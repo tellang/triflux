@@ -454,18 +454,6 @@ export function createMemoryStore() {
         .map((request) => clone(request));
     },
 
-    expireHumanRequests() {
-      let changed = 0;
-      const now = Date.now();
-      for (const request of humanRequests.values()) {
-        if (request.state === "pending" && request.deadline_ms < now) {
-          request.state = "timed_out";
-          changed += 1;
-        }
-      }
-      return changed;
-    },
-
     moveToDeadLetter(messageId, reason, lastError = null) {
       const current = messages.get(messageId);
       if (!current || current.status === "dead_letter") return false;

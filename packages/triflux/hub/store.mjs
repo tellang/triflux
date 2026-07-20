@@ -439,9 +439,6 @@ export function createStore(dbPath, options = {}) {
       "UPDATE human_requests SET state=?, response_json=? WHERE request_id=?",
     ),
     pendingHR: db.prepare("SELECT * FROM human_requests WHERE state='pending'"),
-    expireHR: db.prepare(
-      "UPDATE human_requests SET state='timed_out' WHERE state='pending' AND deadline_ms < ?",
-    ),
 
     insertDL: db.prepare(
       "INSERT INTO dead_letters (message_id, reason, failed_at_ms, last_error) VALUES (?,?,?,?) ON CONFLICT(message_id) DO NOTHING",
@@ -1244,10 +1241,6 @@ export function createStore(dbPath, options = {}) {
 
     getPendingHumanRequests() {
       return S.pendingHR.all().map(parseHumanRequestRow);
-    },
-
-    expireHumanRequests() {
-      return S.expireHR.run(Date.now()).changes;
     },
 
     moveToDeadLetter(messageId, reason, lastError = null) {
