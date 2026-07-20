@@ -26,7 +26,7 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 | triflux 릴리즈 | `/tfx-ship` | triflux 본체는 AI trailer 금지 정책이 있는 전용 ship 경로를 쓴다. |
 | 일반 PR/배포 | `/ship` | 로컬 `/ship`도 AI attribution footer/trailer 없이 실행되어야 한다. |
 | 저장/복원 | `/gstack-context-save` / `/gstack-context-restore` | 진행 상태는 gstack checkpoint 계열이 소유한다. |
-| 회고/슬롭 정리 | `/gstack /retro` 또는 `/tfx-prune` | 세션 회고는 gstack, AI 생성 슬롭 제거는 triflux. |
+| 회고/슬롭 정리 | `/gstack /retro` 또는 명시 `/tfx-prune` | 세션 회고는 gstack, 무수식 AI slop/deslop은 host ai-slop-cleaner, TFX 3자 cleanup만 tfx-prune. |
 
 ## 스킬 선택 결정트리 (SSOT)
 
@@ -58,7 +58,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | 리서치 (빠른) | 검색해줘, 찾아봐, 공식문서, 이거 뭐야 | tfx-research |
 | 리서치 (자율) | 자율 리서치, 검색하고 정리해, research and plan | tfx-autoresearch |
 | 테스트 | 테스트, 검증, 돌려봐, QA | tfx-qa |
-| 정리 | 정리해, 슬롭 제거, 클린업 | tfx-prune |
+| 정리 | 대상 domain을 먼저 판정; 무수식 AI slop/deslop은 host ai-slop-cleaner | D8 참조 (명시 TFX 3자 cleanup만 tfx-prune) |
 | 토론/비교 | 뭐가 나을까, 비교해, A vs B | tfx-auto (`--mode consensus --shape debate`) |
 | 합의 | 합의로 분석해, 3자 합의, consensus | tfx-auto (`--mode consensus`) |
 | 패널 | panel, 패널, 전문가 의견, expert panel | tfx-auto (`--mode consensus --shape panel`) |

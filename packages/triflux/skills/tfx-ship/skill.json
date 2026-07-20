@@ -1,13 +1,5 @@
 {
   "name": "tfx-ship",
-  "description": "triflux 전용 릴리즈 자동화. 기존 scripts/release/* 래퍼 + AskUserQuestion 기반 버전 선택 + CHANGELOG 편집 게이트 + Co-Authored-By/AI trailer 금지 강제. 'ship', '배포', '릴리즈', 'release', 'tfx-ship', 'publish' 같은 요청에 반드시 사용.",
-  "triggers": [
-    "tfx-ship",
-    "ship",
-    "배포",
-    "릴리즈",
-    "release",
-    "publish"
-  ],
+  "description": "triflux 전용 릴리즈 자동화. **GitHub Actions(release.yml dispatch / npm-publish.yml) 기반 CI 릴리즈가 기본 경로 — npm publish 는 OIDC Trusted Publishing 으로 CI 가 수행하므로 로컬 npm login 불필요.** scripts/release/* 래퍼 + AskUserQuestion 기반 버전 선택 + CHANGELOG 편집 게이트 + Co-Authored-By/AI trailer 금지 강제. 'ship', '배포', '릴리즈', 'release', 'tfx-ship', 'publish' 같은 요청에 반드시 사용.",
   "argument_hint": "[patch|minor|major|<version>] [--skip-tests] [--no-publish] [--dry-run]"
 }

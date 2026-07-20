@@ -193,6 +193,4 @@ for each finding in ALL results:
 /tfx-prune
 /tfx-prune src/auth/middleware.ts
 /tfx-prune HEAD~5..HEAD
-/정리 src/
-/anti-slop "과잉 에러 핸들링 제거"
 ```

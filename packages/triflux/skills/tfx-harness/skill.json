@@ -1,0 +1,5 @@
+{
+  "name": "tfx-harness",
+  "description": "어떤 스킬·경로를 선택할지 묻는 메타 라우팅 요청에 사용한다. 실행하지 않고 canonical routing SSOT에서 branch와 즉시 owner 하나만 반환한다.",
+  "internal": true
+}

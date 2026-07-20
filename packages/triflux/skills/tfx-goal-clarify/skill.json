@@ -1,0 +1,5 @@
+{
+  "name": "tfx-goal-clarify",
+  "description": "자연어 아이디어를 Claude Code `/goal` 명령어 한 블록으로 변환하는 clarifier. 모호한 작업 설명을 받아 공식 3축(End state / Stated check / Constraints) + stop bound로 압축해 복붙 가능한 /goal 문자열을 출력. '/goal로 만들어', 'goal 프롬프트', 'goal 변환', 'clarify goal', 'goal 양식', '자율 작업 시작' 같은 요청에 사용.",
+  "argument_hint": "<목표 자연어> [--tier 1|2|3]"
+}

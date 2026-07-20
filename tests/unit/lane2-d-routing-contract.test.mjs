@@ -177,3 +177,36 @@ describe("lane2-d routing contract: locked prompt matrix", () => {
     });
   }
 });
+
+describe("lane2-b trigger reduction: D2/D8 surfaces stay explicit-only", () => {
+  const read = (...parts) =>
+    readFileSync(join(process.cwd(), ...parts), "utf8");
+
+  it("keeps quick references derived from the D8 owner boundary", () => {
+    const routing = read(".claude", "rules", "tfx-routing.md");
+    assert.match(
+      routing,
+      /\| 회고\/슬롭 정리 \| `\/gstack \/retro` 또는 명시 `\/tfx-prune` \|/,
+    );
+    assert.match(
+      routing,
+      /\| 정리 \| 대상 domain을 먼저 판정; 무수식 AI slop\/deslop은 host ai-slop-cleaner \| D8 참조 \(명시 TFX 3자 cleanup만 tfx-prune\) \|/,
+    );
+  });
+
+  for (const [skill, forbiddenExamples] of [
+    ["tfx-interview", ["/요구사항 분석", "/인터뷰"]],
+    ["tfx-prune", ["/정리 src/", "/anti-slop"]],
+  ]) {
+    it(`${skill} does not advertise generic activation aliases`, () => {
+      const content = read("skills", skill, "SKILL.md");
+      assert.match(content, /명시 `tfx-/);
+      for (const example of forbiddenExamples) {
+        assert.doesNotMatch(
+          content,
+          new RegExp(example.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+        );
+      }
+    });
+  }
+});

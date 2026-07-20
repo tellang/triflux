@@ -306,6 +306,4 @@ Fallback: Antigravity 호출 실패 시 Claude Opus가 분석을 직접 처리�
 ```
 /tfx-interview "인증 시스템 리팩터링"
 /tfx-interview "실시간 알림 기능 추가"
-/요구사항 분석 "데이터 파이프라인 설계"
-/인터뷰 "레거시 API를 REST에서 GraphQL로 마이그레이션"
 ```
