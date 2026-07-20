@@ -12,6 +12,7 @@ import { test } from "node:test";
 import { compareMirror } from "../../scripts/release/check-packages-mirror.mjs";
 
 const CORE_MIRRORS = new Map([
+  ["hub/lib/memory-store.mjs", "packages/core/hub/lib/memory-store.mjs"],
   ["hub/bridge.mjs", "packages/core/hub/bridge.mjs"],
   ["hub/router.mjs", "packages/core/hub/router.mjs"],
   [
@@ -108,6 +109,18 @@ test("compareMirror detects packages/core content drift", (t) => {
 
   assert.equal(result.ok, false);
   assert.ok(findIssue(result, "packages/core/hub/bridge.mjs", "content-diff"));
+});
+
+test("compareMirror detects packages/core memory-store drift", (t) => {
+  const repoRoot = makeFixture(t);
+  write(repoRoot, "packages/core/hub/lib/memory-store.mjs", "drift\\n");
+
+  const result = compareMirror({ fix: false, repoRoot });
+
+  assert.equal(result.ok, false);
+  assert.ok(
+    findIssue(result, "packages/core/hub/lib/memory-store.mjs", "content-diff"),
+  );
 });
 
 test("compareMirror keeps existing packages/triflux top-level mirror behavior", (t) => {

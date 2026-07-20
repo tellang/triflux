@@ -36,6 +36,10 @@ const MIRROR_TOPS = [
 ];
 const CORE_FILE_MIRRORS = [
   {
+    source: "hub/lib/memory-store.mjs",
+    target: "packages/core/hub/lib/memory-store.mjs",
+  },
+  {
     source: "hub/bridge.mjs",
     target: "packages/core/hub/bridge.mjs",
   },
