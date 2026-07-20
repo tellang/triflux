@@ -23,11 +23,12 @@ describe("tfx-deep-interview SKILL.md — 구조 검증", () => {
 
   // lane2-d SSOT(D2, 2026-07-17): 무수식 한국어 트리거(딥인터뷰/소크라테스/깊이 탐색)는
   // host deep-interview 소유로 이관 — description 이 좁혀진 표면이 정본이다.
-  it("트리거 키워드가 모두 포함되어야 한다", () => {
-    const triggers = ["deep-interview", "tfx-interview", "요구사항 분석"];
+  it("명시 TFX 트리거와 정량 변형이 포함되어야 한다", () => {
+    const triggers = ["tfx-interview", "TFX 정량·다중 CLI"];
     for (const trigger of triggers) {
       assert.ok(content.includes(trigger), `트리거 "${trigger}" 누락`);
     }
+    assert.doesNotMatch(content, /\/요구사항 분석/);
   });
 
   it("D2 소유권 경계가 description 에 명시되어야 한다", () => {
