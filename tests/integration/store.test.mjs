@@ -581,6 +581,40 @@ describe("sweepExpired() B0 contract", { skip: SQLITE_SKIP }, () => {
         mock.restoreAll();
       }
     });
+
+    it(`${kind}: TTL terminalization이 뒤늦은 delivery error보다 먼저 기록된다`, () => {
+      let now = 30_000;
+      mock.method(Date, "now", () => now);
+      const fixture = makeSweepStore(kind);
+      const { store } = fixture;
+      try {
+        const message = store.enqueueMessage({
+          type: "event",
+          from: "ttl-first",
+          to: "target",
+          topic: "ttl-first-error-later",
+          ttl_ms: 10,
+          payload: {},
+        });
+        now = message.expires_at_ms;
+
+        assert.equal(store.sweepExpired({ now_ms: now }).messages, 1);
+        assert.equal(
+          store.moveToDeadLetter(message.id, "delivery_error", "late error"),
+          false,
+        );
+        const deadLetter = store
+          .getDeadLetters(20)
+          .find((entry) => entry.message_id === message.id);
+        assert.deepEqual(
+          { reason: deadLetter.reason, last_error: deadLetter.last_error },
+          { reason: "ttl_expired", last_error: null },
+        );
+      } finally {
+        fixture.cleanup();
+        mock.restoreAll();
+      }
+    });
   }
 
   it("sqlite: DLQ insert fault는 status claim도 rollback한다", () => {

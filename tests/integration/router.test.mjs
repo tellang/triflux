@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, mock } from "node:test";
 import { createRouter } from "../../hub/router.mjs";
 import { createStore } from "../../hub/store.mjs";
 import { createRouter as createCoreRouter } from "../../packages/core/hub/router.mjs";
@@ -1384,6 +1384,80 @@ describe("createRouter()", { skip: SQLITE_SKIP }, () => {
         assert.equal(notices.length, 0);
         assert.equal(fixture.store.getMessage(source.id).status, "dead_letter");
       } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it("notice 대상이 아닌 event, assign.job, topic sender를 제외한다", () => {
+      const fixture = createIsolatedRouter();
+      try {
+        const now = 50_000;
+        const enqueue = (input) =>
+          fixture.store.enqueueMessage({
+            to: "expiry-filter-target",
+            ttl_ms: 1,
+            payload: {},
+            ...input,
+          });
+        const event = enqueue({
+          type: "event",
+          from: "expiry-filter-event",
+          topic: "expiry.filter.event",
+        });
+        const assign = enqueue({
+          type: "handoff",
+          from: "expiry-filter-assign",
+          topic: "expiry.filter.assign",
+          payload: { kind: "assign.job" },
+        });
+        const topicSender = enqueue({
+          type: "request",
+          from: "topic:expiry-filter",
+          topic: "expiry.filter.topic",
+        });
+
+        const result = fixture.router.sweepExpired({
+          now_ms: Math.max(
+            event.expires_at_ms,
+            assign.expires_at_ms,
+            topicSender.expires_at_ms,
+            now,
+          ),
+        });
+
+        assert.equal(result.messages, 3);
+        for (const sender of [
+          "expiry-filter-event",
+          "expiry-filter-assign",
+          "topic:expiry-filter",
+        ]) {
+          assert.equal(
+            fixture.router
+              .getPendingMessages(sender, { max_messages: 20 })
+              .filter((message) => message.topic === "handoff.dead_letter")
+              .length,
+            0,
+          );
+        }
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it("default sweep은 한 번의 now_ms를 capture해 store에 전달한다", () => {
+      const fixture = createIsolatedRouter();
+      let calls = 0;
+      mock.method(Date, "now", () => {
+        calls += 1;
+        return 60_000;
+      });
+      try {
+        const result = fixture.router.sweepExpired();
+
+        assert.equal(result.now_ms, 60_000);
+        assert.equal(calls, 1);
+      } finally {
+        mock.restoreAll();
         fixture.cleanup();
       }
     });
