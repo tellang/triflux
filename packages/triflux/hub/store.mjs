@@ -444,7 +444,7 @@ export function createStore(dbPath, options = {}) {
     ),
 
     insertDL: db.prepare(
-      "INSERT OR REPLACE INTO dead_letters (message_id, reason, failed_at_ms, last_error) VALUES (?,?,?,?)",
+      "INSERT INTO dead_letters (message_id, reason, failed_at_ms, last_error) VALUES (?,?,?,?) ON CONFLICT(message_id) DO NOTHING",
     ),
     getDL: db.prepare(
       "SELECT * FROM dead_letters ORDER BY failed_at_ms DESC LIMIT ?",
@@ -491,7 +491,13 @@ export function createStore(dbPath, options = {}) {
       WHERE job_id=@job_id`),
 
     findExpired: db.prepare(
-      "SELECT id FROM messages WHERE status='queued' AND expires_at_ms < ?",
+      "SELECT * FROM messages WHERE status IN ('queued', 'delivered') AND expires_at_ms <= ?",
+    ),
+    claimExpired: db.prepare(
+      "UPDATE messages SET status='dead_letter' WHERE id=? AND status IN ('queued', 'delivered') AND expires_at_ms <= ?",
+    ),
+    claimDeadLetter: db.prepare(
+      "UPDATE messages SET status='dead_letter' WHERE id=? AND status != 'dead_letter'",
     ),
     urgentDepth: db.prepare(
       "SELECT COUNT(*) as cnt FROM messages WHERE status='queued' AND priority >= 7",
@@ -1245,11 +1251,13 @@ export function createStore(dbPath, options = {}) {
     },
 
     moveToDeadLetter(messageId, reason, lastError = null) {
-      db.transaction(() => {
-        S.setMsgStatus.run("dead_letter", messageId);
-        S.insertDL.run(messageId, reason, Date.now(), lastError);
+      const failedAt = Date.now();
+      return db.transaction(() => {
+        const changed = S.claimDeadLetter.run(messageId).changes;
+        if (!changed) return false;
+        S.insertDL.run(messageId, reason, failedAt, lastError);
+        return true;
       })();
-      return true;
     },
 
     getDeadLetters(limit = 50) {
@@ -1519,16 +1527,27 @@ export function createStore(dbPath, options = {}) {
       });
     },
 
-    sweepExpired() {
-      const now = Date.now();
+    sweepExpired({ now_ms = Date.now() } = {}) {
       return db.transaction(() => {
-        const expired = S.findExpired.all(now);
-        for (const { id } of expired) {
-          S.setMsgStatus.run("dead_letter", id);
-          S.insertDL.run(id, "ttl_expired", now, null);
+        const transitions = [];
+        for (const row of S.findExpired.all(now_ms)) {
+          if (!S.claimExpired.run(row.id, now_ms).changes) continue;
+          options.beforeDeadLetterInsert?.({
+            message_id: row.id,
+            reason: "ttl_expired",
+            failed_at_ms: now_ms,
+          });
+          const dlqInserted =
+            S.insertDL.run(row.id, "ttl_expired", now_ms, null).changes === 1;
+          transitions.push({
+            message: parseMessageRow(row),
+            previous_status: row.status,
+            reason: "ttl_expired",
+            failed_at_ms: now_ms,
+            dlq_inserted: dlqInserted,
+          });
         }
-        const humanRequests = S.expireHR.run(now).changes;
-        return { messages: expired.length, human_requests: humanRequests };
+        return { now_ms, messages: transitions.length, transitions };
       })();
     },
 

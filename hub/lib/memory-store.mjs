@@ -468,7 +468,9 @@ export function createMemoryStore() {
 
     moveToDeadLetter(messageId, reason, lastError = null) {
       const current = messages.get(messageId);
-      if (current) current.status = "dead_letter";
+      if (!current || current.status === "dead_letter") return false;
+      current.status = "dead_letter";
+      if (deadLetters.has(messageId)) return true;
       deadLetters.set(messageId, {
         message_id: messageId,
         reason,
@@ -718,25 +720,38 @@ export function createMemoryStore() {
       });
     },
 
-    sweepExpired() {
-      const now = Date.now();
-      let expiredMessages = 0;
+    sweepExpired({ now_ms = Date.now() } = {}) {
+      const transitions = [];
       for (const message of messages.values()) {
-        if (message.status === "queued" && message.expires_at_ms < now) {
-          message.status = "dead_letter";
+        if (
+          !["queued", "delivered"].includes(message.status) ||
+          message.expires_at_ms > now_ms
+        )
+          continue;
+        const snapshot = clone(message);
+        const previousStatus = message.status;
+        message.status = "dead_letter";
+        const dlqInserted = !deadLetters.has(message.id);
+        if (dlqInserted) {
           deadLetters.set(message.id, {
             message_id: message.id,
             reason: "ttl_expired",
-            failed_at_ms: now,
+            failed_at_ms: now_ms,
             last_error: null,
           });
-          expiredMessages += 1;
         }
+        transitions.push({
+          message: snapshot,
+          previous_status: previousStatus,
+          reason: "ttl_expired",
+          failed_at_ms: now_ms,
+          dlq_inserted: dlqInserted,
+        });
       }
-      const humanRequestsExpired = store.expireHumanRequests();
       return {
-        messages: expiredMessages,
-        human_requests: humanRequestsExpired,
+        now_ms,
+        messages: transitions.length,
+        transitions,
       };
     },
 

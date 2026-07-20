@@ -961,6 +961,7 @@ function servePublicFile(res, path) {
  * @param {string} [opts.host]
  * @param {string|number} [opts.sessionId]
  * @param {(options: { cwd: string }) => object} [opts.createDelegatorWorker]
+ * @param {(dbPath: string) => object|Promise<object>} [opts.createStoreAdapterFn] test seam
  */
 export async function startHub({
   port: portOpt,
@@ -968,6 +969,7 @@ export async function startHub({
   host = "127.0.0.1",
   sessionId = process.pid,
   createDelegatorWorker = createDelegatorMcpWorker,
+  createStoreAdapterFn = createStoreAdapter,
 } = {}) {
   const resolvedPort = parseHubPort(portOpt);
   const portSpecified = Number.isFinite(resolvedPort);
@@ -1062,7 +1064,7 @@ export async function startHub({
     cleanupOwnedTokenFile({ token: HUB_TOKEN, port });
   }
 
-  const store = await createStoreAdapter(dbPath);
+  const store = await createStoreAdapterFn(dbPath);
   const router = createRouter(store);
   const fingerprintService = createAdaptiveFingerprintService({ store });
 
@@ -2356,9 +2358,15 @@ export async function startHub({
   httpServer.requestTimeout = 30000;
   httpServer.headersTimeout = 10000;
 
-  router.startSweeper();
+  let hitlTimer = null;
+  let sessionTimer = null;
+  let synapsePruneTimer = null;
+  let orphanCleanupTimer = null;
+  let rateLimitTimer = null;
 
-  const hitlTimer = setInterval(() => {
+  const startBackgroundTimers = () => {
+
+  hitlTimer = setInterval(() => {
     try {
       hitl.checkTimeouts();
     } catch (err) {
@@ -2371,7 +2379,7 @@ export async function startHub({
   // Configurable via SESSION_TTL_MS (default 30 minutes). The sweep runs every 60 s.
   const SESSION_TTL_MS =
     parseInt(process.env.TFX_SESSION_TTL_MS || "", 10) || 30 * 60 * 1000;
-  const sessionTimer = setInterval(() => {
+  sessionTimer = setInterval(() => {
     const now = Date.now();
     for (const [sid, session] of transports) {
       if (now - (session.transport._lastActivity || 0) <= SESSION_TTL_MS)
@@ -2381,7 +2389,7 @@ export async function startHub({
   }, 60000);
   sessionTimer.unref();
 
-  const synapsePruneTimer = setInterval(() => {
+  synapsePruneTimer = setInterval(() => {
     try {
       const { count } = synapseRegistry.pruneExpired();
       if (count > 0) hubLog.info({ count }, "synapse.prune");
@@ -2393,7 +2401,7 @@ export async function startHub({
 
   // 고아 node.exe 프로세스 + stale spawn 세션 주기적 정리 (5분마다)
   // TFX_DISABLE_ORPHAN_CLEANUP=1 로 비활성 (active SSH/swarm 세션 보호 회피용 hotfix gate)
-  const orphanCleanupTimer = setInterval(
+  orphanCleanupTimer = setInterval(
     () => {
       if (process.env.TFX_DISABLE_ORPHAN_CLEANUP === "1") return;
       try {
@@ -2440,7 +2448,7 @@ export async function startHub({
   orphanCleanupTimer.unref();
 
   // Evict stale rate-limit buckets once per minute to bound memory usage.
-  const rateLimitTimer = setInterval(() => {
+  rateLimitTimer = setInterval(() => {
     const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
     for (const [ip, timestamps] of rateLimitMap) {
       const fresh = timestamps.filter((t) => t >= cutoff);
@@ -2453,12 +2461,21 @@ export async function startHub({
   }, RATE_LIMIT_WINDOW_MS);
   rateLimitTimer.unref();
 
+  };
+
   mkdirSync(PID_DIR, { recursive: true });
 
   const cleanupStartupFailure = async ({ preserveTokenFile = false } = {}) => {
     try {
       router.stopSweeper();
     } catch {}
+    for (const timer of [hitlTimer, sessionTimer, synapsePruneTimer, orphanCleanupTimer, rateLimitTimer]) {
+      if (timer) clearInterval(timer);
+    }
+    for (const [sid, session] of Array.from(transports)) {
+      await closeMcpTransportSession(sid, session, "hub.startup_failure");
+    }
+    transports.clear();
     try {
       await pipe.stop();
     } catch {}
@@ -2467,6 +2484,9 @@ export async function startHub({
     } catch {}
     try {
       await delegatorWorker.stop();
+    } catch {}
+    try {
+      synapseRegistry.destroy();
     } catch {}
     try {
       store.close();
@@ -2478,6 +2498,15 @@ export async function startHub({
   };
 
   try {
+    router.sweepExpired({ now_ms: Date.now(), source: "startup" });
+    router.startSweeper({
+      run_immediately: false,
+      interval_ms: 10000,
+      onSweepError: ({ source, error, consecutive_failures }) => {
+        hubLog.warn({ source, code: error?.code || "UNKNOWN", consecutive_failures }, "hub.sweep_failed");
+      },
+    });
+    startBackgroundTimers();
     await pipe.start();
     await assignCallbacks.start();
   } catch (error) {
