@@ -232,6 +232,9 @@ describe("bridge.mjs interactive session registration", () => {
   });
 
   it("does not turn legacy agent registration into an interactive session registration", () => {
-    assert.equal(buildInteractiveSessionRegistrationPayload({ agent: "legacy-agent" }), null);
+    assert.equal(
+      buildInteractiveSessionRegistrationPayload({ agent: "legacy-agent" }),
+      null,
+    );
   });
 });

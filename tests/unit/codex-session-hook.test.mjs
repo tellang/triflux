@@ -34,11 +34,14 @@ describe("codex-session-hook", () => {
 
     assert.equal(result, "{}\n");
     assert.deepEqual(calls, [
-      ["presence", {
-        session_id: "codex-session-1",
-        cwd: "/work/triflux",
-        hook_event_name: "session_start",
-      }],
+      [
+        "presence",
+        {
+          session_id: "codex-session-1",
+          cwd: "/work/triflux",
+          hook_event_name: "session_start",
+        },
+      ],
       ["ensure", payload()],
       ["register", payload()],
       ["drain", 1000],
@@ -78,38 +81,54 @@ describe("codex-session-hook", () => {
       process.env.OMX_TMUX_SESSION = "omx-presence";
       process.env.TMUX_PANE = "%42";
       const child = { once: () => child, unref: () => {} };
-      assert.equal(launchCodexPresenceRegistration(JSON.parse(payload()), {
-        bridgePath: "/tmp/bridge.mjs",
-        spawnFn: (...args) => {
-          launches.push(args);
-          return child;
-        },
-      }), true);
-      assert.deepEqual(launches, [[
-        process.execPath,
+      assert.equal(
+        launchCodexPresenceRegistration(JSON.parse(payload()), {
+          bridgePath: "/tmp/bridge.mjs",
+          spawnFn: (...args) => {
+            launches.push(args);
+            return child;
+          },
+        }),
+        true,
+      );
+      assert.deepEqual(launches, [
         [
-          "/tmp/bridge.mjs", "register",
-          "--session-id", "codex-session-1",
-          "--cwd", "/work/triflux",
-          "--worktree-path", "/work/triflux",
-          "--session-kind", "interactive",
-          "--host", "local",
-          "--codex-session-id", "codex-session-1",
-          "--omx-session-id", "omx-session-01",
-          "--tmux-session", "omx-presence",
-          "--tmux-pane", "%42",
+          process.execPath,
+          [
+            "/tmp/bridge.mjs",
+            "register",
+            "--session-id",
+            "codex-session-1",
+            "--cwd",
+            "/work/triflux",
+            "--worktree-path",
+            "/work/triflux",
+            "--session-kind",
+            "interactive",
+            "--host",
+            "local",
+            "--codex-session-id",
+            "codex-session-1",
+            "--omx-session-id",
+            "omx-session-01",
+            "--tmux-session",
+            "omx-presence",
+            "--tmux-pane",
+            "%42",
+          ],
+          {
+            detached: true,
+            stdio: "ignore",
+            windowsHide: true,
+            env: process.env,
+          },
         ],
-        {
-          detached: true,
-          stdio: "ignore",
-          windowsHide: true,
-          env: process.env,
-        },
-      ]]);
+      ]);
     } finally {
       if (originalOmxSession === undefined) delete process.env.OMX_SESSION_ID;
       else process.env.OMX_SESSION_ID = originalOmxSession;
-      if (originalTmuxSession === undefined) delete process.env.OMX_TMUX_SESSION;
+      if (originalTmuxSession === undefined)
+        delete process.env.OMX_TMUX_SESSION;
       else process.env.OMX_TMUX_SESSION = originalTmuxSession;
       if (originalTmuxPane === undefined) delete process.env.TMUX_PANE;
       else process.env.TMUX_PANE = originalTmuxPane;

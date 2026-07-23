@@ -63,12 +63,13 @@ export function launchCodexPresenceRegistration(payload, opts = {}) {
     const sessionId = String(payload?.session_id || "").trim();
     if (!sessionId) return false;
 
-    const cwd = typeof payload?.cwd === "string" && payload.cwd.trim()
-      ? payload.cwd
-      : process.cwd();
-    const bridgePath = opts.bridgePath || fileURLToPath(
-      new URL("../hub/bridge.mjs", import.meta.url),
-    );
+    const cwd =
+      typeof payload?.cwd === "string" && payload.cwd.trim()
+        ? payload.cwd
+        : process.cwd();
+    const bridgePath =
+      opts.bridgePath ||
+      fileURLToPath(new URL("../hub/bridge.mjs", import.meta.url));
     const spawnFn = opts.spawnFn || spawn;
     const canonicalSessionId = String(process.env.OMX_SESSION_ID || "").trim();
     const tmuxSession = String(
@@ -78,12 +79,18 @@ export function launchCodexPresenceRegistration(payload, opts = {}) {
     const args = [
       bridgePath,
       "register",
-      "--session-id", sessionId,
-      "--cwd", cwd,
-      "--worktree-path", cwd,
-      "--session-kind", "interactive",
-      "--host", "local",
-      "--codex-session-id", sessionId,
+      "--session-id",
+      sessionId,
+      "--cwd",
+      cwd,
+      "--worktree-path",
+      cwd,
+      "--session-kind",
+      "interactive",
+      "--host",
+      "local",
+      "--codex-session-id",
+      sessionId,
     ];
     if (canonicalSessionId && canonicalSessionId !== sessionId) {
       args.push("--omx-session-id", canonicalSessionId);
