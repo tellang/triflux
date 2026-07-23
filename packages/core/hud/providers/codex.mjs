@@ -89,6 +89,9 @@ export function expireStaleCodexBuckets(
 }
 
 const RESET_CLUSTER_TOLERANCE_SEC = 90;
+// A probe may miss the instant immediately after a reset. Keep that brief
+// polling gap, but never let a long-expired cached window win the fallback.
+const STALE_WINDOW_FALLBACK_GRACE_SEC = CODEX_PROBE_TTL_MS / 1000;
 
 function isNewerSnapshot(candidate, current) {
   if (!current) return true;
@@ -149,7 +152,13 @@ function selectCodexWindowSnapshot(snapshots, nowSec, windowKey) {
       })[0];
   } else {
     for (const snapshot of [
-      ...groups.map((group) => group.latest),
+      ...groups
+        .filter(
+          (group) =>
+            nowSec - Number(group.latest[windowKey]?.resets_at) <=
+            STALE_WINDOW_FALLBACK_GRACE_SEC,
+        )
+        .map((group) => group.latest),
       ...ungrouped,
     ]) {
       if (isNewerSnapshot(snapshot, selected)) selected = snapshot;
