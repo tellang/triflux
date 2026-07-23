@@ -75,6 +75,69 @@ test("tfx-live runs main() when invoked through a symlink (npm global bin shim)"
   }
 });
 
+test("tfx-live list-sessions discovers Codex tmux sessions and filters exact cwd", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-sessions-"));
+  try {
+    const codexCwd = path.join(dir, "codex-worktree");
+    const otherCwd = path.join(dir, "other-worktree");
+    const tmuxPath = path.join(dir, "tmux");
+    const logPath = path.join(dir, "tmux-args.json");
+    await fs.mkdir(codexCwd);
+    await fs.mkdir(otherCwd);
+    const normalizedCodexCwd = await fs.realpath(codexCwd);
+    await fs.writeFile(
+      tmuxPath,
+      [
+        "#!/usr/bin/env node",
+        "import fs from 'node:fs/promises';",
+        "await fs.writeFile(process.env.TMUX_LOG, JSON.stringify(process.argv.slice(2)));",
+        "console.log([",
+        `  'omx-live\\t1735689600\\t1\\t${codexCwd}\\tzsh\\tbash -lc \\'omx_codex_pid=123; exec codex\\'',`,
+        `  'manual-codex\\t1735776000\\t0\\t${otherCwd}\\tcodex\\tcodex',`,
+        `  'claude-live\\t1735862400\\t0\\t${codexCwd}\\tclaude\\tclaude',`,
+        "].join('\\n'));",
+      ].join("\n"),
+      "utf8",
+    );
+    await fs.chmod(tmuxPath, 0o755);
+
+    const env = {
+      TMUX_LOG: logPath,
+      PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+    };
+    const all = JSON.parse(
+      await runTfxLive(["list-sessions", "--cli", "codex"], { env }),
+    );
+    const filtered = JSON.parse(
+      await runTfxLive(["list-sessions", "--cli", "codex", "--cwd", codexCwd], {
+        env,
+      }),
+    );
+    const tmuxArgs = JSON.parse(await fs.readFile(logPath, "utf8"));
+
+    assert.deepEqual(tmuxArgs.slice(0, 3), ["list-panes", "-a", "-F"]);
+    assert.equal(all.ok, true);
+    assert.equal(all.cli, "codex");
+    assert.deepEqual(
+      all.sessions.map((session) => session.session),
+      ["manual-codex", "omx-live"],
+    );
+    assert.deepEqual(all.sessions[1], {
+      session: "omx-live",
+      startedAt: "2025-01-01T00:00:00.000Z",
+      startedAtEpoch: 1735689600,
+      cwd: normalizedCodexCwd,
+      attached: true,
+    });
+    assert.deepEqual(
+      filtered.sessions.map((session) => session.session),
+      ["omx-live"],
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("tfx-live probe returns daemon-probe JSON through bundled bridge", async () => {
   const stdout = await runTfxLive([
     "probe",

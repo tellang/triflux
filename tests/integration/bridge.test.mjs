@@ -3,7 +3,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { parseArgs, parseJsonSafe } from "../../hub/bridge.mjs";
+import {
+  buildInteractiveSessionRegistrationPayload,
+  parseArgs,
+  parseJsonSafe,
+} from "../../hub/bridge.mjs";
 
 describe("bridge.mjs parseArgs()", () => {
   it("--agent 플래그를 올바르게 파싱해야 한다", () => {
@@ -154,5 +158,83 @@ describe("bridge.mjs parseJsonSafe()", () => {
 
   it("배열 JSON을 올바르게 파싱해야 한다", () => {
     assert.deepEqual(parseJsonSafe("[1,2,3]", []), [1, 2, 3]);
+  });
+});
+
+describe("bridge.mjs interactive session registration", () => {
+  it("converts a Codex SessionStart into synapse and agents-table registration data", () => {
+    const payload = buildInteractiveSessionRegistrationPayload({
+      "session-id": "codex-session-01",
+      cwd: "/tmp/codex-worktree",
+      "worktree-path": "/tmp/codex-worktree",
+      branch: "feature/presence",
+      host: "local",
+      "session-kind": "interactive",
+      "tmux-session": "omx-presence",
+      "omx-session-id": "omx-session-01",
+      "codex-session-id": "codex-session-01",
+    });
+
+    assert.deepEqual(
+      {
+        sessionId: payload.sessionId,
+        cwd: payload.cwd,
+        worktreePath: payload.worktreePath,
+        branch: payload.branch,
+        host: payload.host,
+        sessionKind: payload.sessionKind,
+        isRemote: payload.isRemote,
+        agent_id: payload.agent_id,
+        cli: payload.cli,
+        capabilities: payload.capabilities,
+        topics: payload.topics,
+        heartbeat_ttl_ms: payload.heartbeat_ttl_ms,
+        session_id: payload.session_id,
+        metadata: {
+          cwd: payload.metadata.cwd,
+          worktree_path: payload.metadata.worktree_path,
+          branch: payload.metadata.branch,
+          host: payload.metadata.host,
+          session_kind: payload.metadata.session_kind,
+          is_remote: payload.metadata.is_remote,
+          tmux_session: payload.metadata.tmux_session,
+          omx_session_id: payload.metadata.omx_session_id,
+          codex_session_id: payload.metadata.codex_session_id,
+        },
+      },
+      {
+        sessionId: "codex-session-01",
+        cwd: "/tmp/codex-worktree",
+        worktreePath: "/tmp/codex-worktree",
+        branch: "feature/presence",
+        host: "local",
+        sessionKind: "interactive",
+        isRemote: false,
+        agent_id: "codex-session-codex-session-01",
+        cli: "codex",
+        capabilities: ["code"],
+        topics: [],
+        heartbeat_ttl_ms: 300000,
+        session_id: "codex-session-01",
+        metadata: {
+          cwd: "/tmp/codex-worktree",
+          worktree_path: "/tmp/codex-worktree",
+          branch: "feature/presence",
+          host: "local",
+          session_kind: "interactive",
+          is_remote: false,
+          tmux_session: "omx-presence",
+          omx_session_id: "omx-session-01",
+          codex_session_id: "codex-session-01",
+        },
+      },
+    );
+  });
+
+  it("does not turn legacy agent registration into an interactive session registration", () => {
+    assert.equal(
+      buildInteractiveSessionRegistrationPayload({ agent: "legacy-agent" }),
+      null,
+    );
   });
 });

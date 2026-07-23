@@ -400,6 +400,16 @@ export function parseArgs(argv) {
       command: { type: "string" },
       role: { type: "string" },
       "session-id": { type: "string" },
+      cwd: { type: "string" },
+      "worktree-path": { type: "string" },
+      branch: { type: "string" },
+      host: { type: "string" },
+      "session-kind": { type: "string" },
+      "is-remote": { type: "string" },
+      "tmux-session": { type: "string" },
+      "tmux-pane": { type: "string" },
+      "omx-session-id": { type: "string" },
+      "codex-session-id": { type: "string" },
       reason: { type: "string" },
       type: { type: "string" },
       from: { type: "string" },
@@ -606,6 +616,71 @@ function unavailableResult() {
   return { ok: false, reason: "hub_unavailable" };
 }
 
+function nonEmptyString(value, fallback = "") {
+  const normalized = String(value ?? "").trim();
+  return normalized || fallback;
+}
+
+function readBoolean(value) {
+  return ["1", "true", "yes"].includes(nonEmptyString(value).toLowerCase());
+}
+
+function sessionAgentId(sessionId) {
+  return `codex-session-${sessionId.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+}
+
+export function buildInteractiveSessionRegistrationPayload(args = {}) {
+  const sessionId = nonEmptyString(args["session-id"]);
+  if (!sessionId) return null;
+
+  const cwd = nonEmptyString(args.cwd, process.cwd());
+  const worktreePath = nonEmptyString(args["worktree-path"], cwd);
+  const host = nonEmptyString(args.host, "local");
+  const sessionKind = nonEmptyString(args["session-kind"], "interactive");
+  const agentId = nonEmptyString(args.agent, sessionAgentId(sessionId));
+  const metadata = {
+    pid: process.ppid,
+    registered_at: Date.now(),
+    cwd,
+    worktree_path: worktreePath,
+    branch: nonEmptyString(args.branch),
+    host,
+    session_kind: sessionKind,
+    is_remote: readBoolean(args["is-remote"]),
+    ...(nonEmptyString(args["tmux-session"])
+      ? { tmux_session: nonEmptyString(args["tmux-session"]) }
+      : {}),
+    ...(nonEmptyString(args["tmux-pane"])
+      ? { tmux_pane: nonEmptyString(args["tmux-pane"]) }
+      : {}),
+    ...(nonEmptyString(args["omx-session-id"])
+      ? { omx_session_id: nonEmptyString(args["omx-session-id"]) }
+      : {}),
+    ...(nonEmptyString(args["codex-session-id"])
+      ? { codex_session_id: nonEmptyString(args["codex-session-id"]) }
+      : {}),
+  };
+
+  return {
+    sessionId,
+    cwd,
+    worktreePath,
+    branch: nonEmptyString(args.branch),
+    host,
+    sessionKind,
+    isRemote: readBoolean(args["is-remote"]),
+    agent_id: agentId,
+    cli: nonEmptyString(args.cli, "codex"),
+    capabilities: args.capabilities
+      ? String(args.capabilities).split(",")
+      : ["code"],
+    topics: args.topics ? String(args.topics).split(",") : [],
+    heartbeat_ttl_ms: 300000,
+    session_id: sessionId,
+    metadata,
+  };
+}
+
 function emitJson(payload) {
   if (payload !== undefined) {
     console.log(JSON.stringify(payload));
@@ -614,6 +689,15 @@ function emitJson(payload) {
 }
 
 async function cmdRegister(args) {
+  const interactiveSession = buildInteractiveSessionRegistrationPayload(args);
+  if (interactiveSession) {
+    const result = await requestJson("/synapse/register", {
+      body: interactiveSession,
+      timeoutMs: 3000,
+    });
+    return emitJson(result || unavailableResult());
+  }
+
   const agentId = args.agent;
   const timeoutSec = parseInt(args.timeout || "600", 10);
   const outcome = await requestHub(HUB_OPERATIONS.register, {

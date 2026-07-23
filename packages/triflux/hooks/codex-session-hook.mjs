@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
+import { spawn } from "node:child_process";
 import { argv, exit, stdin, stdout } from "node:process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { drainPendingSynapse as defaultDrainPendingSynapse } from "../hub/team/synapse-http.mjs";
 import {
   heartbeatInteractiveSession as defaultHeartbeatInteractiveSession,
@@ -51,6 +52,66 @@ function normalizeMode(mode, payload) {
   return "";
 }
 
+/**
+ * Start a detached bridge call so Codex/OMX presence reaches both the Synapse
+ * session registry and the hub agents table. This is intentionally independent
+ * of the legacy session-start work below: a missing or unavailable hub must
+ * never delay or fail SessionStart.
+ */
+export function launchCodexPresenceRegistration(payload, opts = {}) {
+  try {
+    const sessionId = String(payload?.session_id || "").trim();
+    if (!sessionId) return false;
+
+    const cwd =
+      typeof payload?.cwd === "string" && payload.cwd.trim()
+        ? payload.cwd
+        : process.cwd();
+    const bridgePath =
+      opts.bridgePath ||
+      fileURLToPath(new URL("../hub/bridge.mjs", import.meta.url));
+    const spawnFn = opts.spawnFn || spawn;
+    const canonicalSessionId = String(process.env.OMX_SESSION_ID || "").trim();
+    const tmuxSession = String(
+      process.env.OMX_TMUX_SESSION_NAME || process.env.OMX_TMUX_SESSION || "",
+    ).trim();
+    const tmuxPane = String(process.env.TMUX_PANE || "").trim();
+    const args = [
+      bridgePath,
+      "register",
+      "--session-id",
+      sessionId,
+      "--cwd",
+      cwd,
+      "--worktree-path",
+      cwd,
+      "--session-kind",
+      "interactive",
+      "--host",
+      "local",
+      "--codex-session-id",
+      sessionId,
+    ];
+    if (canonicalSessionId && canonicalSessionId !== sessionId) {
+      args.push("--omx-session-id", canonicalSessionId);
+    }
+    if (tmuxSession) args.push("--tmux-session", tmuxSession);
+    if (tmuxPane) args.push("--tmux-pane", tmuxPane);
+
+    const child = spawnFn(process.execPath, args, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+      env: process.env,
+    });
+    child?.once?.("error", () => {});
+    child?.unref?.();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function swallowStdoutWrite(_chunk, encodingOrCallback, callback) {
   const done =
     typeof encodingOrCallback === "function" ? encodingOrCallback : callback;
@@ -91,10 +152,15 @@ export async function runCodexSessionHook(stdinData, opts = {}) {
     opts.heartbeatInteractiveSession || defaultHeartbeatInteractiveSession;
   const drainPendingSynapse =
     opts.drainPendingSynapse || defaultDrainPendingSynapse;
+  const launchPresenceRegistration =
+    opts.launchPresenceRegistration || launchCodexPresenceRegistration;
 
   try {
     await runHookSideEffectsWithStdoutSuppressed(async () => {
       if (mode === "register") {
+        try {
+          launchPresenceRegistration(parsed.payload);
+        } catch {}
         try {
           await hubEnsureRun(stdinData);
         } catch {}

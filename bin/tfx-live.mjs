@@ -52,6 +52,7 @@ function usage() {
     "  tfx-live interrupt --session NAME [--cli codex|claude] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 5]",
     "  tfx-live stop --session NAME [--cli codex|claude] [--remote HOST]",
     "  tfx-live probe [--short SHORT] [--session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 10]",
+    "  tfx-live list-sessions --cli codex [--cwd DIR]",
     "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
     "  tfx-live goal-driven --session NAME --goal TEXT [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500] [--max-rounds 8] [--done-token DONE]",
     "  tfx-live peer [--cli-a codex] [--cli-b claude] [--session-a peerA] [--session-b peerB] [--transport-a tmux|uds|auto] [--transport-b tmux|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--bridge ABS] [--remote HOST] [--cwd DIR] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60]",
@@ -350,6 +351,119 @@ async function runTmux(remote, tmuxArgs, options = {}) {
       .filter(Boolean)
       .join("\n");
     throw new Error(detail);
+  }
+}
+
+function normalizeCwd(value) {
+  if (!value) return null;
+  const resolved = pathResolve(value);
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+function isCodexTmuxPane(currentCommand, startCommand) {
+  const current = String(currentCommand ?? "").trim();
+  const currentBase = current.split("/").at(-1);
+  if (currentBase === "codex") {
+    return true;
+  }
+
+  const started = String(startCommand ?? "").trim();
+  const directStart = started
+    .replace(/^exec\s+/, "")
+    .replace(/^['"]|['"]$/g, "");
+  if (/^(?:\S*\/)?codex(?:\s|$)/.test(directStart)) {
+    return true;
+  }
+
+  return (
+    /\bomx_codex_pid\b/.test(started) &&
+    /(?:^|[\s'""])(?:[^'" \t]+\/)?codex(?:[\s'"]|$)/.test(started)
+  );
+}
+
+function parseCodexTmuxSessions(stdout, cwd = null) {
+  const cwdFilter = normalizeCwd(cwd);
+  const sessions = new Map();
+
+  for (const line of String(stdout).split(/\r?\n/)) {
+    if (!line) continue;
+    const [
+      session,
+      createdRaw,
+      attachedRaw,
+      paneCwd,
+      currentCommand,
+      ...startParts
+    ] = line.split("\t");
+    const startCommand = startParts.join("\t");
+    if (!session || !isCodexTmuxPane(currentCommand, startCommand)) {
+      continue;
+    }
+
+    const normalizedPaneCwd = normalizeCwd(paneCwd);
+    if (cwdFilter && normalizedPaneCwd !== cwdFilter) {
+      continue;
+    }
+
+    const startedAtEpoch = Number.parseInt(createdRaw, 10);
+    const startedAt = Number.isSafeInteger(startedAtEpoch)
+      ? new Date(startedAtEpoch * 1000).toISOString()
+      : null;
+    const existing = sessions.get(session);
+    if (existing) {
+      if (!existing.cwd && normalizedPaneCwd) {
+        existing.cwd = normalizedPaneCwd;
+      }
+      continue;
+    }
+
+    sessions.set(session, {
+      session,
+      startedAt,
+      startedAtEpoch: Number.isSafeInteger(startedAtEpoch)
+        ? startedAtEpoch
+        : null,
+      cwd: normalizedPaneCwd,
+      attached: Number.parseInt(attachedRaw, 10) > 0,
+    });
+  }
+
+  return [...sessions.values()].sort((left, right) =>
+    left.session.localeCompare(right.session),
+  );
+}
+
+async function discoverCodexTmuxSessions({ cwd = null } = {}) {
+  const format = [
+    "#{session_name}",
+    "#{session_created}",
+    "#{session_attached}",
+    "#{pane_current_path}",
+    "#{pane_current_command}",
+    "#{pane_start_command}",
+  ].join("\t");
+
+  try {
+    const { stdout } = await runTmux(null, ["list-panes", "-a", "-F", format]);
+    return {
+      ok: true,
+      cli: "codex",
+      cwd: normalizeCwd(cwd),
+      sessions: parseCodexTmuxSessions(stdout, cwd),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      cli: "codex",
+      cwd: normalizeCwd(cwd),
+      reason: "tmux-unavailable",
+      error: error.message,
+      sessions: [],
+    };
   }
 }
 
@@ -1887,6 +2001,14 @@ async function probe(flags) {
   );
 }
 
+async function listSessions(flags) {
+  const adapter = selectAdapter(flags);
+  if (adapter.cli !== "codex") {
+    throw new Error("list-sessions currently supports only --cli codex");
+  }
+  printJson(await discoverCodexTmuxSessions({ cwd: flags.cwd }));
+}
+
 function startOptsForSession(flags, session) {
   return {
     session,
@@ -2344,6 +2466,8 @@ async function main() {
     await interrupt(flags);
   } else if (command === "probe") {
     await probe(flags);
+  } else if (command === "list-sessions") {
+    await listSessions(flags);
   } else if (command === "converse") {
     await converse(flags);
   } else if (command === "goal-driven") {
@@ -2364,9 +2488,11 @@ export {
   buildRemoteLiveCommand,
   callRemoteLive,
   ctoHygieneNotify,
+  discoverCodexTmuxSessions,
   extractAssistantResponse,
   extractClaudeCompletedTaskListResponse,
   hasClaudeCompletedTaskListResponse,
+  parseCodexTmuxSessions,
   parseRemoteLiveJson,
   resolveAskTransport,
 };

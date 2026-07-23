@@ -3,7 +3,7 @@ name: tfx-live
 description: >
   Use when Claude, Codex, or a Triflux worker needs live Claude↔Codex orchestration:
   start/ask/stop, multi-turn, peer relay, daemon UDS attach, or UDS-first with tmux fallback.
-argument-hint: "<start|ask|stop|probe|peer|converse|goal-driven> ..."
+argument-hint: "<start|ask|stop|probe|list-sessions|peer|converse|goal-driven> ..."
 ---
 
 # tfx-live — Claude↔Codex live orchestration
@@ -54,6 +54,24 @@ For explicit UDS-only failure behavior:
 tfx-live ask --cli claude --transport uds --short <8hex> --prompt "..." --timeout 120
 ```
 
+## Codex tmux session discovery
+
+List the Codex CLI sessions already running in tmux; this does not require a
+prior `tfx-live start`. The JSON result includes the tmux session name, start
+time, current working directory, and attachment state.
+
+```bash
+# All locally running Codex tmux sessions
+tfx-live list-sessions --cli codex
+
+# Limit discovery to sessions whose pane cwd exactly matches this worktree
+tfx-live list-sessions --cli codex --cwd ~/Projects/my-worktree
+```
+
+`probe` remains the Claude daemon/UDS discovery command. Use
+`list-sessions --cli codex` when selecting an existing Codex tmux session to
+pass to `tfx-live ask --session <name>`.
+
 ## Peer relay
 
 ```bash
@@ -99,6 +117,9 @@ tfx-live --help
 
 # Probe daemon sessions through Triflux bridge
 tfx-live probe
+
+# Discover existing Codex tmux sessions
+tfx-live list-sessions --cli codex
 ```
 
 If auto falls back, inspect `~/.claude/cache/triflux/tfx-live/bug-reports/uds-fallback-*.json` (override with `$TFX_LIVE_BUG_REPORT_DIR` for tests).
