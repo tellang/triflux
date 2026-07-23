@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { runCodexSessionHook } from "../../hooks/codex-session-hook.mjs";
+import {
+  launchCodexPresenceRegistration,
+  runCodexSessionHook,
+} from "../../hooks/codex-session-hook.mjs";
 import { registerInteractiveSession } from "../../hooks/session-start-fast.mjs";
 
 function payload(overrides = {}) {
@@ -25,10 +28,17 @@ describe("codex-session-hook", () => {
       heartbeatInteractiveSession: () => calls.push(["heartbeat"]),
       drainPendingSynapse: async (timeoutMs) =>
         calls.push(["drain", timeoutMs]),
+      launchPresenceRegistration: (hookPayload) =>
+        calls.push(["presence", hookPayload]),
     });
 
     assert.equal(result, "{}\n");
     assert.deepEqual(calls, [
+      ["presence", {
+        session_id: "codex-session-1",
+        cwd: "/work/triflux",
+        hook_event_name: "session_start",
+      }],
       ["ensure", payload()],
       ["register", payload()],
       ["drain", 1000],
@@ -56,6 +66,54 @@ describe("codex-session-hook", () => {
       ["heartbeat", payload({ hook_event_name: "user_prompt_submit" })],
       ["drain", 500],
     ]);
+  });
+
+  it("launches bridge registration detached with Codex, OMX, and tmux context", () => {
+    const launches = [];
+    const originalOmxSession = process.env.OMX_SESSION_ID;
+    const originalTmuxSession = process.env.OMX_TMUX_SESSION;
+    const originalTmuxPane = process.env.TMUX_PANE;
+    try {
+      process.env.OMX_SESSION_ID = "omx-session-01";
+      process.env.OMX_TMUX_SESSION = "omx-presence";
+      process.env.TMUX_PANE = "%42";
+      const child = { once: () => child, unref: () => {} };
+      assert.equal(launchCodexPresenceRegistration(JSON.parse(payload()), {
+        bridgePath: "/tmp/bridge.mjs",
+        spawnFn: (...args) => {
+          launches.push(args);
+          return child;
+        },
+      }), true);
+      assert.deepEqual(launches, [[
+        process.execPath,
+        [
+          "/tmp/bridge.mjs", "register",
+          "--session-id", "codex-session-1",
+          "--cwd", "/work/triflux",
+          "--worktree-path", "/work/triflux",
+          "--session-kind", "interactive",
+          "--host", "local",
+          "--codex-session-id", "codex-session-1",
+          "--omx-session-id", "omx-session-01",
+          "--tmux-session", "omx-presence",
+          "--tmux-pane", "%42",
+        ],
+        {
+          detached: true,
+          stdio: "ignore",
+          windowsHide: true,
+          env: process.env,
+        },
+      ]]);
+    } finally {
+      if (originalOmxSession === undefined) delete process.env.OMX_SESSION_ID;
+      else process.env.OMX_SESSION_ID = originalOmxSession;
+      if (originalTmuxSession === undefined) delete process.env.OMX_TMUX_SESSION;
+      else process.env.OMX_TMUX_SESSION = originalTmuxSession;
+      if (originalTmuxPane === undefined) delete process.env.TMUX_PANE;
+      else process.env.TMUX_PANE = originalTmuxPane;
+    }
   });
 
   it("falls back to hook_event_name case-insensitively when argv mode is absent", async () => {
