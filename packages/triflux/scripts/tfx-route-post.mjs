@@ -326,6 +326,15 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
 
   const patterns = [
     {
+      // MCP transport 채널 런타임 사망 — codex exec 가 exit 0 으로 끝나도 워커가
+      // 빈손으로 죽은 케이스. tfx-route.sh 가드가 이를 실패(exit 68)로 승격하고,
+      // 여기서 원인을 cli-issues.jsonl 에 기록해 관측성을 확보한다(#result-verification).
+      regex: /Transport channel closed|rmcp::transport worker quit with fatal/i,
+      pattern: "mcp_transport",
+      msg: "MCP transport channel closed mid-run (worker likely produced no result)",
+      severity: "error",
+    },
+    {
       regex: /sandbox image.*missing/i,
       pattern: "sandbox_missing",
       msg: "Docker sandbox image not found",
@@ -377,6 +386,13 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
       msg: `Exit code ${exitCode}`,
       severity: "warn",
     };
+  }
+
+  // mcp_transport 는 실행 실패를 유발한 크래시일 때만 이슈로 기록한다. exit 0
+  // (진짜 산출물이 있어 가드가 미승격)에서의 "Transport channel closed" 는 정상
+  // 종료 teardown 노이즈이므로 관측 오탐을 피해 제외한다(#result-verification P3-3).
+  if (matched && matched.pattern === "mcp_transport" && exitCode === 0) {
+    matched = null;
   }
 
   if (!matched) return;

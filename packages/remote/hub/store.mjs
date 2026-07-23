@@ -1,8 +1,8 @@
 // hub/store.mjs — SQLite 감사 로그/메타데이터/역할 레지스트리 저장소
 // 실시간 배달은 router/pipe가 담당하고, 역할 권한과 복구 상태는 SQLite가 보존한다.
 
-import { mkdirSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,10 +13,7 @@ import {
 } from "@triflux/core/hub/lib/timeout-defaults.mjs";
 import { uuidv7 } from "@triflux/core/hub/lib/uuidv7.mjs";
 import { recalcConfidence } from "@triflux/core/hub/reflexion.mjs";
-import {
-  decodeRoleKey,
-  ROLE_REACHABILITY_STATES,
-} from "@triflux/core/hub/role-contract.mjs";
+import { decodeRoleKey, ROLE_REACHABILITY_STATES } from "@triflux/core/hub/role-contract.mjs";
 
 export { uuidv7 };
 
@@ -135,9 +132,7 @@ function ensureV7Columns(db) {
 }
 
 function storeFingerprint(dbPath) {
-  return `sqlite:${createHash("sha256")
-    .update(String(dbPath))
-    .digest("hex")}`;
+  return `sqlite:${createHash("sha256").update(String(dbPath)).digest("hex")}`;
 }
 
 /**
@@ -238,8 +233,14 @@ export function createStore(dbPath, options = {}) {
     heartbeat: db.prepare(
       "UPDATE agents SET last_seen_ms=?, lease_expires_ms=?, status='online' WHERE agent_id=? AND presence_generation=?",
     ),
+    heartbeatWithoutGeneration: db.prepare(
+      "UPDATE agents SET last_seen_ms=?, lease_expires_ms=?, status='online' WHERE agent_id=?",
+    ),
     setAgentStatus: db.prepare(
       "UPDATE agents SET status=? WHERE agent_id=? AND presence_generation=?",
+    ),
+    setAgentStatusWithoutGeneration: db.prepare(
+      "UPDATE agents SET status=? WHERE agent_id=?",
     ),
     onlineAgents: db.prepare("SELECT * FROM agents WHERE status != 'offline'"),
     allAgents: db.prepare("SELECT * FROM agents"),
@@ -253,9 +254,7 @@ export function createStore(dbPath, options = {}) {
       "UPDATE agents SET status='offline' WHERE agent_id=? AND presence_generation=? AND status='stale' AND lease_expires_ms < ? - 300000",
     ),
 
-    getRole: db.prepare(
-      "SELECT * FROM role_registry WHERE role_key_wire = ?",
-    ),
+    getRole: db.prepare("SELECT * FROM role_registry WHERE role_key_wire = ?"),
     insertRoleReservation: db.prepare(`
       INSERT INTO role_registry (
         role_key_wire, project_id, role_kind, scope_id, state,
@@ -312,9 +311,7 @@ export function createStore(dbPath, options = {}) {
         AND activation_seq=@expected_activation_seq
         AND activation_id IS @expected_activation_id
         AND version=@expected_version`),
-    listRoles: db.prepare(
-      "SELECT * FROM role_registry ORDER BY role_key_wire",
-    ),
+    listRoles: db.prepare("SELECT * FROM role_registry ORDER BY role_key_wire"),
     expiredHolderRoles: db.prepare(`
       SELECT * FROM role_registry
       WHERE holder_agent_id IS NOT NULL
@@ -655,27 +652,28 @@ export function createStore(dbPath, options = {}) {
       previous_holder_agent_id:
         input.previous_holder_agent_id ??
         (current?.holder_agent_id !== input.holder_agent_id
-          ? current?.holder_agent_id ?? null
-          : current?.previous_holder_agent_id ?? null),
+          ? (current?.holder_agent_id ?? null)
+          : (current?.previous_holder_agent_id ?? null)),
       epoch: nextEpoch,
       activation_seq: nextActivationSeq,
       activation_id:
         input.activation_id ??
-        (input.holder_agent_id ? uuidv7() : current?.activation_id ?? null),
+        (input.holder_agent_id ? uuidv7() : (current?.activation_id ?? null)),
       activation_deadline_ms:
         input.activation_deadline_ms ?? current?.activation_deadline_ms ?? null,
       holder_lease_expires_ms:
         input.holder_lease_expires_ms ??
         current?.holder_lease_expires_ms ??
         null,
-      charter_version: input.charter_version ?? current?.charter_version ?? null,
+      charter_version:
+        input.charter_version ?? current?.charter_version ?? null,
       charter_acked_epoch:
         input.charter_acked_epoch ?? current?.charter_acked_epoch ?? null,
       retry_count: input.retry_count ?? current?.retry_count ?? 0,
       next_probe_ms: input.next_probe_ms ?? current?.next_probe_ms ?? null,
       blocked_reason:
         input.blocked_reason === undefined
-          ? current?.blocked_reason ?? null
+          ? (current?.blocked_reason ?? null)
           : input.blocked_reason,
       last_transition_ms: input.last_transition_ms ?? Date.now(),
       last_reason: input.last_reason ?? "role_reserved",
@@ -727,14 +725,10 @@ export function createStore(dbPath, options = {}) {
     return {
       roles,
       candidates: roles.flatMap((role) =>
-        S.listRoleCandidates
-          .all(role.role_key_wire)
-          .map(parseRoleCandidateRow),
+        S.listRoleCandidates.all(role.role_key_wire).map(parseRoleCandidateRow),
       ),
       pending_messages: roles.flatMap((role) =>
-        S.pendingRoleMessages
-          .all(role.role_key_wire, now)
-          .map(parseMessageRow),
+        S.pendingRoleMessages.all(role.role_key_wire, now).map(parseMessageRow),
       ),
     };
   });
@@ -800,12 +794,10 @@ export function createStore(dbPath, options = {}) {
 
     refreshLease(agentId, ttlMs = 30000, presenceGeneration) {
       const now = Date.now();
-      const write = S.heartbeat.run(
-        now,
-        now + ttlMs,
-        agentId,
-        presenceGeneration,
-      );
+      const write =
+        presenceGeneration == null
+          ? S.heartbeatWithoutGeneration.run(now, now + ttlMs, agentId)
+          : S.heartbeat.run(now, now + ttlMs, agentId, presenceGeneration);
       return {
         agent_id: agentId,
         lease_expires_ms: now + ttlMs,
@@ -868,7 +860,12 @@ export function createStore(dbPath, options = {}) {
     },
 
     updateAgentStatus(agentId, status, presenceGeneration) {
-      return S.setAgentStatus.run(status, agentId, presenceGeneration).changes > 0;
+      return (
+        (presenceGeneration == null
+          ? S.setAgentStatusWithoutGeneration.run(status, agentId)
+          : S.setAgentStatus.run(status, agentId, presenceGeneration)
+        ).changes > 0
+      );
     },
 
     getRole(roleKeyWire) {
@@ -894,7 +891,8 @@ export function createStore(dbPath, options = {}) {
         Object.hasOwn(input, "expectedActivationId") ||
         Object.hasOwn(input, "activation_id");
       const expected = {
-        version: input.expected_version ?? input.expectedVersion ?? input.version,
+        version:
+          input.expected_version ?? input.expectedVersion ?? input.version,
         epoch: input.expected_epoch ?? input.expectedEpoch ?? input.epoch,
         activation_seq:
           input.expected_activation_seq ??
@@ -1036,15 +1034,15 @@ export function createStore(dbPath, options = {}) {
           0,
         excluded_until_ms:
           input.excluded_until_ms === undefined
-            ? current?.excluded_until_ms ?? null
+            ? (current?.excluded_until_ms ?? null)
             : input.excluded_until_ms,
         last_probe_ms:
           input.last_probe_ms === undefined
-            ? current?.last_probe_ms ?? null
+            ? (current?.last_probe_ms ?? null)
             : input.last_probe_ms,
         last_probe_code:
           input.last_probe_code === undefined
-            ? current?.last_probe_code ?? null
+            ? (current?.last_probe_code ?? null)
             : input.last_probe_code,
         updated_at_ms: input.updated_at_ms ?? Date.now(),
       });
@@ -1059,9 +1057,11 @@ export function createStore(dbPath, options = {}) {
       if (!current) return { ok: false, reason: "not_found" };
 
       let failures =
-        input.consecutive_probe_failures ??
-        current.consecutive_probe_failures;
-      if (input.probe_failed === true || input.increment_probe_failures === true) {
+        input.consecutive_probe_failures ?? current.consecutive_probe_failures;
+      if (
+        input.probe_failed === true ||
+        input.increment_probe_failures === true
+      ) {
         failures = current.consecutive_probe_failures + 1;
       } else if (input.probe_succeeded === true) {
         failures = 0;
@@ -1530,8 +1530,15 @@ export function createStore(dbPath, options = {}) {
             reason: "ttl_expired",
             failed_at_ms: now_ms,
           });
-          const dlqInserted = S.insertDL.run(row.id, "ttl_expired", now_ms, null).changes === 1;
-          transitions.push({ message: parseMessageRow(row), previous_status: row.status, reason: "ttl_expired", failed_at_ms: now_ms, dlq_inserted: dlqInserted });
+          const dlqInserted =
+            S.insertDL.run(row.id, "ttl_expired", now_ms, null).changes === 1;
+          transitions.push({
+            message: parseMessageRow(row),
+            previous_status: row.status,
+            reason: "ttl_expired",
+            failed_at_ms: now_ms,
+            dlq_inserted: dlqInserted,
+          });
         }
         return { now_ms, messages: transitions.length, transitions };
       })();

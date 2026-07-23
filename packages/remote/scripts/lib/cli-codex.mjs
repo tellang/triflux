@@ -18,6 +18,8 @@ import {
   resolveNestedCodexAgentProfile,
 } from "./agent-route-policy.mjs";
 
+// Compatibility re-exports for launchers which historically imported these
+// helpers from this adapter. The policy module owns the semantics.
 export { resolveCodexAgentProfile, resolveNestedCodexAgentProfile };
 
 export function plan({

@@ -272,12 +272,16 @@ export async function deregisterHeadlessWorkers(
       requestJsonFn("/bridge/deregister", {
         body: {
           agent_id: getHeadlessWorkerAgentId(sessionName, index),
-          ...(presenceOwnerByAgent.get(getHeadlessWorkerAgentId(sessionName, index)) || {}),
+          ...(presenceOwnerByAgent.get(
+            getHeadlessWorkerAgentId(sessionName, index),
+          ) || {}),
         },
       })
         .catch(() => {})
         .finally(() =>
-          presenceOwnerByAgent.delete(getHeadlessWorkerAgentId(sessionName, index)),
+          presenceOwnerByAgent.delete(
+            getHeadlessWorkerAgentId(sessionName, index),
+          ),
         ),
     ),
   );

@@ -2365,102 +2365,99 @@ export async function startHub({
   let rateLimitTimer = null;
 
   const startBackgroundTimers = () => {
-
-  hitlTimer = setInterval(() => {
-    try {
-      hitl.checkTimeouts();
-    } catch (err) {
-      hubLog.warn({ err }, "hitl.timeout_check_failed");
-    }
-  }, 10000);
-  hitlTimer.unref();
-
-  // MCP session TTL: sessions idle for SESSION_TTL_MS are closed automatically.
-  // Configurable via SESSION_TTL_MS (default 30 minutes). The sweep runs every 60 s.
-  const SESSION_TTL_MS =
-    parseInt(process.env.TFX_SESSION_TTL_MS || "", 10) || 30 * 60 * 1000;
-  sessionTimer = setInterval(() => {
-    const now = Date.now();
-    for (const [sid, session] of transports) {
-      if (now - (session.transport._lastActivity || 0) <= SESSION_TTL_MS)
-        continue;
-      void closeMcpTransportSession(sid, session, "session_ttl");
-    }
-  }, 60000);
-  sessionTimer.unref();
-
-  synapsePruneTimer = setInterval(() => {
-    try {
-      const { count } = synapseRegistry.pruneExpired();
-      if (count > 0) hubLog.info({ count }, "synapse.prune");
-    } catch (err) {
-      hubLog.warn({ err }, "synapse.prune_failed");
-    }
-  }, 60000);
-  synapsePruneTimer.unref();
-
-  // 고아 node.exe 프로세스 + stale spawn 세션 주기적 정리 (5분마다)
-  // TFX_DISABLE_ORPHAN_CLEANUP=1 로 비활성 (active SSH/swarm 세션 보호 회피용 hotfix gate)
-  orphanCleanupTimer = setInterval(
-    () => {
-      if (process.env.TFX_DISABLE_ORPHAN_CLEANUP === "1") return;
+    hitlTimer = setInterval(() => {
       try {
-        const { killed, killedProcesses = [] } = cleanupOrphanNodeProcesses();
-        const {
-          killed: runtimeKilled,
-          killedProcesses: runtimeKilledProcesses = [],
-        } = cleanupOrphanRuntimeProcesses();
-        const totalKilled = killed + runtimeKilled;
-        if (totalKilled > 0) {
-          hubLog.info(
-            {
-              killed: totalKilled,
-              processes: [...killedProcesses, ...runtimeKilledProcesses],
-              caller: "timer",
-            },
-            "hub.orphan_cleanup",
-          );
-        }
-
-        const { killed: fsmonitorKilled, stale } = cleanupStaleFsmonitorDaemons(
-          {
-            minAgeMs: 24 * 60 * 60 * 1000,
-          },
-        );
-        if (fsmonitorKilled > 0) {
-          hubLog.info(
-            { killed: fsmonitorKilled, stale: stale.length },
-            "hub.fsmonitor_cleanup",
-          );
-        }
-      } catch {}
-
-      // stale tfx-spawn-* psmux 세션 정리 (30분 이상 idle)
-      try {
-        const staleKilled = cleanupStaleSpawnSessions(hubLog);
-        if (staleKilled > 0) {
-          hubLog.info({ killed: staleKilled }, "hub.stale_spawn_cleanup");
-        }
-      } catch {}
-    },
-    5 * 60 * 1000,
-  );
-  orphanCleanupTimer.unref();
-
-  // Evict stale rate-limit buckets once per minute to bound memory usage.
-  rateLimitTimer = setInterval(() => {
-    const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
-    for (const [ip, timestamps] of rateLimitMap) {
-      const fresh = timestamps.filter((t) => t >= cutoff);
-      if (fresh.length === 0) {
-        rateLimitMap.delete(ip);
-      } else {
-        rateLimitMap.set(ip, fresh);
+        hitl.checkTimeouts();
+      } catch (err) {
+        hubLog.warn({ err }, "hitl.timeout_check_failed");
       }
-    }
-  }, RATE_LIMIT_WINDOW_MS);
-  rateLimitTimer.unref();
+    }, 10000);
+    hitlTimer.unref();
 
+    // MCP session TTL: sessions idle for SESSION_TTL_MS are closed automatically.
+    // Configurable via SESSION_TTL_MS (default 30 minutes). The sweep runs every 60 s.
+    const SESSION_TTL_MS =
+      parseInt(process.env.TFX_SESSION_TTL_MS || "", 10) || 30 * 60 * 1000;
+    sessionTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [sid, session] of transports) {
+        if (now - (session.transport._lastActivity || 0) <= SESSION_TTL_MS)
+          continue;
+        void closeMcpTransportSession(sid, session, "session_ttl");
+      }
+    }, 60000);
+    sessionTimer.unref();
+
+    synapsePruneTimer = setInterval(() => {
+      try {
+        const { count } = synapseRegistry.pruneExpired();
+        if (count > 0) hubLog.info({ count }, "synapse.prune");
+      } catch (err) {
+        hubLog.warn({ err }, "synapse.prune_failed");
+      }
+    }, 60000);
+    synapsePruneTimer.unref();
+
+    // 고아 node.exe 프로세스 + stale spawn 세션 주기적 정리 (5분마다)
+    // TFX_DISABLE_ORPHAN_CLEANUP=1 로 비활성 (active SSH/swarm 세션 보호 회피용 hotfix gate)
+    orphanCleanupTimer = setInterval(
+      () => {
+        if (process.env.TFX_DISABLE_ORPHAN_CLEANUP === "1") return;
+        try {
+          const { killed, killedProcesses = [] } = cleanupOrphanNodeProcesses();
+          const {
+            killed: runtimeKilled,
+            killedProcesses: runtimeKilledProcesses = [],
+          } = cleanupOrphanRuntimeProcesses();
+          const totalKilled = killed + runtimeKilled;
+          if (totalKilled > 0) {
+            hubLog.info(
+              {
+                killed: totalKilled,
+                processes: [...killedProcesses, ...runtimeKilledProcesses],
+                caller: "timer",
+              },
+              "hub.orphan_cleanup",
+            );
+          }
+
+          const { killed: fsmonitorKilled, stale } =
+            cleanupStaleFsmonitorDaemons({
+              minAgeMs: 24 * 60 * 60 * 1000,
+            });
+          if (fsmonitorKilled > 0) {
+            hubLog.info(
+              { killed: fsmonitorKilled, stale: stale.length },
+              "hub.fsmonitor_cleanup",
+            );
+          }
+        } catch {}
+
+        // stale tfx-spawn-* psmux 세션 정리 (30분 이상 idle)
+        try {
+          const staleKilled = cleanupStaleSpawnSessions(hubLog);
+          if (staleKilled > 0) {
+            hubLog.info({ killed: staleKilled }, "hub.stale_spawn_cleanup");
+          }
+        } catch {}
+      },
+      5 * 60 * 1000,
+    );
+    orphanCleanupTimer.unref();
+
+    // Evict stale rate-limit buckets once per minute to bound memory usage.
+    rateLimitTimer = setInterval(() => {
+      const cutoff = Date.now() - RATE_LIMIT_WINDOW_MS;
+      for (const [ip, timestamps] of rateLimitMap) {
+        const fresh = timestamps.filter((t) => t >= cutoff);
+        if (fresh.length === 0) {
+          rateLimitMap.delete(ip);
+        } else {
+          rateLimitMap.set(ip, fresh);
+        }
+      }
+    }, RATE_LIMIT_WINDOW_MS);
+    rateLimitTimer.unref();
   };
 
   mkdirSync(PID_DIR, { recursive: true });
@@ -2469,7 +2466,13 @@ export async function startHub({
     try {
       router.stopSweeper();
     } catch {}
-    for (const timer of [hitlTimer, sessionTimer, synapsePruneTimer, orphanCleanupTimer, rateLimitTimer]) {
+    for (const timer of [
+      hitlTimer,
+      sessionTimer,
+      synapsePruneTimer,
+      orphanCleanupTimer,
+      rateLimitTimer,
+    ]) {
       if (timer) clearInterval(timer);
     }
     for (const [sid, session] of Array.from(transports)) {
@@ -2503,7 +2506,14 @@ export async function startHub({
       run_immediately: false,
       interval_ms: 10000,
       onSweepError: ({ source, error, consecutive_failures }) => {
-        hubLog.warn({ source, code: error?.code || "UNKNOWN", consecutive_failures }, "hub.sweep_failed");
+        hubLog.warn(
+          {
+            source,
+            code: error?.code || "UNKNOWN",
+            consecutive_failures,
+          },
+          "hub.sweep_failed",
+        );
       },
     });
     startBackgroundTimers();

@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import * as z from "zod";
-import { resolveCodexAgentPolicy } from "@triflux/core/scripts/lib/agent-route-policy.mjs";
+import { resolveCodexAgentPolicy } from "../../scripts/lib/agent-route-policy.mjs";
 import { resolveBashExecutable } from "@triflux/core/hub/lib/bash-path.mjs";
 import { runHeadlessWithCleanup } from "../team/headless.mjs";
 import { buildWorkerSandboxEnv } from "../team/worker-sandbox.mjs";

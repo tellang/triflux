@@ -1,6 +1,9 @@
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir, hostname } from "node:os";
+import { dirname, join } from "node:path";
+import { normalizeRoleKey } from "@triflux/core/hub/role-contract.mjs";
 
 const HUB_DEFAULT_PORT = 27888;
 // Same token file as hub/bridge.mjs (HUB_TOKEN_FILE). Kept inline rather than
@@ -19,6 +22,144 @@ function normalizeToken(raw) {
   if (raw == null) return null;
   const token = String(raw).trim();
   return token || null;
+}
+
+function opaqueId(prefix, value) {
+  return `${prefix}_${createHash("sha256")
+    .update(String(value || ""))
+    .digest("base64url")
+    .slice(0, 22)}`;
+}
+
+function normalizedProjectId(value) {
+  try {
+    return normalizeRoleKey({ project_id: value, role_kind: "cto" }).project_id;
+  } catch {
+    return "";
+  }
+}
+
+function resolveProjectId(cwd, meta, opts = {}) {
+  const explicit = meta?.project_id || process.env.TFX_PROJECT_ID;
+  if (explicit) return normalizedProjectId(explicit);
+  if (typeof opts.resolveProjectId === "function") {
+    return normalizedProjectId(opts.resolveProjectId(cwd));
+  }
+  let current = cwd;
+  while (current) {
+    const manifest = join(current, ".triflux", "project.json");
+    if (existsSync(manifest)) {
+      try {
+        const parsed = JSON.parse(readFileSync(manifest, "utf8"));
+        if (parsed?.schema_version !== "tfx.project.v1") return "";
+        return normalizedProjectId(parsed.project_id);
+      } catch {
+        return "";
+      }
+    }
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return "";
+}
+
+function inferSessionCli(meta, opts = {}) {
+  const explicit = String(meta?.cli || meta?.actor_cli || "")
+    .trim()
+    .toLowerCase();
+  if (explicit === "codex" || explicit === "claude") return explicit;
+  const entrypoint = String(opts.entrypoint ?? process.argv[1] ?? "");
+  if (entrypoint.includes("codex-session-hook")) return "codex";
+  if (entrypoint.includes("agy-session-hook")) return "other";
+  return "claude";
+}
+
+function resolveTmuxSession(meta, opts = {}) {
+  const explicit =
+    meta?.tmux_session || meta?.session_name || process.env.TFX_TMUX_SESSION;
+  if (explicit) return String(explicit).trim();
+  if (!process.env.TMUX) return "";
+  try {
+    const run =
+      opts.tmuxSessionName ||
+      (() =>
+        execFileSync("tmux", ["display-message", "-p", "#{session_name}"], {
+          encoding: "utf8",
+          timeout: 200,
+          windowsHide: true,
+        }));
+    return String(run() || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+export function buildSynapseRegistrationMeta(meta, opts = {}) {
+  if (!meta || meta.sessionKind !== "interactive") return meta;
+  const sessionId = String(meta.sessionId || "").trim();
+  if (!sessionId) return meta;
+  const cwd = typeof meta.cwd === "string" ? meta.cwd : process.cwd();
+  const cli = inferSessionCli(meta, opts);
+  const hostId = String(
+    meta.host_id ||
+      process.env.TFX_HOST_ID ||
+      opaqueId("hst", opts.hostname?.() || hostname()),
+  ).trim();
+  const expiresAtMs = Number(opts.nowMs?.() ?? Date.now()) + 299000;
+  const transportLocators = [];
+  if (cli === "claude") {
+    transportLocators.push({
+      schema_version: "tfx.transport-locator.v1",
+      transport_id: opaqueId("trn", `claude-uds:${hostId}:${sessionId}`),
+      kind: "claude-uds",
+      host_id: hostId,
+      capabilities: ["probe", "wake", "activate", "interrupt"],
+      priority: 100,
+      expires_at_ms: expiresAtMs,
+      locator: {
+        session_id: sessionId,
+        bridge_id: String(
+          meta.bridge_id || process.env.TFX_BRIDGE_ID || "local-hub",
+        ),
+      },
+    });
+  }
+  const tmuxSession = resolveTmuxSession(meta, opts);
+  if (tmuxSession) {
+    const muxServerSource =
+      meta.mux_server_id ||
+      process.env.TFX_MUX_SERVER_ID ||
+      String(process.env.TMUX || "default").split(",", 1)[0];
+    transportLocators.push({
+      schema_version: "tfx.transport-locator.v1",
+      transport_id: opaqueId("trn", `tmux:${hostId}:${tmuxSession}`),
+      kind: "tmux",
+      host_id: hostId,
+      capabilities: ["probe", "wake", "activate", "interrupt"],
+      priority: cli === "codex" ? 100 : 50,
+      expires_at_ms: expiresAtMs,
+      locator: {
+        session_name: tmuxSession,
+        mux_server_id: opaqueId("mux", muxServerSource),
+      },
+    });
+  }
+  const directAgentId = `session:${sessionId}`;
+  return {
+    ...meta,
+    agent_id:
+      meta.agent_id ||
+      (directAgentId.length <= 64 && /^[a-zA-Z0-9._:-]+$/u.test(directAgentId)
+        ? directAgentId
+        : opaqueId("session", sessionId)),
+    cli,
+    project_id: resolveProjectId(cwd, meta, opts) || undefined,
+    session_id: meta.session_id || sessionId,
+    host_id: hostId,
+    transport_locators_json:
+      meta.transport_locators_json ?? JSON.stringify(transportLocators),
+  };
 }
 
 // Mirrors hub/bridge.mjs:readHubToken — env override first, then the token file.
@@ -139,7 +280,11 @@ export function drainPendingSynapse(timeoutMs = 1000) {
 }
 
 export function registerSynapseSession(meta, opts = {}) {
-  return fireAndForgetSynapse("/synapse/register", meta, opts);
+  return fireAndForgetSynapse(
+    "/synapse/register",
+    buildSynapseRegistrationMeta(meta, opts),
+    opts,
+  );
 }
 
 export function heartbeatSynapseSession(
