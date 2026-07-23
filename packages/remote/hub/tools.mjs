@@ -159,7 +159,10 @@ export function createTools(store, router, hitl, pipe = null) {
           transport_locators_json: {
             description:
               "tfx.transport-locator.v1 객체 배열 또는 그 JSON 문자열",
-            oneOf: [{ type: "array", items: { type: "object" } }, { type: "string" }],
+            oneOf: [
+              { type: "array", items: { type: "object" } },
+              { type: "string" },
+            ],
           },
           hub_instance_id: { type: "string" },
           store_fingerprint: { type: "string" },

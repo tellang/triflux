@@ -3066,6 +3066,9 @@ FALLBACK_EOF
   if workspace_signature_before=$(capture_workspace_signature); then
     workspace_probe_supported=true
   fi
+  # recover_codex_stdout 이 복구 진입 시 1로 세운다(dynamic scope로 이 local 이 갱신됨).
+  # 매 실행 초기화로 스테일 방지. 진짜 산출물 부재 판정(아래 no-op 가드)에 쓰인다.
+  local CODEX_STDOUT_WAS_RECOVERED=0
 
   # tee 활성화 조건: 팀 모드 + 실제 터미널(TTY/tmux)
   # Agent 래퍼 안에서는 가상 stdout 캡처로 tee 출력이 사용자에게 안 보임 → 파일 전용
@@ -3307,8 +3310,31 @@ EOF
       fi
     fi
 
-    if [[ ! -s "$STDOUT_LOG" && "$workspace_changed" == "no" && "$CLI_TYPE" != "antigravity" ]]; then
-      printf '%s\n' "[tfx-route] exit 0 이지만 stdout 비어있고 워크스페이스 변화가 없습니다. no-op 성공을 실패로 승격합니다." >> "$STDERR_LOG"
+    # 진짜 산출물 부재 판정 — 빈 stdout 이거나, recover_codex_stdout 이 stderr
+    # 노이즈로 backfill 한 경우(복구 플래그)면 진짜 워커 출력이 아니다. 복구가
+    # `! -s STDOUT_LOG` 를 무력화해 빈손 실행을 success 로 오보고하던 갭을 막는다.
+    local no_genuine_output="no"
+    if [[ ! -s "$STDOUT_LOG" || "${CODEX_STDOUT_WAS_RECOVERED:-0}" == "1" ]]; then
+      no_genuine_output="yes"
+    fi
+
+    # MCP transport 채널이 실행 중 죽었는지(exit 0 이어도) stderr 서명으로 판정.
+    local mcp_transport_crashed="no"
+    if declare -F codex_stdout_transport_crashed >/dev/null 2>&1 \
+       && codex_stdout_transport_crashed "$STDERR_LOG"; then
+      mcp_transport_crashed="yes"
+    fi
+
+    # 승격 조건: 진짜 출력이 없고(무근거 성공) + (워크스페이스 무변화 = 완전 no-op
+    # 이거나 transport 채널 사망 = 결과 신뢰 불가). antigravity 는 stdout 계약이
+    # 달라 제외. 진짜 출력이 있는 성공은 no_genuine_output=no 라 절대 승격되지 않는다.
+    # ★의도된 보수적 트레이드오프: codex 가 stdout 없이 stderr 로만 답을 쓰고 recover
+    # 가 salvage 한 경우(no_genuine_output=yes)라도 transport 채널이 죽었으면 결과를
+    # 신뢰 불가로 보고 실패로 승격한다. 채널 사망 후 salvage 는 완결 보장이 없기
+    # 때문이며, 극히 드문 stdout-없는 정상완료보다 false-success 방지를 우선한다.
+    if [[ "$CLI_TYPE" != "antigravity" && "$no_genuine_output" == "yes" ]] \
+       && { [[ "$workspace_changed" == "no" ]] || [[ "$mcp_transport_crashed" == "yes" ]]; }; then
+      printf '%s\n' "[tfx-route] exit 0 이지만 진짜 산출물이 없습니다 (recovered=${CODEX_STDOUT_WAS_RECOVERED:-0}, workspace_changed=${workspace_changed}, mcp_transport_crash=${mcp_transport_crashed}). no-op/실패 실행을 실패로 승격합니다." >> "$STDERR_LOG"
       exit_code=68
     fi
   fi

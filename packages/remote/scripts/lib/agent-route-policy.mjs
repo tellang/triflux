@@ -207,15 +207,23 @@ export const DEFAULT_CODEX_AGENT = "executor";
 
 export const CANONICAL_CODEX_PROFILE_OVERRIDES = Object.freeze(
   new Set([
-    "gpt56_luna_low", "gpt56_terra_med", "gpt56_terra_high", "gpt56_sol_xhigh",
-    "gpt56_sol_max", "gpt56_sol_ultra",
+    "gpt56_luna_low",
+    "gpt56_terra_med",
+    "gpt56_terra_high",
+    "gpt56_sol_xhigh",
+    "gpt56_sol_max",
+    "gpt56_sol_ultra",
   ]),
 );
 export const ULTRA_ELIGIBLE_CODEX_AGENTS = Object.freeze(
   new Set(["deep-executor", "scientist-deep"]),
 );
+
 const NESTED_GLOBAL_PROFILE_OVERRIDES = new Set([
-  "max", "ultra", "gpt56_sol_max", "gpt56_sol_ultra",
+  "max",
+  "ultra",
+  "gpt56_sol_max",
+  "gpt56_sol_ultra",
 ]);
 
 export function resolveCodexAgentPolicy(agent) {
@@ -224,32 +232,77 @@ export function resolveCodexAgentPolicy(agent) {
   );
 }
 
+/**
+ * Resolves a requested Codex profile against the canonical role policy.
+ *
+ * `retryProfile` intentionally wins over `profileOverride`: retry snapshots
+ * represent an already-selected escalation step and must not be replaced by a
+ * later process-level `TFX_CODEX_PROFILE`. Ultra is reserved for an eligible
+ * top-level role; every nested/sandboxed or ineligible request is max.
+ */
 export function resolveCodexAgentProfile(
   agent,
-  { profileOverride = "auto", retryProfile = null, nested = false, allowCustom = false } = {},
+  {
+    profileOverride = "auto",
+    retryProfile = null,
+    nested = false,
+    allowCustom = false,
+  } = {},
 ) {
   const defaultProfile = resolveCodexAgentPolicy(agent).profile;
   const retryRequested = String(retryProfile ?? "").trim();
   const requested = retryRequested || String(profileOverride || "auto").trim();
   if (!requested || requested === "auto") return defaultProfile;
-  const canonical = requested === "max" ? "gpt56_sol_max" : requested === "ultra" ? "gpt56_sol_ultra" : requested;
+
+  const canonical =
+    requested === "max"
+      ? "gpt56_sol_max"
+      : requested === "ultra"
+        ? "gpt56_sol_ultra"
+        : requested;
   if (!CANONICAL_CODEX_PROFILE_OVERRIDES.has(canonical)) {
     if (allowCustom) return requested;
-    throw new Error(`[agent-route-policy] unsupported profile override: ${requested}`);
+    throw new Error(
+      `[agent-route-policy] unsupported profile override: ${requested}`,
+    );
   }
   if (canonical !== "gpt56_sol_ultra") return canonical;
-  return nested || !ULTRA_ELIGIBLE_CODEX_AGENTS.has(agent) ? "gpt56_sol_max" : canonical;
+  return nested || !ULTRA_ELIGIBLE_CODEX_AGENTS.has(agent)
+    ? "gpt56_sol_max"
+    : canonical;
 }
 
+/**
+ * Nested headless, team, worker, and delegator launches always select an
+ * explicit role profile rather than inheriting the global Codex config. A
+ * custom profile that resolves to ultra is also downgraded to max.
+ */
 export function resolveNestedCodexAgentProfile(
   agent,
-  { profileOverride = "auto", globalProfile = "auto", retryProfile = null, codexHome } = {},
+  {
+    profileOverride = "auto",
+    globalProfile = "auto",
+    retryProfile = null,
+    codexHome,
+  } = {},
 ) {
   const explicitProfile = String(profileOverride || "auto").trim();
   const globalOverride = String(globalProfile || "auto").trim();
-  const effectiveOverride = explicitProfile !== "auto" ? explicitProfile : NESTED_GLOBAL_PROFILE_OVERRIDES.has(globalOverride) ? globalOverride : "auto";
+  // Headless lanes must select their role policy explicitly. Only the max and
+  // ultra exception lanes may cross the process environment boundary.
+  const effectiveOverride =
+    explicitProfile !== "auto"
+      ? explicitProfile
+      : NESTED_GLOBAL_PROFILE_OVERRIDES.has(globalOverride)
+        ? globalOverride
+        : "auto";
   const fallback = resolveCodexAgentProfile(agent);
-  const candidate = resolveCodexAgentProfile(agent, { profileOverride: effectiveOverride, retryProfile, nested: true, allowCustom: true });
+  const candidate = resolveCodexAgentProfile(agent, {
+    profileOverride: effectiveOverride,
+    retryProfile,
+    nested: true,
+    allowCustom: true,
+  });
   const { effort } = resolveCodexProfileConfigValues(candidate, { codexHome });
   if (!effort) return fallback;
   return effort.toLowerCase() === "ultra" ? "gpt56_sol_max" : candidate;
