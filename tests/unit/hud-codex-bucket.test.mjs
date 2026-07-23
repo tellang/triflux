@@ -277,6 +277,94 @@ describe("Codex multi-window selection", () => {
     }
   });
 
+  it("drops a long-expired five-hour fallback after Codex reports weekly-only primary data", () => {
+    const sessionsRoot = mkdtempSync(
+      join(tmpdir(), "triflux-codex-weekly-only-fallback-"),
+    );
+    const now = new Date("2026-07-23T06:00:00.000Z");
+    const nowSec = Math.floor(now.getTime() / 1000);
+    try {
+      // A stale local session can be written after the last weekly-only event,
+      // but its reset proves that its five-hour value is no longer usable.
+      writeRollout(sessionsRoot, now, "rollout-stale-five-hour.jsonl", [
+        {
+          timestamp: "2026-07-23T05:59:00.000Z",
+          payload: {
+            rate_limits: {
+              limit_id: "codex",
+              primary: {
+                used_percent: 10,
+                window_minutes: 300,
+                resets_at: nowSec - 6 * 60 * 60,
+              },
+              secondary: null,
+            },
+          },
+        },
+      ]);
+      writeRollout(sessionsRoot, now, "rollout-weekly-only.jsonl", [
+        {
+          timestamp: "2026-07-23T05:55:00.000Z",
+          payload: {
+            rate_limits: {
+              limit_id: "codex",
+              primary: {
+                used_percent: 13,
+                window_minutes: 10080,
+                resets_at: nowSec + 6 * 24 * 60 * 60,
+              },
+              secondary: null,
+            },
+          },
+        },
+      ]);
+
+      const buckets = getCodexRateLimits({ sessionsRoot, now });
+
+      assert.equal(
+        buckets.codex.primary,
+        null,
+        "a long-expired five-hour snapshot must not repopulate the 5h HUD slot",
+      );
+      assert.equal(buckets.codex.secondary.used_percent, 13);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a just-reset five-hour fallback during the probe polling gap", () => {
+    const sessionsRoot = mkdtempSync(
+      join(tmpdir(), "triflux-codex-reset-grace-"),
+    );
+    const now = new Date("2026-07-23T06:00:00.000Z");
+    const nowSec = Math.floor(now.getTime() / 1000);
+    try {
+      writeRollout(sessionsRoot, now, "rollout-just-reset.jsonl", [
+        {
+          timestamp: "2026-07-23T05:59:00.000Z",
+          payload: {
+            rate_limits: {
+              limit_id: "codex",
+              primary: {
+                used_percent: 10,
+                window_minutes: 300,
+                resets_at: nowSec - 60,
+              },
+              secondary: null,
+            },
+          },
+        },
+      ]);
+
+      const buckets = getCodexRateLimits({ sessionsRoot, now });
+
+      assert.equal(buckets.codex.primary.used_percent, 0);
+      assert.equal(buckets.codex.primary.expired, true);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
   it("selects an active heavy weekly window independently from the active five-hour window", () => {
     const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-weekly-"));
     const now = new Date("2026-07-11T06:50:00.000Z");
