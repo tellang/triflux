@@ -16,7 +16,7 @@ function stdinContext(modelId, usedTokens) {
   };
 }
 
-describe("Opus 4.7 duplicate status suppression", () => {
+describe("1M Opus duplicate status suppression", () => {
   it("claude-opus-4-7 계열에서는 info-only 상태 태그를 숨긴다", () => {
     const view = buildContextUsageView(
       stdinContext("claude-opus-4-7", 700_000),
@@ -28,26 +28,26 @@ describe("Opus 4.7 duplicate status suppression", () => {
     assert.equal(view.warningTag, "");
   });
 
-  it("claude-opus-4-8 계열에서도 info-only 상태 태그를 숨긴다", () => {
+  it("claude-opus-5 계열에서도 info-only 상태 태그를 숨긴다", () => {
     const view = buildContextUsageView(
-      stdinContext("claude-opus-4-8", 700_000),
+      stdinContext("claude-opus-5", 700_000),
       null,
     );
 
-    assert.equal(shouldSuppressInfoOnlyContextStatus("claude-opus-4-8"), true);
+    assert.equal(shouldSuppressInfoOnlyContextStatus("claude-opus-5"), true);
     assert.equal(view.warningLevel, "info");
     assert.equal(view.warningMessage, "");
     assert.equal(view.warningTag, "");
   });
 
-  it("claude-opus-4-8[1m] 계열에서도 info-only 상태 태그를 숨긴다 (현재 세션 모델 ID)", () => {
+  it("claude-opus-5[1m] 계열에서도 info-only 상태 태그를 숨긴다", () => {
     const view = buildContextUsageView(
-      stdinContext("claude-opus-4-8[1m]", 700_000),
+      stdinContext("claude-opus-5[1m]", 700_000),
       null,
     );
 
     assert.equal(
-      shouldSuppressInfoOnlyContextStatus("claude-opus-4-8[1m]"),
+      shouldSuppressInfoOnlyContextStatus("claude-opus-5[1m]"),
       true,
     );
     assert.equal(view.warningLevel, "info");
@@ -86,13 +86,13 @@ describe("Opus 4.7 duplicate status suppression", () => {
     assert.equal(criticalView.warningTag, "‼ 분할 권장");
   });
 
-  it("warn/critical 구간은 Opus 4.8에서도 그대로 유지한다", () => {
+  it("warn/critical 구간은 Opus 5에서도 그대로 유지한다", () => {
     const warnView = buildContextUsageView(
-      stdinContext("claude-opus-4-8", 850_000),
+      stdinContext("claude-opus-5", 850_000),
       null,
     );
     const criticalView = buildContextUsageView(
-      stdinContext("claude-opus-4-8[1m]", 950_000),
+      stdinContext("claude-opus-5[1m]", 950_000),
       null,
     );
 

@@ -80,16 +80,16 @@ describe("hud/context-monitor.mjs", () => {
     );
   });
 
-  it("Opus 4.8도 1M으로 추정한다 (Anthropic 공식 1M 모델)", () => {
+  it("Opus 5도 suffix 없이 1M으로 추정한다", () => {
     assert.equal(
-      deriveContextLimit({ model: { id: "claude-opus-4-8" } }),
+      deriveContextLimit({ model: { id: "claude-opus-5" } }),
       1_000_000,
     );
   });
 
-  it("Opus 4.8 [1m] suffix 모델도 1M으로 추정한다 (현재 세션 모델 ID)", () => {
+  it("Opus 5 [1m] suffix 모델도 1M으로 추정한다", () => {
     assert.equal(
-      deriveContextLimit({ model: { id: "claude-opus-4-8[1m]" } }),
+      deriveContextLimit({ model: { id: "claude-opus-5[1m]" } }),
       1_000_000,
     );
   });
@@ -113,7 +113,7 @@ describe("hud/context-monitor.mjs", () => {
 
   it("model hint가 있어도 stdin 사용량이 없으면 CTX를 표시하지 않는다", () => {
     const view = buildContextUsageView(
-      { model: { id: "claude-opus-4-8" } },
+      { model: { id: "claude-opus-5" } },
       { usedTokens: 44_000, limitTokens: 200_000 },
     );
     assert.equal(view.limitTokens, 0);
@@ -132,6 +132,13 @@ describe("hud/context-monitor.mjs", () => {
     assert.equal(
       deriveContextLimit({ model: { id: "claude-opus-4-6" } }),
       1_000_000,
+    );
+  });
+
+  it("Opus 4.5는 200K로 유지해 4.6 이상 경계를 보장한다", () => {
+    assert.equal(
+      deriveContextLimit({ model: { id: "claude-opus-4-5" } }),
+      200_000,
     );
   });
 

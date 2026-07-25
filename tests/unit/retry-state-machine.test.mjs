@@ -154,7 +154,7 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.equal(last.reason, "escalation-chain-exhausted");
     });
 
-    it("DEFAULT_ESCALATION_CHAIN 은 gpt-5.6-sol → opus-4-8 2단계 순", () => {
+    it("DEFAULT_ESCALATION_CHAIN 은 gpt-5.6-sol → 최신 Opus 별칭 2단계 순", () => {
       assert.equal(DEFAULT_ESCALATION_CHAIN.length, 2);
       const [s1, s2] = DEFAULT_ESCALATION_CHAIN;
 
@@ -163,14 +163,23 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.equal(s1.profile, "gpt56_sol_max");
 
       assert.equal(s2.cli, "claude");
-      assert.equal(s2.model, "opus-4-8");
+      assert.equal(s2.model, "opus");
       assert.equal(s2.profile, undefined);
+    });
+
+    it("TFX_ESCALATION_CLAUDE_MODEL은 프로젝트 override가 없을 때 기본 Claude 모델을 대체한다", () => {
+      const sm = createRetryStateMachine({
+        mode: "auto-escalate",
+        env: { TFX_ESCALATION_CLAUDE_MODEL: "claude-opus-5" },
+      });
+
+      assert.equal(sm.getCurrent().cliChain[1].model, "claude-opus-5");
     });
 
     it("custom cliChain 의 optional profile 필드를 보존한다", () => {
       const chain = [
         { cli: "codex", model: "gpt-5.5", profile: "gpt55_xhigh" },
-        { cli: "claude", model: "opus-4-8" },
+        { cli: "claude", model: "opus" },
       ];
       const sm = createRetryStateMachine({
         mode: "auto-escalate",
@@ -194,7 +203,7 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
             model: "gpt-5.6-sol",
             profile: "gpt56_sol_ultra",
           },
-          { cli: "claude", model: "opus-4-8" },
+          { cli: "claude", model: "opus" },
         ],
       });
 
@@ -211,7 +220,7 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
           version: 1,
           chain: [
             { cli: "codex", model: "gpt-5.5", profile: "gpt55_high" },
-            { cli: "claude", model: "opus-4-8" },
+            { cli: "claude", model: "opus" },
           ],
         }),
       );
@@ -219,10 +228,11 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       const sm = createRetryStateMachine({
         mode: "auto-escalate",
         projectRoot: dir,
+        env: { TFX_ESCALATION_CLAUDE_MODEL: "claude-opus-5" },
       });
       assert.deepEqual(sm.getCurrent().cliChain, [
         { cli: "codex", model: "gpt-5.5", profile: "gpt55_high" },
-        { cli: "claude", model: "opus-4-8" },
+        { cli: "claude", model: "opus" },
       ]);
     });
 

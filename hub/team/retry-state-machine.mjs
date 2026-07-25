@@ -39,17 +39,18 @@ export const MODES = Object.freeze({
 });
 
 const ESCALATION_CHAIN_CONFIG_PATH = ".triflux/config/escalation-chain.json";
+const DEFAULT_CLAUDE_MODEL = "opus";
 
 // Escalation chain (2026-05-27 정책):
 //   1. codex gpt-5.6-sol max — 최난도 단일 작업용 Codex escalation 단계
-//   2. claude opus-4-8 — 최종 수단
+//   2. claude opus alias — Claude CLI가 최신 Opus tier로 해석하는 최종 수단
 const DEFAULT_ESCALATION_CHAIN = Object.freeze([
   Object.freeze({
     cli: "codex",
     model: "gpt-5.6-sol",
     profile: "gpt56_sol_max",
   }),
-  Object.freeze({ cli: "claude", model: "opus-4-8" }),
+  Object.freeze({ cli: "claude", model: DEFAULT_CLAUDE_MODEL }),
 ]);
 
 const STUCK_THRESHOLD = 3;
@@ -234,13 +235,23 @@ function resolveEscalationChain(options) {
   }
 
   const projectRoot = options.projectRoot || process.cwd();
-  return (
-    loadEscalationChainOverride(projectRoot) ||
-    normalizeEscalationChain(
-      DEFAULT_ESCALATION_CHAIN,
-      "DEFAULT_ESCALATION_CHAIN",
-    )
+  const projectOverride = loadEscalationChainOverride(projectRoot);
+  if (projectOverride) return projectOverride;
+
+  return normalizeEscalationChain(
+    resolveDefaultEscalationChain(options.env || process.env),
+    "DEFAULT_ESCALATION_CHAIN",
   );
+}
+
+function resolveDefaultEscalationChain(env) {
+  const configuredModel = env?.TFX_ESCALATION_CLAUDE_MODEL?.trim();
+  if (!configuredModel) return DEFAULT_ESCALATION_CHAIN;
+
+  return [
+    DEFAULT_ESCALATION_CHAIN[0],
+    { cli: "claude", model: configuredModel },
+  ];
 }
 
 export function loadEscalationChainOverride(projectRoot = process.cwd()) {

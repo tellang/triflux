@@ -15,24 +15,29 @@ const MAX_CAPTURE_BYTES = 256 * 1024;
 const MAX_TOP_KEYS = 20;
 
 // stdin 이 context_window_size 를 제공하지 않을 때 모델 ID 로 한도를 추정한다.
-// Anthropic 공식 문서(2026-04 기준): Opus 4.8 / Opus 4.7 / Opus 4.6 / Sonnet 4.6 = 1M,
+// Anthropic 공식 문서(2026-07 기준): Opus 4.6 이상 / Sonnet 4.6 = 1M,
 // Sonnet 4.5 / Haiku 4.5 = 200K. 그 외 모델은 [1m] suffix 로 opt-in 가능.
-const MODEL_HINT_1M_PREFIXES = [
-  "claude-opus-4-8",
-  "claude-opus-4-7",
-  "claude-opus-4-6",
-  "claude-sonnet-4-6",
-];
+const MODEL_HINT_1M_PREFIXES = ["claude-sonnet-4-6"];
 
 function normalizeModelId(modelId) {
   if (!modelId) return "";
   return String(modelId).toLowerCase();
 }
 
+function isMillionContextOpusModel(modelId) {
+  const match = /^claude-opus-(\d+)(?:-(\d+))?(?:$|[-[\s])/u.exec(modelId);
+  if (!match) return false;
+
+  const major = Number(match[1]);
+  const minor = Number(match[2] || 0);
+  return major > 4 || (major === 4 && minor >= 6);
+}
+
 function resolveModelLimit(modelId) {
   const id = normalizeModelId(modelId);
   if (!id) return DEFAULT_CONTEXT_LIMIT;
   if (id.includes("[1m]")) return MILLION_CONTEXT_LIMIT;
+  if (isMillionContextOpusModel(id)) return MILLION_CONTEXT_LIMIT;
   for (const prefix of MODEL_HINT_1M_PREFIXES) {
     if (id.startsWith(prefix)) return MILLION_CONTEXT_LIMIT;
   }
@@ -42,11 +47,7 @@ function resolveModelLimit(modelId) {
 export function shouldSuppressInfoOnlyContextStatus(modelId) {
   const id = normalizeModelId(modelId);
   if (!id) return false;
-  return (
-    id.startsWith("claude-opus-4-8") ||
-    id.startsWith("claude-opus-4-7") ||
-    id.includes("[1m]")
-  );
+  return isMillionContextOpusModel(id) || id.includes("[1m]");
 }
 
 const WARNING_LEVELS = Object.freeze({

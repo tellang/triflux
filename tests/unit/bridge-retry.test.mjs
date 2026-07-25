@@ -151,7 +151,7 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
             model: "gpt-5.6-terra",
             profile: "gpt56_terra_high",
           },
-          { cli: "claude", model: "opus-4-8" },
+          { cli: "claude", model: "opus" },
         ],
         mode: "auto-escalate",
         sessionId: null,
