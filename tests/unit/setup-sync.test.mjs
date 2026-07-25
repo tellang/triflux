@@ -192,6 +192,8 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
     ensureTmpDir();
     const sourceDir = join(TMP_DIR, "managed-source");
     const destinationDir = join(TMP_DIR, "managed-destination");
+    const stagingRoot = join(dirname(TMP_DIR), ".tmp-setup-sync-staging");
+    rmSync(stagingRoot, { recursive: true, force: true });
     mkdirSync(sourceDir, { recursive: true });
     mkdirSync(destinationDir, { recursive: true });
     writeFileSync(join(sourceDir, "SKILL.md"), "tracked adapter v2\n");
@@ -201,7 +203,11 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
       "managed by triflux\n",
     );
 
-    const result = syncCodexHarnessAdapter({ sourceDir, destinationDir });
+    const result = syncCodexHarnessAdapter({
+      sourceDir,
+      destinationDir,
+      stagingRoot,
+    });
 
     assert.equal(result.ok, true);
     assert.equal(result.action, "synced");
@@ -216,6 +222,8 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
       ),
       [],
     );
+    assert.deepEqual(readdirSync(stagingRoot), []);
+    rmSync(stagingRoot, { recursive: true, force: true });
   });
 
   it("CLI user-owned skip 메시지는 존재하지 않는 backupDir를 참조하지 않는다", () => {

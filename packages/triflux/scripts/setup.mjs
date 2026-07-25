@@ -614,6 +614,7 @@ function skillTreeMatches(srcDir, dstDir) {
 function syncCodexHarnessAdapter({
   sourceDir = join(PLUGIN_ROOT, "adapters", "codex", "skills", "tfx-harness"),
   destinationDir = join(CODEX_DIR, "skills", "tfx-harness"),
+  stagingRoot = null,
 } = {}) {
   const sourceSkill = join(sourceDir, "SKILL.md");
   if (!existsSync(sourceSkill)) {
@@ -644,34 +645,51 @@ function syncCodexHarnessAdapter({
 
   const destinationParent = dirname(destinationDir);
   const destinationName = basename(destinationDir);
+  const replacementRoot =
+    stagingRoot ||
+    join(dirname(destinationParent), "backups", "triflux", "codex-skills");
   const tempDir = join(
-    destinationParent,
-    `.${destinationName}.triflux-tmp-${process.pid}-${Date.now()}`,
+    replacementRoot,
+    `${destinationName}.triflux-tmp-${process.pid}-${Date.now()}`,
   );
   mkdirSync(destinationParent, { recursive: true });
-  cpSync(sourceDir, tempDir, { recursive: true });
-  writeFileSync(
-    join(tempDir, MANAGED_CODEX_SKILL_MARKER),
-    "managed by triflux\n",
-  );
+  mkdirSync(replacementRoot, { recursive: true });
 
   let previousDir = null;
   try {
+    cpSync(sourceDir, tempDir, { recursive: true });
+    writeFileSync(
+      join(tempDir, MANAGED_CODEX_SKILL_MARKER),
+      "managed by triflux\n",
+    );
     if (existsSync(destinationDir)) {
       previousDir = join(
-        destinationParent,
-        `.${destinationName}.triflux-previous-${Date.now()}`,
+        replacementRoot,
+        `${destinationName}.triflux-previous-${Date.now()}`,
       );
       renameSync(destinationDir, previousDir);
     }
-    renameSync(tempDir, destinationDir);
-    if (previousDir) rmSync(previousDir, { recursive: true, force: true });
-  } catch (error) {
-    if (previousDir && existsSync(previousDir) && !existsSync(destinationDir)) {
-      renameSync(previousDir, destinationDir);
+    try {
+      renameSync(tempDir, destinationDir);
+    } catch (error) {
+      if (
+        previousDir &&
+        existsSync(previousDir) &&
+        !existsSync(destinationDir)
+      ) {
+        renameSync(previousDir, destinationDir);
+      }
+      throw error;
     }
+    if (previousDir) {
+      try {
+        rmSync(previousDir, { recursive: true, force: true });
+      } catch {
+        // Recovery copy is outside Codex discovery and is safe to retain.
+      }
+    }
+  } finally {
     rmSync(tempDir, { recursive: true, force: true });
-    throw error;
   }
   return { ok: true, action: "synced", sourceDir, destinationDir };
 }
