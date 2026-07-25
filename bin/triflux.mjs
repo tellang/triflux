@@ -2212,9 +2212,7 @@ function cmdSetup(options = {}) {
   if (codexHarnessSync.action === "synced") {
     ok("Codex tfx-harness adapter: 동기화됨");
   } else if (codexHarnessSync.action === "skipped") {
-    warn(
-      `Codex tfx-harness adapter: 사용자 스킬 보존 (backup: ${codexHarnessSync.backupDir})`,
-    );
+    warn("Codex tfx-harness adapter: 사용자 스킬 보존 (관리 파일 변경 없음)");
   }
 
   // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──

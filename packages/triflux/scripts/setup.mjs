@@ -21,7 +21,7 @@ import {
 } from "fs";
 import { createRequire } from "module";
 import { homedir } from "os";
-import { dirname, join, relative, resolve } from "path";
+import { basename, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import {
   ensureGlobalClaudeRoutingSection,
@@ -642,19 +642,37 @@ function syncCodexHarnessAdapter({
     };
   }
 
-  const tempDir = `${destinationDir}.triflux-tmp-${process.pid}-${Date.now()}`;
-  mkdirSync(dirname(destinationDir), { recursive: true });
+  const destinationParent = dirname(destinationDir);
+  const destinationName = basename(destinationDir);
+  const tempDir = join(
+    destinationParent,
+    `.${destinationName}.triflux-tmp-${process.pid}-${Date.now()}`,
+  );
+  mkdirSync(destinationParent, { recursive: true });
   cpSync(sourceDir, tempDir, { recursive: true });
   writeFileSync(
     join(tempDir, MANAGED_CODEX_SKILL_MARKER),
     "managed by triflux\n",
   );
 
-  if (existsSync(destinationDir)) {
-    const previousDir = `${destinationDir}.triflux-previous-${Date.now()}`;
-    renameSync(destinationDir, previousDir);
+  let previousDir = null;
+  try {
+    if (existsSync(destinationDir)) {
+      previousDir = join(
+        destinationParent,
+        `.${destinationName}.triflux-previous-${Date.now()}`,
+      );
+      renameSync(destinationDir, previousDir);
+    }
+    renameSync(tempDir, destinationDir);
+    if (previousDir) rmSync(previousDir, { recursive: true, force: true });
+  } catch (error) {
+    if (previousDir && existsSync(previousDir) && !existsSync(destinationDir)) {
+      renameSync(previousDir, destinationDir);
+    }
+    rmSync(tempDir, { recursive: true, force: true });
+    throw error;
   }
-  renameSync(tempDir, destinationDir);
   return { ok: true, action: "synced", sourceDir, destinationDir };
 }
 

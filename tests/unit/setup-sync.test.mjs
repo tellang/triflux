@@ -187,6 +187,51 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
     );
   });
 
+  it("managed Codex skill 갱신 뒤 discovery root에 previous/tmp 사본을 남기지 않는다", () => {
+    cleanTmpDir();
+    ensureTmpDir();
+    const sourceDir = join(TMP_DIR, "managed-source");
+    const destinationDir = join(TMP_DIR, "managed-destination");
+    mkdirSync(sourceDir, { recursive: true });
+    mkdirSync(destinationDir, { recursive: true });
+    writeFileSync(join(sourceDir, "SKILL.md"), "tracked adapter v2\n");
+    writeFileSync(join(destinationDir, "SKILL.md"), "tracked adapter v1\n");
+    writeFileSync(
+      join(destinationDir, ".triflux-managed-skill"),
+      "managed by triflux\n",
+    );
+
+    const result = syncCodexHarnessAdapter({ sourceDir, destinationDir });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.action, "synced");
+    assert.equal(
+      readFileSync(join(destinationDir, "SKILL.md"), "utf8"),
+      "tracked adapter v2\n",
+    );
+    assert.deepEqual(
+      readdirSync(TMP_DIR).filter(
+        (name) =>
+          name.includes(".triflux-previous-") || name.includes(".triflux-tmp-"),
+      ),
+      [],
+    );
+  });
+
+  it("CLI user-owned skip 메시지는 존재하지 않는 backupDir를 참조하지 않는다", () => {
+    for (const relative of [
+      "bin/triflux.mjs",
+      "packages/triflux/bin/triflux.mjs",
+    ]) {
+      const text = readFileSync(join(PROJECT_ROOT, relative), "utf8");
+      assert.equal(
+        text.includes("codexHarnessSync.backupDir"),
+        false,
+        relative,
+      );
+    }
+  });
+
   it("tracked adapter source가 없으면 fail-closed한다", () => {
     const result = syncCodexHarnessAdapter({
       sourceDir: join(TMP_DIR, "missing-codex-adapter"),
