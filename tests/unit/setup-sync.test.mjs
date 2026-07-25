@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -159,7 +160,9 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
     assert.equal(result.action, "noop");
   });
 
-  it("user-owned Codex skill은 backup 뒤 명시적으로 skip한다", () => {
+  it("user-owned Codex skill은 discovery root에 backup을 만들지 않고 보존한다", () => {
+    cleanTmpDir();
+    ensureTmpDir();
     const sourceDir = join(TMP_DIR, "codex-adapter-source");
     const destinationDir = join(TMP_DIR, "codex-adapter-destination");
     mkdirSync(sourceDir, { recursive: true });
@@ -167,17 +170,20 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
     writeFileSync(join(sourceDir, "SKILL.md"), "tracked adapter\n");
     writeFileSync(join(destinationDir, "SKILL.md"), "user adapter\n");
 
-    const result = syncCodexHarnessAdapter({ sourceDir, destinationDir });
-    assert.equal(result.ok, true);
-    assert.equal(result.action, "skipped");
-    assert.equal(result.reason, "user_owned_codex_skill");
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const result = syncCodexHarnessAdapter({ sourceDir, destinationDir });
+      assert.equal(result.ok, true);
+      assert.equal(result.action, "skipped");
+      assert.equal(result.reason, "user_owned_codex_skill");
+      assert.equal("backupDir" in result, false);
+    }
     assert.equal(
       readFileSync(join(destinationDir, "SKILL.md"), "utf8"),
       "user adapter\n",
     );
-    assert.equal(
-      readFileSync(join(result.backupDir, "SKILL.md"), "utf8"),
-      "user adapter\n",
+    assert.deepEqual(
+      readdirSync(TMP_DIR).filter((name) => name.includes(".triflux-backup-")),
+      [],
     );
   });
 

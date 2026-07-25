@@ -607,7 +607,9 @@ function skillTreeMatches(srcDir, dstDir) {
 /**
  * Sync the tracked Codex tfx-harness adapter without taking ownership of a
  * pre-existing user skill. A missing source is a hard failure; a conflicting
- * destination is backed up and deliberately left untouched.
+ * destination is deliberately left untouched. Do not create backups inside
+ * the Codex skill discovery root: Codex would register each copied SKILL.md as
+ * another callable skill.
  */
 function syncCodexHarnessAdapter({
   sourceDir = join(PLUGIN_ROOT, "adapters", "codex", "skills", "tfx-harness"),
@@ -631,15 +633,12 @@ function syncCodexHarnessAdapter({
   }
 
   if (existsSync(destinationDir) && !managed) {
-    const backupDir = `${destinationDir}.triflux-backup-${Date.now()}`;
-    cpSync(destinationDir, backupDir, { recursive: true });
     return {
       ok: true,
       action: "skipped",
       reason: "user_owned_codex_skill",
       sourceDir,
       destinationDir,
-      backupDir,
     };
   }
 
@@ -1669,7 +1668,7 @@ export async function runDeferred(stdinData) {
   }
   if (codexHarnessSync.action === "skipped") {
     io.log(
-      `  \x1b[33m⚠\x1b[0m Codex tfx-harness: user skill preserved; backup ${codexHarnessSync.backupDir}`,
+      "  \x1b[33m⚠\x1b[0m Codex tfx-harness: user skill preserved; no managed files changed",
     );
   }
   const cloakBrowserResult = ensureCloakBrowser({
