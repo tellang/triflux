@@ -1379,10 +1379,13 @@ case "$TFX_NO_CLAUDE_NATIVE" in
     ;;
 esac
 case "$TFX_CODEX_PLAN" in
-  pro|plus|free) ;;
+  pro|prolite|plus|free) ;;
   *)
-    echo "ERROR: TFX_CODEX_PLAN 값은 pro, plus, free 중 하나여야 합니다. (현재: $TFX_CODEX_PLAN)" >&2
-    exit 1
+    # 플랜 값은 preflight 가 Codex 인증 JWT 에서 읽어온다. OpenAI 가 요금제를
+    # 신설하면(예: prolite) 화이트리스트가 뒤처져 CLI 위임 전체가 죽었다.
+    # 미지값은 차단하지 말고 경고 후 pro 로 degrade 한다 (fail-open).
+    echo "WARN: 알 수 없는 TFX_CODEX_PLAN 값 '$TFX_CODEX_PLAN' — pro 로 degrade 합니다." >&2
+    TFX_CODEX_PLAN=pro
     ;;
 esac
 case "$TFX_CODEX_TRANSPORT" in
