@@ -59,6 +59,3 @@
 
 `ralph`/`auto-escalate` 는 `hub/team/retry-state-machine.mjs` 가 구동. state 는 `.omc/state/retry-<sessionId>.json` 에 저장 (compaction survive). Bridge: `node hub/bridge.mjs retry-run --snapshot X --event ...`.
 
-## 해결됨
-
-`tfx-auto` 자동 swarm dispatch 갭은 Issue #87 / #281 로 종료됐다. 2+ 태스크 + 코드 변경은 자동 swarm escalate, 명시 `--parallel N` override 는 warning 후 사용자 결정 존중.

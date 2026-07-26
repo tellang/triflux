@@ -115,22 +115,6 @@ shard 가 `references/{codex,gemini}-snapshots/` 같은 경로에 100MB+ binary 
 | root 만 수정하고 packages 누락한 채 ship | v10.x.x 릴리즈 후 chore PR 로 늦게 sync (PR #219 패턴) | 코드 변경 PR 안에서 동시에 mirror — sync chore PR 은 backfill 용일 때만 |
 | packages/remote 변경 후 import path 검증 생략 | 머지 후 `npm install @triflux/remote` 한 사용자가 `Cannot find module` 으로 깨짐 | `git diff` 로 `@triflux/core/...` 경로 1회 grep 확인 |
 
-## 관련 메모리
-
-- `feedback_packages_mirror_two_layer.md` — 2-layer 룰 (core 단순 cp / remote import 변환)
-- `feedback_packages_mirror_scope_tests_excluded.md` — tests/ 제외 사유 (npm files 미포함)
-- `feedback_remote_package_mirror.md` — packages/remote 는 cp 금지 (import path revert 사고)
-- `feedback_npm_pack_binary_exclusion.md` — files 부정 패턴 (binary 폭증 회피)
-- `feedback_indexof_open_prefix_pattern.md` — assertion boundary marker 패턴 (PR #218)
-
-## 관련 PR
-
-| PR | 사유 |
-|----|------|
-| #219 | packages/{core,remote} mirror sync v10.18.0 hub state — 13 modified + 3 new = 16 files |
-| #222 | packages/triflux/scripts/__tests__/release-governance.test.mjs byte-identical mirror sync (lint optional chain fix 동시 적용) |
-| v10.16.0 ship 1차 publish fail | binary path `references/codex-snapshots/` 추가 후 files 부정 패턴 누락 → 317.5MB → 1MB fix (commit 74a9f2d) |
-
 ## 메모
 
 - 이 문서는 정책 추출본이다. 실제 mirror 자동화 (있다면 `scripts/pack.mjs`) 의 구현 세부는 코드 주석 참조.
