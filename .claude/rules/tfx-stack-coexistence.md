@@ -41,6 +41,9 @@ triflux  →  superpowers  (금지)
 
 ## 책임 매트릭스
 
+> **기능별 owner 의 SSOT는 이 표다.** `tfx-routing.md` 는 워크플로 단계와 자연어 트리거를
+> 담당하며, 같은 층위(어느 시스템이 소유하는가)에서 어긋나면 이 표가 이긴다.
+
 | 기능 | Owner | 근거 |
 |------|-------|------|
 | **Review** (코드 판정) | superpowers | 입력 diff → 출력 verdict 프리미티브. 가장 단순한 경계 |

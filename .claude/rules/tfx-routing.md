@@ -2,6 +2,12 @@
 
 사용자가 스킬명을 모르더라도 자연어로 요청하면 아래 규칙에 따라 적절한 스킬을 호출한다.
 
+이 문서는 **무엇을 어떤 순서로 밟는가**(워크플로 단계 + 자연어 트리거)를 정한다.
+**어느 시스템이 그 기능을 소유하는가**(gstack / superpowers / triflux)는
+`tfx-stack-coexistence.md` 의 책임 매트릭스가 SSOT다. 두 문서가 어긋나 보이면 층위를
+먼저 구분한다 — 예컨대 `writing-plans` 는 ladder 의 한 *단계*이고, Plan 기능의 *owner* 는
+triflux 다. 같은 층위에서 실제로 갈릴 때만 coexistence 를 따른다.
+
 ## 기본 워크플로우 ladder
 
 넓은 운영 순서와 스택 간 책임 경계는 이 파일에 둔다. 개별 `SKILL.md`
@@ -51,7 +57,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | 의도 | 자연어 신호 | 스킬 |
 |------|-----------|------|
 | 구현/수정 | 만들어, 고쳐, 구현해, 짜줘, 수정해, 바꿔 | tfx-auto |
-| 리뷰 | 봐줘, 리뷰해, 검토해, 괜찮아? | tfx-review |
+| 리뷰 | 봐줘, 리뷰해, 검토해, 괜찮아? | `superpowers:review` (owner). 교차모델 판정이 필요할 때만 tfx-review |
 | 분석 | 분석해, 어떻게 돌아가?, 구조가 뭐야 | tfx-analysis |
 | 계획 | 계획, 어떻게 하지, 설계해 | tfx-plan |
 | 검색 | 찾아, 어디있어, 파일 찾아 | tfx-find |
@@ -142,8 +148,3 @@ headless-guard 가 `codex exec` / `agy -y -p` 직접 호출을 차단한다. tfx
 - `ralph` 표기는 항상 `--retry ralph` mode 를 지칭. persist 스킬도 동일 의미. `--retry auto-escalate` 와 동시 사용 불가 (escalation-chain.md 규약).
 - `tfx-auto` 자동 swarm escalate: 2+ 태스크 + 코드 변경 ≥ 1건 시 자동. 명시 `--parallel N` override 가능 (warning).
 
-## Q-Learning 동적 라우팅 (실험적)
-
-- `TRIFLUX_DYNAMIC_ROUTING=true` 또는 `1` 설정 시 Q-Learning 기반 동적 스킬 라우팅 활성화
-- `routing-weights.json` + Q-table로 스킬 선택 최적화
-- 기본 비활성
