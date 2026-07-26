@@ -1,9 +1,12 @@
 # tfx-psmux — always-on psmux + Codex CLI policy
 
-sync-source: AGENTS.md
-sync-scope: section `TFX psmux Rules`
-sync-status: mirrored
-sync-block-sha256: b975aedecb60cd489f5acc55675657eaaca20a8316add8bb613025689dff7436
+sync-role: source
+sync-mirror: AGENTS.md 의 `TFX psmux Rules` 섹션 (단방향 생성)
+sync-note: |
+  2026-07-26 양방향 sync-source 순환 선언 해소. 이전에는 이 파일이 AGENTS.md 를,
+  AGENTS.md 가 이 파일을 서로 sync-source 로 지목해 정본이 없었고, 양쪽이 주장하던
+  hash 는 실제 블록과도 달랐다. 이제 이 파일만 편집하고 AGENTS.md 는 생성한다.
+  근거: .claude/rules/ = auto-load 실행 SSOT (tfx-doc-governance.md).
 
 <!-- TFX_PSMUX_RULES:START -->
 > **적용 범위: Windows 환경 한정.** macOS/Linux는 platform guard(`hub/team/wt-manager.mjs:199`, `hub/team/headless.mjs:1725`, `tfx-route.sh:86`)로 코드 레벨 no-op 처리된다. mac 사용자는 이 룰셋의 RULE 1~3, 5~6, 8 (WT/PowerShell 관련) 전체를 skip해도 됨. RULE 4 (Codex CLI), RULE 7 (gpt55 프로파일 정책)만 cross-platform.
@@ -111,18 +114,24 @@ config.toml에 이미 설정된 값을 CLI 플래그로 다시 지정하면 에�
 
 규칙: 런처 생성 전 config.toml을 확인하고, 이미 있는 항목은 CLI에서 생략.
 
-### 4-3. 프롬프트는 stdin으로 전달
+### 4-3. 프롬프트는 `--` 뒤 argv로 전달 (codex), stdin 파이프 (agy)
 
-프롬프트를 CLI 인자로 넘기면 `--` 접두사 텍스트가 플래그로 파싱될 수 있다.
-항상 stdin(파이프 또는 리다이렉션)으로 전달한다.
+2026-07-26 실구현 정정. 이전 판은 "항상 stdin"이었으나 `scripts/tfx-route.sh`의 실제
+호출과 반대였다.
 
 ```bash
-exec codex < /c/path/prompts/prompt.md
+# codex 레인 — argv + stdin 봉인
+"$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null
+
+# agy 레인 — stdin 파이프 (positional prompt 는 timeout 재현되어 고정)
+printf '%s' "$prompt" | "$CLI_CMD" "${agy_args[@]}"
 ```
 
-```powershell
-Get-Content 'C:\path\prompts\prompt.md' -Raw | codex
-```
+- "프롬프트가 `--`/`---`(front-matter 등)로 시작하면 플래그로 파싱된다"는 우려는 유효하지만,
+  해법은 stdin 이 아니라 **`--` end-of-options** 다.
+- `codex exec` 는 non-TTY subprocess 에서 실행되므로 stdin 을 `/dev/null` 로 닫는다.
+  `codex < prompt.md` 는 `stdin is not a terminal` 로 실패한다.
+- 특수문자(`$`, 백슬래시) 보존은 `printf`/`cat` → temp file 경로가 담당한다.
 
 ## RULE 5: WT 패인 정리
 
