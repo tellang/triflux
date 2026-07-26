@@ -46,7 +46,7 @@ sync-source: .claude/rules/tfx-psmux.md
 sync-scope: full section
 sync-status: mirrored (generated — 직접 편집 금지)
 sync-verify: 정본 파일의 블록 경계 마커 사이(경계 두 줄 포함)를 shasum -a 256 한 값
-sync-block-sha256: 36bf3b5a82be57f98613342a0adb1cf3df608598ae123537613f94e6af588c7a
+sync-block-sha256: c842c5ec1b59086fe0de2aee4e9e19cc745f476ed8008838fec176202902f0a4
 
 <!-- TFX_PSMUX_RULES:START -->
 > **적용 범위: Windows 환경 한정.** macOS/Linux는 platform guard(`hub/team/wt-manager.mjs:199`, `hub/team/headless.mjs:1725`, `tfx-route.sh:86`)로 코드 레벨 no-op 처리된다. mac 사용자는 이 룰셋의 RULE 1~3, 5~6, 8 (WT/PowerShell 관련) 전체를 skip해도 됨. RULE 4 (Codex CLI), RULE 7 (gpt55 프로파일 정책)만 cross-platform.
@@ -212,10 +212,26 @@ tfx doctor --json
 
 ## RULE 6: WT 탭/창은 wt-manager 경유 필수
 
-- `wt.exe new-tab ...` 직접 호출 금지
-- `wt.exe split-pane ...` 직접 호출 금지
-- `Start-Process wt.exe ...` PowerShell 호출 금지
-- 반드시 `wt-manager.mjs`의 `createTab()` / `applyLayout()` 사용
+safety-guard 가 `wt.exe` / `wt new-tab` / `wt split-pane` / `Start-Process wt` 를 차단한다.
+`hub/team/wt-manager.mjs` API 를 쓴다.
+
+| 용도 | API |
+|------|-----|
+| 새 탭 | `createTab({ title, command, profile, cwd })` |
+| 패인 분할 | `splitPane({ direction: 'H'\|'V', title, command })` |
+| 다중 배치 | `applySplitLayout([{ title, command, direction }])` |
+| 탭 정리 | `closeTab(title)` / `closeStale({ olderThanMs, titlePattern })` |
+
+raw `psmux kill-session` 도 차단되므로 `hub/team/psmux.mjs` 를 경유한다.
+
+| 용도 | API / 래퍼 |
+|------|------------|
+| 세션 조회 | `listSessions({ filterTitle?, olderThanMs? })` |
+| title prefix / regex kill | `killSessionByTitle(titlePattern)` |
+| stale idle 정리 | `pruneStale({ olderThanMs, dryRun })` |
+| Bash 훅 우회 래퍼 | `node hub/team/psmux.mjs --internal kill-by-title <prefix\|/regex/>` |
+
+차단과 대안은 항상 쌍으로 만든다. 차단만 추가하면 데드락이다.
 
 ## RULE 7: gpt55 프로파일 우선
 

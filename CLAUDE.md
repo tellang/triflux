@@ -16,59 +16,11 @@
 </core-systems>
 
 <psmux-wt>
-## psmux/WT 규칙
+## psmux/WT 규칙 (Windows 한정)
 
-> **이 섹션은 Windows 환경 한정.** macOS/Linux는 platform guard로 코드 레벨 no-op 처리되며 이 섹션 전체를 skip해도 됨. mac 인프라는 아래 `<macos-terminal>` 섹션 참조.
-
-정책 SSOT는 `.claude/rules/tfx-psmux.md`(RULE 1~8)다. Claude는 `.claude/rules/`를 자동
-로드하므로 여기서 규칙을 복제하지 않는다. 이 섹션은 rules에 없는 **wrapper API 표**만 둔다.
-
-세션 정리 순서는 RULE 5를 따른다: **detach → sleep 2 → kill**. `exit` 전송은 금지다
-(WT 1.24 ConPTY close race). 2026-07-26 이전 이 자리에 있던 `exit → sleep 2 → kill`은
-RULE 5와 정면으로 어긋나 제거했다.
-
-### wt.exe → wt-manager 경유
-
-safety-guard가 `wt.exe`, `wt new-tab`, `wt split-pane`, `Start-Process wt`를 차단한다.
-`hub/team/wt-manager.mjs`의 API를 사용한다.
-
-| 용도 | API |
-|------|-----|
-| 새 탭 | `createTab({ title, command, profile, cwd })` |
-| 패인 분할 | `splitPane({ direction: 'H'\|'V', title, command })` |
-| 다중 배치 | `applySplitLayout([{ title, command, direction }])` |
-| 탭 정리 | `closeTab(title)` / `closeStale({ olderThanMs, titlePattern })` |
-
-차단과 대안은 항상 쌍으로 존재해야 한다. 차단만 추가하고 대안을 안 만들면 데드락.
-
-### raw `psmux kill-session` → psmux wrapper 경유
-
-safety-guard가 raw `psmux kill-session`을 차단한다.
-세션 정리는 `hub/team/psmux.mjs` 공개 API 또는 internal wrapper로 우회한다.
-
-| 용도 | API / 래퍼 |
-|------|------------|
-| 세션 조회 | `listSessions({ filterTitle?, olderThanMs? })` |
-| title prefix / regex kill | `killSessionByTitle(titlePattern)` |
-| stale idle 세션 정리 | `pruneStale({ olderThanMs, dryRun })` |
-| Bash 훅 우회용 래퍼 | `node hub/team/psmux.mjs --internal kill-by-title <prefix\|/regex/>` |
-
-### psmux에서 Codex 실행
-
-**직접 호출하지 않는다.** headless-guard가 `codex exec` 직접 호출을 차단하므로 `tfx-auto
---cli codex` / `tfx-multi` / `tfx-swarm` 을 경유한다. 아래는 그 스킬들이 내부에서 쓰는
-실제 형태이고, 손으로 칠 명령이 아니다.
-
-| 방식 | 동작 | 이유 |
-|------|------|------|
-| `codex` (interactive) | 불가 | psmux에서 TTY를 못 잡음 |
-| `codex < prompt.md` | 불가 | non-TTY subprocess — `stdin is not a terminal` |
-| `codex exec … -- "$prompt" < /dev/null` | 내부 사용 | `--` end-of-options + stdin 봉인 (`tfx-route.sh`) |
-
-`codex exec`는 config.toml `approval_mode`를 무시하므로 bypass 플래그가 필요하다. 다만
-프로필·샌드박스는 `tfx-route.sh`가 `--profile`로 넘기므로 **호출부에서 `-s`를 덧붙이지
-않는다** (RULE 4-2 중복 플래그 금지). `-s` 유효값: read-only, workspace-write,
-danger-full-access.
+macOS/Linux 는 platform guard 로 no-op — 이 항목 자체를 skip 해도 된다. mac 인프라는
+아래 `<macos-terminal>` 참조. 정책·wrapper API·Codex 호출 형태 전부
+`.claude/rules/tfx-psmux.md` (RULE 1~8) 가 SSOT 이고 Claude 는 이를 자동 로드한다.
 </psmux-wt>
 
 <macos-terminal>

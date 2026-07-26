@@ -172,10 +172,26 @@ tfx doctor --json
 
 ## RULE 6: WT 탭/창은 wt-manager 경유 필수
 
-- `wt.exe new-tab ...` 직접 호출 금지
-- `wt.exe split-pane ...` 직접 호출 금지
-- `Start-Process wt.exe ...` PowerShell 호출 금지
-- 반드시 `wt-manager.mjs`의 `createTab()` / `applyLayout()` 사용
+safety-guard 가 `wt.exe` / `wt new-tab` / `wt split-pane` / `Start-Process wt` 를 차단한다.
+`hub/team/wt-manager.mjs` API 를 쓴다.
+
+| 용도 | API |
+|------|-----|
+| 새 탭 | `createTab({ title, command, profile, cwd })` |
+| 패인 분할 | `splitPane({ direction: 'H'\|'V', title, command })` |
+| 다중 배치 | `applySplitLayout([{ title, command, direction }])` |
+| 탭 정리 | `closeTab(title)` / `closeStale({ olderThanMs, titlePattern })` |
+
+raw `psmux kill-session` 도 차단되므로 `hub/team/psmux.mjs` 를 경유한다.
+
+| 용도 | API / 래퍼 |
+|------|------------|
+| 세션 조회 | `listSessions({ filterTitle?, olderThanMs? })` |
+| title prefix / regex kill | `killSessionByTitle(titlePattern)` |
+| stale idle 정리 | `pruneStale({ olderThanMs, dryRun })` |
+| Bash 훅 우회 래퍼 | `node hub/team/psmux.mjs --internal kill-by-title <prefix\|/regex/>` |
+
+차단과 대안은 항상 쌍으로 만든다. 차단만 추가하면 데드락이다.
 
 ## RULE 7: gpt55 프로파일 우선
 
