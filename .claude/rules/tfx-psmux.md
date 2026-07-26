@@ -70,68 +70,42 @@ RIGHT:  C:\Users\SSAFY\Desktop\Projects\...
 
 ## RULE 3: 프롬프트 인자 인용 필수
 
-PRD/프롬프트 내용을 CLI 인자로 전달할 때 반드시 인용한다.
-
-### PowerShell (.ps1)
-
-```powershell
-$p = (Get-Content 'prompt.md' -Raw) -replace "`r`n"," " -replace "`n"," "
-
-codex -c 'model="gpt-5.3-codex"' "$p"
-
-codex -c 'model="gpt-5.3-codex"' $p
-```
-
-### Bash (.sh)
+CLI 인자로 넘기는 프롬프트는 반드시 인용한다. 비인용은 공백 분리·glob 전개를 일으킨다.
 
 ```bash
-prompt=$(cat prompt.md)
-
-exec codex "$prompt"
-
-exec codex $prompt
+codex exec --profile <profile> -- "$prompt"   # MUST
+codex exec --profile <profile> -- $prompt     # MUST NOT
 ```
+
+PowerShell 은 `$p = (Get-Content 'prompt.md' -Raw)` 로 읽어 같은 규칙을 적용한다.
 
 ## RULE 4: 프로파일 사용, 인자 하드코딩 금지
 
-Codex든 Antigravity든 모델·effort·실행모드는 프로파일(config)로 관리한다.
-CLI 인자로 하드코딩하지 않는다.
+모델·effort·실행모드는 프로파일로 관리한다. 문서·명령에 모델 ID를 적지 않는다 —
+프로파일명이 SSOT (`tfx-skill-authoring.md` §3). 관리는 `tfx-profile` 또는 `~/.codex/config.toml`.
 
 ### 4-1. 프로파일 우선
 
 ```bash
-codex < prompt.md
-codex --full-auto < prompt.md
-
-codex -c 'model="gpt-5.3-codex"' -c 'model_reasoning_effort="high"' "prompt"
+codex exec --profile <profile> -- "$prompt" < /dev/null    # MUST
+codex -c 'model="…"' -c 'model_reasoning_effort="…"'       # MUST NOT — 하드코딩
 ```
-
-프로파일 관리는 `tfx-profile` 스킬 또는 `~/.codex/config.toml` 직접 편집.
 
 ### 4-2. config.toml 중복 플래그 금지
 
-config.toml에 이미 설정된 값을 CLI 플래그로 다시 지정하면 에러가 발생한다.
+config.toml 에 있는 값을 CLI 로 다시 주면 에러다. 런처 생성 전 확인하고 생략한다.
 
-규칙: 런처 생성 전 config.toml을 확인하고, 이미 있는 항목은 CLI에서 생략.
-
-### 4-3. 프롬프트는 `--` 뒤 argv로 전달 (codex), stdin 파이프 (agy)
-
-2026-07-26 실구현 정정. 이전 판은 "항상 stdin"이었으나 `scripts/tfx-route.sh`의 실제
-호출과 반대였다.
+### 4-3. 프롬프트 전달 = argv (codex) / stdin (agy)
 
 ```bash
-# codex 레인 — argv + stdin 봉인
-"$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null
-
-# agy 레인 — stdin 파이프 (positional prompt 는 timeout 재현되어 고정)
-printf '%s' "$prompt" | "$CLI_CMD" "${agy_args[@]}"
+"$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null    # codex
+printf '%s' "$prompt" | "$CLI_CMD" "${agy_args[@]}"       # agy
 ```
 
-- "프롬프트가 `--`/`---`(front-matter 등)로 시작하면 플래그로 파싱된다"는 우려는 유효하지만,
-  해법은 stdin 이 아니라 **`--` end-of-options** 다.
-- `codex exec` 는 non-TTY subprocess 에서 실행되므로 stdin 을 `/dev/null` 로 닫는다.
-  `codex < prompt.md` 는 `stdin is not a terminal` 로 실패한다.
-- 특수문자(`$`, 백슬래시) 보존은 `printf`/`cat` → temp file 경로가 담당한다.
+`--` end-of-options 가 `--`로 시작하는 프롬프트의 플래그 오인식을 막는다. codex 는 non-TTY
+subprocess 라 stdin 을 닫으므로 `codex < prompt.md` 는 실패한다. 특수문자 보존은
+`printf`/`cat` → temp file 이 담당한다. (2026-07-26 `scripts/tfx-route.sh` 실측 — 이전 판의
+"항상 stdin" 은 실구현과 반대였다.)
 
 ## RULE 5: WT 패인 정리
 
@@ -185,64 +159,16 @@ Triflux는 아래 capability를 전제로 한다.
 tfx doctor --json
 ```
 
-공식 설치/업데이트 기준:
-
-```bash
-winget install psmux
-scoop install psmux
-choco install psmux
-cargo install psmux
-
-winget upgrade psmux
-scoop update psmux
-choco upgrade psmux
-cargo install psmux --force
-```
+설치·업데이트는 `winget` / `scoop` / `choco` / `cargo install psmux` 중 하나를 쓴다
+(업그레이드는 각 매니저의 upgrade/update, cargo 는 `--force`).
 
 문서/스크립트에서 `npm install -g psmux`를 표준 설치 경로처럼 안내하지 않는다.
 
-## RULE 5-3: WT 명령 치트시트
+## RULE 5-3: WT 명령 형태
 
-### 패인 분할
-
-```bash
-wt.exe -w 0 sp -H -p triflux --title "worker" psmux attach-session -t SESSION
-wt.exe -w 0 sp -V -p triflux --title "worker" psmux attach-session -t SESSION
-wt.exe -w 0 \
-  sp -H -p triflux --title "w1" psmux attach-session -t S1 \; \
-  sp -V -p triflux --title "w2" psmux attach-session -t S2 \; \
-  move-focus up \; \
-  sp -V -p triflux --title "w3" psmux attach-session -t S3
-```
-
-### 포커스 이동
-
-```bash
-wt.exe -w 0 move-focus up|down|left|right
-```
-
-### 패인 닫기
-
-```bash
-wt.exe -w 0 close-pane
-```
-
-### 필수 옵션
-
-| 옵션 | 의미 | 필수 여부 |
-|------|------|----------|
-| `-w 0` | 현재 WT 윈도우 | 필수 |
-| `-p triflux` | triflux WT 프로파일 | 필수 |
-| `--title "name"` | 패인 제목 | 권장 |
-| `sp -H` / `sp -V` | 분할 방향 | 필수 |
-
-### 새 탭 금지
-
-```bash
-wt.exe -w 0 nt -p triflux ...
-
-wt.exe -w 0 sp -V -p triflux ...
-```
+에이전트는 `wt.exe` 를 직접 호출하지 않는다(RULE 6, safety-guard 차단). 실제 명령 조립은
+`hub/team/wt-manager.mjs` 가 담당하며 그 구현이 형태의 SSOT 다. 매니저를 고칠 때만 코드를 본다.
+필수 인자는 `-w 0`(현재 창), `-p triflux`(프로파일), 분할은 `sp -H|-V`, 새 탭(`nt`)은 금지.
 
 ## RULE 6: WT 탭/창은 wt-manager 경유 필수
 
