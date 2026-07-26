@@ -20,8 +20,12 @@
 
 > **이 섹션은 Windows 환경 한정.** macOS/Linux는 platform guard로 코드 레벨 no-op 처리되며 이 섹션 전체를 skip해도 됨. mac 인프라는 아래 `<macos-terminal>` 섹션 참조.
 
-psmux 세션·WT 패인을 생성/조작/정리할 때 `tfx-psmux-rules` 스킬을 참조한다.
-WT 프리징 방지: exit → sleep 2 → kill 순서. 바로 kill하지 않는다.
+정책 SSOT는 `.claude/rules/tfx-psmux.md`(RULE 1~8)다. Claude는 `.claude/rules/`를 자동
+로드하므로 여기서 규칙을 복제하지 않는다. 이 섹션은 rules에 없는 **wrapper API 표**만 둔다.
+
+세션 정리 순서는 RULE 5를 따른다: **detach → sleep 2 → kill**. `exit` 전송은 금지다
+(WT 1.24 ConPTY close race). 2026-07-26 이전 이 자리에 있던 `exit → sleep 2 → kill`은
+RULE 5와 정면으로 어긋나 제거했다.
 
 ### wt.exe → wt-manager 경유
 
@@ -51,14 +55,20 @@ safety-guard가 raw `psmux kill-session`을 차단한다.
 
 ### psmux에서 Codex 실행
 
+**직접 호출하지 않는다.** headless-guard가 `codex exec` 직접 호출을 차단하므로 `tfx-auto
+--cli codex` / `tfx-multi` / `tfx-swarm` 을 경유한다. 아래는 그 스킬들이 내부에서 쓰는
+실제 형태이고, 손으로 칠 명령이 아니다.
+
 | 방식 | 동작 | 이유 |
 |------|------|------|
 | `codex` (interactive) | 불가 | psmux에서 TTY를 못 잡음 |
-| `codex < prompt.md` | 불가 | "stdin is not a terminal" |
-| `codex exec "$(cat prompt.md)" -s danger-full-access --dangerously-bypass-approvals-and-sandbox` | 사용 | 유일한 안전 경로 |
+| `codex < prompt.md` | 불가 | non-TTY subprocess — `stdin is not a terminal` |
+| `codex exec … -- "$prompt" < /dev/null` | 내부 사용 | `--` end-of-options + stdin 봉인 (`tfx-route.sh`) |
 
-`codex exec`는 config.toml `approval_mode`를 무시하므로 `--dangerously-bypass-approvals-and-sandbox` 필수.
-`-s` 유효값: read-only, workspace-write, danger-full-access.
+`codex exec`는 config.toml `approval_mode`를 무시하므로 bypass 플래그가 필요하다. 다만
+프로필·샌드박스는 `tfx-route.sh`가 `--profile`로 넘기므로 **호출부에서 `-s`를 덧붙이지
+않는다** (RULE 4-2 중복 플래그 금지). `-s` 유효값: read-only, workspace-write,
+danger-full-access.
 </psmux-wt>
 
 <macos-terminal>
@@ -224,10 +234,10 @@ sentinel exit 즉시 daemon `sendKillBySessionId` 발사 → stale row 잔존 �
 
 Claude Code는 `.claude/rules/*.md` 를 자동 로드한다. Codex CLI는 `@import` 미지원이므로 필요 시 `AGENTS.md` 를 독립 유지한다.
 
-## GBrain Configuration (configured by /setup-gbrain)
-- Engine: pglite
-- Config file: ~/.gbrain/config.json (mode 0600)
-- Setup date: 2026-04-25
-- MCP registered: yes (user scope, absolute path)
-- Memory sync: artifacts-only (repo: github.com/tellang/gstack-brain-tellang)
-- Current repo policy: read-write (github.com/tellang/triflux)
+## GBrain
+
+설정 정본은 `~/Projects/CLAUDE.md` 한 곳이다. 여기 있던 사본은 `engine=pglite` /
+`2026-04-25` 로 stale 해서 글로벌·Projects 블록과 서로 모순됐다(2026-07-26 제거).
+실제 engine 은 postgres(Supabase), gbrain 0.42.51.0.
+
+- 이 repo 정책: read-write (github.com/tellang/triflux)
