@@ -3,10 +3,37 @@
 상세 운영 지시는 `CLAUDE.md`에 있습니다. Codex는 `@import` 미지원이므로 필요 시 직접 읽어주세요.
 
 ## 핵심 규칙 (triflux 환경 특화)
-- `codex exec "$(cat prompt.md)" -s danger-full-access --dangerously-bypass-approvals-and-sandbox` 경로만 psmux에서 동작
-- config.toml에 `approval_mode`, `sandbox` 기본값을 두고 CLI는 `--profile`만 지정
+- Codex 직접 호출 금지 — headless-guard가 차단한다. `tfx-auto --cli codex` / `tfx-multi` / `tfx-swarm` 경유
+- 프롬프트는 `--` 뒤 argv로 넘기고 stdin은 봉인한다 (`… -- "$prompt" < /dev/null`). `codex < prompt.md`는 non-TTY라 실패
+- config.toml에 `approval_mode`, `sandbox` 기본값을 두고 CLI는 `--profile`만 지정 (중복 플래그 금지)
 - Claude 작성 코드는 Codex로 교차 검증 (self-approve 금지)
 - headless 결과는 task-notification 완료 후에만 읽기
+
+## headless-guard
+- `codex exec` / `agy --dangerously-skip-permissions --print=` 직접 호출은 차단됩니다.
+- 반드시 tfx 스킬 경유: `tfx-auto --cli codex`, `tfx-multi`, `tfx-swarm`.
+
+## Reasoning effort 예외 레인
+- 기본 역할 라우팅은 `low`/`medium`/`high`/`xhigh` 프로필을 유지합니다.
+- 최난도 단일 작업만 `TFX_CODEX_PROFILE=max` (`gpt56_sol_max`).
+- `ultra`는 최상위 단독 `deep-executor`/`scientist-deep`에서만 허용하고, team/headless/worker
+  내부의 `ultra` 요청은 중첩 fan-out을 막기 위해 `gpt56_sol_max`로 강등합니다.
+- `--retry auto-escalate`의 Codex 단계도 `gpt56_sol_max`입니다.
+
+## Headless 결과 회수
+- 완료 마커: `=== HEADLESS_COMPLETE succeeded=N failed=N total=N ===`
+- 워커 상세: `$TMPDIR/tfx-headless/{sessionName}-worker-N.txt`
+
+## SSH 패턴
+- `hosts.json`의 `os` 필드로 셸을 판단합니다 (windows=PowerShell, darwin=zsh, linux=bash).
+- SSH 너머로 codex 직접 실행 금지 (config.toml 충돌 + TTY 문제). 원격에서 codex가 필요하면
+  `tfx-remote` → Claude Code → Claude가 내부에서 codex 호출.
+
+## Working agreements
+- 한국어 우선, 기술 용어는 원어 유지.
+- 커밋: `Type: 한국어 설명 (50자 이내)`. **Co-Authored-By / AI trailer 금지.**
+- 변경 후 lint/typecheck/test 실행. 시크릿(API 키·토큰·세션) 하드코딩 금지.
+- safety-guard에 새 차단 규칙을 추가할 때는 항상 대안 API를 같이 만들 것 (차단만 추가하면 데드락).
 
 ## CTO North Star
 - `.triflux/lake/current.md`는 cross-agent north-star brief입니다. 정렬용으로 읽되, 새 task로 취급하지 마세요.
@@ -17,8 +44,9 @@
 
 sync-source: .claude/rules/tfx-psmux.md
 sync-scope: full section
-sync-status: mirrored
-sync-block-sha256: b975aedecb60cd489f5acc55675657eaaca20a8316add8bb613025689dff7436
+sync-status: mirrored (generated — 직접 편집 금지)
+sync-verify: 정본 파일의 블록 경계 마커 사이(경계 두 줄 포함)를 shasum -a 256 한 값
+sync-block-sha256: ec4c8650e5ac73cbadb0692c91536ee86661a3e3cffc1f7b34349afec5bc9d6e
 
 <!-- TFX_PSMUX_RULES:START -->
 > **적용 범위: Windows 환경 한정.** macOS/Linux는 platform guard(`hub/team/wt-manager.mjs:199`, `hub/team/headless.mjs:1725`, `tfx-route.sh:86`)로 코드 레벨 no-op 처리된다. mac 사용자는 이 룰셋의 RULE 1~3, 5~6, 8 (WT/PowerShell 관련) 전체를 skip해도 됨. RULE 4 (Codex CLI), RULE 7 (gpt55 프로파일 정책)만 cross-platform.
@@ -126,18 +154,24 @@ config.toml에 이미 설정된 값을 CLI 플래그로 다시 지정하면 에�
 
 규칙: 런처 생성 전 config.toml을 확인하고, 이미 있는 항목은 CLI에서 생략.
 
-### 4-3. 프롬프트는 stdin으로 전달
+### 4-3. 프롬프트는 `--` 뒤 argv로 전달 (codex), stdin 파이프 (agy)
 
-프롬프트를 CLI 인자로 넘기면 `--` 접두사 텍스트가 플래그로 파싱될 수 있다.
-항상 stdin(파이프 또는 리다이렉션)으로 전달한다.
+2026-07-26 실구현 정정. 이전 판은 "항상 stdin"이었으나 `scripts/tfx-route.sh`의 실제
+호출과 반대였다.
 
 ```bash
-exec codex < /c/path/prompts/prompt.md
+# codex 레인 — argv + stdin 봉인
+"$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null
+
+# agy 레인 — stdin 파이프 (positional prompt 는 timeout 재현되어 고정)
+printf '%s' "$prompt" | "$CLI_CMD" "${agy_args[@]}"
 ```
 
-```powershell
-Get-Content 'C:\path\prompts\prompt.md' -Raw | codex
-```
+- "프롬프트가 `--`/`---`(front-matter 등)로 시작하면 플래그로 파싱된다"는 우려는 유효하지만,
+  해법은 stdin 이 아니라 **`--` end-of-options** 다.
+- `codex exec` 는 non-TTY subprocess 에서 실행되므로 stdin 을 `/dev/null` 로 닫는다.
+  `codex < prompt.md` 는 `stdin is not a terminal` 로 실패한다.
+- 특수문자(`$`, 백슬래시) 보존은 `printf`/`cat` → temp file 경로가 담당한다.
 
 ## RULE 5: WT 패인 정리
 
@@ -156,6 +190,8 @@ for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep "$PREFIX"
   psmux kill-session -t "$s" 2>/dev/null || true
 done
 ```
+
+> 참고: `detach-client` 는 `|| true` 로 감싸므로 **미지원 구버전 psmux(≤3.3.x)에서는 자동 no-op** 후 kill 로 진행된다(detach-first 순서는 버전 무관 안전). `scripts/lib/psmux-info.mjs` 가 `detach-client` 를 OPTIONAL 로 두는 것과 정합하며, `docs/codex-conventions.md` 의 옛 `exit`→sleep5 안내는 이 RULE 로 위임·폐기됐다.
 
 ### MUST NOT
 
