@@ -8,9 +8,25 @@ description: >
 
 # tfx-harness — Claude adapter
 
-이 스킬은 실행 엔진이 아니다. `.claude/rules/tfx-routing.md`의 D0–D11을 읽어
-사용자 intent와 확인 가능한 host capability evidence를 판정한다. 정책 표, keyword
-표, owner 매트릭스를 이 파일에 복제하지 않는다.
+이 스킬은 실행 엔진이 아니다. routing SSOT의 D0–D11을 읽어 사용자 intent와 확인 가능한
+host capability evidence를 판정한다. 정책 표, keyword 표, owner 매트릭스를 이 파일에
+복제하지 않는다.
+
+## SSOT 탐색
+
+이 스킬은 글로벌 설치이고 triflux 밖에서도 호출되지만 SSOT는 프로젝트 로컬 파일이다.
+아래를 순서대로 시도하고, **전부 실패할 때만** blocked를 반환한다.
+
+1. `$TFX_ROUTING_SSOT` (설정돼 있으면 1순위)
+2. `$(git rev-parse --show-toplevel)/.claude/rules/tfx-routing.md`
+3. cwd에서 위로 올라가며 `.claude/rules/tfx-routing.md`
+
+blocked를 반환할 때는 해소 방법을 한 줄 덧붙인다:
+`export TFX_ROUTING_SSOT=<triflux clone>/.claude/rules/tfx-routing.md`
+
+`~/.claude/rules/`에 사본이나 symlink를 두지 않는다. 그 디렉터리는 Claude가 모든 세션에
+자동 로드하므로 tfx와 무관한 세션까지 SSOT 전문을 매번 컨텍스트에 싣게 된다.
+npm 패키지에도 `.claude/`는 없다(`tfx-mirror-policy.md` mirror 제외 대상).
 
 반환 형식:
 
