@@ -6,6 +6,46 @@
 대체하지 않는다 — 근거(왜)가 아키텍처/정책 수준이면 ADR로, 운영 절차 수준이면
 여기로.
 
+## 2026-07-26 — psmux 미러는 `.claude/rules/`가 작성 정본, AGENTS.md는 생성물
+
+- **결정**: `tfx-psmux.md`에 `sync-role: source`를 두고 `AGENTS.md`는 단방향 생성
+  미러로 고정. `sync-block-sha256` 산출 기준(경계 마커 두 줄 포함)을 헤더에 명시.
+- **근거**: 두 파일이 서로를 `sync-source`로 지목하는 순환 선언이었고, 양쪽이
+  주장하던 hash가 실제 블록과도 달라 어느 쪽도 정본이 아니었다. 유지보수자가 어느
+  쪽을 고쳐도 다음 동기화가 역방향으로 덮어쓰는 상태. 계산 방식이 문서화된 적이
+  없던 것이 hash가 stale해진 원인이라 검증 기준을 함께 남겼다.
+  `.claude/rules/` = auto-load 실행 SSOT([tfx-doc-governance](../.claude/rules/tfx-doc-governance.md)).
+- **관련**: commit `b6553482`, `a04777e2`
+
+## 2026-07-26 — Codex 프롬프트 전달은 `--` 뒤 argv (문서를 실구현에 맞춤)
+
+- **결정**: `RULE 4-3`의 "항상 stdin"을 폐기하고 argv + stdin 봉인으로 정정.
+  `codex exec … -- "$prompt" < /dev/null`. agy 레인만 stdin 파이프.
+- **근거**: `scripts/tfx-route.sh` 실측 결과 문서와 정반대였다. "프롬프트가 `--`로
+  시작하면 플래그로 파싱된다"는 우려는 유효하나 해법은 stdin이 아니라 `--`
+  end-of-options다. `codex exec`는 non-TTY subprocess라 `codex < prompt.md`가 실패한다.
+  같은 파일 안에 반대 지시가 공존해 어느 쪽을 골라도 규칙 위반이 아닌 상태였다.
+- **관련**: commit `b6553482`, `acd4f1d1`
+
+## 2026-07-26 — Codex instruction 표면은 AGENTS.md 하나로 단일화
+
+- **결정**: `CODEX.md`를 제거하고 고유 규칙을 `AGENTS.md`로 병합.
+- **근거**: 같은 디렉터리에 `AGENTS.md`가 있으면 Codex 탐색 규칙
+  (`AGENTS.override.md` → `AGENTS.md` → fallback)상 `CODEX.md`는 영구히 가려진다.
+  `codex debug prompt-input`으로 미로드를 실증했고, headless-guard 규칙·커밋
+  규약(AI trailer 금지)·effort 예외 레인이 Codex에 전혀 닿지 않고 있었다.
+- **관련**: commit `a04777e2`
+
+## 2026-07-26 — routing과 stack-coexistence는 충돌이 아니라 층위 차이
+
+- **결정**: `tfx-routing.md` = 워크플로 단계 + 자연어 트리거, `tfx-stack-coexistence.md`
+  책임 매트릭스 = 기능별 owner SSOT. 각 문서 상단에 관할을 명시하고, 같은 층위에서
+  실제로 갈리던 한 건(`리뷰해` → `tfx-review` vs superpowers)만 정본에 맞췄다.
+- **근거**: 두 문서가 plan/review owner를 두고 어긋난다는 지적이 있었으나,
+  `writing-plans`는 ladder의 한 *단계*이고 Plan 기능의 *owner*는 triflux라 모순이
+  아니었다. 통합했다면 검증된 워크플로 체인이 깨졌을 것이다.
+- **관련**: commit `98ee2423` · [ADR-0009](adr/0009-stack-coexistence-three-layer.md)
+
 ## 2026-07-07 — docs/req/ raw↔refined 링크 강제 수준 = should
 
 - **결정**: `.document-harness.toml`의 `raw_refined_link`를 `must`가 아닌
