@@ -8,9 +8,32 @@ description: >
 
 # tfx-harness — Claude adapter
 
-이 스킬은 실행 엔진이 아니다. `.claude/rules/tfx-routing.md`의 D0–D11을 읽어
-사용자 intent와 확인 가능한 host capability evidence를 판정한다. 정책 표, keyword
-표, owner 매트릭스를 이 파일에 복제하지 않는다.
+이 스킬은 실행 엔진이 아니다. routing SSOT의 D0–D11을 읽어 사용자 intent와 확인 가능한
+host capability evidence를 판정한다. 정책 표, keyword 표, owner 매트릭스를 이 파일에
+복제하지 않는다.
+
+## SSOT 탐색
+
+이 스킬은 글로벌 설치이고 triflux 밖에서도 호출되지만 SSOT는 프로젝트 로컬 파일이다.
+아래를 순서대로 시도하고, **전부 실패할 때만** blocked를 반환한다.
+
+1. `$TFX_ROUTING_SSOT` (설정돼 있으면 1순위)
+2. git 메인 워크트리 — `$(git rev-parse --git-common-dir)`의 부모 아래
+   `.claude/rules/tfx-routing.md`
+3. cwd에서 위로 올라가며 `.claude/rules/tfx-routing.md`
+
+2순위에 `--show-toplevel`을 쓰지 않는다. linked worktree 안에서는 worktree 루트를
+반환하는데 그곳의 SSOT는 브랜치 분기 시점 사본이라, blocked 없이 stale 정책으로
+조용히 오판정한다. `--git-common-dir`은 worktree 안에서도 메인 repo의 `.git`을 가리킨다.
+
+blocked를 반환할 때는 해소 방법을 한 줄 덧붙인다:
+`export TFX_ROUTING_SSOT=<triflux clone>/.claude/rules/tfx-routing.md`
+(`~/.zshrc`가 아니라 `~/.zshenv`에 둔다. zshrc는 interactive 전용이라 훅·headless
+워커·툴 셸에서는 1순위가 통째로 죽는다.)
+
+`~/.claude/rules/`에 사본이나 symlink를 두지 않는다. 그 디렉터리는 Claude가 모든 세션에
+자동 로드하므로 tfx와 무관한 세션까지 SSOT 전문을 매번 컨텍스트에 싣게 된다.
+npm 패키지에도 `.claude/`는 없다(`tfx-mirror-policy.md` mirror 제외 대상).
 
 반환 형식:
 
