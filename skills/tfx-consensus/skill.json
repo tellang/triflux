@@ -1,8 +1,0 @@
-{
-  "name": "tfx-consensus",
-  "description": "DEPRECATED — tfx-auto consensus root 로 통합됨. `/tfx-auto --mode consensus` 가 canonical entrypoint 다. Phase 4a 부터 consensus/debate/panel 은 같은 엔진 family 를 공유하고, 차이는 `--shape` 와 renderer 에만 남긴다. Phase 5 (v11) 에 물리 삭제 예정.",
-  "triggers": "[consensus, 합의]",
-  "argument_hint": "<분석 주제 또는 컨텍스트 — tfx-auto 로 passthrough>",
-  "deprecated": true,
-  "superseded_by": "tfx-auto"
-}

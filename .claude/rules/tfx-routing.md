@@ -24,8 +24,8 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 | 검증 | `/superpowers:review` + `/gstack /qa` + `/superpowers:verification-before-completion` | 코드 판정은 review, 브라우저/워크플로우 게이트는 qa, 완료 주장 전 evidence 수집은 verification. |
 | 디자인 검토 | `/gstack /design-review` | 시각/UX 판정. 코드 판정과 분리. |
 | TDD 시작 | `/superpowers:test-driven-development` | 테스트부터 짜는 흐름. 구현 전에 invoke. |
-| PRD/worktree 격리 실행 | `/tfx-swarm` | PRD 별 worktree + 다중 모델/기기. 코드 변경 포함 병렬에 필수. |
-| 병렬 작업 (read-only) | `/tfx-multi` 또는 `/superpowers:dispatching-parallel-agents` | cwd 공유 가능한 read-only 병렬. 코드 변경 시 swarm 으로 격상. |
+| PRD/worktree 격리 실행 | `/tfx-auto --parallel swarm --mode consensus --isolation worktree` | PRD 별 worktree + 다중 모델/기기. 코드 변경 포함 병렬에 필수. |
+| 병렬 작업 (read-only) | `/tfx-auto --parallel N --mode deep` 또는 `/superpowers:dispatching-parallel-agents` | cwd 공유 가능한 read-only 병렬. 코드 변경 시 swarm 으로 격상. |
 | plan 실행 (체크포인트 별도) | `/superpowers:executing-plans` | 다른 세션에서 plan 을 단계별 실행. |
 | 머지 직전 정리 | `/superpowers:finishing-a-development-branch` → `/tfx-ship` 또는 `/ship` | merge/PR/cleanup 결정 후 ship. |
 | 리뷰 응답 | `/superpowers:receiving-code-review` | 검토 의견에 기술적 rigor 로 응답. blind apply 금지. |
