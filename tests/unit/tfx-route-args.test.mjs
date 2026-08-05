@@ -96,6 +96,56 @@ describe("tfx-route-args — parseArgs", () => {
     });
   });
 
+  describe("v1 live mode", () => {
+    it("--mode live 와 --rounds 를 파싱하고 rounds 기본값은 4", () => {
+      const explicit = parseArgs("합의 --mode live --rounds 2");
+      const defaults = parseArgs("합의 --mode live");
+
+      assert.equal(explicit.mode, "live");
+      assert.equal(explicit.rounds, 2);
+      assert.deepEqual(explicit.warnings, []);
+      assert.equal(defaults.rounds, 4);
+    });
+
+    it("live 전용이 아닌 실행 플래그는 warning 후 기본값으로 무시", () => {
+      const r = parseArgs(
+        "합의 --mode live --parallel 3 --isolation worktree --retry ralph --remote host1",
+      );
+
+      assert.equal(r.parallel, "1");
+      assert.equal(r.isolation, "none");
+      assert.equal(r.retry, "1");
+      assert.equal(r.remote, "none");
+      for (const flag of [
+        "--parallel",
+        "--isolation",
+        "--retry ralph",
+        "--remote",
+      ]) {
+        assert.ok(
+          r.warnings.some((warning) => warning.includes(flag)),
+          `${flag} warning missing: ${r.warnings.join("\n")}`,
+        );
+      }
+    });
+
+    it("--rounds 는 live가 아니면 warning 후 기본값으로 무시", () => {
+      const r = parseArgs("일반 실행 --mode deep --rounds 2");
+
+      assert.equal(r.rounds, 4);
+      assert.ok(r.warnings.some((warning) => warning.includes("--rounds")));
+    });
+
+    it("--rounds 는 양의 정수만 허용", () => {
+      const r = parseArgs("합의 --mode live --rounds 0");
+
+      assert.equal(r.rounds, 4);
+      assert.ok(
+        r.warnings.some((warning) => warning.includes("invalid --rounds=0")),
+      );
+    });
+  });
+
   describe("validation — 조합 규칙", () => {
     it("--parallel 1 + --isolation worktree → warning + isolation 강제 none", () => {
       const r = parseArgs("work --parallel 1 --isolation worktree");

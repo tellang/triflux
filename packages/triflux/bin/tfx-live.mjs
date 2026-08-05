@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join as pathJoin, resolve as pathResolve } from "node:path";
@@ -23,6 +23,9 @@ const DEFAULT_POLL_INTERVAL_MS = 1500;
 const DEFAULT_READY_TIMEOUT_MS = 30_000;
 const DEFAULT_ANSWER_TIMEOUT_MS = 60_000;
 const FALLBACK_QUIET_POLLS = 3;
+const PROMPT_SUBMIT_MAX_ATTEMPTS = 3;
+const PROMPT_SUBMIT_RETRY_DELAY_MS = 100;
+const PROMPT_COMPOSER_NEEDLE_LENGTH = 30;
 // Capture the complete pane history so a long TUI response does not lose its
 // leading lines. runTmux's MAX_BUFFER remains the memory/output ceiling.
 const CAPTURE_START = "-";
@@ -36,6 +39,7 @@ const BRIDGE_TIMEOUT_BUFFER_MS = 15_000;
 const PAYLOAD_FILE_THRESHOLD = 96 * 1024;
 const VALID_TRANSPORTS = ["tmux", "uds", "auto"];
 const BOOLEAN_FLAGS = new Set(["json"]);
+const PEER_HOP_DONE_MARKER = "<<<TFX_PEER_HOP_DONE>>>";
 // uds-fallback diagnostics land here, written async so a failed daemon attach
 // never blocks the tmux fallback path (see writeUdsBugReport / doAskAuto).
 const BUG_REPORT_DIR =
@@ -45,7 +49,7 @@ const BUG_REPORT_DIR =
 function usage() {
   return [
     "Usage:",
-    "  tfx-live start --session NAME [--cli codex|claude] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
+    "  tfx-live start --session NAME [--cli codex|claude] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME --prompt TEXT [--cli codex|claude] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
     "    transport: auto is the default for Claude when --short/--session-id is present; otherwise tmux. bridge path: --bridge > $TFX_BRIDGE > $TFX_REPO_ROOT/hub/bridge.mjs > bundled Triflux hub/bridge.mjs.",
@@ -55,7 +59,7 @@ function usage() {
     "  tfx-live list-sessions --cli codex [--cwd DIR]",
     "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
     "  tfx-live goal-driven --session NAME --goal TEXT [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500] [--max-rounds 8] [--done-token DONE]",
-    "  tfx-live peer [--cli-a codex] [--cli-b claude] [--session-a peerA] [--session-b peerB] [--transport-a tmux|uds|auto] [--transport-b tmux|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--bridge ABS] [--remote HOST] [--cwd DIR] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60]",
+    "  tfx-live peer [--cli-a codex] [--cli-b claude] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--session-a peerA] [--session-b peerB] [--transport-a tmux|uds|auto] [--transport-b tmux|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--bridge ABS] [--remote HOST] [--cwd DIR] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60]",
     "  tfx-live orchestrate --task TEXT [--mode peer|codex-led|claude-led] [--codex-transport exec|app-server-uds] [--cwd DIR] [--timeout 120]",
     "    Runs the Claude(UDS)+Codex orchestration engine. --codex-transport app-server-uds drives a real `codex app-server` over WebSocket-over-UDS (experimental); default exec keeps the codex stdio one-shot path.",
     "  tfx-live cto-hygiene-notify --root DIR --state-file PATH [--json]",
@@ -603,6 +607,26 @@ function isComposerPromptLine(line) {
   return hasCodexComposerPrompt(line) || hasClaudeComposerPrompt(line);
 }
 
+function promptComposerNeedle(prompt) {
+  const firstContentLine = String(prompt)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+  return (firstContentLine ?? "").slice(0, PROMPT_COMPOSER_NEEDLE_LENGTH);
+}
+
+function composerShowsPrompt(text, prompt) {
+  const needle = promptComposerNeedle(prompt);
+  if (!needle) {
+    return false;
+  }
+  const activeComposerLine = String(text)
+    .split("\n")
+    .filter(isComposerPromptLine)
+    .at(-1);
+  return activeComposerLine?.includes(needle) ?? false;
+}
+
 function nextComposerPromptIndex(lines, startIndex) {
   for (
     let index = Math.max(0, startIndex + 1);
@@ -675,6 +699,56 @@ function extractAssistantResponse(adapter, text, prompt = null) {
   }
 
   return response.join("\n").trim();
+}
+
+function extractResponseSinceMarker({ beforeRaw, raw, doneMarker, adapter }) {
+  if (!doneMarker) {
+    return "";
+  }
+
+  const beforeLines = String(beforeRaw)
+    .split("\n")
+    .map((line) => line.replace(/\s+$/g, ""));
+  const rawLines = String(raw)
+    .split("\n")
+    .map((line) => line.replace(/\s+$/g, ""));
+  let sharedPrefixLength = 0;
+  while (
+    sharedPrefixLength < beforeLines.length &&
+    sharedPrefixLength < rawLines.length &&
+    beforeLines[sharedPrefixLength] === rawLines[sharedPrefixLength]
+  ) {
+    sharedPrefixLength += 1;
+  }
+
+  const newLines =
+    sharedPrefixLength > 0 ? rawLines.slice(sharedPrefixLength) : rawLines;
+  const markerIndex = newLines.findIndex((line) => line.trim() === doneMarker);
+  if (markerIndex === -1) {
+    return "";
+  }
+
+  const candidateLines = newLines.slice(0, markerIndex);
+  const responseStart = candidateLines.findIndex((line) =>
+    adapter.isResponseLine(line),
+  );
+  const responseLines =
+    responseStart === -1 ? candidateLines : candidateLines.slice(responseStart);
+
+  return responseLines
+    .filter(
+      (line) =>
+        !adapter.isChromeLine(line) &&
+        !isWarningLine(line) &&
+        !adapter.isStatusLine(line) &&
+        !hasCodexComposerPrompt(line) &&
+        !hasClaudeComposerPrompt(line),
+    )
+    .map((line) =>
+      adapter.isResponseLine(line) ? adapter.stripResponseMarker(line) : line,
+    )
+    .join("\n")
+    .trim();
 }
 
 function normalizeClaudeTaskText(text) {
@@ -1026,9 +1100,21 @@ const ADAPTERS = {
   codex: {
     cli: "codex",
     launchArgv: ["codex"],
-    launchKeys: ["codex", "Enter"],
-    resumeById: (id) => shellQuote(["codex", "resume", id]),
-    resumeLast: () => shellQuote(["codex", "resume", "--last"]),
+    launchKeys: ["codex --dangerously-bypass-approvals-and-sandbox", "Enter"],
+    resumeById: (id) =>
+      shellQuote([
+        "codex",
+        "resume",
+        id,
+        "--dangerously-bypass-approvals-and-sandbox",
+      ]),
+    resumeLast: () =>
+      shellQuote([
+        "codex",
+        "resume",
+        "--last",
+        "--dangerously-bypass-approvals-and-sandbox",
+      ]),
     composerGlyph: "›",
     isReady: isCodexReadyCapture,
     contextPct: parseCodexContextPct,
@@ -1109,6 +1195,39 @@ const ADAPTERS = {
     ],
   },
 };
+
+function buildLaunchKeys(adapter, { model, effort } = {}) {
+  const hasModel = model !== undefined;
+  const hasEffort = effort !== undefined;
+  if (!hasModel && !hasEffort) {
+    return adapter.launchKeys;
+  }
+
+  const overrideArgs = [];
+  if (adapter.cli === "codex") {
+    if (hasModel) {
+      overrideArgs.push("-c", `model=${JSON.stringify(String(model))}`);
+    }
+    if (hasEffort) {
+      overrideArgs.push(
+        "-c",
+        `model_reasoning_effort=${JSON.stringify(String(effort))}`,
+      );
+    }
+  } else if (adapter.cli === "claude") {
+    if (hasModel) {
+      overrideArgs.push("--model", model);
+    }
+    if (hasEffort) {
+      overrideArgs.push("--effort", effort);
+    }
+  } else {
+    throw new Error(`Unsupported adapter: ${adapter.cli}`);
+  }
+
+  const [command, ...remainingKeys] = adapter.launchKeys;
+  return [`${command} ${shellQuote(overrideArgs)}`, ...remainingKeys];
+}
 
 async function dismissStartupScreens(adapter, remote, session) {
   let raw = "";
@@ -1372,6 +1491,8 @@ async function doStart(adapter, opts) {
     cwd,
     resume,
     resumeLast,
+    model,
+    effort,
     readyTimeoutMs,
     pollIntervalMs,
   } = opts;
@@ -1379,7 +1500,7 @@ async function doStart(adapter, opts) {
     ? [adapter.resumeById(resume), "Enter"]
     : resumeLast
       ? [adapter.resumeLast(), "Enter"]
-      : adapter.launchKeys;
+      : buildLaunchKeys(adapter, { model, effort });
   const resumed = Boolean(resume || resumeLast);
   const resumeTarget = resume ?? (resumeLast ? "last" : null);
 
@@ -1389,6 +1510,16 @@ async function doStart(adapter, opts) {
     "-s",
     session,
     ...(cwd ? ["-c", cwd] : []),
+  ]);
+  // Default tmux history-limit (2000) is far too small for long tool-heavy
+  // CLI sessions (file reads, test runs) — the actual response can scroll
+  // out of scrollback before capturePane() runs, producing an empty extract.
+  await runTmux(remote, [
+    "set-option",
+    "-t",
+    session,
+    "history-limit",
+    "100000",
   ]);
   await runTmux(remote, ["send-keys", "-t", session, ...launchKeys]);
   await dismissStartupScreens(adapter, remote, session);
@@ -1412,13 +1543,49 @@ async function doStart(adapter, opts) {
 }
 
 async function doAskViaTmux(adapter, opts) {
-  const { session, prompt, remote, timeoutMs, settleMs, pollIntervalMs } = opts;
+  const {
+    session,
+    prompt,
+    remote,
+    timeoutMs,
+    settleMs,
+    pollIntervalMs,
+    doneMarker,
+  } = opts;
   const beforeRaw = await capturePane(remote, session);
   const contextPctBefore = adapter.contextPct(beforeRaw);
 
-  await runTmux(remote, ["send-keys", "-t", session, "--", prompt]);
+  const bufferName = `tfx-live-prompt-${session}-${Date.now()}`;
+  await runTmux(remote, ["set-buffer", "-b", bufferName, "--", prompt]);
+  await runTmux(remote, [
+    "paste-buffer",
+    "-b",
+    bufferName,
+    "-d",
+    "-t",
+    session,
+  ]);
   await sleep(settleMs);
-  await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+
+  let promptSubmitted = !doneMarker;
+  if (doneMarker) {
+    for (let attempt = 1; attempt <= PROMPT_SUBMIT_MAX_ATTEMPTS; attempt += 1) {
+      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+      await sleep(PROMPT_SUBMIT_RETRY_DELAY_MS);
+      const submissionVisible = await captureVisible(remote, session);
+      if (!composerShowsPrompt(submissionVisible, prompt)) {
+        promptSubmitted = true;
+        break;
+      }
+    }
+    if (!promptSubmitted) {
+      throw new Error(
+        `Prompt did not submit after ${PROMPT_SUBMIT_MAX_ATTEMPTS} attempts`,
+      );
+    }
+  } else {
+    await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+  }
 
   const startedAt = Date.now();
   let raw = "";
@@ -1430,18 +1597,36 @@ async function doAskViaTmux(adapter, opts) {
   let done = false;
 
   while (Date.now() - startedAt < timeoutMs) {
-    visible = await captureVisible(remote, session);
+    visible = doneMarker
+      ? await capturePane(remote, session)
+      : await captureVisible(remote, session);
     contextPctAfter = adapter.contextPct(visible);
 
     quietPolls = visible === previousVisible ? quietPolls + 1 : 0;
     previousVisible = visible;
 
-    const ready = adapter.isReady(visible);
-    const doneSignal =
+    const markerDone =
+      promptSubmitted &&
+      Boolean(
+        extractResponseSinceMarker({
+          beforeRaw,
+          raw: visible,
+          doneMarker,
+          adapter,
+        }),
+      );
+    const fallbackDone =
+      !doneMarker &&
       !adapter.isBusy(visible) &&
-      ready &&
-      hasTmuxAssistantResponseAfterPrompt(adapter, visible, prompt, beforeRaw);
-    if (doneSignal && quietPolls >= FALLBACK_QUIET_POLLS) {
+      adapter.isReady(visible) &&
+      hasTmuxAssistantResponseAfterPrompt(
+        adapter,
+        visible,
+        prompt,
+        beforeRaw,
+      ) &&
+      quietPolls >= FALLBACK_QUIET_POLLS;
+    if (markerDone || fallbackDone) {
       done = true;
       break;
     }
@@ -1450,7 +1635,20 @@ async function doAskViaTmux(adapter, opts) {
   }
 
   raw = await capturePane(remote, session);
-  response = extractAssistantResponse(adapter, raw, prompt);
+  const markerResponse = promptSubmitted
+    ? extractResponseSinceMarker({
+        beforeRaw,
+        raw,
+        doneMarker,
+        adapter,
+      })
+    : "";
+  if (markerResponse) {
+    response = markerResponse;
+    done = true;
+  } else {
+    response = extractAssistantResponse(adapter, raw, prompt);
+  }
   if (!response && adapter.cli === "claude") {
     response = extractClaudeCompletedTaskListResponse(raw, {
       beforeText: beforeRaw,
@@ -1881,6 +2079,8 @@ function startOpts(flags) {
     cwd: flags.cwd,
     resume: flags.resume,
     resumeLast: Object.hasOwn(flags, "resume-last"),
+    model: flags.model,
+    effort: flags.effort,
     readyTimeoutMs: secondsFlag(
       flags,
       "ready-timeout",
@@ -2009,11 +2209,17 @@ async function listSessions(flags) {
   printJson(await discoverCodexTmuxSessions({ cwd: flags.cwd }));
 }
 
-function startOptsForSession(flags, session) {
+function startOptsForSession(flags, session, side) {
   return {
     session,
     remote: flags.remote,
     cwd: flags.cwd,
+    ...(side
+      ? {
+          model: flags[`model-${side}`],
+          effort: flags[`effort-${side}`],
+        }
+      : {}),
     readyTimeoutMs: secondsFlag(
       flags,
       "ready-timeout",
@@ -2176,17 +2382,279 @@ function peerMode(flags) {
 }
 
 function peerPrompt(mode, hopIndex, previous) {
+  let prompt;
   if (mode === "counting") {
     if (hopIndex === 0) {
-      return "Reply with only the integer 1.";
+      prompt = "Reply with only the integer 1.";
+    } else {
+      prompt = `The current integer is ${previous}. Add 1 to it and reply with ONLY the resulting integer, nothing else.`;
     }
-    return `The current integer is ${previous}. Add 1 to it and reply with ONLY the resulting integer, nothing else.`;
+  } else if (hopIndex === 0) {
+    prompt = previous;
+  } else {
+    prompt = `The other party said: ${previous}\nReply briefly in 1-2 sentences and ask one short follow-up question.`;
   }
 
-  if (hopIndex === 0) {
-    return previous;
+  return [
+    prompt,
+    `After you have completely finished your response, print a new line containing only this token: \`${PEER_HOP_DONE_MARKER}\`. Do not put any other characters on that line.`,
+  ].join("\n");
+}
+
+function buildPeerClosurePrompt(previous) {
+  return [
+    "This is the final closure turn. Based on the discussion so far, declare whether a final agreement was reached.",
+    "First reply with exactly one JSON object and no markdown fences:",
+    '{"agreement_status":"complete|partial","unresolved_questions":[],"needs_more_rounds":false,"summary":"short final agreement"}',
+    "Use agreement_status=complete only when no unresolved question remains and no more rounds are needed.",
+    `The other party's latest response was: ${previous ?? "(none)"}`,
+    `After the JSON is complete, print a new line containing only this token: \`${PEER_HOP_DONE_MARKER}\`. Do not put any other characters on that line.`,
+  ].join("\n");
+}
+
+function isCompleteDeclaration(value) {
+  return ["complete", "completed", "agreed", "합의완료", "완료"].includes(
+    String(value ?? "")
+      .trim()
+      .toLowerCase(),
+  );
+}
+
+function unstructuredPeerClosure() {
+  return {
+    structured: false,
+    declaredComplete: false,
+    unresolvedQuestions: [],
+    needsMoreRounds: null,
+  };
+}
+
+function parsePeerClosure(response) {
+  const text = String(response ?? "").trim();
+  const fenced = text.match(/```(?:json)?\s*({[\s\S]*})\s*```/i)?.[1];
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  const objectText =
+    fenced ??
+    (firstBrace >= 0 && lastBrace > firstBrace
+      ? text.slice(firstBrace, lastBrace + 1)
+      : null);
+
+  if (objectText) {
+    try {
+      // Terminal word-wrap can inject a raw newline + indent mid-token in
+      // compact JSON (e.g. "f\n  alse" for "false") since there's often no
+      // space nearby to wrap at. Try the raw text first, then retry with
+      // wrap artifacts collapsed before giving up as unstructured.
+      let parsed;
+      try {
+        parsed = JSON.parse(objectText);
+      } catch {
+        parsed = JSON.parse(objectText.replace(/\n[ \t]*/g, ""));
+      }
+      const unresolvedQuestions = parsed.unresolved_questions;
+      const needsMoreRounds = parsed.needs_more_rounds;
+      const structured =
+        Object.hasOwn(parsed, "agreement_status") &&
+        Array.isArray(unresolvedQuestions) &&
+        typeof needsMoreRounds === "boolean";
+      if (structured) {
+        return {
+          structured: true,
+          declaredComplete: isCompleteDeclaration(parsed.agreement_status),
+          unresolvedQuestions: unresolvedQuestions.map(String),
+          needsMoreRounds,
+        };
+      }
+      return unstructuredPeerClosure();
+    } catch {
+      return unstructuredPeerClosure();
+    }
   }
-  return `The other party said: ${previous}\nReply briefly in 1-2 sentences and ask one short follow-up question.`;
+
+  const status = text.match(
+    /(?:agreement_status|agreement status|합의상태|합의 상태)\s*[:=]\s*["']?([^\n,"'}]+)/i,
+  )?.[1];
+  const unresolved = text.match(
+    /(?:unresolved_questions|unresolved questions|미해결 쟁점)\s*[:=]\s*([^\n]+)/i,
+  )?.[1];
+  const needsMore = text.match(
+    /(?:needs_more_rounds|needs more rounds|추가 라운드 필요)\s*[:=]\s*(true|false)/i,
+  )?.[1];
+  const structured =
+    status !== undefined && unresolved !== undefined && needsMore !== undefined;
+  const unresolvedQuestions = /^(?:\[\s*\]|none|없음)$/i.test(
+    String(unresolved ?? "").trim(),
+  )
+    ? []
+    : String(unresolved ?? "")
+        .replace(/^\[|\]$/g, "")
+        .split(/[,;|]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+  return {
+    structured,
+    declaredComplete: isCompleteDeclaration(status),
+    unresolvedQuestions,
+    needsMoreRounds:
+      needsMore === undefined ? null : needsMore.toLowerCase() === "true",
+  };
+}
+
+function derivePeerStatus({ hopsCompleted, closure, exitReason = null }) {
+  if (hopsCompleted < 1) return "failed";
+  if (exitReason) return "partial";
+  if (
+    closure?.structured === true &&
+    closure.declaredComplete === true &&
+    closure.needsMoreRounds === false &&
+    closure.unresolvedQuestions.length === 0
+  ) {
+    return "complete";
+  }
+  return "partial";
+}
+
+function classifyPeerExitReason(error) {
+  const fingerprint = [error?.name, error?.code, error?.message]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return /timeout|timed out|etimedout|aborterror/.test(fingerprint)
+    ? "timeout"
+    : "transport_error";
+}
+
+function peerSignalExit(signal) {
+  return signal === "SIGTERM"
+    ? { exitReason: "terminated", exitCode: 143 }
+    : { exitReason: "user_interrupt", exitCode: 130 };
+}
+
+function createPeerSignalController({
+  output,
+  persistTranscript,
+  persistStatus,
+  stopSessions,
+  printOutput = printJson,
+  exitProcess = (code) => process.exit(code),
+  timeoutMs = 3000,
+  now = Date.now,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+}) {
+  let signalCount = 0;
+  let settled = false;
+
+  const recordArtifactError = (kind, error) => {
+    output.artifact_errors ??= [];
+    output.artifact_errors.push(`${kind}: ${error.message}`);
+  };
+
+  return {
+    async handle(signal) {
+      if (settled) return;
+      signalCount += 1;
+      const { exitReason, exitCode } = peerSignalExit(signal);
+      if (signalCount > 1) {
+        settled = true;
+        exitProcess(exitCode);
+        return;
+      }
+
+      const startedAt = now();
+      output.status = "aborted";
+      output.exit_reason = exitReason;
+      output.hops_completed = output.hops.length;
+
+      try {
+        persistTranscript(output);
+      } catch (error) {
+        recordArtifactError("transcript", error);
+      }
+      try {
+        persistStatus(output);
+      } catch (error) {
+        recordArtifactError("status", error);
+      }
+
+      const remainingMs = Math.max(0, timeoutMs - (now() - startedAt));
+      let timer;
+      const graceExpired = new Promise((resolve) => {
+        timer = setTimer(() => resolve("timeout"), remainingMs);
+      });
+      await Promise.race([
+        Promise.resolve()
+          .then(stopSessions)
+          .then(
+            () => "stopped",
+            () => "stop_error",
+          ),
+        graceExpired,
+      ]);
+      clearTimer(timer);
+
+      if (settled) return;
+      settled = true;
+      printOutput(output);
+      exitProcess(exitCode);
+    },
+    dispose() {
+      settled = true;
+    },
+  };
+}
+
+function peerArtifactPaths(sessionA, sessionB) {
+  const preferredDir =
+    process.env.TFX_LIVE_ARTIFACT_DIR ??
+    pathJoin(homedir(), ".claude", "cache", "triflux", "tfx-live", "peer-runs");
+  const fallbackDir = pathJoin(tmpdir(), "triflux-live");
+  let artifactDir = preferredDir;
+  try {
+    mkdirSync(artifactDir, { recursive: true });
+  } catch {
+    artifactDir = fallbackDir;
+    mkdirSync(artifactDir, { recursive: true });
+  }
+  const safe = (value) =>
+    String(value)
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .slice(0, 48);
+  const runId = `peer-${safe(sessionA)}-${safe(sessionB)}-${Date.now()}-${process.pid}`;
+  return {
+    transcriptPath: pathJoin(artifactDir, `${runId}.transcript.json`),
+    statusPath: pathJoin(artifactDir, `${runId}.status.json`),
+  };
+}
+
+function persistPeerTranscript(paths, output) {
+  writeFileSync(
+    paths.transcriptPath,
+    `${JSON.stringify(
+      {
+        mode: output.mode,
+        rounds: output.rounds,
+        cliA: output.cliA,
+        cliB: output.cliB,
+        hops_completed: output.hops.length,
+        hops: output.hops,
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+}
+
+function persistPeerStatus(paths, output) {
+  const { hops: _hops, ...status } = output;
+  writeFileSync(
+    paths.statusPath,
+    `${JSON.stringify(status, null, 2)}\n`,
+    "utf8",
+  );
 }
 
 function sideFlag(flags, side, name, fallback = undefined) {
@@ -2248,7 +2716,7 @@ function peerSideBaseOpts(flags, side, adapter, session) {
 }
 
 function askOptsFromPeerBase(base, prompt) {
-  return { ...base, prompt };
+  return { ...base, prompt, doneMarker: PEER_HOP_DONE_MARKER };
 }
 
 function shouldPrestartPeerSide(base) {
@@ -2283,20 +2751,51 @@ async function peer(flags) {
   const hops = [];
   const numbers = [];
   const stopSpecs = [];
+  const artifactPaths = peerArtifactPaths(sessionA, sessionB);
+  const output = {
+    mode,
+    rounds,
+    cliA: adapterA.cli,
+    cliB: adapterB.cli,
+    transportA: baseA.transport,
+    transportB: baseB.transport,
+    hops,
+    transcript_path: artifactPaths.transcriptPath,
+    status_path: artifactPaths.statusPath,
+  };
+  if (mode === "counting") {
+    output.numbers = numbers;
+  }
   let previous =
     mode === "freeform"
       ? (flags.seed ??
         "Introduce yourself in one sentence, then ask the other party one short question.")
       : null;
   let primaryError = null;
+  let stopError = null;
+  let closure = null;
+  const signalController = createPeerSignalController({
+    output,
+    persistTranscript: (value) => persistPeerTranscript(artifactPaths, value),
+    persistStatus: (value) => persistPeerStatus(artifactPaths, value),
+    stopSessions: () => stopAfterLifecycle(stopSpecs),
+  });
+  const onSigint = () => {
+    void signalController.handle("SIGINT");
+  };
+  const onSigterm = () => {
+    void signalController.handle("SIGTERM");
+  };
+  process.on("SIGINT", onSigint);
+  process.on("SIGTERM", onSigterm);
 
   try {
     if (shouldPrestartPeerSide(baseA)) {
-      await doStart(adapterA, startOptsForSession(flags, sessionA));
+      await doStart(adapterA, startOptsForSession(flags, sessionA, "a"));
       addStopSpecOnce(stopSpecs, adapterA, baseA);
     }
     if (shouldPrestartPeerSide(baseB)) {
-      await doStart(adapterB, startOptsForSession(flags, sessionB));
+      await doStart(adapterB, startOptsForSession(flags, sessionB, "b"));
       addStopSpecOnce(stopSpecs, adapterB, baseB);
     }
 
@@ -2308,10 +2807,25 @@ async function peer(flags) {
       const isA = hopIndex % 2 === 0;
       const adapter = isA ? adapterA : adapterB;
       const base = isA ? baseA : baseB;
-      const sent = peerPrompt(mode, hopIndex, previous);
+      const isClosure = hopIndex === rounds * 2 - 1;
+      const sent = isClosure
+        ? buildPeerClosurePrompt(previous)
+        : peerPrompt(mode, hopIndex, previous);
       const result = await doAsk(adapter, askOptsFromPeerBase(base, sent));
       if (result.tmuxStartedOnDemand) {
         addStopSpecOnce(stopSpecs, adapter, base);
+      }
+      if (
+        result.done !== true ||
+        result.error ||
+        !String(result.response ?? "").trim()
+      ) {
+        throw new Error(
+          (result.timedOut
+            ? `Peer hop timed out at hop ${hopIndex + 1}`
+            : result.error) ??
+            `Empty response from ${adapter.cli} at hop ${hopIndex + 1}`,
+        );
       }
 
       hops.push({
@@ -2327,40 +2841,70 @@ async function peer(flags) {
         aborted: result.aborted === true ? true : undefined,
         reason: result.reason,
       });
+      if (isClosure) {
+        closure = parsePeerClosure(result.response);
+      }
 
       if (mode === "counting") {
         const parsed = parseFirstInteger(result.response);
-        if (parsed === null) {
+        if (parsed === null && !isClosure) {
           throw new Error(
             `Could not parse integer from ${adapter.cli} response at hop ${hopIndex + 1}`,
           );
         }
-        numbers.push(parsed);
-        previous = parsed;
+        if (parsed !== null) {
+          numbers.push(parsed);
+          previous = parsed;
+        } else {
+          previous = result.response;
+        }
       } else {
         previous = result.response;
       }
     }
   } catch (error) {
     primaryError = error;
-  } finally {
-    await stopAfterLifecycle(stopSpecs, primaryError);
   }
 
-  const output = {
-    mode,
-    rounds,
-    cliA: adapterA.cli,
-    cliB: adapterB.cli,
-    transportA: baseA.transport,
-    transportB: baseB.transport,
-    hops,
-  };
-  if (mode === "counting") {
-    output.numbers = numbers;
+  try {
+    await stopAfterLifecycle(stopSpecs);
+  } catch (error) {
+    stopError = error;
   }
-  output.stoppedA = true;
-  output.stoppedB = true;
+  signalController.dispose();
+  process.off("SIGINT", onSigint);
+  process.off("SIGTERM", onSigterm);
+
+  const terminalError = primaryError ?? stopError;
+  const exitReason = terminalError
+    ? classifyPeerExitReason(terminalError)
+    : null;
+  output.hops_completed = hops.length;
+  output.closure = closure;
+  output.status = derivePeerStatus({
+    hopsCompleted: hops.length,
+    closure,
+    exitReason,
+  });
+  if (exitReason) {
+    output.exit_reason = exitReason;
+    output.error = terminalError.message;
+  }
+  output.stoppedA = stopError === null;
+  output.stoppedB = stopError === null;
+
+  try {
+    persistPeerTranscript(artifactPaths, output);
+  } catch (error) {
+    output.artifact_errors ??= [];
+    output.artifact_errors.push(`transcript: ${error.message}`);
+  }
+  try {
+    persistPeerStatus(artifactPaths, output);
+  } catch (error) {
+    output.artifact_errors ??= [];
+    output.artifact_errors.push(`status: ${error.message}`);
+  }
   printJson(output);
 }
 
@@ -2485,14 +3029,22 @@ async function main() {
 
 export {
   ADAPTERS,
+  buildLaunchKeys,
+  buildPeerClosurePrompt,
   buildRemoteLiveCommand,
   callRemoteLive,
+  classifyPeerExitReason,
+  createPeerSignalController,
   ctoHygieneNotify,
+  derivePeerStatus,
   discoverCodexTmuxSessions,
+  doAskViaTmux,
   extractAssistantResponse,
   extractClaudeCompletedTaskListResponse,
+  extractResponseSinceMarker,
   hasClaudeCompletedTaskListResponse,
   parseCodexTmuxSessions,
+  parsePeerClosure,
   parseRemoteLiveJson,
   resolveAskTransport,
 };

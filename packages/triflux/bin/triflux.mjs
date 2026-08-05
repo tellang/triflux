@@ -148,7 +148,7 @@ const NORMALIZED_ARGS = RAW_ARGS.filter((arg) => arg !== "--json");
 const CLI_COMMAND_SCHEMAS = Object.freeze({
   auto: {
     usage:
-      "tfx auto [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus] [--parallel 1|N|swarm] [--json]",
+      "tfx auto [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus|live] [--rounds N] [--parallel 1|N|swarm] [--json]",
     description:
       "tfx-auto 라우팅 결정을 CLI에서 미리보기/직렬화 (실행 skill front door와 같은 flag surface)",
     options: [
@@ -160,7 +160,12 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       {
         name: "--mode <name>",
         type: "string",
-        description: "라우팅 모드: quick|deep|consensus",
+        description: "라우팅 모드: quick|deep|consensus|live",
+      },
+      {
+        name: "--rounds <N>",
+        type: "number",
+        description: "live peer 왕복 횟수 (기본 4, --mode live 전용)",
       },
       {
         name: "--parallel <1|N|swarm>",

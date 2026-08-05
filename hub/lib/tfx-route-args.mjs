@@ -8,11 +8,12 @@
 //
 // 기존 플래그 (Phase 2 v10.9.33+):
 //   --cli {auto|codex|antigravity|claude}
-//   --mode {quick|deep|consensus}
+//   --mode {quick|deep|consensus|live}
 //   --parallel {1|N|swarm}
 //   --retry {0|1|ralph|auto-escalate}    (Phase 3 에서 ralph/auto-escalate 신규)
 //   --isolation {none|worktree}
 //   --remote {none|<host>}
+//   --rounds <N>                          (--mode live 전용, 기본 4)
 //
 // Phase 3 신규:
 //   --lead {claude|codex}             (tfx-auto-codex 의미 흡수)
@@ -31,11 +32,12 @@ export const DEFAULT_OPTIONS = Object.freeze({
   lead: "claude",
   noClaudeNative: false,
   maxIterations: 0,
+  rounds: 4,
 });
 
 const VALID_VALUES = Object.freeze({
   cli: ["auto", "codex", "antigravity", "claude"],
-  mode: ["quick", "deep", "consensus"],
+  mode: ["quick", "deep", "consensus", "live"],
   retry: ["0", "1", "ralph", "auto-escalate"],
   isolation: ["none", "worktree"],
   lead: ["claude", "codex"],
@@ -50,6 +52,7 @@ const VALUE_FLAGS = new Set([
   "--remote",
   "--lead",
   "--max-iterations",
+  "--rounds",
 ]);
 
 const BOOL_FLAGS = new Set(["--no-claude-native"]);
@@ -61,12 +64,14 @@ export function parseArgs(input) {
   const opts = { ...DEFAULT_OPTIONS };
   const warnings = [];
   const taskTokens = [];
+  const providedFlags = new Set();
 
   let i = 0;
   while (i < tokens.length) {
     const raw = tokens[i];
 
     if (BOOL_FLAGS.has(raw)) {
+      providedFlags.add(raw);
       applyBool(opts, raw);
       i += 1;
       continue;
@@ -82,6 +87,7 @@ export function parseArgs(input) {
     }
 
     if (VALUE_FLAGS.has(flag)) {
+      providedFlags.add(flag);
       if (value === null) {
         const next = tokens[i + 1];
         if (next === undefined || next.startsWith("--")) {
@@ -108,7 +114,7 @@ export function parseArgs(input) {
     i += 1;
   }
 
-  validate(opts, warnings);
+  validate(opts, warnings, providedFlags);
 
   return {
     ...opts,
@@ -196,10 +202,19 @@ function applyValue(opts, flag, value, warnings) {
       }
       break;
     }
+    case "--rounds": {
+      const n = Number(value);
+      if (!Number.isInteger(n) || n <= 0) {
+        warnings.push(`invalid --rounds=${value}, expected positive integer`);
+      } else {
+        opts.rounds = n;
+      }
+      break;
+    }
   }
 }
 
-function validate(opts, warnings) {
+function validate(opts, warnings, providedFlags = new Set()) {
   for (const key of Object.keys(VALID_VALUES)) {
     if (!VALID_VALUES[key].includes(opts[key])) {
       warnings.push(
@@ -214,6 +229,28 @@ function validate(opts, warnings) {
   ) {
     warnings.push(`invalid --parallel=${opts.parallel}, expected 1|N|swarm`);
   }
+
+  if (opts.mode === "live") {
+    const ignored = [
+      ["--parallel", "parallel", DEFAULT_OPTIONS.parallel],
+      ["--isolation", "isolation", DEFAULT_OPTIONS.isolation],
+      ["--remote", "remote", DEFAULT_OPTIONS.remote],
+    ];
+    for (const [flag, key, fallback] of ignored) {
+      if (providedFlags.has(flag)) {
+        warnings.push(`${flag} ignored with --mode live`);
+        opts[key] = fallback;
+      }
+    }
+    if (providedFlags.has("--retry") && opts.retry === "ralph") {
+      warnings.push("--retry ralph ignored with --mode live");
+      opts.retry = DEFAULT_OPTIONS.retry;
+    }
+  } else if (providedFlags.has("--rounds")) {
+    warnings.push("--rounds ignored unless --mode live");
+    opts.rounds = DEFAULT_OPTIONS.rounds;
+  }
+
   const parallelOne = opts.parallel === "1" || opts.parallel === 1;
   if (parallelOne && opts.isolation === "worktree") {
     warnings.push(

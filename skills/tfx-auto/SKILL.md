@@ -5,7 +5,7 @@ description: >
   Codex 우선으로 dispatch 하고, 명시 플래그로 mode/parallel/consensus 등 동작을 오버라이드한다.
   '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은
   구현/수정 요청에 사용. 플래그 상세는 argument-hint, 라우팅 정책은 .claude/rules/tfx-routing.md 참조.
-argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus] [--risk-tier auto|low|medium|high] [--shape consensus|debate|panel] [--cli-set triad|no-antigravity|custom] [--parallel 1|N|swarm] [--retry 0|1|ralph] [--isolation none|worktree] [--remote <host>|none] [--skill <name>]"
+argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus|live] [--rounds <N>] [--risk-tier auto|low|medium|high] [--shape consensus|debate|panel] [--cli-set triad|no-antigravity|custom] [--parallel 1|N|swarm] [--retry 0|1|ralph] [--isolation none|worktree] [--remote <host>|none] [--skill <name>]"
 ---
 
 # tfx-auto — 통합 CLI 오케스트레이터
@@ -42,14 +42,18 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
    - `--risk-tier low|medium|high` → risk-tier 기준으로 verification 강도와 mode 결정
    - `--mode ...` 명시 시 `--risk-tier` 는 무시 (mode 우선)
    - `--mode consensus --shape debate|panel` → prompt ensemble fold 경로
+   - `--mode live` → `tfx-live` 엔진 위임 (분해/트리아지 스킵)
    - `--retry ralph` → stderr 경고 후 bounded 3회 degrade (Phase 2 미구현)
 
 1. **사용자 명시 키워드** (플래그 없을 때):
-   - "병렬", "swarm", "PRD 돌려" → `--parallel swarm --mode consensus --isolation worktree`
+   - "swarm", "PRD 돌려", "격리해서", "충돌 없이 돌려" → `--parallel swarm --mode consensus --isolation worktree`
+   - "병렬", "동시에", "multi", "협업"(단순 동시 작업 의미) → `--parallel N --mode deep` — 여기서 미리 swarm으로 단정하지 않는다. 실제 코드 변경이 여러 파일에 걸치면 "멀티 태스크 라우팅"의 자동 분류가 swarm으로 승격시킨다 ("병렬" 한 단어만으로 곧장 worktree 격리+3-CLI 합의까지 가는 건 과함)
+   - "팀"은 모호하다: 서로 메시지를 주고받는 영속 협업을 원하면 정답은 OMC 네이티브 `/team`이고(tfx-auto 관할 밖), 그냥 여러 작업을 동시에 처리해달라는 뜻이면 바로 위 `--parallel N` 행을 따른다. "팀"만 보고 바로 `--parallel N`으로 단정하지 말고 어느 쪽인지 애매하면 되묻는다
    - "꼼꼼히", "제대로", "deep" → `--mode deep`
    - "끝까지", "멈추지마", "ralph" → `--retry ralph`
-   - "multi", "팀", "협업" → `--parallel N --mode deep`
    - "codex로", "antigravity로" → `--cli codex` 또는 `--cli antigravity`
+   - "원격으로", "다른 기기에서", "리모트로 돌려" → `--remote <host>` (`--parallel swarm` 자동 동반. host 미지정 시 `hosts.json` 목록에서 질의)
+   - "논쟁시켜", "서로 반박하게 해", "계속 대화하면서 풀게", "왕복으로 주고받게" → `--mode live` (`tfx-live peer` 고정). "협업"/"팀"과 겹쳐 보여도 이 쪽은 "논쟁/반박/대화를 계속 이어간다"는 뉘앙스가 명시적으로 있을 때만 해당
 
 2. **PRD 인자 분석**:
    - PRD 경로 2개 이상 → `--parallel swarm --mode consensus --isolation worktree`
@@ -108,6 +112,8 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--mode` | `quick` (기본) | fire-and-forget, plan/verify 오버헤드 없음 | 직접 실행 |
 | `--mode` | `deep` | pipeline init → plan → PRD → verify → fix loop | `-t/--thorough` 동일 |
 | `--mode` | `consensus` | 3-CLI 합의 family 실행 | tfx-auto consensus root |
+| `--mode` | `live` | 서브태스크 분해 불가한 왕복 대화형 작업을 직행 위임 | `tfx-live peer` (v1 단일 경로, 상세는 "Live 위임 계약" 절) |
+| `--rounds` | `4` (기본) | live peer 왕복 횟수(총 hop 수는 `rounds * 2`) | `tfx-live peer --rounds` |
 | `--risk-tier` | `auto` (기본) | changed files 기준 자동 분류 후 mode/verify 강도 결정 | risk matrix |
 | `--risk-tier` | `low` | quick mode + verify skip | 기존 default 와 동일 |
 | `--risk-tier` | `medium` | quick mode + verify (lint + test 만) | bounded verify |
@@ -176,6 +182,8 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 - `--retry auto-escalate` → CLI 승격 체인 (Phase 3)
 - `--max-iterations N` (N>0) → ralph/auto-escalate 에 상한 부여
 - `--skill <name>` → `TFX_INJECT_SKILL=<name>` 로 tfx-route.sh 에 전달. 스킬 파일 부재 시 warning 후 주입 생략 (fail-open, 작업은 계속)
+- `--mode live` + `--parallel`/`--isolation`/`--retry ralph`/`--remote` 동시 지정 → warning 후 무시. 라이브 세션은 배치 병렬·worktree 격리·재시도 상태머신 모델과 호환되지 않는다
+- `--rounds` 지정 + `--mode != live` → warning 후 무시
 
 ### 스킬 주입 (`--skill <name>`)
 
@@ -250,6 +258,7 @@ agy 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율
 /tfx-auto "PRD 실행" --parallel swarm          # = legacy tfx-swarm
 /tfx-auto "REST vs GraphQL" --mode consensus --shape debate
 /tfx-auto "모놀리스 분해 전략" --mode consensus --shape panel --experts "claude:Fowler|Beck;codex:Newman|Hohpe;antigravity:Porter|Wiegers"
+/tfx-auto "이벤트소싱 도입 여부 논쟁" --mode live --rounds 3       # = tfx-live peer 위임
 ```
 
 ### Consensus shape 계약 (Phase 4a — ensemble fold)
@@ -628,6 +637,33 @@ shape 별 orchestration 정책:
 }
 ```
 
+### Live 위임 계약 (`--mode live`)
+
+`--mode live`는 Codex 분류/Opus 분해 트리아지를 건너뛰고 `tfx-live peer`(Claude↔Codex 실시간 세션 릴레이)로 직접 위임한다. **독립 엔진 위임**이며 `tfx-live`를 병합·재구현하지 않는다 — `--parallel swarm`이 `tfx-swarm`을, `--parallel N`이 `tfx-multi`를 위임하는 것과 동일한 패턴이다.
+
+v1은 `peer` 단일 경로만 지원한다. `--live-shape`, `--live-mode`, `tfx-auto`의 `orchestrate` 위임은 v2 예정이며 현재 파서·실행 계약에는 없다.
+
+**적용 대상**: 서브태스크로 쪼갤 수 없는 왕복 대화형 작업(설계 논쟁, 경쟁 가설 조율, 두 모델이 서로 반박하며 수렴해야 하는 케이스). 독립적으로 병렬 처리 가능한 작업, 또는 가벼운 반박 1라운드면 `--mode consensus --shape debate`(배치형, 리드 중개, ≤2라운드, per-round 재시작 오버헤드 있음)가 더 저렴하다. `live`는 리드 중개 없이 세션이 직접 이어받으며 세션 상태를 유지해야 하는 경우에만 쓴다.
+
+**tfx-auto의 배치 모델과 근본적으로 다른 지점**: 나머지 모든 모드(quick/deep/consensus)는 "분해 → dispatch → 결과 수집"의 stateless 배치 잡이다. `live`는 `tfx-live`가 관리하는 장수명 세션(daemon UDS attach 또는 지속 tmux 세션)에 얹혀가므로, verify/fix loop나 risk-tier 자동판정 같은 배치형 계약이 적용되지 않는다.
+
+디스패치:
+
+```bash
+Bash("tfx-live peer --cli-a codex --cli-b claude \
+  --session-a {sid}-a --session-b {sid}-b \
+  --cwd {cwd} --mode freeform --seed '{task}' \
+  --rounds {rounds} --timeout {timeout}", run_in_background=true)
+```
+
+**Closure**: `rounds * 2` hop 예산을 늘리지 않고 마지막 B(`--cli-b`) hop을 closure turn으로 대체한다. B는 `agreement_status`, `unresolved_questions`, `needs_more_rounds`를 포함한 구조화 선언을 반환해야 한다.
+
+**상태 판정**: harness가 B의 자기선언과 독립적으로 판정한다. closure가 구조화되어 있고 `unresolved_questions=[]`, `needs_more_rounds=false`, `agreement_status=complete`일 때만 `status=complete`다. 검증·저장된 성공 hop이 1개 이상이면 그 외에는 `partial`, 0개면 `failed`다. timeout/transport 오류도 성공 hop이 있으면 `partial`이며 원인은 `exit_reason=timeout|transport_error`로 따로 남긴다.
+
+**중단과 세션 정리**: SIGINT/SIGTERM은 transcript 수와 무관하게 `status=aborted`로 분리하고 `hops_completed`, `exit_reason=user_interrupt|terminated`를 남긴다. 첫 신호 뒤 3초 안에 transcript flush → status 기록 → session stop을 시도한다. stop이 3초를 넘기면 orphan tmux 세션은 허용하지만 transcript/status 파일은 보존한다. 두 번째 신호는 graceful 경로를 포기하고 즉시 종료한다.
+
+**보고**: 배치 모드의 `=== OUTPUT ===` 대신 `tfx-live peer` JSON의 `status`, `exit_reason`, `hops_completed`, `transcript_path`, `status_path`를 위 규칙대로 해석하고 transcript를 요약한다.
+
 ### Legacy 스킬 매핑
 
 | legacy 스킬 | `tfx-auto` 등가 플래그 |
@@ -907,6 +943,7 @@ OUTPUT 추출: `echo "$result" | sed -n '/^=== OUTPUT ===/,/^=== /{/^=== OUTPUT 
 
 - `~/.claude/scripts/tfx-route.sh` (필수)
 - codex: `npm install -g @openai/codex` | antigravity: `curl -fsSL https://antigravity.google/cli/install.sh | bash`
+- `--mode live` 전용: `tfx-live` CLI (triflux 번들, `bin/tfx-live.mjs`). UDS transport를 쓰면 살아있는 Claude daemon이 필요하며 데몬 미가용 시 tmux fallback 또는 `transport_error`로 판정한다
 
 ## 에러 레퍼런스
 
@@ -918,6 +955,8 @@ OUTPUT 추출: `echo "$result" | sed -n '/^=== OUTPUT ===/,/^=== /{/^=== OUTPUT 
 | N > 10 | 10 이하로 조정 |
 | 순환 의존 | 분해 재시도 |
 | 컨텍스트 > 32KB | 비례 절삭 |
+| `tfx-live: not found` | triflux 재설치/업데이트 안내, `--mode live` 중단 |
+| UDS probe/attach 실패 | `tfx-live probe`로 재확인 후 tmux fallback 안내 (bug-report는 `tfx-live` 자체가 기록) |
 
 > Claude Code `TaskUpdate`를 사용할 때는 `status: "failed"`를 쓰지 않는다.
 > 실패 보고는 `status: "completed"` + `metadata.result: "failed"`로 표현한다.

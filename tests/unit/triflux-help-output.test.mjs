@@ -78,6 +78,8 @@ describe("tfx --help 출력", () => {
     const out = stripAnsi(raw);
     assert.match(out, /--cli <name>/);
     assert.match(out, /antigravity/);
+    assert.match(out, /quick\|deep\|consensus\|live/);
+    assert.match(out, /--rounds <N>/);
     assert.doesNotMatch(out, /gemini/);
   });
 
