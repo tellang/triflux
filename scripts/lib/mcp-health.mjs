@@ -345,6 +345,35 @@ function isValidInitResponse(line) {
   }
 }
 
+function validateHttpInitResponse(msg) {
+  if (msg?.jsonrpc !== "2.0") return "http:not-jsonrpc";
+  if (msg.id !== 1 && msg.id !== "1") return "http:id-mismatch";
+  if (msg.result === undefined && msg.error === undefined) {
+    return "http:no-result";
+  }
+  return null;
+}
+
+function parseSseInitResponse(body) {
+  let failureReason = "http:no-jsonrpc-body";
+  for (const event of body.split(/\r?\n\r?\n/)) {
+    const data = event
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice("data:".length).replace(/^\s/, ""))
+      .join("\n");
+    if (!data) continue;
+    try {
+      const reason = validateHttpInitResponse(JSON.parse(data));
+      if (!reason) return null;
+      failureReason = reason;
+    } catch {
+      failureReason = "http:invalid-json";
+    }
+  }
+  return failureReason;
+}
+
 export function probeStdio(def, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
   return new Promise((resolve) => {
     const start = Date.now();
@@ -431,7 +460,10 @@ export async function probeHttp(url, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
       body: makeInitializeRequest().trim(),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -445,26 +477,20 @@ export async function probeHttp(url, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
     } catch {
       return { alive: false, reason: "http:body-read-failed", ms };
     }
-    // SSE / ndjson 환경 대비 — 첫 JSON-RPC envelope 하나만 찾으면 충분.
-    const envelope = body
-      .split(/\r?\n/)
-      .map((chunk) => chunk.replace(/^data:\s*/, "").trim())
-      .find((chunk) => chunk.startsWith("{"));
-    if (!envelope) {
+    const contentType = (res.headers.get("content-type") || "")
+      .split(";", 1)[0]
+      .trim()
+      .toLowerCase();
+    if (contentType === "text/event-stream") {
+      const reason = parseSseInitResponse(body);
+      return reason ? { alive: false, reason, ms } : { alive: true, ms };
+    }
+    if (contentType !== "application/json") {
       return { alive: false, reason: "http:no-jsonrpc-body", ms };
     }
     try {
-      const msg = JSON.parse(envelope);
-      if (msg.jsonrpc !== "2.0") {
-        return { alive: false, reason: "http:not-jsonrpc", ms };
-      }
-      if (msg.id !== 1 && msg.id !== "1") {
-        return { alive: false, reason: "http:id-mismatch", ms };
-      }
-      if (msg.result === undefined && msg.error === undefined) {
-        return { alive: false, reason: "http:no-result", ms };
-      }
-      return { alive: true, ms };
+      const reason = validateHttpInitResponse(JSON.parse(body));
+      return reason ? { alive: false, reason, ms } : { alive: true, ms };
     } catch {
       return { alive: false, reason: "http:invalid-json", ms };
     }
