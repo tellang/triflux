@@ -62,4 +62,22 @@ describe("cto pull helper", () => {
 
     assert.deepEqual(readCtoSnapshot({ lakeRoot }), snapshot);
   });
+
+  it("returns null when TFX_CTO disables an opted-in north-star read", () => {
+    const snapshot = fixtureSnapshot();
+    mkdirSync(lakeRoot, { recursive: true });
+    writeFileSync(
+      join(lakeRoot, "current.json"),
+      JSON.stringify(snapshot),
+      "utf8",
+    );
+
+    assert.equal(
+      readCtoSnapshot({
+        lakeRoot,
+        env: { TFX_CTO: "0", TFX_CTO_NORTH_STAR: "1" },
+      }),
+      null,
+    );
+  });
 });

@@ -2,16 +2,12 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { resolveLakeRootDir } from "../../cto/lake-root.mjs";
+import { resolveRoleControlSnapshot } from "@triflux/core/hub/lib/cto-env.mjs";
 
 const DEFAULT_DEBOUNCE_MS = 120_000;
-const OFF_VALUES = new Set(["0", "false", "off", "no"]);
 
 export function isCtoAutoCollectDisabled(env = process.env) {
-  return OFF_VALUES.has(
-    String(env?.TFX_CTO_AUTO_COLLECT ?? "")
-      .trim()
-      .toLowerCase(),
-  );
+  return !resolveRoleControlSnapshot(env).auto_collect_enabled;
 }
 
 function freshCurrentMd(projectRoot, now, debounceMs) {

@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { resolveRoleControlSnapshot } from "../lib/cto-env.mjs";
+
 function defaultLakeRoot() {
   return join(process.cwd(), ".triflux", "lake");
 }
@@ -9,9 +11,11 @@ function defaultLakeRoot() {
  * Read the CTO north-star lake snapshot without affecting runtime control flow.
  * @param {object} [opts]
  * @param {string} [opts.lakeRoot] Directory containing current.json.
+ * @param {object} [opts.env] Environment values used for the CTO kill-switch.
  * @returns {object|null}
  */
 export function readCtoSnapshot(opts = {}) {
+  if (!resolveRoleControlSnapshot(opts.env).north_star_enabled) return null;
   try {
     const lakeRoot = opts.lakeRoot || defaultLakeRoot();
     const parsed = JSON.parse(

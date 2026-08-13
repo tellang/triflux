@@ -11,6 +11,8 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+import { resolveRoleControlSnapshot } from "../hub/lib/cto-env.mjs";
+
 const MAX_CONTEXT_BYTES = 2048;
 const HEADER = "[CTO NORTH STAR - READ ONLY]";
 const INSTRUCTION =
@@ -45,21 +47,6 @@ function sha256(input) {
   return createHash("sha256").update(input).digest("hex");
 }
 
-function ctoNorthStarEnabled() {
-  switch (process.env.TFX_CTO_NORTH_STAR || "1") {
-    case "0":
-    case "false":
-    case "FALSE":
-    case "off":
-    case "OFF":
-    case "no":
-    case "NO":
-      return false;
-    default:
-      return true;
-  }
-}
-
 function wrapBrief(brief) {
   return [HEADER, INSTRUCTION, BEGIN, brief, END].join("\n");
 }
@@ -89,7 +76,7 @@ function writeMarker(markerPath, state) {
 }
 
 function main() {
-  if (!ctoNorthStarEnabled()) return;
+  if (!resolveRoleControlSnapshot().north_star_enabled) return;
 
   const input = readStdinJson();
   if (input.hook_event_name && input.hook_event_name !== "UserPromptSubmit") {

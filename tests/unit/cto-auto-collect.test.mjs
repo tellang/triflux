@@ -173,6 +173,29 @@ describe("cto-auto-collect", () => {
     assert.deepEqual(calls, ["debounced"]);
   });
 
+  it("does not call runCollect when TFX_CTO disables an opted-in auto-collector", async () => {
+    const root = makeProjectRoot();
+    const calls = [];
+    const collector = makeCollector({
+      env: {
+        TFX_CTO: "0",
+        TFX_CTO_AUTO_COLLECT: "1",
+        TFX_CTO_NORTH_STAR: "1",
+      },
+      registry: { querySessions: () => [{ sessionId: "peer" }] },
+      runCollect: async () => calls.push("collect"),
+    });
+
+    const result = collector.handleSessionStarted({
+      sessionId: "master-off",
+      session: { cwd: root, worktreePath: root },
+    });
+    await collector.drain();
+
+    assert.deepEqual(result, { triggered: false, reason: "disabled" });
+    assert.deepEqual(calls, []);
+  });
+
   it("skips when current.md is fresh", () => {
     const root = makeProjectRoot();
     const lakeRoot = join(root, ".triflux", "lake");
