@@ -579,23 +579,9 @@ function isWarningLine(line) {
   return /^\s*(?:\u26A0|\(warning\))/i.test(line);
 }
 
-function hasAssistantResponseLine(adapter, text) {
-  return String(text)
-    .split("\n")
-    .some((line) => adapter.isResponseLine(line));
-}
-
 function promptLineIndex(lines, prompt) {
-  if (!prompt) {
-    return -1;
-  }
-
   for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index];
-    if (
-      (hasCodexComposerPrompt(line) || hasClaudeComposerPrompt(line)) &&
-      line.includes(prompt)
-    ) {
+    if (composerLineMatchesPrompt(lines[index], prompt)) {
       return index;
     }
   }
@@ -615,16 +601,21 @@ function promptComposerNeedle(prompt) {
   return (firstContentLine ?? "").slice(0, PROMPT_COMPOSER_NEEDLE_LENGTH);
 }
 
-function composerShowsPrompt(text, prompt) {
+function composerLineMatchesPrompt(line, prompt) {
   const needle = promptComposerNeedle(prompt);
-  if (!needle) {
-    return false;
-  }
+  return (
+    Boolean(needle) &&
+    isComposerPromptLine(line) &&
+    String(line).includes(needle)
+  );
+}
+
+function composerShowsPrompt(text, prompt) {
   const activeComposerLine = String(text)
     .split("\n")
     .filter(isComposerPromptLine)
     .at(-1);
-  return activeComposerLine?.includes(needle) ?? false;
+  return composerLineMatchesPrompt(activeComposerLine, prompt);
 }
 
 function nextComposerPromptIndex(lines, startIndex) {
@@ -651,16 +642,6 @@ function responseLineIndexForPrompt(adapter, lines, promptIndex) {
   }
 
   return -1;
-}
-
-function hasAssistantResponseAfterPrompt(adapter, text, prompt) {
-  const lines = String(text).split("\n");
-  const promptIndex = promptLineIndex(lines, prompt);
-  if (promptIndex === -1) {
-    return hasAssistantResponseLine(adapter, text);
-  }
-
-  return responseLineIndexForPrompt(adapter, lines, promptIndex) !== -1;
 }
 
 function extractAssistantResponse(adapter, text, prompt = null) {
@@ -873,19 +854,35 @@ function hasClaudeCompletedTaskListResponse(text, options = {}) {
   return extractClaudeCompletedTaskListResponse(text, options).length > 0;
 }
 
-function hasTmuxAssistantResponseAfterPrompt(
+function hasTmuxAssistantResponseAfterCurrentPrompt(
   adapter,
   text,
   prompt,
   beforeText,
 ) {
+  if (adapter.cli === "claude") {
+    return hasClaudeCompletedTaskListResponse(text, {
+      beforeText,
+      prompt,
+    });
+  }
+
+  const lines = String(text).split("\n");
+  const promptIndex = promptLineIndex(lines, prompt);
+  if (promptIndex === -1) {
+    return false;
+  }
+
+  const beforePromptCount = String(beforeText)
+    .split("\n")
+    .filter((line) => composerLineMatchesPrompt(line, prompt)).length;
+  const currentPromptCount = lines.filter((line) =>
+    composerLineMatchesPrompt(line, prompt),
+  ).length;
+
   return (
-    hasAssistantResponseAfterPrompt(adapter, text, prompt) ||
-    (adapter.cli === "claude" &&
-      hasClaudeCompletedTaskListResponse(text, {
-        beforeText,
-        prompt,
-      }))
+    currentPromptCount > beforePromptCount &&
+    responseLineIndexForPrompt(adapter, lines, promptIndex) !== -1
   );
 }
 
@@ -1619,13 +1616,13 @@ async function doAskViaTmux(adapter, opts) {
       !doneMarker &&
       !adapter.isBusy(visible) &&
       adapter.isReady(visible) &&
-      hasTmuxAssistantResponseAfterPrompt(
+      quietPolls >= FALLBACK_QUIET_POLLS &&
+      hasTmuxAssistantResponseAfterCurrentPrompt(
         adapter,
-        visible,
+        await capturePane(remote, session),
         prompt,
         beforeRaw,
-      ) &&
-      quietPolls >= FALLBACK_QUIET_POLLS;
+      );
     if (markerDone || fallbackDone) {
       done = true;
       break;

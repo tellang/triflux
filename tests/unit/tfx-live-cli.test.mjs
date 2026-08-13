@@ -97,9 +97,16 @@ async function writeReadyFakeTmux(dir) {
       "  const session = state.sessions[target];",
       "  if (session?.submitted) {",
       "    const composer = target.endsWith('B') ? '❯' : '›';",
+      "    if (process.env.TMUX_LONG_RESPONSE === '1') {",
+      "      const renderedPrompt = process.env.TMUX_HARD_WRAPPED_PROMPT === '1' ? `${composer} Count from 1 to 40, one number per line, then output the word FINISHED on the\\n  last line.` : `${composer} ${session.prompt}`;",
+      "      const history = `${renderedPrompt}\\n\\n• 1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10\\n11\\n12\\n13\\n14\\n15\\n16\\n17\\n18\\n19\\n20\\n21\\n22\\n23\\n24\\n25\\n26\\n27\\n28\\n29\\n30\\n31\\n32\\n33\\n34\\n35\\n36\\n37\\n38\\n39\\n40\\nFINISHED\\n${composer}`;",
+      "      const visible = process.env.TMUX_HARD_WRAPPED_PROMPT === '1' ? composer : `36\\n37\\n38\\n39\\n40\\nFINISHED\\n${composer}`;",
+      "      console.log(args.includes('-S') ? history : visible);",
+      "    } else {",
       "    const echoedPrompt = process.env.TMUX_ECHO_SUBMITTED_PROMPT === '1' ? `${composer} ${session.prompt}\\n\\n` : '';",
       `    const completed = target.endsWith('A') ? '• 1\\n${PEER_HOP_DONE_MARKER}\\n›' : '⏺ 2\\n${PEER_HOP_DONE_MARKER}\\n❯\\nCTX:0/100 (0%)';`,
       "    console.log(`${echoedPrompt}${completed}`);",
+      "    }",
       "  } else if (session?.prompt) {",
       "    console.log(`${target.endsWith('B') ? '❯' : '›'} ${session.prompt}`);",
       "  } else {",
@@ -275,6 +282,47 @@ test("doAskViaTmux stops on a done marker without quiet polls", async () => {
     assert.equal(result.done, true);
     assert.equal(result.response, "1");
     assert.equal(visibleCaptures.length, 1);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("doAskViaTmux completes when a long response has scrolled its marker out of view", async () => {
+  const dir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "tfx-live-long-response-"),
+  );
+  try {
+    const logPath = path.join(dir, "tmux-log.jsonl");
+    const statePath = path.join(dir, "tmux-state.json");
+    await writeReadyFakeTmux(dir);
+
+    const priorPath = process.env.PATH;
+    process.env.PATH = `${dir}${path.delimiter}${priorPath}`;
+    process.env.TMUX_LOG = logPath;
+    process.env.TMUX_STATE = statePath;
+    process.env.TMUX_LONG_RESPONSE = "1";
+    process.env.TMUX_HARD_WRAPPED_PROMPT = "1";
+    let result;
+    try {
+      result = await tfxLive.doAskViaTmux(ADAPTERS.codex, {
+        session: "longA",
+        prompt:
+          "Count from 1 to 40, one number per line, then output the word FINISHED on the last line.",
+        timeoutMs: 1_000,
+        settleMs: 1,
+        pollIntervalMs: 1,
+      });
+    } finally {
+      process.env.PATH = priorPath;
+      delete process.env.TMUX_LOG;
+      delete process.env.TMUX_STATE;
+      delete process.env.TMUX_LONG_RESPONSE;
+      delete process.env.TMUX_HARD_WRAPPED_PROMPT;
+    }
+
+    assert.equal(result.done, true);
+    assert.equal(result.matchedCompletion, true);
+    assert.match(result.response, /40\nFINISHED$/);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
