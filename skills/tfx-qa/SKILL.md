@@ -36,20 +36,20 @@ psmux --version 2>/dev/null && \
 
 | Tier | 조건 | 실행 방식 |
 |------|------|----------|
-| **Tier 1** | 전부 정상 | headless multi 3-CLI |
+| **Tier 1** | 전부 정상 | auto multi 3-CLI (tmux/psmux 리드면 interactive) |
 | **Tier 2** | 일부 CLI | 가용 CLI + Claude Agent |
-| **Tier 3** | headless 불가 | Claude Agent only |
+| **Tier 3** | Hub 또는 필요 CLI 불가 | Claude Agent only |
 
 Tier 3 시:
 ```
-⚠ [Tier 3] headless multi 환경 미충족 (consensus 미적용)
+⚠ [Tier 3] multi 실행 환경 미충족 (consensus 미적용)
   누락: {missing} | 권장: 설치 후 재실행 또는 /tfx-qa --quick
 ```
 
 ### HARD RULES
 
 1. `codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 금지
-2. Codex/Antigravity → `Bash("tfx multi --teammate-mode headless --assign ...")` 만
+2. Codex/Antigravity → `Bash("tfx multi --assign ...")` 만. teammate mode는 생략해 `auto` 기본값을 쓴다.
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent 동시 호출
 
@@ -83,10 +83,10 @@ Agent(
 
 **Codex + Antigravity headless:**
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:보안/성능 전문가. OWASP Top 10, O(n²), 메모리 누수, 입력 검증 누락. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --assign 'antigravity:UX/접근성 전문가. API 응답 일관성, 에러 메시지, WCAG 2.1 AA, 문서-동작 일치. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --timeout 1800", run_in_background=true)
+Bash("tfx multi --auto-attach --dashboard --assign 'codex:보안/성능 전문가. OWASP Top 10, O(n²), 메모리 누수, 입력 검증 누락. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --assign 'antigravity:UX/접근성 전문가. API 응답 일관성, 에러 메시지, WCAG 2.1 AA, 문서-동작 일치. JSON: { findings: [...], overall_verdict: \"pass\"|\"fail\" }:verifier' --timeout 1800", run_in_background=true)
 ```
 
-> 배리어: 위 dispatch는 background — task-notification 완료(`=== HEADLESS_COMPLETE ... ===` 마커) 후 출력 파일에서 verifier 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
+> 배리어: 위 dispatch는 background — task-notification 완료 후 team runtime 결과에서 verifier 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
 
 #### Step 3: Consensus Scoring
 - 동일 파일+라인±5 + 유사 카테고리 → 동일 이슈
@@ -95,7 +95,7 @@ Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'cod
 #### Step 4: 합의된 Critical/High 수정
 
 ```
-Bash("tfx multi --teammate-mode headless --assign 'codex:합의된 이슈 수정. 최소 변경으로 수정 + 테스트 재실행: {consensus_findings}:fixer' --timeout 900", run_in_background=true)
+Bash("tfx multi --assign 'codex:합의된 이슈 수정. 최소 변경으로 수정 + 테스트 재실행: {consensus_findings}:fixer' --timeout 900", run_in_background=true)
 ```
 
 > 배리어: fixer도 background — task-notification 완료 후 수정 결과를 확인한 다음에만 Step 5 보고서를 작성한다.

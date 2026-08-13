@@ -36,7 +36,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 
 0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--risk-tier`/`--shape`/`--cli-set`/`--parallel`/`--retry`/`--isolation`/`--remote` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
    - `--parallel swarm` → tfx-swarm 엔진 위임 (PRD 필요)
-   - `--parallel N` → tfx-multi 엔진 위임 (headless)
+   - `--parallel N` → tfx-multi 엔진 위임 (`auto`: 리드 tmux면 interactive pane, 없으면 in-process)
    - `--cli codex|antigravity` → `TFX_CLI_MODE` 설정 + 단일 실행
    - `--mode deep` → `-t/--thorough` 동일 동작 (pipeline init)
    - `--risk-tier low|medium|high` → risk-tier 기준으로 verification 강도와 mode 결정
@@ -129,9 +129,9 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--experts` | `"claude:...;codex:...;antigravity:..."` | panel roster override | panel normalizer |
 | `--analysis-prompt-file` | `<path>` | consensus family 공통 분석 프롬프트 주입 | consensus normalizer |
 | `--parallel` | `1` (기본) | 단일 워커 | tfx-route.sh |
-| `--parallel` | `N` | 로컬 headless 병렬 (cwd 공유) | `tfx multi` |
+| `--parallel` | `N` | 로컬 병렬 (mode 생략=`auto`; 리드 tmux면 interactive pane, 없으면 in-process) | `tfx multi` |
 | `--parallel` | `swarm` | worktree 격리 + 다기기 | `tfx swarm` (PRD 필요) |
-| `--no-native-bridge-ui` | true | headless worker의 Claude agents UI 노출을 비활성화 | `tfx multi` |
+| `--no-native-bridge-ui` | true | 명시적 headless worker의 Claude agents UI 노출을 비활성화 | `tfx multi` |
 | `--retry` | `0` | 자동 재시도 없음 | — |
 | `--retry` | `1` (기본) | bounded verify → fix loop 3회 | — |
 | `--retry` | `ralph` | **Phase 3** — true ralph state machine (unlimited, stuck detector 3회 중단) | retry-state-machine.mjs |
@@ -834,21 +834,21 @@ deep/fullcycle 추가 규칙:
 ## 멀티 태스크 라우팅 (트리아지 후)
 
 > **트리아지 결과에 따라 실행 경로 결정.**
-> v6.0.0부터 CLI 워커는 **Lead-Direct Headless** 가 기본. Agent 래퍼 불필요.
+> v6.0.0부터 CLI 워커는 **Lead-Direct `auto`** 가 기본이다. Agent 래퍼는 불필요하며, 리드가 tmux/psmux 안이면 interactive pane으로 보인다.
 > OS별 primary multiplexer는 macOS/Linux = tmux, Windows = psmux다. macOS에서 psmux 미설치는 fallback 사유가 아니다.
 
 | 조건 | 실행 경로 | 엔진 |
 |------|----------|------|
 | 1개 + quick | tfx-auto 직접 실행 (fire-and-forget) | tfx-route.sh |
 | 1개 + thorough | tfx-auto 직접 실행 + verify/fix loop | tfx-route.sh |
-| 2개+ + quick | **headless 직접 실행** (Windows: WT/psmux / macOS·Linux: tmux) | headless.mjs |
-| 2개+ + thorough | Plan/PRD/Approval 후 → headless + verify/fix | headless.mjs |
+| 2개+ + quick | `tfx multi` auto 실행 (리드 tmux/psmux면 interactive pane) | team runtime |
+| 2개+ + thorough | Plan/PRD/Approval 후 → auto 실행 + verify/fix | team runtime |
 | primary multiplexer 없음 | Native/in-process fallback | native.mjs |
 
-> **MANDATORY: 2개+ 서브태스크 시 headless 엔진 필수**
+> **MANDATORY: 2개+ 서브태스크 시 `tfx multi` 엔진 필수 (teammate mode 생략 = `auto`)**
 > `Agent()` 백그라운드나 `Bash(tfx-route.sh)` 개별 호출로 대체 금지.
-> 반드시 아래 `Bash("tfx multi ...")` 명령으로 headless 엔진에 위임한다.
-> headless dispatch는 기본적으로 Claude agents native bridge UI에 노출된다. 필요 시 `--no-native-bridge-ui` 로 opt-out 한다.
+> 반드시 아래 `Bash("tfx multi ...")` 명령으로 team runtime에 위임한다.
+> `auto`가 interactive(tmux/psmux)로 결정되면 pane이 관찰 표면이고 native bridge는 off다. 명시적 headless만 native bridge default on이며, 필요 시 `--no-native-bridge-ui`로 opt-out 한다.
 
 **전환 방법:**
 
@@ -856,17 +856,36 @@ deep/fullcycle 추가 규칙:
 thorough = args에 -t 또는 --thorough 포함
 
 if subtasks.length >= 2:
-  if OS primary multiplexer 사용 가능(macOS/Linux tmux, Windows psmux):
-    → Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --native-bridge-ui --assign 'cli:prompt:role' ...")
-    → if thorough: verify → fix loop
-  else:
-    → fallback: tfx-multi Native/in-process fallback
+  → Bash("tfx multi --auto-attach --dashboard --assign 'cli:prompt:role' ...")
+  → 리드가 tmux/psmux이면 interactive pane, 없으면 Native/in-process fallback
+  → if thorough: verify → fix loop
 else:
   if thorough:
     → Pipeline init → Plan → PRD → Approval → 직접 실행 → Verify → Fix loop
   else:
     → tfx-auto 직접 실행 (아래)
 ```
+
+### teammate mode 정책 — interactive 기본, headless opt-in
+
+기본 명령에서는 `--teammate-mode`를 **생략**한다. 이때 엔진의 `auto`가 리드 환경을 따라
+결정한다: 리드가 tmux/psmux 안이면 interactive pane, mux가 없으면 `in-process` fallback이다.
+`in-process`는 워커 실행 위치를 바꾸는 fallback일 뿐 비대화형 background 실행을 뜻하는
+`headless`와 같은 모드가 아니다.
+
+`headless`는 다음처럼 **명시적으로** 선택할 때만 쓴다.
+
+```bash
+Bash("tfx multi --teammate-mode headless --assign 'cli:prompt:role' ...", run_in_background=true)
+```
+
+- 사용자가 "조용히" 또는 "백그라운드로만"을 명시한 경우
+- 원격/CI/non-TTY처럼 pane 관찰이 불가능하거나 가치가 없는 실행
+
+워커 수만으로 headless로 자동 전환하는 임계값은 두지 않는다. pane 가독성은 화면·작업 성격에
+따라 달라지므로, 많은 워커도 `auto`와 대시보드를 유지하고 필요하면 호출자가 위 플래그로
+opt-in 한다. 명시적 `--teammate-mode headless`에서는 native bridge UI가 default on이고,
+interactive(tmux/psmux) 및 `in-process`에서는 off다.
 
 ## 실행
 
@@ -879,6 +898,130 @@ Bash("bash ~/.claude/scripts/tfx-route.sh {agent} '{prompt}' {mcp_profile}", run
 # Level 1+ (컨텍스트 의존) — 4번째=timeout(빈값), 5번째=context_file
 Bash("bash ~/.claude/scripts/tfx-route.sh {agent} '{prompt}' {mcp_profile} '' .omc/context/{sid}/combined-{tid}.md", run_in_background=true)
 ```
+
+### tmux 라이브 관전 (default)
+
+**정책 SSOT**: `.claude/rules/tfx-execution-skill-map.md`의 `CLI tmux 관전 기본값`이 개별 CLI 디스패치를 언제 tmux로 관전할지 정한다.
+이 절은 그 정책을 구현하는 세션 생성·attach·정리·폭 배치 절차만 소유한다. 명시적 headless
+선택은 rules의 예외대로 유지한다.
+
+순서:
+
+1. `createPsmuxSession` + `sendKeysToPane`(`hub/team/psmux.mjs`)으로 독립 세션을 만들고
+   tfx-route.sh 커맨드를 흘려보낸다.
+2. `tmux capture-pane`으로 폴링해 `[tfx-route] Codex 버전:` 같은 시작 배너를 확인한다.
+3. 사용자가 attach해 있는 현재 tmux 창에 `tmux split-window` + `env -u TMUX`(nested-attach
+   보호 해제)로 대상 세션에 attach한다.
+
+정리는 반드시 `killPsmuxSession()`으로 한다 (raw `tmux kill-session` 금지 — detach →
+pipe capture 해제 → pane 프로세스 트리 종료 → 세션 종료 → orphan 정리 5단계를 대신
+해준다).
+
+**분할 비율** (triflux 자체 관례 — OMC `main-vertical`의 고정 50:50과 다름):
+
+| 상황 | 리더(기존 화면) : 워커전체 |
+|------|---------------------------|
+| 인터랙티브 워커 1개 이상 포함 | 5 : 5 |
+| 전부 헤드리스 | 7 : 3 |
+
+**워커 영역 배치 — 폭 우선**: 워커가 2개 이상이면 각 워커에 배정되는 폭이 **최소 100 cols**인지
+먼저 계산한다. 현재 전체 폭을 `W`, 워커 수를 `N`이라고 할 때 pane border 전의 근사치는
+`5:5`에서 `W × 0.5 ÷ N`, `7:3`에서 `W × 0.3 ÷ N`이다. tmux border는 실제 폭을 더 줄이므로
+경계값에서는 세로 스택을 택한다.
+
+| 조건 | 배치 |
+|------|------|
+| 워커당 확보 폭이 100 cols 이상 | 워커 영역을 가로로(좌우) 균등분할 |
+| 워커당 확보 폭이 100 cols 미만 또는 측정 불가 | `tmux select-layout even-vertical` 세로 스택 |
+
+`100 cols`는 `scripts/tfx-route.sh`가 출력하는 시작 배너를 실제 캡처 로그로 측정한
+`executor` 116 cols, `deep-executor` 120 cols, `document-specialist` 127 cols와 실측 가독성
+경계(54 cols 불가, 108 cols 가능) 사이에서 정했다. 따라서 한 줄 무개행을 보장하는 값이
+아니라, 시작 배너가 한 번만 접힐 수 있는 최소 가독 폭이다.
+
+예를 들어 `W=361`, 워커 2개이면 `5:5`는 워커당 약 90 cols, `7:3`은 약 54 cols라서 둘 다
+세로 스택이다. 워커 3개면 각각 약 60/36 cols이며, 100 cols를 내려면 전체 폭이 `5:5`에서
+최소 600 cols, `7:3`에서 최소 1000 cols가 필요하다. 따라서 3개 이상은 이 계산을 통과하는
+드문 초광폭 화면이 아니면 세로 스택을 기본으로 한다.
+
+**인터랙티브(진짜 TUI) 워커**: headless `codex exec`가 아니라 사람이 직접 타이핑
+가능한 인터랙티브 세션이 필요하면 `tfx-live`를 쓴다 (raw `codex`/`agy` 직접 호출은
+headless-guard가 차단하는 경로이므로 시도하지 않는다).
+
+1. `tfx-live start --cli codex --session <name> --cwd <dir>` — 세션 생성.
+2. 스킬 주입이 필요하면 `tfx-route.sh`의 `prepend_skill()` 포맷을 그대로 재현해
+   프롬프트 앞에 붙인다 (tfx-live 자체엔 `--skill` 플래그가 없음):
+   ```
+   --- SKILL: <name> (workspace: <cwd>; apply this methodology to the task below) ---
+   <skills/<name>/SKILL.md 본문>
+   <실제 프롬프트>
+   ```
+3. `tfx-live ask --cli codex --session <name> --prompt "<스킬+프롬프트 합친 텍스트>" --timeout <n>`
+   로 실행 지시. 이 호출이 실제로 처리 중인 걸 확인한 뒤에만 tmux attach한다 (위
+   "순서" 절과 동일 원칙 — 빈 세션을 먼저 보여주지 않는다).
+4. 종료는 `tfx-live stop --session <name> --cli codex` (내부적으로
+   `tmux kill-session`을 호출하지만 tfx-live라는 sanctioned CLI 경유라 안전가드에
+   안 걸린다 — 우리가 만든 psmux 세션에 쓰는 raw `tmux kill-session` 금지 규칙과는
+   다른 케이스). 세션의 마지막 프로세스가 죽으면(사람이 직접 codex를 종료해도)
+   tmux 세션 자체가 같이 사라진다 — `stop` 없이도 사람이 직접 끌 수 있다.
+
+#### 운영 시나리오 (실측 검증됨)
+
+**바쁜 상태 식별**: `ask`는 세션이 바쁜지 스스로 확인하지 않는다 — 바쁠 때 호출하면
+그냥 텍스트를 그대로 밀어넣는다. 새 프롬프트 보내기 전에 먼저 확인:
+```bash
+tmux capture-pane -t <session> -p | grep -q "esc to interrupt" && echo BUSY
+```
+(`tfx-live`가 codex/claude 공통으로 이 문자열로 busy를 판정하는 것과 동일 로직.)
+
+**인터럽트 후 즉시 새 프롬프트**: `tfx-live interrupt --session <name> --cli codex`
+(Escape 전송) → 응답이 `aborted:true, reason:"user_interrupt"`이면 성공 → busy 해제
+확인 후 곧바로 `ask` 호출 가능. 이 흐름은 실측 검증 완료.
+
+**스킬 주입 실패 식별**: 두 가지 실패 모드가 있다.
+- 기계적 실패(스킬 파일 없음): 프롬프트에 합치기 전에 `skills/<name>/SKILL.md` 존재를
+  먼저 확인한다. 없으면 `tfx-route.sh`의 `prepend_skill()`과 동일하게 fail-open —
+  경고만 하고 스킬 없이 원래 프롬프트로 진행한다.
+- 정성적 실패(주입은 됐는데 codex가 방법론을 안 따름): 기계적으로 탐지할 수 없다.
+  `response`에 스킬이 명시한 워크플로우 단계를 실제로 따른 흔적(예: tfx-find라면
+  "Explored" 단계, Grep 사용 언급)이 있는지 사람이/Claude가 확인하는 수밖에 없다.
+
+**이미 종료된 세션 resume**: `tfx-live start`의 `--resume <id>` / `--resume-last 1`로
+codex 자체의 대화 이력을 새 tmux 세션에 이어붙인다. ID는 codex의 rollout 파일명에서
+가져온다: `~/.codex/sessions/YYYY/MM/DD/rollout-<timestamp>-<id>.jsonl`
+(또는 `~/.codex/session_index.jsonl`의 `id` 필드). 실측: 세션에 "42를 기억해"
+시킨 뒤 `stop`으로 완전히 끄고, `--resume <id>`로 새 이름의 세션을 띄워 "아까 그
+숫자가 뭐였지"라고 물으니 정확히 "42"라고 답함 — 컨텍스트가 진짜 이어짐을 확인.
+
+**모델/effort — 새로 켤 때**: `tfx-live start --model <codex 모델 문자열> --effort <tier> ...`
+가 codex의 `-c model=... -c model_reasoning_effort=...`로 직접 매핑된다. `tfx-route.sh`의
+프로필 추상화(`gpt56_sol_xhigh` 등)와 달리 codex 고유 모델 ID/effort 값을 그대로 써야
+한다 (프로필 이름 그대로 넣으면 안 됨).
+
+**모델/effort 변경**: 현행 `tfx-live`는 시작 시 launch config로 모델과 effort를 전달한다.
+실행 중인 세션의 `/model` 메뉴를 자동 조작하는 경로는 사용하지 않는다. 값을 바꿔야 하면
+원하는 launch config로 새 세션을 시작하거나 기존 세션을 재시작한다. 모델 ID의 선택은
+프로필/launch config의 책임이며 이 스킬 문서에 하드코딩하지 않는다.
+
+**완료 판정/수집**: `ask`는 자체적으로 폴링한다 — done-marker 방식(제출한 프롬프트
+이후 새 응답이 나타나는지) 또는 fallback(화면이 조용해지고 composer가 준비 상태고
+busy가 아닌 상태가 일정 횟수 지속). 결과는 `response`(정제된 텍스트), `done`,
+`matchedCompletion` 필드로 온다. `response`가 실제 답변인지와 셸 프롬프트 잔재가
+섞이지 않았는지를 확인한다.
+
+**Claude의 크로스세션 메시징과는 무관**: Claude Code 자체의 `SendMessage`(cross-session
+messaging, 2.1.224+)는 여러 머신의 여러 Claude Code 세션끼리 통신하는 **클라이언트
+레벨** 기능이다. `tfx-live`는 (지금 이 세션의) Claude가 별도 프로세스인 codex CLI와
+통신하는 **triflux 레이어** 기능 — 완전히 다른 두 시스템이고 서로 의존하지 않는다.
+이름에 "세션"이 같이 들어가서 헷갈릴 뿐이다.
+
+**codex와의 통신이 진짜 메시지큐 수준인가**: 지금 쓰는 `start`/`ask` 경로는 tmux
+paste-buffer로 텍스트를 밀어넣고 화면을 스크래핑해서 응답을 추출하는 방식 — 구조화된
+메시지큐가 아니라 "터미널을 대신 조작"하는 수준이다. 진짜 구조화 채널은
+`tfx-live orchestrate --codex-transport app-server-uds`(experimental)가 제공한다 —
+`codex app-server`를 WebSocket-over-UDS로 띄워 JSON-RPC(RFC 6455)로 통신한다. 다만
+이건 `orchestrate` 커맨드 전용 실험 경로이고, 지금 문서의 `start`/`ask` 흐름과는
+별개다 — 기본값도 아니다.
 
 ### Claude 네이티브
 

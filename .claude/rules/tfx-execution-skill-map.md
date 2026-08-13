@@ -10,7 +10,7 @@
 |-----------|---------------------|
 | 1 태스크 + 작음 (S) | 직접 실행 (fire-and-forget) |
 | 1 태스크 + 큼 (M+) | pipeline (plan → PRD → exec → verify) |
-| 2+ 태스크 + 코드 변경 **없음** | **tfx-multi** (로컬 headless 병렬) |
+| 2+ 태스크 + 코드 변경 **없음** | **tfx-multi** (로컬 병렬; mode 생략=`auto`) |
 | 2+ 태스크 + 코드 변경 **포함** | **tfx-swarm** (worktree 격리 필수) |
 | 원격 + 코드 변경 | **tfx-swarm** (shard `host:`) |
 | 원격 + 탐색/대화형 | **tfx-remote** (세션 관리 + resume) |
@@ -19,7 +19,7 @@
 
 | 엔진 | 역할 | 호출 경로 |
 |------|------|----------|
-| tfx-multi | 로컬 headless 병렬 (cwd 공유, worktree 불필요) | auto 내부 dispatch 또는 `/tfx-auto --parallel N --mode deep` |
+| tfx-multi | 로컬 병렬 (cwd 공유, worktree 불필요; mode 생략=`auto`) | auto 내부 dispatch 또는 `/tfx-auto --parallel N --mode deep` |
 | tfx-swarm | 격리 + 다기기 + auto merge (로컬/원격) | auto 내부 dispatch 또는 `/tfx-auto --parallel swarm --mode consensus --isolation worktree` |
 | tfx-remote | 단일 세션 관리 (list/attach/send/resume/탐색) | 직접 호출: `/tfx-remote` |
 | tfx-remote-spawn | **DEPRECATED** — tfx-remote로 통합됨 | 사용 금지 |
@@ -45,8 +45,17 @@
 
 ## 핵심 룰
 
-> **코드 변경 = tfx-swarm 우선** (로컬/원격 동일). tfx-remote는 원격 대화형/탐색 전용. multi는 로컬 headless 병렬 (worktree 불필요 read-only 작업).
+> **코드 변경 = tfx-swarm 우선** (로컬/원격 동일). tfx-remote는 원격 대화형/탐색 전용. multi는 로컬 공유-cwd 병렬이며, headless는 명시 선택이다 (worktree 불필요 read-only 작업).
 > **MANDATORY**: `tfx-auto` 는 2+ 태스크 + 코드 변경 자동 감지 시 swarm 으로 escalate (Issue #281 closed). 사용자 명시 `--parallel N` override 시 warning 후 사용자 결정 존중.
+
+## CLI tmux 관전 기본값
+
+> **MANDATORY**: 개별 Codex/Antigravity CLI 디스패치는 사람이 진행을 관전할 수 있도록 기본적으로 tmux split-pane으로 연다. 사용자가 "조용히"/"백그라운드로만"을 명시했거나 tmux가 불가한 경우에만 raw background로 되돌아간다.
+
+이 절이 **언제 관전할지**의 auto-load 정책 SSOT다. 명시적으로 headless를 택한 엔진 경로는
+그 명시 선택을 따른다. 세션 생성, 시작 배너 확인, attach, 정리, `tfx-live` 및 폭 기반 pane
+배치의 **어떻게**는 [`skills/tfx-auto/SKILL.md`](../../skills/tfx-auto/SKILL.md)의
+`tmux 라이브 관전` 절이 정본이다.
 
 ## Retry 정책 (Phase 3+)
 
@@ -58,4 +67,3 @@
 | `auto-escalate` | CLI/모델 승격 체인 — `.claude/rules/tfx-escalation-chain.md` 규약 | `--max-iterations N` 으로 단계당 상한 |
 
 `ralph`/`auto-escalate` 는 `hub/team/retry-state-machine.mjs` 가 구동. state 는 `.omc/state/retry-<sessionId>.json` 에 저장 (compaction survive). Bridge: `node hub/bridge.mjs retry-run --snapshot X --event ...`.
-

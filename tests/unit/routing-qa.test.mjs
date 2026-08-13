@@ -296,16 +296,20 @@ describe("route_agent: effort 레벨 검증", () => {
 describe("headless: buildHeadlessCommand", async () => {
   const { buildHeadlessCommand } = await import("../../hub/team/headless.mjs");
 
-  it("codex → codex exec ... --color never", () => {
+  it("codex → tfx-route.sh를 거쳐 역할 프로필을 전달한다", () => {
     const cmd = buildHeadlessCommand("codex", "hello world", "/tmp/result.txt");
-    assert.ok(cmd.includes("codex exec"), `codex exec가 포함되어야 함: ${cmd}`);
-    assert.ok(cmd.includes("--color never"));
+    assert.ok(
+      cmd.includes("tfx-route.sh"),
+      `tfx-route.sh가 포함되어야 함: ${cmd}`,
+    );
+    assert.ok(cmd.includes("TFX_CLI_MODE="));
+    assert.ok(cmd.includes("TFX_CODEX_PROFILE="));
     assert.ok(cmd.includes("/tmp/result.txt"));
     assert.ok(
-      /model_reasoning_effort=\\?"high\\?"/u.test(cmd),
-      `headless Codex가 전역 ultra를 상속하지 않고 역할 프로필을 써야 함: ${cmd}`,
+      cmd.includes("gpt56_terra_high"),
+      `headless Codex가 역할 프로필을 route에 전달해야 함: ${cmd}`,
     );
-    assert.ok(!/model_reasoning_effort=\\?"ultra\\?"/u.test(cmd));
+    assert.ok(!cmd.includes("gpt56_sol_ultra"));
   });
 
   it("headless architect → gpt56_sol_xhigh 역할 프로필", () => {
@@ -316,7 +320,7 @@ describe("headless: buildHeadlessCommand", async () => {
       { role: "architect" },
     );
     assert.ok(
-      /model_reasoning_effort=\\?"xhigh\\?"/u.test(cmd),
+      cmd.includes("gpt56_sol_xhigh"),
       `architect profile 누락: ${cmd}`,
     );
   });
@@ -335,9 +339,9 @@ describe("headless: buildHeadlessCommand", async () => {
       { role: "deep-executor", profile: "gpt56_sol_ultra" },
     );
 
-    assert.ok(/model_reasoning_effort=\\?"max\\?"/u.test(explicitMax));
-    assert.ok(/model_reasoning_effort=\\?"max\\?"/u.test(nestedUltra));
-    assert.ok(!/model_reasoning_effort=\\?"ultra\\?"/u.test(nestedUltra));
+    assert.ok(explicitMax.includes("gpt56_sol_max"));
+    assert.ok(nestedUltra.includes("gpt56_sol_max"));
+    assert.ok(!nestedUltra.includes("gpt56_sol_ultra"));
   });
 
   it("headless applies TFX_CODEX_PROFILE but never inherits auto/global ultra", () => {
@@ -358,9 +362,9 @@ describe("headless: buildHeadlessCommand", async () => {
         { role: "executor" },
       );
 
-      assert.ok(/model_reasoning_effort=\\?"max\\?"/u.test(explicitMax));
-      assert.ok(/model_reasoning_effort=\\?"high\\?"/u.test(automatic));
-      assert.ok(!/model_reasoning_effort=\\?"ultra\\?"/u.test(automatic));
+      assert.ok(explicitMax.includes("gpt56_sol_max"));
+      assert.ok(automatic.includes("gpt56_terra_high"));
+      assert.ok(!automatic.includes("gpt56_sol_ultra"));
     } finally {
       if (previous === undefined) delete process.env.TFX_CODEX_PROFILE;
       else process.env.TFX_CODEX_PROFILE = previous;
@@ -393,9 +397,9 @@ describe("headless: buildHeadlessCommand", async () => {
         { role: "executor", profile: "missing-private" },
       );
 
-      assert.ok(/model_reasoning_effort=\\?"max\\?"/u.test(customUltra));
-      assert.ok(!/model_reasoning_effort=\\?"ultra\\?"/u.test(customUltra));
-      assert.ok(/model_reasoning_effort=\\?"high\\?"/u.test(missingCustom));
+      assert.ok(customUltra.includes("gpt56_sol_max"));
+      assert.ok(!customUltra.includes("gpt56_sol_ultra"));
+      assert.ok(missingCustom.includes("gpt56_terra_high"));
     } finally {
       if (previous === undefined) delete process.env.CODEX_HOME;
       else process.env.CODEX_HOME = previous;
@@ -442,25 +446,14 @@ describe("headless: buildHeadlessCommand", async () => {
 
   it("프롬프트를 임시 파일에 저장 (셸 주입 방지)", () => {
     const cmd = buildHeadlessCommand("codex", "it's a test", "/tmp/r.txt");
-    // PR #252: codex 명령은 셸 분기로 prompt 를 stdin 으로 전달.
-    //   - Windows pwsh7: `Get-Content -Raw 'path' | codex ...`
-    //   - Unix bash/zsh: `codex ... < 'path'`
-    // 두 경우 모두 codex 의 argv 에는 prompt 가 안 들어가서 셸 주입 방지.
-    if (process.platform === "win32") {
-      assert.ok(
-        cmd.includes("Get-Content -Raw"),
-        `프롬프트가 PowerShell stdin pipe 로 주입되어야 함 (Windows): ${cmd}`,
-      );
-    } else {
-      assert.ok(
-        /< ['"][^'"]*prompt-/.test(cmd),
-        `프롬프트가 stdin redirect 로 주입되어야 함 (Unix): ${cmd}`,
-      );
-    }
-    // prompt 파일 경로 검증 — buildExecCommand 의 새 naming
-    // (`prompt-<timestamp>-<pid>-<counter>.txt`).
+    // route-backed shell은 prompt file을 읽어 argv로 route에 전달한다. prompt 자체는
+    // route command에 인라인되지 않아 shell injection 경로가 없다.
     assert.ok(
-      /prompt-\d+-\d+-\d+\.txt/.test(cmd),
+      /__tfx_prompt=\$\(cat /.test(cmd),
+      `route가 prompt file을 읽어야 함: ${cmd}`,
+    );
+    assert.ok(
+      /prompt-[a-f0-9-]+\.txt/i.test(cmd),
       `프롬프트 파일 경로가 포함되어야 함: ${cmd}`,
     );
   });
@@ -474,7 +467,10 @@ describe("headless: buildHeadlessCommand", async () => {
 
   it("에이전트 역할명 → CLI 타입 자동 해석 (resolveCliType)", () => {
     const cmd = buildHeadlessCommand("executor", "fix bug", "/tmp/r.txt");
-    assert.ok(cmd.includes("codex exec"), `executor → codex: ${cmd}`);
+    assert.ok(
+      cmd.includes("tfx-route.sh"),
+      `executor → route-backed codex: ${cmd}`,
+    );
     const cmd2 = buildHeadlessCommand("designer", "make ui", "/tmp/r.txt");
     assert.ok(cmd2.includes("tfx-route.sh"), `designer → route: ${cmd2}`);
     assert.ok(cmd2.includes("antigravity"), `designer → antigravity: ${cmd2}`);
@@ -490,13 +486,10 @@ describe("headless: buildHeadlessCommand", async () => {
       handoff: false,
       mcp: "implement",
     });
-    // PR #252: 힌트는 buildExecCommand 가 생성한 stdin prompt 파일에 포함됨.
-    // 새 file naming: `prompt-<timestamp>-<pid>-<counter>.txt`.
-    const promptMatch = cmd.match(/prompt-\d+-\d+-\d+\.txt/);
+    // route-backed headless도 생성 prompt file에 힌트를 넣는다.
+    const promptMatch = cmd.match(/prompt-[a-f0-9-]+\.txt/i);
     assert.ok(promptMatch, `프롬프트 파일 경로가 명령에 포함되어야 함: ${cmd}`);
-    // 프롬프트 파일이 생성되었으면 MCP 힌트 포함 확인.
-    // Windows: `Get-Content -Raw 'path' | ...` / Unix: `... < 'path'`.
-    const fullPath = cmd.match(/['"]([^'"]*prompt-\d+-\d+-\d+\.txt)['"]/)?.[1];
+    const fullPath = cmd.match(/(\/[^\s'"]*prompt-[a-f0-9-]+\.txt)/i)?.[1];
     if (fullPath && existsSync(fullPath)) {
       const content = readFileSync(fullPath, "utf8");
       assert.ok(

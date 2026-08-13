@@ -54,12 +54,11 @@ function extractFrontmatter(content) {
 }
 
 describe("스킬 문서 존재 확인", () => {
-  // Phase 5 cleanup (b371043) removed tfx-deep-interview, tfx-autoresearch thin
-  // aliases. Their semantics were absorbed into tfx-interview / tfx-research
-  // main bodies. See `축소된 스킬 본체 이관 완결성` suite for the body-level checks.
+  // Phase 5 cleanup (b371043) removed tfx-deep-interview, tfx-autoresearch,
+  // and tfx-multi thin aliases. Their semantics were absorbed into the main
+  // skill bodies. See `축소된 스킬 본체 이관 완결성` suite for body-level checks.
   const expected = [
     "tfx-auto",
-    "tfx-multi",
     "tfx-hub",
     "tfx-doctor",
     "tfx-setup",
@@ -101,7 +100,7 @@ describe("tfx-auto SKILL.md — 에이전트 매핑 일관성", () => {
     );
   });
 
-  it("멀티 태스크 라우팅 섹션에 headless 엔진 참조 포함", () => {
+  it("멀티 태스크 라우팅 섹션이 auto 기본과 headless opt-in을 설명한다", () => {
     const content = readSkill("tfx-auto");
     // "멀티 태스크 라우팅" 섹션에서 headless를 찾는다
     const routingSection = extractSection(
@@ -109,14 +108,13 @@ describe("tfx-auto SKILL.md — 에이전트 매핑 일관성", () => {
       /^##\s+멀티\s+태스크\s+라우팅/,
     );
     assert.ok(
-      /\bheadless\b/.test(routingSection),
-      "headless가 멀티 태스크 라우팅 섹션에 없음",
+      /\bauto\b/i.test(routingSection) && /\bheadless\b/i.test(routingSection),
+      "auto 기본과 headless opt-in이 멀티 태스크 라우팅 섹션에 없음",
     );
-    // 헤드리스가 단순 주석이 아닌 실제 엔진 참조인지 확인 (headless.mjs 또는 headless 직행 언급)
+    // auto 기본이 실제 multiplexer 경로를 설명하는지 확인한다.
     assert.ok(
-      /headless\.(mjs|엔진|직접|직행)/i.test(routingSection) ||
-        /headless\s+엔진/i.test(routingSection),
-      "headless가 엔진 참조로 사용되지 않음 (headless.mjs 또는 headless 엔진 형태여야 함)",
+      /tmux|psmux/i.test(routingSection),
+      "auto 기본의 tmux/psmux 동작이 멀티 태스크 라우팅 섹션에 없음",
     );
   });
 
@@ -201,28 +199,27 @@ describe("tfx-auto SKILL.md — thin alias 이관 규칙", () => {
     );
   });
 
-  it("멀티 태스크 라우팅 섹션에 headless 엔진 참조 포함", () => {
+  it("멀티 태스크 라우팅 섹션에 headless opt-in 설명 포함", () => {
     const content = readSkill("tfx-auto");
     const routingSection = extractSection(
       content,
       /^##\s+멀티\s+태스크\s+라우팅/,
     );
     assert.ok(
-      /\bheadless\b/i.test(routingSection) &&
-        /headless\.(mjs|엔진|직행)/i.test(routingSection),
-      "headless 엔진 참조가 멀티 태스크 라우팅 섹션에 없음",
+      /--teammate-mode headless/i.test(routingSection),
+      "headless opt-in 명령이 멀티 태스크 라우팅 섹션에 없음",
     );
   });
 
-  it("headless 실행 명령이 구체적인 Bash 형태로 존재", () => {
+  it("기본 실행 명령이 teammate mode를 생략한다", () => {
     const content = readSkill("tfx-auto");
     assert.ok(
-      /tfx\s+multi\s+--teammate-mode\s+headless/.test(content),
-      "headless 엔진 실행 명령(tfx multi --teammate-mode headless)이 없음",
+      /Bash\("tfx multi --auto-attach --dashboard --assign/.test(content),
+      "기본 tfx multi 명령이 mode 생략 형태로 없음",
     );
   });
 
-  it("false positive 방지: headless가 주석이 아닌 MANDATORY 지시문에 포함", () => {
+  it("false positive 방지: auto 기본이 MANDATORY 지시문에 포함", () => {
     const content = readSkill("tfx-auto");
     const routingSection = extractSection(
       content,

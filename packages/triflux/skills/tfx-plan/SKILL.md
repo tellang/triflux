@@ -26,17 +26,16 @@ argument-hint: "<구현할 기능> [--quick]"
 ### 전제조건 프로브 및 Tier Degradation
 
 ```bash
-(tmux -V 2>/dev/null || psmux -V 2>/dev/null) && \
-  curl -sf http://127.0.0.1:27888/status >/dev/null && \
+curl -sf http://127.0.0.1:27888/status >/dev/null && \
   codex --version 2>/dev/null && \
   agy --version 2>/dev/null
 ```
 
 | Tier | 조건 | 실행 |
 |------|------|------|
-| **Tier 1** | 전부 정상 | headless multi 3-Model |
+| **Tier 1** | Hub + 필요 CLI 전부 정상 | auto multi 3-Model (tmux/psmux 리드면 interactive) |
 | **Tier 2** | 일부 CLI | 가용 + Claude Agent |
-| **Tier 3** | headless 불가 | Claude Agent only |
+| **Tier 3** | Hub 또는 필요 CLI 불가 | Claude Agent only |
 
 Tier 3:
 ```
@@ -46,7 +45,7 @@ Tier 3:
 
 ### HARD RULES
 1. `codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 금지
-2. Codex/Antigravity → `Bash("tfx multi --teammate-mode headless --assign ...")` 만
+2. Codex/Antigravity → `Bash("tfx multi --assign ...")` 만. teammate mode는 생략해 `auto` 기본값을 쓴다.
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent 동시 호출
 5. deprecated Gemini CLI 또는 legacy Gemini assign 금지. Antigravity는 `antigravity:`/`agy` 이름만 사용한다.
@@ -91,12 +90,12 @@ Agent(
 
 **Bash (Codex Architect):**
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+Bash("tfx multi --auto-attach --dashboard \
   --assign 'codex:시니어 엔지니어 기술 설계. 기능: [TASK]. 코드베이스: [RECON]. JSON: { architecture, components, data_models, api, files, impl_notes, confidence }:architect' \
   --timeout 1800", run_in_background=true)
 ```
 
-> 배리어: 위 dispatch는 background — architect JSON을 소비하는 단계 전에 task-notification 완료(`=== HEADLESS_COMPLETE ... ===` 마커)를 확인하고 출력 파일에서 결과를 회수한다.
+> 배리어: 위 dispatch는 background — architect JSON을 소비하는 단계 전에 task-notification 완료를 확인하고 team runtime이 제공한 결과에서 회수한다.
 
 **Agent (Claude Critic fallback, schema-valid path):**
 ```

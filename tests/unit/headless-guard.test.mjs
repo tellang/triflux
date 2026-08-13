@@ -213,13 +213,16 @@ describe("headless-guard decision matrix (runtime)", () => {
     assert.equal(result.status, 0);
     const payload = JSON.parse((result.stdout || "").trim());
     const built = payload?.hookSpecificOutput?.updatedInput?.command || "";
+    assert.match(built, /^tfx multi --auto-attach\b/u);
+    assert.doesNotMatch(built, /--teammate-mode\b/u);
     assert.match(built, new RegExp(`--timeout ${lane}\\b`));
   });
 
   it("psmux 설치 + direct codex exec는 deny되고 하드스톱 메시지를 제공한다", () => {
     const result = runGuardWithBashCommand("codex exec 'hello'");
     assert.equal(result.status, 2);
-    assert.match(result.stderr, /--teammate-mode headless/u);
+    assert.match(result.stderr, /tfx multi --assign/u);
+    assert.doesNotMatch(result.stderr, /--teammate-mode headless/u);
     assert.match(result.stderr, /하드스톱/u);
     assert.match(result.stderr, /우회도 시도하지 마라/u);
   });
@@ -227,7 +230,8 @@ describe("headless-guard decision matrix (runtime)", () => {
   it("psmux 설치 + direct gemini --prompt는 deny되고 하드스톱 메시지를 제공한다", () => {
     const result = runGuardWithBashCommand("gemini --prompt 'hello'");
     assert.equal(result.status, 2);
-    assert.match(result.stderr, /--teammate-mode headless/u);
+    assert.match(result.stderr, /tfx multi --assign/u);
+    assert.doesNotMatch(result.stderr, /--teammate-mode headless/u);
     assert.match(result.stderr, /하드스톱/u);
   });
 
@@ -437,7 +441,7 @@ describe("tfx-multi Edit/Write gate (runtime)", () => {
     );
 
     assert.equal(result.status, 2);
-    assert.match(result.stderr, /headless dispatch 먼저 하세요/u);
+    assert.match(result.stderr, /multi\(auto\) dispatch 먼저 하세요/u);
   });
 
   it("Write with dispatched tfx-multi should pass silently under threshold, nudge at threshold", () => {
@@ -632,7 +636,7 @@ describe("P1a: 단일 워커 headless 우회", () => {
     );
   });
 
-  it("--multi 플래그 → headless 변환 수행", () => {
+  it("--multi 플래그 → multi(auto) 변환 수행", () => {
     assert.equal(
       shouldBypassHeadless(
         "bash tfx-route.sh executor 'fix bug' --multi implement",
@@ -641,7 +645,7 @@ describe("P1a: 단일 워커 headless 우회", () => {
     );
   });
 
-  it("--parallel 플래그 → headless 변환 수행", () => {
+  it("--parallel 플래그 → multi(auto) 변환 수행", () => {
     assert.equal(
       shouldBypassHeadless("bash tfx-route.sh executor 'fix bug' --parallel"),
       false,

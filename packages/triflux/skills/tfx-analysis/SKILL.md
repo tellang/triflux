@@ -28,29 +28,28 @@ ARGUMENTS 에 `--quick` 포함 → **Quick 모드** (Codex 단일).
 > **진입 즉시 실행** — 10초 내 가시적 출력 보장. 빈 stdout + exit 0 **금지**.
 
 ```bash
-(tmux -V 2>/dev/null || psmux -V 2>/dev/null) && \
-  curl -sf http://127.0.0.1:27888/status >/dev/null && \
+curl -sf http://127.0.0.1:27888/status >/dev/null && \
   codex --version 2>/dev/null && \
   agy --version 2>/dev/null
 ```
 
 | Tier | 조건 | 실행 방식 |
 |------|------|----------|
-| **Tier 1** | tmux/psmux + Hub + Codex + Antigravity 전부 | headless multi 3-CLI |
+| **Tier 1** | Hub + Codex + Antigravity 전부 | auto multi 3-CLI (tmux/psmux 리드면 interactive) |
 | **Tier 2** | Codex 또는 Antigravity 중 하나만 | 가용 CLI + Claude Agent |
-| **Tier 3** | headless 불가 | Claude Agent only (consensus 미적용) |
+| **Tier 3** | Hub 또는 필요 CLI 불가 | Claude Agent only (consensus 미적용) |
 
 Tier 3 시:
 ```
-⚠ [Tier 3] headless multi 환경 미충족 — single-model 모드 (consensus 미적용)
-  누락: {missing}  |  권장: tmux/psmux + Hub + Codex + Antigravity 설치
+⚠ [Tier 3] multi 실행 환경 미충족 — single-model 모드 (consensus 미적용)
+  누락: {missing}  |  권장: Hub + Codex + Antigravity 설치
   또는 /tfx-analysis --quick 사용
 ```
 
 ### HARD RULES
 
 1. `codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 금지
-2. Codex/Antigravity → `Bash("tfx multi --teammate-mode headless ...")` 만
+2. Codex/Antigravity → `Bash("tfx multi ...")` 만. teammate mode는 생략해 `auto` 기본값을 쓴다.
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent 동시 호출
 
@@ -84,10 +83,10 @@ Agent(
 
 **Codex + Antigravity headless:**
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard --assign 'codex:시니어+보안 엔지니어로서 분석하라. 대상: {target}. 렌즈: 구현 품질, 성능, OWASP, 안정성, 기술 부채. JSON: { findings: [...], metrics: {...}, health_score: 0-100 }:security-engineer' --assign 'antigravity:UX 엔지니어+테크니컬 라이터로서 분석하라. 대상: {target}. 렌즈: DX, 문서화, 접근성, 국제화, 네이밍. JSON: { findings: [...], documentation_score: 0-100, health_score: 0-100 }:ux-engineer' --timeout 1800", run_in_background=true)
+Bash("tfx multi --auto-attach --dashboard --assign 'codex:시니어+보안 엔지니어로서 분석하라. 대상: {target}. 렌즈: 구현 품질, 성능, OWASP, 안정성, 기술 부채. JSON: { findings: [...], metrics: {...}, health_score: 0-100 }:security-engineer' --assign 'antigravity:UX 엔지니어+테크니컬 라이터로서 분석하라. 대상: {target}. 렌즈: DX, 문서화, 접근성, 국제화, 네이밍. JSON: { findings: [...], documentation_score: 0-100, health_score: 0-100 }:ux-engineer' --timeout 1800", run_in_background=true)
 ```
 
-> 배리어: 위 dispatch는 background — task-notification 완료(`=== HEADLESS_COMPLETE ... ===` 마커) 후 출력 파일에서 두 분석 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
+> 배리어: 위 dispatch는 background — task-notification 완료 후 team runtime 결과에서 두 분석 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
 
 #### Step 3: Tri-Debate (교차검증) — Bash + Agent 동시 호출
 

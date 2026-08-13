@@ -4,18 +4,18 @@
  * headless-guard.mjs — PreToolUse 훅 (상시 활성 auto-route)
  *
  * primary multiplexer(Windows psmux, macOS/Linux tmux)가 설치된 환경에서 Bash(tfx-route.sh) 개별 호출을
- * 자동으로 headless 명령으로 변환한다.
+ * 자동으로 teammate mode를 생략한 `tfx multi` 명령으로 변환한다.
  *
  * v2: 마커 파일 의존 제거. primary multiplexer 설치 여부만으로 판단.
  *     Opus가 SKILL.md를 무시해도 auto-route가 작동한다.
  *
  * v3: A(gate) + B(nudge) — OMC 패턴 도입
- *     A: tfx-multi 활성 시 headless dispatch 전까지 Agent 작업 위임 차단
+ *     A: tfx-multi 활성 시 multi dispatch 전까지 Agent 작업 위임 차단
  *     B: dispatch 후 네이티브 드리프트 감지 시 nudge
  *     상태: $TMPDIR/tfx-multi-state.json (tfx-multi-activate.mjs가 생성)
  *
  * 동작:
- * - primary multiplexer 있음 + Bash(tfx-route.sh) → updatedInput: tfx multi --headless --assign
+ * - primary multiplexer 있음 + Bash(tfx-route.sh) → updatedInput: tfx multi --assign (mode=`auto`)
  * - primary multiplexer 있음 + Bash(codex exec / legacy Gemini prompt mode) → deny
  * - primary multiplexer 있음 + Agent(codex/gemini CLI 래핑) → deny
  * - primary multiplexer 없음 → 전부 통과
@@ -193,7 +193,7 @@ export function buildCommand(
   const f = parsed.flags || {};
   const safePrompt = parsed.prompt.replace(/'/g, "'\\''");
 
-  const parts = ["tfx multi --teammate-mode headless"];
+  const parts = ["tfx multi"];
   if (!f.noAutoAttach) parts.push("--auto-attach");
   if (!f.noAutoAttach) parts.push("--dashboard"); // 워커 요약 스플릿이 기본
   if (f.verbose) parts.push("--verbose");
@@ -228,12 +228,12 @@ function autoRoute(updatedCommand, reason) {
   process.exit(0);
 }
 
-const HEADLESS_FALLBACK_COMMAND =
+const MULTI_FALLBACK_COMMAND =
   "올바른 호출:\n" +
   "  • /tfx-auto --parallel N         (병렬 worker, cwd 공유)\n" +
   "  • /tfx-auto --parallel swarm     (worktree 격리, 코드 변경)\n" +
   "레거시 alias (deprecated):\n" +
-  "  Bash(\"tfx multi --teammate-mode headless --assign 'codex:prompt:role' ...\")";
+  "  Bash(\"tfx multi --assign 'codex:prompt:role' ...\")";
 const DIRECT_CLI_BYPASS_HINT =
   "이 차단은 하드스톱이다. 환경변수 우회, SSH 원격 실행, 스크립트 배포 등 어떤 형태의 우회도 시도하지 마라. " +
   "Hub가 미가용이면 hub-ensure로 Hub를 시작한 뒤 tfx-auto를 사용하라. " +
@@ -268,7 +268,7 @@ async function main() {
   if (toolName === "Bash") {
     const cmd = toolInput.command || "";
 
-    // headless 명령은 통과 + dispatch 감지 (A: gate 해제)
+    // multi 명령은 통과 + dispatch 감지 (A: gate 해제)
     if (cmd.includes("tfx multi") || cmd.includes("triflux.mjs multi")) {
       const multiState = readMultiState();
       if (multiState && cmd.includes("--assign")) {
@@ -293,7 +293,7 @@ async function main() {
       ) {
         deny(
           "[headless-guard] psmux send-keys/split-window에 codex/gemini 직접 호출이 포함되어 있습니다. " +
-            `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
+            `승인된 경로: ${MULTI_FALLBACK_COMMAND}. ` +
             DIRECT_CLI_BYPASS_HINT,
         );
       }
@@ -362,7 +362,7 @@ async function main() {
       }
       deny(
         "[headless-guard] codex/gemini 직접 호출(파이프/복합 명령 포함)은 headless-guard에서 차단됩니다. " +
-          `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
+          `승인된 경로: ${MULTI_FALLBACK_COMMAND}. ` +
           DIRECT_CLI_BYPASS_HINT,
       );
     }
@@ -378,8 +378,8 @@ async function main() {
 
       const parsed = parseRouteCommand(cmd);
       if (parsed) {
-        // P1a: 단일 워커는 headless 변환 건너뛰기 (직접 실행이 523~1173ms 절약)
-        // TFX_FORCE_HEADLESS=1이면 단일이어도 headless 변환 강제
+        // P1a: 단일 워커는 multi 변환 건너뛰기 (직접 실행이 523~1173ms 절약)
+        // TFX_FORCE_HEADLESS=1이면 단일이어도 multi 변환을 강제한다.
         if (shouldBypassHeadless(cmd)) {
           process.exit(0); // 원본 tfx-route.sh 명령 그대로 통과
         }
@@ -389,13 +389,13 @@ async function main() {
         const f = parsed.flags || {};
         autoRoute(
           builtCmd,
-          `[headless-guard] auto-route: tfx-route.sh ${parsed.agent} → headless. mcp=${parsed.mcp} dashboard=${!f.noAutoAttach}`,
+          `[headless-guard] auto-route: tfx-route.sh ${parsed.agent} → multi(auto). mcp=${parsed.mcp} dashboard=${!f.noAutoAttach}`,
         );
       }
       deny(
-        "[headless-guard] tfx-route.sh를 headless로 변환 실패. " +
+        "[headless-guard] tfx-route.sh를 multi(auto)로 변환 실패. " +
           "/tfx-auto --parallel N (또는 --parallel swarm) 형식을 사용하세요. " +
-          "레거시: Bash(\"tfx multi --teammate-mode headless --assign 'cli:prompt:role' ...\")",
+          "레거시: Bash(\"tfx multi --assign 'cli:prompt:role' ...\")",
       );
     }
   }
@@ -415,14 +415,14 @@ async function main() {
 
       if (multiState.nativeWorkCalls > GATE_THRESHOLD) {
         deny(
-          `[headless-guard] tfx-auto gate: ${toolName} 호출 ${multiState.nativeWorkCalls}회 — headless dispatch 먼저 하세요.\n` +
-            HEADLESS_FALLBACK_COMMAND,
+          `[headless-guard] tfx-auto gate: ${toolName} 호출 ${multiState.nativeWorkCalls}회 — multi(auto) dispatch 먼저 하세요.\n` +
+            MULTI_FALLBACK_COMMAND,
         );
       }
 
       nudge(
         `[headless-guard] tfx-multi 활성 (${multiState.nativeWorkCalls}/${GATE_THRESHOLD}). ` +
-          "headless dispatch 후 작업을 시작하세요.",
+          "multi(auto) dispatch 후 작업을 시작하세요.",
       );
     }
 
@@ -435,7 +435,7 @@ async function main() {
       multiState.nativeWorkCallsSinceDispatch = 0;
       writeMultiState(multiState);
       nudge(
-        "[headless-guard] nudge: headless 워커가 코드 수정 중. 직접 수정은 충돌 위험.",
+        "[headless-guard] nudge: multi 워커가 코드 수정 중. 직접 수정은 충돌 위험.",
       );
     }
     process.exit(0); // threshold 미만이면 조용히 통과
@@ -458,14 +458,14 @@ async function main() {
 
         if (multiState.nativeWorkCalls > GATE_THRESHOLD) {
           deny(
-            `[headless-guard] tfx-auto gate: Agent(${subType || "default"}) 호출 ${multiState.nativeWorkCalls}회 — headless에 먼저 dispatch하세요.\n` +
-              HEADLESS_FALLBACK_COMMAND,
+            `[headless-guard] tfx-auto gate: Agent(${subType || "default"}) 호출 ${multiState.nativeWorkCalls}회 — multi(auto)에 먼저 dispatch하세요.\n` +
+              MULTI_FALLBACK_COMMAND,
           );
         }
         // 허용 범위 내 → 경고 + 통과
         nudge(
           `[headless-guard] tfx-multi 활성 (${multiState.nativeWorkCalls}/${GATE_THRESHOLD}). ` +
-            "headless dispatch 후 작업을 시작하세요.",
+            "multi(auto) dispatch 후 작업을 시작하세요.",
         );
       } else {
         // ── B: nudge — dispatch 후, 네이티브 드리프트 감지 ──
@@ -477,7 +477,7 @@ async function main() {
           multiState.nativeWorkCallsSinceDispatch = 0;
           writeMultiState(multiState);
           nudge(
-            "[headless-guard] nudge: headless 워커가 실행 중입니다. " +
+            "[headless-guard] nudge: multi 워커가 실행 중입니다. " +
               "결과를 기다리거나 추가 --assign으로 위임하세요.",
           );
         }
@@ -504,7 +504,7 @@ async function main() {
     if (cliPatterns.some((p) => p.test(combined))) {
       deny(
         "[headless-guard] Codex/Antigravity를 Agent()로 래핑하지 마세요. " +
-          `승인된 경로: ${HEADLESS_FALLBACK_COMMAND}. ` +
+          `승인된 경로: ${MULTI_FALLBACK_COMMAND}. ` +
           DIRECT_CLI_BYPASS_HINT,
       );
     }

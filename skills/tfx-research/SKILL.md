@@ -70,12 +70,12 @@ Agent(
 
 **Bash (Codex + Brave):**  *(Antigravity/agy 제외 — agy --print 는 무거운 리서치에서 idle 미도달 시 5분 행; route 에서 --print-timeout 180s 로 bound)*
 ```
-Bash("tfx multi --teammate-mode headless --auto-attach --dashboard \
+Bash("tfx multi --auto-attach --dashboard \
   --assign 'codex:서브쿼리를 Brave Search 로 검색. 서브쿼리: {sub_queries}. 관점: 실용/산업. brave_web_search + brave_news_search, freshness=pw. 각 쿼리 상위 5개 구조화.:researcher' \
   --timeout 1800", run_in_background=true)
 ```
 
-> 배리어: 위 dispatch는 background — task-notification 완료(`=== HEADLESS_COMPLETE ... ===` 마커) 후 출력 파일에서 검색 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
+> 배리어: 위 dispatch는 background — task-notification 완료 후 team runtime 결과에서 검색 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
 
 #### Step 3: 결과 수집 및 교차검증
 
