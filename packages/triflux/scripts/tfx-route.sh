@@ -37,6 +37,78 @@ fi
 
 set -euo pipefail
 
+# ── 영속 machine profile (env > profile > runtime observation) ──
+# 신뢰 경계: 파일을 source/eval 하지 않고 allowlist literal만 읽는다.
+resolve_machine_profile_path() {
+  if [[ -n "${TFX_MACHINE_PROFILE_PATH:-}" ]]; then
+    printf '%s\n' "$TFX_MACHINE_PROFILE_PATH"
+    return 0
+  fi
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*)
+      local appdata_path="${APPDATA:-${HOME}/AppData/Roaming}"
+      if command -v cygpath >/dev/null 2>&1; then
+        appdata_path="$(cygpath -u "$appdata_path" 2>/dev/null || printf '%s' "$appdata_path")"
+      else
+        appdata_path="${appdata_path//\\//}"
+      fi
+      printf '%s/triflux/machine-profile.env\n' "${appdata_path%/}"
+      ;;
+    *)
+      printf '%s/triflux/machine-profile.env\n' "${XDG_CONFIG_HOME:-${HOME}/.config}"
+      ;;
+  esac
+}
+
+load_machine_profile() {
+  local profile_path line key value
+  profile_path="$(resolve_machine_profile_path)"
+  [[ -r "$profile_path" ]] || return 0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == \#* ]] && continue
+    if [[ "$line" != *=* ]]; then
+      echo "[tfx-route] machine profile 형식 무시: KEY=VALUE 아님" >&2
+      continue
+    fi
+    key="${line%%=*}"
+    value="${line#*=}"
+    if [[ -z "$value" || "$value" == *[!A-Za-z0-9_.-]* ]]; then
+      echo "[tfx-route] machine profile ${key} 값 무시: 안전한 literal 아님" >&2
+      continue
+    fi
+    case "$key" in
+      TFX_MACHINE_PROFILE_VERSION)
+        [[ -n "${TFX_MACHINE_PROFILE_VERSION+x}" ]] || TFX_MACHINE_PROFILE_VERSION="$value" ;;
+      TFX_MACHINE_OS)
+        [[ -n "${TFX_MACHINE_OS+x}" ]] || TFX_MACHINE_OS="$value" ;;
+      TFX_MULTIPLEXER_POLICY)
+        [[ -n "${TFX_MULTIPLEXER_POLICY+x}" ]] || TFX_MULTIPLEXER_POLICY="$value" ;;
+      TFX_DISABLE_CODEX)
+        [[ -n "${TFX_DISABLE_CODEX+x}" ]] || TFX_DISABLE_CODEX="$value" ;;
+      TFX_DISABLE_ANTIGRAVITY)
+        [[ -n "${TFX_DISABLE_ANTIGRAVITY+x}" ]] || TFX_DISABLE_ANTIGRAVITY="$value" ;;
+      TFX_TIMEOUT_POLICY)
+        [[ -n "${TFX_TIMEOUT_POLICY+x}" ]] || TFX_TIMEOUT_POLICY="$value" ;;
+      TFX_HARD_CEILING_SEC)
+        [[ -n "${TFX_HARD_CEILING_SEC+x}" ]] || TFX_HARD_CEILING_SEC="$value" ;;
+      TFX_STALL_THRESHOLD)
+        [[ -n "${TFX_STALL_THRESHOLD+x}" ]] || TFX_STALL_THRESHOLD="$value" ;;
+      TFX_STALL_KILL)
+        [[ -n "${TFX_STALL_KILL+x}" ]] || TFX_STALL_KILL="$value" ;;
+      *)
+        echo "[tfx-route] machine profile key 무시: $key" >&2 ;;
+    esac
+  done < "$profile_path"
+}
+
+load_machine_profile
+
+# 첫 인자(초)를 버리고 명령을 그대로 실행한다. timeout binary 부재 또는 명시적
+# TFX_HARD_CEILING_SEC=0에서 사용한다.
+_no_timeout() { shift; "$@"; }
+
 # ── timeout 명령 호환성 — Windows에서 TIMEOUT.exe 대신 Git Bash coreutils timeout 사용 ──
 if command -v /usr/bin/timeout >/dev/null 2>&1; then
   TIMEOUT_BIN="/usr/bin/timeout"
@@ -45,9 +117,9 @@ elif command -v gtimeout >/dev/null 2>&1; then
 elif command -v timeout >/dev/null 2>&1; then
   TIMEOUT_BIN="timeout"   # Linux 기본
 else
-  echo "[tfx-route] WARNING: timeout 명령을 찾을 수 없습니다 — TFX_HARD_CEILING_SEC 최후 방어선(기본 6h)이 비활성화됩니다. hung 워커 방어는 heartbeat stall kill 뿐입니다. macOS: brew install coreutils (gtimeout 제공)" >&2
-  # timeout 없이 실행 — 첫 인자(초)를 무시하고 나머지 명령을 그대로 실행
-  _no_timeout() { shift; "$@"; }
+  if [[ "${TFX_HARD_CEILING_SEC:-21600}" != "0" ]]; then
+    echo "[tfx-route] WARNING: timeout 명령을 찾을 수 없습니다 — TFX_HARD_CEILING_SEC 최후 방어선(기본 6h)이 비활성화됩니다. hung 워커 방어는 heartbeat stall kill 뿐입니다. macOS: brew install coreutils (gtimeout 제공)" >&2
+  fi
   TIMEOUT_BIN="_no_timeout"
 fi
 
@@ -462,12 +534,35 @@ prepend_codex_north_star() {
   fi
   local brief_file="${workdir}/.triflux/lake/current.md"
 
-  case "${TFX_CTO_NORTH_STAR:-1}" in
-    0|false|FALSE|off|OFF|no|NO)
-      printf '%s' "$prompt"
-      return 0
-      ;;
-  esac
+  # CTO gate의 의미론은 hub/lib/cto-env.mjs 한 곳이 소유한다. Bash는 Node
+  # one-shot으로 north_star_enabled 결과만 받아 소비하므로 TFX_CTO_* 판정 로직을
+  # 복제하지 않는다. helper를 불러올 수 없으면 ambient context 누출을 막기 위해
+  # fail-closed로 원본 prompt를 유지한다.
+  local cto_env_dir cto_env_module source_path
+  source_path="${BASH_SOURCE[0]:-$0}"
+  cto_env_dir="$(cd "$(dirname "$source_path")/../hub/lib" 2>/dev/null && pwd -P || true)"
+  cto_env_module="${cto_env_dir:+${cto_env_dir}/cto-env.mjs}"
+  if [[ ! -r "$cto_env_module" && -r "$PWD/hub/lib/cto-env.mjs" ]]; then
+    # 개발 checkout에서의 함수 단위 실행 fallback.
+    cto_env_module="$PWD/hub/lib/cto-env.mjs"
+  fi
+  if [[ ! -r "$cto_env_module" ]]; then
+    printf '%s' "$prompt"
+    return 0
+  fi
+
+  local north_star_enabled
+  if ! north_star_enabled="$(TFX_CTO="${TFX_CTO:-}" TFX_CTO_NORTH_STAR="${TFX_CTO_NORTH_STAR:-}" node --input-type=module -e '
+    const { resolveRoleControlSnapshot } = await import(process.argv[1]);
+    process.stdout.write(resolveRoleControlSnapshot().north_star_enabled ? "1" : "0");
+  ' "$cto_env_module" 2>/dev/null)"; then
+    printf '%s' "$prompt"
+    return 0
+  fi
+  if [[ "$north_star_enabled" != "1" ]]; then
+    printf '%s' "$prompt"
+    return 0
+  fi
 
   if [[ ! -r "$brief_file" ]]; then
     printf '%s' "$prompt"
@@ -1022,6 +1117,11 @@ agy_supports_headless() {
   [[ "$help_text" == *"--print"* && "$help_text" == *"--dangerously-skip-permissions"* ]]
 }
 
+codex_is_available() {
+  [[ "${TFX_CODEX_OK:-0}" == "1" ]] \
+    && command -v "${CODEX_BIN:-codex}" &>/dev/null
+}
+
 auto_reroute() {
   # Issue #281: code-change dispatch escalation is decided in the JS router
   # (hub/lib/tfx-route-args.mjs). This shell function only handles quota-driven
@@ -1039,6 +1139,10 @@ auto_reroute() {
   # 대상 CLI 존재 확인 (P2: command not found 방지)
   local candidate target_bin
   for candidate in "${candidates[@]}"; do
+    if is_cli_disabled "$candidate"; then
+      echo "[tfx-quota] ${candidate} disabled — 자동 전환 후보에서 제외" >&2
+      continue
+    fi
     case "$candidate" in
       codex) target_bin="${CODEX_BIN:-codex}" ;;
       gemini) target_bin="${GEMINI_BIN:-gemini}" ;;
@@ -1049,7 +1153,7 @@ auto_reroute() {
       agy_supports_headless "$target_bin" || continue
       target_cli="$candidate"
       break
-    elif command -v "$target_bin" &>/dev/null; then
+    elif [[ "$candidate" == "codex" ]] && codex_is_available; then
       target_cli="$candidate"
       break
     fi
@@ -1057,7 +1161,7 @@ auto_reroute() {
 
   if [[ -z "$target_cli" ]]; then
     echo "[tfx-quota] $failed_cli 대체 CLI 미설치 — 자동 전환 불가" >&2
-    return 1
+    return 78
   fi
 
   case "$failed_cli:$target_cli" in
@@ -1329,6 +1433,8 @@ route_agent() {
 # ── CLI 모드 오버라이드 (tfx-codex / tfx-gemini 스킬용) ──
 TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
+TFX_DISABLE_CODEX="${TFX_DISABLE_CODEX:-0}"
+TFX_DISABLE_ANTIGRAVITY="${TFX_DISABLE_ANTIGRAVITY:-0}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
 TFX_CODEX_PROFILE="${TFX_CODEX_PROFILE:-auto}"
@@ -1367,14 +1473,30 @@ if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
   [[ -n "${_pf_agents:-}" ]] && export TFX_AVAILABLE_AGENTS="$_pf_agents"
   export TFX_PREFLIGHT_LOADED=1
   unset _pf_codex _pf_gemini _pf_antigravity _pf_hub _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason
-  TFX_CODEX_PLAN="${TFX_CODEX_PLAN:-pro}"
 fi
+# TFX_PREFLIGHT_LOADED는 하위 route 호출에도 상속된다. 요금제도 같은 route policy로
+# 일관되게 상속해야 preflight가 빈 값을 반환한 자식이 set -u에서 죽지 않는다.
+export TFX_CODEX_PLAN="${TFX_CODEX_PLAN:-pro}"
 TFX_WORKER_INDEX="${TFX_WORKER_INDEX:-}"
 TFX_SEARCH_TOOL="${TFX_SEARCH_TOOL:-}"
 case "$TFX_NO_CLAUDE_NATIVE" in
   0|1) ;;
   *)
     echo "ERROR: TFX_NO_CLAUDE_NATIVE 값은 0 또는 1이어야 합니다. (현재: $TFX_NO_CLAUDE_NATIVE)" >&2
+    exit 1
+    ;;
+esac
+case "$TFX_DISABLE_CODEX" in
+  0|1) ;;
+  *)
+    echo "ERROR: TFX_DISABLE_CODEX 값은 0 또는 1이어야 합니다. (현재: $TFX_DISABLE_CODEX)" >&2
+    exit 1
+    ;;
+esac
+case "$TFX_DISABLE_ANTIGRAVITY" in
+  0|1) ;;
+  *)
+    echo "ERROR: TFX_DISABLE_ANTIGRAVITY 값은 0 또는 1이어야 합니다. (현재: $TFX_DISABLE_ANTIGRAVITY)" >&2
     exit 1
     ;;
 esac
@@ -1479,14 +1601,12 @@ apply_cli_mode() {
           echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini → antigravity (Gemini CLI deprecated, use --cli antigravity)" >&2
           TFX_CLI_MODE="antigravity"; apply_cli_mode; return
         fi
-        if command -v "$CODEX_BIN" &>/dev/null; then
+        if codex_is_available; then
           echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy headless 불가 — codex fallback" >&2
           TFX_CLI_MODE="codex"; apply_cli_mode; return
         fi
-        ORIGINAL_AGENT="${AGENT_TYPE}"
-        CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-        CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
-        echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy/codex 불가 — claude-native fallback" >&2
+        CLI_TYPE="antigravity"; CLI_CMD="agy"
+        echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy/codex 불가 — hard routing 검증으로 전달" >&2
       fi ;;
     antigravity)
       if [[ "$CLI_TYPE" != "claude-native" && "$CLI_TYPE" != "claude" ]]; then
@@ -1507,30 +1627,92 @@ apply_cli_mode() {
       # Issue #281: JS layer is the single source of truth for auto router
       # single/multi/swarm dispatch. Shell auto mode only normalizes CLI
       # availability and leaves code-change swarm escalation to JS.
-      if [[ "$CLI_TYPE" == "codex" ]] && ! command -v "$CODEX_BIN" &>/dev/null; then
+      if [[ "$CLI_TYPE" == "codex" ]] && ! codex_is_available; then
         if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && agy_supports_headless "${AGY_BIN:-agy}"; then
           TFX_CLI_MODE="antigravity"; apply_cli_mode; return
         else
-          ORIGINAL_AGENT="${AGENT_TYPE}"          CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-          echo "[tfx-route] codex/antigravity 모두 불가: $AGENT_TYPE → claude-native fallback" >&2
+          echo "[tfx-route] codex/antigravity 모두 불가: hard routing 검증으로 전달" >&2
         fi
       elif [[ "$CLI_TYPE" == "gemini" ]]; then
         if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && agy_supports_headless "${AGY_BIN:-agy}"; then
           TFX_CLI_MODE="antigravity"; apply_cli_mode; return
-        elif command -v "$CODEX_BIN" &>/dev/null; then
+        elif codex_is_available; then
           TFX_CLI_MODE="codex"; apply_cli_mode; return
         else
-          ORIGINAL_AGENT="${AGENT_TYPE}"          CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-          echo "[tfx-route] deprecated gemini alias: agy/codex 불가 — $AGENT_TYPE → claude-native fallback" >&2
+          CLI_TYPE="antigravity"; CLI_CMD="agy"
+          echo "[tfx-route] deprecated gemini alias: agy/codex 불가 — hard routing 검증으로 전달" >&2
         fi
       elif [[ "$CLI_TYPE" == "antigravity" ]] && ! agy_supports_headless "${AGY_BIN:-agy}"; then
-        if command -v "$CODEX_BIN" &>/dev/null; then
+        if codex_is_available; then
           TFX_CLI_MODE="codex"; apply_cli_mode; return
         fi
-        ORIGINAL_AGENT="${AGENT_TYPE}"          CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-        echo "[tfx-route] antigravity headless 불가: $AGENT_TYPE → claude-native fallback" >&2
+        echo "[tfx-route] antigravity headless 불가: hard routing 검증으로 전달" >&2
       fi ;;
   esac
+}
+
+# ── CLI disable 정책 (강제 모드/동적 오버라이드보다 우선) ──
+# TFX_CLI_MODE는 선호/강제 선택이고 TFX_*_OK는 preflight 관측값이다. 이 정책은
+# 운영자가 명시한 실행 금지이므로, 최종 CLI 선택 후 한 번만 적용한다.
+is_cli_disabled() {
+  case "$1" in
+    codex) [[ "$TFX_DISABLE_CODEX" == "1" ]] ;;
+    antigravity) [[ "$TFX_DISABLE_ANTIGRAVITY" == "1" ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+is_cli_available() {
+  case "$1" in
+    codex)
+      codex_is_available
+      ;;
+    antigravity)
+      [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] \
+        && agy_supports_headless "${AGY_BIN:-agy}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+apply_cli_disable_policy() {
+  local selected="$CLI_TYPE"
+  [[ "$selected" == "gemini" ]] && selected="antigravity"
+  [[ "$selected" == "codex" || "$selected" == "antigravity" ]] || return 0
+
+  local blocked_reason=""
+  if is_cli_disabled "$selected"; then
+    case "$selected" in
+      codex) blocked_reason="TFX_DISABLE_CODEX=1: codex 선택 차단" ;;
+      antigravity) blocked_reason="TFX_DISABLE_ANTIGRAVITY=1: antigravity 선택 차단" ;;
+    esac
+  elif ! is_cli_available "$selected"; then
+    blocked_reason="${selected} 미가용: 선택 차단"
+  else
+    return 0
+  fi
+  echo "[tfx-route] $blocked_reason" >&2
+
+  local candidate=""
+  case "$selected" in
+    codex) candidate="antigravity" ;;
+    antigravity) candidate="codex" ;;
+  esac
+  if ! is_cli_disabled "$candidate" && is_cli_available "$candidate"; then
+    echo "[tfx-route] ${selected} → ${candidate} 명시적 fallback (금지 CLI 제외)" >&2
+    TFX_CLI_MODE="$candidate"
+    apply_cli_mode
+    if [[ "$CLI_TYPE" == "$candidate" ]] \
+      && ! is_cli_disabled "$CLI_TYPE" \
+      && is_cli_available "$CLI_TYPE"; then
+      return 0
+    fi
+  fi
+
+  echo "ERROR: 허용되고 사용 가능한 외부 CLI가 없습니다. codex(disabled=${TFX_DISABLE_CODEX}, available=$(is_cli_available codex && echo 1 || echo 0)), antigravity(disabled=${TFX_DISABLE_ANTIGRAVITY}, available=$(is_cli_available antigravity && echo 1 || echo 0)). Claude native로 조용히 강등하지 않습니다." >&2
+  return 78
 }
 
 # ── Codex legacy 프로필 가드 ──
@@ -1562,8 +1744,8 @@ apply_no_claude_native_mode() {
   [[ "$TFX_CLI_MODE" == "gemini" || "$TFX_CLI_MODE" == "antigravity" ]] && return
   [[ "$CLI_TYPE" != "claude-native" ]] && return
 
-  if ! command -v "$CODEX_BIN" &>/dev/null; then
-    echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1 이지만 codex를 찾지 못해 claude-native 유지" >&2
+  if ! codex_is_available; then
+    echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1 이지만 codex가 preflight에서 가용하지 않아 claude-native 유지" >&2
     return
   fi
 
@@ -2166,7 +2348,16 @@ heartbeat_monitor() {
     local codex_rollout_size=0
     codex_rollout_size=$(_codex_rollout_activity_bytes "$pid" $last_known_forks 2>/dev/null || echo 0)
     [[ "$codex_rollout_size" =~ ^[0-9]+$ ]] || codex_rollout_size=0
-    current_size=$((current_size + stderr_size + codex_rollout_size))
+    # MCP wrappers buffer final stdout. Its sidecar grows only on an actual
+    # in-flight MCP progress notification, so a silent/stuck request remains
+    # eligible for the existing stall kill ladder.
+    local mcp_activity_size=0
+    if [[ -n "${TFX_CODEX_MCP_ACTIVITY_FILE:-}" && -f "$TFX_CODEX_MCP_ACTIVITY_FILE" ]]; then
+      mcp_activity_size=$(wc -c < "$TFX_CODEX_MCP_ACTIVITY_FILE" 2>/dev/null || echo 0)
+    fi
+    mcp_activity_size="${mcp_activity_size//[[:space:]]/}"
+    [[ "$mcp_activity_size" =~ ^[0-9]+$ ]] || mcp_activity_size=0
+    current_size=$((current_size + stderr_size + codex_rollout_size + mcp_activity_size))
     local elapsed=$(($(date +%s) - TIMESTAMP))
     local expected_suffix=""
     if [[ -n "$expected_duration" && "$expected_duration" =~ ^[0-9]+$ && "$expected_duration" -gt 0 ]]; then
@@ -2808,6 +2999,7 @@ run_codex_mcp() {
   local mcp_script
   local exit_code_local=0
   local worker_pid
+  local mcp_activity_file="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-mcp-activity.log"
 
   if ! mcp_script=$(resolve_codex_mcp_script); then
     echo "[tfx-route] 경고: Codex MCP 래퍼를 찾지 못했습니다." >&2
@@ -2818,6 +3010,9 @@ run_codex_mcp() {
     echo "[tfx-route] 경고: node를 찾지 못해 Codex MCP 경로를 사용할 수 없습니다." >&2
     return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
   fi
+
+  : > "$mcp_activity_file"
+  export TFX_CODEX_MCP_ACTIVITY_FILE="$mcp_activity_file"
 
   local -a mcp_args=(
     "$mcp_script"
@@ -2873,6 +3068,7 @@ run_codex_mcp() {
     echo "$worker_pid" >> "$JOB_DIR/child_pids"
   fi
   _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
+  unset TFX_CODEX_MCP_ACTIVITY_FILE
 
   # 모듈 로드 실패(의존성 누락) → MCP transport exit code로 변환하여 fallback 트리거
   if [[ "$exit_code_local" -ne 0 && "$exit_code_local" -ne 124 ]] && grep -q 'ERR_MODULE_NOT_FOUND' "$STDERR_LOG" 2>/dev/null; then
@@ -2903,6 +3099,7 @@ main() {
   apply_codex_profile_override
   apply_retry_snapshot_cli_invocation
   apply_codex_concrete_effort_guard
+  apply_cli_disable_policy
 
   # CLI 경로 해석
   case "$CLI_CMD" in
@@ -2940,15 +3137,18 @@ main() {
   # TIMEOUT_SEC/DEFAULT_TIMEOUT은 예상 소요 시간(advisory)만 나타낸다.
   # 실제 wall-clock 종료는 아래 hard ceiling만 수행한다.
   HARD_CEILING_SEC="${TFX_HARD_CEILING_SEC:-21600}"
-  if ! [[ "$HARD_CEILING_SEC" =~ ^[1-9][0-9]*$ ]]; then
+  if ! [[ "$HARD_CEILING_SEC" =~ ^(0|[1-9][0-9]*)$ ]]; then
     echo "[tfx-route] 경고: TFX_HARD_CEILING_SEC='$HARD_CEILING_SEC' 무효 — 21600 사용" >&2
     HARD_CEILING_SEC=21600
   fi
   if [[ "${TFX_TIMEOUT_MODE:-activity}" == "wallclock" ]]; then
     HARD_CEILING_SEC="$TIMEOUT_SEC"
-  elif [[ "$HARD_CEILING_SEC" -lt "$TIMEOUT_SEC" ]]; then
+  elif [[ "$HARD_CEILING_SEC" -gt 0 && "$HARD_CEILING_SEC" -lt "$TIMEOUT_SEC" ]]; then
     echo "[tfx-route] 경고: hard ceiling(${HARD_CEILING_SEC}s) < expected(${TIMEOUT_SEC}s) — expected로 승격" >&2
     HARD_CEILING_SEC="$TIMEOUT_SEC"
+  fi
+  if [[ "$HARD_CEILING_SEC" -eq 0 ]]; then
+    TIMEOUT_CMD=("_no_timeout")
   fi
   STALL_THRESHOLD_SEC="${TFX_STALL_THRESHOLD:-1200}"
   if ! [[ "$STALL_THRESHOLD_SEC" =~ ^[1-9][0-9]*$ ]]; then
@@ -3137,8 +3337,7 @@ FALLBACK_EOF
       if [[ "$exit_code" -eq 0 ]]; then
         codex_transport_effective="mcp"
       elif [[ "$exit_code" -eq "$CODEX_MCP_TRANSPORT_EXIT_CODE" && "$TFX_CODEX_TRANSPORT" == "auto" ]]; then
-        # MCP 실패 → exec fallback. run_codex_exec는 < /dev/null 로 stdin 블록 회피 (line 1639).
-        # 정책: codex/gemini 강건성 — MCP 가용 시 MCP, 실패 시 그래도 워커 자체는 굴러간다.
+        # MCP bootstrap/transport failure only: retain auto's legacy exec fallback.
         echo "[tfx-route] Codex MCP 실패(exit=${exit_code}). legacy exec 경로로 fallback 시도." >&2
         local _sd
         _sd="$(_get_script_dir)"

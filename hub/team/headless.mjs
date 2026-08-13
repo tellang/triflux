@@ -190,6 +190,10 @@ function buildRouteBackedHeadlessCommand(
       : "";
   const timeoutArg = timeout ? ` ${shellQuote(timeout)}` : "";
   const routeMode = resolvedCli === "antigravity" ? "antigravity" : resolvedCli;
+  const codexProfileEnv =
+    resolvedCli === "codex" && opts.codexProfile
+      ? `TFX_CODEX_PROFILE=${shellQuote(opts.codexProfile)} `
+      : "";
   const lifecycleEnv = [
     "TFX_HARD_CEILING_SEC",
     "TFX_STALL_THRESHOLD",
@@ -200,7 +204,7 @@ function buildRouteBackedHeadlessCommand(
     .join("");
   const script =
     `__tfx_prompt=$(cat ${shellQuote(promptFile)}); ` +
-    `${lifecycleEnv}TFX_CLI_MODE=${shellQuote(routeMode)} ` +
+    `${lifecycleEnv}${codexProfileEnv}TFX_CLI_MODE=${shellQuote(routeMode)} ` +
     `bash ${shellQuote(routeScript)} ${shellQuote(routeAgent)} "$__tfx_prompt" ${shellQuote(mcp)}${timeoutArg} ` +
     `> ${shellQuote(resultFile)} 2>${shellQuote(`${resultFile}.err`)} < /dev/null`;
   return `bash -lc ${shellQuote(script)}`;
@@ -388,6 +392,9 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   writeFileSync(promptFile, fullPrompt, "utf8");
   void IS_WINDOWS; // referenced for diagnostic guard chain below
 
+  // Codex와 Antigravity는 tfx-route.sh를 통해서만 headless 실행한다. 이 경로가
+  // disable/fallback/fail-loud 정책의 유일한 판정원이다. 여기서 같은 정책을
+  // 재구현하면 shell route와 headless backend가 서로 다른 결론을 낼 수 있다.
   const codexProfile =
     resolvedCli === "codex"
       ? resolveNestedCodexAgentProfile(opts.role || cli, {
@@ -397,18 +404,15 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
         })
       : undefined;
   const backendCommand =
-    resolvedCli === "antigravity"
+    resolvedCli === "codex" || resolvedCli === "antigravity"
       ? buildRouteBackedHeadlessCommand(resolvedCli, promptFile, resultFile, {
           ...opts,
+          codexProfile,
           mcp,
         })
       : getBackend(resolvedCli).buildArgs(fullPrompt, resultFile, {
           ...opts,
           model,
-          profile: codexProfile,
-          codexHome: process.env.CODEX_HOME,
-          disallowUltra: true,
-          enforceCanonicalProfile: true,
           promptFile,
         });
   const safeCwd =

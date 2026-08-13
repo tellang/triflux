@@ -118,7 +118,21 @@ function runBashScript(script, env = {}, timeoutMs = 15000) {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
     timeout: timeoutMs,
-    env: hubServerTestEnv(env),
+    env: hubServerTestEnv({
+      // Restart-wrapper tests do not route a CLI; keep both observations inert.
+      TFX_CODEX_OK: "0",
+      TFX_ANTIGRAVITY_OK: "0",
+      ...env,
+    }),
+  });
+}
+
+function routeTestEnv(env = {}) {
+  return hubServerTestEnv({
+    // The four full-route recovery fixtures intentionally execute fake Codex.
+    TFX_CODEX_OK: "1",
+    TFX_ANTIGRAVITY_OK: "0",
+    ...env,
   });
 }
 
@@ -308,7 +322,7 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
           cwd: PROJECT_ROOT,
           encoding: "utf8",
           timeout: 45000,
-          env: hubServerTestEnv({
+          env: routeTestEnv({
             // Isolate hub state (pid file / token / cache) to the temp HOME so
             // the spawned isolated-port hub never writes the canonical
             // ~/.claude/cache/tfx-hub/hub.pid (v10.33.1 follow-up #4).
@@ -414,7 +428,7 @@ if (cmd === 'team-task-update' && process.argv.includes('--claim')) {
           cwd: PROJECT_ROOT,
           encoding: "utf8",
           timeout: 45000,
-          env: hubServerTestEnv({
+          env: routeTestEnv({
             // Isolate hub state (pid file / token / cache) to the temp HOME so
             // the spawned isolated-port hub never writes the canonical
             // ~/.claude/cache/tfx-hub/hub.pid (v10.33.1 follow-up #4).
@@ -521,7 +535,7 @@ if (cmd === 'team-task-update') {
           cwd: PROJECT_ROOT,
           encoding: "utf8",
           timeout: 45000,
-          env: hubServerTestEnv({
+          env: routeTestEnv({
             // Isolate hub state (pid file / token / cache) to the temp HOME so
             // the spawned isolated-port hub never writes the canonical
             // ~/.claude/cache/tfx-hub/hub.pid (v10.33.1 follow-up #4).
@@ -636,7 +650,7 @@ if (cmd === 'team-task-update' && isClaim) {
           cwd: PROJECT_ROOT,
           encoding: "utf8",
           timeout: 45000,
-          env: hubServerTestEnv({
+          env: routeTestEnv({
             // Isolate hub state (pid file / token / cache) to the temp HOME so
             // the spawned isolated-port hub never writes the canonical
             // ~/.claude/cache/tfx-hub/hub.pid (v10.33.1 follow-up #4).

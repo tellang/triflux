@@ -103,6 +103,10 @@ function runBash(command, extraEnv = {}) {
       TMUX: "",
       TFX_CLI_MODE: "auto",
       TFX_NO_CLAUDE_NATIVE: "0",
+      // Route fixtures must not inherit preflight observations from the runner.
+      // This file's route assertions all exercise the Antigravity path.
+      TFX_CODEX_OK: "0",
+      TFX_ANTIGRAVITY_OK: "1",
       TFX_CODEX_TRANSPORT: "exec",
       TFX_MCP_HEALTH_CHECK: "0",
       ...extraEnv,

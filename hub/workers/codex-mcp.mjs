@@ -1,5 +1,5 @@
 // hub/workers/codex-mcp.mjs — Codex MCP 서버 래퍼
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
@@ -258,6 +258,21 @@ function isNoiseOnlyOutput(text) {
   return NOISE_ONLY_OUTPUT_PATTERNS.some((pattern) => pattern.test(trimmed));
 }
 
+// MCP tool responses are completion-buffered, so stdout cannot distinguish an
+// active long-running call from a stuck one. The SDK delivers only genuine
+// `notifications/progress` callbacks here; append one record per event for
+// tfx-route's per-run heartbeat sidecar. This is intentionally best-effort:
+// inability to write observability data must never change tool execution.
+function recordMcpProgress(activityFile) {
+  if (typeof activityFile !== "string" || !activityFile) return;
+  try {
+    appendFileSync(activityFile, "progress\n");
+  } catch {
+    // The route's liveness file is diagnostic only. A missing/readonly file
+    // must leave the normal MCP request path untouched.
+  }
+}
+
 function watchBootstrapClose(transport) {
   let active = true;
   const promise = new Promise((_, reject) => {
@@ -424,6 +439,10 @@ export class CodexMcpWorker {
       ? options.bootstrapTimeoutMs
       : DEFAULT_CODEX_MCP_BOOTSTRAP_TIMEOUT_MS;
     this.retryOptions = normalizeRetryOptions(options.retryOptions);
+    this.activityFile =
+      typeof options.activityFile === "string"
+        ? options.activityFile
+        : this.env.TFX_CODEX_MCP_ACTIVITY_FILE || "";
 
     this.client = null;
     this.transport = null;
@@ -609,7 +628,12 @@ export class CodexMcpWorker {
           const nextRawResult = await this.client.callTool(
             { name: toolName, arguments: toolArguments },
             undefined,
-            { timeout: timeoutMs },
+            {
+              timeout: timeoutMs,
+              ...(this.activityFile
+                ? { onprogress: () => recordMcpProgress(this.activityFile) }
+                : {}),
+            },
           );
 
           const textContent = collectTextContent(nextRawResult.content);

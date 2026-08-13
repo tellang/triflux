@@ -14,6 +14,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   closeSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -42,6 +43,21 @@ const HUB_ENSURE_STUB = resolve(
   "tests",
   "fixtures",
   "no-op-hub-ensure.mjs",
+);
+const MACHINE_PROFILE_ENV_KEYS = new Set([
+  "TFX_DISABLE_CODEX",
+  "TFX_DISABLE_ANTIGRAVITY",
+  "TFX_HARD_CEILING_SEC",
+  "TFX_MACHINE_PROFILE_PATH",
+  "TFX_STALL_KILL",
+  "TFX_STALL_THRESHOLD",
+  "TFX_TIMEOUT_POLICY",
+  "XDG_CONFIG_HOME",
+]);
+const ROUTE_TEST_BASE_ENV = Object.fromEntries(
+  Object.entries(process.env).filter(
+    ([key]) => !MACHINE_PROFILE_ENV_KEYS.has(key),
+  ),
 );
 const RUN_BASH_TIMEOUT_MS = 60_000;
 
@@ -73,6 +89,16 @@ function createRouteHome() {
   return home;
 }
 
+function writeMachineProfile(home, lines) {
+  const configDir = join(home, ".config", "triflux");
+  mkdirSync(configDir, { recursive: true });
+  writeFileSync(
+    join(configDir, "machine-profile.env"),
+    `${lines.join("\n")}\n`,
+    "utf8",
+  );
+}
+
 // bash 실행 헬퍼 — stdout + stderr 합산 반환
 function runBash(command, extraEnv = {}) {
   const fallbackHome = extraEnv.HOME ? null : createRouteHome();
@@ -102,9 +128,10 @@ function runBash(command, extraEnv = {}) {
       killSignal: "SIGKILL",
       stdio: ["ignore", stdoutFd, stderrFd],
       env: {
-        ...process.env,
+        ...ROUTE_TEST_BASE_ENV,
         HOME: home,
         USERPROFILE: home,
+        XDG_CONFIG_HOME: join(home, ".config"),
         TRIFLUX_TEST_HOME: home,
         TFX_TEAM_NAME: "",
         TFX_TEAM_TASK_ID: "",
@@ -114,6 +141,9 @@ function runBash(command, extraEnv = {}) {
         TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
         TMUX: "",
         TFX_CLI_MODE: "auto",
+        TFX_PREFLIGHT_LOADED: "1",
+        TFX_CODEX_OK: "1",
+        TFX_ANTIGRAVITY_OK: "0",
         TFX_NO_CLAUDE_NATIVE: "0",
         TFX_CODEX_TRANSPORT: "exec",
         TFX_CTO_NORTH_STAR: "0",
@@ -238,6 +268,237 @@ describe("tfx-route.sh — TFX_CLI_MODE 오버라이드", () => {
     );
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /ROUTE_TYPE=claude-native/);
+  });
+});
+
+// ── CLI disable 정책 ──
+
+describe("tfx-route.sh — TFX_DISABLE_CODEX / TFX_DISABLE_ANTIGRAVITY", () => {
+  it("TFX_DISABLE_CODEX=1이면 강제 codex 모드도 antigravity로 폴백해야 한다", () => {
+    const result = runBash(
+      `TFX_CLI_MODE=codex TFX_DISABLE_CODEX=1 bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
+      fixtureEnv({
+        TFX_ANTIGRAVITY_OK: "1",
+        AGY_BIN: "agy",
+        FAKE_CODEX_MODE: "exec",
+      }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /TFX_DISABLE_CODEX=1: codex 선택 차단/);
+    assert.match(out(result), /type=antigravity|cli: antigravity/);
+    assert.doesNotMatch(out(result), /cli: codex \(/);
+  });
+
+  it("TFX_DISABLE_ANTIGRAVITY=1이면 강제 antigravity 모드도 codex로 폴백해야 한다", () => {
+    const result = runBash(
+      `TFX_CLI_MODE=antigravity TFX_DISABLE_ANTIGRAVITY=1 bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
+      fixtureEnv({ FAKE_CODEX_MODE: "exec" }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(
+      out(result),
+      /TFX_DISABLE_ANTIGRAVITY=1: antigravity 선택 차단/,
+    );
+    assert.match(out(result), /type=codex|cli: codex/);
+    assert.doesNotMatch(out(result), /cli: antigravity/);
+  });
+
+  it("두 CLI를 모두 disable하면 claude-native로 강등하지 않고 fail-loud 한다", () => {
+    const result = runBash(
+      `TFX_DISABLE_CODEX=1 TFX_DISABLE_ANTIGRAVITY=1 bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
+      fixtureEnv({ FAKE_CODEX_MODE: "exec" }),
+    );
+
+    assert.equal(result.status, 78, out(result));
+    assert.match(out(result), /TFX_DISABLE_CODEX=1: codex 선택 차단/);
+    assert.match(out(result), /허용되고 사용 가능한 외부 CLI가 없습니다/);
+    assert.doesNotMatch(out(result), /ROUTE_TYPE=claude-native/);
+  });
+
+  it("남은 허용 CLI가 미가용이면 claude-native가 아니라 fail-loud 한다", () => {
+    const result = runBash(
+      `TFX_CLI_MODE=codex TFX_DISABLE_CODEX=1 bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
+      fixtureEnv({
+        CODEX_BIN: "missing-codex",
+        AGY_BIN: "missing-agy",
+        TFX_ANTIGRAVITY_OK: "0",
+      }),
+    );
+
+    assert.equal(result.status, 78, out(result));
+    assert.match(out(result), /허용되고 사용 가능한 외부 CLI가 없습니다/);
+    assert.doesNotMatch(out(result), /claude-native fallback/);
+  });
+
+  it("선택 CLI 자체가 미가용이고 대체 후보도 없으면 fail-loud 한다", () => {
+    const result = runBash(
+      `TFX_CLI_MODE=codex bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
+      fixtureEnv({
+        CODEX_BIN: "missing-codex",
+        AGY_BIN: "missing-agy",
+        TFX_ANTIGRAVITY_OK: "0",
+      }),
+    );
+
+    assert.equal(result.status, 78, out(result));
+    assert.match(out(result), /codex 미가용: 선택 차단/);
+    assert.match(out(result), /허용되고 사용 가능한 외부 CLI가 없습니다/);
+    assert.doesNotMatch(out(result), /ROUTE_TYPE=claude-native/);
+  });
+
+  it("preflight가 Codex 미가용을 관측하면 binary가 있어도 fail-loud 한다", () => {
+    const result = runBash(
+      `TFX_CLI_MODE=codex bash "${ROUTE_SCRIPT}" executor 'review-preflight-zero' minimal 5`,
+      fixtureEnv({
+        TFX_PREFLIGHT_LOADED: "1",
+        TFX_CODEX_OK: "0",
+        TFX_ANTIGRAVITY_OK: "0",
+        FAKE_CODEX_MODE: "exec",
+      }),
+    );
+
+    assert.equal(result.status, 78, out(result));
+    assert.match(out(result), /codex 미가용: 선택 차단/);
+    assert.doesNotMatch(out(result), /EXEC:review-preflight-zero/);
+  });
+
+  it("CLI disable 값은 0 또는 1만 허용해야 한다", () => {
+    const result = runBash(
+      `TFX_DISABLE_CODEX=true bash "${ROUTE_SCRIPT}" executor 'test-prompt'`,
+    );
+
+    assert.notEqual(result.status, 0, out(result));
+    assert.match(out(result), /TFX_DISABLE_CODEX 값은 0 또는 1/);
+  });
+
+  it("명시 env가 영속 프로파일보다 우선한다", () => {
+    const home = createRouteHome();
+    writeMachineProfile(home, [
+      "TFX_MACHINE_PROFILE_VERSION=1",
+      "TFX_MACHINE_OS=darwin",
+      "TFX_MULTIPLEXER_POLICY=tmux",
+      "TFX_DISABLE_CODEX=1",
+      "TFX_DISABLE_ANTIGRAVITY=0",
+      "TFX_HARD_CEILING_SEC=0",
+      "TFX_STALL_THRESHOLD=1200",
+      "TFX_STALL_KILL=classify",
+    ]);
+
+    try {
+      const result = runBash(
+        `TFX_CLI_MODE=codex TFX_DISABLE_CODEX=0 TFX_DISABLE_ANTIGRAVITY=1 TFX_HARD_CEILING_SEC=30000 bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
+        fixtureEnv({
+          HOME: home,
+          USERPROFILE: home,
+          XDG_CONFIG_HOME: join(home, ".config"),
+          FAKE_CODEX_MODE: "exec",
+        }),
+      );
+
+      assert.equal(result.status, 0, out(result));
+      assert.match(out(result), /type=codex/);
+      assert.match(out(result), /ceiling=30000s/);
+      assert.doesNotMatch(out(result), /cli: antigravity/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("영속 금지는 preflight OK 관측값보다 우선한다", () => {
+    const home = createRouteHome();
+    writeMachineProfile(home, [
+      "TFX_MACHINE_PROFILE_VERSION=1",
+      "TFX_MACHINE_OS=darwin",
+      "TFX_MULTIPLEXER_POLICY=tmux",
+      "TFX_DISABLE_CODEX=0",
+      "TFX_DISABLE_ANTIGRAVITY=1",
+      "TFX_HARD_CEILING_SEC=21600",
+      "TFX_STALL_THRESHOLD=1200",
+      "TFX_STALL_KILL=kill",
+    ]);
+
+    try {
+      const result = runBash(
+        `TFX_CLI_MODE=antigravity bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
+        fixtureEnv({
+          HOME: home,
+          USERPROFILE: home,
+          XDG_CONFIG_HOME: join(home, ".config"),
+          TFX_ANTIGRAVITY_OK: "1",
+          AGY_BIN: "agy",
+          FAKE_CODEX_MODE: "exec",
+        }),
+      );
+
+      assert.equal(result.status, 0, out(result));
+      assert.match(out(result), /TFX_DISABLE_ANTIGRAVITY=1/);
+      assert.match(out(result), /type=codex|cli: codex/);
+      assert.doesNotMatch(out(result), /cli: antigravity/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("프로파일을 source하지 않아 셸 표현식이 실행되지 않는다", () => {
+    const home = createRouteHome();
+    const sentinel = join(home, "must-not-exist");
+    writeMachineProfile(home, [
+      "TFX_MACHINE_PROFILE_VERSION=1",
+      `TFX_DISABLE_CODEX=$(touch ${sentinel})`,
+      "TFX_DISABLE_ANTIGRAVITY=1",
+    ]);
+
+    try {
+      const result = runBash(
+        `bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
+        fixtureEnv({
+          HOME: home,
+          USERPROFILE: home,
+          XDG_CONFIG_HOME: join(home, ".config"),
+          FAKE_CODEX_MODE: "exec",
+        }),
+      );
+
+      assert.equal(result.status, 0, out(result));
+      assert.equal(existsSync(sentinel), false);
+      assert.match(out(result), /machine profile.*무시|TFX_DISABLE_CODEX 값/u);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("프로파일 hard ceiling 0과 classify는 visible 무제한 정책으로 적용된다", () => {
+    const home = createRouteHome();
+    writeMachineProfile(home, [
+      "TFX_MACHINE_PROFILE_VERSION=1",
+      "TFX_MACHINE_OS=darwin",
+      "TFX_MULTIPLEXER_POLICY=tmux",
+      "TFX_DISABLE_CODEX=0",
+      "TFX_DISABLE_ANTIGRAVITY=1",
+      "TFX_HARD_CEILING_SEC=0",
+      "TFX_STALL_THRESHOLD=1200",
+      "TFX_STALL_KILL=classify",
+    ]);
+
+    try {
+      const result = runBash(
+        `TFX_CLI_MODE=codex bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
+        fixtureEnv({
+          HOME: home,
+          USERPROFILE: home,
+          XDG_CONFIG_HOME: join(home, ".config"),
+          FAKE_CODEX_MODE: "exec",
+        }),
+      );
+
+      assert.equal(result.status, 0, out(result));
+      assert.match(out(result), /ceiling=0s/);
+      assert.doesNotMatch(out(result), /무효 — 21600 사용/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 

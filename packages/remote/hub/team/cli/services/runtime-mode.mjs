@@ -5,16 +5,28 @@ import {
   sessionExists,
 } from "../../session.mjs";
 
-export function normalizeTeammateMode(mode = "auto") {
+export function normalizeTeammateMode(mode = "auto", deps = {}) {
+  const platform = deps.platform || process.platform;
+  const env = deps.env || process.env;
+  const detectMux = deps.detectMultiplexer || detectMultiplexer;
   const raw = String(mode).toLowerCase();
   if (raw === "inline" || raw === "native") return "in-process";
   if (raw === "headless" || raw === "hl") return "headless";
-  if (raw === "in-process" || raw === "tmux" || raw === "psmux" || raw === "wt")
-    return raw;
-  if (raw === "windows-terminal" || raw === "windows_terminal") return "wt";
+  if (raw === "in-process" || raw === "tmux") return raw;
+  if (raw === "psmux") return platform === "win32" ? "psmux" : "in-process";
+  if (
+    raw === "wt" ||
+    raw === "windows-terminal" ||
+    raw === "windows_terminal"
+  ) {
+    return platform === "win32" ? "wt" : "in-process";
+  }
   if (raw === "auto") {
-    if (process.env.TMUX) return "tmux";
-    const mux = detectMultiplexer();
+    if (env.TMUX) return "tmux";
+    const mux = detectMux();
+    if (platform !== "win32") {
+      return mux === "tmux" ? "tmux" : "in-process";
+    }
     if (mux === "psmux") return "psmux";
     if (mux === "tmux") return "tmux";
     return "in-process";
@@ -57,9 +69,11 @@ export function isTeamAlive(state) {
   return sessionExists(state.sessionName);
 }
 
-export function ensureTmuxOrExit() {
-  const mux = detectMultiplexer();
-  if (mux) return mux;
+export function ensureTmuxOrExit(deps = {}) {
+  const platform = deps.platform || process.platform;
+  const detectMux = deps.detectMultiplexer || detectMultiplexer;
+  const mux = detectMux();
+  if (mux && (platform === "win32" || mux === "tmux")) return mux;
   const error = new Error("tmux 미발견");
   error.code = "TMUX_REQUIRED";
   throw error;

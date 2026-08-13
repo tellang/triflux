@@ -36,11 +36,12 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-function runPrepend({ workdir, prompt, northStarFlag }) {
+function runPrepend({ workdir, prompt, ctoMasterFlag, northStarFlag }) {
   const funcDef = extractFunction("prepend_codex_north_star");
   const script = [
     "set -euo pipefail",
     `WORKDIR=${shellQuote(workdir)}`,
+    ctoMasterFlag === undefined ? "" : `TFX_CTO=${shellQuote(ctoMasterFlag)}`,
     northStarFlag === undefined
       ? ""
       : `TFX_CTO_NORTH_STAR=${shellQuote(northStarFlag)}`,
@@ -116,6 +117,27 @@ describe("tfx-route Codex north-star prepend", () => {
       workdir,
       prompt,
       northStarFlag: "0",
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, prompt);
+  });
+
+  it("lets TFX_CTO=0 override TFX_CTO_NORTH_STAR=1", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "tfx-codex-master-off-"));
+    cleanupDirs.push(workdir);
+    mkdirSync(join(workdir, ".triflux", "lake"), { recursive: true });
+    writeFileSync(
+      join(workdir, ".triflux", "lake", "current.md"),
+      "Master-off must suppress this brief.\n",
+    );
+    const prompt = "The original task must remain unprefixed.";
+
+    const result = runPrepend({
+      workdir,
+      prompt,
+      ctoMasterFlag: "0",
+      northStarFlag: "1",
     });
 
     assert.equal(result.status, 0, result.stderr);

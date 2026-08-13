@@ -32,6 +32,19 @@ const HUB_ENSURE_STUB = resolve(
   "fixtures",
   "no-op-hub-ensure.mjs",
 );
+const ROUTE_OBSERVATION_ENV_KEYS = new Set([
+  "TFX_ANTIGRAVITY_OK",
+  "TFX_CODEX_OK",
+  "TFX_HARD_CEILING_SEC",
+  "TFX_MACHINE_PROFILE_PATH",
+  "TFX_PREFLIGHT_LOADED",
+  "XDG_CONFIG_HOME",
+]);
+const GEMINI_TEST_BASE_ENV = Object.fromEntries(
+  Object.entries(process.env).filter(
+    ([key]) => !ROUTE_OBSERVATION_ENV_KEYS.has(key),
+  ),
+);
 
 function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
@@ -58,25 +71,30 @@ function runBash(command, extraEnv = {}) {
       cwd: testTempDir,
       encoding: "utf8",
       timeout: 30_000,
-      env: hubServerTestEnv({
-        HOME: testTempDir,
-        TMPDIR: testTempDir,
-        TMP: testTempDir,
-        TEMP: testTempDir,
-        TFX_TEAM_NAME: "",
-        TFX_TEAM_TASK_ID: "",
-        TFX_TEAM_AGENT_NAME: "",
-        TFX_TEAM_LEAD_NAME: "",
-        TFX_HUB_URL: "",
-        TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
-        TMUX: "",
-        TFX_CLI_MODE: "gemini",
-        TFX_NO_CLAUDE_NATIVE: "0",
-        TFX_CODEX_TRANSPORT: "exec",
-        TFX_WORKER_INDEX: "",
-        TFX_SEARCH_TOOL: "",
-        ...extraEnv,
-      }),
+      env: hubServerTestEnv(
+        {
+          HOME: testTempDir,
+          TMPDIR: testTempDir,
+          TMP: testTempDir,
+          TEMP: testTempDir,
+          XDG_CONFIG_HOME: resolve(testTempDir, ".config"),
+          TFX_TEAM_NAME: "",
+          TFX_TEAM_TASK_ID: "",
+          TFX_TEAM_AGENT_NAME: "",
+          TFX_TEAM_LEAD_NAME: "",
+          TFX_HUB_URL: "",
+          TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
+          TMUX: "",
+          TFX_CLI_MODE: "gemini",
+          TFX_PREFLIGHT_LOADED: "1",
+          TFX_NO_CLAUDE_NATIVE: "0",
+          TFX_CODEX_TRANSPORT: "exec",
+          TFX_WORKER_INDEX: "",
+          TFX_SEARCH_TOOL: "",
+          ...extraEnv,
+        },
+        GEMINI_TEST_BASE_ENV,
+      ),
     });
   } finally {
     removeTempDirWithRetry(testTempDir);
@@ -344,25 +362,39 @@ describe("tfx-route.sh — Gemini CLI 모드 전환", { concurrency: 1 }, () => 
     assert.match(out(result), /AGENT=verifier/);
   });
 
-  it("agy 미설치 + codex 미설치 시 claude-native fallback이 발생해야 한다", () => {
+  it("agy와 codex가 모두 미가용이면 claude-native로 강등하지 않고 fail-loud 한다", () => {
     const result = runBash(
       `TFX_CLI_MODE=auto AGY_BIN=__nonexistent_agy__ CODEX_BIN=__nonexistent_codex__ bash "${ROUTE_SCRIPT}" designer 'fallback-test'`,
     );
-    assert.equal(result.status, 0, out(result));
-    assert.match(
-      out(result),
-      /claude-native fallback|ROUTE_TYPE=claude-native/,
-    );
+    assert.equal(result.status, 78, out(result));
+    assert.match(out(result), /허용되고 사용 가능한 외부 CLI가 없습니다/);
+    assert.doesNotMatch(out(result), /ROUTE_TYPE=claude-native/);
   });
 
-  it("agy 미설치 + codex 설치 시 auto 모드에서 codex로 전환되어야 한다", () => {
+  it("agy 미설치 + 가용으로 관측된 codex 설치 시 auto 모드에서 codex로 전환되어야 한다", () => {
     const result = runBash(
-      `TFX_CLI_MODE=auto AGY_BIN=__nonexistent_agy__ CODEX_BIN=codex bash "${ROUTE_SCRIPT}" designer 'codex-switch-test' auto 2>&1 || true`,
-      fixtureEnv({ FAKE_CODEX_MODE: "exec" }),
+      `TFX_CLI_MODE=auto AGY_BIN=__nonexistent_agy__ CODEX_BIN=codex bash "${ROUTE_SCRIPT}" designer 'codex-switch-test' auto`,
+      fixtureEnv({
+        TFX_CODEX_OK: "1",
+        TFX_ANTIGRAVITY_OK: "0",
+        FAKE_CODEX_MODE: "exec",
+      }),
     );
     assert.equal(result.status, 0, out(result));
-    // agy 미설치로 codex로 전환됨
     assert.match(out(result), /type=codex/);
+  });
+
+  it("agy 미설치 + codex 바이너리만 존재하고 가용성 관측값이 없으면 fail-loud 한다", () => {
+    const result = runBash(
+      `TFX_CLI_MODE=auto AGY_BIN=__nonexistent_agy__ CODEX_BIN=codex bash "${ROUTE_SCRIPT}" designer 'codex-observation-required' auto`,
+      fixtureEnv({
+        TFX_ANTIGRAVITY_OK: "0",
+        FAKE_CODEX_MODE: "exec",
+      }),
+    );
+    assert.equal(result.status, 78, out(result));
+    assert.match(out(result), /codex\(disabled=0, available=0\)/);
+    assert.match(out(result), /허용되고 사용 가능한 외부 CLI가 없습니다/);
   });
 });
 

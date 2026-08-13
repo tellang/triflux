@@ -6,7 +6,7 @@
  *         mode while preserving psmux as the Windows tmux-compatible mode.
  *
  * Bug 2: SKILL.md Phase 3 was describing a JS API pattern instead of a
- *         concrete Bash("tfx multi --teammate-mode headless ...") invocation.
+ *         concrete Bash("tfx multi --auto-attach ...") invocation.
  *
  * Strategy: normalizeTeammateMode depends on detectMultiplexer() from
  * session.mjs which uses a module-level cache and execSync (side effects).
@@ -40,17 +40,26 @@ const PROJECT_ROOT = resolve(__dirname, "../..");
  */
 function normalizeTeammateMode(
   mode = "auto",
-  { detectMultiplexer, tmuxEnv } = {},
+  { detectMultiplexer, tmuxEnv, platform = "win32" } = {},
 ) {
   const raw = String(mode).toLowerCase();
   if (raw === "inline" || raw === "native") return "in-process";
   if (raw === "headless" || raw === "hl") return "headless";
-  if (raw === "in-process" || raw === "tmux" || raw === "psmux" || raw === "wt")
-    return raw;
-  if (raw === "windows-terminal" || raw === "windows_terminal") return "wt";
+  if (raw === "in-process" || raw === "tmux") return raw;
+  if (raw === "psmux") return platform === "win32" ? "psmux" : "in-process";
+  if (
+    raw === "wt" ||
+    raw === "windows-terminal" ||
+    raw === "windows_terminal"
+  ) {
+    return platform === "win32" ? "wt" : "in-process";
+  }
   if (raw === "auto") {
     if (tmuxEnv) return "tmux";
     const mux = detectMultiplexer?.();
+    if (platform !== "win32") {
+      return mux === "tmux" ? "tmux" : "in-process";
+    }
     if (mux === "psmux") return "psmux";
     if (mux === "tmux") return "tmux";
     return "in-process";
@@ -292,15 +301,15 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
   });
 
   // Test 14: tfx-auto 가 구체적 Bash("tfx multi ...") 호출을 명시
-  it('tfx-auto SKILL.md 가 Bash("tfx multi --teammate-mode headless") 호출 예시를 포함한다', () => {
+  it('tfx-auto SKILL.md 가 mode 생략 Bash("tfx multi") 호출 예시를 포함한다', () => {
     const content = readFileSync(autoSkillPath, "utf8");
     assert.ok(
       content.includes('Bash("tfx multi'),
       'tfx-auto 는 Bash("tfx multi ...") 호출을 명시해야 함',
     );
     assert.ok(
-      content.includes("--teammate-mode headless"),
-      "tfx-auto 는 --teammate-mode headless 플래그를 명시해야 함",
+      content.includes('Bash("tfx multi --auto-attach'),
+      "tfx-auto 는 기본 경로에서 teammate mode 플래그를 생략해야 함",
     );
     assert.ok(
       content.includes("--auto-attach"),
@@ -332,24 +341,23 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
     );
   });
 
-  // Test 16: tfx-auto SKILL.md contains MANDATORY headless engine rule
-  it('tfx-auto SKILL.md contains "MANDATORY: 2개+ 서브태스크 시 headless 엔진 필수"', () => {
+  // Test 16: tfx-auto SKILL.md contains MANDATORY auto engine rule
+  it('tfx-auto SKILL.md contains "MANDATORY" auto engine rule', () => {
     const content = readFileSync(autoSkillPath, "utf8");
     assert.ok(
       content.includes("MANDATORY"),
       'tfx-auto SKILL.md must contain "MANDATORY" keyword',
     );
     assert.ok(
-      content.includes("headless"),
-      'tfx-auto SKILL.md must mention "headless"',
+      content.includes("auto"),
+      'tfx-auto SKILL.md must mention "auto"',
     );
 
-    // Verify the specific rule about 2+ subtasks requiring headless
-    const has2PlusRule =
-      content.includes("2개+") && content.includes("headless");
+    // Verify the specific rule about 2+ subtasks using the auto mode.
+    const has2PlusRule = content.includes("2개+") && content.includes("auto");
     assert.ok(
       has2PlusRule,
-      "tfx-auto SKILL.md must contain rule for 2+ subtasks requiring headless engine",
+      "tfx-auto SKILL.md must contain rule for 2+ subtasks using auto mode",
     );
   });
 
@@ -364,11 +372,11 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
   });
 
   // Extra: tfx-auto has concrete Bash("tfx multi") in routing section
-  it('tfx-auto SKILL.md routing section contains Bash("tfx multi --teammate-mode headless")', () => {
+  it('tfx-auto SKILL.md routing section contains mode 생략 Bash("tfx multi")', () => {
     const content = readFileSync(autoSkillPath, "utf8");
     assert.ok(
-      content.includes('Bash("tfx multi --teammate-mode headless'),
-      'tfx-auto must reference Bash("tfx multi --teammate-mode headless ...") for multi-task routing',
+      content.includes('Bash("tfx multi --auto-attach'),
+      'tfx-auto must reference mode-free Bash("tfx multi --auto-attach ...") for multi-task routing',
     );
   });
 });
@@ -378,11 +386,11 @@ describe("Deep skill preflight — macOS tmux is first-class", () => {
     "skills/tfx-plan/SKILL.md",
     "skills/tfx-analysis/SKILL.md",
     "skills/tfx-review/SKILL.md",
-    "skills/tfx-persist/SKILL.md",
+    "skills/tfx-ralph/SKILL.md",
     "packages/triflux/skills/tfx-plan/SKILL.md",
     "packages/triflux/skills/tfx-analysis/SKILL.md",
     "packages/triflux/skills/tfx-review/SKILL.md",
-    "packages/triflux/skills/tfx-persist/SKILL.md",
+    "packages/triflux/skills/tfx-ralph/SKILL.md",
   ];
 
   it("deep skills do not gate headless multi on literal psmux --version", () => {
@@ -449,14 +457,14 @@ describe("runtime-mode.mjs — source code regression guard", () => {
     );
   });
 
-  it("explicit psmux is identity pass-through, not headless alias", () => {
+  it("explicit psmux is Windows-only and never a non-Windows alias", () => {
     const src = readFileSync(runtimeModePath, "utf8");
 
     const psmuxPassThrough =
-      /"in-process"\s*\|\|\s*raw\s*===\s*"tmux"\s*\|\|\s*raw\s*===\s*"psmux"/;
+      /raw\s*===\s*"psmux"[\s\S]*?platform\s*===\s*"win32"\s*\?\s*"psmux"\s*:\s*"in-process"/;
     assert.ok(
       psmuxPassThrough.test(src),
-      'explicit "psmux" input must preserve psmux mux mode',
+      'explicit "psmux" must be preserved only on win32',
     );
   });
 
@@ -481,7 +489,7 @@ describe("runtime-mode.mjs — source code regression guard", () => {
       fn.includes('"headless"') && fn.includes('"hl"'),
       "headless/hl branch exists",
     );
-    // Branch: identity pass-through (in-process, tmux, psmux, wt)
+    // Branch: identity pass-through (in-process, tmux); psmux/wt are platform gated.
     assert.ok(
       fn.includes('"in-process"') &&
         fn.includes('"tmux"') &&
@@ -494,7 +502,11 @@ describe("runtime-mode.mjs — source code regression guard", () => {
       "windows-terminal aliases exist",
     );
     // Branch: auto with TMUX check first
-    assert.ok(fn.includes("process.env.TMUX"), "auto branch checks TMUX env");
+    assert.ok(fn.includes("env.TMUX"), "auto branch checks injected TMUX env");
+    assert.ok(
+      fn.includes('platform !== "win32"'),
+      "non-Windows mux gate exists",
+    );
     // Final fallback
     assert.ok(
       fn.includes('return "in-process"'),
@@ -510,8 +522,8 @@ describe("runtime-mode.mjs — source code regression guard", () => {
     assert.ok(fnMatch);
     const fn = fnMatch[0];
 
-    const tmuxEnvIdx = fn.indexOf("process.env.TMUX");
-    const detectIdx = fn.indexOf("detectMultiplexer()");
+    const tmuxEnvIdx = fn.indexOf("env.TMUX");
+    const detectIdx = fn.indexOf("detectMux()");
     assert.ok(tmuxEnvIdx > -1 && detectIdx > -1, "both checks exist");
     assert.ok(
       tmuxEnvIdx < detectIdx,

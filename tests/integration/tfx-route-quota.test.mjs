@@ -61,7 +61,22 @@ describe("tfx-route.sh — Quota Functions", () => {
     ROUTE_SCRIPT_WIN,
     "agy_supports_headless",
   );
+  const codexAvailableFunc = extractFunction(
+    ROUTE_SCRIPT_WIN,
+    "codex_is_available",
+  );
+  const isCliDisabledFunc = extractFunction(
+    ROUTE_SCRIPT_WIN,
+    "is_cli_disabled",
+  );
   const rerouteFunc = extractFunction(ROUTE_SCRIPT_WIN, "auto_reroute");
+  const rerouteFixture = `
+TFX_DISABLE_CODEX="\${TFX_DISABLE_CODEX:-0}"
+TFX_DISABLE_ANTIGRAVITY="\${TFX_DISABLE_ANTIGRAVITY:-0}"
+${agyHeadlessFunc}
+${codexAvailableFunc}
+${isCliDisabledFunc}
+${rerouteFunc}`;
 
   before(() => {
     tmpStdout = resolve(os.tmpdir(), `tfx-quota-stdout-${Date.now()}.log`);
@@ -161,8 +176,7 @@ MCP_PROFILE="auto"
 CLI_TYPE="codex"
 TFX_ANTIGRAVITY_OK="1"
 TFX_TMP="${os.tmpdir()}"
-${agyHeadlessFunc}
-${rerouteFunc}
+${rerouteFixture}
 auto_reroute codex
 `,
       );
@@ -207,8 +221,7 @@ MCP_PROFILE="auto"
 CLI_TYPE="gemini"
 TFX_ANTIGRAVITY_OK="1"
 TFX_TMP="${os.tmpdir()}"
-${agyHeadlessFunc}
-${rerouteFunc}
+${rerouteFixture}
 auto_reroute gemini
 `,
       );
@@ -250,8 +263,7 @@ MCP_PROFILE="auto"
 CLI_TYPE="codex"
 unset TFX_ANTIGRAVITY_OK
 TFX_TMP="${os.tmpdir()}"
-${agyHeadlessFunc}
-${rerouteFunc}
+${rerouteFixture}
 auto_reroute codex
 `,
       );
@@ -288,13 +300,13 @@ fi
 CODEX_BIN="codex"
 GEMINI_BIN="gemini"
 AGY_BIN="agy"
+TFX_CODEX_OK="1"
 AGENT_TYPE="__rerouted_probe"
 PROMPT="test"
 MCP_PROFILE="auto"
 CLI_TYPE="antigravity"
 TFX_TMP="${os.tmpdir()}"
-${agyHeadlessFunc}
-${rerouteFunc}
+${rerouteFixture}
 auto_reroute antigravity
 `,
       );
@@ -314,17 +326,17 @@ auto_reroute antigravity
       assert.match(out(result), /REROUTED: MODE=codex FROM=antigravity/);
     });
 
-    it("5. 대상 CLI 미설치 시 return 1", () => {
+    it("5. 허용되고 가용한 대체 CLI가 없으면 fail-loud 78", () => {
       const script = `
-${agyHeadlessFunc}
-${rerouteFunc}
+${rerouteFixture}
 export CODEX_BIN="nonexistent_codex_bin_123"
 export GEMINI_BIN="nonexistent_gemini_bin_123"
 export AGY_BIN="nonexistent_agy_bin_123"
+export TFX_CODEX_OK="0"
 auto_reroute codex
 `;
       const result = runBash(script);
-      assert.equal(result.status, 1);
+      assert.equal(result.status, 78);
       assert.match(out(result), /codex 대체 CLI 미설치 — 자동 전환 불가/);
     });
   });
@@ -349,6 +361,9 @@ auto_reroute codex
           ...process.env,
           TFX_CODEX_CONFIG: isolatedCodex.path,
           TFX_CLI_MODE: "auto",
+          TFX_PREFLIGHT_LOADED: "1",
+          TFX_CODEX_OK: "1",
+          TFX_ANTIGRAVITY_OK: "0",
           TFX_QUOTA_REROUTE: "0",
           CODEX_BIN: fakeCodex,
           TFX_TMP: os.tmpdir(),
@@ -381,6 +396,9 @@ auto_reroute codex
           ...process.env,
           TFX_CODEX_CONFIG: isolatedCodex.path,
           TFX_CLI_MODE: "auto",
+          TFX_PREFLIGHT_LOADED: "1",
+          TFX_CODEX_OK: "1",
+          TFX_ANTIGRAVITY_OK: "0",
           TFX_REROUTED_FROM: "gemini", // 이전에 gemini에서 넘어왔음을 가정
           CODEX_BIN: fakeCodex,
           TFX_TMP: os.tmpdir(),

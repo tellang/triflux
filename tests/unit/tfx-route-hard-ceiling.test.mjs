@@ -13,6 +13,7 @@ const worker = readFileSync(
 
 it("route execution uses hard ceiling while lane timeout remains advisory", () => {
   assert.match(route, /TFX_HARD_CEILING_SEC:-21600/);
+  assert.match(route, /\^\(0\|\[1-9\]\[0-9\]\*\)\$/);
   assert.match(route, /TFX_TIMEOUT_MODE:-activity/);
   assert.match(route, /"\$\{TIMEOUT_CMD\[@\]\}" "\$HARD_CEILING_SEC"/);
   assert.doesNotMatch(route, /"\$TIMEOUT_BIN" "\$TIMEOUT_SEC"/);

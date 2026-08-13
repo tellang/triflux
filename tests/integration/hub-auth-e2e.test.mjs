@@ -60,8 +60,14 @@ function randomPort() {
 
 function withEnv(overrides, fn) {
   const previous = new Map();
+  const scopedOverrides = {
+    // Dynamic hub/bridge imports must not inherit route preflight state.
+    TFX_CODEX_OK: "0",
+    TFX_ANTIGRAVITY_OK: "0",
+    ...overrides,
+  };
 
-  for (const [key, value] of Object.entries(overrides)) {
+  for (const [key, value] of Object.entries(scopedOverrides)) {
     previous.set(key, process.env[key]);
     if (value == null) delete process.env[key];
     else process.env[key] = value;
@@ -276,6 +282,9 @@ function runRouteWithBridgeLogger({ homeDir, tokenEnv = "" }) {
         TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
         TFX_CLI_MODE: "auto",
         TFX_NO_CLAUDE_NATIVE: "0",
+        // executor route fixture: fake Codex is the intended selected CLI.
+        TFX_CODEX_OK: "1",
+        TFX_ANTIGRAVITY_OK: "0",
         TFX_WORKER_INDEX: "",
         TFX_SEARCH_TOOL: "",
         TFX_TEAM_NAME: `route-auth-${randomUUID().slice(0, 8)}`,

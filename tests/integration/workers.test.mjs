@@ -33,6 +33,9 @@ function buildRouteEnv(extraEnv = {}) {
     PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
     TFX_CLI_MODE: "auto",
     TFX_NO_CLAUDE_NATIVE: "0",
+    // Each caller opts into its expected CLI below; no ambient observation leaks.
+    TFX_CODEX_OK: "0",
+    TFX_ANTIGRAVITY_OK: "0",
     TFX_CODEX_TRANSPORT: "exec",
     TFX_CTO_NORTH_STAR: "0",
     ...extraEnv,
@@ -243,6 +246,7 @@ describe("tfx-route.sh wrapper integration", { timeout: 15000 }, () => {
           HOME: resolve(PROJECT_ROOT, ".tmp-home-route-codex"),
           TFX_TEAM_NAME: "phase3-team",
           CODEX_BIN: "codex",
+          TFX_CODEX_OK: "1",
         }),
       },
     );
@@ -265,6 +269,7 @@ describe("tfx-route.sh wrapper integration", { timeout: 15000 }, () => {
           TFX_TEAM_NAME: "phase3-team",
           TFX_NO_CLAUDE_NATIVE: "1",
           CODEX_BIN: "codex",
+          TFX_CODEX_OK: "1",
         }),
       },
     );

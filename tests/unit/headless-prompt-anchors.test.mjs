@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import { buildHeadlessCommand } from "../../hub/team/headless.mjs";
 
 function readGeneratedPrompt(cmd) {
-  const fullPath = cmd.match(/['"]([^'"]*prompt-\d+-\d+-\d+\.txt)['"]/)?.[1];
+  const fullPath = cmd.match(/(\/[^\s'"]*prompt-[a-f0-9-]+\.txt)/i)?.[1];
   assert.ok(fullPath, `프롬프트 파일 경로를 추출할 수 있어야 함: ${cmd}`);
   return readFileSync(fullPath, "utf8");
 }

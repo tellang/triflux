@@ -21,7 +21,7 @@ import {
 } from "fs";
 import { createRequire } from "module";
 import { homedir } from "os";
-import { basename, dirname, join, relative, resolve } from "path";
+import { basename, delimiter, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import {
   ensureGlobalClaudeRoutingSection,
@@ -56,6 +56,416 @@ const CLAUDE_DIR = join(_TFX_HOME, ".claude");
 const CODEX_DIR = join(_TFX_HOME, ".codex");
 const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
 const SETUP_MARKER_PATH = join(CLAUDE_DIR, "cache", "tfx-setup-marker.json");
+const MACHINE_PROFILE_FILENAME = "machine-profile.env";
+const MACHINE_PROFILE_KEYS = Object.freeze([
+  "TFX_MACHINE_PROFILE_VERSION",
+  "TFX_MACHINE_OS",
+  "TFX_MULTIPLEXER_POLICY",
+  "TFX_DISABLE_CODEX",
+  "TFX_DISABLE_ANTIGRAVITY",
+  "TFX_TIMEOUT_POLICY",
+  "TFX_HARD_CEILING_SEC",
+  "TFX_STALL_THRESHOLD",
+  "TFX_STALL_KILL",
+]);
+const MACHINE_PROFILE_KEY_SET = new Set(MACHINE_PROFILE_KEYS);
+const MACHINE_PROFILE_VALUE_RE = /^[A-Za-z0-9_.-]+$/u;
+
+export function resolveMachineProfilePath({
+  platform = process.platform,
+  env = process.env,
+  home = _TFX_HOME,
+} = {}) {
+  if (env.TFX_MACHINE_PROFILE_PATH) {
+    return resolve(env.TFX_MACHINE_PROFILE_PATH);
+  }
+  if (platform === "win32") {
+    const appData = env.APPDATA || join(home, "AppData", "Roaming");
+    return join(appData, "triflux", MACHINE_PROFILE_FILENAME);
+  }
+  const configRoot = env.XDG_CONFIG_HOME || join(home, ".config");
+  return join(configRoot, "triflux", MACHINE_PROFILE_FILENAME);
+}
+
+export function parseMachineProfileContent(content) {
+  const values = {};
+  const warnings = [];
+  const lines = String(content || "").split(/\r?\n/u);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].trim();
+    if (!line || line.startsWith("#")) continue;
+    const separator = line.indexOf("=");
+    if (separator <= 0) {
+      warnings.push(`line ${index + 1}: KEY=VALUE 형식이 아님`);
+      continue;
+    }
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    if (!MACHINE_PROFILE_KEY_SET.has(key)) {
+      warnings.push(`line ${index + 1}: 허용되지 않은 key ${key}`);
+      continue;
+    }
+    if (!value || !MACHINE_PROFILE_VALUE_RE.test(value)) {
+      warnings.push(`line ${index + 1}: ${key} 값이 안전한 literal이 아님`);
+      continue;
+    }
+    values[key] = value;
+  }
+  return { values, warnings };
+}
+
+function commandAvailableOnPath(command, { env = process.env, platform } = {}) {
+  const selectedPlatform = platform || process.platform;
+  if (command.includes("/") || command.includes("\\")) {
+    return existsSync(command);
+  }
+  const pathSeparator = selectedPlatform === "win32" ? ";" : delimiter;
+  const extensions =
+    selectedPlatform === "win32"
+      ? String(env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+          .split(";")
+          .filter(Boolean)
+      : [""];
+  for (const directory of String(env.PATH || "").split(pathSeparator)) {
+    if (!directory) continue;
+    for (const extension of extensions) {
+      if (existsSync(join(directory, `${command}${extension}`))) return true;
+      if (
+        selectedPlatform === "win32" &&
+        existsSync(join(directory, `${command}${extension.toLowerCase()}`))
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function parseSetupBoolean(env, key, fallback) {
+  const raw = env[key];
+  if (raw === undefined || raw === "") return fallback;
+  if (raw === "1") return true;
+  if (raw === "0") return false;
+  throw new Error(`${key} 값은 0 또는 1이어야 합니다. (현재: ${raw})`);
+}
+
+function isEnabledEnvironmentFlag(value) {
+  if (value === undefined || value === null || value === "") return false;
+  return !/^(0|false|no|off)$/iu.test(String(value));
+}
+
+function parseSetupNonNegativeInteger(env, key, fallback) {
+  const raw = env[key];
+  if (raw === undefined || raw === "") return fallback;
+  if (!/^(0|[1-9][0-9]*)$/u.test(raw)) {
+    throw new Error(`${key} 값은 0 이상의 정수여야 합니다. (현재: ${raw})`);
+  }
+  return Number(raw);
+}
+
+function parseSetupPositiveInteger(env, key, fallback) {
+  const value = parseSetupNonNegativeInteger(env, key, fallback);
+  if (value < 1) {
+    throw new Error(`${key} 값은 1 이상의 정수여야 합니다. (현재: ${value})`);
+  }
+  return value;
+}
+
+function parseSetupStallKill(env, fallback) {
+  const raw = env.TFX_SETUP_STALL_KILL;
+  if (raw === undefined || raw === "") return fallback;
+  if (["kill", "classify", "intervene"].includes(raw)) return raw;
+  throw new Error(
+    `TFX_SETUP_STALL_KILL 값은 kill, classify, intervene 중 하나여야 합니다. (현재: ${raw})`,
+  );
+}
+
+function timeoutBackendAvailable({
+  platform,
+  env,
+  commandAvailable,
+  timeoutCommandAvailable,
+}) {
+  if (typeof timeoutCommandAvailable === "function") {
+    return Boolean(timeoutCommandAvailable());
+  }
+  if (existsSync("/usr/bin/timeout")) return true;
+  if (commandAvailable("gtimeout", { platform, env })) return true;
+  if (platform !== "win32" && commandAvailable("timeout", { platform, env })) {
+    return true;
+  }
+  return false;
+}
+
+function deriveTimeoutPolicy(hardCeilingSec, stallKill) {
+  if (hardCeilingSec === 0 && stallKill === "classify") return "visible";
+  if (hardCeilingSec === 21600 && stallKill === "kill") return "unattended";
+  return "custom";
+}
+
+export function buildMachineProfileDefaults({
+  platform,
+  env = process.env,
+  interactive,
+  commandAvailable,
+}) {
+  if (!["darwin", "linux", "win32"].includes(platform)) {
+    throw new Error(`지원하지 않는 machine profile OS: ${platform}`);
+  }
+  const visibleDefaults = interactive && Boolean(env.TMUX);
+  const detectedCodex = commandAvailable("codex", { platform, env });
+  const detectedAntigravity =
+    commandAvailable("agy", { platform, env }) ||
+    commandAvailable("antigravity", { platform, env });
+  const useCodex = parseSetupBoolean(env, "TFX_SETUP_USE_CODEX", detectedCodex);
+  const useAntigravity = parseSetupBoolean(
+    env,
+    "TFX_SETUP_USE_ANTIGRAVITY",
+    detectedAntigravity,
+  );
+  const hardCeilingSec = parseSetupNonNegativeInteger(
+    env,
+    "TFX_SETUP_HARD_CEILING_SEC",
+    visibleDefaults ? 0 : 21600,
+  );
+  const stallThreshold = parseSetupPositiveInteger(
+    env,
+    "TFX_SETUP_STALL_THRESHOLD",
+    1200,
+  );
+  const stallKill = parseSetupStallKill(
+    env,
+    visibleDefaults ? "classify" : "kill",
+  );
+
+  return {
+    TFX_MACHINE_PROFILE_VERSION: "1",
+    TFX_MACHINE_OS: platform,
+    TFX_MULTIPLEXER_POLICY: platform === "win32" ? "psmux" : "tmux",
+    TFX_DISABLE_CODEX: useCodex ? "0" : "1",
+    TFX_DISABLE_ANTIGRAVITY: useAntigravity ? "0" : "1",
+    TFX_TIMEOUT_POLICY: deriveTimeoutPolicy(hardCeilingSec, stallKill),
+    TFX_HARD_CEILING_SEC: String(hardCeilingSec),
+    TFX_STALL_THRESHOLD: String(stallThreshold),
+    TFX_STALL_KILL: stallKill,
+  };
+}
+
+async function promptMachineProfile(defaults, { input, output }) {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input, output });
+
+  const askBoolean = async (question, defaultValue) => {
+    while (true) {
+      const suffix = defaultValue ? "Y/n" : "y/N";
+      const answer = (await rl.question(`${question} [${suffix}] `))
+        .trim()
+        .toLowerCase();
+      if (!answer) return defaultValue;
+      if (["y", "yes", "1"].includes(answer)) return true;
+      if (["n", "no", "0"].includes(answer)) return false;
+      output.write("  y 또는 n으로 입력하세요.\n");
+    }
+  };
+
+  const askInteger = async (question, defaultValue, { allowZero }) => {
+    while (true) {
+      const answer = (
+        await rl.question(`${question} [${defaultValue}] `)
+      ).trim();
+      if (!answer) return defaultValue;
+      if (/^(0|[1-9][0-9]*)$/u.test(answer)) {
+        const value = Number(answer);
+        if (allowZero || value > 0) return value;
+      }
+      output.write(
+        allowZero
+          ? "  0 이상의 정수를 입력하세요.\n"
+          : "  1 이상의 정수를 입력하세요.\n",
+      );
+    }
+  };
+
+  const useCodex = await askBoolean(
+    "Codex를 이 머신에서 사용합니까?",
+    defaults.TFX_DISABLE_CODEX === "0",
+  );
+  const useAntigravity = await askBoolean(
+    "Antigravity를 이 머신에서 사용합니까?",
+    defaults.TFX_DISABLE_ANTIGRAVITY === "0",
+  );
+  const hardCeilingSec = await askInteger(
+    "Hard ceiling 초 (0=비활성)",
+    Number(defaults.TFX_HARD_CEILING_SEC),
+    { allowZero: true },
+  );
+  const stallThreshold = await askInteger(
+    "무출력 stall 판단 초",
+    Number(defaults.TFX_STALL_THRESHOLD),
+    { allowZero: false },
+  );
+  let stallKill;
+  while (true) {
+    const answer = (
+      await rl.question(
+        `Stall 동작 (kill/classify/intervene) [${defaults.TFX_STALL_KILL}] `,
+      )
+    )
+      .trim()
+      .toLowerCase();
+    stallKill = answer || defaults.TFX_STALL_KILL;
+    if (["kill", "classify", "intervene"].includes(stallKill)) break;
+    output.write("  kill, classify, intervene 중 하나를 입력하세요.\n");
+  }
+  rl.close();
+
+  return {
+    ...defaults,
+    TFX_DISABLE_CODEX: useCodex ? "0" : "1",
+    TFX_DISABLE_ANTIGRAVITY: useAntigravity ? "0" : "1",
+    TFX_TIMEOUT_POLICY: deriveTimeoutPolicy(hardCeilingSec, stallKill),
+    TFX_HARD_CEILING_SEC: String(hardCeilingSec),
+    TFX_STALL_THRESHOLD: String(stallThreshold),
+    TFX_STALL_KILL: stallKill,
+  };
+}
+
+function serializeMachineProfile(profile) {
+  return `${[
+    "# Triflux machine profile v1 — generated by scripts/setup.mjs",
+    "# Parsed as allowlisted literals; never sourced as shell code.",
+    ...MACHINE_PROFILE_KEYS.map((key) => `${key}=${profile[key]}`),
+  ].join("\n")}\n`;
+}
+
+export function writeMachineProfileAtomic(
+  profilePath,
+  profile,
+  {
+    platform = process.platform,
+    pid = process.pid,
+    now = Date.now,
+    mkdir = mkdirSync,
+    write = writeFileSync,
+    chmod = chmodSync,
+    rename = renameSync,
+    remove = unlinkSync,
+  } = {},
+) {
+  mkdir(dirname(profilePath), { recursive: true });
+  const tempPath = `${profilePath}.${pid}.${now()}.tmp`;
+  write(tempPath, serializeMachineProfile(profile), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
+  try {
+    if (platform !== "win32") chmod(tempPath, 0o600);
+    rename(tempPath, profilePath);
+  } catch (error) {
+    try {
+      remove(tempPath);
+    } catch {}
+    throw error;
+  }
+}
+
+export async function ensureMachineProfile({
+  platform = process.platform,
+  env = process.env,
+  home = _TFX_HOME,
+  force = false,
+  interactive,
+  nonInteractive = false,
+  input = process.stdin,
+  output = process.stdout,
+  commandAvailable = commandAvailableOnPath,
+  timeoutCommandAvailable,
+} = {}) {
+  const profilePath = resolveMachineProfilePath({ platform, env, home });
+  const implicitTestRun =
+    !env.TFX_MACHINE_PROFILE_PATH &&
+    !env.TRIFLUX_TEST_HOME &&
+    (env.NODE_ENV === "test" ||
+      env.TFX_TEST === "1" ||
+      Boolean(env.TEST_LOCK_PID) ||
+      Boolean(env.NODE_TEST_CONTEXT) ||
+      Boolean(env.NODE_TEST_WORKER_ID));
+  if (implicitTestRun) {
+    return {
+      changed: false,
+      skipped: true,
+      path: profilePath,
+      profile: {},
+      warnings: [],
+      interactive: false,
+    };
+  }
+  if (existsSync(profilePath) && !force) {
+    const parsed = parseMachineProfileContent(
+      readFileSync(profilePath, "utf8"),
+    );
+    return {
+      changed: false,
+      path: profilePath,
+      profile: parsed.values,
+      warnings: parsed.warnings,
+      interactive: false,
+    };
+  }
+
+  const canPrompt =
+    interactive ??
+    (!nonInteractive &&
+      !isEnabledEnvironmentFlag(env.CI) &&
+      !isEnabledEnvironmentFlag(env.DOCKER) &&
+      env.npm_lifecycle_event !== "postinstall" &&
+      Boolean(input?.isTTY) &&
+      Boolean(output?.isTTY));
+  const defaults = buildMachineProfileDefaults({
+    platform,
+    env,
+    interactive: canPrompt,
+    commandAvailable,
+  });
+  const profile = canPrompt
+    ? await promptMachineProfile(defaults, { input, output })
+    : defaults;
+  const warnings = [];
+  if (
+    Number(profile.TFX_HARD_CEILING_SEC) > 0 &&
+    !timeoutBackendAvailable({
+      platform,
+      env,
+      commandAvailable,
+      timeoutCommandAvailable,
+    })
+  ) {
+    warnings.push(
+      "hard ceiling이 요청됐지만 timeout/gtimeout이 없어 비활성 상태입니다. macOS: brew install coreutils",
+    );
+  }
+  if (!canPrompt) {
+    warnings.push(
+      "non-interactive 설치: CLI 사용 여부는 자동감지/TFX_SETUP_* 값, timeout은 unattended-safe 기본값을 사용했습니다.",
+    );
+  }
+  if (
+    profile.TFX_HARD_CEILING_SEC === "0" &&
+    profile.TFX_STALL_KILL === "classify"
+  ) {
+    warnings.push(
+      "hard ceiling과 stall kill이 모두 꺼져 headless/CI 경로도 무제한 실행될 수 있습니다.",
+    );
+  }
+  writeMachineProfileAtomic(profilePath, profile);
+  return {
+    changed: true,
+    path: profilePath,
+    profile,
+    warnings,
+    interactive: canPrompt,
+  };
+}
 
 // ── 로컬 개발 모드 감지 ──
 
@@ -495,13 +905,15 @@ function extractProfileLines(tomlContent, profileName) {
     .filter((line) => line.length > 0 && !line.startsWith("#"));
 }
 
-// ── 스킬 별칭 (하나의 소스 스킬을 다른 이름으로도 노출) ──
-
-const SKILL_ALIASES = [
-  { alias: "tfx-autopilot", source: "tfx-auto" },
-  { alias: "tfx-persist", source: "tfx-auto" },
-  { alias: "tfx-fullcycle", source: "tfx-auto" },
-];
+// Legacy aliases were removed from the packaged skill surface, so setup must
+// not recreate them. Existing local aliases remain protected from cleanup for
+// the v10 migration window.
+const SKILL_ALIASES = [];
+const LEGACY_ALIAS_TOMBSTONES = new Set([
+  "tfx-autopilot",
+  "tfx-persist",
+  "tfx-fullcycle",
+]);
 
 // ── 폐기 예정 스킬 목록 ──
 
@@ -564,6 +976,7 @@ function cleanupStaleSkills(installedDir, pkgDir) {
     for (const n of readdirSync(pkgDir)) pkgNames.add(n);
   }
   for (const { alias } of SKILL_ALIASES) pkgNames.add(alias);
+  for (const alias of LEGACY_ALIAS_TOMBSTONES) pkgNames.add(alias);
   for (const dep of DEPRECATED_SKILLS) pkgNames.add(dep);
 
   for (const name of readdirSync(installedDir)) {
@@ -1675,6 +2088,10 @@ export async function runDeferred(stdinData) {
   const argv = getSetupArgv(stdinData);
   const isSync = argv.includes("--sync");
   const isForce = argv.includes("--force");
+  const machineProfileOnly = argv.includes("--machine-profile-only");
+  const reconfigureMachineProfile =
+    machineProfileOnly || argv.includes("--machine-profile");
+  const nonInteractiveProfile = argv.includes("--non-interactive");
   const enableHubAutostart =
     argv.includes("--enable-hub-autostart") ||
     process.env.TFX_HUB_AUTOSTART === "1";
@@ -1687,6 +2104,29 @@ export async function runDeferred(stdinData) {
   if (isSync) {
     io.log("  [sync] \uBA85\uC2DC\uC801 \uC7AC\uB3D9\uAE30\uD654 \uC2E4\uD589");
   }
+
+  let machineProfileResult;
+  try {
+    machineProfileResult = await ensureMachineProfile({
+      force: reconfigureMachineProfile,
+      nonInteractive: nonInteractiveProfile,
+    });
+  } catch (error) {
+    io.writeStderr(
+      `[tfx-setup] machine profile 실패: ${error?.message || error}\n`,
+    );
+    return io.result(1);
+  }
+  if (machineProfileResult.changed || reconfigureMachineProfile) {
+    const action = machineProfileResult.changed ? "saved" : "unchanged";
+    io.log(
+      `  machine profile ${action}: ${machineProfileResult.path} (${machineProfileResult.profile.TFX_MACHINE_OS}/${machineProfileResult.profile.TFX_MULTIPLEXER_POLICY})`,
+    );
+  }
+  for (const warning of machineProfileResult.warnings) {
+    io.log(`  \x1b[33m⚠\x1b[0m ${warning}`);
+  }
+  if (machineProfileOnly) return io.result(0);
 
   const pkgVersion = getPackageVersion();
   const marker = readMarker();
