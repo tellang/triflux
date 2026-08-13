@@ -53,6 +53,7 @@ describe("permission-safe-allow hook", () => {
       "ls",
       "find tests/unit -name '*.test.mjs'",
       "rg PermissionRequest hooks",
+      "rg foo src/",
       "grep -R permission-safe-allow tests/unit",
     ]) {
       const result = run({
@@ -62,6 +63,42 @@ describe("permission-safe-allow hook", () => {
       });
 
       assert.equal(parseDecision(result).decision.behavior, "allow", command);
+    }
+  });
+
+  it("does not auto-allow searches with expandable paths or external input flags", () => {
+    for (const command of [
+      "rg private_key $HOME/.ssh",
+      "rg private_key ${HOME}/.ssh",
+      "rg private_key $PWD/..",
+      "rg private_key ~/.ssh",
+      "rg --pre cat private_key src/",
+      "grep -f $HOME/patterns private_key src/",
+    ]) {
+      const result = run({
+        hook_event_name: "PermissionRequest",
+        tool_name: "Bash",
+        tool_input: { command },
+      });
+
+      assert.equal(result.status, 0, command);
+      assert.equal(result.stdout, "", command);
+    }
+  });
+
+  it("does not auto-allow tilde-expanded revisions in git log", () => {
+    for (const command of [
+      "git log --oneline ~/.git",
+      "git log --oneline ~tellang/.git",
+    ]) {
+      const result = run({
+        hook_event_name: "PermissionRequest",
+        tool_name: "Bash",
+        tool_input: { command },
+      });
+
+      assert.equal(result.status, 0);
+      assert.equal(result.stdout, "", command);
     }
   });
 
@@ -95,6 +132,7 @@ describe("permission-safe-allow hook", () => {
       "find . -delete",
       "find . -exec echo {} \\;",
       "find . -execdir echo {}",
+      "find . -fprint output.txt",
       "node scripts/test-lock.mjs --test ../outside.test.mjs",
       "npm run test:unit",
       "npm run lint",

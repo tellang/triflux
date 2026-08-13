@@ -3,6 +3,8 @@
 import { stdin, stdout } from "node:process";
 
 const META_PATTERNS = [/&&/, /\|\|/, /[;|<>`]/, /\$\(/];
+const SHELL_EXPANSION_PATTERN =
+  /(?:^|[^\\])\$(?:[A-Za-z_][A-Za-z0-9_]*|\{[^}]*\}|[?*#@$!0-9-])|(?:^|\s)~[A-Za-z0-9_-]*(?=\/|$)/;
 const RISKY_PATTERNS = [
   /(^|\s)rm(\s|$)/,
   /(^|\s)mv(\s|$)/,
@@ -19,6 +21,25 @@ const RISKY_PATTERNS = [
   /(^|\s)pnpm\s+publish(\s|$)/,
   /(^|\s)yarn\s+publish(\s|$)/,
 ];
+const SEARCH_EXTERNAL_INPUT_FLAGS = new Set([
+  "--exclude-from",
+  "--file",
+  "--files-from",
+  "--ignore-file",
+  "--pre",
+  "--pre-glob",
+]);
+const FIND_SIDE_EFFECT_OPERATORS = new Set([
+  "-delete",
+  "-exec",
+  "-execdir",
+  "-fprint",
+  "-fprint0",
+  "-fprintf",
+  "-fls",
+  "-ok",
+  "-okdir",
+]);
 
 function silentlyExit() {
   process.exit(0);
@@ -57,7 +78,18 @@ function isRepoRelativePath(value) {
 function hasUnsafeSurface(command) {
   return (
     META_PATTERNS.some((pattern) => pattern.test(command)) ||
+    SHELL_EXPANSION_PATTERN.test(command) ||
     RISKY_PATTERNS.some((pattern) => pattern.test(command))
+  );
+}
+
+function isExternalSearchInputFlag(word) {
+  return (
+    SEARCH_EXTERNAL_INPUT_FLAGS.has(word) ||
+    [...SEARCH_EXTERNAL_INPUT_FLAGS].some((flag) =>
+      word.startsWith(`${flag}=`),
+    ) ||
+    /^-[^-]*f/.test(word)
   );
 }
 
@@ -97,8 +129,7 @@ function allowListing(words) {
 
   if (words[0] === "find") {
     const args = words.slice(1);
-    if (args.some((word) => word === "-delete" || word.startsWith("-exec")))
-      return null;
+    if (args.some((word) => FIND_SIDE_EFFECT_OPERATORS.has(word))) return null;
     const firstOption = args.findIndex((word) => word.startsWith("-"));
     const pathArgs = (
       firstOption === -1 ? args : args.slice(0, firstOption)
@@ -118,7 +149,10 @@ function allowSearch(words) {
   if (
     args.some(
       (word) =>
+        isExternalSearchInputFlag(word) ||
         word.startsWith("/") ||
+        word.startsWith("~") ||
+        word.startsWith("$") ||
         word === ".." ||
         word.startsWith("../") ||
         word.includes("/../"),
