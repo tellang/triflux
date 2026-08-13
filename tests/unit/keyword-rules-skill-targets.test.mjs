@@ -106,6 +106,7 @@ describe("tfx-harness 라우팅 우선순위 (동순위 가로채기 회귀 가�
       "tfx swarm으로 돌릴 건데 어떤 스킬이 맞아?",
     );
     assert.equal(resolved[0]?.id, "tfx-swarm");
+    assert.equal(resolved[0]?.skill, "tfx-auto");
     const meta = resolved.find((match) => match.id === "tfx-harness-meta");
     assert.ok(meta, "meta 룰은 함께 매치되되 최우선이 아니어야 한다");
   });

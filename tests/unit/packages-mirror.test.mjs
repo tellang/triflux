@@ -4,7 +4,8 @@
 // (bin, config, hooks, hub, hud, mesh, scripts, skills).
 
 import assert from "node:assert/strict";
-import { rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -124,4 +125,35 @@ test("check-packages-mirror skips skills/tfx-workspace", () => {
       "tfx-workspace drift was flagged — SKIP_RELS regression",
     );
   });
+});
+
+test("check-packages-mirror skips generated skills/.omc state", () => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "triflux-mirror-"));
+  const fixtureMirror = join(fixtureRoot, "packages", "triflux");
+  const statePath = join(
+    fixtureRoot,
+    "skills",
+    ".omc",
+    "state",
+    "idle-notif-cooldown.json",
+  );
+  mkdirSync(dirname(statePath), { recursive: true });
+  writeFileSync(statePath, '{"lastSentAt":"fixture"}\n');
+
+  try {
+    const result = compareMirror({
+      repoRoot: fixtureRoot,
+      mirrorRoot: fixtureMirror,
+    });
+    const leaked = result.issues.find((issue) =>
+      issue.path.endsWith("skills/.omc/state/idle-notif-cooldown.json"),
+    );
+    assert.equal(
+      leaked,
+      undefined,
+      "generated skills/.omc state was flagged as mirror drift",
+    );
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 });

@@ -73,7 +73,7 @@ const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage"]);
 // packages/triflux/package.json "files" negation patterns (e.g.
 // "!skills/tfx-workspace"), so source-tree drift in these subtrees does not
 // affect the npm tarball. See .claude/rules/tfx-mirror-policy.md.
-const SKIP_RELS = new Map([["skills", new Set(["tfx-workspace"])]]);
+const SKIP_RELS = new Map([["skills", new Set([".omc", "tfx-workspace"])]]);
 
 function walkRelFiles(root, skipRels = new Set()) {
   const out = [];

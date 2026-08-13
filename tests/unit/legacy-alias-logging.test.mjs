@@ -6,23 +6,10 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-const LEGACY_SKILLS = [
-  { name: "tfx-autopilot", canonical: "tfx-auto" },
-  { name: "tfx-consensus", canonical: "tfx-auto --mode consensus" },
-  { name: "tfx-debate", canonical: "tfx-auto --mode consensus --shape debate" },
-  { name: "tfx-fullcycle", canonical: "tfx-auto --mode deep --parallel 1" },
-  { name: "tfx-multi", canonical: "tfx-auto --parallel N --mode deep" },
-  { name: "tfx-panel", canonical: "tfx-auto --mode consensus --shape panel" },
-  { name: "tfx-persist", canonical: "tfx-auto --retry ralph" },
-  {
-    name: "tfx-swarm",
-    canonical:
-      "tfx-auto --parallel swarm --mode consensus --isolation worktree",
-  },
-  { name: "tfx-remote-setup", canonical: "tfx-remote setup" },
-  { name: "tfx-remote-spawn", canonical: "tfx-remote" },
-  { name: "tfx-psmux-rules", canonical: ".claude/rules/tfx-psmux.md" },
-];
+// All skill-based aliases completed their removal in 3ecb33b5. Do not add a
+// missing skill here: an alias must have a live SKILL.md before this gate can
+// require its deprecation logging contract.
+const LEGACY_SKILLS = [];
 
 describe("#112 Phase 5 gate — legacy alias deprecation logging", () => {
   for (const { name, canonical } of LEGACY_SKILLS) {

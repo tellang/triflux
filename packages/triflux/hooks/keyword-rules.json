@@ -55,7 +55,7 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-swarm",
+      "skill": "tfx-auto",
       "priority": 1,
       "supersedes": ["tfx-codex"],
       "exclusive": false,

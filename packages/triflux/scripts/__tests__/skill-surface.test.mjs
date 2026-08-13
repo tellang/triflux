@@ -37,7 +37,7 @@ describe("skill surface consolidation (#112)", () => {
     );
   });
 
-  it("marks legacy compatibility aliases as deprecated and superseded", () => {
+  it("keeps removed legacy compatibility aliases out of the packaged surface", () => {
     const expectedAliases = [
       "tfx-autopilot",
       "tfx-consensus",
@@ -53,9 +53,11 @@ describe("skill surface consolidation (#112)", () => {
     ];
 
     for (const name of expectedAliases) {
-      const data = readSkillFrontmatter(name);
-      assert.equal(data.deprecated, true, `${name} must be deprecated`);
-      assert.ok(data["superseded-by"], `${name} must declare superseded-by`);
+      assert.equal(
+        existsSync(join(skillsDir, name, "SKILL.md")),
+        false,
+        `${name} must stay removed from the packaged skill surface`,
+      );
     }
   });
 });
