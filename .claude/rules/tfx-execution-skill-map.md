@@ -48,6 +48,13 @@
 > **코드 변경 = tfx-swarm 우선** (로컬/원격 동일). tfx-remote는 원격 대화형/탐색 전용. multi는 로컬 공유-cwd 병렬이며, headless는 명시 선택이다 (worktree 불필요 read-only 작업).
 > **MANDATORY**: `tfx-auto` 는 2+ 태스크 + 코드 변경 자동 감지 시 swarm 으로 escalate (Issue #281 closed). 사용자 명시 `--parallel N` override 시 warning 후 사용자 결정 존중.
 
+## OMC 비교 경계
+
+OMC PSM의 세 구성요소 도식은 과거 구조와의 비교 참고일 뿐이다. native Claude teammate lifecycle과
+CLI/tmux worker lifecycle은 분리하고, Triflux가 CLI launch·observation·cleanup을 계속 소유한다.
+자세한 근거와 향후 worktree 재사용 검증 후보는
+[OMC 런타임 운용 비교 노트](../../docs/research/omc-runtime-knowhow-2026-08-14.md)를 따른다.
+
 ## CLI tmux 관전 기본값
 
 > **MANDATORY**: 개별 Codex/Antigravity CLI 디스패치는 사람이 진행을 관전할 수 있도록 기본적으로 tmux split-pane으로 연다. 사용자가 "조용히"/"백그라운드로만"을 명시했거나 tmux가 불가한 경우에만 raw background로 되돌아간다.

@@ -7,6 +7,7 @@ import childProcess from "../../hub/lib/spawn-trace.mjs";
 
 const ORIGINAL_ENV = {
   PSMUX_CAPTURE_ROOT: process.env.PSMUX_CAPTURE_ROOT,
+  PSMUX_BIN: process.env.PSMUX_BIN,
   PSMUX_POLL_INTERVAL_MS: process.env.PSMUX_POLL_INTERVAL_MS,
   PSMUX_POLL_INTERVAL_SEC: process.env.PSMUX_POLL_INTERVAL_SEC,
   PSMUX_SESSION: process.env.PSMUX_SESSION,
@@ -314,6 +315,81 @@ describe("psmux nested-session protection", () => {
     assert.ok(versionCall, "psmux -V 호출이 있어야 함");
     assert.equal(versionCall.opts?.env?.PSMUX_SESSION, undefined);
     assert.equal(process.env.PSMUX_SESSION, "inside-psmux-session");
+  });
+});
+
+describe("createPsmuxSession ownership rollback", () => {
+  function mockForCreateSession({ failAt }) {
+    const calls = [];
+    process.env.PSMUX_BIN = "fake-mux";
+
+    const tracker = mock.method(childProcess, "execFileSync", (file, args) => {
+      const argv = Array.isArray(args) ? [...args] : [];
+      calls.push({ file, args: argv });
+
+      if (argv[0] === "-V") return "tmux 3.5";
+      if (file === "pgrep") throw new Error("no matching process");
+
+      if (argv[0] === "new-session") {
+        if (failAt === "new-session") {
+          const error = new Error("duplicate session");
+          error.stderr = "duplicate session";
+          throw error;
+        }
+        return "tfx-owner:0.0\n";
+      }
+      if (argv[0] === "select-layout" && failAt === "select-layout") {
+        const error = new Error("layout initialization failed");
+        error.stderr = "layout initialization failed";
+        throw error;
+      }
+      if (argv[0] === "list-sessions") return "";
+      if (argv[0] === "list-panes") {
+        return argv.some((arg) => String(arg).includes("pane_pid"))
+          ? ""
+          : "0\ttfx-owner:0.0\n";
+      }
+      return "";
+    });
+
+    registerRestore(() => tracker.mock.restore());
+    return calls;
+  }
+
+  it("new-session 성공 후 초기화 실패는 정확히 한 번 rollback하고 원래 error를 rethrow한다", async () => {
+    const calls = mockForCreateSession({ failAt: "select-layout" });
+    const { createPsmuxSession } = await importFreshPsmux();
+
+    assert.throws(
+      () =>
+        createPsmuxSession("tfx-owner", {
+          layout: "2x2",
+          paneCount: 1,
+        }),
+      (error) => {
+        assert.equal(error.message, "layout initialization failed");
+        return true;
+      },
+    );
+
+    assert.equal(
+      calls.filter((call) => call.args[0] === "kill-session").length,
+      1,
+    );
+  });
+
+  it("new-session 자체 실패는 ownership이 없으므로 rollback하지 않는다", async () => {
+    const calls = mockForCreateSession({ failAt: "new-session" });
+    const { createPsmuxSession } = await importFreshPsmux();
+
+    assert.throws(
+      () => createPsmuxSession("tfx-owner", { paneCount: 1 }),
+      /duplicate session/u,
+    );
+    assert.equal(
+      calls.filter((call) => call.args[0] === "kill-session").length,
+      0,
+    );
   });
 });
 

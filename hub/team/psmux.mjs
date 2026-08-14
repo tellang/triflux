@@ -676,41 +676,32 @@ export function createPsmuxSession(sessionName, opts = {}) {
     newSessionArgs.push(PWSH_BIN, "-NoLogo", "-NoProfile");
   const leadPane = psmuxExec(newSessionArgs);
 
-  // split-window로 생성되는 pane도 동일 셸 사용 (Windows: PowerShell 강제)
-  if (PWSH_BIN && IS_WINDOWS) {
-    try {
-      psmuxExec([
-        "set-option",
-        "-t",
-        sessionName,
-        "default-command",
-        `${PWSH_BIN} -NoLogo -NoProfile`,
-      ]);
-    } catch {
-      /* 미지원 시 무시 */
+  try {
+    // split-window로 생성되는 pane도 동일 셸 사용 (Windows: PowerShell 강제)
+    if (PWSH_BIN && IS_WINDOWS) {
+      try {
+        psmuxExec([
+          "set-option",
+          "-t",
+          sessionName,
+          "default-command",
+          `${PWSH_BIN} -NoLogo -NoProfile`,
+        ]);
+      } catch {
+        /* 미지원 시 무시 */
+      }
     }
-  }
 
-  if (layout === "2x2" && limitedPaneCount >= 3) {
-    const rightPane = psmuxExec([
-      "split-window",
-      "-h",
-      "-P",
-      "-F",
-      "#{session_name}:#{window_index}.#{pane_index}",
-      "-t",
-      leadPane,
-    ]);
-    psmuxExec([
-      "split-window",
-      "-v",
-      "-P",
-      "-F",
-      "#{session_name}:#{window_index}.#{pane_index}",
-      "-t",
-      rightPane,
-    ]);
-    if (limitedPaneCount >= 4) {
+    if (layout === "2x2" && limitedPaneCount >= 3) {
+      const rightPane = psmuxExec([
+        "split-window",
+        "-h",
+        "-P",
+        "-F",
+        "#{session_name}:#{window_index}.#{pane_index}",
+        "-t",
+        leadPane,
+      ]);
       psmuxExec([
         "split-window",
         "-v",
@@ -718,51 +709,69 @@ export function createPsmuxSession(sessionName, opts = {}) {
         "-F",
         "#{session_name}:#{window_index}.#{pane_index}",
         "-t",
-        leadPane,
+        rightPane,
       ]);
+      if (limitedPaneCount >= 4) {
+        psmuxExec([
+          "split-window",
+          "-v",
+          "-P",
+          "-F",
+          "#{session_name}:#{window_index}.#{pane_index}",
+          "-t",
+          leadPane,
+        ]);
+      }
+      psmuxExec(["select-layout", "-t", sessionTarget, "tiled"]);
+    } else if (layout === "1xN") {
+      for (let index = 1; index < limitedPaneCount; index += 1) {
+        psmuxExec(["split-window", "-h", "-t", sessionTarget]);
+      }
+      psmuxExec(["select-layout", "-t", sessionTarget, "even-horizontal"]);
+    } else {
+      for (let index = 1; index < limitedPaneCount; index += 1) {
+        psmuxExec(["split-window", "-v", "-t", sessionTarget]);
+      }
+      psmuxExec(["select-layout", "-t", sessionTarget, "even-vertical"]);
     }
-    psmuxExec(["select-layout", "-t", sessionTarget, "tiled"]);
-  } else if (layout === "1xN") {
-    for (let index = 1; index < limitedPaneCount; index += 1) {
-      psmuxExec(["split-window", "-h", "-t", sessionTarget]);
-    }
-    psmuxExec(["select-layout", "-t", sessionTarget, "even-horizontal"]);
-  } else {
-    for (let index = 1; index < limitedPaneCount; index += 1) {
-      psmuxExec(["split-window", "-v", "-t", sessionTarget]);
-    }
-    psmuxExec(["select-layout", "-t", sessionTarget, "even-vertical"]);
-  }
 
-  psmuxExec(["select-pane", "-t", leadPane]);
+    psmuxExec(["select-pane", "-t", leadPane]);
 
-  const panes = collectSessionPanes(sessionName).slice(0, limitedPaneCount);
-  panes.forEach((pane, index) => {
-    try {
-      psmuxExec(["select-pane", "-t", pane, "-T", toPaneTitle(index)]);
-    } catch {
-      // tmux 2.6 미만: select-pane -T 미지원 — pane title 없이 계속 진행
-    }
-  });
-
-  // CP949 등 non-UTF-8 codepage 환경에서 CLI stdout 깨짐 방지:
-  // pane 생성 직후 UTF-8 인코딩을 강제 설정한다.
-  // chcp 65001: 프로세스 코드 페이지를 UTF-8로 전환
-  // OutputEncoding: 네이티브 명령(gemini/codex) stdout 디코딩
-  // $OutputEncoding: PowerShell 파이프라인 기본 인코딩
-  if (IS_WINDOWS) {
-    const encodingInit = [
-      "chcp 65001 > $null",
-      "[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
-      "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-      "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-    ].join("; ");
-    panes.forEach((paneId) => {
-      sendLiteralToPane(paneId, encodingInit, true);
+    const panes = collectSessionPanes(sessionName).slice(0, limitedPaneCount);
+    panes.forEach((pane, index) => {
+      try {
+        psmuxExec(["select-pane", "-t", pane, "-T", toPaneTitle(index)]);
+      } catch {
+        // tmux 2.6 미만: select-pane -T 미지원 — pane title 없이 계속 진행
+      }
     });
-  }
 
-  return { sessionName, panes };
+    // CP949 등 non-UTF-8 codepage 환경에서 CLI stdout 깨짐 방지:
+    // pane 생성 직후 UTF-8 인코딩을 강제 설정한다.
+    // chcp 65001: 프로세스 코드 페이지를 UTF-8로 전환
+    // OutputEncoding: 네이티브 명령(gemini/codex) stdout 디코딩
+    // $OutputEncoding: PowerShell 파이프라인 기본 인코딩
+    if (IS_WINDOWS) {
+      const encodingInit = [
+        "chcp 65001 > $null",
+        "[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+        "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+      ].join("; ");
+      panes.forEach((paneId) => {
+        sendLiteralToPane(paneId, encodingInit, true);
+      });
+    }
+
+    return { sessionName, panes };
+  } catch (error) {
+    try {
+      killPsmuxSession(sessionName);
+    } catch {
+      /* rollback is best-effort; preserve the initialization error */
+    }
+    throw error;
+  }
 }
 
 /**

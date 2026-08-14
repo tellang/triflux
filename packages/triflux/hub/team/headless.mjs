@@ -59,6 +59,7 @@ import {
   killPsmuxSession,
   psmuxExec,
   psmuxSessionExists,
+  sendKeysToPane,
   startCapture,
   waitForCompletion,
 } from "./psmux.mjs";
@@ -953,15 +954,55 @@ export async function waitForCompletionWithStallDetect(
   }
 }
 
+function createHeadlessSessionOwnership(killSession) {
+  let owned = false;
+  let ownedSessionName = "";
+
+  return {
+    get owned() {
+      return owned;
+    },
+
+    acquire(sessionName) {
+      if (owned) return false;
+      ownedSessionName = String(sessionName);
+      owned = true;
+      return true;
+    },
+
+    release() {
+      if (!owned) return false;
+      const sessionName = ownedSessionName;
+      owned = false;
+      ownedSessionName = "";
+      try {
+        killSession(sessionName);
+      } catch {
+        /* cleanup is best-effort and ownership release is idempotent */
+      }
+      return true;
+    },
+  };
+}
+
 /** progressive 스플릿 모드: lead pane만 생성 후, 워커를 하나씩 추가하며 dispatch */
 async function dispatchProgressive(sessionName, assignments, opts = {}) {
-  const { layout, safeProgress, dashboardLayout = "single" } = opts;
+  const {
+    layout,
+    safeProgress,
+    dashboardLayout = "single",
+    sessionOwnership,
+    _deps: deps = {},
+  } = opts;
   const resolvedDashboardLayout = resolveDashboardLayout(
     dashboardLayout,
     assignments.length,
   );
-  const session = createPsmuxSession(sessionName, { layout, paneCount: 1 });
-  applyTrifluxTheme(sessionName);
+  const createSession = deps.createPsmuxSession || createPsmuxSession;
+  const applyTheme = deps.applyTrifluxTheme || applyTrifluxTheme;
+  const session = createSession(sessionName, { layout, paneCount: 1 });
+  sessionOwnership.acquire(session.sessionName || sessionName);
+  applyTheme(sessionName);
   if (safeProgress) {
     safeProgress({
       type: "session_created",
@@ -1073,7 +1114,13 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
 
 /** 기존 batch 모드: 모든 pane을 한 번에 생성하여 dispatch */
 async function dispatchBatch(sessionName, assignments, opts = {}) {
-  const { layout, safeProgress, dashboardLayout = "single" } = opts;
+  const {
+    layout,
+    safeProgress,
+    dashboardLayout = "single",
+    sessionOwnership,
+    _deps: deps = {},
+  } = opts;
   const paneCount = assignments.length + 1;
   const resolvedDashboardLayout = resolveDashboardLayout(
     dashboardLayout,
@@ -1081,11 +1128,14 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
   );
   // A2b fix: 2x2 레이아웃은 최대 4 pane — 초과 시 tiled로 자동 전환
   const effectiveLayout = layout === "2x2" && paneCount > 4 ? "tiled" : layout;
-  const session = createPsmuxSession(sessionName, {
+  const createSession = deps.createPsmuxSession || createPsmuxSession;
+  const applyTheme = deps.applyTrifluxTheme || applyTrifluxTheme;
+  const session = createSession(sessionName, {
     layout: effectiveLayout,
     paneCount,
   });
-  applyTrifluxTheme(sessionName);
+  sessionOwnership.acquire(session.sessionName || sessionName);
+  applyTheme(sessionName);
   if (safeProgress) {
     safeProgress({
       type: "session_created",
@@ -1725,15 +1775,20 @@ function collectGitDiffFiles(cwd) {
  * @param {number} [opts.progressIntervalSec=0] — N초마다 progress 이벤트 발화 (0=비활성)
  * @param {boolean} [opts.progressive=true] — true면 pane을 하나씩 split-window로 추가 (실시간 스플릿)
  * @param {string} [opts.dashboardLayout='single'] — dashboard viewer 레이아웃
- * @returns {{ sessionName: string, results: Array<{cli: string, paneName: string, matched: boolean, exitCode: number|null, output: string, sessionDead?: boolean}> }}
+ * @returns {{ sessionName: string, results: Array<{cli: string, paneName: string, matched: boolean, exitCode: number|null, output: string, sessionDead?: boolean}>, sessionOwnership: {owned: boolean, acquire: (sessionName: string) => boolean, release: () => boolean} }}
  */
 export async function runHeadless(sessionName, assignments, opts = {}) {
+  const deps = opts._deps || {};
+  const sessionOwnership =
+    opts._sessionOwnership ||
+    createHeadlessSessionOwnership(deps.killPsmuxSession || killPsmuxSession);
   let {
     timeoutSec = 900,
     layout = "2x2",
     onProgress,
     progressIntervalSec = 0,
     progressive = true,
+    autoAttach = false,
     dashboard = false,
     dashboardLayout = "single",
     stallDetect,
@@ -1757,11 +1812,15 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   );
 
   if (normalizedAssignments.length === 0) {
-    return { sessionName, results: [] };
+    return { sessionName, results: [], sessionOwnership };
   }
 
   let nativeBridgeHandle = null;
   let daemonDispatches = [];
+  let runCompleted = false;
+  let completedResults = [];
+  let runFailed = false;
+  let runError;
   if (nativeBridge && nativeBridgeMode === "claude-wrapper") {
     throw new Error(
       "[headless] --native-bridge-mode claude-wrapper is reserved and not implemented yet",
@@ -1778,11 +1837,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       workerType:
         nativeBridgeMode === "interactive-attach" ? "interactive" : "headless",
       onKill() {
-        try {
-          killPsmuxSession(sessionName);
-        } catch {
-          /* session may not exist yet */
-        }
+        sessionOwnership.release();
       },
     });
     process.stderr.write(
@@ -1967,24 +2022,60 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   };
 
   try {
+    const progressiveDispatch = deps.dispatchProgressive || dispatchProgressive;
+    const batchDispatch = deps.dispatchBatch || dispatchBatch;
     const dispatches =
       nativeBridge && nativeBridgeMode === "agents"
         ? await dispatchDaemonBatch(sessionName, normalizedAssignments, {
             safeProgress,
           })
         : progressive
-          ? await dispatchProgressive(sessionName, normalizedAssignments, {
+          ? await progressiveDispatch(sessionName, normalizedAssignments, {
               layout,
               safeProgress,
               dashboardLayout,
+              sessionOwnership,
+              _deps: deps,
             })
-          : await dispatchBatch(sessionName, normalizedAssignments, {
+          : await batchDispatch(sessionName, normalizedAssignments, {
               layout,
               safeProgress,
               dashboardLayout,
+              sessionOwnership,
+              _deps: deps,
             });
     if (nativeBridge && nativeBridgeMode === "agents") {
       daemonDispatches = dispatches;
+      const createObservationSession =
+        deps.createDaemonObservationSession || createDaemonObservationSession;
+      let observation = null;
+      try {
+        observation = createObservationSession(sessionName, dispatches, {
+          autoAttach,
+          dashboard,
+          dashboardLayout,
+          onProgress: safeProgress,
+          _deps: deps,
+        });
+      } catch (error) {
+        emitObserverWarning(
+          safeProgress,
+          sessionName,
+          "observer_session_create",
+          error,
+          "observer setup failed",
+        );
+      }
+      if (observation) {
+        sessionOwnership.acquire(observation.sessionName);
+        safeProgress({
+          type: "session_created",
+          sessionName: observation.sessionName,
+          panes: observation.panes,
+          dashboardLayout: observation.dashboardLayout,
+          observationSource: "daemon-files",
+        });
+      }
     }
 
     const results =
@@ -2031,8 +2122,15 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       tui.close();
     }
 
-    return { sessionName, results: collected };
-  } finally {
+    runCompleted = true;
+    completedResults = collected;
+  } catch (error) {
+    runFailed = true;
+    runError = error;
+  }
+
+  if (!runCompleted) sessionOwnership.release();
+  try {
     // Synapse: 세션 unregister (fire-and-forget)
     for (const sid of synapseIds) {
       requestJson("/synapse/unregister", {
@@ -2045,7 +2143,16 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     if (daemonDispatches.length > 0) {
       await cleanupDaemonDispatches(daemonDispatches);
     }
+  } catch (error) {
+    sessionOwnership.release();
+    if (!runFailed) {
+      runFailed = true;
+      runError = error;
+    }
   }
+
+  if (runFailed) throw runError;
+  return { sessionName, results: completedResults, sessionOwnership };
 }
 
 /**
@@ -2059,20 +2166,27 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 export async function runHeadlessWithCleanup(assignments, opts = {}) {
   const { sessionPrefix = "tfx-hl", ...runOpts } = opts;
   const sessionName = `${sessionPrefix}-${Date.now().toString(36).slice(-6)}`;
+  const deps = opts._deps || {};
+  const run = deps.runHeadless || runHeadless;
+  const sessionOwnership = createHeadlessSessionOwnership(
+    deps.killPsmuxSession || killPsmuxSession,
+  );
 
   try {
-    return await runHeadless(sessionName, assignments, runOpts);
+    return await run(sessionName, assignments, {
+      ...runOpts,
+      _sessionOwnership: sessionOwnership,
+    });
   } finally {
-    for (let index = 0; index < assignments.length; index++) {
-      unregisterHeadlessSynapseWorker(
-        getHeadlessWorkerAgentId(sessionName, index),
-      );
-    }
-    await deregisterHeadlessWorkers(sessionName, assignments.length);
     try {
-      killPsmuxSession(sessionName);
-    } catch {
-      /* 무시 */
+      for (let index = 0; index < assignments.length; index++) {
+        unregisterHeadlessSynapseWorker(
+          getHeadlessWorkerAgentId(sessionName, index),
+        );
+      }
+      await deregisterHeadlessWorkers(sessionName, assignments.length);
+    } finally {
+      sessionOwnership.release();
     }
     // WT split pane은 psmux 종료 시 셸이 끝나면서 자동으로 닫힘
     // 수동 close-pane 불필요 (레이스 컨디션으로 WT 에러 발생)
@@ -2189,7 +2303,269 @@ function buildAttachTitle(sessionName, suffix = "") {
   return suffix ? `${base} ${suffix}` : base;
 }
 
+function observerWarningMessage(cause, fallbackMessage) {
+  if (cause instanceof Error && cause.message) return cause.message;
+  const message = String(cause ?? "").trim();
+  return message || fallbackMessage;
+}
+
+function safelyDeliverProgress(onProgress, event) {
+  if (typeof onProgress !== "function") return;
+  try {
+    const result = onProgress(event);
+    if (result?.catch) void result.catch(() => {});
+  } catch {
+    /* observer diagnostics are best-effort and must remain fail-open */
+  }
+}
+
+function emitObserverWarning(
+  onProgress,
+  sessionName,
+  stage,
+  cause,
+  fallbackMessage,
+) {
+  safelyDeliverProgress(onProgress, {
+    type: "observer_warning",
+    stage,
+    message: observerWarningMessage(cause, fallbackMessage),
+    sessionName: sanitizeSessionName(sessionName),
+  });
+}
+
 // ─── v6.0.0: Lead-Direct Interactive Mode ───
+
+/**
+ * daemon/native-bridge worker를 read-only로 관찰하는 tmux session을 만든다.
+ * 실제 worker process는 daemon에 남고, viewer는 result/partial/stderr 파일만 읽는다.
+ *
+ * @param {string} sessionName
+ * @param {Array<{resultFile:string}>} dispatches
+ * @param {object} [opts]
+ * @returns {{sessionName:string, panes:string[], dashboardLayout:string}|null}
+ */
+export function createDaemonObservationSession(
+  sessionName,
+  dispatches,
+  opts = {},
+) {
+  const deps = opts._deps || {};
+  const platform = deps.platform ?? process.platform;
+  const env = deps.env ?? process.env;
+  if (!opts.autoAttach) return null;
+  if (platform !== "darwin" && platform !== "linux") return null;
+  if (!String(env.TMUX || "").trim()) return null;
+  if (!/^%\d+$/u.test(String(env.TMUX_PANE || ""))) return null;
+  if (!Array.isArray(dispatches) || dispatches.length === 0) return null;
+
+  const safeSessionName = sanitizeSessionName(sessionName);
+  const resolvedLayout = opts.dashboard
+    ? resolveDashboardLayout(opts.dashboardLayout, dispatches.length)
+    : "lite";
+  const createSession = deps.createPsmuxSession || createPsmuxSession;
+  const applyTheme = deps.applyTrifluxTheme || applyTrifluxTheme;
+  const sendKeys = deps.sendKeysToPane || sendKeysToPane;
+  const killSession = deps.killPsmuxSession || killPsmuxSession;
+  let created = false;
+  let stage = "observer_session_create";
+
+  try {
+    const session = createSession(safeSessionName, {
+      layout: "2x2",
+      paneCount: 1,
+    });
+    created = true;
+    stage = "observer_theme";
+    applyTheme(safeSessionName);
+    stage = "observer_viewer_start";
+    const targetPane = session.panes?.[0];
+    if (!targetPane) throw new Error("observer pane was not created");
+
+    const viewerCommand = [
+      "exec",
+      shellQuote(process.execPath),
+      shellQuote(join(SCRIPT_DIR, "tui-viewer.mjs")),
+      "--session",
+      shellQuote(safeSessionName),
+      "--result-dir",
+      shellQuote(RESULT_DIR),
+      "--layout",
+      shellQuote(resolvedLayout),
+      "--source",
+      "files",
+      "--workers",
+      String(dispatches.length),
+    ].join(" ");
+    sendKeys(targetPane, viewerCommand, true);
+
+    return {
+      sessionName: safeSessionName,
+      panes: session.panes,
+      dashboardLayout: resolvedLayout,
+    };
+  } catch (error) {
+    if (created) {
+      try {
+        killSession(safeSessionName);
+      } catch {
+        /* fail-open: observer failure must not stop daemon workers */
+      }
+    }
+    emitObserverWarning(
+      opts.onProgress,
+      safeSessionName,
+      stage,
+      error,
+      "observer setup failed",
+    );
+    return null;
+  }
+}
+
+/**
+ * attached tmux의 현재 leader pane 옆에 headless session view를 연다.
+ * 새 pane의 attach client는 headless session 종료와 함께 자연스럽게 종료된다.
+ *
+ * @param {string} sessionName
+ * @param {object} [opts]
+ * @returns {boolean} split 요청 성공 여부
+ */
+export function attachHeadlessTmuxPane(sessionName, opts = {}) {
+  const deps = opts._deps || {};
+  const platform = deps.platform ?? process.platform;
+  const env = deps.env ?? process.env;
+  if (platform !== "darwin" && platform !== "linux") return false;
+  const tmuxEnv = String(env.TMUX || "");
+  if (!tmuxEnv.trim()) return false;
+
+  const socketPath = tmuxEnv.split(",", 1)[0];
+  if (!socketPath.trim()) return false;
+
+  const targetPane = String(env.TMUX_PANE || "");
+  if (!/^%\d+$/u.test(targetPane)) return false;
+
+  const exec = deps.psmuxExec || psmuxExec;
+  try {
+    exec([
+      "split-window",
+      "-v",
+      "-l",
+      "30%",
+      "-t",
+      targetPane,
+      "env",
+      "-u",
+      "TMUX",
+      "tmux",
+      "-S",
+      socketPath,
+      "attach-session",
+      "-t",
+      sanitizeSessionName(sessionName),
+    ]);
+    return true;
+  } catch (error) {
+    emitObserverWarning(
+      opts.onProgress,
+      sessionName,
+      "tmux_split",
+      error,
+      "tmux split failed",
+    );
+    return false;
+  }
+}
+
+/**
+ * session_created auto-attach를 정확히 한 번 라우팅하는 progress handler.
+ * Windows는 기존 WT helper를, macOS/Linux는 현재 tmux window split을 쓴다.
+ *
+ * @param {string} sessionName
+ * @param {number} workerCount
+ * @param {object} [opts]
+ * @returns {(event: object) => void}
+ */
+export function createHeadlessAutoAttachHandler(
+  sessionName,
+  workerCount,
+  opts = {},
+) {
+  const {
+    autoAttach = false,
+    dashboard = false,
+    dashboardLayout = "single",
+    dashboardSize = 0.4,
+    dashboardAnchor = "window",
+    onProgress,
+  } = opts;
+  const deps = opts._deps || {};
+  let terminalAttached = false;
+
+  return (event) => {
+    if (autoAttach && event.type === "session_created" && !terminalAttached) {
+      terminalAttached = true;
+      let warningReported = false;
+      const reportAttachWarning = (warningEvent) => {
+        warningReported = true;
+        safelyDeliverProgress(onProgress, warningEvent);
+      };
+      const reportAttachFailure = (cause, fallbackMessage) => {
+        warningReported = true;
+        emitObserverWarning(
+          onProgress,
+          sessionName,
+          "auto_attach",
+          cause,
+          fallbackMessage,
+        );
+      };
+      try {
+        const platform = deps.platform ?? process.platform;
+        let attachResult;
+        if (platform === "win32" && dashboard) {
+          const attach = deps.attachDashboardTab || attachDashboardTab;
+          attachResult = attach(
+            sessionName,
+            workerCount,
+            event.dashboardLayout ||
+              resolveDashboardLayout(dashboardLayout, workerCount),
+            dashboardSize,
+            dashboardAnchor,
+          );
+        } else if (platform === "win32") {
+          const attach = deps.autoAttachTerminal || autoAttachTerminal;
+          attachResult = attach(
+            sessionName,
+            { dashboardLayout, dashboardAnchor },
+            workerCount,
+          );
+        } else {
+          const attach = deps.attachHeadlessTmuxPane || attachHeadlessTmuxPane;
+          attachResult = attach(sessionName, {
+            _deps: deps,
+            onProgress: reportAttachWarning,
+          });
+        }
+        if (attachResult === false && !warningReported) {
+          reportAttachFailure(null, "auto-attach returned false");
+        } else if (attachResult?.then) {
+          void Promise.resolve(attachResult).then(
+            (result) => {
+              if (result === false && !warningReported) {
+                reportAttachFailure(null, "auto-attach returned false");
+              }
+            },
+            (error) => reportAttachFailure(error, "auto-attach rejected"),
+          );
+        }
+      } catch (error) {
+        reportAttachFailure(error, "auto-attach failed");
+      }
+    }
+    if (onProgress) onProgress(event);
+  };
+}
 
 /**
  * Windows Terminal에서 psmux 세션을 자동 attach한다.
@@ -2339,7 +2715,7 @@ export function getProgressSnapshots(sessionName, dispatches, lines = 15) {
  * @param {string} [opts.layout='2x2']
  * @param {(event: object) => void} [opts.onProgress]
  * @param {number} [opts.progressIntervalSec=0]
- * @param {boolean} [opts.autoAttach=false] — Windows Terminal 자동 attach
+ * @param {boolean} [opts.autoAttach=false] — 현재 platform의 관찰 pane/tab 자동 attach
  * @param {string} [opts.dashboardLayout='single'] — dashboard viewer 레이아웃
  * @param {AbortSignal} [opts.signal] — abort 시 자동 세션 정리
  * @param {number} [opts.maxIdleSec=0] — 유휴 시 자동 정리 (0=비활성)
@@ -2375,41 +2751,38 @@ export async function runHeadlessInteractive(
 
   // autoAttach를 session_created 시점에 트리거 (CLI 실행 전에 터미널 열림)
   const userOnProgress = headlessOpts.onProgress;
-  let terminalAttached = false;
-  const onProgress = (event) => {
-    if (autoAttach && event.type === "session_created" && !terminalAttached) {
-      terminalAttached = true;
-      if (dashboard) {
-        // v7.0: psmux attach로 대시보드+워커 전체 세션을 WT 탭에 표시
-        attachDashboardTab(
-          sessionName,
-          assignments.length,
-          event.dashboardLayout ||
-            resolveDashboardLayout(
-              headlessOpts.dashboardLayout,
-              assignments.length,
-            ),
-          dashboardSize,
-          dashboardAnchor,
-        );
-      } else {
-        autoAttachTerminal(
-          sessionName,
-          { dashboardLayout: headlessOpts.dashboardLayout, dashboardAnchor },
-          assignments.length,
-        );
-      }
-    }
-    if (userOnProgress) userOnProgress(event);
-  };
-  const interactiveRunOpts = { ...headlessOpts, onProgress };
-
-  // Phase 1: 세션 생성 → 즉시 터미널 팝업 → dispatch → 대기 → 결과 수집
-  const { results } = await runHeadless(
+  const onProgress = createHeadlessAutoAttachHandler(
     sessionName,
-    assignments,
-    interactiveRunOpts,
+    assignments.length,
+    {
+      autoAttach,
+      dashboard,
+      dashboardLayout: headlessOpts.dashboardLayout,
+      dashboardSize,
+      dashboardAnchor,
+      onProgress: userOnProgress,
+      _deps: headlessOpts._deps,
+    },
   );
+  const interactiveRunOpts = {
+    ...headlessOpts,
+    autoAttach,
+    dashboard,
+    onProgress,
+  };
+  const deps = headlessOpts._deps || {};
+  const run = deps.runHeadless || runHeadless;
+  let sessionOwnership = createHeadlessSessionOwnership(
+    deps.killPsmuxSession || killPsmuxSession,
+  );
+
+  // Phase 1: 세션 생성 → 즉시 관찰 pane/tab attach → dispatch → 대기 → 결과 수집
+  const runResult = await run(sessionName, assignments, {
+    ...interactiveRunOpts,
+    _sessionOwnership: sessionOwnership,
+  });
+  const { results } = runResult;
+  sessionOwnership = runResult.sessionOwnership || sessionOwnership;
 
   // Phase 2: 세션을 유지하고 interactive handle 반환
   // Fix P2: paneId를 dispatches에 포함 (snapshots에서 필요)
@@ -2485,7 +2858,7 @@ export async function runHeadlessInteractive(
       return psmuxSessionExists(sessionName);
     },
 
-    /** 세션 종료 — WT pane은 psmux 종료 시 자동으로 닫힘 */
+    /** 세션 종료 — attach pane/tab은 psmux 종료 시 자동으로 닫힘 */
     kill() {
       if (this._killed) return;
       this._killed = true;
@@ -2495,12 +2868,8 @@ export async function runHeadlessInteractive(
         );
       }
       void deregisterHeadlessWorkers(sessionName, assignments.length);
-      try {
-        killPsmuxSession(sessionName);
-      } catch {
-        /* 무시 */
-      }
-      // WT split pane은 psmux 종료 → 셸 종료 → 자동 닫힘
+      sessionOwnership.release();
+      // attach pane/tab은 psmux 종료 → attach client 종료 → 자동 닫힘
       // 수동 close-pane 불필요 (레이스 컨디션으로 WT 0x80070002 에러 발생)
     },
   };

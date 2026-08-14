@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
 import { openHeadlessDashboardTarget } from "./dashboard-open.mjs";
 import { processHandoff } from "./handoff.mjs";
+import { getMultiplexerType } from "./psmux.mjs";
 import { createLogDashboard } from "./tui.mjs";
 import { createLiteDashboard } from "./tui-lite.mjs";
 
@@ -24,21 +25,33 @@ function argVal(flag) {
 const SESSION = argVal("--session");
 const RESULT_DIR = argVal("--result-dir") ?? join(tmpdir(), "tfx-headless");
 const LAYOUT = argVal("--layout") ?? "single";
+const SOURCE = argVal("--source") === "files" ? "files" : "mux";
+const parsedWorkerCount = Number.parseInt(argVal("--workers") || "0", 10);
+const WORKER_COUNT = Number.isFinite(parsedWorkerCount)
+  ? Math.min(64, Math.max(0, parsedWorkerCount))
+  : 0;
+const MUX_BIN = getMultiplexerType();
 
-if (!SESSION) {
+if (!SESSION || !/^[a-zA-Z0-9_-]+$/u.test(SESSION)) {
   process.stderr.write(
     "Usage: node tui-viewer.mjs --session <name> [--result-dir <dir>] [--layout <name>]\n",
   );
   process.exit(1);
 }
-
-try {
-  execFileSync("psmux", ["--version"], { encoding: "utf8", timeout: 2000 });
-} catch {
-  process.stderr.write(
-    `ERROR: psmux 미설치. 설치 방법:\n${formatPsmuxInstallGuidance("  ")}\n`,
-  );
+if (SOURCE === "files" && WORKER_COUNT === 0) {
+  process.stderr.write("ERROR: --source files requires --workers <count>\n");
   process.exit(1);
+}
+
+if (SOURCE === "mux") {
+  try {
+    execFileSync(MUX_BIN, ["-V"], { encoding: "utf8", timeout: 2000 });
+  } catch {
+    process.stderr.write(
+      `ERROR: primary multiplexer 미설치. 설치 방법:\n${formatPsmuxInstallGuidance("  ")}\n`,
+    );
+    process.exit(1);
+  }
 }
 
 // ── 메모리 보호 상수 ──
@@ -166,9 +179,16 @@ function estimateProgress(lines, context = {}) {
 
 // ── psmux 래퍼 ──
 function listPanes() {
+  if (SOURCE === "files") {
+    return Array.from({ length: WORKER_COUNT }, (_, index) => ({
+      index: index + 1,
+      title: `worker-${index + 1} (daemon)`,
+      pid: "",
+    }));
+  }
   try {
     const out = execFileSync(
-      "psmux",
+      MUX_BIN,
       [
         "list-panes",
         "-t",
@@ -192,9 +212,35 @@ function listPanes() {
 }
 
 function capturePane(paneIdx, lines = 20) {
+  if (SOURCE === "files") {
+    const base = join(RESULT_DIR, `${SESSION}-worker-${paneIdx}.txt`);
+    const artifacts = [
+      { path: base, label: "output" },
+      { path: `${base}.partial`, label: "daemon" },
+      { path: `${base}.err`, label: "stderr" },
+    ];
+    const snapshots = [];
+    for (const artifact of artifacts) {
+      try {
+        const content = readFileSync(artifact.path, "utf8").trim();
+        if (!content) continue;
+        snapshots.push(
+          `[${artifact.label}]\n${content.split("\n").slice(-lines).join("\n")}`,
+        );
+      } catch {
+        /* artifact is optional while the daemon job is starting */
+      }
+    }
+    return (
+      snapshots.join("\n") ||
+      `worker-${paneIdx} daemon active · waiting for output · ${Math.round(
+        (Date.now() - startTime) / 1000,
+      )}s`
+    );
+  }
   try {
     return execFileSync(
-      "psmux",
+      MUX_BIN,
       ["capture-pane", "-t", `${SESSION}:0.${paneIdx}`, "-p"],
       { encoding: "utf8", timeout: 2000 },
     )
@@ -368,7 +414,7 @@ function ingest() {
     const tokens = extractTokenLabel(snapshot);
     const elapsed = Math.round((Date.now() - startTime) / 1000);
 
-    if (resultSize > 10 || shellReturned) {
+    if (SOURCE !== "files" && (resultSize > 10 || shellReturned)) {
       const resultContent = existsSync(resultFile)
         ? readFileSync(resultFile, "utf8")
         : snapshot;
@@ -410,8 +456,10 @@ function ingest() {
     // 진행 중
     const progress = estimateProgress(lines, {
       tokens,
-      resultSize,
-      shellReturned,
+      // daemon output files grow while the job is still running; file size is
+      // activity evidence, not a completion signal in read-only file mode.
+      resultSize: SOURCE === "files" ? 0 : resultSize,
+      shellReturned: SOURCE === "files" ? false : shellReturned,
       done: false,
     });
     const verdict = lastLine;
