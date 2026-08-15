@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { normalizeRoleKey } from "../role-contract.mjs";
+import { HOST_ID_PATTERN, normalizeRoleKey } from "../role-contract.mjs";
+
+const HOST_ID_RE = new RegExp(HOST_ID_PATTERN, "u");
 
 const HUB_DEFAULT_PORT = 27888;
 // Same token file as hub/bridge.mjs (HUB_TOKEN_FILE). Kept inline rather than
@@ -101,11 +103,12 @@ export function buildSynapseRegistrationMeta(meta, opts = {}) {
   if (!sessionId) return meta;
   const cwd = typeof meta.cwd === "string" ? meta.cwd : process.cwd();
   const cli = inferSessionCli(meta, opts);
-  const hostId = String(
-    meta.host_id ||
-      process.env.TFX_HOST_ID ||
-      opaqueId("hst", opts.hostname?.() || hostname()),
+  const configuredHostId = String(
+    meta.host_id || process.env.TFX_HOST_ID || opts.hostname?.() || hostname(),
   ).trim();
+  const hostId = HOST_ID_RE.test(configuredHostId)
+    ? configuredHostId
+    : opaqueId("hst", configuredHostId);
   const expiresAtMs = Number(opts.nowMs?.() ?? Date.now()) + 299000;
   const transportLocators = [];
   if (cli === "claude") {
@@ -146,6 +149,7 @@ export function buildSynapseRegistrationMeta(meta, opts = {}) {
     });
   }
   const directAgentId = `session:${sessionId}`;
+  const projectId = resolveProjectId(cwd, meta, opts);
   return {
     ...meta,
     agent_id:
@@ -154,7 +158,7 @@ export function buildSynapseRegistrationMeta(meta, opts = {}) {
         ? directAgentId
         : opaqueId("session", sessionId)),
     cli,
-    project_id: resolveProjectId(cwd, meta, opts) || undefined,
+    ...(projectId ? { project_id: projectId } : {}),
     session_id: meta.session_id || sessionId,
     host_id: hostId,
     transport_locators_json:

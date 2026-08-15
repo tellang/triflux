@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS role_registry (
     (role_kind = 'cto' AND scope_id = '') OR
     (role_kind = 'lead' AND scope_id <> '')
   ),
+  CHECK (state <> 'active' OR holder_agent_id IS NOT NULL),
   UNIQUE(project_id, role_kind, scope_id)
 );
 

@@ -128,6 +128,44 @@ describe("worktree-lifecycle", () => {
     assert.equal(result2.integrationBranch, result.integrationBranch);
   });
 
+  it("W-02a: refuses to reset an integration branch checked out elsewhere", async () => {
+    const first = await prepareIntegrationBranch({
+      runId: "checked-out-integration",
+      baseBranch: "main",
+      rootDir: repoDir,
+    });
+    const checkout = join(repoDir, ".codex-swarm", "integration-holder");
+    execFileSync(
+      "git",
+      ["worktree", "add", checkout, first.integrationBranch],
+      {
+        cwd: repoDir,
+        windowsHide: true,
+      },
+    );
+    const before = execFileSync("git", ["rev-parse", first.integrationBranch], {
+      cwd: repoDir,
+      encoding: "utf8",
+      windowsHide: true,
+    }).trim();
+
+    await assert.rejects(
+      prepareIntegrationBranch({
+        runId: "checked-out-integration",
+        baseBranch: "main",
+        rootDir: repoDir,
+      }),
+    );
+    assert.equal(
+      execFileSync("git", ["rev-parse", first.integrationBranch], {
+        cwd: repoDir,
+        encoding: "utf8",
+        windowsHide: true,
+      }).trim(),
+      before,
+    );
+  });
+
   it("W-03: pruneWorktree — worktree + 브랜치 정리", async () => {
     // 먼저 worktree 생성
     const wt = await ensureWorktree({

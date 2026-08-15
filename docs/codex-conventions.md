@@ -72,6 +72,10 @@ psmux send-keys -t "codex-swarm-{id}" \
 | 정리 | 머지 완료 후 `git worktree remove` + `git worktree prune` |
 | 충돌 | 브랜치 존재 시 재사용, 경로 존재 시 `-v{timestamp}` suffix |
 
+`swarm/<runId>/merge` integration branch가 다른 worktree에 이미 checkout된 경우,
+integration branch를 강제로 reset하거나 checkout하지 않는다. 해당 swarm run은
+NO-GO로 실패하며, 기존 worktree와 branch는 그대로 유지한다.
+
 ## 4. MCP tool approval
 
 - **증상**: `codex exec`가 시작된 뒤 끝나지 않고 멈춘다. 특히 MCP tool 호출이 필요한 프롬프트에서 무응답 stall로 보인다.
