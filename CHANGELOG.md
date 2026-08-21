@@ -2,6 +2,15 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.44.1] - 2026-08-21
+
+### Fixed
+- team: non-TTY 호출(파이프 실행)에서 `tfx multi --auto-attach`가 생략되던 문제 — 바깥 tmux 클라이언트 창을 분할해 그 pane 안에서 attach하는 fallback(`splitAttachToClient`) 추가
+- team: paste-buffer 직후의 Enter가 TUI paste-burst에 개행으로 흡수돼 워커 프롬프트가 composer에 미제출로 남던 결함 — composer 준비 대기(stable-capture) + 제출 확인/재시도를 `injectPrompt` 3개 주입 경로 전부에 적용
+
+### Changed
+- docs: psmux 규칙 정본을 `.claude/rules/tfx-psmux.md`로 단일화하고 AGENTS.md는 생성형 미러를 폐지한 슬림 Codex 가이드로 축소, 규칙 문서 전반 한국어 순화
+
 ## [10.44.0] - 2026-07-17
 
 ### Added
