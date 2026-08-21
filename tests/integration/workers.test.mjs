@@ -28,14 +28,21 @@ const ROUTE_SCRIPT = toBashPath(
 );
 
 function buildRouteEnv(extraEnv = {}) {
+  const home = extraEnv.HOME || process.env.HOME || PROJECT_ROOT;
   return {
     ...process.env,
     PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+    HOME: home,
+    USERPROFILE: home,
+    XDG_CONFIG_HOME: resolve(home, ".config"),
+    TFX_MACHINE_PROFILE_PATH: resolve(home, "machine-profile.env"),
     TFX_CLI_MODE: "auto",
     TFX_NO_CLAUDE_NATIVE: "0",
     // Each caller opts into its expected CLI below; no ambient observation leaks.
     TFX_CODEX_OK: "0",
     TFX_ANTIGRAVITY_OK: "0",
+    TFX_DISABLE_CODEX: "0",
+    TFX_DISABLE_ANTIGRAVITY: "0",
     TFX_CODEX_TRANSPORT: "exec",
     TFX_CTO_NORTH_STAR: "0",
     ...extraEnv,

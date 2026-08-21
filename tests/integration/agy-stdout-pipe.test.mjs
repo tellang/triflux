@@ -94,6 +94,8 @@ function runBash(command, extraEnv = {}) {
       AGY_BIN: "agy",
       HOME: home,
       USERPROFILE: home,
+      XDG_CONFIG_HOME: join(home, ".config"),
+      TFX_MACHINE_PROFILE_PATH: join(home, "machine-profile.env"),
       TFX_TEAM_NAME: "",
       TFX_TEAM_TASK_ID: "",
       TFX_TEAM_AGENT_NAME: "",
@@ -107,6 +109,8 @@ function runBash(command, extraEnv = {}) {
       // This file's route assertions all exercise the Antigravity path.
       TFX_CODEX_OK: "0",
       TFX_ANTIGRAVITY_OK: "1",
+      TFX_DISABLE_CODEX: "0",
+      TFX_DISABLE_ANTIGRAVITY: "0",
       TFX_CODEX_TRANSPORT: "exec",
       TFX_MCP_HEALTH_CHECK: "0",
       ...extraEnv,
