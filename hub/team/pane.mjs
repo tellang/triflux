@@ -105,6 +105,72 @@ export function shouldUseFileRef({ multiplexer, useFileRef, cli }) {
   return multiplexer === "psmux" && useFileRef && cli !== "codex";
 }
 
+/** 동기 sleep — injectPrompt는 sync 경로라 setTimeout을 쓸 수 없다 */
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// paste 직후 Enter가 TUI paste-burst 감지에 개행으로 흡수되는 것을 피하는 정착 지연
+const PASTE_SETTLE_MS = 350;
+// 제출 확인 재시도 상한
+const SUBMIT_RETRY_LIMIT = 3;
+// TUI 준비 대기 상한 — 배너/composer 렌더 완료 전 주입은 키 입력이 통째로 유실될 수 있음
+const COMPOSER_READY_TIMEOUT_MS = 8000;
+
+function capturePaneText(target) {
+  try {
+    if (detectMultiplexer() === "psmux") {
+      return String(
+        psmuxExec(["capture-pane", "-t", target, "-p"], { encoding: "utf8" }) ??
+          "",
+      );
+    }
+    return String(muxExec(`capture-pane -t ${target} -p`) ?? "");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * TUI가 그리기를 마칠 때까지 대기: pane 내용이 비어 있지 않고 연속 두 번의
+ * capture가 동일(정적)해질 때까지 폴링한다. CLI 종류와 무관한 준비 신호이며
+ * 시간 초과 시 그냥 진행한다 (기존 고정-대기 동작으로 degrade).
+ */
+function waitForComposerReady(target) {
+  const deadline = Date.now() + COMPOSER_READY_TIMEOUT_MS;
+  let prev = null;
+  while (Date.now() < deadline) {
+    const text = capturePaneText(target);
+    if (text.trim() && prev !== null && text === prev) return;
+    prev = text;
+    sleepMs(400);
+  }
+}
+
+/**
+ * 주입한 프롬프트가 실제 제출됐는지 확인하고, 안 됐으면 Enter를 재전송한다.
+ *
+ * Codex TUI는 연속 키 입력을 paste burst로 묶으므로 paste 직후의 Enter가
+ * 제출이 아니라 개행으로 composer에 삽입될 수 있다 (텍스트만 남고 미제출).
+ * busy 마커가 보이거나 프롬프트 꼬리가 화면에서 사라지면 제출로 판정한다.
+ * capture 불가 환경이면 첫 Enter 후 판정을 포기한다 (기존 동작 수준).
+ * 제출 후 transcript에 프롬프트가 에코돼 꼬리가 남아 있어도 빈 composer에
+ * 대한 추가 Enter는 no-op이라 안전하다.
+ */
+function confirmSubmit(target, prompt, sendEnter) {
+  const lastLine = String(prompt).trim().split("\n").filter(Boolean).pop() || "";
+  const tail = lastLine.slice(-20);
+  sleepMs(PASTE_SETTLE_MS);
+  for (let attempt = 1; attempt <= SUBMIT_RETRY_LIMIT; attempt++) {
+    sendEnter();
+    sleepMs(400 * attempt);
+    const text = capturePaneText(target);
+    if (!text || !tail) return;
+    if (/to interrupt|working|thinking/i.test(text)) return; // busy = 제출됨
+    if (!text.includes(tail)) return; // 화면에서 사라짐 = 제출됨
+  }
+}
+
 /**
  * pane에 프롬프트 주입
  * @param {string} target — 예: tfx-multi-abc:0.1
@@ -131,9 +197,12 @@ export function injectPrompt(
   if (shouldUseFileRef({ multiplexer, useFileRef, cli })) {
     writeFileSync(tmpFile, prompt, "utf8");
     const filePath = tmpFile.replace(/\\/g, "/");
+    waitForComposerReady(target);
     psmuxExec(["select-pane", "-t", target]);
     psmuxExec(["send-keys", "-t", target, "-l", `@${filePath}`]);
-    psmuxExec(["send-keys", "-t", target, "Enter"]);
+    confirmSubmit(target, `@${filePath}`, () =>
+      psmuxExec(["send-keys", "-t", target, "Enter"]),
+    );
     // TUI가 파일을 읽을 시간을 주고 정리
     setTimeout(() => {
       try {
@@ -148,17 +217,21 @@ export function injectPrompt(
 
     if (detectMultiplexer() === "psmux") {
       const sessionName = getPsmuxSessionName(target);
+      waitForComposerReady(target);
       psmuxExec(["load-buffer", "-t", sessionName, toMuxPath(tmpFile)]);
       psmuxExec(["select-pane", "-t", target]);
       psmuxExec(["paste-buffer", "-t", target]);
-      psmuxExec(["send-keys", "-t", target, "Enter"]);
+      confirmSubmit(target, prompt, () =>
+        psmuxExec(["send-keys", "-t", target, "Enter"]),
+      );
       return;
     }
 
-    // tmux load-buffer → paste-buffer → Enter
+    // tmux load-buffer → paste-buffer → (정착 지연 + 제출 확인) Enter
+    waitForComposerReady(target);
     muxExec(`load-buffer ${quoteArg(toMuxPath(tmpFile))}`);
     muxExec(`paste-buffer -t ${target}`);
-    muxExec(`send-keys -t ${target} Enter`);
+    confirmSubmit(target, prompt, () => muxExec(`send-keys -t ${target} Enter`));
   } finally {
     try {
       unlinkSync(tmpFile);

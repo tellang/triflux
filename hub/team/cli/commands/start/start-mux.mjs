@@ -5,6 +5,7 @@ import {
   attachSession,
   configureTeammateKeybindings,
   createSession,
+  splitAttachToClient,
 } from "../../../session.mjs";
 import { BOLD, DIM, GREEN, RESET } from "../../../shared.mjs";
 import { ok, warn } from "../../render.mjs";
@@ -113,7 +114,10 @@ export async function startMuxTeam({
       );
       console.log(`  ${DIM}Ctrl+B → D: 세션 분리 (백그라운드)${RESET}\n`);
       if (process.stdout.isTTY && process.stdin.isTTY) attachSession(sessionId);
-      else {
+      else if (splitAttachToClient(sessionId)) {
+        ok("non-TTY 환경: 바깥 tmux 클라이언트 창을 분할해 attach함");
+        console.log(`  ${DIM}분할 pane에서 나가기: Ctrl+B → D${RESET}\n`);
+      } else {
         warn("TTY 미지원 환경이라 자동 attach를 생략함");
         console.log(`  ${DIM}수동 연결: tfx multi attach${RESET}\n`);
       }
