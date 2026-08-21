@@ -393,7 +393,7 @@ folders. Keep it synchronized when touching mirrored runtime files.
 | Linux | tmux | Supported. |
 | Windows | psmux + Windows Terminal | Supported through managed psmux/WT paths. PowerShell is the default psmux shell. |
 
-See `AGENTS.md` and `.claude/rules/tfx-psmux.md` for the stricter Windows/psmux
+See `.claude/rules/tfx-psmux.md` for the stricter Windows/psmux
 rules used by agents and launch scripts.
 
 ---

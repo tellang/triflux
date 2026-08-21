@@ -22,7 +22,7 @@ triflux 자체는 cross-platform (macOS / Linux / Windows) 이지만, 일부 안
 |------|---------|---------------|
 | 탭/패인 매니저 | Windows Terminal (`wt.exe`) → `wt-manager.mjs` 경유 필수 | 별도 매니저 없음. `hub/team/terminal-opener.mjs` 의 3단계 fallback (win32→wt-manager / tmux 감지→tmux/psmux / darwin→Terminal.app) 으로 동작 |
 | psmux | `winget install psmux` / `scoop install psmux` / `choco install psmux` / `cargo install psmux` | Windows용 native tmux. macOS/Linux는 `tmux`가 primary |
-| `<psmux-wt>` 룰 (CLAUDE.md / AGENTS.md / `.claude/rules/tfx-psmux.md`) | RULE 1~3, 5~6, 8 적용 (PowerShell, wt-manager, WT layout) | RULE 1~3, 5~6, 8 skip 가능. RULE 4 (Codex CLI 인자) 와 gpt55 profile policy 는 공통 적용 |
+| `<psmux-wt>` 룰 (CLAUDE.md / `.claude/rules/tfx-psmux.md`) | RULE 1~3, 5~6, 8 적용 (PowerShell, wt-manager, WT layout) | RULE 1~3, 5~6, 8 skip 가능. RULE 4 (Codex CLI 인자) 와 gpt55 profile policy 는 공통 적용 |
 | `tfx doctor` 의 WT 항목 | `WT: <version>` 또는 `WT: not found` | 현재 build 는 `WT: not found` 로 표시될 수 있음 — Windows 미설치이므로 정상. 후속 PR 에서 `WT: N/A (non-Windows)` 로 명시 표기 예정 |
 | 셸 | PowerShell 7+ 우선 (`pwsh -File` 필수) | zsh (macOS 기본) / bash. 인라인 명령 가능 |
 | 경로 | Windows 형식 (`C:\Users\...`) | POSIX (`/Users/...`, `$HOME`) |

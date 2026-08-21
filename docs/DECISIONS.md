@@ -69,3 +69,12 @@
 `.claude/rules/*.md` 본문에 흩어져 있다. 회고나 문서 정리 중 발견되면 이
 로그로 역채움(backfill)한다 — 예: `tfx-psmux.md`의 gpt55 프로파일 기본값
 채택, `tfx-update-logic.md`의 OMC 3-컴포넌트 동시 갱신 규칙 등.
+
+## 2026-08-21 — AGENTS.md psmux 미러 폐지, 규칙은 tfx-psmux.md 단일 정본
+- **결정**: AGENTS.md의 생성형 `TFX psmux Rules` 섹션을 제거하고 psmux 규칙은
+  `.claude/rules/tfx-psmux.md`만 정본으로 유지한다. AGENTS.md는 Codex 환경 특화
+  핵심 규칙만 남긴 슬림 가이드로 축소하고, README·tfx-remote·tfx-setup의
+  AGENTS.md 참조를 rules 문서로 교체했다.
+- **근거**: 2026-07-26 결정(단방향 생성)은 순환 선언은 해소했지만 생성물 미러의
+  drift 비용이 남아 있었다. rules 파일은 Claude가 자동 로드하고 Codex 표면은
+  CLAUDE.md 직접 참조로 충분하다.

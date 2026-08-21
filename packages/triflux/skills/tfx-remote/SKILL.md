@@ -70,7 +70,7 @@ preflight 실패 시 중단만 하지 말고 아래 중 하나로 복귀시킨�
 ### `tfx-remote kill`
 
 공식 public subcommand다. 세션 종료 전에 psmux/WT 정리 규칙은
-`.claude/rules/tfx-psmux.md`와 `AGENTS.md`의 detach-first 정책을 따른다.
+`.claude/rules/tfx-psmux.md`의 detach-first 정책을 따른다.
 
 ## hosts.json contract
 
@@ -86,5 +86,5 @@ canonical host로 정규화한다.
 
 허용 범위 안에서 Phase 4b가 완료되었는지 확인할 때 최소 검증은 아래와 같다.
 - `node hub/lib/hosts-compat.mjs --self-test`
-- `Get-FileHash .claude/rules/tfx-psmux.md, AGENTS.md`
+- `Get-FileHash .claude/rules/tfx-psmux.md`
 - legacy alias 문서가 모두 `tfx-remote` 또는 rule 문서로 위임되는지 확인
