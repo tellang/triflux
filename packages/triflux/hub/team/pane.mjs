@@ -158,7 +158,8 @@ function waitForComposerReady(target) {
  * 대한 추가 Enter는 no-op이라 안전하다.
  */
 function confirmSubmit(target, prompt, sendEnter) {
-  const lastLine = String(prompt).trim().split("\n").filter(Boolean).pop() || "";
+  const lastLine =
+    String(prompt).trim().split("\n").filter(Boolean).pop() || "";
   const tail = lastLine.slice(-20);
   sleepMs(PASTE_SETTLE_MS);
   for (let attempt = 1; attempt <= SUBMIT_RETRY_LIMIT; attempt++) {
@@ -231,7 +232,9 @@ export function injectPrompt(
     waitForComposerReady(target);
     muxExec(`load-buffer ${quoteArg(toMuxPath(tmpFile))}`);
     muxExec(`paste-buffer -t ${target}`);
-    confirmSubmit(target, prompt, () => muxExec(`send-keys -t ${target} Enter`));
+    confirmSubmit(target, prompt, () =>
+      muxExec(`send-keys -t ${target} Enter`),
+    );
   } finally {
     try {
       unlinkSync(tmpFile);
