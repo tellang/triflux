@@ -275,6 +275,10 @@ describe("release governance scripts", () => {
     );
     assert.match(releaseWorkflow, /actions:\s*write/);
     assert.match(releaseWorkflow, /node-version:\s*24/);
+    assert.match(
+      releaseWorkflow,
+      /TFX_MACHINE_PROFILE_PATH:\s*\$\{\{ runner\.temp \}\}\/triflux-release-ci-machine-profile\.env/,
+    );
     assert.match(releaseWorkflow, /publish\.mjs.*--skip-npm.*--allow-existing/);
     assert.match(releaseWorkflow, /publish\.mjs.*--tag-only/);
     assert.match(

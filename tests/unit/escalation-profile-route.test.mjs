@@ -121,6 +121,10 @@ echo "fake codex ok"
     TFX_WORKER_INDEX: "",
     TFX_WORKER_SANDBOX_SCOPE: "",
     ...envOverrides,
+    XDG_CONFIG_HOME: path.join(home, ".config"),
+    TFX_MACHINE_PROFILE_PATH: "",
+    TFX_DISABLE_CODEX: "0",
+    TFX_DISABLE_ANTIGRAVITY: "0",
   };
   if (snapshot) env.TFX_RETRY_SNAPSHOT = snapshot;
 
@@ -282,5 +286,21 @@ describe("tfx-route retry snapshot profile plumbing", () => {
       configValues(nestedDefault, "model_reasoning_effort").at(-1),
       '"max"',
     );
+  });
+
+  it("does not inherit CLI disable flags from an ambient machine profile", () => {
+    const dir = makeTempDir();
+    const configRoot = path.join(dir, "ambient-config");
+    const profileDir = path.join(configRoot, "triflux");
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(
+      path.join(profileDir, "machine-profile.env"),
+      "TFX_DISABLE_CODEX=1\nTFX_DISABLE_ANTIGRAVITY=1\n",
+      "utf8",
+    );
+
+    const args = runRoute({ env: { XDG_CONFIG_HOME: configRoot } });
+
+    assert.deepEqual(profileValues(args), ["gpt56_terra_high"]);
   });
 });

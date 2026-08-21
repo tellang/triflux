@@ -36,6 +36,8 @@ jobs:
         run: npm ci
 
       - name: Prepare release
+        env:
+          TFX_MACHINE_PROFILE_PATH: ${{ runner.temp }}/triflux-release-ci-machine-profile.env
         run: node scripts/release/prepare.mjs --version ${{ inputs.version }} --execute
 
       - name: Create tag and GitHub release
