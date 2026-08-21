@@ -40,9 +40,17 @@ function runBash(command, extraEnv = {}) {
     encoding: "utf8",
     env: hubServerTestEnv({
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
+      HOME: isolatedCodex.dir,
+      USERPROFILE: isolatedCodex.dir,
+      XDG_CONFIG_HOME: join(isolatedCodex.dir, ".config"),
+      TFX_MACHINE_PROFILE_PATH: join(isolatedCodex.dir, "machine-profile.env"),
       TFX_CODEX_CONFIG: isolatedCodex.path,
       TFX_CODEX_TRANSPORT: "exec",
       TFX_CTO_NORTH_STAR: "0",
+      TFX_DISABLE_CODEX: "0",
+      TFX_DISABLE_ANTIGRAVITY: "0",
+      TFX_CODEX_OK: "1",
+      TFX_ANTIGRAVITY_OK: "0",
       // #148: 테스트 환경 MCP probe 결과는 모두 dead → preflight 가 early-fail.
       // 라우팅/bridge 검증이 목적이므로 preflight 스킵.
       TFX_MCP_HEALTH_CHECK: "0",
