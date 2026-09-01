@@ -69,6 +69,16 @@ function normalizeRule(rule) {
         .map((s) => s.trim())
     : [];
 
+  // platform: process.platform 화이트리스트 (빈 배열 = 전 플랫폼). Windows 전용
+  // 스킬(tfx-wt 등)이 macOS/Linux 프롬프트에 오탐하는 것을 막는다. 배열이 아닌
+  // 값은 규칙 자체를 무효로 본다.
+  if (rule.platform != null && !Array.isArray(rule.platform)) return null;
+  const platform = Array.isArray(rule.platform)
+    ? rule.platform
+        .filter((s) => typeof s === "string" && s.trim())
+        .map((s) => s.trim())
+    : [];
+
   return {
     id: rule.id.trim(),
     patterns,
@@ -81,6 +91,7 @@ function normalizeRule(rule) {
     state,
     mcp_route: mcpRoute,
     repo_scope: repoScope,
+    platform,
     explicit: rule.explicit === true,
   };
 }
@@ -160,6 +171,7 @@ export function matchRules(compiledRules, cleanText) {
       state: rule.state || null,
       mcp_route: rule.mcp_route || null,
       repo_scope: rule.repo_scope || [],
+      platform: rule.platform || [],
       explicit: rule.explicit === true,
     });
   }

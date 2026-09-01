@@ -412,6 +412,7 @@
         }
       ],
       "skill": "tfx-wt",
+      "platform": ["win32"],
       "priority": 1,
       "supersedes": ["tfx-unified"],
       "exclusive": false,
@@ -431,6 +432,7 @@
         }
       ],
       "skill": "tfx-wt",
+      "platform": ["win32"],
       "priority": 1,
       "supersedes": ["tfx-unified"],
       "exclusive": false,
@@ -450,6 +452,7 @@
         }
       ],
       "skill": "tfx-wt",
+      "platform": ["win32"],
       "priority": 1,
       "supersedes": ["tfx-unified"],
       "exclusive": false,
@@ -469,6 +472,7 @@
         }
       ],
       "skill": "tfx-wt",
+      "platform": ["win32"],
       "priority": 1,
       "supersedes": ["tfx-unified"],
       "exclusive": false,
@@ -719,7 +723,7 @@
           "flags": "i"
         },
         {
-          "source": "\\bship\\b(?!.*tfx)",
+          "source": "(?<![\\w-])ship\\b(?!.*tfx)",
           "flags": "i"
         }
       ],
