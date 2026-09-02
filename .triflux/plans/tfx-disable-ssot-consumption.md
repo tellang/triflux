@@ -59,9 +59,18 @@ machine profile의 `TFX_DISABLE_CODEX` / `TFX_DISABLE_ANTIGRAVITY`를 CLI 사용
 
 ### 4. 세션 라우팅 문맥 주입
 
-- `hooks/session-start-fast.mjs`가 additionalContext에 한 줄 주입:
-  `cli-policy: codex=on antigravity=off (SSOT: machine profile)`
+- `hooks/session-start-fast.mjs`가 additionalContext에 한 줄 주입. 형식은 리더의
+  `formatCliPolicyLine()`이 고정한다:
+  `cli-policy: codex=on antigravity=off (SSOT: TFX_DISABLE_*; codex<-env, antigravity<-profile)`
 - Claude의 스킬 선택 판단이 disable 상태를 세션 시작부터 인지
+
+### 5. 테스트 러너 밀폐
+
+- `scripts/test-lock.mjs`가 자식 `node --test`에 `TFX_DISABLE_CODEX=0`,
+  `TFX_DISABLE_ANTIGRAVITY=0`을 고정 주입한다. 개발 머신의 셸 env와 machine
+  profile이 둘 다 1을 공급하므로 env 명시값이 profile을 이기는 리더 규칙상 "0"
+  고정만이 두 공급원을 덮는다. 게이트 동작을 검증하는 테스트는 `cliPolicy` 또는
+  `policyEnv` 인자로 자기 값을 넣는다
 
 ## 비범위
 
@@ -82,7 +91,8 @@ machine profile의 `TFX_DISABLE_CODEX` / `TFX_DISABLE_ANTIGRAVITY`를 CLI 사용
 
 - 리더 단위 테스트: env 우선, profile 폴백, 기본값, allowlist 위반 스킵
 - 기존 `tests/unit/setup-machine-profile.test.mjs` 통과 유지(re-export 검증)
-- HUD 게이트: disabled 시 행 부재, enabled 시 기존 렌더 유지
+- HUD 게이트: disabled 시 행 부재, enabled 시 기존 렌더 유지. nano tier의
+  `getMicroLine`도 codex/gemini 세그먼트를 같은 판정으로 생략
 - spawn 게이트: disabled cli 요청 시 throw, 오류 메시지에 원인 포함
 
 ## 완료 기준

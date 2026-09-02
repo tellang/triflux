@@ -20,6 +20,10 @@ import {
   registerSynapseSession,
 } from "../hub/team/synapse-http.mjs";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
+import {
+  formatCliPolicyLine,
+  resolveCliPolicy,
+} from "../scripts/lib/machine-profile.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPTS = join(__dirname, "..", "scripts");
@@ -315,6 +319,36 @@ export function heartbeatInteractiveSession(stdinData, seams = {}) {
 }
 
 /**
+ * TFX_DISABLE_* SSOT 를 읽어 세션 문맥에 넣을 cli-policy 한 줄을 만든다.
+ *
+ * 형식은 scripts/lib/machine-profile.mjs 의 formatCliPolicyLine 이 고정한다.
+ * 리더는 파일 하나를 동기 읽기하므로 ms 단위이고, 어떤 실패도 빈 문자열로
+ * 흡수해서 SessionStart 가 이 단계 때문에 죽지 않게 한다.
+ *
+ * 프로파일 파싱 경고나 0/1 밖의 값이 있으면 둘째 줄로 함께 노출한다. 경고를
+ * 삼키면 잘못 적은 프로파일이 조용히 "허용"으로 읽혀서 원인을 못 찾는다.
+ *
+ * @param {NodeJS.ProcessEnv} [env] 판독할 환경변수
+ * @param {{ resolve?: Function }} [opts] resolve 는 리더 대체 주입용 테스트 시임
+ * @returns {string} 한 줄 또는 두 줄, 실패 시 빈 문자열
+ */
+export function buildCliPolicyContext(env = process.env, opts = {}) {
+  try {
+    const resolvePolicy = opts.resolve || resolveCliPolicy;
+    const policy = resolvePolicy(env, opts);
+    if (!policy) return "";
+    const line = formatCliPolicyLine(policy);
+    const warnings = Array.isArray(policy.warnings) ? policy.warnings : [];
+    if (warnings.length === 0) return line;
+    // 경고에 줄바꿈이 섞이면 additionalContext 에 라벨 없는 줄이 생기므로 한 줄로 접는다.
+    const folded = warnings.join("; ").replace(/[\r\n]+/gu, " ");
+    return `${line}\ncli-policy-warning: ${folded}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
  * BLOCKING 훅을 순차 실행. 하나라도 throw하면 로그만 남기고 계속.
  * @param {string} stdinData
  * @returns {Promise<{stdout: string, stderr: string}>}
@@ -384,6 +418,21 @@ async function runBlocking(stdinData) {
   } catch (err) {
     log.error(
       { hook: "hub-ensure", err: String(err.message || err) },
+      "hook.failed",
+    );
+  }
+
+  // 4. cli-policy: TFX_DISABLE_* SSOT 를 세션 문맥에 한 줄로 주입
+  try {
+    const t0 = performance.now();
+    const line = buildCliPolicyContext();
+    const dur = performance.now() - t0;
+    timings.push({ hook: "cli-policy", dur_ms: Math.round(dur) });
+    if (line) output.stdout += line + "\n";
+    log.info({ hook: "cli-policy", dur_ms: Math.round(dur) }, "hook.completed");
+  } catch (err) {
+    log.error(
+      { hook: "cli-policy", err: String(err.message || err) },
       "hook.failed",
     );
   }
@@ -509,7 +558,7 @@ export async function execute(stdinData, externalHooks = []) {
   log.info(
     {
       total_ms: Math.round(totalDur),
-      blocking_count: 3,
+      blocking_count: 4,
       deferred_count: 2,
       bg_count: 1,
     },

@@ -31,88 +31,28 @@ import {
 import { ensureAgyHooks } from "./ensure-agy-hooks.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
 import { addPluginRootFallbackToCommand } from "./lib/doctor-env-checks.mjs";
+import {
+  MACHINE_PROFILE_KEYS,
+  parseMachineProfileContent,
+  resolveMachineProfilePath,
+  resolveTrifluxHome,
+} from "./lib/machine-profile.mjs";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(import.meta.url);
-// Windows 에서 os.homedir() 가 USERPROFILE 만 보고 process.env.HOME swap 을
-// 무시하기 때문에, integration test 가 fixture 격리한 spawn child 에서도
-// production ~/.codex/config.toml 을 건드릴 수 있다. (#193 회귀)
-//
-// 우선순위 분기:
-// - TRIFLUX_TEST_HOME: 두 OS 모두 명시 override
-// - Windows: USERPROFILE > HOME > homedir() — Windows native 가 USERPROFILE.
-//   Git Bash 사용자는 USERPROFILE 도 같이 set 되므로 영향 없음.
-// - POSIX: HOME > homedir()
-function _resolveTrifluxHome() {
-  if (process.env.TRIFLUX_TEST_HOME) return process.env.TRIFLUX_TEST_HOME;
-  if (process.platform === "win32") {
-    return process.env.USERPROFILE || process.env.HOME || homedir();
-  }
-  return process.env.HOME || homedir();
-}
-const _TFX_HOME = _resolveTrifluxHome();
+// home 해석은 scripts/lib/machine-profile.mjs 가 정본이다. Windows 의 os.homedir()
+// 가 process.env.HOME swap 을 무시해 fixture 격리한 자식 프로세스가 실제 홈을
+// 건드리던 문제(#193 회귀)까지 그 모듈이 담고 있다.
+const _TFX_HOME = resolveTrifluxHome();
 const CLAUDE_DIR = join(_TFX_HOME, ".claude");
 const CODEX_DIR = join(_TFX_HOME, ".codex");
 const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
 const SETUP_MARKER_PATH = join(CLAUDE_DIR, "cache", "tfx-setup-marker.json");
-const MACHINE_PROFILE_FILENAME = "machine-profile.env";
-const MACHINE_PROFILE_KEYS = Object.freeze([
-  "TFX_MACHINE_PROFILE_VERSION",
-  "TFX_MACHINE_OS",
-  "TFX_MULTIPLEXER_POLICY",
-  "TFX_DISABLE_CODEX",
-  "TFX_DISABLE_ANTIGRAVITY",
-  "TFX_TIMEOUT_POLICY",
-  "TFX_HARD_CEILING_SEC",
-  "TFX_STALL_THRESHOLD",
-  "TFX_STALL_KILL",
-]);
-const MACHINE_PROFILE_KEY_SET = new Set(MACHINE_PROFILE_KEYS);
-const MACHINE_PROFILE_VALUE_RE = /^[A-Za-z0-9_.-]+$/u;
 
-export function resolveMachineProfilePath({
-  platform = process.platform,
-  env = process.env,
-  home = _TFX_HOME,
-} = {}) {
-  if (env.TFX_MACHINE_PROFILE_PATH) {
-    return resolve(env.TFX_MACHINE_PROFILE_PATH);
-  }
-  if (platform === "win32") {
-    const appData = env.APPDATA || join(home, "AppData", "Roaming");
-    return join(appData, "triflux", MACHINE_PROFILE_FILENAME);
-  }
-  const configRoot = env.XDG_CONFIG_HOME || join(home, ".config");
-  return join(configRoot, "triflux", MACHINE_PROFILE_FILENAME);
-}
-
-export function parseMachineProfileContent(content) {
-  const values = {};
-  const warnings = [];
-  const lines = String(content || "").split(/\r?\n/u);
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index].trim();
-    if (!line || line.startsWith("#")) continue;
-    const separator = line.indexOf("=");
-    if (separator <= 0) {
-      warnings.push(`line ${index + 1}: KEY=VALUE 형식이 아님`);
-      continue;
-    }
-    const key = line.slice(0, separator).trim();
-    const value = line.slice(separator + 1).trim();
-    if (!MACHINE_PROFILE_KEY_SET.has(key)) {
-      warnings.push(`line ${index + 1}: 허용되지 않은 key ${key}`);
-      continue;
-    }
-    if (!value || !MACHINE_PROFILE_VALUE_RE.test(value)) {
-      warnings.push(`line ${index + 1}: ${key} 값이 안전한 literal이 아님`);
-      continue;
-    }
-    values[key] = value;
-  }
-  return { values, warnings };
-}
+// machine profile 판독은 공용 리더로 이관했다. 기존 import 표면을 유지하려고
+// 같은 이름으로 다시 내보낸다.
+export { parseMachineProfileContent, resolveMachineProfilePath };
 
 function commandAvailableOnPath(command, { env = process.env, platform } = {}) {
   const selectedPlatform = platform || process.platform;
@@ -685,6 +625,11 @@ const SYNC_MAP = [
     label: "tfx-route-worker.mjs",
   },
   ...scanHubWorkerFiles(PLUGIN_ROOT, CLAUDE_DIR),
+  // lib 는 hud 보다 먼저 복사한다. hud/cli-policy.mjs 가 ../scripts/lib/machine-profile.mjs
+  // 를 정적 import 하므로, 동기화가 중간에 끊겨도 소비자만 있고 리더가 없는
+  // 설치본이 남지 않게 한다. hooks/ 는 플러그인 루트에서 직접 import 되는 경로라
+  // 이 복사 목록의 대상이 아니다.
+  ...scanLibFiles(PLUGIN_ROOT, CLAUDE_DIR),
   ...scanHudFiles(PLUGIN_ROOT, CLAUDE_DIR),
   {
     src: join(PLUGIN_ROOT, "scripts", "notion-read.mjs"),
@@ -696,7 +641,6 @@ const SYNC_MAP = [
     dst: join(CLAUDE_DIR, "scripts", "tfx-batch-stats.mjs"),
     label: "tfx-batch-stats.mjs",
   },
-  ...scanLibFiles(PLUGIN_ROOT, CLAUDE_DIR),
   {
     src: join(PLUGIN_ROOT, "hub", "team", "agent-map.json"),
     dst: join(CLAUDE_DIR, "hub", "team", "agent-map.json"),

@@ -5,6 +5,11 @@
 // F4 해결: codex exec "prompt" 인라인 (파이프/리다이렉트 아님)
 // F5 해결: 동일 입력 → 동일 args 배열 (런타임 분기 없음)
 
+import {
+  buildDisabledCliError,
+  normalizeCliName,
+  resolveCliPolicy,
+} from "../../scripts/lib/machine-profile.mjs";
 import { buildExecArgs as buildCodexArgs } from "@triflux/core/hub/codex-adapter.mjs";
 
 function shellSingleQuote(value) {
@@ -89,6 +94,17 @@ export function buildLauncher(opts) {
 
   if (!agent) throw new Error("agent is required");
   if (!prompt && prompt !== "") throw new Error("prompt is required");
+
+  // TFX_DISABLE_* SSOT 집행. 이 런처는 tfx-route.sh 를 거치지 않고 codex/agy
+  // 바이너리를 직접 실행하는 경로라서 같은 정책을 여기서 다시 확인한다. 정책
+  // 판독 시임은 opts.cliPolicy(계산된 정책)와 opts.policyEnv(env 객체)뿐이다.
+  // claude 처럼 정책 대상이 아닌 CLI 는 프로파일 파일을 읽지 않는다.
+  if (normalizeCliName(agent)) {
+    const cliPolicy =
+      opts.cliPolicy ?? resolveCliPolicy(opts.policyEnv ?? process.env);
+    const blockedCli = buildDisabledCliError(agent, cliPolicy);
+    if (blockedCli) throw blockedCli;
+  }
 
   const adapter = getAdapter(agent);
 

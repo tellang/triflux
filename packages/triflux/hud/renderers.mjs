@@ -281,7 +281,11 @@ export function getMicroLine(
   geminiBucket,
   combinedSvPct,
   geminiMarker = "g",
+  options = {},
 ) {
+  // showCodex / showGemini 는 machine profile 의 TFX_DISABLE_* 게이트다. 기본값이
+  // true 라 8번째 인자를 주지 않는 기존 호출은 그대로 동작한다.
+  const { showCodex = true, showGemini = true } = options;
   const ctxView = contextView || buildContextUsageView({}, null);
   // Claude 5h/1w
   const cF =
@@ -329,13 +333,19 @@ export function getMicroLine(
   const sv = formatSvPct(combinedSvPct).trim();
 
   const cols = getTerminalColumns() || 120;
-  const line =
-    `${bold(claudeOrange("c"))}${dim(":")}${cVal} ` +
-    `${bold(codexWhite("x"))}${dim(":")}${xVal} ` +
-    `${bold(geminiBlue(geminiMarker))}${dim(":")}${gVal} ` +
-    `${dim("sv:")}${sv} ` +
-    `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}`;
-  return truncateAnsi(line, cols);
+  // 세그먼트를 모아 join 한다. 차단된 프로바이더를 뺄 때 공백이 겹치지 않는다.
+  const segments = [`${bold(claudeOrange("c"))}${dim(":")}${cVal}`];
+  if (showCodex) {
+    segments.push(`${bold(codexWhite("x"))}${dim(":")}${xVal}`);
+  }
+  if (showGemini) {
+    segments.push(`${bold(geminiBlue(geminiMarker))}${dim(":")}${gVal}`);
+  }
+  segments.push(`${dim("sv:")}${sv}`);
+  segments.push(
+    `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}`,
+  );
+  return truncateAnsi(segments.join(" "), cols);
 }
 
 // ============================================================================

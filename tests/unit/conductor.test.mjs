@@ -2,7 +2,13 @@
 
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -812,5 +818,185 @@ describe("conductor: remote Codex profile guard", () => {
       if (previous === undefined) delete process.env.TFX_CODEX_PROFILE;
       else process.env.TFX_CODEX_PROFILE = previous;
     }
+  });
+});
+
+// ── TFX_DISABLE_* spawn 차단 ────────────────────────────────────────────────
+
+describe("conductor: TFX_DISABLE_* spawn 차단", () => {
+  it("codex disabled 면 spawnSession 이 명시 실패하고 원인이 기록된다", async () => {
+    const previous = process.env.TFX_DISABLE_CODEX;
+    const warnings = [];
+    conductor.on("warning", (w) => warnings.push(w));
+    try {
+      process.env.TFX_DISABLE_CODEX = "1";
+      let thrown = null;
+      try {
+        conductor.spawnSession(
+          minConfig({ id: "codex-disabled-guard", agent: "codex" }),
+        );
+      } catch (err) {
+        thrown = err;
+      }
+
+      assert.ok(thrown, "차단된 codex 세션은 호출자에게 실패를 돌려줘야 한다");
+      assert.equal(thrown.code, "TFX_CLI_DISABLED");
+      assert.match(thrown.message, /TFX_DISABLE_CODEX=1/u);
+      // 세션이 매달리지 않는다 (등록 자체가 안 됨).
+      assert.equal(conductor.sessionCount, 0);
+
+      const blockedWarning = warnings.find(
+        (w) => w.type === "session_spawn_blocked",
+      );
+      assert.ok(blockedWarning, "emitter 에 차단 경고가 실려야 한다");
+      assert.equal(blockedWarning.session, "codex-disabled-guard");
+      assert.equal(blockedWarning.code, "TFX_CLI_DISABLED");
+      assert.match(blockedWarning.error, /TFX_DISABLE_CODEX=1/u);
+
+      const events = await waitFor(() => {
+        const rows = readJsonl(join(logsDir, "conductor-events.jsonl"));
+        const blocked = rows.filter((r) => r.event === "session_spawn_blocked");
+        return blocked.length > 0 ? blocked : null;
+      });
+      assert.equal(events[0].session, "codex-disabled-guard");
+      assert.equal(events[0].agent, "codex");
+      assert.match(events[0].error, /TFX_DISABLE_CODEX=1/u);
+    } finally {
+      if (previous === undefined) delete process.env.TFX_DISABLE_CODEX;
+      else process.env.TFX_DISABLE_CODEX = previous;
+    }
+  });
+
+  it("codex disabled 여도 claude 세션은 그대로 생성된다", () => {
+    const previous = process.env.TFX_DISABLE_CODEX;
+    try {
+      process.env.TFX_DISABLE_CODEX = "1";
+      const id = conductor.spawnSession(
+        minConfig({ id: "claude-not-gated", agent: "claude" }),
+      );
+      assert.equal(id, "claude-not-gated");
+      assert.equal(conductor.sessionCount, 1);
+    } finally {
+      if (previous === undefined) delete process.env.TFX_DISABLE_CODEX;
+      else process.env.TFX_DISABLE_CODEX = previous;
+    }
+  });
+
+  // 게이트가 broker.lease 뒤에 있으면 정책 거부가 계정 실패로 집계돼 멀쩡한
+  // 계정이 cooldown 에 들어간다. 임대 자체를 잡지 않는지 확인한다.
+  it("차단되면 계정 임대를 잡지도 반납하지도 않는다", async () => {
+    await conductor.shutdown("recreate_for_disabled_lease_guard");
+
+    const leaseCalls = [];
+    const releaseCalls = [];
+    const broker = new EventEmitter();
+    broker.lease = (request) => {
+      leaseCalls.push(request);
+      return { id: "acct-lease-guard", profile: null, env: {}, authFile: null };
+    };
+    broker.nextAvailableEta = () => null;
+    broker.release = (accountId, result) => {
+      releaseCalls.push({ accountId, result });
+    };
+    conductor = makeConductor(logsDir, { broker });
+
+    const previous = process.env.TFX_DISABLE_CODEX;
+    try {
+      process.env.TFX_DISABLE_CODEX = "1";
+      assert.throws(
+        () =>
+          conductor.spawnSession(
+            minConfig({ id: "codex-disabled-no-lease", agent: "codex" }),
+          ),
+        (err) => err.code === "TFX_CLI_DISABLED",
+      );
+
+      assert.deepEqual(leaseCalls, [], "차단된 세션은 임대를 잡으면 안 된다");
+      assert.deepEqual(
+        releaseCalls,
+        [],
+        "임대를 잡지 않았으므로 실패 반납도 없어야 한다",
+      );
+    } finally {
+      if (previous === undefined) delete process.env.TFX_DISABLE_CODEX;
+      else process.env.TFX_DISABLE_CODEX = previous;
+    }
+  });
+
+  // 게이트가 buildWorkerSandboxEnv 뒤에 있으면 거부된 세션의 샌드박스 HOME 이
+  // 디스크에 남는다. 허용 시에는 만들어지고 차단 시에는 안 만들어져야 한다.
+  it("차단되면 worker sandbox 디렉터리를 만들지 않는다", () => {
+    const workdir = makeTmpDir();
+    const previous = process.env.TFX_DISABLE_CODEX;
+    const sandboxPath = (sessionId) =>
+      join(workdir, ".triflux", "worker-home", sessionId);
+    try {
+      process.env.TFX_DISABLE_CODEX = "0";
+      conductor.spawnSession(
+        minConfig({ id: "codex-sandbox-allowed", agent: "codex", workdir }),
+      );
+      assert.equal(
+        existsSync(sandboxPath("codex-sandbox-allowed")),
+        true,
+        "허용된 codex 세션은 샌드박스 HOME 을 만든다 (대조군)",
+      );
+
+      process.env.TFX_DISABLE_CODEX = "1";
+      assert.throws(
+        () =>
+          conductor.spawnSession(
+            minConfig({ id: "codex-sandbox-blocked", agent: "codex", workdir }),
+          ),
+        (err) => err.code === "TFX_CLI_DISABLED",
+      );
+      assert.equal(
+        existsSync(sandboxPath("codex-sandbox-blocked")),
+        false,
+        "차단된 세션은 샌드박스 디렉터리를 남기면 안 된다",
+      );
+    } finally {
+      if (previous === undefined) delete process.env.TFX_DISABLE_CODEX;
+      else process.env.TFX_DISABLE_CODEX = previous;
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  });
+
+  // 정책 차단과 그 밖의 spawn spec 실패는 원인이 달라서 이벤트 이름을 나눈다.
+  it("정책 차단이 아닌 spawn spec 실패는 session_spawn_failed 로 기록된다", async () => {
+    await conductor.shutdown("recreate_for_spawn_failed_event");
+
+    const warnings = [];
+    conductor = makeConductor(logsDir, {
+      deps: {
+        resolveCliExecutable: () => {
+          throw new Error("resolve_boom");
+        },
+      },
+    });
+    conductor.on("warning", (w) => warnings.push(w));
+
+    conductor.spawnSession(
+      minConfig({ id: "spawn-spec-failed", agent: "claude" }),
+    );
+
+    const events = await waitFor(() => {
+      const rows = readJsonl(join(logsDir, "conductor-events.jsonl"));
+      const failed = rows.filter((r) => r.event === "session_spawn_failed");
+      return failed.length > 0 ? failed : null;
+    });
+
+    assert.equal(events[0].session, "spawn-spec-failed");
+    assert.equal(events[0].agent, "claude");
+    assert.equal(events[0].code, null);
+    assert.match(events[0].error, /resolve_boom/u);
+
+    assert.ok(
+      warnings.some((w) => w.type === "session_spawn_failed"),
+      "emitter 에 session_spawn_failed 경고가 실려야 한다",
+    );
+    assert.ok(
+      !warnings.some((w) => w.type === "session_spawn_blocked"),
+      "정책 차단이 아니므로 blocked 로 기록하면 안 된다",
+    );
   });
 });
