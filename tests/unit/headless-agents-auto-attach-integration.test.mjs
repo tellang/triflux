@@ -92,16 +92,35 @@ async function listenFakeClaudeDaemon(controlSock) {
   const sockets = new Set();
   await fs.mkdir(path.dirname(controlSock), { recursive: true });
 
+  // 목 서버가 응답을 쓰는 사이 피어(프로덕션 클라이언트)가 socket.destroy()로
+  // 먼저 사라질 수 있다. 그 경우 write/end 는 EPIPE 를 내는데, 'error' 리스너가
+  // 없으면 Node 가 uncaught 로 승격시켜 테스트를 죽인다. 실제 서버라면 당연히
+  // 견뎌야 하는 상황이라 목도 같은 계약을 지킨다.
+  const isPeerGone = (socket) =>
+    socket.destroyed || socket.writableEnded || !socket.writable;
+  const respond = (socket, payload, { end = true } = {}) => {
+    if (isPeerGone(socket)) return;
+    if (end) socket.end(payload);
+    else socket.write(payload);
+  };
+
   const server = net.createServer((socket) => {
     sockets.add(socket);
     socket.setEncoding("utf8");
     socket.on("close", () => sockets.delete(socket));
+    socket.on("error", (error) => {
+      if (error?.code === "EPIPE" || error?.code === "ECONNRESET") return;
+      throw error;
+    });
     let buffer = "";
     socket.on("data", async (chunk) => {
       buffer += chunk;
       const newline = buffer.indexOf("\n");
       if (newline < 0) return;
       const request = JSON.parse(buffer.slice(0, newline));
+      // 소비한 줄을 버퍼에서 제거한다. 남겨 두면 다음 data 청크에서 같은 요청을
+      // 다시 파싱해 이미 end() 한 소켓에 두 번째 응답을 쓴다.
+      buffer = buffer.slice(newline + 1);
       requests.push(request);
 
       if (request.op === "dispatch") {
@@ -119,12 +138,13 @@ async function listenFakeClaudeDaemon(controlSock) {
           token,
           resultFile,
         });
-        socket.end(`${JSON.stringify({ ok: true, op: "dispatch" })}\n`);
+        respond(socket, `${JSON.stringify({ ok: true, op: "dispatch" })}\n`);
         return;
       }
 
       if (request.op === "list") {
-        socket.end(
+        respond(
+          socket,
           `${JSON.stringify({ ok: true, op: "list", jobs: [...jobs.values()] })}\n`,
         );
         return;
@@ -139,21 +159,27 @@ async function listenFakeClaudeDaemon(controlSock) {
             "utf8",
           );
         }
-        socket.write(
+        respond(
+          socket,
           `${JSON.stringify({ line: `live:${request.short}\n` })}\n`,
+          { end: false },
         );
-        socket.end(
+        respond(
+          socket,
           `${JSON.stringify({ line: `__TFX_HEADLESS_DONE__:${job?.token}:0\n` })}\n`,
         );
         return;
       }
 
       if (request.op === "kill") {
-        socket.end(`${JSON.stringify({ ok: true, op: "kill" })}\n`);
+        respond(socket, `${JSON.stringify({ ok: true, op: "kill" })}\n`);
         return;
       }
 
-      socket.end(`${JSON.stringify({ ok: false, error: "unsupported" })}\n`);
+      respond(
+        socket,
+        `${JSON.stringify({ ok: false, error: "unsupported" })}\n`,
+      );
     });
   });
 

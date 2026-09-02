@@ -7,6 +7,7 @@ import os from "node:os";
 import { dirname, resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { routeCliPolicyEnv } from "../fixtures/route-cli-policy-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
@@ -39,7 +40,7 @@ function runBash(command, extraEnv = {}) {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
     env: {
-      ...process.env,
+      ...routeCliPolicyEnv(),
       TFX_TMP: os.tmpdir(),
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
       // #148: 테스트 환경 MCP probe 결과는 모두 dead → preflight early-fail.
@@ -188,7 +189,7 @@ auto_reroute codex
         cwd: PROJECT_ROOT,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...routeCliPolicyEnv(),
           PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
         },
       });
@@ -231,7 +232,7 @@ auto_reroute gemini
         cwd: PROJECT_ROOT,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...routeCliPolicyEnv(),
           PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
         },
       });
@@ -273,7 +274,7 @@ auto_reroute codex
         cwd: PROJECT_ROOT,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...routeCliPolicyEnv(),
           PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
         },
       });
@@ -316,7 +317,7 @@ auto_reroute antigravity
         cwd: PROJECT_ROOT,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...routeCliPolicyEnv(),
           PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
         },
       });
@@ -358,7 +359,7 @@ auto_reroute codex
         cwd: PROJECT_ROOT,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...routeCliPolicyEnv(),
           TFX_CODEX_CONFIG: isolatedCodex.path,
           TFX_CLI_MODE: "auto",
           TFX_PREFLIGHT_LOADED: "1",
@@ -393,7 +394,7 @@ auto_reroute codex
         cwd: PROJECT_ROOT,
         encoding: "utf8",
         env: {
-          ...process.env,
+          ...routeCliPolicyEnv(),
           TFX_CODEX_CONFIG: isolatedCodex.path,
           TFX_CLI_MODE: "auto",
           TFX_PREFLIGHT_LOADED: "1",
