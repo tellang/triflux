@@ -105,6 +105,14 @@ function getReason(error, fallback) {
   return fallback;
 }
 
+// 기본 로거는 stdout 이 아니라 stderr 로 쓴다.
+//
+// 이 모듈은 SessionStart 훅 안에서 실행된다. Claude Code 는 훅의 stdout 을 JSON
+// 페이로드로 파싱하므로, console 기본값(console.info -> stdout)을 쓰면 로그가
+// 페이로드보다 먼저 stdout 에 실려 페이로드가 JSON 으로 해석되지 않는다.
+// Console 인스턴스를 stderr 로 묶어 같은 API(.info/.warn/.error/.log)를 유지한다.
+const STDERR_CONSOLE = new console.Console(process.stderr, process.stderr);
+
 function log(logger, level, message) {
   const writer = logger?.[level];
   if (typeof writer !== "function") {
@@ -788,7 +796,7 @@ async function syncProjectMcpFile({ filePath, hubUrl, dryRun, logger }) {
 export async function syncHubMcpSettings({
   hubUrl,
   dryRun = false,
-  logger = console,
+  logger = STDERR_CONSOLE,
   registryPath,
 }) {
   const result = {
@@ -861,7 +869,7 @@ export async function syncCodexHubUrl({
   hubUrl,
   codexConfigPath,
   dryRun = false,
-  logger = console,
+  logger = STDERR_CONSOLE,
   allowProtectedEnvWrite = false,
   registryPath,
 }) {
@@ -940,7 +948,7 @@ export async function syncProjectMcpJson({
   hubUrl,
   projectRoot,
   dryRun = false,
-  logger = console,
+  logger = STDERR_CONSOLE,
 }) {
   const result = {
     updated: [],
