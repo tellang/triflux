@@ -69,17 +69,6 @@
         "description": "git commit 전 교차 리뷰 미검증 파일 차단/경고"
       },
       {
-        "id": "omc-headless-guard",
-        "source": "omc",
-        "matcher": "Bash|Agent",
-        "command": "bash \"${HOME}/.claude/scripts/headless-guard-fast.sh\"",
-        "priority": 50,
-        "enabled": true,
-        "timeout": 3,
-        "blocking": false,
-        "description": "primary multiplexer headless 가드"
-      },
-      {
         "id": "omc-tfx-gate-activate",
         "source": "omc",
         "matcher": "Skill",

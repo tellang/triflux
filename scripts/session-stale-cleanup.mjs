@@ -7,7 +7,6 @@
  * 2. tfx-route-*-pids — 고아 워커 프로세스 정리 (#62 후속)
  * 3. git fsmonitor--daemon 누적 감시 — threshold 초과 시 증거 기록 (#214)
  *
- * @see scripts/headless-guard.mjs — 상태 소비자
  * @see scripts/tfx-gate-activate.mjs — 상태 생산자 (ownerPid 기록)
  * @see scripts/tfx-route.sh — PID tracking 파일 생산자
  */

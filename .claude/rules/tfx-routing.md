@@ -99,7 +99,7 @@ triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR
 
 ## CLI 라우팅
 
-headless-guard 가 `codex exec` / `agy -y -p` 직접 호출을 차단한다. tfx 스킬 경유 필수.
+`codex exec` / `agy -y -p` 직접 호출은 금지한다. tfx 스킬 경유 필수. 자동 차단 훅(headless-guard)은 제거됐으므로 호출자가 지킨다.
 
 **Layer 1 — Light** (tfx-route.sh → 단일 CLI)
 

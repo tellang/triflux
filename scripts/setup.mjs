@@ -647,16 +647,6 @@ const SYNC_MAP = [
     label: "hub/team/agent-map.json",
   },
   {
-    src: join(PLUGIN_ROOT, "scripts", "headless-guard.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "headless-guard.mjs"),
-    label: "headless-guard.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "scripts", "headless-guard-fast.sh"),
-    dst: join(CLAUDE_DIR, "scripts", "headless-guard-fast.sh"),
-    label: "headless-guard-fast.sh",
-  },
-  {
     src: join(PLUGIN_ROOT, "scripts", "tfx-gate-activate.mjs"),
     dst: join(CLAUDE_DIR, "scripts", "tfx-gate-activate.mjs"),
     label: "tfx-gate-activate.mjs",
@@ -1808,49 +1798,6 @@ function applyHooks(settings) {
 
   if (!Array.isArray(settings.hooks.PreToolUse)) settings.hooks.PreToolUse = [];
 
-  const guardScriptPath = join(
-    CLAUDE_DIR,
-    "scripts",
-    "headless-guard-fast.sh",
-  ).replace(/\\/g, "/");
-  const hasGuardHook = settings.hooks.PreToolUse.some(
-    (entry) =>
-      Array.isArray(entry.hooks) &&
-      entry.hooks.some(
-        (hook) =>
-          typeof hook.command === "string" &&
-          hook.command.includes("headless-guard"),
-      ),
-  );
-
-  if (!hasGuardHook && existsSync(guardScriptPath.replace(/\//g, "\\"))) {
-    settings.hooks.PreToolUse.push({
-      matcher: "Bash|Agent",
-      hooks: [
-        {
-          type: "command",
-          command: `bash "${guardScriptPath}"`,
-          timeout: 3,
-        },
-      ],
-    });
-    changed = true;
-  } else if (hasGuardHook) {
-    for (const entry of settings.hooks.PreToolUse) {
-      if (!Array.isArray(entry.hooks)) continue;
-      for (const hook of entry.hooks) {
-        if (
-          typeof hook.command === "string" &&
-          hook.command.includes("headless-guard") &&
-          !hook.command.includes(guardScriptPath)
-        ) {
-          hook.command = `bash "${guardScriptPath}"`;
-          changed = true;
-        }
-      }
-    }
-  }
-
   const gateScriptPath = join(
     CLAUDE_DIR,
     "scripts",
@@ -2463,19 +2410,15 @@ export async function runDeferred(stdinData) {
       }
     }
 
-    // ── PreToolUse 훅: headless-guard + tfx-gate-activate ──
-    // orchestrator 가 registry 기반으로 omc-headless-guard / omc-tfx-gate-activate 를
-    // 이미 디스패치하므로, `*` orchestrator entry 와 별도로 등록된 직접 entry 는
-    // 2배 발화를 유발한다 (#76). 이 블록은 orchestrator 유무에 따라 다르게 동작한다:
+    // ── PreToolUse 훅: tfx-gate-activate ──
+    // orchestrator 가 registry 기반으로 omc-tfx-gate-activate 를 이미 디스패치하므로,
+    // `*` orchestrator entry 와 별도로 등록된 직접 entry 는 2배 발화를 유발한다 (#76).
+    // headless-guard 는 2026-09-07 에 제거됐다. 과거 설치가 남긴 직접 entry 는 계속 prune 한다.
+    // 이 블록은 orchestrator 유무에 따라 다르게 동작한다:
     //   - orchestrator 가 있으면: 직접 등록된 중복 entry 를 제거 (prune).
     //   - orchestrator 가 없으면: legacy ADD 경로로 직접 entry 주입 (구 설치 fallback).
     if (!Array.isArray(s.hooks.PreToolUse)) s.hooks.PreToolUse = [];
 
-    const guardScriptPath = join(
-      CLAUDE_DIR,
-      "scripts",
-      "headless-guard-fast.sh",
-    ).replace(/\\/g, "/");
     const gateScriptPath = join(
       CLAUDE_DIR,
       "scripts",
@@ -2494,7 +2437,7 @@ export async function runDeferred(stdinData) {
     );
 
     if (hasPreToolUseOrchestrator) {
-      // prune: 직접 등록된 headless-guard / tfx-gate-activate 전용 entry 제거
+      // prune: 직접 등록된 tfx-gate-activate 전용 entry 와 제거된 headless-guard entry 정리
       const DUP_MARKERS = ["headless-guard", "tfx-gate-activate"];
       const before = s.hooks.PreToolUse.length;
       s.hooks.PreToolUse = s.hooks.PreToolUse.filter((entry) => {
@@ -2512,30 +2455,6 @@ export async function runDeferred(stdinData) {
       if (s.hooks.PreToolUse.length !== before) changed = true;
     } else {
       // legacy: orchestrator 부재 시 직접 entry 주입
-      const hasGuardHook = s.hooks.PreToolUse.some(
-        (entry) =>
-          Array.isArray(entry.hooks) &&
-          entry.hooks.some(
-            (h) =>
-              typeof h.command === "string" &&
-              h.command.includes("headless-guard"),
-          ),
-      );
-
-      if (!hasGuardHook && existsSync(guardScriptPath.replace(/\//g, "\\"))) {
-        s.hooks.PreToolUse.push({
-          matcher: "Bash|Agent",
-          hooks: [
-            {
-              type: "command",
-              command: `bash "${guardScriptPath}"`,
-              timeout: 3,
-            },
-          ],
-        });
-        changed = true;
-      }
-
       const hasGateHook = s.hooks.PreToolUse.some(
         (entry) =>
           Array.isArray(entry.hooks) &&
@@ -2567,13 +2486,6 @@ export async function runDeferred(stdinData) {
       for (const h of entry.hooks) {
         if (typeof h.command !== "string") continue;
         if (h.command.includes("hook-orchestrator")) continue;
-        if (
-          h.command.includes("headless-guard") &&
-          !h.command.includes(guardScriptPath)
-        ) {
-          h.command = `bash "${guardScriptPath}"`;
-          changed = true;
-        }
         if (
           h.command.includes("tfx-gate-activate") &&
           h.command !== buildNodeScriptCommand(gateScriptPath)

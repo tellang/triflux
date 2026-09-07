@@ -68,7 +68,6 @@ Bash("triflux setup")
 필수 훅 목록:
 | 이벤트 | matcher | 스크립트 | 역할 |
 |--------|---------|---------|------|
-| PreToolUse | Bash\|Agent | headless-guard-fast.sh | Codex/Antigravity 직접 호출 차단 |
 | PreToolUse | Bash | psmux-safety-guard.mjs | psmux kill-session 직접 호출 차단 (WT 프리징 방지) |
 | PreToolUse | Skill | tfx-gate-activate.mjs | tfx-multi 게이트 |
 
@@ -202,7 +201,7 @@ options:
 ```
 
 **CLAUDE.md 주입 (필수):** 감지된 config.toml 설정을 프로젝트 CLAUDE.md의 `<codex-config>` 섹션에 반영한다.
-이렇게 해야 훅(headless-guard, safety-guard)이 명령을 차단했을 때, Claude가 차단 메시지를 읽고 "왜 차단됐는지" + "어떻게 수정해야 하는지"를 CLAUDE.md에서 찾아서 올바르게 재시도할 수 있다.
+이렇게 해야 훅(safety-guard)이 명령을 차단하거나 Codex 가 플래그 충돌로 실패했을 때, Claude가 차단 메시지를 읽고 "왜 차단됐는지" + "어떻게 수정해야 하는지"를 CLAUDE.md에서 찾아서 올바르게 재시도할 수 있다.
 
 주입 예시 (Edit 도구로 `<codex-config>` 섹션 업데이트):
 ```markdown
@@ -221,8 +220,8 @@ config.toml에 이미 설정된 값은 CLI 플래그로 중복 지정하지 않�
 ```
 
 차단 → 수정 흐름:
-1. headless-guard가 `codex exec --full-auto` 차단
-2. 차단 메시지: "config.toml에 approval_mode=full-auto 있으므로 --full-auto 중복"
+1. Codex 가 `codex exec --full-auto` 를 중복 플래그로 거부
+2. 오류 메시지: "config.toml에 approval_mode=full-auto 있으므로 --full-auto 중복"
 3. Claude가 CLAUDE.md `<codex-config>` 읽음 → `--full-auto` 제거 후 재실행
 4. 동일 실수 반복 방지
 

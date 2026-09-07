@@ -3,7 +3,7 @@
  * tfx-multi-activate.mjs — PreToolUse(Skill) 훅
  *
  * /tfx-multi 스킬 호출을 감지하여 상태 파일을 설정한다.
- * headless-guard.mjs가 이 상태를 읽어 A(gate) + B(nudge)를 수행.
+ * 상태 파일은 안내(additionalContext) 용도다. 차단 훅 headless-guard 는 2026-09-07 에 제거됐다.
  *
  * 상태 파일: $TMPDIR/tfx-multi-state.json
  * 자동 만료: 30분
@@ -85,7 +85,7 @@ async function main() {
     try {
       const state = JSON.parse(readFileSync(STATE_FILE, "utf8"));
       if (Date.now() - state.activatedAt > EXPIRE_MS) {
-        // 만료 → 삭제하지 않고 headless-guard가 처리
+        // 만료 → 다음 활성화 때 덮어쓴다
       }
     } catch {
       /* ignore */

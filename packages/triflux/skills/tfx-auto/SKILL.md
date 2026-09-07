@@ -946,7 +946,7 @@ pipe capture 해제 → pane 프로세스 트리 종료 → 세션 종료 → or
 
 **인터랙티브(진짜 TUI) 워커**: headless `codex exec`가 아니라 사람이 직접 타이핑
 가능한 인터랙티브 세션이 필요하면 `tfx-live`를 쓴다 (raw `codex`/`agy` 직접 호출은
-headless-guard가 차단하는 경로이므로 시도하지 않는다).
+라우팅 규약이 금지하는 경로이므로 시도하지 않는다).
 
 1. `tfx-live start --cli codex --session <name> --cwd <dir>` — 세션 생성.
 2. 스킬 주입이 필요하면 `tfx-route.sh`의 `prepend_skill()` 포맷을 그대로 재현해

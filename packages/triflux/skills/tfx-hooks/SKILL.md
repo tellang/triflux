@@ -154,8 +154,6 @@ options:
     description: "[PreToolUse:Bash] 위험 명령 차단 — priority:0, 활성"
   - label: "tfx-agent-route-guard"
     description: "[PreToolUse:Agent] 에이전트 라우팅 — priority:0, 활성"
-  - label: "omc-headless-guard"
-    description: "[PreToolUse:Bash|Agent] headless 가드 — priority:50, 활성"
   ...
 ```
 
