@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  buildSynapseRegistrationMeta,
   buildSynapseTaskSummary,
   drainPendingSynapse,
   fireAndForgetSynapse,
@@ -412,5 +414,30 @@ describe("drainPendingSynapse (flush before process.exit)", () => {
     } finally {
       await closeServer(server);
     }
+  });
+});
+
+describe("inferSessionCli stays inside the hub agents.cli CHECK constraint", () => {
+  const schema = readFileSync(join(__dirname, "../../hub/schema.sql"), "utf8");
+  const match = schema.match(/cli TEXT NOT NULL CHECK \(cli IN \(([^)]+)\)\)/);
+  const allowed = new Set(match[1].split(",").map((v) => v.trim().replace(/'/g, "")));
+  const base = { sessionKind: "interactive", sessionId: "sess-1", cwd: "/tmp" };
+  const opts = { hostname: () => "h", nowMs: () => 0, resolveProjectId: () => "" };
+
+  it("maps the agy session hook entrypoint to an allowed cli value", () => {
+    const meta = buildSynapseRegistrationMeta(
+      { ...base },
+      { ...opts, entrypoint: "/repo/hooks/agy-session-hook.mjs" },
+    );
+    assert.ok(allowed.has(meta.cli), `cli=${meta.cli} not in ${[...allowed]}`);
+  });
+
+  it("does not pass an explicit actor_cli=agy through as the hub cli", () => {
+    const meta = buildSynapseRegistrationMeta(
+      { ...base, actor_cli: "agy" },
+      { ...opts, entrypoint: "/repo/hooks/agy-session-hook.mjs" },
+    );
+    assert.ok(allowed.has(meta.cli), `cli=${meta.cli} not in ${[...allowed]}`);
+    assert.equal(meta.actor_cli, "agy");
   });
 });

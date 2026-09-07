@@ -11,7 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
-import { ensureAgyHooks } from "../../scripts/ensure-agy-hooks.mjs";
+import {
+  ensureAgyHooks,
+  resolveStableNodeBin,
+} from "../../scripts/ensure-agy-hooks.mjs";
 
 const tmpRoots = [];
 
@@ -253,5 +256,54 @@ describe("ensureAgyHooks", () => {
       if (prevPid === undefined) delete process.env.TEST_LOCK_PID;
       else process.env.TEST_LOCK_PID = prevPid;
     }
+  });
+});
+
+describe("resolveStableNodeBin", () => {
+  it("prefers the Homebrew bin/node alias over the versioned Cellar path", () => {
+    const prefix = "/opt/homebrew";
+    const cellar = `${prefix}/Cellar/node/26.0.0/bin/node`;
+    const alias = `${prefix}/bin/node`;
+    const realpath = (p) => {
+      if (p === cellar || p === alias) return cellar;
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    };
+    assert.equal(
+      resolveStableNodeBin(cellar, { env: { HOMEBREW_PREFIX: prefix }, realpath }),
+      alias,
+    );
+  });
+
+  it("keeps execPath when no stable alias resolves to the same binary", () => {
+    const exec = "/Users/me/.nvm/versions/node/v26.0.0/bin/node";
+    const realpath = (p) => {
+      if (p === exec) return exec;
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    };
+    assert.equal(resolveStableNodeBin(exec, { env: {}, realpath }), exec);
+  });
+
+  it("keeps execPath when the alias points at a different node", () => {
+    const exec = "/opt/homebrew/Cellar/node/26.0.0/bin/node";
+    const realpath = (p) => {
+      if (p === exec) return exec;
+      if (p === "/opt/homebrew/bin/node") return "/opt/homebrew/Cellar/node/25.0.0/bin/node";
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    };
+    assert.equal(resolveStableNodeBin(exec, { env: {}, realpath }), exec);
+  });
+
+  it("uses the resolved alias for the installed command when nodeBin is not given", () => {
+    const geminiConfigHome = makeGeminiConfigHome();
+    const result = ensureAgyHooks({
+      geminiConfigHome,
+      hookScriptPath: "/repo/hooks/agy-session-hook.mjs",
+    });
+    assert.equal(result.skipped, false);
+    const parsed = JSON.parse(
+      readFileSync(join(geminiConfigHome, "hooks.json"), "utf8"),
+    );
+    const command = parsed["triflux-session"].PreInvocation[0].command;
+    assert.ok(command.startsWith(`"${resolveStableNodeBin()}"`), command);
   });
 });
