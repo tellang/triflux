@@ -18,7 +18,8 @@ function shellSingleQuote(value) {
 
 function buildAntigravityArgs(opts = {}) {
   const prompt = typeof opts.prompt === "string" ? opts.prompt : "";
-  const command = `printf %s ${shellSingleQuote(prompt)} | agy --print --dangerously-skip-permissions`;
+  // agy 1.1.27: --print 는 값(프롬프트) 필수, stdin 프롬프트 불가.
+  const command = `agy --dangerously-skip-permissions --print ${shellSingleQuote(prompt)}`;
   if (opts.resultFile) {
     return `${command} > ${shellSingleQuote(opts.resultFile)} 2>${shellSingleQuote(`${opts.resultFile}.err`)}`;
   }

@@ -198,7 +198,16 @@ export const ANTIGRAVITY_SETTINGS_PATH = join(
 // /usage 실측 (2026-05-22): Gemini 4개 모델이 동일 reset window 공유 (family-pool).
 // Claude/GPT-OSS family는 Gemini와 별도 quota 윈도우.
 export const ANTIGRAVITY_MODEL_ABBREV = {
-  // Gemini family — 통합 quota
+  // Gemini family — 통합 quota. 3.6+ Flash 는 세대 숫자 + 등급으로 구분한다.
+  "Gemini 3.8 Flash (High)": "8h",
+  "Gemini 3.8 Flash (Medium)": "8m",
+  "Gemini 3.8 Flash (Low)": "8l",
+  "Gemini 3.7 Flash (High)": "7h",
+  "Gemini 3.7 Flash (Medium)": "7m",
+  "Gemini 3.7 Flash (Low)": "7l",
+  "Gemini 3.6 Flash (High)": "6h",
+  "Gemini 3.6 Flash (Medium)": "6m",
+  "Gemini 3.6 Flash (Low)": "6l",
   "Gemini 3.5 Flash (High)": "Fh",
   "Gemini 3.5 Flash (Medium)": "Fm",
   "Gemini 3.5 Flash (Low)": "Fl",

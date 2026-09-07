@@ -238,7 +238,8 @@ function runWithCli(cliType, prompt, timeout, runMode = "fg") {
   if (cliType === "codex") {
     cmd = buildExecArgs({ prompt: metaPrompt });
   } else if (cliType === "antigravity") {
-    cmd = `agy --print --dangerously-skip-permissions < ${shellSingleQuote(promptPath)}`;
+    // agy 1.1.27: --print 는 값(프롬프트) 필수, stdin 프롬프트 불가.
+    cmd = `agy --dangerously-skip-permissions --print "$(cat ${shellSingleQuote(promptPath)})"`;
   } else {
     // Claude CLI — print 모드 (MCP 도구 자동 접근)
     cmd = `claude -p "${metaPrompt}"`;

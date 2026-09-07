@@ -461,11 +461,48 @@ test("buildSpawnSpecForMode: gemini alias uses agy stdin print mode", () => {
     platform: "linux",
     resolveCommand: () => "/usr/local/bin/agy",
     env: {},
+    geminiProfilesPath: "/nonexistent/triflux-profiles.json",
   });
   assert.equal(spec.command, "/usr/local/bin/agy");
-  assert.equal(spec.stdinPrompt, true);
-  assert.deepEqual(spec.args, ["--print", "--dangerously-skip-permissions"]);
+  // agy 1.1.27: 프롬프트는 --print 의 값으로 argv 에 실린다 (stdin 불가)
+  assert.equal(spec.stdinPrompt, false);
+  // role 없음 → Medium 기본 effort
+  assert.deepEqual(spec.args, [
+    "--dangerously-skip-permissions",
+    "--model",
+    "Gemini 3.8 Flash (Medium)",
+    "--print",
+    "ACK",
+  ]);
   assert.equal(spec.prompt, "ACK");
+});
+
+test("buildSpawnSpecForMode: antigravity role picks effort from the purpose SSOT", () => {
+  const reviewer = buildSpawnSpecForMode(MODES.HEADLESS, {
+    cli: "antigravity",
+    prompt: "ACK",
+    role: "reviewer",
+    platform: "linux",
+    resolveCommand: () => "/usr/local/bin/agy",
+    env: {},
+    geminiProfilesPath: "/nonexistent/triflux-profiles.json",
+  });
+  assert.deepEqual(reviewer.args.slice(0, 3), [
+    "--dangerously-skip-permissions",
+    "--model",
+    "Gemini 3.8 Flash (High)",
+  ]);
+  const explicit = buildSpawnSpecForMode(MODES.HEADLESS, {
+    cli: "antigravity",
+    prompt: "ACK",
+    role: "reviewer",
+    model: "flash38_low",
+    platform: "linux",
+    resolveCommand: () => "/usr/local/bin/agy",
+    env: {},
+    geminiProfilesPath: "/nonexistent/triflux-profiles.json",
+  });
+  assert.equal(explicit.args[2], "Gemini 3.8 Flash (Low)");
 });
 
 test("buildSpawnSpecForMode: claude headless ignores stdinPrompt (keeps -p flag)", () => {
@@ -546,6 +583,7 @@ describe("buildSpawnSpecForMode: TFX_DISABLE_* 게이트", () => {
 
   it("둘 다 허용이면 기존 spec 과 동일하다", () => {
     const base = {
+      geminiProfilesPath: "/nonexistent/triflux-profiles.json",
       cli: "gemini",
       prompt: "ACK",
       platform: "linux",
@@ -568,8 +606,14 @@ describe("buildSpawnSpecForMode: TFX_DISABLE_* 게이트", () => {
     });
     assert.deepEqual(gated, ungated);
     assert.equal(gated.command, "/usr/local/bin/agy");
-    assert.deepEqual(gated.args, ["--print", "--dangerously-skip-permissions"]);
-    assert.equal(gated.stdinPrompt, true);
+    assert.deepEqual(gated.args, [
+      "--dangerously-skip-permissions",
+      "--model",
+      "Gemini 3.8 Flash (Medium)",
+      "--print",
+      "ACK",
+    ]);
+    assert.equal(gated.stdinPrompt, false);
     assert.equal(gated.prompt, "ACK");
   });
 

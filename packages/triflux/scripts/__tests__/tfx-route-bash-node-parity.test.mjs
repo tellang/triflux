@@ -101,7 +101,7 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     assert.equal(plan.cliType, "antigravity");
     assert.equal(plan.adapter, "agy");
     assert.equal(plan.effort, "agy_v1");
-    assert.equal(plan.stdinMode, "pipe");
+    assert.equal(plan.stdinMode, "argv");
   });
 
   test("--route-print invocation: explore → claude-native (no CLI command)", () => {
@@ -116,7 +116,7 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     assert.equal(plan.command, null);
   });
 
-  test("--route-print invocation: antigravity → stdin-pipe", () => {
+  test("--route-print invocation: antigravity → argv prompt", () => {
     const out = execFileSync(
       "node",
       [NODE_SCRIPT, "--route-print", "antigravity", "doc gen"],
@@ -125,8 +125,10 @@ describe("tfx-route bash/node parity — Phase 0 회귀가드", () => {
     const plan = JSON.parse(out);
     assert.equal(plan.cliType, "antigravity");
     assert.equal(plan.adapter, "agy");
-    assert.equal(plan.stdinMode, "pipe");
-    assert.deepEqual(plan.args, ["--print", "--dangerously-skip-permissions"]);
+    assert.equal(plan.stdinMode, "argv");
+    assert.equal(plan.args[0], "--dangerously-skip-permissions");
+    assert.equal(plan.args[1], "--model");
+    assert.deepEqual(plan.args.slice(3), ["--print", "doc gen"]);
   });
 
   test("Unknown agent → exit 1 + stderr error", () => {

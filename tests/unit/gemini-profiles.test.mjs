@@ -15,6 +15,8 @@ import { afterEach, describe, it } from "node:test";
 import {
   DEFAULT_GEMINI_PROFILES,
   ensureGeminiProfiles,
+  resolveGeminiModel,
+  resolveGeminiProfileForPurpose,
 } from "../../scripts/lib/gemini-profiles.mjs";
 
 const tempDirs = [];
@@ -62,7 +64,7 @@ describe("ensureGeminiProfiles()", () => {
       JSON.stringify(
         {
           profiles: {
-            pro31: DEFAULT_GEMINI_PROFILES.profiles.pro31,
+            flash38_high: DEFAULT_GEMINI_PROFILES.profiles.flash38_high,
           },
         },
         null,
@@ -134,12 +136,13 @@ describe("ensureGeminiProfiles() 마이그레이션", () => {
     assert.equal(saved.profiles.pro25, undefined);
     assert.equal(saved.profiles.flash25, undefined);
     assert.equal(saved.profiles.lite25, undefined);
-    assert.equal(saved.profiles.pro31.model, "Gemini 3.1 Pro (High)");
-    assert.equal(saved.profiles.flash3.model, "Gemini 3 Flash");
-    // 모델 값만 교체, 나머지 필드(hint)는 보존
-    assert.equal(saved.profiles.pro31.hint, "old");
+    // pro31 은 자동 생성 이름이라 정책상 제거된다 (Pro 미사용)
+    assert.equal(saved.profiles.pro31, undefined);
+    // "Gemini 3 Flash" 는 agy 카탈로그에서 빠졌으므로 프로필 자체가 제거된다
+    assert.equal(saved.profiles.flash3, undefined);
     // 신규 default 프로필이 함께 채워짐
-    assert.ok(saved.profiles.flash35);
+    assert.ok(saved.profiles.flash38);
+    assert.equal(saved.profiles.flash38.model, "Gemini 3.8 Flash (Medium)");
     const baks = readdirSync(geminiDir).filter((name) =>
       name.startsWith("triflux-profiles.json.bak."),
     );
@@ -152,7 +155,7 @@ describe("ensureGeminiProfiles() 마이그레이션", () => {
       profilesPath,
       JSON.stringify({
         model: "gemini-3.1-pro-preview",
-        profiles: { pro31: { model: "gemini-3.1-pro-preview" } },
+        profiles: { mypro: { model: "gemini-3.1-pro-preview" } },
       }),
     );
 
@@ -160,7 +163,31 @@ describe("ensureGeminiProfiles() 마이그레이션", () => {
     const saved = JSON.parse(readFileSync(profilesPath, "utf8"));
 
     assert.equal(saved.model, DEFAULT_GEMINI_PROFILES.model);
-    assert.equal(saved.model, "Gemini 3.5 Flash (Medium)");
+    assert.equal(saved.model, "Gemini 3.8 Flash (Medium)");
+  });
+
+  it("이전 세대 자동 생성 기본 model(3.5 Flash Medium)과 display name 형식의 3 Flash 프로필을 정리한다", () => {
+    const { geminiDir, profilesPath } = makeTempPaths();
+    writeFileSync(
+      profilesPath,
+      JSON.stringify({
+        model: "Gemini 3.5 Flash (Medium)",
+        profiles: {
+          flash3: { model: "Gemini 3 Flash", hint: "3.0 Flash" },
+          flash35: { model: "Gemini 3.5 Flash (Medium)", hint: "keep" },
+          pro31: { model: "Gemini 3.1 Pro (High)" },
+        },
+      }),
+    );
+
+    ensureGeminiProfiles({ geminiDir, profilesPath });
+    const saved = JSON.parse(readFileSync(profilesPath, "utf8"));
+
+    assert.equal(saved.model, "Gemini 3.8 Flash (Medium)");
+    assert.equal(saved.profiles.flash3, undefined);
+    // 이전 세대 자동 생성 프로필도 제거된다
+    assert.equal(saved.profiles.flash35, undefined);
+    assert.ok(saved.profiles.flash38_high);
   });
 
   it("이미 새 형식이면 마이그레이션/백업하지 않는다 (멱등)", () => {
@@ -174,5 +201,31 @@ describe("ensureGeminiProfiles() 마이그레이션", () => {
 
     assert.equal(result.added, 0);
     assert.equal(baks.length, 0);
+  });
+});
+
+describe("용도별 effort 분리 (SSOT)", () => {
+  it("역할을 3.8 Flash effort 프로필로 매핑한다", () => {
+    assert.equal(resolveGeminiProfileForPurpose("designer"), "flash38_high");
+    assert.equal(resolveGeminiProfileForPurpose("reviewer"), "flash38_high");
+    assert.equal(resolveGeminiProfileForPurpose("Code-Reviewer"), "flash38_high");
+    assert.equal(resolveGeminiProfileForPurpose("writer"), "flash38");
+    assert.equal(resolveGeminiProfileForPurpose("antigravity"), "flash38");
+    assert.equal(resolveGeminiProfileForPurpose("summarizer"), "flash38_low");
+    assert.equal(resolveGeminiProfileForPurpose("no-such-role"), "flash38");
+    assert.equal(resolveGeminiProfileForPurpose(""), "flash38");
+  });
+
+  it("프로필 이름을 display name 으로 푼다 (사용자 파일 우선, 없으면 기본값)", () => {
+    const { profilesPath } = makeTempPaths();
+    assert.equal(resolveGeminiModel("flash38_high", { profilesPath }), "Gemini 3.8 Flash (High)");
+    writeFileSync(
+      profilesPath,
+      JSON.stringify({ model: "Gemini 3.8 Flash (Low)", profiles: { flash38: { model: "Gemini 3.7 Flash (Medium)" } } }),
+    );
+    assert.equal(resolveGeminiModel("flash38", { profilesPath }), "Gemini 3.7 Flash (Medium)");
+    assert.equal(resolveGeminiModel("unknown_profile", { profilesPath }), "Gemini 3.8 Flash (Low)");
+    assert.equal(resolveGeminiModel("Gemini 3.1 Pro (High)", { profilesPath }), "Gemini 3.1 Pro (High)");
+    assert.equal(resolveGeminiModel("gemini-3.8-flash-high", { profilesPath }), "gemini-3.8-flash-high");
   });
 });

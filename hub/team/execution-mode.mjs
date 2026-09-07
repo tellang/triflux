@@ -9,6 +9,10 @@ import {
   normalizeCliName,
   resolveCliPolicy,
 } from "../../scripts/lib/machine-profile.mjs";
+import {
+  resolveGeminiModel,
+  resolveGeminiProfileForPurpose,
+} from "../../scripts/lib/gemini-profiles.mjs";
 import { whichCommand } from "../platform.mjs";
 
 const WIN32_EXT_PRECEDENCE = [".cmd", ".exe", ".bat", ".ps1"];
@@ -144,12 +148,26 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
   };
 
   if (cli === "antigravity") {
-    const args = ["--print", "--dangerously-skip-permissions"];
+    // agy 1.1.27: --print 는 값(프롬프트)을 받는 마지막 인자다. stdin 프롬프트는
+    // "empty prompt" 로 거부되므로 argv 로 넘긴다.
+    // effort 는 역할별 SSOT(scripts/lib/gemini-profiles.mjs). 명시 model 이 우선한다.
+    const model =
+      typeof opts.model === "string" && opts.model.trim()
+        ? resolveGeminiModel(opts.model.trim(), {
+            profilesPath: opts.geminiProfilesPath,
+          })
+        : resolveGeminiModel(
+            resolveGeminiProfileForPurpose(opts.role || opts.agent),
+            { profilesPath: opts.geminiProfilesPath },
+          );
+    const args = ["--dangerously-skip-permissions"];
+    if (model) args.push("--model", model);
+    args.push("--print", prompt);
     return {
       ...wrap(args),
       useExec: true,
       shell: false,
-      stdinPrompt: prompt.length > 0,
+      stdinPrompt: false,
       prompt,
     };
   }
