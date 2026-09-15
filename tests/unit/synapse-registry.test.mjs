@@ -471,7 +471,7 @@ describe("synapse-registry peer-discovery", () => {
     reg.destroy();
   });
 
-  it("getActive()는 idle interactive 세션도 live로 포함한다 (git-preflight 충돌 가드)", async () => {
+  it("getActive()는 idle interactive 세션도 live로 포함한다 (peer discovery 가드)", async () => {
     const reg = createSynapseRegistry({
       persistPath,
       interactiveHeartbeatIntervalMs: 10,
@@ -490,10 +490,10 @@ describe("synapse-registry peer-discovery", () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
     assert.equal(reg.getSession("ix-idle").status, "idle");
 
-    // git-preflight reads getActive() to find other live sessions whose dirty
-    // files would conflict. An idle interactive session is still live, so it
-    // MUST appear here with its dirty files (regression: getActive() previously
-    // returned only "active" and hid idle sessions from that safety check).
+    // Peer discovery and CTO status/hygiene read getActive() to find other
+    // live sessions. An idle interactive session is still live, so it MUST
+    // appear here (regression: getActive() previously returned only
+    // "active" and hid idle sessions from those consumers).
     const live = reg.getActive();
     const ixIdle = live.find((s) => s.sessionId === "ix-idle");
     assert.ok(
@@ -540,7 +540,7 @@ describe("synapse-registry peer-discovery", () => {
     );
     assert.equal(res.ok, true);
     assert.equal(reg.getSession("ix-resume").status, "active");
-    // Live again → visible to git-preflight (getActive) AND peer-discovery.
+    // Live again: visible to getActive() and peer-discovery.
     assert.equal(reg.getActive().length, 1);
     assert.equal(reg.querySessions({ cwd: "/ix-resume" }).length, 1);
 

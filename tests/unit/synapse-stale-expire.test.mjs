@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { registerInteractiveSession } from "../../hooks/session-start-fast.mjs";
-import { createGitPreflight } from "../../hub/team/git-preflight.mjs";
 import { createSynapseRegistry } from "../../hub/team/synapse-registry.mjs";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -41,10 +40,6 @@ function sessionRow(overrides = {}) {
     sessionKind: "interactive",
     ...overrides,
   };
-}
-
-function fakeLocks(snapshot = []) {
-  return { snapshot: () => snapshot };
 }
 
 function payloadJson(obj) {
@@ -116,50 +111,6 @@ describe("synapse stale expiry policy", () => {
     reg.destroy();
   });
 
-  it("retained stale dirty rows do not affect git-preflight until revived", () => {
-    persistRows(persistPath, {
-      dirty: sessionRow({
-        sessionId: "dirty",
-        dirtyFiles: ["hub/server.mjs"],
-      }),
-    });
-    process.env.TFX_SYNAPSE_CLEAN_EXPIRE_MS = String(HOUR_MS);
-
-    const reg = createSynapseRegistry({
-      persistPath,
-      expireTimeoutMs: 24 * HOUR_MS,
-    });
-    const preflight = createGitPreflight({ registry: reg, locks: fakeLocks() });
-
-    const staleDecision = preflight.checkRebase(
-      {},
-      { sessionId: "self", workerId: "self" },
-    );
-    assert.equal(staleDecision.allowed, true);
-
-    const revived = reg.register({
-      sessionId: "dirty",
-      host: "local",
-      worktreePath: "/repo/wt",
-      branch: "main",
-      dirtyFiles: ["hub/server.mjs"],
-      taskSummary: "resumed dirty task",
-      cwd: "/repo/wt",
-      sessionKind: "interactive",
-      isRemote: false,
-    });
-    assert.equal(revived.ok, true);
-
-    const liveDecision = preflight.checkRebase(
-      {},
-      { sessionId: "self", workerId: "self" },
-    );
-    assert.equal(liveDecision.allowed, false);
-    assert.equal(liveDecision.conflicts[0].file, "hub/server.mjs");
-    assert.equal(liveDecision.conflicts[0].activeSession, "dirty");
-
-    reg.destroy();
-  });
 });
 
 describe("SessionStart headless registration noise", () => {

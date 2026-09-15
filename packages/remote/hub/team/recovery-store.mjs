@@ -1,6 +1,6 @@
 // hub/team/recovery-store.mjs — Best-effort preservation of worker changes
 // before a dirty worktree is removed. Uses file-based `.patch` + JSON manifest
-// instead of git stash (git-preflight flags stash-pop/worktree-remove as risky).
+// instead of git stash, which is risky to pop under concurrent worktree use.
 
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
