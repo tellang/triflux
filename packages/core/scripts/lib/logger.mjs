@@ -31,6 +31,18 @@ import pino from "pino";
 
 const isDev = process.env.NODE_ENV !== "production";
 
+// 로그는 항상 stderr(fd 2)로 보낸다.
+//
+// Claude Code 훅은 stdout 을 훅의 JSON 페이로드로 파싱한다. 로그가 stdout 으로
+// 나가면 페이로드와 한 스트림에 섞여, 훅이 돌려준 hookSpecificOutput 이 JSON 으로
+// 해석되지 않고 그냥 본문 텍스트가 된다. Claude Code 2.1.257 부터는 stdout 이
+// "{" 로 시작하는데 유효한 JSON 이 아니면 훅 오류로 보고하므로, 로그가 먼저 나가느냐
+// 페이로드가 먼저 나가느냐에 따라 훅 전체가 실패로 뒤집힌다.
+//
+// stderr 로 보내면 Claude Code 가 verbose/transcript 에서 그대로 보여주고 stdout 은
+// 페이로드만 남는다. CLI 관례상으로도 구조화 로그는 stderr 가 맞다.
+const LOG_FD = 2;
+
 export const logger = pino({
   level: process.env.LOG_LEVEL || (isDev ? "debug" : "info"),
 
@@ -67,7 +79,7 @@ export const logger = pino({
     remove: true,
   },
 
-  // 개발 환경: 컬러 콘솔 출력
+  // 개발 환경: 컬러 콘솔 출력 (stderr)
   transport: isDev
     ? {
         target: "pino-pretty",
@@ -75,10 +87,13 @@ export const logger = pino({
           colorize: true,
           translateTime: "yyyy-mm-dd HH:MM:ss",
           ignore: "pid,hostname",
+          destination: LOG_FD,
         },
       }
     : undefined,
-});
+},
+// 운영 환경(transport 미사용)에서도 stdout 이 아니라 stderr 로 쓴다.
+isDev ? undefined : pino.destination({ dest: LOG_FD, sync: false }));
 
 /**
  * 모듈별 Child Logger 생성.

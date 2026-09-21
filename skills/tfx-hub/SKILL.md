@@ -34,13 +34,8 @@ argument-hint: "<start|stop|status|자유형 작업 설명>"
 
 fallthrough 라우팅:
 ```bash
-# tfx-route.sh 경유 (권장)
+# tfx-route.sh 경유 (codex·agy 직접 호출은 라우팅 규칙상 금지)
 Bash("bash ~/.claude/scripts/tfx-route.sh {에이전트} '{hub 컨텍스트 + 작업}' {mcp_profile}")
-
-# codex 직접 호출 시 — 반드시 exec 서브커맨드 포함
-Bash("codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check '{작업}'")
-Bash("codex --profile gpt56_sol_xhigh exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check '{작업}'")
-#          ↑ --profile은 exec 앞에, --skip-git-repo-check은 exec 뒤에
 
 # Claude 네이티브 (탐색/검증)
 Agent(subagent_type="oh-my-claudecode:explore", model="haiku", prompt="{작업}")

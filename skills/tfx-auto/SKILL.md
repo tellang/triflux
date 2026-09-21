@@ -78,7 +78,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 > 1. **실행**: CLI 에이전트는 반드시 `Bash("bash ~/.claude/scripts/tfx-route.sh ...")`. Claude 네이티브(explore/verifier/test-engineer/qa-tester)만 `Agent()`.
 > 2. **비용/편향 분리**: 실행 워커 비용은 Codex/Antigravity 우선으로 낮추되, consensus/debate/panel에서는 Claude/Opus를 최후수단이 아니라 counter-bias outvoice로 둔다. Claude가 실행을 맡는 경우는 명시적 `--cli claude`, Claude-native host role, 또는 fallback뿐이다.
 > 2-a. **Anti-bias triad**: Triflux의 본가 목적은 Codex↔Claude 균형으로 단일 모델 편향을 줄이는 것이다. `triad`는 Claude/Opus(counter-bias outvoice) + Codex(implementation/reality check) + Antigravity(product/UX auxiliary)를 보존하고, disputed/minority view를 삭제하지 않는다.
-> 2-b. **Claude effort**: Claude lane은 Claude Code CLI의 `--model`과 `--effort`를 사용한다. Triflux의 `CLI_EFFORT`/profile 값은 `low|medium|high|xhigh|max` Claude effort로 매핑한다(`ultracode`는 `claude --effort` 값이 아니라 하니스 모드이므로 기본 effort로 매핑된다). skill 문서가 모델 ID를 하드코딩하지 않는다.
+> 2-b. **Claude effort**: Claude lane은 Claude Code CLI의 `--model`과 `--effort`를 사용한다. Triflux의 `CLI_EFFORT`/profile 값은 `low|medium|high|xhigh|max` Claude effort로 매핑한다. `ultracode`도 공식 `--effort` 값(v2.1.203+)이지만 프로필 매핑에서는 쓰지 않는다. skill 문서가 모델 ID를 하드코딩하지 않는다.
 > 3. **DAG**: SEQUENTIAL/DAG이면 레벨 기반 순차 실행. `.omc/context/{sid}/` 생성, context_output 저장, 실패 시 후속 SKIP.
 > 4. **트리아지**: Codex `exec --full-auto` 분류 + Opus 인라인 분해. Agent 스폰 금지.
 > 5. **thorough**: `-t`/`--thorough` 시 파이프라인 init 필수. 커맨드 숏컷은 항상 quick.
@@ -265,9 +265,9 @@ agy 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율
 
 `--mode consensus` 는 orchestration family 를 뜻하고, `--shape` 는 그 family 내부의 출력/해석 surface 를 뜻한다.
 
-- `--mode consensus --shape consensus` → 기존 `tfx-consensus`
-- `--mode consensus --shape debate` → 기존 `tfx-debate`
-- `--mode consensus --shape panel` → 기존 `tfx-panel`
+- `--mode consensus --shape consensus`: 3-CLI findings 합의/충돌 판정
+- `--mode consensus --shape debate`: 옵션 비교 + ranking/recommendation
+- `--mode consensus --shape panel`: 전문가 역할 시뮬레이션
 
 canonical 호출:
 
@@ -287,7 +287,7 @@ shape 의미:
 
 | `--shape` | 의미 | orchestration 차이 |
 |-----------|------|-------------------|
-| `consensus` | 3-CLI findings 합의/충돌 판정 | 기존 `tfx-consensus` 의미 |
+| `consensus` | 3-CLI findings 합의/충돌 판정 | findings renderer |
 | `debate` | 옵션 비교 + ranking/recommendation | 옵션/criteria renderer |
 | `panel` | 전문가 역할 시뮬레이션 | expert roster + panel renderer |
 
@@ -664,31 +664,6 @@ Bash("tfx-live peer --cli-a codex --cli-b claude \
 
 **보고**: 배치 모드의 `=== OUTPUT ===` 대신 `tfx-live peer` JSON의 `status`, `exit_reason`, `hops_completed`, `transcript_path`, `status_path`를 위 규칙대로 해석하고 transcript를 요약한다.
 
-### Legacy 스킬 매핑
-
-| legacy 스킬 | `tfx-auto` 등가 플래그 |
-|------------|----------------------|
-| `tfx-autopilot` | `(기본)` |
-| `tfx-autoroute` | `--retry auto-escalate` (Phase 3) |
-| `tfx-fullcycle` | `--mode deep --parallel 1` |
-| `tfx-persist` | `--retry ralph` (Phase 3, unlimited) |
-| `tfx-codex` | `--cli codex` |
-| `tfx-antigravity` | `--cli antigravity` |
-| `tfx-auto-codex` | `--cli codex --lead codex --no-claude-native` (Phase 3) |
-| `tfx-consensus` | `--mode consensus` |
-| `tfx-debate` | `--mode consensus --shape debate` |
-| `tfx-panel` | `--mode consensus --shape panel` |
-| `tfx-multi` | `--parallel N --mode deep` |
-| `tfx-swarm` | `--parallel swarm --mode consensus --isolation worktree` |
-| `tfx-codex-swarm` | `--parallel swarm --cli codex --isolation worktree` |
-
-legacy 스킬은 thin alias 로 유지. 호출 시 stderr 에 `[deprecated] {legacy} -> use: tfx-auto --{flag} {value}` 1회 출력, stdout 머리부에 `[DEPRECATED]` 마커를 남기고 `.omc/state/alias-usage.log` 에 usage 를 append 한다. Phase 5 (v11) 에 물리 삭제.
-
-Phase 5 삭제 게이트:
-- 코드 검색에서 alias 파일 자체만 남아야 함
-- integration + golden test 100% pass
-- `.omc/state/alias-usage.log` 7일 집계 0
-
 ### 파싱 규칙
 
 - 플래그는 ARGUMENTS 어느 위치에든 올 수 있다. 순서 자유.
@@ -946,7 +921,7 @@ pipe capture 해제 → pane 프로세스 트리 종료 → 세션 종료 → or
 
 **인터랙티브(진짜 TUI) 워커**: headless `codex exec`가 아니라 사람이 직접 타이핑
 가능한 인터랙티브 세션이 필요하면 `tfx-live`를 쓴다 (raw `codex`/`agy` 직접 호출은
-headless-guard가 차단하는 경로이므로 시도하지 않는다).
+라우팅 규약이 금지하는 경로이므로 시도하지 않는다).
 
 1. `tfx-live start --cli codex --session <name> --cwd <dir>` — 세션 생성.
 2. 스킬 주입이 필요하면 `tfx-route.sh`의 `prepend_skill()` 포맷을 그대로 재현해

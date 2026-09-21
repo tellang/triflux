@@ -47,6 +47,7 @@ export async function openHeadlessDashboardTarget(sessionName, opts = {}) {
       title: title || `▲ ${safeSession}`,
       cwd,
       profile: opts.profile ?? "triflux",
+      targetPane: opts.targetPane,
     });
     return await opened;
   } catch {

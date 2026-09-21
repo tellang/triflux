@@ -27,10 +27,11 @@ function installFakeAntigravity(binDir) {
     [
       "#!/usr/bin/env node",
       "if (process.env.FAKE_GEMINI_FAIL === '1') { process.stderr.write('agy failed'); process.exit(5); }",
-      "let input = '';",
-      "process.stdin.setEncoding('utf8');",
-      "process.stdin.on('data', (chunk) => { input += chunk; });",
-      "process.stdin.on('end', () => { process.stdout.write(`AGY:${input}`); });",
+      "// agy 1.1.27: the prompt arrives as the value of --print (never via stdin).",
+      "const argv = process.argv.slice(2);",
+      "const i = argv.indexOf('--print');",
+      "if (i === -1 || i === argv.length - 1) { process.stderr.write('flag needs an argument: -print'); process.exit(2); }",
+      "process.stdout.write(`AGY:${argv[i + 1]}`);",
     ].join("\n"),
     "utf8",
   );
@@ -76,8 +77,9 @@ test("buildExecArgs produces agy stdin print command for legacy gemini adapter",
     model: "gemini-3-flash-preview",
   });
 
-  assert.match(cmd, /agy --print/);
-  assert.match(cmd, /--dangerously-skip-permissions/);
+  // --print 는 값을 받는 플래그라 항상 마지막 인자여야 한다 (agy 1.1.2x 회귀)
+  assert.match(cmd, /agy --dangerously-skip-permissions --model 'gemini-3-flash-preview' --print(?:\s|$)/);
+  assert.doesNotMatch(cmd, /--print --dangerously-skip-permissions/);
   assert.doesNotMatch(cmd, /gemini --/);
   assert.doesNotMatch(cmd, /--prompt/);
 });

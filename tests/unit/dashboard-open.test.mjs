@@ -21,6 +21,7 @@ describe("dashboard-open", () => {
       openAll: true,
       cwd: "/tmp/triflux",
       title: "Team Dashboard",
+      targetPane: "%42",
       _deps: {
         createTerminalOpener: (deps) => {
           assert.equal(typeof deps.createTerminalOpener, "function");
@@ -42,6 +43,7 @@ describe("dashboard-open", () => {
           title: "Team Dashboard",
           cwd: "/tmp/triflux",
           profile: "triflux",
+          targetPane: "%42",
         },
       },
     ]);

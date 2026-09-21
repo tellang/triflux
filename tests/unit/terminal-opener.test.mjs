@@ -47,11 +47,17 @@ describe("terminal-opener adapter", () => {
       const opener = createTerminalOpener({
         platform: "darwin",
         mux: "psmux",
-        tmuxExec: (command) => calls.push(command),
+        tmuxExec: (command) => {
+          calls.push(command);
+          return command.startsWith("display-message") ? "lead:0" : "";
+        },
       });
 
-      assert.equal(await opener.openSession("demo"), true);
-      assert.match(calls[0], /psmux attach-session -t/);
+      assert.equal(
+        await opener.openSession("demo", { targetPane: "%40" }),
+        true,
+      );
+      assert.match(calls[1], /psmux attach-session -t/);
     } finally {
       process.env.PATH = previousPath;
       if (previousPsmuxBin === undefined) {
@@ -78,11 +84,17 @@ describe("terminal-opener adapter", () => {
       const opener = createTerminalOpener({
         platform: "darwin",
         mux: "psmux",
-        tmuxExec: (command) => calls.push(command),
+        tmuxExec: (command) => {
+          calls.push(command);
+          return command.startsWith("display-message") ? "lead:0" : "";
+        },
       });
 
-      assert.equal(await opener.openSession("demo"), true);
-      assert.match(calls[0], /psmux attach-session -t/);
+      assert.equal(
+        await opener.openSession("demo", { targetPane: "%41" }),
+        true,
+      );
+      assert.match(calls[1], /psmux attach-session -t/);
     } finally {
       process.env.PATH = previousPath;
       if (previousPsmuxBin === undefined) {
@@ -240,40 +252,64 @@ describe("terminal-opener adapter", () => {
     const opener = createTerminalOpener({
       platform: "darwin",
       mux: "tmux",
-      tmuxExec: (command) => calls.push(command),
+      tmuxExec: (command) => {
+        calls.push(command);
+        return command.startsWith("display-message") ? "lead-session:3\n" : "";
+      },
     });
 
     const opened = await opener.openCommand({
       title: "Worker 2",
       cwd: "/tmp/work tree",
       command: "node --test tests/unit/terminal-opener.test.mjs",
+      targetPane: "%42",
     });
 
     assert.equal(opened, true);
-    assert.equal(calls.length, 1);
-    assert.match(calls[0], /^new-window -n 'Worker 2' /);
+    assert.deepEqual(calls.slice(0, 1), [
+      "display-message -p -t %42 '#{session_name}:#{window_index}'",
+    ]);
+    assert.equal(calls.length, 2);
+    assert.match(calls[1], /^new-window -a -t 'lead-session:3' -n 'Worker 2' /);
     assert.match(
-      calls[0],
+      calls[1],
       /node --test tests\/unit\/terminal-opener\.test\.mjs/,
     );
-    assert.match(calls[0], /cd '\\''\/tmp\/work tree'\\'' && /);
+    assert.match(calls[1], /cd '\\''\/tmp\/work tree'\\'' && /);
   });
 
   it("macOS tmux openSession opens tmux attach-session in a new window", async () => {
     const calls = [];
+    const socketPath = "/tmp/tmux-501/triflux.sock";
     const opener = createTerminalOpener({
       platform: "darwin",
       mux: "tmux",
-      tmuxExec: (command) => calls.push(command),
+      tmuxExec: (command) => {
+        calls.push(command);
+        if (command.includes("#{socket_path}")) return socketPath;
+        return command.startsWith("display-message") ? "requesting:7" : "";
+      },
     });
 
     assert.equal(
-      await opener.openSession("demo", { title: "Demo Session" }),
+      await opener.openSession("demo", {
+        title: "Demo Session",
+        targetPane: "%43",
+      }),
       true,
     );
-    assert.match(calls[0], /^new-window -n 'Demo Session' /);
-    assert.match(calls[0], /tmux attach-session -t/);
-    assert.doesNotMatch(calls[0], /psmux attach-session -t/);
+    assert.equal(calls[0], "display-message -p -t %43 '#{socket_path}'");
+    assert.equal(
+      calls[1],
+      "display-message -p -t %43 '#{session_name}:#{window_index}'",
+    );
+    assert.match(
+      calls[2],
+      /^new-window -a -t 'requesting:7' -n 'Demo Session' /,
+    );
+    assert.match(calls[2], /env -u TMUX tmux -S/);
+    assert.match(calls[2], /\/tmp\/tmux-501\/triflux\.sock/);
+    assert.doesNotMatch(calls[2], /psmux attach-session -t/);
   });
 
   it("macOS psmux fallback is treated as tmux-compatible for openCommand", async () => {
@@ -281,14 +317,28 @@ describe("terminal-opener adapter", () => {
     const opener = createTerminalOpener({
       platform: "darwin",
       mux: "psmux",
-      tmuxExec: (command) => calls.push(command),
+      tmuxExec: (command) => {
+        calls.push(command);
+        return command.startsWith("display-message") ? "lead:1" : "";
+      },
     });
 
     assert.equal(
-      await opener.openCommand({ title: "Worker 3", command: "echo hi" }),
+      await opener.openCommand({
+        title: "Worker 3",
+        command: "echo hi",
+        targetPane: "%44",
+      }),
       true,
     );
-    assert.match(calls[0], /^new-window -n 'Worker 3' 'echo hi'$/);
+    assert.equal(
+      calls[0],
+      "display-message -p -t %44 '#{session_name}:#{window_index}'",
+    );
+    assert.match(
+      calls[1],
+      /^new-window -a -t 'lead:1' -n 'Worker 3' 'echo hi'$/,
+    );
   });
 
   it("macOS psmux fallback opens sessions with psmux attach in a new window", async () => {
@@ -297,16 +347,22 @@ describe("terminal-opener adapter", () => {
       platform: "darwin",
       mux: "psmux",
       psmuxBinaryExists: () => true,
-      tmuxExec: (command) => calls.push(command),
+      tmuxExec: (command) => {
+        calls.push(command);
+        return command.startsWith("display-message") ? "lead:4" : "";
+      },
     });
 
     assert.equal(
-      await opener.openSession("demo", { title: "Demo Session" }),
+      await opener.openSession("demo", {
+        title: "Demo Session",
+        targetPane: "%45",
+      }),
       true,
     );
-    assert.match(calls[0], /^new-window -n 'Demo Session' /);
-    assert.match(calls[0], /psmux attach-session -t/);
-    assert.doesNotMatch(calls[0], /tmux attach-session -t/);
+    assert.match(calls[1], /^new-window -a -t 'lead:4' -n 'Demo Session' /);
+    assert.match(calls[1], /psmux attach-session -t/);
+    assert.doesNotMatch(calls[1], /tmux attach-session -t/);
   });
 
   it("macOS psmux openSession refuses to emit attach command when psmux binary is absent", async () => {
@@ -321,6 +377,91 @@ describe("terminal-opener adapter", () => {
     assert.equal(await opener.openSession("demo"), false);
     assert.deepEqual(calls, []);
   });
+
+  it("tmux-compatible opener는 explicit lead pane 없이는 new-window를 열지 않는다", async () => {
+    const calls = [];
+    const opener = createTerminalOpener({
+      platform: "darwin",
+      mux: "tmux",
+      tmuxExec: (command) => calls.push(command),
+    });
+
+    assert.equal(await opener.openCommand({ command: "echo hi" }), false);
+    assert.equal(await opener.openSession("demo"), false);
+    assert.deepEqual(calls, []);
+  });
+
+  it("lead pane의 window를 해석하지 못하면 new-window를 실행하지 않는다", async () => {
+    const calls = [];
+    const opener = createTerminalOpener({
+      platform: "darwin",
+      mux: "tmux",
+      tmuxExec: (command) => {
+        calls.push(command);
+        return "";
+      },
+    });
+
+    assert.equal(
+      await opener.openCommand({
+        command: "echo hi",
+        targetPane: "%46",
+      }),
+      false,
+    );
+    assert.deepEqual(calls, [
+      "display-message -p -t %46 '#{session_name}:#{window_index}'",
+    ]);
+  });
+
+  it("target window의 new-window 실패를 false로 반환한다", async () => {
+    const calls = [];
+    const opener = createTerminalOpener({
+      platform: "darwin",
+      mux: "tmux",
+      tmuxExec: (command) => {
+        calls.push(command);
+        if (command.startsWith("display-message")) return "lead:2";
+        throw new Error("new-window failed");
+      },
+    });
+
+    assert.equal(
+      await opener.openSession("demo", {
+        targetPane: "%47",
+      }),
+      false,
+    );
+    assert.equal(calls.length, 3);
+    assert.match(calls[2], /^new-window -a -t 'lead:2'/u);
+  });
+
+  for (const [caseName, socketResult] of [
+    ["빈 값", ""],
+    ["예외", new Error("socket lookup failed")],
+  ]) {
+    it(`lead pane socket_path가 ${caseName}이면 new-window를 열지 않는다`, async () => {
+      const calls = [];
+      const opener = createTerminalOpener({
+        platform: "darwin",
+        mux: "tmux",
+        tmuxExec: (command) => {
+          calls.push(command);
+          if (command.includes("#{socket_path}")) {
+            if (socketResult instanceof Error) throw socketResult;
+            return socketResult;
+          }
+          return "lead:3";
+        },
+      });
+
+      assert.equal(
+        await opener.openSession("demo", { targetPane: "%48" }),
+        false,
+      );
+      assert.deepEqual(calls, ["display-message -p -t %48 '#{socket_path}'"]);
+    });
+  }
 
   it("macOS without mux falls back to exec open -a Terminal", async () => {
     const calls = [];

@@ -102,6 +102,35 @@ describe("orchestrator cli hint propagation (#117)", () => {
     // DI가 작동하는지만 위 테스트들로 검증되면 기본 import 경로도 동일 signature로 호출됨을 보장한다.
     assert.ok(typeof orchestrate === "function");
   });
+
+  it("한 worker의 prompt 제출 실패를 보고하고 나머지 worker 주입을 계속한다", async () => {
+    const attempted = [];
+    const reported = [];
+    const failures = await orchestrate(
+      "test-session",
+      [
+        { target: "test-session:0.1", cli: "antigravity", subtask: "first" },
+        { target: "test-session:0.2", cli: "codex", subtask: "second" },
+      ],
+      {
+        injectPrompt(target) {
+          attempted.push(target);
+          if (target.endsWith(".1"))
+            throw new Error("prompt remains in composer");
+        },
+        onInjectionFailure(failure) {
+          reported.push(failure);
+        },
+      },
+    );
+
+    assert.deepEqual(attempted, ["test-session:0.1", "test-session:0.2"]);
+    assert.equal(failures.length, 1);
+    assert.equal(failures[0].target, "test-session:0.1");
+    assert.equal(failures[0].cli, "antigravity");
+    assert.equal(failures[0].message, "prompt remains in composer");
+    assert.deepEqual(reported, failures);
+  });
 });
 
 describe("buildLeadPrompt grounding and evidence gates", () => {

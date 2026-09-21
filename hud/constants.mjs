@@ -71,7 +71,7 @@ export const CONTEXT_MONITOR_LOG_DIR = join(
   "logs",
 );
 
-// 원격 프로브 캐시 (tfx-remote-spawn)
+// 원격 프로브 캐시 (tfx-remote)
 export const REMOTE_ENV_CACHE_DIR = join(
   homedir(),
   ".claude",
@@ -89,12 +89,19 @@ export const CLAUDE_CREDENTIALS_PATH = join(
 );
 export const CLAUDE_CREDENTIALS_FILENAME = ".credentials.json";
 export const CLAUDE_CODE_USER_AGENT_FALLBACK = "claude-code/2.x";
+// Claude Code 2.1.x 평문 폴백 파일 위치: CLAUDE_SECURESTORAGE_CONFIG_DIR 가 정의돼 있으면 그 디렉터리
+// (빈 문자열은 기본 ~/.claude), 아니면 CLAUDE_CONFIG_DIR. 기본 경로는 항상 마지막 후보로 둔다.
 export function getClaudeCredentialPaths(env = process.env) {
   const paths = [];
-  if (env.CLAUDE_CONFIG_DIR) {
+  const secureDir = env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+  if (secureDir !== undefined) {
+    if (secureDir) {
+      paths.push(join(secureDir.normalize("NFC"), CLAUDE_CREDENTIALS_FILENAME));
+    }
+  } else if (env.CLAUDE_CONFIG_DIR) {
     paths.push(join(env.CLAUDE_CONFIG_DIR, CLAUDE_CREDENTIALS_FILENAME));
   }
-  paths.push(CLAUDE_CREDENTIALS_PATH);
+  if (paths[0] !== CLAUDE_CREDENTIALS_PATH) paths.push(CLAUDE_CREDENTIALS_PATH);
   return paths;
 }
 export function getClaudeCodeUserAgent(env = process.env) {
@@ -198,7 +205,16 @@ export const ANTIGRAVITY_SETTINGS_PATH = join(
 // /usage 실측 (2026-05-22): Gemini 4개 모델이 동일 reset window 공유 (family-pool).
 // Claude/GPT-OSS family는 Gemini와 별도 quota 윈도우.
 export const ANTIGRAVITY_MODEL_ABBREV = {
-  // Gemini family — 통합 quota
+  // Gemini family — 통합 quota. 3.6+ Flash 는 세대 숫자 + 등급으로 구분한다.
+  "Gemini 3.8 Flash (High)": "8h",
+  "Gemini 3.8 Flash (Medium)": "8m",
+  "Gemini 3.8 Flash (Low)": "8l",
+  "Gemini 3.7 Flash (High)": "7h",
+  "Gemini 3.7 Flash (Medium)": "7m",
+  "Gemini 3.7 Flash (Low)": "7l",
+  "Gemini 3.6 Flash (High)": "6h",
+  "Gemini 3.6 Flash (Medium)": "6m",
+  "Gemini 3.6 Flash (Low)": "6l",
   "Gemini 3.5 Flash (High)": "Fh",
   "Gemini 3.5 Flash (Medium)": "Fm",
   "Gemini 3.5 Flash (Low)": "Fl",
@@ -242,12 +258,6 @@ export const GEMINI_RPM_TRACKER_PATH = join(
   "cache",
   "gemini-rpm-tracker.json",
 );
-export const SV_ACCUMULATOR_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "sv-accumulator.json",
-);
 // 이전 .omc/ 경로 fallback (기존 환경 호환)
 export const LEGACY_GEMINI_QUOTA_CACHE = join(
   homedir(),
@@ -273,12 +283,6 @@ export const LEGACY_GEMINI_RPM_TRACKER = join(
   "state",
   "gemini_rpm_tracker.json",
 );
-export const LEGACY_SV_ACCUMULATOR = join(
-  homedir(),
-  ".omc",
-  "state",
-  "sv-accumulator.json",
-);
 
 export const GEMINI_RPM_WINDOW_MS = 60 * 1000; // 60초 슬라이딩 윈도우
 export const GEMINI_QUOTA_STALE_MS = 5 * 60 * 1000; // 5분
@@ -289,7 +293,6 @@ export const ACCOUNT_LABEL_WIDTH = 10;
 export const PROVIDER_PREFIX_WIDTH = 2;
 export const PERCENT_CELL_WIDTH = 3;
 export const TIME_CELL_INNER_WIDTH = 6;
-export const SV_CELL_WIDTH = 5;
 
 export const CLAUDE_REFRESH_FLAG = "--refresh-claude-usage";
 export const CODEX_REFRESH_FLAG = "--refresh-codex-rate-limits";

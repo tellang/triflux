@@ -128,7 +128,10 @@ function runBashScript(script, env = {}, timeoutMs = 15000) {
 }
 
 function routeTestEnv(env = {}) {
+  const home = env.HOME || process.env.HOME || PROJECT_ROOT;
   return hubServerTestEnv({
+    XDG_CONFIG_HOME: join(home, ".config"),
+    TFX_MACHINE_PROFILE_PATH: join(home, "machine-profile.env"),
     // The four full-route recovery fixtures intentionally execute fake Codex.
     TFX_CODEX_OK: "1",
     TFX_ANTIGRAVITY_OK: "0",

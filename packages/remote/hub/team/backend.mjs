@@ -21,10 +21,12 @@ export function buildAntigravityCommand(
   // and `"` reach the shell verbatim (P1: shell injection).
   const promptFile = `${resultFile}.prompt`;
   writeFileSync(promptFile, prompt);
+  // agy 1.1.27 부터 --print 는 값(프롬프트)이 필수이고 stdin 프롬프트는 거부된다.
+  // 파일 내용을 셸이 재해석하지 않는 형태(따옴표 안 명령 치환 / Get-Content 식)로 값에 넣는다.
   if (isWindows) {
-    return `Get-Content -Raw '${promptFile}' | agy --print --dangerously-skip-permissions > '${resultFile}' 2>'${resultFile}.err'`;
+    return `agy --dangerously-skip-permissions --print (Get-Content -Raw '${promptFile}') > '${resultFile}' 2>'${resultFile}.err'`;
   }
-  return `agy --print --dangerously-skip-permissions < '${promptFile}' > '${resultFile}' 2>'${resultFile}.err'`;
+  return `agy --dangerously-skip-permissions --print "$(cat '${promptFile}')" > '${resultFile}' 2>'${resultFile}.err'`;
 }
 
 const _require = createRequire(import.meta.url);

@@ -130,9 +130,12 @@ test("agy --print prompt-passing regression tests", {
       : false,
 }, async (t) => {
   await t.test(
-    "1. alpha commit pattern: --print --dangerously + stdin pipe -> success",
+    "1. legacy alpha pattern: --print --dangerously + stdin pipe -> rejected (agy 1.1.2x+)",
     { timeout: 100000 },
     () => {
+      // agy 1.1.27 (2026-09-07 실측): --print 가 다음 토큰을 프롬프트로 삼키고
+      // "--print took \"--dangerously-skip-permissions\" as its prompt" 로 종료한다.
+      // wrapper 는 이 순서를 더 이상 쓰지 않는다 (T10 순서 고정).
       const result = spawnSync(
         AGY_PATH,
         ["--print", "--dangerously-skip-permissions"],
@@ -143,20 +146,10 @@ test("agy --print prompt-passing regression tests", {
           env: { ...process.env, PAGER: "cat" },
         },
       );
-      assert.strictEqual(
-        result.status,
-        0,
-        `Should exit 0. status=${result.status} signal=${result.signal} stderr=${result.stderr}`,
-      );
+      const combined = (result.stdout || "") + (result.stderr || "");
       assert.ok(
-        hasHi(result.stdout),
-        `Should contain 'hi'. Got: ${result.stdout}`,
-      );
-      const leaks = leakedFlags(result.stdout);
-      assert.deepStrictEqual(
-        leaks,
-        [],
-        `Flag pollution detected in stdout: ${leaks.join(", ")}. Got: ${result.stdout}`,
+        result.status !== 0 || /took .* as its prompt/.test(combined),
+        `Legacy order should be rejected now. status=${result.status} output: ${combined}`,
       );
     },
   );

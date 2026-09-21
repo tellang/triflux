@@ -19,8 +19,8 @@ triflux 워크스페이스에서 Antigravity CLI의 역할과 운영 규칙. 1M 
 - 1M context 활용 — 큰 코드베이스 분석 / `tfx-interview`는 Gemini 단독
 - swarm/multi headless 병렬 실행의 워커
 
-## headless-guard
-- `agy --dangerously-skip-permissions --print=` 직접 호출은 차단됨
+## 비대화식 실행 경로
+- `agy --dangerously-skip-permissions --print=` 를 직접 호출하지 않는다. 자동 차단 훅(headless-guard)은 2026-09-07 에 제거됐으므로 호출자가 지킨다.
 - 반드시 tfx 스킬 경유: tfx-auto (--cli antigravity), tfx-multi, tfx-swarm 등
 - 일반 호출: `tfx-route.sh --cli antigravity ...` (legacy `--cli gemini`는 agy 미가용 시 fallback)
 

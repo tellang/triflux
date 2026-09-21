@@ -107,6 +107,31 @@ test("stop disables pipe-pane before killing the tmux session and removes the pi
   await assert.rejects(() => access(outputPath), /ENOENT/);
 });
 
+test("plain Codex launch is submitted with approval and sandbox bypass posture", async () => {
+  const fake = createFakeTmux();
+  const transport = createInteractiveTuiTransport({
+    runTmux: fake.runTmux,
+    sessionName: "tfx-int-codex-posture",
+    launchCmd: "codex --profile gpt55_low",
+    pollIntervalMs: 5,
+  });
+
+  await transport.start();
+  await transport.stop();
+
+  const launch = fake.calls.find(
+    (call) => call[0] === "send-keys" && call.at(-1) === "Enter",
+  );
+  assert.deepEqual(launch, [
+    "send-keys",
+    "-t",
+    "tfx-int-codex-posture",
+    "codex --dangerously-bypass-approvals-and-sandbox --profile gpt55_low",
+    "Enter",
+  ]);
+  assert.doesNotMatch(launch.join(" "), /dangerously-bypass-hook-trust/u);
+});
+
 function isPipeOffCall(call, sessionName) {
   return (
     call.length === 3 &&

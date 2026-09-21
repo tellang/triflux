@@ -23,20 +23,30 @@ if (args.includes("--help") || args.includes("-h")) {
   process.exit(0);
 }
 
-let stdin = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => {
-  stdin += chunk;
-});
+// agy 1.1.27 semantics: --print takes the prompt as its value (the next argv
+// token, or --print=VALUE). A bare trailing --print is rejected, and stdin is
+// never used for the prompt.
+function parsePrintValue(argv) {
+  const eq = argv.find((a) => a.startsWith("--print="));
+  if (eq) return eq.slice("--print=".length);
+  const i = argv.indexOf("--print");
+  if (i === -1) return null;
+  if (i === argv.length - 1) {
+    process.stderr.write("flag needs an argument: -print\n");
+    process.exit(2);
+  }
+  return argv[i + 1];
+}
 
-process.stdin.on("end", () => {
+function main() {
   if (process.env.FAKE_AGY_EXIT_CODE) {
     process.stderr.write("fake agy failure\n");
     process.exit(Number(process.env.FAKE_AGY_EXIT_CODE));
     return;
   }
 
-  if (!args.includes("--print")) {
+  const printValue = parsePrintValue(args);
+  if (printValue === null) {
     process.stderr.write("expected --print\n");
     process.exit(2);
     return;
@@ -48,9 +58,9 @@ process.stdin.on("end", () => {
     return;
   }
 
-  const prompt = stdin.trim();
+  const prompt = printValue.trim();
   if (!prompt) {
-    process.stderr.write("expected prompt on stdin\n");
+    process.stderr.write('Error: Error: empty prompt. Usage: agy --print "your prompt here"\n');
     process.exit(4);
     return;
   }
@@ -61,4 +71,6 @@ process.stdin.on("end", () => {
   }
 
   process.stdout.write(`AGY:${prompt}\n`);
-});
+}
+
+main();

@@ -31,6 +31,13 @@ function baseTestEnv() {
   );
 }
 
+function isolatedMachineProfileEnv(home) {
+  return {
+    XDG_CONFIG_HOME: join(home, ".config"),
+    TFX_MACHINE_PROFILE_PATH: join(home, "machine-profile.env"),
+  };
+}
+
 function createHeadlessFixture() {
   const root = mkdtempSync(join(tmpdir(), "tfx-headless-disable-gate-"));
   const home = join(root, "home");
@@ -109,6 +116,7 @@ function runCodexHeadless(fixture, overrides = {}) {
       ...baseTestEnv(),
       HOME: fixture.home,
       USERPROFILE: fixture.home,
+      ...isolatedMachineProfileEnv(fixture.home),
       CODEX_BIN: fixture.codexBin,
       AGY_BIN: fixture.agyBin,
       TFX_TEST_CODEX_EXEC_LOG: fixture.codexLog,
@@ -148,6 +156,7 @@ function runRouteWithPreflightLoaded(fixture) {
         ...baseTestEnv(),
         HOME: fixture.home,
         USERPROFILE: fixture.home,
+        ...isolatedMachineProfileEnv(fixture.home),
         CODEX_BIN: fixture.codexBin,
         AGY_BIN: fixture.agyBin,
         TFX_TEST_CODEX_EXEC_LOG: fixture.codexLog,
@@ -216,6 +225,38 @@ describe("headless Codex disable gate", { timeout: 90_000 }, () => {
       assert.match(outcome.command, /tfx-route\.sh/);
       assert.doesNotMatch(outcome.command, /codex exec/);
     } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("부모 XDG_CONFIG_HOME의 차단 프로파일을 상속하지 않는다", () => {
+    const fixture = createHeadlessFixture();
+    const parentConfigHome = mkdtempSync(
+      join(tmpdir(), "tfx-headless-parent-profile-"),
+    );
+    const previousXdgConfigHome = process.env.XDG_CONFIG_HOME;
+    mkdirSync(join(parentConfigHome, "triflux"), { recursive: true });
+    writeFileSync(
+      join(parentConfigHome, "triflux", "machine-profile.env"),
+      "TFX_DISABLE_CODEX=1\nTFX_DISABLE_ANTIGRAVITY=1\n",
+      "utf8",
+    );
+
+    try {
+      process.env.XDG_CONFIG_HOME = parentConfigHome;
+      const outcome = runCodexHeadless(fixture);
+
+      assert.equal(outcome.result.status, 0, outcome.stderr);
+      assert.match(readIfPresent(fixture.codexLog), /^exec\b/m);
+      assert.equal(readIfPresent(fixture.agyLog), "");
+      assert.match(outcome.stdout, /CODEX_EXEC/);
+    } finally {
+      if (previousXdgConfigHome === undefined) {
+        delete process.env.XDG_CONFIG_HOME;
+      } else {
+        process.env.XDG_CONFIG_HOME = previousXdgConfigHome;
+      }
+      rmSync(parentConfigHome, { recursive: true, force: true });
       rmSync(fixture.root, { recursive: true, force: true });
     }
   });

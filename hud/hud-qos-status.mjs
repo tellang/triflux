@@ -6,6 +6,10 @@
 // ============================================================================
 
 import {
+  resolveHudCliVisibility,
+  shouldRenderGeminiFallbackRow,
+} from "./cli-policy.mjs";
+import {
   bold,
   claudeOrange,
   codexWhite,
@@ -28,10 +32,7 @@ import {
   TFX_PREFLIGHT_CACHE_PATH,
   TFX_PREFLIGHT_CACHE_STALE_MS,
 } from "./constants.mjs";
-import {
-  buildContextUsageView,
-  deriveContextLimit,
-} from "./context-monitor.mjs";
+import { buildContextUsageView } from "./context-monitor.mjs";
 import { getMissionBoardState } from "./mission-board.mjs";
 // Claude provider
 import {
@@ -72,8 +73,6 @@ import {
   getProviderRow,
   getTeamRow,
   readLatestBenchmarkDiff,
-  readSvAccumulator,
-  readTokenSavings,
   renderAlignedRows,
   renderMissionBoard,
 } from "./renderers.mjs";
@@ -123,8 +122,14 @@ async function main() {
   const preflightFresh =
     Number.isFinite(preflightTimestamp) &&
     Date.now() - preflightTimestamp <= TFX_PREFLIGHT_CACHE_STALE_MS;
+  // machine profile 의 TFX_DISABLE_* 정책. 차단된 CLI 는 행 자체를 그리지 않는다.
+  // antigravity 가 꺼지면 antigravityReady 를 강제로 내려서 기존 슬롯 로직이 그대로
+  // gemini 폴백 경로를 타게 한다.
+  const { showCodex, antigravityAllowed } = resolveHudCliVisibility();
   const antigravityReady =
-    preflightFresh && preflightCache?.antigravity?.ok === true;
+    antigravityAllowed &&
+    preflightFresh &&
+    preflightCache?.antigravity?.ok === true;
   const accountsConfig = readJson(ACCOUNTS_CONFIG_PATH, { providers: {} });
   const accountsState = readJson(ACCOUNTS_STATE_PATH, { providers: {} });
   const claudeUsageSnapshot = readClaudeUsageSnapshot();
@@ -168,35 +173,6 @@ async function main() {
   const geminiQuota = geminiQuotaSnapshot.quota;
   const missionBoardState = await getMissionBoardState();
 
-  // 누적 절약 데이터 읽기
-  const svSavings = readTokenSavings();
-  const svAccumulator = readSvAccumulator();
-  const _totalCostSaved =
-    svSavings?.totalSaved || svAccumulator?.totalCostSaved || 0;
-
-  // 세션/누적 토큰 → context 대비 절약 배수 (개별 provider sv%)
-  const ctxCapacity = deriveContextLimit(stdin);
-  let codexSv = null;
-  let codexAccumulatorSv = null;
-  if (svAccumulator?.codex?.tokens > 0) {
-    codexAccumulatorSv = svAccumulator.codex.tokens / ctxCapacity;
-    codexSv = codexAccumulatorSv;
-  } else if (codexBuckets) {
-    const main =
-      codexBuckets.codex || codexBuckets[Object.keys(codexBuckets)[0]];
-    if (main?.tokens?.total_tokens)
-      codexSv = main.tokens.total_tokens / ctxCapacity;
-  }
-  let geminiSv = null;
-  let geminiAccumulatorSv = null;
-  if (svAccumulator?.gemini?.tokens > 0) {
-    geminiAccumulatorSv = svAccumulator.gemini.tokens / ctxCapacity;
-    geminiSv = geminiAccumulatorSv;
-  } else {
-    const geminiTokens = geminiSession?.total || null;
-    geminiSv = geminiTokens ? geminiTokens / ctxCapacity : null;
-  }
-
   // Gemini: 3풀 버킷 추출 (Pro/Flash/Lite — 각 풀 내 모델들은 쿼터 공유)
   const geminiModel = geminiSession?.model || "gemini-3-flash-preview";
   const geminiBuckets = geminiQuota?.buckets || [];
@@ -220,18 +196,17 @@ async function main() {
   const antigravitySlot1Bucket =
     antigravityModelFamily === "gemini" ? antigravityFamilyBucket : null;
 
-  // 합산 절약은 svAccumulator 기반일 때만 표시한다.
-  // Codex bucket fallback은 account-window 누적 토큰이고 Gemini fallback은 latest
-  // session 토큰이라 서로 의미가 달라 합산하면 misleading cross-provider total이 된다.
-  const hasComparableSvAccumulator = Boolean(
-    codexAccumulatorSv != null || geminiAccumulatorSv != null,
-  );
-  const combinedSvPct = hasComparableSvAccumulator
-    ? Math.round(((codexAccumulatorSv ?? 0) + (geminiAccumulatorSv ?? 0)) * 100)
-    : null;
-
   // 인디케이터 인식 tier 선택 (stdin + Claude 사용량 기반)
   const CURRENT_TIER = selectTier(stdin, claudeUsageSnapshot.data);
+
+  // antigravity/gemini 슬롯 표시 판정. nano 와 나머지 tier 가 같은 판정을 쓴다.
+  const showGeminiRow = shouldRenderGeminiFallbackRow({
+    antigravityAllowed,
+    antigravityReady,
+    geminiEmail,
+    geminiBucket,
+    geminiSession,
+  });
 
   // nano tier: 1줄 모드 (극소 폭 또는 알림 배너 대응)
   if (CURRENT_TIER === "nano") {
@@ -241,8 +216,8 @@ async function main() {
       codexBuckets,
       antigravityReady ? null : geminiSession,
       antigravityReady ? null : geminiBucket,
-      combinedSvPct,
       antigravityReady ? "a" : "g",
+      { showCodex, showGemini: showGeminiRow },
     );
     process.stdout.write(`\x1b[0m${microLine}\n`);
     return;
@@ -262,46 +237,58 @@ async function main() {
     session: geminiSession,
   };
 
-  const rows = [
-    ...getClaudeRows(CURRENT_TIER, contextView, claudeUsage, combinedSvPct),
-    getProviderRow(
-      CURRENT_TIER,
-      "codex",
-      "x",
-      codexWhite,
-      qosProfile,
-      accountsConfig,
-      accountsState,
-      codexQuotaData,
-      codexEmail,
-      codexSv,
-      null,
-    ),
-    getProviderRow(
-      CURRENT_TIER,
-      antigravityReady ? "antigravity" : "gemini",
-      antigravityReady ? "a" : "g",
-      geminiBlue,
-      qosProfile,
-      accountsConfig,
-      accountsState,
-      antigravityReady
-        ? {
-            type: "antigravity",
-            pools: {
-              current: antigravitySlot1Bucket,
-              gemini_family: antigravityFamilyBucket,
-            },
-            currentAbbrev: antigravityAbbrev,
-            currentModel: antigravityModel,
-            currentFamily: antigravityModelFamily,
-          }
-        : geminiQuotaData,
-      antigravityReady ? antigravityEmail : geminiEmail,
-      antigravityReady ? null : geminiSv,
-      null,
-    ),
-  ];
+  const rows = [...getClaudeRows(CURRENT_TIER, contextView, claudeUsage)];
+
+  // 정책으로 생략된 행이 있으면 뒤따르는 행의 인덱스가 밀린다. dim 래핑이
+  // 하드코딩 인덱스를 쓰지 않도록 실제 위치를 기록해 둔다.
+  let codexRowIndex = -1;
+  if (showCodex) {
+    codexRowIndex = rows.length;
+    rows.push(
+      getProviderRow(
+        CURRENT_TIER,
+        "codex",
+        "x",
+        codexWhite,
+        qosProfile,
+        accountsConfig,
+        accountsState,
+        codexQuotaData,
+        codexEmail,
+        null,
+      ),
+    );
+  }
+
+  let geminiRowIndex = -1;
+  if (showGeminiRow) {
+    geminiRowIndex = rows.length;
+    rows.push(
+      getProviderRow(
+        CURRENT_TIER,
+        antigravityReady ? "antigravity" : "gemini",
+        antigravityReady ? "a" : "g",
+        geminiBlue,
+        qosProfile,
+        accountsConfig,
+        accountsState,
+        antigravityReady
+          ? {
+              type: "antigravity",
+              pools: {
+                current: antigravitySlot1Bucket,
+                gemini_family: antigravityFamilyBucket,
+              },
+              currentAbbrev: antigravityAbbrev,
+              currentModel: antigravityModel,
+              currentFamily: antigravityModelFamily,
+            }
+          : geminiQuotaData,
+        antigravityReady ? antigravityEmail : geminiEmail,
+        null,
+      ),
+    );
+  }
 
   const ctoStatus = readCtoStatus();
   if (ctoStatus) {
@@ -348,10 +335,13 @@ async function main() {
 
   const outputLines = renderAlignedRows(rows);
 
-  // 비활성 줄 dim 래핑 (rows 순서: [claude, codex, gemini])
-  if (outputLines.length >= 3) {
-    if (!codexActive) outputLines[1] = `${DIM}${outputLines[1]}${RESET}`;
-    if (!geminiActive) outputLines[2] = `${DIM}${outputLines[2]}${RESET}`;
+  // 비활성 줄 dim 래핑. 정책으로 생략된 행은 인덱스가 -1 이라 건너뛴다.
+  if (!codexActive && outputLines[codexRowIndex] != null) {
+    outputLines[codexRowIndex] = `${DIM}${outputLines[codexRowIndex]}${RESET}`;
+  }
+  if (!geminiActive && outputLines[geminiRowIndex] != null) {
+    outputLines[geminiRowIndex] =
+      `${DIM}${outputLines[geminiRowIndex]}${RESET}`;
   }
 
   // 선행 개행: 알림 배너(노란 글씨)가 빈 첫 줄에 오도록 → HUD 내용 보호

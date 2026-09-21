@@ -4,7 +4,13 @@
 // (bin, config, hooks, hub, hud, mesh, scripts, skills).
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -32,11 +38,15 @@ test("packages/triflux mirror is byte-identical to root", () => {
 // Codex review on PR #319 follow-up and mirror-policy follow-ups.
 function withMirrorProbe(rel, fn) {
   const probePath = join(REPO_ROOT, rel);
+  const probeDir = dirname(probePath);
+  const createdDir = !existsSync(probeDir);
+  mkdirSync(probeDir, { recursive: true });
   writeFileSync(probePath, "probe");
   try {
     fn();
   } finally {
     rmSync(probePath, { force: true });
+    if (createdDir) rmSync(probeDir, { recursive: true, force: true });
   }
 }
 

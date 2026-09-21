@@ -18,13 +18,15 @@ const TRIFLUX_SKILL_ROOTS = ["skills", "packages/triflux/skills"];
 // 피하기 위해 allowlist 로 관리한다. ~/.claude 실제 존재 여부는 검증하지 않는다.
 const EXTERNAL_GSTACK_TARGETS = new Set([
   "autoplan",
-  "checkpoint",
   "cso",
   "investigate",
   "office-hours",
   "qa",
   "retro",
   "ship",
+  // Claude 호출명은 SKILL.md frontmatter name(gstack-<name>)을 따른다.
+  // gstack 이 /checkpoint 를 /context-save + /context-restore 로 개명했으므로 bare "checkpoint" 는 제거.
+  "gstack-context-restore",
 ]);
 const EXTERNAL_HOST_TARGETS = new Set(["ai-slop-cleaner"]);
 

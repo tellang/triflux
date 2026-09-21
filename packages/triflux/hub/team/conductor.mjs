@@ -21,6 +21,11 @@ import { dirname, join } from "node:path";
 import { createRegistry } from "../../mesh/mesh-registry.mjs";
 import { resolveNestedCodexAgentProfile } from "../../scripts/lib/cli-codex.mjs";
 import { codexProfileConfigOverrides } from "../../scripts/lib/codex-profile-config.mjs";
+import {
+  buildDisabledCliError,
+  normalizeCliName,
+  resolveCliPolicy,
+} from "../../scripts/lib/machine-profile.mjs";
 import { broker } from "../account-broker.mjs";
 import { runPreflight as runCodexPreflight } from "../codex-preflight.mjs";
 import {
@@ -606,30 +611,53 @@ export function createConductor(opts = {}) {
       }
     }
 
-    const spawnSpec = buildSpawnSpecForMode(MODES.HEADLESS, {
-      cli: session.config.agent,
-      prompt: session.config.prompt,
-      profile: session.config.profile,
-      role: session.config.role,
-      model: session.config.model,
-      env: session.config.env,
-      mcpServers: session.config.mcpServers,
-      excludeMcpServers,
-      resolveCommand: opts.deps?.resolveCliExecutable,
-      onWarning: (message, details = {}) => {
-        eventLog.append("mcp_server_skipped", {
-          session: session.id,
-          message,
-          ...details,
-        });
-        emitter.emit("warning", {
-          type: "mcp_server_skipped",
-          session: session.id,
-          message,
-          ...details,
-        });
-      },
-    });
+    let spawnSpec;
+    try {
+      spawnSpec = buildSpawnSpecForMode(MODES.HEADLESS, {
+        cli: session.config.agent,
+        prompt: session.config.prompt,
+        profile: session.config.profile,
+        role: session.config.role,
+        model: session.config.model,
+        env: session.config.env,
+        mcpServers: session.config.mcpServers,
+        excludeMcpServers,
+        resolveCommand: opts.deps?.resolveCliExecutable,
+        onWarning: (message, details = {}) => {
+          eventLog.append("mcp_server_skipped", {
+            session: session.id,
+            message,
+            ...details,
+          });
+          emitter.emit("warning", {
+            type: "mcp_server_skipped",
+            session: session.id,
+            message,
+            ...details,
+          });
+        },
+      });
+    } catch (err) {
+      // respawnSession 은 `void` 로 호출되므로 여기서 던지면 처리되지 않은 거부가
+      // 된다. spec 생성 실패를 명시 실패로 접어 세션이 매달리지 않게 한다.
+      // 정책 차단과 그 밖의 spec 생성 실패는 원인이 다르므로 이벤트를 나눈다.
+      const message = err?.message || String(err);
+      const blockedByPolicy = err?.code === "TFX_CLI_DISABLED";
+      const eventName = blockedByPolicy
+        ? "session_spawn_blocked"
+        : "session_spawn_failed";
+      const reason = blockedByPolicy ? "spawn_blocked" : "spawn_failed";
+      const detail = {
+        session: session.id,
+        agent: session.config.agent,
+        code: err?.code || null,
+        error: message,
+      };
+      eventLog.append(eventName, detail);
+      emitter.emit("warning", { type: eventName, ...detail });
+      handleFailure(session, `${reason}:${message}`);
+      return;
+    }
 
     // #90 branch guard: shard spawn cwd가 main 브랜치면 즉시 abort.
     // swarm shard는 반드시 shard 전용 worktree 브랜치에서 실행되어야 한다.
@@ -1173,6 +1201,34 @@ export function createConductor(opts = {}) {
           session: config.id,
           error: err?.message || String(err),
         });
+      }
+    }
+
+    // TFX_DISABLE_* SSOT 집행. 계정 임대와 worker sandbox 생성보다 앞에 둔다.
+    // 뒤에 두면 정책으로 거부된 세션이 샌드박스 디렉터리와 auth.json 사본을
+    // 남기고, 임대 반납이 회로 차단기 실패로 집계돼 멀쩡한 계정이 cooldown 에
+    // 들어간다. 다른 CLI 로 자동 전환하지 않고 호출자에게 그대로 던진다.
+    // claude 처럼 정책 대상이 아닌 agent 는 프로파일 파일을 읽지 않는다 (F4 와 동일).
+    if (!config.remote && normalizeCliName(config.agent)) {
+      const blockedCli = buildDisabledCliError(
+        config.agent,
+        resolveCliPolicy(process.env),
+      );
+      if (blockedCli) {
+        eventLog.append("session_spawn_blocked", {
+          session: config.id,
+          agent: config.agent,
+          code: blockedCli.code || null,
+          error: blockedCli.message,
+        });
+        emitter.emit("warning", {
+          type: "session_spawn_blocked",
+          session: config.id,
+          agent: config.agent,
+          code: blockedCli.code || null,
+          error: blockedCli.message,
+        });
+        throw blockedCli;
       }
     }
 

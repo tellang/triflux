@@ -73,8 +73,9 @@ Hub는 팀·원격 세션·MCP 도구·상태 표면을 잇는 로컬 메시지 
 ### 가드(Guards)
 
 triflux는 위험한 실행을 관리된 경로 뒤에 둔다. 직접 `codex exec`,
-관리되지 않은 `agy`, 폐기된 `gemini` 경로는 headless-guard가 차단하고,
-psmux/Windows Terminal 흐름은 safety-guard가 관리 API로만 우회하도록 강제한다.
+관리되지 않은 `agy`, 폐기된 `gemini` 경로는 라우팅 규약으로 금지한다(자동 차단
+훅 headless-guard 는 2026-09-07 에 제거). psmux/Windows Terminal 흐름은
+safety-guard가 관리 API로만 우회하도록 강제한다.
 CLI 호출은 `tfx-route.sh` / Hub 워커 / `tfx` CLI를 경유해야 한다.
 
 ## 스택 공존

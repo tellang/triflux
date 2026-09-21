@@ -18,7 +18,7 @@ argument-hint: "[파일 경로 또는 git diff 범위]"
 
 ## HARD RULES
 
-> headless-guard가 이 규칙 위반을 **자동 차단**한다. 우회 불가.
+> 자동 차단 훅은 없다. 아래 규칙은 호출자가 지킨다.
 
 1. **`codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 절대 금지**
 2. Codex·Antigravity → `Bash("tfx multi --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 1800", run_in_background=true)` **만** 사용 — teammate mode는 생략해 `auto` 기본값을 쓰며, foreground Bash는 하니스가 600s에 강제 종료. 결과는 task-notification 후 회수

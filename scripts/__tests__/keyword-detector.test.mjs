@@ -30,7 +30,8 @@ if (previousDisable === undefined) {
   process.env.TRIFLUX_DISABLE_MAGICWORDS = previousDisable;
 }
 
-const { extractPrompt, sanitizeForKeywordDetection } = detectorModule;
+const { extractPrompt, matchesPlatform, sanitizeForKeywordDetection } =
+  detectorModule;
 
 function loadCompiledRules() {
   const rules = loadRules(rulesPath);
@@ -280,4 +281,91 @@ test("OMC 키워드와 triflux 키워드 비간섭 + TRIFLUX 네임스페이스"
   const additionalContext =
     triflux?.hookSpecificOutput?.additionalContext || "";
   assert.match(additionalContext, /^\[TRIFLUX MAGIC KEYWORD: tfx-multi\]/);
+});
+
+test("matchesPlatform: 미지정/빈 배열은 전 플랫폼 통과", () => {
+  assert.equal(matchesPlatform(undefined, "darwin"), true);
+  assert.equal(matchesPlatform(null, "darwin"), true);
+  assert.equal(matchesPlatform([], "darwin"), true);
+  assert.equal(matchesPlatform("win32", "win32"), true);
+});
+
+test("matchesPlatform: 화이트리스트 일치 여부", () => {
+  assert.equal(matchesPlatform(["win32"], "win32"), true);
+  assert.equal(matchesPlatform(["win32"], "darwin"), false);
+  assert.equal(matchesPlatform(["darwin", "linux"], "linux"), true);
+  assert.equal(matchesPlatform(["darwin", "linux"], "win32"), false);
+});
+
+test("loadRules: platform 필드 정규화", () => {
+  const tempDir = mkdtempSync(join(tmpdir(), "triflux-platform-"));
+  const fixture = join(tempDir, "rules.json");
+  writeFileSync(
+    fixture,
+    JSON.stringify({
+      rules: [
+        {
+          id: "no-platform",
+          patterns: [{ source: "alpha", flags: "i" }],
+          skill: "tfx-auto",
+          priority: 1,
+        },
+        {
+          id: "win-only",
+          patterns: [{ source: "bravo", flags: "i" }],
+          skill: "tfx-wt",
+          platform: ["win32"],
+          priority: 1,
+        },
+        {
+          id: "bad-platform",
+          patterns: [{ source: "charlie", flags: "i" }],
+          skill: "tfx-auto",
+          platform: "win32",
+          priority: 1,
+        },
+      ],
+    }),
+    "utf8",
+  );
+
+  const rules = loadRules(fixture);
+  assert.deepEqual(
+    rules.map((rule) => rule.id),
+    ["no-platform", "win-only"],
+  );
+  assert.deepEqual(rules[0].platform, []);
+  assert.deepEqual(rules[1].platform, ["win32"]);
+
+  rmSync(tempDir, { recursive: true, force: true });
+});
+
+test("keyword-rules.json: tfx-wt 규칙은 win32 전용", () => {
+  const rules = loadRules(rulesPath);
+  const wtRules = rules.filter((rule) => rule.skill === "tfx-wt");
+  assert.ok(wtRules.length > 0, "tfx-wt 규칙이 없습니다.");
+  for (const rule of wtRules) {
+    assert.deepEqual(
+      rule.platform,
+      ["win32"],
+      `${rule.id} 가 win32 전용이 아닙니다.`,
+    );
+  }
+});
+
+test("non-Windows: WT 탭 프롬프트가 tfx-wt 로 라우팅되지 않음", (t) => {
+  if (process.platform === "win32") {
+    t.skip("Windows 에서는 tfx-wt 라우팅이 정상 동작한다.");
+    return;
+  }
+
+  for (const prompt of ["열린 탭 목록 보여줘", "탭 닫아줘", "탭 정리해줘"]) {
+    const output = runDetector(prompt);
+    const additionalContext =
+      output?.hookSpecificOutput?.additionalContext || "";
+    assert.ok(
+      !additionalContext.includes("tfx-wt"),
+      `"${prompt}" 가 tfx-wt 로 라우팅됐습니다: ${additionalContext}`,
+    );
+  }
 });

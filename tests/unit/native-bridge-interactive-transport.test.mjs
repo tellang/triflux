@@ -31,8 +31,14 @@ function hasCall(calls, expected) {
 function startupSendKeys(calls, sessionName) {
   return calls
     .filter((call) => call[0] === "send-keys" && call[2] === sessionName)
-    .filter((call) => call.at(-1) !== "codex")
-    .filter((call) => call[3] !== "codex")
+    .filter(
+      (call) =>
+        !(
+          typeof call[3] === "string" &&
+          call[3].startsWith("codex") &&
+          call[4] === "Enter"
+        ),
+    )
     .map((call) => call.at(-1));
 }
 
@@ -99,11 +105,52 @@ test("start creates a detached tmux session, sends launch command, and streams c
       "send-keys",
       "-t",
       "tfx-int-test",
-      "codex --profile gpt55_low",
+      "codex --dangerously-bypass-approvals-and-sandbox --profile gpt55_low",
       "Enter",
     ]),
   );
   assert.deepEqual(chunks, ["ready\n"]);
+});
+
+test("start does not duplicate an existing Codex bypass flag", async () => {
+  const fake = createFakeTmux({ captures: [mainPromptScreen()] });
+  const launchCmd =
+    "codex --dangerously-bypass-approvals-and-sandbox --profile gpt55_low";
+  const transport = createInteractiveTuiTransport({
+    runTmux: fake.runTmux,
+    sessionName: "tfx-int-existing-bypass",
+    launchCmd,
+  });
+
+  await transport.start();
+  await transport.stop();
+
+  assert.ok(
+    hasCall(fake.calls, [
+      "send-keys",
+      "-t",
+      "tfx-int-existing-bypass",
+      launchCmd,
+      "Enter",
+    ]),
+  );
+});
+
+test("start leaves a non-Codex launch command unchanged", async () => {
+  const fake = createFakeTmux({ captures: [mainPromptScreen()] });
+  const launchCmd = "agy --profile gpt55_low";
+  const transport = createInteractiveTuiTransport({
+    runTmux: fake.runTmux,
+    sessionName: "tfx-int-agy",
+    launchCmd,
+  });
+
+  await transport.start();
+  await transport.stop();
+
+  assert.ok(
+    hasCall(fake.calls, ["send-keys", "-t", "tfx-int-agy", launchCmd, "Enter"]),
+  );
 });
 
 test("start dismisses update before trust without selecting Update now", async () => {

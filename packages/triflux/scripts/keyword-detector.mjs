@@ -99,6 +99,14 @@ export function matchesRepoScope(path, scopes) {
   return scopes.some((scope) => segments.includes(scope));
 }
 
+// platform 은 규칙의 정적 속성이라 cwd 의존인 repo_scope 와 달리 매칭 이전에
+// 거른다. resolveConflicts 뒤에 걸면 Windows 전용 규칙이 supersedes 로 다른
+// 규칙을 죽인 다음 자신도 빠져 매칭 결과가 통째로 비어버린다.
+export function matchesPlatform(platforms, currentPlatform) {
+  if (!Array.isArray(platforms) || platforms.length === 0) return true;
+  return platforms.includes(currentPlatform);
+}
+
 // resolvedMatches[0] 단일 승자의 우선순위 역전 방지 — explicit(종결 라우팅) 규칙이
 // 있으면 정렬 순서와 무관하게 그 규칙이 이긴다. 없으면 정렬 선두 유지.
 export function selectPrimaryMatch(resolvedMatches) {
@@ -260,7 +268,9 @@ function main() {
     return;
   }
 
-  const rules = loadRules(getRulesPath());
+  const rules = loadRules(getRulesPath()).filter((rule) =>
+    matchesPlatform(rule.platform, process.platform),
+  );
   if (rules.length === 0) {
     console.log(JSON.stringify(createSuppressOutput()));
     return;

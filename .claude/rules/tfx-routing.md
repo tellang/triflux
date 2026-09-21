@@ -79,7 +79,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | 반복 | 끝까지, 멈추지마, ralph | `--retry ralph` (Phase 3 true state machine, `.claude/rules/tfx-escalation-chain.md` 참조) |
 | 승격 | 알아서 승격, 안 되면 더 강한 모델 | `--retry auto-escalate` (Phase 3 CLI 체인 승격) |
 | 자율 | 알아서, 자동으로, autopilot | autopilot 모드 |
-| 최대 effort | ultracode, 울트라코드 | Claude Code 최대 effort — 기본적으로 멀티에이전트 Workflow 오케스트레이션, 토큰 비용 무관 철저성 우선 (tfx CLI 플래그 아님, Claude Code 하니스 모드) |
+| 최대 effort | ultracode, 울트라코드 | Claude Code `--effort ultracode`(v2.1.203+). 멀티에이전트 Workflow 오케스트레이션, 토큰 비용 무관 철저성 우선. tfx CLI 플래그는 아니다 |
 
 ## CLI 우선순위 정책 — default = Codex
 
@@ -99,7 +99,7 @@ triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR
 
 ## CLI 라우팅
 
-headless-guard 가 `codex exec` / `agy -y -p` 직접 호출을 차단한다. tfx 스킬 경유 필수.
+`codex exec` / `agy -y -p` 직접 호출은 금지한다. tfx 스킬 경유 필수. 자동 차단 훅(headless-guard)은 제거됐으므로 호출자가 지킨다.
 
 **Layer 1 — Light** (tfx-route.sh → 단일 CLI)
 
@@ -116,25 +116,30 @@ headless-guard 가 `codex exec` / `agy -y -p` 직접 호출을 차단한다. tfx
 `tfx-auto --mode deep`, `tfx-auto --mode consensus --shape consensus|debate|panel`,
 `tfx-auto --parallel swarm --mode consensus --isolation worktree`, `tfx-auto --retry ralph`
 
-호환 alias:
-- `tfx-consensus` → `tfx-auto --mode consensus`
-- `tfx-debate` → `tfx-auto --mode consensus --shape debate`
-- `tfx-panel` → `tfx-auto --mode consensus --shape panel`
-- 위 3개 alias 는 deprecated 이며 stderr 경고 + stdout `[DEPRECATED]` + `.omc/state/alias-usage.log` append 규약을 따른다
-
 **Layer 3 — Remote/병렬**
 
 | 스킬 | 용도 |
 |------|------|
 | tfx-multi | 2+개 태스크 headless 병렬 |
 | tfx-swarm | PRD별 worktree + 다중 모델(Codex/Antigravity/Claude) + 다중 기기(로컬+원격) |
-| tfx-remote | Claude Code 원격 세션 (SSH, user-state hosts.json setup 필수; tfx-remote-spawn은 legacy alias) |
+| tfx-remote | Claude Code 원격 세션 (SSH, user-state hosts.json setup 필수) |
 
 **Claude 네이티브** (CLI 불필요): tfx-find, tfx-forge, tfx-prune, tfx-index, tfx-setup, tfx-doctor, tfx-hooks, tfx-hub
 
 **Headless UI default** — `tfx-auto`, `tfx multi`, `tfx swarm` 로컬 shard 의 headless 워커는 default 로 `claude agents` 패널에 노출 (`--native-bridge-ui agents`). opt-out: `--no-native-bridge-ui`. interactive (tmux/wt) 경로는 default-off. `tfx swarm` 원격 shard 는 `registerSwarmShard()` 가 warn + skip 만 하고 원격 daemon 등록은 후속 PRD. 상세 행동표는 `CLAUDE.md` 의 `<native-bridge>` 섹션. 근거(why): [ADR-0008 — headless 워커 native-bridge 기본 노출](../../docs/adr/0008-native-bridge-ui-default-on.md).
 
 자원 우선순위: remote-spawn > swarm > multi > Light > 로컬 단독
+
+**m2 오프로드 기본 정책** — 로컬(m5)은 fanless 16GB라 램이 빠듯해지면 무거운 작업을 원격으로 넘긴다. 판단 시점은 swarm PRD 작성과 병렬 dispatch 직전이다.
+
+- 판정 명령: `sysctl -n kern.memorystatus_vm_pressure_level` (1=normal, 2=warn, 4=critical; Stats 앱·활성 상태 보기의 메모리 색과 같은 커널 신호, 노랑=2 빨강=4)
+- 4(critical): 무조건 오프로드
+- 2(warn): 무거운 shard(빌드·전체 테스트 스위트·대규모 리팩터)를 띄우거나 워커 3+개를 새로 만들 때만 오프로드
+- 1(normal): 로컬 유지
+- sysctl 실패 시 대체 신호: `vm_stat` 5초 간격 2회 측정에서 swapouts 증가
+- 행동: 코드 변경 shard는 PRD에 `host: m2`를 지정(tfx-swarm), 탐색·대화형은 tfx-remote로 m2 세션을 띄운다
+- 로컬 여유가 충분하면 로컬 유지. 사용자가 로컬/원격을 명시하면 그에 따른다
+- m2 부재 시(ssh 불응) 조용히 로컬로 강등하지 말고 한 줄 알린 뒤 로컬 진행
 
 원격 hosts 설정은 user-state 경로만 참조한다: macOS/Linux `~/.config/triflux/hosts.json`, Windows `%APPDATA%\triflux\hosts.json`. 기존 source-tree `references/hosts.json` 은 라우팅 입력으로 사용하지 않으며 첫 실행 lazy auto-migration 대상이다.
 
@@ -144,7 +149,7 @@ headless-guard 가 `codex exec` / `agy -y -p` 직접 호출을 차단한다. tfx
 - "auto" 단독 → tfx-auto. "알아서 해" → tfx-autopilot
 - "코드에서 찾아" → tfx-find. "알아봐" → tfx-research
 - 복합 의도: "구현하고 리뷰까지" → tfx-auto → cross-review hook
-- "합의해서 비교해" 류 요청은 alias 대신 기본적으로 `tfx-auto --mode consensus --shape debate` 로 fold 한다
+- "합의해서 비교해" 류 요청은 기본적으로 `tfx-auto --mode consensus --shape debate` 로 fold 한다
 - `ralph` 표기는 항상 `--retry ralph` mode 를 지칭. persist 스킬도 동일 의미. `--retry auto-escalate` 와 동시 사용 불가 (escalation-chain.md 규약).
 - `tfx-auto` 자동 swarm escalate: 2+ 태스크 + 코드 변경 ≥ 1건 시 자동. 명시 `--parallel N` override 가능 (warning).
 

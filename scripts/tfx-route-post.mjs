@@ -110,6 +110,7 @@ function filterCodexOutput(rawOutput) {
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
+    if (trimmed === "Reading additional input from stdin...") continue;
 
     try {
       const obj = JSON.parse(trimmed);
@@ -198,16 +199,39 @@ function appendCodexResumeHint(output, rawOutput, stderrContent = "") {
 function prepareCliOutput(
   rawOutput,
   cliType,
-  { cleanTui = true, stderrContent = "" } = {},
+  { cleanTui = true, stderrContent = "", sessionRawOutput = rawOutput } = {},
 ) {
   let prepared = cliType === "codex" ? filterCodexOutput(rawOutput) : rawOutput;
   if (cleanTui && process.env.TFX_CLEAN_TUI !== "0") {
     prepared = cleanTuiArtifacts(prepared, cliType);
   }
   if (cliType === "codex") {
-    prepared = appendCodexResumeHint(prepared, rawOutput, stderrContent);
+    prepared = appendCodexResumeHint(prepared, sessionRawOutput, stderrContent);
   }
   return prepared;
+}
+
+// codex exec(0.155+)는 배너, 프롬프트 에코, 실행 추적을 전부 stderr 로 낸다. 그 기록은 경고가 아니다.
+// 경고로 볼 것은 tracing 형식의 WARN/ERROR 줄과 배너보다 앞에 찍히는 warning:/error: 줄뿐이다.
+// 배너가 아예 없으면(구버전이거나 비정상 종료) 예전처럼 남은 줄 전부를 경고로 본다.
+const CODEX_STDIN_NOTICE = "Reading additional input from stdin...";
+const CODEX_TRACING_DIAGNOSTIC = /^\d{4}-\d{2}-\d{2}T\S+\s+(WARN|ERROR)\b/;
+const CODEX_PLAIN_DIAGNOSTIC = /^(warning|error|fatal)\b[:\s]/i;
+
+function filterBenignStderr(stderrContent, cliType) {
+  if (cliType !== "codex" || !stderrContent) return stderrContent;
+  const lines = stderrContent.split("\n");
+  const bannerIndex = lines.findIndex((line) =>
+    /^OpenAI Codex v/.test(line.trim()),
+  );
+  const kept = lines.filter((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed === CODEX_STDIN_NOTICE) return false;
+    if (bannerIndex === -1) return true;
+    if (CODEX_TRACING_DIAGNOSTIC.test(trimmed)) return true;
+    return index < bannerIndex && CODEX_PLAIN_DIAGNOSTIC.test(trimmed);
+  });
+  return kept.join("\n").trim();
 }
 
 function cleanTuiArtifacts(output, cliType) {
@@ -456,8 +480,8 @@ function truncateOutput(text, maxBytes) {
   const buf = Buffer.from(text);
   if (buf.length > maxBytes) {
     return (
-      buf.subarray(0, maxBytes).toString("utf-8") +
-      `\n--- [출력 ${buf.length}B → ${maxBytes}B로 절삭됨] ---`
+      `--- [출력 ${buf.length}B → ${maxBytes}B로 절삭됨; tail ${maxBytes}B 유지] ---\n` +
+      buf.subarray(-maxBytes).toString("utf-8")
     );
   }
   return text;
@@ -478,6 +502,8 @@ function main() {
   const mcpProfile = a.mcp_profile || "auto";
   const stderrLog = a.stderr_log || "";
   const stdoutLog = a.stdout_log || "";
+  const lastMessageLog = a.last_message_log || "";
+  const resultReason = a.result_reason || "";
   const maxBytes = parseInt(a.max_bytes || "51200", 10);
   const cliCmd = a.cli_cmd || cliType;
 
@@ -490,14 +516,22 @@ function main() {
   try {
     rawOutput = readFileSync(stdoutLog, "utf-8");
   } catch {}
+  let lastMessage = "";
+  try {
+    lastMessage = readFileSync(lastMessageLog, "utf-8");
+  } catch {}
+  const displayOutput = lastMessage || rawOutput;
+  const warningContent = filterBenignStderr(stderrContent, cliType);
 
   // 1. 토큰 추출
   const tokens = extractTokens(cliType, stderrLog);
 
   // 2. 상태 판단
   let status;
-  if (exitCode === 0) {
-    status = stderrContent ? "success_with_warnings" : "success";
+  if (resultReason) {
+    status = "partial";
+  } else if (exitCode === 0) {
+    status = warningContent ? "success_with_warnings" : "success";
   } else if (exitCode === 124) {
     status = "timeout";
   } else {
@@ -542,28 +576,48 @@ function main() {
   console.log(`elapsed: ${elapsed}s`);
   console.log(`mcp_profile: ${mcpProfile}`);
   console.log(`stderr_log: ${stderrLog}`);
+  console.log(`stdout_log: ${stdoutLog}`);
+  if (cliType === "codex") {
+    console.log(`last_message_log: ${lastMessageLog}`);
+  }
 
-  if (exitCode === 0) {
+  if (status === "partial") {
+    console.log("status: partial");
+    console.log(`reason: ${resultReason}`);
+    console.log("=== PARTIAL OUTPUT ===");
+    const partialFiltered = prepareCliOutput(displayOutput, cliType, {
+      cleanTui: a.clean_tui !== "false",
+      stderrContent,
+      sessionRawOutput: rawOutput,
+    });
+    console.log(truncateOutput(partialFiltered, maxBytes));
     if (stderrContent) {
+      console.log("=== STDERR ===");
+      console.log(stderrContent.split("\n").slice(-20).join("\n"));
+    }
+  } else if (exitCode === 0) {
+    if (warningContent) {
       console.log("status: success_with_warnings");
       console.log(
-        `warnings: ${stderrContent.split("\n").slice(0, 3).join(" ")}`,
+        `warnings: ${warningContent.split("\n").slice(0, 3).join(" ")}`,
       );
     } else {
       console.log("status: success");
     }
     console.log("=== OUTPUT ===");
-    const filtered = prepareCliOutput(rawOutput, cliType, {
+    const filtered = prepareCliOutput(displayOutput, cliType, {
       cleanTui: a.clean_tui !== "false",
       stderrContent,
+      sessionRawOutput: rawOutput,
     });
     console.log(truncateOutput(filtered, maxBytes));
   } else if (exitCode === 124) {
     console.log(`status: timeout (${timeout}s 초과)`);
     console.log("=== PARTIAL OUTPUT ===");
-    const partialFiltered = prepareCliOutput(rawOutput, cliType, {
+    const partialFiltered = prepareCliOutput(displayOutput, cliType, {
       cleanTui: a.clean_tui !== "false",
       stderrContent,
+      sessionRawOutput: rawOutput,
     });
     console.log(truncateOutput(partialFiltered, maxBytes));
     console.log("=== STDERR ===");
@@ -572,11 +626,12 @@ function main() {
     console.log(`status: failed (exit_code=${exitCode})`);
     console.log("=== STDERR ===");
     console.log(stderrContent.split("\n").slice(-20).join("\n"));
-    if (rawOutput) {
+    if (displayOutput) {
       console.log("=== PARTIAL OUTPUT ===");
-      const partialFiltered = prepareCliOutput(rawOutput, cliType, {
+      const partialFiltered = prepareCliOutput(displayOutput, cliType, {
         cleanTui: a.clean_tui !== "false",
         stderrContent,
+        sessionRawOutput: rawOutput,
       });
       console.log(truncateOutput(partialFiltered, maxBytes));
     }
@@ -589,4 +644,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   main();
 }
 
-export { appendCodexResumeHint, cleanTuiArtifacts, extractCodexSessionId };
+export {
+  appendCodexResumeHint,
+  cleanTuiArtifacts,
+  extractCodexSessionId,
+  filterBenignStderr,
+  truncateOutput,
+};

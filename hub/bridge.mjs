@@ -688,6 +688,11 @@ function emitJson(payload) {
   return payload?.ok !== false;
 }
 
+const HUB_STORE_CLI_VALUES = new Set(["codex", "gemini", "claude", "other"]);
+function normalizeCliForStore(cli) {
+  return HUB_STORE_CLI_VALUES.has(cli) ? cli : "other";
+}
+
 async function cmdRegister(args) {
   const interactiveSession = buildInteractiveSessionRegistrationPayload(args);
   if (interactiveSession) {
@@ -700,14 +705,16 @@ async function cmdRegister(args) {
 
   const agentId = args.agent;
   const timeoutSec = parseInt(args.timeout || "600", 10);
+  const rawCli = args.cli || "other";
   const outcome = await requestHub(HUB_OPERATIONS.register, {
     agent_id: agentId,
-    cli: args.cli || "other",
+    cli: normalizeCliForStore(rawCli),
     timeout_sec: timeoutSec,
     heartbeat_ttl_ms: (timeoutSec + 120) * 1000,
     topics: args.topics ? args.topics.split(",") : [],
     capabilities: args.capabilities ? args.capabilities.split(",") : ["code"],
     metadata: {
+      cli: rawCli,
       pid: process.ppid,
       registered_at: Date.now(),
     },

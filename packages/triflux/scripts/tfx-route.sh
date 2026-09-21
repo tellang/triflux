@@ -703,6 +703,7 @@ read_probe_state() {
 RUN_ID="${TIMESTAMP}-$$-${RANDOM}"
 STDERR_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-stderr.log"
 STDOUT_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-stdout.log"
+CODEX_LAST_MESSAGE_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-last-message.log"
 
 # ── 팀 환경변수 ──
 TFX_TEAM_NAME="${TFX_TEAM_NAME:-}"
@@ -1213,6 +1214,26 @@ codex_gte() {
 
 # ── Gemini 프로필 해석 (Codex --profile 대칭) ──
 _GEMINI_PROFILE_CACHE=""
+# resolve_gemini_profile_for_agent AGENT → 프로필 이름 (SSOT: scripts/lib/gemini-profiles.mjs)
+# 역할별 effort 분리. node 를 못 찾으면 medium(flash38) 으로 떨어진다.
+resolve_gemini_profile_for_agent() {
+  local agent="$1"
+  local sd; sd="$(_get_script_dir)"
+  local mod
+  mod="$(_resolve_script "${TFX_GEMINI_PROFILES_MODULE:-}" \
+    "$sd/lib/gemini-profiles.mjs" \
+    "$sd/../scripts/lib/gemini-profiles.mjs" \
+    ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/lib/gemini-profiles.mjs"})" || { echo "flash38"; return; }
+  local out
+  out="$("$NODE_BIN" -e '
+    const { pathToFileURL } = require("node:url");
+    import(pathToFileURL(process.argv[1]).href)
+      .then((m) => process.stdout.write(m.resolveGeminiProfileForPurpose(process.argv[2])))
+      .catch(() => process.stdout.write("flash38"));
+  ' "$mod" "$agent" 2>/dev/null)"
+  echo "${out:-flash38}"
+}
+
 resolve_gemini_profile() {
   local profile="$1"
   if [[ "$profile" == gemini-* ]]; then
@@ -1233,12 +1254,9 @@ resolve_gemini_profile() {
     const primaryRaw = process.argv[2] || '{}';
     const settingsRaw = process.argv[3] || '{}';
     const defaults = {
-      flash35_low: 'Gemini 3.5 Flash (Low)',
-      flash35: 'Gemini 3.5 Flash (Medium)',
-      flash35_high: 'Gemini 3.5 Flash (High)',
-      pro31_low: 'Gemini 3.1 Pro (Low)',
-      pro31: 'Gemini 3.1 Pro (High)',
-      flash3: 'Gemini 3 Flash'
+      flash38_low: 'Gemini 3.8 Flash (Low)',
+      flash38: 'Gemini 3.8 Flash (Medium)',
+      flash38_high: 'Gemini 3.8 Flash (High)'
     };
 
     if (typeof name === 'string' && name.startsWith('gemini-')) {
@@ -1306,9 +1324,9 @@ resolve_gemini_profile() {
       }
     }
 
-    process.stdout.write(defaults[name] || defaults[process.env.TFX_GEMINI_DEFAULT_PROFILE] || defaults.flash35);
+    process.stdout.write(defaults[name] || defaults[process.env.TFX_GEMINI_DEFAULT_PROFILE] || defaults.flash38);
   " "$profile" "$_GEMINI_PROFILE_CACHE" "$settings_cache" 2>/dev/null)
-  echo "${result:-Gemini 3.5 Flash (Medium)}"
+  echo "${result:-Gemini 3.8 Flash (Medium)}"
 }
 
 # ── 라우팅 테이블 ──
@@ -1392,26 +1410,26 @@ route_agent() {
     # ─── Antigravity CLI lane ───
     # effort 차등: agent 별 GEMINI_PROFILE 을 설정하면 run_antigravity_exec() 가
     # resolve_gemini_profile 로 해석해 `--model "<display name>"`을 agy_args 에
-    # 주입한다. 우선순위는 TFX_GEMINI_PROFILE(env) > GEMINI_PROFILE(agent) > flash35.
+    # 주입한다. 우선순위는 TFX_GEMINI_PROFILE(env) > GEMINI_PROFILE(agent) > flash38.
     # CLI_ARGS 는 read -a 로 word-split 되므로 공백 포함 모델명을 여기 넣지 않는다.
     # #310: upstream callers are normalized through agent-map.json, but this
     # direct route entrypoint intentionally keeps agy as a compatibility alias.
     designer)
-      # 디자인 = 시각/UX 추론 → 3.5 Flash (High)
+      # effort 는 역할별 SSOT(scripts/lib/gemini-profiles.mjs)가 정한다: designer → High
       CLI_ARGS="--print --dangerously-skip-permissions"
-      GEMINI_PROFILE="flash35_high"
+      GEMINI_PROFILE="$(resolve_gemini_profile_for_agent designer)"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     writer)
-      # 문서 작성 = 균형 → 3.5 Flash (Medium)
+      # writer → Medium (SSOT)
       CLI_ARGS="--print --dangerously-skip-permissions"
-      GEMINI_PROFILE="flash35"
+      GEMINI_PROFILE="$(resolve_gemini_profile_for_agent writer)"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     gemini|antigravity|agy)
-      # 직접 호출 alias — 기본 flash35. TFX_GEMINI_PROFILE 로 override 가능.
-      # agy --print + --dangerously-skip-permissions 조합은 positional prompt에서
-      # timeout이 재현되므로 wrapper 호출은 stdin pipe로 고정한다.
+      # 직접 호출 alias — Medium (SSOT). TFX_GEMINI_PROFILE 로 override 가능.
+      # 프롬프트는 run_antigravity_exec 가 `--print "$prompt"` 값으로 넘긴다
+      # (agy 1.1.27 부터 stdin 프롬프트 불가). --print 는 항상 마지막 인자다.
       CLI_ARGS="--print --dangerously-skip-permissions"
-      GEMINI_PROFILE="flash35"
+      GEMINI_PROFILE="$(resolve_gemini_profile_for_agent "$agent")"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── 탐색 (Claude-native: Glob/Grep/Read 직접 접근) ───
@@ -1423,6 +1441,7 @@ route_agent() {
       case "$CLI_TYPE" in
         gemini|antigravity)
           CLI_ARGS="--print --dangerously-skip-permissions"
+          GEMINI_PROFILE="$(resolve_gemini_profile_for_agent "$agent")"
           CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
         claude-native)
           CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
@@ -1613,12 +1632,9 @@ apply_cli_mode() {
         CLI_TYPE="antigravity"
         CLI_CMD="agy"
         CLI_ARGS="--print --dangerously-skip-permissions"
-        # 주 라우팅(route_agent)과 동일하게 designer 만 effort 상향. 나머지는
-        # run_antigravity_exec 폴백(flash35) 또는 TFX_GEMINI_PROFILE override.
-        case "$AGENT_TYPE" in
-          designer) GEMINI_PROFILE="flash35_high" ;;
-          *)        GEMINI_PROFILE="flash35" ;;
-        esac
+        # effort 는 역할별 SSOT(scripts/lib/gemini-profiles.mjs)가 정한다.
+        # TFX_GEMINI_PROFILE 로 override 가능.
+        GEMINI_PROFILE="$(resolve_gemini_profile_for_agent "$AGENT_TYPE")"
         CLI_EFFORT="agy_v1"
         DEFAULT_TIMEOUT=900
         echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE → antigravity($CLI_EFFORT)로 리매핑" >&2
@@ -2589,18 +2605,40 @@ run_antigravity_exec() {
   local exit_code_local=0
   local worker_pid
   local -a agy_args=()
-  read -r -a agy_args <<< "$CLI_ARGS"
+  local -a _cli_tokens=()
+  local _print_flag=""
+  local _tok
+  read -r -a _cli_tokens <<< "$CLI_ARGS"
+  # ── --print 는 값(프롬프트)을 받는 마지막 인자 ──
+  # agy 의 --print 는 값을 받는 플래그라(Go flag) 바로 뒤 토큰을 프롬프트로 삼킨다.
+  # agy 1.1.27 실측(2026-09-07): 값 없는 `--print` 는 "flag needs an argument",
+  # 빈 값 + stdin 은 "empty prompt" 로 거부된다. 즉 stdin 프롬프트 전달은 더 이상 없다.
+  # 그래서 print 계열 플래그를 빼 두었다가 --model 뒤에 `--print "$prompt"` 로 붙인다.
+  for _tok in "${_cli_tokens[@]}"; do
+    case "$_tok" in
+      --print|-p|--prompt) _print_flag="$_tok" ;;
+      *) agy_args+=("$_tok") ;;
+    esac
+  done
 
   # ── 프로필 기반 모델 주입 ──
-  # display name 에 공백/괄호가 있으므로(예: "Gemini 3.5 Flash (Medium)") CLI_ARGS
+  # display name 에 공백/괄호가 있으므로(예: "Gemini 3.8 Flash (Medium)") CLI_ARGS
   # 문자열이 아니라 agy_args 배열에 두 원소(--model, <display name>)로 append 해야
   # "${agy_args[@]}" expand 시 단일 인자로 보존된다. 모델 SSOT 는 프로필 설정이다.
   if [[ -z "${TFX_GEMINI_NO_MODEL:-}" ]]; then
     local _agy_model
-    _agy_model="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-flash35}}")"
+    _agy_model="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-flash38}}")"
     if [[ -n "$_agy_model" ]]; then
       agy_args+=("--model" "$_agy_model")
     fi
+  fi
+  if [[ -n "$_print_flag" ]]; then
+    # argv 상한(macOS ARG_MAX 1MiB) 안에서만 인자로 넘긴다. 초과는 조용히 자르지 않는다.
+    if (( ${#prompt} > 900000 )); then
+      echo "[tfx-route] Antigravity prompt too large for argv (${#prompt} chars > 900000). Split the task or shorten the context." >"$STDERR_LOG"
+      return 2
+    fi
+    agy_args+=("$_print_flag" "$prompt")
   fi
 
   if ! agy_supports_headless "$CLI_CMD"; then
@@ -2609,9 +2647,9 @@ run_antigravity_exec() {
   fi
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${agy_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${agy_args[@]}" </dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
-    printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${agy_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${agy_args[@]}" </dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
   if [[ -n "${JOB_DIR:-}" && -w "${JOB_DIR}" ]]; then
@@ -2918,6 +2956,22 @@ else
   echo "[tfx-route] WARNING: optional helper missing: $_TFX_ROUTE_DIR/lib/codex-recovery.sh (run: tfx doctor --fix)" >&2
 fi
 
+_codex_stdout_has_meaningful_output() {
+  local output_file="$1"
+  [[ -s "$output_file" ]] || return 1
+  awk '
+    {
+      line = $0
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+      if (line != "" && line != "Reading additional input from stdin...") {
+        found = 1
+        exit
+      }
+    }
+    END { exit !found }
+  ' "$output_file" 2>/dev/null
+}
+
 run_codex_exec() {
   local prompt="$1"
   local use_tee_flag="$2"
@@ -2930,6 +2984,7 @@ run_codex_exec() {
 
   _attempt_codex_run() {
     exit_code_local=0
+    : > "$CODEX_LAST_MESSAGE_LOG"
     # `--` end-of-options: prompt가 '--'/'---' (front-matter 등)로 시작하면
     # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
     if [[ "$use_tee_flag" == "true" ]]; then
@@ -2937,13 +2992,13 @@ run_codex_exec() {
         # agy --print + skip-permissions positional prompt는 timeout이 재현되어 stdin pipe로 고정한다.
         printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
       else
-        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
       fi
     else
       if [[ "$CLI_TYPE" == "antigravity" ]]; then
         printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
       else
-        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
       fi
     fi
     worker_pid=$!
@@ -2988,7 +3043,11 @@ run_codex_exec() {
     fi
   fi
 
-  recover_codex_stdout
+  # 공식 -o 계약이 산출물을 제공했으면 raw stdout은 진단 로그 그대로 보존한다.
+  # -o가 비었을 때만 기존 stderr 복구 경로로 호환한다.
+  if [[ ! -s "$CODEX_LAST_MESSAGE_LOG" ]]; then
+    recover_codex_stdout
+  fi
 
   return "$exit_code_local"
 }
@@ -3272,6 +3331,7 @@ FALLBACK_EOF
   # recover_codex_stdout 이 복구 진입 시 1로 세운다(dynamic scope로 이 local 이 갱신됨).
   # 매 실행 초기화로 스테일 방지. 진짜 산출물 부재 판정(아래 no-op 가드)에 쓰인다.
   local CODEX_STDOUT_WAS_RECOVERED=0
+  local result_reason=""
 
   # tee 활성화 조건: 팀 모드 + 실제 터미널(TTY/tmux)
   # Agent 래퍼 안에서는 가상 stdout 캡처로 tee 출력이 사용자에게 안 보임 → 파일 전용
@@ -3284,6 +3344,12 @@ FALLBACK_EOF
   fi
 
   if [[ "$CLI_TYPE" == "codex" ]]; then
+    # codex mcp-server는 upstream에서 제거됐다. auto와 명시 mcp 모두 exec로
+    # 수렴시키되, 명시 mcp 요청에는 한 번만 이유를 알린다.
+    if [[ "$TFX_CODEX_TRANSPORT" == "mcp" ]]; then
+      echo "[tfx-route] TFX_CODEX_TRANSPORT=mcp 요청: codex mcp-server가 upstream에서 제거되어 exec로 계속합니다." >&2
+    fi
+    TFX_CODEX_TRANSPORT="exec"
     # Degraded is a per-invocation result, not an inherited process contract.
     # Test and wrapper environments can carry stale exported values from prior
     # route calls; clear it before the current MCP preflight decides.
@@ -3331,29 +3397,8 @@ FALLBACK_EOF
       _codex_skill_prompt="$(prepend_skill "$FULL_PROMPT"; printf '%s' "$_codex_skill_sentinel")"
       FULL_PROMPT="${_codex_skill_prompt%"$_codex_skill_sentinel"}"
     fi
+    run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
     codex_transport_effective="exec"
-    if [[ "$TFX_CODEX_TRANSPORT" != "exec" ]]; then
-      run_codex_mcp "$FULL_PROMPT" "$use_tee" || exit_code=$?
-      if [[ "$exit_code" -eq 0 ]]; then
-        codex_transport_effective="mcp"
-      elif [[ "$exit_code" -eq "$CODEX_MCP_TRANSPORT_EXIT_CODE" && "$TFX_CODEX_TRANSPORT" == "auto" ]]; then
-        # MCP bootstrap/transport failure only: retain auto's legacy exec fallback.
-        echo "[tfx-route] Codex MCP 실패(exit=${exit_code}). legacy exec 경로로 fallback 시도." >&2
-        local _sd
-        _sd="$(_get_script_dir)"
-        if [[ -f "$_sd/hub-ensure.mjs" ]]; then
-          "$NODE_BIN" "$_sd/hub-ensure.mjs" >/dev/null 2>&1 || true
-        fi
-        exit_code=0
-        run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
-        codex_transport_effective="exec-fallback"
-      else
-        codex_transport_effective="mcp"
-      fi
-    else
-      run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
-      codex_transport_effective="exec"
-    fi
     echo "[tfx-route] codex_transport_effective=$codex_transport_effective" >&2
     # Config swap 복원 (성공/실패 관계없이)
     _codex_config_swap "restore"
@@ -3516,8 +3561,16 @@ EOF
     # 노이즈로 backfill 한 경우(복구 플래그)면 진짜 워커 출력이 아니다. 복구가
     # `! -s STDOUT_LOG` 를 무력화해 빈손 실행을 success 로 오보고하던 갭을 막는다.
     local no_genuine_output="no"
-    if [[ ! -s "$STDOUT_LOG" || "${CODEX_STDOUT_WAS_RECOVERED:-0}" == "1" ]]; then
+    if [[ "$CLI_TYPE" == "codex" && -s "$CODEX_LAST_MESSAGE_LOG" ]]; then
+      no_genuine_output="no"
+    elif [[ "$CLI_TYPE" == "codex" ]] && ! _codex_stdout_has_meaningful_output "$STDOUT_LOG"; then
       no_genuine_output="yes"
+    elif [[ ! -s "$STDOUT_LOG" || "${CODEX_STDOUT_WAS_RECOVERED:-0}" == "1" ]]; then
+      no_genuine_output="yes"
+    fi
+
+    if [[ "$CLI_TYPE" == "codex" && ! -s "$CODEX_LAST_MESSAGE_LOG" && "$no_genuine_output" == "yes" ]]; then
+      result_reason="no_final_message"
     fi
 
     # MCP transport 채널이 실행 중 죽었는지(exit 0 이어도) stderr 서명으로 판정.
@@ -3572,7 +3625,14 @@ EOF
 
   # ── 후처리: 단일 node 프로세스로 위임 ──
   # 토큰 추출, 출력 필터링, 로그, 토큰 누적, AIMD, 이슈 추적, 결과 출력 전부 처리
-  local post_script="${HOME}/.claude/scripts/tfx-route-post.mjs"
+  # 후처리기는 이 라우터와 같은 디렉터리의 것을 먼저 쓴다. 설치본 경로를 고정하면 라우터와 후처리기의
+  # 버전이 어긋나 새 인자(--last-message-log 등)를 옛 후처리기가 무시한다. 설치본은 폴백이다.
+  local _route_dir post_script
+  _route_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+  post_script="${_route_dir}/tfx-route-post.mjs"
+  if [[ ! -f "$post_script" ]]; then
+    post_script="${HOME}/.claude/scripts/tfx-route-post.mjs"
+  fi
   if [[ -f "$post_script" ]]; then
     node "$post_script" \
       --agent "$AGENT_TYPE" \
@@ -3587,6 +3647,8 @@ EOF
       --mcp-profile "$MCP_PROFILE" \
       --stderr-log "$STDERR_LOG" \
       --stdout-log "$STDOUT_LOG" \
+      --last-message-log "$CODEX_LAST_MESSAGE_LOG" \
+      --result-reason "$result_reason" \
       --rerouted-from "${TFX_REROUTED_FROM:-}" \
       --max-bytes "$MAX_STDOUT_BYTES" \
       --tee-active "$use_tee" \
@@ -3599,16 +3661,38 @@ EOF
     [[ -n "${TFX_REROUTED_FROM:-}" ]] && echo "rerouted_from: $TFX_REROUTED_FROM"
     echo "exit_code: $exit_code"
     echo "elapsed: ${elapsed}s"
-    echo "status: $([ $exit_code -eq 0 ] && echo success || echo failed)"
-    echo "=== OUTPUT ==="
-    if [[ "${TFX_CLEAN_TUI:-1}" != "0" ]]; then
-      cat "$STDOUT_LOG" 2>/dev/null \
-        | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
-        | sed '/^[[:space:]]*[╭╮╰╯│─┌┐└┘├┤┬┴┼]/d' \
-        | sed '/^[[:space:]]*[›❯][[:space:]]*$/d' \
-        | head -c "$MAX_STDOUT_BYTES"
+    echo "stdout_log: $STDOUT_LOG"
+    [[ "$CLI_TYPE" == "codex" ]] && echo "last_message_log: $CODEX_LAST_MESSAGE_LOG"
+    if [[ -n "$result_reason" ]]; then
+      echo "status: partial"
+      echo "reason: $result_reason"
+      echo "=== PARTIAL OUTPUT ==="
     else
-      cat "$STDOUT_LOG" 2>/dev/null | head -c "$MAX_STDOUT_BYTES"
+      echo "status: $([ $exit_code -eq 0 ] && echo success || echo failed)"
+      echo "=== OUTPUT ==="
+    fi
+    local result_output_log="$STDOUT_LOG"
+    if [[ "$CLI_TYPE" == "codex" && -s "$CODEX_LAST_MESSAGE_LOG" ]]; then
+      result_output_log="$CODEX_LAST_MESSAGE_LOG"
+    fi
+    local capped_output_log="$result_output_log"
+    if [[ "${TFX_CLEAN_TUI:-1}" != "0" ]]; then
+      capped_output_log="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-clean-output.log"
+      sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$result_output_log" 2>/dev/null \
+        | sed '/^[[:space:]]*[╭╮╰╯│─┌┐└┘├┤┬┴┼]/d' \
+        | sed '/^[[:space:]]*[›❯][[:space:]]*$/d' > "$capped_output_log"
+    fi
+    local output_bytes=0
+    [[ -f "$capped_output_log" ]] && output_bytes=$(wc -c < "$capped_output_log" 2>/dev/null | tr -d ' ')
+    if [[ "$output_bytes" -gt "$MAX_STDOUT_BYTES" ]]; then
+      echo "--- [출력 ${output_bytes}B → ${MAX_STDOUT_BYTES}B로 절삭됨; tail ${MAX_STDOUT_BYTES}B 유지] ---"
+      tail -c "$MAX_STDOUT_BYTES" "$capped_output_log" 2>/dev/null
+    else
+      cat "$capped_output_log" 2>/dev/null
+    fi
+    if [[ -n "$result_reason" && -s "$STDERR_LOG" ]]; then
+      echo "=== STDERR ==="
+      tail -n 20 "$STDERR_LOG"
     fi
   fi
 
@@ -3619,7 +3703,12 @@ EOF
     echo "cli: $CLI_TYPE"
     echo "exit_code: $exit_code"
     echo "elapsed: ${elapsed}s"
-    echo "status: $([ $exit_code -eq 0 ] && echo success || echo failed)"
+    if [[ -n "$result_reason" ]]; then
+      echo "status: partial"
+      echo "reason: $result_reason"
+    else
+      echo "status: $([ $exit_code -eq 0 ] && echo success || echo failed)"
+    fi
     echo "stdout_log: $STDOUT_LOG"
     echo "result_file: $result_file"
   } > "$result_file" 2>/dev/null

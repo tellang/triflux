@@ -37,7 +37,7 @@ triflux  →  superpowers  (금지)
 |------|---------|
 | gstack 스킬 없음 | `tfx-auto`로 직접 라우팅 |
 | superpowers review 실패 | triflux `--mode consensus` 3-CLI 합의로 대체 |
-| triflux headless guard 차단 | 오류 즉시 서페이스. gstack/sp 우회 금지 |
+| triflux 라우팅 오류 | 오류 즉시 서페이스. gstack/sp 우회 금지 |
 
 ## 책임 매트릭스
 
@@ -100,6 +100,6 @@ triflux  →  superpowers  (금지)
 | triflux 코어가 gstack 스킬을 `spawn`으로 호출 | 역방향 의존 → 순환 참조 가능성 | triflux는 결과만 반환. gstack이 triflux를 호출하는 방향으로 |
 | superpowers `/review` 스킬을 triflux 코어에 `import` | sp → tfx 단방향 위반 | triflux는 자체 review primitive 사용 또는 hook으로 sp 결과 수신 |
 | 80+ 스킬 키워드 충돌 시 임의 선택 | 비결정적 라우팅 | 이 문서 §충돌 해소 표에서 1순위를 명확히 따름 |
-| gstack `/ship`이 triflux를 우회하고 codex 직접 호출 | headless-guard 차단 | gstack → triflux → headless 경로 필수 |
+| gstack `/ship`이 triflux를 우회하고 codex 직접 호출 | 라우팅 규약 위반 | gstack → triflux → headless 경로 필수 |
 | 발표자 영상 워크플로우에서 tfx-auto만 사용 | /office-hours 게이트 없이 배포 → QA 누락 | gstack /office-hours → tfx-auto --mode deep → tfx-swarm 순서 준수 |
 | sp 판정 없이 triflux auto-merge | 미검증 코드 머지 | swarm 완료 후 superpowers review verdict 수신 확인 후 merge |

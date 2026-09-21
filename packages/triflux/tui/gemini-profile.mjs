@@ -35,34 +35,20 @@ import {
   YELLOW,
 } from "./core.mjs";
 
+import { DEFAULT_GEMINI_PROFILES } from "../scripts/lib/gemini-profiles.mjs";
+
 const GEMINI_DIR = join(homedir(), ".gemini");
 const CONFIG_PATH = join(GEMINI_DIR, "triflux-profiles.json");
 
+// `agy models` display name 이 SSOT 다 (scripts/lib/gemini-profiles.mjs 와 동일 형식).
 const KNOWN_MODELS = [
-  { label: "gemini-3.1-pro-preview", hint: "3.1 Pro — 플래그십" },
-  { label: "gemini-3-flash-preview", hint: "3.0 Flash — 빠른 응답" },
-  { label: "gemini-2.5-pro", hint: "2.5 Pro — 안정" },
-  { label: "gemini-2.5-flash", hint: "2.5 Flash — 경량" },
-  { label: "gemini-2.5-flash-lite", hint: "2.5 Flash Lite — 최경량" },
+  { label: "Gemini 3.8 Flash (High)", hint: "3.8 Flash (High) — 코드/추론 강화" },
+  { label: "Gemini 3.8 Flash (Medium)", hint: "3.8 Flash (Medium) — 기본" },
+  { label: "Gemini 3.8 Flash (Low)", hint: "3.8 Flash (Low) — 경량" },
   { label: "직접 입력", hint: "" },
 ];
 
-const DEFAULT_CONFIG = {
-  model: "gemini-3.1-pro-preview",
-  profiles: {
-    pro31: {
-      model: "gemini-3.1-pro-preview",
-      hint: "3.1 Pro — 플래그십 (1M ctx, 멀티모달)",
-    },
-    flash3: {
-      model: "gemini-3-flash-preview",
-      hint: "3.0 Flash — 빠른 응답, 비용 효율",
-    },
-    pro25: { model: "gemini-2.5-pro", hint: "2.5 Pro — 안정 (추론 강화)" },
-    flash25: { model: "gemini-2.5-flash", hint: "2.5 Flash — 경량 범용" },
-    lite25: { model: "gemini-2.5-flash-lite", hint: "2.5 Flash Lite — 최경량" },
-  },
-};
+const DEFAULT_CONFIG = structuredClone(DEFAULT_GEMINI_PROFILES);
 
 // ── JSON Config ──
 
@@ -110,9 +96,10 @@ function showStatus(config) {
 
 function modelColor(model) {
   if (!model) return `${DIM}inherit${RESET}`;
-  if (model.includes("pro")) return `${YELLOW}${model}${RESET}`;
-  if (model.includes("flash-lite")) return `${GREEN}${model}${RESET}`;
-  if (model.includes("flash")) return `${CYAN}${model}${RESET}`;
+  const low = model.toLowerCase();
+  if (low.includes("pro")) return `${YELLOW}${model}${RESET}`;
+  if (low.includes("flash-lite")) return `${GREEN}${model}${RESET}`;
+  if (low.includes("flash")) return `${CYAN}${model}${RESET}`;
   return `${WHITE}${model}${RESET}`;
 }
 

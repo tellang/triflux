@@ -63,12 +63,23 @@ export async function startMuxTeam({
 
   ok("CLI 초기화 대기 (3초)...");
   await new Promise((resolve) => setTimeout(resolve, 3000));
-  await orchestrate(sessionId, assignments, {
+  const promptInjectionFailures = await orchestrate(sessionId, assignments, {
     hubUrl,
     teammateMode,
     lead: { target: leadTarget, cli: lead, task },
+    onInjectionFailure(failure) {
+      warn(
+        `${failure.cli} ${failure.role} prompt 제출 실패 (${failure.target}): ${failure.message}`,
+      );
+    },
   });
-  ok("리드/워커 프롬프트 주입 완료");
+  if (promptInjectionFailures.length === 0) {
+    ok("리드/워커 프롬프트 주입 완료");
+  } else {
+    warn(
+      `prompt 제출 실패 ${promptInjectionFailures.length}건 — 세션 상태에 기록함`,
+    );
+  }
 
   return {
     sessionName: sessionId,
@@ -79,6 +90,7 @@ export async function startMuxTeam({
     teammateMode,
     startedAt: Date.now(),
     hubUrl,
+    promptInjectionFailures,
     members,
     panes: Object.fromEntries(
       members.map((member) => [
@@ -114,7 +126,12 @@ export async function startMuxTeam({
       );
       console.log(`  ${DIM}Ctrl+B → D: 세션 분리 (백그라운드)${RESET}\n`);
       if (process.stdout.isTTY && process.stdin.isTTY) attachSession(sessionId);
-      else if (splitAttachToClient(sessionId)) {
+      else if (
+        splitAttachToClient(sessionId, {
+          targetPane: process.env.TMUX_PANE,
+          tmuxEnv: process.env.TMUX,
+        })
+      ) {
         ok("non-TTY 환경: 바깥 tmux 클라이언트 창을 분할해 attach함");
         console.log(`  ${DIM}분할 pane에서 나가기: Ctrl+B → D${RESET}\n`);
       } else {

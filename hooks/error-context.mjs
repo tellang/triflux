@@ -129,9 +129,8 @@ function main() {
     JSON.stringify(input.tool_result || ""),
   ].join("\n");
 
-  // ── reflexion 적응형 학습: safety-guard/headless-guard 차단을 패널티로 기록 ──
-  const isSafetyBlock =
-    /\[(?:safety-guard|headless-guard)\].*(?:BLOCKED|차단)/i.test(errorText);
+  // ── reflexion 적응형 학습: safety-guard 차단을 패널티로 기록 ──
+  const isSafetyBlock = /\[safety-guard\].*(?:BLOCKED|차단)/i.test(errorText);
   if (isSafetyBlock) {
     try {
       const home = process.env.HOME || process.env.USERPROFILE || "";
@@ -147,9 +146,7 @@ function main() {
           errorText.match(/\[.*?\]\s*(.{0,120})/)?.[1] ||
           errorText.slice(0, 120),
         command_preview: command.slice(0, 200),
-        source: errorText.includes("safety-guard")
-          ? "safety-guard"
-          : "headless-guard",
+        source: "safety-guard",
       };
       writeFileSync(penaltyFile, JSON.stringify(entry) + "\n", { flag: "a" });
     } catch {

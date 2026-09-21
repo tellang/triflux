@@ -277,11 +277,9 @@ describe("setup-sync: SYNC_MAP", () => {
     }
   });
 
-  it("headless-guard-fast.sh가 SYNC_MAP에 포함되어 있다", () => {
-    const hasFastSh = SYNC_MAP.some(
-      (e) => e.label === "headless-guard-fast.sh",
-    );
-    assert.ok(hasFastSh, "SYNC_MAP must include headless-guard-fast.sh");
+  it("제거된 headless-guard 는 SYNC_MAP 에 다시 들어오지 않는다", () => {
+    const stale = SYNC_MAP.filter((e) => /headless-guard/.test(e.label));
+    assert.deepEqual(stale, []);
   });
 
   it("scripts/lib/*.sh도 SYNC_MAP에 포함한다 (#227)", () => {

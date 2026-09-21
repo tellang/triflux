@@ -4,6 +4,15 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve as pathResolve } from "node:path";
 import { resolveNestedCodexAgentProfile } from "../../scripts/lib/cli-codex.mjs";
 import { codexProfileConfigOverrides } from "../../scripts/lib/codex-profile-config.mjs";
+import {
+  buildDisabledCliError,
+  normalizeCliName,
+  resolveCliPolicy,
+} from "../../scripts/lib/machine-profile.mjs";
+import {
+  resolveGeminiModel,
+  resolveGeminiProfileForPurpose,
+} from "../../scripts/lib/gemini-profiles.mjs";
 import { whichCommand } from "../platform.mjs";
 
 const WIN32_EXT_PRECEDENCE = [".cmd", ".exe", ".bat", ".ps1"];
@@ -96,6 +105,19 @@ export function resolveCliExecutable(cli, opts = {}) {
 
 export function buildSpawnSpecForMode(mode, opts = {}) {
   const cli = normalizeCli(opts.cli || "codex");
+
+  // TFX_DISABLE_* SSOT 집행. route 를 우회하는 spawn 경로도 tfx-route.sh 와 같은
+  // 정책을 따른다. 정책 판독은 런타임 process.env 와 machine profile 만 쓰고,
+  // 자식에게 넘길 세션 env(opts.env)는 쓰지 않는다. 주입 시임은 opts.cliPolicy
+  // (계산된 정책)와 opts.policyEnv(env 객체) 둘뿐이다.
+  // claude 처럼 정책 대상이 아닌 CLI 는 프로파일 파일을 읽지 않는다.
+  if (normalizeCliName(cli)) {
+    const cliPolicy =
+      opts.cliPolicy ?? resolveCliPolicy(opts.policyEnv ?? process.env);
+    const blockedCli = buildDisabledCliError(cli, cliPolicy);
+    if (blockedCli) throw blockedCli;
+  }
+
   const prompt = asPrompt(opts.prompt);
   const commandName = cli === "antigravity" ? "agy" : cli;
   const resolvedCommand = resolveCliExecutable(commandName, opts);
@@ -126,12 +148,26 @@ export function buildSpawnSpecForMode(mode, opts = {}) {
   };
 
   if (cli === "antigravity") {
-    const args = ["--print", "--dangerously-skip-permissions"];
+    // agy 1.1.27: --print 는 값(프롬프트)을 받는 마지막 인자다. stdin 프롬프트는
+    // "empty prompt" 로 거부되므로 argv 로 넘긴다.
+    // effort 는 역할별 SSOT(scripts/lib/gemini-profiles.mjs). 명시 model 이 우선한다.
+    const model =
+      typeof opts.model === "string" && opts.model.trim()
+        ? resolveGeminiModel(opts.model.trim(), {
+            profilesPath: opts.geminiProfilesPath,
+          })
+        : resolveGeminiModel(
+            resolveGeminiProfileForPurpose(opts.role || opts.agent),
+            { profilesPath: opts.geminiProfilesPath },
+          );
+    const args = ["--dangerously-skip-permissions"];
+    if (model) args.push("--model", model);
+    args.push("--print", prompt);
     return {
       ...wrap(args),
       useExec: true,
       shell: false,
-      stdinPrompt: prompt.length > 0,
+      stdinPrompt: false,
       prompt,
     };
   }
