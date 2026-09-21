@@ -78,7 +78,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 > 1. **실행**: CLI 에이전트는 반드시 `Bash("bash ~/.claude/scripts/tfx-route.sh ...")`. Claude 네이티브(explore/verifier/test-engineer/qa-tester)만 `Agent()`.
 > 2. **비용/편향 분리**: 실행 워커 비용은 Codex/Antigravity 우선으로 낮추되, consensus/debate/panel에서는 Claude/Opus를 최후수단이 아니라 counter-bias outvoice로 둔다. Claude가 실행을 맡는 경우는 명시적 `--cli claude`, Claude-native host role, 또는 fallback뿐이다.
 > 2-a. **Anti-bias triad**: Triflux의 본가 목적은 Codex↔Claude 균형으로 단일 모델 편향을 줄이는 것이다. `triad`는 Claude/Opus(counter-bias outvoice) + Codex(implementation/reality check) + Antigravity(product/UX auxiliary)를 보존하고, disputed/minority view를 삭제하지 않는다.
-> 2-b. **Claude effort**: Claude lane은 Claude Code CLI의 `--model`과 `--effort`를 사용한다. Triflux의 `CLI_EFFORT`/profile 값은 `low|medium|high|xhigh|max` Claude effort로 매핑한다(`ultracode`는 `claude --effort` 값이 아니라 하니스 모드이므로 기본 effort로 매핑된다). skill 문서가 모델 ID를 하드코딩하지 않는다.
+> 2-b. **Claude effort**: Claude lane은 Claude Code CLI의 `--model`과 `--effort`를 사용한다. Triflux의 `CLI_EFFORT`/profile 값은 `low|medium|high|xhigh|max` Claude effort로 매핑한다. `ultracode`도 공식 `--effort` 값(v2.1.203+)이지만 프로필 매핑에서는 쓰지 않는다. skill 문서가 모델 ID를 하드코딩하지 않는다.
 > 3. **DAG**: SEQUENTIAL/DAG이면 레벨 기반 순차 실행. `.omc/context/{sid}/` 생성, context_output 저장, 실패 시 후속 SKIP.
 > 4. **트리아지**: Codex `exec --full-auto` 분류 + Opus 인라인 분해. Agent 스폰 금지.
 > 5. **thorough**: `-t`/`--thorough` 시 파이프라인 init 필수. 커맨드 숏컷은 항상 quick.

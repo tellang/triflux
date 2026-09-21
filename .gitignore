@@ -168,3 +168,7 @@ swarm-prompts/
 # macOS Finder metadata
 .DS_Store
 **/.DS_Store
+
+# 스킬 평가 산출물(skill-creator eval)은 추적하지 않는다
+skills/*-workspace/
+packages/triflux/skills/*-workspace/

@@ -79,7 +79,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | 반복 | 끝까지, 멈추지마, ralph | `--retry ralph` (Phase 3 true state machine, `.claude/rules/tfx-escalation-chain.md` 참조) |
 | 승격 | 알아서 승격, 안 되면 더 강한 모델 | `--retry auto-escalate` (Phase 3 CLI 체인 승격) |
 | 자율 | 알아서, 자동으로, autopilot | autopilot 모드 |
-| 최대 effort | ultracode, 울트라코드 | Claude Code 최대 effort — 기본적으로 멀티에이전트 Workflow 오케스트레이션, 토큰 비용 무관 철저성 우선 (tfx CLI 플래그 아님, Claude Code 하니스 모드) |
+| 최대 effort | ultracode, 울트라코드 | Claude Code `--effort ultracode`(v2.1.203+). 멀티에이전트 Workflow 오케스트레이션, 토큰 비용 무관 철저성 우선. tfx CLI 플래그는 아니다 |
 
 ## CLI 우선순위 정책 — default = Codex
 
