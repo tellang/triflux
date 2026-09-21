@@ -7,8 +7,6 @@ const DEFAULT_CONFIDENCE = 0.5;
 const ACTIVE_RULE_CONFIDENCE = 0.5;
 const ADAPTIVE_PROMOTION_STEP = 0.1;
 const ADAPTIVE_DECAY_STEP = 0.1;
-/** @deprecated 세션 기반 decay에서 시간 기반으로 변경됨. 미사용. */
-const _ADAPTIVE_DECAY_WINDOW = 5;
 const ADAPTIVE_DELETE_THRESHOLD = 0.3;
 
 function clampConfidence(value) {
@@ -100,61 +98,6 @@ function buildAdaptiveSolution(errorContext = {}, errorText = "") {
   if (command)
     return `${toolName} 재시도 전 입력을 검증하세요: ${command}\n원인: ${summary}`;
   return `${toolName} 재시도 전 실패 원인을 검증하세요: ${summary}`;
-}
-
-function normalizeSessionIds(sessionIds) {
-  if (!Array.isArray(sessionIds)) return [];
-  return [
-    ...new Set(
-      sessionIds.filter((value) => typeof value === "string" && value.trim()),
-    ),
-  ];
-}
-
-/** @deprecated reflexion_entries 기반. adaptive_rules에서는 미사용. 세션 인식 복원 시 재활용 예정. */
-function getAdaptiveState(rule = {}) {
-  const state = rule.adaptive_state || {};
-  const session_ids = normalizeSessionIds(state.session_ids);
-  return {
-    ...state,
-    project_slug: pickString(state.project_slug, rule.context?.project_slug),
-    session_ids,
-    session_occurrences: Math.max(
-      state.session_occurrences || 0,
-      session_ids.length,
-    ),
-    last_seen_session: pickSessionCount(state.last_seen_session),
-    last_decay_session: pickSessionCount(state.last_decay_session),
-  };
-}
-
-/** @deprecated reflexion_entries 기반. adaptive_rules에서는 미사용. 세션 인식 복원 시 재활용 예정. */
-function _mergeAdaptiveState(rule, errorContext = {}) {
-  const current = getAdaptiveState(rule);
-  const sessionId = pickSessionId(errorContext);
-  const sessionCount = pickSessionCount(
-    errorContext.sessionCount,
-    errorContext.session_count,
-    errorContext.context?.sessionCount,
-    errorContext.context?.session_count,
-  );
-  const session_ids = normalizeSessionIds(
-    sessionId ? [...current.session_ids, sessionId] : current.session_ids,
-  );
-  return {
-    ...current,
-    project_slug: pickString(
-      pickProjectSlug(errorContext),
-      current.project_slug,
-    ),
-    session_ids,
-    session_occurrences: Math.max(
-      current.session_occurrences,
-      session_ids.length,
-    ),
-    last_seen_session: Math.max(current.last_seen_session, sessionCount),
-    last_decay_session: current.last_decay_session || sessionCount,
-  };
 }
 
 function filterEntriesByType(entries, type) {
