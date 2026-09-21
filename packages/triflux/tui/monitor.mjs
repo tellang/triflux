@@ -140,6 +140,7 @@ export function createMonitor(opts = {}) {
         command,
         cwd: process.cwd(),
         profile: "triflux",
+        targetPane: opts.targetPane,
       });
       if (!opened) {
         statusMessage = `${RED}터미널 열기 실패${RESET}`;

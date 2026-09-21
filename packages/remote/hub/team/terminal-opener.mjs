@@ -111,6 +111,35 @@ function wtResultSucceeded(result) {
   return result?.success !== false;
 }
 
+function resolveLeadPane(value) {
+  const pane = String(value || "");
+  return /^%\d+$/u.test(pane) ? pane : null;
+}
+
+function resolveLeadWindow(tmuxExec, targetPane) {
+  try {
+    const targetWindow = String(
+      tmuxExec(
+        `display-message -p -t ${targetPane} '#{session_name}:#{window_index}'`,
+      ) ?? "",
+    ).trim();
+    return targetWindow || null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveLeadSocket(tmuxExec, targetPane) {
+  try {
+    const socketPath = String(
+      tmuxExec(`display-message -p -t ${targetPane} '#{socket_path}'`) ?? "",
+    ).trim();
+    return socketPath || null;
+  } catch {
+    return null;
+  }
+}
+
 export function createTerminalOpener(deps = {}) {
   const platform = resolvePlatform(deps);
   const tmuxExec = deps.tmuxExec || defaultTmuxExec;
@@ -134,12 +163,22 @@ export function createTerminalOpener(deps = {}) {
 
     const mux = resolveMux(deps);
     if (isTmuxLikeMux(mux, platform)) {
-      tmuxExec(
-        `new-window -n ${shellQuote(title)} ${shellQuote(
-          buildCommandString(spec),
-        )}`,
-      );
-      return true;
+      const targetPane = resolveLeadPane(spec.targetPane);
+      if (!targetPane) return false;
+      const targetWindow = resolveLeadWindow(tmuxExec, targetPane);
+      if (!targetWindow) return false;
+      try {
+        // tmux new-window는 pane target(%N)을 거부하므로, 요청 pane에서 해석한
+        // 정확한 session:window 뒤에 새 window를 삽입한다.
+        tmuxExec(
+          `new-window -a -t ${shellQuote(targetWindow)} -n ${shellQuote(
+            title,
+          )} ${shellQuote(buildCommandString(spec))}`,
+        );
+        return true;
+      } catch {
+        return false;
+      }
     }
 
     if (platform === "darwin") {
@@ -174,14 +213,30 @@ export function createTerminalOpener(deps = {}) {
 
     const mux = resolveMux(deps);
     if (isTmuxLikeMux(mux, platform)) {
-      const attachCommand = buildAttachCommand(mux, sessionName, deps);
+      const targetPane = resolveLeadPane(opts.targetPane);
+      if (!targetPane) return false;
+      const socketPath =
+        mux === "psmux" ? null : resolveLeadSocket(tmuxExec, targetPane);
+      if (mux !== "psmux" && !socketPath) return false;
+      const attachCommand =
+        mux === "psmux"
+          ? buildAttachCommand(mux, sessionName, deps)
+          : `env -u TMUX tmux -S ${shellQuote(
+              socketPath,
+            )} attach-session -t ${shellQuote(sessionName)}`;
       if (!attachCommand) return false;
-      tmuxExec(
-        `new-window -n ${shellQuote(opts.title ?? sessionName)} ${shellQuote(
-          attachCommand,
-        )}`,
-      );
-      return true;
+      const targetWindow = resolveLeadWindow(tmuxExec, targetPane);
+      if (!targetWindow) return false;
+      try {
+        tmuxExec(
+          `new-window -a -t ${shellQuote(targetWindow)} -n ${shellQuote(
+            opts.title ?? sessionName,
+          )} ${shellQuote(attachCommand)}`,
+        );
+        return true;
+      } catch {
+        return false;
+      }
     }
 
     return false;

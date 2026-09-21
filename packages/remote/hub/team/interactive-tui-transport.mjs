@@ -14,6 +14,7 @@ const STARTUP_PROMPT_MAX_ATTEMPTS = 30;
 const STARTUP_PROMPT_POLL_INTERVAL_MS = 300;
 const PIPE_TEMP_PREFIX = "triflux-tui-pipe-";
 const PIPE_OUTPUT_FILE = "pane.out";
+const CODEX_NO_APPROVAL_FLAG = "--dangerously-bypass-approvals-and-sandbox";
 
 const CONTROL_SEQUENCES = [
   ["\x1b[A", "Up"],
@@ -39,6 +40,13 @@ export async function defaultRunTmux(args, options = {}) {
     timeout: options.timeout ?? 15_000,
     maxBuffer: MAX_BUFFER,
   });
+}
+
+export function ensureInteractiveCodexPosture(launchCmd) {
+  const command = String(launchCmd || "").trim();
+  if (!/^codex(?:\s|$)/u.test(command)) return command;
+  if (command.includes(CODEX_NO_APPROVAL_FLAG)) return command;
+  return command.replace(/^codex/u, `codex ${CODEX_NO_APPROVAL_FLAG}`);
 }
 
 export function createInteractiveTuiTransport({
@@ -113,7 +121,13 @@ export function createInteractiveTuiTransport({
       ...(cwd ? ["-c", cwd] : []),
       ...buildTmuxEnvArgs(env),
     ]);
-    await tmux(["send-keys", "-t", sessionName, String(launchCmd), "Enter"]);
+    await tmux([
+      "send-keys",
+      "-t",
+      sessionName,
+      ensureInteractiveCodexPosture(launchCmd),
+      "Enter",
+    ]);
     await dismissStartupPrompts({ tmux, captureVisible, sessionName });
     started = true;
     await startOutputStream();

@@ -17,6 +17,8 @@ const attachedTmuxEnv = {
 function createHarness({
   platform = "darwin",
   env = attachedTmuxEnv,
+  leadPane = "%7",
+  leadTmux = attachedTmuxEnv.TMUX,
   autoAttach = true,
   dashboard = true,
 } = {}) {
@@ -35,6 +37,8 @@ function createHarness({
       dashboardLayout: "lite",
       dashboardSize: 0.3,
       dashboardAnchor: "window",
+      leadPane,
+      leadTmux,
       onProgress: (event) => calls.progress.push(event),
       _deps: {
         platform,
@@ -91,6 +95,18 @@ describe("headless tmux auto-attach", () => {
     assert.equal(calls.terminal.length, 0);
   });
 
+  it("daemon의 inherited TMUX/TMUX_PANE 대신 명시적으로 전달한 lead context를 쓴다", () => {
+    const { calls, handler } = createHarness({
+      env: { TMUX: "/tmp/wrong-socket,999,0", TMUX_PANE: "%99" },
+      leadPane: "%7",
+      leadTmux: attachedTmuxEnv.TMUX,
+    });
+
+    handler({ type: "session_created" });
+
+    assert.equal(calls.tmux[0][5], "%7");
+  });
+
   it("autoAttach=false이면 pane을 만들지 않고 progress는 전달한다", () => {
     const { calls, handler } = createHarness({ autoAttach: false });
 
@@ -102,13 +118,13 @@ describe("headless tmux auto-attach", () => {
     assert.equal(calls.progress.length, 1);
   });
 
-  for (const env of [
-    {},
-    { TMUX: attachedTmuxEnv.TMUX },
-    { ...attachedTmuxEnv, TMUX_PANE: "7; display-message" },
+  for (const { leadTmux, leadPane } of [
+    { leadTmux: null, leadPane: "%7" },
+    { leadTmux: attachedTmuxEnv.TMUX, leadPane: null },
+    { leadTmux: attachedTmuxEnv.TMUX, leadPane: "7; display-message" },
   ]) {
-    it(`tmux env가 부적합하면 fail-open한다: ${JSON.stringify(env)}`, () => {
-      const { calls, handler } = createHarness({ env });
+    it(`tmux target context가 부적합하면 fail-open한다: ${JSON.stringify({ leadTmux, leadPane })}`, () => {
+      const { calls, handler } = createHarness({ leadTmux, leadPane });
       const event = { type: "session_created" };
 
       assert.doesNotThrow(() => handler(event));
@@ -130,6 +146,8 @@ describe("headless tmux auto-attach", () => {
     const handler = createHeadlessAutoAttachHandler("safe-session", 1, {
       autoAttach: true,
       dashboard: true,
+      leadPane: "%7",
+      leadTmux: attachedTmuxEnv.TMUX,
       onProgress: (event) => progress.push(event),
       _deps: {
         platform: "darwin",
@@ -328,6 +346,8 @@ describe("daemon observation session", () => {
           autoAttach: true,
           dashboard,
           dashboardLayout: "lite",
+          leadPane: "%7",
+          leadTmux: attachedTmuxEnv.TMUX,
           _deps: deps,
         },
       );
@@ -342,14 +362,30 @@ describe("daemon observation session", () => {
       assert.match(calls.send[0][1], /tui-viewer\.mjs/u);
       assert.match(calls.send[0][1], /--source files/u);
       assert.match(calls.send[0][1], /--workers 2/u);
+      assert.match(calls.send[0][1], /--lead-pane '%7'/u);
       assert.doesNotMatch(calls.send[0][1], /touch \/tmp/u);
     });
   }
 
   for (const [name, options] of [
-    ["autoAttach=false", { autoAttach: false }],
-    ["tmux env 없음", { autoAttach: true, env: {} }],
-    ["Windows", { autoAttach: true, platform: "win32" }],
+    [
+      "autoAttach=false",
+      { autoAttach: false, leadPane: "%7", leadTmux: attachedTmuxEnv.TMUX },
+    ],
+    ["lead tmux 없음", { autoAttach: true, leadPane: "%7", leadTmux: null }],
+    [
+      "lead pane 없음",
+      { autoAttach: true, leadPane: null, leadTmux: attachedTmuxEnv.TMUX },
+    ],
+    [
+      "Windows",
+      {
+        autoAttach: true,
+        platform: "win32",
+        leadPane: "%7",
+        leadTmux: attachedTmuxEnv.TMUX,
+      },
+    ],
   ]) {
     it(`${name}이면 observer session을 만들지 않는다`, () => {
       const { calls, deps } = observerHarness({
@@ -362,6 +398,8 @@ describe("daemon observation session", () => {
         {
           autoAttach: options.autoAttach,
           dashboard: true,
+          leadPane: options.leadPane,
+          leadTmux: options.leadTmux,
           _deps: deps,
         },
       );
@@ -387,6 +425,8 @@ describe("daemon observation session", () => {
       {
         autoAttach: true,
         dashboard: true,
+        leadPane: "%7",
+        leadTmux: attachedTmuxEnv.TMUX,
         onProgress: (event) => progress.push(event),
         _deps: deps,
       },
@@ -425,6 +465,8 @@ describe("daemon observation session", () => {
       {
         autoAttach: true,
         dashboard: true,
+        leadPane: "%7",
+        leadTmux: attachedTmuxEnv.TMUX,
         onProgress: (event) => progress.push(event),
         _deps: deps,
       },
@@ -459,6 +501,8 @@ describe("daemon observation session", () => {
       {
         autoAttach: true,
         dashboard: true,
+        leadPane: "%7",
+        leadTmux: attachedTmuxEnv.TMUX,
         onProgress: (event) => progress.push(event),
         _deps: deps,
       },
@@ -492,6 +536,8 @@ describe("daemon observation session", () => {
         {
           autoAttach: true,
           dashboard: true,
+          leadPane: "%7",
+          leadTmux: attachedTmuxEnv.TMUX,
           onProgress() {
             warningCalls += 1;
             throw new Error("warning sink failed");
@@ -514,11 +560,13 @@ describe("attachHeadlessTmuxPane", () => {
 
     assert.equal(
       attachHeadlessTmuxPane("custom-socket", {
+        targetPane: "%9",
+        tmuxEnv: `${socketPath},4321,7`,
         _deps: {
           platform: "darwin",
           env: {
-            TMUX: `${socketPath},4321,7`,
-            TMUX_PANE: "%9",
+            TMUX: "/tmp/wrong-socket,999,0",
+            TMUX_PANE: "%99",
           },
           psmuxExec: (args) => calls.push(args),
         },
@@ -552,6 +600,8 @@ describe("attachHeadlessTmuxPane", () => {
 
     assert.equal(
       attachHeadlessTmuxPane("safe-session", {
+        targetPane: "%9",
+        tmuxEnv: ",4321,7",
         _deps: {
           platform: "darwin",
           env: { TMUX: ",4321,7", TMUX_PANE: "%9" },
@@ -571,6 +621,8 @@ describe("attachHeadlessTmuxPane", () => {
 
     assert.equal(
       attachHeadlessTmuxPane("alpha; rm -rf /", {
+        targetPane: "%7",
+        tmuxEnv: attachedTmuxEnv.TMUX,
         _deps: {
           platform: "darwin",
           env: attachedTmuxEnv,

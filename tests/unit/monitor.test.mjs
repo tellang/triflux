@@ -126,6 +126,7 @@ describe("createMonitor", () => {
     const monitor = createMonitor({
       stream: makeStream(),
       refreshMs: 0,
+      targetPane: "%77",
       _deps: {
         pollAgents: () => [
           {
@@ -164,6 +165,7 @@ describe("createMonitor", () => {
     assert.equal(openCalls[0].title, "tfx worker-a");
     assert.equal(openCalls[0].cwd, process.cwd());
     assert.equal(openCalls[0].profile, "triflux");
+    assert.equal(openCalls[0].targetPane, "%77");
     assert.match(openCalls[0].command, /psmux attach-session -t 'worker-a'/);
   });
 });

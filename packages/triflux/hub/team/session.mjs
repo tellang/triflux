@@ -476,8 +476,8 @@ export function attachSession(sessionName) {
 }
 
 /**
- * non-TTY 환경용 attach fallback: 바깥 tmux 서버에 attach된 클라이언트의
- * 현재 창을 분할해 그 pane 안에서 대상 세션에 attach한다.
+ * non-TTY 환경용 attach fallback: 요청 프로세스가 명시적으로 넘긴 lead pane을
+ * 분할해 그 pane 안에서 대상 세션에 attach한다.
  *
  * 호출 프로세스가 pipe(non-TTY)로 실행돼 attachSession()이 불가능해도,
  * tmux 서버에 보내는 split-window는 호출자 TTY가 필요 없다. 새 pane에는
@@ -485,47 +485,50 @@ export function attachSession(sessionName) {
  * env -u TMUX는 nested-attach 보호 해제용이다.
  *
  * @param {string} sessionName attach할 대상 세션
+ * @param {string} targetPane 요청 lead의 `$TMUX_PANE` (`%N`)
+ * @param {string} tmuxEnv 요청 lead의 `$TMUX` (`socket,pid,index`)
  * @returns {boolean} 분할 attach 성공 여부 (false면 호출자가 기존 생략 경로 유지)
  */
-export function splitAttachToClient(sessionName) {
-  if (detectMultiplexer() !== "tmux") return false;
-
-  const list = spawnSync(
-    "tmux",
-    [
-      "list-clients",
-      "-F",
-      "#{client_session}\t#{client_activity}\t#{client_flags}",
-    ],
-    { encoding: "utf8" },
-  );
-  if ((list.status ?? 1) !== 0 || !list.stdout?.trim()) return false;
-
-  const clients = list.stdout
-    .trim()
-    .split("\n")
-    .map((line) => {
-      const [session, activity, flags] = line.split("\t");
-      return { session, activity: Number(activity) || 0, flags: flags || "" };
-    })
-    // 대상 세션을 이미 보고 있는 클라이언트는 분할 대상에서 제외
-    .filter((c) => c.session && c.session !== sessionName);
-  if (clients.length === 0) return false;
-
-  const target =
-    clients.find((c) => c.flags.includes("focused")) ??
-    clients.sort((a, b) => b.activity - a.activity)[0];
-
-  // 상하 분할: 좌우 분할은 절반 폭이 워커 pane 가독 하한(100cols) 미만인 경우가 흔함
-  const split = spawnSync("tmux", [
+export function buildSplitAttachArgs(sessionName, targetPane, tmuxEnv) {
+  const normalizedSessionName = String(sessionName || "");
+  if (!normalizedSessionName.trim()) {
+    throw new Error("session name is required");
+  }
+  if (!/^%\d+$/u.test(String(targetPane || ""))) {
+    throw new Error("requesting lead TMUX_PANE is required");
+  }
+  const socketPath = String(tmuxEnv || "").split(",", 1)[0];
+  if (!socketPath.trim()) {
+    throw new Error("requesting lead TMUX socket is required");
+  }
+  const quotedSocket = `'${socketPath.replace(/'/gu, "'\\''")}'`;
+  const quotedSessionName = `'${normalizedSessionName.replace(/'/gu, "'\\''")}'`;
+  return [
     "split-window",
     "-t",
-    `${target.session}:`,
+    targetPane,
     "-v",
     "-l",
     "50%",
-    `env -u TMUX tmux attach -t ${sessionName}`,
-  ]);
+    `env -u TMUX tmux -S ${quotedSocket} attach -t ${quotedSessionName}`,
+  ];
+}
+
+export function splitAttachToClient(sessionName, opts = {}) {
+  const deps = opts._deps || {};
+  const detectMux = deps.detectMultiplexer || detectMultiplexer;
+  if (detectMux() !== "tmux") return false;
+
+  let args;
+  try {
+    args = buildSplitAttachArgs(sessionName, opts.targetPane, opts.tmuxEnv);
+  } catch {
+    return false;
+  }
+
+  // 상하 분할: 좌우 분할은 절반 폭이 워커 pane 가독 하한(100cols) 미만인 경우가 흔함
+  const spawn = deps.spawnSync || spawnSync;
+  const split = spawn("tmux", args);
   return (split.status ?? 1) === 0;
 }
 
