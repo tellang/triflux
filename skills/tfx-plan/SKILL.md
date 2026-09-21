@@ -170,7 +170,7 @@ consensus_score = CONSENSUS / 전체 * 100
 ### Step 2: Antigravity 위임
 
 ```
-Bash("printf '%s' '소프트웨어 아키텍트로서 구현 계획. 기능: {feature}. 컨텍스트: {context}. 파일: {file_list}. 출력: 1) 영향 범위 2) 태스크 분해 (검증 방법 포함) 3) 리스크/의존성 4) 복잡도' | agy --print --dangerously-skip-permissions --print-timeout 10m")
+Bash("agy --dangerously-skip-permissions --print '소프트웨어 아키텍트로서 구현 계획. 기능: {feature}. 컨텍스트: {context}. 파일: {file_list}. 출력: 1) 영향 범위 2) 태스크 분해 (검증 방법 포함) 3) 리스크/의존성 4) 복잡도' --print-timeout 10m")
 ```
 
 **Fallback**: Antigravity 실패 시 Claude Opus 직접.

@@ -61,16 +61,18 @@ describe("GeminiBackend", () => {
     assert.equal(backend.command(), "agy");
   });
 
-  it("buildArgs — agy --print stdin 계약으로 실행", () => {
+  it("buildArgs — agy --print 값 계약으로 실행", () => {
     const cmd = backend.buildArgs(
       "(Get-Content -Raw '/tmp/p.txt')",
       "/tmp/r.txt",
     );
-    assert.ok(cmd.includes("agy --print"), `agy --print 포함: ${cmd}`);
-    assert.ok(
-      cmd.includes("--dangerously-skip-permissions"),
-      `dangerously flag 포함: ${cmd}`,
+    assert.match(
+      cmd,
+      /agy --dangerously-skip-permissions --print (?:\(Get-Content -Raw '.*\.prompt'\)|"\$\(cat '.*\.prompt'\)")/,
+      `agy --print 값 순서: ${cmd}`,
     );
+    assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
+    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
     assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
     assert.ok(cmd.includes("> '/tmp/r.txt'"), `> result 포함: ${cmd}`);
   });
@@ -87,28 +89,25 @@ describe("buildGeminiCommand: platform-specific formatting", () => {
   const prompt = "(Get-Content -Raw '/tmp/p.txt')";
   const resultFile = "/tmp/r.txt";
 
-  it("Windows 분기 — prompt file을 agy stdin으로 전달", () => {
+  it("Windows 분기 — prompt file을 agy --print 값으로 전달", () => {
     const cmd = buildGeminiCommand(prompt, resultFile, { isWindows: true });
-    assert.ok(
-      cmd.startsWith(`Get-Content -Raw '${resultFile}.prompt' | agy --print `),
-      `Windows 분기 시작 prefix: ${cmd}`,
+    assert.equal(
+      cmd,
+      `agy --dangerously-skip-permissions --print (Get-Content -Raw '${resultFile}.prompt') > '${resultFile}' 2>'${resultFile}.err'`,
     );
-    assert.ok(
-      cmd.includes(`> '${resultFile}' 2>'${resultFile}.err'`),
-      `result/err 리다이렉트: ${cmd}`,
-    );
+    assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
+    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
     assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
   });
 
-  it("Unix 분기 — prompt file redirect로 agy stdin 전달", () => {
+  it("Unix 분기 — prompt file을 agy --print 값으로 전달", () => {
     const cmd = buildGeminiCommand(prompt, resultFile, { isWindows: false });
-    assert.ok(
-      cmd.startsWith(
-        `agy --print --dangerously-skip-permissions < '${resultFile}.prompt' `,
-      ),
-      `Unix 분기 시작 prefix: ${cmd}`,
+    assert.equal(
+      cmd,
+      `agy --dangerously-skip-permissions --print "$(cat '${resultFile}.prompt')" > '${resultFile}' 2>'${resultFile}.err'`,
     );
-    assert.ok(cmd.includes(`> '${resultFile}'`), `result redirect: ${cmd}`);
+    assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
+    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
     assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
   });
 
@@ -117,17 +116,22 @@ describe("buildGeminiCommand: platform-specific formatting", () => {
     const unix = buildGeminiCommand(prompt, resultFile, { isWindows: false });
     for (const cmd of [win, unix]) {
       assert.ok(
-        /\bagy\s+--print\b/.test(cmd),
-        `agy --print 플래그 누락: ${cmd}`,
+        /\bagy\s+--dangerously-skip-permissions\s+--print\s+/.test(cmd),
+        `agy print 값 순서 누락: ${cmd}`,
       );
-      assert.ok(cmd.includes("--dangerously-skip-permissions"), cmd);
+      assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
+      assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
+      assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
     }
   });
 
   it("isWindows 생략 시 Unix 분기로 기본 동작", () => {
     const cmd = buildGeminiCommand(prompt, resultFile);
-    assert.ok(cmd.startsWith("agy --print"), `기본 Unix 포맷: ${cmd}`);
-    assert.ok(cmd.includes(`< '${resultFile}.prompt'`), `기본 stdin: ${cmd}`);
+    assert.ok(
+      cmd.startsWith('agy --dangerously-skip-permissions --print "$(cat '),
+      `기본 Unix value 포맷: ${cmd}`,
+    );
+    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
   });
 });
 
@@ -171,16 +175,19 @@ describe("AntigravityBackend", () => {
     assert.equal(backend.command(), "agy");
   });
 
-  it("buildArgs — agy --print stdin pipe 계약을 사용한다", () => {
+  it("buildArgs — agy --print 값 계약을 사용한다", () => {
     const cmd = backend.buildArgs(
       "(Get-Content -Raw '/tmp/p.txt')",
       "/tmp/r.txt",
     );
-    assert.ok(cmd.includes("agy --print"), `agy --print 포함: ${cmd}`);
-    assert.ok(
-      cmd.includes("--dangerously-skip-permissions"),
-      `dangerously flag 포함: ${cmd}`,
+    assert.match(
+      cmd,
+      /agy --dangerously-skip-permissions --print (?:\(Get-Content -Raw '.*\.prompt'\)|"\$\(cat '.*\.prompt'\)")/,
+      `agy --print 값 순서: ${cmd}`,
     );
+    assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
+    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
+    assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
     assert.ok(cmd.includes("> '/tmp/r.txt'"), `> result 포함: ${cmd}`);
   });
 
@@ -193,31 +200,32 @@ describe("buildAntigravityCommand: platform-specific formatting", () => {
   const prompt = "(Get-Content -Raw '/tmp/p.txt')";
   const resultFile = "/tmp/r.txt";
 
-  it("Windows 분기 — prompt file을 PowerShell pipeline으로 stdin 전달", () => {
+  it("Windows 분기 — prompt file을 PowerShell --print 값으로 전달", () => {
     const cmd = buildAntigravityCommand(prompt, resultFile, {
       isWindows: true,
     });
     assert.equal(readFileSync(`${resultFile}.prompt`, "utf8"), prompt);
-    assert.ok(
-      cmd.startsWith(`Get-Content -Raw '${resultFile}.prompt' | agy --print `),
+    assert.equal(
       cmd,
+      `agy --dangerously-skip-permissions --print (Get-Content -Raw '${resultFile}.prompt') > '${resultFile}' 2>'${resultFile}.err'`,
     );
-    assert.ok(cmd.includes("--dangerously-skip-permissions"), cmd);
-    assert.ok(!cmd.includes(prompt), cmd);
+    assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
+    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
+    assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
   });
 
-  it("Unix 분기 — prompt file redirect로 stdin 전달", () => {
+  it("Unix 분기 — prompt file을 --print 값으로 전달", () => {
     const cmd = buildAntigravityCommand(prompt, resultFile, {
       isWindows: false,
     });
-    assert.ok(
-      cmd.startsWith(
-        `agy --print --dangerously-skip-permissions < '${resultFile}.prompt' `,
-      ),
+    assert.equal(
       cmd,
+      `agy --dangerously-skip-permissions --print "$(cat '${resultFile}.prompt')" > '${resultFile}' 2>'${resultFile}.err'`,
     );
     assert.equal(readFileSync(`${resultFile}.prompt`, "utf8"), prompt);
-    assert.ok(cmd.includes(`> '${resultFile}'`), cmd);
+    assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
+    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
+    assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
     assert.ok(!cmd.includes(prompt), cmd);
   });
 });
@@ -349,22 +357,36 @@ describe("packages/remote/hub/team/backend.mjs — mirror contract", () => {
     );
   });
 
-  it("Windows 분기에 agy stdin print 포함", () => {
+  it("Windows 분기에 agy print 값 계약 포함", () => {
     assert.ok(
-      /Get-Content\s+-Raw\s+'\$\{promptFile\}'\s*\|\s*agy\s+--print/.test(
+      /agy\s+--dangerously-skip-permissions\s+--print\s+\(Get-Content\s+-Raw\s+'\$\{promptFile\}'\)\s+>/.test(
         REMOTE_BACKEND,
       ),
-      "Windows 분기 agy stdin 누락",
+      "Windows 분기 agy print 값 계약 누락",
     );
   });
 
-  it("Unix 분기에 agy stdin print 포함", () => {
+  it("Unix 분기에 agy print 값 계약 포함", () => {
     assert.ok(
-      /agy\s+--print\s+--dangerously-skip-permissions\s+<\s+'\$\{promptFile\}'/s.test(
+      /agy\s+--dangerously-skip-permissions\s+--print\s+"\$\(cat\s+'\$\{promptFile\}'\)"\s+>/.test(
         REMOTE_BACKEND,
       ),
-      "Unix 분기 agy stdin 누락",
+      "Unix 분기 agy print 값 계약 누락",
     );
+  });
+
+  it("파이프와 입력 redirect를 포함하지 않는다", () => {
+    assert.ok(
+      !/Get-Content\s+-Raw\s+'\$\{promptFile\}'\s*\|\s*agy/.test(
+        REMOTE_BACKEND,
+      ),
+      "Windows stdin pipe 금지",
+    );
+    assert.ok(
+      !/agy\s+--print[^\n]*<\s+'\$\{promptFile\}'/.test(REMOTE_BACKEND),
+      "Unix stdin redirect 금지",
+    );
+    assert.ok(!/gemini\s+--/.test(REMOTE_BACKEND), "gemini 직접 호출 금지");
   });
 
   it("GeminiBackend.buildArgs 가 buildGeminiCommand alias 를 호출", () => {

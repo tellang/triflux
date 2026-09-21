@@ -1,5 +1,5 @@
 // hub/team/launcher-template.mjs — 결정론적 런처 생성
-// 기존 codex-adapter와 Antigravity stdin 계약을 소비하여
+// 기존 codex-adapter와 Antigravity print-value 계약을 소비하여
 // 동일 입력 → 동일 args 배열을 보장한다.
 // F1 해결: codex adapter가 --dangerously-bypass-approvals-and-sandbox 자동 추가
 // F4 해결: codex exec "prompt" 인라인 (파이프/리다이렉트 아님)

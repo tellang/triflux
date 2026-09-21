@@ -53,14 +53,30 @@ describe("launcher-template: buildLauncher", () => {
     );
   });
 
-  it("gemini 런처는 agy stdin print 계약을 사용해야 한다", () => {
+  it("gemini 런처는 agy print 값 계약을 사용해야 한다", () => {
     const result = buildLauncher({ agent: "gemini", prompt: "test" });
     assert.equal(result.bin, "agy");
-    assert.ok(result.command.includes("agy --print"), result.command);
-    assert.ok(
-      result.command.includes("--dangerously-skip-permissions"),
+    assert.equal(
       result.command,
+      "agy --dangerously-skip-permissions --print 'test'",
     );
+    assert.ok(!result.command.includes(" | agy"), result.command);
+    assert.ok(!result.command.includes(" < '"), result.command);
+    assert.ok(!result.command.includes("gemini "), result.command);
+  });
+
+  it("gemini 런처는 stdout/stderr redirect를 보존한다", () => {
+    const result = buildLauncher({
+      agent: "gemini",
+      prompt: "test",
+      resultFile: "/tmp/result.txt",
+    });
+    assert.equal(
+      result.command,
+      "agy --dangerously-skip-permissions --print 'test' > '/tmp/result.txt' 2>'/tmp/result.txt.err'",
+    );
+    assert.ok(!result.command.includes(" | agy"), result.command);
+    assert.ok(!result.command.includes(" < '"), result.command);
     assert.ok(!result.command.includes("gemini "), result.command);
   });
 
