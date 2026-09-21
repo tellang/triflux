@@ -116,19 +116,13 @@ headless-guard 가 `codex exec` / `agy -y -p` 직접 호출을 차단한다. tfx
 `tfx-auto --mode deep`, `tfx-auto --mode consensus --shape consensus|debate|panel`,
 `tfx-auto --parallel swarm --mode consensus --isolation worktree`, `tfx-auto --retry ralph`
 
-호환 alias:
-- `tfx-consensus` → `tfx-auto --mode consensus`
-- `tfx-debate` → `tfx-auto --mode consensus --shape debate`
-- `tfx-panel` → `tfx-auto --mode consensus --shape panel`
-- 위 3개 alias 는 deprecated 이며 stderr 경고 + stdout `[DEPRECATED]` + `.omc/state/alias-usage.log` append 규약을 따른다
-
 **Layer 3 — Remote/병렬**
 
 | 스킬 | 용도 |
 |------|------|
 | tfx-multi | 2+개 태스크 headless 병렬 |
 | tfx-swarm | PRD별 worktree + 다중 모델(Codex/Antigravity/Claude) + 다중 기기(로컬+원격) |
-| tfx-remote | Claude Code 원격 세션 (SSH, user-state hosts.json setup 필수; tfx-remote-spawn은 legacy alias) |
+| tfx-remote | Claude Code 원격 세션 (SSH, user-state hosts.json setup 필수) |
 
 **Claude 네이티브** (CLI 불필요): tfx-find, tfx-forge, tfx-prune, tfx-index, tfx-setup, tfx-doctor, tfx-hooks, tfx-hub
 
@@ -144,7 +138,7 @@ headless-guard 가 `codex exec` / `agy -y -p` 직접 호출을 차단한다. tfx
 - "auto" 단독 → tfx-auto. "알아서 해" → tfx-autopilot
 - "코드에서 찾아" → tfx-find. "알아봐" → tfx-research
 - 복합 의도: "구현하고 리뷰까지" → tfx-auto → cross-review hook
-- "합의해서 비교해" 류 요청은 alias 대신 기본적으로 `tfx-auto --mode consensus --shape debate` 로 fold 한다
+- "합의해서 비교해" 류 요청은 기본적으로 `tfx-auto --mode consensus --shape debate` 로 fold 한다
 - `ralph` 표기는 항상 `--retry ralph` mode 를 지칭. persist 스킬도 동일 의미. `--retry auto-escalate` 와 동시 사용 불가 (escalation-chain.md 규약).
 - `tfx-auto` 자동 swarm escalate: 2+ 태스크 + 코드 변경 ≥ 1건 시 자동. 명시 `--parallel N` override 가능 (warning).
 

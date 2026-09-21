@@ -69,12 +69,13 @@ mac에서 위 코드가 호출돼도 일찍 반환하므로 실행되지 않는 
 
 `config.toml`에 이미 설정된 값은 CLI 플래그로 중복 지정하지 않는다.
 
-| `config.toml`에 있으면 | CLI에서 생략 |
-|---------------------|-------------|
-| `approval_mode = "auto"` | `-a`, `--full-auto` |
-| `sandbox = "workspace-write"` | `-s`, `--full-auto` |
+| `config.toml` 키 | 같은 뜻의 CLI 플래그 |
+|---|---|
+| `approval_policy` (`on-request` / `never` / granular) | `--dangerously-bypass-approvals-and-sandbox` |
+| `sandbox_mode` (`read-only` / `workspace-write` / `danger-full-access`) | `-s`, `--sandbox` |
 
-안전한 방식: `config.toml`에 기본값을 두고 CLI에서는 `--profile`만 선택한다.
+`--full-auto` 는 Codex 0.147 에서 제거됐다. 안전한 방식: `config.toml`에 기본값을 두고 CLI에서는 `--profile`만 선택한다.
+프로필은 `$CODEX_HOME/<이름>.config.toml` 파일이다(인라인 `[profiles.*]` 아님).
 </codex-config>
 
 <account-broker>
@@ -101,9 +102,8 @@ conductor·headless·swarm-hypervisor가 하나의 AccountBroker 단일 인스�
 
 | 스킬 | 대상 | 방식 |
 |------|------|------|
-| tfx-codex-swarm | 로컬 전용 | 로컬 워크트리 + psmux |
+| tfx-swarm | 로컬 worktree + shard `host:` 원격 분배 | PRD별 worktree, 다중 모델·기기 |
 | tfx-remote | Claude Code 원격 | SSH → Claude Code 세션 → 내부 tfx 라우팅 |
-| tfx-remote-spawn | 폐기된 별칭 | tfx-remote로 통합됨; 직접 호출 금지 |
 
 Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TTY 문제가 있다.
 원격에서 Codex가 필요하면 tfx-remote → Claude Code → Claude가 내부에서 Codex를 호출한다.

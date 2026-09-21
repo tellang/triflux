@@ -125,10 +125,10 @@ EOF
    * 워크트리 정리 완료 여부
    * push 안내 (`git push`)
 
-## codex-swarm 연동
+## swarm 연동
 
-이 스킬은 `tfx-codex-swarm`의 Step 10 "결과 수집"에서 자동으로 호출된다.
-codex-swarm이 완료한 각 워크트리에 대해 순차적으로 실행:
+이 스킬은 `tfx-swarm`의 결과 수집 단계에서 자동으로 호출된다.
+swarm 이 완료한 각 워크트리에 대해 순차적으로 실행:
 
 ```
 각 워크트리에 대해:

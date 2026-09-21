@@ -265,9 +265,9 @@ agy 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율
 
 `--mode consensus` 는 orchestration family 를 뜻하고, `--shape` 는 그 family 내부의 출력/해석 surface 를 뜻한다.
 
-- `--mode consensus --shape consensus` → 기존 `tfx-consensus`
-- `--mode consensus --shape debate` → 기존 `tfx-debate`
-- `--mode consensus --shape panel` → 기존 `tfx-panel`
+- `--mode consensus --shape consensus`: 3-CLI findings 합의/충돌 판정
+- `--mode consensus --shape debate`: 옵션 비교 + ranking/recommendation
+- `--mode consensus --shape panel`: 전문가 역할 시뮬레이션
 
 canonical 호출:
 
@@ -287,7 +287,7 @@ shape 의미:
 
 | `--shape` | 의미 | orchestration 차이 |
 |-----------|------|-------------------|
-| `consensus` | 3-CLI findings 합의/충돌 판정 | 기존 `tfx-consensus` 의미 |
+| `consensus` | 3-CLI findings 합의/충돌 판정 | findings renderer |
 | `debate` | 옵션 비교 + ranking/recommendation | 옵션/criteria renderer |
 | `panel` | 전문가 역할 시뮬레이션 | expert roster + panel renderer |
 
@@ -663,31 +663,6 @@ Bash("tfx-live peer --cli-a codex --cli-b claude \
 **중단과 세션 정리**: SIGINT/SIGTERM은 transcript 수와 무관하게 `status=aborted`로 분리하고 `hops_completed`, `exit_reason=user_interrupt|terminated`를 남긴다. 첫 신호 뒤 3초 안에 transcript flush → status 기록 → session stop을 시도한다. stop이 3초를 넘기면 orphan tmux 세션은 허용하지만 transcript/status 파일은 보존한다. 두 번째 신호는 graceful 경로를 포기하고 즉시 종료한다.
 
 **보고**: 배치 모드의 `=== OUTPUT ===` 대신 `tfx-live peer` JSON의 `status`, `exit_reason`, `hops_completed`, `transcript_path`, `status_path`를 위 규칙대로 해석하고 transcript를 요약한다.
-
-### Legacy 스킬 매핑
-
-| legacy 스킬 | `tfx-auto` 등가 플래그 |
-|------------|----------------------|
-| `tfx-autopilot` | `(기본)` |
-| `tfx-autoroute` | `--retry auto-escalate` (Phase 3) |
-| `tfx-fullcycle` | `--mode deep --parallel 1` |
-| `tfx-persist` | `--retry ralph` (Phase 3, unlimited) |
-| `tfx-codex` | `--cli codex` |
-| `tfx-antigravity` | `--cli antigravity` |
-| `tfx-auto-codex` | `--cli codex --lead codex --no-claude-native` (Phase 3) |
-| `tfx-consensus` | `--mode consensus` |
-| `tfx-debate` | `--mode consensus --shape debate` |
-| `tfx-panel` | `--mode consensus --shape panel` |
-| `tfx-multi` | `--parallel N --mode deep` |
-| `tfx-swarm` | `--parallel swarm --mode consensus --isolation worktree` |
-| `tfx-codex-swarm` | `--parallel swarm --cli codex --isolation worktree` |
-
-legacy 스킬은 thin alias 로 유지. 호출 시 stderr 에 `[deprecated] {legacy} -> use: tfx-auto --{flag} {value}` 1회 출력, stdout 머리부에 `[DEPRECATED]` 마커를 남기고 `.omc/state/alias-usage.log` 에 usage 를 append 한다. Phase 5 (v11) 에 물리 삭제.
-
-Phase 5 삭제 게이트:
-- 코드 검색에서 alias 파일 자체만 남아야 함
-- integration + golden test 100% pass
-- `.omc/state/alias-usage.log` 7일 집계 0
 
 ### 파싱 규칙
 

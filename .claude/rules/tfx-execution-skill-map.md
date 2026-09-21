@@ -22,8 +22,6 @@
 | tfx-multi | 로컬 병렬 (cwd 공유, worktree 불필요; mode 생략=`auto`) | auto 내부 dispatch 또는 `/tfx-auto --parallel N --mode deep` |
 | tfx-swarm | 격리 + 다기기 + auto merge (로컬/원격) | auto 내부 dispatch 또는 `/tfx-auto --parallel swarm --mode consensus --isolation worktree` |
 | tfx-remote | 단일 세션 관리 (list/attach/send/resume/탐색) | 직접 호출: `/tfx-remote` |
-| tfx-remote-spawn | **DEPRECATED** — tfx-remote로 통합됨 | 사용 금지 |
-| tfx-codex-swarm | **DEPRECATED** — tfx-swarm으로 통합됨 | 사용 금지 |
 
 ## 핵심 차이 (격리 기준)
 
