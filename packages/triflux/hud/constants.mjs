@@ -71,7 +71,7 @@ export const CONTEXT_MONITOR_LOG_DIR = join(
   "logs",
 );
 
-// 원격 프로브 캐시 (tfx-remote-spawn)
+// 원격 프로브 캐시 (tfx-remote)
 export const REMOTE_ENV_CACHE_DIR = join(
   homedir(),
   ".claude",
