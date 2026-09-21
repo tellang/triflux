@@ -1118,6 +1118,38 @@ agy_supports_headless() {
   [[ "$help_text" == *"--print"* && "$help_text" == *"--dangerously-skip-permissions"* ]]
 }
 
+# agy는 SSH 환경을 감지하면 macOS Keychain 대신 file token store를 사용한다.
+# 이 cache는 한 route invocation에서 Keychain probe를 한 번만 수행하게 한다.
+_AGY_KEYCHAIN_SSH_SCRUB=""
+agy_should_scrub_ssh_env() {
+  if [[ -n "$_AGY_KEYCHAIN_SSH_SCRUB" ]]; then
+    [[ "$_AGY_KEYCHAIN_SSH_SCRUB" == "1" ]]
+    return
+  fi
+  _AGY_KEYCHAIN_SSH_SCRUB="0"
+
+  [[ "${TFX_AGY_KEEP_SSH_ENV:-0}" != "1" ]] || return 1
+  [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]] || return 1
+  command -v security >/dev/null 2>&1 || return 1
+
+  # probe 는 백그라운드 job 을 남기지 않는다. watchdog 서브셸이 호출자의
+  # stdout/stderr 파이프를 상속하면 route 출력을 읽는 쪽이 EOF 를 받지 못한다.
+  local -a _probe_cmd=()
+  if command -v gtimeout >/dev/null 2>&1; then
+    _probe_cmd=(gtimeout 2)
+  elif command -v timeout >/dev/null 2>&1; then
+    _probe_cmd=(timeout 2)
+  fi
+
+  # bash 3.2(macOS 기본)는 set -u 에서 빈 배열의 "${a[@]}" 확장을 unbound 로 본다.
+  if ${_probe_cmd[@]+"${_probe_cmd[@]}"} security find-generic-password -s gemini -a antigravity -w \
+    </dev/null >/dev/null 2>&1; then
+    _AGY_KEYCHAIN_SSH_SCRUB="1"
+    return 0
+  fi
+  return 1
+}
+
 codex_is_available() {
   [[ "${TFX_CODEX_OK:-0}" == "1" ]] \
     && command -v "${CODEX_BIN:-codex}" &>/dev/null
@@ -2624,6 +2656,7 @@ run_antigravity_exec() {
   local exit_code_local=0
   local worker_pid
   local -a agy_args=()
+  local -a agy_exec_env=()
   local -a _cli_tokens=()
   local _print_flag=""
   local _tok
@@ -2665,10 +2698,15 @@ run_antigravity_exec() {
     return 127
   fi
 
+  if agy_should_scrub_ssh_env; then
+    agy_exec_env=(env -u SSH_CONNECTION -u SSH_CLIENT -u SSH_TTY)
+    echo "[tfx-route] agy가 Keychain을 읽도록 SSH 변수를 제거했습니다." >&2
+  fi
+
   if [[ "$use_tee_flag" == "true" ]]; then
-    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${agy_args[@]}" </dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" ${agy_exec_env[@]+"${agy_exec_env[@]}"} "$CLI_CMD" "${agy_args[@]}" </dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
-    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${agy_args[@]}" </dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" ${agy_exec_env[@]+"${agy_exec_env[@]}"} "$CLI_CMD" "${agy_args[@]}" </dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
   if [[ -n "${JOB_DIR:-}" && -w "${JOB_DIR}" ]]; then
