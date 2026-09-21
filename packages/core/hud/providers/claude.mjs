@@ -116,70 +116,85 @@ function normalizeClaudeCredentials(data, source, supportsUsageApi = true) {
   };
 }
 
+// Claude Code 2.1.x secure-storage 규칙(바이너리 실측, 2026-09-21):
+// - CLAUDE_SECURESTORAGE_CONFIG_DIR 가 정의돼 있으면 그 값이 스코프다. 빈 문자열은 기본 디렉터리를
+//   뜻해 접미사를 붙이지 않고, 값이 있으면 NFC 로 정규화한 뒤 해시한다.
+// - 아니면 CLAUDE_CONFIG_DIR 원문(경로 확장·정규화 없이)을 sha256 해 앞 8자리를 붙인다.
+//   OMC 격리 세션의 `Claude Code-credentials-<hash>` 항목이 이 규칙으로 만들어진다.
 export function getKeychainServiceName(env = process.env) {
-  const configDir = env.CLAUDE_CONFIG_DIR;
-  if (configDir) {
-    const hash = createHash("sha256")
-      .update(configDir)
-      .digest("hex")
-      .slice(0, 8);
-    return `${CLAUDE_KEYCHAIN_SERVICE}-${hash}`;
+  const secureDir = env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+  let scope = "";
+  if (secureDir !== undefined) {
+    scope = secureDir ? secureDir.normalize("NFC") : "";
+  } else {
+    scope = env.CLAUDE_CONFIG_DIR || "";
   }
-  return CLAUDE_KEYCHAIN_SERVICE;
+  if (!scope) return CLAUDE_KEYCHAIN_SERVICE;
+  const hash = createHash("sha256").update(scope).digest("hex").slice(0, 8);
+  return `${CLAUDE_KEYCHAIN_SERVICE}-${hash}`;
 }
 
-function isCredentialExpired(creds) {
-  return creds.expiresAt != null && creds.expiresAt <= Date.now();
-}
+const KEYCHAIN_ACCOUNT_PATTERN = /^[a-zA-Z0-9._-]+$/;
+const KEYCHAIN_ACCOUNT_FALLBACK = "claude-code-user";
 
-function getKeychainAccount() {
+// Claude Code 와 같은 계정 규칙: USER 환경변수 → os.userInfo().username → 허용 문자 밖이면 고정 대체값.
+export function getKeychainAccount(env = process.env) {
+  let name = null;
   try {
-    return userInfo().username?.trim() || null;
+    name = env.USER || userInfo().username;
   } catch {
-    return null;
+    name = null;
   }
+  if (typeof name !== "string" || !KEYCHAIN_ACCOUNT_PATTERN.test(name)) {
+    return KEYCHAIN_ACCOUNT_FALLBACK;
+  }
+  return name;
 }
 
-function readClaudeKeychainCredential(
+function readClaudeKeychainRaw(
   serviceName,
   account,
   execFileSyncFn = execFileSync,
 ) {
   try {
-    const args = account
-      ? ["find-generic-password", "-s", serviceName, "-a", account, "-w"]
-      : ["find-generic-password", "-s", serviceName, "-w"];
-    const raw = execFileSyncFn("security", args, { encoding: "utf8" });
-    return normalizeClaudeCredentials(JSON.parse(raw.trim()), "keychain");
+    const raw = execFileSyncFn(
+      "security",
+      ["find-generic-password", "-s", serviceName, "-a", account, "-w"],
+      { encoding: "utf8" },
+    );
+    return JSON.parse(raw.trim());
   } catch {
     return null;
   }
+}
+
+// Keychain 항목은 (service, account) 복합 키다. Claude Code 는 항상 `-a <account>` 로 쓰고 읽으므로
+// 같은 키만 본다. `-a` 없는 조회는 "계정 없는 항목"이 아니라 같은 service 의 임의 계정 항목을 돌려주고,
+// `add-generic-password` 는 `-a` 가 필수라 그런 항목에는 되쓸 수도 없다(2026-09-21 실측, exit 2).
+export function readClaudeKeychainEntry({
+  execFileSyncFn = execFileSync,
+  env = process.env,
+} = {}) {
+  const serviceName = getKeychainServiceName(env);
+  const account = getKeychainAccount(env);
+  const raw = readClaudeKeychainRaw(serviceName, account, execFileSyncFn);
+  return raw ? { raw, account, serviceName } : null;
 }
 
 function readClaudeKeychainCredentials(
   execFileSyncFn = execFileSync,
   env = process.env,
 ) {
-  const serviceName = getKeychainServiceName(env);
-  const candidateAccounts = [];
-  const username = getKeychainAccount();
-  if (username) candidateAccounts.push(username);
-  candidateAccounts.push(undefined);
-
-  let expiredFallback = null;
-  for (const account of candidateAccounts) {
-    const creds = readClaudeKeychainCredential(
-      serviceName,
-      account,
-      execFileSyncFn,
-    );
-    if (!creds) continue;
-    if (!isCredentialExpired(creds)) return creds;
-    expiredFallback ??= creds;
-  }
-  return expiredFallback;
+  const entry = readClaudeKeychainEntry({ execFileSyncFn, env });
+  if (!entry) return null;
+  const creds = normalizeClaudeCredentials(entry.raw, "keychain");
+  // 만료된 항목도 그대로 돌려준다. 호출자가 refreshToken 으로 갱신한 뒤 같은 항목에 되쓴다.
+  return creds ? { ...creds, keychainAccount: entry.account } : null;
 }
 
+// 읽기 순서는 Claude Code 와 같다. macOS 에서는 Keychain 이 정본이고 평문 파일은 Keychain 을 못 쓸 때의
+// 폴백이라, 옛 파일이 남아 있어도 Keychain 항목이 있으면 그쪽이 현재 로그인이다.
+// 반환값에는 되쓰기 대상을 고정하기 위해 출처 위치(keychainAccount 또는 filePath)를 함께 싣는다.
 export function readClaudeCredentials({
   readCredentialFile = (filePath = CLAUDE_CREDENTIALS_PATH) =>
     readJson(filePath, null),
@@ -187,21 +202,31 @@ export function readClaudeCredentials({
   execFileSyncFn = execFileSync,
   env = process.env,
 } = {}) {
-  for (const filePath of getClaudeCredentialPaths(env)) {
-    try {
-      const fileCreds = normalizeClaudeCredentials(
-        readCredentialFile(filePath),
-        "file",
-      );
-      if (fileCreds) return fileCreds;
-    } catch {
-      /* try next credential source */
-    }
-  }
+  const tryKeychain = () =>
+    platform === "darwin"
+      ? readClaudeKeychainCredentials(execFileSyncFn, env)
+      : null;
 
-  if (platform === "darwin") {
-    const keychainCreds = readClaudeKeychainCredentials(execFileSyncFn, env);
-    if (keychainCreds) return keychainCreds;
+  const tryFile = () => {
+    for (const filePath of getClaudeCredentialPaths(env)) {
+      try {
+        const fileCreds = normalizeClaudeCredentials(
+          readCredentialFile(filePath),
+          "file",
+        );
+        if (fileCreds) return { ...fileCreds, filePath };
+      } catch {
+        /* try next credential source */
+      }
+    }
+    return null;
+  };
+
+  const readers =
+    platform === "darwin" ? [tryKeychain, tryFile] : [tryFile, tryKeychain];
+  for (const read of readers) {
+    const creds = read();
+    if (creds) return creds;
   }
 
   if (env.ANTHROPIC_API_KEY) {
@@ -274,74 +299,115 @@ export function refreshClaudeAccessToken(refreshToken) {
   });
 }
 
-function serializeClaudeCredentials(creds) {
+// 기존 항목의 나머지 필드(scopes, subscriptionType, rateLimitTier, refreshTokenExpiresAt, mcpOAuth 등)를
+// 보존하고 토큰 필드만 갈아 끼운다. 저장 형태(claudeAiOauth 래퍼 또는 legacy 평면)는 그대로 둔다.
+function mergeClaudeCredentials(creds, existingRaw) {
+  const base =
+    existingRaw &&
+    typeof existingRaw === "object" &&
+    !Array.isArray(existingRaw)
+      ? existingRaw
+      : null;
+  const hasWrapper =
+    !!base?.claudeAiOauth && typeof base.claudeAiOauth === "object";
   const oauth = {
+    ...(hasWrapper ? base.claudeAiOauth : (base ?? {})),
     accessToken: creds.accessToken,
   };
   if (creds.expiresAt != null) oauth.expiresAt = creds.expiresAt;
   if (creds.refreshToken) oauth.refreshToken = creds.refreshToken;
+  if (hasWrapper) return { ...base, claudeAiOauth: oauth };
+  if (base) return oauth;
   return { claudeAiOauth: oauth };
 }
+
+// Claude Code 와 같은 쓰기 경로: 비밀값을 argv 에 두지 않도록 `security -i` 표준입력으로 명령 한 줄을
+// 넘기고 payload 는 `-X` 16진수로 싣는다. 한 줄 상한(4032B)을 넘는 큰 항목만 argv 로 내려간다.
+const KEYCHAIN_STDIN_LINE_LIMIT = 4032;
 
 function writeClaudeKeychainCredentials(
   creds,
   execFileSyncFn = execFileSync,
   env = process.env,
 ) {
-  const username = getKeychainAccount();
-  const accountArgs = username ? ["-a", username] : [];
+  const serviceName = getKeychainServiceName(env);
+  // 읽어 온 항목(keychainAccount)에 그대로 되쓴다. 현재 USER 와 달라도 다른 계정 항목을 만들지 않는다.
+  const account = creds.keychainAccount || getKeychainAccount(env);
+  const existingRaw = readClaudeKeychainRaw(
+    serviceName,
+    account,
+    execFileSyncFn,
+  );
+  const payload = mergeClaudeCredentials(creds, existingRaw);
+  const hex = Buffer.from(JSON.stringify(payload), "utf8").toString("hex");
+  const line = `add-generic-password -U -a "${account}" -s "${serviceName}" -X "${hex}"\n`;
+  if (line.length <= KEYCHAIN_STDIN_LINE_LIMIT) {
+    execFileSyncFn("security", ["-i"], {
+      input: line,
+      stdio: ["pipe", "ignore", "ignore"],
+    });
+    return;
+  }
   execFileSyncFn(
     "security",
-    [
-      "add-generic-password",
-      "-s",
-      getKeychainServiceName(env),
-      ...accountArgs,
-      "-w",
-      JSON.stringify(serializeClaudeCredentials(creds)),
-      "-U",
-    ],
+    ["add-generic-password", "-U", "-a", account, "-s", serviceName, "-X", hex],
     { stdio: "ignore" },
   );
 }
 
+function writeClaudeFileCredentials(
+  creds,
+  readCredentialFile,
+  writeCredentialFile,
+) {
+  const filePath = creds.filePath || CLAUDE_CREDENTIALS_PATH;
+  let data = null;
+  try {
+    data = readCredentialFile(filePath);
+  } catch {
+    data = null;
+  }
+  // 파일이 사라졌으면 새로 만들지 않는다 (Claude Code 가 Keychain 으로 옮긴 뒤 지운 경우)
+  if (!data) return;
+  writeCredentialFile(mergeClaudeCredentials(creds, data), filePath);
+}
+
+// 되쓰기는 자격증명을 읽어 온 저장소에만 한다. Keychain 출처를 파일에 쓰거나 파일 출처를 Keychain 에 쓰면
+// 계정이 다른 두 저장소가 섞이고(2026-09 실측: 파일=max 계정 만료분, Keychain=pro 계정 현재 로그인),
+// Claude Code 가 실제로 쓰는 Keychain 항목을 옛 계정 토큰으로 덮어쓴다.
 export function writeBackClaudeCredentials(
   creds,
   {
-    readCredentialFile = () => readJson(CLAUDE_CREDENTIALS_PATH, null),
-    writeCredentialFile = (data) =>
-      writeFileSync(CLAUDE_CREDENTIALS_PATH, JSON.stringify(data, null, 2)),
+    readCredentialFile = (filePath = CLAUDE_CREDENTIALS_PATH) =>
+      readJson(filePath, null),
+    writeCredentialFile = (data, filePath = CLAUDE_CREDENTIALS_PATH) =>
+      writeFileSync(filePath, JSON.stringify(data, null, 2), { mode: 0o600 }),
     platform = process.platform,
     execFileSyncFn = execFileSync,
     env = process.env,
   } = {},
 ) {
-  if (creds?.source === "env") return;
+  if (!creds || creds.source === "env") return;
 
-  let data = null;
-  try {
-    data = readCredentialFile();
-  } catch {
-    data = null;
-  }
-
-  if (data) {
-    const target = data.claudeAiOauth || data;
-    target.accessToken = creds.accessToken;
-    if (creds.expiresAt != null) target.expiresAt = creds.expiresAt;
-    if (creds.refreshToken) target.refreshToken = creds.refreshToken;
-    try {
-      writeCredentialFile(data);
-    } catch {
-      /* 파일 쓰기 실패 무시 */
-    }
-  }
-
-  if (platform === "darwin") {
+  if (creds.source === "keychain") {
+    if (platform !== "darwin") return;
     try {
       writeClaudeKeychainCredentials(creds, execFileSyncFn, env);
     } catch {
       /* Keychain 쓰기 실패 무시 */
+    }
+    return;
+  }
+
+  if (creds.source === "file") {
+    try {
+      writeClaudeFileCredentials(
+        creds,
+        readCredentialFile,
+        writeCredentialFile,
+      );
+    } catch {
+      /* 파일 쓰기 실패 무시 */
     }
   }
 }

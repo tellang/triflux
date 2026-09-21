@@ -89,12 +89,19 @@ export const CLAUDE_CREDENTIALS_PATH = join(
 );
 export const CLAUDE_CREDENTIALS_FILENAME = ".credentials.json";
 export const CLAUDE_CODE_USER_AGENT_FALLBACK = "claude-code/2.x";
+// Claude Code 2.1.x 평문 폴백 파일 위치: CLAUDE_SECURESTORAGE_CONFIG_DIR 가 정의돼 있으면 그 디렉터리
+// (빈 문자열은 기본 ~/.claude), 아니면 CLAUDE_CONFIG_DIR. 기본 경로는 항상 마지막 후보로 둔다.
 export function getClaudeCredentialPaths(env = process.env) {
   const paths = [];
-  if (env.CLAUDE_CONFIG_DIR) {
+  const secureDir = env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
+  if (secureDir !== undefined) {
+    if (secureDir) {
+      paths.push(join(secureDir.normalize("NFC"), CLAUDE_CREDENTIALS_FILENAME));
+    }
+  } else if (env.CLAUDE_CONFIG_DIR) {
     paths.push(join(env.CLAUDE_CONFIG_DIR, CLAUDE_CREDENTIALS_FILENAME));
   }
-  paths.push(CLAUDE_CREDENTIALS_PATH);
+  if (paths[0] !== CLAUDE_CREDENTIALS_PATH) paths.push(CLAUDE_CREDENTIALS_PATH);
   return paths;
 }
 export function getClaudeCodeUserAgent(env = process.env) {
