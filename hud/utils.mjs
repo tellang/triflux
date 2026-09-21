@@ -5,11 +5,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import {
-  PERCENT_CELL_WIDTH,
-  SV_CELL_WIDTH,
-  TIME_CELL_INNER_WIDTH,
-} from "./constants.mjs";
+import { PERCENT_CELL_WIDTH, TIME_CELL_INNER_WIDTH } from "./constants.mjs";
 
 export async function readStdinJson() {
   if (process.stdin.isTTY) return {};
@@ -336,16 +332,6 @@ export function createHttpsPost(https, timeoutMs) {
       req.end();
     });
   };
-}
-
-// sv 퍼센트 포맷 (1000+ → k 표기, 5자 고정폭)
-export function formatSvPct(value) {
-  if (value == null) return "--%".padStart(SV_CELL_WIDTH);
-  if (value >= 10000)
-    return `${Math.round(value / 1000)}k%`.padStart(SV_CELL_WIDTH);
-  if (value >= 1000)
-    return `${(value / 1000).toFixed(1)}k%`.padStart(SV_CELL_WIDTH);
-  return `${value}%`.padStart(SV_CELL_WIDTH);
 }
 
 export function formatSavings(dollars) {

@@ -162,14 +162,13 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
       CODEX_BUCKETS,
       { total: 1200 },
       null,
-      180,
       "g",
     ];
     if (options !== undefined) args.push(options);
     return stripAnsi(getMicroLine(...args));
   }
 
-  it("8번째 인자를 주지 않은 기존 호출과 빈 객체 호출의 출력이 같다", () => {
+  it("7번째 인자를 주지 않은 기존 호출과 빈 객체 호출의 출력이 같다", () => {
     assert.equal(micro(), micro({}));
   });
 
@@ -178,7 +177,7 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
     assert.ok(!line.includes("x:"), `x 세그먼트가 남아 있다: ${line}`);
     assert.ok(line.includes("c:"), "claude 세그먼트는 남아야 한다");
     assert.ok(line.includes("g:"), "gemini 세그먼트는 남아야 한다");
-    assert.ok(line.includes("sv:"), "sv 세그먼트는 남아야 한다");
+    assert.ok(!line.includes("sv:"), "sv 세그먼트는 제거됐다");
     assert.ok(line.includes("CTX:"), "CTX 세그먼트는 남아야 한다");
   });
 
@@ -206,8 +205,7 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
       line.indexOf("c:") < line.indexOf("g:"),
       `순서가 바뀌었다: ${line}`,
     );
-    assert.ok(line.indexOf("g:") < line.indexOf("sv:"));
-    assert.ok(line.indexOf("sv:") < line.indexOf("CTX:"));
+    assert.ok(line.indexOf("g:") < line.indexOf("CTX:"));
   });
 });
 

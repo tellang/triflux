@@ -22,11 +22,9 @@ import {
 import {
   ACCOUNT_LABEL_WIDTH,
   FIVE_HOUR_MS,
-  LEGACY_SV_ACCUMULATOR,
   ONE_DAY_MS,
   PROVIDER_PREFIX_WIDTH,
   SEVEN_DAY_MS,
-  SV_ACCUMULATOR_PATH,
   TEAM_STATE_PATH,
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
@@ -40,13 +38,11 @@ import {
   formatResetRemaining,
   formatResetRemainingDayHour,
   formatSavings,
-  formatSvPct,
   formatTimeCell,
   formatTimeCellDH,
   formatTokenCount,
   padAnsiRight,
   readJson,
-  readJsonMigrate,
   stripAnsi,
   truncateAnsi,
 } from "./utils.mjs";
@@ -86,25 +82,6 @@ export function readLatestBenchmarkDiff() {
   } catch {
     return null;
   }
-}
-
-// 토큰 절약액 누적치 읽기 (tfx-auto token tracker)
-export function readTokenSavings() {
-  const savingsPath = join(
-    homedir(),
-    ".omc",
-    "state",
-    "tfx-auto-tokens",
-    "savings-total.json",
-  );
-  const data = readJson(savingsPath, null);
-  if (!data || data.totalSaved === 0) return null;
-  return data;
-}
-
-// sv-accumulator.json에서 누적 토큰/비용 읽기
-export function readSvAccumulator() {
-  return readJsonMigrate(SV_ACCUMULATOR_PATH, LEGACY_SV_ACCUMULATOR, null);
 }
 
 /**
@@ -279,7 +256,6 @@ export function getMicroLine(
   codexBuckets,
   geminiSession,
   geminiBucket,
-  combinedSvPct,
   geminiMarker = "g",
   options = {},
 ) {
@@ -329,9 +305,6 @@ export function getMicroLine(
     gVal = dim("--");
   }
 
-  // sv
-  const sv = formatSvPct(combinedSvPct).trim();
-
   const cols = getTerminalColumns() || 120;
   // 세그먼트를 모아 join 한다. 차단된 프로바이더를 뺄 때 공백이 겹치지 않는다.
   const segments = [`${bold(claudeOrange("c"))}${dim(":")}${cVal}`];
@@ -341,7 +314,6 @@ export function getMicroLine(
   if (showGemini) {
     segments.push(`${bold(geminiBlue(geminiMarker))}${dim(":")}${gVal}`);
   }
-  segments.push(`${dim("sv:")}${sv}`);
   segments.push(
     `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}`,
   );
@@ -351,18 +323,9 @@ export function getMicroLine(
 // ============================================================================
 // Claude 행 렌더러
 // ============================================================================
-export function getClaudeRows(
-  currentTier,
-  contextView,
-  claudeUsage,
-  combinedSvPct,
-) {
+export function getClaudeRows(currentTier, contextView, claudeUsage) {
   const ctxView = contextView || buildContextUsageView({}, null);
   const prefix = `${bold(claudeOrange("c"))}:`;
-  // 절약 퍼센트
-  const svStr = formatSvPct(combinedSvPct);
-  const svSuffix = `${dim("sv:")}${svStr}`;
-
   // API 실측 데이터
   const fiveHourPercent = claudeUsage?.fiveHourPercent ?? null;
   const weeklyPercent = claudeUsage?.weeklyPercent ?? null;
@@ -428,7 +391,7 @@ export function getClaudeRows(
     const warning = ctxView.warningTag
       ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
       : "";
-    const contextSection = `${svSuffix} ${dim("|")} ${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}${warning}`;
+    const contextSection = `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}${warning}`;
     return [{ prefix, left: quotaSection, right: contextSection }];
   }
 
@@ -438,7 +401,7 @@ export function getClaudeRows(
   const warning = ctxView.warningTag
     ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
     : "";
-  const contextSection = `${svSuffix} ${dim("|")} ${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}${warning}`;
+  const contextSection = `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}${warning}`;
   return [{ prefix, left: quotaSection, right: contextSection }];
 }
 
@@ -523,7 +486,6 @@ export function getProviderRow(
   accountsState,
   realQuota,
   codexEmail,
-  savingsMultiplier,
   modelLabel,
 ) {
   const accountLabel = fitText(
@@ -531,10 +493,6 @@ export function getProviderRow(
     ACCOUNT_LABEL_WIDTH,
   );
 
-  // 절약 퍼센트 섹션
-  const svPct =
-    savingsMultiplier != null ? Math.round(savingsMultiplier * 100) : null;
-  const svStr = formatSvPct(svPct);
   const _modelLabelStr = modelLabel ? ` ${markerColor(modelLabel)}` : "";
 
   // 프로바이더별 색상 프로필
@@ -718,10 +676,7 @@ export function getProviderRow(
       quotaSection = `${dim("5h:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("--d--h"))}`;
     }
     const prefix = `${bold(markerColor(`${marker}`))}:`;
-    const compactRight = [
-      svStr ? `${dim("sv:")}${svStr}` : "",
-      accountLabel ? markerColor(accountLabel) : "",
-    ]
+    const compactRight = [accountLabel ? markerColor(accountLabel) : ""]
       .filter(Boolean)
       .join(" ");
     return { prefix, left: quotaSection, right: compactRight };
@@ -810,11 +765,8 @@ export function getProviderRow(
 
   const prefix = `${bold(markerColor(`${marker}`))}:`;
   const accountSection = `${markerColor(accountLabel)}`;
-  const svSection = svStr ? `${dim("sv:")}${svStr}` : "";
   const modelLabelSection = modelLabel ? markerColor(modelLabel) : "";
-  const rightParts = [svSection, accountSection, modelLabelSection].filter(
-    Boolean,
-  );
+  const rightParts = [accountSection, modelLabelSection].filter(Boolean);
   return {
     prefix,
     left: quotaSection,

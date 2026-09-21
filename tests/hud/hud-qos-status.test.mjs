@@ -218,7 +218,7 @@ describe("HUD Breakpoints", () => {
     }
   });
 
-  it("does not combine sv from Codex bucket and Gemini session fallbacks when accumulator is missing", () => {
+  it("어느 행에도 sv 절약 세그먼트를 그리지 않는다 (accumulator 유무와 무관)", () => {
     const accumulatorPaths = [
       join(mockClaudeCacheDir, "sv-accumulator.json"),
       join(mockOmcStateDir, "sv-accumulator.json"),
@@ -230,10 +230,8 @@ describe("HUD Breakpoints", () => {
     for (const path of accumulatorPaths) rmSync(path, { force: true });
     try {
       const output = stripAnsiText(runHudWithDimensions(120, 40));
-      assert.match(output, /^c: .*sv:\s*--%/m);
-      assert.doesNotMatch(output, /^c: .*sv:\s*150%/m);
-      assert.match(output, /^x: .*sv:\s*25%/m);
-      assert.match(output, /^g: .*sv:\s*60%/m);
+      assert.doesNotMatch(output, /sv:/);
+      assert.match(output, /^c: .*CTX:/m);
     } finally {
       for (const original of originals) {
         if (original.content == null) {

@@ -32,10 +32,7 @@ import {
   TFX_PREFLIGHT_CACHE_PATH,
   TFX_PREFLIGHT_CACHE_STALE_MS,
 } from "./constants.mjs";
-import {
-  buildContextUsageView,
-  deriveContextLimit,
-} from "./context-monitor.mjs";
+import { buildContextUsageView } from "./context-monitor.mjs";
 import { getMissionBoardState } from "./mission-board.mjs";
 // Claude provider
 import {
@@ -76,8 +73,6 @@ import {
   getProviderRow,
   getTeamRow,
   readLatestBenchmarkDiff,
-  readSvAccumulator,
-  readTokenSavings,
   renderAlignedRows,
   renderMissionBoard,
 } from "./renderers.mjs";
@@ -178,35 +173,6 @@ async function main() {
   const geminiQuota = geminiQuotaSnapshot.quota;
   const missionBoardState = await getMissionBoardState();
 
-  // 누적 절약 데이터 읽기
-  const svSavings = readTokenSavings();
-  const svAccumulator = readSvAccumulator();
-  const _totalCostSaved =
-    svSavings?.totalSaved || svAccumulator?.totalCostSaved || 0;
-
-  // 세션/누적 토큰 → context 대비 절약 배수 (개별 provider sv%)
-  const ctxCapacity = deriveContextLimit(stdin);
-  let codexSv = null;
-  let codexAccumulatorSv = null;
-  if (svAccumulator?.codex?.tokens > 0) {
-    codexAccumulatorSv = svAccumulator.codex.tokens / ctxCapacity;
-    codexSv = codexAccumulatorSv;
-  } else if (codexBuckets) {
-    const main =
-      codexBuckets.codex || codexBuckets[Object.keys(codexBuckets)[0]];
-    if (main?.tokens?.total_tokens)
-      codexSv = main.tokens.total_tokens / ctxCapacity;
-  }
-  let geminiSv = null;
-  let geminiAccumulatorSv = null;
-  if (svAccumulator?.gemini?.tokens > 0) {
-    geminiAccumulatorSv = svAccumulator.gemini.tokens / ctxCapacity;
-    geminiSv = geminiAccumulatorSv;
-  } else {
-    const geminiTokens = geminiSession?.total || null;
-    geminiSv = geminiTokens ? geminiTokens / ctxCapacity : null;
-  }
-
   // Gemini: 3풀 버킷 추출 (Pro/Flash/Lite — 각 풀 내 모델들은 쿼터 공유)
   const geminiModel = geminiSession?.model || "gemini-3-flash-preview";
   const geminiBuckets = geminiQuota?.buckets || [];
@@ -230,16 +196,6 @@ async function main() {
   const antigravitySlot1Bucket =
     antigravityModelFamily === "gemini" ? antigravityFamilyBucket : null;
 
-  // 합산 절약은 svAccumulator 기반일 때만 표시한다.
-  // Codex bucket fallback은 account-window 누적 토큰이고 Gemini fallback은 latest
-  // session 토큰이라 서로 의미가 달라 합산하면 misleading cross-provider total이 된다.
-  const hasComparableSvAccumulator = Boolean(
-    codexAccumulatorSv != null || geminiAccumulatorSv != null,
-  );
-  const combinedSvPct = hasComparableSvAccumulator
-    ? Math.round(((codexAccumulatorSv ?? 0) + (geminiAccumulatorSv ?? 0)) * 100)
-    : null;
-
   // 인디케이터 인식 tier 선택 (stdin + Claude 사용량 기반)
   const CURRENT_TIER = selectTier(stdin, claudeUsageSnapshot.data);
 
@@ -260,7 +216,6 @@ async function main() {
       codexBuckets,
       antigravityReady ? null : geminiSession,
       antigravityReady ? null : geminiBucket,
-      combinedSvPct,
       antigravityReady ? "a" : "g",
       { showCodex, showGemini: showGeminiRow },
     );
@@ -282,9 +237,7 @@ async function main() {
     session: geminiSession,
   };
 
-  const rows = [
-    ...getClaudeRows(CURRENT_TIER, contextView, claudeUsage, combinedSvPct),
-  ];
+  const rows = [...getClaudeRows(CURRENT_TIER, contextView, claudeUsage)];
 
   // 정책으로 생략된 행이 있으면 뒤따르는 행의 인덱스가 밀린다. dim 래핑이
   // 하드코딩 인덱스를 쓰지 않도록 실제 위치를 기록해 둔다.
@@ -302,7 +255,6 @@ async function main() {
         accountsState,
         codexQuotaData,
         codexEmail,
-        codexSv,
         null,
       ),
     );
@@ -333,7 +285,6 @@ async function main() {
             }
           : geminiQuotaData,
         antigravityReady ? antigravityEmail : geminiEmail,
-        antigravityReady ? null : geminiSv,
         null,
       ),
     );
