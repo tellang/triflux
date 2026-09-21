@@ -9,7 +9,7 @@
 |--------|--------|------|---------|
 | **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·스웜·원격 실행 | ~40개 |
 | **gstack** | `/` (접두사 없음) | QA·출시·조사·설계·검토·점검 지점 | ~35개 |
-| **omc** | `/oh-my-claudecode:*` | autopilot·ralph·team·ultrawork·ccg | ~25개 |
+| **omc** | `/oh-my-claudecode:*` | autopilot·ralph·team·execute·ultragoal | ~37개 |
 
 스킬을 모르면 자연어 라우팅(`.claude/rules/tfx-routing.md`)으로 자동 매핑된다.
 세션 종료 전 메모리 파일이 3개+ 변경됐으면 `/memory-hygiene` 제안을 검토한다.

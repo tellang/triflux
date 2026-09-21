@@ -3,14 +3,14 @@
 상세 운영 지시는 `CLAUDE.md`에 있습니다. Codex는 `@import`를 지원하지 않으므로 필요할 때 직접 읽습니다.
 
 ## 핵심 규칙 (triflux 환경 특화)
-- Codex 직접 호출 금지 — `headless-guard`가 차단한다. `tfx-auto --cli codex` / `tfx-multi` / `tfx-swarm`을 거친다.
+- Codex 직접 호출 금지. `tfx-auto --cli codex` / `tfx-multi` / `tfx-swarm`을 거친다.
 - 프롬프트는 `--` 뒤의 인자로 넘기고 표준 입력은 닫는다(`… -- "$prompt" < /dev/null`). `codex < prompt.md`는 비대화식 실행이라 실패한다.
 - `config.toml`에 `approval_mode`, `sandbox` 기본값을 두고 CLI는 `--profile`만 지정한다. 중복 플래그를 쓰지 않는다.
 - Claude가 작성한 코드는 Codex로 교차 검증한다. 스스로 승인하지 않는다.
 - 비대화식 결과는 작업 알림이 완료된 뒤에만 읽는다.
 
-## 비대화식 실행 보호기(`headless-guard`)
-- `codex exec` / `agy --dangerously-skip-permissions --print=` 직접 호출은 차단됩니다.
+## 비대화식 실행 경로
+- `codex exec` / `agy --dangerously-skip-permissions --print=` 를 직접 호출하지 않는다. 자동 차단 훅(headless-guard)은 2026-09-07 에 제거됐으므로 호출자가 지킨다.
 - 반드시 tfx 스킬인 `tfx-auto --cli codex`, `tfx-multi`, `tfx-swarm`을 거친다.
 
 ## 추론 수준 예외 경로

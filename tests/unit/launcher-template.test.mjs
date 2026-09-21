@@ -105,3 +105,89 @@ describe("launcher-template: listAgents", () => {
     assert.ok(agents.includes("claude"));
   });
 });
+
+// ── TFX_DISABLE_* 런처 게이트 ───────────────────────────────────────────────
+// policyEnv 로 정책을 밀폐한다. env 에 키가 있으면 리더가 machine profile 파일을
+// 읽지 않으므로 이 머신의 실제 프로파일에 좌우되지 않는다.
+describe("launcher-template: TFX_DISABLE_* 게이트", () => {
+  const ENABLED = { TFX_DISABLE_CODEX: "0", TFX_DISABLE_ANTIGRAVITY: "0" };
+
+  it("codex disabled 면 런처 대신 명시 오류를 던진다", () => {
+    let thrown = null;
+    try {
+      buildLauncher({
+        agent: "codex",
+        prompt: "fix bug",
+        policyEnv: { TFX_DISABLE_CODEX: "1", TFX_DISABLE_ANTIGRAVITY: "0" },
+      });
+    } catch (err) {
+      thrown = err;
+    }
+    assert.ok(thrown, "차단된 codex 요청은 반드시 던져야 한다");
+    assert.equal(thrown.code, "TFX_CLI_DISABLED");
+    assert.equal(thrown.cli, "codex");
+    assert.match(thrown.message, /TFX_DISABLE_CODEX=1/u);
+    assert.match(thrown.message, /TFX_DISABLE_CODEX=0/u);
+  });
+
+  it("antigravity disabled 면 antigravity, agy, gemini 전부 던진다", () => {
+    const policyEnv = { TFX_DISABLE_CODEX: "0", TFX_DISABLE_ANTIGRAVITY: "1" };
+    for (const agent of ["antigravity", "agy", "gemini"]) {
+      let thrown = null;
+      try {
+        buildLauncher({ agent, prompt: "test", policyEnv });
+      } catch (err) {
+        thrown = err;
+      }
+      assert.ok(thrown, `${agent} 요청은 반드시 던져야 한다`);
+      assert.equal(thrown.code, "TFX_CLI_DISABLED");
+      assert.equal(thrown.cli, "antigravity");
+      assert.match(thrown.message, /TFX_DISABLE_ANTIGRAVITY=1/u);
+    }
+  });
+
+  it("codex disabled 여도 claude 런처는 만들어진다", () => {
+    const result = buildLauncher({
+      agent: "claude",
+      prompt: "test",
+      policyEnv: { TFX_DISABLE_CODEX: "1", TFX_DISABLE_ANTIGRAVITY: "1" },
+    });
+    assert.equal(result.bin, "claude");
+    assert.ok(result.command.includes("claude -p"), result.command);
+  });
+
+  it("둘 다 허용이면 기존 런처와 동일하다", () => {
+    const gated = buildLauncher({
+      agent: "codex",
+      prompt: "fix bug",
+      profile: "default",
+      policyEnv: ENABLED,
+    });
+    const ungated = buildLauncher({
+      agent: "codex",
+      prompt: "fix bug",
+      profile: "default",
+      cliPolicy: {
+        codexDisabled: false,
+        antigravityDisabled: false,
+        source: { codex: "default", antigravity: "default" },
+        profilePath: null,
+        warnings: [],
+      },
+    });
+    assert.deepEqual({ ...gated }, { ...ungated });
+    assert.equal(gated.bin, "codex");
+  });
+
+  it("getAdapter 는 게이트 대상이 아니다 (순수 조회)", () => {
+    const original = process.env.TFX_DISABLE_CODEX;
+    process.env.TFX_DISABLE_CODEX = "1";
+    try {
+      assert.equal(getAdapter("codex").bin, "codex");
+      assert.ok(listAgents().includes("codex"));
+    } finally {
+      if (original === undefined) delete process.env.TFX_DISABLE_CODEX;
+      else process.env.TFX_DISABLE_CODEX = original;
+    }
+  });
+});

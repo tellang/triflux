@@ -113,7 +113,7 @@ function identifySource(cmd) {
   if (/oh-my-claudecode|omc/i.test(cmd)) return "omc";
   if (/session-vault/i.test(cmd)) return "session-vault";
   if (/compact-helper/i.test(cmd)) return "compact-helper";
-  if (/headless-guard|tfx-gate/i.test(cmd)) return "omc";
+  if (/tfx-gate/i.test(cmd)) return "omc";
   if (/mcp-cleanup/i.test(cmd)) return "system";
   return "unknown";
 }

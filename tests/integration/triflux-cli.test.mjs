@@ -147,7 +147,7 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     );
     assert.ok(
       payload.actions.some(
-        (action) => action.label === "headless-guard-fast.sh",
+        (action) => action.label === "tfx-gate-activate.mjs",
       ),
     );
     assert.ok(

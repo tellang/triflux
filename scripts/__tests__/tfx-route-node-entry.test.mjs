@@ -354,19 +354,23 @@ describe("cli-gemini.mjs — Antigravity compatibility alias", () => {
     assert.equal(p.timeoutMs, 900_000);
     assert.equal(p.runMode, "bg");
     assert.equal(p.mcpProfile, "docs");
-    assert.equal(p.stdinMode, "pipe");
-    assert.deepEqual(p.args, ["--print", "--dangerously-skip-permissions"]);
+    assert.equal(p.stdinMode, "argv");
+    assert.equal(p.args[0], "--dangerously-skip-permissions");
+    assert.equal(p.args[1], "--model");
+    assert.deepEqual(p.args.slice(3), ["--print", "x"]);
   });
 
-  test("writer → agy_v1 stdin pipe", () => {
+  test("writer → agy_v1 argv prompt", () => {
     const p = geminiAdapter.plan({
       agent: "writer",
       prompt: "x",
       mcpProfile: "auto",
     });
     assert.equal(p.effort, "agy_v1");
-    assert.equal(p.stdinMode, "pipe");
-    assert.deepEqual(p.args, ["--print", "--dangerously-skip-permissions"]);
+    assert.equal(p.stdinMode, "argv");
+    assert.equal(p.args[0], "--dangerously-skip-permissions");
+    assert.equal(p.args[1], "--model");
+    assert.deepEqual(p.args.slice(3), ["--print", "x"]);
   });
 });
 
@@ -397,14 +401,16 @@ describe("cli-claude.mjs — native (no CLI command)", () => {
 });
 
 describe("cli-agy.mjs — stdin-pipe 계약", () => {
-  test("antigravity → stdinMode=pipe + --print --dangerously-skip-permissions", () => {
+  test("antigravity → stdinMode=argv + --dangerously-skip-permissions --print <prompt>", () => {
     const p = agyAdapter.plan({
       agent: "antigravity",
       prompt: "x",
       mcpProfile: "auto",
     });
-    assert.equal(p.stdinMode, "pipe");
-    assert.deepEqual(p.args, ["--print", "--dangerously-skip-permissions"]);
+    assert.equal(p.stdinMode, "argv");
+    assert.equal(p.args[0], "--dangerously-skip-permissions");
+    assert.equal(p.args[1], "--model");
+    assert.deepEqual(p.args.slice(3), ["--print", "x"]);
     assert.equal(p.command, "agy");
     assert.equal(p.effort, "agy_v1");
     assert.equal(p.mcpProfile, "docs");
@@ -416,7 +422,7 @@ describe("cli-agy.mjs — stdin-pipe 계약", () => {
       prompt: "x",
       mcpProfile: "auto",
     });
-    assert.equal(p.stdinMode, "pipe");
+    assert.equal(p.stdinMode, "argv");
     assert.equal(p.command, "agy");
   });
 });

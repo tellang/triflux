@@ -1214,6 +1214,26 @@ codex_gte() {
 
 # ── Gemini 프로필 해석 (Codex --profile 대칭) ──
 _GEMINI_PROFILE_CACHE=""
+# resolve_gemini_profile_for_agent AGENT → 프로필 이름 (SSOT: scripts/lib/gemini-profiles.mjs)
+# 역할별 effort 분리. node 를 못 찾으면 medium(flash38) 으로 떨어진다.
+resolve_gemini_profile_for_agent() {
+  local agent="$1"
+  local sd; sd="$(_get_script_dir)"
+  local mod
+  mod="$(_resolve_script "${TFX_GEMINI_PROFILES_MODULE:-}" \
+    "$sd/lib/gemini-profiles.mjs" \
+    "$sd/../scripts/lib/gemini-profiles.mjs" \
+    ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/lib/gemini-profiles.mjs"})" || { echo "flash38"; return; }
+  local out
+  out="$("$NODE_BIN" -e '
+    const { pathToFileURL } = require("node:url");
+    import(pathToFileURL(process.argv[1]).href)
+      .then((m) => process.stdout.write(m.resolveGeminiProfileForPurpose(process.argv[2])))
+      .catch(() => process.stdout.write("flash38"));
+  ' "$mod" "$agent" 2>/dev/null)"
+  echo "${out:-flash38}"
+}
+
 resolve_gemini_profile() {
   local profile="$1"
   if [[ "$profile" == gemini-* ]]; then
@@ -1234,12 +1254,9 @@ resolve_gemini_profile() {
     const primaryRaw = process.argv[2] || '{}';
     const settingsRaw = process.argv[3] || '{}';
     const defaults = {
-      flash35_low: 'Gemini 3.5 Flash (Low)',
-      flash35: 'Gemini 3.5 Flash (Medium)',
-      flash35_high: 'Gemini 3.5 Flash (High)',
-      pro31_low: 'Gemini 3.1 Pro (Low)',
-      pro31: 'Gemini 3.1 Pro (High)',
-      flash3: 'Gemini 3 Flash'
+      flash38_low: 'Gemini 3.8 Flash (Low)',
+      flash38: 'Gemini 3.8 Flash (Medium)',
+      flash38_high: 'Gemini 3.8 Flash (High)'
     };
 
     if (typeof name === 'string' && name.startsWith('gemini-')) {
@@ -1307,9 +1324,9 @@ resolve_gemini_profile() {
       }
     }
 
-    process.stdout.write(defaults[name] || defaults[process.env.TFX_GEMINI_DEFAULT_PROFILE] || defaults.flash35);
+    process.stdout.write(defaults[name] || defaults[process.env.TFX_GEMINI_DEFAULT_PROFILE] || defaults.flash38);
   " "$profile" "$_GEMINI_PROFILE_CACHE" "$settings_cache" 2>/dev/null)
-  echo "${result:-Gemini 3.5 Flash (Medium)}"
+  echo "${result:-Gemini 3.8 Flash (Medium)}"
 }
 
 # ── 라우팅 테이블 ──
@@ -1393,26 +1410,26 @@ route_agent() {
     # ─── Antigravity CLI lane ───
     # effort 차등: agent 별 GEMINI_PROFILE 을 설정하면 run_antigravity_exec() 가
     # resolve_gemini_profile 로 해석해 `--model "<display name>"`을 agy_args 에
-    # 주입한다. 우선순위는 TFX_GEMINI_PROFILE(env) > GEMINI_PROFILE(agent) > flash35.
+    # 주입한다. 우선순위는 TFX_GEMINI_PROFILE(env) > GEMINI_PROFILE(agent) > flash38.
     # CLI_ARGS 는 read -a 로 word-split 되므로 공백 포함 모델명을 여기 넣지 않는다.
     # #310: upstream callers are normalized through agent-map.json, but this
     # direct route entrypoint intentionally keeps agy as a compatibility alias.
     designer)
-      # 디자인 = 시각/UX 추론 → 3.5 Flash (High)
+      # effort 는 역할별 SSOT(scripts/lib/gemini-profiles.mjs)가 정한다: designer → High
       CLI_ARGS="--print --dangerously-skip-permissions"
-      GEMINI_PROFILE="flash35_high"
+      GEMINI_PROFILE="$(resolve_gemini_profile_for_agent designer)"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     writer)
-      # 문서 작성 = 균형 → 3.5 Flash (Medium)
+      # writer → Medium (SSOT)
       CLI_ARGS="--print --dangerously-skip-permissions"
-      GEMINI_PROFILE="flash35"
+      GEMINI_PROFILE="$(resolve_gemini_profile_for_agent writer)"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
     gemini|antigravity|agy)
-      # 직접 호출 alias — 기본 flash35. TFX_GEMINI_PROFILE 로 override 가능.
-      # agy --print + --dangerously-skip-permissions 조합은 positional prompt에서
-      # timeout이 재현되므로 wrapper 호출은 stdin pipe로 고정한다.
+      # 직접 호출 alias — Medium (SSOT). TFX_GEMINI_PROFILE 로 override 가능.
+      # 프롬프트는 run_antigravity_exec 가 `--print "$prompt"` 값으로 넘긴다
+      # (agy 1.1.27 부터 stdin 프롬프트 불가). --print 는 항상 마지막 인자다.
       CLI_ARGS="--print --dangerously-skip-permissions"
-      GEMINI_PROFILE="flash35"
+      GEMINI_PROFILE="$(resolve_gemini_profile_for_agent "$agent")"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
 
     # ─── 탐색 (Claude-native: Glob/Grep/Read 직접 접근) ───
@@ -1424,6 +1441,7 @@ route_agent() {
       case "$CLI_TYPE" in
         gemini|antigravity)
           CLI_ARGS="--print --dangerously-skip-permissions"
+          GEMINI_PROFILE="$(resolve_gemini_profile_for_agent "$agent")"
           CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
         claude-native)
           CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
@@ -1614,12 +1632,9 @@ apply_cli_mode() {
         CLI_TYPE="antigravity"
         CLI_CMD="agy"
         CLI_ARGS="--print --dangerously-skip-permissions"
-        # 주 라우팅(route_agent)과 동일하게 designer 만 effort 상향. 나머지는
-        # run_antigravity_exec 폴백(flash35) 또는 TFX_GEMINI_PROFILE override.
-        case "$AGENT_TYPE" in
-          designer) GEMINI_PROFILE="flash35_high" ;;
-          *)        GEMINI_PROFILE="flash35" ;;
-        esac
+        # effort 는 역할별 SSOT(scripts/lib/gemini-profiles.mjs)가 정한다.
+        # TFX_GEMINI_PROFILE 로 override 가능.
+        GEMINI_PROFILE="$(resolve_gemini_profile_for_agent "$AGENT_TYPE")"
         CLI_EFFORT="agy_v1"
         DEFAULT_TIMEOUT=900
         echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE → antigravity($CLI_EFFORT)로 리매핑" >&2
@@ -2590,18 +2605,40 @@ run_antigravity_exec() {
   local exit_code_local=0
   local worker_pid
   local -a agy_args=()
-  read -r -a agy_args <<< "$CLI_ARGS"
+  local -a _cli_tokens=()
+  local _print_flag=""
+  local _tok
+  read -r -a _cli_tokens <<< "$CLI_ARGS"
+  # ── --print 는 값(프롬프트)을 받는 마지막 인자 ──
+  # agy 의 --print 는 값을 받는 플래그라(Go flag) 바로 뒤 토큰을 프롬프트로 삼킨다.
+  # agy 1.1.27 실측(2026-09-07): 값 없는 `--print` 는 "flag needs an argument",
+  # 빈 값 + stdin 은 "empty prompt" 로 거부된다. 즉 stdin 프롬프트 전달은 더 이상 없다.
+  # 그래서 print 계열 플래그를 빼 두었다가 --model 뒤에 `--print "$prompt"` 로 붙인다.
+  for _tok in "${_cli_tokens[@]}"; do
+    case "$_tok" in
+      --print|-p|--prompt) _print_flag="$_tok" ;;
+      *) agy_args+=("$_tok") ;;
+    esac
+  done
 
   # ── 프로필 기반 모델 주입 ──
-  # display name 에 공백/괄호가 있으므로(예: "Gemini 3.5 Flash (Medium)") CLI_ARGS
+  # display name 에 공백/괄호가 있으므로(예: "Gemini 3.8 Flash (Medium)") CLI_ARGS
   # 문자열이 아니라 agy_args 배열에 두 원소(--model, <display name>)로 append 해야
   # "${agy_args[@]}" expand 시 단일 인자로 보존된다. 모델 SSOT 는 프로필 설정이다.
   if [[ -z "${TFX_GEMINI_NO_MODEL:-}" ]]; then
     local _agy_model
-    _agy_model="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-flash35}}")"
+    _agy_model="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-flash38}}")"
     if [[ -n "$_agy_model" ]]; then
       agy_args+=("--model" "$_agy_model")
     fi
+  fi
+  if [[ -n "$_print_flag" ]]; then
+    # argv 상한(macOS ARG_MAX 1MiB) 안에서만 인자로 넘긴다. 초과는 조용히 자르지 않는다.
+    if (( ${#prompt} > 900000 )); then
+      echo "[tfx-route] Antigravity prompt too large for argv (${#prompt} chars > 900000). Split the task or shorten the context." >"$STDERR_LOG"
+      return 2
+    fi
+    agy_args+=("$_print_flag" "$prompt")
   fi
 
   if ! agy_supports_headless "$CLI_CMD"; then
@@ -2610,9 +2647,9 @@ run_antigravity_exec() {
   fi
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${agy_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${agy_args[@]}" </dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
-    printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${agy_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${agy_args[@]}" </dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
   worker_pid=$!
   if [[ -n "${JOB_DIR:-}" && -w "${JOB_DIR}" ]]; then
