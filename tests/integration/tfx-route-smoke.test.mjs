@@ -14,11 +14,13 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   closeSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -61,8 +63,8 @@ const ROUTE_TEST_BASE_ENV = Object.fromEntries(
 );
 const RUN_BASH_TIMEOUT_MS = 60_000;
 
-function createRouteHome() {
-  const home = mkdtempSync(join(tmpdir(), "tfx-route-home-"));
+function createRouteHome({ includeRoutePost = false } = {}) {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "tfx-route-home-")));
   const codexDir = join(home, ".codex");
   mkdirSync(codexDir, { recursive: true });
   writeFileSync(
@@ -86,6 +88,14 @@ function createRouteHome() {
     ].join("\n"),
     "utf8",
   );
+  if (includeRoutePost) {
+    const scriptsDir = join(home, ".claude", "scripts");
+    mkdirSync(scriptsDir, { recursive: true });
+    copyFileSync(
+      resolve(PROJECT_ROOT, "scripts", "tfx-route-post.mjs"),
+      join(scriptsDir, "tfx-route-post.mjs"),
+    );
+  }
   return home;
 }
 
@@ -141,6 +151,8 @@ function runBash(command, extraEnv = {}) {
         TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
         TMUX: "",
         TFX_CLI_MODE: "auto",
+        TFX_DISABLE_CODEX: "0",
+        TFX_DISABLE_ANTIGRAVITY: "0",
         TFX_PREFLIGHT_LOADED: "1",
         TFX_CODEX_OK: "1",
         TFX_ANTIGRAVITY_OK: "0",
@@ -184,8 +196,8 @@ function allowedMcpServers(result) {
     .filter(Boolean);
 }
 
-function fixtureEnv(extraEnv = {}) {
-  const home = createRouteHome();
+function fixtureEnv(extraEnv = {}, options = {}) {
+  const home = createRouteHome(options);
   return {
     ...extraEnv,
     PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
@@ -421,7 +433,7 @@ describe("tfx-route.sh — TFX_DISABLE_CODEX / TFX_DISABLE_ANTIGRAVITY", () => {
 
     try {
       const result = runBash(
-        `TFX_CLI_MODE=antigravity bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
+        `env -u TFX_DISABLE_CODEX -u TFX_DISABLE_ANTIGRAVITY TFX_CLI_MODE=antigravity bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
         fixtureEnv({
           HOME: home,
           USERPROFILE: home,
@@ -568,28 +580,66 @@ describe("tfx-route.sh — Codex MCP transport", () => {
     assert.match(out(result), /EXEC:echo hi/);
   });
 
-  it("TFX_CODEX_TRANSPORT=auto 기본값에서 MCP가 가능하면 MCP 경로를 우선 사용한다", () => {
+  it("-o 파일이 있으면 OUTPUT은 최종 메시지만 쓰고 raw trace는 stdout_log에 보존한다", () => {
     const result = runBash(
-      `TFX_CODEX_TRANSPORT=auto bash "${ROUTE_SCRIPT}" executor 'hello-mcp' minimal`,
+      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-last-message' minimal`,
+      fixtureEnv(
+        { FAKE_CODEX_MODE: "exec-last-message" },
+        { includeRoutePost: true },
+      ),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /=== OUTPUT ===\nFINAL:assistant message/);
+    assert.match(out(result), /Codex session ID: thr_last_message/);
+    assert.doesNotMatch(out(result), /RAW_TRACE:hook line/);
+
+    const stdoutLog = out(result)
+      .match(/^stdout_log: (.+)$/m)?.[1]
+      ?.trim();
+    assert.ok(stdoutLog, `stdout_log header missing:\n${out(result)}`);
+    assert.match(readFileSync(stdoutLog, "utf8"), /RAW_TRACE:hook line/);
+  });
+
+  it("최종 메시지가 byte cap을 넘으면 head가 아니라 tail을 유지한다", () => {
+    const result = runBash(
+      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-long-output' minimal`,
+      fixtureEnv({ FAKE_CODEX_MODE: "exec-long-last-message" }),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /tail 51200B 유지/);
+    assert.match(out(result), /TAIL-MARKER/);
+    assert.doesNotMatch(out(result), /HEAD-MARKER/);
+  });
+
+  it("TFX_CODEX_TRANSPORT=auto는 MCP worker 없이 곧바로 exec를 사용한다", () => {
+    const result = runBash(
+      `TFX_CODEX_TRANSPORT=auto bash "${ROUTE_SCRIPT}" executor 'hello-auto-exec' minimal`,
       fixtureEnv({ FAKE_CODEX_MODE: "mcp-ok" }),
     );
 
     assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /codex_transport_effective=mcp/);
-    assert.match(out(result), /MCP:hello-mcp/);
-    assert.doesNotMatch(out(result), /EXEC:hello-mcp/);
+    assert.match(out(result), /codex_transport_effective=exec/);
+    assert.match(out(result), /EXEC:hello-auto-exec/);
+    assert.doesNotMatch(out(result), /MCP:hello-auto-exec/);
+    assert.doesNotMatch(out(result), /exec-fallback/);
   });
 
-  it("MCP bootstrap 실패 시 auto 모드는 legacy exec 경로로 fallback한다", () => {
+  it("TFX_CODEX_TRANSPORT=mcp는 upstream 제거 안내 후 exec를 사용한다", () => {
     const result = runBash(
-      `TFX_CODEX_TRANSPORT=auto bash "${ROUTE_SCRIPT}" executor 'hello-fallback' minimal`,
-      fixtureEnv({ FAKE_CODEX_MODE: "mcp-fail" }),
+      `TFX_CODEX_TRANSPORT=mcp bash "${ROUTE_SCRIPT}" executor 'hello-mcp-request' minimal`,
+      fixtureEnv({ FAKE_CODEX_MODE: "mcp-ok" }),
     );
 
     assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /legacy exec 경로로 fallback/);
-    assert.match(out(result), /codex_transport_effective=exec-fallback/);
-    assert.match(out(result), /EXEC:hello-fallback/);
+    assert.match(
+      out(result),
+      /codex mcp-server가 upstream에서 제거되어 exec로 계속합니다/,
+    );
+    assert.match(out(result), /codex_transport_effective=exec/);
+    assert.match(out(result), /EXEC:hello-mcp-request/);
+    assert.doesNotMatch(out(result), /MCP:hello-mcp-request/);
   });
 
   it("TFX_CODEX_TRANSPORT 값이 잘못되면 오류로 종료해야 한다", () => {
@@ -601,14 +651,77 @@ describe("tfx-route.sh — Codex MCP transport", () => {
     assert.match(out(result), /auto, mcp, exec/);
   });
 
-  it("exit 0 이어도 stdout 비어 있고 워크스페이스 변화가 없으면 no-op 실패로 승격해야 한다", () => {
+  it("exit 0이어도 최종 메시지와 stdout이 모두 없으면 partial/no_final_message로 보고한다", () => {
     const result = runBash(
       `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-noop' minimal`,
-      fixtureEnv({ FAKE_CODEX_MODE: "exec-empty" }),
+      fixtureEnv({ FAKE_CODEX_MODE: "exec-empty" }, { includeRoutePost: true }),
     );
 
     assert.notEqual(result.status, 0, out(result));
     assert.match(out(result), /exit_code: 68/);
+    assert.match(out(result), /status: partial/);
+    assert.match(out(result), /reason: no_final_message/);
+    assert.match(out(result), /exit 0 이지만 진짜 산출물이 없습니다/);
+  });
+
+  it("Codex stdin 안내 문구만으로 success_with_warnings가 되지 않는다", () => {
+    const result = runBash(
+      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-stdin-notice' minimal`,
+      fixtureEnv(
+        { FAKE_CODEX_MODE: "exec-stdin-notice" },
+        { includeRoutePost: true },
+      ),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /^status: success$/m);
+    assert.doesNotMatch(out(result), /status: success_with_warnings/);
+    assert.doesNotMatch(out(result), /^warnings:/m);
+    assert.match(out(result), /FINAL:stdin notice is benign/);
+  });
+
+  it("codex 0.155 의 stderr 배너와 실행 추적은 경고로 분류하지 않는다", () => {
+    const result = runBash(
+      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-stderr-transcript' minimal`,
+      fixtureEnv(
+        { FAKE_CODEX_MODE: "exec-stderr-transcript" },
+        { includeRoutePost: true },
+      ),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /^status: success$/m);
+    assert.doesNotMatch(out(result), /^warnings:/m);
+    assert.match(out(result), /FINAL:transcript on stderr is not a warning/);
+  });
+
+  it("stderr 의 tracing ERROR 줄은 여전히 경고로 올린다", () => {
+    const result = runBash(
+      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-stderr-tracing-error' minimal`,
+      fixtureEnv(
+        { FAKE_CODEX_MODE: "exec-stderr-tracing-error" },
+        { includeRoutePost: true },
+      ),
+    );
+
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /^status: success_with_warnings$/m);
+    assert.match(out(result), /^warnings: .*context7 failed to start/m);
+    assert.doesNotMatch(out(result), /^warnings: .*echoed prompt/m);
+  });
+
+  it("stdout의 Codex stdin 안내 문구만 있으면 meaningful output으로 보지 않는다", () => {
+    const result = runBash(
+      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-stdin-notice-only' minimal`,
+      fixtureEnv(
+        { FAKE_CODEX_MODE: "exec-stdin-notice-only" },
+        { includeRoutePost: true },
+      ),
+    );
+
+    assert.notEqual(result.status, 0, out(result));
+    assert.match(out(result), /status: partial/);
+    assert.match(out(result), /reason: no_final_message/);
   });
 
   it("exit 0 이지만 MCP transport 채널이 죽어 stderr 노이즈만 복구된 경우 실패로 승격해야 한다(#result-verification)", () => {
