@@ -274,6 +274,8 @@ function runRouteWithBridgeLogger({ homeDir, tokenEnv = "" }) {
       env: hubServerTestEnv({
         HOME: homeDir,
         USERPROFILE: homeDir,
+        XDG_CONFIG_HOME: join(homeDir, ".config"),
+        TFX_MACHINE_PROFILE_PATH: join(homeDir, "machine-profile.env"),
         PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
         NODE_BIN: process.execPath,
         CODEX_BIN: "codex",
