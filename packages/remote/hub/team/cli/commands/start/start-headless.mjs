@@ -88,6 +88,8 @@ export async function startHeadlessTeam({
     timeoutSec: timeoutSec || 900,
     layout,
     autoAttach: !!autoAttach,
+    leadPane: process.env.TMUX_PANE,
+    leadTmux: process.env.TMUX,
     dashboard: !!dashboard,
     dashboardLayout,
     dashboardSize: dashboardSize ?? 0.5,

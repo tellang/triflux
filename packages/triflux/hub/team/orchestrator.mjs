@@ -126,7 +126,8 @@ export function buildPrompt(subtask, config) {
  * @param {string} opts.hubUrl — Hub URL
  * @param {{target:string, cli:string, task:string}|null} opts.lead
  * @param {string} opts.teammateMode
- * @returns {Promise<void>}
+ * @param {(failure: {target:string, cli:string, role:string, message:string}) => void} [opts.onInjectionFailure]
+ * @returns {Promise<Array<{target:string, cli:string, role:string, message:string}>>}
  */
 export async function orchestrate(sessionName, assignments, opts = {}) {
   const {
@@ -134,7 +135,24 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
     lead = null,
     teammateMode = "tmux",
     injectPrompt = defaultInjectPrompt,
+    onInjectionFailure,
   } = opts;
+  const failures = [];
+
+  function recordInjectionFailure(target, cli, role, error) {
+    const failure = {
+      target,
+      cli: cli || "unknown",
+      role,
+      message: String(error?.message || error || "prompt submission failed"),
+    };
+    failures.push(failure);
+    try {
+      onInjectionFailure?.(failure);
+    } catch {
+      // reporting failure must not stop the remaining pane injections
+    }
+  }
 
   const workers = assignments.map(({ target, cli, subtask }) => ({
     target,
@@ -155,10 +173,14 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
         subtask: w.subtask,
       })),
     });
-    injectPrompt(lead.target, leadPrompt, {
-      useFileRef: true,
-      cli: lead.cli,
-    });
+    try {
+      injectPrompt(lead.target, leadPrompt, {
+        useFileRef: true,
+        cli: lead.cli,
+      });
+    } catch (error) {
+      recordInjectionFailure(lead.target, lead.cli, "lead", error);
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
 
@@ -169,10 +191,15 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
       hubUrl,
       sessionName,
     });
-    injectPrompt(worker.target, prompt, {
-      useFileRef: true,
-      cli: worker.cli,
-    });
+    try {
+      injectPrompt(worker.target, prompt, {
+        useFileRef: true,
+        cli: worker.cli,
+      });
+    } catch (error) {
+      recordInjectionFailure(worker.target, worker.cli, "worker", error);
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
+  return failures;
 }

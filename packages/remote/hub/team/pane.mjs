@@ -62,7 +62,7 @@ export function buildCliCommand(cli, options = {}) {
       if (trustMode) {
         return buildExecArgs({});
       }
-      return "codex";
+      return "codex --dangerously-bypass-approvals-and-sandbox";
     case "gemini":
       // interactive 모드 — MCP는 ~/.gemini/settings.json에 사전 등록
       return "gemini";
@@ -150,26 +150,102 @@ function waitForComposerReady(target) {
 /**
  * 주입한 프롬프트가 실제 제출됐는지 확인하고, 안 됐으면 Enter를 재전송한다.
  *
- * Codex TUI는 연속 키 입력을 paste burst로 묶으므로 paste 직후의 Enter가
- * 제출이 아니라 개행으로 composer에 삽입될 수 있다 (텍스트만 남고 미제출).
- * busy 마커가 보이거나 프롬프트 꼬리가 화면에서 사라지면 제출로 판정한다.
- * capture 불가 환경이면 첫 Enter 후 판정을 포기한다 (기존 동작 수준).
- * 제출 후 transcript에 프롬프트가 에코돼 꼬리가 남아 있어도 빈 composer에
- * 대한 추가 Enter는 no-op이라 안전하다.
+ * TUI는 연속 키 입력을 paste burst로 묶으므로 paste 직후의 Enter가 제출 대신
+ * composer 개행으로 흡수될 수 있다. transcript의 과거 prompt가 아니라 마지막
+ * composer line에서 현재 prompt가 사라졌을 때만 제출로 판정한다. Antigravity는
+ * capture 불가 또는 재시도 소진을 성공으로 숨기지 않고 오류로 반환한다.
  */
-function confirmSubmit(target, prompt, sendEnter) {
-  const lastLine =
-    String(prompt).trim().split("\n").filter(Boolean).pop() || "";
-  const tail = lastLine.slice(-20);
-  sleepMs(PASTE_SETTLE_MS);
-  for (let attempt = 1; attempt <= SUBMIT_RETRY_LIMIT; attempt++) {
-    sendEnter();
-    sleepMs(400 * attempt);
-    const text = capturePaneText(target);
-    if (!text || !tail) return;
-    if (/to interrupt|working|thinking/i.test(text)) return; // busy = 제출됨
-    if (!text.includes(tail)) return; // 화면에서 사라짐 = 제출됨
+function isAntigravityCli(cli) {
+  return ["agy", "antigravity", "gemini"].includes(
+    String(cli || "").toLowerCase(),
+  );
+}
+
+function promptComposerNeedle(prompt) {
+  const firstContentLine = String(prompt || "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .find(Boolean);
+  return (firstContentLine || "").slice(0, 16);
+}
+
+function isComposerPromptLine(line) {
+  return /^\s*(?:[│┃]\s*)?[›❯▶▸>]\s*/u.test(String(line || ""));
+}
+
+function composerPromptState(text, needle) {
+  const composerLines = String(text || "")
+    .split("\n")
+    .filter(isComposerPromptLine);
+  if (composerLines.length === 0) return "unknown";
+  return composerLines.at(-1).includes(needle) ? "present" : "absent";
+}
+
+function hasBusyMarkerOutsideComposer(text) {
+  return String(text || "")
+    .split("\n")
+    .some(
+      (line) =>
+        !isComposerPromptLine(line) &&
+        /esc to (?:interrupt|cancel)/iu.test(line),
+    );
+}
+
+/**
+ * paste된 prompt가 실제 제출될 때까지 Enter를 bounded retry한다.
+ * Antigravity는 capture로 성공을 확인하지 못하면 조용히 idle 상태로 남기지 않고
+ * caller에 명확한 오류를 반환한다.
+ */
+export function submitPromptWithVerification({
+  cli,
+  prompt,
+  capture,
+  sendEnter,
+  sleep = sleepMs,
+  settleMs = PASTE_SETTLE_MS,
+  retryLimit = SUBMIT_RETRY_LIMIT,
+} = {}) {
+  if (typeof capture !== "function" || typeof sendEnter !== "function") {
+    throw new TypeError("capture and sendEnter are required");
   }
+
+  const strictVerification = isAntigravityCli(cli);
+  const needle = promptComposerNeedle(prompt);
+  sleep(settleMs);
+
+  if (!needle) {
+    sendEnter();
+    return;
+  }
+
+  for (let attempt = 1; attempt <= retryLimit; attempt++) {
+    sendEnter();
+    sleep(400 * attempt);
+    const text = String(capture() ?? "");
+    if (!text) {
+      if (strictVerification) continue;
+      return;
+    }
+    if (hasBusyMarkerOutsideComposer(text)) return;
+    const composerState = composerPromptState(text, needle);
+    if (composerState === "absent") return;
+    if (composerState === "unknown" && !strictVerification) return;
+  }
+
+  if (strictVerification) {
+    throw new Error(
+      `Antigravity prompt submission failed after ${retryLimit} attempts: prompt remains in composer or submission could not be verified`,
+    );
+  }
+}
+
+function confirmSubmit(target, prompt, cli, sendEnter) {
+  submitPromptWithVerification({
+    cli,
+    prompt,
+    capture: () => capturePaneText(target),
+    sendEnter,
+  });
 }
 
 /**
@@ -198,19 +274,29 @@ export function injectPrompt(
   if (shouldUseFileRef({ multiplexer, useFileRef, cli })) {
     writeFileSync(tmpFile, prompt, "utf8");
     const filePath = tmpFile.replace(/\\/g, "/");
-    waitForComposerReady(target);
-    psmuxExec(["select-pane", "-t", target]);
-    psmuxExec(["send-keys", "-t", target, "-l", `@${filePath}`]);
-    confirmSubmit(target, `@${filePath}`, () =>
-      psmuxExec(["send-keys", "-t", target, "Enter"]),
-    );
-    // TUI가 파일을 읽을 시간을 주고 정리
-    setTimeout(() => {
-      try {
-        unlinkSync(tmpFile);
-      } catch {}
-    }, 10000);
-    return;
+    let cleanupScheduled = false;
+    try {
+      waitForComposerReady(target);
+      psmuxExec(["select-pane", "-t", target]);
+      psmuxExec(["send-keys", "-t", target, "-l", `@${filePath}`]);
+      confirmSubmit(target, `@${filePath}`, cli, () =>
+        psmuxExec(["send-keys", "-t", target, "Enter"]),
+      );
+      // TUI가 파일을 읽을 시간을 주고 정리
+      setTimeout(() => {
+        try {
+          unlinkSync(tmpFile);
+        } catch {}
+      }, 10000);
+      cleanupScheduled = true;
+      return;
+    } finally {
+      if (!cleanupScheduled) {
+        try {
+          unlinkSync(tmpFile);
+        } catch {}
+      }
+    }
   }
 
   try {
@@ -222,7 +308,7 @@ export function injectPrompt(
       psmuxExec(["load-buffer", "-t", sessionName, toMuxPath(tmpFile)]);
       psmuxExec(["select-pane", "-t", target]);
       psmuxExec(["paste-buffer", "-t", target]);
-      confirmSubmit(target, prompt, () =>
+      confirmSubmit(target, prompt, cli, () =>
         psmuxExec(["send-keys", "-t", target, "Enter"]),
       );
       return;
@@ -232,7 +318,7 @@ export function injectPrompt(
     waitForComposerReady(target);
     muxExec(`load-buffer ${quoteArg(toMuxPath(tmpFile))}`);
     muxExec(`paste-buffer -t ${target}`);
-    confirmSubmit(target, prompt, () =>
+    confirmSubmit(target, prompt, cli, () =>
       muxExec(`send-keys -t ${target} Enter`),
     );
   } finally {

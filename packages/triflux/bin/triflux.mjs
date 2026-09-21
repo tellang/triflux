@@ -7525,7 +7525,7 @@ async function main() {
         return;
       }
       const { createMonitor } = await import("../tui/monitor.mjs");
-      const mon = createMonitor();
+      const mon = createMonitor({ targetPane: process.env.TMUX_PANE });
       await mon.start();
       break;
     }

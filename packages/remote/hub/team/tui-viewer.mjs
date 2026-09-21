@@ -26,6 +26,7 @@ const SESSION = argVal("--session");
 const RESULT_DIR = argVal("--result-dir") ?? join(tmpdir(), "tfx-headless");
 const LAYOUT = argVal("--layout") ?? "single";
 const SOURCE = argVal("--source") === "files" ? "files" : "mux";
+const LEAD_PANE = argVal("--lead-pane");
 const parsedWorkerCount = Number.parseInt(argVal("--workers") || "0", 10);
 const WORKER_COUNT = Number.isFinite(parsedWorkerCount)
   ? Math.min(64, Math.max(0, parsedWorkerCount))
@@ -72,11 +73,13 @@ const tui = tuiFactory({
       worker: workerName,
       openAll: false,
       cwd: process.cwd(),
+      targetPane: LEAD_PANE,
     }),
   onOpenAllWorkers: () =>
     openHeadlessDashboardTarget(SESSION, {
       openAll: true,
       cwd: process.cwd(),
+      targetPane: LEAD_PANE,
     }),
 });
 const startTime = Date.now();

@@ -1795,6 +1795,8 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     nativeBridge = false,
     nativeBridgeMode = "roster",
     onIntervene,
+    leadPane = null,
+    leadTmux = null,
   } = opts;
   if (!Number.isFinite(Number(timeoutSec)) || Number(timeoutSec) <= 0)
     timeoutSec = 900;
@@ -2054,6 +2056,8 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
           autoAttach,
           dashboard,
           dashboardLayout,
+          leadPane,
+          leadTmux,
           onProgress: safeProgress,
           _deps: deps,
         });
@@ -2352,11 +2356,12 @@ export function createDaemonObservationSession(
 ) {
   const deps = opts._deps || {};
   const platform = deps.platform ?? process.platform;
-  const env = deps.env ?? process.env;
+  const leadPane = String(opts.leadPane || "");
+  const leadTmux = String(opts.leadTmux || "");
   if (!opts.autoAttach) return null;
   if (platform !== "darwin" && platform !== "linux") return null;
-  if (!String(env.TMUX || "").trim()) return null;
-  if (!/^%\d+$/u.test(String(env.TMUX_PANE || ""))) return null;
+  if (!leadTmux.trim()) return null;
+  if (!/^%\d+$/u.test(leadPane)) return null;
   if (!Array.isArray(dispatches) || dispatches.length === 0) return null;
 
   const safeSessionName = sanitizeSessionName(sessionName);
@@ -2396,6 +2401,8 @@ export function createDaemonObservationSession(
       "files",
       "--workers",
       String(dispatches.length),
+      "--lead-pane",
+      shellQuote(leadPane),
     ].join(" ");
     sendKeys(targetPane, viewerCommand, true);
 
@@ -2434,15 +2441,14 @@ export function createDaemonObservationSession(
 export function attachHeadlessTmuxPane(sessionName, opts = {}) {
   const deps = opts._deps || {};
   const platform = deps.platform ?? process.platform;
-  const env = deps.env ?? process.env;
   if (platform !== "darwin" && platform !== "linux") return false;
-  const tmuxEnv = String(env.TMUX || "");
+  const tmuxEnv = String(opts.tmuxEnv || "");
   if (!tmuxEnv.trim()) return false;
 
   const socketPath = tmuxEnv.split(",", 1)[0];
   if (!socketPath.trim()) return false;
 
-  const targetPane = String(env.TMUX_PANE || "");
+  const targetPane = String(opts.targetPane || "");
   if (!/^%\d+$/u.test(targetPane)) return false;
 
   const exec = deps.psmuxExec || psmuxExec;
@@ -2497,6 +2503,8 @@ export function createHeadlessAutoAttachHandler(
     dashboardLayout = "single",
     dashboardSize = 0.4,
     dashboardAnchor = "window",
+    leadPane = null,
+    leadTmux = null,
     onProgress,
   } = opts;
   const deps = opts._deps || {};
@@ -2543,6 +2551,8 @@ export function createHeadlessAutoAttachHandler(
         } else {
           const attach = deps.attachHeadlessTmuxPane || attachHeadlessTmuxPane;
           attachResult = attach(sessionName, {
+            targetPane: leadPane,
+            tmuxEnv: leadTmux,
             _deps: deps,
             onProgress: reportAttachWarning,
           });
@@ -2741,13 +2751,15 @@ export async function runHeadlessInteractive(
     dashboard = false,
     dashboardSize = 0.4,
     dashboardAnchor = "window",
+    leadPane = null,
+    leadTmux = null,
     signal,
     maxIdleSec = 0,
     ...runOpts
   } = opts;
   const headlessOpts = dashboard
-    ? { ...runOpts, dashboard: true }
-    : { ...runOpts };
+    ? { ...runOpts, dashboard: true, leadPane, leadTmux }
+    : { ...runOpts, leadPane, leadTmux };
 
   // autoAttach를 session_created 시점에 트리거 (CLI 실행 전에 터미널 열림)
   const userOnProgress = headlessOpts.onProgress;
@@ -2760,6 +2772,8 @@ export async function runHeadlessInteractive(
       dashboardLayout: headlessOpts.dashboardLayout,
       dashboardSize,
       dashboardAnchor,
+      leadPane,
+      leadTmux,
       onProgress: userOnProgress,
       _deps: headlessOpts._deps,
     },
