@@ -258,12 +258,6 @@ export const GEMINI_RPM_TRACKER_PATH = join(
   "cache",
   "gemini-rpm-tracker.json",
 );
-export const SV_ACCUMULATOR_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "sv-accumulator.json",
-);
 // 이전 .omc/ 경로 fallback (기존 환경 호환)
 export const LEGACY_GEMINI_QUOTA_CACHE = join(
   homedir(),
@@ -289,12 +283,6 @@ export const LEGACY_GEMINI_RPM_TRACKER = join(
   "state",
   "gemini_rpm_tracker.json",
 );
-export const LEGACY_SV_ACCUMULATOR = join(
-  homedir(),
-  ".omc",
-  "state",
-  "sv-accumulator.json",
-);
 
 export const GEMINI_RPM_WINDOW_MS = 60 * 1000; // 60초 슬라이딩 윈도우
 export const GEMINI_QUOTA_STALE_MS = 5 * 60 * 1000; // 5분
@@ -305,7 +293,6 @@ export const ACCOUNT_LABEL_WIDTH = 10;
 export const PROVIDER_PREFIX_WIDTH = 2;
 export const PERCENT_CELL_WIDTH = 3;
 export const TIME_CELL_INNER_WIDTH = 6;
-export const SV_CELL_WIDTH = 5;
 
 export const CLAUDE_REFRESH_FLAG = "--refresh-claude-usage";
 export const CODEX_REFRESH_FLAG = "--refresh-codex-rate-limits";
