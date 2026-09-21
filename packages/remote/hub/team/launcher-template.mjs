@@ -18,7 +18,7 @@ function shellSingleQuote(value) {
 
 function buildAntigravityArgs(opts = {}) {
   const prompt = typeof opts.prompt === "string" ? opts.prompt : "";
-  const command = `printf %s ${shellSingleQuote(prompt)} | agy --print --dangerously-skip-permissions`;
+  const command = `agy --dangerously-skip-permissions --print ${shellSingleQuote(prompt)}`;
   if (opts.resultFile) {
     return `${command} > ${shellSingleQuote(opts.resultFile)} 2>${shellSingleQuote(`${opts.resultFile}.err`)}`;
   }
