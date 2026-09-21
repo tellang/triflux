@@ -6,6 +6,25 @@
 대체하지 않는다 — 근거(왜)가 아키텍처/정책 수준이면 ADR로, 운영 절차 수준이면
 여기로.
 
+## 2026-09-21: agy 프롬프트는 `--print` 값으로 전달한다 (stdin 폐기)
+
+- **결정**: agy 호출은 `agy --dangerously-skip-permissions --print "<프롬프트>"` 형태로 한다.
+  아래 2026-07-26 항목의 "agy 레인만 stdin 파이프" 부분을 이 항목이 대체한다.
+- **근거**: Antigravity CLI 공식 헤드리스 문서는 `-p`/`--print`/`--prompt` 가 프롬프트를 값으로
+  받고, stdin 프롬프트는 `--input-format stream-json` 에서만 읽는다고 적는다. agy 1.2.7 실측에서
+  stdin 방식은 `--print` 가 다음 플래그를 프롬프트로 삼켜 exit 2 로 끝났다. 외부 CLI 가 강제한
+  계약 변경이라 ADR 이 아니라 여기에 남긴다.
+- **남은 것**: `.claude/rules/tfx-psmux.md` 규칙 4-3 과 그 생성 미러 `AGENTS.md` 가 아직 agy 를
+  표준 입력으로 적고 있다. 규칙 본문과 sync hash 를 함께 고쳐야 한다.
+- **관련**: PR #501
+
+## 2026-09-21: HUD 의 `sv` 절약 세그먼트를 뺀다
+
+- **결정**: HUD 의 모든 tier 에서 `sv:` 구간과 그 계산부(accumulator 판독, 포맷터, 상수)를 제거한다.
+- **근거**: 컨텍스트 용량 대비 누적 토큰 배수라 `5.7k%` 같은 값이 나오고, 읽는 사람이 뜻을
+  알 수 없었다. 파이프라인 벤치마크 요약의 비용 절약 표기는 의미가 분명해 그대로 둔다.
+- **관련**: PR #502
+
 ## 2026-07-26 — psmux 미러는 `.claude/rules/`가 작성 정본, AGENTS.md는 생성물
 
 - **결정**: `tfx-psmux.md`에 `sync-role: source`를 두고 `AGENTS.md`는 단방향 생성
