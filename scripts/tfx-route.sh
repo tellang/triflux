@@ -703,6 +703,7 @@ read_probe_state() {
 RUN_ID="${TIMESTAMP}-$$-${RANDOM}"
 STDERR_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-stderr.log"
 STDOUT_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-stdout.log"
+CODEX_LAST_MESSAGE_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-last-message.log"
 
 # ── 팀 환경변수 ──
 TFX_TEAM_NAME="${TFX_TEAM_NAME:-}"
@@ -2918,6 +2919,22 @@ else
   echo "[tfx-route] WARNING: optional helper missing: $_TFX_ROUTE_DIR/lib/codex-recovery.sh (run: tfx doctor --fix)" >&2
 fi
 
+_codex_stdout_has_meaningful_output() {
+  local output_file="$1"
+  [[ -s "$output_file" ]] || return 1
+  awk '
+    {
+      line = $0
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+      if (line != "" && line != "Reading additional input from stdin...") {
+        found = 1
+        exit
+      }
+    }
+    END { exit !found }
+  ' "$output_file" 2>/dev/null
+}
+
 run_codex_exec() {
   local prompt="$1"
   local use_tee_flag="$2"
@@ -2930,6 +2947,7 @@ run_codex_exec() {
 
   _attempt_codex_run() {
     exit_code_local=0
+    : > "$CODEX_LAST_MESSAGE_LOG"
     # `--` end-of-options: prompt가 '--'/'---' (front-matter 등)로 시작하면
     # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
     if [[ "$use_tee_flag" == "true" ]]; then
@@ -2937,13 +2955,13 @@ run_codex_exec() {
         # agy --print + skip-permissions positional prompt는 timeout이 재현되어 stdin pipe로 고정한다.
         printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
       else
-        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
       fi
     else
       if [[ "$CLI_TYPE" == "antigravity" ]]; then
         printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
       else
-        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
+        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
       fi
     fi
     worker_pid=$!
@@ -2988,7 +3006,11 @@ run_codex_exec() {
     fi
   fi
 
-  recover_codex_stdout
+  # 공식 -o 계약이 산출물을 제공했으면 raw stdout은 진단 로그 그대로 보존한다.
+  # -o가 비었을 때만 기존 stderr 복구 경로로 호환한다.
+  if [[ ! -s "$CODEX_LAST_MESSAGE_LOG" ]]; then
+    recover_codex_stdout
+  fi
 
   return "$exit_code_local"
 }
@@ -3272,6 +3294,7 @@ FALLBACK_EOF
   # recover_codex_stdout 이 복구 진입 시 1로 세운다(dynamic scope로 이 local 이 갱신됨).
   # 매 실행 초기화로 스테일 방지. 진짜 산출물 부재 판정(아래 no-op 가드)에 쓰인다.
   local CODEX_STDOUT_WAS_RECOVERED=0
+  local result_reason=""
 
   # tee 활성화 조건: 팀 모드 + 실제 터미널(TTY/tmux)
   # Agent 래퍼 안에서는 가상 stdout 캡처로 tee 출력이 사용자에게 안 보임 → 파일 전용
@@ -3284,6 +3307,12 @@ FALLBACK_EOF
   fi
 
   if [[ "$CLI_TYPE" == "codex" ]]; then
+    # codex mcp-server는 upstream에서 제거됐다. auto와 명시 mcp 모두 exec로
+    # 수렴시키되, 명시 mcp 요청에는 한 번만 이유를 알린다.
+    if [[ "$TFX_CODEX_TRANSPORT" == "mcp" ]]; then
+      echo "[tfx-route] TFX_CODEX_TRANSPORT=mcp 요청: codex mcp-server가 upstream에서 제거되어 exec로 계속합니다." >&2
+    fi
+    TFX_CODEX_TRANSPORT="exec"
     # Degraded is a per-invocation result, not an inherited process contract.
     # Test and wrapper environments can carry stale exported values from prior
     # route calls; clear it before the current MCP preflight decides.
@@ -3331,29 +3360,8 @@ FALLBACK_EOF
       _codex_skill_prompt="$(prepend_skill "$FULL_PROMPT"; printf '%s' "$_codex_skill_sentinel")"
       FULL_PROMPT="${_codex_skill_prompt%"$_codex_skill_sentinel"}"
     fi
+    run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
     codex_transport_effective="exec"
-    if [[ "$TFX_CODEX_TRANSPORT" != "exec" ]]; then
-      run_codex_mcp "$FULL_PROMPT" "$use_tee" || exit_code=$?
-      if [[ "$exit_code" -eq 0 ]]; then
-        codex_transport_effective="mcp"
-      elif [[ "$exit_code" -eq "$CODEX_MCP_TRANSPORT_EXIT_CODE" && "$TFX_CODEX_TRANSPORT" == "auto" ]]; then
-        # MCP bootstrap/transport failure only: retain auto's legacy exec fallback.
-        echo "[tfx-route] Codex MCP 실패(exit=${exit_code}). legacy exec 경로로 fallback 시도." >&2
-        local _sd
-        _sd="$(_get_script_dir)"
-        if [[ -f "$_sd/hub-ensure.mjs" ]]; then
-          "$NODE_BIN" "$_sd/hub-ensure.mjs" >/dev/null 2>&1 || true
-        fi
-        exit_code=0
-        run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
-        codex_transport_effective="exec-fallback"
-      else
-        codex_transport_effective="mcp"
-      fi
-    else
-      run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
-      codex_transport_effective="exec"
-    fi
     echo "[tfx-route] codex_transport_effective=$codex_transport_effective" >&2
     # Config swap 복원 (성공/실패 관계없이)
     _codex_config_swap "restore"
@@ -3516,8 +3524,16 @@ EOF
     # 노이즈로 backfill 한 경우(복구 플래그)면 진짜 워커 출력이 아니다. 복구가
     # `! -s STDOUT_LOG` 를 무력화해 빈손 실행을 success 로 오보고하던 갭을 막는다.
     local no_genuine_output="no"
-    if [[ ! -s "$STDOUT_LOG" || "${CODEX_STDOUT_WAS_RECOVERED:-0}" == "1" ]]; then
+    if [[ "$CLI_TYPE" == "codex" && -s "$CODEX_LAST_MESSAGE_LOG" ]]; then
+      no_genuine_output="no"
+    elif [[ "$CLI_TYPE" == "codex" ]] && ! _codex_stdout_has_meaningful_output "$STDOUT_LOG"; then
       no_genuine_output="yes"
+    elif [[ ! -s "$STDOUT_LOG" || "${CODEX_STDOUT_WAS_RECOVERED:-0}" == "1" ]]; then
+      no_genuine_output="yes"
+    fi
+
+    if [[ "$CLI_TYPE" == "codex" && ! -s "$CODEX_LAST_MESSAGE_LOG" && "$no_genuine_output" == "yes" ]]; then
+      result_reason="no_final_message"
     fi
 
     # MCP transport 채널이 실행 중 죽었는지(exit 0 이어도) stderr 서명으로 판정.
@@ -3572,7 +3588,14 @@ EOF
 
   # ── 후처리: 단일 node 프로세스로 위임 ──
   # 토큰 추출, 출력 필터링, 로그, 토큰 누적, AIMD, 이슈 추적, 결과 출력 전부 처리
-  local post_script="${HOME}/.claude/scripts/tfx-route-post.mjs"
+  # 후처리기는 이 라우터와 같은 디렉터리의 것을 먼저 쓴다. 설치본 경로를 고정하면 라우터와 후처리기의
+  # 버전이 어긋나 새 인자(--last-message-log 등)를 옛 후처리기가 무시한다. 설치본은 폴백이다.
+  local _route_dir post_script
+  _route_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+  post_script="${_route_dir}/tfx-route-post.mjs"
+  if [[ ! -f "$post_script" ]]; then
+    post_script="${HOME}/.claude/scripts/tfx-route-post.mjs"
+  fi
   if [[ -f "$post_script" ]]; then
     node "$post_script" \
       --agent "$AGENT_TYPE" \
@@ -3587,6 +3610,8 @@ EOF
       --mcp-profile "$MCP_PROFILE" \
       --stderr-log "$STDERR_LOG" \
       --stdout-log "$STDOUT_LOG" \
+      --last-message-log "$CODEX_LAST_MESSAGE_LOG" \
+      --result-reason "$result_reason" \
       --rerouted-from "${TFX_REROUTED_FROM:-}" \
       --max-bytes "$MAX_STDOUT_BYTES" \
       --tee-active "$use_tee" \
@@ -3599,16 +3624,38 @@ EOF
     [[ -n "${TFX_REROUTED_FROM:-}" ]] && echo "rerouted_from: $TFX_REROUTED_FROM"
     echo "exit_code: $exit_code"
     echo "elapsed: ${elapsed}s"
-    echo "status: $([ $exit_code -eq 0 ] && echo success || echo failed)"
-    echo "=== OUTPUT ==="
-    if [[ "${TFX_CLEAN_TUI:-1}" != "0" ]]; then
-      cat "$STDOUT_LOG" 2>/dev/null \
-        | sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' \
-        | sed '/^[[:space:]]*[╭╮╰╯│─┌┐└┘├┤┬┴┼]/d' \
-        | sed '/^[[:space:]]*[›❯][[:space:]]*$/d' \
-        | head -c "$MAX_STDOUT_BYTES"
+    echo "stdout_log: $STDOUT_LOG"
+    [[ "$CLI_TYPE" == "codex" ]] && echo "last_message_log: $CODEX_LAST_MESSAGE_LOG"
+    if [[ -n "$result_reason" ]]; then
+      echo "status: partial"
+      echo "reason: $result_reason"
+      echo "=== PARTIAL OUTPUT ==="
     else
-      cat "$STDOUT_LOG" 2>/dev/null | head -c "$MAX_STDOUT_BYTES"
+      echo "status: $([ $exit_code -eq 0 ] && echo success || echo failed)"
+      echo "=== OUTPUT ==="
+    fi
+    local result_output_log="$STDOUT_LOG"
+    if [[ "$CLI_TYPE" == "codex" && -s "$CODEX_LAST_MESSAGE_LOG" ]]; then
+      result_output_log="$CODEX_LAST_MESSAGE_LOG"
+    fi
+    local capped_output_log="$result_output_log"
+    if [[ "${TFX_CLEAN_TUI:-1}" != "0" ]]; then
+      capped_output_log="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-clean-output.log"
+      sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$result_output_log" 2>/dev/null \
+        | sed '/^[[:space:]]*[╭╮╰╯│─┌┐└┘├┤┬┴┼]/d' \
+        | sed '/^[[:space:]]*[›❯][[:space:]]*$/d' > "$capped_output_log"
+    fi
+    local output_bytes=0
+    [[ -f "$capped_output_log" ]] && output_bytes=$(wc -c < "$capped_output_log" 2>/dev/null | tr -d ' ')
+    if [[ "$output_bytes" -gt "$MAX_STDOUT_BYTES" ]]; then
+      echo "--- [출력 ${output_bytes}B → ${MAX_STDOUT_BYTES}B로 절삭됨; tail ${MAX_STDOUT_BYTES}B 유지] ---"
+      tail -c "$MAX_STDOUT_BYTES" "$capped_output_log" 2>/dev/null
+    else
+      cat "$capped_output_log" 2>/dev/null
+    fi
+    if [[ -n "$result_reason" && -s "$STDERR_LOG" ]]; then
+      echo "=== STDERR ==="
+      tail -n 20 "$STDERR_LOG"
     fi
   fi
 
@@ -3619,7 +3666,12 @@ EOF
     echo "cli: $CLI_TYPE"
     echo "exit_code: $exit_code"
     echo "elapsed: ${elapsed}s"
-    echo "status: $([ $exit_code -eq 0 ] && echo success || echo failed)"
+    if [[ -n "$result_reason" ]]; then
+      echo "status: partial"
+      echo "reason: $result_reason"
+    else
+      echo "status: $([ $exit_code -eq 0 ] && echo success || echo failed)"
+    fi
     echo "stdout_log: $STDOUT_LOG"
     echo "result_file: $result_file"
   } > "$result_file" 2>/dev/null

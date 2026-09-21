@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // tests/fixtures/fake-codex.mjs — Codex CLI/MCP 테스트 대역
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import process from "node:process";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -166,13 +166,24 @@ function runExec() {
   }
   const prompt = stdinPrompt || process.argv.at(-1) || "";
   const configFlags = [];
+  let lastMessagePath = "";
 
   for (let i = 3; i < process.argv.length - 1; i += 1) {
     if (process.argv[i] === "-c" && process.argv[i + 1]) {
       configFlags.push(process.argv[i + 1]);
       i += 1;
+    } else if (
+      ["-o", "--output-last-message"].includes(process.argv[i]) &&
+      process.argv[i + 1]
+    ) {
+      lastMessagePath = process.argv[i + 1];
+      i += 1;
     }
   }
+
+  const writeLastMessage = (content) => {
+    if (lastMessagePath) writeFileSync(lastMessagePath, content, "utf8");
+  };
 
   if (mode === "exec-fail") {
     console.error("fake codex exec failed");
@@ -180,6 +191,68 @@ function runExec() {
   }
 
   if (mode === "exec-empty") {
+    process.exit(0);
+  }
+
+  if (mode === "exec-last-message") {
+    writeLastMessage("FINAL:assistant message");
+    process.stdout.write(
+      [
+        "RAW_TRACE:hook line",
+        "exec",
+        "/bin/zsh -lc echo fixture",
+        '{"type":"thread.started","thread_id":"thr_last_message"}',
+      ].join("\n"),
+    );
+    process.exit(0);
+  }
+
+  if (mode === "exec-long-last-message") {
+    writeLastMessage(`HEAD-MARKER\n${"x".repeat(60_000)}\nTAIL-MARKER`);
+    process.stdout.write("RAW_TRACE:long output");
+    process.exit(0);
+  }
+
+  if (mode === "exec-stdin-notice") {
+    writeLastMessage("FINAL:stdin notice is benign");
+    process.stderr.write("Reading additional input from stdin...\n");
+    process.exit(0);
+  }
+
+  if (
+    mode === "exec-stderr-transcript" ||
+    mode === "exec-stderr-tracing-error"
+  ) {
+    // codex 0.155 실측 형태: 안내 한 줄 + 배너 + 프롬프트 에코 + 실행 추적이 모두 stderr 로 나온다.
+    writeLastMessage("FINAL:transcript on stderr is not a warning");
+    process.stderr.write(
+      [
+        "Reading additional input from stdin...",
+        "OpenAI Codex v0.155.1",
+        "--------",
+        "workdir: /tmp/fake",
+        "model: gpt-5.6-luna",
+        "approval: never",
+        "--------",
+        "user",
+        "error: this word appears inside the echoed prompt and must not count",
+        "exec",
+        "/bin/zsh -lc 'echo trace-line'",
+        ...(mode === "exec-stderr-tracing-error"
+          ? [
+              "2026-09-21T02:00:00.000Z ERROR codex_core::mcp: server context7 failed to start",
+            ]
+          : []),
+        "tokens used",
+        "1,234",
+        "",
+      ].join("\n"),
+    );
+    process.exit(0);
+  }
+
+  if (mode === "exec-stdin-notice-only") {
+    process.stdout.write("Reading additional input from stdin...\n");
     process.exit(0);
   }
 
