@@ -5,15 +5,15 @@ import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  resolveGeminiModel,
+  resolveGeminiProfileForPurpose,
+} from "../scripts/lib/gemini-profiles.mjs";
+import {
   executeWithCircuitBroker,
   normalizePathForShell,
   runProcess,
 } from "./cli-adapter-base.mjs";
 import { isActivityLifecycleEnabled } from "./lib/worker-lifecycle.mjs";
-import {
-  resolveGeminiModel,
-  resolveGeminiProfileForPurpose,
-} from "../scripts/lib/gemini-profiles.mjs";
 import { whichCommandAsync } from "./platform.mjs";
 
 function shellSingleQuote(value) {
@@ -83,11 +83,17 @@ function buildGeminiCommand(prompt, resultFile, opts = {}) {
 function resolveAntigravityModel(opts = {}) {
   // effort 는 역할별 SSOT(scripts/lib/gemini-profiles.mjs). 명시 model 이 우선한다.
   const explicit = typeof opts.model === "string" ? opts.model.trim() : "";
-  if (explicit) return resolveGeminiModel(explicit, { profilesPath: opts.geminiProfilesPath });
+  if (explicit)
+    return resolveGeminiModel(explicit, {
+      profilesPath: opts.geminiProfilesPath,
+    });
   if (!opts.role && !opts.agent) return "";
-  return resolveGeminiModel(resolveGeminiProfileForPurpose(opts.role || opts.agent), {
-    profilesPath: opts.geminiProfilesPath,
-  });
+  return resolveGeminiModel(
+    resolveGeminiProfileForPurpose(opts.role || opts.agent),
+    {
+      profilesPath: opts.geminiProfilesPath,
+    },
+  );
 }
 
 function buildAttempts(opts, preflight) {

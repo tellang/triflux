@@ -5,6 +5,10 @@ import { mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  resolveGeminiModel,
+  resolveGeminiProfileForPurpose,
+} from "../scripts/lib/gemini-profiles.mjs";
+import {
   executeWithCircuitBroker,
   normalizePathForShell,
   runProcess,
@@ -61,15 +65,13 @@ async function runPreflight(opts = {}) {
 // ── Command building ────────────────────────────────────────────
 
 function buildGeminiCommand(prompt, resultFile, opts = {}) {
-  const parts = [
-    "printf",
-    "%s",
-    shellSingleQuote(prompt),
-    "|",
-    "agy",
-    "--print",
-    "--dangerously-skip-permissions",
-  ];
+  // agy 의 --print 는 값(프롬프트)을 받는 플래그다. 1.1.27 부터 stdin 프롬프트는
+  // "empty prompt" 로 거부되므로 프롬프트를 --print 의 값으로, 맨 끝에 넘긴다.
+  const parts = ["agy", "--dangerously-skip-permissions"];
+  if (typeof opts.model === "string" && opts.model.trim()) {
+    parts.push("--model", shellSingleQuote(opts.model.trim()));
+  }
+  parts.push("--print", shellSingleQuote(prompt));
 
   if (resultFile) {
     return `${parts.join(" ")} > ${shellSingleQuote(normalizePathForShell(resultFile))} 2>${shellSingleQuote(normalizePathForShell(resultFile + ".err"))}`;
@@ -78,11 +80,27 @@ function buildGeminiCommand(prompt, resultFile, opts = {}) {
   return parts.join(" ");
 }
 
+function resolveAntigravityModel(opts = {}) {
+  // effort 는 역할별 SSOT(scripts/lib/gemini-profiles.mjs). 명시 model 이 우선한다.
+  const explicit = typeof opts.model === "string" ? opts.model.trim() : "";
+  if (explicit)
+    return resolveGeminiModel(explicit, {
+      profilesPath: opts.geminiProfilesPath,
+    });
+  if (!opts.role && !opts.agent) return "";
+  return resolveGeminiModel(
+    resolveGeminiProfileForPurpose(opts.role || opts.agent),
+    {
+      profilesPath: opts.geminiProfilesPath,
+    },
+  );
+}
+
 function buildAttempts(opts, preflight) {
   const timeout = Number.isFinite(opts.timeout) ? opts.timeout : 900_000;
   const base = {
     timeout,
-    model: opts.model,
+    model: resolveAntigravityModel(opts),
     allowedMcpServers: Array.isArray(opts.mcpServers)
       ? [...opts.mcpServers]
       : [],
@@ -98,7 +116,7 @@ function buildAttempts(opts, preflight) {
 export function buildExecArgs(opts = {}) {
   const prompt = typeof opts.prompt === "string" ? opts.prompt : "";
   return buildGeminiCommand(prompt, opts.resultFile || null, {
-    model: opts.model,
+    model: resolveAntigravityModel(opts),
     allowedMcpServers: opts.mcpServers,
   });
 }

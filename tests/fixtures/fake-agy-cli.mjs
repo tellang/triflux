@@ -60,7 +60,9 @@ function main() {
 
   const prompt = printValue.trim();
   if (!prompt) {
-    process.stderr.write('Error: Error: empty prompt. Usage: agy --print "your prompt here"\n');
+    process.stderr.write(
+      'Error: Error: empty prompt. Usage: agy --print "your prompt here"\n',
+    );
     process.exit(4);
     return;
   }

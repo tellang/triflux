@@ -5,14 +5,14 @@ import { dirname, resolve as pathResolve } from "node:path";
 import { resolveNestedCodexAgentProfile } from "../../scripts/lib/cli-codex.mjs";
 import { codexProfileConfigOverrides } from "../../scripts/lib/codex-profile-config.mjs";
 import {
+  resolveGeminiModel,
+  resolveGeminiProfileForPurpose,
+} from "../../scripts/lib/gemini-profiles.mjs";
+import {
   buildDisabledCliError,
   normalizeCliName,
   resolveCliPolicy,
 } from "../../scripts/lib/machine-profile.mjs";
-import {
-  resolveGeminiModel,
-  resolveGeminiProfileForPurpose,
-} from "../../scripts/lib/gemini-profiles.mjs";
 import { whichCommand } from "../platform.mjs";
 
 const WIN32_EXT_PRECEDENCE = [".cmd", ".exe", ".bat", ".ps1"];

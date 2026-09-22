@@ -43,57 +43,59 @@ const isDev = process.env.NODE_ENV !== "production";
 // 페이로드만 남는다. CLI 관례상으로도 구조화 로그는 stderr 가 맞다.
 const LOG_FD = 2;
 
-export const logger = pino({
-  level: process.env.LOG_LEVEL || (isDev ? "debug" : "info"),
+export const logger = pino(
+  {
+    level: process.env.LOG_LEVEL || (isDev ? "debug" : "info"),
 
-  // 모든 로그에 포함되는 기본 필드
-  base: {
-    service: process.env.SERVICE_NAME || "triflux",
-    env: process.env.NODE_ENV || "development",
+    // 모든 로그에 포함되는 기본 필드
+    base: {
+      service: process.env.SERVICE_NAME || "triflux",
+      env: process.env.NODE_ENV || "development",
+    },
+
+    // 레벨을 대문자로 출력 (AI 파싱 용이)
+    formatters: {
+      level: (label) => ({ level: label.toUpperCase() }),
+    },
+
+    // ISO 8601 타임스탬프
+    timestamp: pino.stdTimeFunctions.isoTime,
+
+    // 민감정보 자동 필터링
+    redact: {
+      paths: [
+        "password",
+        "token",
+        "apiKey",
+        "secret",
+        "authorization",
+        "*.password",
+        "*.token",
+        "*.apiKey",
+        "*.secret",
+        "req.headers.authorization",
+        "req.headers.cookie",
+        "hubToken",
+      ],
+      remove: true,
+    },
+
+    // 개발 환경: 컬러 콘솔 출력 (stderr)
+    transport: isDev
+      ? {
+          target: "pino-pretty",
+          options: {
+            colorize: true,
+            translateTime: "yyyy-mm-dd HH:MM:ss",
+            ignore: "pid,hostname",
+            destination: LOG_FD,
+          },
+        }
+      : undefined,
   },
-
-  // 레벨을 대문자로 출력 (AI 파싱 용이)
-  formatters: {
-    level: (label) => ({ level: label.toUpperCase() }),
-  },
-
-  // ISO 8601 타임스탬프
-  timestamp: pino.stdTimeFunctions.isoTime,
-
-  // 민감정보 자동 필터링
-  redact: {
-    paths: [
-      "password",
-      "token",
-      "apiKey",
-      "secret",
-      "authorization",
-      "*.password",
-      "*.token",
-      "*.apiKey",
-      "*.secret",
-      "req.headers.authorization",
-      "req.headers.cookie",
-      "hubToken",
-    ],
-    remove: true,
-  },
-
-  // 개발 환경: 컬러 콘솔 출력 (stderr)
-  transport: isDev
-    ? {
-        target: "pino-pretty",
-        options: {
-          colorize: true,
-          translateTime: "yyyy-mm-dd HH:MM:ss",
-          ignore: "pid,hostname",
-          destination: LOG_FD,
-        },
-      }
-    : undefined,
-},
-// 운영 환경(transport 미사용)에서도 stdout 이 아니라 stderr 로 쓴다.
-isDev ? undefined : pino.destination({ dest: LOG_FD, sync: false }));
+  // 운영 환경(transport 미사용)에서도 stdout 이 아니라 stderr 로 쓴다.
+  isDev ? undefined : pino.destination({ dest: LOG_FD, sync: false }),
+);
 
 /**
  * 모듈별 Child Logger 생성.

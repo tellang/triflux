@@ -78,7 +78,10 @@ test("buildExecArgs produces agy stdin print command for legacy gemini adapter",
   });
 
   // --print 는 값을 받는 플래그라 항상 마지막 인자여야 한다 (agy 1.1.2x 회귀)
-  assert.match(cmd, /agy --dangerously-skip-permissions --model 'gemini-3-flash-preview' --print(?:\s|$)/);
+  assert.match(
+    cmd,
+    /agy --dangerously-skip-permissions --model 'gemini-3-flash-preview' --print(?:\s|$)/,
+  );
   assert.doesNotMatch(cmd, /--print --dangerously-skip-permissions/);
   assert.doesNotMatch(cmd, /gemini --/);
   assert.doesNotMatch(cmd, /--prompt/);

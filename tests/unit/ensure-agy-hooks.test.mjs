@@ -269,7 +269,10 @@ describe("resolveStableNodeBin", () => {
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     };
     assert.equal(
-      resolveStableNodeBin(cellar, { env: { HOMEBREW_PREFIX: prefix }, realpath }),
+      resolveStableNodeBin(cellar, {
+        env: { HOMEBREW_PREFIX: prefix },
+        realpath,
+      }),
       alias,
     );
   });
@@ -287,7 +290,8 @@ describe("resolveStableNodeBin", () => {
     const exec = "/opt/homebrew/Cellar/node/26.0.0/bin/node";
     const realpath = (p) => {
       if (p === exec) return exec;
-      if (p === "/opt/homebrew/bin/node") return "/opt/homebrew/Cellar/node/25.0.0/bin/node";
+      if (p === "/opt/homebrew/bin/node")
+        return "/opt/homebrew/Cellar/node/25.0.0/bin/node";
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     };
     assert.equal(resolveStableNodeBin(exec, { env: {}, realpath }), exec);

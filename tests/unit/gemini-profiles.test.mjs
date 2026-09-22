@@ -208,7 +208,10 @@ describe("용도별 effort 분리 (SSOT)", () => {
   it("역할을 3.8 Flash effort 프로필로 매핑한다", () => {
     assert.equal(resolveGeminiProfileForPurpose("designer"), "flash38_high");
     assert.equal(resolveGeminiProfileForPurpose("reviewer"), "flash38_high");
-    assert.equal(resolveGeminiProfileForPurpose("Code-Reviewer"), "flash38_high");
+    assert.equal(
+      resolveGeminiProfileForPurpose("Code-Reviewer"),
+      "flash38_high",
+    );
     assert.equal(resolveGeminiProfileForPurpose("writer"), "flash38");
     assert.equal(resolveGeminiProfileForPurpose("antigravity"), "flash38");
     assert.equal(resolveGeminiProfileForPurpose("summarizer"), "flash38_low");
@@ -218,14 +221,32 @@ describe("용도별 effort 분리 (SSOT)", () => {
 
   it("프로필 이름을 display name 으로 푼다 (사용자 파일 우선, 없으면 기본값)", () => {
     const { profilesPath } = makeTempPaths();
-    assert.equal(resolveGeminiModel("flash38_high", { profilesPath }), "Gemini 3.8 Flash (High)");
+    assert.equal(
+      resolveGeminiModel("flash38_high", { profilesPath }),
+      "Gemini 3.8 Flash (High)",
+    );
     writeFileSync(
       profilesPath,
-      JSON.stringify({ model: "Gemini 3.8 Flash (Low)", profiles: { flash38: { model: "Gemini 3.7 Flash (Medium)" } } }),
+      JSON.stringify({
+        model: "Gemini 3.8 Flash (Low)",
+        profiles: { flash38: { model: "Gemini 3.7 Flash (Medium)" } },
+      }),
     );
-    assert.equal(resolveGeminiModel("flash38", { profilesPath }), "Gemini 3.7 Flash (Medium)");
-    assert.equal(resolveGeminiModel("unknown_profile", { profilesPath }), "Gemini 3.8 Flash (Low)");
-    assert.equal(resolveGeminiModel("Gemini 3.1 Pro (High)", { profilesPath }), "Gemini 3.1 Pro (High)");
-    assert.equal(resolveGeminiModel("gemini-3.8-flash-high", { profilesPath }), "gemini-3.8-flash-high");
+    assert.equal(
+      resolveGeminiModel("flash38", { profilesPath }),
+      "Gemini 3.7 Flash (Medium)",
+    );
+    assert.equal(
+      resolveGeminiModel("unknown_profile", { profilesPath }),
+      "Gemini 3.8 Flash (Low)",
+    );
+    assert.equal(
+      resolveGeminiModel("Gemini 3.1 Pro (High)", { profilesPath }),
+      "Gemini 3.1 Pro (High)",
+    );
+    assert.equal(
+      resolveGeminiModel("gemini-3.8-flash-high", { profilesPath }),
+      "gemini-3.8-flash-high",
+    );
   });
 });

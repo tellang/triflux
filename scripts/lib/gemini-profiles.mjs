@@ -43,8 +43,15 @@ const LEGACY_MODEL_MIGRATION = {
 // 과거 setup 이 자동 생성했던 프로필 이름. 정책상 더 쓰지 않으므로 제거한다.
 // 사용자가 직접 이름 붙인 프로필은 건드리지 않는다.
 const LEGACY_PROFILE_NAMES = [
-  "pro25", "flash25", "lite25", "flash3",
-  "pro31", "pro31_low", "flash35", "flash35_high", "flash35_low",
+  "pro25",
+  "flash25",
+  "lite25",
+  "flash3",
+  "pro31",
+  "pro31_low",
+  "flash35",
+  "flash35_high",
+  "flash35_low",
 ];
 // 과거 setup 이 자동 생성한 기본 model 값. 사용자가 고른 값이 아니므로 새 기본으로 올린다.
 const LEGACY_DEFAULT_MODELS = new Set(["Gemini 3.5 Flash (Medium)"]);
@@ -115,7 +122,8 @@ function resolveGeminiModel(profileOrModel, opts = {}) {
   if (typeof fromFile === "string" && fromFile.trim()) return fromFile.trim();
   const fromDefault = DEFAULT_GEMINI_PROFILES.profiles[raw];
   if (fromDefault) return fromDefault.model;
-  if (typeof cfg?.model === "string" && cfg.model.trim()) return cfg.model.trim();
+  if (typeof cfg?.model === "string" && cfg.model.trim())
+    return cfg.model.trim();
   return DEFAULT_GEMINI_PROFILES.model;
 }
 
@@ -251,9 +259,9 @@ function ensureGeminiProfiles({
 
 export {
   DEFAULT_GEMINI_PROFILES,
+  ensureGeminiProfiles,
   GEMINI_DEFAULT_PURPOSE_PROFILE,
   GEMINI_PROFILE_BY_PURPOSE,
-  ensureGeminiProfiles,
   resolveGeminiModel,
   resolveGeminiProfileForPurpose,
 };

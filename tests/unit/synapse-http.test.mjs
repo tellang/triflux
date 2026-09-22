@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -420,9 +420,15 @@ describe("drainPendingSynapse (flush before process.exit)", () => {
 describe("inferSessionCli stays inside the hub agents.cli CHECK constraint", () => {
   const schema = readFileSync(join(__dirname, "../../hub/schema.sql"), "utf8");
   const match = schema.match(/cli TEXT NOT NULL CHECK \(cli IN \(([^)]+)\)\)/);
-  const allowed = new Set(match[1].split(",").map((v) => v.trim().replace(/'/g, "")));
+  const allowed = new Set(
+    match[1].split(",").map((v) => v.trim().replace(/'/g, "")),
+  );
   const base = { sessionKind: "interactive", sessionId: "sess-1", cwd: "/tmp" };
-  const opts = { hostname: () => "h", nowMs: () => 0, resolveProjectId: () => "" };
+  const opts = {
+    hostname: () => "h",
+    nowMs: () => 0,
+    resolveProjectId: () => "",
+  };
 
   it("maps the agy session hook entrypoint to an allowed cli value", () => {
     const meta = buildSynapseRegistrationMeta(

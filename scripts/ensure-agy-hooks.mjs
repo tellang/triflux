@@ -89,7 +89,8 @@ export function resolveStableNodeBin(execPath = process.execPath, opts = {}) {
   const env = opts.env || process.env;
   const realpath = opts.realpath || realpathSync;
   const candidates = [];
-  if (env.HOMEBREW_PREFIX) candidates.push(join(env.HOMEBREW_PREFIX, "bin", "node"));
+  if (env.HOMEBREW_PREFIX)
+    candidates.push(join(env.HOMEBREW_PREFIX, "bin", "node"));
   candidates.push("/opt/homebrew/bin/node", "/usr/local/bin/node");
   let target;
   try {
