@@ -12,6 +12,10 @@ All notable changes to triflux will be documented in this file.
 - remote: m2 원격 세션 수명주기 자동화 (bbdc5f9d)
 
 ### Fixed
+- route: agy가 SSH 세션 판정 때문에 macOS Keychain 토큰을 못 읽던 문제. Keychain 토큰을 읽을 수 있을 때만 SSH 환경 변수를 빼고 agy를 실행한다 (f8ea9312)
+- packages: `@triflux/core`, `@triflux/remote`의 agy 설정이 Gemini 3.5 Flash와 옛 stdin 호출로 남아 있던 미러 누락 보정
+- routing: retry snapshot을 읽을 때 옛 `gpt56_sol_*` 프로필을 정규화해 `retry-status`가 옛 이름을 내보내지 않게 한다
+- ci: main CI를 Biome lint 단계에서 막던 포맷과 import 정렬 오류 14건 정리
 - route: codex 레인의 출력, 상태, 전송을 Codex CLI 0.155 공식 계약에 맞춤 (f542b5f7)
 - agy: remote 미러, 런처, tfx-plan의 stdin 프롬프트 호출을 `--print` 값 계약으로 전환 (b434ffb1)
 - agy: ensure-agy-hooks가 안정된 node 경로를 쓰도록 수정 (6223d466)
@@ -25,6 +29,7 @@ All notable changes to triflux will be documented in this file.
 - test: route 통합 테스트의 머신 프로파일 경로 격리 (4a739f78)
 
 ### Changed
+- release: `release:check-mirror`가 core의 `hub/*.mjs`, `scripts/lib/*.mjs`를 root와 바이트 단위로, remote의 `scripts/lib/*.mjs`를 import 변환을 되돌린 뒤 비교한다
 - hooks: headless-guard 훅 제거. 직접 호출 금지는 문서 규약으로 유지 (9d5e5914)
 - chore: 폐기 별칭 스킬, 제거된 Codex 플래그 잔재, 평가 워크스페이스, 미사용 reflexion 헬퍼 정리 (d917ee09, b0786807, 85d03687)
 - docs: ADR-0014 Claude 자격증명 Keychain 정본, ADR-0015 Codex 레인 exec 전송과 최종 메시지 계약 (8be06b18)
