@@ -51,8 +51,11 @@ function resolveModelLimit(modelId) {
     : DEFAULT_CONTEXT_LIMIT;
 }
 
-export function shouldSuppressInfoOnlyContextStatus(modelId) {
-  return isMillionContextModel(modelId);
+export function shouldSuppressInfoOnlyContextStatus(modelId, contextLimit = 0) {
+  const explicitLimit = Number(contextLimit);
+  return explicitLimit > 0
+    ? explicitLimit >= MILLION_CONTEXT_LIMIT
+    : isMillionContextModel(modelId);
 }
 
 const WARNING_LEVELS = Object.freeze({
@@ -288,6 +291,7 @@ export function deriveContextLimit(stdin) {
 }
 
 export function buildContextUsageView(stdin, snapshot = null) {
+  const modelId = stdin?.model?.id ?? stdin?.model;
   const stdinUsage = getStdinContextUsage(stdin);
   if (!stdinUsage) {
     return {
@@ -302,14 +306,14 @@ export function buildContextUsageView(stdin, snapshot = null) {
     };
   }
 
-  const modelId = stdin?.model?.id ?? stdin?.model;
   const limitTokens = Math.max(1, stdinUsage.limitTokens);
   const usedTokens = stdinUsage.usedTokens;
   const percent = clampPercent((usedTokens / limitTokens) * 100);
 
   const warning = classifyContextThreshold(percent);
   const showInfoOnlyStatus = !(
-    warning.level === "info" && shouldSuppressInfoOnlyContextStatus(modelId)
+    warning.level === "info" &&
+    shouldSuppressInfoOnlyContextStatus(modelId, stdinUsage.limitTokens)
   );
   return {
     usedTokens,

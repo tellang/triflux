@@ -68,6 +68,10 @@ const CORE_FILE_MIRRORS = [
 // Mirror policy (§packages/core): hooks/hud are byte-identical cp mirrors.
 // See .claude/rules/tfx-mirror-policy.md and PR #377.
 const CORE_DIR_MIRRORS = ["hooks", "hud"];
+const CORE_MJS_DIR_MIRRORS = [
+  { source: "hub", target: "packages/core/hub" },
+  { source: "scripts/lib", target: "packages/core/scripts/lib" },
+];
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage"]);
 // Per-top relative paths to skip. Mirror policy excludes these via
 // packages/triflux/package.json "files" negation patterns (e.g.
@@ -123,6 +127,18 @@ function extractImportSpecifiers(content) {
   return specs;
 }
 
+function restoreRemoteCoreHubImports(content) {
+  return content
+    .replace(
+      /(from\s+["'])@triflux\/core\/hub\/([^"']+)(["'])/g,
+      "$1../../hub/$2$3",
+    )
+    .replace(
+      /(import\(\s*["'])@triflux\/core\/hub\/([^"']+)(["']\s*\))/g,
+      "$1../../hub/$2$3",
+    );
+}
+
 function checkRemoteMirror(repoRoot) {
   const issues = [];
   const remoteRoot = join(repoRoot, "packages", "remote");
@@ -150,6 +166,17 @@ function checkRemoteMirror(repoRoot) {
             path: displayPath,
             kind: `remote-unresolvable-import (${spec})`,
           });
+        }
+      }
+      if (rel.startsWith("scripts/lib/")) {
+        const rootPath = join(repoRoot, rel);
+        if (
+          existsSync(rootPath) &&
+          !readFileSync(rootPath).equals(
+            Buffer.from(restoreRemoteCoreHubImports(content)),
+          )
+        ) {
+          issues.push({ path: displayPath, kind: "remote-content-diff" });
         }
       }
     } else {
@@ -248,6 +275,27 @@ function compareMirror({
         fixed.push({ path: mirror.target, kind: "updated" });
       } else {
         issues.push({ path: mirror.target, kind: "content-diff" });
+      }
+    }
+  }
+
+  for (const mirror of CORE_MJS_DIR_MIRRORS) {
+    const srcDir = join(repoRoot, mirror.source);
+    const dstDir = join(repoRoot, mirror.target);
+    for (const rel of walkRelFiles(dstDir)) {
+      if (!rel.endsWith(".mjs") || rel.includes("/")) continue;
+      const srcPath = join(srcDir, rel);
+      const dstPath = join(dstDir, rel);
+      const displayPath = `${mirror.target}/${rel}`;
+
+      if (!existsSync(srcPath)) continue;
+      if (!readFileSync(srcPath).equals(readFileSync(dstPath))) {
+        if (fix) {
+          copyFileSync(srcPath, dstPath);
+          fixed.push({ path: displayPath, kind: "updated" });
+        } else {
+          issues.push({ path: displayPath, kind: "content-diff" });
+        }
       }
     }
   }

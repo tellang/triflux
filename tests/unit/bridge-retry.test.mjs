@@ -173,4 +173,42 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
       argv: ["--profile", "gpt56_terra_high"],
     });
   });
+
+  it("retry-status 는 옛 xhigh/max/ultra snapshot profile을 정규화한 argv로 방출한다", () => {
+    for (const [legacy, canonical] of [
+      ["gpt56_sol_xhigh", "gpt6_astra_xhigh"],
+      ["gpt56_sol_max", "gpt6_astra_max"],
+      ["gpt56_sol_ultra", "gpt6_astra_max"],
+    ]) {
+      const dir = makeTempDir();
+      const snapshot = join(dir, `${legacy}.json`);
+      writeFileSync(
+        snapshot,
+        JSON.stringify({
+          version: 1,
+          current: "EXECUTING",
+          iterations: 1,
+          maxIterations: 3,
+          stuckCounter: 0,
+          lastFailureReason: null,
+          cliIndex: 0,
+          cliChain: [{ cli: "codex", model: "gpt-6-astra", profile: legacy }],
+          mode: "auto-escalate",
+          sessionId: null,
+          history: [],
+        }),
+        "utf8",
+      );
+
+      assert.deepEqual(
+        runBridge(["retry-status", "--snapshot", snapshot]).cliInvocation,
+        {
+          cli: "codex",
+          model: "gpt-6-astra",
+          profile: canonical,
+          argv: ["--profile", canonical],
+        },
+      );
+    }
+  });
 });

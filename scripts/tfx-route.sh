@@ -1783,15 +1783,17 @@ apply_cli_disable_policy() {
 apply_plan_guard() {
   [[ "$CLI_TYPE" != "codex" ]] && return
 
-  local replacement=""
-  case "$CLI_EFFORT" in
-    gpt55_low|spark53_low|codex53_low|gpt54_low|mini54_low) replacement="gpt56_luna_low" ;;
-    gpt55_med|spark53_med|codex53_med|mini54_med) replacement="gpt56_terra_med" ;;
-    gpt55_xhigh|codex53_xhigh|gpt54_xhigh|gpt56_sol_xhigh) replacement="gpt6_astra_xhigh" ;;
-    gpt56_sol_max) replacement="gpt6_astra_max" ;;
-    gpt56_sol_ultra) replacement="gpt6_astra_ultra" ;;
-    gpt55_high|spark53_*|codex53_*|gpt54_*|mini54_*) replacement="gpt56_terra_high" ;;
-  esac
+  local replacement
+  replacement="$(normalize_codex_profile_name "$CLI_EFFORT")"
+  if [[ "$replacement" == "$CLI_EFFORT" ]]; then
+    replacement=""
+    case "$CLI_EFFORT" in
+      gpt55_low|spark53_low|codex53_low|gpt54_low|mini54_low) replacement="gpt56_luna_low" ;;
+      gpt55_med|spark53_med|codex53_med|mini54_med) replacement="gpt56_terra_med" ;;
+      gpt55_xhigh|codex53_xhigh|gpt54_xhigh) replacement="gpt6_astra_xhigh" ;;
+      gpt55_high|spark53_*|codex53_*|gpt54_*|mini54_*) replacement="gpt56_terra_high" ;;
+    esac
+  fi
   [[ -z "$replacement" ]] && return
 
   local codex_base

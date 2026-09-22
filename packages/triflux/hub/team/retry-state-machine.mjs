@@ -350,6 +350,12 @@ export function loadSnapshot(snapshotFile) {
       `unsupported snapshot version: ${parsed.version} (expected 1)`,
     );
   }
+  if (Array.isArray(parsed.cliChain) && parsed.cliChain.length > 0) {
+    return {
+      ...parsed,
+      cliChain: normalizeEscalationChain(parsed.cliChain, "snapshot.cliChain"),
+    };
+  }
   return parsed;
 }
 

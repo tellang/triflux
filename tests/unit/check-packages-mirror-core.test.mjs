@@ -135,6 +135,73 @@ test("compareMirror keeps existing packages/triflux top-level mirror behavior", 
   );
 });
 
+test("compareMirror compares core hub and scripts/lib mjs mirrors and normalized remote scripts", (t) => {
+  const repoRoot = makeFixture(t);
+  for (const [source] of CORE_MIRRORS) {
+    write(repoRoot, `packages/triflux/${source}`, `source:${source}\n`);
+  }
+  write(repoRoot, "hub/runtime.mjs", "export const runtime = true;\n");
+  write(
+    repoRoot,
+    "packages/core/hub/runtime.mjs",
+    "export const runtime = true;\n",
+  );
+  write(
+    repoRoot,
+    "packages/triflux/hub/runtime.mjs",
+    "export const runtime = true;\n",
+  );
+  write(repoRoot, "hub/shared.mjs", "export const shared = true;\n");
+  write(
+    repoRoot,
+    "packages/core/hub/shared.mjs",
+    "export const shared = true;\n",
+  );
+  write(
+    repoRoot,
+    "packages/triflux/hub/shared.mjs",
+    "export const shared = true;\n",
+  );
+  write(
+    repoRoot,
+    "scripts/lib/remote-source.mjs",
+    'import { shared } from "../../hub/shared.mjs";\nexport { shared };\n',
+  );
+  write(
+    repoRoot,
+    "packages/core/scripts/lib/remote-source.mjs",
+    'import { shared } from "../../hub/shared.mjs";\nexport { shared };\n',
+  );
+  write(
+    repoRoot,
+    "packages/triflux/scripts/lib/remote-source.mjs",
+    'import { shared } from "../../hub/shared.mjs";\nexport { shared };\n',
+  );
+  write(
+    repoRoot,
+    "packages/remote/scripts/lib/remote-source.mjs",
+    'import { shared } from "@triflux/core/hub/shared.mjs";\nexport { shared };\n',
+  );
+
+  const clean = compareMirror({ fix: false, repoRoot });
+  assert.equal(clean.ok, true, JSON.stringify(clean.issues));
+
+  write(
+    repoRoot,
+    "packages/remote/scripts/lib/remote-source.mjs",
+    'import { shared } from "@triflux/core/hub/shared.mjs";\nexport const changed = true;\n',
+  );
+  const drifted = compareMirror({ fix: false, repoRoot });
+  assert.equal(drifted.ok, false);
+  assert.ok(
+    findIssue(
+      drifted,
+      "packages/remote/scripts/lib/remote-source.mjs",
+      "remote-content-diff",
+    ),
+  );
+});
+
 // --- packages/core/hud directory mirror tests ---
 
 test("compareMirror detects missing packages/core/hud file", (t) => {

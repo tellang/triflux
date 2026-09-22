@@ -401,6 +401,42 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.equal(loaded.current, STATES.DIAGNOSING);
     });
 
+    it("loadSnapshot은 옛 Codex profile을 applySnapshot과 같은 값으로 정규화한다", () => {
+      const dir = makeTempDir();
+      const file = join(dir, "legacy-profiles.json");
+      writeFileSync(
+        file,
+        JSON.stringify({
+          version: 1,
+          current: STATES.EXECUTING,
+          iterations: 1,
+          maxIterations: 3,
+          stuckCounter: 0,
+          lastFailureReason: null,
+          cliIndex: 0,
+          cliChain: [
+            { cli: "codex", model: "gpt-6-astra", profile: "gpt56_sol_xhigh" },
+            { cli: "codex", model: "gpt-6-astra", profile: "gpt56_sol_max" },
+            { cli: "codex", model: "gpt-6-astra", profile: "gpt56_sol_ultra" },
+          ],
+          mode: "auto-escalate",
+          sessionId: null,
+          history: [],
+        }),
+        "utf8",
+      );
+
+      const loaded = loadSnapshot(file);
+      assert.deepEqual(
+        loaded.cliChain.map((entry) => entry.profile),
+        ["gpt6_astra_xhigh", "gpt6_astra_max", "gpt6_astra_max"],
+      );
+
+      const restored = createRetryStateMachine({ mode: "auto-escalate" });
+      restored.applySnapshot(loaded);
+      assert.deepEqual(restored.getCurrent().cliChain, loaded.cliChain);
+    });
+
     it("loadSnapshot 존재하지 않는 파일은 null", () => {
       const dir = makeTempDir();
       assert.equal(loadSnapshot(join(dir, "none.json")), null);

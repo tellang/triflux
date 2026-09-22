@@ -13,6 +13,7 @@ import {
   estimateTokens,
   formatContextUsage,
   parseUsageFromPayload,
+  shouldSuppressInfoOnlyContextStatus,
 } from "../../hud/context-monitor.mjs";
 
 function makeTmpPath(prefix) {
@@ -71,6 +72,44 @@ describe("hud/context-monitor.mjs", () => {
     );
     assert.equal(view.display, "45K/200K (23%)");
     assert.equal(view.warningLevel, "ok");
+  });
+
+  it("Sonnet 5라도 statusline 실제 한도가 200K면 info 경고를 표시한다", () => {
+    const view = buildContextUsageView({
+      model: { id: "claude-sonnet-5" },
+      context_window: {
+        context_window_size: 200_000,
+        current_usage: { input_tokens: 120_000 },
+      },
+    });
+
+    assert.equal(view.warningLevel, "info");
+    assert.equal(view.warningTag, "ℹ 절반 이상 사용");
+  });
+
+  it("Sonnet 5의 statusline 실제 한도가 1M이면 info 경고를 숨긴다", () => {
+    const view = buildContextUsageView({
+      model: { id: "claude-sonnet-5" },
+      context_window: {
+        context_window_size: 1_000_000,
+        current_usage: { input_tokens: 600_000 },
+      },
+    });
+
+    assert.equal(view.warningLevel, "info");
+    assert.equal(view.warningTag, "");
+  });
+
+  it("한도 값이 없으면 모델 추정으로 숨김 여부를 판정한다", () => {
+    assert.equal(shouldSuppressInfoOnlyContextStatus("claude-sonnet-5"), true);
+    assert.equal(
+      shouldSuppressInfoOnlyContextStatus("claude-sonnet-5", 200_000),
+      false,
+    );
+    assert.equal(
+      shouldSuppressInfoOnlyContextStatus("claude-haiku-4-5"),
+      false,
+    );
   });
 
   it("stdin이 context_window_size를 주지 않으면 model.id로 한도를 추정한다 (Opus 4.7 → 1M)", () => {
