@@ -2,6 +2,33 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.45.0] - 2026-09-22
+
+### Added
+- routing: Codex 최상위 tier를 `gpt-6-astra`로 전환. `gpt6_astra_xhigh`, `gpt6_astra_max`, `gpt6_astra_ultra` 프로필을 추가하고 옛 `gpt56_sol_*` 이름은 새 이름으로 정규화한다. terra/luna 레인은 그대로 (ADR-0016)
+- routing: `--retry auto-escalate` 최종 단계를 Claude `fable` 별칭으로 바꾼다. ADR-0006을 ADR-0016이 대체
+- agy: Gemini 3.8 Flash 전환, 역할별 effort 분리, agy 1.1.27 `--print` 계약 (e55be390)
+- machine-profile: `TFX_DISABLE_*`를 CLI 사용 여부 SSOT로 승격 (9fa37b28)
+- remote: m2 원격 세션 수명주기 자동화 (bbdc5f9d)
+
+### Fixed
+- route: codex 레인의 출력, 상태, 전송을 Codex CLI 0.155 공식 계약에 맞춤 (f542b5f7)
+- agy: remote 미러, 런처, tfx-plan의 stdin 프롬프트 호출을 `--print` 값 계약으로 전환 (b434ffb1)
+- agy: ensure-agy-hooks가 안정된 node 경로를 쓰도록 수정 (6223d466)
+- hud: Sonnet 5와 Fable 5.x를 1M 컨텍스트로 판정
+- hud: Claude 자격증명 정본을 Keychain으로 맞추고 로그인 감지를 refreshToken 지문으로 (28bcdc65)
+- hud: sv 절약 세그먼트 제거 (a2c7e264)
+- team: 대화형 pane 배치, agy 제출 확인, codex 승인 우회 수정 (259029ad)
+- hooks: checkpoint 키워드를 gstack-context-restore로 재지정하고 hub register의 cli 값을 정규화 (bedb7545)
+- hooks: 키워드 라우팅 오탐 두 건 차단 (795736ed)
+- hooks: 훅 로그를 stdout에서 stderr로 이동 (88bb102a)
+- test: route 통합 테스트의 머신 프로파일 경로 격리 (4a739f78)
+
+### Changed
+- hooks: headless-guard 훅 제거. 직접 호출 금지는 문서 규약으로 유지 (9d5e5914)
+- chore: 폐기 별칭 스킬, 제거된 Codex 플래그 잔재, 평가 워크스페이스, 미사용 reflexion 헬퍼 정리 (d917ee09, b0786807, 85d03687)
+- docs: ADR-0014 Claude 자격증명 Keychain 정본, ADR-0015 Codex 레인 exec 전송과 최종 메시지 계약 (8be06b18)
+
 ## [10.44.1] - 2026-08-21
 
 ### Fixed
