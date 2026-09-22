@@ -28,8 +28,8 @@ beforeEach(() => {
     'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "high"\n',
   );
   writeFileSync(
-    join(root, "gpt56_sol_xhigh.config.toml"),
-    'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "xhigh"\n',
+    join(root, "gpt6_astra_xhigh.config.toml"),
+    'model = "gpt-6-astra"\nmodel_reasoning_effort = "xhigh"\n',
   );
 });
 
@@ -47,10 +47,31 @@ describe("resolveCodexProfileConfig", () => {
       model: "gpt-5.6-terra",
       reasoningEffort: "high",
     });
-    assert.deepEqual(resolveCodexProfileConfig("gpt56_sol_xhigh"), {
-      model: "gpt-5.6-sol",
+    assert.deepEqual(resolveCodexProfileConfig("gpt6_astra_xhigh"), {
+      model: "gpt-6-astra",
       reasoningEffort: "xhigh",
     });
+  });
+
+  it("normalizes all old Sol profile names to Astra profile files", () => {
+    writeFileSync(
+      join(process.env.CODEX_HOME, "gpt6_astra_max.config.toml"),
+      'model = "gpt-6-astra"\nmodel_reasoning_effort = "max"\n',
+    );
+    writeFileSync(
+      join(process.env.CODEX_HOME, "gpt6_astra_ultra.config.toml"),
+      'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
+    );
+    for (const [legacy, effort] of [
+      ["gpt56_sol_xhigh", "xhigh"],
+      ["gpt56_sol_max", "max"],
+      ["gpt56_sol_ultra", "ultra"],
+    ]) {
+      assert.deepEqual(resolveCodexProfileConfig(legacy), {
+        model: "gpt-6-astra",
+        reasoningEffort: effort,
+      });
+    }
   });
 
   it("tolerates inline comments and single quotes", () => {
@@ -79,11 +100,11 @@ describe("resolveCodexProfileConfig", () => {
       model: null,
       reasoningEffort: "medium",
     });
-    assert.deepEqual(resolveCodexProfileConfig("gpt56_sol_max"), {
+    assert.deepEqual(resolveCodexProfileConfig("gpt6_astra_max"), {
       model: null,
       reasoningEffort: "max",
     });
-    assert.deepEqual(resolveCodexProfileConfig("gpt56_sol_ultra"), {
+    assert.deepEqual(resolveCodexProfileConfig("gpt6_astra_ultra"), {
       model: null,
       reasoningEffort: "ultra",
     });
@@ -134,7 +155,7 @@ describe("buildCodexArguments — codex 0.137 profile regression guard", () => {
 
   it("merges profile effort on top of an explicit config object", () => {
     const args = buildCodexArguments("hi", {
-      profile: "gpt56_sol_xhigh",
+      profile: "gpt6_astra_xhigh",
       config: { foo: "bar" },
     });
     assert.equal(args.config.foo, "bar");
@@ -143,23 +164,24 @@ describe("buildCodexArguments — codex 0.137 profile regression guard", () => {
 
   it("lets the final concrete reasoning override win over a mutable profile", () => {
     const args = buildCodexArguments("hi", {
-      profile: "gpt56_sol_ultra",
-      model: "gpt-5.6-sol",
+      profile: "gpt6_astra_ultra",
+      model: "custom-model",
       reasoningEffort: "max",
     });
+    assert.equal(args.model, "custom-model");
     assert.equal(args.config.model_reasoning_effort, "max");
   });
 
   it("downgrades profile-derived ultra unless an explicit final override opts in", () => {
     const guarded = buildCodexArguments("hi", {
-      profile: "gpt56_sol_ultra",
+      profile: "gpt6_astra_ultra",
     });
     const explicit = buildCodexArguments("hi", {
-      profile: "gpt56_sol_ultra",
+      profile: "gpt6_astra_ultra",
       reasoningEffort: "ultra",
     });
 
-    assert.equal(guarded.model, "gpt-5.6-sol");
+    assert.equal(guarded.model, "gpt-6-astra");
     assert.equal(guarded.config.model_reasoning_effort, "max");
     assert.equal(explicit.config.model_reasoning_effort, "ultra");
   });

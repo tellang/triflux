@@ -793,8 +793,8 @@ describe("conductor: remote Codex profile guard", () => {
     const codexHome = join(logsDir, "codex-home");
     mkdirSync(codexHome, { recursive: true });
     writeFileSync(
-      join(codexHome, "gpt56_sol_max.config.toml"),
-      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
+      join(codexHome, "gpt6_astra_max.config.toml"),
+      'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
     );
 
     const previous = process.env.TFX_CODEX_PROFILE;

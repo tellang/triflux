@@ -23,6 +23,8 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { normalizeCodexProfileName } from "../../scripts/lib/codex-profile-config.mjs";
+
 export const STATES = Object.freeze({
   PLANNING: "PLANNING",
   EXECUTING: "EXECUTING",
@@ -39,21 +41,28 @@ export const MODES = Object.freeze({
 });
 
 const ESCALATION_CHAIN_CONFIG_PATH = ".triflux/config/escalation-chain.json";
-const DEFAULT_CLAUDE_MODEL = "opus";
+const DEFAULT_CLAUDE_MODEL = "fable";
 
-// Escalation chain (2026-05-27 정책):
-//   1. codex gpt-5.6-sol max — 최난도 단일 작업용 Codex escalation 단계
-//   2. claude opus alias — Claude CLI가 최신 Opus tier로 해석하는 최종 수단
+// Escalation chain (2026-09-22 정책):
+//   1. codex gpt-6-astra max: 최난도 단일 작업용 Codex escalation 단계
+//   2. claude fable alias: Claude CLI가 최신 Fable tier로 해석하는 최종 수단
 const DEFAULT_ESCALATION_CHAIN = Object.freeze([
   Object.freeze({
     cli: "codex",
-    model: "gpt-5.6-sol",
-    profile: "gpt56_sol_max",
+    model: "gpt-6-astra",
+    profile: "gpt6_astra_max",
   }),
   Object.freeze({ cli: "claude", model: DEFAULT_CLAUDE_MODEL }),
 ]);
 
 const STUCK_THRESHOLD = 3;
+
+function normalizeEscalationProfile(profile) {
+  const normalized = normalizeCodexProfileName(profile);
+  return normalized === "ultra" || normalized === "gpt6_astra_ultra"
+    ? "gpt6_astra_max"
+    : normalized;
+}
 
 export function createRetryStateMachine(options = {}) {
   const mode = options.mode || MODES.BOUNDED;
@@ -308,10 +317,7 @@ function normalizeEscalationChainEntry(entry, index, source) {
   if (typeof entry.profile === "string" && entry.profile.trim() !== "") {
     const profile = entry.profile.trim();
     normalized.profile =
-      entry.cli === "codex" &&
-      (profile === "ultra" || profile === "gpt56_sol_ultra")
-        ? "gpt56_sol_max"
-        : profile;
+      entry.cli === "codex" ? normalizeEscalationProfile(profile) : profile;
   }
   return normalized;
 }

@@ -3,7 +3,7 @@
 `/tfx-auto --retry auto-escalate` 가 사용하는 CLI 승격 체인.
 각 단계에서 `--max-iterations` (기본 3) 소진 시 다음 단계로 전이.
 
-> 근거(why): [ADR-0006 — 재시도 승격 체인 codex→claude opus 2단계](../../docs/adr/0006-escalation-chain-codex-to-claude-opus.md). 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
+> 근거(why): [ADR-0016: Codex 최상위 tier를 Astra로 하고 최종 승격을 Fable로 한다](../../docs/adr/0016-codex-astra-top-tier-and-fable-escalation.md). 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
 
 ## DEFAULT_ESCALATION_CHAIN
 
@@ -11,8 +11,8 @@
 
 | # | CLI | 모델 | profile | 이유 |
 |---|-----|------|---------|------|
-| 1 | codex | gpt-5.6-sol | gpt56_sol_max | 최난도 단일 작업용 Codex 복구 단계. |
-| 2 | claude | opus | 미지정 | Claude CLI가 최신 Opus tier로 해석하는 최종 수단, 복잡 아키텍처/합의 요구 시 |
+| 1 | codex | gpt-6-astra | gpt6_astra_max | 최난도 단일 작업용 Codex 복구 단계. |
+| 2 | claude | fable | 미지정 | Claude CLI가 최신 Fable tier로 해석하는 최종 수단, 복잡 아키텍처/합의 요구 시 |
 
 체인 길이 소진 시 `BUDGET_EXCEEDED` with `reason: "escalation-chain-exhausted"`.
 
@@ -30,8 +30,8 @@ PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escal
 {
   "version": 1,
   "chain": [
-    { "cli": "codex", "model": "gpt-5.6-sol", "profile": "gpt56_sol_max" },
-    { "cli": "claude", "model": "opus" }
+    { "cli": "codex", "model": "gpt-6-astra", "profile": "gpt6_astra_max" },
+    { "cli": "claude", "model": "fable" }
   ]
 }
 ```
@@ -39,9 +39,9 @@ PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escal
 체인 항목 필드:
 - `cli` (codex|antigravity|claude)
 - `model` (CLI 가 해석하는 문자열)
-- `profile` (optional): `gpt56_luna_low` / `gpt56_terra_med` / `gpt56_terra_high` / `gpt56_sol_xhigh` / `gpt56_sol_max` 같은 CLI profile 이름. `gpt56_sol_ultra`는 다른 오케스트레이터가 없는 최상위 단독 실행 전용이므로 retry chain에는 넣지 않는다.
+- `profile` (optional): `gpt56_luna_low` / `gpt56_terra_med` / `gpt56_terra_high` / `gpt6_astra_xhigh` / `gpt6_astra_max` 같은 CLI profile 이름. `gpt6_astra_ultra`는 다른 오케스트레이터가 없는 최상위 단독 실행 전용이므로 retry chain에는 넣지 않는다.
 
-기본 Claude 모델은 `opus` 별칭이며 Claude CLI가 최신 Opus tier로 해석한다. 기본값만 바꾸려면 `TFX_ESCALATION_CLAUDE_MODEL`을 설정할 수 있고, 프로젝트의 `.triflux/config/escalation-chain.json`은 그보다 우선한다.
+기본 Claude 모델은 `fable` 별칭이며 Claude CLI가 최신 Fable tier로 해석한다. 기본값만 바꾸려면 `TFX_ESCALATION_CLAUDE_MODEL`을 설정할 수 있고, 프로젝트의 `.triflux/config/escalation-chain.json`은 그보다 우선한다.
 
 ## 사용 예시
 
@@ -58,11 +58,11 @@ PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escal
 
 ## Codex max / ultra 예외 레인
 
-- `TFX_CODEX_PROFILE=max`는 `gpt56_sol_max`를 명시적으로 선택한다.
+- `TFX_CODEX_PROFILE=max`는 `gpt6_astra_max`를 명시적으로 선택한다.
 - `TFX_CODEX_PROFILE=ultra`는 다른 오케스트레이터가 없는 최상위
-  `deep-executor`/`scientist-deep` 실행에서만 `gpt56_sol_ultra`로 해석한다.
+  `deep-executor`/`scientist-deep` 실행에서만 `gpt6_astra_ultra`로 해석한다.
 - Team, worker, delegator sandbox 안의 ultra 요청과 ultra 비대상 역할은
-  `gpt56_sol_max`로 강등한다.
+  `gpt6_astra_max`로 강등한다.
 - headless Codex는 전역 `config.toml` effort를 상속하지 않고 역할 프로필을
   명시한다.
 - retry snapshot은 `TFX_CODEX_PROFILE`보다 우선한다.

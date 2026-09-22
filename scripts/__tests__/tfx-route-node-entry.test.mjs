@@ -249,28 +249,28 @@ describe("cli-codex.mjs — 핵심 매핑", () => {
     assert.equal(p.subcommand, "exec");
   });
 
-  test("architect → gpt56_sol_xhigh / 3600s / bg / opus oversight", () => {
+  test("architect → gpt6_astra_xhigh / 3600s / bg / opus oversight", () => {
     const p = codexAdapter.plan({
       agent: "architect",
       prompt: "x",
       mcpProfile: "auto",
     });
-    assert.equal(p.effort, "gpt56_sol_xhigh");
+    assert.equal(p.effort, "gpt6_astra_xhigh");
     assert.equal(p.timeoutMs, 3_600_000);
     assert.equal(p.runMode, "bg");
     assert.equal(p.opusOversight, true);
     assert.equal(p.mcpProfile, "analyze");
   });
 
-  test("explicit max override selects the canonical Sol max profile", () => {
+  test("explicit max override selects the canonical Astra max profile", () => {
     const p = codexAdapter.plan({
       agent: "architect",
       prompt: "x",
       mcpProfile: "auto",
       profileOverride: "max",
     });
-    assert.equal(p.profile, "gpt56_sol_max");
-    assert.equal(p.effort, "gpt56_sol_max");
+    assert.equal(p.profile, "gpt6_astra_max");
+    assert.equal(p.effort, "gpt6_astra_max");
   });
 
   test("ultra is limited to top-level deep execution and research", () => {
@@ -293,9 +293,9 @@ describe("cli-codex.mjs — 핵심 매핑", () => {
       nested: false,
     });
 
-    assert.equal(topLevel.profile, "gpt56_sol_ultra");
-    assert.equal(nested.profile, "gpt56_sol_max");
-    assert.equal(ineligible.profile, "gpt56_sol_max");
+    assert.equal(topLevel.profile, "gpt6_astra_ultra");
+    assert.equal(nested.profile, "gpt6_astra_max");
+    assert.equal(ineligible.profile, "gpt6_astra_max");
   });
 
   test("security-reviewer → review 서브커맨드 + opus oversight", () => {

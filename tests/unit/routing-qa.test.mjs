@@ -269,8 +269,8 @@ describe("route_agent: effort 레벨 검증", () => {
     assert.equal(ROUTE_TABLE["build-fixer"]?.CLI_EFFORT, "gpt56_luna_low");
   });
 
-  it("deep-executor → gpt56_sol_xhigh effort", () => {
-    assert.equal(ROUTE_TABLE["deep-executor"]?.CLI_EFFORT, "gpt56_sol_xhigh");
+  it("deep-executor → gpt6_astra_xhigh effort", () => {
+    assert.equal(ROUTE_TABLE["deep-executor"]?.CLI_EFFORT, "gpt6_astra_xhigh");
   });
 
   it("spark → gpt56_luna_low effort", () => {
@@ -309,10 +309,10 @@ describe("headless: buildHeadlessCommand", async () => {
       cmd.includes("gpt56_terra_high"),
       `headless Codex가 역할 프로필을 route에 전달해야 함: ${cmd}`,
     );
-    assert.ok(!cmd.includes("gpt56_sol_ultra"));
+    assert.ok(!cmd.includes("gpt6_astra_ultra"));
   });
 
-  it("headless architect → gpt56_sol_xhigh 역할 프로필", () => {
+  it("headless architect → gpt6_astra_xhigh 역할 프로필", () => {
     const cmd = buildHeadlessCommand(
       "codex",
       "architecture",
@@ -320,7 +320,7 @@ describe("headless: buildHeadlessCommand", async () => {
       { role: "architect" },
     );
     assert.ok(
-      cmd.includes("gpt56_sol_xhigh"),
+      cmd.includes("gpt6_astra_xhigh"),
       `architect profile 누락: ${cmd}`,
     );
   });
@@ -330,18 +330,18 @@ describe("headless: buildHeadlessCommand", async () => {
       "codex",
       "hard task",
       "/tmp/result.txt",
-      { role: "executor", profile: "gpt56_sol_max" },
+      { role: "executor", profile: "gpt6_astra_max" },
     );
     const nestedUltra = buildHeadlessCommand(
       "codex",
       "fan out",
       "/tmp/result.txt",
-      { role: "deep-executor", profile: "gpt56_sol_ultra" },
+      { role: "deep-executor", profile: "gpt6_astra_ultra" },
     );
 
-    assert.ok(explicitMax.includes("gpt56_sol_max"));
-    assert.ok(nestedUltra.includes("gpt56_sol_max"));
-    assert.ok(!nestedUltra.includes("gpt56_sol_ultra"));
+    assert.ok(explicitMax.includes("gpt6_astra_max"));
+    assert.ok(nestedUltra.includes("gpt6_astra_max"));
+    assert.ok(!nestedUltra.includes("gpt6_astra_ultra"));
   });
 
   it("headless applies TFX_CODEX_PROFILE but never inherits auto/global ultra", () => {
@@ -362,9 +362,9 @@ describe("headless: buildHeadlessCommand", async () => {
         { role: "executor" },
       );
 
-      assert.ok(explicitMax.includes("gpt56_sol_max"));
+      assert.ok(explicitMax.includes("gpt6_astra_max"));
       assert.ok(automatic.includes("gpt56_terra_high"));
-      assert.ok(!automatic.includes("gpt56_sol_ultra"));
+      assert.ok(!automatic.includes("gpt6_astra_ultra"));
     } finally {
       if (previous === undefined) delete process.env.TFX_CODEX_PROFILE;
       else process.env.TFX_CODEX_PROFILE = previous;
@@ -378,11 +378,11 @@ describe("headless: buildHeadlessCommand", async () => {
       process.env.CODEX_HOME = codexHome;
       writeFileSync(
         join(codexHome, "private.config.toml"),
-        'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
+        'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
       );
       writeFileSync(
-        join(codexHome, "gpt56_sol_max.config.toml"),
-        'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
+        join(codexHome, "gpt6_astra_max.config.toml"),
+        'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
       );
       const customUltra = buildHeadlessCommand(
         "codex",
@@ -397,8 +397,8 @@ describe("headless: buildHeadlessCommand", async () => {
         { role: "executor", profile: "missing-private" },
       );
 
-      assert.ok(customUltra.includes("gpt56_sol_max"));
-      assert.ok(!customUltra.includes("gpt56_sol_ultra"));
+      assert.ok(customUltra.includes("gpt6_astra_max"));
+      assert.ok(!customUltra.includes("gpt6_astra_ultra"));
       assert.ok(missingCustom.includes("gpt56_terra_high"));
     } finally {
       if (previous === undefined) delete process.env.CODEX_HOME;

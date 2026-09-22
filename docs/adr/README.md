@@ -12,7 +12,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0003](0003-tfx-skill-passing-prose-injection.md) | headless CLI 스킬 전달 = 즉석 prose 주입 | Accepted | 0002 |
 | [0004](0004-codex-as-default-cli.md) | 기본 구현 CLI = Codex | Accepted | 0002 |
 | [0005](0005-packages-three-layer-mirror.md) | packages/ 3-layer single-source 미러 | Accepted | 0002 |
-| [0006](0006-escalation-chain-codex-to-claude-opus.md) | 재시도 승격 체인 codex→claude opus 2단계 | Accepted | 0002, 0004 |
+| [0006](../_archive/adr/0006-escalation-chain-codex-to-claude-opus.md) | 재시도 승격 체인 codex→claude opus 2단계 | Superseded | 0002, 0004, 0016 |
 | [0007](0007-hub-default-port-27888.md) | hub 기본 포트 27888 고정 | Accepted | 0002 |
 | [0008](0008-native-bridge-ui-default-on.md) | headless 워커 native-bridge 기본 노출 | Accepted | 0002 |
 | [0009](0009-stack-coexistence-three-layer.md) | gstack·sp·triflux 단방향 3-layer 공존 | Accepted | 0002 |
@@ -20,6 +20,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0011](0011-active-role-system-cto-scoped-lead.md) | 능동 역할 시스템 — CTO + scoped lead (C+A 하이브리드) | Accepted | 0010 |
 | [0014](0014-claude-credentials-keychain-source-of-truth.md) | Claude 자격증명은 macOS Keychain 정본, 읽은 저장소에만 되쓰기 | Proposed | 0002 |
 | [0015](0015-codex-lane-exec-transport-and-last-message.md) | Codex 레인은 exec 전송 + 최종 메시지 파일이 결과 계약 | Proposed | 0004, 0006 |
+| [0016](0016-codex-astra-top-tier-and-fable-escalation.md) | Codex 최상위 tier = Astra, 최종 승격 = Fable | Accepted | 0004, 0006, 0015 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 

@@ -154,16 +154,16 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.equal(last.reason, "escalation-chain-exhausted");
     });
 
-    it("DEFAULT_ESCALATION_CHAIN 은 gpt-5.6-sol → 최신 Opus 별칭 2단계 순", () => {
+    it("DEFAULT_ESCALATION_CHAIN 은 gpt-6-astra → 최신 Fable 별칭 2단계 순", () => {
       assert.equal(DEFAULT_ESCALATION_CHAIN.length, 2);
       const [s1, s2] = DEFAULT_ESCALATION_CHAIN;
 
       assert.equal(s1.cli, "codex");
-      assert.equal(s1.model, "gpt-5.6-sol");
-      assert.equal(s1.profile, "gpt56_sol_max");
+      assert.equal(s1.model, "gpt-6-astra");
+      assert.equal(s1.profile, "gpt6_astra_max");
 
       assert.equal(s2.cli, "claude");
-      assert.equal(s2.model, "opus");
+      assert.equal(s2.model, "fable");
       assert.equal(s2.profile, undefined);
     });
 
@@ -194,23 +194,42 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.deepEqual(restored.getCurrent().cliChain, chain);
     });
 
-    it("custom Codex ultra retry profile은 max로 정규화한다", () => {
+    it("custom Codex ultra retry profile은 Astra max로 정규화한다", () => {
       const sm = createRetryStateMachine({
         mode: "auto-escalate",
         cliChain: [
           {
             cli: "codex",
-            model: "gpt-5.6-sol",
-            profile: "gpt56_sol_ultra",
+            model: "gpt-6-astra",
+            profile: "gpt6_astra_ultra",
           },
           { cli: "claude", model: "opus" },
         ],
       });
 
-      assert.equal(sm.getCurrent().cliChain[0].profile, "gpt56_sol_max");
+      assert.equal(sm.getCurrent().cliChain[0].profile, "gpt6_astra_max");
     });
 
-    it(".triflux/config/escalation-chain.json override 는 profile 필드를 읽는다", () => {
+    it("옛 Sol profile 이름 세 개를 Astra profile로 정규화한다", () => {
+      const aliases = [
+        ["gpt56_sol_xhigh", "gpt6_astra_xhigh"],
+        ["gpt56_sol_max", "gpt6_astra_max"],
+        ["gpt56_sol_ultra", "gpt6_astra_max"],
+      ];
+
+      for (const [legacy, canonical] of aliases) {
+        const sm = createRetryStateMachine({
+          mode: "auto-escalate",
+          cliChain: [
+            { cli: "codex", model: "gpt-6-astra", profile: legacy },
+            { cli: "claude", model: "fable" },
+          ],
+        });
+        assert.equal(sm.getCurrent().cliChain[0].profile, canonical);
+      }
+    });
+
+    it(".triflux/config/escalation-chain.json의 옛 Sol profile을 정규화한다", () => {
       const dir = makeTempDir();
       const configDir = join(dir, ".triflux", "config");
       mkdirSync(configDir, { recursive: true });
@@ -219,7 +238,21 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
         JSON.stringify({
           version: 1,
           chain: [
-            { cli: "codex", model: "gpt-5.5", profile: "gpt55_high" },
+            {
+              cli: "codex",
+              model: "gpt-6-astra",
+              profile: "gpt56_sol_xhigh",
+            },
+            {
+              cli: "codex",
+              model: "gpt-6-astra",
+              profile: "gpt56_sol_max",
+            },
+            {
+              cli: "codex",
+              model: "gpt-6-astra",
+              profile: "gpt56_sol_ultra",
+            },
             { cli: "claude", model: "opus" },
           ],
         }),
@@ -231,7 +264,21 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
         env: { TFX_ESCALATION_CLAUDE_MODEL: "claude-opus-5" },
       });
       assert.deepEqual(sm.getCurrent().cliChain, [
-        { cli: "codex", model: "gpt-5.5", profile: "gpt55_high" },
+        {
+          cli: "codex",
+          model: "gpt-6-astra",
+          profile: "gpt6_astra_xhigh",
+        },
+        {
+          cli: "codex",
+          model: "gpt-6-astra",
+          profile: "gpt6_astra_max",
+        },
+        {
+          cli: "codex",
+          model: "gpt-6-astra",
+          profile: "gpt6_astra_max",
+        },
         { cli: "claude", model: "opus" },
       ]);
     });

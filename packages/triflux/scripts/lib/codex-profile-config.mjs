@@ -22,10 +22,21 @@ const CANONICAL_PROFILE_VALUES = Object.freeze({
   gpt56_luna_low: { model: "gpt-5.6-luna", effort: "low" },
   gpt56_terra_med: { model: "gpt-5.6-terra", effort: "medium" },
   gpt56_terra_high: { model: "gpt-5.6-terra", effort: "high" },
-  gpt56_sol_xhigh: { model: "gpt-5.6-sol", effort: "xhigh" },
-  gpt56_sol_max: { model: "gpt-5.6-sol", effort: "max" },
-  gpt56_sol_ultra: { model: "gpt-5.6-sol", effort: "ultra" },
+  gpt6_astra_xhigh: { model: "gpt-6-astra", effort: "xhigh" },
+  gpt6_astra_max: { model: "gpt-6-astra", effort: "max" },
+  gpt6_astra_ultra: { model: "gpt-6-astra", effort: "ultra" },
 });
+
+const LEGACY_CANONICAL_PROFILE_ALIASES = Object.freeze({
+  gpt56_sol_xhigh: "gpt6_astra_xhigh",
+  gpt56_sol_max: "gpt6_astra_max",
+  gpt56_sol_ultra: "gpt6_astra_ultra",
+});
+
+export function normalizeCodexProfileName(profileName) {
+  const normalized = String(profileName ?? "").trim();
+  return LEGACY_CANONICAL_PROFILE_ALIASES[normalized] || normalized;
+}
 
 function readProfileScalar(raw, key) {
   const match = String(raw).match(
@@ -64,32 +75,39 @@ export function resolveCodexProfileConfigValues(profileName, opts = {}) {
   if (typeof profileName !== "string" || !profileName) {
     return { model: null, effort: null };
   }
+  const normalizedProfileName = normalizeCodexProfileName(profileName);
   const codexHome =
     opts.codexHome || process.env.CODEX_HOME || join(homedir(), ".codex");
   let model = null;
   let effort = null;
   try {
     const raw = readFileSync(
-      join(codexHome, `${profileName}.config.toml`),
+      join(codexHome, `${normalizedProfileName}.config.toml`),
       "utf8",
     );
     model = readProfileScalar(raw, "model");
     effort = readProfileScalar(raw, "model_reasoning_effort");
   } catch {
-    const suffix = /_(ultra|max|xhigh|high|med|medium|low)$/.exec(profileName);
+    const suffix = /_(ultra|max|xhigh|high|med|medium|low)$/.exec(
+      normalizedProfileName,
+    );
     if (suffix) effort = EFFORT_BY_SUFFIX[suffix[1]] || null;
   }
   return { model, effort };
 }
 
 export function codexProfileConfigOverrides(profileName, opts = {}) {
-  let { model, effort } = resolveCodexProfileConfigValues(profileName, opts);
+  const normalizedProfileName = normalizeCodexProfileName(profileName);
+  let { model, effort } = resolveCodexProfileConfigValues(
+    normalizedProfileName,
+    opts,
+  );
   if (opts.enforceCanonicalProfile === true) {
-    const canonical = CANONICAL_PROFILE_VALUES[profileName];
+    const canonical = CANONICAL_PROFILE_VALUES[normalizedProfileName];
     if (canonical) ({ model, effort } = canonical);
   }
   if (opts.disallowUltra === true && effort?.toLowerCase() === "ultra") {
-    model = "gpt-5.6-sol";
+    model = "gpt-6-astra";
     effort = "max";
   }
   const overrides = [];

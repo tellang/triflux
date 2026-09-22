@@ -15,10 +15,10 @@
 
 ## 추론 수준 예외 경로
 - 기본 역할 라우팅은 `low`/`medium`/`high`/`xhigh` 프로필을 유지합니다.
-- 최난도 단일 작업만 `TFX_CODEX_PROFILE=max` (`gpt56_sol_max`).
+- 최난도 단일 작업만 `TFX_CODEX_PROFILE=max` (`gpt6_astra_max`).
 - `ultra`는 최상위 단독 `deep-executor`/`scientist-deep`에서만 허용하고, 팀·비대화식·워커
-  내부의 `ultra` 요청은 중첩 분산 실행을 막기 위해 `gpt56_sol_max`로 낮춥니다.
-- `--retry auto-escalate`의 Codex 단계도 `gpt56_sol_max`입니다.
+  내부의 `ultra` 요청은 중첩 분산 실행을 막기 위해 `gpt6_astra_max`로 낮춥니다.
+- `--retry auto-escalate`의 Codex 단계도 `gpt6_astra_max`입니다.
 
 ## 비대화식 결과 회수
 - 완료 마커: `=== HEADLESS_COMPLETE succeeded=N failed=N total=N ===`

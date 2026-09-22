@@ -970,7 +970,7 @@ codex 자체의 대화 이력을 새 tmux 세션에 이어붙인다. ID는 codex
 
 **모델/effort — 새로 켤 때**: `tfx-live start --model <codex 모델 문자열> --effort <tier> ...`
 가 codex의 `-c model=... -c model_reasoning_effort=...`로 직접 매핑된다. `tfx-route.sh`의
-프로필 추상화(`gpt56_sol_xhigh` 등)와 달리 codex 고유 모델 ID/effort 값을 그대로 써야
+프로필 추상화(`gpt6_astra_xhigh` 등)와 달리 codex 고유 모델 ID/effort 값을 그대로 써야
 한다 (프로필 이름 그대로 넣으면 안 됨).
 
 **모델/effort 변경**: 현행 `tfx-live`는 시작 시 launch config로 모델과 effort를 전달한다.

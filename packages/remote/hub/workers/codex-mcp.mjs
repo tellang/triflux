@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
+import { normalizeCodexProfileName } from "../../scripts/lib/codex-profile-config.mjs";
 import {
   CODEX_MCP_EXECUTION_EXIT_CODE,
   CODEX_MCP_TRANSPORT_EXIT_CODE,
@@ -134,11 +135,13 @@ function readTomlScalar(raw, key) {
 export function resolveCodexProfileConfig(profileName) {
   const result = { model: null, reasoningEffort: null };
   if (typeof profileName !== "string" || !profileName) return result;
+  const normalizedProfileName = normalizeCodexProfileName(profileName);
+  if (!normalizedProfileName) return result;
 
   const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
   try {
     const raw = readFileSync(
-      join(codexHome, `${profileName}.config.toml`),
+      join(codexHome, `${normalizedProfileName}.config.toml`),
       "utf8",
     );
     result.model = readTomlScalar(raw, "model");
@@ -146,7 +149,9 @@ export function resolveCodexProfileConfig(profileName) {
   } catch {
     // Profile file absent (non-file alias). Derive effort from the naming
     // convention; leave model unset so codex uses its config.toml default.
-    const suffix = /_(ultra|max|xhigh|high|med|medium|low)$/.exec(profileName);
+    const suffix = /_(ultra|max|xhigh|high|med|medium|low)$/.exec(
+      normalizedProfileName,
+    );
     if (suffix) {
       const map = {
         ultra: "ultra",
@@ -198,7 +203,7 @@ export function buildCodexArguments(prompt, opts = {}) {
     const profileDerivedUltra =
       resolved.reasoningEffort?.toLowerCase() === "ultra";
     if (typeof args.model !== "string") {
-      if (profileDerivedUltra) args.model = "gpt-5.6-sol";
+      if (profileDerivedUltra) args.model = "gpt-6-astra";
       else if (resolved.model) args.model = resolved.model;
     }
     if (resolved.reasoningEffort) {

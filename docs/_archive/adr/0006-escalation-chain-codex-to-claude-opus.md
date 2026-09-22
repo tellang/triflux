@@ -1,11 +1,11 @@
 ---
 id: 0006
 title: 재시도 승격 체인을 codex→claude opus 2단계로 한다
-status: accepted
+status: superseded
 date: 2026-05-27
 deciders: [tellang]
 supersedes: []
-superseded_by: null
+superseded_by: 0016
 relates: [0002, 0004]
 pr: "#356"
 ---

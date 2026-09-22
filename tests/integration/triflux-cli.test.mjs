@@ -188,9 +188,9 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.ok(codexProfiles, "codex-profiles action missing");
     assert.equal(codexProfiles.change, "update");
     assert.deepEqual(codexProfiles.profiles, [
-      "gpt56_sol_ultra",
-      "gpt56_sol_max",
-      "gpt56_sol_xhigh",
+      "gpt6_astra_ultra",
+      "gpt6_astra_max",
+      "gpt6_astra_xhigh",
       "gpt56_terra_high",
       "gpt56_terra_med",
       "gpt56_luna_low",
@@ -310,6 +310,18 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
   it("setup은 기존 inline Codex 프로필을 0.134 별도 파일로 마이그레이션해야 한다", () => {
     const homeDir = createHomeDir();
     const codexConfigPath = join(homeDir, ".codex", "config.toml");
+    const retiredSolProfiles = [
+      "gpt56_sol_xhigh",
+      "gpt56_sol_max",
+      "gpt56_sol_ultra",
+    ];
+    for (const name of retiredSolProfiles) {
+      writeFileSync(
+        join(homeDir, ".codex", `${name}.config.toml`),
+        'model = "user-preserved"\nmodel_reasoning_effort = "high"\n',
+        "utf8",
+      );
+    }
     writeFileSync(
       codexConfigPath,
       [
@@ -352,21 +364,27 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
       'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "high"\n',
     );
     assert.equal(
-      readFileSync(join(codexDir, "gpt56_sol_xhigh.config.toml"), "utf8"),
-      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "xhigh"\n',
+      readFileSync(join(codexDir, "gpt6_astra_xhigh.config.toml"), "utf8"),
+      'model = "gpt-6-astra"\nmodel_reasoning_effort = "xhigh"\n',
     );
     assert.equal(
-      readFileSync(join(codexDir, "gpt56_sol_max.config.toml"), "utf8"),
-      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "max"\n',
+      readFileSync(join(codexDir, "gpt6_astra_max.config.toml"), "utf8"),
+      'model = "gpt-6-astra"\nmodel_reasoning_effort = "max"\n',
     );
     assert.equal(
-      readFileSync(join(codexDir, "gpt56_sol_ultra.config.toml"), "utf8"),
-      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
+      readFileSync(join(codexDir, "gpt6_astra_ultra.config.toml"), "utf8"),
+      'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
     );
     assert.equal(
       readFileSync(join(codexDir, "gpt56_luna_low.config.toml"), "utf8"),
       'model = "gpt-5.6-luna"\nmodel_reasoning_effort = "low"\n',
     );
+    for (const name of retiredSolProfiles) {
+      assert.equal(
+        readFileSync(join(codexDir, `${name}.config.toml`), "utf8"),
+        'model = "user-preserved"\nmodel_reasoning_effort = "high"\n',
+      );
+    }
     // 커스텀 inline 프로필도 별도 파일로 이관되어야 한다 (내용 보존, codex 0.134+).
     assert.equal(
       readFileSync(join(codexDir, "personal.config.toml"), "utf8"),

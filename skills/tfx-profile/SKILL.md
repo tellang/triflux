@@ -78,9 +78,9 @@ options:
      - label: "gpt56_terra_high" → 기본 고품질 (Recommended)
      - label: "gpt56_terra_med"  → 균형형
      - label: "gpt56_luna_low"   → 빠른 경량
-     - label: "gpt56_sol_xhigh"  → 고강도 추론
-     - label: "gpt56_sol_max"    → 최난도 단일 작업
-     - label: "gpt56_sol_ultra"  → 최상위 자동 위임 (비중첩 전용)
+     - label: "gpt6_astra_xhigh" → 고강도 추론
+     - label: "gpt6_astra_max"   → 최난도 단일 작업
+     - label: "gpt6_astra_ultra" → 최상위 자동 위임 (비중첩 전용)
      - label: "custom"      → 사용자가 관리하는 프로필
    ```
 3. AskUserQuestion으로 effort 선택: `low | medium | high | xhigh | max | ultra`
@@ -188,9 +188,9 @@ options:
 | 프로필 | 용도 |
 |------|------|
 | gpt56_terra_high | 기본 고품질 |
-| gpt56_sol_xhigh | 고강도 추론 |
-| gpt56_sol_max | 최난도 단일 작업 |
-| gpt56_sol_ultra | 최상위 자동 위임 (비중첩 전용) |
+| gpt6_astra_xhigh | 고강도 추론 |
+| gpt6_astra_max | 최난도 단일 작업 |
+| gpt6_astra_ultra | 최상위 자동 위임 (비중첩 전용) |
 | gpt56_terra_med | 균형형 |
 | gpt56_luna_low | 빠른 경량 |
 | custom | 사용자가 관리하는 프로필 |

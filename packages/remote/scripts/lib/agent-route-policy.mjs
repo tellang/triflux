@@ -1,6 +1,9 @@
 // Canonical Codex role policy. Concrete model IDs stay in profile config files.
 
-import { resolveCodexProfileConfigValues } from "./codex-profile-config.mjs";
+import {
+  normalizeCodexProfileName,
+  resolveCodexProfileConfigValues,
+} from "./codex-profile-config.mjs";
 
 const policy = {
   executor: {
@@ -44,7 +47,7 @@ const policy = {
     subcommand: "exec",
   },
   debugger: {
-    profile: "gpt56_sol_xhigh",
+    profile: "gpt6_astra_xhigh",
     timeoutSec: 900,
     runMode: "bg",
     opusOversight: false,
@@ -52,7 +55,7 @@ const policy = {
     subcommand: "exec",
   },
   "deep-executor": {
-    profile: "gpt56_sol_xhigh",
+    profile: "gpt6_astra_xhigh",
     timeoutSec: 3600,
     runMode: "bg",
     opusOversight: true,
@@ -60,7 +63,7 @@ const policy = {
     subcommand: "exec",
   },
   architect: {
-    profile: "gpt56_sol_xhigh",
+    profile: "gpt6_astra_xhigh",
     timeoutSec: 3600,
     runMode: "bg",
     opusOversight: true,
@@ -68,7 +71,7 @@ const policy = {
     subcommand: "exec",
   },
   critic: {
-    profile: "gpt56_sol_xhigh",
+    profile: "gpt6_astra_xhigh",
     timeoutSec: 3600,
     runMode: "bg",
     opusOversight: true,
@@ -76,7 +79,7 @@ const policy = {
     subcommand: "exec",
   },
   planner: {
-    profile: "gpt56_sol_xhigh",
+    profile: "gpt6_astra_xhigh",
     timeoutSec: 3600,
     runMode: "fg",
     opusOversight: true,
@@ -84,7 +87,7 @@ const policy = {
     subcommand: "exec",
   },
   analyst: {
-    profile: "gpt56_sol_xhigh",
+    profile: "gpt6_astra_xhigh",
     timeoutSec: 3600,
     runMode: "fg",
     opusOversight: true,
@@ -108,7 +111,7 @@ const policy = {
     subcommand: "review",
   },
   "security-reviewer": {
-    profile: "gpt56_sol_xhigh",
+    profile: "gpt6_astra_xhigh",
     timeoutSec: 1800,
     runMode: "bg",
     opusOversight: true,
@@ -132,7 +135,7 @@ const policy = {
     subcommand: "exec",
   },
   "scientist-deep": {
-    profile: "gpt56_sol_xhigh",
+    profile: "gpt6_astra_xhigh",
     timeoutSec: 3600,
     runMode: "bg",
     opusOversight: false,
@@ -174,7 +177,7 @@ const policy = {
   // These entries are only for explicit direct-Codex overrides. agent-map.json
   // remains the provider-selection authority for their normal execution.
   designer: {
-    profile: "gpt56_sol_xhigh",
+    profile: "gpt6_astra_xhigh",
     timeoutSec: 900,
     runMode: "bg",
     opusOversight: false,
@@ -210,9 +213,9 @@ export const CANONICAL_CODEX_PROFILE_OVERRIDES = Object.freeze(
     "gpt56_luna_low",
     "gpt56_terra_med",
     "gpt56_terra_high",
-    "gpt56_sol_xhigh",
-    "gpt56_sol_max",
-    "gpt56_sol_ultra",
+    "gpt6_astra_xhigh",
+    "gpt6_astra_max",
+    "gpt6_astra_ultra",
   ]),
 );
 export const ULTRA_ELIGIBLE_CODEX_AGENTS = Object.freeze(
@@ -222,8 +225,8 @@ export const ULTRA_ELIGIBLE_CODEX_AGENTS = Object.freeze(
 const NESTED_GLOBAL_PROFILE_OVERRIDES = new Set([
   "max",
   "ultra",
-  "gpt56_sol_max",
-  "gpt56_sol_ultra",
+  "gpt6_astra_max",
+  "gpt6_astra_ultra",
 ]);
 
 export function resolveCodexAgentPolicy(agent) {
@@ -251,14 +254,16 @@ export function resolveCodexAgentProfile(
 ) {
   const defaultProfile = resolveCodexAgentPolicy(agent).profile;
   const retryRequested = String(retryProfile ?? "").trim();
-  const requested = retryRequested || String(profileOverride || "auto").trim();
+  const requested = normalizeCodexProfileName(
+    retryRequested || String(profileOverride || "auto").trim(),
+  );
   if (!requested || requested === "auto") return defaultProfile;
 
   const canonical =
     requested === "max"
-      ? "gpt56_sol_max"
+      ? "gpt6_astra_max"
       : requested === "ultra"
-        ? "gpt56_sol_ultra"
+        ? "gpt6_astra_ultra"
         : requested;
   if (!CANONICAL_CODEX_PROFILE_OVERRIDES.has(canonical)) {
     if (allowCustom) return requested;
@@ -266,9 +271,9 @@ export function resolveCodexAgentProfile(
       `[agent-route-policy] unsupported profile override: ${requested}`,
     );
   }
-  if (canonical !== "gpt56_sol_ultra") return canonical;
+  if (canonical !== "gpt6_astra_ultra") return canonical;
   return nested || !ULTRA_ELIGIBLE_CODEX_AGENTS.has(agent)
-    ? "gpt56_sol_max"
+    ? "gpt6_astra_max"
     : canonical;
 }
 
@@ -287,7 +292,9 @@ export function resolveNestedCodexAgentProfile(
   } = {},
 ) {
   const explicitProfile = String(profileOverride || "auto").trim();
-  const globalOverride = String(globalProfile || "auto").trim();
+  const globalOverride = normalizeCodexProfileName(
+    String(globalProfile || "auto").trim(),
+  );
   // Headless lanes must select their role policy explicitly. Only the max and
   // ultra exception lanes may cross the process environment boundary.
   const effectiveOverride =
@@ -305,7 +312,7 @@ export function resolveNestedCodexAgentProfile(
   });
   const { effort } = resolveCodexProfileConfigValues(candidate, { codexHome });
   if (!effort) return fallback;
-  return effort.toLowerCase() === "ultra" ? "gpt56_sol_max" : candidate;
+  return effort.toLowerCase() === "ultra" ? "gpt6_astra_max" : candidate;
 }
 
 export function describeCodexAgentPolicy() {

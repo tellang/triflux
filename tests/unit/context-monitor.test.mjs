@@ -156,6 +156,24 @@ describe("hud/context-monitor.mjs", () => {
     );
   });
 
+  it("Sonnet 5와 Fable 5.1은 suffix 없이 1M으로 추정한다", () => {
+    assert.equal(
+      deriveContextLimit({ model: { id: "claude-sonnet-5" } }),
+      1_000_000,
+    );
+    assert.equal(
+      deriveContextLimit({ model: { id: "claude-fable-5-1" } }),
+      1_000_000,
+    );
+  });
+
+  it("Haiku 4.5는 200K로 유지한다", () => {
+    assert.equal(
+      deriveContextLimit({ model: { id: "claude-haiku-4-5" } }),
+      200_000,
+    );
+  });
+
   it("model이 raw string 으로 전달돼도 한도를 올바르게 추정한다", () => {
     assert.equal(deriveContextLimit({ model: "claude-opus-4-7" }), 1_000_000);
   });

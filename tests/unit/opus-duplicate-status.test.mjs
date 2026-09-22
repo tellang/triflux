@@ -17,6 +17,17 @@ function stdinContext(modelId, usedTokens) {
 }
 
 describe("1M Opus duplicate status suppression", () => {
+  for (const modelId of ["claude-sonnet-5", "claude-fable-5-1"]) {
+    it(`${modelId}에서도 info-only 상태 태그를 숨긴다`, () => {
+      const view = buildContextUsageView(stdinContext(modelId, 700_000), null);
+
+      assert.equal(shouldSuppressInfoOnlyContextStatus(modelId), true);
+      assert.equal(view.warningLevel, "info");
+      assert.equal(view.warningMessage, "");
+      assert.equal(view.warningTag, "");
+    });
+  }
+
   it("claude-opus-4-7 계열에서는 info-only 상태 태그를 숨긴다", () => {
     const view = buildContextUsageView(
       stdinContext("claude-opus-4-7", 700_000),

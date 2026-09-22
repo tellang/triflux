@@ -398,11 +398,11 @@ test("buildSpawnSpecForMode: custom nested profiles cannot hide ultra or inherit
   try {
     writeFileSync(
       join(codexHome, "private.config.toml"),
-      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
+      'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
     );
     writeFileSync(
-      join(codexHome, "gpt56_sol_max.config.toml"),
-      'model = "gpt-5.6-sol"\nmodel_reasoning_effort = "ultra"\n',
+      join(codexHome, "gpt6_astra_max.config.toml"),
+      'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
     );
     const customUltra = buildSpawnSpecForMode(MODES.HEADLESS, {
       cli: "codex",

@@ -424,18 +424,18 @@ const HUD_PATH = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
 const WINDOWS_HUB_AUTOSTART_TASK = "TrifluxHubEnsure";
 
 const REQUIRED_CODEX_PROFILES = [
-  // GPT-5.6 family — max/ultra are explicit exception lanes, not role defaults.
+  // GPT-6 Astra: max/ultra are explicit exception lanes, not role defaults.
   {
-    name: "gpt56_sol_ultra",
-    lines: ['model = "gpt-5.6-sol"', 'model_reasoning_effort = "ultra"'],
+    name: "gpt6_astra_ultra",
+    lines: ['model = "gpt-6-astra"', 'model_reasoning_effort = "ultra"'],
   },
   {
-    name: "gpt56_sol_max",
-    lines: ['model = "gpt-5.6-sol"', 'model_reasoning_effort = "max"'],
+    name: "gpt6_astra_max",
+    lines: ['model = "gpt-6-astra"', 'model_reasoning_effort = "max"'],
   },
   {
-    name: "gpt56_sol_xhigh",
-    lines: ['model = "gpt-5.6-sol"', 'model_reasoning_effort = "xhigh"'],
+    name: "gpt6_astra_xhigh",
+    lines: ['model = "gpt-6-astra"', 'model_reasoning_effort = "xhigh"'],
   },
   {
     name: "gpt56_terra_high",
@@ -1316,7 +1316,7 @@ function ensureCodexHubServerConfig({
 // Only injected when the key is completely absent — existing user values are
 // never overwritten, regardless of what value was set.
 const REQUIRED_TOP_LEVEL_SETTINGS = [
-  { key: "model", value: '"gpt-5.6-sol"' },
+  { key: "model", value: '"gpt-6-astra"' },
   { key: "model_reasoning_effort", value: '"high"' },
   { key: "service_tier", value: '"fast"' },
 ];

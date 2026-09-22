@@ -159,30 +159,63 @@ describe("codexProfileConfigOverrides", () => {
     );
   });
 
-  it("derives max and ultra from canonical profile suffixes", () => {
+  it("derives max and ultra from canonical Astra profile suffixes", () => {
     const codexHome = makeHome();
     assert.deepEqual(
-      codexProfileConfigOverrides("gpt56_sol_max", { codexHome }),
+      codexProfileConfigOverrides("gpt6_astra_max", { codexHome }),
       ['model_reasoning_effort="max"'],
     );
     assert.deepEqual(
-      codexProfileConfigOverrides("gpt56_sol_ultra", { codexHome }),
+      codexProfileConfigOverrides("gpt6_astra_ultra", { codexHome }),
       ['model_reasoning_effort="ultra"'],
     );
+  });
+
+  it("normalizes old Sol canonical names before reading profile files", () => {
+    const codexHome = makeHome();
+    for (const [legacy, canonical, effort] of [
+      ["gpt56_sol_xhigh", "gpt6_astra_xhigh", "xhigh"],
+      ["gpt56_sol_max", "gpt6_astra_max", "max"],
+      ["gpt56_sol_ultra", "gpt6_astra_ultra", "ultra"],
+    ]) {
+      writeFileSync(
+        join(codexHome, `${canonical}.config.toml`),
+        `model = "gpt-6-astra"\nmodel_reasoning_effort = "${effort}"\n`,
+      );
+      assert.deepEqual(codexProfileConfigOverrides(legacy, { codexHome }), [
+        'model="gpt-6-astra"',
+        `model_reasoning_effort="${effort}"`,
+      ]);
+    }
   });
 
   it("can enforce canonical values for nested role profiles", () => {
     const codexHome = makeHome();
     writeFileSync(
-      join(codexHome, "gpt56_sol_xhigh.config.toml"),
+      join(codexHome, "gpt6_astra_xhigh.config.toml"),
       'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "high"\n',
     );
     assert.deepEqual(
-      codexProfileConfigOverrides("gpt56_sol_xhigh", {
+      codexProfileConfigOverrides("gpt6_astra_xhigh", {
         codexHome,
         enforceCanonicalProfile: true,
       }),
-      ['model="gpt-5.6-sol"', 'model_reasoning_effort="xhigh"'],
+      ['model="gpt-6-astra"', 'model_reasoning_effort="xhigh"'],
+    );
+  });
+
+  it("downgrades any ultra profile to Astra max when ultra is disallowed", () => {
+    const codexHome = makeHome();
+    writeFileSync(
+      join(codexHome, "private.config.toml"),
+      'model = "custom-model"\nmodel_reasoning_effort = "ultra"\n',
+    );
+    assert.deepEqual(
+      codexProfileConfigOverrides("private", {
+        codexHome,
+        disallowUltra: true,
+      }),
+      ['model="gpt-6-astra"', 'model_reasoning_effort="max"'],
     );
   });
 
