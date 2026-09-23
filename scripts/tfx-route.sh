@@ -1424,7 +1424,7 @@ route_agent() {
       exit 1
     }
     IFS=$'\t' read -r policy_profile policy_timeout policy_mode policy_oversight policy_mcp policy_subcommand <<< "$policy_row"
-    case "$policy_profile" in gpt6_astra_xhigh|gpt56_terra_high|gpt56_terra_med|gpt56_luna_low) ;; *) echo "ERROR: invalid Codex profile policy" >&2; exit 1 ;; esac
+    case "$policy_profile" in gpt6_astra_xhigh|gpt6_sol_high|gpt6_sol_med|gpt6_luna_high|gpt6_luna_low) ;; *) echo "ERROR: invalid Codex profile policy" >&2; exit 1 ;; esac
     [[ "$policy_timeout" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: invalid Codex timeout policy" >&2; exit 1; }
     case "$policy_mode" in fg|bg) ;; *) echo "ERROR: invalid Codex run mode policy" >&2; exit 1 ;; esac
     case "$policy_oversight" in true|false) ;; *) echo "ERROR: invalid Codex oversight policy" >&2; exit 1 ;; esac
@@ -1495,6 +1495,9 @@ normalize_codex_profile_name() {
     gpt56_sol_xhigh) echo "gpt6_astra_xhigh" ;;
     gpt56_sol_max) echo "gpt6_astra_max" ;;
     gpt56_sol_ultra) echo "gpt6_astra_ultra" ;;
+    gpt56_terra_high) echo "gpt6_sol_high" ;;
+    gpt56_terra_med) echo "gpt6_sol_med" ;;
+    gpt56_luna_low) echo "gpt6_luna_low" ;;
     *) echo "$1" ;;
   esac
 }
@@ -1585,9 +1588,9 @@ case "$TFX_CODEX_TRANSPORT" in
     ;;
 esac
 case "$TFX_CODEX_PROFILE" in
-  auto|max|ultra|gpt56_luna_low|gpt56_terra_med|gpt56_terra_high|gpt6_astra_xhigh|gpt6_astra_max|gpt6_astra_ultra) ;;
+  auto|max|ultra|gpt6_luna_low|gpt6_luna_high|gpt6_sol_med|gpt6_sol_high|gpt6_astra_xhigh|gpt6_astra_max|gpt6_astra_ultra) ;;
   *)
-    echo "ERROR: TFX_CODEX_PROFILE 값은 auto, max, ultra 또는 canonical gpt56_*/gpt6_* profile이어야 합니다. (현재: $TFX_CODEX_PROFILE)" >&2
+    echo "ERROR: TFX_CODEX_PROFILE 값은 auto, max, ultra 또는 canonical gpt6_* profile이어야 합니다. (현재: $TFX_CODEX_PROFILE)" >&2
     exit 1
     ;;
 esac
@@ -1640,9 +1643,9 @@ apply_cli_mode() {
           designer|antigravity|agy|gemini)
             CLI_ARGS="exec --profile gpt6_astra_xhigh ${codex_base}"; CLI_EFFORT="gpt6_astra_xhigh"; DEFAULT_TIMEOUT=3600 ;;
           writer)
-            CLI_ARGS="exec --profile gpt56_luna_low ${codex_base}"; CLI_EFFORT="gpt56_luna_low"; DEFAULT_TIMEOUT=180 ;;
+            CLI_ARGS="exec --profile gpt6_luna_high ${codex_base}"; CLI_EFFORT="gpt6_luna_high"; DEFAULT_TIMEOUT=900 ;;
           *)
-            CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"; CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1080 ;;
+            CLI_ARGS="exec --profile gpt6_sol_high ${codex_base}"; CLI_EFFORT="gpt6_sol_high"; DEFAULT_TIMEOUT=1080 ;;
         esac
         echo "[tfx-route] TFX_CLI_MODE=codex: $AGENT_TYPE → codex($CLI_EFFORT)로 리매핑" >&2
       fi ;;
@@ -1788,10 +1791,10 @@ apply_plan_guard() {
   if [[ "$replacement" == "$CLI_EFFORT" ]]; then
     replacement=""
     case "$CLI_EFFORT" in
-      gpt55_low|spark53_low|codex53_low|gpt54_low|mini54_low) replacement="gpt56_luna_low" ;;
-      gpt55_med|spark53_med|codex53_med|mini54_med) replacement="gpt56_terra_med" ;;
+      gpt55_low|spark53_low|codex53_low|gpt54_low|mini54_low) replacement="gpt6_luna_low" ;;
+      gpt55_med|spark53_med|codex53_med|mini54_med) replacement="gpt6_sol_med" ;;
       gpt55_xhigh|codex53_xhigh|gpt54_xhigh) replacement="gpt6_astra_xhigh" ;;
-      gpt55_high|spark53_*|codex53_*|gpt54_*|mini54_*) replacement="gpt56_terra_high" ;;
+      gpt55_high|spark53_*|codex53_*|gpt54_*|mini54_*) replacement="gpt6_sol_high" ;;
     esac
   fi
   [[ -z "$replacement" ]] && return
@@ -1822,29 +1825,29 @@ apply_no_claude_native_mode() {
 
   case "$AGENT_TYPE" in
     explore)
-      CLI_ARGS="exec --profile gpt56_luna_low ${codex_base}"
-      CLI_EFFORT="gpt56_luna_low"
+      CLI_ARGS="exec --profile gpt6_luna_low ${codex_base}"
+      CLI_EFFORT="gpt6_luna_low"
       DEFAULT_TIMEOUT=600
       RUN_MODE="fg"
       OPUS_OVERSIGHT="false"
       ;;
     verifier)
-      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base} review"
-      CLI_EFFORT="gpt56_terra_high"
+      CLI_ARGS="exec --profile gpt6_sol_high ${codex_base} review"
+      CLI_EFFORT="gpt6_sol_high"
       DEFAULT_TIMEOUT=1200
       RUN_MODE="fg"
       OPUS_OVERSIGHT="false"
       ;;
     test-engineer)
-      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"
-      CLI_EFFORT="gpt56_terra_high"
+      CLI_ARGS="exec --profile gpt6_sol_high ${codex_base}"
+      CLI_EFFORT="gpt6_sol_high"
       DEFAULT_TIMEOUT=1200
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"
       ;;
     qa-tester)
-      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base} review"
-      CLI_EFFORT="gpt56_terra_high"
+      CLI_ARGS="exec --profile gpt6_sol_high ${codex_base} review"
+      CLI_EFFORT="gpt6_sol_high"
       DEFAULT_TIMEOUT=1200
       RUN_MODE="bg"
       OPUS_OVERSIGHT="false"
@@ -1876,7 +1879,7 @@ resolve_safe_retry_codex_profile() {
       echo "gpt6_astra_max"
       return
       ;;
-    gpt56_luna_low|gpt56_terra_med|gpt56_terra_high|gpt6_astra_xhigh|gpt6_astra_max)
+    gpt6_luna_low|gpt6_luna_high|gpt6_sol_med|gpt6_sol_high|gpt6_astra_xhigh|gpt6_astra_max)
       echo "$profile"
       return
       ;;
@@ -1886,7 +1889,7 @@ resolve_safe_retry_codex_profile() {
   codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
   profile_file="${codex_home}/${profile}.config.toml"
   if [[ ! -f "$profile_file" ]]; then
-    echo "gpt56_terra_high"
+    echo "gpt6_sol_high"
     return
   fi
   effort=$(awk -F= '
@@ -1900,7 +1903,7 @@ resolve_safe_retry_codex_profile() {
   ' "$profile_file" 2>/dev/null || true)
   case "$effort" in
     ultra) echo "gpt6_astra_max" ;;
-    "") echo "gpt56_terra_high" ;;
+    "") echo "gpt6_sol_high" ;;
     *) echo "$profile" ;;
   esac
 }
@@ -2113,8 +2116,8 @@ apply_dynamic_routing_override() {
       local codex_base
       codex_base="$(build_codex_base)"
       CLI_CMD="codex"
-      CLI_ARGS="exec --profile gpt56_terra_high ${codex_base}"
-      CLI_EFFORT="gpt56_terra_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
+      CLI_ARGS="exec --profile gpt6_sol_high ${codex_base}"
+      CLI_EFFORT="gpt6_sol_high"; DEFAULT_TIMEOUT=1080; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
       ;;
     antigravity)
       CLI_CMD="agy"
@@ -3071,12 +3074,12 @@ run_codex_exec() {
   _attempt_codex_run
 
   # Tier-fallback: ChatGPT account가 높은 reasoning profile을 거부하면
-  # GPT-5.6 family low로만 1회 재시도한다. 구형 gpt-5.4 계열로는 더 이상 다운그레이드하지 않는다.
+  # GPT-6 Luna low로만 1회 재시도한다. 구형 gpt-5.4 계열로는 더 이상 다운그레이드하지 않는다.
   # 출처: Issue #211 — codex CLI tier-aware fallback.
   if [[ "$exit_code_local" -ne 0 ]] && grep -qE "is not supported when using Codex with a ChatGPT account" "$STDERR_LOG" 2>/dev/null; then
     local fallback_profile=""
     case "$CLI_EFFORT" in
-      gpt6_astra_ultra|gpt6_astra_max|gpt6_astra_xhigh|gpt56_terra_high|gpt56_terra_med) fallback_profile="gpt56_luna_low" ;;
+      gpt6_astra_ultra|gpt6_astra_max|gpt6_astra_xhigh|gpt6_sol_high|gpt6_sol_med|gpt6_luna_high) fallback_profile="gpt6_luna_low" ;;
     esac
     if [[ -n "$fallback_profile" ]]; then
       echo "[tfx-route] tier fallback: $CLI_EFFORT not supported on ChatGPT account → retry with $fallback_profile" >&2

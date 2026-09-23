@@ -23,7 +23,10 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { normalizeCodexProfileName } from "../../scripts/lib/codex-profile-config.mjs";
+import {
+  canonicalCodexProfileModel,
+  normalizeCodexProfileName,
+} from "../../scripts/lib/codex-profile-config.mjs";
 
 export const STATES = Object.freeze({
   PLANNING: "PLANNING",
@@ -318,6 +321,11 @@ function normalizeEscalationChainEntry(entry, index, source) {
     const profile = entry.profile.trim();
     normalized.profile =
       entry.cli === "codex" ? normalizeEscalationProfile(profile) : profile;
+    // A remapped legacy profile must not keep reporting its old model.
+    if (normalized.profile !== profile) {
+      normalized.model =
+        canonicalCodexProfileModel(normalized.profile) ?? normalized.model;
+    }
   }
   return normalized;
 }

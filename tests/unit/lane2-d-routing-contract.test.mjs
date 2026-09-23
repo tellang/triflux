@@ -33,7 +33,7 @@ describe("lane2-d routing contract: Codex agent policy SSOT", () => {
 
   it("preserves direct-Codex designer and writer overrides in the policy", () => {
     assert.equal(CODEX_AGENT_POLICY.designer.profile, "gpt6_astra_xhigh");
-    assert.equal(CODEX_AGENT_POLICY.writer.profile, "gpt56_luna_low");
+    assert.equal(CODEX_AGENT_POLICY.writer.profile, "gpt6_luna_high");
   });
 
   it("resolves max and top-level eligible ultra in the policy", () => {
@@ -74,6 +74,9 @@ describe("lane2-d routing contract: Codex agent policy SSOT", () => {
     ["gpt56_sol_xhigh", "gpt6_astra_xhigh"],
     ["gpt56_sol_max", "gpt6_astra_max"],
     ["gpt56_sol_ultra", "gpt6_astra_ultra"],
+    ["gpt56_terra_high", "gpt6_sol_high"],
+    ["gpt56_terra_med", "gpt6_sol_med"],
+    ["gpt56_luna_low", "gpt6_luna_low"],
   ]) {
     it(`${legacy} override를 ${canonical}으로 정규화한다`, () => {
       assert.equal(
@@ -88,7 +91,7 @@ describe("lane2-d routing contract: Codex agent policy SSOT", () => {
   it("headless roles ignore ordinary global profiles but retain max/ultra lanes", () => {
     assert.equal(
       resolveNestedCodexAgentProfile("architect", {
-        globalProfile: "gpt56_terra_high",
+        globalProfile: "gpt6_sol_high",
       }),
       "gpt6_astra_xhigh",
     );

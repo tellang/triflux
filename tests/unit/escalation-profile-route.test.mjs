@@ -164,7 +164,7 @@ describe("tfx-route retry snapshot profile plumbing", () => {
   it("does not change codex argv when no retry snapshot is provided", () => {
     const args = runRoute();
 
-    assert.deepEqual(profileValues(args), ["gpt56_terra_high"]);
+    assert.deepEqual(profileValues(args), ["gpt6_sol_high"]);
   });
 
   it("uses bridge cliInvocation.argv from TFX_RETRY_SNAPSHOT as the single codex profile", () => {
@@ -243,11 +243,14 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     }
   });
 
-  it("normalizes all old Sol profiles from TFX_CODEX_PROFILE", () => {
+  it("normalizes all old GPT-5.6 profiles from TFX_CODEX_PROFILE", () => {
     for (const [legacy, canonical] of [
       ["gpt56_sol_xhigh", "gpt6_astra_xhigh"],
       ["gpt56_sol_max", "gpt6_astra_max"],
       ["gpt56_sol_ultra", "gpt6_astra_ultra"],
+      ["gpt56_terra_high", "gpt6_sol_high"],
+      ["gpt56_terra_med", "gpt6_sol_med"],
+      ["gpt56_luna_low", "gpt6_luna_low"],
     ]) {
       const args = runRoute({
         agent: "deep-executor",
@@ -277,7 +280,7 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     });
 
     assert.deepEqual(profileValues(customUltra), ["gpt6_astra_max"]);
-    assert.deepEqual(profileValues(missingCustom), ["gpt56_terra_high"]);
+    assert.deepEqual(profileValues(missingCustom), ["gpt6_sol_high"]);
   });
 
   it("final shell argv enforces concrete max/ultra semantics over mutable profile files", () => {
@@ -286,7 +289,7 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     const mutatedUltra =
       'model = "gpt-6-astra"\nmodel_reasoning_effort = "max"\n';
     const mutatedDefault =
-      'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "ultra"\n';
+      'model = "gpt-6-sol"\nmodel_reasoning_effort = "ultra"\n';
 
     const explicitMax = runRoute({
       env: { TFX_CODEX_PROFILE: "max" },
@@ -299,7 +302,7 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     });
     const nestedDefault = runRoute({
       env: { TFX_TEAM_NAME: "nested-team" },
-      profileFiles: { gpt56_terra_high: mutatedDefault },
+      profileFiles: { gpt6_sol_high: mutatedDefault },
     });
 
     assert.equal(
@@ -330,6 +333,6 @@ describe("tfx-route retry snapshot profile plumbing", () => {
 
     const args = runRoute({ env: { XDG_CONFIG_HOME: configRoot } });
 
-    assert.deepEqual(profileValues(args), ["gpt56_terra_high"]);
+    assert.deepEqual(profileValues(args), ["gpt6_sol_high"]);
   });
 });

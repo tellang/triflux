@@ -191,9 +191,10 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
       "gpt6_astra_ultra",
       "gpt6_astra_max",
       "gpt6_astra_xhigh",
-      "gpt56_terra_high",
-      "gpt56_terra_med",
-      "gpt56_luna_low",
+      "gpt6_sol_high",
+      "gpt6_sol_med",
+      "gpt6_luna_high",
+      "gpt6_luna_low",
     ]);
     if (process.platform === "win32") {
       assert.equal(codexProfiles.windowsSandbox, true);
@@ -314,6 +315,9 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
       "gpt56_sol_xhigh",
       "gpt56_sol_max",
       "gpt56_sol_ultra",
+      "gpt56_terra_high",
+      "gpt56_terra_med",
+      "gpt56_luna_low",
     ];
     for (const name of retiredSolProfiles) {
       writeFileSync(
@@ -360,8 +364,8 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     );
     const codexDir = join(homeDir, ".codex");
     assert.equal(
-      readFileSync(join(codexDir, "gpt56_terra_high.config.toml"), "utf8"),
-      'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "high"\n',
+      readFileSync(join(codexDir, "gpt6_sol_high.config.toml"), "utf8"),
+      'model = "gpt-6-sol"\nmodel_reasoning_effort = "high"\n',
     );
     assert.equal(
       readFileSync(join(codexDir, "gpt6_astra_xhigh.config.toml"), "utf8"),
@@ -376,8 +380,12 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
       'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
     );
     assert.equal(
-      readFileSync(join(codexDir, "gpt56_luna_low.config.toml"), "utf8"),
-      'model = "gpt-5.6-luna"\nmodel_reasoning_effort = "low"\n',
+      readFileSync(join(codexDir, "gpt6_luna_high.config.toml"), "utf8"),
+      'model = "gpt-6-luna"\nmodel_reasoning_effort = "high"\n',
+    );
+    assert.equal(
+      readFileSync(join(codexDir, "gpt6_luna_low.config.toml"), "utf8"),
+      'model = "gpt-6-luna"\nmodel_reasoning_effort = "low"\n',
     );
     for (const name of retiredSolProfiles) {
       assert.equal(

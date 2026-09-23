@@ -24,8 +24,8 @@ beforeEach(() => {
   tempDirs.push(root);
   process.env.CODEX_HOME = root;
   writeFileSync(
-    join(root, "gpt56_terra_high.config.toml"),
-    'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "high"\n',
+    join(root, "gpt6_sol_high.config.toml"),
+    'model = "gpt-6-sol"\nmodel_reasoning_effort = "high"\n',
   );
   writeFileSync(
     join(root, "gpt6_astra_xhigh.config.toml"),
@@ -43,8 +43,8 @@ afterEach(() => {
 
 describe("resolveCodexProfileConfig", () => {
   it("reads model + reasoning effort from the SSOT profile file", () => {
-    assert.deepEqual(resolveCodexProfileConfig("gpt56_terra_high"), {
-      model: "gpt-5.6-terra",
+    assert.deepEqual(resolveCodexProfileConfig("gpt6_sol_high"), {
+      model: "gpt-6-sol",
       reasoningEffort: "high",
     });
     assert.deepEqual(resolveCodexProfileConfig("gpt6_astra_xhigh"), {
@@ -78,10 +78,10 @@ describe("resolveCodexProfileConfig", () => {
     const root = process.env.CODEX_HOME;
     writeFileSync(
       join(root, "gpt56_terra_commented.config.toml"),
-      'model = "gpt-5.6-terra"   # pinned\nmodel_reasoning_effort = "high"  # effort lane\n',
+      'model = "gpt-6-sol"   # pinned\nmodel_reasoning_effort = "high"  # effort lane\n',
     );
     assert.deepEqual(resolveCodexProfileConfig("gpt56_terra_commented"), {
-      model: "gpt-5.6-terra",
+      model: "gpt-6-sol",
       reasoningEffort: "high",
     });
     writeFileSync(
@@ -95,8 +95,8 @@ describe("resolveCodexProfileConfig", () => {
   });
 
   it("derives effort from the naming convention when the file is absent", () => {
-    // No gpt56_terra_med file written → fallback path.
-    assert.deepEqual(resolveCodexProfileConfig("gpt56_terra_med"), {
+    // No gpt6_sol_med file written → fallback path.
+    assert.deepEqual(resolveCodexProfileConfig("gpt6_sol_med"), {
       model: null,
       reasoningEffort: "medium",
     });
@@ -125,7 +125,7 @@ describe("resolveCodexProfileConfig", () => {
 describe("buildCodexArguments — codex 0.137 profile regression guard", () => {
   it("never emits a `profile` tool argument", () => {
     const args = buildCodexArguments("hi", {
-      profile: "gpt56_terra_high",
+      profile: "gpt6_sol_high",
       cwd: "/tmp",
       approvalPolicy: "never",
       sandbox: "danger-full-access",
@@ -138,14 +138,14 @@ describe("buildCodexArguments — codex 0.137 profile regression guard", () => {
   });
 
   it("maps the effort profile to model + config.model_reasoning_effort", () => {
-    const args = buildCodexArguments("hi", { profile: "gpt56_terra_high" });
-    assert.equal(args.model, "gpt-5.6-terra");
+    const args = buildCodexArguments("hi", { profile: "gpt6_sol_high" });
+    assert.equal(args.model, "gpt-6-sol");
     assert.equal(args.config?.model_reasoning_effort, "high");
   });
 
   it("lets an explicit model win over the profile model", () => {
     const args = buildCodexArguments("hi", {
-      profile: "gpt56_terra_high",
+      profile: "gpt6_sol_high",
       model: "gpt-5.5-codex",
     });
     assert.equal(args.model, "gpt-5.5-codex");
@@ -188,7 +188,7 @@ describe("buildCodexArguments — codex 0.137 profile regression guard", () => {
 
   it("only sets the accepted Codex tool fields", () => {
     const args = buildCodexArguments("hi", {
-      profile: "gpt56_terra_high",
+      profile: "gpt6_sol_high",
       cwd: "/tmp",
       approvalPolicy: "never",
       sandbox: "danger-full-access",

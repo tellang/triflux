@@ -21,6 +21,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0014](0014-claude-credentials-keychain-source-of-truth.md) | Claude 자격증명은 macOS Keychain 정본, 읽은 저장소에만 되쓰기 | Proposed | 0002 |
 | [0015](0015-codex-lane-exec-transport-and-last-message.md) | Codex 레인은 exec 전송 + 최종 메시지 파일이 결과 계약 | Proposed | 0004, 0006 |
 | [0016](0016-codex-astra-top-tier-and-fable-escalation.md) | Codex 최상위 tier = Astra, 최종 승격 = Fable | Accepted | 0004, 0006, 0015 |
+| [0017](0017-gpt6-sol-luna-lanes.md) | Terra/Luna 레인 = GPT-6 Sol/Luna | Accepted | 0004, 0015, 0016 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 

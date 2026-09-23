@@ -437,17 +437,23 @@ const REQUIRED_CODEX_PROFILES = [
     name: "gpt6_astra_xhigh",
     lines: ['model = "gpt-6-astra"', 'model_reasoning_effort = "xhigh"'],
   },
+  // GPT-6 Sol: implementation, review, and verification role defaults.
   {
-    name: "gpt56_terra_high",
-    lines: ['model = "gpt-5.6-terra"', 'model_reasoning_effort = "high"'],
+    name: "gpt6_sol_high",
+    lines: ['model = "gpt-6-sol"', 'model_reasoning_effort = "high"'],
   },
   {
-    name: "gpt56_terra_med",
-    lines: ['model = "gpt-5.6-terra"', 'model_reasoning_effort = "medium"'],
+    name: "gpt6_sol_med",
+    lines: ['model = "gpt-6-sol"', 'model_reasoning_effort = "medium"'],
+  },
+  // GPT-6 Luna: high for focused lanes, low for latency-first lanes.
+  {
+    name: "gpt6_luna_high",
+    lines: ['model = "gpt-6-luna"', 'model_reasoning_effort = "high"'],
   },
   {
-    name: "gpt56_luna_low",
-    lines: ['model = "gpt-5.6-luna"', 'model_reasoning_effort = "low"'],
+    name: "gpt6_luna_low",
+    lines: ['model = "gpt-6-luna"', 'model_reasoning_effort = "low"'],
   },
 ];
 
@@ -1391,7 +1397,7 @@ function ensureCodexProfiles() {
       }
     }
     // config.toml 의 모든 inline [profiles.*] 마이그레이션 (Codex 0.134 는 inline 거부).
-    //   - 관리 gpt56_*: 위에서 canonical 별도 파일을 썼으므로 inline 만 제거.
+    //   - 관리 gpt6_*: 위에서 canonical 별도 파일을 썼으므로 inline 만 제거.
     //   - 구형 retired (codex53/spark53/gpt54/mini54): inline 제거, 재생성 안 함.
     //   - 그 외 사용자 커스텀: 본문을 보존해 별도 파일로 이관한 뒤 inline 제거.
     //     (별도 파일이 이미 있으면 덮어쓰지 않는다 — 사용자 수정 보존.)

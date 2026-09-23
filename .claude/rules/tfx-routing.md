@@ -89,13 +89,32 @@ triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR
 
 | 우선순위 | CLI / 모델 | default 적용 lane |
 |---------|-----------|-------------------|
-| 1차 (default) | **Codex** (GPT-6 Astra top tier + GPT-5.6 Terra/Luna) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
+| 1차 (default) | **Codex** (GPT-6 Astra/Sol/Luna) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
 | 2차 | **Antigravity** | Codex quota exhaust, 가독성 cross-check, 별도 시각 검토 |
 | 한정 (Claude 만) | **Claude** (`opus` 최신 tier 별칭) | 메타 라우팅 (`/tfx-harness`), planning gate (`/office-hours`, `/autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack /qa`), 또는 Codex/Antigravity 미가용 |
 
 `tfx-auto`, `tfx-review`, `tfx-analysis`, `tfx-plan`, `tfx-find` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli codex`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
 
 `--retry auto-escalate` 체인 (`.claude/rules/tfx-escalation-chain.md`) 의 1단계가 Codex 인 것도 이 정책과 정합한다 (2단계 Claude `fable` 최신 tier 별칭은 최종 수단).
+
+### 모델 배치
+
+> 근거(why): [ADR-0016](../../docs/adr/0016-codex-astra-top-tier-and-fable-escalation.md), [ADR-0017](../../docs/adr/0017-gpt6-sol-luna-lanes.md). 기준 문서는 OpenAI Codex 모델 페이지와 Anthropic 모델 개요(2026-09-23 확인)다.
+
+Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고, 모델 ID는 `~/.codex/<프로필>.config.toml`이 정한다. Claude는 별칭으로 호출하므로 새 모델이 나오면 아래 "현재 모델" 열만 고친다.
+
+| 호출 | 현재 모델 | 공식 용도 | triflux lane |
+|------|-----------|-----------|--------------|
+| `gpt6_astra_xhigh` | GPT-6 Astra | 여러 단계와 도구에 걸친 최고 난도 작업 | architect, planner, critic, analyst, debugger, deep-executor, security-reviewer, scientist-deep, designer |
+| `gpt6_astra_max` / `gpt6_astra_ultra` | GPT-6 Astra | 최난도 단일 작업, 자동 위임 | `TFX_CODEX_PROFILE=max/ultra`, 재시도 1단계 |
+| `gpt6_sol_high` | GPT-6 Sol | 일상 작업과 복잡한 코딩 | executor, codex, code-reviewer, quality-reviewer, verifier, test-engineer, qa-tester, scientist, document-specialist |
+| `gpt6_sol_med` | GPT-6 Sol | 같은 모델의 공식 시작 effort | cleanup, deslop |
+| `gpt6_luna_high` | GPT-6 Luna | 명확하고 반복 가능한 작업 | build-fixer, writer |
+| `gpt6_luna_low` | GPT-6 Luna | 지연이 우선인 작업 | spark, explore 재매핑, ChatGPT tier 폴백 |
+| `fable` | Claude Fable 5.1 | 까다로운 추론과 긴 에이전트 작업, Opus가 높은 effort에서도 부족할 때 | `--retry auto-escalate` 최종 단계 |
+| `opus` | Claude Opus 5.5 | 오래 도는 에이전트 코딩과 지식 작업, Claude 기본 출발점 | 메타 라우팅, planning gate, 스킬의 `model="opus"` lane |
+| `sonnet` | Claude Sonnet 5 | 속도와 지능의 균형 | Claude native test-engineer, qa-tester, verifier |
+| `haiku` | Claude Haiku 4.5 | 가장 빠른 모델 | Claude native explore, claude |
 
 ## CLI 라우팅
 

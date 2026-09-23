@@ -148,8 +148,8 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
         cliChain: [
           {
             cli: "codex",
-            model: "gpt-5.6-terra",
-            profile: "gpt56_terra_high",
+            model: "gpt-6-sol",
+            profile: "gpt6_sol_high",
           },
           { cli: "claude", model: "opus" },
         ],
@@ -163,14 +163,14 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
     const status = runBridge(["retry-status", "--snapshot", snapshot]);
     assert.deepEqual(status.cli, {
       cli: "codex",
-      model: "gpt-5.6-terra",
-      profile: "gpt56_terra_high",
+      model: "gpt-6-sol",
+      profile: "gpt6_sol_high",
     });
     assert.deepEqual(status.cliInvocation, {
       cli: "codex",
-      model: "gpt-5.6-terra",
-      profile: "gpt56_terra_high",
-      argv: ["--profile", "gpt56_terra_high"],
+      model: "gpt-6-sol",
+      profile: "gpt6_sol_high",
+      argv: ["--profile", "gpt6_sol_high"],
     });
   });
 
@@ -205,6 +205,43 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
         {
           cli: "codex",
           model: "gpt-6-astra",
+          profile: canonical,
+          argv: ["--profile", canonical],
+        },
+      );
+    }
+  });
+
+  it("retry-status 는 옛 GPT-5.6 snapshot의 model도 새 profile에 맞춘다", () => {
+    for (const [legacyModel, legacy, model, canonical] of [
+      ["gpt-5.6-terra", "gpt56_terra_high", "gpt-6-sol", "gpt6_sol_high"],
+      ["gpt-5.6-luna", "gpt56_luna_low", "gpt-6-luna", "gpt6_luna_low"],
+    ]) {
+      const dir = makeTempDir();
+      const snapshot = join(dir, `${legacy}.json`);
+      writeFileSync(
+        snapshot,
+        JSON.stringify({
+          version: 1,
+          current: "EXECUTING",
+          iterations: 1,
+          maxIterations: 3,
+          stuckCounter: 0,
+          lastFailureReason: null,
+          cliIndex: 0,
+          cliChain: [{ cli: "codex", model: legacyModel, profile: legacy }],
+          mode: "auto-escalate",
+          sessionId: null,
+          history: [],
+        }),
+        "utf8",
+      );
+
+      assert.deepEqual(
+        runBridge(["retry-status", "--snapshot", snapshot]).cliInvocation,
+        {
+          cli: "codex",
+          model,
           profile: canonical,
           argv: ["--profile", canonical],
         },

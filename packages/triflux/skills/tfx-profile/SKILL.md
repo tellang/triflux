@@ -45,7 +45,7 @@ options:
 ```
 | 프로파일 | 모델 | Effort |
 |----------|------|--------|
-| gpt56_terra_high | 프로필 설정의 현재 모델 | high |
+| gpt6_sol_high | 프로필 설정의 현재 모델 | high |
 | ...  | ...           | ...  |
 ```
 
@@ -75,9 +75,10 @@ options:
 2. AskUserQuestion으로 프로필/alias 선택:
    ```
    options:
-     - label: "gpt56_terra_high" → 기본 고품질 (Recommended)
-     - label: "gpt56_terra_med"  → 균형형
-     - label: "gpt56_luna_low"   → 빠른 경량
+     - label: "gpt6_sol_high"    → 구현과 리뷰 기본값 (Recommended)
+     - label: "gpt6_sol_med"     → 정리와 리팩터 균형형
+     - label: "gpt6_luna_high"   → 명확한 반복 작업
+     - label: "gpt6_luna_low"    → 지연 우선 경량
      - label: "gpt6_astra_xhigh" → 고강도 추론
      - label: "gpt6_astra_max"   → 최난도 단일 작업
      - label: "gpt6_astra_ultra" → 최상위 자동 위임 (비중첩 전용)
@@ -187,12 +188,13 @@ options:
 
 | 프로필 | 용도 |
 |------|------|
-| gpt56_terra_high | 기본 고품질 |
+| gpt6_sol_high | 구현과 리뷰 기본값 |
 | gpt6_astra_xhigh | 고강도 추론 |
 | gpt6_astra_max | 최난도 단일 작업 |
 | gpt6_astra_ultra | 최상위 자동 위임 (비중첩 전용) |
-| gpt56_terra_med | 균형형 |
-| gpt56_luna_low | 빠른 경량 |
+| gpt6_sol_med | 정리와 리팩터 균형형 |
+| gpt6_luna_high | 명확한 반복 작업 |
+| gpt6_luna_low | 지연 우선 경량 |
 | custom | 사용자가 관리하는 프로필 |
 
 ### Codex Effort 레벨

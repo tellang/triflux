@@ -7,7 +7,7 @@ import {
 
 const policy = {
   executor: {
-    profile: "gpt56_terra_high",
+    profile: "gpt6_sol_high",
     timeoutSec: 1080,
     runMode: "fg",
     opusOversight: false,
@@ -15,7 +15,7 @@ const policy = {
     subcommand: "exec",
   },
   codex: {
-    profile: "gpt56_terra_high",
+    profile: "gpt6_sol_high",
     timeoutSec: 1080,
     runMode: "fg",
     opusOversight: false,
@@ -23,7 +23,7 @@ const policy = {
     subcommand: "exec",
   },
   "build-fixer": {
-    profile: "gpt56_luna_low",
+    profile: "gpt6_luna_high",
     timeoutSec: 540,
     runMode: "fg",
     opusOversight: false,
@@ -31,7 +31,7 @@ const policy = {
     subcommand: "exec",
   },
   cleanup: {
-    profile: "gpt56_terra_med",
+    profile: "gpt6_sol_med",
     timeoutSec: 540,
     runMode: "fg",
     opusOversight: false,
@@ -39,7 +39,7 @@ const policy = {
     subcommand: "exec",
   },
   deslop: {
-    profile: "gpt56_terra_med",
+    profile: "gpt6_sol_med",
     timeoutSec: 540,
     runMode: "fg",
     opusOversight: false,
@@ -95,7 +95,7 @@ const policy = {
     subcommand: "exec",
   },
   "code-reviewer": {
-    profile: "gpt56_terra_high",
+    profile: "gpt6_sol_high",
     timeoutSec: 1800,
     runMode: "bg",
     opusOversight: false,
@@ -103,7 +103,7 @@ const policy = {
     subcommand: "review",
   },
   "quality-reviewer": {
-    profile: "gpt56_terra_high",
+    profile: "gpt6_sol_high",
     timeoutSec: 1800,
     runMode: "bg",
     opusOversight: false,
@@ -119,7 +119,7 @@ const policy = {
     subcommand: "review",
   },
   scientist: {
-    profile: "gpt56_terra_high",
+    profile: "gpt6_sol_high",
     timeoutSec: 1440,
     runMode: "bg",
     opusOversight: false,
@@ -127,7 +127,7 @@ const policy = {
     subcommand: "exec",
   },
   "document-specialist": {
-    profile: "gpt56_terra_high",
+    profile: "gpt6_sol_high",
     timeoutSec: 1440,
     runMode: "bg",
     opusOversight: false,
@@ -143,7 +143,7 @@ const policy = {
     subcommand: "exec",
   },
   verifier: {
-    profile: "gpt56_terra_high",
+    profile: "gpt6_sol_high",
     timeoutSec: 1200,
     runMode: "fg",
     opusOversight: false,
@@ -151,7 +151,7 @@ const policy = {
     subcommand: "review",
   },
   "test-engineer": {
-    profile: "gpt56_terra_high",
+    profile: "gpt6_sol_high",
     timeoutSec: 1200,
     runMode: "bg",
     opusOversight: false,
@@ -159,7 +159,7 @@ const policy = {
     subcommand: "exec",
   },
   "qa-tester": {
-    profile: "gpt56_terra_high",
+    profile: "gpt6_sol_high",
     timeoutSec: 1200,
     runMode: "bg",
     opusOversight: false,
@@ -167,7 +167,7 @@ const policy = {
     subcommand: "review",
   },
   spark: {
-    profile: "gpt56_luna_low",
+    profile: "gpt6_luna_low",
     timeoutSec: 180,
     runMode: "fg",
     opusOversight: false,
@@ -185,7 +185,7 @@ const policy = {
     subcommand: "exec",
   },
   writer: {
-    profile: "gpt56_luna_low",
+    profile: "gpt6_luna_high",
     timeoutSec: 900,
     runMode: "bg",
     opusOversight: false,
@@ -210,9 +210,10 @@ export const DEFAULT_CODEX_AGENT = "executor";
 
 export const CANONICAL_CODEX_PROFILE_OVERRIDES = Object.freeze(
   new Set([
-    "gpt56_luna_low",
-    "gpt56_terra_med",
-    "gpt56_terra_high",
+    "gpt6_luna_low",
+    "gpt6_luna_high",
+    "gpt6_sol_med",
+    "gpt6_sol_high",
     "gpt6_astra_xhigh",
     "gpt6_astra_max",
     "gpt6_astra_ultra",

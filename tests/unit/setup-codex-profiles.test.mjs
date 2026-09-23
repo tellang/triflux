@@ -53,9 +53,10 @@ describe("REQUIRED_CODEX_PROFILES: 확장된 프로필 목록 검증", () => {
     "gpt6_astra_ultra",
     "gpt6_astra_max",
     "gpt6_astra_xhigh",
-    "gpt56_terra_high",
-    "gpt56_terra_med",
-    "gpt56_luna_low",
+    "gpt6_sol_high",
+    "gpt6_sol_med",
+    "gpt6_luna_high",
+    "gpt6_luna_low",
   ];
 
   for (const name of requiredNames) {

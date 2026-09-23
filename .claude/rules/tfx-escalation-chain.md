@@ -39,7 +39,7 @@ PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escal
 체인 항목 필드:
 - `cli` (codex|antigravity|claude)
 - `model` (CLI 가 해석하는 문자열)
-- `profile` (optional): `gpt56_luna_low` / `gpt56_terra_med` / `gpt56_terra_high` / `gpt6_astra_xhigh` / `gpt6_astra_max` 같은 CLI profile 이름. `gpt6_astra_ultra`는 다른 오케스트레이터가 없는 최상위 단독 실행 전용이므로 retry chain에는 넣지 않는다.
+- `profile` (optional): `gpt6_luna_low` / `gpt6_luna_high` / `gpt6_sol_med` / `gpt6_sol_high` / `gpt6_astra_xhigh` / `gpt6_astra_max` 같은 CLI profile 이름. `gpt6_astra_ultra`는 다른 오케스트레이터가 없는 최상위 단독 실행 전용이므로 retry chain에는 넣지 않는다.
 
 기본 Claude 모델은 `fable` 별칭이며 Claude CLI가 최신 Fable tier로 해석한다. 기본값만 바꾸려면 `TFX_ESCALATION_CLAUDE_MODEL`을 설정할 수 있고, 프로젝트의 `.triflux/config/escalation-chain.json`은 그보다 우선한다.
 

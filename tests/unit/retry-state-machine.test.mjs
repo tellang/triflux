@@ -229,6 +229,39 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       }
     });
 
+    it("옛 GPT-5.6 스냅샷은 profile과 model을 함께 GPT-6 값으로 맞춘다", () => {
+      const cases = [
+        ["gpt-5.6-terra", "gpt56_terra_high", "gpt6_sol_high", "gpt-6-sol"],
+        ["gpt-5.6-terra", "gpt56_terra_med", "gpt6_sol_med", "gpt-6-sol"],
+        ["gpt-5.6-luna", "gpt56_luna_low", "gpt6_luna_low", "gpt-6-luna"],
+        ["gpt-5.6-sol", "gpt56_sol_max", "gpt6_astra_max", "gpt-6-astra"],
+      ];
+
+      for (const [legacyModel, legacyProfile, profile, model] of cases) {
+        const sm = createRetryStateMachine({
+          mode: "auto-escalate",
+          cliChain: [
+            { cli: "codex", model: legacyModel, profile: legacyProfile },
+            { cli: "claude", model: "fable" },
+          ],
+        });
+        const [step] = sm.getCurrent().cliChain;
+        assert.equal(step.profile, profile);
+        assert.equal(step.model, model);
+      }
+    });
+
+    it("canonical profile은 사용자가 지정한 model을 바꾸지 않는다", () => {
+      const sm = createRetryStateMachine({
+        mode: "auto-escalate",
+        cliChain: [
+          { cli: "codex", model: "custom-model", profile: "gpt6_sol_high" },
+          { cli: "claude", model: "fable" },
+        ],
+      });
+      assert.equal(sm.getCurrent().cliChain[0].model, "custom-model");
+    });
+
     it(".triflux/config/escalation-chain.json의 옛 Sol profile을 정규화한다", () => {
       const dir = makeTempDir();
       const configDir = join(dir, ".triflux", "config");

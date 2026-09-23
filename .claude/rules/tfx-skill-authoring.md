@@ -24,7 +24,7 @@
 
 - Codex, Claude, Antigravity 모델 ID는 프로필 설정이 단일 정본이다.
 - `SKILL.md` 본문에 `gpt-5.6-sol`, `opus-4-8` 같은 모델명을 하드코딩하지 않는다.
-- 스킬 문서에서는 `gpt56_terra_high`, `gpt6_astra_xhigh`, `flash38_high` 같은 프로필명이나
+- 스킬 문서에서는 `gpt6_sol_high`, `gpt6_astra_xhigh`, `flash38_high` 같은 프로필명이나
   "프로필 설정을 따른다"는 표현을 사용한다.
 - 모델 교체가 필요하면 스킬 본문을 고치지 말고 프로필 설정과 라우팅 규칙을
   갱신한다.

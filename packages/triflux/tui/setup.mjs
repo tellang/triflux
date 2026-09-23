@@ -39,9 +39,10 @@ const REQUIRED_CODEX_PROFILE_NAMES = [
   "gpt6_astra_ultra",
   "gpt6_astra_max",
   "gpt6_astra_xhigh",
-  "gpt56_terra_high",
-  "gpt56_terra_med",
-  "gpt56_luna_low",
+  "gpt6_sol_high",
+  "gpt6_sol_med",
+  "gpt6_luna_high",
+  "gpt6_luna_low",
 ];
 
 const STABLE_NODE_COMMAND_CANDIDATES = Object.freeze([

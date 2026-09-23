@@ -1009,10 +1009,11 @@ Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}", prompt="{prompt
 
 | 입력 | CLI | MCP |
 |------|-----|-----|
-| codex / executor / spark | Codex (high; 복잡 구현은 deep-executor/xhigh) | implement |
-| debugger / deep-executor | Codex (xhigh) | implement |
-| build-fixer | Codex (low) | implement |
-| architect / planner / critic / analyst | Codex (xhigh) | analyze |
+| codex / executor | Codex (`gpt6_sol_high`; 복잡 구현은 deep-executor/xhigh) | implement |
+| debugger / deep-executor | Codex (`gpt6_astra_xhigh`) | implement |
+| build-fixer | Codex (`gpt6_luna_high`) | implement |
+| spark | Codex (`gpt6_luna_low`) | implement |
+| architect / planner / critic / analyst | Codex (`gpt6_astra_xhigh`) | analyze |
 | scientist / document-specialist | Codex | analyze |
 | code-reviewer / security-reviewer / quality-reviewer | Codex (review) | review |
 | antigravity / designer / writer | Antigravity | docs |

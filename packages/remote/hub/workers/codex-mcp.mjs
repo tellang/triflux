@@ -120,7 +120,7 @@ function readTomlScalar(raw, key) {
 }
 
 /**
- * Resolve a Codex effort profile name (e.g. "gpt56_terra_high") to its concrete
+ * Resolve a Codex effort profile name (e.g. "gpt6_sol_high") to its concrete
  * `model` + reasoning effort. SSOT = the per-profile file written by
  * `tfx setup` at `~/.codex/<profile>.config.toml`. Falls back to deriving the
  * effort from the `<...>_<effort>` naming convention when the file is absent.

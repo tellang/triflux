@@ -14,6 +14,7 @@ import { afterEach, describe, it } from "node:test";
 import {
   codexProfileConfigOverrides,
   listLegacyCodexProfileSections,
+  normalizeCodexProfileName,
   sanitizeCodexProfileConfig,
   sanitizeCodexProfileConfigFile,
 } from "../../scripts/lib/codex-profile-config.mjs";
@@ -189,11 +190,30 @@ describe("codexProfileConfigOverrides", () => {
     }
   });
 
+  it("normalizes old Terra and Luna names to the GPT-6 lane with the same effort", () => {
+    const codexHome = makeHome();
+    for (const [legacy, canonical, model, effort] of [
+      ["gpt56_terra_high", "gpt6_sol_high", "gpt-6-sol", "high"],
+      ["gpt56_terra_med", "gpt6_sol_med", "gpt-6-sol", "medium"],
+      ["gpt56_luna_low", "gpt6_luna_low", "gpt-6-luna", "low"],
+    ]) {
+      writeFileSync(
+        join(codexHome, `${canonical}.config.toml`),
+        `model = "${model}"\nmodel_reasoning_effort = "${effort}"\n`,
+      );
+      assert.equal(normalizeCodexProfileName(legacy), canonical);
+      assert.deepEqual(codexProfileConfigOverrides(legacy, { codexHome }), [
+        `model="${model}"`,
+        `model_reasoning_effort="${effort}"`,
+      ]);
+    }
+  });
+
   it("can enforce canonical values for nested role profiles", () => {
     const codexHome = makeHome();
     writeFileSync(
       join(codexHome, "gpt6_astra_xhigh.config.toml"),
-      'model = "gpt-5.6-terra"\nmodel_reasoning_effort = "high"\n',
+      'model = "gpt-6-sol"\nmodel_reasoning_effort = "high"\n',
     );
     assert.deepEqual(
       codexProfileConfigOverrides("gpt6_astra_xhigh", {

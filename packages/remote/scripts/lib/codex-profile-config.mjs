@@ -19,23 +19,37 @@ const EFFORT_BY_SUFFIX = {
 };
 
 const CANONICAL_PROFILE_VALUES = Object.freeze({
-  gpt56_luna_low: { model: "gpt-5.6-luna", effort: "low" },
-  gpt56_terra_med: { model: "gpt-5.6-terra", effort: "medium" },
-  gpt56_terra_high: { model: "gpt-5.6-terra", effort: "high" },
+  gpt6_luna_low: { model: "gpt-6-luna", effort: "low" },
+  gpt6_luna_high: { model: "gpt-6-luna", effort: "high" },
+  gpt6_sol_med: { model: "gpt-6-sol", effort: "medium" },
+  gpt6_sol_high: { model: "gpt-6-sol", effort: "high" },
   gpt6_astra_xhigh: { model: "gpt-6-astra", effort: "xhigh" },
   gpt6_astra_max: { model: "gpt-6-astra", effort: "max" },
   gpt6_astra_ultra: { model: "gpt-6-astra", effort: "ultra" },
 });
 
+// GPT-5.6 lane names map to the GPT-6 lane with the same effort. GPT-6 has no
+// Terra tier, so Terra lanes move to Sol.
 const LEGACY_CANONICAL_PROFILE_ALIASES = Object.freeze({
   gpt56_sol_xhigh: "gpt6_astra_xhigh",
   gpt56_sol_max: "gpt6_astra_max",
   gpt56_sol_ultra: "gpt6_astra_ultra",
+  gpt56_terra_high: "gpt6_sol_high",
+  gpt56_terra_med: "gpt6_sol_med",
+  gpt56_luna_low: "gpt6_luna_low",
 });
 
 export function normalizeCodexProfileName(profileName) {
   const normalized = String(profileName ?? "").trim();
   return LEGACY_CANONICAL_PROFILE_ALIASES[normalized] || normalized;
+}
+
+/** Model ID of a canonical profile (after legacy normalization), or null. */
+export function canonicalCodexProfileModel(profileName) {
+  return (
+    CANONICAL_PROFILE_VALUES[normalizeCodexProfileName(profileName)]?.model ??
+    null
+  );
 }
 
 function readProfileScalar(raw, key) {
@@ -51,7 +65,7 @@ function readProfileScalar(raw, key) {
 }
 
 /**
- * Resolve a Codex effort profile name (e.g. "gpt56_terra_high") to the `-c key=value`
+ * Resolve a Codex effort profile name (e.g. "gpt6_sol_high") to the `-c key=value`
  * config overrides that `codex exec` accepts, so the headless CLI lanes can
  * select a profile WITHOUT `codex exec --profile <name>`. codex 0.134+ rejects
  * `--profile X` whenever config.toml still contains an inline `[profiles.X]`
@@ -69,7 +83,7 @@ function readProfileScalar(raw, key) {
  *
  * @param {string} profileName
  * @param {{ codexHome?: string }} [opts]
- * @returns {string[]} e.g. ['model="gpt-5.6-terra"', 'model_reasoning_effort="high"']
+ * @returns {string[]} e.g. ['model="gpt-6-sol"', 'model_reasoning_effort="high"']
  */
 export function resolveCodexProfileConfigValues(profileName, opts = {}) {
   if (typeof profileName !== "string" || !profileName) {

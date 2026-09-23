@@ -234,14 +234,14 @@ describe("tfx-route.mjs — buildRoutePlan (agent-map.json 전수)", () => {
 });
 
 describe("cli-codex.mjs — 핵심 매핑", () => {
-  test("executor → gpt56_terra_high / 1080s / fg / mcp=implement", () => {
+  test("executor → gpt6_sol_high / 1080s / fg / mcp=implement", () => {
     const p = codexAdapter.plan({
       agent: "executor",
       prompt: "x",
       mcpProfile: "auto",
     });
-    assert.equal(p.effort, "gpt56_terra_high");
-    assert.equal(p.profile, "gpt56_terra_high");
+    assert.equal(p.effort, "gpt6_sol_high");
+    assert.equal(p.profile, "gpt6_sol_high");
     assert.equal(p.timeoutMs, 1_080_000);
     assert.equal(p.runMode, "fg");
     assert.equal(p.opusOversight, false);
@@ -334,7 +334,7 @@ describe("cli-codex.mjs — 핵심 매핑", () => {
       prompt: "x",
       mcpProfile: "auto",
     });
-    assert.equal(p.effort, "gpt56_terra_high");
+    assert.equal(p.effort, "gpt6_sol_high");
     assert.equal(p.timeoutMs, 1_080_000);
   });
 
