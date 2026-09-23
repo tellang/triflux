@@ -492,8 +492,6 @@ export function getProviderRow(
     ACCOUNT_LABEL_WIDTH,
   );
 
-  const _modelLabelStr = modelLabel ? ` ${markerColor(modelLabel)}` : "";
-
   // 프로바이더별 색상 프로필
   const isGeminiFamily = provider === "gemini" || provider === "antigravity";
   const provAnsi =
@@ -502,7 +500,6 @@ export function getProviderRow(
     provider === "codex" ? codexWhite : isGeminiFamily ? geminiBlue : green;
 
   let quotaSection;
-  const _extraRightSection = "";
 
   if (currentTier === "nano" || currentTier === "micro") {
     const minPrefix = `${bold(markerColor(`${marker}`))}:`;

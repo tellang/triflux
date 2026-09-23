@@ -542,22 +542,6 @@ function buildTarget(target, options = {}) {
   return { target, status: "built", file: filePath, payload };
 }
 
-export function buildCodexSkills(options = {}) {
-  return buildTarget("codexSkills", options);
-}
-
-export function buildTierEnvironment(options = {}) {
-  return buildTarget("tierEnvironment", options);
-}
-
-export function buildProjectMeta(options = {}) {
-  return buildTarget("projectMeta", options);
-}
-
-export function buildSearchEngines(options = {}) {
-  return buildTarget("searchEngines", options);
-}
-
 export function buildAll(options = {}) {
   const targets = normalizeTargets(options.targets);
   const dirs = resolveRootDirs(options.cwd);

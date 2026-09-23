@@ -4,8 +4,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export const VERSION = "2.0";
-
 export const QOS_PATH = join(
   homedir(),
   ".claude",

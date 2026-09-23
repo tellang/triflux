@@ -86,10 +86,6 @@ export function padAnsiRight(text, width) {
   return padAnsi(text, width, "right");
 }
 
-export function padAnsiLeft(text, width) {
-  return padAnsi(text, width, "left");
-}
-
 export function fitText(text, width) {
   const t = String(text || "");
   if (t.length <= width) return t;
@@ -182,20 +178,6 @@ export function formatTokenCount(n) {
   return String(n);
 }
 
-export function getContextPercent(stdin) {
-  const nativePercent = stdin?.context_window?.used_percentage;
-  if (typeof nativePercent === "number" && Number.isFinite(nativePercent))
-    return clampPercent(nativePercent);
-  const usage = stdin?.context_window?.current_usage || {};
-  const totalTokens =
-    Number(usage.input_tokens || 0) +
-    Number(usage.cache_creation_input_tokens || 0) +
-    Number(usage.cache_read_input_tokens || 0);
-  const capacity = Number(stdin?.context_window?.context_window_size || 0);
-  if (!capacity || capacity <= 0) return 0;
-  return clampPercent((totalTokens / capacity) * 100);
-}
-
 // 과거 리셋 시간 → 다음 주기로 순환하여 미래 시점 반환
 // elapsed가 cycleMs의 정수배일 때 ceil은 target=now를 반환해 diff=0이 되므로
 // floor+1로 항상 다음 사이클을 가리키도록 한다.
@@ -234,11 +216,6 @@ export function formatResetRemaining(isoOrUnix, cycleMs = 0) {
   const totalHours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
   return `${totalHours}h${String(minutes).padStart(2, "0")}m`;
-}
-
-export function isResetPast(isoOrUnix) {
-  const date = parseResetDate(isoOrUnix);
-  return date != null && date.getTime() <= Date.now();
 }
 
 export function formatResetRemainingDayHour(isoOrUnix, cycleMs = 0) {

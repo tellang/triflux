@@ -2966,15 +2966,6 @@ async function refreshAllAccountQuotas() {
   return results;
 }
 
-function _loadQuotaCache() {
-  try {
-    if (!existsSync(QUOTA_CACHE_PATH)) return null;
-    return JSON.parse(readFileSync(QUOTA_CACHE_PATH, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
 // ── Broker Dashboard HTML ──────────────────────────────────────
 
 function renderBrokerDashboard() {

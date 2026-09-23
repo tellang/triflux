@@ -52,7 +52,7 @@ function parseNonNegativeInteger(name, value) {
   return parsed;
 }
 
-export function parseStewardArgs(args = []) {
+function parseStewardArgs(args = []) {
   const parsed = {
     watch: false,
     maxRuns: null,
@@ -111,7 +111,7 @@ function isAbortError(error) {
   return error?.name === "AbortError" || error?.code === "ABORT_ERR";
 }
 
-export function stewardLoopLockPath(lakeRoot) {
+function stewardLoopLockPath(lakeRoot) {
   return join(lakeRoot, "stewards", "steward-loop.lock");
 }
 

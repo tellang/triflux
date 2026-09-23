@@ -11,7 +11,6 @@ export const GREEN = "\x1b[32m";
 export const YELLOW = "\x1b[33m";
 export const CYAN = "\x1b[36m";
 export const AMBER = "\x1b[38;5;214m";
-export const BLUE = "\x1b[38;5;39m";
 export const WHITE = "\x1b[97m";
 export const GRAY = "\x1b[38;5;245m";
 
@@ -248,10 +247,6 @@ export function spinner(message) {
 
 export function stripAnsi(str) {
   return str.replace(/\x1b\[[0-9;]*m/g, "");
-}
-
-export function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 // graceful exit

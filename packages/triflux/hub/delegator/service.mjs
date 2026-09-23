@@ -5,7 +5,6 @@ import {
   DELEGATOR_MODES,
   DELEGATOR_PROVIDERS,
 } from "./contracts.mjs";
-import { getDelegatorMcpToolDefinitions } from "./tool-definitions.mjs";
 
 function deepClone(value) {
   if (value == null) return value;
@@ -35,10 +34,6 @@ export class DelegatorService {
     this.jobs = new Map();
     this.worker = worker;
     this._workerJobMap = new Map();
-  }
-
-  listToolDefinitions() {
-    return getDelegatorMcpToolDefinitions();
   }
 
   createJobSnapshot(input = {}) {

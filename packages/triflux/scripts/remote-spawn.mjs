@@ -815,7 +815,7 @@ function parseProbeLines(text) {
   );
 }
 
-function normalizePwshProbeEnv(host, parsed) {
+function normalizePwshProbeEnv(parsed) {
   if (parsed.shell !== "pwsh" || parsed.os !== "win32") {
     return null;
   }
@@ -833,7 +833,7 @@ function normalizePwshProbeEnv(host, parsed) {
   });
 }
 
-function normalizePosixProbeEnv(host, parsed) {
+function normalizePosixProbeEnv(parsed) {
   const os =
     parsed.os === "darwin" ? "darwin" : parsed.os === "linux" ? "linux" : null;
   if (!os || !parsed.home) {
@@ -904,7 +904,7 @@ function probeRemoteEnvViaPwsh(host) {
     return null;
   }
 
-  return normalizePwshProbeEnv(host, parseProbeLines(output));
+  return normalizePwshProbeEnv(parseProbeLines(output));
 }
 
 function probeRemoteEnvViaPosix(host) {
@@ -926,7 +926,7 @@ function probeRemoteEnvViaPosix(host) {
     return null;
   }
 
-  return normalizePosixProbeEnv(host, parseProbeLines(output));
+  return normalizePosixProbeEnv(parseProbeLines(output));
 }
 
 function probeRemoteEnv(host, opts = {}) {
@@ -1234,7 +1234,6 @@ function listSpawnSessions() {
 
 async function openAttachTab(sessionName, title = null) {
   if (IS_WINDOWS_LOCAL) {
-    const _wtArgs = title;
     try {
       const wt = (await import("../hub/team/wt-manager.mjs")).createWtManager();
       await wt.createTab({

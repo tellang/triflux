@@ -137,10 +137,6 @@ export function validateCommandForOs(command, os) {
     if (/2>\/dev\/null/.test(command)) {
       violations.push("2>/dev/null → PowerShell에서는 2>$null 사용");
     }
-    if (/\$\(/.test(command) && !/\$\(/.test(command) === false) {
-      // $() bash substitution vs PowerShell $() — 문맥 의존
-      // PowerShell도 $()를 사용하므로 여기선 경고만
-    }
     if (/\s&&\s/.test(command)) {
       violations.push("&& → PowerShell에서는 ; 또는 -and 사용");
     }

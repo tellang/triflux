@@ -123,8 +123,6 @@ docs/research/*competitor*
 
 # local-only cleanup bypass flag (Issue #89 대안, local workflow)
 .claude/cleanup-bypass
-.claude/hub-watchdog.pid
-.claude/hub-watchdog.log
 
 # ad-hoc swarm/fix scratch scripts
 .tmp-*.mjs

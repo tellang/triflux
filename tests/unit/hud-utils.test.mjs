@@ -9,9 +9,6 @@ import {
   decodeJwtEmail,
   formatResetRemaining,
   formatResetRemainingDayHour,
-  getContextPercent,
-  isResetPast,
-  padAnsiLeft,
   padAnsiRight,
   readJsonMigrate,
   stripAnsi,
@@ -57,12 +54,9 @@ describe("hud/utils.mjs", () => {
   it("ANSI padding helpers use visible width instead of escape length", () => {
     const colored = dim("ok");
 
-    const left = padAnsiLeft(colored, 5);
     const right = padAnsiRight(colored, 5);
 
-    assert.equal(stripAnsi(left).length, 5);
     assert.equal(stripAnsi(right).length, 5);
-    assert.equal(stripAnsi(left), "   ok");
     assert.equal(stripAnsi(right), "ok   ");
   });
 
@@ -97,32 +91,6 @@ describe("hud/utils.mjs", () => {
     assert.equal(clampPercent("oops"), 0);
   });
 
-  it("getContextPercent prefers native usage percentage and otherwise calculates from token usage", () => {
-    assert.equal(
-      getContextPercent({ context_window: { used_percentage: 87.4 } }),
-      87,
-    );
-
-    assert.equal(
-      getContextPercent({
-        context_window: {
-          current_usage: {
-            input_tokens: 250,
-            cache_creation_input_tokens: 100,
-            cache_read_input_tokens: 150,
-          },
-          context_window_size: 1000,
-        },
-      }),
-      50,
-    );
-
-    assert.equal(
-      getContextPercent({ context_window: { context_window_size: 0 } }),
-      0,
-    );
-  });
-
   it("reset helpers share the same future-target behavior for past timestamps", () => {
     const nowMs = Date.parse("2026-01-01T00:00:00.000Z");
 
@@ -135,8 +103,6 @@ describe("hud/utils.mjs", () => {
         formatResetRemainingDayHour("2026-01-03T05:00:00.000Z", 0),
         "02d05h",
       );
-      assert.equal(isResetPast("2025-12-31T23:59:00.000Z"), true);
-      assert.equal(isResetPast("2026-01-01T00:01:00.000Z"), false);
     });
   });
 

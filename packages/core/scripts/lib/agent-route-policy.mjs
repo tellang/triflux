@@ -316,13 +316,6 @@ export function resolveNestedCodexAgentProfile(
   return effort.toLowerCase() === "ultra" ? "gpt6_astra_max" : candidate;
 }
 
-export function describeCodexAgentPolicy() {
-  return {
-    defaultAgent: DEFAULT_CODEX_AGENT,
-    agents: Object.keys(CODEX_AGENT_POLICY),
-  };
-}
-
 function parseCliArgs(argv) {
   const args = [...argv];
   let format = "json";

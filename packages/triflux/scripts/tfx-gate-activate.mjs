@@ -9,12 +9,11 @@
  * 자동 만료: 30분
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const STATE_FILE = join(tmpdir(), "tfx-multi-state.json");
-const EXPIRE_MS = 30 * 60 * 1000; // 30분
 
 async function main() {
   let raw = "";
@@ -78,18 +77,6 @@ async function main() {
       }),
     );
     process.exit(0);
-  }
-
-  // /tfx-multi 외 스킬 호출 시: 기존 상태 만료 체크만
-  if (existsSync(STATE_FILE)) {
-    try {
-      const state = JSON.parse(readFileSync(STATE_FILE, "utf8"));
-      if (Date.now() - state.activatedAt > EXPIRE_MS) {
-        // 만료 → 다음 활성화 때 덮어쓴다
-      }
-    } catch {
-      /* ignore */
-    }
   }
 
   process.exit(0);

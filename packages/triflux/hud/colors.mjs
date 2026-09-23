@@ -48,7 +48,6 @@ export function colorByPercent(value, text) {
 }
 
 export const GAUGE_WIDTH = 5;
-export const GAUGE_BLOCKS = ["░", "▒", "▓", "█"]; // 밝기 0~3
 
 export function coloredBar(percent, width = GAUGE_WIDTH, baseColor = null) {
   const safePercent = Math.min(100, Math.max(0, percent));

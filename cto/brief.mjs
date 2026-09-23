@@ -89,5 +89,3 @@ export function renderBrief(current) {
 
   return enforceCap(`${lines.join("\n")}\n`);
 }
-
-export { BRIEF_VERSION, MAX_BRIEF_BYTES };

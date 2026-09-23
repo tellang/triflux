@@ -1,7 +1,7 @@
 // tfx-route.mjs Phase 0 PoC — 단위 테스트.
 //
 // 검증 범위:
-//   1. 4개 CLI 어댑터의 {id, cliType, plan, describe} 계약
+//   1. 3개 CLI 어댑터의 {id, cliType, plan, describe} 계약
 //   2. parseArgs — positional + flag 처리, 거부 케이스
 //   3. selectAdapter — CLI 타입별 매핑
 //   4. buildRoutePlan — agent-map.json 의 모든 agent 가 분기에 도달
@@ -19,7 +19,6 @@ const AGENT_MAP_PATH = join(REPO_ROOT, "hub/team/agent-map.json");
 
 const route = await import("../tfx-route.mjs");
 const codexAdapter = await import("../lib/cli-codex.mjs");
-const geminiAdapter = await import("../lib/cli-gemini.mjs");
 const claudeAdapter = await import("../lib/cli-claude.mjs");
 const agyAdapter = await import("../lib/cli-agy.mjs");
 
@@ -28,7 +27,6 @@ const AGENT_MAP = JSON.parse(readFileSync(AGENT_MAP_PATH, "utf8"));
 describe("tfx-route.mjs Phase 0 PoC — adapter contract", () => {
   const adapters = [
     ["codex", codexAdapter, "codex", "codex"],
-    ["gemini", geminiAdapter, "gemini", "antigravity"],
     ["claude", claudeAdapter, "claude", "claude-native"],
     ["agy", agyAdapter, "agy", "antigravity"],
   ];
@@ -340,37 +338,6 @@ describe("cli-codex.mjs — 핵심 매핑", () => {
 
   test("agent 누락 시 throw", () => {
     assert.throws(() => codexAdapter.plan({}), /agent required/);
-  });
-});
-
-describe("cli-gemini.mjs — Antigravity compatibility alias", () => {
-  test("designer → agy_v1 / 900s / bg / stdin pipe", () => {
-    const p = geminiAdapter.plan({
-      agent: "designer",
-      prompt: "x",
-      mcpProfile: "auto",
-    });
-    assert.equal(p.effort, "agy_v1");
-    assert.equal(p.timeoutMs, 900_000);
-    assert.equal(p.runMode, "bg");
-    assert.equal(p.mcpProfile, "docs");
-    assert.equal(p.stdinMode, "argv");
-    assert.equal(p.args[0], "--dangerously-skip-permissions");
-    assert.equal(p.args[1], "--model");
-    assert.deepEqual(p.args.slice(3), ["--print", "x"]);
-  });
-
-  test("writer → agy_v1 argv prompt", () => {
-    const p = geminiAdapter.plan({
-      agent: "writer",
-      prompt: "x",
-      mcpProfile: "auto",
-    });
-    assert.equal(p.effort, "agy_v1");
-    assert.equal(p.stdinMode, "argv");
-    assert.equal(p.args[0], "--dangerously-skip-permissions");
-    assert.equal(p.args[1], "--model");
-    assert.deepEqual(p.args.slice(3), ["--print", "x"]);
   });
 });
 

@@ -37,7 +37,6 @@ const DEFAULT_CONTEXT_BYTES = 32 * 1024;
 const DIRECT_PROGRESS_START = 5;
 const DIRECT_PROGRESS_RUNNING = 60;
 const DIRECT_PROGRESS_DONE = 100;
-const SEARCH_ENGINE_CACHE_PATH = [".omc", "state", "search-engines.json"];
 
 const REVIEW_INSTRUCTION_BY_AGENT = Object.freeze({
   "code-reviewer":
@@ -139,24 +138,6 @@ function joinInstructions(...values) {
     .filter((value) => typeof value === "string" && value.trim())
     .join("\n")
     .trim();
-}
-
-function _loadAvailableServersFromSearchEngineCache(cwd = process.cwd()) {
-  const cacheFile = resolve(cwd, ...SEARCH_ENGINE_CACHE_PATH);
-  if (!existsSync(cacheFile)) return null;
-
-  try {
-    const parsed = JSON.parse(readFileSync(cacheFile, "utf8"));
-    if (!Array.isArray(parsed?.engines)) return null;
-    return parsed.engines
-      .filter((engine) => engine?.status === "available")
-      .map((engine) =>
-        typeof engine?.name === "string" ? engine.name.trim() : "",
-      )
-      .filter(Boolean);
-  } catch {
-    return null;
-  }
 }
 
 function parseRouteType(stderr = "") {

@@ -76,7 +76,7 @@ function resolveCommand(cmd) {
 }
 
 // ── 매처 매칭 ───────────────────────────────────────────────
-function matchesMatcher(hookMatcher, toolName, eventInput) {
+function matchesMatcher(hookMatcher, toolName) {
   if (!hookMatcher || hookMatcher === "*") return true;
   if (!toolName) return true;
 
