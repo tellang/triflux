@@ -197,7 +197,7 @@ hub/
 │   └── request-logger.mjs
 ├── quality/              # 품질 검사
 │   └── deslop.mjs
-└── public/               # 정적 자산 (대시보드 HTML, 트레이 아이콘)
+└── public/               # 정적 자산 (대시보드 HTML)
 ```
 
 ## 상태
