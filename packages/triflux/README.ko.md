@@ -11,17 +11,16 @@
 <h3 align="center">Claude Code, Codex, Antigravity를 위한 CLI-first 멀티 모델 오케스트레이션</h3>
 
 <p align="center">
-  작업 라우팅, 에이전트 조율, 로컬/원격 팀 실행, Codex/Antigravity/Claude 실행 경로를<br>
-  감사 가능한 경로로 묶는 단일 진입점입니다.
+  작업 라우팅, 에이전트 조율, 로컬/원격 팀 실행을<br>
+  Codex, Antigravity, Claude에 걸쳐 묶는 단일 진입점입니다.
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/dm/triflux?style=flat-square&color=F5C242" alt="npm downloads"></a>
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
-  <img src="https://img.shields.io/badge/skill_files-34-F5C242?style=flat-square" alt="34 skill files">
-  <sub>deprecated 호환 alias 11개는 전면 API가 아닙니다</sub>
-  <img src="https://img.shields.io/badge/node-%3E%3D18-374151?style=flat-square" alt="Node >= 18">
+  <img src="https://img.shields.io/badge/skill_files-25-F5C242?style=flat-square" alt="25 skill files">
+  <img src="https://img.shields.io/badge/node-%3E%3D20.11-374151?style=flat-square" alt="Node >= 20.11">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
 
@@ -43,15 +42,13 @@
 ## triflux란?
 
 triflux는 **Claude Code plugin + npm CLI**입니다. Claude, Codex, Antigravity를
-오가며 AI 코딩 작업을 라우팅합니다. 임의 셸 명령이나 오래된 skill alias가
-제어 표면이 되지 않도록 현재 진입점을 좁혔습니다.
+오가며 AI 코딩 작업을 라우팅합니다. 임의 셸 명령이 컨트롤 플레인이 되지 않도록
+진입점을 좁혔습니다.
 
-현재 설계는 예전 README보다 단순합니다.
+진입점은 두 개입니다.
 
 - **`/tfx-auto`가 Claude Code skill의 표준 front door입니다.** quick/deep/consensus/parallel/retry 동작은 플래그로 표현합니다.
 - **`tfx`는 셸 CLI입니다.** setup, doctor, Hub, MCP, team/swarm, handoff 같은 운영 작업을 담당합니다.
-- **호환 alias는 남아 있지만 전면 API가 아닙니다.** 마이그레이션 표는 [`docs/legacy-skill-aliases.md`](https://github.com/tellang/triflux/blob/main/docs/legacy-skill-aliases.md)로 분리했습니다.
-- **호스트 로컬 Codex harness는 패키지 범위 밖입니다.** 예를 들어 `~/.codex/skills/tfx-harness`는 특정 머신에서 워크플로우를 추천할 수 있지만, 이 저장소/npm/Claude plugin에 포함되지 않습니다.
 
 ---
 
@@ -63,7 +60,7 @@ Claude Code plugin:
 
 ```text
 /plugin marketplace add tellang/triflux
-/plugin install triflux@tellang
+/plugin install triflux@triflux
 ```
 
 npm:
@@ -89,7 +86,6 @@ Claude Code slash skill:
 /tfx-auto "이 변경 리뷰해줘" --mode consensus
 /tfx-auto "인증 플로우 구현하고 테스트까지" --mode deep --retry ralph
 /tfx-auto "이 PRD를 격리 shard로 나눠 실행" --parallel swarm --mode consensus --isolation worktree
-/tfx-remote spawn ryzen5-7600 "보안 리뷰 실행"
 /tfx-doctor
 ```
 
@@ -135,7 +131,7 @@ tfx codex-team "auth 리팩터링 + 테스트 추가"
 | `tfx codex-team` | Codex lead team mode용 편의 wrapper. |
 | `tfx notion-read` | MCP client로 Notion 페이지를 Markdown으로 변환. |
 | `tfx why` | 특정 경로의 마지막 커밋 intent trailer 조회. |
-| `tfx update` | 최신 stable/dev 패키지로 업데이트. |
+| `tfx update` | 설치 방식(plugin, npm, git)을 감지해 업데이트. |
 | `tfx monitor` | 터미널 TUI monitor 실행. |
 | `tfx version` | 버전 정보 출력. |
 | `tfx-profile` | Codex profile 관리용 편의 binary. |
@@ -144,18 +140,20 @@ tfx codex-team "auth 리팩터링 + 테스트 추가"
 
 ### Claude Code skill
 
-패키지에는 **34개 skill 파일**이 들어 있습니다. 크게 나누면 다음과 같습니다.
+패키지에는 **25개 스킬 파일**이 들어 있습니다. 종류는 다음과 같습니다.
 
-- **표준 진입점**: `tfx-auto`, `tfx-remote`, `tfx-doctor`, `tfx-setup`,
-  `tfx-profile`, `tfx-hub`, `tfx-hooks`, `tfx-ship`, `tfx-wt`.
+- **표준 진입점**: `tfx-auto`, `tfx-doctor`, `tfx-setup`,
+  `tfx-profile`, `tfx-hub`, `tfx-hooks`, `tfx-ship`, `tfx-wt`(Windows 전용).
 - **작업 helper**: `tfx-plan`, `tfx-review`, `tfx-qa`, `tfx-research`,
   `tfx-analysis`, `tfx-find`, `tfx-index`, `tfx-interview`, `tfx-prune`,
-  `tfx-forge`, `merge-worktree`, `star-prompt`.
-- **deprecated 호환 alias**: 11개 legacy 이름은 전환용 shim입니다. 새 문서와 새 프롬프트에서는 위 표준 진입점을 우선 사용하세요.
+  `tfx-forge`, `tfx-harness`, `tfx-live`, `tfx-goal-clarify`,
+  `tfx-ralph`(`--retry ralph` 별칭), `merge-worktree`, `star-prompt`.
+- **미완성**: `tfx-remote`는 setup과 spawn 절차를 삭제된 `tfx-remote-setup`,
+  `tfx-remote-spawn` 스킬에 맡기고 있어 아직 실행할 절차가 없습니다.
 
 ### 표준 플래그 맵
 
-대부분의 옛 skill 이름은 `tfx-auto` 플래그로 표현할 수 있습니다.
+자주 쓰는 의도는 `tfx-auto` 플래그로 표현합니다.
 
 | 의도 | 표준 형태 |
 | --- | --- |
@@ -176,12 +174,8 @@ triflux를 디버그하거나 확장할 때는 아래 경계를 분리해서 봐
 | --- | --- | --- |
 | 공개 CLI/runtime | `bin/`, `scripts/`, `hub/`, `hooks/`, `skills/` | 포함 |
 | publish mirror | `packages/triflux/` | 포함. root runtime 파일과 일치해야 함 |
-| Claude plugin metadata | `.claude-plugin/` | 포함. npm package 내용을 가리킴 |
-| Codex-local harness 실험 | `~/.codex/skills/*` | 미포함 |
-| legacy alias | `skills/<alias>/` + `docs/legacy-skill-aliases.md` | 포함되지만 deprecated 상태 |
-
-로컬 Codex harness가 workflow를 추천해도 이는 해당 머신의 routing 조언일 뿐입니다.
-패키지의 계약은 위의 CLI, Claude skill, hook, Hub 표면입니다.
+| Claude plugin metadata | `.claude-plugin/` | 저장소에만 있음. `/plugin marketplace add`가 읽고 plugin은 npm 패키지에서 설치 |
+| Codex 스킬 어댑터 | `adapters/codex/skills/tfx-harness` | 포함. `tfx setup`이 `~/.codex/skills/tfx-harness`로 복사 |
 
 ---
 
@@ -229,22 +223,10 @@ tfx swarm run docs/prd/my-feature.md
 swarm은 격리 worktree와 file lease를 사용합니다. 큰 PRD는 실행 전에 preflight로 host,
 CLI profile, lease 충돌을 먼저 확인하세요.
 
-### 원격 세션
-
-```text
-/tfx-remote setup
-/tfx-remote spawn ryzen5-7600 "보안 리뷰 실행"
-/tfx-remote list
-/tfx-remote attach <session>
-/tfx-remote send <session> "수정 계속 진행"
-```
-
-`tfx-remote`는 setup/spawn/list/attach/send/resume/probe/kill 흐름을 하나로 묶은 Claude skill 표면입니다.
-
 ### 컨텍스트 저장/이어받기
 
 ```bash
-tfx handoff --target remote --decision "README는 canonical 중심, alias는 docs로 분리" --output .omx/handoff.md
+tfx handoff --target remote --decision "auth 테스트 통과 후 배포" --output .omx/handoff.md
 ```
 
 세션을 끝내거나 다른 host/agent가 이어받아야 할 때 사용합니다.
@@ -253,21 +235,17 @@ tfx handoff --target remote --decision "README는 canonical 중심, alias는 doc
 
 ## 아키텍처
 
-<p align="center">
-  <img src="docs/assets/architecture.svg" alt="triflux architecture" width="680">
-</p>
+> 상세 구조, 패키지 레이아웃, 실행 경로는 [ARCHITECTURE.md](ARCHITECTURE.md)에, 문서 인덱스는 [docs/README.md](docs/README.md)에 있습니다.
 
 ```mermaid
 graph TD
     User([User / Claude Code / shell]) --> Skills[Claude skills]
     User --> CLI[tfx CLI]
     Skills --> Auto["/tfx-auto"]
-    Skills --> Remote["/tfx-remote"]
     CLI --> Hub[triflux Hub]
     CLI --> Team[tfx multi / swarm]
-    Auto --> Route[tfx-route.sh + guards]
+    Auto --> Route[tfx-route.sh]
     Team --> Hub
-    Remote --> Hub
     Route --> Codex[Codex CLI]
     Route --> Antigravity[Antigravity agy CLI]
     Route --> Claude[Claude Code]
@@ -303,7 +281,7 @@ macOS에서 test나 Hub 시작이 `node` localhost port를 열면 방화벽 팝�
 triflux는 위험한 실행을 관리된 경로 뒤에 둡니다.
 
 - CLI 호출은 `tfx-route.sh`, Hub worker, `tfx` CLI를 통과해야 합니다.
-- 직접 `codex exec` / `gemini -y` 경로는 설치된 workflow에서 guard됩니다.
+- `codex exec`나 `agy`를 직접 호출하지 않는 것은 문서로 정한 규칙이고, 막는 훅은 없습니다.
 - psmux/Windows Terminal 흐름은 임의 `wt.exe`/`psmux send-keys`가 아니라 관리 API와 규칙을 사용합니다.
 
 ### Profile과 모델 라우팅
@@ -341,7 +319,7 @@ Codex/Antigravity/Claude MCP 파일을 직접 수정하지 마세요.
 
 ### State snapshot
 
-Hub 시작 시 `~/.codex/`, `~/.gemini/` 일부 상태를 ignored `references/*-snapshots/`
+Hub 시작 시 `~/.codex/`와 Antigravity/Gemini용 `~/.gemini/` 일부 상태를 ignored `references/*-snapshots/`
 폴더에 best-effort daily snapshot으로 저장할 수 있습니다. 수동 helper:
 
 ```bash
@@ -371,12 +349,12 @@ npm run lint
 
 | 플랫폼 | Multiplexer | 참고 |
 | --- | --- | --- |
-| macOS | tmux | 지원. 일부 흐름은 `gtimeout` 같은 timeout provider 필요. |
+| macOS | tmux | 지원. 양수 `TFX_HARD_CEILING_SEC`에는 `gtimeout` 필요. `brew install coreutils`로 설치하고, 없으면 상한만 꺼짐. |
 | Linux | tmux | 지원. |
 | Windows | psmux + Windows Terminal | 관리된 psmux/WT 경로로 지원. psmux 기본 shell은 PowerShell. |
 
-agent/launcher가 따라야 하는 더 엄격한 Windows/psmux 규칙은 `AGENTS.md`와
-`.claude/rules/tfx-psmux.md`를 보세요.
+agent/launcher가 따라야 하는 더 엄격한 Windows/psmux 규칙은
+`.claude/rules/tfx-psmux.md`에 있습니다.
 
 ---
 
@@ -387,7 +365,6 @@ agent/launcher가 따라야 하는 더 엄격한 Windows/psmux 규칙은 `AGENTS
 | Hub token auth | 설정된 경우 Hub API에 로컬 bearer token 적용. |
 | Localhost binding | Hub 기본 bind는 `127.0.0.1`. |
 | MCP registry guard | 지원하지 않거나 stale한 MCP record를 관리형 HTTP entry로 교체. |
-| Headless guard | 비관리 Codex/Antigravity headless 실행 경로와 deprecated Gemini route 차단. |
 | Safety guard | psmux/SSH/WT 셸 민감 흐름 sanitizing. |
 | Consensus reporting | deep/consensus workflow는 degraded/disputed 결과를 명시해야 함. |
 
@@ -405,7 +382,6 @@ npm run release:check-mirror
 
 기여자 메모:
 
-- deprecated alias 세부사항은 main README에 다시 늘어놓지 말고 [`docs/legacy-skill-aliases.md`](https://github.com/tellang/triflux/blob/main/docs/legacy-skill-aliases.md)를 갱신하세요.
 - Codex-local 실험은 패키지 경계를 의도적으로 바꾸는 경우가 아니라면 `~/.codex/skills` 아래에 둡니다.
 - docs-only 변경은 보통 `npm run lint`, release sync check 같은 targeted check로 충분합니다. full integration test는 Hub 서버와 localhost listener를 띄울 수 있습니다.
 

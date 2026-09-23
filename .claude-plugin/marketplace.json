@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "triflux",
-      "description": "Tri-CLI orchestrator for Claude Code. Routes tasks across Claude + Codex + Antigravity with consensus intelligence, natural language routing, 34 skills, and cross-model review.",
+      "description": "Tri-CLI orchestrator for Claude Code. Routes tasks across Claude + Codex + Antigravity with consensus intelligence, natural language routing, 25 skills, and cross-model review.",
       "version": "10.45.0",
       "author": {
         "name": "tellang"

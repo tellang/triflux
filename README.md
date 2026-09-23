@@ -11,17 +11,16 @@
 <h3 align="center">CLI-first multi-model orchestration for Claude Code, Codex, and Antigravity</h3>
 
 <p align="center">
-  One front door for routing work, coordinating agents, running local/remote teams,<br>
-  and keeping Codex/Antigravity/Claude execution behind auditable guards.
+  One front door for routing work, coordinating agents, and running local/remote teams<br>
+  across Codex, Antigravity, and Claude.
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/dm/triflux?style=flat-square&color=F5C242" alt="npm downloads"></a>
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
-  <img src="https://img.shields.io/badge/skill_files-34-F5C242?style=flat-square" alt="34 skill files">
-  <sub>11 compatibility aliases are deprecated</sub>
-  <img src="https://img.shields.io/badge/node-%3E%3D18-374151?style=flat-square" alt="Node >= 18">
+  <img src="https://img.shields.io/badge/skill_files-25-F5C242?style=flat-square" alt="25 skill files">
+  <img src="https://img.shields.io/badge/node-%3E%3D20.11-374151?style=flat-square" alt="Node >= 20.11">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
 
@@ -43,21 +42,15 @@
 ## What is triflux?
 
 triflux is a **Claude Code plugin + npm CLI** for routing AI coding work across
-Claude, Codex, and Antigravity without letting ad-hoc shell commands or stale skill
-aliases become the control plane.
+Claude, Codex, and Antigravity without letting ad-hoc shell commands become the
+control plane.
 
-The current design is intentionally simpler than the old README implied:
+There are two front doors:
 
 - **`/tfx-auto` is the canonical Claude Code skill front door.** Use flags to
   express quick/deep/consensus/parallel/retry behavior.
 - **`tfx` is the shell CLI.** Use it for setup, diagnostics, hub lifecycle,
   MCP sync, team/swarm orchestration, and handoffs.
-- **Compatibility aliases still exist, but they are not the primary API.** They
-  are documented in [`docs/legacy-skill-aliases.md`](https://github.com/tellang/triflux/blob/main/docs/legacy-skill-aliases.md)
-  so the main README stays focused on the supported path.
-- **Host-local Codex harnesses are out of package scope.** For example, a local
-  `~/.codex/skills/tfx-harness` can recommend workflows on one machine, but it
-  is not shipped in this repository, npm package, or Claude plugin.
 
 ---
 
@@ -69,7 +62,7 @@ Claude Code plugin install:
 
 ```text
 /plugin marketplace add tellang/triflux
-/plugin install triflux@tellang
+/plugin install triflux@triflux
 ```
 
 npm install:
@@ -95,7 +88,6 @@ Claude Code slash skills:
 /tfx-auto "review this change" --mode consensus
 /tfx-auto "implement auth flow with tests" --mode deep --retry ralph
 /tfx-auto "split this PRD across isolated shards" --parallel swarm --mode consensus --isolation worktree
-/tfx-remote spawn ryzen5-7600 "run a security review"
 /tfx-doctor
 ```
 
@@ -141,7 +133,7 @@ The `tfx` CLI currently exposes these primary commands:
 | `tfx codex-team` | Codex-led team mode convenience wrapper. |
 | `tfx notion-read` | Convert Notion pages to Markdown through configured MCP clients. |
 | `tfx why` | Read intent trailers from the last commit touching a path. |
-| `tfx update` | Update to the latest stable or dev package. |
+| `tfx update` | Detect the install method (plugin, npm, or git) and update. |
 | `tfx monitor` | Open the terminal TUI monitor. |
 | `tfx version` | Print version information. |
 | `tfx-profile` | Convenience binary for interactive Codex profile management. |
@@ -150,20 +142,21 @@ Run `tfx schema <command>` for the exact argument contract.
 
 ### Claude Code skills
 
-The package ships **34 skill files**. The important split is:
+The package ships **25 skill files**. The important split is:
 
-- **Canonical entrypoints**: `tfx-auto`, `tfx-remote`, `tfx-doctor`,
-  `tfx-setup`, `tfx-profile`, `tfx-hub`, `tfx-hooks`, `tfx-ship`, `tfx-wt`.
+- **Canonical entrypoints**: `tfx-auto`, `tfx-doctor`, `tfx-setup`,
+  `tfx-profile`, `tfx-hub`, `tfx-hooks`, `tfx-ship`, `tfx-wt` (Windows only).
 - **Task helpers**: `tfx-plan`, `tfx-review`, `tfx-qa`, `tfx-research`,
   `tfx-analysis`, `tfx-find`, `tfx-index`, `tfx-interview`, `tfx-prune`,
-  `tfx-forge`, `merge-worktree`, `star-prompt`.
-- **Deprecated compatibility aliases**: 11 legacy names remain only as transition
-  shims. Prefer the canonical commands above and see the alias table only when
-  migrating old prompts.
+  `tfx-forge`, `tfx-harness`, `tfx-live`, `tfx-goal-clarify`,
+  `tfx-ralph` (alias for `--retry ralph`), `merge-worktree`, `star-prompt`.
+- **Incomplete**: `tfx-remote` still hands its setup and spawn steps to the
+  removed `tfx-remote-setup` and `tfx-remote-spawn` skills, so it has no
+  working procedure yet.
 
 ### Canonical flag map
 
-Most old skill names now map to explicit `tfx-auto` flags:
+Common intents map to explicit `tfx-auto` flags:
 
 | Intent | Canonical form |
 | --- | --- |
@@ -184,13 +177,8 @@ Keep these surfaces separate when debugging or extending triflux:
 | --- | --- | --- |
 | Public CLI/runtime | `bin/`, `scripts/`, `hub/`, `hooks/`, `skills/` | Yes |
 | Published mirror | `packages/triflux/` | Yes; must match root runtime files |
-| Claude plugin metadata | `.claude-plugin/` | Yes; points at npm package contents |
-| Codex-local harness experiments | `~/.codex/skills/*` | No |
-| Legacy aliases | `skills/<alias>/` + `docs/legacy-skill-aliases.md` | Yes, but deprecated |
-
-If a local Codex harness recommends a workflow, treat that as host-local routing
-advice. The package contract is still the CLI, Claude skill, hook, and Hub surface
-above.
+| Claude plugin metadata | `.claude-plugin/` | Repository only; `/plugin marketplace add` reads it and installs the plugin from the npm package |
+| Codex skill adapter | `adapters/codex/skills/tfx-harness` | Yes; `tfx setup` copies it to `~/.codex/skills/tfx-harness` |
 
 ---
 
@@ -239,22 +227,10 @@ tfx swarm run docs/prd/my-feature.md
 Swarm work uses isolated worktrees and file leases. Use preflight before running a
 large PRD so missing hosts, CLI profiles, and lease conflicts are caught first.
 
-### Remote sessions
-
-```text
-/tfx-remote setup
-/tfx-remote spawn ryzen5-7600 "run security review"
-/tfx-remote list
-/tfx-remote attach <session>
-/tfx-remote send <session> "continue with fixes"
-```
-
-`tfx-remote` is the consolidated Claude skill surface for setup/spawn/list/attach/send/resume/probe/kill flows.
-
 ### Save or restore context
 
 ```bash
-tfx handoff --target remote --decision "Keep README canonical; move aliases to docs" --output .omx/handoff.md
+tfx handoff --target remote --decision "Ship after the auth tests pass" --output .omx/handoff.md
 ```
 
 Use handoffs when a session is ending or when another host/agent needs the current
@@ -264,23 +240,17 @@ state without replaying the entire conversation.
 
 ## Architecture
 
-> 상세 구조·패키지 레이아웃·실행 경로는 [ARCHITECTURE.md](ARCHITECTURE.md), 문서 전체 지도는 [docs/README.md](docs/README.md) 참조.
-
-<p align="center">
-  <img src="docs/assets/architecture.svg" alt="triflux architecture" width="680">
-</p>
+> See [ARCHITECTURE.md](ARCHITECTURE.md) for the detailed structure, package layout, and execution paths, and [docs/README.md](docs/README.md) for the documentation index.
 
 ```mermaid
 graph TD
     User([User / Claude Code / shell]) --> Skills[Claude skills]
     User --> CLI[tfx CLI]
     Skills --> Auto["/tfx-auto"]
-    Skills --> Remote["/tfx-remote"]
     CLI --> Hub[triflux Hub]
     CLI --> Team[tfx multi / swarm]
-    Auto --> Route[tfx-route.sh + guards]
+    Auto --> Route[tfx-route.sh]
     Team --> Hub
-    Remote --> Hub
     Route --> Codex[Codex CLI]
     Route --> Antigravity[Antigravity agy CLI]
     Route --> Claude[Claude Code]
@@ -320,7 +290,7 @@ team, or MCP workflows allow localhost access if your environment requires it.
 triflux keeps risky execution behind managed routes:
 
 - CLI calls should flow through `tfx-route.sh`, Hub workers, or the `tfx` CLI.
-- Direct `codex exec`, unmanaged `agy`, and deprecated `gemini` routes are guarded in the installed workflow.
+- Calling `codex exec` or `agy` directly is disallowed by documented rule; no hook enforces it.
 - psmux/Windows Terminal flows must use the managed API and documented rules, not
   ad-hoc `wt.exe` or `psmux send-keys` snippets.
 
@@ -389,7 +359,7 @@ folders. Keep it synchronized when touching mirrored runtime files.
 
 | Platform | Multiplexer | Notes |
 | --- | --- | --- |
-| macOS | tmux | Supported. Requires a timeout provider such as `gtimeout` for some flows. |
+| macOS | tmux | Supported. A positive `TFX_HARD_CEILING_SEC` needs `gtimeout` from `brew install coreutils`; without it the ceiling is disabled. |
 | Linux | tmux | Supported. |
 | Windows | psmux + Windows Terminal | Supported through managed psmux/WT paths. PowerShell is the default psmux shell. |
 
@@ -405,7 +375,6 @@ rules used by agents and launch scripts.
 | Hub token auth | Local bearer token for Hub APIs where configured. |
 | Localhost binding | Hub defaults to `127.0.0.1`. |
 | MCP registry guard | Replaces unsupported or stale MCP records with managed HTTP entries. |
-| Headless guard | Blocks unmanaged Codex/Antigravity headless execution paths and deprecated Gemini routes. |
 | Safety guard | Sanitizes shell-sensitive psmux/SSH/WT flows. |
 | Consensus reporting | Deep/consensus workflows should report degraded or disputed findings explicitly. |
 
@@ -423,8 +392,6 @@ npm run release:check-mirror
 
 Notes for contributors:
 
-- Keep deprecated alias details out of the main README; update
-  [`docs/legacy-skill-aliases.md`](https://github.com/tellang/triflux/blob/main/docs/legacy-skill-aliases.md) instead.
 - Keep Codex-local experiments under `~/.codex/skills`, not in this package,
   unless the package boundary is intentionally changed.
 - For docs-only changes, targeted checks such as `npm run lint` and release sync
