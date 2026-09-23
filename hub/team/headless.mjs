@@ -10,7 +10,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -78,7 +77,6 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 /** CLI별 브랜드 — 이모지 + 공식 색상 (HUD와 통일) */
 const CLI_BRAND = {
   codex: { emoji: "\u{26AA}", label: "Codex", ansi: "\x1b[97m" }, // ⚪ bright white (codexWhite)
-  gemini: { emoji: "\u{1F535}", label: "Gemini", ansi: "\x1b[38;5;39m" }, // 🔵 geminiBlue
   antigravity: {
     emoji: "\u{1F535}",
     label: "Antigravity",
@@ -90,8 +88,6 @@ const CLI_BRAND = {
     ansi: "\x1b[38;2;232;112;64m",
   }, // 🟠 claudeOrange
 };
-const _ANSI_RESET = "\x1b[0m";
-const _ANSI_DIM = "\x1b[2m";
 
 /** 에이전트 역할명 → CLI 타입 매핑 (단일 소스: agent-map.json) */
 const _require = createRequire(import.meta.url);
@@ -325,27 +321,6 @@ const MCP_PROFILE_HINTS = {
  * @param {string} [opts.contextFile] — 컨텍스트 파일 경로 (최대 32KB, UTF-8 안전 절단)
  * @returns {string} PowerShell 명령
  */
-// ── Dashboard attach args for WT ────────────────────────────────
-
-export function buildDashboardAttachArgs(
-  sessionName,
-  layout,
-  workerCount,
-  anchor = "window",
-) {
-  const safeName = String(sessionName).replace(/[^a-zA-Z0-9_-]/g, "");
-  const base = anchor === "tab" ? ["-w", "0", "nt"] : ["-w", "new"];
-  return [
-    ...base,
-    "--session",
-    safeName,
-    "--layout",
-    layout,
-    "--workers",
-    String(workerCount),
-  ];
-}
-
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const { handoff = true, mcp, contextFile, model, cwd } = opts;
   const resolvedCli = resolveHeadlessCliType(cli);
@@ -391,7 +366,6 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
     "prompt-" + randomUUID().slice(0, 8) + ".txt",
   ).replace(/\\/g, "/");
   writeFileSync(promptFile, fullPrompt, "utf8");
-  void IS_WINDOWS; // referenced for diagnostic guard chain below
 
   // Codex와 Antigravity는 tfx-route.sh를 통해서만 headless 실행한다. 이 경로가
   // disable/fallback/fail-loud 정책의 유일한 판정원이다. 여기서 같은 정책을
@@ -532,81 +506,6 @@ export function readResult(resultFile, paneId) {
 }
 
 // ─── Stall Detection ───
-
-/** Stall detection 기본값 (immutable) */
-export const STALL_DEFAULTS = Object.freeze({
-  pollInterval: 5_000,
-  stallTimeout: 120_000,
-  interventionTimeout: resolveStallInterventionMs(),
-  hardCeiling: resolveHardCeilingMs(),
-  maxRestarts: 2,
-  maxInterventions: 1,
-});
-
-/** CLI pane stall 감지 에러 (STALL_EXHAUSTED | COMPLETION_TIMEOUT) */
-export class StallError extends Error {
-  constructor(
-    message,
-    { code = "STALL_DETECTED", category = "transient", recovery = "" } = {},
-  ) {
-    super(message);
-    this.name = "StallError";
-    this.code = code;
-    this.category = category;
-    this.recovery = recovery;
-  }
-}
-
-/**
- * Stall 모니터 팩토리 — output + resultFile mtime 하이브리드 감지
- * @param {string} paneId
- * @param {string} resultFile
- * @param {{ stallTimeout: number }} config
- * @param {{ capturePsmuxPane?: Function, statSync?: Function }} [deps]
- * @returns {{ poll: () => { snapshot: string, mtimeChanged: boolean, stalled: boolean, elapsed: number } }}
- */
-export function createStallMonitor(paneId, resultFile, config, deps = {}) {
-  const capture = deps.capturePsmuxPane || capturePsmuxPane;
-  const stat = deps.statSync || statSync;
-  let lastSnapshot = "";
-  let lastMtime = 0;
-  let lastChangeAt = Date.now();
-
-  try {
-    lastMtime = stat(resultFile).mtimeMs;
-  } catch {
-    /* not created yet */
-  }
-
-  return Object.freeze({
-    poll() {
-      const snapshot = capture(paneId, 50);
-      let currentMtime = 0;
-      try {
-        currentMtime = stat(resultFile).mtimeMs;
-      } catch {
-        /* ignore */
-      }
-
-      const outputChanged = snapshot !== lastSnapshot;
-      const mtimeChanged = currentMtime > 0 && currentMtime !== lastMtime;
-
-      if (outputChanged || mtimeChanged) {
-        lastChangeAt = Date.now();
-        lastSnapshot = snapshot;
-        if (mtimeChanged) lastMtime = currentMtime;
-      }
-
-      const elapsed = Date.now() - lastChangeAt;
-      return Object.freeze({
-        snapshot,
-        mtimeChanged,
-        stalled: elapsed >= config.stallTimeout,
-        elapsed,
-      });
-    },
-  });
-}
 
 function createHeadlessIntervention(dispatch, fallback) {
   return async (context) => {
@@ -2230,71 +2129,6 @@ export function applyTrifluxTheme(sessionName) {
     } catch {
       /* 무시 */
     }
-  }
-}
-
-/**
- * Windows Terminal에 triflux 프로필을 자동 생성/갱신한다.
- * 반투명 + 비포커스 시 더 투명 + Catppuccin 테마.
- * @returns {boolean} 성공 여부
- */
-
-/**
- * WT 기본 프로필의 폰트 크기를 읽는다.
- * @returns {number} 기본 폰트 크기 (못 읽으면 12)
- */
-function _getWtDefaultFontSize() {
-  const settingsPaths = [
-    join(
-      process.env.LOCALAPPDATA || "",
-      "Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json",
-    ),
-    join(
-      process.env.LOCALAPPDATA || "",
-      "Microsoft/Windows Terminal/settings.json",
-    ),
-  ];
-  for (const p of settingsPaths) {
-    if (!existsSync(p)) continue;
-    try {
-      const settings = JSON.parse(
-        readFileSync(p, "utf8").replace(/^\s*\/\/.*$/gm, ""),
-      );
-      // 기본 프로필 or 첫 프로필의 폰트
-      const defaultGuid = settings.defaultProfile;
-      const profiles = settings.profiles?.list || [];
-      const defaultProfile =
-        profiles.find((pr) => pr.guid === defaultGuid) || profiles[0];
-      return (
-        defaultProfile?.font?.size ||
-        settings.profiles?.defaults?.font?.size ||
-        12
-      );
-    } catch {
-      /* 다음 */
-    }
-  }
-  return 12;
-}
-
-/**
- * 파일을 원자적으로 쓴다 — 임시 파일에 먼저 기록 후 rename으로 교체.
- * 프로세스가 쓰기 도중 충돌해도 원본 파일이 손상되지 않는다.
- * @param {string} filePath — 대상 파일 경로
- * @param {string} data — 쓸 내용
- */
-function _atomicWriteSync(filePath, data) {
-  const tmpPath = `${filePath}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmpPath, data, "utf8");
-    renameSync(tmpPath, filePath);
-  } catch (err) {
-    try {
-      writeFileSync(tmpPath.replace(/\.tmp$/, ".tmp.del"), "");
-    } catch {
-      /* 무시 */
-    }
-    throw err;
   }
 }
 

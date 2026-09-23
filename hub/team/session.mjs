@@ -402,23 +402,13 @@ export function configureTeammateKeybindings(sessionName, opts = {}) {
     ? `'select-pane -t :.- \\; resize-pane -Z'`
     : `'select-pane -t :.-'`;
 
-  if (inProcess) {
-    // 단일 뷰(zoom) 상태에서 팀메이트 순환
-    tmux(
-      `bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`,
-    );
-    tmux(
-      `bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`,
-    );
-  } else {
-    // 분할 뷰에서 팀메이트 순환
-    tmux(
-      `bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`,
-    );
-    tmux(
-      `bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`,
-    );
-  }
+  // 팀메이트 순환. 단일 뷰(zoom)와 분할 뷰의 차이는 bindNext/bindPrev 에 있다.
+  tmux(
+    `bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`,
+  );
+  tmux(
+    `bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`,
+  );
 
   // 대체 키: 일부 환경에서 S-Up이 누락될 때 사용
   tmux(

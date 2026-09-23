@@ -722,5 +722,3 @@ export async function runLogRetention(opts = {}) {
     results,
   };
 }
-
-export const applyLogRetention = runLogRetention;

@@ -9,7 +9,6 @@ import {
   MODES,
   resolveCliExecutable,
   resolveStdinPromptMode,
-  selectExecutionMode,
   unwrapCmdToJsScript,
 } from "../../hub/team/execution-mode.mjs";
 
@@ -19,104 +18,6 @@ test("MODES exports stable mode names", () => {
     INTERACTIVE: "interactive",
     AUTO: "auto",
   });
-});
-
-test("selectExecutionMode: hub가 없으면 headless", () => {
-  const result = selectExecutionMode({ cli: "codex", hasHub: false });
-  assert.equal(result.mode, MODES.HEADLESS);
-  assert.match(result.reason, /requires hub/u);
-});
-
-test("selectExecutionMode: gemini alias는 Antigravity headless", () => {
-  const result = selectExecutionMode({
-    cli: "gemini",
-    hasHub: true,
-    needsInput: true,
-    estimatedDuration: 999,
-    taskType: "research",
-  });
-  assert.equal(result.mode, MODES.HEADLESS);
-  assert.match(result.reason, /antigravity CLI/u);
-});
-
-test("selectExecutionMode: implement + no input -> headless", () => {
-  const result = selectExecutionMode({
-    cli: "codex",
-    hasHub: true,
-    taskType: "implement",
-    needsInput: false,
-  });
-  assert.equal(result.mode, MODES.HEADLESS);
-  assert.match(result.reason, /implementation/u);
-});
-
-test("selectExecutionMode: review -> headless", () => {
-  const result = selectExecutionMode({
-    cli: "codex",
-    hasHub: true,
-    taskType: "review",
-    needsInput: false,
-  });
-  assert.equal(result.mode, MODES.HEADLESS);
-  assert.match(result.reason, /review and analyze/u);
-});
-
-test("selectExecutionMode: analyze -> headless", () => {
-  const result = selectExecutionMode({
-    cli: "claude",
-    hasHub: true,
-    taskType: "analyze",
-    needsInput: false,
-  });
-  assert.equal(result.mode, MODES.HEADLESS);
-  assert.match(result.reason, /review and analyze/u);
-});
-
-test("selectExecutionMode: needsInput이면 interactive", () => {
-  const result = selectExecutionMode({
-    cli: "codex",
-    hasHub: true,
-    taskType: "research",
-    needsInput: true,
-    estimatedDuration: 120,
-  });
-  assert.equal(result.mode, MODES.INTERACTIVE);
-  assert.match(result.reason, /operator input/u);
-});
-
-test("selectExecutionMode: 장시간 작업이면 interactive", () => {
-  const result = selectExecutionMode({
-    cli: "codex",
-    hasHub: true,
-    taskType: "test",
-    needsInput: false,
-    estimatedDuration: 301,
-  });
-  assert.equal(result.mode, MODES.INTERACTIVE);
-  assert.match(result.reason, /long-running/u);
-});
-
-test("selectExecutionMode: 기본값은 headless", () => {
-  const result = selectExecutionMode({
-    cli: "claude",
-    hasHub: true,
-    taskType: "research",
-    needsInput: false,
-    estimatedDuration: 300,
-  });
-  assert.equal(result.mode, MODES.HEADLESS);
-  assert.match(result.reason, /defaulting/u);
-});
-
-test("selectExecutionMode: review는 needsInput보다 우선해 headless", () => {
-  const result = selectExecutionMode({
-    cli: "codex",
-    hasHub: true,
-    taskType: "review",
-    needsInput: true,
-    estimatedDuration: 999,
-  });
-  assert.equal(result.mode, MODES.HEADLESS);
 });
 
 // buildCommandForMode 관련 4 테스트는 본 함수가 dead code 로 제거되면서 동반

@@ -262,10 +262,6 @@ export function createTerminalOpener(deps = {}) {
   return { openCommand, openSession, focusPane };
 }
 
-export function openSessionTarget(sessionName, opts = {}) {
-  return createTerminalOpener(opts._deps).openSession(sessionName, opts);
-}
-
 export function focusSessionPane(sessionName, workerNumber, opts = {}) {
   return createTerminalOpener(opts._deps).focusPane(sessionName, workerNumber);
 }

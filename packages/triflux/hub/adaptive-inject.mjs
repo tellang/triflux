@@ -220,5 +220,3 @@ export function createAdaptiveInjector(opts = {}) {
     cleanup,
   });
 }
-
-export default createAdaptiveInjector;

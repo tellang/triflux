@@ -347,4 +347,3 @@ export function createDiagnosticPipeline(options = {}) {
 }
 
 export { DEFAULT_KNOWN_ERRORS_PATH };
-export default createDiagnosticPipeline;

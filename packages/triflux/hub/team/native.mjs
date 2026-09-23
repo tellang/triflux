@@ -715,13 +715,3 @@ function detectSlop(text) {
   }
   return false;
 }
-
-/**
- * 팀 이름 생성 (타임스탬프 기반)
- * @returns {string}
- */
-export function generateTeamName() {
-  const ts = Date.now().toString(36).slice(-4);
-  const rand = Math.random().toString(36).slice(2, 6);
-  return `tfx-${ts}${rand}`;
-}

@@ -27,7 +27,3 @@ export function writePromptToTmpFile(prompt) {
   writeFileSync(file, String(prompt ?? ""), "utf8");
   return file;
 }
-
-export function getPromptTmpDir() {
-  return PROMPT_TMP_DIR;
-}

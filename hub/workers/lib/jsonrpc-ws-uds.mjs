@@ -475,5 +475,3 @@ export class JsonRpcWsUdsClient extends JsonRpcDispatchBase {
     this._closeWith("closed", wrapped);
   }
 }
-
-export default JsonRpcWsUdsClient;

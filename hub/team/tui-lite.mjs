@@ -36,14 +36,6 @@ import {
 const VERSION = await loadVersion("lite");
 const VALID_TABS = new Set(VALID_TABS_ARRAY);
 
-function wrap(text, width) {
-  return wrapTextFull(text, width);
-}
-
-function normalizeWorkerState(existing = {}, state = {}) {
-  return coreNormalizeWorkerState(existing, state);
-}
-
 function frame(lines, width, border = MOCHA.border) {
   const body = lines.length ? lines : [dim("내용 없음")];
   const rendered = box(
@@ -133,14 +125,14 @@ function buildDetail(workerName, worker, width, tab, helpVisible) {
     );
   } else if (tab === "detail") {
     detailLines.push(
-      ...wrap(
+      ...wrapTextFull(
         worker.detail || worker.summary || worker.snapshot || "",
         width - 4,
       ),
     );
   } else {
     detailLines.push(
-      ...wrap(
+      ...wrapTextFull(
         worker.summary || worker.snapshot || worker.detail || "",
         width - 4,
       ),
@@ -418,7 +410,7 @@ export function createLiteDashboard(opts = {}) {
 
   return {
     updateWorker(name, state) {
-      workers.set(name, normalizeWorkerState(workers.get(name), state));
+      workers.set(name, coreNormalizeWorkerState(workers.get(name), state));
       ensureSelection(workerNames());
     },
     updatePipeline(state) {

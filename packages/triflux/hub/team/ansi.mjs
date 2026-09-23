@@ -439,24 +439,6 @@ export function progressBar(percent, width = 20, time) {
   return `${fillText}${emptyText}`;
 }
 
-// ── 애니메이션 진행률 바 (shimmer sweep) ──
-export function animatedProgressBar(percent, width = 20, tick = 0) {
-  const ratio = Math.max(0, Math.min(100, percent)) / 100;
-  const filled = Math.round(ratio * width);
-  const empty = width - filled;
-  if (filled === 0 || percent >= 100) return progressBar(percent, width);
-  const baseClr = percent >= 50 ? MOCHA.partial : MOCHA.fail;
-  const pos = tick % (filled + 3);
-  let bar = "";
-  for (let i = 0; i < filled; i++) {
-    const d = Math.abs(i - pos);
-    if (d === 0) bar += `${ESC}[97m█`;
-    else if (d === 1) bar += `${baseClr}▓`;
-    else bar += `${baseClr}█`;
-  }
-  return `${bar}${MOCHA.border}${"░".repeat(empty)}${RESET}`;
-}
-
 // ── 상태 아이콘 ──
 export const STATUS_ICON = {
   running: `${MOCHA.partial}⏳${RESET}`,
@@ -470,9 +452,3 @@ export const CLI_ICON = {
   gemini: `${FG.gemini}🔵${RESET}`,
   claude: `${FG.claude}🟠${RESET}`,
 };
-
-// ── 로딩 도트 (braille spinner) ──
-const BRAILLE_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-export function loadingDots(tick = 0, clr = MOCHA.thinking) {
-  return `${clr}${BRAILLE_FRAMES[tick % BRAILLE_FRAMES.length]}${RESET}`;
-}

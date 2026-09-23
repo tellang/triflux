@@ -1061,7 +1061,3 @@ export class CodexAppServerWorker {
     };
   }
 }
-
-export function createCodexAppServerWorker(options = {}) {
-  return new CodexAppServerWorker(options);
-}
