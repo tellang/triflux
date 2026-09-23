@@ -95,7 +95,6 @@ export function formatTokenSummary(diff) {
   const inputStr = formatTokenCount(t.input);
   const outputStr = formatTokenCount(t.output);
   const actualStr = formatSavings(s.actualCost);
-  const _claudeStr = formatSavings(s.claudeCost);
   const savedPct =
     s.claudeCost > 0 ? Math.round((s.saved / s.claudeCost) * 100) : 0;
 

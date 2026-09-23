@@ -1,12 +1,3 @@
-const SUBCOMMANDS = [
-  "collect",
-  "status",
-  "dashboard",
-  "hygiene",
-  "steward",
-  "event",
-];
-
 function printUsage(subcommand) {
   if (subcommand) {
     console.log(`Unknown cto subcommand: ${subcommand}`);
@@ -63,4 +54,3 @@ export async function cmdCto(cmdArgs, opts = {}) {
   }
 }
 
-export { SUBCOMMANDS };

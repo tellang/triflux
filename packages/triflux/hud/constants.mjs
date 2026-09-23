@@ -79,7 +79,6 @@ export const REMOTE_ENV_CACHE_DIR = join(
   "tfx-hub",
   "remote-env",
 );
-export const REMOTE_ENV_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24시간
 
 // Claude OAuth Usage API (api.anthropic.com/api/oauth/usage)
 export const CLAUDE_CREDENTIALS_PATH = join(
@@ -125,9 +124,6 @@ export const OMC_PLUGIN_USAGE_CACHE_PATH = join(
 export const CLAUDE_USAGE_STALE_MS_SOLO = 5 * 60 * 1000; // OMC 없을 때: 5분 캐시
 export const CLAUDE_USAGE_STALE_MS_WITH_OMC = 15 * 60 * 1000; // OMC 있을 때: 15분
 export const CLAUDE_USAGE_429_BACKOFF_MS = 10 * 60 * 1000; // 429 에러 시 10분 backoff
-export const GEMINI_429_BASE_DELAY_MS = 2000;
-export const GEMINI_429_MAX_RETRIES = 3;
-export const GEMINI_429_COOLDOWN_MS = 30000;
 export const CLAUDE_USAGE_ERROR_BACKOFF_MS = 3 * 60 * 1000; // 기타 에러 시 3분 backoff
 export const CLAUDE_API_TIMEOUT_MS = 10_000;
 export const FIVE_HOUR_MS = 5 * 60 * 60 * 1000;
@@ -252,12 +248,6 @@ export const TFX_PREFLIGHT_CACHE_PATH = join(
   "tfx-preflight.json",
 );
 export const TFX_PREFLIGHT_CACHE_STALE_MS = 60 * 60 * 1000;
-export const GEMINI_RPM_TRACKER_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "gemini-rpm-tracker.json",
-);
 // 이전 .omc/ 경로 fallback (기존 환경 호환)
 export const LEGACY_GEMINI_QUOTA_CACHE = join(
   homedir(),
@@ -277,14 +267,7 @@ export const LEGACY_GEMINI_SESSION_CACHE = join(
   "state",
   "gemini_session_tokens_cache.json",
 );
-export const LEGACY_GEMINI_RPM_TRACKER = join(
-  homedir(),
-  ".omc",
-  "state",
-  "gemini_rpm_tracker.json",
-);
 
-export const GEMINI_RPM_WINDOW_MS = 60 * 1000; // 60초 슬라이딩 윈도우
 export const GEMINI_QUOTA_STALE_MS = 5 * 60 * 1000; // 5분
 export const GEMINI_SESSION_STALE_MS = 30 * 1000; // 30초
 export const GEMINI_API_TIMEOUT_MS = 3000; // 3초
@@ -303,12 +286,6 @@ export const GEMINI_SESSION_REFRESH_FLAG = "--refresh-gemini-session";
 export const HUD_CONFIG_PATH = join(homedir(), ".omc", "config", "hud.json");
 export const COMPACT_COLS_THRESHOLD = 80;
 export const MINIMAL_COLS_THRESHOLD = 60;
-
-// rows 임계값 상수 (selectTier 에서 tier 결정에 사용)
-export const ROWS_BUDGET_FULL = 40;
-export const ROWS_BUDGET_LARGE = 35;
-export const ROWS_BUDGET_MEDIUM = 28;
-export const ROWS_BUDGET_SMALL = 22;
 
 // Gemini Pro 풀 공유 그룹: 같은 remainingFraction을 공유하는 모델 ID들
 export const GEMINI_PRO_POOL = new Set([

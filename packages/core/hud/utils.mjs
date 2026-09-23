@@ -176,17 +176,6 @@ export function getCliArgValue(flag) {
   return process.argv[idx + 1] || null;
 }
 
-export function formatDuration(ms) {
-  if (!Number.isFinite(ms) || ms <= 0) return "n/a";
-  const totalMinutes = Math.floor(ms / 60000);
-  const days = Math.floor(totalMinutes / (60 * 24));
-  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-  const minutes = totalMinutes % 60;
-  if (days > 0) return hours > 0 ? `${days}d${hours}h` : `${days}d`;
-  if (hours > 0) return minutes > 0 ? `${hours}h${minutes}m` : `${hours}h`;
-  return `${minutes}m`;
-}
-
 export function formatTokenCount(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
@@ -259,13 +248,6 @@ export function formatResetRemainingDayHour(isoOrUnix, cycleMs = 0) {
   const days = Math.floor(totalMinutes / (60 * 24));
   const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
   return `${String(days).padStart(2, "0")}d${String(hours).padStart(2, "0")}h`;
-}
-
-export function calcCooldownLeftSeconds(isoDatetime) {
-  if (!isoDatetime) return 0;
-  const cooldownMs = new Date(isoDatetime).getTime() - Date.now();
-  if (!Number.isFinite(cooldownMs) || cooldownMs <= 0) return 0;
-  return Math.ceil(cooldownMs / 1000);
 }
 
 export function getProviderAccountId(provider, accountsConfig, accountsState) {
