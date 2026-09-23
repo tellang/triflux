@@ -110,7 +110,6 @@ describe("synapse stale expiry policy", () => {
 
     reg.destroy();
   });
-
 });
 
 describe("SessionStart headless registration noise", () => {
