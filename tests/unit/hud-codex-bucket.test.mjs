@@ -8,6 +8,7 @@ import {
   classifyBucket,
   expireStaleCodexBuckets,
   getCodexRateLimits,
+  hasBrokerCodexAccounts,
   normalizeBuckets,
 } from "../../hud/providers/codex.mjs";
 import { getProviderRow } from "../../hud/renderers.mjs";
@@ -66,6 +67,24 @@ function rateLimitEvent({
       info: {
         total_token_usage: totalTokenUsage,
         model_context_window: contextWindow,
+      },
+    },
+  };
+}
+
+// 2026-09-21 이후 Codex 는 5h 창 없이 주간 창 하나만 primary 로 보낸다.
+function weeklyOnlyEvent({ timestamp, usedPercent, resetsAt }) {
+  return {
+    timestamp,
+    payload: {
+      rate_limits: {
+        limit_id: "codex",
+        primary: {
+          used_percent: usedPercent,
+          window_minutes: 10080,
+          resets_at: resetsAt,
+        },
+        secondary: null,
       },
     },
   };
@@ -159,6 +178,37 @@ describe("Codex bucket normalization", () => {
 
   it("neither: both null → both null", () => {
     const rl = { primary: null, secondary: null };
+    const { primary, secondary } = normalizeBuckets(rl);
+    assert.equal(primary, null);
+    assert.equal(secondary, null);
+  });
+
+  it("unknown length: keeps a bucket without window_minutes in its reported slot", () => {
+    // app-server 스키마에서 windowDurationMins 는 선택 필드다.
+    const rl = {
+      primary: { used_percent: 40, window_minutes: null, resets_at: 1000 },
+      secondary: { used_percent: 20, resets_at: 2000 },
+    };
+    const { primary, secondary } = normalizeBuckets(rl);
+    assert.equal(primary.used_percent, 40);
+    assert.equal(secondary.used_percent, 20);
+  });
+
+  it("unknown length: a classified bucket wins the slot", () => {
+    const rl = {
+      primary: { used_percent: 40, window_minutes: null, resets_at: 1000 },
+      secondary: { used_percent: 50, window_minutes: 300, resets_at: 2000 },
+    };
+    const { primary, secondary } = normalizeBuckets(rl);
+    assert.equal(primary.used_percent, 50);
+    assert.equal(secondary, null);
+  });
+
+  it("known but unsupported length (24h) is still dropped", () => {
+    const rl = {
+      primary: { used_percent: 40, window_minutes: 1440, resets_at: 1000 },
+      secondary: null,
+    };
     const { primary, secondary } = normalizeBuckets(rl);
     assert.equal(primary, null);
     assert.equal(secondary, null);
@@ -376,7 +426,8 @@ describe("Codex multi-window selection", () => {
           usedPercent: 12,
           resetsAt: nowSec + 4 * 60 * 60,
           secondaryUsedPercent: 4,
-          secondaryResetsAt: nowSec + 7 * 24 * 60 * 60,
+          // 하루 전에 열린 창이라 무거운 창이 관측된 시각과 겹친다.
+          secondaryResetsAt: nowSec + 6 * 24 * 60 * 60,
           credits: { balance: 9 },
           totalTokenUsage: { total_tokens: 1234 },
           contextWindow: 200_000,
@@ -442,6 +493,304 @@ describe("Codex multi-window selection", () => {
 
       assert.equal(buckets.codex.primary.used_percent, 11);
       assert.equal(buckets.codex.secondary.used_percent, 22);
+      assert.equal(buckets.codex.mixedWindows, true);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("puts a weekly-only probe snapshot in the 1w slot, not the 5h slot", () => {
+    const sessionsRoot = mkdtempSync(
+      join(tmpdir(), "triflux-codex-probe-weekly-only-"),
+    );
+    const now = new Date("2026-09-23T13:50:00.000Z");
+    try {
+      // 2026-09-23 account/rateLimits/read 실측 응답을 옮긴 값이다.
+      const probeSnapshot = {
+        limitId: "codex",
+        limitName: null,
+        primary: {
+          used_percent: 33,
+          window_minutes: 10080,
+          resets_at: 1790754846,
+        },
+        secondary: null,
+        credits: null,
+        tokens: null,
+        contextWindow: null,
+        timestamp: now.toISOString(),
+        probe: true,
+      };
+
+      const buckets = getCodexRateLimits({
+        sessionsRoot,
+        now,
+        extraSnapshots: [probeSnapshot],
+      });
+
+      assert.equal(
+        buckets.codex.primary,
+        null,
+        "a weekly window must not fill the 5h HUD slot",
+      );
+      assert.equal(buckets.codex.secondary.used_percent, 33);
+      assert.equal(buckets.codex.secondary.resets_at, 1790754846);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("drops a weekly window that an early reset replaced before its reset time", () => {
+    const sessionsRoot = mkdtempSync(
+      join(tmpdir(), "triflux-codex-weekly-replaced-"),
+    );
+    const now = new Date("2026-09-23T13:50:00.000Z");
+    try {
+      // 2026-09-23 실측: 100% 였던 주간 창이 07:54 에 새 창으로 바뀌었다.
+      // 옛 창은 그 뒤로 관측되지 않았지만 리셋 시각은 아직 4일 넘게 남았다.
+      writeRollout(sessionsRoot, now, "rollout-old-window.jsonl", [
+        weeklyOnlyEvent({
+          timestamp: "2026-09-23T07:53:16.809Z",
+          usedPercent: 100,
+          resetsAt: 1790561788,
+        }),
+      ]);
+      writeRollout(sessionsRoot, now, "rollout-new-window.jsonl", [
+        weeklyOnlyEvent({
+          timestamp: "2026-09-23T13:49:00.000Z",
+          usedPercent: 34,
+          resetsAt: 1790754846,
+        }),
+      ]);
+
+      const buckets = getCodexRateLimits({ sessionsRoot, now });
+
+      assert.equal(buckets.codex.primary, null);
+      assert.equal(buckets.codex.secondary.used_percent, 34);
+      assert.equal(buckets.codex.secondary.resets_at, 1790754846);
+      assert.equal(buckets.codex.mixedWindows, undefined);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps max-used weekly selection when both windows were observed while open", () => {
+    const sessionsRoot = mkdtempSync(
+      join(tmpdir(), "triflux-codex-weekly-concurrent-"),
+    );
+    const now = new Date("2026-09-23T13:50:00.000Z");
+    try {
+      // 새 창이 열린 뒤에도 옛 창이 관측되면 다른 계정이 함께 도는 것이다.
+      writeRollout(sessionsRoot, now, "rollout-heavy-account.jsonl", [
+        weeklyOnlyEvent({
+          timestamp: "2026-09-23T13:40:00.000Z",
+          usedPercent: 100,
+          resetsAt: 1790561788,
+        }),
+      ]);
+      writeRollout(sessionsRoot, now, "rollout-light-account.jsonl", [
+        weeklyOnlyEvent({
+          timestamp: "2026-09-23T13:49:00.000Z",
+          usedPercent: 34,
+          resetsAt: 1790754846,
+        }),
+      ]);
+
+      const buckets = getCodexRateLimits({ sessionsRoot, now });
+
+      assert.equal(buckets.codex.secondary.used_percent, 100);
+      assert.equal(buckets.codex.mixedWindows, true);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps max-used when broker Codex accounts may still use the older window", () => {
+    const sessionsRoot = mkdtempSync(
+      join(tmpdir(), "triflux-codex-weekly-broker-"),
+    );
+    const now = new Date("2026-09-23T13:50:00.000Z");
+    try {
+      // 조기 리셋 실측과 같은 데이터지만, 브로커 계정이 있으면 옛 창이 전환 전
+      // 계정의 창일 수 있어 교체로 판정하지 않는다.
+      writeRollout(sessionsRoot, now, "rollout-old-window.jsonl", [
+        weeklyOnlyEvent({
+          timestamp: "2026-09-23T07:53:16.809Z",
+          usedPercent: 100,
+          resetsAt: 1790561788,
+        }),
+      ]);
+      writeRollout(sessionsRoot, now, "rollout-new-window.jsonl", [
+        weeklyOnlyEvent({
+          timestamp: "2026-09-23T13:49:00.000Z",
+          usedPercent: 34,
+          resetsAt: 1790754846,
+        }),
+      ]);
+
+      const buckets = getCodexRateLimits({
+        sessionsRoot,
+        now,
+        replaceEndedWindows: false,
+      });
+
+      assert.equal(buckets.codex.secondary.used_percent, 100);
+      assert.equal(buckets.codex.mixedWindows, true);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the session window length when the newest probe omits it", () => {
+    const sessionsRoot = mkdtempSync(
+      join(tmpdir(), "triflux-codex-five-hour-length-less-probe-"),
+    );
+    const now = new Date("2026-09-23T13:50:00.000Z");
+    const nowSec = Math.floor(now.getTime() / 1000);
+    const fiveHourEvent = (timestamp, usedPercent, resetsAt) => ({
+      timestamp,
+      payload: {
+        rate_limits: {
+          limit_id: "codex",
+          primary: {
+            used_percent: usedPercent,
+            window_minutes: 300,
+            resets_at: resetsAt,
+          },
+          secondary: null,
+        },
+      },
+    });
+    try {
+      // 옛 5h 창은 10:30 이 마지막 관측이고, 조기 리셋 뒤 11:50 에 새 창이 열렸다.
+      writeRollout(sessionsRoot, now, "rollout-old-five-hour.jsonl", [
+        fiveHourEvent("2026-09-23T10:30:00.000Z", 80, nowSec + 70 * 60),
+      ]);
+      writeRollout(sessionsRoot, now, "rollout-new-five-hour.jsonl", [
+        fiveHourEvent("2026-09-23T13:40:00.000Z", 10, nowSec + 3 * 60 * 60),
+      ]);
+      const probeWithoutLength = {
+        limitId: "codex",
+        limitName: null,
+        primary: {
+          used_percent: 12,
+          window_minutes: null,
+          resets_at: nowSec + 3 * 60 * 60,
+        },
+        secondary: null,
+        credits: null,
+        tokens: null,
+        contextWindow: null,
+        timestamp: now.toISOString(),
+        probe: true,
+      };
+
+      const buckets = getCodexRateLimits({
+        sessionsRoot,
+        now,
+        extraSnapshots: [probeWithoutLength],
+      });
+
+      assert.equal(buckets.codex.primary.used_percent, 12);
+      assert.equal(buckets.codex.mixedWindows, undefined);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("hasBrokerCodexAccounts: accounts.json codex 항목이나 인증 캐시가 있으면 true", () => {
+    const brokerDir = mkdtempSync(join(tmpdir(), "triflux-codex-broker-dir-"));
+    try {
+      assert.equal(hasBrokerCodexAccounts({ brokerDir }), false);
+
+      writeFileSync(
+        join(brokerDir, "accounts.json"),
+        JSON.stringify({ codex: [], gemini: [{ id: "g1" }] }),
+      );
+      assert.equal(hasBrokerCodexAccounts({ brokerDir }), false);
+
+      writeFileSync(
+        join(brokerDir, "accounts.json"),
+        JSON.stringify({ codex: [{ id: "c1" }] }),
+      );
+      assert.equal(hasBrokerCodexAccounts({ brokerDir }), true);
+
+      rmSync(join(brokerDir, "accounts.json"));
+      writeFileSync(join(brokerDir, "codex-auth-work.json"), "{}");
+      assert.equal(hasBrokerCodexAccounts({ brokerDir }), true);
+    } finally {
+      rmSync(brokerDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a window observed shortly after the newer window opened", () => {
+    const sessionsRoot = mkdtempSync(
+      join(tmpdir(), "triflux-codex-weekly-just-after-open-"),
+    );
+    const now = new Date("2026-09-23T13:50:00.000Z");
+    try {
+      // 새 창은 07:54:06 에 열렸고 옛 창은 그 24초 뒤에 관측됐다.
+      writeRollout(sessionsRoot, now, "rollout-heavy-account.jsonl", [
+        weeklyOnlyEvent({
+          timestamp: "2026-09-23T07:54:30.000Z",
+          usedPercent: 100,
+          resetsAt: 1790561788,
+        }),
+      ]);
+      writeRollout(sessionsRoot, now, "rollout-light-account.jsonl", [
+        weeklyOnlyEvent({
+          timestamp: "2026-09-23T13:49:00.000Z",
+          usedPercent: 34,
+          resetsAt: 1790754846,
+        }),
+      ]);
+
+      const buckets = getCodexRateLimits({ sessionsRoot, now });
+
+      assert.equal(buckets.codex.secondary.used_percent, 100);
+      assert.equal(buckets.codex.mixedWindows, true);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not let a probe-only window replace a session window", () => {
+    const sessionsRoot = mkdtempSync(
+      join(tmpdir(), "triflux-codex-weekly-probe-only-"),
+    );
+    const now = new Date("2026-09-23T13:50:00.000Z");
+    try {
+      // 브로커 계정은 자기 CODEX_HOME 에 세션을 쓰므로 프로브로만 보인다.
+      writeRollout(sessionsRoot, now, "rollout-current-account.jsonl", [
+        weeklyOnlyEvent({
+          timestamp: "2026-09-23T07:53:16.809Z",
+          usedPercent: 100,
+          resetsAt: 1790561788,
+        }),
+      ]);
+      const brokerProbe = {
+        limitId: "codex",
+        limitName: null,
+        primary: {
+          used_percent: 34,
+          window_minutes: 10080,
+          resets_at: 1790754846,
+        },
+        secondary: null,
+        credits: null,
+        tokens: null,
+        contextWindow: null,
+        timestamp: now.toISOString(),
+        probe: true,
+      };
+
+      const buckets = getCodexRateLimits({
+        sessionsRoot,
+        now,
+        extraSnapshots: [brokerProbe],
+      });
+
+      assert.equal(buckets.codex.secondary.used_percent, 100);
       assert.equal(buckets.codex.mixedWindows, true);
     } finally {
       rmSync(sessionsRoot, { recursive: true, force: true });

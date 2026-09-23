@@ -38,6 +38,8 @@ export function classifyBucket(bucket) {
 
 // primary/secondary를 window_minutes 기준으로 정규화
 // HUD 규약: primary=5h, secondary=1w
+// window_minutes 가 비어 있으면 길이를 모르므로 보고된 칸에 둔다(app-server 스키마에서
+// windowDurationMins 는 선택 필드). 길이를 알지만 5h/1w 가 아닌 버킷은 버린다.
 export function normalizeBuckets(rl) {
   let primary = null;
   let secondary = null;
@@ -45,6 +47,12 @@ export function normalizeBuckets(rl) {
     const kind = classifyBucket(bucket);
     if (kind === "five_hour") primary = bucket;
     else if (kind === "weekly") secondary = bucket;
+  }
+  if (!primary && rl.primary && rl.primary.window_minutes == null) {
+    primary = rl.primary;
+  }
+  if (!secondary && rl.secondary && rl.secondary.window_minutes == null) {
+    secondary = rl.secondary;
   }
   return { primary, secondary };
 }
@@ -104,7 +112,35 @@ function isNewerSnapshot(candidate, current) {
   );
 }
 
-function selectCodexWindowSnapshot(snapshots, nowSec, windowKey) {
+function positiveWindowMinutes(bucket) {
+  const minutes = Number(bucket?.window_minutes);
+  return minutes > 0 ? minutes : null;
+}
+
+// 계정 하나에는 같은 종류의 창이 한 번에 하나만 열린다. 브로커 계정이 없으면
+// ~/.codex/sessions 와 HUD 라벨이 모두 ~/.codex/auth.json 계정 하나의 것이다. 그래서
+// 세션 로그에 더 늦게 리셋되는 창이 나타났고 옛 창이 그 창이 열리기 전에만 관측됐다면,
+// 옛 창은 조기 리셋(2026-09-23 실측)이나 계정 전환으로 끝난 창이다. 프로브로만 본 창은
+// 다른 계정일 수 있어 근거로 쓰지 않는다. 새 창이 열린 뒤에도 관측된 창은 함께 도는
+// 계정이므로 max-used 후보로 남긴다.
+function isReplacedWindowGroup(group, other) {
+  if (other === group || !other.seenInSessions) return false;
+  if (other.minResetAt <= group.maxResetAt || !other.windowMinutes) {
+    return false;
+  }
+  const lastSeenMs = Date.parse(group.latest.timestamp);
+  if (!Number.isFinite(lastSeenMs)) return false;
+  // resets_at 은 실측으로 아래로 약 30초, 위로 1초 흔들리므로 가장 늦은 값으로 개시 시각을 잡는다.
+  const otherOpenedAtMs = (other.maxResetAt - other.windowMinutes * 60) * 1000;
+  return lastSeenMs <= otherOpenedAtMs;
+}
+
+function selectCodexWindowSnapshot(
+  snapshots,
+  nowSec,
+  windowKey,
+  replaceEndedWindows,
+) {
   const groups = [];
   const ungrouped = [];
 
@@ -126,19 +162,29 @@ function selectCodexWindowSnapshot(snapshots, nowSec, windowKey) {
         minResetAt: resetAt,
         maxResetAt: resetAt,
         latest: snapshot,
+        seenInSessions: !snapshot.probe,
+        windowMinutes: positiveWindowMinutes(snapshot[windowKey]),
       };
       groups.push(group);
       continue;
     }
 
+    if (!snapshot.probe) group.seenInSessions = true;
+    group.windowMinutes ??= positiveWindowMinutes(snapshot[windowKey]);
     group.minResetAt = Math.min(group.minResetAt, resetAt);
     group.maxResetAt = Math.max(group.maxResetAt, resetAt);
     if (isNewerSnapshot(snapshot, group.latest)) group.latest = snapshot;
   }
 
-  const activeGroups = groups.filter(
+  const openGroups = groups.filter(
     (group) => Number(group.latest[windowKey]?.resets_at) > nowSec,
   );
+  const activeGroups = replaceEndedWindows
+    ? openGroups.filter(
+        (group) =>
+          !openGroups.some((other) => isReplacedWindowGroup(group, other)),
+      )
+    : openGroups;
   let selected = null;
   if (activeGroups.length > 0) {
     selected = activeGroups
@@ -168,16 +214,18 @@ function selectCodexWindowSnapshot(snapshots, nowSec, windowKey) {
   return { snapshot: selected, activeGroupCount: activeGroups.length };
 }
 
-function selectCodexSnapshot(snapshots, nowSec) {
+function selectCodexSnapshot(snapshots, nowSec, replaceEndedWindows) {
   const primarySelection = selectCodexWindowSnapshot(
     snapshots,
     nowSec,
     "primary",
+    replaceEndedWindows,
   );
   const secondarySelection = selectCodexWindowSnapshot(
     snapshots,
     nowSec,
     "secondary",
+    replaceEndedWindows,
   );
   const primarySnapshot = primarySelection.snapshot;
   if (!primarySnapshot) return null;
@@ -198,7 +246,7 @@ function selectCodexSnapshot(snapshots, nowSec) {
   return selected;
 }
 
-function mergeRateLimitSnapshots(snapshots, nowSec) {
+function mergeRateLimitSnapshots(snapshots, nowSec, replaceEndedWindows) {
   const merged = {};
   const codexSnapshots = [];
   for (const snapshot of snapshots) {
@@ -211,7 +259,11 @@ function mergeRateLimitSnapshots(snapshots, nowSec) {
     }
   }
 
-  const codex = selectCodexSnapshot(codexSnapshots, nowSec);
+  const codex = selectCodexSnapshot(
+    codexSnapshots,
+    nowSec,
+    replaceEndedWindows,
+  );
   if (codex) merged.codex = codex;
   return merged;
 }
@@ -227,9 +279,16 @@ export function getCodexRateLimits({
   now = new Date(),
   maxLinesPerFile = 800,
   extraSnapshots = [],
+  // 교체된 창 판정(isReplacedWindowGroup). 브로커 Codex 계정이 있으면 끈다.
+  replaceEndedWindows = true,
 } = {}) {
   let syntheticBucket = null; // 최근 token_count에서 합성 (행 활성화 + 토큰 데이터용)
-  const recentSnapshots = [...extraSnapshots];
+  // 프로브도 세션 로그와 같은 window_minutes 기준으로 5h/1w 슬롯을 정한다.
+  // app-server 는 5h 창이 없으면 주간 창을 primary 로 보낸다(2026-09-23 실측).
+  const recentSnapshots = extraSnapshots.map((snapshot) => ({
+    ...snapshot,
+    ...normalizeBuckets(snapshot),
+  }));
   const nowSec = Math.floor(now.getTime() / 1000);
 
   // 7일간 스캔: 실제 rate_limits 우선, 합성 버킷은 폴백
@@ -313,7 +372,11 @@ export function getCodexRateLimits({
     }
 
     const snapshots = dayOffset <= 1 ? recentSnapshots : daySnapshots;
-    const mergedBuckets = mergeRateLimitSnapshots(snapshots, nowSec);
+    const mergedBuckets = mergeRateLimitSnapshots(
+      snapshots,
+      nowSec,
+      replaceEndedWindows,
+    );
     if (Object.keys(mergedBuckets).length > 0) {
       if (syntheticBucket) {
         const main =
@@ -369,10 +432,30 @@ export async function collectProbeSnapshots(now = new Date()) {
   );
 }
 
+// 브로커 계정은 자기 CODEX_HOME 에서 돌기 때문에, 옛 창이 전환 전 계정의 창이어도 그
+// 계정이 아직 쓰이고 있을 수 있다. accounts.json 의 codex 항목과 프로브용 인증 캐시로 판정한다.
+export function hasBrokerCodexAccounts({
+  brokerDir = CODEX_BROKER_AUTH_CACHE_DIR,
+} = {}) {
+  const accounts = readJson(join(brokerDir, "accounts.json"), null);
+  if (Array.isArray(accounts?.codex) && accounts.codex.length > 0) return true;
+  try {
+    return readdirSync(brokerDir).some((file) =>
+      /^codex-auth-.+\.json$/.test(file),
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function refreshCodexRateLimitsCache() {
   const now = new Date();
   const extraSnapshots = await collectProbeSnapshots(now);
-  const buckets = getCodexRateLimits({ now, extraSnapshots });
+  const buckets = getCodexRateLimits({
+    now,
+    extraSnapshots,
+    replaceEndedWindows: !hasBrokerCodexAccounts(),
+  });
   // buckets가 null이어도 캐시 갱신 (stale 데이터 제거)
   writeJsonSafe(CODEX_QUOTA_CACHE_PATH, { timestamp: Date.now(), buckets });
   return buckets;
