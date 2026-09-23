@@ -5,7 +5,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { classifyIntent as _classifyIntent } from "../intent.mjs";
 import { runConfidenceCheck } from "./gates/confidence.mjs";
 import { runSelfCheck } from "./gates/selfcheck.mjs";
 import {
@@ -325,20 +324,6 @@ export async function benchmarkEnd(preLabel, postLabel, options = {}) {
   } catch {
     return null;
   }
-}
-
-/**
- * 트리아지 통합: quickClassify 고신뢰 시 Codex 분류 스킵 판정
- * @param {string} prompt
- * @param {number} [threshold=0.8]
- * @returns {{ skip: boolean, routing: object|null, classification: object }}
- */
-export function triageWithIntent(prompt, threshold = 0.8) {
-  const classification = _classifyIntent(prompt);
-  if (classification.confidence >= threshold) {
-    return { skip: true, routing: classification.routing, classification };
-  }
-  return { skip: false, routing: null, classification };
 }
 
 export {

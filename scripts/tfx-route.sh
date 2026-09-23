@@ -232,16 +232,6 @@ _sanitize_codex_legacy_profiles() {
 
 _sanitize_codex_legacy_profiles "$_CODEX_CONFIG"
 
-_CODEX_HAS_SANDBOX=""
-if [[ -f "$_CODEX_CONFIG" ]] && awk '
-  /^\[{1,2}mcp_servers\..*\.tools\./ { in_mcp_tool=1; next }
-  /^\[/ { in_mcp_tool=0; next }
-  !in_mcp_tool && /^[[:space:]]*(sandbox|approval_mode)[[:space:]]*=/ { found=1; exit }
-  END { exit !found }
-' "$_CODEX_CONFIG" 2>/dev/null; then
-  _CODEX_HAS_SANDBOX="1"
-fi
-
 # ── MCP tool approval_mode stall 방지 (ISSUE-4) ──
 # oh-my-codex 업데이트가 MCP tool 블록의 approval_mode를 "approve"로 복원함.
 # codex exec는 non-TTY subprocess이므로 interactive 승인 대기 = output 0B stall.
@@ -260,9 +250,6 @@ build_codex_base() {
   # --dangerously-bypass는 config.toml의 approval_mode/sandbox와 충돌하지 않음
   # (--full-auto와 달리 bypass는 config 값을 override할 뿐 에러를 던지지 않음).
   # 검증: approval_mode="auto" config에서 --dangerously-bypass 동시 사용 → exit 0 확인.
-  #
-  # Note: 위의 _CODEX_HAS_SANDBOX awk 감지는 현재 미사용이지만, 향후 codex가
-  # bypass와 config.toml 충돌을 감지하면 분기 로직을 재활성화할 수 있으므로 유지.
   echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
 }
 
@@ -1236,14 +1223,6 @@ get_codex_version() {
   echo "$_CODEX_VERSION"
 }
 
-# codex_gte <min_version>: 현재 버전이 min 이상이면 true(0), 아니면 false(1)
-codex_gte() {
-  local min="$1"
-  local cur
-  cur=$(get_codex_version)
-  printf '%s\n%s' "$min" "$cur" | sort -V | head -1 | grep -q "^${min}$"
-}
-
 # ── Gemini 프로필 해석 (Codex --profile 대칭) ──
 _GEMINI_PROFILE_CACHE=""
 # resolve_gemini_profile_for_agent AGENT → 프로필 이름 (SSOT: scripts/lib/gemini-profiles.mjs)
@@ -1615,7 +1594,6 @@ case "$TFX_SEARCH_TOOL" in
     exit 1
     ;;
 esac
-CODEX_MCP_TRANSPORT_EXIT_CODE=70
 
 apply_cli_mode() {
   local codex_base
@@ -2262,12 +2240,6 @@ resolve_mcp_policy() {
     _gemini_servers _codex_flags CODEX_CONFIG_JSON _phase <<< "$_raw"
   IFS=',' read -r -a GEMINI_ALLOWED_SERVERS <<< "$_gemini_servers"
   IFS=',' read -r -a CODEX_CONFIG_FLAGS <<< "$_codex_flags"
-  # set -e 환경에서 함수 마지막 명령이 `[[ ... ]] && ...` 이면
-  # 조건 불일치(= phase 없음)만으로 함수 전체가 실패 처리되어 route가 즉시 종료된다.
-  # implement/default 같은 일반 경로는 phase를 비우는 것이 정상이다.
-  if [[ -n "$_phase" ]]; then
-    MCP_PIPELINE_PHASE="$_phase"
-  fi
 
   return 0
 }
@@ -2721,13 +2693,6 @@ run_antigravity_exec() {
   return "$exit_code_local"
 }
 
-resolve_codex_mcp_script() {
-  local sd; sd="$(_get_script_dir)"
-  _resolve_script "${TFX_CODEX_MCP_SCRIPT:-}" \
-    ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/hub/workers/codex-mcp.mjs"} \
-    "$sd/hub/workers/codex-mcp.mjs" "$sd/../hub/workers/codex-mcp.mjs"
-}
-
 ## ── MCP Preflight: dead 서버 감지 후 CODEX_CONFIG_FLAGS 에서 제거 ──
 # Session 18 체크포인트 P3 root-cause fix. dead MCP 가 allowed_pat 에 포함되면
 # _codex_config_swap 이 section 을 유지 → Codex 가 init 시도 → -32000 으로 죽는다.
@@ -2825,9 +2790,8 @@ _mcp_preflight_filter_dead() {
   # #170 graceful degradation (회귀 fix):
   # all-dead 시 default 는 exec mode 자동 fallback. TFX_MCP_FAIL_ON_ALL_DEAD=1 로
   # 명시 opt-in 시만 #148 기존 동작 (early fail). TFX_MCP_ALLOW_ALL_DEAD=1 은 호환성
-  # 유지 (alias for graceful default). 단 transport 가 auto 인 채로 run_codex_mcp 를
-  # 호출하면 dead MCP 와 connect 시도 → stall → 본 fix 의 _TFX_MCP_DEGRADED=1 marker
-  # 가 호출자 에서 transport=exec 강제 + MCP_HINT 자동 주입 skip 을 유발한다.
+  # 유지 (alias for graceful default). 본 fix 의 _TFX_MCP_DEGRADED=1 marker 는
+  # 호출자에서 MCP_HINT 자동 주입 skip 을 유발한다.
   local remaining_alive=0
   local rflag
   for rflag in "${CODEX_CONFIG_FLAGS[@]}"; do
@@ -3050,18 +3014,9 @@ run_codex_exec() {
     # `--` end-of-options: prompt가 '--'/'---' (front-matter 등)로 시작하면
     # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
     if [[ "$use_tee_flag" == "true" ]]; then
-      if [[ "$CLI_TYPE" == "antigravity" ]]; then
-        # agy --print + skip-permissions positional prompt는 timeout이 재현되어 stdin pipe로 고정한다.
-        printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
-      else
-        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
-      fi
+      "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
     else
-      if [[ "$CLI_TYPE" == "antigravity" ]]; then
-        printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
-      else
-        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
-      fi
+      "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
     fi
     worker_pid=$!
     # Track codex child PID so --job-status can detect orphan-running when wrapper dies (Issue #176).
@@ -3109,98 +3064,6 @@ run_codex_exec() {
   # -o가 비었을 때만 기존 stderr 복구 경로로 호환한다.
   if [[ ! -s "$CODEX_LAST_MESSAGE_LOG" ]]; then
     recover_codex_stdout
-  fi
-
-  return "$exit_code_local"
-}
-
-run_codex_mcp() {
-  local prompt="$1"
-  local use_tee_flag="$2"
-  local mcp_script
-  local exit_code_local=0
-  local worker_pid
-  local mcp_activity_file="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-mcp-activity.log"
-
-  if ! mcp_script=$(resolve_codex_mcp_script); then
-    echo "[tfx-route] 경고: Codex MCP 래퍼를 찾지 못했습니다." >&2
-    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
-  fi
-
-  if ! command -v "$NODE_BIN" &>/dev/null; then
-    echo "[tfx-route] 경고: node를 찾지 못해 Codex MCP 경로를 사용할 수 없습니다." >&2
-    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
-  fi
-
-  : > "$mcp_activity_file"
-  export TFX_CODEX_MCP_ACTIVITY_FILE="$mcp_activity_file"
-
-  local -a mcp_args=(
-    "$mcp_script"
-    "--prompt" "$prompt"
-    "--cwd" "$PWD"
-    "--profile" "$CLI_EFFORT"
-    "--approval-policy" "never"
-    "--sandbox" "danger-full-access"
-    "--timeout-ms" "$((HARD_CEILING_SEC * 1000))"
-    "--codex-command" "$CODEX_BIN"
-  )
-
-  if [[ -n "${CODEX_MODEL_OVERRIDE:-}" ]]; then
-    mcp_args+=("--model" "$CODEX_MODEL_OVERRIDE")
-  fi
-  if [[ -n "${CODEX_REASONING_EFFORT_OVERRIDE:-}" ]]; then
-    mcp_args+=("--reasoning-effort" "$CODEX_REASONING_EFFORT_OVERRIDE")
-  fi
-
-  if [[ -n "$CODEX_CONFIG_JSON" && "$CODEX_CONFIG_JSON" != "{}" ]]; then
-    mcp_args+=("--config-json" "$CODEX_CONFIG_JSON")
-  fi
-
-  case "$AGENT_TYPE" in
-    code-reviewer)
-      mcp_args+=(
-        "--developer-instructions"
-        "코드 리뷰 모드로 동작하라. 버그, 리스크, 회귀, 테스트 누락을 우선 식별하라."
-      )
-      ;;
-    security-reviewer)
-      mcp_args+=(
-        "--developer-instructions"
-        "보안 리뷰 모드로 동작하라. 취약점, 권한 경계, 비밀정보 노출 가능성을 우선 식별하라."
-      )
-      ;;
-    quality-reviewer)
-      mcp_args+=(
-        "--developer-instructions"
-        "품질 리뷰 모드로 동작하라. 로직 결함, 유지보수성 저하, 테스트 누락을 우선 식별하라."
-      )
-      ;;
-  esac
-
-  if [[ "$use_tee_flag" == "true" ]]; then
-    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$NODE_BIN" "${mcp_args[@]}" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
-  else
-    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$NODE_BIN" "${mcp_args[@]}" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
-  fi
-  worker_pid=$!
-  # Track codex MCP child PID so --job-status can detect orphan-running when wrapper dies (Issue #176).
-  if [[ -n "${JOB_DIR:-}" && -w "${JOB_DIR}" ]]; then
-    echo "$worker_pid" >> "$JOB_DIR/child_pids"
-  fi
-  _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
-  unset TFX_CODEX_MCP_ACTIVITY_FILE
-
-  # 모듈 로드 실패(의존성 누락) → MCP transport exit code로 변환하여 fallback 트리거
-  if [[ "$exit_code_local" -ne 0 && "$exit_code_local" -ne 124 ]] && grep -q 'ERR_MODULE_NOT_FOUND' "$STDERR_LOG" 2>/dev/null; then
-    echo "[tfx-route] Codex MCP 모듈 로드 실패 — fallback 가능 exit code로 변환" >&2
-    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
-  fi
-
-  # MCP 연결 실패(서버 미응답, 연결 종료) → transport exit code로 변환
-  if [[ "$exit_code_local" -ne 0 && "$exit_code_local" -ne 124 ]] && grep -qE 'MCP error|Connection closed|연결 실패' "$STDOUT_LOG" 2>/dev/null; then
-    echo "[tfx-route] Codex MCP 연결 실패 — fallback 가능 exit code로 변환" >&2
-    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
   fi
 
   return "$exit_code_local"
@@ -3426,7 +3289,6 @@ FALLBACK_EOF
       exit 78
     fi
     # Config swap: 프로필에 맞는 MCP 서버만 남긴 임시 config 적용
-    # run_codex_mcp / run_codex_exec 어느 경로든 적용되도록 최상단에서 실행
     _codex_config_swap "filter"
     # swap 후 config override 플래그 클리어 — 제거된 서버에 override 보내면 "invalid transport" 에러
     CODEX_CONFIG_FLAGS=()

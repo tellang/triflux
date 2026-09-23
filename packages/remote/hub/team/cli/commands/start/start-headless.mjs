@@ -76,7 +76,6 @@ export async function startHeadlessTeam({
     cwd,
   });
 
-  const _startedAt = Date.now();
   ok(`headless ${assignments.length}워커 시작`);
   if (nativeBridge) {
     process.stderr.write(

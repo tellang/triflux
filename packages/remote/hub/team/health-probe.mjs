@@ -1,5 +1,5 @@
 // hub/team/health-probe.mjs — 4단계 health model + INPUT_WAIT 감지
-// 기존 cli-adapter-base.mjs:stallThresholdMs(30s)와 headless.mjs:STALL_DEFAULTS(120s)를
+// 기존 cli-adapter-base.mjs:stallThresholdMs(30s)와 headless.mjs 의 옛 STALL_DEFAULTS(120s, 삭제됨)를
 // 4단계 probe 모델로 교체. stdout+stderr 통합 스트림으로 평가 (F3 해결).
 
 import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";

@@ -199,16 +199,6 @@ export function collectAntigravityConversations(options = {}) {
   }
 }
 
-export function buildRuntimeStatus(psOutput = "", options = {}) {
-  const processes = collectRuntimeProcesses(psOutput);
-  const conversations = collectAntigravityConversations(options);
-  const allProcesses = [...processes, ...conversations];
-  return {
-    processes: allProcesses,
-    summary: summarizeRuntimeProcesses(allProcesses),
-  };
-}
-
 export function collectCwdByPid(pids = []) {
   const ids = [
     ...new Set(

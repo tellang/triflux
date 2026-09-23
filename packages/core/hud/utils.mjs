@@ -86,10 +86,6 @@ export function padAnsiRight(text, width) {
   return padAnsi(text, width, "right");
 }
 
-export function padAnsiLeft(text, width) {
-  return padAnsi(text, width, "left");
-}
-
 export function fitText(text, width) {
   const t = String(text || "");
   if (t.length <= width) return t;
@@ -176,35 +172,10 @@ export function getCliArgValue(flag) {
   return process.argv[idx + 1] || null;
 }
 
-export function formatDuration(ms) {
-  if (!Number.isFinite(ms) || ms <= 0) return "n/a";
-  const totalMinutes = Math.floor(ms / 60000);
-  const days = Math.floor(totalMinutes / (60 * 24));
-  const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
-  const minutes = totalMinutes % 60;
-  if (days > 0) return hours > 0 ? `${days}d${hours}h` : `${days}d`;
-  if (hours > 0) return minutes > 0 ? `${hours}h${minutes}m` : `${hours}h`;
-  return `${minutes}m`;
-}
-
 export function formatTokenCount(n) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${Math.round(n / 1_000)}K`;
   return String(n);
-}
-
-export function getContextPercent(stdin) {
-  const nativePercent = stdin?.context_window?.used_percentage;
-  if (typeof nativePercent === "number" && Number.isFinite(nativePercent))
-    return clampPercent(nativePercent);
-  const usage = stdin?.context_window?.current_usage || {};
-  const totalTokens =
-    Number(usage.input_tokens || 0) +
-    Number(usage.cache_creation_input_tokens || 0) +
-    Number(usage.cache_read_input_tokens || 0);
-  const capacity = Number(stdin?.context_window?.context_window_size || 0);
-  if (!capacity || capacity <= 0) return 0;
-  return clampPercent((totalTokens / capacity) * 100);
 }
 
 // 과거 리셋 시간 → 다음 주기로 순환하여 미래 시점 반환
@@ -247,11 +218,6 @@ export function formatResetRemaining(isoOrUnix, cycleMs = 0) {
   return `${totalHours}h${String(minutes).padStart(2, "0")}m`;
 }
 
-export function isResetPast(isoOrUnix) {
-  const date = parseResetDate(isoOrUnix);
-  return date != null && date.getTime() <= Date.now();
-}
-
 export function formatResetRemainingDayHour(isoOrUnix, cycleMs = 0) {
   const diffMs = getRemainingResetMs(isoOrUnix, cycleMs);
   if (diffMs == null || diffMs <= 0) return "";
@@ -259,13 +225,6 @@ export function formatResetRemainingDayHour(isoOrUnix, cycleMs = 0) {
   const days = Math.floor(totalMinutes / (60 * 24));
   const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
   return `${String(days).padStart(2, "0")}d${String(hours).padStart(2, "0")}h`;
-}
-
-export function calcCooldownLeftSeconds(isoDatetime) {
-  if (!isoDatetime) return 0;
-  const cooldownMs = new Date(isoDatetime).getTime() - Date.now();
-  if (!Number.isFinite(cooldownMs) || cooldownMs <= 0) return 0;
-  return Math.ceil(cooldownMs / 1000);
 }
 
 export function getProviderAccountId(provider, accountsConfig, accountsState) {

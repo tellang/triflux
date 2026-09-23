@@ -35,7 +35,6 @@ const VERSION = "1.2";
 const CLAUDE_DIR = join(homedir(), ".claude");
 const MCP_CACHE = join(CLAUDE_DIR, "cache", "mcp-inventory.json");
 const LOG_FILE = join(CLAUDE_DIR, "logs", "tfx-route-stats.jsonl");
-const _ACC_FILE = join(CLAUDE_DIR, "cache", "sv-accumulator.json");
 
 // ── ANSI 색상 ──
 const AMBER = "\x1b[38;5;214m";

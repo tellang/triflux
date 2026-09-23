@@ -8,7 +8,6 @@ import { resolveHubPortForContext } from "../../hub/hub-lifecycle.mjs";
 import { whichCommand, whichCommandAsync } from "../../hub/platform.mjs";
 
 const HUB_DEFAULT_PORT = 27888;
-const DEFAULT_STATUS_URL = "http://127.0.0.1:27888/status";
 const _sab = new Int32Array(new SharedArrayBuffer(4));
 const CLI_PROBE_CACHE = new Map();
 const CLI_PROBE_PROMISES = new Map();
@@ -296,4 +295,4 @@ export function checkHub({
   return { ok: false, state: "unreachable", restart: "timeout" };
 }
 
-export { DEFAULT_PKG_ROOT, DEFAULT_STATUS_URL };
+export { DEFAULT_PKG_ROOT };

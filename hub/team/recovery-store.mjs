@@ -143,7 +143,3 @@ export function readManifest(recoveryDir) {
   }
   return readManifestFile(resolve(recoveryDir));
 }
-
-export const RECOVERY_DEFAULTS = Object.freeze({
-  dir: DEFAULT_RECOVERY_DIR,
-});

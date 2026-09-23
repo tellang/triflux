@@ -1,5 +1,3 @@
-import { readState } from "../state.mjs";
-
 const DEFAULT_TIMEOUT_MS = 2500;
 const CONTROL_COMMAND_ALIASES = Object.freeze({
   stop: "abort",
@@ -37,39 +35,6 @@ function normalizeCommand(command) {
 function safeAbortSignal(timeoutMs) {
   if (typeof AbortSignal?.timeout !== "function") return undefined;
   return AbortSignal.timeout(timeoutMs);
-}
-
-function isPidAlive(pid) {
-  const resolvedPid = Number(pid);
-  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return false;
-  try {
-    process.kill(resolvedPid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function resolveHeadlessHubUrl() {
-  const stateUrl = normalizeHubBaseUrl(readState()?.url);
-  if (stateUrl) return stateUrl;
-
-  const envHubUrl = normalizeHubBaseUrl(process.env.TFX_HUB_URL);
-  if (envHubUrl) return envHubUrl;
-
-  const envPort = Number(process.env.TFX_HUB_PORT || "27888");
-  const port = Number.isFinite(envPort) && envPort > 0 ? envPort : 27888;
-  return `http://127.0.0.1:${port}`;
-}
-
-function hasLiveHubState() {
-  const state = readState();
-  return !!normalizeHubBaseUrl(state?.url) && isPidAlive(state?.pid);
-}
-
-function toHeadlessSessionAgentId(sessionName) {
-  const normalizedSessionName = String(sessionName || "").trim();
-  return normalizedSessionName ? `session:${normalizedSessionName}` : "";
 }
 
 function safeJson(res) {
@@ -146,46 +111,4 @@ export async function publishLeadControl({
       command: normalizedCommand,
     };
   }
-}
-
-export async function publishHeadlessControl(
-  sessionName,
-  command,
-  targetWorker = "*",
-) {
-  const sessionAgentId = toHeadlessSessionAgentId(sessionName);
-  if (!sessionAgentId) {
-    return {
-      ok: false,
-      noop: true,
-      error: "SESSION_NAME_REQUIRED",
-      command: String(command || "")
-        .trim()
-        .toLowerCase(),
-    };
-  }
-
-  if (!normalizeHubBaseUrl(process.env.TFX_HUB_URL) && !hasLiveHubState()) {
-    return {
-      ok: false,
-      noop: true,
-      error: "HUB_UNAVAILABLE",
-      command: String(command || "")
-        .trim()
-        .toLowerCase(),
-    };
-  }
-
-  return await publishLeadControl({
-    hubUrl: resolveHeadlessHubUrl(),
-    fromAgent: "lead",
-    toAgent: sessionAgentId,
-    command,
-    payload: {
-      session_name: String(sessionName || "").trim(),
-      target_worker: String(targetWorker || "*").trim() || "*",
-      issued_by: "lead",
-      issued_at: Date.now(),
-    },
-  });
 }

@@ -5,16 +5,13 @@
 // L0: SSH 연결 + psmux 세션 존재 확인
 // L1: capture-pane 출력 변화 감지 (advancing)
 // L1.5: INPUT_WAIT 패턴 감지 (detectInputWait 재사용)
-// L3: 완료 토큰 감지 (__TRIFLUX_DONE__ 또는 프롬프트 idle)
+// L3: 완료 토큰 감지 (__TRIFLUX_DONE__)
 
 import { execFileSync } from "node:child_process";
 import { detectInputWait, PROBE_DEFAULTS } from "./health-probe.mjs";
 
 /** 완료 토큰 패턴 */
 const COMPLETION_TOKEN_RE = /__TRIFLUX_DONE__/;
-
-/** 프롬프트 idle 패턴 (Claude Code 프롬프트 복귀) */
-const _PROMPT_IDLE_RE = /(\u276f|\u2795|>\s*$)/;
 
 /**
  * SSH 경유로 원격 psmux capture-pane 실행.

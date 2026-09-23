@@ -9,9 +9,9 @@ import { basename, join } from "node:path";
 import { resolveLakeRootDir } from "./lake-root.mjs";
 
 export const CTO_EVENT_SCHEMA_VERSION = "cto-event.v1";
-export const DEFAULT_CTO_EVENT_SOURCE = "tfx_cto_event";
+const DEFAULT_CTO_EVENT_SOURCE = "tfx_cto_event";
 
-export const CTO_EVENT_TYPES = Object.freeze([
+const CTO_EVENT_TYPES = Object.freeze([
   "session_started",
   "session_heartbeat",
   "session_stale",
@@ -26,7 +26,7 @@ export const CTO_EVENT_TYPES = Object.freeze([
   "hygiene_applied",
 ]);
 
-export const CTO_HYGIENE_STATUSES = Object.freeze([
+const CTO_HYGIENE_STATUSES = Object.freeze([
   "active",
   "idle",
   "stale",

@@ -4,7 +4,7 @@
 // plan() 은 프롬프트를 args 의 --print 값으로 넣고 stdinMode="argv" 를 돌려준다.
 // --print 뒤에 다른 플래그가 오면 그 플래그를 프롬프트로 삼키므로 항상 마지막에 둔다.
 //
-// 출처: scripts/tfx-route.sh route_agent() L1052-L1059, run_codex_exec() L2036-L2046.
+// 출처: scripts/tfx-route.sh route_agent(), run_antigravity_exec().
 //        .claude/rules/tfx-update-logic.md Antigravity CLI 1.0.0 정밀 sanity matrix.
 // timeoutSec은 lane 예상 소요 시간(advisory)이다. hard ceiling 집행은 Bash route가 소유한다.
 

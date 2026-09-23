@@ -73,19 +73,10 @@ export function transitionPhase(state, nextPhase) {
     }
   }
 
-  // fix → exec 재진입 시 (fix 후 재실행)
-  if (current === "fix" && nextPhase === "exec") {
-    // fix_attempt 유지 (이미 fix 진입 시 증가됨)
-  }
-
   // verify → fix → ... → verify 반복 후 fix_max 초과 시 ralph loop
   if (nextPhase === "failed" && current === "fix") {
     // ralph loop 반복 증가
     next.ralph_iteration = (state.ralph_iteration || 0) + 1;
-    if (next.ralph_iteration > (state.ralph_max || 10)) {
-      // 최종 실패 — ralph loop도 초과
-      next.phase = "failed";
-    }
   }
 
   // phase_history 기록

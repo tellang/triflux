@@ -28,16 +28,6 @@ const GATEWAY_MAP = new Map(
   SERVERS.map((s) => [s.name, `http://127.0.0.1:${s.port}/mcp`]),
 );
 
-// stdio 정의를 보존해야 하는 MCP 서버 (gateway 대상 아님)
-const _KEEP_STDIO = new Set([
-  "omx_state",
-  "omx_memory",
-  "omx_code_intel",
-  "omx_trace",
-  "omx_team_run",
-  "tfx-hub",
-]);
-
 function parseTomlMcpServers(content) {
   const servers = new Map();
   const re = /^\[mcp_servers\.([^\]]+)\]\s*$/gm;
@@ -80,10 +70,6 @@ function isCurrentGatewayUrl(srv, expectedUrl) {
 
 function buildHttpEntry(name, url) {
   return `[mcp_servers.${name}]\nurl = "${url}"\n`;
-}
-
-function _buildStdioEntry(name, block) {
-  return `[mcp_servers.${name}]\n${block}\n`;
 }
 
 function isProtectedCodexConfigMutationEnv(env = process.env) {

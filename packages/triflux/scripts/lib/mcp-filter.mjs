@@ -15,10 +15,6 @@ import {
   uniqueStrings,
 } from "./mcp-server-catalog.mjs";
 
-export const KNOWN_MCP_SERVERS = Object.freeze(
-  Object.keys(MCP_SERVER_TOOL_CATALOG),
-);
-
 const SEARCH_INTENT_PATTERNS = Object.freeze([
   /\b(search|web|browse|look ?up|find|latest|recent|news|current|today|release(?: note)?s?|changelog|announcement|pricing|status|verify|fact[- ]?check)\b/i,
   /(검색|웹|브라우즈|찾아|조회|최신|최근|뉴스|현재|오늘|릴리즈|배포|변경사항|공지|가격|상태|검증)/u,

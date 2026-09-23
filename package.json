@@ -43,7 +43,6 @@
     "pack:core": "node scripts/pack.mjs core",
     "pack:remote": "node scripts/pack.mjs remote",
     "setup": "node scripts/setup.mjs",
-    "preinstall": "node scripts/preinstall.mjs",
     "postinstall": "node scripts/setup.mjs",
     "snapshot:codex": "node scripts/snapshot-codex-state.mjs",
     "snapshot:gemini": "node scripts/snapshot-gemini-state.mjs",

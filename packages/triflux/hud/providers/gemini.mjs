@@ -1,5 +1,5 @@
 // ============================================================================
-// Gemini 쿼터 API / 세션 토큰 / RPM 트래커
+// Gemini 쿼터 API / 세션 토큰
 // ============================================================================
 
 import { spawn, spawnSync } from "node:child_process";
@@ -20,15 +20,12 @@ import {
   GEMINI_QUOTA_REFRESH_LOCK_PATH,
   GEMINI_QUOTA_STALE_MS,
   GEMINI_REFRESH_FLAG,
-  GEMINI_RPM_TRACKER_PATH,
-  GEMINI_RPM_WINDOW_MS,
   GEMINI_SESSION_CACHE_PATH,
   GEMINI_SESSION_REFRESH_FLAG,
   GEMINI_SESSION_REFRESH_LOCK_PATH,
   GEMINI_SESSION_STALE_MS,
   LEGACY_GEMINI_PROJECT_CACHE,
   LEGACY_GEMINI_QUOTA_CACHE,
-  LEGACY_GEMINI_RPM_TRACKER,
   LEGACY_GEMINI_SESSION_CACHE,
   SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
@@ -43,23 +40,6 @@ import {
 } from "../utils.mjs";
 
 const httpsPost = createHttpsPost(https, GEMINI_API_TIMEOUT_MS);
-
-// Gemini 모델별 RPM 한도 (실측 기반: Pro 25, Flash 300)
-export function getGeminiRpmLimit(model) {
-  if (model?.includes("pro")) return 25;
-  return 300; // Flash 기본
-}
-
-// Gemini 모델 ID → HUD 표시 라벨 (동적 매핑)
-export function getGeminiModelLabel(model) {
-  if (!model) return "";
-  // 버전 + 티어 추출: gemini-3.1-pro-preview → [3.1Pro], gemini-2.5-flash → [2.5Flash]
-  const m = model.match(/gemini-(\d+(?:\.\d+)?)-(\w+)/);
-  if (!m) return "";
-  const ver = m[1];
-  const tier = m[2].charAt(0).toUpperCase() + m[2].slice(1);
-  return `[${ver}${tier}]`;
-}
 
 // remainingFraction → 사용 퍼센트 변환 (remainingAmount가 있으면 절대값도 제공)
 export function deriveGeminiLimits(bucket) {
@@ -508,47 +488,6 @@ export async function fetchGeminiQuota(accountId, options = {}) {
   };
   writeJsonSafe(GEMINI_QUOTA_CACHE_PATH, result);
   return result;
-}
-
-/**
- * Gemini RPM 트래커에서 최근 60초 내 요청 수를 읽는다.
- * @returns {{ count: number, percent: number, remainingSec: number }}
- */
-export function readGeminiRpm(model) {
-  try {
-    // 새 경로 → 레거시 경로 fallback
-    const rpmPath = existsSync(GEMINI_RPM_TRACKER_PATH)
-      ? GEMINI_RPM_TRACKER_PATH
-      : existsSync(LEGACY_GEMINI_RPM_TRACKER)
-        ? LEGACY_GEMINI_RPM_TRACKER
-        : null;
-    if (!rpmPath) return { count: 0, percent: 0, remainingSec: 60 };
-    const raw = readFileSync(rpmPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    const timestamps = Array.isArray(parsed.timestamps)
-      ? parsed.timestamps
-      : [];
-    const now = Date.now();
-    const recent = timestamps.filter((t) => now - t < GEMINI_RPM_WINDOW_MS);
-    const count = recent.length;
-    const rpmLimit = getGeminiRpmLimit(model);
-    const percent = clampPercent(Math.round((count / rpmLimit) * 100));
-    // 가장 오래된 엔트리가 윈도우에서 빠지기까지 남은 초 (0건이면 0s)
-    // 5초 단위 반올림으로 HUD 깜빡임 감소
-    const rawRemainingSec =
-      recent.length > 0
-        ? Math.max(
-            0,
-            Math.ceil(
-              (GEMINI_RPM_WINDOW_MS - (now - Math.min(...recent))) / 1000,
-            ),
-          )
-        : 0;
-    const remainingSec = Math.ceil(rawRemainingSec / 5) * 5;
-    return { count, percent, remainingSec };
-  } catch {
-    return { count: 0, percent: 0, remainingSec: 60 };
-  }
 }
 
 export function readGeminiQuotaSnapshot(accountId, authContext) {

@@ -70,8 +70,6 @@ function renderTmuxInstallHelp() {
   );
 }
 
-export { parseTeamArgs };
-
 export async function teamStart(args = []) {
   const {
     agents,

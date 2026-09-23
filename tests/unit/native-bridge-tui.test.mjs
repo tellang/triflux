@@ -10,13 +10,6 @@ import {
   startClaudeNativeBridge,
 } from "../../hub/team/claude-native-bridge.mjs";
 import { parseTeamArgs } from "../../hub/team/cli/commands/start/parse-args.mjs";
-import { writeBridgeSession } from "../../hub/team/headless-bridge-session.mjs";
-
-// Setup Mock State Dir
-const MOCK_STATE_DIR = path.join(
-  os.tmpdir(),
-  `mock-claude-state-${Date.now()}`,
-);
 
 function readJsonLine(sockPath, { timeoutMs = 1000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -106,38 +99,6 @@ test("CLI start parser keeps interactive native bridge UI default-off", () => {
     parseTeamArgs(["start", "--teammate-mode", "wt"]).nativeBridge,
     false,
   );
-});
-
-test("Session persistence should write valid JSON to sessions folder", async () => {
-  const testSessionId = "session_hl_test_99";
-  const testSocket = "/tmp/claude-test-99.sock";
-
-  await fs.mkdir(path.join(MOCK_STATE_DIR, "sessions"), { recursive: true });
-
-  // Call actual implementation
-  await writeBridgeSession(testSessionId, testSocket, MOCK_STATE_DIR);
-
-  const filePath = path.join(
-    MOCK_STATE_DIR,
-    "sessions",
-    `${testSessionId}.json`,
-  );
-
-  const fileExists = await fs
-    .access(filePath)
-    .then(() => true)
-    .catch(() => false);
-  assert.equal(fileExists, true, "Session file must be written to disk");
-
-  const content = await fs.readFile(filePath, "utf8");
-  const data = JSON.parse(content);
-
-  assert.equal(data.session_id, testSessionId, "Session ID must match");
-  assert.equal(data.messagingSock, testSocket, "Socket path must match");
-  assert.equal(data.status, "RUNNING", "Status must be RUNNING");
-
-  // Cleanup mock dir
-  await fs.rm(MOCK_STATE_DIR, { recursive: true, force: true });
 });
 
 test("runHeadless no longer bypasses assignments when nativeBridge is true", async () => {

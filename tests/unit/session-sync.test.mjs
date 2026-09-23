@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import {
-  publishHeadlessControl,
-  publishLeadControl,
-} from "../../hub/team/lead-control.mjs";
+import { publishLeadControl } from "../../hub/team/lead-control.mjs";
 import {
   createHeadlessControlSubscriber,
   getTeamStatus,
@@ -22,21 +19,6 @@ function mockJsonResponse(status, body) {
       return body;
     },
   };
-}
-
-function withHubState(state, run) {
-  const stateDir = mkdtempSync(join(tmpdir(), "tfx-hub-state-"));
-  const previousStateDir = process.env.TFX_HUB_STATE_DIR;
-  process.env.TFX_HUB_STATE_DIR = stateDir;
-  writeFileSync(join(stateDir, "hub.pid"), JSON.stringify(state), "utf8");
-
-  return Promise.resolve()
-    .then(run)
-    .finally(() => {
-      if (previousStateDir === undefined) delete process.env.TFX_HUB_STATE_DIR;
-      else process.env.TFX_HUB_STATE_DIR = previousStateDir;
-      rmSync(stateDir, { recursive: true, force: true });
-    });
 }
 
 describe("team lead-control/session-sync", () => {
@@ -82,37 +64,6 @@ describe("team lead-control/session-sync", () => {
     assert.equal(result.ok, false);
     assert.equal(result.error, "INVALID_COMMAND");
     assert.equal(called, false);
-  });
-
-  it("publishHeadlessControl()는 headless session 대상과 target_worker payload를 함께 전송해야 한다", async () => {
-    const calls = [];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = async (url, options) => {
-      calls.push({ url, options });
-      return mockJsonResponse(200, {
-        ok: true,
-        data: { message_id: "m-headless-1" },
-      });
-    };
-
-    try {
-      const result = await withHubState(
-        { pid: process.pid, url: "http://127.0.0.1:27888/mcp" },
-        () => publishHeadlessControl("hl-session", "pause", "worker-2"),
-      );
-
-      assert.equal(result.ok, true);
-      assert.equal(calls.length, 1);
-      assert.equal(calls[0].url, "http://127.0.0.1:27888/bridge/control");
-
-      const payload = JSON.parse(calls[0].options.body);
-      assert.equal(payload.to_agent, "session:hl-session");
-      assert.equal(payload.command, "pause");
-      assert.equal(payload.payload.session_name, "hl-session");
-      assert.equal(payload.payload.target_worker, "worker-2");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
   });
 
   it("subscribeToLeadCommands()는 lead.control 메시지만 command로 변환해야 한다", async () => {

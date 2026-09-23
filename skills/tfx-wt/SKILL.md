@@ -31,7 +31,6 @@ argument-hint: "<create-tab|split-pane|layout|list|close|close-stale|rename> [js
 |--------|------|
 | `hub/team/wt-manager.mjs` | Windows-only (non-Windows 에서 stub). tfx-wt 가 사용 |
 | `hub/team/terminal-opener.mjs` | Cross-platform abstraction. Windows→wt-manager, macOS/Linux→tmux |
-| `hub/team/runtime-strategy.mjs` | `psmux` (Windows) 와 `tmux` (macOS/Linux) runtime identity 분리 유지 |
 
 macOS 사용자가 "탭 열어"라고 했는데 본 스킬로 들어오면 잘못된 라우팅. 사용자에게 다음을 안내한 뒤 종료:
 - "Windows Terminal 은 macOS 에 없습니다."

@@ -38,12 +38,6 @@ const PROMPT_IDLE_PATTERNS = Object.freeze([
   BARE_PROMPT_RE,
 ]);
 
-/** @deprecated shellQuoteForHost(value, os) 사용 권장 — OS-aware 쿼팅 */
-function _shellQuote(value, os) {
-  if (os) return shellQuoteForHost(value, os);
-  return `'${String(value).replace(/'/g, "'\\''")}'`;
-}
-
 function freezeErrorRecord(error) {
   if (!error) return null;
   return Object.freeze({

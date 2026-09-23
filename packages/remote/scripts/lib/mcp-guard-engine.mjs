@@ -250,8 +250,6 @@ function detectLabel(filePath) {
   if (normalized.endsWith("/.gemini/config/mcp_config.json"))
     return "Antigravity";
   if (normalized.endsWith("/.gemini/settings.json")) return "Gemini";
-  if (normalized.endsWith("/.gemini/config/mcp_config.json"))
-    return "Antigravity";
   if (normalized.endsWith("/.codex/config.toml")) return "Codex";
   if (normalized.endsWith("/.claude.json")) return "Claude User MCP";
   if (normalized.endsWith("/.claude/settings.json")) return "Claude User";
@@ -767,10 +765,6 @@ function getHubServerEntry(registry) {
   );
 }
 
-function _makeHubRuntimeConfig() {
-  return { url: resolveHubUrl() };
-}
-
 function serverTargets(serverConfig) {
   if (Array.isArray(serverConfig?.targets) && serverConfig.targets.length > 0) {
     return [
@@ -1260,10 +1254,6 @@ function scanConfig(filePath) {
     servers: [],
     stdioServers: [],
   };
-}
-
-export function getRegistryPath() {
-  return registryPath();
 }
 
 export function createDefaultRegistry() {

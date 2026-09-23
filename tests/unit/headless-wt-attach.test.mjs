@@ -22,10 +22,6 @@ describe("headless wt-manager migration", () => {
     assert.ok(!headlessSrc.includes("function spawnDetachedWt"));
   });
 
-  it("buildDashboardAttachArgs가 존재한다", () => {
-    assert.ok(headlessSrc.includes("export function buildDashboardAttachArgs"));
-  });
-
   it("buildWtAttachArgs가 제거되었다", () => {
     assert.ok(!headlessSrc.includes("export function buildWtAttachArgs"));
   });

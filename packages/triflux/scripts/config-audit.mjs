@@ -73,13 +73,11 @@ function auditSettings() {
   // 훅 timeout 검사
   const hooks = settings.hooks || {};
   let totalHooks = 0;
-  let _longTimeouts = 0;
   for (const [event, matchers] of Object.entries(hooks)) {
     for (const matcher of Array.isArray(matchers) ? matchers : []) {
       for (const hook of matcher.hooks || []) {
         totalHooks++;
         if (hook.timeout && hook.timeout > 15) {
-          _longTimeouts++;
           addFinding(
             "hooks",
             "warn",

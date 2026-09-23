@@ -52,14 +52,12 @@ import {
 import {
   createPanelResizer,
   createSearchState,
-  createTokenTracker,
   createVimMotion,
 } from "./tui-widgets.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
 const VERSION = await loadVersion();
 
-// FALLBACK_COLUMNS, FALLBACK_ROWS → tui-core.mjs에서 import
 const MIN_CARD_WIDTH = 28;
 const ATTACH_SESSION_NAME_PATTERN = /^[a-zA-Z0-9_.-]+$/u;
 const DEFAULT_ATTACH_TAB_TTL_MS = 30_000;
@@ -284,11 +282,6 @@ function activityWave(tick, count = 4) {
   return `${MOCHA.executing}${wave}${RESET}`;
 }
 
-const GRID_GAP = 2;
-const DEFAULT_DETAIL_LINES = 10;
-// Tier1 상단 고정 행 수
-const _TIER1_ROWS = 2;
-
 const SUMMARY_KEYS = [
   "status",
   "lead_action",
@@ -301,32 +294,6 @@ const SUMMARY_KEYS = [
   "retryable",
   "partial_output",
 ];
-
-// ── 레이아웃 브레이크포인트 ──────────────────────────────────────────────
-// 80-119: 28col rail, 120-159: 36col rail, 160+: 균등
-function _resolveRailWidth(totalCols, columnCount) {
-  if (columnCount <= 1) return totalCols;
-  if (totalCols >= 160)
-    return Math.floor((totalCols - GRID_GAP * (columnCount - 1)) / columnCount);
-  if (totalCols >= 120)
-    return Math.min(
-      36,
-      Math.floor((totalCols - GRID_GAP * (columnCount - 1)) / columnCount),
-    );
-  return Math.min(
-    28,
-    Math.floor((totalCols - GRID_GAP * (columnCount - 1)) / columnCount),
-  );
-}
-
-function _autoColumnCount(totalCols, workerCount) {
-  if (workerCount <= 1) return 1;
-  if (totalCols >= 160) return Math.min(workerCount, 3);
-  if (totalCols >= 120) return Math.min(workerCount, 2);
-  return 1;
-}
-
-// 텍스트/상태/색상 유틸은 tui-core.mjs에서 import (위 참조)
 
 // ── MOCHA RGB (gradual fade 보간용) ──
 const MOCHA_RGB = {
@@ -354,8 +321,6 @@ function statusToRgb(status) {
   return MOCHA_RGB.muted;
 }
 
-const FADE_DURATION_MS = 1500;
-const FLASH_PHASE_MS = 250;
 const CARD_GLOW_MS = 3000;
 
 // Effect 1: Pulse border — running 워커 보더가 heartbeat 동기 breathing
@@ -372,22 +337,6 @@ function gradientBorderFn(topRgb, bottomRgb) {
     const c = lerpRgb(topRgb, bottomRgb, t);
     return `\x1b[38;2;${c.r};${c.g};${c.b}m`;
   };
-}
-
-// Effect 3: Flash-fade border — 상태 변경 시 백색 플래시 → 페이드아웃
-function _flashFadeBorderColor(currentStatus, prevStatus, changedAt) {
-  const elapsed = Date.now() - (changedAt || 0);
-  if (elapsed >= FADE_DURATION_MS || !prevStatus) return null;
-  const statusRgb = statusToRgb(currentStatus);
-  if (elapsed < FLASH_PHASE_MS) {
-    const t = elapsed / FLASH_PHASE_MS;
-    const bright = { r: 255, g: 255, b: 255 };
-    const c = lerpRgb(bright, statusRgb, t);
-    return `\x1b[38;2;${c.r};${c.g};${c.b}m`;
-  }
-  const t = (elapsed - FLASH_PHASE_MS) / (FADE_DURATION_MS - FLASH_PHASE_MS);
-  const c = lerpRgb(statusRgb, MOCHA_RGB.border, t);
-  return `\x1b[38;2;${c.r};${c.g};${c.b}m`;
 }
 
 function easeOutCubic(t) {
@@ -434,28 +383,6 @@ function dedupeRole(role, name, cli) {
   return r;
 }
 
-// wrapLine, wrapTextAll → tui-core.mjs에서 import
-
-function _wrapText(
-  text,
-  width,
-  maxLines = DEFAULT_DETAIL_LINES,
-  rawMode = false,
-) {
-  if (maxLines <= 0) return [];
-  const input = sanitizeTextBlock(text, rawMode);
-  if (!input) return [];
-  const wrapped = input
-    .split("\n")
-    .flatMap((line) => wrapLine(line, width))
-    .filter(Boolean);
-  if (wrapped.length <= maxLines) return wrapped;
-  return [
-    ...wrapped.slice(0, maxLines - 1),
-    truncate(wrapped[wrapped.length - 1], width),
-  ];
-}
-
 // ── virtual row buffer ────────────────────────────────────────────────────
 class RowBuffer {
   constructor() {
@@ -488,8 +415,6 @@ class RowBuffer {
     return this._prev.length;
   }
 }
-
-// countStatuses → tui-core.mjs에서 import
 
 // ── Tier1: 상단 고정 1행 ─────────────────────────────────────────────────
 function phaseColor(phase, time = Date.now()) {
@@ -927,19 +852,6 @@ function buildHelpOverlay(width, height) {
   return result;
 }
 
-// ── joinColumns ───────────────────────────────────────────────────────────
-function _joinColumns(blocks, gap = GRID_GAP) {
-  const maxHeight = Math.max(...blocks.map((b) => b.length));
-  return Array.from({ length: maxHeight }, (_, rowIdx) =>
-    blocks
-      .map(
-        (block) =>
-          block[rowIdx] || " ".repeat(wcswidth(stripAnsi(block[0] || ""))),
-      )
-      .join(" ".repeat(gap)),
-  );
-}
-
 // ── normalizeWorkerState ──────────────────────────────────────────────────
 function normalizeWorkerState(existing, state) {
   return coreNormalizeWorkerState(
@@ -1010,7 +922,6 @@ export function createLogDashboard(opts = {}) {
   let rawModeEnabled = false;
 
   // UX 위젯 (ISSUE-14)
-  const tokenTracker = createTokenTracker();
   const searchState = createSearchState();
   const vimMotion = createVimMotion();
   const panelResizer = createPanelResizer({
@@ -1681,9 +1592,6 @@ export function createLogDashboard(opts = {}) {
           ? existing._logSec
           : (explicitElapsed ?? nowElapsedSec());
       workers.set(paneName, merged);
-      // 토큰 히스토리 추적 (스파크라인용)
-      if (merged.tokens !== undefined)
-        tokenTracker.record(paneName, merged.tokens);
       ensureSelectedWorker(visibleWorkerNames());
       // follow-tail: 새 데이터 → 자동 scroll 재계산
       if (followTail) detailScrollOffset = 0;
@@ -1894,10 +1802,6 @@ export function renderConductorTier(snapshot, cols = 100) {
   const dataLines = [];
   if (!snapshot || snapshot.length === 0) {
     const emptyMsg = color("(no sessions)", FG.muted);
-    const _emptyPad = clip(
-      stripAnsi(emptyMsg) === "(no sessions)" ? emptyMsg : emptyMsg,
-      inner,
-    );
     dataLines.push(
       `${borderSeq}│${RESET} ${padRight(emptyMsg, inner - 2)} ${borderSeq}│${RESET}`,
     );
@@ -1933,6 +1837,3 @@ export function renderConductorTier(snapshot, cols = 100) {
 
   return [topBorder, headerLine, ...dataLines, botBorder];
 }
-
-// 하위 호환
-export { createLogDashboard as createTui };

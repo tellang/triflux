@@ -95,7 +95,6 @@ export function formatTokenSummary(diff) {
   const inputStr = formatTokenCount(t.input);
   const outputStr = formatTokenCount(t.output);
   const actualStr = formatSavings(s.actualCost);
-  const _claudeStr = formatSavings(s.claudeCost);
   const savedPct =
     s.claudeCost > 0 ? Math.round((s.saved / s.claudeCost) * 100) : 0;
 
@@ -493,8 +492,6 @@ export function getProviderRow(
     ACCOUNT_LABEL_WIDTH,
   );
 
-  const _modelLabelStr = modelLabel ? ` ${markerColor(modelLabel)}` : "";
-
   // 프로바이더별 색상 프로필
   const isGeminiFamily = provider === "gemini" || provider === "antigravity";
   const provAnsi =
@@ -503,7 +500,6 @@ export function getProviderRow(
     provider === "codex" ? codexWhite : isGeminiFamily ? geminiBlue : green;
 
   let quotaSection;
-  const _extraRightSection = "";
 
   if (currentTier === "nano" || currentTier === "micro") {
     const minPrefix = `${bold(markerColor(`${marker}`))}:`;

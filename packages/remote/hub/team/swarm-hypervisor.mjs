@@ -38,7 +38,6 @@ import {
   extractDirtyFiles,
   fetchRemoteShard,
   prepareIntegrationBranch,
-  pruneWorktree,
   rebaseShardOntoIntegration,
 } from "./worktree-lifecycle.mjs";
 
@@ -222,8 +221,7 @@ export function createSwarmHypervisor(opts) {
     _deps.prepareIntegrationBranch || prepareIntegrationBranch;
   const rebaseShardOntoIntegrationImpl =
     _deps.rebaseShardOntoIntegration || rebaseShardOntoIntegration;
-  const cleanupWorktreeImpl =
-    _deps.cleanupWorktree || cleanupWorktree || pruneWorktree;
+  const cleanupWorktreeImpl = _deps.cleanupWorktree || cleanupWorktree;
   const cleanupShardProcessesImpl =
     _deps.cleanupShardProcesses || cleanupShardProcesses;
   const registerSwarmShardImpl = _deps.registerSwarmShard || registerSwarmShard;
@@ -1789,7 +1787,6 @@ export function createSwarmHypervisor(opts) {
    */
   function detectChangedFiles(shardName, worker) {
     // Best-effort: parse output log for file paths
-    const _outPath = join(logsDir, shardName);
     try {
       const snap = worker.conductor.getSnapshot();
       for (const session of snap) {

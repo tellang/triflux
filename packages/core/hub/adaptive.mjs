@@ -168,5 +168,3 @@ export function createAdaptiveEngine(opts = {}) {
 export function __resetAdaptiveEngineForTests() {
   singletonEngine = null;
 }
-
-export default createAdaptiveEngine;

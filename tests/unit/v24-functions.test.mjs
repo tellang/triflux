@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { replaceProfileSection } from "../../scripts/setup.mjs";
 import {
   appendCodexResumeHint,
   cleanTuiArtifacts,
@@ -90,48 +89,6 @@ describe("v2.4 신규 JS 함수 테스트", () => {
         appendCodexResumeHint(existing, "", "session id: thr_other"),
         existing,
       );
-    });
-  });
-
-  describe("replaceProfileSection()", () => {
-    const tomlContent = `
-[profiles.high]
-model = "gpt-4"
-effort = "high"
-
-[profiles.low]
-model = "gpt-3.5"
-`;
-
-    it("1. 기존 프로필 교체 확인", () => {
-      const newLines = ['model = "gpt-5"', 'effort = "max"'];
-      const updated = replaceProfileSection(tomlContent, "high", newLines);
-
-      assert.ok(
-        updated.includes('[profiles.high]\nmodel = "gpt-5"\neffort = "max"'),
-      );
-      assert.ok(!updated.includes('model = "gpt-4"'));
-      // low 프로필은 유지되어야 함
-      assert.ok(updated.includes("[profiles.low]"));
-    });
-
-    it("2. 프로필 없을 때 원본 유지 확인 (replace는 match 실패 시 원본 반환)", () => {
-      const newLines = ['model = "gpt-5"'];
-      const updated = replaceProfileSection(tomlContent, "missing", newLines);
-
-      // 변경이 없어야 함
-      assert.equal(updated, tomlContent);
-    });
-
-    it("3. 여러 프로필 중 특정 하나만 교체 확인", () => {
-      const newLines = ['model = "gpt-4o-mini"'];
-      const updated = replaceProfileSection(tomlContent, "low", newLines);
-
-      // high 프로필은 유지
-      assert.ok(updated.includes('[profiles.high]\nmodel = "gpt-4"'));
-      // low 프로필은 변경
-      assert.ok(updated.includes('[profiles.low]\nmodel = "gpt-4o-mini"'));
-      assert.ok(!updated.includes('model = "gpt-3.5"'));
     });
   });
 });

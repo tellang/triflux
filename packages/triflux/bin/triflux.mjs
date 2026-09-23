@@ -123,10 +123,8 @@ const GREEN_BRIGHT = "\x1b[38;5;82m";
 const RED_BRIGHT = "\x1b[38;5;196m";
 
 // ── 브랜드 요소 ──
-const _BRAND = `${AMBER}${BOLD}triflux${RESET}`;
 const VER = `${DIM}v${PKG.version}${RESET}`;
 const LINE = `${GRAY}${"─".repeat(48)}${RESET}`;
-const _DOT = `${GRAY}·${RESET}`;
 const STALE_TEAM_MAX_AGE_SEC = 3600;
 const DEFAULT_TMUX_CLEANUP_PREFIX = "tfx-*";
 const DEFAULT_TMUX_CLEANUP_AGE_MIN = 60;
@@ -134,7 +132,6 @@ const ANSI_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/g;
 const HUB_DEFAULT_PORT = 27888;
 const DOCTOR_HUB_PID_FILE = join(CLAUDE_DIR, "cache", "tfx-hub", "hub.pid");
 
-const _EXIT_SUCCESS = 0;
 const EXIT_ERROR = 1;
 const EXIT_ARG_ERROR = 2;
 const EXIT_CLI_MISSING = 3;
@@ -1498,7 +1495,7 @@ function sumMemoryEstimateMb(panes, { execFile = execFileSync } = {}) {
   return seen ? total : null;
 }
 
-export function inspectDetachedTmuxSessions({
+function inspectDetachedTmuxSessions({
   prefix = DEFAULT_TMUX_CLEANUP_PREFIX,
   ageMin = DEFAULT_TMUX_CLEANUP_AGE_MIN,
   platform = process.platform,
@@ -1577,7 +1574,7 @@ export function inspectDetachedTmuxSessions({
   };
 }
 
-export async function cleanupDetachedTmuxSessions({
+async function cleanupDetachedTmuxSessions({
   sessions,
   dryRun = true,
   apply = false,
@@ -2039,9 +2036,8 @@ function previewClaudeRoutingAction() {
   const globalClaudePath = join(CLAUDE_DIR, "CLAUDE.md");
   const projectClaudePath = join(PKG_ROOT, "CLAUDE.md");
 
-  let _routingTable;
   try {
-    _routingTable = getLatestRoutingTable();
+    getLatestRoutingTable();
   } catch {
     return {
       type: "claude-guidance",
@@ -3784,7 +3780,6 @@ async function cmdDoctor(options = {}) {
           // --fix 모드: npm install 실행 (Windows 호환 shell: true)
           info(`npm install 실행 중 (${PKG_ROOT})...`);
           try {
-            const { execFileSync } = await import("node:child_process");
             execFileSync("npm", ["install", "--no-audit", "--no-fund"], {
               cwd: PKG_ROOT,
               stdio: "inherit",
@@ -4435,10 +4430,7 @@ async function cmdDoctor(options = {}) {
           }
         } else {
           // --fix 없이는 개수만 보고
-          const { execSync: execSyncDoctor } = await import(
-            "node:child_process"
-          );
-          const countStr = execSyncDoctor(
+          const countStr = execSync(
             `powershell -NoProfile -WindowStyle Hidden -Command "(Get-Process node -ErrorAction SilentlyContinue).Count"`,
             { encoding: "utf8", timeout: 5000 },
           ).trim();
@@ -4511,7 +4503,6 @@ async function cmdDoctor(options = {}) {
     // 14. Stale Teams (Claude teams/ + tasks/ 자동 감지)
     section("Stale Teams");
     const teamsDir = join(CLAUDE_DIR, "teams");
-    const _tasksDir = join(CLAUDE_DIR, "tasks");
     if (existsSync(teamsDir)) {
       try {
         const teamDirs = readdirSync(teamsDir).filter((d) => {
@@ -4584,7 +4575,6 @@ async function cmdDoctor(options = {}) {
               // 프로세스 명령줄에서 세션 ID 매칭 (tmux 없는 in-process 팀 지원)
               if (!hasActiveMember && teamConfig.leadSessionId) {
                 try {
-                  const _sessionToken = teamConfig.leadSessionId.toLowerCase();
                   const safeToken = teamConfig.leadSessionId
                     .slice(0, 8)
                     .replace(/[^a-zA-Z0-9-]/g, "");
@@ -5739,7 +5729,6 @@ async function cmdUpdate(args = []) {
     // ── Post-update: 설정 동기화 ──
     console.log(`\n${CYAN}── 설정 동기화 ──${RESET}`);
     cmdSetup({
-      fromUpdate: true,
       overrideVersion: newVer,
       skipClaudeMdSync: true,
     });
@@ -6831,17 +6820,13 @@ async function cmdHub(args = [], options = {}) {
       // - startupErrPath (tmp): 3초 안의 startup 실패 진단 (성공 시 cleanup)
       // - hub.log (cache): runtime stdout/stderr 영구 보존 (crash 추적)
       // detached spawn 은 pipe 유지가 까다로우니 fd 리다이렉트로 접근.
-      const { openSync: _openSync, closeSync: _closeSync } = await import(
-        "node:fs"
-      );
-      const { tmpdir: _tmpdir } = await import("node:os");
       const startupErrPath = join(
-        _tmpdir(),
+        tmpdir(),
         `tfx-hub-start-${Date.now()}-${process.pid}.err`,
       );
       let errFd;
       try {
-        errFd = _openSync(startupErrPath, "w");
+        errFd = openSync(startupErrPath, "w");
       } catch {
         errFd = undefined;
       }
@@ -6856,12 +6841,12 @@ async function cmdHub(args = [], options = {}) {
       child.unref();
       if (errFd !== undefined) {
         try {
-          _closeSync(errFd);
+          closeSync(errFd);
         } catch {}
       }
       if (logFd !== undefined) {
         try {
-          _closeSync(logFd);
+          closeSync(logFd);
         } catch {}
       }
 

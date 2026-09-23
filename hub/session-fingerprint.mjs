@@ -414,5 +414,3 @@ export function createAdaptiveFingerprintService(options = {}) {
     getHealth,
   });
 }
-
-export default createAdaptiveFingerprintService;

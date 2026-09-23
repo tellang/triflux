@@ -427,11 +427,6 @@ function main() {
     }
   }
 
-  // wt 정리 명령 우회 (TFX_CLEANUP_BYPASS=1 한정). new-tab/split-pane만 차단 유지하려면 아래 조건 세분화.
-  if (CLEANUP_BYPASS) {
-    // bypass 모드에서는 아래 wt 검사를 이미 통과한 상태. 추가 작업 없음.
-  }
-
   // 2. WARN 체크 — allow + additionalContext
   const warnings = [];
   for (const rule of WARN_RULES) {

@@ -188,13 +188,6 @@ function allowTargetedTest(words) {
   return null;
 }
 
-function allowNpm(command) {
-  // npm scripts are intentionally not auto-allowed: package.json can redefine
-  // them to perform arbitrary side effects. Prefer explicit node test commands.
-  void command;
-  return null;
-}
-
 function allowanceReason(command) {
   const trimmed = command.trim().replace(/\s+/g, " ");
   if (!trimmed || hasUnsafeSurface(trimmed)) return null;
@@ -202,12 +195,13 @@ function allowanceReason(command) {
   const words = shellWords(trimmed);
   if (words.length === 0) return null;
 
+  // npm scripts are intentionally not auto-allowed: package.json can redefine
+  // them to perform arbitrary side effects. Prefer explicit node test commands.
   return (
     allowGit(words, trimmed) ??
     allowListing(words) ??
     allowSearch(words) ??
-    allowTargetedTest(words) ??
-    allowNpm(trimmed)
+    allowTargetedTest(words)
   );
 }
 

@@ -60,56 +60,6 @@ export function getTerminalColumns() {
   return 0;
 }
 
-let _cachedRows = 0;
-export function getTerminalRows() {
-  if (_cachedRows > 0) return _cachedRows;
-  if (process.stdout.rows) {
-    _cachedRows = process.stdout.rows;
-    return _cachedRows;
-  }
-  if (process.stderr.rows) {
-    _cachedRows = process.stderr.rows;
-    return _cachedRows;
-  }
-  const envLines = Number(process.env.LINES);
-  if (envLines > 0) {
-    _cachedRows = envLines;
-    return _cachedRows;
-  }
-  try {
-    if (process.platform === "win32") {
-      const raw = execSync("mode con", {
-        timeout: 2000,
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
-      }).toString();
-      const m =
-        raw.match(/Lines[^:]*:\s*(\d+)/i) || raw.match(/줄[^:]*:\s*(\d+)/);
-      if (m) {
-        _cachedRows = Number(m[1]);
-        return _cachedRows;
-      }
-    } else {
-      const raw = execSync(
-        "tput lines 2>/dev/null || stty size 2>/dev/null | awk '{print $1}'",
-        {
-          timeout: 2000,
-          stdio: ["pipe", "pipe", "pipe"],
-        },
-      )
-        .toString()
-        .trim();
-      if (raw && !Number.isNaN(Number(raw))) {
-        _cachedRows = Number(raw);
-        return _cachedRows;
-      }
-    }
-  } catch {
-    /* 감지 실패 */
-  }
-  return 0;
-}
-
 export function detectCompactMode() {
   // 1. 명시적 CLI 플래그
   if (process.argv.includes("--compact")) return true;
@@ -195,16 +145,4 @@ export function tierDimBar(currentTier) {
   return currentTier === "full"
     ? DIM + "░".repeat(GAUGE_WIDTH) + RESET + " "
     : "";
-}
-// Gemini ∞% 전용: 무한 쿼터이므로 dim 회색 바
-export function tierInfBar(currentTier) {
-  return currentTier === "full"
-    ? DIM + "█".repeat(GAUGE_WIDTH) + RESET + " "
-    : "";
-}
-
-// 테스트 지원: 캐시 초기화
-export function _resetTerminalCache() {
-  _cachedColumns = 0;
-  _cachedRows = 0;
 }
