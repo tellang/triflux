@@ -127,7 +127,7 @@ describe("#148 _mcp_preflight_filter_dead — all-dead early fail", () => {
 
   it("#170 all-dead default: graceful degradation (rc=0)", () => {
     // PR #170 회귀 fix: default 동작이 early-fail (rc=78) 에서 graceful (rc=0+marker) 로 변경.
-    // 호출자 (run_codex_mcp 분기) 가 _TFX_MCP_DEGRADED 마커 보고 transport=exec 강제.
+    // 호출자 (codex exec 레인) 가 _TFX_MCP_DEGRADED 마커 보고 transport=exec 강제.
     const result = runPreflight({
       flags: [
         "-c",
@@ -363,9 +363,8 @@ describe("#153 dotted server names — preflight regex 는 dot 포함", () => {
   });
 });
 
-// PR #170 — graceful degradation marker 가 호출자 (run_codex_mcp 분기) 에서
+// PR #170 — graceful degradation marker 가 호출자 (codex exec 레인) 에서
 // transport=exec 강제 + FULL_PROMPT 리셋 (MCP_HINT 제거) 을 trigger 한다.
-// 이 분기가 회귀하면 dead MCP 환경에서 codex-mcp.mjs 가 spawn 되어 stall 재발.
 describe("#170 transport degradation marker — source 분기 회귀 가드", () => {
   it("MCP_HINT 는 사용자 프롬프트와 라벨+빈줄로 분리해 결합한다", () => {
     const source = readFileSync(SCRIPT_PATH, "utf8");

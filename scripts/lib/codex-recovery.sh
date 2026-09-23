@@ -58,8 +58,8 @@ recover_codex_stdout() {
 
 # ── MCP transport 채널 사망 판정 ──
 # Codex MCP transport 채널이 실행 중 죽으면 codex exec 가 exit 0 + 빈 stdout 으로
-# 끝나는 변형이 있다(래퍼 부재로 인한 pre-flight CODEX_MCP_TRANSPORT_EXIT_CODE=70
-# 과 구분됨 — 이건 런타임 채널 사망). stderr 의 하드 크래시 서명으로 이 사망을
+# 끝나는 변형이 있다(pre-flight 단계 실패와
+# 구분되는 런타임 채널 사망). stderr 의 하드 크래시 서명으로 이 사망을
 # 검출한다. 아우터 가드가 exit 0 이어도 결과를 실패로 승격하는 근거로 쓴다.
 # 인자: [stderr_log] (미지정 시 $STDERR_LOG). 반환: 0=크래시 서명 있음, 1=없음.
 codex_stdout_transport_crashed() {
