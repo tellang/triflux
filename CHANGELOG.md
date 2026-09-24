@@ -2,6 +2,19 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.47.0] - 2026-09-24
+
+### Changed
+- cto: north star 주입, 허브 auto-collect, 훅의 lake 자동 기록, 트레이 자동 기동을 기본으로 끈다. 켜려면 `TFX_CTO_NORTH_STAR=1`, `TFX_CTO_AUTO_COLLECT=1`, `TFX_HUB_AUTO_TRAY=1`. auto-collect 가 꺼져 있으면 HUD 의 cto 줄을 숨긴다. `tfx cto`, `tfx tray` 수동 명령은 그대로다 (ADR-0018, #579)
+- docs: 구현이 제거된 PRD 와 recovery 문서는 폐기 표시를 달고 `docs/_archive/` 로 옮긴다 (ADR-0012, #510)
+
+### Removed
+- hub: 호출자가 없던 git-preflight 충돌 가드와 `/synapse/preflight`, `/synapse/locks` 라우트 (#510)
+
+### Fixed
+- hud: Codex 가 5h 창 없이 주간 창만 보내면서 주간 사용률이 5h 칸에 찍히던 문제, 주간 창이 조기 리셋된 뒤 옛 창의 100% 가 1w 칸에 남던 문제 (#509)
+- swarm: 통합 워크트리 추가가 중간에 실패하면 git 메타데이터가 남던 문제 (#577)
+
 ## [10.46.0] - 2026-09-24
 
 ### Added
