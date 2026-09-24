@@ -17,6 +17,7 @@
 - 새 아키텍처/정책/횡단 결정은 `docs/adr/`에 ADR로 `proposed`부터 시작한다. 규약은 `docs/adr/CONVENTIONS.md`. 필수 헤딩 `## 결정`·`## 검토한 대안`은 반드시 포함한다.
 - `.claude/rules/`의 정책이 "왜" 그런지는 관련 ADR로 링크한다. **rules = 실행 SSOT(가변), ADR = 근거 이력(불변).** rules를 `docs/`로 흡수하지 않는다 — auto-load 경로를 보존한다.
 - 정책을 바꾸면 `.claude/rules/`를 고치고, 결정 자체가 바뀌면 새 번호 ADR을 만들어 옛 것을 `superseded`로 둔다(ADR은 사후 수정하지 않는다).
+- PRD 와 recovery 문서는 대상 구현이 제거되면 맨 앞에 폐기 표시 한 줄(제거 커밋 해시, 근거 ADR)을 달고 `docs/_archive/` 아래 같은 하위 경로로 옮긴다. 삭제하지 않는다. 근거(why): [ADR-0012](../../docs/adr/0012-orphaned-design-doc-deprecation.md).
 - 문서 배치·공개 여부는 `docs/README.md` 인덱스가 정본이다(미등재 = 존재 부정). 정책 캘리브레이션(자동화 트리거 등)은 `.document-harness.toml`이 정본이다.
 
 ## 관련

@@ -1,3 +1,5 @@
+> 폐기(2026-09-24): 이 문서가 기술한 git-preflight 배선은 12313814 에서 제거됐다. 근거: ADR-0012.
+
 # Synapse v1 — Hub Integration Remaining Shards
 
 > Source: deep-plan 92% consensus (2026-04-11)

@@ -1,13 +1,13 @@
 ---
 id: 0012
 title: 제거된 구현의 설계 문서 폐기 표시
-status: proposed
+status: accepted
 date: 2026-09-15
 deciders: [tellang]
 supersedes: []
 superseded_by: null
 relates: [0002]
-pr: null
+pr: 510
 ---
 
 # ADR-0012: 제거된 구현의 설계 문서 폐기 표시
