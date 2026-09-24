@@ -145,6 +145,7 @@ describe("agy-session-hook adapter", () => {
       hubEnsureRun: async () => {},
       registerInteractiveSession: (stdinData) =>
         registerInteractiveSession(stdinData, {
+          env: { TFX_CTO_AUTO_COLLECT: "1" },
           register: () => {},
           heartbeat: () => {},
           gitRunner: () => {},

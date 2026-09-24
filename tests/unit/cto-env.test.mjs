@@ -155,16 +155,25 @@ describe("resolveRoleControlSnapshot", () => {
       },
       [false, false, false, false],
     ],
-    [{}, [false, false, true, true]],
-    [{ TFX_CTO_MANAGER: "1" }, [true, false, true, true]],
-    [{ TFX_CTO_MANAGER: "1", TFX_LEAD_MANAGER: "1" }, [true, true, true, true]],
+    [{}, [false, false, false, false]],
+    [{ TFX_CTO_MANAGER: "1" }, [true, false, false, false]],
+    [
+      { TFX_CTO_MANAGER: "1", TFX_LEAD_MANAGER: "1" },
+      [true, true, false, false],
+    ],
     [
       { TFX_CTO_MANAGER: "1", TFX_CTO_NORTH_STAR: "0" },
-      [true, false, false, true],
+      [true, false, false, false],
     ],
     [
       { TFX_CTO_MANAGER: "1", TFX_CTO_AUTO_COLLECT: "off" },
-      [true, false, true, false],
+      [true, false, false, false],
+    ],
+    [{ TFX_CTO_NORTH_STAR: "1" }, [false, false, true, false]],
+    [{ TFX_CTO_AUTO_COLLECT: "1" }, [false, false, false, true]],
+    [
+      { TFX_CTO_NORTH_STAR: "1", TFX_CTO_AUTO_COLLECT: "1" },
+      [false, false, true, true],
     ],
   ];
 

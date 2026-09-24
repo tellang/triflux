@@ -13,6 +13,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { resolveRoleControlSnapshot } from "../hub/lib/cto-env.mjs";
 import {
   buildSynapseTaskSummary,
   drainPendingSynapse,
@@ -95,6 +96,11 @@ async function defaultResolveParticipantLakeRoot(cwd) {
  */
 export async function emitParticipantSessionStarted(stdinData, seams = {}) {
   try {
+    if (
+      !resolveRoleControlSnapshot(seams.env || process.env).auto_collect_enabled
+    ) {
+      return null;
+    }
     const payload = parseStartPayload(stdinData);
     const sessionId = String(payload?.session_id || "").trim();
     if (!sessionId) return null;

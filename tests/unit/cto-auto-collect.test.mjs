@@ -37,7 +37,7 @@ function makeCollector({
   registry,
   runCollect,
   now = () => 1_000_000,
-  env = {},
+  env = { TFX_CTO_AUTO_COLLECT: "1" },
 }) {
   return createCtoAutoCollector({
     registry,
@@ -49,7 +49,7 @@ function makeCollector({
 }
 
 describe("cto-auto-collect", () => {
-  it("recognizes opt-out env values", () => {
+  it("requires an explicit opt-in env value", () => {
     for (const value of ["0", "false", "off", "no", " FALSE "]) {
       assert.equal(
         isCtoAutoCollectDisabled({ TFX_CTO_AUTO_COLLECT: value }),
@@ -60,7 +60,31 @@ describe("cto-auto-collect", () => {
       isCtoAutoCollectDisabled({ TFX_CTO_AUTO_COLLECT: "1" }),
       false,
     );
-    assert.equal(isCtoAutoCollectDisabled({}), false);
+    assert.equal(isCtoAutoCollectDisabled({}), true);
+    assert.equal(
+      isCtoAutoCollectDisabled({ TFX_CTO_AUTO_COLLECT: "maybe" }),
+      true,
+    );
+  });
+
+  it("does not collect by default", async () => {
+    const root = makeProjectRoot();
+    const calls = [];
+    const collector = makeCollector({
+      env: {},
+      registry: { querySessions: () => [{ sessionId: "peer" }] },
+      runCollect: async () => calls.push("collect"),
+    });
+
+    assert.deepEqual(
+      collector.handleSessionStarted({
+        sessionId: "solo",
+        session: { cwd: root, worktreePath: root },
+      }),
+      { triggered: false, reason: "disabled" },
+    );
+    await collector.drain();
+    assert.deepEqual(calls, []);
   });
 
   it("triggers runCollect with reason 'triggered' when a same-project peer exists", async () => {
