@@ -2,6 +2,25 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.46.0] - 2026-09-24
+
+### Added
+- live: `peer --attach-a/--attach-b`로 이미 떠 있는 tmux 세션에 붙는다. 새로 띄우지 않고 끝나도 종료하지 않는다. npm shim(`node`)으로 뜬 codex도 판정한다 (#573)
+- live: `ask --session 이름:창.pane` 타깃과 보내기 전 busy 검사(`--if-busy wait|fail|interrupt`, `--busy-timeout`) (#573)
+- live: `ask --cli codex --transport uds --thread <id|auto>`. codex 0.156 TUI는 `daemon_auto_start`에서 공유 app-server 데몬 위에서 돌므로, tmux 밖에서 띄운 TUI 스레드에도 턴을 넣는다. 응답은 `final_answer`와 `commentary`를 나눠 준다 (#573)
+- live: `orchestrate --codex-socket PATH|default`, `list-sessions --transport uds` (#573)
+- release: 버전을 올린 커밋이 main에 머지되면 ci 통과 뒤 `release.yml`이 태그, GitHub 릴리즈, npm 게시, 검증까지 자동으로 진행한다. 버전을 안 바꾼 머지는 건너뛴다 (#574)
+
+### Changed
+- routing: 구현, 리뷰, 검증 레인을 GPT-6 Sol(`gpt6_sol_high`, `gpt6_sol_med`)로, 경량 레인을 GPT-6 Luna(`gpt6_luna_high`, `gpt6_luna_low`)로 옮긴다. 옛 `gpt56_terra_*`, `gpt56_luna_*` 이름은 같은 effort의 새 이름으로 정규화한다. 모델 배치표는 `tfx-routing.md`에 둔다 (ADR-0017, bb87b8c0)
+- release: npm 게시는 OIDC Trusted Publishing만 쓴다. `NPM_TOKEN` 폴백을 뺐고, 세 패키지 모두 Trusted Publisher가 등록돼 있어야 한다 (#574)
+- release: npm 게시 시점 검사로 레지스트리 반영이 늦으면 verify가 900초 기다린 뒤 경고만 남기고 통과한다. 10.45.0 반영에 remote가 11시간 걸렸다 (#575)
+
+### Fixed
+- release: `channel` 입력이 npm dist-tag로 전달되지 않아 canary가 latest로 나가던 문제 (#574)
+- release: npm 게시 실행을 태그 ref로 dispatch하고, 이번 dispatch의 실행 ID만 기다린다 (#574)
+- live: codex 0.156에서 `model: loading` 화면을 준비 완료로 판정해 첫 ask가 사라지던 문제, 응답 끝에 시각 줄이 섞이던 문제 (#573)
+
 ## [10.45.0] - 2026-09-22
 
 ### Added
