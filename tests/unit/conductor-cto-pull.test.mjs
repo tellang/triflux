@@ -37,11 +37,51 @@ function readJsonl(filePath) {
   return text.split("\n").map((line) => JSON.parse(line));
 }
 
+function writeLakeSnapshot(lakeRoot) {
+  mkdirSync(lakeRoot, { recursive: true });
+  writeFileSync(
+    join(lakeRoot, "current.json"),
+    JSON.stringify({
+      schema_version: "cto-lake.v1",
+      repo: { branch: "feat/cto-t6e" },
+      sources: { git: { available: true } },
+      ledger_tail: [{ event: "collect" }],
+      live_sessions: [],
+      active_shards: [],
+    }),
+    "utf8",
+  );
+}
+
+async function spawnAndReadEvents(sandboxDir, lakeRoot) {
+  const conductor = createConductor({
+    logsDir: join(sandboxDir, "logs"),
+    ctoLakeRoot: lakeRoot,
+    enableMesh: false,
+    probeOpts: {
+      intervalMs: 999_999,
+      l1ThresholdMs: 999_999,
+      l3ThresholdMs: 999_999,
+    },
+    deps: { spawn: makeMockSpawn() },
+  });
+  conductor.spawnSession({
+    id: "cto-context-session",
+    agent: "claude",
+    prompt: "echo_test",
+  });
+  await conductor.shutdown("flush_events");
+  return { conductor, events: readJsonl(conductor.eventLogPath) };
+}
+
 describe("conductor CTO pull surface", () => {
   let sandboxDir;
   let conductor;
+  const originalNorthStar = process.env.TFX_CTO_NORTH_STAR;
 
   afterEach(async () => {
+    if (originalNorthStar === undefined) delete process.env.TFX_CTO_NORTH_STAR;
+    else process.env.TFX_CTO_NORTH_STAR = originalNorthStar;
     if (conductor) {
       await conductor.shutdown("afterEach_cleanup");
       conductor = null;
@@ -52,45 +92,33 @@ describe("conductor CTO pull surface", () => {
     }
   });
 
-  it("logs CTO context additively when a lake snapshot is available", async () => {
-    sandboxDir = makeTempDir("triflux-conductor-cto-");
-    const logsDir = join(sandboxDir, "logs");
+  it("does not log CTO context by default (ADR-0018 opt-in)", async () => {
+    delete process.env.TFX_CTO_NORTH_STAR;
+    sandboxDir = makeTempDir("triflux-conductor-cto-off-");
     const lakeRoot = join(sandboxDir, ".triflux", "lake");
-    mkdirSync(lakeRoot, { recursive: true });
-    writeFileSync(
-      join(lakeRoot, "current.json"),
-      JSON.stringify({
-        schema_version: "cto-lake.v1",
-        repo: { branch: "feat/cto-t6e" },
-        sources: { git: { available: true } },
-        ledger_tail: [{ event: "collect" }],
-        live_sessions: [],
-        active_shards: [],
-      }),
-      "utf8",
+    writeLakeSnapshot(lakeRoot);
+
+    const result = await spawnAndReadEvents(sandboxDir, lakeRoot);
+    conductor = result.conductor;
+
+    assert.equal(
+      result.events.find((event) => event.event === "cto_context"),
+      undefined,
     );
+  });
 
-    conductor = createConductor({
-      logsDir,
-      ctoLakeRoot: lakeRoot,
-      enableMesh: false,
-      probeOpts: {
-        intervalMs: 999_999,
-        l1ThresholdMs: 999_999,
-        l3ThresholdMs: 999_999,
-      },
-      deps: { spawn: makeMockSpawn() },
-    });
+  it("logs CTO context additively when north star is enabled", async () => {
+    process.env.TFX_CTO_NORTH_STAR = "1";
+    sandboxDir = makeTempDir("triflux-conductor-cto-");
+    const lakeRoot = join(sandboxDir, ".triflux", "lake");
+    writeLakeSnapshot(lakeRoot);
 
-    conductor.spawnSession({
-      id: "cto-context-session",
-      agent: "claude",
-      prompt: "echo_test",
-    });
-    await conductor.shutdown("flush_events");
+    const result = await spawnAndReadEvents(sandboxDir, lakeRoot);
+    conductor = result.conductor;
 
-    const events = readJsonl(conductor.eventLogPath);
-    const ctoEvent = events.find((event) => event.event === "cto_context");
+    const ctoEvent = result.events.find(
+      (event) => event.event === "cto_context",
+    );
     assert.equal(ctoEvent.session, "cto-context-session");
     assert.equal(ctoEvent.snapshot.schema_version, "cto-lake.v1");
     assert.equal(ctoEvent.snapshot.repo.branch, "feat/cto-t6e");
