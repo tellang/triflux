@@ -48,9 +48,9 @@ function hasDirtyFiles(session) {
 // A session is "live" while active OR idle. Idle is an interactive session that
 // missed its heartbeat interval but is still under the TTL — alive but inactive,
 // not presumed dead. getActive() and querySessions() share this single predicate
-// so the liveness contract can't drift: getActive() feeds git-preflight's
-// dirty-file conflict guard, so dropping idle there would hide a still-live
-// interactive session's claimed paths from that safety check.
+// so the liveness contract can't drift: getActive() feeds peer discovery,
+// CTO status/hygiene and log retention, so dropping idle there would hide a
+// still-live interactive session from every one of those consumers.
 function isLiveStatus(status) {
   return status === "active" || status === "idle";
 }
@@ -337,7 +337,7 @@ export function createSynapseRegistry(opts = {}) {
     // session resuming: Claude Code re-fires SessionStart with the same
     // session_id on resume/clear/compact, so fall through and re-register
     // (revive) it. Otherwise the resumed-but-live session stays stale forever
-    // and vanishes from peer-discovery AND git-preflight's dirty-file guard.
+    // and vanishes from peer-discovery.
     const existing = sessions.get(sessionId);
     if (existing && isLiveStatus(existing.status)) {
       console.warn(
@@ -381,10 +381,13 @@ export function createSynapseRegistry(opts = {}) {
   }
 
   // stale/expired 세션이 cutoff 넘게 누적되면 Map에서 제거.
-  // live(active/idle)는 lastHeartbeat가 오래돼도 보존 — git-preflight dirty-file 가드가 의존.
-  // Dirty stale rows keep the historical 24h window because same-id resume
-  // revives their dirty-file guard; clean stale rows expire quickly to avoid
-  // daily dummy rows after overnight operator gaps.
+  // live(active/idle) rows survive a long-stale lastHeartbeat because peer
+  // discovery and CTO status/hygiene still read them.
+  // Dirty stale rows keep the historical 24h window. Its original consumer,
+  // the git-preflight dirty-file guard, is gone and nothing populates
+  // dirtyFiles today, so this split is a candidate for collapsing into one
+  // window. Clean stale rows expire quickly to avoid daily dummy rows after
+  // overnight operator gaps.
   function pruneExpired(opts2 = {}) {
     if (destroyed) return { removed: [], count: 0 };
 
@@ -510,9 +513,9 @@ export function createSynapseRegistry(opts = {}) {
   }
 
   function getActive() {
-    // Live = active or idle. git-preflight uses this to detect other live
-    // sessions whose dirty files would conflict; an idle interactive session is
-    // still live (process alive, dirty files on disk) and must stay visible.
+    // Live = active or idle. Peer discovery, CTO status/hygiene and log
+    // retention read this list; an idle interactive session is still live
+    // (process alive) and must stay visible to them.
     return [...sessions.values()]
       .filter((session) => isLiveStatus(session.status))
       .map((session) => cloneSession(session));
