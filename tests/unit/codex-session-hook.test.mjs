@@ -158,6 +158,7 @@ describe("codex-session-hook", () => {
       hubEnsureRun: async () => {},
       registerInteractiveSession: (stdinData) =>
         registerInteractiveSession(stdinData, {
+          env: { TFX_CTO_AUTO_COLLECT: "1" },
           register: () => {},
           heartbeat: () => {},
           gitRunner: () => {},
@@ -186,7 +187,8 @@ describe("codex-session-hook", () => {
       encodingOrCallback,
       callback,
     ) {
-      writes.push(String(chunk));
+      // node:test may write binary reporter events while stdout is patched.
+      if (typeof chunk === "string") writes.push(chunk);
       const done =
         typeof encodingOrCallback === "function"
           ? encodingOrCallback

@@ -19,11 +19,33 @@ describe("CTO HUD provider", () => {
 
   it("returns null without throwing when the current lake brief is missing", () => {
     assert.doesNotThrow(() => {
-      assert.equal(readCtoStatus({ rootDir }), null);
+      assert.equal(
+        readCtoStatus({ rootDir, env: { TFX_CTO_AUTO_COLLECT: "1" } }),
+        null,
+      );
     });
   });
 
-  it("returns the current brief summary line and version tag", () => {
+  it("hides the CTO row unless auto-collect is enabled", () => {
+    const lakeDir = join(rootDir, ".triflux", "lake");
+    mkdirSync(lakeDir, { recursive: true });
+    writeFileSync(join(lakeDir, "current.md"), "summary: old CTO state\n");
+
+    assert.equal(readCtoStatus({ rootDir, env: {} }), null);
+    assert.equal(
+      readCtoStatus({ rootDir, env: { TFX_CTO_AUTO_COLLECT: "0" } }),
+      null,
+    );
+    assert.equal(
+      readCtoStatus({
+        rootDir,
+        env: { TFX_CTO: "0", TFX_CTO_AUTO_COLLECT: "1" },
+      }),
+      null,
+    );
+  });
+
+  it("returns the current brief summary line and version tag when enabled", () => {
     const lakeDir = join(rootDir, ".triflux", "lake");
     mkdirSync(lakeDir, { recursive: true });
     writeFileSync(
@@ -31,7 +53,7 @@ describe("CTO HUD provider", () => {
       [
         "brief_version: cto-lake.v1",
         "repo_state",
-        "summary: ship the always-on HUD row",
+        "summary: ship the CTO HUD row",
         "active_goals",
         "- G1 in_progress: keep operators aligned",
         "",
@@ -39,10 +61,13 @@ describe("CTO HUD provider", () => {
       "utf8",
     );
 
-    const status = readCtoStatus({ rootDir });
+    const status = readCtoStatus({
+      rootDir,
+      env: { TFX_CTO_AUTO_COLLECT: "1" },
+    });
 
     assert.deepEqual(status, {
-      line: "ship the always-on HUD row",
+      line: "ship the CTO HUD row",
       rightTag: "cto-lake.v1",
     });
   });

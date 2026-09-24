@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { resolveRoleControlSnapshot } from "../../hub/lib/cto-env.mjs";
 import {
   CTO_LAKE_CURRENT_RELATIVE_PATH,
   CTO_STATUS_LINE_MAX_CHARS,
@@ -53,6 +54,8 @@ function extractStatusLine(lines) {
 }
 
 export function readCtoStatus(options = {}) {
+  if (!resolveRoleControlSnapshot(options.env).auto_collect_enabled)
+    return null;
   try {
     const currentPath = resolveCurrentPath(options);
     const stat = statSync(currentPath);

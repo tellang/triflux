@@ -75,6 +75,7 @@ describe("tfx-route Codex north-star prepend", () => {
     const result = runPrepend({
       workdir,
       prompt: "Implement the requested change.\nKeep dispatch stable.",
+      northStarFlag: "1",
     });
     const resolvedWorkdir = realpathSync(workdir);
 
@@ -118,6 +119,19 @@ describe("tfx-route Codex north-star prepend", () => {
       prompt,
       northStarFlag: "0",
     });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, prompt);
+  });
+
+  it("leaves the prompt byte-unchanged when north star is unset", () => {
+    const workdir = mkdtempSync(join(tmpdir(), "tfx-codex-brief-default-"));
+    cleanupDirs.push(workdir);
+    mkdirSync(join(workdir, ".triflux", "lake"), { recursive: true });
+    writeFileSync(join(workdir, ".triflux", "lake", "current.md"), "Brief.\n");
+    const prompt = "Original prompt.";
+
+    const result = runPrepend({ workdir, prompt });
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, prompt);

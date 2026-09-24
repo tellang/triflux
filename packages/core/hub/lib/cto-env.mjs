@@ -38,10 +38,9 @@ export function resolveRoleControlSnapshot(env = process.env, options = {}) {
   const ctoManagerEnabled = masterEnabled && isEnvOn(env, "TFX_CTO_MANAGER");
   const leadManagerEnabled =
     ctoManagerEnabled && isEnvOn(env, "TFX_LEAD_MANAGER");
-  const northStarEnabled =
-    masterEnabled && !isEnvOff(env, "TFX_CTO_NORTH_STAR");
+  const northStarEnabled = masterEnabled && isEnvOn(env, "TFX_CTO_NORTH_STAR");
   const autoCollectEnabled =
-    masterEnabled && !isEnvOff(env, "TFX_CTO_AUTO_COLLECT");
+    masterEnabled && isEnvOn(env, "TFX_CTO_AUTO_COLLECT");
   const values = {
     master_enabled: masterEnabled,
     cto_manager_enabled: ctoManagerEnabled,

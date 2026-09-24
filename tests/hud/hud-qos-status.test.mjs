@@ -341,20 +341,32 @@ describe("HUD Breakpoints", () => {
       "utf8",
     );
 
+    // ADR-0018: auto-collect 가 꺼져 있으면 갱신되지 않는 lake 를 그리지 않는다.
+    const defaultOutput = stripAnsiText(
+      runHudWithDimensions(
+        120,
+        40,
+        { TFX_CTO_AUTO_COLLECT: "" },
+        { cwd: projectDir },
+      ),
+    );
+    assert.doesNotMatch(defaultOutput, /^\^:/m);
+
+    const ctoEnv = { TFX_CTO_AUTO_COLLECT: "1" };
     const fullOutput = stripAnsiText(
-      runHudWithDimensions(120, 40, {}, { cwd: projectDir }),
+      runHudWithDimensions(120, 40, ctoEnv, { cwd: projectDir }),
     );
     assert.match(fullOutput, /^\^: cto:focus on the north-star row/m);
     assert.match(fullOutput, /^\^: .* \| cto-lake\.v1/m);
 
     const microOutput = stripAnsiText(
-      runHudWithDimensions(50, 40, {}, { cwd: projectDir }),
+      runHudWithDimensions(50, 40, ctoEnv, { cwd: projectDir }),
     );
     assert.match(microOutput, /^\^: cto:focus on the north-star row/m);
     assert.doesNotMatch(microOutput, /cto-lake\.v1/);
 
     const nanoOutput = stripAnsiText(
-      runHudWithDimensions(35, 40, {}, { cwd: projectDir }),
+      runHudWithDimensions(35, 40, ctoEnv, { cwd: projectDir }),
     );
     assert.doesNotMatch(nanoOutput, /cto-lake\.v1/);
     assert.doesNotMatch(nanoOutput, /^\^:/m);

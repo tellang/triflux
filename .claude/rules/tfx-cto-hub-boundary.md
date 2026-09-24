@@ -76,7 +76,9 @@ UI/문서에서 "stale"을 표기할 때는 어느 평면인지 라벨을 붙인
 가드레일 2종은 필수 불변식: **TFX_CTO kill-switch 매 cycle 확인** + **lake당
 single-instance 락**. hygiene 실제 archive 실행부(T4)와 결합할 때도 이 게이트를
 우회하는 경로를 만들지 않는다. collect 트리거 정책 소유자는 hub auto-collect
-(debounce + fresh-lake 게이트)와 steward 루프 둘이며, 셋째 드라이버(PRD Tier-1 데몬)
+(`TFX_CTO_AUTO_COLLECT=1`일 때만 동작, debounce + fresh-lake 게이트;
+[ADR-0018](../../docs/adr/0018-cto-auto-behaviors-opt-in.md))와 steward 루프 둘이며,
+셋째 드라이버(PRD Tier-1 데몬)
 추가 시 이 문서에 조정 규칙을 먼저 기록한다.
 
 ## 관련

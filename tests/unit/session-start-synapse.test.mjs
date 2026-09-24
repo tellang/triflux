@@ -43,6 +43,7 @@ describe("registerInteractiveSession (SessionStart self-register)", () => {
           projectRoot: cwd,
           lakeRoot: `${cwd}/.triflux/lake`,
         }),
+        env: {},
       },
     );
 
@@ -73,6 +74,7 @@ describe("registerInteractiveSession (SessionStart self-register)", () => {
         hook_event_name: "SessionStart",
       }),
       {
+        env: { TFX_CTO_AUTO_COLLECT: "1" },
         resolveLakeRoot: (cwd) => ({
           projectRoot: "/home/dev/proj",
           lakeRoot: `${cwd}/.triflux/lake`,
@@ -113,6 +115,7 @@ describe("registerInteractiveSession (SessionStart self-register)", () => {
     const result = await emitParticipantSessionStarted(
       payloadJson({ session_id: "sess-fail", cwd: "/home/dev/proj" }),
       {
+        env: { TFX_CTO_AUTO_COLLECT: "1" },
         resolveLakeRoot: () => ({
           projectRoot: "/home/dev/proj",
           lakeRoot: "/home/dev/proj/.triflux/lake",
@@ -135,7 +138,10 @@ describe("registerInteractiveSession (SessionStart self-register)", () => {
           cwd: root,
           hook_event_name: "SessionStart",
         }),
-        { now: "2026-06-17T00:00:00.000Z" },
+        {
+          env: { TFX_CTO_AUTO_COLLECT: "1" },
+          now: "2026-06-17T00:00:00.000Z",
+        },
       );
 
       const lines = readFileSync(
@@ -153,6 +159,33 @@ describe("registerInteractiveSession (SessionStart self-register)", () => {
       assert.equal(event.ref.status, "active");
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not resolve or write the lake unless auto-collect is enabled", async () => {
+    for (const env of [
+      {},
+      { TFX_CTO_AUTO_COLLECT: "0" },
+      { TFX_CTO: "0", TFX_CTO_AUTO_COLLECT: "1" },
+    ]) {
+      let lakeResolutions = 0;
+      let appends = 0;
+      const result = await emitParticipantSessionStarted(
+        payloadJson({ session_id: "sess-off", cwd: "/home/dev/proj" }),
+        {
+          env,
+          resolveLakeRoot: () => {
+            lakeResolutions++;
+            return { lakeRoot: "/home/dev/proj/.triflux/lake" };
+          },
+          ctoAppend: () => {
+            appends++;
+          },
+        },
+      );
+      assert.equal(result, null);
+      assert.equal(lakeResolutions, 0);
+      assert.equal(appends, 0);
     }
   });
 
