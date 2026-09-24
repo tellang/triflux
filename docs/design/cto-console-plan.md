@@ -50,7 +50,7 @@ Because host-local cache files may be shared by multiple checkouts, every collec
 
 ## Prompt Boundary
 
-`current.md` is injected only as read-only context. Hook and route injectors wrap it with explicit `CTO NORTH STAR - READ ONLY` boundaries, and `TFX_CTO_NORTH_STAR=0` disables injection for tests, automation, or operators who want no implicit prompt conditioning.
+`current.md` is injected only as read-only context. Hook and route injectors wrap it with explicit `CTO NORTH STAR - READ ONLY` boundaries. Injection is off by default and requires `TFX_CTO_NORTH_STAR=1` ([ADR-0018](../adr/0018-cto-auto-behaviors-opt-in.md)).
 
 ## Commands
 
@@ -61,8 +61,8 @@ Because host-local cache files may be shared by multiple checkouts, every collec
 ## Cadence Defaults
 
 - Dashboard UI refresh: 1 minute.
-- Collector refresh: 5 minutes.
-- Brief refresh: 30 minutes.
+- Collector refresh: 5 minutes when automatic collection is enabled with `TFX_CTO_AUTO_COLLECT=1`; off by default.
+- Brief refresh: 30 minutes under the planned collector cadence; no automatic refresh by default.
 
 ## Non-Goals
 
