@@ -1,6 +1,10 @@
 name: release
 
 on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       version:
@@ -12,8 +16,45 @@ on:
         default: stable
 
 jobs:
-  release:
+  resolve:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      release: ${{ steps.resolve.outputs.release }}
+      version: ${{ steps.resolve.outputs.version }}
+      channel: ${{ steps.resolve.outputs.channel }}
+      mode: ${{ steps.resolve.outputs.mode }}
+      npm_tag: ${{ steps.resolve.outputs.npm_tag }}
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Resolve release
+        id: resolve
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_HEAD_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+        run: node scripts/release/resolve-auto-release.mjs
+
+  release:
+    needs: resolve
+    if: needs.resolve.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release
+      cancel-in-progress: false
     permissions:
       contents: write
       actions: write
@@ -21,7 +62,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.resolve.outputs.sha }}
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -37,54 +80,85 @@ jobs:
 
       - name: Prepare release
         env:
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
           TFX_MACHINE_PROFILE_PATH: ${{ runner.temp }}/triflux-release-ci-machine-profile.env
-        run: node scripts/release/prepare.mjs --version ${{ inputs.version }} --execute
+        run: |
+          args=(--version "$RELEASE_VERSION" --execute)
+          if [[ "$RELEASE_MODE" == "auto" ]]; then
+            args+=(--skip-tests)
+          fi
+          node scripts/release/prepare.mjs "${args[@]}"
 
       - name: Create tag and GitHub release
         env:
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+          RELEASE_MODE: ${{ needs.resolve.outputs.mode }}
         # npm-publish is triggered by explicit workflow_dispatch; GITHUB_TOKEN tag pushes do not recursively trigger it, and npm-view skips make duplicate dispatch idempotent.
-        run: node scripts/release/publish.mjs --version ${{ inputs.version }} --channel ${{ inputs.channel }} --skip-npm --allow-existing --tag-only --execute
+        run: |
+          args=(--version "$RELEASE_VERSION" --channel "$RELEASE_CHANNEL" --skip-npm --allow-existing --tag-only --execute)
+          if [[ "$RELEASE_MODE" == "auto" ]]; then
+            args+=(--allow-ancestor)
+          fi
+          node scripts/release/publish.mjs "${args[@]}"
 
       - name: Dispatch npm publish
+        id: dispatch
         env:
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+          NPM_TAG: ${{ needs.resolve.outputs.npm_tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh workflow run npm-publish.yml --ref ${{ github.ref_name }}
+        run: |
+          publish_ref="v$RELEASE_VERSION"
+          # Save every existing dispatch ID before creating a run for older gh versions.
+          previous_ids="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/npm-publish.yml/runs?event=workflow_dispatch&branch=$publish_ref&per_page=100" --jq '.workflow_runs[].id' | jq -sc '.')"
+          echo "previous_ids=$previous_ids" >> "$GITHUB_OUTPUT"
+          dispatch_output="$(gh workflow run npm-publish.yml --ref "v$RELEASE_VERSION" -f npm_tag="$NPM_TAG" 2>&1)"
+          printf '%s\n' "$dispatch_output"
+          if [[ "$dispatch_output" =~ /actions/runs/([0-9]+) ]]; then
+            echo "run_id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Wait for npm publish
         env:
+          DISPATCH_RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+          PREVIOUS_RUN_IDS: ${{ steps.dispatch.outputs.previous_ids }}
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          publish_ref="${{ github.ref_name }}"
-          head_sha="$(git rev-parse HEAD)"
+          publish_ref="v$RELEASE_VERSION"
+          head_sha="$(git rev-parse "$publish_ref^{commit}")"
+          run_id="$DISPATCH_RUN_ID"
           deadline=$((SECONDS + 900))
 
           echo "Waiting for npm-publish.yml workflow_dispatch run for $publish_ref at $head_sha"
           while (( SECONDS < deadline )); do
-            run_json="$(
-              gh run list \
-                --workflow npm-publish.yml \
-                --limit 20 \
-                --json databaseId,status,conclusion,headBranch,headSha,event,url \
-                | jq -c --arg publish_ref "$publish_ref" --arg sha "$head_sha" '
-                  map(
-                    select(
-                      .event == "workflow_dispatch"
-                      and .headBranch == $publish_ref
+            if [[ -z "$run_id" ]]; then
+              run_id="$(
+                gh run list \
+                  --workflow npm-publish.yml \
+                  --event workflow_dispatch \
+                  --branch "$publish_ref" \
+                  --limit 100 \
+                  --json databaseId,headBranch,headSha \
+                  | jq -r --arg publish_ref "$publish_ref" --arg sha "$head_sha" --argjson previous_ids "$PREVIOUS_RUN_IDS" '
+                    map(select(
+                      .headBranch == $publish_ref
                       and .headSha == $sha
-                    )
-                  )
-                  | first // empty
-                '
-            )"
+                      and (.databaseId as $id | $previous_ids | index($id) | not)
+                    )) | sort_by(.databaseId) | first.databaseId // empty
+                  '
+              )"
+            fi
 
-            if [[ -n "$run_json" ]]; then
-              run_id="$(jq -r '.databaseId' <<<"$run_json")"
+            if [[ -n "$run_id" ]]; then
+              run_json="$(gh run view "$run_id" --json status,conclusion)"
               status="$(jq -r '.status' <<<"$run_json")"
               conclusion="$(jq -r '.conclusion // ""' <<<"$run_json")"
-              url="$(jq -r '.url' <<<"$run_json")"
-              echo "npm publish run $run_id: status=$status conclusion=${conclusion:-none} $url"
+              echo "npm publish run $run_id: status=$status conclusion=${conclusion:-none}"
 
               if [[ "$status" == "completed" ]]; then
                 if [[ "$conclusion" == "success" ]]; then
@@ -105,6 +179,7 @@ jobs:
 
       - name: Verify release
         env:
+          RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/release/verify.mjs --version ${{ inputs.version }} --execute
+        run: node scripts/release/verify.mjs --version "$RELEASE_VERSION" --npm-wait-seconds 3600 --execute

@@ -1,7 +1,7 @@
 ---
 name: tfx-ship
 description: >
-  triflux 전용 릴리즈 자동화. **GitHub Actions(release.yml dispatch / npm-publish.yml) 기반 CI 릴리즈가 기본 경로 -
+  triflux 전용 릴리즈 자동화. **GitHub Actions(버전 증가 PR 머지 / release.yml dispatch / npm-publish.yml) 기반 CI 릴리즈가 기본 경로 -
   npm publish 는 OIDC Trusted Publishing 으로 CI 가 수행하므로 로컬 npm login 불필요.** scripts/release/* 래퍼 +
   AskUserQuestion 기반 버전 선택 + CHANGELOG 편집 게이트 + Co-Authored-By/AI trailer 금지 강제. 'ship', '배포', '릴리즈',
   'release', 'tfx-ship', 'publish' 같은 요청에 반드시 사용.
@@ -28,11 +28,11 @@ triflux 는 아래 3채널로 동시 배포. 각 채널의 버전은 반드시 �
 | # | 채널 | 명령 | 우선순위 |
 |---|------|------|---------|
 | 1 | **GitHub Releases** | `gh release create vX.Y.Z --notes-file <notes>` | 공지 + changelog 공식 소스 |
-| 2 | **npm registry** | **CI `npm-publish.yml`** (`v*` 태그 push 자동 / OIDC Trusted Publishing, `NPM_TOKEN` secret) | primary distribution |
+| 2 | **npm registry** | **CI `npm-publish.yml`** (`v*` 태그 push 자동 / OIDC Trusted Publishing) | primary distribution |
 | 3 | **Claude Code marketplace** | `.claude-plugin/marketplace.json` (`source: npm` 참조) | `claude plugin add triflux` |
 | 4 | **pypi** (future, 비활성) | 현재 `pyproject.toml` 없음 | 활성화 시 Step 10.5 신설 |
 
-- **npm publish 는 로컬에서 하지 않는다** - `release.yml` dispatch 또는 `v*` 태그 push 시 `npm-publish.yml` 이 OIDC 로 발행한다. 로컬 `publish.mjs --execute` 는 CI 불가 시 폴백 전용.
+- **npm publish 는 로컬에서 하지 않는다** - 버전을 올린 PR 머지 후 ci 성공, `release.yml` dispatch 또는 `v*` 태그 push 시 `npm-publish.yml` 이 OIDC 로 발행한다. 로컬 `publish.mjs --execute` 는 CI 불가 시 폴백 전용.
 - marketplace 는 자체 publish 명령이 없음. marketplace.json 의 version 만 갱신하면 git push 로 반영됨 (GitHub 호스팅).
 - `release:check-sync` 가 package.json + marketplace.json + package-lock.json 3곳 version 일치를 강제한다.
 - pypi 는 triflux 가 Python 모듈을 가지게 되면 활성화. 현 단계는 플레이스홀더.
@@ -43,18 +43,25 @@ triflux 는 아래 3채널로 동시 배포. 각 채널의 버전은 반드시 �
 
 - `~/.claude/scripts/tfx-route.sh` 불필요 (CLI 워커 호출 없음)
 - `gh` CLI 인증됨 (`gh auth status`) - `release.yml` dispatch / GitHub release 에 필요. 깨졌으면 웹 UI 대체
-- **npm 인증 불필요** - npm publish 는 CI(`npm-publish.yml`)가 OIDC/`NPM_TOKEN` 으로 수행 (로컬 `npm login` 필요 없음)
-- 릴리즈할 코드가 `origin/main` 에 있을 것 (CI 는 `--ref main` 으로 origin 을 checkout)
+- **npm 인증 불필요** - npm publish 는 CI(`npm-publish.yml`)가 OIDC 로 수행 (로컬 `npm login` 필요 없음)
+- 릴리즈할 커밋이 `origin/main` 에 포함되어 있을 것. 자동 경로는 ci 의 head_sha, 수동 경로는 dispatch 시점의 github.sha 를 checkout 한다.
 
 ## 기본 경로 - CI 릴리즈 (권장)
+
+PR 에서 `npm run release:bump -- --version X --write` 로 버전을 올려 main 에 머지하면,
+같은 커밋의 ci 통과 뒤 `release.yml` 이 자동으로 실행된다. 버전을 안 올린 머지는 릴리즈하지 않는다.
+자동 경로는 해당 커밋과 첫 번째 부모의 package.json 버전을 비교한다. 버전이 같거나 이미 태그가 있으면 건너뛰고, prerelease 는 수동 dispatch 로 진행한다.
+main 이 앞서 있어도 해당 커밋이 origin/main 의 조상이면 릴리즈한다. 강제 푸시로 main 에서 사라진 커밋은 건너뛰고, 최신 안정 태그 이하로 버전이 역행하면 실패한다.
+`resolve` 잡은 동시성 제한 없이 판정하고, 실제 `release` 잡만 `release` concurrency 그룹에서 직렬 실행한다. 자동 경로만 `publish.mjs --allow-ancestor` 를 사용하며 수동 경로는 기존 HEAD 동등성 검사를 유지한다.
+버전을 올린 커밋 두 개가 거의 동시에 들어오면 앞의 대기 릴리즈가 취소될 수 있다. 해당 커밋의 ci 를 Re-run 하거나 `release.yml` 을 수동 dispatch 해 복구한다.
 
 > **npm publish 는 로컬에서 하지 않는다.** GitHub Actions 가 OIDC(Trusted Publishing)로 발행한다.
 > 워크플로우: `.github/workflows/{release,npm-publish,ci}.yml`
 
-- **`release.yml`** (`workflow_dispatch`, inputs: `version`, `channel`): 한 번의 dispatch 로 prepare(테스트/버전 bump) → 태그 + GitHub release(`publish.mjs --skip-npm`) → `npm-publish.yml` dispatch → npm publish 완료 대기 → `verify.mjs` 까지 전부 CI(ubuntu, node 24)에서 수행.
-- **`npm-publish.yml`** (`on: push tags ['v*']` + dispatch): `v*` 태그가 push 되면 자동 npm publish (`--provenance --access public`, `NPM_TOKEN` secret). 루트/core/triflux 3패키지 각각, 이미 게시된 버전은 skip.
+- **`release.yml`** (`workflow_run` + `workflow_dispatch`, inputs: `version`, `channel`): prepare → 태그 + GitHub release(`publish.mjs --skip-npm`) → 태그 ref 와 channel 에 따른 npm_tag(stable=latest, canary=canary)로 `npm-publish.yml` dispatch → 반환 URL의 run ID로 npm publish 완료 대기 → `verify.mjs` 까지 CI(ubuntu, node 24)에서 수행한다. 자동 경로는 같은 커밋의 ci 가 전체 테스트를 통과했으므로 prepare 에서 테스트만 생략한다. 수동 dispatch 는 기존대로 테스트한다. npm 레지스트리 반영은 20초 간격으로 최대 3600초 기다린다. 2026-09-23 게시에서 패키지에 따라 반영에 수십 분이 걸렸다. 구버전 gh 가 실행 URL을 반환하지 않으면 dispatch 직전 저장한 기존 실행 ID를 제외해 새 실행을 고른다.
+- **`npm-publish.yml`** (`on: push tags ['v*']` + dispatch): `v*` 태그가 push 되면 자동 npm publish (`--provenance --access public --tag "$NPM_TAG"`, OIDC 전용). dispatch 의 선택 입력 `npm_tag` 가 있으면 사용하고, 없으면 버전에 `-` 가 있을 때 canary, 그 밖에는 latest 로 게시한다. latest 와 canary 외의 값은 거부한다. `@triflux/core`, `@triflux/remote`, `triflux` 3패키지 각각, 이미 게시된 버전은 skip. 세 패키지 모두 Trusted Publisher 등록이 필요하며 `npm trust list <패키지>` 로 확인한다.
 
-### 권장 실행 - release.yml 디스패치
+### 수동 실행 - release.yml 디스패치
 
 ```bash
 gh workflow run release.yml --ref main -f version=<X.Y.Z> -f channel=stable
@@ -308,7 +315,7 @@ github:  https://github.com/tellang/triflux/releases/tag/v${TARGET_VERSION}
 | Step 7 | commit 메시지에 AI trailer 감지 | 하드 차단 + 재작성 요청 |
 | Step 8 | push 거부 (remote 변경됨) | `git pull --rebase origin main` 후 재시도 |
 | Step 9 | gh release create 실패 | `gh auth status` 확인, 수동 재시도 |
-| Step 10 | npm publish(CI) 실패 | `gh run view <id> --log-failed` 로 `npm-publish.yml` 로그 확인. `NPM_TOKEN` secret / OIDC 설정 점검 |
+| Step 10 | npm publish(CI) 실패 | `gh run view <id> --log-failed` 로 `npm-publish.yml` 로그 확인. 세 패키지의 OIDC Trusted Publisher 설정 점검 |
 
 ## 플래그
 

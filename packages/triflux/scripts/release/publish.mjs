@@ -47,6 +47,7 @@ export async function publishRelease({
   provenance = false,
   allowExistingArtifacts = false,
   pushBranch = true,
+  allowAncestor = false,
   tagPoll = {},
   execFileSyncFn,
 } = {}) {
@@ -194,7 +195,19 @@ export async function publishRelease({
           stdio: "pipe",
         }),
       ).trim();
-      if (head !== remote) {
+      if (allowAncestor) {
+        try {
+          runCommand(
+            "git",
+            ["merge-base", "--is-ancestor", "HEAD", `origin/${branch}`],
+            { cwd: rootDir, execFileSyncFn, stdio: "pipe" },
+          );
+        } catch {
+          throw new Error(
+            `Refusing tag-only publish: HEAD ${head} is not an ancestor of origin/${branch} ${remote}`,
+          );
+        }
+      } else if (head !== remote) {
         throw new Error(
           `Refusing tag-only publish: HEAD ${head} != origin/${branch} ${remote} (stale checkout or unpushed ${branch})`,
         );
@@ -235,6 +248,7 @@ export async function publishRelease({
     provenance,
     allowExistingArtifacts,
     pushBranch,
+    allowAncestor,
     dryRun,
     notesPath,
     steps: steps.map((step) => ({
@@ -260,6 +274,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     provenance: Boolean(args.provenance || envProvenance),
     allowExistingArtifacts: Boolean(args["allow-existing"]),
     pushBranch: !args["tag-only"],
+    allowAncestor: Boolean(args["allow-ancestor"]),
   });
   console.log(JSON.stringify(result, null, 2));
 }
