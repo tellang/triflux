@@ -10,7 +10,7 @@ const HOOK = join(process.cwd(), "hooks", "session-start-lake.mjs");
 function runHook(payload, cwd = process.cwd(), env = {}) {
   return spawnSync(process.execPath, [HOOK], {
     cwd,
-    env: { ...process.env, ...env },
+    env: { ...process.env, TFX_CTO_NORTH_STAR: undefined, ...env },
     input: JSON.stringify(payload),
     encoding: "utf8",
   });
@@ -42,10 +42,11 @@ describe("session-start-lake hook", () => {
       "utf8",
     );
 
-    const result = runHook({
-      hook_event_name: "SessionStart",
-      cwd: sandboxDir,
-    });
+    const result = runHook(
+      { hook_event_name: "SessionStart", cwd: sandboxDir },
+      process.cwd(),
+      { TFX_CTO_NORTH_STAR: "1" },
+    );
 
     const output = parseOutput(result);
     assert.equal(output.hookSpecificOutput.hookEventName, "SessionStart");
@@ -61,20 +62,26 @@ describe("session-start-lake hook", () => {
     );
   });
 
-  it("is a silent no-op when TFX_CTO_NORTH_STAR disables injection", () => {
+  it("is a silent no-op by default", () => {
     const lakeDir = join(sandboxDir, ".triflux", "lake");
     mkdirSync(lakeDir, { recursive: true });
     writeFileSync(join(lakeDir, "current.md"), "disabled brief", "utf8");
 
+    const result = runHook({
+      hook_event_name: "SessionStart",
+      cwd: sandboxDir,
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "");
+  });
+
+  it("is a silent no-op when TFX_CTO_NORTH_STAR=0", () => {
     const result = runHook(
-      {
-        hook_event_name: "SessionStart",
-        cwd: sandboxDir,
-      },
+      { hook_event_name: "SessionStart", cwd: sandboxDir },
       process.cwd(),
       { TFX_CTO_NORTH_STAR: "0" },
     );
-
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, "");
   });
@@ -98,10 +105,11 @@ describe("session-start-lake hook", () => {
   });
 
   it("is a silent no-op when the current lake brief is missing", () => {
-    const result = runHook({
-      hook_event_name: "SessionStart",
-      cwd: sandboxDir,
-    });
+    const result = runHook(
+      { hook_event_name: "SessionStart", cwd: sandboxDir },
+      process.cwd(),
+      { TFX_CTO_NORTH_STAR: "1" },
+    );
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, "");
@@ -112,10 +120,11 @@ describe("session-start-lake hook", () => {
     mkdirSync(lakeDir, { recursive: true });
     writeFileSync(join(lakeDir, "current.md"), "x".repeat(3000), "utf8");
 
-    const result = runHook({
-      hook_event_name: "SessionStart",
-      cwd: sandboxDir,
-    });
+    const result = runHook(
+      { hook_event_name: "SessionStart", cwd: sandboxDir },
+      process.cwd(),
+      { TFX_CTO_NORTH_STAR: "1" },
+    );
 
     const output = parseOutput(result);
     const context = output.hookSpecificOutput.additionalContext;

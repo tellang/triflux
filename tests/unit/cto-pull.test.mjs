@@ -60,7 +60,11 @@ describe("cto pull helper", () => {
       "utf8",
     );
 
-    assert.deepEqual(readCtoSnapshot({ lakeRoot }), snapshot);
+    assert.equal(readCtoSnapshot({ lakeRoot, env: {} }), null);
+    assert.deepEqual(
+      readCtoSnapshot({ lakeRoot, env: { TFX_CTO_NORTH_STAR: "1" } }),
+      snapshot,
+    );
   });
 
   it("returns null when TFX_CTO disables an opted-in north-star read", () => {

@@ -83,14 +83,14 @@ describe("hub/tray lifecycle", () => {
     assert.equal(spawns[0][2].env.TFX_HUB_PORT, "27888");
   });
 
-  it("hub startup spawns tray on macOS unless auto-tray is disabled", () => {
+  it("hub startup spawns tray on macOS when auto-tray is opted in", () => {
     const spawns = [];
 
     const result = spawnTrayForHub({
       platform: "darwin",
       trayPath: "/repo/hub/tray.mjs",
       nodePath: "/usr/local/bin/node",
-      env: { PATH: "/bin" },
+      env: { PATH: "/bin", TFX_HUB_AUTO_TRAY: "1" },
       cwd: "/repo",
       spawnFn: (...args) => {
         spawns.push(args);
@@ -106,23 +106,25 @@ describe("hub/tray lifecycle", () => {
     assert.equal(spawns[0][2].stdio, "ignore");
   });
 
-  it("hub startup skips tray when disabled or not macOS", () => {
-    assert.deepEqual(
-      spawnTrayForHub({
-        platform: "darwin",
-        env: { TFX_HUB_AUTO_TRAY: "0" },
-        cwd: "/repo",
-        spawnFn: () => {
-          throw new Error("should not spawn");
-        },
-      }),
-      { status: "disabled" },
-    );
+  it("hub startup skips tray when unset, disabled, or not macOS", () => {
+    for (const env of [{}, { TFX_HUB_AUTO_TRAY: "0" }]) {
+      assert.deepEqual(
+        spawnTrayForHub({
+          platform: "darwin",
+          env,
+          cwd: "/repo",
+          spawnFn: () => {
+            throw new Error("should not spawn");
+          },
+        }),
+        { status: "disabled" },
+      );
+    }
 
     assert.deepEqual(
       spawnTrayForHub({
         platform: "linux",
-        env: {},
+        env: { TFX_HUB_AUTO_TRAY: "1" },
         cwd: "/repo",
         spawnFn: () => {
           throw new Error("should not spawn");
@@ -137,7 +139,7 @@ describe("hub/tray lifecycle", () => {
       spawnTrayForHub({
         platform: "darwin",
         trayPath: "/repo/hub/tray.mjs",
-        env: { TFX_TEAM_TASK_ID: "task-123" },
+        env: { TFX_TEAM_TASK_ID: "task-123", TFX_HUB_AUTO_TRAY: "1" },
         spawnFn: () => {
           throw new Error("should not spawn");
         },

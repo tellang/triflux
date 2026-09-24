@@ -120,7 +120,7 @@ export function spawnTrayForHub({
   cwd = process.cwd(),
   spawnFn = spawn,
 } = {}) {
-  if (env?.TFX_HUB_AUTO_TRAY === "0") return { status: "disabled" };
+  if (env?.TFX_HUB_AUTO_TRAY !== "1") return { status: "disabled" };
   if (isWorktreeOrEphemeralHubContext({ cwd, env })) {
     return { status: "disabled", reason: "ephemeral-or-worktree-context" };
   }

@@ -50,7 +50,7 @@ describe("cto-north-star-brief hook", () => {
         cwd: sandboxDir,
       },
       process.cwd(),
-      { TRIFLUX_CTO_BRIEF_MARKER: markerPath },
+      { TRIFLUX_CTO_BRIEF_MARKER: markerPath, TFX_CTO_NORTH_STAR: "1" },
     );
 
     const output = parseOutput(result);
@@ -75,7 +75,10 @@ describe("cto-north-star-brief hook", () => {
       hook_event_name: "UserPromptSubmit",
       cwd: sandboxDir,
     };
-    const env = { TRIFLUX_CTO_BRIEF_MARKER: markerPath };
+    const env = {
+      TRIFLUX_CTO_BRIEF_MARKER: markerPath,
+      TFX_CTO_NORTH_STAR: "1",
+    };
 
     const first = runHook(payload, process.cwd(), env);
     assert.equal(first.status, 0, first.stderr);
@@ -99,6 +102,21 @@ describe("cto-north-star-brief hook", () => {
       },
       process.cwd(),
       { TRIFLUX_CTO_BRIEF_MARKER: markerPath, TFX_CTO_NORTH_STAR: "0" },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "");
+  });
+
+  it("is a silent no-op by default even when a lake brief exists", () => {
+    const lakeDir = join(sandboxDir, ".triflux", "lake");
+    mkdirSync(lakeDir, { recursive: true });
+    writeFileSync(join(lakeDir, "current.md"), "default-off brief", "utf8");
+
+    const result = runHook(
+      { hook_event_name: "UserPromptSubmit", cwd: sandboxDir },
+      process.cwd(),
+      { TRIFLUX_CTO_BRIEF_MARKER: markerPath, TFX_CTO_NORTH_STAR: "" },
     );
 
     assert.equal(result.status, 0, result.stderr);
@@ -134,7 +152,7 @@ describe("cto-north-star-brief hook", () => {
         cwd: sandboxDir,
       },
       process.cwd(),
-      { TRIFLUX_CTO_BRIEF_MARKER: markerPath },
+      { TRIFLUX_CTO_BRIEF_MARKER: markerPath, TFX_CTO_NORTH_STAR: "1" },
     );
 
     assert.equal(result.status, 0, result.stderr);
@@ -152,7 +170,7 @@ describe("cto-north-star-brief hook", () => {
         cwd: sandboxDir,
       },
       process.cwd(),
-      { TRIFLUX_CTO_BRIEF_MARKER: markerPath },
+      { TRIFLUX_CTO_BRIEF_MARKER: markerPath, TFX_CTO_NORTH_STAR: "1" },
     );
 
     const output = parseOutput(result);
