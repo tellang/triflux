@@ -72,9 +72,7 @@ import {
 } from "@triflux/core/hub/state.mjs";
 import { createStoreAdapter } from "./store-adapter.mjs";
 import { createCtoAutoCollector } from "./team/cto-auto-collect.mjs";
-import { createGitPreflight } from "./team/git-preflight.mjs";
 import { nativeProxy } from "./team/nativeProxy.mjs";
-import { createSwarmLocks } from "./team/swarm-locks.mjs";
 import {
   createSynapseRegistry,
   projectPeer,
@@ -119,14 +117,6 @@ const AIMD_WINDOW_MS = 30 * 60 * 1000;
 const AIMD_INITIAL_BATCH_SIZE = 3;
 const AIMD_MIN_BATCH_SIZE = 1;
 const AIMD_MAX_BATCH_SIZE = 10;
-const SYNAPSE_VALID_OPS = new Set([
-  "checkout",
-  "rebase",
-  "cherry-pick",
-  "reset",
-  "stash-pop",
-  "worktree-remove",
-]);
 const HUB_IDLE_TIMEOUT_DEFAULT_MS = 30 * 60 * 1000;
 const HUB_IDLE_SWEEP_DEFAULT_MS = 60 * 1000;
 const STATIC_CONTENT_TYPES = Object.freeze({
@@ -1124,20 +1114,12 @@ export async function startHub({
   }
   const delegatorService = new DelegatorService({ worker: delegatorWorker });
 
-  // Synapse Layer 4: session registry + git preflight + swarm locks
+  // Synapse Layer 4: session registry
   const synapseEmitter = new EventEmitter();
   synapseEmitter.setMaxListeners(50);
   const synapseRegistry = createSynapseRegistry({
     persistPath: join(CACHE_DIR, "tfx-hub", "synapse-sessions.json"),
     emitter: synapseEmitter,
-  });
-  const swarmLocks = createSwarmLocks({
-    repoRoot: PROJECT_ROOT,
-    persistPath: join(CACHE_DIR, "tfx-hub", "swarm-locks.json"),
-  });
-  const gitPreflight = createGitPreflight({
-    registry: synapseRegistry,
-    locks: swarmLocks,
   });
   const ctoAutoCollector = createCtoAutoCollector({
     registry: synapseRegistry,
@@ -1437,7 +1419,7 @@ export async function startHub({
         });
       }
 
-      // ── Synapse Layer 5: session registry + locks + preflight routes ──
+      // ── Synapse Layer 5: session registry routes ──
       // Admin/raw snapshot (loopback-only). Returns raw cwd/pid for local
       // admin/HUD use; the redacted peer surface is GET /synapse/peers.
       if (path === "/synapse/sessions" && req.method === "GET") {
@@ -1634,37 +1616,6 @@ export async function startHub({
             throw new Error("unregister failed");
           }
           return writeJson(res, 200, { ok: true });
-        } catch (err) {
-          return writeJson(res, 400, {
-            ok: false,
-            error: String(err?.message || err),
-          });
-        }
-      }
-
-      if (path === "/synapse/locks" && req.method === "GET") {
-        return writeJson(res, 200, {
-          ok: true,
-          locks: swarmLocks.snapshot(),
-          ts: Date.now(),
-        });
-      }
-
-      if (path === "/synapse/preflight" && req.method === "POST") {
-        try {
-          const body = await parseBody(req);
-          const { op, args = {}, sessionContext = {} } = body;
-          if (!op || typeof op !== "string") {
-            return writeJson(res, 400, { ok: false, error: "op 필수" });
-          }
-          if (!SYNAPSE_VALID_OPS.has(op)) {
-            return writeJson(res, 400, {
-              ok: false,
-              error: `invalid op: ${op}`,
-            });
-          }
-          const result = gitPreflight.check(op, args, sessionContext);
-          return writeJson(res, 200, { ok: true, ...result });
         } catch (err) {
           return writeJson(res, 400, {
             ok: false,
