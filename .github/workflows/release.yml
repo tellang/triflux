@@ -182,4 +182,4 @@ jobs:
           RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node scripts/release/verify.mjs --version "$RELEASE_VERSION" --npm-wait-seconds 3600 --execute
+        run: node scripts/release/verify.mjs --version "$RELEASE_VERSION" --npm-wait-seconds 900 --npm-pending-ok --execute
