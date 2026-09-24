@@ -273,6 +273,8 @@ export async function ensureWorktree({
  * @param {string} opts.baseBranch
  * @param {string} [opts.rootDir=process.cwd()]
  * @returns {Promise<{ integrationBranch: string, baseCommit: string }>}
+ * @throws {Error} when the integration branch is checked out by another
+ * worktree; this is an intentional NO-GO and leaves that worktree untouched.
  */
 export async function prepareIntegrationBranch({
   runId,
@@ -458,6 +460,11 @@ export async function rebaseShardOntoIntegration({
       }
     } else {
       await rm(integrationWorktree, { recursive: true, force: true });
+      try {
+        await git(["worktree", "prune"], rootDir);
+      } catch {
+        /* best-effort metadata cleanup after a partial worktree add */
+      }
     }
   }
 }
