@@ -21,6 +21,20 @@ const sockPath = process.argv[2] || process.env.FAKE_WS_UDS_SOCK;
 const mode = process.env.FAKE_MODE || "ok";
 const deltas = (process.env.FAKE_DELTAS || "P,O,N,G").split(",");
 const threadId = process.env.FAKE_THREAD_ID || "fake-thread-ws";
+const loadedThreads = JSON.parse(
+  process.env.FAKE_LOADED_THREADS || `["${threadId}"]`,
+);
+const initialActiveReads = Number(process.env.FAKE_ACTIVE_READS || 0);
+const statusByThread = new Map(
+  loadedThreads.map((id) => [
+    id,
+    {
+      activeReads: initialActiveReads,
+      active: initialActiveReads > 0,
+      currentTurnId: initialActiveReads > 0 ? "active-turn-ws-1" : null,
+    },
+  ]),
+);
 
 if (!sockPath) {
   process.stderr.write("fake-codex-app-server-ws-uds: missing socket path\n");
@@ -50,10 +64,12 @@ function encodeServerFrame(opcode, payload, fin = true) {
 }
 
 const FRAGMENT = process.env.FAKE_FRAGMENT === "1";
+const connections = new Set();
 
 const server = net.createServer((socket) => {
   let upgraded = false;
   let buf = Buffer.alloc(0);
+  const subscribed = new Set();
 
   const sendJson = (obj) => {
     const full = Buffer.from(JSON.stringify(obj), "utf8");
@@ -69,18 +85,30 @@ const server = net.createServer((socket) => {
   };
   const respond = (id, result) => sendJson({ id, result });
   const notify = (method, params) => sendJson({ method, params });
+  const connection = { subscribed, notify };
+  connections.add(connection);
+  const notifyThread = (id, method, params) => {
+    for (const peer of connections) {
+      if (peer.subscribed.has(id)) peer.notify(method, params);
+    }
+  };
 
-  const fakeThread = () => ({
-    id: threadId,
-    sessionId: threadId,
+  const fakeThread = (id = threadId) => ({
+    id,
+    sessionId: id,
     ephemeral: true,
     modelProvider: "fake",
-    status: { type: "idle" },
-    cwd: process.cwd(),
-    turns: [],
+    status: { type: statusByThread.get(id)?.active ? "active" : "idle" },
+    cwd: process.env.FAKE_CWD || process.cwd(),
+    name: `fake ${id}`,
+    source: "cli",
+    turns:
+      mode === "active-turns-visible" && statusByThread.get(id)?.active
+        ? [fakeTurn("inProgress", statusByThread.get(id).currentTurnId)]
+        : [],
   });
-  const fakeTurn = (status) => ({
-    id: "turn-ws-1",
+  const fakeTurn = (status, id = "turn-ws-1") => ({
+    id,
     items: [],
     status,
     error: status === "failed" ? { message: "boom" } : null,
@@ -105,29 +133,231 @@ const server = net.createServer((socket) => {
     } else if (msg.method === "initialized") {
       /* no-op */
     } else if (msg.method === "thread/start") {
+      subscribed.add(threadId);
       respond(msg.id, {
         thread: fakeThread(),
         model: "gpt-fake",
         approvalPolicy: "never",
       });
-    } else if (msg.method === "turn/start") {
-      respond(msg.id, { turn: fakeTurn("inProgress") });
-      notify("thread/started", { thread: fakeThread() });
-      notify("turn/started", { threadId, turn: fakeTurn("inProgress") });
-      for (const d of deltas) {
-        notify("item/agentMessage/delta", {
-          threadId,
-          turnId: "turn-ws-1",
-          itemId: "item-1",
-          delta: d,
+    } else if (msg.method === "thread/loaded/list") {
+      respond(msg.id, { data: loadedThreads, nextCursor: null });
+    } else if (msg.method === "thread/read") {
+      if (msg.params?.includeTurns) {
+        sendJson({
+          id: msg.id,
+          error: { code: -32601, message: "list_turns is not supported yet" },
+        });
+      } else {
+        const id = msg.params?.threadId;
+        const state = statusByThread.get(id);
+        if (!state)
+          sendJson({
+            id: msg.id,
+            error: { code: -32602, message: "thread not found" },
+          });
+        else {
+          const thread = fakeThread(id);
+          respond(msg.id, { thread });
+          if (state.activeReads > 0 && --state.activeReads === 0)
+            state.active = false;
+        }
+      }
+    } else if (msg.method === "thread/resume") {
+      if (mode === "resume-failed") {
+        sendJson({
+          id: msg.id,
+          error: { code: -32602, message: "resume failed" },
+        });
+      } else if (msg.params?.excludeTurns !== true) {
+        sendJson({
+          id: msg.id,
+          error: { code: -32602, message: "excludeTurns required" },
+        });
+      } else {
+        subscribed.add(msg.params.threadId);
+        respond(msg.id, { thread: fakeThread(msg.params.threadId) });
+      }
+    } else if (msg.method === "turn/start" || msg.method === "turn/steer") {
+      const requestedThreadId = msg.params?.threadId || threadId;
+      const state = statusByThread.get(requestedThreadId) || {
+        active: false,
+        activeReads: 0,
+        currentTurnId: null,
+      };
+      const wasActive = state.active;
+      if (
+        mode === "active-turns-visible" &&
+        wasActive &&
+        msg.method === "turn/start"
+      ) {
+        sendJson({
+          id: msg.id,
+          error: { code: -32602, message: "use turn/steer" },
+        });
+        return;
+      }
+      if (
+        msg.method === "turn/steer" &&
+        msg.params?.expectedTurnId !== state.currentTurnId
+      ) {
+        sendJson({
+          id: msg.id,
+          error: { code: -32602, message: "wrong expectedTurnId" },
+        });
+        return;
+      }
+      const turnId = wasActive ? state.currentTurnId : "turn-ws-1";
+      state.active = true;
+      state.currentTurnId = turnId;
+      statusByThread.set(requestedThreadId, state);
+      respond(
+        msg.id,
+        msg.method === "turn/steer"
+          ? { turnId }
+          : { turn: fakeTurn("inProgress", turnId) },
+      );
+      if (!subscribed.has(requestedThreadId)) {
+        notify("thread/status/changed", {
+          threadId: requestedThreadId,
+          status: { type: "active" },
         });
       }
-      if (mode === "execution-failed") {
-        notify("turn/completed", { threadId, turn: fakeTurn("failed") });
-      } else if (mode === "execution-interrupted") {
-        notify("turn/completed", { threadId, turn: fakeTurn("interrupted") });
+      notifyThread(requestedThreadId, "thread/started", {
+        thread: fakeThread(requestedThreadId),
+      });
+      if (!wasActive)
+        notifyThread(requestedThreadId, "turn/started", {
+          threadId: requestedThreadId,
+          turn: fakeTurn("inProgress", turnId),
+        });
+      if (mode === "mixed-ids") {
+        notifyThread(requestedThreadId, "item/agentMessage/delta", {
+          threadId: requestedThreadId,
+          turnId: "other-turn",
+          delta: "WRONG",
+        });
+        notifyThread(requestedThreadId, "turn/completed", {
+          threadId: requestedThreadId,
+          turn: fakeTurn("completed", "other-turn"),
+        });
+      }
+      if (mode === "missing-completion-id") {
+        notifyThread(requestedThreadId, "turn/completed", {
+          threadId: requestedThreadId,
+          turn: { status: "failed" },
+        });
+      }
+      if (mode === "partial-completed") {
+        notifyThread(requestedThreadId, "item/agentMessage/delta", {
+          threadId: requestedThreadId,
+          turnId,
+          itemId: "item-1",
+          delta: "PO",
+        });
+        notifyThread(requestedThreadId, "item/completed", {
+          threadId: requestedThreadId,
+          turnId,
+          item: {
+            id: "item-1",
+            type: "agentMessage",
+            text: "PONG",
+            phase: "final_answer",
+          },
+        });
+      } else if (
+        mode === "multi-message" ||
+        mode === "multi-message-no-final"
+      ) {
+        const messages =
+          mode === "multi-message"
+            ? [
+                ["comment-1", "working", "commentary"],
+                ["final-1", "FINAL ONE", "final_answer"],
+                ["final-2", "FINAL TWO", "final_answer"],
+              ]
+            : [
+                ["first", "first message", "commentary"],
+                ["last", "last message", "commentary"],
+              ];
+        for (const [itemId, text, phase] of messages) {
+          for (const delta of [text.slice(0, 3), text.slice(3)])
+            notifyThread(requestedThreadId, "item/agentMessage/delta", {
+              threadId: requestedThreadId,
+              turnId,
+              itemId,
+              delta,
+            });
+          notifyThread(requestedThreadId, "item/completed", {
+            threadId: requestedThreadId,
+            turnId,
+            item: { id: itemId, type: "agentMessage", text, phase },
+          });
+        }
       } else {
-        notify("turn/completed", { threadId, turn: fakeTurn("completed") });
+        for (const d of deltas) {
+          notifyThread(requestedThreadId, "item/agentMessage/delta", {
+            threadId: requestedThreadId,
+            turnId,
+            itemId: "item-1",
+            delta: d,
+          });
+        }
+      }
+      if (mode === "timeout") return;
+      if (mode === "error-notification") {
+        notifyThread(requestedThreadId, "error", {
+          threadId: requestedThreadId,
+          turnId,
+          error: { message: "fake turn error" },
+          willRetry: false,
+        });
+        return;
+      }
+      if (mode === "retry-notification")
+        notifyThread(requestedThreadId, "error", {
+          threadId: requestedThreadId,
+          turnId,
+          error: { message: "transient error" },
+          willRetry: true,
+        });
+      state.active = false;
+      if (mode === "tool-activity") {
+        for (const delay of [50, 140, 230]) {
+          setTimeout(
+            () =>
+              notifyThread(requestedThreadId, "item/started", {
+                threadId: requestedThreadId,
+                turnId,
+                item: { id: `tool-${delay}`, type: "commandExecution" },
+              }),
+            delay,
+          );
+        }
+        setTimeout(
+          () =>
+            notifyThread(requestedThreadId, "turn/completed", {
+              threadId: requestedThreadId,
+              turn: fakeTurn("completed", turnId),
+            }),
+          300,
+        );
+        return;
+      }
+      if (mode === "execution-failed") {
+        notifyThread(requestedThreadId, "turn/completed", {
+          threadId: requestedThreadId,
+          turn: fakeTurn("failed", turnId),
+        });
+      } else if (mode === "execution-interrupted") {
+        notifyThread(requestedThreadId, "turn/completed", {
+          threadId: requestedThreadId,
+          turn: fakeTurn("interrupted", turnId),
+        });
+      } else {
+        notifyThread(requestedThreadId, "turn/completed", {
+          threadId: requestedThreadId,
+          turn: fakeTurn("completed", turnId),
+        });
       }
     } else if (msg.method === "thread/unsubscribe") {
       if (typeof msg.id !== "undefined") respond(msg.id, {});
@@ -203,6 +433,7 @@ const server = net.createServer((socket) => {
     drainFrames();
   });
   socket.on("error", () => {});
+  socket.on("close", () => connections.delete(connection));
 });
 
 server.on("error", (err) => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join as pathJoin, resolve as pathResolve } from "node:path";
@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { runHygiene } from "../cto/hygiene.mjs";
 import { notifyCtoHygieneOnce } from "../cto/hygiene-notify.mjs";
+import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
 import { createNotifier } from "../hub/team/notify.mjs";
 import {
   escapePwshSingleQuoted as escapeRemotePwshSingleQuoted,
@@ -38,7 +39,7 @@ const BRIDGE_TIMEOUT_BUFFER_MS = 15_000;
 // spill the JSON to a temp file and pass --payload-file instead.
 const PAYLOAD_FILE_THRESHOLD = 96 * 1024;
 const VALID_TRANSPORTS = ["tmux", "uds", "auto"];
-const BOOLEAN_FLAGS = new Set(["json"]);
+const BOOLEAN_FLAGS = new Set(["json", "attach-a", "attach-b"]);
 const PEER_HOP_DONE_MARKER = "<<<TFX_PEER_HOP_DONE>>>";
 // uds-fallback diagnostics land here, written async so a failed daemon attach
 // never blocks the tmux fallback path (see writeUdsBugReport / doAskAuto).
@@ -50,17 +51,19 @@ function usage() {
   return [
     "Usage:",
     "  tfx-live start --session NAME [--cli codex|claude] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
-    "  tfx-live ask --session NAME --prompt TEXT [--cli codex|claude] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
+    "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude] [--if-busy wait|fail|interrupt] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
+    "  tfx-live ask --cli codex --transport uds --thread ID|auto --prompt TEXT [--codex-socket PATH|default] [--cwd DIR] [--if-busy wait|fail|steer] [--busy-timeout 60] [--timeout 60] [--max-turn SECONDS]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
     "    transport: auto is the default for Claude when --short/--session-id is present; otherwise tmux. bridge path: --bridge > $TFX_BRIDGE > $TFX_REPO_ROOT/hub/bridge.mjs > bundled Triflux hub/bridge.mjs.",
     "  tfx-live interrupt --session NAME [--cli codex|claude] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 5]",
     "  tfx-live stop --session NAME [--cli codex|claude] [--remote HOST]",
     "  tfx-live probe [--short SHORT] [--session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 10]",
-    "  tfx-live list-sessions --cli codex [--cwd DIR]",
+    "  tfx-live list-sessions --cli codex [--transport tmux|uds] [--codex-socket PATH|default] [--cwd DIR] [--remote HOST (tmux)]",
     "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
     "  tfx-live goal-driven --session NAME --goal TEXT [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500] [--max-rounds 8] [--done-token DONE]",
-    "  tfx-live peer [--cli-a codex] [--cli-b claude] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--session-a peerA] [--session-b peerB] [--transport-a tmux|uds|auto] [--transport-b tmux|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--bridge ABS] [--remote HOST] [--cwd DIR] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60]",
-    "  tfx-live orchestrate --task TEXT [--mode peer|codex-led|claude-led] [--codex-transport exec|app-server-uds] [--cwd DIR] [--timeout 120]",
+    "  tfx-live peer [--cli-a codex] [--cli-b claude] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--session-a NAME[:WINDOW.PANE]] [--session-b NAME[:WINDOW.PANE]] [--attach-a] [--attach-b] [--transport-a tmux|uds|auto] [--transport-b tmux|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--thread-a ID|auto] [--thread-b ID|auto] [--codex-socket-a PATH|default] [--codex-socket-b PATH|default] [--bridge ABS] [--remote HOST] [--cwd DIR] [--if-busy wait|fail] [--if-busy-a POLICY] [--if-busy-b POLICY] [--busy-timeout 60] [--max-turn SECONDS] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60]",
+    "  tfx-live orchestrate --task TEXT [--mode peer|codex-led|claude-led] [--codex-transport exec|app-server-uds] [--codex-socket PATH|default] [--cwd DIR] [--timeout 120]",
+    "    Codex TUI may use a shared app-server daemon. UDS ask resumes the thread to receive answer events; sending to an active thread with --if-busy steer merges input into that turn.",
     "    Runs the Claude(UDS)+Codex orchestration engine. --codex-transport app-server-uds drives a real `codex app-server` over WebSocket-over-UDS (experimental); default exec keeps the codex stdio one-shot path.",
     "  tfx-live cto-hygiene-notify --root DIR --state-file PATH [--json]",
     "    One-shot CTO hygiene dry-run notification: sends only when actionable hygiene state changes; no polling or apply/steward lock.",
@@ -202,7 +205,7 @@ function buildRemoteLiveArgv(verb, opts) {
     "tfx-live",
     verb,
     "--cli",
-    "claude",
+    opts.cli ?? "claude",
     "--transport",
     opts.transport ?? "uds",
   ];
@@ -210,6 +213,13 @@ function buildRemoteLiveArgv(verb, opts) {
   if (opts.sessionId) args.push("--session-id", opts.sessionId);
   if (opts.session) args.push("--session", opts.session);
   if (opts.configDir) args.push("--config-dir", opts.configDir);
+  if (opts.threadId) args.push("--thread", opts.threadId);
+  if (opts.codexSocket) args.push("--codex-socket", opts.codexSocket);
+  if (opts.cwd) args.push("--cwd", opts.cwd);
+  if (opts.ifBusy) args.push("--if-busy", opts.ifBusy);
+  if (opts.busyTimeoutMs)
+    args.push("--busy-timeout", String(opts.busyTimeoutMs / 1000));
+  if (opts.maxTurnMs) args.push("--max-turn", String(opts.maxTurnMs / 1000));
   if (verb === "ask") args.push("--prompt", opts.prompt ?? "");
   args.push("--timeout", timeoutSeconds(opts.timeoutMs));
   if (verb === "ask" && opts.settleMs) {
@@ -316,8 +326,21 @@ async function callRemoteLive(verb, opts, deps = {}) {
   const execRemote = deps.sshExec ?? execFileAsync;
   const env = await probeRemoteEnv(host);
   const plan = buildRemoteLiveCommand(host, verb, opts, env);
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_ANSWER_TIMEOUT_MS;
+  const codexUds =
+    verb === "ask" &&
+    opts.cli === "codex" &&
+    (opts.transport ?? "uds") === "uds";
+  const maxTurnMs = codexUds
+    ? (opts.maxTurnMs ?? Math.min(resolveHardCeilingMs(), 15 * 60_000))
+    : 0;
   const execOptions = {
-    timeout: (opts.timeoutMs ?? DEFAULT_ANSWER_TIMEOUT_MS) + 30_000,
+    timeout:
+      (verb === "ask" ? (opts.busyTimeoutMs ?? timeoutMs) : 0) +
+      // Codex checks its hard ceiling on a timeoutMs tick.
+      maxTurnMs +
+      timeoutMs +
+      30_000,
     maxBuffer: MAX_BUFFER,
   };
 
@@ -368,6 +391,37 @@ function normalizeCwd(value) {
   }
 }
 
+function splitTmuxTarget(value) {
+  const target = String(value ?? "");
+  const session = target.split(":", 1)[0];
+  if (!session)
+    throw new Error("tmux target requires a session name before ':'");
+  return { session, target };
+}
+
+function tmuxBufferName(target) {
+  return `tfx-live-prompt-${target.replace(/[^A-Za-z0-9_-]/g, "_")}-${Date.now()}`;
+}
+
+function resolveCodexDaemonSocket(value = "default") {
+  const socketPath =
+    value === "default"
+      ? pathJoin(
+          process.env.CODEX_HOME ?? pathJoin(homedir(), ".codex"),
+          "app-server-control",
+          "app-server-control.sock",
+        )
+      : pathResolve(value);
+  try {
+    if (statSync(socketPath).isSocket()) return socketPath;
+  } catch {
+    /* handled below */
+  }
+  throw new Error(
+    `Codex daemon socket unavailable: ${socketPath}. Start it with codex app-server daemon start`,
+  );
+}
+
 function isCodexTmuxPane(currentCommand, startCommand) {
   const current = String(currentCommand ?? "").trim();
   const currentBase = current.split("/").at(-1);
@@ -389,7 +443,102 @@ function isCodexTmuxPane(currentCommand, startCommand) {
   );
 }
 
-function parseCodexTmuxSessions(stdout, cwd = null) {
+function isCodexProcessCommand(command) {
+  const argv = (command.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((arg) =>
+    arg.replace(/^["']|["']$/g, ""),
+  );
+  const isCodexPath = (arg) => /^(?:.*\/)?codex(?:\.js)?$/.test(arg ?? "");
+  const executable = argv.shift();
+  if (isCodexPath(executable)) return true;
+  if (!/^(?:.*\/)?node(?:js)?$/.test(executable ?? "")) return false;
+  const valueOptions = new Set([
+    "-r",
+    "--require",
+    "--import",
+    "--loader",
+    "--experimental-loader",
+    "--icu-data-dir",
+  ]);
+  const booleanOptions = new Set([
+    "--no-warnings",
+    "--enable-source-maps",
+    "--preserve-symlinks",
+    "--preserve-symlinks-main",
+  ]);
+  while (argv.length) {
+    const arg = argv.shift();
+    if (arg === "--") return isCodexPath(argv[0]);
+    if (/^(?:-[ep]|--eval(?:=|$)|--print(?:=|$))/.test(arg)) return false;
+    if (!arg.startsWith("-")) return isCodexPath(arg);
+    if (valueOptions.has(arg.split("=", 1)[0])) {
+      if (!arg.includes("=")) argv.shift();
+    } else if (!booleanOptions.has(arg)) {
+      // Unknown Node options may consume the next token as a value.
+      return false;
+    }
+  }
+  return false;
+}
+
+async function inspectCodexTmuxPane(pane, deps = {}) {
+  if (isCodexTmuxPane(pane.currentCommand, pane.startCommand))
+    return { isCodex: true };
+  if (!pane.panePid && !pane.paneTty) return { isCodex: false };
+  const args = ["-ax", "-o", "pid=,ppid=,tty=,args="];
+  const command = pane.remote ? "ssh" : "ps";
+  const commandArgs = pane.remote
+    ? [
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        pane.remote,
+        shellQuote(["ps", ...args]),
+      ]
+    : args;
+  let stdout;
+  try {
+    ({ stdout } = await (deps.psExec ?? execFileAsync)(command, commandArgs, {
+      timeout: 15_000,
+      maxBuffer: MAX_BUFFER,
+    }));
+  } catch (error) {
+    return {
+      isCodex: false,
+      preflightWarning: `Codex pane process inspection unavailable: ${error.message}`,
+    };
+  }
+  const processes = String(stdout)
+    .split(/\r?\n/)
+    .flatMap((line) => {
+      const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/);
+      return match
+        ? [{ pid: match[1], ppid: match[2], tty: match[3], command: match[4] }]
+        : [];
+    });
+  const descendants = new Set([String(pane.panePid)]);
+  let added;
+  do {
+    added = false;
+    for (const process of processes) {
+      if (descendants.has(process.ppid) && !descendants.has(process.pid)) {
+        descendants.add(process.pid);
+        added = true;
+      }
+    }
+  } while (added);
+  const tty = String(pane.paneTty ?? "").replace(/^\/dev\//, "");
+  return {
+    isCodex: processes.some(
+      (process) =>
+        (descendants.has(process.pid) ||
+          (tty && tty !== "?" && tty !== "??" && process.tty === tty)) &&
+        isCodexProcessCommand(process.command),
+    ),
+  };
+}
+
+function parseCodexTmuxSessions(stdout, cwd = null, codexTargets = null) {
   const cwdFilter = normalizeCwd(cwd);
   const sessions = new Map();
 
@@ -399,12 +548,18 @@ function parseCodexTmuxSessions(stdout, cwd = null) {
       session,
       createdRaw,
       attachedRaw,
+      windowIndex,
+      paneIndex,
       paneCwd,
       currentCommand,
-      ...startParts
+      startCommand,
     ] = line.split("\t");
-    const startCommand = startParts.join("\t");
-    if (!session || !isCodexTmuxPane(currentCommand, startCommand)) {
+    if (
+      !session ||
+      !(codexTargets
+        ? codexTargets.has(`${session}:${windowIndex}.${paneIndex}`)
+        : isCodexTmuxPane(currentCommand, startCommand))
+    ) {
       continue;
     }
 
@@ -418,10 +573,16 @@ function parseCodexTmuxSessions(stdout, cwd = null) {
       ? new Date(startedAtEpoch * 1000).toISOString()
       : null;
     const existing = sessions.get(session);
+    const pane = {
+      target: `${session}:${windowIndex}.${paneIndex}`,
+      cwd: normalizedPaneCwd,
+      command: currentCommand,
+    };
     if (existing) {
       if (!existing.cwd && normalizedPaneCwd) {
         existing.cwd = normalizedPaneCwd;
       }
+      existing.panes.push(pane);
       continue;
     }
 
@@ -433,6 +594,8 @@ function parseCodexTmuxSessions(stdout, cwd = null) {
         : null,
       cwd: normalizedPaneCwd,
       attached: Number.parseInt(attachedRaw, 10) > 0,
+      target: pane.target,
+      panes: [pane],
     });
   }
 
@@ -441,23 +604,56 @@ function parseCodexTmuxSessions(stdout, cwd = null) {
   );
 }
 
-async function discoverCodexTmuxSessions({ cwd = null } = {}) {
+async function discoverCodexTmuxSessions(
+  { cwd = null, remote = null } = {},
+  deps = {},
+) {
   const format = [
     "#{session_name}",
     "#{session_created}",
     "#{session_attached}",
+    "#{window_index}",
+    "#{pane_index}",
     "#{pane_current_path}",
     "#{pane_current_command}",
     "#{pane_start_command}",
+    "#{pane_tty}",
+    "#{pane_pid}",
   ].join("\t");
 
   try {
-    const { stdout } = await runTmux(null, ["list-panes", "-a", "-F", format]);
+    const { stdout } = await (deps.runTmux ?? runTmux)(remote, [
+      "list-panes",
+      "-a",
+      "-F",
+      format,
+    ]);
+    const codexTargets = new Set();
+    for (const line of String(stdout).split(/\r?\n/)) {
+      if (!line) continue;
+      const [
+        session,
+        ,
+        ,
+        window,
+        pane,
+        ,
+        currentCommand,
+        startCommand,
+        paneTty,
+        panePid,
+      ] = line.split("\t");
+      const result = await inspectCodexTmuxPane(
+        { currentCommand, startCommand, paneTty, panePid, remote },
+        deps,
+      );
+      if (result.isCodex) codexTargets.add(`${session}:${window}.${pane}`);
+    }
     return {
       ok: true,
       cli: "codex",
       cwd: normalizeCwd(cwd),
-      sessions: parseCodexTmuxSessions(stdout, cwd),
+      sessions: parseCodexTmuxSessions(stdout, cwd, codexTargets),
     };
   } catch (error) {
     return {
@@ -501,6 +697,30 @@ function isBusyByEsc(text) {
   return String(text).includes("esc to interrupt");
 }
 
+function isCodexLoadingCapture(text) {
+  const headers = [
+    ...stripAnsi(text).matchAll(/^\s*(?:│\s*)?model:\s*([^\n]*)/gim),
+  ];
+  return /^loading\b/i.test(headers.at(-1)?.[1] ?? "");
+}
+
+function isCodexTimeLine(line) {
+  return (
+    /^\s*\d{1,2}:\d{2}(?:\s?[AP]M)?\s*$/.test(line) ||
+    /^\s*(?:오전|오후)\s?\d{1,2}:\d{2}\s*$/.test(line)
+  );
+}
+
+function trimResponseLines(adapter, lines) {
+  while (
+    lines.length &&
+    (!lines.at(-1).trim() ||
+      (adapter.cli === "codex" && isCodexTimeLine(lines.at(-1))))
+  )
+    lines.pop();
+  return lines.join("\n").trim();
+}
+
 function hasCodexComposerPrompt(text) {
   return /^\s*[›❯▶▸>]\s*/m.test(text);
 }
@@ -536,7 +756,11 @@ function isClaudeResponseLine(line) {
 }
 
 function isCodexReadyCapture(text) {
-  return !isBusyByEsc(text) && hasCodexComposerPrompt(text);
+  return (
+    !isBusyByEsc(text) &&
+    !isCodexLoadingCapture(text) &&
+    hasCodexComposerPrompt(text)
+  );
 }
 
 function hasClaudeLoginGuard(text) {
@@ -679,7 +903,7 @@ function extractAssistantResponse(adapter, text, prompt = null) {
     }
   }
 
-  return response.join("\n").trim();
+  return trimResponseLines(adapter, response);
 }
 
 function extractResponseSinceMarker({ beforeRaw, raw, doneMarker, adapter }) {
@@ -716,20 +940,21 @@ function extractResponseSinceMarker({ beforeRaw, raw, doneMarker, adapter }) {
   const responseLines =
     responseStart === -1 ? candidateLines : candidateLines.slice(responseStart);
 
-  return responseLines
-    .filter(
-      (line) =>
-        !adapter.isChromeLine(line) &&
-        !isWarningLine(line) &&
-        !adapter.isStatusLine(line) &&
-        !hasCodexComposerPrompt(line) &&
-        !hasClaudeComposerPrompt(line),
-    )
-    .map((line) =>
-      adapter.isResponseLine(line) ? adapter.stripResponseMarker(line) : line,
-    )
-    .join("\n")
-    .trim();
+  return trimResponseLines(
+    adapter,
+    responseLines
+      .filter(
+        (line) =>
+          !adapter.isChromeLine(line) &&
+          !isWarningLine(line) &&
+          !adapter.isStatusLine(line) &&
+          !hasCodexComposerPrompt(line) &&
+          !hasClaudeComposerPrompt(line),
+      )
+      .map((line) =>
+        adapter.isResponseLine(line) ? adapter.stripResponseMarker(line) : line,
+      ),
+  );
 }
 
 function normalizeClaudeTaskText(text) {
@@ -1414,7 +1639,11 @@ async function probeDaemon(bridgePath, ref, timeoutMs) {
 async function hasTmuxSession(adapter, opts) {
   if (!opts.session) return false;
   try {
-    await runTmux(opts.remote, ["has-session", "-t", opts.session]);
+    await runTmux(opts.remote, [
+      "has-session",
+      "-t",
+      splitTmuxTarget(opts.session).session,
+    ]);
     return true;
   } catch {
     return false;
@@ -1493,6 +1722,8 @@ async function doStart(adapter, opts) {
     readyTimeoutMs,
     pollIntervalMs,
   } = opts;
+  if (session.includes(":"))
+    throw new Error("start --session accepts only a session name without ':'");
   const launchKeys = resume
     ? [adapter.resumeById(resume), "Enter"]
     : resumeLast
@@ -1539,6 +1770,36 @@ async function doStart(adapter, opts) {
   });
 }
 
+async function waitForTmuxIdle(adapter, opts) {
+  const { session, remote, pollIntervalMs, busyTimeoutMs, ifBusy } = opts;
+  if (!["wait", "fail", "interrupt"].includes(ifBusy)) {
+    throw new Error("--if-busy must be wait, fail, or interrupt for tmux");
+  }
+  const startedAt = Date.now();
+  let interrupted = false;
+  while (true) {
+    const visible = await captureVisible(remote, session);
+    const elapsedMs = Date.now() - startedAt;
+    const busy =
+      isBusyByEsc(visible) ||
+      (adapter.cli === "codex" && isCodexLoadingCapture(visible));
+    if (!busy) return elapsedMs;
+    if (ifBusy === "fail") throw new Error("target busy (--if-busy fail)");
+    if (elapsedMs >= busyTimeoutMs) {
+      throw new Error(
+        `target busy after ${Math.ceil(busyTimeoutMs / 1000)}s (--if-busy ${ifBusy})`,
+      );
+    }
+    if (ifBusy === "interrupt" && !interrupted) {
+      await runTmux(remote, ["send-keys", "-t", session, "Escape"]);
+      interrupted = true;
+    }
+    await sleep(
+      Math.min(pollIntervalMs, Math.max(1, busyTimeoutMs - elapsedMs)),
+    );
+  }
+}
+
 async function doAskViaTmux(adapter, opts) {
   const {
     session,
@@ -1548,11 +1809,20 @@ async function doAskViaTmux(adapter, opts) {
     settleMs,
     pollIntervalMs,
     doneMarker,
+    ifBusy = "wait",
+    busyTimeoutMs = timeoutMs,
   } = opts;
+  const busyWaitedMs = await waitForTmuxIdle(adapter, {
+    session,
+    remote,
+    pollIntervalMs,
+    busyTimeoutMs,
+    ifBusy,
+  });
   const beforeRaw = await capturePane(remote, session);
   const contextPctBefore = adapter.contextPct(beforeRaw);
 
-  const bufferName = `tfx-live-prompt-${session}-${Date.now()}`;
+  const bufferName = tmuxBufferName(session);
   await runTmux(remote, ["set-buffer", "-b", bufferName, "--", prompt]);
   await runTmux(remote, [
     "paste-buffer",
@@ -1662,6 +1932,8 @@ async function doAskViaTmux(adapter, opts) {
     session,
     remote: remote ?? null,
     transport: "tmux",
+    ifBusy,
+    busyWaitedMs,
     response,
     contextPctBefore,
     contextPctAfter,
@@ -1675,6 +1947,24 @@ async function doAsk(adapter, opts) {
   const transport = opts.transport ?? "tmux";
   if (transport === "tmux") {
     return doAskViaTmux(adapter, opts);
+  }
+
+  if (adapter.cli === "codex" && transport === "uds") {
+    if (opts.remote) return doAskViaRemoteLive(adapter, opts);
+    const { askCodexAppServerThread } = await import(
+      "../hub/team/uds-orchestrator.mjs"
+    );
+    return askCodexAppServerThread({
+      socketPath: opts.socketPath,
+      threadId: opts.threadId,
+      cwd: opts.cwd,
+      prompt: opts.prompt,
+      timeoutMs: opts.timeoutMs,
+      maxTurnMs: opts.maxTurnMs,
+      ifBusy: opts.ifBusy,
+      busyTimeoutMs: opts.busyTimeoutMs,
+      pollIntervalMs: opts.pollIntervalMs,
+    });
   }
 
   // uds/auto attach a live background Claude daemon, not a tmux TUI.
@@ -1706,7 +1996,11 @@ async function doAsk(adapter, opts) {
 }
 
 async function doAskViaRemoteLive(adapter, opts, deps = {}) {
-  const result = await callRemoteLive("ask", opts, deps);
+  const result = await callRemoteLive(
+    "ask",
+    { ...opts, cli: adapter.cli },
+    deps,
+  );
   return {
     ...result,
     cli: result.cli ?? adapter.cli,
@@ -1774,7 +2068,11 @@ function daemonProbeTargetAttachable(probe, opts) {
 async function ensureTmuxSession(adapter, opts) {
   if (!opts.session) return false;
   try {
-    await runTmux(opts.remote, ["has-session", "-t", opts.session]);
+    await runTmux(opts.remote, [
+      "has-session",
+      "-t",
+      splitTmuxTarget(opts.session).session,
+    ]);
     return false;
   } catch {
     await doStart(adapter, {
@@ -1953,6 +2251,10 @@ async function doAskAuto(adapter, opts) {
 
 async function doStop(adapter, opts) {
   const { session, remote } = opts;
+  if (/[:.]|^[%@]\d+$/.test(session))
+    throw new Error(
+      "stop --session accepts only a session name; pass the session name without a pane target",
+    );
   await runTmux(remote, ["kill-session", "-t", session]);
   return {
     cli: adapter.cli,
@@ -2070,8 +2372,11 @@ async function doInterrupt(adapter, opts) {
 }
 
 function startOpts(flags) {
+  const session = requireFlag(flags, "session");
+  if (session.includes(":"))
+    throw new Error("start --session accepts only a session name without ':'");
   return {
-    session: requireFlag(flags, "session"),
+    session,
     remote: flags.remote,
     cwd: flags.cwd,
     resume: flags.resume,
@@ -2115,7 +2420,10 @@ function askOpts(flags, adapter) {
   const short = flags.short;
   const sessionId = flags["session-id"];
   const transport = transportFlag(flags, adapter, short, sessionId);
-  if (transport !== "tmux" && !short && !sessionId) {
+  const codexUds = adapter.cli === "codex" && transport === "uds";
+  if (adapter.cli === "codex" && transport === "auto")
+    throw new Error("--transport auto is only supported with --cli claude");
+  if (transport !== "tmux" && !codexUds && !short && !sessionId) {
     throw new Error(
       `--transport ${transport} requires --short or --session-id`,
     );
@@ -2124,15 +2432,37 @@ function askOpts(flags, adapter) {
     // tmux needs a tmux session name; uds needs a daemon ref (short/sessionId);
     // auto can take both (daemon ref to probe, tmux session for fallback).
     session:
-      transport === "tmux" ? requireFlag(flags, "session") : flags.session,
+      transport === "tmux"
+        ? splitTmuxTarget(requireFlag(flags, "session")).target
+        : flags.session,
     short,
     sessionId,
     configDir: flags["config-dir"],
     transport,
+    threadId: codexUds ? requireFlag(flags, "thread") : null,
+    codexSocket: codexUds ? (flags["codex-socket"] ?? "default") : null,
+    socketPath:
+      codexUds && !flags.remote
+        ? resolveCodexDaemonSocket(flags["codex-socket"] ?? "default")
+        : null,
+    cwd: flags.cwd,
+    ifBusy: flags["if-busy"] ?? "wait",
+    busyTimeoutMs: secondsFlag(
+      flags,
+      "busy-timeout",
+      secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
+    ),
     bridgePath: resolveBridgePath(flags),
     prompt: requireFlag(flags, "prompt"),
     remote: flags.remote,
     timeoutMs: secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
+    maxTurnMs: codexUds
+      ? secondsFlag(
+          flags,
+          "max-turn",
+          Math.min(resolveHardCeilingMs(), 15 * 60_000),
+        )
+      : undefined,
     settleMs: msFlag(flags, "settle", DEFAULT_SETTLE_MS),
     pollIntervalMs: msFlag(flags, "poll-interval", DEFAULT_POLL_INTERVAL_MS),
   };
@@ -2149,9 +2479,15 @@ function interruptOpts(flags, adapter) {
   const short = flags.short;
   const sessionId = flags["session-id"];
   const transport = transportFlag(flags, adapter, short, sessionId);
+  if (adapter.cli === "codex" && transport === "uds")
+    throw new Error(
+      "active turnId unavailable; cannot interrupt Codex UDS thread",
+    );
   return {
     session:
-      transport === "tmux" ? requireFlag(flags, "session") : flags.session,
+      transport === "tmux"
+        ? splitTmuxTarget(requireFlag(flags, "session")).target
+        : flags.session,
     short,
     sessionId,
     configDir: flags["config-dir"],
@@ -2203,7 +2539,25 @@ async function listSessions(flags) {
   if (adapter.cli !== "codex") {
     throw new Error("list-sessions currently supports only --cli codex");
   }
-  printJson(await discoverCodexTmuxSessions({ cwd: flags.cwd }));
+  if (flags.transport === "uds") {
+    const { listCodexAppServerThreads } = await import(
+      "../hub/team/uds-orchestrator.mjs"
+    );
+    printJson(
+      await listCodexAppServerThreads({
+        socketPath: resolveCodexDaemonSocket(
+          flags["codex-socket"] ?? "default",
+        ),
+        cwd: flags.cwd,
+      }),
+    );
+    return;
+  }
+  if (flags.transport && flags.transport !== "tmux")
+    throw new Error("list-sessions --transport must be tmux or uds");
+  printJson(
+    await discoverCodexTmuxSessions({ cwd: flags.cwd, remote: flags.remote }),
+  );
 }
 
 function startOptsForSession(flags, session, side) {
@@ -2234,6 +2588,12 @@ function askOptsForSession(flags, session, prompt) {
     timeoutMs: secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
     settleMs: msFlag(flags, "settle", DEFAULT_SETTLE_MS),
     pollIntervalMs: msFlag(flags, "poll-interval", DEFAULT_POLL_INTERVAL_MS),
+    ifBusy: flags["if-busy"] ?? "wait",
+    busyTimeoutMs: secondsFlag(
+      flags,
+      "busy-timeout",
+      secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
+    ),
   };
 }
 
@@ -2254,9 +2614,12 @@ async function readPromptsFile(path) {
 
 async function stopAfterLifecycle(stopSpecs, primaryError = null) {
   let stopError = null;
-  for (const { adapter, opts } of stopSpecs) {
+  for (const spec of stopSpecs) {
     try {
-      await doStop(adapter, opts);
+      if (!spec.stopped) {
+        const result = await doStop(spec.adapter, spec.opts);
+        spec.stopped = result.stopped === true;
+      }
     } catch (error) {
       stopError ??= error;
     }
@@ -2676,7 +3039,11 @@ function peerSideTransport(flags, side, adapter) {
       `--transport-${side} must be one of: ${VALID_TRANSPORTS.join(", ")}`,
     );
   }
-  if (transport !== "tmux" && adapter.cli !== "claude") {
+  if (
+    transport !== "tmux" &&
+    adapter.cli !== "claude" &&
+    !(adapter.cli === "codex" && transport === "uds")
+  ) {
     throw new Error(
       `--transport-${side} ${transport} is only supported when --cli-${side} is claude`,
     );
@@ -2684,11 +3051,34 @@ function peerSideTransport(flags, side, adapter) {
   return transport;
 }
 
+function peerSideBusyPolicy(flags, side, adapter, transport) {
+  const allowed =
+    adapter.cli === "codex" && transport === "uds"
+      ? ["wait", "fail", "steer"]
+      : ["wait", "fail", "interrupt"];
+  for (const name of ["if-busy", `if-busy-${side}`]) {
+    if (flags[name] !== undefined && !allowed.includes(flags[name]))
+      throw new Error(
+        `--${name} must be ${allowed.join("|")} for side ${side} (${adapter.cli} ${transport})`,
+      );
+  }
+  return sideFlag(flags, side, "if-busy", "wait");
+}
+
 function peerSideBaseOpts(flags, side, adapter, session) {
   const transport = peerSideTransport(flags, side, adapter);
+  const ifBusy = peerSideBusyPolicy(flags, side, adapter, transport);
   const short = sideFlag(flags, side, "short");
   const sessionId = sideFlag(flags, side, "session-id");
-  if (transport !== "tmux" && !short && !sessionId) {
+  const threadId = sideFlag(flags, side, "thread");
+  if (transport === "uds" && adapter.cli === "codex" && !threadId)
+    throw new Error(`--transport-${side} uds requires --thread-${side}`);
+  if (
+    transport !== "tmux" &&
+    adapter.cli === "claude" &&
+    !short &&
+    !sessionId
+  ) {
     throw new Error(
       `--transport-${side} ${transport} requires --short-${side} or --session-id-${side}`,
     );
@@ -2697,13 +3087,38 @@ function peerSideBaseOpts(flags, side, adapter, session) {
     session,
     short,
     sessionId,
+    threadId,
+    codexSocket:
+      adapter.cli === "codex" && transport === "uds"
+        ? sideFlag(flags, side, "codex-socket", "default")
+        : null,
+    socketPath:
+      adapter.cli === "codex" && transport === "uds" && !flags.remote
+        ? resolveCodexDaemonSocket(
+            sideFlag(flags, side, "codex-socket", "default"),
+          )
+        : null,
     transport,
     bridgePath: sideFlag(flags, side, "bridge", resolveBridgePath(flags)),
     remote: flags.remote,
     cwd: flags.cwd,
     timeoutMs: secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
+    maxTurnMs:
+      adapter.cli === "codex" && transport === "uds"
+        ? secondsFlag(
+            flags,
+            "max-turn",
+            Math.min(resolveHardCeilingMs(), 15 * 60_000),
+          )
+        : undefined,
     settleMs: msFlag(flags, "settle", DEFAULT_SETTLE_MS),
     pollIntervalMs: msFlag(flags, "poll-interval", DEFAULT_POLL_INTERVAL_MS),
+    ifBusy,
+    busyTimeoutMs: secondsFlag(
+      flags,
+      "busy-timeout",
+      secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
+    ),
     readyTimeoutMs: secondsFlag(
       flags,
       "ready-timeout",
@@ -2718,6 +3133,37 @@ function askOptsFromPeerBase(base, prompt) {
 
 function shouldPrestartPeerSide(base) {
   return base.transport === "tmux";
+}
+
+async function verifyAttachedPeerSide(adapter, base, deps = {}) {
+  if (base.transport !== "tmux") return;
+  const tmux = deps.runTmux ?? runTmux;
+  const { session, target } = splitTmuxTarget(base.session);
+  try {
+    await tmux(base.remote, ["has-session", "-t", session]);
+  } catch {
+    throw new Error(`attached ${adapter.cli} session not found: ${session}`);
+  }
+  if (adapter.cli === "codex") {
+    const { stdout } = await tmux(base.remote, [
+      "display-message",
+      "-p",
+      "-t",
+      target,
+      "#{pane_current_command}\t#{pane_start_command}\t#{pane_tty}\t#{pane_pid}",
+    ]);
+    const [currentCommand, startCommand, paneTty, panePid] = stdout
+      .trimEnd()
+      .split("\t");
+    const result = await inspectCodexTmuxPane(
+      { currentCommand, startCommand, paneTty, panePid, remote: base.remote },
+      deps,
+    );
+    if (result.preflightWarning) return result;
+    if (!result.isCodex) {
+      throw new Error(`attached target is not a Codex tmux pane: ${target}`);
+    }
+  }
 }
 
 function addStopSpecOnce(stopSpecs, adapter, opts) {
@@ -2739,10 +3185,26 @@ function addStopSpecOnce(stopSpecs, adapter, opts) {
 async function peer(flags) {
   const adapterA = selectAdapterName(flags["cli-a"] ?? "codex", "cli-a");
   const adapterB = selectAdapterName(flags["cli-b"] ?? "claude", "cli-b");
+  peerSideBusyPolicy(
+    flags,
+    "a",
+    adapterA,
+    peerSideTransport(flags, "a", adapterA),
+  );
+  peerSideBusyPolicy(
+    flags,
+    "b",
+    adapterB,
+    peerSideTransport(flags, "b", adapterB),
+  );
   const sessionA = flags["session-a"] ?? "peerA";
   const sessionB = flags["session-b"] ?? "peerB";
   const baseA = peerSideBaseOpts(flags, "a", adapterA, sessionA);
   const baseB = peerSideBaseOpts(flags, "b", adapterB, sessionB);
+  const attachedA =
+    Object.hasOwn(flags, "attach-a") || baseA.transport === "uds";
+  const attachedB =
+    Object.hasOwn(flags, "attach-b") || baseB.transport === "uds";
   const rounds = integerFlag(flags, "rounds", 4);
   const mode = peerMode(flags);
   const hops = [];
@@ -2756,6 +3218,10 @@ async function peer(flags) {
     cliB: adapterB.cli,
     transportA: baseA.transport,
     transportB: baseB.transport,
+    attachedA,
+    attachedB,
+    stoppedA: false,
+    stoppedB: false,
     hops,
     transcript_path: artifactPaths.transcriptPath,
     status_path: artifactPaths.statusPath,
@@ -2771,11 +3237,27 @@ async function peer(flags) {
   let primaryError = null;
   let stopError = null;
   let closure = null;
+  const stopPeerSessions = async () => {
+    try {
+      await stopAfterLifecycle(stopSpecs);
+    } finally {
+      output.stoppedA =
+        !attachedA &&
+        stopSpecs.some(
+          (spec) => spec.opts.session === sessionA && spec.stopped,
+        );
+      output.stoppedB =
+        !attachedB &&
+        stopSpecs.some(
+          (spec) => spec.opts.session === sessionB && spec.stopped,
+        );
+    }
+  };
   const signalController = createPeerSignalController({
     output,
     persistTranscript: (value) => persistPeerTranscript(artifactPaths, value),
     persistStatus: (value) => persistPeerStatus(artifactPaths, value),
-    stopSessions: () => stopAfterLifecycle(stopSpecs),
+    stopSessions: stopPeerSessions,
   });
   const onSigint = () => {
     void signalController.handle("SIGINT");
@@ -2787,11 +3269,25 @@ async function peer(flags) {
   process.on("SIGTERM", onSigterm);
 
   try {
-    if (shouldPrestartPeerSide(baseA)) {
+    for (const [side, adapter, base, attached] of [
+      ["a", adapterA, baseA, attachedA],
+      ["b", adapterB, baseB, attachedB],
+    ]) {
+      if (!attached) continue;
+      const result = await verifyAttachedPeerSide(adapter, base);
+      if (result?.preflightWarning) {
+        output.preflightWarning ??= [];
+        output.preflightWarning.push({
+          side,
+          message: result.preflightWarning,
+        });
+      }
+    }
+    if (!attachedA && shouldPrestartPeerSide(baseA)) {
       await doStart(adapterA, startOptsForSession(flags, sessionA, "a"));
       addStopSpecOnce(stopSpecs, adapterA, baseA);
     }
-    if (shouldPrestartPeerSide(baseB)) {
+    if (!attachedB && shouldPrestartPeerSide(baseB)) {
       await doStart(adapterB, startOptsForSession(flags, sessionB, "b"));
       addStopSpecOnce(stopSpecs, adapterB, baseB);
     }
@@ -2809,7 +3305,17 @@ async function peer(flags) {
         ? buildPeerClosurePrompt(previous)
         : peerPrompt(mode, hopIndex, previous);
       const result = await doAsk(adapter, askOptsFromPeerBase(base, sent));
-      if (result.tmuxStartedOnDemand) {
+      if (
+        (result.transportSelected ?? result.transport ?? base.transport) ===
+        "uds"
+      ) {
+        result.response = String(result.response ?? "")
+          .split(/\r?\n/)
+          .filter((line) => line.trim() !== PEER_HOP_DONE_MARKER)
+          .join("\n")
+          .trim();
+      }
+      if (result.tmuxStartedOnDemand && !(isA ? attachedA : attachedB)) {
         addStopSpecOnce(stopSpecs, adapter, base);
       }
       if (
@@ -2864,7 +3370,7 @@ async function peer(flags) {
   }
 
   try {
-    await stopAfterLifecycle(stopSpecs);
+    await stopPeerSessions();
   } catch (error) {
     stopError = error;
   }
@@ -2887,8 +3393,6 @@ async function peer(flags) {
     output.exit_reason = exitReason;
     output.error = terminalError.message;
   }
-  output.stoppedA = stopError === null;
-  output.stoppedB = stopError === null;
 
   try {
     persistPeerTranscript(artifactPaths, output);
@@ -2914,7 +3418,11 @@ async function orchestrate(flags) {
     throw new Error(`--mode must be one of: ${ORCHESTRATION_MODES.join(", ")}`);
   }
   const task = requireFlag(flags, "task");
-  const codexTransport = flags["codex-transport"] ?? "exec";
+  if (flags["codex-socket"] && flags["codex-transport"] === "exec")
+    throw new Error("--codex-socket conflicts with --codex-transport exec");
+  const codexTransport =
+    flags["codex-transport"] ??
+    (flags["codex-socket"] ? "app-server-uds" : "exec");
   if (!CODEX_ORCH_TRANSPORTS.includes(codexTransport)) {
     throw new Error(
       `--codex-transport must be one of: ${CODEX_ORCH_TRANSPORTS.join(", ")}`,
@@ -2922,6 +3430,9 @@ async function orchestrate(flags) {
   }
   const cwd = flags.cwd ?? process.cwd();
   const timeoutMs = secondsFlag(flags, "timeout", 120_000);
+  const socketPath = flags["codex-socket"]
+    ? resolveCodexDaemonSocket(flags["codex-socket"])
+    : undefined;
 
   // Lazy import keeps the orchestration engine (and its hub/team deps) off the
   // hot path for every other thin-CLI verb; only `orchestrate` pays the cost.
@@ -2939,7 +3450,11 @@ async function orchestrate(flags) {
   const claude = createClaudeUdsEndpoint({ cwd, timeoutMs });
   const codex =
     codexTransport === "app-server-uds"
-      ? createCodexAppServerUdsEndpoint({ cwd, timeoutMs })
+      ? createCodexAppServerUdsEndpoint({
+          cwd,
+          timeoutMs,
+          ...(socketPath ? { socketPath, spawnServer: false } : {}),
+        })
       : createCodexExecEndpoint({ workdir: cwd, timeout: timeoutMs });
 
   const result = await runUdsOrchestration({ mode, task, claude, codex });
@@ -3029,6 +3544,7 @@ export {
   buildLaunchKeys,
   buildPeerClosurePrompt,
   buildRemoteLiveCommand,
+  buildTmuxCommand,
   callRemoteLive,
   classifyPeerExitReason,
   createPeerSignalController,
@@ -3040,10 +3556,17 @@ export {
   extractClaudeCompletedTaskListResponse,
   extractResponseSinceMarker,
   hasClaudeCompletedTaskListResponse,
+  inspectCodexTmuxPane,
+  isCodexLoadingCapture,
   parseCodexTmuxSessions,
   parsePeerClosure,
   parseRemoteLiveJson,
+  peerSideBaseOpts,
   resolveAskTransport,
+  resolveCodexDaemonSocket,
+  splitTmuxTarget,
+  tmuxBufferName,
+  verifyAttachedPeerSide,
 };
 
 function isMainModule() {
