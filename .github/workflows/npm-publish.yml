@@ -1,9 +1,18 @@
+# All three packages (@triflux/core, @triflux/remote, triflux) must have a
+# Trusted Publisher registered for this npm-publish.yml workflow.
+# Check each registration with: npm trust list <package>
 name: Publish to npm (Trusted Publishing OIDC)
 
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      npm_tag:
+        description: npm dist-tag (latest or canary; empty infers from version)
+        required: false
+        default: ''
+        type: string
 
 permissions:
   id-token: write
@@ -22,6 +31,25 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: Resolve npm tag
+        env:
+          INPUT_NPM_TAG: ${{ inputs.npm_tag }}
+        run: |
+          NPM_TAG="$INPUT_NPM_TAG"
+          if [[ -z "$NPM_TAG" ]]; then
+            version="$(node -p "require('./package.json').version")"
+            if [[ "$version" == *-* ]]; then
+              NPM_TAG=canary
+            else
+              NPM_TAG=latest
+            fi
+          fi
+          case "$NPM_TAG" in
+            latest|canary) ;;
+            *) echo "::error::Invalid npm tag: $NPM_TAG (expected latest or canary)"; exit 1 ;;
+          esac
+          echo "NPM_TAG=$NPM_TAG" >> "$GITHUB_ENV"
+
       - name: Verify npm 11.5.1+
         run: npm --version
 
@@ -31,48 +59,33 @@ jobs:
       # Each npm package needs a Trusted Publisher entry for OIDC/provenance.
       - name: Publish @triflux/core
         working-directory: packages/core
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
           if npm view "$name@$version" version >/dev/null 2>&1; then
             echo "$name@$version is already published; skipping."
           else
-            if [[ -n "${NPM_TOKEN:-}" ]]; then
-              export NODE_AUTH_TOKEN="$NPM_TOKEN"
-            fi
-            npm publish --provenance --access public
+            npm publish --provenance --access public --tag "$NPM_TAG"
           fi
 
       - name: Publish @triflux/remote
         working-directory: packages/remote
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
           if npm view "$name@$version" version >/dev/null 2>&1; then
             echo "$name@$version is already published; skipping."
           else
-            if [[ -n "${NPM_TOKEN:-}" ]]; then
-              export NODE_AUTH_TOKEN="$NPM_TOKEN"
-            fi
-            npm publish --provenance --access public
+            npm publish --provenance --access public --tag "$NPM_TAG"
           fi
 
       - name: Publish triflux
         working-directory: packages/triflux
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
           if npm view "$name@$version" version >/dev/null 2>&1; then
             echo "$name@$version is already published; skipping."
           else
-            if [[ -n "${NPM_TOKEN:-}" ]]; then
-              export NODE_AUTH_TOKEN="$NPM_TOKEN"
-            fi
-            npm publish --provenance --access public
+            npm publish --provenance --access public --tag "$NPM_TAG"
           fi

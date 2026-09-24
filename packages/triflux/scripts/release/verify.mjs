@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url";
 import { assertVersionSync, parseArgs, ROOT } from "./lib.mjs";
 
 const NPM_VERIFY_TARGETS = ["@triflux/core", "@triflux/remote", "triflux"];
+const NPM_POLL_INTERVAL_MS = 20_000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function errorMessage(error) {
   const stderr = error?.stderr?.toString?.().trim();
@@ -16,7 +21,19 @@ export async function verifyRelease({
   rootDir = ROOT,
   dryRun = true,
   execFileSyncFn = execFileSync,
+  npmWaitSeconds = 0,
+  nowFn = Date.now,
+  sleepFn = sleep,
 } = {}) {
+  const waitSeconds = Number(npmWaitSeconds);
+  if (
+    typeof npmWaitSeconds === "boolean" ||
+    npmWaitSeconds === "" ||
+    !Number.isFinite(waitSeconds) ||
+    waitSeconds < 0
+  ) {
+    throw new Error("--npm-wait-seconds must be a non-negative finite number");
+  }
   const sync = assertVersionSync({ rootDir });
   if (!sync.ok) {
     throw new Error("Version sync failed. Fix metadata before verify.");
@@ -31,32 +48,43 @@ export async function verifyRelease({
   ];
 
   if (!dryRun) {
-    for (const packageName of NPM_VERIFY_TARGETS) {
-      const packageSpec = `${packageName}@${releaseVersion}`;
-      try {
-        const npmVersion = execFileSyncFn(
-          "npm",
-          ["view", packageSpec, "version"],
-          {
-            cwd: rootDir,
-            encoding: "utf8",
-          },
-        ).trim();
-        checks.push({
-          name: `npm-view ${packageName}`,
-          ok: npmVersion === releaseVersion,
-          detail:
-            npmVersion === releaseVersion
-              ? npmVersion
-              : `expected ${releaseVersion}, got ${npmVersion}`,
-        });
-      } catch (error) {
-        checks.push({
-          name: `npm-view ${packageName}`,
-          ok: false,
-          detail: `npm view failed for ${packageSpec}: ${errorMessage(error)}`,
-        });
+    const deadline = nowFn() + waitSeconds * 1000;
+    const lastSeen = new Map();
+    while (true) {
+      const npmChecks = NPM_VERIFY_TARGETS.map((packageName) => {
+        const packageSpec = `${packageName}@${releaseVersion}`;
+        try {
+          const npmVersion = execFileSyncFn(
+            "npm",
+            ["view", packageSpec, "version"],
+            { cwd: rootDir, encoding: "utf8" },
+          ).trim();
+          lastSeen.set(packageName, npmVersion);
+          return {
+            name: `npm-view ${packageName}`,
+            ok: npmVersion === releaseVersion,
+            detail:
+              npmVersion === releaseVersion
+                ? npmVersion
+                : `expected ${releaseVersion}, got ${npmVersion}`,
+          };
+        } catch (error) {
+          const previous = lastSeen.get(packageName);
+          const lastSeenDetail =
+            waitSeconds > 0 ? ` (last seen ${previous ?? "unavailable"})` : "";
+          return {
+            name: `npm-view ${packageName}`,
+            ok: false,
+            detail: `npm view failed for ${packageSpec}: ${errorMessage(error)}${lastSeenDetail}`,
+          };
+        }
+      });
+      const remainingMs = deadline - nowFn();
+      if (npmChecks.every((check) => check.ok) || remainingMs <= 0) {
+        checks.push(...npmChecks);
+        break;
       }
+      await sleepFn(Math.min(NPM_POLL_INTERVAL_MS, remainingMs));
     }
 
     const ghRelease = execFileSyncFn(
@@ -101,6 +129,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     version: args.version,
     rootDir: args.root,
     dryRun: !args.execute,
+    npmWaitSeconds: args["npm-wait-seconds"] ?? 0,
   });
   console.log(JSON.stringify(result, null, 2));
   process.exitCode = result.ok ? 0 : 1;
