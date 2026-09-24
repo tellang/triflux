@@ -636,6 +636,13 @@ const SYNC_MAP = [
   // 설치본이 남지 않게 한다. hooks/ 는 플러그인 루트에서 직접 import 되는 경로라
   // 이 복사 목록의 대상이 아니다.
   ...scanLibFiles(PLUGIN_ROOT, CLAUDE_DIR),
+  // hud/providers/cto.mjs 가 ../../hub/lib/cto-env.mjs 를 정적 import 한다(ADR-0018).
+  // 의존성 없는 env 판독 모듈이라 이 파일 하나만 hud 보다 먼저 복사한다.
+  {
+    src: join(PLUGIN_ROOT, "hub", "lib", "cto-env.mjs"),
+    dst: join(CLAUDE_DIR, "hub", "lib", "cto-env.mjs"),
+    label: "hub/lib/cto-env.mjs",
+  },
   ...scanHudFiles(PLUGIN_ROOT, CLAUDE_DIR),
   {
     src: join(PLUGIN_ROOT, "scripts", "notion-read.mjs"),
