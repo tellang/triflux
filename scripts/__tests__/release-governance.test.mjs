@@ -386,7 +386,10 @@ describe("release governance scripts", () => {
       workflow,
       /NPM_TAG: \$\{\{ needs\.resolve\.outputs\.npm_tag \}\}/,
     );
-    assert.match(workflow, /verify\.mjs.*--npm-wait-seconds 3600/);
+    assert.match(
+      workflow,
+      /verify\.mjs.*--npm-wait-seconds 900 --npm-pending-ok/,
+    );
   });
 
   it("verify reports explicit npm package/version failures", async () => {

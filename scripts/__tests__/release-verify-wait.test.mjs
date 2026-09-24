@@ -29,6 +29,7 @@ it("waits for all three npm packages to show the release version", async () => {
       version: "1.2.3",
       dryRun: false,
       npmWaitSeconds: 40,
+      npmPendingOk: true,
       nowFn: () => now,
       sleepFn: async (ms) => {
         sleeps.push(ms);
@@ -43,9 +44,75 @@ it("waits for all three npm packages to show the release version", async () => {
       },
     });
     assert.equal(result.ok, true);
+    assert.equal(
+      result.checks.some((check) => check.status === "pending"),
+      false,
+    );
     assert.deepEqual(sleeps, [20_000]);
     assert.deepEqual([...calls.values()], [2, 2, 2]);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it("passes with pending npm checks and emits one Actions warning at the deadline", async () => {
+  const root = makeRepo();
+  let now = 0;
+  const calls = new Map();
+  const warnings = [];
+  const originalActions = process.env.GITHUB_ACTIONS;
+  const originalLog = console.log;
+  process.env.GITHUB_ACTIONS = "true";
+  console.log = (message) => warnings.push(message);
+  try {
+    const result = await verifyRelease({
+      rootDir: root,
+      version: "1.2.3",
+      dryRun: false,
+      npmWaitSeconds: 20,
+      npmPendingOk: true,
+      nowFn: () => now,
+      sleepFn: async (ms) => {
+        now += ms;
+      },
+      execFileSyncFn: (command, args) => {
+        if (command === "gh") return '{"tagName":"v1.2.3"}';
+        const count = (calls.get(args[1]) || 0) + 1;
+        calls.set(args[1], count);
+        if (args[1].startsWith("@triflux/core")) return "1.2.3\n";
+        if (args[1].startsWith("@triflux/remote") && count === 2) {
+          throw new Error("registry timeout");
+        }
+        return args[1].startsWith("@triflux/remote") ? "1.2.2\n" : "1.2.1\n";
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.deepEqual([...calls.values()], [2, 2, 2]);
+    assert.deepEqual(
+      result.checks
+        .filter((check) => check.status === "pending")
+        .map((check) => check.name),
+      ["npm-view @triflux/remote", "npm-view triflux"],
+    );
+    assert.match(
+      result.checks.find((check) => check.name === "npm-view @triflux/remote")
+        .detail,
+      /last seen 1\.2\.2; npm publish-time scan may still be processing/,
+    );
+    assert.match(
+      result.checks.find((check) => check.name === "npm-view triflux").detail,
+      /last seen 1\.2\.1; npm publish-time scan may still be processing/,
+    );
+    assert.equal(
+      result.checks.find((check) => check.name === "github-release").ok,
+      true,
+    );
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /^::warning::npm registry pending/);
+  } finally {
+    console.log = originalLog;
+    if (originalActions === undefined) delete process.env.GITHUB_ACTIONS;
+    else process.env.GITHUB_ACTIONS = originalActions;
     rmSync(root, { recursive: true, force: true });
   }
 });

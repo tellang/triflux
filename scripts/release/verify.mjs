@@ -22,6 +22,7 @@ export async function verifyRelease({
   dryRun = true,
   execFileSyncFn = execFileSync,
   npmWaitSeconds = 0,
+  npmPendingOk = false,
   nowFn = Date.now,
   sleepFn = sleep,
 } = {}) {
@@ -81,6 +82,24 @@ export async function verifyRelease({
       });
       const remainingMs = deadline - nowFn();
       if (npmChecks.every((check) => check.ok) || remainingMs <= 0) {
+        if (npmPendingOk && remainingMs <= 0) {
+          const pending = npmChecks.filter((check) => !check.ok);
+          for (const check of pending) {
+            const packageName = check.name.slice("npm-view ".length);
+            check.ok = null;
+            check.status = "pending";
+            check.detail = `expected ${releaseVersion}, last seen ${lastSeen.get(packageName) ?? "unavailable"}; npm publish-time scan may still be processing`;
+          }
+          if (pending.length && process.env.GITHUB_ACTIONS === "true") {
+            const packages = pending.map(
+              (check) =>
+                `${check.name.slice("npm-view ".length)}@${releaseVersion}`,
+            );
+            console.log(
+              `::warning::npm registry pending for ${packages.join(", ")}; npm publish-time scan may still be processing`,
+            );
+          }
+        }
         checks.push(...npmChecks);
         break;
       }
@@ -130,6 +149,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     rootDir: args.root,
     dryRun: !args.execute,
     npmWaitSeconds: args["npm-wait-seconds"] ?? 0,
+    npmPendingOk: args["npm-pending-ok"] === true,
   });
   console.log(JSON.stringify(result, null, 2));
   process.exitCode = result.ok ? 0 : 1;
