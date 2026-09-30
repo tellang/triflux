@@ -10,7 +10,7 @@ argument-hint: "<구현할 기능> [--quick]"
 > **ARGUMENTS 처리**: `--quick` → Quick 모드. 그 외 → Deep 모드 (기본).
 
 > AI makes completeness near-free. 기본은 Opus 4.6(Planner) + Codex(Architect) + Claude Opus(Critic) 합의.
-> Antigravity는 `agy --print` stdin 경로가 단순 프롬프트에서만 검증됐으므로, schema-driven critic에는 쓰지 않고 `--quick` freeform 보조로만 사용한다.
+> Antigravity는 `agy --print` 경로가 단순 프롬프트에서만 검증됐으므로, schema-driven critic에는 쓰지 않고 `--quick` freeform 보조로만 사용한다.
 
 ---
 
@@ -49,7 +49,7 @@ Tier 3:
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent 동시 호출
 5. deprecated Gemini CLI 또는 legacy Gemini assign 금지. Antigravity는 `antigravity:`/`agy` 이름만 사용한다.
-6. `agy --print`는 stdin prompt만 사용한다. positional prompt 및 strict JSON critic 검증에 실패하면 Claude critic으로 대체한다.
+6. `agy --print`는 프롬프트를 옵션 값으로 받는다(`--print '<prompt>'`). 표준 입력 프롬프트는 agy 1.1.27부터 동작하지 않는다. strict JSON critic 검증에 실패하면 Claude critic으로 대체한다.
 
 ### 모델 역할
 
