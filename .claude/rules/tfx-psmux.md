@@ -189,7 +189,7 @@ safety-guard 가 `wt.exe` / `wt new-tab` / `wt split-pane` / `Start-Process wt` 
 
 ## 규칙 7: 현재 모델 프로파일 우선
 
-라우팅 기본값은 `gpt6_astra_xhigh`, `gpt6_sol_high`, `gpt6_sol_med`, `gpt6_luna_high`, `gpt6_luna_low` 프로파일을 사용한다.
+라우팅 기본값은 `gpt6_astra_xhigh`, `gpt61_sol_high`, `gpt61_sol_med`, `gpt6_luna_high`, `gpt6_luna_low` 프로파일을 사용한다.
 구형 `gpt56_*`, `spark53_*`, `codex53_*`, `gpt54_*`, `mini54_*` 프로파일을 새 라우팅 기본값으로 되살리지 않는다.
 
 ## 규칙 8: WT 배치 선택 필수

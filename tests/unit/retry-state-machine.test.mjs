@@ -231,8 +231,8 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
 
     it("옛 GPT-5.6 스냅샷은 profile과 model을 함께 GPT-6 값으로 맞춘다", () => {
       const cases = [
-        ["gpt-5.6-terra", "gpt56_terra_high", "gpt6_sol_high", "gpt-6-sol"],
-        ["gpt-5.6-terra", "gpt56_terra_med", "gpt6_sol_med", "gpt-6-sol"],
+        ["gpt-5.6-terra", "gpt56_terra_high", "gpt61_sol_high", "gpt-6.1-sol"],
+        ["gpt-5.6-terra", "gpt56_terra_med", "gpt61_sol_med", "gpt-6.1-sol"],
         ["gpt-5.6-luna", "gpt56_luna_low", "gpt6_luna_low", "gpt-6-luna"],
         ["gpt-5.6-sol", "gpt56_sol_max", "gpt6_astra_max", "gpt-6-astra"],
       ];
@@ -255,7 +255,7 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       const sm = createRetryStateMachine({
         mode: "auto-escalate",
         cliChain: [
-          { cli: "codex", model: "custom-model", profile: "gpt6_sol_high" },
+          { cli: "codex", model: "custom-model", profile: "gpt61_sol_high" },
           { cli: "claude", model: "fable" },
         ],
       });

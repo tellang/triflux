@@ -15,7 +15,7 @@ const MAX_CAPTURE_BYTES = 256 * 1024;
 const MAX_TOP_KEYS = 20;
 
 // stdin 이 context_window_size 를 제공하지 않을 때 모델 ID 로 한도를 추정한다.
-// Anthropic 공식 문서(2026-09-22 기준): Opus 4.6 이상, Sonnet 4.6/5,
+// Anthropic 공식 문서(2026-09-30 기준): Opus 4.6 이상, Sonnet 4.6/5/5.5,
 // Fable 5/5.1 = 1M. Sonnet 4.5 / Haiku 4.5 = 200K이며 [1m]도 유지한다.
 const MODEL_HINT_1M_PREFIXES = [
   "claude-sonnet-4-6",

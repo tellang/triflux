@@ -195,9 +195,13 @@ describe("hud/context-monitor.mjs", () => {
     );
   });
 
-  it("Sonnet 5와 Fable 5.1은 suffix 없이 1M으로 추정한다", () => {
+  it("Sonnet 5, Sonnet 5.5, Fable 5.1은 suffix 없이 1M으로 추정한다", () => {
     assert.equal(
       deriveContextLimit({ model: { id: "claude-sonnet-5" } }),
+      1_000_000,
+    );
+    assert.equal(
+      deriveContextLimit({ model: { id: "claude-sonnet-5-5" } }),
       1_000_000,
     );
     assert.equal(

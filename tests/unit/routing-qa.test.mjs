@@ -261,8 +261,8 @@ describe("route_agent: 에이전트→CLI 매핑", () => {
 // 5. route_agent(): effort/timeout 매핑
 // ========================================================================
 describe("route_agent: effort 레벨 검증", () => {
-  it("executor → gpt6_sol_high effort", () => {
-    assert.equal(ROUTE_TABLE.executor?.CLI_EFFORT, "gpt6_sol_high");
+  it("executor → gpt61_sol_high effort", () => {
+    assert.equal(ROUTE_TABLE.executor?.CLI_EFFORT, "gpt61_sol_high");
   });
 
   it("build-fixer → gpt6_luna_high effort", () => {
@@ -277,12 +277,12 @@ describe("route_agent: effort 레벨 검증", () => {
     assert.equal(ROUTE_TABLE.spark?.CLI_EFFORT, "gpt6_luna_low");
   });
 
-  it("code-reviewer → gpt6_sol_high effort", () => {
-    assert.equal(ROUTE_TABLE["code-reviewer"]?.CLI_EFFORT, "gpt6_sol_high");
+  it("code-reviewer → gpt61_sol_high effort", () => {
+    assert.equal(ROUTE_TABLE["code-reviewer"]?.CLI_EFFORT, "gpt61_sol_high");
   });
 
-  it("codex alias → gpt6_sol_high effort (executor와 동일)", () => {
-    assert.equal(ROUTE_TABLE.codex?.CLI_EFFORT, "gpt6_sol_high");
+  it("codex alias → gpt61_sol_high effort (executor와 동일)", () => {
+    assert.equal(ROUTE_TABLE.codex?.CLI_EFFORT, "gpt61_sol_high");
   });
 
   it("gemini alias → agy_v1 effort", () => {
@@ -306,7 +306,7 @@ describe("headless: buildHeadlessCommand", async () => {
     assert.ok(cmd.includes("TFX_CODEX_PROFILE="));
     assert.ok(cmd.includes("/tmp/result.txt"));
     assert.ok(
-      cmd.includes("gpt6_sol_high"),
+      cmd.includes("gpt61_sol_high"),
       `headless Codex가 역할 프로필을 route에 전달해야 함: ${cmd}`,
     );
     assert.ok(!cmd.includes("gpt6_astra_ultra"));
@@ -363,7 +363,7 @@ describe("headless: buildHeadlessCommand", async () => {
       );
 
       assert.ok(explicitMax.includes("gpt6_astra_max"));
-      assert.ok(automatic.includes("gpt6_sol_high"));
+      assert.ok(automatic.includes("gpt61_sol_high"));
       assert.ok(!automatic.includes("gpt6_astra_ultra"));
     } finally {
       if (previous === undefined) delete process.env.TFX_CODEX_PROFILE;
@@ -399,7 +399,7 @@ describe("headless: buildHeadlessCommand", async () => {
 
       assert.ok(customUltra.includes("gpt6_astra_max"));
       assert.ok(!customUltra.includes("gpt6_astra_ultra"));
-      assert.ok(missingCustom.includes("gpt6_sol_high"));
+      assert.ok(missingCustom.includes("gpt61_sol_high"));
     } finally {
       if (previous === undefined) delete process.env.CODEX_HOME;
       else process.env.CODEX_HOME = previous;
@@ -599,7 +599,7 @@ describe("tfx-route.sh: 기본 검증", () => {
       /apply_dynamic_routing_override\(\)\s*\{([\s\S]*?)^}/m,
     )?.[1];
     assert.ok(fn, "apply_dynamic_routing_override 함수가 있어야 함");
-    assert.match(fn, /codex\)[\s\S]*CLI_ARGS="exec --profile gpt6_sol_high/);
+    assert.match(fn, /codex\)[\s\S]*CLI_ARGS="exec --profile gpt61_sol_high/);
     assert.match(
       fn,
       /antigravity\)[\s\S]*CLI_ARGS="--print --dangerously-skip-permissions"/,

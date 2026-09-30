@@ -190,12 +190,14 @@ describe("codexProfileConfigOverrides", () => {
     }
   });
 
-  it("normalizes old Terra and Luna names to the GPT-6 lane with the same effort", () => {
+  it("normalizes old Terra, Luna, and GPT-6 Sol names to the current lane with the same effort", () => {
     const codexHome = makeHome();
     for (const [legacy, canonical, model, effort] of [
-      ["gpt56_terra_high", "gpt6_sol_high", "gpt-6-sol", "high"],
-      ["gpt56_terra_med", "gpt6_sol_med", "gpt-6-sol", "medium"],
+      ["gpt56_terra_high", "gpt61_sol_high", "gpt-6.1-sol", "high"],
+      ["gpt56_terra_med", "gpt61_sol_med", "gpt-6.1-sol", "medium"],
       ["gpt56_luna_low", "gpt6_luna_low", "gpt-6-luna", "low"],
+      ["gpt6_sol_high", "gpt61_sol_high", "gpt-6.1-sol", "high"],
+      ["gpt6_sol_med", "gpt61_sol_med", "gpt-6.1-sol", "medium"],
     ]) {
       writeFileSync(
         join(codexHome, `${canonical}.config.toml`),
@@ -213,7 +215,7 @@ describe("codexProfileConfigOverrides", () => {
     const codexHome = makeHome();
     writeFileSync(
       join(codexHome, "gpt6_astra_xhigh.config.toml"),
-      'model = "gpt-6-sol"\nmodel_reasoning_effort = "high"\n',
+      'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "high"\n',
     );
     assert.deepEqual(
       codexProfileConfigOverrides("gpt6_astra_xhigh", {

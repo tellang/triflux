@@ -60,13 +60,13 @@ describe("intent", () => {
     assert.ok(r.reasoning, "Should have reasoning");
   });
 
-  // 7. classifyIntent: implement → executor/implement/gpt6_sol_high
-  it("classifyIntent: implement routes to executor/implement/gpt6_sol_high", () => {
+  // 7. classifyIntent: implement → executor/implement/gpt61_sol_high
+  it("classifyIntent: implement routes to executor/implement/gpt61_sol_high", () => {
     const r = classifyIntent("새로운 API 엔드포인트 구현해줘");
     assert.equal(r.category, "implement");
     assert.equal(r.routing.agent, "executor");
     assert.equal(r.routing.mcp, "implement");
-    assert.equal(r.routing.effort, "gpt6_sol_high");
+    assert.equal(r.routing.effort, "gpt61_sol_high");
   });
 
   // 8. classifyIntent: document → writer/docs/direct-Codex policy

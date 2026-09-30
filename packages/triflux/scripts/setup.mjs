@@ -437,14 +437,14 @@ const REQUIRED_CODEX_PROFILES = [
     name: "gpt6_astra_xhigh",
     lines: ['model = "gpt-6-astra"', 'model_reasoning_effort = "xhigh"'],
   },
-  // GPT-6 Sol: implementation, review, and verification role defaults.
+  // GPT-6.1 Sol: implementation, review, and verification role defaults.
   {
-    name: "gpt6_sol_high",
-    lines: ['model = "gpt-6-sol"', 'model_reasoning_effort = "high"'],
+    name: "gpt61_sol_high",
+    lines: ['model = "gpt-6.1-sol"', 'model_reasoning_effort = "high"'],
   },
   {
-    name: "gpt6_sol_med",
-    lines: ['model = "gpt-6-sol"', 'model_reasoning_effort = "medium"'],
+    name: "gpt61_sol_med",
+    lines: ['model = "gpt-6.1-sol"', 'model_reasoning_effort = "medium"'],
   },
   // GPT-6 Luna: high for focused lanes, low for latency-first lanes.
   {

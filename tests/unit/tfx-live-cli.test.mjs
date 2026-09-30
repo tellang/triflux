@@ -42,13 +42,13 @@ test("Codex loading screen blocks readiness and timestamp lines leave responses"
   );
   assert.equal(
     tfxLive.isCodexLoadingCapture(
-      "model: loading\nold scrollback\nmodel: gpt-6-sol\n›",
+      "model: loading\nold scrollback\nmodel: gpt-6.1-sol\n›",
     ),
     false,
   );
   assert.equal(
     tfxLive.isCodexLoadingCapture(
-      "model: gpt-6-sol\nold scrollback\nmodel: loading\n›",
+      "model: gpt-6.1-sol\nold scrollback\nmodel: loading\n›",
     ),
     true,
   );

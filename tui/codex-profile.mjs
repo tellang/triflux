@@ -41,6 +41,7 @@ const CONFIG_PATH = join(CODEX_DIR, "config.toml");
 
 const KNOWN_MODELS = [
   { label: "gpt-6-astra", hint: "프런티어" },
+  { label: "gpt-6.1-sol", hint: "범용, Astra에 근접" },
   { label: "gpt-6-sol", hint: "범용" },
   { label: "gpt-6-luna", hint: "경량" },
   { label: "직접 입력", hint: "" },
