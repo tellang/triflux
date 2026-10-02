@@ -157,6 +157,13 @@ export function writeCodexSessionRecord(
     ) {
       return false;
     }
+    // Split ps argv on whitespace; the first non-option after the binary is the subcommand.
+    const subcommand = command
+      .trim()
+      .split(/\s+/)
+      .slice(1)
+      .find((arg) => !arg.startsWith("-"));
+    if (subcommand === "exec") return false;
     const panePidOutput = String(panePidFn(paneId)).trim();
     const panePid = Number(panePidOutput);
     if (
@@ -189,14 +196,12 @@ export function writeCodexSessionRecord(
   const targetDir = dir;
   const target = join(targetDir, `${pid}.json`);
   let startedAt = timestamp;
+  let source = payload.source || null;
   try {
     const existing = JSON.parse(readFileSync(target, "utf8"));
-    if (
-      existing.pid === pid &&
-      existing.sessionId === payload.session_id &&
-      Number.isFinite(existing.startedAt)
-    ) {
-      startedAt = existing.startedAt;
+    if (existing.pid === pid && existing.sessionId === payload.session_id) {
+      if (Number.isFinite(existing.startedAt)) startedAt = existing.startedAt;
+      if (payload.source === undefined) source = existing.source || null;
     }
   } catch {
     // New record, or an invalid previous record.
@@ -210,7 +215,7 @@ export function writeCodexSessionRecord(
     cwd: payload.cwd || process.cwd(),
     tmux: resolveTmuxCoordinate({ paneId, tmuxFn }),
     tmuxPane: paneId,
-    source: payload.source || null,
+    source,
     startedAt,
     updatedAt: timestamp,
   };

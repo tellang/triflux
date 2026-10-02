@@ -138,6 +138,71 @@ describe("codex-session-registry", () => {
       assert.equal(existsSync(dir), false);
     }));
 
+  it("skips exec workers even when they descend from the inherited pane", () =>
+    withTempDir((root) => {
+      const dir = join(root, "registry");
+      for (const command of [
+        "codex exec",
+        "/opt/bin/codex exec --profile x -- do work",
+        "codex --dangerously-bypass-approvals-and-sandbox exec -- do work",
+      ]) {
+        assert.equal(
+          writeCodexSessionRecord(
+            { session_id: "headless" },
+            {
+              dir,
+              env: { TMUX_PANE: "%42" },
+              psFn: () => ({ ppid: 424242, comm: "codex" }),
+              commandFn: () => command,
+              panePidFn: () => "424242",
+              tmuxFn: () => "claude:@2.%42",
+            },
+          ),
+          false,
+          command,
+        );
+        assert.equal(existsSync(dir), false, command);
+      }
+    }));
+
+  for (const [name, commands] of [
+    ["resume", ["codex resume thread-id", "codex resume thread-id exec"]],
+    [
+      "plain codex with flags",
+      [
+        "codex",
+        "codex --dangerously-bypass-approvals-and-sandbox",
+        "codex --profile tui",
+      ],
+    ],
+  ]) {
+    it(`records interactive ${name}`, () =>
+      withTempDir((dir) => {
+        for (const command of commands) {
+          assert.equal(
+            writeCodexSessionRecord(
+              { session_id: "interactive" },
+              {
+                dir,
+                env: { TMUX_PANE: "%42" },
+                psFn: () => ({ ppid: 1, comm: "codex" }),
+                commandFn: () => command,
+                panePidFn: () => `${process.ppid}`,
+                tmuxFn: () => "room:@2.%42",
+              },
+            ),
+            true,
+            command,
+          );
+          const record = JSON.parse(
+            readFileSync(join(dir, `${process.ppid}.json`), "utf8"),
+          );
+          assert.equal(record.sessionId, "interactive");
+          assert.equal(record.tmux, "room:@2.%42");
+        }
+      }));
+  }
+
   it("writes nothing for missing, stale, or unreadable panes", () =>
     withTempDir((root) => {
       const dir = join(root, "registry");
@@ -258,7 +323,7 @@ describe("codex-session-registry", () => {
       }
     }));
 
-  it("writes a private atomic record and preserves startedAt only for the same thread", () =>
+  it("writes a private atomic record and preserves startedAt and source on same-thread heartbeats", () =>
     withTempDir((root) => {
       const dir = join(root, "registry");
       const psFn = () => ({ ppid: 1, comm: "/bin/codex" });
@@ -300,10 +365,12 @@ describe("codex-session-registry", () => {
       const second = JSON.parse(readFileSync(file, "utf8"));
       assert.equal(second.startedAt, 100);
       assert.equal(second.updatedAt, 200);
+      assert.equal(second.source, "startup");
       writeCodexSessionRecord({ session_id: "second" }, { ...opts, now: 300 });
       const third = JSON.parse(readFileSync(file, "utf8"));
       assert.equal(third.startedAt, 300);
       assert.equal(third.sessionId, "second");
+      assert.equal(third.source, null);
       assert.deepEqual(readdirSync(dir), [`${process.ppid}.json`]);
     }));
 
