@@ -79,6 +79,33 @@ the npm `node .../codex` shim, `codex.js`, and native `codex` executables.
 on that host; unavailable `ps` produces a peer `preflightWarning` and allows
 attach to continue.
 
+### Claude discovery and Codex registry
+
+`tfx-live list-sessions --cli claude [--cwd DIR]` lists local tmux sessions from
+`~/.claude/sessions/*.json` (`TFX_CLAUDE_SESSIONS_DIR` overrides the directory).
+It returns `session`, `target`, `paneId`, pane `cwd`, `pid`, `sessionId`, `short`,
+`name`, `title`, `nameSource`, and `status` only for live PIDs matching the pane process
+or a descendant within four levels. Claude discovery rejects `--remote` and
+`--transport uds`; `--transport auto` uses local tmux, and `--cwd` matches the
+pane cwd exactly.
+
+`title` equals `name` unless `nameSource` is `derived` or the name is empty.
+In those cases it uses the latest non-empty, trimmed `custom-title` or `ai-title`
+from the last 262144 bytes of `~/.claude/projects/*/<sessionId>.jsonl`
+(`TFX_CLAUDE_PROJECTS_DIR` overrides the projects directory). `customTitle`
+takes precedence over `aiTitle` on the same line; no matching title yields null.
+
+Codex SessionStart and UserPromptSubmit hooks atomically write `<pid>.json` to
+`${XDG_STATE_HOME:-$HOME/.local/state}/triflux/codex-sessions`
+(`TFX_CODEX_SESSION_REGISTRY_DIR` overrides it). Version 1 contains
+`{ version: 1, writer: "triflux", pid, sessionId, cwd, tmux, tmuxPane, source,
+startedAt, updatedAt }`: `tmux` is `<session>:@<window_id>.%<pane_id>` or null,
+`tmuxPane` is `%<pane_id>` or null, `source` defaults to null, and timestamps
+are milliseconds. `startedAt` stays unchanged for the same PID and thread.
+Local Codex discovery adds `threadId` and `name` to matching entries in `panes`;
+names come from `$CODEX_HOME/session_index.jsonl` (default `~/.codex`), and are
+null when absent. Dead PID records are pruned after writes.
+
 `ask` and tmux `interrupt` accept session names, `name:window`, and
 `name:window.pane`. `start` and `stop` require a session name only; `stop`
 rejects pane targets because it kills the entire session. `--remote HOST`
