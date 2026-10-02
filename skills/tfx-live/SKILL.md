@@ -105,6 +105,7 @@ are milliseconds. `startedAt` stays unchanged for the same PID and thread.
 Local Codex discovery adds `threadId` and `name` to matching entries in `panes`;
 names come from `$CODEX_HOME/session_index.jsonl` (default `~/.codex`), and are
 null when absent. Dead PID records are pruned after writes.
+Records are written only when the Codex process is inside the hook's tmux pane, so TUIs attached to a shared app-server daemon (`daemon_auto_start`) are not recorded.
 
 `ask` and tmux `interrupt` accept session names, `name:window`, and
 `name:window.pane`. `start` and `stop` require a session name only; `stop`

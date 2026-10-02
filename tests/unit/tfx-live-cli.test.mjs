@@ -2615,24 +2615,12 @@ test("Codex discovery enriches only matching panes with registry thread names", 
     await fs.mkdir(registryDir);
     await fs.mkdir(codexHome);
     const records = [
-      { pid: process.pid, sessionId: "thread-one", tmuxPane: "%7" },
-      { pid: process.pid, sessionId: "thread-two", tmuxPane: "%8" },
+      { pid: 100, sessionId: "thread-one", tmuxPane: "%7" },
+      { pid: 208, sessionId: "thread-two", tmuxPane: "%8" },
+      { pid: 900, sessionId: "unrelated", tmuxPane: "%9" },
+      { pid: 408, sessionId: "at-depth-eight", tmuxPane: "%10" },
+      { pid: 509, sessionId: "beyond-depth-eight", tmuxPane: "%11" },
     ];
-    for (const [i, record] of records.entries()) {
-      await fs.writeFile(
-        path.join(registryDir, `${i}.json`),
-        JSON.stringify({
-          version: 1,
-          writer: "triflux",
-          cwd: dir,
-          tmux: null,
-          source: null,
-          startedAt: 1,
-          updatedAt: 1,
-          ...record,
-        }),
-      );
-    }
     await fs.writeFile(
       path.join(codexHome, "session_index.jsonl"),
       [
@@ -2646,13 +2634,53 @@ test("Codex discovery enriches only matching panes with registry thread names", 
         TFX_CODEX_SESSION_REGISTRY_DIR: registryDir,
         CODEX_HOME: codexHome,
       },
+      readCodexSessionRecords: ({ dir: requestedDir }) => {
+        assert.equal(requestedDir, registryDir);
+        return records;
+      },
       runTmux: async () => ({
         stdout: [
-          `team\t1735689600\t1\t0\t0\t${dir}\tcodex\tcodex\t/dev/ttys1\t${process.pid}\t%7`,
-          `team\t1735689600\t1\t0\t1\t${dir}\tcodex\tcodex\t/dev/ttys2\t${process.pid}\t%8`,
-          `other\t1735689600\t0\t1\t0\t${dir}\tcodex\tcodex\t/dev/ttys3\t${process.pid}\t%9`,
+          `team\t1735689600\t1\t0\t0\t${dir}\tcodex\tcodex\t/dev/ttys1\t100\t%7`,
+          `team\t1735689600\t1\t0\t1\t${dir}\tcodex\tcodex\t/dev/ttys2\t200\t%8`,
+          `other\t1735689600\t0\t1\t0\t${dir}\tcodex\tcodex\t/dev/ttys3\t300\t%9`,
+          `other\t1735689600\t0\t1\t1\t${dir}\tcodex\tcodex\t/dev/ttys4\t400\t%10`,
+          `other\t1735689600\t0\t1\t2\t${dir}\tcodex\tcodex\t/dev/ttys5\t500\t%11`,
         ].join("\n"),
       }),
+      psExec: async (command, args, options) => {
+        assert.equal(command, "ps");
+        assert.deepEqual(args, ["-eo", "pid=,ppid="]);
+        assert.equal(options.timeout, 1000);
+        return {
+          stdout: [
+            "100 1",
+            "200 1",
+            "207 200",
+            "208 207",
+            "300 1",
+            "900 1",
+            "400 1",
+            "401 400",
+            "402 401",
+            "403 402",
+            "404 403",
+            "405 404",
+            "406 405",
+            "407 406",
+            "408 407",
+            "500 1",
+            "501 500",
+            "502 501",
+            "503 502",
+            "504 503",
+            "505 504",
+            "506 505",
+            "507 506",
+            "508 507",
+            "509 508",
+          ].join("\n"),
+        };
+      },
     };
     const result = await tfxLive.discoverCodexTmuxSessions({}, deps);
     const panes = result.sessions.find(
@@ -2662,9 +2690,27 @@ test("Codex discovery enriches only matching panes with registry thread names", 
     assert.equal(panes[0].name, "Latest");
     assert.equal(panes[1].threadId, "thread-two");
     assert.equal(panes[1].name, null);
-    const other = result.sessions.find((session) => session.session === "other")
-      .panes[0];
-    assert.equal(Object.hasOwn(other, "threadId"), false);
+    const other = result.sessions.find(
+      (session) => session.session === "other",
+    ).panes;
+    assert.equal(Object.hasOwn(other[0], "threadId"), false);
+    assert.equal(Object.hasOwn(other[0], "name"), false);
+    assert.equal(other[1].threadId, "at-depth-eight");
+    assert.equal(Object.hasOwn(other[2], "threadId"), false);
+    const noPs = await tfxLive.discoverCodexTmuxSessions(
+      {},
+      {
+        ...deps,
+        psExec: async () => {
+          throw new Error("ps unavailable");
+        },
+      },
+    );
+    const noPsPanes = noPs.sessions.find(
+      (session) => session.session === "team",
+    ).panes;
+    assert.equal(noPsPanes[0].threadId, "thread-one");
+    assert.equal(Object.hasOwn(noPsPanes[1], "threadId"), false);
     const remote = await tfxLive.discoverCodexTmuxSessions(
       { remote: "host" },
       deps,

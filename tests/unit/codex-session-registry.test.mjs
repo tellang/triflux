@@ -99,6 +99,165 @@ describe("codex-session-registry", () => {
     );
   });
 
+  it("rejects empty or malformed tmux coordinates", () => {
+    for (const output of [
+      "",
+      "\n",
+      ":.",
+      "room:.",
+      ":@2.%42",
+      "room:2.42",
+      "room:@2.%42\nother",
+    ]) {
+      assert.equal(
+        resolveTmuxCoordinate({ paneId: "%42", tmuxFn: () => output }),
+        null,
+        output,
+      );
+    }
+  });
+
+  it("does not write for a shared app-server even if its pane ancestry matches", () =>
+    withTempDir((root) => {
+      const dir = join(root, "registry");
+      assert.equal(
+        writeCodexSessionRecord(
+          { session_id: "daemon" },
+          {
+            dir,
+            env: { TMUX_PANE: "%91" },
+            psFn: () => ({ ppid: 1, comm: "codex" }),
+            commandFn: () =>
+              "codex app-server --listen unix:// --managed-daemon",
+            panePidFn: () => `${process.ppid}\n`,
+            tmuxFn: () => "room:@2.%91",
+          },
+        ),
+        false,
+      );
+      assert.equal(existsSync(dir), false);
+    }));
+
+  it("writes nothing for missing, stale, or unreadable panes", () =>
+    withTempDir((root) => {
+      const dir = join(root, "registry");
+      for (const [pane, panePidFn] of [
+        [undefined, () => `${process.ppid}`],
+        ["   ", () => `${process.ppid}`],
+        ["%91", () => ""],
+        ["%91", () => "\n"],
+        ["%91", () => "0"],
+        ["%91", () => "123garbage"],
+        [
+          "%91",
+          () => {
+            throw new Error("pane missing");
+          },
+        ],
+      ]) {
+        assert.equal(
+          writeCodexSessionRecord(
+            { session_id: "stale" },
+            {
+              dir,
+              env: { TMUX_PANE: pane },
+              psFn: () => ({ ppid: 1, comm: "codex" }),
+              commandFn: () => "codex --profile tui",
+              panePidFn,
+              tmuxFn: () => ":.",
+            },
+          ),
+          false,
+        );
+        assert.equal(existsSync(dir), false);
+      }
+    }));
+
+  it("rejects a codex pid outside the pane process tree", () =>
+    withTempDir((root) => {
+      const dir = join(root, "registry");
+      assert.equal(
+        writeCodexSessionRecord(
+          { session_id: "unrelated" },
+          {
+            dir,
+            env: { TMUX_PANE: "%42" },
+            psFn: () => ({ ppid: 1, comm: "codex" }),
+            commandFn: () => "codex",
+            panePidFn: () => "424242\n",
+            tmuxFn: () => "room:@2.%42",
+          },
+        ),
+        false,
+      );
+      assert.equal(existsSync(dir), false);
+    }));
+
+  it("accepts eight parent edges to the pane but rejects deeper ancestry", () =>
+    withTempDir((root) => {
+      for (const [edges, expected] of [
+        [8, true],
+        [9, false],
+      ]) {
+        const dir = join(root, String(edges));
+        const parents = new Map();
+        let child = process.ppid;
+        for (let edge = 0; edge < edges; edge += 1) {
+          const parent = 90000000 + edge;
+          parents.set(child, {
+            ppid: parent,
+            comm: child === process.ppid ? "codex" : "shell",
+          });
+          child = parent;
+        }
+        assert.equal(
+          writeCodexSessionRecord(
+            { session_id: "nested" },
+            {
+              dir,
+              env: { TMUX_PANE: "%42" },
+              psFn: (pid) => parents.get(pid) ?? null,
+              commandFn: () => "codex",
+              panePidFn: () => `${child}\n`,
+              tmuxFn: () => "room:@2.%42",
+            },
+          ),
+          expected,
+        );
+        assert.equal(existsSync(dir), expected);
+      }
+    }));
+
+  it("writes nothing when process ancestry or command lookup fails", () =>
+    withTempDir((root) => {
+      for (const failure of ["ancestry", "command"]) {
+        const dir = join(root, failure);
+        let calls = 0;
+        assert.equal(
+          writeCodexSessionRecord(
+            { session_id: "unknown" },
+            {
+              dir,
+              env: { TMUX_PANE: "%42" },
+              psFn: () => {
+                if (calls++ > 0) throw new Error("ps failed");
+                return { ppid: 424242, comm: "codex" };
+              },
+              commandFn: () => {
+                if (failure === "command")
+                  throw new Error("command lookup failed");
+                return "codex";
+              },
+              panePidFn: () => "424242",
+              tmuxFn: () => "room:@2.%42",
+            },
+          ),
+          false,
+        );
+        assert.equal(existsSync(dir), false);
+      }
+    }));
+
   it("writes a private atomic record and preserves startedAt only for the same thread", () =>
     withTempDir((root) => {
       const dir = join(root, "registry");
@@ -108,6 +267,8 @@ describe("codex-session-registry", () => {
         dir,
         env,
         psFn,
+        commandFn: () => "codex --profile tui",
+        panePidFn: () => `${process.ppid}\n`,
         tmuxFn: () => "room:@2.%42",
       };
       assert.equal(
@@ -152,12 +313,15 @@ describe("codex-session-registry", () => {
       assert.equal(
         writeCodexSessionRecord(
           {},
-          { dir, psFn: () => ({ ppid: 1, comm: "codex" }) },
+          { dir, env: {}, psFn: () => ({ ppid: 1, comm: "codex" }) },
         ),
         false,
       );
       assert.equal(
-        writeCodexSessionRecord({ session_id: "a" }, { dir, psFn: () => null }),
+        writeCodexSessionRecord(
+          { session_id: "a" },
+          { dir, env: { TMUX_PANE: "%42" }, psFn: () => null },
+        ),
         false,
       );
       assert.equal(existsSync(dir), false);
@@ -175,7 +339,10 @@ describe("codex-session-registry", () => {
           dir,
           now: 100,
           psFn: () => ({ ppid: 1, comm: "codex" }),
-          env: { HOME: dir },
+          commandFn: () => "codex",
+          panePidFn: () => `${process.ppid}\n`,
+          tmuxFn: () => "room:@2.%42",
+          env: { HOME: dir, TMUX_PANE: "%42" },
         },
       );
       assert.equal(existsSync(deadFile), false);

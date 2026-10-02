@@ -76,11 +76,26 @@ function defaultTmuxFn(paneId) {
   );
 }
 
+function defaultPanePidFn(paneId) {
+  return execFileSync(
+    "tmux",
+    ["display-message", "-p", "-t", paneId, "#{pane_pid}"],
+    { encoding: "utf8", timeout: 1000 },
+  );
+}
+
+function defaultCommandFn(pid) {
+  return execFileSync("ps", ["-o", "command=", "-p", String(pid)], {
+    encoding: "utf8",
+    timeout: 1000,
+  });
+}
+
 export function resolveTmuxCoordinate({ paneId, tmuxFn = defaultTmuxFn } = {}) {
   if (typeof paneId !== "string" || !paneId.trim()) return null;
   try {
     const coordinate = tmuxFn(paneId).trim();
-    return coordinate || null;
+    return /^.+:@\d+\.%\d+$/.test(coordinate) ? coordinate : null;
   } catch {
     return null;
   }
@@ -118,16 +133,57 @@ export function writeCodexSessionRecord(
   {
     env = process.env,
     now = Date.now,
-    psFn,
+    psFn = defaultPsFn,
     tmuxFn,
+    panePidFn = defaultPanePidFn,
+    commandFn = defaultCommandFn,
     dir = registryDir(env),
   } = {},
 ) {
   if (typeof payload?.session_id !== "string" || !payload.session_id.trim()) {
     return false;
   }
+  const paneId = typeof env.TMUX_PANE === "string" ? env.TMUX_PANE.trim() : "";
+  if (!paneId) return false;
   const pid = findCodexAncestorPid({ psFn });
   if (pid === null) return false;
+
+  try {
+    const command = commandFn(pid);
+    if (
+      typeof command !== "string" ||
+      !command.trim() ||
+      command.includes("app-server")
+    ) {
+      return false;
+    }
+    const panePidOutput = String(panePidFn(paneId)).trim();
+    const panePid = Number(panePidOutput);
+    if (
+      !/^\d+$/.test(panePidOutput) ||
+      !Number.isSafeInteger(panePid) ||
+      panePid <= 0
+    ) {
+      return false;
+    }
+    const seen = new Set();
+    let ancestor = pid;
+    for (let depth = 0; depth < 8 && ancestor !== panePid; depth += 1) {
+      if (
+        !Number.isSafeInteger(ancestor) ||
+        ancestor <= 0 ||
+        seen.has(ancestor)
+      ) {
+        return false;
+      }
+      seen.add(ancestor);
+      ancestor = Number(psFn(ancestor)?.ppid);
+    }
+    if (ancestor !== panePid) return false;
+  } catch {
+    // Daemons and stale panes cannot prove which TUI owns this thread.
+    return false;
+  }
 
   const timestamp = typeof now === "function" ? now() : now;
   const targetDir = dir;
@@ -146,17 +202,13 @@ export function writeCodexSessionRecord(
     // New record, or an invalid previous record.
   }
 
-  const paneId =
-    typeof env.TMUX_PANE === "string" && env.TMUX_PANE.trim()
-      ? env.TMUX_PANE
-      : null;
   const record = {
     version: 1,
     writer: "triflux",
     pid,
     sessionId: payload.session_id,
     cwd: payload.cwd || process.cwd(),
-    tmux: paneId ? resolveTmuxCoordinate({ paneId, tmuxFn }) : null,
+    tmux: resolveTmuxCoordinate({ paneId, tmuxFn }),
     tmuxPane: paneId,
     source: payload.source || null,
     startedAt,

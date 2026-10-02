@@ -652,6 +652,7 @@ async function discoverCodexTmuxSessions(
       TMUX_DISCOVERY_FORMAT,
     ]);
     const codexTargets = new Set();
+    const panePids = new Map();
     for (const line of String(stdout).split(/\r?\n/)) {
       if (!line) continue;
       const [
@@ -665,7 +666,9 @@ async function discoverCodexTmuxSessions(
         startCommand,
         paneTty,
         panePid,
+        paneId,
       ] = line.split("\t");
+      panePids.set(paneId, Number(panePid));
       const result = await inspectCodexTmuxPane(
         { currentCommand, startCommand, paneTty, panePid, remote },
         deps,
@@ -675,7 +678,25 @@ async function discoverCodexTmuxSessions(
     const paneThreads = new Map();
     if (!remote) {
       const env = deps.env ?? process.env;
-      const records = readCodexSessionRecords({ dir: registryDir(env) });
+      const records = (deps.readCodexSessionRecords ?? readCodexSessionRecords)(
+        {
+          dir: registryDir(env),
+        },
+      );
+      const parents = new Map();
+      try {
+        const processes = await (deps.psExec ?? execFileAsync)(
+          "ps",
+          ["-eo", "pid=,ppid="],
+          { timeout: 1000, maxBuffer: MAX_BUFFER },
+        );
+        for (const line of String(processes.stdout).split(/\r?\n/)) {
+          const match = line.match(/^\s*(\d+)\s+(\d+)\s*$/);
+          if (match) parents.set(Number(match[1]), Number(match[2]));
+        }
+      } catch {
+        // Without ancestry evidence only the pane process itself can match.
+      }
       const names = codexThreadNames({
         indexPath: pathJoin(
           env.CODEX_HOME || pathJoin(env.HOME || homedir(), ".codex"),
@@ -683,12 +704,17 @@ async function discoverCodexTmuxSessions(
         ),
       });
       for (const record of records) {
-        if (record.tmuxPane) {
-          paneThreads.set(record.tmuxPane, {
-            threadId: record.sessionId,
-            name: names.get(record.sessionId) ?? null,
-          });
+        const panePid = panePids.get(record.tmuxPane);
+        if (!Number.isSafeInteger(panePid) || panePid <= 0) continue;
+        let ancestor = record.pid;
+        for (let depth = 0; depth < 8 && ancestor !== panePid; depth++) {
+          ancestor = parents.get(ancestor);
         }
+        if (ancestor !== panePid) continue;
+        paneThreads.set(record.tmuxPane, {
+          threadId: record.sessionId,
+          name: names.get(record.sessionId) ?? null,
+        });
       }
     }
     return {
