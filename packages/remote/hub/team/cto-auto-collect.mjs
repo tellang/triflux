@@ -2,7 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { resolveLakeRootDir } from "../../cto/lake-root.mjs";
-import { resolveRoleControlSnapshot } from "@triflux/core/hub/lib/cto-env.mjs";
+import { resolveRoleControlSnapshot } from "../lib/cto-env.mjs";
 
 const DEFAULT_DEBOUNCE_MS = 120_000;
 

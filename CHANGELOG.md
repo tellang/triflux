@@ -2,6 +2,20 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.48.0] - 2026-10-03
+
+### Added
+- live: Codex 세션 레지스트리. Codex 훅이 SessionStart 와 UserPromptSubmit 마다 codex 본체 pid, thread ID, tmux pane 을 `~/.local/state/triflux/codex-sessions/<pid>.json` 에 남긴다. Claude Code 의 `~/.claude/sessions` 와 같은 역할이며 tmux-rooms 도 읽는다 (1298352b)
+- live: `list-sessions --cli claude`. 레지스트리 pid 가 pane 프로세스이거나 그 하위일 때만 믿고, 자동 생성 이름이면 대화 제목을 title 로 준다. codex 목록은 레지스트리와 `session_index.jsonl` 로 threadId 와 name 을 붙인다 (1298352b)
+
+### Changed
+- routing: Codex Sol 레인 프로필을 `gpt61_sol_high`, `gpt61_sol_med`(gpt-6.1-sol)로 옮긴다. 옛 `gpt6_sol_*` 는 같은 effort 의 새 이름으로 정규화한다. 모델 배치표의 sonnet 을 Sonnet 5.5로 갱신한다 (ADR-0019, da104316)
+
+### Fixed
+- live: `daemon_auto_start` 로 공유 app-server 데몬 위에서 도는 TUI 의 훅이 데몬 pid 와 오래된 `TMUX_PANE` 을 기록하던 문제. codex pid 가 pane 프로세스 트리 안에 있을 때만 기록한다 (b05b6e22)
+- live: Claude Code 의 Bash 에서 띄운 headless `codex exec` 가 Claude pane 소속으로 기록되던 문제. 첫 서브커맨드가 `exec` 이면 기록하지 않는다 (41d04b12)
+- docs: tfx-plan 의 agy 프롬프트 전달 설명을 `--print` 값 방식으로 바로잡는다 (28b8f3a2)
+
 ## [10.47.0] - 2026-09-24
 
 ### Changed

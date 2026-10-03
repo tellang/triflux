@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import { argv, exit, stdin, stdout } from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { writeCodexSessionRecord } from "../hub/lib/codex-session-registry.mjs";
 import { drainPendingSynapse as defaultDrainPendingSynapse } from "../hub/team/synapse-http.mjs";
 import {
   heartbeatInteractiveSession as defaultHeartbeatInteractiveSession,
@@ -145,6 +146,7 @@ export async function runCodexSessionHook(stdinData, opts = {}) {
   const mode = parsed.ok
     ? normalizeMode(opts.argvMode ?? argv[2], parsed.payload)
     : "";
+  const writeSessionRecord = opts.writeSessionRecord || writeCodexSessionRecord;
   const hubEnsureRun = opts.hubEnsureRun || defaultHubEnsureRun;
   const registerInteractiveSession =
     opts.registerInteractiveSession || defaultRegisterInteractiveSession;
@@ -157,6 +159,11 @@ export async function runCodexSessionHook(stdinData, opts = {}) {
 
   try {
     await runHookSideEffectsWithStdoutSuppressed(async () => {
+      if (mode === "register" || mode === "heartbeat") {
+        try {
+          writeSessionRecord(parsed.payload);
+        } catch {}
+      }
       if (mode === "register") {
         try {
           launchPresenceRegistration(parsed.payload);

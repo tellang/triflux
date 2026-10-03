@@ -470,6 +470,12 @@ async function runTfxLive(args, options = {}) {
           TRIFLUX_NOTIFY_BELL: "0",
           TRIFLUX_NOTIFY_TOAST: "0",
           TFX_LIVE_ARTIFACT_DIR: artifactDir,
+          TFX_CODEX_SESSION_REGISTRY_DIR: path.join(
+            artifactDir,
+            "codex-registry",
+          ),
+          TFX_CLAUDE_SESSIONS_DIR: path.join(artifactDir, "claude-sessions"),
+          CODEX_HOME: path.join(artifactDir, "codex-home"),
           ...(extraEnv || {}),
         },
       },
@@ -1530,6 +1536,12 @@ test("tfx-live peer replaces the final B hop with closure and persists complete 
           env: {
             FAKE_BRIDGE_LOG: logPath,
             TFX_LIVE_ARTIFACT_DIR: artifactDir,
+            TFX_CODEX_SESSION_REGISTRY_DIR: path.join(
+              artifactDir,
+              "codex-registry",
+            ),
+            TFX_CLAUDE_SESSIONS_DIR: path.join(artifactDir, "claude-sessions"),
+            CODEX_HOME: path.join(artifactDir, "codex-home"),
           },
         },
       ),
@@ -1617,6 +1629,12 @@ test("tfx-live peer SIGINT emits aborted output and leaves transcript/status fil
           TRIFLUX_NOTIFY_TOAST: "0",
           FAKE_BRIDGE_LOG: logPath,
           TFX_LIVE_ARTIFACT_DIR: artifactDir,
+          TFX_CODEX_SESSION_REGISTRY_DIR: path.join(
+            artifactDir,
+            "codex-registry",
+          ),
+          TFX_CLAUDE_SESSIONS_DIR: path.join(artifactDir, "claude-sessions"),
+          CODEX_HOME: path.join(artifactDir, "codex-home"),
         },
       },
     );
@@ -2417,3 +2435,558 @@ test("tfx-live cto-hygiene-notify notifies once for actionable unchanged hygiene
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("Claude discovery matches live pane owners and descendants up to four levels", async () => {
+  const dir = await fs.mkdtemp(path.resolve(".test-claude-sessions-"));
+  try {
+    const sessionsDir = path.join(dir, "claude-sessions");
+    await fs.mkdir(sessionsDir);
+    const records = [
+      {
+        pid: 100,
+        sessionId: "session-direct",
+        tmux: "team:part.one:@2.%7",
+        name: "Direct",
+        nameSource: "user",
+        status: "idle",
+      },
+      {
+        pid: 104,
+        sessionId: "session-deep",
+        tmux: "team:part.one:@2.%8",
+        name: "Deep",
+        nameSource: "auto",
+        status: "busy",
+      },
+      { pid: 105, sessionId: "too-deep", tmux: "team:part.one:@2.%8" },
+      { pid: 200, sessionId: "unrelated", tmux: "team:part.one:@2.%8" },
+      { pid: 201, sessionId: "dead", tmux: "team:part.one:@2.%9" },
+      { pid: 100, sessionId: "missing-pane", tmux: "team:part.one:@2.%99" },
+      {
+        pid: 100,
+        sessionId: "malformed-coordinate",
+        tmux: "team:part.one:2.7",
+      },
+    ];
+    for (const [i, record] of records.entries()) {
+      await fs.writeFile(
+        path.join(sessionsDir, `${i}.json`),
+        JSON.stringify(record),
+      );
+    }
+    await fs.writeFile(path.join(sessionsDir, "broken.json"), "{bad");
+    const cwd = await fs.realpath(dir);
+    const deps = {
+      env: { TFX_CLAUDE_SESSIONS_DIR: sessionsDir },
+      runTmux: async (_remote, args) => {
+        assert.deepEqual(args.slice(0, 3), ["list-panes", "-a", "-F"]);
+        assert.match(args[3], /#\{pane_id\}/);
+        return {
+          stdout: [
+            `team:part.one\t1735689600\t0\t3\t1\t${cwd}\tclaude\tclaude\t/dev/ttys1\t100\t%7`,
+            `team:part.one\t1735689600\t0\t3\t2\t${cwd}\tzsh\tzsh\t/dev/ttys2\t100\t%8`,
+            `team:part.one\t1735689600\t0\t3\t3\t${cwd}\tclaude\tclaude\t/dev/ttys3\t201\t%9`,
+          ].join("\n"),
+        };
+      },
+      psExec: async (command, args) => {
+        assert.equal(command, "ps");
+        assert.deepEqual(args, ["-eo", "pid=,ppid="]);
+        return {
+          stdout: "100 1\n101 100\n102 101\n103 102\n104 103\n105 104\n200 1",
+        };
+      },
+      isAlive: (pid) => pid !== 201,
+    };
+    const all = await tfxLive.discoverClaudeTmuxSessions({}, deps);
+    assert.deepEqual(all, {
+      ok: true,
+      cli: "claude",
+      cwd: null,
+      sessions: [
+        {
+          session: "team:part.one",
+          target: "team:part.one:3.1",
+          paneId: "%7",
+          cwd,
+          pid: 100,
+          sessionId: "session-direct",
+          short: "session-",
+          name: "Direct",
+          title: "Direct",
+          nameSource: "user",
+          status: "idle",
+        },
+        {
+          session: "team:part.one",
+          target: "team:part.one:3.2",
+          paneId: "%8",
+          cwd,
+          pid: 104,
+          sessionId: "session-deep",
+          short: "session-",
+          name: "Deep",
+          title: "Deep",
+          nameSource: "auto",
+          status: "busy",
+        },
+      ],
+    });
+    assert.equal(
+      (await tfxLive.discoverClaudeTmuxSessions({ cwd: dir }, deps)).sessions
+        .length,
+      2,
+    );
+    assert.deepEqual(
+      (
+        await tfxLive.discoverClaudeTmuxSessions(
+          { cwd: path.join(dir, "other") },
+          deps,
+        )
+      ).sessions,
+      [],
+    );
+    assert.deepEqual(
+      (
+        await tfxLive.discoverClaudeTmuxSessions(
+          {},
+          {
+            ...deps,
+            env: { TFX_CLAUDE_SESSIONS_DIR: path.join(dir, "missing") },
+          },
+        )
+      ).sessions,
+      [],
+    );
+    const renamed = await tfxLive.discoverClaudeTmuxSessions(
+      {},
+      {
+        ...deps,
+        runTmux: async (...args) => ({
+          stdout: (await deps.runTmux(...args)).stdout.replaceAll(
+            "team:part.one",
+            "renamed:session",
+          ),
+        }),
+      },
+    );
+    assert.deepEqual(
+      renamed.sessions.map((session) => session.target),
+      ["renamed:session:3.1", "renamed:session:3.2"],
+    );
+    const failed = await tfxLive.discoverClaudeTmuxSessions(
+      {},
+      {
+        ...deps,
+        runTmux: async () => {
+          throw new Error("no tmux");
+        },
+      },
+    );
+    assert.equal(failed.ok, false);
+    assert.equal(failed.reason, "tmux-unavailable");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Claude list-sessions rejects remote and UDS discovery", async () => {
+  for (const args of [
+    ["--remote", "host"],
+    ["--transport", "uds"],
+  ]) {
+    await assert.rejects(
+      runTfxLive(["list-sessions", "--cli", "claude", ...args]),
+      (error) => {
+        const output = JSON.parse(error.stdout);
+        assert.equal(output.ok, false);
+        assert.match(output.error, /Claude.*local.*tmux|claude.*tmux.*local/i);
+        return true;
+      },
+    );
+  }
+});
+
+test("Codex discovery enriches only matching panes with registry thread names", async () => {
+  const dir = await fs.mkdtemp(path.resolve(".test-codex-discovery-"));
+  try {
+    const registryDir = path.join(dir, "registry");
+    const codexHome = path.join(dir, "codex-home");
+    await fs.mkdir(registryDir);
+    await fs.mkdir(codexHome);
+    const records = [
+      { pid: 100, sessionId: "thread-one", tmuxPane: "%7" },
+      { pid: 208, sessionId: "thread-two", tmuxPane: "%8" },
+      { pid: 900, sessionId: "unrelated", tmuxPane: "%9" },
+      { pid: 408, sessionId: "at-depth-eight", tmuxPane: "%10" },
+      { pid: 509, sessionId: "beyond-depth-eight", tmuxPane: "%11" },
+    ];
+    await fs.writeFile(
+      path.join(codexHome, "session_index.jsonl"),
+      [
+        JSON.stringify({ id: "thread-one", thread_name: "Old" }),
+        "{bad",
+        JSON.stringify({ id: "thread-one", thread_name: "Latest" }),
+      ].join("\n"),
+    );
+    const deps = {
+      env: {
+        TFX_CODEX_SESSION_REGISTRY_DIR: registryDir,
+        CODEX_HOME: codexHome,
+      },
+      readCodexSessionRecords: ({ dir: requestedDir }) => {
+        assert.equal(requestedDir, registryDir);
+        return records;
+      },
+      runTmux: async () => ({
+        stdout: [
+          `team\t1735689600\t1\t0\t0\t${dir}\tcodex\tcodex\t/dev/ttys1\t100\t%7`,
+          `team\t1735689600\t1\t0\t1\t${dir}\tcodex\tcodex\t/dev/ttys2\t200\t%8`,
+          `other\t1735689600\t0\t1\t0\t${dir}\tcodex\tcodex\t/dev/ttys3\t300\t%9`,
+          `other\t1735689600\t0\t1\t1\t${dir}\tcodex\tcodex\t/dev/ttys4\t400\t%10`,
+          `other\t1735689600\t0\t1\t2\t${dir}\tcodex\tcodex\t/dev/ttys5\t500\t%11`,
+        ].join("\n"),
+      }),
+      psExec: async (command, args, options) => {
+        assert.equal(command, "ps");
+        assert.deepEqual(args, ["-eo", "pid=,ppid="]);
+        assert.equal(options.timeout, 1000);
+        return {
+          stdout: [
+            "100 1",
+            "200 1",
+            "207 200",
+            "208 207",
+            "300 1",
+            "900 1",
+            "400 1",
+            "401 400",
+            "402 401",
+            "403 402",
+            "404 403",
+            "405 404",
+            "406 405",
+            "407 406",
+            "408 407",
+            "500 1",
+            "501 500",
+            "502 501",
+            "503 502",
+            "504 503",
+            "505 504",
+            "506 505",
+            "507 506",
+            "508 507",
+            "509 508",
+          ].join("\n"),
+        };
+      },
+    };
+    const result = await tfxLive.discoverCodexTmuxSessions({}, deps);
+    const panes = result.sessions.find(
+      (session) => session.session === "team",
+    ).panes;
+    assert.equal(panes[0].threadId, "thread-one");
+    assert.equal(panes[0].name, "Latest");
+    assert.equal(panes[1].threadId, "thread-two");
+    assert.equal(panes[1].name, null);
+    const other = result.sessions.find(
+      (session) => session.session === "other",
+    ).panes;
+    assert.equal(Object.hasOwn(other[0], "threadId"), false);
+    assert.equal(Object.hasOwn(other[0], "name"), false);
+    assert.equal(other[1].threadId, "at-depth-eight");
+    assert.equal(Object.hasOwn(other[2], "threadId"), false);
+    const noPs = await tfxLive.discoverCodexTmuxSessions(
+      {},
+      {
+        ...deps,
+        psExec: async () => {
+          throw new Error("ps unavailable");
+        },
+      },
+    );
+    const noPsPanes = noPs.sessions.find(
+      (session) => session.session === "team",
+    ).panes;
+    assert.equal(noPsPanes[0].threadId, "thread-one");
+    assert.equal(Object.hasOwn(noPsPanes[1], "threadId"), false);
+    const remote = await tfxLive.discoverCodexTmuxSessions(
+      { remote: "host" },
+      deps,
+    );
+    assert.equal(
+      Object.hasOwn(
+        remote.sessions.find((session) => session.session === "team").panes[0],
+        "threadId",
+      ),
+      false,
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Claude list-sessions CLI reads the overridden registry and uses pane cwd", async () => {
+  const dir = await fs.mkdtemp(path.resolve(".test-claude-cli-"));
+  try {
+    const sessionsDir = path.join(dir, "sessions");
+    await fs.mkdir(sessionsDir);
+    await fs.writeFile(
+      path.join(sessionsDir, `${process.pid}.json`),
+      JSON.stringify({
+        pid: process.pid,
+        sessionId: "abcdef12-session",
+        cwd: "/stale/cwd",
+        tmux: "claude:work.tree:@4.%17",
+        name: "Work",
+        nameSource: "user",
+        status: "idle",
+      }),
+    );
+    const paneCwd = await fs.realpath(dir);
+    await fs.writeFile(
+      path.join(dir, "tmux"),
+      [
+        "#!/usr/bin/env node",
+        `console.log(${JSON.stringify(`claude:work.tree\t1735689600\t0\t2\t3\t${paneCwd}\tclaude\tclaude\t/dev/ttys1\t${process.pid}\t%17`)});`,
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    await fs.writeFile(
+      path.join(dir, "ps"),
+      "#!/usr/bin/env node\nconsole.log('');\n",
+      { mode: 0o755 },
+    );
+    const env = {
+      TFX_CLAUDE_SESSIONS_DIR: sessionsDir,
+      PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+    };
+    const result = JSON.parse(
+      await runTfxLive(["list-sessions", "--cli", "claude", "--cwd", dir], {
+        env,
+      }),
+    );
+    const automatic = JSON.parse(
+      await runTfxLive(
+        [
+          "list-sessions",
+          "--cli",
+          "claude",
+          "--transport",
+          "auto",
+          "--cwd",
+          dir,
+        ],
+        { env },
+      ),
+    );
+    assert.deepEqual(automatic, result);
+    assert.deepEqual(result, {
+      ok: true,
+      cli: "claude",
+      cwd: paneCwd,
+      sessions: [
+        {
+          session: "claude:work.tree",
+          target: "claude:work.tree:2.3",
+          paneId: "%17",
+          cwd: paneCwd,
+          pid: process.pid,
+          sessionId: "abcdef12-session",
+          short: "abcdef12",
+          name: "Work",
+          title: "Work",
+          nameSource: "user",
+          status: "idle",
+        },
+      ],
+    });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+const claudeTitleFixtures = [
+  {
+    label: "derived names use the latest trimmed custom title",
+    transcript:
+      '{"type":"ai-title","aiTitle":"Old"}\n{"type":"custom-title","customTitle":"  최신 제목  "}\n',
+    expected: "최신 제목",
+  },
+  {
+    label: "a newer AI title wins over an older custom title",
+    transcript:
+      '{"type":"custom-title","customTitle":"Old"}\n{"type":"ai-title","aiTitle":"  Latest AI  "}',
+    expected: "Latest AI",
+  },
+  {
+    label: "customTitle wins over aiTitle on the same line",
+    transcript: '{"type":"ai-title","customTitle":" Custom ","aiTitle":"AI"}\n',
+    expected: "Custom",
+  },
+  {
+    label: "blank customTitle skips the line even when aiTitle is present",
+    transcript:
+      '{"type":"ai-title","aiTitle":"Earlier"}\n{"type":"custom-title","customTitle":"  ","aiTitle":"Ignored"}\n',
+    expected: "Earlier",
+  },
+  {
+    label: "null customTitle falls back to aiTitle",
+    transcript:
+      '{"type":"ai-title","customTitle":null,"aiTitle":" AI fallback "}\n',
+    expected: "AI fallback",
+  },
+  {
+    label: "malformed, unrelated, and empty title lines are skipped",
+    transcript:
+      '{"type":"ai-title","aiTitle":"Earlier"}\r\n{bad\nnull\n{"type":"user","customTitle":"Ignored"}\n{"type":"ai-title","aiTitle":12}\n{"type":"custom-title","customTitle":" \\n "}\n{"type":"ai-title"}\n',
+    expected: "Earlier",
+  },
+  {
+    label: "an empty user name triggers transcript lookup",
+    name: "",
+    nameSource: "user",
+    transcript: '{"type":"ai-title","aiTitle":"Recovered"}\n',
+    expected: "Recovered",
+  },
+  {
+    label: "a missing name triggers transcript lookup",
+    name: null,
+    nameSource: "auto",
+    transcript: '{"type":"ai-title","aiTitle":"Recovered"}\n',
+    expected: "Recovered",
+  },
+  {
+    label: "a whitespace-only name triggers transcript lookup",
+    name: " \t ",
+    nameSource: "user",
+    transcript: '{"type":"ai-title","aiTitle":"Recovered"}\n',
+    expected: "Recovered",
+  },
+  {
+    label: "a user name is preserved instead of the transcript title",
+    name: "  User name  ",
+    nameSource: "user",
+    transcript: '{"type":"custom-title","customTitle":"Ignored"}\n',
+    expected: "  User name  ",
+  },
+  {
+    label: "an automatic registry name is preserved",
+    name: "Auto name",
+    nameSource: "auto",
+    transcript: '{"type":"ai-title","aiTitle":"Ignored"}\n',
+    expected: "Auto name",
+  },
+  {
+    label: "a name without nameSource is preserved",
+    name: "Legacy name",
+    nameSource: null,
+    transcript: '{"type":"ai-title","aiTitle":"Ignored"}\n',
+    expected: "Legacy name",
+  },
+  {
+    label: "a missing transcript returns null instead of the derived handle",
+    expected: null,
+  },
+  {
+    label: "an empty transcript returns null",
+    transcript: "",
+    expected: null,
+  },
+  {
+    label: "a transcript without valid titles returns null",
+    transcript:
+      '{bad\n{"type":"assistant","aiTitle":"Ignored"}\n{"type":"custom-title","customTitle":" "}\n',
+    expected: null,
+  },
+  {
+    label: "a missing projects directory returns null",
+    missingProjects: true,
+    expected: null,
+  },
+  {
+    label: "titles before the last 262144 bytes are ignored",
+    transcript:
+      '{"type":"custom-title","customTitle":"Too old"}\n' + "x".repeat(262144),
+    expected: null,
+  },
+  {
+    label: "a truncated first line does not hide a valid title in the tail",
+    transcript:
+      `{"type":"assistant","text":"${"가".repeat(100000)}"}\n` +
+      '{"type":"ai-title","aiTitle":"  꼬리 제목  "}\n{partial',
+    expected: "꼬리 제목",
+  },
+  {
+    label: "a title at the start of the 262144-byte tail is included",
+    transcript:
+      "x".repeat(262144) +
+      '{"type":"ai-title","aiTitle":"Boundary"}\n' +
+      "x".repeat(
+        262144 -
+          Buffer.byteLength('{"type":"ai-title","aiTitle":"Boundary"}\n'),
+      ),
+    expected: "Boundary",
+  },
+];
+
+for (const fixture of claudeTitleFixtures) {
+  test(`Claude discovery title: ${fixture.label}`, async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-claude-title-"));
+    try {
+      const sessionsDir = path.join(dir, "sessions");
+      const projectsDir = path.join(dir, "projects");
+      const record = {
+        pid: 100,
+        sessionId: "conversation-session",
+        tmux: "claude:@1.%7",
+        name: fixture.name === undefined ? "Derived handle" : fixture.name,
+        nameSource:
+          fixture.nameSource === undefined ? "derived" : fixture.nameSource,
+      };
+      await fs.mkdir(sessionsDir);
+      await fs.writeFile(
+        path.join(sessionsDir, "100.json"),
+        JSON.stringify(record),
+      );
+      if (!fixture.missingProjects) {
+        await fs.mkdir(path.join(projectsDir, "a-unrelated"), {
+          recursive: true,
+        });
+        await fs.mkdir(path.join(projectsDir, "z-project"));
+      }
+      if (fixture.transcript !== undefined) {
+        await fs.writeFile(
+          path.join(projectsDir, "z-project", "conversation-session.jsonl"),
+          fixture.transcript,
+        );
+        await fs.writeFile(
+          path.join(projectsDir, "a-unrelated", "other-session.jsonl"),
+          '{"type":"custom-title","customTitle":"Wrong session"}\n',
+        );
+      }
+      const result = await tfxLive.discoverClaudeTmuxSessions(
+        {},
+        {
+          env: {
+            HOME: dir,
+            TFX_CLAUDE_SESSIONS_DIR: sessionsDir,
+            TFX_CLAUDE_PROJECTS_DIR: projectsDir,
+          },
+          runTmux: async () => ({
+            stdout: `claude\t0\t0\t1\t0\t${dir}\tclaude\tclaude\t/dev/ttys1\t100\t%7`,
+          }),
+          psExec: async () => ({ stdout: "" }),
+          isAlive: () => true,
+        },
+      );
+      assert.equal(result.ok, true);
+      assert.equal(result.sessions.length, 1);
+      assert.equal(result.sessions[0].title, fixture.expected);
+      assert.equal(result.sessions[0].name, record.name);
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+}

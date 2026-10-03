@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { resolveRoleControlSnapshot } from "@triflux/core/hub/lib/cto-env.mjs";
+import { resolveRoleControlSnapshot } from "../lib/cto-env.mjs";
 
 function defaultLakeRoot() {
   return join(process.cwd(), ".triflux", "lake");

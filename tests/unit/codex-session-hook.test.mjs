@@ -3,9 +3,17 @@ import { describe, it } from "node:test";
 
 import {
   launchCodexPresenceRegistration,
-  runCodexSessionHook,
+  runCodexSessionHook as runHook,
 } from "../../hooks/codex-session-hook.mjs";
 import { registerInteractiveSession } from "../../hooks/session-start-fast.mjs";
+
+function runCodexSessionHook(stdinData, opts = {}) {
+  return runHook(stdinData, {
+    writeSessionRecord: () => {},
+    launchPresenceRegistration: () => {},
+    ...opts,
+  });
+}
 
 function payload(overrides = {}) {
   return JSON.stringify({
@@ -22,6 +30,7 @@ describe("codex-session-hook", () => {
     const result = await runCodexSessionHook(payload(), {
       argvMode: "register",
       writeStdout: false,
+      writeSessionRecord: (hookPayload) => calls.push(["record", hookPayload]),
       hubEnsureRun: async (stdinData) => calls.push(["ensure", stdinData]),
       registerInteractiveSession: (stdinData) =>
         calls.push(["register", stdinData]),
@@ -34,6 +43,7 @@ describe("codex-session-hook", () => {
 
     assert.equal(result, "{}\n");
     assert.deepEqual(calls, [
+      ["record", JSON.parse(payload())],
       [
         "presence",
         {
@@ -55,6 +65,8 @@ describe("codex-session-hook", () => {
       {
         argvMode: "heartbeat",
         writeStdout: false,
+        writeSessionRecord: (hookPayload) =>
+          calls.push(["record", hookPayload]),
         hubEnsureRun: async () => calls.push(["ensure"]),
         registerInteractiveSession: () => calls.push(["register"]),
         heartbeatInteractiveSession: (stdinData) =>
@@ -66,6 +78,10 @@ describe("codex-session-hook", () => {
 
     assert.equal(result, "{}\n");
     assert.deepEqual(calls, [
+      [
+        "record",
+        JSON.parse(payload({ hook_event_name: "user_prompt_submit" })),
+      ],
       ["heartbeat", payload({ hook_event_name: "user_prompt_submit" })],
       ["drain", 500],
     ]);
@@ -200,6 +216,10 @@ describe("codex-session-hook", () => {
     try {
       const result = await runCodexSessionHook(payload(), {
         argvMode: "register",
+        writeSessionRecord: () => {
+          process.stdout.write("registry noise\n");
+          throw new Error("registry unavailable");
+        },
         hubEnsureRun: async () => {
           process.stdout.write("[mcp-sync] skipped\n");
           console.log("[mcp-sync] console noise");
@@ -243,3 +263,29 @@ describe("codex-session-hook", () => {
     assert.deepEqual(calls, []);
   });
 });
+
+for (const mode of ["register", "heartbeat"]) {
+  it(`continues ${mode} side effects after a synchronous registry failure`, async () => {
+    const calls = [];
+    const result = await runCodexSessionHook(payload(), {
+      argvMode: mode,
+      writeStdout: false,
+      writeSessionRecord: () => {
+        calls.push("record");
+        throw new Error("registry unavailable");
+      },
+      launchPresenceRegistration: () => calls.push("presence"),
+      hubEnsureRun: async () => calls.push("ensure"),
+      registerInteractiveSession: () => calls.push("register"),
+      heartbeatInteractiveSession: () => calls.push("heartbeat"),
+      drainPendingSynapse: async () => calls.push("drain"),
+    });
+    assert.equal(result, "{}\n");
+    assert.deepEqual(
+      calls,
+      mode === "register"
+        ? ["record", "presence", "ensure", "register", "drain"]
+        : ["record", "heartbeat", "drain"],
+    );
+  });
+}

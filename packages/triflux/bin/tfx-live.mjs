@@ -1,13 +1,25 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join as pathJoin, resolve as pathResolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { runHygiene } from "../cto/hygiene.mjs";
 import { notifyCtoHygieneOnce } from "../cto/hygiene-notify.mjs";
+import {
+  codexThreadNames,
+  readCodexSessionRecords,
+  registryDir,
+} from "../hub/lib/codex-session-registry.mjs";
 import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
 import { createNotifier } from "../hub/team/notify.mjs";
 import {
@@ -58,7 +70,8 @@ function usage() {
     "  tfx-live interrupt --session NAME [--cli codex|claude] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 5]",
     "  tfx-live stop --session NAME [--cli codex|claude] [--remote HOST]",
     "  tfx-live probe [--short SHORT] [--session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 10]",
-    "  tfx-live list-sessions --cli codex [--transport tmux|uds] [--codex-socket PATH|default] [--cwd DIR] [--remote HOST (tmux)]",
+    "  tfx-live list-sessions --cli codex|claude [--transport tmux|uds] [--codex-socket PATH|default] [--cwd DIR] [--remote HOST (codex tmux only)]",
+    "    Claude list-sessions supports local tmux only; --transport uds requires --cli codex.",
     "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
     "  tfx-live goal-driven --session NAME --goal TEXT [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500] [--max-rounds 8] [--done-token DONE]",
     "  tfx-live peer [--cli-a codex] [--cli-b claude] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--session-a NAME[:WINDOW.PANE]] [--session-b NAME[:WINDOW.PANE]] [--attach-a] [--attach-b] [--transport-a tmux|uds|auto] [--transport-b tmux|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--thread-a ID|auto] [--thread-b ID|auto] [--codex-socket-a PATH|default] [--codex-socket-b PATH|default] [--bridge ABS] [--remote HOST] [--cwd DIR] [--if-busy wait|fail] [--if-busy-a POLICY] [--if-busy-b POLICY] [--busy-timeout 60] [--max-turn SECONDS] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60]",
@@ -538,7 +551,26 @@ async function inspectCodexTmuxPane(pane, deps = {}) {
   };
 }
 
-function parseCodexTmuxSessions(stdout, cwd = null, codexTargets = null) {
+const TMUX_DISCOVERY_FORMAT = [
+  "#{session_name}",
+  "#{session_created}",
+  "#{session_attached}",
+  "#{window_index}",
+  "#{pane_index}",
+  "#{pane_current_path}",
+  "#{pane_current_command}",
+  "#{pane_start_command}",
+  "#{pane_tty}",
+  "#{pane_pid}",
+  "#{pane_id}",
+].join("\t");
+
+function parseCodexTmuxSessions(
+  stdout,
+  cwd = null,
+  codexTargets = null,
+  paneThreads = new Map(),
+) {
   const cwdFilter = normalizeCwd(cwd);
   const sessions = new Map();
 
@@ -553,6 +585,9 @@ function parseCodexTmuxSessions(stdout, cwd = null, codexTargets = null) {
       paneCwd,
       currentCommand,
       startCommand,
+      ,
+      ,
+      paneId,
     ] = line.split("\t");
     if (
       !session ||
@@ -577,6 +612,7 @@ function parseCodexTmuxSessions(stdout, cwd = null, codexTargets = null) {
       target: `${session}:${windowIndex}.${paneIndex}`,
       cwd: normalizedPaneCwd,
       command: currentCommand,
+      ...(paneThreads.get(paneId) ?? {}),
     };
     if (existing) {
       if (!existing.cwd && normalizedPaneCwd) {
@@ -608,27 +644,15 @@ async function discoverCodexTmuxSessions(
   { cwd = null, remote = null } = {},
   deps = {},
 ) {
-  const format = [
-    "#{session_name}",
-    "#{session_created}",
-    "#{session_attached}",
-    "#{window_index}",
-    "#{pane_index}",
-    "#{pane_current_path}",
-    "#{pane_current_command}",
-    "#{pane_start_command}",
-    "#{pane_tty}",
-    "#{pane_pid}",
-  ].join("\t");
-
   try {
     const { stdout } = await (deps.runTmux ?? runTmux)(remote, [
       "list-panes",
       "-a",
       "-F",
-      format,
+      TMUX_DISCOVERY_FORMAT,
     ]);
     const codexTargets = new Set();
+    const panePids = new Map();
     for (const line of String(stdout).split(/\r?\n/)) {
       if (!line) continue;
       const [
@@ -642,18 +666,62 @@ async function discoverCodexTmuxSessions(
         startCommand,
         paneTty,
         panePid,
+        paneId,
       ] = line.split("\t");
+      panePids.set(paneId, Number(panePid));
       const result = await inspectCodexTmuxPane(
         { currentCommand, startCommand, paneTty, panePid, remote },
         deps,
       );
       if (result.isCodex) codexTargets.add(`${session}:${window}.${pane}`);
     }
+    const paneThreads = new Map();
+    if (!remote) {
+      const env = deps.env ?? process.env;
+      const records = (deps.readCodexSessionRecords ?? readCodexSessionRecords)(
+        {
+          dir: registryDir(env),
+        },
+      );
+      const parents = new Map();
+      try {
+        const processes = await (deps.psExec ?? execFileAsync)(
+          "ps",
+          ["-eo", "pid=,ppid="],
+          { timeout: 1000, maxBuffer: MAX_BUFFER },
+        );
+        for (const line of String(processes.stdout).split(/\r?\n/)) {
+          const match = line.match(/^\s*(\d+)\s+(\d+)\s*$/);
+          if (match) parents.set(Number(match[1]), Number(match[2]));
+        }
+      } catch {
+        // Without ancestry evidence only the pane process itself can match.
+      }
+      const names = codexThreadNames({
+        indexPath: pathJoin(
+          env.CODEX_HOME || pathJoin(env.HOME || homedir(), ".codex"),
+          "session_index.jsonl",
+        ),
+      });
+      for (const record of records) {
+        const panePid = panePids.get(record.tmuxPane);
+        if (!Number.isSafeInteger(panePid) || panePid <= 0) continue;
+        let ancestor = record.pid;
+        for (let depth = 0; depth < 8 && ancestor !== panePid; depth++) {
+          ancestor = parents.get(ancestor);
+        }
+        if (ancestor !== panePid) continue;
+        paneThreads.set(record.tmuxPane, {
+          threadId: record.sessionId,
+          name: names.get(record.sessionId) ?? null,
+        });
+      }
+    }
     return {
       ok: true,
       cli: "codex",
       cwd: normalizeCwd(cwd),
-      sessions: parseCodexTmuxSessions(stdout, cwd, codexTargets),
+      sessions: parseCodexTmuxSessions(stdout, cwd, codexTargets, paneThreads),
     };
   } catch (error) {
     return {
@@ -665,6 +733,185 @@ async function discoverCodexTmuxSessions(
       sessions: [],
     };
   }
+}
+
+function isSessionPidAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+async function claudeConversationTitle(sessionId, env) {
+  if (!sessionId || /[/\\]/.test(sessionId)) return null;
+  const projectsDir =
+    env.TFX_CLAUDE_PROJECTS_DIR ||
+    pathJoin(env.HOME || homedir(), ".claude", "projects");
+  let projects;
+  try {
+    projects = await readdir(projectsDir);
+  } catch {
+    return null;
+  }
+  for (const project of projects.sort()) {
+    let handle;
+    try {
+      handle = await open(
+        pathJoin(projectsDir, project, `${sessionId}.jsonl`),
+        "r",
+      );
+      const stat = await handle.stat();
+      if (!stat.isFile()) continue;
+      const length = Math.min(stat.size, 262144);
+      const buffer = Buffer.alloc(length);
+      const start = stat.size - length;
+      let total = 0;
+      while (total < length) {
+        const { bytesRead } = await handle.read(
+          buffer,
+          total,
+          length - total,
+          start + total,
+        );
+        if (!bytesRead) break;
+        total += bytesRead;
+      }
+      const lines = buffer.subarray(0, total).toString("utf8").split("\n");
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const record = JSON.parse(lines[i]);
+          if (record?.type !== "custom-title" && record?.type !== "ai-title")
+            continue;
+          const title = record.customTitle ?? record.aiTitle;
+          if (typeof title === "string" && title.trim()) return title.trim();
+        } catch {
+          // The tail may start mid-line or end with a concurrent partial write.
+        }
+      }
+    } catch {
+      // Missing or unreadable transcripts cannot break session discovery.
+    } finally {
+      await handle?.close().catch(() => {});
+    }
+  }
+  return null;
+}
+
+async function discoverClaudeTmuxSessions({ cwd = null } = {}, deps = {}) {
+  const result = {
+    ok: true,
+    cli: "claude",
+    cwd: normalizeCwd(cwd),
+    sessions: [],
+  };
+  let stdout;
+  try {
+    ({ stdout } = await (deps.runTmux ?? runTmux)(null, [
+      "list-panes",
+      "-a",
+      "-F",
+      TMUX_DISCOVERY_FORMAT,
+    ]));
+  } catch (error) {
+    return {
+      ...result,
+      ok: false,
+      reason: "tmux-unavailable",
+      error: error.message,
+    };
+  }
+  const panes = new Map();
+  for (const line of String(stdout).split(/\r?\n/)) {
+    const [session, , , window, pane, paneCwd, , , , pid, paneId] =
+      line.split("\t");
+    if (paneId)
+      panes.set(paneId, {
+        session,
+        target: `${session}:${window}.${pane}`,
+        cwd: normalizeCwd(paneCwd),
+        pid: Number(pid),
+      });
+  }
+  const parents = new Map();
+  try {
+    const processes = await (deps.psExec ?? execFileAsync)(
+      "ps",
+      ["-eo", "pid=,ppid="],
+      {
+        timeout: 1000,
+        maxBuffer: MAX_BUFFER,
+      },
+    );
+    for (const line of String(processes.stdout).split(/\r?\n/)) {
+      const match = line.match(/^\s*(\d+)\s+(\d+)\s*$/);
+      if (match) parents.set(Number(match[1]), Number(match[2]));
+    }
+  } catch {
+    // Without ancestry evidence only the pane process itself can match.
+  }
+  const env = deps.env ?? process.env;
+  const dir =
+    env.TFX_CLAUDE_SESSIONS_DIR ||
+    pathJoin(env.HOME || homedir(), ".claude", "sessions");
+  let files;
+  try {
+    files = await readdir(dir);
+  } catch {
+    return result;
+  }
+  for (const file of files.sort()) {
+    if (!file.endsWith(".json")) continue;
+    try {
+      const record = JSON.parse(await readFile(pathJoin(dir, file), "utf8"));
+      // Match from the right: session names may themselves contain ':' and '.'.
+      const coordinate =
+        typeof record.tmux === "string"
+          ? record.tmux.match(/^(.*):@(\d+)\.(%\d+)$/)
+          : null;
+      if (
+        !coordinate ||
+        typeof record.sessionId !== "string" ||
+        !record.sessionId ||
+        !Number.isSafeInteger(record.pid) ||
+        record.pid <= 0
+      )
+        continue;
+      const pane = panes.get(coordinate[3]);
+      if (!pane || (result.cwd && pane.cwd !== result.cwd)) continue;
+      if (!(deps.isAlive ?? isSessionPidAlive)(record.pid)) continue;
+      let ancestor = record.pid;
+      for (let depth = 0; depth < 4 && ancestor !== pane.pid; depth++) {
+        ancestor = parents.get(ancestor);
+      }
+      if (ancestor !== pane.pid) continue;
+      const name = record.name ?? null;
+      const title =
+        record.nameSource === "derived" ||
+        !name ||
+        (typeof name === "string" && !name.trim())
+          ? await claudeConversationTitle(record.sessionId, env)
+          : name;
+      result.sessions.push({
+        session: pane.session,
+        target: pane.target,
+        paneId: coordinate[3],
+        cwd: pane.cwd,
+        pid: record.pid,
+        sessionId: record.sessionId,
+        short: record.sessionId.slice(0, 8),
+        name,
+        title,
+        nameSource: record.nameSource ?? null,
+        status: record.status ?? null,
+      });
+    } catch {
+      // A malformed or concurrently removed record cannot break discovery.
+    }
+  }
+  return result;
 }
 
 function sleep(ms) {
@@ -2536,8 +2783,20 @@ async function probe(flags) {
 
 async function listSessions(flags) {
   const adapter = selectAdapter(flags);
+  if (adapter.cli === "claude") {
+    if (flags.remote || flags.transport === "uds") {
+      throw new Error(
+        "Claude list-sessions supports local tmux only; --remote and --transport uds are unavailable",
+      );
+    }
+    if (flags.transport && !["tmux", "auto"].includes(flags.transport)) {
+      throw new Error("Claude list-sessions --transport must be tmux or auto");
+    }
+    printJson(await discoverClaudeTmuxSessions({ cwd: flags.cwd }));
+    return;
+  }
   if (adapter.cli !== "codex") {
-    throw new Error("list-sessions currently supports only --cli codex");
+    throw new Error("list-sessions supports --cli codex or --cli claude");
   }
   if (flags.transport === "uds") {
     const { listCodexAppServerThreads } = await import(
@@ -3550,6 +3809,7 @@ export {
   createPeerSignalController,
   ctoHygieneNotify,
   derivePeerStatus,
+  discoverClaudeTmuxSessions,
   discoverCodexTmuxSessions,
   doAskViaTmux,
   extractAssistantResponse,
