@@ -2,7 +2,7 @@
 
 All notable changes to triflux will be documented in this file.
 
-## [Unreleased]
+## [10.49.0] - 2026-10-04
 
 ### Removed
 - skills: 스킬 표면을 12개 + Windows 1개로 줄인다. `tfx-ralph`(= `tfx-auto --retry ralph`), `tfx-forge`, `tfx-find`(Claude 기본 Explore 에이전트와 중복), `tfx-index` 는 기능 이전 없이 지운다. `tfx-goal-clarify`, `tfx-hooks`, `tfx-hub`, `tfx-analysis`, `tfx-prune`, `tfx-qa` 는 쓸모 있는 내용을 남는 스킬로 옮긴 뒤 지운다. `tfx-hub` MCP 서버, `tfx hub` CLI, hub 코드는 그대로다. 지운 스킬의 설치본은 `tfx setup` 의 stale 정리가 지운다 (ADR-0020)
@@ -17,11 +17,16 @@ All notable changes to triflux will be documented in this file.
 - hooks: gstack 규칙은 스킬 이름을 고정하지 않고 `skill_candidates`(`ship`/`gstack-ship` 등)에서 실제 설치된 이름을 골라 주입한다. 설치된 후보가 없으면 주입하지 않는다 (ADR-0021)
 - setup: SKILL.md frontmatter `platform:` 목록(keyword-rules 의 `platform` 과 같은 뜻)이 있으면 현재 플랫폼이 목록에 있을 때만 스킬을 설치하고, 아니면 이미 깔린 사본을 지운다. `tfx doctor` 의 스킬 집계·stale 감지와 Codex managed 스킬 동기화도 같은 규칙을 따른다. `tfx-wt` 는 `platform: [win32]` 다
 - docs: 라우팅 정본(D2·D6·D7·D8, ladder, 행동 유형 표, Claude 네이티브 목록), 스택 공존·실행 스킬 맵이 지운 스킬을 owner 로 돌려주지 않게 고친다
+- docs: README·README.ko 를 현재 스킬·CLI 구조로 다시 쓴다. 스킬 개수 문구와 없는 문서 링크, 제거된 headless guard 설명을 지우고 `tfx-live`, `--mode live`, 모델 프로필 표, async 라우팅, Codex 세션 레지스트리를 넣는다. 기여자용 절은 CONTRIBUTING 으로 옮기고 낡은 architecture.svg 는 mermaid 로 대체한다
+- node: 최소 Node 를 20 으로 올린다(`engines.node >=20`, `tfx-route.mjs` preflight). better-sqlite3 12.x 가 Node 20+ 를 요구한다
 
 ### Fixed
 - skills: macOS/Linux 에도 Windows 전용 `tfx-wt` 가 설치되던 문제
 - hooks: 슬래시 명령(`/resume`, `/tfx-auto …`, `/loop …`)으로 시작하는 프롬프트, 핸드오프·팀 리드·중계 토픽 같은 자동 생성 프롬프트, "진행해" 같은 짧은 반응, 붙여넣기 태그 안 텍스트(속성 달린 닫는 태그), `~/` 경로, 줄 머리 `>` 인용문, 스킬 선언 목록 줄(`- /tfx-x — 설명`)에 키워드 규칙이 걸리던 문제. `gstack-checkpoint` 등 gstack 규칙이 머신에 따라 설치되지 않은 이름을 가리키던 문제. `context_hint` 주입문에 Windows 전용 `wt.exe` 문구가 붙던 문제
 - docs: 라우팅 표가 이미 없는 `tfx-autoresearch`, `tfx-autopilot` 을 가리키던 곳을 `tfx-research`, autopilot 모드, `tfx-auto` 로 바로잡는다
+- route: 32KB 를 넘는 `context_file` 을 주면 `tfx-route.sh` 가 메시지 없이 exit 141 로 끝나던 문제. `cat | head -c` 절삭에서 cat 이 SIGPIPE 를 받아 pipefail 로 스크립트 전체가 끝났다
+- hooks: 짧은 반응 가드가 `tfx-auto 로 돌려` 같은 짧은 명시 호출까지 막던 문제, suggest 규칙의 `supersedes` 가 같은 프롬프트의 명시 호출을 지우던 문제, `/tmp …` 처럼 경로로 시작하는 프롬프트와 `CHANGELOG …` 처럼 대문자 단어로 시작하는 프롬프트를 슬래시 명령·자동 생성 봉투로 오인하던 문제, 스킬 목록 줄 정규식이 다음 줄 지시까지 지우고 긴 공백 입력에서 느려지던 문제, `skill_candidates` 이름으로 스킬 루트 밖을 탐색할 수 있던 문제, 비슬래시 `tfx-auto-codex 로` 명시 호출을 놓치던 문제
+- setup: 트레이 잔재 정리가 실제 실행 대상이 triflux 트레이인 현재 사용자 프로세스만, 종료 직전 같은 프로세스임을 다시 확인한 뒤 SIGTERM 한다
 
 ## [10.48.1] - 2026-10-04
 
