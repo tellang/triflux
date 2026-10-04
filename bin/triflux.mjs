@@ -88,6 +88,7 @@ import {
   getWindowsHubAutostartStatus,
   isLocalDevSkillDir,
   isSetupUserStateFile,
+  isSkillSupportedOnPlatform,
   LEGACY_CODEX_MODELS,
   listInlineProfileNames,
   REQUIRED_CODEX_PROFILES,
@@ -612,17 +613,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         name: "--help",
         type: "boolean",
         description: "업데이트를 실행하지 않고 도움말만 출력",
-      },
-    ],
-  },
-  tray: {
-    usage: "tfx tray [--attach]",
-    description: "트레이/HUD 상태 표시 프로세스 실행",
-    options: [
-      {
-        name: "--attach",
-        type: "boolean",
-        description: "디버깅용 foreground 실행 (기본은 detach)",
       },
     ],
   },
@@ -1958,6 +1948,7 @@ function listSkillSyncActions() {
     const src = join(skillsSrc, name, "SKILL.md");
     const dst = join(CLAUDE_DIR, "skills", name, "SKILL.md");
     if (!existsSync(src)) continue;
+    if (!isSkillSupportedOnPlatform(join(skillsSrc, name))) continue;
     actions.push(describeSyncAction(src, dst, `skill:${name}`));
   }
   for (const { alias, source } of SKILL_ALIASES) {
@@ -2149,6 +2140,7 @@ function cmdSetup(options = {}) {
       const src = join(skillsSrc, name, "SKILL.md");
       const dst = join(skillsDst, name, "SKILL.md");
       if (!existsSync(src)) continue;
+      if (!isSkillSupportedOnPlatform(join(skillsSrc, name))) continue;
       skillTotal++;
 
       const dstDir = dirname(dst);
@@ -3142,6 +3134,7 @@ async function cmdDoctor(options = {}) {
           const src = join(fSkillsSrc, name, "SKILL.md");
           const dst = join(fSkillsDst, name, "SKILL.md");
           if (!existsSync(src)) continue;
+          if (!isSkillSupportedOnPlatform(join(fSkillsSrc, name))) continue;
           st++;
           const dstDir = dirname(dst);
           if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
@@ -3656,6 +3649,7 @@ async function cmdDoctor(options = {}) {
       const missing = [];
       for (const name of readdirSync(skillsSrc)) {
         if (!existsSync(join(skillsSrc, name, "SKILL.md"))) continue;
+        if (!isSkillSupportedOnPlatform(join(skillsSrc, name))) continue;
         total++;
         if (existsSync(join(skillsDst, name, "SKILL.md"))) {
           installed++;
@@ -3701,7 +3695,10 @@ async function cmdDoctor(options = {}) {
       const pkgSkillsDir = join(PKG_ROOT, "skills");
       const pkgSkills = new Set();
       if (existsSync(pkgSkillsDir)) {
-        for (const n of readdirSync(pkgSkillsDir)) pkgSkills.add(n);
+        for (const n of readdirSync(pkgSkillsDir)) {
+          if (isSkillSupportedOnPlatform(join(pkgSkillsDir, n)))
+            pkgSkills.add(n);
+        }
       }
       for (const { alias } of SKILL_ALIASES) pkgSkills.add(alias);
 
@@ -6411,8 +6408,6 @@ ${updateNotice}
     ${WHITE_BRIGHT}tfx schema${RESET}     ${GRAY}CLI/Hub schema JSON 출력${RESET}
     ${WHITE_BRIGHT}tfx hooks${RESET}      ${GRAY}훅 오케스트레이터 scan/diff/apply/status${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
-    ${WHITE_BRIGHT}tfx tray${RESET}       ${GRAY}Windows 시스템 트레이 실행${RESET}
-    ${DIM}  --attach${RESET}      ${GRAY}foreground 트레이 프로세스로 실행${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
     ${WHITE_BRIGHT}tfx swarm${RESET}       ${GRAY}PRD 기반 worktree 격리 병렬 실행 (run/plan/list)${RESET}
     ${WHITE_BRIGHT}tfx synapse${RESET}     ${GRAY}스웜 세션 registry 조회 / lease 관리${RESET}
@@ -7528,31 +7523,6 @@ async function main() {
       const mon = createMonitor({ targetPane: process.env.TMUX_PANE });
       await mon.start();
       break;
-    }
-    case "tray": {
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("tray");
-        return;
-      }
-      const trayUrl = new URL("../hub/tray.mjs", import.meta.url);
-      const trayPath = fileURLToPath(trayUrl);
-      if (cmdArgs.includes("--attach")) {
-        // --attach: 포그라운드 모드 (디버깅용)
-        const { startTray } = await import(trayUrl.href);
-        await startTray();
-        return;
-      }
-      // 기본: detach 모드 (프리징 방지)
-      const child = spawn(process.execPath, [trayPath], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      child.unref();
-      console.log(
-        `\n  ${GREEN_BRIGHT}✓${RESET} tray 시작됨 (PID ${child.pid})\n`,
-      );
-      return;
     }
     case "cto": {
       if (cmdArgs.some(isHelpArg)) {

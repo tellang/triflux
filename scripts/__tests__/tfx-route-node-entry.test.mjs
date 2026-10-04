@@ -428,16 +428,18 @@ describe("cli-agy.mjs — stdin-pipe 계약", () => {
 });
 
 describe("preflightNodeVersion", () => {
-  test("v18+ 통과", () => {
-    assert.equal(route.preflightNodeVersion("18.0.0"), 18);
+  test("v20+ 통과", () => {
+    assert.equal(route.preflightNodeVersion("20.0.0"), 20);
     assert.equal(route.preflightNodeVersion("20.10.5"), 20);
     assert.equal(route.preflightNodeVersion("26.0.0"), 26);
   });
 
-  test("v16 거부", () => {
+  // better-sqlite3 12.x 가 Node 20+ 를 요구한다 (engines.node >=20 과 맞춘다).
+  test("v18 이하 거부", () => {
+    assert.throws(() => route.preflightNodeVersion("18.0.0"), /Node\.js v20\+/);
     assert.throws(
       () => route.preflightNodeVersion("16.20.0"),
-      /Node\.js v18\+/,
+      /Node\.js v20\+/,
     );
   });
 

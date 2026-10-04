@@ -19,7 +19,7 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 | 신규 제품/아이디어 | `/office-hours` → `/autoplan` → `/writing-plans` → `/tfx-auto` | 먼저 문제/범위를 잡고, 리뷰된 계획을 실행으로 넘긴다. |
 | 기존 작업 계속 | `/gstack-context-restore` → `/tfx-auto` | 저장된 맥락을 복원한 뒤 실행한다. |
 | 직접 구현/수정 | `/tfx-auto` (Codex 우선) | "이거 고쳐줘", "구현해줘". 기존 작업 연장이면 `/gstack-context-restore` 먼저. |
-| 디버그 | `/tfx-find` → `/superpowers:systematic-debugging` → `/tfx-auto` | 코드 위치/사용처 확인과 원인 분석을 분리한다. |
+| 디버그 | Claude 기본 Explore 에이전트 → `/superpowers:systematic-debugging` → `/tfx-auto` | 코드 위치/사용처 확인과 원인 분석을 분리한다. |
 | 리서치 | `/tfx-research` 또는 `/multilingual-parallel-research` | 외부/최신/도구 가능 여부 의문문은 `/tfx-research`; 언어권 병렬 조사는 multilingual 경로. |
 | 검증 | `/superpowers:review` + `/gstack /qa` + `/superpowers:verification-before-completion` | 코드 판정은 review, 브라우저/워크플로우 게이트는 qa, 완료 주장 전 evidence 수집은 verification. |
 | 디자인 검토 | `/gstack /design-review` | 시각/UX 판정. 코드 판정과 분리. |
@@ -32,7 +32,7 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 | triflux 릴리즈 | `/tfx-ship` | triflux 본체는 AI trailer 금지 정책이 있는 전용 ship 경로를 쓴다. |
 | 일반 PR/배포 | `/ship` | 로컬 `/ship`도 AI attribution footer/trailer 없이 실행되어야 한다. |
 | 저장/복원 | `/gstack-context-save` / `/gstack-context-restore` | 진행 상태는 gstack checkpoint 계열이 소유한다. |
-| 회고/슬롭 정리 | `/gstack /retro` 또는 명시 `/tfx-prune` | 세션 회고는 gstack, 무수식 AI slop/deslop은 host ai-slop-cleaner, TFX 3자 cleanup만 tfx-prune. |
+| 회고/슬롭 정리 | `/gstack /retro` 또는 명시 `tfx-auto --mode consensus` | 세션 회고는 gstack, 무수식 AI slop/deslop은 host ai-slop-cleaner, TFX 3자 cleanup만 `tfx-auto --mode consensus`. |
 
 ## 스킬 선택 결정트리 (SSOT)
 
@@ -40,12 +40,12 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 
 - D0: 명시 `/skill`, `$skill`, `tfx-*`, `--mode/--cli`는 안전 위반이 없으면 유지한다.
 - D1: “어떤 스킬/경로?”만 묻는 요청은 `tfx-harness`가 recommendation-only로 owner 하나를 반환한다.
-- D2: 목표·non-goal·acceptance criteria가 불명확하면 host `deep-interview`; 명시 TFX 변형이면 `tfx-interview`.
+- D2: 목표·non-goal·acceptance criteria가 불명확하면 host `deep-interview`; 명시 TFX 변형이면 `tfx-interview`; 자연어 목표의 `/goal` 블록 변환은 `tfx-interview --format goal`.
 - D3: 제품 수요·wedge 단계는 `office-hours`; D4 해법/UX 발산은 `brainstorming`.
 - D5: 승인된 spec의 실행 계획은 `writing-plans`; 명시 TFX 다중모델 합의는 `tfx-plan`.
-- D6: 실패/버그/test failure는 `systematic-debugging` 후 `tfx-auto`; 정상 구조 설명은 `tfx-analysis`.
-- D7: 로컬 파일·심볼은 `tfx-find`; 외부·최신·공식 문서는 `tfx-research`.
-- D8: 무수식 AI slop/deslop/refactor는 host `ai-slop-cleaner`; 명시 TFX 3자 cleanup만 `tfx-prune`; 회고는 `retro`. “정리” 한 단어로 cleanup을 강제하지 않는다.
+- D6: 실패/버그/test failure는 `systematic-debugging` 후 `tfx-auto`; 정상 구조 설명은 `tfx-auto --mode consensus --shape panel`.
+- D7: 로컬 파일·심볼은 Claude 기본 Explore 에이전트(스킬 없음); 외부·최신·공식 문서는 `tfx-research`.
+- D8: 무수식 AI slop/deslop/refactor는 host `ai-slop-cleaner`; 명시 TFX 3자 cleanup만 `tfx-auto --mode consensus`; 회고는 `retro`. “정리” 한 단어로 cleanup을 강제하지 않는다.
 - D9: web/app flow는 `qa`; code verdict는 review backend; 완료 주장은 `verification-before-completion`이 필수다.
 - D10: 명확한 직접 구현은 TDD 필요 여부 뒤 `tfx-auto`; 2+ code-changing lane은 worktree/team/swarm.
 - D11: fresh verification 없이 ship 금지. triflux release는 `tfx-ship`, 일반 release는 `ship`, 중단/재개는 context save/restore.
@@ -58,16 +58,36 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 |------|-----------|------|
 | 구현/수정 | 만들어, 고쳐, 구현해, 짜줘, 수정해, 바꿔 | tfx-auto |
 | 리뷰 | 봐줘, 리뷰해, 검토해, 괜찮아? | `superpowers:review` (owner). 교차모델 판정이 필요할 때만 tfx-review |
-| 분석 | 분석해, 어떻게 돌아가?, 구조가 뭐야 | tfx-analysis |
+| 분석 | 분석해, 어떻게 돌아가?, 구조가 뭐야 | tfx-auto (`--mode consensus --shape panel`) |
 | 계획 | 계획, 어떻게 하지, 설계해 | tfx-plan |
-| 검색 | 찾아, 어디있어, 파일 찾아 | tfx-find |
+| 검색 | 찾아, 어디있어, 파일 찾아 | Claude 기본 Explore 에이전트 |
 | 리서치 (빠른) | 검색해줘, 찾아봐, 공식문서, 이거 뭐야 | tfx-research |
-| 리서치 (자율) | 자율 리서치, 검색하고 정리해, research and plan | tfx-autoresearch |
-| 테스트 | 테스트, 검증, 돌려봐, QA | tfx-qa |
-| 정리 | 대상 domain을 먼저 판정; 무수식 AI slop/deslop은 host ai-slop-cleaner | D8 참조 (명시 TFX 3자 cleanup만 tfx-prune) |
+| 리서치 (자율) | 자율 리서치, 검색하고 정리해, research and plan | tfx-research (Auto 모드) |
+| 테스트 | 테스트, 검증, 돌려봐, QA | 코드 판정은 tfx-review, 테스트→수정 반복은 tfx-auto, 브라우저 흐름은 gstack `/qa` |
+| 정리 | 대상 domain을 먼저 판정; 무수식 AI slop/deslop은 host ai-slop-cleaner | D8 참조 (명시 TFX 3자 cleanup만 `tfx-auto --mode consensus`) |
 | 토론/비교 | 뭐가 나을까, 비교해, A vs B | tfx-auto (`--mode consensus --shape debate`) |
 | 합의 | 합의로 분석해, 3자 합의, consensus | tfx-auto (`--mode consensus`) |
 | 패널 | panel, 패널, 전문가 의견, expert panel | tfx-auto (`--mode consensus --shape panel`) |
+
+위 표는 Claude가 요청을 읽고 판정할 때 쓰는 지도다. 키워드 훅이 이 신호를 강제 주입한다는 뜻이 아니다.
+
+## 키워드 훅 주입 (UserPromptSubmit)
+
+> 근거(why): [ADR-0021 — 키워드 훅을 명시 호출 중심으로 줄인다](../../docs/adr/0021-keyword-hook-explicit-first.md). 규칙 정본은 `hooks/keyword-rules.json`.
+
+| 입력 | 훅 동작 |
+|------|---------|
+| 선두가 슬래시 명령(`/resume`, `/tfx-auto …`, `/oh-my-claudecode:team`, `/loop …`) | 주입 안 함. 호스트가 이미 실행한다 |
+| 자동 생성 봉투(`Continuation skills/contract`, `- Handoff envelope`, `리드 에이전트:`, 대문자 토픽 태그) | 주입 안 함 |
+| 붙여넣기를 뺀 직접 입력이 공백 제외 12자 이하(`진행해`, `좋아 해봐`) | 주입 안 함. 문장 중간 `/tfx-` 토큰이 있으면 예외 |
+| 명시 토큰(문장 중간 `/tfx-harness`, `tfx-auto 로 돌려`, `tfx-review`, `deslop`, `autoplan` 등, 규칙 `strength: explicit`) | MUST 호출 문구 |
+| 자연어 매칭(`결제 화면에 로그인 기능 구현해줘`, `어떤 스킬 써?` 등, `strength: suggest`) | "실행 요청이면 고려하라, 질문·대화면 무시하라" 제안 문구 |
+| 질문형 끝맺음(`exclude_patterns`), 광역 동사 단독(`진행해`, `검토해`), 서비스 맨명사(`메일`, `일정`, `chrome`), 이름만 언급(`tfx-auto에 합쳐졌을텐데`) | 주입 안 함 |
+
+- 주입문에 프롬프트 원문을 다시 붙이지 않는다. 자연어 매칭을 MUST 로 올리지 않는다.
+- 붙여넣기 태그(`<pasted_content …>…</pasted_content …>`), 코드블록, 경로(`~/`, `/`, `./`), 줄 머리 `>` 인용문, 스킬 선언 목록 줄(`- /tfx-x — 설명`)은 매칭 전에 지운다.
+- gstack 처럼 머신마다 설치 이름이 다른 스킬은 `skill_candidates`(`["ship", "gstack-ship"]`)로 두고, 훅이 설치된 이름을 고른다. 하나도 없으면 주입하지 않는다.
+- 새 규칙은 명시 토큰이면 기본(`explicit`), 자연어면 `strength: suggest` + `suggest_when` 을 둔다. 맨명사 하나로 걸리는 패턴은 추가하지 않는다.
 
 ## 깊이 수정자
 
@@ -93,7 +113,7 @@ triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR
 | 2차 | **Antigravity** | Codex quota exhaust, 가독성 cross-check, 별도 시각 검토 |
 | 한정 (Claude 만) | **Claude** (`opus` 최신 tier 별칭) | 메타 라우팅 (`/tfx-harness`), planning gate (`/office-hours`, `/autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack /qa`), 또는 Codex/Antigravity 미가용 |
 
-`tfx-auto`, `tfx-review`, `tfx-analysis`, `tfx-plan`, `tfx-find` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli codex`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
+`tfx-auto`, `tfx-review`, `tfx-plan`, `tfx-research` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli codex`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
 
 `--retry auto-escalate` 체인 (`.claude/rules/tfx-escalation-chain.md`) 의 1단계가 Codex 인 것도 이 정책과 정합한다 (2단계 Claude `fable` 최신 tier 별칭은 최종 수단).
 
@@ -143,7 +163,7 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 | tfx-swarm | PRD별 worktree + 다중 모델(Codex/Antigravity/Claude) + 다중 기기(로컬+원격) |
 | tfx-remote | Claude Code 원격 세션 (SSH, user-state hosts.json setup 필수) |
 
-**Claude 네이티브** (CLI 불필요): tfx-find, tfx-forge, tfx-prune, tfx-index, tfx-setup, tfx-doctor, tfx-hooks, tfx-hub
+**Claude 네이티브** (CLI 불필요): tfx-setup(훅 우선순위 관리 포함), tfx-doctor(hub 시작·중지·상태 포함)
 
 **Headless UI default** — `tfx-auto`, `tfx multi`, `tfx swarm` 로컬 shard 의 headless 워커는 default 로 `claude agents` 패널에 노출 (`--native-bridge-ui agents`). opt-out: `--no-native-bridge-ui`. interactive (tmux/wt) 경로는 default-off. `tfx swarm` 원격 shard 는 `registerSwarmShard()` 가 warn + skip 만 하고 원격 daemon 등록은 후속 PRD. 상세 행동표는 `CLAUDE.md` 의 `<native-bridge>` 섹션. 근거(why): [ADR-0008 — headless 워커 native-bridge 기본 노출](../../docs/adr/0008-native-bridge-ui-default-on.md).
 
@@ -165,8 +185,8 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 ## 충돌 해소
 
 - ralph = persist alias
-- "auto" 단독 → tfx-auto. "알아서 해" → tfx-autopilot
-- "코드에서 찾아" → tfx-find. "알아봐" → tfx-research
+- "auto" 단독 → tfx-auto. "알아서 해" → autopilot 모드 (위 깊이 수정자)
+- "코드에서 찾아" → Claude 기본 Explore 에이전트. "알아봐" → tfx-research
 - 복합 의도: "구현하고 리뷰까지" → tfx-auto → cross-review hook
 - "합의해서 비교해" 류 요청은 기본적으로 `tfx-auto --mode consensus --shape debate` 로 fold 한다
 - `ralph` 표기는 항상 `--retry ralph` mode 를 지칭. persist 스킬도 동일 의미. `--retry auto-escalate` 와 동시 사용 불가 (escalation-chain.md 규약).

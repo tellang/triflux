@@ -89,7 +89,6 @@ CLI 라우팅 + 파이프라인 + 품질 게이트. 네이티브 의존성 없�
 │   ├── store-adapter.mjs
 │   ├── pipe.mjs
 │   ├── tools.mjs
-│   ├── tray.mjs
 │   ├── team/                   ← 전체
 │   └── workers/                ← 전체
 ├── skills/                     ← Layer 2-3 스킬
@@ -99,7 +98,7 @@ CLI 라우팅 + 파이프라인 + 품질 게이트. 네이티브 의존성 없�
 └── bin/tfx-team.mjs            ← team CLI 진입점
 ```
 
-**deps:** better-sqlite3, @modelcontextprotocol/sdk, systray2
+**deps:** better-sqlite3, @modelcontextprotocol/sdk (트레이와 `systray2`는 ADR-0022로 제거)
 **peerDeps:** @triflux/core
 
 ## 커플링 해소 — 4개 브릿지 포인트

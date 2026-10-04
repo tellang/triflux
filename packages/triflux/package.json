@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "10.48.1",
+  "version": "10.49.0",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Antigravity, and Claude",
   "type": "module",
   "bin": {
@@ -15,7 +15,7 @@
     "tfx-setup-tui": "bin/tfx-setup-tui.mjs"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

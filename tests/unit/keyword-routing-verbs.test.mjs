@@ -21,33 +21,47 @@ function topId(text) {
   return resolveConflicts(matchRules(compiled, text))[0]?.id;
 }
 
-// root cause ① 의 hook 계층 동사군 분리는 lane2-d 잠금(2026-07-17,
-// tests/unit/lane2-d-routing-contract.test.mjs "locked prompt matrix")이 우선해
-// 접었다 — hook 은 광역 동사를 tfx-unified 로 유지하고, 세분화는 D-트리(모델
+// ADR-0021: hook 은 광역 동사 단독을 잡지 않는다. 60일 코퍼스에서 광역 동사
+// 매칭이 오탐의 대부분(tfx-unified 63건 중 55건)이었다. 자연어 구현 요청은
+// "대상 명사 + 구현·수정 동사" 형태만 suggest 로 잡고, 세분화는 D-트리(모델
 // 계층)가 담당한다. 전용 규칙은 명시 토큰 전용으로 존재한다(root cause ② 블록).
-describe("keyword routing: 광역 동사는 tfx-unified 유지 (lane2-d 잠금)", () => {
-  const cases = [
-    ["리뷰해줘 이 코드", "tfx-unified"],
-    ["검토해줘", "tfx-unified"],
-    ["review this PR", "tfx-unified"],
-    ["분석해줘 구조", "tfx-unified"],
-    ["analyze this module", "tfx-unified"],
-    ["계획 세워줘", "tfx-unified"],
-    ["설계해줘", "tfx-unified"],
-    ["테스트 돌려봐", "tfx-unified"],
-    ["검증해줘", "tfx-unified"],
-    ["찾아봐 최신 정보", "tfx-unified"],
-    ["조사해줘", "tfx-unified"],
-    ["만들어줘 함수", "tfx-unified"],
-    ["고쳐줘 버그", "tfx-unified"],
-    ["implement this", "tfx-unified"],
-    // H-결정(D8, 2026-07-17): 무수식 slop/cleanup 은 host ai-slop-cleaner 소유.
-    ["정리해줘 슬롭", "host-ai-slop-cleaner"],
-    ["클린업 해줘", "host-ai-slop-cleaner"],
-  ];
-  for (const [text, expected] of cases) {
-    it(`'${text}' → ${expected}`, () => {
-      assert.equal(topId(text), expected);
+describe("keyword routing: 광역 동사 단독은 매칭하지 않는다 (ADR-0021)", () => {
+  for (const text of [
+    "리뷰해줘 이 코드",
+    "검토해줘",
+    "review this PR",
+    "분석해줘 구조",
+    "analyze this module",
+    "계획 세워줘",
+    "설계해줘",
+    "테스트 돌려봐",
+    "검증해줘",
+    "찾아봐 최신 정보",
+    "조사해줘",
+    "진행해",
+    "계속해",
+    "확인해줘",
+    "정리해줘 슬롭",
+    "클린업 해줘",
+  ]) {
+    it(`'${text}' → 매칭 없음`, () => {
+      assert.equal(topId(text), undefined);
+    });
+  }
+});
+
+describe("keyword routing: 대상 명사 + 구현·수정 동사는 tfx-unified suggest", () => {
+  for (const text of [
+    "함수 만들어줘",
+    "로그인 기능 구현해줘",
+    "이 함수 버그 고쳐줘",
+    "implement the parser",
+    "fix the bug in auth",
+  ]) {
+    it(`'${text}' → tfx-unified (suggest)`, () => {
+      const top = resolveConflicts(matchRules(compiled, text))[0];
+      assert.equal(top?.id, "tfx-unified");
+      assert.equal(top?.strength, "suggest");
     });
   }
 });
@@ -72,24 +86,35 @@ describe("keyword routing: 전용 규칙이 tfx-unified 를 supersede (root caus
 
   for (const [text, id] of [
     ["tfx-review 해줘", "tfx-review"],
-    ["tfx-find 해줘", "tfx-find"],
-    ["tfx-prune 돌려", "tfx-prune"],
+    ["tfx-qa 돌려", "tfx-qa"],
   ]) {
     it(`명시 토큰 '${text}' → ${id}`, () => {
       assert.equal(topId(text), id);
     });
   }
 
+  // 스킬 표면 축소(ADR-0020) 후 감사(ADR-0021): 사용 0회 토큰 규칙은 지우고,
+  // tfx-qa 는 tfx-review 로 retarget, tfx-hub 토큰은 tfx-doctor 규칙에 합친다.
+  it("tfx-qa 규칙은 tfx-review 로 retarget 된다", () => {
+    assert.equal(rules.find((x) => x.id === "tfx-qa")?.skill, "tfx-review");
+  });
+
+  it("tfx hub 토큰은 tfx-doctor 규칙이 받는다", () => {
+    assert.equal(topId("tfx hub 상태"), "tfx-doctor");
+    assert.equal(topId("tfx-doctor 돌려"), "tfx-doctor");
+  });
+
+  for (const id of ["tfx-find", "tfx-analysis", "tfx-prune", "tfx-hub"]) {
+    it(`${id} 규칙은 제거됐다`, () => {
+      assert.equal(
+        rules.some((x) => x.id === id),
+        false,
+      );
+    });
+  }
+
   it("전용 규칙은 priority 1 + supersedes:['tfx-unified']", () => {
-    const dedicated = [
-      "tfx-review",
-      "tfx-analysis",
-      "tfx-plan",
-      "tfx-qa",
-      "tfx-research",
-      "tfx-find",
-      "tfx-prune",
-    ];
+    const dedicated = ["tfx-review", "tfx-plan", "tfx-qa", "tfx-research"];
     for (const id of dedicated) {
       const rule = rules.find((x) => x.id === id);
       assert.ok(rule, `${id} 규칙이 존재해야 함`);
@@ -111,18 +136,25 @@ describe("keyword routing: tfx-ship repo 스코프 (root cause ③)", () => {
     assert.equal(shipRule.explicit, true);
   });
 
-  it("영문 release/publish 전역 패턴은 제거, 배포/릴리즈는 repo_scope 로 가드", () => {
+  it("영문 release/publish 전역 패턴은 제거, 배포/릴리즈는 동사형만 + 질문 제외", () => {
     const sources = shipRule.patterns.map((p) => p.source);
     assert.ok(
       !sources.some((s) => /release|publish/i.test(s)),
       "release/publish 전역 패턴이 없어야 함",
     );
-    // lane2-d 잠금("배포 검증해줘" → tfx-ship)과의 조정: 맨 명사 배포 패턴은
-    // 유지하되 repo_scope=["triflux"] 로 타 repo 하이재킹을 차단한다.
-    assert.ok(
-      sources.includes("배포(?!자|사|장|처)"),
-      "배포 패턴은 유지 (repo_scope 가드)",
-    );
+    // ADR-0021: 맨 명사 "배포"·"릴리즈" 패턴은 오탐 원인이라 동사형만 남긴다.
+    assert.ok(!sources.includes("배포(?!자|사|장|처)"));
+    assert.ok(!sources.includes("릴리[즈스]"));
+    assert.equal(topId("릴리즈 해줘"), "tfx-ship");
+    assert.equal(topId("배포 일정 공유"), undefined);
+    assert.equal(topId("릴리즈 되나?"), undefined);
+    assert.equal(topId("릴리즈 해도 되나?"), undefined);
+    // 명시 토큰은 질문형이어도 MUST 로 남는다.
+    const explicitAsk = resolveConflicts(
+      matchRules(compiled, "tfx-ship 돌려도 되나?"),
+    )[0];
+    assert.equal(explicitAsk?.id, "tfx-ship");
+    assert.equal(explicitAsk?.strength, "explicit");
   });
 
   it("matchesRepoScope 는 path segment 단위로 매칭한다", () => {
@@ -174,27 +206,35 @@ describe("keyword routing: 우선순위 역전 방지 (root cause ④)", () => {
 });
 
 // Codex 리뷰 P2 회귀 가드 2건 (PR #487)
-describe("keyword routing: 명시 토큰이 광역 클린업 매처를 이긴다 (P2-1)", () => {
-  it("'tfx-prune으로 클린업 해줘' → selectPrimaryMatch 가 tfx-prune 선택", () => {
+describe("keyword routing: 명시 토큰이 자연어 제안을 이긴다 (P2-1)", () => {
+  it("'tfx-review 로 AI 슬롭 봐줘' → 명시 토큰 tfx-review 선택", () => {
     const resolved = resolveConflicts(
-      matchRules(compiled, "tfx-prune으로 클린업 해줘"),
+      matchRules(compiled, "tfx-review 로 AI 슬롭 봐줘"),
     );
-    // 정렬상 host-ai-slop-cleaner 가 앞서더라도 explicit 규칙이 이겨야 한다.
-    assert.equal(selectPrimaryMatch(resolved).id, "tfx-prune");
+    // 정렬상 host-ai-slop-cleaner(suggest)가 앞서더라도 명시 토큰이 이겨야 한다.
+    assert.ok(resolved.some((m) => m.id === "host-ai-slop-cleaner"));
+    assert.equal(selectPrimaryMatch(resolved).id, "tfx-review");
+  });
+
+  it("selectPrimaryMatch: explicit 종결 규칙이라도 suggest 매칭이면 명시 토큰에 진다", () => {
+    const resolved = [
+      { id: "gstack-ship", priority: 1, strength: "suggest" },
+      { id: "tfx-ship", priority: 1, explicit: true, strength: "suggest" },
+      { id: "tfx-codex", priority: 3, strength: "explicit" },
+    ];
+    assert.equal(selectPrimaryMatch(resolved).id, "tfx-codex");
+    assert.equal(
+      selectPrimaryMatch(resolved.slice(0, 2)).id,
+      "tfx-ship",
+      "명시 토큰이 없으면 explicit 종결 규칙이 이긴다",
+    );
   });
 
   it("전용 명시토큰 규칙은 전부 explicit:true", () => {
-    for (const id of [
-      "tfx-review",
-      "tfx-analysis",
-      "tfx-plan",
-      "tfx-qa",
-      "tfx-research",
-      "tfx-find",
-      "tfx-prune",
-    ]) {
+    for (const id of ["tfx-review", "tfx-plan", "tfx-qa", "tfx-research"]) {
       const rule = rules.find((x) => x.id === id);
       assert.equal(rule.explicit, true, `${id} explicit=true`);
+      assert.equal(rule.strength, "explicit", `${id} strength=explicit`);
     }
   });
 });
@@ -208,7 +248,10 @@ describe("keyword routing: direct-run 가드는 심링크 실행을 허용 (P2-2
     const link = join(dir, "keyword-detector-link.mjs");
     symlinkSync(join(ROOT, "scripts/keyword-detector.mjs"), link);
     const out = execFileSync(process.execPath, [link], {
-      input: JSON.stringify({ prompt: "만들어줘 함수", cwd: ROOT }),
+      input: JSON.stringify({
+        prompt: "이 작업 tfx-auto 로 돌려줘",
+        cwd: ROOT,
+      }),
       encoding: "utf8",
     });
     const parsed = JSON.parse(out.trim().split("\n").at(-1));

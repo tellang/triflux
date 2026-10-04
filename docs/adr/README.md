@@ -26,6 +26,9 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0017](0017-gpt6-sol-luna-lanes.md) | Terra/Luna 레인 = GPT-6 Sol/Luna | Accepted | 0004, 0015, 0016 |
 | [0018](0018-cto-auto-behaviors-opt-in.md) | CTO 자동 동작은 명시적으로 켜야 실행 | Proposed | 0010, 0011 |
 | [0019](0019-gpt61-sol-and-sonnet-55.md) | Sol 레인 = GPT-6.1 Sol, sonnet 별칭 = Sonnet 5.5 | Accepted | 0004, 0016, 0017 |
+| [0020](0020-skill-surface-reduction.md) | tfx 스킬 표면 = 12개 + Windows 1개, 스킬 frontmatter `platform` 필터 | Proposed | 0004, 0009 |
+| [0021](0021-keyword-hook-explicit-first.md) | 키워드 훅은 명시 토큰만 MUST, 자연어는 제안(suggest), gstack 이름은 설치본 기준 | Proposed | 0009, 0020 |
+| [0022](0022-remove-cto-tray.md) | CTO 트레이를 패키지에서 제거 | Proposed | 0010, 0018 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 

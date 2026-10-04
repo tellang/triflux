@@ -22,13 +22,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { runCollect } from "../cto/collect.mjs";
-import { resolveLakeRootDir } from "../cto/lake-root.mjs";
-import { runStatus as runCtoStatus } from "../cto/status.mjs";
 import { createModuleLogger } from "../scripts/lib/logger.mjs";
-import {
-  inspectRegistry,
-  inspectRegistryStatus,
-} from "../scripts/lib/mcp-guard-engine.mjs";
 import { broker as brokerInstance, reloadBroker } from "./account-broker.mjs";
 import { createAdaptiveEngine } from "./adaptive.mjs";
 import { createAssignCallbackServer } from "./assign-callbacks.mjs";
@@ -56,7 +50,6 @@ import {
   recordWorker,
   snapshot as traceSnapshot,
 } from "./lib/trace-recorder.mjs";
-import { focusSessionOnMac } from "./mac-focus.mjs";
 import { logQuotaRefreshFailures } from "./middleware/quota-middleware.mjs";
 import { wrapRequestHandler } from "./middleware/request-logger.mjs";
 import { createPipeServer } from "./pipe.mjs";
@@ -79,9 +72,6 @@ import {
 } from "./team/synapse-registry.mjs";
 import { registerTeamBridge } from "./team-bridge.mjs";
 import { createTools } from "./tools.mjs";
-import { spawnTrayForHub } from "./tray-lifecycle.mjs";
-import { getRuntimeStatus } from "./tray-runtime.mjs";
-import { buildTrayStatePayload } from "./tray-state.mjs";
 import { createDelegatorMcpWorker } from "./workers/delegator-mcp.mjs";
 
 registerTeamBridge(nativeProxy);
@@ -101,7 +91,6 @@ const LOOPBACK_REMOTE_ADDRESSES = new Set([
 const ALLOWED_ORIGIN_RE =
   /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
-const CANONICAL_PROJECT_ROOT = resolveLakeRootDir(PROJECT_ROOT) || PROJECT_ROOT;
 const PUBLIC_DIR = resolve(join(PROJECT_ROOT, "hub", "public"));
 const CACHE_DIR = join(homedir(), ".claude", "cache");
 const HUB_DEFAULT_PORT = 27888;
@@ -498,7 +487,6 @@ function isPublicPath(path) {
   return (
     PUBLIC_PATHS.has(path) ||
     path === "/dashboard" ||
-    path === "/tray.html" ||
     path === "/api/qos-stats" ||
     path.startsWith("/public/")
   );
@@ -861,41 +849,10 @@ function getBrokerPublicSnapshot(currentBroker = brokerInstance) {
   return currentBroker.publicSnapshot();
 }
 
-async function getTrayCtoStatus() {
-  try {
-    return await runCtoStatus(["--json"], {
-      rootDir: CANONICAL_PROJECT_ROOT,
-      stdout: { write() {} },
-    });
-  } catch (error) {
-    return { error: error?.message || String(error) };
-  }
-}
-
-function getTrayMcpStatus() {
-  const registryState = inspectRegistry();
-  if (!registryState.exists || !registryState.valid) {
-    return {
-      registry_path: registryState.path,
-      server_count: 0,
-      rows: [],
-      error: registryState.errors?.join("; ") || "MCP registry unavailable",
-    };
-  }
-  const status = inspectRegistryStatus(registryState.registry);
-  return {
-    registry_path: registryState.path,
-    server_count: Object.keys(registryState.registry?.servers || {}).length,
-    rows: status.rows,
-  };
-}
-
 function resolvePublicFilePath(path) {
   let relativePath = null;
   if (path === "/dashboard") {
     relativePath = "dashboard.html";
-  } else if (path === "/tray.html") {
-    relativePath = "tray.html";
   } else if (path.startsWith("/public/")) {
     relativePath = path.slice("/public/".length);
   }
@@ -1439,76 +1396,6 @@ export async function startHub({
           ...synapseRegistry.snapshot(),
           ts: Date.now(),
         });
-      }
-
-      if (path === "/api/tray-state" && req.method === "GET") {
-        if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
-          return writeJson(res, 403, { ok: false, error: "Loopback only" });
-        }
-
-        const qos = getQosStatsPayload();
-        const synapseSnapshot = synapseRegistry.snapshot();
-        const broker = getBrokerPublicSnapshot(brokerInstance);
-        const runtimeStatus = getRuntimeStatus({
-          projectRoots: [
-            ...new Set([CANONICAL_PROJECT_ROOT, PROJECT_ROOT].filter(Boolean)),
-          ],
-        });
-        const [ctoStatus, mcpStatus, hubStatus] = await Promise.all([
-          getTrayCtoStatus(),
-          Promise.resolve(getTrayMcpStatus()),
-          pipe.executeQuery("status", {
-            scope: "hub",
-            include_metrics: true,
-          }),
-        ]);
-        const mergedCtoStatus = {
-          ...(ctoStatus || {}),
-          roles: hubStatus?.data?.roles || ctoStatus?.roles || {},
-        };
-
-        return writeJson(
-          res,
-          200,
-          buildTrayStatePayload({
-            hub: {
-              id: String(sessionId),
-              pid: process.pid,
-              port,
-              url: buildHubUrl(host, port),
-              projectRoot: CANONICAL_PROJECT_ROOT,
-            },
-            qos,
-            synapseSnapshot,
-            broker,
-            ctoStatus: mergedCtoStatus,
-            mcpStatus,
-            runtimeStatus,
-          }),
-        );
-      }
-
-      if (path === "/api/focus-session" && req.method === "POST") {
-        if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) {
-          return writeJson(res, 403, { ok: false, error: "Loopback only" });
-        }
-        let body;
-        try {
-          body = await parseBody(req);
-        } catch (_e) {
-          return writeJson(res, 400, {
-            error: "Invalid JSON or Body too large",
-          });
-        }
-
-        const { sessionId, udsId } = body || {};
-        const result = await focusSessionOnMac({
-          sessionId,
-          udsId,
-          pid: body?.pid,
-          agentId: body?.agentId ?? body?.agent_id,
-        });
-        return writeJson(res, 200, { ok: result.ok !== false, focus: result });
       }
 
       // Redacted peer-discovery surface. Returns co-located live peers (same
@@ -3109,15 +2996,6 @@ if (selfRun) {
         );
         process.exit(0);
         return;
-      }
-      try {
-        const trayPath = fileURLToPath(new URL("./tray.mjs", import.meta.url));
-        const tray = spawnTrayForHub({ trayPath });
-        if (tray.status === "started") {
-          hubLog.info({ pid: tray.pid }, "tray.auto_started");
-        }
-      } catch (error) {
-        hubLog.warn({ err: error }, "tray.auto_start_failed");
       }
       const shutdown = async (signal) => {
         hubLog.info({ signal }, "hub.stopping");

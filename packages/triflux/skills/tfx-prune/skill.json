@@ -1,6 +1,0 @@
-{
-  "name": "tfx-prune",
-  "description": "명시 `tfx-prune` 또는 TFX 3자 합의 cleanup을 요청할 때 사용한다. 무수식 AI slop/deslop/refactor는 host ai-slop-cleaner가 소유한다.",
-  "argument_hint": "[파일 경로 또는 git diff 범위]",
-  "internal": true
-}

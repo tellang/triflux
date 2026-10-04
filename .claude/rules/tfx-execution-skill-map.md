@@ -2,7 +2,7 @@
 
 ## 멘탈 모델
 
-사용자는 `tfx-auto`만 알아도 된다. auto가 내부에서 multi/swarm을 자동 선택한다. 명시 오버라이드는 magic keyword: "스웜", "멀티".
+사용자는 `tfx-auto`만 알아도 된다. auto가 내부에서 multi/swarm을 자동 선택한다. 명시 오버라이드는 `--parallel` 플래그나 `tfx swarm`·`/tfx-multi`(또는 `tfx multi 로 돌려`) 명시 토큰이다(키워드 훅이 tfx-auto 호출을 MUST로 주입한다. 자연어 "스웜"·"멀티"는 훅이 잡지 않는다 — [ADR-0021](../../docs/adr/0021-keyword-hook-explicit-first.md)).
 
 ## 내부 라우팅 (auto가 판정)
 
@@ -37,7 +37,7 @@
 | 패턴 | 문제 | 대체 |
 |------|------|------|
 | PR conflict 해결을 `tfx-remote`로 실행 | WT 세션 `git checkout feat/X` → 메인 세션 working tree도 함께 전환 → race (2026-04-17 PR #72 사고) | `tfx-swarm` |
-| 단일 파일 수정을 `tfx-swarm`으로 실행 | PRD + worktree 오버헤드 과잉 | `tfx-autopilot` |
+| 단일 파일 수정을 `tfx-swarm`으로 실행 | PRD + worktree 오버헤드 과잉 | `tfx-auto` (단일 태스크 직접 실행) |
 | `tfx-multi`로 코드 수정 병렬 | cwd 공유 파일 race | `tfx-swarm` |
 | `tfx-auto --parallel N` 명시 + 코드 변경 | warning 후 사용자 결정 존중 | swarm 권장이지만 사용자 명시 override 시 multi 진행 (Issue #281 closed) |
 

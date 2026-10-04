@@ -59,7 +59,6 @@ describe("스킬 문서 존재 확인", () => {
   // skill bodies. See `축소된 스킬 본체 이관 완결성` suite for body-level checks.
   const expected = [
     "tfx-auto",
-    "tfx-hub",
     "tfx-doctor",
     "tfx-setup",
     "tfx-interview",
@@ -142,21 +141,17 @@ describe("tfx-auto SKILL.md — 에이전트 매핑 일관성", () => {
   });
 });
 
-describe("tfx-hub SKILL.md — hub 모듈 참조", () => {
-  it("제목 또는 설명에 hub 키워드 포함 (단어 경계)", () => {
-    const content = readSkill("tfx-hub");
+// tfx-hub 스킬은 스킬 표면 축소로 tfx-doctor 의 `## tfx-hub 관리` 절로 흡수됐다.
+describe("tfx-doctor SKILL.md — hub 관리 절", () => {
+  it("설명에 hub 키워드 포함 (단어 경계)", () => {
+    const content = readSkill("tfx-doctor");
     const frontmatter = extractFrontmatter(content);
-    // 프론트매터 name/description 또는 h1 제목에서 hub를 찾는다
-    const titleLine = content.split("\n").find((l) => /^#\s/.test(l)) || "";
-    assert.ok(
-      /\bhub\b/i.test(frontmatter) || /\bhub\b/i.test(titleLine),
-      "hub가 프론트매터 또는 H1 제목에 없음",
-    );
+    assert.ok(/\bhub\b/i.test(frontmatter), "hub가 프론트매터에 없음");
   });
 
   it("MCP 도구 섹션에 메시지 관련 키워드 포함", () => {
-    const content = readSkill("tfx-hub");
-    const mcpSection = extractSection(content, /^##\s+MCP\s+도구/);
+    const content = readSkill("tfx-doctor");
+    const mcpSection = extractSection(content, /^###\s+hub\s+MCP\s+도구/);
     assert.ok(mcpSection.length > 0, "MCP 도구 섹션이 존재하지 않음");
     // 실제 MCP 도구 목록에 메시지 버스 핵심 동사가 포함되어야 한다
     assert.ok(
@@ -166,7 +161,7 @@ describe("tfx-hub SKILL.md — hub 모듈 참조", () => {
   });
 
   it("CLI 등록/대응 섹션 존재", () => {
-    const content = readSkill("tfx-hub");
+    const content = readSkill("tfx-doctor");
     assert.ok(
       /##\s+(CLI\s+대응|각\s+CLI\s+등록\s+방법)/.test(content),
       "CLI 등록/대응 섹션이 없음",
@@ -174,7 +169,7 @@ describe("tfx-hub SKILL.md — hub 모듈 참조", () => {
   });
 
   it("false positive 방지: hub가 단순 URL이나 변수명이 아닌 섹션 제목에 존재", () => {
-    const content = readSkill("tfx-hub");
+    const content = readSkill("tfx-doctor");
     // H1 또는 H2 수준 제목에 hub가 포함되어야 한다
     const headings = content.split("\n").filter((l) => /^#{1,2}\s/.test(l));
     const hubInHeading = headings.some((h) => /\bhub\b/i.test(h));

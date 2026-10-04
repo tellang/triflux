@@ -17,7 +17,6 @@ _tfx() {
         'schema:Print CLI and Hub schema'
         'hooks:Manage hook orchestrator'
         'hub:Hub process management'
-        'tray:Start tray process'
         'multi:Multi-CLI team mode'
         'swarm:PRD worktree swarm'
         'synapse:Show swarm registry'

@@ -26,7 +26,7 @@ import { resolveJobsDir, resolveTmpDir } from "./lib/tmp.mjs";
 import { patchCodexConfigFile } from "./lib/toml.mjs";
 
 export const MJS_VERSION = "0.2.0-phase1";
-const MIN_NODE_MAJOR = 18;
+const MIN_NODE_MAJOR = 20;
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");

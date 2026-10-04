@@ -37,6 +37,7 @@ import {
   resolveMachineProfilePath,
   resolveTrifluxHome,
 } from "./lib/machine-profile.mjs";
+import { parseFrontmatter } from "./lib/skill-template.mjs";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -861,6 +862,9 @@ const LEGACY_ALIAS_TOMBSTONES = new Set([
   "tfx-persist",
   "tfx-fullcycle",
 ]);
+// 위 tombstone 은 설치본을 cleanup 에서 *보호*한다. 기능째 지운 스킬(스킬 표면
+// 축소로 제거한 tfx-ralph, tfx-qa 등)은 여기에 넣지 않는다 — 넣으면 낡은 설치본이
+// 영구히 남는다. 패키지에 없으면 cleanupStaleSkills 가 설치본을 지운다.
 
 // ── 폐기 예정 스킬 목록 ──
 
@@ -909,18 +913,58 @@ function syncAliasedSkillDir(srcDir, dstDir, { alias, source }) {
 }
 
 /**
- * 설치된 스킬 디렉토리에서 패키지에 더 이상 없는 tfx-* 스킬을 제거한다.
+ * SKILL.md frontmatter 의 `platform:` 목록(process.platform 값)을 읽는다.
+ * keyword-rules.json 의 `platform` 필드와 같은 의미다. 없거나 비어 있으면
+ * 모든 플랫폼에 설치한다.
+ * @param {string} skillDir - SKILL.md 가 든 스킬 디렉토리
+ * @returns {string[]}
+ */
+function readSkillPlatforms(skillDir) {
+  const skillMd = join(skillDir, "SKILL.md");
+  if (!existsSync(skillMd)) return [];
+  const raw = parseFrontmatter(readFileSync(skillMd, "utf8")).data.platform;
+  // 블록 목록(`- win32`)은 배열로, 인라인(`[win32]`)은 문자열로 들어온다.
+  const values = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.replace(/^\[|\]$/g, "").split(",")
+      : [];
+  return values
+    .map((value) =>
+      String(value)
+        .trim()
+        .replace(/^["']|["']$/g, ""),
+    )
+    .filter(Boolean);
+}
+
+function isSkillSupportedOnPlatform(skillDir, platform = process.platform) {
+  const platforms = readSkillPlatforms(skillDir);
+  return platforms.length === 0 || platforms.includes(platform);
+}
+
+/**
+ * 설치된 스킬 디렉토리에서 패키지에 더 이상 없는 tfx-* 스킬과 현재 플랫폼에
+ * 해당하지 않는 패키지 스킬(frontmatter `platform:`)을 제거한다.
  * @param {string} installedDir - ~/.claude/skills
  * @param {string} pkgDir - PLUGIN_ROOT/skills
+ * @param {{ platform?: string }} [options]
  * @returns {{ count: number, removed: string[] }}
  */
-function cleanupStaleSkills(installedDir, pkgDir) {
+function cleanupStaleSkills(
+  installedDir,
+  pkgDir,
+  { platform = process.platform } = {},
+) {
   const removed = [];
   if (!existsSync(installedDir)) return { count: 0, removed };
 
   const pkgNames = new Set();
   if (existsSync(pkgDir)) {
-    for (const n of readdirSync(pkgDir)) pkgNames.add(n);
+    for (const n of readdirSync(pkgDir)) {
+      if (isSkillSupportedOnPlatform(join(pkgDir, n), platform))
+        pkgNames.add(n);
+    }
   }
   for (const { alias } of SKILL_ALIASES) pkgNames.add(alias);
   for (const alias of LEGACY_ALIAS_TOMBSTONES) pkgNames.add(alias);
@@ -975,6 +1019,7 @@ function syncCodexHarnessAdapter({
   sourceDir = join(PLUGIN_ROOT, "adapters", "codex", "skills", "tfx-harness"),
   destinationDir = join(CODEX_DIR, "skills", "tfx-harness"),
   stagingRoot = null,
+  platform = process.platform,
 } = {}) {
   const sourceSkill = join(sourceDir, "SKILL.md");
   if (!existsSync(sourceSkill)) {
@@ -988,6 +1033,21 @@ function syncCodexHarnessAdapter({
   }
 
   const managed = existsSync(join(destinationDir, MANAGED_CODEX_SKILL_MARKER));
+  // Claude 스킬 동기화와 같은 frontmatter `platform:` 규칙. 비대상 플랫폼에는
+  // 설치하지 않고, 우리가 깔아 둔(managed) 사본만 지운다.
+  if (!isSkillSupportedOnPlatform(sourceDir, platform)) {
+    if (managed) {
+      rmSync(destinationDir, { recursive: true, force: true });
+      return { ok: true, action: "removed", sourceDir, destinationDir };
+    }
+    return {
+      ok: true,
+      action: "unsupported",
+      reason: "unsupported_platform",
+      sourceDir,
+      destinationDir,
+    };
+  }
   const current = skillTreeMatches(sourceDir, destinationDir);
   if (current && managed) {
     return { ok: true, action: "noop", sourceDir, destinationDir };
@@ -1857,6 +1917,161 @@ function applyHooks(settings) {
   return changed;
 }
 
+// ── 제거된 CTO 트레이 잔여 프로세스 (ADR-0022) ──
+// 이전 버전은 `node hub/tray.mjs` 와 그 자식 `swift hub/mac-tray.swift` 를 detached 로
+// 띄웠다. 파일을 지워도 이미 뜬 프로세스는 남으므로 업그레이드 setup 에서 한 번 거둔다.
+// 트레이는 시작 프로그램·작업 스케줄러·LaunchAgent 에 등록된 적이 없어 지울 항목은 없다.
+const LEGACY_TRAY_PS_FIELDS = "uid=,pid=,lstart=,command=";
+const LEGACY_TRAY_PS_OPTIONS = {
+  encoding: "utf8",
+  timeout: 2000,
+  maxBuffer: 4 * 1024 * 1024,
+  // lstart 표기를 로캘과 무관하게 고정한다(재조회 비교용).
+  env: { ...process.env, LC_ALL: "C" },
+};
+// `uid pid <lstart: 요일 월 일 시:분:초 연도> command`
+const LEGACY_TRAY_PS_LINE_RE =
+  /^\s*(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d+:\d+:\d+\s+\d+)\s+(.+)$/u;
+// node 에서 다음 인자를 값으로 받는 옵션 — 그 값은 실행 대상이 아니다.
+const NODE_VALUE_OPTIONS = new Set([
+  "-r",
+  "--require",
+  "--import",
+  "--loader",
+  "--experimental-loader",
+  "--env-file",
+  "--input-type",
+  "--conditions",
+  "-C",
+  "--title",
+]);
+// 스크립트 대신 코드를 실행하는 옵션 — 트레이 실행이 아니다.
+const NODE_EVAL_OPTIONS = new Set(["-e", "--eval", "-p", "--print"]);
+
+function parseLegacyTrayPsLine(line) {
+  const match = String(line).match(LEGACY_TRAY_PS_LINE_RE);
+  if (!match) return null;
+  return {
+    pid: Number.parseInt(match[2], 10),
+    uid: Number.parseInt(match[1], 10),
+    startedAt: match[3],
+    command: match[4].trim(),
+  };
+}
+
+// 실제 실행 대상(entrypoint). 경로를 인자로만 받은 프로세스는 대상이 아니다.
+function legacyTrayEntrypoint(argv) {
+  const runtime = basename(argv[0] || "");
+  if (runtime === "node") {
+    for (let i = 1; i < argv.length; i += 1) {
+      const arg = argv[i];
+      if (NODE_EVAL_OPTIONS.has(arg)) return null;
+      if (NODE_VALUE_OPTIONS.has(arg)) {
+        i += 1;
+        continue;
+      }
+      if (arg === "--") return argv[i + 1] ?? null;
+      if (arg.startsWith("-")) continue;
+      return arg;
+    }
+    return null;
+  }
+  if (runtime === "swift" || runtime === "swift-frontend") {
+    const interpret = argv.indexOf("-interpret");
+    if (interpret !== -1) return argv[interpret + 1] ?? null;
+    // swift-frontend 는 -interpret 일 때만 스크립트를 실행한다.
+    if (runtime === "swift-frontend") return null;
+    return argv.slice(1).find((arg) => !arg.startsWith("-")) ?? null;
+  }
+  return null;
+}
+
+// `.../triflux/.../hub/tray.mjs` 또는 `.../hub/mac-tray.swift` — triflux 설치 위치로 보이는 경로.
+function isLegacyTrayScriptPath(path, runtime) {
+  if (typeof path !== "string" || !path) return false;
+  const segments = path.split(/[/\\]+/u);
+  const file = segments.at(-1);
+  const expected = runtime === "node" ? "tray.mjs" : "mac-tray.swift";
+  if (file !== expected || segments.at(-2) !== "hub") return false;
+  return segments.slice(0, -2).includes("triflux");
+}
+
+function collectLegacyTrayProcesses(
+  psOutput = "",
+  { currentPid = process.pid, currentUid = process.getuid?.() } = {},
+) {
+  // 현재 사용자를 알 수 없으면 아무것도 고르지 않는다.
+  if (!Number.isInteger(currentUid)) return [];
+  return String(psOutput)
+    .split(/\r?\n/u)
+    .flatMap((line) => {
+      const proc = parseLegacyTrayPsLine(line);
+      if (!proc || !Number.isFinite(proc.pid)) return [];
+      if (proc.pid === Number(currentPid) || proc.uid !== currentUid) return [];
+      const argv = proc.command.split(/\s+/u);
+      const runtime = basename(argv[0] || "");
+      const entry = legacyTrayEntrypoint(argv);
+      if (!isLegacyTrayScriptPath(entry, runtime)) return [];
+      return [proc];
+    });
+}
+
+// PID 재사용 방지: 보내기 직전에 다시 조회해 uid·시작 시각·command 가 같을 때만 같은 프로세스로 본다.
+function isSameLegacyTrayProcess(proc, execFileSyncFn) {
+  try {
+    const output = execFileSyncFn(
+      "ps",
+      ["-o", LEGACY_TRAY_PS_FIELDS, "-p", String(proc.pid)],
+      LEGACY_TRAY_PS_OPTIONS,
+    );
+    const current = String(output)
+      .split(/\r?\n/u)
+      .map(parseLegacyTrayPsLine)
+      .find((entry) => entry?.pid === proc.pid);
+    return (
+      !!current &&
+      current.uid === proc.uid &&
+      current.startedAt === proc.startedAt &&
+      current.command === proc.command
+    );
+  } catch {
+    return false;
+  }
+}
+
+function reapLegacyTrayProcesses({
+  platform = process.platform,
+  currentPid = process.pid,
+  currentUid = process.getuid?.(),
+  execFileSyncFn = execFileSync,
+  killFn = process.kill,
+} = {}) {
+  // Windows 트레이는 수동 `tfx tray` 로만 떴고 ps 가 없으므로 건너뛴다.
+  if (platform === "win32") return [];
+  let output = "";
+  try {
+    output = execFileSyncFn(
+      "ps",
+      ["-axo", LEGACY_TRAY_PS_FIELDS],
+      LEGACY_TRAY_PS_OPTIONS,
+    );
+  } catch {
+    return [];
+  }
+  const reaped = [];
+  for (const proc of collectLegacyTrayProcesses(output, {
+    currentPid,
+    currentUid,
+  })) {
+    if (!isSameLegacyTrayProcess(proc, execFileSyncFn)) continue;
+    try {
+      killFn(proc.pid, "SIGTERM");
+      reaped.push(proc);
+    } catch {}
+  }
+  return reaped;
+}
+
 function ensureCriticalSetup() {
   const settings = loadSettings();
   let settingsChanged = false;
@@ -1923,6 +2138,7 @@ export {
   CLAUDE_DIR,
   classifySchtasksStderr,
   cleanupStaleSkills,
+  collectLegacyTrayProcesses,
   DEPRECATED_SKILLS,
   detectDevMode,
   ensureAgyHooks,
@@ -1941,6 +2157,7 @@ export {
   hasProfileSection,
   isLocalDevSkillDir,
   isSetupUserStateFile,
+  isSkillSupportedOnPlatform,
   LEGACY_CODEX_MODELS,
   LEGACY_CODEX_PROFILE_NAMES,
   LOCAL_DEV_SKILL_MARKER,
@@ -1949,6 +2166,7 @@ export {
   REQUIRED_CODEX_PROFILES,
   REQUIRED_TOP_LEVEL_SETTINGS,
   readMarker,
+  reapLegacyTrayProcesses,
   removeProfileSection,
   replaceProfileSection,
   SCHTASKS_TR_MAX_LENGTH,
@@ -2258,7 +2476,17 @@ export async function runDeferred(stdinData) {
       const skillMd = join(skillDir, "SKILL.md");
       if (!existsSync(skillMd)) continue;
 
-      synced += syncSkillDir(skillDir, join(skillsDst, name));
+      const installedDir = join(skillsDst, name);
+      // frontmatter `platform:` 비대상(예: macOS 의 tfx-wt)은 설치하지 않고,
+      // 이전에 깔린 사본은 지운다. 로컬 개발 스킬은 건드리지 않는다.
+      if (!isSkillSupportedOnPlatform(skillDir)) {
+        if (existsSync(installedDir) && !isLocalDevSkillDir(installedDir)) {
+          rmSync(installedDir, { recursive: true, force: true });
+        }
+        continue;
+      }
+
+      synced += syncSkillDir(skillDir, installedDir);
     }
   }
 
@@ -2600,6 +2828,14 @@ export async function runDeferred(stdinData) {
       } catch {} // 죽은 프로세스면 PID 파일 삭제
       synced++;
     }
+  }
+
+  const reapedTrays = reapLegacyTrayProcesses();
+  if (reapedTrays.length > 0) {
+    io.log(
+      `  \x1b[32m✓\x1b[0m 제거된 CTO 트레이 프로세스 ${reapedTrays.length}개 종료`,
+    );
+    synced++;
   }
 
   // ── psmux 자동 설치 (Windows tmux-compatible mux) ──

@@ -453,6 +453,32 @@ describe("tfx-route.sh — TFX_DISABLE_CODEX / TFX_DISABLE_ANTIGRAVITY", () => {
     }
   });
 
+  // 32KB 절삭이 `cat | head -c` 였을 때 큰 파일에서 cat 이 SIGPIPE 를 받고
+  // pipefail + set -e 로 스크립트 전체가 메시지 없이 141 로 끝났다.
+  it("32KB 보다 큰 context_file 도 SIGPIPE 없이 실행된다", () => {
+    const home = createRouteHome();
+    const contextFile = join(home, "big-context.md");
+    writeFileSync(contextFile, "x".repeat(200 * 1024));
+
+    try {
+      const result = runBash(
+        `TFX_CLI_MODE=codex bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5 "${contextFile}"`,
+        fixtureEnv({
+          HOME: home,
+          USERPROFILE: home,
+          XDG_CONFIG_HOME: join(home, ".config"),
+          FAKE_CODEX_MODE: "exec",
+        }),
+      );
+
+      assert.notEqual(result.status, 141, out(result));
+      assert.equal(result.status, 0, out(result));
+      assert.match(out(result), /type=codex/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("프로파일을 source하지 않아 셸 표현식이 실행되지 않는다", () => {
     const home = createRouteHome();
     const sentinel = join(home, "must-not-exist");

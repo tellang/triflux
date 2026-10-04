@@ -1,6 +1,6 @@
 {
   "name": "@triflux/core",
-  "version": "10.48.1",
+  "version": "10.49.0",
   "description": "triflux core — CLI routing, pipeline, adapters. Zero native dependencies.",
   "type": "module",
   "main": "hub/index.mjs",
@@ -11,7 +11,7 @@
     "./scripts/*": "./scripts/*"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

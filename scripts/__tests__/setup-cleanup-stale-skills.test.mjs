@@ -17,9 +17,11 @@ import path from "node:path";
 import { after, describe, it } from "node:test";
 
 const SETUP_MJS_URL = new URL("../setup.mjs", import.meta.url).href;
-const { cleanupStaleSkills, LOCAL_DEV_SKILL_MARKER } = await import(
-  SETUP_MJS_URL
-);
+const {
+  cleanupStaleSkills,
+  isSkillSupportedOnPlatform,
+  LOCAL_DEV_SKILL_MARKER,
+} = await import(SETUP_MJS_URL);
 
 describe("#144 cleanupStaleSkills — 재귀 삭제", () => {
   const cleanupDirs = [];
@@ -119,5 +121,110 @@ describe("#144 cleanupStaleSkills — 재귀 삭제", () => {
       true,
       "로컬 개발 스킬은 setup cleanup 에서 보존",
     );
+  });
+});
+
+describe("스킬 표면 축소 — 제거 스킬과 플랫폼 필터", () => {
+  const cleanupDirs = [];
+  after(() => {
+    for (const d of cleanupDirs) rmSync(d, { recursive: true, force: true });
+  });
+
+  function writeSkill(dir, name, extraFrontmatter = "") {
+    mkdirSync(path.join(dir, name), { recursive: true });
+    writeFileSync(
+      path.join(dir, name, "SKILL.md"),
+      `---\nname: ${name}\ndescription: x\n${extraFrontmatter}---\nbody\n`,
+    );
+  }
+
+  function setupFixture() {
+    const root = mkdtempSync(path.join(tmpdir(), "tfx-cleanup-platform-"));
+    cleanupDirs.push(root);
+    const installedDir = path.join(root, "installed");
+    const pkgDir = path.join(root, "pkg");
+    writeSkill(pkgDir, "tfx-auto");
+    writeSkill(pkgDir, "tfx-wt", "platform:\n  - win32\n");
+    for (const name of ["tfx-auto", "tfx-wt"]) {
+      mkdirSync(path.join(installedDir, name), { recursive: true });
+      writeFileSync(path.join(installedDir, name, "SKILL.md"), "# installed");
+    }
+    return { installedDir, pkgDir };
+  }
+
+  const REMOVED_SKILLS = [
+    "tfx-ralph",
+    "tfx-forge",
+    "tfx-find",
+    "tfx-index",
+    "tfx-goal-clarify",
+    "tfx-hooks",
+    "tfx-hub",
+    "tfx-analysis",
+    "tfx-prune",
+    "tfx-qa",
+  ];
+
+  it("패키지에서 지운 스킬의 설치본은 보호되지 않고 제거된다", () => {
+    const { installedDir, pkgDir } = setupFixture();
+    for (const name of REMOVED_SKILLS) {
+      mkdirSync(path.join(installedDir, name), { recursive: true });
+      writeFileSync(path.join(installedDir, name, "SKILL.md"), "# removed");
+    }
+
+    const result = cleanupStaleSkills(installedDir, pkgDir, {
+      platform: "win32",
+    });
+
+    assert.deepEqual([...result.removed].sort(), [...REMOVED_SKILLS].sort());
+    for (const name of REMOVED_SKILLS) {
+      assert.equal(existsSync(path.join(installedDir, name)), false, name);
+    }
+  });
+
+  it("platform 비대상 스킬(macOS 의 tfx-wt) 설치본은 제거된다", () => {
+    const { installedDir, pkgDir } = setupFixture();
+    const result = cleanupStaleSkills(installedDir, pkgDir, {
+      platform: "darwin",
+    });
+    assert.deepEqual(result.removed, ["tfx-wt"]);
+    assert.equal(existsSync(path.join(installedDir, "tfx-wt")), false);
+    assert.equal(existsSync(path.join(installedDir, "tfx-auto")), true);
+  });
+
+  it("platform 대상(win32)에서는 tfx-wt 설치본을 유지한다", () => {
+    const { installedDir, pkgDir } = setupFixture();
+    const result = cleanupStaleSkills(installedDir, pkgDir, {
+      platform: "win32",
+    });
+    assert.equal(result.count, 0);
+    assert.equal(existsSync(path.join(installedDir, "tfx-wt")), true);
+  });
+
+  it("platform 은 블록 목록·인라인 목록·무지정을 모두 읽는다", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "tfx-skill-platform-"));
+    cleanupDirs.push(root);
+    writeSkill(root, "block", "platform:\n  - win32\n  - linux\n");
+    writeSkill(root, "inline", "platform: [win32]\n");
+    writeSkill(root, "none");
+    const supported = (name, platform) =>
+      isSkillSupportedOnPlatform(path.join(root, name), platform);
+
+    assert.equal(supported("block", "linux"), true);
+    assert.equal(supported("block", "darwin"), false);
+    assert.equal(supported("inline", "win32"), true);
+    assert.equal(supported("inline", "darwin"), false);
+    assert.equal(supported("none", "darwin"), true);
+    assert.equal(supported("missing", "darwin"), true);
+  });
+
+  it("패키지 tfx-wt 는 win32 에만 설치된다", () => {
+    const repoSkills = path.join(import.meta.dirname, "..", "..", "skills");
+    const supported = (name, platform) =>
+      isSkillSupportedOnPlatform(path.join(repoSkills, name), platform);
+    assert.equal(supported("tfx-wt", "win32"), true);
+    assert.equal(supported("tfx-wt", "darwin"), false);
+    assert.equal(supported("tfx-wt", "linux"), false);
+    assert.equal(supported("tfx-auto", "darwin"), true);
   });
 });
