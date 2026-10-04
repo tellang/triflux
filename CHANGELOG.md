@@ -7,6 +7,7 @@ All notable changes to triflux will be documented in this file.
 ### Removed
 - skills: 스킬 표면을 12개 + Windows 1개로 줄인다. `tfx-ralph`(= `tfx-auto --retry ralph`), `tfx-forge`, `tfx-find`(Claude 기본 Explore 에이전트와 중복), `tfx-index` 는 기능 이전 없이 지운다. `tfx-goal-clarify`, `tfx-hooks`, `tfx-hub`, `tfx-analysis`, `tfx-prune`, `tfx-qa` 는 쓸모 있는 내용을 남는 스킬로 옮긴 뒤 지운다. `tfx-hub` MCP 서버, `tfx hub` CLI, hub 코드는 그대로다. 지운 스킬의 설치본은 `tfx setup` 의 stale 정리가 지운다 (ADR-0020)
 - hooks: 대상 스킬이 없어진 `tfx-find` 키워드 규칙을 지운다
+- hub: CTO 트레이를 지운다. `tfx tray` 명령, 허브의 트레이 자동 기동(`TFX_HUB_AUTO_TRAY`, 설정해 두어도 무시), `/tray.html`·`/api/tray-state`·`/api/focus-session` 라우트, `systray2` 의존성이 함께 빠진다. 업그레이드 setup 이 이전 버전이 띄운 트레이 프로세스를 한 번 종료한다. `tfx cto` 명령과 lake, hub roles, HUD 는 그대로다 (ADR-0022)
 
 ### Changed
 - skills: `tfx-interview --format goal` 이 자연어 목표를 `/goal` 블록(End state / Check / Constraints / Stop bound)으로 바꾼다. `tfx-setup` 에 훅 우선순위 관리 절, `tfx-doctor` 에 tfx-hub 시작·중지·상태 절을 둔다. `tfx-auto` 의 panel 설명에 3관점 분석 roster 를, consensus 설명에 3자 합의 cleanup 기준을 더한다. `tfx-review` 가 코드 판정, gstack `/qa` 가 브라우저·흐름 게이트를 맡는다
