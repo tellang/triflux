@@ -1921,32 +1921,128 @@ function applyHooks(settings) {
 // 이전 버전은 `node hub/tray.mjs` 와 그 자식 `swift hub/mac-tray.swift` 를 detached 로
 // 띄웠다. 파일을 지워도 이미 뜬 프로세스는 남으므로 업그레이드 setup 에서 한 번 거둔다.
 // 트레이는 시작 프로그램·작업 스케줄러·LaunchAgent 에 등록된 적이 없어 지울 항목은 없다.
-const LEGACY_TRAY_RUNTIMES = new Set(["node", "swift", "swift-frontend"]);
-const LEGACY_TRAY_SCRIPT_RE =
-  /(?:^|\s)\S*[/\\]hub[/\\](?:tray\.mjs|mac-tray\.swift)(?:\s|$)/u;
+const LEGACY_TRAY_PS_FIELDS = "uid=,pid=,lstart=,command=";
+const LEGACY_TRAY_PS_OPTIONS = {
+  encoding: "utf8",
+  timeout: 2000,
+  maxBuffer: 4 * 1024 * 1024,
+  // lstart 표기를 로캘과 무관하게 고정한다(재조회 비교용).
+  env: { ...process.env, LC_ALL: "C" },
+};
+// `uid pid <lstart: 요일 월 일 시:분:초 연도> command`
+const LEGACY_TRAY_PS_LINE_RE =
+  /^\s*(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d+:\d+:\d+\s+\d+)\s+(.+)$/u;
+// node 에서 다음 인자를 값으로 받는 옵션 — 그 값은 실행 대상이 아니다.
+const NODE_VALUE_OPTIONS = new Set([
+  "-r",
+  "--require",
+  "--import",
+  "--loader",
+  "--experimental-loader",
+  "--env-file",
+  "--input-type",
+  "--conditions",
+  "-C",
+  "--title",
+]);
+// 스크립트 대신 코드를 실행하는 옵션 — 트레이 실행이 아니다.
+const NODE_EVAL_OPTIONS = new Set(["-e", "--eval", "-p", "--print"]);
+
+function parseLegacyTrayPsLine(line) {
+  const match = String(line).match(LEGACY_TRAY_PS_LINE_RE);
+  if (!match) return null;
+  return {
+    pid: Number.parseInt(match[2], 10),
+    uid: Number.parseInt(match[1], 10),
+    startedAt: match[3],
+    command: match[4].trim(),
+  };
+}
+
+// 실제 실행 대상(entrypoint). 경로를 인자로만 받은 프로세스는 대상이 아니다.
+function legacyTrayEntrypoint(argv) {
+  const runtime = basename(argv[0] || "");
+  if (runtime === "node") {
+    for (let i = 1; i < argv.length; i += 1) {
+      const arg = argv[i];
+      if (NODE_EVAL_OPTIONS.has(arg)) return null;
+      if (NODE_VALUE_OPTIONS.has(arg)) {
+        i += 1;
+        continue;
+      }
+      if (arg === "--") return argv[i + 1] ?? null;
+      if (arg.startsWith("-")) continue;
+      return arg;
+    }
+    return null;
+  }
+  if (runtime === "swift" || runtime === "swift-frontend") {
+    const interpret = argv.indexOf("-interpret");
+    if (interpret !== -1) return argv[interpret + 1] ?? null;
+    // swift-frontend 는 -interpret 일 때만 스크립트를 실행한다.
+    if (runtime === "swift-frontend") return null;
+    return argv.slice(1).find((arg) => !arg.startsWith("-")) ?? null;
+  }
+  return null;
+}
+
+// `.../triflux/.../hub/tray.mjs` 또는 `.../hub/mac-tray.swift` — triflux 설치 위치로 보이는 경로.
+function isLegacyTrayScriptPath(path, runtime) {
+  if (typeof path !== "string" || !path) return false;
+  const segments = path.split(/[/\\]+/u);
+  const file = segments.at(-1);
+  const expected = runtime === "node" ? "tray.mjs" : "mac-tray.swift";
+  if (file !== expected || segments.at(-2) !== "hub") return false;
+  return segments.slice(0, -2).includes("triflux");
+}
 
 function collectLegacyTrayProcesses(
   psOutput = "",
-  { currentPid = process.pid } = {},
+  { currentPid = process.pid, currentUid = process.getuid?.() } = {},
 ) {
+  // 현재 사용자를 알 수 없으면 아무것도 고르지 않는다.
+  if (!Number.isInteger(currentUid)) return [];
   return String(psOutput)
     .split(/\r?\n/u)
     .flatMap((line) => {
-      const match = line.match(/^\s*(\d+)\s+(.+)$/u);
-      if (!match) return [];
-      const pid = Number.parseInt(match[1], 10);
-      const command = match[2].trim();
-      if (!Number.isFinite(pid) || pid === Number(currentPid)) return [];
-      const runtime = basename(command.split(/\s+/u)[0] || "");
-      if (!LEGACY_TRAY_RUNTIMES.has(runtime)) return [];
-      if (!LEGACY_TRAY_SCRIPT_RE.test(command)) return [];
-      return [{ pid, command }];
+      const proc = parseLegacyTrayPsLine(line);
+      if (!proc || !Number.isFinite(proc.pid)) return [];
+      if (proc.pid === Number(currentPid) || proc.uid !== currentUid) return [];
+      const argv = proc.command.split(/\s+/u);
+      const runtime = basename(argv[0] || "");
+      const entry = legacyTrayEntrypoint(argv);
+      if (!isLegacyTrayScriptPath(entry, runtime)) return [];
+      return [proc];
     });
+}
+
+// PID 재사용 방지: 보내기 직전에 다시 조회해 uid·시작 시각·command 가 같을 때만 같은 프로세스로 본다.
+function isSameLegacyTrayProcess(proc, execFileSyncFn) {
+  try {
+    const output = execFileSyncFn(
+      "ps",
+      ["-o", LEGACY_TRAY_PS_FIELDS, "-p", String(proc.pid)],
+      LEGACY_TRAY_PS_OPTIONS,
+    );
+    const current = String(output)
+      .split(/\r?\n/u)
+      .map(parseLegacyTrayPsLine)
+      .find((entry) => entry?.pid === proc.pid);
+    return (
+      !!current &&
+      current.uid === proc.uid &&
+      current.startedAt === proc.startedAt &&
+      current.command === proc.command
+    );
+  } catch {
+    return false;
+  }
 }
 
 function reapLegacyTrayProcesses({
   platform = process.platform,
   currentPid = process.pid,
+  currentUid = process.getuid?.(),
   execFileSyncFn = execFileSync,
   killFn = process.kill,
 } = {}) {
@@ -1954,16 +2050,20 @@ function reapLegacyTrayProcesses({
   if (platform === "win32") return [];
   let output = "";
   try {
-    output = execFileSyncFn("ps", ["-axo", "pid=,command="], {
-      encoding: "utf8",
-      timeout: 2000,
-      maxBuffer: 4 * 1024 * 1024,
-    });
+    output = execFileSyncFn(
+      "ps",
+      ["-axo", LEGACY_TRAY_PS_FIELDS],
+      LEGACY_TRAY_PS_OPTIONS,
+    );
   } catch {
     return [];
   }
   const reaped = [];
-  for (const proc of collectLegacyTrayProcesses(output, { currentPid })) {
+  for (const proc of collectLegacyTrayProcesses(output, {
+    currentPid,
+    currentUid,
+  })) {
+    if (!isSameLegacyTrayProcess(proc, execFileSyncFn)) continue;
     try {
       killFn(proc.pid, "SIGTERM");
       reaped.push(proc);
