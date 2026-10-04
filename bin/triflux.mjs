@@ -616,17 +616,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       },
     ],
   },
-  tray: {
-    usage: "tfx tray [--attach]",
-    description: "트레이/HUD 상태 표시 프로세스 실행",
-    options: [
-      {
-        name: "--attach",
-        type: "boolean",
-        description: "디버깅용 foreground 실행 (기본은 detach)",
-      },
-    ],
-  },
   "codex-team": {
     usage:
       "tfx codex-team [status|debug|send|attach|stop|<task>] [--layout 1xN|Nx1] [--json]",
@@ -6419,8 +6408,6 @@ ${updateNotice}
     ${WHITE_BRIGHT}tfx schema${RESET}     ${GRAY}CLI/Hub schema JSON 출력${RESET}
     ${WHITE_BRIGHT}tfx hooks${RESET}      ${GRAY}훅 오케스트레이터 scan/diff/apply/status${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
-    ${WHITE_BRIGHT}tfx tray${RESET}       ${GRAY}Windows 시스템 트레이 실행${RESET}
-    ${DIM}  --attach${RESET}      ${GRAY}foreground 트레이 프로세스로 실행${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
     ${WHITE_BRIGHT}tfx swarm${RESET}       ${GRAY}PRD 기반 worktree 격리 병렬 실행 (run/plan/list)${RESET}
     ${WHITE_BRIGHT}tfx synapse${RESET}     ${GRAY}스웜 세션 registry 조회 / lease 관리${RESET}
@@ -7536,31 +7523,6 @@ async function main() {
       const mon = createMonitor({ targetPane: process.env.TMUX_PANE });
       await mon.start();
       break;
-    }
-    case "tray": {
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("tray");
-        return;
-      }
-      const trayUrl = new URL("../hub/tray.mjs", import.meta.url);
-      const trayPath = fileURLToPath(trayUrl);
-      if (cmdArgs.includes("--attach")) {
-        // --attach: 포그라운드 모드 (디버깅용)
-        const { startTray } = await import(trayUrl.href);
-        await startTray();
-        return;
-      }
-      // 기본: detach 모드 (프리징 방지)
-      const child = spawn(process.execPath, [trayPath], {
-        detached: true,
-        stdio: "ignore",
-        windowsHide: true,
-      });
-      child.unref();
-      console.log(
-        `\n  ${GREEN_BRIGHT}✓${RESET} tray 시작됨 (PID ${child.pid})\n`,
-      );
-      return;
     }
     case "cto": {
       if (cmdArgs.some(isHelpArg)) {

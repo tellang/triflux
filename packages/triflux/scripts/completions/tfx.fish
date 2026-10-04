@@ -1,7 +1,7 @@
 # Installation: ~/.config/fish/completions/에 복사
 # e.g., cp /path/to/tfx.fish ~/.config/fish/completions/tfx.fish
 
-set -l commands setup doctor mcp update list ls handoff schema hooks hub tray multi swarm synapse review why codex-team notion-read nr monitor version auto help
+set -l commands setup doctor mcp update list ls handoff schema hooks hub multi swarm synapse review why codex-team notion-read nr monitor version auto help
 set -l hub_cmds start stop status ensure help
 set -l multi_cmds status stop kill attach list help
 set -l swarm_cmds run preflight plan list status help
@@ -18,7 +18,6 @@ complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "handoff" -d "
 complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "schema" -d "Print CLI and Hub schema"
 complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "hooks" -d "Manage hook orchestrator"
 complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "hub" -d "Hub process management"
-complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "tray" -d "Start tray process"
 complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "multi" -d "Multi-CLI team mode"
 complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "swarm" -d "PRD worktree swarm"
 complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "synapse" -d "Show swarm registry"
@@ -57,5 +56,5 @@ complete -c tfx -n "__fish_seen_subcommand_from review" -l timeout -d "Timeout s
 complete -c tfx -n "__fish_seen_subcommand_from review" -l shard -d "Shard mode"
 complete -c tfx -n "__fish_seen_subcommand_from review" -l json -d "JSON output"
 
-complete -c tfx -n "__fish_seen_subcommand_from update tray list ls handoff schema synapse why codex-team notion-read nr monitor version" -l help -d "Show help"
+complete -c tfx -n "__fish_seen_subcommand_from update list ls handoff schema synapse why codex-team notion-read nr monitor version" -l help -d "Show help"
 complete -c tfx -n "__fish_seen_subcommand_from list ls handoff synapse review codex-team notion-read nr version" -l json -d "JSON output"

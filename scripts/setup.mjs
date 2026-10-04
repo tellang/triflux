@@ -1917,6 +1917,61 @@ function applyHooks(settings) {
   return changed;
 }
 
+// ── 제거된 CTO 트레이 잔여 프로세스 (ADR-0022) ──
+// 이전 버전은 `node hub/tray.mjs` 와 그 자식 `swift hub/mac-tray.swift` 를 detached 로
+// 띄웠다. 파일을 지워도 이미 뜬 프로세스는 남으므로 업그레이드 setup 에서 한 번 거둔다.
+// 트레이는 시작 프로그램·작업 스케줄러·LaunchAgent 에 등록된 적이 없어 지울 항목은 없다.
+const LEGACY_TRAY_RUNTIMES = new Set(["node", "swift", "swift-frontend"]);
+const LEGACY_TRAY_SCRIPT_RE =
+  /(?:^|\s)\S*[/\\]hub[/\\](?:tray\.mjs|mac-tray\.swift)(?:\s|$)/u;
+
+function collectLegacyTrayProcesses(
+  psOutput = "",
+  { currentPid = process.pid } = {},
+) {
+  return String(psOutput)
+    .split(/\r?\n/u)
+    .flatMap((line) => {
+      const match = line.match(/^\s*(\d+)\s+(.+)$/u);
+      if (!match) return [];
+      const pid = Number.parseInt(match[1], 10);
+      const command = match[2].trim();
+      if (!Number.isFinite(pid) || pid === Number(currentPid)) return [];
+      const runtime = basename(command.split(/\s+/u)[0] || "");
+      if (!LEGACY_TRAY_RUNTIMES.has(runtime)) return [];
+      if (!LEGACY_TRAY_SCRIPT_RE.test(command)) return [];
+      return [{ pid, command }];
+    });
+}
+
+function reapLegacyTrayProcesses({
+  platform = process.platform,
+  currentPid = process.pid,
+  execFileSyncFn = execFileSync,
+  killFn = process.kill,
+} = {}) {
+  // Windows 트레이는 수동 `tfx tray` 로만 떴고 ps 가 없으므로 건너뛴다.
+  if (platform === "win32") return [];
+  let output = "";
+  try {
+    output = execFileSyncFn("ps", ["-axo", "pid=,command="], {
+      encoding: "utf8",
+      timeout: 2000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+  } catch {
+    return [];
+  }
+  const reaped = [];
+  for (const proc of collectLegacyTrayProcesses(output, { currentPid })) {
+    try {
+      killFn(proc.pid, "SIGTERM");
+      reaped.push(proc);
+    } catch {}
+  }
+  return reaped;
+}
+
 function ensureCriticalSetup() {
   const settings = loadSettings();
   let settingsChanged = false;
@@ -1983,6 +2038,7 @@ export {
   CLAUDE_DIR,
   classifySchtasksStderr,
   cleanupStaleSkills,
+  collectLegacyTrayProcesses,
   DEPRECATED_SKILLS,
   detectDevMode,
   ensureAgyHooks,
@@ -2010,6 +2066,7 @@ export {
   REQUIRED_CODEX_PROFILES,
   REQUIRED_TOP_LEVEL_SETTINGS,
   readMarker,
+  reapLegacyTrayProcesses,
   removeProfileSection,
   replaceProfileSection,
   SCHTASKS_TR_MAX_LENGTH,
@@ -2671,6 +2728,14 @@ export async function runDeferred(stdinData) {
       } catch {} // 죽은 프로세스면 PID 파일 삭제
       synced++;
     }
+  }
+
+  const reapedTrays = reapLegacyTrayProcesses();
+  if (reapedTrays.length > 0) {
+    io.log(
+      `  \x1b[32m✓\x1b[0m 제거된 CTO 트레이 프로세스 ${reapedTrays.length}개 종료`,
+    );
+    synced++;
   }
 
   // ── psmux 자동 설치 (Windows tmux-compatible mux) ──

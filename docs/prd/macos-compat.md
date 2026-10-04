@@ -84,6 +84,9 @@ triflux의 macOS 비호환 부분을 수정하여 macOS를 1등 시민으로 지
   process.platform === "darwin"이면 macOS 우선 표시, "win32"면 Windows 우선.
 
 ## Shard: tray-macos-guard
+
+> 폐기(2026-10-04): 대상 `tray.mjs`는 75ce2244 에서 제거됐다. 근거: ADR-0022.
+
 - agent: codex
 - files: packages/remote/hub/tray.mjs
 - prompt: |

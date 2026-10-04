@@ -102,7 +102,6 @@ describe("tfx --help 출력", () => {
     "multi",
     "notion-read",
     "review",
-    "tray",
     "why",
   ]) {
     it(`stale: tfx ${command} --help 는 side-effect 없이 help 출력`, () => {

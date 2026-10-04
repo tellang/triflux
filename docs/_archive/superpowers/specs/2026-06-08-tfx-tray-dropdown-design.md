@@ -1,3 +1,5 @@
+> 폐기(2026-10-04): 이 문서가 기술한 CTO 트레이는 75ce2244 에서 제거됐다. 근거: ADR-0022.
+
 # Triflux CTO Tray Dropdown Design
 
 ## 1. Objective

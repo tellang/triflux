@@ -14,7 +14,7 @@ lake는 live 상태의 **스냅샷 기록자**이지 실시간 뷰가 아니다.
 ## 의존 방향 (단방향)
 
 ```
-hub/*  →  cto/*          (허용 — auto-collect, tray, 이벤트 기록)
+hub/*  →  cto/*          (허용 — auto-collect, 이벤트 기록)
 cto/*  →  hub/*          (금지)
 cto/*  →  공용 하위 계층   (허용 — 아래 allowlist만)
 ```
@@ -53,13 +53,13 @@ UI/문서에서 "stale"을 표기할 때는 어느 평면인지 라벨을 붙인
 
 ## 소비 표면 계약
 
-- tray payload: `cto`(lake, 현재 tray read는 단일 repo) ↔ `roles`(hub 전역)를 형제
-  키로 분리. 섹션 라벨에 스코프 명시("CTO Hygiene (this repo)" / "CTO Succession
-  (hub-wide)"). lake 합성물에 hub 데이터를 주입한 채 `cto-lake.v1` 스키마를 붙이지
-  않는다.
-- hub의 lake **write**(auto-collect)는 세션 cwd별 멀티레포, tray의 lake **read**는
-  현재 단일 repo — 이 비대칭을 없애거나 라벨로 명시하기 전까지 "hub가 모든 프로젝트
-  lake를 보여준다"고 서술하지 않는다.
+- lake 합성물에 hub 데이터(roles 등)를 주입한 채 `cto-lake.v1` 스키마를 붙이지
+  않는다. lake와 hub live 상태를 함께 내보내는 표면은 둘을 형제 키로 분리하고 섹션
+  라벨에 스코프를 명시한다("this repo" / "hub-wide").
+- hub의 lake **write**(auto-collect)는 세션 cwd별 멀티레포, `tfx cto status`의 lake
+  **read**는 현재 단일 repo — "hub가 모든 프로젝트 lake를 보여준다"고 서술하지 않는다.
+- CTO 트레이(옛 tray payload 소비자)는 제거됐다. 근거(why):
+  [ADR-0022](../../docs/adr/0022-remove-cto-tray.md).
 
 ## 커밋 스코프 규약
 

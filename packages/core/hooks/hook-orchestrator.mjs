@@ -469,7 +469,7 @@ async function main() {
   // UserPromptSubmit 은 턴 *시작* 에, Stop 은 매 어시스턴트 턴 *종료* 에 heartbeat
   // 한다. 둘이 함께 "대화 중이지만 매 분 새 프롬프트를 보내지는 않는" 세션을 5분
   // interactive TTL 위로 유지해, 대화 도중 stale 로 떨어져 `cto status`
-  // live_sessions / tray 에서 사라지는 것을 막는다. 진짜 완전 idle(턴 자체가 없음)
+  // live_sessions 에서 사라지는 것을 막는다. 진짜 완전 idle(턴 자체가 없음)
   // 은 여전히 TTL 후 stale 로 가며 — 그게 의도된 dead-session 신호다. UserPromptSubmit
   // 과 동일하게 fire-and-forget POST 직후 짧은 상한으로 drain 한다.
   if (eventName === "Stop") {
