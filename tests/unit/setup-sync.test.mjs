@@ -240,6 +240,55 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
     }
   });
 
+  it("platform 비대상 adapter는 설치하지 않고 managed 사본만 지운다", () => {
+    cleanTmpDir();
+    ensureTmpDir();
+    const sourceDir = join(TMP_DIR, "platform-source");
+    const destinationDir = join(TMP_DIR, "platform-destination");
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(
+      join(sourceDir, "SKILL.md"),
+      "---\nname: tfx-harness\nplatform:\n  - win32\n---\nbody\n",
+    );
+
+    const fresh = syncCodexHarnessAdapter({
+      sourceDir,
+      destinationDir,
+      platform: "darwin",
+    });
+    assert.equal(fresh.ok, true);
+    assert.equal(fresh.action, "unsupported");
+    assert.equal(existsSync(destinationDir), false);
+
+    mkdirSync(destinationDir, { recursive: true });
+    writeFileSync(join(destinationDir, "SKILL.md"), "old managed\n");
+    writeFileSync(
+      join(destinationDir, ".triflux-managed-skill"),
+      "managed by triflux\n",
+    );
+    const removed = syncCodexHarnessAdapter({
+      sourceDir,
+      destinationDir,
+      platform: "darwin",
+    });
+    assert.equal(removed.action, "removed");
+    assert.equal(existsSync(destinationDir), false);
+
+    mkdirSync(destinationDir, { recursive: true });
+    writeFileSync(join(destinationDir, "SKILL.md"), "user skill\n");
+    const userOwned = syncCodexHarnessAdapter({
+      sourceDir,
+      destinationDir,
+      platform: "darwin",
+    });
+    assert.equal(userOwned.action, "unsupported");
+    assert.equal(
+      readFileSync(join(destinationDir, "SKILL.md"), "utf8"),
+      "user skill\n",
+    );
+    cleanTmpDir();
+  });
+
   it("tracked adapter source가 없으면 fail-closed한다", () => {
     const result = syncCodexHarnessAdapter({
       sourceDir: join(TMP_DIR, "missing-codex-adapter"),

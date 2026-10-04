@@ -88,6 +88,7 @@ import {
   getWindowsHubAutostartStatus,
   isLocalDevSkillDir,
   isSetupUserStateFile,
+  isSkillSupportedOnPlatform,
   LEGACY_CODEX_MODELS,
   listInlineProfileNames,
   REQUIRED_CODEX_PROFILES,
@@ -1958,6 +1959,7 @@ function listSkillSyncActions() {
     const src = join(skillsSrc, name, "SKILL.md");
     const dst = join(CLAUDE_DIR, "skills", name, "SKILL.md");
     if (!existsSync(src)) continue;
+    if (!isSkillSupportedOnPlatform(join(skillsSrc, name))) continue;
     actions.push(describeSyncAction(src, dst, `skill:${name}`));
   }
   for (const { alias, source } of SKILL_ALIASES) {
@@ -2149,6 +2151,7 @@ function cmdSetup(options = {}) {
       const src = join(skillsSrc, name, "SKILL.md");
       const dst = join(skillsDst, name, "SKILL.md");
       if (!existsSync(src)) continue;
+      if (!isSkillSupportedOnPlatform(join(skillsSrc, name))) continue;
       skillTotal++;
 
       const dstDir = dirname(dst);
@@ -3142,6 +3145,7 @@ async function cmdDoctor(options = {}) {
           const src = join(fSkillsSrc, name, "SKILL.md");
           const dst = join(fSkillsDst, name, "SKILL.md");
           if (!existsSync(src)) continue;
+          if (!isSkillSupportedOnPlatform(join(fSkillsSrc, name))) continue;
           st++;
           const dstDir = dirname(dst);
           if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
@@ -3656,6 +3660,7 @@ async function cmdDoctor(options = {}) {
       const missing = [];
       for (const name of readdirSync(skillsSrc)) {
         if (!existsSync(join(skillsSrc, name, "SKILL.md"))) continue;
+        if (!isSkillSupportedOnPlatform(join(skillsSrc, name))) continue;
         total++;
         if (existsSync(join(skillsDst, name, "SKILL.md"))) {
           installed++;
@@ -3701,7 +3706,10 @@ async function cmdDoctor(options = {}) {
       const pkgSkillsDir = join(PKG_ROOT, "skills");
       const pkgSkills = new Set();
       if (existsSync(pkgSkillsDir)) {
-        for (const n of readdirSync(pkgSkillsDir)) pkgSkills.add(n);
+        for (const n of readdirSync(pkgSkillsDir)) {
+          if (isSkillSupportedOnPlatform(join(pkgSkillsDir, n)))
+            pkgSkills.add(n);
+        }
       }
       for (const { alias } of SKILL_ALIASES) pkgSkills.add(alias);
 

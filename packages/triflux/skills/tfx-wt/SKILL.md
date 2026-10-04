@@ -6,6 +6,8 @@ description: >
   safety-guard가 wt.exe 직접 호출을 차단하므로 이 스킬이 유일한 경로다.
   Use when: 새 탭, tab open, 패인, pane split, 탭 목록, 탭 닫아, wt 탭, wt 패인
 argument-hint: "<create-tab|split-pane|layout|list|close|close-stale|rename> [json-opts]"
+platform:
+  - win32
 ---
 
 # tfx-wt — Windows Terminal 자연어 조작
@@ -19,6 +21,8 @@ argument-hint: "<create-tab|split-pane|layout|list|close|close-stale|rename> [js
 ## OS 정책
 
 이 스킬은 **Windows 전용**. macOS/Linux 의 탭/패인 자연어 라우팅은 본 스킬 범위 외다.
+frontmatter `platform: [win32]` 때문에 `tfx setup` 은 macOS/Linux 에 이 스킬을 설치하지 않고,
+이미 깔린 사본은 지운다.
 
 | OS | 동작 | 라우팅 |
 |----|------|--------|

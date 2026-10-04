@@ -37,6 +37,7 @@ import {
   resolveMachineProfilePath,
   resolveTrifluxHome,
 } from "./lib/machine-profile.mjs";
+import { parseFrontmatter } from "./lib/skill-template.mjs";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -861,6 +862,9 @@ const LEGACY_ALIAS_TOMBSTONES = new Set([
   "tfx-persist",
   "tfx-fullcycle",
 ]);
+// 위 tombstone 은 설치본을 cleanup 에서 *보호*한다. 기능째 지운 스킬(스킬 표면
+// 축소로 제거한 tfx-ralph, tfx-qa 등)은 여기에 넣지 않는다 — 넣으면 낡은 설치본이
+// 영구히 남는다. 패키지에 없으면 cleanupStaleSkills 가 설치본을 지운다.
 
 // ── 폐기 예정 스킬 목록 ──
 
@@ -909,18 +913,58 @@ function syncAliasedSkillDir(srcDir, dstDir, { alias, source }) {
 }
 
 /**
- * 설치된 스킬 디렉토리에서 패키지에 더 이상 없는 tfx-* 스킬을 제거한다.
+ * SKILL.md frontmatter 의 `platform:` 목록(process.platform 값)을 읽는다.
+ * keyword-rules.json 의 `platform` 필드와 같은 의미다. 없거나 비어 있으면
+ * 모든 플랫폼에 설치한다.
+ * @param {string} skillDir - SKILL.md 가 든 스킬 디렉토리
+ * @returns {string[]}
+ */
+function readSkillPlatforms(skillDir) {
+  const skillMd = join(skillDir, "SKILL.md");
+  if (!existsSync(skillMd)) return [];
+  const raw = parseFrontmatter(readFileSync(skillMd, "utf8")).data.platform;
+  // 블록 목록(`- win32`)은 배열로, 인라인(`[win32]`)은 문자열로 들어온다.
+  const values = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string"
+      ? raw.replace(/^\[|\]$/g, "").split(",")
+      : [];
+  return values
+    .map((value) =>
+      String(value)
+        .trim()
+        .replace(/^["']|["']$/g, ""),
+    )
+    .filter(Boolean);
+}
+
+function isSkillSupportedOnPlatform(skillDir, platform = process.platform) {
+  const platforms = readSkillPlatforms(skillDir);
+  return platforms.length === 0 || platforms.includes(platform);
+}
+
+/**
+ * 설치된 스킬 디렉토리에서 패키지에 더 이상 없는 tfx-* 스킬과 현재 플랫폼에
+ * 해당하지 않는 패키지 스킬(frontmatter `platform:`)을 제거한다.
  * @param {string} installedDir - ~/.claude/skills
  * @param {string} pkgDir - PLUGIN_ROOT/skills
+ * @param {{ platform?: string }} [options]
  * @returns {{ count: number, removed: string[] }}
  */
-function cleanupStaleSkills(installedDir, pkgDir) {
+function cleanupStaleSkills(
+  installedDir,
+  pkgDir,
+  { platform = process.platform } = {},
+) {
   const removed = [];
   if (!existsSync(installedDir)) return { count: 0, removed };
 
   const pkgNames = new Set();
   if (existsSync(pkgDir)) {
-    for (const n of readdirSync(pkgDir)) pkgNames.add(n);
+    for (const n of readdirSync(pkgDir)) {
+      if (isSkillSupportedOnPlatform(join(pkgDir, n), platform))
+        pkgNames.add(n);
+    }
   }
   for (const { alias } of SKILL_ALIASES) pkgNames.add(alias);
   for (const alias of LEGACY_ALIAS_TOMBSTONES) pkgNames.add(alias);
@@ -975,6 +1019,7 @@ function syncCodexHarnessAdapter({
   sourceDir = join(PLUGIN_ROOT, "adapters", "codex", "skills", "tfx-harness"),
   destinationDir = join(CODEX_DIR, "skills", "tfx-harness"),
   stagingRoot = null,
+  platform = process.platform,
 } = {}) {
   const sourceSkill = join(sourceDir, "SKILL.md");
   if (!existsSync(sourceSkill)) {
@@ -988,6 +1033,21 @@ function syncCodexHarnessAdapter({
   }
 
   const managed = existsSync(join(destinationDir, MANAGED_CODEX_SKILL_MARKER));
+  // Claude 스킬 동기화와 같은 frontmatter `platform:` 규칙. 비대상 플랫폼에는
+  // 설치하지 않고, 우리가 깔아 둔(managed) 사본만 지운다.
+  if (!isSkillSupportedOnPlatform(sourceDir, platform)) {
+    if (managed) {
+      rmSync(destinationDir, { recursive: true, force: true });
+      return { ok: true, action: "removed", sourceDir, destinationDir };
+    }
+    return {
+      ok: true,
+      action: "unsupported",
+      reason: "unsupported_platform",
+      sourceDir,
+      destinationDir,
+    };
+  }
   const current = skillTreeMatches(sourceDir, destinationDir);
   if (current && managed) {
     return { ok: true, action: "noop", sourceDir, destinationDir };
@@ -1941,6 +2001,7 @@ export {
   hasProfileSection,
   isLocalDevSkillDir,
   isSetupUserStateFile,
+  isSkillSupportedOnPlatform,
   LEGACY_CODEX_MODELS,
   LEGACY_CODEX_PROFILE_NAMES,
   LOCAL_DEV_SKILL_MARKER,
@@ -2258,7 +2319,17 @@ export async function runDeferred(stdinData) {
       const skillMd = join(skillDir, "SKILL.md");
       if (!existsSync(skillMd)) continue;
 
-      synced += syncSkillDir(skillDir, join(skillsDst, name));
+      const installedDir = join(skillsDst, name);
+      // frontmatter `platform:` 비대상(예: macOS 의 tfx-wt)은 설치하지 않고,
+      // 이전에 깔린 사본은 지운다. 로컬 개발 스킬은 건드리지 않는다.
+      if (!isSkillSupportedOnPlatform(skillDir)) {
+        if (existsSync(installedDir) && !isLocalDevSkillDir(installedDir)) {
+          rmSync(installedDir, { recursive: true, force: true });
+        }
+        continue;
+      }
+
+      synced += syncSkillDir(skillDir, installedDir);
     }
   }
 
