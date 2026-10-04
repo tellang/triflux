@@ -187,7 +187,7 @@
           "strength": "explicit"
         },
         {
-          "source": "\\btfx[\\s-]?auto\\s*(?:로|으로)\\s*(?:해|돌려|처리|진행|시켜|보내|라우팅)",
+          "source": "\\btfx[\\s-]?auto(?:[\\s-]?codex)?\\s*(?:로|으로)\\s*(?:해|돌려|처리|진행|시켜|보내|라우팅)",
           "flags": "i",
           "strength": "explicit"
         },

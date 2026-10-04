@@ -267,13 +267,20 @@ export function resolveConflicts(matches) {
       seen.add(match.id);
     }
 
+    // strength 우선순위를 충돌 해소에도 적용한다 — suggest 매칭의 supersedes 는
+    // 사용자가 직접 부른 explicit 매칭을 지우지 못한다.
+    const strengthById = new Map(
+      deduped.map((match) => [match.id, match.strength ?? DEFAULT_STRENGTH]),
+    );
     const superseded = new Set();
     const resolved = [];
 
     for (const match of deduped) {
       if (superseded.has(match.id)) continue;
       resolved.push(match);
+      const fromSuggest = (match.strength ?? DEFAULT_STRENGTH) === "suggest";
       for (const targetId of match.supersedes || []) {
+        if (fromSuggest && strengthById.get(targetId) === "explicit") continue;
         superseded.add(targetId);
       }
     }
