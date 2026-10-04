@@ -156,6 +156,32 @@ track_worker_pid() {
   echo "$1" >> "$_PID_TRACK"
 }
 
+# --async 서브셸은 job id 를 찍고 끝나는 맨 위 프로세스($$)보다 오래 산다. 추적 파일이
+# 끝난 $$ 이름이면 SessionStart 의 session-stale-cleanup 이 소유자 사망으로 보고
+# 실행 중인 워커를 SIGTERM 한다. 서브셸 안에서 자기 PID 로 다시 묶는다.
+# BASHPID 가 없는 bash 3.2 에서는 sh 의 PPID(= 이 서브셸)를 쓴다.
+_rebind_pid_track_to_self() {
+  local self_pid="${BASHPID:-}"
+  [[ -n "$self_pid" ]] || self_pid="$(exec sh -c 'echo "$PPID"')"
+  _PID_TRACK="${TFX_TMP}/tfx-route-${self_pid}-pids"
+}
+
+# async 잡 서브셸의 공통 실행부. 운영 --async(main)와 self-test 가 같은 코드를 탄다.
+# body 는 자체 EXIT trap(cleanup_workers)을 설치하므로 정상 종료는 straight-line 으로
+# 기록하고 시그널만 trap 한다. 서브셸 안에서 호출해야 한다.
+_run_async_job_body() {
+  local body="$1" _ec
+  set +e
+  trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' INT TERM HUP
+  _rebind_pid_track_to_self
+  exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
+  "$body"
+  _ec=$?
+  echo "$_ec" > "$JOB_DIR/exit_code"
+  touch "$JOB_DIR/done"
+  exit "$_ec"
+}
+
 cleanup_workers() {
   _codex_config_swap "restore" 2>/dev/null || true
   deregister_agent 2>/dev/null || true
@@ -407,6 +433,31 @@ if [[ "${1:-}" == "--async-self-test" ]]; then
         touch "$JOB_DIR/done"
         exit "$_ec"
       ) &
+      bg_pid=$!
+      echo "$bg_pid" > "$JOB_DIR/pid"
+      disown "$bg_pid"
+      echo "$JOB_ID"
+      exit 0
+      ;;
+    pid-track-owner)
+      # 운영 --async 처럼 부모가 먼저 끝난 뒤 서브셸이 워커를 추적한다.
+      # 추적 파일 소유자가 살아 있어야 session-stale-cleanup 이 워커를 고아로 보지 않는다.
+      mkdir -p "$TFX_JOBS_DIR"
+      JOB_ID="selftest-track-$$-$RANDOM"
+      JOB_DIR="$TFX_JOBS_DIR/$JOB_ID"
+      mkdir -p "$JOB_DIR"
+      selftest_track_worker() {
+        # main 과 같은 정리 경로(EXIT trap → cleanup_workers)를 쓴다.
+        trap 'cleanup_workers' EXIT
+        sleep "${TFX_SELFTEST_WORKER_SEC:-20}" &
+        local worker=$!
+        track_worker_pid "$worker"
+        echo "$worker" > "$JOB_DIR/worker_pid"
+        echo "$_PID_TRACK" > "$JOB_DIR/pid_track"
+        wait "$worker"
+        return 0
+      }
+      ( _run_async_job_body selftest_track_worker ) &
       bg_pid=$!
       echo "$bg_pid" > "$JOB_DIR/pid"
       disown "$bg_pid"
@@ -3796,15 +3847,7 @@ if [[ "$TFX_ASYNC_MODE" -eq 1 ]]; then
   # 은 main 시작 전에 done 마커를 찍는 dead code 였다. main() 이 자체 EXIT
   # trap 을 설치하므로 정상 종료는 straight-line write 로 기록하고, 시그널만 trap 한다.
   echo "starting" > "$JOB_DIR/pid"
-  ( set +e
-    trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' INT TERM HUP
-    exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
-    main
-    _ec=$?
-    echo "$_ec" > "$JOB_DIR/exit_code"
-    touch "$JOB_DIR/done"
-    exit "$_ec"
-  ) &
+  ( _run_async_job_body main ) &
   bg_pid=$!
   echo "$bg_pid" > "$JOB_DIR/pid"
   disown "$bg_pid"          # explicit PID — H1' fix (was missing arg, disowning daemon only)

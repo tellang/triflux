@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.48.1] - 2026-10-04
+
+### Fixed
+- route: `tfx-route.sh --async` 로 띄운 codex 가 4~6초 만에 산출물 없이 끝나던 문제. 워커 PID 추적 파일 이름이 job id 를 찍고 바로 끝나는 맨 위 프로세스의 PID 여서, codex 자신의 SessionStart 훅이 돌리는 `session-stale-cleanup` 이 소유자 사망으로 보고 실행 중인 워커를 SIGTERM 했다. async 서브셸이 추적 파일을 자기 PID 로 다시 묶는다. 같은 시각 다른 세션이 시작될 때 async 잡이 죽던 것도 같은 원인이다
+
 ## [10.48.0] - 2026-10-03
 
 ### Added
