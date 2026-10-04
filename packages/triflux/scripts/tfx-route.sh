@@ -3339,7 +3339,9 @@ main() {
   # 컨텍스트 파일 → 프롬프트에 주입
   if [[ -n "$CONTEXT_FILE" && -f "$CONTEXT_FILE" ]]; then
     local ctx_content
-    ctx_content=$(cat "$CONTEXT_FILE" 2>/dev/null | head -c 32768)  # 32KB 상한
+    # 32KB 상한. `cat | head -c` 는 큰 파일에서 cat 이 SIGPIPE 를 받아 pipefail+set -e 로
+    # 스크립트가 메시지 없이 141 로 끝나므로 head 가 파일을 직접 읽는다.
+    ctx_content=$(head -c 32768 "$CONTEXT_FILE" 2>/dev/null || true)
     PROMPT="${PROMPT}
 
 <prior_context>
