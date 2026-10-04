@@ -71,9 +71,10 @@ const compiled = compileRules(rawRules);
 // ========================================================================
 // 1. keyword-rules: tfx-auto 라우팅
 // ========================================================================
+// ADR-0021: 명시 토큰은 문장 중간 슬래시(/tfx-auto) 또는 "토큰 + 로/으로 + 실행 동사"만.
 describe("keyword-rules: tfx-auto 매칭", () => {
-  it("'tfx-auto' 입력 시 tfx-auto 스킬로 라우팅", () => {
-    const matches = matchRules(compiled, "tfx-auto 인증 리팩터링");
+  it("'tfx-auto 로 돌려' 입력 시 tfx-auto 스킬로 라우팅", () => {
+    const matches = matchRules(compiled, "인증 리팩터링은 tfx-auto 로 돌려");
     const resolved = resolveConflicts(matches);
     const skills = resolved.map((r) => r.skill).filter(Boolean);
     assert.ok(
@@ -83,20 +84,29 @@ describe("keyword-rules: tfx-auto 매칭", () => {
   });
 
   it("'tfx auto' (공백) 입력도 매칭", () => {
-    const matches = matchRules(compiled, "tfx auto 코드 리뷰");
+    const matches = matchRules(compiled, "코드 리뷰를 tfx auto 로 진행");
     const resolved = resolveConflicts(matches);
     assert.ok(resolved.some((r) => r.skill === "tfx-auto"));
   });
 
   it("'tfxauto' (붙여쓰기)도 매칭", () => {
-    const matches = matchRules(compiled, "tfxauto 빌드");
+    const matches = matchRules(compiled, "빌드는 tfxauto로 처리");
     const resolved = resolveConflicts(matches);
     assert.ok(resolved.some((r) => r.skill === "tfx-auto"));
   });
 
-  it("'my tfx-auto' 같은 문맥에서도 매칭됨 (negative lookbehind는 multi 전용)", () => {
-    const matches = matchRules(compiled, "run tfx-auto now");
-    assert.ok(matches.some((r) => r.skill === "tfx-auto"));
+  it("문장 중간 슬래시 '/tfx-auto' 는 명시 호출로 매칭", () => {
+    const matches = matchRules(compiled, "이 작업은 /tfx-auto 에 맡겨");
+    const unified = matches.find((r) => r.id === "tfx-unified");
+    assert.equal(unified?.strength, "explicit");
+  });
+
+  it("슬래시·실행 동사 없는 이름 언급은 매칭 안 됨", () => {
+    for (const text of ["tfx-auto에 합쳐졌을텐데", "tfx-harness? tfx-auto?"]) {
+      const ids = matchRules(compiled, text).map((r) => r.id);
+      assert.ok(!ids.includes("tfx-unified"), `${text}: ${ids}`);
+      assert.ok(!ids.includes("tfx-harness"), `${text}: ${ids}`);
+    }
   });
 });
 
@@ -108,7 +118,7 @@ describe("keyword-rules: tfx-auto 매칭", () => {
 // 회귀 가드: skill 값이 "tfx-auto" 가 아니면 deprecated skill 강제 invoke.
 describe("keyword-rules: tfx-multi 매칭 (→ tfx-auto redirect)", () => {
   it("'tfx-multi' 입력 시 tfx-auto 스킬로 redirect", () => {
-    const matches = matchRules(compiled, "tfx-multi 인증+UI+테스트");
+    const matches = matchRules(compiled, "인증+UI+테스트 /tfx-multi");
     const resolved = resolveConflicts(matches);
     const multiRule = resolved.find((r) => r.id === "tfx-multi");
     assert.ok(multiRule, "tfx-multi 규칙이 매칭되어야 함");
@@ -120,7 +130,7 @@ describe("keyword-rules: tfx-multi 매칭 (→ tfx-auto redirect)", () => {
   });
 
   it("'tfx multi' (공백)도 tfx-auto 로 redirect", () => {
-    const matches = matchRules(compiled, "tfx multi --quick 작업");
+    const matches = matchRules(compiled, "작업은 tfx multi 로 돌려");
     const resolved = resolveConflicts(matches);
     const multiRule = resolved.find((r) => r.id === "tfx-multi");
     assert.ok(multiRule);
@@ -128,7 +138,7 @@ describe("keyword-rules: tfx-multi 매칭 (→ tfx-auto redirect)", () => {
   });
 
   it("tfx-multi 규칙은 priority 1 — tfx-unified(priority 2)보다 우선", () => {
-    const matches = matchRules(compiled, "tfx-multi와 tfx-auto 같이 쓰기");
+    const matches = matchRules(compiled, "/tfx-multi 와 /tfx-auto 같이 쓰기");
     const resolved = resolveConflicts(matches);
     // tfx-multi 규칙이 먼저 나와야 함 (id 기준), skill 은 tfx-auto 로 redirect
     assert.equal(resolved[0].id, "tfx-multi");
@@ -180,7 +190,7 @@ describe("keyword-rules: 충돌 해결", () => {
   });
 
   it("tfx-unified가 tfx-auto-codex를 supersede (통합 규칙)", () => {
-    const matches = matchRules(compiled, "tfx auto 리팩터링");
+    const matches = matchRules(compiled, "리팩터링은 tfx auto 로 진행");
     const resolved = resolveConflicts(matches);
     const ids = resolved.map((r) => r.id);
     assert.ok(ids.includes("tfx-unified"), "tfx-unified 규칙이 매칭되어야 함");
@@ -190,16 +200,16 @@ describe("keyword-rules: 충돌 해결", () => {
     );
   });
 
-  it("MCP 라우트: notion 키워드 → antigravity 라우트", () => {
-    const matches = matchRules(compiled, "노션 페이지 조회");
-    const resolved = resolveConflicts(matches);
-    assert.ok(resolved.some((r) => r.mcp_route === "antigravity"));
-  });
-
-  it("MCP 라우트: jira 키워드 → codex 라우트", () => {
-    const matches = matchRules(compiled, "jira 이슈 생성");
-    const resolved = resolveConflicts(matches);
-    assert.ok(resolved.some((r) => r.mcp_route === "codex"));
+  // 맨명사 MCP 라우트 규칙은 오탐만 내서 지웠다 (ADR-0021).
+  it("서비스 명사(노션/jira)는 MCP 라우트로 매칭되지 않는다", () => {
+    for (const text of ["노션 페이지 조회", "jira 이슈 생성"]) {
+      const resolved = resolveConflicts(matchRules(compiled, text));
+      assert.equal(
+        resolved.some((r) => r.mcp_route),
+        false,
+        `${text} 가 MCP 라우트로 매칭됨`,
+      );
+    }
   });
 });
 

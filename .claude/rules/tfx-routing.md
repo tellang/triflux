@@ -69,6 +69,26 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | 합의 | 합의로 분석해, 3자 합의, consensus | tfx-auto (`--mode consensus`) |
 | 패널 | panel, 패널, 전문가 의견, expert panel | tfx-auto (`--mode consensus --shape panel`) |
 
+위 표는 Claude가 요청을 읽고 판정할 때 쓰는 지도다. 키워드 훅이 이 신호를 강제 주입한다는 뜻이 아니다.
+
+## 키워드 훅 주입 (UserPromptSubmit)
+
+> 근거(why): [ADR-0021 — 키워드 훅을 명시 호출 중심으로 줄인다](../../docs/adr/0021-keyword-hook-explicit-first.md). 규칙 정본은 `hooks/keyword-rules.json`.
+
+| 입력 | 훅 동작 |
+|------|---------|
+| 선두가 슬래시 명령(`/resume`, `/tfx-auto …`, `/oh-my-claudecode:team`, `/loop …`) | 주입 안 함. 호스트가 이미 실행한다 |
+| 자동 생성 봉투(`Continuation skills/contract`, `- Handoff envelope`, `리드 에이전트:`, 대문자 토픽 태그) | 주입 안 함 |
+| 붙여넣기를 뺀 직접 입력이 공백 제외 12자 이하(`진행해`, `좋아 해봐`) | 주입 안 함. 문장 중간 `/tfx-` 토큰이 있으면 예외 |
+| 명시 토큰(문장 중간 `/tfx-harness`, `tfx-auto 로 돌려`, `tfx-review`, `deslop`, `autoplan` 등, 규칙 `strength: explicit`) | MUST 호출 문구 |
+| 자연어 매칭(`결제 화면에 로그인 기능 구현해줘`, `어떤 스킬 써?` 등, `strength: suggest`) | "실행 요청이면 고려하라, 질문·대화면 무시하라" 제안 문구 |
+| 질문형 끝맺음(`exclude_patterns`), 광역 동사 단독(`진행해`, `검토해`), 서비스 맨명사(`메일`, `일정`, `chrome`), 이름만 언급(`tfx-auto에 합쳐졌을텐데`) | 주입 안 함 |
+
+- 주입문에 프롬프트 원문을 다시 붙이지 않는다. 자연어 매칭을 MUST 로 올리지 않는다.
+- 붙여넣기 태그(`<pasted_content …>…</pasted_content …>`), 코드블록, 경로(`~/`, `/`, `./`), 줄 머리 `>` 인용문, 스킬 선언 목록 줄(`- /tfx-x — 설명`)은 매칭 전에 지운다.
+- gstack 처럼 머신마다 설치 이름이 다른 스킬은 `skill_candidates`(`["ship", "gstack-ship"]`)로 두고, 훅이 설치된 이름을 고른다. 하나도 없으면 주입하지 않는다.
+- 새 규칙은 명시 토큰이면 기본(`explicit`), 자연어면 `strength: suggest` + `suggest_when` 을 둔다. 맨명사 하나로 걸리는 패턴은 추가하지 않는다.
+
 ## 깊이 수정자
 
 | 수정자 | 신호 | 효과 |

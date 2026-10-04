@@ -35,7 +35,7 @@ const { extractPrompt, matchesPlatform, sanitizeForKeywordDetection } =
 
 function loadCompiledRules() {
   const rules = loadRules(rulesPath);
-  assert.ok(rules.length >= 32);
+  assert.ok(rules.length >= 25);
   return compileRules(rules);
 }
 
@@ -84,6 +84,22 @@ test("extractPrompt: prompt/message.content/parts[].text 우선순위", () => {
   );
 });
 
+test("sanitizeForKeywordDetection: 속성 달린 닫는 태그·~/ 경로·줄 머리 인용문 제거", () => {
+  const input = [
+    '<pasted_content id="1">',
+    "tfx-auto, tfx-review, 로그인 기능 구현해줘",
+    '</pasted_content id="1">',
+    "~/projects/tfx-auto/notes.md 참고",
+    "> 이 함수 버그 고쳐줘",
+    "  > tfx-ship 해줘",
+    "본문 문장",
+  ].join("\n");
+
+  const sanitized = sanitizeForKeywordDetection(input);
+
+  assert.equal(sanitized, "참고 본문 문장");
+});
+
 test("sanitizeForKeywordDetection: 코드블록/URL/파일경로/XML 태그 제거", () => {
   const input = [
     "정상 문장",
@@ -109,9 +125,14 @@ test("sanitizeForKeywordDetection: 코드블록/URL/파일경로/XML 태그 제�
 
 test("loadRules: 유효한 JSON 로드", () => {
   const rules = loadRules(rulesPath);
-  assert.ok(rules.length >= 32);
+  assert.ok(rules.length >= 25);
   assert.ok(rules.filter((rule) => rule.skill).length >= 18);
-  assert.equal(rules.filter((rule) => rule.mcp_route).length, 10);
+  // 맨명사 MCP 라우트 규칙과 구현 없는 handoff 규칙은 지웠다 (ADR-0021).
+  assert.equal(rules.filter((rule) => rule.mcp_route).length, 0);
+  assert.equal(
+    rules.some((rule) => rule.action === "handoff"),
+    false,
+  );
 });
 
 test("loadRules: 잘못된 파일 처리", () => {
@@ -161,8 +182,8 @@ test("compileRules: 정규식 컴파일 실패", () => {
 test("matchRules: tfx 키워드 매칭", () => {
   const compiledRules = loadCompiledRules();
   const cases = [
-    { text: "tfx multi 세션 시작", expectedId: "tfx-multi" },
-    { text: "tfx auto 돌려줘", expectedId: "tfx-unified" },
+    { text: "세션은 /tfx-multi 로 시작", expectedId: "tfx-multi" },
+    { text: "이건 tfx auto 로 돌려줘", expectedId: "tfx-unified" },
     { text: "tfx codex 로 실행", expectedId: "tfx-codex" },
     { text: "tfx gemini 로 실행", expectedId: "tfx-gemini" },
     { text: "canceltfx", expectedId: "tfx-cancel" },
@@ -178,54 +199,28 @@ test("matchRules: tfx 키워드 매칭", () => {
   }
 });
 
-test("matchRules: MCP 라우팅 매칭", () => {
+test("matchRules: 서비스 맨명사는 매칭 없음 (MCP 라우트 규칙 삭제)", () => {
   const compiledRules = loadCompiledRules();
-  const cases = [
-    {
-      text: "노션 페이지 조회해줘",
-      expectedId: "notion-route",
-      expectedRoute: "antigravity",
-    },
-    {
-      text: "jira 이슈 생성",
-      expectedId: "jira-route",
-      expectedRoute: "codex",
-    },
-    {
-      text: "크롬 열고 로그인",
-      expectedId: "chrome-route",
-      expectedRoute: "antigravity",
-    },
-    {
-      text: "이메일 보내줘",
-      expectedId: "mail-route",
-      expectedRoute: "antigravity",
-    },
-    {
-      text: "캘린더 일정 생성",
-      expectedId: "calendar-route",
-      expectedRoute: "antigravity",
-    },
-    {
-      text: "playwright 테스트 작성",
-      expectedId: "playwright-route",
-      expectedRoute: "antigravity",
-    },
-    {
-      text: "canva 디자인 생성",
-      expectedId: "canva-route",
-      expectedRoute: "antigravity",
-    },
-  ];
-
-  for (const { text, expectedId, expectedRoute } of cases) {
+  for (const text of [
+    "노션 페이지 조회해줘",
+    "jira 이슈 생성",
+    "크롬 열고 로그인",
+    "이메일 보내줘",
+    "캘린더 일정 생성",
+    "일정은 어떻지?",
+    "You have new mail",
+    "github 리포 봐줘",
+    "핸드오프 생성",
+  ]) {
     const matches = matchRules(
       compiledRules,
       sanitizeForKeywordDetection(text),
     );
-    const matched = matches.find((match) => match.id === expectedId);
-    assert.ok(matched, `${text} => ${expectedId} 미매칭`);
-    assert.equal(matched.mcp_route, expectedRoute);
+    assert.deepEqual(
+      matches.map((match) => match.id),
+      [],
+      `${text} 가 매칭됐습니다`,
+    );
   }
 });
 
@@ -267,7 +262,9 @@ test("resolveConflicts: exclusive 처리", () => {
 
 test("코드블록 내 키워드: sanitize 후 매칭 안 됨", () => {
   const compiledRules = loadCompiledRules();
-  const input = ["```txt", "tfx multi", "jira 이슈 생성", "```"].join("\n");
+  const input = ["```txt", "tfx multi", "로그인 기능 구현해줘", "```"].join(
+    "\n",
+  );
   const clean = sanitizeForKeywordDetection(input);
   const matches = matchRules(compiledRules, clean);
   assert.deepEqual(matches, []);
@@ -277,7 +274,7 @@ test("OMC 키워드와 triflux 키워드 비간섭 + TRIFLUX 네임스페이스"
   const omcLike = runDetector("my tfx multi 세션 보여줘");
   assert.equal(omcLike.suppressOutput, true);
 
-  const triflux = runDetector("tfx multi 세션 시작");
+  const triflux = runDetector("이 작업 세 개는 /tfx-multi 로 시작");
   const additionalContext =
     triflux?.hookSpecificOutput?.additionalContext || "";
   assert.match(additionalContext, /^\[TRIFLUX MAGIC KEYWORD: tfx-multi\]/);
