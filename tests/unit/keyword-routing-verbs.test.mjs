@@ -72,13 +72,31 @@ describe("keyword routing: 전용 규칙이 tfx-unified 를 supersede (root caus
 
   for (const [text, id] of [
     ["tfx-review 해줘", "tfx-review"],
-    ["tfx-find 해줘", "tfx-find"],
     ["tfx-prune 돌려", "tfx-prune"],
   ]) {
     it(`명시 토큰 '${text}' → ${id}`, () => {
       assert.equal(topId(text), id);
     });
   }
+
+  // 스킬 표면 축소: 지운 스킬의 명시 토큰은 흡수한 스킬로 보낸다 (패턴은 그대로).
+  for (const [id, skill] of [
+    ["tfx-analysis", "tfx-auto"],
+    ["tfx-prune", "tfx-auto"],
+    ["tfx-qa", "tfx-review"],
+    ["tfx-hub", "tfx-doctor"],
+  ]) {
+    it(`${id} 규칙은 ${skill} 로 retarget 된다`, () => {
+      assert.equal(rules.find((x) => x.id === id)?.skill, skill);
+    });
+  }
+
+  it("tfx-find 규칙은 대상 스킬이 없어 제거됐다", () => {
+    assert.equal(
+      rules.some((x) => x.id === "tfx-find"),
+      false,
+    );
+  });
 
   it("전용 규칙은 priority 1 + supersedes:['tfx-unified']", () => {
     const dedicated = [
@@ -87,7 +105,6 @@ describe("keyword routing: 전용 규칙이 tfx-unified 를 supersede (root caus
       "tfx-plan",
       "tfx-qa",
       "tfx-research",
-      "tfx-find",
       "tfx-prune",
     ];
     for (const id of dedicated) {
@@ -190,7 +207,6 @@ describe("keyword routing: 명시 토큰이 광역 클린업 매처를 이긴다
       "tfx-plan",
       "tfx-qa",
       "tfx-research",
-      "tfx-find",
       "tfx-prune",
     ]) {
       const rule = rules.find((x) => x.id === id);

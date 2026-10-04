@@ -3,8 +3,9 @@ name: tfx-doctor
 description: >
   triflux 진단 및 수리 도구. AskUserQuestion 기반 인터랙티브 선택지로
   CLI 미발견, HUD 미표시, 캐시 오류, 스킬 미설치 등을 진단하고 자동 수정합니다.
-  Use when: not working, broken, error, 안 돼, 이상해, 에러, 캐시, reset, doctor
-argument-hint: "[--fix|--reset]"
+  tfx-hub(MCP 메시지 버스) 시작·중지·상태 확인도 여기서 안내합니다.
+  Use when: not working, broken, error, 안 돼, 이상해, 에러, 캐시, reset, doctor, hub 상태, 허브 시작, 메시지 버스
+argument-hint: "[--fix|--reset|hub <start|stop|status|ensure>]"
 ---
 
 # tfx-doctor — triflux 진단 및 수리
@@ -31,7 +32,7 @@ options:
     description: "모든 캐시 삭제 + 재생성 (위험)"
 ```
 
-`--fix`, `--reset` 인자가 있으면 바로 해당 모드로 실행.
+`--fix`, `--reset` 인자가 있으면 바로 해당 모드로 실행. `hub ...` 인자가 있으면 [tfx-hub 관리](#tfx-hub-관리) 절로 바로 간다.
 
 ### Step 2: 모드별 실행
 
@@ -156,6 +157,48 @@ options:
 - **Docs 동기화** — `docs/design/`, `docs/research/` → `~/.claude/docs/` 레퍼런스 문서 동기화 상태
 - **Antigravity MCP 안전성** — `~/.gemini/settings.json`의 stdio MCP 감지 (spawn EPERM 방지)
 - **Route Script 정합성** — 프로젝트 소스 `scripts/tfx-route.sh`와 `~/.claude/scripts/tfx-route.sh` 일치 여부
+
+## tfx-hub 관리
+
+tfx-hub는 CLI 에이전트(Codex/Antigravity/Claude) 사이의 MCP 메시지 버스다. 이 절은 허브
+프로세스 제어만 다룬다. `tfx-hub` MCP 서버 이름, `tfx hub` CLI, `hub/` 코드는 그대로다.
+
+| 작업 | 명령 | 비고 |
+|------|------|------|
+| 상태 확인 | `Bash("tfx hub status --json")` | 미실행이면 그 사실을 그대로 보고한다 |
+| 시작 | `Bash("tfx hub start")` | 포트 지정은 `--port N` |
+| 헬스체크 + 자동 시작 | `Bash("tfx hub ensure --json")` | 이미 떠 있으면 아무것도 하지 않는다 |
+| 중지 | `Bash("tfx hub stop")` | |
+
+- 기본 엔드포인트: `http://127.0.0.1:27888/mcp` (Streamable HTTP), 상태는 `/status`
+- 상태 DB `~/.claude/cache/tfx-hub/state.db`, PID 파일 `~/.claude/cache/tfx-hub/hub.pid`
+- 환경 변수: `TFX_HUB_PORT`(포트), `TFX_HUB_DB`(DB 경로)
+- 포트가 이미 쓰이면 `tfx hub stop` 후 다시 시작한다. PID는 살아 있는데 status가 응답하지
+  않으면 `tfx hub start`가 오래된 PID 파일을 정리한다.
+
+### 각 CLI 등록 방법
+
+`triflux setup`이 설정을 자동 관리한다. 수동으로 등록할 때만 아래를 쓴다.
+
+```bash
+# Codex: 사전 등록은 disabled로 두고 `tfx hub start` 이후에만 enabled로 전환된다.
+codex mcp add tfx-hub --url http://127.0.0.1:27888/mcp
+# Claude
+claude mcp add --transport http tfx-hub http://127.0.0.1:27888/mcp
+# Antigravity: settings.json 의 mcpServers.tfx-hub.url
+```
+
+### hub MCP 도구
+
+| 묶음 | 도구 |
+|------|------|
+| Core | `register`, `status`, `publish`, `ask`, `handoff`, `poll_messages`(폐기 예정) |
+| Assign | `assign_async`, `assign_result`, `assign_status` |
+| Team | `team_info`, `team_task_list`, `team_task_update`, `team_send_message` |
+| Pipeline | `pipeline_init`, `pipeline_state`, `pipeline_advance`, `pipeline_advance_gated`, `pipeline_list` |
+| HITL | `request_human_input`, `submit_human_input` |
+
+브릿지 REST 엔드포인트: `POST /bridge/register`, `/bridge/result`, `/bridge/context`, `/bridge/deregister`.
 
 ## 에러 처리
 

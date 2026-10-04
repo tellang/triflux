@@ -1,8 +1,8 @@
 ---
 internal: true
 name: tfx-interview
-description: "명시 `tfx-interview` 또는 TFX 정량·다중 CLI 요구사항 탐색을 요청할 때 사용한다. 무수식 일반 요구사항 명확화는 host deep-interview가 소유한다."
-argument-hint: "<구현할 주제 또는 요구사항>"
+description: "명시 `tfx-interview` 또는 TFX 정량·다중 CLI 요구사항 탐색을 요청할 때 사용한다. 자연어 목표를 Claude Code `/goal` 블록으로 바꿔 달라는 요청('/goal로 만들어', 'goal 프롬프트', 'goal 변환', 'clarify goal', 'goal 양식')에는 `--format goal`로 사용한다. 무수식 일반 요구사항 명확화는 host deep-interview가 소유한다."
+argument-hint: "<구현할 주제 또는 요구사항> [--format plan|goal] [--tier 1|2|3]"
 ---
 
 # tfx-interview — Quantified Socratic Requirements Exploration
@@ -279,6 +279,67 @@ Date: {date} | Final Ambiguity: {score}%
 3. ...
 ```
 
+## `/goal` 블록 모드 (`--format goal`)
+
+`--format goal`이거나 사용자가 `/goal` 변환을 요청하면 Action Plan 대신 Claude Code `/goal`
+명령에 붙여넣을 **블록 한 덩어리만** 산출한다. 기본값은 `--format plan`(위 Step 4 산출물)이다.
+
+`/goal`의 평가자는 transcript만 보고 yes/no를 판정한다. 측정할 수 없는 조건은 무한 루프나
+근거 없는 yes를 부르므로, 이 모드는 아래 3축과 stop bound를 강제한다.
+
+| 축 | 질문 | 모호성 요소 |
+|----|------|-------------|
+| End state | 완료를 어떤 단일 측정 가능한 결과로 증명하나? | goal |
+| Stated check | Claude가 어떤 명령과 출력으로 그 결과를 transcript에 남기나? | criteria |
+| Constraints | 절대 건드리면 안 되는 것은? (없으면 `none`) | constraints |
+| Stop bound | 최대 몇 턴까지 돌리나? (`or stop after N turns`) | — |
+
+모호성 계산식과 20% 조기 종료 규칙은 위 Step 1~3을 그대로 쓴다. 질문은 AskUserQuestion으로
+보기(테스트 exit code / 패턴 카운트 0 / 타입체크 / 빌드 성공 등)를 주고 고르게 한다.
+
+`--tier` 로 질문 수와 블록 형태를 정한다(기본 2).
+
+| Tier | 필수 축 | 질문 수 | 블록 형태 |
+|------|---------|---------|-----------|
+| 1 | End state, Stop bound | 1~2 | `/goal <end_state>, or stop after N turns` 한 줄 |
+| 2 | End state, Check, Constraints, Stop bound (+조건부 Scope) | 3~5 | 아래 4줄 형식 |
+| 3 | 위 + Scope, Priority, Plan (+선택 Rollback, Output) | 5~8 | GOAL / CONTEXT / CONSTRAINTS / PRIORITY / PLAN / DONE WHEN / VERIFY / OUTPUT / STOP RULES |
+
+Tier 2 형식:
+
+```
+/goal
+End state: {end_state}
+Check: {check_command}
+Constraints: {constraints | none}
+Bound: or stop after {N} turns
+```
+
+블록 규칙:
+
+1. **Check 강제**: Check가 없는 블록은 내보내지 않는다.
+2. **Stop bound 강제**: 사용자가 지정하지 않으면 Tier 2/3에 `or stop after 20 turns`를 넣는다.
+3. **4000자 한도**: 넘으면 PLAN/CONTEXT부터 줄인다.
+4. **언어**: 인터뷰는 사용자 언어로, `/goal` 블록은 영어로 쓴다.
+5. **주관적 End state 거부**: "production-ready", "better", "clean", 위치 없는 "all tests pass",
+   "refactor everything"은 받지 않고 exit code·문자열 카운트·변경 파일 수 중 하나로 바꾸자고 묻는다.
+
+출력은 복붙 영역에 블록만 두고, 그 아래에 점검표(End state 측정 가능 / Check가 transcript에
+남음 / Stop bound 있음 / 4000자 이내)를 Y/N으로 붙인다. `/goal`은 슬래시 명령이라 에이전트가
+대신 제출할 수 없으므로 "바로 실행" 선택지는 두지 않는다. 사용자가 원하면 블록을 임시 파일에
+쓴 뒤 `pbcopy` → `wl-copy` → `xclip -selection clipboard` → `clip.exe` 순으로 있는 명령에
+넘겨 클립보드에 복사하고, 저장을 원하면 `.tfx/goals/goal-{timestamp}.txt`에 원문·응답·블록을 남긴다.
+
+```
+입력: "레거시 auth API 호출들을 v2로 마이그레이션" --format goal
+출력:
+/goal
+End state: every call under src/legacy/auth/*.ts is migrated to src/auth/v2
+Check: `pnpm test src/auth` exits 0 AND `rg "legacy/auth" src` returns 0 hits
+Constraints: do not modify tests/legacy/, do not add package.json dependencies
+Bound: or stop after 30 turns
+```
+
 ## 동작 규칙
 
 1. 각 단계에서 반드시 사용자 응답을 수집한 후 다음으로 이동한다.
@@ -306,4 +367,5 @@ Fallback: Antigravity 호출 실패 시 Claude Opus가 분석을 직접 처리�
 ```
 /tfx-interview "인증 시스템 리팩터링"
 /tfx-interview "실시간 알림 기능 추가"
+/tfx-interview "auth 테스트 다 통과시켜" --format goal --tier 1
 ```

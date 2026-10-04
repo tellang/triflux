@@ -384,13 +384,9 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
 describe("Deep skill preflight — macOS tmux is first-class", () => {
   const deepSkillPaths = [
     "skills/tfx-plan/SKILL.md",
-    "skills/tfx-analysis/SKILL.md",
     "skills/tfx-review/SKILL.md",
-    "skills/tfx-ralph/SKILL.md",
     "packages/triflux/skills/tfx-plan/SKILL.md",
-    "packages/triflux/skills/tfx-analysis/SKILL.md",
     "packages/triflux/skills/tfx-review/SKILL.md",
-    "packages/triflux/skills/tfx-ralph/SKILL.md",
   ];
 
   it("deep skills do not gate headless multi on literal psmux --version", () => {

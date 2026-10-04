@@ -51,6 +51,8 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
    - "팀"은 모호하다: 서로 메시지를 주고받는 영속 협업을 원하면 정답은 OMC 네이티브 `/team`이고(tfx-auto 관할 밖), 그냥 여러 작업을 동시에 처리해달라는 뜻이면 바로 위 `--parallel N` 행을 따른다. "팀"만 보고 바로 `--parallel N`으로 단정하지 말고 어느 쪽인지 애매하면 되묻는다
    - "꼼꼼히", "제대로", "deep" → `--mode deep`
    - "끝까지", "멈추지마", "ralph" → `--retry ralph`
+   - 명시 `tfx-analysis` / "3관점 분석" → `--mode consensus --shape panel` (아래 `shape=panel` 의 분석 roster)
+   - 명시 `tfx-prune` / "3자 합의 정리" → `--mode consensus` cleanup. 무수식 slop/deslop 은 host `ai-slop-cleaner` 소관이다
    - "codex로", "antigravity로" → `--cli codex` 또는 `--cli antigravity`
    - "원격으로", "다른 기기에서", "리모트로 돌려" → `--remote <host>` (`--parallel swarm` 자동 동반. host 미지정 시 `hosts.json` 목록에서 질의)
    - "논쟁시켜", "서로 반박하게 해", "계속 대화하면서 풀게", "왕복으로 주고받게" → `--mode live` (`tfx-live peer` 고정). "협업"/"팀"과 겹쳐 보여도 이 쪽은 "논쟁/반박/대화를 계속 이어간다"는 뉘앙스가 명시적으로 있을 때만 해당
@@ -256,6 +258,9 @@ agy 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율
 /tfx-auto "hub 라우팅 개편" --risk-tier high   # = deep + full verify/fix loop
 /tfx-auto "병렬" --parallel N --mode deep      # = legacy tfx-multi 기본값
 /tfx-auto "PRD 실행" --parallel swarm          # = legacy tfx-swarm
+/tfx-auto "끝까지 고쳐" --retry ralph           # = 제거된 tfx-ralph
+/tfx-auto "src/auth 구조 분석" --mode consensus --shape panel   # = 제거된 tfx-analysis
+/tfx-auto "src/ 슬롭 3자 합의 정리" --mode consensus             # = 제거된 tfx-prune
 /tfx-auto "REST vs GraphQL" --mode consensus --shape debate
 /tfx-auto "모놀리스 분해 전략" --mode consensus --shape panel --experts "claude:Fowler|Beck;codex:Newman|Hohpe;antigravity:Porter|Wiegers"
 /tfx-auto "이벤트소싱 도입 여부 논쟁" --mode live --rounds 3       # = tfx-live peer 위임
@@ -400,6 +405,7 @@ shape 별 orchestration 정책:
 - 합의 판정: 3자 중 2자 이상이 같은 remediation 또는 risk assessment 를 지지하면 provisional agreement 로 분류하고, Claude/Opus outvoice가 반론을 제공하고 lead가 최종 `resolved_items` 승격 여부를 결정한다.
 - 충돌 승격: P1/P2 급 충돌은 score 와 무관하게 `user_decision_needed` 또는 `FIX_FIRST` 로 승격한다. score 가 높아도 안전 이슈를 묻지 않는다.
 - degrade: `no-antigravity` 또는 partial timeout 시 2자 합의를 허용하되 root meta 의 `status=partial` 과 누락 participant 이유를 반드시 남긴다.
+- cleanup 요청: 대상(최근 변경분 / 디렉토리 / 전체)을 먼저 확정하고, 각 participant 가 슬롭 카테고리(단일 용도 추상화, 중복 코드, 발생 불가 에러 처리, 코드를 되풀이하는 주석, 과잉 타입, 미사용 코드, 디버그 로깅)를 독립 감지한다. 2자 이상 합의한 항목만 제거하고 제거 후 lint/test 로 회귀를 확인한다.
 
 출력 schema 예시:
 
@@ -571,6 +577,7 @@ shape 별 orchestration 정책:
 - 발언 구조: participant raw answer 를 그대로 이어붙이지 말고 `expert -> thesis -> supporting evidence -> concern -> recommendation` 구조로 정리한다.
 - 합의 규칙: panel 은 unanimity 보다 "majority view + minority view + open questions" 보존이 중요하다. minority 가 P1/P2 를 제기하면 별도 `open_questions` 로 승격한다.
 - moderator 역할: Claude/Opus outvoice 는 moderator 로서 panel synthesis 를 담당하지만, 자기 의견을 추가 participant 처럼 중복 집계하지 않는다.
+- 코드/아키텍처 분석 roster: `--experts` 가 없으면 Claude=아키텍처(레이어, SOLID, 결합도, 확장성, 테스트 용이성), Codex=구현·보안(복잡도, 성능, OWASP, 기술 부채), Antigravity=DX·문서(네이밍, 문서화, 접근성)로 나눈다. 1라운드는 서로의 결과를 보지 않고 독립 분석하고, 발견사항은 3/3 CONFIRMED · 2/3 LIKELY · 1/3 UNVERIFIED 로 표기한다. 보고서에는 관점별 health score(0-100)와 우선순위(P0~) 개선 로드맵을 넣는다.
 
 출력 schema 예시:
 
@@ -958,8 +965,8 @@ tmux capture-pane -t <session> -p | grep -q "esc to interrupt" && echo BUSY
   먼저 확인한다. 없으면 `tfx-route.sh`의 `prepend_skill()`과 동일하게 fail-open —
   경고만 하고 스킬 없이 원래 프롬프트로 진행한다.
 - 정성적 실패(주입은 됐는데 codex가 방법론을 안 따름): 기계적으로 탐지할 수 없다.
-  `response`에 스킬이 명시한 워크플로우 단계를 실제로 따른 흔적(예: tfx-find라면
-  "Explored" 단계, Grep 사용 언급)이 있는지 사람이/Claude가 확인하는 수밖에 없다.
+  `response`에 스킬이 명시한 워크플로우 단계를 실제로 따른 흔적(예: tfx-review라면
+  독립 리뷰 → 합의 판정 단계)이 있는지 사람이/Claude가 확인하는 수밖에 없다.
 
 **이미 종료된 세션 resume**: `tfx-live start`의 `--resume <id>` / `--resume-last 1`로
 codex 자체의 대화 이력을 새 tmux 세션에 이어붙인다. ID는 codex의 rollout 파일명에서

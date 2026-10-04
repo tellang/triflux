@@ -37,7 +37,7 @@
 | 패턴 | 문제 | 대체 |
 |------|------|------|
 | PR conflict 해결을 `tfx-remote`로 실행 | WT 세션 `git checkout feat/X` → 메인 세션 working tree도 함께 전환 → race (2026-04-17 PR #72 사고) | `tfx-swarm` |
-| 단일 파일 수정을 `tfx-swarm`으로 실행 | PRD + worktree 오버헤드 과잉 | `tfx-autopilot` |
+| 단일 파일 수정을 `tfx-swarm`으로 실행 | PRD + worktree 오버헤드 과잉 | `tfx-auto` (단일 태스크 직접 실행) |
 | `tfx-multi`로 코드 수정 병렬 | cwd 공유 파일 race | `tfx-swarm` |
 | `tfx-auto --parallel N` 명시 + 코드 변경 | warning 후 사용자 결정 존중 | swarm 권장이지만 사용자 명시 override 시 multi 진행 (Issue #281 closed) |
 

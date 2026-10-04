@@ -2,6 +2,22 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [Unreleased]
+
+### Removed
+- skills: 스킬 표면을 12개 + Windows 1개로 줄인다. `tfx-ralph`(= `tfx-auto --retry ralph`), `tfx-forge`, `tfx-find`(Claude 기본 Explore 에이전트와 중복), `tfx-index` 는 기능 이전 없이 지운다. `tfx-goal-clarify`, `tfx-hooks`, `tfx-hub`, `tfx-analysis`, `tfx-prune`, `tfx-qa` 는 쓸모 있는 내용을 남는 스킬로 옮긴 뒤 지운다. `tfx-hub` MCP 서버, `tfx hub` CLI, hub 코드는 그대로다. 지운 스킬의 설치본은 `tfx setup` 의 stale 정리가 지운다 (ADR-0020)
+- hooks: 대상 스킬이 없어진 `tfx-find` 키워드 규칙을 지운다
+
+### Changed
+- skills: `tfx-interview --format goal` 이 자연어 목표를 `/goal` 블록(End state / Check / Constraints / Stop bound)으로 바꾼다. `tfx-setup` 에 훅 우선순위 관리 절, `tfx-doctor` 에 tfx-hub 시작·중지·상태 절을 둔다. `tfx-auto` 의 panel 설명에 3관점 분석 roster 를, consensus 설명에 3자 합의 cleanup 기준을 더한다. `tfx-review` 가 코드 판정, gstack `/qa` 가 브라우저·흐름 게이트를 맡는다
+- hooks: 키워드 규칙 `tfx-analysis`·`tfx-prune` 은 `tfx-auto`, `tfx-qa` 는 `tfx-review`, `tfx-hub` 는 `tfx-doctor` 로 보낸다. 패턴은 그대로다
+- setup: SKILL.md frontmatter `platform:` 목록(keyword-rules 의 `platform` 과 같은 뜻)이 있으면 현재 플랫폼이 목록에 있을 때만 스킬을 설치하고, 아니면 이미 깔린 사본을 지운다. `tfx doctor` 의 스킬 집계·stale 감지와 Codex managed 스킬 동기화도 같은 규칙을 따른다. `tfx-wt` 는 `platform: [win32]` 다
+- docs: 라우팅 정본(D2·D6·D7·D8, ladder, 행동 유형 표, Claude 네이티브 목록), 스택 공존·실행 스킬 맵이 지운 스킬을 owner 로 돌려주지 않게 고친다
+
+### Fixed
+- skills: macOS/Linux 에도 Windows 전용 `tfx-wt` 가 설치되던 문제
+- docs: 라우팅 표가 이미 없는 `tfx-autoresearch`, `tfx-autopilot` 을 가리키던 곳을 `tfx-research`, autopilot 모드, `tfx-auto` 로 바로잡는다
+
 ## [10.48.1] - 2026-10-04
 
 ### Fixed

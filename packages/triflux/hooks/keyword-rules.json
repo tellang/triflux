@@ -120,7 +120,7 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-analysis",
+      "skill": "tfx-auto",
       "priority": 1,
       "supersedes": ["tfx-unified"],
       "exclusive": false,
@@ -152,7 +152,7 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-qa",
+      "skill": "tfx-review",
       "priority": 1,
       "supersedes": ["tfx-unified"],
       "exclusive": false,
@@ -169,22 +169,6 @@
         }
       ],
       "skill": "tfx-research",
-      "priority": 1,
-      "supersedes": ["tfx-unified"],
-      "exclusive": false,
-      "state": null,
-      "mcp_route": null,
-      "explicit": true
-    },
-    {
-      "id": "tfx-find",
-      "patterns": [
-        {
-          "source": "\\btfx[\\s-]?find\\b",
-          "flags": "i"
-        }
-      ],
-      "skill": "tfx-find",
       "priority": 1,
       "supersedes": ["tfx-unified"],
       "exclusive": false,
@@ -274,7 +258,7 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-prune",
+      "skill": "tfx-auto",
       "priority": 1,
       "supersedes": ["tfx-unified"],
       "exclusive": false,
@@ -320,7 +304,7 @@
           "flags": "i"
         }
       ],
-      "skill": "tfx-hub",
+      "skill": "tfx-doctor",
       "priority": 1,
       "supersedes": [],
       "exclusive": false,
