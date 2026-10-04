@@ -13,10 +13,11 @@ const MIRRORS = [
 
 const TRIFLUX_SKILL_ROOTS = ["skills", "packages/triflux/skills"];
 
-// 외부 gstack 시스템 skill — ~/.claude/skills/gstack-<name> 또는 ~/.claude/skills/<name>
-// triflux 통제 밖이지만 keyword-rules 가 라우팅 타깃으로 참조함. CI 머신 의존을
-// 피하기 위해 allowlist 로 관리한다. ~/.claude 실제 존재 여부는 검증하지 않는다.
-const EXTERNAL_GSTACK_TARGETS = new Set([
+// 외부 gstack 시스템 skill. 설치 이름이 머신마다 다르다 — ~/.claude/skills/<name>
+// (접두사 없음) 또는 ~/.claude/skills/gstack-<name>. 규칙은 이름을 고정하지 않고
+// skill_candidates 로 두 이름을 모두 적으며, detector 가 실행 시점에 설치된 이름을
+// 고른다(ADR-0021). CI 머신 의존을 피하기 위해 allowlist 로 관리한다.
+const GSTACK_BASE_NAMES = [
   "autoplan",
   "cso",
   "investigate",
@@ -24,10 +25,11 @@ const EXTERNAL_GSTACK_TARGETS = new Set([
   "qa",
   "retro",
   "ship",
-  // Claude 호출명은 SKILL.md frontmatter name(gstack-<name>)을 따른다.
-  // gstack 이 /checkpoint 를 /context-save + /context-restore 로 개명했으므로 bare "checkpoint" 는 제거.
-  "gstack-context-restore",
-]);
+  "context-restore",
+];
+const EXTERNAL_GSTACK_TARGETS = new Set(
+  GSTACK_BASE_NAMES.flatMap((name) => [name, `gstack-${name}`]),
+);
 const EXTERNAL_HOST_TARGETS = new Set(["ai-slop-cleaner"]);
 
 function readRules(mirrorPath) {
@@ -59,6 +61,11 @@ describe("keyword-rules.json: skill target 검증", () => {
         if (!isKnownTarget(rule.skill)) {
           missing.push(`${rule.id} → ${rule.skill}`);
         }
+        for (const candidate of rule.skill_candidates ?? []) {
+          if (!isKnownTarget(candidate)) {
+            missing.push(`${rule.id} → ${candidate} (candidate)`);
+          }
+        }
       }
       assert.deepEqual(
         missing,
@@ -89,6 +96,21 @@ describe("keyword-rules.json: skill target 검증", () => {
   });
 });
 
+describe("keyword-rules.json: gstack 타깃은 설치 이름 후보로 둔다", () => {
+  it("gstack-* 규칙은 skill 을 고정하지 않고 [<name>, gstack-<name>] 후보를 갖는다", () => {
+    const rules = readRules(MIRRORS[0]).rules.filter((rule) =>
+      rule.id.startsWith("gstack-"),
+    );
+    assert.ok(rules.length > 0);
+    for (const rule of rules) {
+      assert.equal(rule.skill, undefined, `${rule.id} 가 skill 을 고정함`);
+      const [base, prefixed] = rule.skill_candidates ?? [];
+      assert.ok(GSTACK_BASE_NAMES.includes(base), `${rule.id}: ${base}`);
+      assert.equal(prefixed, `gstack-${base}`, rule.id);
+    }
+  });
+});
+
 describe("tfx-harness 라우팅 우선순위 (동순위 가로채기 회귀 가드)", () => {
   async function resolveFor(text) {
     const { compileRules, loadRules, matchRules, resolveConflicts } =
@@ -99,7 +121,7 @@ describe("tfx-harness 라우팅 우선순위 (동순위 가로채기 회귀 가�
   }
 
   it("명시 'tfx-harness' 토큰은 priority 1로 선택된다", async () => {
-    const resolved = await resolveFor("tfx-harness로 라우팅 판정해줘");
+    const resolved = await resolveFor("이건 tfx-harness로 라우팅 해줘");
     assert.equal(resolved[0]?.id, "tfx-harness");
   });
 
@@ -113,11 +135,11 @@ describe("tfx-harness 라우팅 우선순위 (동순위 가로채기 회귀 가�
     assert.ok(meta, "meta 룰은 함께 매치되되 최우선이 아니어야 한다");
   });
 
-  it("priority 1 명시 토큰(tfx-hub 등)은 메타 문구와 섞여도 가로채이지 않는다", async () => {
+  it("priority 1 명시 토큰(tfx hub → tfx-doctor 등)은 메타 문구와 섞여도 가로채이지 않는다", async () => {
     const resolved = await resolveFor(
       "tfx hub 상태 보려는데 어떤 스킬이 맞아?",
     );
-    assert.equal(resolved[0]?.id, "tfx-hub");
+    assert.equal(resolved[0]?.id, "tfx-doctor");
     assert.ok(resolved.some((match) => match.id === "tfx-harness-meta"));
   });
 

@@ -81,37 +81,28 @@ describe("keyword-rules: Korean keyword matching", () => {
   const rawRules = loadRules(RULES_PATH);
   const compiled = compileRules(rawRules);
 
-  it("matches handoff-route on Korean input", () => {
-    const matches = matchRules(
-      compiled,
-      "\ud578\ub4dc\uc624\ud504 \uc0dd\uc131",
-    );
-    const ids = matches.map((r) => r.id);
-    assert.ok(
-      ids.includes("handoff-route"),
-      `handoff-route expected in: ${JSON.stringify(ids)}`,
-    );
-  });
+  for (const [text, id] of [
+    ["로그인 기능 구현해줘", "tfx-unified"],
+    ["이 함수 버그 고쳐줘", "tfx-unified"],
+    ["이번 주 회고해줘", "gstack-retro"],
+    ["보안 점검해줘", "gstack-cso"],
+  ]) {
+    it(`matches ${id} on Korean input: ${text}`, () => {
+      const ids = matchRules(compiled, text).map((r) => r.id);
+      assert.ok(ids.includes(id), `${id} expected in: ${JSON.stringify(ids)}`);
+    });
+  }
 
-  it("matches canva-route on Korean input", () => {
-    const matches = matchRules(compiled, "\uce94\ubc14 \ub514\uc790\uc778");
-    const ids = matches.map((r) => r.id);
-    assert.ok(
-      ids.includes("canva-route"),
-      `canva-route expected in: ${JSON.stringify(ids)}`,
-    );
-  });
-
-  it("matches playwright-route on Korean input", () => {
-    const matches = matchRules(
-      compiled,
-      "\ube0c\ub77c\uc6b0\uc800 \ud14c\uc2a4\ud2b8 \uc2e4\ud589",
-    );
-    const ids = matches.map((r) => r.id);
-    assert.ok(
-      ids.includes("playwright-route"),
-      `playwright-route expected in: ${JSON.stringify(ids)}`,
-    );
+  it("handoff/canva/playwright routes are removed (ADR-0021)", () => {
+    for (const id of ["handoff-route", "canva-route", "playwright-route"]) {
+      assert.equal(
+        rawRules.some((r) => r.id === id),
+        false,
+        `${id} should be removed`,
+      );
+    }
+    assert.deepEqual(matchRules(compiled, "핸드오프 생성"), []);
+    assert.deepEqual(matchRules(compiled, "캔바 디자인"), []);
   });
 });
 
