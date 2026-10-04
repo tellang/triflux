@@ -13,15 +13,11 @@ describe("remote package assembly", () => {
     );
   });
 
-  it("copies tray and CTO runtime dependencies into @triflux/remote", () => {
+  it("copies CTO runtime dependencies into @triflux/remote", () => {
     const packScript = readFileSync("scripts/pack.mjs", "utf8");
 
     for (const requiredFile of [
-      "hub/mac-tray.swift",
-      "hub/mac-focus.mjs",
       "hub/promote-penalties.mjs",
-      "hub/tray-runtime.mjs",
-      "hub/tray-state.mjs",
       "cto/brief.mjs",
       "cto/collect.mjs",
       "cto/hygiene-actions.mjs",
@@ -29,6 +25,24 @@ describe("remote package assembly", () => {
       "cto/current.schema.json",
     ]) {
       assert.match(packScript, new RegExp(JSON.stringify(requiredFile), "u"));
+    }
+  });
+
+  it("does not ship the removed CTO tray", () => {
+    const packScript = readFileSync("scripts/pack.mjs", "utf8");
+
+    for (const removedFile of [
+      "hub/tray.mjs",
+      "hub/tray-lifecycle.mjs",
+      "hub/tray-runtime.mjs",
+      "hub/tray-state.mjs",
+      "hub/mac-tray.swift",
+      "hub/mac-focus.mjs",
+    ]) {
+      assert.doesNotMatch(
+        packScript,
+        new RegExp(JSON.stringify(removedFile), "u"),
+      );
     }
   });
 
@@ -58,7 +72,6 @@ describe("remote package assembly", () => {
       "better-sqlite3",
       "pino",
       "pino-pretty",
-      "systray2",
       "zod",
     ]) {
       assert.ok(deps[dependency], `${dependency} must be declared`);

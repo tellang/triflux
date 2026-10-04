@@ -97,7 +97,6 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     for (const command of [
       "auto",
       "update",
-      "tray",
       "codex-team",
       "notion-read",
       "review",
@@ -105,6 +104,8 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     ]) {
       assert.ok(bundle.commands[command], `schema command missing: ${command}`);
     }
+    // CTO 트레이는 제거됐다(ADR-0022).
+    assert.equal(bundle.commands.tray, undefined);
     assert.ok(Array.isArray(bundle.hub_tools["x-triflux-mcp-tools"]));
 
     const delegate = parseStdoutJson(runCli(["schema", "delegate"]));

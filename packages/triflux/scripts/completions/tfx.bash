@@ -9,7 +9,7 @@ _tfx_completion() {
     words=("${COMP_WORDS[@]}")
     cword=$COMP_CWORD
 
-    local commands="setup doctor mcp update list ls handoff schema hooks hub tray multi swarm synapse review why codex-team notion-read nr monitor version auto help"
+    local commands="setup doctor mcp update list ls handoff schema hooks hub multi swarm synapse review why codex-team notion-read nr monitor version auto help"
     local doctor_flags="--fix --reset --audit --diagnose --purge-logs --dynamic-routing --cleanup-stale-hubs --cleanup-stale-tmux --prefix --age-min --dry-run --apply --json --help"
     local auto_flags="--cli --mode --parallel --json --help"
     local setup_flags="--dry-run --enable-hub-autostart --help"
@@ -71,7 +71,7 @@ _tfx_completion() {
         schema)
             COMPREPLY=( $(compgen -W "${commands} delegate delegate-reply status ${schema_flags}" -- "$cur") )
             ;;
-        update|list|ls|handoff|tray|synapse|why|codex-team|notion-read|nr|monitor|version)
+        update|list|ls|handoff|synapse|why|codex-team|notion-read|nr|monitor|version)
             COMPREPLY=( $(compgen -W "--json --help" -- "$cur") )
             ;;
     esac
