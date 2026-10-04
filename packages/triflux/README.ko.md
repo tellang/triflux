@@ -137,7 +137,7 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 | `tfx cto` | 저장소 단위 권위 콘솔: `collect`, `status`, `dashboard`, `hygiene`, `steward`, `event` |
 | `tfx review` / `tfx codex-team` | Codex git diff 리뷰 / Codex 주도 팀 모드 |
 | `tfx stealth-fetch <url>` | cloakbrowser로 URL 하나를 가져옴(JSON을 stdout으로) |
-| `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx tray`, `tfx update`, `tfx version` | Notion → Markdown, 커밋 intent 트레일러, CLI 스키마, 설치된 스킬, TUI 모니터, 트레이, 업데이트, 버전 |
+| `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | Notion → Markdown, 커밋 intent 트레일러, CLI 스키마, 설치된 스킬, TUI 모니터, 업데이트, 버전 |
 | `tfx-live` | 라이브 세션 브리지(`/tfx-live` 스킬과 같은 명령) |
 | `tfx-profile` | 대화형 Codex 프로필 관리자 |
 
@@ -172,8 +172,9 @@ Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-s
 [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tfx-machine-profile.md).
 
 **CTO lake.** `tfx cto`는 저장소에서 일어난 일을 `.triflux/lake/`에 덧붙이기 전용으로 남긴다. 자동
-동작은 기본으로 꺼져 있고 `TFX_CTO_AUTO_COLLECT=1`, `TFX_CTO_NORTH_STAR=1`, `TFX_HUB_AUTO_TRAY=1`로
-켠다([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)).
+동작은 기본으로 꺼져 있고 `TFX_CTO_AUTO_COLLECT=1`이나 `TFX_CTO_NORTH_STAR=1`로
+켠다([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)). 예전 트레이 UI는 제거됐다
+([ADR-0022](docs/adr/0022-remove-cto-tray.md)).
 
 **원격 호스트.** `/tfx-remote`와 `--remote <host>`는 `~/.config/triflux/hosts.json`
 (Windows는 `%APPDATA%\triflux\hosts.json`)에서 호스트를 읽는다. `/tfx-remote setup`으로 호스트를
@@ -209,14 +210,14 @@ graph TD
 
 | 플랫폼 | 멀티플렉서 | 참고 |
 | --- | --- | --- |
-| macOS | tmux | 기본 경로. hard ceiling을 양수로 두면 `coreutils`(`gtimeout`)가 필요하다. `tfx tray`는 Swift 메뉴 막대 도우미를 띄운다. |
-| Linux | tmux | 지원. `tfx tray`는 쓸 수 없다. |
+| macOS | tmux | 기본 경로. hard ceiling을 양수로 두면 `coreutils`(`gtimeout`)가 필요하다. |
+| Linux | tmux | 지원. |
 | Windows | psmux + Windows Terminal | 아래 참고. |
 
 **Windows.** psmux(tmux 포크)의 기본 셸은 PowerShell이다. safety-guard가 `wt.exe`와 psmux `kill-session`
 직접 호출을 막으므로 탭과 패인은 `tfx-wt` 스킬(Windows에만 설치)과
-`hub/team/wt-manager.mjs`를 거친다. `tfx tray`는 시스템 트레이를 띄운다(`--attach`는 포그라운드
-디버깅). 에이전트 규칙은 [`.claude/rules/tfx-psmux.md`](.claude/rules/tfx-psmux.md).
+`hub/team/wt-manager.mjs`를 거친다. 에이전트 규칙은
+[`.claude/rules/tfx-psmux.md`](.claude/rules/tfx-psmux.md).
 
 ## 보안과 가드
 

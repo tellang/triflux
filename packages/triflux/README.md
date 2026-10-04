@@ -138,7 +138,7 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 | `tfx cto` | Repo-local authority console: `collect`, `status`, `dashboard`, `hygiene`, `steward`, `event` |
 | `tfx review` / `tfx codex-team` | Codex git-diff review / Codex-led team mode |
 | `tfx stealth-fetch <url>` | Fetch one URL through cloakbrowser (JSON on stdout) |
-| `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx tray`, `tfx update`, `tfx version` | Notion → Markdown, commit intent trailers, CLI schemas, installed skills, TUI monitor, tray, update, version |
+| `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | Notion → Markdown, commit intent trailers, CLI schemas, installed skills, TUI monitor, update, version |
 | `tfx-live` | Live session bridge (same as the `/tfx-live` skill) |
 | `tfx-profile` | Interactive Codex profile manager |
 
@@ -173,8 +173,9 @@ removes a CLI from routing; if no allowed CLI is available the route fails inste
 falling back. Details: [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tfx-machine-profile.md).
 
 **CTO lake.** `tfx cto` keeps an append-only history of the repo in `.triflux/lake/`. Automatic
-behavior is off by default; opt in with `TFX_CTO_AUTO_COLLECT=1`, `TFX_CTO_NORTH_STAR=1`, or
-`TFX_HUB_AUTO_TRAY=1` ([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)).
+behavior is off by default; opt in with `TFX_CTO_AUTO_COLLECT=1` or `TFX_CTO_NORTH_STAR=1`
+([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)). The old tray UI was removed
+([ADR-0022](docs/adr/0022-remove-cto-tray.md)).
 
 **Remote hosts.** `/tfx-remote` and `--remote <host>` read hosts from `~/.config/triflux/hosts.json`
 (Windows: `%APPDATA%\triflux\hosts.json`). Run `/tfx-remote setup` to add one, then
@@ -210,14 +211,14 @@ Package layout and execution paths: [ARCHITECTURE.md](ARCHITECTURE.md). Document
 
 | Platform | Multiplexer | Notes |
 | --- | --- | --- |
-| macOS | tmux | Default path. Install `coreutils` (`gtimeout`) if you keep a positive hard ceiling. `tfx tray` starts a Swift menu-bar helper. |
-| Linux | tmux | Supported. `tfx tray` is not available. |
+| macOS | tmux | Default path. Install `coreutils` (`gtimeout`) if you keep a positive hard ceiling. |
+| Linux | tmux | Supported. |
 | Windows | psmux + Windows Terminal | See below. |
 
 **Windows.** psmux (a tmux fork) runs PowerShell by default. safety-guard blocks direct `wt.exe`
 and raw `psmux kill-session`, so tabs and panes go through the `tfx-wt` skill (set up only on
-Windows) and `hub/team/wt-manager.mjs`. `tfx tray` runs the system tray (`--attach` for a
-foreground debug run). Agent rules: [`.claude/rules/tfx-psmux.md`](.claude/rules/tfx-psmux.md).
+Windows) and `hub/team/wt-manager.mjs`. Agent rules:
+[`.claude/rules/tfx-psmux.md`](.claude/rules/tfx-psmux.md).
 
 ## Security and guards
 
