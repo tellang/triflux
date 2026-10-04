@@ -152,6 +152,16 @@ describe("감사 정탐은 유지한다", () => {
     assert.match(contextOf("그럼 /tfx-auto 로"), /Skill: tfx-auto/);
   });
 
+  it("짧은 명시 호출(tfx-auto 로 돌려)은 짧은 반응 가드에 막히지 않는다", () => {
+    const context = contextOf("tfx-auto 로 돌려");
+    assert.match(context, /^\[TRIFLUX MAGIC KEYWORD: tfx-unified\]/);
+    assert.match(context, /You MUST invoke the skill/);
+  });
+
+  it("짧은 자연어 제안(로그인 기능 구현해줘)은 짧은 반응으로 보고 주입하지 않는다", () => {
+    assert.equal(contextOf("로그인 기능 구현해줘"), undefined);
+  });
+
   it("슬래시 없는 이름 언급은 주입하지 않는다", () => {
     for (const prompt of [
       "그건 이미 tfx-auto에 합쳐졌을텐데 맞지",
