@@ -8,20 +8,13 @@
   </picture>
 </p>
 
-<h3 align="center">Claude Code, Codex, Antigravity를 위한 CLI-first 멀티 모델 오케스트레이션</h3>
-
-<p align="center">
-  작업 라우팅, 에이전트 조율, 로컬/원격 팀 실행, Codex/Antigravity/Claude 실행 경로를<br>
-  감사 가능한 경로로 묶는 단일 진입점입니다.
-</p>
+<h3 align="center">Claude Code · Codex · Antigravity를 잇는 CLI 중심 멀티모델 오케스트레이터</h3>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/dm/triflux?style=flat-square&color=F5C242" alt="npm downloads"></a>
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
-  <img src="https://img.shields.io/badge/skill_files-34-F5C242?style=flat-square" alt="34 skill files">
-  <sub>deprecated 호환 alias 11개는 전면 API가 아닙니다</sub>
-  <img src="https://img.shields.io/badge/node-%3E%3D18-374151?style=flat-square" alt="Node >= 18">
+  <img src="https://img.shields.io/badge/node-%3E%3D20-374151?style=flat-square" alt="Node >= 20">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
 
@@ -29,387 +22,218 @@
   <img alt="triflux demo" src="docs/assets/demo-multi.gif" width="680">
 </p>
 
-<p align="center">
-  <a href="#빠른-시작">빠른 시작</a> &middot;
-  <a href="#현재-표면">현재 표면</a> &middot;
-  <a href="#권장-워크플로우">권장 워크플로우</a> &middot;
-  <a href="#아키텍처">아키텍처</a> &middot;
-  <a href="#운영">운영</a> &middot;
-  <a href="#보안과-guard">보안</a>
-</p>
+triflux는 코딩 작업을 Claude, Codex, Antigravity 사이에서 나눠 맡기는 Claude Code 플러그인이자
+npm CLI다. `/tfx-auto`에 할 일을 한 번 적으면 triflux가 CLI 레인(기본은 Codex)을 고르고, 임의
+셸 명령 대신 관리된 경로로 실행한다. 필요하면 로컬 병렬 워커, worktree로 격리한 스웜,
+Claude↔Codex 라이브 세션, 원격 호스트로 작업을 나눈다. 설치, 진단, 로컬 Hub, 팀 실행은 `tfx`
+셸 CLI가 맡는다.
 
----
-
-## triflux란?
-
-triflux는 **Claude Code plugin + npm CLI**입니다. Claude, Codex, Antigravity를
-오가며 AI 코딩 작업을 라우팅합니다. 임의 셸 명령이나 오래된 skill alias가
-제어 표면이 되지 않도록 현재 진입점을 좁혔습니다.
-
-현재 설계는 예전 README보다 단순합니다.
-
-- **`/tfx-auto`가 Claude Code skill의 표준 front door입니다.** quick/deep/consensus/parallel/retry 동작은 플래그로 표현합니다.
-- **`tfx`는 셸 CLI입니다.** setup, doctor, Hub, MCP, team/swarm, handoff 같은 운영 작업을 담당합니다.
-- **호환 alias는 남아 있지만 전면 API가 아닙니다.** 마이그레이션 표는 [`docs/legacy-skill-aliases.md`](https://github.com/tellang/triflux/blob/main/docs/legacy-skill-aliases.md)로 분리했습니다.
-- **호스트 로컬 Codex harness는 패키지 범위 밖입니다.** 예를 들어 `~/.codex/skills/tfx-harness`는 특정 머신에서 워크플로우를 추천할 수 있지만, 이 저장소/npm/Claude plugin에 포함되지 않습니다.
-
----
-
-## 빠른 시작
-
-### 1. 설치
-
-Claude Code plugin:
-
-```text
-/plugin marketplace add tellang/triflux
-/plugin install triflux@tellang
-```
-
-npm:
+## 설치
 
 ```bash
-npm install -g triflux
+npm install -g triflux   # postinstall이 setup 스크립트를 실행한다
+tfx doctor               # CLI, tmux, Hub, MCP, 프로필, 스킬 점검
 ```
 
-터미널에서 setup/doctor를 실행합니다.
+이 저장소의 마켓플레이스에서 Claude Code 플러그인으로 설치할 수도 있다.
 
 ```bash
-tfx setup
-tfx doctor
+claude plugin marketplace add tellang/triflux
+claude plugin install triflux@triflux
 ```
 
-자동화에서는 `tfx doctor --json`을 사용하세요.
+흔한 설정 어긋남은 `tfx doctor --fix`로 고친다. 자동화에서는 `tfx doctor --json`을 쓴다.
 
-### 2. 현재 권장 front door 사용
-
-Claude Code slash skill:
+## 처음 써 보기
 
 ```text
-/tfx-auto "이 변경 리뷰해줘" --mode consensus
-/tfx-auto "인증 플로우 구현하고 테스트까지" --mode deep --retry ralph
-/tfx-auto "이 PRD를 격리 shard로 나눠 실행" --parallel swarm --mode consensus --isolation worktree
-/tfx-remote spawn ryzen5-7600 "보안 리뷰 실행"
-/tfx-doctor
-```
-
-셸 CLI:
-
-```bash
-tfx list
-tfx hub ensure
-tfx mcp list
-tfx handoff --target remote --output .omx/handoff.md
-tfx swarm preflight docs/prd/example.md --json
-tfx codex-team "auth 리팩터링 + 테스트 추가"
-```
-
-> deep, consensus, team, swarm 경로는 관련 CLI와 터미널 multiplexer가 필요합니다.
-> 먼저 `tfx doctor`를 실행하면 Codex/Antigravity/Claude, psmux/tmux, Hub, MCP,
-> profile, stale skill 문제를 한 번에 확인할 수 있습니다.
-
----
-
-## 현재 표면
-
-### 셸 명령
-
-`tfx` CLI의 주요 명령은 다음과 같습니다.
-
-| 명령 | 용도 |
-| --- | --- |
-| `tfx setup` | scripts, HUD, hooks, MCP, profile 동기화. `--dry-run` 지원. |
-| `tfx doctor` | 설치 상태 진단/복구. `--fix`, `--reset`, `--diagnose`, `--json` 지원. |
-| `tfx auto` | `tfx-auto` 라우팅 결정을 미리 확인. `--cli`, `--mode`, `--parallel`, `--json` 지원. |
-| `tfx mcp` | MCP registry 대상을 `list`, `sync`, `add`, `remove`. |
-| `tfx hub` | 로컬 MCP 메시지 버스 시작/중지/보장/상태 확인. |
-| `tfx list` | 설치된 package skill과 user skill 목록. |
-| `tfx handoff` | 현재 컨텍스트를 로컬/원격 이어받기 프롬프트로 직렬화. |
-| `tfx schema` | CLI와 Hub delegator schema 출력. |
-| `tfx hooks` | hook orchestrator를 scan/diff/apply/restore/status로 관리. |
-| `tfx tray` | tray/HUD 상태 프로세스 실행. `--attach`는 foreground 디버깅용. |
-| `tfx multi` | tmux/psmux + Hub 기반 로컬 multi-agent team 실행. |
-| `tfx swarm` | PRD 기반 worktree 격리 swarm의 plan/preflight/run/list. |
-| `tfx synapse` | swarm registry와 lease 상태 확인. |
-| `tfx review` | Codex 기반 git diff review 실행. |
-| `tfx codex-team` | Codex lead team mode용 편의 wrapper. |
-| `tfx notion-read` | MCP client로 Notion 페이지를 Markdown으로 변환. |
-| `tfx why` | 특정 경로의 마지막 커밋 intent trailer 조회. |
-| `tfx update` | 최신 stable/dev 패키지로 업데이트. |
-| `tfx monitor` | 터미널 TUI monitor 실행. |
-| `tfx version` | 버전 정보 출력. |
-| `tfx-profile` | Codex profile 관리용 편의 binary. |
-
-정확한 인자 계약은 `tfx schema <command>`로 확인합니다.
-
-### Claude Code skill
-
-패키지에는 **34개 skill 파일**이 들어 있습니다. 크게 나누면 다음과 같습니다.
-
-- **표준 진입점**: `tfx-auto`, `tfx-remote`, `tfx-doctor`, `tfx-setup`,
-  `tfx-profile`, `tfx-hub`, `tfx-hooks`, `tfx-ship`, `tfx-wt`.
-- **작업 helper**: `tfx-plan`, `tfx-review`, `tfx-qa`, `tfx-research`,
-  `tfx-analysis`, `tfx-find`, `tfx-index`, `tfx-interview`, `tfx-prune`,
-  `tfx-forge`, `merge-worktree`, `star-prompt`.
-- **deprecated 호환 alias**: 11개 legacy 이름은 전환용 shim입니다. 새 문서와 새 프롬프트에서는 위 표준 진입점을 우선 사용하세요.
-
-### 표준 플래그 맵
-
-대부분의 옛 skill 이름은 `tfx-auto` 플래그로 표현할 수 있습니다.
-
-| 의도 | 표준 형태 |
-| --- | --- |
-| 빠른 단일 lane 작업 | `/tfx-auto "작업" --mode quick` |
-| 더 깊은 계획/실행/검증 루프 | `/tfx-auto "작업" --mode deep` |
-| 지속 retry 루프 | `/tfx-auto "작업" --retry ralph` |
-| consensus 리뷰 | `/tfx-auto "작업" --mode consensus` |
-| debate 또는 panel 보고 | `/tfx-auto "작업" --mode consensus --shape debate|panel` |
-| 로컬 병렬 작업 | `/tfx-auto "작업" --parallel N --mode deep` 또는 shell `tfx multi ...` |
-| PRD/worktree swarm | `/tfx-auto "작업" --parallel swarm --mode consensus --isolation worktree` 또는 shell `tfx swarm ...` |
-| CLI lane 강제 | `/tfx-auto "작업" --cli codex|antigravity|claude` |
-
-### 제어 표면의 경계
-
-triflux를 디버그하거나 확장할 때는 아래 경계를 분리해서 봐야 합니다.
-
-| 표면 | 기준 위치 | npm/plugin 포함 여부 |
-| --- | --- | --- |
-| 공개 CLI/runtime | `bin/`, `scripts/`, `hub/`, `hooks/`, `skills/` | 포함 |
-| publish mirror | `packages/triflux/` | 포함. root runtime 파일과 일치해야 함 |
-| Claude plugin metadata | `.claude-plugin/` | 포함. npm package 내용을 가리킴 |
-| Codex-local harness 실험 | `~/.codex/skills/*` | 미포함 |
-| legacy alias | `skills/<alias>/` + `docs/legacy-skill-aliases.md` | 포함되지만 deprecated 상태 |
-
-로컬 Codex harness가 workflow를 추천해도 이는 해당 머신의 routing 조언일 뿐입니다.
-패키지의 계약은 위의 CLI, Claude skill, hook, Hub 표면입니다.
-
----
-
-## 권장 워크플로우
-
-### 직접 구현/리뷰
-
-```text
-/tfx-auto "실패하는 auth 테스트 고쳐줘" --risk-tier medium
-/tfx-auto "SQL과 trust-boundary 중심으로 PR 리뷰" --mode consensus
-```
-
-검증 강도를 명시하려면 `--risk-tier low|medium|high`, 모드를 이미 알고 있으면
-`--mode quick|deep|consensus`를 사용합니다.
-
-### 끝까지 완료 루프
-
-```text
+/tfx-auto "깨지는 인증 테스트 고쳐줘"
+/tfx-auto "이 변경에서 신뢰 경계 문제 리뷰해줘" --mode consensus
 /tfx-auto "마이그레이션 끝내고 검증까지" --mode deep --retry ralph --max-iterations 10
 ```
 
-`--retry ralph`는 retry state machine과 stuck detector를 사용합니다. 루프 상한이
-필요하면 `--max-iterations`를 지정하세요.
+실행하지 않고 라우팅 판정만 보려면 셸에서 `tfx auto "<작업>" --json`을 실행한다.
 
-### consensus/debate/panel 출력
+## 스킬
 
-```text
-/tfx-auto "Postgres LISTEN/NOTIFY vs Redis Streams" --mode consensus --shape debate
-/tfx-auto "마이그레이션 전략 리뷰" --mode consensus --shape panel
-```
+직접 쓰는 스킬:
 
-참여 lane은 설정된 Claude/Codex/Antigravity입니다. 어떤 lane이 없으면 결과에 partial/degraded 상태가 드러나야 합니다.
+| 스킬 | 용도 |
+| --- | --- |
+| `/tfx-auto` | 구현, 수정, 리뷰, 병렬 작업의 진입점. 동작은 아래 플래그로 정한다. |
+| `/tfx-live` | Claude↔Codex 라이브 세션. `start`/`ask`/`stop`, `peer` 중계, `orchestrate`, `list-sessions`. |
+| `/tfx-remote` | SSH 너머 원격 Claude Code 세션. `setup`, `spawn`, `list`, `attach`, `send`, `resume`, `probe`, `kill`. |
+| `/tfx-setup` | 대화형 설정. 파일 동기화, HUD, Codex 프로필, MCP, 훅 우선순위. |
+| `/tfx-doctor` | 진단과 복구. Hub 시작·중지·상태 확인도 여기서 한다. |
+| `/tfx-profile` | Codex 프로필 관리. |
+| `/tfx-ship` | triflux 릴리즈 절차(메인테이너용). |
+| `/tfx-wt` | Windows Terminal 탭·패인 조작. `tfx setup`은 Windows에만 설치한다. |
 
-### 로컬 팀 또는 PRD swarm
+내부 레인(`internal: true`. 다른 스킬과 라우터가 부르지만 이름을 직접 불러도 된다):
 
-```text
-# 로컬 team mode
-tfx multi "auth 리팩터링 + UI 수정 + 테스트 추가"
+| 스킬 | 용도 |
+| --- | --- |
+| `tfx-harness` | 메타 라우팅. 요청에 맞는 스킬이나 경로를 실행 없이 하나 골라 준다. |
+| `tfx-plan` | 여러 모델이 합의한 구현 계획(`--quick`은 가벼운 버전). |
+| `tfx-review` | 코드 리뷰 판정(`--quick`은 가벼운 버전). |
+| `tfx-research` | 출처를 교차 확인하는 웹 리서치(`--quick`, `--auto`, `--depth`). |
+| `tfx-interview` | 요구사항 인터뷰. `--format goal`은 아이디어를 Claude Code `/goal` 블록으로 바꾼다. |
 
-# worktree 격리 PRD swarm
-tfx swarm preflight docs/prd/my-feature.md --json
-tfx swarm run docs/prd/my-feature.md
-```
+범용 보조 스킬 `merge-worktree`, `star-prompt`도 함께 들어 있다.
+키워드 훅이 프롬프트를 보고 스킬을 제안할 수 있다. 경로를 확실히 정하려면 `/tfx-*`를 직접 부른다.
 
-swarm은 격리 worktree와 file lease를 사용합니다. 큰 PRD는 실행 전에 preflight로 host,
-CLI profile, lease 충돌을 먼저 확인하세요.
+## `/tfx-auto` 플래그
 
-### 원격 세션
+| 플래그 | 값 | 효과 |
+| --- | --- | --- |
+| `--mode` | `quick`(기본), `deep`, `consensus`, `live` | `deep` = 계획 → 실행 → 검증 루프, `consensus` = 여러 CLI 합의, `live` = `tfx-live peer`로 넘김 |
+| `--shape` | `consensus`, `debate`, `panel` | `--mode consensus`의 결과 형태 |
+| `--cli` | `auto`, `codex`, `antigravity`, `claude` | CLI 레인 고정 |
+| `--cli-set` | `triad`, `no-antigravity`, `custom` | 합의 참여자 구성 |
+| `--parallel` | `1`, `N`, `swarm` | `N` = 로컬 워커(`tfx multi`), `swarm` = worktree별 PRD 샤드(`tfx swarm`) |
+| `--isolation` | `none`, `worktree` | 샤드별 worktree 격리(`swarm`이면 강제) |
+| `--remote` | `<host>` | 스웜 샤드를 `hosts.json`의 호스트로 보냄 |
+| `--retry` | `0`, `1`(기본), `ralph`, `auto-escalate` | `ralph` = 막힘 감지가 있는 재시도 상태 기계, `auto-escalate` = 모델 체인을 한 단계씩 올림 |
+| `--max-iterations` | `N` | `ralph`/`auto-escalate` 상한(`0`은 무제한) |
+| `--rounds` | `N`(기본 4) | `--mode live` 왕복 횟수 |
+| `--risk-tier` | `auto`, `low`, `medium`, `high` | 변경 범위로 검증 강도를 정함. `--mode`가 있으면 무시 |
+| `--skill` | `<name>` | `skills/<name>/SKILL.md`를 Codex/Antigravity 프롬프트 앞에 붙임 |
+| `--no-native-bridge-ui` | | headless 워커를 `claude agents` 패널에 띄우지 않음 |
 
-```text
-/tfx-remote setup
-/tfx-remote spawn ryzen5-7600 "보안 리뷰 실행"
-/tfx-remote list
-/tfx-remote attach <session>
-/tfx-remote send <session> "수정 계속 진행"
-```
+`--lead`, `--options`, `--experts`와 플래그 충돌 규칙까지 포함한 전체 계약은
+[`skills/tfx-auto/SKILL.md`](skills/tfx-auto/SKILL.md)에 있다.
 
-`tfx-remote`는 setup/spawn/list/attach/send/resume/probe/kill 흐름을 하나로 묶은 Claude skill 표면입니다.
+## 모델과 프로필
 
-### 컨텍스트 저장/이어받기
+Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로필>.config.toml`이, 역할별 프로필
+배정은 [`scripts/lib/agent-route-policy.mjs`](scripts/lib/agent-route-policy.mjs)가 정한다. Claude는
+별칭으로 부르므로 등급마다 가장 새 모델이 자동으로 잡힌다.
 
-```bash
-tfx handoff --target remote --decision "README는 canonical 중심, alias는 docs로 분리" --output .omx/handoff.md
-```
+| 프로필 / 별칭 | 레인 |
+| --- | --- |
+| `gpt6_astra_xhigh` | 아키텍처, 계획, 비평, 디버깅, 보안 리뷰, 깊은 실행 |
+| `gpt6_astra_max`, `gpt6_astra_ultra` | 가장 어려운 단일 작업(`TFX_CODEX_PROFILE=max\|ultra`). `max`는 `auto-escalate` 첫 단계 |
+| `gpt61_sol_high` / `gpt61_sol_med` | 기본 구현, 리뷰, 검증, 테스트, 문서 / 정리 작업 |
+| `gpt6_luna_high` / `gpt6_luna_low` | 빌드 수정, 글쓰기 / 지연 우선 조회 |
+| Claude `fable` | `--retry auto-escalate` 마지막 단계 |
+| Claude `opus` / `sonnet` / `haiku` | 메타 라우팅과 계획 게이트 / Claude 네이티브 QA·검증 / 빠른 탐색 |
 
-세션을 끝내거나 다른 host/agent가 이어받아야 할 때 사용합니다.
+라우팅 정책: [`.claude/rules/tfx-routing.md`](.claude/rules/tfx-routing.md) ·
+승격 체인: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-escalation-chain.md).
 
----
+## 셸 CLI
 
-## 아키텍처
+| 명령 | 용도 |
+| --- | --- |
+| `tfx setup` / `tfx doctor` | 파일·훅·HUD·MCP·프로필 동기화 / 진단과 복구(`--fix`, `--json`) |
+| `tfx auto` | `tfx-auto` 라우팅 판정 미리 보기 |
+| `tfx multi` | tmux + Hub 기반 로컬 멀티 CLI 팀 |
+| `tfx swarm` | PRD 기반 worktree 격리 실행: `plan`, `preflight`, `run`, `list` |
+| `tfx synapse` | 스웜 세션 레지스트리와 lease |
+| `tfx hub` | 로컬 Hub: `start`, `stop`, `status`, `ensure` |
+| `tfx mcp` | 관리형 MCP 레지스트리: `list`, `sync`, `add`, `remove` |
+| `tfx hooks` | 훅 오케스트레이터: scan, diff, apply, status |
+| `tfx handoff` | 현재 맥락을 다른 세션이나 호스트로 넘길 프롬프트로 묶음 |
+| `tfx cto` | 저장소 단위 권위 콘솔: `collect`, `status`, `dashboard`, `hygiene`, `steward`, `event` |
+| `tfx review` / `tfx codex-team` | Codex git diff 리뷰 / Codex 주도 팀 모드 |
+| `tfx stealth-fetch <url>` | cloakbrowser로 URL 하나를 가져옴(JSON을 stdout으로) |
+| `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx tray`, `tfx update`, `tfx version` | Notion → Markdown, 커밋 intent 트레일러, CLI 스키마, 설치된 스킬, TUI 모니터, 트레이, 업데이트, 버전 |
+| `tfx-live` | 라이브 세션 브리지(`/tfx-live` 스킬과 같은 명령) |
+| `tfx-profile` | 대화형 Codex 프로필 관리자 |
 
-<p align="center">
-  <img src="docs/assets/architecture.svg" alt="triflux architecture" width="680">
-</p>
+정확한 인자는 `tfx <명령> --help`나 `tfx schema <명령>`으로 확인한다.
+
+## 런타임 기능
+
+**라이브 세션.** `tfx-live`는 Claude Code와 Codex TUI 세션을 조종한다. Claude 데몬 대상
+(`--short`/`--session-id`)은 UDS를 먼저 시도하고, `--session`도 주면 실패 시 tmux로 넘어간다.
+Codex는 tmux를 쓰거나 `--transport uds --thread <id|auto>`로 UDS를 쓴다. `peer`는 두 세션 사이를
+`--rounds`만큼 중계하고, `orchestrate`는 한 작업에 Claude와 Codex를 함께 붙인다. triflux의 Codex
+훅이 실행 중인 Codex 세션을 `~/.local/state/triflux/codex-sessions/`에 기록하므로
+`tfx-live list-sessions --cli codex|claude`로 직접 띄운 tmux 세션도 찾을 수 있다.
+
+**오래 걸리는 작업.** `scripts/tfx-route.sh --async <agent> "<프롬프트>"`는 job id를 바로 돌려줘서
+Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-status`, `--job-wait`,
+`--job-result`로 확인한다.
+
+**Hub.** 팀, 원격 세션, MCP 도구, 상태 표시를 잇는 로컬 메시지 버스다. 기본으로
+`127.0.0.1:27888`에 붙고(`TFX_HUB_PORT`로 변경), `TFX_HUB_TOKEN`이 있으면 bearer 토큰을 요구한다.
+`tfx-auto`, `tfx multi`, 로컬 스웜 샤드의 headless 워커는 `claude agents` 패널에 행으로 보인다.
+끄려면 `--no-native-bridge-ui`를 준다.
+
+**재시도와 승격.** `--retry ralph`는 끝나거나 막힐 때(같은 실패 3회 연속)까지 반복한다.
+`--retry auto-escalate`는 Codex `gpt6_astra_max`에서 Claude `fable`로 올라간다. 체인은
+`.triflux/config/escalation-chain.json`으로 바꿀 수 있다.
+
+**머신 프로파일.** setup은 이 머신에서 쓸 CLI와 timeout 정책을
+`~/.config/triflux/machine-profile.env`에 기록한다. `TFX_DISABLE_CODEX=1`이나
+`TFX_DISABLE_ANTIGRAVITY=1`을 주면 그 CLI가 라우팅에서 빠진다. 허용된 CLI가 하나도 없으면 조용히
+다른 경로로 넘어가지 않고 실패한다. 자세한 내용은
+[`.claude/rules/tfx-machine-profile.md`](.claude/rules/tfx-machine-profile.md).
+
+**CTO lake.** `tfx cto`는 저장소에서 일어난 일을 `.triflux/lake/`에 덧붙이기 전용으로 남긴다. 자동
+동작은 기본으로 꺼져 있고 `TFX_CTO_AUTO_COLLECT=1`, `TFX_CTO_NORTH_STAR=1`, `TFX_HUB_AUTO_TRAY=1`로
+켠다([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)).
+
+**원격 호스트.** `/tfx-remote`와 `--remote <host>`는 `~/.config/triflux/hosts.json`
+(Windows는 `%APPDATA%\triflux\hosts.json`)에서 호스트를 읽는다. `/tfx-remote setup`으로 호스트를
+추가한 뒤 `/tfx-remote spawn <host> "보안 리뷰 실행"`처럼 쓴다.
+
+## 구조
 
 ```mermaid
 graph TD
-    User([User / Claude Code / shell]) --> Skills[Claude skills]
+    User([Claude Code 프롬프트 / 셸]) --> Skills["/tfx-auto · /tfx-live · /tfx-remote"]
     User --> CLI[tfx CLI]
-    Skills --> Auto["/tfx-auto"]
-    Skills --> Remote["/tfx-remote"]
-    CLI --> Hub[triflux Hub]
-    CLI --> Team[tfx multi / swarm]
-    Auto --> Route[tfx-route.sh + guards]
-    Team --> Hub
-    Remote --> Hub
+    Skills --> Route[tfx-route.sh]
+    Skills --> Live[tfx-live]
+    CLI --> Team["tfx multi · tfx swarm"]
     Route --> Codex[Codex CLI]
-    Route --> Antigravity[Antigravity agy CLI]
+    Route --> Agy[Antigravity agy]
     Route --> Claude[Claude Code]
-    Hub --> MCP[MCP registry + bridge]
-    Hub --> Store[(SQLite or memory store)]
-    Hub --> Dashboard[HUD / monitor]
+    Team --> Route
+    Team --> WT[(git worktrees)]
+    Live -->|UDS 또는 tmux| Sessions[Claude / Codex TUI 세션]
+    Route --> Hub["Hub 127.0.0.1:27888"]
+    Team --> Hub
+    Hub --> Store[(SQLite 또는 메모리 저장소)]
+    Hub --> MCP[MCP 도구]
+    Hub --> UI["HUD · claude agents 패널"]
+    CLI --> Lake[(".triflux/lake (tfx cto)")]
 ```
 
-일반적인 라우팅 경로는 다음과 같습니다.
+패키지 구성과 실행 경로는 [ARCHITECTURE.md](ARCHITECTURE.md), 문서 지도는
+[docs/README.md](docs/README.md)에 있다.
 
-1. Claude Code prompt 또는 명시적 skill 호출.
-2. keyword/routing hook이 context를 추가하거나 skill을 고릅니다.
-3. `tfx-auto`가 intent를 mode, retry, parallelism, risk tier, 대상 CLI lane으로 정규화합니다.
-4. `tfx-route.sh`, Hub worker, 또는 `tfx` CLI가 실제 Codex/Antigravity/Claude 기반 작업을 실행합니다.
-5. Hub가 team message, lease, retry, handoff, status surface를 기록합니다.
+## 플랫폼
 
-### Hub
-
-Hub는 team, remote session, MCP tool, status surface를 위한 로컬 메시지 버스입니다.
-localhost에 bind하며 pipe/HTTP transport를 사용합니다.
-
-```bash
-tfx hub ensure
-tfx hub status --json
-tfx hub stop
-```
-
-macOS에서 test나 Hub 시작이 `node` localhost port를 열면 방화벽 팝업이 뜰 수 있습니다.
-문서 작업에는 필요 없고, 실제 Hub/team/MCP workflow가 필요할 때만 환경 정책에 맞게 허용하세요.
-
-### Guard
-
-triflux는 위험한 실행을 관리된 경로 뒤에 둡니다.
-
-- CLI 호출은 `tfx-route.sh`, Hub worker, `tfx` CLI를 통과해야 합니다.
-- 직접 `codex exec` / `gemini -y` 경로는 설치된 workflow에서 guard됩니다.
-- psmux/Windows Terminal 흐름은 임의 `wt.exe`/`psmux send-keys`가 아니라 관리 API와 규칙을 사용합니다.
-
-### Profile과 모델 라우팅
-
-Codex profile은 `tfx-profile`로 관리하고, Antigravity 및 legacy Gemini 호환 상태는 `tfx setup`/`tfx doctor`로 점검합니다. 이미 profile이
-소유한 model/effort 값을 launcher script에 중복 하드코딩하지 마세요.
-
----
-
-## 운영
-
-### 진단
-
-```bash
-tfx doctor
-tfx doctor --json
-tfx doctor --fix
-tfx doctor --diagnose
-```
-
-`doctor`는 CLI, profile, hook, skill, Hub, MCP registry, route script sync,
-stale team, 로컬 설정 drift를 확인합니다.
-
-### MCP registry
-
-```bash
-tfx mcp list
-tfx mcp sync
-tfx mcp add context7 --url https://mcp.context7.com/mcp
-tfx mcp remove context7
-```
-
-registry가 관리 대상 MCP 설정의 source of truth입니다. Drift 디버깅이 아니라면
-Codex/Antigravity/Claude MCP 파일을 직접 수정하지 마세요.
-
-### State snapshot
-
-Hub 시작 시 `~/.codex/`, `~/.gemini/` 일부 상태를 ignored `references/*-snapshots/`
-폴더에 best-effort daily snapshot으로 저장할 수 있습니다. 수동 helper:
-
-```bash
-npm run snapshot:codex
-npm run snapshot:gemini
-npm run snapshot:all
-```
-
-### Release/mirror check
-
-패키지 내용에 영향이 있는 저장소 변경은 ship 전에 release gate를 통과시킵니다.
-
-```bash
-npm run lint:skills
-npm run gen:skill-manifest
-npm run release:check-sync
-npm run release:check-mirror
-npm run lint
-```
-
-`packages/triflux`는 일부 runtime folder의 npm publish mirror입니다. mirror 대상 파일을
-수정했다면 동기화 상태를 확인하세요.
-
----
-
-## 플랫폼 지원
-
-| 플랫폼 | Multiplexer | 참고 |
+| 플랫폼 | 멀티플렉서 | 참고 |
 | --- | --- | --- |
-| macOS | tmux | 지원. 일부 흐름은 `gtimeout` 같은 timeout provider 필요. |
-| Linux | tmux | 지원. |
-| Windows | psmux + Windows Terminal | 관리된 psmux/WT 경로로 지원. psmux 기본 shell은 PowerShell. |
+| macOS | tmux | 기본 경로. hard ceiling을 양수로 두면 `coreutils`(`gtimeout`)가 필요하다. `tfx tray`는 Swift 메뉴 막대 도우미를 띄운다. |
+| Linux | tmux | 지원. `tfx tray`는 쓸 수 없다. |
+| Windows | psmux + Windows Terminal | 아래 참고. |
 
-agent/launcher가 따라야 하는 더 엄격한 Windows/psmux 규칙은 `AGENTS.md`와
-`.claude/rules/tfx-psmux.md`를 보세요.
+**Windows.** psmux(tmux 포크)의 기본 셸은 PowerShell이다. safety-guard가 `wt.exe`와 psmux `kill-session`
+직접 호출을 막으므로 탭과 패인은 `tfx-wt` 스킬(Windows에만 설치)과
+`hub/team/wt-manager.mjs`를 거친다. `tfx tray`는 시스템 트레이를 띄운다(`--attach`는 포그라운드
+디버깅). 에이전트 규칙은 [`.claude/rules/tfx-psmux.md`](.claude/rules/tfx-psmux.md).
 
----
+## 보안과 가드
 
-## 보안과 Guard
-
-| 계층 | 보호 |
+| 층 | 보호 |
 | --- | --- |
-| Hub token auth | 설정된 경우 Hub API에 로컬 bearer token 적용. |
-| Localhost binding | Hub 기본 bind는 `127.0.0.1`. |
-| MCP registry guard | 지원하지 않거나 stale한 MCP record를 관리형 HTTP entry로 교체. |
-| Headless guard | 비관리 Codex/Antigravity headless 실행 경로와 deprecated Gemini route 차단. |
-| Safety guard | psmux/SSH/WT 셸 민감 흐름 sanitizing. |
-| Consensus reporting | deep/consensus workflow는 degraded/disputed 결과를 명시해야 함. |
+| 관리된 경로 | Codex와 Antigravity는 `tfx-route.sh`, Hub 워커, `tfx`로만 부르고 맨 `codex exec`나 `agy`로 부르지 않는다. 호출자가 지키는 규칙이며 이를 막는 훅은 없다. |
+| safety-guard 훅 | 위험한 셸 명령(루트 `rm -rf`, main 강제 push, `git clean -fd`, SQL `DROP`), `wt.exe`·psmux 종료 직접 호출, Windows 호스트로 SSH 보내는 bash 문법을 막고 관리된 대안을 알려 준다. |
+| Hub | localhost에만 붙는다. bearer 토큰(`TFX_HUB_TOKEN`)은 선택. |
+| MCP 레지스트리 | 낡았거나 지원하지 않는 MCP 항목을 관리형 항목으로 바꾼다. |
+| 합의 결과 | deep·consensus 실행은 일부 레인이 빠졌거나 의견이 갈린 결과를 숨기지 않고 표시한다. |
 
----
+## 기여
 
-## 개발
-
-```bash
-npm ci
-npm test
-npm run lint
-npm run release:check-sync
-npm run release:check-mirror
-```
-
-기여자 메모:
-
-- deprecated alias 세부사항은 main README에 다시 늘어놓지 말고 [`docs/legacy-skill-aliases.md`](https://github.com/tellang/triflux/blob/main/docs/legacy-skill-aliases.md)를 갱신하세요.
-- Codex-local 실험은 패키지 경계를 의도적으로 바꾸는 경우가 아니라면 `~/.codex/skills` 아래에 둡니다.
-- docs-only 변경은 보통 `npm run lint`, release sync check 같은 targeted check로 충분합니다. full integration test는 Hub 서버와 localhost listener를 띄울 수 있습니다.
-
----
+Node 20 이상이 필요하다. 테스트, 린트, 패키지 경계, 미러·릴리즈 점검, 상태 스냅샷은
+[CONTRIBUTING.md](CONTRIBUTING.md)에 있다. 릴리즈는 자동이다. 버전을 올린 커밋이 `main`에
+머지되면 CI 통과 뒤 `release.yml`이 태그, GitHub 릴리즈, OIDC Trusted Publishing을 통한 npm 게시까지 진행한다.
+결정 기록은 [docs/adr/](docs/adr/README.md)에 있다.
 
 <p align="center">
   <sub>MIT License &middot; Made by <a href="https://github.com/tellang">tellang</a></sub>

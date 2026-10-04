@@ -283,9 +283,9 @@ user-state `hosts.json` 존재 여부 확인.
     - label: "네, 원격 설정"
       description: "SSH 호스트를 감지하고 연결 테스트합니다"
     - label: "나중에"
-      description: "로컬만 사용. 나중에 /tfx-remote-setup으로 설정"
+      description: "로컬만 사용. 나중에 /tfx-remote setup으로 설정"
   ```
-  "네" 선택 시 → `/tfx-remote-setup` 스킬 호출하여 호스트 위저드 실행
+  "네" 선택 시 → `/tfx-remote setup` 호출하여 호스트 위저드 실행
 
 - 파일 있음 → 등록된 호스트 각각에 대해 SSH 연결 + Claude 설치 프로브:
   ```bash
@@ -545,7 +545,7 @@ options:
 ### 다음 단계
 - Codex 미설치 시: `npm install -g @openai/codex`
 - Antigravity 미설치 시: Google Antigravity 설치 후 `agy`가 PATH에서 실행되는지 확인
-- 원격 호스트 추가: `/tfx-remote-setup`
+- 원격 호스트 추가: `/tfx-remote setup`
 - 검색 MCP 추가/변경: `/tfx-setup` → 단계별 선택 → 검색 MCP
 - 세션 재시작하면 HUD + 검색 MCP가 활성화됩니다
 ```

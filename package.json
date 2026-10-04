@@ -70,7 +70,7 @@
     "release:verify": "node scripts/release/verify.mjs"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20"
   },
   "repository": {
     "type": "git",

@@ -15,7 +15,7 @@
     "tfx-setup-tui": "bin/tfx-setup-tui.mjs"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
