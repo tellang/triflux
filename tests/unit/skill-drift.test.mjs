@@ -161,18 +161,6 @@ describe("tfx-auto SKILL.md — thin alias 이관 규칙", () => {
     );
   });
 
-  it("false positive 방지: auto 기본이 MANDATORY 지시문에 포함", () => {
-    const content = readSkill("tfx-auto");
-    const routingSection = extractSection(
-      content,
-      /^##\s+멀티\s+태스크\s+라우팅/,
-    );
-    assert.ok(
-      /MANDATORY/i.test(routingSection),
-      "멀티 태스크 라우팅 섹션에 MANDATORY 강제 지시문이 없음",
-    );
-  });
-
   it("tfx-autoroute 의미가 auto-escalate 체인으로 이관되었다", () => {
     const content = readSkill("tfx-auto");
     assert.ok(

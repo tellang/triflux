@@ -1194,7 +1194,7 @@ codex_is_available() {
 
 auto_reroute() {
   # Issue #281: code-change dispatch escalation is decided in the JS router
-  # (hub/lib/tfx-route-args.mjs). This shell function only handles quota-driven
+  # before CLI execution. This shell function only handles quota-driven
   # CLI fallback and must stay a transparent passthrough for dispatch mode.
   local failed_cli="$1"
   local target_cli=""

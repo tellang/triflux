@@ -296,7 +296,7 @@ export function uniqueStrings(values = []) {
   ];
 }
 
-export function inferDomainTagsFromText(text = "") {
+function inferDomainTagsFromText(text = "") {
   if (typeof text !== "string" || !text.trim()) return [];
   const normalized = text.toLocaleLowerCase();
   const matched = [];
@@ -314,7 +314,7 @@ export function inferDomainTagsFromText(text = "") {
   return uniqueStrings(matched);
 }
 
-export function getDefaultServerMetadata(serverName = "") {
+function getDefaultServerMetadata(serverName = "") {
   const toolCount = MCP_SERVER_TOOL_CATALOG[serverName]?.length || 0;
   const domainTags = uniqueStrings([
     ...(MCP_SERVER_DOMAIN_TAGS[serverName] || []),

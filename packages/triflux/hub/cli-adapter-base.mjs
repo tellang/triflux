@@ -1,7 +1,7 @@
 // hub/cli-adapter-base.mjs — codex/gemini 공통 CLI adapter 인터페이스
 // Phase 2: codex-adapter.mjs에서 추출한 재사용 가능 유틸리티
 
-import { execSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 
 import { codexProfileConfigOverrides } from "../scripts/lib/codex-profile-config.mjs";
@@ -70,71 +70,6 @@ export function parseRetryAfterMs(text, provider) {
   return FALLBACK_COOLDOWN_MS[provider] || 5 * 3600_000;
 }
 
-// ── Codex CLI compatibility ─────────────────────────────────────
-
-let _cachedVersion = null;
-
-/**
- * `codex --version` 실행 결과를 파싱하여 마이너 버전 숫자 반환.
- * 파싱 실패 시 0 반환 (구버전으로 간주).
- * @returns {number} 마이너 버전 (예: 0.117.0 → 117)
- */
-export function getCodexVersion() {
-  if (_cachedVersion !== null) return _cachedVersion;
-  const override = Number(process.env.TFX_CODEX_VERSION_MINOR);
-  if (Number.isFinite(override) && override > 0) {
-    _cachedVersion = override;
-    return _cachedVersion;
-  }
-  try {
-    const out = execSync("codex --version", {
-      encoding: "utf8",
-      timeout: 5000,
-    }).trim();
-    const match = out.match(/(\d+)\.(\d+)\.(\d+)/);
-    _cachedVersion = match ? Number.parseInt(match[2], 10) : 0;
-  } catch {
-    // Command builders should remain stable in CI even when the real Codex
-    // CLI is absent. Runtime preflight still reports/install-gates Codex
-    // separately; this fallback only selects the modern argv shape.
-    _cachedVersion = 117;
-  }
-  return _cachedVersion;
-}
-
-/**
- * 최소 마이너 버전 이상인지 확인.
- * @param {number} minMinor
- * @returns {boolean}
- */
-export function gte(minMinor) {
-  return getCodexVersion() >= minMinor;
-}
-
-/**
- * Codex CLI 기능별 분기 객체.
- * 실측 기반 임계값: 0.114.0에서 exec/skip-git-repo-check/color 확인됨.
- * --output-last-message는 0.114.0에 없음 (0.117+ 추정).
- */
-export const FEATURES = {
-  /** exec 서브커맨드 사용 가능 여부 (0.110+ 이전부터 존재) */
-  get execSubcommand() {
-    return gte(110);
-  },
-  /** --output-last-message 플래그 지원 여부 (0.117+) */
-  get outputLastMessage() {
-    return gte(117);
-  },
-  /** --color <COLOR> 플래그 지원 여부 (exec와 동시 도입) */
-  get colorNever() {
-    return gte(110);
-  },
-  /** 플러그인 시스템 지원 여부 (향후 확장용) */
-  get pluginSystem() {
-    return gte(120);
-  },
-};
-
 // ── Shell utilities ─────────────────────────────────────────────
 
 export function normalizePathForShell(value) {
@@ -182,7 +117,7 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
     enforceCanonicalProfile,
   } = opts;
 
-  const parts = ["codex"];
+  const parts = ["codex", "exec"];
   // Select the effort profile via `-c` config overrides instead of
   // `--profile <name>`. codex 0.134+ rejects `--profile X` whenever config.toml
   // still contains an inline [profiles.X] table (and codex re-injects such
@@ -196,30 +131,17 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
       })
     : [];
 
-  if (FEATURES.execSubcommand) {
-    parts.push("exec");
-    if (sandboxBypass) parts.push("--dangerously-bypass-approvals-and-sandbox");
-    if (skipGitRepoCheck) parts.push("--skip-git-repo-check");
-    if (resultFile && FEATURES.outputLastMessage) {
-      parts.push("--output-last-message", resultFile);
+  if (sandboxBypass) parts.push("--dangerously-bypass-approvals-and-sandbox");
+  if (skipGitRepoCheck) parts.push("--skip-git-repo-check");
+  if (resultFile) parts.push("--output-last-message", resultFile);
+  parts.push("--color", "never");
+  for (const override of profileOverrides)
+    parts.push("-c", shellQuote(override));
+  // `codex exec`는 --cwd를 받지 않아 child process의 cwd로 제어한다.
+  if (Array.isArray(mcpServers)) {
+    for (const server of mcpServers) {
+      parts.push("-c", `mcp_servers.${server}.enabled=true`);
     }
-    if (FEATURES.colorNever) parts.push("--color", "never");
-    for (const override of profileOverrides)
-      parts.push("-c", shellQuote(override));
-    // NOTE: `codex exec`는 --cwd 플래그를 지원하지 않는다. Node spawn의 cwd
-    // 옵션으로 child process의 working directory를 제어한다 (conductor.mjs 참조).
-    // opts.cwd는 기록용으로만 받아두고 CLI command에는 반영하지 않는다.
-    // (이전 커밋에서 잘못 추가되어 shard 전체가 exit 2로 크래시한 회귀 #94 후속 이슈)
-    if (Array.isArray(mcpServers)) {
-      for (const server of mcpServers) {
-        parts.push("-c", `mcp_servers.${server}.enabled=true`);
-      }
-    }
-  } else {
-    parts.push("--dangerously-bypass-approvals-and-sandbox");
-    if (skipGitRepoCheck) parts.push("--skip-git-repo-check");
-    for (const override of profileOverrides)
-      parts.push("-c", shellQuote(override));
   }
 
   const useStdin = resolveStdinPromptMode(stdinPrompt);

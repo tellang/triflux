@@ -70,6 +70,22 @@ describe("spawn-trace", () => {
     }
   });
 
+  it("reload restores the default rate after an override is removed", async () => {
+    const original = process.env.TRIFLUX_MAX_SPAWN_RATE;
+    delete process.env.TRIFLUX_MAX_SPAWN_RATE;
+    const mod = await loadSpawnTraceModule();
+    const defaultRate = mod.getMaxSpawnPerSec();
+    try {
+      process.env.TRIFLUX_MAX_SPAWN_RATE = "7";
+      assert.equal(mod.reload(), 7);
+      delete process.env.TRIFLUX_MAX_SPAWN_RATE;
+      assert.equal(mod.reload(), defaultRate);
+    } finally {
+      if (original == null) delete process.env.TRIFLUX_MAX_SPAWN_RATE;
+      else process.env.TRIFLUX_MAX_SPAWN_RATE = original;
+    }
+  });
+
   it("spawn returns a ChildProcess-like object", async () => {
     const mod = await loadSpawnTraceModule();
     const child = mod.spawn("node", ["-e", "process.exit(0)"], {

@@ -340,6 +340,50 @@ describe("hub/lib/phase-manager.mjs", () => {
     await assert.doesNotReject(syncToGstack(runId, slug));
   });
 
+  it("syncToGstack preserves exact frontmatter delimiters and body newlines", async () => {
+    const root = setupWorkspace();
+    const homeDir = registerTempDir("tfx-gstack-frontmatter-");
+    setHomeDir(homeDir);
+    const runId = "run-frontmatter";
+    writeJson(fullcycleStatePath(root, runId), {
+      run_id: runId,
+      phase: "Execution",
+      phase_status: "active",
+    });
+    const checkpointDir = join(
+      homeDir,
+      ".gstack",
+      "projects",
+      "triflux",
+      "checkpoints",
+    );
+    mkdirSync(checkpointDir, { recursive: true });
+    const checkpointPath = join(checkpointDir, "latest.md");
+
+    for (const eol of ["\n", "\r\n"]) {
+      for (const bodyLines of [[], [""], ["body"], ["", "body", ""]]) {
+        const lines = ["---", "status: in-progress", "--- ", "----"];
+        writeFileSync(
+          checkpointPath,
+          [...lines, "---", ...bodyLines].join(eol),
+        );
+
+        await syncToGstack(runId, "triflux");
+
+        assert.equal(
+          readFileSync(checkpointPath, "utf8"),
+          [
+            ...lines,
+            "phase: Execution",
+            `triflux_run_id: ${runId}`,
+            "---",
+            ...bodyLines,
+          ].join(eol),
+        );
+      }
+    }
+  });
+
   it("coerceLegacyPhase maps research, strategy, execution, validation, complete and unknown cases", () => {
     assert.equal(coerceLegacyPhase("phase1-interview"), "Research");
     assert.equal(coerceLegacyPhase("strategy review"), "Strategy");

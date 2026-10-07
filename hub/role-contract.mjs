@@ -216,8 +216,6 @@ export function reduceRoleReachabilityTransition(state, trigger) {
     : { state: transition.to, action: transition.action };
 }
 
-export const reduceRoleReachability = reduceRoleReachabilityTransition;
-
 function snapshotLegacyDetails(snapshot) {
   const legacy = isRecord(snapshot.legacy) ? snapshot.legacy : {};
   return {

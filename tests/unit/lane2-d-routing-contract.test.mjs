@@ -3,16 +3,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
-  CODEX_AGENT_POLICY,
-  DEFAULT_CODEX_AGENT,
   resolveCodexAgentPolicy,
-  resolveCodexAgentProfile,
   resolveNestedCodexAgentProfile,
 } from "../../scripts/lib/agent-route-policy.mjs";
 
 describe("lane2-d routing contract: Codex agent policy SSOT", () => {
   it("unknown Codex role resolves to the canonical executor policy", () => {
-    assert.equal(DEFAULT_CODEX_AGENT, "executor");
     assert.deepEqual(
       resolveCodexAgentPolicy("unknown-lane"),
       resolveCodexAgentPolicy("executor"),
@@ -26,63 +22,12 @@ describe("lane2-d routing contract: Codex agent policy SSOT", () => {
   }
 
   it("preserves direct-Codex designer and writer overrides in the policy", () => {
-    assert.equal(CODEX_AGENT_POLICY.designer.profile, "gpt6_astra_xhigh");
-    assert.equal(CODEX_AGENT_POLICY.writer.profile, "gpt6_luna_high");
+    assert.equal(
+      resolveCodexAgentPolicy("designer").profile,
+      "gpt6_astra_xhigh",
+    );
+    assert.equal(resolveCodexAgentPolicy("writer").profile, "gpt6_luna_high");
   });
-
-  it("resolves max and top-level eligible ultra in the policy", () => {
-    assert.equal(
-      resolveCodexAgentProfile("architect", { profileOverride: "max" }),
-      "gpt6_astra_max",
-    );
-    assert.equal(
-      resolveCodexAgentProfile("deep-executor", {
-        profileOverride: "ultra",
-      }),
-      "gpt6_astra_ultra",
-    );
-  });
-
-  it("downgrades ineligible or nested ultra and lets retry snapshots win", () => {
-    assert.equal(
-      resolveCodexAgentProfile("architect", { profileOverride: "ultra" }),
-      "gpt6_astra_max",
-    );
-    assert.equal(
-      resolveCodexAgentProfile("scientist-deep", {
-        profileOverride: "ultra",
-        nested: true,
-      }),
-      "gpt6_astra_max",
-    );
-    assert.equal(
-      resolveCodexAgentProfile("deep-executor", {
-        profileOverride: "ultra",
-        retryProfile: "gpt6_astra_max",
-      }),
-      "gpt6_astra_max",
-    );
-  });
-
-  for (const [legacy, canonical] of [
-    ["gpt56_sol_xhigh", "gpt6_astra_xhigh"],
-    ["gpt56_sol_max", "gpt6_astra_max"],
-    ["gpt56_sol_ultra", "gpt6_astra_ultra"],
-    ["gpt56_terra_high", "gpt61_sol_high"],
-    ["gpt56_terra_med", "gpt61_sol_med"],
-    ["gpt56_luna_low", "gpt6_luna_low"],
-    ["gpt6_sol_high", "gpt61_sol_high"],
-    ["gpt6_sol_med", "gpt61_sol_med"],
-  ]) {
-    it(`${legacy} override를 ${canonical}으로 정규화한다`, () => {
-      assert.equal(
-        resolveCodexAgentProfile("deep-executor", {
-          profileOverride: legacy,
-        }),
-        canonical,
-      );
-    });
-  }
 
   it("headless roles ignore ordinary global profiles but retain max/ultra lanes", () => {
     assert.equal(

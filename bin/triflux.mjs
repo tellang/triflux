@@ -27,10 +27,6 @@ import {
   checkNetworkAvailability,
   validateRuntimeCachePaths,
 } from "../hub/lib/cache-guard.mjs";
-import {
-  decideDispatchMode,
-  parseArgs as parseRouteArgs,
-} from "../hub/lib/tfx-route-args.mjs";
 import { getPipelineStateDbPath } from "../hub/pipeline/state.mjs";
 import { getVersionHash } from "../hub/state.mjs";
 import {
@@ -107,10 +103,8 @@ const GREEN_BRIGHT = "\x1b[38;5;82m";
 const RED_BRIGHT = "\x1b[38;5;196m";
 
 // ── 브랜드 요소 ──
-const _BRAND = `${AMBER}${BOLD}triflux${RESET}`;
 const VER = `${DIM}v${PKG.version}${RESET}`;
 const LINE = `${GRAY}${"─".repeat(48)}${RESET}`;
-const _DOT = `${GRAY}·${RESET}`;
 const STALE_TEAM_MAX_AGE_SEC = 3600;
 const DEFAULT_TMUX_CLEANUP_PREFIX = "tfx-*";
 const DEFAULT_TMUX_CLEANUP_AGE_MIN = 60;
@@ -118,7 +112,6 @@ const ANSI_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/g;
 const HUB_DEFAULT_PORT = 27888;
 const DOCTOR_HUB_PID_FILE = join(CLAUDE_DIR, "cache", "tfx-hub", "hub.pid");
 
-const _EXIT_SUCCESS = 0;
 const EXIT_ERROR = 1;
 const EXIT_ARG_ERROR = 2;
 const EXIT_CLI_MISSING = 3;
@@ -130,39 +123,6 @@ const JSON_OUTPUT = RAW_ARGS.includes("--json");
 const NORMALIZED_ARGS = RAW_ARGS.filter((arg) => arg !== "--json");
 
 const CLI_COMMAND_SCHEMAS = Object.freeze({
-  auto: {
-    usage:
-      "tfx auto [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus|live] [--rounds N] [--parallel 1|N] [--json]",
-    description:
-      "tfx-auto 라우팅 결정을 CLI에서 미리보기/직렬화 (실행 skill front door와 같은 flag surface)",
-    options: [
-      {
-        name: "--cli <name>",
-        type: "string",
-        description: "실행 lane 강제: auto|codex|antigravity|claude",
-      },
-      {
-        name: "--mode <name>",
-        type: "string",
-        description: "라우팅 모드: quick|deep|consensus|live",
-      },
-      {
-        name: "--rounds <N>",
-        type: "number",
-        description: "live peer 왕복 횟수 (기본 4, --mode live 전용)",
-      },
-      {
-        name: "--parallel <1|N>",
-        type: "string",
-        description: "단일/로컬 병렬 라우팅 힌트",
-      },
-      {
-        name: "--json",
-        type: "boolean",
-        description: "parse 결과와 dispatch 결정을 JSON으로 출력",
-      },
-    ],
-  },
   setup: {
     usage: "tfx setup [--dry-run] [--enable-hub-autostart]",
     description: "파일 동기화 + HUD/MCP 설정",
@@ -524,33 +484,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         name: "--json",
         type: "boolean",
         description: "가능한 경우 구조화된 JSON 출력",
-      },
-    ],
-  },
-  review: {
-    usage:
-      "tfx review [ref] [--base <ref>] [--timeout <seconds>] [--shard off|per-file] [--json]",
-    description: "Codex 기반 git diff review 실행",
-    options: [
-      {
-        name: "--base <ref>",
-        type: "string",
-        description: "비교 기준 ref",
-      },
-      {
-        name: "--timeout <seconds>",
-        type: "number",
-        description: "review 실행 timeout (기본 180)",
-      },
-      {
-        name: "--shard <mode>",
-        type: "string",
-        description: "off 또는 per-file",
-      },
-      {
-        name: "--json",
-        type: "boolean",
-        description: "review 결과 JSON 출력",
       },
     ],
   },
@@ -4357,72 +4290,21 @@ async function cmdUpdate(args = []) {
   console.log(`${GREEN}${BOLD}✓ 업데이트 완료${RESET}\n`);
 }
 
-function readPackagedSkillMetadata(skillName) {
-  const skillPath = join(PKG_ROOT, "skills", skillName, "SKILL.md");
-  if (!existsSync(skillPath)) return null;
-  const metadata = { name: skillName, deprecated: false, supersededBy: null };
-  let inFrontmatter = false;
-  for (const line of readFileSync(skillPath, "utf8").split(/\r?\n/)) {
-    if (line.trim() === "---") {
-      if (!inFrontmatter) {
-        inFrontmatter = true;
-        continue;
-      }
-      break;
-    }
-    if (!inFrontmatter) continue;
-    const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (!match) continue;
-    const [, key, rawValue] = match;
-    const value = rawValue.trim().replace(/^["']|["']$/g, "");
-    if (key === "deprecated") metadata.deprecated = value === "true";
-    if (key === "superseded-by") metadata.supersededBy = value || null;
-  }
-  return metadata;
-}
-
-function listDeprecatedPackagedSkillAliases(pluginSkills, installedSkills) {
-  if (!existsSync(pluginSkills)) return [];
-  return readdirSync(pluginSkills)
-    .sort()
-    .map((name) => readPackagedSkillMetadata(name))
-    .filter((metadata) => metadata?.deprecated)
-    .map((metadata) => ({
-      alias: metadata.name,
-      source: metadata.supersededBy || "deprecated",
-      installed: existsSync(join(installedSkills, metadata.name, "SKILL.md")),
-      deprecated: true,
-    }));
-}
-
 function cmdList(options = {}) {
   const { json = false } = options;
   const pluginSkills = join(PKG_ROOT, "skills");
   const installedSkills = join(CLAUDE_DIR, "skills");
   const packageSkills = [];
   const userSkills = [];
-  const skillAliases = listDeprecatedPackagedSkillAliases(
-    pluginSkills,
-    installedSkills,
-  );
-  const aliasNames = new Set([
-    ...SKILL_ALIASES.map(({ alias }) => alias),
-    ...skillAliases.map(({ alias }) => alias),
-  ]);
 
   if (existsSync(pluginSkills)) {
     for (const name of readdirSync(pluginSkills).sort()) {
       const src = join(pluginSkills, name, "SKILL.md");
       if (!existsSync(src)) continue;
-      const metadata = readPackagedSkillMetadata(name);
       const dst = join(installedSkills, name, "SKILL.md");
       packageSkills.push({
         name,
         installed: existsSync(dst),
-        ...(metadata?.deprecated ? { deprecated: true } : {}),
-        ...(metadata?.supersededBy
-          ? { superseded_by: metadata.supersededBy }
-          : {}),
       });
     }
   }
@@ -4432,7 +4314,7 @@ function cmdList(options = {}) {
   );
   if (existsSync(installedSkills)) {
     for (const name of readdirSync(installedSkills).sort()) {
-      if (pkgNames.has(name) || aliasNames.has(name)) continue;
+      if (pkgNames.has(name)) continue;
       const skill = join(installedSkills, name, "SKILL.md");
       if (!existsSync(skill)) continue;
       userSkills.push(name);
@@ -4442,7 +4324,6 @@ function cmdList(options = {}) {
   if (json) {
     printJson({
       package_skills: packageSkills,
-      skill_aliases: skillAliases,
       user_skills: userSkills,
       install_path: installedSkills,
     });
@@ -4468,19 +4349,6 @@ function cmdList(options = {}) {
     console.log(`    ${AMBER}◆${RESET} ${name}`);
   }
   if (userSkills.length === 0) console.log(`    ${GRAY}없음${RESET}`);
-
-  if (skillAliases.length > 0) {
-    section("호환 alias");
-    for (const entry of skillAliases) {
-      const icon = entry.installed
-        ? `${GREEN_BRIGHT}↳${RESET}`
-        : `${RED_BRIGHT}↳${RESET}`;
-      const status = entry.installed ? "" : ` ${GRAY}(미설치)${RESET}`;
-      console.log(
-        `    ${icon} ${BOLD}${entry.alias}${RESET} ${GRAY}→ ${entry.source}${RESET}${entry.deprecated ? ` ${YELLOW}(deprecated)${RESET}` : ""}${status}`,
-      );
-    }
-  }
 
   console.log(`\n  ${LINE}`);
   console.log(`  ${GRAY}${installedSkills}${RESET}\n`);
@@ -4978,7 +4846,6 @@ ${updateNotice}
     ${DIM}  --fix${RESET}        ${GRAY}진단 + 자동 수정${RESET}
     ${DIM}  --reset${RESET}      ${GRAY}캐시 전체 초기화${RESET}
     ${DIM}  --json${RESET}       ${GRAY}구조화된 진단 결과 JSON 출력${RESET}
-    ${WHITE_BRIGHT}tfx auto${RESET}       ${GRAY}tfx-auto 라우팅 결정 미리보기 (--cli codex|antigravity|claude)${RESET}
     ${WHITE_BRIGHT}tfx stealth-fetch${RESET} ${GRAY}cloakbrowser 기반 URL fetch (JSON stdout)${RESET}
     ${WHITE_BRIGHT}tfx mcp${RESET}        ${GRAY}MCP registry 관리 (list/sync/add/remove)${RESET}
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
@@ -4989,7 +4856,6 @@ ${updateNotice}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
     ${WHITE_BRIGHT}tfx synapse${RESET}     ${GRAY}스웜 세션 registry 조회 / lease 관리${RESET}
-    ${WHITE_BRIGHT}tfx review${RESET}      ${GRAY}Codex 기반 git diff review${RESET}
     ${WHITE_BRIGHT}tfx why${RESET}         ${GRAY}경로의 마지막 커밋 X-Intent 트레일러 추출${RESET}
     ${WHITE_BRIGHT}tfx codex-team${RESET} ${GRAY}Codex 전용 팀 모드 (기본 lead/agents: codex)${RESET}
     ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
@@ -5872,14 +5738,6 @@ function parsePositiveIntegerOption(args, name, fallback) {
   return parsed;
 }
 
-function applyAutoDispatchDecision(parsedArgs, decision = null) {
-  const resolved = decision || decideDispatchMode(parsedArgs);
-  if (resolved.warning) {
-    process.stderr.write(`${resolved.warning}\n`);
-  }
-  return resolved;
-}
-
 async function main() {
   const cmd = NORMALIZED_ARGS[0] || "help";
   const cmdArgs = NORMALIZED_ARGS.slice(1);
@@ -5889,20 +5747,6 @@ async function main() {
   }).catch(() => {});
 
   switch (cmd) {
-    case "auto": {
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("auto");
-        return;
-      }
-      const parsedArgs = parseRouteArgs(cmdArgs);
-      const decision = applyAutoDispatchDecision(parsedArgs);
-      if (JSON_OUTPUT) {
-        printJson({ args: parsedArgs, dispatch: decision });
-      } else {
-        process.stdout.write(`${decision.mode}\n`);
-      }
-      return;
-    }
     case "setup":
       if (cmdArgs.some(isHelpArg)) {
         printCommandHelp("setup");
@@ -6134,76 +5978,6 @@ async function main() {
         });
       }
       await cmdSynapseStatus(cmdArgs.slice(1), { json: JSON_OUTPUT });
-      return;
-    }
-    case "review": {
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("review");
-        return;
-      }
-      const ref =
-        cmdArgs[0] && !cmdArgs[0].startsWith("--") ? cmdArgs[0] : "HEAD";
-      const baseIdx = cmdArgs.indexOf("--base");
-      const base = baseIdx >= 0 ? cmdArgs[baseIdx + 1] : undefined;
-      const timeoutIdx = cmdArgs.indexOf("--timeout");
-      const timeoutMs =
-        timeoutIdx >= 0 ? Number(cmdArgs[timeoutIdx + 1]) * 1000 : 180_000;
-      const shardIdx = cmdArgs.indexOf("--shard");
-      const shard = shardIdx >= 0 ? cmdArgs[shardIdx + 1] : "off";
-
-      if (shard === "per-file") {
-        const { runCodexReviewSharded } = await import(
-          "../hub/team/codex-review.mjs"
-        );
-        const result = await runCodexReviewSharded({
-          ref,
-          base,
-          timeoutMs,
-          onFileStart: ({ file, index, total }) => {
-            if (!JSON_OUTPUT) {
-              process.stderr.write(
-                `[${index + 1}/${total}] reviewing ${file}\n`,
-              );
-            }
-          },
-        });
-        if (JSON_OUTPUT) {
-          console.log(JSON.stringify(result, null, 2));
-        } else {
-          console.log(
-            `=== per-file review (${result.files.length} files, range=${result.range}) ===`,
-          );
-          for (const r of result.perFile) {
-            console.log("");
-            console.log(
-              `--- ${r.file} (${r.diffBytes}b, verdict=${r.verdict || "n/a"}${r.skipped ? ", skipped" : ""}) ---`,
-            );
-            if (r.error) console.log(`  error: ${r.error}`);
-            if (r.stdout) process.stdout.write(r.stdout);
-          }
-          console.log("");
-          console.log(
-            `Aggregate: files=${result.files.length} verdict=${result.verdict}`,
-          );
-          if (result.error) console.log(`error: ${result.error}`);
-        }
-        process.exit(result.ok ? 0 : 1);
-      }
-
-      const { runCodexReview } = await import("../hub/team/codex-review.mjs");
-      const result = await runCodexReview({ ref, base, timeoutMs });
-      if (JSON_OUTPUT) {
-        console.log(JSON.stringify(result, null, 2));
-      } else {
-        if (result.stdout) process.stdout.write(result.stdout);
-        if (result.stderr) process.stderr.write(result.stderr);
-        console.log("");
-        console.log(
-          `range=${result.range || ref} diffBytes=${result.diffBytes} verdict=${result.verdict || "n/a"}`,
-        );
-        if (result.error) console.log(`error: ${result.error}`);
-      }
-      process.exit(result.ok ? 0 : 1);
       return;
     }
     case "why": {

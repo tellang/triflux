@@ -5,7 +5,7 @@ description: >
   Codex 우선으로 dispatch 하고, 명시 플래그로 mode/parallel/consensus 등 동작을 오버라이드한다.
   '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은
   구현/수정 요청에 사용. 플래그 상세는 argument-hint, 라우팅 정책은 .claude/rules/tfx-routing.md 참조.
-argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus|live] [--rounds <N>] [--risk-tier auto|low|medium|high] [--shape consensus|debate|panel] [--cli-set triad|no-antigravity|custom] [--parallel 1|N] [--retry 0|1|ralph] [--skill <name>]"
+argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus|live] [--rounds <N>] [--shape consensus|debate|panel] [--cli-set triad|no-antigravity|custom] [--parallel 1|N] [--retry 0|1|ralph] [--skill <name>]"
 ---
 
 # tfx-auto — 통합 CLI 오케스트레이터
@@ -34,12 +34,10 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 
 판단 기준 (우선순위 순):
 
-0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--risk-tier`/`--shape`/`--cli-set`/`--parallel`/`--retry` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
+0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--shape`/`--cli-set`/`--parallel`/`--retry` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
    - `--parallel N` → tfx-multi 엔진 위임 (`auto`: 리드 tmux면 interactive pane, 없으면 in-process)
    - `--cli codex|antigravity` → `TFX_CLI_MODE` 설정 + 단일 실행
    - `--mode deep` → `-t/--thorough` 동일 동작 (pipeline init)
-   - `--risk-tier low|medium|high` → risk-tier 기준으로 verification 강도와 mode 결정
-   - `--mode ...` 명시 시 `--risk-tier` 는 무시 (mode 우선)
    - `--mode consensus --shape debate|panel` → prompt ensemble fold 경로
    - `--mode live` → `tfx-live` 엔진 위임 (분해/트리아지 스킵)
    - `--retry ralph` → stderr 경고 후 bounded 3회 degrade (Phase 2 미구현)
@@ -115,10 +113,6 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--mode` | `consensus` | 3-CLI 합의 family 실행 | tfx-auto consensus root |
 | `--mode` | `live` | 서브태스크 분해 불가한 왕복 대화형 작업을 직행 위임 | `tfx-live peer` (v1 단일 경로, 상세는 "Live 위임 계약" 절) |
 | `--rounds` | `4` (기본) | live peer 왕복 횟수(총 hop 수는 `rounds * 2`) | `tfx-live peer --rounds` |
-| `--risk-tier` | `auto` (기본) | changed files 기준 자동 분류 후 mode/verify 강도 결정 | risk matrix |
-| `--risk-tier` | `low` | quick mode + verify skip | 기존 default 와 동일 |
-| `--risk-tier` | `medium` | quick mode + verify (lint + test 만) | bounded verify |
-| `--risk-tier` | `high` | deep mode + full verify/fix loop | pipeline + full verify |
 | `--shape` | `consensus` (기본) | findings 합의/충돌 판정 | consensus renderer |
 | `--shape` | `debate` | 옵션 비교 + 점수화 + 최종 추천 | debate renderer |
 | `--shape` | `panel` | 전문가 roster 기반 시뮬레이션 | panel renderer |
@@ -143,31 +137,8 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--max-iterations` | `0` (기본, unlimited) | `--retry ralph`/`auto-escalate` 상한 | retry-state-machine.mjs |
 | `--skill` | `<name>` | `skills/<name>/SKILL.md` 본문을 codex/agy 프롬프트 앞에 주입 (`TFX_INJECT_SKILL`). 미지정 시 no-op | tfx-route.sh |
 
-### `--risk-tier` 계약
-
-- 기본값은 `auto`.
-- `--mode` 가 명시되면 `--risk-tier` 는 무시된다. mode 가 최종 우선순위다.
-- `--risk-tier` 만 명시되면 tier 가 mode 를 자동 결정한다.
-- `low` → quick mode + verify skip.
-- `medium` → quick mode + verify (lint + test 만).
-- `high` → deep mode + full verify/fix loop.
-- `auto` → 아래 변경 분류 매트릭스로 tier 를 계산한다.
-- auto 분류 입력은 **staged + unstaged 전체 변경 파일** 기준이다. untracked 파일도 relative path 집합에 포함해 판정한다.
-
-### 자동 분류 매트릭스
-
-`hub/lib/risk-tier.mjs` 의 `classifyRiskTier({ changedFiles })` 계약을 기준으로 적용한다. 판정 순서는 **high → medium → low → default** 이다.
-
-| tier | 규칙 | 판정 기준 |
-|------|------|----------|
-| `high` | 아키텍처/배포/운영 핵심 경로 | `hub/`, `scripts/`, `.claude/rules/`, `bin/`, `.github/` prefix 중 하나라도 매칭 |
-| `medium` | 빌드/설정/런타임 영향 | 다중 파일 변경, `package.json`, `.yml/.yaml`, `.toml`, `config/`, `hooks/` 매칭 |
-| `low` | 문서/텍스트/테스트-only | 단일 파일 + non-config (`.md`/`.txt` 만) 또는 `.test` 파일만 |
-| default | 안전 fallback | 어떤 low/high 패턴에도 안 맞으면 `medium` |
-
 ### 플래그 검증
 
-- `--mode ...` + `--risk-tier ...` 동시 지정 → mode 우선. risk-tier 는 informational 로그만 남기고 실행 결정에는 사용하지 않음
 - `--shape` 미지정 + `--mode consensus` → `shape=consensus`
 - `--shape` 지정 + `--mode != consensus` → warning 또는 error. shape 는 consensus family 에서만 유효
 - `--cli-set custom` + 기존 3 CLI 외 participant 지정 → 즉시 error. silent fallback 금지
@@ -244,9 +215,6 @@ agy 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율
 ```
 /tfx-auto "리팩터링" --mode deep               # = 기존 -t/--thorough
 /tfx-auto "구현" --cli codex                   # = legacy tfx-codex
-/tfx-auto "문서만 수정" --risk-tier low        # = quick + verify skip
-/tfx-auto "설정/빌드 손봄" --risk-tier medium  # = quick + lint/test verify
-/tfx-auto "hub 라우팅 개편" --risk-tier high   # = deep + full verify/fix loop
 /tfx-auto "병렬" --parallel N --mode deep      # = legacy tfx-multi 기본값
 /tfx-auto "끝까지 고쳐" --retry ralph           # = 제거된 tfx-ralph
 /tfx-auto "src/auth 구조 분석" --mode consensus --shape panel   # = 제거된 tfx-analysis
@@ -345,7 +313,6 @@ shape 별 `shape_input`:
 
 공통 메타/렌더링 계약:
 
-- 공통 유틸: `hub/team/consensus-meta.mjs`
 - 공통 `meta_judgment` 스키마:
 
 ```json
@@ -642,7 +609,7 @@ v1은 `peer` 단일 경로만 지원한다. `--live-shape`, `--live-mode`, `tfx-
 
 **적용 대상**: 서브태스크로 쪼갤 수 없는 왕복 대화형 작업(설계 논쟁, 경쟁 가설 조율, 두 모델이 서로 반박하며 수렴해야 하는 케이스). 독립적으로 병렬 처리 가능한 작업, 또는 가벼운 반박 1라운드면 `--mode consensus --shape debate`(배치형, 리드 중개, ≤2라운드, per-round 재시작 오버헤드 있음)가 더 저렴하다. `live`는 리드 중개 없이 세션이 직접 이어받으며 세션 상태를 유지해야 하는 경우에만 쓴다.
 
-**tfx-auto의 배치 모델과 근본적으로 다른 지점**: 나머지 모든 모드(quick/deep/consensus)는 "분해 → dispatch → 결과 수집"의 stateless 배치 잡이다. `live`는 `tfx-live`가 관리하는 장수명 세션(daemon UDS attach 또는 지속 tmux 세션)에 얹혀가므로, verify/fix loop나 risk-tier 자동판정 같은 배치형 계약이 적용되지 않는다.
+**tfx-auto의 배치 모델과 근본적으로 다른 지점**: 나머지 모든 모드(quick/deep/consensus)는 "분해 → dispatch → 결과 수집"의 stateless 배치 잡이다. `live`는 `tfx-live`가 관리하는 장수명 세션(daemon UDS attach 또는 지속 tmux 세션)에 얹혀가므로, verify/fix loop 같은 배치형 계약이 적용되지 않는다.
 
 디스패치:
 
@@ -813,13 +780,12 @@ deep/fullcycle 추가 규칙:
 |------|----------|------|
 | 1개 + quick | tfx-auto 직접 실행 (fire-and-forget) | tfx-route.sh |
 | 1개 + thorough | tfx-auto 직접 실행 + verify/fix loop | tfx-route.sh |
-| 2개+ + quick | `tfx multi` auto 실행 (리드 tmux/psmux면 interactive pane) | team runtime |
-| 2개+ + thorough | Plan/PRD/Approval 후 → auto 실행 + verify/fix | team runtime |
+| 2개+ + 코드 변경 없음 | `tfx multi` auto 실행 (리드 tmux/psmux면 interactive pane) | team runtime |
+| 2개+ + 코드 변경 있음 | 태스크별 worktree에서 세션 하나씩 실행 | 개별 세션 또는 `Agent(isolation: worktree)` |
 | primary multiplexer 없음 | Native/in-process fallback | native.mjs |
 
-> **MANDATORY: 2개+ 서브태스크 시 `tfx multi` 엔진 필수 (teammate mode 생략 = `auto`)**
-> `Agent()` 백그라운드나 `Bash(tfx-route.sh)` 개별 호출로 대체 금지.
-> 반드시 아래 `Bash("tfx multi ...")` 명령으로 team runtime에 위임한다.
+> **2개 이상 태스크에 코드 변경이 있으면 worktree를 나눠 세션마다 하나씩 실행한다.**
+> `Agent()`를 사용하면 `isolation: worktree`를 지정한다. 코드 변경이 없는 병렬 작업은 `tfx multi`를 사용할 수 있다.
 > `auto`가 interactive(tmux/psmux)로 결정되면 pane이 관찰 표면이고 native bridge는 off다. 명시적 headless만 native bridge default on이며, 필요 시 `--no-native-bridge-ui`로 opt-out 한다.
 
 **전환 방법:**
@@ -827,7 +793,10 @@ deep/fullcycle 추가 규칙:
 ```
 thorough = args에 -t 또는 --thorough 포함
 
-if subtasks.length >= 2:
+if subtasks.length >= 2 and code_change:
+  → 태스크별 worktree 생성 또는 Agent(isolation: worktree)
+  → 세션마다 태스크 하나씩 실행
+else if subtasks.length >= 2:
   → Bash("tfx multi --auto-attach --dashboard --assign 'cli:prompt:role' ...")
   → 리드가 tmux/psmux이면 interactive pane, 없으면 Native/in-process fallback
   → if thorough: verify → fix loop

@@ -7,7 +7,6 @@ import { describe, it } from "node:test";
 import * as lib from "../../scripts/lib/machine-profile.mjs";
 import {
   buildDisabledCliError,
-  formatCliPolicyLine,
   normalizeCliName,
   readMachineProfile,
   resolveCliPolicy,
@@ -123,20 +122,6 @@ describe("readMachineProfile", () => {
       assert.deepEqual(profile.warnings, []);
       assert.equal(profile.path, profilePath);
     });
-  });
-});
-
-describe("formatCliPolicyLine", () => {
-  it("세션 문맥 주입 형식이 고정돼 있다", () => {
-    const policy = {
-      codexDisabled: false,
-      antigravityDisabled: true,
-      source: { codex: "default", antigravity: "profile" },
-    };
-    assert.equal(
-      formatCliPolicyLine(policy),
-      "cli-policy: codex=on antigravity=off (SSOT: TFX_DISABLE_*; codex<-default, antigravity<-profile)",
-    );
   });
 });
 

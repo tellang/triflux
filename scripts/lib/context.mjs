@@ -5,19 +5,13 @@
  * 하나의 요청에서 발생한 모든 로그를 추적할 수 있다.
  *
  * 사용법:
- *   import { getLogger, getCorrelationId, withRequestContext } from './lib/context.mjs';
+ *   import { getCorrelationId, withRequestContext } from './lib/context.mjs';
  *
  *   // 미들웨어에서 컨텍스트 생성
  *   withRequestContext({ method: 'POST', path: '/bridge/result' }, () => {
- *     const log = getLogger();
- *     log.info({ agentId }, 'bridge.result_received');
+ *     const correlationId = getCorrelationId();
  *   });
  *
- *   // 내부 함수에서 자동 상관 ID
- *   function processResult() {
- *     const log = getLogger();
- *     log.info('result.processed'); // correlationId 자동 포함
- *   }
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
@@ -25,17 +19,7 @@ import { randomUUID } from "node:crypto";
 import { logger } from "./logger.mjs";
 
 /** @type {AsyncLocalStorage<{logger: import('pino').Logger, correlationId: string}>} */
-export const asyncLocalStorage = new AsyncLocalStorage();
-
-/**
- * 현재 요청 컨텍스트의 로거를 반환한다.
- * 요청 컨텍스트 밖에서 호출하면 기본 로거를 반환한다.
- *
- * @returns {import('pino').Logger}
- */
-export function getLogger() {
-  return asyncLocalStorage.getStore()?.logger || logger;
-}
+const asyncLocalStorage = new AsyncLocalStorage();
 
 /**
  * 현재 요청의 상관 ID를 반환한다.

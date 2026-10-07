@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-export const MACHINE_PROFILE_FILENAME = "machine-profile.env";
+const MACHINE_PROFILE_FILENAME = "machine-profile.env";
 
 export const MACHINE_PROFILE_KEYS = Object.freeze([
   "TFX_MACHINE_PROFILE_VERSION",
@@ -28,9 +28,9 @@ export const MACHINE_PROFILE_KEYS = Object.freeze([
   "TFX_STALL_KILL",
 ]);
 
-export const MACHINE_PROFILE_KEY_SET = new Set(MACHINE_PROFILE_KEYS);
+const MACHINE_PROFILE_KEY_SET = new Set(MACHINE_PROFILE_KEYS);
 
-export const MACHINE_PROFILE_VALUE_RE = /^[A-Za-z0-9_.-]+$/u;
+const MACHINE_PROFILE_VALUE_RE = /^[A-Za-z0-9_.-]+$/u;
 
 // CLI 이름과 disable 키의 대응. 이 두 개가 TFX_DISABLE_* SSOT 의 전부다.
 const CLI_DISABLE_KEYS = Object.freeze({
@@ -246,20 +246,6 @@ export function normalizeCliName(cli) {
     .trim()
     .toLowerCase();
   return CLI_ALIASES[key] || null;
-}
-
-/**
- * 세션 문맥 주입용 한 줄. 형식은 고정이며 소비자가 파싱하지 않고 그대로 보여준다.
- *
- * @param {ReturnType<typeof resolveCliPolicy>} policy
- * @returns {string}
- */
-export function formatCliPolicyLine(policy) {
-  const codex = policy?.codexDisabled ? "off" : "on";
-  const antigravity = policy?.antigravityDisabled ? "off" : "on";
-  const codexSource = policy?.source?.codex || "default";
-  const antigravitySource = policy?.source?.antigravity || "default";
-  return `cli-policy: codex=${codex} antigravity=${antigravity} (SSOT: TFX_DISABLE_*; codex<-${codexSource}, antigravity<-${antigravitySource})`;
 }
 
 /**

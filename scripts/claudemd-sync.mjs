@@ -1,8 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { OMC_END, TFX_START, writeSection } from "./lib/claudemd-scanner.mjs";
 
 const PKG_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const GLOBAL_CLAUDE_MD_PATH = join(homedir(), ".claude", "CLAUDE.md");
@@ -144,32 +143,6 @@ export function ensureTfxSection(claudeMdPath, routingTable) {
     action: findRoutingSection(currentMarkdown).found ? "updated" : "created",
     path: claudeMdPath,
   };
-}
-
-export function ensureTfxCrown(claudeMdPath, options = {}) {
-  const absolutePath = resolve(claudeMdPath);
-  if (!existsSync(absolutePath)) {
-    return toSkippedResult(absolutePath, "missing_file");
-  }
-
-  const content = readFileSync(absolutePath, "utf8");
-  const startIdx = content.indexOf(TFX_START);
-  const omcEndIdx = content.indexOf(OMC_END);
-
-  if (startIdx === -1) {
-    const result = writeSection(absolutePath, options);
-    return { action: result.action, path: absolutePath };
-  }
-
-  const expectedPos = omcEndIdx !== -1 ? omcEndIdx + OMC_END.length : 0;
-  const textBefore = content.slice(expectedPos, startIdx).trim();
-
-  if (textBefore.length === 0) {
-    return { action: "unchanged", path: absolutePath };
-  }
-
-  const result = writeSection(absolutePath, options);
-  return { action: "repositioned", path: absolutePath, detail: result.action };
 }
 
 export function ensureGlobalClaudeRoutingSection(claudeDir) {
