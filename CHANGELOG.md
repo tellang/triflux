@@ -13,10 +13,12 @@ All notable changes to triflux will be documented in this file.
 - scripts: 켜는 곳이 없던 Node 레인(`scripts/tfx-route.mjs`, `TFX_ROUTE_NODE`), 소비자 없는 scripts·설정·문서, `bin/tfx-profile.mjs`, `skills/*/skill.json`, `tree-kill` 의존을 지운다 (#602)
 - hub: 소비자가 없는 hub 모듈 20개와 죽은 export 를 지운다. `@triflux/core` 배럴에서 `executeGemini`, fullcycle, research, token-mode, codex-compat, routing 이 빠진다 (#603)
 - cto: 조회만 남긴다. `tfx cto steward|event|dashboard`, `hygiene --apply`, `cto/hygiene-notify.mjs` 를 지우고 수집원을 11개에서 8개로 줄인다 (ADR-0024, #604)
+- hud: 항상 비던 mission-board 행, 토큰 절약액 행과 `scripts/token-snapshot.mjs`, CTO 공급자 행, Gemini CLI 세션 스캔, agy 행의 비공식 쿼터 조회를 지운다. 계정·프로젝트 ID 표시는 남긴다 (#605)
 
 ### Fixed
 - team: Windows Git Bash 환경에서 정의 없는 `findGitBashExe()` 호출로 나던 ReferenceError (#601)
 - cto: `tfx cto status` 가 생성 시각과 경과 시간을 보여 준다. 몇 주 전 스냅샷이 현재처럼 읽히던 문제 (#604)
+- hud: 고정 경로 `team-state.json` 만 읽어 팀 행이 한 번도 그려지지 않던 문제. 24시간 안의 최신 `team-state-*.json` 을 읽는다 (#605)
 
 ## [10.50.1] - 2026-10-08
 
