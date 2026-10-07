@@ -117,8 +117,10 @@ export async function findCodexThreadByCwd(
       if (!file.startsWith("rollout-") || !file.endsWith(".jsonl")) continue;
       try {
         const { payload } = JSON.parse(await readFirstLine(join(dir, file)));
+        // 같은 cwd 의 서브에이전트 thread 는 TUI 대상이 아니다.
         if (
           isCodexThreadId(payload?.id) &&
+          (payload.thread_source ?? "user") === "user" &&
           realCwd(payload.cwd) === target &&
           Date.parse(payload.timestamp) >= sinceMs
         )
@@ -135,23 +137,71 @@ export async function findCodexThreadByCwd(
   };
 }
 
+// 같은 cwd 에서 도는 Codex TUI 수. 확인할 수 없으면 null.
+export async function countCodexTuiInCwd(cwd, { execFn = execFileAsync } = {}) {
+  const target = realCwd(cwd);
+  let listed = "";
+  try {
+    ({ stdout: listed } = await execFn(
+      "lsof",
+      ["-a", "-c", "codex", "-d", "cwd", "-Fpn"],
+      { timeout: 5000, maxBuffer: 1024 * 1024 },
+    ));
+  } catch (error) {
+    // lsof 는 일치하는 프로세스가 없어도 1 로 끝난다.
+    if (error.code !== 1) return null;
+    listed = error.stdout ?? "";
+  }
+  const pids = [];
+  let pid = null;
+  for (const line of String(listed).split("\n")) {
+    if (line.startsWith("p")) pid = line.slice(1);
+    else if (line.startsWith("n") && pid && realCwd(line.slice(1)) === target)
+      pids.push(pid);
+  }
+  if (!pids.length) return 0;
+  try {
+    const { stdout } = await execFn(
+      "ps",
+      ["-o", "args=", "-p", pids.join(",")],
+      { timeout: 5000, maxBuffer: 1024 * 1024 },
+    );
+    return String(stdout)
+      .split("\n")
+      .filter((line) => line.trim() && !/\bapp-server\b/.test(line)).length;
+  } catch {
+    return null;
+  }
+}
+
 export async function queueCodexMessage({
   threadId,
   message,
   env = process.env,
   execFn = execFileAsync,
 }) {
-  // cwd 의 프로젝트 .codex/config.toml 이 깨져 있으면 queue 가 실패하므로 HOME 에서 실행한다.
-  const { stdout } = await execFn(
-    "codex",
-    ["queue", "--thread", threadId, "--message", message],
-    {
-      env,
-      cwd: env.HOME || homedir(),
-      timeout: 30_000,
-      maxBuffer: 1024 * 1024,
-    },
-  );
+  let stdout;
+  try {
+    // cwd 의 프로젝트 .codex/config.toml 이 깨져 있으면 queue 가 실패하므로 HOME 에서 실행한다.
+    ({ stdout } = await execFn(
+      "codex",
+      ["queue", `--thread=${threadId}`, `--message=${message}`],
+      {
+        env,
+        cwd: env.HOME || homedir(),
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024,
+      },
+    ));
+  } catch (error) {
+    // 비정상 종료라도 이미 쌓였을 수 있으면 폴백 재전송을 막는다.
+    if (!/Queued message/.test(String(error.stdout ?? ""))) {
+      if (error.killed || String(error.stdout ?? "").trim())
+        error.maybeQueued = true;
+      throw error;
+    }
+    stdout = error.stdout;
+  }
   const match = String(stdout).match(/Queued message (\S+) for thread/);
   if (!match) {
     const error = new Error(

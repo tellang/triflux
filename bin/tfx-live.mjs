@@ -26,6 +26,7 @@ import {
 } from "../hub/team/claude-transcript.mjs";
 import {
   codexThreadIdByName,
+  countCodexTuiInCwd,
   findCodexThreadByCwd,
   isCodexThreadId,
   queueCodexMessage,
@@ -1138,7 +1139,12 @@ function promptComposerNeedle(prompt) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean);
-  return (firstContentLine ?? "").slice(0, PROMPT_COMPOSER_NEEDLE_LENGTH);
+  // 발신자 머리말이 길어도 요청별로 가려지도록 표식을 바늘로 쓴다.
+  const tag = firstContentLine?.match(/\[tfx-live req=[^\]]+\]/)?.[0];
+  return (tag ?? firstContentLine ?? "").slice(
+    0,
+    PROMPT_COMPOSER_NEEDLE_LENGTH,
+  );
 }
 
 function composerLineMatchesPrompt(line, prompt) {
@@ -2397,19 +2403,25 @@ async function doAsk(adapter, opts) {
   const requestId = opts.requestId ?? randomBytes(6).toString("hex");
   const tag = `[tfx-live req=${requestId}]`;
   // Codex 는 접힌 발신자 표시가 없어 첫 줄 머리말로 보낸 세션을 드러낸다.
+  // 슬래시 명령은 첫 글자가 / 여야 실행되므로 표식을 붙이지 않는다.
+  const bare =
+    opts.noRelayTag || (adapter.cli === "codex" && opts.prompt.startsWith("/"));
   const from =
-    adapter.cli === "codex" && !opts.noRelayTag
+    adapter.cli === "codex" && !bare
       ? (opts.from ?? (await resolveSenderName()))
       : null;
   const header = from ? `[from ${from}] ${tag}` : tag;
   const prompt =
-    opts.noRelayTag || opts.prompt.split("\n", 1)[0].includes(tag)
+    bare || opts.prompt.split("\n", 1)[0].includes(tag)
       ? opts.prompt
       : `${header}\n${opts.prompt}`;
   try {
     return {
       ...(await dispatchAsk(adapter, { ...opts, prompt, requestId })),
       requestId,
+      ...(opts.transportReason
+        ? { transportReason: opts.transportReason }
+        : {}),
     };
   } catch (error) {
     error.requestId = requestId;
@@ -2473,7 +2485,35 @@ async function dispatchAsk(adapter, opts) {
   return doAskAuto(adapter, opts);
 }
 
-// tfx-live start 가 남긴 tmux 옵션, 세션 레지스트리, rollout cwd 순으로 찾는다.
+async function codexPaneArgs(panePid) {
+  if (!/^\d+$/.test(String(panePid ?? ""))) return null;
+  try {
+    const { stdout } = await execFileAsync(
+      "ps",
+      ["-ax", "-o", "pid=,ppid=,args="],
+      {
+        timeout: 5000,
+        maxBuffer: MAX_BUFFER,
+      },
+    );
+    const rows = String(stdout)
+      .split("\n")
+      .map((line) => line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/))
+      .filter(Boolean);
+    const tree = new Set([String(panePid)]);
+    for (let depth = 0; depth < 8; depth += 1)
+      for (const [, pid, ppid] of rows) if (tree.has(ppid)) tree.add(pid);
+    return (
+      rows.find(
+        ([, pid, , args]) => tree.has(pid) && isCodexProcessCommand(args),
+      )?.[3] ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+// tfx-live start 가 남긴 tmux 옵션, 세션 레지스트리, 프로세스 인자, rollout cwd 순으로 찾는다.
 async function resolveCodexTmuxThread(session, deps = {}) {
   const tmux = deps.runTmux ?? runTmux;
   let fields;
@@ -2483,13 +2523,13 @@ async function resolveCodexTmuxThread(session, deps = {}) {
       "-p",
       "-t",
       session,
-      "#{@tfx_codex_thread}\t#{pane_id}\t#{pane_current_path}\t#{session_created}",
+      "#{@tfx_codex_thread}\t#{pane_id}\t#{pane_current_path}\t#{session_created}\t#{pane_pid}",
     ]);
     fields = String(stdout).trim().split("\t");
   } catch (error) {
     return { threadId: null, reason: `tmux-unavailable: ${error.message}` };
   }
-  const [stored, paneId, cwd, created] = fields;
+  const [stored, paneId, cwd, created, panePid] = fields;
   if (isCodexThreadId(stored))
     return { threadId: stored, threadSource: "tmux-option" };
   const record = (deps.readCodexSessionRecords ?? readCodexSessionRecords)({
@@ -2497,6 +2537,21 @@ async function resolveCodexTmuxThread(session, deps = {}) {
   }).find((entry) => entry.tmuxPane === paneId);
   if (isCodexThreadId(record?.sessionId))
     return { threadId: record.sessionId, threadSource: "registry" };
+  // resume 한 thread 는 rollout 이 세션보다 오래돼 cwd 대응에서 빠지므로 프로세스 인자로 찾는다.
+  const args = await (deps.codexPaneArgs ?? codexPaneArgs)(panePid);
+  if (/\bresume\b/.test(args ?? "")) {
+    const resumed = args.match(/\bresume\s+([0-9a-f-]{36})\b/i)?.[1];
+    return isCodexThreadId(resumed)
+      ? { threadId: resumed, threadSource: "process-args" }
+      : { threadId: null, reason: "resumed-thread-unknown" };
+  }
+  // 같은 cwd 에 Codex TUI 가 둘 이상이면 rollout 만으로 누구 것인지 알 수 없다.
+  const live = await (deps.countCodexTuiInCwd ?? countCodexTuiInCwd)(cwd);
+  if (live !== 1)
+    return {
+      threadId: null,
+      reason: live === null ? "cwd-unverified" : "thread-ambiguous",
+    };
   const createdMs = Number.parseInt(created, 10) * 1000;
   const byCwd = await findCodexThreadByCwd(cwd, {
     sinceMs: Number.isFinite(createdMs) ? createdMs : 0,
@@ -3054,10 +3109,18 @@ function transportFlag(flags, adapter, short, sessionId) {
 function askOpts(flags, adapter) {
   const short = flags.short;
   const sessionId = flags["session-id"];
-  // Codex 메시지는 queue 가 기본이다. 입력창을 건드리지 않고 바쁠 때 쌓인다.
+  // Codex 메시지는 queue 가 기본이다. 슬래시 명령과 바쁠 때 거부·중단은 tmux 만 할 수 있다.
+  const slash = String(flags.prompt ?? "").startsWith("/");
+  const busyPolicy = ["fail", "interrupt"].includes(flags["if-busy"]);
+  const transportReason =
+    adapter.cli === "codex" && !flags.transport && (slash || busyPolicy)
+      ? slash
+        ? "slash-command"
+        : `if-busy-${flags["if-busy"]}`
+      : null;
   const transport = transportFlag(
     adapter.cli === "codex" && !flags.transport
-      ? { ...flags, transport: "queue" }
+      ? { ...flags, transport: transportReason ? "tmux" : "queue" }
       : flags,
     adapter,
     short,
@@ -3069,6 +3132,10 @@ function askOpts(flags, adapter) {
     throw new Error("--transport auto is only supported with --cli claude");
   if (codexQueue && adapter.cli !== "codex")
     throw new Error("--transport queue is only supported with --cli codex");
+  if (codexQueue && (slash || busyPolicy))
+    throw new Error(
+      "queue cannot run slash commands or --if-busy fail|interrupt; use --transport tmux",
+    );
   if (codexQueue && flags.thread && !isCodexThreadId(flags.thread))
     throw new Error("--thread for queue must be a Codex session UUID");
   if (codexQueue && !flags.thread && !flags.session)
@@ -3095,6 +3162,7 @@ function askOpts(flags, adapter) {
     sessionId,
     configDir: flags["config-dir"],
     transport,
+    transportReason,
     from: flags.from,
     threadId: codexUds
       ? requireFlag(flags, "thread")
@@ -3912,10 +3980,8 @@ function peerSideTransport(flags, side, adapter) {
       ? (globalTransport ?? defaultTransportFor(adapter, short, sessionId))
       : undefined) ??
     "tmux";
-  if (!VALID_TRANSPORTS.includes(transport)) {
-    throw new Error(
-      `--transport-${side} must be one of: ${VALID_TRANSPORTS.join(", ")}`,
-    );
+  if (!VALID_TRANSPORTS.includes(transport) || transport === "queue") {
+    throw new Error(`--transport-${side} must be one of: tmux, uds, auto`);
   }
   if (
     transport !== "tmux" &&

@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import {
   codexThreadIdByName,
   findCodexThreadByCwd,
+  queueCodexMessage,
   waitCodexRequest,
 } from "../../hub/team/codex-queue.mjs";
 
@@ -111,7 +112,7 @@ test("ask --cli codex 는 queue 로 보내고 보낸 세션 이름을 첫 줄에
     [
       "#!/usr/bin/env node",
       "require('node:fs').writeFileSync(process.env.CODEX_LOG, JSON.stringify(process.argv.slice(2)));",
-      "console.log(`Queued message m1 for thread ${process.argv[4]}.`);",
+      "console.log('Queued message m1 for thread x.');",
     ].join("\n"),
     { mode: 0o755 },
   );
@@ -145,9 +146,37 @@ test("ask --cli codex 는 queue 로 보내고 보낸 세션 이름을 첫 줄에
   assert.equal(result.status, "queued");
   assert.equal(result.queuedMessageId, "m1");
   const argv = JSON.parse(await fs.readFile(log, "utf8"));
-  assert.deepEqual(argv.slice(0, 3), ["queue", "--thread", THREAD]);
-  assert.equal(
-    argv[4],
-    `[from 10.8 리드] [tfx-live req=${result.requestId}]\n안녕`,
+  assert.deepEqual(argv, [
+    "queue",
+    `--thread=${THREAD}`,
+    `--message=[from 10.8 리드] [tfx-live req=${result.requestId}]\n안녕`,
+  ]);
+});
+
+test("queue 가 비정상 종료해도 이미 쌓였을 수 있으면 폴백 재전송을 막는다", async () => {
+  const fail = (fields) => async () => {
+    throw Object.assign(new Error("codex failed"), fields);
+  };
+  const queued = await queueCodexMessage({
+    threadId: THREAD,
+    message: "m",
+    execFn: fail({ code: 1, stdout: "Queued message m2 for thread x.\n" }),
+  });
+  assert.equal(queued.queuedMessageId, "m2");
+  await assert.rejects(
+    queueCodexMessage({
+      threadId: THREAD,
+      message: "m",
+      execFn: fail({ killed: true, stdout: "" }),
+    }),
+    (error) => error.maybeQueued === true,
+  );
+  await assert.rejects(
+    queueCodexMessage({
+      threadId: THREAD,
+      message: "m",
+      execFn: fail({ code: 2, stdout: "" }),
+    }),
+    (error) => error.maybeQueued !== true,
   );
 });
