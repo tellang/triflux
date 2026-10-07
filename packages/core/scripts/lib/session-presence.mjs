@@ -57,15 +57,7 @@ async function defaultResolveParticipantLakeRoot(cwd) {
   };
 }
 
-/**
- * Append a compact CTO `session_started` event for participant hooks.
- * This is intentionally observational only: no cleanup, reconciliation, or
- * summarization policy is performed here. Callers may fire-and-forget it.
- *
- * @param {string} stdinData SessionStart-shaped stdin JSON
- * @param {object} [seams] test seams
- * @returns {Promise<object|null>}
- */
+/** 참가 세션의 시작 이벤트만 기록한다. */
 export async function emitParticipantSessionStarted(stdinData, seams = {}) {
   try {
     if (
@@ -163,14 +155,7 @@ function shouldSkipInteractiveRegistration(payload, seams = {}) {
   );
 }
 
-/**
- * cwd 기준 git 컨텍스트(worktree root / branch)를 best-effort, 비동기로 수집.
- * execFileSync 와 달리 호출자(BACKGROUND)를 블로킹하지 않는다. 각 git 호출은
- * tight timeout(1.5s) + 강제 kill 로 묶여 hub/디스크 stall 시에도 잔류하지 않는다.
- * @param {string} cwd
- * @param {(args:string[], cb:(out:string)=>void)=>void} [gitRunner] 테스트용 seam
- * @returns {Promise<{ worktreePath: string, branch: string }>}
- */
+/** git 조회는 세션 시작을 막지 않도록 비동기로 실행한다. */
 function gitContextAsync(cwd, gitRunner = defaultGitRunner) {
   const run = (args) =>
     new Promise((resolve) => {
@@ -189,7 +174,7 @@ function gitContextAsync(cwd, gitRunner = defaultGitRunner) {
   }));
 }
 
-/** 기본 git runner: execFile(async) + tight timeout + kill. 실패는 빈 문자열. */
+/** git 조회 실패는 빈 문자열로 처리한다. */
 function defaultGitRunner(cwd, args, cb) {
   execFile(
     "git",
@@ -207,21 +192,7 @@ function defaultGitRunner(cwd, args, cb) {
   );
 }
 
-/**
- * 인터랙티브 세션을 Synapse 레지스트리에 self-register (fire-and-forget).
- * hub 미응답이면 silent no-op. BLOCKING path 에 latency 0 — git 컨텍스트는
- * 블로킹 경로 밖에서 비동기로 enrich 한다 (cwd 만으로 즉시 minimal register).
- *
- * pid 는 의도적으로 보내지 않는다: 이 훅 프로세스의 process.pid 는 short-lived
- * 훅 PID 일 뿐 세션 PID 가 아니므로 오기재가 된다. liveness 는 TTL 이 담당한다.
- *
- * @param {string} stdinData
- * @param {object} [seams] 테스트용 injectable seam
- * @param {Function} [seams.register]  registerSynapseSession 대체
- * @param {Function} [seams.heartbeat] heartbeatSynapseSession 대체
- * @param {Function} [seams.gitRunner] git runner 대체
- * @returns {Promise<object|null>|null} CTO append promise; enrich 는 백그라운드에서 완료
- */
+/** 세션을 즉시 등록하고 git 정보는 뒤이어 갱신한다. 훅 PID는 세션 PID가 아니다. */
 export function registerInteractiveSession(stdinData, seams = {}) {
   let ctoEvent = null;
   const register = seams.register || registerSynapseSession;
@@ -234,7 +205,6 @@ export function registerInteractiveSession(stdinData, seams = {}) {
     if (shouldSkipInteractiveRegistration(payload, seams)) return null;
     const cwd = typeof payload?.cwd === "string" ? payload.cwd : process.cwd();
 
-    // 1) cwd 만으로 즉시 minimal register (블로킹 git 없음, latency 0).
     register({
       sessionId,
       cwd,
@@ -249,35 +219,19 @@ export function registerInteractiveSession(stdinData, seams = {}) {
       () => null,
     );
 
-    // 2) worktree/branch 는 블로킹 경로 밖에서 비동기 enrich → heartbeat partial.
     gitContextAsync(cwd, gitRunner)
       .then(({ worktreePath, branch }) => {
-        if (worktreePath === cwd && !branch) return; // 추가 정보 없음
+        if (worktreePath === cwd && !branch) return;
         heartbeat(sessionId, { worktreePath, branch });
       })
       .catch(() => {});
   } catch {
-    /* best-effort — never affects session start */
+    /* 세션 시작은 계속한다. */
   }
   return ctoEvent;
 }
 
-/**
- * interactive 세션의 사용자 활동을 liveness 로 갱신한다.
- * 이 갱신이 없으면 hub monitor 가 5분 TTL 후 세션을 stale 로 전이시켜
- * `cto status` 의 live_sessions 가 비어 보인다.
- *
- * heartbeat 는 fire-and-forget POST 이므로 호출측 세션 hook 이
- * process.exit 전에 drainPendingSynapse 로 flush 해야 drop 되지 않는다.
- *
- * pid 는 register 와 동일하게 보내지 않는다(91-92 주석): liveness 는 TTL +
- * heartbeat 가 담당한다.
- *
- * @param {string} stdinData UserPromptSubmit stdin JSON
- * @param {object} [seams] 테스트용 injectable seam
- * @param {Function} [seams.heartbeat] heartbeatSynapseSession 대체
- * @returns {void}
- */
+/** 사용자 활동을 갱신한다. 호출자는 종료 전에 전송을 완료해야 한다. */
 export function heartbeatInteractiveSession(stdinData, seams = {}) {
   const heartbeat = seams.heartbeat || heartbeatSynapseSession;
   try {
@@ -290,6 +244,6 @@ export function heartbeatInteractiveSession(stdinData, seams = {}) {
     if (prompt) partial.taskSummary = buildSynapseTaskSummary(prompt);
     heartbeat(sessionId, partial);
   } catch {
-    /* best-effort — never affects the prompt turn */
+    /* 프롬프트 처리는 계속한다. */
   }
 }

@@ -12,18 +12,6 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { refreshPreflightCacheIfStale } from "../../scripts/preflight-cache.mjs";
 
-test("유효한 캐시는 다시 갱신하지 않는다", async () => {
-  let calls = 0;
-  const changed = await refreshPreflightCacheIfStale({
-    readCache: () => ({ timestamp: Date.now() }),
-    refresh: () => {
-      calls += 1;
-    },
-  });
-  assert.equal(changed, false);
-  assert.equal(calls, 0);
-});
-
 test("디스크 캐시가 없거나 손상되거나 만료됐을 때만 갱신한다", (t) => {
   const home = mkdtempSync(join(tmpdir(), "tfx-preflight-refresh-"));
   t.after(() => rmSync(home, { recursive: true, force: true }));

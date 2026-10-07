@@ -13,7 +13,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-// ADR-0023: match the installed Triflux command target, not arbitrary text about Triflux.
+// 설치된 Triflux 실행 대상만 식별한다.
 const MANAGED_FILENAMES = [
   "hook-orchestrator.mjs",
   "claude-cwd-projection-refresh.mjs",
@@ -112,7 +112,7 @@ export function isLegacyTrifluxHook(hook) {
     return false;
   const target = readCommandToken(executable.rest);
   if (!target) return false;
-  // hooks/hooks.json used one inline bootstrap. Other inline strings are data.
+  // 옛 inline bootstrap만 제거한다.
   if (target.value === "-e" || target.value === "--eval")
     return (
       command.includes(".tfx-pkg-root") &&
@@ -121,7 +121,7 @@ export function isLegacyTrifluxHook(hook) {
       command.includes("path.join(root")
     );
   if (matchesTarget(target.value)) return true;
-  // keyword-detector was passed as the only script argument to run.cjs.
+  // run.cjs의 keyword-detector 인자를 확인한다.
   if (/[/\\]scripts[/\\]run\.cjs$/.test(target.value)) {
     const script = readCommandToken(target.rest);
     return (
@@ -162,10 +162,7 @@ function removeManagedHooks(settings) {
   return removed;
 }
 
-/**
- * Remove previously installed Triflux command hooks from Claude settings.
- * A dry run reports `removed` and `wouldChange` without creating files.
- */
+/** Claude 설정의 이전 Triflux command hook을 정리한다. */
 export function cleanupLegacyHooks({
   settingsPath = join(
     process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"),
@@ -186,7 +183,7 @@ export function cleanupLegacyHooks({
   try {
     const pathInfo = lstatSync(settingsPath, { throwIfNoEntry: false });
     if (!pathInfo) return result;
-    // Rename the actual file so a settings.json symlink remains intact.
+    // symlink는 유지하고 실제 파일을 교체한다.
     const targetPath = pathInfo.isSymbolicLink()
       ? realpathSync(settingsPath)
       : settingsPath;
@@ -220,7 +217,7 @@ export function cleanupLegacyHooks({
       try {
         unlinkSync(temporary);
       } catch {
-        /* no temporary file */
+        /* 임시 파일 없음 */
       }
       throw error;
     }

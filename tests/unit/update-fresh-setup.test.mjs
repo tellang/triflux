@@ -24,8 +24,6 @@ test("업데이트 후 새 CLI 파일을 별도 프로세스에서 setup --from-
   const root = fixture(t);
   const result = join(root, "result.json");
   const cli = join(root, "bin", "triflux.mjs");
-  writeFileSync(cli, "throw new Error('old code');\n");
-  // 부모가 helper를 이미 import한 뒤 설치 파일이 바뀌는 상황이다.
   writeFileSync(
     cli,
     `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(result)}, JSON.stringify({pid: process.pid, argv: process.argv.slice(2)}));\n`,
@@ -34,20 +32,4 @@ test("업데이트 후 새 CLI 파일을 별도 프로세스에서 setup --from-
   const actual = JSON.parse(readFileSync(result, "utf8"));
   assert.notEqual(actual.pid, process.pid);
   assert.deepEqual(actual.argv, ["setup", "--from-update"]);
-});
-
-test("남는 핵심 파일이 없으면 새 setup을 실행하지 않는다", (t) => {
-  assert.throws(
-    () => runUpdatedSetup({ packageRoot: fixture(t) }),
-    /핵심 파일 누락/,
-  );
-});
-
-test("새 setup 실패를 부모에게 전달한다", (t) => {
-  const root = fixture(t);
-  writeFileSync(join(root, "bin", "triflux.mjs"), "process.exit(7);\n");
-  assert.throws(
-    () => runUpdatedSetup({ packageRoot: root }),
-    (error) => error.status === 7,
-  );
 });

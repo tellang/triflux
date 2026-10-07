@@ -10,12 +10,7 @@ import {
   registerInteractiveSession as defaultRegisterInteractiveSession,
 } from "../scripts/lib/session-presence.mjs";
 
-// hub-ensure is loaded lazily so the byte-identical packages/core mirror of this
-// file loads cleanly. packages/core mirrors scripts/lib only (not scripts/*), so a
-// static `../scripts/hub-ensure.mjs` import would make the core copy throw
-// ERR_MODULE_NOT_FOUND at load time. The core copy is published-but-dormant — the
-// live codex hook always runs from the installed triflux package where the path
-// resolves. This follows the existing lazy script-import pattern.
+// hub-ensure가 없는 core 미러도 불러올 수 있도록 지연 import한다.
 async function defaultHubEnsureRun(stdinData) {
   const { run } = await import(
     new URL("../scripts/hub-ensure.mjs", import.meta.url).href
