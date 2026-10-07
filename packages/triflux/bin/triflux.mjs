@@ -41,7 +41,6 @@ import {
   inspectMacTimeoutDependency,
 } from "../scripts/lib/doctor-env-checks.mjs";
 import { ensureGeminiProfiles } from "../scripts/lib/gemini-profiles.mjs";
-import { serializeHandoff } from "../scripts/lib/handoff.mjs";
 import { cleanupLegacyHooks } from "../scripts/lib/legacy-hook-cleanup.mjs";
 import { cleanupLegacyMcp } from "../scripts/lib/legacy-mcp-cleanup.mjs";
 import {
@@ -226,38 +225,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         name: "--json",
         type: "boolean",
         description: "버전 정보를 JSON으로 출력",
-      },
-    ],
-  },
-  handoff: {
-    usage:
-      "tfx handoff [--target local|remote] [--decision <text>] [--decision-file <path>] [--output <path>] [--json]",
-    description: "현재 작업 컨텍스트를 세션 핸드오프 프롬프트로 직렬화",
-    options: [
-      {
-        name: "--target",
-        type: "string",
-        description: "주입 대상 (local|remote, 기본값 remote)",
-      },
-      {
-        name: "--decision",
-        type: "string",
-        description: "핸드오프 결정사항 (반복 지정 가능)",
-      },
-      {
-        name: "--decision-file",
-        type: "string",
-        description: "결정사항 파일 (라인/불릿 단위)",
-      },
-      {
-        name: "--output",
-        type: "string",
-        description: "생성한 핸드오프 프롬프트 저장 경로",
-      },
-      {
-        name: "--json",
-        type: "boolean",
-        description: "핸드오프 결과를 JSON으로 출력",
       },
     ],
   },
@@ -4375,133 +4342,6 @@ function cmdVersion(options = {}) {
   console.log("");
 }
 
-function cmdHandoff(args = [], options = {}) {
-  if (args.some(isHelpArg)) {
-    printCommandHelp("handoff");
-    return;
-  }
-
-  const { json = false } = options;
-  const parsed = {
-    target: "remote",
-    decisions: [],
-    decisionFile: null,
-    output: null,
-    cwd: process.cwd(),
-  };
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    const next = args[index + 1];
-
-    if (arg === "--target") {
-      if (!next || next.startsWith("-")) {
-        throw createCliError("--target 값이 필요합니다 (local|remote)", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx handoff --target remote",
-        });
-      }
-      if (!["local", "remote"].includes(next)) {
-        throw createCliError(`지원하지 않는 --target 값: ${next}`, {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx handoff --target local|remote",
-        });
-      }
-      parsed.target = next;
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--decision") {
-      if (!next || next.startsWith("-")) {
-        throw createCliError("--decision 값이 필요합니다", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: 'tfx handoff --decision "결정사항"',
-        });
-      }
-      parsed.decisions.push(next);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--decision-file") {
-      if (!next || next.startsWith("-")) {
-        throw createCliError("--decision-file 경로가 필요합니다", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx handoff --decision-file .omx/notepad.md",
-        });
-      }
-      parsed.decisionFile = resolve(next);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--output" || arg === "--out") {
-      if (!next || next.startsWith("-")) {
-        throw createCliError(`${arg} 경로가 필요합니다`, {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx handoff --output .omx/handoff.md",
-        });
-      }
-      parsed.output = resolve(next);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--cwd") {
-      if (!next || next.startsWith("-")) {
-        throw createCliError("--cwd 경로가 필요합니다", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx handoff --cwd <project-path>",
-        });
-      }
-      parsed.cwd = resolve(next);
-      index += 1;
-      continue;
-    }
-
-    throw createCliError(`알 수 없는 handoff 옵션: ${arg}`, {
-      exitCode: EXIT_ARG_ERROR,
-      reason: "argError",
-      fix: "tfx handoff --target remote --output .omx/handoff.md",
-    });
-  }
-
-  const result = serializeHandoff({
-    target: parsed.target,
-    decisions: parsed.decisions,
-    decisionFile: parsed.decisionFile,
-    cwd: parsed.cwd,
-  });
-
-  if (parsed.output) {
-    const outputDir = dirname(parsed.output);
-    if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
-    writeFileSync(parsed.output, `${result.prompt}\n`, "utf8");
-  }
-
-  if (json) {
-    printJson({
-      handoff: {
-        ...result,
-        ...(parsed.output ? { output: parsed.output } : {}),
-      },
-    });
-    return;
-  }
-
-  console.log(result.prompt);
-  if (parsed.output) {
-    console.log(`\n${DIM}saved:${RESET} ${parsed.output}`);
-  }
-}
-
 function cmdSchema(args = []) {
   const bundle = loadDelegatorSchemaBundle();
   const selector = String(args[0] || "").trim();
@@ -4811,7 +4651,6 @@ function cmdHelp() {
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
     ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
-    ${WHITE_BRIGHT}tfx handoff${RESET}    ${GRAY}현재 컨텍스트를 원격/로컬 핸드오프 프롬프트로 생성${RESET}
     ${WHITE_BRIGHT}tfx schema${RESET}     ${GRAY}CLI/Hub schema JSON 출력${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
@@ -5821,9 +5660,6 @@ async function main() {
         return;
       }
       cmdList({ json: JSON_OUTPUT });
-      return;
-    case "handoff":
-      cmdHandoff(cmdArgs, { json: JSON_OUTPUT });
       return;
     case "hub":
       if (cmdArgs.some(isHelpArg)) {

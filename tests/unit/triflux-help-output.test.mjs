@@ -43,7 +43,6 @@ describe("tfx --help 출력", () => {
   for (const command of [
     "setup",
     "doctor",
-    "handoff",
     "schema",
     "synapse",
     "multi",

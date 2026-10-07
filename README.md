@@ -138,7 +138,6 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 | `tfx synapse` | Session registry and leases |
 | `tfx hub` | Local Hub: `start`, `stop`, `status`, `ensure` |
 | `tfx mcp` | Managed MCP registry: `list`, `sync`, `add`, `remove` |
-| `tfx handoff` | Serialize the current context for another session or host |
 | `tfx cto` | Repo-local authority console: `collect`, `status`, `hygiene` (dry-run) |
 | `tfx codex-team` | Codex-led team mode |
 | `bash ~/.claude/scripts/tfx-route.sh code-reviewer "<instruction>"` | Send review to Codex (`codex exec review` via policy) |
