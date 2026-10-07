@@ -2,18 +2,14 @@
 name: tfx-setup
 description: >
   triflux 초기 설정 및 진단. AskUserQuestion 기반 인터랙티브 위저드로
-  파일 동기화, HUD 설정, Codex 프로파일, CLI 진단, MCP 확인, 검색 MCP 설정과
-  훅 우선순위(hook-orchestrator) 관리를 수행합니다.
-  Use when: setup, 설정, 설치, install, 초기화, 처음, 시작, wizard, 훅 관리, hook priority, 훅 우선순위
-argument-hint: "[doctor|hooks]"
+  파일 동기화, HUD 설정, Codex 프로파일, CLI 진단, MCP 확인과 검색 MCP 설정을 수행합니다.
+  Use when: setup, 설정, 설치, install, 초기화, 처음, 시작, wizard
+argument-hint: "[doctor]"
 ---
 
 # tfx-setup — triflux 초기 설정 위저드
 
 > 설치 후 최초 1회 + **매 업데이트 후** 실행 권장.
-> `tfx update` 완료 후에도 이 스킬의 단계 1.5(훅 등록 확인)를 반드시 실행하여
-> 신규/변경된 훅이 settings.json에 반영되도록 한다.
-> 훅 우선순위 관리는 아래 [훅 우선순위 관리](#훅-우선순위-관리) 절의 오케스트레이터 패턴을 따른다.
 
 ## OS별 동작
 
@@ -48,7 +44,7 @@ options:
     description: "설정 없이 진단만 수행"
 ```
 
-`doctor` 인자가 있으면 바로 `triflux doctor` 실행. `hooks` 인자가 있으면 [훅 우선순위 관리](#훅-우선순위-관리) 절로 바로 간다.
+`doctor` 인자가 있으면 바로 `triflux doctor`를 실행한다.
 
 ### Step 2: 전체 설정 (6단계)
 
@@ -61,18 +57,6 @@ Bash("triflux setup")
 ```
 
 스크립트/HUD/스킬을 `~/.claude/`에 배포. 결과 표시. `tfx setup` 은 user-state 파일(예: macOS/Linux `~/.config/triflux/hosts.json`, Windows `%APPDATA%\triflux\hosts.json`)을 덮어쓰지 않는다.
-
-#### 단계 1.5: 훅 등록 확인
-
-`~/.claude/settings.json`을 Read 도구로 읽어 필수 훅이 등록되어 있는지 확인한다.
-
-필수 훅 목록:
-| 이벤트 | matcher | 스크립트 | 역할 |
-|--------|---------|---------|------|
-| PreToolUse | Bash | psmux-safety-guard.mjs | psmux kill-session 직접 호출 차단 (WT 프리징 방지) |
-| PreToolUse | Skill | tfx-gate-activate.mjs | tfx-multi 게이트 |
-
-누락된 훅이 있으면 update-config 스킬로 등록한다. 이미 있으면 ✅ 표시.
 
 #### 단계 2: HUD 설정
 
@@ -202,7 +186,7 @@ options:
 ```
 
 **CLAUDE.md 주입 (필수):** 감지된 config.toml 설정을 프로젝트 CLAUDE.md의 `<codex-config>` 섹션에 반영한다.
-이렇게 해야 훅(safety-guard)이 명령을 차단하거나 Codex 가 플래그 충돌로 실패했을 때, Claude가 차단 메시지를 읽고 "왜 차단됐는지" + "어떻게 수정해야 하는지"를 CLAUDE.md에서 찾아서 올바르게 재시도할 수 있다.
+이렇게 해야 Codex 가 플래그 충돌로 실패했을 때 Claude가 CLAUDE.md에서 설정을 확인하고 올바르게 재시도할 수 있다.
 
 주입 예시 (Edit 도구로 `<codex-config>` 섹션 업데이트):
 ```markdown
@@ -549,31 +533,6 @@ options:
 - 검색 MCP 추가/변경: `/tfx-setup` → 단계별 선택 → 검색 MCP
 - 세션 재시작하면 HUD + 검색 MCP가 활성화됩니다
 ```
-
-## 훅 우선순위 관리
-
-Claude Code는 같은 이벤트에 걸린 훅을 **병렬로** 실행하므로 순서를 보장하지 않는다. triflux의
-`hooks/hook-orchestrator.mjs`가 이벤트마다 단일 진입점이 되어 `hooks/hook-registry.json`을 읽고
-priority 순(triflux 0 → OMC 50 → 외부 100, 숫자가 낮을수록 먼저)으로 순차 실행한다.
-
-먼저 `Bash("triflux hooks status")`로 `orchestrated` 여부를 확인한 뒤 AskUserQuestion으로 작업을 고른다.
-
-| 작업 | 명령 | 비고 |
-|------|------|------|
-| 현재 상태 보기 | `triflux hooks scan` | 이벤트별 훅 수와 출처를 표로 보여 준다 |
-| 변경점 미리보기 | `triflux hooks diff` | 적용 전에 반드시 먼저 보여 준다 |
-| 오케스트레이터 적용 | `triflux hooks apply` | diff를 보여 주고 "적용/취소" 확인 후 실행. settings.json을 백업한다 |
-| 원래대로 복원 | `triflux hooks restore` | `restored`면 복원 완료, `no_backup`이면 적용한 적이 없다고 알린다 |
-| 훅 활성/비활성 | `triflux hooks toggle <hookId>` | 대상 훅은 레지스트리 목록에서 고르게 한다 |
-| 우선순위 변경 | `triflux hooks set-priority <hookId> <priority>` | 0=최우선, 50=중간, 100=후순위 |
-
-오케스트레이터는 레지스트리를 실행할 때마다 읽으므로 toggle·set-priority 뒤에 다시 적용할 필요가 없다.
-
-| 상황 | 처리 |
-|------|------|
-| hook-registry.json 없음 | 패키지의 `hooks/` 디렉터리를 확인하라고 안내 |
-| settings.json 파싱 실패 | 수동 확인 안내 (자동 덮어쓰기 금지) |
-| hook-manager 실행 실패 | `node hooks/hook-manager.mjs status`를 직접 실행해 보라고 안내 |
 
 ## 에러 처리
 

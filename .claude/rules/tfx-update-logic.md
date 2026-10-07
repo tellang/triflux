@@ -12,9 +12,9 @@
 
 ## 주의
 
-- `git reset --hard`는 safety-guard가 차단 → `git merge --ff-only`로 우회
+- 업데이트 중 로컬 변경을 보존한다. `git reset --hard` 대신 상태를 확인하고 `git merge --ff-only`를 사용한다.
 - OMC drift 감지 시 plugin/npm/CLAUDE.md 3개 컴포넌트를 반드시 함께 갱신 (한쪽만 새 버전이면 훅/라우팅 호환성 깨짐)
 - gstack 업그레이드 후 `~/.gstack/just-upgraded-from`을 체크해서 CHANGELOG 하이라이트 표시
 - 원격 머신 업그레이드 전파는 `tfx-remote` + SSH scp로 수동 (자동화 예정)
-- Antigravity headless fallback readiness 는 SessionStart `preflight-cache.mjs` 가 `TFX_ANTIGRAVITY_OK` 로 캐시. `hub/team/preflight-cache.mjs` 코드 주석 참조.
+- Antigravity headless fallback readiness 는 `tfx-route.sh` 가 캐시가 없거나 오래됐을 때 `TFX_ANTIGRAVITY_OK` 를 갱신한다. `hub/team/preflight-cache.mjs` 코드 주석 참조.
 - Antigravity CLI 인증은 ChainedAuth (Mac Keychain → oauth_creds.json 순) 기반. 별도 sign-in 일반적으로 불필요.

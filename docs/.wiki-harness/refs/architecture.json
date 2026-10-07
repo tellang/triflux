@@ -62,29 +62,7 @@
       "label": "term-psmux",
       "type": "term",
       "word": "psmux",
-      "definition": "Windows 전용 tmux 유사 터미널 멀티플렉서. triflux가 Windows Terminal 패인·세션을 관리 API 경유로만 조작하도록 강제할 때 대상이 되는 도구다."
-    },
-    "code-headless-guard": {
-      "label": "code-headless-guard",
-      "type": "code",
-      "word": "headless-guard",
-      "definition": "PreToolUse 훅 — primary multiplexer가 있으면 Bash(tfx-route.sh) 개별 호출을 headless 명령으로 자동 변환하고, `codex exec`/`agy`/`gemini` 직접 래핑을 차단한다.",
-      "file": "scripts/headless-guard.mjs",
-      "line": "187",
-      "signature": "async function main()",
-      "role": "PreToolUse 훅 — direct codex/agy/gemini 래핑 차단 + headless 자동 변환",
-      "vscode_link": "vscode://file/Users/tellang/Projects/tools/triflux/scripts/headless-guard.mjs:187"
-    },
-    "code-safety-guard": {
-      "label": "code-safety-guard",
-      "type": "code",
-      "word": "safety-guard",
-      "definition": "PreToolUse:Bash 훅 — 위험한 Bash 명령을 사전 차단(exit 2)하거나 경고(additionalContext)한다.",
-      "file": "hooks/safety-guard.mjs",
-      "line": "312",
-      "signature": "function main()",
-      "role": "PreToolUse:Bash 훅 — 위험 명령 차단/경고",
-      "vscode_link": "vscode://file/Users/tellang/Projects/tools/triflux/hooks/safety-guard.mjs:312"
+      "definition": "Windows 전용 tmux 유사 터미널 멀티플렉서. triflux가 Windows Terminal 패인과 세션을 관리 API로 조작할 때 사용하는 도구다."
     },
     "code-tfx-route": {
       "label": "code-tfx-route",

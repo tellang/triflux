@@ -1,5 +1,5 @@
 ---
-globs: **/*.ps1, **/launch-*.sh, **/tfx-route.sh, **/*psmux*, **/*wt-manager*, **/terminal-opener*, **/safety-guard.mjs
+globs: **/*.ps1, **/launch-*.sh, **/tfx-route.sh, **/*psmux*, **/*wt-manager*, **/terminal-opener*
 ---
 # tfx-psmux — Windows psmux와 Codex CLI 정책
 
@@ -160,13 +160,13 @@ tfx doctor --json
 
 ## 규칙 5-3: WT 명령 형태
 
-에이전트는 `wt.exe` 를 직접 호출하지 않는다(RULE 6, safety-guard 차단). 실제 명령 조립은
+에이전트는 `wt.exe` 를 직접 호출하지 않는다(RULE 6). 실제 명령 조립은
 `hub/team/wt-manager.mjs`가 담당하며 그 구현이 명령 형태의 정본이다. 관리자를 고칠 때만 코드를 본다.
 필수 인자는 `-w 0`(현재 창), `-p triflux`(프로파일), 분할은 `sp -H|-V`, 새 탭(`nt`)은 금지.
 
 ## 규칙 6: WT 탭·창은 `wt-manager` 경유 필수
 
-safety-guard 가 `wt.exe` / `wt new-tab` / `wt split-pane` / `Start-Process wt` 를 차단한다.
+`wt.exe` / `wt new-tab` / `wt split-pane` / `Start-Process wt` 직접 호출 대신
 `hub/team/wt-manager.mjs` API 를 쓴다.
 
 | 용도 | API |
@@ -183,7 +183,7 @@ safety-guard 가 `wt.exe` / `wt new-tab` / `wt split-pane` / `Start-Process wt` 
 | 세션 조회 | `listSessions({ filterTitle?, olderThanMs? })` |
 | 제목 접두사·정규식으로 종료 | `killSessionByTitle(titlePattern)` |
 | 오래된 유휴 세션 정리 | `pruneStale({ olderThanMs, dryRun })` |
-| Bash 훅 우회 래퍼 | `node hub/team/psmux.mjs --internal kill-by-title <prefix\|/regex/>` |
+| 내부 종료 래퍼 | `node hub/team/psmux.mjs --internal kill-by-title <prefix\|/regex/>` |
 
 차단과 대안은 항상 쌍으로 만든다. 차단만 추가하면 데드락이다.
 

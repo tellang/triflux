@@ -2,7 +2,7 @@
 
 ## 멘탈 모델
 
-사용자는 `tfx-auto`만 알아도 된다. auto가 내부에서 multi/swarm을 자동 선택한다. 명시 오버라이드는 `--parallel` 플래그나 `tfx swarm`·`/tfx-multi`(또는 `tfx multi 로 돌려`) 명시 토큰이다(키워드 훅이 tfx-auto 호출을 MUST로 주입한다. 자연어 "스웜"·"멀티"는 훅이 잡지 않는다 — [ADR-0021](../../docs/adr/0021-keyword-hook-explicit-first.md)).
+사용자는 `tfx-auto`만 알아도 된다. auto가 내부에서 multi/swarm을 자동 선택한다. 명시 오버라이드는 `--parallel` 플래그나 `tfx swarm`·`/tfx-multi`(또는 `tfx multi 로 돌려`) 명시 토큰이다. 자연어 요청은 대화 맥락에 따라 판단한다([ADR-0023](../../docs/adr/0023-remove-command-hooks-hub-and-adopt-mods.md)).
 
 ## 내부 라우팅 (auto가 판정)
 

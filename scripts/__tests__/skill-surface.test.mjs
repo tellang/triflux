@@ -127,7 +127,7 @@ describe("skill surface cleanup (12 + Windows 1)", () => {
     }
   });
 
-  it("tfx-setup 은 훅 우선순위 관리를, tfx-doctor 는 hub 관리를 흡수했다", () => {
+  it("tfx-setup 은 설정을 안내하고 tfx-doctor 는 hub 관리를 안내한다", () => {
     const setup = readFileSync(
       join(skillsDir, "tfx-setup", "SKILL.md"),
       "utf8",
@@ -136,8 +136,8 @@ describe("skill surface cleanup (12 + Windows 1)", () => {
       join(skillsDir, "tfx-doctor", "SKILL.md"),
       "utf8",
     );
-    assert.match(setup, /^## 훅 우선순위 관리$/m);
-    assert.match(setup, /triflux hooks apply/);
+    assert.match(setup, /^#### 단계 1: 파일 동기화$/m);
+    assert.doesNotMatch(setup, /triflux hooks apply/);
     assert.match(doctor, /^## tfx-hub 관리$/m);
     assert.match(doctor, /tfx hub status/);
   });

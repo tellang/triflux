@@ -50,9 +50,7 @@
 
 - `.claude-plugin/marketplace.json`
 - `.claude-plugin/plugin.json`
-- `hooks/hooks.json`
-- `hooks/hook-orchestrator.mjs`
-- `hooks/hook-registry.json`
+- 당시 Claude Code hook 설정 파일과 실행기 (ADR-0023에서 제거)
 - `skills/*/SKILL.md`
 - `package.json`
 
@@ -336,9 +334,7 @@ GitHub 웹 UI 기준으로도 상위 구조는 다음과 같다.
 
 파일:
 
-- `hooks/hooks.json`
-- `hooks/hook-orchestrator.mjs`
-- `hooks/hook-registry.json`
+- 당시 Claude Code hook 설정 파일과 실행기 (ADR-0023에서 제거)
 
 정의된 이벤트(관찰된 것만 기준):
 
@@ -352,8 +348,8 @@ GitHub 웹 UI 기준으로도 상위 구조는 다음과 같다.
 
 구조적 특징:
 
-1. **모든 이벤트를 `hook-orchestrator.mjs` 하나로 라우팅**한다.
-2. 실제 훅 우선순위/차단 여부/외부 훅 병합은 `hook-registry.json`에서 관리한다.
+1. 당시에는 모든 이벤트를 단일 실행기로 라우팅했다.
+2. 실제 훅 우선순위와 외부 훅 병합은 별도 레지스트리에서 관리했다.
 3. 기능 범위가 넓다.
    - 위험 Bash 차단
    - subagent context injection
@@ -611,7 +607,7 @@ repo root
 | 항목 | `codex-plugin-cc` | `triflux` |
 |---|---|---|
 | 훅 이벤트 범위 | `SessionStart`, `SessionEnd`, `Stop` | `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStop` |
-| 훅 구조 | 단순 직접 바인딩 | `hook-orchestrator.mjs` + `hook-registry.json` priority orchestration |
+| 훅 구조 | 단순 직접 바인딩 | 당시 단일 실행기와 레지스트리 방식 (ADR-0023에서 제거) |
 | 주 용도 | runtime lifecycle + optional review gate | safety, routing, bootstrap, error context, MCP watcher, keyword detector, stop gate |
 | blocking 정책 | stop-review gate 중심 | pipeline stop, safety guard, hub ensure 등 다수 blocking hook |
 | 복잡도 | 낮음 | 높음 |

@@ -98,7 +98,7 @@ triflux  →  superpowers  (금지)
 | 패턴 | 문제 | 올바른 방법 |
 |------|------|------------|
 | triflux 코어가 gstack 스킬을 `spawn`으로 호출 | 역방향 의존 → 순환 참조 가능성 | triflux는 결과만 반환. gstack이 triflux를 호출하는 방향으로 |
-| superpowers `/review` 스킬을 triflux 코어에 `import` | sp → tfx 단방향 위반 | triflux는 자체 review primitive 사용 또는 hook으로 sp 결과 수신 |
+| superpowers `/review` 스킬을 triflux 코어에 `import` | sp → tfx 단방향 위반 | triflux는 자체 review primitive를 사용하거나 호출자가 결과를 확인 |
 | 80+ 스킬 키워드 충돌 시 임의 선택 | 비결정적 라우팅 | 이 문서 §충돌 해소 표에서 1순위를 명확히 따름 |
 | gstack `/ship`이 triflux를 우회하고 codex 직접 호출 | 라우팅 규약 위반 | gstack → triflux → headless 경로 필수 |
 | 발표자 영상 워크플로우에서 tfx-auto만 사용 | /office-hours 게이트 없이 배포 → QA 누락 | gstack /office-hours → tfx-auto --mode deep → tfx-swarm 순서 준수 |

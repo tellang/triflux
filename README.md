@@ -126,14 +126,13 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 
 | Command | Use |
 | --- | --- |
-| `tfx setup` / `tfx doctor` | Sync files, hooks, HUD, MCP, profiles / diagnose and repair (`--fix`, `--json`) |
+| `tfx setup` / `tfx doctor` | Sync files, HUD, MCP, profiles / diagnose and repair (`--fix`, `--json`) |
 | `tfx auto` | Preview the `tfx-auto` routing decision |
 | `tfx multi` | Local multi-CLI team in tmux + Hub |
 | `tfx swarm` | PRD-based, worktree-isolated work: `plan`, `preflight`, `run`, `list` |
 | `tfx synapse` | Swarm session registry and leases |
 | `tfx hub` | Local Hub: `start`, `stop`, `status`, `ensure` |
 | `tfx mcp` | Managed MCP registry: `list`, `sync`, `add`, `remove` |
-| `tfx hooks` | Hook orchestrator: scan, diff, apply, status |
 | `tfx handoff` | Serialize the current context for another session or host |
 | `tfx cto` | Repo-local authority console: `collect`, `status`, `dashboard`, `hygiene`, `steward`, `event` |
 | `tfx review` / `tfx codex-team` | Codex git-diff review / Codex-led team mode |

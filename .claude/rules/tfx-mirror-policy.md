@@ -69,7 +69,7 @@ mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (�
 - `scripts/lib/*` → `packages/core/scripts/lib/`, `packages/triflux/scripts/lib/`, `packages/remote/scripts/lib/` (PR #314 catch-up — remote 는 root subset, root-relative 의존 시 `@triflux/core/...` 로 import 변환)
 - `scripts/release/*`, `scripts/__tests__/*` → `packages/triflux/scripts/` (publish 포함)
 - `bin/*` → `packages/triflux/bin/`
-- `hooks/*`, `hud/*` → `packages/triflux/{hooks,hud}/` + `packages/core/{hooks,hud}/` (core 도 `package.json` files 에 `hooks`, `hud` 포함 → byte-identical cp 2곳. PR #376 에서 hooks/pipeline-stop.mjs·hud/context-monitor.mjs 가 core 에도 미러됨을 실측 확인)
+- `hooks/*`, `hud/*` → `packages/triflux/{hooks,hud}/` + `packages/core/{hooks,hud}/` (core 도 `package.json` files 에 `hooks`, `hud` 포함하므로 byte-identical cp 2곳)
 - `config/*` → `packages/triflux/config/` (core·remote 는 config 미러 안 함)
 
 **mirror 제외**:

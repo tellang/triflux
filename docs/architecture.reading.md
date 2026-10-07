@@ -52,7 +52,7 @@ source of truth[^abbr-ssot]이고, `packages/*`는 배포용 미러다.
 | `hub/team/` | 팀/멀티에이전트 오케스트레이션 | `conductor.mjs`, `headless.mjs`, `dashboard.mjs`, `cto-auto-collect.mjs`, `claude-native-bridge.mjs`, `notify.mjs` |
 | `hub/` 하위 | 세분 모듈 | `delegator/`, `diagnostics/`, `lib/`, `middleware/`, `pipeline/`, `quality/`, `routing/`, `workers/` |
 | `mesh/` | 에이전트 간 메시지 메시 프로토콜 | `mesh-protocol.mjs`, `mesh-router.mjs`, `mesh-registry.mjs`, `mesh-queue.mjs`, `mesh-heartbeat.mjs`, `mesh-budget.mjs` |
-| `hooks/` | Claude Code 세션 훅 + 가드 | `session-start-fast.mjs`, `session-start-lake.mjs`, `session-end-cleanup.mjs`, `safety-guard.mjs`, `hook-orchestrator.mjs`, `keyword-rules.json` |
+| `hooks/` | Codex 및 Antigravity 세션 연결과 전환용 stub | `codex-session-hook.mjs`, `agy-session-hook.mjs` |
 | `hud/` | 상태 표시(HUD) / 모니터 | `context-monitor.mjs`, `mission-board.mjs`, `renderers.mjs`, `providers/` |
 | `cto/` | CTO 콘솔 — 멀티세션 수집·요약·위생(hygiene) | `collect.mjs`, `brief.mjs`, `dashboard.mjs`, `status.mjs`, `hygiene.mjs` |
 | `scripts/` | 라우팅 스크립트 + 릴리즈 게이트 | `tfx-route.sh`(라우팅 엔진), `scripts/release/`(릴리즈 자동화), `scripts/lib/`(공용 helper) |
@@ -87,10 +87,9 @@ localhost에 바인딩하며 `tfx hub ensure` / `tfx hub status` / `tfx hub stop
 
 ### 가드(Guards)
 
-직접 `codex exec`, 관리되지 않은 `agy`, 폐기된 `gemini` 경로는
-headless-guard[^code-headless-guard]가 차단하고 psmux[^term-psmux]/Windows
-Terminal 흐름은 safety-guard[^code-safety-guard]가 관리 API로만 우회하도록
-강제한다. CLI 호출은 tfx-route.sh[^code-tfx-route] / Hub 워커 / `tfx` CLI를
+직접 `codex exec`, 관리되지 않은 `agy`, 폐기된 `gemini` 경로는 라우팅 규약으로
+금지한다. psmux[^term-psmux]/Windows Terminal 흐름은 관리 API를 사용한다.
+CLI 호출은 tfx-route.sh[^code-tfx-route] / Hub 워커 / `tfx` CLI를
 경유해야 한다.
 
 ## 스택 공존
@@ -119,8 +118,6 @@ triflux는 gstack·superpowers와 **레이어 분리** 관계로 공존한다.
 [^term-cross-check]: cross-check — Codex가 만든 결과를 Antigravity가 다시 읽고 가독성·논리를 검증하는 2차 확인. 실행 권한을 넘기는 게 아니라 검토만 한다.
 [^term-meta-routing]: 메타 라우팅 — Claude가 직접 코드를 실행하지 않고 "이 작업을 어떤 스킬·CLI로 보낼지"만 판정하는 역할. `/tfx-harness`가 대표적이다.
 [^abbr-mcp]: MCP — Model Context Protocol. 에이전트가 외부 도구(hub 포함)를 표준화된 방식으로 호출하게 해주는 프로토콜.
-[^code-headless-guard]: `scripts/headless-guard.mjs:187` · `async function main()` · PreToolUse 훅 — primary multiplexer가 있으면 Bash(tfx-route.sh) 개별 호출을 headless 명령으로 자동 변환하고, `codex exec`/`agy`/`gemini` 직접 래핑을 차단한다. [▸ 코드 열기](vscode://file/Users/tellang/Projects/tools/triflux/scripts/headless-guard.mjs:187)
 [^term-psmux]: psmux — Windows 전용 tmux 유사 터미널 멀티플렉서. triflux가 Windows Terminal 패인·세션을 관리 API 경유로만 조작하도록 강제할 때 대상이 되는 도구다.
-[^code-safety-guard]: `hooks/safety-guard.mjs:312` · `function main()` · PreToolUse:Bash 훅 — 위험한 Bash 명령을 사전 차단(exit 2)하거나 경고(additionalContext)한다. [▸ 코드 열기](vscode://file/Users/tellang/Projects/tools/triflux/hooks/safety-guard.mjs:312)
 [^code-tfx-route]: `scripts/tfx-route.sh:290` · `case "${1:-}" in` · CLI 라우팅 엔진 진입점 — agent_type/prompt/mcp_profile/timeout/context_file 인자를 받아 Codex/Antigravity/Claude lane으로 dispatch한다. [▸ 코드 열기](vscode://file/Users/tellang/Projects/tools/triflux/scripts/tfx-route.sh:290)
 <!-- wiki-harness:end -->

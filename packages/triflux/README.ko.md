@@ -125,14 +125,13 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 
 | 명령 | 용도 |
 | --- | --- |
-| `tfx setup` / `tfx doctor` | 파일·훅·HUD·MCP·프로필 동기화 / 진단과 복구(`--fix`, `--json`) |
+| `tfx setup` / `tfx doctor` | 파일·HUD·MCP·프로필 동기화 / 진단과 복구(`--fix`, `--json`) |
 | `tfx auto` | `tfx-auto` 라우팅 판정 미리 보기 |
 | `tfx multi` | tmux + Hub 기반 로컬 멀티 CLI 팀 |
 | `tfx swarm` | PRD 기반 worktree 격리 실행: `plan`, `preflight`, `run`, `list` |
 | `tfx synapse` | 스웜 세션 레지스트리와 lease |
 | `tfx hub` | 로컬 Hub: `start`, `stop`, `status`, `ensure` |
 | `tfx mcp` | 관리형 MCP 레지스트리: `list`, `sync`, `add`, `remove` |
-| `tfx hooks` | 훅 오케스트레이터: scan, diff, apply, status |
 | `tfx handoff` | 현재 맥락을 다른 세션이나 호스트로 넘길 프롬프트로 묶음 |
 | `tfx cto` | 저장소 단위 권위 콘솔: `collect`, `status`, `dashboard`, `hygiene`, `steward`, `event` |
 | `tfx review` / `tfx codex-team` | Codex git diff 리뷰 / Codex 주도 팀 모드 |
