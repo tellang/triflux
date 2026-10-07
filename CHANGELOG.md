@@ -2,6 +2,29 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.51.0] - 2026-10-08
+
+### Added
+- mods: marketplace 에 triflux-mods 를 등록하고 `tfx setup --mods` 로 설치한다. 기본 setup 은 marketplace 등록과 안내 한 줄만 한다. README 에 npm 12 의 `--allow-scripts` 안내를 넣는다 (#616)
+
+### Changed
+- route: Codex MCP 선택을 전역 `~/.codex/config.toml` 을 줄였다 되돌리는 방식 대신 실행별 `-c mcp_servers.<이름>.enabled` 설정으로 한다. 동시에 도는 다른 Codex 세션이 줄어든 설정을 보거나, 비정상 종료 때 MCP 항목이 사라지던 문제가 없어진다 (ADR-0028, #617)
+- hub: 훅, tfx-route, headless, tfx multi 가 허브를 부르거나 새로 띄우지 않는다. tfx-review 는 허브 없이 Codex, agy 가용성으로 Tier 를 정한다 (ADR-0023, #620)
+- hud: 팀 행을 지운다. `g` 행을 Antigravity `a` 행으로 되돌리고 공식 `agy /usage` 로 쿼터를 읽는다(캐시, 백그라운드 조회). GCP 프로젝트 인증이면 행을 지우지 않고 비활성으로 표시한다. `c`, `x`, `a` 행의 열을 맞춘다 (#622)
+- docs: `.claude/rules` 에 `paths:` 를 지정해 필요한 파일에서만 규칙을 싣는다. ADR 상태를 정리하고 낡은 문서를 `docs/_archive/` 로 옮긴다. ADR-0028~0031 을 추가한다 (#614, #615, #618, #621)
+
+### Removed
+- route: Gemini CLI 실행 경로와 `TFX_CLI_MODE=gemini` 를 지운다 (#607, #612)
+- team: swarm 실행 엔진을 퇴역한다. `tfx swarm`, 동적 라우팅(`TRIFLUX_DYNAMIC_ROUTING`, doctor `--dynamic-routing`), `@triflux/core` 의 `./mesh/*` export, `@triflux/remote` 의 swarm-reconciler export 가 빠진다 (ADR-0025, #610)
+- cli: `tfx auto` 미리보기, `tfx review`, `tfx why` 와 작은 죽은 모듈을 지운다 (#611)
+- route: tfx-route.sh 의 죽은 함수와 중복 역할 규칙, Codex MCP 전송 잔재(`TFX_CODEX_TRANSPORT=mcp`)를 지운다 (#612)
+- team: tfx multi 의 죽은 모드와 in-process, WT 팀 엔진을 지운다 (#613)
+- tests: 복제본과 소스 문구를 검사하던 테스트 15개를 지운다 (#609)
+
+### Fixed
+- tests: uds-orchestrator 의 타이머 추적 오판과 hub-start 의 포트 선점 경쟁을 고쳐 CI 연속 실패를 없앤다 (#619)
+- tests: tfx-live peer SIGINT 테스트의 로그 읽기 경쟁 조건 (#608)
+
 ## [10.50.2] - 2026-10-08
 
 ### Changed

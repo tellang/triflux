@@ -1,7 +1,9 @@
 {
   "name": "triflux-mods",
-  "version": "10.50.2",
+  "version": "10.51.0",
   "description": "triflux 의 Claude Code mods: HUD band 와 서브에이전트 effort 정책",
-  "author": { "name": "tellang" },
+  "author": {
+    "name": "tellang"
+  },
   "types": "./types/index.d.ts"
 }
