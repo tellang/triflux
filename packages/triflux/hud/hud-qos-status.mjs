@@ -59,7 +59,7 @@ import {
   deriveGeminiFamilyBucket,
   fetchGeminiQuota,
   getAntigravityCurrentModel,
-  getAntigravityEmail,
+  getAntigravityAccountLabel,
   getAntigravityModelAbbrev,
   getAntigravityModelFamily,
   getGeminiEmail,
@@ -171,7 +171,7 @@ async function main() {
     : claudeUsageSnapshot.data;
   const codexEmail = getCodexEmail();
   const geminiEmail = getGeminiEmail();
-  const antigravityEmail = getAntigravityEmail();
+  const antigravityAccountLabel = getAntigravityAccountLabel();
   const codexBuckets = codexSnapshot.buckets;
   const geminiSession = geminiSessionSnapshot.session;
   const geminiQuota = geminiQuotaSnapshot.quota;
@@ -292,7 +292,7 @@ async function main() {
               currentFamily: antigravityModelFamily,
             }
           : geminiQuotaData,
-        antigravityReady ? antigravityEmail : geminiEmail,
+        antigravityReady ? antigravityAccountLabel : geminiEmail,
         null,
       ),
     );

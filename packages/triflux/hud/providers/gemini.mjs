@@ -136,7 +136,10 @@ export function getGeminiEmail() {
   }
 }
 
-export function getAntigravityEmail() {
+// GCP 프로젝트 인증이면 계정 이메일 대신 프로젝트 ID 를 보여 준다.
+export function getAntigravityAccountLabel() {
+  const project = readJson(ANTIGRAVITY_SETTINGS_PATH, null)?.gcp?.project;
+  if (project) return project;
   for (const oauthPath of ANTIGRAVITY_OAUTH_PATHS) {
     try {
       const oauth = readJson(oauthPath, null);
