@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.50.2] - 2026-10-08
+
+### Changed
+- mcp: Antigravity MCP 설정(`~/.gemini/config/mcp_config.json`)도 gateway 이주 대상에 넣는다 (#598)
+
+### Removed
+- setup: 쓰지 않는 Gemini 쿼터 갱신 호출, tfx-batch-stats, slim-wrapper 배포를 뺀다 (#600)
+
 ## [10.50.1] - 2026-10-08
 
 ### Changed
