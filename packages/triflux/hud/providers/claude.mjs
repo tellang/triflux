@@ -25,7 +25,6 @@ import {
   SEVEN_DAY_MS,
   SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
-import { readContextMonitorSnapshot } from "../context-monitor.mjs";
 import {
   advanceToNextCycle,
   clampPercent,
@@ -116,17 +115,14 @@ function normalizeClaudeCredentials(data, source, supportsUsageApi = true) {
   };
 }
 
-// Claude Code 2.1.x secure-storage 규칙(바이너리 실측, 2026-09-21):
-// - CLAUDE_SECURESTORAGE_CONFIG_DIR 가 정의돼 있으면 그 값이 스코프다. 빈 문자열은 기본 디렉터리를
-//   뜻해 접미사를 붙이지 않고, 값이 있으면 NFC 로 정규화한 뒤 해시한다.
-// - 아니면 CLAUDE_CONFIG_DIR 원문(경로 확장·정규화 없이)을 sha256 해 앞 8자리를 붙인다.
-//   OMC 격리 세션의 `Claude Code-credentials-<hash>` 항목이 이 규칙으로 만들어진다.
+// 격리된 설정 디렉터리는 기본 Keychain 항목과 다른 서비스 이름을 사용한다.
 export function getKeychainServiceName(env = process.env) {
   const secureDir = env.CLAUDE_SECURESTORAGE_CONFIG_DIR;
   let scope = "";
   if (secureDir !== undefined) {
     scope = secureDir ? secureDir.normalize("NFC") : "";
   } else {
+    // CLAUDE_CONFIG_DIR은 정규화하지 않고 빈 문자열은 기본값으로 본다.
     scope = env.CLAUDE_CONFIG_DIR || "";
   }
   if (!scope) return CLAUDE_KEYCHAIN_SERVICE;
@@ -168,9 +164,7 @@ function readClaudeKeychainRaw(
   }
 }
 
-// Keychain 항목은 (service, account) 복합 키다. Claude Code 는 항상 `-a <account>` 로 쓰고 읽으므로
-// 같은 키만 본다. `-a` 없는 조회는 "계정 없는 항목"이 아니라 같은 service 의 임의 계정 항목을 돌려주고,
-// `add-generic-password` 는 `-a` 가 필수라 그런 항목에는 되쓸 수도 없다(2026-09-21 실측, exit 2).
+// service와 account를 함께 지정해야 다른 계정의 항목을 읽지 않는다.
 export function readClaudeKeychainEntry({
   execFileSyncFn = execFileSync,
   env = process.env,
@@ -372,9 +366,7 @@ function writeClaudeFileCredentials(
   writeCredentialFile(mergeClaudeCredentials(creds, data), filePath);
 }
 
-// 되쓰기는 자격증명을 읽어 온 저장소에만 한다. Keychain 출처를 파일에 쓰거나 파일 출처를 Keychain 에 쓰면
-// 계정이 다른 두 저장소가 섞이고(2026-09 실측: 파일=max 계정 만료분, Keychain=pro 계정 현재 로그인),
-// Claude Code 가 실제로 쓰는 Keychain 항목을 옛 계정 토큰으로 덮어쓴다.
+// 자격증명을 읽어 온 저장소에만 써서 다른 계정의 토큰을 덮어쓰지 않는다.
 export function writeBackClaudeCredentials(
   creds,
   {
@@ -732,8 +724,4 @@ export function scheduleClaudeUsageRefresh() {
       hint: String(spawnErr?.message || spawnErr),
     });
   }
-}
-
-export function readClaudeContextSnapshot() {
-  return readContextMonitorSnapshot();
 }

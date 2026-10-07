@@ -9,11 +9,9 @@ import {
   buildContextUsageView,
   classifyContextThreshold,
   createContextMonitor,
-  deriveContextLimit,
   estimateTokens,
   formatContextUsage,
   parseUsageFromPayload,
-  shouldSuppressInfoOnlyContextStatus,
 } from "../../hud/context-monitor.mjs";
 
 function makeTmpPath(prefix) {
@@ -57,19 +55,16 @@ describe("hud/context-monitor.mjs", () => {
     assert.equal(formatContextUsage(45_000, 200_000, 22), "45K/200K (22%)");
   });
 
-  it("stdin context와 snapshot을 합성해 표시값을 생성한다", () => {
-    const view = buildContextUsageView(
-      {
-        context_window: {
-          context_window_size: 200_000,
-          current_usage: {
-            input_tokens: 30_000,
-            cache_read_input_tokens: 15_000,
-          },
+  it("stdin context에서 표시값을 생성한다", () => {
+    const view = buildContextUsageView({
+      context_window: {
+        context_window_size: 200_000,
+        current_usage: {
+          input_tokens: 30_000,
+          cache_read_input_tokens: 15_000,
         },
       },
-      { usedTokens: 10_000, limitTokens: 200_000 },
-    );
+    });
     assert.equal(view.display, "45K/200K (23%)");
     assert.equal(view.warningLevel, "ok");
   });
@@ -100,125 +95,11 @@ describe("hud/context-monitor.mjs", () => {
     assert.equal(view.warningTag, "");
   });
 
-  it("한도 값이 없으면 모델 추정으로 숨김 여부를 판정한다", () => {
-    assert.equal(shouldSuppressInfoOnlyContextStatus("claude-sonnet-5"), true);
-    assert.equal(
-      shouldSuppressInfoOnlyContextStatus("claude-sonnet-5", 200_000),
-      false,
-    );
-    assert.equal(
-      shouldSuppressInfoOnlyContextStatus("claude-haiku-4-5"),
-      false,
-    );
-  });
-
-  it("stdin이 context_window_size를 주지 않으면 model.id로 한도를 추정한다 (Opus 4.7 → 1M)", () => {
-    assert.equal(
-      deriveContextLimit({ model: { id: "claude-opus-4-7" } }),
-      1_000_000,
-    );
-  });
-
-  it("Opus 5도 suffix 없이 1M으로 추정한다", () => {
-    assert.equal(
-      deriveContextLimit({ model: { id: "claude-opus-5" } }),
-      1_000_000,
-    );
-  });
-
-  it("Opus 5 [1m] suffix 모델도 1M으로 추정한다", () => {
-    assert.equal(
-      deriveContextLimit({ model: { id: "claude-opus-5[1m]" } }),
-      1_000_000,
-    );
-  });
-
-  it("model.id에 [1m] suffix가 있으면 1M으로 추정한다", () => {
-    assert.equal(
-      deriveContextLimit({ model: { id: "claude-opus-4-7[1m]" } }),
-      1_000_000,
-    );
-  });
-
   it("stdin 사용량이 없으면 stale monitor 스냅샷을 CTX로 표시하지 않는다", () => {
-    const view = buildContextUsageView(
-      { model: { id: "claude-opus-4-7" } },
-      { usedTokens: 44_000, limitTokens: 200_000 },
-    );
+    const view = buildContextUsageView({ model: { id: "claude-opus-4-7" } });
     assert.equal(view.limitTokens, 0);
     assert.equal(view.display, "--");
     assert.equal(view.warningLevel, "ok");
-  });
-
-  it("model hint가 있어도 stdin 사용량이 없으면 CTX를 표시하지 않는다", () => {
-    const view = buildContextUsageView(
-      { model: { id: "claude-opus-5" } },
-      { usedTokens: 44_000, limitTokens: 200_000 },
-    );
-    assert.equal(view.limitTokens, 0);
-    assert.equal(view.source, "none");
-    assert.equal(view.warningLevel, "ok");
-  });
-
-  it("알 수 없는 모델 + stdin size 없음 + monitor 없음 = 기본 200K", () => {
-    assert.equal(
-      deriveContextLimit({ model: { id: "unknown-model" } }),
-      200_000,
-    );
-  });
-
-  it("Opus 4.6도 1M으로 추정한다 (Anthropic 공식 1M 모델)", () => {
-    assert.equal(
-      deriveContextLimit({ model: { id: "claude-opus-4-6" } }),
-      1_000_000,
-    );
-  });
-
-  it("Opus 4.5는 200K로 유지해 4.6 이상 경계를 보장한다", () => {
-    assert.equal(
-      deriveContextLimit({ model: { id: "claude-opus-4-5" } }),
-      200_000,
-    );
-  });
-
-  it("Sonnet 4.6도 1M으로 추정한다 (Anthropic 공식 1M 모델)", () => {
-    assert.equal(
-      deriveContextLimit({ model: { id: "claude-sonnet-4-6" } }),
-      1_000_000,
-    );
-  });
-
-  it("Sonnet 4.5는 200K (Anthropic 공식 기본 컨텍스트)", () => {
-    assert.equal(
-      deriveContextLimit({ model: { id: "claude-sonnet-4-5" } }),
-      200_000,
-    );
-  });
-
-  it("Sonnet 5, Sonnet 5.5, Fable 5.1은 suffix 없이 1M으로 추정한다", () => {
-    assert.equal(
-      deriveContextLimit({ model: { id: "claude-sonnet-5" } }),
-      1_000_000,
-    );
-    assert.equal(
-      deriveContextLimit({ model: { id: "claude-sonnet-5-5" } }),
-      1_000_000,
-    );
-    assert.equal(
-      deriveContextLimit({ model: { id: "claude-fable-5-1" } }),
-      1_000_000,
-    );
-  });
-
-  it("Haiku 4.5는 200K로 유지한다", () => {
-    assert.equal(
-      deriveContextLimit({ model: { id: "claude-haiku-4-5" } }),
-      200_000,
-    );
-  });
-
-  it("model이 raw string 으로 전달돼도 한도를 올바르게 추정한다", () => {
-    assert.equal(deriveContextLimit({ model: "claude-opus-4-7" }), 1_000_000);
   });
 
   it("요청/응답 기록 후 snapshot과 리포트를 저장한다", () => {

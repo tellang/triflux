@@ -47,20 +47,7 @@ export function colorByPercent(value, text) {
   return green(text);
 }
 
-export function colorCooldown(seconds, text) {
-  if (seconds > 120) return red(text);
-  if (seconds > 0) return yellow(text);
-  return dim(text);
-}
-
-export function colorParallel(current, cap) {
-  if (current >= cap) return green(`${current}/${cap}`);
-  if (current > 1) return yellow(`${current}/${cap}`);
-  return red(`${current}/${cap}`);
-}
-
 export const GAUGE_WIDTH = 5;
-export const GAUGE_BLOCKS = ["░", "▒", "▓", "█"]; // 밝기 0~3
 
 export function coloredBar(percent, width = GAUGE_WIDTH, baseColor = null) {
   const safePercent = Math.min(100, Math.max(0, percent));
