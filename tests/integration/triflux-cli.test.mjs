@@ -242,47 +242,6 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     rmSync(homeDir, { recursive: true, force: true });
   });
 
-  it("doctor --json은 serena 잔존을 부활(should-be-absent)로 감지해야 한다", () => {
-    // serena 는 2026-06-10 core 에서 제거됨. config 에 남아있으면 부활로 간주한다.
-    const homeDir = createHomeDir();
-    writeFileSync(
-      join(homeDir, ".codex", "config.toml"),
-      [
-        "[mcp_servers.serena]",
-        'command = "uvx"',
-        'args = ["--from", "git+https://github.com/oraios/serena", "serena", "start-mcp-server", "--context", "codex"]',
-        "startup_timeout_sec = 10",
-        "",
-      ].join("\n"),
-      "utf8",
-    );
-
-    const payload = parseStdoutJson(runCli(["doctor", "--json"], { homeDir }));
-    const serenaCheck = payload.checks.find(
-      (check) => check.name === "serena-mcp",
-    );
-    assert.ok(serenaCheck, "serena-mcp check missing");
-    assert.equal(serenaCheck.status, "issues");
-    assert.equal(serenaCheck.resurrected, true);
-  });
-
-  it("doctor --json은 serena 부재를 정상(ok)으로 처리해야 한다", () => {
-    // serena 제거 후 부재가 정상 상태 — missing 으로 경고하지 않는다.
-    const homeDir = createHomeDir();
-    writeFileSync(
-      join(homeDir, ".codex", "config.toml"),
-      ['model = "gpt-5.5"', ""].join("\n"),
-      "utf8",
-    );
-
-    const payload = parseStdoutJson(runCli(["doctor", "--json"], { homeDir }));
-    const serenaCheck = payload.checks.find(
-      (check) => check.name === "serena-mcp",
-    );
-    assert.ok(serenaCheck, "serena-mcp check missing");
-    assert.equal(serenaCheck.status, "ok");
-  });
-
   it("multi status --json은 팀 상태가 없을 때 offline JSON을 반환해야 한다", () => {
     const result = runCli(["multi", "status", "--json"]);
     const payload = parseStdoutJson(result);

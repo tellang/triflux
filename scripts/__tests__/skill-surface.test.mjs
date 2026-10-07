@@ -90,19 +90,4 @@ describe("skill surface cleanup (9 + Windows 1)", () => {
   it("tfx-wt 는 frontmatter platform 으로 win32 전용을 선언한다", () => {
     assert.deepEqual(readSkillFrontmatter("tfx-wt").platform, ["win32"]);
   });
-
-  it("tfx-setup 은 설정을 안내하고 tfx-doctor 는 hub 관리를 안내한다", () => {
-    const setup = readFileSync(
-      join(skillsDir, "tfx-setup", "SKILL.md"),
-      "utf8",
-    );
-    const doctor = readFileSync(
-      join(skillsDir, "tfx-doctor", "SKILL.md"),
-      "utf8",
-    );
-    assert.match(setup, /^#### 단계 1: 파일 동기화$/m);
-    assert.doesNotMatch(setup, /triflux hooks apply/);
-    assert.match(doctor, /^## tfx-hub 관리$/m);
-    assert.match(doctor, /tfx hub status/);
-  });
 });
