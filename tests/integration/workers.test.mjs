@@ -149,14 +149,6 @@ describe("ClaudeWorker", { timeout: 15000 }, () => {
 describe("createWorker()", { timeout: 15000 }, () => {
   it("타입별 worker 인스턴스를 생성해야 한다", async () => {
     assert.equal(
-      (await createWorker("gemini")).constructor.name,
-      "AntigravityRouteWorker",
-    );
-    assert.equal(
-      (await createWorker("antigravity")).constructor.name,
-      "AntigravityRouteWorker",
-    );
-    assert.equal(
       (await createWorker("claude")).constructor.name,
       "ClaudeWorker",
     );

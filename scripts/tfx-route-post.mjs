@@ -4,7 +4,7 @@
 // ~100ms (node 1회 기동) vs ~1000ms (python3×2 + jq×3 + node×2)
 //
 // 처리:
-//   1. 토큰 추출 (Codex stderr / Gemini session JSON)
+//   1. 토큰 추출 (Codex stderr)
 //   2. Codex JSON-line 출력 필터링
 //   3. 실행 로그 기록 (JSONL)
 //   4. 토큰 누적 (sv-accumulator.json)
@@ -16,9 +16,7 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
-  statSync,
   writeFileSync,
 } from "fs";
 import { homedir } from "os";
@@ -52,47 +50,6 @@ function extractTokens(cliType, stderrFile) {
         const total = parseInt(match[1].replace(/,/g, ""), 10);
         if (total > 0) return { input: total, output: 0 };
       }
-    } catch {}
-    return { input: 0, output: 0 };
-  }
-
-  if (cliType === "gemini") {
-    // Gemini CLI: ~/.gemini/tmp/*/chats/session-*.json에서 최신 세션
-    const geminiTmp = join(HOME, ".gemini", "tmp");
-    if (!existsSync(geminiTmp)) return { input: 0, output: 0 };
-
-    let latestFile = null;
-    let latestMtime = 0;
-
-    try {
-      for (const dir of readdirSync(geminiTmp)) {
-        const chatsDir = join(geminiTmp, dir, "chats");
-        if (!existsSync(chatsDir)) continue;
-        for (const f of readdirSync(chatsDir)) {
-          if (!f.startsWith("session-") || !f.endsWith(".json")) continue;
-          const fp = join(chatsDir, f);
-          try {
-            const mtime = statSync(fp).mtimeMs;
-            if (mtime > latestMtime) {
-              latestMtime = mtime;
-              latestFile = fp;
-            }
-          } catch {}
-        }
-      }
-    } catch {}
-
-    if (!latestFile) return { input: 0, output: 0 };
-
-    try {
-      const data = JSON.parse(readFileSync(latestFile, "utf-8"));
-      let inp = 0,
-        out = 0;
-      for (const msg of data.messages || []) {
-        inp += msg.tokens?.input || 0;
-        out += msg.tokens?.output || 0;
-      }
-      if (inp + out > 0) return { input: inp, output: out };
     } catch {}
     return { input: 0, output: 0 };
   }
@@ -255,10 +212,6 @@ function cleanTuiArtifacts(output, cliType) {
       .replace(/^[^\S\n]*[›❯]\s*$/gm, "")
       .replace(/^\s*codex\s*$/gm, "")
       .replace(/^[^\S\n]*[›❯]\s*Applied.*$/gm, "");
-  } else if (normalizedCliType.startsWith("gemini")) {
-    cleaned = cleaned
-      .replace(/^[^\S\n]*[╭╮╰╯│─═].*$/gm, "")
-      .replace(/^[^\S\n]*>\s*$/gm, "");
   } else if (normalizedCliType.startsWith("claude")) {
     cleaned = cleaned.replace(/^[^\S\n]*[━─]{5,}.*$/gm, "");
   }
@@ -298,7 +251,7 @@ function logExecution(params) {
 }
 
 // ── 토큰 누적 (sv-accumulator.json) ──
-function accumulateTokens(cliType, tokens) {
+function accumulateTokens(tokens) {
   if (tokens.input + tokens.output === 0) return;
 
   const accFile = join(CACHE_DIR, "sv-accumulator.json");
@@ -312,11 +265,8 @@ function accumulateTokens(cliType, tokens) {
     }
 
     if (!data.codex) data.codex = { tokens: 0, calls: 0 };
-    if (!data.gemini) data.gemini = { tokens: 0, calls: 0 };
-
-    const key = cliType === "gemini" ? "gemini" : "codex";
-    data[key].tokens += tokens.input + tokens.output;
-    data[key].calls += 1;
+    data.codex.tokens += tokens.input + tokens.output;
+    data.codex.calls += 1;
     data.lastUpdated = new Date().toISOString();
 
     writeFileSync(accFile, JSON.stringify(data, null, 2));
@@ -446,11 +396,6 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
 
     const snippet = stderrText.substring(0, 200).replace(/\n/g, " ");
 
-    const retryCount =
-      matched.pattern === "rate_limit" && cliType === "gemini"
-        ? parseInt(process.env.TFX_GEMINI_429_RETRIES || "0", 10)
-        : undefined;
-
     const issueEntry = {
       ts: Date.now(),
       cli: cliType,
@@ -461,7 +406,6 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
       snippet,
       resolved: false,
     };
-    if (retryCount !== undefined) issueEntry.retry_count = retryCount;
 
     appendFileSync(issuesFile, JSON.stringify(issueEntry) + "\n");
 
@@ -553,7 +497,7 @@ function main() {
   });
 
   // 4. 성공 시 토큰 누적
-  if (exitCode === 0) accumulateTokens(cliType, tokens);
+  if (exitCode === 0) accumulateTokens(tokens);
 
   // 5. AIMD 배치 이벤트
   const aimdResult =

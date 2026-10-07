@@ -271,7 +271,7 @@ describe("tfx-route.sh — TFX_CLI_MODE 오버라이드", () => {
   });
 
   it("TFX_CLI_MODE=codex 일 때 claude-native 에이전트는 여전히 claude-native를 반환해야 한다", () => {
-    // TFX_CLI_MODE=codex는 gemini→codex 리매핑만 수행하고 claude-native는 그대로
+    // TFX_CLI_MODE=codex는 claude-native를 변경하지 않는다.
     const result = runBash(
       `TFX_CLI_MODE=codex bash "${ROUTE_SCRIPT}" explore 'test-prompt'`,
     );
@@ -950,7 +950,7 @@ describe("tfx-route.sh — 오류 케이스", () => {
 
   it("CLI 이름(gemini)을 역할 자리에 사용하면 antigravity alias로 허용된다", () => {
     const result = runBash(
-      `GEMINI_BIN=false bash "${ROUTE_SCRIPT}" gemini 'test-prompt' 2>&1 || true`,
+      `bash "${ROUTE_SCRIPT}" gemini 'test-prompt' 2>&1 || true`,
       fixtureEnv({ TFX_ANTIGRAVITY_OK: "1", AGY_BIN: "agy" }),
     );
     assert.match(out(result), /type=antigravity/);
@@ -996,7 +996,7 @@ describe("tfx-route.sh — 라우팅 테이블 메타데이터", () => {
 
   it("designer 에이전트는 type=antigravity 메타데이터를 출력해야 한다", () => {
     const result = runBash(
-      `GEMINI_BIN=false bash "${ROUTE_SCRIPT}" designer 'test' 2>&1 || true`,
+      `bash "${ROUTE_SCRIPT}" designer 'test' 2>&1 || true`,
       fixtureEnv({ TFX_ANTIGRAVITY_OK: "1", AGY_BIN: "agy" }),
     );
     assert.match(out(result), /type=antigravity/);
@@ -1026,14 +1026,13 @@ describe("tfx-route.sh — executor 라우팅 회귀 방지", {
     // codex가 없어도 agy headless가 사용 가능하면 claude-native가 아니라
     // Antigravity로 폴백해야 한다. 실제 agy 바이너리를 치지 않도록 fixture를 사용한다.
     const result = runBash(
-      `TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=__nonexistent_codex__ GEMINI_BIN=__nonexistent_gemini__ bash "${ROUTE_SCRIPT}" executor 'test-prompt' implement`,
+      `TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=__nonexistent_codex__ bash "${ROUTE_SCRIPT}" executor 'test-prompt' implement`,
       fixtureEnv({ TFX_ANTIGRAVITY_OK: "1", AGY_BIN: "agy" }),
     );
     assert.equal(result.status, 0, out(result));
     const combined = out(result);
     assert.match(combined, /type=antigravity|cli: antigravity/, combined);
     assert.match(combined, /TFX_CLI_MODE=antigravity/, combined);
-    assert.doesNotMatch(combined, /gemini-worker|type=gemini/, combined);
   });
 });
 

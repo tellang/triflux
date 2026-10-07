@@ -498,13 +498,8 @@ fi
 # ── CLI 경로 해석 (Windows npm global 대응) ──
 NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || command -v node.exe 2>/dev/null || echo node)}"
 CODEX_BIN="${CODEX_BIN:-$(command -v codex 2>/dev/null || echo codex)}"
-GEMINI_BIN="${GEMINI_BIN:-$(command -v gemini 2>/dev/null || echo gemini)}"
 AGY_BIN="${AGY_BIN:-$(command -v agy 2>/dev/null || echo agy)}"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo claude)}"
-GEMINI_BIN_ARGS_JSON="${GEMINI_BIN_ARGS_JSON:-[]}"
-# ── Gemini 확장 플래그 (issue #64) ──
-TFX_GEMINI_EXTENSIONS="${TFX_GEMINI_EXTENSIONS:-}"
-TFX_GEMINI_FLAGS="${TFX_GEMINI_FLAGS:-}"
 CLAUDE_BIN_ARGS_JSON="${CLAUDE_BIN_ARGS_JSON:-[]}"
 
 # ── Codex auth/home 명시 라우팅 (Issue #78 race 차단) ──
@@ -1206,7 +1201,6 @@ auto_reroute() {
   local -a candidates=()
   case "$failed_cli" in
     codex) candidates=("antigravity") ;;
-    gemini) candidates=("antigravity" "codex") ;;
     antigravity) candidates=("codex") ;;
     *) echo "[tfx-quota] $failed_cli 대체 CLI 없음" >&2; return 1 ;;
   esac
@@ -1220,7 +1214,6 @@ auto_reroute() {
     fi
     case "$candidate" in
       codex) target_bin="${CODEX_BIN:-codex}" ;;
-      gemini) target_bin="${GEMINI_BIN:-gemini}" ;;
       antigravity) target_bin="${AGY_BIN:-agy}" ;;
     esac
     if [[ "$candidate" == "antigravity" ]]; then
@@ -1241,8 +1234,6 @@ auto_reroute() {
 
   case "$failed_cli:$target_cli" in
     codex:antigravity) echo "[tfx-quota] Codex → Antigravity 자동 전환" >&2 ;;
-    gemini:antigravity) echo "[tfx-quota] Gemini → Antigravity 자동 전환" >&2 ;;
-    gemini:codex) echo "[tfx-quota] Gemini → Codex 자동 전환" >&2 ;;
     antigravity:codex) echo "[tfx-quota] Antigravity → Codex 자동 전환" >&2 ;;
   esac
 
@@ -1317,16 +1308,10 @@ resolve_gemini_profile() {
   if [[ -z "$_GEMINI_PROFILE_CACHE" && -f "$GEMINI_PROFILES_PATH" ]]; then
     _GEMINI_PROFILE_CACHE=$(cat "$GEMINI_PROFILES_PATH" 2>/dev/null || echo "{}")
   fi
-  local settings_path="${HOME}/.gemini/settings.json"
-  local settings_cache="{}"
-  if [[ -f "$settings_path" ]]; then
-    settings_cache=$(cat "$settings_path" 2>/dev/null || echo "{}")
-  fi
   local result
   result=$("$NODE_BIN" -e "
     const name = process.argv[1];
     const primaryRaw = process.argv[2] || '{}';
-    const settingsRaw = process.argv[3] || '{}';
     const defaults = {
       flash38_low: 'Gemini 3.8 Flash (Low)',
       flash38: 'Gemini 3.8 Flash (Medium)',
@@ -1377,7 +1362,7 @@ resolve_gemini_profile() {
       );
     };
 
-    const sources = [parseJson(primaryRaw), parseJson(settingsRaw)];
+    const sources = [parseJson(primaryRaw)];
     for (const cfg of sources) {
       for (const bucket of getProfileBuckets(cfg)) {
         const value = getModelValue(bucket[name]);
@@ -1399,7 +1384,7 @@ resolve_gemini_profile() {
     }
 
     process.stdout.write(defaults[name] || defaults[process.env.TFX_GEMINI_DEFAULT_PROFILE] || defaults.flash38);
-  " "$profile" "$_GEMINI_PROFILE_CACHE" "$settings_cache" 2>/dev/null)
+  " "$profile" "$_GEMINI_PROFILE_CACHE" 2>/dev/null)
   echo "${result:-Gemini 3.8 Flash (Medium)}"
 }
 
@@ -1444,7 +1429,6 @@ route_agent() {
   # ── CLI_CMD: CLI_TYPE에서 파생 ──
   case "$CLI_TYPE" in
     codex)         CLI_CMD="codex" ;;
-    gemini)        CLI_CMD="gemini" ;;
     antigravity)   CLI_CMD="agy" ;;
     claude-native) CLI_CMD=""; CLI_ARGS="" ;;
   esac
@@ -1513,7 +1497,7 @@ route_agent() {
     # ─── agent-map.json에만 정의된 신규 에이전트 (CLI_TYPE별 기본값) ───
     *)
       case "$CLI_TYPE" in
-        gemini|antigravity)
+        antigravity)
           CLI_ARGS="--print --dangerously-skip-permissions"
           GEMINI_PROFILE="$(resolve_gemini_profile_for_agent "$agent")"
           CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
@@ -1553,7 +1537,7 @@ if [[ "$TFX_CODEX_PROFILE" != "$_raw_tfx_codex_profile" ]]; then
 fi
 unset _raw_tfx_codex_profile
 # Preflight 캐시 일괄 로드 — CLI/Hub 가용성 + Codex 요금제를 환경변수로 내보냄
-# 하위 프로세스(스킬 포함)가 TFX_CODEX_OK, TFX_GEMINI_OK, TFX_ANTIGRAVITY_OK, TFX_HUB_OK로 즉시 참조 가능
+# 하위 프로세스(스킬 포함)가 CLI/Hub 가용성을 즉시 참조 가능
 if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
   # SessionStart 훅 없이도 route 진입 시 없거나 만료된 캐시를 갱신한다.
   _preflight_script="$(_resolve_script "" \
@@ -1565,13 +1549,12 @@ if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
   unset _preflight_script
   # eval 제거 — \x1e (ASCII 30, Record Separator) delimited read로 인젝션 위험 차단
   # F05: `|`에서 `\x1e`로 변경 — 계정 tier/agent 이름 등 값에 `|` 포함 시 필드 분리 오류 방지
-  IFS=$'\x1e' read -r _pf_codex _pf_gemini _pf_antigravity _pf_hub _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason < <(
+  IFS=$'\x1e' read -r _pf_codex _pf_antigravity _pf_hub _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason < <(
     "$NODE_BIN" -e '
       try {
         const c = JSON.parse(require("fs").readFileSync(require("path").join(require("os").homedir(),".claude","cache","tfx-preflight.json"),"utf8"));
         const parts = [
           c?.codex?.ok ? "1" : "0",
-          c?.gemini?.ok ? "1" : "0",
           c?.antigravity?.ok ? "1" : "0",
           c?.hub?.ok ? "1" : "0",
           (c?.codex_plan?.plan && c.codex_plan.plan !== "unknown" && c.codex_plan.plan !== "api") ? c.codex_plan.plan : "",
@@ -1581,11 +1564,10 @@ if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
           c?.antigravity?.reason || ""
         ];
         process.stdout.write(parts.join("\x1e"));
-      } catch { process.stdout.write("0\x1e0\x1e0\x1e0\x1e\x1e\x1e\x1e\x1e"); }
+      } catch { process.stdout.write("0\x1e0\x1e0\x1e\x1e\x1e\x1e\x1e"); }
     ' 2>/dev/null
   ) || true
   export TFX_CODEX_OK="${TFX_CODEX_OK:-${_pf_codex:-0}}"
-  export TFX_GEMINI_OK="${TFX_GEMINI_OK:-${_pf_gemini:-0}}"
   export TFX_ANTIGRAVITY_OK="${TFX_ANTIGRAVITY_OK:-${_pf_antigravity:-0}}"
   export TFX_HUB_OK="${TFX_HUB_OK:-${_pf_hub:-0}}"
   [[ -n "${_pf_antigravity_status:-}" ]] && export TFX_ANTIGRAVITY_STATUS="$_pf_antigravity_status"
@@ -1594,7 +1576,7 @@ if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
   [[ -n "${_pf_plan:-}" ]] && export TFX_CODEX_PLAN="$_pf_plan"
   [[ -n "${_pf_agents:-}" ]] && export TFX_AVAILABLE_AGENTS="$_pf_agents"
   export TFX_PREFLIGHT_LOADED=1
-  unset _pf_codex _pf_gemini _pf_antigravity _pf_hub _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason
+  unset _pf_codex _pf_antigravity _pf_hub _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason
 fi
 # TFX_PREFLIGHT_LOADED는 하위 route 호출에도 상속된다. 요금제도 같은 route policy로
 # 일관되게 상속해야 preflight가 빈 값을 반환한 자식이 set -u에서 죽지 않는다.
@@ -1672,24 +1654,10 @@ CODEX_MCP_TRANSPORT_EXIT_CODE=70
 apply_cli_mode() {
   local codex_base
   codex_base="$(build_codex_base)"
-  local gemini_tier=""
-
-  if [[ "$CLI_TYPE" == "gemini" && ( "$TFX_CLI_MODE" == "auto" || "$TFX_CLI_MODE" == "gemini" ) ]]; then
-    # Gemini CLI is deprecated, but the `gemini` route name remains as a
-    # compatibility alias until Phase 5 cleanup. When Antigravity readiness has
-    # already been proven by preflight/cache, direct gemini routes must follow
-    # the same redirect as TFX_CLI_MODE=gemini remaps.
-    if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && command -v "${AGY_BIN:-agy}" &>/dev/null; then
-      echo "[tfx-route] [deprecated] gemini route → antigravity (Gemini CLI deprecated, use antigravity/agy)" >&2
-      TFX_CLI_MODE="antigravity"
-      apply_cli_mode
-      return
-    fi
-  fi
 
   case "$TFX_CLI_MODE" in
     codex)
-      if [[ "$CLI_TYPE" == "gemini" || "$CLI_TYPE" == "antigravity" ]]; then
+      if [[ "$CLI_TYPE" == "antigravity" ]]; then
         CLI_TYPE="codex"; CLI_CMD="codex"
         case "$AGENT_TYPE" in
           designer|antigravity|agy|gemini)
@@ -1752,15 +1720,6 @@ apply_cli_mode() {
         else
           echo "[tfx-route] codex/antigravity 모두 불가: hard routing 검증으로 전달" >&2
         fi
-      elif [[ "$CLI_TYPE" == "gemini" ]]; then
-        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && agy_supports_headless "${AGY_BIN:-agy}"; then
-          TFX_CLI_MODE="antigravity"; apply_cli_mode; return
-        elif codex_is_available; then
-          TFX_CLI_MODE="codex"; apply_cli_mode; return
-        else
-          CLI_TYPE="antigravity"; CLI_CMD="agy"
-          echo "[tfx-route] deprecated gemini alias: agy/codex 불가 — hard routing 검증으로 전달" >&2
-        fi
       elif [[ "$CLI_TYPE" == "antigravity" ]] && ! agy_supports_headless "${AGY_BIN:-agy}"; then
         if codex_is_available; then
           TFX_CLI_MODE="codex"; apply_cli_mode; return
@@ -1798,7 +1757,6 @@ is_cli_available() {
 
 apply_cli_disable_policy() {
   local selected="$CLI_TYPE"
-  [[ "$selected" == "gemini" ]] && selected="antigravity"
   [[ "$selected" == "codex" || "$selected" == "antigravity" ]] || return 0
 
   local blocked_reason=""
@@ -2249,7 +2207,7 @@ MCP_FILTER_SCRIPT=""
 MCP_PROFILE_REQUESTED="auto"
 MCP_RESOLVED_PROFILE="default"
 MCP_HINT=""
-GEMINI_ALLOWED_SERVERS=()
+ALLOWED_MCP_SERVERS=()
 CODEX_CONFIG_FLAGS=()
 CODEX_CONFIG_JSON=""
 
@@ -2276,7 +2234,7 @@ resolve_mcp_policy() {
     MCP_PROFILE_REQUESTED="$MCP_PROFILE"
     MCP_RESOLVED_PROFILE="$MCP_PROFILE"
     MCP_HINT=""
-    GEMINI_ALLOWED_SERVERS=()
+    ALLOWED_MCP_SERVERS=()
     CODEX_CONFIG_FLAGS=()
     CODEX_CONFIG_JSON=""
     return 0
@@ -2309,10 +2267,10 @@ resolve_mcp_policy() {
     return 1
   fi
 
-  local _gemini_servers _codex_flags _phase
+  local _allowed_servers _codex_flags _phase
   IFS=$'\x1e' read -r MCP_PROFILE_REQUESTED MCP_RESOLVED_PROFILE MCP_HINT \
-    _gemini_servers _codex_flags CODEX_CONFIG_JSON _phase <<< "$_raw"
-  IFS=',' read -r -a GEMINI_ALLOWED_SERVERS <<< "$_gemini_servers"
+    _allowed_servers _codex_flags CODEX_CONFIG_JSON _phase <<< "$_raw"
+  IFS=',' read -r -a ALLOWED_MCP_SERVERS <<< "$_allowed_servers"
   IFS=',' read -r -a CODEX_CONFIG_FLAGS <<< "$_codex_flags"
   # set -e 환경에서 함수 마지막 명령이 `[[ ... ]] && ...` 이면
   # 조건 불일치(= phase 없음)만으로 함수 전체가 실패 처리되어 route가 즉시 종료된다.
@@ -3102,18 +3060,9 @@ run_codex_exec() {
     # `--` end-of-options: prompt가 '--'/'---' (front-matter 등)로 시작하면
     # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
     if [[ "$use_tee_flag" == "true" ]]; then
-      if [[ "$CLI_TYPE" == "antigravity" ]]; then
-        # agy --print + skip-permissions positional prompt는 timeout이 재현되어 stdin pipe로 고정한다.
-        printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
-      else
-        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
-      fi
+      "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
     else
-      if [[ "$CLI_TYPE" == "antigravity" ]]; then
-        printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
-      else
-        "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
-      fi
+      "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
     fi
     worker_pid=$!
     # Track codex child PID so --job-status can detect orphan-running when wrapper dies (Issue #176).
@@ -3277,7 +3226,6 @@ main() {
   # CLI 경로 해석
   case "$CLI_CMD" in
     codex) CLI_CMD="$CODEX_BIN" ;;
-    gemini) CLI_CMD="$GEMINI_BIN" ;;
     agy) CLI_CMD="$AGY_BIN" ;;
     claude) CLI_CMD="$CLAUDE_BIN" ;;
   esac
@@ -3388,7 +3336,7 @@ FALLBACK_EOF
     exit 0
   fi
 
-  # Issue #156: hub-ensure 무조건 호출 — codex/gemini 가 tfx-hub MCP 를 쓸 수
+  # Issue #156: hub-ensure 무조건 호출: codex/agy 가 tfx-hub MCP 를 쓸 수
   # 있도록 사전 보장. Claude 세션 SessionStart 훅 외부에서 (Windows 재부팅 후
   # codex 단독 실행, hub crash 후 Claude 미오픈, WSL/SSH 등) 도 hub 가 자동
   # 기동된다. hub 가 이미 alive 면 /health 1회 호출로 no-op (저비용).
@@ -3413,8 +3361,8 @@ FALLBACK_EOF
   # 메타정보 (stderr)
   echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT mode=$RUN_MODE expected=${TIMEOUT_SEC}s stall=${STALL_THRESHOLD_SEC}s ceiling=${HARD_CEILING_SEC}s" >&2
   echo "[tfx-route] opus_oversight=$OPUS_OVERSIGHT mcp_profile=$MCP_PROFILE resolved_profile=$MCP_RESOLVED_PROFILE verifier_override=$TFX_VERIFIER_OVERRIDE" >&2
-  if [[ ${#GEMINI_ALLOWED_SERVERS[@]} -gt 0 ]]; then
-    echo "[tfx-route] allowed_mcp_servers=$(IFS=,; echo "${GEMINI_ALLOWED_SERVERS[*]}")" >&2
+  if [[ ${#ALLOWED_MCP_SERVERS[@]} -gt 0 ]]; then
+    echo "[tfx-route] allowed_mcp_servers=$(IFS=,; echo "${ALLOWED_MCP_SERVERS[*]}")" >&2
   else
     echo "[tfx-route] allowed_mcp_servers=none" >&2
   fi
@@ -3518,74 +3466,6 @@ FALLBACK_EOF
     echo "[tfx-route] codex_transport_effective=$codex_transport_effective" >&2
     # Config swap 복원 (성공/실패 관계없이)
     _codex_config_swap "restore"
-
-  elif [[ "$CLI_TYPE" == "gemini" ]]; then
-    # Codex degraded branch strips MCP_HINT; keep gemini parity when the marker is inherited.
-    if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" ]]; then
-      FULL_PROMPT="$PROMPT"
-    fi
-    local gemini_model
-    gemini_model=$(awk '{
-      for (i = 1; i <= NF; i++) {
-        if ($i == "-m" || $i == "--model") {
-          print $(i + 1)
-          exit
-        }
-      }
-    }' <<< "$CLI_ARGS")
-    local -a gemini_worker_args=(
-      "--command" "$CLI_CMD"
-      "--command-args-json" "$GEMINI_BIN_ARGS_JSON"
-      "--model" "$gemini_model"
-      "--approval-mode" "yolo"
-    )
-
-    if [[ ${#GEMINI_ALLOWED_SERVERS[@]} -gt 0 ]]; then
-      echo "[tfx-route] Gemini MCP 서버: $(IFS=' '; echo "${GEMINI_ALLOWED_SERVERS[*]}")" >&2
-      local server_name
-      for server_name in "${GEMINI_ALLOWED_SERVERS[@]}"; do
-        gemini_worker_args+=("--allowed-mcp-server-name" "$server_name")
-      done
-    fi
-
-    # ── Gemini extensions (-e) 주입 (issue #64) ──
-    if [[ -n "$TFX_GEMINI_EXTENSIONS" ]]; then
-      local ext
-      IFS="," read -ra _gemini_exts <<< "$TFX_GEMINI_EXTENSIONS"
-      for ext in "${_gemini_exts[@]}"; do
-        ext=$(echo "$ext" | xargs)  # trim whitespace
-        [[ -n "$ext" ]] && gemini_worker_args+=("--extra-arg" "-e" "--extra-arg" "$ext")
-      done
-      echo "[tfx-route] Gemini extensions: ${TFX_GEMINI_EXTENSIONS}" >&2
-    fi
-
-    # ── Gemini 추가 플래그 주입 (issue #64) ──
-    if [[ -n "$TFX_GEMINI_FLAGS" ]]; then
-      local flag
-      read -ra _gemini_flags <<< "$TFX_GEMINI_FLAGS"
-      for flag in "${_gemini_flags[@]}"; do
-        [[ -n "$flag" ]] && gemini_worker_args+=("--extra-arg" "$flag")
-      done
-      echo "[tfx-route] Gemini extra flags: ${TFX_GEMINI_FLAGS}" >&2
-    fi
-
-    run_stream_worker "gemini" "$FULL_PROMPT" "$use_tee" "${gemini_worker_args[@]}" || exit_code=$?
-    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
-      # stderr 내용을 fallback 전에 보존하여 디버깅 가능하게 함
-      local gemini_stderr_bytes=0
-      [[ -f "$STDERR_LOG" ]] && gemini_stderr_bytes=$(wc -c < "$STDERR_LOG" 2>/dev/null | tr -d ' ')
-      echo "[tfx-route] Gemini stream wrapper 실패(exit=${exit_code}, stderr=${gemini_stderr_bytes}B). claude-native fallback." >&2
-      if [[ "$gemini_stderr_bytes" -gt 0 ]]; then
-        echo "[tfx-route] Gemini stderr 보존:" >&2
-        tail -c 2048 "$STDERR_LOG" >&2
-      fi
-      cat > "$STDOUT_LOG" <<EOF
-$(emit_claude_native_metadata)
-EOF
-      : > "$STDERR_LOG"
-      exit_code=0
-      CLI_TYPE="claude-native"
-    fi
 
   elif [[ "$CLI_TYPE" == "antigravity" ]]; then
     # Codex degraded branch strips MCP_HINT; keep agy parity when the marker is inherited.

@@ -211,7 +211,6 @@ if [[ "\${1:-}" == "__rerouted_probe" ]]; then
   exit 0
 fi
 CODEX_BIN="echo"
-GEMINI_BIN="echo"
 AGY_BIN="agy"
 AGENT_TYPE="__rerouted_probe"
 PROMPT="test"
@@ -242,49 +241,7 @@ auto_reroute codex
       assert.match(out(result), /REROUTED: MODE=antigravity FROM=codex/);
     });
 
-    it("2. gemini → antigravity 전환 시 TFX_CLI_MODE=antigravity 설정 확인", () => {
-      const wrapperScript = resolve(
-        os.tmpdir(),
-        `tfx-reroute-wrapper-2-${Date.now()}.sh`,
-      );
-      fs.writeFileSync(
-        wrapperScript,
-        `#!/usr/bin/env bash
-set -uo pipefail
-if [[ "\${1:-}" == "__rerouted_probe" ]]; then
-  echo "REROUTED: MODE=\${TFX_CLI_MODE:-unset} FROM=\${TFX_REROUTED_FROM:-unset}"
-  exit 0
-fi
-CODEX_BIN="echo"
-GEMINI_BIN="echo"
-AGY_BIN="agy"
-AGENT_TYPE="__rerouted_probe"
-PROMPT="test"
-MCP_PROFILE="auto"
-CLI_TYPE="gemini"
-TFX_ANTIGRAVITY_OK="1"
-TFX_TMP="${os.tmpdir()}"
-${rerouteFixture}
-auto_reroute gemini
-`,
-      );
-      fs.chmodSync(wrapperScript, 0o755);
-
-      const result = spawnSync(BASH_EXE, [wrapperScript], {
-        cwd: PROJECT_ROOT,
-        encoding: "utf8",
-        env: {
-          ...routeCliPolicyEnv(),
-          PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
-        },
-      });
-      fs.unlinkSync(wrapperScript);
-
-      assert.match(out(result), /Gemini → Antigravity 자동 전환/);
-      assert.match(out(result), /REROUTED: MODE=antigravity FROM=gemini/);
-    });
-
-    it("3. Antigravity readiness 미설정 시 codex 대체 CLI 미설치 (gemini lane deprecated)", () => {
+    it("2. Antigravity readiness 미설정 시 codex 대체 CLI 미설치", () => {
       const wrapperScript = resolve(
         os.tmpdir(),
         `tfx-reroute-wrapper-3-${Date.now()}.sh`,
@@ -298,7 +255,6 @@ if [[ "\${1:-}" == "__rerouted_probe" ]]; then
   exit 0
 fi
 CODEX_BIN="echo"
-GEMINI_BIN="echo"
 AGY_BIN="agy"
 AGENT_TYPE="__rerouted_probe"
 PROMPT="test"
@@ -323,11 +279,9 @@ auto_reroute codex
       fs.unlinkSync(wrapperScript);
 
       assert.match(out(result), /codex 대체 CLI 미설치 — 자동 전환 불가/);
-      assert.doesNotMatch(out(result), /Codex → Gemini 자동 전환/);
-      assert.doesNotMatch(out(result), /REROUTED: MODE=gemini/);
     });
 
-    it("4. antigravity → codex 전환 시 TFX_CLI_MODE=codex 설정 확인", () => {
+    it("3. antigravity → codex 전환 시 TFX_CLI_MODE=codex 설정 확인", () => {
       const wrapperScript = resolve(
         os.tmpdir(),
         `tfx-reroute-wrapper-4-${Date.now()}.sh`,
@@ -341,7 +295,6 @@ if [[ "\${1:-}" == "__rerouted_probe" ]]; then
   exit 0
 fi
 CODEX_BIN="codex"
-GEMINI_BIN="gemini"
 AGY_BIN="agy"
 TFX_CODEX_OK="1"
 AGENT_TYPE="__rerouted_probe"
@@ -369,11 +322,10 @@ auto_reroute antigravity
       assert.match(out(result), /REROUTED: MODE=codex FROM=antigravity/);
     });
 
-    it("5. 허용되고 가용한 대체 CLI가 없으면 fail-loud 78", () => {
+    it("4. 허용되고 가용한 대체 CLI가 없으면 fail-loud 78", () => {
       const script = `
 ${rerouteFixture}
 export CODEX_BIN="nonexistent_codex_bin_123"
-export GEMINI_BIN="nonexistent_gemini_bin_123"
 export AGY_BIN="nonexistent_agy_bin_123"
 export TFX_CODEX_OK="0"
 auto_reroute codex
@@ -395,7 +347,7 @@ auto_reroute codex
     });
 
     it("3. TFX_REROUTED_FROM 설정 시 중복 재귀 전환 방지", () => {
-      const result = runFullRoute({ TFX_REROUTED_FROM: "gemini" });
+      const result = runFullRoute({ TFX_REROUTED_FROM: "codex" });
 
       assert.notEqual(result.status, 0);
       assert.doesNotMatch(out(result), /\[tfx-quota\].*자동 전환/);

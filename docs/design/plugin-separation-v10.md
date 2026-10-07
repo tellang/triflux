@@ -2,6 +2,8 @@
 
 Lake 2 설계 문서. v10 로드맵 P3-11.
 
+현재 상태: 이 설계도에 나온 `hub/gemini-adapter.mjs`는 Gemini CLI 실행 경로 정리로 제거됐다. 아래 구조는 당시 설계 기록이다.
+
 ## 문제
 
 triflux는 단일 패키지(23K LOC)로, CLI 라우팅만 필요한 사용자도 팀 모드·원격 실행·psmux 전체를 설치한다.

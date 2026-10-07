@@ -112,95 +112,33 @@ describe("ensureGeminiProfiles()", () => {
   });
 });
 
-describe("ensureGeminiProfiles() 마이그레이션", () => {
-  it("deprecated 2.5 프로필을 제거하고 옛 ID 형식을 display name 으로 갱신한다", () => {
+describe("ensureGeminiProfiles() 기존 설정", () => {
+  it("기존 프로필과 기본 모델을 유지하며 새 기본 프로필만 추가한다", () => {
     const { geminiDir, profilesPath } = makeTempPaths();
+    const oldModel = "Gemini 3.5 Flash (Medium)";
+    const oldProfile = { model: oldModel, hint: "custom" };
     writeFileSync(
       profilesPath,
-      JSON.stringify({
-        model: "gemini-3.1-pro-preview",
-        profiles: {
-          pro31: { model: "gemini-3.1-pro-preview", hint: "old" },
-          flash3: { model: "gemini-3-flash-preview", hint: "old" },
-          pro25: { model: "gemini-2.5-pro" },
-          flash25: { model: "gemini-2.5-flash" },
-          lite25: { model: "gemini-2.5-flash-lite" },
-        },
-      }),
+      JSON.stringify({ model: oldModel, profiles: { flash35: oldProfile } }),
     );
 
     const result = ensureGeminiProfiles({ geminiDir, profilesPath });
     const saved = JSON.parse(readFileSync(profilesPath, "utf8"));
 
-    assert.equal(result.ok, true);
-    assert.equal(saved.profiles.pro25, undefined);
-    assert.equal(saved.profiles.flash25, undefined);
-    assert.equal(saved.profiles.lite25, undefined);
-    // pro31 은 자동 생성 이름이라 정책상 제거된다 (Pro 미사용)
-    assert.equal(saved.profiles.pro31, undefined);
-    // "Gemini 3 Flash" 는 agy 카탈로그에서 빠졌으므로 프로필 자체가 제거된다
-    assert.equal(saved.profiles.flash3, undefined);
-    // 신규 default 프로필이 함께 채워짐
-    assert.ok(saved.profiles.flash38);
-    assert.equal(saved.profiles.flash38.model, "Gemini 3.8 Flash (Medium)");
-    const baks = readdirSync(geminiDir).filter((name) =>
-      name.startsWith("triflux-profiles.json.bak."),
+    assert.equal(
+      result.added,
+      Object.keys(DEFAULT_GEMINI_PROFILES.profiles).length,
     );
-    assert.equal(baks.length, 1);
-  });
-
-  it("옛 ID 형식 기본 model 을 새 기본으로 정규화한다", () => {
-    const { geminiDir, profilesPath } = makeTempPaths();
-    writeFileSync(
-      profilesPath,
-      JSON.stringify({
-        model: "gemini-3.1-pro-preview",
-        profiles: { mypro: { model: "gemini-3.1-pro-preview" } },
-      }),
+    assert.equal(saved.model, oldModel);
+    assert.deepEqual(saved.profiles.flash35, oldProfile);
+    assert.deepEqual(
+      saved.profiles.flash38,
+      DEFAULT_GEMINI_PROFILES.profiles.flash38,
     );
-
-    ensureGeminiProfiles({ geminiDir, profilesPath });
-    const saved = JSON.parse(readFileSync(profilesPath, "utf8"));
-
-    assert.equal(saved.model, DEFAULT_GEMINI_PROFILES.model);
-    assert.equal(saved.model, "Gemini 3.8 Flash (Medium)");
-  });
-
-  it("이전 세대 자동 생성 기본 model(3.5 Flash Medium)과 display name 형식의 3 Flash 프로필을 정리한다", () => {
-    const { geminiDir, profilesPath } = makeTempPaths();
-    writeFileSync(
-      profilesPath,
-      JSON.stringify({
-        model: "Gemini 3.5 Flash (Medium)",
-        profiles: {
-          flash3: { model: "Gemini 3 Flash", hint: "3.0 Flash" },
-          flash35: { model: "Gemini 3.5 Flash (Medium)", hint: "keep" },
-          pro31: { model: "Gemini 3.1 Pro (High)" },
-        },
-      }),
+    assert.equal(
+      readdirSync(geminiDir).filter((name) => name.includes(".bak.")).length,
+      0,
     );
-
-    ensureGeminiProfiles({ geminiDir, profilesPath });
-    const saved = JSON.parse(readFileSync(profilesPath, "utf8"));
-
-    assert.equal(saved.model, "Gemini 3.8 Flash (Medium)");
-    assert.equal(saved.profiles.flash3, undefined);
-    // 이전 세대 자동 생성 프로필도 제거된다
-    assert.equal(saved.profiles.flash35, undefined);
-    assert.ok(saved.profiles.flash38_high);
-  });
-
-  it("이미 새 형식이면 마이그레이션/백업하지 않는다 (멱등)", () => {
-    const { geminiDir, profilesPath } = makeTempPaths();
-    writeFileSync(profilesPath, JSON.stringify(DEFAULT_GEMINI_PROFILES));
-
-    const result = ensureGeminiProfiles({ geminiDir, profilesPath });
-    const baks = readdirSync(geminiDir).filter((name) =>
-      name.startsWith("triflux-profiles.json.bak."),
-    );
-
-    assert.equal(result.added, 0);
-    assert.equal(baks.length, 0);
   });
 });
 

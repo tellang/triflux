@@ -22,11 +22,7 @@ triflux 워크스페이스에서 Antigravity CLI의 역할과 운영 규칙. 1M 
 ## 비대화식 실행 경로
 - `agy --dangerously-skip-permissions --print=` 를 직접 호출하지 않는다. 자동 차단 훅(headless-guard)은 2026-09-07 에 제거됐으므로 호출자가 지킨다.
 - 반드시 tfx 스킬 경유: tfx-auto (--cli antigravity), tfx-multi, tfx-swarm 등
-- 일반 호출: `tfx-route.sh --cli antigravity ...` (legacy `--cli gemini`는 agy 미가용 시 fallback)
-
-## 디렉터리 import 금지 (EISDIR)
-- `@./path/` 처럼 디렉터리 import하면 Gemini ImportProcessor가 fs.readFile을 호출해 EISDIR로 크래시 (gemini-cli #6450, #4760)
-- 디렉터리 경로를 문서에 남겨야 한다면 백틱(`)으로 감싸 import 스캔에서 제외
+- 일반 호출: `tfx-route.sh --cli antigravity ...`
 
 ## 핵심 운영 컨텍스트 (요약 — 상세는 CLAUDE.md)
 - psmux/WT 규칙: `tfx-psmux-rules` 스킬 / WT 프리징 방지 (exit → sleep 2 → kill)

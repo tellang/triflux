@@ -111,7 +111,7 @@ describe("mcp-filter", () => {
       ],
     });
 
-    assert.deepEqual(policy.geminiAllowedServers, [
+    assert.deepEqual(policy.allowedServers, [
       "context7",
       "brave-search",
       "sequential-thinking",

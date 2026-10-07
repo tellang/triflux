@@ -229,9 +229,6 @@ export function probeTierEnvironment(options = {}) {
   const codexCheck =
     preflight?.codex ||
     checkCliSync("codex", { whichCommandFn: options.whichCommandFn });
-  const geminiCheck =
-    preflight?.gemini ||
-    checkCliSync("gemini", { whichCommandFn: options.whichCommandFn });
   const antigravityCheck = preflight?.antigravity || null;
   const hubCheck =
     preflight?.hub ||
@@ -247,7 +244,6 @@ export function probeTierEnvironment(options = {}) {
     psmux: false,
     hub: !!hubCheck?.ok,
     codex: !!codexCheck?.ok,
-    gemini: !!geminiCheck?.ok,
     antigravity: !!antigravityCheck?.ok,
     wt: false,
   };
@@ -276,21 +272,13 @@ export function probeTierEnvironment(options = {}) {
   }
 
   let tier = "minimal";
-  if (checks.codex || checks.antigravity || checks.gemini) tier = "standard";
-  if (
-    checks.multiplexer &&
-    checks.hub &&
-    (checks.codex || checks.antigravity || checks.gemini)
-  )
+  if (checks.codex || checks.antigravity) tier = "standard";
+  if (checks.multiplexer && checks.hub && (checks.codex || checks.antigravity))
     tier = "full";
 
   const agents = ["claude"];
   if (checks.codex) agents.push("codex");
-  if (checks.antigravity) {
-    agents.push("antigravity");
-  } else if (checks.gemini) {
-    agents.push("gemini");
-  }
+  if (checks.antigravity) agents.push("antigravity");
 
   return {
     probed_at: new Date(options.now ?? Date.now()).toISOString(),
@@ -431,7 +419,7 @@ export function checkSearchEngines(options = {}) {
   const allServerNames = new Set(knownSearchServers);
 
   if (inventory) {
-    for (const scope of ["codex", "gemini", "claude"]) {
+    for (const scope of ["codex", "claude"]) {
       const scopeData = inventory[scope];
       if (!scopeData?.servers) continue;
       for (const server of scopeData.servers) {
@@ -465,7 +453,7 @@ export function checkSearchEngines(options = {}) {
 
     let inventoryStatus = null;
     if (inventory) {
-      for (const scope of ["codex", "gemini", "claude"]) {
+      for (const scope of ["codex", "claude"]) {
         const server = inventory[scope]?.servers?.find(
           (item) => item.name === name,
         );

@@ -1,8 +1,6 @@
 // hub/workers/factory.mjs — Worker 생성 팩토리
 //
 // Supported worker types:
-//   - 'gemini'           → AntigravityRouteWorker (deprecated alias)
-//   - 'antigravity'      → AntigravityRouteWorker
 //   - 'claude'           → ClaudeWorker
 //   - 'codex'            → CodexMcpWorker (default) or CodexAppServerWorker when
 //                          opts.transport === 'app-server'
@@ -14,7 +12,6 @@
 // existing `requestJson` helper. Callers can override by passing their own
 // `publishCallback` or swap the transport with `requestJsonFn`.
 
-import { AntigravityRouteWorker } from "./antigravity-route-worker.mjs";
 import { ClaudeWorker } from "./claude-worker.mjs";
 import { CodexAppServerWorker } from "./codex-app-server-worker.mjs";
 
@@ -77,16 +74,12 @@ async function createCodexWorker(opts = {}) {
 }
 
 /**
- * @param {'gemini'|'antigravity'|'agy'|'claude'|'codex'|'codex-app-server'|'delegator'} type
+ * @param {'claude'|'codex'|'codex-app-server'|'delegator'} type
  * @param {object} [opts]
  * @returns {Promise<import('./interface.mjs').IWorker>}
  */
 export async function createWorker(type, opts = {}) {
   switch (type) {
-    case "gemini":
-    case "antigravity":
-    case "agy":
-      return new AntigravityRouteWorker(opts);
     case "claude":
       return new ClaudeWorker(opts);
     case "codex":

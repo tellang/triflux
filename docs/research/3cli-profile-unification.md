@@ -3,6 +3,8 @@
 > Date: 2026-04-09 | Target: Claude Code, Codex CLI, Gemini CLI
 > Status: Expanded — actual config files verified (v2)
 
+현재 상태: `hub/gemini-adapter.mjs`와 Gemini CLI 실행 경로는 제거됐다. 아래 내용은 2026-04-09 조사 기록이다.
+
 ---
 
 ## 1. Config Comparison (Summary)

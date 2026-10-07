@@ -9,10 +9,8 @@ import { fileURLToPath } from "node:url";
 import {
   AntigravityBackend,
   buildAntigravityCommand,
-  buildGeminiCommand,
   ClaudeBackend,
   CodexBackend,
-  GeminiBackend,
   getBackend,
   getBackendForAgent,
   listBackends,
@@ -47,91 +45,6 @@ describe("CodexBackend", () => {
 
   it("env() — 빈 객체 반환", () => {
     assert.deepEqual(backend.env(), {});
-  });
-});
-
-describe("GeminiBackend", () => {
-  const backend = new GeminiBackend();
-
-  it("name() === 'gemini'", () => {
-    assert.equal(backend.name(), "gemini");
-  });
-
-  it("command() === 'agy' (legacy alias)", () => {
-    assert.equal(backend.command(), "agy");
-  });
-
-  it("buildArgs — agy --print 값 계약으로 실행", () => {
-    const cmd = backend.buildArgs(
-      "(Get-Content -Raw '/tmp/p.txt')",
-      "/tmp/r.txt",
-    );
-    assert.match(
-      cmd,
-      /agy --dangerously-skip-permissions --print (?:\(Get-Content -Raw '.*\.prompt'\)|"\$\(cat '.*\.prompt'\)")/,
-      `agy --print 값 순서: ${cmd}`,
-    );
-    assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
-    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
-    assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
-    assert.ok(cmd.includes("> '/tmp/r.txt'"), `> result 포함: ${cmd}`);
-  });
-
-  it("env() — 빈 객체 반환", () => {
-    assert.deepEqual(backend.env(), {});
-  });
-});
-
-// ========================================================================
-// GeminiBackend — legacy alias helper (Windows/Unix 양 분기)
-// ========================================================================
-describe("buildGeminiCommand: platform-specific formatting", () => {
-  const prompt = "(Get-Content -Raw '/tmp/p.txt')";
-  const resultFile = "/tmp/r.txt";
-
-  it("Windows 분기 — prompt file을 agy --print 값으로 전달", () => {
-    const cmd = buildGeminiCommand(prompt, resultFile, { isWindows: true });
-    assert.equal(
-      cmd,
-      `agy --dangerously-skip-permissions --print (Get-Content -Raw '${resultFile}.prompt') > '${resultFile}' 2>'${resultFile}.err'`,
-    );
-    assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
-    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
-    assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
-  });
-
-  it("Unix 분기 — prompt file을 agy --print 값으로 전달", () => {
-    const cmd = buildGeminiCommand(prompt, resultFile, { isWindows: false });
-    assert.equal(
-      cmd,
-      `agy --dangerously-skip-permissions --print "$(cat '${resultFile}.prompt')" > '${resultFile}' 2>'${resultFile}.err'`,
-    );
-    assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
-    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
-    assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
-  });
-
-  it("양 분기 모두 agy print 계약 필수", () => {
-    const win = buildGeminiCommand(prompt, resultFile, { isWindows: true });
-    const unix = buildGeminiCommand(prompt, resultFile, { isWindows: false });
-    for (const cmd of [win, unix]) {
-      assert.ok(
-        /\bagy\s+--dangerously-skip-permissions\s+--print\s+/.test(cmd),
-        `agy print 값 순서 누락: ${cmd}`,
-      );
-      assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
-      assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
-      assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
-    }
-  });
-
-  it("isWindows 생략 시 Unix 분기로 기본 동작", () => {
-    const cmd = buildGeminiCommand(prompt, resultFile);
-    assert.ok(
-      cmd.startsWith('agy --dangerously-skip-permissions --print "$(cat '),
-      `기본 Unix value 포맷: ${cmd}`,
-    );
-    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
   });
 });
 
@@ -240,13 +153,6 @@ describe("getBackend: 레지스트리 조회", () => {
     assert.equal(b.name(), "codex");
   });
 
-  it("'gemini' → GeminiBackend alias", () => {
-    const b = getBackend("gemini");
-    assert.ok(b instanceof GeminiBackend);
-    assert.equal(b.name(), "gemini");
-    assert.equal(b.command(), "agy");
-  });
-
   it("'claude' → ClaudeBackend", () => {
     const b = getBackend("claude");
     assert.ok(b instanceof ClaudeBackend);
@@ -350,13 +256,6 @@ describe("packages/remote/hub/team/backend.mjs — mirror contract", () => {
     "utf8",
   );
 
-  it("buildGeminiCommand helper 가 export 되어야 한다", () => {
-    assert.ok(
-      /export\s+function\s+buildGeminiCommand\s*\(/.test(REMOTE_BACKEND),
-      "buildGeminiCommand export 누락 (root backend.mjs 와 sync)",
-    );
-  });
-
   it("Windows 분기에 agy print 값 계약 포함", () => {
     assert.ok(
       /agy\s+--dangerously-skip-permissions\s+--print\s+\(Get-Content\s+-Raw\s+'\$\{promptFile\}'\)\s+>/.test(
@@ -387,17 +286,6 @@ describe("packages/remote/hub/team/backend.mjs — mirror contract", () => {
       "Unix stdin redirect 금지",
     );
     assert.ok(!/gemini\s+--/.test(REMOTE_BACKEND), "gemini 직접 호출 금지");
-  });
-
-  it("GeminiBackend.buildArgs 가 buildGeminiCommand alias 를 호출", () => {
-    const geminiClass = REMOTE_BACKEND.match(
-      /class\s+GeminiBackend[\s\S]*?^\}/m,
-    );
-    assert.ok(geminiClass, "GeminiBackend class 누락");
-    assert.ok(
-      /buildGeminiCommand\s*\(/.test(geminiClass[0]),
-      "GeminiBackend.buildArgs 가 buildGeminiCommand alias 호출 안 함",
-    );
   });
 
   it("CodexBackend / ClaudeBackend 존재 (registry 계약 유지)", () => {

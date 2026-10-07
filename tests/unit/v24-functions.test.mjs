@@ -48,14 +48,10 @@ describe("v2.4 신규 JS 함수 테스트", () => {
       assert.equal(cleanTuiArtifacts(input, "codex"), expected);
     });
 
-    it("6. codex/gemini/claude별 분기 동작", () => {
+    it("6. codex/claude별 분기 동작", () => {
       // codex
       const codexText = "│ codex\n❯ Applied fix";
       assert.equal(cleanTuiArtifacts(codexText, "codex"), "");
-
-      // gemini
-      const geminiText = "╭─ Gemini\n> \nReal Output";
-      assert.equal(cleanTuiArtifacts(geminiText, "gemini"), "Real Output");
 
       // claude
       const claudeText = "━━━━━━━\nClaude response";

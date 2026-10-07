@@ -261,26 +261,24 @@ function buildInventoryIndex(inventory = null) {
   const index = new Map();
   if (!inventory || typeof inventory !== "object") return index;
 
-  for (const client of ["codex", "gemini"]) {
-    const servers = Array.isArray(inventory[client]?.servers)
-      ? inventory[client].servers
-      : [];
-    for (const server of servers) {
-      if (!server || typeof server.name !== "string" || !server.name.trim())
-        continue;
-      const name = server.name.trim();
-      const previous = index.get(name) || {};
-      index.set(name, {
-        ...previous,
-        tool_count: Number.isFinite(server.tool_count)
-          ? Math.max(previous.tool_count ?? 0, Math.trunc(server.tool_count))
-          : previous.tool_count,
-        domain_tags: uniqueStrings([
-          ...(Array.isArray(previous.domain_tags) ? previous.domain_tags : []),
-          ...(Array.isArray(server.domain_tags) ? server.domain_tags : []),
-        ]),
-      });
-    }
+  const servers = Array.isArray(inventory.codex?.servers)
+    ? inventory.codex.servers
+    : [];
+  for (const server of servers) {
+    if (!server || typeof server.name !== "string" || !server.name.trim())
+      continue;
+    const name = server.name.trim();
+    const previous = index.get(name) || {};
+    index.set(name, {
+      ...previous,
+      tool_count: Number.isFinite(server.tool_count)
+        ? Math.max(previous.tool_count ?? 0, Math.trunc(server.tool_count))
+        : previous.tool_count,
+      domain_tags: uniqueStrings([
+        ...(Array.isArray(previous.domain_tags) ? previous.domain_tags : []),
+        ...(Array.isArray(server.domain_tags) ? server.domain_tags : []),
+      ]),
+    });
   }
 
   return index;
@@ -636,10 +634,6 @@ export function buildPromptHint(options = {}) {
     .join(" ");
 }
 
-export function getGeminiAllowedServers(options = {}) {
-  return resolveAllowedServers(options);
-}
-
 export function getCodexMcpConfig(options = {}) {
   const allowedServers = new Set(resolveAllowedServers(options));
   const resolvedProfile = resolveMcpProfile(
@@ -739,7 +733,6 @@ export function buildMcpPolicy(options = {}) {
     resolvedPhase: phase || null,
     allowedServers,
     hint,
-    geminiAllowedServers: getGeminiAllowedServers(resolvedOptions),
     codexConfig: getCodexMcpConfig(resolvedOptions),
     codexConfigOverrides: getCodexConfigOverrides(resolvedOptions),
   };
@@ -759,7 +752,7 @@ export function toDelimited(policy) {
     policy.requestedProfile,
     policy.resolvedProfile,
     policy.hint,
-    policy.geminiAllowedServers.join(","),
+    policy.allowedServers.join(","),
     policy.codexConfigOverrides.flatMap((o) => ["-c", o]).join(","),
     JSON.stringify(policy.codexConfig),
     policy.resolvedPhase || "",
@@ -771,7 +764,7 @@ export function toShellExports(policy) {
     `MCP_PROFILE_REQUESTED=${shellEscape(policy.requestedProfile)}`,
     `MCP_RESOLVED_PROFILE=${shellEscape(policy.resolvedProfile)}`,
     `MCP_HINT=${shellEscape(policy.hint)}`,
-    shellArray("GEMINI_ALLOWED_SERVERS", policy.geminiAllowedServers),
+    shellArray("ALLOWED_MCP_SERVERS", policy.allowedServers),
     shellArray(
       "CODEX_CONFIG_FLAGS",
       policy.codexConfigOverrides.flatMap((override) => ["-c", override]),

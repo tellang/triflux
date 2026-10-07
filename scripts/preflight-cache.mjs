@@ -318,7 +318,7 @@ async function runPreflight({
   spawnSyncFn = spawnSync,
   platformFn = () => process.platform,
 } = {}) {
-  const cliChecks = await probeClisFn(["codex", "gemini", "agy"]);
+  const cliChecks = await probeClisFn(["codex", "agy"]);
   const antigravity = checkAntigravityReadiness(cliChecks.agy, {
     homeDir,
     existsSyncFn,
@@ -331,7 +331,6 @@ async function runPreflight({
     hub: checkHubFn({ pkgRoot: PKG_ROOT }),
     route: checkRouteFn({ homeDir, existsSyncFn }),
     codex: cliChecks.codex || { ok: false },
-    gemini: cliChecks.gemini || { ok: false },
     antigravity,
     codex_plan: detectCodexPlanFn({ homeDir }),
     ok: false,
@@ -340,11 +339,7 @@ async function runPreflight({
 
   const agents = [];
   if (result.codex.ok) agents.push("codex");
-  if (result.antigravity.ok) {
-    agents.push("antigravity");
-  } else if (result.gemini.ok) {
-    agents.push("gemini");
-  }
+  if (result.antigravity.ok) agents.push("antigravity");
   agents.push("claude");
   result.available_agents = agents;
 

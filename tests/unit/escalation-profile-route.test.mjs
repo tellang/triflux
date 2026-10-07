@@ -123,7 +123,6 @@ function runRoute({
     TFX_CODEX_OK: "1",
     TFX_CODEX_PLAN: "pro",
     TFX_CODEX_TRANSPORT: "exec",
-    TFX_GEMINI_OK: "0",
     TFX_ANTIGRAVITY_OK: "0",
     TFX_HUB_OK: "1",
     TFX_HUB_ENSURE_SCRIPT: fakeHubEnsure,
