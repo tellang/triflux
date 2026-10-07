@@ -18,6 +18,7 @@ import {
   dispatchClaudeDaemonJob,
   teardownClaudeDaemonJob,
 } from "./claude-daemon-control.mjs";
+import { contextGuard, readCodexContext } from "./session-context.mjs";
 
 const DEFAULT_TIMEOUT_MS = 90_000;
 const DEFAULT_CODEX_APP_SERVER_UDS_TIMEOUT_MS = 120_000;
@@ -310,6 +311,8 @@ export async function askCodexAppServerThread({
   busyTimeoutMs = timeoutMs,
   pollIntervalMs = 200,
   noWait = false,
+  warnContextPct,
+  maxContextPct,
   clientFactory = (opts) => new JsonRpcWsUdsClient(opts),
 } = {}) {
   if (typeof prompt !== "string" || !prompt.trim())
@@ -389,6 +392,17 @@ export async function askCodexAppServerThread({
       { threadId: selectedId, excludeTurns: true },
       DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS,
     );
+    const context = await readCodexContext(
+      resumed?.thread?.path || thread.path,
+      selectedId,
+    );
+    const guard = contextGuard("codex", context, {
+      warnContextPct,
+      maxContextPct,
+    });
+    if (guard.ok === false) {
+      return { ...guard, cli: "codex", transport: "uds", threadId: selectedId };
+    }
     let activeTurns = null;
     if (resumed?.thread?.status?.type === "active")
       activeTurns = resumed.thread.turns?.length
@@ -412,6 +426,8 @@ export async function askCodexAppServerThread({
     if (turn.message) throw new Error(turn.message);
     return {
       ...turn,
+      ...context,
+      ...guard,
       cli: "codex",
       transport: "uds",
       threadId: selectedId,

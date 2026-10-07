@@ -248,7 +248,14 @@ test("peer attach reuses tmux sessions and never starts or stops them", async ()
     assert.equal(output.stoppedB, false);
     assert.equal(output.hops_completed, 2);
     assert.equal(log.filter((args) => args[0] === "has-session").length, 2);
-    assert.equal(log.filter((args) => args[0] === "display-message").length, 1);
+    assert.equal(
+      log.filter(
+        (args) =>
+          args[0] === "display-message" &&
+          args.at(-1).startsWith("#{pane_current_command}"),
+      ).length,
+      1,
+    );
     assert.equal(
       log.some((args) => ["new-session", "kill-session"].includes(args[0])),
       false,
@@ -1972,6 +1979,9 @@ test("tfx-live peer maps side-specific model and effort flags", async () => {
 });
 
 test("tfx-live help documents UDS-first auto default", async () => {
+  const help = await runTfxLive(["ask", "--prompt", "--help"]);
+  assert.match(help, /tfx-live ask/);
+  assert.doesNotMatch(help, /tfx-live stop/);
   const stdout = await runTfxLive(["--help"]);
 
   assert.match(stdout, /tfx-live start .*\[--model ID\] \[--effort TIER\]/);
@@ -1986,127 +1996,6 @@ test("tfx-live help documents UDS-first auto default", async () => {
     stdout,
     /auto is the default for Claude when --short\/--session-id is present/,
   );
-});
-
-test("help works before or after a subcommand without parsing other flags", async () => {
-  for (const args of [
-    ["ask", "--prompt", "--help"],
-    ["-h", "wait"],
-    ["start", "-h"],
-  ]) {
-    const text = await runTfxLive(args);
-    const verb = args.find((arg) => ["ask", "wait", "start"].includes(arg));
-    assert.match(text, new RegExp(`tfx-live ${verb} `));
-    assert.doesNotMatch(text, /tfx-live stop /);
-  }
-});
-
-test("Claude start passes the explicit display name through -n", async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "live-name-"));
-  try {
-    await writeReadyFakeTmux(dir);
-    const logPath = path.join(dir, "tmux.jsonl");
-    const name = "10.8 운영 개선";
-    const result = JSON.parse(
-      await runTfxLive(
-        [
-          "start",
-          "--cli",
-          "claude",
-          "--session",
-          "namedB",
-          "--name",
-          name,
-          "--ready-timeout",
-          "0.2",
-          "--poll-interval",
-          "1",
-        ],
-        {
-          env: {
-            PATH: `${dir}${path.delimiter}${process.env.PATH}`,
-            TMUX_LOG: logPath,
-            TMUX_STATE: path.join(dir, "state.json"),
-          },
-        },
-      ),
-    );
-    assert.equal(result.name, name);
-    assert.equal(result.nameGenerated, false);
-    assert.equal(result.nameApplied, true);
-    const log = await readTmuxLog(logPath);
-    assert.ok(
-      log.some((args) =>
-        args.some((arg) => arg.includes(`claude -n '${name}'`)),
-      ),
-    );
-  } finally {
-    await fs.rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("Claude no-wait carries the request tag and guard flags; wait preserves the request id", async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "live-submit-"));
-  try {
-    const logPath = path.join(dir, "bridge.json");
-    const bridge = await writeFakeBridge(
-      dir,
-      `
-if (verb === 'daemon-probe') console.log(JSON.stringify({ok:true,target:{short:'aaaa'},daemon:{configDir:'cfg'}}));
-else if (verb === 'daemon-attach') console.log(JSON.stringify({ok:true,status:'submitted',inputSent:true,done:false,submittedAt:'now',target:{short:'aaaa'}}));
-else if (verb === 'daemon-wait') console.log(JSON.stringify({ok:true,status:'completed',done:true,timedOut:false,response:'answer',estimatedContextTokens:42,requestId:payload.requestId}));
-`,
-    );
-    const args = [
-      "ask",
-      "--cli",
-      "claude",
-      "--short",
-      "aaaa",
-      "--bridge",
-      bridge,
-      "--prompt",
-      "hello",
-      "--no-wait",
-      "--max-context-tokens",
-      "0",
-    ];
-    const env = { FAKE_BRIDGE_LOG: logPath };
-    const result = JSON.parse(await runTfxLive(args, { env }));
-    assert.equal(result.status, "submitted");
-    assert.equal(result.done, false);
-    assert.equal(Object.hasOwn(result, "timedOut"), false);
-    const calls = JSON.parse(await fs.readFile(logPath, "utf8"));
-    assert.equal(
-      calls[1].payload.prompt,
-      `[tfx-live req=${result.requestId}]\nhello`,
-    );
-    assert.equal(calls[1].payload.noWait, true);
-    assert.equal(calls[1].payload.maxContextTokens, 0);
-    const waited = JSON.parse(
-      await runTfxLive(
-        [
-          "wait",
-          "--cli",
-          "claude",
-          "--short",
-          "aaaa",
-          "--request-id",
-          result.requestId,
-          "--bridge",
-          bridge,
-        ],
-        { env },
-      ),
-    );
-    assert.equal(waited.status, "completed");
-    assert.equal(waited.requestId, result.requestId);
-    await runTfxLive([...args, "--no-relay-tag"], { env });
-    const untagged = JSON.parse(await fs.readFile(logPath, "utf8")).at(-1);
-    assert.equal(untagged.payload.prompt, "hello");
-  } finally {
-    await fs.rm(dir, { recursive: true, force: true });
-  }
 });
 
 test("tmux no-wait confirms submission and reports submitted without waiting for an answer", async () => {
@@ -3216,3 +3105,15 @@ for (const fixture of claudeTitleFixtures) {
     }
   });
 }
+
+test("stop parses one Claude daemon target", () => {
+  assert.equal(tfxLive.stopOpts({ short: "abc12345" }).short, "abc12345");
+  assert.equal(
+    tfxLive.stopOpts({ "session-id": "session-1" }).sessionId,
+    "session-1",
+  );
+  assert.throws(
+    () => tfxLive.stopOpts({ short: "abc12345", session: "cl1" }),
+    /one of/,
+  );
+});

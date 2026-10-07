@@ -1462,10 +1462,12 @@ async function cmdDaemonAttach(args) {
     const { findClaudeTranscript, readClaudeTranscript } = await import(
       "./team/claude-transcript.mjs"
     );
-    const maxContextTokens = numericOption(payload.maxContextTokens, 850_000);
-    const warnContextTokens = numericOption(payload.warnContextTokens, 600_000);
+    const { contextGuard, modelContext } = await import(
+      "./team/session-context.mjs"
+    );
     let result;
-    let contextWarning;
+    let context = modelContext("claude", null);
+    let guard = {};
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const short = payload.short ?? probe.target?.short;
       if (!short) {
@@ -1483,27 +1485,20 @@ async function cmdDaemonAttach(args) {
         sessionId: probe.target?.sessionId,
         cwd: probe.target?.cwd,
       });
-      const contextTokens =
-        (await readClaudeTranscript(transcript).catch(() => null))?.context
-          ?.estimatedContextTokens ?? null;
-      if (maxContextTokens > 0 && contextTokens >= maxContextTokens) {
+      context =
+        (await readClaudeTranscript(transcript).catch(() => null))?.context ??
+        modelContext("claude", null);
+      guard = contextGuard("claude", context, {
+        warnContextPct: payload.warnContextPct,
+        maxContextPct: payload.maxContextPct,
+      });
+      if (guard.ok === false) {
         return emitJson({
-          ok: false,
-          errorCode: "context-limit",
-          contextTokens,
-          hint: "Claude 세션을 승계한 뒤 새 세션에 요청하라.",
-          inputSent: false,
+          ...guard,
           ...(recoveredFrom ? { recoveredFrom } : {}),
           ...daemonProbeMetadata(probe),
         });
       }
-      contextWarning =
-        warnContextTokens > 0 && contextTokens >= warnContextTokens
-          ? {
-              estimatedContextTokens: contextTokens,
-              threshold: warnContextTokens,
-            }
-          : undefined;
       const controlAuth = await buildDaemonControlAuth(probe.daemon?.configDir);
       try {
         result = await attachClaudeDaemonSession({
@@ -1581,7 +1576,8 @@ async function cmdDaemonAttach(args) {
       inputSent: result.inputSent ?? null,
       error:
         result.handshake?.ok === false ? result.handshake?.error : undefined,
-      ...(contextWarning ? { contextWarning } : {}),
+      ...modelContext("claude", context.model, context.estimatedContextTokens),
+      ...guard,
       ...(recoveredFrom ? { recoveredFrom } : {}),
       ...daemonProbeMetadata(probe),
     });
@@ -1627,6 +1623,9 @@ async function cmdDaemonWait(args) {
             done: false,
             timedOut: true,
             estimatedContextTokens: last?.estimatedContextTokens ?? null,
+            contextLimitTokens: last?.contextLimitTokens ?? null,
+            contextLimitSource: last?.contextLimitSource ?? null,
+            contextPct: last?.contextPct ?? null,
             requestId,
           });
         }
@@ -1636,6 +1635,9 @@ async function cmdDaemonWait(args) {
           done: false,
           timedOut: false,
           estimatedContextTokens: null,
+          contextLimitTokens: null,
+          contextLimitSource: null,
+          contextPct: null,
           requestId,
           ...daemonProbeMetadata(probe),
           error: probe.error || probe.reason,
@@ -1650,8 +1652,12 @@ async function cmdDaemonWait(args) {
       const transcript = await readClaudeTranscript(transcriptPath, {
         requestId: payload.requestId,
       });
-      const estimatedContextTokens =
-        transcript?.context?.estimatedContextTokens ?? null;
+      const context = transcript?.context ?? {
+        estimatedContextTokens: null,
+        contextLimitTokens: null,
+        contextLimitSource: null,
+        contextPct: null,
+      };
       const idle = ["idle", "done", "ready"].includes(
         String(probe.target?.state || probe.target?.status || "").toLowerCase(),
       );
@@ -1661,7 +1667,7 @@ async function cmdDaemonWait(args) {
         done: false,
         timedOut: false,
         response: transcript?.response || "",
-        estimatedContextTokens,
+        ...context,
         requestId,
         target: probe.target,
         ...daemonProbeMetadata(probe),
@@ -1693,6 +1699,9 @@ async function cmdDaemonWait(args) {
       done: false,
       timedOut: false,
       estimatedContextTokens: null,
+      contextLimitTokens: null,
+      contextLimitSource: null,
+      contextPct: null,
       requestId,
     });
   }

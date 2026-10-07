@@ -6,7 +6,12 @@ import { describe, it } from "node:test";
 
 import { __remoteSpawnTest } from "../../scripts/remote-spawn.mjs";
 
-const { buildPromptContext, parseArgs, rewritePromptPaths } = __remoteSpawnTest;
+const {
+  buildPromptContext,
+  normalizePosixProbeEnv,
+  parseArgs,
+  rewritePromptPaths,
+} = __remoteSpawnTest;
 
 function withTempDir(run) {
   const parent = resolve("tests", ".tmp-remote-spawn");
@@ -38,6 +43,40 @@ describe("remote-spawn parseArgs()", () => {
     assert.equal(parsed.prompt, "run this");
     assert.equal(parsed.host, "example-host");
   });
+});
+
+it("POSIX probe reports health and blocks memory pressure level 4", () => {
+  const probe = normalizePosixProbeEnv(
+    "example-host",
+    {
+      os: "darwin",
+      shell: "zsh",
+      home: "/Users/remote",
+      claude: "/usr/local/bin/claude",
+      memoryPressureLevel: "4",
+      memoryFreePct: "12.5",
+      loadAvg: "1.2,2.3,3.4",
+      diskFreeHome: String(4 * 1024 ** 3),
+      codexAuthExists: "true",
+      nodeVersion: "v24.0.0",
+    },
+    { node: [22, 0, 0] },
+  );
+
+  assert.equal(probe.ready, false);
+  assert.equal(probe.memoryFreePct, 12.5);
+  assert.deepEqual(probe.loadAvg, [1.2, 2.3, 3.4]);
+  assert.equal(probe.codexAuthExists, true);
+  assert.equal(probe.versions.node, "v24.0.0");
+  assert.equal(probe.warnings.length, 3);
+
+  const warning = normalizePosixProbeEnv(
+    "example-host",
+    { os: "darwin", home: "/Users/remote", memoryPressureLevel: "2" },
+    {},
+  );
+  assert.equal(warning.ready, true);
+  assert.deepEqual(warning.warnings, ["memory pressure level 2"]);
 });
 
 describe("remote-spawn buildPromptContext()", () => {

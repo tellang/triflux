@@ -22,6 +22,10 @@ import {
   registryDir,
 } from "../hub/lib/codex-session-registry.mjs";
 import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
+import {
+  findClaudeTranscript,
+  readClaudeTranscript,
+} from "../hub/team/claude-transcript.mjs";
 import { createNotifier } from "../hub/team/notify.mjs";
 import {
   escapePwshSingleQuoted as escapeRemotePwshSingleQuoted,
@@ -29,6 +33,12 @@ import {
   shellQuote as remoteShellQuote,
   validateHost as validateRemoteHost,
 } from "../hub/team/remote-session.mjs";
+import {
+  CONTEXT_THRESHOLDS,
+  contextGuard,
+  modelContext,
+  readCodexContext,
+} from "../hub/team/session-context.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -73,12 +83,14 @@ function usage(command) {
     "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude] [--if-busy wait|fail|interrupt] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --cli codex --transport uds --thread ID|auto --prompt TEXT [--codex-socket PATH|default] [--cwd DIR] [--if-busy wait|fail|steer] [--busy-timeout 60] [--timeout 60] [--max-turn SECONDS]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
-    "    ask options: --no-wait --no-relay-tag --max-context-tokens 850000 --warn-context-tokens 600000 (max 0 disables the Claude UDS guard).",
+    "    ask options: --no-wait --no-relay-tag --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 15/22).",
+    "  tfx-live compact --cli claude --session NAME [--instructions TEXT] [--if-busy fail|wait] [--timeout 60]",
     "  tfx-live wait --cli claude (--short SHORT | --session-id ID) [--request-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 60] [--poll-interval 1500]",
     "  tfx-live rename --cli codex --transport uds --thread ID --name NAME [--codex-socket PATH|default]",
     "    transport: auto is the default for Claude when --short/--session-id is present; otherwise tmux. bridge path: --bridge > $TFX_BRIDGE > $TFX_REPO_ROOT/hub/bridge.mjs > bundled Triflux hub/bridge.mjs.",
     "  tfx-live interrupt --session NAME [--cli codex|claude] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 5]",
     "  tfx-live stop --session NAME [--cli codex|claude] [--remote HOST]",
+    "  tfx-live stop --cli claude (--short SHORT | --session-id ID) [--config-dir DIR]",
     "  tfx-live probe [--short SHORT] [--session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 10]",
     "  tfx-live list-sessions --cli codex|claude [--transport tmux|uds] [--codex-socket PATH|default] [--cwd DIR] [--remote HOST (codex tmux only)]",
     "    Claude list-sessions supports local tmux only; --transport uds requires --cli codex.",
@@ -105,7 +117,7 @@ function usage(command) {
 function parseCli(argv) {
   if (argv.some((arg) => arg === "--help" || arg === "-h")) {
     const subcommand = argv.find((arg) =>
-      /^(start|ask|wait|rename|stop|interrupt|probe|list-sessions|converse|goal-driven|peer|orchestrate|cto-hygiene-notify)$/.test(
+      /^(start|ask|wait|compact|rename|stop|interrupt|probe|list-sessions|converse|goal-driven|peer|orchestrate|cto-hygiene-notify)$/.test(
         arg,
       ),
     );
@@ -127,6 +139,10 @@ function parseCli(argv) {
     if (!key) {
       throw new Error("Empty flag is not valid");
     }
+    if (key === "warn-context-tokens" || key === "max-context-tokens")
+      throw new Error(
+        `--${key} was removed; use --${key.replace("tokens", "pct")}`,
+      );
 
     if (BOOLEAN_FLAGS.has(key)) {
       flags[key] = "1";
@@ -185,11 +201,26 @@ function integerFlag(flags, name, defaultValue) {
   return value;
 }
 
-function contextTokenFlag(flags, name, defaultValue) {
+function contextPctFlag(flags, name, defaultValue) {
   const value = flags[name] === undefined ? defaultValue : Number(flags[name]);
-  if (!Number.isSafeInteger(value) || value < 0)
-    throw new Error(`--${name} must be a non-negative integer`);
+  if (!Number.isFinite(value) || value < 0 || value > 100)
+    throw new Error(`--${name} must be between 0 and 100`);
   return value;
+}
+
+function contextOpts(flags, cli) {
+  return {
+    warnContextPct: contextPctFlag(
+      flags,
+      "warn-context-pct",
+      CONTEXT_THRESHOLDS[cli].warnContextPct,
+    ),
+    maxContextPct: contextPctFlag(
+      flags,
+      "max-context-pct",
+      CONTEXT_THRESHOLDS[cli].maxContextPct,
+    ),
+  };
 }
 
 function selectAdapter(flags) {
@@ -272,10 +303,10 @@ function buildRemoteLiveArgv(verb, opts) {
     if (opts.noWait) args.push("--no-wait");
     if (opts.noRelayTag) args.push("--no-relay-tag");
     if (opts.requestId) args.push("--request-id", opts.requestId);
-    if (opts.maxContextTokens !== undefined)
-      args.push("--max-context-tokens", String(opts.maxContextTokens));
-    if (opts.warnContextTokens !== undefined)
-      args.push("--warn-context-tokens", String(opts.warnContextTokens));
+    if (opts.maxContextPct !== undefined)
+      args.push("--max-context-pct", String(opts.maxContextPct));
+    if (opts.warnContextPct !== undefined)
+      args.push("--warn-context-pct", String(opts.warnContextPct));
   }
   args.push("--timeout", timeoutSeconds(opts.timeoutMs));
   if (verb === "ask" && opts.settleMs) {
@@ -2155,6 +2186,19 @@ async function doAskViaTmux(adapter, opts) {
   });
   const beforeRaw = await capturePane(remote, session);
   const contextPctBefore = adapter.contextPct(beforeRaw);
+  const context = opts.skipContextGuard ? {} : await tmuxContext(adapter, opts);
+  const guard = opts.skipContextGuard
+    ? {}
+    : contextGuard(adapter.cli, context, opts);
+  if (guard.ok === false)
+    return {
+      ...guard,
+      status: "failed",
+      done: false,
+      cli: adapter.cli,
+      session,
+      transport: "tmux",
+    };
 
   const bufferName = tmuxBufferName(session);
   await runTmux(remote, ["set-buffer", "-b", bufferName, "--", prompt]);
@@ -2199,6 +2243,8 @@ async function doAskViaTmux(adapter, opts) {
 
   if (opts.noWait) {
     return {
+      ...context,
+      ...guard,
       ok: true,
       cli: adapter.cli,
       transport: "tmux",
@@ -2297,6 +2343,8 @@ async function doAskViaTmux(adapter, opts) {
     response,
     contextPctBefore,
     contextPctAfter,
+    ...context,
+    ...guard,
     matchedCompletion: done,
     done,
     raw,
@@ -2343,6 +2391,8 @@ async function dispatchAsk(adapter, opts) {
       busyTimeoutMs: opts.busyTimeoutMs,
       pollIntervalMs: opts.pollIntervalMs,
       noWait: opts.noWait,
+      maxContextPct: opts.maxContextPct,
+      warnContextPct: opts.warnContextPct,
     });
   }
 
@@ -2395,10 +2445,10 @@ async function doAskViaDaemon(opts, meta = {}) {
   if (sessionId) payload.sessionId = sessionId;
   if (configDir) payload.configDir = configDir;
   if (opts.noWait) payload.noWait = true;
-  if (opts.maxContextTokens !== undefined)
-    payload.maxContextTokens = opts.maxContextTokens;
-  if (opts.warnContextTokens !== undefined)
-    payload.warnContextTokens = opts.warnContextTokens;
+  if (opts.maxContextPct !== undefined)
+    payload.maxContextPct = opts.maxContextPct;
+  if (opts.warnContextPct !== undefined)
+    payload.warnContextPct = opts.warnContextPct;
 
   const result = await callBridgeVerb(
     bridgePath,
@@ -2654,6 +2704,34 @@ async function doAskAuto(adapter, opts) {
 }
 
 async function doStop(adapter, opts) {
+  if (opts.short || opts.sessionId) {
+    let sessionId = opts.sessionId;
+    let configDir = opts.configDir;
+    if (!sessionId) {
+      const probe = await callBridgeVerb(
+        opts.bridgePath,
+        "daemon-probe",
+        {
+          short: opts.short,
+          configDir: opts.configDir,
+        },
+        10_000,
+      );
+      if (!probe.ok || !probe.target?.sessionId)
+        throw new Error(
+          probe.error || probe.reason || "Claude session not found",
+        );
+      sessionId = probe.target.sessionId;
+      configDir = probe.daemon?.configDir ?? configDir;
+    }
+    await execFileAsync("claude", ["stop", sessionId], {
+      timeout: 15_000,
+      env: configDir
+        ? { ...process.env, CLAUDE_CONFIG_DIR: configDir }
+        : process.env,
+    });
+    return { cli: "claude", sessionId, stopped: true, conversationKept: true };
+  }
   const { session, remote } = opts;
   if (/[:.]|^[%@]\d+$/.test(session))
     throw new Error(
@@ -2862,8 +2940,7 @@ function askOpts(flags, adapter) {
     requestId: flags["request-id"],
     noWait: Object.hasOwn(flags, "no-wait"),
     noRelayTag: Object.hasOwn(flags, "no-relay-tag"),
-    maxContextTokens: contextTokenFlag(flags, "max-context-tokens", 850000),
-    warnContextTokens: contextTokenFlag(flags, "warn-context-tokens", 600000),
+    ...contextOpts(flags, adapter.cli),
     remote: flags.remote,
     timeoutMs: secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
     maxTurnMs: codexUds
@@ -2879,8 +2956,22 @@ function askOpts(flags, adapter) {
 }
 
 function stopOpts(flags) {
+  const targetCount = [flags.session, flags.short, flags["session-id"]].filter(
+    Boolean,
+  ).length;
+  if (targetCount !== 1)
+    throw new Error("stop requires one of --session, --short, or --session-id");
+  if (
+    (flags.short || flags["session-id"]) &&
+    (flags.remote || (flags.cli && flags.cli !== "claude"))
+  )
+    throw new Error("stop --short/--session-id supports local Claude only");
   return {
-    session: requireFlag(flags, "session"),
+    session: flags.session,
+    short: flags.short,
+    sessionId: flags["session-id"],
+    configDir: flags["config-dir"],
+    bridgePath: flags.short ? resolveBridgePath(flags) : undefined,
     remote: flags.remote,
   };
 }
@@ -2981,8 +3072,121 @@ async function rename(flags) {
 }
 
 async function stop(flags) {
-  const adapter = selectAdapter(flags);
+  const adapter = selectAdapter({
+    ...flags,
+    cli: flags.cli ?? (flags.short || flags["session-id"] ? "claude" : "codex"),
+  });
   printJson(await doStop(adapter, stopOpts(flags)));
+}
+
+async function claudeTmuxTranscript(session, configDir) {
+  const { stdout: paneId } = await runTmux(null, [
+    "display-message",
+    "-p",
+    "-t",
+    session,
+    "#{pane_id}",
+  ]);
+  const discovery = await discoverClaudeTmuxSessions();
+  const target = discovery.sessions.find(
+    (entry) => entry.paneId === paneId.trim(),
+  );
+  return findClaudeTranscript({
+    configDir:
+      configDir ||
+      process.env.CLAUDE_CONFIG_DIR ||
+      pathJoin(homedir(), ".claude"),
+    sessionId: target?.sessionId,
+    cwd: target?.cwd,
+  });
+}
+
+async function tmuxContext(adapter, opts) {
+  const unknown = modelContext(adapter.cli, null);
+  if (opts.remote) return unknown;
+  try {
+    if (adapter.cli === "claude") {
+      const transcript = await claudeTmuxTranscript(
+        opts.session,
+        opts.configDir,
+      );
+      return (await readClaudeTranscript(transcript))?.context ?? unknown;
+    }
+    const { stdout: target } = await runTmux(null, [
+      "display-message",
+      "-p",
+      "-t",
+      opts.session,
+      "#{session_name}:#{window_index}.#{pane_index}",
+    ]);
+    const discovery = await discoverCodexTmuxSessions();
+    const pane = discovery.sessions
+      .flatMap((entry) => entry.panes)
+      .find((entry) => entry.target === target.trim());
+    return await readCodexContext(null, pane?.threadId);
+  } catch {
+    return unknown;
+  }
+}
+
+async function compact(flags) {
+  if (
+    (flags.cli ?? "claude") !== "claude" ||
+    flags.remote ||
+    flags.short ||
+    flags["session-id"] ||
+    (flags.transport && flags.transport !== "tmux")
+  )
+    throw new Error(
+      "compact supports local --cli claude --session NAME only; UDS slash execution is unverified",
+    );
+  const ifBusy = flags["if-busy"] ?? "fail";
+  if (!["fail", "wait"].includes(ifBusy))
+    throw new Error("compact --if-busy must be fail or wait");
+  const opts = askOpts(
+    {
+      ...flags,
+      cli: "claude",
+      transport: "tmux",
+      "if-busy": ifBusy,
+      "no-wait": true,
+      prompt: `/compact${flags.instructions ? ` ${flags.instructions}` : ""}`,
+    },
+    ADAPTERS.claude,
+  );
+  await waitForTmuxIdle(ADAPTERS.claude, opts);
+  const transcriptPath = await claudeTmuxTranscript(
+    opts.session,
+    opts.configDir,
+  );
+  const before = await readClaudeTranscript(transcriptPath);
+  if (!before)
+    throw new Error(
+      "compact requires a discoverable Claude transcript for this tmux pane",
+    );
+  await doAskViaTmux(ADAPTERS.claude, { ...opts, skipContextGuard: true });
+  const deadline = Date.now() + opts.timeoutMs;
+  do {
+    const snapshot = await readClaudeTranscript(transcriptPath);
+    if (snapshot?.compactCount > before.compactCount) {
+      printJson({
+        cli: "claude",
+        session: opts.session,
+        compacted: true,
+        ...snapshot.compact,
+      });
+      return;
+    }
+    await sleep(
+      Math.min(opts.pollIntervalMs, Math.max(0, deadline - Date.now())),
+    );
+  } while (Date.now() < deadline);
+  printJson({
+    cli: "claude",
+    session: opts.session,
+    compacted: false,
+    timedOut: true,
+  });
 }
 
 async function interrupt(flags) {
@@ -3065,10 +3269,11 @@ function startOptsForSession(flags, session, side) {
   };
 }
 
-function askOptsForSession(flags, session, prompt) {
+function askOptsForSession(flags, session, prompt, cli) {
   return {
     session,
     prompt,
+    ...contextOpts(flags, cli),
     noRelayTag: Object.hasOwn(flags, "no-relay-tag"),
     remote: flags.remote,
     timeoutMs: secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
@@ -3152,7 +3357,7 @@ async function converse(flags) {
     for (const prompt of prompts) {
       const result = await doAsk(
         adapter,
-        askOptsForSession(flags, session, prompt),
+        askOptsForSession(flags, session, prompt, adapter.cli),
       );
       turns.push(turnFromAsk(prompt, result));
     }
@@ -3193,7 +3398,7 @@ async function goalDriven(flags) {
           : `Continue. Reply with only ${doneToken} on its own line when fully complete.`;
       const result = await doAsk(
         adapter,
-        askOptsForSession(flags, session, prompt),
+        askOptsForSession(flags, session, prompt, adapter.cli),
       );
       turns.push(turnFromAsk(prompt, result));
       if (hasDoneToken(result.response, doneToken)) {
@@ -3573,8 +3778,7 @@ function peerSideBaseOpts(flags, side, adapter, session) {
   return {
     session,
     noRelayTag: Object.hasOwn(flags, "no-relay-tag"),
-    maxContextTokens: contextTokenFlag(flags, "max-context-tokens", 850000),
-    warnContextTokens: contextTokenFlag(flags, "warn-context-tokens", 600000),
+    ...contextOpts(flags, adapter.cli),
     short,
     sessionId,
     threadId,
@@ -4009,6 +4213,8 @@ async function main() {
     await ask(flags);
   } else if (command === "wait") {
     await wait(flags);
+  } else if (command === "compact") {
+    await compact(flags);
   } else if (command === "rename") {
     await rename(flags);
   } else if (command === "stop") {
@@ -4061,6 +4267,7 @@ export {
   resolveAskTransport,
   resolveCodexDaemonSocket,
   splitTmuxTarget,
+  stopOpts,
   tmuxBufferName,
   verifyAttachedPeerSide,
 };

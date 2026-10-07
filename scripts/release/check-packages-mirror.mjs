@@ -64,6 +64,10 @@ const CORE_FILE_MIRRORS = [
     target: "packages/core/hub/team/claude-transcript.mjs",
   },
   {
+    source: "hub/team/session-context.mjs",
+    target: "packages/core/hub/team/session-context.mjs",
+  },
+  {
     source: "hub/team/claude-session-projection.mjs",
     target: "packages/core/hub/team/claude-session-projection.mjs",
   },

@@ -2,6 +2,7 @@ import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
+import { modelContext } from "./session-context.mjs";
 
 export async function findClaudeTranscript({
   configDir,
@@ -47,6 +48,8 @@ export async function readClaudeTranscript(transcriptPath, { requestId } = {}) {
   let estimatedContextTokens = null;
   let model = null;
   let measuredAt = null;
+  let compactCount = 0;
+  let compact = null;
 
   try {
     const lines = readline.createInterface({
@@ -61,6 +64,15 @@ export async function readClaudeTranscript(transcriptPath, { requestId } = {}) {
         continue;
       }
       const message = entry?.message;
+      if (entry?.type === "system" && entry.subtype === "compact_boundary") {
+        compactCount += 1;
+        compact = {
+          preTokens: entry.compactMetadata?.preTokens ?? null,
+          postTokens: entry.compactMetadata?.postTokens ?? null,
+        };
+        estimatedContextTokens = compact.postTokens;
+        measuredAt = entry.timestamp || null;
+      }
       if (entry?.type === "assistant") {
         const usage = message?.usage;
         if (usage) {
@@ -110,12 +122,18 @@ export async function readClaudeTranscript(transcriptPath, { requestId } = {}) {
   }
   return {
     context:
-      estimatedContextTokens === null
+      estimatedContextTokens === null && model === null
         ? null
-        : { estimatedContextTokens, model, measuredAt },
+        : {
+            ...modelContext("claude", model, estimatedContextTokens),
+            model,
+            measuredAt,
+          },
     userSeen,
     response,
     turnEnded,
     sectionClosed,
+    compactCount,
+    compact,
   };
 }
