@@ -314,9 +314,7 @@ export function getMicroLine(
   if (showGemini) {
     segments.push(`${bold(geminiBlue(geminiMarker))}${dim(":")}${gVal}`);
   }
-  segments.push(
-    `${dim("CTX:")}${contextPercentText(ctxView)}`,
-  );
+  segments.push(`${dim("CTX:")}${contextPercentText(ctxView)}`);
   return truncateAnsi(segments.join(" "), cols);
 }
 
