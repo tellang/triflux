@@ -4797,51 +4797,11 @@ function cmdMcp(args = [], options = {}) {
   }
 }
 
-function checkForUpdate() {
-  const cacheFile = join(CLAUDE_DIR, "cache", "triflux-update-check.json");
-  const cacheDir = dirname(cacheFile);
-
-  // 캐시 확인 (1시간 이내면 캐시 사용)
-  try {
-    if (existsSync(cacheFile)) {
-      const cache = JSON.parse(readFileSync(cacheFile, "utf8"));
-      if (Date.now() - cache.timestamp < 3600000) {
-        return cache.latest !== PKG.version ? cache.latest : null;
-      }
-    }
-  } catch {}
-
-  // npm registry 조회
-  try {
-    const result = execSync("npm view triflux version", {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "ignore"],
-      windowsHide: true,
-    }).trim();
-
-    if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
-    writeFileSync(
-      cacheFile,
-      JSON.stringify({ latest: result, timestamp: Date.now() }),
-    );
-
-    return result !== PKG.version ? result : null;
-  } catch {
-    return null;
-  }
-}
-
 function cmdHelp() {
-  const latestVer = checkForUpdate();
-  const updateNotice = latestVer
-    ? `\n  ${YELLOW}${BOLD}↑ v${latestVer} 사용 가능${RESET}  ${GRAY}npm update -g triflux${RESET}\n`
-    : "";
-
   console.log(`
   ${AMBER}${BOLD}⬡ triflux${RESET} ${DIM}v${PKG.version}${RESET}
   ${GRAY}CLI-first multi-model orchestrator for Claude Code${RESET}
-${updateNotice}
+
   ${LINE}
 
   ${BOLD}Commands${RESET}
