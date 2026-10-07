@@ -1661,15 +1661,19 @@ test("tfx-live peer SIGINT emits aborted output and leaves transcript/status fil
       stderr += chunk;
     });
 
+    // 가짜 브리지는 로그를 통째로 다시 쓰므로 쓰는 도중에는 비어 있을 수 있다.
+    const readEntries = () =>
+      fs
+        .readFile(logPath, "utf8")
+        .then(JSON.parse)
+        .catch(() => []);
     const deadline = Date.now() + 3000;
+    let entries = [];
     while (Date.now() < deadline) {
-      const entries = JSON.parse(
-        await fs.readFile(logPath, "utf8").catch(() => "[]"),
-      );
+      entries = await readEntries();
       if (entries.length >= 2) break;
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    const entries = JSON.parse(await fs.readFile(logPath, "utf8"));
     assert.equal(entries.length, 2, "closure hop did not start before SIGINT");
 
     child.kill("SIGINT");
