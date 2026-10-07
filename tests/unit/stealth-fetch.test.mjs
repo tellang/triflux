@@ -232,7 +232,9 @@ describe("ensureCloakBrowser", () => {
         throw new Error("missing");
       },
       execFileSyncFn: (_cmd, args) => {
-        installed = args.includes("--ignore-scripts");
+        installed =
+          args.includes("--ignore-scripts") &&
+          args.some((arg) => arg.startsWith("cloakbrowser@"));
         throw new Error("npm failed");
       },
       warn: (message) => warnings.push(message),
