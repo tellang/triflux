@@ -24,8 +24,8 @@
 
 triflux는 코딩 작업을 Claude, Codex, Antigravity 사이에서 나눠 맡기는 Claude Code 플러그인이자
 npm CLI다. `/tfx-auto`에 할 일을 한 번 적으면 triflux가 CLI 레인(기본은 Codex)을 고르고, 임의
-셸 명령 대신 관리된 경로로 실행한다. 필요하면 로컬 병렬 워커, worktree로 격리한 스웜,
-Claude↔Codex 라이브 세션, 원격 호스트로 작업을 나눈다. 설치, 진단, 로컬 Hub, 팀 실행은 `tfx`
+셸 명령 대신 관리된 경로로 실행한다. 필요하면 로컬 병렬 워커, Claude↔Codex 라이브 세션, 원격 호스트로 작업을 나눈다.
+코드 변경을 병렬로 진행할 때는 작업별 worktree와 세션을 분리한다. 설치, 진단, 로컬 Hub, 팀 실행은 `tfx`
 셸 CLI가 맡는다.
 
 ## 설치
@@ -88,9 +88,7 @@ Codex 프로필은 `~/.codex/<프로필>.config.toml`에서 직접 관리한다.
 | `--shape` | `consensus`, `debate`, `panel` | `--mode consensus`의 결과 형태 |
 | `--cli` | `auto`, `codex`, `antigravity`, `claude` | CLI 레인 고정 |
 | `--cli-set` | `triad`, `no-antigravity`, `custom` | 합의 참여자 구성 |
-| `--parallel` | `1`, `N`, `swarm` | `N` = 로컬 워커(`tfx multi`), `swarm` = worktree별 PRD 샤드(`tfx swarm`) |
-| `--isolation` | `none`, `worktree` | 샤드별 worktree 격리(`swarm`이면 강제) |
-| `--remote` | `<host>` | 스웜 샤드를 `hosts.json`의 호스트로 보냄 |
+| `--parallel` | `1`, `N` | `N` = 로컬 워커(`tfx multi`) |
 | `--retry` | `0`, `1`(기본), `ralph`, `auto-escalate` | `ralph` = 막힘 감지가 있는 재시도 상태 기계, `auto-escalate` = 모델 체인을 한 단계씩 올림 |
 | `--max-iterations` | `N` | `ralph`/`auto-escalate` 상한(`0`은 무제한) |
 | `--rounds` | `N`(기본 4) | `--mode live` 왕복 횟수 |
@@ -126,8 +124,7 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 | `tfx setup` / `tfx doctor` | 파일·HUD·MCP·프로필 동기화 / 진단과 복구(`--fix`, `--json`) |
 | `tfx auto` | `tfx-auto` 라우팅 판정 미리 보기 |
 | `tfx multi` | tmux + Hub 기반 로컬 멀티 CLI 팀 |
-| `tfx swarm` | PRD 기반 worktree 격리 실행: `plan`, `preflight`, `run`, `list` |
-| `tfx synapse` | 스웜 세션 레지스트리와 lease |
+| `tfx synapse` | 세션 레지스트리와 lease |
 | `tfx hub` | 로컬 Hub: `start`, `stop`, `status`, `ensure` |
 | `tfx mcp` | 관리형 MCP 레지스트리: `list`, `sync`, `add`, `remove` |
 | `tfx handoff` | 현재 맥락을 다른 세션이나 호스트로 넘길 프롬프트로 묶음 |
@@ -154,7 +151,7 @@ Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-s
 
 **Hub.** 팀, 원격 세션, MCP 도구, 상태 표시를 잇는 로컬 메시지 버스다. 기본으로
 `127.0.0.1:27888`에 붙고(`TFX_HUB_PORT`로 변경), `TFX_HUB_TOKEN`이 있으면 bearer 토큰을 요구한다.
-`tfx-auto`, `tfx multi`, 로컬 스웜 샤드의 headless 워커는 `claude agents` 패널에 행으로 보인다.
+`tfx-auto`, `tfx multi`의 headless 워커는 `claude agents` 패널에 행으로 보인다.
 끄려면 `--no-native-bridge-ui`를 준다.
 
 **재시도와 승격.** `--retry ralph`는 끝나거나 막힐 때(같은 실패 3회 연속)까지 반복한다.
@@ -172,7 +169,7 @@ Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-s
 보고한다. 트레이와 쓰이지 않는 CTO 운영 명령은 제거했다
 ([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)). 자동 수집은 기본으로 꺼져 있고 `TFX_CTO_AUTO_COLLECT=1` 로 켠다([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)).
 
-**원격 호스트.** `/tfx-remote`와 `--remote <host>`는 `~/.config/triflux/hosts.json`
+**원격 호스트.** `/tfx-remote`는 `~/.config/triflux/hosts.json`
 (Windows는 `%APPDATA%\triflux\hosts.json`)에서 호스트를 읽는다. `/tfx-remote setup`으로 호스트를
 추가한 뒤 `/tfx-remote spawn <host> "보안 리뷰 실행"`처럼 쓴다.
 
@@ -184,12 +181,11 @@ graph TD
     User --> CLI[tfx CLI]
     Skills --> Route[tfx-route.sh]
     Skills --> Live[tfx-live]
-    CLI --> Team["tfx multi · tfx swarm"]
+    CLI --> Team["tfx multi"]
     Route --> Codex[Codex CLI]
     Route --> Agy[Antigravity agy]
     Route --> Claude[Claude Code]
     Team --> Route
-    Team --> WT[(git worktrees)]
     Live -->|UDS 또는 tmux| Sessions[Claude / Codex TUI 세션]
     Route --> Hub["Hub 127.0.0.1:27888"]
     Team --> Hub

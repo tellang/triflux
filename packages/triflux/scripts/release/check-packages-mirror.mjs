@@ -29,7 +29,6 @@ const MIRROR_TOPS = [
   "hooks",
   "hub",
   "hud",
-  "mesh",
   "scripts",
   "skills",
   "tui",

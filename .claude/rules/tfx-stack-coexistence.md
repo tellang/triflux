@@ -49,7 +49,7 @@ triflux  →  superpowers  (금지)
 | **Review** (코드 판정) | superpowers | 입력 diff → 출력 verdict 프리미티브. 가장 단순한 경계 |
 | **Plan** (작업 설계) | superpowers `writing-plans`; TFX 다중모델 계획·실행은 `tfx-auto --mode deep` | 실행 계획 작성과 다중모델 실행을 구분한다 |
 | **Checkpoint** (진행 상태 스냅샷) | gstack (`/checkpoint`) | 워크플로우 상태 관리는 무대 레이어 책임 |
-| **Worktree** (격리 실행) | triflux (`tfx-swarm`) | PRD별 worktree + auto merge = 오케스트레이션 |
+| **Worktree** (격리 실행) | Git worktree 또는 Claude Agent `isolation: worktree` | 코드 변경 병렬 작업은 세션별 worktree를 분리하고 각 세션에서 `tfx-auto` 실행 |
 | **QA / 검증** | gstack (`/qa`) → triflux (`tfx-review` 코드 판정, `tfx-auto` 테스트→수정 반복) | gstack이 게이트, triflux가 병렬 실행 |
 | **Ship / 배포** | gstack (`/ship`) | 배포 게이트는 무대 레이어 |
 | **Brainstorm** | triflux (`tfx-auto --mode consensus --shape debate`) | 우선순위 규칙 §충돌 해소 참조 |
@@ -67,12 +67,11 @@ triflux  →  superpowers  (금지)
   ← plan.md
 
 워크트리 생성
-  → tfx-swarm plan.md  (triflux 백엔드: worktree 격리 실행)
-  ← shard별 브랜치
+  → 작업별 Git worktree 생성 또는 Claude Agent `isolation: worktree`
+  ← 작업별 브랜치와 세션
 
 서브에이전트 실행
-  → tfx-swarm 내부 자동 dispatch  (triflux)
-  → 각 worker가 tfx-auto로 구현
+  → 각 세션에서 tfx-auto로 구현
 
 리뷰
   → superpowers /review  (sp 엔진: diff → verdict)
@@ -101,5 +100,5 @@ triflux  →  superpowers  (금지)
 | superpowers `/review` 스킬을 triflux 코어에 `import` | sp → tfx 단방향 위반 | triflux는 자체 review primitive를 사용하거나 호출자가 결과를 확인 |
 | 80+ 스킬 키워드 충돌 시 임의 선택 | 비결정적 라우팅 | 이 문서 §충돌 해소 표에서 1순위를 명확히 따름 |
 | gstack `/ship`이 triflux를 우회하고 codex 직접 호출 | 라우팅 규약 위반 | gstack → triflux → headless 경로 필수 |
-| 발표자 영상 워크플로우에서 tfx-auto만 사용 | /office-hours 게이트 없이 배포 → QA 누락 | gstack /office-hours → tfx-auto --mode deep → tfx-swarm 순서 준수 |
-| sp 판정 없이 triflux auto-merge | 미검증 코드 머지 | swarm 완료 후 superpowers review verdict 수신 확인 후 merge |
+| 발표자 영상 워크플로우에서 tfx-auto만 사용 | /office-hours 게이트 없이 배포 → QA 누락 | gstack /office-hours → tfx-auto --mode deep → 작업별 worktree와 세션 분리 |
+| sp 판정 없이 triflux auto-merge | 미검증 코드 머지 | worktree별 superpowers review verdict 수신 확인 후 merge |

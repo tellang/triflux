@@ -19,17 +19,4 @@ describe("synapse wiring", () => {
     assert.match(src, /unregisterHeadlessSynapseWorker\(d\.workerId\)/);
     assert.match(src, /taskSummary:\s*buildSynapseTaskSummary\(prompt\)/);
   });
-
-  it("conductor state transition에 synapse register/heartbeat/unregister 배선이 있어야 한다", () => {
-    const src = read("hub/team/conductor.mjs");
-    assert.match(
-      src,
-      /if \(nextState === STATES\.HEALTHY\)\s*\{\s*registerSynapseSession/s,
-    );
-    assert.match(src, /heartbeatSynapseSession\(/);
-    assert.match(
-      src,
-      /if \(nextState === STATES\.COMPLETED \|\| nextState === STATES\.DEAD\)\s*\{\s*unregisterSynapseSession/s,
-    );
-  });
 });

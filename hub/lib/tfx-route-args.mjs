@@ -9,10 +9,10 @@
 // 기존 플래그 (Phase 2 v10.9.33+):
 //   --cli {auto|codex|antigravity|claude}
 //   --mode {quick|deep|consensus|live}
-//   --parallel {1|N|swarm}
+//   --parallel {1|N}
 //   --retry {0|1|ralph|auto-escalate}    (Phase 3 에서 ralph/auto-escalate 신규)
-//   --isolation {none|worktree}
-//   --remote {none|<host>}
+//   --isolation {none}
+//   --remote {none}
 //   --rounds <N>                          (--mode live 전용, 기본 4)
 //
 // Phase 3 신규:
@@ -39,7 +39,7 @@ const VALID_VALUES = Object.freeze({
   cli: ["auto", "codex", "antigravity", "claude"],
   mode: ["quick", "deep", "consensus", "live"],
   retry: ["0", "1", "ralph", "auto-escalate"],
-  isolation: ["none", "worktree"],
+  isolation: ["none"],
   lead: ["claude", "codex"],
 });
 
@@ -54,6 +54,8 @@ const VALUE_FLAGS = new Set([
   "--max-iterations",
   "--rounds",
 ]);
+
+const EXIT_ARG_ERROR = 2;
 
 const BOOL_FLAGS = new Set(["--no-claude-native"]);
 
@@ -162,6 +164,17 @@ function applyBool(opts, flag) {
 }
 
 function applyValue(opts, flag, value, warnings) {
+  if (
+    (flag === "--parallel" && value === "swarm") ||
+    (flag === "--isolation" && value !== "none") ||
+    (flag === "--remote" && value !== "none")
+  ) {
+    const error = new Error(
+      `${flag} ${value} is retired; use a worktree per session with tfx-auto, or tfx-remote for remote sessions`,
+    );
+    error.exitCode = EXIT_ARG_ERROR;
+    throw error;
+  }
   switch (flag) {
     case "--cli":
       if (value === "gemini") {
@@ -222,12 +235,8 @@ function validate(opts, warnings, providedFlags = new Set()) {
       );
     }
   }
-  if (
-    opts.parallel !== "1" &&
-    opts.parallel !== "swarm" &&
-    !/^\d+$/.test(opts.parallel)
-  ) {
-    warnings.push(`invalid --parallel=${opts.parallel}, expected 1|N|swarm`);
+  if (opts.parallel !== "1" && !/^\d+$/.test(opts.parallel)) {
+    warnings.push(`invalid --parallel=${opts.parallel}, expected 1|N`);
   }
 
   if (opts.mode === "live") {
@@ -250,40 +259,11 @@ function validate(opts, warnings, providedFlags = new Set()) {
     warnings.push("--rounds ignored unless --mode live");
     opts.rounds = DEFAULT_OPTIONS.rounds;
   }
-
-  const parallelOne = opts.parallel === "1" || opts.parallel === 1;
-  if (parallelOne && opts.isolation === "worktree") {
-    warnings.push(
-      "--isolation worktree requires --parallel >=2 or swarm; forcing isolation=none",
-    );
-    opts.isolation = "none";
-  }
-  if (opts.remote !== "none" && opts.parallel !== "swarm") {
-    warnings.push(
-      `--remote ${opts.remote} ignored (requires --parallel swarm)`,
-    );
-  }
 }
 
 export { VALID_VALUES };
 
-/**
- * Decide dispatch mode based on parsed args and current git state.
- *
- * Issue #281: auto router code changes should use isolated swarm dispatch for
- * multi-task work unless the user explicitly selected local parallel mode.
- *
- * @param {object} args
- * @param {object} [opts]
- * @param {string} [opts.cwd]
- * @param {Function} [opts.detector]
- * @returns {{
- *   mode: "single" | "multi" | "swarm",
- *   escalated: boolean,
- *   warning: string | null,
- *   reason: string,
- * }}
- */
+/** Decide single or local parallel dispatch without managing worktrees. */
 export function decideDispatchMode(
   args = {},
   { cwd = process.cwd(), detector = hasCodeChange } = {},
@@ -291,33 +271,17 @@ export function decideDispatchMode(
   const tasksCount = countTasks(args);
   const parallel = normalizeParallel(args.parallel);
   const hasUserParallel = parallel !== null && parallel !== "1";
-  const hasUserSwarm = parallel === "swarm" || args.isolation === "worktree";
   const codeChanged = Boolean(detector({ cwd }));
 
-  if (hasUserSwarm) {
-    return {
-      mode: "swarm",
-      escalated: false,
-      warning: null,
-      reason: "user-explicit-swarm",
-    };
-  }
-
-  if (hasUserParallel && codeChanged) {
+  if ((tasksCount >= 2 || hasUserParallel) && codeChanged) {
     return {
       mode: "multi",
       escalated: false,
-      warning: `[tfx-auto] WARNING: 코드 변경 감지 (cwd race 위험). --parallel swarm --isolation worktree 권장. 사용자 명시 --parallel=${args.parallel} 존중하여 multi 로 진행.`,
-      reason: "user-explicit-multi-with-code-change",
-    };
-  }
-
-  if (tasksCount >= 2 && codeChanged) {
-    return {
-      mode: "swarm",
-      escalated: true,
-      warning: `[tfx-auto] 코드 변경 ${tasksCount}건 태스크 + dirty cwd 감지. swarm dispatch 자동 escalate (--parallel swarm --isolation worktree). Issue #281.`,
-      reason: "auto-escalate-code-change",
+      warning:
+        "[tfx-auto] WARNING: 코드 변경 병렬 작업은 worktree를 나누고 세션마다 tfx-auto로 실행하세요.",
+      reason: hasUserParallel
+        ? "user-explicit-multi-with-code-change"
+        : "multi-with-code-change",
     };
   }
 
@@ -348,6 +312,5 @@ function countTasks(args) {
 
 function normalizeParallel(value) {
   if (value == null) return null;
-  if (value === "swarm") return value;
   return String(value);
 }

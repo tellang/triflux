@@ -3,8 +3,6 @@
 // hub/team/psmux.mjs 의 PSMUX_BIN resolution 이 OS 별 primary multiplexer 로
 // 명시 분기되는지 (silent fallback 아님) 검증. mac/Linux 의 codex worker 가
 // tmux 환경에서 silent fallback path 로 흘러가던 회귀 가드.
-//
-// 그리고 execution-mode.mjs 의 dead buildCommandForMode 가 제거됐는지 가드.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -153,22 +151,6 @@ describe("psmux.mjs: OS primary multiplexer 명시 분기", () => {
       undefined,
       "isTmuxFallback 은 제거됐어야 함 — getMultiplexerType 로 대체",
     );
-  });
-});
-
-describe("execution-mode.mjs: dead buildCommandForMode 제거", () => {
-  it("buildCommandForMode 는 더 이상 export 안 됨 (PR #252 stdin redirect 와 정합 안 됨)", async () => {
-    const mod = await import("../../hub/team/execution-mode.mjs");
-    assert.equal(
-      mod.buildCommandForMode,
-      undefined,
-      "buildCommandForMode 는 caller 없는 dead code 였고 argv-inline + -s flag 가 PR #252 와 충돌해서 제거됨",
-    );
-  });
-
-  it("buildSpawnSpecForMode 는 유지된다 (conductor.mjs:544 의 활성 caller)", async () => {
-    const mod = await import("../../hub/team/execution-mode.mjs");
-    assert.equal(typeof mod.buildSpawnSpecForMode, "function");
   });
 });
 

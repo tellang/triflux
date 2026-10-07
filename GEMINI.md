@@ -17,11 +17,11 @@ triflux 워크스페이스에서 Antigravity CLI의 역할과 운영 규칙. 1M 
 - 빠른 웹 검색 (Google Search 통합) — `tfx-research --quick`
 - 3-CLI 합의(consensus/debate/panel)에서 Gemini 시점 제공
 - 1M context 활용 — 큰 코드베이스 분석
-- swarm/multi headless 병렬 실행의 워커
+- 분리된 worktree와 세션에서 코드 변경 작업 수행
 
 ## 비대화식 실행 경로
 - `agy --dangerously-skip-permissions --print=` 를 직접 호출하지 않는다. 자동 차단 훅(headless-guard)은 2026-09-07 에 제거됐으므로 호출자가 지킨다.
-- 반드시 tfx 스킬 경유: tfx-auto (--cli antigravity), tfx-multi, tfx-swarm 등
+- 반드시 `tfx-auto --cli antigravity` 경유. 코드 변경 병렬 작업은 작업별 worktree와 세션을 분리하고 각 세션에서 `tfx-auto`를 사용한다.
 - 일반 호출: `tfx-route.sh --cli antigravity ...`
 
 ## 핵심 운영 컨텍스트 (요약 — 상세는 CLAUDE.md)

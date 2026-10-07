@@ -9,7 +9,7 @@
       "root_cause": "원격 호스트가 PowerShell인데 bash 문법(2>/dev/null)을 사용",
       "dna_factor": "remote.os",
       "rule_template": "원격 호스트 {host}는 PowerShell 기본 셸. 2>/dev/null 대신 2>$null, && 대신 ;, $(cmd) 대신 $(cmd) PowerShell 구문 사용.",
-      "fix": "hub/lib/ssh-command.mjs의 suppressStderr(os) 사용",
+      "fix": "PowerShell 호스트에서는 2>/dev/null 대신 2>$null 사용",
       "confidence_base": 0.95,
       "severity": "high"
     },
@@ -20,7 +20,7 @@
       "root_cause": "원격 호스트가 PowerShell인데 bash의 && 연결자를 사용",
       "dna_factor": "remote.os",
       "rule_template": "원격 호스트 {host}는 PowerShell 기본 셸. && 대신 ; 사용.",
-      "fix": "hub/lib/ssh-command.mjs의 commandJoin(os) 사용",
+      "fix": "PowerShell 호스트에서는 && 대신 ; 사용",
       "confidence_base": 0.95,
       "severity": "high"
     },

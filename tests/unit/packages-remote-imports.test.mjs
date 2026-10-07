@@ -9,7 +9,6 @@ import { promisify } from "node:util";
 const REPO_ROOT = path.resolve(import.meta.dirname, "../..");
 const REMOTE_ROOT = path.join(REPO_ROOT, "packages/remote");
 const CORE_ROOT = path.join(REPO_ROOT, "packages/core");
-const TEAM_DIR = path.join(REMOTE_ROOT, "hub/team");
 const IMPORT_RE =
   /(?:from\s*["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\))/g;
 
@@ -97,33 +96,6 @@ test("packages/remote imports core modules through @triflux/core", async () => {
   assert.deepEqual(violations, []);
 });
 
-test("packages/remote conductor mesh imports use @triflux/core/mesh", async () => {
-  const expected = new Map([
-    ["conductor.mjs", 'from "@triflux/core/mesh/mesh-registry.mjs"'],
-    [
-      "conductor-mesh-bridge.mjs",
-      'from "@triflux/core/mesh/mesh-protocol.mjs"',
-    ],
-    [
-      "swarm-hypervisor.mjs",
-      /import\(\s*["@']@triflux\/core\/mesh\/mesh-registry\.mjs["']\s*\)/u,
-    ],
-  ]);
-
-  for (const [fileName, snippet] of expected) {
-    const source = await fs.readFile(path.join(TEAM_DIR, fileName), "utf8");
-    if (typeof snippet === "string") {
-      assert.ok(
-        source.includes(snippet),
-        `${fileName} should include ${snippet}`,
-      );
-    } else {
-      assert.match(source, snippet);
-    }
-    assert.doesNotMatch(source, /\.\.\/\.\.\/mesh/u);
-  }
-});
-
 test("packages/remote team entrypoints load with published package layout", async () => {
   const execFileAsync = promisify(execFile);
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-remote-import-"));
@@ -140,7 +112,7 @@ test("packages/remote team entrypoints load with published package layout", asyn
         "--preserve-symlinks",
         "--input-type=module",
         "-e",
-        "await import('@triflux/core/mesh/mesh-registry.mjs'); await import('@triflux/core/mesh/mesh-protocol.mjs'); await import('@triflux/remote/hub/team/headless.mjs'); await import('@triflux/remote/hub/team/backend.mjs'); await import('@triflux/remote/hub/team/conductor.mjs'); await import('@triflux/remote/hub/team/conductor-mesh-bridge.mjs'); await import('@triflux/remote/hub/team/swarm-hypervisor.mjs'); console.log('ok');",
+        "await import('@triflux/remote/hub/team/headless.mjs'); await import('@triflux/remote/hub/team/backend.mjs'); console.log('ok');",
       ],
       { cwd: tmp },
     );

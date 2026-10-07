@@ -27,13 +27,6 @@ function formatGoal(goal) {
   return `- ${id} ${status}: ${title}`;
 }
 
-function formatShard(shard) {
-  const id = oneLine(shard?.id || shard?.name || shard?.sessionId, "shard");
-  const status = oneLine(shard?.status || shard?.state, "unknown");
-  const detail = oneLine(shard?.summary || shard?.objective || shard?.task, "");
-  return detail ? `- ${id} ${status}: ${detail}` : `- ${id} ${status}`;
-}
-
 function formatEvent(event) {
   const ts = oneLine(event?.ts, "unknown_ts");
   const name = oneLine(event?.event, "event");
@@ -61,9 +54,6 @@ export function renderBrief(current) {
   const activeGoals = Array.isArray(summary.active_goals)
     ? summary.active_goals.slice(0, 3)
     : [];
-  const swarmShards = Array.isArray(summary.swarm_shards)
-    ? summary.swarm_shards.slice(0, 2)
-    : [];
   const recentEvents = Array.isArray(current?.ledger_tail)
     ? current.ledger_tail.slice(-2)
     : [];
@@ -75,8 +65,6 @@ export function renderBrief(current) {
     `summary: ${oneLine(summary.repo_state, "no repo summary")}`,
     "active_goals",
     ...(activeGoals.length > 0 ? activeGoals.map(formatGoal) : ["- none"]),
-    "swarm_shards",
-    ...(swarmShards.length > 0 ? swarmShards.map(formatShard) : ["- none"]),
     "hub_status",
     `status: ${oneLine(hub.status, "unknown")} available: ${hub.available === true} detail: ${compactDetail(hub.detail)}`,
     "recent_events",

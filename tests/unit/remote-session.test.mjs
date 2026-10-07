@@ -106,26 +106,3 @@ describe("remote-session — resolveRemoteStageDir", () => {
     assert.ok(!result.includes("\\\\"));
   });
 });
-
-describe("remote-session — planner host field", () => {
-  it("R-11: parseShards에서 host 필드 파싱", async () => {
-    const { parseShards } = await import("../../hub/team/swarm-planner.mjs");
-
-    const shards = parseShards(`
-## Shard: local-work
-- agent: codex
-- files: src/a.mjs
-- prompt: local task
-
-## Shard: remote-work
-- agent: codex
-- host: ultra4
-- files: src/b.mjs
-- prompt: remote task
-`);
-
-    assert.equal(shards.length, 2);
-    assert.equal(shards[0].host, ""); // default empty
-    assert.equal(shards[1].host, "ultra4");
-  });
-});

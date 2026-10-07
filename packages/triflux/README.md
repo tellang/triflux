@@ -25,8 +25,9 @@
 triflux is a Claude Code plugin and npm CLI that routes coding work across Claude, Codex,
 and Antigravity. You describe the task once with `/tfx-auto`; triflux picks the CLI lane
 (Codex by default), runs it through managed routes instead of ad-hoc shell commands, and
-can fan the work out to parallel workers, worktree-isolated swarms, live Claude↔Codex
-sessions, or remote hosts. The `tfx` shell CLI covers setup, diagnostics, the local Hub,
+can fan the work out to parallel workers, live Claude↔Codex sessions, or remote
+hosts. Parallel code changes use separate worktrees and one session per worktree.
+The `tfx` shell CLI covers setup, diagnostics, the local Hub,
 and team orchestration.
 
 ## Install
@@ -89,9 +90,7 @@ and execution. Manage Codex profiles directly in `~/.codex/<profile>.config.toml
 | `--shape` | `consensus`, `debate`, `panel` | Output shape for `--mode consensus` |
 | `--cli` | `auto`, `codex`, `antigravity`, `claude` | Force a CLI lane |
 | `--cli-set` | `triad`, `no-antigravity`, `custom` | Consensus participants |
-| `--parallel` | `1`, `N`, `swarm` | `N` = local workers (`tfx multi`); `swarm` = PRD shards in worktrees (`tfx swarm`) |
-| `--isolation` | `none`, `worktree` | Worktree isolation per shard (forced on with `swarm`) |
-| `--remote` | `<host>` | Send swarm shards to a host from `hosts.json` |
+| `--parallel` | `1`, `N` | `N` = local workers (`tfx multi`) |
 | `--retry` | `0`, `1` (default), `ralph`, `auto-escalate` | `ralph` = retry state machine with stuck detection; `auto-escalate` = move up the model chain |
 | `--max-iterations` | `N` | Cap for `ralph` / `auto-escalate` (`0` = unlimited) |
 | `--rounds` | `N` (default 4) | Round trips for `--mode live` |
@@ -127,8 +126,7 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 | `tfx setup` / `tfx doctor` | Sync files, HUD, MCP, profiles / diagnose and repair (`--fix`, `--json`) |
 | `tfx auto` | Preview the `tfx-auto` routing decision |
 | `tfx multi` | Local multi-CLI team in tmux + Hub |
-| `tfx swarm` | PRD-based, worktree-isolated work: `plan`, `preflight`, `run`, `list` |
-| `tfx synapse` | Swarm session registry and leases |
+| `tfx synapse` | Session registry and leases |
 | `tfx hub` | Local Hub: `start`, `stop`, `status`, `ensure` |
 | `tfx mcp` | Managed MCP registry: `list`, `sync`, `add`, `remove` |
 | `tfx handoff` | Serialize the current context for another session or host |
@@ -156,7 +154,7 @@ gets past Claude Code's 600-second Bash limit. Follow up with `--job-status`, `-
 
 **Hub.** A local message bus for teams, remote sessions, MCP tools, and status surfaces. It binds
 to `127.0.0.1:27888` by default (`TFX_HUB_PORT` overrides) and accepts a bearer token from
-`TFX_HUB_TOKEN`. Headless workers from `tfx-auto`, `tfx multi`, and local swarm shards appear in
+`TFX_HUB_TOKEN`. Headless workers from `tfx-auto` and `tfx multi` appear in
 the `claude agents` panel unless you pass `--no-native-bridge-ui`.
 
 **Retry and escalation.** `--retry ralph` loops until done or stuck (three identical failures).
@@ -173,7 +171,7 @@ falling back. Details: [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tf
 dry-run findings. The tray and unused CTO operating commands were removed
 ([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)). Automatic collection stays off unless `TFX_CTO_AUTO_COLLECT=1` is set ([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)).
 
-**Remote hosts.** `/tfx-remote` and `--remote <host>` read hosts from `~/.config/triflux/hosts.json`
+**Remote hosts.** `/tfx-remote` reads hosts from `~/.config/triflux/hosts.json`
 (Windows: `%APPDATA%\triflux\hosts.json`). Run `/tfx-remote setup` to add one, then
 `/tfx-remote spawn <host> "run a security review"`.
 
@@ -185,12 +183,11 @@ graph TD
     User --> CLI[tfx CLI]
     Skills --> Route[tfx-route.sh]
     Skills --> Live[tfx-live]
-    CLI --> Team["tfx multi · tfx swarm"]
+    CLI --> Team["tfx multi"]
     Route --> Codex[Codex CLI]
     Route --> Agy[Antigravity agy]
     Route --> Claude[Claude Code]
     Team --> Route
-    Team --> WT[(git worktrees)]
     Live -->|UDS or tmux| Sessions[Claude / Codex TUI sessions]
     Route --> Hub["Hub 127.0.0.1:27888"]
     Team --> Hub

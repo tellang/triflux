@@ -31,13 +31,12 @@ export function <name>(<args>)
 <테스트 명령어 2>
 ```
 
-## Codex 실행 제약 (자동 삽입됨)
-<!-- codex-swarm 스킬이 이 섹션을 자동으로 프롬프트에 주입합니다.
-     PRD 작성자는 이 섹션을 수정하지 마세요. -->
-> Codex/swarm 실행 규칙(프로필·exec 제약·sandbox)의 정본은 [.claude/rules/tfx-psmux.md](../../.claude/rules/tfx-psmux.md)·[tfx-escalation-chain.md](../../.claude/rules/tfx-escalation-chain.md) 및 `hub/team/build-worker-prompt.mjs`. 아래는 요지.
-- exec 호출 방식(프롬프트 전달·approval/sandbox 플래그)은 codex 버전에 따라 달라질 수 있으므로 단정하지 말고 위 SSOT와 `hub/team/build-worker-prompt.mjs`를 따른다.
+## 실행 제약
+
+코드 변경을 병렬로 진행하면 작업별 worktree와 세션을 나누고, 각 세션의 CLI 실행은 `tfx-auto`를 거친다. Claude Agent를 사용하면 `isolation: worktree`를 지정할 수 있다. Codex 프로필과 실행 규칙은 [tfx-execution-skill-map.md](../../.claude/rules/tfx-execution-skill-map.md) 및 [tfx-psmux.md](../../.claude/rules/tfx-psmux.md)를 따른다.
+
 - 모델·effort·sandbox·프로필은 CLI 하드코딩 대신 프로필/`config.toml`을 SSOT로 사용하고, `config.toml`에 이미 있는 값은 CLI 플래그로 중복 지정하지 않는다.
-- 테스트 병렬 실행 시 `.test-lock/pid.lock` 충돌 가능 — 순차 실행 권장.
+- 테스트 병렬 실행 시 `.test-lock/pid.lock` 충돌 가능. 순차 실행을 권장한다.
 
 ## 완료 조건 (필수)
 작업이 끝나면 반드시:
@@ -49,11 +48,3 @@ export function <name>(<args>)
    git commit -m "<type>: <설명>"
    ```
    커밋하지 않으면 작업이 유실됩니다. codex는 명시적 지시 없이 자동 커밋하지 않습니다.
-
-## Completion Protocol (자동 삽입됨)
-<!-- swarm hypervisor 가 이 섹션을 worker prompt 에 자동 주입합니다.
-     PRD 작성자는 이 섹션을 수정하지 마세요.
-     상세: hub/team/build-worker-prompt.mjs / sentinel-capture.mjs (#125). -->
-- worker 는 stdout 의 마지막에 `<<<TFX_COMPLETION_BEGIN>>>` / `<<<TFX_COMPLETION_END>>>` sentinel 사이에 단일 JSON object payload 를 출력해야 한다.
-- 미준수 시 conductor 는 16 KiB stdout tail 의 brace-scan fallback 으로 추출을 시도하지만, payload 가 16 KiB 를 초과하면 silent partial extraction 위험이 있다.
-- BEGIN 만 출력하고 END 누락 시 conductor 가 truncation 으로 명확히 reject (F7).

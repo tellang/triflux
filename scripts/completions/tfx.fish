@@ -1,10 +1,9 @@
 # Installation: ~/.config/fish/completions/에 복사
 # e.g., cp /path/to/tfx.fish ~/.config/fish/completions/tfx.fish
 
-set -l commands setup doctor mcp update list ls handoff schema hub multi swarm synapse review why codex-team notion-read nr monitor version auto help
+set -l commands setup doctor mcp update list ls handoff schema hub multi synapse review why codex-team notion-read nr monitor version auto help
 set -l hub_cmds start stop status ensure help
 set -l multi_cmds status stop kill attach list help
-set -l swarm_cmds run preflight plan list status help
 
 complete -c tfx -f
 
@@ -17,8 +16,7 @@ complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "handoff" -d "
 complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "schema" -d "Print CLI and Hub schema"
 complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "hub" -d "Hub process management"
 complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "multi" -d "Multi-CLI team mode"
-complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "swarm" -d "PRD worktree swarm"
-complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "synapse" -d "Show swarm registry"
+complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "synapse" -d "Show session registry"
 complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "review" -d "Codex diff review"
 complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "why" -d "Show X-Intent trailer"
 complete -c tfx -n "not __fish_seen_subcommand_from $commands" -a "codex-team" -d "Codex team mode"
@@ -41,12 +39,11 @@ complete -c tfx -n "__fish_seen_subcommand_from setup" -l dry-run -d "Preview se
 complete -c tfx -n "__fish_seen_subcommand_from setup" -l enable-hub-autostart -d "Register hub autostart"
 complete -c tfx -n "__fish_seen_subcommand_from auto" -l cli -d "Force lane: auto/codex/antigravity/claude"
 complete -c tfx -n "__fish_seen_subcommand_from auto" -l mode -d "Mode: quick/deep/consensus"
-complete -c tfx -n "__fish_seen_subcommand_from auto" -l parallel -d "Parallelism: 1/N/swarm"
+complete -c tfx -n "__fish_seen_subcommand_from auto" -l parallel -d "Parallelism: 1/N"
 complete -c tfx -n "__fish_seen_subcommand_from auto" -l json -d "JSON output"
 
 complete -c tfx -n "__fish_seen_subcommand_from hub; and not __fish_seen_subcommand_from $hub_cmds" -a "$hub_cmds"
 complete -c tfx -n "__fish_seen_subcommand_from multi; and not __fish_seen_subcommand_from $multi_cmds" -a "$multi_cmds"
-complete -c tfx -n "__fish_seen_subcommand_from swarm; and not __fish_seen_subcommand_from $swarm_cmds" -a "$swarm_cmds"
 
 complete -c tfx -n "__fish_seen_subcommand_from review" -l base -d "Base ref"
 complete -c tfx -n "__fish_seen_subcommand_from review" -l timeout -d "Timeout seconds"

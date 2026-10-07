@@ -73,30 +73,6 @@ function redactedCwdFields(cwd) {
   };
 }
 
-function normalizeActiveShard(shard) {
-  return {
-    shard_name:
-      typeof shard?.shard_name === "string"
-        ? shard.shard_name
-        : typeof shard?.shardName === "string"
-          ? shard.shardName
-          : typeof shard?.name === "string"
-            ? shard.name
-            : typeof shard?.id === "string"
-              ? shard.id
-              : null,
-    phase:
-      typeof shard?.phase === "string"
-        ? shard.phase
-        : typeof shard?.status === "string"
-          ? shard.status
-          : "active",
-    members: Array.isArray(shard?.members)
-      ? shard.members.map((member) => String(member))
-      : [],
-  };
-}
-
 function normalizeSynapseOverlay(value) {
   const sessions = Array.isArray(value)
     ? value
@@ -105,11 +81,6 @@ function normalizeSynapseOverlay(value) {
       : Array.isArray(value?.live_sessions)
         ? value.live_sessions
         : [];
-  const activeShards = Array.isArray(value?.active_shards)
-    ? value.active_shards
-    : Array.isArray(value?.activeShards)
-      ? value.activeShards
-      : [];
 
   return {
     live_sessions: sessions
@@ -119,7 +90,6 @@ function normalizeSynapseOverlay(value) {
         ...redactedCwdFields(session?.cwd),
       }))
       .filter((session) => session.sessionId),
-    active_shards: activeShards.map(normalizeActiveShard),
   };
 }
 
@@ -150,26 +120,8 @@ async function readSynapseOverlay(opts) {
     );
     return normalizeSynapseOverlay(raw);
   } catch {
-    return { live_sessions: [], active_shards: [] };
+    return { live_sessions: [] };
   }
-}
-
-// active_shards 의 source 는 live_sessions 와 다르다: live_sessions 는 synapse
-// overlay(실시간 세션)에서, active_shards 는 collect 가 .triflux/swarm-locks.json 을
-// snapshot 한 current.json(sources.tfx_swarm.detail.shards)에서 온다. synapse
-// overlay 가 shard 를 채우는 경로가 생기면 그쪽을 우선하고, 없으면 snapshot 으로
-// fallback 한다(현재 overlay 의 active_shards 는 항상 비어 snapshot 을 쓴다).
-function deriveActiveShards(current, overlay) {
-  // overlay(synapse)가 채운 shard 중 식별 가능한 것만 authoritative 로 본다.
-  // normalizeSynapseOverlay 가 shard_name 을 null 로 정규화한 무효 행이 snapshot
-  // fallback 을 가로채지 않도록 먼저 거른다.
-  const overlayShards = Array.isArray(overlay?.active_shards)
-    ? overlay.active_shards.filter((shard) => shard?.shard_name)
-    : [];
-  if (overlayShards.length > 0) return overlayShards;
-  const shards = current?.sources?.tfx_swarm?.detail?.shards;
-  if (!Array.isArray(shards)) return [];
-  return shards.map(normalizeActiveShard).filter((shard) => shard.shard_name);
 }
 
 function deriveLiveSessionGroups(liveSessions) {
@@ -202,7 +154,7 @@ function projectStatus(current, overlay) {
     ledger_tail: Array.isArray(current?.ledger_tail) ? current.ledger_tail : [],
     live_sessions: liveSessions,
     live_session_groups: deriveLiveSessionGroups(liveSessions),
-    active_shards: deriveActiveShards(current, overlay),
+    active_shards: [],
     hygiene: compactHygieneCounts(projectCtoHygiene({ current, overlay })),
   };
 }

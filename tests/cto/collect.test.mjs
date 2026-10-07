@@ -128,10 +128,6 @@ describe("runCollect", () => {
           { id: "G2", title: "Wire status", status: "pending" },
         ],
       });
-      mkdirSync(join(rootDir, ".triflux"), { recursive: true });
-      writeJson(join(rootDir, ".triflux", "swarm-locks.json"), {
-        shards: [{ id: "S1", status: "running" }],
-      });
 
       const current = await runCollect(["--json"], {
         lakeRoot,
@@ -145,7 +141,7 @@ describe("runCollect", () => {
       assert.equal(current.repo.branch, "main");
       assert.equal(current.repo.dirty, true);
       assert.equal(current.sources.ultragoal_omx.available, true);
-      assert.equal(current.sources.tfx_swarm.available, true);
+      assert.equal(Object.hasOwn(current.sources, "tfx_swarm"), false);
 
       const currentJson = readJson(join(lakeRoot, "current.json"));
       assert.deepEqual(currentJson, current);

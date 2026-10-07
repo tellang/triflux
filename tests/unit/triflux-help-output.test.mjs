@@ -18,20 +18,6 @@ function stripAnsi(str) {
 }
 
 describe("tfx --help 출력", () => {
-  it("Commands 섹션에 tfx swarm 포함", () => {
-    const raw = execSync(`node "${binPath}" --help`, { encoding: "utf8" });
-    const out = stripAnsi(raw);
-    assert.match(out, /tfx swarm/);
-  });
-
-  it("tfx swarm --help 가 sub-help 출력", () => {
-    const raw = execSync(`node "${binPath}" swarm --help`, {
-      encoding: "utf8",
-    });
-    const out = stripAnsi(raw);
-    assert.match(out, /PRD|shard|worktree/i);
-  });
-
   it("#109: Commands 섹션에 tfx synapse 포함", () => {
     const raw = execSync(`node "${binPath}" --help`, { encoding: "utf8" });
     const out = stripAnsi(raw);
@@ -42,23 +28,6 @@ describe("tfx --help 출력", () => {
     const raw = execSync(`node "${binPath}" --help`, { encoding: "utf8" });
     const out = stripAnsi(raw);
     assert.match(out, /tfx why\b/);
-  });
-
-  it("#109: tfx swarm --help 에 run 서브커맨드 노출", () => {
-    const raw = execSync(`node "${binPath}" swarm --help`, {
-      encoding: "utf8",
-    });
-    const out = stripAnsi(raw);
-    assert.match(out, /tfx swarm run/);
-  });
-
-  it("#188: tfx swarm --help 에 preflight 서브커맨드 노출", () => {
-    const raw = execSync(`node "${binPath}" swarm --help`, {
-      encoding: "utf8",
-    });
-    const out = stripAnsi(raw);
-    assert.match(out, /tfx swarm preflight/);
-    assert.match(out, /go\/no-go|preflight/i);
   });
 
   it("stale: tfx update --help 는 업데이트를 실행하지 않고 도움말만 출력", () => {

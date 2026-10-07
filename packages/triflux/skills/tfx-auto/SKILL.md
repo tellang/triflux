@@ -5,7 +5,7 @@ description: >
   Codex 우선으로 dispatch 하고, 명시 플래그로 mode/parallel/consensus 등 동작을 오버라이드한다.
   '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은
   구현/수정 요청에 사용. 플래그 상세는 argument-hint, 라우팅 정책은 .claude/rules/tfx-routing.md 참조.
-argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus|live] [--rounds <N>] [--risk-tier auto|low|medium|high] [--shape consensus|debate|panel] [--cli-set triad|no-antigravity|custom] [--parallel 1|N|swarm] [--retry 0|1|ralph] [--isolation none|worktree] [--remote <host>|none] [--skill <name>]"
+argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus|live] [--rounds <N>] [--risk-tier auto|low|medium|high] [--shape consensus|debate|panel] [--cli-set triad|no-antigravity|custom] [--parallel 1|N] [--retry 0|1|ralph] [--skill <name>]"
 ---
 
 # tfx-auto — 통합 CLI 오케스트레이터
@@ -34,8 +34,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 
 판단 기준 (우선순위 순):
 
-0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--risk-tier`/`--shape`/`--cli-set`/`--parallel`/`--retry`/`--isolation`/`--remote` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
-   - `--parallel swarm` → tfx-swarm 엔진 위임 (PRD 필요)
+0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--risk-tier`/`--shape`/`--cli-set`/`--parallel`/`--retry` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
    - `--parallel N` → tfx-multi 엔진 위임 (`auto`: 리드 tmux면 interactive pane, 없으면 in-process)
    - `--cli codex|antigravity` → `TFX_CLI_MODE` 설정 + 단일 실행
    - `--mode deep` → `-t/--thorough` 동일 동작 (pipeline init)
@@ -46,19 +45,19 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
    - `--retry ralph` → stderr 경고 후 bounded 3회 degrade (Phase 2 미구현)
 
 1. **사용자 명시 키워드** (플래그 없을 때):
-   - "swarm", "PRD 돌려", "격리해서", "충돌 없이 돌려" → `--parallel swarm --mode consensus --isolation worktree`
-   - "병렬", "동시에", "multi", "협업"(단순 동시 작업 의미) → `--parallel N --mode deep` — 여기서 미리 swarm으로 단정하지 않는다. 실제 코드 변경이 여러 파일에 걸치면 "멀티 태스크 라우팅"의 자동 분류가 swarm으로 승격시킨다 ("병렬" 한 단어만으로 곧장 worktree 격리+3-CLI 합의까지 가는 건 과함)
+   - "격리해서", "충돌 없이 돌려" → 작업별 worktree와 세션을 나누고 각 세션에서 `tfx-auto` 실행. Claude Agent는 `isolation: worktree`를 쓸 수 있다
+   - "병렬", "동시에", "multi", "협업"(단순 동시 작업 의미) → `--parallel N --mode deep` (코드 변경이 없거나 작업별 worktree가 분리된 경우)
    - "팀"은 모호하다: 서로 메시지를 주고받는 영속 협업을 원하면 정답은 OMC 네이티브 `/team`이고(tfx-auto 관할 밖), 그냥 여러 작업을 동시에 처리해달라는 뜻이면 바로 위 `--parallel N` 행을 따른다. "팀"만 보고 바로 `--parallel N`으로 단정하지 말고 어느 쪽인지 애매하면 되묻는다
    - "꼼꼼히", "제대로", "deep" → `--mode deep`
    - "끝까지", "멈추지마", "ralph" → `--retry ralph`
    - 명시 `tfx-analysis` / "3관점 분석" → `--mode consensus --shape panel` (아래 `shape=panel` 의 분석 roster)
    - 명시 `tfx-prune` / "3자 합의 정리" → `--mode consensus` cleanup. 무수식 slop/deslop 은 host `ai-slop-cleaner` 소관이다
    - "codex로", "antigravity로" → `--cli codex` 또는 `--cli antigravity`
-   - "원격으로", "다른 기기에서", "리모트로 돌려" → `--remote <host>` (`--parallel swarm` 자동 동반. host 미지정 시 `hosts.json` 목록에서 질의)
+   - "원격으로", "다른 기기에서", "리모트로 돌려" → `tfx-remote`로 원격 세션 관리. 원격에서 코드 변경 병렬 실행 시 세션별 worktree 분리
    - "논쟁시켜", "서로 반박하게 해", "계속 대화하면서 풀게", "왕복으로 주고받게" → `--mode live` (`tfx-live peer` 고정). "협업"/"팀"과 겹쳐 보여도 이 쪽은 "논쟁/반박/대화를 계속 이어간다"는 뉘앙스가 명시적으로 있을 때만 해당
 
 2. **PRD 인자 분석**:
-   - PRD 경로 2개 이상 → `--parallel swarm --mode consensus --isolation worktree`
+   - PRD 경로 2개 이상 → 작업별 worktree와 세션을 나누고 각 세션에서 `tfx-auto` 실행
    - PRD 1개 + XL 규모 → `--mode deep --parallel 1`
 
 3. **선호도 가중치** (tiebreaker):
@@ -72,7 +71,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 
 라우팅 결정 후 1줄 표시:
 ```
-[tfx] 규모: {S/M/L/XL}, 모드: {mode} ({profile}) — 오버라이드: /tfx-multi, /tfx-swarm 등
+[tfx] 규모: {S/M/L/XL}, 모드: {mode} ({profile}) : 오버라이드: /tfx-multi 등
 ```
 
 > **MANDATORY RULES**
@@ -101,7 +100,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 
 ## 플래그 오버라이드 (명시 제어, Phase 2 v10.9.33+)
 
-ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부 추론을 건너뛰고 값대로 즉시 dispatch 한다. legacy tfx-codex/antigravity/multi/swarm 등을 이 플래그로 표현할 수 있게 되어, 기존 11개 실행 스킬의 front door 역할을 tfx-auto 가 맡는다.
+ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부 추론을 건너뛰고 값대로 즉시 dispatch 한다. legacy tfx-codex/antigravity/multi 등을 이 플래그로 표현할 수 있게 되어, 기존 11개 실행 스킬의 front door 역할을 tfx-auto 가 맡는다.
 
 ### 플래그 표
 
@@ -132,16 +131,11 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--analysis-prompt-file` | `<path>` | consensus family 공통 분석 프롬프트 주입 | consensus normalizer |
 | `--parallel` | `1` (기본) | 단일 워커 | tfx-route.sh |
 | `--parallel` | `N` | 로컬 병렬 (mode 생략=`auto`; 리드 tmux면 interactive pane, 없으면 in-process) | `tfx multi` |
-| `--parallel` | `swarm` | worktree 격리 + 다기기 | `tfx swarm` (PRD 필요) |
 | `--no-native-bridge-ui` | true | 명시적 headless worker의 Claude agents UI 노출을 비활성화 | `tfx multi` |
 | `--retry` | `0` | 자동 재시도 없음 | — |
 | `--retry` | `1` (기본) | bounded verify → fix loop 3회 | — |
 | `--retry` | `ralph` | **Phase 3** — true ralph state machine (unlimited, stuck detector 3회 중단) | retry-state-machine.mjs |
 | `--retry` | `auto-escalate` | **Phase 3** — 프로필 기반 체인 승격 | retry-state-machine.mjs |
-| `--isolation` | `none` (기본) | cwd 공유 | — |
-| `--isolation` | `worktree` | shard별 `.codex-swarm/wt-*/` 격리 | `--parallel swarm` 자동 강제 |
-| `--remote` | `none` (기본) | 로컬만 | — |
-| `--remote` | `<host>` | hosts.json 의 host 로 shard 분배 | `--parallel swarm` 전용 |
 | `--lead` | `claude` (기본) | 분류·메타판단을 Claude 가 담당 | tfx-auto 내장 |
 | `--lead` | `codex` | 분류·메타판단을 Codex 에 위임 (tfx-auto-codex 의미 일부 흡수) | tfx-route.sh |
 | `--no-claude-native` | false (기본) | Claude native sub-agent 경로 유지 | — |
@@ -174,9 +168,6 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 ### 플래그 검증
 
 - `--mode ...` + `--risk-tier ...` 동시 지정 → mode 우선. risk-tier 는 informational 로그만 남기고 실행 결정에는 사용하지 않음
-- `--parallel swarm` + PRD 없음 → PRD 자동 생성 또는 사용자에게 경로 질의
-- `--parallel 1` + `--isolation worktree` → warning, isolation=none 으로 강제
-- `--remote <host>` + `--parallel != swarm` → warning, remote 무시
 - `--shape` 미지정 + `--mode consensus` → `shape=consensus`
 - `--shape` 지정 + `--mode != consensus` → warning 또는 error. shape 는 consensus family 에서만 유효
 - `--cli-set custom` + 기존 3 CLI 외 participant 지정 → 즉시 error. silent fallback 금지
@@ -184,7 +175,7 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 - `--retry auto-escalate` → CLI 승격 체인 (Phase 3)
 - `--max-iterations N` (N>0) → ralph/auto-escalate 에 상한 부여
 - `--skill <name>` → `TFX_INJECT_SKILL=<name>` 로 tfx-route.sh 에 전달. 스킬 파일 부재 시 warning 후 주입 생략 (fail-open, 작업은 계속)
-- `--mode live` + `--parallel`/`--isolation`/`--retry ralph`/`--remote` 동시 지정 → warning 후 무시. 라이브 세션은 배치 병렬·worktree 격리·재시도 상태머신 모델과 호환되지 않는다
+- `--mode live` + `--parallel`/`--retry ralph` 동시 지정 → warning 후 무시. 라이브 세션은 배치 병렬·재시도 상태머신 모델과 호환되지 않는다
 - `--rounds` 지정 + `--mode != live` → warning 후 무시
 
 ### 스킬 주입 (`--skill <name>`)
@@ -257,7 +248,6 @@ agy 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율
 /tfx-auto "설정/빌드 손봄" --risk-tier medium  # = quick + lint/test verify
 /tfx-auto "hub 라우팅 개편" --risk-tier high   # = deep + full verify/fix loop
 /tfx-auto "병렬" --parallel N --mode deep      # = legacy tfx-multi 기본값
-/tfx-auto "PRD 실행" --parallel swarm          # = legacy tfx-swarm
 /tfx-auto "끝까지 고쳐" --retry ralph           # = 제거된 tfx-ralph
 /tfx-auto "src/auth 구조 분석" --mode consensus --shape panel   # = 제거된 tfx-analysis
 /tfx-auto "src/ 슬롭 3자 합의 정리" --mode consensus             # = 제거된 tfx-prune
@@ -646,7 +636,7 @@ shape 별 orchestration 정책:
 
 ### Live 위임 계약 (`--mode live`)
 
-`--mode live`는 Codex 분류/Opus 분해 트리아지를 건너뛰고 `tfx-live peer`(Claude↔Codex 실시간 세션 릴레이)로 직접 위임한다. **독립 엔진 위임**이며 `tfx-live`를 병합·재구현하지 않는다 — `--parallel swarm`이 `tfx-swarm`을, `--parallel N`이 `tfx-multi`를 위임하는 것과 동일한 패턴이다.
+`--mode live`는 Codex 분류/Opus 분해 트리아지를 건너뛰고 `tfx-live peer`(Claude↔Codex 실시간 세션 릴레이)로 직접 위임한다. **독립 엔진 위임**이며 `tfx-live`를 병합·재구현하지 않는다. `--parallel N`은 `tfx-multi`를 위임한다.
 
 v1은 `peer` 단일 경로만 지원한다. `--live-shape`, `--live-mode`, `tfx-auto`의 `orchestrate` 위임은 v2 예정이며 현재 파서·실행 계약에는 없다.
 
