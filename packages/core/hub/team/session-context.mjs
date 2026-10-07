@@ -96,7 +96,7 @@ export function contextGuard(
     : {};
 }
 
-async function findCodexRollout(threadId) {
+export async function findCodexRollout(threadId) {
   if (!/^[a-zA-Z0-9-]+$/u.test(threadId || "")) return null;
   const root = path.join(
     process.env.CODEX_HOME || path.join(homedir(), ".codex"),
