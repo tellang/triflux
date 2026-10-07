@@ -1,3 +1,12 @@
+---
+paths:
+  - "cto/**/*"
+  - "hub/**/*"
+  - "hooks/**/*"
+  - "tests/cto/**/*"
+  - "docs/adr/0010-*.md"
+  - "docs/adr/0024-*.md"
+---
 # CTO lake ↔ Hub role 경계 규칙
 
 > 근거(why): [ADR-0010: CTO lake와 Hub role 경계](../../docs/adr/0010-cto-lake-hub-role-boundary.md), [ADR-0024: CTO 조회 축소](../../docs/adr/0024-cto-explicit-queries-only.md). 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
@@ -74,4 +83,4 @@ UI/문서에서 "stale"을 표기할 때는 어느 평면인지 라벨을 붙인
 | CTO 조회 축소 | `docs/adr/0024-cto-explicit-queries-only.md` |
 | role 스코프(전역 vs per-project) | 이슈 #447 (의도적 DEFER — ADR 하위 결정으로 별도 확정) |
 | 미러 범위(cto/ 포함) | `.claude/rules/tfx-mirror-policy.md` |
-| resident CTO PRD | `.triflux/plans/resident-cto-manager.md` (precursor 브랜치) |
+| resident CTO PRD | [보관한 resident CTO 계획](../../docs/_archive/triflux/plans/resident-cto-manager.md) |

@@ -1,7 +1,7 @@
 ---
 id: 0015
 title: Codex 레인은 exec 전송과 최종 메시지 파일을 결과 계약으로 삼는다
-status: proposed
+status: accepted
 date: 2026-09-21
 deciders: [tellang]
 supersedes: []

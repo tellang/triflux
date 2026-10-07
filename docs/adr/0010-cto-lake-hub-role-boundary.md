@@ -1,7 +1,7 @@
 ---
 id: 0010
 title: CTO lake ↔ Hub role 경계 — liveness/history 평면 분리
-status: proposed
+status: accepted
 date: 2026-07-07
 deciders: [tellang]
 supersedes: []

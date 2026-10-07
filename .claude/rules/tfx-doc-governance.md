@@ -1,3 +1,10 @@
+---
+paths:
+  - "docs/**/*"
+  - ".triflux/plans/**/*"
+  - ".claude/rules/**/*"
+  - ".document-harness.toml"
+---
 # 문서 거버넌스 — rules ↔ docs 경계
 
 정책은 어디, 결정 근거는 어디. 실행 규칙과 결정 이력이 섞이지 않도록 경계를 고정한다.

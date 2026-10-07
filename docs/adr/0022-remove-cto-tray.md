@@ -1,7 +1,7 @@
 ---
 id: 0022
 title: CTO 트레이를 패키지에서 제거한다
-status: proposed
+status: accepted
 date: 2026-10-04
 deciders: [tellang]
 supersedes: []

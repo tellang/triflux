@@ -1,3 +1,17 @@
+---
+paths:
+  - "packages/**/*"
+  - "hub/**/*"
+  - "scripts/**/*"
+  - "bin/**/*"
+  - "hooks/**/*"
+  - "hud/**/*"
+  - "cto/**/*"
+  - "config/**/*"
+  - "skills/**/*"
+  - "adapters/**/*"
+  - "package.json"
+---
 # packages/ mirror 정책 — 3-layer single source
 
 ## 멘탈 모델

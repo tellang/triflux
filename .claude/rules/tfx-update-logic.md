@@ -1,3 +1,12 @@
+---
+paths:
+  - "scripts/*update*"
+  - "scripts/setup.mjs"
+  - "scripts/sync-hub-mcp-settings.mjs"
+  - "scripts/hub-ensure.mjs"
+  - "bin/triflux.mjs"
+  - "skills/tfx-setup/**/*"
+---
 # 업데이트 로직
 
 | 도구 | 감지 | 갱신 방법 |

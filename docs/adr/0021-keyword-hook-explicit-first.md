@@ -1,7 +1,7 @@
 ---
 id: 0021
 title: 키워드 훅을 명시 호출 중심으로 줄이고 자연어는 제안으로 낮춘다
-status: proposed
+status: accepted
 date: 2026-10-04
 deciders: [tellang]
 supersedes: []
