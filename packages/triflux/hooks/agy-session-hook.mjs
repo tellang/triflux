@@ -2,22 +2,10 @@
 
 import { argv, exit, stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
-import { drainPendingSynapse as defaultDrainPendingSynapse } from "../hub/team/synapse-http.mjs";
 import {
-  heartbeatInteractiveSession as defaultHeartbeatInteractiveSession,
-  registerInteractiveSession as defaultRegisterInteractiveSession,
+  emitParticipantSessionStarted,
+  shouldSkipInteractiveRegistration,
 } from "../scripts/lib/session-presence.mjs";
-
-// hub-ensure is loaded lazily so the byte-identical packages/core mirror of this
-// file loads cleanly. packages/core mirrors scripts/lib only (not scripts/*), so a
-// static `../scripts/hub-ensure.mjs` import would make the core copy throw
-// ERR_MODULE_NOT_FOUND at load time. Mirrors codex-session-hook.mjs's pattern.
-async function defaultHubEnsureRun(stdinData) {
-  const { run } = await import(
-    new URL("../scripts/hub-ensure.mjs", import.meta.url).href
-  );
-  return run(stdinData);
-}
 
 function parsePayload(stdinData) {
   try {
@@ -76,8 +64,7 @@ export function normalizeMode(argvMode, payload) {
   if (Number.isFinite(invocationNum)) {
     return invocationNum <= 1 ? "register" : "heartbeat";
   }
-  // Unknown invocation index: register is idempotent and also ensures the hub,
-  // so it is the safe default for a first-contact payload.
+  // 첫 호출 정보가 없으면 시작 기록을 남긴다.
   return "register";
 }
 
@@ -108,23 +95,6 @@ async function runHookSideEffectsWithStdoutSuppressed(fn) {
   }
 }
 
-/**
- * Execute the observational Antigravity session hook.
- *
- * The hook always returns/writes an empty JSON object so hook stdout remains
- * JSON-only and hook failures never block the user session.
- *
- * @param {string} stdinData
- * @param {{
- *   argvMode?: string,
- *   writeStdout?: boolean,
- *   hubEnsureRun?: (stdinData: string) => Promise<unknown> | unknown,
- *   registerInteractiveSession?: (stdinData: string) => Promise<unknown> | unknown,
- *   heartbeatInteractiveSession?: (stdinData: string) => Promise<unknown> | unknown,
- *   drainPendingSynapse?: (timeoutMs?: number) => Promise<unknown> | unknown,
- * }} [opts]
- * @returns {Promise<string>}
- */
 export async function runAgySessionHook(stdinData, opts = {}) {
   const output = "{}\n";
   const parsed = parsePayload(stdinData);
@@ -142,37 +112,22 @@ export async function runAgySessionHook(stdinData, opts = {}) {
   }
 
   const mode = normalizeMode(opts.argvMode ?? argv[2], parsed.payload);
-  const hubEnsureRun = opts.hubEnsureRun || defaultHubEnsureRun;
-  const registerInteractiveSession =
-    opts.registerInteractiveSession || defaultRegisterInteractiveSession;
-  const heartbeatInteractiveSession =
-    opts.heartbeatInteractiveSession || defaultHeartbeatInteractiveSession;
-  const drainPendingSynapse =
-    opts.drainPendingSynapse || defaultDrainPendingSynapse;
+  const emitSessionStarted =
+    opts.emitSessionStarted || emitParticipantSessionStarted;
 
   try {
     await runHookSideEffectsWithStdoutSuppressed(async () => {
-      if (mode === "register") {
+      if (
+        mode === "register" &&
+        !shouldSkipInteractiveRegistration(JSON.parse(sessionPayload), opts)
+      ) {
         try {
-          await hubEnsureRun(sessionPayload);
-        } catch {}
-        try {
-          await Promise.resolve(registerInteractiveSession(sessionPayload));
-        } catch {}
-        try {
-          await drainPendingSynapse(1000);
-        } catch {}
-      } else if (mode === "heartbeat") {
-        try {
-          heartbeatInteractiveSession(sessionPayload);
-        } catch {}
-        try {
-          await drainPendingSynapse(500);
+          await emitSessionStarted(sessionPayload);
         } catch {}
       }
     });
   } catch {
-    // agy session hooks are observational and must never block the session.
+    // 로컬 기록 실패가 세션을 막지 않게 한다.
   }
 
   if (opts.writeStdout !== false) {

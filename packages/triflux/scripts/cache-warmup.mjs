@@ -12,11 +12,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  checkCliSync,
-  checkHub,
-  detectCodexAuthState,
-} from "./lib/env-probe.mjs";
+import { checkCliSync, detectCodexAuthState } from "./lib/env-probe.mjs";
 import {
   MCP_SERVER_DOMAIN_TAGS,
   SEARCH_SERVER_ORDER,
@@ -230,19 +226,9 @@ export function probeTierEnvironment(options = {}) {
     preflight?.codex ||
     checkCliSync("codex", { whichCommandFn: options.whichCommandFn });
   const antigravityCheck = preflight?.antigravity || null;
-  const hubCheck =
-    preflight?.hub ||
-    checkHub({
-      pkgRoot: options.pkgRoot,
-      restart: options.hubRestart === true,
-      requestTimeoutMs: options.hubTimeoutMs ?? 1000,
-      pollAttempts: options.hubRestart === true ? 8 : 0,
-      execSyncFn,
-    });
   const checks = {
     multiplexer: false,
     psmux: false,
-    hub: !!hubCheck?.ok,
     codex: !!codexCheck?.ok,
     antigravity: !!antigravityCheck?.ok,
     wt: false,
@@ -273,8 +259,7 @@ export function probeTierEnvironment(options = {}) {
 
   let tier = "minimal";
   if (checks.codex || checks.antigravity) tier = "standard";
-  if (checks.multiplexer && checks.hub && (checks.codex || checks.antigravity))
-    tier = "full";
+  if (checks.multiplexer && (checks.codex || checks.antigravity)) tier = "full";
 
   const agents = ["claude"];
   if (checks.codex) agents.push("codex");
@@ -292,7 +277,6 @@ export function probeTierEnvironment(options = {}) {
     source: {
       preflight: !!preflight,
       home_dir: homeDir,
-      hub_state: hubCheck?.state || "unknown",
     },
   };
 }

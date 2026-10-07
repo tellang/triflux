@@ -5,15 +5,8 @@
 // Named Pipe/Unix Socket 제어 채널을 우선 사용하고,
 // 연결이 없을 때만 HTTP /bridge/* 엔드포인트로 내려간다.
 
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -515,56 +508,6 @@ function buildPublishBody(from, to, type, payload) {
   };
 }
 
-// Hub 자동 재시작 (Pipe+HTTP 모두 실패 시 1회 시도, 최대 4초 대기)
-async function tryRestartHub() {
-  const serverPath = join(PROJECT_ROOT, "hub", "server.mjs");
-  if (!existsSync(serverPath)) return false;
-
-  if (existsSync(HUB_PID_FILE)) {
-    try {
-      const info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-      if (info.pid) {
-        try {
-          process.kill(info.pid, 0);
-          return false;
-        } catch (e) {
-          // still alive
-          if (e.code === "EPERM") return false;
-        } // alive, no permission
-      }
-    } catch {} // corrupt PID file, proceed with restart
-  }
-
-  try {
-    const logDir = join(process.cwd(), ".tfx", "logs");
-    if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
-    const logFile = join(logDir, "hub-restart.log");
-    const logFd = openSync(logFile, "a");
-    const child = spawn(process.execPath, [serverPath], {
-      detached: true,
-      stdio: ["ignore", "ignore", logFd],
-      windowsHide: true,
-    });
-    child.unref();
-  } catch {
-    return false;
-  }
-
-  for (let i = 0; i < 8; i++) {
-    await new Promise((r) => setTimeout(r, 500));
-    try {
-      const res = await fetch(`${getHubUrl()}/status`, {
-        signal: AbortSignal.timeout(1000),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.hub?.state === "healthy") return true;
-      }
-    } catch {}
-  }
-  return false;
-}
-
 async function requestHub(operation, body, timeoutMs = 3000, fallback = null) {
   const viaPipe =
     operation.transport === "command"
@@ -583,27 +526,6 @@ async function requestHub(operation, body, timeoutMs = 3000, fallback = null) {
     : null;
   if (viaHttp) {
     return { transport: "http", result: viaHttp };
-  }
-
-  // Hub 재시작 시도 → Pipe/HTTP 재시도
-  if (await tryRestartHub()) {
-    const retryPipe =
-      operation.transport === "command"
-        ? await pipeCommand(operation.action, body, timeoutMs)
-        : await pipeQuery(operation.action, body, timeoutMs);
-    if (retryPipe) {
-      return { transport: "pipe", result: retryPipe };
-    }
-    const retryHttp = operation.httpPath
-      ? await requestJson(operation.httpPath, {
-          method: operation.httpMethod || "POST",
-          body: operation.httpMethod === "GET" ? undefined : body,
-          timeoutMs: Math.max(timeoutMs, 5000),
-        })
-      : null;
-    if (retryHttp) {
-      return { transport: "http", result: retryHttp };
-    }
   }
 
   if (!fallback) return null;

@@ -44,13 +44,12 @@ export function decomposeTask(taskDescription, agentCount) {
  * @param {string} taskDescription
  * @param {object} config
  * @param {string} config.agentId
- * @param {string} config.hubUrl
  * @param {string} config.teammateMode
  * @param {Array<{agentId:string, cli:string, subtask:string}>} config.workers
  * @returns {string}
  */
 export function buildLeadPrompt(taskDescription, config) {
-  const { agentId, repoRoot, teammateMode = "tmux", workers = [] } = config;
+  const { agentId, teammateMode = "tmux", workers = [] } = config;
 
   const roster =
     workers
@@ -58,11 +57,6 @@ export function buildLeadPrompt(taskDescription, config) {
       .join("\n") || "- (워커 없음)";
 
   const workerIds = workers.map((w) => w.agentId).join(", ");
-
-  // TODO: Require repoRoot once all callers pass absolute repository roots.
-  const bridgePath = repoRoot
-    ? `node ${String(repoRoot).replace(/\/+$/, "")}/hub/bridge.mjs`
-    : "node hub/bridge.mjs";
 
   return `리드 에이전트: ${agentId}
 
@@ -74,12 +68,7 @@ ${roster}
 
 규칙:
 - 가능한 짧고 핵심만 지시/요약(토큰 절약)
-- 워커 제어:
-  ${bridgePath} result --agent ${agentId} --topic lead.control
-- 워커 결과 수집:
-  ${bridgePath} context --agent ${agentId} --max 20
-- 최종 결과는 topic="task.result"를 모아 통합
-- 모든 워커의 task.result 수신 후 결과를 통합하고 종료하라. 워커가 무응답이면 상태를 보고하고 중단하라.
+- 모든 워커의 결과와 출력 파일을 확인하고 통합한다. 무응답 워커는 상태를 보고하고 중단한다.
 - 증거(커밋/테스트/파일) 없는 완료 주장은 통합하지 말고 해당 워커에 redo 를 지시하라.
 
 워커 ID: ${workerIds || "(없음)"}
@@ -92,28 +81,17 @@ ${roster}
  * @param {object} config
  * @param {string} config.cli — codex/gemini/claude
  * @param {string} config.agentId — 에이전트 식별자
- * @param {string} config.hubUrl — Hub URL
  * @returns {string}
  */
 export function buildPrompt(subtask, config) {
-  const { cli, agentId, hubUrl } = config;
-
-  const _hubBase = hubUrl.replace("/mcp", "");
-
-  const bridgePath = "node hub/bridge.mjs";
+  const { cli, agentId } = config;
 
   return `워커: ${agentId} (${cli})
 작업: ${subtask}
 
 필수 규칙:
 1) 간결하게 작업(불필요한 장문 설명 금지)
-2) 시작 즉시 등록:
-   ${bridgePath} register --agent ${agentId} --cli ${cli} --topics lead.control,task.result
-3) 주기적으로 수신함 확인:
-   ${bridgePath} context --agent ${agentId} --max 10
-4) lead.control 수신 시 즉시 반응 (interrupt/stop/pause/resume)
-5) 완료 시 결과 발행:
-   ${bridgePath} result --agent ${agentId} --topic task.result --file <출력파일>
+2) 완료 시 변경 파일, 검증 결과와 출력 파일 경로를 보고한다
 
 지금 작업을 시작하라.`;
 }
@@ -123,7 +101,6 @@ export function buildPrompt(subtask, config) {
  * @param {string} sessionName — tmux 세션 이름
  * @param {Array<{target: string, cli: string, subtask: string}>} assignments
  * @param {object} opts
- * @param {string} opts.hubUrl — Hub URL
  * @param {{target:string, cli:string, task:string}|null} opts.lead
  * @param {string} opts.teammateMode
  * @param {(failure: {target:string, cli:string, role:string, message:string}) => void} [opts.onInjectionFailure]
@@ -131,7 +108,6 @@ export function buildPrompt(subtask, config) {
  */
 export async function orchestrate(sessionName, assignments, opts = {}) {
   const {
-    hubUrl = "http://127.0.0.1:27888/mcp",
     lead = null,
     teammateMode = "tmux",
     injectPrompt = defaultInjectPrompt,
@@ -165,7 +141,6 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
     const leadAgentId = `${lead.cli || "claude"}-${lead.target.split(".").pop()}`;
     const leadPrompt = buildLeadPrompt(lead.task || "팀 작업 조율", {
       agentId: leadAgentId,
-      hubUrl,
       teammateMode,
       workers: workers.map((w) => ({
         agentId: w.agentId,
@@ -188,7 +163,6 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
     const prompt = buildPrompt(worker.subtask, {
       cli: worker.cli,
       agentId: worker.agentId,
-      hubUrl,
       sessionName,
     });
     try {

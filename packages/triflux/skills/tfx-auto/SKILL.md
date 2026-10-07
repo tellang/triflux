@@ -20,7 +20,7 @@ argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [
 0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--shape`/`--cli-set`/`--parallel`/`--retry` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
    - `--parallel N` → `tfx multi` 위임 (`auto`: mux가 있으면 interactive pane, 비TTY에서 mux가 없으면 headless)
    - `--cli codex|antigravity` → `TFX_CLI_MODE` 설정 + 단일 실행
-   - `--mode deep` → `-t/--thorough` 동일 동작 (pipeline init)
+   - `--mode deep` → `-t/--thorough` 동일 동작 (Plan → PRD → Exec → Verify)
    - `--mode consensus --shape debate|panel` → prompt ensemble fold 경로
    - `--mode live` → `tfx-live` 엔진 위임 (분해/트리아지 스킵)
    - `--retry ralph` → `retry-state-machine.mjs`의 ralph 모드
@@ -58,7 +58,7 @@ argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [
 > 2-b. **Claude effort**: Claude lane은 Claude Code CLI의 `--model`과 `--effort`를 사용한다. Triflux의 `CLI_EFFORT`/profile 값은 `low|medium|high|xhigh|max` Claude effort로 매핑한다. `ultracode`도 공식 `--effort` 값(v2.1.203+)이지만 프로필 매핑에서는 쓰지 않는다. skill 문서가 모델 ID를 하드코딩하지 않는다.
 > 3. **DAG**: SEQUENTIAL/DAG이면 레벨 기반 순차 실행. `.omc/context/{sid}/` 생성, context_output 저장, 실패 시 후속 SKIP.
 > 4. **트리아지**: 입력을 분류하고 의존 관계에 따라 작업을 나눈다.
-> 5. **thorough**: `-t`/`--thorough` 시 파이프라인 init 필수.
+> 5. **thorough**: `-t`/`--thorough` 시 Plan → PRD → Exec → Verify 순서를 따른다.
 > 6. **CLI 실행**: Codex/Antigravity CLI 작업은 `tfx-route.sh`를 경유한다.
 
 ## 모드
@@ -85,7 +85,7 @@ ARGUMENTS 에 아래 플래그가 있으면 라우팅 판단의 내부 추론을
 | `--cli` | `antigravity` | Antigravity CLI 고정. `TFX_CLI_MODE=antigravity` | tfx-route.sh |
 | `--cli` | `claude` | Claude native 에이전트만 (CLI 호출 없음) | Agent() |
 | `--mode` | `quick` (기본) | plan/verify 단계 없음 | 직접 실행 |
-| `--mode` | `deep` | pipeline init → plan → PRD → verify → fix loop | `-t/--thorough` 동일 |
+| `--mode` | `deep` | Plan → PRD → Exec → Verify → Fix loop | `-t/--thorough` 동일 |
 | `--mode` | `consensus` | 3-CLI 합의 family 실행 | tfx-auto consensus root |
 | `--mode` | `live` | 서브태스크 분해 불가한 왕복 대화형 작업을 직행 위임 | `tfx-live peer` (v1 단일 경로, 상세는 "Live 위임 계약" 절) |
 | `--rounds` | `4` (기본) | live peer 왕복 횟수(총 hop 수는 `rounds * 2`) | `tfx-live peer --rounds` |
@@ -253,17 +253,12 @@ Bash("tfx-live peer --cli-a codex --cli-b claude \
 
 TRIAGE
   │
-  ├─ [thorough] → PIPELINE INIT(plan) → PLAN → PRD → [APPROVAL]
-  │                                                      │
-  │                                      ┌───────────────┤
-  │                                      │               │
-  │                                  [1 task]        [2+ tasks]
-  │                                      │               │
-  │                                  AUTO 직접 실행   병렬 실행 (tfx multi)
-  │                                      │               │
-  │                                      └───────┬───────┘
-  │                                              │
-  │                                          VERIFY → FIX loop → COMPLETE
+  ├─ [thorough] → PLAN → PRD
+  │                       │
+  │                       ├─ [1 task] → AUTO 직접 실행
+  │                       └─ [2+ tasks] → 병렬 실행 (tfx multi)
+  │                           │
+  │                           └─ VERIFY → FIX loop → COMPLETE
   │
   └─ [quick] → [1 task] → fire-and-forget
                [2+ tasks] → TEAM EXEC → COLLECT → CLEANUP
@@ -271,18 +266,16 @@ TRIAGE
 
 ### 단일 태스크 thorough
 
-1. `Bash("node hub/bridge.mjs pipeline-init --team ${sid}")`: 파이프라인 초기화 (phase: plan)
-2. Plan: Codex architect → 결과를 `pipeline.writePlanFile()` 저장
-3. PRD: Codex analyst → acceptance criteria 확정
-4. `pipeline_advance_gated` → [Approval Gate] → 사용자 승인 대기
-5. Exec: tfx-auto 직접 실행 (아래 "실행" 섹션)
-6. Verify: Codex verifier → 검증
-7. 실패 시 Fix loop (최대 3회) → Exec 재실행
-8. Complete
+1. Plan: Codex architect → 결과를 `pipeline.writePlanFile()` 저장
+2. PRD: Codex analyst → acceptance criteria 확정
+3. Exec: tfx-auto 직접 실행 (아래 "실행" 섹션)
+4. Verify: Codex verifier → 검증
+5. 실패 시 Fix loop (최대 3회) → Exec 재실행
+6. Complete
 
 ### 멀티 태스크 thorough
 
-Plan/PRD/Approval은 tfx-auto에서 실행하고, 여러 작업의 실행은 `tfx multi`에 위임한다.
+Plan/PRD는 tfx-auto에서 실행하고, 여러 작업의 실행은 `tfx multi`에 위임한다.
 서브태스크 배열 + `thorough: true` 신호를 함께 전달하여 multi 측에서 verify/fix를 수행.
 
 ## 실행 전 컨텍스트
@@ -351,7 +344,7 @@ else if subtasks.length >= 2:
   → if thorough: verify → fix loop
 else:
   if thorough:
-    → Pipeline init → Plan → PRD → Approval → 직접 실행 → Verify → Fix loop
+    → Plan → PRD → 직접 실행 → Verify → Fix loop
   else:
     → tfx-auto 직접 실행 (아래)
 ```

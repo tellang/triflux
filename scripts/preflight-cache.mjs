@@ -4,16 +4,12 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import {
   ANTIGRAVITY_KEYCHAIN_ACCOUNT,
   ANTIGRAVITY_KEYCHAIN_SERVICE,
 } from "../hud/constants.mjs";
-import { checkHub, detectCodexPlan, probeClis } from "./lib/env-probe.mjs";
-
-const __filename = fileURLToPath(import.meta.url);
-const PKG_ROOT = join(dirname(__filename), "..");
+import { detectCodexPlan, probeClis } from "./lib/env-probe.mjs";
 
 const CACHE_DIR = join(homedir(), ".claude", "cache");
 const CACHE_FILE = join(CACHE_DIR, "tfx-preflight.json");
@@ -310,7 +306,6 @@ function checkAntigravityReadiness(
 async function runPreflight({
   homeDir = homedir(),
   probeClisFn = probeClis,
-  checkHubFn = checkHub,
   checkRouteFn = checkRoute,
   detectCodexPlanFn = detectCodexPlan,
   existsSyncFn = existsSync,
@@ -328,14 +323,13 @@ async function runPreflight({
   });
   const result = {
     timestamp: Date.now(),
-    hub: checkHubFn({ pkgRoot: PKG_ROOT }),
     route: checkRouteFn({ homeDir, existsSyncFn }),
     codex: cliChecks.codex || { ok: false },
     antigravity,
     codex_plan: detectCodexPlanFn({ homeDir }),
     ok: false,
   };
-  result.ok = result.hub.ok && result.route.ok;
+  result.ok = result.route.ok;
 
   const agents = [];
   if (result.codex.ok) agents.push("codex");
@@ -363,8 +357,6 @@ export async function run(stdinData) {
 
   const summary = result.ok ? "preflight: ok" : "preflight: FAIL";
   const details = [];
-  if (!result.hub.ok) details.push("hub:" + result.hub.state);
-  else if (result.hub.restarted) details.push("hub:restarted");
   if (!result.route.ok) details.push("route:missing");
   if (result.available_agents.length === 1) details.push("agents:claude-only");
 

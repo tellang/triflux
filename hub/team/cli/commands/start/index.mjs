@@ -1,19 +1,6 @@
 import { decomposeTask } from "../../../orchestrator.mjs";
-import {
-  AMBER,
-  BOLD,
-  DIM,
-  GREEN,
-  RED,
-  RESET,
-  WHITE,
-} from "../../../shared.mjs";
-import { fail, ok, warn } from "../../render.mjs";
-import {
-  getDefaultHubUrl,
-  getHubInfo,
-  startHubDaemon,
-} from "../../services/hub-client.mjs";
+import { AMBER, BOLD, DIM, RESET, WHITE } from "../../../shared.mjs";
+import { fail } from "../../render.mjs";
 import {
   ensureTmuxOrExit,
   normalizeTeammateMode,
@@ -107,30 +94,7 @@ export async function teamStart(args = []) {
 
   console.log(`\n  ${AMBER}${BOLD}⬡ tfx multi${RESET}\n`);
 
-  // P1b: 워커 수 계산 — 단일 워커 headless에는 Hub 불필요
-  const workerCount = agents.length;
-  const needsHub = workerCount >= 2 || effectiveMode !== "headless";
-
-  let hub = null;
-  if (needsHub) {
-    hub = await getHubInfo();
-    if (!hub) {
-      process.stdout.write("  Hub 시작 중...");
-      try {
-        hub = await startHubDaemon();
-      } catch (error) {
-        if (error?.code === "HUB_SERVER_MISSING")
-          fail("hub/server.mjs 없음 — hub 모듈이 설치되지 않음");
-      }
-      console.log(` ${hub ? `${GREEN}✓${RESET}` : `${RED}✗${RESET}`}`);
-      if (!hub) warn("Hub 시작 실패 — 수동으로 실행: tfx hub start");
-    } else ok(`Hub: ${DIM}${hub.url}${RESET}`);
-  } else {
-    ok(`Hub: ${DIM}건너뜀 (단일 워커 headless)${RESET}`);
-  }
-
   const sessionId = `tfx-multi-${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 6)}`;
-  const hubUrl = hub?.url || getDefaultHubUrl();
 
   console.log(`  세션:  ${WHITE}${sessionId}${RESET}`);
   console.log(`  모드:  ${effectiveMode}`);
@@ -172,7 +136,6 @@ export async function teamStart(args = []) {
     agents,
     subtasks,
     layout,
-    hubUrl,
     teammateMode: effectiveMode,
   });
 

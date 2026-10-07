@@ -1,291 +1,110 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { it } from "node:test";
+import { runCodexSessionHook } from "../../hooks/codex-session-hook.mjs";
+import { emitParticipantSessionStarted } from "../../scripts/lib/session-presence.mjs";
 
-import {
-  launchCodexPresenceRegistration,
-  runCodexSessionHook as runHook,
-} from "../../hooks/codex-session-hook.mjs";
-import { registerInteractiveSession } from "../../scripts/lib/session-presence.mjs";
-
-function runCodexSessionHook(stdinData, opts = {}) {
-  return runHook(stdinData, {
-    writeSessionRecord: () => {},
-    launchPresenceRegistration: () => {},
-    ...opts,
-  });
-}
-
-function payload(overrides = {}) {
-  return JSON.stringify({
-    session_id: "codex-session-1",
-    cwd: "/work/triflux",
-    hook_event_name: "session_start",
-    ...overrides,
-  });
-}
-
-describe("codex-session-hook", () => {
-  it("register mode ensures the hub, registers the flat codex payload, drains, and returns {}", async () => {
-    const calls = [];
-    const result = await runCodexSessionHook(payload(), {
-      argvMode: "register",
-      writeStdout: false,
-      writeSessionRecord: (hookPayload) => calls.push(["record", hookPayload]),
-      hubEnsureRun: async (stdinData) => calls.push(["ensure", stdinData]),
-      registerInteractiveSession: (stdinData) =>
-        calls.push(["register", stdinData]),
-      heartbeatInteractiveSession: () => calls.push(["heartbeat"]),
-      drainPendingSynapse: async (timeoutMs) =>
-        calls.push(["drain", timeoutMs]),
-      launchPresenceRegistration: (hookPayload) =>
-        calls.push(["presence", hookPayload]),
-    });
-
-    assert.equal(result, "{}\n");
-    assert.deepEqual(calls, [
-      ["record", JSON.parse(payload())],
-      [
-        "presence",
-        {
-          session_id: "codex-session-1",
-          cwd: "/work/triflux",
-          hook_event_name: "session_start",
-        },
-      ],
-      ["ensure", payload()],
-      ["register", payload()],
-      ["drain", 1000],
-    ]);
-  });
-
-  it("heartbeat mode heartbeats the flat codex payload and drains without hub ensure", async () => {
-    const calls = [];
-    const result = await runCodexSessionHook(
-      payload({ hook_event_name: "user_prompt_submit" }),
-      {
-        argvMode: "heartbeat",
-        writeStdout: false,
-        writeSessionRecord: (hookPayload) =>
-          calls.push(["record", hookPayload]),
-        hubEnsureRun: async () => calls.push(["ensure"]),
-        registerInteractiveSession: () => calls.push(["register"]),
-        heartbeatInteractiveSession: (stdinData) =>
-          calls.push(["heartbeat", stdinData]),
-        drainPendingSynapse: async (timeoutMs) =>
-          calls.push(["drain", timeoutMs]),
-      },
-    );
-
-    assert.equal(result, "{}\n");
-    assert.deepEqual(calls, [
-      [
-        "record",
-        JSON.parse(payload({ hook_event_name: "user_prompt_submit" })),
-      ],
-      ["heartbeat", payload({ hook_event_name: "user_prompt_submit" })],
-      ["drain", 500],
-    ]);
-  });
-
-  it("launches bridge registration detached with Codex, OMX, and tmux context", () => {
-    const launches = [];
-    const originalOmxSession = process.env.OMX_SESSION_ID;
-    const originalTmuxSession = process.env.OMX_TMUX_SESSION;
-    const originalTmuxPane = process.env.TMUX_PANE;
-    try {
-      process.env.OMX_SESSION_ID = "omx-session-01";
-      process.env.OMX_TMUX_SESSION = "omx-presence";
-      process.env.TMUX_PANE = "%42";
-      const child = { once: () => child, unref: () => {} };
-      assert.equal(
-        launchCodexPresenceRegistration(JSON.parse(payload()), {
-          bridgePath: "/tmp/bridge.mjs",
-          spawnFn: (...args) => {
-            launches.push(args);
-            return child;
-          },
-        }),
-        true,
-      );
-      assert.deepEqual(launches, [
-        [
-          process.execPath,
-          [
-            "/tmp/bridge.mjs",
-            "register",
-            "--session-id",
-            "codex-session-1",
-            "--cwd",
-            "/work/triflux",
-            "--worktree-path",
-            "/work/triflux",
-            "--session-kind",
-            "interactive",
-            "--host",
-            "local",
-            "--codex-session-id",
-            "codex-session-1",
-            "--omx-session-id",
-            "omx-session-01",
-            "--tmux-session",
-            "omx-presence",
-            "--tmux-pane",
-            "%42",
-          ],
-          {
-            detached: true,
-            stdio: "ignore",
-            windowsHide: true,
-            env: process.env,
-          },
-        ],
-      ]);
-    } finally {
-      if (originalOmxSession === undefined) delete process.env.OMX_SESSION_ID;
-      else process.env.OMX_SESSION_ID = originalOmxSession;
-      if (originalTmuxSession === undefined)
-        delete process.env.OMX_TMUX_SESSION;
-      else process.env.OMX_TMUX_SESSION = originalTmuxSession;
-      if (originalTmuxPane === undefined) delete process.env.TMUX_PANE;
-      else process.env.TMUX_PANE = originalTmuxPane;
-    }
-  });
-
-  it("falls back to hook_event_name case-insensitively when argv mode is absent", async () => {
-    const calls = [];
-    await runCodexSessionHook(
-      payload({ hook_event_name: "UserPromptSubmit" }),
-      {
-        argvMode: "",
-        writeStdout: false,
-        heartbeatInteractiveSession: () => calls.push("heartbeat"),
-        drainPendingSynapse: async () => {},
-      },
-    );
-
-    assert.deepEqual(calls, ["heartbeat"]);
-  });
-
-  it("register path emits a codex participant CTO session_started event", async () => {
+for (const [mode, hookEvent] of [
+  ["register", "session_start"],
+  ["heartbeat", "UserPromptSubmit"],
+]) {
+  it(`${mode}는 로컬 세션 기록만 갱신한다`, async () => {
+    const payload = {
+      session_id: "codex-1",
+      cwd: "/work",
+      hook_event_name: hookEvent,
+    };
+    const records = [];
     const events = [];
-    await runCodexSessionHook(payload(), {
-      argvMode: "register",
+    let remoteCalls = 0;
+    const remote = () => remoteCalls++;
+    const result = await runCodexSessionHook(JSON.stringify(payload), {
+      argvMode: "",
       writeStdout: false,
-      hubEnsureRun: async () => {},
-      registerInteractiveSession: (stdinData) =>
-        registerInteractiveSession(stdinData, {
+      writeSessionRecord: (record) => records.push(record),
+      ancestorCommands: [],
+      emitSessionStarted: (data) =>
+        emitParticipantSessionStarted(data, {
           env: { TFX_CTO_AUTO_COLLECT: "1" },
-          register: () => {},
-          heartbeat: () => {},
-          gitRunner: () => {},
           resolveLakeRoot: () => ({
-            projectRoot: "/work/triflux",
-            lakeRoot: "/work/triflux/.triflux/lake",
+            projectRoot: "/work",
+            lakeRoot: "/work/.triflux/lake",
           }),
           ctoAppend: (lakeRoot, event) => events.push({ lakeRoot, event }),
         }),
-      drainPendingSynapse: async () => {},
+      hubEnsureRun: remote,
+      registerInteractiveSession: remote,
+      heartbeatInteractiveSession: remote,
+      drainPendingSynapse: remote,
+      launchPresenceRegistration: remote,
     });
-
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(events.length, 1);
-    assert.equal(events[0].lakeRoot, "/work/triflux/.triflux/lake");
-    assert.equal(events[0].event.event, "session_started");
-    assert.equal(events[0].event.actor.cli, "codex");
-    assert.equal(events[0].event.session_id, "codex-session-1");
-  });
-
-  it("keeps hook stdout JSON-only even when side effects log to stdout", async () => {
-    const writes = [];
-    const originalWrite = process.stdout.write;
-    process.stdout.write = function writeForTest(
-      chunk,
-      encodingOrCallback,
-      callback,
-    ) {
-      // node:test may write binary reporter events while stdout is patched.
-      if (typeof chunk === "string") writes.push(chunk);
-      const done =
-        typeof encodingOrCallback === "function"
-          ? encodingOrCallback
-          : callback;
-      if (typeof done === "function") done();
-      return true;
-    };
-
-    try {
-      const result = await runCodexSessionHook(payload(), {
-        argvMode: "register",
-        writeSessionRecord: () => {
-          process.stdout.write("registry noise\n");
-          throw new Error("registry unavailable");
-        },
-        hubEnsureRun: async () => {
-          process.stdout.write("[mcp-sync] skipped\n");
-          console.log("[mcp-sync] console noise");
-        },
-        registerInteractiveSession: () => {
-          process.stdout.write("[session-start] register noise\n");
-        },
-        drainPendingSynapse: async () => {
-          process.stdout.write("[synapse] drain noise\n");
-        },
-      });
-
-      assert.equal(result, "{}\n");
-      assert.deepEqual(writes, ["{}\n"]);
-      assert.doesNotThrow(() => JSON.parse(writes.join("")));
-    } finally {
-      process.stdout.write = originalWrite;
+    assert.equal(result, "{}\n");
+    assert.deepEqual(records, [payload]);
+    assert.equal(remoteCalls, 0);
+    assert.equal(events.length, mode === "register" ? 1 : 0);
+    if (mode === "register") {
+      assert.equal(events[0].event.event, "session_started");
+      assert.equal(events[0].event.actor.cli, "codex");
+      assert.equal(events[0].event.session_id, "codex-1");
+      for (const skipOptions of [
+        { session_kind: "headless" },
+        { ancestorCommands: ["claude -p review"] },
+      ]) {
+        await runCodexSessionHook(
+          JSON.stringify({ ...payload, ...skipOptions }),
+          {
+            argvMode: "register",
+            writeStdout: false,
+            writeSessionRecord: () => {},
+            ancestorCommands: [],
+            ...skipOptions,
+            emitSessionStarted: () =>
+              assert.fail("unexpected interactive event"),
+          },
+        );
+      }
     }
   });
+}
 
-  it("absorbs parse failures, unknown modes, and seam errors while still returning {}", async () => {
-    const calls = [];
-    const result = await runCodexSessionHook("{not-json", {
-      argvMode: "register",
-      writeStdout: false,
-      hubEnsureRun: async () => {
-        calls.push("ensure");
-        throw new Error("hub failed");
-      },
-      registerInteractiveSession: () => {
-        calls.push("register");
-        throw new Error("register failed");
-      },
-      drainPendingSynapse: async () => {
-        calls.push("drain");
-        throw new Error("drain failed");
-      },
-    });
-
-    assert.equal(result, "{}\n");
-    assert.deepEqual(calls, []);
-  });
+it("알 수 없는 이벤트와 잘못된 JSON은 기록하지 않는다", async () => {
+  for (const input of ["{invalid", "", '{"hook_event_name":"unknown"}']) {
+    assert.equal(
+      await runCodexSessionHook(input, {
+        argvMode: "",
+        writeStdout: false,
+        writeSessionRecord: () => assert.fail("unexpected record"),
+      }),
+      "{}\n",
+    );
+  }
 });
 
-for (const mode of ["register", "heartbeat"]) {
-  it(`continues ${mode} side effects after a synchronous registry failure`, async () => {
-    const calls = [];
-    const result = await runCodexSessionHook(payload(), {
-      argvMode: mode,
-      writeStdout: false,
-      writeSessionRecord: () => {
-        calls.push("record");
-        throw new Error("registry unavailable");
-      },
-      launchPresenceRegistration: () => calls.push("presence"),
-      hubEnsureRun: async () => calls.push("ensure"),
-      registerInteractiveSession: () => calls.push("register"),
-      heartbeatInteractiveSession: () => calls.push("heartbeat"),
-      drainPendingSynapse: async () => calls.push("drain"),
-    });
-    assert.equal(result, "{}\n");
-    assert.deepEqual(
-      calls,
-      mode === "register"
-        ? ["record", "presence", "ensure", "register", "drain"]
-        : ["record", "heartbeat", "drain"],
+it("로컬 기록의 출력과 실패가 훅 JSON 응답을 막지 않는다", async () => {
+  const writes = [];
+  const originalWrite = process.stdout.write;
+  process.stdout.write = (chunk) => {
+    if (typeof chunk === "string") writes.push(chunk);
+    return true;
+  };
+  try {
+    assert.equal(
+      await runCodexSessionHook('{"session_id":"codex-1"}', {
+        argvMode: "register",
+        ancestorCommands: [],
+        emitSessionStarted: () => {
+          process.stdout.write("cto noise\n");
+          throw new Error("ledger unavailable");
+        },
+        writeSessionRecord: () => {
+          process.stdout.write("noise\n");
+          console.log("noise");
+          throw new Error("registry unavailable");
+        },
+      }),
+      "{}\n",
     );
-  });
-}
+    assert.deepEqual(writes, ["{}\n"]);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+});

@@ -50,7 +50,7 @@ function makePreflightOptions(
       codex: { ok: false },
       agy: { ok: true, path: "/fake/bin/agy" },
     }),
-    checkHubFn: () => ({ ok: true, state: "healthy" }),
+    checkHubFn: () => assert.fail("unexpected hub probe"),
     detectCodexPlanFn: () => ({ plan: "pro", source: "test" }),
     platformFn: () => platform,
     spawnSyncFn: (command, args) => {
@@ -97,6 +97,8 @@ describe("preflight-cache Antigravity readiness", () => {
         auth_source: "file",
       });
       assert.ok(result.available_agents.includes("antigravity"));
+      assert.equal(result.ok, true);
+      assert.equal("hub" in result, false);
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }

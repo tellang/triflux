@@ -7,36 +7,11 @@
 //   - 'codex-app-server' → CodexAppServerWorker (explicit alias)
 //   - 'delegator'        → DelegatorMcpWorker
 //
-// For the codex app-server transport the factory injects a default
-// `publishCallback` that forwards each envelope to `/bridge/publish` via the
-// existing `requestJson` helper. Callers can override by passing their own
-// `publishCallback` or swap the transport with `requestJsonFn`.
-
 import { ClaudeWorker } from "./claude-worker.mjs";
 import { CodexAppServerWorker } from "./codex-app-server-worker.mjs";
 
 /**
- * Build a best-effort publishCallback that posts the envelope to
- * `/bridge/publish`. Failures are swallowed so publish pressure never crashes
- * a running worker turn.
- * @param {(path: string, opts?: object) => Promise<unknown>} [requestJsonFn]
- * @returns {(publishMessage: object) => Promise<void>}
- */
-function defaultPublishCallback(requestJsonFn = null) {
-  return async (publishMessage) => {
-    try {
-      const publishRequestJson =
-        requestJsonFn || (await import("../bridge.mjs")).requestJson;
-      await publishRequestJson("/bridge/publish", { body: publishMessage });
-    } catch {
-      // best-effort; publish failures must not crash the worker
-    }
-  };
-}
-
-/**
- * Construct a CodexAppServerWorker with a default publishCallback wired to
- * `requestJson('/bridge/publish', ...)` unless the caller supplied one.
+ * 호출자가 지정한 발행 콜백만 연결한다.
  *
  * Issue #95 P1 #4 validation: the app-server transport does not yet implement
  * the server-initiated approval / `tool/requestUserInput` round-trip. Any
@@ -48,6 +23,7 @@ function defaultPublishCallback(requestJsonFn = null) {
  */
 async function createCodexWorker(opts = {}) {
   const { transport, requestJsonFn, publishCallback, ...rest } = opts;
+  void requestJsonFn;
 
   if (transport === "app-server") {
     const policy = rest.approvalPolicy;
@@ -62,9 +38,7 @@ async function createCodexWorker(opts = {}) {
     return new CodexAppServerWorker({
       ...rest,
       publishCallback:
-        typeof publishCallback === "function"
-          ? publishCallback
-          : defaultPublishCallback(requestJsonFn),
+        typeof publishCallback === "function" ? publishCallback : null,
     });
   }
 

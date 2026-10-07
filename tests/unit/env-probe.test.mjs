@@ -97,88 +97,35 @@ describe("env-probe detectCodexAuthState", () => {
   });
 });
 
-describe("env-probe hub port resolution", () => {
-  it("checkHub probes and restarts using the env-selected port", () => {
-    const originalPort = process.env.TFX_HUB_PORT;
-    const originalAllowEphemeral = process.env.TFX_HUB_ALLOW_EPHEMERAL_PORT;
-    process.env.TFX_HUB_PORT = "30124";
-    process.env.TFX_HUB_ALLOW_EPHEMERAL_PORT = "1";
-    const commands = [];
-    const spawnCalls = [];
-    let attempts = 0;
-
-    try {
-      const result = checkHub({
-        pkgRoot: makeTempHome(),
-        execSyncFn(command) {
-          commands.push(command);
-          attempts += 1;
-          if (attempts === 1) throw new Error("down");
-          return JSON.stringify({ hub: { state: "healthy" }, pid: 1234 });
-        },
-        spawnFn(command, args, options) {
-          spawnCalls.push({ command, args, options });
-          return { unref() {} };
-        },
-        existsSyncFn() {
-          return true;
-        },
-        sleepSyncFn() {},
-      });
-
-      assert.equal(result.ok, true);
-      assert.equal(result.restarted, true);
-      assert.ok(commands.every((command) => command.includes(":30124/status")));
-      assert.equal(spawnCalls[0]?.options?.env?.TFX_HUB_PORT, "30124");
-    } finally {
-      if (originalPort === undefined) delete process.env.TFX_HUB_PORT;
-      else process.env.TFX_HUB_PORT = originalPort;
-      if (originalAllowEphemeral === undefined) {
-        delete process.env.TFX_HUB_ALLOW_EPHEMERAL_PORT;
-      } else {
-        process.env.TFX_HUB_ALLOW_EPHEMERAL_PORT = originalAllowEphemeral;
-      }
-    }
+describe("env-probe hub status", () => {
+  it("restart 요청에도 허브를 띄우지 않는다", () => {
+    const calls = [];
+    const result = checkHub({
+      restart: true,
+      execSyncFn: (command) => {
+        calls.push(command);
+        throw new Error("down");
+      },
+      spawnFn: () => assert.fail("unexpected spawn"),
+    });
+    assert.deepEqual(result, {
+      ok: false,
+      state: "unreachable",
+      restart: "disabled",
+    });
+    assert.equal(calls.length, 1);
   });
 
-  it("checkHub restarts worktree probes on canonical 27888 despite poisoned env", () => {
-    const originalPort = process.env.TFX_HUB_PORT;
-    const originalUrl = process.env.TFX_HUB_URL;
-    process.env.TFX_HUB_PORT = "30124";
-    process.env.TFX_HUB_URL = "http://127.0.0.1:30124/mcp";
-    const commands = [];
-    const spawnCalls = [];
-    let attempts = 0;
-
-    try {
-      const result = checkHub({
-        cwd: "/repo/.worktrees/worker-a",
-        pkgRoot: makeTempHome(),
-        execSyncFn(command) {
-          commands.push(command);
-          attempts += 1;
-          if (attempts === 1) throw new Error("down");
-          return JSON.stringify({ hub: { state: "healthy" }, pid: 1234 });
-        },
-        spawnFn(command, args, options) {
-          spawnCalls.push({ command, args, options });
-          return { unref() {} };
-        },
-        existsSyncFn() {
-          return true;
-        },
-        sleepSyncFn() {},
-      });
-
-      assert.equal(result.ok, true);
-      assert.equal(result.restarted, true);
-      assert.ok(commands.every((command) => command.includes(":27888/status")));
-      assert.equal(spawnCalls[0]?.options?.env?.TFX_HUB_PORT, "27888");
-    } finally {
-      if (originalPort === undefined) delete process.env.TFX_HUB_PORT;
-      else process.env.TFX_HUB_PORT = originalPort;
-      if (originalUrl === undefined) delete process.env.TFX_HUB_URL;
-      else process.env.TFX_HUB_URL = originalUrl;
-    }
+  it("조회 포트 해석과 healthy 응답은 유지한다", () => {
+    let command;
+    const result = checkHub({
+      env: { TFX_HUB_PORT: "30124", TFX_HUB_ALLOW_EPHEMERAL_PORT: "1" },
+      execSyncFn: (value) => {
+        command = value;
+        return JSON.stringify({ hub: { state: "healthy" }, pid: 1234 });
+      },
+    });
+    assert.match(command, /:30124\/status/);
+    assert.deepEqual(result, { ok: true, state: "healthy", pid: 1234 });
   });
 });

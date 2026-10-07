@@ -1,23 +1,14 @@
-import { execSync, spawn } from "node:child_process";
+import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { resolveHubPortForContext } from "../../hub/hub-lifecycle.mjs";
 import { whichCommand, whichCommandAsync } from "@triflux/core/hub/platform.mjs";
 
 const HUB_DEFAULT_PORT = 27888;
-const _sab = new Int32Array(new SharedArrayBuffer(4));
 const CLI_PROBE_CACHE = new Map();
 const CLI_PROBE_PROMISES = new Map();
-
-const __filename = fileURLToPath(import.meta.url);
-const DEFAULT_PKG_ROOT = join(dirname(__filename), "..", "..");
-
-function sleepSync(ms) {
-  Atomics.wait(_sab, 0, 0, ms);
-}
 
 function fetchHubStatus({
   execSyncFn = execSync,
@@ -232,16 +223,9 @@ export function detectCodexPlan(options = {}) {
 export function checkHub({
   env = process.env,
   cwd = process.cwd(),
-  pkgRoot = DEFAULT_PKG_ROOT,
   statusUrl = resolveDefaultStatusUrl(env, cwd),
-  restart = true,
   requestTimeoutMs = 3000,
-  pollAttempts = 8,
-  pollIntervalMs = 500,
   execSyncFn = execSync,
-  spawnFn = spawn,
-  existsSyncFn = existsSync,
-  sleepSyncFn = sleepSync,
 } = {}) {
   const guardedStatusUrl = resolveStatusUrlForContext({ statusUrl, env, cwd });
   try {
@@ -250,39 +234,7 @@ export function checkHub({
       statusUrl: guardedStatusUrl,
       timeout: requestTimeoutMs,
     });
-  } catch {}
-
-  if (!restart) return { ok: false, state: "unreachable", restart: "disabled" };
-
-  const serverPath = join(pkgRoot, "hub", "server.mjs");
-  if (!existsSyncFn(serverPath))
-    return { ok: false, state: "unreachable", restart: "no_server" };
-
-  try {
-    const child = spawnFn(process.execPath, [serverPath], {
-      env: { ...env, TFX_HUB_PORT: String(new URL(guardedStatusUrl).port) },
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    child.unref();
   } catch {
-    return { ok: false, state: "unreachable", restart: "spawn_failed" };
+    return { ok: false, state: "unreachable", restart: "disabled" };
   }
-
-  for (let i = 0; i < pollAttempts; i++) {
-    sleepSyncFn(pollIntervalMs);
-    try {
-      const status = fetchHubStatus({
-        execSyncFn,
-        statusUrl: guardedStatusUrl,
-        timeout: Math.min(requestTimeoutMs, 1000),
-      });
-      if (status.state === "healthy") {
-        return { ...status, restarted: true };
-      }
-    } catch {}
-  }
-
-  return { ok: false, state: "unreachable", restart: "timeout" };
 }
