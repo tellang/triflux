@@ -72,9 +72,19 @@ function renderTmuxInstallHelp() {
 
 export { parseTeamArgs };
 
+export function resolveTeamWorkers({ agents, task, assigns = [] }) {
+  if (assigns.length > 0) {
+    return {
+      agents: assigns.map((assign) => assign.cli),
+      subtasks: assigns.map((assign) => assign.prompt),
+    };
+  }
+  return { agents, subtasks: decomposeTask(task, agents.length) };
+}
+
 export async function teamStart(args = []) {
   const {
-    agents,
+    agents: requestedAgents,
     lead,
     layout,
     teammateMode,
@@ -100,11 +110,16 @@ export async function teamStart(args = []) {
     rawTask ||
     (assigns.length > 0 ? assigns.map((a) => a.prompt).join(" + ") : "");
   if (!task) return printStartUsage();
+  const { agents, subtasks } = resolveTeamWorkers({
+    agents: requestedAgents,
+    task,
+    assigns,
+  });
 
   console.log(`\n  ${AMBER}${BOLD}⬡ tfx multi${RESET}\n`);
 
   // P1b: 워커 수 계산 — 단일 워커 headless에는 Hub 불필요
-  const workerCount = assigns.length > 0 ? assigns.length : agents.length;
+  const workerCount = agents.length;
   const needsHub = workerCount >= 2 || teammateMode !== "headless";
 
   let hub = null;
@@ -126,7 +141,6 @@ export async function teamStart(args = []) {
   }
 
   const sessionId = `tfx-multi-${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 6)}`;
-  const subtasks = decomposeTask(task, agents.length);
   const hubUrl = hub?.url || getDefaultHubUrl();
   const { mode: effectiveMode, warnings: modeWarnings } =
     resolveEffectiveMode(teammateMode);
