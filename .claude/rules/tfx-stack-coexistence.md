@@ -47,7 +47,7 @@ triflux  →  superpowers  (금지)
 | 기능 | Owner | 근거 |
 |------|-------|------|
 | **Review** (코드 판정) | superpowers | 입력 diff → 출력 verdict 프리미티브. 가장 단순한 경계 |
-| **Plan** (작업 설계) | triflux (`tfx-plan`, `tfx-auto --mode deep`) | 멀티모델 합의 + PRD 생성 포함 |
+| **Plan** (작업 설계) | superpowers `writing-plans`; TFX 다중모델 계획·실행은 `tfx-auto --mode deep` | 실행 계획 작성과 다중모델 실행을 구분한다 |
 | **Checkpoint** (진행 상태 스냅샷) | gstack (`/checkpoint`) | 워크플로우 상태 관리는 무대 레이어 책임 |
 | **Worktree** (격리 실행) | triflux (`tfx-swarm`) | PRD별 worktree + auto merge = 오케스트레이션 |
 | **QA / 검증** | gstack (`/qa`) → triflux (`tfx-review` 코드 판정, `tfx-auto` 테스트→수정 반복) | gstack이 게이트, triflux가 병렬 실행 |
@@ -85,7 +85,7 @@ triflux  →  superpowers  (금지)
 | 기능 | 1순위 | 2순위 | 3순위 |
 |------|-------|-------|-------|
 | Brainstorm / 아이디어 발산 | `tfx-auto --mode consensus --shape debate` | `sc:brainstorm` | gstack 없음 |
-| Plan / 설계 | `tfx-auto --mode deep` | `sc:pm` | gstack `/investigate` |
+| Plan / 설계 | superpowers `writing-plans` | 명시 TFX 계획·실행은 `tfx-auto --mode deep` | — |
 | Review / 코드 판정 | superpowers `/review` | `tfx-auto --mode consensus` | — |
 | QA / 테스트 검증 | gstack `/qa` → `tfx-review` | `tfx-auto --mode deep` | — |
 | Checkpoint / 스냅샷 | gstack `/checkpoint` | — | — |

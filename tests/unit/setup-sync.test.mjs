@@ -124,7 +124,7 @@ describe("setup-sync: --sync 플래그 파싱", () => {
 });
 
 describe("setup-sync: Codex tfx-harness adapter", () => {
-  it("temp HOME에 adapter를 동기화하고 재실행해도 idempotent하다", () => {
+  it("temp HOME에 Codex 관리 스킬 두 개를 동기화하고 재실행해도 idempotent하다", () => {
     execFileSync(
       process.execPath,
       [join(PROJECT_ROOT, "scripts", "setup.mjs"), "--sync"],
@@ -151,6 +151,22 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
       "SKILL.md",
     );
     assert.equal(readFileSync(installed, "utf8"), readFileSync(source, "utf8"));
+    const liveSource = join(PROJECT_ROOT, "skills", "tfx-live", "SKILL.md");
+    const liveInstalled = join(
+      SETUP_TEST_HOME,
+      ".codex",
+      "skills",
+      "tfx-live",
+      "SKILL.md",
+    );
+    assert.equal(
+      readFileSync(liveInstalled, "utf8"),
+      readFileSync(liveSource, "utf8"),
+    );
+    assert.equal(
+      existsSync(join(dirname(liveInstalled), ".triflux-managed-skill")),
+      true,
+    );
 
     const result = syncCodexHarnessAdapter({
       destinationDir: join(SETUP_TEST_HOME, ".codex", "skills", "tfx-harness"),

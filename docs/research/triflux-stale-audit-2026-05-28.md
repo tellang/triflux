@@ -22,7 +22,7 @@ Safe, non-destructive fixes were applied after the initial audit:
 - README skill count is now 34, matching packed/package skill files.
 - README, package metadata, SVGs, demo tape, and generated GIF now use the current Codex/Antigravity/Claude surface instead of stale Gemini-front-door wording. Legacy Gemini references remain only where they describe compatibility state or snapshot files.
 - `docs/assets/demo-multi.gif` was regenerated locally (960x540 GIF, 10 frames) because `vhs` was unavailable and Pillow was available.
-- Root and `packages/triflux` package metadata now include `docs/assets`; the workspace package also includes `tui` and `README.ko.md`, fixing package README media and `tfx-profile`/TUI packaging gaps.
+- Root and `packages/triflux` package metadata now include `docs/assets`; the workspace package also includes `tui` and `README.ko.md`, fixing package README media and profile/TUI packaging gaps.
 - `tfx update --help` now prints help before side effects; `cmdUpdate` receives `cmdArgs`.
 - `tfx auto/setup/doctor/handoff/schema/synapse/hooks/multi/notion-read/review/tray/why --help` now use explicit help paths.
 - `tfx schema` now includes implemented/help-listed commands such as `auto`, `update`, `tray`, `codex-team`, `notion-read`, `review`, and `monitor`.

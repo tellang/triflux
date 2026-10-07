@@ -87,11 +87,12 @@ import {
   isSkillSupportedOnPlatform,
   LEGACY_CODEX_MODELS,
   listInlineProfileNames,
+  REMOVED_SKILL_NAMES,
   REQUIRED_CODEX_PROFILES,
   SKILL_ALIASES,
   SYNC_MAP,
   syncAliasedSkillDir,
-  syncCodexHarnessAdapter,
+  syncCodexManagedSkills,
 } from "../scripts/setup.mjs";
 import { cleanupTmpFiles } from "../scripts/tmp-cleanup.mjs";
 
@@ -100,9 +101,6 @@ const CLAUDE_DIR = join(homedir(), ".claude");
 const CODEX_DIR = join(homedir(), ".codex");
 const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
 const PKG = JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8"));
-
-// 이 배열에 포함된 버전에서만 star prompt를 표시한다 (빈 배열 = 모든 버전에서 표시)
-const STAR_PROMPT_VERSIONS = [];
 
 // ── 색상 체계 (triflux brand: amber/orange accent) ──
 const CYAN = "\x1b[36m";
@@ -2227,24 +2225,23 @@ function cmdSetup(options = {}) {
     } else {
       ok(`스킬: ${skillTotal}개 최신 상태`);
     }
-    // Stale 스킬 정리 (패키지에서 제거된 tfx-* 스킬 삭제)
-    const staleCleanup = cleanupStaleSkills(skillsDst, skillsSrc);
-    if (staleCleanup.count > 0) {
-      ok(
-        `구형 스킬 ${staleCleanup.count}개 제거: ${staleCleanup.removed.join(", ")}`,
-      );
-    }
   }
 
-  const codexHarnessSync = syncCodexHarnessAdapter();
-  if (!codexHarnessSync.ok) {
-    fail(`Codex tfx-harness: ${codexHarnessSync.reason}`);
-    return;
+  for (const installedDir of [skillsDst, join(CODEX_DIR, "skills")]) {
+    const stale = cleanupStaleSkills(installedDir, skillsSrc);
+    if (stale.count)
+      ok(`구형 스킬 ${stale.count}개 제거: ${stale.removed.join(", ")}`);
+    for (const name of stale.preserved)
+      warn(`구형 스킬 ${name}: 사용자 사본 보존`);
   }
-  if (codexHarnessSync.action === "synced") {
-    ok("Codex tfx-harness adapter: 동기화됨");
-  } else if (codexHarnessSync.action === "skipped") {
-    warn("Codex tfx-harness adapter: 사용자 스킬 보존 (관리 파일 변경 없음)");
+  for (const skill of syncCodexManagedSkills()) {
+    if (!skill.ok) {
+      fail(`Codex ${skill.name}: ${skill.reason}`);
+      return;
+    }
+    if (skill.action === "synced") ok(`Codex ${skill.name}: 동기화됨`);
+    if (skill.action === "skipped")
+      warn(`Codex ${skill.name}: 사용자 스킬 보존`);
   }
 
   // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──
@@ -2538,75 +2535,6 @@ function cmdSetup(options = {}) {
         status: "⏭️",
         detail: `미설치 (${install})`,
       });
-    }
-  }
-
-  // Star request (버전 게이팅 + 인터랙티브 [y/n])
-  const showStar =
-    STAR_PROMPT_VERSIONS.length === 0 ||
-    STAR_PROMPT_VERSIONS.includes(PKG.version);
-  if (showStar) {
-    let ghOk = false;
-    try {
-      execFileSync("gh", ["auth", "status"], {
-        timeout: 5000,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      ghOk = true;
-    } catch {}
-
-    if (!ghOk) {
-      // gh 미설치/미인증 — URL만 표시
-      console.log();
-      info(
-        `${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. ${CYAN}https://github.com/tellang/triflux${RESET}`,
-      );
-    } else {
-      let alreadyStarred = false;
-      try {
-        execFileSync("gh", ["api", "user/starred/tellang/triflux"], {
-          timeout: 5000,
-          stdio: ["pipe", "pipe", "pipe"],
-        });
-        alreadyStarred = true;
-      } catch {}
-
-      if (alreadyStarred) {
-        console.log();
-        ok(`이미 함께하고 계시군요. ${AMBER}⭐${RESET}`);
-      } else {
-        // 인터랙티브 confirm
-        console.log();
-        process.stdout.write(
-          `    ${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다. Star? ${DIM}[y/N]${RESET} `,
-        );
-        let answer = "";
-        try {
-          const buf = Buffer.alloc(128);
-          const n = readSync(0, buf, 0, 128);
-          answer = buf.toString("utf8", 0, n).trim().toLowerCase();
-        } catch {
-          // non-interactive stdin — 건너뜀
-        }
-        if (answer.startsWith("y")) {
-          try {
-            execFileSync(
-              "gh",
-              ["api", "-X", "PUT", "/user/starred/tellang/triflux"],
-              {
-                timeout: 5000,
-                stdio: ["pipe", "pipe", "pipe"],
-              },
-            );
-            ok(`함께해 주셔서 감사합니다. ${AMBER}⭐${RESET}`);
-          } catch {
-            info(`${CYAN}https://github.com/tellang/triflux${RESET}`);
-          }
-        } else if (answer === "") {
-          // 아무 입력 없이 Enter — 조용히 URL만
-          console.log(`      ${DIM}https://github.com/tellang/triflux${RESET}`);
-        }
-      }
     }
   }
 
@@ -3662,14 +3590,18 @@ async function cmdDoctor(options = {}) {
       for (const { alias } of SKILL_ALIASES) pkgSkills.add(alias);
 
       for (const n of readdirSync(userSkillsDir)) {
-        if (!n.startsWith("tfx-")) continue;
+        if (
+          !REMOVED_SKILL_NAMES.includes(n) &&
+          !existsSync(join(pkgSkillsDir, n))
+        )
+          continue;
         if (isLocalDevSkillDir(join(userSkillsDir, n))) continue;
         if (!pkgSkills.has(n)) staleSkills.push(n);
       }
     }
     if (staleSkills.length > 0) {
       warn(`구형 스킬 ${staleSkills.length}개 감지: ${staleSkills.join(", ")}`);
-      info("제거: tfx setup 또는 tfx update");
+      info("관리 사본 정리: tfx setup 또는 tfx update");
       addDoctorCheck(report, {
         name: "stale-skills",
         status: "issues",

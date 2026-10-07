@@ -76,7 +76,7 @@ PowerShell 은 `$p = (Get-Content 'prompt.md' -Raw)` 로 읽어 같은 규칙을
 ## 규칙 4: 프로파일 사용, 인자 하드코딩 금지
 
 모델·effort·실행모드는 프로파일로 관리한다. 문서·명령에 모델 ID를 적지 않는다 —
-프로파일명이 SSOT (`tfx-skill-authoring.md` §3). 관리는 `tfx-profile` 또는 `~/.codex/config.toml`.
+프로파일명이 SSOT (`tfx-skill-authoring.md` §3). `~/.codex/<프로필>.config.toml`에서 직접 관리한다.
 
 ### 4-1. 프로파일 우선
 

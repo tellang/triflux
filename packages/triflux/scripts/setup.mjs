@@ -5,6 +5,7 @@
 // - hud-qos-status.mjs를 ~/.claude/hud/에 동기화
 // - skills/를 ~/.claude/skills/에 동기화
 
+import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "child_process";
 import {
   chmodSync,
@@ -866,6 +867,70 @@ const LEGACY_ALIAS_TOMBSTONES = new Set([
 const DEPRECATED_SKILLS = ["tfx-codex-route", "tfx-gemini-route"];
 const LOCAL_DEV_SKILL_MARKER = ".triflux-local-skill";
 const MANAGED_CODEX_SKILL_MARKER = ".triflux-managed-skill";
+// ADR-0020 제거 직전(612b1e91^)과 이번 제거 직전 원본의 SKILL.md 단독/전체 트리 지문.
+const REMOVED_SKILL_HASHES = {
+  "tfx-ralph": [
+    "4a4145a6242a76c05104dfbaa154607deee220944d4d26f4612f07973762d7ac",
+    "982126ae9b3dc39ef28f06fa39e08352c82ed478527ae01eaf9786abe1e98829",
+  ],
+  "tfx-forge": [
+    "b966faf22a89f59f6f59f629b0088b01373e2b3fdfd5b47b6c6773f7d129304a",
+    "b9b10dd358848f7201b2526f452e8d0d939356578ca93611c581e0fee6f59f8a",
+  ],
+  "tfx-find": [
+    "8e4837fa1ec5d51c1297c98c76bae0fdb7f4d52196a7c38f17463ad7b235ec34",
+    "f5174a7330eefe0255356f4e5b5519120e4d8a69eeb3f9cca3a5b7c46b99d31c",
+  ],
+  "tfx-index": [
+    "2531f5a016169e3f87091c8b2032a8a1efa843df54f230603fd0a242682d857e",
+    "26b9b94802961d982e695b22af93264ed87d7a39b57e80957c97811ed13779de",
+  ],
+  "tfx-goal-clarify": [
+    "1932752fee5a1d2b4934960b95135ac02550d114eaf2421e3d943315d3943183",
+    "926f16e40213dc97bb4bea34923854df72d9259bec34eb8373fd8aed01ee4b98",
+  ],
+  "tfx-hooks": [
+    "9a24a86b246b53a121f548e44c858e56f3ba4de49d1f7572e64bf95d1318a02d",
+    "b3bb55a9be027498e25f9e1f317d228c0fb08007e0827cd97682acc9c661b7a2",
+  ],
+  "tfx-hub": [
+    "eb71c0767620c342ebf5add9a6fabf271a03456237ae77a959fedb30080ae47a",
+    "46401764a1cda1e20a21b39678e31b2416aca7ce72e9dda0933673881d007ee0",
+  ],
+  "tfx-analysis": [
+    "24cd2746d0cfa2382a643900401874c083bcf1c1b67aa0420681233c634daa13",
+    "8c345dce0ea557635a5163c7d1810bc20ae3ca69074d4107bc2726335799589e",
+  ],
+  "tfx-prune": [
+    "04f20d1206fc038c72f2e79f890eaff94c988f6c129db7b0e53ae249731e6138",
+    "0a9e8fa5f6469f756ff7cc97fa4ee8ba29509a7fa2472bb2f6e522ea62e22de6",
+  ],
+  "tfx-qa": [
+    "2bec88749d08849650830055c4cec9622bad91f93246b04e5d4fb58f3ad1a036",
+    "f5f9c6e036d5a965931ab9a6c6b23c41886cd370edf90e46f19d119516e05d1a",
+  ],
+  "tfx-plan": [
+    "af4427146af67849cc89d36787115d9bfc3b643a38208def9014234b05875e00",
+    "bf854e64db158d3fc4faa5995921e357304ef559fad43a3b60b8258e3f685f27",
+  ],
+  "tfx-interview": [
+    "c98438dc65cc6902934804e51e739c6e356053c1d3e823e5a4cbfdf677474ca9",
+    "5281bfac1ab926215cef40f6ac28305fb3525a9f5266b7d3e00b6fe12f41cac2",
+  ],
+  "tfx-profile": [
+    "294b440c8d71290263054c5143f1ceddd995da7271e39e14bc96f7a73002dd25",
+    "82c6397a124d39f637e103f0f02d0ac4a6cbe171a45ad62671463e35507368eb",
+  ],
+  "merge-worktree": [
+    "306bd5b6288505ff69fa9ed7037354891b75919d8ef1c8cbec0b4ebe55c17870",
+    "b3ca6e3f7caa290bcbaf83cb4a30e1db2269d32726c56e32431905b2e25c9b6d",
+  ],
+  "star-prompt": [
+    "b8c845284d33fae16ea8f3dc5f3d6e8c2e656c7ceb49bb464a9252ff745c900c",
+    "b5ff7ca412dab7152d1661bcafa9735d12fa64f0e10c674eb9e6f0ecb535a1b7",
+  ],
+};
+const REMOVED_SKILL_NAMES = Object.freeze(Object.keys(REMOVED_SKILL_HASHES));
 
 // ── 구형 Codex 모델 (마이그레이션 안내 대상) ──
 
@@ -938,21 +1003,39 @@ function isSkillSupportedOnPlatform(skillDir, platform = process.platform) {
   return platforms.length === 0 || platforms.includes(platform);
 }
 
-/**
- * 설치된 스킬 디렉토리에서 패키지에 더 이상 없는 tfx-* 스킬과 현재 플랫폼에
- * 해당하지 않는 패키지 스킬(frontmatter `platform:`)을 제거한다.
- * @param {string} installedDir - ~/.claude/skills
- * @param {string} pkgDir - PLUGIN_ROOT/skills
- * @param {{ platform?: string }} [options]
- * @returns {{ count: number, removed: string[] }}
- */
+function skillTreeHash(skillDir, skillOnly = false) {
+  if (!existsSync(join(skillDir, "SKILL.md"))) return null;
+  const hash = createHash("sha256");
+  function visit(dir, prefix = "") {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort(
+      (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+    )) {
+      if (skillOnly && entry.name !== "SKILL.md") continue;
+      const name = prefix + entry.name;
+      if (entry.isDirectory()) {
+        if (!visit(join(dir, entry.name), `${name}/`)) return false;
+      } else if (entry.isFile()) {
+        hash.update(name);
+        hash.update("\0");
+        hash.update(readFileSync(join(dir, entry.name)));
+        hash.update("\0");
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+  return visit(skillDir) ? hash.digest("hex") : null;
+}
+
 function cleanupStaleSkills(
   installedDir,
   pkgDir,
   { platform = process.platform } = {},
 ) {
   const removed = [];
-  if (!existsSync(installedDir)) return { count: 0, removed };
+  const preserved = [];
+  if (!existsSync(installedDir)) return { count: 0, removed, preserved };
 
   const pkgNames = new Set();
   if (existsSync(pkgDir)) {
@@ -966,22 +1049,40 @@ function cleanupStaleSkills(
   for (const dep of DEPRECATED_SKILLS) pkgNames.add(dep);
 
   for (const name of readdirSync(installedDir)) {
-    if (!name.startsWith("tfx-")) continue;
+    if (
+      !Object.hasOwn(REMOVED_SKILL_HASHES, name) &&
+      !existsSync(join(pkgDir, name))
+    )
+      continue;
     if (pkgNames.has(name)) continue;
 
     const skillPath = join(installedDir, name);
-    if (isLocalDevSkillDir(skillPath)) continue;
-    // #144: 재귀 삭제 필요 — 과거 구현은 파일만 unlink 하여 nested 디렉토리가 있는 스킬을
-    // 온전히 제거하지 못했다. `tfx-deep-*`, `tfx-codex-swarm` 같은 과거 잔재 디렉토리는
-    // workspace/snapshot 같은 하위 폴더를 가지므로 rmSync recursive 가 필수.
+    if (isLocalDevSkillDir(skillPath)) {
+      preserved.push(name);
+      continue;
+    }
+    const managed = existsSync(join(skillPath, MANAGED_CODEX_SKILL_MARKER));
+    const sourcePath = join(pkgDir, name);
+    const hash = managed ? null : skillTreeHash(skillPath);
+    const originals = [...(REMOVED_SKILL_HASHES[name] ?? [])];
+    if (existsSync(sourcePath)) {
+      originals.push(
+        skillTreeHash(sourcePath),
+        skillTreeHash(sourcePath, true),
+      );
+    }
+    if (!managed && (!hash || !originals.includes(hash))) {
+      preserved.push(name);
+      continue;
+    }
     try {
       rmSync(skillPath, { recursive: true, force: true });
       removed.push(name);
     } catch {
-      /* best effort — next setup/update cycle 에서 재시도 */
+      preserved.push(name);
     }
   }
-  return { count: removed.length, removed };
+  return { count: removed.length, removed, preserved };
 }
 
 function isLocalDevSkillDir(skillPath) {
@@ -1003,13 +1104,7 @@ function skillTreeMatches(srcDir, dstDir) {
   return true;
 }
 
-/**
- * Sync the tracked Codex tfx-harness adapter without taking ownership of a
- * pre-existing user skill. A missing source is a hard failure; a conflicting
- * destination is deliberately left untouched. Do not create backups inside
- * the Codex skill discovery root: Codex would register each copied SKILL.md as
- * another callable skill.
- */
+// Codex 탐색 경로에 백업을 두면 별도 스킬로 등록된다.
 function syncCodexHarnessAdapter({
   sourceDir = join(PLUGIN_ROOT, "adapters", "codex", "skills", "tfx-harness"),
   destinationDir = join(CODEX_DIR, "skills", "tfx-harness"),
@@ -1100,13 +1195,29 @@ function syncCodexHarnessAdapter({
       try {
         rmSync(previousDir, { recursive: true, force: true });
       } catch {
-        // Recovery copy is outside Codex discovery and is safe to retain.
+        // 복구본은 Codex 탐색 경로 밖에 둔다.
       }
     }
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
   return { ok: true, action: "synced", sourceDir, destinationDir };
+}
+
+function syncCodexManagedSkills() {
+  return [
+    [
+      "tfx-harness",
+      join(PLUGIN_ROOT, "adapters", "codex", "skills", "tfx-harness"),
+    ],
+    ["tfx-live", join(PLUGIN_ROOT, "skills", "tfx-live")],
+  ].map(([name, sourceDir]) => ({
+    name,
+    ...syncCodexHarnessAdapter({
+      sourceDir,
+      destinationDir: join(CODEX_DIR, "skills", name),
+    }),
+  }));
 }
 
 function isProtectedCodexConfigMutationEnv(env = process.env) {
@@ -1913,6 +2024,7 @@ export {
   LOCAL_DEV_SKILL_MARKER,
   listInlineProfileNames,
   PLUGIN_ROOT,
+  REMOVED_SKILL_NAMES,
   REQUIRED_CODEX_PROFILES,
   REQUIRED_TOP_LEVEL_SETTINGS,
   readMarker,
@@ -1927,6 +2039,7 @@ export {
   scanHudFiles,
   syncAliasedSkillDir,
   syncCodexHarnessAdapter,
+  syncCodexManagedSkills,
   syncWorkerPackages,
   validateSchtasksTrLength,
   WINDOWS_HUB_AUTOSTART_TASK,
@@ -2019,15 +2132,24 @@ export async function runDeferred(stdinData) {
       result.action === "updated" ||
       result.action === "removed",
   ).length;
-  const codexHarnessSync = syncCodexHarnessAdapter();
-  if (!codexHarnessSync.ok) {
-    io.log(`  \x1b[31m✗\x1b[0m Codex tfx-harness: ${codexHarnessSync.reason}`);
-    return io.result(1);
+  const codexSkills = syncCodexManagedSkills();
+  for (const skill of codexSkills) {
+    if (!skill.ok) {
+      io.log(`  \x1b[31m✗\x1b[0m Codex ${skill.name}: ${skill.reason}`);
+      return io.result(1);
+    }
+    if (skill.action === "skipped") {
+      io.log(`  \x1b[33m⚠\x1b[0m Codex ${skill.name}: 사용자 스킬 보존`);
+    }
   }
-  if (codexHarnessSync.action === "skipped") {
-    io.log(
-      "  \x1b[33m⚠\x1b[0m Codex tfx-harness: user skill preserved; no managed files changed",
-    );
+  const staleSourceDir = join(PLUGIN_ROOT, "skills");
+  for (const installedDir of [
+    join(CLAUDE_DIR, "skills"),
+    join(CODEX_DIR, "skills"),
+  ]) {
+    const stale = cleanupStaleSkills(installedDir, staleSourceDir);
+    for (const name of stale.preserved)
+      io.log(`  \x1b[33m⚠\x1b[0m 구형 스킬 ${name}: 사용자 사본 보존`);
   }
   const cloakBrowserResult = ensureCloakBrowser({
     warn: (message) => io.log(`  \x1b[33m⚠\x1b[0m ${message}`),
@@ -2050,7 +2172,8 @@ export async function runDeferred(stdinData) {
   }
 
   let synced =
-    claudeRoutingChangedCount + (codexHarnessSync.action === "synced" ? 1 : 0);
+    claudeRoutingChangedCount +
+    codexSkills.filter((skill) => skill.action === "synced").length;
 
   // ── Memory Doctor (P0 자동 수정) ──
   const isCIEnv = process.env.CI === "true" || process.env.DOCKER === "true";
@@ -2237,12 +2360,8 @@ export async function runDeferred(stdinData) {
       if (!existsSync(skillMd)) continue;
 
       const installedDir = join(skillsDst, name);
-      // frontmatter `platform:` 비대상(예: macOS 의 tfx-wt)은 설치하지 않고,
-      // 이전에 깔린 사본은 지운다. 로컬 개발 스킬은 건드리지 않는다.
+      // 플랫폼 비대상 사본은 앞선 관리 설치본 정리에서 판정한다.
       if (!isSkillSupportedOnPlatform(skillDir)) {
-        if (existsSync(installedDir) && !isLocalDevSkillDir(installedDir)) {
-          rmSync(installedDir, { recursive: true, force: true });
-        }
         continue;
       }
 

@@ -96,7 +96,7 @@ Bash("triflux setup")
 
 #### 단계 3: Codex 프로파일
 
-`~/.codex/config.toml`을 Read 도구로 읽어 필수 프로파일 존재 여부 확인.
+`~/.codex/<프로필>.config.toml` 파일을 읽어 필수 프로파일 존재 여부 확인.
 필수: `gpt6_astra_ultra`, `gpt6_astra_max`, `gpt6_astra_xhigh`, `gpt61_sol_high`, `gpt61_sol_med`, `gpt6_luna_high`, `gpt6_luna_low`.
 
 - 모두 존재 → ✅ 표시
@@ -106,9 +106,9 @@ Bash("triflux setup")
   header: "Profiles"
   options:
     - label: "생성 (Recommended)"
-      description: "누락된 프로파일을 config.toml에 추가"
+      description: "누락된 프로파일 파일 생성"
     - label: "건너뛰기"
-      description: "나중에 /tfx-profile로 관리"
+      description: "나중에 ~/.codex/<프로필>.config.toml 직접 관리"
   ```
 
 #### 단계 3.5: Antigravity 프로필
@@ -126,7 +126,7 @@ Bash("triflux setup")
     - label: "생성 (Recommended)"
       description: "누락된 프로필을 triflux-profiles.json에 추가"
     - label: "건너뛰기"
-      description: "나중에 /tfx-profile --gemini로 관리"
+      description: "나중에 ~/.gemini/triflux-profiles.json 직접 관리"
   ```
 
 #### 단계 3.6: Codex MCP Gateway 싱글톤 전환

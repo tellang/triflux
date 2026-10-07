@@ -66,7 +66,6 @@ Skills you invoke directly:
 | `/tfx-remote` | Remote Claude Code sessions over SSH: `setup`, `spawn`, `list`, `attach`, `send`, `resume`, `probe`, `kill`. |
 | `/tfx-setup` | Interactive setup: file sync, HUD, Codex profiles, MCP, hook priority. |
 | `/tfx-doctor` | Diagnose and repair; also starts, stops, and checks the Hub. |
-| `/tfx-profile` | Manage Codex profiles. |
 | `/tfx-ship` | triflux release flow (maintainers). |
 | `/tfx-wt` | Windows Terminal tabs and panes. `tfx setup` installs it on Windows only. |
 
@@ -75,13 +74,12 @@ Internal lanes (marked `internal: true`; other skills and the router call them, 
 | Skill | Use |
 | --- | --- |
 | `tfx-harness` | Meta routing: returns which skill or path fits a request, without running it. |
-| `tfx-plan` | Multi-model implementation plan (`--quick` for a lighter pass). |
 | `tfx-review` | Code review verdict (`--quick` for a lighter pass). |
 | `tfx-research` | Web research with cross-checked sources (`--quick`, `--auto`, `--depth`). |
-| `tfx-interview` | Requirements interview; `--format goal` turns an idea into a Claude Code `/goal` block. |
 
-The package also bundles two general helpers, `merge-worktree` and `star-prompt`.
-A keyword hook may suggest a skill from your prompt; invoke `/tfx-*` explicitly when you want a predictable route.
+Use superpowers `writing-plans` for implementation plans, host `deep-interview` for requirements,
+and Claude Code’s built-in `/goal` for goals. Use `/tfx-auto --mode deep` for multi-model planning
+and execution. Manage Codex profiles directly in `~/.codex/<profile>.config.toml`.
 
 ## `/tfx-auto` flags
 

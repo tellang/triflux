@@ -57,13 +57,7 @@ describe("스킬 문서 존재 확인", () => {
   // Phase 5 cleanup (b371043) removed tfx-deep-interview, tfx-autoresearch,
   // and tfx-multi thin aliases. Their semantics were absorbed into the main
   // skill bodies. See `축소된 스킬 본체 이관 완결성` suite for body-level checks.
-  const expected = [
-    "tfx-auto",
-    "tfx-doctor",
-    "tfx-setup",
-    "tfx-interview",
-    "tfx-research",
-  ];
+  const expected = ["tfx-auto", "tfx-doctor", "tfx-setup", "tfx-research"];
 
   for (const name of expected) {
     it(`${name}/SKILL.md 존재`, () => {
@@ -255,35 +249,6 @@ describe("tfx-auto SKILL.md — thin alias 이관 규칙", () => {
 });
 
 describe("축소된 스킬 본체 이관 완결성", () => {
-  it("tfx-interview: 프론트매터에 deep-interview 트리거를 흡수", () => {
-    const content = readSkill("tfx-interview");
-    const frontmatter = extractFrontmatter(content);
-    assert.ok(
-      /deep-interview|딥인터뷰|소크라테스|깊이 탐색|요구사항 분석/.test(
-        frontmatter,
-      ),
-      "프론트매터에 deep-interview 계열 트리거가 없음",
-    );
-  });
-
-  it("tfx-interview: 5개 Stage 헤더가 모두 존재 (Stage 1~5)", () => {
-    const content = readSkill("tfx-interview");
-    for (let i = 1; i <= 5; i++) {
-      assert.ok(
-        new RegExp(`#{3,4}\\s+Stage\\s+${i}:`).test(content),
-        `Stage ${i} 헤더가 없음`,
-      );
-    }
-  });
-
-  it("tfx-interview: 산출물 저장 경로 명시", () => {
-    const content = readSkill("tfx-interview");
-    assert.ok(
-      /\.tfx\/plans\/interview-/.test(content),
-      "산출물 저장 경로(.tfx/plans/interview-{timestamp})가 없음",
-    );
-  });
-
   it("tfx-research: auto 리서치 섹션 존재", () => {
     const content = readSkill("tfx-research");
     const autoSection = extractSection(content, /^##\s+Auto\s+모드/);
@@ -306,14 +271,6 @@ describe("축소된 스킬 본체 이관 완결성", () => {
       /\.tfx\/reports\/research-/.test(content),
       "보고서 저장 경로(.tfx/reports/research-{timestamp})가 없음",
     );
-  });
-
-  it("false positive 방지: tfx-interview에서 Stage가 주석이 아닌 헤더로 존재", () => {
-    const content = readSkill("tfx-interview");
-    const stageHeadings = content
-      .split("\n")
-      .filter((l) => /^#{3,4}\s+Stage\s+\d+:/.test(l));
-    assert.ok(stageHeadings.length >= 5, "Stage 헤더가 5개 미만임");
   });
 
   it("tfx-auto: PRE-CONTEXT GATE와 context snapshot 계약을 명시", () => {

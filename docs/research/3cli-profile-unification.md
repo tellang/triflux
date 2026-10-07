@@ -877,7 +877,7 @@ tasks:
      - tier 색상 코딩 (flagship=purple, standard=blue, coding=green, ...)
   2. hub/hud/ (있는 경우)
      - qos 상태에 통일 프로파일 정보 포함
-  3. tfx-profile 스킬 업데이트
+  3. 프로필 목록 UI 업데이트
      - 통일 프로파일 목록 표시
      - 에이전트별 기본 프로파일 조회
 ```

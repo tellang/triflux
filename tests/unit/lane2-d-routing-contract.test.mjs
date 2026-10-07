@@ -148,19 +148,4 @@ describe("lane2-b trigger reduction: D2/D8 surfaces stay explicit-only", () => {
       /\| 정리 \| 대상 domain을 먼저 판정; 무수식 AI slop\/deslop은 host ai-slop-cleaner \| D8 참조 \(명시 TFX 3자 cleanup만 `tfx-auto --mode consensus`\) \|/,
     );
   });
-
-  for (const [skill, forbiddenExamples] of [
-    ["tfx-interview", ["/요구사항 분석", "/인터뷰"]],
-  ]) {
-    it(`${skill} does not advertise generic activation aliases`, () => {
-      const content = read("skills", skill, "SKILL.md");
-      assert.match(content, /명시 `tfx-/);
-      for (const example of forbiddenExamples) {
-        assert.doesNotMatch(
-          content,
-          new RegExp(example.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
-        );
-      }
-    });
-  }
 });

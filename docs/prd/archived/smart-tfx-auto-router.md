@@ -148,8 +148,8 @@ function recordRouteOutcome(slug, mode, outcome) {
 ```
 tfx-autopilot, tfx-autoroute, tfx-auto-codex, tfx-codex, tfx-gemini,
 tfx-fullcycle, tfx-persist, tfx-ralph, tfx-consensus,
-tfx-plan, tfx-review, tfx-qa, tfx-analysis, tfx-research, tfx-autoresearch,
-tfx-find, tfx-prune, tfx-debate, tfx-panel, tfx-interview,
+tfx-review, tfx-qa, tfx-analysis, tfx-research, tfx-autoresearch,
+tfx-find, tfx-prune, tfx-debate, tfx-panel,
 tfx-deep-analysis, tfx-deep-plan, tfx-deep-qa, tfx-deep-research, tfx-deep-review
 ```
 

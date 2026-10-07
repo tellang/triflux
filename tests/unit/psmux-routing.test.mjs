@@ -383,9 +383,7 @@ describe("SKILL.md — Phase 3 content verification (psmux routing fix)", () => 
 
 describe("Deep skill preflight — macOS tmux is first-class", () => {
   const deepSkillPaths = [
-    "skills/tfx-plan/SKILL.md",
     "skills/tfx-review/SKILL.md",
-    "packages/triflux/skills/tfx-plan/SKILL.md",
     "packages/triflux/skills/tfx-review/SKILL.md",
   ];
 

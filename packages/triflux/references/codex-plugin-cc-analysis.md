@@ -414,7 +414,6 @@ GitHub 웹 UI 기준으로도 상위 구조는 다음과 같다.
 - `tfx-hooks`
 - `tfx-hub`
 - `tfx-setup`
-- `tfx-profile`
 - `tfx-remote-spawn`
 - `tfx-review`
 - `tfx-qa`

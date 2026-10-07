@@ -5,8 +5,8 @@
 이 문서는 **무엇을 어떤 순서로 밟는가**(워크플로 단계 + 자연어 트리거)를 정한다.
 **어느 시스템이 그 기능을 소유하는가**(gstack / superpowers / triflux)는
 `tfx-stack-coexistence.md` 의 책임 매트릭스가 SSOT다. 두 문서가 어긋나 보이면 층위를
-먼저 구분한다 — 예컨대 `writing-plans` 는 ladder 의 한 *단계*이고, Plan 기능의 *owner* 는
-triflux 다. 같은 층위에서 실제로 갈릴 때만 coexistence 를 따른다.
+먼저 구분한다. 실행 계획은 superpowers `writing-plans`, TFX 다중모델 계획·실행은
+`tfx-auto --mode deep`이 맡는다. 같은 층위에서 실제로 갈릴 때만 coexistence를 따른다.
 
 ## 기본 워크플로우 ladder
 
@@ -40,9 +40,9 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 
 - D0: 명시 `/skill`, `$skill`, `tfx-*`, `--mode/--cli`는 안전 위반이 없으면 유지한다.
 - D1: “어떤 스킬/경로?”만 묻는 요청은 `tfx-harness`가 recommendation-only로 owner 하나를 반환한다.
-- D2: 목표·non-goal·acceptance criteria가 불명확하면 host `deep-interview`; 명시 TFX 변형이면 `tfx-interview`; 자연어 목표의 `/goal` 블록 변환은 `tfx-interview --format goal`.
+- D2: 목표·non-goal·acceptance criteria가 불명확하면 host `deep-interview`; 자연어 목표의 `/goal` 변환은 Claude Code 기본 `/goal`을 쓴다.
 - D3: 제품 수요·wedge 단계는 `office-hours`; D4 해법/UX 발산은 `brainstorming`.
-- D5: 승인된 spec의 실행 계획은 `writing-plans`; 명시 TFX 다중모델 합의는 `tfx-plan`.
+- D5: 승인된 spec의 실행 계획은 superpowers `writing-plans`; 명시 TFX 다중모델 계획·실행은 `tfx-auto --mode deep`.
 - D6: 실패/버그/test failure는 `systematic-debugging` 후 `tfx-auto`; 정상 구조 설명은 `tfx-auto --mode consensus --shape panel`.
 - D7: 로컬 파일·심볼은 Claude 기본 Explore 에이전트(스킬 없음); 외부·최신·공식 문서는 `tfx-research`.
 - D8: 무수식 AI slop/deslop/refactor는 host `ai-slop-cleaner`; 명시 TFX 3자 cleanup만 `tfx-auto --mode consensus`; 회고는 `retro`. “정리” 한 단어로 cleanup을 강제하지 않는다.
@@ -59,7 +59,9 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | 구현/수정 | 만들어, 고쳐, 구현해, 짜줘, 수정해, 바꿔 | tfx-auto |
 | 리뷰 | 봐줘, 리뷰해, 검토해, 괜찮아? | `superpowers:review` (owner). 교차모델 판정이 필요할 때만 tfx-review |
 | 분석 | 분석해, 어떻게 돌아가?, 구조가 뭐야 | tfx-auto (`--mode consensus --shape panel`) |
-| 계획 | 계획, 어떻게 하지, 설계해 | tfx-plan |
+| 계획 | 계획, 어떻게 하지, 설계해 | superpowers `writing-plans`; TFX 다중모델 계획·실행은 `tfx-auto --mode deep` |
+| 요구사항 명확화 | 요구사항, 인터뷰, 목표 구체화 | host `deep-interview`; 목표 변환은 Claude Code 기본 `/goal` |
+| Codex 프로필 관리 | 프로필, 모델, effort 변경 | `~/.codex/<프로필>.config.toml` 직접 관리 |
 | 검색 | 찾아, 어디있어, 파일 찾아 | Claude 기본 Explore 에이전트 |
 | 리서치 (빠른) | 검색해줘, 찾아봐, 공식문서, 이거 뭐야 | tfx-research |
 | 리서치 (자율) | 자율 리서치, 검색하고 정리해, research and plan | tfx-research (Auto 모드) |
@@ -95,7 +97,7 @@ triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR
 | 2차 | **Antigravity** | Codex quota exhaust, 가독성 cross-check, 별도 시각 검토 |
 | 한정 (Claude 만) | **Claude** (`opus` 최신 tier 별칭) | 메타 라우팅 (`/tfx-harness`), planning gate (`/office-hours`, `/autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack /qa`), 또는 Codex/Antigravity 미가용 |
 
-`tfx-auto`, `tfx-review`, `tfx-plan`, `tfx-research` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli codex`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
+`tfx-auto`, `tfx-review`, `tfx-research` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli codex`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
 
 `--retry auto-escalate` 체인 (`.claude/rules/tfx-escalation-chain.md`) 의 1단계가 Codex 인 것도 이 정책과 정합한다 (2단계 Claude `fable` 최신 tier 별칭은 최종 수단).
 
