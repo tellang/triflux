@@ -1,7 +1,4 @@
-// tests/unit/tfx-route-preflight-all-dead.test.mjs
-// #148: _mcp_preflight_filter_dead — profile-allowed 전부 dead 엣지케이스.
-// 빈 allowed_pat 이 _codex_config_swap fail-safe (#132) 를 통해 원본 config
-// 전체를 유지시키는 역효과를 early-fail (rc=78) 로 차단한다.
+// dead MCP는 enabled=false로 유지하고 all-dead 판정은 기존 정책을 따른다.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -74,6 +71,7 @@ done
   const result = spawnSync("bash", ["-c", script], {
     encoding: "utf8",
     cwd: REPO_ROOT,
+    env: { ...process.env, HOME: dir, CODEX_HOME: dir },
   });
   const stdout = result.stdout || "";
   const rcMatch = stdout.match(/PREFLIGHT_RC=(\d+)/);
@@ -115,10 +113,12 @@ describe("#148 _mcp_preflight_filter_dead — all-dead early fail", () => {
     });
     cleanupDirs.push(result.dir);
     assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
-    assert.equal(result.remainingCount, 4);
+    assert.equal(result.remainingCount, 6);
     assert.deepEqual(result.remainingFlags, [
       "-c",
       "mcp_servers.alive1.enabled=true",
+      "-c",
+      "mcp_servers.dead1.enabled=false",
       "-c",
       "mcp_servers.alive2.enabled=true",
     ]);
@@ -140,7 +140,12 @@ describe("#148 _mcp_preflight_filter_dead — all-dead early fail", () => {
     assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
     assert.match(result.stderr, /graceful degradation/);
     assert.match(result.stderr, /MCP 전부 dead/);
-    assert.equal(result.remainingCount, 0);
+    assert.deepEqual(result.remainingFlags, [
+      "-c",
+      "mcp_servers.dead1.enabled=false",
+      "-c",
+      "mcp_servers.dead2.enabled=false",
+    ]);
   });
 
   it("#170 all-dead + TFX_MCP_FAIL_ON_ALL_DEAD=1 → rc=78 (opt-in early fail)", () => {
@@ -177,7 +182,12 @@ describe("#148 _mcp_preflight_filter_dead — all-dead early fail", () => {
     cleanupDirs.push(result.dir);
     assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
     assert.match(result.stderr, /graceful degradation/);
-    assert.equal(result.remainingCount, 0);
+    assert.deepEqual(result.remainingFlags, [
+      "-c",
+      "mcp_servers.dead1.enabled=false",
+      "-c",
+      "mcp_servers.dead2.enabled=false",
+    ]);
   });
 
   it("none-dead: no dead servers → rc=0, no filter changes", () => {
@@ -277,7 +287,7 @@ describe("#153 dotted server names — preflight regex 는 dot 포함", () => {
     }
   });
 
-  it("dotted dead 서버 (`foo.bar`) 가 candidate 로 추출되고 flag 가 제거된다", () => {
+  it("dotted dead 서버 (`foo.bar`) 가 candidate 로 추출되고 enabled=false로 바뀐다", () => {
     const result = runPreflight({
       flags: [
         "-c",
@@ -291,10 +301,14 @@ describe("#153 dotted server names — preflight regex 는 dot 포함", () => {
     });
     cleanupDirs.push(result.dir);
     assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
-    // dotted 서버의 모든 override (enabled=true + args=[]) 가 drop 된다.
+    // enabled만 바꾸고 다른 override는 보존한다.
     assert.deepEqual(result.remainingFlags, [
       "-c",
       "mcp_servers.alive1.enabled=true",
+      "-c",
+      "mcp_servers.foo.bar.enabled=false",
+      "-c",
+      "mcp_servers.foo.bar.args=[]",
     ]);
     assert.match(result.stderr, /1개 dead MCP 제외 \(foo\.bar\)/);
   });
@@ -391,8 +405,10 @@ describe("#170 P1-1 dotted alive survivor — false degraded 방지", () => {
       /graceful degradation/,
       "dotted alive 1개 있는데도 degraded 로 빠짐 — 정규식 회귀",
     );
-    // dotted alive flag 보존 + dead flag 제거 검증
+    // dotted alive는 유지하고 dead는 비활성화한다.
     assert.deepEqual(result.remainingFlags, [
+      "-c",
+      "mcp_servers.dead1.enabled=false",
       "-c",
       "mcp_servers.foo.bar.enabled=true",
     ]);

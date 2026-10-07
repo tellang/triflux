@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -12,11 +13,32 @@ import {
   resolveSearchToolOrder,
 } from "../../scripts/lib/mcp-filter.mjs";
 
+const fixtureDir = mkdtempSync(join(tmpdir(), "tfx-mcp-policy-"));
+const codexConfig = join(fixtureDir, "config.toml");
+writeFileSync(
+  codexConfig,
+  [
+    "context7",
+    "brave-search",
+    "exa",
+    "tavily",
+    "playwright",
+    "sequential-thinking",
+  ]
+    .map(
+      (name) => `[mcp_servers.${name}]\nurl = "http://fixture.invalid/mcp"\n`,
+    )
+    .join("\n"),
+);
+after(() => rmSync(fixtureDir, { recursive: true, force: true }));
+
 describe("mcp-filter", () => {
   it("delimited 출력은 라우터가 읽는 7필드를 레코드 구분자로 잇는다", (t) => {
     const dir = mkdtempSync(new URL("./mcp-filter-", import.meta.url));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const inventoryFile = join(dir, "inventory.json");
+    const config = join(dir, "config.toml");
+    writeFileSync(config, "[mcp_servers.context7]\n[mcp_servers.playwright]\n");
     writeFileSync(
       inventoryFile,
       JSON.stringify({
@@ -40,6 +62,8 @@ describe("mcp-filter", () => {
         "context7,playwright",
         "--inventory-file",
         inventoryFile,
+        "--codex-config",
+        config,
         "--phase",
         "verify",
       ],
@@ -50,7 +74,14 @@ describe("mcp-filter", () => {
       "reviewer",
       "context7으로 관련 문서를 조회하세요.",
       "context7",
-      '-c,mcp_servers.context7.enabled=true,-c,mcp_servers.context7.enabled_tools=["resolve-library-id","query-docs"],-c,mcp_servers.playwright.enabled=false',
+      [
+        "-c",
+        "mcp_servers.context7.enabled=true",
+        "-c",
+        'mcp_servers.context7.enabled_tools=["resolve-library-id","query-docs"]',
+        "-c",
+        "mcp_servers.playwright.enabled=false",
+      ].join("\x1f"),
       JSON.stringify({
         mcp_servers: {
           context7: {
@@ -111,6 +142,7 @@ describe("mcp-filter", () => {
 
   it("executor 프로필은 코드 구현 문맥에서 context7만 허용한다 (검색/브라우징 stall 방지)", () => {
     const policy = buildMcpPolicy({
+      codexConfig,
       agentType: "executor",
       requestedProfile: "auto",
       availableServers: [
@@ -154,6 +186,7 @@ describe("mcp-filter", () => {
 
   it("reviewer 프로필은 분석용 도구와 문서 조회만 남긴다", () => {
     const policy = buildMcpPolicy({
+      codexConfig,
       agentType: "code-reviewer",
       requestedProfile: "reviewer",
       availableServers: [
@@ -217,6 +250,7 @@ describe("mcp-filter", () => {
 
   it("inventory domain_tags가 과도해도 executor 허용 서버를 불필요하게 넓히지 않아야 한다", () => {
     const policy = buildMcpPolicy({
+      codexConfig,
       agentType: "executor",
       requestedProfile: "auto",
       availableServers: [
@@ -251,8 +285,11 @@ describe("mcp-filter", () => {
     });
   });
 
-  it("CLI inventory 서버 목록을 재사용하되 명시된 available 목록을 우선한다", () => {
+  it("inventory는 허용 정책에 쓰고 Codex override는 config 서버만 대상으로 한다", () => {
+    const config = join(fixtureDir, "inventory-config.toml");
+    writeFileSync(config, "[mcp_servers.context7]\n[mcp_servers.exa]\n");
     const options = {
+      codexConfig: config,
       agentType: "executor",
       cliType: "codex",
       inventory: {
@@ -276,7 +313,7 @@ describe("mcp-filter", () => {
           availableServers: ["tavily"],
         }).codexConfig.mcp_servers,
       ),
-      ["tavily"],
+      ["context7", "exa"],
     );
   });
 
@@ -294,6 +331,17 @@ describe("mcp-filter", () => {
       assert.deepEqual(Object.keys(policy.codexConfig.mcp_servers), [
         "context7",
       ]);
+      for (const configPath of ["", join(dir, "missing.toml")]) {
+        assert.deepEqual(
+          buildMcpPolicy({
+            agentType: "executor",
+            cliType: "codex",
+            codexConfig: configPath,
+            availableServers: ["context7", "cua_repl"],
+          }).codexConfigOverrides,
+          [],
+        );
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

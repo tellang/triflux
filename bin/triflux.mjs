@@ -3846,9 +3846,7 @@ async function cmdDoctor(options = {}) {
     }
 
     // ── Codex Config Health (BUG-H #132) ──
-    // _codex_config_swap 의 restore 가 Windows lock/ACL 로 실패하면
-    // ~/.codex/config.toml.pre-exec 가 남아 [mcp_servers.*] 섹션이 영구 손실된다.
-    // orphan backup 을 감지하고 --fix 로 자동 복원한다.
+    // 이전 버전의 swap이 남긴 백업을 감지하고 --fix로 복원한다.
     section("Codex Config Health");
     {
       const codexConfig = join(CODEX_DIR, "config.toml");
