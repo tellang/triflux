@@ -16,14 +16,12 @@ import {
 } from "../../services/hub-client.mjs";
 import {
   ensureTmuxOrExit,
-  resolveEffectiveMode,
+  normalizeTeammateMode,
 } from "../../services/runtime-mode.mjs";
 import { saveTeamState } from "../../services/state-store.mjs";
 import { parseTeamArgs } from "./parse-args.mjs";
 import { startHeadlessTeam } from "./start-headless.mjs";
-import { startInProcessTeam } from "./start-in-process.mjs";
 import { startMuxTeam } from "./start-mux.mjs";
-import { startWtTeam } from "./start-wt.mjs";
 
 function printStartUsage() {
   console.log(`\n  ${AMBER}${BOLD}⬡ tfx multi${RESET}\n`);
@@ -43,12 +41,6 @@ function printStartUsage() {
   console.log(
     `          ${WHITE}tfx multi --dashboard-anchor window "작업"${RESET} ${DIM}(dashboard anchor: window|tab, 기본 window)${RESET}`,
   );
-  console.log(
-    `          ${WHITE}tfx multi --teammate-mode wt "작업"${RESET} ${DIM}(Windows Terminal split-pane)${RESET}`,
-  );
-  console.log(
-    `          ${WHITE}tfx multi --teammate-mode in-process "작업"${RESET} ${DIM}(mux 불필요)${RESET}\n`,
-  );
 }
 
 function printWorkerPreview(agents, subtasks) {
@@ -60,14 +52,6 @@ function printWorkerPreview(agents, subtasks) {
     console.log(`    ${DIM}[${agents[index]}-${index + 1}] ${preview}${RESET}`);
   }
   console.log("");
-}
-
-function renderTmuxInstallHelp() {
-  console.log(`\n  ${RED}${BOLD}tmux 미발견${RESET}\n`);
-  console.log("  현재 선택한 모드는 tmux 기반 팀세션이 필요합니다.\n");
-  console.log(
-    `  설치:\n    Windows: ${WHITE}winget install psmux${RESET}\n    macOS:   ${WHITE}brew install tmux${RESET}\n    Linux:   ${WHITE}apt install tmux${RESET}\n`,
-  );
 }
 
 export { parseTeamArgs };
@@ -116,11 +100,16 @@ export async function teamStart(args = []) {
     assigns,
   });
 
+  const effectiveMode = normalizeTeammateMode(teammateMode);
+  if (effectiveMode !== "headless") ensureTmuxOrExit();
+  const effectiveNativeBridge =
+    effectiveMode === "headless" && !nativeBridgeUiOptOut ? true : nativeBridge;
+
   console.log(`\n  ${AMBER}${BOLD}⬡ tfx multi${RESET}\n`);
 
   // P1b: 워커 수 계산 — 단일 워커 headless에는 Hub 불필요
   const workerCount = agents.length;
-  const needsHub = workerCount >= 2 || teammateMode !== "headless";
+  const needsHub = workerCount >= 2 || effectiveMode !== "headless";
 
   let hub = null;
   if (needsHub) {
@@ -142,11 +131,6 @@ export async function teamStart(args = []) {
 
   const sessionId = `tfx-multi-${Date.now().toString(36).slice(-4)}${Math.random().toString(36).slice(2, 6)}`;
   const hubUrl = hub?.url || getDefaultHubUrl();
-  const { mode: effectiveMode, warnings: modeWarnings } =
-    resolveEffectiveMode(teammateMode);
-  for (const message of modeWarnings) warn(message);
-  const effectiveNativeBridge =
-    effectiveMode === "headless" && !nativeBridgeUiOptOut ? true : nativeBridge;
 
   console.log(`  세션:  ${WHITE}${sessionId}${RESET}`);
   console.log(`  모드:  ${effectiveMode}`);
@@ -156,83 +140,44 @@ export async function teamStart(args = []) {
   );
   printWorkerPreview(agents, subtasks);
 
-  if (effectiveMode === "tmux") {
-    try {
-      ensureTmuxOrExit();
-    } catch {
-      return renderTmuxInstallHelp();
-    }
+  if (effectiveMode === "headless") {
+    return startHeadlessTeam({
+      sessionId,
+      task,
+      lead,
+      agents,
+      subtasks,
+      layout,
+      assigns,
+      autoAttach,
+      progressive,
+      timeoutSec,
+      verbose,
+      dashboard,
+      dashboardLayout,
+      dashboardSize,
+      dashboardAnchor,
+      mcpProfile,
+      model,
+      cwd,
+      nativeBridge: effectiveNativeBridge,
+      nativeBridgeMode,
+    });
   }
 
-  const state =
-    effectiveMode === "in-process"
-      ? await startInProcessTeam({
-          sessionId,
-          task,
-          lead,
-          agents,
-          subtasks,
-          hubUrl,
-        })
-      : effectiveMode === "headless"
-        ? await startHeadlessTeam({
-            sessionId,
-            task,
-            lead,
-            agents,
-            subtasks,
-            layout,
-            assigns,
-            autoAttach,
-            progressive,
-            timeoutSec,
-            verbose,
-            dashboard,
-            dashboardLayout,
-            dashboardSize,
-            dashboardAnchor,
-            mcpProfile,
-            model,
-            cwd,
-            nativeBridge: effectiveNativeBridge,
-            nativeBridgeMode,
-          })
-        : effectiveMode === "wt"
-          ? await startWtTeam({
-              sessionId,
-              task,
-              lead,
-              agents,
-              subtasks,
-              layout,
-              hubUrl,
-            })
-          : await startMuxTeam({
-              sessionId,
-              task,
-              lead,
-              agents,
-              subtasks,
-              layout,
-              hubUrl,
-              teammateMode: effectiveMode,
-            });
+  const state = await startMuxTeam({
+    sessionId,
+    task,
+    lead,
+    agents,
+    subtasks,
+    layout,
+    hubUrl,
+    teammateMode: effectiveMode,
+  });
 
-  if (!state) return fail("in-process supervisor 시작 실패");
+  if (!state) return fail("팀 세션 시작 실패");
   state.sessionId = sessionId;
   saveTeamState(state, sessionId);
   if (typeof state.postSave === "function") state.postSave();
-  if (effectiveMode === "in-process") {
-    ok("네이티브 in-process 팀 시작 완료");
-    console.log(`  ${DIM}tmux 없이 실행됨 (직접 CLI 프로세스)${RESET}`);
-    console.log(`  ${DIM}제어: tfx multi send/control/tasks/status${RESET}\n`);
-  } else if (effectiveMode === "wt") {
-    ok("Windows Terminal wt 팀 시작 완료");
-    console.log(
-      `  ${DIM}현재 pane 기준으로 ${state.layout} 분할 생성됨${RESET}`,
-    );
-    console.log(
-      `  ${DIM}wt 모드는 자동 프롬프트 주입/Hub direct 제어(send/control)가 제한됩니다.${RESET}\n`,
-    );
-  }
 }

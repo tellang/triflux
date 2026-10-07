@@ -15,8 +15,6 @@ import {
 } from "../../session-sync.mjs";
 import { HUB_PID_DIR, PKG_ROOT } from "./state-store.mjs";
 
-export { nativeGetStatus } from "./native-control.mjs";
-
 const HUB_PID_FILE = join(HUB_PID_DIR, "hub.pid");
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 
@@ -193,7 +191,7 @@ export async function ensureHubAlive(maxRetries = 3) {
 
 export async function fetchHubTaskList(state) {
   const hubBase = (state?.hubUrl || getDefaultHubUrl()).replace(/\/mcp$/, "");
-  const teamName = state?.native?.teamName || state?.sessionName || null;
+  const teamName = state?.sessionName || null;
   if (!teamName) return [];
 
   try {

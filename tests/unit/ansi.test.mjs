@@ -10,7 +10,6 @@ import {
   BOLD,
   bold,
   box,
-  CLI_ICON,
   clearLine,
   clearScreen,
   clearToEnd,
@@ -23,7 +22,6 @@ import {
   dim,
   FG,
   MOCHA,
-  moveDown,
   moveTo,
   moveUp,
   padRight,
@@ -63,11 +61,9 @@ describe("커서 이동", () => {
     assert.equal(moveTo(1, 1), "\x1b[1;1H");
   });
 
-  it("moveUp / moveDown 기본값 1", () => {
+  it("moveUp 기본값 1", () => {
     assert.ok(moveUp().includes("1A"));
-    assert.ok(moveDown().includes("1B"));
     assert.ok(moveUp(3).includes("3A"));
-    assert.ok(moveDown(5).includes("5B"));
   });
 });
 
@@ -316,19 +312,13 @@ describe("statusBadge", () => {
   });
 });
 
-// ── STATUS_ICON / CLI_ICON ──
-describe("STATUS_ICON / CLI_ICON", () => {
+// ── STATUS_ICON ──
+describe("STATUS_ICON", () => {
   it("STATUS_ICON: 모든 상태 정의", () => {
     assert.ok(STATUS_ICON.running);
     assert.ok(STATUS_ICON.completed);
     assert.ok(STATUS_ICON.failed);
     assert.ok(STATUS_ICON.pending);
-  });
-
-  it("CLI_ICON: codex/antigravity/claude 정의", () => {
-    assert.ok(CLI_ICON.codex);
-    assert.ok(CLI_ICON.antigravity);
-    assert.ok(CLI_ICON.claude);
   });
 });
 

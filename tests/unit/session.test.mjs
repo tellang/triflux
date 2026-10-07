@@ -168,10 +168,6 @@ describe("session.mjs wt-manager migration", () => {
     assert.ok(sessionSrc.includes(".terminal.hasWt"));
   });
 
-  it("createWtManager를 import한다", () => {
-    assert.ok(sessionSrc.includes('from "./wt-manager.mjs"'));
-  });
-
   it("wt.exe 직접 호출이 없다", () => {
     assert.ok(
       !sessionSrc.match(/(?:spawn|execFile(?:Sync)?)\s*\(\s*["']wt\.exe/),

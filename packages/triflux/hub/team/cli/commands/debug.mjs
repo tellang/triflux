@@ -2,18 +2,11 @@ import {
   capturePaneOutput,
   detectMultiplexer,
   getSessionAttachedCount,
-  hasWindowsTerminal,
-  hasWindowsTerminalSession,
   listSessions,
 } from "../../session.mjs";
 import { AMBER, BOLD, DIM, RESET } from "../../shared.mjs";
-import { formatCompletionSuffix } from "../render.mjs";
-import { getHubInfo, nativeGetStatus } from "../services/hub-client.mjs";
-import {
-  isNativeMode,
-  isTeamAlive,
-  isWtMode,
-} from "../services/runtime-mode.mjs";
+import { getHubInfo } from "../services/hub-client.mjs";
+import { isTeamAlive } from "../services/runtime-mode.mjs";
 import { loadTeamState, TEAM_PROFILE } from "../services/state-store.mjs";
 
 export async function teamDebug(args = []) {
@@ -52,31 +45,6 @@ export async function teamDebug(args = []) {
   console.log(
     `    attached:  ${getSessionAttachedCount(state.sessionName) ?? "-"}`,
   );
-
-  if (isWtMode(state)) {
-    console.log(`\n  ${BOLD}wt-session${RESET}`);
-    console.log(`    window:    ${state?.wt?.windowId ?? 0}`);
-    console.log(`    layout:    ${state?.wt?.layout || state?.layout || "-"}`);
-    console.log(
-      `    panes:     ${state?.wt?.paneCount ?? (state.members || []).length}`,
-    );
-    console.log(`    wt.exe:    ${hasWindowsTerminal() ? "yes" : "no"}`);
-    console.log(`    WT_SESSION:${hasWindowsTerminalSession() ? "yes" : "no"}`);
-    console.log("");
-    return;
-  }
-
-  if (isNativeMode(state)) {
-    console.log(`\n  ${BOLD}native-members${RESET}`);
-    const members = (await nativeGetStatus(state))?.data?.members || [];
-    if (!members.length) console.log(`    ${DIM}(no data)${RESET}`);
-    for (const member of members)
-      console.log(
-        `    - ${member.name}: ${member.status}${formatCompletionSuffix(member)}${member.lastPreview ? ` ${DIM}${member.lastPreview}${RESET}` : ""}`,
-      );
-    console.log("");
-    return;
-  }
 
   console.log(
     `\n  ${BOLD}pane-tail${RESET} ${DIM}(last ${lines} lines)${RESET}`,

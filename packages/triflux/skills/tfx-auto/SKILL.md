@@ -35,7 +35,7 @@ echo "USER_PREFERRED_MODE: ${USER_MODE:-none}"
 판단 기준 (우선순위 순):
 
 0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--shape`/`--cli-set`/`--parallel`/`--retry` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
-   - `--parallel N` → tfx-multi 엔진 위임 (`auto`: 리드 tmux면 interactive pane, 없으면 in-process)
+   - `--parallel N` → tfx-multi 엔진 위임 (`auto`: mux가 있으면 interactive pane, 비TTY에서 mux가 없으면 headless)
    - `--cli codex|antigravity` → `TFX_CLI_MODE` 설정 + 단일 실행
    - `--mode deep` → `-t/--thorough` 동일 동작 (pipeline init)
    - `--mode consensus --shape debate|panel` → prompt ensemble fold 경로
@@ -124,7 +124,7 @@ ARGUMENTS 에 아래 플래그가 있으면 Step 0 스마트 라우팅의 내부
 | `--experts` | `"claude:...;codex:...;antigravity:..."` | panel roster override | panel normalizer |
 | `--analysis-prompt-file` | `<path>` | consensus family 공통 분석 프롬프트 주입 | consensus normalizer |
 | `--parallel` | `1` (기본) | 단일 워커 | tfx-route.sh |
-| `--parallel` | `N` | 로컬 병렬 (mode 생략=`auto`; 리드 tmux면 interactive pane, 없으면 in-process) | `tfx multi` |
+| `--parallel` | `N` | 로컬 병렬 (mode 생략=`auto`; mux가 있으면 interactive pane, 비TTY에서 mux가 없으면 headless) | `tfx multi` |
 | `--no-native-bridge-ui` | true | 명시적 headless worker의 Claude agents UI 노출을 비활성화 | `tfx multi` |
 | `--retry` | `0` | 자동 재시도 없음 | — |
 | `--retry` | `1` (기본) | bounded verify → fix loop 3회 | — |
@@ -782,7 +782,8 @@ deep/fullcycle 추가 규칙:
 | 1개 + thorough | tfx-auto 직접 실행 + verify/fix loop | tfx-route.sh |
 | 2개+ + 코드 변경 없음 | `tfx multi` auto 실행 (리드 tmux/psmux면 interactive pane) | team runtime |
 | 2개+ + 코드 변경 있음 | 태스크별 worktree에서 세션 하나씩 실행 | 개별 세션 또는 `Agent(isolation: worktree)` |
-| primary multiplexer 없음 | Native/in-process fallback | native.mjs |
+| 대화형 + primary multiplexer 없음 | tmux(macOS/Linux) 또는 psmux(Windows) 설치 안내 오류 | team runtime |
+| 비TTY + primary multiplexer 없음 | headless | headless.mjs |
 
 > **2개 이상 태스크에 코드 변경이 있으면 worktree를 나눠 세션마다 하나씩 실행한다.**
 > `Agent()`를 사용하면 `isolation: worktree`를 지정한다. 코드 변경이 없는 병렬 작업은 `tfx multi`를 사용할 수 있다.
@@ -797,8 +798,8 @@ if subtasks.length >= 2 and code_change:
   → 태스크별 worktree 생성 또는 Agent(isolation: worktree)
   → 세션마다 태스크 하나씩 실행
 else if subtasks.length >= 2:
-  → Bash("tfx multi --auto-attach --dashboard --assign 'cli:prompt:role' ...")
-  → 리드가 tmux/psmux이면 interactive pane, 없으면 Native/in-process fallback
+  → Bash("tfx multi --assign 'cli:prompt:role' ...")
+  → mux가 있으면 interactive pane, 비TTY에서 mux가 없으면 headless, 대화형에서 mux가 없으면 설치 오류
   → if thorough: verify → fix loop
 else:
   if thorough:
@@ -807,14 +808,13 @@ else:
     → tfx-auto 직접 실행 (아래)
 ```
 
-### teammate mode 정책 — interactive 기본, headless opt-in
+### teammate mode 정책
 
 기본 명령에서는 `--teammate-mode`를 **생략**한다. 이때 엔진의 `auto`가 리드 환경을 따라
-결정한다: 리드가 tmux/psmux 안이면 interactive pane, mux가 없으면 `in-process` fallback이다.
-`in-process`는 워커 실행 위치를 바꾸는 fallback일 뿐 비대화형 background 실행을 뜻하는
-`headless`와 같은 모드가 아니다.
+결정한다. tmux/psmux가 있으면 interactive pane을 사용한다. 대화형 환경에서 mux가 없으면
+설치 안내 오류로 끝낸다. 비TTY에서 mux가 없으면 headless로 실행한다.
 
-`headless`는 다음처럼 **명시적으로** 선택할 때만 쓴다.
+`headless`는 다음처럼 명시적으로 선택할 수 있다.
 
 ```bash
 Bash("tfx multi --teammate-mode headless --assign 'cli:prompt:role' ...", run_in_background=true)
@@ -826,7 +826,7 @@ Bash("tfx multi --teammate-mode headless --assign 'cli:prompt:role' ...", run_in
 워커 수만으로 headless로 자동 전환하는 임계값은 두지 않는다. pane 가독성은 화면·작업 성격에
 따라 달라지므로, 많은 워커도 `auto`와 대시보드를 유지하고 필요하면 호출자가 위 플래그로
 opt-in 한다. 명시적 `--teammate-mode headless`에서는 native bridge UI가 default on이고,
-interactive(tmux/psmux) 및 `in-process`에서는 off다.
+interactive(tmux/psmux)에서는 off다.
 
 ## 실행
 

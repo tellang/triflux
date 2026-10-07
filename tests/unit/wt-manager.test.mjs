@@ -378,3 +378,22 @@ describe("wt-manager: lifecycle helpers", () => {
     assert.deepEqual(manager.getEnvironmentInfo(), harness.environment);
   });
 });
+
+describe("wt-manager readiness deadline", () => {
+  it("uses the configured wait timeout instead of the default", async () => {
+    const harness = createHarness({ writePidFile: false });
+    const manager = createWtManager({
+      pidDir: createTempPidDir(),
+      waitTimeoutMs: 75,
+      deps: harness.deps,
+    });
+    await assert.rejects(
+      manager.createTab({ title: "slow" }),
+      /WT tab ready timeout/,
+    );
+    assert.equal(
+      harness.sleepCalls.reduce((sum, ms) => sum + ms, 0),
+      75,
+    );
+  });
+});

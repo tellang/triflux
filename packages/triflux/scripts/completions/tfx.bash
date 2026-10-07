@@ -16,7 +16,7 @@ _tfx_completion() {
     local hub_cmds="start stop status ensure help"
     local hub_flags="--port --json --help"
     local multi_cmds="status stop kill attach list help"
-    local multi_flags="--dashboard --no-dashboard --dashboard-layout --json --help"
+    local multi_flags="--no-dashboard --dashboard-layout --json --help"
     local review_flags="--base --timeout --shard --json --help"
     local schema_flags="--help"
 

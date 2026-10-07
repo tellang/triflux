@@ -1,5 +1,4 @@
-// hub/team/session.mjs — tmux/psmux/wt 세션 생명주기 관리
-// 의존성: child_process (Node.js 내장)만 사용
+// tmux/psmux 세션 생명주기 관리
 import { execSync, spawnSync } from "node:child_process";
 import { resolveGitBashExecutable } from "@triflux/core/hub/lib/bash-path.mjs";
 import { getEnvironment } from "@triflux/core/hub/lib/env-detect.mjs";
@@ -16,7 +15,6 @@ import {
   psmuxExec,
   psmuxSessionExists,
 } from "./psmux.mjs";
-import { createWtManager } from "./wt-manager.mjs";
 
 /** Windows Terminal 실행 파일 존재 여부 */
 export function hasWindowsTerminal() {
@@ -194,77 +192,6 @@ export function resolveAttachCommand(sessionName, opts = {}) {
 }
 
 /**
- * Windows Terminal pane 포커스 이동
- * @param {number} paneIndex - createWtSession()에서 생성한 pane 인덱스(0 기반)
- * @param {object} opts
- * @param {'1xN'|'Nx1'} opts.layout
- * @returns {boolean}
- */
-export function focusWtPane(paneIndex, opts = {}) {
-  // wt() 제거로 인해 일시 비활성화 (탭 기반 전환 필요)
-  return false;
-}
-
-/**
- * Windows Terminal에서 생성한 팀 pane 정리
- * @param {object} opts
- * @param {'1xN'|'Nx1'} opts.layout
- * @param {number} opts.paneCount
- * @returns {number} 닫힌 pane 수 (best-effort)
- */
-export function closeWtSession(opts = {}) {
-  // wt() 제거로 인해 일시 비활성화 (탭 기반 전환 필요)
-  return 0;
-}
-
-/**
- * Windows Terminal 독립 모드 세션 생성 (비동기)
- * @param {string} sessionName
- * @param {object} opts
- * @param {'1xN'|'Nx1'} opts.layout
- * @param {Array<{title:string,command:string,cwd?:string}>} opts.paneCommands
- * @returns {Promise<{ sessionName: string, panes: string[], titles: string[], layout: '1xN'|'Nx1', paneCount: number, anchorPane: string }>}
- */
-export async function createWtSession(sessionName, opts = {}) {
-  const { layout = "1xN", paneCommands = [] } = opts;
-
-  if (!hasWindowsTerminalSession()) {
-    throw new Error("WT_SESSION 미감지");
-  }
-  if (!getEnvironment().terminal.hasWt) {
-    throw new Error("wt.exe 미발견");
-  }
-  if (!Array.isArray(paneCommands) || paneCommands.length === 0) {
-    throw new Error("paneCommands가 비어 있음");
-  }
-
-  const wtManager = createWtManager();
-  const panes = [];
-  const titles = [];
-
-  for (let i = 0; i < paneCommands.length; i++) {
-    const pane = paneCommands[i] || {};
-    const title = pane.title || `${sessionName}-${i + 1}`;
-    const command = String(pane.command || "").trim();
-    const cwd = pane.cwd || process.cwd();
-    if (!command) continue;
-
-    await wtManager.createTab({ title, command, cwd });
-    panes.push(`wt:${i}`);
-    titles.push(title);
-  }
-
-  return {
-    sessionName,
-    panes,
-    titles,
-    layout: layout === "Nx1" ? "Nx1" : "1xN",
-    paneCount: panes.length,
-    anchorPane: "wt:anchor",
-  };
-}
-
-/**
  * tmux 세션 생성 + 레이아웃 분할
  * @param {string} sessionName — 세션 이름
  * @param {object} opts
@@ -375,23 +302,12 @@ export function configureTeammateKeybindings(sessionName, opts = {}) {
     ? `'select-pane -t :.- \\; resize-pane -Z'`
     : `'select-pane -t :.-'`;
 
-  if (inProcess) {
-    // 단일 뷰(zoom) 상태에서 팀메이트 순환
-    tmux(
-      `bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`,
-    );
-    tmux(
-      `bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`,
-    );
-  } else {
-    // 분할 뷰에서 팀메이트 순환
-    tmux(
-      `bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`,
-    );
-    tmux(
-      `bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`,
-    );
-  }
+  tmux(
+    `bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`,
+  );
+  tmux(
+    `bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`,
+  );
 
   // 대체 키: 일부 환경에서 S-Up이 누락될 때 사용
   tmux(

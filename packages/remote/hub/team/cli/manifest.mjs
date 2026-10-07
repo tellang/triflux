@@ -32,7 +32,11 @@ export const TEAM_COMMANDS = [
     usage: "tfx multi control <대상> <cmd> [사유]",
     desc: "리드 제어명령 전송",
   },
-  { name: "stop", usage: "tfx multi stop", desc: "graceful 종료" },
+  {
+    name: "stop",
+    usage: "tfx multi stop [session-id]",
+    desc: "선택한 팀 세션 종료",
+  },
   { name: "kill", usage: "tfx multi kill", desc: "모든 팀 세션 강제 종료" },
   { name: "list", usage: "tfx multi list", desc: "활성 세션 목록" },
   { name: "help", usage: "tfx multi help", desc: "도움말" },

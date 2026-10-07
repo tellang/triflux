@@ -38,15 +38,3 @@ export function renderTasks(tasks = []) {
   }
   console.log("");
 }
-
-export function formatCompletionSuffix(member) {
-  if (!member?.completionStatus) return "";
-  if (member.completionStatus === "abnormal") {
-    return ` ${RED}[abnormal:${member.completionReason || "unknown"}]${RESET}`;
-  }
-  if (member.completionStatus === "normal")
-    return ` ${GREEN}[route-ok]${RESET}`;
-  if (member.completionStatus === "unchecked")
-    return ` ${GRAY}[route-unchecked]${RESET}`;
-  return "";
-}

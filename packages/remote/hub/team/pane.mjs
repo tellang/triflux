@@ -3,7 +3,6 @@
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildExecArgs } from "@triflux/core/hub/codex-adapter.mjs";
 import { psmuxExec } from "./psmux.mjs";
 import { detectMultiplexer, tmuxExec } from "./session.mjs";
 
@@ -50,18 +49,11 @@ function muxExec(args, opts = {}) {
 /**
  * CLI 에이전트 시작 커맨드 생성
  * @param {'codex'|'antigravity'|'claude'} cli
- * @param {{ trustMode?: boolean }} [options]
  * @returns {string} 실행할 셸 커맨드
  */
-export function buildCliCommand(cli, options = {}) {
-  const { trustMode = false } = options;
-
+export function buildCliCommand(cli) {
   switch (cli) {
     case "codex":
-      // trust 모드에서는 exec 서브커맨드 기반 명령을 사용
-      if (trustMode) {
-        return buildExecArgs({});
-      }
       return "codex --dangerously-bypass-approvals-and-sandbox";
     case "claude":
       // interactive 모드
@@ -84,17 +76,8 @@ export function startCliInPane(target, command) {
 /**
  * psmux `@file` 참조 주입이 가능한 CLI인지 판정한다.
  *
- * Codex TUI는 `@` 입력이 있으면 sync_file_search_popup 경로로 FileSearchPopup을
- * 활성화한다 (call-site `codex-rs/tui/src/bottom_pane/chat_composer.rs:3082`;
- * 본체 L3271-3313 에서 `ActivePopup::File(popup)` 분기; 빈 query 상태는
- * `file_search_popup.rs:54-63` 의 `set_empty_prompt()` 가 정의). 팝업이 떠 있는
- * 동안의 Enter 처리는 같은 파일 composer의 Enter handler (`chat_composer.rs:1585-1645`
- * 기준) 에서 popup 선택 path insert 또는 dismiss 로 분기하므로 prompt submit 으로
- * 전달되지 않는다. Gemini CLI의 `@path`는 공식 client-side file-content inject
- * 이므로 유지. Codex TUI에서 `@path` 선택은 path 문자열만 textarea에 insert할
- * 뿐 Gemini처럼 파일 내용을 inject하지 않으며, 별도 file-injection slash
- * command 도 존재하지 않음 (slash_commands / prompt_args / skill_popup /
- * command_popup 소스 전수 grep 결과 0건, 2026-04-19 검증 — absence-based).
+ * Codex TUI의 @path는 파일 검색 팝업을 열어 Enter 제출을 가로막는다.
+ * Gemini CLI의 파일 내용 주입은 유지한다.
  *
  * @param {{ multiplexer: string, useFileRef: boolean, cli: string|null }} args
  */

@@ -32,10 +32,10 @@ import {
   cliColor,
   normalizeWorkerState as coreNormalizeWorkerState,
   countStatuses,
-  FALLBACK_COLUMNS,
-  FALLBACK_ROWS,
   formatTokens,
   loadVersion,
+  resolveViewportColumns,
+  resolveViewportRows,
   runtimeStatus,
   sanitizeFiles,
   sanitizeOneLine,
@@ -52,14 +52,12 @@ import {
 import {
   createPanelResizer,
   createSearchState,
-  createTokenTracker,
   createVimMotion,
 } from "./tui-widgets.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
 const VERSION = await loadVersion();
 
-// FALLBACK_COLUMNS, FALLBACK_ROWS → tui-core.mjs에서 import
 const MIN_CARD_WIDTH = 28;
 const ATTACH_SESSION_NAME_PATTERN = /^[a-zA-Z0-9_.-]+$/u;
 const DEFAULT_ATTACH_TAB_TTL_MS = 30_000;
@@ -284,11 +282,6 @@ function activityWave(tick, count = 4) {
   return `${MOCHA.executing}${wave}${RESET}`;
 }
 
-const GRID_GAP = 2;
-const DEFAULT_DETAIL_LINES = 10;
-// Tier1 상단 고정 행 수
-const _TIER1_ROWS = 2;
-
 const SUMMARY_KEYS = [
   "status",
   "lead_action",
@@ -301,30 +294,6 @@ const SUMMARY_KEYS = [
   "retryable",
   "partial_output",
 ];
-
-// ── 레이아웃 브레이크포인트 ──────────────────────────────────────────────
-// 80-119: 28col rail, 120-159: 36col rail, 160+: 균등
-function _resolveRailWidth(totalCols, columnCount) {
-  if (columnCount <= 1) return totalCols;
-  if (totalCols >= 160)
-    return Math.floor((totalCols - GRID_GAP * (columnCount - 1)) / columnCount);
-  if (totalCols >= 120)
-    return Math.min(
-      36,
-      Math.floor((totalCols - GRID_GAP * (columnCount - 1)) / columnCount),
-    );
-  return Math.min(
-    28,
-    Math.floor((totalCols - GRID_GAP * (columnCount - 1)) / columnCount),
-  );
-}
-
-function _autoColumnCount(totalCols, workerCount) {
-  if (workerCount <= 1) return 1;
-  if (totalCols >= 160) return Math.min(workerCount, 3);
-  if (totalCols >= 120) return Math.min(workerCount, 2);
-  return 1;
-}
 
 // 텍스트/상태/색상 유틸은 tui-core.mjs에서 import (위 참조)
 
@@ -354,8 +323,6 @@ function statusToRgb(status) {
   return MOCHA_RGB.muted;
 }
 
-const FADE_DURATION_MS = 1500;
-const FLASH_PHASE_MS = 250;
 const CARD_GLOW_MS = 3000;
 
 // Effect 1: Pulse border — running 워커 보더가 heartbeat 동기 breathing
@@ -372,22 +339,6 @@ function gradientBorderFn(topRgb, bottomRgb) {
     const c = lerpRgb(topRgb, bottomRgb, t);
     return `\x1b[38;2;${c.r};${c.g};${c.b}m`;
   };
-}
-
-// Effect 3: Flash-fade border — 상태 변경 시 백색 플래시 → 페이드아웃
-function _flashFadeBorderColor(currentStatus, prevStatus, changedAt) {
-  const elapsed = Date.now() - (changedAt || 0);
-  if (elapsed >= FADE_DURATION_MS || !prevStatus) return null;
-  const statusRgb = statusToRgb(currentStatus);
-  if (elapsed < FLASH_PHASE_MS) {
-    const t = elapsed / FLASH_PHASE_MS;
-    const bright = { r: 255, g: 255, b: 255 };
-    const c = lerpRgb(bright, statusRgb, t);
-    return `\x1b[38;2;${c.r};${c.g};${c.b}m`;
-  }
-  const t = (elapsed - FLASH_PHASE_MS) / (FADE_DURATION_MS - FLASH_PHASE_MS);
-  const c = lerpRgb(statusRgb, MOCHA_RGB.border, t);
-  return `\x1b[38;2;${c.r};${c.g};${c.b}m`;
 }
 
 function easeOutCubic(t) {
@@ -435,26 +386,6 @@ function dedupeRole(role, name, cli) {
 }
 
 // wrapLine, wrapTextAll → tui-core.mjs에서 import
-
-function _wrapText(
-  text,
-  width,
-  maxLines = DEFAULT_DETAIL_LINES,
-  rawMode = false,
-) {
-  if (maxLines <= 0) return [];
-  const input = sanitizeTextBlock(text, rawMode);
-  if (!input) return [];
-  const wrapped = input
-    .split("\n")
-    .flatMap((line) => wrapLine(line, width))
-    .filter(Boolean);
-  if (wrapped.length <= maxLines) return wrapped;
-  return [
-    ...wrapped.slice(0, maxLines - 1),
-    truncate(wrapped[wrapped.length - 1], width),
-  ];
-}
 
 // ── virtual row buffer ────────────────────────────────────────────────────
 class RowBuffer {
@@ -927,19 +858,6 @@ function buildHelpOverlay(width, height) {
   return result;
 }
 
-// ── joinColumns ───────────────────────────────────────────────────────────
-function _joinColumns(blocks, gap = GRID_GAP) {
-  const maxHeight = Math.max(...blocks.map((b) => b.length));
-  return Array.from({ length: maxHeight }, (_, rowIdx) =>
-    blocks
-      .map(
-        (block) =>
-          block[rowIdx] || " ".repeat(wcswidth(stripAnsi(block[0] || ""))),
-      )
-      .join(" ".repeat(gap)),
-  );
-}
-
 // ── normalizeWorkerState ──────────────────────────────────────────────────
 function normalizeWorkerState(existing, state) {
   return coreNormalizeWorkerState(
@@ -1010,7 +928,6 @@ export function createLogDashboard(opts = {}) {
   let rawModeEnabled = false;
 
   // UX 위젯 (ISSUE-14)
-  const tokenTracker = createTokenTracker();
   const searchState = createSearchState();
   const vimMotion = createVimMotion();
   const panelResizer = createPanelResizer({
@@ -1044,26 +961,6 @@ export function createLogDashboard(opts = {}) {
 
   function nowElapsedSec() {
     return Math.max(0, Math.round((now() - startedAt) / 1000));
-  }
-
-  function getViewportColumns() {
-    const v = Number.isFinite(columns)
-      ? columns
-      : Number.isFinite(stream?.columns)
-        ? stream.columns
-        : Number.isFinite(process.stdout?.columns)
-          ? process.stdout.columns
-          : FALLBACK_COLUMNS;
-    return Math.max(48, v || FALLBACK_COLUMNS);
-  }
-
-  function getViewportRows() {
-    const v = Number.isFinite(stream?.rows)
-      ? stream.rows
-      : Number.isFinite(process.stdout?.rows)
-        ? process.stdout.rows
-        : FALLBACK_ROWS;
-    return Math.max(10, v || FALLBACK_ROWS);
   }
 
   function visibleWorkerNames() {
@@ -1244,7 +1141,10 @@ export function createLogDashboard(opts = {}) {
     if (key === "g") return;
 
     // PgUp/PgDn: 페이지 단위 스크롤
-    const pageSize = Math.max(1, Math.floor(getViewportRows() / 2));
+    const pageSize = Math.max(
+      1,
+      Math.floor(resolveViewportRows({ stream }) / 2),
+    );
     if (key === "\x1b[5~") {
       scrollDetail(-pageSize);
       return;
@@ -1442,8 +1342,8 @@ export function createLogDashboard(opts = {}) {
     ensureSelectedWorker(names);
     attachInput();
 
-    const totalCols = getViewportColumns();
-    const totalRows = getViewportRows();
+    const totalCols = resolveViewportColumns({ columns, stream });
+    const totalRows = resolveViewportRows({ stream });
 
     // Help overlay: 전체 화면 오버레이
     if (helpOverlay) {
@@ -1681,9 +1581,6 @@ export function createLogDashboard(opts = {}) {
           ? existing._logSec
           : (explicitElapsed ?? nowElapsedSec());
       workers.set(paneName, merged);
-      // 토큰 히스토리 추적 (스파크라인용)
-      if (merged.tokens !== undefined)
-        tokenTracker.record(paneName, merged.tokens);
       ensureSelectedWorker(visibleWorkerNames());
       // follow-tail: 새 데이터 → 자동 scroll 재계산
       if (followTail) detailScrollOffset = 0;
@@ -1778,161 +1675,3 @@ export function createLogDashboard(opts = {}) {
     },
   };
 }
-
-// ── Conductor Tier: 세션 테이블 렌더러 ─────────────────────────────────
-//
-// renderConductorTier(snapshot, cols)
-//   snapshot: conductor.getSnapshot() 반환 배열
-//   cols:     터미널 폭 (기본 100)
-//
-// 레이아웃:
-//   ┌─ CONDUCTOR ──────────────────────────────────────────┐
-//   │ ID       Agent   Host   Health       Last Out  Restarts Why │
-//   │ abc123   codex   local  ■ OK         2s ago    0           │
-//   └──────────────────────────────────────────────────────┘
-//
-// Health 색상: healthy=green, stalled=yellow, input_wait=cyan,
-//              failed=red, dead/init/starting=dim
-
-const CONDUCTOR_STATE_LABEL = {
-  init: { label: "INIT", seq: MOCHA.subtext },
-  starting: { label: "START", seq: MOCHA.executing },
-  healthy: { label: "OK", seq: MOCHA.ok },
-  stalled: { label: "STALL", seq: MOCHA.yellow },
-  input_wait: { label: "INPUT_WAIT", seq: FG.cyan },
-  failed: { label: "FAIL", seq: MOCHA.fail },
-  restarting: { label: "RESTART", seq: MOCHA.partial },
-  dead: { label: "DEAD", seq: FG.gray },
-  completed: { label: "DONE", seq: MOCHA.ok },
-};
-
-function conductorHealthCell(state) {
-  const entry = CONDUCTOR_STATE_LABEL[state] || {
-    label: state.toUpperCase(),
-    seq: FG.gray,
-  };
-  return `${entry.seq}■ ${entry.label}${RESET}`;
-}
-
-function conductorRelTime(ms) {
-  if (!ms) return "—";
-  const sec = Math.round((Date.now() - ms) / 1000);
-  if (sec < 0) return "—";
-  if (sec < 60) return `${sec}s ago`;
-  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
-  return `${Math.floor(sec / 3600)}h ago`;
-}
-
-/**
- * Conductor 세션 테이블을 문자열 배열(행 목록)로 렌더링.
- *
- * @param {object[]} snapshot — conductor.getSnapshot() 결과
- * @param {number}   [cols=100] — 터미널 폭
- * @returns {string[]} 렌더링된 행 목록 (altScreen rowBuf.set()에 바로 삽입 가능)
- */
-export function renderConductorTier(snapshot, cols = 100) {
-  const width = Math.max(48, cols);
-  const inner = width - 4; // border: '│ ' + content + ' │'
-
-  // ── 열 너비 계산 ────────────────────────────────────────
-  // ID(8) Agent(7) Host(6) Health(dyn) LastOut(dyn) Restarts(8) Why(rest)
-  const COL_ID = 8;
-  const COL_AGENT = 7;
-  const COL_HOST = 6;
-  const COL_RESTARTS = 4;
-  const COL_HEALTH = 12; // '■ INPUT_WAIT' = 12 chars
-  const COL_LASTOUT = 9; // '999m ago' = 8 + space
-  // Why gets the remainder
-  const fixedCols =
-    COL_ID + COL_AGENT + COL_HOST + COL_HEALTH + COL_LASTOUT + COL_RESTARTS + 6; // 6 spaces between cols
-  const COL_WHY = Math.max(4, inner - fixedCols);
-
-  function cell(text, width_) {
-    return clip(String(text ?? ""), width_);
-  }
-
-  function buildRow(id, agent, host, healthCell, lastOut, restarts, why) {
-    const idC = cell(id, COL_ID);
-    const agentC = cell(agent, COL_AGENT);
-    const hostC = cell(host, COL_HOST);
-    const restartsC = cell(String(restarts ?? 0), COL_RESTARTS);
-    const lastOutC = clip(lastOut, COL_LASTOUT);
-    const whyC = cell(why, COL_WHY);
-    // healthCell already has ANSI codes; pad its visible width manually
-    const healthVis = wcswidth(stripAnsi(healthCell));
-    const healthPad = Math.max(0, COL_HEALTH - healthVis);
-    const healthC = healthCell + " ".repeat(healthPad);
-
-    return `${idC} ${agentC} ${hostC} ${healthC} ${lastOutC} ${restartsC} ${whyC}`;
-  }
-
-  const boxWidth = inner;
-
-  // ── 타이틀 행 ───────────────────────────────────────────
-  const titleText = ` CONDUCTOR `;
-  const titleColored = bold(color(titleText, FG.accent));
-  // Border top with title embedded: ┌─ CONDUCTOR ──...─┐
-  const dashLen = Math.max(0, boxWidth - titleText.length);
-  const dashLeft = 1;
-  const dashRight = Math.max(0, dashLen - dashLeft);
-  const borderSeq = MOCHA.border;
-  const topBorder = `${borderSeq}┌${"─".repeat(dashLeft)}${RESET}${titleColored}${borderSeq}${"─".repeat(dashRight)}┐${RESET}`;
-
-  // ── ヘッダー行 ───────────────────────────────────────────
-  const headerRow = buildRow(
-    "ID",
-    "Agent",
-    "Host",
-    clip("Health", COL_HEALTH),
-    "Last Out",
-    "Rst",
-    "Why",
-  );
-  const headerLine = `${borderSeq}│${RESET} ${dim(headerRow)} ${borderSeq}│${RESET}`;
-
-  // ── データ行 ────────────────────────────────────────────
-  const dataLines = [];
-  if (!snapshot || snapshot.length === 0) {
-    const emptyMsg = color("(no sessions)", FG.muted);
-    const _emptyPad = clip(
-      stripAnsi(emptyMsg) === "(no sessions)" ? emptyMsg : emptyMsg,
-      inner,
-    );
-    dataLines.push(
-      `${borderSeq}│${RESET} ${padRight(emptyMsg, inner - 2)} ${borderSeq}│${RESET}`,
-    );
-  } else {
-    for (const s of snapshot) {
-      const id = String(s.id ?? "").slice(0, COL_ID);
-      const agent = String(s.agent ?? "unknown").slice(0, COL_AGENT);
-      const host = "local";
-      const state = s.state ?? "init";
-      const healthCell = conductorHealthCell(state);
-      const lastOut = conductorRelTime(s.health?.lastProbeAt ?? null);
-      const restarts = s.restarts ?? 0;
-      // derive "why" from last state transition context
-      const why = s.health?.inputWaitPattern
-        ? String(s.health.inputWaitPattern).slice(0, COL_WHY)
-        : "";
-
-      const rowText = buildRow(
-        id,
-        agent,
-        host,
-        healthCell,
-        lastOut,
-        restarts,
-        why,
-      );
-      dataLines.push(`${borderSeq}│${RESET} ${rowText} ${borderSeq}│${RESET}`);
-    }
-  }
-
-  // ── Bottom border ─────────────────────────────────────
-  const botBorder = `${borderSeq}└${"─".repeat(boxWidth)}┘${RESET}`;
-
-  return [topBorder, headerLine, ...dataLines, botBorder];
-}
-
-// 하위 호환
-export { createLogDashboard as createTui };

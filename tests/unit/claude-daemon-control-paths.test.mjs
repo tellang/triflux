@@ -7,19 +7,13 @@ import test from "node:test";
 
 import {
   buildClaudeDaemonDiscoveryCandidates,
-  deriveClaudeDaemonPaths as deriveFromControl,
+  deriveClaudeDaemonPaths,
   detectCallerProvenance,
   findDaemonJobBySessionId,
   readOmcLaunchProfile,
-  resolveClaudeConfigDir,
   resolveClaudeHomeDir,
 } from "../../hub/team/claude-daemon-control.mjs";
-import {
-  deriveClaudeDaemonPaths as deriveFromBridge,
-  resolveClaudeConfigDir as resolveConfigDirFromBridge,
-} from "../../hub/team/claude-native-bridge.mjs";
 
-// daemon-control 이 단일 owner 이고 native-bridge 는 그것을 re-export 한다.
 test("deriveClaudeDaemonPaths returns the superset incl rendezvousDir+ptyDir+hash", () => {
   const configDir = path.join(os.tmpdir(), "claude-paths-superset");
   const hash = crypto
@@ -28,7 +22,11 @@ test("deriveClaudeDaemonPaths returns the superset incl rendezvousDir+ptyDir+has
     .digest("hex")
     .slice(0, 8);
 
-  const paths = deriveFromControl({ configDir, uid: 501, tmpRoot: "/tmp" });
+  const paths = deriveClaudeDaemonPaths({
+    configDir,
+    uid: 501,
+    tmpRoot: "/tmp",
+  });
 
   assert.equal(paths.configDir, path.resolve(configDir));
   assert.equal(paths.hash, hash);
@@ -46,16 +44,6 @@ test("deriveClaudeDaemonPaths returns the superset incl rendezvousDir+ptyDir+has
     path.join(path.resolve(configDir), "sessions"),
   );
   assert.equal(paths.jobsDir, path.join(path.resolve(configDir), "jobs"));
-});
-
-test("native-bridge re-exports the canonical deriveClaudeDaemonPaths (same implementation)", () => {
-  assert.equal(deriveFromBridge, deriveFromControl);
-});
-
-// configDir 해석이 모듈마다 갈리면 control.sock hash split-brain 이 생긴다
-// (probe 는 daemon-control, dispatch/roster 는 native-bridge). 단일 owner 강제.
-test("native-bridge re-exports the canonical resolveClaudeConfigDir (same implementation)", () => {
-  assert.equal(resolveConfigDirFromBridge, resolveClaudeConfigDir);
 });
 
 test("resolveClaudeHomeDir prefers HOME on POSIX and falls back to os.homedir()", () => {
@@ -88,7 +76,7 @@ test("resolveClaudeHomeDir prefers USERPROFILE over divergent HOME on win32", ()
 });
 
 test("parity: derived field set covers what both former callsites needed", () => {
-  const paths = deriveFromControl({
+  const paths = deriveClaudeDaemonPaths({
     configDir: path.join(os.tmpdir(), "claude-paths-parity"),
     uid: 501,
     tmpRoot: "/tmp",

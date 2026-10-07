@@ -11,18 +11,8 @@ describe("pane.mjs", () => {
     assert.doesNotMatch(command, /dangerously-bypass-hook-trust/u);
   });
 
-  it("buildCliCommand(codex, trustMode)는 exec + sandbox bypass를 포함해야 한다", () => {
-    const command = buildCliCommand("codex", { trustMode: true });
-    assert.ok(command.includes("codex"), `codex 포함: ${command}`);
-    assert.ok(command.includes("exec"), `exec 포함: ${command}`);
-    assert.ok(
-      command.includes("--dangerously-bypass-approvals-and-sandbox"),
-      `sandbox bypass 포함: ${command}`,
-    );
-    assert.ok(
-      command.includes("--skip-git-repo-check"),
-      `skip-git 포함: ${command}`,
-    );
+  it("buildCliCommand 은 모르는 CLI 이름을 그대로 돌려준다", () => {
+    assert.equal(buildCliCommand("agy"), "agy");
   });
 });
 

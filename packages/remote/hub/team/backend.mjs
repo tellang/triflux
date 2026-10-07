@@ -1,131 +1,17 @@
-// hub/team/backend.mjs — CLI 백엔드 추상화 레이어
-// 각 CLI(codex/antigravity/claude)의 명령 빌드 로직을 클래스로 캡슐화한다.
-// v7.2.2
-import { writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
-
-import { buildExecArgs } from "@triflux/core/hub/codex-adapter.mjs";
 import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
+import { powershellSingleQuote, shellQuote } from "./terminal-opener.mjs";
 
-export function buildAntigravityCommand(
-  prompt,
-  resultFile,
-  { isWindows } = {},
-) {
-  // Persist prompt to a sibling file so the shell never interpolates raw
-  // prompt content. Without this the Unix branch let `$()`, backticks, `\\`,
-  // and `"` reach the shell verbatim (P1: shell injection).
-  const promptFile = `${resultFile}.prompt`;
-  writeFileSync(promptFile, prompt);
-  // agy 1.1.27 부터 --print 는 값(프롬프트)이 필수이고 stdin 프롬프트는 거부된다.
-  // 파일 내용을 셸이 재해석하지 않는 형태(따옴표 안 명령 치환 / Get-Content 식)로 값에 넣는다.
-  if (isWindows) {
-    return `agy --dangerously-skip-permissions --print (Get-Content -Raw '${promptFile}') > '${resultFile}' 2>'${resultFile}.err'`;
-  }
-  return `agy --dangerously-skip-permissions --print "$(cat '${promptFile}')" > '${resultFile}' 2>'${resultFile}.err'`;
-}
-
-const _require = createRequire(import.meta.url);
-
-// ── 백엔드 클래스 ──────────────────────────────────────────────────────────
-
-export class CodexBackend {
-  name() {
-    return "codex";
-  }
-  command() {
-    return "codex";
-  }
-
-  /**
-   * @param {string} prompt — 프롬프트 (프롬프트 파일 경로가 아닌 PowerShell 표현식)
-   * @param {string} resultFile — 결과 저장 경로
-   * @param {object} [opts]
-   * @returns {string} PowerShell 명령 (cls 제외)
-   */
-  buildArgs(prompt, resultFile, opts = {}) {
-    return buildExecArgs({ prompt, resultFile, ...opts });
-  }
-
-  env() {
-    return {};
+class ClaudeBackend {
+  buildArgs(prompt, resultFile, { isWindows = IS_WINDOWS } = {}) {
+    const quote = isWindows ? powershellSingleQuote : shellQuote;
+    const args = ["--print", prompt, "--output-format", "text"];
+    return `claude ${args.map(quote).join(" ")} > ${quote(resultFile)} 2>&1`;
   }
 }
 
-export class ClaudeBackend {
-  name() {
-    return "claude";
-  }
-  command() {
-    return "claude";
-  }
+const claude = new ClaudeBackend();
 
-  buildArgs(prompt, resultFile, opts = {}) {
-    return `claude --print ${prompt} --output-format text > '${resultFile}' 2>&1`;
-  }
-
-  env() {
-    return {};
-  }
-}
-
-export class AntigravityBackend {
-  name() {
-    return "antigravity";
-  }
-  command() {
-    return "agy";
-  }
-
-  buildArgs(prompt, resultFile, opts = {}) {
-    return buildAntigravityCommand(prompt, resultFile, {
-      isWindows: IS_WINDOWS,
-      ...opts,
-    });
-  }
-
-  env() {
-    return {};
-  }
-}
-
-// ── 레지스트리 ─────────────────────────────────────────────────────────────
-
-/** @type {Map<string, CodexBackend|ClaudeBackend|AntigravityBackend>} */
-const backends = new Map([
-  ["codex", new CodexBackend()],
-  ["claude", new ClaudeBackend()],
-  ["antigravity", new AntigravityBackend()],
-]);
-
-/**
- * 백엔드 이름으로 조회한다.
- * @param {string} name: "codex" | "claude" | "antigravity"
- * @returns {CodexBackend|ClaudeBackend|AntigravityBackend}
- * @throws {Error} 등록되지 않은 이름
- */
 export function getBackend(name) {
-  const b = backends.get(name);
-  if (!b) throw new Error(`지원하지 않는 CLI: ${name}`);
-  return b;
-}
-
-/**
- * 에이전트명 또는 CLI명을 Backend로 해석한다.
- * agent-map.json을 통해 에이전트명 → CLI명으로 변환 후 레지스트리에서 조회한다.
- * @param {string} agentOrCli: "executor", "codex", "designer" 등
- * @returns {CodexBackend|ClaudeBackend|AntigravityBackend}
- */
-export function getBackendForAgent(agentOrCli) {
-  const agentMap = _require("./agent-map.json");
-  const cliName = agentMap[agentOrCli] || agentOrCli;
-  return getBackend(cliName);
-}
-
-/**
- * 등록된 모든 백엔드를 반환한다.
- * @returns {Array<CodexBackend|ClaudeBackend|AntigravityBackend>}
- */
-export function listBackends() {
-  return Array.from(backends.values());
+  if (name !== "claude") throw new Error(`지원하지 않는 CLI: ${name}`);
+  return claude;
 }

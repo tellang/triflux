@@ -72,7 +72,7 @@ _tfx() {
                     if (( CURRENT == 3 )) && [[ $words[CURRENT] != -* ]]; then
                         _describe -t multi_cmds 'multi commands' multi_cmds
                     else
-                        _arguments '--dashboard[Enable dashboard]' '--no-dashboard[Disable dashboard]' '--dashboard-layout[Dashboard layout]' '--json[JSON output]' '--help[Show help]'
+                        _arguments '--no-dashboard[Disable dashboard]' '--dashboard-layout[Dashboard layout]' '--json[JSON output]' '--help[Show help]'
                     fi
                     ;;
                 review)

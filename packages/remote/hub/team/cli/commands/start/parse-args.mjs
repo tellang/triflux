@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { parseDashboardAnchor } from "../../../dashboard-anchor.mjs";
 import { parseDashboardLayout } from "../../../dashboard-layout.mjs";
@@ -6,35 +7,7 @@ import {
   normalizeTeammateMode,
 } from "../../services/runtime-mode.mjs";
 
-// --assign 파싱 시 마지막 콜론 뒤를 role로 인식할 알려진 역할/CLI 이름
-const KNOWN_ROLES = new Set([
-  "codex",
-  "antigravity",
-  "agy",
-  "gemini",
-  "claude",
-  "executor",
-  "architect",
-  "planner",
-  "analyst",
-  "critic",
-  "debugger",
-  "verifier",
-  "code-reviewer",
-  "security-reviewer",
-  "test-engineer",
-  "designer",
-  "writer",
-  "researcher",
-  "scientist",
-]);
-
-const NATIVE_BRIDGE_MODES = new Set([
-  "roster",
-  "agents",
-  "interactive-attach",
-  "claude-wrapper",
-]);
+const AGENT_TO_CLI = createRequire(import.meta.url)("../../../agent-map.json");
 
 /**
  * --assign "cli:prompt:role" 형식을 콜론-안전하게 파싱한다.
@@ -42,7 +15,7 @@ const NATIVE_BRIDGE_MODES = new Set([
  *
  * 규칙:
  *   1. 첫 번째 콜론 앞 = CLI 이름
- *   2. 마지막 콜론 뒤가 KNOWN_ROLES에 있으면 role, 나머지가 prompt
+ *   2. 마지막 콜론 뒤가 agent-map.json에 있으면 role, 나머지가 prompt
  *   3. 그 외에는 첫 콜론 뒤 전체가 prompt, role은 빈 문자열
  */
 function parseAssignValue(raw) {
@@ -58,7 +31,7 @@ function parseAssignValue(raw) {
       .slice(lastColon + 1)
       .trim()
       .toLowerCase();
-    if (KNOWN_ROLES.has(candidate)) {
+    if (Object.hasOwn(AGENT_TO_CLI, candidate)) {
       return { cli, prompt: rest.slice(0, lastColon).trim(), role: candidate };
     }
   }
@@ -72,7 +45,7 @@ export function parseTeamArgs(args = []) {
   let layout = "2x2";
   let teammateMode = "auto";
   const taskParts = [];
-  const assigns = []; // --assign "codex:프롬프트:역할" 형식
+  const assigns = [];
   let autoAttach = true;
   let progressive = true;
   let timeoutSec = 0;
@@ -109,14 +82,10 @@ export function parseTeamArgs(args = []) {
     } else if (current === "--assign" && args[index + 1]) {
       const parsed = parseAssignValue(args[++index]);
       if (parsed) assigns.push(parsed);
-    } else if (current === "--auto-attach") {
-      autoAttach = true;
     } else if (current === "--no-auto-attach") {
       autoAttach = false;
     } else if (current === "--verbose") {
       verbose = true;
-    } else if (current === "--dashboard") {
-      dashboard = true;
     } else if (current === "--no-dashboard") {
       dashboard = false;
     } else if (current === "--dashboard-layout" && args[index + 1]) {
@@ -159,9 +128,9 @@ export function parseTeamArgs(args = []) {
       nativeBridgeUiOptOut = true;
     } else if (current === "--native-bridge-mode") {
       const mode = args[++index];
-      if (!NATIVE_BRIDGE_MODES.has(mode)) {
+      if (mode !== "agents") {
         throw new Error(
-          `unknown native bridge mode: ${mode || ""}; expected roster, agents, interactive-attach, or claude-wrapper`,
+          `unknown native bridge mode: ${mode || ""}; expected agents`,
         );
       }
       nativeBridge = true;
@@ -174,6 +143,8 @@ export function parseTeamArgs(args = []) {
         p = p[1].toUpperCase() + ":" + p.slice(2);
       }
       cwd = resolve(p);
+    } else if (current === "--auto-attach" || current === "--dashboard") {
+      // 이전 설치 스킬이 넘기는 기본값 플래그는 무시한다.
     } else if (current.startsWith("-")) {
       console.warn(`  ⚠ 미인식 플래그 무시: ${current}`);
     } else {
@@ -181,7 +152,11 @@ export function parseTeamArgs(args = []) {
     }
   }
 
-  const normalizedTeammateMode = normalizeTeammateMode(teammateMode);
+  const task = taskParts.join(" ").trim();
+  const normalizedTeammateMode =
+    task || assigns.length > 0
+      ? normalizeTeammateMode(teammateMode)
+      : teammateMode;
   if (
     !nativeBridgeExplicit &&
     !nativeBridgeUiOptOut &&
@@ -195,7 +170,7 @@ export function parseTeamArgs(args = []) {
     lead,
     layout: normalizeLayout(layout),
     teammateMode: normalizedTeammateMode,
-    task: taskParts.join(" ").trim(),
+    task,
     assigns,
     autoAttach,
     progressive,

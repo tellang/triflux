@@ -25,14 +25,8 @@ triflux의 macOS 비호환 부분을 수정하여 macOS를 1등 시민으로 지
   3. hub/team/notify.mjs, packages/remote/hub/team/notify.mjs, packages/triflux/hub/team/notify.mjs 모두 동일 수정
 
 ## Shard: runtime-tmux
-- agent: codex
-- files: hub/team/runtime-strategy.mjs
-- prompt: |
-  runtime-strategy.mjs의 createRuntime()이 "psmux"만 지원한다.
-  macOS에서 tmux를 런타임으로 사용할 수 있도록 "tmux" 모드를 추가하라.
-  hub/team/session.mjs에서 createSession/killSession/sessionExists를 tmux로 이미 구현하고 있으므로,
-  session.mjs의 기존 tmux 함수들(tmuxExec, listSessions, killSession)을 import해서 tmux 런타임을 구현하라.
-  패턴은 createPsmuxRuntime()과 동일하게 createTmuxRuntime()을 만들면 된다.
+
+> 폐기(2026-10-08): 미사용 `runtime-strategy.mjs`를 S5에서 제거했다. tmux 실행은 `hub/team/session.mjs`가 담당한다.
 
 ## Shard: dashboard-open-macos
 - agent: codex

@@ -156,7 +156,7 @@ describe("tfx-auto SKILL.md — thin alias 이관 규칙", () => {
   it("기본 실행 명령이 teammate mode를 생략한다", () => {
     const content = readSkill("tfx-auto");
     assert.ok(
-      /Bash\("tfx multi --auto-attach --dashboard --assign/.test(content),
+      /Bash\("tfx multi --assign/.test(content),
       "기본 tfx multi 명령이 mode 생략 형태로 없음",
     );
   });

@@ -1,4 +1,4 @@
-import { attachSession, focusPane, focusWtPane } from "../../session.mjs";
+import { attachSession, focusPane } from "../../session.mjs";
 import { DIM, RESET, WHITE } from "../../shared.mjs";
 import { fail, ok, warn } from "../render.mjs";
 import {
@@ -7,23 +7,16 @@ import {
   wantsWtAttachFallback,
 } from "../services/attach-fallback.mjs";
 import { resolveMember } from "../services/member-selector.mjs";
-import {
-  isNativeMode,
-  isTeamAlive,
-  isWtMode,
-} from "../services/runtime-mode.mjs";
+import { isTeamAlive } from "../services/runtime-mode.mjs";
 import { loadTeamState } from "../services/state-store.mjs";
 
 export async function teamFocus(args = []) {
   const state = loadTeamState();
+  if (state?.teammateMode === "headless") {
+    throw new Error("headless 실행에는 지원하지 않는다");
+  }
   if (!state || !isTeamAlive(state)) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
-    return;
-  }
-  if (isNativeMode(state)) {
-    console.log(
-      `\n  ${DIM}in-process 모드는 focus/attach 개념이 없습니다.${RESET}\n  ${DIM}직접 지시: tfx multi send <대상> "메시지"${RESET}\n`,
-    );
     return;
   }
 
@@ -32,25 +25,6 @@ export async function teamFocus(args = []) {
     console.log(
       `\n  사용법: ${WHITE}tfx multi focus <lead|이름|번호>${RESET}\n`,
     );
-    return;
-  }
-
-  if (isWtMode(state)) {
-    const paneIndex = Number(/^wt:(\d+)$/.exec(member.pane || "")?.[1]);
-    if (!Number.isFinite(paneIndex)) {
-      console.log(
-        `\n  ${DIM}wt pane 인덱스 파싱 실패: ${member.pane}${RESET}\n`,
-      );
-      return;
-    }
-    if (
-      focusWtPane(paneIndex, {
-        layout: state?.wt?.layout || state?.layout || "1xN",
-      })
-    )
-      ok(`${member.name} pane 포커스 이동 (wt)`);
-    else warn("wt pane 포커스 이동 실패 (WT_SESSION/wt.exe 상태 확인 필요)");
-    console.log("");
     return;
   }
 

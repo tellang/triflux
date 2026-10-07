@@ -140,6 +140,12 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 </headless-retrieval>
 
 <native-bridge>
+## 팀 실행 모드
+
+`tfx multi`는 tmux/psmux와 headless를 지원한다. in-process와 WT 팀 모드는 지원하지 않는다.
+대화형 auto 실행에서 멀티플렉서가 없으면 tmux(macOS/Linux) 또는 psmux(Windows) 설치 오류로 끝난다.
+비TTY에서 멀티플렉서가 없으면 headless로 실행한다. Windows Terminal의 독립 탭 열기는 유지한다.
+
 ## 기본 연결 UI(`claude agents` 노출)
 
 비대화식 워커는 기본적으로 `claude agents` 패널에 행으로 나타난다. 제외하려면 `--no-native-bridge-ui`를 쓴다.
@@ -147,7 +153,7 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 | 모드 | 기본값 | 행이 보이는 위치 |
 |------|---------|--------------------|
 | `tfx-auto` / `tfx multi`(비대화식) | 켬 | 로컬 `claude agents` |
-| 대화식(tmux/wt) | 끔 | 해당 없음 |
+| 대화식(tmux/psmux) | 끔 | 해당 없음 |
 
 감시자가 종료되면 즉시 데몬의 `sendKillBySessionId`를 실행해 오래된 행을 남기지 않는다. PRD: `.triflux/plans/native-bridge-ui-default-expansion.md`(PR #323으로 병합).
 </native-bridge>

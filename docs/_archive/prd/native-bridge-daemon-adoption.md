@@ -1,3 +1,5 @@
+폐기: 2026-10-08 슬롭 정리(interactive-attach 모드 삭제(S5))
+
 # Native Bridge Daemon Adoption Gap
 
 ## Status

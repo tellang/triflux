@@ -34,7 +34,7 @@ OMC Native Agent Team과 triflux headless 실행 엔진을 결합하여
            │                                    │
     ┌──────▼──────────────────────────────────┐ │
     │           team-exec (triflux headless)  │ │
-    │  Bash("tfx multi --headless --assign …")│ │
+    │  Bash("tfx multi --teammate-mode headless --assign …")│ │
     │                                         │ │
     │  ┌─────────────┐  ┌─────────────┐       │ │
     │  │ codex worker│  │gemini worker│  …    │ │
@@ -70,7 +70,7 @@ Agent({ subagent_type: "executor", model: "sonnet", prompt: subtask })
 **변경 후 (headless CLI 위임):**
 ```js
 // OMC skill 내부 — team-exec 스테이지
-Bash(`tfx multi --headless \
+Bash(`tfx multi --teammate-mode headless \
   --assign codex:"${subtask1}" \
   --assign gemini:"${subtask2}" \
   --timeout 300`)
@@ -94,7 +94,7 @@ const summary = results.map(r =>
 ```js
 // team-verify 실패 시
 if (!verified) {
-  Bash(`tfx multi --headless \
+  Bash(`tfx multi --teammate-mode headless \
     --assign ${failedCli}:"${fixPrompt}" \
     --context-file ${priorResultFile}`)
 }
@@ -190,7 +190,7 @@ Hub 연결 시도
 
 ### Phase 2 — OMC skill 연동 (단기)
 
-1. `skills/tfx-multi/SKILL.md`에 `--headless --assign` 패턴 문서화
+1. `skills/tfx-multi/SKILL.md`에 `--teammate-mode headless --assign` 패턴 문서화
 2. OMC `team` skill의 team-exec 스테이지에서 `Bash("tfx multi ...")` 호출 패턴 추가
 3. handoff 결과를 OMC 컨텍스트에 주입하는 포맷터 구현
 
@@ -224,7 +224,6 @@ Hub 연결 시도
 
 ## 8. 비고
 
-- **현재 기본 모드**: `tfx multi`의 기본 `--teammate-mode`는 `headless` (`start/index.mjs` L84)
-- **Native in-process 모드**: `--teammate-mode in-process`로 mux 없이 직접 실행 가능 (소규모 태스크)
+- **현재 기본 모드**: `auto`는 tmux/psmux가 있으면 pane을 사용한다. 대화형 환경에서 mux가 없으면 설치 안내 오류로 끝내고, 비TTY에서 mux가 없으면 headless로 실행한다.
 - **Phase 2 이전**: OMC skill에서 `Bash("tfx multi ...")` 패턴으로 즉시 활용 가능
 - **handoff 스키마 원본**: `docs/design/handoff-schema-v7.md`

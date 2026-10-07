@@ -404,9 +404,9 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     description: "멀티-CLI 팀 모드",
     options: [
       {
-        name: "--dashboard",
-        type: "boolean",
-        description: "headless dashboard viewer 표시 (기본값: 켜짐)",
+        name: "--teammate-mode",
+        type: "string",
+        description: "실행 모드: auto|headless|tmux|psmux (Windows)",
       },
       {
         name: "--no-dashboard",
@@ -5906,7 +5906,11 @@ async function main() {
     case "multi": {
       const subcommand = cmdArgs[0] || "";
       if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("multi");
+        const { pathToFileURL } = await import("node:url");
+        const { renderTeamHelp } = await import(
+          pathToFileURL(join(PKG_ROOT, "hub", "team", "cli", "help.mjs")).href
+        );
+        renderTeamHelp();
         return;
       }
       if (JSON_OUTPUT) process.env.TFX_OUTPUT_JSON = "1";

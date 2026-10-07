@@ -31,14 +31,14 @@
   4. compact nudge 강화 (advisory only)
 - **Tier-2 (지능, episodic)** — 판단이 필요한 순간에만 `conductor.spawnSession({agent:'claude',model:'sonnet'})` 또는 `claude-worker --resume`로 headless Sonnet 1턴을 띄워 collect/North-Star 합성/hygiene 분류 결정만 얻고 **종료**(기존 cto-auto-collect 120s 디바운스 패턴). 상주 TUI 아님.
 
-**옵션(opt-in)**: 사용자가 진짜 풀 상주를 원하면 `TFX_CTO_MODE=bridge`로 native-bridge interactive-attach 경로를 opt-in 활성(Codex 제안). default는 bounded.
+현재 지원하는 경로는 bounded다. interactive-attach 기반 bridge 옵션은 폐기됐다.
 
 ### 상주 3경로 트레이드오프 (합의)
 
 | 경로 | 메커니즘 | 장점 | 단점 | 판정 |
 |------|----------|------|------|------|
 | **a. hub-supervised respawn** | conductor.spawnSession + 완료 시 재spawn | 상태머신/health/broker 재사용, headless 저RAM | task-scoped(maxRestarts=3+maybeAutoShutdown)라 상위 드라이버 필요, hub 내부라 hub 죽으면 CTO 소멸 | **Tier-2 지능 spawn 경로** |
-| **b. native-bridge interactive-attach** | daemon-pty-tmux-bridge runBridge + roster | 진짜 long-lived, claude agents 가시성 | TUI 고RAM(fanless 치명), tmux/pty 복잡, 사람지향 | **opt-in only (TFX_CTO_MODE=bridge)** |
+| **b. native-bridge interactive-attach** | daemon-pty-tmux-bridge runBridge + roster | 진짜 long-lived, claude agents 가시성 | TUI 고RAM(fanless 치명), tmux/pty 복잡, 사람지향 | **opt-in only (TFX_CTO_MODE=bridge), 폐기: interactive-attach 모드 삭제(S5)** |
 | **c. launchd/systemd 감독** | CTO 전용 OS unit | 재부팅 생존, OS KeepAlive 자동재기동, **hub 독립 → hub bounce 생존** | OS별 설치/권한, 유휴 24/7 점유 | **Tier-1 경량 데몬 상주 경로 (권장)** |
 
 **상주 위치 미합의 해소**: Codex는 hub 내부 CTOManager(경로 a supervisor)를 권했으나, Critic의 CRITICAL("roleStates는 router in-memory Map → hub 재시작 시 CTO leadership 소멸")이 결정적. **별도 경량 데몬(경로 c 감독)이 hub-bounce 생존 요구를 만족** → Planner 안 채택. 단 미설치 시 SessionStart hub-ensure가 대체 기동 경로.

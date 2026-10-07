@@ -44,6 +44,7 @@
   - [Lake 4 스킬 템플릿 엔진 PRD](_archive/prd/archived/lake4-skill-templates.md)를 템플릿 엔진 폐기에 따라 보존한다.
   - [Lake 4 공유 세그먼트 PRD](_archive/prd/archived/lake4-token-shared-segments.md)를 템플릿 엔진 폐기에 따라 보존한다.
   - [Lake 4 텔레메트리 PRD](_archive/prd/archived/lake4-token-telemetry.md)를 템플릿 엔진 폐기에 따라 보존한다.
+  - [native bridge daemon adoption PRD](_archive/prd/native-bridge-daemon-adoption.md)와 [interactive-attach 계획](_archive/triflux/plans/native-bridge-interactive-attach.md)은 S5에서 interactive-attach 모드를 삭제해 보존한다.
 - **`superpowers/plans/`** — LOCAL(git-ignore). 실행 중 산출물이라 공개 대상이 아니다.
 
 ## 메모

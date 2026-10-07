@@ -7,7 +7,6 @@ import {
   altScreenOff,
   altScreenOn,
   box,
-  CLI_ICON,
   clip,
   color,
   cursorHide,
@@ -114,12 +113,6 @@ describe("ansi.mjs", () => {
     assert.ok(STATUS_ICON.completed);
     assert.ok(STATUS_ICON.failed);
     assert.ok(STATUS_ICON.pending);
-  });
-
-  it("CLI_ICON: codex/antigravity/claude 아이콘 정의", () => {
-    assert.ok(CLI_ICON.codex);
-    assert.ok(CLI_ICON.antigravity);
-    assert.ok(CLI_ICON.claude);
   });
 
   it("altScreen: on/off 시퀀스", () => {
