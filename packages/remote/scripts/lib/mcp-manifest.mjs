@@ -1,6 +1,6 @@
 // scripts/lib/mcp-manifest.mjs
 // MCP 서버 활성화 매니페스트 — 단일 진실 소스.
-// tfx-setup 위저드가 저장하고, gateway/filter가 참조한다.
+// tfx-setup 위저드가 저장하고, MCP 필터가 참조한다.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -13,7 +13,7 @@ export const MANIFEST_PATH = join(
   "mcp-enabled.json",
 );
 
-/** API 키 불필요 — 항상 활성화 for gateway-managed MCP servers (현재 없음 — serena는 2026-06-10 core에서 제거) */
+/** API 키 불필요 서버 (현재 없음) */
 export const CORE_SERVERS = Object.freeze([]);
 
 /** 검색 MCP — API 키 필요 */

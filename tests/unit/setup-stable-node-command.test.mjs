@@ -14,6 +14,8 @@ import { describe, it } from "node:test";
 const SETUP_URL = new URL("../../scripts/setup.mjs", import.meta.url).href;
 
 function runCriticalWithHome(home) {
+  const repoRoot = join(home, "repo");
+  mkdirSync(repoRoot, { recursive: true });
   const script = `
     import(${JSON.stringify(SETUP_URL)}).then(async (m) => {
       const result = await m.runCritical({ argv: [] });
@@ -25,6 +27,7 @@ function runCriticalWithHome(home) {
   `;
 
   return spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    cwd: repoRoot,
     env: {
       ...process.env,
       HOME: home,
@@ -106,15 +109,9 @@ describe("setup stable node command (#253)", () => {
       );
 
       const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-      const commands = [
-        settings.statusLine.command,
-        ...settings.hooks.SessionStart.flatMap((entry) =>
-          entry.hooks.map((hook) => hook.command),
-        ),
-        ...settings.hooks.PreToolUse.flatMap((entry) =>
-          entry.hooks.map((hook) => hook.command),
-        ),
-      ];
+      const commands = [settings.statusLine.command];
+      assert.equal(settings.hooks?.SessionStart, undefined);
+      assert.equal(settings.hooks?.PreToolUse, undefined);
 
       assert.ok(
         commands.some((command) => command.includes("hud-qos-status.mjs")),
@@ -128,4 +125,30 @@ describe("setup stable node command (#253)", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+});
+
+it("setup이 다른 statusLine과 깨진 설정을 보존한다", () => {
+  const home = mkdtempSync(join(tmpdir(), "tfx-statusline-owner-"));
+  const claudeDir = join(home, ".claude");
+  const settingsPath = join(claudeDir, "settings.json");
+  mkdirSync(join(claudeDir, "hud"), { recursive: true });
+  writeFileSync(join(claudeDir, "hud", "hud-qos-status.mjs"), "");
+  try {
+    for (const command of ["node /my/status.mjs", "echo hud-qos-status.mjs"]) {
+      const statusLine = { type: "command", command, padding: 2 };
+      writeFileSync(settingsPath, JSON.stringify({ statusLine }));
+      const result = runCriticalWithHome(home);
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(
+        JSON.parse(readFileSync(settingsPath, "utf8")).statusLine,
+        statusLine,
+      );
+    }
+    writeFileSync(settingsPath, "{broken");
+    const result = runCriticalWithHome(home);
+    assert.equal(JSON.parse(result.stdout).code, 1);
+    assert.equal(readFileSync(settingsPath, "utf8"), "{broken");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });

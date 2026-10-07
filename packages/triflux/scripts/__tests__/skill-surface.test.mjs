@@ -62,15 +62,12 @@ describe("skill surface consolidation (#112)", () => {
   });
 });
 
-describe("skill surface cleanup (12 + Windows 1)", () => {
+describe("skill surface cleanup (9 + Windows 1)", () => {
   const KEPT = [
     "tfx-auto",
     "tfx-doctor",
     "tfx-harness",
-    "tfx-interview",
     "tfx-live",
-    "tfx-plan",
-    "tfx-profile",
     "tfx-remote",
     "tfx-research",
     "tfx-review",
@@ -78,67 +75,19 @@ describe("skill surface cleanup (12 + Windows 1)", () => {
     "tfx-ship",
     "tfx-wt",
   ];
-  const REMOVED = [
-    "tfx-analysis",
-    "tfx-find",
-    "tfx-forge",
-    "tfx-goal-clarify",
-    "tfx-hooks",
-    "tfx-hub",
-    "tfx-index",
-    "tfx-prune",
-    "tfx-qa",
-    "tfx-ralph",
-  ];
 
   for (const root of ["skills", join("packages", "triflux", "skills")]) {
-    it(`${root}: tfx-* 스킬은 승인된 13개뿐이다`, () => {
+    it(`${root}: 스킬은 승인된 10개뿐이다`, () => {
       const names = readdirSync(join(repoRoot, root), { withFileTypes: true })
         .filter((entry) => entry.isDirectory())
         .map((entry) => entry.name)
-        .filter((name) => name.startsWith("tfx-"))
         .filter((name) => existsSync(join(repoRoot, root, name, "SKILL.md")))
         .sort();
       assert.deepEqual(names, [...KEPT].sort());
-      for (const name of REMOVED) {
-        assert.equal(names.includes(name), false, `${name} must stay removed`);
-      }
     });
   }
 
   it("tfx-wt 는 frontmatter platform 으로 win32 전용을 선언한다", () => {
     assert.deepEqual(readSkillFrontmatter("tfx-wt").platform, ["win32"]);
-  });
-
-  it("tfx-interview 는 /goal 블록 모드를 흡수했다", () => {
-    const content = readFileSync(
-      join(skillsDir, "tfx-interview", "SKILL.md"),
-      "utf8",
-    );
-    assert.match(readSkillFrontmatter("tfx-interview").description, /\/goal/);
-    assert.match(content, /--format goal/);
-    for (const axis of [
-      "End state",
-      "Stated check",
-      "Constraints",
-      "Stop bound",
-    ]) {
-      assert.match(content, new RegExp(axis), `${axis} 축 누락`);
-    }
-  });
-
-  it("tfx-setup 은 훅 우선순위 관리를, tfx-doctor 는 hub 관리를 흡수했다", () => {
-    const setup = readFileSync(
-      join(skillsDir, "tfx-setup", "SKILL.md"),
-      "utf8",
-    );
-    const doctor = readFileSync(
-      join(skillsDir, "tfx-doctor", "SKILL.md"),
-      "utf8",
-    );
-    assert.match(setup, /^## 훅 우선순위 관리$/m);
-    assert.match(setup, /triflux hooks apply/);
-    assert.match(doctor, /^## tfx-hub 관리$/m);
-    assert.match(doctor, /tfx hub status/);
   });
 });

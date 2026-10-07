@@ -2,14 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 describe("smoke: 주요 모듈 import 검증", () => {
-  it("scripts/lib/keyword-rules.mjs — 순수 함수 export", async () => {
-    const mod = await import("../lib/keyword-rules.mjs");
-    assert.equal(typeof mod.loadRules, "function");
-    assert.equal(typeof mod.compileRules, "function");
-    assert.equal(typeof mod.matchRules, "function");
-    assert.equal(typeof mod.resolveConflicts, "function");
-  });
-
   it("hub/team/shared.mjs — ANSI 상수 export", async () => {
     const mod = await import("../../hub/team/shared.mjs");
     assert.equal(typeof mod.AMBER, "string");

@@ -1,7 +1,7 @@
 # PRD: activity-based worker lifecycle — 킬 평면의 활동 기반 재배선
 
 - 상태: proposed (2026-07-10)
-- 출처: tfx-interview 타임아웃 전수 감사 (272 raw → 95 논리 사이트, 판정 no 4 / questionable 38 / yes 53)
+- 출처: 타임아웃 전수 감사 (272 raw → 95 논리 사이트, 판정 no 4 / questionable 38 / yes 53)
 - 선행 조치: no-판정 4건은 별도 커밋으로 즉시 수정됨 (SKILL.md 6곳 bg 전환, tfx-route:1463 3600, 죽은 지침 정정, dead param 제거)
 
 ## 배경 / 문제
@@ -87,7 +87,7 @@ triflux에는 활동 기반 판정기가 3개 있다 — `scripts/tfx-route.sh` 
 
 ## 부록 A — 이번 즉시-수정으로 이미 해소된 것 (재작업 금지)
 
-- SKILL.md 6곳 (tfx-review/prune/qa/analysis/plan/research) fg `--timeout 600` → `run_in_background` + 1800
+- SKILL.md 6곳 (review/prune/qa/analysis/plan/research) fg `--timeout 600` → `run_in_background` + 1800
 - `scripts/tfx-route.sh` xhigh 리매핑 lane 600 → 3600
 - `skills/tfx-review/SKILL.md` Error Recovery 죽은 "--timeout 900" 지침 정정
 - `hub/team/swarm-hypervisor.mjs` `_integrationTimeoutMs` dead param 제거

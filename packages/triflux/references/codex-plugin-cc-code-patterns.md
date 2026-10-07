@@ -183,8 +183,8 @@ function parseStopReviewOutput(rawOutput) {
 }
 ```
 
-**배울 점**: triflux의 cross-review-tracker가 커밋 전 검증을 하는데, Stop 훅으로 세션 종료 전
-자동 리뷰를 강제하면 "검증 안 하고 끝내는" 패턴을 원천 차단할 수 있다.
+**당시 검토한 점**: Stop 훅으로 세션 종료 전 자동 리뷰를 강제하는 방식은
+ADR-0023의 command hook 제거 결정으로 채택하지 않았다.
 
 ---
 
@@ -459,7 +459,7 @@ plugins/{name}/
 | 1 | Adversarial review 프롬프트 구조 | 낮음 | 높음 | tfx-deep-review Codex 프롬프트 |
 | 2 | XML 블록 프롬프팅 | 낮음 | 높음 | 모든 headless 프롬프트 |
 | 3 | Stop review gate | 중간 | 높음 | 새 훅 추가 |
-| 4 | Process tree kill | 낮음 | 중간 | worker-utils.mjs, safety-guard |
+| 4 | Process tree kill | 낮음 | 중간 | worker-utils.mjs |
 | 5 | CLAUDE_ENV_FILE 패턴 | 낮음 | 중간 | session-start 훅 |
 | 6 | Broker busy → direct fallback | 중간 | 중간 | Hub 클라이언트 |
 | 7 | Turn capture state machine | 높음 | 높음 | headless 결과 추적 시스템 |

@@ -4,7 +4,7 @@
 
 _tfx() {
     local state
-    local -a commands hub_cmds multi_cmds swarm_cmds hooks_cmds
+    local -a commands hub_cmds multi_cmds swarm_cmds
 
     commands=(
         'setup:Setup and sync files'
@@ -15,7 +15,6 @@ _tfx() {
         'ls:Alias for list'
         'handoff:Create handoff prompt'
         'schema:Print CLI and Hub schema'
-        'hooks:Manage hook orchestrator'
         'hub:Hub process management'
         'multi:Multi-CLI team mode'
         'swarm:PRD worktree swarm'
@@ -34,7 +33,6 @@ _tfx() {
     hub_cmds=('start:Start hub' 'stop:Stop hub' 'status:Show hub status' 'ensure:Ensure hub is healthy' 'help:Show hub help')
     multi_cmds=('status:Show status' 'stop:Stop multi' 'kill:Kill multi' 'attach:Attach to multi' 'list:List sessions' 'help:Show multi help')
     swarm_cmds=('run:Run PRD swarm' 'preflight:Go/no-go report' 'plan:Plan only' 'list:List sessions' 'status:Alias for list' 'help:Show swarm help')
-    hooks_cmds=('scan:Scan hooks' 'diff:Preview changes' 'apply:Apply orchestrator' 'restore:Restore hooks' 'status:Show status' 'set-priority:Set hook priority' 'toggle:Toggle hook' 'help:Show hooks help')
 
     _arguments -C \
         '1: :->cmds' \
@@ -84,13 +82,6 @@ _tfx() {
                         _describe -t swarm_cmds 'swarm commands' swarm_cmds
                     else
                         _arguments '--dry-run[Plan without execution]' '--json[JSON output]' '--filter[Shard filter]' '--max-restarts[Max restarts]' '--logs-dir[Logs directory]' '--help[Show help]'
-                    fi
-                    ;;
-                hooks)
-                    if (( CURRENT == 3 )) && [[ $words[CURRENT] != -* ]]; then
-                        _describe -t hooks_cmds 'hooks commands' hooks_cmds
-                    else
-                        _arguments '--help[Show help]'
                     fi
                     ;;
                 review)

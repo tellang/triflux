@@ -98,7 +98,6 @@ describe("tfx --help 출력", () => {
     "handoff",
     "schema",
     "synapse",
-    "hooks",
     "multi",
     "notion-read",
     "review",

@@ -5,8 +5,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { registerInteractiveSession } from "../../hooks/session-start-fast.mjs";
 import { createSynapseRegistry } from "../../hub/team/synapse-registry.mjs";
+import { registerInteractiveSession } from "../../scripts/lib/session-presence.mjs";
 
 const HOUR_MS = 60 * 60 * 1000;
 

@@ -39,7 +39,7 @@
 |------|----------|------|------|------|
 | **a. hub-supervised respawn** | conductor.spawnSession + 완료 시 재spawn | 상태머신/health/broker 재사용, headless 저RAM | task-scoped(maxRestarts=3+maybeAutoShutdown)라 상위 드라이버 필요, hub 내부라 hub 죽으면 CTO 소멸 | **Tier-2 지능 spawn 경로** |
 | **b. native-bridge interactive-attach** | daemon-pty-tmux-bridge runBridge + roster | 진짜 long-lived, claude agents 가시성 | TUI 고RAM(fanless 치명), tmux/pty 복잡, 사람지향 | **opt-in only (TFX_CTO_MODE=bridge)** |
-| **c. launchd/systemd 감독** | install-mcp-gateway-startup template 파생 | 재부팅 생존, OS KeepAlive 자동재기동, **hub 독립 → hub bounce 생존** | OS별 설치/권한, 유휴 24/7 점유 | **Tier-1 경량 데몬 상주 경로 (권장)** |
+| **c. launchd/systemd 감독** | CTO 전용 OS unit | 재부팅 생존, OS KeepAlive 자동재기동, **hub 독립 → hub bounce 생존** | OS별 설치/권한, 유휴 24/7 점유 | **Tier-1 경량 데몬 상주 경로 (권장)** |
 
 **상주 위치 미합의 해소**: Codex는 hub 내부 CTOManager(경로 a supervisor)를 권했으나, Critic의 CRITICAL("roleStates는 router in-memory Map → hub 재시작 시 CTO leadership 소멸")이 결정적. **별도 경량 데몬(경로 c 감독)이 hub-bounce 생존 요구를 만족** → Planner 안 채택. 단 미설치 시 SessionStart hub-ensure가 대체 기동 경로.
 
@@ -129,7 +129,7 @@
 
 **수정 (root SSOT)**:
 - `hub/server.mjs` (TFX_CTO gate, unref 타이머 또는 데몬 attach 지점), `hub/tools.mjs`(MCP tools), `hub/pipe.mjs`, `hub/bridge.mjs`, `cto/hygiene.mjs`(executor 위임), `cto/index.mjs`(CLI), `hooks/hook-orchestrator.mjs`(nudge)
-- `scripts/install-mcp-gateway-startup.mjs` 파생(OS unit template)
+- CTO 전용 launchd/systemd unit 작성
 
 **미러**: root SSOT 변경 후 packages/triflux(byte) + packages/core(bridge self-import 대상만 minimal cp) + packages/remote(@triflux/core import 변환, Edit만). npm pack --dry-run ~1MB 확인.
 
@@ -200,7 +200,7 @@
 - `hub/team/conductor.mjs`: :498-535 finite restart/dead, :793-817 completed release, :1079-1087 maybeAutoShutdown, :1107-1189 spawnSession, :1158-1173 claude lease=null
 - `hub/team/cto-auto-collect.mjs`: :9 env-gate, :27-119 debounce+runCollect
 - `hub/workers/claude-worker.mjs`: :115 --model, :126-127 --resume
-- `scripts/install-mcp-gateway-startup.mjs`: :185-204,367-374 plist KeepAlive/systemd Restart
+- launchd plist의 KeepAlive와 systemd unit의 Restart 정책은 CTO 전용 구현에서 검증
 - `scripts/hub-ensure.mjs`: :637-664 detached start, :666-829 health-gated run
 - `hooks/hook-orchestrator.mjs`: :569-600 80/90% nudge
 - `hooks/pre-compact-snapshot.mjs`: :129-170 PreCompact additionalContext

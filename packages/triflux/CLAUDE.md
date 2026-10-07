@@ -110,7 +110,7 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 
 ### SSH 패턴
 
-`hosts.json`의 `os` 필드로 대상 셸을 판단한다. `safety-guard`도 이 필드를 참조한다.
+`hosts.json`의 `os` 필드로 대상 셸을 판단한다.
 
 | 대상 OS | 셸 | 패턴 |
 |---------|-----|------|
@@ -157,7 +157,6 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 - Claude 작성 코드 → Codex 리뷰
 - Codex 작성 코드 → Claude 리뷰
 - 동일 모델이 스스로 승인하지 않는다.
-- git 커밋 전에 미검증 파일을 감지하면 알린다.
 </cross-review>
 
 <session-context>

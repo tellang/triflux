@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 /**
- * session-stale-cleanup.mjs — SessionStart 훅
+ * session-stale-cleanup.mjs — tfx doctor --fix 정리 작업
  *
- * 새 세션 시작 시 이전 세션의 stale 상태를 정리한다:
+ * 이전 세션의 stale 상태를 정리한다:
  * 1. tfx-multi-state.json — 세션 간 상태 누수 방지 (#62)
  * 2. tfx-route-*-pids — 고아 워커 프로세스 정리 (#62 후속)
  * 3. git fsmonitor--daemon 누적 감시 — threshold 초과 시 증거 기록 (#214)
  *
- * @see scripts/tfx-gate-activate.mjs — 상태 생산자 (ownerPid 기록)
  * @see scripts/tfx-route.sh — PID tracking 파일 생산자
  */
 

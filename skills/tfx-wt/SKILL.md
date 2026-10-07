@@ -3,7 +3,7 @@ name: tfx-wt
 description: >
   Windows Terminal 탭/패인 자연어 조작. 사용자가 "새 탭 열어줘", "패인 분할",
   "탭 목록", "탭 닫아" 같은 한국어/영어 표현을 쓰면 wt-cli.mjs 경유로 wt-manager API 호출.
-  safety-guard가 wt.exe 직접 호출을 차단하므로 이 스킬이 유일한 경로다.
+  Windows Terminal 명령은 이 스킬에서 관리 API를 경유한다.
   Use when: 새 탭, tab open, 패인, pane split, 탭 목록, 탭 닫아, wt 탭, wt 패인
 argument-hint: "<create-tab|split-pane|layout|list|close|close-stale|rename> [json-opts]"
 platform:
@@ -15,8 +15,7 @@ platform:
 > **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급한다.
 > ARGUMENTS가 비어있거나 없으면 사용자에게 의도 확인 후 적절한 action 으로 라우팅한다.
 
-> **인프라**: keyword-rules.json 의 `wt-tab-*` 4 규칙이 이 스킬로 라우팅한다.
-> 사용자는 보통 자연어로 호출 ("탭 열어줘") 하므로 의도 → action 매핑이 첫 단계.
+> 사용자가 이 스킬을 호출하면 요청의 의도를 먼저 action에 매핑한다.
 
 ## OS 정책
 
@@ -26,7 +25,7 @@ frontmatter `platform: [win32]` 때문에 `tfx setup` 은 macOS/Linux 에 이 �
 
 | OS | 동작 | 라우팅 |
 |----|------|--------|
-| Windows | `wt.exe` 실제 호출 (wt-manager 경유). safety-guard 차단 우회 | **tfx-wt 가 담당** |
+| Windows | `wt.exe` 실제 호출 (wt-manager 경유) | **tfx-wt 가 담당** |
 | macOS / Linux | `createWtManager()` 가 stub 반환 (PR #241). 모든 action no-op | **`terminal-opener.mjs` 가 tmux 경로로 담당** (PR #236). tfx-wt 는 사용자에게 안내만 |
 
 ### 분리 정신 (PR #236, #241)
@@ -185,13 +184,13 @@ CLAUDE.md `psmux-wt > wt.exe → wt-manager 경유` 섹션:
 | `wt.exe -w 0 sp -H ...` | `layout` (다중) 또는 `split-pane` (단일) |
 | `Start-Process wt.exe ...` (PowerShell) | `create-tab` |
 
-safety-guard 가 위 4 패턴을 모두 차단하므로 자연어 라우팅 → `tfx-wt` → `wt-cli.mjs` 가 유일한 안전 경로.
+Windows Terminal 요청은 `tfx-wt`에서 `wt-cli.mjs`를 경유해 실행한다.
 
 ## 안티패턴
 
 | 패턴 | 문제 | 대체 |
 |------|------|------|
-| `Bash("wt.exe new-tab ...")` | safety-guard 차단 | `node scripts/wt-cli.mjs create-tab '{...}'` |
+| `Bash("wt.exe new-tab ...")` | 관리 API를 거치지 않음 | `node scripts/wt-cli.mjs create-tab '{...}'` |
 | macOS 에서 "탭 열어" 받고 강제 실행 시도 | wt-manager stub 반환 → 효과 없음 + 혼란 | "Windows Terminal 미설치 환경 — no-op" 명시 후 종료 |
 | `wt.exe -w 0 nt` (새 창) | CLAUDE.md tfx-psmux.md RULE 5-3 금지 | `sp -H` / `sp -V` (split) 사용 |
 | 다중 패인을 `create-tab` N회 호출 | 새 창 N개 띄우기 | `layout` 한 번 호출 |
@@ -202,9 +201,8 @@ safety-guard 가 위 4 패턴을 모두 차단하므로 자연어 라우팅 → 
 - `hub/team/wt-manager.mjs` — 실제 구현체 (`createTab`, `splitPane`, `applySplitLayout`, `closeTab`, `closeStale`, `renameTab`, `listTabs`)
 - CLAUDE.md `psmux-wt` 섹션 — wt-manager API 가이드
 - `.claude/rules/tfx-psmux.md` — psmux/WT 정책 RULE 5/6
-- `hooks/keyword-rules.json` `wt-tab-*` 4 규칙 — 자연어 라우팅 진입점
 
 ## 메모
 
 - PR #241 (5/8) 이후 macOS/Linux 에서도 안전. wt-manager 가 stub 반환하므로 crash 없이 no-op.
-- 4/11 b313c648 커밋이 keyword-rules + wt-cli.mjs 만 추가하고 SKILL.md 를 빠뜨려 한 달간 dead 라우팅. issue #248 로 발견 후 본 스킬 추가.
+- 4/11 b313c648 커밋에서 CLI만 추가하고 SKILL.md를 빠뜨린 문제가 issue #248에서 발견되어 본 스킬을 추가했다.

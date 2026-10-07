@@ -45,7 +45,6 @@ function writeRegistry(filePath, home, project, server) {
             : {}),
         },
         policies: {
-          stdio_action: "replace-with-hub",
           watched_paths: [
             join(home, ".codex", "config.toml"),
             join(project, ".mcp.json"),

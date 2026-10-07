@@ -7,10 +7,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_GEMINI_PROFILES } from "../scripts/lib/gemini-profiles.mjs";
 import {
-  AMBER,
   BOLD,
   box,
-  CYAN,
   clear,
   confirm,
   DIM,
@@ -437,133 +435,6 @@ function showSummary(results) {
   }
 }
 
-// ── Star Request ──
-
-const STAR_OWNER = "tellang";
-const STAR_REPO = "triflux";
-const STAR_URL = `https://github.com/${STAR_OWNER}/${STAR_REPO}`;
-const STAR_MARKER_DIR = join(homedir(), ".config", "star-prompt");
-const STAR_MARKER = join(
-  STAR_MARKER_DIR,
-  `${STAR_OWNER}-${STAR_REPO}.prompted`,
-);
-
-function markStarPrompted() {
-  mkdirSync(STAR_MARKER_DIR, { recursive: true });
-  writeFileSync(STAR_MARKER, new Date().toISOString(), "utf8");
-}
-
-function runGh(args) {
-  return execFileSync("gh", args, {
-    timeout: 10000,
-    encoding: "utf8",
-    stdio: ["pipe", "pipe", "pipe"],
-  });
-}
-
-function getGhHttpStatus(error) {
-  const out = [error?.stdout, error?.stderr].filter(Boolean).join("\n");
-  const match = out.match(/HTTP\s+(\d{3})/i) || out.match(/\b(\d{3})\b/);
-  return match ? Number(match[1]) : null;
-}
-
-async function starRequest({ soft = false } = {}) {
-  const interactive =
-    process.stdout.isTTY && !process.env.CI && process.env.TERM !== "dumb";
-  const useSoft = soft || !interactive;
-
-  // 이미 프롬프트 본 유저 스킵
-  if (existsSync(STAR_MARKER)) return;
-
-  // gh 설치 확인
-  try {
-    runGh(["--version"]);
-  } catch {
-    console.log();
-    info(`${AMBER}⭐${RESET} ${CYAN}${STAR_URL}${RESET}`);
-    console.log();
-    return;
-  }
-
-  // gh 인증 확인
-  try {
-    runGh(["auth", "status"]);
-  } catch {
-    console.log();
-    info(`${AMBER}⭐${RESET} ${CYAN}${STAR_URL}${RESET}`);
-    console.log();
-    return;
-  }
-
-  // 스타 여부 체크
-  let alreadyStarred = false;
-  try {
-    runGh(["api", `user/starred/${STAR_OWNER}/${STAR_REPO}`]);
-    alreadyStarred = true;
-  } catch (error) {
-    const status = getGhHttpStatus(error);
-    if (status === 404) {
-      alreadyStarred = false;
-    } else {
-      // API 에러 (404 외): 프롬프트 없이 URL만 출력, 마커 미기록
-      console.log();
-      info(`${CYAN}${STAR_URL}${RESET}`);
-      console.log();
-      return;
-    }
-  }
-
-  console.log();
-
-  if (alreadyStarred) {
-    ok(`이미 함께하고 계시군요. ${AMBER}⭐${RESET}`);
-    markStarPrompted();
-    console.log();
-    return;
-  }
-
-  let accepted = false;
-  if (useSoft) {
-    accepted = await confirm(
-      `${AMBER}⭐${RESET} 하나가 큰 차이를 만듭니다.`,
-      true,
-    );
-  } else {
-    const answer = await select(
-      `${AMBER}⭐${RESET} 이 프로젝트가 마음에 드셨나요?`,
-      [
-        { label: "예, 누를게요", hint: "GitHub Star" },
-        { label: "아니오", hint: "" },
-      ],
-    );
-    accepted = answer?.index === 0;
-  }
-
-  if (!accepted) {
-    if (useSoft) {
-      info(`${CYAN}${STAR_URL}${RESET}`);
-    } else {
-      info(`괜찮습니다. 나중에 마음이 바뀌시면: ${CYAN}${STAR_URL}${RESET}`);
-    }
-    markStarPrompted();
-    console.log();
-    return;
-  }
-
-  try {
-    runGh(["api", "-X", "PUT", `/user/starred/${STAR_OWNER}/${STAR_REPO}`]);
-    if (useSoft) {
-      ok(`함께해 주셔서 감사합니다. ${AMBER}⭐${RESET}`);
-    } else {
-      ok(`감사합니다! 여러분의 ${AMBER}⭐${RESET}가 프로젝트를 성장시킵니다.`);
-    }
-  } catch {
-    info(`${CYAN}${STAR_URL}${RESET}`);
-  }
-  markStarPrompted();
-  console.log();
-}
-
 // ── Main Menu ──
 
 const MENU = [
@@ -595,7 +466,6 @@ async function main() {
       case 0: {
         const results = await runWizard();
         showSummary(results);
-        await starRequest();
         break;
       }
 

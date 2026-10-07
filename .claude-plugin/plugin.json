@@ -17,6 +17,5 @@
     "orchestration",
     "multi-model"
   ],
-  "skills": "./skills/",
-  "hooks": "./hooks/hooks.json"
+  "skills": "./skills/"
 }

@@ -16,7 +16,7 @@ triflux 워크스페이스에서 Antigravity CLI의 역할과 운영 규칙. 1M 
 ## Gemini의 역할
 - 빠른 웹 검색 (Google Search 통합) — `tfx-research --quick`
 - 3-CLI 합의(consensus/debate/panel)에서 Gemini 시점 제공
-- 1M context 활용 — 큰 코드베이스 분석 / `tfx-interview`는 Gemini 단독
+- 1M context 활용 — 큰 코드베이스 분석
 - swarm/multi headless 병렬 실행의 워커
 
 ## 비대화식 실행 경로

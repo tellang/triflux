@@ -1,5 +1,4 @@
 // hub/team/worktree-lifecycle.mjs — Git worktree lifecycle management
-// Replaces shell commands in tfx-codex-swarm Step 5 + merge-worktree Phase 6.
 // Convention: .codex-swarm/wt-{slug} paths, swarm/{runId}/{slug} branches.
 // Remote support: host option → SSH-based git operations via remote-session.mjs.
 
