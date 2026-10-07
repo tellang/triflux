@@ -7,17 +7,21 @@ const usage = atom({ plugin: 'triflux-mods', key: 'usage' } as const, null)
 
 const WINDOW_LABEL: Record<string, string> = { five_hour: '5h', seven_day: '1w', spend_limit: '$' }
 
+// 선택 기능이라 실패를 삼킨다. hook 오류가 쌓이면 mod 전체가 꺼진다.
 async function refreshUsage($: EngineInterface) {
-  const { rateLimits, context, cost } = await $.session.usage()
-  const snapshot: UsageSnapshot = {
-    windows: rateLimits.map(({ kind, percentUsed, resetsAt }) => ({ kind, percentUsed, resetsAt })),
-    contextPercent: context.percent ?? null,
-    costUsd: cost?.usd ?? null,
-  }
-  await update($, usage, () => snapshot)
-  // statusLine HUD 가 이 파일을 보고 Claude 행을 뺀다(hud/hud-qos-status.mjs).
-  const home = await $.env.get('HOME')
-  if (home) await $.fs.write(`${home}/.claude/cache/triflux/claude-band/${await $.session.id()}`, String(await $.clock.now()))
+  try {
+    const { rateLimits, context, cost } = await $.session.usage()
+    const snapshot: UsageSnapshot = {
+      windows: rateLimits.map(({ kind, percentUsed, resetsAt }) => ({ kind, percentUsed, resetsAt })),
+      contextPercent: context.percent ?? null,
+      costUsd: cost?.usd ?? null,
+    }
+    await update($, usage, () => snapshot)
+    // band 가 실제로 그려질 때만 statusLine HUD 가 Claude 행을 뺀다(hud/hud-qos-status.mjs).
+    const home = await $.env.get('HOME')
+    if (home && snapshot.windows.length > 0)
+      await $.fs.write(`${home}/.claude/cache/triflux/claude-band/${await $.session.id()}`, String(await $.clock.now()))
+  } catch {}
 }
 
 function formatRemaining(resetsAt: string | undefined, now: number) {

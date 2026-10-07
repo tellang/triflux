@@ -26,9 +26,14 @@ export function registerAgentEffort(on: On) {
   const explicitCalls = new Set<string>()
   const effortByAgentId = new Map<string, Effort>()
 
-  on('tool.call', { tool: 'Agent' }, ($, e, next) => {
-    if (e.effort) explicitCalls.add(e.tool_use_id)
-    return next(e)
+  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    if (!e.effort) return next(e)
+    explicitCalls.add(e.tool_use_id)
+    try {
+      return await next(e)
+    } finally {
+      explicitCalls.delete(e.tool_use_id)
+    }
   })
 
   on('agent.spawn', async ($, e, next) => {
@@ -37,8 +42,14 @@ export function registerAgentEffort(on: On) {
     // 호출자가 Agent 도구에 effort 를 직접 적었으면 그 값을 따른다.
     if (spawned.agentId && effort && !e.fork && !explicitCalls.has(e.tool_use_id))
       effortByAgentId.set(spawned.agentId, effort)
-    explicitCalls.delete(e.tool_use_id)
     return spawned
+  })
+
+  // /clear 는 session.start 없이 새 세션으로 넘어가므로 여기서 비운다.
+  on('session.end', ($, e, next) => {
+    explicitCalls.clear()
+    effortByAgentId.clear()
+    return next(e)
   })
 
   on('turn.step', async function* ($, e, next) {
