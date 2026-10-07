@@ -33,14 +33,14 @@ macOS/Linux는 플랫폼 보호기가 아무 작업도 하지 않게 처리하�
 
 위 `<psmux-wt>` 룰셋은 Windows 전용이다. macOS/Linux 환경에서 triflux가 터미널/세션을 다루는 방식.
 
-### terminal-opener.mjs 3단계 대체 경로(`hub/team/terminal-opener.mjs:124~149`)
+### terminal-opener.mjs 3단계 대체 경로(`hub/team/terminal-opener.mjs` 의 `openCommand`)
 
 `openCommand()` 가 순차 평가하는 분기:
 
 | 우선순위 | 조건 | 동작 | API |
 |---------|------|------|-----|
 | 1 | `platform === "win32"` | `wt-manager.createTab` | `hub/team/wt-manager.mjs` |
-| 2 | `isTmuxLikeMux(mux, platform)` (`detectMultiplexer()` → `getMultiplexerType()`/`hasMultiplexer()`/`hasTmux()` + 리터럴 psmux 검사) | `tmux new-window -n <title> <command>` | 셸 직접 호출 |
+| 2 | `isTmuxLikeMux(mux)` (`detectMultiplexer()` → `getMultiplexerType()`/`hasMultiplexer()`/`hasTmux()`) | `tmux new-window -n <title> <command>` | 셸 직접 호출 |
 | 3 | `platform === "darwin"` (대체 경로) | `open -a Terminal` | macOS `open` 명령 |
 | — | Linux(멀티플렉서 없음) | 미지원(`false` 반환) | — |
 
@@ -48,9 +48,9 @@ macOS/Linux는 플랫폼 보호기가 아무 작업도 하지 않게 처리하�
 
 | 후보 | 필요성 | 이유 |
 |------|--------|------|
-| iTerm2 관리자 | **불필요** | `hub/lib/env-detect.mjs:96`이 `TERM_PROGRAM === "iTerm.app"`을 감지하지만 별도 GUI 패인 조작은 tmux/psmux로 처리한다. 새 창은 `open -a Terminal` 대체 경로로 충분하다. |
-| tmux 관리자 | **불필요** | psmux 자체가 tmux 포크다. `terminal-opener.mjs`가 `tmux new-window`로 직접 호출한다. |
-| psmux 관리자 | **이미 있음** | `hub/team/psmux.mjs`가 `IS_WINDOWS`/`IS_MAC`으로 플랫폼을 분기한다. |
+| iTerm2 관리자 | **불필요** | `hub/lib/env-detect.mjs:96`이 `TERM_PROGRAM === "iTerm.app"`을 감지하지만 별도 GUI 패인 조작은 tmux로 처리한다. 새 창은 `open -a Terminal` 대체 경로로 충분하다. |
+| tmux 관리자 | **불필요** | `terminal-opener.mjs`가 `tmux new-window`로 직접 호출한다. |
+| psmux 관리자 | **이미 있음** | `hub/team/psmux.mjs`가 Windows에서는 psmux, macOS/Linux에서는 tmux를 사용한다. |
 
 참고 사례: OMC(`oh-my-claudecode`)도 운영체제별 관리자를 만들지 않고 Tmux 관리자·워크트리 관리자·Claude 실행기 세 구성 요소로 정리한다. 이 저장소 결정의 외부 근거가 아니라 비교 참고로만 본다.
 

@@ -29,8 +29,8 @@ import { IS_WINDOWS } from "../platform.mjs";
 // OS 별 primary multiplexer 를 명시적으로 결정한다.
 //   - PSMUX_BIN env 가 있으면 user override (가장 우선)
 //   - Windows: psmux 가 primary. PATH + 기본 설치 경로에서 탐색.
-//   - mac/Linux: tmux 가 primary. PATH 에서만 찾는다 (HomeBrew, apt 등 표준 위치).
-// silent fallback 은 두지 않는다 — primary 가 없으면 의도된 fail.
+//   - mac/Linux: tmux 가 primary. 탐색 없이 PATH 의 tmux 를 쓴다.
+// silent fallback 은 두지 않는다. primary 가 없으면 의도된 fail.
 const PSMUX_BIN = (() => {
   if (process.env.PSMUX_BIN) return process.env.PSMUX_BIN;
 
@@ -58,20 +58,9 @@ const PSMUX_BIN = (() => {
     return "psmux"; // 최종 — hasPsmux/hasMultiplexer 가 검증
   }
 
-  // mac/Linux primary: tmux (POSIX 표준). silent fallback 아님 — 정식 primary.
-  try {
-    childProcess.execFileSync("tmux", ["-V"], {
-      stdio: "ignore",
-      timeout: 2000,
-    });
-    return "tmux";
-  } catch {
-    /* tmux not in PATH — hasMultiplexer 가 false 반환할 것 */
-  }
+  // mac/Linux primary: tmux
   return "tmux";
 })();
-const GIT_BASH =
-  process.env.GIT_BASH_PATH || resolveGitBashExecutable() || "bash";
 
 /** Windows psmux 세션의 기본 셸을 PowerShell로 강제한다 (pwsh7 우선, ps5 fallback). */
 const PWSH_BIN = (() => {
@@ -231,10 +220,10 @@ function randomToken(prefix) {
 }
 
 function ensurePsmuxInstalled() {
-  if (!hasPsmux()) {
+  if (!hasMultiplexer()) {
+    const mux = IS_WINDOWS ? "psmux" : "tmux";
     throw new Error(
-      "psmux가 설치되어 있지 않습니다.\n\n" +
-        "psmux는 Codex/Antigravity CLI를 병렬 세션으로 실행하는 터미널 멀티플렉서입니다.\n" +
+      `${mux}가 설치되어 있지 않습니다.\n\n` +
         "설치 방법 (택 1):\n" +
         `${formatPsmuxInstallGuidance("  ")}\n\n` +
         "설치 후 터미널을 재시작하세요.",
@@ -539,13 +528,6 @@ function disablePipeCapture(paneId) {
   }
 }
 
-function sendLiteralToPane(paneId, text, submit = true) {
-  psmuxExec(["send-keys", "-t", paneId, "-l", text]);
-  if (submit) {
-    psmuxExec(["send-keys", "-t", paneId, "Enter"]);
-  }
-}
-
 export function sendKeysToPane(paneId, text, submit = true) {
   psmuxExec(["send-keys", "-t", paneId, "-l", text]);
   if (submit) {
@@ -561,10 +543,6 @@ function toPatternRegExp(pattern) {
     return new RegExp(pattern.source, flags);
   }
   return new RegExp(String(pattern), "m");
-}
-
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function psmux(args, opts = {}) {
@@ -759,7 +737,7 @@ export function createPsmuxSession(sessionName, opts = {}) {
         "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
       ].join("; ");
       panes.forEach((paneId) => {
-        sendLiteralToPane(paneId, encodingInit, true);
+        sendKeysToPane(paneId, encodingInit, true);
       });
     }
 
@@ -1048,22 +1026,6 @@ function detachAttachedClients(sessionName, waitMs = 750) {
   }
 }
 
-function findFallbackPane(sessionName, excludedPaneId) {
-  try {
-    const panes = listPaneDetails(sessionName).filter(
-      (pane) => pane.paneId !== excludedPaneId && !pane.isDead,
-    );
-    if (panes.length === 0) return null;
-    return (
-      panes.find((pane) => pane.title === "lead") ||
-      panes.find((pane) => pane.paneIndex === 0) ||
-      panes[0]
-    );
-  } catch {
-    return null;
-  }
-}
-
 /**
  * psmux 세션 종료
  * 순서: pipe-pane 해제 → pane 프로세스 트리 정리 → 세션 종료 → 고아 정리
@@ -1179,7 +1141,7 @@ export function pruneStale(opts = {}) {
   const result = killSessionByTitle(
     new RegExp(
       `^(?:${sessions
-        .map((session) => escapeRegExp(session.title))
+        .map((session) => escapeRegex(session.title))
         .join("|")})$`,
     ),
   );
@@ -1496,7 +1458,7 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
     wrapped = `{ ${safeCommand}; __ec=$?; echo "${COMPLETION_PREFIX}${token}:$__ec"; }`;
   }
 
-  sendLiteralToPane(pane.paneId, wrapped, true);
+  sendKeysToPane(pane.paneId, wrapped, true);
 
   return { paneId: pane.paneId, paneName, token, logPath };
 }
@@ -1677,7 +1639,7 @@ export async function waitForCompletion(
   opts = {},
 ) {
   const completionRegex = new RegExp(
-    `${escapeRegExp(COMPLETION_PREFIX)}${escapeRegExp(token)}:(\\d+)`,
+    `${escapeRegex(COMPLETION_PREFIX)}${escapeRegex(token)}:(\\d+)`,
     "m",
   );
   const result = await waitForPattern(
@@ -1726,211 +1688,10 @@ export async function waitForCompletion(
   };
 }
 
-// ─── 하이브리드 모드 워커 관리 함수 ───
-
-/**
- * psmux 세션의 새 pane에서 워커 실행
- * @param {string} sessionName - 대상 psmux 세션 이름
- * @param {string} workerName - 워커 식별용 pane 타이틀
- * @param {string} cmd - 실행할 커맨드
- * @returns {{ paneId: string, workerName: string }}
- */
-export function spawnWorker(sessionName, workerName, cmd) {
-  if (!hasPsmux()) {
-    throw new Error(
-      "psmux가 설치되어 있지 않습니다.\n" +
-        `설치 방법:\n${formatPsmuxInstallGuidance("  ")}`,
-    );
-  }
-
-  // remain-on-exit: 종료된 pane이 즉시 사라지는 것 방지
-  try {
-    psmuxExec(["set-option", "-t", sessionName, "remain-on-exit", "on"]);
-  } catch {
-    // 미지원 시 무시
-  }
-
-  // Windows: pane 기본셸이 PowerShell → Git Bash로 래핑
-  // psmux가 이스케이프 시퀀스를 처리하므로 포워드 슬래시 경로를 사용한다.
-  const shellCmd = IS_WINDOWS
-    ? `& '${GIT_BASH.replace(/\\/g, "/")}' -l -c '${cmd.replace(/'/g, "'\\''")}'`
-    : cmd;
-
-  try {
-    const paneTarget = psmuxExec([
-      "split-window",
-      "-t",
-      sessionName,
-      "-P",
-      "-F",
-      "#{session_name}:#{window_index}.#{pane_index}",
-      shellCmd,
-    ]);
-    try {
-      psmuxExec(["select-pane", "-t", paneTarget, "-T", workerName]);
-    } catch {
-      // tmux 2.6 미만: select-pane -T 미지원 — 무시
-    }
-    return { paneId: paneTarget, workerName };
-  } catch (err) {
-    throw new Error(
-      `워커 생성 실패 (session=${sessionName}, worker=${workerName}): ${err.message}`,
-    );
-  }
-}
-
-/**
- * 워커 pane 실행 상태 확인
- * @param {string} sessionName - 대상 psmux 세션 이름
- * @param {string} workerName - 워커 pane 타이틀
- * @returns {{ status: "running"|"exited", exitCode: number|null, paneId: string }}
- */
-export function getWorkerStatus(sessionName, workerName) {
-  if (!hasPsmux()) {
-    throw new Error(
-      `psmux 미설치. 설치 방법:\n${formatPsmuxInstallGuidance("  ")}`,
-    );
-  }
-  try {
-    const pane = resolvePane(sessionName, workerName);
-    return {
-      status: pane.isDead ? "exited" : "running",
-      exitCode: pane.isDead ? pane.exitCode : null,
-      paneId: pane.paneId,
-    };
-  } catch (err) {
-    if (err.message.includes("Pane을 찾을 수 없습니다")) {
-      throw new Error(`워커를 찾을 수 없습니다: ${workerName}`);
-    }
-    throw new Error(
-      `워커 상태 조회 실패 (session=${sessionName}, worker=${workerName}): ${err.message}`,
-    );
-  }
-}
-
-/**
- * 워커 pane 프로세스 강제 종료
- * @param {string} sessionName - 대상 psmux 세션 이름
- * @param {string} workerName - 워커 pane 타이틀
- * @returns {{ killed: boolean }}
- */
-export function killWorker(sessionName, workerName) {
-  if (!hasPsmux()) {
-    throw new Error(
-      `psmux 미설치. 설치 방법:\n${formatPsmuxInstallGuidance("  ")}`,
-    );
-  }
-  try {
-    const { paneId, status } = getWorkerStatus(sessionName, workerName);
-    const attachedCount = getPsmuxSessionAttachedCount(sessionName);
-    const fallbackPane =
-      attachedCount > 0 ? findFallbackPane(sessionName, paneId) : null;
-
-    if (fallbackPane?.paneId) {
-      try {
-        psmuxExec(["select-pane", "-t", fallbackPane.paneId]);
-      } catch {
-        // focus 회복 best-effort
-      }
-    }
-
-    // pipe-pane 캡처 해제 — reader 프로세스 정상 종료 유도
-    disablePipeCapture(paneId);
-
-    // pane PID 수집 → 프로세스 트리 정리 (MCP 서버 좀비 방지)
-    try {
-      const pidOutput = psmuxExec([
-        "list-panes",
-        "-t",
-        paneId,
-        "-F",
-        "#{pane_pid}",
-      ]);
-      const pid = Number.parseInt(pidOutput.trim(), 10);
-      if (Number.isFinite(pid) && pid > 0) killProcessTree(pid);
-    } catch {
-      // PID 조회 실패 — 아래에서 pane만 정리
-    }
-
-    // 이미 종료된 워커 → pane 정리만 수행
-    if (status === "exited") {
-      try {
-        psmuxExec(["kill-pane", "-t", paneId]);
-      } catch {
-        // 무시
-      }
-      return { killed: true };
-    }
-
-    // running → C-c 우아한 종료 시도
-    try {
-      psmuxExec(["send-keys", "-t", paneId, "C-c"]);
-    } catch {
-      // send-keys 실패 무시
-    }
-
-    if (!fallbackPane) {
-      try {
-        psmuxExec(["send-keys", "-t", paneId, "exit", "Enter"]);
-      } catch {
-        // send-keys 실패 무시
-      }
-    }
-
-    sleepMs(2000);
-
-    try {
-      psmuxExec(["kill-pane", "-t", paneId]);
-    } catch {
-      // 이미 종료된 pane — 무시
-    }
-
-    if (fallbackPane?.paneId) {
-      try {
-        psmuxExec(["select-pane", "-t", fallbackPane.paneId]);
-      } catch {
-        // pane 정리 후 focus 재선택 best-effort
-      }
-    }
-    return { killed: true };
-  } catch (err) {
-    if (err.message.includes("워커를 찾을 수 없습니다")) {
-      return { killed: true };
-    }
-    throw new Error(
-      `워커 종료 실패 (session=${sessionName}, worker=${workerName}): ${err.message}`,
-    );
-  }
-}
-
-/**
- * 워커 pane 출력 마지막 N줄 캡처
- * @param {string} sessionName - 대상 psmux 세션 이름
- * @param {string} workerName - 워커 pane 타이틀
- * @param {number} lines - 캡처할 줄 수 (기본 50)
- * @returns {string} 캡처된 출력
- */
-export function captureWorkerOutput(sessionName, workerName, lines = 50) {
-  if (!hasPsmux()) {
-    throw new Error(
-      `psmux 미설치. 설치 방법:\n${formatPsmuxInstallGuidance("  ")}`,
-    );
-  }
-  try {
-    const { paneId } = getWorkerStatus(sessionName, workerName);
-    return psmuxExec(["capture-pane", "-t", paneId, "-p", "-S", `-${lines}`]);
-  } catch (err) {
-    if (err.message.includes("워커를 찾을 수 없습니다")) throw err;
-    throw new Error(
-      `출력 캡처 실패 (session=${sessionName}, worker=${workerName}): ${err.message}`,
-    );
-  }
-}
-
 // ─── CLI 진입점 ───
 
 if (process.argv[1]?.endsWith("psmux.mjs")) {
-  (async () => {
+  (() => {
     const rawArgs = process.argv.slice(2);
     const internalMode = rawArgs[0] === "--internal";
     const cmd = internalMode ? rawArgs[1] : rawArgs[0];
@@ -2007,157 +1768,10 @@ if (process.argv[1]?.endsWith("psmux.mjs")) {
         return;
       }
 
-      switch (cmd) {
-        case "spawn": {
-          const session = getArg("session");
-          const name = getArg("name");
-          const workerCmd = getArg("cmd");
-          if (!session || !name || !workerCmd) {
-            console.error(
-              "사용법: node psmux.mjs spawn --session <세션> --name <워커명> --cmd <커맨드>",
-            );
-            process.exit(1);
-          }
-          console.log(
-            JSON.stringify(spawnWorker(session, name, workerCmd), null, 2),
-          );
-          break;
-        }
-        case "status": {
-          const session = getArg("session");
-          const name = getArg("name");
-          if (!session || !name) {
-            console.error(
-              "사용법: node psmux.mjs status --session <세션> --name <워커명>",
-            );
-            process.exit(1);
-          }
-          console.log(JSON.stringify(getWorkerStatus(session, name), null, 2));
-          break;
-        }
-        case "kill": {
-          const session = getArg("session");
-          const name = getArg("name");
-          if (!session || !name) {
-            console.error(
-              "사용법: node psmux.mjs kill --session <세션> --name <워커명>",
-            );
-            process.exit(1);
-          }
-          console.log(JSON.stringify(killWorker(session, name), null, 2));
-          break;
-        }
-        case "output": {
-          const session = getArg("session");
-          const name = getArg("name");
-          const lines = parseInt(getArg("lines") || "50", 10);
-          if (!session || !name) {
-            console.error(
-              "사용법: node psmux.mjs output --session <세션> --name <워커명> [--lines <줄수>]",
-            );
-            process.exit(1);
-          }
-          console.log(captureWorkerOutput(session, name, lines));
-          break;
-        }
-        case "capture-start": {
-          const session = getArg("session");
-          const name = getArg("name");
-          if (!session || !name) {
-            console.error(
-              "사용법: node psmux.mjs capture-start --session <세션> --name <pane>",
-            );
-            process.exit(1);
-          }
-          console.log(JSON.stringify(startCapture(session, name), null, 2));
-          break;
-        }
-        case "dispatch": {
-          const session = getArg("session");
-          const name = getArg("name");
-          const commandText = getArg("command");
-          if (!session || !name || !commandText) {
-            console.error(
-              "사용법: node psmux.mjs dispatch --session <세션> --name <pane> --command <PowerShell 명령>",
-            );
-            process.exit(1);
-          }
-          console.log(
-            JSON.stringify(
-              dispatchCommand(session, name, commandText),
-              null,
-              2,
-            ),
-          );
-          break;
-        }
-        case "wait-pattern": {
-          const session = getArg("session");
-          const name = getArg("name");
-          const pattern = getArg("pattern");
-          const timeoutSec = parseInt(getArg("timeout") || "300", 10);
-          if (!session || !name || !pattern) {
-            console.error(
-              "사용법: node psmux.mjs wait-pattern --session <세션> --name <pane> --pattern <정규식> [--timeout <초>]",
-            );
-            process.exit(1);
-          }
-          const result = await waitForPattern(
-            session,
-            name,
-            pattern,
-            timeoutSec,
-          );
-          console.log(JSON.stringify(result, null, 2));
-          if (!result.matched) process.exit(2);
-          break;
-        }
-        case "wait-completion": {
-          const session = getArg("session");
-          const name = getArg("name");
-          const token = getArg("token");
-          const timeoutSec = parseInt(getArg("timeout") || "300", 10);
-          if (!session || !name || !token) {
-            console.error(
-              "사용법: node psmux.mjs wait-completion --session <세션> --name <pane> --token <토큰> [--timeout <초>]",
-            );
-            process.exit(1);
-          }
-          const result = await waitForCompletion(
-            session,
-            name,
-            token,
-            timeoutSec,
-          );
-          console.log(JSON.stringify(result, null, 2));
-          if (!result.matched) process.exit(2);
-          break;
-        }
-        default:
-          console.error(
-            "사용법: node psmux.mjs spawn|status|kill|output|capture-start|dispatch|wait-pattern|wait-completion [args]",
-          );
-          console.error("");
-          console.error(
-            "  spawn            --session <세션> --name <워커명> --cmd <커맨드>",
-          );
-          console.error("  status           --session <세션> --name <워커명>");
-          console.error("  kill             --session <세션> --name <워커명>");
-          console.error(
-            "  output           --session <세션> --name <워커명> [--lines <줄수>]",
-          );
-          console.error("  capture-start    --session <세션> --name <pane>");
-          console.error(
-            "  dispatch         --session <세션> --name <pane> --command <PowerShell 명령>",
-          );
-          console.error(
-            "  wait-pattern     --session <세션> --name <pane> --pattern <정규식> [--timeout <초>]",
-          );
-          console.error(
-            "  wait-completion  --session <세션> --name <pane> --token <토큰> [--timeout <초>]",
-          );
-          process.exit(1);
-      }
+      console.error(
+        "사용법: node psmux.mjs --internal list|kill-by-title|prune-stale [args]",
+      );
+      process.exit(1);
     } catch (err) {
       console.error(`오류: ${err.message}`);
       process.exit(1);

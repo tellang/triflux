@@ -46,7 +46,7 @@ psmux.mjs는 **순수 인프라 래퍼**로, psmux 바이너리에 대한 저수
 
 - 세션 생성/종료 (`createPsmuxSession`, `killPsmuxSession`)
 - pane 목록/해석 (`listPaneDetails`, `resolvePane`)
-- 명령 dispatch (`dispatchCommand`, `sendLiteralToPane`)
+- 명령 dispatch (`dispatchCommand`, `sendKeysToPane`)
 - 출력 캡처 (`capturePsmuxPane`, `startCapture`, `waitForCompletion`)
 - 유틸리티 (`hasPsmux`, `psmuxExec`, `psmuxSessionExists`)
 

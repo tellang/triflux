@@ -55,25 +55,6 @@ function hasGitBashTmux() {
   }
 }
 
-function getCommandVersion(command) {
-  const r = spawnSync(command, ["-V"], {
-    encoding: "utf8",
-    timeout: 3000,
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-  });
-  if ((r.status ?? 1) !== 0) return null;
-  return `${r.stdout || ""}${r.stderr || ""}`.trim();
-}
-
-function isPsmuxVersion(command) {
-  try {
-    return /\bpsmux\b/i.test(getCommandVersion(command) || "");
-  } catch {
-    return false;
-  }
-}
-
 function isPsmuxCommandName(command) {
   const name = String(command || "")
     .replace(/\\/g, "/")
@@ -81,10 +62,6 @@ function isPsmuxCommandName(command) {
     .pop()
     .toLowerCase();
   return name === "psmux" || name === "psmux.exe" || name === "psmux.cmd";
-}
-
-function hasLiteralPsmuxBinary(command = process.env.PSMUX_BIN || "psmux") {
-  return isPsmuxVersion(command);
 }
 
 /**
@@ -103,10 +80,6 @@ export function detectMultiplexer() {
     }
     if (hasTmux()) {
       _cachedMux = "tmux";
-      return _cachedMux;
-    }
-    if (hasLiteralPsmuxBinary()) {
-      _cachedMux = "psmux";
       return _cachedMux;
     }
     _cachedMux = null;
@@ -150,7 +123,7 @@ function tmux(args, opts = {}) {
     return psmuxExec(args, opts);
   }
   if (mux === "git-bash-tmux") {
-    const bash = findGitBashExe();
+    const bash = resolveGitBashExecutable();
     if (!bash) throw new Error("git-bash-tmux 감지 실패");
     const r = spawnSync(bash, ["-lc", `tmux ${args}`], {
       encoding: "utf8",

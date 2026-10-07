@@ -6,6 +6,7 @@ import {
   formatPsmuxInstallGuidance,
   formatPsmuxUpdateGuidance,
   parsePsmuxVersion,
+  probePrimaryMultiplexerSupport,
   probePsmuxSupport,
 } from "../../scripts/lib/psmux-info.mjs";
 
@@ -31,35 +32,28 @@ describe("psmux-info", () => {
     assert.match(updateText, /cargo install psmux --force/);
   });
 
-  it("guidance formatters suggest brew + cargo + tmux fallback on darwin", () => {
-    const installText = formatPsmuxInstallGuidance("", "darwin");
-    const updateText = formatPsmuxUpdateGuidance("", "darwin");
-    // Windows-only 패키지매니저는 mac 안내에서 빠진다.
-    assert.doesNotMatch(installText, /winget|scoop|choco/);
-    assert.match(installText, /brew install psmux/);
-    assert.match(installText, /cargo install psmux/);
-    // tmux primary 안내가 mac 가이드에 포함된다.
-    assert.match(
-      installText,
-      /tmux.*primary|tmux.*표준|in-process\/native fallback/,
-    );
-    assert.match(updateText, /brew upgrade psmux/);
-    assert.match(updateText, /cargo install psmux --force/);
-    assert.doesNotMatch(updateText, /winget|choco/);
-  });
-
-  it("guidance formatters use cargo + tmux fallback on linux", () => {
-    const installText = formatPsmuxInstallGuidance("", "linux");
-    const updateText = formatPsmuxUpdateGuidance("", "linux");
-    assert.doesNotMatch(installText, /winget|scoop|choco|brew/);
-    assert.match(installText, /cargo install psmux/);
-    assert.match(
-      installText,
-      /tmux.*primary|tmux.*표준|in-process\/native fallback/,
-    );
-    assert.match(updateText, /cargo install psmux --force/);
-    assert.doesNotMatch(updateText, /winget|brew/);
-  });
+  for (const [platform, install, update] of [
+    ["darwin", "brew install tmux", "brew upgrade tmux"],
+    ["linux", "apt install tmux", "apt install --only-upgrade tmux"],
+  ]) {
+    it(`${platform}에서 tmux 부재 시 tmux 설치와 업데이트를 안내한다`, () => {
+      const calls = [];
+      const result = probePrimaryMultiplexerSupport({
+        platform,
+        execFileSyncFn(command, args) {
+          calls.push([command, ...args]);
+          throw new Error("not installed");
+        },
+      });
+      assert.equal(result.installed, false);
+      assert.equal(result.kind, "tmux");
+      assert.deepEqual(calls, [["tmux", "-V"]]);
+      assert.equal(result.installHint.trim(), install);
+      assert.equal(result.updateHint.trim(), update);
+      assert.equal(formatPsmuxInstallGuidance("", platform), install);
+      assert.equal(formatPsmuxUpdateGuidance("", platform), update);
+    });
+  }
 
   it("probePsmuxSupport detects required commands from help output", () => {
     const calls = [];
