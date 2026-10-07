@@ -42,7 +42,7 @@ function stdoutSink() {
 }
 
 describe("projectCtoHygiene", () => {
-  it("deterministically projects actionable hygiene counts from CTO events and live overlay", () => {
+  it("deterministically projects actionable hygiene counts from CTO events", () => {
     const ledger = [
       event("2026-06-17T00:00:00.000Z", "task_claimed", {
         task_id: "task-active",
@@ -76,25 +76,21 @@ describe("projectCtoHygiene", () => {
     const projection = projectCtoHygiene({
       current: baseCurrent,
       ledger,
-      overlay: {
-        live_sessions: [{ sessionId: "session-live", phase: "stale" }],
-      },
     });
 
     assert.equal(projection.dry_run, true);
     assert.equal(projection.counts.active_tasks, 1);
     assert.equal(projection.counts.completed_tasks, 1);
-    assert.equal(projection.counts.stale_sessions, 2);
+    assert.equal(projection.counts.stale_sessions, 1);
     assert.equal(projection.counts.orphan_worktrees, 1);
     assert.equal(projection.counts.superseded_checkpoints, 1);
-    assert.equal(projection.counts.unknown_owner, 4);
+    assert.equal(projection.counts.unknown_owner, 3);
     assert.deepEqual(
       projection.rows.map((row) => [row.kind, row.id, row.status]),
       [
         ["task", "task-active", "active"],
         ["task", "task-done", "completed"],
         ["session", "session-old", "stale"],
-        ["session", "session-live", "stale"],
         ["worktree", "worker-a", "orphaned"],
         ["checkpoint", "cp-old", "superseded"],
       ],
@@ -126,7 +122,6 @@ describe("projectCtoHygiene", () => {
         rootDir: root,
         lakeRoot,
         stdout,
-        overlay: { live_sessions: [] },
       });
       assert.equal(projection.dry_run, true);
       assert.equal(stdout.json().counts.stale_sessions, 1);

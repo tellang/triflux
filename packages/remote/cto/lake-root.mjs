@@ -6,7 +6,6 @@ import {
   renameSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { basename, dirname, join, parse } from "node:path";
 
 const MAX_DEPTH = 64;
@@ -77,10 +76,6 @@ export function resolveLakeRootDir(cwd, opts = {}) {
   return cwd;
 }
 
-export function firstExisting(paths) {
-  return paths.filter(Boolean).find((path) => defaultExistsSync(path)) || null;
-}
-
 export function toIsoTime(value) {
   if (typeof value === "string" && value.trim()) return value;
   if (value instanceof Date) return value.toISOString();
@@ -104,57 +99,6 @@ export function pathLabel(value) {
   if (!str) return "";
   const segments = str.split(/[/\\]+/u);
   return segments[segments.length - 1] || "";
-}
-
-export function normalizeLiveSession(session) {
-  return {
-    sessionId: String(session?.sessionId || session?.session_id || ""),
-    agent_id:
-      typeof session?.agent_id === "string"
-        ? session.agent_id
-        : typeof session?.agentId === "string"
-          ? session.agentId
-          : null,
-    phase:
-      typeof session?.phase === "string"
-        ? session.phase
-        : typeof session?.status === "string"
-          ? session.status
-          : "active",
-    started_at: toIsoTime(
-      session?.started_at ?? session?.startedAt ?? session?.lastHeartbeat,
-    ),
-  };
-}
-
-export async function readSynapseSnapshot(opts = {}) {
-  const rootDir = opts.rootDir || process.cwd();
-  const persistPath = firstExisting([
-    opts.synapsePersistPath,
-    join(rootDir, ".triflux", "synapse-registry.json"),
-    join(rootDir, ".triflux", "synapse", "registry.json"),
-    join(homedir(), ".claude", "cache", "tfx-hub", "synapse-sessions.json"),
-    join(homedir(), ".claude", "cache", "tfx-hub", "synapse-registry.json"),
-  ]);
-  if (!persistPath) return { sessions: [], active_shards: [] };
-  const data = JSON.parse(readFileSync(persistPath, "utf8"));
-  // 상태 전이는 hub 소유이며 조회는 저장된 live 상태만 읽는다.
-  const sessions = Object.entries(data).flatMap(([key, session]) => {
-    const sessionId = String(session?.sessionId ?? key).trim();
-    if (!sessionId || ["stale", "expired"].includes(session?.status)) return [];
-    return [
-      {
-        ...session,
-        sessionId,
-        status: session?.status === "idle" ? "idle" : "active",
-        lastHeartbeat:
-          typeof session?.lastHeartbeat === "number"
-            ? session.lastHeartbeat
-            : Date.now(),
-      },
-    ];
-  });
-  return { sessions, active_shards: [] };
 }
 
 export function readJsonLines(filePath, limit = Infinity) {

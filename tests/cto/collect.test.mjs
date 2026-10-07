@@ -131,7 +131,6 @@ describe("runCollect", () => {
 
       const current = await runCollect(["--json"], {
         lakeRoot,
-        includeHostArtifacts: false,
         rootDir,
         stdout: { write() {} },
         stderr: { write() {} },
@@ -188,14 +187,12 @@ describe("runCollect", () => {
 
       await runCollect([], {
         lakeRoot,
-        includeHostArtifacts: false,
         rootDir,
         stdout: { write() {} },
         stderr: { write() {} },
       });
       await runCollect([], {
         lakeRoot,
-        includeHostArtifacts: false,
         rootDir,
         stdout: { write() {} },
         stderr: { write() {} },
@@ -219,7 +216,6 @@ describe("runCollect", () => {
       await assert.doesNotReject(() =>
         runCollect([], {
           lakeRoot,
-          includeHostArtifacts: false,
           rootDir,
           stdout: { write() {} },
           stderr: {
@@ -253,7 +249,6 @@ describe("runCollect", () => {
 
       const current = await runCollect([], {
         lakeRoot,
-        includeHostArtifacts: false,
         rootDir,
         stdout: { write() {} },
         stderr: { write() {} },
@@ -276,7 +271,6 @@ describe("runCollect", () => {
     try {
       const current = await runCollect([], {
         lakeRoot,
-        includeHostArtifacts: false,
         rootDir,
         stdout: { write() {} },
         stderr: { write() {} },
@@ -288,7 +282,6 @@ describe("runCollect", () => {
       assert.equal(current.repo.dirty, false);
       assert.equal(current.sources.git.available, false);
       assert.equal(current.sources.ultragoal_omx.available, false);
-      assert.equal(current.sources.tfx_hub.available, false);
     } finally {
       cleanup(rootDir);
     }

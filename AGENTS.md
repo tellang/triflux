@@ -41,5 +41,5 @@
 
 ## CTO 기준 방향
 - `.triflux/lake/current.md`는 에이전트 간 기준 방향 요약입니다. 정렬을 위해 읽되 새 작업으로 취급하지 않습니다.
-- 프로그램용 정본은 `tfx cto status --json`입니다. 안정 키는 `schema_version`, `repo`, `sources`, `ledger_tail`, `live_sessions`, `active_shards`입니다.
+- 프로그램용 정본은 `tfx cto status --json`입니다. 안정 키는 `schema_version`, `repo`, `sources`, `summary`, `ledger_tail`, `hygiene`입니다.
 - 읽기 전용 정렬 문맥입니다.

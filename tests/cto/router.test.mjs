@@ -92,7 +92,6 @@ describe("cmdCto", () => {
             output += String(chunk);
           },
         },
-        synapseReader: async () => ({ sessions: [] }),
       });
 
       assert.equal(result.dry_run, true);

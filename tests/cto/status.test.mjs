@@ -1,11 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -56,7 +50,7 @@ function fixtureCurrent(overrides = {}) {
         detail: {},
         collected_at: "2026-06-02T00:00:00.000Z",
       },
-      tfx_synapse: {
+      handoffs: {
         available: false,
         status: "no_shell_readable_artifact",
         detail: "missing",
@@ -81,7 +75,7 @@ function fixtureCurrent(overrides = {}) {
 }
 
 describe("runStatus", () => {
-  it("prints stable status JSON keys with live synapse overlays", async () => {
+  it("prints stable status JSON keys", async () => {
     const rootDir = makeTempDir();
     const lakeRoot = join(rootDir, ".test-lake");
     const out = captureStdout();
@@ -91,24 +85,6 @@ describe("runStatus", () => {
       const result = await runStatus(["--json"], {
         lakeRoot,
         stdout: out.stdout,
-        synapseReader: async () => ({
-          sessions: [
-            {
-              sessionId: "sess-1",
-              host: "local",
-              agent_id: "agent-1",
-              status: "active",
-              started_at: "2026-06-02T00:01:00.000Z",
-            },
-          ],
-          active_shards: [
-            {
-              shard_name: "t4",
-              phase: "running",
-              members: ["agent-1"],
-            },
-          ],
-        }),
       });
 
       const parsed = JSON.parse(out.read());
@@ -119,29 +95,16 @@ describe("runStatus", () => {
         "sources",
         "summary",
         "ledger_tail",
-        "live_sessions",
-        "active_shards",
         "hygiene",
       ];
       for (const key of existingKeys)
         assert.ok(key in parsed, `${key} missing`);
-      assert.ok("live_session_groups" in parsed);
       assert.deepEqual(parsed, result);
       assert.equal(parsed.schema_version, "cto-lake.v1");
       assert.equal(parsed.repo.branch, "main");
       assert.equal(parsed.sources.git.available, true);
       assert.equal(parsed.ledger_tail.length, 1);
-      assert.deepEqual(parsed.live_session_groups, []);
-      assert.deepEqual(parsed.live_sessions, [
-        {
-          sessionId: "sess-1",
-          host: "local",
-          agent_id: "agent-1",
-          phase: "active",
-          started_at: "2026-06-02T00:01:00.000Z",
-        },
-      ]);
-      assert.deepEqual(parsed.active_shards, []);
+      assert.deepEqual(parsed.ledger_tail, fixtureCurrent().ledger_tail);
       assert.deepEqual(parsed.hygiene, {
         active_tasks: 0,
         completed_tasks: 0,
@@ -150,67 +113,6 @@ describe("runStatus", () => {
         superseded_checkpoints: 0,
         unknown_owner: 0,
       });
-    } finally {
-      cleanup(rootDir);
-    }
-  });
-
-  it("reads active and idle persisted sessions without changing their snapshot or exposing paths", async () => {
-    const rootDir = makeTempDir();
-    const lakeRoot = join(rootDir, ".test-lake");
-    const persistPath = join(rootDir, ".triflux", "synapse-registry.json");
-    try {
-      writeJson(join(lakeRoot, "current.json"), fixtureCurrent());
-      writeJson(persistPath, {
-        active: {
-          status: "active",
-          cwd: "/private/project",
-          lastHeartbeat: 1780358460000,
-        },
-        idle: {
-          status: "idle",
-          cwd: "C:\\Users\\Alice\\project",
-          lastHeartbeat: 1780358460000,
-        },
-        stale: { status: "stale" },
-        expired: { status: "expired" },
-      });
-      const before = readFileSync(persistPath, "utf8");
-      const result = await runStatus(["--json"], {
-        rootDir,
-        lakeRoot,
-        synapsePersistPath: persistPath,
-        stdout: { write() {} },
-      });
-      assert.deepEqual(
-        result.live_sessions.map((s) => [s.sessionId, s.phase, s.cwdLabel]),
-        [
-          ["active", "active", "project"],
-          ["idle", "idle", "project"],
-        ],
-      );
-      assert.equal(
-        result.live_sessions[0].started_at,
-        "2026-06-02T00:01:00.000Z",
-      );
-      assert.equal(
-        JSON.stringify(result.live_sessions).includes("/private/"),
-        false,
-      );
-      assert.equal(
-        JSON.stringify(result.live_sessions).includes("Alice"),
-        false,
-      );
-      assert.equal(readFileSync(persistPath, "utf8"), before);
-      writeFileSync(persistPath, "{broken", "utf8");
-      const unavailable = await runStatus(["--json"], {
-        rootDir,
-        lakeRoot,
-        synapsePersistPath: persistPath,
-        stdout: { write() {} },
-      });
-      assert.deepEqual(unavailable.live_sessions, []);
-      assert.deepEqual(unavailable.ledger_tail, fixtureCurrent().ledger_tail);
     } finally {
       cleanup(rootDir);
     }
@@ -235,7 +137,6 @@ describe("runStatus", () => {
           lakeRoot,
           stdout: out.stdout,
           now: "2026-10-08T00:00:00.000Z",
-          synapseReader: async () => [],
         });
         assert.ok(
           out.read().includes(`generated_at: ${generated_at} (${expected})`),
@@ -255,9 +156,6 @@ describe("runStatus", () => {
         runStatus(["--json"], {
           lakeRoot,
           stdout: out.stdout,
-          synapseReader: async () => {
-            throw new Error("must not be read without current.json");
-          },
         }),
       );
 
@@ -271,44 +169,7 @@ describe("runStatus", () => {
     }
   });
 
-  it("falls back to ledger_tail when synapse is unavailable", async () => {
-    const rootDir = makeTempDir();
-    const lakeRoot = join(rootDir, ".test-lake");
-    const out = captureStdout();
-    const current = fixtureCurrent({
-      ledger_tail: [
-        {
-          ts: "2026-06-02T00:02:00.000Z",
-          event: "collect",
-          source: "tfx_cto_collect",
-          summary: "fallback activity",
-          ref: {},
-        },
-      ],
-    });
-    try {
-      writeJson(join(lakeRoot, "current.json"), current);
-
-      await assert.doesNotReject(() =>
-        runStatus(["--json"], {
-          lakeRoot,
-          stdout: out.stdout,
-          synapseReader: async () => {
-            throw new Error("synapse down");
-          },
-        }),
-      );
-
-      const parsed = JSON.parse(out.read());
-      assert.deepEqual(parsed.live_sessions, []);
-      assert.deepEqual(parsed.active_shards, []);
-      assert.deepEqual(parsed.ledger_tail, current.ledger_tail);
-    } finally {
-      cleanup(rootDir);
-    }
-  });
-
-  it("includes compact hygiene summary derived from current ledger and live overlay", async () => {
+  it("includes compact hygiene summary derived from current ledger", async () => {
     const rootDir = makeTempDir();
     const lakeRoot = join(rootDir, ".test-lake");
     const out = captureStdout();
@@ -338,9 +199,6 @@ describe("runStatus", () => {
       await runStatus(["--json"], {
         lakeRoot,
         stdout: out.stdout,
-        synapseReader: async () => ({
-          sessions: [{ sessionId: "session-live", status: "active" }],
-        }),
       });
 
       const parsed = JSON.parse(out.read());

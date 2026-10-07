@@ -46,26 +46,9 @@
       "type": "object",
       "description": "Durable artifact source states only. A source reports available:false when no shell-readable durable artifact exists.",
       "additionalProperties": false,
-      "required": [
-        "git",
-        "tfx_hub",
-        "tfx_team",
-        "tfx_synapse",
-        "ultragoal_omx",
-        "ultragoal_omc",
-        "handoffs"
-      ],
+      "required": ["git", "ultragoal_omx", "ultragoal_omc", "handoffs"],
       "properties": {
         "git": {
-          "$ref": "#/$defs/sourceState"
-        },
-        "tfx_hub": {
-          "$ref": "#/$defs/sourceState"
-        },
-        "tfx_team": {
-          "$ref": "#/$defs/sourceState"
-        },
-        "tfx_synapse": {
           "$ref": "#/$defs/sourceState"
         },
         "ultragoal_omx": {
@@ -81,7 +64,7 @@
     },
     "summary": {
       "type": "object",
-      "description": "Human-oriented synthesized authority summary derived from durable artifacts and live Triflux synapse session status. Phase 1 may add source-derived fields here without changing the top-level contract.",
+      "description": "Human-oriented synthesized authority summary derived from durable artifacts. Phase 1 may add source-derived fields here without changing the top-level contract.",
       "additionalProperties": true
     },
     "ledger_tail": {
