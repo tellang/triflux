@@ -1,8 +1,6 @@
 // ============================================================================
 // 라인 렌더러 (tier별 행 생성)
 // ============================================================================
-import { readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
 import {
   bold,
   CLAUDE_ORANGE,
@@ -12,9 +10,8 @@ import {
   colorByPercent,
   colorByProvider,
   dim,
+  GEMINI_BLUE,
   geminiBlue,
-  green,
-  red,
   yellow,
 } from "./colors.mjs";
 import {
@@ -22,7 +19,6 @@ import {
   FIVE_HOUR_MS,
   PROVIDER_PREFIX_WIDTH,
   SEVEN_DAY_MS,
-  TEAM_STATE_DIR,
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
 import { getTerminalColumns, tierBar, tierDimBar } from "./terminal.mjs";
@@ -36,93 +32,9 @@ import {
   formatTimeCell,
   formatTimeCellDH,
   padAnsiRight,
-  readJson,
   stripAnsi,
   truncateAnsi,
 } from "./utils.mjs";
-
-// ============================================================================
-// tfx-multi 상태 행 생성 (v2.2 HUD 통합)
-// ============================================================================
-export function getTeamRow(currentTier, stateDir = TEAM_STATE_DIR) {
-  let latestPath = null;
-  let latestMtime = Date.now() - 24 * 60 * 60 * 1000;
-  try {
-    for (const name of readdirSync(stateDir)) {
-      if (!/^team-state-.+\.json$/.test(name)) continue;
-      const path = join(stateDir, name);
-      try {
-        const stat = statSync(path);
-        if (stat.isFile() && stat.mtimeMs > latestMtime) {
-          latestPath = path;
-          latestMtime = stat.mtimeMs;
-        }
-      } catch {
-        // 세션 종료 중 사라진 파일은 제외한다.
-      }
-    }
-  } catch {
-    return null;
-  }
-  const teamState = latestPath ? readJson(latestPath, null) : null;
-  if (!teamState?.sessionName) return null;
-
-  const workers = (teamState.members || []).filter((m) => m.role === "worker");
-  if (!workers.length) return null;
-
-  const tasks = teamState.tasks || [];
-  const completed = tasks.filter((t) => t.status === "completed").length;
-  const failed = tasks.filter((t) => t.status === "failed").length;
-  const total = tasks.length || workers.length;
-
-  // 경과 시간 (80col 이상에서만 표시)
-  const elapsed =
-    teamState.startedAt && (currentTier === "full" || currentTier === "compact")
-      ? `${Math.round((Date.now() - teamState.startedAt) / 60000)}m`
-      : "";
-
-  // CLI 브랜드: 단일문자 + ANSI 색상 (x=codex, g=gemini, c=claude)
-  const cliTag = (cli) =>
-    cli === "codex"
-      ? bold(codexWhite("x"))
-      : cli === "gemini"
-        ? bold(geminiBlue("g"))
-        : bold(claudeOrange("c"));
-  // 멤버 상태: 태그 + 상태기호 (60col 이상)
-  const memberIcons =
-    currentTier === "full" ||
-    currentTier === "compact" ||
-    currentTier === "minimal"
-      ? workers
-          .map((m) => {
-            const task = tasks.find((t) => t.owner === m.name);
-            const status =
-              task?.status === "completed"
-                ? green("\u2713")
-                : task?.status === "in_progress"
-                  ? yellow("\u22EF")
-                  : task?.status === "failed"
-                    ? red("\u2717")
-                    : dim("\u25CC");
-            return `${cliTag(m.cli)}${status}`;
-          })
-          .join(" ")
-      : "";
-
-  // 진행 텍스트
-  const doneText =
-    failed > 0
-      ? `${completed}/${total} ${red(`${failed}\u2717`)}`
-      : `${completed}/${total}`;
-
-  const leftText = elapsed ? `${doneText} ${dim(elapsed)}` : doneText;
-
-  return {
-    prefix: bold(claudeOrange("\u25B2")),
-    left: leftText,
-    right: memberIcons,
-  };
-}
 
 // ============================================================================
 // 행 정렬 렌더링
@@ -169,10 +81,9 @@ export function getMicroLine(
   contextView,
   claudeUsage,
   codexBuckets,
-  antigravityReady,
   options = {},
 ) {
-  const { showCodex = true, showGemini = true } = options;
+  const { showCodex = true, showAntigravity = true } = options;
   const ctxView = contextView || buildContextUsageView({});
   // Claude 5h/1w
   const cF =
@@ -211,13 +122,23 @@ export function getMicroLine(
   if (showCodex) {
     segments.push(`${bold(codexWhite("x"))}${dim(":")}${xVal}`);
   }
-  if (showGemini) {
+  if (showAntigravity) {
     segments.push(
-      `${bold(geminiBlue(antigravityReady ? "a" : "g"))}${dim(":")}${antigravityReady ? "agy" : dim("--")}`,
+      `${bold(geminiBlue("a"))}${dim(":")}${antigravityPercentText(options.antigravityQuota)}${options.antigravityQuota?.stale ? dim("*") : ""}`,
     );
   }
   segments.push(`${dim("CTX:")}${contextPercentText(ctxView)}`);
   return truncateAnsi(segments.join(" "), cols);
+}
+
+function antigravityPercentText(quota) {
+  return quota?.usedPercent != null
+    ? colorByProvider(
+        quota.usedPercent,
+        formatPercentCell(quota.usedPercent),
+        geminiBlue,
+      )
+    : dim(formatPlaceholderPercentCell());
 }
 
 // context 는 토큰 수 대신 사용률만 보여 준다.
@@ -324,7 +245,10 @@ export function getAccountLabel(
   const providerState = accountsState?.providers?.[provider] || {};
   const lastId = providerState.last_selected_id;
   const picked = providerConfig.find((a) => a.id === lastId) ||
-    providerConfig[0] || { id: `${provider}-main`, label: provider };
+    providerConfig[0] || {
+      id: `${provider}-main`,
+      label: provider === "antigravity" ? "agy" : provider,
+    };
   let label = picked.label || picked.id;
   if (codexEmail) label = codexEmail;
   if (label.includes("@")) label = label.split("@")[0];
@@ -347,13 +271,17 @@ export function getProviderRow(
   );
 
   const prefix = `${bold(markerColor(marker))}:`;
-  if (provider === "antigravity" || provider === "gemini") {
+  if (provider === "antigravity") {
+    const usedPercent = realQuota?.usedPercent;
+    const bar =
+      usedPercent != null
+        ? tierBar(currentTier, usedPercent, GEMINI_BLUE)
+        : tierDimBar(currentTier);
+    const reset = formatResetRemaining(realQuota?.resetTime) || "n/a";
+    const showTime = currentTier === "full" || currentTier === "compact";
     return {
       prefix,
-      left:
-        provider === "antigravity"
-          ? markerColor(realQuota?.currentAbbrev || "agy")
-          : dim("--"),
+      left: `${dim(`${realQuota?.currentAbbrev || "agy"}:`)}${bar}${antigravityPercentText(realQuota)}${showTime ? ` ${dim(formatTimeCell(reset))}` : ""}${realQuota?.stale ? dim(" [stale]") : ""}`,
       right: accountLabel ? markerColor(accountLabel) : "",
     };
   }

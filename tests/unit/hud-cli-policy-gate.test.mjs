@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import {
-  resolveHudCliVisibility,
-  shouldRenderGeminiFallbackRow,
-} from "../../hud/cli-policy.mjs";
+import { resolveHudCliVisibility } from "../../hud/cli-policy.mjs";
 import { getMicroLine } from "../../hud/renderers.mjs";
 import { stripAnsi } from "../../hud/utils.mjs";
 
@@ -82,44 +79,6 @@ describe("hud/cli-policy: resolveHudCliVisibility", () => {
   });
 });
 
-describe("hud/cli-policy: shouldRenderGeminiFallbackRow", () => {
-  it("antigravity 가 허용이면 gemini 정보가 없어도 그린다", () => {
-    assert.equal(
-      shouldRenderGeminiFallbackRow({
-        antigravityAllowed: true,
-        antigravityReady: false,
-        geminiEmail: null,
-      }),
-      true,
-    );
-  });
-
-  it("antigravity 가 차단이고 gemini 정보가 전무하면 행을 생략한다", () => {
-    assert.equal(
-      shouldRenderGeminiFallbackRow({
-        antigravityAllowed: false,
-        antigravityReady: false,
-        geminiEmail: null,
-      }),
-      false,
-    );
-  });
-
-  it("antigravity 가 차단이어도 이메일 하나만 있으면 그린다", () => {
-    assert.equal(
-      shouldRenderGeminiFallbackRow({
-        antigravityAllowed: false,
-        geminiEmail: "someone@example.com",
-      }),
-      true,
-    );
-  });
-
-  it("인자를 주지 않으면 기존 동작대로 그린다", () => {
-    assert.equal(shouldRenderGeminiFallbackRow(), true);
-  });
-});
-
 describe("hud/renderers: getMicroLine 정책 게이트", () => {
   const CONTEXT_VIEW = { percent: 12, display: "12%" };
   const CLAUDE_USAGE = { fiveHourPercent: 39, weeklyPercent: 20 };
@@ -131,7 +90,7 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
   };
 
   function micro(options) {
-    const args = [CONTEXT_VIEW, CLAUDE_USAGE, CODEX_BUCKETS, true];
+    const args = [CONTEXT_VIEW, CLAUDE_USAGE, CODEX_BUCKETS];
     if (options !== undefined) args.push(options);
     return stripAnsi(getMicroLine(...args));
   }
@@ -149,15 +108,15 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
     assert.ok(line.includes("CTX:"), "CTX 세그먼트는 남아야 한다");
   });
 
-  it("showGemini 가 false 면 a 세그먼트만 빠진다", () => {
-    const line = micro({ showGemini: false });
+  it("showAntigravity 가 false 면 a 세그먼트만 빠진다", () => {
+    const line = micro({ showAntigravity: false });
     assert.ok(!line.includes("a:"), `a 세그먼트가 남아 있다: ${line}`);
     assert.ok(line.includes("x:"), "codex 세그먼트는 남아야 한다");
     assert.ok(line.includes("c:"), "claude 세그먼트는 남아야 한다");
   });
 
   it("둘 다 빼도 공백이 두 번 연속 나오지 않는다", () => {
-    const line = micro({ showCodex: false, showGemini: false });
+    const line = micro({ showCodex: false, showAntigravity: false });
     assert.ok(
       !line.includes("  "),
       `이중 공백이 있다: ${JSON.stringify(line)}`,

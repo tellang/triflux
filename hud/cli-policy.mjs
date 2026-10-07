@@ -41,25 +41,3 @@ export function resolveHudCliVisibility(env = process.env, opts = {}) {
     return { showCodex: true, antigravityAllowed: true, policy: null };
   }
 }
-
-/**
- * antigravity / gemini 슬롯 행을 그릴지 판정한다.
- *
- * antigravity 가 허용이면 기존 동작 그대로 항상 그린다. 정책으로 꺼졌을 때만
- * gemini 폴백 정보가 하나라도 있는지 보고, 전부 비어 있으면 행을 생략한다.
- *
- * @param {{
- *   antigravityAllowed?: boolean,
- *   antigravityReady?: boolean,
- *   geminiEmail?: unknown,
- * }} [args]
- * @returns {boolean}
- */
-export function shouldRenderGeminiFallbackRow({
-  antigravityAllowed = true,
-  antigravityReady = false,
-  geminiEmail = null,
-} = {}) {
-  if (antigravityAllowed || antigravityReady) return true;
-  return Boolean(geminiEmail);
-}
