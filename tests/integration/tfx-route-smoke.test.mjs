@@ -1,8 +1,5 @@
 // tests/integration/tfx-route-smoke.test.mjs — tfx-route.sh 스모크 테스트
 //
-// scripts/test-tfx-route-no-claude-native.mjs의 테스트 케이스를 포함하여
-// tests/integration/ 디렉토리의 통합 테스트로 재구성한다.
-//
 // 테스트 범위:
 //   - claude-native 에이전트(explore/verifier/test-engineer/qa-tester) 기본 라우팅
 //   - TFX_CLI_MODE=codex/gemini compatibility 오버라이드 메타데이터

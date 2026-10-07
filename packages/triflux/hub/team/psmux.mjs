@@ -614,7 +614,7 @@ export function hasMultiplexer() {
 
 /**
  * backward-compat alias — historical 이름 `hasPsmux` 는 OS 별 primary 의 의미를
- * 가린다. 외부 caller (scripts/remote-spawn.mjs, scripts/session-spawn-helper.mjs,
+ * 가린다. 외부 caller (scripts/remote-spawn.mjs,
  * tests) 호환을 위해 alias 로 보존. 신규 코드는 hasMultiplexer 사용.
  */
 export const hasPsmux = hasMultiplexer;

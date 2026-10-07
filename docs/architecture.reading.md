@@ -47,7 +47,7 @@ source of truth[^abbr-ssot]이고, `packages/*`는 배포용 미러다.
 
 | 디렉토리 | 역할 | 대표 파일 |
 |----------|------|-----------|
-| `bin/` | CLI 실행 엔트리포인트 | `triflux.mjs`(메인 `tfx`), `tfx-setup.mjs`, `tfx-doctor.mjs`, `tfx-profile.mjs`, `tfx-live.mjs` |
+| `bin/` | CLI 실행 엔트리포인트 | `triflux.mjs`(메인 `tfx`), `tfx-setup.mjs`, `tfx-doctor.mjs`, `tfx-live.mjs` |
 | `hub/` | 로컬 허브 — 라우팅, 서버, MCP 브리지, 계정 브로커 | `router.mjs`, `server.mjs`, `bridge.mjs`, `hub-lifecycle.mjs`, `account-broker.mjs`, `codex-adapter.mjs`, `gemini-adapter.mjs` |
 | `hub/team/` | 팀/멀티에이전트 오케스트레이션 | `conductor.mjs`, `headless.mjs`, `dashboard.mjs`, `cto-auto-collect.mjs`, `claude-native-bridge.mjs`, `notify.mjs` |
 | `hub/` 하위 | 세분 모듈 | `delegator/`, `diagnostics/`, `lib/`, `middleware/`, `pipeline/`, `quality/`, `routing/`, `workers/` |

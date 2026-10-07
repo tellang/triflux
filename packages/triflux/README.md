@@ -137,7 +137,6 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 | `tfx stealth-fetch <url>` | Fetch one URL through cloakbrowser (JSON on stdout) |
 | `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | Notion → Markdown, commit intent trailers, CLI schemas, installed skills, TUI monitor, update, version |
 | `tfx-live` | Live session bridge (same as the `/tfx-live` skill) |
-| `tfx-profile` | Interactive Codex profile manager |
 
 `tfx <command> --help` and `tfx schema <command>` print the exact arguments.
 

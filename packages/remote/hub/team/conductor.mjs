@@ -19,7 +19,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createRegistry } from "@triflux/core/mesh/mesh-registry.mjs";
-import { resolveNestedCodexAgentProfile } from "../../scripts/lib/cli-codex.mjs";
+import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
 import { codexProfileConfigOverrides } from "../../scripts/lib/codex-profile-config.mjs";
 import {
   buildDisabledCliError,

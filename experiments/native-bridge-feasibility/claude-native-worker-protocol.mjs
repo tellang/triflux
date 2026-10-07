@@ -1,8 +1,8 @@
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 
 export function deriveDaemonPaths({
   configDir,
@@ -11,7 +11,11 @@ export function deriveDaemonPaths({
 } = {}) {
   if (!configDir) throw new Error("configDir is required");
   const resolvedConfigDir = path.resolve(configDir);
-  const hash = crypto.createHash("sha256").update(resolvedConfigDir).digest("hex").slice(0, 8);
+  const hash = crypto
+    .createHash("sha256")
+    .update(resolvedConfigDir)
+    .digest("hex")
+    .slice(0, 8);
   const daemonDir = path.join(tmpRoot, `cc-daemon-${uid}`, hash);
   return {
     configDir,
@@ -33,7 +37,11 @@ export function parseJsonLine(text) {
   return JSON.parse(line);
 }
 
-export function sendControlRequest(sockPath, request, { timeoutMs = 3000 } = {}) {
+export function sendControlRequest(
+  sockPath,
+  request,
+  { timeoutMs = 3000 } = {},
+) {
   return new Promise((resolve, reject) => {
     const socket = net.connect(sockPath);
     let data = "";
@@ -46,7 +54,9 @@ export function sendControlRequest(sockPath, request, { timeoutMs = 3000 } = {})
       else resolve(value);
     };
 
-    socket.setTimeout(timeoutMs, () => finish(new Error(`Timed out waiting for ${sockPath}`)));
+    socket.setTimeout(timeoutMs, () =>
+      finish(new Error(`Timed out waiting for ${sockPath}`)),
+    );
     socket.on("error", finish);
     socket.on("connect", () => socket.write(`${JSON.stringify(request)}\n`));
     socket.on("data", (chunk) => {
@@ -66,7 +76,9 @@ export function sendControlRequest(sockPath, request, { timeoutMs = 3000 } = {})
           finish(error);
         }
       } else if (!settled) {
-        finish(new Error("daemon closed the control socket without a response"));
+        finish(
+          new Error("daemon closed the control socket without a response"),
+        );
       }
     });
   });
@@ -136,7 +148,8 @@ export function buildPtyControlFrame(value) {
 
 export function decodePtyFrames(buffer) {
   const { frames, rest } = extractPtyFrames(buffer);
-  if (rest.length !== 0) throw new Error(`trailing partial PTY frame: ${rest.length} bytes`);
+  if (rest.length !== 0)
+    throw new Error(`trailing partial PTY frame: ${rest.length} bytes`);
   return frames;
 }
 
@@ -150,7 +163,8 @@ export function extractPtyFrames(buffer) {
     const kind = rest.readUInt8(4);
     const payload = rest.subarray(5, frameLength);
     if (kind === 0) frames.push({ kind, payload: Buffer.from(payload) });
-    else if (kind === 1) frames.push({ kind, ctrl: JSON.parse(payload.toString("utf8")) });
+    else if (kind === 1)
+      frames.push({ kind, ctrl: JSON.parse(payload.toString("utf8")) });
     else throw new Error(`unknown PTY frame kind ${kind}`);
     rest = rest.subarray(frameLength);
   }
@@ -158,7 +172,8 @@ export function extractPtyFrames(buffer) {
 }
 
 export function getProcStart(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) throw new Error(`invalid pid: ${pid}`);
+  if (!Number.isInteger(pid) || pid <= 0)
+    throw new Error(`invalid pid: ${pid}`);
   return execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
     encoding: "utf8",
     env: { ...process.env, LC_ALL: "C", TZ: "UTC" },

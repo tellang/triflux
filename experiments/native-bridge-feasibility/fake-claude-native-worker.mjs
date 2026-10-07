@@ -55,7 +55,9 @@ export async function startFakeNativeWorker({
       );
     };
     socket.write(`${JSON.stringify({ type: "heartbeat" })}\n`);
-    socket.write(`${JSON.stringify({ type: "state", patch: { state: "running", tempo: "idle" } })}\n`);
+    socket.write(
+      `${JSON.stringify({ type: "state", patch: { state: "running", tempo: "idle" } })}\n`,
+    );
     const stateTimer = setInterval(sendState, 300);
     socket.once("close", () => clearInterval(stateTimer));
     socket.on("data", (chunk) => {
@@ -94,11 +96,23 @@ export async function startFakeNativeWorker({
         const result = extractPtyFrames(Buffer.concat([ptyBuffer, chunk]));
         ptyBuffer = result.rest;
         for (const frame of result.frames) {
-          events.push({ type: "pty-frame", frame: frame.kind === 1 ? frame.ctrl : { kind: 0, bytes: frame.payload.length } });
+          events.push({
+            type: "pty-frame",
+            frame:
+              frame.kind === 1
+                ? frame.ctrl
+                : { kind: 0, bytes: frame.payload.length },
+          });
           if (frame.kind === 0) {
             socket.write(buildPtyDataFrame(frame.payload));
           } else if (frame.kind === 1 && frame.ctrl.t === "kill") {
-            socket.write(buildPtyControlFrame({ t: "exit", code: 0, signal: frame.ctrl.sig }));
+            socket.write(
+              buildPtyControlFrame({
+                t: "exit",
+                code: 0,
+                signal: frame.ctrl.sig,
+              }),
+            );
             socket.end();
           } else if (frame.kind === 1 && frame.ctrl.t === "resize") {
             socket.write(buildPtyControlFrame({ t: "live" }));

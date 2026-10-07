@@ -69,7 +69,6 @@ triflux 는 npm `files` 기준 바이트 동일)은
 
 ```bash
 npm run lint:skills
-npm run gen:skill-manifest
 npm run release:check-sync
 npm run release:check-mirror
 npm run lint
@@ -77,8 +76,7 @@ npm run lint
 
 릴리즈는 `/tfx-ship` 으로 시작한다. 버전을 올린 커밋이 `main` 에 머지되면 CI 통과 뒤
 `release.yml` 이 태그, GitHub 릴리즈, npm 게시, 검증을 진행한다. npm 게시는 OIDC Trusted
-Publishing 만 쓰므로 로컬 `npm login` 이나 `NPM_TOKEN` 이 필요 없다. 게시 순서와 세부 점검은
-[`docs/release-checklist.md`](docs/release-checklist.md) 를 따른다.
+Publishing 만 쓰므로 로컬 `npm login` 이나 `NPM_TOKEN` 이 필요 없다.
 
 ## 상태 스냅샷
 
