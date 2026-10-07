@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://triflux.local/schemas/cto/current.schema.json",
   "title": "Triflux CTO Lake Current Authority State",
-  "description": "Contract for .triflux/lake/current.json. .triflux/lake is a triflux-owned, namespace-neutral cross-agent rollup for durable artifacts across Claude, Codex/OMX, OMC, AGY, gstack, gbrain, and Triflux state. It reads and aggregates .omx/ultragoal and .omc/ultragoal execution ledgers without replacing or duplicating their authority. ledger.jsonl and sources.json companion contracts are documented in $defs.",
+  "description": "Contract for .triflux/lake/current.json. .triflux/lake is a triflux-owned, namespace-neutral cross-agent rollup for durable artifacts across Claude, Codex/OMX, OMC, and Triflux state. It reads and aggregates .omx/ultragoal and .omc/ultragoal execution ledgers without replacing or duplicating their authority. ledger.jsonl and sources.json companion contracts are documented in $defs.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -44,7 +44,7 @@
     },
     "sources": {
       "type": "object",
-      "description": "Durable artifact source states only. Live Claude /goal state and AGY internal state are not shell-collectable; a source reports available:false when no shell-readable durable artifact exists.",
+      "description": "Durable artifact source states only. A source reports available:false when no shell-readable durable artifact exists.",
       "additionalProperties": false,
       "required": [
         "git",
@@ -54,10 +54,7 @@
         "tfx_synapse",
         "ultragoal_omx",
         "ultragoal_omc",
-        "handoffs",
-        "session_vault",
-        "agy",
-        "gbrain"
+        "handoffs"
       ],
       "properties": {
         "git": {
@@ -83,21 +80,12 @@
         },
         "handoffs": {
           "$ref": "#/$defs/sourceState"
-        },
-        "session_vault": {
-          "$ref": "#/$defs/sourceState"
-        },
-        "agy": {
-          "$ref": "#/$defs/sourceState"
-        },
-        "gbrain": {
-          "$ref": "#/$defs/sourceState"
         }
       }
     },
     "summary": {
       "type": "object",
-      "description": "Human- and dashboard-oriented synthesized authority summary derived from durable artifacts and live Triflux synapse session status. Phase 1 may add source-derived fields here without changing the top-level contract.",
+      "description": "Human-oriented synthesized authority summary derived from durable artifacts and live Triflux synapse session status. Phase 1 may add source-derived fields here without changing the top-level contract.",
       "additionalProperties": true
     },
     "ledger_tail": {

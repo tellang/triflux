@@ -89,8 +89,6 @@ const REMOTE_FILES = [
   "cto/brief.mjs",
   "cto/collect.mjs",
   "cto/events.mjs",
-  "cto/hygiene-actions.mjs",
-  "cto/hygiene-notify.mjs",
   "cto/hygiene.mjs",
   "cto/lake-root.mjs",
   "cto/status.mjs",

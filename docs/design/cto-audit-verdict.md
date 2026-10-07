@@ -21,12 +21,14 @@ a thin authority layer" is the right instinct.
 | 3 | P2 | Source-probe brittleness; "cross-agent" oversells what is collectable. Live Claude `/goal` and AGY state are not shell-readable. | **Applied:** Collection scope = durable ARTIFACTS only. `sources.*` entries carry `available:false` when a surface exposes no shell-readable artifact. Documented in schema + design doc. |
 | 4 | P2 | Original research "PASS" was self-approval + a trivial critic gate (`grep -qi Decision`), no adversarial scrutiny. | This independent audit is the first real gate; concerns above raised the bar accordingly. |
 | 5 | P3 | `lake` collides with the internal "Neural Memory Lake N" concept. | User chose to keep `lake` (now at `.triflux/lake`, a distinct path/context). Noted; not blocking. |
-| 6 | P3 | `synapse` (live cross-session/host registry) not examined; `tfx cto status` should read from it rather than re-derive. | **Applied:** `tfx cto status` reads live-session data from synapse (`tfx synapse status` / `hub/team/synapse-registry.mjs`). |
+| 6 | P3 | `synapse` (live cross-session/host registry) not examined; `tfx cto status` should read from it rather than re-derive. | **Applied:** `tfx cto status` reads live-session data from synapse (persisted synapse snapshots). |
 
-## Net architecture (post-decision)
+## Net architecture (initial audit)
+
+The current command scope is defined by [ADR-0024](../adr/0024-cto-explicit-queries-only.md).
 
 - Store: `.triflux/lake/{current.json, current.md, ledger.jsonl, sources.json}` (git-ignored runtime).
 - Contract: `cto/current.schema.json` (tracked, lives with the code).
-- Commands: `tfx cto collect` (aggregate durable artifacts → current.json + locked ledger append), `tfx cto status` (current.json + live synapse), `tfx cto dashboard --watch` (static HTML + auto-refresh).
-- Cadence defaults: UI 1 min / collect 5 min / brief 30 min.
+- Commands: `tfx cto collect` (aggregate durable artifacts to current.json and append a ledger event), `tfx cto status` (snapshot and live sessions), `tfx cto hygiene --dry-run` (dry-run report).
+- Refresh: explicitly run `tfx cto collect`; `status` shows snapshot age.
 - Non-goal: does NOT reimplement goal/scheduler/memory engines; reads them only.

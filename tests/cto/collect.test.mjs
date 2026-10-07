@@ -94,6 +94,10 @@ function assertCurrentMatchesSchema(current) {
   );
   assert.equal(typeof current.repo.dirty, "boolean");
 
+  assert.deepEqual(
+    Object.keys(current.sources).sort(),
+    [...schema.properties.sources.required].sort(),
+  );
   for (const sourceId of schema.properties.sources.required) {
     assert.ok(
       Object.hasOwn(current.sources, sourceId),
@@ -170,7 +174,11 @@ describe("runCollect", () => {
       assert.equal(ledger.length, 1);
       assert.equal(ledger[0].event, "collect");
       assert.equal(ledger[0].source, "tfx_cto_collect");
-      assert.equal(ledger[0].ref.current_json, "current.json");
+      assert.deepEqual(ledger[0].ref, {
+        current_json: "current.json",
+        current_md: "current.md",
+        sources_json: "sources.json",
+      });
     } finally {
       cleanup(rootDir);
     }
@@ -285,11 +293,6 @@ describe("runCollect", () => {
       assert.equal(current.sources.git.available, false);
       assert.equal(current.sources.ultragoal_omx.available, false);
       assert.equal(current.sources.tfx_hub.available, false);
-      assert.equal(current.sources.agy.status, "not_shell_collectable");
-      assert.equal(
-        current.sources.session_vault.status,
-        "not_shell_collectable",
-      );
     } finally {
       cleanup(rootDir);
     }

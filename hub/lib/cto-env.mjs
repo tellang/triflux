@@ -69,13 +69,6 @@ export function isCtoManagerEnabled() {
   return isExplicitlyOn("TFX_CTO_MANAGER");
 }
 
-export function getCtoHygieneApplyMode() {
-  if (isExplicitlyOff("TFX_CTO")) return "off";
-  return normalizeEnvValue("TFX_CTO_HYGIENE_APPLY") === "archive"
-    ? "archive"
-    : "off";
-}
-
 export function isCtoRetentionEnabled() {
   if (isExplicitlyOff("TFX_CTO")) return false;
   return isExplicitlyOn("TFX_CTO_RETENTION");
