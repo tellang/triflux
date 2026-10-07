@@ -28,6 +28,16 @@
         "cost-optimization",
         "dag-execution"
       ]
+    },
+    {
+      "name": "triflux-mods",
+      "description": "사용량 band 표시와 서브에이전트 effort 정책 강제",
+      "version": "10.50.2",
+      "author": {
+        "name": "tellang"
+      },
+      "source": "./mods/triflux",
+      "category": "productivity"
     }
   ],
   "version": "10.50.2"

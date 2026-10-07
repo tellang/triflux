@@ -35,6 +35,19 @@ npm install -g triflux   # postinstall이 setup 스크립트를 실행한다
 tfx doctor               # CLI, tmux, Hub, MCP, 프로필, 스킬 점검
 ```
 
+npm 12 이상은 기본적으로 설치 스크립트를 막는다. setup과 네이티브 의존성의 스크립트를 허용해 설치한다.
+
+```bash
+npm i -g triflux --allow-scripts=triflux,better-sqlite3
+```
+
+기본 setup은 `triflux` 마켓플레이스를 등록하고 mods 설치 안내만 출력한다. 사용량 band와
+서브에이전트 effort 강제 기능은 따로 설치한다(Claude Code 2.1.287 이상).
+
+```bash
+tfx setup --mods
+```
+
 이 저장소의 마켓플레이스에서 Claude Code 플러그인으로 설치할 수도 있다.
 
 ```bash

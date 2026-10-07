@@ -37,6 +37,19 @@ npm install -g triflux   # postinstall runs the setup script
 tfx doctor               # check CLIs, tmux, Hub, MCP, profiles, skills
 ```
 
+npm 12 and newer block install scripts by default. Allow the setup and native dependency scripts:
+
+```bash
+npm i -g triflux --allow-scripts=triflux,better-sqlite3
+```
+
+Setup registers the `triflux` marketplace and prints a mods installation hint. To install
+usage bands and subagent effort enforcement (Claude Code 2.1.287 or newer):
+
+```bash
+tfx setup --mods
+```
+
 Or install the Claude Code plugin from this repository's marketplace:
 
 ```bash

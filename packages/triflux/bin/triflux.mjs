@@ -66,6 +66,7 @@ import {
   buildWindowsHubAutostartCommand,
   ensureCodexHubServerConfig,
   ensureCodexProfiles,
+  ensureTrifluxMods,
   getVersion,
   getWindowsHubAutostartStatus,
   isLocalDevSkillDir,
@@ -124,9 +125,14 @@ const NORMALIZED_ARGS = RAW_ARGS.filter((arg) => arg !== "--json");
 
 const CLI_COMMAND_SCHEMAS = Object.freeze({
   setup: {
-    usage: "tfx setup [--dry-run] [--enable-hub-autostart]",
+    usage: "tfx setup [--dry-run] [--enable-hub-autostart] [--mods]",
     description: "파일 동기화 + HUD/MCP 설정",
     options: [
+      {
+        name: "--mods",
+        type: "boolean",
+        description: "Claude Code mods 설치 (2.1.287 이상)",
+      },
       {
         name: "--dry-run",
         type: "boolean",
@@ -1886,6 +1892,7 @@ function cmdSetup(options = {}) {
     fromUpdate = false,
     overrideVersion,
     enableHubAutostart = false,
+    mods = false,
   } = options;
   if (dryRun) {
     printJson(buildSetupDryRunPlan());
@@ -1912,6 +1919,7 @@ function cmdSetup(options = {}) {
     syncFile(target.src, target.dst, target.label);
   }
   reportSkillSync();
+  ensureTrifluxMods({ install: mods, log: console.log, warn });
 
   // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──
   if (process.platform === "win32" && which("psmux")) {
@@ -4842,6 +4850,7 @@ ${updateNotice}
 
     ${WHITE_BRIGHT}tfx setup${RESET}      ${GRAY}파일 동기화 + HUD 설정${RESET}
     ${DIM}  --dry-run${RESET}    ${GRAY}변경 예정 작업을 JSON으로 미리보기${RESET}
+    ${DIM}  --mods${RESET}       ${GRAY}Claude Code mods 설치 (2.1.287 이상)${RESET}
     ${WHITE_BRIGHT}tfx doctor${RESET}     ${GRAY}CLI 진단 + 이슈 확인${RESET}
     ${DIM}  --fix${RESET}        ${GRAY}진단 + 자동 수정${RESET}
     ${DIM}  --reset${RESET}      ${GRAY}캐시 전체 초기화${RESET}
@@ -5756,6 +5765,7 @@ async function main() {
         dryRun: cmdArgs.includes("--dry-run"),
         fromUpdate: cmdArgs.includes("--from-update"),
         enableHubAutostart: cmdArgs.includes("--enable-hub-autostart"),
+        mods: cmdArgs.includes("--mods"),
       });
       return;
     case "stealth-fetch":
