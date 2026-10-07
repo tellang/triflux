@@ -1,0 +1,16 @@
+#!/bin/sh
+# ADR-0023: 이 저장소의 커밋 메시지에서 AI attribution을 막는다.
+
+message_file=$1
+
+if [ ! -f "$message_file" ]; then
+  printf '%s\n' 'commit-msg: 커밋 메시지 파일을 읽을 수 없습니다.' >&2
+  exit 1
+fi
+
+if grep -Eiq '^[[:space:]]*(Co-Authored-By:|Claude-Session:|(🤖[[:space:]]*)?Generated with \[Claude)' "$message_file"; then
+  printf '%s\n' 'commit-msg: AI attribution trailer를 제거한 뒤 다시 커밋하세요.' >&2
+  exit 1
+fi
+
+exit 0

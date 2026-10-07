@@ -43,6 +43,7 @@
     "pack:core": "node scripts/pack.mjs core",
     "pack:remote": "node scripts/pack.mjs remote",
     "setup": "node scripts/setup.mjs",
+    "prepare": "node scripts/install-commit-hook.mjs",
     "preinstall": "node scripts/preinstall.mjs",
     "postinstall": "node scripts/setup.mjs",
     "snapshot:codex": "node scripts/snapshot-codex-state.mjs",
