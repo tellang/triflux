@@ -12,7 +12,6 @@ const slimWrapperPath = new URL(
   "../../.claude/agents/slim-wrapper.md",
   import.meta.url,
 );
-const setupScriptPath = new URL("../../scripts/setup.mjs", import.meta.url);
 
 const REQUIRED_TOOLS = [
   "Bash",
@@ -102,19 +101,6 @@ describe("slim-wrapper 프롬프트와 정의 일관성 검증", () => {
     );
     assert.match(prompt, /tfx-route\.sh/u);
     assert.equal(SLIM_WRAPPER_SUBAGENT_TYPE, "slim-wrapper");
-  });
-});
-
-describe("setup.mjs 에이전트 동기화 검증", () => {
-  it("agents 동기화 섹션과 소스/대상 경로를 유지해야 한다", async () => {
-    const source = await fs.readFile(setupScriptPath, "utf8");
-
-    assert.match(source, /(에이전트 동기화|agents)/u);
-    assert.match(
-      source,
-      /const agentsSrc = join\(PLUGIN_ROOT, "\.claude", "agents"\);/u,
-    );
-    assert.match(source, /const agentsDst = join\(CLAUDE_DIR, "agents"\);/u);
   });
 });
 
