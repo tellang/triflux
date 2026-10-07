@@ -66,7 +66,7 @@ const CORE_DIRS = [
   "mesh",
 ];
 
-const REMOTE_FILES = [
+export const REMOTE_FILES = [
   "hub/server.mjs",
   "hub/store.mjs",
   "hub/schema.sql",

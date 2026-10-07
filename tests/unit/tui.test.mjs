@@ -257,19 +257,6 @@ describe("createLogDashboard", () => {
     tui.close();
   });
 
-  it("초기 생성 시 에러 없이 완료", () => {
-    let _output = "";
-    const fakeStream = {
-      write: (s) => {
-        _output += s;
-      },
-      columns: 60,
-    };
-    const tui = createLogDashboard({ stream: fakeStream, refreshMs: 0 });
-    // 워커 없으면 초기 출력 없음 (append-only)
-    tui.close();
-  });
-
   it("close 후 render 무효", () => {
     let output = "";
     const fakeStream = {

@@ -285,7 +285,7 @@ describe("codex-app-server integration — AC-15 PID zombie check", () => {
 // ── Scenario (c) — env-gated real codex ──────────────────────────────
 
 describe("codex-app-server integration — real codex (env-gated)", () => {
-  it("5. AC-16 — real codex 0.119.0 streams PONG through factory worker", {
+  it("5. AC-16 — real codex streams PONG through factory worker", {
     timeout: 120_000,
     skip: !REAL_CODEX_ENABLED,
   }, async () => {

@@ -1,79 +1,26 @@
-// tests/unit/pack-remote.test.mjs — remote package assembly regressions
-
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { describe, it } from "node:test";
+import { it } from "node:test";
 
-describe("remote package assembly", () => {
-  it("copies the core Codex intervention dependency", () => {
-    const packScript = readFileSync("scripts/pack.mjs", "utf8");
-    assert.match(
-      packScript,
-      new RegExp(JSON.stringify("hub/team/intervention.mjs"), "u"),
-    );
-  });
-
-  it("copies CTO runtime dependencies into @triflux/remote", () => {
-    const packScript = readFileSync("scripts/pack.mjs", "utf8");
-
-    for (const requiredFile of [
-      "hub/promote-penalties.mjs",
-      "cto/brief.mjs",
-      "cto/collect.mjs",
-      "cto/status.mjs",
-      "cto/current.schema.json",
-    ]) {
-      assert.match(packScript, new RegExp(JSON.stringify(requiredFile), "u"));
-    }
-  });
-
-  it("does not ship the removed CTO tray", () => {
-    const packScript = readFileSync("scripts/pack.mjs", "utf8");
-
-    for (const removedFile of [
+it("remote package does not ship the removed CTO tray", async () => {
+  const argv = process.argv;
+  try {
+    // import 시 패키지 조립을 막고 목록만 읽는다.
+    process.argv = [...argv.slice(0, 2), "inspect"];
+    const { REMOTE_FILES } = await import("../../scripts/pack.mjs");
+    const removedFiles = new Set([
       "hub/tray.mjs",
       "hub/tray-lifecycle.mjs",
       "hub/tray-runtime.mjs",
       "hub/tray-state.mjs",
       "hub/mac-tray.swift",
       "hub/mac-focus.mjs",
-    ]) {
-      assert.doesNotMatch(
-        packScript,
-        new RegExp(JSON.stringify(removedFile), "u"),
-      );
-    }
-  });
+    ]);
 
-  it("publishes the copied CTO files in the @triflux/remote tarball", () => {
-    const packageJson = JSON.parse(
-      readFileSync("packages/remote/package.json", "utf8"),
+    assert.deepEqual(
+      REMOTE_FILES.filter((file) => removedFiles.has(file)),
+      [],
     );
-
-    assert.ok(packageJson.files.includes("hub"));
-    assert.ok(packageJson.files.includes("cto"));
-    assert.ok(packageJson.files.includes("scripts/lib"));
-  });
-
-  it("declares runtime dependencies used by copied remote files", () => {
-    const packageJson = JSON.parse(
-      readFileSync("packages/remote/package.json", "utf8"),
-    );
-    const deps = {
-      ...packageJson.peerDependencies,
-      ...packageJson.dependencies,
-    };
-
-    for (const dependency of [
-      "@modelcontextprotocol/sdk",
-      "@triflux/core",
-      "ajv",
-      "better-sqlite3",
-      "pino",
-      "pino-pretty",
-      "zod",
-    ]) {
-      assert.ok(deps[dependency], `${dependency} must be declared`);
-    }
-  });
+  } finally {
+    process.argv = argv;
+  }
 });

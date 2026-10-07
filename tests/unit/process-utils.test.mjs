@@ -9,12 +9,20 @@ import {
   findFsmonitorDaemons,
   findProcessesByCommandLine,
   findProcessTree,
+  isPidAlive,
   killProcessTree,
   killProcessTreeSnapshot,
 } from "../../hub/lib/process-utils.mjs";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const NOW_MS = Date.parse("2026-04-26T00:00:00.000Z");
+
+it("isPidAlive treats EPERM as an existing process", (t) => {
+  t.mock.method(process, "kill", () => {
+    throw Object.assign(new Error("permission denied"), { code: "EPERM" });
+  });
+  assert.equal(isPidAlive(12345), true);
+});
 
 function psJson(records) {
   return JSON.stringify(records);
