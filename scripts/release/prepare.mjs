@@ -186,9 +186,5 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     skipTests: Boolean(args["skip-tests"]),
     dryRun: !args.execute,
   });
-  if (args.json) {
-    console.log(JSON.stringify(result, null, 2));
-  } else {
-    console.log(JSON.stringify(result, null, 2));
-  }
+  console.log(JSON.stringify(result, null, 2));
 }

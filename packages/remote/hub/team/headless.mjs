@@ -20,7 +20,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveNestedCodexAgentProfile } from "../../scripts/lib/cli-codex.mjs";
+import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
 import { requestJson } from "@triflux/core/hub/bridge.mjs";
 import { escapePwshSingleQuoted } from "@triflux/core/hub/cli-adapter-base.mjs";
 import { getMaxSpawnPerSec } from "@triflux/core/hub/lib/spawn-trace.mjs";

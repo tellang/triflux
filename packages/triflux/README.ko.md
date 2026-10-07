@@ -136,7 +136,6 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 | `tfx stealth-fetch <url>` | cloakbrowser로 URL 하나를 가져옴(JSON을 stdout으로) |
 | `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | Notion → Markdown, 커밋 intent 트레일러, CLI 스키마, 설치된 스킬, TUI 모니터, 업데이트, 버전 |
 | `tfx-live` | 라이브 세션 브리지(`/tfx-live` 스킬과 같은 명령) |
-| `tfx-profile` | 대화형 Codex 프로필 관리자 |
 
 정확한 인자는 `tfx <명령> --help`나 `tfx schema <명령>`으로 확인한다.
 

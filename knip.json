@@ -7,33 +7,50 @@
         "scripts/*.mjs",
         "hub/**/*.mjs",
         "hud/**/*.mjs",
-        "hooks/**/*.mjs"
+        "hooks/**/*.mjs",
+        "cto/**/*.mjs",
+        "mesh/**/*.mjs",
+        "tui/**/*.mjs"
       ],
       "project": [
         "bin/**/*.mjs",
         "scripts/**/*.mjs",
         "hub/**/*.mjs",
         "hooks/**/*.mjs",
-        "hud/**/*.mjs"
+        "hud/**/*.mjs",
+        "cto/**/*.mjs",
+        "mesh/**/*.mjs",
+        "tui/**/*.mjs"
       ]
     },
     "packages/core": {
-      "entry": ["hub/**/*.mjs", "hud/**/*.mjs"],
-      "project": ["hub/**/*.mjs", "hud/**/*.mjs"]
+      "entry": ["hub/**/*.mjs", "hud/**/*.mjs", "mesh/**/*.mjs"],
+      "project": ["hub/**/*.mjs", "hud/**/*.mjs", "mesh/**/*.mjs"]
     },
     "packages/remote": {
-      "entry": ["hub/**/*.mjs", "scripts/*.mjs"],
-      "project": ["hub/**/*.mjs", "scripts/**/*.mjs"]
+      "entry": ["hub/**/*.mjs", "scripts/*.mjs", "cto/**/*.mjs"],
+      "project": ["hub/**/*.mjs", "scripts/**/*.mjs", "cto/**/*.mjs"]
     },
     "packages/triflux": {
-      "entry": ["bin/*.mjs", "scripts/*.mjs", "hub/**/*.mjs", "hooks/**/*.mjs"],
+      "entry": [
+        "bin/*.mjs",
+        "scripts/*.mjs",
+        "hub/**/*.mjs",
+        "hooks/**/*.mjs",
+        "cto/**/*.mjs",
+        "mesh/**/*.mjs",
+        "tui/**/*.mjs"
+      ],
       "project": [
         "bin/**/*.mjs",
         "scripts/**/*.mjs",
         "hub/**/*.mjs",
-        "hooks/**/*.mjs"
+        "hooks/**/*.mjs",
+        "cto/**/*.mjs",
+        "mesh/**/*.mjs",
+        "tui/**/*.mjs"
       ]
     }
   },
-  "ignore": ["research/**", "tests/**", "skills/**"]
+  "ignore": ["tests/**", "skills/**"]
 }

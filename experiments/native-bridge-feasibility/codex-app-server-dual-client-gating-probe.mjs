@@ -7,8 +7,6 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-
-import { JsonRpcWsUdsClient } from "../../hub/workers/lib/jsonrpc-ws-uds.mjs";
 import {
   capturePsmuxPane,
   createPsmuxSession,
@@ -18,6 +16,7 @@ import {
   psmuxSessionExists,
   sendKeysToPane,
 } from "../../hub/team/psmux.mjs";
+import { JsonRpcWsUdsClient } from "../../hub/workers/lib/jsonrpc-ws-uds.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPORT_PATH = join(
@@ -25,8 +24,7 @@ const REPORT_PATH = join(
   "codex-app-server-dual-client-gating-latest-report.json",
 );
 const CODEX_BIN = process.env.CODEX_BIN || "codex";
-const RUN_REAL_PROBE =
-  process.env.TFX_RUN_REAL_CODEX_DUAL_CLIENT_GATE === "1";
+const RUN_REAL_PROBE = process.env.TFX_RUN_REAL_CODEX_DUAL_CLIENT_GATE === "1";
 const REPO_ROOT = dirname(dirname(HERE));
 const DEFAULT_TIMEOUT_MS = Number.parseInt(
   process.env.TFX_CODEX_DUAL_CLIENT_TIMEOUT_MS || "90000",
@@ -165,11 +163,12 @@ export function summarizeLatencyMs(measurements) {
     .filter((value) => Number.isFinite(value))
     .sort((a, b) => a - b);
   const middle = Math.floor(valuesMs.length / 2);
-  const medianMs = valuesMs.length === 0
-    ? null
-    : valuesMs.length % 2 === 1
-      ? valuesMs[middle]
-      : (valuesMs[middle - 1] + valuesMs[middle]) / 2;
+  const medianMs =
+    valuesMs.length === 0
+      ? null
+      : valuesMs.length % 2 === 1
+        ? valuesMs[middle]
+        : (valuesMs[middle - 1] + valuesMs[middle]) / 2;
   return {
     repetitions: measurements.length,
     completed: valuesMs.length,
@@ -412,7 +411,10 @@ async function main() {
   };
 
   const paneTail = (text, lines = 24) =>
-    String(text || "").split("\n").slice(-lines).join("\n");
+    String(text || "")
+      .split("\n")
+      .slice(-lines)
+      .join("\n");
 
   const capturePaneState = (label, storeCapture = true) => {
     const text = currentPane ? capturePsmuxPane(currentPane, 120) : "";
@@ -474,7 +476,8 @@ async function main() {
           startedAt,
           sinceAt,
           resolvedAt,
-          latencyMs: new Date(resolvedAt).getTime() -
+          latencyMs:
+            new Date(resolvedAt).getTime() -
             new Date(sinceAt || startedAt).getTime(),
           timedOut: false,
           timeoutMs,
@@ -645,10 +648,13 @@ async function main() {
     const deadline = Date.now() + timeoutMs;
     let history = null;
     while (Date.now() < deadline) {
-      const itemEvent = report.events.slice(afterIndex).find(
-        (event) =>
-          event.itemType === "userMessage" && event.text?.includes(nonce),
-      ) || null;
+      const itemEvent =
+        report.events
+          .slice(afterIndex)
+          .find(
+            (event) =>
+              event.itemType === "userMessage" && event.text?.includes(nonce),
+          ) || null;
       try {
         history = await readHistory(`poll-human-${nonce}`, false);
       } catch {}
@@ -674,16 +680,20 @@ async function main() {
   const humanLifecycle = (nonce, afterIndex, turnId) => {
     const events = report.events.slice(afterIndex);
     return {
-      turnStarted: events.find(
-        (event) => event.method === "turn/started" && event.turnId === turnId,
-      ) || null,
-      userItem: events.find(
-        (event) =>
-          event.itemType === "userMessage" && event.text?.includes(nonce),
-      ) || null,
-      turnCompleted: events.find(
-        (event) => event.method === "turn/completed" && event.turnId === turnId,
-      ) || null,
+      turnStarted:
+        events.find(
+          (event) => event.method === "turn/started" && event.turnId === turnId,
+        ) || null,
+      userItem:
+        events.find(
+          (event) =>
+            event.itemType === "userMessage" && event.text?.includes(nonce),
+        ) || null,
+      turnCompleted:
+        events.find(
+          (event) =>
+            event.method === "turn/completed" && event.turnId === turnId,
+        ) || null,
     };
   };
 
@@ -875,18 +885,21 @@ async function main() {
     const previous = JSON.parse(await readFile(REPORT_PATH, "utf8"));
     const previousCompleted =
       previous?.scenarios?.program_to_tui_and_history?.completed?.at || null;
-    const previousInput = previous?.actions?.find(
-      (action) =>
-        action?.phase === "human_to_controller_and_history" &&
-        action?.kind === "direct-input" &&
-        action?.label === "H1 direct input",
-    ) || null;
-    const previousReady = previous?.paneCaptures?.find(
-      (capture) => capture?.label === "tui-ready-h1",
-    ) || null;
-    const previousAfter = previous?.paneCaptures?.find(
-      (capture) => capture?.label === "after-H1",
-    ) || null;
+    const previousInput =
+      previous?.actions?.find(
+        (action) =>
+          action?.phase === "human_to_controller_and_history" &&
+          action?.kind === "direct-input" &&
+          action?.label === "H1 direct input",
+      ) || null;
+    const previousReady =
+      previous?.paneCaptures?.find(
+        (capture) => capture?.label === "tui-ready-h1",
+      ) || null;
+    const previousAfter =
+      previous?.paneCaptures?.find(
+        (capture) => capture?.label === "after-H1",
+      ) || null;
     if (
       previous?.schemaVersion === "tfx.codex-dual-client-gate.v1" &&
       previousCompleted &&
@@ -935,11 +948,13 @@ async function main() {
     report.server.pid = server.pid || null;
     server.stdout.on("data", (chunk) => {
       serverStderr += `[stdout] ${String(chunk)}`;
-      if (serverStderr.length > 24000) serverStderr = serverStderr.slice(-24000);
+      if (serverStderr.length > 24000)
+        serverStderr = serverStderr.slice(-24000);
     });
     server.stderr.on("data", (chunk) => {
       serverStderr += String(chunk);
-      if (serverStderr.length > 24000) serverStderr = serverStderr.slice(-24000);
+      if (serverStderr.length > 24000)
+        serverStderr = serverStderr.slice(-24000);
     });
     const earlyExit = new Promise((resolve) => {
       server.once("error", (error) => resolve(`spawn error: ${error.message}`));
@@ -1077,7 +1092,10 @@ async function main() {
       seedCompleted,
       seedHistoryCorrelation: correlateNonce(seedHistory, seedNonce),
     };
-    if (!seedCompleted || report.thread.materialization.rolloutAfterSeed !== "file") {
+    if (
+      !seedCompleted ||
+      report.thread.materialization.rolloutAfterSeed !== "file"
+    ) {
       throw new Error(
         `P0 seed did not materialize durable rollout: ${JSON.stringify(report.thread.materialization)}`,
       );
@@ -1155,7 +1173,10 @@ async function main() {
       const preInputIdle = await waitForTuiNotBusy("H1-pre-input-idle");
       const beforeInput = capturePaneState("H1-immediately-before-input");
       const eventStart = report.events.length;
-      const inputAction = sendTuiText(`Reply exactly ${nonce}.`, "H1 direct input");
+      const inputAction = sendTuiText(
+        `Reply exactly ${nonce}.`,
+        "H1 direct input",
+      );
       await delay(100);
       const afterInput = capturePaneState("H1-immediately-after-input");
       const busyObservation = await waitForTuiBusy("H1-after-input-busy", {
@@ -1167,11 +1188,15 @@ async function main() {
       );
       const history = await readHistory("after-H1");
       const correlation = correlateNonce(history, nonce);
-      const turnId = correlation?.turnId ||
-        report.events.slice(eventStart).find(
-          (event) =>
-            event.itemType === "userMessage" && event.text?.includes(nonce),
-        )?.turnId || null;
+      const turnId =
+        correlation?.turnId ||
+        report.events
+          .slice(eventStart)
+          .find(
+            (event) =>
+              event.itemType === "userMessage" && event.text?.includes(nonce),
+          )?.turnId ||
+        null;
       const lifecycle = humanLifecycle(nonce, eventStart, turnId);
       return {
         nonce,
@@ -1225,8 +1250,8 @@ async function main() {
         20_000,
         `A/history sees human interrupt target ${nonce}`,
       );
-      const turnId = evidence.itemEvent?.turnId ||
-        evidence.correlation?.turnId || null;
+      const turnId =
+        evidence.itemEvent?.turnId || evidence.correlation?.turnId || null;
       const statusAtInterruptRequest = turnStatus(evidence.history, turnId);
       let interruptResult = null;
       let interruptError = null;
@@ -1240,7 +1265,8 @@ async function main() {
             15_000,
           );
         } catch (error) {
-          interruptError = error instanceof Error ? error.message : String(error);
+          interruptError =
+            error instanceof Error ? error.message : String(error);
         }
       }
       const notBusyAfterInterrupt = await waitForTuiNotBusy(
@@ -1302,15 +1328,18 @@ async function main() {
         } catch {}
         historyEnd = await waitForHistoryTurnEnd(turnId, 10_000);
       }
-      const completed = report.events.slice(eventStart).find(
-        (event) =>
-          event.method === "turn/completed" && event.turnId === turnId,
-      ) || null;
+      const completed =
+        report.events
+          .slice(eventStart)
+          .find(
+            (event) =>
+              event.method === "turn/completed" && event.turnId === turnId,
+          ) || null;
       const notBusyAfterInterrupt = await waitForTuiNotBusy(
         "human-escape-program-after-interrupt-not-busy",
       );
-      const history = historyEnd.history ||
-        (await readHistory("after-human-escape-program"));
+      const history =
+        historyEnd.history || (await readHistory("after-human-escape-program"));
       report.historySnapshots.push({
         at: nowIso(),
         phase: currentPhase,
@@ -1452,7 +1481,9 @@ async function main() {
         "collision-tab-queue-final-not-busy",
         { timeoutMs: TUI_STATE_TIMEOUT_MS },
       );
-      const history = queuedHistoryEnd.history || queuedEvidence.history ||
+      const history =
+        queuedHistoryEnd.history ||
+        queuedEvidence.history ||
         (await readHistory("collision-tab-queue-history"));
       report.historySnapshots.push({
         at: nowIso(),
@@ -1639,12 +1670,16 @@ async function main() {
       );
       const finalHistory = await readHistory("after-reattach-human");
       const humanCorrelation = correlateNonce(finalHistory, humanNonce);
-      const humanTurnId = humanCorrelation?.turnId ||
-        report.events.slice(humanEventStart).find(
-          (event) =>
-            event.itemType === "userMessage" &&
-            event.text?.includes(humanNonce),
-        )?.turnId || null;
+      const humanTurnId =
+        humanCorrelation?.turnId ||
+        report.events
+          .slice(humanEventStart)
+          .find(
+            (event) =>
+              event.itemType === "userMessage" &&
+              event.text?.includes(humanNonce),
+          )?.turnId ||
+        null;
       const lifecycle = humanLifecycle(
         humanNonce,
         humanEventStart,
@@ -1665,7 +1700,8 @@ async function main() {
         detachedTurnId: detachedTurn.turnId,
         detachedCompleted,
         reattachIdle,
-        detachedHistoryVisibleOnReattach: reattachCapture.text.includes(detachedNonce),
+        detachedHistoryVisibleOnReattach:
+          reattachCapture.text.includes(detachedNonce),
         replayedPriorItemEvents: replayedPriorItems,
         humanNonce,
         humanTurnId,
@@ -1720,15 +1756,15 @@ async function main() {
             sync?.error ||
               "one or more controller turns did not return the TUI to stable not-busy before the timeout",
           );
-    report.checks.programInputAppearsInTuiAndHistory = p1?.paneContainsNonce &&
-      p1?.historyCorrelation
-      ? classify("confirmed", {
-          nonce: p1.nonce,
-          turnId: p1.turnId,
-          clientUserMessageId: p1.clientUserMessageId,
-          history: p1.historyCorrelation,
-        })
-      : classify("disproved", p1 || null, p1?.error || null);
+    report.checks.programInputAppearsInTuiAndHistory =
+      p1?.paneContainsNonce && p1?.historyCorrelation
+        ? classify("confirmed", {
+            nonce: p1.nonce,
+            turnId: p1.turnId,
+            clientUserMessageId: p1.clientUserMessageId,
+            history: p1.historyCorrelation,
+          })
+        : classify("disproved", p1 || null, p1?.error || null);
     report.checks.humanInputAppearsInHistory =
       h1?.beforeInput?.state?.notBusy && h1?.historyCorrelation
         ? classify("confirmed", {
@@ -1792,27 +1828,27 @@ async function main() {
       concurrent?.enterDeterministic &&
       concurrent?.enterTrials?.length === 2 &&
       concurrent?.queuedTrial?.programCorrelation
-      ? classify("confirmed", {
-          enterPolicy: concurrent.enterPolicy,
-          enterTrials: concurrent.enterTrials.map((trial) => ({
-            trial: trial.trial,
-            policy: trial.policy,
-            programTurnId: trial.programCorrelation?.turnId || null,
-            humanTurnId: trial.humanCorrelation?.turnId || null,
-          })),
-          tabQueuePolicy: concurrent.queuedTrial.policy,
-          tabQueueProgramTurnId:
-            concurrent.queuedTrial.programCorrelation?.turnId || null,
-          tabQueueHumanTurnId:
-            concurrent.queuedTrial.humanCorrelation?.turnId || null,
-          stagedPaneHadQueueHint:
-            concurrent.queuedTrial.stagedCapture?.state?.queueHint || false,
-        })
-      : classify(
-          concurrent?.enterTrials?.length ? "disproved" : "unconfirmed",
-          concurrent || null,
-          concurrent?.error || null,
-        );
+        ? classify("confirmed", {
+            enterPolicy: concurrent.enterPolicy,
+            enterTrials: concurrent.enterTrials.map((trial) => ({
+              trial: trial.trial,
+              policy: trial.policy,
+              programTurnId: trial.programCorrelation?.turnId || null,
+              humanTurnId: trial.humanCorrelation?.turnId || null,
+            })),
+            tabQueuePolicy: concurrent.queuedTrial.policy,
+            tabQueueProgramTurnId:
+              concurrent.queuedTrial.programCorrelation?.turnId || null,
+            tabQueueHumanTurnId:
+              concurrent.queuedTrial.humanCorrelation?.turnId || null,
+            stagedPaneHadQueueHint:
+              concurrent.queuedTrial.stagedCapture?.state?.queueHint || false,
+          })
+        : classify(
+            concurrent?.enterTrials?.length ? "disproved" : "unconfirmed",
+            concurrent || null,
+            concurrent?.error || null,
+          );
     report.checks.tabQueuesBusyHumanMessage =
       concurrent?.queuedTrial?.policy === "queue" &&
       concurrent?.queuedTrial?.humanCorrelation
@@ -1827,7 +1863,9 @@ async function main() {
         : classify("disproved", concurrent?.queuedTrial || null);
     report.checks.approvalRequestRouting = approval?.controllerRequests?.length
       ? classify("confirmed", {
-          route: approval.tuiApprovalUiPattern ? "controller-and-tui" : "controller-only",
+          route: approval.tuiApprovalUiPattern
+            ? "controller-and-tui"
+            : "controller-only",
           turnId: approval.turnId,
           requestIds: approval.controllerRequests.map((entry) => entry.id),
           methods: approval.controllerRequests.map((entry) => entry.method),
@@ -1894,8 +1932,10 @@ async function main() {
         "IMPOSSIBLE_FOR_PERSISTENT_CONTROLLER_TUI_COEXISTENCE: clean-condition bidirectional history, TUI recovery, or deterministic collision handling was not demonstrated";
     }
   } catch (error) {
-    report.fatalError = error instanceof Error ? error.stack || error.message : String(error);
-    report.verdict = "UNCONFIRMED: fatal probe blocker prevented the decision experiment";
+    report.fatalError =
+      error instanceof Error ? error.stack || error.message : String(error);
+    report.verdict =
+      "UNCONFIRMED: fatal probe blocker prevented the decision experiment";
   } finally {
     currentPhase = "cleanup";
     try {

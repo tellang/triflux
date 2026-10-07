@@ -2,7 +2,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve as pathResolve } from "node:path";
-import { resolveNestedCodexAgentProfile } from "../../scripts/lib/cli-codex.mjs";
+import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
 import { codexProfileConfigOverrides } from "../../scripts/lib/codex-profile-config.mjs";
 import {
   resolveGeminiModel,

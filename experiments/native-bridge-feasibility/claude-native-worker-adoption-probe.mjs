@@ -1,14 +1,14 @@
+import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
 
 import {
-  buildRosterEntry,
   buildDaemonControlAuth,
   buildIsolatedDaemonEnv,
+  buildRosterEntry,
   deriveDaemonPaths,
   getProcStart,
   sendControlRequest,
@@ -34,14 +34,25 @@ async function waitForFile(filePath, timeoutMs = 5000) {
 }
 
 function startDaemon({ configDir, logFile }) {
-  return spawn("claude", ["daemon", "run", path.join(configDir, "daemon.json"), "--log-file", logFile], {
-    env: buildIsolatedDaemonEnv(configDir),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  return spawn(
+    "claude",
+    [
+      "daemon",
+      "run",
+      path.join(configDir, "daemon.json"),
+      "--log-file",
+      logFile,
+    ],
+    {
+      env: buildIsolatedDaemonEnv(configDir),
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
 }
 
 function waitForExit(child, timeoutMs) {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  if (child.exitCode !== null || child.signalCode !== null)
+    return Promise.resolve(true);
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
       child.off("exit", onExit);
@@ -56,14 +67,19 @@ function waitForExit(child, timeoutMs) {
 }
 
 async function stopDaemon(daemon, controlSock) {
-  await sendControlRequest(controlSock, { proto: 1, op: "shutdown", reapWorkers: false }, { timeoutMs: 1000 })
-    .catch(() => {});
+  await sendControlRequest(
+    controlSock,
+    { proto: 1, op: "shutdown", reapWorkers: false },
+    { timeoutMs: 1000 },
+  ).catch(() => {});
   if (await waitForExit(daemon, 2000)) return;
   daemon.kill("SIGTERM");
   if (await waitForExit(daemon, 2000)) return;
   daemon.kill("SIGKILL");
   if (!(await waitForExit(daemon, 2000))) {
-    throw new Error(`isolated daemon did not exit after SIGKILL: pid=${daemon.pid}`);
+    throw new Error(
+      `isolated daemon did not exit after SIGKILL: pid=${daemon.pid}`,
+    );
   }
 }
 
@@ -81,7 +97,11 @@ async function collectSubscribe(controlSock, short, { timeoutMs = 1500 } = {}) {
       clearTimeout(timer);
       resolve(messages);
     });
-    socket.on("connect", () => socket.write(`${JSON.stringify({ proto: 1, op: "subscribe", short, tail: 10 })}\n`));
+    socket.on("connect", () =>
+      socket.write(
+        `${JSON.stringify({ proto: 1, op: "subscribe", short, tail: 10 })}\n`,
+      ),
+    );
     socket.on("data", (chunk) => {
       data += chunk.toString("utf8");
       while (data.includes("\n")) {
@@ -179,8 +199,13 @@ function compactJob(job) {
   };
 }
 
-export default async function runProbe({ scenario = "startup-native", cleanup = true } = {}) {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), `tfx-native-${scenario}-`));
+export default async function runProbe({
+  scenario = "startup-native",
+  cleanup = true,
+} = {}) {
+  const tmp = await fs.mkdtemp(
+    path.join(os.tmpdir(), `tfx-native-${scenario}-`),
+  );
   const configDir = path.join(tmp, "config");
   await fs.mkdir(path.join(configDir, "daemon"), { recursive: true });
   const paths = deriveDaemonPaths({ configDir });
@@ -192,10 +217,17 @@ export default async function runProbe({ scenario = "startup-native", cleanup = 
   try {
     const startedAt = Date.now();
     const rvSock = path.join(tmp, "worker.rv.sock");
-    const ptySock = scenario === "startup-native" ? path.join(tmp, "worker.pty.sock") : undefined;
+    const ptySock =
+      scenario === "startup-native"
+        ? path.join(tmp, "worker.pty.sock")
+        : undefined;
     const messagingSock = path.join(tmp, "worker.msg.sock");
     if (scenario === "startup-native") {
-      fakeWorker = await startFakeNativeWorker({ rvSock, ptySock, pid: sleeper.pid });
+      fakeWorker = await startFakeNativeWorker({
+        rvSock,
+        ptySock,
+        pid: sleeper.pid,
+      });
     }
     const entry = buildRosterEntry({
       short,
@@ -210,22 +242,44 @@ export default async function runProbe({ scenario = "startup-native", cleanup = 
     });
 
     if (scenario === "hot-roster") {
-      daemon = startDaemon({ configDir, logFile: path.join(tmp, "daemon.log") });
-      if (!(await waitForFile(paths.controlSock))) throw new Error(`control.sock not found: ${paths.controlSock}`);
-      const before = await sendControlRequest(paths.controlSock, { proto: 1, op: "list" });
+      daemon = startDaemon({
+        configDir,
+        logFile: path.join(tmp, "daemon.log"),
+      });
+      if (!(await waitForFile(paths.controlSock)))
+        throw new Error(`control.sock not found: ${paths.controlSock}`);
+      const before = await sendControlRequest(paths.controlSock, {
+        proto: 1,
+        op: "list",
+      });
       await writeRoster(paths.rosterPath, { [short]: entry });
       await sleep(750);
-      const afterList = await sendControlRequest(paths.controlSock, { proto: 1, op: "list" });
-      const afterHas = await sendControlRequest(paths.controlSock, { proto: 1, op: "has", short });
+      const afterList = await sendControlRequest(paths.controlSock, {
+        proto: 1,
+        op: "list",
+      });
+      const afterHas = await sendControlRequest(paths.controlSock, {
+        proto: 1,
+        op: "has",
+        short,
+      });
       return { scenario, tmp, short, before, afterList, afterHas };
     }
 
     await writeRoster(paths.rosterPath, { [short]: entry });
     daemon = startDaemon({ configDir, logFile: path.join(tmp, "daemon.log") });
-    if (!(await waitForFile(paths.controlSock))) throw new Error(`control.sock not found: ${paths.controlSock}`);
+    if (!(await waitForFile(paths.controlSock)))
+      throw new Error(`control.sock not found: ${paths.controlSock}`);
     await sleep(1000);
-    const list = await sendControlRequest(paths.controlSock, { proto: 1, op: "list" });
-    const has = await sendControlRequest(paths.controlSock, { proto: 1, op: "has", short });
+    const list = await sendControlRequest(paths.controlSock, {
+      proto: 1,
+      op: "list",
+    });
+    const has = await sendControlRequest(paths.controlSock, {
+      proto: 1,
+      op: "has",
+      short,
+    });
     const subscribe = await collectSubscribe(paths.controlSock, short);
     const attach =
       scenario === "startup-native"
@@ -233,12 +287,23 @@ export default async function runProbe({ scenario = "startup-native", cleanup = 
         : undefined;
     const resize =
       scenario === "startup-native"
-        ? await sendControlRequest(paths.controlSock, { proto: 1, op: "resize", short, cols: 100, rows: 30 })
+        ? await sendControlRequest(paths.controlSock, {
+            proto: 1,
+            op: "resize",
+            short,
+            cols: 100,
+            rows: 30,
+          })
         : undefined;
     await sleep(300);
     const kill =
       scenario === "startup-native"
-        ? await sendControlRequest(paths.controlSock, { proto: 1, op: "kill", short, signal: "SIGTERM" })
+        ? await sendControlRequest(paths.controlSock, {
+            proto: 1,
+            op: "kill",
+            short,
+            signal: "SIGTERM",
+          })
         : undefined;
     await sleep(300);
     const fakeWorkerEvents = fakeWorker?.getEvents();

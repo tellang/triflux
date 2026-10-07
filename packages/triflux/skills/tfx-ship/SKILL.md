@@ -141,7 +141,7 @@ npm run release:bump -- --version "$TARGET_VERSION" --write
 
 이 스크립트가 `package.json` + `.claude-plugin/marketplace.json` + `package-lock.json` 을 갱신한다.
 
-> **MANDATORY `--write`**: 플래그 없으면 dry-run 만 동작 (`scripts/release/bump-version.mjs:28` `if (write)` 분기). `--write` 누락 시 후속 Step 이 모두 이전 버전으로 진행되는 silent failure 가 된다.
+> **MANDATORY `--write`**: 플래그가 없으면 CLI가 경고를 출력하고 변경 없이 종료한다. 버전을 갱신하려면 반드시 `--write`를 지정한다.
 
 ### Step 4 - CHANGELOG 초안 생성
 

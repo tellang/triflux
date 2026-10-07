@@ -85,7 +85,6 @@ describe("release governance scripts", () => {
       const result = await bumpVersion({
         rootDir: root,
         nextVersion: "2.0.0",
-        write: true,
       });
       assert.equal(result.ok, true);
       assert.equal(

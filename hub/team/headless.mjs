@@ -20,7 +20,7 @@ import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveNestedCodexAgentProfile } from "../../scripts/lib/cli-codex.mjs";
+import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
 import { requestJson } from "../bridge.mjs";
 import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
 import { getMaxSpawnPerSec } from "../lib/spawn-trace.mjs";

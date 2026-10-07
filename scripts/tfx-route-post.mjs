@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // tfx-route-post.mjs v2.0 — tfx-route.sh 후처리 (단일 프로세스)
 //
-// cli-route.sh v1.x의 5개 런타임(jq, python3, node)을 node 단일로 통합.
 // ~100ms (node 1회 기동) vs ~1000ms (python3×2 + jq×3 + node×2)
 //
 // 처리:

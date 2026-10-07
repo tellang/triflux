@@ -46,8 +46,16 @@ test("classifyCollision identifies same-turn steering", () => {
       id: "turn-steer",
       status: "completed",
       items: [
-        { type: "userMessage", id: "p", content: [{ type: "text", text: "P-COLLIDE" }] },
-        { type: "userMessage", id: "h", content: [{ type: "text", text: "H-COLLIDE" }] },
+        {
+          type: "userMessage",
+          id: "p",
+          content: [{ type: "text", text: "P-COLLIDE" }],
+        },
+        {
+          type: "userMessage",
+          id: "h",
+          content: [{ type: "text", text: "H-COLLIDE" }],
+        },
       ],
     },
   ]);
@@ -56,11 +64,38 @@ test("classifyCollision identifies same-turn steering", () => {
 
 test("classifyCollision distinguishes queue and reject", () => {
   const queued = threadWithTurns([
-    { id: "turn-p", items: [{ type: "userMessage", id: "p", content: [{ type: "text", text: "P-QUEUE" }] }] },
-    { id: "turn-h", items: [{ type: "userMessage", id: "h", content: [{ type: "text", text: "H-QUEUE" }] }] },
+    {
+      id: "turn-p",
+      items: [
+        {
+          type: "userMessage",
+          id: "p",
+          content: [{ type: "text", text: "P-QUEUE" }],
+        },
+      ],
+    },
+    {
+      id: "turn-h",
+      items: [
+        {
+          type: "userMessage",
+          id: "h",
+          content: [{ type: "text", text: "H-QUEUE" }],
+        },
+      ],
+    },
   ]);
   const rejected = threadWithTurns([
-    { id: "turn-p", items: [{ type: "userMessage", id: "p", content: [{ type: "text", text: "P-REJECT" }] }] },
+    {
+      id: "turn-p",
+      items: [
+        {
+          type: "userMessage",
+          id: "p",
+          content: [{ type: "text", text: "P-REJECT" }],
+        },
+      ],
+    },
   ]);
 
   assert.equal(classifyCollision(queued, "P-QUEUE", "H-QUEUE"), "queue");

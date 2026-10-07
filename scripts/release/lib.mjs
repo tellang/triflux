@@ -8,13 +8,6 @@ export const ROOT = resolve(
   "..",
   "..",
 );
-export const DEFAULT_MANIFEST_PATH = join(
-  ROOT,
-  "scripts",
-  "release",
-  "version-manifest.json",
-);
-
 export function parseArgs(argv) {
   const args = {};
   for (let i = 0; i < argv.length; i++) {
@@ -41,14 +34,14 @@ export function writeJson(filePath, value) {
   writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-export function getValueAtPath(obj, pathSegments) {
+function getValueAtPath(obj, pathSegments) {
   return pathSegments.reduce((acc, segment) => {
     if (acc === undefined || acc === null) return undefined;
     return acc[segment];
   }, obj);
 }
 
-export function setValueAtPath(obj, pathSegments, value) {
+function setValueAtPath(obj, pathSegments, value) {
   if (!pathSegments.length) {
     throw new Error("pathSegments must not be empty");
   }
@@ -85,7 +78,7 @@ export function isSemver(value) {
   return /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(String(value || "").trim());
 }
 
-export function loadVersionManifest({
+function loadVersionManifest({
   rootDir = ROOT,
   manifestPath = join(rootDir, "scripts", "release", "version-manifest.json"),
 } = {}) {
@@ -96,7 +89,7 @@ export function loadVersionManifest({
   return manifest;
 }
 
-export function getCanonicalVersion({
+function getCanonicalVersion({
   rootDir = ROOT,
   manifest = loadVersionManifest({ rootDir }),
 } = {}) {
@@ -114,7 +107,7 @@ export function getCanonicalVersion({
   return value;
 }
 
-export function collectVersionTargets({
+function collectVersionTargets({
   rootDir = ROOT,
   manifest = loadVersionManifest({ rootDir }),
   expectedVersion = getCanonicalVersion({ rootDir, manifest }),
@@ -239,7 +232,7 @@ export function getPreviousTag({
   }
 }
 
-export function getCommitSummaries({
+function getCommitSummaries({
   rootDir = ROOT,
   previousTag,
   execFileSyncFn = execFileSync,

@@ -14,10 +14,8 @@
       "**/*.js",
       "**/*.cjs",
       "**/*.json",
-      "!**/research",
       "!**/node_modules",
       "!**/skills",
-      "!**/public",
       "!**/.claude",
       "!**/packages",
       "!**/docs"

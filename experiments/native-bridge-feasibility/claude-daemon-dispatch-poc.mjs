@@ -17,12 +17,17 @@ function defaultDaemonTmpRoot() {
 }
 
 export function deriveDaemonPaths({
-  configDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"),
+  configDir = process.env.CLAUDE_CONFIG_DIR ||
+    path.join(os.homedir(), ".claude"),
   uid = typeof process.getuid === "function" ? process.getuid() : 0,
   tmpRoot = defaultDaemonTmpRoot(),
 } = {}) {
   const resolvedConfigDir = path.resolve(configDir);
-  const hash = crypto.createHash("sha256").update(resolvedConfigDir).digest("hex").slice(0, 8);
+  const hash = crypto
+    .createHash("sha256")
+    .update(resolvedConfigDir)
+    .digest("hex")
+    .slice(0, 8);
   const daemonDir = path.join(tmpRoot, `cc-daemon-${uid}`, hash);
   return {
     configDir,
@@ -69,7 +74,9 @@ export function redactControlResponse(response) {
     ...response,
     jobs: response.jobs.map((job) =>
       Object.fromEntries(
-        Object.entries(redactJob(job)).filter(([, value]) => value !== undefined),
+        Object.entries(redactJob(job)).filter(
+          ([, value]) => value !== undefined,
+        ),
       ),
     ),
   };
@@ -87,7 +94,9 @@ export function redactSubscribeMessages(messages) {
       return {
         ...message,
         record: Object.fromEntries(
-          Object.entries(redactJob(message.record)).filter(([, value]) => value !== undefined),
+          Object.entries(redactJob(message.record)).filter(
+            ([, value]) => value !== undefined,
+          ),
         ),
       };
     }
@@ -107,7 +116,11 @@ export function redactSubscribeMessages(messages) {
   });
 }
 
-export function sendControlRequest(sockPath, request, { timeoutMs = 6000 } = {}) {
+export function sendControlRequest(
+  sockPath,
+  request,
+  { timeoutMs = 6000 } = {},
+) {
   return new Promise((resolve, reject) => {
     const socket = net.connect(sockPath);
     let settled = false;
@@ -120,7 +133,9 @@ export function sendControlRequest(sockPath, request, { timeoutMs = 6000 } = {})
       else resolve(value);
     };
 
-    socket.setTimeout(timeoutMs, () => finish(new Error(`Timed out connecting to ${sockPath}`)));
+    socket.setTimeout(timeoutMs, () =>
+      finish(new Error(`Timed out connecting to ${sockPath}`)),
+    );
     socket.on("error", (error) => finish(error));
     socket.on("connect", () => socket.write(`${JSON.stringify(request)}\n`));
     socket.on("data", (chunk) => {
@@ -241,7 +256,11 @@ async function ensureDaemon(paths) {
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  return { started: false, command: result, error: `control.sock not found at ${paths.controlSock}` };
+  return {
+    started: false,
+    command: result,
+    error: `control.sock not found at ${paths.controlSock}`,
+  };
 }
 
 async function collectSubscribe(sockPath, short, { timeoutMs = 2500 } = {}) {
@@ -260,7 +279,9 @@ async function collectSubscribe(sockPath, short, { timeoutMs = 2500 } = {}) {
       resolve(messages);
     });
     socket.on("connect", () => {
-      socket.write(`${JSON.stringify({ proto: 1, op: "subscribe", short, tail: 20 })}\n`);
+      socket.write(
+        `${JSON.stringify({ proto: 1, op: "subscribe", short, tail: 20 })}\n`,
+      );
     });
     socket.on("data", (chunk) => {
       data += chunk.toString("utf8");
@@ -325,7 +346,12 @@ async function main() {
       ...payload,
       launch:
         payload.launch.mode === "prompt"
-          ? { ...payload.launch, args: payload.launch.args.slice(0, -1).concat("[prompt redacted]") }
+          ? {
+              ...payload.launch,
+              args: payload.launch.args
+                .slice(0, -1)
+                .concat("[prompt redacted]"),
+            }
           : payload.launch,
       seed:
         payload.launch.mode === "prompt"
@@ -366,12 +392,18 @@ async function main() {
           : "exec-dispatch-registered"
         : "dispatch-not-registered";
   } else {
-    report.verdict = report.listBefore?.ok === true ? "control-list-ok" : "control-list-failed";
+    report.verdict =
+      report.listBefore?.ok === true
+        ? "control-list-ok"
+        : "control-list-failed";
   }
 
   await fs.writeFile(defaultReportPath, JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
-  if (report.verdict.endsWith("failed") || report.verdict === "daemon-unreachable") {
+  if (
+    report.verdict.endsWith("failed") ||
+    report.verdict === "daemon-unreachable"
+  ) {
     process.exitCode = 1;
   }
 }

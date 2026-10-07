@@ -10,7 +10,6 @@
     "tfx-live": "bin/tfx-live.mjs",
     "tfx-setup": "bin/tfx-setup.mjs",
     "tfx-doctor": "bin/tfx-doctor.mjs",
-    "tfx-profile": "bin/tfx-profile.mjs",
     "tfx-doctor-tui": "bin/tfx-doctor-tui.mjs",
     "tfx-setup-tui": "bin/tfx-setup-tui.mjs"
   },
@@ -23,8 +22,7 @@
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "@triflux/core": "^10.25.0",
-    "@triflux/remote": "^10.25.0",
-    "tree-kill": "^1.2.2"
+    "@triflux/remote": "^10.25.0"
   },
   "optionalDependencies": {
     "cloakbrowser": "0.5.12",
