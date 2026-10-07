@@ -1,5 +1,4 @@
-import { AMBER, BOLD, DIM, GRAY, GREEN, RED, RESET } from "../../shared.mjs";
-import { fetchHubTaskList } from "../services/hub-client.mjs";
+import { AMBER, BOLD, DIM, GREEN, RED, RESET } from "../../shared.mjs";
 import { isTeamAlive } from "../services/runtime-mode.mjs";
 import { loadTeamState } from "../services/state-store.mjs";
 
@@ -35,10 +34,6 @@ export async function teamStatus(args = []) {
     })),
   };
 
-  if (alive) {
-    payload.hubTasks = await fetchHubTaskList(state);
-  }
-
   if (json) {
     process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
     return;
@@ -62,32 +57,5 @@ export async function teamStatus(args = []) {
     );
   }
 
-  if (alive) {
-    const hubTasks = payload.hubTasks || (await fetchHubTaskList(state));
-    if (hubTasks.length) {
-      const completed = hubTasks.filter(
-        (task) => task.status === "completed",
-      ).length;
-      const failed = hubTasks.filter((task) => task.status === "failed").length;
-      console.log(
-        `\n  ${BOLD}Hub Tasks${RESET} ${DIM}(${completed}/${hubTasks.length} done)${RESET}`,
-      );
-      for (const task of hubTasks) {
-        const icon =
-          task.status === "completed"
-            ? `${GREEN}✓${RESET}`
-            : task.status === "in_progress"
-              ? `${AMBER}●${RESET}`
-              : task.status === "failed"
-                ? `${RED}✗${RESET}`
-                : `${GRAY}○${RESET}`;
-        const owner = task.owner ? ` ${GRAY}[${task.owner}]${RESET}` : "";
-        console.log(
-          `    ${icon} ${task.subject || task.description?.slice(0, 50) || ""}${owner}`,
-        );
-      }
-      if (failed > 0) console.log(`    ${RED}⚠ ${failed}건 실패${RESET}`);
-    }
-  }
   console.log("");
 }

@@ -17,9 +17,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
-import { requestJson } from "../bridge.mjs";
 import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
-import { getMaxSpawnPerSec } from "../lib/spawn-trace.mjs";
 import {
   createActivityLifecycle,
   isActivityLifecycleEnabled,
@@ -58,11 +56,6 @@ import {
   startCapture,
   waitForCompletion,
 } from "./psmux.mjs";
-import {
-  buildSynapseTaskSummary,
-  registerSynapseSession,
-  unregisterSynapseSession,
-} from "./synapse-http.mjs";
 import { createLogDashboard } from "./tui.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
@@ -200,95 +193,6 @@ function buildRouteBackedHeadlessCommand(
 
 export function getHeadlessWorkerAgentId(sessionName, index) {
   return `headless-${sessionName}-${index}`;
-}
-
-export function getHeadlessLeadAgentId(sessionName) {
-  return `headless-${sessionName}-lead`;
-}
-
-const HUB_CLI_VALUES = new Set(["codex", "gemini", "claude", "other"]);
-const presenceOwnerByAgent = new Map();
-function normalizeCliForHub(cli) {
-  return HUB_CLI_VALUES.has(cli) ? cli : "other";
-}
-
-export async function registerHeadlessWorker(
-  sessionName,
-  index,
-  cli,
-  requestJsonFn = requestJson,
-) {
-  const agentId = getHeadlessWorkerAgentId(sessionName, index);
-  const result = await requestJsonFn("/bridge/register", {
-    body: {
-      agent_id: agentId,
-      cli: normalizeCliForHub(cli),
-      topics: ["headless.worker"],
-      capabilities: [cli],
-    },
-  }).catch(() => null);
-  if (result?.ok && result.data?.presence_generation != null) {
-    presenceOwnerByAgent.set(agentId, {
-      presence_generation: result.data.presence_generation,
-      hub_instance_id: result.data.hub_instance_id,
-      store_fingerprint: result.data.store_fingerprint,
-    });
-  }
-  return result;
-}
-
-export async function publishHeadlessResult(
-  sessionName,
-  workerId,
-  status,
-  handoff,
-  requestJsonFn = requestJson,
-) {
-  await requestJsonFn("/bridge/publish", {
-    body: {
-      from: getHeadlessLeadAgentId(sessionName),
-      to: "topic:headless.results",
-      type: "event",
-      payload: { workerId, status, handoff },
-    },
-  }).catch(() => {});
-}
-
-export async function deregisterHeadlessWorkers(
-  sessionName,
-  workerCount,
-  requestJsonFn = requestJson,
-) {
-  await Promise.all(
-    Array.from({ length: workerCount }, (_, index) =>
-      requestJsonFn("/bridge/deregister", {
-        body: {
-          agent_id: getHeadlessWorkerAgentId(sessionName, index),
-          ...(presenceOwnerByAgent.get(
-            getHeadlessWorkerAgentId(sessionName, index),
-          ) || {}),
-        },
-      })
-        .catch(() => {})
-        .finally(() =>
-          presenceOwnerByAgent.delete(
-            getHeadlessWorkerAgentId(sessionName, index),
-          ),
-        ),
-    ),
-  );
-}
-
-function registerHeadlessSynapseWorker(workerId, prompt) {
-  registerSynapseSession({
-    sessionId: workerId,
-    host: "local",
-    taskSummary: buildSynapseTaskSummary(prompt),
-  });
-}
-
-function unregisterHeadlessSynapseWorker(workerId) {
-  unregisterSynapseSession(workerId);
 }
 
 /** MCP 프로필별 프롬프트 힌트 (tfx-route.sh resolve_mcp_policy의 경량 미러) */
@@ -695,7 +599,6 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     } catch {
       /* 무시 */
     }
-    await registerHeadlessWorker(sessionName, i, resolvedCli);
 
     if (safeProgress)
       safeProgress({
@@ -729,7 +632,6 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     // pane 간 pipe-pane EBUSY 방지 — 이벤트 루프 해방하며 순차 대기
     if (i > 0) await new Promise((r) => setTimeout(r, 300));
     const dispatch = dispatchCommand(sessionName, newPaneId, cmd);
-    registerHeadlessSynapseWorker(workerId, assignment.prompt);
 
     if (safeProgress)
       safeProgress({ type: "dispatched", paneName, cli: resolvedCli });
@@ -818,12 +720,10 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         },
       );
       const scriptDir = join(RESULT_DIR, sessionName);
-      await registerHeadlessWorker(sessionName, i, resolvedCli);
       const dispatch = dispatchCommand(sessionName, paneName, cmd, {
         scriptDir,
         scriptName: paneName,
       });
-      registerHeadlessSynapseWorker(workerId, assignment.prompt);
 
       // P1 fix: 비-progressive에서는 pane 리네임 금지 — 캡처 로그 경로가 타이틀 기반이므로
       // 리네임하면 waitForCompletion이 "codex (role).log"를 찾지만 실제는 "worker-N.log"로 불일치
@@ -935,8 +835,6 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
         sessionId: dispatched.sessionId,
         sessionProjectionPath: dispatched.sessionProjectionPath,
       });
-      await registerHeadlessWorker(sessionName, i, resolvedCli);
-      registerHeadlessSynapseWorker(workerId, assignment.prompt);
       if (safeProgress) {
         safeProgress({ type: "dispatched", paneName, cli: resolvedCli });
       }
@@ -1082,7 +980,6 @@ async function awaitAll(
       }
 
       const output = readResult(d.resultFile, d.paneId);
-      unregisterHeadlessSynapseWorker(d.workerId);
 
       if (safeProgress) {
         safeProgress({
@@ -1246,7 +1143,6 @@ async function awaitAllDaemon(
         lifecycle,
       );
       const output = readResult(d.resultFile, d.paneId);
-      unregisterHeadlessSynapseWorker(d.workerId);
 
       if (safeProgress) {
         safeProgress({
@@ -1270,7 +1166,7 @@ async function awaitAllDaemon(
  * @param {Array<{d, completion, output}>} results
  * @returns {Array}
  */
-async function collectResults(sessionName, results) {
+async function collectResults(results) {
   // handoff 파이프라인: parse → validate → format (각 워커 결과에 적용)
   return await Promise.all(
     results.map(async ({ d, completion, output }) => {
@@ -1292,18 +1188,6 @@ async function collectResults(sessionName, results) {
         };
         handoffResult.formatted = formatHandoffForLead(handoffResult.handoff);
       }
-      const status =
-        handoffResult.handoff?.status ||
-        (completion.matched && completion.exitCode === 0
-          ? "completed"
-          : "failed");
-      await publishHeadlessResult(
-        sessionName,
-        d.workerId,
-        status,
-        handoffResult.handoff,
-      );
-
       return {
         cli: d.cli,
         paneName: d.paneName,
@@ -1398,37 +1282,6 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   let completedResults = [];
   let runFailed = false;
   let runError;
-  // Hub version skew pre-flight (fail-open, best-effort)
-  requestJson("/status", { method: "GET", timeoutMs: 500 })
-    .then((status) => {
-      const hubRate = status?.spawn_trace?.max_per_sec;
-      const localRate = getMaxSpawnPerSec();
-      if (typeof hubRate === "number" && hubRate !== localRate) {
-        console.warn(
-          `[headless] Hub version skew detected: hub spawn rate=${hubRate}/s, local=${localRate}/s. Restart hub to sync.`,
-        );
-      }
-    })
-    .catch(() => {});
-
-  // Synapse: 세션 registration (fire-and-forget, hub 미응답 시 무시)
-  const synapseIds = normalizedAssignments.map(
-    (_, i) => `${sessionName}-worker-${i + 1}`,
-  );
-  for (let i = 0; i < normalizedAssignments.length; i++) {
-    const a = normalizedAssignments[i];
-    requestJson("/synapse/register", {
-      method: "POST",
-      body: {
-        sessionId: synapseIds[i],
-        host: "local",
-        taskSummary: String(a.prompt || "").slice(0, 100),
-        isRemote: false,
-      },
-      timeoutMs: 1000,
-    }).catch(() => {});
-  }
-
   // in-process TUI: dashboard=true이고 stdout이 TTY일 때 직접 구동
   let tui = null;
   const resolvedLayout = resolveDashboardLayout(
@@ -1501,61 +1354,9 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     }
   }
 
-  // Synapse heartbeat: progress 이벤트마다 해당 워커의 세션 갱신
-  const feedSynapse = (event) => {
-    if (!event?.paneName) return;
-    const match = event.paneName.match(/worker-(\d+)/);
-    if (!match) return;
-    const idx = parseInt(match[1], 10) - 1;
-    const sid = synapseIds[idx];
-    if (!sid) return;
-    requestJson("/synapse/heartbeat", {
-      method: "POST",
-      body: {
-        sessionId: sid,
-        partial: { taskSummary: (event.snapshot || "").slice(0, 100) },
-      },
-      timeoutMs: 500,
-    }).catch(() => {});
-  };
-
-  const HUB_ACTIVITY_MIN_INTERVAL_MS = 30_000;
-  const lastHubBeatByWorker = new Map();
-  const feedHubActivity = (event) => {
-    if (event?.type !== "progress" || !event.paneName) return;
-    const match = event.paneName.match(/worker-(\d+)/);
-    if (!match) return;
-    const idx = parseInt(match[1], 10) - 1;
-    const agentId = getHeadlessWorkerAgentId(sessionName, idx);
-    const nowMs = Date.now();
-    if (
-      (lastHubBeatByWorker.get(agentId) || 0) + HUB_ACTIVITY_MIN_INTERVAL_MS >
-      nowMs
-    )
-      return;
-    lastHubBeatByWorker.set(agentId, nowMs);
-    requestJson("/bridge/heartbeat", {
-      method: "POST",
-      body: {
-        agent_id: agentId,
-        ...(presenceOwnerByAgent.get(agentId) || {}),
-      },
-      timeoutMs: 500,
-    }).catch(() => {});
-    const assignJobId = normalizedAssignments[idx]?.assignJobId;
-    if (assignJobId)
-      requestJson("/bridge/assign/result", {
-        method: "POST",
-        body: { job_id: assignJobId, worker_agent: agentId, status: "running" },
-        timeoutMs: 500,
-      }).catch(() => {});
-  };
-
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
     feedTui(event);
-    feedSynapse(event);
-    feedHubActivity(event);
     if (onProgress) {
       try {
         onProgress(event);
@@ -1648,7 +1449,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
             progressIntervalSec,
             lifecycle,
           );
-    const collected = await collectResults(sessionName, results);
+    const collected = await collectResults(results);
 
     // 완료 시 TUI에 최종 상태 반영 후 닫기
     if (tui) {
@@ -1682,14 +1483,6 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 
   if (!runCompleted) sessionOwnership.release();
   try {
-    // Synapse: 세션 unregister (fire-and-forget)
-    for (const sid of synapseIds) {
-      requestJson("/synapse/unregister", {
-        method: "POST",
-        body: { sessionId: sid },
-        timeoutMs: 1000,
-      }).catch(() => {});
-    }
     if (daemonDispatches.length > 0) {
       await cleanupDaemonDispatches(daemonDispatches);
     }
@@ -1728,16 +1521,7 @@ export async function runHeadlessWithCleanup(assignments, opts = {}) {
       _sessionOwnership: sessionOwnership,
     });
   } finally {
-    try {
-      for (let index = 0; index < assignments.length; index++) {
-        unregisterHeadlessSynapseWorker(
-          getHeadlessWorkerAgentId(sessionName, index),
-        );
-      }
-      await deregisterHeadlessWorkers(sessionName, assignments.length);
-    } finally {
-      sessionOwnership.release();
-    }
+    sessionOwnership.release();
     // WT split pane은 psmux 종료 시 셸이 끝나면서 자동으로 닫힘
     // 수동 close-pane 불필요 (레이스 컨디션으로 WT 에러 발생)
   }
@@ -2357,12 +2141,6 @@ export async function runHeadlessInteractive(
     kill() {
       if (this._killed) return;
       this._killed = true;
-      for (let index = 0; index < assignments.length; index++) {
-        unregisterHeadlessSynapseWorker(
-          getHeadlessWorkerAgentId(sessionName, index),
-        );
-      }
-      void deregisterHeadlessWorkers(sessionName, assignments.length);
       sessionOwnership.release();
       // attach pane/tab은 psmux 종료 → attach client 종료 → 자동 닫힘
       // 수동 close-pane 불필요 (레이스 컨디션으로 WT 0x80070002 에러 발생)

@@ -1,7 +1,6 @@
 import { injectPrompt, sendKeys } from "../../pane.mjs";
 import { DIM, RESET, WHITE } from "../../shared.mjs";
 import { ok } from "../render.mjs";
-import { publishLeadControl } from "../services/hub-client.mjs";
 import { resolveMember } from "../services/member-selector.mjs";
 import { isTeamAlive } from "../services/runtime-mode.mjs";
 import { loadTeamState } from "../services/state-store.mjs";
@@ -34,8 +33,6 @@ export async function teamControl(args = []) {
   );
   if (command === "interrupt") sendKeys(member.pane, "C-c");
 
-  const published = await publishLeadControl(state, member, command, reason);
-  if (published) ok(`${member.name} 제어 전송 (${command}, direct + hub)`);
-  else ok(`${member.name} 제어 전송 (${command}, direct only)`);
+  ok(`${member.name} 제어 전송 (${command})`);
   console.log("");
 }

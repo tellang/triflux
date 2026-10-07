@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildLeadPrompt, orchestrate } from "../../hub/team/orchestrator.mjs";
+import {
+  buildLeadPrompt,
+  buildPrompt,
+  orchestrate,
+} from "../../hub/team/orchestrator.mjs";
 
 function makeMockInject() {
   const calls = [];
@@ -134,31 +138,20 @@ describe("orchestrator cli hint propagation (#117)", () => {
 });
 
 describe("buildLeadPrompt grounding and evidence gates", () => {
-  it("repoRoot가 있으면 bridge 호출을 절대경로로 안내한다", () => {
-    const prompt = buildLeadPrompt("ship shard", {
+  it("리드와 워커는 허브 호출 없이 결과 파일을 보고한다", () => {
+    const config = {
       agentId: "lead-1",
+      cli: "codex",
       repoRoot: "/repo/triflux",
       workers: [{ agentId: "worker-1", cli: "codex", subtask: "edit" }],
-    });
-
-    assert.ok(prompt.includes("node /repo/triflux/hub/bridge.mjs result"));
-    assert.ok(prompt.includes("node /repo/triflux/hub/bridge.mjs context"));
-    assert.ok(!prompt.includes("node hub/bridge.mjs result"));
-  });
-
-  it("리드 프롬프트는 task.result 수신 종료 조건과 무응답 중단 조건을 포함한다", () => {
-    const prompt = buildLeadPrompt("ship shard", {
-      agentId: "lead-1",
-      repoRoot: "/repo/triflux",
-      workers: [{ agentId: "worker-1", cli: "codex", subtask: "edit" }],
-    });
-
-    assert.ok(
-      prompt.includes(
-        "모든 워커의 task.result 수신 후 결과를 통합하고 종료하라. 워커가 무응답이면 상태를 보고하고 중단하라.",
-      ),
-      prompt,
-    );
+    };
+    const lead = buildLeadPrompt("ship shard", config);
+    const worker = buildPrompt("edit", config);
+    for (const prompt of [lead, worker])
+      assert.doesNotMatch(prompt, /bridge\.mjs|task\.result|27888/);
+    assert.match(lead, /모든 워커의 결과와 출력 파일을 확인하고 통합한다/);
+    assert.match(lead, /무응답 워커는 상태를 보고하고 중단한다/);
+    assert.match(worker, /변경 파일, 검증 결과와 출력 파일 경로/);
   });
 
   it("리드 프롬프트는 증거 없는 완료 주장을 통합하지 않도록 지시한다", () => {
@@ -174,15 +167,5 @@ describe("buildLeadPrompt grounding and evidence gates", () => {
       ),
       prompt,
     );
-  });
-
-  it("repoRoot가 없으면 기존 상대 bridge 호출을 유지한다", () => {
-    const prompt = buildLeadPrompt("ship shard", {
-      agentId: "lead-1",
-      workers: [{ agentId: "worker-1", cli: "codex", subtask: "edit" }],
-    });
-
-    assert.ok(prompt.includes("node hub/bridge.mjs result"));
-    assert.ok(prompt.includes("node hub/bridge.mjs context"));
   });
 });

@@ -5,7 +5,6 @@ import {
   listSessions,
 } from "../../session.mjs";
 import { AMBER, BOLD, DIM, RESET } from "../../shared.mjs";
-import { getHubInfo } from "../services/hub-client.mjs";
 import { isTeamAlive } from "../services/runtime-mode.mjs";
 import { loadTeamState, TEAM_PROFILE } from "../services/state-store.mjs";
 
@@ -16,7 +15,6 @@ export async function teamDebug(args = []) {
     flagIndex === -1
       ? 20
       : Math.max(3, parseInt(args[flagIndex + 1] || "20", 10) || 20);
-  const hub = await getHubInfo();
 
   console.log(`\n  ${AMBER}${BOLD}⬡ Team Debug${RESET}\n`);
   console.log(`    platform:  ${process.platform}`);
@@ -25,8 +23,6 @@ export async function teamDebug(args = []) {
     `    tty:       stdout=${!!process.stdout.isTTY}, stdin=${!!process.stdin.isTTY}`,
   );
   console.log(`    mux:       ${detectMultiplexer() || "none"}`);
-  console.log(`    hub-pid:   ${hub ? `${hub.pid}` : "-"}`);
-  console.log(`    hub-url:   ${hub?.url || "-"}`);
   const sessions = listSessions();
   console.log(`    sessions:  ${sessions.length ? sessions.join(", ") : "-"}`);
 

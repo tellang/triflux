@@ -20,7 +20,6 @@ export async function startMuxTeam({
   agents,
   subtasks,
   layout,
-  hubUrl,
   teammateMode,
 }) {
   const paneCount = agents.length + 1;
@@ -64,7 +63,6 @@ export async function startMuxTeam({
   ok("CLI 초기화 대기 (3초)...");
   await new Promise((resolve) => setTimeout(resolve, 3000));
   const promptInjectionFailures = await orchestrate(sessionId, assignments, {
-    hubUrl,
     teammateMode,
     lead: { target: leadTarget, cli: lead, task },
     onInjectionFailure(failure) {
@@ -89,7 +87,6 @@ export async function startMuxTeam({
     layout: effectiveLayout,
     teammateMode,
     startedAt: Date.now(),
-    hubUrl,
     promptInjectionFailures,
     members,
     panes: Object.fromEntries(
