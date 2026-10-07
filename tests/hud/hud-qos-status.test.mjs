@@ -17,12 +17,6 @@ before(() => {
   mockHomeDir = mkdtempSync(join(tmpdir(), "tfx-hud-status-"));
   cacheDir = join(mockHomeDir, ".claude", "cache");
   mkdirSync(cacheDir, { recursive: true });
-  for (const name of ["claude", "codex"]) {
-    writeFileSync(
-      join(cacheDir, `.${name}-refresh-lock`),
-      JSON.stringify({ t: Date.now() }),
-    );
-  }
 });
 
 after(() => {
@@ -30,6 +24,12 @@ after(() => {
 });
 
 function runHud(extraEnv = {}, { preserveAnsi = false } = {}) {
+  for (const name of ["claude", "codex", "antigravity"]) {
+    writeFileSync(
+      join(cacheDir, `.${name}-refresh-lock`),
+      JSON.stringify({ t: Date.now() }),
+    );
+  }
   const result = spawnSync(process.execPath, [hudScriptPath], {
     cwd: mockHomeDir,
     input: JSON.stringify({
@@ -44,6 +44,7 @@ function runHud(extraEnv = {}, { preserveAnsi = false } = {}) {
       LINES: "40",
       OMC_HUD_COMPACT: "",
       OMC_HUD_MINIMAL: "",
+      TFX_HUB_PID_DIR: join(cacheDir, "tfx-hub"),
       TFX_MACHINE_PROFILE_PATH: join(mockHomeDir, "missing-profile.env"),
       TFX_DISABLE_ANTIGRAVITY: "0",
       ...extraEnv,
@@ -76,7 +77,7 @@ describe("HUD provider visibility", () => {
     }
   });
 
-  it("agy 준비 상태에서만 a 행을 보이고 GCP 프로젝트 ID를 계정 칸에 표시한다", () => {
+  it("preflight 없이 agy 프로젝트를 표시하고 Gemini 폴백과 팀 행을 그리지 않는다", () => {
     const preflightPath = join(cacheDir, "tfx-preflight.json");
     const settingsDir = join(mockHomeDir, ".gemini", "antigravity-cli");
     mkdirSync(settingsDir, { recursive: true });
@@ -87,24 +88,56 @@ describe("HUD provider visibility", () => {
         gcp: { project: "hud-prj" },
       }),
     );
-    assert.doesNotMatch(runHud(), /^a:/m);
-    assert.match(
-      runHud({}, { preserveAnsi: true }),
-      /^\x1b\[0m\x1b\[2m(?:\x1b\[[0-9;]*m)*g/m,
+    const teamDir = join(cacheDir, "tfx-hub");
+    mkdirSync(teamDir, { recursive: true });
+    writeFileSync(
+      join(teamDir, "team-state-hud.json"),
+      JSON.stringify({
+        sessionName: "hud",
+        startedAt: Date.now(),
+        members: [{ name: "codex-1", role: "worker", cli: "codex" }],
+        tasks: [{ owner: "codex-1", status: "in_progress" }],
+      }),
     );
+    writeFileSync(
+      join(mockHomeDir, ".gemini", "oauth_creds.json"),
+      JSON.stringify({ email: "gemini-only@example.test" }),
+    );
+    assert.match(runHud(), /^a:.*hud-prj/m);
     writeFileSync(
       preflightPath,
       JSON.stringify({ timestamp: Date.now(), antigravity: { ok: true } }),
     );
     const output = runHud();
     assert.match(output, /^a:.*hud-prj/m);
-    assert.doesNotMatch(output, /^g:/m);
+    assert.doesNotMatch(output, /^(g:|▲)/m);
+    assert.doesNotMatch(output, /gemini-only/);
     assert.doesNotMatch(output, /^a:.*\d+%/m);
-    assert.doesNotMatch(
-      runHud({}, { preserveAnsi: true }),
-      /^\x1b\[0m\x1b\[2m(?:\x1b\[[0-9;]*m)*a/m,
+    const quotaPath = join(cacheDir, "antigravity-quota-cache.json");
+    const quota = {
+      timestamp: Date.now(),
+      accountLabel: "hud-prj",
+      buckets: [
+        {
+          id: "gemini-3.5-flash-high",
+          name: "Gemini 3.5 Flash (High)",
+          remaining_fraction: 0.75,
+          reset_time: "1970-01-01T00:00:00Z",
+        },
+      ],
+    };
+    writeFileSync(quotaPath, JSON.stringify(quota));
+    const disabledOutput = runHud();
+    assert.match(disabledOutput, /^a:.*--.*n\/a.*hud-prj/m);
+    assert.doesNotMatch(disabledOutput, /^a:.*(?:25%|Fh|[█▓▒░])/m);
+    assert.match(runHud({}, { preserveAnsi: true }), /^\x1b\[0m\x1b\[2ma:/m);
+    writeFileSync(
+      quotaPath,
+      JSON.stringify({ ...quota, accountLabel: "other-project" }),
     );
-    assert.doesNotMatch(runHud({ TFX_DISABLE_ANTIGRAVITY: "1" }), /^a:/m);
+    assert.doesNotMatch(runHud(), /^a:.*25%/m);
+    writeFileSync(quotaPath, JSON.stringify(quota));
+    assert.doesNotMatch(runHud({ TFX_DISABLE_ANTIGRAVITY: "1" }), /^(a:|g:)/m);
     writeFileSync(
       preflightPath,
       JSON.stringify({
@@ -112,6 +145,90 @@ describe("HUD provider visibility", () => {
         antigravity: { ok: true },
       }),
     );
-    assert.doesNotMatch(runHud(), /^a:/m);
+    assert.match(runHud(), /^a:.*hud-prj/m);
+    assert.match(runHud({ COLUMNS: "30" }), /a:/);
+    assert.doesNotMatch(
+      runHud({ COLUMNS: "30", TFX_DISABLE_ANTIGRAVITY: "1" }),
+      /[ag]:/,
+    );
+
+    const future = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    writeFileSync(
+      join(settingsDir, "settings.json"),
+      JSON.stringify({ model: "Gemini 3.5 Flash (High)" }),
+    );
+    writeFileSync(
+      join(settingsDir, "oauth_creds.json"),
+      JSON.stringify({ email: "quota-user@example.test" }),
+    );
+    const personalQuota = { ...quota, accountLabel: "quota-user@example.test" };
+    writeFileSync(quotaPath, JSON.stringify(personalQuota));
+    assert.doesNotMatch(runHud(), /^a:.*\d+%/m);
+    personalQuota.buckets[0].reset_time = future;
+    writeFileSync(quotaPath, JSON.stringify(personalQuota));
+    writeFileSync(
+      join(cacheDir, "claude-usage-cache.json"),
+      JSON.stringify({
+        timestamp: Date.now(),
+        data: {
+          fiveHourPercent: 17,
+          weeklyPercent: 100,
+          fiveHourResetsAt: future,
+        },
+      }),
+    );
+    writeFileSync(
+      join(cacheDir, "codex-rate-limits-cache.json"),
+      JSON.stringify({
+        timestamp: Date.now(),
+        buckets: {
+          codex: {
+            primary: {
+              used_percent: 100,
+              resets_at: Date.parse(future) / 1000,
+            },
+            secondary: { used_percent: 83 },
+          },
+        },
+      }),
+    );
+    const configDir = join(mockHomeDir, ".omc", "config");
+    mkdirSync(configDir, { recursive: true });
+    for (const tier of ["full", "compact", "minimal"]) {
+      writeFileSync(join(configDir, "hud.json"), JSON.stringify({ tier }));
+      for (const active of [true, false]) {
+        writeFileSync(
+          quotaPath,
+          JSON.stringify({
+            ...personalQuota,
+            buckets: active ? personalQuota.buckets : [],
+          }),
+        );
+        const lines = runHud({ TFX_DISABLE_CODEX: "0" }).trim().split("\n");
+        const [claude, codex, agy] = lines;
+        assert.equal(lines.length, 3);
+        assert.equal(
+          agy.indexOf("|"),
+          codex.indexOf("|"),
+          `${tier}: ${lines.join("\n")}`,
+        );
+        assert.equal(agy.indexOf("|"), claude.indexOf("|"));
+        assert.equal(
+          agy.indexOf(active ? "25%" : "-- ") + (active ? 3 : 2),
+          claude.indexOf("17%") + 3,
+        );
+        assert.match(
+          agy,
+          active ? /^a: --:.*25%.*quota-user$/ : /^a: --:.*--.*quota-user$/,
+        );
+        if (tier !== "minimal") {
+          assert.equal(agy.indexOf("("), claude.indexOf("("));
+          assert.equal(agy.indexOf("("), codex.indexOf("("));
+        }
+        if (tier === "full") {
+          assert.equal(agy.slice(6, 11), active ? "█░░░░" : "     ");
+        }
+      }
+    }
   });
 });

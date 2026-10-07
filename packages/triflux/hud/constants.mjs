@@ -31,9 +31,6 @@ export const CLAUDE_BAND_MARKER_DIR = join(
 );
 export const CLAUDE_BAND_MARKER_TTL_MS = 12 * 60 * 60 * 1000;
 
-// tfx-multi 세션 상태 디렉터리
-export const TEAM_STATE_DIR =
-  process.env.TFX_HUB_PID_DIR || join(homedir(), ".claude", "cache", "tfx-hub");
 export const CONTEXT_MONITOR_CACHE_PATH = join(
   homedir(),
   ".claude",
@@ -149,11 +146,9 @@ export const CODEX_REFRESH_LOCK_PATH = join(
 );
 export const SPAWN_LOCK_TTL_MS = 30 * 1000; // 30초 spawn dedup
 
-export const GEMINI_OAUTH_PATH = join(homedir(), ".gemini", "oauth_creds.json");
 export const ANTIGRAVITY_OAUTH_PATHS = [
   join(homedir(), ".gemini", "antigravity-cli", "oauth_creds.json"),
   join(homedir(), ".gemini", "antigravity-cli", "credentials.json"),
-  GEMINI_OAUTH_PATH,
 ];
 export const ANTIGRAVITY_KEYCHAIN_SERVICE = "gemini";
 export const ANTIGRAVITY_KEYCHAIN_ACCOUNT = "antigravity";
@@ -163,33 +158,23 @@ export const ANTIGRAVITY_SETTINGS_PATH = join(
   "antigravity-cli",
   "settings.json",
 );
-// Antigravity CLI 현재 장착 모델 라벨 → HUD 2자 약어 매핑
-export const ANTIGRAVITY_MODEL_ABBREV = {
-  // Flash 세대와 등급을 구분한다.
-  "Gemini 3.8 Flash (High)": "8h",
-  "Gemini 3.8 Flash (Medium)": "8m",
-  "Gemini 3.8 Flash (Low)": "8l",
-  "Gemini 3.7 Flash (High)": "7h",
-  "Gemini 3.7 Flash (Medium)": "7m",
-  "Gemini 3.7 Flash (Low)": "7l",
-  "Gemini 3.6 Flash (High)": "6h",
-  "Gemini 3.6 Flash (Medium)": "6m",
-  "Gemini 3.6 Flash (Low)": "6l",
-  "Gemini 3.5 Flash (High)": "Fh",
-  "Gemini 3.5 Flash (Medium)": "Fm",
-  "Gemini 3.5 Flash (Low)": "Fl",
-};
-export const TFX_PREFLIGHT_CACHE_PATH = join(
+export const ANTIGRAVITY_QUOTA_CACHE_PATH = join(
   homedir(),
   ".claude",
   "cache",
-  "tfx-preflight.json",
+  "antigravity-quota-cache.json",
 );
-export const TFX_PREFLIGHT_CACHE_STALE_MS = 60 * 60 * 1000;
-
+export const ANTIGRAVITY_REFRESH_LOCK_PATH = join(
+  homedir(),
+  ".claude",
+  "cache",
+  ".antigravity-refresh-lock",
+);
+export const ANTIGRAVITY_QUOTA_STALE_MS = 5 * 60 * 1000;
+export const ANTIGRAVITY_REFRESH_FLAG = "--refresh-antigravity-quota";
 export const ACCOUNT_LABEL_WIDTH = 10;
 export const PROVIDER_PREFIX_WIDTH = 2;
-export const PERCENT_CELL_WIDTH = 3;
+export const PERCENT_CELL_WIDTH = 4;
 export const TIME_CELL_INNER_WIDTH = 6;
 
 export const CLAUDE_REFRESH_FLAG = "--refresh-claude-usage";

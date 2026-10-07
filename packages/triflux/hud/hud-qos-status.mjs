@@ -3,10 +3,7 @@
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import {
-  resolveHudCliVisibility,
-  shouldRenderGeminiFallbackRow,
-} from "./cli-policy.mjs";
+import { resolveHudCliVisibility } from "./cli-policy.mjs";
 import {
   bold,
   claudeOrange,
@@ -19,12 +16,11 @@ import {
 import {
   ACCOUNTS_CONFIG_PATH,
   ACCOUNTS_STATE_PATH,
+  ANTIGRAVITY_REFRESH_FLAG,
   CLAUDE_BAND_MARKER_DIR,
   CLAUDE_BAND_MARKER_TTL_MS,
   CLAUDE_REFRESH_FLAG,
   CODEX_REFRESH_FLAG,
-  TFX_PREFLIGHT_CACHE_PATH,
-  TFX_PREFLIGHT_CACHE_STALE_MS,
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
 import {
@@ -41,15 +37,14 @@ import {
 } from "./providers/codex.mjs";
 import {
   getAntigravityAccountLabel,
-  getAntigravityCurrentModel,
-  getAntigravityModelAbbrev,
-  getGeminiEmail,
+  readAntigravityQuotaSnapshot,
+  refreshAntigravityQuotaCache,
+  scheduleAntigravityQuotaRefresh,
 } from "./providers/gemini.mjs";
 import {
   getClaudeRows,
   getMicroLine,
   getProviderRow,
-  getTeamRow,
   renderAlignedRows,
 } from "./renderers.mjs";
 import { selectTier } from "./terminal.mjs";
@@ -64,22 +59,21 @@ async function main() {
     await refreshCodexRateLimitsCache();
     return;
   }
+  if (process.argv.includes(ANTIGRAVITY_REFRESH_FLAG)) {
+    refreshAntigravityQuotaCache();
+    return;
+  }
 
   const stdinPromise = readStdinJson();
-  const preflightCache = readJson(TFX_PREFLIGHT_CACHE_PATH, null);
-  const preflightTimestamp = Number(preflightCache?.timestamp);
-  const preflightFresh =
-    Number.isFinite(preflightTimestamp) &&
-    Date.now() - preflightTimestamp <= TFX_PREFLIGHT_CACHE_STALE_MS;
   const { showCodex, antigravityAllowed } = resolveHudCliVisibility();
-  const antigravityReady =
-    antigravityAllowed &&
-    preflightFresh &&
-    preflightCache?.antigravity?.ok === true;
   const accountsConfig = readJson(ACCOUNTS_CONFIG_PATH, { providers: {} });
   const accountsState = readJson(ACCOUNTS_STATE_PATH, { providers: {} });
   const claudeUsageSnapshot = readClaudeUsageSnapshot();
   const codexSnapshot = readCodexRateLimitSnapshot();
+  const antigravitySnapshot = antigravityAllowed
+    ? readAntigravityQuotaSnapshot()
+    : null;
+  if (antigravitySnapshot?.shouldRefresh) scheduleAntigravityQuotaRefresh();
   // 설정이 없는 홈에서는 갱신 프로세스를 시작하지 않는다.
   if (
     claudeUsageSnapshot.shouldRefresh &&
@@ -102,21 +96,12 @@ async function main() {
     : null;
   const codexBuckets = codexSnapshot.buckets;
   const currentTier = selectTier();
-  const geminiEmail = getGeminiEmail();
-  const showGeminiRow = shouldRenderGeminiFallbackRow({
-    antigravityAllowed,
-    antigravityReady,
-    geminiEmail,
-  });
-
   if (currentTier === "nano") {
-    const microLine = getMicroLine(
-      contextView,
-      claudeUsage,
-      codexBuckets,
-      antigravityReady,
-      { showCodex, showGemini: showGeminiRow },
-    );
+    const microLine = getMicroLine(contextView, claudeUsage, codexBuckets, {
+      showCodex,
+      showAntigravity: antigravityAllowed,
+      antigravityQuota: antigravitySnapshot?.data,
+    });
     process.stdout.write(`\x1b[0m${microLine}\n`);
     return;
   }
@@ -140,37 +125,24 @@ async function main() {
       ),
     );
   }
-  let geminiRowIndex = -1;
-  if (showGeminiRow) {
-    geminiRowIndex = rows.length;
+  if (antigravityAllowed) {
     rows.push(
       getProviderRow(
         currentTier,
-        antigravityReady ? "antigravity" : "gemini",
-        antigravityReady ? "a" : "g",
+        "antigravity",
+        "a",
         geminiBlue,
         accountsConfig,
         accountsState,
-        antigravityReady
-          ? {
-              currentAbbrev: getAntigravityModelAbbrev(
-                getAntigravityCurrentModel(),
-              ),
-            }
-          : null,
-        antigravityReady ? getAntigravityAccountLabel() : geminiEmail,
+        antigravitySnapshot?.data,
+        getAntigravityAccountLabel(),
       ),
     );
   }
-  const teamRow = getTeamRow(currentTier);
-  if (teamRow) rows.push(teamRow);
 
   const outputLines = renderAlignedRows(rows);
   if (!codexBuckets && outputLines[codexRowIndex] != null) {
     outputLines[codexRowIndex] = `${DIM}${outputLines[codexRowIndex]}${RESET}`;
-  }
-  if (!antigravityReady && outputLines[geminiRowIndex] != null) {
-    outputLines[geminiRowIndex] = dim(outputLines[geminiRowIndex]);
   }
   // 알림 배너와 TUI 스타일이 HUD 내용에 겹치지 않도록 한다.
   const leadingBreaks = contextView.percent >= 85 ? "\n\n" : "\n";

@@ -54,3 +54,81 @@ it("shows the Antigravity OAuth email when no GCP project is configured", () => 
     rmSync(homeDir, { recursive: true, force: true });
   }
 });
+
+it("공식 usage 응답을 현재 모델의 사용률로 바꾸고 실패를 0%로 표시하지 않는다", () => {
+  const homeDir = mkdtempSync(join(tmpdir(), "triflux-agy-quota-"));
+  try {
+    const agyDir = join(homeDir, ".gemini", "antigravity-cli");
+    mkdirSync(agyDir, { recursive: true });
+    writeFileSync(
+      join(agyDir, "settings.json"),
+      JSON.stringify({
+        model: "Gemini 3.8 Flash (High)",
+      }),
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import assert from "node:assert/strict";
+      import { readFileSync, writeFileSync } from "node:fs";
+      import { refreshAntigravityQuotaCache, readAntigravityQuotaSnapshot } from ${JSON.stringify(providerUrl.href)};
+      import { ANTIGRAVITY_QUOTA_CACHE_PATH, ANTIGRAVITY_SETTINGS_PATH } from ${JSON.stringify(new URL("../../hud/constants.mjs", import.meta.url).href)};
+      const future = new Date(Date.now() + 3600000).toISOString();
+      const bucket = {
+        id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)",
+        remaining_fraction: 0.75, reset_time: future,
+      };
+      const success = (item) => JSON.stringify({
+        status: "SUCCESS", num_turns: 0,
+        command: { name: "usage", data: { groups: [{ name: "All Models", buckets: [item] }] } },
+      });
+      refreshAntigravityQuotaCache((command, args, opts) => {
+        assert.equal(command, "agy");
+        assert.deepEqual(args, ["-p", "/usage", "--output-format", "json"]);
+        assert.equal(opts.stdio[0], "ignore");
+        assert.equal(opts.timeout, 15000);
+        return success(bucket);
+      });
+      assert.deepEqual(readAntigravityQuotaSnapshot(), {
+        data: { usedPercent: 25, resetTime: future, stale: false },
+        shouldRefresh: false,
+      });
+      const cached = JSON.parse(readFileSync(ANTIGRAVITY_QUOTA_CACHE_PATH));
+      writeFileSync(ANTIGRAVITY_QUOTA_CACHE_PATH, JSON.stringify({ ...cached, timestamp: 1 }));
+      assert.equal(readAntigravityQuotaSnapshot().data.stale, true);
+      assert.equal(readAntigravityQuotaSnapshot().shouldRefresh, true);
+      for (const value of [null, "0.75", -1, 2]) {
+        refreshAntigravityQuotaCache(() => success({ ...bucket, remaining_fraction: value }));
+        assert.equal(readAntigravityQuotaSnapshot().data, null);
+      }
+      for (const reset_time of [null, "invalid", "1970-01-01T00:00:00Z", new Date(Date.now() - 1).toISOString()]) {
+        refreshAntigravityQuotaCache(() => success({ ...bucket, remaining_fraction: 1, reset_time }));
+        assert.equal(readAntigravityQuotaSnapshot().data, null);
+      }
+      refreshAntigravityQuotaCache(() => success({ ...bucket, remaining_fraction: 1 }));
+      assert.equal(readAntigravityQuotaSnapshot().data.usedPercent, 0);
+      refreshAntigravityQuotaCache(() => JSON.stringify({ status: "ERROR", usage: { total_tokens: 0 } }));
+      assert.deepEqual(readAntigravityQuotaSnapshot(), { data: null, shouldRefresh: false });
+      refreshAntigravityQuotaCache(() => { throw new Error("timeout"); });
+      assert.deepEqual(readAntigravityQuotaSnapshot(), { data: null, shouldRefresh: false });
+      refreshAntigravityQuotaCache(() => success(bucket));
+      writeFileSync(ANTIGRAVITY_SETTINGS_PATH, JSON.stringify({ model: bucket.name, gcp: { project: "quota-project" } }));
+      assert.deepEqual(readAntigravityQuotaSnapshot(), { data: null, shouldRefresh: false });
+      let calls = 0;
+      refreshAntigravityQuotaCache(() => { calls++; return success(bucket); });
+      assert.equal(calls, 0, "GCP 프로젝트 인증에서는 개인 쿼터 명령을 실행하지 않는다");
+    `,
+      ],
+      {
+        encoding: "utf8",
+        env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});
