@@ -955,8 +955,6 @@ function probeRemoteEnvViaPosix(host) {
     "echo home=$HOME",
     "command -v claude >/dev/null 2>&1 && echo claude=$(command -v claude) || echo claude=notfound",
     "echo os=$(uname -s | tr A-Z a-z)",
-    'probe_version() { command -v "$1" >/dev/null 2>&1 && "$1" --version 2>/dev/null | head -n 1; }',
-    'for cli in node codex agy claude triflux; do printf \'%sVersion=%s\\n\' "$cli" "$(probe_version "$cli")"; done',
     'if [ "$(uname -s)" = Darwin ]; then',
     "  printf 'memoryPressureLevel=%s\\n' \"$(sysctl -n kern.memorystatus_vm_pressure_level 2>/dev/null)\"",
     '  vm_stat | awk -v total="$(sysctl -n hw.memsize 2>/dev/null)" -v pageSize="$(sysctl -n hw.pagesize 2>/dev/null)" \'/Pages free:|Pages inactive:|Pages speculative:/ {gsub(/[^0-9]/, "", $3); pages += $3} END {if (total > 0 && pageSize > 0) printf "memoryFreePct=%.1f\\n", pages * pageSize / total * 100}\'',
@@ -967,6 +965,8 @@ function probeRemoteEnvViaPosix(host) {
     "fi",
     'df -Pk "$HOME" 2>/dev/null | awk \'NR==2 {printf "diskFreeHome=%.0f\\n", $4 * 1024}\'',
     'if [ -f "${CODEX_HOME:-$HOME/.codex}/auth.json" ]; then echo codexAuthExists=true; else echo codexAuthExists=false; fi',
+    'probe_version() { command -v "$1" >/dev/null 2>&1 && "$1" --version </dev/null 2>/dev/null | head -n 1; }',
+    'for cli in node codex agy claude triflux; do printf \'%sVersion=%s\\n\' "$cli" "$(probe_version "$cli")"; done',
   ].join("\n");
 
   let output;

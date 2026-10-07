@@ -9,6 +9,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { deriveClaudeDaemonPaths } from "../../hub/team/claude-daemon-control.mjs";
+import { readCodexContext } from "../../hub/team/session-context.mjs";
 import {
   askCodexAppServerThread,
   createClaudeUdsEndpoint,
@@ -986,5 +987,43 @@ test("Codex UDS clears turn timers and listeners on completion, timeout, error, 
   } finally {
     globalThis.setTimeout = originalSetTimeout;
     globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
+test("Codex rollout tracks appended token usage", async () => {
+  const dir = await fs.mkdtemp(path.join(tmpdir(), "cx-rollout-"));
+  const rolloutPath = path.join(dir, "rollout.jsonl");
+  try {
+    await fs.writeFile(
+      rolloutPath,
+      [
+        { type: "turn_context", payload: { model: "gpt-6-astra" } },
+        {
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            info: {
+              last_token_usage: { total_tokens: 100 },
+              model_context_window: 258_400,
+            },
+          },
+        },
+      ]
+        .map(JSON.stringify)
+        .join("\n"),
+    );
+    assert.equal(
+      (await readCodexContext(rolloutPath)).estimatedContextTokens,
+      100,
+    );
+    await fs.appendFile(
+      rolloutPath,
+      `\n${JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { total_tokens: 200 } } } })}\n`,
+    );
+    const result = await readCodexContext(rolloutPath);
+    assert.equal(result.estimatedContextTokens, 200);
+    assert.equal(result.executionContextLimitTokens, 258_400);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });

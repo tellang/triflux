@@ -580,7 +580,6 @@ test("attachClaudeDaemonSession waits for post-input busy before matching comple
       short: "busy001",
       input: "Reply with NEW_SELF_PEER_REPLY",
       timeoutMs: 1000,
-      completionQuiescenceMs: 80,
     });
 
     assert.equal(result.inputSent, true);

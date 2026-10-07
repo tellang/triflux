@@ -11,9 +11,12 @@ test("Codex tfx-live adapter keeps the canonical skill body", () => {
   const frontmatterEnd = canonical.indexOf("\n---\n", 4) + 5;
   assert.ok(frontmatterEnd > 4);
   assert.ok(adapter.startsWith(canonical.slice(0, frontmatterEnd)));
-  assert.match(
+  const body = canonical.slice(frontmatterEnd);
+  const hostContract =
+    "\n## Codex 호스트 계약\n\nCodex에서는 `$tfx-live`로 호출한다. CLI의 `--cli`는 현재 호스트가 아니라 대상 세션을 선택한다.\n";
+  assert.ok(body.startsWith("\n# tfx-live\n"));
+  assert.equal(
     adapter.slice(frontmatterEnd),
-    /^## Codex host contract\n\nInvoke this skill as `\$tfx-live`/,
+    body.replace("\n# tfx-live\n", `\n# tfx-live\n${hostContract}`),
   );
-  assert.ok(adapter.endsWith(canonical.slice(frontmatterEnd)));
 });

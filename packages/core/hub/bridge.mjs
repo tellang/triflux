@@ -1392,15 +1392,12 @@ async function cmdDaemonProbe(args) {
     const { probe, recoveredFrom } = await probeDaemonTarget(
       payload,
       probeClaudeDaemonCandidates,
+      payload.includeContext === true,
     );
     return emitJson({ ...probe, ...(recoveredFrom ? { recoveredFrom } : {}) });
   } catch (error) {
     return emitJson(daemonErrorResult(error));
   }
-}
-
-function daemonRecovery(probe) {
-  return probe?.ok ? staleCandidate(probe) : null;
 }
 
 function staleCandidate(probe) {
@@ -1411,12 +1408,8 @@ function staleCandidate(probe) {
   );
 }
 
-async function probeDaemonTarget(
-  payload,
-  probeCandidates,
-  includeContext = true,
-) {
-  const options = {
+function daemonProbeOptions(payload, includeContext = false) {
+  return {
     configDir: payload.configDir,
     env: process.env,
     short: payload.short,
@@ -1425,22 +1418,26 @@ async function probeDaemonTarget(
     tmpRoot: payload.tmpRoot,
     includeContext,
   };
+}
+
+async function probeDaemonTarget(
+  payload,
+  probeCandidates,
+  includeContext = false,
+) {
+  const options = daemonProbeOptions(payload, includeContext);
   const probe = await probeCandidates(options);
-  if (
-    probe.ok ||
-    !(payload.short || payload.sessionId) ||
-    !staleCandidate(probe)
-  ) {
-    return { probe, recoveredFrom: daemonRecovery(probe) };
+  const stale = staleCandidate(probe);
+  if (probe.ok || !(payload.short || payload.sessionId) || !stale) {
+    return { probe, recoveredFrom: null };
   }
-  const ambient = await probeCandidates({
+  const retry = await probeCandidates({
     ...options,
-    configDir: undefined,
-    env: { ...process.env, CLAUDE_CONFIG_DIR: "" },
+    candidateSourceConfigDir: stale.sourceConfigDir ?? stale.configDir,
   });
   return {
-    probe: ambient,
-    recoveredFrom: ambient.ok ? staleCandidate(probe) : null,
+    probe: retry,
+    recoveredFrom: retry.ok ? stale : null,
   };
 }
 
@@ -1499,7 +1496,9 @@ async function cmdDaemonAttach(args) {
           ...daemonProbeMetadata(probe),
         });
       }
-      const controlAuth = await buildDaemonControlAuth(probe.daemon?.configDir);
+      const controlAuth = await buildDaemonControlAuth(
+        probe.daemon?.configDir ?? payload.configDir,
+      );
       try {
         result = await attachClaudeDaemonSession({
           controlSock: probe.controlSock,
@@ -1524,24 +1523,19 @@ async function cmdDaemonAttach(args) {
             ...daemonProbeMetadata(probe),
           });
         }
-        const previousSock = probe.controlSock;
+        const stale = probe.daemon;
         const recovered = await probeClaudeDaemonCandidates({
-          configDir: undefined,
-          env: { ...process.env, CLAUDE_CONFIG_DIR: "" },
-          short: payload.short,
-          sessionId: payload.sessionId,
-          timeoutMs: numericOption(payload.timeoutMs, 6000),
-          tmpRoot: payload.tmpRoot,
-          includeContext: false,
+          ...daemonProbeOptions(payload),
+          candidateSourceConfigDir: stale.sourceConfigDir ?? stale.configDir,
         });
-        if (!recovered.ok || recovered.controlSock === previousSock) {
+        if (!recovered.ok) {
           return emitJson({
             ...daemonAttachErrorResult(error),
             ...daemonProbeMetadata(recovered),
           });
         }
         probe = recovered;
-        recoveredFrom = { controlSock: previousSock };
+        recoveredFrom = stale;
       }
     }
 
@@ -1576,18 +1570,29 @@ async function cmdDaemonAttach(args) {
       inputSent: result.inputSent ?? null,
       error:
         result.handshake?.ok === false ? result.handshake?.error : undefined,
-      ...modelContext("claude", context.model, context.estimatedContextTokens),
+      ...context,
       ...guard,
       ...(recoveredFrom ? { recoveredFrom } : {}),
       ...daemonProbeMetadata(probe),
     });
   } catch (error) {
-    return emitJson(daemonAttachErrorResult(error));
+    return emitJson(
+      daemonAttachErrorResult({
+        inputSent: false,
+        message: error?.message || String(error),
+      }),
+    );
   }
 }
 
 async function cmdDaemonWait(args) {
   let requestId = null;
+  const emptyContext = {
+    estimatedContextTokens: null,
+    contextLimitTokens: null,
+    contextLimitSource: null,
+    contextPct: null,
+  };
   try {
     const payload = readBridgePayload(args);
     requestId = payload.requestId ?? null;
@@ -1617,15 +1622,11 @@ async function cmdDaemonWait(args) {
       if (!probe.ok) {
         if (Date.now() >= deadline) {
           return emitJson({
-            ...(last ?? {}),
+            ...(last ?? emptyContext),
             ok: true,
             status: "working",
             done: false,
             timedOut: true,
-            estimatedContextTokens: last?.estimatedContextTokens ?? null,
-            contextLimitTokens: last?.contextLimitTokens ?? null,
-            contextLimitSource: last?.contextLimitSource ?? null,
-            contextPct: last?.contextPct ?? null,
             requestId,
           });
         }
@@ -1634,10 +1635,7 @@ async function cmdDaemonWait(args) {
           status: "unknown",
           done: false,
           timedOut: false,
-          estimatedContextTokens: null,
-          contextLimitTokens: null,
-          contextLimitSource: null,
-          contextPct: null,
+          ...emptyContext,
           requestId,
           ...daemonProbeMetadata(probe),
           error: probe.error || probe.reason,
@@ -1652,14 +1650,13 @@ async function cmdDaemonWait(args) {
       const transcript = await readClaudeTranscript(transcriptPath, {
         requestId: payload.requestId,
       });
-      const context = transcript?.context ?? {
-        estimatedContextTokens: null,
-        contextLimitTokens: null,
-        contextLimitSource: null,
-        contextPct: null,
-      };
-      const idle = ["idle", "done", "ready"].includes(
-        String(probe.target?.state || probe.target?.status || "").toLowerCase(),
+      const context = transcript?.context ?? emptyContext;
+      const idle = [
+        probe.target?.state,
+        probe.target?.status,
+        probe.target?.tempo,
+      ].some((value) =>
+        ["idle", "done", "ready"].includes(String(value || "").toLowerCase()),
       );
       last = {
         ok: true,
@@ -1672,6 +1669,14 @@ async function cmdDaemonWait(args) {
         target: probe.target,
         ...daemonProbeMetadata(probe),
       };
+      if (transcript?.error) {
+        return emitJson({
+          ...last,
+          ok: false,
+          status: "failed",
+          error: transcript.error,
+        });
+      }
       if (
         (idle || transcript?.sectionClosed) &&
         transcript?.userSeen &&
@@ -1698,10 +1703,7 @@ async function cmdDaemonWait(args) {
       status: "unknown",
       done: false,
       timedOut: false,
-      estimatedContextTokens: null,
-      contextLimitTokens: null,
-      contextLimitSource: null,
-      contextPct: null,
+      ...emptyContext,
       requestId,
     });
   }

@@ -116,12 +116,7 @@ function usage(command) {
 
 function parseCli(argv) {
   if (argv.some((arg) => arg === "--help" || arg === "-h")) {
-    const subcommand = argv.find((arg) =>
-      /^(start|ask|wait|compact|rename|stop|interrupt|probe|list-sessions|converse|goal-driven|peer|orchestrate|cto-hygiene-notify)$/.test(
-        arg,
-      ),
-    );
-    return { command: "help", flags: { subcommand } };
+    return { command: "help", flags: { subcommand: argv[0] } };
   }
   const [command, ...rest] = argv;
   if (!command || command === "--help" || command === "-h") {
@@ -139,10 +134,6 @@ function parseCli(argv) {
     if (!key) {
       throw new Error("Empty flag is not valid");
     }
-    if (key === "warn-context-tokens" || key === "max-context-tokens")
-      throw new Error(
-        `--${key} was removed; use --${key.replace("tokens", "pct")}`,
-      );
 
     if (BOOLEAN_FLAGS.has(key)) {
       flags[key] = "1";
@@ -2047,16 +2038,21 @@ async function doStart(adapter, opts) {
   if (session.includes(":"))
     throw new Error("start --session accepts only a session name without ':'");
   const now = new Date();
-  const name = opts.name ?? `${now.getMonth() + 1}.${now.getDate()} ${session}`;
-  if (!/^\d{1,2}\.\d{1,2} \S/u.test(name) || /[\r\n]/u.test(name))
+  const resumed = Boolean(resume || resumeLast);
+  const name =
+    opts.name ??
+    (resumed ? null : `${now.getMonth() + 1}.${now.getDate()} ${session}`);
+  if (
+    name !== null &&
+    (!/^\d{1,2}\.\d{1,2} \S/u.test(name) || /[\r\n]/u.test(name))
+  )
     throw new Error("--name must use '<month>.<day> <topic>' on one line");
   const launchKeys = resume
     ? [adapter.resumeById(resume), "Enter"]
     : resumeLast
       ? [adapter.resumeLast(), "Enter"]
       : buildLaunchKeys(adapter, { model, effort, name });
-  const resumed = Boolean(resume || resumeLast);
-  if (resumed && adapter.cli === "claude")
+  if (resumed && name && adapter.cli === "claude")
     launchKeys[0] += ` ${shellQuote(["-n", name])}`;
   const resumeTarget = resume ?? (resumeLast ? "last" : null);
 
@@ -2087,8 +2083,8 @@ async function doStart(adapter, opts) {
     readyTimeoutMs,
     pollIntervalMs,
   );
-  let nameApplied = adapter.cli === "claude" && ready;
-  if (adapter.cli === "codex" && ready) {
+  let nameApplied = Boolean(name) && adapter.cli === "claude" && ready;
+  if (name && adapter.cli === "codex" && ready) {
     try {
       await runTmux(remote, [
         "send-keys",
@@ -2123,9 +2119,9 @@ async function doStart(adapter, opts) {
     resumeTarget,
     ready,
     name,
-    nameGenerated: opts.name === undefined,
+    nameGenerated: !resumed && opts.name === undefined,
     nameApplied,
-    ...(adapter.cli === "codex" && !nameApplied
+    ...(name && adapter.cli === "codex" && !nameApplied
       ? {
           nameWarning:
             "name update could not be confirmed from the Codex session registry",
@@ -2202,14 +2198,6 @@ async function doAskViaTmux(adapter, opts) {
 
   const bufferName = tmuxBufferName(session);
   await runTmux(remote, ["set-buffer", "-b", bufferName, "--", prompt]);
-  const { stdout: buffered } = await runTmux(remote, [
-    "show-buffer",
-    "-b",
-    bufferName,
-  ]);
-  if (buffered !== prompt && buffered !== `${prompt}\n`)
-    throw new Error("tmux prompt buffer verification failed");
-  await runTmux(remote, ["send-keys", "-t", session, "C-u"]);
   await runTmux(remote, [
     "paste-buffer",
     "-b",
@@ -3006,18 +2994,7 @@ async function start(flags) {
 
 async function ask(flags) {
   const adapter = selectAdapter(flags);
-  const requestId = flags["request-id"] ?? randomBytes(6).toString("hex");
-  try {
-    printJson(
-      await doAsk(
-        adapter,
-        askOpts({ ...flags, "request-id": requestId }, adapter),
-      ),
-    );
-  } catch (error) {
-    error.requestId = requestId;
-    throw error;
-  }
+  printJson(await doAsk(adapter, askOpts(flags, adapter)));
 }
 
 async function wait(flags) {
@@ -3154,7 +3131,7 @@ async function compact(flags) {
     },
     ADAPTERS.claude,
   );
-  await waitForTmuxIdle(ADAPTERS.claude, opts);
+  if (ifBusy === "wait") await waitForTmuxIdle(ADAPTERS.claude, opts);
   const transcriptPath = await claudeTmuxTranscript(
     opts.session,
     opts.configDir,
@@ -3164,7 +3141,11 @@ async function compact(flags) {
     throw new Error(
       "compact requires a discoverable Claude transcript for this tmux pane",
     );
-  await doAskViaTmux(ADAPTERS.claude, { ...opts, skipContextGuard: true });
+  await doAskViaTmux(ADAPTERS.claude, {
+    ...opts,
+    ifBusy: "fail",
+    skipContextGuard: true,
+  });
   const deadline = Date.now() + opts.timeoutMs;
   do {
     const snapshot = await readClaudeTranscript(transcriptPath);
@@ -3195,7 +3176,7 @@ async function interrupt(flags) {
 }
 
 async function probe(flags) {
-  const payload = {};
+  const payload = { includeContext: true };
   if (flags.short) payload.short = flags.short;
   if (flags["session-id"]) payload.sessionId = flags["session-id"];
   if (flags["config-dir"]) payload.configDir = flags["config-dir"];
@@ -3251,7 +3232,7 @@ async function listSessions(flags) {
 function startOptsForSession(flags, session, side) {
   return {
     session,
-    name: side ? flags[`name-${side}`] : flags.name,
+    ...(!side ? { name: flags.name } : {}),
     remote: flags.remote,
     cwd: flags.cwd,
     ...(side
@@ -4289,9 +4270,7 @@ if (isMainModule()) {
     printJson({
       ok: false,
       error: error.message,
-      ...(error.requestId || process.argv[2] === "ask"
-        ? { requestId: error.requestId ?? randomBytes(6).toString("hex") }
-        : {}),
+      ...(error.requestId ? { requestId: error.requestId } : {}),
     });
     process.exitCode = 1;
   });

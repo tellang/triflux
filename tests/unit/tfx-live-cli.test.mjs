@@ -1893,6 +1893,10 @@ test("tfx-live start keeps resume launch keys ahead of model overrides", async (
         args.length === 5,
     );
 
+    assert.equal(
+      log.some((args) => args.some((arg) => arg.startsWith("/rename "))),
+      false,
+    );
     assert.deepEqual(launch, [
       "send-keys",
       "-t",
@@ -2033,7 +2037,10 @@ test("tmux no-wait confirms submission and reports submitted without waiting for
       calls.find((args) => args[0] === "set-buffer").at(-1),
       `[tfx-live req=${result.requestId}]\nhello`,
     );
-    assert.ok(calls.some((args) => args[0] === "show-buffer"));
+    assert.equal(
+      calls.some((args) => args.includes("C-u")),
+      false,
+    );
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
@@ -2205,7 +2212,10 @@ test("tfx-live probe returns fake daemon-probe JSON", async () => {
       daemon: { status: "available" },
     });
     assert.deepEqual(JSON.parse(await fs.readFile(logPath, "utf8")), [
-      { verb: "daemon-probe", payload: { short: "00000000" } },
+      {
+        verb: "daemon-probe",
+        payload: { includeContext: true, short: "00000000" },
+      },
     ]);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -2304,7 +2314,7 @@ test("tfx-live probe forwards --config-dir to daemon-probe", async () => {
     assert.deepEqual(log, [
       {
         verb: "daemon-probe",
-        payload: { short: "facefeed", configDir },
+        payload: { includeContext: true, short: "facefeed", configDir },
       },
     ]);
   } finally {

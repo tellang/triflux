@@ -401,7 +401,14 @@ export async function askCodexAppServerThread({
       maxContextPct,
     });
     if (guard.ok === false) {
-      return { ...guard, cli: "codex", transport: "uds", threadId: selectedId };
+      return {
+        ...guard,
+        status: "failed",
+        done: false,
+        cli: "codex",
+        transport: "uds",
+        threadId: selectedId,
+      };
     }
     let activeTurns = null;
     if (resumed?.thread?.status?.type === "active")

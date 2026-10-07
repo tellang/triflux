@@ -2,11 +2,10 @@ import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import readline from "node:readline";
+import { StringDecoder } from "node:string_decoder";
 
 // https://platform.claude.com/docs/en/build-with-claude/context-windows 2026-10-08
 // https://developers.openai.com/api/docs/models 2026-10-08
-// https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash 2026-10-08
 const MODEL_CONTEXT = [
   {
     cli: "claude",
@@ -21,32 +20,36 @@ const MODEL_CONTEXT = [
     tokens: 1_050_000,
     source: "https://developers.openai.com/api/docs/models",
   },
-  {
-    cli: "agy",
-    model: /^gemini-3\.8-flash(?:$|-preview)/i,
-    tokens: 1_048_576,
-    source: "https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash",
-  },
 ];
 
 export const CONTEXT_THRESHOLDS = {
   claude: { warnContextPct: 60, maxContextPct: 90 },
   codex: { warnContextPct: 15, maxContextPct: 22 },
-  agy: { warnContextPct: 12, maxContextPct: 18 },
 };
+
+const rolloutCache = new Map();
 
 export function modelContext(cli, model, estimatedContextTokens = null) {
   const entry = MODEL_CONTEXT.find(
     (item) => item.cli === cli && item.model.test(model || ""),
   );
   const contextLimitTokens = entry?.tokens ?? null;
+  const executionContextLimitTokens =
+    cli === "claude" && process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT === "1"
+      ? 200_000
+      : null;
+  const effectiveLimit = Math.min(
+    contextLimitTokens ?? Infinity,
+    executionContextLimitTokens ?? Infinity,
+  );
   return {
     estimatedContextTokens,
     contextLimitTokens,
     contextLimitSource: entry?.source ?? null,
+    ...(executionContextLimitTokens ? { executionContextLimitTokens } : {}),
     contextPct:
       contextLimitTokens && Number.isFinite(estimatedContextTokens)
-        ? (estimatedContextTokens / contextLimitTokens) * 100
+        ? (estimatedContextTokens / effectiveLimit) * 100
         : null,
   };
 }
@@ -63,6 +66,7 @@ export function contextGuard(
     estimatedContextTokens: context?.estimatedContextTokens ?? null,
     contextLimitTokens: context?.contextLimitTokens ?? null,
     contextLimitSource: context?.contextLimitSource ?? null,
+    executionContextLimitTokens: context?.executionContextLimitTokens ?? null,
     contextPct: context?.contextPct ?? null,
   };
   if (fields.contextPct === null) {
@@ -98,15 +102,21 @@ async function findCodexRollout(threadId) {
     process.env.CODEX_HOME || path.join(homedir(), ".codex"),
     "sessions",
   );
-  for (const year of await fs.readdir(root).catch(() => [])) {
+  for (const year of (await fs.readdir(root).catch(() => []))
+    .sort()
+    .reverse()) {
     if (!/^\d{4}$/u.test(year)) continue;
-    for (const month of await fs
-      .readdir(path.join(root, year))
-      .catch(() => [])) {
+    for (const month of (
+      await fs.readdir(path.join(root, year)).catch(() => [])
+    )
+      .sort()
+      .reverse()) {
       if (!/^\d{2}$/u.test(month)) continue;
-      for (const day of await fs
-        .readdir(path.join(root, year, month))
-        .catch(() => [])) {
+      for (const day of (
+        await fs.readdir(path.join(root, year, month)).catch(() => [])
+      )
+        .sort()
+        .reverse()) {
         if (!/^\d{2}$/u.test(day)) continue;
         const dir = path.join(root, year, month, day);
         const file = (await fs.readdir(dir).catch(() => [])).find((name) =>
@@ -119,42 +129,75 @@ async function findCodexRollout(threadId) {
   return null;
 }
 
+function acceptCodexLine(state, line) {
+  let entry;
+  try {
+    entry = JSON.parse(line);
+  } catch {
+    return false;
+  }
+  if (entry?.type === "turn_context")
+    state.model = entry.payload?.model || state.model;
+  if (entry?.type === "event_msg" && entry.payload?.type === "token_count") {
+    const info = entry.payload.info;
+    if (Number.isFinite(info?.last_token_usage?.total_tokens))
+      state.tokens = info.last_token_usage.total_tokens;
+    if (Number.isFinite(info?.model_context_window))
+      state.executionContextLimitTokens = info.model_context_window;
+  }
+  return true;
+}
+
 export async function readCodexContext(rolloutPath, threadId) {
   rolloutPath ||= await findCodexRollout(threadId);
   if (!rolloutPath) return { ...modelContext("codex", null), model: null };
-  let model = null;
-  let tokens = null;
-  let executionContextLimitTokens = null;
+  let stat;
   try {
-    const lines = readline.createInterface({
-      input: createReadStream(rolloutPath, { encoding: "utf8" }),
-      crlfDelay: Infinity,
-    });
-    for await (const line of lines) {
-      let entry;
-      try {
-        entry = JSON.parse(line);
-      } catch {
-        continue;
+    stat = await fs.stat(rolloutPath);
+  } catch {
+    return { ...modelContext("codex", null), model: null };
+  }
+  let state = rolloutCache.get(rolloutPath);
+  if (
+    !state ||
+    state.ino !== stat.ino ||
+    stat.size < state.offset ||
+    (stat.size === state.offset && stat.mtimeMs !== state.mtimeMs)
+  ) {
+    state = {
+      ino: stat.ino,
+      offset: 0,
+      pending: "",
+      decoder: new StringDecoder("utf8"),
+      model: null,
+      tokens: null,
+      executionContextLimitTokens: null,
+    };
+  }
+  try {
+    if (stat.size > state.offset) {
+      const stream = createReadStream(rolloutPath, {
+        start: state.offset,
+        end: stat.size - 1,
+      });
+      for await (const chunk of stream) {
+        const lines = (state.pending + state.decoder.write(chunk)).split("\n");
+        state.pending = lines.pop();
+        for (const line of lines) acceptCodexLine(state, line);
       }
-      if (entry?.type === "turn_context") model = entry.payload?.model || model;
-      if (
-        entry?.type === "event_msg" &&
-        entry.payload?.type === "token_count"
-      ) {
-        const info = entry.payload.info;
-        if (Number.isFinite(info?.last_token_usage?.total_tokens))
-          tokens = info.last_token_usage.total_tokens;
-        if (Number.isFinite(info?.model_context_window))
-          executionContextLimitTokens = info.model_context_window;
-      }
+      if (state.pending && acceptCodexLine(state, state.pending))
+        state.pending = "";
     }
   } catch {
-    tokens = null;
+    rolloutCache.delete(rolloutPath);
+    return { ...modelContext("codex", null), model: null };
   }
+  state.offset = stat.size;
+  state.mtimeMs = stat.mtimeMs;
+  rolloutCache.set(rolloutPath, state);
   return {
-    ...modelContext("codex", model, tokens),
-    model,
-    executionContextLimitTokens,
+    ...modelContext("codex", state.model, state.tokens),
+    model: state.model,
+    executionContextLimitTokens: state.executionContextLimitTokens,
   };
 }

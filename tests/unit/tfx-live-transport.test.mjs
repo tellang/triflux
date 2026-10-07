@@ -137,7 +137,7 @@ test("peer reports remote ps failure as a preflight warning and preserves attach
     await fs.writeFile(
       path.join(dir, "ssh"),
       `#!${process.execPath}
-import fs from 'node:fs';
+const fs = require('node:fs');
 const command = process.argv.at(-1);
 fs.appendFileSync(process.env.SSH_LOG, JSON.stringify(command) + '\\n');
 if (command.startsWith('ps ')) { console.error('ps unavailable'); process.exit(1); }
@@ -348,9 +348,7 @@ test("peer validates busy policies for each transport before any side starts", a
 async function withCodexCliFixture(env, fn) {
   const dir = await fs.mkdtemp(path.join(tmpdir(), "uds-"));
   const socketPath = path.join(dir, "daemon.sock");
-  // Keep the symlink path below macOS's Unix socket path limit.
-  const fixtureHome = path.relative(process.cwd(), dir);
-  const daemonDir = path.join(fixtureHome, "app-server-control");
+  const daemonDir = path.join(dir, "app-server-control");
   await fs.mkdir(daemonDir);
   const defaultSocket = path.join(daemonDir, "app-server-control.sock");
   await fs.symlink(socketPath, defaultSocket);
@@ -379,7 +377,7 @@ async function withCodexCliFixture(env, fn) {
         timeout: 5000,
         env: {
           ...process.env,
-          CODEX_HOME: fixtureHome,
+          CODEX_HOME: dir,
           PATH: `${dir}${path.delimiter}${process.env.PATH}`,
           TFX_LIVE_ARTIFACT_DIR: dir,
           TRIFLUX_NOTIFY_BELL: "0",

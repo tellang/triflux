@@ -269,6 +269,15 @@ test("readBridgePayload parses --payload-file - from stdin text", () => {
   });
 });
 
+test("daemon-attach reports unsent input for pre-attach errors", async () => {
+  const out = await runBridge(
+    ["daemon-attach", "--payload", JSON.stringify({ prompt: "" })],
+    { allowFailure: true },
+  );
+  assert.equal(out.inputSent, false);
+  assert.equal(out.status, "failed");
+});
+
 test("daemon-probe lists fake daemon sessions and resolves target by short", async () => {
   await withTempConfig(async (configDir) => {
     const paths = deriveClaudeDaemonPaths({
@@ -295,7 +304,6 @@ test("daemon-probe lists fake daemon sessions and resolves target by short", asy
           session_id: "sess-1",
           state: "ready",
           status: "ready",
-          context: null,
         },
       ]);
       assert.deepEqual(out.target, {
@@ -305,7 +313,6 @@ test("daemon-probe lists fake daemon sessions and resolves target by short", asy
         session_id: "sess-1",
         state: "ready",
         status: "ready",
-        context: null,
       });
       assert.deepEqual(fake.requests, [{ proto: 1, op: "list" }]);
     } finally {
@@ -533,7 +540,6 @@ test("daemon-probe discovers an OMC runtime daemon in ambient OMX caller env", a
           session_id: "omc-session",
           state: "unknown",
           status: "unknown",
-          context: null,
         },
       ]);
       assert.equal(Object.hasOwn(out.sessions[0], "daemon"), false);
@@ -717,7 +723,7 @@ test("daemon-attach rejects duplicate ambient targets before attaching", async (
   });
 });
 
-test("explicit stale daemon recovers a requested target from ambient OMC", async () => {
+test("explicit stale daemon does not search ambient OMC", async () => {
   await withTempClaudeHome(async ({ home, omcRuntime, customConfig }) => {
     const omcPaths = deriveClaudeDaemonPaths({
       configDir: omcRuntime,
@@ -748,21 +754,21 @@ test("explicit stale daemon recovers a requested target from ambient OMC", async
         },
       );
 
-      assert.equal(out.ok, true);
-      assert.equal(out.daemon.configDirSource, "omc-runtime");
-      assert.equal(out.recoveredFrom.configDirSource, "explicit");
+      assert.equal(out.ok, false);
+      assert.equal(out.daemon, null);
+      assert.equal(out.recoveredFrom, undefined);
       assert.deepEqual(
         out.candidateResults.map((candidate) => candidate.configDirSource),
-        ["omc-runtime", "default"],
+        ["explicit"],
       );
-      assert.deepEqual(fake.requests, [{ proto: 1, op: "list" }]);
+      assert.deepEqual(fake.requests, []);
     } finally {
       await new Promise((resolve) => fake.server.close(resolve));
     }
   });
 });
 
-test("stale CLAUDE_CONFIG_DIR recovers a requested target from ambient OMC", async () => {
+test("stale CLAUDE_CONFIG_DIR does not search ambient OMC", async () => {
   await withTempClaudeHome(async ({ home, defaultConfig, omcRuntime }) => {
     const omcPaths = deriveClaudeDaemonPaths({
       configDir: omcRuntime,
@@ -793,17 +799,14 @@ test("stale CLAUDE_CONFIG_DIR recovers a requested target from ambient OMC", asy
         },
       );
 
-      assert.equal(out.ok, true);
-      assert.equal(out.inputSent, true);
-      assert.equal(out.recoveredFrom.configDirSource, "env");
+      assert.equal(out.ok, false);
+      assert.equal(out.inputSent, false);
+      assert.equal(out.recoveredFrom, undefined);
       assert.deepEqual(
         out.candidateResults.map((candidate) => candidate.configDirSource),
-        ["omc-runtime", "default"],
+        ["env"],
       );
-      assert.deepEqual(
-        fake.requests.map((request) => request.op),
-        ["list", "attach"],
-      );
+      assert.deepEqual(fake.requests, []);
     } finally {
       await new Promise((resolve) => fake.server.close(resolve));
     }

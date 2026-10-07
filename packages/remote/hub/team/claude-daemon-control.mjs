@@ -341,13 +341,21 @@ export async function probeClaudeDaemonCandidates({
   sessionId,
   timeoutMs = 6000,
   tmpRoot = "/tmp",
-  includeContext = true,
+  includeContext = false,
+  candidateSourceConfigDir,
 } = {}) {
-  const candidates = await buildClaudeDaemonDiscoveryCandidates({
+  const discovered = await buildClaudeDaemonDiscoveryCandidates({
     configDir,
     env,
     tmpRoot,
   });
+  const candidates = candidateSourceConfigDir
+    ? discovered.filter(
+        (candidate) =>
+          (candidate.sourceConfigDir ?? candidate.configDir) ===
+          candidateSourceConfigDir,
+      )
+    : discovered;
   const callerProvenance = detectCallerProvenance(env);
   const targetRequested = Boolean(short || sessionId);
   const results = [];
