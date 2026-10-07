@@ -8,25 +8,17 @@ import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
 import { BASH_EXE } from "../helpers/bash-path.mjs";
 import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
-it("bridge 가 실패해도 허브를 띄우지 않고 team 결과를 로컬에 남긴다", () => {
+it("bridge 가 실패해도 team 결과를 로컬에 남긴다", () => {
   const route = resolve("scripts/tfx-route.sh");
   const config = makeIsolatedCodexConfig();
-  const dir = mkdtempSync(join(tmpdir(), "tfx-hub-unavailable-"));
+  const dir = mkdtempSync(join(tmpdir(), "tfx-bridge-unavailable-"));
   const log = join(dir, "calls.jsonl");
-  const ensureMarker = join(dir, "ensure-called");
   const bridge = join(dir, "bridge.mjs");
-  const ensure = join(dir, "ensure.mjs");
   writeFileSync(
     bridge,
     `import { appendFileSync } from "node:fs";
 appendFileSync(process.env.BRIDGE_LOG, JSON.stringify(process.argv.slice(2)) + "\\n");
 process.exit(1);
-`,
-  );
-  writeFileSync(
-    ensure,
-    `import { writeFileSync } from "node:fs";
-writeFileSync(process.env.ENSURE_MARKER, "called");
 `,
   );
   try {
@@ -53,8 +45,6 @@ writeFileSync(process.env.ENSURE_MARKER, "called");
           TFX_MCP_HEALTH_CHECK: "0",
           FAKE_CODEX_MODE: "exec",
           TFX_BRIDGE_SCRIPT: bridge,
-          TFX_HUB_ENSURE_SCRIPT: ensure,
-          ENSURE_MARKER: ensureMarker,
           BRIDGE_LOG: log,
           TFX_TEAM_NAME: "unavailable-team",
           TFX_TEAM_TASK_ID: "task-1",
@@ -75,7 +65,6 @@ writeFileSync(process.env.ENSURE_MARKER, "called");
     const backup = JSON.parse(readFileSync(join(dir, "task-1.json"), "utf8"));
     assert.equal(backup.result, "success");
     assert.match(backup.summary, /^EXEC:unavailable-bridge/);
-    assert.throws(() => readFileSync(ensureMarker), { code: "ENOENT" });
   } finally {
     config.cleanup();
     rmSync(dir, { recursive: true, force: true });

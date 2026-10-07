@@ -18,12 +18,6 @@ import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(HERE, "..", "..");
 const ROUTE_SCRIPT = toBashPath(resolve(PROJECT_ROOT, "scripts/tfx-route.sh"));
-const HUB_ENSURE_STUB = resolve(
-  PROJECT_ROOT,
-  "tests",
-  "fixtures",
-  "no-op-hub-ensure.mjs",
-);
 const UNSET = "__TFX_UNSET__";
 
 function writeExecutable(path, source) {
@@ -93,8 +87,6 @@ function runRoute(overrides = {}) {
         USERPROFILE: home,
         XDG_CONFIG_HOME: join(home, ".config"),
         TFX_MACHINE_PROFILE_PATH: join(home, "machine-profile.env"),
-        TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
-        TFX_HUB_URL: "",
         TFX_TEAM_NAME: "",
         TFX_TEAM_TASK_ID: "",
         TFX_TEAM_AGENT_NAME: "",

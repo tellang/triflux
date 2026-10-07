@@ -28,7 +28,6 @@ const CORE_FILES = [
   "hub/paths.mjs",
   "hub/platform.mjs",
   "hub/state.mjs",
-  "hub/role-contract.mjs",
   "hub/bridge.mjs",
   "hub/account-broker.mjs",
 ];
@@ -38,6 +37,7 @@ const CORE_DIRS = [
   "hub/delegator",
   "hub/lib",
   "hub/team/intervention.mjs",
+  "hub/team/nativeProxy.mjs",
   "hub/team/retry-state-machine.mjs",
   "hub/team/claude-agent-session-normalizer.mjs",
   "hub/team/claude-daemon-control.mjs",

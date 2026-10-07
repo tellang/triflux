@@ -15,8 +15,6 @@ for (const [mode, hookEvent] of [
     };
     const records = [];
     const events = [];
-    let remoteCalls = 0;
-    const remote = () => remoteCalls++;
     const result = await runCodexSessionHook(JSON.stringify(payload), {
       argvMode: "",
       writeStdout: false,
@@ -31,15 +29,9 @@ for (const [mode, hookEvent] of [
           }),
           ctoAppend: (lakeRoot, event) => events.push({ lakeRoot, event }),
         }),
-      hubEnsureRun: remote,
-      registerInteractiveSession: remote,
-      heartbeatInteractiveSession: remote,
-      drainPendingSynapse: remote,
-      launchPresenceRegistration: remote,
     });
     assert.equal(result, "{}\n");
     assert.deepEqual(records, [payload]);
-    assert.equal(remoteCalls, 0);
     assert.equal(events.length, mode === "register" ? 1 : 0);
     if (mode === "register") {
       assert.equal(events[0].event.event, "session_started");

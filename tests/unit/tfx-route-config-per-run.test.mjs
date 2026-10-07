@@ -73,12 +73,6 @@ console.log("fixture result");
         TFX_RETRY_SNAPSHOT_FILE: "",
         TFX_INJECT_SKILL: "",
         TFX_MCP_HEALTH_CHECK: "0",
-        TFX_HUB_ENSURE_SCRIPT: join(
-          repoRoot,
-          "tests",
-          "fixtures",
-          "no-op-hub-ensure.mjs",
-        ),
         TFX_HEARTBEAT: "0",
         TFX_HARD_CEILING_SEC: "0",
         TFX_QUOTA_REROUTE: "0",

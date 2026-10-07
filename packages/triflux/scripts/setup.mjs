@@ -515,9 +515,7 @@ function scanLibFiles(pluginRoot, claudeDir) {
 
 /**
  * hub/workers/**\/*.mjs + hub/ 루트의 worker 의존성 파일을 자동 스캔.
- * 수동 리스트 대신 재귀 walk로 탐색하여 파일/서브디렉토리 추가 시 sync
- * 누락 방지. 2026-04-20 `workers/lib/jsonrpc-stdio.mjs` 가 top-level 전용
- * 스캔 때문에 누락되어 codex app-server worker 기동 실패 → 수정.
+ * 서브디렉토리의 파일이 sync 에서 빠지지 않도록 재귀로 탐색한다.
  */
 export function scanHubWorkerFiles(pluginRoot, claudeDir) {
   const results = [];
@@ -2301,7 +2299,7 @@ export async function runDeferred(stdinData) {
   }
 
   // ── 패키지 루트 breadcrumb 기록 ──
-  // tfx-route.sh가 hub/server.mjs, hub/bridge.mjs를 찾을 수 있도록
+  // tfx-route.sh가 hub/bridge.mjs를 찾을 수 있도록
   // 패키지 루트 경로를 ~/.claude/scripts/.tfx-pkg-root에 기록한다.
   // dev mode에서는 항상 최신 경로를 기록 (--sync 시 강제 갱신).
   {

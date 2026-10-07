@@ -76,21 +76,6 @@ npm run lint
 `release.yml` 이 태그, GitHub 릴리즈, npm 게시, 검증을 진행한다. npm 게시는 OIDC Trusted
 Publishing 만 쓰므로 로컬 `npm login` 이나 `NPM_TOKEN` 이 필요 없다.
 
-## 상태 스냅샷
-
-Hub 를 보장(`hub-ensure`)할 때 `~/.codex/` 일부 상태를 git-ignore 된
-`references/codex-snapshots/` 에 하루 한 번 꼴로 스냅샷한다. 실패해도 Hub 시작에는 영향이 없다.
-수동 명령:
-
-```bash
-npm run snapshot:codex
-npm run snapshot:all
-```
-
-같은 시점에 legacy Gemini CLI 호환용으로 `~/.gemini/` 도 `references/gemini-snapshots/` 에
-스냅샷한다(수동: `npm run snapshot:gemini`). 두 스냅샷 디렉터리는 `packages/triflux/package.json`
-의 `files` 부정 패턴으로 npm 패키지에서 빠진다.
-
 ## 브랜치 네이밍
 
 ```

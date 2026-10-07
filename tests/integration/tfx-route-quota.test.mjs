@@ -18,12 +18,6 @@ const ROUTE_SCRIPT = toBashPath(ROUTE_SCRIPT_WIN);
 const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
 );
-const HUB_ENSURE_STUB = resolve(
-  PROJECT_ROOT,
-  "tests",
-  "fixtures",
-  "no-op-hub-ensure.mjs",
-);
 
 // Isolate tfx-route's codex config-swap so the full-route invocations below
 // never mutate the real ~/.codex/config.toml under concurrency.
@@ -123,8 +117,6 @@ ${rerouteFunc}`;
         XDG_CONFIG_HOME: resolve(isolatedHome, ".config"),
         TRIFLUX_TEST_HOME: isolatedHome,
         TFX_CODEX_CONFIG: isolatedCodex.path,
-        TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
-        TFX_HUB_URL: "",
         TFX_HEARTBEAT: "0",
         TFX_MCP_HEALTH_CHECK: "0",
         TFX_CTO_NORTH_STAR: "0",

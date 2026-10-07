@@ -13,6 +13,7 @@ import { compareMirror } from "../../scripts/release/check-packages-mirror.mjs";
 
 const CORE_MIRRORS = new Map([
   ["hub/bridge.mjs", "packages/core/hub/bridge.mjs"],
+  ["hub/team/nativeProxy.mjs", "packages/core/hub/team/nativeProxy.mjs"],
   [
     "hub/team/retry-state-machine.mjs",
     "packages/core/hub/team/retry-state-machine.mjs",

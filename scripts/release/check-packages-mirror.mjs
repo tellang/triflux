@@ -38,6 +38,10 @@ const CORE_FILE_MIRRORS = [
     target: "packages/core/hub/bridge.mjs",
   },
   {
+    source: "hub/team/nativeProxy.mjs",
+    target: "packages/core/hub/team/nativeProxy.mjs",
+  },
+  {
     source: "hub/team/retry-state-machine.mjs",
     target: "packages/core/hub/team/retry-state-machine.mjs",
   },

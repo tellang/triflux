@@ -1,22 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { ClaudeWorker } from "../../hub/workers/claude-worker.mjs";
 import { CodexMcpWorker } from "../../hub/workers/codex-mcp.mjs";
 import { createWorker } from "../../hub/workers/factory.mjs";
 
 describe("worker factory", () => {
-  it("createWorker('codex') returns CodexMcpWorker", async () => {
-    const worker = await createWorker("codex");
-    assert.ok(worker instanceof CodexMcpWorker);
-    assert.equal(worker.type, "codex");
+  it("타입별 worker 인스턴스를 생성한다", async () => {
+    assert.ok((await createWorker("claude")) instanceof ClaudeWorker);
+    assert.ok((await createWorker("codex")) instanceof CodexMcpWorker);
   });
 
-  it("codex 워커는 approvalPolicy 값을 막지 않는다", async () => {
-    const worker = await createWorker("codex", { approvalPolicy: "on-failure" });
-    assert.ok(worker instanceof CodexMcpWorker);
-  });
-
-  it("unknown worker type still rejects with a recognizable error", async () => {
+  it("알 수 없는 타입은 거부한다", async () => {
     await assert.rejects(
       () => createWorker("nonexistent"),
       /Unknown worker type/,

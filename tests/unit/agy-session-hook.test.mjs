@@ -3,10 +3,8 @@ import { it } from "node:test";
 import { runAgySessionHook } from "../../hooks/agy-session-hook.mjs";
 import { emitParticipantSessionStarted } from "../../scripts/lib/session-presence.mjs";
 
-it("agy 훅의 기존 입력과 모드는 허브 호출 없이 성공한다", async () => {
-  let calls = 0;
+it("agy 훅은 잘못된 입력에도 성공하고 시작 이벤트만 남긴다", async () => {
   const events = [];
-  const remote = () => calls++;
   for (const mode of ["register", "heartbeat", ""]) {
     for (const input of [
       '{"conversationId":"conv-1","invocationNum":1}',
@@ -24,16 +22,11 @@ it("agy 훅의 기존 입력과 모드는 허브 호출 없이 성공한다", as
               resolveLakeRoot: () => ({ lakeRoot: "/fixture/.triflux/lake" }),
               ctoAppend: (_root, event) => events.push(event),
             }),
-          hubEnsureRun: remote,
-          registerInteractiveSession: remote,
-          heartbeatInteractiveSession: remote,
-          drainPendingSynapse: remote,
         }),
         "{}\n",
       );
     }
   }
-  assert.equal(calls, 0);
   assert.equal(events.length, 2);
   for (const event of events) {
     assert.equal(event.event, "session_started");
