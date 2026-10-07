@@ -3,7 +3,7 @@ name: tfx-live
 description: >
   Use when Claude, Codex, or a Triflux worker needs live Claude↔Codex orchestration:
   start/ask/stop, multi-turn, peer relay, daemon UDS attach, or UDS-first with tmux fallback.
-argument-hint: "<start|ask|stop|interrupt|probe|list-sessions|peer|converse|goal-driven|orchestrate> ..."
+argument-hint: "<start|ask|wait|stop|interrupt|probe|list-sessions|peer|converse|goal-driven|orchestrate> ..."
 ---
 
 # tfx-live: Claude↔Codex live orchestration
@@ -34,6 +34,82 @@ tfx-live ask --cli claude --session cl1 --prompt "이 구현을 리뷰해줘" --
 tfx-live stop --cli claude --session cl1
 ```
 
+Name every new Claude or Codex session as `<month>.<day> <topic>`, for example
+`10.8 오케스트레이션 개선`. Pass `start --name "10.8 오케스트레이션 개선"` or let
+`start` generate `<month>.<day> <session>` and report `nameGenerated: true`.
+For a successor, append ` 2`, then ` 3` to the existing name. Results include
+`name`; if Codex TUI naming fails, `nameApplied: false` reports that outcome.
+Rename a loaded Codex UDS thread with
+`tfx-live rename --cli codex --transport uds --thread ID --name "<name>"`
+and optionally `--codex-socket PATH|default`. The app-server call is
+`thread/name/set` with `{ threadId, name }`; success returns `{}`.
+
+`tfx-live --help`, `tfx-live <verb> --help`, and `-h` print usage and exit 0.
+
+## Lead operations
+
+Send a request with `ask --no-wait`, then confirm its completion with `wait`:
+
+```bash
+tfx-live ask --cli claude --transport uds --short <8hex> \
+  --prompt "진행 상황을 보고해줘" --no-wait
+tfx-live wait --cli claude --short <8hex> --request-id <requestId> \
+  --timeout 120 --poll-interval 500
+```
+
+`ask --no-wait` returns `status: "submitted"`, `inputSent: true`, `done: false`,
+`submittedAt`, `target`, and `requestId` once input is sent. It has no
+`timedOut` field. All ask results carry `requestId`. By default, the sent
+prompt starts with `[tfx-live req=<requestId>]`. Peer, converse, and
+goal-driven prompts use the same tag. `--no-relay-tag` removes it; then
+`wait --request-id` cannot match that request.
+
+`wait` reads the Claude transcript for the tagged user turn and its last
+assistant text before the next user turn. Without `--request-id`, it checks
+the latest user turn. An idle daemon triggers a check but does not by itself
+prove completion. `status` is `submitted`, `working`, `completed`, `failed`,
+or `unknown`. A timeout returns `status: "working"`, `timedOut: true`, and
+`done: false`. Results include `estimatedContextTokens`. Codex UDS `wait` is
+outside this release.
+Claude `wait` recognizes the observed JSONL `end_turn` and `turn_duration`
+markers; this is not a documented stable transcript schema.
+
+Use `tmux capture-pane` and `tmux send-keys` only to diagnose transport or
+pane state. Do not send `C-c` to a Claude pane.
+
+### Receiving session context
+
+`probe` includes `context: { estimatedContextTokens, model, measuredAt }`
+for a session with transcript usage, or `context: null` when unavailable.
+The token estimate sums the last assistant usage values for `input_tokens`,
+`cache_read_input_tokens`, and `cache_creation_input_tokens`; it is not a
+percentage of the model context window.
+
+Claude UDS `ask` warns at `--warn-context-tokens 600000` by default and
+refuses to send at `--max-context-tokens 850000` by default. Set the maximum
+to 0 to disable the guard. At 600k, prepare a checkpoint. At the 700k task
+boundary, use `/compact` or hand off. At 800k, stop assigning new work and
+hand off. At 850k, the default guard rejects the send with `context-limit`.
+
+For handoff, stop new assignments to the current writer, settle work already
+in progress, and write an envelope plus checkpoint containing unfinished
+tasks, changed files, verification results, next actions, and
+`predecessorSessionId`. Start the successor with the old name plus ` 2`,
+obtain its pointer confirmation ACK, transfer ownership, and leave the old
+session as retired-standby. The numeric suffix is display information only.
+
+The creator owns each agent's context and shutdown. Before assigning work,
+inspect its context: use `/compact` to retain a working summary, `/clear`
+for independent work after saving the checkpoint, or a named successor for
+an ownership handoff. Do not rely on automatic compaction.
+Close completed or retired agents promptly: `claude stop <id>` preserves
+the conversation for `claude attach`; use `tfx-live stop --session NAME`
+for owned tmux sessions and TaskStop for background tasks. Keep retired-standby
+running only with a recorded reason. Leave other owners' agents to them.
+
+`tmr` is a human room selector. Automation may use `tmr ls --json` for
+discovery; `tmr attach` exits 1 when no terminal is available.
+
 ## UDS-first Claude daemon ask
 
 Find daemon sessions:
@@ -54,6 +130,12 @@ For explicit UDS-only failure behavior:
 ```bash
 tfx-live ask --cli claude --transport uds --short <8hex> --prompt "..." --timeout 120
 ```
+
+If a selected daemon directory is missing or its control socket returns
+ENOENT before input is sent, `ask` and `probe` rediscover live daemons and
+retry the requested short or session ID once. Results identify the old
+endpoint in `recoveredFrom`. If delivery is uncertain, `ask` reports
+`status: "unknown"` and does not resend.
 
 ## Codex tmux session discovery
 

@@ -1009,15 +1009,13 @@ function skillTreeMatches(srcDir, dstDir) {
 }
 
 /**
- * Sync the tracked Codex tfx-harness adapter without taking ownership of a
- * pre-existing user skill. A missing source is a hard failure; a conflicting
- * destination is deliberately left untouched. Do not create backups inside
- * the Codex skill discovery root: Codex would register each copied SKILL.md as
- * another callable skill.
+ * Sync a tracked Codex adapter. Keep user-owned backups outside the skill
+ * discovery root so Codex does not register another callable skill.
  */
-function syncCodexHarnessAdapter({
-  sourceDir = join(PLUGIN_ROOT, "adapters", "codex", "skills", "tfx-harness"),
-  destinationDir = join(CODEX_DIR, "skills", "tfx-harness"),
+function syncCodexSkillAdapter({
+  skillName = "tfx-harness",
+  sourceDir = join(PLUGIN_ROOT, "adapters", "codex", "skills", skillName),
+  destinationDir = join(CODEX_DIR, "skills", skillName),
   stagingRoot = null,
   platform = process.platform,
 } = {}) {
@@ -1026,7 +1024,7 @@ function syncCodexHarnessAdapter({
     return {
       ok: false,
       action: "blocked",
-      reason: "codex_harness_adapter_source_missing",
+      reason: `codex_${skillName.slice(4)}_adapter_source_missing`,
       sourceDir,
       destinationDir,
     };
@@ -1053,16 +1051,6 @@ function syncCodexHarnessAdapter({
     return { ok: true, action: "noop", sourceDir, destinationDir };
   }
 
-  if (existsSync(destinationDir) && !managed) {
-    return {
-      ok: true,
-      action: "skipped",
-      reason: "user_owned_codex_skill",
-      sourceDir,
-      destinationDir,
-    };
-  }
-
   const destinationParent = dirname(destinationDir);
   const destinationName = basename(destinationDir);
   const replacementRoot =
@@ -1076,6 +1064,7 @@ function syncCodexHarnessAdapter({
   mkdirSync(replacementRoot, { recursive: true });
 
   let previousDir = null;
+  let backupDir = null;
   try {
     cpSync(sourceDir, tempDir, { recursive: true });
     writeFileSync(
@@ -1085,9 +1074,10 @@ function syncCodexHarnessAdapter({
     if (existsSync(destinationDir)) {
       previousDir = join(
         replacementRoot,
-        `${destinationName}.triflux-previous-${Date.now()}`,
+        `${destinationName}.triflux-${managed ? "previous" : "backup"}-${process.pid}-${Date.now()}`,
       );
       renameSync(destinationDir, previousDir);
+      if (!managed) backupDir = previousDir;
     }
     try {
       renameSync(tempDir, destinationDir);
@@ -1101,7 +1091,7 @@ function syncCodexHarnessAdapter({
       }
       throw error;
     }
-    if (previousDir) {
+    if (previousDir && managed) {
       try {
         rmSync(previousDir, { recursive: true, force: true });
       } catch {
@@ -1111,7 +1101,21 @@ function syncCodexHarnessAdapter({
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
-  return { ok: true, action: "synced", sourceDir, destinationDir };
+  return {
+    ok: true,
+    action: "synced",
+    sourceDir,
+    destinationDir,
+    ...(backupDir && { backupDir }),
+  };
+}
+
+function syncCodexHarnessAdapter(options = {}) {
+  return syncCodexSkillAdapter({ skillName: "tfx-harness", ...options });
+}
+
+function syncCodexLiveAdapter(options = {}) {
+  return syncCodexSkillAdapter({ skillName: "tfx-live", ...options });
 }
 
 /**
@@ -2177,6 +2181,7 @@ export {
   scanHudFiles,
   syncAliasedSkillDir,
   syncCodexHarnessAdapter,
+  syncCodexLiveAdapter,
   syncWorkerPackages,
   validateSchtasksTrLength,
   WINDOWS_HUB_AUTOSTART_TASK,
@@ -2259,15 +2264,20 @@ export async function runDeferred(stdinData) {
       result.action === "updated" ||
       result.action === "removed",
   ).length;
-  const codexHarnessSync = syncCodexHarnessAdapter();
-  if (!codexHarnessSync.ok) {
-    io.log(`  \x1b[31m✗\x1b[0m Codex tfx-harness: ${codexHarnessSync.reason}`);
-    return io.result(1);
-  }
-  if (codexHarnessSync.action === "skipped") {
-    io.log(
-      "  \x1b[33m⚠\x1b[0m Codex tfx-harness: user skill preserved; no managed files changed",
-    );
+  const codexSkillSyncs = [
+    ["tfx-harness", syncCodexHarnessAdapter()],
+    ["tfx-live", syncCodexLiveAdapter()],
+  ];
+  for (const [name, result] of codexSkillSyncs) {
+    if (!result.ok) {
+      io.log(`  \x1b[31m✗\x1b[0m Codex ${name}: ${result.reason}`);
+      return io.result(1);
+    }
+    if (result.backupDir) {
+      io.log(
+        `  \x1b[33m⚠\x1b[0m Codex ${name}: user skill backed up to ${result.backupDir}`,
+      );
+    }
   }
   const cloakBrowserResult = ensureCloakBrowser({
     warn: (message) => io.log(`  \x1b[33m⚠\x1b[0m ${message}`),
@@ -2290,7 +2300,8 @@ export async function runDeferred(stdinData) {
   }
 
   let synced =
-    claudeRoutingChangedCount + (codexHarnessSync.action === "synced" ? 1 : 0);
+    claudeRoutingChangedCount +
+    codexSkillSyncs.filter(([, result]) => result.action === "synced").length;
 
   // ── Memory Doctor (P0 자동 수정) ──
   const isCIEnv = process.env.CI === "true" || process.env.DOCKER === "true";

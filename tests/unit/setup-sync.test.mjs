@@ -10,7 +10,6 @@ import {
   rmSync,
   writeFileSync,
 } from "fs";
-import { tmpdir } from "os";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 
@@ -28,13 +27,16 @@ const {
   SETUP_USER_STATE_FILES,
   getWorkerPackageSyncEntries,
   syncCodexHarnessAdapter,
+  syncCodexLiveAdapter,
   syncWorkerPackages,
 } = await import("../../scripts/setup.mjs");
 
 // ── helpers ──
 
 const TMP_DIR = join(PROJECT_ROOT, "tests", ".tmp-setup-sync");
-const SETUP_TEST_HOME = mkdtempSync(join(tmpdir(), "tfx-setup-sync-"));
+const SETUP_TEST_HOME = mkdtempSync(
+  join(PROJECT_ROOT, "tests", ".tmp-setup-home-"),
+);
 const SETUP_TEST_ENV = {
   ...process.env,
   TRIFLUX_TEST_HOME: SETUP_TEST_HOME,
@@ -124,8 +126,8 @@ describe("setup-sync: --sync 플래그 파싱", () => {
   });
 });
 
-describe("setup-sync: Codex tfx-harness adapter", () => {
-  it("temp HOME에 adapter를 동기화하고 재실행해도 idempotent하다", () => {
+describe("setup-sync: Codex adapters", () => {
+  it("temp HOME에 두 adapter를 동기화하고 재실행해도 idempotent하다", () => {
     execFileSync(
       process.execPath,
       [join(PROJECT_ROOT, "scripts", "setup.mjs"), "--sync"],
@@ -136,31 +138,30 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
-    const source = join(
-      PROJECT_ROOT,
-      "adapters",
-      "codex",
-      "skills",
-      "tfx-harness",
-      "SKILL.md",
-    );
-    const installed = join(
-      SETUP_TEST_HOME,
-      ".codex",
-      "skills",
-      "tfx-harness",
-      "SKILL.md",
-    );
-    assert.equal(readFileSync(installed, "utf8"), readFileSync(source, "utf8"));
-
-    const result = syncCodexHarnessAdapter({
-      destinationDir: join(SETUP_TEST_HOME, ".codex", "skills", "tfx-harness"),
-    });
-    assert.equal(result.ok, true);
-    assert.equal(result.action, "noop");
+    for (const [name, sync] of [
+      ["tfx-harness", syncCodexHarnessAdapter],
+      ["tfx-live", syncCodexLiveAdapter],
+    ]) {
+      const source = join(
+        PROJECT_ROOT,
+        "adapters",
+        "codex",
+        "skills",
+        name,
+        "SKILL.md",
+      );
+      const destinationDir = join(SETUP_TEST_HOME, ".codex", "skills", name);
+      assert.equal(
+        readFileSync(join(destinationDir, "SKILL.md"), "utf8"),
+        readFileSync(source, "utf8"),
+      );
+      const result = sync({ destinationDir });
+      assert.equal(result.ok, true);
+      assert.equal(result.action, "noop");
+    }
   });
 
-  it("user-owned Codex skill은 discovery root에 backup을 만들지 않고 보존한다", () => {
+  it("user-owned Codex skill은 discovery root 밖에 백업하고 managed 사본으로 교체한다", () => {
     cleanTmpDir();
     ensureTmpDir();
     const sourceDir = join(TMP_DIR, "codex-adapter-source");
@@ -170,16 +171,27 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
     writeFileSync(join(sourceDir, "SKILL.md"), "tracked adapter\n");
     writeFileSync(join(destinationDir, "SKILL.md"), "user adapter\n");
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const result = syncCodexHarnessAdapter({ sourceDir, destinationDir });
-      assert.equal(result.ok, true);
-      assert.equal(result.action, "skipped");
-      assert.equal(result.reason, "user_owned_codex_skill");
-      assert.equal("backupDir" in result, false);
-    }
+    const stagingRoot = join(TMP_DIR, "staging");
+    const result = syncCodexHarnessAdapter({
+      sourceDir,
+      destinationDir,
+      stagingRoot,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.action, "synced");
+    assert.equal(
+      readFileSync(join(result.backupDir, "SKILL.md"), "utf8"),
+      "user adapter\n",
+    );
+    assert.equal(dirname(result.backupDir) === dirname(destinationDir), false);
     assert.equal(
       readFileSync(join(destinationDir, "SKILL.md"), "utf8"),
-      "user adapter\n",
+      "tracked adapter\n",
+    );
+    assert.equal(
+      syncCodexHarnessAdapter({ sourceDir, destinationDir, stagingRoot })
+        .action,
+      "noop",
     );
     assert.deepEqual(
       readdirSync(TMP_DIR).filter((name) => name.includes(".triflux-backup-")),
@@ -226,7 +238,7 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
     rmSync(stagingRoot, { recursive: true, force: true });
   });
 
-  it("CLI user-owned skip 메시지는 존재하지 않는 backupDir를 참조하지 않는다", () => {
+  it("CLI 동기화는 존재하지 않는 backupDir를 참조하지 않는다", () => {
     for (const relative of [
       "bin/triflux.mjs",
       "packages/triflux/bin/triflux.mjs",

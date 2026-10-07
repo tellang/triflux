@@ -5,6 +5,10 @@ description: >
   start/ask/stop, multi-turn, peer relay, daemon UDS attach, or UDS-first with tmux fallback.
 argument-hint: "<start|ask|wait|stop|interrupt|probe|list-sessions|peer|converse|goal-driven|orchestrate> ..."
 ---
+## Codex host contract
+
+Invoke this skill as `$tfx-live` in Codex. The CLI `--cli` flag selects the target session, not the current host.
+
 
 # tfx-live: Claude↔Codex live orchestration
 
