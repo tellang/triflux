@@ -195,8 +195,6 @@ function ensureGeminiProfiles({
 export {
   DEFAULT_GEMINI_PROFILES,
   ensureGeminiProfiles,
-  GEMINI_DEFAULT_PURPOSE_PROFILE,
-  GEMINI_PROFILE_BY_PURPOSE,
   resolveGeminiModel,
   resolveGeminiProfileForPurpose,
 };

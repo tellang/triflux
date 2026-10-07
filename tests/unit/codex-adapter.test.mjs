@@ -116,8 +116,8 @@ test("runPreflight marks unreachable MCP servers for exclusion", async () => {
     writeFileSync(
       join(home, ".codex", "config.toml"),
       [
-        'approval_mode = "full-auto"',
-        'sandbox = "danger-full-access"',
+        'approval_policy = "never"',
+        'sandbox_mode = "danger-full-access"',
         "",
         "[mcp_servers.context7]",
         'command = "missing-context7"',
@@ -136,6 +136,7 @@ test("runPreflight marks unreachable MCP servers for exclusion", async () => {
     assert.equal(result.version, 119);
     assert.equal(result.needsBypass, true);
     assert.deepEqual(result.excludeMcpServers, ["context7"]);
+    assert.equal(result.warnings.length, 1);
     assert.match(result.warnings.join("\n"), /missing-context7/);
   });
 });

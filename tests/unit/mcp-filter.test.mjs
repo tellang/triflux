@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   buildMcpPolicy,
@@ -9,6 +13,57 @@ import {
 } from "../../scripts/lib/mcp-filter.mjs";
 
 describe("mcp-filter", () => {
+  it("delimited 출력은 라우터가 읽는 7필드를 레코드 구분자로 잇는다", (t) => {
+    const dir = mkdtempSync(new URL("./mcp-filter-", import.meta.url));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const inventoryFile = join(dir, "inventory.json");
+    writeFileSync(
+      inventoryFile,
+      JSON.stringify({
+        codex: {
+          servers: [{ name: "context7", tool_count: 2, domain_tags: ["docs"] }],
+        },
+      }),
+    );
+    const output = execFileSync(
+      process.execPath,
+      [
+        fileURLToPath(
+          new URL("../../scripts/lib/mcp-filter.mjs", import.meta.url),
+        ),
+        "delimited",
+        "--agent",
+        "code-reviewer",
+        "--profile",
+        "auto",
+        "--available",
+        "context7,playwright",
+        "--inventory-file",
+        inventoryFile,
+        "--phase",
+        "verify",
+      ],
+      { encoding: "utf8" },
+    );
+    assert.deepEqual(output.split("\x1e"), [
+      "auto",
+      "reviewer",
+      "context7으로 관련 문서를 조회하세요.",
+      "context7",
+      '-c,mcp_servers.context7.enabled=true,-c,mcp_servers.context7.enabled_tools=["resolve-library-id","query-docs"],-c,mcp_servers.playwright.enabled=false',
+      JSON.stringify({
+        mcp_servers: {
+          context7: {
+            enabled: true,
+            enabled_tools: ["resolve-library-id", "query-docs"],
+          },
+          playwright: { enabled: false },
+        },
+      }),
+      "verify",
+    ]);
+  });
+
   it("auto 프로필은 역할에 따라 role profile로 해석된다", () => {
     assert.equal(resolveMcpProfile("executor", "auto"), "executor");
     assert.equal(resolveMcpProfile("designer", "auto"), "designer");

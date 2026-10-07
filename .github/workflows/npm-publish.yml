@@ -50,9 +50,6 @@ jobs:
           esac
           echo "NPM_TAG=$NPM_TAG" >> "$GITHUB_ENV"
 
-      - name: Verify npm 11.5.1+
-        run: npm --version
-
       - name: Install dependencies
         run: npm ci || npm install --no-audit --no-fund
 

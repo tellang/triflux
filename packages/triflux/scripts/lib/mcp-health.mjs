@@ -224,7 +224,7 @@ export function parseMcpServersFromToml(content = "") {
   return servers;
 }
 
-export function readMcpServers(configPath = DEFAULT_CONFIG_PATH) {
+function readMcpServers(configPath = DEFAULT_CONFIG_PATH) {
   if (!existsSync(configPath)) return {};
   try {
     const content = readFileSync(configPath, "utf8");
@@ -754,7 +754,7 @@ function renderOutput(results, source, format) {
   return JSON.stringify({ source, healthy, dead, results }, null, 2);
 }
 
-export async function runCli(argv = process.argv.slice(2)) {
+async function runCli(argv = process.argv.slice(2)) {
   let args;
   try {
     args = parseCliArgs(argv);

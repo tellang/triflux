@@ -40,27 +40,6 @@ describe("tfx --help 출력", () => {
     assert.doesNotMatch(out, /npm install -g|업데이트 완료|git pull/);
   });
 
-  it("stale: tfx auto --help 는 현재 antigravity lane을 노출", () => {
-    const raw = execSync(`node "${binPath}" auto --help`, {
-      encoding: "utf8",
-    });
-    const out = stripAnsi(raw);
-    assert.match(out, /--cli <name>/);
-    assert.match(out, /antigravity/);
-    assert.match(out, /quick\|deep\|consensus\|live/);
-    assert.match(out, /--rounds <N>/);
-    assert.doesNotMatch(out, /gemini/);
-  });
-
-  it("stale: tfx auto --cli gemini 는 antigravity 호환 alias로 정규화", () => {
-    const raw = execSync(`node "${binPath}" auto --cli gemini --json`, {
-      encoding: "utf8",
-    });
-    const payload = JSON.parse(stripAnsi(raw));
-    assert.equal(payload.args.cli, "antigravity");
-    assert.match(payload.args.warnings.join("\n"), /deprecated.*antigravity/);
-  });
-
   for (const command of [
     "setup",
     "doctor",
@@ -69,7 +48,6 @@ describe("tfx --help 출력", () => {
     "synapse",
     "multi",
     "notion-read",
-    "review",
     "why",
   ]) {
     it(`stale: tfx ${command} --help 는 side-effect 없이 help 출력`, () => {

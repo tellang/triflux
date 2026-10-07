@@ -5,7 +5,6 @@ import { join } from "node:path";
 
 import { whichCommandAsync } from "./platform.mjs";
 
-const MIN_RECOMMENDED_MINOR = 118;
 let _cachedVersion = null;
 
 function escapeRegExp(value) {
@@ -74,25 +73,11 @@ async function checkCodexInstalled() {
   };
 }
 
-function checkCodexVersion() {
-  const version = getCodexVersion();
-  const warnings =
-    version >= MIN_RECOMMENDED_MINOR
-      ? []
-      : [
-          `Codex CLI 0.${version}.x detected; 0.${MIN_RECOMMENDED_MINOR}.x or newer is recommended.`,
-        ];
-  return { version, warnings };
-}
-
 function checkApprovalMode(configText, opts = {}) {
-  const approvalMode = readTomlString(configText, "approval_mode");
-  const sandbox = readTomlString(configText, "sandbox");
+  const approvalPolicy = readTomlString(configText, "approval_policy");
   const subcommand = opts.subcommand || "exec";
   return {
-    needsBypass: subcommand === "exec" || approvalMode !== "full-auto",
-    approvalMode,
-    sandbox,
+    needsBypass: subcommand === "exec" || approvalPolicy !== "never",
   };
 }
 
@@ -154,7 +139,7 @@ async function checkMcpHealth(mcpServers, configText) {
 /**
  * Detects codex config drift between global (~/.codex/config.toml) and the
  * target workdir. Covers:
- *   1. workdir-local `.codex/config.toml` overriding global approval_mode/sandbox
+ *   1. workdir-local `.codex/config.toml` overriding global approval_policy/sandbox_mode
  *   2. instruction-file asymmetry (AGENTS.md vs CLAUDE.md)
  *
  * @param {string} [workdir] absolute path to the invocation workdir
@@ -173,7 +158,7 @@ export function detectWorkdirDrift(workdir, globalConfigText = "") {
     } catch {
       localText = "";
     }
-    const keys = ["approval_mode", "sandbox", "model"];
+    const keys = ["approval_policy", "sandbox_mode", "model"];
     for (const key of keys) {
       const local = readTomlString(localText, key);
       const global = readTomlString(globalConfigText, key);
@@ -212,18 +197,10 @@ export async function runPreflight(opts = {}) {
   }
 
   const warnings = [...install.warnings];
-  const { version, warnings: versionWarnings } = checkCodexVersion();
-  warnings.push(...versionWarnings);
+  const version = getCodexVersion();
 
   const configText = readConfigText(opts.configPath);
   const approval = checkApprovalMode(configText, opts);
-  if (approval.approvalMode !== "full-auto") {
-    warnings.push(
-      `approval_mode is '${approval.approvalMode || "unset"}'; bypass flag will be used.`,
-    );
-  }
-  if (approval.sandbox)
-    warnings.push(`sandbox mode from config.toml: ${approval.sandbox}`);
 
   const mcp = await checkMcpHealth(opts.mcpServers, configText);
   warnings.push(...mcp.warnings);

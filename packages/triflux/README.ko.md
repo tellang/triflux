@@ -52,8 +52,6 @@ claude plugin install triflux@triflux
 /tfx-auto "마이그레이션 끝내고 검증까지" --mode deep --retry ralph --max-iterations 10
 ```
 
-실행하지 않고 라우팅 판정만 보려면 셸에서 `tfx auto "<작업>" --json`을 실행한다.
-
 ## 스킬
 
 직접 쓰는 스킬:
@@ -92,7 +90,6 @@ Codex 프로필은 `~/.codex/<프로필>.config.toml`에서 직접 관리한다.
 | `--retry` | `0`, `1`(기본), `ralph`, `auto-escalate` | `ralph` = 막힘 감지가 있는 재시도 상태 기계, `auto-escalate` = 모델 체인을 한 단계씩 올림 |
 | `--max-iterations` | `N` | `ralph`/`auto-escalate` 상한(`0`은 무제한) |
 | `--rounds` | `N`(기본 4) | `--mode live` 왕복 횟수 |
-| `--risk-tier` | `auto`, `low`, `medium`, `high` | 변경 범위로 검증 강도를 정함. `--mode`가 있으면 무시 |
 | `--skill` | `<name>` | `skills/<name>/SKILL.md`를 Codex/Antigravity 프롬프트 앞에 붙임 |
 | `--no-native-bridge-ui` | | headless 워커를 `claude agents` 패널에 띄우지 않음 |
 
@@ -122,14 +119,14 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 | 명령 | 용도 |
 | --- | --- |
 | `tfx setup` / `tfx doctor` | 파일·HUD·MCP·프로필 동기화 / 진단과 복구(`--fix`, `--json`) |
-| `tfx auto` | `tfx-auto` 라우팅 판정 미리 보기 |
 | `tfx multi` | tmux + Hub 기반 로컬 멀티 CLI 팀 |
 | `tfx synapse` | 세션 레지스트리와 lease |
 | `tfx hub` | 로컬 Hub: `start`, `stop`, `status`, `ensure` |
 | `tfx mcp` | 관리형 MCP 레지스트리: `list`, `sync`, `add`, `remove` |
 | `tfx handoff` | 현재 맥락을 다른 세션이나 호스트로 넘길 프롬프트로 묶음 |
 | `tfx cto` | 저장소 단위 권위 콘솔: `collect`, `status`, `hygiene`(dry-run) |
-| `tfx review` / `tfx codex-team` | Codex git diff 리뷰 / Codex 주도 팀 모드 |
+| `tfx codex-team` | Codex 주도 팀 모드 |
+| `bash ~/.claude/scripts/tfx-route.sh code-reviewer "<지시>"` | 정책에 따라 `codex exec review`로 리뷰 전달 |
 | `tfx stealth-fetch <url>` | cloakbrowser로 URL 하나를 가져옴(JSON을 stdout으로) |
 | `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | Notion → Markdown, 커밋 intent 트레일러, CLI 스키마, 설치된 스킬, TUI 모니터, 업데이트, 버전 |
 | `tfx-live` | 라이브 세션 브리지(`/tfx-live` 스킬과 같은 명령) |

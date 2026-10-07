@@ -1,3 +1,5 @@
+폐기: 2026-10-08 슬롭 정리(.triflux/plans/slop-audit-2026-10.md S3 B34)
+
 # Lake 4: Telemetry 블록 표준화
 
 ## 목표

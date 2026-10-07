@@ -94,14 +94,7 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
   it("schema는 CLI 명세와 hub tool schema를 노출해야 한다", () => {
     const bundle = parseStdoutJson(runCli(["schema"]));
     assert.ok(bundle.commands.doctor);
-    for (const command of [
-      "auto",
-      "update",
-      "codex-team",
-      "notion-read",
-      "review",
-      "monitor",
-    ]) {
+    for (const command of ["update", "codex-team", "notion-read", "monitor"]) {
       assert.ok(bundle.commands[command], `schema command missing: ${command}`);
     }
     // CTO 트레이는 제거됐다(ADR-0022).
@@ -263,17 +256,7 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     const listPayload = parseStdoutJson(
       runCli(["list", "--json"], { homeDir }),
     );
-    assert.deepEqual(
-      listPayload.skill_aliases.map(
-        ({ alias, source, installed, deprecated }) => ({
-          alias,
-          source,
-          installed,
-          deprecated,
-        }),
-      ),
-      [],
-    );
+    assert.equal(Object.hasOwn(listPayload, "skill_aliases"), false);
     assert.equal(listPayload.user_skills.includes("tfx-autopilot"), false);
   });
 

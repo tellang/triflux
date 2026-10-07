@@ -2,27 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  compareSemver,
   formatPsmuxInstallGuidance,
   formatPsmuxUpdateGuidance,
-  parsePsmuxVersion,
-  probePrimaryMultiplexerSupport,
   probePsmuxSupport,
 } from "../../scripts/lib/psmux-info.mjs";
 
 describe("psmux-info", () => {
-  it("parsePsmuxVersion extracts semantic versions", () => {
-    assert.equal(parsePsmuxVersion("psmux 3.3.1"), "3.3.1");
-    assert.equal(parsePsmuxVersion("psmux v3.3.0"), "3.3.0");
-    assert.equal(parsePsmuxVersion("unknown"), null);
-  });
-
-  it("compareSemver compares numerically", () => {
-    assert.equal(compareSemver("3.3.1", "3.3.1"), 0);
-    assert.equal(compareSemver("3.3.2", "3.3.1"), 1);
-    assert.equal(compareSemver("3.2.9", "3.3.1"), -1);
-  });
-
   it("guidance formatters include official install/update commands (win32)", () => {
     const installText = formatPsmuxInstallGuidance("", "win32");
     const updateText = formatPsmuxUpdateGuidance("", "win32");
@@ -36,20 +21,7 @@ describe("psmux-info", () => {
     ["darwin", "brew install tmux", "brew upgrade tmux"],
     ["linux", "apt install tmux", "apt install --only-upgrade tmux"],
   ]) {
-    it(`${platform}에서 tmux 부재 시 tmux 설치와 업데이트를 안내한다`, () => {
-      const calls = [];
-      const result = probePrimaryMultiplexerSupport({
-        platform,
-        execFileSyncFn(command, args) {
-          calls.push([command, ...args]);
-          throw new Error("not installed");
-        },
-      });
-      assert.equal(result.installed, false);
-      assert.equal(result.kind, "tmux");
-      assert.deepEqual(calls, [["tmux", "-V"]]);
-      assert.equal(result.installHint.trim(), install);
-      assert.equal(result.updateHint.trim(), update);
+    it(`${platform} 설치 안내를 반환한다`, () => {
       assert.equal(formatPsmuxInstallGuidance("", platform), install);
       assert.equal(formatPsmuxUpdateGuidance("", platform), update);
     });

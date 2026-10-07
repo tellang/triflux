@@ -41,6 +41,9 @@
 
 - **[_archive/](_archive/)** : Superseded/무효화된 문서 보존본(추적성 유지).
   - [swarm 인프라 PRD](_archive/prd/p3-swarm-infra-fixes.md)와 [Issue #281 계획](_archive/triflux/plans/issue-281-auto-router-swarm-dispatch.md), [shard A](_archive/triflux/plans/issue-281-shard-a-staged-file-detect.md), [shard B](_archive/triflux/plans/issue-281-shard-b-router-escalate.md), [shard C](_archive/triflux/plans/issue-281-shard-c-integration-ssot-mirror.md), [swarm 실행 계획](_archive/triflux/plans/issue-281-swarm.md), [swarm smoke test](_archive/prd/archived/swarm-smoke-test.md), [mesh router/queue PRD](_archive/prd/archived/lake5-mesh-router-queue.md), [mesh 활성화 PRD](_archive/prd/archived/mesh-production-activation.md), [worktree lifecycle 테스트 PRD](_archive/prd/archived/worktree-lifecycle-test.md)를 ADR-0025에 따라 보존한다.
+  - [Lake 4 스킬 템플릿 엔진 PRD](_archive/prd/archived/lake4-skill-templates.md)를 템플릿 엔진 폐기에 따라 보존한다.
+  - [Lake 4 공유 세그먼트 PRD](_archive/prd/archived/lake4-token-shared-segments.md)를 템플릿 엔진 폐기에 따라 보존한다.
+  - [Lake 4 텔레메트리 PRD](_archive/prd/archived/lake4-token-telemetry.md)를 템플릿 엔진 폐기에 따라 보존한다.
 - **`superpowers/plans/`** — LOCAL(git-ignore). 실행 중 산출물이라 공개 대상이 아니다.
 
 ## 메모

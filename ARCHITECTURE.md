@@ -51,7 +51,7 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 ```
 사용자 (Claude Code 프롬프트 / 셸)
   → /tfx-auto (스킬 프런트 도어) 또는 tfx CLI
-  → tfx-route.sh + 가드 (intent → mode/parallel/retry/risk-tier/CLI lane 정규화)
+  → tfx-route.sh + 가드 (intent → mode/parallel/retry/CLI lane 정규화)
   → CLI lane 실행: Codex (기본) / Antigravity / Claude
   → headless 워커 (로컬 병렬)
   → Hub 가 team 메시지 · 리스 · retry · handoff · 상태를 기록

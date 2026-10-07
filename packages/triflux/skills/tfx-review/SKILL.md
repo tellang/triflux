@@ -206,10 +206,10 @@ Bash("tfx multi --auto-attach --dashboard --assign 'codex:보안/성능 전문�
 
 ### Step 2: Codex 리뷰 실행
 ```bash
-bash ~/.claude/scripts/tfx-route.sh codex \
+bash ~/.claude/scripts/tfx-route.sh code-reviewer \
   "다음 코드 변경을 리뷰하라. 심각도별 분류(critical/high/medium/low).
    체크: 로직 결함, 보안 취약점, 성능 문제, SOLID 위반, 에러 핸들링.
-   변경사항: {diff_or_file_content}" review
+   변경사항: {diff_or_file_content}"
 ```
 
 ### Step 3: 결과 포맷

@@ -8,7 +8,6 @@ import { resolveHubPortForContext } from "../../hub/hub-lifecycle.mjs";
 import { whichCommand, whichCommandAsync } from "../../hub/platform.mjs";
 
 const HUB_DEFAULT_PORT = 27888;
-const DEFAULT_STATUS_URL = "http://127.0.0.1:27888/status";
 const _sab = new Int32Array(new SharedArrayBuffer(4));
 const CLI_PROBE_CACHE = new Map();
 const CLI_PROBE_PROMISES = new Map();
@@ -38,10 +37,7 @@ function fetchHubStatus({
   };
 }
 
-export function resolveDefaultStatusUrl(
-  env = process.env,
-  cwd = process.cwd(),
-) {
+function resolveDefaultStatusUrl(env = process.env, cwd = process.cwd()) {
   const port = resolveHubPortForContext({
     env,
     cwd,
@@ -125,7 +121,7 @@ async function resolveCliProbe(name, options = {}) {
   return toCliResult(path);
 }
 
-export async function checkCli(name, options = {}) {
+async function checkCli(name, options = {}) {
   const cliName = normalizeCliName(name);
   if (!cliName) return { ok: false };
 
@@ -166,11 +162,6 @@ export async function probeClis(names, options = {}) {
     cliNames.map((name) => checkCli(name, options)),
   );
   return mapCliResults(cliNames, results);
-}
-
-export function resetCliProbeCache() {
-  CLI_PROBE_CACHE.clear();
-  CLI_PROBE_PROMISES.clear();
 }
 
 export function detectCodexAuthState({
@@ -295,5 +286,3 @@ export function checkHub({
 
   return { ok: false, state: "unreachable", restart: "timeout" };
 }
-
-export { DEFAULT_PKG_ROOT, DEFAULT_STATUS_URL };

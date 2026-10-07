@@ -54,8 +54,6 @@ claude plugin install triflux@triflux
 /tfx-auto "finish the migration and verify it" --mode deep --retry ralph --max-iterations 10
 ```
 
-Run `tfx auto "<task>" --json` in a shell to preview the routing decision without executing it.
-
 ## Skills
 
 Skills you invoke directly:
@@ -94,7 +92,6 @@ and execution. Manage Codex profiles directly in `~/.codex/<profile>.config.toml
 | `--retry` | `0`, `1` (default), `ralph`, `auto-escalate` | `ralph` = retry state machine with stuck detection; `auto-escalate` = move up the model chain |
 | `--max-iterations` | `N` | Cap for `ralph` / `auto-escalate` (`0` = unlimited) |
 | `--rounds` | `N` (default 4) | Round trips for `--mode live` |
-| `--risk-tier` | `auto`, `low`, `medium`, `high` | Pick verification strength from the change; ignored when `--mode` is set |
 | `--skill` | `<name>` | Prepend `skills/<name>/SKILL.md` to the Codex/Antigravity prompt |
 | `--no-native-bridge-ui` | | Hide headless workers from the `claude agents` panel |
 
@@ -124,14 +121,14 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 | Command | Use |
 | --- | --- |
 | `tfx setup` / `tfx doctor` | Sync files, HUD, MCP, profiles / diagnose and repair (`--fix`, `--json`) |
-| `tfx auto` | Preview the `tfx-auto` routing decision |
 | `tfx multi` | Local multi-CLI team in tmux + Hub |
 | `tfx synapse` | Session registry and leases |
 | `tfx hub` | Local Hub: `start`, `stop`, `status`, `ensure` |
 | `tfx mcp` | Managed MCP registry: `list`, `sync`, `add`, `remove` |
 | `tfx handoff` | Serialize the current context for another session or host |
 | `tfx cto` | Repo-local authority console: `collect`, `status`, `hygiene` (dry-run) |
-| `tfx review` / `tfx codex-team` | Codex git-diff review / Codex-led team mode |
+| `tfx codex-team` | Codex-led team mode |
+| `bash ~/.claude/scripts/tfx-route.sh code-reviewer "<instruction>"` | Send review to Codex (`codex exec review` via policy) |
 | `tfx stealth-fetch <url>` | Fetch one URL through cloakbrowser (JSON on stdout) |
 | `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | Notion → Markdown, commit intent trailers, CLI schemas, installed skills, TUI monitor, update, version |
 | `tfx-live` | Live session bridge (same as the `/tfx-live` skill) |

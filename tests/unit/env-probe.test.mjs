@@ -9,7 +9,6 @@ import {
   checkHub,
   detectCodexAuthState,
   detectCodexPlan,
-  resolveDefaultStatusUrl,
 } from "../../scripts/lib/env-probe.mjs";
 
 function makeTempHome() {
@@ -99,30 +98,6 @@ describe("env-probe detectCodexAuthState", () => {
 });
 
 describe("env-probe hub port resolution", () => {
-  it("resolveDefaultStatusUrl honors TFX_HUB_PORT", () => {
-    assert.equal(
-      resolveDefaultStatusUrl({
-        TFX_HUB_PORT: "30123",
-        TFX_HUB_ALLOW_EPHEMERAL_PORT: "1",
-      }),
-      "http://127.0.0.1:30123/status",
-    );
-    assert.equal(
-      resolveDefaultStatusUrl({ TFX_HUB_PORT: "not-a-number" }),
-      "http://127.0.0.1:27888/status",
-    );
-  });
-
-  it("resolveDefaultStatusUrl forces worktree hub probes back to 27888", () => {
-    assert.equal(
-      resolveDefaultStatusUrl(
-        { TFX_HUB_PORT: "30123" },
-        "/repo/.claude/worktrees/worker-a",
-      ),
-      "http://127.0.0.1:27888/status",
-    );
-  });
-
   it("checkHub probes and restarts using the env-selected port", () => {
     const originalPort = process.env.TFX_HUB_PORT;
     const originalAllowEphemeral = process.env.TFX_HUB_ALLOW_EPHEMERAL_PORT;

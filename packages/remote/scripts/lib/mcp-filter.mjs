@@ -15,10 +15,6 @@ import {
   uniqueStrings,
 } from "./mcp-server-catalog.mjs";
 
-export const KNOWN_MCP_SERVERS = Object.freeze(
-  Object.keys(MCP_SERVER_TOOL_CATALOG),
-);
-
 const SEARCH_INTENT_PATTERNS = Object.freeze([
   /\b(search|web|browse|look ?up|find|latest|recent|news|current|today|release(?: note)?s?|changelog|announcement|pricing|status|verify|fact[- ]?check)\b/i,
   /(검색|웹|브라우즈|찾아|조회|최신|최근|뉴스|현재|오늘|릴리즈|배포|변경사항|공지|가격|상태|검증)/u,
@@ -145,7 +141,7 @@ const PROFILE_DEFINITIONS = Object.freeze({
  * 파이프라인 단계별 MCP 서버/도구 제한 (post-filter).
  * role-based 프로필 위에 추가 적용. 빈 배열 = 전체 차단, 미정의 = 제한 없음.
  */
-export const PHASE_OVERRIDES = Object.freeze({
+const PHASE_OVERRIDES = Object.freeze({
   plan: Object.freeze({
     description: "계획 단계: 읽기 전용 탐색만 허용",
     allowedServers: Object.freeze(["context7"]),
@@ -166,7 +162,7 @@ export const PHASE_OVERRIDES = Object.freeze({
   }),
 });
 
-export const LEGACY_PROFILE_ALIASES = Object.freeze({
+const LEGACY_PROFILE_ALIASES = Object.freeze({
   implement: "executor",
   analyze: "analyze",
   review: "reviewer",
@@ -496,7 +492,7 @@ export function resolveMcpProfile(agentType = "", requestedProfile = "auto") {
   return normalized === "auto" ? resolveAutoProfile(agentType) : normalized;
 }
 
-export function parseAvailableServers(rawAvailableServers = "") {
+function parseAvailableServers(rawAvailableServers = "") {
   if (Array.isArray(rawAvailableServers))
     return uniqueStrings(rawAvailableServers);
   if (typeof rawAvailableServers !== "string" || !rawAvailableServers.trim())
@@ -552,7 +548,7 @@ function applyManifestFilter(servers) {
   return servers.filter((s) => enabled.has(s));
 }
 
-export function resolveAllowedServers(options = {}) {
+function resolveAllowedServers(options = {}) {
   const resolvedProfile = resolveMcpProfile(
     options.agentType,
     options.requestedProfile,
@@ -746,7 +742,7 @@ function shellArray(name, values) {
   return `${name}=(${values.map((value) => shellEscape(value)).join(" ")})`;
 }
 
-export function toDelimited(policy) {
+function toDelimited(policy) {
   const RS = "\x1e";
   return [
     policy.requestedProfile,
@@ -759,7 +755,7 @@ export function toDelimited(policy) {
   ].join(RS);
 }
 
-export function toShellExports(policy) {
+function toShellExports(policy) {
   const lines = [
     `MCP_PROFILE_REQUESTED=${shellEscape(policy.requestedProfile)}`,
     `MCP_RESOLVED_PROFILE=${shellEscape(policy.resolvedProfile)}`,
@@ -837,7 +833,7 @@ function parseCliArgs(argv) {
   return args;
 }
 
-export async function runCli(argv = process.argv.slice(2)) {
+async function runCli(argv = process.argv.slice(2)) {
   let args;
   try {
     args = parseCliArgs(argv);

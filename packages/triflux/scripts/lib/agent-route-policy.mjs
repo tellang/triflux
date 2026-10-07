@@ -198,7 +198,7 @@ function freezePolicy(entry) {
   return Object.freeze({ ...entry });
 }
 
-export const CODEX_AGENT_POLICY = Object.freeze(
+const CODEX_AGENT_POLICY = Object.freeze(
   Object.fromEntries(
     Object.entries(policy).map(([agent, entry]) => [
       agent,
@@ -206,9 +206,9 @@ export const CODEX_AGENT_POLICY = Object.freeze(
     ]),
   ),
 );
-export const DEFAULT_CODEX_AGENT = "executor";
+const DEFAULT_CODEX_AGENT = "executor";
 
-export const CANONICAL_CODEX_PROFILE_OVERRIDES = Object.freeze(
+const CANONICAL_CODEX_PROFILE_OVERRIDES = Object.freeze(
   new Set([
     "gpt6_luna_low",
     "gpt6_luna_high",
@@ -219,7 +219,7 @@ export const CANONICAL_CODEX_PROFILE_OVERRIDES = Object.freeze(
     "gpt6_astra_ultra",
   ]),
 );
-export const ULTRA_ELIGIBLE_CODEX_AGENTS = Object.freeze(
+const ULTRA_ELIGIBLE_CODEX_AGENTS = Object.freeze(
   new Set(["deep-executor", "scientist-deep"]),
 );
 
@@ -244,7 +244,7 @@ export function resolveCodexAgentPolicy(agent) {
  * later process-level `TFX_CODEX_PROFILE`. Ultra is reserved for an eligible
  * top-level role; every nested/sandboxed or ineligible request is max.
  */
-export function resolveCodexAgentProfile(
+function resolveCodexAgentProfile(
   agent,
   {
     profileOverride = "auto",
@@ -314,13 +314,6 @@ export function resolveNestedCodexAgentProfile(
   const { effort } = resolveCodexProfileConfigValues(candidate, { codexHome });
   if (!effort) return fallback;
   return effort.toLowerCase() === "ultra" ? "gpt6_astra_max" : candidate;
-}
-
-export function describeCodexAgentPolicy() {
-  return {
-    defaultAgent: DEFAULT_CODEX_AGENT,
-    agents: Object.keys(CODEX_AGENT_POLICY),
-  };
 }
 
 function parseCliArgs(argv) {
