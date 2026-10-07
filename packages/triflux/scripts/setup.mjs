@@ -1325,6 +1325,17 @@ function isCloakBrowserSupportedPlatform(platform, arch) {
   );
 }
 
+// 버전 없이 받으면 최신이 깔린다. cloakbrowser 는 0.4.0 부터 라이선스 키 경로가 들어갔고
+// 최신 브라우저는 로그인이 필요하므로 package.json 에 고정한 버전으로 받는다.
+function optionalDependencySpecs(root = PLUGIN_ROOT) {
+  const { optionalDependencies = {} } = JSON.parse(
+    readFileSync(join(root, "package.json"), "utf8"),
+  );
+  return Object.entries(optionalDependencies).map(
+    ([name, range]) => `${name}@${range}`,
+  );
+}
+
 function ensureCloakBrowser({
   env = process.env,
   platform = process.platform,
@@ -1370,8 +1381,7 @@ function ensureCloakBrowser({
         "install",
         "--no-save",
         "--ignore-scripts",
-        "cloakbrowser",
-        "playwright-core",
+        ...optionalDependencySpecs(),
       ],
       {
         cwd: PLUGIN_ROOT,
