@@ -61,7 +61,7 @@
  * @property {() => Promise<void>} start
  * @property {() => Promise<void>} stop
  * @property {() => boolean} isReady
- * @property {'codex'|'codex-app-server'|'gemini'|'antigravity'|'claude'|'delegator'} type
+ * @property {'codex'|'codex-app-server'|'gemini'|'antigravity'|'claude'} type
  */
 
 export const WORKER_TYPES = Object.freeze([
@@ -70,5 +70,4 @@ export const WORKER_TYPES = Object.freeze([
   "gemini",
   "antigravity",
   "claude",
-  "delegator",
 ]);

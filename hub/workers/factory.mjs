@@ -5,7 +5,6 @@
 //   - 'codex'            → CodexMcpWorker (default) or CodexAppServerWorker when
 //                          opts.transport === 'app-server'
 //   - 'codex-app-server' → CodexAppServerWorker (explicit alias)
-//   - 'delegator'        → DelegatorMcpWorker
 //
 import { ClaudeWorker } from "./claude-worker.mjs";
 import { CodexAppServerWorker } from "./codex-app-server-worker.mjs";
@@ -48,7 +47,7 @@ async function createCodexWorker(opts = {}) {
 }
 
 /**
- * @param {'claude'|'codex'|'codex-app-server'|'delegator'} type
+ * @param {'claude'|'codex'|'codex-app-server'} type
  * @param {object} [opts]
  * @returns {Promise<import('./interface.mjs').IWorker>}
  */
@@ -60,10 +59,6 @@ export async function createWorker(type, opts = {}) {
       return createCodexWorker(opts);
     case "codex-app-server":
       return createCodexWorker({ ...opts, transport: "app-server" });
-    case "delegator": {
-      const { DelegatorMcpWorker } = await import("./delegator-mcp.mjs");
-      return new DelegatorMcpWorker(opts);
-    }
     default:
       throw new Error(`Unknown worker type: ${type}`);
   }

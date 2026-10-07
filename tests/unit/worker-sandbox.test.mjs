@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
 import { buildWorkerSandboxEnv } from "../../hub/team/worker-sandbox.mjs";
-import { DelegatorMcpWorker } from "../../hub/workers/delegator-mcp.mjs";
 
 const cleanup = [];
 
@@ -74,31 +73,6 @@ describe("worker sandbox env", () => {
     assert.deepEqual(result.env, {});
   });
 
-  it("delegator route spawns inherit sandboxed user-state roots", () => {
-    const cwd = tmpRoot("worker-sandbox-delegator");
-    const hostHome = tmpRoot("worker-sandbox-host-home");
-    const worker = new DelegatorMcpWorker({
-      cwd,
-      env: {
-        HOME: hostHome,
-        APPDATA: join(hostHome, "AppData", "Roaming"),
-        PATH: process.env.PATH || "",
-        CODEX_HOME: join(hostHome, ".codex"),
-      },
-    });
-
-    const env = worker._buildRouteEnv({
-      provider: "codex",
-      teamTaskId: "task/one",
-    });
-
-    const expectedHome = join(cwd, ".triflux", "worker-home", "task_one");
-    assert.equal(env.HOME, expectedHome);
-    assert.equal(env.APPDATA, join(expectedHome, "AppData", "Roaming"));
-    assert.equal(env.CODEX_HOME, join(hostHome, ".codex"));
-    assert.equal(env.TFX_WORKER_SANDBOX_SCOPE, "delegator-route");
-  });
-
   it("keeps the host HOME for antigravity-family agents (no headless auth)", () => {
     const cwd = tmpRoot("worker-sandbox-agy");
     for (const agent of ["antigravity", "agy", "gemini", "AGY"]) {
@@ -126,25 +100,5 @@ describe("worker sandbox env", () => {
     assert.equal(result.disabled, false);
     assert.equal(result.env.HOME, expectedHome);
     assert.equal(result.env.CODEX_HOME, join("/host/home", ".codex"));
-  });
-
-  it("delegator route keeps the host HOME for the antigravity provider", () => {
-    const cwd = tmpRoot("worker-sandbox-agy-delegator");
-    const hostHome = tmpRoot("worker-sandbox-agy-host-home");
-    const worker = new DelegatorMcpWorker({
-      cwd,
-      env: {
-        HOME: hostHome,
-        PATH: process.env.PATH || "",
-      },
-    });
-
-    const env = worker._buildRouteEnv({
-      provider: "antigravity",
-      teamTaskId: "task/agy",
-    });
-
-    assert.equal(env.HOME, hostHome);
-    assert.equal(env.TFX_WORKER_SANDBOX_SCOPE, undefined);
   });
 });

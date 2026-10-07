@@ -151,8 +151,8 @@ describe("createWorker()", { timeout: 15000 }, () => {
       "ClaudeWorker",
     );
     assert.equal(
-      (await createWorker("delegator")).constructor.name,
-      "DelegatorMcpWorker",
+      (await createWorker("codex")).constructor.name,
+      "CodexMcpWorker",
     );
     await assert.rejects(() => createWorker("unknown"), /Unknown worker type/);
   });
