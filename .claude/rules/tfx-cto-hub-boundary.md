@@ -25,9 +25,7 @@ cto/*  →  공용 하위 계층   (허용 — 아래 allowlist만)
 |------|------|
 | `hub/lib/cto-env.mjs` | TFX_CTO_* kill-switch 판독. env만 읽는 dep-free 프리미티브 |
 
-**금지 패턴**: `cto/*`가 `hub/team/*`를 import(현재 잔존 위반: `cto/status.mjs`·
-`cto/hygiene.mjs`의 synapse-registry — reader 주입 seam 또는 공용 계층 강등으로 해소
-예정). synapse TTL/phase **판정 로직을 cto에 복제하는 것도 금지**(판정 기계 4중화).
+**금지 패턴**: `cto/*`가 `hub/team/*`를 import. 2026-10-08 에 ADR-0024 로 `cto/status.mjs`, `cto/hygiene.mjs` 의 synapse-registry import 를 걷어냈고, 조회는 저장된 레지스트리 파일만 읽는다. synapse TTL/phase **판정 로직을 cto에 복제하는 것도 금지**(판정 기계 4중화).
 
 ## Presence 계약 (false-positive 성공 금지)
 

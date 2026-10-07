@@ -172,7 +172,7 @@ falling back. Details: [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tf
 **CTO lake.** Run `tfx cto collect` to refresh the repo snapshot in `.triflux/lake/`, then
 `tfx cto status` to inspect it with its generation time and age. `tfx cto hygiene --dry-run` reports
 dry-run findings. The tray and unused CTO operating commands were removed
-([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)).
+([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)). Automatic collection stays off unless `TFX_CTO_AUTO_COLLECT=1` is set ([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)).
 
 **Remote hosts.** `/tfx-remote` and `--remote <host>` read hosts from `~/.config/triflux/hosts.json`
 (Windows: `%APPDATA%\triflux\hosts.json`). Run `/tfx-remote setup` to add one, then
