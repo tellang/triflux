@@ -14,37 +14,6 @@ const TOKEN_HARD_CAP = 150;
 const HANDOFF_MARKER = "--- HANDOFF ---";
 
 /**
- * 워커 프롬프트에 삽입할 HANDOFF 블록 생성 지시
- */
-export const HANDOFF_INSTRUCTION = `
-After completing the task, you MUST output a HANDOFF block in exactly this format at the end of your response:
-
---- HANDOFF ---
-status: ok | partial | failed
-lead_action: accept | needs_read | retry | reassign
-task: <1-3 word task type>
-files_changed: <comma-separated repo-root relative file paths, or "none">
-verdict: <one sentence conclusion>
-confidence: high | medium | low
-risk: low | med | high
-detail: <result file path if available, or "none">
-
-If the task failed, also include:
-error_stage: dispatch | execution | timeout
-retryable: yes | no
-partial_output: yes | no
-
-Rules:
-- The HANDOFF block must start with exactly "--- HANDOFF ---"
-- Set status: ok only after you have verified the work (file/diff/test evidence) — unverified claims must use partial or failed.
-- Each field must be on its own line as "key: value"
-- Report files_changed as repo-root relative paths
-- verdict must be a single concise sentence
-- Do not skip any required field
-- This block owns the final output position; this block must be the last thing you output
-`.trim();
-
-/**
  * CLI 프롬프트 길이 제한을 고려한 축약 HANDOFF 지시
  */
 export const HANDOFF_INSTRUCTION_SHORT = `After completing, output this block at the end; this block must be the last thing you output:
@@ -61,7 +30,7 @@ Set status: ok only after you have verified the work (file/diff/test evidence) �
  * @param {string} rawText
  * @returns {object|null} 파싱된 필드 객체, 블록이 없으면 null
  */
-export function parseHandoff(rawText) {
+function parseHandoff(rawText) {
   if (!rawText || typeof rawText !== "string") return null;
 
   // P1 fix: 마지막 HANDOFF 블록을 파싱 (프롬프트 에코로 인한 중복 마커 대응)
@@ -137,7 +106,7 @@ function validateEnum(value, allowed) {
  * @param {string[]} [context.gitDiffFiles]
  * @returns {{ handoff: object, valid: boolean, warnings: string[] }}
  */
-export function validateHandoff(parsed, context = {}) {
+function validateHandoff(parsed, context = {}) {
   const warnings = [];
   const h = { ...parsed };
 
@@ -247,7 +216,7 @@ export function validateHandoff(parsed, context = {}) {
  * @param {string[]} [context.filesChanged]
  * @returns {object}
  */
-export function buildFallbackHandoff(exitCode, resultFile, cli, context = {}) {
+function buildFallbackHandoff(exitCode, resultFile, cli, context = {}) {
   const ok = exitCode === 0;
   const filesChanged = Array.isArray(context.filesChanged)
     ? context.filesChanged.filter(Boolean)

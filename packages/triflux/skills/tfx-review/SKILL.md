@@ -92,7 +92,7 @@ ELSE:
 > 자동 차단 훅은 없다. 아래 규칙은 호출자가 지킨다.
 
 1. **`codex exec` 직접 호출 및 deprecated Gemini CLI 직접 호출 절대 금지**
-2. Codex·Antigravity → `Bash("tfx multi --auto-attach --dashboard --assign 'cli:프롬프트:역할' --timeout 1800", run_in_background=true)` **만** 사용 — teammate mode는 생략해 `auto` 기본값을 쓰며, foreground Bash는 하니스가 600s에 강제 종료. 결과는 task-notification 후 회수
+2. Codex·Antigravity → `Bash("tfx multi --assign 'cli:프롬프트:역할' --timeout 1800", run_in_background=true)` **만** 사용. teammate mode는 생략해 `auto` 기본값을 쓰며, foreground Bash는 하니스가 600s에 강제 종료. 결과는 task-notification 후 회수
 3. Claude → `Agent(run_in_background=true)`
 4. Bash + Agent를 같은 메시지에서 동시 호출하여 병렬 실행
 
@@ -125,7 +125,7 @@ Agent(
 
 **Codex + Antigravity multi dispatch (auto):**
 ```
-Bash("tfx multi --auto-attach --dashboard --assign 'codex:보안/성능 전문가로서 이 코드를 분석하라. OWASP Top 10 취약점 확인. O(n²) 이상의 성능 병목 식별. 누락된 에러 핸들링 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:reviewer' --assign 'antigravity:코드 품질 전문가로서 이 코드를 분석하라. 가독성과 네이밍 컨벤션 평가. 주석이 필요한 복잡한 로직 식별. 타입 안전성 문제 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:reviewer' --timeout 1800", run_in_background=true)
+Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분석하라. OWASP Top 10 취약점 확인. O(n²) 이상의 성능 병목 식별. 누락된 에러 핸들링 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:code-reviewer' --assign 'antigravity:코드 품질 전문가로서 이 코드를 분석하라. 가독성과 네이밍 컨벤션 평가. 주석이 필요한 복잡한 로직 식별. 타입 안전성 문제 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:code-reviewer' --timeout 1800", run_in_background=true)
 ```
 
 > 배리어: 위 dispatch는 background — task-notification 완료 후 team runtime 결과에서 Codex/Antigravity findings를 회수하고, Agent 결과도 TaskOutput으로 수집한 다음에만 Step 3을 진행한다.

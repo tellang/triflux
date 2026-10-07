@@ -6,29 +6,13 @@ import {
   launchAttachInWindowsTerminal,
   wantsWtAttachFallback,
 } from "../services/attach-fallback.mjs";
-import {
-  isNativeMode,
-  isTeamAlive,
-  isWtMode,
-} from "../services/runtime-mode.mjs";
+import { isTeamAlive } from "../services/runtime-mode.mjs";
 import { loadTeamState } from "../services/state-store.mjs";
 
 export async function teamAttach(args = []) {
   const state = loadTeamState();
   if (!state || !isTeamAlive(state)) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
-    return;
-  }
-  if (isNativeMode(state)) {
-    console.log(
-      `\n  ${DIM}in-process 모드는 별도 attach가 없습니다.${RESET}\n  ${DIM}상태 확인: tfx multi status${RESET}\n`,
-    );
-    return;
-  }
-  if (isWtMode(state)) {
-    console.log(
-      `\n  ${DIM}wt 모드는 attach 개념이 없습니다 (Windows Terminal pane가 독립 실행됨).${RESET}\n  ${DIM}재실행/정리는: tfx multi stop${RESET}\n`,
-    );
     return;
   }
 

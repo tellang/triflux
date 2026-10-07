@@ -1,3 +1,5 @@
+폐기: 2026-10-08 슬롭 정리(.triflux/plans/slop-audit-2026-10.md 결정 3)
+
 # PRD: native-bridge interactive attach
 
 ## 1. 문제 정의, 목표, 비목표

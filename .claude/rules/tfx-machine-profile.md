@@ -30,8 +30,9 @@ TFX_STALL_KILL=classify
 ```
 
 OS 파생 multiplexer 정책은 `darwin|linux → tmux`, `win32 → psmux`다.
-non-Windows의 `auto` 모드는 psmux 감지를 무시하며, 명시적 `wt|psmux`도
-`in-process`로 정규화한다. 따라서 macOS/Linux에서 WT/psmux 경로를 선택하지 않는다.
+non-Windows의 `auto` 모드는 psmux 감지를 무시하고, 명시적 `psmux`는 오류로 처리한다.
+WT 팀 모드와 in-process 모드는 지원하지 않는다. 대화형 실행에 멀티플렉서가 없으면
+설치 안내 오류로 끝내고, 비TTY에서 사용할 멀티플렉서가 없으면 headless로 실행한다.
 
 ## 설치 캡처
 
@@ -85,7 +86,7 @@ Claude-native로 설계된 역할과 transport 내부의 `Codex MCP → Codex ex
 
 ## Timeout 정책
 
-| 상태 | tmux 경로 | headless / in-process 경로 |
+| 상태 | tmux 경로 | headless 경로 |
 | --- | --- | --- |
 | 프로파일 미설정 | 6h hard ceiling, 1200s stall kill | 동일 |
 | non-interactive `unattended` 프로파일 | 6h hard ceiling, 1200s stall kill | 동일 |

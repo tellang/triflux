@@ -1,12 +1,6 @@
-import { hasWindowsTerminalSession } from "../../session.mjs";
 import { AMBER, BOLD, DIM, GRAY, GREEN, RED, RESET } from "../../shared.mjs";
-import { formatCompletionSuffix } from "../render.mjs";
-import { fetchHubTaskList, nativeGetStatus } from "../services/hub-client.mjs";
-import {
-  isNativeMode,
-  isTeamAlive,
-  isWtMode,
-} from "../services/runtime-mode.mjs";
+import { fetchHubTaskList } from "../services/hub-client.mjs";
+import { isTeamAlive } from "../services/runtime-mode.mjs";
 import { loadTeamState } from "../services/state-store.mjs";
 
 export async function teamStatus(args = []) {
@@ -41,10 +35,6 @@ export async function teamStatus(args = []) {
     })),
   };
 
-  if (isNativeMode(state) && alive) {
-    payload.nativeMembers = (await nativeGetStatus(state))?.data?.members || [];
-  }
-
   if (alive) {
     payload.hubTasks = await fetchHubTaskList(state);
   }
@@ -65,24 +55,11 @@ export async function teamStatus(args = []) {
     `    Uptime: ${alive ? `${Math.round((Date.now() - state.startedAt) / 60000)}분` : "-"}`,
   );
   console.log(`    태스크: ${(state.tasks || []).length}`);
-  if (isWtMode(state) && !hasWindowsTerminalSession()) {
-    console.log(
-      `    ${DIM}WT_SESSION 미감지: 생존성은 heuristics로 판정됨${RESET}`,
-    );
-  }
 
   for (const member of state.members || []) {
     console.log(
       `    - ${member.name} (${member.cli}) ${DIM}${member.role}${RESET} ${DIM}${member.pane}${RESET}`,
     );
-  }
-
-  if (isNativeMode(state) && alive) {
-    for (const member of payload.nativeMembers) {
-      console.log(
-        `    • ${member.name}: ${member.status}${formatCompletionSuffix(member)}${member.lastPreview ? ` ${DIM}${member.lastPreview}${RESET}` : ""}`,
-      );
-    }
   }
 
   if (alive) {

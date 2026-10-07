@@ -1,8 +1,5 @@
 // hub/team/headless.mjs — 헤드리스 CLI 오케스트레이션
 // psmux pane에서 CLI를 헤드리스 모드로 실행하고 결과를 수집한다.
-// v5.2.0: 기본 headless 엔진 (runHeadless, runHeadlessWithCleanup)
-// v6.0.0: Lead-direct 모드 (runHeadlessInteractive, autoAttachTerminal)
-// 의존성: psmux.mjs (Node.js 내장 모듈만 사용)
 
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -10,7 +7,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -40,7 +36,6 @@ import {
   killDaemonJob,
   sendKillBySessionId,
 } from "./claude-daemon-control.mjs";
-import { startClaudeNativeBridge } from "./claude-native-bridge.mjs";
 import { removeClaudeSessionProjection } from "./claude-session-projection.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import {
@@ -89,8 +84,6 @@ const CLI_BRAND = {
     ansi: "\x1b[38;2;232;112;64m",
   }, // 🟠 claudeOrange
 };
-const _ANSI_RESET = "\x1b[0m";
-const _ANSI_DIM = "\x1b[2m";
 
 /** 에이전트 역할명 → CLI 타입 매핑 (단일 소스: agent-map.json) */
 const _require = createRequire(import.meta.url);
@@ -308,19 +301,6 @@ const MCP_PROFILE_HINTS = {
   docs: "Focus on documentation and explanation tasks.",
 };
 
-/**
- * CLI별 헤드리스 명령 빌더
- * @param {'codex'|'antigravity'|'claude'} cli
- * @param {string} prompt — 실행할 프롬프트
- * @param {string} resultFile — 결과 저장 파일 경로
- * @param {object} [opts]
- * @param {boolean} [opts.handoff=true]
- * @param {string} [opts.mcp] — MCP 프로필 ("implement"|"analyze"|"review"|"docs")
- * @param {string} [opts.contextFile] — 컨텍스트 파일 경로 (최대 32KB, UTF-8 안전 절단)
- * @returns {string} PowerShell 명령
- */
-// ── Dashboard attach args for WT ────────────────────────────────
-
 export function buildDashboardAttachArgs(
   sessionName,
   layout,
@@ -385,7 +365,6 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
     "prompt-" + randomUUID().slice(0, 8) + ".txt",
   ).replace(/\\/g, "/");
   writeFileSync(promptFile, fullPrompt, "utf8");
-  void IS_WINDOWS; // referenced for diagnostic guard chain below
 
   // Codex와 Antigravity는 tfx-route.sh를 통해서만 headless 실행한다. 이 경로가
   // disable/fallback/fail-loud 정책의 유일한 판정원이다. 여기서 같은 정책을
@@ -525,83 +504,6 @@ export function readResult(resultFile, paneId) {
   return capturePsmuxPane(paneId, 30);
 }
 
-// ─── Stall Detection ───
-
-/** Stall detection 기본값 (immutable) */
-export const STALL_DEFAULTS = Object.freeze({
-  pollInterval: 5_000,
-  stallTimeout: 120_000,
-  interventionTimeout: resolveStallInterventionMs(),
-  hardCeiling: resolveHardCeilingMs(),
-  maxRestarts: 2,
-  maxInterventions: 1,
-});
-
-/** CLI pane stall 감지 에러 (STALL_EXHAUSTED | COMPLETION_TIMEOUT) */
-export class StallError extends Error {
-  constructor(
-    message,
-    { code = "STALL_DETECTED", category = "transient", recovery = "" } = {},
-  ) {
-    super(message);
-    this.name = "StallError";
-    this.code = code;
-    this.category = category;
-    this.recovery = recovery;
-  }
-}
-
-/**
- * Stall 모니터 팩토리 — output + resultFile mtime 하이브리드 감지
- * @param {string} paneId
- * @param {string} resultFile
- * @param {{ stallTimeout: number }} config
- * @param {{ capturePsmuxPane?: Function, statSync?: Function }} [deps]
- * @returns {{ poll: () => { snapshot: string, mtimeChanged: boolean, stalled: boolean, elapsed: number } }}
- */
-export function createStallMonitor(paneId, resultFile, config, deps = {}) {
-  const capture = deps.capturePsmuxPane || capturePsmuxPane;
-  const stat = deps.statSync || statSync;
-  let lastSnapshot = "";
-  let lastMtime = 0;
-  let lastChangeAt = Date.now();
-
-  try {
-    lastMtime = stat(resultFile).mtimeMs;
-  } catch {
-    /* not created yet */
-  }
-
-  return Object.freeze({
-    poll() {
-      const snapshot = capture(paneId, 50);
-      let currentMtime = 0;
-      try {
-        currentMtime = stat(resultFile).mtimeMs;
-      } catch {
-        /* ignore */
-      }
-
-      const outputChanged = snapshot !== lastSnapshot;
-      const mtimeChanged = currentMtime > 0 && currentMtime !== lastMtime;
-
-      if (outputChanged || mtimeChanged) {
-        lastChangeAt = Date.now();
-        lastSnapshot = snapshot;
-        if (mtimeChanged) lastMtime = currentMtime;
-      }
-
-      const elapsed = Date.now() - lastChangeAt;
-      return Object.freeze({
-        snapshot,
-        mtimeChanged,
-        stalled: elapsed >= config.stallTimeout,
-        elapsed,
-      });
-    },
-  });
-}
-
 function createHeadlessIntervention(dispatch, fallback) {
   return async (context) => {
     if (typeof fallback === "function")
@@ -698,254 +600,6 @@ export function createActivityPollGuard({
       return lastMtime;
     },
   });
-}
-
-/**
- * 하이브리드 stall 감지 대기 — output 변화 + resultFile mtime 모니터링.
- * 2분 무변화 시 pane kill → re-dispatch (최대 2회 재시작).
- *
- * @param {string} sessionName
- * @param {string} paneId — 현재 pane 타겟 (예: "tfx:0.1")
- * @param {string} resultFile — 결과 저장 파일 경로
- * @param {object} [opts]
- * @param {number} [opts.pollInterval=5000] — 폴링 간격 ms
- * @param {number} [opts.stallTimeout=120000] — 무변화 stall 판정 ms
- * @param {number} [opts.hardCeiling] — 활동과 무관한 절대 상한 ms
- * @param {number} [opts.completionTimeout] — hardCeiling의 하위호환 alias
- * @param {number} [opts.maxRestarts=2] — 최대 재시작 횟수
- * @param {string} [opts.command] — re-dispatch용 원본 명령
- * @param {string} [opts.token] — completion token
- * @param {(snapshot: string) => void} [opts.onPoll] — 폴링 콜백
- * @returns {Promise<{ matched: boolean, exitCode: number|null, restarts: number, stallDetected: boolean, paneId: string, token?: string, logPath?: string|null }>}
- */
-export async function waitForCompletionWithStallDetect(
-  sessionName,
-  paneId,
-  resultFile,
-  opts = {},
-) {
-  const {
-    pollInterval = 5000,
-    stallTimeout = 120000,
-    maxRestarts = 2,
-    maxInterventions = 1,
-    command,
-    token,
-    onPoll,
-    onIntervene,
-    _deps,
-  } = opts;
-  const hardCeiling =
-    opts.hardCeiling ??
-    opts.completionTimeout ??
-    (isActivityLifecycleEnabled() ? resolveHardCeilingMs() : 900_000);
-
-  // 의존성 (테스트 시 _deps로 주입 가능)
-  const deps = _deps || {};
-  const _capture = deps.capturePsmuxPane || capturePsmuxPane;
-  const _exists = deps.existsSync || existsSync;
-  const _stat = deps.statSync || statSync;
-  const _readFile = deps.readFileSync || readFileSync;
-  const _exec = deps.psmuxExec || psmuxExec;
-  const _dispatch = deps.dispatchCommand || dispatchCommand;
-  const _startCapture = deps.startCapture || startCapture;
-
-  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const buildCompletionRegex = (activeToken) => {
-    const completionPatterns = [
-      activeToken
-        ? `${esc("__TRIFLUX_DONE__:")}${esc(activeToken)}:(\\d+)`
-        : `${esc("__TRIFLUX_DONE__:")}\\S+:(\\d+)`,
-      activeToken
-        ? `${esc("TFX_DONE_")}${esc(activeToken)}:(\\d+)`
-        : `${esc("TFX_DONE_")}\\S+:(\\d+)`,
-    ];
-    return new RegExp(completionPatterns.join("|"), "m");
-  };
-
-  let restarts = 0;
-  let interventions = 0;
-  const runStartedAt = Date.now();
-  let currentPaneId = paneId;
-  let stallDetected = false;
-  let currentToken = token;
-  let currentLogPath = opts.logPath || null;
-
-  while (true) {
-    let lastOutput = "";
-    let lastMtime = 0;
-    let lastChangeAt = Date.now();
-
-    // 초기 resultFile mtime
-    try {
-      if (_exists(resultFile)) lastMtime = _stat(resultFile).mtimeMs;
-    } catch {
-      /* 무시 */
-    }
-
-    while (true) {
-      await new Promise((r) => setTimeout(r, pollInterval));
-      const now = Date.now();
-
-      // 절대 상한은 재시작과 활동 여부를 관통하는 유일한 wall-clock kill이다.
-      if (now - runStartedAt > hardCeiling) {
-        // Issue #118: timeout kill 전에 capture-pane 출력을 .partial 파일로 persist.
-        // resultFile(`.txt`)이 아직 생성되지 않았을 수 있으므로 readResult 가 fallback 으로 읽는다.
-        try {
-          const partialSnapshot = _capture(currentPaneId, 200);
-          if (partialSnapshot && partialSnapshot.trim().length > 0) {
-            const writer = deps.writeFileSync || writeFileSync;
-            writer(`${resultFile}.partial`, partialSnapshot, "utf8");
-          }
-        } catch {
-          /* best-effort, timeout 은 이미 확정 */
-        }
-        return {
-          matched: false,
-          exitCode: null,
-          restarts,
-          stallDetected,
-          timedOut: true,
-          timeoutReason: "hard_ceiling",
-          paneId: currentPaneId,
-          token: currentToken,
-          logPath: currentLogPath,
-        };
-      }
-
-      // 1) capture-pane 출력 확인
-      const currentOutput = _capture(currentPaneId, 50);
-      if (onPoll) {
-        try {
-          onPoll(currentOutput);
-        } catch {
-          /* 삼킴 */
-        }
-      }
-
-      // 2) completion 토큰 감지
-      const completionRe = buildCompletionRegex(currentToken);
-      const completionMatch = completionRe.exec(currentOutput);
-      if (completionMatch) {
-        return {
-          matched: true,
-          exitCode: Number.parseInt(
-            completionMatch.slice(1).find(Boolean) || "0",
-            10,
-          ),
-          restarts,
-          stallDetected,
-          timedOut: false,
-          paneId: currentPaneId,
-          token: currentToken,
-          logPath: currentLogPath,
-        };
-      }
-
-      // 3) resultFile 존재 + mtime 변화 확인
-      let currentMtime = 0;
-      try {
-        if (_exists(resultFile)) currentMtime = _stat(resultFile).mtimeMs;
-      } catch {
-        /* 무시 */
-      }
-
-      // 4) 변화 감지 → stallTimer 리셋
-      const outputChanged = currentOutput !== lastOutput;
-      const mtimeChanged = currentMtime > 0 && currentMtime !== lastMtime;
-
-      if (outputChanged || mtimeChanged) {
-        lastChangeAt = now;
-        lastOutput = currentOutput;
-        if (mtimeChanged) lastMtime = currentMtime;
-      }
-
-      // resultFile이 갱신되고 내용이 있으면 완료로 간주
-      if (mtimeChanged && currentMtime > 0 && _exists(resultFile)) {
-        try {
-          const content = _readFile(resultFile, "utf8").trim();
-          if (content.length > 0) {
-            return {
-              matched: true,
-              exitCode: 0,
-              restarts,
-              stallDetected,
-              timedOut: false,
-              paneId: currentPaneId,
-              token: currentToken,
-              logPath: currentLogPath,
-            };
-          }
-        } catch {
-          /* 무시 */
-        }
-      }
-
-      // 5) stall 판정
-      if (now - lastChangeAt >= stallTimeout) {
-        stallDetected = true;
-
-        if (restarts >= maxRestarts) {
-          if (onIntervene && interventions < maxInterventions) {
-            interventions += 1;
-            let handled = false;
-            try {
-              handled =
-                (await onIntervene({
-                  channel: "pane",
-                  sessionName,
-                  paneId: currentPaneId,
-                  resultFile,
-                  inactiveMs: now - lastChangeAt,
-                  restarts,
-                  interventions,
-                })) === true;
-            } catch {
-              handled = false;
-            }
-            if (handled) {
-              lastChangeAt = Date.now();
-              continue;
-            }
-          }
-          const err = new Error("CLI가 반복적으로 멈춤. 수동 확인 필요.");
-          err.code = "STALL_EXHAUSTED";
-          err.category = "transient";
-          err.recovery = "CLI가 반복적으로 멈춤. 수동 확인 필요.";
-          err.restarts = restarts;
-          err.interventions = interventions;
-          throw err;
-        }
-
-        // kill pane → re-dispatch
-        try {
-          _exec(["kill-pane", "-t", currentPaneId]);
-        } catch {
-          /* 이미 종료 */
-        }
-
-        if (command) {
-          // 새 pane split + 동일 command re-dispatch
-          const newPaneId = _exec([
-            "split-window",
-            "-t",
-            sessionName,
-            "-P",
-            "-F",
-            "#{session_name}:#{window_index}.#{pane_index}",
-          ]);
-          _startCapture(sessionName, newPaneId);
-          const redispatch = _dispatch(sessionName, newPaneId, command);
-          currentPaneId = redispatch?.paneId || newPaneId;
-          if (redispatch?.token) currentToken = redispatch.token;
-          if (redispatch?.logPath) currentLogPath = redispatch.logPath;
-        }
-
-        restarts++;
-        break; // inner loop 재시작 (stallTimer 리셋)
-      }
-    }
-  }
 }
 
 function createHeadlessSessionOwnership(killSession) {
@@ -1342,7 +996,6 @@ async function awaitAll(
   timeoutSec,
   safeProgress,
   progressIntervalSec,
-  stallOpts,
   lifecycle,
 ) {
   // 병렬 대기 (Promise.all — 모든 pane 동시 폴링, 총 시간 = max(개별 시간))
@@ -1369,73 +1022,7 @@ async function awaitAll(
       }
 
       let completion;
-      if (stallOpts?.enabled) {
-        // 하이브리드 stall detection 모드
-        try {
-          const stallPollCb =
-            safeProgress && progressIntervalSec > 0
-              ? (snapshot) => {
-                  try {
-                    safeProgress({
-                      type: "progress",
-                      paneName: d.paneName,
-                      displayName: d.displayName,
-                      cli: d.cli,
-                      snapshot: snapshot.split("\n").slice(-15).join("\n"),
-                    });
-                  } catch {
-                    /* 삼킴 */
-                  }
-                }
-              : undefined;
-
-          const stallResult = await waitForCompletionWithStallDetect(
-            sessionName,
-            d.paneId || d.paneName,
-            d.resultFile,
-            {
-              pollInterval: stallOpts.pollInterval,
-              stallTimeout: stallOpts.stallTimeout,
-              hardCeiling: lifecycle?.enabled
-                ? (stallOpts.hardCeiling ??
-                  stallOpts.completionTimeout ??
-                  lifecycle.hardCeilingMs)
-                : (stallOpts.completionTimeout ?? timeoutSec * 1000),
-              maxRestarts: stallOpts.maxRestarts,
-              maxInterventions: stallOpts.maxInterventions,
-              command: d.command,
-              token: d.token,
-              onPoll: stallPollCb,
-              onIntervene: lifecycle?.enabled
-                ? createHeadlessIntervention(
-                    d,
-                    stallOpts.onIntervene ?? lifecycle.onIntervene,
-                  )
-                : undefined,
-            },
-          );
-          if (stallResult.paneId) d.paneId = stallResult.paneId;
-          if (stallResult.token) d.token = stallResult.token;
-          if (stallResult.logPath) d.logPath = stallResult.logPath;
-          completion = {
-            matched: stallResult.matched,
-            exitCode: stallResult.exitCode,
-            stallDetected: stallResult.stallDetected,
-            restarts: stallResult.restarts,
-          };
-        } catch (stallErr) {
-          if (stallErr.code === "STALL_EXHAUSTED") {
-            completion = {
-              matched: false,
-              exitCode: null,
-              stallExhausted: true,
-              restarts: stallErr.restarts,
-            };
-          } else {
-            throw stallErr;
-          }
-        }
-      } else if (lifecycle?.enabled) {
+      if (lifecycle?.enabled) {
         if (d.logPath) pollOpts.logPath = d.logPath;
         const activity = createActivityLifecycle({
           interventionMs: lifecycle.interventionMs,
@@ -1506,8 +1093,6 @@ async function awaitAll(
           matched: completion.matched,
           exitCode: completion.exitCode,
           sessionDead: completion.sessionDead || false,
-          stallDetected: completion.stallDetected || false,
-          stallExhausted: completion.stallExhausted || false,
         });
       }
 
@@ -1672,8 +1257,6 @@ async function awaitAllDaemon(
           matched: completion.matched,
           exitCode: completion.exitCode,
           sessionDead: false,
-          stallDetected: false,
-          stallExhausted: false,
         });
       }
 
@@ -1785,9 +1368,8 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     autoAttach = false,
     dashboard = false,
     dashboardLayout = "single",
-    stallDetect,
     nativeBridge = false,
-    nativeBridgeMode = "roster",
+    nativeBridgeMode = "agents",
     onIntervene,
     leadPane = null,
     leadTmux = null,
@@ -1811,36 +1393,11 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     return { sessionName, results: [], sessionOwnership };
   }
 
-  let nativeBridgeHandle = null;
   let daemonDispatches = [];
   let runCompleted = false;
   let completedResults = [];
   let runFailed = false;
   let runError;
-  if (nativeBridge && nativeBridgeMode === "claude-wrapper") {
-    throw new Error(
-      "[headless] --native-bridge-mode claude-wrapper is reserved and not implemented yet",
-    );
-  }
-  if (
-    nativeBridge &&
-    (nativeBridgeMode === "roster" || nativeBridgeMode === "interactive-attach")
-  ) {
-    nativeBridgeHandle = await startClaudeNativeBridge({
-      sessionName,
-      assignments: normalizedAssignments,
-      cwd: process.cwd(),
-      workerType:
-        nativeBridgeMode === "interactive-attach" ? "interactive" : "headless",
-      onKill() {
-        sessionOwnership.release();
-      },
-    });
-    process.stderr.write(
-      `[headless] Claude native bridge roster written: ${nativeBridgeHandle.rosterPath}\n`,
-    );
-  }
-
   // Hub version skew pre-flight (fail-open, best-effort)
   requestJson("/status", { method: "GET", timeoutMs: 500 })
     .then((status) => {
@@ -1899,11 +1456,10 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       });
     }
   } else if (dashboard) {
-    // Issue #116-F: --dashboard 요청이 non-TTY 환경에서 silent skip 되던 혼란 해소.
-    // stderr 로만 안내 (stdout 은 readHeadlessResult 파싱 대상이라 건드리지 않는다).
+    // stdout은 결과 파싱 대상이므로 안내는 stderr로 보낸다.
     const logDir = join(tmpdir(), "tfx-headless");
     process.stderr.write(
-      `\n⚠ --dashboard requested but stdout is not a TTY; dashboard is skipped.\n` +
+      `\n⚠ stdout is not a TTY; dashboard is skipped.\n` +
         `  Session is running in background. Worker logs:\n` +
         `    ${logDir}${IS_WINDOWS ? "\\" : "/"}${sessionName}-worker-N.txt\n` +
         `    ${logDir}${IS_WINDOWS ? "\\" : "/"}${sessionName}-worker-N.txt.err\n\n`,
@@ -1997,7 +1553,6 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
-    nativeBridgeHandle?.handleProgress(event);
     feedTui(event);
     feedSynapse(event);
     feedHubActivity(event);
@@ -2091,11 +1646,9 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
             timeoutSec,
             safeProgress,
             progressIntervalSec,
-            stallDetect,
             lifecycle,
           );
     const collected = await collectResults(sessionName, results);
-    for (const result of collected) nativeBridgeHandle?.completeWorker(result);
 
     // 완료 시 TUI에 최종 상태 반영 후 닫기
     if (tui) {
@@ -2137,7 +1690,6 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
         timeoutMs: 1000,
       }).catch(() => {});
     }
-    if (nativeBridgeHandle) await nativeBridgeHandle.close();
     if (daemonDispatches.length > 0) {
       await cleanupDaemonDispatches(daemonDispatches);
     }
@@ -2224,71 +1776,6 @@ export function applyTrifluxTheme(sessionName) {
     } catch {
       /* 무시 */
     }
-  }
-}
-
-/**
- * Windows Terminal에 triflux 프로필을 자동 생성/갱신한다.
- * 반투명 + 비포커스 시 더 투명 + Catppuccin 테마.
- * @returns {boolean} 성공 여부
- */
-
-/**
- * WT 기본 프로필의 폰트 크기를 읽는다.
- * @returns {number} 기본 폰트 크기 (못 읽으면 12)
- */
-function _getWtDefaultFontSize() {
-  const settingsPaths = [
-    join(
-      process.env.LOCALAPPDATA || "",
-      "Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json",
-    ),
-    join(
-      process.env.LOCALAPPDATA || "",
-      "Microsoft/Windows Terminal/settings.json",
-    ),
-  ];
-  for (const p of settingsPaths) {
-    if (!existsSync(p)) continue;
-    try {
-      const settings = JSON.parse(
-        readFileSync(p, "utf8").replace(/^\s*\/\/.*$/gm, ""),
-      );
-      // 기본 프로필 or 첫 프로필의 폰트
-      const defaultGuid = settings.defaultProfile;
-      const profiles = settings.profiles?.list || [];
-      const defaultProfile =
-        profiles.find((pr) => pr.guid === defaultGuid) || profiles[0];
-      return (
-        defaultProfile?.font?.size ||
-        settings.profiles?.defaults?.font?.size ||
-        12
-      );
-    } catch {
-      /* 다음 */
-    }
-  }
-  return 12;
-}
-
-/**
- * 파일을 원자적으로 쓴다 — 임시 파일에 먼저 기록 후 rename으로 교체.
- * 프로세스가 쓰기 도중 충돌해도 원본 파일이 손상되지 않는다.
- * @param {string} filePath — 대상 파일 경로
- * @param {string} data — 쓸 내용
- */
-function _atomicWriteSync(filePath, data) {
-  const tmpPath = `${filePath}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmpPath, data, "utf8");
-    renameSync(tmpPath, filePath);
-  } catch (err) {
-    try {
-      writeFileSync(tmpPath.replace(/\.tmp$/, ".tmp.del"), "");
-    } catch {
-      /* 무시 */
-    }
-    throw err;
   }
 }
 

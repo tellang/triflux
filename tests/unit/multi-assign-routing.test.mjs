@@ -11,9 +11,9 @@ describe("multi --assign worker routing", () => {
   it("keeps a comma-containing assign as one worker with the full prompt", () => {
     const parsed = parseTeamArgs([
       "--teammate-mode",
-      "in-process",
+      "tmux",
       "--assign",
-      `codex:${prompt}:researcher`,
+      `codex:${prompt}:document-specialist`,
     ]);
     const workers = resolveTeamWorkers({ ...parsed, task: prompt });
 
@@ -21,27 +21,27 @@ describe("multi --assign worker routing", () => {
     assert.deepEqual(workers.subtasks, [prompt]);
   });
 
-  it("parses researcher separately from prompt-internal colons", () => {
+  it("parses document-specialist separately from prompt-internal colons", () => {
     const parsed = parseTeamArgs([
       "--teammate-mode",
-      "in-process",
+      "tmux",
       "--assign",
-      `codex:범위: ${prompt}:researcher`,
+      `codex:범위: ${prompt}:document-specialist`,
     ]);
 
     assert.deepEqual(parsed.assigns, [
-      { cli: "codex", prompt: `범위: ${prompt}`, role: "researcher" },
+      { cli: "codex", prompt: `범위: ${prompt}`, role: "document-specialist" },
     ]);
   });
 
   it("uses assign order and duplicate CLIs instead of agents or task", () => {
     const parsed = parseTeamArgs([
       "--teammate-mode",
-      "in-process",
+      "tmux",
       "--agents",
       "antigravity,claude",
       "--assign",
-      `codex:${prompt}:researcher`,
+      `codex:${prompt}:document-specialist`,
       "--assign",
       "codex:구현 + 검증, 문서\n정리:executor",
       "다른 작업, 분할 대상",

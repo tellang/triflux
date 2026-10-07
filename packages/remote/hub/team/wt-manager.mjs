@@ -231,7 +231,7 @@ export function createWtManager(opts = {}) {
       opts.tabCreateDelayMs,
       DEFAULT_TAB_CREATE_DELAY_MS,
     ) || DEFAULT_TAB_CREATE_DELAY_MS;
-  const _waitTimeoutMs =
+  const waitTimeoutMs =
     resolvePositiveInteger(
       opts.waitTimeoutMs,
       process.env.WTM_WAIT_TIMEOUT_MS,
@@ -274,7 +274,7 @@ export function createWtManager(opts = {}) {
   }
 
   async function waitTabReady(title, pidFile) {
-    const deadline = now() + DEFAULT_WAIT_TIMEOUT_MS;
+    const deadline = now() + waitTimeoutMs;
 
     while (now() <= deadline) {
       if (exists(pidFile)) {

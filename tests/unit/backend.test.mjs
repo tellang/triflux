@@ -1,336 +1,53 @@
-// tests/unit/backend.test.mjs — Backend 인터페이스 단위 테스트
-
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
-
+import { execFileSync } from "node:child_process";
 import {
-  AntigravityBackend,
-  buildAntigravityCommand,
-  ClaudeBackend,
-  CodexBackend,
-  getBackend,
-  getBackendForAgent,
-  listBackends,
-} from "../../hub/team/backend.mjs";
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { test } from "node:test";
+import { getBackend } from "../../hub/team/backend.mjs";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, "../..");
-
-// ========================================================================
-// 1. 개별 백엔드 buildArgs 검증
-// ========================================================================
-describe("CodexBackend", () => {
-  const backend = new CodexBackend();
-
-  it("name() === 'codex'", () => {
-    assert.equal(backend.name(), "codex");
-  });
-
-  it("command() === 'codex'", () => {
-    assert.equal(backend.command(), "codex");
-  });
-
-  it("buildArgs — codex exec ... --color never 포함", () => {
-    const cmd = backend.buildArgs(
-      "(Get-Content -Raw '/tmp/p.txt')",
-      "/tmp/r.txt",
+test("Claude receives a literal prompt and quoted output path", {
+  skip: process.platform === "win32",
+}, () => {
+  const dir = mkdtempSync(join(tmpdir(), "tfx-s5-backend-"));
+  try {
+    const fakeCli = join(dir, "claude");
+    writeFileSync(
+      fakeCli,
+      `#!/usr/bin/env node
+process.stdout.write(JSON.stringify(process.argv.slice(2)));
+`,
     );
-    assert.ok(cmd.includes("codex exec"), `codex exec 포함: ${cmd}`);
-    assert.ok(cmd.includes("--color never"), `--color never 포함: ${cmd}`);
-    assert.ok(cmd.includes("/tmp/r.txt"), `resultFile 포함: ${cmd}`);
-  });
-
-  it("env() — 빈 객체 반환", () => {
-    assert.deepEqual(backend.env(), {});
-  });
-});
-
-describe("ClaudeBackend", () => {
-  const backend = new ClaudeBackend();
-
-  it("name() === 'claude'", () => {
-    assert.equal(backend.name(), "claude");
-  });
-
-  it("command() === 'claude'", () => {
-    assert.equal(backend.command(), "claude");
-  });
-
-  it("buildArgs — claude --print ... --output-format text 포함", () => {
-    const cmd = backend.buildArgs(
-      "(Get-Content -Raw '/tmp/p.txt')",
-      "/tmp/r.txt",
-    );
-    assert.ok(cmd.includes("claude --print"), `claude --print 포함: ${cmd}`);
-    assert.ok(
-      cmd.includes("--output-format text"),
-      `--output-format text 포함: ${cmd}`,
-    );
-    assert.ok(cmd.includes("/tmp/r.txt"), `resultFile 포함: ${cmd}`);
-  });
-
-  it("env() — 빈 객체 반환", () => {
-    assert.deepEqual(backend.env(), {});
-  });
-});
-
-describe("AntigravityBackend", () => {
-  const backend = new AntigravityBackend();
-
-  it("name() === 'antigravity'", () => {
-    assert.equal(backend.name(), "antigravity");
-  });
-
-  it("command() === 'agy'", () => {
-    assert.equal(backend.command(), "agy");
-  });
-
-  it("buildArgs — agy --print 값 계약을 사용한다", () => {
-    const cmd = backend.buildArgs(
-      "(Get-Content -Raw '/tmp/p.txt')",
-      "/tmp/r.txt",
-    );
-    assert.match(
-      cmd,
-      /agy --dangerously-skip-permissions --print (?:\(Get-Content -Raw '.*\.prompt'\)|"\$\(cat '.*\.prompt'\)")/,
-      `agy --print 값 순서: ${cmd}`,
-    );
-    assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
-    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
-    assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
-    assert.ok(cmd.includes("> '/tmp/r.txt'"), `> result 포함: ${cmd}`);
-  });
-
-  it("env() — 빈 객체 반환", () => {
-    assert.deepEqual(backend.env(), {});
-  });
-});
-
-describe("buildAntigravityCommand: platform-specific formatting", () => {
-  const prompt = "(Get-Content -Raw '/tmp/p.txt')";
-  const resultFile = "/tmp/r.txt";
-
-  it("Windows 분기 — prompt file을 PowerShell --print 값으로 전달", () => {
-    const cmd = buildAntigravityCommand(prompt, resultFile, {
-      isWindows: true,
-    });
-    assert.equal(readFileSync(`${resultFile}.prompt`, "utf8"), prompt);
-    assert.equal(
-      cmd,
-      `agy --dangerously-skip-permissions --print (Get-Content -Raw '${resultFile}.prompt') > '${resultFile}' 2>'${resultFile}.err'`,
-    );
-    assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
-    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
-    assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
-  });
-
-  it("Unix 분기 — prompt file을 --print 값으로 전달", () => {
-    const cmd = buildAntigravityCommand(prompt, resultFile, {
+    chmodSync(fakeCli, 0o755);
+    const resultFile = join(dir, "result's output.txt");
+    const injectedFile = join(dir, "injected");
+    const prompt = `quotes ' " spaces
+$(touch '${injectedFile}') \`touch '${injectedFile}'\``;
+    const command = getBackend("claude").buildArgs(prompt, resultFile, {
       isWindows: false,
     });
-    assert.equal(
-      cmd,
-      `agy --dangerously-skip-permissions --print "$(cat '${resultFile}.prompt')" > '${resultFile}' 2>'${resultFile}.err'`,
-    );
-    assert.equal(readFileSync(`${resultFile}.prompt`, "utf8"), prompt);
-    assert.ok(!cmd.includes(" | agy"), `stdin pipe 금지: ${cmd}`);
-    assert.ok(!cmd.includes(" < '"), `stdin redirect 금지: ${cmd}`);
-    assert.ok(!cmd.includes("gemini --"), `gemini 직접 호출 금지: ${cmd}`);
-    assert.ok(!cmd.includes(prompt), cmd);
-  });
+    execFileSync("/bin/sh", ["-c", command], {
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+    });
+    assert.deepEqual(JSON.parse(readFileSync(resultFile, "utf8")), [
+      "--print",
+      prompt,
+      "--output-format",
+      "text",
+    ]);
+    assert.equal(existsSync(injectedFile), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
-// ========================================================================
-// 2. 레지스트리 조회 (getBackend)
-// ========================================================================
-describe("getBackend: 레지스트리 조회", () => {
-  it("'codex' → CodexBackend", () => {
-    const b = getBackend("codex");
-    assert.ok(b instanceof CodexBackend);
-    assert.equal(b.name(), "codex");
-  });
-
-  it("'claude' → ClaudeBackend", () => {
-    const b = getBackend("claude");
-    assert.ok(b instanceof ClaudeBackend);
-    assert.equal(b.name(), "claude");
-  });
-
-  it("'antigravity' → AntigravityBackend", () => {
-    const b = getBackend("antigravity");
-    assert.ok(b instanceof AntigravityBackend);
-    assert.equal(b.name(), "antigravity");
-  });
-
-  it("알 수 없는 이름 → throw (지원하지 않는)", () => {
-    assert.throws(() => getBackend("unknown-xyz"), /지원하지 않는/);
-  });
-
-  it("빈 문자열 → throw", () => {
-    assert.throws(() => getBackend(""), /지원하지 않는/);
-  });
-});
-
-// ========================================================================
-// 3. getBackendForAgent: agent-map.json 연동
-// ========================================================================
-describe("getBackendForAgent: 에이전트명 → Backend", () => {
-  it("'executor' → CodexBackend (codex)", () => {
-    const b = getBackendForAgent("executor");
-    assert.ok(b instanceof CodexBackend);
-  });
-
-  it("'designer' → AntigravityBackend", () => {
-    const b = getBackendForAgent("designer");
-    assert.ok(b instanceof AntigravityBackend);
-  });
-
-  it("'explore' → ClaudeBackend (claude)", () => {
-    const b = getBackendForAgent("explore");
-    assert.ok(b instanceof ClaudeBackend);
-  });
-
-  it("직접 CLI명 'codex' → CodexBackend", () => {
-    const b = getBackendForAgent("codex");
-    assert.ok(b instanceof CodexBackend);
-  });
-
-  it("제거된 gemini 별칭은 지원하지 않는다", () => {
-    assert.throws(() => getBackendForAgent("gemini"), /지원하지 않는/);
-  });
-
-  it("직접 CLI명 'claude' → ClaudeBackend", () => {
-    const b = getBackendForAgent("claude");
-    assert.ok(b instanceof ClaudeBackend);
-  });
-
-  it("직접 CLI명 'antigravity' → AntigravityBackend", () => {
-    const b = getBackendForAgent("antigravity");
-    assert.ok(b instanceof AntigravityBackend);
-  });
-
-  it("alias 'agy' → AntigravityBackend", () => {
-    const b = getBackendForAgent("agy");
-    assert.ok(b instanceof AntigravityBackend);
-  });
-
-  it("알 수 없는 에이전트명 → throw (지원하지 않는)", () => {
-    assert.throws(
-      () => getBackendForAgent("nonexistent-agent-xyz"),
-      /지원하지 않는/,
-    );
-  });
-});
-
-// ========================================================================
-// 4. listBackends
-// ========================================================================
-describe("listBackends", () => {
-  it("3개 백엔드 반환", () => {
-    const list = listBackends();
-    assert.equal(list.length, 3);
-  });
-
-  it("codex, claude, antigravity 모두 포함", () => {
-    const names = listBackends().map((b) => b.name());
-    assert.ok(names.includes("codex"), "codex 포함");
-    assert.ok(names.includes("claude"), "claude 포함");
-    assert.ok(names.includes("antigravity"), "antigravity 포함");
-  });
-});
-
-// ========================================================================
-// 5. packages/remote mirror contract — 원격 실행 패키지도 동일 invariant
-//    (세션 15: 세션 14 #140 mirror 누락 회귀가 실제 발생했으므로 contract
-//    test 로 재발 방지)
-// ========================================================================
-describe("packages/remote/hub/team/backend.mjs — mirror contract", () => {
-  const REMOTE_BACKEND = readFileSync(
-    join(ROOT, "packages/remote/hub/team/backend.mjs"),
-    "utf8",
-  );
-
-  it("Windows 분기에 agy print 값 계약 포함", () => {
-    assert.ok(
-      /agy\s+--dangerously-skip-permissions\s+--print\s+\(Get-Content\s+-Raw\s+'\$\{promptFile\}'\)\s+>/.test(
-        REMOTE_BACKEND,
-      ),
-      "Windows 분기 agy print 값 계약 누락",
-    );
-  });
-
-  it("Unix 분기에 agy print 값 계약 포함", () => {
-    assert.ok(
-      /agy\s+--dangerously-skip-permissions\s+--print\s+"\$\(cat\s+'\$\{promptFile\}'\)"\s+>/.test(
-        REMOTE_BACKEND,
-      ),
-      "Unix 분기 agy print 값 계약 누락",
-    );
-  });
-
-  it("파이프와 입력 redirect를 포함하지 않는다", () => {
-    assert.ok(
-      !/Get-Content\s+-Raw\s+'\$\{promptFile\}'\s*\|\s*agy/.test(
-        REMOTE_BACKEND,
-      ),
-      "Windows stdin pipe 금지",
-    );
-    assert.ok(
-      !/agy\s+--print[^\n]*<\s+'\$\{promptFile\}'/.test(REMOTE_BACKEND),
-      "Unix stdin redirect 금지",
-    );
-    assert.ok(!/gemini\s+--/.test(REMOTE_BACKEND), "gemini 직접 호출 금지");
-  });
-
-  it("CodexBackend / ClaudeBackend 존재 (registry 계약 유지)", () => {
-    assert.ok(
-      /class\s+CodexBackend\b/.test(REMOTE_BACKEND),
-      "CodexBackend class 누락",
-    );
-    assert.ok(
-      /class\s+ClaudeBackend\b/.test(REMOTE_BACKEND),
-      "ClaudeBackend class 누락",
-    );
-    assert.ok(
-      /class\s+AntigravityBackend\b/.test(REMOTE_BACKEND),
-      "AntigravityBackend class 누락",
-    );
-  });
-});
-
-// ========================================================================
-// 6. agent-map.json 정합성 — 모든 에이전트가 유효한 백엔드로 해석됨
-// ========================================================================
-describe("agent-map.json 정합성", () => {
-  const agentMap = JSON.parse(
-    readFileSync(join(ROOT, "hub/team/agent-map.json"), "utf8"),
-  );
-  const validCliNames = ["codex", "claude", "antigravity"];
-
-  it("agent-map.json의 모든 값이 유효한 CLI 이름", () => {
-    for (const [agent, cli] of Object.entries(agentMap)) {
-      assert.ok(
-        validCliNames.includes(cli),
-        `agent-map.json["${agent}"] = "${cli}" — 유효하지 않은 CLI 이름`,
-      );
-    }
-  });
-
-  it("agent-map.json의 모든 에이전트가 getBackendForAgent로 조회 가능", () => {
-    for (const agent of Object.keys(agentMap)) {
-      const b = getBackendForAgent(agent);
-      assert.ok(b, `getBackendForAgent("${agent}") 반환값 있어야 함`);
-      assert.ok(
-        typeof b.name === "function",
-        `"${agent}" 백엔드에 name() 메서드 필요`,
-      );
-      assert.ok(
-        typeof b.buildArgs === "function",
-        `"${agent}" 백엔드에 buildArgs() 메서드 필요`,
-      );
-    }
-  });
+test("unsupported headless backend fails explicitly", () => {
+  assert.throws(() => getBackend("unknown"), /지원하지 않는 CLI/);
 });

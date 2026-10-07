@@ -1,18 +1,16 @@
 import { injectPrompt, sendKeys } from "../../pane.mjs";
-import { DIM, RESET, WHITE, YELLOW } from "../../shared.mjs";
-import { ok, warn } from "../render.mjs";
+import { DIM, RESET, WHITE } from "../../shared.mjs";
+import { ok } from "../render.mjs";
 import { publishLeadControl } from "../services/hub-client.mjs";
 import { resolveMember } from "../services/member-selector.mjs";
-import { nativeRequest } from "../services/native-control.mjs";
-import {
-  isNativeMode,
-  isTeamAlive,
-  isWtMode,
-} from "../services/runtime-mode.mjs";
+import { isTeamAlive } from "../services/runtime-mode.mjs";
 import { loadTeamState } from "../services/state-store.mjs";
 
 export async function teamControl(args = []) {
   const state = loadTeamState();
+  if (state?.teammateMode === "headless") {
+    throw new Error("headless 실행에는 지원하지 않는다");
+  }
   if (!state || !isTeamAlive(state)) {
     console.log(`\n  ${DIM}활성 팀 세션 없음${RESET}\n`);
     return;
@@ -30,35 +28,14 @@ export async function teamControl(args = []) {
     );
     return;
   }
-  if (isWtMode(state)) {
-    console.log(
-      `\n  ${YELLOW}⚠${RESET} wt 모드는 Hub direct/control 주입 경로가 비활성입니다.\n  ${DIM}수동 제어: 해당 pane에서 직접 명령/인터럽트를 수행하세요.${RESET}\n`,
-    );
-    return;
-  }
-
-  let directOk = false;
-  if (isNativeMode(state)) {
-    directOk = !!(
-      await nativeRequest(state, "/control", {
-        member: member.name,
-        command,
-        reason,
-      })
-    )?.ok;
-  } else {
-    injectPrompt(
-      member.pane,
-      `[LEAD CONTROL] command=${command}${reason ? ` reason=${reason}` : ""}`,
-    );
-    if (command === "interrupt") sendKeys(member.pane, "C-c");
-    directOk = true;
-  }
+  injectPrompt(
+    member.pane,
+    `[LEAD CONTROL] command=${command}${reason ? ` reason=${reason}` : ""}`,
+  );
+  if (command === "interrupt") sendKeys(member.pane, "C-c");
 
   const published = await publishLeadControl(state, member, command, reason);
-  if (directOk && published)
-    ok(`${member.name} 제어 전송 (${command}, direct + hub)`);
-  else if (directOk) ok(`${member.name} 제어 전송 (${command}, direct only)`);
-  else warn(`${member.name} 제어 전송 실패 (${command})`);
+  if (published) ok(`${member.name} 제어 전송 (${command}, direct + hub)`);
+  else ok(`${member.name} 제어 전송 (${command}, direct only)`);
   console.log("");
 }
