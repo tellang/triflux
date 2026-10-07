@@ -1,12 +1,7 @@
 // Codex와 Antigravity 세션 hook이 공유하는 presence 기록 함수.
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { resolveRoleControlSnapshot } from "../../hub/lib/cto-env.mjs";
-import {
-  buildSynapseTaskSummary,
-  heartbeatSynapseSession,
-  registerSynapseSession,
-} from "../../hub/team/synapse-http.mjs";
 
 function parseStartPayload(stdinData) {
   try {
@@ -153,97 +148,4 @@ export function shouldSkipInteractiveRegistration(payload, seams = {}) {
   return ancestorCommands.some((command) =>
     commandUsesClaudePrintMode(command),
   );
-}
-
-/** git 조회는 세션 시작을 막지 않도록 비동기로 실행한다. */
-function gitContextAsync(cwd, gitRunner = defaultGitRunner) {
-  const run = (args) =>
-    new Promise((resolve) => {
-      try {
-        gitRunner(cwd, args, (out) => resolve(out));
-      } catch {
-        resolve("");
-      }
-    });
-  return Promise.all([
-    run(["rev-parse", "--show-toplevel"]),
-    run(["rev-parse", "--abbrev-ref", "HEAD"]),
-  ]).then(([toplevel, branch]) => ({
-    worktreePath: toplevel || cwd,
-    branch,
-  }));
-}
-
-/** git 조회 실패는 빈 문자열로 처리한다. */
-function defaultGitRunner(cwd, args, cb) {
-  execFile(
-    "git",
-    args,
-    {
-      cwd,
-      encoding: "utf8",
-      timeout: 1500,
-      killSignal: "SIGKILL",
-      windowsHide: true,
-    },
-    (err, stdout) => {
-      cb(err ? "" : String(stdout || "").trim());
-    },
-  );
-}
-
-/** 세션을 즉시 등록하고 git 정보는 뒤이어 갱신한다. 훅 PID는 세션 PID가 아니다. */
-export function registerInteractiveSession(stdinData, seams = {}) {
-  let ctoEvent = null;
-  const register = seams.register || registerSynapseSession;
-  const heartbeat = seams.heartbeat || heartbeatSynapseSession;
-  const gitRunner = seams.gitRunner || defaultGitRunner;
-  try {
-    const payload = parseStartPayload(stdinData);
-    const sessionId = String(payload?.session_id || "").trim();
-    if (!sessionId) return null;
-    if (shouldSkipInteractiveRegistration(payload, seams)) return null;
-    const cwd = typeof payload?.cwd === "string" ? payload.cwd : process.cwd();
-
-    register({
-      sessionId,
-      cwd,
-      worktreePath: cwd,
-      branch: "",
-      host: "local",
-      sessionKind: "interactive",
-      isRemote: false,
-    });
-
-    ctoEvent = emitParticipantSessionStarted(stdinData, seams).catch(
-      () => null,
-    );
-
-    gitContextAsync(cwd, gitRunner)
-      .then(({ worktreePath, branch }) => {
-        if (worktreePath === cwd && !branch) return;
-        heartbeat(sessionId, { worktreePath, branch });
-      })
-      .catch(() => {});
-  } catch {
-    /* 세션 시작은 계속한다. */
-  }
-  return ctoEvent;
-}
-
-/** 사용자 활동을 갱신한다. 호출자는 종료 전에 전송을 완료해야 한다. */
-export function heartbeatInteractiveSession(stdinData, seams = {}) {
-  const heartbeat = seams.heartbeat || heartbeatSynapseSession;
-  try {
-    const payload = parseStartPayload(stdinData);
-    const sessionId = String(payload?.session_id || "").trim();
-    if (!sessionId) return;
-    const cwd = typeof payload?.cwd === "string" ? payload.cwd : process.cwd();
-    const partial = { worktreePath: cwd, host: "local" };
-    const prompt = typeof payload?.prompt === "string" ? payload.prompt : "";
-    if (prompt) partial.taskSummary = buildSynapseTaskSummary(prompt);
-    heartbeat(sessionId, partial);
-  } catch {
-    /* 프롬프트 처리는 계속한다. */
-  }
 }

@@ -35,7 +35,7 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 |----------|------|-----------|
 | `bin/` | CLI 실행 엔트리포인트 | `triflux.mjs`(메인 `tfx`), `tfx-setup.mjs`, `tfx-doctor.mjs`, `tfx-live.mjs` |
 | `hub/` | 로컬 허브: 라우팅, 서버, MCP 브리지, 계정 브로커 | `router.mjs`, `server.mjs`, `bridge.mjs`, `hub-lifecycle.mjs`, `account-broker.mjs`, `codex-adapter.mjs` |
-| `hub/team/` | 팀/멀티에이전트 오케스트레이션 | `headless.mjs`, `cto-auto-collect.mjs`, `claude-daemon-control.mjs`, `notify.mjs` |
+| `hub/team/` | 팀/멀티에이전트 오케스트레이션 | `headless.mjs`, `claude-daemon-control.mjs`, `notify.mjs` |
 | `hub/` 하위 | 세분 모듈 | `delegator/`, `diagnostics/`, `lib/`, `middleware/`, `pipeline/`, `workers/` |
 | `hooks/` | Codex 및 Antigravity 세션 연결과 전환용 stub | `codex-session-hook.mjs`, `agy-session-hook.mjs` |
 | `hud/` | 상태 표시(HUD) / 모니터 | `context-monitor.mjs`, `renderers.mjs`, `providers/` |
