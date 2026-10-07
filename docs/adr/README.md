@@ -32,6 +32,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0023](0023-remove-command-hooks-hub-and-adopt-mods.md) | command hook, 키워드 라우팅, MCP gateway, synapse, 허브를 걷어내고 Claude Code mods 로 옮긴다 | Proposed | 0007, 0010, 0013, 0018, 0020, 0021, 0022 |
 | [0024](0024-cto-explicit-queries-only.md) | CTO 는 조회만 남긴다 | Accepted | 0010, 0018, 0022 |
 | [0025](0025-retire-swarm-execution-engine.md) | swarm 실행 엔진 퇴역 | Accepted | 0005, 0008, 0024 |
+| [0028](0028-per-run-codex-mcp-selection.md) | Codex MCP 선택은 전역 설정 교체 대신 실행별 -c 설정으로 한다 | Accepted | 0015 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 
