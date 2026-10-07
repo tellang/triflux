@@ -1,11 +1,11 @@
 ---
 id: 0011
 title: 능동 역할 시스템 — CTO + scoped lead (C+A 하이브리드)
-status: accepted
+status: superseded
 date: 2026-07-16
 deciders: [tellang]
 supersedes: []
-superseded_by: null
+superseded_by: 0024
 relates: [0010]
 pr: "#483, #484, #485"
 ---

@@ -1,7 +1,7 @@
 ---
 id: 0020
 title: tfx 스킬 표면을 12개 + Windows 1개로 줄인다
-status: proposed
+status: accepted
 date: 2026-10-04
 deciders: [tellang]
 supersedes: []

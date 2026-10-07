@@ -1,7 +1,7 @@
 ---
 id: 0014
 title: Claude 자격증명은 macOS Keychain 을 정본으로 읽고 읽은 저장소에만 되쓴다
-status: proposed
+status: accepted
 date: 2026-09-21
 deciders: [tellang]
 supersedes: []
