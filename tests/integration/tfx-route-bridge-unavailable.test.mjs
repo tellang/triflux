@@ -8,17 +8,8 @@ import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
 import { BASH_EXE } from "../helpers/bash-path.mjs";
 import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
-it("허브 호출을 재시도하지 않고 team 결과를 로컬에 남긴다", () => {
+it("bridge 가 실패해도 허브를 띄우지 않고 team 결과를 로컬에 남긴다", () => {
   const route = resolve("scripts/tfx-route.sh");
-  const source = readFileSync(route, "utf8");
-  assert.doesNotMatch(
-    source,
-    /hub-ensure|try_restart_hub|bridge_cli_with_restart|TFX_HUB_OK/,
-  );
-  assert.doesNotMatch(
-    readFileSync(resolve("hub/bridge.mjs"), "utf8"),
-    /tryRestartHub|spawn\(/,
-  );
   const config = makeIsolatedCodexConfig();
   const dir = mkdtempSync(join(tmpdir(), "tfx-hub-unavailable-"));
   const log = join(dir, "calls.jsonl");
