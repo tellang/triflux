@@ -16,7 +16,7 @@ import {
   emitParticipantSessionStarted,
   heartbeatInteractiveSession,
   registerInteractiveSession,
-} from "../../hooks/session-start-fast.mjs";
+} from "../../scripts/lib/session-presence.mjs";
 
 function payloadJson(obj) {
   return JSON.stringify(obj);

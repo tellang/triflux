@@ -6,7 +6,7 @@ import {
   runAgySessionHook,
   toSessionPayload,
 } from "../../hooks/agy-session-hook.mjs";
-import { registerInteractiveSession } from "../../hooks/session-start-fast.mjs";
+import { registerInteractiveSession } from "../../scripts/lib/session-presence.mjs";
 
 function agyPayload(overrides = {}) {
   return JSON.stringify({

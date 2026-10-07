@@ -15,15 +15,4 @@ describe("mcp-cleanup Stop hook safety", () => {
     assert.match(script, /TFX_ENABLE_STOP_MCP_CLEANUP/);
     assert.match(script, /exit 0/);
   });
-
-  it("keeps ext-mcp-cleanup disabled in the hook registry", () => {
-    const registry = JSON.parse(
-      readFileSync(join(PROJECT_ROOT, "hooks", "hook-registry.json"), "utf8"),
-    );
-    const stopHooks = registry.events?.Stop ?? [];
-    const cleanup = stopHooks.find((hook) => hook.id === "ext-mcp-cleanup");
-
-    assert.ok(cleanup, "ext-mcp-cleanup entry should stay explicit");
-    assert.equal(cleanup.enabled, false);
-  });
 });

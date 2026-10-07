@@ -182,7 +182,7 @@ function collectSystemInfo() {
 }
 
 function collectHookTimings() {
-  // hook-orchestrator 또는 session-start-fast 로그에서 타이밍 추출
+  // 과거 세션 시작 로그에서 타이밍 추출
   const hookLogDir = join(TRIFLUX_DIR, "logs");
   if (!existsSync(hookLogDir)) return [];
 
