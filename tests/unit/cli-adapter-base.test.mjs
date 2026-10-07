@@ -184,10 +184,9 @@ test("buildExecCommand: TFX_CODEX_STDIN_PROMPT=0 env opts out of stdin mode", as
   });
 });
 
-test("cli-adapter-base exports the shared codex exec builder and codex-compat re-exports it (legacy argv-inline mode)", async () => {
+test("cli-adapter-base exports the shared codex exec builder (legacy argv-inline mode)", async () => {
   await withSandbox(async () => {
     const base = await importFresh("../../hub/cli-adapter-base.mjs");
-    const compat = await importFresh("../../hub/codex-compat.mjs");
 
     // explicit opt-out of the stdin-prompt fix to verify legacy argv-inline
     // shape (matches codex < v0.130 + non-macOS environments).
@@ -197,14 +196,6 @@ test("cli-adapter-base exports the shared codex exec builder and codex-compat re
       stdinPrompt: false,
     });
 
-    assert.equal(
-      compat.buildExecCommand("hello", "/tmp/result.txt", {
-        profile: "codex53_high",
-        cwd: "C:/work/it's-me",
-        stdinPrompt: false,
-      }),
-      command,
-    );
     // Profile is now selected via `-c` config overrides, not `--profile`
     // (codex 0.134+ rejects --profile X against an inline [profiles.X]).
     assert.doesNotMatch(command, /--profile/);
@@ -224,11 +215,8 @@ test("cli-adapter-base exports the shared codex exec builder and codex-compat re
     assert.ok(command.endsWith('"hello"'));
 
     assert.equal(base.escapePwshSingleQuoted("it's"), "it''s");
-    assert.equal(compat.escapePwshSingleQuoted("it's"), "it''s");
     assert.equal(base.CODEX_MCP_TRANSPORT_EXIT_CODE, 70);
     assert.equal(base.CODEX_MCP_EXECUTION_EXIT_CODE, 1);
-    assert.equal(compat.CODEX_MCP_TRANSPORT_EXIT_CODE, 70);
-    assert.equal(compat.CODEX_MCP_EXECUTION_EXIT_CODE, 1);
   });
 });
 

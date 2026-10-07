@@ -8,7 +8,6 @@ import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ClaudeWorker } from "../../hub/workers/claude-worker.mjs";
 import { createWorker } from "../../hub/workers/factory.mjs";
-import { GeminiWorker } from "../../hub/workers/gemini-worker.mjs";
 import {
   createWorkerError,
   DEFAULT_KILL_GRACE_MS,
@@ -48,27 +47,6 @@ function buildRouteEnv(extraEnv = {}) {
     ...extraEnv,
   };
 }
-
-describe("GeminiWorker compatibility alias", { timeout: 15000 }, () => {
-  it("direct GeminiWorker import도 Antigravity route를 사용해야 한다", async () => {
-    const worker = new GeminiWorker({
-      routeScript: ROUTE_SCRIPT,
-      cwd: PROJECT_ROOT,
-      env: buildRouteEnv({
-        HOME: resolve(PROJECT_ROOT, ".tmp-home-route-antigravity"),
-        AGY_BIN: "agy",
-        TFX_ANTIGRAVITY_OK: "1",
-      }),
-      timeoutMs: 5000,
-    });
-
-    const result = await worker.run("hello antigravity");
-    assert.equal(result.type, "antigravity");
-    assert.match(result.response, /AGY:hello antigravity/);
-    assert.equal(result.exitCode, 0);
-    await worker.stop();
-  });
-});
 
 describe("ClaudeWorker", { timeout: 15000 }, () => {
   const argvOutFiles = new Set();

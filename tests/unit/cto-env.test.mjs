@@ -2,20 +2,11 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 
 import {
-  getCtoMaxTokens,
-  getCtoMode,
-  isCtoManagerEnabled,
   isCtoRetentionEnabled,
   resolveRoleControlSnapshot,
 } from "../../hub/lib/cto-env.mjs";
 
-const ENV_KEYS = [
-  "TFX_CTO",
-  "TFX_CTO_MANAGER",
-  "TFX_CTO_RETENTION",
-  "TFX_CTO_MODE",
-  "TFX_CTO_MAX_TOKENS",
-];
+const ENV_KEYS = ["TFX_CTO", "TFX_CTO_RETENTION"];
 
 const originalEnv = new Map(ENV_KEYS.map((key) => [key, process.env[key]]));
 
@@ -40,35 +31,13 @@ afterEach(() => {
 });
 
 describe("cto env readers", () => {
-  it("defaults every gate to off or safe values", () => {
+  it("defaults retention to off", () => {
     setEnv();
-
-    assert.equal(isCtoManagerEnabled(), false);
     assert.equal(isCtoRetentionEnabled(), false);
-    assert.equal(getCtoMode(), "bounded");
-    assert.equal(getCtoMaxTokens(), 0);
   });
 
-  it("enables manager only for explicit on values", () => {
-    for (const value of ["1", "true", "on", "yes", " TRUE "]) {
-      setEnv({ TFX_CTO_MANAGER: value });
-      assert.equal(isCtoManagerEnabled(), true);
-    }
-
-    for (const value of ["0", "false", "off", "no", "", "maybe"]) {
-      setEnv({ TFX_CTO_MANAGER: value });
-      assert.equal(isCtoManagerEnabled(), false);
-    }
-  });
-
-  it("lets the global CTO kill switch disable manager and retention", () => {
-    setEnv({
-      TFX_CTO: "0",
-      TFX_CTO_MANAGER: "1",
-      TFX_CTO_RETENTION: "1",
-    });
-
-    assert.equal(isCtoManagerEnabled(), false);
+  it("lets the global CTO kill switch disable retention", () => {
+    setEnv({ TFX_CTO: "0", TFX_CTO_RETENTION: "1" });
     assert.equal(isCtoRetentionEnabled(), false);
   });
 
@@ -80,46 +49,11 @@ describe("cto env readers", () => {
     assert.equal(isCtoRetentionEnabled(), false);
   });
 
-  it("returns bounded by default and bridge only for explicit bridge mode", () => {
-    setEnv({ TFX_CTO_MODE: "bridge" });
-    assert.equal(getCtoMode(), "bridge");
-
-    for (const value of ["bounded", "off", "", "resident"]) {
-      setEnv({ TFX_CTO_MODE: value });
-      assert.equal(getCtoMode(), "bounded");
-    }
-  });
-
-  it("returns a positive integer max token cap or zero", () => {
-    setEnv({ TFX_CTO_MAX_TOKENS: "12000" });
-    assert.equal(getCtoMaxTokens(), 12000);
-
-    for (const value of ["", "0", "-1", "10.5", "NaN", "Infinity"]) {
-      setEnv({ TFX_CTO_MAX_TOKENS: value });
-      assert.equal(getCtoMaxTokens(), 0);
-    }
-  });
-
   it("rereads process.env on each call", () => {
-    setEnv({ TFX_CTO_MANAGER: "0" });
-    assert.equal(isCtoManagerEnabled(), false);
-    process.env.TFX_CTO_MANAGER = "1";
-    assert.equal(isCtoManagerEnabled(), true);
-
     process.env.TFX_CTO_RETENTION = "0";
     assert.equal(isCtoRetentionEnabled(), false);
     process.env.TFX_CTO_RETENTION = "on";
     assert.equal(isCtoRetentionEnabled(), true);
-
-    process.env.TFX_CTO_MODE = "bounded";
-    assert.equal(getCtoMode(), "bounded");
-    process.env.TFX_CTO_MODE = "bridge";
-    assert.equal(getCtoMode(), "bridge");
-
-    process.env.TFX_CTO_MAX_TOKENS = "0";
-    assert.equal(getCtoMaxTokens(), 0);
-    process.env.TFX_CTO_MAX_TOKENS = "4096";
-    assert.equal(getCtoMaxTokens(), 4096);
   });
 });
 

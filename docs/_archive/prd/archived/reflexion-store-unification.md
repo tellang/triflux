@@ -1,3 +1,5 @@
+폐기: 2026-10-08 슬롭 정리(.triflux/plans/slop-audit-2026-10.md 결정 S7 U7)
+
 # PRD: reflexion.mjs store API 통합
 
 ## 목표

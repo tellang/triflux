@@ -3,11 +3,7 @@
 // 상태(state.mjs) + 전이(transitions.mjs) 통합 인터페이스
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { classifyIntent as _classifyIntent } from "../intent.mjs";
-import { runConfidenceCheck } from "./gates/confidence.mjs";
-import { runSelfCheck } from "./gates/selfcheck.mjs";
 import {
   ensurePipelineTable,
   initPipelineState,
@@ -21,7 +17,6 @@ import {
   TERMINAL,
   transitionPhase,
 } from "./transitions.mjs";
-// deslop gate: 호출자가 scanDirectory/detectSlop 결과를 전달
 
 /**
  * 파이프라인 매니저 생성
@@ -162,192 +157,7 @@ export function createPipeline(db, teamName, opts = {}) {
     remove() {
       return removePipelineState(db, teamName);
     },
-
-    /**
-     * Confidence Gate 실행 + 자동 전이
-     * prd → confidence → exec/failed
-     * @param {string|object} planArtifact
-     * @param {object} context - { checks?, codebaseFiles?, existingTests? }
-     * @returns {{ ok: boolean, gate: object, state?: object, error?: string }}
-     */
-    runConfidenceGate(planArtifact, context = {}) {
-      const current = readPipelineState(db, teamName);
-      if (!current) return { ok: false, error: `파이프라인 없음: ${teamName}` };
-
-      if (current.phase !== "confidence") {
-        return {
-          ok: false,
-          error: `confidence gate는 confidence 단계에서만 실행 가능 (현재: ${current.phase})`,
-        };
-      }
-
-      const gate = runConfidenceCheck(planArtifact, context);
-      this.setArtifact("confidence_result", gate);
-
-      if (gate.decision === "abort") {
-        const result = this.advance("failed");
-        return { ok: true, gate, state: result.state };
-      }
-
-      // proceed 또는 alternative → exec로 전이
-      const result = this.advance("exec");
-      return { ok: result.ok, gate, state: result.state, error: result.error };
-    },
-
-    /**
-     * Deslop Gate 실행 + 자동 전이
-     * exec → deslop → verify
-     * 호출자가 미리 deslop 결과를 생성하여 전달.
-     * @param {object} [deslopResult] - scanDirectory() 또는 detectSlop() 결과
-     * @returns {{ ok: boolean, gate: object, state?: object, error?: string }}
-     */
-    runDeslopGate(deslopResult = null) {
-      const current = readPipelineState(db, teamName);
-      if (!current) return { ok: false, error: `파이프라인 없음: ${teamName}` };
-
-      if (current.phase !== "deslop") {
-        return {
-          ok: false,
-          error: `deslop gate는 deslop 단계에서만 실행 가능 (현재: ${current.phase})`,
-        };
-      }
-
-      const gate = deslopResult || {
-        files: [],
-        summary: { total: 0, clean: 0 },
-      };
-      this.setArtifact("deslop_result", gate);
-
-      // deslop은 항상 verify로 전이 (정보 제공 게이트, 차단 없음)
-      const result = this.advance("verify");
-      return { ok: result.ok, gate, state: result.state, error: result.error };
-    },
-
-    /**
-     * Self-Check Gate 실행 + 자동 전이
-     * verify → selfcheck → complete/fix
-     * @param {string|object} execResult
-     * @param {string|object} verifyResult
-     * @param {object} requirements - { hasDiff?, evidence? }
-     * @returns {{ ok: boolean, gate: object, state?: object, error?: string }}
-     */
-    runSelfCheckGate(execResult, verifyResult, requirements = {}) {
-      const current = readPipelineState(db, teamName);
-      if (!current) return { ok: false, error: `파이프라인 없음: ${teamName}` };
-
-      if (current.phase !== "selfcheck") {
-        return {
-          ok: false,
-          error: `selfcheck gate는 selfcheck 단계에서만 실행 가능 (현재: ${current.phase})`,
-        };
-      }
-
-      const gate = runSelfCheck(execResult, verifyResult, requirements);
-      this.setArtifact("selfcheck_result", gate);
-
-      if (gate.passed) {
-        const result = this.advance("complete");
-        return {
-          ok: result.ok,
-          gate,
-          state: result.state,
-          error: result.error,
-        };
-      }
-
-      // Red Flag 탐지 또는 필수 질문 실패 → fix
-      const result = this.advance("fix");
-      return { ok: result.ok, gate, state: result.state, error: result.error };
-    },
   };
 }
-
-// ── 토큰 벤치마크 훅 ──
-
-let _tokenSnapshotMod = null;
-
-async function loadTokenSnapshot() {
-  if (_tokenSnapshotMod) return _tokenSnapshotMod;
-  try {
-    _tokenSnapshotMod = await import("../../scripts/token-snapshot.mjs");
-  } catch {
-    _tokenSnapshotMod = null;
-  }
-  return _tokenSnapshotMod;
-}
-
-/**
- * 파이프라인 시작 시 토큰 스냅샷 캡처
- * @param {string} label - 스냅샷 라벨 (e.g. teamName + timestamp)
- * @returns {Promise<{label: string, snapshot: object}|null>}
- */
-export async function benchmarkStart(label) {
-  const mod = await loadTokenSnapshot();
-  if (!mod?.takeSnapshot) return null;
-  try {
-    const snapshot = mod.takeSnapshot(label);
-    return { label, snapshot };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 파이프라인 종료 시 diff 계산 + 결과 저장
- * @param {string} preLabel - 시작 스냅샷 라벨
- * @param {string} postLabel - 종료 스냅샷 라벨
- * @param {object} options - { agent?, cli?, id? }
- * @returns {Promise<object|null>} diff 결과
- */
-export async function benchmarkEnd(preLabel, postLabel, options = {}) {
-  const mod = await loadTokenSnapshot();
-  if (!mod?.takeSnapshot || !mod?.computeDiff) return null;
-  try {
-    // 종료 스냅샷 캡처
-    mod.takeSnapshot(postLabel);
-    // diff 계산 (결과는 DIFFS_DIR에 자동 저장됨)
-    const diff = mod.computeDiff(preLabel, postLabel, options);
-
-    // 추가로 타임스탬프 기반 사본 저장
-    const diffsDir = join(
-      homedir(),
-      ".omc",
-      "state",
-      "cx-auto-tokens",
-      "diffs",
-    );
-    mkdirSync(diffsDir, { recursive: true });
-    const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    const outPath = join(diffsDir, `${ts}.json`);
-    writeFileSync(outPath, JSON.stringify(diff, null, 2));
-
-    return diff;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 트리아지 통합: quickClassify 고신뢰 시 Codex 분류 스킵 판정
- * @param {string} prompt
- * @param {number} [threshold=0.8]
- * @returns {{ skip: boolean, routing: object|null, classification: object }}
- */
-export function triageWithIntent(prompt, threshold = 0.8) {
-  const classification = _classifyIntent(prompt);
-  if (classification.confidence >= threshold) {
-    return { skip: true, routing: classification.routing, classification };
-  }
-  return { skip: false, routing: null, classification };
-}
-
-export {
-  classifyIntent,
-  INTENT_CATEGORIES,
-  quickClassify,
-} from "../intent.mjs";
-export { autoFixSlop, detectSlop, scanDirectory } from "../quality/deslop.mjs";
-export { CRITERIA, runConfidenceCheck } from "./gates/confidence.mjs";
-export { QUESTIONS, RED_FLAGS, runSelfCheck } from "./gates/selfcheck.mjs";
 export { ensurePipelineTable } from "./state.mjs";
 export { ALLOWED, canTransition, PHASES, TERMINAL } from "./transitions.mjs";

@@ -59,7 +59,7 @@ const LEGACY_DEFAULT_MODELS = new Set(["Gemini 3.5 Flash (Medium)"]);
 // ── 용도별 effort (SSOT) ──
 // 한 세대(3.8 Flash)만 쓰고 역할에 따라 effort 를 나눈다. 키는 tfx 에이전트/역할 이름
 // (agent-map.json 의 에이전트, tfx multi --assign 의 role). bash(tfx-route.sh)와
-// node(execution-mode, gemini-adapter, cli-agy)가 모두 이 표를 읽는다.
+// 실행 모드와 cli-agy가 이 표를 공유한다.
 //   High   : 판단이 결과를 좌우하는 역할 (검토, 설계, 디버깅, 분석)
 //   Medium : 생성/작성/실행 (기본값)
 //   Low    : 분류, 요약, 추출, 번역처럼 짧고 기계적인 작업

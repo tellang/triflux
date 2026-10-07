@@ -5,13 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
-import {
-  learnFromError,
-  lookupSolution,
-  normalizeError,
-  recalcConfidence,
-  reportOutcome,
-} from "../../hub/reflexion.mjs";
+import { normalizeError, recalcConfidence } from "../../hub/reflexion.mjs";
 import { createStore } from "../../hub/store.mjs";
 import { SQLITE_SKIP } from "../helpers/sqlite.mjs";
 
@@ -44,40 +38,6 @@ describe("reflexion", { skip: SQLITE_SKIP }, () => {
     assert.ok(norm.includes("<line>"), `Expected <line> in: ${norm}`);
     assert.ok(norm.includes("<id>"), `Expected <id> in: ${norm}`);
     assert.ok(norm.includes("<num>"), `Expected <num> in: ${norm}`);
-  });
-
-  // 3. learnFromError: 새 에러 저장 → id 반환
-  it("learnFromError stores new error and returns entry with id", () => {
-    const entry = learnFromError(store, {
-      error: 'TypeError: Cannot read property "foo" of undefined',
-      solution: "Check for null before accessing property",
-      context: { file: "app.js", agent: "executor" },
-    });
-    assert.ok(entry, "Entry should be created");
-    assert.ok(entry.id, "Entry should have an id");
-    assert.equal(entry.solution, "Check for null before accessing property");
-    assert.equal(entry.hit_count, 1);
-    assert.equal(entry.confidence, 0.5);
-  });
-
-  // 4. lookupSolution: 동일 패턴 매칭 → found: true
-  it("lookupSolution finds matching pattern", () => {
-    // 동일 에러 (파일/줄만 다름) → 같은 정규화 패턴으로 매칭
-    const result = lookupSolution(
-      store,
-      'TypeError: Cannot read property "foo" of undefined',
-    );
-    assert.equal(result.found, true, "Should find matching pattern");
-    assert.ok(result.bestMatch, "Should have best match");
-    assert.ok(result.entries.length > 0, "Should have entries");
-  });
-
-  // 5. lookupSolution: 유사하지 않은 에러 → found: false
-  it("lookupSolution returns found:false for unrelated errors", () => {
-    const result = lookupSolution(store, "ECONNREFUSED: connection refused");
-    assert.equal(result.found, false);
-    assert.equal(result.entries.length, 0);
-    assert.equal(result.bestMatch, null);
   });
 
   // 6. updateReflexionHit: hit_count 증가 + success 시 success_count 증가
@@ -142,57 +102,11 @@ describe("reflexion", { skip: SQLITE_SKIP }, () => {
     assert.equal(after, null, "Pruned entry should be gone");
   });
 
-  // 10. 전체 흐름: learn → lookup → report → confidence 변화
-  it("full flow: learn → lookup → report → confidence changes", () => {
-    const error = "SyntaxError: Unexpected token } in /src/parser.js:99:5";
-    const solution = "Missing comma before closing brace";
-
-    // learn
-    const entry = learnFromError(store, { error, solution });
-    assert.ok(entry);
-    assert.equal(entry.confidence, 0.5);
-
-    // lookup
-    const lookup = lookupSolution(store, error);
-    assert.equal(lookup.found, true);
-    assert.equal(lookup.bestMatch.id, entry.id);
-
-    // report success
-    const after1 = reportOutcome(store, entry.id, true);
-    assert.equal(after1.hit_count, 2);
-    assert.equal(after1.success_count, 1);
-    assert.equal(after1.confidence, 0.5); // 1/2 = 0.5
-
-    // report another success
-    const after2 = reportOutcome(store, entry.id, true);
-    assert.equal(after2.hit_count, 3);
-    assert.equal(after2.success_count, 2);
-    // confidence should increase: 2/3 ≈ 0.667
-    assert.ok(
-      after2.confidence > 0.5,
-      `Confidence should increase: ${after2.confidence}`,
-    );
-  });
-
   // 11. normalizeError: 빈 입력 처리
   it("normalizeError returns empty string for invalid input", () => {
     assert.equal(normalizeError(""), "");
     assert.equal(normalizeError(null), "");
     assert.equal(normalizeError(undefined), "");
     assert.equal(normalizeError(42), "");
-  });
-
-  // 12. learnFromError: 동일 패턴 재학습 시 기존 엔트리 업데이트
-  it("learnFromError updates existing entry for same pattern", () => {
-    const error = "ReferenceError: x is not defined at /unique/path.js:10";
-    const entry1 = learnFromError(store, { error, solution: "Define x" });
-    const entry2 = learnFromError(store, {
-      error,
-      solution: "Define x",
-      success: true,
-    });
-    // 동일 패턴이므로 같은 id, hit_count 증가
-    assert.equal(entry2.id, entry1.id);
-    assert.equal(entry2.hit_count, 2);
   });
 });
