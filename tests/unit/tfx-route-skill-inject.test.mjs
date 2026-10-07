@@ -18,7 +18,6 @@ const routeSource = readFileSync(
   "utf8",
 );
 
-// north-star 테스트와 동일한 brace-matching 함수 추출기.
 function extractFunction(funcName) {
   const start = routeSource.indexOf(`${funcName}() {`);
   assert.ok(start >= 0, `${funcName} 정의를 찾을 수 없음`);
@@ -185,32 +184,5 @@ describe("tfx-route skill injection", () => {
     });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout, prompt);
-  });
-
-  it("wires the codex lane to call prepend_skill before dispatch", () => {
-    const codexIdx = routeSource.indexOf("_codex_north_star_file=");
-    assert.ok(codexIdx >= 0, "codex lane not found");
-    const lane = routeSource.slice(
-      codexIdx,
-      routeSource.indexOf('codex_transport_effective="exec"', codexIdx),
-    );
-    assert.match(lane, /TFX_INJECT_SKILL/);
-    assert.match(lane, /prepend_skill "\$FULL_PROMPT"/);
-  });
-
-  it("wires the antigravity lane to call prepend_skill + append_agy_anti_overclaim", () => {
-    const laneStart = routeSource.indexOf(
-      'elif [[ "$CLI_TYPE" == "antigravity" ]]; then',
-    );
-    assert.ok(laneStart >= 0, "antigravity lane not found");
-    const lane = routeSource.slice(
-      laneStart,
-      routeSource.indexOf("run_antigravity_exec", laneStart),
-    );
-    assert.match(lane, /prepend_skill "\$FULL_PROMPT"/);
-    assert.match(
-      lane,
-      /append_agy_anti_overclaim "\$FULL_PROMPT" "\$\{WORKDIR:-\$PWD\}"/,
-    );
   });
 });

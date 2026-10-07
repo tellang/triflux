@@ -1,9 +1,12 @@
 // Canonical Codex role policy. Concrete model IDs stay in profile config files.
 
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import {
   normalizeCodexProfileName,
   resolveCodexProfileConfigValues,
 } from "./codex-profile-config.mjs";
+import { resolveGeminiProfileForPurpose } from "./gemini-profiles.mjs";
 
 const policy = {
   executor: {
@@ -244,7 +247,7 @@ export function resolveCodexAgentPolicy(agent) {
  * later process-level `TFX_CODEX_PROFILE`. Ultra is reserved for an eligible
  * top-level role; every nested/sandboxed or ineligible request is max.
  */
-function resolveCodexAgentProfile(
+export function resolveCodexAgentProfile(
   agent,
   {
     profileOverride = "auto",
@@ -316,24 +319,176 @@ export function resolveNestedCodexAgentProfile(
   return effort.toLowerCase() === "ultra" ? "gpt6_astra_max" : candidate;
 }
 
+const MIN_TIMEOUT_BY_AGENT = Object.freeze({
+  "deep-executor": 900,
+  architect: 900,
+  planner: 900,
+  critic: 900,
+  analyst: 900,
+  "document-specialist": 900,
+  scientist: 900,
+  "scientist-deep": 900,
+  "code-reviewer": 600,
+  "security-reviewer": 600,
+  "quality-reviewer": 600,
+  executor: 300,
+  debugger: 300,
+});
+
+const EXPECTED_DURATION_BY_AGENT = Object.freeze({
+  writer: 90,
+  verifier: 90,
+  "qa-tester": 90,
+  executor: 300,
+  debugger: 300,
+  "test-engineer": 300,
+  "code-reviewer": 600,
+  "security-reviewer": 600,
+  architect: 600,
+  planner: 600,
+  critic: 600,
+  analyst: 600,
+  scientist: 900,
+  "scientist-deep": 900,
+  "deep-executor": 900,
+  "document-specialist": 900,
+});
+
+const NATIVE_CODEX_AGENTS = new Set([
+  "explore",
+  "verifier",
+  "test-engineer",
+  "qa-tester",
+]);
+
+function resolveDirectCodexRoutePolicy(agent) {
+  if (agent === "explore") {
+    return { ...CODEX_AGENT_POLICY.spark, timeoutSec: 600, mcpHint: "analyze" };
+  }
+  if (agent === "antigravity" || agent === "agy") {
+    return CODEX_AGENT_POLICY.designer;
+  }
+  return resolveCodexAgentPolicy(agent);
+}
+
+export function resolveAgentRoute(
+  agent,
+  map,
+  profileOverride = "auto",
+  nested = false,
+  geminiProfileResolver = resolveGeminiProfileForPurpose,
+) {
+  if (!/^[A-Za-z0-9_.-]+$/.test(agent)) {
+    throw new Error(`invalid agent: ${agent}`);
+  }
+  if (!Object.hasOwn(map, agent)) {
+    throw new Error(
+      `알 수 없는 에이전트 타입: ${agent}; available: ${Object.keys(map).join(", ")}`,
+    );
+  }
+  const provider = map[agent];
+  if (!["codex", "antigravity", "claude"].includes(provider)) {
+    throw new Error(`invalid provider for ${agent}: ${provider}`);
+  }
+  const policy = resolveDirectCodexRoutePolicy(agent);
+  const normalizedOverride = normalizeCodexProfileName(profileOverride);
+  let resolvedOverride = policy.profile;
+  if (normalizedOverride !== "auto") {
+    try {
+      resolvedOverride = resolveCodexAgentProfile(agent, {
+        profileOverride: normalizedOverride,
+        nested,
+      });
+    } catch {
+      throw new Error(
+        `TFX_CODEX_PROFILE 값이 유효하지 않습니다: ${profileOverride}`,
+      );
+    }
+  }
+  return [
+    provider,
+    policy.profile,
+    policy.timeoutSec,
+    policy.runMode,
+    policy.opusOversight,
+    policy.mcpHint,
+    policy.subcommand,
+    normalizedOverride,
+    resolvedOverride,
+    geminiProfileResolver(agent),
+    MIN_TIMEOUT_BY_AGENT[agent] ?? 120,
+    EXPECTED_DURATION_BY_AGENT[agent] ?? 30,
+    NATIVE_CODEX_AGENTS.has(agent),
+  ];
+}
+
 function parseCliArgs(argv) {
   const args = [...argv];
   let format = "json";
   let agent = DEFAULT_CODEX_AGENT;
+  let mapFile = "";
+  let profileOverride = "auto";
+  let geminiProfilesModule = "";
+  let nested = false;
   while (args.length > 0) {
     const flag = args.shift();
     if (flag === "--format") format = args.shift() || "";
     else if (flag === "--agent") agent = args.shift() || "";
+    else if (flag === "--map-file") mapFile = args.shift() || "";
+    else if (flag === "--profile-override")
+      profileOverride = args.shift() || "";
+    else if (flag === "--gemini-profiles-module")
+      geminiProfilesModule = args.shift() || "";
+    else if (flag === "--nested") nested = true;
     else throw new Error(`unknown argument: ${flag}`);
   }
-  if (!new Set(["json", "tsv"]).has(format)) {
+  if (!new Set(["json", "tsv", "route"]).has(format)) {
     throw new Error(`unsupported format: ${format}`);
   }
-  return { format, agent };
+  return {
+    format,
+    agent,
+    mapFile,
+    profileOverride,
+    geminiProfilesModule,
+    nested,
+  };
 }
 
-function runCli() {
-  const { format, agent } = parseCliArgs(process.argv.slice(2));
+async function runCli() {
+  const {
+    format,
+    agent,
+    mapFile,
+    profileOverride,
+    geminiProfilesModule,
+    nested,
+  } = parseCliArgs(process.argv.slice(2));
+  if (format === "route") {
+    if (!mapFile) throw new Error("--map-file is required for route format");
+    const map = JSON.parse(readFileSync(mapFile, "utf8"));
+    let resolver = resolveGeminiProfileForPurpose;
+    if (geminiProfilesModule) {
+      try {
+        const module = await import(pathToFileURL(geminiProfilesModule).href);
+        resolver = (agent) => {
+          try {
+            return module.resolveGeminiProfileForPurpose(agent) || "flash38";
+          } catch {
+            return "flash38";
+          }
+        };
+      } catch {
+        resolver = () => "flash38";
+      }
+    }
+    process.stdout.write(
+      resolveAgentRoute(agent, map, profileOverride, nested, resolver).join(
+        "\x1e",
+      ),
+    );
+    return;
+  }
   const resolved = resolveCodexAgentPolicy(agent);
   if (format === "tsv") {
     process.stdout.write(
@@ -353,7 +508,7 @@ function runCli() {
 
 if (import.meta.url === new URL(process.argv[1], "file:").href) {
   try {
-    runCli();
+    await runCli();
   } catch (error) {
     process.stderr.write(`[agent-route-policy] ${error.message}\n`);
     process.exitCode = 1;

@@ -251,6 +251,54 @@ describe("mcp-filter", () => {
     });
   });
 
+  it("CLI inventory 서버 목록을 재사용하되 명시된 available 목록을 우선한다", () => {
+    const options = {
+      agentType: "executor",
+      cliType: "codex",
+      inventory: {
+        codex: {
+          servers: [
+            { name: "context7", status: "enabled" },
+            { name: "exa", status: "configured" },
+            { name: "tavily", status: "disabled" },
+          ],
+        },
+      },
+    };
+    assert.deepEqual(
+      Object.keys(buildMcpPolicy(options).codexConfig.mcp_servers),
+      ["context7", "exa"],
+    );
+    assert.deepEqual(
+      Object.keys(
+        buildMcpPolicy({
+          ...options,
+          availableServers: ["tavily"],
+        }).codexConfig.mcp_servers,
+      ),
+      ["tavily"],
+    );
+  });
+
+  it("Codex inventory가 비면 config의 단순 MCP 섹션으로 fallback한다", () => {
+    const dir = mkdtempSync(join(process.cwd(), ".tfx-mcp-filter-"));
+    const config = join(dir, "config.toml");
+    try {
+      writeFileSync(config, "[mcp_servers.context7]\n[mcp_servers.foo.bar]\n");
+      const policy = buildMcpPolicy({
+        agentType: "executor",
+        cliType: "codex",
+        codexConfig: config,
+        inventory: { codex: { servers: [] } },
+      });
+      assert.deepEqual(Object.keys(policy.codexConfig.mcp_servers), [
+        "context7",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("hint와 allowed server는 동일한 keyword top-k 결과를 재사용한다", () => {
     const policy = buildMcpPolicy({
       agentType: "executor",

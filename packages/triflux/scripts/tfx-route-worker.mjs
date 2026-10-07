@@ -12,9 +12,7 @@ const FACTORY_CANDIDATES = [
   resolve(process.cwd(), "hub/workers/factory.mjs"),
 ];
 
-// MCP transport 실패 시 tfx-route.sh가 exec fallback을 수행할 수 있도록
-// CODEX_MCP_TRANSPORT_EXIT_CODE(70)으로 종료한다.
-const MCP_TRANSPORT_EXIT_CODE = 70;
+const WORKER_UNAVAILABLE_EXIT_CODE = 70;
 
 let createWorker = null;
 
@@ -23,12 +21,11 @@ for (const candidate of FACTORY_CANDIDATES) {
   try {
     ({ createWorker } = await import(pathToFileURL(candidate).href));
   } catch (err) {
-    // 의존성 누락 (예: @modelcontextprotocol/sdk) → fallback 가능하도록 exit 70
     if (err.code === "ERR_MODULE_NOT_FOUND") {
       process.stderr.write(
         `[tfx-route-worker] 모듈 로드 실패: ${err.message}\n`,
       );
-      process.exit(MCP_TRANSPORT_EXIT_CODE);
+      process.exit(WORKER_UNAVAILABLE_EXIT_CODE);
     }
     throw err;
   }
@@ -39,7 +36,7 @@ if (!createWorker) {
   process.stderr.write(
     "[tfx-route-worker] worker factory를 찾지 못했습니다.\n",
   );
-  process.exit(MCP_TRANSPORT_EXIT_CODE);
+  process.exit(WORKER_UNAVAILABLE_EXIT_CODE);
 }
 
 function parseArgs(argv) {

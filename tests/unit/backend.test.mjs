@@ -198,10 +198,8 @@ describe("getBackendForAgent: 에이전트명 → Backend", () => {
     assert.ok(b instanceof CodexBackend);
   });
 
-  it("직접 CLI명 'gemini' → AntigravityBackend (agent-map alias)", () => {
-    const b = getBackendForAgent("gemini");
-    assert.ok(b instanceof AntigravityBackend);
-    assert.equal(b.command(), "agy");
+  it("제거된 gemini 별칭은 지원하지 않는다", () => {
+    assert.throws(() => getBackendForAgent("gemini"), /지원하지 않는/);
   });
 
   it("직접 CLI명 'claude' → ClaudeBackend", () => {
@@ -231,15 +229,14 @@ describe("getBackendForAgent: 에이전트명 → Backend", () => {
 // 4. listBackends
 // ========================================================================
 describe("listBackends", () => {
-  it("4개 백엔드 반환", () => {
+  it("3개 백엔드 반환", () => {
     const list = listBackends();
-    assert.equal(list.length, 4);
+    assert.equal(list.length, 3);
   });
 
-  it("codex, gemini alias, claude, antigravity 모두 포함", () => {
+  it("codex, claude, antigravity 모두 포함", () => {
     const names = listBackends().map((b) => b.name());
     assert.ok(names.includes("codex"), "codex 포함");
-    assert.ok(names.includes("gemini"), "gemini 포함");
     assert.ok(names.includes("claude"), "claude 포함");
     assert.ok(names.includes("antigravity"), "antigravity 포함");
   });
@@ -311,7 +308,7 @@ describe("agent-map.json 정합성", () => {
   const agentMap = JSON.parse(
     readFileSync(join(ROOT, "hub/team/agent-map.json"), "utf8"),
   );
-  const validCliNames = ["codex", "gemini", "claude", "antigravity"];
+  const validCliNames = ["codex", "claude", "antigravity"];
 
   it("agent-map.json의 모든 값이 유효한 CLI 이름", () => {
     for (const [agent, cli] of Object.entries(agentMap)) {

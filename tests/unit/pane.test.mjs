@@ -24,10 +24,6 @@ describe("pane.mjs", () => {
       `skip-git 포함: ${command}`,
     );
   });
-
-  it("buildCliCommand(gemini)는 gemini를 반환해야 한다", () => {
-    assert.equal(buildCliCommand("gemini"), "gemini");
-  });
 });
 
 describe("Antigravity prompt submission", () => {
@@ -170,12 +166,12 @@ describe("Antigravity prompt submission", () => {
 });
 
 describe("shouldUseFileRef(@ intercept 회귀 #117)", () => {
-  it("psmux + useFileRef=true + gemini는 @file 경로 사용", () => {
+  it("psmux + useFileRef=true + antigravity는 @file 경로 사용", () => {
     assert.equal(
       shouldUseFileRef({
         multiplexer: "psmux",
         useFileRef: true,
-        cli: "gemini",
+        cli: "antigravity",
       }),
       true,
     );
@@ -215,7 +211,7 @@ describe("shouldUseFileRef(@ intercept 회귀 #117)", () => {
       shouldUseFileRef({
         multiplexer: "psmux",
         useFileRef: false,
-        cli: "gemini",
+        cli: "antigravity",
       }),
       false,
     );
@@ -226,7 +222,7 @@ describe("shouldUseFileRef(@ intercept 회귀 #117)", () => {
       shouldUseFileRef({
         multiplexer: "tmux",
         useFileRef: true,
-        cli: "gemini",
+        cli: "antigravity",
       }),
       false,
     );

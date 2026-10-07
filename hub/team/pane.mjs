@@ -49,7 +49,7 @@ function muxExec(args, opts = {}) {
 
 /**
  * CLI 에이전트 시작 커맨드 생성
- * @param {'codex'|'gemini'|'claude'} cli
+ * @param {'codex'|'antigravity'|'claude'} cli
  * @param {{ trustMode?: boolean }} [options]
  * @returns {string} 실행할 셸 커맨드
  */
@@ -63,9 +63,6 @@ export function buildCliCommand(cli, options = {}) {
         return buildExecArgs({});
       }
       return "codex --dangerously-bypass-approvals-and-sandbox";
-    case "gemini":
-      // interactive 모드 — MCP는 ~/.gemini/settings.json에 사전 등록
-      return "gemini";
     case "claude":
       // interactive 모드
       return "claude";
@@ -156,9 +153,7 @@ function waitForComposerReady(target) {
  * capture 불가 또는 재시도 소진을 성공으로 숨기지 않고 오류로 반환한다.
  */
 function isAntigravityCli(cli) {
-  return ["agy", "antigravity", "gemini"].includes(
-    String(cli || "").toLowerCase(),
-  );
+  return ["agy", "antigravity"].includes(String(cli || "").toLowerCase());
 }
 
 function promptComposerNeedle(prompt) {
@@ -254,7 +249,7 @@ function confirmSubmit(target, prompt, cli, sendEnter) {
  * @param {string} prompt — 주입할 텍스트
  * @param {object} [opts]
  * @param {boolean} [opts.useFileRef] — true면 TUI용 @file 참조 방식 요청 (psmux 전용). Codex에서는 자동으로 paste-buffer 경로로 fallback.
- * @param {'codex'|'gemini'|'claude'|null} [opts.cli] — 대상 CLI. Codex일 때 @ intercept를 회피하기 위해 paste-buffer 경로를 강제한다.
+ * @param {'codex'|'antigravity'|'claude'|null} [opts.cli]: 대상 CLI. Codex일 때 @ intercept를 회피하기 위해 paste-buffer 경로를 강제한다.
  */
 export function injectPrompt(
   target,

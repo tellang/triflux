@@ -3,8 +3,6 @@
 // 책임: Claude 는 외부 CLI 가 아닌 Claude Code Agent 도구로 dispatch 된다. plan() 은
 // command=null 을 반환하고 호출자가 Agent() 로 라우팅하도록 신호한다.
 //
-// 출처: scripts/tfx-route.sh route_agent() L1062-L1063 (explore|claude),
-//        L1196-L1203 (TFX_CLI_MODE=gemini fallback), TFX_VERIFIER_OVERRIDE=claude.
 // timeoutSec은 lane 예상 소요 시간(advisory)이다. hard ceiling 집행은 Bash route가 소유한다.
 
 export const id = "claude";

@@ -3,8 +3,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { FG } from "../../hub/team/ansi.mjs";
 import {
   clamp,
+  cliColor,
   countStatuses,
   FALLBACK_COLUMNS,
   FALLBACK_ROWS,
@@ -83,6 +85,11 @@ describe("tui-core: 텍스트 유틸", () => {
 });
 
 describe("tui-core: 워커 상태", () => {
+  it("antigravity와 agy 워커는 Antigravity 색을 사용한다", () => {
+    assert.equal(cliColor("antigravity"), FG.antigravity);
+    assert.equal(cliColor("agy"), FG.antigravity);
+  });
+
   it("runtimeStatus: handoff.status 우선", () => {
     assert.equal(runtimeStatus({ handoff: { status: "ok" } }), "ok");
     assert.equal(runtimeStatus({ status: "running" }), "running");
@@ -92,9 +99,9 @@ describe("tui-core: 워커 상태", () => {
   it("normalizeWorkerState: 기본 정규화", () => {
     const result = normalizeWorkerState(
       {},
-      { cli: "gemini", status: "running", progress: 0.5 },
+      { cli: "antigravity", status: "running", progress: 0.5 },
     );
-    assert.equal(result.cli, "gemini");
+    assert.equal(result.cli, "antigravity");
     assert.equal(result.status, "running");
     assert.equal(result.progress, 0.5);
   });

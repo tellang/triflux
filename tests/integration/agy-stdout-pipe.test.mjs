@@ -310,16 +310,3 @@ test("TFX_CLI_MODE=antigravity remaps codex-routed agents to agy", () => {
   assert.match(out(result), /type=antigravity/);
   assert.match(result.stdout, /AGY_OK/);
 });
-
-test("direct gemini route redirects to Antigravity when preflight marked agy ready", () => {
-  const result = runBash(
-    `TFX_ANTIGRAVITY_OK=1 bash "${ROUTE_SCRIPT}" gemini 'Return exactly: AGY_OK' minimal 120`,
-  );
-
-  assert.equal(result.status, 0, out(result));
-  assert.match(out(result), /agent: gemini/);
-  assert.match(out(result), /cli: antigravity/);
-  assert.match(out(result), /type=antigravity/);
-  assert.match(result.stdout, /AGY_OK/);
-  assert.doesNotMatch(out(result), /type=gemini/);
-});

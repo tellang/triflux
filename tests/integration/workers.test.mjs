@@ -42,8 +42,6 @@ function buildRouteEnv(extraEnv = {}) {
     TFX_ANTIGRAVITY_OK: "0",
     TFX_DISABLE_CODEX: "0",
     TFX_DISABLE_ANTIGRAVITY: "0",
-    TFX_CODEX_TRANSPORT: "exec",
-    TFX_CTO_NORTH_STAR: "0",
     ...extraEnv,
   };
 }
@@ -255,6 +253,5 @@ describe("tfx-route.sh wrapper integration", { timeout: 15000 }, () => {
     assert.equal(result.status, 0, output);
     assert.match(output, /EXEC:route verify/);
     assert.match(output, /type=codex/);
-    assert.match(output, /codex_transport_effective=exec/);
   });
 });

@@ -126,8 +126,7 @@ describe("#148 _mcp_preflight_filter_dead — all-dead early fail", () => {
   });
 
   it("#170 all-dead default: graceful degradation (rc=0)", () => {
-    // PR #170 회귀 fix: default 동작이 early-fail (rc=78) 에서 graceful (rc=0+marker) 로 변경.
-    // 호출자 (run_codex_mcp 분기) 가 _TFX_MCP_DEGRADED 마커 보고 transport=exec 강제.
+    // all-dead 기본 동작은 degraded 마커를 남기고 계속한다.
     const result = runPreflight({
       flags: [
         "-c",
@@ -363,80 +362,6 @@ describe("#153 dotted server names — preflight regex 는 dot 포함", () => {
   });
 });
 
-// PR #170 — graceful degradation marker 가 호출자 (run_codex_mcp 분기) 에서
-// transport=exec 강제 + FULL_PROMPT 리셋 (MCP_HINT 제거) 을 trigger 한다.
-// 이 분기가 회귀하면 dead MCP 환경에서 codex-mcp.mjs 가 spawn 되어 stall 재발.
-describe("#170 transport degradation marker — source 분기 회귀 가드", () => {
-  it("MCP_HINT 는 사용자 프롬프트와 라벨+빈줄로 분리해 결합한다", () => {
-    const source = readFileSync(SCRIPT_PATH, "utf8");
-    assert.doesNotMatch(
-      source,
-      /FULL_PROMPT="\$\{PROMPT\}\. \$\{MCP_HINT\}"/,
-      "MCP_HINT 가 사용자 태스크 마지막 문장에 inline 접착되면 안 됨",
-    );
-    assert.match(
-      source,
-      /\[도구 안내\] \$\{MCP_HINT\}/,
-      "MCP_HINT 라벨 분리 결합이 사라짐",
-    );
-  });
-
-  it("source 에 _TFX_MCP_DEGRADED 마커 + transport=exec 강제 분기", () => {
-    const source = readFileSync(SCRIPT_PATH, "utf8");
-    assert.match(
-      source,
-      /_TFX_MCP_DEGRADED:-0/,
-      "_TFX_MCP_DEGRADED 마커 분기가 사라짐",
-    );
-    assert.match(
-      source,
-      /TFX_CODEX_TRANSPORT="exec"/,
-      "transport=exec 강제 분기가 사라짐",
-    );
-    assert.match(
-      source,
-      /FULL_PROMPT="\$PROMPT"/,
-      "FULL_PROMPT 리셋 (MCP_HINT 제거) 분기가 사라짐",
-    );
-  });
-
-  it("antigravity lane 도 degraded 시 MCP_HINT 를 제거한다", () => {
-    const source = readFileSync(SCRIPT_PATH, "utf8");
-    const agyStart = source.indexOf(
-      'elif [[ "$CLI_TYPE" == "antigravity" ]]; then',
-    );
-    assert.ok(agyStart >= 0, "antigravity lane not found");
-    const agyLane = source.slice(
-      agyStart,
-      source.indexOf('elif [[ "$CLI_TYPE" == "claude" ]]; then', agyStart),
-    );
-    assert.match(agyLane, /_TFX_MCP_DEGRADED:-0/);
-    assert.match(agyLane, /FULL_PROMPT="\$PROMPT"/);
-  });
-
-  it("source 에 TFX_MCP_FAIL_ON_ALL_DEAD opt-in 분기 포함", () => {
-    const source = readFileSync(SCRIPT_PATH, "utf8");
-    assert.match(
-      source,
-      /TFX_MCP_FAIL_ON_ALL_DEAD:-0/,
-      "TFX_MCP_FAIL_ON_ALL_DEAD opt-in 이 사라지면 #148 동작 복원 불가",
-    );
-  });
-
-  it("packages/triflux/scripts/tfx-route.sh mirror 가 main 과 byte-identical", () => {
-    const main = readFileSync(SCRIPT_PATH, "utf8");
-    const mirrorPath = path.join(
-      REPO_ROOT,
-      "packages",
-      "triflux",
-      "scripts",
-      "tfx-route.sh",
-    );
-    const mirror = readFileSync(mirrorPath, "utf8");
-    assert.equal(main, mirror, "mirror drift — patch 가 한쪽에만 적용됨");
-  });
-});
-
 // PR #171 review P1-1: dotted MCP alive 카운트 회귀 가드.
 // remaining_alive 정규식이 [^.]+ 면 dotted alive 만 남은 경우 false all-dead 판정.
 describe("#170 P1-1 dotted alive survivor — false degraded 방지", () => {
@@ -471,40 +396,5 @@ describe("#170 P1-1 dotted alive survivor — false degraded 방지", () => {
       "-c",
       "mcp_servers.foo.bar.enabled=true",
     ]);
-  });
-
-  it("source 의 remaining_alive 정규식이 dotted 허용 (`.+` 사용)", () => {
-    const source = readFileSync(SCRIPT_PATH, "utf8");
-    // [^.]+ 패턴이 remaining_alive 분기에 다시 나타나면 회귀
-    const remainingAliveBlock = source.match(
-      /remaining_alive=0[\s\S]{0,400}?for rflag/,
-    );
-    assert.ok(remainingAliveBlock, "remaining_alive 블록을 찾을 수 없음");
-    // 같은 분기 내 정규식 추출
-    const regexMatch = source.match(
-      /remaining_alive=\$\(\(remaining_alive[\s\S]{0,200}?fi\s+done/,
-    );
-    assert.ok(
-      !/\[\^\.\]\+/.test(regexMatch?.[0] || ""),
-      "remaining_alive 정규식이 [^.]+ 로 회귀 (dotted alive 카운트 누락 위험)",
-    );
-  });
-});
-
-// PR #171 review P1-2: degraded 시 user 명시 transport=mcp 도 exec 강제.
-describe("#170 P1-2 degraded transport mcp 강제 회귀 가드", () => {
-  it("source 분기가 transport=auto 외 mcp 도 exec 강제 (warning 포함)", () => {
-    const source = readFileSync(SCRIPT_PATH, "utf8");
-    // 옛 패턴: && "$TFX_CODEX_TRANSPORT" == "auto" — 회귀 시 P1-2 재발
-    assert.doesNotMatch(
-      source,
-      /_TFX_MCP_DEGRADED:-0.*?== "1"\s*&&\s*"\$TFX_CODEX_TRANSPORT"\s*==\s*"auto"/s,
-      "_TFX_MCP_DEGRADED 분기가 transport=auto 만 대상으로 회귀 — user 명시 mcp 시 stall 재발",
-    );
-    assert.match(
-      source,
-      /TFX_CODEX_TRANSPORT=mcp.*all-MCP-dead.*exec 강제/,
-      "transport=mcp + degraded 경고 메시지가 사라짐",
-    );
   });
 });
