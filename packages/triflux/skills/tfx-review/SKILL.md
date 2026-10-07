@@ -45,29 +45,27 @@ ARGUMENTS 에 `--quick` 포함 → **Quick 모드** (아래 Quick 섹션).
 > **진입 즉시 실행**: 10초 내 가시적 출력 보장. 빈 stdout + exit 0 **금지**.
 
 ```bash
-(tmux -V 2>/dev/null || psmux -V 2>/dev/null) && \
-  curl -sf http://127.0.0.1:27888/status >/dev/null && \
-  codex --version 2>/dev/null && \
-  agy --version 2>/dev/null
+if codex --version >/dev/null 2>&1; then
+  printf 'Codex: available\n'
+else
+  printf 'Codex: unavailable\n'
+fi
+if agy --version >/dev/null 2>&1; then
+  printf 'Antigravity: available\n'
+else
+  printf 'Antigravity: unavailable\n'
+fi
 ```
 
 ### Tier 판정
 
 | Tier | 조건 | 실행 방식 |
 |------|------|----------|
-| **Tier 1** | Hub + Codex + Antigravity 전부 정상 | auto multi 3-CLI (tmux/psmux 리드면 interactive) |
+| **Tier 1** | Codex + Antigravity 전부 정상 | auto multi 3-CLI (tmux/psmux 리드면 interactive) |
 | **Tier 2** | Codex 또는 Antigravity 중 하나만 가용 | 가용 CLI + Claude Agent 조합 |
-| **Tier 3** | Hub 또는 필요 CLI 불가, 또는 `claude -p` one-shot | Claude Agent only (consensus 미적용) |
+| **Tier 3** | Codex와 Antigravity 모두 불가 | Claude Agent only (consensus 미적용) |
 
 ```
-IF claude -p (one-shot):
-  → Tier 3
-
-IF Hub 미응답:
-  → hub-ensure 자동 재시작 시도: Bash("node ~/.claude/scripts/hub-ensure.mjs")
-  → 성공 → Tier 판정 재시도
-  → 실패 → Tier 3
-
 IF Codex 없음 AND Antigravity 없음:
   → Tier 3
 
@@ -83,7 +81,7 @@ ELSE:
 ```
 ⚠ [Tier 3] multi 실행 환경 미충족: single-model 모드로 실행합니다 (consensus 미적용)
   누락: {missing_components}
-  권장: Hub, Codex CLI, Antigravity CLI 설치 후 재실행
+  권장: Codex CLI, Antigravity CLI 설치 후 재실행
   또는 /tfx-review --quick 으로 명시적 quick 경로 사용
 ```
 
@@ -176,7 +174,7 @@ Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분�
 | multi dispatch 타임아웃 | 부분 출력(PARTIAL OUTPUT/.partial) 먼저 회수, 미완료분만 `--timeout 3600` + run_in_background 로 재시도 |
 | Agent 결과 미수신 | Step 2를 Agent만 단독 재실행 |
 | consensus 0% | 대상 범위가 너무 넓음: 파일 단위 분할 후 재실행 |
-| `tfx multi` 명령 실패 | 명령의 stderr와 Hub 상태를 확인 |
+| `tfx multi` 명령 실패 | 명령의 stderr와 CLI 가용성을 확인 |
 | 모든 CLI 실패 | Tier 3 fallback → Claude Agent single |
 
 ### 토큰 예산 (Deep)
