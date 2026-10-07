@@ -10,7 +10,7 @@ export const PSMUX_REQUIRED_COMMANDS = [
 
 export const PSMUX_OPTIONAL_COMMANDS = ["detach-client"];
 
-// Windows 패키지 매니저 — winget/scoop/choco 는 Windows 전용
+// Windows 전용 설치 명령
 export const PSMUX_INSTALL_COMMANDS = [
   "winget install psmux",
   "scoop install psmux",
@@ -25,50 +25,18 @@ export const PSMUX_UPDATE_COMMANDS = [
   "cargo install psmux --force",
 ];
 
-// macOS 전용 — brew 가 표준, cargo 는 cross-platform fallback
-export const PSMUX_INSTALL_COMMANDS_DARWIN = [
-  "brew install psmux",
-  "cargo install psmux",
-];
-
-export const PSMUX_UPDATE_COMMANDS_DARWIN = [
-  "brew upgrade psmux",
-  "cargo install psmux --force",
-];
-
-// Linux 전용 — cargo 만 cross-platform 지원, distro 패키지는 미제공
-export const PSMUX_INSTALL_COMMANDS_LINUX = ["cargo install psmux"];
-
-export const PSMUX_UPDATE_COMMANDS_LINUX = ["cargo install psmux --force"];
-
-// PR #258 OS-primary 분기 정책: macOS/Linux 는 tmux 가 POSIX 표준 primary,
-// psmux 는 선택형이다. 따라서 macOS/Linux 에서 "psmux 미설치"는 fallback 사유가
-// 아니며, tmux 까지 없을 때만 native/in-process fallback 을 고려한다.
-export const PSMUX_FALLBACK_NOTE_DARWIN =
-  "macOS 에서는 tmux 가 표준 멀티플렉서이며, " +
-  "psmux 미설치는 fallback 사유가 아닙니다. tmux 도 없을 때만 in-process/native fallback 을 사용합니다.";
-
-export const PSMUX_FALLBACK_NOTE_LINUX =
-  "Linux 에서는 tmux 가 표준 멀티플렉서이며, " +
-  "psmux 미설치는 fallback 사유가 아닙니다. tmux 도 없을 때만 in-process/native fallback 을 사용합니다.";
-
 export function getPsmuxInstallCommandsFor(platform = process.platform) {
-  if (platform === "darwin") return PSMUX_INSTALL_COMMANDS_DARWIN;
-  if (platform === "linux") return PSMUX_INSTALL_COMMANDS_LINUX;
-  // win32 또는 기타 (BSD 등) → Windows 풀 리스트로 폴백 (변경 전 동작 유지)
-  return PSMUX_INSTALL_COMMANDS;
+  if (platform === "win32") return PSMUX_INSTALL_COMMANDS;
+  return [platform === "darwin" ? "brew install tmux" : "apt install tmux"];
 }
 
 export function getPsmuxUpdateCommandsFor(platform = process.platform) {
-  if (platform === "darwin") return PSMUX_UPDATE_COMMANDS_DARWIN;
-  if (platform === "linux") return PSMUX_UPDATE_COMMANDS_LINUX;
-  return PSMUX_UPDATE_COMMANDS;
-}
-
-export function getPsmuxFallbackNoteFor(platform = process.platform) {
-  if (platform === "darwin") return PSMUX_FALLBACK_NOTE_DARWIN;
-  if (platform === "linux") return PSMUX_FALLBACK_NOTE_LINUX;
-  return null;
+  if (platform === "win32") return PSMUX_UPDATE_COMMANDS;
+  return [
+    platform === "darwin"
+      ? "brew upgrade tmux"
+      : "apt install --only-upgrade tmux",
+  ];
 }
 
 export function formatPsmuxCommandList(
@@ -82,10 +50,7 @@ export function formatPsmuxInstallGuidance(
   indent = "",
   platform = process.platform,
 ) {
-  const commands = getPsmuxInstallCommandsFor(platform);
-  const list = formatPsmuxCommandList(commands, indent);
-  const note = getPsmuxFallbackNoteFor(platform);
-  return note ? `${list}\n${indent}(${note})` : list;
+  return formatPsmuxCommandList(getPsmuxInstallCommandsFor(platform), indent);
 }
 
 export function formatPsmuxUpdateGuidance(
@@ -160,8 +125,8 @@ export function probePsmuxSupport(options = {}) {
       missingCommands,
       missingOptionalCommands,
       hasHelp: helpOutput.length > 0,
-      installHint: formatPsmuxInstallGuidance("  "),
-      updateHint: formatPsmuxUpdateGuidance("  "),
+      installHint: formatPsmuxInstallGuidance("  ", "win32"),
+      updateHint: formatPsmuxUpdateGuidance("  ", "win32"),
     };
   } catch {
     return {
@@ -173,8 +138,8 @@ export function probePsmuxSupport(options = {}) {
       missingCommands: [...PSMUX_REQUIRED_COMMANDS],
       missingOptionalCommands: [...PSMUX_OPTIONAL_COMMANDS],
       hasHelp: false,
-      installHint: formatPsmuxInstallGuidance("  "),
-      updateHint: formatPsmuxUpdateGuidance("  "),
+      installHint: formatPsmuxInstallGuidance("  ", "win32"),
+      updateHint: formatPsmuxUpdateGuidance("  ", "win32"),
     };
   }
 }
@@ -207,6 +172,8 @@ export function probePrimaryMultiplexerSupport(options = {}) {
       recommended: true,
       missingCommands: [],
       missingOptionalCommands: [],
+      installHint: formatPsmuxInstallGuidance("  ", platform),
+      updateHint: formatPsmuxUpdateGuidance("  ", platform),
     };
   } catch (error) {
     return {
@@ -218,6 +185,8 @@ export function probePrimaryMultiplexerSupport(options = {}) {
       recommended: false,
       missingCommands: ["tmux"],
       missingOptionalCommands: [],
+      installHint: formatPsmuxInstallGuidance("  ", platform),
+      updateHint: formatPsmuxUpdateGuidance("  ", platform),
       error: error?.message || String(error),
     };
   }

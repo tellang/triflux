@@ -56,16 +56,8 @@ function execOpenTerminal(execFn) {
   });
 }
 
-// psmux는 Windows에서 wt-manager 경유 (createTab/splitPane 등) — tmux 호환 unix 명령군과 다른 표면.
-// 비-Windows(macOS/Linux) 환경에서는 psmux가 tmux-compatible new-window/select-pane 명령을 받아주므로
-// tmux 어댑터와 동일하게 취급한다.
-function isTmuxLikeMux(mux, platform) {
-  return TMUX_LIKE_MUXES.has(mux) || (platform !== "win32" && mux === "psmux");
-}
-
-function shellCommandName(value) {
-  const command = String(value);
-  return /^[A-Za-z0-9_./:-]+$/u.test(command) ? command : shellQuote(command);
+function isTmuxLikeMux(mux) {
+  return TMUX_LIKE_MUXES.has(mux);
 }
 
 function powershellCommandName(value) {
@@ -92,17 +84,6 @@ function defaultPsmuxBinaryExists(command) {
   } catch {
     return false;
   }
-}
-
-function buildAttachCommand(mux, sessionName, deps = {}) {
-  if (mux === "psmux") {
-    const command = process.env.PSMUX_BIN || "psmux";
-    const psmuxBinaryExists =
-      deps.psmuxBinaryExists || defaultPsmuxBinaryExists;
-    if (!psmuxBinaryExists(command)) return null;
-    return `${shellCommandName(command)} attach-session -t ${shellQuote(sessionName)}`;
-  }
-  return `tmux attach-session -t ${shellQuote(sessionName)}`;
 }
 
 // wt-manager.createTab은 (a) undefined/void 반환 — legacy success 의미 (b) {success:true|false, ...} 객체 반환의 두 형태가 공존.
@@ -162,7 +143,7 @@ export function createTerminalOpener(deps = {}) {
     }
 
     const mux = resolveMux(deps);
-    if (isTmuxLikeMux(mux, platform)) {
+    if (isTmuxLikeMux(mux)) {
       const targetPane = resolveLeadPane(spec.targetPane);
       if (!targetPane) return false;
       const targetWindow = resolveLeadWindow(tmuxExec, targetPane);
@@ -212,19 +193,14 @@ export function createTerminalOpener(deps = {}) {
     }
 
     const mux = resolveMux(deps);
-    if (isTmuxLikeMux(mux, platform)) {
+    if (isTmuxLikeMux(mux)) {
       const targetPane = resolveLeadPane(opts.targetPane);
       if (!targetPane) return false;
-      const socketPath =
-        mux === "psmux" ? null : resolveLeadSocket(tmuxExec, targetPane);
-      if (mux !== "psmux" && !socketPath) return false;
-      const attachCommand =
-        mux === "psmux"
-          ? buildAttachCommand(mux, sessionName, deps)
-          : `env -u TMUX tmux -S ${shellQuote(
-              socketPath,
-            )} attach-session -t ${shellQuote(sessionName)}`;
-      if (!attachCommand) return false;
+      const socketPath = resolveLeadSocket(tmuxExec, targetPane);
+      if (!socketPath) return false;
+      const attachCommand = `env -u TMUX tmux -S ${shellQuote(
+        socketPath,
+      )} attach-session -t ${shellQuote(sessionName)}`;
       const targetWindow = resolveLeadWindow(tmuxExec, targetPane);
       if (!targetWindow) return false;
       try {
@@ -246,12 +222,12 @@ export function createTerminalOpener(deps = {}) {
     const target = `${sessionName}:0.${workerNumber}`;
     const mux = resolveMux(deps);
 
-    if (mux === "psmux") {
+    if (platform === "win32" && mux === "psmux") {
       psmuxExec(["select-pane", "-t", target]);
       return true;
     }
 
-    if (isTmuxLikeMux(mux, platform)) {
+    if (isTmuxLikeMux(mux)) {
       tmuxExec(`select-pane -t ${shellQuote(target)}`);
       return true;
     }

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+
 import { describe, it } from "node:test";
 
 import {
@@ -31,80 +30,6 @@ describe("terminal-opener helpers", () => {
 });
 
 describe("terminal-opener adapter", () => {
-  it("detects psmux when version output is written to stdout only", async () => {
-    const binDir = mkdtempSync(join(tmpdir(), "triflux-psmux-stdout-"));
-    const psmuxPath = join(binDir, "psmux");
-    writeFileSync(psmuxPath, "#!/bin/sh\nprintf 'psmux 1.2.3\\n'\n");
-    chmodSync(psmuxPath, 0o755);
-
-    const previousPath = process.env.PATH;
-    const previousPsmuxBin = process.env.PSMUX_BIN;
-    process.env.PATH = `${binDir}:${previousPath || ""}`;
-    delete process.env.PSMUX_BIN;
-
-    try {
-      const calls = [];
-      const opener = createTerminalOpener({
-        platform: "darwin",
-        mux: "psmux",
-        tmuxExec: (command) => {
-          calls.push(command);
-          return command.startsWith("display-message") ? "lead:0" : "";
-        },
-      });
-
-      assert.equal(
-        await opener.openSession("demo", { targetPane: "%40" }),
-        true,
-      );
-      assert.match(calls[1], /psmux attach-session -t/);
-    } finally {
-      process.env.PATH = previousPath;
-      if (previousPsmuxBin === undefined) {
-        delete process.env.PSMUX_BIN;
-      } else {
-        process.env.PSMUX_BIN = previousPsmuxBin;
-      }
-    }
-  });
-
-  it("detects psmux when version output is written to stderr only", async () => {
-    const binDir = mkdtempSync(join(tmpdir(), "triflux-psmux-stderr-"));
-    const psmuxPath = join(binDir, "psmux");
-    writeFileSync(psmuxPath, "#!/bin/sh\nprintf 'psmux 1.2.3\\n' >&2\n");
-    chmodSync(psmuxPath, 0o755);
-
-    const previousPath = process.env.PATH;
-    const previousPsmuxBin = process.env.PSMUX_BIN;
-    process.env.PATH = `${binDir}:${previousPath || ""}`;
-    delete process.env.PSMUX_BIN;
-
-    try {
-      const calls = [];
-      const opener = createTerminalOpener({
-        platform: "darwin",
-        mux: "psmux",
-        tmuxExec: (command) => {
-          calls.push(command);
-          return command.startsWith("display-message") ? "lead:0" : "";
-        },
-      });
-
-      assert.equal(
-        await opener.openSession("demo", { targetPane: "%41" }),
-        true,
-      );
-      assert.match(calls[1], /psmux attach-session -t/);
-    } finally {
-      process.env.PATH = previousPath;
-      if (previousPsmuxBin === undefined) {
-        delete process.env.PSMUX_BIN;
-      } else {
-        process.env.PSMUX_BIN = previousPsmuxBin;
-      }
-    }
-  });
-
   it("session multiplexer detection removes redundant nested win32 guards only", () => {
     const source = readFileSync("hub/team/session.mjs", "utf8");
 
@@ -312,71 +237,27 @@ describe("terminal-opener adapter", () => {
     assert.doesNotMatch(calls[2], /psmux attach-session -t/);
   });
 
-  it("macOS psmux fallback is treated as tmux-compatible for openCommand", async () => {
-    const calls = [];
-    const opener = createTerminalOpener({
-      platform: "darwin",
-      mux: "psmux",
-      tmuxExec: (command) => {
-        calls.push(command);
-        return command.startsWith("display-message") ? "lead:1" : "";
-      },
+  for (const platform of ["darwin", "linux"]) {
+    it(`${platform}에서는 psmux 세션 attach와 pane 조작을 실행하지 않는다`, async () => {
+      const calls = [];
+      const opener = createTerminalOpener({
+        platform,
+        mux: "psmux",
+        psmuxBinaryExists: () => {
+          calls.push("probe");
+          return true;
+        },
+        psmuxExec: (args) => calls.push(args),
+        tmuxExec: (command) => calls.push(command),
+      });
+      assert.equal(
+        await opener.openSession("demo", { targetPane: "%45" }),
+        false,
+      );
+      assert.equal(opener.focusPane("demo", 1), false);
+      assert.deepEqual(calls, []);
     });
-
-    assert.equal(
-      await opener.openCommand({
-        title: "Worker 3",
-        command: "echo hi",
-        targetPane: "%44",
-      }),
-      true,
-    );
-    assert.equal(
-      calls[0],
-      "display-message -p -t %44 '#{session_name}:#{window_index}'",
-    );
-    assert.match(
-      calls[1],
-      /^new-window -a -t 'lead:1' -n 'Worker 3' 'echo hi'$/,
-    );
-  });
-
-  it("macOS psmux fallback opens sessions with psmux attach in a new window", async () => {
-    const calls = [];
-    const opener = createTerminalOpener({
-      platform: "darwin",
-      mux: "psmux",
-      psmuxBinaryExists: () => true,
-      tmuxExec: (command) => {
-        calls.push(command);
-        return command.startsWith("display-message") ? "lead:4" : "";
-      },
-    });
-
-    assert.equal(
-      await opener.openSession("demo", {
-        title: "Demo Session",
-        targetPane: "%45",
-      }),
-      true,
-    );
-    assert.match(calls[1], /^new-window -a -t 'lead:4' -n 'Demo Session' /);
-    assert.match(calls[1], /psmux attach-session -t/);
-    assert.doesNotMatch(calls[1], /tmux attach-session -t/);
-  });
-
-  it("macOS psmux openSession refuses to emit attach command when psmux binary is absent", async () => {
-    const calls = [];
-    const opener = createTerminalOpener({
-      platform: "darwin",
-      mux: "psmux",
-      psmuxBinaryExists: () => false,
-      tmuxExec: (command) => calls.push(command),
-    });
-
-    assert.equal(await opener.openSession("demo"), false);
-    assert.deepEqual(calls, []);
-  });
+  }
 
   it("tmux-compatible opener는 explicit lead pane 없이는 new-window를 열지 않는다", async () => {
     const calls = [];
@@ -483,6 +364,7 @@ describe("terminal-opener adapter", () => {
   it("focusPane uses psmuxExec for psmux", () => {
     const calls = [];
     const opener = createTerminalOpener({
+      platform: "win32",
       mux: "psmux",
       psmuxExec: (args) => calls.push(args),
     });
@@ -508,6 +390,7 @@ describe("terminal-opener adapter", () => {
     assert.equal(
       focusSessionPane("demo", 1, {
         _deps: {
+          platform: "win32",
           mux: "psmux",
           psmuxExec: (args) => calls.push(args),
         },
