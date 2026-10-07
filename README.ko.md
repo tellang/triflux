@@ -163,7 +163,7 @@ Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-s
 **Hub.** 팀, 원격 세션, MCP 도구, 상태 표시를 잇는 로컬 메시지 버스다. 기본으로
 `127.0.0.1:27888`에 붙고(`TFX_HUB_PORT`로 변경), `TFX_HUB_TOKEN`이 있으면 bearer 토큰을 요구한다.
 `tfx-auto`, `tfx multi`의 headless 워커는 `claude agents` 패널에 행으로 보인다.
-끄려면 `--no-native-bridge-ui`를 준다.
+행에서 Enter를 누르면 그 워커가 도는 tmux pane이 열린다. 끄려면 `--no-native-bridge-ui`를 준다.
 
 **재시도와 승격.** `--retry ralph`는 끝나거나 막힐 때(같은 실패 3회 연속)까지 반복한다.
 `--retry auto-escalate`는 Codex `gpt6_astra_max`에서 Claude `fable`로 올라간다. 체인은

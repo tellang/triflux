@@ -141,19 +141,26 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 ## 팀 실행 모드
 
 `tfx multi`는 tmux/psmux와 headless를 지원한다. in-process와 WT 팀 모드는 지원하지 않는다.
-대화형 auto 실행에서 멀티플렉서가 없으면 tmux(macOS/Linux) 또는 psmux(Windows) 설치 오류로 끝난다.
-비TTY에서 멀티플렉서가 없으면 headless로 실행한다. Windows Terminal의 독립 탭 열기는 유지한다.
+headless 워커도 tmux/psmux 방에서 돈다. 멀티플렉서가 없으면 모드와 관계없이 설치 안내 오류로 끝난다.
+Windows Terminal의 독립 탭 열기는 유지한다.
 
 ## 기본 연결 UI(`claude agents` 노출)
 
-비대화식 워커는 기본적으로 `claude agents` 패널에 행으로 나타난다. 제외하려면 `--no-native-bridge-ui`를 쓴다.
+워커는 tmux 방에서 돌고, `claude agents` 행은 그 방에 붙는 attach client다. 행에서 Enter를 누르면
+워커가 도는 tmux pane이 열린다. 행은 공식 `claude --bg --exec`로 만든다(macOS/Linux).
 
-| 모드 | 기본값 | 행이 보이는 위치 |
-|------|---------|--------------------|
-| `tfx-auto` / `tfx multi`(비대화식) | 켬 | 로컬 `claude agents` |
-| 대화식(tmux/psmux) | 끔 | 해당 없음 |
+| 대상 | 기본값 | 행에서 할 수 있는 것 |
+|------|--------|----------------------|
+| `tfx-auto` / `tfx multi` headless 워커 | 켬, `--no-native-bridge-ui`로 끔 | 읽기 전용 관찰 |
+| `tfx-live start` 로 띄운 Claude 외 세션 | 켬 | 입력 가능. python3가 없으면 읽기 전용이고 행 이름에 `[read-only]`가 붙음 |
+| 대화형 `tfx multi`(tmux/psmux) | 끔 | 해당 없음 |
 
-감시자가 종료되면 즉시 데몬의 `sendKillBySessionId`를 실행해 오래된 행을 남기지 않는다. PRD: `.triflux/plans/native-bridge-ui-default-expansion.md`(PR #323으로 병합).
+- 행을 닫거나 Ctrl+Z로 목록에 돌아가도 워커는 계속 돈다.
+- 방이 사라지면 행이 스스로 지워진다. headless 실행은 끝날 때 자기가 연 행을 직접 지운다.
+- 바깥 터미널의 질의 응답이 방 입력으로 새지 않게, 읽기 전용 attach 또는 `hub/team/agents-row-attach.py` 중계를 쓴다.
+- 행 생성에는 cwd가 Claude에서 trust 된 워크스페이스여야 한다. 실패하면 워커는 그대로 돌고 경고만 남는다.
+
+근거: [ADR-0026](docs/adr/0026-agents-row-tmux-attach.md).
 </native-bridge>
 
 <cross-review>

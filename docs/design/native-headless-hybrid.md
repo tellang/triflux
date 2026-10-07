@@ -224,6 +224,6 @@ Hub 연결 시도
 
 ## 8. 비고
 
-- **현재 기본 모드**: `auto`는 tmux/psmux가 있으면 pane을 사용한다. 대화형 환경에서 mux가 없으면 설치 안내 오류로 끝내고, 비TTY에서 mux가 없으면 headless로 실행한다.
+- **현재 기본 모드**: `auto`는 tmux/psmux가 있으면 pane을 사용한다. mux가 없으면 설치 안내 오류로 끝낸다. headless도 tmux/psmux 방에서 돈다.
 - **Phase 2 이전**: OMC skill에서 `Bash("tfx multi ...")` 패턴으로 즉시 활용 가능
 - **handoff 스키마 원본**: `docs/design/handoff-schema-v7.md`

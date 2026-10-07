@@ -328,7 +328,7 @@ deep/fullcycle 추가 규칙:
 
 > **2개 이상 태스크에 코드 변경이 있으면 worktree를 나눠 세션마다 하나씩 실행한다.**
 > `Agent()`를 사용하면 `isolation: worktree`를 지정한다. 코드 변경이 없는 병렬 작업은 `tfx multi`를 사용할 수 있다.
-> `auto`가 interactive(tmux/psmux)로 결정되면 pane이 관찰 표면이고 native bridge는 off다. 명시적 headless만 native bridge default on이며, 필요 시 `--no-native-bridge-ui`로 opt-out 한다.
+> `auto`가 interactive(tmux/psmux)로 결정되면 pane이 관찰 표면이고 native bridge는 off다. 명시적 headless만 native bridge default on이다. 워커마다 `claude agents` 행이 생기고, Enter를 누르면 그 워커의 tmux pane이 읽기 전용으로 열린다. 필요 시 `--no-native-bridge-ui`로 opt-out 한다.
 
 **전환 방법:**
 
@@ -353,7 +353,7 @@ else:
 
 기본 명령에서는 `--teammate-mode`를 **생략**한다. 이때 엔진의 `auto`가 리드 환경을 따라
 결정한다. tmux/psmux가 있으면 interactive pane을 사용한다. 대화형 환경에서 mux가 없으면
-설치 안내 오류로 끝낸다. 비TTY에서 mux가 없으면 headless로 실행한다.
+설치 안내 오류로 끝낸다. headless도 tmux/psmux 방에서 돌기 때문에 mux가 없으면 같은 오류로 끝난다.
 
 `headless`는 다음처럼 명시적으로 선택할 수 있다.
 

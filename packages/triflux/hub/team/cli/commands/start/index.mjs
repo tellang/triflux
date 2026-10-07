@@ -88,7 +88,8 @@ export async function teamStart(args = []) {
   });
 
   const effectiveMode = normalizeTeammateMode(teammateMode);
-  if (effectiveMode !== "headless") ensureTmuxOrExit();
+  // headless 워커도 tmux 방에서 돈다. 방이 없으면 claude agents 행도 열 수 없다.
+  ensureTmuxOrExit();
   const effectiveNativeBridge =
     effectiveMode === "headless" && !nativeBridgeUiOptOut ? true : nativeBridge;
 
