@@ -211,65 +211,10 @@ function auditMcp() {
   }
 }
 
-// ── 4. 훅 레지스트리 감사 ──
-function auditHookRegistry() {
-  const registryPath = join(process.cwd(), "hooks", "hook-registry.json");
-  if (!existsSync(registryPath)) return;
-
-  let registry;
-  try {
-    registry = JSON.parse(readFileSync(registryPath, "utf8"));
-  } catch {
-    return;
-  }
-
-  const events = registry.events || {};
-  let blockingCount = 0;
-  let externalCount = 0;
-
-  for (const [_event, hooks] of Object.entries(events)) {
-    for (const hook of hooks) {
-      if (hook.blocking) blockingCount++;
-      if (hook.source !== "triflux" && hook.source !== "omc") externalCount++;
-
-      // 외부 훅의 명령에 위험 패턴
-      if (hook.source !== "triflux") {
-        const cmd = String(hook.command || "");
-        if (/\brm\b|\bdel\b|\bformat\b|\bgit\s+push\b/i.test(cmd)) {
-          addFinding(
-            "hooks",
-            "warn",
-            `외부 훅 "${hook.id}": 위험 명령 패턴`,
-            cmd.slice(0, 80),
-          );
-        }
-      }
-    }
-  }
-
-  if (blockingCount > 5) {
-    addFinding(
-      "hooks",
-      "info",
-      `blocking 훅 ${blockingCount}개 — 도구 실행 지연 가능`,
-      "불필요한 blocking 해제 검토",
-    );
-  }
-  if (externalCount > 0) {
-    addFinding(
-      "hooks",
-      "info",
-      `외부 훅 ${externalCount}개 등록`,
-      "출처 확인 권장",
-    );
-  }
-}
-
 // ── 실행 ──
 auditSettings();
 auditClaudeMd();
 auditMcp();
-auditHookRegistry();
 
 // ── 출력 ──
 const summary = {

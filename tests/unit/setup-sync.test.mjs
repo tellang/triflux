@@ -22,13 +22,13 @@ const {
   detectDevMode,
   SYNC_MAP,
   BREADCRUMB_PATH,
-  ensureHooksInSettings,
   ensureCodexHubServerConfig,
   isSetupUserStateFile,
   SETUP_USER_STATE_FILES,
   getWorkerPackageSyncEntries,
   syncCodexHarnessAdapter,
   syncWorkerPackages,
+  syncSkills,
 } = await import("../../scripts/setup.mjs");
 
 // ── helpers ──
@@ -125,7 +125,7 @@ describe("setup-sync: --sync 플래그 파싱", () => {
 });
 
 describe("setup-sync: Codex tfx-harness adapter", () => {
-  it("temp HOME에 adapter를 동기화하고 재실행해도 idempotent하다", () => {
+  it("temp HOME에 Codex 관리 스킬 두 개를 동기화하고 재실행해도 idempotent하다", () => {
     execFileSync(
       process.execPath,
       [join(PROJECT_ROOT, "scripts", "setup.mjs"), "--sync"],
@@ -152,6 +152,32 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
       "SKILL.md",
     );
     assert.equal(readFileSync(installed, "utf8"), readFileSync(source, "utf8"));
+    const adapterLiveSource = join(
+      PROJECT_ROOT,
+      "adapters",
+      "codex",
+      "skills",
+      "tfx-live",
+      "SKILL.md",
+    );
+    const liveSource = existsSync(adapterLiveSource)
+      ? adapterLiveSource
+      : join(PROJECT_ROOT, "skills", "tfx-live", "SKILL.md");
+    const liveInstalled = join(
+      SETUP_TEST_HOME,
+      ".codex",
+      "skills",
+      "tfx-live",
+      "SKILL.md",
+    );
+    assert.equal(
+      readFileSync(liveInstalled, "utf8"),
+      readFileSync(liveSource, "utf8"),
+    );
+    assert.equal(
+      existsSync(join(dirname(liveInstalled), ".triflux-managed-skill")),
+      true,
+    );
 
     const result = syncCodexHarnessAdapter({
       destinationDir: join(SETUP_TEST_HOME, ".codex", "skills", "tfx-harness"),
@@ -495,13 +521,66 @@ describe("setup-sync: user-state file exclusions", () => {
     assert.equal(isSetupUserStateFile("SKILL.md"), false);
   });
 
-  it("tfx setup CLI path also skips user-state references", () => {
-    const source = readFileSync(
-      join(PROJECT_ROOT, "bin", "triflux.mjs"),
-      "utf8",
+  it("공용 스킬 동기화가 references를 갱신하고 사용자 파일을 보존한다", () => {
+    const root = join(TMP_DIR, "shared-skills");
+    const source = join(root, "package");
+    const claudeDir = join(root, "claude");
+    const codexDir = join(root, "codex");
+    for (const relative of [
+      "skills/tfx-live",
+      "adapters/codex/skills/tfx-harness",
+      "skills/tfx-example/references/nested",
+    ]) {
+      mkdirSync(join(source, relative), { recursive: true });
+      if (!relative.includes("references"))
+        writeFileSync(join(source, relative, "SKILL.md"), "skill");
+    }
+    writeFileSync(join(source, "skills/tfx-example/SKILL.md"), "example");
+    writeFileSync(
+      join(source, "skills/tfx-example/references/nested/guide.md"),
+      "new guide",
     );
-    assert.match(source, /isSetupUserStateFile/u);
-    assert.match(source, /if \(isSetupUserStateFile\(refFile\)\) continue;/u);
+    writeFileSync(
+      join(source, "skills/tfx-example/references/hosts.json"),
+      "do not copy",
+    );
+    const installed = join(claudeDir, "skills/tfx-example/references");
+    mkdirSync(installed, { recursive: true });
+    writeFileSync(join(installed, "hosts.json"), "user hosts");
+    const removed = join(claudeDir, "skills/tfx-plan");
+    mkdirSync(removed, { recursive: true });
+    writeFileSync(join(removed, ".triflux-managed-skill"), "managed");
+    try {
+      assert.equal(
+        syncSkills({ pluginRoot: source, claudeDir, codexDir }).ok,
+        true,
+      );
+      assert.equal(
+        readFileSync(join(installed, "nested/guide.md"), "utf8"),
+        "new guide",
+      );
+      assert.equal(
+        readFileSync(join(installed, "hosts.json"), "utf8"),
+        "user hosts",
+      );
+      assert.equal(existsSync(removed), false);
+      assert.equal(
+        syncSkills({ pluginRoot: source, claudeDir, codexDir }).changed,
+        0,
+      );
+      const liveInstalled = join(codexDir, "skills/tfx-live/SKILL.md");
+      assert.equal(readFileSync(liveInstalled, "utf8"), "skill");
+      const liveAdapter = join(source, "adapters/codex/skills/tfx-live");
+      mkdirSync(liveAdapter, { recursive: true });
+      writeFileSync(join(liveAdapter, "SKILL.md"), "Codex live skill");
+      assert.equal(
+        syncSkills({ pluginRoot: source, claudeDir, codexDir }).ok,
+        true,
+      );
+      assert.equal(readFileSync(liveInstalled, "utf8"), "Codex live skill");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -541,143 +620,6 @@ describe("setup-sync: dry-run 실행", () => {
       },
     );
     assert.ok(true, "setup.mjs --sync exited successfully");
-  });
-});
-
-describe("setup-sync: managed hook registration", () => {
-  before(ensureTmpDir);
-  after(cleanTmpDir);
-
-  function writeRegistry(registryPath, hooks) {
-    writeFileSync(
-      registryPath,
-      JSON.stringify({ events: { Stop: hooks } }, null, 2) + "\n",
-      "utf8",
-    );
-  }
-
-  function readStopCommands(settingsPath) {
-    const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-    return (settings.hooks?.Stop || [])
-      .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
-      .map((hook) => String(hook.command || ""));
-  }
-
-  it("requires 경로가 없으면 managed hook 등록을 건너뛴다 (#231)", () => {
-    const settingsPath = join(TMP_DIR, "settings-requires-missing.json");
-    const registryPath = join(TMP_DIR, "registry-requires-missing.json");
-
-    writeRegistry(registryPath, [
-      {
-        id: "external-missing",
-        matcher: "*",
-        command: 'bash "${HOME}/missing-tool/hook.sh"',
-        enabled: true,
-        requires: "$HOME/missing-tool",
-      },
-    ]);
-
-    const result = ensureHooksInSettings({ settingsPath, registryPath });
-
-    assert.equal(result.ok, true);
-    assert.equal(result.changed, false);
-    assert.deepEqual(result.added, []);
-    assert.equal(existsSync(settingsPath), false);
-  });
-
-  it("requires 경로가 있으면 managed hook을 등록한다 (#231)", () => {
-    const settingsPath = join(TMP_DIR, "settings-requires-present.json");
-    const registryPath = join(TMP_DIR, "registry-requires-present.json");
-    const requiredDir = join(TMP_DIR, "present-tool");
-    mkdirSync(requiredDir, { recursive: true });
-
-    writeRegistry(registryPath, [
-      {
-        id: "external-present",
-        matcher: "*",
-        command: 'bash "${HOME}/present-tool/hook.sh"',
-        enabled: true,
-        requires: requiredDir,
-      },
-    ]);
-
-    const result = ensureHooksInSettings({ settingsPath, registryPath });
-
-    assert.equal(result.ok, true);
-    assert.deepEqual(result.added, ["external-present"]);
-    assert.ok(
-      readStopCommands(settingsPath).some((command) =>
-        command.includes("present-tool"),
-      ),
-    );
-  });
-
-  it("requires 없는 managed hook은 기존처럼 등록한다 (#231)", () => {
-    const settingsPath = join(TMP_DIR, "settings-no-requires.json");
-    const registryPath = join(TMP_DIR, "registry-no-requires.json");
-
-    writeRegistry(registryPath, [
-      {
-        id: "internal-hook",
-        matcher: "*",
-        command: 'node "${PLUGIN_ROOT}/hooks/pipeline-stop.mjs"',
-        enabled: true,
-      },
-    ]);
-
-    const result = ensureHooksInSettings({ settingsPath, registryPath });
-
-    assert.equal(result.ok, true);
-    assert.deepEqual(result.added, ["internal-hook"]);
-    assert.ok(
-      readStopCommands(settingsPath).some((command) =>
-        command.includes("pipeline-stop.mjs"),
-      ),
-    );
-  });
-
-  it("유효하지 않은 CLAUDE_PLUGIN_ROOT는 무시하고 실제 패키지 루트를 사용한다", () => {
-    const settingsPath = join(TMP_DIR, "settings.json");
-    const registryPath = join(PROJECT_ROOT, "hooks", "hook-registry.json");
-    const invalidPluginRoot = join(TMP_DIR, "empty-worktree");
-    mkdirSync(invalidPluginRoot, { recursive: true });
-
-    const prevPluginRoot = process.env.PLUGIN_ROOT;
-    const prevClaudePluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-    process.env.PLUGIN_ROOT = invalidPluginRoot;
-    process.env.CLAUDE_PLUGIN_ROOT = invalidPluginRoot;
-
-    try {
-      const result = ensureHooksInSettings({ settingsPath, registryPath });
-      assert.equal(result.ok, true);
-
-      const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-      const stopEntries = settings.hooks?.Stop || [];
-      const stopCommands = stopEntries
-        .flatMap((entry) => (Array.isArray(entry?.hooks) ? entry.hooks : []))
-        .map((hook) => String(hook.command || ""));
-
-      assert.ok(
-        stopCommands.some((command) => command.includes("pipeline-stop.mjs")),
-        "pipeline-stop hook must be registered",
-      );
-      assert.ok(
-        stopCommands.every(
-          (command) => !command.includes(invalidPluginRoot.replace(/\\/g, "/")),
-        ),
-        "invalid plugin root must not leak into settings",
-      );
-      assert.ok(
-        stopCommands.some((command) => command.includes("${PLUGIN_ROOT:-")),
-        "registered hook must include a ${PLUGIN_ROOT:-...} fallback",
-      );
-    } finally {
-      if (prevPluginRoot === undefined) delete process.env.PLUGIN_ROOT;
-      else process.env.PLUGIN_ROOT = prevPluginRoot;
-      if (prevClaudePluginRoot === undefined)
-        delete process.env.CLAUDE_PLUGIN_ROOT;
-      else process.env.CLAUDE_PLUGIN_ROOT = prevClaudePluginRoot;
-    }
   });
 });
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -9,7 +9,6 @@ import {
   inspectRegistryStatus,
   isWatchedPath,
   loadRegistry,
-  remediate,
   removeServerFromTargets,
   resolveHubUrl,
   scanForStdioServers,
@@ -140,58 +139,6 @@ describe("mcp guard engine", () => {
       found.map((server) => server.name),
       ["unsafe-stdio"],
     );
-
-    const result = remediate(projectMcpPath, found, {
-      stdio_action: "replace-with-hub",
-    });
-    const updated = JSON.parse(readFileSync(projectMcpPath, "utf8"));
-
-    assert.equal(result.modified, true);
-    assert.equal(updated.mcpServers["tfx-hub"].type, "http");
-    assert.equal(updated.mcpServers["tfx-hub"].url, resolveHubUrl());
-    assert.equal(Object.hasOwn(updated.mcpServers, "unsafe-stdio"), false);
-  });
-
-  it("replaces stdio MCP entries with tfx-hub and writes a backup (TFX_HUB_PORT env overrides)", () => {
-    const homeDir = createHomeDir();
-    withHome(homeDir);
-    process.env.TFX_HUB_PORT = "30123";
-
-    // hub.pid port 는 무시되어야 한다 (PR #158: pid = host hint only).
-    const pidPath = join(homeDir, ".claude", "cache", "tfx-hub", "hub.pid");
-    writeFileSync(
-      pidPath,
-      JSON.stringify({ host: "127.0.0.1", port: 40404 }),
-      "utf8",
-    );
-
-    const settingsPath = join(homeDir, ".gemini", "settings.json");
-    writeFileSync(
-      settingsPath,
-      JSON.stringify(
-        {
-          mcpServers: {
-            "unsafe-stdio": { command: "node", args: ["server.js"] },
-          },
-        },
-        null,
-        2,
-      ),
-    );
-
-    const result = remediate(settingsPath, scanForStdioServers(settingsPath), {
-      stdio_action: "replace-with-hub",
-    });
-    const updated = JSON.parse(readFileSync(settingsPath, "utf8"));
-
-    assert.equal(result.modified, true);
-    assert.equal(existsSync(`${settingsPath}.bak`), true);
-    assert.deepEqual(result.removedServers, ["unsafe-stdio"]);
-    assert.equal(
-      updated.mcpServers["tfx-hub"].url,
-      "http://127.0.0.1:30123/mcp",
-    );
-    assert.equal(Object.hasOwn(updated.mcpServers, "unsafe-stdio"), false);
   });
 
   it("uses TFX_HUB_PORT env as single source when resolving Hub URL", () => {
@@ -247,7 +194,6 @@ describe("mcp guard engine", () => {
         },
       },
       policies: {
-        stdio_action: "replace-with-hub",
         unknown_server_action: "warn",
         sync_denylist: [],
         watched_paths: ["~/.gemini/config/mcp_config.json"],
@@ -290,7 +236,6 @@ describe("mcp guard engine", () => {
         },
       },
       policies: {
-        stdio_action: "replace-with-hub",
         unknown_server_action: "warn",
         sync_denylist: [],
         watched_paths: ["~/.gemini/config/mcp_config.json"],
@@ -339,7 +284,6 @@ describe("mcp guard engine", () => {
         },
       },
       policies: {
-        stdio_action: "replace-with-hub",
         unknown_server_action: "warn",
         sync_denylist: [],
         watched_paths: ["~/.gemini/config/mcp_config.json"],
@@ -403,7 +347,6 @@ describe("mcp guard engine", () => {
         },
       },
       policies: {
-        stdio_action: "replace-with-hub",
         unknown_server_action: "warn",
         sync_denylist: [],
         watched_paths: ["~/.gemini/config/mcp_config.json"],

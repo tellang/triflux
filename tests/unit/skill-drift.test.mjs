@@ -45,25 +45,11 @@ function extractSection(content, headingRegex) {
   return sectionLines.join("\n");
 }
 
-/**
- * YAML 프론트매터에서 특정 필드를 추출한다.
- */
-function extractFrontmatter(content) {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
-  return match ? match[1] : "";
-}
-
 describe("스킬 문서 존재 확인", () => {
   // Phase 5 cleanup (b371043) removed tfx-deep-interview, tfx-autoresearch,
   // and tfx-multi thin aliases. Their semantics were absorbed into the main
   // skill bodies. See `축소된 스킬 본체 이관 완결성` suite for body-level checks.
-  const expected = [
-    "tfx-auto",
-    "tfx-doctor",
-    "tfx-setup",
-    "tfx-interview",
-    "tfx-research",
-  ];
+  const expected = ["tfx-auto", "tfx-doctor", "tfx-setup", "tfx-research"];
 
   for (const name of expected) {
     it(`${name}/SKILL.md 존재`, () => {
@@ -137,45 +123,6 @@ describe("tfx-auto SKILL.md — 에이전트 매핑 일관성", () => {
     assert.ok(
       /\|.*codex.*\|/i.test(agentSection),
       "에이전트 매핑 테이블이 올바른 마크다운 테이블 형식이 아님 (| 구분자 없음)",
-    );
-  });
-});
-
-// tfx-hub 스킬은 스킬 표면 축소로 tfx-doctor 의 `## tfx-hub 관리` 절로 흡수됐다.
-describe("tfx-doctor SKILL.md — hub 관리 절", () => {
-  it("설명에 hub 키워드 포함 (단어 경계)", () => {
-    const content = readSkill("tfx-doctor");
-    const frontmatter = extractFrontmatter(content);
-    assert.ok(/\bhub\b/i.test(frontmatter), "hub가 프론트매터에 없음");
-  });
-
-  it("MCP 도구 섹션에 메시지 관련 키워드 포함", () => {
-    const content = readSkill("tfx-doctor");
-    const mcpSection = extractSection(content, /^###\s+hub\s+MCP\s+도구/);
-    assert.ok(mcpSection.length > 0, "MCP 도구 섹션이 존재하지 않음");
-    // 실제 MCP 도구 목록에 메시지 버스 핵심 동사가 포함되어야 한다
-    assert.ok(
-      /publish|register|ask|handoff|poll_messages/i.test(mcpSection),
-      "MCP 도구 섹션에 핵심 메시지 버스 도구(publish/register/ask 등)가 없음",
-    );
-  });
-
-  it("CLI 등록/대응 섹션 존재", () => {
-    const content = readSkill("tfx-doctor");
-    assert.ok(
-      /##\s+(CLI\s+대응|각\s+CLI\s+등록\s+방법)/.test(content),
-      "CLI 등록/대응 섹션이 없음",
-    );
-  });
-
-  it("false positive 방지: hub가 단순 URL이나 변수명이 아닌 섹션 제목에 존재", () => {
-    const content = readSkill("tfx-doctor");
-    // H1 또는 H2 수준 제목에 hub가 포함되어야 한다
-    const headings = content.split("\n").filter((l) => /^#{1,2}\s/.test(l));
-    const hubInHeading = headings.some((h) => /\bhub\b/i.test(h));
-    assert.ok(
-      hubInHeading,
-      "hub가 H1/H2 섹션 제목에 없음 (단순 본문 언급은 불충분)",
     );
   });
 });
@@ -255,35 +202,6 @@ describe("tfx-auto SKILL.md — thin alias 이관 규칙", () => {
 });
 
 describe("축소된 스킬 본체 이관 완결성", () => {
-  it("tfx-interview: 프론트매터에 deep-interview 트리거를 흡수", () => {
-    const content = readSkill("tfx-interview");
-    const frontmatter = extractFrontmatter(content);
-    assert.ok(
-      /deep-interview|딥인터뷰|소크라테스|깊이 탐색|요구사항 분석/.test(
-        frontmatter,
-      ),
-      "프론트매터에 deep-interview 계열 트리거가 없음",
-    );
-  });
-
-  it("tfx-interview: 5개 Stage 헤더가 모두 존재 (Stage 1~5)", () => {
-    const content = readSkill("tfx-interview");
-    for (let i = 1; i <= 5; i++) {
-      assert.ok(
-        new RegExp(`#{3,4}\\s+Stage\\s+${i}:`).test(content),
-        `Stage ${i} 헤더가 없음`,
-      );
-    }
-  });
-
-  it("tfx-interview: 산출물 저장 경로 명시", () => {
-    const content = readSkill("tfx-interview");
-    assert.ok(
-      /\.tfx\/plans\/interview-/.test(content),
-      "산출물 저장 경로(.tfx/plans/interview-{timestamp})가 없음",
-    );
-  });
-
   it("tfx-research: auto 리서치 섹션 존재", () => {
     const content = readSkill("tfx-research");
     const autoSection = extractSection(content, /^##\s+Auto\s+모드/);
@@ -306,14 +224,6 @@ describe("축소된 스킬 본체 이관 완결성", () => {
       /\.tfx\/reports\/research-/.test(content),
       "보고서 저장 경로(.tfx/reports/research-{timestamp})가 없음",
     );
-  });
-
-  it("false positive 방지: tfx-interview에서 Stage가 주석이 아닌 헤더로 존재", () => {
-    const content = readSkill("tfx-interview");
-    const stageHeadings = content
-      .split("\n")
-      .filter((l) => /^#{3,4}\s+Stage\s+\d+:/.test(l));
-    assert.ok(stageHeadings.length >= 5, "Stage 헤더가 5개 미만임");
   });
 
   it("tfx-auto: PRE-CONTEXT GATE와 context snapshot 계약을 명시", () => {

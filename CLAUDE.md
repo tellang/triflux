@@ -7,13 +7,18 @@
 
 | 시스템 | 접두사 | 용도 | 스킬 수 |
 |--------|--------|------|---------|
-| **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·스웜·원격 실행 | ~40개 |
+| **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·스웜·원격 실행 | 10개 |
 | **gstack** | `/` (접두사 없음) | QA·출시·조사·설계·검토·점검 지점 | ~35개 |
 | **omc** | `/oh-my-claudecode:*` | autopilot·ralph·team·execute·ultragoal | ~37개 |
 
-스킬을 모르면 자연어 라우팅(`.claude/rules/tfx-routing.md`)으로 자동 매핑된다.
-세션 종료 전 메모리 파일이 3개+ 변경됐으면 `/memory-hygiene` 제안을 검토한다.
+필요한 스킬은 이름으로 호출한다.
 </core-systems>
+
+<code-principles>
+## 코드 작성 원칙
+
+코드는 간결하게 쓰고 의미 있는 이름을 쓴다. 주석은 이유만 짧게 한국어로 쓴다. 테스트는 회귀를 막는 핵심 경로만 최소한으로 둔다. 제거 여부는 해당 파일을 끝까지 직접 읽고 판단한다.
+</code-principles>
 
 <psmux-wt>
 ## psmux/WT 규칙 (Windows 한정)
@@ -110,7 +115,7 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 
 ### SSH 패턴
 
-`hosts.json`의 `os` 필드로 대상 셸을 판단한다. `safety-guard`도 이 필드를 참조한다.
+`hosts.json`의 `os` 필드로 대상 셸을 판단한다.
 
 | 대상 OS | 셸 | 패턴 |
 |---------|-----|------|
@@ -157,7 +162,6 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 - Claude 작성 코드 → Codex 리뷰
 - Codex 작성 코드 → Claude 리뷰
 - 동일 모델이 스스로 승인하지 않는다.
-- git 커밋 전에 미검증 파일을 감지하면 알린다.
 </cross-review>
 
 <session-context>
@@ -177,7 +181,6 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 
 | 파일 | 내용 |
 |------|------|
-| `.claude/rules/tfx-routing.md` | 자연어 → 스킬 라우팅, CLI 라우팅 Layer 1~3, 충돌 해소 |
 | `.claude/rules/tfx-execution-skill-map.md` | tfx-auto / multi / swarm 실행 엔진 매핑, 격리 기준, 안티패턴 |
 | `.claude/rules/tfx-autoplan-principles.md` | gstack autoplan의 여섯 가지 결정 원칙·단계 우선순위·충돌 해소 규칙 추출본 |
 | `.claude/rules/tfx-update-logic.md` | triflux / OMC / gstack / Codex / Antigravity 업데이트 로직 |

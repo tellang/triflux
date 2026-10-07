@@ -1,6 +1,5 @@
 import {
   chmodSync,
-  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -22,22 +21,7 @@ const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DEFAULT_REGISTRY_PATH = join(PROJECT_ROOT, "config", "mcp-registry.json");
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const DEFAULT_HUB_PATH = "/mcp";
-const SERVER_POLICIES = new Set([
-  "hosted",
-  "gateway-sse",
-  "gateway-http",
-  "stdio",
-]);
-const GATEWAY_PORTS = Object.freeze({
-  context7: 8100,
-  "brave-search": 8101,
-  exa: 8102,
-  tavily: 8103,
-  jira: 8104,
-  serena: 8105,
-  notion: 8106,
-  "notion-guest": 8107,
-});
+const SERVER_POLICIES = new Set(["hosted", "stdio"]);
 const DEFAULT_REGISTRY = Object.freeze({
   $schema: "mcp-registry-schema",
   version: 1,
@@ -65,7 +49,6 @@ const DEFAULT_REGISTRY = Object.freeze({
     },
   },
   policies: {
-    stdio_action: "replace-with-hub",
     unknown_server_action: "warn",
     sync_denylist: [],
     watched_paths: [
@@ -151,12 +134,6 @@ function registryPath() {
   return process.env.TFX_MCP_REGISTRY_PATH
     ? resolve(process.env.TFX_MCP_REGISTRY_PATH)
     : DEFAULT_REGISTRY_PATH;
-}
-
-function ensureBackup(filePath) {
-  const backupPath = `${filePath}.bak`;
-  copyFileSync(filePath, backupPath);
-  return backupPath;
 }
 
 function isJsonMcpConfig(filePath) {
@@ -484,12 +461,9 @@ function resolveEnvDescriptors(name, serverConfig) {
     const envName = descriptor.env;
     const envValue = process.env[envName];
     if (typeof envValue !== "string" || envValue.length === 0) {
-      warnings.push(
-        `[mcp-guard] ${name}.${envKey} env skipped: env ${envName} is not set`,
-      );
-      continue;
+      warnings.push(`[mcp-guard] ${name}.${envKey} env ${envName} is not set`);
     }
-    env[envKey] = envValue;
+    env[envKey] = "${" + envName + "}";
   }
 
   return { descriptors, env, warnings };
@@ -565,22 +539,6 @@ function resolveHeaderDescriptors(name, serverConfig, filePath) {
 
 function hasOwnEntries(value) {
   return value && typeof value === "object" && Object.keys(value).length > 0;
-}
-
-function redactHeaders(headers = {}) {
-  const redacted = {};
-  for (const key of Object.keys(headers || {})) {
-    redacted[key] = "***REDACTED***";
-  }
-  return redacted;
-}
-
-function redactServerConfig(config = {}) {
-  if (!config || typeof config !== "object") return config;
-  return {
-    ...config,
-    ...(config.headers ? { headers: redactHeaders(config.headers) } : {}),
-  };
 }
 
 function descriptorsFromCodexConfig(config = {}) {
@@ -691,6 +649,7 @@ function upsertTomlServer(raw, name, config, codex = {}) {
     "http_headers",
     "env_http_headers",
     "env",
+    "env_vars",
   ]);
   const nextManagedLines = [];
   if (typeof config.url === "string") {
@@ -707,6 +666,9 @@ function upsertTomlServer(raw, name, config, codex = {}) {
   }
   const env = formatTomlInlineTable(config.env || {});
   if (env) nextManagedLines.push(`env = ${env}`);
+  if (Array.isArray(codex.env_vars) && codex.env_vars.length > 0) {
+    nextManagedLines.push(`env_vars = ${formatTomlArray(codex.env_vars)}`);
+  }
   if (codex.bearer_token_env_var) {
     nextManagedLines.push(
       `bearer_token_env_var = ${formatTomlString(codex.bearer_token_env_var)}`,
@@ -795,34 +757,6 @@ function serverPolicy(serverConfig = {}, registry = {}) {
   return "hosted";
 }
 
-function gatewaySseUrl(name, serverConfig = {}) {
-  if (typeof serverConfig.url === "string" && serverConfig.url.trim()) {
-    return normalizeUrl(serverConfig.url);
-  }
-  const port =
-    Number(serverConfig.gateway_port || serverConfig.port || 0) ||
-    GATEWAY_PORTS[name];
-  if (!Number.isFinite(port) || port <= 0) return "";
-  return `http://127.0.0.1:${port}/sse`;
-}
-
-function gatewayHttpUrl(name, serverConfig = {}) {
-  if (typeof serverConfig.url === "string" && serverConfig.url.trim()) {
-    return normalizeUrl(serverConfig.url);
-  }
-  const port =
-    Number(serverConfig.gateway_port || serverConfig.port || 0) ||
-    GATEWAY_PORTS[name];
-  if (!Number.isFinite(port) || port <= 0) return "";
-  const path =
-    typeof serverConfig.gateway_path === "string" &&
-    serverConfig.gateway_path.trim()
-      ? serverConfig.gateway_path.trim()
-      : "/mcp";
-  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  return `http://127.0.0.1:${port}${normalizedPath}`;
-}
-
 function syncDenylistEntries(policy = {}) {
   if (!Array.isArray(policy?.sync_denylist)) return new Set();
   return new Set(
@@ -848,9 +782,11 @@ export function buildDesiredServerRecord(name, serverConfig, filePath) {
   const policy = serverPolicy(serverConfig);
   if (policy === "stdio") {
     const resolvedEnv = resolveEnvDescriptors(name, serverConfig);
-    const envConfig = hasOwnEntries(resolvedEnv.env)
-      ? { env: resolvedEnv.env }
-      : {};
+    const codexTarget = isCodexConfig(filePath);
+    const envConfig =
+      !codexTarget && hasOwnEntries(resolvedEnv.env)
+        ? { env: resolvedEnv.env }
+        : {};
     return {
       name,
       config: {
@@ -859,19 +795,21 @@ export function buildDesiredServerRecord(name, serverConfig, filePath) {
         ...envConfig,
       },
       envDescriptors: resolvedEnv.descriptors,
-      codex: {},
+      codex: codexTarget
+        ? {
+            env_vars: Object.values(resolvedEnv.descriptors).map(
+              (item) => item.env,
+            ),
+          }
+        : {},
       warnings: resolvedEnv.warnings,
     };
   }
 
   const url =
-    policy === "gateway-sse"
-      ? gatewaySseUrl(name, serverConfig)
-      : policy === "gateway-http"
-        ? gatewayHttpUrl(name, serverConfig)
-        : serverConfig?.transport === "hub-url"
-          ? resolveHubUrl()
-          : normalizeUrl(serverConfig?.url || "");
+    serverConfig?.transport === "hub-url"
+      ? resolveHubUrl()
+      : normalizeUrl(serverConfig?.url || "");
   const basenameValue = pathBasename(filePath);
   const resolvedHeaders = resolveHeaderDescriptors(
     name,
@@ -881,46 +819,6 @@ export function buildDesiredServerRecord(name, serverConfig, filePath) {
   const headerConfig = hasOwnEntries(resolvedHeaders.headers)
     ? { headers: resolvedHeaders.headers }
     : {};
-
-  if (policy === "gateway-http") {
-    if (isCodexConfig(filePath)) {
-      return {
-        name,
-        config: { url },
-        headerDescriptors: {},
-        codex: {},
-        warnings: [],
-      };
-    }
-
-    return {
-      name,
-      config: { type: "http", url },
-      headerDescriptors: {},
-      codex: {},
-      warnings: [],
-    };
-  }
-
-  if (policy === "gateway-sse") {
-    if (isCodexConfig(filePath)) {
-      return {
-        name,
-        config: { url, transport: "sse" },
-        headerDescriptors: {},
-        codex: {},
-        warnings: [],
-      };
-    }
-
-    return {
-      name,
-      config: { type: "sse", url },
-      headerDescriptors: {},
-      codex: {},
-      warnings: [],
-    };
-  }
 
   if (
     basenameValue === ".mcp.json" ||
@@ -1122,7 +1020,6 @@ function scanCodexConfig(filePath) {
       exists: true,
       parseError: null,
       servers,
-      // Wave 1/2-B: Codex stdio servers are observed but not auto-remediated.
       stdioServers: [],
     };
   } catch (error) {
@@ -1305,9 +1202,7 @@ export function validateRegistry(registry) {
         typeof server.policy !== "string" ||
         !SERVER_POLICIES.has(server.policy)
       ) {
-        errors.push(
-          `registry.servers.${name}.policy must be hosted, gateway-sse, gateway-http, or stdio`,
-        );
+        errors.push(`registry.servers.${name}.policy must be hosted or stdio`);
       }
       const transport = server.transport || registry.defaults?.transport;
       if (!["hub-url", "http", "stdio"].includes(transport)) {
@@ -1320,19 +1215,6 @@ export function validateRegistry(registry) {
         (typeof server.url !== "string" || !server.url.trim())
       ) {
         errors.push(`registry.servers.${name}.url must be a non-empty string`);
-      }
-      if (policy === "gateway-sse" || policy === "gateway-http") {
-        const port = Number(server.gateway_port || server.port || 0);
-        const hasGatewayUrl =
-          typeof server.url === "string" && server.url.trim().length > 0;
-        if (
-          !hasGatewayUrl &&
-          (!Number.isInteger(port) || port <= 0 || port > 65535)
-        ) {
-          errors.push(
-            `registry.servers.${name}.gateway_port must be a valid TCP port for ${policy}`,
-          );
-        }
       }
       if (policy === "stdio" && server.url !== undefined) {
         errors.push(`registry.servers.${name}.url is not used for stdio`);
@@ -1519,14 +1401,6 @@ export function validateRegistry(registry) {
           break;
         }
       }
-    }
-    if (
-      registry.policies.stdio_action &&
-      !["replace-with-hub", "warn"].includes(registry.policies.stdio_action)
-    ) {
-      errors.push(
-        "registry.policies.stdio_action must be replace-with-hub or warn",
-      );
     }
   }
 
@@ -1795,101 +1669,6 @@ export function scanForStdioServers(filePath) {
   return scanConfig(filePath).stdioServers;
 }
 
-export function remediate(filePath, stdioServers, policy = {}) {
-  const resolvedPath = resolveFilePath(filePath);
-  const offenders = Array.isArray(stdioServers)
-    ? stdioServers.filter((server) => server?.name)
-    : [];
-  const action = policy?.stdio_action || "warn";
-
-  if (offenders.length === 0) {
-    return {
-      action: "noop",
-      modified: false,
-      backupPath: null,
-      removedServers: [],
-      warnings: [],
-    };
-  }
-
-  if (action === "warn") {
-    return {
-      action,
-      modified: false,
-      backupPath: null,
-      removedServers: [],
-      warnings: [
-        `[mcp-guard] stdio MCP 감지: ${offenders.map((server) => server.name).join(", ")}`,
-      ],
-    };
-  }
-
-  if (isCodexConfig(resolvedPath)) {
-    return {
-      action,
-      modified: false,
-      backupPath: null,
-      removedServers: [],
-      warnings: ["[mcp-guard] Codex TOML 자동 수정은 Wave 2-B 범위 밖입니다."],
-    };
-  }
-
-  const snapshot = scanConfig(resolvedPath);
-  if (snapshot.parseError) {
-    return {
-      action,
-      modified: false,
-      backupPath: null,
-      removedServers: [],
-      warnings: [`[mcp-guard] 설정 파싱 실패: ${snapshot.parseError.message}`],
-    };
-  }
-
-  let backupPath = null;
-  try {
-    if (existsSync(resolvedPath)) backupPath = ensureBackup(resolvedPath);
-  } catch (error) {
-    return {
-      action,
-      modified: false,
-      backupPath: null,
-      removedServers: [],
-      warnings: [`[mcp-guard] 백업 생성 실패: ${error.message}`],
-    };
-  }
-
-  const removals = offenders.map((server) => server.name);
-  const updates = [];
-  let replacement = null;
-
-  if (action === "replace-with-hub") {
-    const registry = policy.registry || loadRegistryOrDefault();
-    const matchingOffender = offenders.find((server) =>
-      Object.hasOwn(registry.servers || {}, server.name),
-    );
-    const [hubServerName, hubServerConfig] = matchingOffender
-      ? [matchingOffender.name, registry.servers[matchingOffender.name]]
-      : getHubServerEntry(registry);
-    const desired = buildDesiredServerRecord(
-      hubServerName,
-      hubServerConfig,
-      resolvedPath,
-    );
-    replacement = { name: desired.name, ...redactServerConfig(desired.config) };
-    updates.push(desired);
-  }
-
-  const result = updateJsonConfig(resolvedPath, updates, removals);
-  return {
-    action,
-    modified: result.modified,
-    backupPath,
-    removedServers: removals,
-    replacement,
-    warnings: updates.flatMap((update) => update.warnings || []),
-  };
-}
-
 export function resolveHubUrl() {
   const registryState = inspectRegistry();
   const registry = registryState.valid
@@ -1981,13 +1760,7 @@ export function addRegistryServer(name, url, options = {}) {
     : cloneDefaultRegistry();
   const transport =
     options.transport || (trimmedName === "tfx-hub" ? "hub-url" : "http");
-  const policy =
-    options.policy ||
-    (transport === "stdio"
-      ? "stdio"
-      : options.gateway_port || options.port
-        ? "gateway-http"
-        : "hosted");
+  const policy = options.policy || (transport === "stdio" ? "stdio" : "hosted");
 
   registry.servers[trimmedName] = {
     policy,
@@ -2127,26 +1900,6 @@ export function syncRegistryTargets(options = {}) {
         status: "invalid-config",
         message: snapshot.parseError.message,
       });
-      continue;
-    }
-
-    if (
-      snapshot.stdioServers.length > 0 &&
-      !isClaudeUserConfig(target.filePath)
-    ) {
-      const remediation = remediate(target.filePath, snapshot.stdioServers, {
-        ...registry.policies,
-        registry,
-      });
-      actions.push({
-        type: "remediate",
-        filePath: target.filePath,
-        label: target.label,
-        status: remediation.modified ? "updated" : "warning",
-        removedServers: remediation.removedServers,
-        replacement: remediation.replacement || null,
-        warnings: remediation.warnings || [],
-      });
     }
   }
 
@@ -2174,6 +1927,26 @@ export function syncRegistryTargets(options = {}) {
     for (const [name, serverConfig] of Object.entries(registry.servers || {})) {
       if (serverConfig?.safe !== true) continue;
       if (!serverAppliesToClient(serverConfig, target.client)) continue;
+
+      if (
+        isCodexConfig(target.filePath) &&
+        serverPolicy(serverConfig) === "stdio"
+      ) {
+        const remappedEnv = Object.entries(
+          normalizeEnvDescriptors(serverConfig.env),
+        ).find(([key, descriptor]) => key !== descriptor.env);
+        if (remappedEnv) {
+          actions.push({
+            type: "sync",
+            filePath: target.filePath,
+            label: target.label,
+            status: "warning",
+            server: name,
+            message: `${name}: Codex env_vars는 ${remappedEnv[1].env}를 ${remappedEnv[0]}로 이름 변경할 수 없습니다`,
+          });
+          continue;
+        }
+      }
 
       const denyKey = syncDenylistKey(target.client, name);
       if (denylist.has(denyKey)) {

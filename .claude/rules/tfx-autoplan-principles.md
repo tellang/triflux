@@ -61,7 +61,7 @@
 
 | 상황 | 적용 |
 |------|------|
-| `tfx-plan`에서 선택지가 2개 이상 남을 때 | 이 문서의 6원칙으로 중간 질문을 자동 해소한다. |
+| `tfx-auto --mode deep`에서 선택지가 2개 이상 남을 때 | 이 문서의 6원칙으로 중간 질문을 자동 해소한다. |
 | `tfx-auto --mode consensus`에서 경미한 disagreement를 정리할 때 | phase 우선순위와 충돌 해소 순서를 적용해 mechanical 또는 taste로 분류한다. |
 | triflux가 gstack `autoplan` 없이 자체 consensus gate를 만들 때 | 이 문서를 dependency-free policy table로 직접 참조한다. |
 

@@ -15,18 +15,9 @@ const TARGET_FILES = [
   [".claude", "settings.json"],
   [".claude", "settings.local.json"],
 ];
-const ANTIGRAVITY_CONFIG_FILE = [
-  ".gemini",
-  "antigravity-cli",
-  "mcp_config.json",
-];
 const CODEX_CONFIG_FILE = [".codex", "config.toml"];
 const TFX_HUB_SECTION = "tfx-hub";
 const CODEX_DEFAULT_HUB_URL = "http://127.0.0.1:27888/mcp";
-const DEFAULT_REGISTRY_PATH = new URL(
-  "../config/mcp-registry.json",
-  import.meta.url,
-);
 const FILE_LOCKS = new Map();
 const CODEX_CONFIG_SYNC_OPT_IN = "TFX_CODEX_CONFIG_SYNC";
 const DEFAULT_ATOMIC_WRITE_OPS = {
@@ -61,10 +52,6 @@ function getCodexConfigPath(codexConfigPath) {
     return codexConfigPath;
   }
   return join(resolveHome(), ...CODEX_CONFIG_FILE);
-}
-
-function getAntigravityConfigPath() {
-  return join(resolveHome(), ...ANTIGRAVITY_CONFIG_FILE);
 }
 
 function isProtectedCodexConfigEnv(env = process.env) {
@@ -307,88 +294,6 @@ function appendCodexMcpServerSection(raw, sectionName, hubUrl) {
   return `${normalized}${separator}[mcp_servers.${sectionName}]\nurl = ${formatTomlString(hubUrl)}\n`;
 }
 
-function appendCodexMcpServerBody(raw, sectionName, body) {
-  const normalized = raw.length > 0 && !raw.endsWith("\n") ? `${raw}\n` : raw;
-  const separator =
-    normalized.length > 0 && !normalized.endsWith("\n\n") ? "\n" : "";
-  return `${normalized}${separator}[mcp_servers.${sectionName}]\n${body}`;
-}
-
-function setCodexMcpServerBody(raw, sectionName, body) {
-  const section = findMcpServerSection(raw, sectionName);
-  if (!section) {
-    return appendCodexMcpServerBody(raw, sectionName, body);
-  }
-  if (section.body === body) {
-    return raw;
-  }
-  return `${raw.slice(0, section.bodyStart)}${body}${raw.slice(section.sectionEnd)}`;
-}
-
-function gatewayUrl(serverName, serverConfig) {
-  if (typeof serverConfig?.url === "string" && serverConfig.url.trim()) {
-    return serverConfig.url.trim();
-  }
-  const port = Number(serverConfig?.gateway_port || serverConfig?.port || 0);
-  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-    return "";
-  }
-  const fallbackPath = serverConfig?.policy === "gateway-sse" ? "/sse" : "/mcp";
-  const rawPath =
-    typeof serverConfig?.gateway_path === "string" &&
-    serverConfig.gateway_path.trim()
-      ? serverConfig.gateway_path.trim()
-      : fallbackPath;
-  const path = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
-  return `http://127.0.0.1:${port}${path}`;
-}
-
-async function loadGatewaySseServers({ registryPath, client, logger }) {
-  let registry;
-  const pathOrUrl = registryPath || DEFAULT_REGISTRY_PATH;
-  try {
-    registry = JSON.parse(await readFile(pathOrUrl, "utf8"));
-  } catch (error) {
-    log(
-      logger,
-      "error",
-      `[mcp-sync] error: registry (${getReason(error, "read failed")})`,
-    );
-    return [];
-  }
-
-  const servers = registry?.servers;
-  if (!servers || typeof servers !== "object" || Array.isArray(servers)) {
-    return [];
-  }
-
-  return Object.entries(servers)
-    .filter(([, server]) => {
-      if (!["gateway-sse", "gateway-http"].includes(server?.policy))
-        return false;
-      if (!Array.isArray(server.targets)) return true;
-      return server.targets.includes(client);
-    })
-    .map(([name, server]) => ({
-      name,
-      url: gatewayUrl(name, server),
-      policy: server.policy,
-    }))
-    .filter((server) => server.url.length > 0);
-}
-
-function desiredJsonGatewayConfig(client, gatewayServer) {
-  if (gatewayServer.policy === "gateway-sse") {
-    if (client === "antigravity") return { serverUrl: gatewayServer.url };
-    return { type: "sse", url: gatewayServer.url };
-  }
-  return { type: "http", url: gatewayServer.url };
-}
-
-function sameJsonValue(left, right) {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
 async function syncSingleFile({ filePath, hubUrl, dryRun, logger }) {
   return withFileLock(filePath, async () => {
     if (!(await fileExists(filePath))) {
@@ -448,70 +353,6 @@ async function syncSingleFile({ filePath, hubUrl, dryRun, logger }) {
       try {
         hubServer.type = "http";
         hubServer.url = hubUrl;
-        await writeJsonAtomic(filePath, settings, { mode: 0o600 });
-      } catch (error) {
-        const reason = getReason(error, "write failed");
-        log(logger, "error", `[mcp-sync] error: ${filePath} (${reason})`);
-        return { kind: "error", path: filePath, reason };
-      }
-    }
-
-    log(logger, "info", `[mcp-sync] updated: ${filePath}`);
-    return { kind: "updated", path: filePath };
-  });
-}
-
-async function syncGatewayJsonFile({
-  filePath,
-  client,
-  gatewayServers,
-  dryRun,
-  logger,
-}) {
-  return withFileLock(filePath, async () => {
-    if (!(await fileExists(filePath))) {
-      log(logger, "info", `[mcp-sync] skipped: ${filePath}`);
-      return { kind: "skipped", path: filePath };
-    }
-
-    let settings;
-    try {
-      settings = JSON.parse(await readFile(filePath, "utf8"));
-    } catch (error) {
-      const reason =
-        error?.name === "SyntaxError"
-          ? "invalid json"
-          : getReason(error, "read failed");
-      log(logger, "error", `[mcp-sync] error: ${filePath} (${reason})`);
-      return { kind: "error", path: filePath, reason };
-    }
-
-    const servers = settings?.mcpServers;
-    if (!servers || typeof servers !== "object" || Array.isArray(servers)) {
-      log(logger, "info", `[mcp-sync] skipped: ${filePath}`);
-      return { kind: "skipped", path: filePath };
-    }
-
-    let changed = false;
-    for (const gatewayServer of gatewayServers) {
-      if (servers[gatewayServer.name] === undefined) {
-        continue;
-      }
-      const nextConfig = desiredJsonGatewayConfig(client, gatewayServer);
-      if (sameJsonValue(servers[gatewayServer.name], nextConfig)) {
-        continue;
-      }
-      servers[gatewayServer.name] = nextConfig;
-      changed = true;
-    }
-
-    if (!changed) {
-      log(logger, "info", `[mcp-sync] skipped: ${filePath}`);
-      return { kind: "skipped", path: filePath };
-    }
-
-    if (!dryRun) {
-      try {
         await writeJsonAtomic(filePath, settings, { mode: 0o600 });
       } catch (error) {
         const reason = getReason(error, "write failed");
@@ -638,82 +479,6 @@ async function syncCodexConfigFile({ filePath, hubUrl, dryRun, logger }) {
   });
 }
 
-async function syncCodexGatewayConfigFile({
-  filePath,
-  gatewayServers,
-  dryRun,
-  logger,
-}) {
-  return withFileLock(filePath, async () => {
-    if (!(await fileExists(filePath))) {
-      log(logger, "info", `[codex-mcp-sync] skipped: ${filePath}`);
-      return { kind: "skipped", path: filePath };
-    }
-
-    let raw;
-    try {
-      raw = await readFile(filePath, "utf8");
-    } catch (error) {
-      const reason = getReason(error, "read failed");
-      log(logger, "error", `[codex-mcp-sync] error: ${filePath} (${reason})`);
-      return { kind: "error", path: filePath, reason };
-    }
-
-    let nextRaw = raw;
-    const changedServers = [];
-    for (const gatewayServer of gatewayServers) {
-      if (!findMcpServerSection(nextRaw, gatewayServer.name)) {
-        continue;
-      }
-      const beforeRaw = nextRaw;
-      const body =
-        gatewayServer.policy === "gateway-sse"
-          ? `url = ${formatTomlString(gatewayServer.url)}
-transport = "sse"
-`
-          : `url = ${formatTomlString(gatewayServer.url)}
-`;
-      nextRaw = setCodexMcpServerBody(nextRaw, gatewayServer.name, body);
-      if (nextRaw !== beforeRaw) {
-        changedServers.push(gatewayServer);
-      }
-    }
-
-    if (nextRaw === raw) {
-      log(logger, "info", `[codex-mcp-sync] skipped: ${filePath}`);
-      return { kind: "skipped", path: filePath };
-    }
-
-    if (!dryRun) {
-      for (const gatewayServer of changedServers) {
-        const validation = validateCodexTomlPayload(
-          nextRaw,
-          gatewayServer.name,
-        );
-        if (!validation.ok) {
-          const reason = `invalid toml payload: ${validation.reason}`;
-          log(
-            logger,
-            "error",
-            `[codex-mcp-sync] error: ${filePath} (${reason})`,
-          );
-          return { kind: "error", path: filePath, reason };
-        }
-      }
-      try {
-        await writeTextAtomic(filePath, nextRaw, { mode: 0o600 });
-      } catch (error) {
-        const reason = getReason(error, "write failed");
-        log(logger, "error", `[codex-mcp-sync] error: ${filePath} (${reason})`);
-        return { kind: "error", path: filePath, reason };
-      }
-    }
-
-    log(logger, "info", `[codex-mcp-sync] updated: ${filePath}`);
-    return { kind: "updated", path: filePath };
-  });
-}
-
 async function syncProjectMcpFile({ filePath, hubUrl, dryRun, logger }) {
   return withFileLock(filePath, async () => {
     if (!(await fileExists(filePath))) {
@@ -797,24 +562,12 @@ export async function syncHubMcpSettings({
   hubUrl,
   dryRun = false,
   logger = STDERR_CONSOLE,
-  registryPath,
 }) {
   const result = {
     updated: [],
     skipped: [],
     errors: [],
   };
-  const geminiGatewayServers = await loadGatewaySseServers({
-    registryPath,
-    client: "gemini",
-    logger,
-  });
-  const antigravityGatewayServers = await loadGatewaySseServers({
-    registryPath,
-    client: "antigravity",
-    logger,
-  });
-
   const recordOutcome = (outcome) => {
     if (outcome.kind === "updated") {
       if (!result.updated.includes(outcome.path))
@@ -836,26 +589,7 @@ export async function syncHubMcpSettings({
   for (const filePath of getSettingsPaths()) {
     const outcome = await syncSingleFile({ filePath, hubUrl, dryRun, logger });
     recordOutcome(outcome);
-    if (filePath === join(resolveHome(), ".gemini", "settings.json")) {
-      const gatewayOutcome = await syncGatewayJsonFile({
-        filePath,
-        client: "gemini",
-        gatewayServers: geminiGatewayServers,
-        dryRun,
-        logger,
-      });
-      recordOutcome(gatewayOutcome);
-    }
   }
-
-  const antigravityOutcome = await syncGatewayJsonFile({
-    filePath: getAntigravityConfigPath(),
-    client: "antigravity",
-    gatewayServers: antigravityGatewayServers,
-    dryRun,
-    logger,
-  });
-  recordOutcome(antigravityOutcome);
 
   for (const path of result.updated) {
     const skippedIndex = result.skipped.indexOf(path);
@@ -871,7 +605,6 @@ export async function syncCodexHubUrl({
   dryRun = false,
   logger = STDERR_CONSOLE,
   allowProtectedEnvWrite = false,
-  registryPath,
 }) {
   const result = {
     updated: [],
@@ -922,19 +655,6 @@ export async function syncCodexHubUrl({
   if (outcome.kind === "error") {
     return result;
   }
-
-  const gatewayServers = await loadGatewaySseServers({
-    registryPath,
-    client: "codex",
-    logger,
-  });
-  const gatewayOutcome = await syncCodexGatewayConfigFile({
-    filePath,
-    gatewayServers,
-    dryRun,
-    logger,
-  });
-  recordOutcome(gatewayOutcome);
 
   if (result.updated.includes(filePath)) {
     const skippedIndex = result.skipped.indexOf(filePath);

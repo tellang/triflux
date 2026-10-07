@@ -11,7 +11,7 @@
    - `{{SKILL_NAME}}` 변수만 주입하면 동작하도록 설계
 2. 기존 skill-template.mjs의 `expandTemplate()` 함수가 shared segment를 인라인 확장하도록 수정
    - `{{#include shared/telemetry-segment.md}}` 디렉티브 지원
-3. tfx-auto, tfx-codex, tfx-plan, tfx-qa, tfx-research, tfx-review 6개 스킬에 우선 적용
+3. tfx-auto, tfx-codex, 계획, tfx-qa, tfx-research, tfx-review 6개 스킬에 우선 적용
    - 기존 Telemetry 블록을 `{{#include}}` 디렉티브로 교체
 
 ## 영향 파일

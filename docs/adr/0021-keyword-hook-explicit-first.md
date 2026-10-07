@@ -12,6 +12,8 @@ pr: null
 
 # ADR-0021: 키워드 훅을 명시 호출 중심으로 줄이고 자연어는 제안으로 낮춘다
 
+이 결정은 [ADR-0023](0023-remove-command-hooks-hub-and-adopt-mods.md)의 키워드 라우팅 제거 결정으로 대체되었다. 이 문서는 당시의 판단과 측정 기록으로 보존한다.
+
 ## 컨텍스트와 문제 (Context)
 
 `scripts/keyword-detector.mjs`(UserPromptSubmit 훅)는 `hooks/keyword-rules.json`의 정규식이 프롬프트에 맞으면 "You MUST invoke the skill" 문구와 프롬프트 원문을 주입한다. 2026-07-17 lane2-d 결정은 광역 동사(`리뷰해`, `분석해`, `계획`, `진행해`, `확인해`, `implement`, `review` …)를 모두 `tfx-unified`(→ `tfx-auto`)로 잡도록 잠갔고(`tests/unit/lane2-d-routing-contract.test.mjs`), 서비스 맨명사(`메일`, `일정`, `chrome`, `github`, `위키`)는 MCP 라우트로 보냈다.

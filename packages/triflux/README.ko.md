@@ -65,7 +65,6 @@ claude plugin install triflux@triflux
 | `/tfx-remote` | SSH 너머 원격 Claude Code 세션. `setup`, `spawn`, `list`, `attach`, `send`, `resume`, `probe`, `kill`. |
 | `/tfx-setup` | 대화형 설정. 파일 동기화, HUD, Codex 프로필, MCP, 훅 우선순위. |
 | `/tfx-doctor` | 진단과 복구. Hub 시작·중지·상태 확인도 여기서 한다. |
-| `/tfx-profile` | Codex 프로필 관리. |
 | `/tfx-ship` | triflux 릴리즈 절차(메인테이너용). |
 | `/tfx-wt` | Windows Terminal 탭·패인 조작. `tfx setup`은 Windows에만 설치한다. |
 
@@ -74,13 +73,12 @@ claude plugin install triflux@triflux
 | 스킬 | 용도 |
 | --- | --- |
 | `tfx-harness` | 메타 라우팅. 요청에 맞는 스킬이나 경로를 실행 없이 하나 골라 준다. |
-| `tfx-plan` | 여러 모델이 합의한 구현 계획(`--quick`은 가벼운 버전). |
 | `tfx-review` | 코드 리뷰 판정(`--quick`은 가벼운 버전). |
 | `tfx-research` | 출처를 교차 확인하는 웹 리서치(`--quick`, `--auto`, `--depth`). |
-| `tfx-interview` | 요구사항 인터뷰. `--format goal`은 아이디어를 Claude Code `/goal` 블록으로 바꾼다. |
 
-범용 보조 스킬 `merge-worktree`, `star-prompt`도 함께 들어 있다.
-키워드 훅이 프롬프트를 보고 스킬을 제안할 수 있다. 경로를 확실히 정하려면 `/tfx-*`를 직접 부른다.
+실행 계획은 superpowers `writing-plans`, 요구사항은 host `deep-interview`, 목표 변환은
+Claude Code 기본 `/goal`을 쓴다. 다중모델 계획·실행은 `/tfx-auto --mode deep`으로 진행하고,
+Codex 프로필은 `~/.codex/<프로필>.config.toml`에서 직접 관리한다.
 
 ## `/tfx-auto` 플래그
 
@@ -125,14 +123,13 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 
 | 명령 | 용도 |
 | --- | --- |
-| `tfx setup` / `tfx doctor` | 파일·훅·HUD·MCP·프로필 동기화 / 진단과 복구(`--fix`, `--json`) |
+| `tfx setup` / `tfx doctor` | 파일·HUD·MCP·프로필 동기화 / 진단과 복구(`--fix`, `--json`) |
 | `tfx auto` | `tfx-auto` 라우팅 판정 미리 보기 |
 | `tfx multi` | tmux + Hub 기반 로컬 멀티 CLI 팀 |
 | `tfx swarm` | PRD 기반 worktree 격리 실행: `plan`, `preflight`, `run`, `list` |
 | `tfx synapse` | 스웜 세션 레지스트리와 lease |
 | `tfx hub` | 로컬 Hub: `start`, `stop`, `status`, `ensure` |
 | `tfx mcp` | 관리형 MCP 레지스트리: `list`, `sync`, `add`, `remove` |
-| `tfx hooks` | 훅 오케스트레이터: scan, diff, apply, status |
 | `tfx handoff` | 현재 맥락을 다른 세션이나 호스트로 넘길 프롬프트로 묶음 |
 | `tfx cto` | 저장소 단위 권위 콘솔: `collect`, `status`, `dashboard`, `hygiene`, `steward`, `event` |
 | `tfx review` / `tfx codex-team` | Codex git diff 리뷰 / Codex 주도 팀 모드 |

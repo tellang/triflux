@@ -6,7 +6,7 @@ import { drainPendingSynapse as defaultDrainPendingSynapse } from "../hub/team/s
 import {
   heartbeatInteractiveSession as defaultHeartbeatInteractiveSession,
   registerInteractiveSession as defaultRegisterInteractiveSession,
-} from "./session-start-fast.mjs";
+} from "../scripts/lib/session-presence.mjs";
 
 // hub-ensure is loaded lazily so the byte-identical packages/core mirror of this
 // file loads cleanly. packages/core mirrors scripts/lib only (not scripts/*), so a

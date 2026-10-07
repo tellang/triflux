@@ -1564,6 +1564,14 @@ unset _raw_tfx_codex_profile
 # Preflight 캐시 일괄 로드 — CLI/Hub 가용성 + Codex 요금제를 환경변수로 내보냄
 # 하위 프로세스(스킬 포함)가 TFX_CODEX_OK, TFX_GEMINI_OK, TFX_ANTIGRAVITY_OK, TFX_HUB_OK로 즉시 참조 가능
 if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
+  # SessionStart 훅 없이도 route 진입 시 없거나 만료된 캐시를 갱신한다.
+  _preflight_script="$(_resolve_script "" \
+    ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/preflight-cache.mjs"} \
+    "$(_get_script_dir)/preflight-cache.mjs" || true)"
+  if [[ -n "$_preflight_script" ]]; then
+    "$NODE_BIN" "$_preflight_script" --if-stale >/dev/null 2>&1 || true
+  fi
+  unset _preflight_script
   # eval 제거 — \x1e (ASCII 30, Record Separator) delimited read로 인젝션 위험 차단
   # F05: `|`에서 `\x1e`로 변경 — 계정 tier/agent 이름 등 값에 `|` 포함 시 필드 분리 오류 방지
   IFS=$'\x1e' read -r _pf_codex _pf_gemini _pf_antigravity _pf_hub _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason < <(

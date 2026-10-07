@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 
-// triflux 세션 시작 시 자동 설정 스크립트
+// triflux 설치 및 업데이트 설정 스크립트
 // - tfx-route.sh를 ~/.claude/scripts/에 동기화
 // - hud-qos-status.mjs를 ~/.claude/hud/에 동기화
 // - skills/를 ~/.claude/skills/에 동기화
 
+import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "child_process";
 import {
   chmodSync,
@@ -14,8 +15,10 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
@@ -23,14 +26,10 @@ import { createRequire } from "module";
 import { homedir } from "os";
 import { basename, delimiter, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
-import {
-  ensureGlobalClaudeRoutingSection,
-  ensureTfxSection,
-  getLatestRoutingTable,
-} from "./claudemd-sync.mjs";
 import { ensureAgyHooks } from "./ensure-agy-hooks.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
-import { addPluginRootFallbackToCommand } from "./lib/doctor-env-checks.mjs";
+import { cleanupLegacyHooks } from "./lib/legacy-hook-cleanup.mjs";
+import { cleanupLegacyMcp } from "./lib/legacy-mcp-cleanup.mjs";
 import {
   MACHINE_PROFILE_KEYS,
   parseMachineProfileContent,
@@ -661,11 +660,6 @@ const SYNC_MAP = [
     label: "hub/team/agent-map.json",
   },
   {
-    src: join(PLUGIN_ROOT, "scripts", "tfx-gate-activate.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "tfx-gate-activate.mjs"),
-    label: "tfx-gate-activate.mjs",
-  },
-  {
     src: join(PLUGIN_ROOT, "scripts", "remote-spawn.mjs"),
     dst: join(CLAUDE_DIR, "scripts", "remote-spawn.mjs"),
     label: "remote-spawn.mjs",
@@ -871,6 +865,70 @@ const LEGACY_ALIAS_TOMBSTONES = new Set([
 const DEPRECATED_SKILLS = ["tfx-codex-route", "tfx-gemini-route"];
 const LOCAL_DEV_SKILL_MARKER = ".triflux-local-skill";
 const MANAGED_CODEX_SKILL_MARKER = ".triflux-managed-skill";
+// ADR-0020 제거 직전(612b1e91^)과 이번 제거 직전 원본의 SKILL.md 단독/전체 트리 지문.
+const REMOVED_SKILL_HASHES = {
+  "tfx-ralph": [
+    "4a4145a6242a76c05104dfbaa154607deee220944d4d26f4612f07973762d7ac",
+    "982126ae9b3dc39ef28f06fa39e08352c82ed478527ae01eaf9786abe1e98829",
+  ],
+  "tfx-forge": [
+    "b966faf22a89f59f6f59f629b0088b01373e2b3fdfd5b47b6c6773f7d129304a",
+    "b9b10dd358848f7201b2526f452e8d0d939356578ca93611c581e0fee6f59f8a",
+  ],
+  "tfx-find": [
+    "8e4837fa1ec5d51c1297c98c76bae0fdb7f4d52196a7c38f17463ad7b235ec34",
+    "f5174a7330eefe0255356f4e5b5519120e4d8a69eeb3f9cca3a5b7c46b99d31c",
+  ],
+  "tfx-index": [
+    "2531f5a016169e3f87091c8b2032a8a1efa843df54f230603fd0a242682d857e",
+    "26b9b94802961d982e695b22af93264ed87d7a39b57e80957c97811ed13779de",
+  ],
+  "tfx-goal-clarify": [
+    "1932752fee5a1d2b4934960b95135ac02550d114eaf2421e3d943315d3943183",
+    "926f16e40213dc97bb4bea34923854df72d9259bec34eb8373fd8aed01ee4b98",
+  ],
+  "tfx-hooks": [
+    "9a24a86b246b53a121f548e44c858e56f3ba4de49d1f7572e64bf95d1318a02d",
+    "b3bb55a9be027498e25f9e1f317d228c0fb08007e0827cd97682acc9c661b7a2",
+  ],
+  "tfx-hub": [
+    "eb71c0767620c342ebf5add9a6fabf271a03456237ae77a959fedb30080ae47a",
+    "46401764a1cda1e20a21b39678e31b2416aca7ce72e9dda0933673881d007ee0",
+  ],
+  "tfx-analysis": [
+    "24cd2746d0cfa2382a643900401874c083bcf1c1b67aa0420681233c634daa13",
+    "8c345dce0ea557635a5163c7d1810bc20ae3ca69074d4107bc2726335799589e",
+  ],
+  "tfx-prune": [
+    "04f20d1206fc038c72f2e79f890eaff94c988f6c129db7b0e53ae249731e6138",
+    "0a9e8fa5f6469f756ff7cc97fa4ee8ba29509a7fa2472bb2f6e522ea62e22de6",
+  ],
+  "tfx-qa": [
+    "2bec88749d08849650830055c4cec9622bad91f93246b04e5d4fb58f3ad1a036",
+    "f5f9c6e036d5a965931ab9a6c6b23c41886cd370edf90e46f19d119516e05d1a",
+  ],
+  "tfx-plan": [
+    "af4427146af67849cc89d36787115d9bfc3b643a38208def9014234b05875e00",
+    "bf854e64db158d3fc4faa5995921e357304ef559fad43a3b60b8258e3f685f27",
+  ],
+  "tfx-interview": [
+    "c98438dc65cc6902934804e51e739c6e356053c1d3e823e5a4cbfdf677474ca9",
+    "5281bfac1ab926215cef40f6ac28305fb3525a9f5266b7d3e00b6fe12f41cac2",
+  ],
+  "tfx-profile": [
+    "294b440c8d71290263054c5143f1ceddd995da7271e39e14bc96f7a73002dd25",
+    "82c6397a124d39f637e103f0f02d0ac4a6cbe171a45ad62671463e35507368eb",
+  ],
+  "merge-worktree": [
+    "306bd5b6288505ff69fa9ed7037354891b75919d8ef1c8cbec0b4ebe55c17870",
+    "b3ca6e3f7caa290bcbaf83cb4a30e1db2269d32726c56e32431905b2e25c9b6d",
+  ],
+  "star-prompt": [
+    "b8c845284d33fae16ea8f3dc5f3d6e8c2e656c7ceb49bb464a9252ff745c900c",
+    "b5ff7ca412dab7152d1661bcafa9735d12fa64f0e10c674eb9e6f0ecb535a1b7",
+  ],
+};
+const REMOVED_SKILL_NAMES = Object.freeze(Object.keys(REMOVED_SKILL_HASHES));
 
 // ── 구형 Codex 모델 (마이그레이션 안내 대상) ──
 
@@ -914,7 +972,7 @@ function syncAliasedSkillDir(srcDir, dstDir, { alias, source }) {
 
 /**
  * SKILL.md frontmatter 의 `platform:` 목록(process.platform 값)을 읽는다.
- * keyword-rules.json 의 `platform` 필드와 같은 의미다. 없거나 비어 있으면
+ * SKILL.md의 `platform` 필드가 없거나 비어 있으면
  * 모든 플랫폼에 설치한다.
  * @param {string} skillDir - SKILL.md 가 든 스킬 디렉토리
  * @returns {string[]}
@@ -943,21 +1001,39 @@ function isSkillSupportedOnPlatform(skillDir, platform = process.platform) {
   return platforms.length === 0 || platforms.includes(platform);
 }
 
-/**
- * 설치된 스킬 디렉토리에서 패키지에 더 이상 없는 tfx-* 스킬과 현재 플랫폼에
- * 해당하지 않는 패키지 스킬(frontmatter `platform:`)을 제거한다.
- * @param {string} installedDir - ~/.claude/skills
- * @param {string} pkgDir - PLUGIN_ROOT/skills
- * @param {{ platform?: string }} [options]
- * @returns {{ count: number, removed: string[] }}
- */
+function skillTreeHash(skillDir, skillOnly = false) {
+  if (!existsSync(join(skillDir, "SKILL.md"))) return null;
+  const hash = createHash("sha256");
+  function visit(dir, prefix = "") {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort(
+      (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0),
+    )) {
+      if (skillOnly && entry.name !== "SKILL.md") continue;
+      const name = prefix + entry.name;
+      if (entry.isDirectory()) {
+        if (!visit(join(dir, entry.name), `${name}/`)) return false;
+      } else if (entry.isFile()) {
+        hash.update(name);
+        hash.update("\0");
+        hash.update(readFileSync(join(dir, entry.name)));
+        hash.update("\0");
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+  return visit(skillDir) ? hash.digest("hex") : null;
+}
+
 function cleanupStaleSkills(
   installedDir,
   pkgDir,
   { platform = process.platform } = {},
 ) {
   const removed = [];
-  if (!existsSync(installedDir)) return { count: 0, removed };
+  const preserved = [];
+  if (!existsSync(installedDir)) return { count: 0, removed, preserved };
 
   const pkgNames = new Set();
   if (existsSync(pkgDir)) {
@@ -971,22 +1047,40 @@ function cleanupStaleSkills(
   for (const dep of DEPRECATED_SKILLS) pkgNames.add(dep);
 
   for (const name of readdirSync(installedDir)) {
-    if (!name.startsWith("tfx-")) continue;
+    if (
+      !Object.hasOwn(REMOVED_SKILL_HASHES, name) &&
+      !existsSync(join(pkgDir, name))
+    )
+      continue;
     if (pkgNames.has(name)) continue;
 
     const skillPath = join(installedDir, name);
-    if (isLocalDevSkillDir(skillPath)) continue;
-    // #144: 재귀 삭제 필요 — 과거 구현은 파일만 unlink 하여 nested 디렉토리가 있는 스킬을
-    // 온전히 제거하지 못했다. `tfx-deep-*`, `tfx-codex-swarm` 같은 과거 잔재 디렉토리는
-    // workspace/snapshot 같은 하위 폴더를 가지므로 rmSync recursive 가 필수.
+    if (isLocalDevSkillDir(skillPath)) {
+      preserved.push(name);
+      continue;
+    }
+    const managed = existsSync(join(skillPath, MANAGED_CODEX_SKILL_MARKER));
+    const sourcePath = join(pkgDir, name);
+    const hash = managed ? null : skillTreeHash(skillPath);
+    const originals = [...(REMOVED_SKILL_HASHES[name] ?? [])];
+    if (existsSync(sourcePath)) {
+      originals.push(
+        skillTreeHash(sourcePath),
+        skillTreeHash(sourcePath, true),
+      );
+    }
+    if (!managed && (!hash || !originals.includes(hash))) {
+      preserved.push(name);
+      continue;
+    }
     try {
       rmSync(skillPath, { recursive: true, force: true });
       removed.push(name);
     } catch {
-      /* best effort — next setup/update cycle 에서 재시도 */
+      preserved.push(name);
     }
   }
-  return { count: removed.length, removed };
+  return { count: removed.length, removed, preserved };
 }
 
 function isLocalDevSkillDir(skillPath) {
@@ -1008,13 +1102,7 @@ function skillTreeMatches(srcDir, dstDir) {
   return true;
 }
 
-/**
- * Sync the tracked Codex tfx-harness adapter without taking ownership of a
- * pre-existing user skill. A missing source is a hard failure; a conflicting
- * destination is deliberately left untouched. Do not create backups inside
- * the Codex skill discovery root: Codex would register each copied SKILL.md as
- * another callable skill.
- */
+// Codex 탐색 경로에 백업을 두면 별도 스킬로 등록된다.
 function syncCodexHarnessAdapter({
   sourceDir = join(PLUGIN_ROOT, "adapters", "codex", "skills", "tfx-harness"),
   destinationDir = join(CODEX_DIR, "skills", "tfx-harness"),
@@ -1105,7 +1193,7 @@ function syncCodexHarnessAdapter({
       try {
         rmSync(previousDir, { recursive: true, force: true });
       } catch {
-        // Recovery copy is outside Codex discovery and is safe to retain.
+        // 복구본은 Codex 탐색 경로 밖에 둔다.
       }
     }
   } finally {
@@ -1114,120 +1202,97 @@ function syncCodexHarnessAdapter({
   return { ok: true, action: "synced", sourceDir, destinationDir };
 }
 
-/**
- * 훅 커맨드 문자열에서 스크립트 파일명을 추출한다.
- * 예: 'node "/path/to/safety-guard.mjs"' → "safety-guard.mjs"
- * @param {string|undefined} command
- * @returns {string|null}
- */
-function extractManagedHookFilename(command) {
-  if (typeof command !== "string") return null;
-  const match = command.match(/([^/\\"\s]+\.(?:mjs|js|sh|cjs))(?:["'\s]|$)/);
-  return match ? match[1] : null;
-}
-
-function expandRequiresPath(value) {
-  if (typeof value !== "string" || value.trim() === "") return null;
-  return resolve(
-    value.replace(/\$\{HOME\}/g, _TFX_HOME).replace(/\$HOME\b/g, _TFX_HOME),
+function syncCodexManagedSkills({
+  pluginRoot = PLUGIN_ROOT,
+  codexDir = CODEX_DIR,
+} = {}) {
+  const liveAdapter = join(
+    pluginRoot,
+    "adapters",
+    "codex",
+    "skills",
+    "tfx-live",
   );
+  return [
+    [
+      "tfx-harness",
+      join(pluginRoot, "adapters", "codex", "skills", "tfx-harness"),
+    ],
+    [
+      "tfx-live",
+      existsSync(liveAdapter)
+        ? liveAdapter
+        : join(pluginRoot, "skills", "tfx-live"),
+    ],
+  ].map(([name, sourceDir]) => ({
+    name,
+    ...syncCodexHarnessAdapter({
+      sourceDir,
+      destinationDir: join(codexDir, "skills", name),
+    }),
+  }));
 }
 
-function isRequiredPathAvailable(value) {
-  const expanded = expandRequiresPath(value);
-  return expanded ? existsSync(expanded) : true;
-}
-
-/**
- * hook-registry.json에서 관리 대상 훅 목록을 플랫 배열로 반환한다.
- * @param {string} registryPath - hook-registry.json 경로
- * @returns {Array<{ event: string, id: string, fileName: string, matcher: string, command: string, priority: number, enabled: boolean, requires?: string }>}
- */
-function getManagedRegistryHooks(registryPath) {
-  if (!existsSync(registryPath)) return [];
-  try {
-    const registry = JSON.parse(readFileSync(registryPath, "utf8"));
-    const events = registry.events || {};
-    const result = [];
-    for (const [event, hooks] of Object.entries(events)) {
-      if (!Array.isArray(hooks)) continue;
-      for (const hook of hooks) {
-        if (!hook.enabled) continue;
-        if (!isRequiredPathAvailable(hook.requires)) continue;
-        const fileName = extractManagedHookFilename(hook.command);
-        result.push({
-          event,
-          id: hook.id || "",
-          fileName,
-          matcher: hook.matcher || "*",
-          command: hook.command || "",
-          priority: hook.priority ?? 100,
-          enabled: hook.enabled,
-          requires: hook.requires,
-        });
+export function syncSkills({
+  pluginRoot = PLUGIN_ROOT,
+  claudeDir = CLAUDE_DIR,
+  codexDir = CODEX_DIR,
+  platform = process.platform,
+} = {}) {
+  const source = join(pluginRoot, "skills");
+  const destination = join(claudeDir, "skills");
+  const result = { ok: true, changed: 0, total: 0, warnings: [] };
+  function syncDirectory(src, dst) {
+    mkdirSync(dst, { recursive: true });
+    for (const entry of readdirSync(src, { withFileTypes: true })) {
+      if (isSetupUserStateFile(entry.name)) continue;
+      const from = join(src, entry.name);
+      const to = join(dst, entry.name);
+      if (entry.isDirectory()) syncDirectory(from, to);
+      else if (
+        entry.isFile() &&
+        entry.name.endsWith(".md") &&
+        shouldSyncTextFile(from, to)
+      ) {
+        copyFileSync(from, to);
+        result.changed++;
       }
     }
-    return result;
-  } catch {
-    return [];
   }
-}
-
-/**
- * hook-registry.json 기준으로 settings.json에 누락된 훅을 자동 등록한다.
- * @param {{ settingsPath: string, registryPath: string }} opts
- * @returns {{ ok: boolean, changed: boolean, added: string[] }}
- */
-function ensureHooksInSettings({ settingsPath, registryPath }) {
-  try {
-    const managed = getManagedRegistryHooks(registryPath);
-    if (managed.length === 0) return { ok: true, changed: false, added: [] };
-
-    let settings = {};
-    if (existsSync(settingsPath)) {
-      settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+  if (existsSync(source)) {
+    for (const name of readdirSync(source)) {
+      const skill = join(source, name);
+      if (
+        !existsSync(join(skill, "SKILL.md")) ||
+        !isSkillSupportedOnPlatform(skill, platform)
+      )
+        continue;
+      syncDirectory(skill, join(destination, name));
+      result.total++;
     }
-    if (!settings.hooks) settings.hooks = {};
-
-    const added = [];
-    for (const spec of managed) {
-      if (!Array.isArray(settings.hooks[spec.event])) {
-        settings.hooks[spec.event] = [];
-      }
-      const entries = settings.hooks[spec.event];
-      const alreadyRegistered = entries.some(
-        (entry) =>
-          Array.isArray(entry?.hooks) &&
-          entry.hooks.some(
-            (h) => extractManagedHookFilename(h?.command) === spec.fileName,
-          ),
-      );
-      if (alreadyRegistered) continue;
-
-      entries.push({
-        matcher: spec.matcher,
-        hooks: [
-          {
-            type: "command",
-            command: addPluginRootFallbackToCommand(spec.command, PLUGIN_ROOT),
-            timeout: 5,
-          },
-        ],
-      });
-      added.push(spec.id || spec.fileName);
-    }
-
-    if (added.length > 0) {
-      writeFileSync(
-        settingsPath,
-        JSON.stringify(settings, null, 2) + "\n",
-        "utf8",
+    for (const { alias, source: name } of SKILL_ALIASES) {
+      result.changed += syncAliasedSkillDir(
+        join(source, name),
+        join(destination, alias),
+        { alias, source: name },
       );
     }
-    return { ok: true, changed: added.length > 0, added };
-  } catch {
-    return { ok: false, changed: false, added: [] };
   }
+  for (const installed of [destination, join(codexDir, "skills")]) {
+    const stale = cleanupStaleSkills(installed, source, { platform });
+    result.changed += stale.count;
+    for (const name of stale.preserved)
+      result.warnings.push(`구형 스킬 ${name}: 사용자 사본 보존`);
+  }
+  for (const skill of syncCodexManagedSkills({ pluginRoot, codexDir })) {
+    if (skill.action === "synced") result.changed++;
+    if (!skill.ok) {
+      result.ok = false;
+      result.warnings.push(`Codex ${skill.name}: ${skill.reason}`);
+    } else if (skill.action === "skipped")
+      result.warnings.push(`Codex ${skill.name}: 사용자 스킬 보존`);
+  }
+  return result;
 }
 
 function isProtectedCodexConfigMutationEnv(env = process.env) {
@@ -1508,27 +1573,6 @@ function ensureCodexProfiles() {
   }
 }
 
-function syncClaudeRoutingSections() {
-  try {
-    const routingTable = getLatestRoutingTable();
-    return [
-      ensureTfxSection(join(PLUGIN_ROOT, "CLAUDE.md"), routingTable),
-      ensureGlobalClaudeRoutingSection(CLAUDE_DIR),
-    ];
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : "routing_sync_failed";
-    return [
-      {
-        action: "unchanged",
-        path: join(PLUGIN_ROOT, "CLAUDE.md"),
-        skipped: true,
-        reason,
-      },
-    ];
-  }
-}
-
 function createCommandIo() {
   const stdout = [];
   const stderr = [];
@@ -1584,15 +1628,6 @@ function resolveStableNodeCommand({ existsSyncFn = existsSync } = {}) {
 
 function buildNodeScriptCommand(scriptPath) {
   return `${quoteShellCommandArg(resolveStableNodeCommand())} ${quoteShellCommandArg(scriptPath)}`;
-}
-
-function refreshHookCommandForScript(hook, scriptName, scriptPath) {
-  if (typeof hook?.command !== "string") return false;
-  if (!hook.command.includes(scriptName)) return false;
-  const desired = buildNodeScriptCommand(scriptPath);
-  if (hook.command === desired) return false;
-  hook.command = desired;
-  return true;
 }
 
 function buildWindowsHubAutostartCommand({
@@ -1751,33 +1786,60 @@ function ensureWindowsHubAutostart({
 
 function loadSettings() {
   if (!existsSync(SETTINGS_PATH)) return {};
+  const settings = JSON.parse(readFileSync(SETTINGS_PATH, "utf8"));
+  if (!settings || typeof settings !== "object" || Array.isArray(settings))
+    throw new Error("settings.json은 객체여야 합니다.");
+  return settings;
+}
 
+export function persistSettings(settings, settingsPath = SETTINGS_PATH) {
+  const target = existsSync(settingsPath)
+    ? realpathSync(settingsPath)
+    : settingsPath;
+  mkdirSync(dirname(target), { recursive: true });
+  const temporary = `${target}.tfx-${process.pid}-${Date.now()}.tmp`;
   try {
-    return JSON.parse(readFileSync(SETTINGS_PATH, "utf8"));
-  } catch {
-    return {};
+    writeFileSync(temporary, `${JSON.stringify(settings, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: existsSync(target) ? statSync(target).mode : 0o600,
+    });
+    renameSync(temporary, target);
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
   }
 }
 
-function persistSettings(settings) {
-  writeFileSync(
-    SETTINGS_PATH,
-    JSON.stringify(settings, null, 2) + "\n",
-    "utf8",
-  );
-}
-
-function applyStatusLine(settings) {
-  if (!existsSync(HUD_PATH)) return false;
-  const currentCmd = settings.statusLine?.command || "";
-  const desiredCommand = buildNodeScriptCommand(HUD_PATH);
-  if (currentCmd.includes("hud-qos-status.mjs")) {
-    if (currentCmd === desiredCommand) return false;
-    settings.statusLine = { type: "command", command: desiredCommand };
-    return true;
+export function applyStatusLine(
+  settings,
+  { hudPath = HUD_PATH, warn = console.warn } = {},
+) {
+  if (!existsSync(hudPath)) return false;
+  const current = settings.statusLine;
+  const desiredCommand = buildNodeScriptCommand(hudPath);
+  if (current?.command === desiredCommand) return false;
+  if (current != null) {
+    const tokens = String(current.command || "").match(
+      /^(?:"([^"\n]+)"|'([^'\n]+)'|(\S+))\s+(?:"([^"\n]+)"|'([^'\n]+)'|(\S+))$/u,
+    );
+    const node = tokens?.[1] ?? tokens?.[2] ?? tokens?.[3] ?? "";
+    const script = tokens?.[4] ?? tokens?.[5] ?? tokens?.[6];
+    if (
+      current.type !== "command" ||
+      !/(?:^|[/\\])node(?:\.exe)?$/u.test(node) ||
+      script !== hudPath.replace(/\\/g, "/")
+    ) {
+      warn(
+        "기존 statusLine 유지: Triflux HUD를 쓰려면 settings.json에서 직접 선택하세요.",
+      );
+      return false;
+    }
   }
-
-  settings.statusLine = { type: "command", command: desiredCommand };
+  settings.statusLine = {
+    ...current,
+    type: "command",
+    command: desiredCommand,
+  };
   return true;
 }
 
@@ -1801,120 +1863,6 @@ function applyRemoteControl(settings) {
   if (process.env.TFX_REMOTE_CONTROL !== "1" && !detectDevMode()) return false;
   settings.remoteControlAtStartup = true;
   return true;
-}
-
-function applyHooks(settings) {
-  if (!settings.hooks) settings.hooks = {};
-  let changed = false;
-
-  if (!Array.isArray(settings.hooks.SessionStart))
-    settings.hooks.SessionStart = [];
-
-  const hasTrifluxHooks = settings.hooks.SessionStart.some(
-    (entry) =>
-      Array.isArray(entry.hooks) &&
-      entry.hooks.some(
-        (hook) =>
-          typeof hook.command === "string" && hook.command.includes("triflux"),
-      ),
-  );
-
-  const pluginRoot = PLUGIN_ROOT.replace(/\\/g, "/");
-  const commandForScript = (scriptName) =>
-    buildNodeScriptCommand(`${pluginRoot}/scripts/${scriptName}`);
-
-  if (!hasTrifluxHooks) {
-    settings.hooks.SessionStart.push({
-      matcher: "*",
-      hooks: [
-        {
-          type: "command",
-          command: commandForScript("setup.mjs"),
-          timeout: 10,
-        },
-        {
-          type: "command",
-          command: commandForScript("hub-ensure.mjs"),
-          timeout: 8,
-        },
-        {
-          type: "command",
-          command: commandForScript("preflight-cache.mjs"),
-          timeout: 5,
-        },
-      ],
-    });
-    changed = true;
-  }
-
-  for (const entry of settings.hooks.SessionStart) {
-    if (!Array.isArray(entry.hooks)) continue;
-    for (const hook of entry.hooks) {
-      for (const scriptName of [
-        "setup.mjs",
-        "hub-ensure.mjs",
-        "mcp-gateway-ensure.mjs",
-        "preflight-cache.mjs",
-      ]) {
-        if (
-          refreshHookCommandForScript(
-            hook,
-            scriptName,
-            `${pluginRoot}/scripts/${scriptName}`,
-          )
-        ) {
-          changed = true;
-        }
-      }
-    }
-  }
-
-  if (!Array.isArray(settings.hooks.PreToolUse)) settings.hooks.PreToolUse = [];
-
-  const gateScriptPath = join(
-    CLAUDE_DIR,
-    "scripts",
-    "tfx-gate-activate.mjs",
-  ).replace(/\\/g, "/");
-  const hasGateHook = settings.hooks.PreToolUse.some(
-    (entry) =>
-      Array.isArray(entry.hooks) &&
-      entry.hooks.some(
-        (hook) =>
-          typeof hook.command === "string" &&
-          hook.command.includes("tfx-gate-activate"),
-      ),
-  );
-
-  if (!hasGateHook && existsSync(gateScriptPath.replace(/\//g, "\\"))) {
-    settings.hooks.PreToolUse.push({
-      matcher: "Skill",
-      hooks: [
-        {
-          type: "command",
-          command: buildNodeScriptCommand(gateScriptPath),
-          timeout: 2,
-        },
-      ],
-    });
-    changed = true;
-  } else if (hasGateHook) {
-    for (const entry of settings.hooks.PreToolUse) {
-      if (!Array.isArray(entry.hooks)) continue;
-      for (const hook of entry.hooks) {
-        if (
-          typeof hook.command === "string" &&
-          hook.command.includes("tfx-gate-activate") &&
-          hook.command !== buildNodeScriptCommand(gateScriptPath)
-        ) {
-          hook.command = buildNodeScriptCommand(gateScriptPath);
-          changed = true;
-        }
-      }
-    }
-  }
-
-  return changed;
 }
 
 // ── 제거된 CTO 트레이 잔여 프로세스 (ADR-0022) ──
@@ -2085,9 +2033,6 @@ function ensureCriticalSetup() {
   try {
     if (applyRemoteControl(settings)) settingsChanged = true;
   } catch {}
-  try {
-    if (applyHooks(settings)) settingsChanged = true;
-  } catch {}
 
   if (settingsChanged) {
     try {
@@ -2146,11 +2091,8 @@ export {
   ensureCodexHooks,
   ensureCodexHubServerConfig,
   ensureCodexProfiles,
-  ensureHooksInSettings,
   ensureWindowsHubAutostart,
-  extractManagedHookFilename,
   extractProfileLines,
-  getManagedRegistryHooks,
   getVersion,
   getWindowsHubAutostartStatus,
   getWorkerPackageSyncEntries,
@@ -2163,6 +2105,7 @@ export {
   LOCAL_DEV_SKILL_MARKER,
   listInlineProfileNames,
   PLUGIN_ROOT,
+  REMOVED_SKILL_NAMES,
   REQUIRED_CODEX_PROFILES,
   REQUIRED_TOP_LEVEL_SETTINGS,
   readMarker,
@@ -2177,6 +2120,7 @@ export {
   scanHudFiles,
   syncAliasedSkillDir,
   syncCodexHarnessAdapter,
+  syncCodexManagedSkills,
   syncWorkerPackages,
   validateSchtasksTrLength,
   WINDOWS_HUB_AUTOSTART_TASK,
@@ -2185,6 +2129,11 @@ export {
 
 export async function runCritical(stdinData) {
   const io = createCommandIo();
+  const cleanup = cleanupLegacyHooks({ settingsPath: SETTINGS_PATH });
+  if (!cleanup.ok) {
+    io.writeStderr(`[tfx-setup] 이전 hook 정리 실패: ${cleanup.error}\n`);
+    return io.result(1);
+  }
   const argv = getSetupArgv(stdinData);
   const isSync = argv.includes("--sync");
   const isDev = detectDevMode();
@@ -2201,12 +2150,22 @@ export async function runCritical(stdinData) {
     io.log("  [sync] 명시적 재동기화 실행");
   }
 
-  ensureCriticalSetup();
+  try {
+    ensureCriticalSetup();
+  } catch (error) {
+    io.writeStderr(`[tfx-setup] settings.json 읽기 실패: ${error.message}\n`);
+    return io.result(1);
+  }
   return io.result(0);
 }
 
 export async function runDeferred(stdinData) {
   const io = createCommandIo();
+  const cleanup = cleanupLegacyHooks({ settingsPath: SETTINGS_PATH });
+  if (!cleanup.ok) {
+    io.writeStderr(`[tfx-setup] 이전 hook 정리 실패: ${cleanup.error}\n`);
+    return io.result(1);
+  }
   const argv = getSetupArgv(stdinData);
   const isSync = argv.includes("--sync");
   const isForce = argv.includes("--force");
@@ -2250,25 +2209,18 @@ export async function runDeferred(stdinData) {
   }
   if (machineProfileOnly) return io.result(0);
 
+  const mcpCleanup = cleanupLegacyMcp({
+    home: _TFX_HOME,
+    repoRoot: process.env.INIT_CWD || process.cwd(),
+  });
+  // 이주가 막혀도 설치는 계속한다. 남은 항목은 경고로 알린다.
+  for (const warning of mcpCleanup.warnings) io.log(`  ⚠ ${warning}`);
+
   const pkgVersion = getPackageVersion();
   const marker = readMarker();
-  const claudeRoutingResults = syncClaudeRoutingSections();
-  const claudeRoutingChangedCount = claudeRoutingResults.filter(
-    (result) =>
-      result.action === "created" ||
-      result.action === "updated" ||
-      result.action === "removed",
-  ).length;
-  const codexHarnessSync = syncCodexHarnessAdapter();
-  if (!codexHarnessSync.ok) {
-    io.log(`  \x1b[31m✗\x1b[0m Codex tfx-harness: ${codexHarnessSync.reason}`);
-    return io.result(1);
-  }
-  if (codexHarnessSync.action === "skipped") {
-    io.log(
-      "  \x1b[33m⚠\x1b[0m Codex tfx-harness: user skill preserved; no managed files changed",
-    );
-  }
+  const skillSync = syncSkills();
+  for (const warning of skillSync.warnings) io.log(`  ⚠ ${warning}`);
+  if (!skillSync.ok) return io.result(1);
   const cloakBrowserResult = ensureCloakBrowser({
     warn: (message) => io.log(`  \x1b[33m⚠\x1b[0m ${message}`),
   });
@@ -2279,18 +2231,11 @@ export async function runDeferred(stdinData) {
     io.log("  \x1b[32m✓\x1b[0m cloakbrowser optional backend ready");
   }
   if (pkgVersion && marker?.version === pkgVersion && !isForce) {
-    if (claudeRoutingChangedCount > 0) {
-      io.log(
-        `setup: skip core sync (v${pkgVersion} already synced, CLAUDE.md ${claudeRoutingChangedCount}건 반영)`,
-      );
-    } else {
-      io.log(`setup: skip (v${pkgVersion} already synced)`);
-    }
+    io.log(`setup: skip (v${pkgVersion} already synced)`);
     return io.result(0);
   }
 
-  let synced =
-    claudeRoutingChangedCount + (codexHarnessSync.action === "synced" ? 1 : 0);
+  let synced = skillSync.changed;
 
   // ── Memory Doctor (P0 자동 수정) ──
   const isCIEnv = process.env.CI === "true" || process.env.DOCKER === "true";
@@ -2349,13 +2294,6 @@ export async function runDeferred(stdinData) {
         synced++;
       }
     }
-  }
-
-  try {
-    const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
-    if (claudeGuide.changed) synced++;
-  } catch (e) {
-    io.log(`  \x1b[33m⚠\x1b[0m CLAUDE.md 라우팅: ${e.message}`);
   }
 
   // ── Worker 의존성 동기화 (MCP SDK + transitive deps) ──
@@ -2442,353 +2380,15 @@ export async function runDeferred(stdinData) {
     }
   }
 
-  // ── 스킬 동기화 ──
-  // SKILL.md + 하위 디렉토리(references/ 등)를 재귀적으로 동기화.
-  // hosts.json 같은 user-state 파일은 설치/동기화 대상이 아니다.
-
-  const skillsSrc = join(PLUGIN_ROOT, "skills");
-  const skillsDst = join(CLAUDE_DIR, "skills");
-
-  function syncSkillDir(srcDir, dstDir) {
-    if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
-
-    let count = 0;
-    for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
-      const srcPath = join(srcDir, entry.name);
-      const dstPath = join(dstDir, entry.name);
-      if (isSetupUserStateFile(entry.name)) continue;
-
-      if (entry.isDirectory()) {
-        count += syncSkillDir(srcPath, dstPath);
-      } else if (entry.name.endsWith(".md")) {
-        if (shouldSyncTextFile(srcPath, dstPath)) {
-          copyFileSync(srcPath, dstPath);
-          count++;
-        }
-      }
-    }
-    return count;
-  }
-
-  if (existsSync(skillsSrc)) {
-    for (const name of readdirSync(skillsSrc)) {
-      const skillDir = join(skillsSrc, name);
-      const skillMd = join(skillDir, "SKILL.md");
-      if (!existsSync(skillMd)) continue;
-
-      const installedDir = join(skillsDst, name);
-      // frontmatter `platform:` 비대상(예: macOS 의 tfx-wt)은 설치하지 않고,
-      // 이전에 깔린 사본은 지운다. 로컬 개발 스킬은 건드리지 않는다.
-      if (!isSkillSupportedOnPlatform(skillDir)) {
-        if (existsSync(installedDir) && !isLocalDevSkillDir(installedDir)) {
-          rmSync(installedDir, { recursive: true, force: true });
-        }
-        continue;
-      }
-
-      synced += syncSkillDir(skillDir, installedDir);
-    }
-  }
-
-  // ── settings.json 통합 R/W ──
-  // 3개 섹션(statusLine, agentTeams, hooks)을 1회 read → 일괄 수정 → 1회 write
-
-  const settingsPath = join(CLAUDE_DIR, "settings.json");
-  const hudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
-
-  /**
-   * statusLine 섹션 적용.
-   * @param {object} s - settings 객체 (직접 변경)
-   * @returns {boolean} 변경 여부
-   */
-  function applyStatusLine(s) {
-    if (!existsSync(hudPath)) return false;
-    const currentCmd = s.statusLine?.command || "";
-    const desiredCommand = buildNodeScriptCommand(hudPath);
-    if (currentCmd.includes("hud-qos-status.mjs")) {
-      if (currentCmd === desiredCommand) return false;
-      s.statusLine = { type: "command", command: desiredCommand };
-      return true;
-    }
-
-    s.statusLine = { type: "command", command: desiredCommand };
-    return true;
-  }
-
-  /**
-   * Agent Teams 환경변수 섹션 적용.
-   * @param {object} s - settings 객체 (직접 변경)
-   * @returns {boolean} 변경 여부
-   */
-  function applyAgentTeams(s) {
-    if (!s.env) s.env = {};
-    let changed = false;
-
-    if (s.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS !== "1") {
-      s.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1";
-      changed = true;
-    }
-    // teammateMode: auto (tmux 밖이면 in-process, 안이면 split-pane)
-    if (!s.teammateMode) {
-      s.teammateMode = "auto";
-      changed = true;
-    }
-    return changed;
-  }
-
-  /**
-   * Remote Control 자동 활성화.
-   * 모든 세션에서 remote control URL을 자동 발급하도록 설정.
-   * @param {object} s - settings 객체 (직접 변경)
-   * @returns {boolean} 변경 여부
-   */
-  function applyRemoteControl(s) {
-    if (s.remoteControlAtStartup === true) return false;
-    if (process.env.TFX_REMOTE_CONTROL !== "1" && !detectDevMode())
-      return false;
-    s.remoteControlAtStartup = true;
-    return true;
-  }
-
-  /**
-   * SessionStart + PreToolUse 훅 섹션 적용.
-   * @param {object} s - settings 객체 (직접 변경)
-   * @returns {boolean} 변경 여부
-   */
-  function applyHooks(s) {
-    if (!s.hooks) s.hooks = {};
-    let changed = false;
-
-    // ── SessionStart 훅 ──
-    if (!Array.isArray(s.hooks.SessionStart)) s.hooks.SessionStart = [];
-
-    const pluginRoot = PLUGIN_ROOT.replace(/\\/g, "/");
-    const commandForScript = (scriptName) =>
-      buildNodeScriptCommand(`${pluginRoot}/scripts/${scriptName}`);
-
-    const hasTrifluxHooks = s.hooks.SessionStart.some(
-      (entry) =>
-        Array.isArray(entry.hooks) &&
-        entry.hooks.some(
-          (h) => typeof h.command === "string" && h.command.includes("triflux"),
-        ),
-    );
-
-    if (!hasTrifluxHooks) {
-      s.hooks.SessionStart.push({
-        matcher: "*",
-        hooks: [
-          {
-            type: "command",
-            command: commandForScript("setup.mjs"),
-            timeout: 10,
-          },
-          {
-            type: "command",
-            command: commandForScript("hub-ensure.mjs"),
-            timeout: 8,
-          },
-          {
-            type: "command",
-            command: commandForScript("mcp-gateway-ensure.mjs"),
-            timeout: 8,
-          },
-          {
-            type: "command",
-            command: commandForScript("preflight-cache.mjs"),
-            timeout: 5,
-          },
-        ],
-      });
-      changed = true;
-    }
-
-    for (const entry of s.hooks.SessionStart) {
-      if (!Array.isArray(entry.hooks)) continue;
-      const hasDirectTrifluxHook = entry.hooks.some(
-        (h) => typeof h.command === "string" && h.command.includes("triflux"),
-      );
-      const hasGatewayEnsure = entry.hooks.some(
-        (h) =>
-          typeof h.command === "string" &&
-          h.command.includes("mcp-gateway-ensure.mjs"),
-      );
-      if (!hasDirectTrifluxHook || hasGatewayEnsure) continue;
-
-      const hubIndex = entry.hooks.findIndex(
-        (h) =>
-          typeof h.command === "string" && h.command.includes("hub-ensure.mjs"),
-      );
-      const gatewayHook = {
-        type: "command",
-        command: commandForScript("mcp-gateway-ensure.mjs"),
-        timeout: 8,
-      };
-      if (hubIndex >= 0) entry.hooks.splice(hubIndex + 1, 0, gatewayHook);
-      else entry.hooks.push(gatewayHook);
-      changed = true;
-    }
-
-    for (const entry of s.hooks.SessionStart) {
-      if (!Array.isArray(entry.hooks)) continue;
-      for (const hook of entry.hooks) {
-        for (const scriptName of [
-          "setup.mjs",
-          "hub-ensure.mjs",
-          "mcp-gateway-ensure.mjs",
-          "preflight-cache.mjs",
-        ]) {
-          if (
-            refreshHookCommandForScript(
-              hook,
-              scriptName,
-              `${pluginRoot}/scripts/${scriptName}`,
-            )
-          ) {
-            changed = true;
-          }
-        }
-      }
-    }
-
-    // ── PreToolUse 훅: tfx-gate-activate ──
-    // orchestrator 가 registry 기반으로 omc-tfx-gate-activate 를 이미 디스패치하므로,
-    // `*` orchestrator entry 와 별도로 등록된 직접 entry 는 2배 발화를 유발한다 (#76).
-    // headless-guard 는 2026-09-07 에 제거됐다. 과거 설치가 남긴 직접 entry 는 계속 prune 한다.
-    // 이 블록은 orchestrator 유무에 따라 다르게 동작한다:
-    //   - orchestrator 가 있으면: 직접 등록된 중복 entry 를 제거 (prune).
-    //   - orchestrator 가 없으면: legacy ADD 경로로 직접 entry 주입 (구 설치 fallback).
-    if (!Array.isArray(s.hooks.PreToolUse)) s.hooks.PreToolUse = [];
-
-    const gateScriptPath = join(
-      CLAUDE_DIR,
-      "scripts",
-      "tfx-gate-activate.mjs",
-    ).replace(/\\/g, "/");
-
-    const hasPreToolUseOrchestrator = s.hooks.PreToolUse.some(
-      (entry) =>
-        entry.matcher === "*" &&
-        Array.isArray(entry.hooks) &&
-        entry.hooks.some(
-          (h) =>
-            typeof h.command === "string" &&
-            h.command.includes("hook-orchestrator.mjs"),
-        ),
-    );
-
-    if (hasPreToolUseOrchestrator) {
-      // prune: 직접 등록된 tfx-gate-activate 전용 entry 와 제거된 headless-guard entry 정리
-      const DUP_MARKERS = ["headless-guard", "tfx-gate-activate"];
-      const before = s.hooks.PreToolUse.length;
-      s.hooks.PreToolUse = s.hooks.PreToolUse.filter((entry) => {
-        if (entry.matcher === "*") return true;
-        if (!Array.isArray(entry.hooks) || entry.hooks.length === 0)
-          return true;
-        const allDup = entry.hooks.every(
-          (h) =>
-            typeof h.command === "string" &&
-            !h.command.includes("hook-orchestrator") &&
-            DUP_MARKERS.some((m) => h.command.includes(m)),
-        );
-        return !allDup;
-      });
-      if (s.hooks.PreToolUse.length !== before) changed = true;
-    } else {
-      // legacy: orchestrator 부재 시 직접 entry 주입
-      const hasGateHook = s.hooks.PreToolUse.some(
-        (entry) =>
-          Array.isArray(entry.hooks) &&
-          entry.hooks.some(
-            (h) =>
-              typeof h.command === "string" &&
-              h.command.includes("tfx-gate-activate"),
-          ),
-      );
-
-      if (!hasGateHook && existsSync(gateScriptPath.replace(/\//g, "\\"))) {
-        s.hooks.PreToolUse.push({
-          matcher: "Skill",
-          hooks: [
-            {
-              type: "command",
-              command: buildNodeScriptCommand(gateScriptPath),
-              timeout: 2,
-            },
-          ],
-        });
-        changed = true;
-      }
-    }
-
-    // 남아있는 직접 entry 경로 동기화 (legacy 또는 외부 등록 대응)
-    for (const entry of s.hooks.PreToolUse) {
-      if (!Array.isArray(entry.hooks)) continue;
-      for (const h of entry.hooks) {
-        if (typeof h.command !== "string") continue;
-        if (h.command.includes("hook-orchestrator")) continue;
-        if (
-          h.command.includes("tfx-gate-activate") &&
-          h.command !== buildNodeScriptCommand(gateScriptPath)
-        ) {
-          h.command = buildNodeScriptCommand(gateScriptPath);
-          changed = true;
-        }
-      }
-    }
-
-    return changed;
-  }
-
-  // 1회 읽기
-  let settings = {};
-  if (existsSync(settingsPath)) {
-    try {
-      settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-    } catch {
-      /* 기존 설정 보존 */
-    }
-  }
-
-  // 3개 섹션 일괄 수정 (각각 try-catch로 독립 실행)
+  const settings = loadSettings();
   let settingsChanged = false;
-  try {
-    if (applyStatusLine(settings)) {
+  for (const apply of [applyStatusLine, applyAgentTeams, applyRemoteControl]) {
+    if (apply(settings)) {
       settingsChanged = true;
       synced++;
-    }
-  } catch {}
-  try {
-    if (applyAgentTeams(settings)) {
-      settingsChanged = true;
-      synced++;
-    }
-  } catch {}
-  try {
-    if (applyRemoteControl(settings)) {
-      settingsChanged = true;
-      synced++;
-    }
-  } catch {}
-  try {
-    if (applyHooks(settings)) {
-      settingsChanged = true;
-      synced++;
-    }
-  } catch {}
-
-  // 1회 쓰기
-  if (settingsChanged) {
-    try {
-      writeFileSync(
-        settingsPath,
-        JSON.stringify(settings, null, 2) + "\n",
-        "utf8",
-      );
-    } catch {
-      // settings.json 쓰기 실패 시 무시
     }
   }
+  if (settingsChanged) persistSettings(settings);
 
   // ── HUD 캐시 pre-warm (백그라운드) ──
 
@@ -2986,26 +2586,6 @@ export async function runDeferred(stdinData) {
     }
   }
 
-  // ── CLAUDE.md 라우팅 섹션 자동 동기화 ──
-
-  try {
-    const routingTable = getLatestRoutingTable();
-    const projectResult = ensureTfxSection(
-      join(PLUGIN_ROOT, "CLAUDE.md"),
-      routingTable,
-    );
-    if (projectResult.action !== "unchanged") {
-      io.log(`  \x1b[32m✓\x1b[0m CLAUDE.md (project): ${projectResult.action}`);
-      synced++;
-    }
-    const globalResult = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
-    if (globalResult.action !== "unchanged") {
-      io.log(`  \x1b[32m✓\x1b[0m CLAUDE.md (global): ${globalResult.action}`);
-      synced++;
-    }
-  } catch (error) {
-    io.log(`  \x1b[33m⚠\x1b[0m CLAUDE.md 동기화 실패: ${error.message}`);
-  }
   // ── MCP 인벤토리 백그라운드 갱신 ──
 
   const mcpCheck = join(PLUGIN_ROOT, "scripts", "mcp-check.mjs");
@@ -3079,7 +2659,7 @@ ${B}╚════════════════════════�
   ${G}✓${R} tfx-route.sh     → ~/.claude/scripts/
   ${G}✓${R} hud-qos-status   → ~/.claude/hud/
   ${G}✓${R} ${synced > 0 ? synced + " files synced" : "all files up to date"}
-  ${G}✓${R} HUD statusLine   → settings.json
+  ${D}HUD statusLine: 기존 설정을 보존하며 미설정 시 등록${R}
 
 ${B}Commands:${R}
   ${C}triflux${R} setup     파일 동기화 + HUD 설정

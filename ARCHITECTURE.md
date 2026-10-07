@@ -39,7 +39,7 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 | `hub/team/` | 팀/멀티에이전트 오케스트레이션 | `conductor.mjs`, `headless.mjs`, `dashboard.mjs`, `cto-auto-collect.mjs`, `claude-native-bridge.mjs`, `notify.mjs` |
 | `hub/` 하위 | 세분 모듈 | `delegator/`, `diagnostics/`, `lib/`, `middleware/`, `pipeline/`, `quality/`, `routing/`, `workers/` |
 | `mesh/` | 에이전트 간 메시지 메시 프로토콜 | `mesh-protocol.mjs`, `mesh-router.mjs`, `mesh-registry.mjs`, `mesh-queue.mjs`, `mesh-heartbeat.mjs`, `mesh-budget.mjs` |
-| `hooks/` | Claude Code 세션 훅 + 가드 | `session-start-fast.mjs`, `session-start-lake.mjs`, `session-end-cleanup.mjs`, `safety-guard.mjs`, `hook-orchestrator.mjs`, `keyword-rules.json` |
+| `hooks/` | Codex 및 Antigravity 세션 연결과 전환용 stub | `codex-session-hook.mjs`, `agy-session-hook.mjs` |
 | `hud/` | 상태 표시(HUD) / 모니터 | `context-monitor.mjs`, `mission-board.mjs`, `renderers.mjs`, `providers/` |
 | `cto/` | CTO 콘솔 — 멀티세션 수집·요약·위생(hygiene) | `collect.mjs`, `brief.mjs`, `dashboard.mjs`, `status.mjs`, `hygiene.mjs` |
 | `scripts/` | 라우팅 스크립트 + 릴리즈 게이트 | `tfx-route.sh`(라우팅 엔진), `scripts/release/`(릴리즈 자동화), `scripts/lib/`(공용 helper) |
@@ -75,7 +75,7 @@ Hub는 팀·원격 세션·MCP 도구·상태 표면을 잇는 로컬 메시지 
 triflux는 위험한 실행을 관리된 경로 뒤에 둔다. 직접 `codex exec`,
 관리되지 않은 `agy`, 폐기된 `gemini` 경로는 라우팅 규약으로 금지한다(자동 차단
 훅 headless-guard 는 2026-09-07 에 제거). psmux/Windows Terminal 흐름은
-safety-guard가 관리 API로만 우회하도록 강제한다.
+관리 API를 사용한다.
 CLI 호출은 `tfx-route.sh` / Hub 워커 / `tfx` CLI를 경유해야 한다.
 
 ## 스택 공존

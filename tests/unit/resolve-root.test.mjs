@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -27,7 +28,7 @@ function createValidPluginRoot(baseDir, name) {
   const root = join(baseDir, name);
   mkdirSync(join(root, "hooks"), { recursive: true });
   writeFileSync(
-    join(root, "hooks", "hook-orchestrator.mjs"),
+    join(root, "hooks", "codex-session-hook.mjs"),
     "// sentinel\n",
     "utf8",
   );
@@ -114,7 +115,7 @@ describe("resolve-root", () => {
     process.env.CLAUDE_PLUGIN_ROOT = join(tempDir, "invalid-env");
     const callerRoot = createValidPluginRoot(tempDir, "caller-root");
     const callerUrl = pathToFileURL(
-      join(callerRoot, "hooks", "pipeline-stop.mjs"),
+      join(callerRoot, "hooks", "codex-session-hook.mjs"),
     ).href;
 
     const { resolvePluginRoot } = await importFreshModule();
@@ -139,10 +140,32 @@ describe("resolve-root", () => {
       const resolved = resolvePluginRoot(
         pathToFileURL(join(tempDir, "no-hooks", "file.mjs")).href,
       );
-      assert.ok(existsSync(join(resolved, "hooks", "hook-orchestrator.mjs")));
+      assert.ok(existsSync(join(resolved, "hooks", "codex-session-hook.mjs")));
       assert.match(stderr, /resolve-root/i);
     } finally {
       process.stderr.write = originalWrite;
     }
+  });
+
+  it("run.cjs는 전환 stub 없는 패키지도 breadcrumb으로 찾는다", () => {
+    const root = createValidPluginRoot(tempDir, "package with spaces");
+    mkdirSync(join(root, "scripts"));
+    writeFileSync(
+      join(root, "scripts", "probe.mjs"),
+      "process.stdout.write('resolved');\n",
+    );
+    const scriptsDir = join(process.env.HOME, ".claude", "scripts");
+    mkdirSync(scriptsDir, { recursive: true });
+    writeFileSync(join(scriptsDir, ".tfx-pkg-root"), root);
+    const result = spawnSync(
+      process.execPath,
+      [
+        new URL("../../scripts/run.cjs", import.meta.url).pathname,
+        "${CLAUDE_PLUGIN_ROOT}/scripts/probe.mjs",
+      ],
+      { encoding: "utf8", input: "{}" },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "resolved");
   });
 });

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -9,15 +8,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { syncRegistryTargets } from "../lib/mcp-guard-engine.mjs";
-
-const TEST_DIR = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
-const SAFETY_GUARD_PATH = join(PROJECT_ROOT, "scripts", "mcp-safety-guard.mjs");
 
 const originalEnv = {
   HOME: process.env.HOME,
@@ -75,7 +69,6 @@ function registryFor(settingsPath, overrides = {}) {
       ...(overrides.servers || {}),
     },
     policies: {
-      stdio_action: "replace-with-hub",
       unknown_server_action: "warn",
       sync_denylist: [],
       watched_paths: [settingsPath],
@@ -143,7 +136,7 @@ describe("mcp guard proactive registry sync", () => {
     ]);
   });
 
-  it("remediates stdio entries and adds the Hub entry in the combined flow", () => {
+  it("preserves direct stdio entries while adding the Hub entry", () => {
     const homeDir = makeTempRoot();
     useHome(homeDir);
     const settingsPath = writeGeminiSettings(homeDir, {
@@ -155,16 +148,17 @@ describe("mcp guard proactive registry sync", () => {
     const result = syncRegistryTargets({ registry: registryFor(settingsPath) });
     const updated = readJson(settingsPath);
 
-    assert.equal(Object.hasOwn(updated.mcpServers, "unsafe-stdio"), false);
+    assert.deepEqual(updated.mcpServers["unsafe-stdio"], {
+      command: "node",
+      args: ["server.js"],
+    });
     assert.equal(
       updated.mcpServers["tfx-hub"].url,
       "http://127.0.0.1:30123/mcp",
     );
     assert.equal(
-      result.actions.some(
-        (action) => action.type === "remediate" && action.status === "updated",
-      ),
-      true,
+      result.actions.some((action) => action.type === "remediate"),
+      false,
     );
   });
 
@@ -213,25 +207,5 @@ describe("mcp guard proactive registry sync", () => {
     );
     assert.equal(afterContent, beforeContent);
     assert.equal(afterMtime, beforeMtime);
-  });
-
-  it("leaves parse-error JSON untouched and the hook exits 0 with a warning", async () => {
-    const homeDir = makeTempRoot();
-    const projectDir = makeTempRoot("mcp-guard-project-");
-    useHome(homeDir);
-    process.chdir(projectDir);
-
-    const settingsPath = join(homeDir, ".gemini", "settings.json");
-    mkdirSync(dirname(settingsPath), { recursive: true });
-    writeFileSync(settingsPath, "{broken-json", "utf8");
-
-    const guardUrl = `${pathToFileURL(SAFETY_GUARD_PATH).href}?case=${Date.now()}`;
-    const { run } = await import(guardUrl);
-    const result = await run();
-
-    assert.equal(result.code, 0);
-    assert.match(result.stdout, /\[mcp-guard\] 설정 파싱 실패:/);
-    assert.equal(readFileSync(settingsPath, "utf8"), "{broken-json");
-    assert.equal(existsSync(`${settingsPath}.bak`), false);
   });
 });

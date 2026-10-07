@@ -5,15 +5,9 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { progressBar } from "../../hub/team/ansi.mjs";
-import {
-  compileRules,
-  loadRules,
-  matchRules,
-} from "../../scripts/lib/keyword-rules.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, "../..");
-const RULES_PATH = join(ROOT, "hooks/keyword-rules.json");
 
 // ── semverGte 인라인 복제 (triflux.mjs 내부 함수 — export 불가) ──
 function semverGte(a, b) {
@@ -71,38 +65,6 @@ describe("progressBar: boundary values do not crash", () => {
     const result = progressBar(100, 20);
     assert.ok(result.includes("\u2588"), "should have filled blocks");
     assert.ok(!result.includes("\u2591"), "should have no empty blocks");
-  });
-});
-
-// ========================================================================
-// 3. Korean keyword-rules matching
-// ========================================================================
-describe("keyword-rules: Korean keyword matching", () => {
-  const rawRules = loadRules(RULES_PATH);
-  const compiled = compileRules(rawRules);
-
-  for (const [text, id] of [
-    ["로그인 기능 구현해줘", "tfx-unified"],
-    ["이 함수 버그 고쳐줘", "tfx-unified"],
-    ["이번 주 회고해줘", "gstack-retro"],
-    ["보안 점검해줘", "gstack-cso"],
-  ]) {
-    it(`matches ${id} on Korean input: ${text}`, () => {
-      const ids = matchRules(compiled, text).map((r) => r.id);
-      assert.ok(ids.includes(id), `${id} expected in: ${JSON.stringify(ids)}`);
-    });
-  }
-
-  it("handoff/canva/playwright routes are removed (ADR-0021)", () => {
-    for (const id of ["handoff-route", "canva-route", "playwright-route"]) {
-      assert.equal(
-        rawRules.some((r) => r.id === id),
-        false,
-        `${id} should be removed`,
-      );
-    }
-    assert.deepEqual(matchRules(compiled, "핸드오프 생성"), []);
-    assert.deepEqual(matchRules(compiled, "캔바 디자인"), []);
   });
 });
 
