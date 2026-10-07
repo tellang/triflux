@@ -417,18 +417,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       },
     ],
   },
-  "notion-read": {
-    usage: "tfx notion-read <notion-url-or-page-id> [options]",
-    description: "Notion page/database를 markdown/JSON으로 읽기 (nr alias)",
-    aliases: ["nr"],
-    options: [
-      {
-        name: "--json",
-        type: "boolean",
-        description: "가능한 경우 구조화된 JSON 출력",
-      },
-    ],
-  },
   monitor: {
     usage: "tfx monitor",
     description: "터미널 TUI 모니터 실행",
@@ -4631,7 +4619,6 @@ function cmdHelp() {
     ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
     ${WHITE_BRIGHT}tfx synapse${RESET}     ${GRAY}스웜 세션 registry 조회 / lease 관리${RESET}
     ${WHITE_BRIGHT}tfx why${RESET}         ${GRAY}경로의 마지막 커밋 X-Intent 트레일러 추출${RESET}
-    ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
 
   ${BOLD}Skills${RESET} ${GRAY}(Claude Code 슬래시 커맨드)${RESET}
@@ -5627,27 +5614,6 @@ async function main() {
       } finally {
         process.argv = prevArgv;
         delete process.env.TFX_OUTPUT_JSON;
-      }
-      return;
-    }
-    case "notion-read":
-    case "nr": {
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("notion-read");
-        return;
-      }
-      const scriptPath = join(PKG_ROOT, "scripts", "notion-read.mjs");
-      try {
-        execFileSync(process.execPath, [scriptPath, ...cmdArgs], {
-          stdio: "inherit",
-          timeout: 660000,
-          windowsHide: true,
-        });
-      } catch (e) {
-        throw createCliError(e.message || "notion-read 실행 실패", {
-          exitCode: e.status || EXIT_ERROR,
-          reason: "error",
-        });
       }
       return;
     }

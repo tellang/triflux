@@ -643,11 +643,6 @@ const SYNC_MAP = [
   },
   ...scanHudFiles(PLUGIN_ROOT, CLAUDE_DIR),
   {
-    src: join(PLUGIN_ROOT, "scripts", "notion-read.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "notion-read.mjs"),
-    label: "notion-read.mjs",
-  },
-  {
     src: join(PLUGIN_ROOT, "hub", "team", "agent-map.json"),
     dst: join(CLAUDE_DIR, "hub", "team", "agent-map.json"),
     label: "hub/team/agent-map.json",
@@ -1378,6 +1373,7 @@ const RETIRED_INSTALL_FILES = [
     "tfx-batch-stats.mjs v1.0",
   ],
   [join(CLAUDE_DIR, "agents", "slim-wrapper.md"), "name: slim-wrapper"],
+  [join(CLAUDE_DIR, "scripts", "notion-read.mjs"), "notion-read.mjs v"],
 ];
 
 function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {

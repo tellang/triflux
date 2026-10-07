@@ -140,7 +140,7 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 | `tfx mcp` | Managed MCP registry: `list`, `sync`, `add`, `remove` |
 | `tfx cto` | Repo-local authority console: `collect`, `status`, `hygiene` (dry-run) |
 | `bash ~/.claude/scripts/tfx-route.sh code-reviewer "<instruction>"` | Send review to Codex (`codex exec review` via policy) |
-| `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | Notion → Markdown, commit intent trailers, CLI schemas, installed skills, TUI monitor, update, version |
+| `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | Commit intent trailers, CLI schemas, installed skills, TUI monitor, update, version |
 | `tfx-live` | Live session bridge (same as the `/tfx-live` skill) |
 
 `tfx <command> --help` and `tfx schema <command>` print the exact arguments.
