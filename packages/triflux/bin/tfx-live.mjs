@@ -4136,7 +4136,6 @@ function printJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
-
 async function main() {
   const { command, flags } = parseCli(process.argv.slice(2));
 

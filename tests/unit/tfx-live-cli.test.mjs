@@ -2507,7 +2507,6 @@ test("tfx-live interrupt returns the common abort contract through tmux Escape",
   }
 });
 
-
 test("Claude discovery matches live pane owners and descendants up to four levels", async () => {
   const dir = await fs.mkdtemp(path.resolve(".test-claude-sessions-"));
   try {
