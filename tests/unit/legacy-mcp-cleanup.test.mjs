@@ -28,7 +28,7 @@ function fixture() {
     home,
     repoRoot,
     join(home, ".codex"),
-    join(home, ".gemini"),
+    join(home, ".gemini", "config"),
   ])
     mkdirSync(path, { recursive: true });
   return { home, repoRoot };
@@ -41,12 +41,18 @@ function put(path, value) {
   );
 }
 
-test("4개 설정의 소유 URL만 직접 연결로 이주하고 백업 후 멱등으로 끝난다", () => {
+test("5개 설정의 소유 URL만 직접 연결로 이주하고 백업 후 멱등으로 끝난다", () => {
   const { home, repoRoot } = fixture();
   const claude = join(home, ".claude.json");
   const project = join(repoRoot, ".mcp.json");
   const gemini = join(home, ".gemini", "settings.json");
   const codex = join(home, ".codex", "config.toml");
+  const agy = join(home, ".gemini", "config", "mcp_config.json");
+  put(agy, {
+    mcpServers: {
+      "brave-search": { type: "http", url: "http://127.0.0.1:8101/mcp" },
+    },
+  });
   put(claude, {
     history: ["http://127.0.0.1:8101/mcp"],
     mcpServers: {
@@ -88,8 +94,8 @@ test("4개 설정의 소유 URL만 직접 연결로 이주하고 백업 후 멱�
   };
   const result = cleanupLegacyMcp(options);
   assert.equal(result.ok, true);
-  assert.equal(result.migrated, 7);
-  assert.equal(result.backups.length, 4);
+  assert.equal(result.migrated, 8);
+  assert.equal(result.backups.length, 5);
   assert.ok(calls.every(([command]) => command === "ps"));
   assert.ok(result.warnings.some((warning) => warning.includes("secrets.env")));
   for (const file of [claude, project, gemini, codex])
@@ -101,6 +107,10 @@ test("4개 설정의 소유 URL만 직접 연결로 이주하고 백업 후 멱�
     env: { BRAVE_API_KEY: "${BRAVE_API_KEY}" },
   });
   assert.deepEqual(claudeServers.other, { url: "https://example.test/mcp" });
+  assert.deepEqual(
+    JSON.parse(readFileSync(agy, "utf8")).mcpServers["brave-search"],
+    { command: "npx", args: ["-y", "@brave/brave-search-mcp-server"] },
+  );
   assert.equal(
     JSON.parse(readFileSync(claude, "utf8")).projects.sample.mcpServers.context7
       .command,
