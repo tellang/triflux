@@ -666,11 +666,6 @@ export function buildPromptHint(options = {}) {
 }
 
 export function getCodexMcpConfig(options = {}) {
-  const allowedServers = new Set(resolveAllowedServers(options));
-  const resolvedProfile = resolveMcpProfile(
-    options.agentType,
-    options.requestedProfile,
-  );
   // Codex에 실제 등록된 서버만 대상으로 config override 생성.
   // 미등록 서버에 enabled=false를 보내면 "invalid transport" 에러 발생.
   const registeredServers = parseAvailableServers(options.availableServers);
@@ -679,6 +674,11 @@ export function getCodexMcpConfig(options = {}) {
   if (registeredServers.length === 0) {
     return { mcp_servers: {} };
   }
+  const allowedServers = new Set(resolveAllowedServers(options));
+  const resolvedProfile = resolveMcpProfile(
+    options.agentType,
+    options.requestedProfile,
+  );
   const targetServers = registeredServers;
 
   if (resolvedProfile === "none") {
@@ -773,6 +773,12 @@ export function buildMcpPolicy(options = {}) {
     allowedServers = allowedServers.filter((s) => !blocked.has(s));
   }
 
+  // 플러그인 서버는 transport 설정이 없어 CLI override를 받으면 부팅이 실패한다.
+  const codexOptions = {
+    ...resolvedOptions,
+    availableServers: codexServersFromConfig(options.codexConfig),
+  };
+
   return {
     requestedProfile:
       typeof options.requestedProfile === "string" && options.requestedProfile
@@ -782,8 +788,8 @@ export function buildMcpPolicy(options = {}) {
     resolvedPhase: phase || null,
     allowedServers,
     hint,
-    codexConfig: getCodexMcpConfig(resolvedOptions),
-    codexConfigOverrides: getCodexConfigOverrides(resolvedOptions),
+    codexConfig: getCodexMcpConfig(codexOptions),
+    codexConfigOverrides: getCodexConfigOverrides(codexOptions),
   };
 }
 
@@ -802,7 +808,7 @@ function toDelimited(policy) {
     policy.resolvedProfile,
     policy.hint,
     policy.allowedServers.join(","),
-    policy.codexConfigOverrides.flatMap((o) => ["-c", o]).join(","),
+    policy.codexConfigOverrides.flatMap((o) => ["-c", o]).join("\x1f"),
     JSON.stringify(policy.codexConfig),
     policy.resolvedPhase || "",
   ].join(RS);

@@ -169,7 +169,6 @@ _run_async_job_body() {
 }
 
 cleanup_workers() {
-  _codex_config_swap "restore" 2>/dev/null || true
   deregister_agent 2>/dev/null || true
   [[ ! -f "$_PID_TRACK" ]] && return
   while IFS= read -r pid; do
@@ -209,7 +208,7 @@ _preflight_check_gh_auth() {
 }
 _preflight_check_gh_auth
 
-# 테스트는 TFX_CODEX_CONFIG로 config swap 대상을 격리한다.
+# MCP override 대상은 이 파일에 정의된 서버로 한정한다.
 _CODEX_CONFIG="${TFX_CODEX_CONFIG:-${HOME}/.codex/config.toml}"
 
 _sanitize_codex_legacy_profiles() {
@@ -1633,7 +1632,7 @@ resolve_mcp_policy() {
   IFS=$'\x1e' read -r MCP_PROFILE_REQUESTED MCP_RESOLVED_PROFILE MCP_HINT \
     _allowed_servers _codex_flags _codex_config_json _phase <<< "$_raw"
   IFS=',' read -r -a ALLOWED_MCP_SERVERS <<< "$_allowed_servers"
-  IFS=',' read -r -a CODEX_CONFIG_FLAGS <<< "$_codex_flags"
+  IFS=$'\x1f' read -r -a CODEX_CONFIG_FLAGS <<< "$_codex_flags"
   # set -e 환경에서 함수 마지막 명령이 `[[ ... ]] && ...` 이면
   # 조건 불일치(= phase 없음)만으로 함수 전체가 실패 처리되어 route가 즉시 종료된다.
   # implement/default 같은 일반 경로는 phase를 비우는 것이 정상이다.
@@ -2084,11 +2083,7 @@ run_antigravity_exec() {
   return "$exit_code_local"
 }
 
-## ── MCP Preflight: dead 서버 감지 후 CODEX_CONFIG_FLAGS 에서 제거 ──
-# Session 18 체크포인트 P3 root-cause fix. dead MCP 가 allowed_pat 에 포함되면
-# _codex_config_swap 이 section 을 유지 → Codex 가 init 시도 → -32000 으로 죽는다.
-# Preflight 가 각 서버를 probe (initialize 요청) 한 뒤 응답 없는 서버의
-# enabled=true 플래그를 제거해서 swap 이 그 section 을 자동으로 drop 하게 만든다.
+# 응답 없는 MCP는 명시적으로 꺼서 config 기본값으로 재연결하지 않게 한다.
 # Opt-out: TFX_MCP_HEALTH_CHECK=0
 _mcp_preflight_filter_dead() {
   local opt="${TFX_MCP_HEALTH_CHECK:-1}"
@@ -2147,7 +2142,7 @@ _mcp_preflight_filter_dead() {
   done <<< "$probe_output"
   [[ -z "$dead_list" ]] && return 0
 
-  # dead 서버의 모든 mcp_servers.<dead>.* override 를 CODEX_CONFIG_FLAGS 에서 제거
+  # dead 서버의 enabled override를 false로 바꾸고 나머지 설정은 보존한다.
   local -a dead_names=()
   IFS=',' read -ra dead_names <<< "$dead_list"
   local -a new_flags=()
@@ -2156,18 +2151,15 @@ _mcp_preflight_filter_dead() {
     local flag="${CODEX_CONFIG_FLAGS[$i]}"
     if [[ "$flag" == "-c" ]] && (( i + 1 < n )); then
       local value="${CODEX_CONFIG_FLAGS[$((i+1))]}"
-      local drop=false
       local dead
       for dead in "${dead_names[@]}"; do
         [[ -z "$dead" ]] && continue
-        if [[ "$value" == "mcp_servers.${dead}."* ]]; then
-          drop=true
+        if [[ "$value" == "mcp_servers.${dead}.enabled="* ]]; then
+          value="mcp_servers.${dead}.enabled=false"
           break
         fi
       done
-      if [[ "$drop" == "false" ]]; then
-        new_flags+=("-c" "$value")
-      fi
+      new_flags+=("-c" "$value")
       i=$((i+2))
     else
       new_flags+=("$flag")
@@ -2175,13 +2167,13 @@ _mcp_preflight_filter_dead() {
     fi
   done
 
-  CODEX_CONFIG_FLAGS=("${new_flags[@]}")
+  CODEX_CONFIG_FLAGS=(${new_flags[@]+"${new_flags[@]}"})
   echo "[tfx-route] MCP preflight: ${#dead_names[@]}개 dead MCP 제외 (${dead_list})" >&2
 
   # 전부 dead일 때 명시적 early-fail만 중단하고, 기본은 도구 안내 없이 계속한다.
   local remaining_alive=0
   local rflag
-  for rflag in "${CODEX_CONFIG_FLAGS[@]}"; do
+  for rflag in ${CODEX_CONFIG_FLAGS[@]+"${CODEX_CONFIG_FLAGS[@]}"}; do
     # #153 + #170 P1: candidate 추출 정규식 (line 1607) 과 일관 — dotted server 이름
     # (e.g. mcp_servers.foo.bar.enabled=true) 도 alive 로 카운트한다. `[^.]+` 는 첫 dot
     # 에서 끊겨 dotted alive 만 남은 경우 false all-dead 판정 → 불필요 degraded.
@@ -2199,164 +2191,6 @@ _mcp_preflight_filter_dead() {
     export _TFX_MCP_DEGRADED=1
     echo "[tfx-route] graceful degradation: MCP 전부 dead, 도구 안내 생략 (set TFX_MCP_FAIL_ON_ALL_DEAD=1 to revert to early-fail)" >&2
     return 0
-  fi
-}
-
-## ── Config Swap: 프로필별 MCP 서버 필터링 ──
-# codex exec는 -c flag로 MCP enabled/disabled를 제어할 수 없다.
-# config.toml을 원자적으로 교체하여 불필요한 서버 시작을 방지한다.
-_codex_config_swap() {
-  local action="$1"  # "filter" or "restore"
-  local config="$_CODEX_CONFIG"
-  local backup="${config}.pre-exec"
-
-  if [[ "$action" == "filter" && -f "$config" ]]; then
-    # MCP 프로필에서 허용된 서버 목록 추출
-    local allowed_pat=""
-    for flag in "${CODEX_CONFIG_FLAGS[@]}"; do
-      if [[ "$flag" =~ mcp_servers\.([^.]+)\.enabled=true ]]; then
-        [[ -n "$allowed_pat" ]] && allowed_pat="${allowed_pat}|"
-        allowed_pat="${allowed_pat}${BASH_REMATCH[1]}"
-      fi
-    done
-
-    # BUG-H (#132) fail-safe: allowed_pat 이 비면 swap 스킵.
-    # 과거에는 awk 가 keep="" 에서 모든 [mcp_servers.*] 섹션을 제거하고
-    # restore 시 Windows mv 실패 → config.toml 영구 손상이 재발했다.
-    # 비허용 서버 비활성화는 mcp-filter.mjs 의 enabled=false override 가 담당한다.
-    if [[ -z "$allowed_pat" ]]; then
-      echo "[tfx-route] config.toml swap 스킵: 허용 서버 패턴 없음 (fail-safe)" >&2
-      return 0
-    fi
-
-    # Pre-validation: config.toml이 500 bytes 미만이면 이미 손상된 상태일 수 있음 — 스킵
-    local config_size
-    config_size=$(wc -c < "$config" 2>/dev/null | tr -d ' ') || config_size=0
-    if [[ "$config_size" -lt 500 && "${TFX_ALLOW_SMALL_CODEX_CONFIG:-0}" != "1" ]]; then
-      echo "[tfx-route] 경고: config.toml 크기 ${config_size} bytes — 손상 의심, swap 스킵 (수동 확인 필요)" >&2
-      return 0
-    fi
-
-    # 백업 생성 (이미 있으면 다른 워커가 swap 중 — 단, owner-dead + 백업 안전 복원 시 이어받기)
-    if [[ -f "$backup" ]]; then
-      # Owner PID marker (P1 fix): mtime 만으로 stale 을 판정하면 장시간 정상 실행 워커도 오탐.
-      # $backup.owner 에 생성 워커 PID 기록 → kill -0 로 alive 확인. PID 파일 없거나 죽었으면 stale.
-      # mtime 은 신뢰성 낮아 soft 보조 지표로만 사용 (owner 파일 유실 대비 fallback).
-      local owner_file="${backup}.owner"
-      local owner_alive=false
-      local owner_pid=""
-      if [[ -f "$owner_file" ]]; then
-        owner_pid=$(cat "$owner_file" 2>/dev/null | tr -d '[:space:]')
-        if [[ -n "$owner_pid" ]] && kill -0 "$owner_pid" 2>/dev/null; then
-          owner_alive=true
-        fi
-      fi
-
-      if [[ "$owner_alive" == "true" ]]; then
-        echo "[tfx-route] config.toml swap 스킵: 소유 워커 살아있음 (pid=$owner_pid, $backup)" >&2
-        return 0
-      fi
-
-      # Owner dead or unknown — stale 후보. 다만 backup-loss 방지를 위해 원본 복원 먼저.
-      # P2 fix: `rm -f $backup` 후 현재 config 를 새 backup 으로 cp 하면, 이전 워커가 이미
-      # filter 한 상태에서 crash 했을 때 원본이 영구 소실. 여기서 먼저 restore 를 시도해
-      # backup 이 원본을 담고 있는 한 그것을 살린다.
-      local backup_restore_guard_size
-      backup_restore_guard_size=$(wc -c < "$backup" 2>/dev/null | tr -d ' ') || backup_restore_guard_size=0
-      if [[ "$backup_restore_guard_size" -lt 500 && "${TFX_ALLOW_SMALL_CODEX_CONFIG:-0}" != "1" ]]; then
-        # 작은 backup 은 이미 손상된 state. 현재 config 도 필터된 상태일 수 있으므로
-        # 추가 swap 은 상황을 악화시킬 위험. 전체 스킵하고 수동 확인 유도.
-        echo "[tfx-route] stale backup 작음 (size=${backup_restore_guard_size}B, pid=${owner_pid:-?} dead) — swap 스킵, 수동 확인: $backup" >&2
-        return 0
-      fi
-      local stale_tmp="${config}.stale-restore.$$"
-      if cp "$backup" "$stale_tmp" && mv "$stale_tmp" "$config"; then
-        echo "[tfx-route] stale backup 감지 (pid=${owner_pid:-?} dead) — 원본 복원 후 swap 재진행" >&2
-        if declare -f _sanitize_codex_legacy_profiles >/dev/null 2>&1; then
-          _sanitize_codex_legacy_profiles "$config"
-        fi
-      else
-        echo "[tfx-route] 경고: stale backup 복원 실패, swap 스킵 (수동 확인: $backup)" >&2
-        rm -f "$stale_tmp" 2>/dev/null
-        return 0
-      fi
-      rm -f "$backup" "$owner_file" 2>/dev/null || true
-    fi
-    cp "$config" "$backup"
-    # Owner marker: 이 워커가 backup 소유자임을 기록. 다음 워커의 stale detection 기준.
-    echo "$$" > "${backup}.owner" 2>/dev/null || true
-
-    # awk로 필터링: 비허용 MCP 서버 섹션 제거, 나머지 그대로 유지.
-    # keep="" 은 진입 가드에서 return 됐지만 defense-in-depth 유지.
-    local tmp_filtered="${config}.filter.$$"
-    awk -v keep="$allowed_pat" '
-      BEGIN { skip=0 }
-      /^\[mcp_servers\./ {
-        if (keep == "") { skip=0; print; next }
-        name=$0; gsub(/^\[mcp_servers\./, "", name); gsub(/[\].].*/, "", name)
-        if (name !~ "^(" keep ")$") { skip=1; next }
-        else { skip=0 }
-      }
-      /^\[/ && !/^\[mcp_servers\./ { skip=0 }
-      !skip { print }
-    ' "$backup" > "$tmp_filtered"
-
-    # Output sanity check: 필터 결과가 비었거나 백업의 30% 미만이면 적용 거부
-    local filtered_size backup_size threshold
-    filtered_size=$(wc -c < "$tmp_filtered" 2>/dev/null | tr -d ' ') || filtered_size=0
-    backup_size=$(wc -c < "$backup" 2>/dev/null | tr -d ' ') || backup_size=1
-    threshold=$(( backup_size * 30 / 100 ))
-    if [[ ( "$filtered_size" -eq 0 || "$filtered_size" -lt "$threshold" ) && "${TFX_ALLOW_SMALL_CODEX_CONFIG:-0}" != "1" ]]; then
-      echo "[tfx-route] 경고: 필터 결과 크기 ${filtered_size} bytes (백업 ${backup_size} bytes의 30% 미만) — 적용 거부, 백업에서 복원" >&2
-      rm -f "$tmp_filtered" 2>/dev/null
-      rm -f "$backup" 2>/dev/null
-      return 1
-    fi
-
-    # 검증 통과 — atomic rename으로 적용
-    if ! mv "$tmp_filtered" "$config"; then
-      echo "[tfx-route] 경고: 필터 결과 적용 실패 (atomic rename), 백업 보존: $backup" >&2
-      rm -f "$tmp_filtered" 2>/dev/null
-      return 1
-    fi
-
-    local kept
-    kept=$(echo "$allowed_pat" | tr '|' '\n' | wc -l | tr -d ' ')
-    echo "[tfx-route] config.toml swap: ${kept}개 MCP 서버만 활성" >&2
-
-  elif [[ "$action" == "restore" && -f "$backup" ]]; then
-    # BUG-H (#132) atomic rename: cp→tmp→mv 로 중간 실패 시 config 손상 방지.
-    # `cat > $config` 는 cat 실행 전에 dest 가 truncate 되어 mid-stream 실패 시
-    # 빈/부분 파일이 남는다. 같은 디렉토리 내 mv 는 POSIX 상 atomic 이므로
-    # 실패해도 기존 config 와 backup 모두 보존된다.
-
-    # Restore sanity check: 백업 자체가 비었거나 500 bytes 미만이면 복원 중단
-    local backup_restore_size
-    backup_restore_size=$(wc -c < "$backup" 2>/dev/null | tr -d ' ') || backup_restore_size=0
-    if [[ "$backup_restore_size" -lt 500 && "${TFX_ALLOW_SMALL_CODEX_CONFIG:-0}" != "1" ]]; then
-      echo "[tfx-route] 경고: backup 크기 ${backup_restore_size} bytes — 손상 의심, 복원 중단. 수동 확인 필요: $backup" >&2
-      return 1
-    fi
-
-    local tmp="${config}.restore.$$"
-    if ! cp "$backup" "$tmp"; then
-      echo "[tfx-route] 경고: config.toml 복원 실패 (temp copy). backup 보존: $backup" >&2
-      rm -f "$tmp" 2>/dev/null
-      return 1
-    fi
-    if ! mv "$tmp" "$config"; then
-      echo "[tfx-route] 경고: config.toml 복원 실패 (atomic rename). backup 보존: $backup" >&2
-      rm -f "$tmp" 2>/dev/null
-      return 1
-    fi
-    if ! rm -f "$backup"; then
-      echo "[tfx-route] 경고: backup 삭제 실패: $backup (수동 정리 필요)" >&2
-    fi
-    rm -f "${backup}.owner" 2>/dev/null || true
-    if declare -f _sanitize_codex_legacy_profiles >/dev/null 2>&1; then
-      _sanitize_codex_legacy_profiles "$config"
-    fi
-    echo "[tfx-route] config.toml 복원 완료" >&2
   fi
 }
 
@@ -2392,8 +2226,7 @@ run_codex_exec() {
   local worker_pid
   local -a codex_args=()
   read -r -a codex_args <<< "$CLI_ARGS"
-  # -c flags는 codex exec에서 MCP enabled 제어 불가 — config swap으로 대체
-  # config swap은 codex 블록 최상단(_codex_config_swap "filter")에서 실행됨
+  codex_args=("${codex_args[0]}" ${CODEX_CONFIG_FLAGS[@]+"${CODEX_CONFIG_FLAGS[@]}"} "${codex_args[@]:1}")
 
   _attempt_codex_run() {
     exit_code_local=0
@@ -2646,19 +2479,11 @@ FALLBACK_EOF
     # Test and wrapper environments can carry stale exported values from prior
     # route calls; clear it before the current MCP preflight decides.
     unset _TFX_MCP_DEGRADED
-    # Preflight: dead MCP 감지 후 CODEX_CONFIG_FLAGS 에서 제거.
-    # swap 이 allowed_pat 을 이 배열에서 계산하므로, 여기서 제거하면
-    # dead section 이 config.toml 에서 자동으로 drop 된다.
-    # #148: preflight 가 78 반환 시 all-dead → Codex 호출 중단 (early fail).
     local _preflight_rc=0
     _mcp_preflight_filter_dead || _preflight_rc=$?
     if [[ "$_preflight_rc" -eq 78 ]]; then
       exit 78
     fi
-    # Config swap: 프로필에 맞는 MCP 서버만 남긴 임시 config 적용
-    _codex_config_swap "filter"
-    # swap 후 config override 플래그 클리어 — 제거된 서버에 override 보내면 "invalid transport" 에러
-    CODEX_CONFIG_FLAGS=()
     # 사용할 수 없는 MCP를 프롬프트가 안내하지 않게 한다.
     if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" ]]; then
       FULL_PROMPT="$PROMPT"
@@ -2672,8 +2497,6 @@ FALLBACK_EOF
       FULL_PROMPT="${_codex_skill_prompt%"$_codex_skill_sentinel"}"
     fi
     run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
-    # Config swap 복원 (성공/실패 관계없이)
-    _codex_config_swap "restore"
 
   elif [[ "$CLI_TYPE" == "antigravity" ]]; then
     # Codex degraded branch strips MCP_HINT; keep agy parity when the marker is inherited.
