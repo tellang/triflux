@@ -143,7 +143,14 @@ function envWarning(server, home, env, warnings) {
   }
 }
 
-function patchJson(original, file, home, env, warnings) {
+function patchJson(
+  original,
+  file,
+  home,
+  env,
+  warnings,
+  { withEnv = true } = {},
+) {
   const data = JSON.parse(original);
   if (!data || typeof data !== "object" || Array.isArray(data))
     throw new Error(`${file}: JSON 객체가 아닙니다`);
@@ -190,7 +197,7 @@ function patchJson(original, file, home, env, warnings) {
         ...kept,
         command: server.command,
         args: server.args,
-        ...(server.envVars.length
+        ...(withEnv && server.envVars.length
           ? {
               env: {
                 ...kept.env,
@@ -710,6 +717,8 @@ export function cleanupLegacyMcp({
     [join(repoRoot, ".mcp.json"), "json"],
     [join(home, ".codex/config.toml"), "toml"],
     [join(home, ".gemini/settings.json"), "json"],
+    // agy 는 \${VAR} 참조를 풀지 않으므로 env 없이 바꾸고 셸 환경을 물려받게 한다.
+    [join(home, ".gemini/config/mcp_config.json"), "agy"],
   ];
   const plans = [];
   let blocked = false;
@@ -721,7 +730,9 @@ export function cleanupLegacyMcp({
       const plan =
         kind === "toml"
           ? patchToml(original, file, home, env, result.warnings)
-          : patchJson(original, file, home, env, result.warnings);
+          : patchJson(original, file, home, env, result.warnings, {
+              withEnv: kind !== "agy",
+            });
       if (plan.blocked) blocked = true;
       if (plan.count) plans.push({ file, target, original, ...plan });
     } catch {
