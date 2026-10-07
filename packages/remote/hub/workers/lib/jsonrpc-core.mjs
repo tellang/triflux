@@ -12,6 +12,17 @@ export class JsonRpcProtocolError extends Error {
   }
 }
 
+/**
+ * Thrown when the underlying stream closes unexpectedly.
+ */
+export class JsonRpcTransportError extends Error {
+  /** @param {string} message @param {{ cause?: unknown }} [options] */
+  constructor(message, options = {}) {
+    super(message, { cause: options.cause });
+    this.name = "JsonRpcTransportError";
+  }
+}
+
 export class JsonRpcDispatchBase {
   /**
    * @param {object} options

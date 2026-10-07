@@ -5,27 +5,26 @@
 // on the socket — it speaks WebSocket (RFC 6455) after a standard HTTP/1.1
 // Upgrade handshake, one JSON-RPC message per text frame. Confirmed live against
 // codex-cli 0.135.0 (see experiments/native-bridge-feasibility/
-// codex-app-server-uds-smoke.mjs). This is the UDS sibling of the stdio
-// `JsonRpcStdioClient`: same public surface (request/notify/onNotification/
-// close/isOpen), different framing.
+// codex-app-server-uds-smoke.mjs). Public surface: request/notify/
+// onNotification/close/isOpen.
 //
 // Wire framing notes:
 //   - client -> server frames MUST be masked (RFC 6455 §5.3).
 //   - server -> client frames are unmasked.
 //   - one JSON-RPC object per text frame; fragmented frames are reassembled.
 //   - outbound JSON-RPC omits the `"jsonrpc":"2.0"` header (OpenAI App Server
-//     JSONL variant), matching JsonRpcStdioClient.
+//     JSONL variant).
 //
 // Zero new dependencies — minimal hand-rolled WS client (no `ws` package).
 
 import { createHash, randomBytes } from "node:crypto";
 import net from "node:net";
 
-import { JsonRpcDispatchBase } from "./jsonrpc-core.mjs";
 import {
+  JsonRpcDispatchBase,
   JsonRpcProtocolError,
   JsonRpcTransportError,
-} from "./jsonrpc-stdio.mjs";
+} from "./jsonrpc-core.mjs";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const DEFAULT_MAX_FRAME_SIZE = 16 * 1024 * 1024; // 16 MiB
