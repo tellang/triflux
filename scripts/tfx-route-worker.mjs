@@ -15,13 +15,6 @@ const FACTORY_CANDIDATES = [
 // MCP transport 실패 시 tfx-route.sh가 exec fallback을 수행할 수 있도록
 // CODEX_MCP_TRANSPORT_EXIT_CODE(70)으로 종료한다.
 const MCP_TRANSPORT_EXIT_CODE = 70;
-const ROUTE_RETRY_DELAY_MS = 5000;
-const ROUTE_RETRY_PATTERN_SNIPPETS = [
-  "429",
-  "quota",
-  "rate limit",
-  "resource_exhausted",
-];
 
 let createWorker = null;
 
@@ -51,7 +44,6 @@ if (!createWorker) {
 
 function parseArgs(argv) {
   const args = {
-    allowedMcpServerNames: [],
     extraArgs: [],
     mcpConfig: [],
   };
@@ -89,20 +81,12 @@ function parseArgs(argv) {
         args.stallMs = Number(next);
         index += 1;
         break;
-      case "--approval-mode":
-        args.approvalMode = next;
-        index += 1;
-        break;
       case "--permission-mode":
         args.permissionMode = next;
         index += 1;
         break;
       case "--allow-dangerously-skip-permissions":
         args.allowDangerouslySkipPermissions = true;
-        break;
-      case "--allowed-mcp-server-name":
-        args.allowedMcpServerNames.push(next);
-        index += 1;
         break;
       case "--extra-arg":
         args.extraArgs.push(next);
@@ -126,11 +110,6 @@ function parseArgs(argv) {
   }
 
   return args;
-}
-
-function normalizeWorkerType(type) {
-  if (type === "gemini" || type === "agy") return "antigravity";
-  return type;
 }
 
 function parseJsonArray(raw, label) {
@@ -171,56 +150,7 @@ function resolveDefaultMcpConfig(cwd) {
   return [];
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isRouteQuotaRetrySignal(error) {
-  if (Number(error?.result?.exitCode) === 429) {
-    return true;
-  }
-
-  const fragments = [error?.message, error?.stderr, error?.result?.stderr]
-    .filter((value) => typeof value === "string" && value.trim().length > 0)
-    .map((value) => value.toLowerCase());
-
-  if (fragments.length === 0) return false;
-  const merged = fragments.join("\n");
-  return ROUTE_RETRY_PATTERN_SNIPPETS.some((pattern) =>
-    merged.includes(pattern),
-  );
-}
-
-async function runWorker(worker, type, prompt) {
-  const maxAttempts = type === "antigravity" ? 2 : 1;
-  let lastError = null;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      return await worker.run(prompt);
-    } catch (error) {
-      lastError = error;
-      const shouldRetry =
-        type === "antigravity" &&
-        attempt < maxAttempts &&
-        isRouteQuotaRetrySignal(error);
-
-      if (!shouldRetry) {
-        throw error;
-      }
-
-      process.stderr.write(
-        "[tfx-route-worker] Antigravity 429/quota 감지 — 5초 후 1회 재시도합니다.\n",
-      );
-      await sleep(ROUTE_RETRY_DELAY_MS);
-    }
-  }
-
-  throw lastError;
-}
-
 const args = parseArgs(process.argv.slice(2));
-args.type = normalizeWorkerType(args.type);
 const prompt = await readPromptFromStdin();
 
 const worker = await createWorker(args.type, {
@@ -230,10 +160,8 @@ const worker = await createWorker(args.type, {
   effort: args.effort,
   timeoutMs: args.timeoutMs,
   stallMs: args.stallMs,
-  approvalMode: args.approvalMode,
   permissionMode: args.permissionMode,
   allowDangerouslySkipPermissions: args.allowDangerouslySkipPermissions,
-  allowedMcpServerNames: args.allowedMcpServerNames,
   extraArgs: args.extraArgs,
   mcpConfig:
     args.type === "claude" && args.mcpConfig.length === 0
@@ -243,7 +171,7 @@ const worker = await createWorker(args.type, {
 });
 
 try {
-  const result = await runWorker(worker, args.type, prompt);
+  const result = await worker.run(prompt);
   if (result.response) {
     process.stdout.write(result.response);
     if (!result.response.endsWith("\n")) process.stdout.write("\n");

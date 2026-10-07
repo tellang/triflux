@@ -36,7 +36,6 @@ const STATE_PATH = join(
 const HUD_CACHES = [
   join(homedir(), ".claude", "cache", "claude-usage-cache.json"),
   join(homedir(), ".claude", "cache", "codex-rate-limits-cache.json"),
-  join(homedir(), ".claude", "cache", "gemini-quota-cache.json"),
 ];
 
 // 로그인 지문: refreshToken 은 로그인 때 발급되고 8시간 주기 accessToken 갱신에는 바뀌지 않는다

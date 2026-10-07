@@ -30,36 +30,10 @@ const DEFAULT_GEMINI_PROFILES = {
   },
 };
 
-// 1회 마이그레이션 테이블: 옛 ID 형식 모델값 → agy display name.
-// null = 카탈로그에서 빠진 모델(2.5 계열, 3 Flash) → 해당 프로필 제거 대상.
-const LEGACY_MODEL_MIGRATION = {
-  "gemini-3.1-pro-preview": "Gemini 3.1 Pro (High)",
-  "gemini-3-flash-preview": null,
-  "Gemini 3 Flash": null,
-  "gemini-2.5-pro": null,
-  "gemini-2.5-flash": null,
-  "gemini-2.5-flash-lite": null,
-};
-// 과거 setup 이 자동 생성했던 프로필 이름. 정책상 더 쓰지 않으므로 제거한다.
-// 사용자가 직접 이름 붙인 프로필은 건드리지 않는다.
-const LEGACY_PROFILE_NAMES = [
-  "pro25",
-  "flash25",
-  "lite25",
-  "flash3",
-  "pro31",
-  "pro31_low",
-  "flash35",
-  "flash35_high",
-  "flash35_low",
-];
-// 과거 setup 이 자동 생성한 기본 model 값. 사용자가 고른 값이 아니므로 새 기본으로 올린다.
-const LEGACY_DEFAULT_MODELS = new Set(["Gemini 3.5 Flash (Medium)"]);
-
 // ── 용도별 effort (SSOT) ──
 // 한 세대(3.8 Flash)만 쓰고 역할에 따라 effort 를 나눈다. 키는 tfx 에이전트/역할 이름
 // (agent-map.json 의 에이전트, tfx multi --assign 의 role). bash(tfx-route.sh)와
-// 실행 모드와 cli-agy가 이 표를 공유한다.
+// 실행 모드(execution-mode)가 이 표를 읽는다.
 //   High   : 판단이 결과를 좌우하는 역할 (검토, 설계, 디버깅, 분석)
 //   Medium : 생성/작성/실행 (기본값)
 //   Low    : 분류, 요약, 추출, 번역처럼 짧고 기계적인 작업
@@ -182,40 +156,6 @@ function ensureGeminiProfiles({
     )
       cfg.profiles = {};
 
-    // ── 1회 마이그레이션: deprecated 2.5 프로필 prune + 옛 ID 형식 → display name ──
-    // merge-only 로직만으로는 기존 사용자 파일에 남은 stale 프로필/옛 모델 ID 가
-    // 정리되지 않으므로, 신규 default 를 채우기 전에 마이그레이션을 먼저 적용한다.
-    let migrated = false;
-    for (const legacy of LEGACY_PROFILE_NAMES) {
-      if (cfg.profiles[legacy]) {
-        delete cfg.profiles[legacy];
-        migrated = true;
-      }
-    }
-    for (const [pname, pval] of Object.entries(cfg.profiles)) {
-      const mid = typeof pval === "string" ? pval : pval?.model;
-      if (mid && Object.hasOwn(LEGACY_MODEL_MIGRATION, mid)) {
-        const repl = LEGACY_MODEL_MIGRATION[mid];
-        if (repl === null) {
-          delete cfg.profiles[pname];
-        } else if (typeof pval === "string") {
-          cfg.profiles[pname] = repl;
-        } else {
-          cfg.profiles[pname].model = repl;
-        }
-        migrated = true;
-      }
-    }
-    if (
-      typeof cfg.model === "string" &&
-      (Object.hasOwn(LEGACY_MODEL_MIGRATION, cfg.model) ||
-        LEGACY_DEFAULT_MODELS.has(cfg.model))
-    ) {
-      // 옛 ID 형식/이전 세대 자동 생성 기본값은 새 기본(DEFAULT)으로 정규화한다.
-      cfg.model = DEFAULT_GEMINI_PROFILES.model;
-      migrated = true;
-    }
-
     let added = 0;
     for (const [name, value] of Object.entries(
       DEFAULT_GEMINI_PROFILES.profiles,
@@ -227,12 +167,7 @@ function ensureGeminiProfiles({
     }
     if (!cfg.model) cfg.model = DEFAULT_GEMINI_PROFILES.model;
 
-    if (added > 0 || migrated) {
-      if (migrated) {
-        try {
-          copyFileSync(profilesPath, profilesPath + `.bak.${Date.now()}`);
-        } catch {}
-      }
+    if (added > 0) {
       writeFileSync(profilesPath, JSON.stringify(cfg, null, 2) + "\n", {
         encoding: "utf8",
         mode: 0o600,

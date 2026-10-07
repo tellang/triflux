@@ -144,7 +144,6 @@ describe("cache-warmup", () => {
       writeAuth(fixture.homeDir, "pro");
       const preflight = {
         codex: { ok: true, path: "codex" },
-        gemini: { ok: false },
         hub: { ok: true, state: "healthy" },
       };
 
@@ -200,7 +199,6 @@ describe("cache-warmup", () => {
       writeAuth(fixture.homeDir, "pro", { sub: "user-1" });
       const preflight = {
         codex: { ok: true, path: "codex" },
-        gemini: { ok: false },
         hub: { ok: true, state: "healthy" },
       };
 

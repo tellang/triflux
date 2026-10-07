@@ -48,7 +48,6 @@ function makePreflightOptions(
     homeDir,
     probeClisFn: async () => ({
       codex: { ok: false },
-      gemini: { ok: false },
       agy: { ok: true, path: "/fake/bin/agy" },
     }),
     checkHubFn: () => ({ ok: true, state: "healthy" }),

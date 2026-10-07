@@ -130,7 +130,7 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 |------|-----|------|
 | `tfx-auto` | 자동 | 통합 진입점 |
 | `tfx-auto --cli codex` | Codex | Codex 전용 lane |
-| `tfx-auto --cli antigravity` | Antigravity | Antigravity 전용 lane (agy 없으면 legacy gemini fallback) |
+| `tfx-auto --cli antigravity` | Antigravity | Antigravity 전용 lane |
 | `tfx-auto --mode quick` | Codex→검증 | 단일 파일, 5분 이내 |
 | `tfx-auto --retry auto-escalate` | 자동 승격 | 실패→더 강한 모델 |
 

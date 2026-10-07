@@ -86,7 +86,6 @@ describe("cache-doctor", () => {
     try {
       const preflight = {
         codex: { ok: true, path: "codex" },
-        gemini: { ok: true, path: "gemini" },
         hub: { ok: true, state: "healthy" },
         codex_plan: { plan: "plus", source: "jwt" },
       };
