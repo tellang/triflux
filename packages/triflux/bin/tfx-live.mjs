@@ -25,6 +25,14 @@ import {
   readClaudeTranscript,
 } from "../hub/team/claude-transcript.mjs";
 import {
+  codexThreadIdByName,
+  findCodexThreadByCwd,
+  isCodexThreadId,
+  queueCodexMessage,
+  resolveSenderName,
+  waitCodexRequest,
+} from "../hub/team/codex-queue.mjs";
+import {
   escapePwshSingleQuoted as escapeRemotePwshSingleQuoted,
   probeRemoteEnv as probeRemoteHostEnv,
   shellQuote as remoteShellQuote,
@@ -58,7 +66,7 @@ const BRIDGE_TIMEOUT_BUFFER_MS = 15_000;
 // Above this size an argv-passed --payload risks E2BIG on some platforms;
 // spill the JSON to a temp file and pass --payload-file instead.
 const PAYLOAD_FILE_THRESHOLD = 96 * 1024;
-const VALID_TRANSPORTS = ["tmux", "uds", "auto"];
+const VALID_TRANSPORTS = ["tmux", "uds", "auto", "queue"];
 const BOOLEAN_FLAGS = new Set([
   "json",
   "attach-a",
@@ -78,11 +86,14 @@ function usage(command) {
     "Usage:",
     "  tfx-live start --session NAME [--name NAME] [--cli codex|claude] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude] [--if-busy wait|fail|interrupt] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
+    "  tfx-live ask --cli codex [--transport queue|tmux] (--session NAME[:WINDOW.PANE] | --thread UUID) --prompt TEXT [--from NAME] [--timeout 60] [--no-wait]",
+    "    Codex ask defaults to `codex queue` (queued, delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands.",
     "  tfx-live ask --cli codex --transport uds --thread ID|auto --prompt TEXT [--codex-socket PATH|default] [--cwd DIR] [--if-busy wait|fail|steer] [--busy-timeout 60] [--timeout 60] [--max-turn SECONDS]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
     "    ask options: --no-wait --no-relay-tag --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 15/22).",
     "  tfx-live compact --cli claude --session NAME [--instructions TEXT] [--if-busy fail|wait] [--timeout 60]",
     "  tfx-live wait --cli claude (--short SHORT | --session-id ID) [--request-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 60] [--poll-interval 1500]",
+    "  tfx-live wait --cli codex (--session NAME[:WINDOW.PANE] | --thread UUID) --request-id ID [--timeout 60] [--poll-interval 1500]",
     "  tfx-live rename --cli codex --transport uds --thread ID --name NAME [--codex-socket PATH|default]",
     "    transport: auto is the default for Claude when --short/--session-id is present; otherwise tmux. bridge path: --bridge > $TFX_BRIDGE > $TFX_REPO_ROOT/hub/bridge.mjs > bundled Triflux hub/bridge.mjs.",
     "  tfx-live interrupt --session NAME [--cli codex|claude] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 5]",
@@ -94,9 +105,7 @@ function usage(command) {
     "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
     "  tfx-live goal-driven --session NAME --goal TEXT [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500] [--max-rounds 8] [--done-token DONE]",
     "  tfx-live peer [--cli-a codex] [--cli-b claude] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--session-a NAME[:WINDOW.PANE]] [--session-b NAME[:WINDOW.PANE]] [--attach-a] [--attach-b] [--transport-a tmux|uds|auto] [--transport-b tmux|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--thread-a ID|auto] [--thread-b ID|auto] [--codex-socket-a PATH|default] [--codex-socket-b PATH|default] [--bridge ABS] [--remote HOST] [--cwd DIR] [--if-busy wait|fail] [--if-busy-a POLICY] [--if-busy-b POLICY] [--busy-timeout 60] [--max-turn SECONDS] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60]",
-    "  tfx-live orchestrate --task TEXT [--mode peer|codex-led|claude-led] [--codex-transport exec|app-server-uds] [--codex-socket PATH|default] [--cwd DIR] [--timeout 120]",
     "    Codex TUI may use a shared app-server daemon. UDS ask resumes the thread to receive answer events; sending to an active thread with --if-busy steer merges input into that turn.",
-    "    Runs the Claude(UDS)+Codex orchestration engine. --codex-transport app-server-uds drives a real `codex app-server` over WebSocket-over-UDS (experimental); default exec keeps the codex stdio one-shot path.",
   ];
   if (!command) return lines.join("\n");
   const selected = lines.filter(
@@ -1547,6 +1556,28 @@ async function dismissCodexUpdatePrompt(remote, session) {
   return { dismissed: false, raw };
 }
 
+function isCodexDaemonSettingsPrompt(text) {
+  return /Background server has incompatible feature settings/.test(
+    String(text),
+  );
+}
+
+// 공유 daemon 을 다시 띄우면 다른 클라이언트 설정이 바뀌므로 이번 실행만 daemon 없이 간다.
+async function dismissCodexDaemonSettingsPrompt(remote, session) {
+  let raw = await captureVisible(remote, session);
+  if (!isCodexDaemonSettingsPrompt(raw)) return { dismissed: false, raw };
+  for (let iteration = 0; iteration < 4; iteration += 1) {
+    if (/Run without daemon/.test(selectedLine(raw))) {
+      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+      return { dismissed: true, raw };
+    }
+    await runTmux(remote, ["send-keys", "-t", session, "Up"]);
+    await sleep(200);
+    raw = await captureVisible(remote, session);
+  }
+  return { dismissed: false, raw };
+}
+
 async function dismissClaudeTrustPrompt(remote, session) {
   let raw = await captureVisible(remote, session);
   if (!isClaudeTrustPrompt(raw)) {
@@ -1663,6 +1694,11 @@ const ADAPTERS = {
         name: "update",
         isPresent: isUpdatePrompt,
         dismiss: dismissCodexUpdatePrompt,
+      },
+      {
+        name: "daemon-settings",
+        isPresent: isCodexDaemonSettingsPrompt,
+        dismiss: dismissCodexDaemonSettingsPrompt,
       },
     ],
   },
@@ -2051,11 +2087,16 @@ async function doStart(adapter, opts) {
     launchKeys[0] += ` ${shellQuote(["-n", name])}`;
   const resumeTarget = resume ?? (resumeLast ? "last" : null);
 
+  // 분리 세션 기본 80x24 에서는 긴 입력이 화면 높이를 넘으므로 넓게 만든다. 붙으면 클라이언트 크기를 따른다.
   await runTmux(remote, [
     "new-session",
     "-d",
     "-s",
     session,
+    "-x",
+    "240",
+    "-y",
+    "60",
     ...(cwd ? ["-c", cwd] : []),
   ]);
   // Default tmux history-limit (2000) is far too small for long tool-heavy
@@ -2079,33 +2120,38 @@ async function doStart(adapter, opts) {
     pollIntervalMs,
   );
   let nameApplied = Boolean(name) && adapter.cli === "claude" && ready;
+  let threadId =
+    adapter.cli === "codex" && isCodexThreadId(resume) ? resume : null;
   if (name && adapter.cli === "codex" && ready) {
     try {
-      await runTmux(remote, [
-        "send-keys",
-        "-t",
-        session,
-        "-l",
-        "--",
-        `/rename ${name}`,
-      ]);
-      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
-      const deadline = Date.now() + Math.min(readyTimeoutMs, 2000);
-      do {
-        const discovery = await discoverCodexTmuxSessions({ remote });
-        nameApplied =
-          discovery.sessions?.some(
-            (entry) =>
-              entry.session === session &&
-              entry.panes.some((pane) => pane.name === name),
-          ) === true;
-        if (nameApplied || remote) break;
+      const command = `/rename ${name}`;
+      await runTmux(remote, ["send-keys", "-t", session, "-l", "--", command]);
+      await submitComposerLine(remote, session, command);
+      const deadline = Date.now() + Math.min(readyTimeoutMs, 5000);
+      while (!remote && Date.now() < deadline) {
+        const named = await codexThreadIdByName(name, {
+          sinceMs: now.getTime() - 1000,
+        });
+        if (named) {
+          threadId = named;
+          nameApplied = true;
+          break;
+        }
         await sleep(Math.min(pollIntervalMs, 200));
-      } while (Date.now() < deadline);
+      }
     } catch {
       nameApplied = false;
     }
   }
+  // ask 의 queue 전송이 레지스트리 없이도 thread 를 찾도록 세션에 남긴다.
+  if (threadId && !remote)
+    await runTmux(null, [
+      "set-option",
+      "-t",
+      session,
+      "@tfx_codex_thread",
+      threadId,
+    ]).catch(() => {});
   return addLoginGuard(adapter, raw, {
     cli: adapter.cli,
     session,
@@ -2116,14 +2162,27 @@ async function doStart(adapter, opts) {
     name,
     nameGenerated: !resumed && opts.name === undefined,
     nameApplied,
+    ...(adapter.cli === "codex" ? { threadId } : {}),
     ...(name && adapter.cli === "codex" && !nameApplied
       ? {
           nameWarning:
-            "name update could not be confirmed from the Codex session registry",
+            "name update could not be confirmed from Codex session_index",
         }
       : {}),
     raw,
   });
+}
+
+// 빠른 입력 직후의 Enter 는 Codex 입력창이 버릴 수 있어 입력창이 빌 때까지 다시 누른다.
+async function submitComposerLine(remote, session, line) {
+  await sleep(300);
+  for (let attempt = 1; attempt <= PROMPT_SUBMIT_MAX_ATTEMPTS; attempt += 1) {
+    await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+    await sleep(300);
+    if (!composerShowsPrompt(await captureVisible(remote, session), line))
+      return true;
+  }
+  return false;
 }
 
 async function waitForTmuxIdle(adapter, opts) {
@@ -2337,10 +2396,16 @@ async function doAskViaTmux(adapter, opts) {
 async function doAsk(adapter, opts) {
   const requestId = opts.requestId ?? randomBytes(6).toString("hex");
   const tag = `[tfx-live req=${requestId}]`;
+  // Codex 는 접힌 발신자 표시가 없어 첫 줄 머리말로 보낸 세션을 드러낸다.
+  const from =
+    adapter.cli === "codex" && !opts.noRelayTag
+      ? (opts.from ?? (await resolveSenderName()))
+      : null;
+  const header = from ? `[from ${from}] ${tag}` : tag;
   const prompt =
-    opts.noRelayTag || opts.prompt.startsWith(`${tag}\n`)
+    opts.noRelayTag || opts.prompt.split("\n", 1)[0].includes(tag)
       ? opts.prompt
-      : `${tag}\n${opts.prompt}`;
+      : `${header}\n${opts.prompt}`;
   try {
     return {
       ...(await dispatchAsk(adapter, { ...opts, prompt, requestId })),
@@ -2357,6 +2422,7 @@ async function dispatchAsk(adapter, opts) {
   if (transport === "tmux") {
     return doAskViaTmux(adapter, opts);
   }
+  if (transport === "queue") return doAskViaQueue(adapter, opts);
 
   if (adapter.cli === "codex" && transport === "uds") {
     if (opts.remote) return doAskViaRemoteLive(adapter, opts);
@@ -2405,6 +2471,109 @@ async function dispatchAsk(adapter, opts) {
   }
 
   return doAskAuto(adapter, opts);
+}
+
+// tfx-live start 가 남긴 tmux 옵션, 세션 레지스트리, rollout cwd 순으로 찾는다.
+async function resolveCodexTmuxThread(session, deps = {}) {
+  const tmux = deps.runTmux ?? runTmux;
+  let fields;
+  try {
+    const { stdout } = await tmux(null, [
+      "display-message",
+      "-p",
+      "-t",
+      session,
+      "#{@tfx_codex_thread}\t#{pane_id}\t#{pane_current_path}\t#{session_created}",
+    ]);
+    fields = String(stdout).trim().split("\t");
+  } catch (error) {
+    return { threadId: null, reason: `tmux-unavailable: ${error.message}` };
+  }
+  const [stored, paneId, cwd, created] = fields;
+  if (isCodexThreadId(stored))
+    return { threadId: stored, threadSource: "tmux-option" };
+  const record = (deps.readCodexSessionRecords ?? readCodexSessionRecords)({
+    dir: registryDir(),
+  }).find((entry) => entry.tmuxPane === paneId);
+  if (isCodexThreadId(record?.sessionId))
+    return { threadId: record.sessionId, threadSource: "registry" };
+  const createdMs = Number.parseInt(created, 10) * 1000;
+  const byCwd = await findCodexThreadByCwd(cwd, {
+    sinceMs: Number.isFinite(createdMs) ? createdMs : 0,
+  });
+  return byCwd.threadId
+    ? { threadId: byCwd.threadId, threadSource: "rollout-cwd" }
+    : byCwd;
+}
+
+async function doAskViaQueue(adapter, opts, deps = {}) {
+  // queue 를 못 쓰면 tmux 붙여넣기로 보내고 그 이유를 결과에 남긴다.
+  const fallback = async (reason) => ({
+    ...(await doAskViaTmux(adapter, { ...opts, transport: "tmux" })),
+    transportRequested: "queue",
+    fallbackReason: reason,
+  });
+  if (opts.remote) return fallback("remote-host");
+  const thread = opts.threadId
+    ? { threadId: opts.threadId, threadSource: "flag" }
+    : await resolveCodexTmuxThread(opts.session, deps);
+  if (!thread.threadId) {
+    if (!opts.session)
+      throw new Error(`Codex thread unavailable: ${thread.reason}`);
+    return fallback(thread.reason);
+  }
+  const context = opts.skipContextGuard
+    ? {}
+    : await readCodexContext(null, thread.threadId);
+  const guard = opts.skipContextGuard
+    ? {}
+    : contextGuard("codex", context, opts);
+  const base = {
+    cli: "codex",
+    transport: "queue",
+    session: opts.session ?? null,
+    threadId: thread.threadId,
+    threadSource: thread.threadSource,
+    ...context,
+    ...guard,
+  };
+  if (guard.ok === false) return { ...base, status: "failed", done: false };
+  let queued;
+  try {
+    queued = await (deps.queueCodexMessage ?? queueCodexMessage)({
+      threadId: thread.threadId,
+      message: opts.prompt,
+    });
+  } catch (error) {
+    if (error.maybeQueued)
+      return {
+        ...base,
+        ok: false,
+        status: "unknown",
+        inputSent: null,
+        done: false,
+        error: error.message,
+      };
+    if (!opts.session) throw error;
+    return fallback(`queue-error: ${error.message}`);
+  }
+  const sent = {
+    ...base,
+    ok: true,
+    inputSent: true,
+    queuedMessageId: queued.queuedMessageId,
+    submittedAt: new Date().toISOString(),
+  };
+  // 표식이 없으면 rollout 에서 이 요청의 턴을 가려낼 수 없다.
+  if (opts.noWait || opts.noRelayTag)
+    return { ...sent, status: "queued", delivered: false, done: false };
+  const result = await waitCodexRequest({
+    threadId: thread.threadId,
+    requestId: opts.requestId,
+    timeoutMs: opts.timeoutMs,
+    pollIntervalMs: opts.pollIntervalMs,
+  });
+  return { ...sent, ...result, transport: "queue" };
 }
 
 async function doAskViaRemoteLive(adapter, opts, deps = {}) {
@@ -2885,11 +3054,32 @@ function transportFlag(flags, adapter, short, sessionId) {
 function askOpts(flags, adapter) {
   const short = flags.short;
   const sessionId = flags["session-id"];
-  const transport = transportFlag(flags, adapter, short, sessionId);
+  // Codex 메시지는 queue 가 기본이다. 입력창을 건드리지 않고 바쁠 때 쌓인다.
+  const transport = transportFlag(
+    adapter.cli === "codex" && !flags.transport
+      ? { ...flags, transport: "queue" }
+      : flags,
+    adapter,
+    short,
+    sessionId,
+  );
   const codexUds = adapter.cli === "codex" && transport === "uds";
+  const codexQueue = transport === "queue";
   if (adapter.cli === "codex" && transport === "auto")
     throw new Error("--transport auto is only supported with --cli claude");
-  if (transport !== "tmux" && !codexUds && !short && !sessionId) {
+  if (codexQueue && adapter.cli !== "codex")
+    throw new Error("--transport queue is only supported with --cli codex");
+  if (codexQueue && flags.thread && !isCodexThreadId(flags.thread))
+    throw new Error("--thread for queue must be a Codex session UUID");
+  if (codexQueue && !flags.thread && !flags.session)
+    throw new Error("Codex queue ask requires --session or --thread");
+  if (
+    transport !== "tmux" &&
+    !codexUds &&
+    !codexQueue &&
+    !short &&
+    !sessionId
+  ) {
     throw new Error(
       `--transport ${transport} requires --short or --session-id`,
     );
@@ -2898,14 +3088,19 @@ function askOpts(flags, adapter) {
     // tmux needs a tmux session name; uds needs a daemon ref (short/sessionId);
     // auto can take both (daemon ref to probe, tmux session for fallback).
     session:
-      transport === "tmux"
+      transport === "tmux" || (codexQueue && flags.session)
         ? splitTmuxTarget(requireFlag(flags, "session")).target
         : flags.session,
     short,
     sessionId,
     configDir: flags["config-dir"],
     transport,
-    threadId: codexUds ? requireFlag(flags, "thread") : null,
+    from: flags.from,
+    threadId: codexUds
+      ? requireFlag(flags, "thread")
+      : codexQueue
+        ? (flags.thread ?? null)
+        : null,
     codexSocket: codexUds ? (flags["codex-socket"] ?? "default") : null,
     socketPath:
       codexUds && !flags.remote
@@ -2963,6 +3158,8 @@ function interruptOpts(flags, adapter) {
   const short = flags.short;
   const sessionId = flags["session-id"];
   const transport = transportFlag(flags, adapter, short, sessionId);
+  if (transport === "queue")
+    throw new Error("interrupt uses tmux; queue cannot send keys");
   if (adapter.cli === "codex" && transport === "uds")
     throw new Error(
       "active turnId unavailable; cannot interrupt Codex UDS thread",
@@ -2992,11 +3189,34 @@ async function ask(flags) {
   printJson(await doAsk(adapter, askOpts(flags, adapter)));
 }
 
-async function wait(flags) {
-  if ((flags.cli ?? "claude") !== "claude")
-    throw new Error(
-      "wait supports Claude UDS only; Codex UDS wait is unavailable",
+async function waitCodex(flags) {
+  if (flags.remote) throw new Error("Codex wait supports local sessions only");
+  const requestId = requireFlag(flags, "request-id");
+  let thread = { threadId: flags.thread, threadSource: "flag" };
+  if (flags.thread && !isCodexThreadId(flags.thread))
+    throw new Error("--thread must be a Codex session UUID");
+  if (!flags.thread) {
+    thread = await resolveCodexTmuxThread(
+      splitTmuxTarget(requireFlag(flags, "session")).target,
     );
+    if (!thread.threadId)
+      throw new Error(`Codex thread unavailable: ${thread.reason}`);
+  }
+  printJson({
+    ...(await waitCodexRequest({
+      threadId: thread.threadId,
+      requestId,
+      timeoutMs: secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
+      pollIntervalMs: msFlag(flags, "poll-interval", DEFAULT_POLL_INTERVAL_MS),
+    })),
+    threadSource: thread.threadSource,
+  });
+}
+
+async function wait(flags) {
+  if (flags.cli === "codex") return waitCodex(flags);
+  if ((flags.cli ?? "claude") !== "claude")
+    throw new Error("wait supports --cli claude or codex");
   if (!flags.short && !flags["session-id"])
     throw new Error("wait requires --short or --session-id");
   if (flags.remote || (flags.transport && flags.transport !== "uds"))
@@ -3084,18 +3304,8 @@ async function tmuxContext(adapter, opts) {
       );
       return (await readClaudeTranscript(transcript))?.context ?? unknown;
     }
-    const { stdout: target } = await runTmux(null, [
-      "display-message",
-      "-p",
-      "-t",
-      opts.session,
-      "#{session_name}:#{window_index}.#{pane_index}",
-    ]);
-    const discovery = await discoverCodexTmuxSessions();
-    const pane = discovery.sessions
-      .flatMap((entry) => entry.panes)
-      .find((entry) => entry.target === target.trim());
-    return await readCodexContext(null, pane?.threadId);
+    const { threadId } = await resolveCodexTmuxThread(opts.session);
+    return await readCodexContext(null, threadId);
   } catch {
     return unknown;
   }
@@ -4080,58 +4290,6 @@ async function peer(flags) {
   printJson(output);
 }
 
-const ORCHESTRATION_MODES = ["peer", "codex-led", "claude-led"];
-const CODEX_ORCH_TRANSPORTS = ["exec", "app-server-uds"];
-
-async function orchestrate(flags) {
-  const mode = flags.mode ?? "peer";
-  if (!ORCHESTRATION_MODES.includes(mode)) {
-    throw new Error(`--mode must be one of: ${ORCHESTRATION_MODES.join(", ")}`);
-  }
-  const task = requireFlag(flags, "task");
-  if (flags["codex-socket"] && flags["codex-transport"] === "exec")
-    throw new Error("--codex-socket conflicts with --codex-transport exec");
-  const codexTransport =
-    flags["codex-transport"] ??
-    (flags["codex-socket"] ? "app-server-uds" : "exec");
-  if (!CODEX_ORCH_TRANSPORTS.includes(codexTransport)) {
-    throw new Error(
-      `--codex-transport must be one of: ${CODEX_ORCH_TRANSPORTS.join(", ")}`,
-    );
-  }
-  const cwd = flags.cwd ?? process.cwd();
-  const timeoutMs = secondsFlag(flags, "timeout", 120_000);
-  const socketPath = flags["codex-socket"]
-    ? resolveCodexDaemonSocket(flags["codex-socket"])
-    : undefined;
-
-  // Lazy import keeps the orchestration engine (and its hub/team deps) off the
-  // hot path for every other thin-CLI verb; only `orchestrate` pays the cost.
-  const orchestratorUrl = new URL(
-    "../hub/team/uds-orchestrator.mjs",
-    import.meta.url,
-  ).href;
-  const {
-    runUdsOrchestration,
-    createClaudeUdsEndpoint,
-    createCodexExecEndpoint,
-    createCodexAppServerUdsEndpoint,
-  } = await import(orchestratorUrl);
-
-  const claude = createClaudeUdsEndpoint({ cwd, timeoutMs });
-  const codex =
-    codexTransport === "app-server-uds"
-      ? createCodexAppServerUdsEndpoint({
-          cwd,
-          timeoutMs,
-          ...(socketPath ? { socketPath, spawnServer: false } : {}),
-        })
-      : createCodexExecEndpoint({ workdir: cwd, timeout: timeoutMs });
-
-  const result = await runUdsOrchestration({ mode, task, claude, codex });
-  printJson({ codexTransport, ...result });
-}
-
 function printJson(value) {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
@@ -4168,8 +4326,6 @@ async function main() {
     await goalDriven(flags);
   } else if (command === "peer") {
     await peer(flags);
-  } else if (command === "orchestrate") {
-    await orchestrate(flags);
   } else {
     throw new Error(`Unknown subcommand: ${command}\n${usage()}`);
   }

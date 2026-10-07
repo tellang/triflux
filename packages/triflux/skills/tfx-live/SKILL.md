@@ -3,7 +3,7 @@ name: tfx-live
 description: >
   Claude·Codex 세션을 실시간으로 생성·질의·대기·압축·종료하거나,
   tmux/daemon UDS 연결과 peer 중계를 운영할 때 사용한다.
-argument-hint: "<start|ask|wait|compact|stop|rename|interrupt|probe|list-sessions|peer|converse|goal-driven|orchestrate> ..."
+argument-hint: "<start|ask|wait|compact|stop|rename|interrupt|probe|list-sessions|peer|converse|goal-driven> ..."
 ---
 
 # tfx-live
@@ -14,7 +14,8 @@ argument-hint: "<start|ask|wait|compact|stop|rename|interrupt|probe|list-session
 ## 전송 경로
 
 - Claude `--short` 또는 `--session-id`는 기본 `auto`로 UDS를 먼저 시도한다. `--session`이 있고 입력 미전송이 확인된 UDS 실패라면 tmux로 전환하고 `~/.claude/cache/triflux/tfx-live/bug-reports/uds-fallback-*.json`을 남긴다. 컨텍스트 가드 거부 시에는 전환하지 않는다.
-- Codex와 daemon 참조가 없는 Claude는 tmux가 기본이다. 기존 Codex thread의 UDS 연결은 `--transport uds --thread <id|auto>`를 명시한다.
+- Codex `ask`는 `codex queue`가 기본이다. 아래 "Codex 메시지 전송" 순서를 따른다. 기존 Codex thread의 UDS 연결은 `--transport uds --thread <id|auto>`를 명시한다.
+- daemon 참조가 없는 Claude는 tmux가 기본이다.
 - UDS 결과는 `matchedCompletion === true`일 때만 `done: true`다. timeout이나 연결 종료는 완료가 아니다.
 - bridge 선택 순서는 `--bridge`, `$TFX_BRIDGE`, `$TFX_REPO_ROOT/hub/bridge.mjs`, 번들된 `hub/bridge.mjs`다.
 
@@ -24,7 +25,7 @@ tfx-live ask --cli codex --session cx1 --prompt "현재 변경사항을 요약�
 tfx-live stop --cli codex --session cx1
 ```
 
-새 세션 이름은 `<월>.<일> <주제>`로 짓는다. `start --name`을 생략하면 자동으로 만들고 `nameGenerated: true`를 보고한다. `--resume` 또는 `--resume-last`는 `--name`을 명시한 경우에만 이름을 적용한다. 승계 세션에는 기존 이름 뒤에 ` 2`, 이후 ` 3`을 붙인다. 이름 적용을 요청한 경우 결과의 `nameApplied: false`는 적용 실패를 뜻한다. 기존 Codex UDS thread는 `tfx-live rename --cli codex --transport uds --thread ID --name "<이름>"`으로 이름을 바꾼다.
+새 세션 이름은 `<월>.<일> <주제>`로 짓는다. `start --name`을 생략하면 자동으로 만들고 `nameGenerated: true`를 보고한다. `--resume` 또는 `--resume-last`는 `--name`을 명시한 경우에만 이름을 적용한다. 승계 세션에는 기존 이름 뒤에 ` 2`, 이후 ` 3`을 붙인다. 이름 적용을 요청한 경우 결과의 `nameApplied: false`는 적용 실패를 뜻한다. Codex `start`는 `/rename` 제출을 입력창이 빌 때까지 확인하고, 이름으로 찾은 thread UUID를 `threadId`로 돌려주며 tmux 세션 옵션 `@tfx_codex_thread`에 남긴다. 기존 Codex UDS thread는 `tfx-live rename --cli codex --transport uds --thread ID --name "<이름>"`으로 이름을 바꾼다.
 
 ## 리드 운영
 
@@ -38,6 +39,16 @@ tfx-live stop --cli codex --session cx1
 | close | 결과와 인계를 확인한 즉시 닫는다. Claude 백그라운드는 `claude stop <id>`, tmux는 `tfx-live stop --session`, Claude 팀원은 shutdown, Codex 서브에이전트는 `close_agent`, agy 서브에이전트는 `/agents` 패널의 K를 쓴다. |
 
 두 번째 compact 전에는 handoff가 맞는지 점검한다. compact 횟수는 고정하지 않는다.
+
+### Codex 메시지 전송
+
+1. 기본은 `codex queue --thread <UUID>`다. 입력창을 건드리지 않고, 바쁘면 쌓였다가 앞 턴이 끝난 직후 순서대로 들어간다. 유휴 TUI는 약 20초 주기로 큐를 가져간다.
+2. 첫 줄 머리말은 `[from <보낸 세션 이름>] [tfx-live req=<id>]`다. 이름은 `--from`, `$TFX_LIVE_FROM`, Claude 세션 기록, Codex `session_index` 순으로 찾고 없으면 머리말 없이 표식만 붙인다. Codex TUI는 Claude처럼 접어 보여 주지 않고 사용자 입력으로 그대로 표시한다.
+3. thread는 `--thread UUID`, `start`가 남긴 `@tfx_codex_thread`, Codex 세션 레지스트리, pane cwd와 같은 rollout 하나 순으로 찾는다. 이름으로는 보내지 않는다(`codex queue`의 이름 조회가 실패한다).
+4. tmux 직접 입력은 queue를 못 쓸 때만 쓴다: 원격 호스트, thread를 못 찾음, `codex queue` 오류(0.160 미만 포함). 결과에 `transport: "tmux"`, `transportRequested: "queue"`, `fallbackReason`이 남는다. queue가 성공했을 수도 있는 오류는 `status: "unknown"`으로 끝내고 재전송하지 않는다.
+5. 슬래시 명령(`/rename`, `/compact`, `/new`)과 interrupt(Escape)는 tmux 직접 입력 전용이다. queue로 보낸 슬래시 명령은 실행되지 않고 일반 텍스트로 모델에 들어간다. `--transport tmux`를 명시한다.
+
+결과의 `status`는 `queued`(쌓임), `working`(TUI가 가져가 턴 시작), `completed`, `failed`로 나뉘고 `delivered`, `deliveredAt`, `turnId`가 배달을 구분한다. `--if-busy`는 tmux 전송에만 적용된다.
 
 ### 컨텍스트 판단
 
@@ -73,11 +84,15 @@ tfx-live stop --session cl1
 ```bash
 tfx-live ask --cli claude --transport uds --short <8hex> --prompt "진행 상황을 보고해줘" --no-wait
 tfx-live wait --cli claude --short <8hex> --request-id <requestId> --timeout 120 --poll-interval 500
+tfx-live ask --cli codex --session cx1 --prompt "진행 상황을 보고해줘" --no-wait
+tfx-live wait --cli codex --session cx1 --request-id <requestId> --timeout 120
 ```
 
-`ask --no-wait`는 `status: "submitted"`, `inputSent: true`, `done: false`, `submittedAt`, `target`, `requestId`를 반환한다. `ask`, `peer`, `converse`, `goal-driven`은 `[tfx-live req=<requestId>]`를 프롬프트 앞에 붙인다. `--no-relay-tag`로 제거하면 `wait --request-id`가 해당 요청을 찾을 수 없다.
+`ask --no-wait`는 Claude와 tmux에서 `status: "submitted"`, Codex queue에서 `status: "queued"`와 함께 `inputSent: true`, `done: false`, `submittedAt`, `target`, `requestId`를 반환한다. `ask`, `peer`, `converse`, `goal-driven`은 `[tfx-live req=<requestId>]`를 프롬프트 앞에 붙인다. `--no-relay-tag`로 제거하면 `wait --request-id`가 해당 요청을 찾을 수 없다.
 
-`wait`는 Claude transcript에서 표식을 user 메시지, `queue-operation`의 `enqueue` content, queued command attachment에서 찾는다. 표식이 소비된 턴이 끝난 뒤 마지막 assistant 텍스트를 응답으로 쓴다. 표식 없는 `wait`는 최신 user turn을 본다. `isSidechain`과 합성 API 오류 메시지는 정상 응답에서 제외한다. 요청을 소비한 턴에서 합성 오류가 나타나면 오류 문구와 `status: "failed"`를 반환한다. daemon의 `idle`만으로 완료를 단정하지 않는다. timeout은 `status: "working"`, `timedOut: true`, `done: false`다. Codex UDS `wait`는 지원하지 않는다.
+`wait`는 Claude transcript에서 표식을 user 메시지, `queue-operation`의 `enqueue` content, queued command attachment에서 찾는다. 표식이 소비된 턴이 끝난 뒤 마지막 assistant 텍스트를 응답으로 쓴다. 표식 없는 `wait`는 최신 user turn을 본다. `isSidechain`과 합성 API 오류 메시지는 정상 응답에서 제외한다. 요청을 소비한 턴에서 합성 오류가 나타나면 오류 문구와 `status: "failed"`를 반환한다. daemon의 `idle`만으로 완료를 단정하지 않는다. timeout은 `status: "working"`, `timedOut: true`, `done: false`다.
+
+Codex `wait`는 `--session` 또는 `--thread UUID`의 rollout에서 표식이 든 user 메시지의 `turn_id`를 찾고, 같은 턴의 `task_complete.last_agent_message`를 응답으로 쓴다. `turn_aborted`는 `status: "failed"`다. 표식이 아직 없으면 `status: "queued"`, `timedOut: true`다. `--timeout 0`은 한 번만 확인한다.
 
 명시한 `--config-dir`은 정확히 일치하는 daemon만 선택한다. `CLAUDE_CONFIG_DIR`도 해당 env 디렉터리로 제한한다. stale endpoint 복구는 같은 source configDir 안에서만 재시도한다. attach 전 예외는 `inputSent: false`이므로 `auto`의 tmux fallback이 가능하다. attach 뒤 전송 여부가 불명확하면 `status: "unknown"`으로 보고하고 재전송하지 않는다.
 
@@ -89,7 +104,7 @@ tfx-live wait --cli claude --short <8hex> --request-id <requestId> --timeout 120
 
 `ask`와 tmux `interrupt`는 세션명, `name:window`, `name:window.pane`을 받는다. `start`와 tmux `stop --session`은 세션명만 받는다. `stop`은 pane·window 대상과 `%12`, `@3` 같은 ID를 거부한다. `--remote HOST`는 대상을 그대로 원격에 전달한다.
 
-`ask`는 pane의 작업 상태와 Codex `model: loading`을 확인한다. tmux의 `--if-busy wait|fail|interrupt` 기본값은 `wait`다. `--busy-timeout` 기본값은 `--timeout`이고 `--poll-interval`은 밀리초다. timeout이면 프롬프트를 보내지 않는다. `interrupt`는 Escape 후 idle을 기다린다. 기존 입력 초안이 있으면 붙여넣기와 합쳐질 수 있으므로 전송 전 pane을 확인한다.
+tmux `ask`는 pane의 작업 상태와 Codex `model: loading`을 확인한다. tmux의 `--if-busy wait|fail|interrupt` 기본값은 `wait`다. `--busy-timeout` 기본값은 `--timeout`이고 `--poll-interval`은 밀리초다. timeout이면 프롬프트를 보내지 않는다. `interrupt`는 Escape 후 idle을 기다린다. 기존 입력 초안이 있으면 붙여넣기와 합쳐질 수 있으므로 전송 전 pane을 확인한다.
 
 ### Codex UDS 스레드
 
@@ -102,17 +117,14 @@ tfx-live ask --cli codex --transport uds --thread auto --cwd ~/Projects/my-workt
 
 `--thread auto`는 선택 조건에 맞는 로드된 thread가 정확히 하나일 때만 쓴다. 여러 개면 목록에서 ID를 골라 `--thread ID`를 지정한다. UDS의 `--if-busy wait|fail|steer` 기본값은 `wait`다. `thread/resume`으로 알림을 구독한 뒤 `turn/start`를 호출하고 반환된 turn ID의 완료만 인정한다. 완료 응답은 `final_answer`를 우선하고 중간 commentary는 따로 반환한다. `--max-turn`은 활동 연장 상한을 지정한다. Codex UDS `interrupt`는 지원하지 않으므로 tmux pane이 있으면 `interrupt --session <target>`을 쓴다.
 
-## peer와 orchestrate
+## peer
 
 ```bash
 tfx-live peer --cli-a codex --cli-b claude --session-a cx-peer --session-b cl-peer --cwd ~/Projects --mode freeform --seed "변경을 함께 검토해줘" --rounds 2 --timeout 180
 tfx-live peer --cli-a codex --transport-a uds --thread-a <id|auto> --cli-b claude --transport-b uds --short-b <8hex> --cwd ~/Projects/my-worktree --mode freeform --seed "변경을 검토해줘"
-tfx-live orchestrate --task "이 변경의 위험을 한 줄로" --mode peer
 ```
 
-`peer`는 이전 응답을 반대쪽의 다음 프롬프트로 전달한다. 기존 tmux pane은 `--attach-a`·`--attach-b`로 연결하며 종료하지 않는다. UDS 쪽도 기존 세션으로 취급한다. `--if-busy-a`·`--if-busy-b`로 각 쪽의 정책을 정한다. 소유한 세션을 실제 종료한 경우에만 `stoppedA`·`stoppedB`가 참이다.
-
-`orchestrate`의 `--mode`는 `peer|codex-led|claude-led`다. Claude 쪽은 살아 있는 daemon이 필요하다. Codex는 기본 `exec` 경로 또는 실험적 `--codex-transport app-server-uds`를 쓴다. `--codex-socket PATH|default`는 기존 app-server daemon에 연결하고 새 임시 thread를 만든다.
+`peer`는 이전 응답을 반대쪽의 다음 프롬프트로 전달한다. 기존 tmux pane은 `--attach-a`·`--attach-b`로 연결하며 종료하지 않는다. UDS 쪽도 기존 세션으로 취급한다. Codex tmux 쪽은 화면에서 응답을 읽으므로 queue가 아니라 tmux로 보낸다. `--if-busy-a`·`--if-busy-b`로 각 쪽의 정책을 정한다. 소유한 세션을 실제 종료한 경우에만 `stoppedA`·`stoppedB`가 참이다.
 
 ## 진단
 

@@ -74,7 +74,7 @@ Skills you invoke directly:
 | Skill | Use |
 | --- | --- |
 | `/tfx-auto` | Front door for implementing, fixing, reviewing, and parallel work. Behavior is set by flags (below). |
-| `/tfx-live` | Live Claude↔Codex sessions: `start`/`ask`/`stop`, `peer` relay, `orchestrate`, `list-sessions`. |
+| `/tfx-live` | Live Claude↔Codex sessions: `start`/`ask`/`wait`/`stop`, `peer` relay, `list-sessions`. |
 | `/tfx-remote` | SSH 원격 Claude Code 세션 시작, 조회, 재부착, 메시지 전송, 준비 상태 확인, 모니터링, 종료. |
 | `/tfx-setup` | Interactive setup: file sync, HUD, Codex profiles, MCP, hook priority. |
 | `/tfx-doctor` | Diagnose and repair; also starts, stops, and checks the Hub. |
@@ -152,9 +152,9 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 
 **Live sessions.** `tfx-live` drives Claude Code and Codex TUI sessions. Claude daemon targets
 (`--short`/`--session-id`) try UDS first and fall back to tmux when `--session` is also given;
-Codex uses tmux, or UDS with
-`--transport uds --thread <id|auto>`. `peer` relays between two sessions for `--rounds`, and
-`orchestrate` runs Claude + Codex on one task. triflux's Codex hook records running Codex
+Codex `ask` queues the message with `codex queue` (shown in the TUI with a
+`[from <sender>]` first line) and falls back to tmux with a reported reason; UDS stays available with
+`--transport uds --thread <id|auto>`. `peer` relays between two sessions for `--rounds`. triflux's Codex hook records running Codex
 sessions under `~/.local/state/triflux/codex-sessions/`, so `tfx-live list-sessions --cli codex|claude`
 also finds sessions you started yourself in tmux.
 

@@ -438,27 +438,6 @@ test("Codex daemon default socket follows CODEX_HOME symlink and rejects missing
   }
 });
 
-test("orchestrate rejects explicit exec transport with a Codex socket", async () => {
-  await assert.rejects(
-    runTfxLive([
-      "orchestrate",
-      "--task",
-      "test",
-      "--codex-transport",
-      "exec",
-      "--codex-socket",
-      "default",
-    ]),
-    (error) => {
-      assert.match(
-        JSON.parse(error.stdout).error,
-        /conflicts with --codex-transport exec/,
-      );
-      return true;
-    },
-  );
-});
-
 async function runTfxLive(args, options = {}) {
   const { env: extraEnv, cli, ...execOptions } = options;
   const artifactDir = await fs.mkdtemp(
