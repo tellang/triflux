@@ -25,6 +25,7 @@ const KNOWN_ROLES = new Set([
   "test-engineer",
   "designer",
   "writer",
+  "researcher",
   "scientist",
 ]);
 
