@@ -231,8 +231,8 @@ describe("ensureCloakBrowser", () => {
       requireResolve: () => {
         throw new Error("missing");
       },
-      execFileSyncFn: () => {
-        installed = true;
+      execFileSyncFn: (_cmd, args) => {
+        installed = args.includes("--ignore-scripts");
         throw new Error("npm failed");
       },
       warn: (message) => warnings.push(message),
@@ -243,6 +243,7 @@ describe("ensureCloakBrowser", () => {
     assert.equal(result.skipped, false);
     assert.equal(result.reason, "install_failed");
     assert.match(result.error, /npm failed/);
+    // 자식 npm install 이 같은 패키지의 postinstall(setup)을 다시 부르지 않게 한다.
     assert.equal(installed, true);
     assert.match(warnings.join("\n"), /optional setup failed/);
   });

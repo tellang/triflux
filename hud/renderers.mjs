@@ -314,10 +314,14 @@ export function getMicroLine(
   if (showGemini) {
     segments.push(`${bold(geminiBlue(geminiMarker))}${dim(":")}${gVal}`);
   }
-  segments.push(
-    `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}`,
-  );
+  segments.push(`${dim("CTX:")}${contextPercentText(ctxView)}`);
   return truncateAnsi(segments.join(" "), cols);
+}
+
+// context 는 토큰 수 대신 사용률만 보여 준다.
+function contextPercentText(ctxView) {
+  const text = ctxView.display === "--" ? "--" : `${ctxView.percent}%`;
+  return colorByPercent(ctxView.percent, text);
 }
 
 // ============================================================================
@@ -381,7 +385,7 @@ export function getClaudeRows(currentTier, contextView, claudeUsage) {
   if (currentTier === "minimal") {
     const staleTag = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
     const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}${staleTag}`;
-    const right = `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}`;
+    const right = `${dim("CTX:")}${contextPercentText(ctxView)}`;
     return [{ prefix, left: quotaSection, right }];
   }
 
@@ -391,7 +395,7 @@ export function getClaudeRows(currentTier, contextView, claudeUsage) {
     const warning = ctxView.warningTag
       ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
       : "";
-    const contextSection = `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}${warning}`;
+    const contextSection = `${dim("CTX:")}${contextPercentText(ctxView)}${warning}`;
     return [{ prefix, left: quotaSection, right: contextSection }];
   }
 
@@ -401,7 +405,7 @@ export function getClaudeRows(currentTier, contextView, claudeUsage) {
   const warning = ctxView.warningTag
     ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
     : "";
-  const contextSection = `${dim("CTX:")}${colorByPercent(ctxView.percent, ctxView.display)}${warning}`;
+  const contextSection = `${dim("CTX:")}${contextPercentText(ctxView)}${warning}`;
   return [{ prefix, left: quotaSection, right: contextSection }];
 }
 
