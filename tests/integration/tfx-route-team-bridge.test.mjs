@@ -65,7 +65,7 @@ function output(result) {
 }
 
 describe("tfx-route.sh — team bridge integration", () => {
-  it("team claim/start-message/result를 bridge CLI 단일 경로로 호출하고 완료는 backup 파일로 남겨야 한다", () => {
+  it("team claim/start-message를 bridge CLI 단일 경로로 호출하고 완료는 backup 파일로 남겨야 한다", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "tfx-route-team-bridge-"));
     const logPath = join(tempDir, "bridge.log");
     const resultDir = join(tempDir, "results");
@@ -94,7 +94,7 @@ describe("tfx-route.sh — team bridge integration", () => {
         .filter(Boolean)
         .map((line) => JSON.parse(line).argv);
 
-      assert.equal(calls.length, 3, JSON.stringify(calls, null, 2));
+      assert.equal(calls.length, 2, JSON.stringify(calls, null, 2));
       assert.equal(calls[0][0], "team-task-update");
       assert.ok(calls[0].includes("--claim"));
       assert.equal(calls[1][0], "team-send-message");
@@ -102,13 +102,6 @@ describe("tfx-route.sh — team bridge integration", () => {
         calls[1][calls[1].indexOf("--text") + 1],
         /작업 시작: executor-worker-test/,
       );
-      assert.equal(calls[2][0], "result");
-
-      const resultPayload = calls[2][calls[2].indexOf("--payload") + 1];
-      assert.deepEqual(JSON.parse(resultPayload), {
-        task_id: "task-001",
-        result: "success",
-      });
 
       const backup = JSON.parse(
         readFileSync(join(resultDir, "task-001.json"), "utf8"),
@@ -167,10 +160,9 @@ describe("tfx-route.sh — team bridge integration", () => {
         .filter(Boolean)
         .map((line) => JSON.parse(line).argv);
 
-      assert.equal(calls.length, 3, JSON.stringify(calls, null, 2));
+      assert.equal(calls.length, 2, JSON.stringify(calls, null, 2));
       assert.equal(calls[0][0], "team-task-update");
       assert.equal(calls[1][0], "team-send-message");
-      assert.equal(calls[2][0], "result");
 
       const backup = JSON.parse(
         readFileSync(join(resultDir, "task-002.json"), "utf8"),

@@ -70,7 +70,7 @@ writeFileSync(process.env.ENSURE_MARKER, "called");
       .map((line) => JSON.parse(line));
     assert.deepEqual(
       calls.map((args) => args[0]),
-      ["team-task-update", "team-send-message", "result"],
+      ["team-task-update", "team-send-message"],
     );
     const backup = JSON.parse(readFileSync(join(dir, "task-1.json"), "utf8"));
     assert.equal(backup.result, "success");

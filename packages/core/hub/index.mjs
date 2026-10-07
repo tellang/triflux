@@ -14,7 +14,7 @@ export { IS_WINDOWS, IS_MAC, IS_LINUX, TEMP_DIR, normalizePath, whichCommand, ki
 // Core services
 export { createHitlManager } from './hitl.mjs';
 export { createAssignCallbackServer } from './assign-callbacks.mjs';
-export { getHubUrl, getHubPipePath, requestJson, post, connectPipe, parseArgs, parseJsonSafe } from './bridge.mjs';
+export { parseArgs, parseJsonSafe } from './bridge.mjs';
 
 // Reflexion (adaptive error learning)
 export { normalizeError, adaptiveRuleFromError } from './reflexion.mjs';
