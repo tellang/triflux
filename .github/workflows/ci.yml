@@ -6,6 +6,12 @@ on:
     branches:
       - main
 
+# PR은 새 커밋이 오면 이전 실행을 취소한다. main push는 release.yml이 커밋마다 결과를 기다리므로
+# 실행마다 고유 그룹을 써서 대기 중 교체도 막는다.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,6 +23,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
       - name: Install dependencies
         # npm ci fail (lock sync mismatch — e.g. @emnapi/core peer dep platform skew) 시
