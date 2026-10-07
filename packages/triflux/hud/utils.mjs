@@ -164,10 +164,10 @@ export function formatTimeCell(value) {
   return `(${text.padStart(TIME_CELL_INNER_WIDTH, padChar)})`;
 }
 
-// 주간(d/h) 전용 — 최대 7d00h(5자)이므로 공백 불필요
+// n/a도 정상 주간 시간과 같은 너비를 유지한다.
 export function formatTimeCellDH(value) {
   const text = normalizeTimeToken(value);
-  return `(${text})`;
+  return `(${text.padStart(TIME_CELL_INNER_WIDTH, " ")})`;
 }
 
 export function getCliArgValue(flag) {

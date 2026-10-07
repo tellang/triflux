@@ -10,6 +10,7 @@ import {
   colorByPercent,
   colorByProvider,
   dim,
+  GAUGE_WIDTH,
   GEMINI_BLUE,
   geminiBlue,
   yellow,
@@ -17,6 +18,8 @@ import {
 import {
   ACCOUNT_LABEL_WIDTH,
   FIVE_HOUR_MS,
+  ONE_DAY_MS,
+  PERCENT_CELL_WIDTH,
   PROVIDER_PREFIX_WIDTH,
   SEVEN_DAY_MS,
 } from "./constants.mjs";
@@ -54,9 +57,7 @@ export function renderAlignedRows(rows) {
     if (!hasRight) {
       return truncateAnsi(`${prefix} ${row.left}`, cols);
     }
-    // 자기 left 대비 패딩 상한: 최대 2칸까지만 패딩 (과도한 공백 방지)
-    const ownLen = stripAnsi(row.left).length;
-    const effectiveWidth = Math.min(rawLeftWidth, ownLen + 2);
+    const effectiveWidth = rawLeftWidth;
     const left = padAnsiRight(row.left, effectiveWidth);
     // 우선순위 기반 truncate: right 먼저 축소, 그래도 넘치면 left 축소
     // prefix(PROVIDER_PREFIX_WIDTH) + " "(1) + left(effectiveWidth) + " | "(3) + right
@@ -123,8 +124,9 @@ export function getMicroLine(
     segments.push(`${bold(codexWhite("x"))}${dim(":")}${xVal}`);
   }
   if (showAntigravity) {
+    const marker = options.antigravityQuota ? bold(geminiBlue("a")) : dim("a");
     segments.push(
-      `${bold(geminiBlue("a"))}${dim(":")}${antigravityPercentText(options.antigravityQuota)}${options.antigravityQuota?.stale ? dim("*") : ""}`,
+      `${marker}${dim(":")}${antigravityPercentText(options.antigravityQuota)}${options.antigravityQuota?.stale ? dim("*") : ""}`,
     );
   }
   segments.push(`${dim("CTX:")}${contextPercentText(ctxView)}`);
@@ -138,7 +140,7 @@ function antigravityPercentText(quota) {
         formatPercentCell(quota.usedPercent),
         geminiBlue,
       )
-    : dim(formatPlaceholderPercentCell());
+    : dim("--".padStart(PERCENT_CELL_WIDTH));
 }
 
 // context 는 토큰 수 대신 사용률만 보여 준다.
@@ -273,16 +275,32 @@ export function getProviderRow(
   const prefix = `${bold(markerColor(marker))}:`;
   if (provider === "antigravity") {
     const usedPercent = realQuota?.usedPercent;
-    const bar =
-      usedPercent != null
-        ? tierBar(currentTier, usedPercent, GEMINI_BLUE)
-        : tierDimBar(currentTier);
-    const reset = formatResetRemaining(realQuota?.resetTime) || "n/a";
+    const active = usedPercent != null;
+    const quotaPercent = antigravityPercentText(realQuota);
+    const right = `${active ? markerColor(accountLabel) : dim(accountLabel)}${realQuota?.stale ? dim(" [stale]") : ""}`;
+    if (currentTier === "nano" || currentTier === "micro") {
+      return {
+        prefix: active ? prefix : dim(`${marker}:`),
+        left: quotaPercent,
+        right,
+      };
+    }
+    const bar = active
+      ? tierBar(currentTier, usedPercent, GEMINI_BLUE)
+      : currentTier === "full"
+        ? " ".repeat(GAUGE_WIDTH + 1)
+        : "";
+    const reset =
+      (Date.parse(realQuota?.resetTime) - Date.now() >= ONE_DAY_MS
+        ? formatResetRemainingDayHour(realQuota.resetTime)
+        : formatResetRemaining(realQuota?.resetTime)) || "n/a";
     const showTime = currentTier === "full" || currentTier === "compact";
+    // /usage의 모델별 값에는 5h/1w 식별자가 없으므로 창을 추측하지 않는다.
+    const slot = `${dim("--:")}${bar}${quotaPercent}${showTime ? ` ${dim(formatTimeCell(reset))}` : ""}`;
     return {
-      prefix,
-      left: `${dim(`${realQuota?.currentAbbrev || "agy"}:`)}${bar}${antigravityPercentText(realQuota)}${showTime ? ` ${dim(formatTimeCell(reset))}` : ""}${realQuota?.stale ? dim(" [stale]") : ""}`,
-      right: accountLabel ? markerColor(accountLabel) : "",
+      prefix: active ? prefix : dim(`${marker}:`),
+      left: `${slot} ${" ".repeat(stripAnsi(slot).length)}`,
+      right,
     };
   }
   const provAnsi = CODEX_WHITE;

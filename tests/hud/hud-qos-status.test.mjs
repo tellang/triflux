@@ -17,12 +17,6 @@ before(() => {
   mockHomeDir = mkdtempSync(join(tmpdir(), "tfx-hud-status-"));
   cacheDir = join(mockHomeDir, ".claude", "cache");
   mkdirSync(cacheDir, { recursive: true });
-  for (const name of ["claude", "codex", "antigravity"]) {
-    writeFileSync(
-      join(cacheDir, `.${name}-refresh-lock`),
-      JSON.stringify({ t: Date.now() }),
-    );
-  }
 });
 
 after(() => {
@@ -30,6 +24,12 @@ after(() => {
 });
 
 function runHud(extraEnv = {}, { preserveAnsi = false } = {}) {
+  for (const name of ["claude", "codex", "antigravity"]) {
+    writeFileSync(
+      join(cacheDir, `.${name}-refresh-lock`),
+      JSON.stringify({ t: Date.now() }),
+    );
+  }
   const result = spawnSync(process.execPath, [hudScriptPath], {
     cwd: mockHomeDir,
     input: JSON.stringify({
@@ -127,7 +127,10 @@ describe("HUD provider visibility", () => {
       ],
     };
     writeFileSync(quotaPath, JSON.stringify(quota));
-    assert.match(runHud(), /^a:.*Fh:.*25%.*n\/a.*hud-prj/m);
+    const disabledOutput = runHud();
+    assert.match(disabledOutput, /^a:.*--.*n\/a.*hud-prj/m);
+    assert.doesNotMatch(disabledOutput, /^a:.*(?:25%|Fh|[█▓▒░])/m);
+    assert.match(runHud({}, { preserveAnsi: true }), /^\x1b\[0m\x1b\[2ma:/m);
     writeFileSync(
       quotaPath,
       JSON.stringify({ ...quota, accountLabel: "other-project" }),
@@ -148,5 +151,84 @@ describe("HUD provider visibility", () => {
       runHud({ COLUMNS: "30", TFX_DISABLE_ANTIGRAVITY: "1" }),
       /[ag]:/,
     );
+
+    const future = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    writeFileSync(
+      join(settingsDir, "settings.json"),
+      JSON.stringify({ model: "Gemini 3.5 Flash (High)" }),
+    );
+    writeFileSync(
+      join(settingsDir, "oauth_creds.json"),
+      JSON.stringify({ email: "quota-user@example.test" }),
+    );
+    const personalQuota = { ...quota, accountLabel: "quota-user@example.test" };
+    writeFileSync(quotaPath, JSON.stringify(personalQuota));
+    assert.doesNotMatch(runHud(), /^a:.*\d+%/m);
+    personalQuota.buckets[0].reset_time = future;
+    writeFileSync(quotaPath, JSON.stringify(personalQuota));
+    writeFileSync(
+      join(cacheDir, "claude-usage-cache.json"),
+      JSON.stringify({
+        timestamp: Date.now(),
+        data: {
+          fiveHourPercent: 17,
+          weeklyPercent: 100,
+          fiveHourResetsAt: future,
+        },
+      }),
+    );
+    writeFileSync(
+      join(cacheDir, "codex-rate-limits-cache.json"),
+      JSON.stringify({
+        timestamp: Date.now(),
+        buckets: {
+          codex: {
+            primary: {
+              used_percent: 100,
+              resets_at: Date.parse(future) / 1000,
+            },
+            secondary: { used_percent: 83 },
+          },
+        },
+      }),
+    );
+    const configDir = join(mockHomeDir, ".omc", "config");
+    mkdirSync(configDir, { recursive: true });
+    for (const tier of ["full", "compact", "minimal"]) {
+      writeFileSync(join(configDir, "hud.json"), JSON.stringify({ tier }));
+      for (const active of [true, false]) {
+        writeFileSync(
+          quotaPath,
+          JSON.stringify({
+            ...personalQuota,
+            buckets: active ? personalQuota.buckets : [],
+          }),
+        );
+        const lines = runHud({ TFX_DISABLE_CODEX: "0" }).trim().split("\n");
+        const [claude, codex, agy] = lines;
+        assert.equal(lines.length, 3);
+        assert.equal(
+          agy.indexOf("|"),
+          codex.indexOf("|"),
+          `${tier}: ${lines.join("\n")}`,
+        );
+        assert.equal(agy.indexOf("|"), claude.indexOf("|"));
+        assert.equal(
+          agy.indexOf(active ? "25%" : "-- ") + (active ? 3 : 2),
+          claude.indexOf("17%") + 3,
+        );
+        assert.match(
+          agy,
+          active ? /^a: --:.*25%.*quota-user$/ : /^a: --:.*--.*quota-user$/,
+        );
+        if (tier !== "minimal") {
+          assert.equal(agy.indexOf("("), claude.indexOf("("));
+          assert.equal(agy.indexOf("("), codex.indexOf("("));
+        }
+        if (tier === "full") {
+          assert.equal(agy.slice(6, 11), active ? "█░░░░" : "     ");
+        }
+      }
+    }
   });
 });

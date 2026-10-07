@@ -37,8 +37,6 @@ import {
 } from "./providers/codex.mjs";
 import {
   getAntigravityAccountLabel,
-  getAntigravityCurrentModel,
-  getAntigravityModelAbbrev,
   readAntigravityQuotaSnapshot,
   refreshAntigravityQuotaCache,
   scheduleAntigravityQuotaRefresh,
@@ -136,12 +134,7 @@ async function main() {
         geminiBlue,
         accountsConfig,
         accountsState,
-        {
-          ...antigravitySnapshot?.data,
-          currentAbbrev: getAntigravityModelAbbrev(
-            getAntigravityCurrentModel(),
-          ),
-        },
+        antigravitySnapshot?.data,
         getAntigravityAccountLabel(),
       ),
     );

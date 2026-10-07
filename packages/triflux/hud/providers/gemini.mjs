@@ -1,7 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import {
-  ANTIGRAVITY_MODEL_ABBREV,
   ANTIGRAVITY_OAUTH_PATHS,
   ANTIGRAVITY_QUOTA_CACHE_PATH,
   ANTIGRAVITY_QUOTA_STALE_MS,
@@ -38,39 +37,30 @@ export function getAntigravityAccountLabel() {
   return null;
 }
 
-export function getAntigravityCurrentModel() {
-  const settings = readJson(ANTIGRAVITY_SETTINGS_PATH, null);
-  return settings?.model || null;
-}
-
-export function getAntigravityModelAbbrev(label) {
-  if (!label) return "??";
-  const known = ANTIGRAVITY_MODEL_ABBREV[label];
-  if (known) return known;
-  const parens = label.match(/\(([^)]+)\)/);
-  const head = label.match(/^(\w+)/);
-  if (head && parens) {
-    return `${head[1][0].toUpperCase()}${parens[1][0].toLowerCase()}`;
-  }
-  if (head) return head[1].slice(0, 2);
-  return "??";
+function isGcpProjectAuth() {
+  return Boolean(readJson(ANTIGRAVITY_SETTINGS_PATH, null)?.gcp?.project);
 }
 
 export function readAntigravityQuotaSnapshot() {
+  // 프로젝트 과금의 기본 응답을 개인 플랜의 0% 사용률로 표시하지 않는다.
+  if (isGcpProjectAuth()) return { data: null, shouldRefresh: false };
   const cache = readJson(ANTIGRAVITY_QUOTA_CACHE_PATH, null);
   const matched = cache?.accountLabel === getAntigravityAccountLabel();
   const stale =
     !cache?.timestamp ||
     Date.now() - cache.timestamp >= ANTIGRAVITY_QUOTA_STALE_MS;
-  const model = getAntigravityCurrentModel();
+  const model = readJson(ANTIGRAVITY_SETTINGS_PATH, null)?.model;
   const buckets = matched && Array.isArray(cache?.buckets) ? cache.buckets : [];
   const bucket = buckets
     .filter(
       (item) =>
+        model &&
+        item &&
         (item?.name === model || item?.id === model) &&
         Number.isFinite(item.remaining_fraction) &&
         item.remaining_fraction >= 0 &&
-        item.remaining_fraction <= 1,
+        item.remaining_fraction <= 1 &&
+        Date.parse(item.reset_time) > Date.now(),
     )
     .sort((a, b) => a.remaining_fraction - b.remaining_fraction)[0];
   return {
@@ -87,6 +77,7 @@ export function readAntigravityQuotaSnapshot() {
 
 // /usage는 모델 턴을 시작하지 않는 공식 print-mode 조회다.
 export function refreshAntigravityQuotaCache(execFileSyncFn = execFileSync) {
+  if (isGcpProjectAuth()) return null;
   const accountLabel = getAntigravityAccountLabel();
   let buckets = null;
   try {
@@ -123,7 +114,12 @@ export function refreshAntigravityQuotaCache(execFileSyncFn = execFileSync) {
 
 export function scheduleAntigravityQuotaRefresh() {
   const scriptPath = process.argv[1];
-  if (!scriptPath || !existsSync(ANTIGRAVITY_SETTINGS_PATH)) return;
+  if (
+    !scriptPath ||
+    !existsSync(ANTIGRAVITY_SETTINGS_PATH) ||
+    isGcpProjectAuth()
+  )
+    return;
   const lock = readJson(ANTIGRAVITY_REFRESH_LOCK_PATH, null);
   if (Date.now() - Number(lock?.t || 0) < SPAWN_LOCK_TTL_MS) return;
   writeJsonSafe(ANTIGRAVITY_REFRESH_LOCK_PATH, { t: Date.now() });
