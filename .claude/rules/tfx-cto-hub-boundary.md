@@ -1,3 +1,12 @@
+---
+paths:
+  - "cto/**/*"
+  - "hub/**/*"
+  - "hooks/**/*"
+  - "tests/cto/**/*"
+  - "docs/adr/0010-*.md"
+  - "docs/adr/0024-*.md"
+---
 # CTO lake ↔ Hub role 경계 규칙
 
 > 근거(why): [ADR-0010: CTO lake와 Hub role 경계](../../docs/adr/0010-cto-lake-hub-role-boundary.md), [ADR-0024: CTO 조회 축소](../../docs/adr/0024-cto-explicit-queries-only.md). 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).

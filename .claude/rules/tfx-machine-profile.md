@@ -1,3 +1,11 @@
+---
+paths:
+  - "scripts/setup.mjs"
+  - "scripts/tfx-route.sh"
+  - "scripts/lib/machine-profile.mjs"
+  - "hub/team/**/*"
+  - "tests/**/*machine-profile*"
+---
 # Triflux machine profile
 
 `scripts/setup.mjs`는 최초 설치 또는 명시적 재설정 시 머신 단위 라우팅/수명주기

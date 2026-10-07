@@ -16,7 +16,7 @@
 2. **토큰**: 24/7 live loop는 유휴에도 구독 토큰을 계속 소진. (Planner risk)
 3. **Compaction 소유권**: Claude Code 하니스가 세션 수명·compaction을 소유 → triflux가 상주 세션의 context 폭발을 강제 관리 불가. 다일 세션은 lossy auto-compact로 CTO 판단 저하. (Critic MEDIUM/edge)
 
-→ **tfx-autoplan-principles의 user-challenge 규칙 적용**: 두 모델 이상이 사용자 원래 방향을 바꾸자고 합의하면 자동 확정하지 않고 사용자에게 올린다. 기본값은 사용자 원안 유지. **이 PRD의 권장안(하이브리드)은 사용자 승인 전까지 제안일 뿐이다.**
+두 모델 이상이 사용자 원래 방향을 바꾸자고 합의하면 자동 확정하지 않고 사용자에게 올린다. 기본값은 사용자 원안 유지. **이 PRD의 권장안(하이브리드)은 사용자 승인 전까지 제안일 뿐이다.**
 
 **✅ 해소 (2026-07-01)**: 사용자가 하이브리드 2-tier 채택을 명시 승인. 순수 24/7 상주는 `TFX_CTO_MODE=bridge` opt-in으로만 유지. 이 PRD는 하이브리드 기준으로 확정.
 

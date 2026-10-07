@@ -182,7 +182,6 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 | 파일 | 내용 |
 |------|------|
 | `.claude/rules/tfx-execution-skill-map.md` | tfx-auto / multi 실행 경로와 코드 변경 병렬 작업의 worktree 격리 기준 |
-| `.claude/rules/tfx-autoplan-principles.md` | gstack autoplan의 여섯 가지 결정 원칙·단계 우선순위·충돌 해소 규칙 추출본 |
 | `.claude/rules/tfx-update-logic.md` | triflux / OMC / gstack / Codex / Antigravity 업데이트 로직 |
 | `.claude/rules/tfx-stack-coexistence.md` | gstack / superpowers / triflux 공존 원칙, 레이어 분리, 의존 방향, 충돌 해소 |
 | `.claude/rules/tfx-mirror-policy.md` | packages/ 3계층 미러 정책(핵심 단순 복사 / 원격 가져오기 변환 / triflux 바이트 동일), 테스트 제외 규칙, 불일치 차단 |

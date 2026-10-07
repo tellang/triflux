@@ -1,3 +1,11 @@
+---
+paths:
+  - "scripts/tfx-route.sh"
+  - "scripts/lib/agent-route-policy.mjs"
+  - "hub/team/retry-state-machine.mjs"
+  - "skills/tfx-auto/**/*"
+  - ".triflux/config/escalation-chain.json"
+---
 # `--retry auto-escalate` 체인 규약
 
 `/tfx-auto --retry auto-escalate` 가 사용하는 CLI 승격 체인.

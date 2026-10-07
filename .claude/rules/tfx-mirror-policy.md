@@ -1,3 +1,9 @@
+---
+paths:
+  - "packages/**/*"
+  - "scripts/pack.mjs"
+  - "scripts/release/**/*"
+---
 # packages/ mirror 정책 — 3-layer single source
 
 ## 멘탈 모델

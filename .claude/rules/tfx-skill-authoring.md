@@ -1,3 +1,8 @@
+---
+paths:
+  - "skills/**/*"
+  - "scripts/lint-skills.mjs"
+---
 # TFX Skill Authoring SSOT
 
 이 문서는 Triflux 스킬 작성 규칙의 단일 정본이다. Claude Code와 Codex가

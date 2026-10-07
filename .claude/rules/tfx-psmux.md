@@ -1,5 +1,13 @@
 ---
-globs: **/*.ps1, **/launch-*.sh, **/tfx-route.sh, **/*psmux*, **/*wt-manager*, **/terminal-opener*
+paths:
+  - "**/*.ps1"
+  - "**/launch-*.sh"
+  - "**/tfx-route.sh"
+  - "**/*psmux*"
+  - "**/*wt-manager*"
+  - "**/terminal-opener*"
+  - "hub/codex-adapter.mjs"
+  - "scripts/lib/agent-route-policy.mjs"
 ---
 # tfx-psmux: Windows psmux와 Codex CLI 정책
 
