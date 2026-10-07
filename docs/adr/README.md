@@ -34,6 +34,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0025](0025-retire-swarm-execution-engine.md) | swarm 실행 엔진 퇴역 | Accepted | 0005, 0008, 0024 |
 | [0028](0028-per-run-codex-mcp-selection.md) | Codex MCP 선택은 전역 설정 교체 대신 실행별 -c 설정으로 한다 | Accepted | 0015 |
 | [0029](0029-lead-session-operating-model.md) | 리드가 세션의 생성부터 종료까지 소유한다 | Proposed | 0004, 0023 |
+| [0030](0030-tests-and-worktrees-do-not-write-user-state.md) | 테스트와 worktree는 실제 사용자 상태에 쓰지 않는다 | Proposed | 0028 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 
