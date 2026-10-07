@@ -897,8 +897,8 @@ test("Codex UDS clears turn timers and listeners on completion, timeout, error, 
   const cleared = new Set();
   globalThis.setTimeout = (...args) => {
     const handle = originalSetTimeout(...args);
-    if (new Error().stack.includes("runCodexAppServerTurn"))
-      allocated.push(handle);
+    // 비동기 재등록에서는 최초 호출 stack이 사라져도 타이머를 추적한다.
+    allocated.push(handle);
     return handle;
   };
   globalThis.clearTimeout = (handle) => {
