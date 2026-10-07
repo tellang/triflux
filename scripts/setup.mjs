@@ -22,7 +22,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from "fs";
-import { createRequire } from "module";
 import { homedir } from "os";
 import { basename, delimiter, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
@@ -40,7 +39,6 @@ import { parseFrontmatter } from "./lib/skill-template.mjs";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const require = createRequire(import.meta.url);
 // home 해석은 scripts/lib/machine-profile.mjs 가 정본이다. Windows 의 os.homedir()
 // 가 process.env.HOME swap 을 무시해 fixture 격리한 자식 프로세스가 실제 홈을
 // 건드리던 문제(#193 회귀)까지 그 모듈이 담고 있다.
@@ -1307,16 +1305,7 @@ function isProtectedSetupEnv(env = process.env) {
     Boolean(env.TRIFLUX_TEST_HOME) ||
     Boolean(env.TEST_LOCK_PID) ||
     Boolean(env.NODE_TEST_CONTEXT) ||
-    Boolean(env.NODE_TEST_WORKER_ID) ||
-    env.TFX_SKIP_CLOAKBROWSER_SETUP === "1"
-  );
-}
-
-function isCloakBrowserSupportedPlatform(platform, arch) {
-  return (
-    (platform === "linux" && (arch === "x64" || arch === "arm64")) ||
-    (platform === "darwin" && (arch === "x64" || arch === "arm64")) ||
-    (platform === "win32" && arch === "x64")
+    Boolean(env.NODE_TEST_WORKER_ID)
   );
 }
 
@@ -1382,17 +1371,6 @@ export function ensureTrifluxMods({
   }
 }
 
-// 버전 없이 받으면 최신이 깔린다. 키 없이 쓰는 무료 바이너리(v146)가 확인된 래퍼 버전만
-// package.json 에 고정해 받는다. 최신 바이너리(v152)는 로그인 키가 필요하다.
-function optionalDependencySpecs(root = PLUGIN_ROOT) {
-  const { optionalDependencies = {} } = JSON.parse(
-    readFileSync(join(root, "package.json"), "utf8"),
-  );
-  return Object.entries(optionalDependencies).map(
-    ([name, range]) => `${name}@${range}`,
-  );
-}
-
 // 예전에 배포했다가 그만둔 설치 파일. 내용에 배포 표식이 있을 때만 지운다.
 const RETIRED_INSTALL_FILES = [
   [
@@ -1415,75 +1393,6 @@ function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
     }
   }
   return removed;
-}
-
-function ensureCloakBrowser({
-  env = process.env,
-  platform = process.platform,
-  arch = process.arch,
-  requireResolve = require.resolve,
-  execFileSyncFn = execFileSync,
-  warn = (message) => console.warn(message),
-} = {}) {
-  if (isProtectedSetupEnv(env)) {
-    return {
-      ok: true,
-      installed: false,
-      skipped: true,
-      reason: "protected-env",
-    };
-  }
-
-  if (!isCloakBrowserSupportedPlatform(platform, arch)) {
-    warn(
-      `[setup] cloakbrowser optional setup skipped: unsupported_platform (${platform}/${arch})`,
-    );
-    return {
-      ok: true,
-      installed: false,
-      skipped: true,
-      reason: "unsupported_platform",
-    };
-  }
-
-  try {
-    requireResolve("cloakbrowser", { paths: [PLUGIN_ROOT] });
-    return { ok: true, installed: true, skipped: false, reason: "installed" };
-  } catch {
-    // CloakBrowser downloads its browser binary lazily on first launch; there is
-    // no separate browser install command to run here.
-  }
-
-  try {
-    execFileSyncFn(
-      "npm",
-      // 같은 패키지의 postinstall(setup)을 다시 부르면 무한 재귀가 된다.
-      [
-        "install",
-        "--no-save",
-        "--ignore-scripts",
-        ...optionalDependencySpecs(),
-      ],
-      {
-        cwd: PLUGIN_ROOT,
-        stdio: "ignore",
-        env,
-        timeout: 120_000,
-      },
-    );
-    return { ok: true, installed: true, skipped: false, reason: "installed" };
-  } catch (error) {
-    warn(
-      `[setup] cloakbrowser optional setup failed: ${_normalizeErrorMessage(error)}`,
-    );
-    return {
-      ok: false,
-      installed: false,
-      skipped: false,
-      reason: "install_failed",
-      error: _normalizeErrorMessage(error),
-    };
-  }
 }
 
 /**
@@ -2185,7 +2094,6 @@ export {
   DEPRECATED_SKILLS,
   detectDevMode,
   ensureAgyHooks,
-  ensureCloakBrowser,
   ensureCodexHooks,
   ensureCodexHubServerConfig,
   ensureCodexProfiles,
@@ -2319,15 +2227,6 @@ export async function runDeferred(stdinData) {
   const skillSync = syncSkills();
   for (const warning of skillSync.warnings) io.log(`  ⚠ ${warning}`);
   if (!skillSync.ok) return io.result(1);
-  const cloakBrowserResult = ensureCloakBrowser({
-    warn: (message) => io.log(`  \x1b[33m⚠\x1b[0m ${message}`),
-  });
-  if (
-    cloakBrowserResult.reason === "installed" &&
-    cloakBrowserResult.installed
-  ) {
-    io.log("  \x1b[32m✓\x1b[0m cloakbrowser optional backend ready");
-  }
   ensureTrifluxMods({
     install: argv.includes("--mods"),
     log: (message) => io.log(message),

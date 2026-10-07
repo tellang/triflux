@@ -79,7 +79,7 @@ Bash("tfx multi \
 
 #### Step 3: 결과 수집 및 교차검증
 
-수치와 인용은 검색 스니펫이 아니라 원문으로 확인한다. 원문은 아래 "URL 콘텐츠 수집" 순서로 가져온다.
+수치와 인용은 검색 스니펫이 아니라 원문으로 확인한다. 원문은 WebFetch, Tavily extract, Exa fetch 순서로 가져온다.
 
 교차검증 기준:
 1. 사실 일치
@@ -126,13 +126,6 @@ AskUserQuestion:
   4. 일반 웹 (Tavily)
   5. URL 콘텐츠 추출
 ```
-
-## URL 콘텐츠 수집 (stealth-first)
-
-모든 모드에서 URL 본문이 필요하면 WebFetch 보다 먼저 쓴다. Quick 의 `5. URL 콘텐츠 추출`, Deep Step 3 의 교차검증 원문 확인, Auto Step 4 의 핵심 정보 추출이 여기에 해당한다. 봇 차단, JS 렌더링, 쿠키 동의 화면이 있는 페이지도 읽는다.
-1. 먼저 `tfx stealth-fetch <url>` 을 실행한다(어느 디렉터리에서나 동작).
-2. exit 0 이면 stdout JSON 의 `html` 또는 `text` 를 URL 본문 근거로 사용한다.
-3. exit 3/4/5 이면 stderr/stdout 의 reason 을 확인하고 `stealth-fetch 폴백: <이유>` 1줄 경고 후 기존 폴백을 사용한다: WebFetch → Tavily extract → Exa fetch.
 
 ### Step 2: Antigravity Google Search 위임
 
@@ -181,7 +174,7 @@ Bash("bash ~/.claude/scripts/tfx-route.sh antigravity 'Research: use Google Sear
 brave-search MCP 우선, 없으면 WebSearch. 쿼리당 상위 5-10개, URL 중복 제거, 실패 시 쿼리 변형 재시도.
 
 ### Step 4: 핵심 정보 추출
-- 상위 결과는 "URL 콘텐츠 수집" 순서로 원문을 가져와 스니펫 대신 쓴다
+- 상위 결과는 WebFetch, Tavily extract, Exa fetch 순서로 원문을 가져와 스니펫 대신 쓴다
 - 제목/URL/스니펫 정규화
 - 관련성 높은 것 우선
 - 사실 vs 의견 구분

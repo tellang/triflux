@@ -60,7 +60,6 @@ import {
   formatPsmuxUpdateGuidance,
   probePsmuxSupport,
 } from "../scripts/lib/psmux-info.mjs";
-import { main as stealthFetchMain } from "../scripts/lib/stealth-fetch.mjs";
 import {
   applyStatusLine,
   buildWindowsHubAutostartCommand,
@@ -145,11 +144,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
           "Windows 로그인 시 tfx-hub를 보장하는 Task Scheduler 항목 등록",
       },
     ],
-  },
-  "stealth-fetch": {
-    usage: "tfx stealth-fetch <url>",
-    description:
-      "cloakbrowser 기반 단일 URL fetch (http/https only, JSON stdout)",
   },
   doctor: {
     usage:
@@ -4813,7 +4807,6 @@ function cmdHelp() {
     ${DIM}  --fix${RESET}        ${GRAY}진단 + 자동 수정${RESET}
     ${DIM}  --reset${RESET}      ${GRAY}캐시 전체 초기화${RESET}
     ${DIM}  --json${RESET}       ${GRAY}구조화된 진단 결과 JSON 출력${RESET}
-    ${WHITE_BRIGHT}tfx stealth-fetch${RESET} ${GRAY}cloakbrowser 기반 URL fetch (JSON stdout)${RESET}
     ${WHITE_BRIGHT}tfx mcp${RESET}        ${GRAY}MCP registry 관리 (list/sync/add/remove)${RESET}
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
     ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
@@ -5725,13 +5718,6 @@ async function main() {
         enableHubAutostart: cmdArgs.includes("--enable-hub-autostart"),
         mods: cmdArgs.includes("--mods"),
       });
-      return;
-    case "stealth-fetch":
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("stealth-fetch");
-        return;
-      }
-      await stealthFetchMain([process.argv[0], "stealth-fetch", ...cmdArgs]);
       return;
     case "doctor": {
       if (cmdArgs.some(isHelpArg)) {

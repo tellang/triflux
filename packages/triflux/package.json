@@ -24,10 +24,6 @@
     "@triflux/core": "^10.25.0",
     "@triflux/remote": "^10.25.0"
   },
-  "optionalDependencies": {
-    "cloakbrowser": "0.5.12",
-    "playwright-core": "^1.53.0"
-  },
   "files": [
     "adapters",
     "bin",

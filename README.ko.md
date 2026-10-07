@@ -140,7 +140,6 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 | `tfx cto` | 저장소 단위 권위 콘솔: `collect`, `status`, `hygiene`(dry-run) |
 | `tfx codex-team` | Codex 주도 팀 모드 |
 | `bash ~/.claude/scripts/tfx-route.sh code-reviewer "<지시>"` | 정책에 따라 `codex exec review`로 리뷰 전달 |
-| `tfx stealth-fetch <url>` | cloakbrowser로 URL 하나를 가져옴(JSON을 stdout으로) |
 | `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | Notion → Markdown, 커밋 intent 트레일러, CLI 스키마, 설치된 스킬, TUI 모니터, 업데이트, 버전 |
 | `tfx-live` | 라이브 세션 브리지(`/tfx-live` 스킬과 같은 명령) |
 

@@ -60,7 +60,6 @@ test("mods skips protected environments and old/missing CLIs; failures only warn
     { TEST_LOCK_PID: "1" },
     { NODE_TEST_CONTEXT: "child-v8" },
     { NODE_TEST_WORKER_ID: "1" },
-    { TFX_SKIP_CLOAKBROWSER_SETUP: "1" },
     { npm_lifecycle_event: "postinstall" },
   ]) {
     const { result, calls } = runMods({ env, install: true });
