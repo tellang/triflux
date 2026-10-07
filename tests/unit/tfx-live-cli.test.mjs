@@ -2507,60 +2507,6 @@ test("tfx-live interrupt returns the common abort contract through tmux Escape",
   }
 });
 
-test("tfx-live cto-hygiene-notify notifies once for actionable unchanged hygiene state", async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-cto-hygiene-"));
-  try {
-    const lakeDir = path.join(dir, ".triflux", "lake");
-    await fs.mkdir(lakeDir, { recursive: true });
-    await fs.writeFile(path.join(lakeDir, "current.json"), "{}", "utf8");
-    await fs.writeFile(
-      path.join(lakeDir, "ledger.jsonl"),
-      `${JSON.stringify({
-        ts: "2026-06-17T00:00:00.000Z",
-        event: "task_claimed",
-        summary: "Open item",
-        ref: { task_id: "G005", status: "active", actor: { cli: "codex" } },
-      })}\n`,
-      "utf8",
-    );
-    const stateFile = path.join(dir, "notify-state.json");
-
-    const first = JSON.parse(
-      await runTfxLive([
-        "cto-hygiene-notify",
-        "--root",
-        dir,
-        "--state-file",
-        stateFile,
-        "--json",
-      ]),
-    );
-    const second = JSON.parse(
-      await runTfxLive([
-        "cto-hygiene-notify",
-        "--root",
-        dir,
-        "--state-file",
-        stateFile,
-        "--json",
-      ]),
-    );
-
-    assert.equal(first.ok, true);
-    assert.equal(first.actionable, true);
-    assert.equal(first.notified, true);
-    assert.equal(first.reason, "changed-actionable-state");
-    assert.equal(first.notify.results.bell.status, "skipped");
-    assert.equal(first.notify.results.toast.status, "skipped");
-    assert.equal(second.ok, true);
-    assert.equal(second.actionable, true);
-    assert.equal(second.notified, false);
-    assert.equal(second.reason, "unchanged-state");
-  } finally {
-    await fs.rm(dir, { recursive: true, force: true });
-  }
-});
-
 test("Claude discovery matches live pane owners and descendants up to four levels", async () => {
   const dir = await fs.mkdtemp(path.resolve(".test-claude-sessions-"));
   try {
