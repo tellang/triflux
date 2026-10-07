@@ -73,7 +73,7 @@ claude plugin install triflux@triflux
 | --- | --- |
 | `/tfx-auto` | 구현, 수정, 리뷰, 병렬 작업의 진입점. 동작은 아래 플래그로 정한다. |
 | `/tfx-live` | Claude↔Codex 라이브 세션. `start`/`ask`/`stop`, `peer` 중계, `orchestrate`, `list-sessions`. |
-| `/tfx-remote` | SSH 너머 원격 Claude Code 세션. `setup`, `spawn`, `list`, `attach`, `send`, `resume`, `probe`, `kill`. |
+| `/tfx-remote` | SSH 원격 Claude Code 세션 시작, 조회, 재부착, 메시지 전송, 준비 상태 확인, 모니터링, 종료. |
 | `/tfx-setup` | 대화형 설정. 파일 동기화, HUD, Codex 프로필, MCP, 훅 우선순위. |
 | `/tfx-doctor` | 진단과 복구. Hub 시작·중지·상태 확인도 여기서 한다. |
 | `/tfx-ship` | triflux 릴리즈 절차(메인테이너용). |
@@ -176,12 +176,13 @@ Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-s
 
 **CTO lake.** `tfx cto collect`로 `.triflux/lake/`의 저장소 스냅샷을 갱신하고,
 `tfx cto status`로 생성 시각과 경과 시간을 확인한다. `tfx cto hygiene --dry-run`는 dry-run 결과를
-보고한다. 트레이와 쓰이지 않는 CTO 운영 명령은 제거했다
+보고한다. 트레이와 쓰이지 않는 CTO 운영 명령은 제거하였다
 ([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)). 자동 수집은 기본으로 꺼져 있고 `TFX_CTO_AUTO_COLLECT=1` 로 켠다([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)).
 
 **원격 호스트.** `/tfx-remote`는 `~/.config/triflux/hosts.json`
-(Windows는 `%APPDATA%\triflux\hosts.json`)에서 호스트를 읽는다. `/tfx-remote setup`으로 호스트를
-추가한 뒤 `/tfx-remote spawn <host> "보안 리뷰 실행"`처럼 쓴다.
+(Windows는 `%APPDATA%\triflux\hosts.json`)에서 호스트를 읽는다. 세션 시작은
+`remote-spawn.mjs`의 `--host <host> --prompt "<요청>"` 옵션을 사용한다.
+[실행 옵션](skills/tfx-remote/SKILL.md)을 따른다.
 
 ## 구조
 

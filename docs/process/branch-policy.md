@@ -16,6 +16,7 @@
 | 기능 | `feat/<issue>-<slug>` | 사용자·시스템 기능 | PR 경유 |
 | 버그 | `fix/<issue>-<slug>` | 버그 수정 | PR 경유 |
 | 문서 | `docs/<issue>-<slug>` | 문서만 변경 | PR 경유 |
+| 유지보수 | `chore/<issue>-<slug>` | 설정과 의존성 등 유지보수 | PR 경유 |
 | 리팩터 | `refactor/<issue>-<slug>` | 동작 보존 정리 | PR 경유 |
 | 릴리즈(선택) | `release/<version>` | 단기 안정화 브랜치 | 필요 시에만 |
 | 스파이크 | `spike/<date>-<slug>` | 폐기용 조사 | promote 없으면 머지 금지 |
@@ -43,7 +44,7 @@
 | 상황 | 경로 | 격리 |
 |---|---|---|
 | 2+ 태스크 + 코드 변경 | 작업별 worktree와 세션에서 `tfx-auto` | YES |
-| 2+ 태스크 + read-only | `tfx-multi` (로컬 headless 병렬) | NO (cwd 공유) |
+| 2+ 태스크 + read-only | `tfx multi` (로컬 병렬) | NO (cwd 공유) |
 | 원격 + 코드 변경 | 원격 세션별 worktree에서 `tfx-auto` | YES |
 | 원격 + 탐색/대화형 | `tfx-remote` | NO (SSH 단일 세션) |
 
@@ -64,7 +65,7 @@ resume·compaction 이후 또는 링크된 worktree 안에서 편집을 시작�
 
 ## 관련 문서
 
-- [PR 리뷰 계약](pr-review-contract.md) — 교차리뷰·머지 전 검증 게이트
+- [PR 리뷰 계약](pr-review-contract.md): 교차리뷰·머지 전 검증 게이트
 - [`.claude/rules/tfx-execution-skill-map.md`](../../.claude/rules/tfx-execution-skill-map.md) : worktree/multi 격리 기준
-- [`.claude/rules/tfx-routing.md`](../../.claude/rules/tfx-routing.md) — 실행/라우팅 정책
+- [`.claude/rules/tfx-routing.md`](../../.claude/rules/tfx-routing.md): 실행/라우팅 정책
 - [PRD 01: 브랜치+Issue/PR 거버넌스](../prd/release-governance/01-branch-issue-pr-governance.md)

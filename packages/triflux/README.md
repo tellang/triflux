@@ -75,7 +75,7 @@ Skills you invoke directly:
 | --- | --- |
 | `/tfx-auto` | Front door for implementing, fixing, reviewing, and parallel work. Behavior is set by flags (below). |
 | `/tfx-live` | Live Claude↔Codex sessions: `start`/`ask`/`stop`, `peer` relay, `orchestrate`, `list-sessions`. |
-| `/tfx-remote` | Remote Claude Code sessions over SSH: `setup`, `spawn`, `list`, `attach`, `send`, `resume`, `probe`, `kill`. |
+| `/tfx-remote` | SSH 원격 Claude Code 세션 시작, 조회, 재부착, 메시지 전송, 준비 상태 확인, 모니터링, 종료. |
 | `/tfx-setup` | Interactive setup: file sync, HUD, Codex profiles, MCP, hook priority. |
 | `/tfx-doctor` | Diagnose and repair; also starts, stops, and checks the Hub. |
 | `/tfx-ship` | triflux release flow (maintainers). |
@@ -181,9 +181,9 @@ falling back. Details: [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tf
 dry-run findings. The tray and unused CTO operating commands were removed
 ([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)). Automatic collection stays off unless `TFX_CTO_AUTO_COLLECT=1` is set ([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)).
 
-**Remote hosts.** `/tfx-remote` reads hosts from `~/.config/triflux/hosts.json`
-(Windows: `%APPDATA%\triflux\hosts.json`). Run `/tfx-remote setup` to add one, then
-`/tfx-remote spawn <host> "run a security review"`.
+**원격 호스트.** `/tfx-remote`는 `~/.config/triflux/hosts.json`에서 호스트를 읽는다
+(Windows: `%APPDATA%\triflux\hosts.json`). 세션 시작은 `remote-spawn.mjs`의
+`--host <host> --prompt "<요청>"` 옵션을 사용한다. [실행 옵션](skills/tfx-remote/SKILL.md)을 따른다.
 
 ## Architecture
 

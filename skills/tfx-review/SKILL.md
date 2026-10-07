@@ -5,7 +5,7 @@ description: "코드 리뷰가 필요할 때 사용한다. 'review', '리뷰해�
 argument-hint: "[파일 경로 또는 변경 설명] [--quick]"
 ---
 
-# tfx-review — Code Review (Deep by Default)
+# tfx-review 코드 리뷰
 
 > **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
 > 워크플로우의 첫 단계 입력으로 사용한다. `--quick` 플래그 감지 시 quick 경로로 분기.
@@ -24,10 +24,10 @@ argument-hint: "[파일 경로 또는 변경 설명] [--quick]"
 
 ## 기본값: Deep (3-CLI Consensus)
 
-> AI makes completeness near-free. 기본은 풀프라이스 딥. 빠른 피드백은 `--quick` opt-out.
+> 기본은 Deep 모드다. 빠른 피드백은 `--quick`을 지정한다.
 
 **Anti-Herding**: Round 1에서 3개 CLI가 서로의 결과를 보지 않고 독립 리뷰.
-**Consensus Only**: 2개 이상 CLI가 동일 이슈를 지적한 항목만 최종 보고 → false-positive 87% 감소.
+**Consensus Only**: 2개 이상 CLI가 동일 이슈를 지적한 항목을 합의 결과로 보고한다. 단독 지적은 별도 섹션에 둔다.
 
 ---
 
@@ -42,7 +42,7 @@ ARGUMENTS 에 `--quick` 포함 → **Quick 모드** (아래 Quick 섹션).
 
 ### 전제조건 프로브
 
-> **진입 즉시 실행** — 10초 내 가시적 출력 보장. 빈 stdout + exit 0 **금지**.
+> **진입 즉시 실행**: 10초 내 가시적 출력 보장. 빈 stdout + exit 0 **금지**.
 
 ```bash
 (tmux -V 2>/dev/null || psmux -V 2>/dev/null) && \
@@ -81,7 +81,7 @@ ELSE:
 ### Tier 3 진입 시 필수 출력
 
 ```
-⚠ [Tier 3] multi 실행 환경 미충족 — single-model 모드로 실행합니다 (consensus 미적용)
+⚠ [Tier 3] multi 실행 환경 미충족: single-model 모드로 실행합니다 (consensus 미적용)
   누락: {missing_components}
   권장: Hub, Codex CLI, Antigravity CLI 설치 후 재실행
   또는 /tfx-review --quick 으로 명시적 quick 경로 사용
@@ -109,7 +109,7 @@ ELSE:
 #### Step 1: 리뷰 대상 수집
 `git diff` (staged + unstaged) 또는 사용자 지정 파일.
 
-#### Step 2: 3-CLI 독립 리뷰 — Bash + Agent 동시 호출
+#### Step 2: 3-CLI 독립 리뷰: Bash + Agent 동시 호출
 
 **Claude Agent (로직+아키텍처):**
 ```
@@ -128,7 +128,7 @@ Agent(
 Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분석하라. OWASP Top 10 취약점 확인. O(n²) 이상의 성능 병목 식별. 누락된 에러 핸들링 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:code-reviewer' --assign 'antigravity:코드 품질 전문가로서 이 코드를 분석하라. 가독성과 네이밍 컨벤션 평가. 주석이 필요한 복잡한 로직 식별. 타입 안전성 문제 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:code-reviewer' --timeout 1800", run_in_background=true)
 ```
 
-> 배리어: 위 dispatch는 background — task-notification 완료 후 team runtime 결과에서 Codex/Antigravity findings를 회수하고, Agent 결과도 TaskOutput으로 수집한 다음에만 Step 3을 진행한다.
+> 배리어: 위 dispatch는 background로 실행한다. task-notification 완료 후 team runtime 결과에서 Codex/Antigravity findings를 회수하고, Agent 결과도 TaskOutput으로 수집한 다음에만 Step 3을 진행한다.
 
 #### Step 3: Consensus Scoring
 
@@ -147,19 +147,19 @@ Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분�
 **Consensus Score**: {score}% | **Reviewers**: Claude/Codex/Antigravity
 
 ### Critical (3/3 합의)
-- [C1] `{file}:{line}` — {description}
+- [C1] `{file}:{line}`: {description}
   - Claude: {detail} | Codex: {detail} | Antigravity: {detail}
   - **Fix**: {suggestion}
 
 ### High (2/3 합의)
-- [H1] `{file}:{line}` — {description}
+- [H1] `{file}:{line}`: {description}
   - 합의: {agreers} | 반대: {dissenter}: "{reason}"
 
 ### Verified Medium
 - ...
 
 ### Unverified (1/3만 지적, 참고용)
-- [U1] `{file}:{line}` — {description} (by {single_cli})
+- [U1] `{file}:{line}`: {description} (by {single_cli})
 
 ### 통계
 | CLI | 발견 수 | 합의 기여율 |
@@ -175,8 +175,8 @@ Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분�
 |------|------|
 | multi dispatch 타임아웃 | 부분 출력(PARTIAL OUTPUT/.partial) 먼저 회수, 미완료분만 `--timeout 3600` + run_in_background 로 재시도 |
 | Agent 결과 미수신 | Step 2를 Agent만 단독 재실행 |
-| consensus 0% | 대상 범위가 너무 넓음 — 파일 단위 분할 후 재실행 |
-| `tfx multi` 명령 실패 | `tfx status`로 teammate 연결 상태 확인 |
+| consensus 0% | 대상 범위가 너무 넓음: 파일 단위 분할 후 재실행 |
+| `tfx multi` 명령 실패 | 명령의 stderr와 Hub 상태를 확인 |
 | 모든 CLI 실패 | Tier 3 fallback → Claude Agent single |
 
 ### 토큰 예산 (Deep)
@@ -214,16 +214,16 @@ bash ~/.claude/scripts/tfx-route.sh code-reviewer \
 
 ### Step 3: 결과 포맷
 ```markdown
-## Code Review: {target} (Quick — single CLI)
+## Code Review: {target} (Quick, single CLI)
 
 ### Critical (즉시 수정)
-- [C1] {파일:라인} — {설명}
+- [C1] {파일:라인}: {설명}
 
 ### High (수정 권장)
-- [H1] {파일:라인} — {설명}
+- [H1] {파일:라인}: {설명}
 
 ### Medium (개선 제안)
-- [M1] {파일:라인} — {설명}
+- [M1] {파일:라인}: {설명}
 
 ### Summary
 {전체 코드 품질 평가 1-2줄}

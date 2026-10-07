@@ -1,16 +1,16 @@
 ---
 name: tfx-wt
 description: >
-  Windows Terminal 탭/패인 자연어 조작. 사용자가 "새 탭 열어줘", "패인 분할",
+  Windows Terminal 패인과 탭 상태 조작. 사용자가 "패인 분할",
   "탭 목록", "탭 닫아" 같은 한국어/영어 표현을 쓰면 wt-cli.mjs 경유로 wt-manager API 호출.
   Windows Terminal 명령은 이 스킬에서 관리 API를 경유한다.
-  Use when: 새 탭, tab open, 패인, pane split, 탭 목록, 탭 닫아, wt 탭, wt 패인
-argument-hint: "<create-tab|split-pane|layout|list|close|close-stale|rename> [json-opts]"
+  Use when: 패인, pane split, 탭 목록, 탭 닫아, wt 탭, wt 패인
+argument-hint: "<split-pane|layout|list|close|close-stale|rename> [json-opts]"
 platform:
   - win32
 ---
 
-# tfx-wt — Windows Terminal 자연어 조작
+# tfx-wt Windows Terminal 조작
 
 > **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급한다.
 > ARGUMENTS가 비어있거나 없으면 사용자에게 의도 확인 후 적절한 action 으로 라우팅한다.
@@ -26,9 +26,9 @@ frontmatter `platform: [win32]` 때문에 `tfx setup` 은 macOS/Linux 에 이 �
 | OS | 동작 | 라우팅 |
 |----|------|--------|
 | Windows | `wt.exe` 실제 호출 (wt-manager 경유) | **tfx-wt 가 담당** |
-| macOS / Linux | `createWtManager()` 가 stub 반환 (PR #241). 모든 action no-op | **`terminal-opener.mjs` 가 tmux 경로로 담당** (PR #236). tfx-wt 는 사용자에게 안내만 |
+| macOS / Linux | `createWtManager()` 가 stub 반환. 모든 action no-op | **`terminal-opener.mjs` 가 tmux 경로로 담당**. tfx-wt 는 사용자에게 안내만 |
 
-### 분리 정신 (PR #236, #241)
+### 구성 요소
 
 | 레이어 | 역할 |
 |--------|------|
@@ -46,7 +46,6 @@ macOS 사용자가 "탭 열어"라고 했는데 본 스킬로 들어오면 잘�
 
 | 자연어 입력 | action | 예시 |
 |------------|--------|------|
-| 새 탭, tab open, 탭 추가/생성/열어/띄워, 터미널 탭 | `create-tab` | "새 탭 열어줘" |
 | 패인 분할, pane split, 화면 나눠 | `split-pane` | "패인 가로로 분할" |
 | 탭 + 여러 개 동시 배치, layout, dashboard | `layout` | "워커 3개 가로로 배치" |
 | 탭 목록, 탭 리스트, 열린 탭, 현재 탭 | `list` | "지금 탭 뭐있어" |
@@ -56,20 +55,20 @@ macOS 사용자가 "탭 열어"라고 했는데 본 스킬로 들어오면 잘�
 
 ## wt + psmux 통합 패턴 (Windows 기본 사용 흐름)
 
-triflux 의 WT `triflux` 프로파일은 **commandline = psmux** (wt-manager:319 의 `ensureWtProfile`). 즉 wt 의 새 탭/패인 = wt 가 컨테이너, **그 안에서 psmux 가 멀티플렉서로 도는 구조**. 대시보드와 장기 세션에 이 형태를 쓴다.
+triflux 의 WT `triflux` 프로파일은 `ensureWtProfile`에서 psmux를 commandline으로 설정한다. WT 패인은 컨테이너이고, 그 안에서 psmux가 세션을 유지한다.
 
 | 레이어 | 역할 |
 |--------|------|
 | wt | 윈도우 / 탭 / 패인 컨테이너 |
 | psmux (탭 내부 default 셸) | 세션 호스팅. detach → wt 닫혀도 살아있음 → 재첨부 가능 |
 
-전형적인 `wt sp` 한 줄 (`.claude/rules/tfx-psmux.md` RULE 5-3 인용):
+패인 분할 명령의 형태는 `.claude/rules/tfx-psmux.md` 규칙 5-3을 따른다.
 
 ```bash
 wt.exe -w 0 sp -H -p triflux --title "worker" psmux attach-session -t SESSION
 ```
 
-이걸 본 스킬에서 호출하려면 `split-pane` 또는 `create-tab` 의 `command` 에 `psmux attach-session -t <session>` 을 넣는다. 다중 worker 동시 배치는 `layout`.
+이걸 본 스킬에서 호출하려면 `split-pane`의 `command` 에 `psmux attach-session -t <session>` 을 넣는다. 다중 worker 동시 배치는 `layout`.
 
 ### 세션 다중 배치 (전형)
 
@@ -83,16 +82,6 @@ node scripts/wt-cli.mjs layout '[
 
 각 패인이 미리 띄워둔 psmux session (s1/s2/s3) 에 attach. wt 패인 닫혀도 psmux session 은 살아있어 재시작 후 reattach 가능.
 
-### 일반 명령 실행 (psmux 통합 불필요한 경우)
-
-장기 세션이 아니고 단발 명령이면 psmux 우회 가능:
-
-```bash
-node scripts/wt-cli.mjs create-tab '{"title":"build","command":"npm run build","profile":"triflux"}'
-```
-
-`profile: "triflux"` 가 자동으로 psmux 를 셸로 띄우긴 하지만, `command` 가 즉시 종료되면 `closeOnExit: "always"` (wt-manager:331) 로 패인도 닫힘.
-
 ## 실행
 
 `scripts/wt-cli.mjs` 가 `wt-manager` 의 thin wrapper. json-opts 는 단일 인자로 전달.
@@ -101,22 +90,7 @@ node scripts/wt-cli.mjs create-tab '{"title":"build","command":"npm run build","
 node scripts/wt-cli.mjs <action> '<json-opts>'
 ```
 
-### create-tab — 새 탭 생성
-
-```bash
-node scripts/wt-cli.mjs create-tab '{"title":"backend","command":"npm run dev","profile":"triflux","cwd":"C:\\path"}'
-```
-
-| 옵션 | 필수 | 기본 |
-|------|------|------|
-| `title` | 권장 | 자동 |
-| `command` | 권장 | shell |
-| `profile` | 선택 | "triflux" |
-| `cwd` | 선택 | 현재 |
-
-반환: `{ success, title, id? }`
-
-### split-pane — 패인 분할
+### split-pane: 패인 분할
 
 ```bash
 node scripts/wt-cli.mjs split-pane '{"direction":"H","title":"logs","command":"tail -f log"}'
@@ -128,7 +102,7 @@ node scripts/wt-cli.mjs split-pane '{"direction":"H","title":"logs","command":"t
 | `title` | string | 패인 제목 |
 | `command` | string | 실행할 명령 |
 
-### layout — 다중 패인 배치
+### layout: 다중 패인 배치
 
 ```bash
 node scripts/wt-cli.mjs layout '[{"title":"w1","command":"...","direction":"H"},{"title":"w2","command":"...","direction":"V"}]'
@@ -136,7 +110,7 @@ node scripts/wt-cli.mjs layout '[{"title":"w1","command":"...","direction":"H"},
 
 또는 객체 형태: `'{"panes":[...]}'`. 대시보드와 여러 세션 배치에 사용.
 
-### list — 탭 목록
+### list: 탭 목록
 
 ```bash
 node scripts/wt-cli.mjs list
@@ -144,15 +118,15 @@ node scripts/wt-cli.mjs list
 
 반환: `[{ title, id, ... }]`. macOS/Linux 에서는 `[]`.
 
-### close — 탭 닫기
+### close: 탭 닫기
 
 ```bash
 node scripts/wt-cli.mjs close '{"title":"worker-1"}'
 ```
 
-`title` 은 정확 일치 또는 prefix. **단일 탭** 닫기.
+`title`은 정확히 일치하는 탭 하나를 닫는다.
 
-### close-stale — 오래된 탭 정리
+### close-stale: 오래된 탭 정리
 
 ```bash
 node scripts/wt-cli.mjs close-stale '{"olderThanMs":3600000,"titlePattern":"worker-"}'
@@ -160,28 +134,27 @@ node scripts/wt-cli.mjs close-stale '{"olderThanMs":3600000,"titlePattern":"work
 
 | 옵션 | 의미 |
 |------|------|
-| `olderThanMs` | 이 ms 이상 idle 탭만 |
-| `titlePattern` | title prefix 또는 regex 매칭만 |
-| `dryRun` | true 시 닫을 후보만 반환 |
+| `olderThanMs` | 생성 시각에서 이 시간이 지난 탭 |
+| `titlePattern` | 문자열이 포함된 제목만 선택 |
 
-반환: `{ success, closed: ["title-1", ...] }`
+반환: `{ success: true, closed: <닫은 탭 수> }`
 
-### rename — 탭 이름 변경
+### rename: 탭 이름 변경
 
 ```bash
-node scripts/wt-cli.mjs rename '{"title":"old","newTitle":"backend"}'
+node scripts/wt-cli.mjs rename '{"oldTitle":"old","newTitle":"backend"}'
 ```
 
-## CLAUDE.md 규칙 준수
+## CLAUDE.md 규칙
 
-CLAUDE.md `psmux-wt > wt.exe → wt-manager 경유` 섹션:
+실행 규칙은 `.claude/rules/tfx-psmux.md`의 규칙 6과 8을 따른다.
 
 | 차단되는 직접 호출 | 이 스킬 경유 |
 |-------------------|-------------|
-| `wt.exe new-tab ...` | `create-tab` |
+| `wt.exe new-tab ...` | 새 탭 생성 대신 `split-pane` 또는 `layout` |
 | `wt.exe split-pane ...` | `split-pane` |
 | `wt.exe -w 0 sp -H ...` | `layout` (다중) 또는 `split-pane` (단일) |
-| `Start-Process wt.exe ...` (PowerShell) | `create-tab` |
+| `Start-Process wt.exe ...` (PowerShell) | `split-pane` 또는 `layout` |
 
 Windows Terminal 요청은 `tfx-wt`에서 `wt-cli.mjs`를 경유해 실행한다.
 
@@ -189,19 +162,13 @@ Windows Terminal 요청은 `tfx-wt`에서 `wt-cli.mjs`를 경유해 실행한다
 
 | 패턴 | 문제 | 대체 |
 |------|------|------|
-| `Bash("wt.exe new-tab ...")` | 관리 API를 거치지 않음 | `node scripts/wt-cli.mjs create-tab '{...}'` |
-| macOS 에서 "탭 열어" 받고 강제 실행 시도 | wt-manager stub 반환 → 효과 없음 + 혼란 | "Windows Terminal 미설치 환경 — no-op" 명시 후 종료 |
-| `wt.exe -w 0 nt` (새 창) | CLAUDE.md tfx-psmux.md RULE 5-3 금지 | `sp -H` / `sp -V` (split) 사용 |
-| 다중 패인을 `create-tab` N회 호출 | 새 창 N개 띄우기 | `layout` 한 번 호출 |
+| `Bash("wt.exe new-tab ...")` | 규칙 8의 새 탭 금지 | `node scripts/wt-cli.mjs split-pane '{...}'` |
+| macOS 에서 "탭 열어" 받고 강제 실행 시도 | wt-manager stub 반환 → 효과 없음 + 혼란 | "Windows Terminal 미설치 환경: no-op" 명시 후 종료 |
+| 다중 패인을 개별 생성 | 여러 번 배치해야 함 | `layout` 한 번 호출 |
 
 ## 관련
 
-- `scripts/wt-cli.mjs` — CLI wrapper (이 스킬이 호출)
-- `hub/team/wt-manager.mjs` — 실제 구현체 (`createTab`, `splitPane`, `applySplitLayout`, `closeTab`, `closeStale`, `renameTab`, `listTabs`)
-- CLAUDE.md `psmux-wt` 섹션 — wt-manager API 가이드
-- `.claude/rules/tfx-psmux.md` — psmux/WT 정책 RULE 5/6
-
-## 메모
-
-- PR #241 (5/8) 이후 macOS/Linux 에서도 안전. wt-manager 가 stub 반환하므로 crash 없이 no-op.
-- 4/11 b313c648 커밋에서 CLI만 추가하고 SKILL.md를 빠뜨린 문제가 issue #248에서 발견되어 본 스킬을 추가했다.
+- `scripts/wt-cli.mjs`: CLI wrapper (이 스킬이 호출)
+- `hub/team/wt-manager.mjs`: 실제 구현체 (`splitPane`, `applySplitLayout`, `closeTab`, `closeStale`, `renameTab`, `listTabs`)
+- CLAUDE.md `psmux-wt` 섹션: wt-manager API 가이드
+- `.claude/rules/tfx-psmux.md`: psmux/WT 정책 규칙 5, 6, 8

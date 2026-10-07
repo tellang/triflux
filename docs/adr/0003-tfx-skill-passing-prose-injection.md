@@ -25,4 +25,4 @@ triflux는 codex/antigravity를 100% headless(`codex exec` / `agy --print`)로 �
 - 참고: 레퍼런스 오케스트레이션 프로젝트도 정확히 prose 주입을 쓰고 네이티브 스킬을 의도적으로 회피(자기 role .md를 raw text prepend). 검증된 패턴.
 
 ## 결과 (Consequences)
-긍정: headless에서 결정적 스킬 전달, DRY, parse-safe($·₩·`\\`·`--flag` 리터럴 보존, 테스트 9개). Gemini 3.x 과신 완화(ITEM3)를 agy 레인 anti-overclaim prose로 통합. 부정/리스크: live 실프로세스 transcript는 headless-guard로 미실행 — 정적 + 함수레벨 단위테스트로 리터럴 보존을 증명(갈음). 구현: commit 31594494, PR #387. 상세 근거는 `.triflux/plans/decision-tfx-skill-passing.md`(원본, 승격됨).
+긍정: headless에서 결정적 스킬 전달, DRY, parse-safe($·₩·`\\`·`--flag` 리터럴 보존, 테스트 9개). Gemini 3.x 과신 완화(ITEM3)를 agy 레인 anti-overclaim prose로 통합. 부정/리스크: live 실프로세스 transcript는 headless-guard로 미실행 — 정적 + 함수레벨 단위테스트로 리터럴 보존을 증명(갈음). 구현: commit 31594494, PR #387. 상세 근거는 (폐기성 계획 문서였고 2026-10-08 슬롭 정리에서 삭제).

@@ -8,8 +8,7 @@
 
 triflux는 Claude Code용 **플러그인 + npm CLI**로, AI 코딩 작업을
 **Codex / Claude / Antigravity** 세 CLI에 라우팅하고 오케스트레이션하는
-멀티모델 도구다. 사용자는 `/tfx-auto`(Claude Code 스킬 프런트 도어) 또는
-`tfx`(셸 CLI) 하나만 알면 되고, 그 뒤에서 로컬/원격 팀·스웜 실행,
+멀티모델 도구다. 사용자는 `/tfx-auto` 스킬 또는 `tfx` CLI로 작업을 요청한다. 로컬·원격 팀 실행,
 가드(guard), 허브(Hub) 메시지 버스가 실제 실행을 관리한다.
 
 ## 패키지 레이아웃
@@ -19,7 +18,7 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 
 | 레이어 | 역할 | 미러 방식 |
 |--------|------|-----------|
-| **root** | 개발 SSOT — 모든 런타임 파일의 정본 | — |
+| **root** | 개발 SSOT: 모든 런타임 파일의 정본 | 해당 없음 |
 | `packages/core` (`@triflux/core`) | 공용 라이브러리 (`hub/`, `hud/`, `hooks/`, `scripts/` helper) | root와 byte-identical `cp` |
 | `packages/remote` (`@triflux/remote`) | 원격 실행용 서브셋 (`hub/`, `cto/`, `scripts/`) | root 서브셋 + `@triflux/core/...` import 경로 변환 |
 | `packages/triflux` (`triflux` npm) | 사용자 대상 CLI/런타임 (`bin/`, `config/`, `hooks/`, `hub/`, `hud/`, `cto/`, `scripts/`, `skills/`, `tui/`, `docs/`) | npm `files` 기준 byte-identical 미러 |
@@ -30,7 +29,7 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 
 ## 핵심 컴포넌트
 
-최상위 런타임 디렉토리와 각 역할:
+주요 디렉터리와 역할:
 
 | 디렉토리 | 역할 | 대표 파일 |
 |----------|------|-----------|
@@ -40,9 +39,14 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 | `hub/` 하위 | 세분 모듈 | `delegator/`, `diagnostics/`, `lib/`, `middleware/`, `pipeline/`, `workers/` |
 | `hooks/` | Codex 및 Antigravity 세션 연결과 전환용 stub | `codex-session-hook.mjs`, `agy-session-hook.mjs` |
 | `hud/` | 상태 표시(HUD) / 모니터 | `context-monitor.mjs`, `renderers.mjs`, `providers/` |
-| `cto/` | CTO 콘솔 — 멀티세션 수집·요약·위생(hygiene) | `collect.mjs`, `brief.mjs`, `status.mjs`, `hygiene.mjs` |
+| `cto/` | CTO 콘솔: 멀티세션 수집·요약·위생(hygiene) | `collect.mjs`, `brief.mjs`, `status.mjs`, `hygiene.mjs` |
 | `scripts/` | 라우팅 스크립트 + 릴리즈 게이트 | `tfx-route.sh`(라우팅 엔진), `scripts/release/`(릴리즈 자동화), `scripts/lib/`(공용 helper) |
 | `skills/` | Claude Code 스킬 정의 (`SKILL.md`) | `tfx-auto`, `tfx-remote`, `tfx-doctor` 등 |
+| `tui/` | 터미널 UI와 상태 모니터 | `core.mjs`, `monitor.mjs`, `doctor.mjs`, `setup.mjs` |
+| `config/` | MCP 서버 설정 | `mcp-registry.json` |
+| `adapters/` | CLI 어댑터 지원 파일 | `codex/` |
+| `experiments/` | 실험 자료 | `native-bridge-feasibility/` |
+| `references/` | 분석 참고 자료 | `codex-plugin-cc-analysis.md`, `codex-plugin-cc-code-patterns.md` |
 
 ## 실행 경로
 
@@ -58,7 +62,7 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 ```
 
 - **기본 CLI lane은 Codex다.** Antigravity는 cross-check / quota 대체,
-  Claude opus는 메타 라우팅과 최종 수단 lane이다.
+  Claude는 메타 라우팅과 최종 수단 lane이다.
 - 라우팅 판정(자연어 → 스킬, Layer 1~3, 충돌 해소)은
   [`.claude/rules/tfx-routing.md`](.claude/rules/tfx-routing.md),
   실행 경로와 코드 변경 병렬 작업의 격리 기준은
@@ -69,7 +73,7 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 Hub는 팀·원격 세션·MCP 도구·상태 표면을 잇는 로컬 메시지 버스다. localhost에
 바인딩하며 `tfx hub ensure` / `tfx hub status` / `tfx hub stop`으로 관리한다.
 
-### 가드(Guards)
+### 실행 경계
 
 triflux는 위험한 실행을 관리된 경로 뒤에 둔다. 직접 `codex exec`,
 관리되지 않은 `agy`, 폐기된 `gemini` 경로는 라우팅 규약으로 금지한다(자동 차단
@@ -83,14 +87,10 @@ triflux는 gstack·superpowers와 **레이어 분리** 관계로 공존한다.
 
 | 레이어 | 시스템 | 역할 |
 |--------|--------|------|
-| 무대(Stage) | gstack | 워크플로우 게이트 (`/ship`, `/qa`, `/checkpoint`) |
-| 엔진(Engine) | superpowers | 리뷰 프리미티브 (diff → verdict) |
-| 백엔드(Backend) | **triflux** | 오케스트레이션 (병렬 워커·모델 선택·실행) |
+| 워크플로우 | gstack | 워크플로우 게이트 (`/gstack-ship`, `/gstack-qa`, `/gstack-context-save`) |
+| 검토 | superpowers | 리뷰 프리미티브 (diff → verdict) |
+| 실행 | **triflux** | 오케스트레이션 (병렬 워커·모델 선택·실행) |
 
 의존은 **단방향**이다: `gstack → triflux`, `superpowers → triflux`는 허용,
 `triflux → gstack/superpowers`는 금지. 상세 책임 매트릭스와 충돌 해소는
 [`.claude/rules/tfx-stack-coexistence.md`](.claude/rules/tfx-stack-coexistence.md)를 따른다.
-
----
-
-정책의 단일 정본은 [`.claude/rules/`](.claude/rules/), 아키텍처 결정의 근거는 [`docs/adr/`](docs/adr/README.md)에 있다.

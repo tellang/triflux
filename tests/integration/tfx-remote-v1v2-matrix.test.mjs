@@ -53,33 +53,29 @@ before(() => {
   process.env.TFX_HOSTS_USER_STATE_DISABLE = "1";
 });
 
-describe("Phase 4b integration — tfx-remote public subcommands", () => {
-  it("documents the consolidated public subcommand surface", () => {
+describe("tfx-remote 실행 옵션", () => {
+  it("구현된 remote-spawn 옵션을 안내한다", () => {
     const skill = readFileSync(TFX_REMOTE_SKILL, "utf8");
 
-    const expectedSubcommands = [
-      "setup",
-      "spawn",
+    const expectedOptions = [
+      "host",
+      "local",
       "list",
       "attach",
       "send",
-      "resume",
-      "kill",
       "probe",
+      "capture",
+      "wait",
+      "monitor",
+      "kill",
     ];
 
-    for (const subcommand of expectedSubcommands) {
-      assert.ok(
-        skill.includes(`| \`${subcommand}`),
-        `missing subcommand row: ${subcommand}`,
-      );
+    for (const option of expectedOptions) {
+      assert.ok(skill.includes(`\`--${option}`), `missing option: --${option}`);
     }
 
     assert.match(skill, /hosts-compat\.mjs/u);
-    assert.match(
-      skill,
-      /setup,\s*spawn,\s*list,\s*attach,\s*send,\s*resume,\s*kill,\s*probe/u,
-    );
+    assert.match(skill, /remote-spawn\.mjs/u);
   });
 });
 

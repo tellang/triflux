@@ -1,100 +1,37 @@
 ---
 name: tfx-remote
 description: >
-  원격 관련 표면을 setup/spawn 계열 하나로 통합한 엔트리포인트.
-  setup, spawn, list, attach, send, resume, kill, probe 하위 명령을 기준으로
-  기존 tfx-remote-setup/tfx-remote-spawn 흐름을 축소 통합한다.
-argument-hint: "[setup|spawn|list|attach|send|resume|kill|probe] ..."
+  SSH 호스트의 Claude Code 세션을 시작하고 조회하거나 이어서 작업할 때 사용한다.
+  원격 호스트 준비 상태, 세션 목록, 재부착, 메시지 전송, 모니터링, 종료 요청을
+  scripts/remote-spawn.mjs의 구현된 옵션으로 처리한다.
+argument-hint: "<host|list|attach|send|probe|monitor|kill> ..."
 ---
 
-# tfx-remote — 원격 세션 통합 명령
+# tfx-remote 원격 Claude Code 세션
 
-`tfx-remote`는 신규 원격 엔진이 아니라 기존 `tfx-remote-setup` + `tfx-remote-spawn`
-표면을 한 명령군으로 축소한 통합 진입점이다.
+`tfx-remote`는 Claude Code 스킬이다. 현재 `bin/triflux.mjs`에는 `tfx remote` 하위 명령이 없다. 실행은 설치된 `~/.claude/scripts/remote-spawn.mjs` 또는 이 저장소의 `scripts/remote-spawn.mjs`를 `node`로 호출한다. 다른 저장소에서 작업하면 설치된 스크립트를 쓴다.
 
-## 하위 명령
+## 실행 옵션
 
-| Subcommand | 역할 | legacy 매핑 |
-| --- | --- | --- |
-| `setup` | hosts 등록/편집/진단/probe-all | `tfx-remote-setup` |
-| `spawn <host> [prompt]` | 원격/로컬 세션 생성 | `tfx-remote-spawn` |
-| `list` | 활성 세션 목록 | `tfx-remote-spawn --list` |
-| `attach <session>` | 세션 재부착 | `tfx-remote-spawn --attach` |
-| `send <session> "<msg>"` | 세션에 후속 프롬프트 전송 | `tfx-remote-spawn --send` |
-| `resume <session|host|recent>` | 최근 세션 또는 호스트 기준 재개 | 신규 통합 표면 |
-| `kill <session>` | 세션 종료 | legacy kill 동작 공식 승격 |
-| `probe <host>` | 원격으로 일을 넘기기 전 준비 상태 점검 | `tfx-remote-setup` / `tfx-remote-spawn --probe` |
+| 요청 | 스크립트 옵션 |
+| --- | --- |
+| 호스트 세션 시작 | `--host <host> --prompt "<요청>"` |
+| 로컬 세션 시작 | `--local --prompt "<요청>"` |
+| 세션 목록 | `--list` |
+| 세션 재부착 | `--attach <session>` |
+| 후속 메시지 | `--send <session> "<메시지>"` |
+| 호스트 준비 상태 | `--probe <host>` |
+| 화면 캡처 | `--capture <session>` |
+| 준비 완료 대기 | `--wait <session>` |
+| 화면 상태 관찰 | `--monitor <session>` |
+| 세션 종료 | `--kill <session>` |
 
-`capture` / `wait`는 Phase 4b public consolidation 대상이 아니다.
-필요하면 legacy passthrough로만 유지한다.
+예를 들어 원격 세션을 시작하기 전에는 `node ~/.claude/scripts/remote-spawn.mjs --probe <host>`로 준비 상태를 확인한다. 세션 시작 시 `--dir`, `--name`, `--handoff`, `--transfer`, `--no-attach` 옵션을 추가할 수 있다. 스크립트의 실제 옵션과 실패 처리는 `scripts/remote-spawn.mjs`의 `parseArgs`와 `main`을 따른다.
 
-## 명령별 동작
+`setup`과 `resume`은 구현된 명령이 아니다. 호스트 설정은 macOS/Linux의 `~/.config/triflux/hosts.json`, Windows의 `%APPDATA%\triflux\hosts.json`을 사용한다. `hub/lib/hosts-compat.mjs`가 호스트 이름과 alias를 해석한다. 호스트가 없거나 SSH가 실패하면 설정과 `--probe` 결과를 확인한다.
 
-### `tfx-remote setup`
+원격에서 Codex가 필요하면 원격 Claude Code 세션 안에서 Triflux 라우팅을 사용한다. SSH 너머로 Codex를 직접 실행하지 않는다.
 
-기존 `tfx-remote-setup` 플로우를 그대로 사용한다.
-- `setup`
-- `setup --add`
-- `setup --edit`
-- `setup --probe-all`
-- `setup --diagnose`
+## 확인
 
-`hosts.json` 은 user-state 경로 한 곳만 읽고 쓴다.
-- macOS/Linux: `~/.config/triflux/hosts.json`
-- Windows: `%APPDATA%\triflux\hosts.json`
-
-기존 `references/hosts.json` 및 source/packages/global 3곳 fan-out 단계는 더 이상 사용하지 않는다.
-첫 실행 시 legacy `references/hosts.json` 이 발견되면 lazy auto-migration으로 user-state 경로에 자동 이동된다.
-
-### `tfx-remote spawn`
-
-기존 `tfx-remote-spawn` 플로우를 사용하되 아래 preflight를 먼저 수행한다.
-1. user-state `hosts.json` 존재 확인
-2. 호스트명/alias 해석
-3. probe TTL 확인
-4. SSH 실패 시 `setup diagnose` 또는 `setup edit` 복귀 경로 제시
-
-preflight 실패 시 중단만 하지 말고 아래 중 하나로 복귀시킨다.
-- `tfx-remote setup --add`
-- `tfx-remote setup --edit`
-- `tfx-remote setup --diagnose`
-- `tfx-remote probe <host>`
-
-### `tfx-remote resume`
-
-우선순위는 아래와 같다.
-1. 세션명이 주어지면 해당 세션 attach/복구
-2. 호스트명이 주어지면 해당 호스트의 최근 세션 탐색
-3. `recent` 또는 생략이면 최근 세션 우선, 없으면 `default_host` 기준 새 spawn
-
-### `tfx-remote kill`
-
-공식 public subcommand다. 세션 종료 전에 psmux/WT 정리 규칙은
-`.claude/rules/tfx-psmux.md`의 detach-first 정책을 따른다.
-
-## hosts.json 형식
-
-신규 코드는 가능하면 `hub/lib/hosts-compat.mjs`를 기준으로 해석한다.
-저장 위치는 macOS/Linux `~/.config/triflux/hosts.json`, Windows `%APPDATA%\triflux\hosts.json` 이다.
-- v1 legacy 필드 유지: `os`, `ssh_user`, `tailscale.ip`, `tailscale.dns`, `capabilities`
-- v2 additive 필드 허용: `ssh.user`, `capabilities_v2`, `last_probe`
-
-`resolveHost(nameOrAlias)` 기준으로 alias, tailscale DNS/IP, `ssh_user@host`를
-canonical host로 정규화한다.
-
-## 원격 배정 전 점검
-
-`tfx-remote probe <host>` 결과의 `ready`와 `warnings`를 확인한다. POSIX 호스트는
-`memoryPressureLevel`(macOS), `memoryFreePct`, `loadAvg`, `diskFreeHome`,
-Node·Codex·agy·Claude·triflux의 `versions`, `codexAuthExists`를 보고한다.
-메모리 압박 4는 `ready: false`, 압박 2 이상·홈 디스크 여유 5GiB 미만·로컬과
-CLI 버전 차이는 `warnings`에 담는다. Windows PowerShell probe는 기존 연결
-정보만 보고하므로 이 추가 필드를 전제로 판정하지 않는다.
-
-## 검증
-
-공통: `node hub/lib/hosts-compat.mjs --self-test`를 실행하고 legacy alias 문서가
-`tfx-remote` 또는 규칙 문서로 위임되는지 확인한다.
-
-- Windows: `Get-FileHash .claude/rules/tfx-psmux.md`로 규칙 파일을 확인하고 psmux/WT 정리 경로를 검증한다.
-- macOS/Linux: `shasum -a 256 .claude/rules/tfx-psmux.md` 또는 `sha256sum`으로 파일을 확인하고 tmux 경로를 검증한다.
+호스트 해석 검사는 `node hub/lib/hosts-compat.mjs --self-test`를 사용한다. 규칙 파일 해시는 Windows PowerShell에서 `Get-FileHash .claude/rules/tfx-psmux.md`, macOS에서 `shasum -a 256 .claude/rules/tfx-psmux.md`, Linux에서 `sha256sum .claude/rules/tfx-psmux.md`로 확인한다.

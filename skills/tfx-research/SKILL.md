@@ -5,11 +5,11 @@ description: "웹 검색/리서치가 필요할 때 사용한다. '검색해줘'
 argument-hint: "<주제> [--quick | --auto] [--depth quick|standard|deep]"
 ---
 
-# tfx-research — Web Research (Deep by Default)
+# tfx-research 웹 조사
 
 > **ARGUMENTS 처리**: `--quick` → Quick. `--auto` → Auto. 그 외 → Deep (기본).
 
-> AI makes completeness near-free. 기본은 Claude(Exa/학술) + Codex(Brave/실용) 2-CLI 멀티소스 교차검증 합의 (Antigravity/Tavily는 agy --print idle 미도달 행으로 Deep 제외; Quick 단일 검색만 유지).
+> 기본은 Claude(Exa/학술) + Codex(Brave/실용) 2-CLI 멀티소스 교차검증 합의다. Antigravity/Tavily는 Quick 단일 검색에 사용한다.
 > 빠른 단일 Google Search 는 `--quick`. 자율 쿼리생성+구조화 보고서 는 `--auto`.
 
 ---
@@ -43,8 +43,8 @@ argument-hint: "<주제> [--quick | --auto] [--depth quick|standard|deep]"
 
 | 모드 | 서브쿼리 | 소스/쿼리 | 라운드 | 토큰 | 시간 |
 |------|---------|----------|--------|------|------|
-| quick | 3 | 2 | 1 | ~20K | 2-3분 |
-| standard | 5 | 3 | 1-2 | ~40K | 5-8분 (기본) |
+| quick | 3 | 2 | 1 | ~18K | 2-3분 |
+| standard | 5 | 3 | 1-2 | ~35K | 5-8분 (기본) |
 | deep | 8-10 | 5 | 2-3 | ~80K | 10-15분 |
 
 ### EXECUTION
@@ -56,7 +56,7 @@ argument-hint: "<주제> [--quick | --auto] [--depth quick|standard|deep]"
 - depth 에 따른 서브쿼리 생성
 - 각 쿼리에 관점(학술/실용/DX) 매핑
 
-#### Step 2: 2-CLI 독립 병렬 검색 (Anti-Herding) — Bash + Agent 동시 호출
+#### Step 2: 2-CLI 독립 병렬 검색 (Anti-Herding): Bash + Agent 동시 호출
 
 **Agent (Claude + Exa):**
 ```
@@ -68,14 +68,14 @@ Agent(
 )
 ```
 
-**Bash (Codex + Brave):**  *(Antigravity/agy 제외 — agy --print 는 무거운 리서치에서 idle 미도달 시 5분 행; route 에서 --print-timeout 180s 로 bound)*
+**Bash (Codex + Brave):**
 ```
 Bash("tfx multi \
   --assign 'codex:서브쿼리를 Brave Search 로 검색. 서브쿼리: {sub_queries}. 관점: 실용/산업. brave_web_search + brave_news_search, freshness=pw. 각 쿼리 상위 5개 구조화.:scientist' \
   --timeout 1800", run_in_background=true)
 ```
 
-> 배리어: 위 dispatch는 background — task-notification 완료 후 team runtime 결과에서 검색 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
+> 배리어: 위 dispatch는 background로 실행한다. task-notification 완료 후 team runtime 결과에서 검색 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
 
 #### Step 3: 결과 수집 및 교차검증
 
@@ -97,7 +97,7 @@ Bash("tfx multi \
 
 ## Executive Summary
 ## Key Findings (consensus 기반)
-### 1. {finding} — 합의도: 3/3 또는 2/3
+### 1. {finding}: 합의도: 3/3 또는 2/3
 ## Comparative Analysis
 ## 미합의 사항 (Disputed)
 ## 추천
@@ -140,7 +140,7 @@ AskUserQuestion:
 Bash("bash ~/.claude/scripts/tfx-route.sh antigravity 'Research: use Google Search, return structured markdown with sources. Query: {optimized_query}' auto 120")
 ```
 
-**Fallback**: Antigravity 실패 시 MCP 순서 — context7 → WebSearch → Brave → Exa → Tavily.
+**Fallback**: Antigravity 실패 시 MCP 순서: context7 → WebSearch → Brave → Exa → Tavily.
 
 ### Step 3: 결과 포맷팅 (Claude ~300 토큰)
 

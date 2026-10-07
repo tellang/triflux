@@ -63,13 +63,11 @@ describe("스킬 문서 존재 확인", () => {
 describe("tfx-auto SKILL.md — 에이전트 매핑 일관성", () => {
   it("에이전트 매핑 섹션에 executor 포함 (단어 경계 일치)", () => {
     const content = readSkill("tfx-auto");
-    // "에이전트 매핑" 섹션 또는 "커맨드 숏컷" 섹션에서 executor를 단어 단위로 찾는다
-    const agentSection = extractSection(content, /^##\s+에이전트\s+매핑/);
-    const shortcutSection = extractSection(content, /^##\s+커맨드\s+숏컷/);
-    const combined = agentSection + shortcutSection;
+    // 현재 매핑 표에서 실행 역할을 확인한다
+    const combined = extractSection(content, /^###\s+에이전트\s+매핑/);
     assert.ok(
       /\bexecutor\b/.test(combined),
-      "executor가 에이전트 매핑/커맨드 숏컷 섹션에 없음",
+      "executor가 에이전트 매핑 섹션에 없음",
     );
   });
 
@@ -128,7 +126,7 @@ describe("tfx-auto SKILL.md — 에이전트 매핑 일관성", () => {
 });
 
 describe("tfx-auto SKILL.md — thin alias 이관 규칙", () => {
-  it("tfx-multi 의미가 플래그 표와 legacy 매핑에 남아 있다", () => {
+  it("병렬 실행 플래그가 tfx multi CLI를 가리킨다", () => {
     const content = readSkill("tfx-auto");
     const overrideSection = extractSection(
       content,
@@ -136,8 +134,8 @@ describe("tfx-auto SKILL.md — thin alias 이관 규칙", () => {
     );
     assert.ok(
       /`--parallel`\s*\|\s*`N`/.test(overrideSection) &&
-        /tfx-multi/.test(overrideSection),
-      "tfx-multi 이관 의미가 플래그 표/legacy 매핑에 없음",
+        /tfx multi/.test(overrideSection),
+      "병렬 실행 플래그에 tfx multi CLI가 없음",
     );
   });
 
@@ -174,7 +172,7 @@ describe("tfx-auto SKILL.md — thin alias 이관 규칙", () => {
     const content = readSkill("tfx-auto");
     assert.ok(
       /--retry ralph/.test(content) &&
-        /\.omc\/state\/ralph-<sessionId>\.json/.test(content),
+        /\.omc\/state\/retry-<sessionId>\.json/.test(content),
       "persist 이관용 ralph state machine 규칙이 없음",
     );
   });
@@ -214,11 +212,11 @@ describe("축소된 스킬 본체 이관 완결성", () => {
     );
   });
 
-  it("tfx-auto: PRE-CONTEXT GATE와 context snapshot 계약을 명시", () => {
+  it("tfx-auto: 실행 전 컨텍스트와 context snapshot 계약을 명시", () => {
     const content = readSkill("tfx-auto");
     assert.ok(
-      /##\s+PRE-CONTEXT\s+GATE/.test(content),
-      "PRE-CONTEXT GATE 섹션이 없음",
+      /##\s+실행 전 컨텍스트/.test(content),
+      "실행 전 컨텍스트 섹션이 없음",
     );
     assert.ok(
       /task slug/i.test(content) && /context-snapshot\.md/i.test(content),
@@ -262,8 +260,8 @@ describe("축소된 스킬 본체 이관 완결성", () => {
   it("tfx-auto: cleanup/cancel 메타데이터 규칙을 명시", () => {
     const content = readSkill("tfx-auto");
     assert.ok(
-      /##\s+CLEANUP\s+&\s+CANCEL\s+RULES/.test(content),
-      "CLEANUP & CANCEL RULES 섹션이 없음",
+      /##\s+정리와 취소 규칙/.test(content),
+      "정리와 취소 규칙 섹션이 없음",
     );
     assert.ok(
       /failure_reason/i.test(content) && /`?complete`?\s+상태/.test(content),
