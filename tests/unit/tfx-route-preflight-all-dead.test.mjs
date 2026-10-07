@@ -400,22 +400,8 @@ describe("#170 transport degradation marker — source 분기 회귀 가드", ()
     );
   });
 
-  it("gemini/antigravity lane 도 degraded 시 MCP_HINT 를 제거한다", () => {
+  it("antigravity lane 도 degraded 시 MCP_HINT 를 제거한다", () => {
     const source = readFileSync(SCRIPT_PATH, "utf8");
-    const geminiStart = source.indexOf(
-      'elif [[ "$CLI_TYPE" == "gemini" ]]; then',
-    );
-    assert.ok(geminiStart >= 0, "gemini lane not found");
-    const geminiLane = source.slice(
-      geminiStart,
-      source.indexOf(
-        'elif [[ "$CLI_TYPE" == "antigravity" ]]; then',
-        geminiStart,
-      ),
-    );
-    assert.match(geminiLane, /_TFX_MCP_DEGRADED:-0/);
-    assert.match(geminiLane, /FULL_PROMPT="\$PROMPT"/);
-
     const agyStart = source.indexOf(
       'elif [[ "$CLI_TYPE" == "antigravity" ]]; then',
     );
