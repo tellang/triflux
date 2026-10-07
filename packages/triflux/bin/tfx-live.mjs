@@ -2405,7 +2405,7 @@ async function doAsk(adapter, opts) {
   // Codex 는 접힌 발신자 표시가 없어 첫 줄 머리말로 보낸 세션을 드러낸다.
   // 슬래시 명령은 첫 글자가 / 여야 실행되므로 표식을 붙이지 않는다.
   const bare =
-    opts.noRelayTag || (adapter.cli === "codex" && opts.prompt.startsWith("/"));
+    opts.noRelayTag || (adapter.cli === "codex" && isSlashCommand(opts.prompt));
   const from =
     adapter.cli === "codex" && !bare
       ? (opts.from ?? (await resolveSenderName()))
@@ -2545,6 +2545,7 @@ async function resolveCodexTmuxThread(session, deps = {}) {
       ? { threadId: resumed, threadSource: "process-args" }
       : { threadId: null, reason: "resumed-thread-unknown" };
   }
+  if (!cwd) return { threadId: null, reason: "cwd-unknown" };
   // 같은 cwd 에 Codex TUI 가 둘 이상이면 rollout 만으로 누구 것인지 알 수 없다.
   const live = await (deps.countCodexTuiInCwd ?? countCodexTuiInCwd)(cwd);
   if (live !== 1)
@@ -3106,11 +3107,16 @@ function transportFlag(flags, adapter, short, sessionId) {
   return transport;
 }
 
+// 절대 경로로 시작하는 프롬프트는 슬래시 명령이 아니다.
+function isSlashCommand(prompt) {
+  return /^\/[a-z][\w-]*(?:\s|$)/i.test(String(prompt ?? ""));
+}
+
 function askOpts(flags, adapter) {
   const short = flags.short;
   const sessionId = flags["session-id"];
   // Codex 메시지는 queue 가 기본이다. 슬래시 명령과 바쁠 때 거부·중단은 tmux 만 할 수 있다.
-  const slash = String(flags.prompt ?? "").startsWith("/");
+  const slash = isSlashCommand(flags.prompt);
   const busyPolicy = ["fail", "interrupt"].includes(flags["if-busy"]);
   const transportReason =
     adapter.cli === "codex" && !flags.transport && (slash || busyPolicy)

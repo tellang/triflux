@@ -90,12 +90,17 @@ test("thread 찾기는 이름의 등록 시각과 cwd 유일성을 지킨다", a
 
   const day = path.join(home, "sessions", "2026", "10", "08");
   await fs.mkdir(day, { recursive: true });
-  const meta = (id) =>
-    `${JSON.stringify({ type: "session_meta", payload: { id, cwd: home, timestamp: "2026-10-08T00:00:00Z" } })}\n`;
+  const meta = (id, source = "cli") =>
+    `${JSON.stringify({ type: "session_meta", payload: { id, cwd: home, timestamp: "2026-10-08T00:00:00Z", source } })}\n`;
   await fs.writeFile(path.join(day, `rollout-a-${THREAD}.jsonl`), meta(THREAD));
   assert.deepEqual(await findCodexThreadByCwd(home, { env }), {
     threadId: THREAD,
   });
+  await fs.writeFile(
+    path.join(day, "rollout-c-01a11894-ec17-7313-8bf2-d379b4fcff03.jsonl"),
+    meta("01a11894-ec17-7313-8bf2-d379b4fcff03", "exec"),
+  );
+  assert.equal((await findCodexThreadByCwd(home, { env })).threadId, THREAD);
   const other = "01a11894-ec17-7313-8bf2-d379b4fcff02";
   await fs.writeFile(path.join(day, `rollout-b-${other}.jsonl`), meta(other));
   assert.equal(

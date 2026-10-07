@@ -44,9 +44,9 @@ tfx-live stop --cli codex --session cx1
 
 1. 기본은 `codex queue --thread <UUID>`다. 입력창을 건드리지 않고, 바쁘면 쌓였다가 앞 턴이 끝난 직후 순서대로 들어간다. 유휴 TUI는 약 20초 주기로 큐를 가져간다.
 2. 첫 줄 머리말은 `[from <보낸 세션 이름>] [tfx-live req=<id>]`다. 이름은 `--from`, `$TFX_LIVE_FROM`, Claude 세션 기록, Codex `session_index` 순으로 찾고 없으면 머리말 없이 표식만 붙인다. Codex TUI는 Claude처럼 접어 보여 주지 않고 사용자 입력으로 그대로 표시한다.
-3. thread는 `--thread UUID`, `start`가 남긴 `@tfx_codex_thread`, Codex 세션 레지스트리, pane 프로세스의 `resume <UUID>` 인자, pane cwd와 같은 rollout 하나 순으로 찾는다. cwd 대응은 그 cwd의 Codex TUI가 하나일 때만 쓰고 서브에이전트 thread는 뺀다. 이름으로는 보내지 않는다(`codex queue`의 이름 조회가 실패한다).
+3. thread는 `--thread UUID`, `start`가 남긴 `@tfx_codex_thread`, Codex 세션 레지스트리, pane 프로세스의 `resume <UUID>` 인자, pane cwd와 같은 rollout 하나 순으로 찾는다. cwd 대응은 그 cwd의 Codex TUI가 하나일 때만 쓰고 exec 워커와 서브에이전트 thread는 뺀다. 이름으로는 보내지 않는다(`codex queue`의 이름 조회가 실패한다).
 4. tmux 직접 입력은 queue를 못 쓸 때만 쓴다: 원격 호스트, thread를 못 찾음(`resume --last`로 띄운 세션, 같은 cwd의 TUI 여럿 포함), `codex queue` 오류(0.160 미만 포함). 결과에 `transport: "tmux"`, `transportRequested: "queue"`, `fallbackReason`이 남는다. 시간 초과처럼 queue가 이미 쌓았을 수도 있는 오류는 `status: "unknown"`으로 끝내고 재전송하지 않는다.
-5. 슬래시 명령(`/rename`, `/compact`, `/new`)과 interrupt(Escape)는 tmux 직접 입력 전용이다. queue로 보낸 슬래시 명령은 실행되지 않고 일반 텍스트로 모델에 들어간다. `/`로 시작하는 프롬프트와 `--if-busy fail|interrupt`는 tmux로 보내고 `transportReason`을 남긴다. 슬래시 명령에는 표식을 붙이지 않으므로 `wait`로 추적할 수 없다.
+5. 슬래시 명령(`/rename`, `/compact`, `/new`)과 interrupt(Escape)는 tmux 직접 입력 전용이다. queue로 보낸 슬래시 명령은 실행되지 않고 일반 텍스트로 모델에 들어간다. `/명령`으로 시작하는 프롬프트(절대 경로는 제외)와 `--if-busy fail|interrupt`는 tmux로 보내고 `transportReason`을 남긴다. 슬래시 명령에는 표식을 붙이지 않으므로 `wait`로 추적할 수 없다.
 
 결과의 `status`는 `queued`(쌓임), `working`(TUI가 가져가 턴 시작), `completed`, `failed`로 나뉘고 `delivered`, `deliveredAt`, `turnId`가 배달을 구분한다. queue는 바쁜 세션에도 쌓으므로 `--if-busy wait`는 의미가 없다.
 

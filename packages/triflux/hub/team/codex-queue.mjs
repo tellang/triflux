@@ -117,10 +117,10 @@ export async function findCodexThreadByCwd(
       if (!file.startsWith("rollout-") || !file.endsWith(".jsonl")) continue;
       try {
         const { payload } = JSON.parse(await readFirstLine(join(dir, file)));
-        // 같은 cwd 의 서브에이전트 thread 는 TUI 대상이 아니다.
+        // 같은 cwd 의 exec 워커와 서브에이전트 thread 는 TUI 대상이 아니다.
         if (
           isCodexThreadId(payload?.id) &&
-          (payload.thread_source ?? "user") === "user" &&
+          (payload.source ?? "cli") === "cli" &&
           realCwd(payload.cwd) === target &&
           Date.parse(payload.timestamp) >= sinceMs
         )
