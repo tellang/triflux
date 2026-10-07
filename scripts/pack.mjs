@@ -68,6 +68,8 @@ const CORE_DIRS = [
   "hub/team/retry-state-machine.mjs",
   "hub/team/claude-agent-session-normalizer.mjs",
   "hub/team/claude-daemon-control.mjs",
+  "hub/team/claude-transcript.mjs",
+  "hub/team/session-context.mjs",
   "hub/team/claude-session-projection.mjs",
   // dep-free helper imported by core's session-start/end hooks (peer-discovery)
   "hub/team/synapse-http.mjs",
@@ -99,6 +101,7 @@ const REMOTE_DIRS = ["hub/team", "hub/workers", "hub/public"];
 const REMOTE_CORE_PROXIES = ["hub/lib/cto-env.mjs"];
 
 const TRIFLUX_DIRS = [
+  "adapters",
   "bin",
   "skills",
   "hooks",
@@ -322,6 +325,7 @@ function packTriflux() {
   cleanDist(dest);
   // clean extra dirs that triflux now includes
   for (const d of [
+    "adapters",
     "hooks",
     "hud",
     "scripts",

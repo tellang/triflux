@@ -15,6 +15,7 @@
     "tfx-setup-tui": "bin/tfx-setup-tui.mjs"
   },
   "files": [
+    "adapters",
     "bin",
     "tui",
     "hub",

@@ -8,6 +8,10 @@ argument-hint: "<start|ask|wait|compact|stop|rename|interrupt|probe|list-session
 
 # tfx-live
 
+## Codex 호스트 계약
+
+Codex에서는 `$tfx-live`로 호출한다. CLI의 `--cli`는 현재 호스트가 아니라 대상 세션을 선택한다.
+
 `tfx-live`는 Claude Code와 Codex 세션을 tmux 또는 daemon UDS로 제어한다.
 `tfx-live --help`와 `tfx-live <동사> --help`로 사용법을 확인한다.
 

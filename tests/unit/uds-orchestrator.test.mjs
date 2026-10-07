@@ -3,11 +3,13 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs/promises";
 import net from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { deriveClaudeDaemonPaths } from "../../hub/team/claude-daemon-control.mjs";
+import { readCodexContext } from "../../hub/team/session-context.mjs";
 import {
   askCodexAppServerThread,
   createClaudeUdsEndpoint,
@@ -15,6 +17,7 @@ import {
   createCodexExecEndpoint,
   extractClaudeUdsText,
   listCodexAppServerThreads,
+  renameCodexAppServerThread,
   runUdsOrchestration,
   subscribeClaudeUntilMarker,
 } from "../../hub/team/uds-orchestrator.mjs";
@@ -26,7 +29,7 @@ const FAKE_CODEX_SERVER = path.resolve(
 );
 
 async function withFakeCodexServer(env, fn) {
-  const dir = await fs.mkdtemp("/tmp/tfx-codex-uds-");
+  const dir = await fs.mkdtemp(path.join(tmpdir(), "cx-"));
   const socketPath = path.join(dir, "fake.sock");
   const child = spawn(process.execPath, [FAKE_CODEX_SERVER, socketPath], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -62,6 +65,34 @@ function scriptedEndpoint(name, replies) {
     },
   };
 }
+
+test("Codex rename uses thread/name/set empty success response and closes its client", async () => {
+  const calls = [];
+  let closed = false;
+  const result = await renameCodexAppServerThread({
+    socketPath: "/fake.sock",
+    threadId: "one",
+    name: "10.8 운영 개선",
+    clientFactory: () => ({
+      async connect() {},
+      notify() {},
+      close() {
+        closed = true;
+      },
+      async request(method, params) {
+        calls.push({ method, params });
+        return {};
+      },
+    }),
+  });
+  assert.deepEqual(calls.at(-1), {
+    method: "thread/name/set",
+    params: { threadId: "one", name: "10.8 운영 개선" },
+  });
+  assert.equal(result.nameApplied, true);
+  assert.equal(result.name, "10.8 운영 개선");
+  assert.equal(closed, true);
+});
 
 test("codex-led mode asks Codex, then Claude UDS, then Codex final", async () => {
   const codex = scriptedEndpoint("codex", ["CODEX_PLAN", "CODEX_FINAL"]);
@@ -127,7 +158,7 @@ test("peer mode asks Claude UDS and Codex as peers, then synthesizes", async () 
 });
 
 async function withFakeClaudeDaemon(handler, fn) {
-  const dir = await fs.mkdtemp("/tmp/tfx-uds-");
+  const dir = await fs.mkdtemp(path.join(tmpdir(), "cl-"));
   const paths = deriveClaudeDaemonPaths({
     configDir: path.join(dir, "claude"),
     tmpRoot: dir,
@@ -956,5 +987,43 @@ test("Codex UDS clears turn timers and listeners on completion, timeout, error, 
   } finally {
     globalThis.setTimeout = originalSetTimeout;
     globalThis.clearTimeout = originalClearTimeout;
+  }
+});
+
+test("Codex rollout tracks appended token usage", async () => {
+  const dir = await fs.mkdtemp(path.join(tmpdir(), "cx-rollout-"));
+  const rolloutPath = path.join(dir, "rollout.jsonl");
+  try {
+    await fs.writeFile(
+      rolloutPath,
+      [
+        { type: "turn_context", payload: { model: "gpt-6-astra" } },
+        {
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            info: {
+              last_token_usage: { total_tokens: 100 },
+              model_context_window: 258_400,
+            },
+          },
+        },
+      ]
+        .map(JSON.stringify)
+        .join("\n"),
+    );
+    assert.equal(
+      (await readCodexContext(rolloutPath)).estimatedContextTokens,
+      100,
+    );
+    await fs.appendFile(
+      rolloutPath,
+      `\n${JSON.stringify({ type: "event_msg", payload: { type: "token_count", info: { last_token_usage: { total_tokens: 200 } } } })}\n`,
+    );
+    const result = await readCodexContext(rolloutPath);
+    assert.equal(result.estimatedContextTokens, 200);
+    assert.equal(result.executionContextLimitTokens, 258_400);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
   }
 });

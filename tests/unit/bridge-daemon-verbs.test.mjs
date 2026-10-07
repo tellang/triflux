@@ -269,6 +269,15 @@ test("readBridgePayload parses --payload-file - from stdin text", () => {
   });
 });
 
+test("daemon-attach reports unsent input for pre-attach errors", async () => {
+  const out = await runBridge(
+    ["daemon-attach", "--payload", JSON.stringify({ prompt: "" })],
+    { allowFailure: true },
+  );
+  assert.equal(out.inputSent, false);
+  assert.equal(out.status, "failed");
+});
+
 test("daemon-probe lists fake daemon sessions and resolves target by short", async () => {
   await withTempConfig(async (configDir) => {
     const paths = deriveClaudeDaemonPaths({
@@ -714,7 +723,7 @@ test("daemon-attach rejects duplicate ambient targets before attaching", async (
   });
 });
 
-test("explicit configDir is exact-only and never falls back to ambient OMC", async () => {
+test("explicit stale daemon does not search ambient OMC", async () => {
   await withTempClaudeHome(async ({ home, omcRuntime, customConfig }) => {
     const omcPaths = deriveClaudeDaemonPaths({
       configDir: omcRuntime,
@@ -746,8 +755,8 @@ test("explicit configDir is exact-only and never falls back to ambient OMC", asy
       );
 
       assert.equal(out.ok, false);
-      assert.equal(out.reason, "daemon-dir-missing");
       assert.equal(out.daemon, null);
+      assert.equal(out.recoveredFrom, undefined);
       assert.deepEqual(
         out.candidateResults.map((candidate) => candidate.configDirSource),
         ["explicit"],
@@ -759,7 +768,7 @@ test("explicit configDir is exact-only and never falls back to ambient OMC", asy
   });
 });
 
-test("CLAUDE_CONFIG_DIR env mode is strict and never falls back to ambient OMC", async () => {
+test("stale CLAUDE_CONFIG_DIR does not search ambient OMC", async () => {
   await withTempClaudeHome(async ({ home, defaultConfig, omcRuntime }) => {
     const omcPaths = deriveClaudeDaemonPaths({
       configDir: omcRuntime,
@@ -775,8 +784,8 @@ test("CLAUDE_CONFIG_DIR env mode is strict and never falls back to ambient OMC",
           "--payload",
           JSON.stringify({
             short: "omc12345",
-            prompt: "must not attach",
-            timeoutMs: 100,
+            prompt: "recover attach",
+            timeoutMs: 1500,
           }),
         ],
         {
@@ -791,8 +800,8 @@ test("CLAUDE_CONFIG_DIR env mode is strict and never falls back to ambient OMC",
       );
 
       assert.equal(out.ok, false);
-      assert.equal(out.reason, "daemon-dir-missing");
       assert.equal(out.inputSent, false);
+      assert.equal(out.recoveredFrom, undefined);
       assert.deepEqual(
         out.candidateResults.map((candidate) => candidate.configDirSource),
         ["env"],

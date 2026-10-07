@@ -833,19 +833,61 @@ function normalizePwshProbeEnv(host, parsed) {
   });
 }
 
-function normalizePosixProbeEnv(host, parsed) {
+function normalizePosixProbeEnv(host, parsed, localVersions = null) {
   const os =
     parsed.os === "darwin" ? "darwin" : parsed.os === "linux" ? "linux" : null;
   if (!os || !parsed.home) {
     return null;
   }
 
+  const versions = Object.fromEntries(
+    ["node", "codex", "agy", "claude", "triflux"].map((name) => [
+      name,
+      parsed[`${name}Version`] || null,
+    ]),
+  );
+  const warnings = [];
+  const memoryPressureLevel =
+    os === "darwin" ? Number(parsed.memoryPressureLevel) || null : null;
+  const memoryFreePct =
+    parsed.memoryFreePct && Number.isFinite(Number(parsed.memoryFreePct))
+      ? Number(parsed.memoryFreePct)
+      : null;
+  const loadAvgValues = parsed.loadAvg?.split(",").map(Number);
+  const loadAvg =
+    loadAvgValues?.length === 3 && loadAvgValues.every(Number.isFinite)
+      ? loadAvgValues
+      : null;
+  const diskFreeHome = parsed.diskFreeHome ? Number(parsed.diskFreeHome) : null;
+
+  if (memoryPressureLevel >= 2) {
+    warnings.push(`memory pressure level ${memoryPressureLevel}`);
+  }
+  if (diskFreeHome !== null && diskFreeHome < 5 * 1024 ** 3) {
+    warnings.push("home disk free below 5 GiB");
+  }
+  for (const [name, remote] of Object.entries(versions)) {
+    const local = localVersions ? localVersions[name] : probeVersion(name);
+    const remoteVersion = remote && parseVersion(remote);
+    if (local && remoteVersion && compareVersions(local, remoteVersion) !== 0) {
+      warnings.push(`${name} version differs`);
+    }
+  }
+
   return Object.freeze({
     claudePath:
       !parsed.claude || parsed.claude === "notfound" ? null : parsed.claude,
     home: parsed.home,
+    codexAuthExists: parsed.codexAuthExists === "true",
+    diskFreeHome,
+    loadAvg,
+    memoryFreePct,
+    memoryPressureLevel,
     os,
+    ready: memoryPressureLevel !== 4,
     shell: parsed.shell === "zsh" ? "zsh" : "bash",
+    versions,
+    warnings,
   });
 }
 
@@ -913,6 +955,18 @@ function probeRemoteEnvViaPosix(host) {
     "echo home=$HOME",
     "command -v claude >/dev/null 2>&1 && echo claude=$(command -v claude) || echo claude=notfound",
     "echo os=$(uname -s | tr A-Z a-z)",
+    'if [ "$(uname -s)" = Darwin ]; then',
+    "  printf 'memoryPressureLevel=%s\\n' \"$(sysctl -n kern.memorystatus_vm_pressure_level 2>/dev/null)\"",
+    '  vm_stat | awk -v total="$(sysctl -n hw.memsize 2>/dev/null)" -v pageSize="$(sysctl -n hw.pagesize 2>/dev/null)" \'/Pages free:|Pages inactive:|Pages speculative:/ {gsub(/[^0-9]/, "", $3); pages += $3} END {if (total > 0 && pageSize > 0) printf "memoryFreePct=%.1f\\n", pages * pageSize / total * 100}\'',
+    '  sysctl -n vm.loadavg 2>/dev/null | tr -d \'{}\' | awk \'{print "loadAvg=" $1 "," $2 "," $3}\'',
+    "else",
+    "  awk '/MemTotal:/ {total=$2} /MemAvailable:/ {available=$2} END {if (total > 0) printf \"memoryFreePct=%.1f\\n\", available / total * 100}' /proc/meminfo 2>/dev/null",
+    '  awk \'{print "loadAvg=" $1 "," $2 "," $3}\' /proc/loadavg 2>/dev/null',
+    "fi",
+    'df -Pk "$HOME" 2>/dev/null | awk \'NR==2 {printf "diskFreeHome=%.0f\\n", $4 * 1024}\'',
+    'if [ -f "${CODEX_HOME:-$HOME/.codex}/auth.json" ]; then echo codexAuthExists=true; else echo codexAuthExists=false; fi',
+    'probe_version() { command -v "$1" >/dev/null 2>&1 && "$1" --version </dev/null 2>/dev/null | head -n 1; }',
+    'for cli in node codex agy claude triflux; do printf \'%sVersion=%s\\n\' "$cli" "$(probe_version "$cli")"; done',
   ].join("\n");
 
   let output;
@@ -2352,6 +2406,7 @@ if (selfRun) {
 
 export const __remoteSpawnTest = {
   buildPromptContext,
+  normalizePosixProbeEnv,
   parseArgs,
   rewritePromptPaths,
   startSpawnExitWatcher,

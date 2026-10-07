@@ -7,12 +7,12 @@ description: >
 argument-hint: "[setup|spawn|list|attach|send|resume|kill|probe] ..."
 ---
 
-# tfx-remote — remote consolidated entrypoint
+# tfx-remote — 원격 세션 통합 명령
 
 `tfx-remote`는 신규 원격 엔진이 아니라 기존 `tfx-remote-setup` + `tfx-remote-spawn`
 표면을 한 명령군으로 축소한 통합 진입점이다.
 
-## Public subcommands
+## 하위 명령
 
 | Subcommand | 역할 | legacy 매핑 |
 | --- | --- | --- |
@@ -23,12 +23,12 @@ argument-hint: "[setup|spawn|list|attach|send|resume|kill|probe] ..."
 | `send <session> "<msg>"` | 세션에 후속 프롬프트 전송 | `tfx-remote-spawn --send` |
 | `resume <session|host|recent>` | 최근 세션 또는 호스트 기준 재개 | 신규 통합 표면 |
 | `kill <session>` | 세션 종료 | legacy kill 동작 공식 승격 |
-| `probe <host>` | SSH/Tailscale/Claude 연결 체크 | `tfx-remote-setup` / `tfx-remote-spawn --probe` |
+| `probe <host>` | 원격으로 일을 넘기기 전 준비 상태 점검 | `tfx-remote-setup` / `tfx-remote-spawn --probe` |
 
 `capture` / `wait`는 Phase 4b public consolidation 대상이 아니다.
 필요하면 legacy passthrough로만 유지한다.
 
-## Dispatch contract
+## 명령별 동작
 
 ### `tfx-remote setup`
 
@@ -72,7 +72,7 @@ preflight 실패 시 중단만 하지 말고 아래 중 하나로 복귀시킨�
 공식 public subcommand다. 세션 종료 전에 psmux/WT 정리 규칙은
 `.claude/rules/tfx-psmux.md`의 detach-first 정책을 따른다.
 
-## hosts.json contract
+## hosts.json 형식
 
 신규 코드는 가능하면 `hub/lib/hosts-compat.mjs`를 기준으로 해석한다.
 저장 위치는 macOS/Linux `~/.config/triflux/hosts.json`, Windows `%APPDATA%\triflux\hosts.json` 이다.
@@ -82,9 +82,19 @@ preflight 실패 시 중단만 하지 말고 아래 중 하나로 복귀시킨�
 `resolveHost(nameOrAlias)` 기준으로 alias, tailscale DNS/IP, `ssh_user@host`를
 canonical host로 정규화한다.
 
-## Verification
+## 원격 배정 전 점검
 
-허용 범위 안에서 Phase 4b가 완료되었는지 확인할 때 최소 검증은 아래와 같다.
-- `node hub/lib/hosts-compat.mjs --self-test`
-- `Get-FileHash .claude/rules/tfx-psmux.md`
-- legacy alias 문서가 모두 `tfx-remote` 또는 rule 문서로 위임되는지 확인
+`tfx-remote probe <host>` 결과의 `ready`와 `warnings`를 확인한다. POSIX 호스트는
+`memoryPressureLevel`(macOS), `memoryFreePct`, `loadAvg`, `diskFreeHome`,
+Node·Codex·agy·Claude·triflux의 `versions`, `codexAuthExists`를 보고한다.
+메모리 압박 4는 `ready: false`, 압박 2 이상·홈 디스크 여유 5GiB 미만·로컬과
+CLI 버전 차이는 `warnings`에 담는다. Windows PowerShell probe는 기존 연결
+정보만 보고하므로 이 추가 필드를 전제로 판정하지 않는다.
+
+## 검증
+
+공통: `node hub/lib/hosts-compat.mjs --self-test`를 실행하고 legacy alias 문서가
+`tfx-remote` 또는 규칙 문서로 위임되는지 확인한다.
+
+- Windows: `Get-FileHash .claude/rules/tfx-psmux.md`로 규칙 파일을 확인하고 psmux/WT 정리 경로를 검증한다.
+- macOS/Linux: `shasum -a 256 .claude/rules/tfx-psmux.md` 또는 `sha256sum`으로 파일을 확인하고 tmux 경로를 검증한다.

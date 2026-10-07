@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
@@ -130,7 +131,7 @@ test("remote Codex preflight runs ps remotely and warns only when inspection fai
 });
 
 test("peer reports remote ps failure as a preflight warning and preserves attached sessions", async () => {
-  const dir = await fs.mkdtemp("/tmp/tfx-live-remote-preflight-");
+  const dir = await fs.mkdtemp(path.join(tmpdir(), "preflight-"));
   const log = path.join(dir, "ssh.jsonl");
   try {
     await fs.writeFile(
@@ -345,7 +346,7 @@ test("peer validates busy policies for each transport before any side starts", a
 });
 
 async function withCodexCliFixture(env, fn) {
-  const dir = await fs.mkdtemp("/tmp/tfx-live-cli-uds-");
+  const dir = await fs.mkdtemp(path.join(tmpdir(), "uds-"));
   const socketPath = path.join(dir, "daemon.sock");
   const daemonDir = path.join(dir, "app-server-control");
   await fs.mkdir(daemonDir);
@@ -439,6 +440,31 @@ test("Codex UDS CLI discovers and asks through the default symlink socket", asyn
     assert.equal(result.socketPath, defaultSocket);
     assert.equal(result.ifBusy, "wait");
     assert.equal(result.steered, false);
+  });
+});
+
+test("Codex UDS no-wait returns the accepted turn without a completion event", async () => {
+  await withCodexCliFixture({ FAKE_MODE: "timeout" }, async ({ run }) => {
+    const result = await run([
+      "ask",
+      "--cli",
+      "codex",
+      "--transport",
+      "uds",
+      "--thread",
+      "fake-thread-ws",
+      "--prompt",
+      "hello",
+      "--no-wait",
+    ]);
+    assert.equal(result.ok, true);
+    assert.equal(result.status, "submitted");
+    assert.equal(result.done, false);
+    assert.equal(result.inputSent, true);
+    assert.equal(result.target, "fake-thread-ws");
+    assert.ok(result.turnId);
+    assert.match(result.requestId, /^[0-9a-f]{12}$/);
+    assert.equal(Object.hasOwn(result, "timedOut"), false);
   });
 });
 
