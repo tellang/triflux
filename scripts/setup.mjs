@@ -1325,8 +1325,8 @@ function isCloakBrowserSupportedPlatform(platform, arch) {
   );
 }
 
-// 버전 없이 받으면 최신이 깔린다. cloakbrowser 는 0.4.0 부터 라이선스 키 경로가 들어갔고
-// 최신 브라우저는 로그인이 필요하므로 package.json 에 고정한 버전으로 받는다.
+// 버전 없이 받으면 최신이 깔린다. 키 없이 쓰는 무료 바이너리(v146)가 확인된 래퍼 버전만
+// package.json 에 고정해 받는다. 최신 바이너리(v152)는 로그인 키가 필요하다.
 function optionalDependencySpecs(root = PLUGIN_ROOT) {
   const { optionalDependencies = {} } = JSON.parse(
     readFileSync(join(root, "package.json"), "utf8"),
