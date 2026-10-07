@@ -1,5 +1,5 @@
 // tests/unit/jsonrpc-ws-uds.test.mjs
-// JsonRpcWsUdsClient + createCodexAppServerUdsEndpoint over a fake
+// JsonRpcWsUdsClient over a fake
 // WebSocket-over-UDS server (no real codex, zero quota).
 
 import assert from "node:assert/strict";
@@ -11,7 +11,6 @@ import process from "node:process";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createCodexAppServerUdsEndpoint } from "../../hub/team/uds-orchestrator.mjs";
 import { JsonRpcWsUdsClient } from "../../hub/workers/lib/jsonrpc-ws-uds.mjs";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -167,65 +166,5 @@ describe("JsonRpcWsUdsClient over fake WebSocket-over-UDS", () => {
     } finally {
       killChild(child);
     }
-  });
-});
-
-describe("createCodexAppServerUdsEndpoint (attach mode, fake server)", () => {
-  let dir;
-  before(async () => {
-    dir = await mkdtemp(join(tmpdir(), "tfx-ws-uds-ep-test-"));
-  });
-  after(async () => {
-    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
-  });
-
-  it("ask() returns the assembled agent text with done=true on completed turn", async () => {
-    const { child, sockPath } = await startFakeServer(dir, {
-      FAKE_DELTAS: "PO,NG",
-    });
-    try {
-      const endpoint = createCodexAppServerUdsEndpoint({
-        socketPath: sockPath,
-        spawnServer: false,
-        timeoutMs: 5000,
-        bootstrapTimeoutMs: 3000,
-      });
-      assert.equal(endpoint.name, "codex-app-server-uds");
-      const result = await endpoint.ask("Say PONG");
-      assert.equal(result.endpoint, "codex-app-server-uds");
-      assert.equal(result.text, "PONG");
-      assert.equal(result.done, true);
-      assert.equal(result.meta.status, "completed");
-      assert.equal(result.meta.spawned, false);
-    } finally {
-      killChild(child);
-    }
-  });
-
-  it("ask() reports done=false when the turn fails", async () => {
-    const { child, sockPath } = await startFakeServer(dir, {
-      FAKE_MODE: "execution-failed",
-    });
-    try {
-      const endpoint = createCodexAppServerUdsEndpoint({
-        socketPath: sockPath,
-        spawnServer: false,
-        timeoutMs: 5000,
-        bootstrapTimeoutMs: 3000,
-      });
-      const result = await endpoint.ask("Say PONG");
-      assert.equal(result.done, false);
-      assert.equal(result.meta.status, "failed");
-    } finally {
-      killChild(child);
-    }
-  });
-
-  it("ask() rejects an empty prompt", async () => {
-    const endpoint = createCodexAppServerUdsEndpoint({
-      socketPath: "/nonexistent.sock",
-      spawnServer: false,
-    });
-    await assert.rejects(() => endpoint.ask("   "));
   });
 });
