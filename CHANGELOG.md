@@ -2,6 +2,15 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.50.1] - 2026-10-08
+
+### Changed
+- ci: `setup-node` 에 npm 캐시를 쓰고, PR 에 새 커밋이 오면 같은 PR 의 이전 실행을 취소한다. main push 는 release.yml 이 커밋마다 결과를 기다리므로 실행마다 고유 concurrency 그룹을 쓴다 (#595)
+- tests: 실제 tfx-route.sh 와 agy 경로를 돌리는 느린 회귀 가드 6개의 대기와 중복 실행을 줄인다. 검사 동작은 그대로이고 합계 178초가 41초가 된다 (#597)
+
+### Removed
+- live: 세션 지휘와 무관한 `tfx-live cto-hygiene-notify` 하위 명령을 지운다 (#596)
+
 ## [10.50.0] - 2026-10-08
 
 ### Removed
