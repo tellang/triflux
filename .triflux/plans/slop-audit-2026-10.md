@@ -624,6 +624,48 @@ A42~A46 외 추가.
 
 같은 날 main 에 들어온 것: INFRA1(#588), mods(#587), HUD 수정(#589), multi assign 수정(#586). 그래서 3단계 묶음(S-G1, S-NODE, S-ROUTE, S-G2)은 바로 진행할 수 있고, S1 은 #587 과 #589 위에서 다시 잰다. LIVE(#590)는 아직 열려 있어 C1 은 대기한다. 항목표의 줄 번호는 1a3d57b9 기준이라 구현 때는 심볼로 다시 찾는다.
 
+## 2단계 결과 기록 (2026-10-08)
+
+승인받은 묶음을 PR 하나씩 머지하였다. 구현은 Codex executor(gpt61_sol_high), 리뷰는 Claude(opus)가 하였고, 리뷰가 지적한 것은 Codex 후속 수정이나 리드가 직접 고친 뒤 머지하였다. 변경 영역 테스트와 미러 검사, lint 를 PR 마다 돌렸고 tfx-route.sh 를 실행하는 통합 테스트는 HOME 과 CODEX_HOME 을 임시 디렉터리로 두고 리드가 따로 돌렸다.
+
+| PR | 묶음 | 파일 | 추가 | 삭제 | 상태 |
+|---|---|---|---|---|---|
+| #593 | 1단계 보고서 | 1 | 784 | 0 | 머지 |
+| #601 | S4 psmux Windows 전용, psmux.mjs 죽은 CLI | 20 | 273 | 1,866 | 머지 |
+| #602 | S6 scripts 죽은 파일, Node 레인(결정 2) | 176 | 430 | 14,354 | 머지 |
+| #603 | S7 hub 죽은 모듈 20개 | 116 | 35 | 16,437 | 머지 |
+| #604 | S2 CTO 조회만(ADR-0024), hygiene-notify | 62 | 1,126 | 8,181 | 머지 |
+| #605 | S1 HUD(결정 5, 6) | 63 | 572 | 8,043 | 머지 |
+| #607 | S-G1 Gemini CLI 실행 경로 | 48 | 245 | 2,398 | 머지 |
+| #609 | S8-A 복제본·소스 문구 테스트 15개 | 21 | 27 | 1,986 | 머지 |
+| #610 | S-SWARM-R swarm 퇴역(ADR-0025, 결정 1), 동적 라우팅, mesh | 274 | 372 | 52,511 | 머지 |
+| #611 | S3 tfx auto·review 삭제(결정 4), 작은 모듈 | 126 | 430 | 8,165 | 머지 |
+| #612 | S-ROUTE tfx-route.sh 정리, gemini 별칭 | 59 | 1,412 | 2,931 | 머지 |
+| #613 | S5 tfx multi 죽은 모드, in-process·WT(결정 3) | 175 | 1,522 | 19,830 | 머지 |
+| #614 | S-DOCS 스킬·규칙·루트 문서, 끝난 계획 문서 | 60 | 1,180 | 5,416 | 머지 |
+
+수치는 packages 미러 3곳을 포함한다. root 기준 실제 삭제는 그 3분의 1 안팎이다. tfx-route.sh 는 3,862줄에서 2,958줄로, tfx-auto SKILL.md 는 1,096줄에서 483줄로 줄었다. 다른 세션이 같은 날 머지한 것: 인프라 묶음 1(#588), setup 후속(#600), tfx-live(#590, #596), 느린 가드 6개 속도(#597), v10.50.0~v10.50.2 릴리스.
+
+### 리뷰가 되돌리거나 고친 것
+
+- Codex 가 packages/core 와 packages/triflux 의 package.json 을 root 것으로 덮어썼다(#610). 미러 검사와 버전 검사는 못 잡았다. main 판으로 되돌리고 mesh 항목만 뺐다.
+- 살아 있는 경로를 검사하던 테스트를 지운 것(#611 의 mcp-filter 18건), 보관 기준(ADR-0012)에 못 미치는 문서를 docs/_archive 로 옮긴 것(#603 4건, #605 4건, #613 4건), accepted ADR 본문을 사후 수정한 것(#612, S-DOCS)을 되돌렸다.
+- 회귀 2건을 머지 전에 잡았다. mcp-filter 가 인벤토리 JSON 파싱 오류를 던지게 바뀌어 모든 레인이 멈출 수 있던 것과 `agy --help` 캐시 변수가 초기화 전에 읽히던 것(#612).
+- 지시 밖 동작 추가(TFX_CLI_MODE 검증, 퇴역 옵션 exit 코드)와 호출 경로가 깨진 문서 안내(tfx-review 의 상대 경로)를 되돌렸다.
+
+### 사고 기록
+
+- 이 기기에서 `node --test` 의 파일 목록이 비어 전체 스위트가 세 번 돌았다(02:50, 04:21, 05:00 무렵). 실행 중인 허브가 worktree 경로로 재바인딩되었고 한 번은 `~/.codex/config.toml` 의 MCP 항목이 지워져 인프라 세션이 백업에서 복구하였다. 원인은 zsh 에서 글롭 하나가 안 맞으면 `$(ls a b*)` 전체가 비는 것. 이후 `find` 결과만 쓰고 비어 있으면 실행하지 않게 하였고, 허브는 `tfx hub stop` 과 `ensure` 로 되돌렸다.
+- Codex executor 안에서 tfx-route.sh 를 실행하는 테스트를 돌리면 바깥 executor 의 config swap 과 겹쳐 실제 설정이 깨질 수 있다. 지시서에 금지를 넣었다.
+- 보관 디렉터리 관례는 `docs/_archive/triflux/plans/` 다. Codex 가 `docs/_archive/plans/`, `docs/_archive/.triflux/plans/` 를 만들어 매번 옮겼다.
+
+### 남은 것
+
+- 사용자 결정으로 남긴 항목: U5 codex-app-server-worker, U6 account-broker, U8 memory-doctor, U9 ssh 안전 게이트, U10 phase-manager 의 gstack 수정, U13 bin 하위 명령 묶음(handoff, codex-team, notion-read, monitor, tfl, completions, *-tui 껍데기), U14 checkForUpdate, U15 스냅샷과 cache-warmup, U16 stealth-fetch, U18 remote-watcher(swarm 퇴역으로 삭제됨), U20 uds orchestrate, U21 experiments 보존 정책, P3·P4·P6 packages, F6 .geminiignore, F8 tfl, S7·S12·S13·S19·S20·S27·S35~S39·S41 문서, H11, X12·X13·X16·X17, B20·B21, C6, R14·R15.
+- 인프라 세션 묶음 3(허브·synapse 제거) 뒤에 처리할 것: adaptive 계열, hygiene 나머지와 status 의 hygiene 필드, `tfx why` 파서 측과 bin 분기, codex-mcp.mjs 와 delegator 의존, 허브·delegator 의 gemini enum, snapshot-gemini-state 와 hub-ensure 호출, `~/.gemini/settings.json` 동기화.
+- swarm 재설계: 네이티브 worktree 격리(Claude `isolation: worktree`)와 tfx-route.sh 위에 PRD 샤드 분배, 파일 lease, 검증 뒤 통합만 얇게 다시 짠다. 별도 PRD 로 시작한다.
+- CI 의 `hub-start-codex-config.test.mjs` "hub already running" 케이스가 간헐적으로 깨진다(허브 구역). 다른 허브 테스트와의 포트 경쟁으로 보인다.
+
 ## 제안하는 PR 묶음과 순서
 
 다른 세션의 PR 은 대문자로 적는다. INFRA1 은 인프라 묶음 1(훅, 키워드, 스킬 5개, 설치 이주, 이미 브랜치에 있음), INFRA3 은 허브와 synapse 제거, LIVE 는 live-ops 의 tfx-live PR 이다. 묶음마다 PR 하나, 머지는 사용자가 한다. 모듈을 지우는 PR 은 그 모듈의 테스트와 packages 미러 사본을 같은 PR 에서 지운다. 구현은 Codex executor, 리뷰는 작성 모델과 다른 모델이 한다.
