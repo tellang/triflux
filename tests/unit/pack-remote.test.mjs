@@ -20,7 +20,6 @@ describe("remote package assembly", () => {
       "hub/promote-penalties.mjs",
       "cto/brief.mjs",
       "cto/collect.mjs",
-      "cto/hygiene-actions.mjs",
       "cto/status.mjs",
       "cto/current.schema.json",
     ]) {

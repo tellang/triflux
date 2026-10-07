@@ -1,23 +1,23 @@
 import { execFileSync } from "node:child_process";
 import {
-  appendFileSync,
-  closeSync,
   existsSync,
   mkdirSync,
-  openSync,
   readdirSync,
   readFileSync,
-  renameSync,
   statSync,
-  unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { renderBrief } from "./brief.mjs";
-import { resolveLakeRootDir } from "./lake-root.mjs";
+import { appendCtoEvent } from "./events.mjs";
+import {
+  firstExisting,
+  readJsonLines,
+  resolveLakeRootDir,
+  writeAtomic,
+} from "./lake-root.mjs";
 
 const SCHEMA_VERSION = "cto-lake.v1";
 const SOURCE_REGISTRY = [
@@ -69,24 +69,6 @@ const SOURCE_REGISTRY = [
     probe: ".omx/handoffs/*",
     enabled: true,
   },
-  {
-    id: "session_vault",
-    kind: "optional-durable-ref",
-    probe: ".triflux/session-vault.json, sessions_v2.db, or .session-vault",
-    enabled: true,
-  },
-  {
-    id: "agy",
-    kind: "optional-durable-ref",
-    probe: ".agy/state.json or .agy/refs.json",
-    enabled: true,
-  },
-  {
-    id: "gbrain",
-    kind: "optional-durable-ref",
-    probe: ".gbrain/refs.json or .gbrain/config.json",
-    enabled: true,
-  },
 ];
 const SOURCE_IDS = SOURCE_REGISTRY.map((source) => source.id);
 
@@ -102,10 +84,6 @@ function isoNow(opts) {
         ? new Date(opts.now)
         : new Date();
   return value.toISOString();
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function sourceState(available, status, detail, collectedAt) {
@@ -128,25 +106,6 @@ function relPath(rootDir, filePath) {
 
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
-}
-
-function readJsonLines(filePath, limit = 20) {
-  if (!existsSync(filePath)) return [];
-  const lines = readFileSync(filePath, "utf8")
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  return lines.slice(-limit).flatMap((line) => {
-    try {
-      return [JSON.parse(line)];
-    } catch {
-      return [];
-    }
-  });
-}
-
-function findFirstExisting(candidates) {
-  return candidates.find((candidate) => existsSync(candidate)) || null;
 }
 
 function listDirFiles(dirPath, rootDir, limit = 10) {
@@ -237,7 +196,7 @@ function collectJsonArtifact(
   collectedAt,
   summarize = safeSummary,
 ) {
-  const filePath = findFirstExisting(candidates);
+  const filePath = firstExisting(candidates);
   if (!filePath) {
     return missingSource(
       "no_shell_readable_artifact",
@@ -429,59 +388,6 @@ function collectHandoffs(rootDir, collectedAt) {
   );
 }
 
-function collectDurableRefs(
-  id,
-  candidates,
-  rootDir,
-  collectedAt,
-  unavailableStatus = "no_shell_readable_artifact",
-) {
-  const filePath = findFirstExisting(candidates);
-  if (!filePath) {
-    return missingSource(
-      unavailableStatus,
-      `${id} exposes no shell-readable durable artifact`,
-      collectedAt,
-    );
-  }
-  try {
-    const stat = statSync(filePath);
-    if (stat.isDirectory()) {
-      return sourceState(
-        true,
-        "ok",
-        {
-          path: relPath(rootDir, filePath),
-          files: listDirFiles(filePath, rootDir, 10),
-        },
-        collectedAt,
-      );
-    }
-    const parsed = basename(filePath).endsWith(".json")
-      ? readJson(filePath)
-      : readFileSync(filePath, "utf8");
-    return sourceState(
-      true,
-      "ok",
-      {
-        path: relPath(rootDir, filePath),
-        summary: safeSummary(parsed),
-      },
-      collectedAt,
-    );
-  } catch (error) {
-    return sourceState(
-      true,
-      "read_error",
-      {
-        path: relPath(rootDir, filePath),
-        error: error?.message || `${id} read failed`,
-      },
-      collectedAt,
-    );
-  }
-}
-
 function buildSummary(current) {
   const repo = current.repo;
   const omxGoals = current.sources.ultragoal_omx.detail?.active_goals || [];
@@ -633,48 +539,6 @@ function validateCurrent(current) {
   }
 }
 
-function writeAtomic(filePath, body) {
-  mkdirSync(dirname(filePath), { recursive: true });
-  const tmpPath = join(
-    dirname(filePath),
-    `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`,
-  );
-  writeFileSync(tmpPath, body, "utf8");
-  renameSync(tmpPath, filePath);
-}
-
-async function appendLedgerEvent(lakeRoot, event, stderr) {
-  mkdirSync(lakeRoot, { recursive: true });
-  const ledgerPath = join(lakeRoot, "ledger.jsonl");
-  const lockPath = join(lakeRoot, "ledger.jsonl.lock");
-  let fd = null;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      fd = openSync(lockPath, "wx", 0o600);
-      break;
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-      if (attempt < 2) await sleep(100);
-    }
-  }
-  if (fd === null) {
-    stderr.write(
-      "[tfx cto collect] warning: ledger lock timeout; skipped ledger append\n",
-    );
-    return false;
-  }
-
-  try {
-    appendFileSync(ledgerPath, `${JSON.stringify(event)}\n`, "utf8");
-    return true;
-  } finally {
-    closeSync(fd);
-    try {
-      unlinkSync(lockPath);
-    } catch {}
-  }
-}
-
 function collectSources(rootDir, collectedAt, execFileSyncFn, opts = {}) {
   const home = homedir();
   const hostArtifactCandidates =
@@ -748,34 +612,6 @@ function collectSources(rootDir, collectedAt, execFileSyncFn, opts = {}) {
       collectedAt,
     ),
     handoffs: collectHandoffs(rootDir, collectedAt),
-    session_vault: collectDurableRefs(
-      "session_vault",
-      [
-        join(rootDir, ".triflux", "session-vault.json"),
-        join(rootDir, "sessions_v2.db"),
-        join(rootDir, ".session-vault"),
-      ],
-      rootDir,
-      collectedAt,
-      "not_shell_collectable",
-    ),
-    agy: collectDurableRefs(
-      "agy",
-      [join(rootDir, ".agy", "state.json"), join(rootDir, ".agy", "refs.json")],
-      rootDir,
-      collectedAt,
-      "not_shell_collectable",
-    ),
-    gbrain: collectDurableRefs(
-      "gbrain",
-      [
-        join(rootDir, ".gbrain", "refs.json"),
-        join(rootDir, ".gbrain", "config.json"),
-      ],
-      rootDir,
-      collectedAt,
-      "not_shell_collectable",
-    ),
   };
 
   return { repo: git.repo, sources };
@@ -786,6 +622,12 @@ function hasFlag(args, flag) {
 }
 
 export async function runCollect(args = [], opts = {}) {
+  if (hasFlag(args, "--help")) {
+    (opts.stdout || process.stdout).write(
+      "Usage: tfx cto collect [--json]\nRefresh the CTO lake from durable authority sources.\n",
+    );
+    return;
+  }
   const rootDir = opts.rootDir || resolveLakeRootDir(process.cwd());
   const lakeRoot = opts.lakeRoot || join(rootDir, ".triflux", "lake");
   const stdout = opts.stdout || process.stdout;
@@ -822,7 +664,7 @@ export async function runCollect(args = [], opts = {}) {
       sources_json: "sources.json",
     },
   };
-  const appended = await appendLedgerEvent(lakeRoot, event, stderr);
+  const { appended } = await appendCtoEvent(lakeRoot, event, { stderr });
   if (appended) current.ledger_tail = readLedgerTail(lakeRoot);
 
   validateCurrent(current);

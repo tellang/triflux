@@ -1,20 +1,11 @@
-import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
-import { getCtoHygieneApplyMode } from "../hub/lib/cto-env.mjs";
-import { appendCtoEvent } from "./events.mjs";
-import { applyHygieneArchiveActions } from "./hygiene-actions.mjs";
-import { resolveLakeRootDir } from "./lake-root.mjs";
+  normalizeLiveSession,
+  readJsonLines,
+  readSynapseSnapshot,
+  resolveLakeRootDir,
+} from "./lake-root.mjs";
 
 const COUNT_KEYS = [
   "active_tasks",
@@ -29,49 +20,12 @@ function hasFlag(args, flag) {
   return Array.isArray(args) && args.includes(flag);
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function writeJson(stdout, payload) {
   stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
-}
-
-function firstExisting(paths) {
-  return paths.filter(Boolean).find((path) => existsSync(path)) || null;
-}
-
-function toIsoTime(value) {
-  if (typeof value === "string" && value.trim()) return value;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return new Date(value).toISOString();
-  }
-  return null;
-}
-
-function normalizeLiveSession(session) {
-  return {
-    sessionId: String(session?.sessionId || session?.session_id || ""),
-    phase:
-      typeof session?.phase === "string"
-        ? session.phase
-        : typeof session?.status === "string"
-          ? session.status
-          : "active",
-    agent_id:
-      typeof session?.agent_id === "string"
-        ? session.agent_id
-        : typeof session?.agentId === "string"
-          ? session.agentId
-          : null,
-    started_at: toIsoTime(
-      session?.started_at ?? session?.startedAt ?? session?.lastHeartbeat,
-    ),
-  };
 }
 
 function normalizeOverlay(value) {
@@ -89,28 +43,10 @@ function normalizeOverlay(value) {
   };
 }
 
-async function readSynapseWithRegistry(opts = {}) {
-  const rootDir = opts.rootDir || process.cwd();
-  const persistPath = firstExisting([
-    opts.synapsePersistPath,
-    join(rootDir, ".triflux", "synapse-registry.json"),
-    join(rootDir, ".triflux", "synapse", "registry.json"),
-    join(homedir(), ".claude", "cache", "tfx-hub", "synapse-sessions.json"),
-    join(homedir(), ".claude", "cache", "tfx-hub", "synapse-registry.json"),
-  ]);
-  if (!persistPath) return { live_sessions: [] };
-
-  const { createSynapseRegistry } = await import(
-    "../hub/team/synapse-registry.mjs"
-  );
-  const registry = createSynapseRegistry({ persistPath });
-  return normalizeOverlay(registry.getActive());
-}
-
 async function readLiveOverlay(opts = {}) {
   if (opts.overlay) return normalizeOverlay(opts.overlay);
   try {
-    const reader = opts.synapseReader || readSynapseWithRegistry;
+    const reader = opts.synapseReader || readSynapseSnapshot;
     return normalizeOverlay(
       await reader({
         rootDir: opts.rootDir,
@@ -121,21 +57,6 @@ async function readLiveOverlay(opts = {}) {
   } catch {
     return { live_sessions: [] };
   }
-}
-
-function readJsonLines(filePath) {
-  if (!existsSync(filePath)) return [];
-  return readFileSync(filePath, "utf8")
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line)];
-      } catch {
-        return [];
-      }
-    });
 }
 
 function eventTime(entry) {
@@ -429,271 +350,30 @@ export function projectCtoHygiene({
   };
 }
 
-function safeLabel(value) {
-  return (
-    String(value || "project")
-      .toLowerCase()
-      .replace(/[^a-z0-9._-]+/gu, "-")
-      .replace(/^-+|-+$/gu, "")
-      .slice(0, 40) || "project"
-  );
-}
-
-function rootHash(rootDir) {
-  return createHash("sha256")
-    .update(String(rootDir || ""))
-    .digest("hex")
-    .slice(0, 12);
-}
-
-export function ctoHygieneStewardLockPath(rootDir, lakeRoot) {
-  const label = safeLabel(basename(rootDir || "project"));
-  return join(lakeRoot, "stewards", `${label}-${rootHash(rootDir)}.apply.lock`);
-}
-
-export async function acquireCtoHygieneStewardLock(
-  rootDir,
-  lakeRoot,
-  opts = {},
-) {
-  const lockPath =
-    opts.lockPath || ctoHygieneStewardLockPath(rootDir, lakeRoot);
-  const timeoutMs = Math.max(0, Number(opts.timeoutMs) || 3000);
-  const retryMs = Math.max(1, Number(opts.retryMs) || 50);
-  const staleMs = Math.max(1000, Number(opts.staleMs) || 10 * 60_000);
-  const start = Date.now();
-
-  mkdirSync(dirname(lockPath), { recursive: true });
-
-  while (true) {
-    let fd = null;
-    try {
-      fd = openSync(lockPath, "wx", 0o600);
-      writeFileSync(
-        fd,
-        `${JSON.stringify(
-          {
-            pid: process.pid,
-            project_root: rootDir,
-            project_root_hash: rootHash(rootDir),
-            created_at: new Date().toISOString(),
-          },
-          null,
-          2,
-        )}\n`,
-        "utf8",
-      );
-      return {
-        path: lockPath,
-        project_root: rootDir,
-        project_root_hash: rootHash(rootDir),
-        release() {
-          try {
-            closeSync(fd);
-          } catch {}
-          try {
-            unlinkSync(lockPath);
-          } catch {}
-        },
-      };
-    } catch (error) {
-      if (fd !== null) {
-        try {
-          closeSync(fd);
-        } catch {}
-      }
-      if (error?.code !== "EEXIST") throw error;
-      try {
-        if (Date.now() - statSync(lockPath).mtimeMs > staleMs) {
-          unlinkSync(lockPath);
-          continue;
-        }
-      } catch {}
-      if (Date.now() - start >= timeoutMs) {
-        throw new Error(`cto hygiene steward lock busy: ${lockPath}`);
-      }
-      await sleep(retryMs);
-    }
-  }
-}
-
-const APPLICABLE_STATUSES = new Set([
-  "active",
-  "stale",
-  "superseded",
-  "orphaned",
-  "hidden",
-  "completed",
-]);
-
-function isApplicableRow(row) {
-  return Boolean(row?.action) || APPLICABLE_STATUSES.has(row?.status);
-}
-
-const ARCHIVE_ACK_STATUSES = new Set(["archived", "already_archived"]);
-
-function hygieneApplyActor(opts = {}) {
-  const actor = { cli: "tfx cto hygiene --apply" };
-  if (typeof opts.actorSessionId === "string" && opts.actorSessionId.trim()) {
-    actor.session_id = opts.actorSessionId.trim();
-  }
-  return actor;
-}
-
-async function applyHygieneRows({
-  rootDir,
-  lakeRoot,
-  projection,
-  steward,
-  active,
-  approvals,
-  opts,
-}) {
-  const rows = projection.rows.filter(isApplicableRow);
-  const appended = [];
-  const now = opts.now || new Date().toISOString();
-  const actions = await applyHygieneArchiveActions({
-    rootDir,
-    lakeRoot,
-    projection: { ...projection, rows },
-    dryRun: false,
-    now,
-    applyMode: opts.applyMode || getCtoHygieneApplyMode(),
-    active,
-    humanAck: opts.humanAck,
-    humanGate: opts.humanGate,
-    actorSessionId: opts.actorSessionId,
-    approvals,
-    fsOps: opts.fsOps,
-  });
-  const operationByKey = new Map(
-    (actions.operations || []).map((operation) => [
-      operation.hygiene_key,
-      operation,
-    ]),
-  );
-  for (const row of rows) {
-    const hygieneKey = hygieneKeyForRow(row);
-    const operation = operationByKey.get(hygieneKey);
-    if (operation && !ARCHIVE_ACK_STATUSES.has(operation.status)) continue;
-    const result = await appendCtoEvent(
-      lakeRoot,
-      {
-        event: "hygiene_applied",
-        now,
-        source: "tfx_cto_hygiene_apply",
-        project_root: rootDir,
-        status: row.status,
-        hygiene_key: hygieneKey,
-        hygiene_kind: row.kind,
-        hygiene_id: row.id,
-        hygiene_action: row.action || `acknowledge_${row.status}`,
-        summary: `hygiene apply ${row.kind}:${row.id} ${row.status}`,
-        actor: hygieneApplyActor(opts),
-      },
-      {
-        stderr: opts.stderr,
-        lockRetries: opts.ledgerLockRetries,
-        lockRetryDelayMs: opts.ledgerLockRetryDelayMs,
-      },
-    );
-    if (result.appended) appended.push(result.event);
-  }
-  return {
-    steward: {
-      lock_path: steward.path,
-      project_root: steward.project_root,
-      project_root_hash: steward.project_root_hash,
-    },
-    applicable_count: rows.length,
-    applied_count: appended.length,
-    actions,
-    events: appended,
-  };
-}
-
 export async function runHygiene(args = [], opts = {}) {
+  if (args.some((arg) => !["--dry-run", "--json"].includes(arg))) {
+    throw new Error("tfx cto hygiene supports only --dry-run and --json");
+  }
+  if (opts.dryRun !== true && !hasFlag(args, "--dry-run")) {
+    throw new Error("tfx cto hygiene requires --dry-run");
+  }
   const rootDir = opts.rootDir || resolveLakeRootDir(process.cwd());
   const lakeRoot = opts.lakeRoot || join(rootDir, ".triflux", "lake");
   const stdout = opts.stdout || process.stdout;
-  const jsonOut = opts.json === true || hasFlag(args, "--json");
-  const dryRun = opts.dryRun === true || hasFlag(args, "--dry-run");
-  const apply = opts.apply === true || hasFlag(args, "--apply");
-  if (dryRun && apply) {
-    throw new Error("tfx cto hygiene accepts only one of --dry-run or --apply");
-  }
-  if (!dryRun && !apply) {
-    throw new Error("tfx cto hygiene requires --dry-run or --apply");
-  }
-
-  const buildProjection = async () => {
-    const currentPath = join(lakeRoot, "current.json");
-    const current = existsSync(currentPath) ? readJson(currentPath) : {};
-    const ledger = readJsonLines(join(lakeRoot, "ledger.jsonl"));
-    const overlay = await readLiveOverlay({ ...opts, rootDir, lakeRoot });
-    return {
-      ledger,
-      overlay,
-      projection: projectCtoHygiene({
-        current,
-        ledger: ledger.length > 0 ? ledger : null,
-        overlay,
-      }),
-    };
-  };
-
-  let steward = null;
-  let projection;
-  let overlay = { live_sessions: [] };
-  let ledger = [];
-  let applyResult = null;
-  if (apply) {
-    steward = await acquireCtoHygieneStewardLock(rootDir, lakeRoot, {
-      timeoutMs: opts.stewardLockTimeoutMs,
-      retryMs: opts.stewardLockRetryMs,
-      staleMs: opts.stewardLockStaleMs,
-      lockPath: opts.stewardLockPath,
-    });
-    try {
-      ({ projection, overlay, ledger } = await buildProjection());
-      applyResult = await applyHygieneRows({
-        rootDir,
-        lakeRoot,
-        projection,
-        steward,
-        active: overlay,
-        approvals: ledger.filter((entry) => entry?.event === "hygiene_applied"),
-        opts,
-      });
-      projection = { ...projection, dry_run: false, apply: applyResult };
-    } finally {
-      steward.release();
-    }
-  } else {
-    ({ projection, overlay } = await buildProjection());
-    projection = {
-      ...projection,
-      actions: await applyHygieneArchiveActions({
-        rootDir,
-        lakeRoot,
-        projection,
-        dryRun: true,
-        now: opts.now || new Date().toISOString(),
-        applyMode: opts.applyMode || getCtoHygieneApplyMode(),
-        active: overlay,
-        fsOps: opts.fsOps,
-      }),
-    };
-  }
-
-  if (jsonOut) writeJson(stdout, projection);
-  else {
+  const currentPath = join(lakeRoot, "current.json");
+  const current = existsSync(currentPath) ? readJson(currentPath) : {};
+  const ledger = readJsonLines(join(lakeRoot, "ledger.jsonl"));
+  const overlay = await readLiveOverlay({ ...opts, rootDir, lakeRoot });
+  const projection = projectCtoHygiene({
+    current,
+    ledger: ledger.length ? ledger : null,
+    overlay,
+  });
+  if (opts.json === true || hasFlag(args, "--json"))
+    writeJson(stdout, projection);
+  else
     stdout.write(
-      apply
-        ? `cto hygiene apply: ${applyResult.applied_count} event(s) appended for ${applyResult.applicable_count} actionable row(s)\n`
-        : `cto hygiene dry-run: ${projection.counts.active_tasks} active tasks, ${projection.counts.stale_sessions} stale sessions, ${projection.counts.orphan_worktrees} orphan worktrees\n`,
+      `cto hygiene dry-run: ${projection.counts.active_tasks} active tasks, ${projection.counts.stale_sessions} stale sessions, ${projection.counts.orphan_worktrees} orphan worktrees\n`,
     );
-  }
-
   return projection;
 }

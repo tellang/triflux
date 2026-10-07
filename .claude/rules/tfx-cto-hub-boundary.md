@@ -1,6 +1,6 @@
 # CTO lake ↔ Hub role 경계 규칙
 
-> 근거(why): [ADR-0010 — CTO lake ↔ Hub role 경계](../../docs/adr/0010-cto-lake-hub-role-boundary.md). 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
+> 근거(why): [ADR-0010: CTO lake와 Hub role 경계](../../docs/adr/0010-cto-lake-hub-role-boundary.md), [ADR-0024: CTO 조회 축소](../../docs/adr/0024-cto-explicit-queries-only.md). 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
 
 ## 두 평면 정의
 
@@ -46,8 +46,6 @@ cto/*  →  공용 하위 계층   (허용 — 아래 allowlist만)
 | stale (lease) | hub | agents lease 만료 | `store.sweepStaleAgents` |
 | stale (session) | synapse | registry TTL 초과 | `hub/team/synapse-registry.mjs` |
 | stale (hygiene) | lake | ledger/overlay 판정 | `cto/hygiene.mjs` |
-| steward lock | lake | hygiene **apply 직렬화** 락 (`*.apply.lock`) | `cto/hygiene.mjs` |
-| steward loop | lake | `tfx cto steward` 주기 루프 (lake당 단일 인스턴스, `steward-loop.lock`) | `cto/steward.mjs` |
 
 UI/문서에서 "stale"을 표기할 때는 어느 평면인지 라벨을 붙인다.
 
@@ -66,26 +64,16 @@ UI/문서에서 "stale"을 표기할 때는 어느 평면인지 라벨을 붙인
 | 작업 | 스코프 |
 |------|--------|
 | roleStates/선출/sweeper/presence/메시징 | `feat(hub)` / `fix(hub)` |
-| lake/collect/status/hygiene/steward/events | `feat(cto)` / `fix(cto)` |
+| lake/collect/status/hygiene/events | `feat(cto)` / `fix(cto)` |
 
 (PR #442가 `feat(cto)`로 hub/router 작업을 표기한 오표기 재발 방지.)
-
-## steward 시퀀싱 조건
-
-`tfx cto steward`(주기 루프)는 resident-cto-manager PRD T2의 선행 슬라이스다.
-가드레일 2종은 필수 불변식: **TFX_CTO kill-switch 매 cycle 확인** + **lake당
-single-instance 락**. hygiene 실제 archive 실행부(T4)와 결합할 때도 이 게이트를
-우회하는 경로를 만들지 않는다. collect 트리거 정책 소유자는 hub auto-collect
-(`TFX_CTO_AUTO_COLLECT=1`일 때만 동작, debounce + fresh-lake 게이트;
-[ADR-0018](../../docs/adr/0018-cto-auto-behaviors-opt-in.md))와 steward 루프 둘이며,
-셋째 드라이버(PRD Tier-1 데몬)
-추가 시 이 문서에 조정 규칙을 먼저 기록한다.
 
 ## 관련
 
 | 대상 | 포인터 |
 |------|--------|
 | 결정 근거 | `docs/adr/0010-cto-lake-hub-role-boundary.md` |
+| CTO 조회 축소 | `docs/adr/0024-cto-explicit-queries-only.md` |
 | role 스코프(전역 vs per-project) | 이슈 #447 (의도적 DEFER — ADR 하위 결정으로 별도 확정) |
 | 미러 범위(cto/ 포함) | `.claude/rules/tfx-mirror-policy.md` |
 | resident CTO PRD | `.triflux/plans/resident-cto-manager.md` (precursor 브랜치) |

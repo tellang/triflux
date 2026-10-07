@@ -1,19 +1,12 @@
-// cto/lake-root.mjs - resolve the canonical project root for the CTO lake.
-//
-// CTO lake (.triflux/lake/current.json) 는 repo 루트에 하나만 둔다. 그런데
-// runStatus/runCollect/runDashboard 는 process.cwd() 를 기본 rootDir 로 쓰므로,
-// repo 루트가 아닌 하위 폴더(예: packages/triflux)에서 `tfx cto` 를 부르면 lake
-// 를 못 찾아 "run tfx cto collect" 가 반복되고, collect 는 엉뚱한 하위 폴더에
-// 새 .triflux/lake 를 만든다. cwd 에서 `.git` 마커를 위로 탐색해 toplevel 로
-// 올려 이 불일치를 없앤다.
-//
-// git worktree 는 별도 프로젝트가 아니라 같은 프로젝트의 작업 디렉터리다. 따라서
-// linked worktree 안에서 호출하더라도 `git rev-parse --git-common-dir` 로 canonical
-// project root(일반적으로 main checkout)를 찾아 같은 CTO lake 를 공유한다. git 명령을
-// 사용할 수 없으면 기존의 `.git` 상향 탐색으로 fallback 한다.
-
 import { execFileSync as defaultExecFileSync } from "node:child_process";
-import { existsSync as defaultExistsSync } from "node:fs";
+import {
+  existsSync as defaultExistsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, parse } from "node:path";
 
 const MAX_DEPTH = 64;
@@ -66,7 +59,7 @@ export function resolveLakeRootDir(cwd, opts = {}) {
   const exists = opts?.existsSync || defaultExistsSync;
   const execFileSync = opts?.execFileSync || defaultExecFileSync;
   // 비문자열(객체/숫자 등 truthy 포함) 또는 빈 문자열이면 항상 "" 를 반환해
-  // @returns {string} 계약을 지킨다 — truthy 비문자열을 그대로 누설하지 않는다.
+  // @returns {string} 계약을 지킨다. truthy 비문자열을 그대로 누설하지 않는다.
   if (typeof cwd !== "string" || !cwd) return "";
 
   const gitRoot = resolveViaGitCommonDir(cwd, execFileSync);
@@ -82,4 +75,109 @@ export function resolveLakeRootDir(cwd, opts = {}) {
     dir = parent;
   }
   return cwd;
+}
+
+export function firstExisting(paths) {
+  return paths.filter(Boolean).find((path) => defaultExistsSync(path)) || null;
+}
+
+export function toIsoTime(value) {
+  if (typeof value === "string" && value.trim()) return value;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value).toISOString();
+  }
+  return null;
+}
+
+export function shortHash(value) {
+  const str = String(value ?? "");
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = (h * 33) ^ str.charCodeAt(i);
+  }
+  return (h >>> 0).toString(36);
+}
+
+export function pathLabel(value) {
+  const str = String(value ?? "").replace(/[/\\]+$/u, "");
+  if (!str) return "";
+  const segments = str.split(/[/\\]+/u);
+  return segments[segments.length - 1] || "";
+}
+
+export function normalizeLiveSession(session) {
+  return {
+    sessionId: String(session?.sessionId || session?.session_id || ""),
+    agent_id:
+      typeof session?.agent_id === "string"
+        ? session.agent_id
+        : typeof session?.agentId === "string"
+          ? session.agentId
+          : null,
+    phase:
+      typeof session?.phase === "string"
+        ? session.phase
+        : typeof session?.status === "string"
+          ? session.status
+          : "active",
+    started_at: toIsoTime(
+      session?.started_at ?? session?.startedAt ?? session?.lastHeartbeat,
+    ),
+  };
+}
+
+export async function readSynapseSnapshot(opts = {}) {
+  const rootDir = opts.rootDir || process.cwd();
+  const persistPath = firstExisting([
+    opts.synapsePersistPath,
+    join(rootDir, ".triflux", "synapse-registry.json"),
+    join(rootDir, ".triflux", "synapse", "registry.json"),
+    join(homedir(), ".claude", "cache", "tfx-hub", "synapse-sessions.json"),
+    join(homedir(), ".claude", "cache", "tfx-hub", "synapse-registry.json"),
+  ]);
+  if (!persistPath) return { sessions: [], active_shards: [] };
+  const data = JSON.parse(readFileSync(persistPath, "utf8"));
+  // 상태 전이는 hub 소유이며 조회는 저장된 live 상태만 읽는다.
+  const sessions = Object.entries(data).flatMap(([key, session]) => {
+    const sessionId = String(session?.sessionId ?? key).trim();
+    if (!sessionId || ["stale", "expired"].includes(session?.status)) return [];
+    return [
+      {
+        ...session,
+        sessionId,
+        status: session?.status === "idle" ? "idle" : "active",
+        lastHeartbeat:
+          typeof session?.lastHeartbeat === "number"
+            ? session.lastHeartbeat
+            : Date.now(),
+      },
+    ];
+  });
+  return { sessions, active_shards: [] };
+}
+
+export function readJsonLines(filePath, limit = Infinity) {
+  if (!defaultExistsSync(filePath)) return [];
+  const lines = readFileSync(filePath, "utf8")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.slice(-limit).flatMap((line) => {
+    try {
+      return [JSON.parse(line)];
+    } catch {
+      return [];
+    }
+  });
+}
+
+export function writeAtomic(filePath, body) {
+  mkdirSync(dirname(filePath), { recursive: true });
+  const tmpPath = join(
+    dirname(filePath),
+    `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`,
+  );
+  writeFileSync(tmpPath, body, "utf8");
+  renameSync(tmpPath, filePath);
 }

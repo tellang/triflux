@@ -132,7 +132,7 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 | `tfx hub` | Local Hub: `start`, `stop`, `status`, `ensure` |
 | `tfx mcp` | Managed MCP registry: `list`, `sync`, `add`, `remove` |
 | `tfx handoff` | Serialize the current context for another session or host |
-| `tfx cto` | Repo-local authority console: `collect`, `status`, `dashboard`, `hygiene`, `steward`, `event` |
+| `tfx cto` | Repo-local authority console: `collect`, `status`, `hygiene` (dry-run) |
 | `tfx review` / `tfx codex-team` | Codex git-diff review / Codex-led team mode |
 | `tfx stealth-fetch <url>` | Fetch one URL through cloakbrowser (JSON on stdout) |
 | `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | Notion → Markdown, commit intent trailers, CLI schemas, installed skills, TUI monitor, update, version |
@@ -169,10 +169,10 @@ the `claude agents` panel unless you pass `--no-native-bridge-ui`.
 removes a CLI from routing; if no allowed CLI is available the route fails instead of silently
 falling back. Details: [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tfx-machine-profile.md).
 
-**CTO lake.** `tfx cto` keeps an append-only history of the repo in `.triflux/lake/`. Automatic
-behavior is off by default; opt in with `TFX_CTO_AUTO_COLLECT=1` or `TFX_CTO_NORTH_STAR=1`
-([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)). The old tray UI was removed
-([ADR-0022](docs/adr/0022-remove-cto-tray.md)).
+**CTO lake.** Run `tfx cto collect` to refresh the repo snapshot in `.triflux/lake/`, then
+`tfx cto status` to inspect it with its generation time and age. `tfx cto hygiene --dry-run` reports
+dry-run findings. The tray and unused CTO operating commands were removed
+([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)).
 
 **Remote hosts.** `/tfx-remote` and `--remote <host>` read hosts from `~/.config/triflux/hosts.json`
 (Windows: `%APPDATA%\triflux\hosts.json`). Run `/tfx-remote setup` to add one, then

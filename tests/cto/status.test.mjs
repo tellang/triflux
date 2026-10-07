@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -150,6 +156,97 @@ describe("runStatus", () => {
         superseded_checkpoints: 0,
         unknown_owner: 0,
       });
+    } finally {
+      cleanup(rootDir);
+    }
+  });
+
+  it("reads active and idle persisted sessions without changing their snapshot or exposing paths", async () => {
+    const rootDir = makeTempDir();
+    const lakeRoot = join(rootDir, ".test-lake");
+    const persistPath = join(rootDir, ".triflux", "synapse-registry.json");
+    try {
+      writeJson(join(lakeRoot, "current.json"), fixtureCurrent());
+      writeJson(persistPath, {
+        active: {
+          status: "active",
+          cwd: "/private/project",
+          lastHeartbeat: 1780358460000,
+        },
+        idle: {
+          status: "idle",
+          cwd: "C:\\Users\\Alice\\project",
+          lastHeartbeat: 1780358460000,
+        },
+        stale: { status: "stale" },
+        expired: { status: "expired" },
+      });
+      const before = readFileSync(persistPath, "utf8");
+      const result = await runStatus(["--json"], {
+        rootDir,
+        lakeRoot,
+        synapsePersistPath: persistPath,
+        stdout: { write() {} },
+      });
+      assert.deepEqual(
+        result.live_sessions.map((s) => [s.sessionId, s.phase, s.cwdLabel]),
+        [
+          ["active", "active", "project"],
+          ["idle", "idle", "project"],
+        ],
+      );
+      assert.equal(
+        result.live_sessions[0].started_at,
+        "2026-06-02T00:01:00.000Z",
+      );
+      assert.equal(
+        JSON.stringify(result.live_sessions).includes("/private/"),
+        false,
+      );
+      assert.equal(
+        JSON.stringify(result.live_sessions).includes("Alice"),
+        false,
+      );
+      assert.equal(readFileSync(persistPath, "utf8"), before);
+      writeFileSync(persistPath, "{broken", "utf8");
+      const unavailable = await runStatus(["--json"], {
+        rootDir,
+        lakeRoot,
+        synapsePersistPath: persistPath,
+        stdout: { write() {} },
+      });
+      assert.deepEqual(unavailable.live_sessions, []);
+      assert.deepEqual(unavailable.ledger_tail, fixtureCurrent().ledger_tail);
+    } finally {
+      cleanup(rootDir);
+    }
+  });
+
+  it("shows snapshot generation time and age in human output", async () => {
+    const rootDir = makeTempDir();
+    const lakeRoot = join(rootDir, ".test-lake");
+    try {
+      for (const [generated_at, expected] of [
+        ["2026-09-24T00:00:00.000Z", "14d ago"],
+        ["invalid", "unknown age"],
+        ["2026-10-09T00:00:00.000Z", "in the future"],
+      ]) {
+        writeJson(
+          join(lakeRoot, "current.json"),
+          fixtureCurrent({ generated_at }),
+        );
+        const out = captureStdout();
+        await runStatus([], {
+          rootDir,
+          lakeRoot,
+          stdout: out.stdout,
+          now: "2026-10-08T00:00:00.000Z",
+          synapseReader: async () => [],
+        });
+        assert.ok(
+          out.read().includes(`generated_at: ${generated_at} (${expected})`),
+        );
+      }
     } finally {
       cleanup(rootDir);
     }

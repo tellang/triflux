@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 
 import {
-  getCtoHygieneApplyMode,
   getCtoMaxTokens,
   getCtoMode,
   isCtoManagerEnabled,
@@ -13,7 +12,6 @@ import {
 const ENV_KEYS = [
   "TFX_CTO",
   "TFX_CTO_MANAGER",
-  "TFX_CTO_HYGIENE_APPLY",
   "TFX_CTO_RETENTION",
   "TFX_CTO_MODE",
   "TFX_CTO_MAX_TOKENS",
@@ -46,7 +44,6 @@ describe("cto env readers", () => {
     setEnv();
 
     assert.equal(isCtoManagerEnabled(), false);
-    assert.equal(getCtoHygieneApplyMode(), "off");
     assert.equal(isCtoRetentionEnabled(), false);
     assert.equal(getCtoMode(), "bounded");
     assert.equal(getCtoMaxTokens(), 0);
@@ -64,27 +61,15 @@ describe("cto env readers", () => {
     }
   });
 
-  it("lets the global CTO kill switch disable manager, hygiene, and retention", () => {
+  it("lets the global CTO kill switch disable manager and retention", () => {
     setEnv({
       TFX_CTO: "0",
       TFX_CTO_MANAGER: "1",
-      TFX_CTO_HYGIENE_APPLY: "archive",
       TFX_CTO_RETENTION: "1",
     });
 
     assert.equal(isCtoManagerEnabled(), false);
-    assert.equal(getCtoHygieneApplyMode(), "off");
     assert.equal(isCtoRetentionEnabled(), false);
-  });
-
-  it("returns archive only for the hygiene archive apply mode", () => {
-    setEnv({ TFX_CTO_HYGIENE_APPLY: "archive" });
-    assert.equal(getCtoHygieneApplyMode(), "archive");
-
-    for (const value of ["off", "0", "", "delete", "apply"]) {
-      setEnv({ TFX_CTO_HYGIENE_APPLY: value });
-      assert.equal(getCtoHygieneApplyMode(), "off");
-    }
   });
 
   it("enables retention only for explicit on values", () => {
@@ -120,11 +105,6 @@ describe("cto env readers", () => {
     assert.equal(isCtoManagerEnabled(), false);
     process.env.TFX_CTO_MANAGER = "1";
     assert.equal(isCtoManagerEnabled(), true);
-
-    process.env.TFX_CTO_HYGIENE_APPLY = "off";
-    assert.equal(getCtoHygieneApplyMode(), "off");
-    process.env.TFX_CTO_HYGIENE_APPLY = "archive";
-    assert.equal(getCtoHygieneApplyMode(), "archive");
 
     process.env.TFX_CTO_RETENTION = "0";
     assert.equal(isCtoRetentionEnabled(), false);

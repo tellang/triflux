@@ -1,9 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { compactHygieneCounts, projectCtoHygiene } from "./hygiene.mjs";
-import { resolveLakeRootDir } from "./lake-root.mjs";
+import {
+  normalizeLiveSession,
+  pathLabel,
+  readSynapseSnapshot,
+  resolveLakeRootDir,
+  shortHash,
+} from "./lake-root.mjs";
 
 const SCHEMA_VERSION = "cto-lake.v1";
 const SYNAPSE_TIMEOUT_MS = 1500;
@@ -18,36 +23,6 @@ function writeJson(stdout, payload) {
 
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
-}
-
-function firstExisting(paths) {
-  return paths.filter(Boolean).find((path) => existsSync(path)) || null;
-}
-
-function toIsoTime(value) {
-  if (typeof value === "string" && value.trim()) return value;
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return new Date(value).toISOString();
-  }
-  return null;
-}
-
-// Non-cryptographic djb2-style hash used only to produce stable redacted
-// labels for local paths. Do not use this as a trust boundary or secret token.
-function shortHash(value) {
-  const str = String(value ?? "");
-  let h = 5381;
-  for (let i = 0; i < str.length; i++) {
-    h = (h * 33) ^ str.charCodeAt(i);
-  }
-  return (h >>> 0).toString(36);
-}
-
-function pathLabel(value) {
-  const str = String(value ?? "").replace(/[/\\]+$/u, "");
-  if (!str) return "";
-  const segments = str.split(/[/\\]+/u);
-  return segments[segments.length - 1] || "";
 }
 
 export function deriveRepoRootFromCwd(cwd) {
@@ -98,30 +73,6 @@ function redactedCwdFields(cwd) {
   };
 }
 
-function normalizeLiveSession(session) {
-  const cwd = typeof session?.cwd === "string" ? session.cwd : "";
-  return {
-    sessionId: String(session?.sessionId || ""),
-    host: typeof session?.host === "string" ? session.host : "local",
-    agent_id:
-      typeof session?.agent_id === "string"
-        ? session.agent_id
-        : typeof session?.agentId === "string"
-          ? session.agentId
-          : null,
-    phase:
-      typeof session?.phase === "string"
-        ? session.phase
-        : typeof session?.status === "string"
-          ? session.status
-          : "active",
-    started_at: toIsoTime(
-      session?.started_at ?? session?.startedAt ?? session?.lastHeartbeat,
-    ),
-    ...redactedCwdFields(cwd),
-  };
-}
-
 function normalizeActiveShard(shard) {
   return {
     shard_name:
@@ -162,7 +113,11 @@ function normalizeSynapseOverlay(value) {
 
   return {
     live_sessions: sessions
-      .map(normalizeLiveSession)
+      .map((session) => ({
+        ...normalizeLiveSession(session),
+        host: typeof session?.host === "string" ? session.host : "local",
+        ...redactedCwdFields(session?.cwd),
+      }))
       .filter((session) => session.sessionId),
     active_shards: activeShards.map(normalizeActiveShard),
   };
@@ -182,27 +137,9 @@ function withTimeout(promise, timeoutMs = SYNAPSE_TIMEOUT_MS) {
   });
 }
 
-async function readSynapseWithRegistry(opts = {}) {
-  const rootDir = opts.rootDir || process.cwd();
-  const persistPath = firstExisting([
-    opts.synapsePersistPath,
-    join(rootDir, ".triflux", "synapse-registry.json"),
-    join(rootDir, ".triflux", "synapse", "registry.json"),
-    join(homedir(), ".claude", "cache", "tfx-hub", "synapse-sessions.json"),
-    join(homedir(), ".claude", "cache", "tfx-hub", "synapse-registry.json"),
-  ]);
-  if (!persistPath) return { sessions: [], active_shards: [] };
-
-  const { createSynapseRegistry } = await import(
-    "../hub/team/synapse-registry.mjs"
-  );
-  const registry = createSynapseRegistry({ persistPath });
-  return { sessions: registry.getActive(), active_shards: [] };
-}
-
 async function readSynapseOverlay(opts) {
   try {
-    const reader = opts.synapseReader || readSynapseWithRegistry;
+    const reader = opts.synapseReader || readSynapseSnapshot;
     const raw = await withTimeout(
       reader({
         rootDir: opts.rootDir,
@@ -300,13 +237,29 @@ function formatLedgerEntry(entry) {
   return `${ts} ${event}${summary}`;
 }
 
-function renderHumanStatus(status) {
+function formatSnapshotAge(generatedAt, now) {
+  const ageMs = new Date(now).getTime() - Date.parse(generatedAt);
+  if (!Number.isFinite(ageMs)) return "unknown age";
+  if (ageMs < 0) return "in the future";
+  for (const [unit, ms] of [
+    ["d", 86400000],
+    ["h", 3600000],
+    ["m", 60000],
+    ["s", 1000],
+  ]) {
+    if (ageMs >= ms || unit === "s")
+      return `${Math.floor(ageMs / ms)}${unit} ago`;
+  }
+}
+
+function renderHumanStatus(status, now) {
   const { available, total } = countAvailableSources(status.sources);
   const activeGoals = countActiveGoals(status);
   const recent = Array.isArray(status.ledger_tail)
     ? status.ledger_tail.slice(-2)
     : [];
   const lines = [
+    `generated_at: ${status.generated_at || "unknown"} (${formatSnapshotAge(status.generated_at, now)})`,
     `repo: ${formatRepo(status.repo)}`,
     `sources: ${available}/${total} available`,
     `active: ${status.live_sessions.length} sessions, ${status.active_shards.length} shards, ${activeGoals} goals`,
@@ -347,7 +300,7 @@ export async function runStatus(args = [], opts = {}) {
   const status = projectStatus(current, overlay);
 
   if (jsonOut) writeJson(stdout, status);
-  else stdout.write(renderHumanStatus(status));
+  else stdout.write(renderHumanStatus(status, opts.now ?? Date.now()));
 
   return status;
 }

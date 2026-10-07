@@ -16,6 +16,7 @@
 | **무엇을 만드나 / 요구사항** | [prd/](prd/) — 제품 요구(PRD) · 템플릿 [prd/_template.md](prd/_template.md) |
 | **원문 요구 ↔ 확정 요구 (추적성)** | [req/](req/) — raw(원문 ask) ↔ refined(확정 요구사항) 양방향 링크. PRD보다 앞 단계 |
 | **왜 이렇게 정했나 (결정 근거)** | [adr/](adr/) — 번호화된 불변 ADR · 상태보드 [adr/README.md](adr/README.md) · 운영 규약 [adr/CONVENTIONS.md](adr/CONVENTIONS.md) · 경량 결정로그 [DECISIONS.md](DECISIONS.md) |
+| **CTO 조회 범위** | [ADR-0024](adr/0024-cto-explicit-queries-only.md) : 명시적 `collect`·`status`와 제거한 운영 기능 |
 | **항상 지킬 에이전트 규칙** | [../.claude/rules/](../.claude/rules/) — 정책 SSOT. 하네스가 auto-load한다. 문서는 이 규칙을 "가리키기만" 한다 |
 | **시스템 구조** | [../ARCHITECTURE.md](../ARCHITECTURE.md) — 패키지·데이터 흐름·미러 관계 · 각주 리딩 노트 [architecture.reading.md](architecture.reading.md)(옵시디언, wiki-harness) |
 | **개발 / 기여 프로세스** | [process/](process/) — 브랜치 정책·PR 리뷰 계약 · 진입점 [../CONTRIBUTING.md](../CONTRIBUTING.md) |

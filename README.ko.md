@@ -131,7 +131,7 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 | `tfx hub` | 로컬 Hub: `start`, `stop`, `status`, `ensure` |
 | `tfx mcp` | 관리형 MCP 레지스트리: `list`, `sync`, `add`, `remove` |
 | `tfx handoff` | 현재 맥락을 다른 세션이나 호스트로 넘길 프롬프트로 묶음 |
-| `tfx cto` | 저장소 단위 권위 콘솔: `collect`, `status`, `dashboard`, `hygiene`, `steward`, `event` |
+| `tfx cto` | 저장소 단위 권위 콘솔: `collect`, `status`, `hygiene`(dry-run) |
 | `tfx review` / `tfx codex-team` | Codex git diff 리뷰 / Codex 주도 팀 모드 |
 | `tfx stealth-fetch <url>` | cloakbrowser로 URL 하나를 가져옴(JSON을 stdout으로) |
 | `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | Notion → Markdown, 커밋 intent 트레일러, CLI 스키마, 설치된 스킬, TUI 모니터, 업데이트, 버전 |
@@ -168,10 +168,10 @@ Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-s
 다른 경로로 넘어가지 않고 실패한다. 자세한 내용은
 [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tfx-machine-profile.md).
 
-**CTO lake.** `tfx cto`는 저장소에서 일어난 일을 `.triflux/lake/`에 덧붙이기 전용으로 남긴다. 자동
-동작은 기본으로 꺼져 있고 `TFX_CTO_AUTO_COLLECT=1`이나 `TFX_CTO_NORTH_STAR=1`로
-켠다([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)). 예전 트레이 UI는 제거됐다
-([ADR-0022](docs/adr/0022-remove-cto-tray.md)).
+**CTO lake.** `tfx cto collect`로 `.triflux/lake/`의 저장소 스냅샷을 갱신하고,
+`tfx cto status`로 생성 시각과 경과 시간을 확인한다. `tfx cto hygiene --dry-run`는 dry-run 결과를
+보고한다. 트레이와 쓰이지 않는 CTO 운영 명령은 제거했다
+([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)).
 
 **원격 호스트.** `/tfx-remote`와 `--remote <host>`는 `~/.config/triflux/hosts.json`
 (Windows는 `%APPDATA%\triflux\hosts.json`)에서 호스트를 읽는다. `/tfx-remote setup`으로 호스트를
