@@ -10,7 +10,7 @@ function isValidPluginRoot(candidate) {
   return (
     typeof candidate === "string" &&
     candidate.trim().length > 0 &&
-    existsSync(join(candidate.trim(), "hooks", "hook-orchestrator.mjs"))
+    existsSync(join(candidate.trim(), "hooks", "codex-session-hook.mjs"))
   );
 }
 

@@ -106,15 +106,9 @@ describe("setup stable node command (#253)", () => {
       );
 
       const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-      const commands = [
-        settings.statusLine.command,
-        ...settings.hooks.SessionStart.flatMap((entry) =>
-          entry.hooks.map((hook) => hook.command),
-        ),
-        ...settings.hooks.PreToolUse.flatMap((entry) =>
-          entry.hooks.map((hook) => hook.command),
-        ),
-      ];
+      const commands = [settings.statusLine.command];
+      assert.equal(settings.hooks?.SessionStart, undefined);
+      assert.equal(settings.hooks?.PreToolUse, undefined);
 
       assert.ok(
         commands.some((command) => command.includes("hud-qos-status.mjs")),

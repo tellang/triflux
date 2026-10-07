@@ -146,10 +146,11 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
       false,
       "삭제된 legacy alias는 dry-run 동기화 액션에 포함되면 안 된다",
     );
-    assert.ok(
+    assert.equal(
       payload.actions.some(
         (action) => action.label === "tfx-gate-activate.mjs",
       ),
+      false,
     );
     assert.ok(
       payload.actions.some(
@@ -203,15 +204,42 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
   });
 
   it("doctor --json은 checks 배열을 포함해야 한다", () => {
-    const result = runCli(["doctor", "--json"]);
+    const homeDir = createHomeDir();
+    const settingsPath = join(homeDir, ".claude", "settings.json");
+    const original = JSON.stringify({
+      hooks: {
+        SessionStart: [
+          {
+            hooks: [
+              {
+                type: "command",
+                command:
+                  'node "/opt/node_modules/triflux/hooks/hook-orchestrator.mjs"',
+              },
+              { type: "command", command: "bash /user/hooks/custom.sh" },
+            ],
+          },
+        ],
+      },
+    });
+    writeFileSync(settingsPath, original);
+    const result = runCli(["doctor", "--json"], { homeDir });
     const payload = parseStdoutJson(result);
     assert.ok(Array.isArray(payload.checks));
-    assert.equal(typeof payload.hook_coverage?.total, "number");
-    assert.equal(typeof payload.hook_coverage?.registered, "number");
-    assert.ok(Array.isArray(payload.hook_coverage?.missing));
+    assert.equal(typeof payload.legacy_hooks?.remaining, "number");
+    assert.equal(typeof payload.legacy_hooks?.removed, "number");
+    assert.equal(payload.legacy_hooks.remaining, 1);
+    assert.equal(payload.legacy_hooks.removed, 0);
+    assert.equal(
+      payload.checks.find((check) => check.name === "legacy-claude-hooks")
+        .status,
+      "issues",
+    );
+    assert.equal(readFileSync(settingsPath, "utf8"), original);
     assert.ok(payload.checks.some((check) => check.name === "tfx-route.sh"));
     assert.ok(payload.checks.some((check) => check.name === "codex"));
     assert.ok(payload.checks.some((check) => check.name === "warmup-cache"));
+    rmSync(homeDir, { recursive: true, force: true });
   });
 
   it("doctor --json은 serena 잔존을 부활(should-be-absent)로 감지해야 한다", () => {

@@ -47,9 +47,9 @@ function getTestHomeDir() {
 
 function createValidPluginRoot(baseDir, name = "plugin-root") {
   const root = join(baseDir, name);
-  const orchestratorPath = join(root, "hooks", "hook-orchestrator.mjs");
-  mkdirSync(dirname(orchestratorPath), { recursive: true });
-  writeFileSync(orchestratorPath, "// test fixture\n", "utf8");
+  const sentinelPath = join(root, "hooks", "codex-session-hook.mjs");
+  mkdirSync(dirname(sentinelPath), { recursive: true });
+  writeFileSync(sentinelPath, "// test fixture\n", "utf8");
   return root;
 }
 

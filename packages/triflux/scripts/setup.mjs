@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// triflux 세션 시작 시 자동 설정 스크립트
+// triflux 설치 및 업데이트 설정 스크립트
 // - tfx-route.sh를 ~/.claude/scripts/에 동기화
 // - hud-qos-status.mjs를 ~/.claude/hud/에 동기화
 // - skills/를 ~/.claude/skills/에 동기화
@@ -30,7 +30,7 @@ import {
 } from "./claudemd-sync.mjs";
 import { ensureAgyHooks } from "./ensure-agy-hooks.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
-import { addPluginRootFallbackToCommand } from "./lib/doctor-env-checks.mjs";
+import { cleanupLegacyHooks } from "./lib/legacy-hook-cleanup.mjs";
 import {
   MACHINE_PROFILE_KEYS,
   parseMachineProfileContent,
@@ -661,11 +661,6 @@ const SYNC_MAP = [
     label: "hub/team/agent-map.json",
   },
   {
-    src: join(PLUGIN_ROOT, "scripts", "tfx-gate-activate.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "tfx-gate-activate.mjs"),
-    label: "tfx-gate-activate.mjs",
-  },
-  {
     src: join(PLUGIN_ROOT, "scripts", "remote-spawn.mjs"),
     dst: join(CLAUDE_DIR, "scripts", "remote-spawn.mjs"),
     label: "remote-spawn.mjs",
@@ -914,7 +909,7 @@ function syncAliasedSkillDir(srcDir, dstDir, { alias, source }) {
 
 /**
  * SKILL.md frontmatter 의 `platform:` 목록(process.platform 값)을 읽는다.
- * keyword-rules.json 의 `platform` 필드와 같은 의미다. 없거나 비어 있으면
+ * SKILL.md의 `platform` 필드가 없거나 비어 있으면
  * 모든 플랫폼에 설치한다.
  * @param {string} skillDir - SKILL.md 가 든 스킬 디렉토리
  * @returns {string[]}
@@ -1112,122 +1107,6 @@ function syncCodexHarnessAdapter({
     rmSync(tempDir, { recursive: true, force: true });
   }
   return { ok: true, action: "synced", sourceDir, destinationDir };
-}
-
-/**
- * 훅 커맨드 문자열에서 스크립트 파일명을 추출한다.
- * 예: 'node "/path/to/safety-guard.mjs"' → "safety-guard.mjs"
- * @param {string|undefined} command
- * @returns {string|null}
- */
-function extractManagedHookFilename(command) {
-  if (typeof command !== "string") return null;
-  const match = command.match(/([^/\\"\s]+\.(?:mjs|js|sh|cjs))(?:["'\s]|$)/);
-  return match ? match[1] : null;
-}
-
-function expandRequiresPath(value) {
-  if (typeof value !== "string" || value.trim() === "") return null;
-  return resolve(
-    value.replace(/\$\{HOME\}/g, _TFX_HOME).replace(/\$HOME\b/g, _TFX_HOME),
-  );
-}
-
-function isRequiredPathAvailable(value) {
-  const expanded = expandRequiresPath(value);
-  return expanded ? existsSync(expanded) : true;
-}
-
-/**
- * hook-registry.json에서 관리 대상 훅 목록을 플랫 배열로 반환한다.
- * @param {string} registryPath - hook-registry.json 경로
- * @returns {Array<{ event: string, id: string, fileName: string, matcher: string, command: string, priority: number, enabled: boolean, requires?: string }>}
- */
-function getManagedRegistryHooks(registryPath) {
-  if (!existsSync(registryPath)) return [];
-  try {
-    const registry = JSON.parse(readFileSync(registryPath, "utf8"));
-    const events = registry.events || {};
-    const result = [];
-    for (const [event, hooks] of Object.entries(events)) {
-      if (!Array.isArray(hooks)) continue;
-      for (const hook of hooks) {
-        if (!hook.enabled) continue;
-        if (!isRequiredPathAvailable(hook.requires)) continue;
-        const fileName = extractManagedHookFilename(hook.command);
-        result.push({
-          event,
-          id: hook.id || "",
-          fileName,
-          matcher: hook.matcher || "*",
-          command: hook.command || "",
-          priority: hook.priority ?? 100,
-          enabled: hook.enabled,
-          requires: hook.requires,
-        });
-      }
-    }
-    return result;
-  } catch {
-    return [];
-  }
-}
-
-/**
- * hook-registry.json 기준으로 settings.json에 누락된 훅을 자동 등록한다.
- * @param {{ settingsPath: string, registryPath: string }} opts
- * @returns {{ ok: boolean, changed: boolean, added: string[] }}
- */
-function ensureHooksInSettings({ settingsPath, registryPath }) {
-  try {
-    const managed = getManagedRegistryHooks(registryPath);
-    if (managed.length === 0) return { ok: true, changed: false, added: [] };
-
-    let settings = {};
-    if (existsSync(settingsPath)) {
-      settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-    }
-    if (!settings.hooks) settings.hooks = {};
-
-    const added = [];
-    for (const spec of managed) {
-      if (!Array.isArray(settings.hooks[spec.event])) {
-        settings.hooks[spec.event] = [];
-      }
-      const entries = settings.hooks[spec.event];
-      const alreadyRegistered = entries.some(
-        (entry) =>
-          Array.isArray(entry?.hooks) &&
-          entry.hooks.some(
-            (h) => extractManagedHookFilename(h?.command) === spec.fileName,
-          ),
-      );
-      if (alreadyRegistered) continue;
-
-      entries.push({
-        matcher: spec.matcher,
-        hooks: [
-          {
-            type: "command",
-            command: addPluginRootFallbackToCommand(spec.command, PLUGIN_ROOT),
-            timeout: 5,
-          },
-        ],
-      });
-      added.push(spec.id || spec.fileName);
-    }
-
-    if (added.length > 0) {
-      writeFileSync(
-        settingsPath,
-        JSON.stringify(settings, null, 2) + "\n",
-        "utf8",
-      );
-    }
-    return { ok: true, changed: added.length > 0, added };
-  } catch {
-    return { ok: false, changed: false, added: [] };
-  }
 }
 
 function isProtectedCodexConfigMutationEnv(env = process.env) {
@@ -1586,15 +1465,6 @@ function buildNodeScriptCommand(scriptPath) {
   return `${quoteShellCommandArg(resolveStableNodeCommand())} ${quoteShellCommandArg(scriptPath)}`;
 }
 
-function refreshHookCommandForScript(hook, scriptName, scriptPath) {
-  if (typeof hook?.command !== "string") return false;
-  if (!hook.command.includes(scriptName)) return false;
-  const desired = buildNodeScriptCommand(scriptPath);
-  if (hook.command === desired) return false;
-  hook.command = desired;
-  return true;
-}
-
 function buildWindowsHubAutostartCommand({
   nodePath = process.execPath,
   pluginRoot = PLUGIN_ROOT,
@@ -1803,120 +1673,6 @@ function applyRemoteControl(settings) {
   return true;
 }
 
-function applyHooks(settings) {
-  if (!settings.hooks) settings.hooks = {};
-  let changed = false;
-
-  if (!Array.isArray(settings.hooks.SessionStart))
-    settings.hooks.SessionStart = [];
-
-  const hasTrifluxHooks = settings.hooks.SessionStart.some(
-    (entry) =>
-      Array.isArray(entry.hooks) &&
-      entry.hooks.some(
-        (hook) =>
-          typeof hook.command === "string" && hook.command.includes("triflux"),
-      ),
-  );
-
-  const pluginRoot = PLUGIN_ROOT.replace(/\\/g, "/");
-  const commandForScript = (scriptName) =>
-    buildNodeScriptCommand(`${pluginRoot}/scripts/${scriptName}`);
-
-  if (!hasTrifluxHooks) {
-    settings.hooks.SessionStart.push({
-      matcher: "*",
-      hooks: [
-        {
-          type: "command",
-          command: commandForScript("setup.mjs"),
-          timeout: 10,
-        },
-        {
-          type: "command",
-          command: commandForScript("hub-ensure.mjs"),
-          timeout: 8,
-        },
-        {
-          type: "command",
-          command: commandForScript("preflight-cache.mjs"),
-          timeout: 5,
-        },
-      ],
-    });
-    changed = true;
-  }
-
-  for (const entry of settings.hooks.SessionStart) {
-    if (!Array.isArray(entry.hooks)) continue;
-    for (const hook of entry.hooks) {
-      for (const scriptName of [
-        "setup.mjs",
-        "hub-ensure.mjs",
-        "mcp-gateway-ensure.mjs",
-        "preflight-cache.mjs",
-      ]) {
-        if (
-          refreshHookCommandForScript(
-            hook,
-            scriptName,
-            `${pluginRoot}/scripts/${scriptName}`,
-          )
-        ) {
-          changed = true;
-        }
-      }
-    }
-  }
-
-  if (!Array.isArray(settings.hooks.PreToolUse)) settings.hooks.PreToolUse = [];
-
-  const gateScriptPath = join(
-    CLAUDE_DIR,
-    "scripts",
-    "tfx-gate-activate.mjs",
-  ).replace(/\\/g, "/");
-  const hasGateHook = settings.hooks.PreToolUse.some(
-    (entry) =>
-      Array.isArray(entry.hooks) &&
-      entry.hooks.some(
-        (hook) =>
-          typeof hook.command === "string" &&
-          hook.command.includes("tfx-gate-activate"),
-      ),
-  );
-
-  if (!hasGateHook && existsSync(gateScriptPath.replace(/\//g, "\\"))) {
-    settings.hooks.PreToolUse.push({
-      matcher: "Skill",
-      hooks: [
-        {
-          type: "command",
-          command: buildNodeScriptCommand(gateScriptPath),
-          timeout: 2,
-        },
-      ],
-    });
-    changed = true;
-  } else if (hasGateHook) {
-    for (const entry of settings.hooks.PreToolUse) {
-      if (!Array.isArray(entry.hooks)) continue;
-      for (const hook of entry.hooks) {
-        if (
-          typeof hook.command === "string" &&
-          hook.command.includes("tfx-gate-activate") &&
-          hook.command !== buildNodeScriptCommand(gateScriptPath)
-        ) {
-          hook.command = buildNodeScriptCommand(gateScriptPath);
-          changed = true;
-        }
-      }
-    }
-  }
-
-  return changed;
-}
-
 // ── 제거된 CTO 트레이 잔여 프로세스 (ADR-0022) ──
 // 이전 버전은 `node hub/tray.mjs` 와 그 자식 `swift hub/mac-tray.swift` 를 detached 로
 // 띄웠다. 파일을 지워도 이미 뜬 프로세스는 남으므로 업그레이드 setup 에서 한 번 거둔다.
@@ -2085,9 +1841,6 @@ function ensureCriticalSetup() {
   try {
     if (applyRemoteControl(settings)) settingsChanged = true;
   } catch {}
-  try {
-    if (applyHooks(settings)) settingsChanged = true;
-  } catch {}
 
   if (settingsChanged) {
     try {
@@ -2146,11 +1899,8 @@ export {
   ensureCodexHooks,
   ensureCodexHubServerConfig,
   ensureCodexProfiles,
-  ensureHooksInSettings,
   ensureWindowsHubAutostart,
-  extractManagedHookFilename,
   extractProfileLines,
-  getManagedRegistryHooks,
   getVersion,
   getWindowsHubAutostartStatus,
   getWorkerPackageSyncEntries,
@@ -2185,6 +1935,11 @@ export {
 
 export async function runCritical(stdinData) {
   const io = createCommandIo();
+  const cleanup = cleanupLegacyHooks({ settingsPath: SETTINGS_PATH });
+  if (!cleanup.ok) {
+    io.writeStderr(`[tfx-setup] 이전 hook 정리 실패: ${cleanup.error}\n`);
+    return io.result(1);
+  }
   const argv = getSetupArgv(stdinData);
   const isSync = argv.includes("--sync");
   const isDev = detectDevMode();
@@ -2207,6 +1962,11 @@ export async function runCritical(stdinData) {
 
 export async function runDeferred(stdinData) {
   const io = createCommandIo();
+  const cleanup = cleanupLegacyHooks({ settingsPath: SETTINGS_PATH });
+  if (!cleanup.ok) {
+    io.writeStderr(`[tfx-setup] 이전 hook 정리 실패: ${cleanup.error}\n`);
+    return io.result(1);
+  }
   const argv = getSetupArgv(stdinData);
   const isSync = argv.includes("--sync");
   const isForce = argv.includes("--force");
@@ -2491,7 +2251,7 @@ export async function runDeferred(stdinData) {
   }
 
   // ── settings.json 통합 R/W ──
-  // 3개 섹션(statusLine, agentTeams, hooks)을 1회 read → 일괄 수정 → 1회 write
+  // 설정 섹션(statusLine, agentTeams, remoteControl)을 1회 read → 일괄 수정 → 1회 write
 
   const settingsPath = join(CLAUDE_DIR, "settings.json");
   const hudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
@@ -2550,196 +2310,6 @@ export async function runDeferred(stdinData) {
     return true;
   }
 
-  /**
-   * SessionStart + PreToolUse 훅 섹션 적용.
-   * @param {object} s - settings 객체 (직접 변경)
-   * @returns {boolean} 변경 여부
-   */
-  function applyHooks(s) {
-    if (!s.hooks) s.hooks = {};
-    let changed = false;
-
-    // ── SessionStart 훅 ──
-    if (!Array.isArray(s.hooks.SessionStart)) s.hooks.SessionStart = [];
-
-    const pluginRoot = PLUGIN_ROOT.replace(/\\/g, "/");
-    const commandForScript = (scriptName) =>
-      buildNodeScriptCommand(`${pluginRoot}/scripts/${scriptName}`);
-
-    const hasTrifluxHooks = s.hooks.SessionStart.some(
-      (entry) =>
-        Array.isArray(entry.hooks) &&
-        entry.hooks.some(
-          (h) => typeof h.command === "string" && h.command.includes("triflux"),
-        ),
-    );
-
-    if (!hasTrifluxHooks) {
-      s.hooks.SessionStart.push({
-        matcher: "*",
-        hooks: [
-          {
-            type: "command",
-            command: commandForScript("setup.mjs"),
-            timeout: 10,
-          },
-          {
-            type: "command",
-            command: commandForScript("hub-ensure.mjs"),
-            timeout: 8,
-          },
-          {
-            type: "command",
-            command: commandForScript("mcp-gateway-ensure.mjs"),
-            timeout: 8,
-          },
-          {
-            type: "command",
-            command: commandForScript("preflight-cache.mjs"),
-            timeout: 5,
-          },
-        ],
-      });
-      changed = true;
-    }
-
-    for (const entry of s.hooks.SessionStart) {
-      if (!Array.isArray(entry.hooks)) continue;
-      const hasDirectTrifluxHook = entry.hooks.some(
-        (h) => typeof h.command === "string" && h.command.includes("triflux"),
-      );
-      const hasGatewayEnsure = entry.hooks.some(
-        (h) =>
-          typeof h.command === "string" &&
-          h.command.includes("mcp-gateway-ensure.mjs"),
-      );
-      if (!hasDirectTrifluxHook || hasGatewayEnsure) continue;
-
-      const hubIndex = entry.hooks.findIndex(
-        (h) =>
-          typeof h.command === "string" && h.command.includes("hub-ensure.mjs"),
-      );
-      const gatewayHook = {
-        type: "command",
-        command: commandForScript("mcp-gateway-ensure.mjs"),
-        timeout: 8,
-      };
-      if (hubIndex >= 0) entry.hooks.splice(hubIndex + 1, 0, gatewayHook);
-      else entry.hooks.push(gatewayHook);
-      changed = true;
-    }
-
-    for (const entry of s.hooks.SessionStart) {
-      if (!Array.isArray(entry.hooks)) continue;
-      for (const hook of entry.hooks) {
-        for (const scriptName of [
-          "setup.mjs",
-          "hub-ensure.mjs",
-          "mcp-gateway-ensure.mjs",
-          "preflight-cache.mjs",
-        ]) {
-          if (
-            refreshHookCommandForScript(
-              hook,
-              scriptName,
-              `${pluginRoot}/scripts/${scriptName}`,
-            )
-          ) {
-            changed = true;
-          }
-        }
-      }
-    }
-
-    // ── PreToolUse 훅: tfx-gate-activate ──
-    // orchestrator 가 registry 기반으로 omc-tfx-gate-activate 를 이미 디스패치하므로,
-    // `*` orchestrator entry 와 별도로 등록된 직접 entry 는 2배 발화를 유발한다 (#76).
-    // headless-guard 는 2026-09-07 에 제거됐다. 과거 설치가 남긴 직접 entry 는 계속 prune 한다.
-    // 이 블록은 orchestrator 유무에 따라 다르게 동작한다:
-    //   - orchestrator 가 있으면: 직접 등록된 중복 entry 를 제거 (prune).
-    //   - orchestrator 가 없으면: legacy ADD 경로로 직접 entry 주입 (구 설치 fallback).
-    if (!Array.isArray(s.hooks.PreToolUse)) s.hooks.PreToolUse = [];
-
-    const gateScriptPath = join(
-      CLAUDE_DIR,
-      "scripts",
-      "tfx-gate-activate.mjs",
-    ).replace(/\\/g, "/");
-
-    const hasPreToolUseOrchestrator = s.hooks.PreToolUse.some(
-      (entry) =>
-        entry.matcher === "*" &&
-        Array.isArray(entry.hooks) &&
-        entry.hooks.some(
-          (h) =>
-            typeof h.command === "string" &&
-            h.command.includes("hook-orchestrator.mjs"),
-        ),
-    );
-
-    if (hasPreToolUseOrchestrator) {
-      // prune: 직접 등록된 tfx-gate-activate 전용 entry 와 제거된 headless-guard entry 정리
-      const DUP_MARKERS = ["headless-guard", "tfx-gate-activate"];
-      const before = s.hooks.PreToolUse.length;
-      s.hooks.PreToolUse = s.hooks.PreToolUse.filter((entry) => {
-        if (entry.matcher === "*") return true;
-        if (!Array.isArray(entry.hooks) || entry.hooks.length === 0)
-          return true;
-        const allDup = entry.hooks.every(
-          (h) =>
-            typeof h.command === "string" &&
-            !h.command.includes("hook-orchestrator") &&
-            DUP_MARKERS.some((m) => h.command.includes(m)),
-        );
-        return !allDup;
-      });
-      if (s.hooks.PreToolUse.length !== before) changed = true;
-    } else {
-      // legacy: orchestrator 부재 시 직접 entry 주입
-      const hasGateHook = s.hooks.PreToolUse.some(
-        (entry) =>
-          Array.isArray(entry.hooks) &&
-          entry.hooks.some(
-            (h) =>
-              typeof h.command === "string" &&
-              h.command.includes("tfx-gate-activate"),
-          ),
-      );
-
-      if (!hasGateHook && existsSync(gateScriptPath.replace(/\//g, "\\"))) {
-        s.hooks.PreToolUse.push({
-          matcher: "Skill",
-          hooks: [
-            {
-              type: "command",
-              command: buildNodeScriptCommand(gateScriptPath),
-              timeout: 2,
-            },
-          ],
-        });
-        changed = true;
-      }
-    }
-
-    // 남아있는 직접 entry 경로 동기화 (legacy 또는 외부 등록 대응)
-    for (const entry of s.hooks.PreToolUse) {
-      if (!Array.isArray(entry.hooks)) continue;
-      for (const h of entry.hooks) {
-        if (typeof h.command !== "string") continue;
-        if (h.command.includes("hook-orchestrator")) continue;
-        if (
-          h.command.includes("tfx-gate-activate") &&
-          h.command !== buildNodeScriptCommand(gateScriptPath)
-        ) {
-          h.command = buildNodeScriptCommand(gateScriptPath);
-          changed = true;
-        }
-      }
-    }
-
-    return changed;
-  }
-
   // 1회 읽기
   let settings = {};
   if (existsSync(settingsPath)) {
@@ -2766,12 +2336,6 @@ export async function runDeferred(stdinData) {
   } catch {}
   try {
     if (applyRemoteControl(settings)) {
-      settingsChanged = true;
-      synced++;
-    }
-  } catch {}
-  try {
-    if (applyHooks(settings)) {
       settingsChanged = true;
       synced++;
     }

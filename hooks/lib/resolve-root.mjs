@@ -15,7 +15,7 @@ function normalizeCandidate(candidate) {
 function isValidPluginRoot(candidate) {
   const root = normalizeCandidate(candidate);
   if (!root) return false;
-  return existsSync(join(root, "hooks", "hook-orchestrator.mjs"));
+  return existsSync(join(root, "hooks", "codex-session-hook.mjs"));
 }
 
 function toPluginRootFromUrl(url) {

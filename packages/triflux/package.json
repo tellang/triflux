@@ -17,6 +17,9 @@
   "engines": {
     "node": ">=20"
   },
+  "scripts": {
+    "postinstall": "node scripts/setup.mjs"
+  },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "@triflux/core": "^10.25.0",

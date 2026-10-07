@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// scripts/preflight-cache.mjs — 세션 시작 시 preflight 점검 캐싱
+// scripts/preflight-cache.mjs — tfx-route 시작 시 필요한 preflight 점검 캐싱
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -17,7 +17,7 @@ const PKG_ROOT = join(dirname(__filename), "..");
 
 const CACHE_DIR = join(homedir(), ".claude", "cache");
 const CACHE_FILE = join(CACHE_DIR, "tfx-preflight.json");
-const CACHE_TTL_MS = 3_600_000; // 1시간 (세션당 1회, SessionStart 훅에서 갱신)
+const CACHE_TTL_MS = 3_600_000; // 1시간
 const ANTIGRAVITY_AUTH_READY_SKEW_MS = CACHE_TTL_MS + 60_000;
 const ANTIGRAVITY_OAUTH_PATHS = (homeDir) => [
   join(homeDir, ".gemini", "antigravity-cli", "oauth_creds.json"),
@@ -380,6 +380,15 @@ export async function run(stdinData) {
   };
 }
 
+export async function refreshPreflightCacheIfStale({
+  readCache = readPreflightCache,
+  refresh = run,
+} = {}) {
+  if (readCache()) return false;
+  await refresh();
+  return true;
+}
+
 const isMain =
   process.argv[1] &&
   import.meta.url.endsWith(
@@ -387,10 +396,14 @@ const isMain =
   );
 
 if (isMain) {
-  const result = await run();
-  if (result.stdout) process.stdout.write(result.stdout);
-  if (result.stderr) process.stderr.write(result.stderr);
-  process.exit(result.code);
+  if (process.argv.includes("--if-stale")) {
+    await refreshPreflightCacheIfStale();
+  } else {
+    const result = await run();
+    if (result.stdout) process.stdout.write(result.stdout);
+    if (result.stderr) process.stderr.write(result.stderr);
+    process.exit(result.code);
+  }
 }
 
 export {
