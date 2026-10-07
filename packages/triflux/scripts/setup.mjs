@@ -1369,7 +1369,8 @@ function ensureCloakBrowser({
       {
         cwd: PLUGIN_ROOT,
         stdio: "ignore",
-        env,
+        // 이 npm install 이 같은 패키지의 postinstall(setup)을 다시 부르면 무한 재귀가 된다.
+        env: { ...env, TFX_SKIP_CLOAKBROWSER_SETUP: "1" },
         timeout: 120_000,
       },
     );
