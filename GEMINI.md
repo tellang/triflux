@@ -1,67 +1,57 @@
-# triflux — Gemini 프로젝트 지시
+# triflux Antigravity 프로젝트 지시
 
-> 정책 SSOT는 `.claude/rules/`, 결정 근거는 `docs/adr/README.md`.
+Antigravity CLI는 웹 검색, 코드 검토, consensus·debate·panel 분석과 작업 실행을 맡는다.
+프로젝트 운영 규칙은 `CLAUDE.md`, 실행 정책은 `.claude/rules/`, 결정 근거는 `docs/adr/README.md`에 있다.
 
-triflux 워크스페이스에서 Antigravity CLI의 역할과 운영 규칙. 1M context 활용·웹 검색·헤드리스 합의의 한 축으로 사용된다.
+## 행동 규칙
 
-전체 프로젝트 컨텍스트는 `CLAUDE.md`를 참조한다 (이 파일은 Gemini 관점만 다룸).
+- 한국어로 답하고 코드 식별자·명령어·로그는 원래 언어를 유지한다.
+- 확인한 사실과 추정을 구분한다.
+- 커밋 형식은 `type(scope): 한국어 설명`이다. `Co-Authored-By`와 AI 꼬리표를 넣지 않는다.
+- API 키, 토큰, 세션 값을 하드코딩하지 않는다.
 
-## 행동 규칙 (파일 상단 우선 적용)
-- 한국어 우선, 기술 용어 원어 유지
-- 응답은 결정론적·구조적으로 — 마크다운 헤더 또는 XML 태그 일관 사용 (혼용 금지)
-- 부정 지시도 효과적 (긍정과 동등한 adherence — A/B 검증)
-- 커밋: `Type: 한국어 설명 (50자 이내)`. Co-Authored-By / AI trailer 금지
-- 시크릿(API 키, 토큰, 세션) 하드코딩 금지
+## 실행 경로
 
-## Gemini의 역할
-- 빠른 웹 검색 (Google Search 통합) — `tfx-research --quick`
-- 3-CLI 합의(consensus/debate/panel)에서 Gemini 시점 제공
-- 1M context 활용 — 큰 코드베이스 분석
-- 분리된 worktree와 세션에서 코드 변경 작업 수행
+Antigravity 작업은 `tfx-auto --cli antigravity` 또는 역할 기반 `tfx-route.sh`를 경유한다.
+코드 변경 병렬 작업은 작업별 worktree와 세션을 분리한다.
 
-## 비대화식 실행 경로
-- `agy --dangerously-skip-permissions --print=` 를 직접 호출하지 않는다. 자동 차단 훅(headless-guard)은 2026-09-07 에 제거됐으므로 호출자가 지킨다.
-- 반드시 `tfx-auto --cli antigravity` 경유. 코드 변경 병렬 작업은 작업별 worktree와 세션을 분리하고 각 세션에서 `tfx-auto`를 사용한다.
-- 일반 호출: `tfx-route.sh --cli antigravity ...`
+```bash
+TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh executor "$prompt" implement < /dev/null
+```
 
-## 핵심 운영 컨텍스트 (요약 — 상세는 CLAUDE.md)
-- psmux/WT 규칙: `tfx-psmux-rules` 스킬 / WT 프리징 방지 (exit → sleep 2 → kill)
-- AccountBroker 싱글턴: 계정별 CircuitBreaker, busy 플래그, 이벤트 기반 HUD 연동
-- 원격 실행: tfx-remote (SSH → Claude Code → 내부 tfx 라우팅)
-- Headless 결과 회수: task-notification 완료 후 output 파일 읽기
-  - 완료 마커: `=== HEADLESS_COMPLETE succeeded=N failed=N total=N ===`
+`tfx-route.sh`의 인자는 역할, 프롬프트, MCP 프로필 순서다. `--cli` 옵션은 받지 않는다.
+`agy`의 비대화식 프롬프트는 `--print` 값으로 전달한다. Gemini CLI 실행 경로는 제공하지 않는다.
+모델과 추론 수준은 프로필 설정을 따른다.
 
-## 교차 검증
-- Claude 작성 코드 → Gemini/Codex 리뷰 가능
-- Gemini 작성 코드 → Claude 또는 Codex 리뷰
-- 동일 모델 self-approve 금지
+## 운영 규칙
+
+- Windows psmux와 WT 실행 규칙은 `.claude/rules/tfx-psmux.md`에 있다.
+- 원격 실행은 `tfx-remote`를 사용한다.
+- 비대화식 결과는 작업 완료 알림 뒤에 읽는다. 완료 마커는 `=== HEADLESS_COMPLETE succeeded=N failed=N total=N ===`다.
+- Claude 작성 코드는 Codex로, Antigravity 작성 코드는 Claude 또는 Codex로 교차 검증한다. 동일 모델이 스스로 승인하지 않는다.
+
+## 스킬 라우팅
+
+설치된 스킬의 description과 사용자 요청이 맞으면 해당 스킬을 호출한다.
+
+| 작업 | 스킬 |
+| --- | --- |
+| 제품 아이디어 | `/gstack-office-hours` |
+| 전략과 범위 | `/gstack-plan-ceo-review` |
+| 아키텍처 | `/gstack-plan-eng-review` |
+| 설계 검토 | `/gstack-design-consultation`, `/gstack-plan-design-review` |
+| 계획 검토 | `/gstack-autoplan` |
+| 오류 조사 | `/gstack-investigate` |
+| QA | `/gstack-qa`, `/gstack-qa-only` |
+| 코드 검토 | `/gstack-review` |
+| 시각 설계 검토 | `/gstack-design-review` |
+| 출시 | `/gstack-ship`, `/gstack-land-and-deploy` |
+| 진행 저장 | `/gstack-context-save` |
+| 맥락 복원 | `/gstack-context-restore` |
+| 명세 작성 | `/gstack-spec` |
 
 ## 검증
-- 변경 후 lint/typecheck/test 실행
-- 새 차단 규칙은 항상 대안 API와 함께 추가 (차단만 추가하면 데드락)
 
-## Skill routing
-
-When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
-
-Key routing rules:
-- Product ideas/brainstorming → invoke /gstack:office-hours
-- Strategy/scope → invoke /gstack:plan-ceo-review
-- Architecture → invoke /gstack:plan-eng-review
-- Design system/plan review → invoke /gstack:design-consultation or /gstack:plan-design-review
-- Full review pipeline → invoke /gstack:autoplan
-- Bugs/errors → invoke /gstack:investigate
-- QA/testing site behavior → invoke /gstack:qa or /gstack:qa-only
-- Code review/diff check → invoke /gstack:review
-- Visual polish → invoke /gstack:design-review
-- Ship/deploy/PR → invoke /gstack:ship or /gstack:land-and-deploy
-- Save progress → invoke /gstack:context-save
-- Resume context → invoke /gstack:context-restore
-- Author a backlog-ready spec/issue → invoke /gstack:spec
-
-## Health Stack
-
-- lint: biome check .
-- test: node scripts/test-lock.mjs --test --test-force-exit --test-concurrency=8 "tests/**/*.test.mjs" "scripts/__tests__/**/*.test.mjs" && npm run lint:skills
-- deadcode: npx knip
-- gbrain: gbrain doctor --json
+변경 영역의 lint, 타입 검사, 테스트를 실행한다. 스킬 문서는 `npm run lint:skills`로 검사한다.
+패키지 미러와 버전은 `node scripts/release/check-packages-mirror.mjs`와
+`node scripts/release/check-sync.mjs`로 확인한다.

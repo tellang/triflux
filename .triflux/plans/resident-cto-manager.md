@@ -1,16 +1,18 @@
-# PRD — 상주 자율 Sonnet CTO 매니저
+# PRD: 상주 자율 Sonnet CTO 매니저
+
+> ADR-0024로 범위 축소: 현재 CTO는 명시적 `collect`, `status`와 hygiene dry-run 조회를 중심으로 남긴다.
 
 **Consensus**: ~82% | **Rounds**: 1 (+critic 비평 통합) | **Models**: Codex(Architect) + Claude Opus(Planner) + Claude Opus(Critic)
 **작성**: 2026-07-01 | **상태**: ✅ 계획 확정 (하이브리드 2-tier, 2026-07-01 사용자 승인) | **원안**: 사용자 옵션 C "풀 자율 상주" → 하이브리드로 전환
 
 ---
 
-## ⚠️ USER CHALLENGE — 원안 대비 방향 전환 제안
+## ⚠️ USER CHALLENGE: 원안 대비 방향 전환 제안
 
 사용자 원안은 **"백그라운드에 별도 Sonnet을 상시 띄워 CTO를 관리"**(옵션 C, 풀 자율 상주)였다.
-그러나 **3개 모델이 만장일치로 "문자 그대로의 24/7 live Sonnet 세션은 default 부적합"**으로 수렴했다. 근거 3중:
+그러나 **3개 모델이 만장일치로 "문자 그대로의 24/7 live Sonnet 세션은 default 부적합"**으로 수렴하였다. 근거 3중:
 
-1. **RAM**: 상주 Claude Code 세션 = 영구 ~0.5–1GB 프로세스, 절대 free 안 됨. m5(MacBook Air M5 fanless 16GB)에서 hub + swarm(≤10) 위에 영구 +1 → swap/yellow memory_pressure(문서화된 back-off 신호). (Critic CRITICAL/perf)
+1. **RAM**: 상주 Claude Code 세션 = 영구 ~0.5-1GB 프로세스, 절대 free 안 됨. m5(MacBook Air M5 fanless 16GB)에서 hub + swarm(≤10) 위에 영구 +1 → swap/yellow memory_pressure(문서화된 back-off 신호). (Critic CRITICAL/perf)
 2. **토큰**: 24/7 live loop는 유휴에도 구독 토큰을 계속 소진. (Planner risk)
 3. **Compaction 소유권**: Claude Code 하니스가 세션 수명·compaction을 소유 → triflux가 상주 세션의 context 폭발을 강제 관리 불가. 다일 세션은 lossy auto-compact로 CTO 판단 저하. (Critic MEDIUM/edge)
 
@@ -24,12 +26,12 @@
 
 "항상 살아있는 CTO"를 단일 24/7 Sonnet이 아니라 **2계층**으로 구현한다:
 
-- **Tier-1 (상주, 경량)** — 경량 Node 데몬(~30MB) `cto-manager`가 항상 살아 있으며 hub HTTP/MCP + fs 만으로 다음을 수행. **LLM 불요(mechanical)**:
+- **Tier-1 (상주, 경량)**: 경량 Node 데몬(~30MB) `cto-manager`가 항상 살아 있으며 hub HTTP/MCP + fs 만으로 다음을 수행. **LLM 불요(mechanical)**:
   1. CTO role leader 유지 (register + heartbeat + takeover_role)
   2. hygiene 실제 archive 실행 (dry-run→승인→apply, move-not-delete)
   3. 이벤트/체크포인트/스웜 로그 retention·회전
   4. compact nudge 강화 (advisory only)
-- **Tier-2 (지능, episodic)** — 판단이 필요한 순간에만 `conductor.spawnSession({agent:'claude',model:'sonnet'})` 또는 `claude-worker --resume`로 headless Sonnet 1턴을 띄워 collect/North-Star 합성/hygiene 분류 결정만 얻고 **종료**(기존 cto-auto-collect 120s 디바운스 패턴). 상주 TUI 아님.
+- **Tier-2 (지능, episodic)**: 판단이 필요한 순간에만 `conductor.spawnSession({agent:'claude',model:'sonnet'})` 또는 `claude-worker --resume`로 headless Sonnet 1턴을 띄워 collect/North-Star 합성/hygiene 분류 결정만 얻고 **종료**(기존 cto-auto-collect 120s 디바운스 패턴). 상주 TUI 아님.
 
 현재 지원하는 경로는 bounded다. interactive-attach 기반 bridge 옵션은 폐기됐다.
 
@@ -41,7 +43,7 @@
 | **b. native-bridge interactive-attach** | daemon-pty-tmux-bridge runBridge + roster | 진짜 long-lived, claude agents 가시성 | TUI 고RAM(fanless 치명), tmux/pty 복잡, 사람지향 | **opt-in only (TFX_CTO_MODE=bridge), 폐기: interactive-attach 모드 삭제(S5)** |
 | **c. launchd/systemd 감독** | CTO 전용 OS unit | 재부팅 생존, OS KeepAlive 자동재기동, **hub 독립 → hub bounce 생존** | OS별 설치/권한, 유휴 24/7 점유 | **Tier-1 경량 데몬 상주 경로 (권장)** |
 
-**상주 위치 미합의 해소**: Codex는 hub 내부 CTOManager(경로 a supervisor)를 권했으나, Critic의 CRITICAL("roleStates는 router in-memory Map → hub 재시작 시 CTO leadership 소멸")이 결정적. **별도 경량 데몬(경로 c 감독)이 hub-bounce 생존 요구를 만족** → Planner 안 채택. 단 미설치 시 SessionStart hub-ensure가 대체 기동 경로.
+**상주 위치 미합의 해소**: Codex는 hub 내부 CTOManager(경로 a supervisor)를 권하였으나, Critic의 CRITICAL("roleStates는 router in-memory Map → hub 재시작 시 CTO leadership 소멸")이 결정적. **별도 경량 데몬(경로 c 감독)이 hub-bounce 생존 요구를 만족** → Planner 안 채택. 단 미설치 시 SessionStart hub-ensure가 대체 기동 경로.
 
 ### 자율 loop 설계 (합의: liveness=fixed, work=event+debounce, unbounded=배제)
 
@@ -63,14 +65,14 @@
 현재 `applyHygieneRows`(cto/hygiene.mjs:520-564)는 `hygiene_applied` ledger ack만 append(실제 이동 0). 신규:
 
 - **executor 위치**: `cto/hygiene-actions.mjs`(신규). `cto/hygiene.mjs`는 projection/locking/CLI facade로 유지.
-- **archive target**: `.triflux/lake/archive/YYYYMMDD/` — `memory-doctor.mjs:481-483` renameSync 패턴(동일 fs; EXDEV 시 copy+unlink fallback). **move-not-delete → 복구 가능**.
+- **archive target**: `.triflux/lake/archive/YYYYMMDD/`: `memory-doctor.mjs:481-483` renameSync 패턴(동일 fs; EXDEV 시 copy+unlink fallback). **move-not-delete → 복구 가능**.
 - **operations**: superseded checkpoint / stale session 산출물 → archive 이동. orphan worktree(git remove/삭제) = **v1 자동 금지**, 보고만 + `request_human_input` MCP로 사람 ack.
 - **게이트 (3중)**: (1) `dry_run:true` default(hygiene.mjs:416) → planned ops/bytes/digest/live-safety JSON 반환. (2) `TFX_CTO_HYGIENE_APPLY=archive` env. (3) 기존 steward lock(hygiene.mjs:441-505). delete는 별도 `TFX_CTO_HYGIENE_DELETE=1` 없이 금지.
 - **second-actor 승인 (Critic/교차검증 정책)**: apply는 unlink/rename 전 out-of-band ack(다른 에이전트가 쓴 ledger ack row 또는 human gate). 동일 세션 self-approve 금지.
 - **target 검증**: 모든 target이 lakeRoot 하위 AND `project_root_hash` 일치. live session 소유 산출물 skip(getActive() 교차).
 - **멱등**: `hygiene_key` dedup(hygiene.mjs:398-400) 재사용.
 
-### retention 정책 (합의: 상주 CTO와 함께/전에 ship — HARD 선행조건)
+### retention 정책 (합의: 상주 CTO와 함께/전에 ship: HARD 선행조건)
 
 - `ledger.jsonl`: single-writer lock 유지. 50MB 또는 30일 초과 시 `ledger-YYYYMMDD-HHMMSS.jsonl.gz` 회전, 최근 10MB/14일 tail은 in-place 유지. current.json/md 재생성 후 `retention_applied` event.
 - `swarm-events.jsonl`: run별 25MB/14일 초과 시 gzip archive. active run은 mtime + registry live check로 skip.
@@ -89,7 +91,7 @@
 
 ### kill-switch (합의: 매 cycle read)
 
-- `TFX_CTO=0` / `TFX_CTO_MANAGER=0`: 데몬 timer·spawn·archive apply·retention apply 전부 비활성 (default off — 도입만으로 동작변화 0).
+- `TFX_CTO=0` / `TFX_CTO_MANAGER=0`: 데몬 timer·spawn·archive apply·retention apply 전부 비활성 (default off: 도입만으로 동작변화 0).
 - `TFX_CTO_HYGIENE_APPLY=off|archive`, `TFX_CTO_RETENTION=0`, `TFX_CTO_MODE=bounded|bridge`, `TFX_CTO_MAX_TOKENS`(loop cap).
 - **boot이 아닌 매 cycle read** (Critic): fs-mutation+계정 leasing 하는 자율 에이전트엔 매 cycle 하드 disable 필요.
 
@@ -99,7 +101,7 @@
 
 | ID | 제목 | 복잡도 | deps |
 |----|------|--------|------|
-| T1 | kill-switch + config surface (TFX_CTO_* env, default off) | S | — |
+| T1 | kill-switch + config surface (TFX_CTO_* env, default off) | S | 없음 |
 | T4 | hygiene archive 실행부 (executor, dry-run/승인/steward lock, move-not-delete) | L | T1 |
 | T5 | retention/rotation 모듈 (ledger/swarm-events/batch-events, active-session 제외, tail cap) | M | T1 |
 | T2 | cto-manager 데몬 스켈레톤 (single-instance lock, 스케줄러, env-gate no-op) | M | T1 |
@@ -121,7 +123,7 @@
 ## 파일 변경
 
 **신규**:
-- `hub/team/cto-manager.mjs` (상주 데몬) — 또는 Codex 안대로 `hub/cto-manager.mjs`
+- `hub/team/cto-manager.mjs` (상주 데몬): 또는 Codex 안대로 `hub/cto-manager.mjs`
 - `hub/cto-role-client.mjs` (register/heartbeat/takeover wrapper, retry/backoff)
 - `hub/log-retention.mjs` (회전/압축)
 - `cto/hygiene-actions.mjs` (dry-run plan + archive executor)
@@ -149,7 +151,7 @@
 | **MAJOR** | 실제 archive가 잘못된 대상 삭제 (dry-run/승인 gate 부재) | dry-run→ack→apply, target lakeRoot 하위 AND project_root_hash 일치 검증, rm 금지 rename-to-archive |
 | **MEDIUM** | runaway-healthy loop (maxRestarts=3 미커버) | per-iteration budget(tool calls/tokens/wall-clock) + 동일 action circuit-break |
 | **MEDIUM** | steward-lock staleMs auto-steal이 hijack 허용 (hygiene.mjs:494) | lock holder가 장기작업 중 mtime refresh + pid liveness 검증 후에만 steal |
-| **MEDIUM** | RAM: 16GB fanless 영구 slot | 명시적 RAM 회계 — 상주 중 유효 worker cap 10→9, active swarm 중 CTO sweep 자동 suspend |
+| **MEDIUM** | RAM: 16GB fanless 영구 slot | 명시적 RAM 회계: 상주 중 유효 worker cap 10→9, active swarm 중 CTO sweep 자동 suspend |
 | **MEDIUM** | retention이 live 세션 log 삭제 | getActive() 소유 log 제외, archive 이동(truncate 금지) |
 | **LOW** | public snapshot 누출 (account id/auth path/session path) | broker publicSnapshot()만 경유, env/authFile/host/raw-timestamp 누출 안 됨 assert |
 | **LOW** | unbounded ledger read OOM | readJsonLines tail cap 전역 강제 |
@@ -185,8 +187,8 @@
 
 ## 미합의 / 결정 대기
 
-1. **[USER CHALLENGE — 최우선]** 순수 24/7 상주(원안 C) vs 하이브리드 2-tier(합의 권장). 위 헤더 참조. 사용자 결정 필요.
-2. **상주 위치** (hub 내부 vs 별도 데몬): Critic 근거로 별도 데몬 권장했으나 Codex는 hub 내부 supervisor 이점(타이머/broker 재사용) 주장. 별도 데몬이 hub HTTP/MCP로 접근하면 양쪽 이점 → 합의로 수렴하나 구현 세부는 T2에서 확정.
+1. **[USER CHALLENGE: 최우선]** 순수 24/7 상주(원안 C) vs 하이브리드 2-tier(합의 권장). 위 헤더 참조. 사용자 결정 필요.
+2. **상주 위치** (hub 내부 vs 별도 데몬): Critic 근거로 별도 데몬 권장하였으나 Codex는 hub 내부 supervisor 이점(타이머/broker 재사용) 주장. 별도 데몬이 hub HTTP/MCP로 접근하면 양쪽 이점 → 합의로 수렴하나 구현 세부는 T2에서 확정.
 3. **broker 위험도**: Critic CRITICAL vs Planner "Claude broker 밖이라 저위험". 사실 확인 완료(Planner 옳음) → per-action lease는 향후 claude 계정 broker 도입 시에만.
 
 ---

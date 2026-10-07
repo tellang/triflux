@@ -1,84 +1,33 @@
-# Codex CLI 실행 컨벤션
+# Codex CLI 실행 관례
 
-> triflux에서 Codex CLI를 사용할 때 반드시 준수해야 하는 규칙.
-> `tfx-auto --cli codex`, `tfx-route.sh`
-> 모두 이 규칙을 따른다.
+Triflux에서 Codex 작업은 `tfx-auto --cli codex` 또는 `tfx-route.sh`를 경유한다. 실행 정책의 정본은 [tfx-psmux 규칙 4](../.claude/rules/tfx-psmux.md)다.
 
-## 1. 실행 방식
+## 프롬프트와 프로필
 
-### 금지 패턴 (stdin redirect)
+`tfx-route.sh`는 Codex 프롬프트를 `--` 뒤의 단일 인자로 전달하고 표준 입력을 닫는다. 모델과 추론 수준은 프로필 설정에서 가져온다.
+
+래퍼 내부의 인자 형태는 `codex exec --profile <profile> -- "$prompt" < /dev/null`이다. 실제 작업은 다음과 같이 요청한다.
+
 ```bash
-# WRONG — "stdin is not a terminal" 에러
-codex < prompt.md
-codex --profile X < prompt.md
-cat prompt.md | codex
-Get-Content prompt.md -Raw | codex
+bash ~/.claude/scripts/tfx-route.sh executor "$prompt" implement < /dev/null
 ```
 
-### 올바른 패턴 (인자 전달)
-```bash
-# codex exec — one-shot, config.toml 무시
-PROMPT="$(cat prompt.md)"
-codex exec "$PROMPT" --dangerously-bypass-approvals-and-sandbox
+`codex < prompt.md`는 비대화식 실행에서 사용할 수 없다. `--full-auto`는 제거된 플래그다. `approval_policy`와 `sandbox_mode`의 기본값은 `config.toml`에 둔다.
 
-# tfx-route.sh 경유 — MCP/타임아웃 통합
-~/.claude/scripts/tfx-route.sh executor "$(cat prompt.md)" "{profile}" 900
-```
+Antigravity CLI의 `--print`는 프롬프트 값을 받는다. `tfx-route.sh`의 `run_antigravity_exec`는 옵션을 조립한 뒤 `--print "$prompt"`를 마지막에 붙인다.
 
-## 2. config.toml 규칙
+## 작업 문서
 
-| 상황 | 규칙 |
-|------|------|
-| interactive `codex` | config.toml `approval_policy` 존중 |
-| `codex exec` | config.toml 무시 → `--dangerously-bypass-approvals-and-sandbox` 필수 |
-| `--full-auto` 플래그 | Codex 0.147 에서 제거됨. 쓰지 않는다 (`sandbox_mode` 로 대체) |
-| `--profile` | interactive + `codex exec` 모두 지원 (codex 0.154.0 기준, `-p, --profile <CONFIG_PROFILE_V2>` = `$CODEX_HOME/<이름>.config.toml`). `tfx-route.sh` 가 실제로 `exec --profile` 사용 중 |
+작업 계획에는 대상 경로, 완료 조건, 필요한 검증 명령을 구체적으로 적는다. [PRD 템플릿](prd/_template.md)과 [브랜치 정책](process/branch-policy.md)을 따른다.
 
-## 3. PRD 작성 규칙
+## Windows 세션
 
-- **완료 조건에 git commit 필수**: codex는 명시적 지시 없이 자동 커밋하지 않음
-- **테스트 명령 구체적으로**: `npm test`가 아닌 `node --test tests/unit/specific.test.mjs`
-- **파일 경로 명시**: codex가 올바른 파일을 찾을 수 있도록 상대 경로 기재
-- 템플릿: `docs/prd/_template.md`
+Windows Terminal과 psmux 세션의 생성 및 정리는 [tfx-psmux 규칙](../.claude/rules/tfx-psmux.md)이 정본이다. macOS와 Linux의 tmux 경로에는 Windows 규칙을 적용하지 않는다.
 
-## 4. psmux 세션 관리
+## 병렬 작업
 
-### 생성
-```bash
-psmux new-session -s "codex-{id}" -d
-BASH_WIN='C:\\Program Files\\Git\\bin\\bash.exe'
-psmux send-keys -t "codex-{id}" \
-  "& '${BASH_WIN}' '${LAUNCH_DIR}\\launch-{id}.sh'" Enter
-```
+코드 변경 작업은 각각의 worktree와 세션에서 수행한다. 작업을 이어가기 전에 현재 디렉터리와 `git status --short --branch`를 확인한다. 테스트 락과 세션 정리는 소유 세션의 상태를 확인한 뒤 처리한다.
 
-### 정리 (WT 프리징 방지)
+## MCP 승인 문제
 
-> ⚠️ **정본은 SSOT [.claude/rules/tfx-psmux.md](../.claude/rules/tfx-psmux.md) RULE 5.** 세션 정리는 **detach-first**(`detach-client` → `sleep 2` → `kill-session`)를 따른다. 과거 이 문서가 안내하던 `send-keys "exit"` → `sleep 5` 방식은 RULE 5의 **MUST NOT**이므로 폐기한다. `detach-client` 미지원 구버전 psmux에서는 detach 루프가 `|| true`로 자동 no-op 후 kill로 진행되어 순서가 버전 무관 안전하다.
-
-**절대 금지**: WT pane이 attach된 상태에서 `psmux kill-session` 직접 실행 → WT ConPTY 레이스 → 프리징 (microsoft/terminal#17871).
-
-## 5. 병렬 실행 제약
-
-- test-lock: `.test-lock/pid.lock` — 동일 worktree에서 테스트 동시 실행 불가
-- codex가 테스트 실행 후 lock 잔류 가능 → 수동 `rm .test-lock/pid.lock`
-- 3+ worktree 병렬 테스트는 순차 실행 권장
-
-## 6. Worktree 규칙
-
-| 항목 | 규칙 |
-|------|------|
-| 경로 | `.worktrees/{slug}` |
-| 브랜치 | `codex/{slug}` |
-| 정리 | 머지 완료 후 `git worktree remove` + `git worktree prune` |
-| 충돌 | 브랜치 존재 시 재사용, 경로 존재 시 `-v{timestamp}` suffix |
-
-다른 worktree에서 이미 checkout한 브랜치를 강제로 reset하거나 checkout하지 않는다. 변경 통합은 각 worktree의 검증과 리뷰 후 사람이 결정한다.
-
-## 4. MCP tool approval
-
-- **증상**: `codex exec`가 시작된 뒤 끝나지 않고 멈춘다. 특히 MCP tool 호출이 필요한 프롬프트에서 무응답 stall로 보인다.
-- **원인**: oh-my-codex 업데이트/재설치 후 `~/.codex/config.toml`의 `[mcp_servers.*.tools.*]` 블록이 `approval_mode = "approve"`로 복원될 수 있다. top-level `approval_mode`와 별개로, 이 per-tool 승인 대기는 `codex exec` subprocess에서 interactive approval을 기다리며 멈출 수 있다.
-- **워크어라운드**:
-  - 권장: 해당 MCP tool 블록의 `approval_mode`를 `auto`로 되돌린다.
-  - 즉시 우회: `codex exec ... --dangerously-bypass-approvals-and-sandbox`
-- **참고**: 자세한 재현, 검증, 복구 절차는 `docs/troubleshooting/issue-66-codex-mcp-approval.md` 참고.
+Codex의 MCP 도구 호출이 대기 상태에 머무는 경우에는 [문제 해결 기록](troubleshooting/issue-66-codex-mcp-approval.md)의 진단 절차를 따른다.

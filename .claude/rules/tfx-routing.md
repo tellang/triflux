@@ -16,27 +16,27 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 | 상황 | 기본 순서 | 비고 |
 |------|-----------|------|
 | 메타 라우팅/스킬 선택 | `/tfx-harness` | 어떤 스킬/순서가 맞는지 먼저 판정해야 할 때 쓰는 단일 진입점. |
-| 신규 제품/아이디어 | `/office-hours` → `/autoplan` → `/writing-plans` → `/tfx-auto` | 먼저 문제/범위를 잡고, 리뷰된 계획을 실행으로 넘긴다. |
+| 신규 제품/아이디어 | `/gstack-office-hours` → `/gstack-autoplan` → `/superpowers:writing-plans` → `/tfx-auto` | 먼저 문제/범위를 잡고, 리뷰된 계획을 실행으로 넘긴다. |
 | 기존 작업 계속 | `/gstack-context-restore` → `/tfx-auto` | 저장된 맥락을 복원한 뒤 실행한다. |
 | 직접 구현/수정 | `/tfx-auto` (Codex 우선) | "이거 고쳐줘", "구현해줘". 기존 작업 연장이면 `/gstack-context-restore` 먼저. |
 | 디버그 | Claude 기본 Explore 에이전트 → `/superpowers:systematic-debugging` → `/tfx-auto` | 코드 위치/사용처 확인과 원인 분석을 분리한다. |
 | 리서치 | `/tfx-research` 또는 `/multilingual-parallel-research` | 외부/최신/도구 가능 여부 의문문은 `/tfx-research`; 언어권 병렬 조사는 multilingual 경로. |
-| 검증 | `/superpowers:review` + `/gstack /qa` + `/superpowers:verification-before-completion` | 코드 판정은 review, 브라우저/워크플로우 게이트는 qa, 완료 주장 전 evidence 수집은 verification. |
-| 디자인 검토 | `/gstack /design-review` | 시각/UX 판정. 코드 판정과 분리. |
+| 검증 | `/superpowers:requesting-code-review` + `/gstack-qa` + `/superpowers:verification-before-completion` | 코드 판정은 review, 브라우저/워크플로우 게이트는 qa, 완료 주장 전 evidence 수집은 verification. |
+| 디자인 검토 | `/gstack-design-review` | 시각/UX 판정. 코드 판정과 분리. |
 | TDD 시작 | `/superpowers:test-driven-development` | 테스트부터 짜는 흐름. 구현 전에 invoke. |
 | 코드 변경 병렬 실행 | 작업별 worktree와 세션을 분리하고 각 세션에서 `/tfx-auto` 실행 | Claude Agent는 `isolation: worktree` 사용 가능. |
 | 병렬 작업 (read-only) | `/tfx-auto --parallel N --mode deep` 또는 `/superpowers:dispatching-parallel-agents` | cwd 공유가 가능한 read-only 병렬. 코드 변경은 작업별 worktree를 분리. |
 | plan 실행 (체크포인트 별도) | `/superpowers:executing-plans` | 다른 세션에서 plan 을 단계별 실행. |
-| 머지 직전 정리 | `/superpowers:finishing-a-development-branch` → `/tfx-ship` 또는 `/ship` | merge/PR/cleanup 결정 후 ship. |
+| 머지 직전 정리 | `/superpowers:finishing-a-development-branch` → `/tfx-ship` 또는 `/gstack-ship` | merge/PR/cleanup 결정 후 ship. |
 | 리뷰 응답 | `/superpowers:receiving-code-review` | 검토 의견에 기술적 rigor 로 응답. blind apply 금지. |
 | triflux 릴리즈 | `/tfx-ship` | triflux 본체는 AI trailer 금지 정책이 있는 전용 ship 경로를 쓴다. |
-| 일반 PR/배포 | `/ship` | 로컬 `/ship`도 AI attribution footer/trailer 없이 실행되어야 한다. |
+| 일반 PR/배포 | `/gstack-ship` | 로컬 `/gstack-ship`도 AI attribution footer/trailer 없이 실행되어야 한다. |
 | 저장/복원 | `/gstack-context-save` / `/gstack-context-restore` | 진행 상태는 gstack checkpoint 계열이 소유한다. |
-| 회고/슬롭 정리 | `/gstack /retro` 또는 명시 `tfx-auto --mode consensus` | 세션 회고는 gstack, 무수식 AI slop/deslop은 host ai-slop-cleaner, TFX 3자 cleanup만 `tfx-auto --mode consensus`. |
+| 회고/슬롭 정리 | `/gstack-retro` 또는 명시 `tfx-auto --mode consensus` | 세션 회고는 gstack, 무수식 AI slop/deslop은 host ai-slop-cleaner, TFX 3자 cleanup만 `tfx-auto --mode consensus`. |
 
 ## 스킬 선택 결정트리 (SSOT)
 
-우선순위는 **명시 스킬/플래그 > D0–D11 결정트리 > 위 quick reference > 개별 description**이다. 위 표는 파생 참조이며 충돌하면 이 결정트리가 이긴다.
+우선순위는 **명시 스킬/플래그 > D0-D11 결정트리 > 위 quick reference > 개별 description**이다. 위 표는 파생 참조이며 충돌하면 이 결정트리가 이긴다.
 
 - D0: 명시 `/skill`, `$skill`, `tfx-*`, `--mode/--cli`는 안전 위반이 없으면 유지한다.
 - D1: “어떤 스킬/경로?”만 묻는 요청은 `tfx-harness`가 recommendation-only로 owner 하나를 반환한다.
@@ -57,7 +57,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | 의도 | 자연어 신호 | 스킬 |
 |------|-----------|------|
 | 구현/수정 | 만들어, 고쳐, 구현해, 짜줘, 수정해, 바꿔 | tfx-auto |
-| 리뷰 | 봐줘, 리뷰해, 검토해, 괜찮아? | `superpowers:review` (owner). 교차모델 판정이 필요할 때만 tfx-review |
+| 리뷰 | 봐줘, 리뷰해, 검토해, 괜찮아? | `superpowers:requesting-code-review` (owner). 교차모델 판정이 필요할 때만 tfx-review |
 | 분석 | 분석해, 어떻게 돌아가?, 구조가 뭐야 | tfx-auto (`--mode consensus --shape panel`) |
 | 계획 | 계획, 어떻게 하지, 설계해 | superpowers `writing-plans`; TFX 다중모델 계획·실행은 `tfx-auto --mode deep` |
 | 요구사항 명확화 | 요구사항, 인터뷰, 목표 구체화 | host `deep-interview`; 목표 변환은 Claude Code 기본 `/goal` |
@@ -65,7 +65,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | 검색 | 찾아, 어디있어, 파일 찾아 | Claude 기본 Explore 에이전트 |
 | 리서치 (빠른) | 검색해줘, 찾아봐, 공식문서, 이거 뭐야 | tfx-research |
 | 리서치 (자율) | 자율 리서치, 검색하고 정리해, research and plan | tfx-research (Auto 모드) |
-| 테스트 | 테스트, 검증, 돌려봐, QA | 코드 판정은 tfx-review, 테스트→수정 반복은 tfx-auto, 브라우저 흐름은 gstack `/qa` |
+| 테스트 | 테스트, 검증, 돌려봐, QA | 코드 판정은 tfx-review, 테스트→수정 반복은 tfx-auto, 브라우저 흐름은 gstack `/gstack-qa` |
 | 정리 | 대상 domain을 먼저 판정; 무수식 AI slop/deslop은 host ai-slop-cleaner | D8 참조 (명시 TFX 3자 cleanup만 `tfx-auto --mode consensus`) |
 | 토론/비교 | 뭐가 나을까, 비교해, A vs B | tfx-auto (`--mode consensus --shape debate`) |
 | 합의 | 합의로 분석해, 3자 합의, consensus | tfx-auto (`--mode consensus`) |
@@ -85,17 +85,17 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | 자율 | 알아서, 자동으로, autopilot | autopilot 모드 |
 | 최대 effort | ultracode, 울트라코드 | Claude Code `--effort ultracode`(v2.1.203+). 멀티에이전트 Workflow 오케스트레이션, 토큰 비용 무관 철저성 우선. tfx CLI 플래그는 아니다 |
 
-## CLI 우선순위 정책 — default = Codex
+## CLI 우선순위 정책: default = Codex
 
-> 근거(why): [ADR-0004 — 기본 구현 CLI = Codex](../../docs/adr/0004-codex-as-default-cli.md). 이 절이 SSOT(어떻게), ADR은 결정 이력(왜).
+> 근거(why): [ADR-0004: 기본 구현 CLI = Codex](../../docs/adr/0004-codex-as-default-cli.md). 이 절이 SSOT(어떻게), ADR은 결정 이력(왜).
 
-triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR) 이 거의 전부 Codex 단독 또는 Codex worker spawn 으로 진행됐다. 이 운영 fact 를 default policy 로 명시한다.
+triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR) 이 거의 전부 Codex 단독 또는 Codex worker spawn 으로 진행되었다. 이 운영 fact 를 default policy 로 명시한다.
 
 | 우선순위 | CLI / 모델 | default 적용 lane |
 |---------|-----------|-------------------|
-| 1차 (default) | **Codex** (GPT-6 Astra/Sol/Luna) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
+| 1차 (default) | **Codex** (프로필 설정 기준) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
 | 2차 | **Antigravity** | Codex quota exhaust, 가독성 cross-check, 별도 시각 검토 |
-| 한정 (Claude 만) | **Claude** (`opus` 최신 tier 별칭) | 메타 라우팅 (`/tfx-harness`), planning gate (`/office-hours`, `/autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack /qa`), 또는 Codex/Antigravity 미가용 |
+| 한정 (Claude 만) | **Claude** (`opus` 최신 tier 별칭) | 메타 라우팅 (`/tfx-harness`), planning gate (`/gstack-office-hours`, `/gstack-autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack-qa`), 또는 Codex/Antigravity 미가용 |
 
 `tfx-auto`, `tfx-review`, `tfx-research` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli codex`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
 
@@ -105,26 +105,26 @@ triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR
 
 > 근거(why): [ADR-0016](../../docs/adr/0016-codex-astra-top-tier-and-fable-escalation.md), [ADR-0017](../../docs/adr/0017-gpt6-sol-luna-lanes.md), [ADR-0019](../../docs/adr/0019-gpt61-sol-and-sonnet-55.md). 기준 문서는 OpenAI Codex 모델 페이지와 Anthropic 모델 개요(2026-09-30 확인)다.
 
-Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고, 모델 ID는 `~/.codex/<프로필>.config.toml`이 정한다. Claude는 별칭으로 호출하므로 새 모델이 나오면 아래 "현재 모델" 열만 고친다.
+Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고, 모델 ID는 `~/.codex/<프로필>.config.toml`이 정한다. `designer`, `writer` 항목은 직접 Codex를 지정한 경우에만 적용하며 일반 실행의 provider는 `hub/team/agent-map.json`이 정한다.
 
-| 호출 | 현재 모델 | 공식 용도 | triflux lane |
-|------|-----------|-----------|--------------|
-| `gpt6_astra_xhigh` | GPT-6 Astra | 여러 단계와 도구에 걸친 최고 난도 작업 | architect, planner, critic, analyst, debugger, deep-executor, security-reviewer, scientist-deep, designer |
-| `gpt6_astra_max` / `gpt6_astra_ultra` | GPT-6 Astra | 최난도 단일 작업, 자동 위임 | `TFX_CODEX_PROFILE=max/ultra`, 재시도 1단계 |
-| `gpt61_sol_high` | GPT-6.1 Sol | Astra에 근접한 성능을 Astra보다 싸게, 반복적이고 오래 도는 코드와 문서 작업 | executor, codex, code-reviewer, quality-reviewer, verifier, test-engineer, qa-tester, scientist, document-specialist |
-| `gpt61_sol_med` | GPT-6.1 Sol | 추가 계획이 필요한 작업의 공식 시작 effort | cleanup, deslop |
-| `gpt6_luna_high` | GPT-6 Luna | 명확하고 반복 가능한 작업 | build-fixer, writer |
-| `gpt6_luna_low` | GPT-6 Luna | 지연이 우선인 작업 | spark, explore 재매핑, ChatGPT tier 폴백 |
-| `fable` | Claude Fable 5.1 | 까다로운 추론과 긴 에이전트 작업, Opus가 높은 effort에서도 부족할 때 | `--retry auto-escalate` 최종 단계 |
-| `opus` | Claude Opus 5.5 | 오래 도는 에이전트 코딩과 지식 작업, Claude 기본 출발점 | 메타 라우팅, planning gate, 스킬의 `model="opus"` lane |
-| `sonnet` | Claude Sonnet 5.5 | 속도와 지능의 최적 조합 | Claude native test-engineer, qa-tester, verifier |
-| `haiku` | Claude Haiku 4.5 | 가장 빠른 모델 | Claude native explore, claude |
+| 프로필 | triflux lane |
+|---------|--------------|
+| `gpt6_astra_xhigh` | architect, planner, critic, analyst, debugger, deep-executor, security-reviewer, scientist-deep, designer(직접 지정) |
+| `gpt6_astra_max` / `gpt6_astra_ultra` | `TFX_CODEX_PROFILE=max/ultra`, 재시도 1단계 |
+| `gpt61_sol_high` | executor, codex, code-reviewer, quality-reviewer, verifier, test-engineer, qa-tester, scientist, document-specialist |
+| `gpt61_sol_med` | cleanup, deslop |
+| `gpt6_luna_high` | build-fixer, writer(직접 지정) |
+| `gpt6_luna_low` | spark, explore 재매핑, ChatGPT tier 폴백 |
+| `fable` | `--retry auto-escalate` 최종 단계 |
+| `opus` | 메타 라우팅, planning gate, 스킬의 `model="opus"` lane |
+| `sonnet` | Claude native test-engineer, qa-tester, verifier |
+| `haiku` | Claude native explore, claude |
 
 ## CLI 라우팅
 
-`codex exec` / `agy -y -p` 직접 호출은 금지한다. tfx 스킬 경유 필수. 자동 차단 훅(headless-guard)은 제거됐으므로 호출자가 지킨다.
+`codex exec` / `agy -y -p` 직접 호출은 금지한다. tfx 스킬 경유 필수. 자동 차단 훅(headless-guard)은 제거되었으므로 호출자가 지킨다.
 
-**Layer 1 — Light** (tfx-route.sh → 단일 CLI)
+**Layer 1: Light** (tfx-route.sh → 단일 CLI)
 
 | 경로 | CLI | 용도 |
 |------|-----|------|
@@ -134,16 +134,16 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 | `tfx-auto --mode quick` | Codex→검증 | 단일 파일, 5분 이내 |
 | `tfx-auto --retry auto-escalate` | 자동 승격 | 실패→더 강한 모델 |
 
-**Layer 2 — Deep** (headless 3-CLI 합의)
+**Layer 2: Deep** (headless 3-CLI 합의)
 
 `tfx-auto --mode deep`, `tfx-auto --mode consensus --shape consensus|debate|panel`,
 `tfx-auto --retry ralph`
 
-**Layer 3 — Remote/병렬**
+**Layer 3: Remote/병렬**
 
 | 스킬 | 용도 |
 |------|------|
-| tfx-multi | 2+개 태스크 headless 병렬 |
+| `tfx multi` CLI | 2+개 태스크 headless 병렬 |
 | tfx-remote | Claude Code 원격 세션 (SSH, user-state hosts.json setup 필수) |
 
 **Claude 네이티브** (CLI 불필요): tfx-setup, tfx-doctor(hub 시작·중지·상태 포함)
@@ -159,7 +159,7 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 - 2(warn): 무거운 shard(빌드·전체 테스트 스위트·대규모 리팩터)를 띄우거나 워커 3+개를 새로 만들 때만 오프로드
 - 1(normal): 로컬 유지
 - sysctl 실패 시 대체 신호: `vm_stat` 5초 간격 2회 측정에서 swapouts 증가
-- 원격으로 넘기기 전에 `tfx-remote probe <host>`(구현: `node scripts/remote-spawn.mjs --probe <host>`)로 호스트 상태를 먼저 확인한다.
+- 원격으로 넘기기 전에 `node scripts/remote-spawn.mjs --probe <host>`로 호스트 상태를 먼저 확인한다.
 - 행동: 원격 코드 변경은 별도 worktree와 세션에서 실행한다. 탐색·대화형은 tfx-remote로 m2 세션을 띄운다
 - 로컬 여유가 충분하면 로컬 유지. 사용자가 로컬/원격을 명시하면 그에 따른다
 - m2 부재 시(ssh 불응) 조용히 로컬로 강등하지 말고 한 줄 알린 뒤 로컬 진행

@@ -126,7 +126,7 @@ describe("lane2-b trigger reduction: D2/D8 surfaces stay explicit-only", () => {
     const routing = read(".claude", "rules", "tfx-routing.md");
     assert.match(
       routing,
-      /\| 회고\/슬롭 정리 \| `\/gstack \/retro` 또는 명시 `tfx-auto --mode consensus` \|/,
+      /\| 회고\/슬롭 정리 \| `\/gstack-retro` 또는 명시 `tfx-auto --mode consensus` \|/,
     );
     assert.match(
       routing,

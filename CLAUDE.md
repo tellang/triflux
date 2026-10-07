@@ -1,13 +1,13 @@
-# triflux — Claude Code 운영 가이드
+# triflux Claude Code 운영 가이드
 
 <core-systems>
-## 핵심 스킬 시스템 (항상 인지)
+## 스킬 시스템
 
 이 프로젝트는 3개의 스킬 시스템을 동시에 사용한다. 어떤 작업이든 해당 시스템의 스킬이 있는지 먼저 확인한다.
 
 | 시스템 | 접두사 | 용도 | 스킬 수 |
 |--------|--------|------|---------|
-| **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·스웜·원격 실행 | 10개 |
+| **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·원격 실행 | 10개 |
 | **gstack** | `/` (접두사 없음) | QA·출시·조사·설계·검토·점검 지점 | ~35개 |
 | **omc** | `/oh-my-claudecode:*` | autopilot·ralph·team·execute·ultragoal | ~37개 |
 
@@ -33,7 +33,7 @@ macOS/Linux는 플랫폼 보호기가 아무 작업도 하지 않게 처리하�
 
 위 `<psmux-wt>` 룰셋은 Windows 전용이다. macOS/Linux 환경에서 triflux가 터미널/세션을 다루는 방식.
 
-### terminal-opener.mjs 3단계 대체 경로(`hub/team/terminal-opener.mjs` 의 `openCommand`)
+### 터미널 실행 경로
 
 `openCommand()` 가 순차 평가하는 분기:
 
@@ -42,9 +42,9 @@ macOS/Linux는 플랫폼 보호기가 아무 작업도 하지 않게 처리하�
 | 1 | `platform === "win32"` | `wt-manager.createTab` | `hub/team/wt-manager.mjs` |
 | 2 | `isTmuxLikeMux(mux)` (`detectMultiplexer()` → `getMultiplexerType()`/`hasMultiplexer()`/`hasTmux()`) | `tmux new-window -n <title> <command>` | 셸 직접 호출 |
 | 3 | `platform === "darwin"` (대체 경로) | `open -a Terminal` | macOS `open` 명령 |
-| — | Linux(멀티플렉서 없음) | 미지원(`false` 반환) | — |
+| 없음 | Linux(멀티플렉서 없음) | 미지원(`false` 반환) | 없음 |
 
-### 별도 mac 매니저 불필요
+### 터미널 관리 방식
 
 | 후보 | 필요성 | 이유 |
 |------|--------|------|
@@ -52,21 +52,19 @@ macOS/Linux는 플랫폼 보호기가 아무 작업도 하지 않게 처리하�
 | tmux 관리자 | **불필요** | `terminal-opener.mjs`가 `tmux new-window`로 직접 호출한다. |
 | psmux 관리자 | **이미 있음** | `hub/team/psmux.mjs`가 Windows에서는 psmux, macOS/Linux에서는 tmux를 사용한다. |
 
-참고 사례: OMC(`oh-my-claudecode`)도 운영체제별 관리자를 만들지 않고 Tmux 관리자·워크트리 관리자·Claude 실행기 세 구성 요소로 정리한다. 이 저장소 결정의 외부 근거가 아니라 비교 참고로만 본다.
+### 플랫폼 보호기
 
-### 플랫폼 보호기 위치(참고)
-
-| 파일 | 줄 | 보호기 |
+| 파일 | 함수 | 보호기 |
 |------|------|-------|
-| `hub/team/wt-manager.mjs` | 199 | `if (platform() !== "win32") return createNonWindowsStubManager();` |
-| `hub/team/headless.mjs` | 1725-1726 | `if (process.platform !== "win32") return false;` + `WT_SESSION` 체크 |
-| `tfx-route.sh` | 86, 1662, 1681 | `case "$(uname -s)"` 분기 |
+| `hub/team/wt-manager.mjs` | `createWtManager` | `if (platform() !== "win32") return createNonWindowsStubManager();` |
+| `hub/team/headless.mjs` | `autoAttachTerminal` | `if (process.platform !== "win32") return false;` + `WT_SESSION` 체크 |
+| `scripts/tfx-route.sh` | `resolve_machine_profile_path`, `heartbeat_monitor` | `case "$(uname -s)"` 분기 |
 
-mac에서 위 코드가 호출돼도 일찍 반환하므로 실행되지 않는 코드가 동작하지 않는다. **실행되지 않는 문서만 주입되는 것이 남은 불일치다.**
+Windows 전용 경로는 플랫폼과 `WT_SESSION` 조건을 확인한다.
 
-### macOS 알림(참고)
+### macOS 알림
 
-`hub/team/notify.mjs:221~234`가 `osascript`로 macOS 기본 알림을 보낸다. 별도 의존성은 없다.
+`hub/team/notify.mjs`의 `sendToast`가 `osascript`로 macOS 기본 알림을 보낸다. 별도 의존성은 없다.
 </macos-terminal>
 
 <codex-config>
@@ -79,7 +77,7 @@ mac에서 위 코드가 호출돼도 일찍 반환하므로 실행되지 않는 
 | `approval_policy` (`on-request` / `never` / granular) | `--dangerously-bypass-approvals-and-sandbox` |
 | `sandbox_mode` (`read-only` / `workspace-write` / `danger-full-access`) | `-s`, `--sandbox` |
 
-`--full-auto` 는 Codex 0.147 에서 제거됐다. 안전한 방식: `config.toml`에 기본값을 두고 CLI에서는 `--profile`만 선택한다.
+`--full-auto` 는 Codex 0.147 에서 제거되었다. 안전한 방식: `config.toml`에 기본값을 두고 CLI에서는 `--profile`만 선택한다.
 프로필은 `$CODEX_HOME/<이름>.config.toml` 파일이다(인라인 `[profiles.*]` 아님).
 </codex-config>
 
@@ -90,13 +88,13 @@ headless 워커는 AccountBroker를 사용한다.
 
 | 항목 | 설명 |
 |------|------|
-| 계정별 회로 차단기 | 장애 격리 — 한 계정 오류가 다른 계정에 전파되지 않음 |
+| 계정별 회로 차단기 | 장애 격리: 한 계정 오류가 다른 계정에 전파되지 않음 |
 | 사용 중 플래그 | 동일 계정 이중 임대 방지 |
 | `/broker/reload` | 장시간 세션 중 accounts.json을 다시 불러온다. 활성 임대 소유권은 다시 불러온 뒤에도 보존한다. |
 | 어댑터의 임대 없음 정책 | headless 어댑터는 브로커가 비활성·비어 있음이면 기본 CLI 인증 경로로 실행하고, 브로커가 활성인데 임대가 없으면 `circuit_open`으로 실패한다. |
 | 공개 스냅숏 정책 | `/broker/snapshot`과 대시보드는 `publicSnapshot()`만 사용한다. `env`, `authFile`, `profile`, `host`, 파일 경로, 가공하지 않은 실패 시각은 공개하지 않는다. |
 | 진단 이벤트 | `securityViolation`, `authSyncError`는 허브가 가린 경고 로그(`broker.security_violation`, `broker.auth_sync_error`)로 처리한다. |
-| EventEmitter 이벤트 | `lease`, `release`, `cooldown`, `tierFallback`, `circuitOpen`, `circuitClose`, `noAvailableAccounts` — HUD 연동용 |
+| EventEmitter 이벤트 | `lease`, `release`, `cooldown`, `tierFallback`, `circuitOpen`, `circuitClose`, `noAvailableAccounts`: HUD 연동용 |
 </account-broker>
 
 <remote>
@@ -188,13 +186,18 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 | `.claude/rules/tfx-update-logic.md` | triflux / OMC / gstack / Codex / Antigravity 업데이트 로직 |
 | `.claude/rules/tfx-stack-coexistence.md` | gstack / superpowers / triflux 공존 원칙, 레이어 분리, 의존 방향, 충돌 해소 |
 | `.claude/rules/tfx-mirror-policy.md` | packages/ 3계층 미러 정책(핵심 단순 복사 / 원격 가져오기 변환 / triflux 바이트 동일), 테스트 제외 규칙, 불일치 차단 |
+| `.claude/rules/tfx-cto-hub-boundary.md` | CTO 조회 표면과 Hub 소유권 경계 |
+| `.claude/rules/tfx-doc-governance.md` | 실행 규칙, ADR, 설계, 계획 문서의 배치 |
+| `.claude/rules/tfx-escalation-chain.md` | 자동 재시도와 CLI 전환 체인 |
+| `.claude/rules/tfx-machine-profile.md` | 기기 프로필 우선순위와 실행 정책 |
+| `.claude/rules/tfx-psmux.md` | Windows psmux와 WT 실행 규칙 |
+| `.claude/rules/tfx-routing.md` | 역할별 CLI 라우팅과 직접 호출 제한 |
+| `.claude/rules/tfx-skill-authoring.md` | 스킬 frontmatter, 프로필 표기, 검증 규약 |
 
 Claude Code는 `.claude/rules/*.md`를 자동으로 불러온다. Codex CLI는 `@import`를 지원하지 않으므로 필요하면 `AGENTS.md`를 독립적으로 유지한다.
 
 ## GBrain
 
-설정 정본은 `~/Projects/CLAUDE.md` 한 곳이다. 여기 있던 사본은 `engine=pglite` /
-`2026-04-25`로 오래되어 전역·Projects 블록과 서로 모순됐다(2026-07-26 제거).
-실제 엔진은 postgres(Supabase), gbrain 0.42.51.0이다.
+설정 정본은 `~/Projects/CLAUDE.md`다.
 
 - 이 저장소 정책: 읽기·쓰기(github.com/tellang/triflux)

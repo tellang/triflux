@@ -10,8 +10,8 @@
 - `triggers:`는 Claude Code 표준에서 활성화 신호로 인정되지 않는다.
 - 기존 호환성이나 문서화를 위해 `triggers:`가 남아 있을 수 있어도, 새 판단
   기준으로 사용하지 않는다.
-- 따라서 `description:`은 한국어로 유지하되, 언제 이 스킬을 써야 하는지
-  명확하게 적는다.
+- 따라서 새 `description:`은 한국어로 작성하고 언제 이 스킬을 써야 하는지
+  명확하게 적는다. 현재 lint는 설명의 언어를 검사하지 않는다.
 
 ## 2. name만 영문
 
@@ -23,7 +23,7 @@
 ## 3. 모델명은 프로필이 SSOT
 
 - Codex, Claude, Antigravity 모델 ID는 프로필 설정이 단일 정본이다.
-- `SKILL.md` 본문에 `gpt-5.6-sol`, `opus-4-8` 같은 모델명을 하드코딩하지 않는다.
+- `SKILL.md` 본문에 구체적인 모델 ID를 하드코딩하지 않는다.
 - 스킬 문서에서는 `gpt61_sol_high`, `gpt6_astra_xhigh`, `flash38_high` 같은 프로필명이나
   "프로필 설정을 따른다"는 표현을 사용한다.
 - 모델 교체가 필요하면 스킬 본문을 고치지 말고 프로필 설정과 라우팅 규칙을
@@ -34,16 +34,15 @@
 - `skills/**/SKILL.md`가 배포·리뷰·lint 기준의 단일 정본이다.
 - `SKILL.md.tmpl` 기반 생성 파이프라인은 deprecated 상태이며 새 변경을
   추가하지 않는다.
-- 기존 `.tmpl` 파일은 별도 gate에서 일괄 정리한다. 개별 shard는 lease 밖
-  대량 삭제를 수행하지 않는다.
+- 현재 `.tmpl` 파일은 없다.
 
 ## 5. Lake4 manifest는 영구 보류
 
 - Lake4 manifest 분리는 영구 보류한다.
 - Claude Code가 frontmatter를 필수 표면으로 요구하므로, manifest만 별도
   정본으로 분리할 수 없다.
-- `skill.json`이나 manifest 계열 파일이 있어도 `SKILL.md` frontmatter를
-  대체하지 않는다.
+- manifest 생성 스크립트는 제거되었다. `skill.json`이 있어도 `SKILL.md`
+  frontmatter를 대체하지 않는다.
 
 ## 6. 변경 검증
 

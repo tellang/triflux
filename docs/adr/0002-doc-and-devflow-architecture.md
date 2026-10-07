@@ -32,4 +32,4 @@ triflux 문서는 양은 많지만(docs/ 100+ 파일, 루트 MD 9개, `.claude/r
 - **정책 위치 — `.claude/rules/` 유지(채택) vs docs로 흡수**: 흡수 시 harness auto-load 강제력을 잃고 수동 위키로 전락.
 
 ## 결과 (Consequences)
-긍정: 결정에 단일·검색가능·불변 집이 생기고, 온보딩이 단선화되며, 공개 경계가 명시화되고, 신규 ADR이 실제로 커밋 가능해진다(gitignore 교정). 부정: accepted ADR 불변 규율 + 상태보드 등재 의무 + 작성 비용. 트레이드오프: 초기 수동 운영(자동화는 `automation_trigger` 도달 시). 되돌릴 조건: ADR 체계가 부담만 되고 실사용되지 않으면 이 ADR을 superseded 처리하고 경량 `decisions.md`로 축소. 후속: 마이그레이션 Phase 0~5 상세는 `.triflux/plans/2026-07-01-docs-adr-foundation.md`.
+긍정: 결정에 단일·검색가능·불변 집이 생기고, 온보딩이 단선화되며, 공개 경계가 명시화되고, 신규 ADR이 실제로 커밋 가능해진다(gitignore 교정). 부정: accepted ADR 불변 규율 + 상태보드 등재 의무 + 작성 비용. 트레이드오프: 초기 수동 운영(자동화는 `automation_trigger` 도달 시). 되돌릴 조건: ADR 체계가 부담만 되고 실사용되지 않으면 이 ADR을 superseded 처리하고 경량 `decisions.md`로 축소. 후속: 마이그레이션 Phase 0~5 상세는 (폐기성 계획 문서였고 2026-10-08 슬롭 정리에서 삭제).

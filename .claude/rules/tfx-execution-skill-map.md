@@ -1,4 +1,4 @@
-# 실행 스킬 맵 — tfx-auto 중심
+# 실행 스킬 맵: tfx-auto 중심
 
 ## 멘탈 모델
 
@@ -30,8 +30,7 @@ CLI/tmux worker lifecycle은 분리하고, Triflux가 CLI launch·observation·c
 
 이 절이 **언제 관전할지**의 auto-load 정책 SSOT다. 명시적으로 headless를 택한 엔진 경로는
 그 명시 선택을 따른다. 세션 생성, 시작 배너 확인, attach, 정리, `tfx-live` 및 폭 기반 pane
-배치의 **어떻게**는 [`skills/tfx-auto/SKILL.md`](../../skills/tfx-auto/SKILL.md)의
-`tmux 라이브 관전` 절이 정본이다.
+배치의 **어떻게**는 [`skills/tfx-auto/references/tmux-observation.md`](../../skills/tfx-auto/references/tmux-observation.md)가 정본이다.
 
 ## Retry 정책 (Phase 3+)
 
@@ -39,7 +38,7 @@ CLI/tmux worker lifecycle은 분리하고, Triflux가 CLI launch·observation·c
 |-------------|------|---------|
 | `0` | 재시도 없음 | 모든 모드 |
 | `1` (기본) | bounded verify→fix loop 3회, 같은 CLI | 모든 모드 |
-| `ralph` | true state machine — `--max-iterations 0` (unlimited) 기본, stuck 3회 중단 | 스킬 경유 시 unlimited, CLI 직접 호출 시 bounded 1 |
-| `auto-escalate` | CLI/모델 승격 체인 — `.claude/rules/tfx-escalation-chain.md` 규약 | `--max-iterations N` 으로 단계당 상한 |
+| `ralph` | true state machine: `--max-iterations 0` (unlimited) 기본, stuck 3회 중단 | 스킬 경유 시 unlimited, CLI 직접 호출 시 bounded 1 |
+| `auto-escalate` | CLI/모델 승격 체인: `.claude/rules/tfx-escalation-chain.md` 규약 | `--max-iterations N` 으로 단계당 상한 |
 
 `ralph`/`auto-escalate` 는 `hub/team/retry-state-machine.mjs` 가 구동. state 는 `.omc/state/retry-<sessionId>.json` 에 저장 (compaction survive). Bridge: `node hub/bridge.mjs retry-run --snapshot X --event ...`.

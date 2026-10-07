@@ -1,23 +1,23 @@
-# triflux에 기여하기
+# triflux 기여
 
 triflux는 Claude Code · Codex · Antigravity 를 라우팅하는 CLI-first 멀티모델
 오케스트레이터다. 이 문서는 코드/문서 기여의 진입점이다. 결정의 "왜"는
 [`docs/adr/`](docs/adr/README.md), 문서 배치 규칙은 [`docs/README.md`](docs/README.md),
 프로세스 상세는 [`docs/process/`](docs/process/) 에 있다.
 
-## 빌드 / 설치
+## 빌드와 설치
 
 - **Node 20+** 필요(`package.json` `engines.node = ">=20"`). 의존성 `better-sqlite3` 12.x 가
   Node 20 이상을 요구한다. CI 는 Node 20, 릴리즈 워크플로는 Node 24 로 돈다.
 - 의존성 설치:
 
 ```bash
-npm install
+npm ci --ignore-scripts
 ```
 
 빌드 스텝은 따로 없다. triflux는 `.mjs` 소스를 그대로 실행한다.
 
-## 테스트 / 린트
+## 테스트와 린트
 
 변경 후에는 아래를 통과시킨다.
 
@@ -27,9 +27,7 @@ npm install
 | `npm run lint` | biome `check` = **lint + format** |
 | `npm run lint:skills` | 스킬 문서(`skills/**/SKILL.md`) 규약 |
 
-> **주의: `npm run lint` 를 반드시 먼저 돌린다.** biome `check` 는 lint 와
-> **format 을 함께** 본다. 로컬에서 `biome lint` 만 돌리면 format 위반을
-> 놓쳐 CI 에서 걸린다. 자동 정리는 `npm run lint:fix`.
+Biome `check`는 lint와 format을 함께 검사한다. 자동 정리는 `npm run lint:fix`로 실행한다.
 
 패키지 배포에 영향을 주는 변경(루트 런타임 파일 수정 등)은 미러/동기화
 게이트도 함께 확인한다.
@@ -39,7 +37,7 @@ npm run release:check-sync
 npm run release:check-mirror
 ```
 
-문서만 고친 변경이면 `npm run lint` 와 위 두 점검 정도로 충분하다. 전체 통합 테스트는
+문서 변경은 관련 문서 테스트와 미러·동기화 검사를 실행한다. 스킬 변경은 `lint:skills`도 실행한다. 전체 통합 테스트는
 Hub 서버를 띄우므로 macOS 에서 `node` 의 localhost 포트 수신을 묻는 방화벽 창이 뜰 수 있다.
 Hub·팀·MCP 흐름을 실제로 시험할 때만 허용하면 된다.
 
@@ -96,7 +94,7 @@ npm run snapshot:all
 ## 브랜치 네이밍
 
 ```
-feat|fix|docs|refactor/<issue>-<slug>
+feat|fix|docs|refactor|chore/<issue>-<slug>
 ```
 
 예: `fix/449-shim-entrypoint`, `docs/12-adr-foundation`. `<issue>` 는 관련
@@ -136,7 +134,7 @@ triflux는 **동일 모델 self-approve 를 금지**한다. 작성 모델과 리
 같은 활성 컨텍스트에서 자기 코드를 승인하지 않는다. 근거와 게이트 상세는
 [`docs/process/pr-review-contract.md`](docs/process/pr-review-contract.md) 를 따른다.
 
-## 커밋 / PR 규칙
+## 커밋과 PR 규칙
 
 - **AI attribution 금지.** 커밋 메시지에 `Co-Authored-By`, `Generated with`,
   기타 AI 생성 표기(trailer/footer)를 넣지 않는다. 이는 triflux 릴리즈 정책이다.
