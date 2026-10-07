@@ -116,9 +116,9 @@ describe("ansi.mjs", () => {
     assert.ok(STATUS_ICON.pending);
   });
 
-  it("CLI_ICON: codex/gemini/claude 아이콘 정의", () => {
+  it("CLI_ICON: codex/antigravity/claude 아이콘 정의", () => {
     assert.ok(CLI_ICON.codex);
-    assert.ok(CLI_ICON.gemini);
+    assert.ok(CLI_ICON.antigravity);
     assert.ok(CLI_ICON.claude);
   });
 
@@ -429,7 +429,7 @@ describe("createLogDashboard", () => {
       handoff: { status: "ok", verdict: "auth done", confidence: "high" },
     });
     tui.updateWorker("w2", {
-      cli: "gemini",
+      cli: "antigravity",
       status: "running",
       snapshot: "step 2",
       progress: 0.4,
@@ -466,7 +466,7 @@ describe("createLogDashboard", () => {
     });
     ["w1", "w2", "w3", "w4"].forEach((name, idx) => {
       tui.updateWorker(name, {
-        cli: idx % 2 === 0 ? "codex" : "gemini",
+        cli: idx % 2 === 0 ? "codex" : "antigravity",
         status: idx === 3 ? "completed" : "running",
         snapshot: `step ${idx + 1}`,
         progress: 0.25 * (idx + 1),
@@ -628,7 +628,7 @@ describe("createLogDashboard", () => {
       progress: 0.5,
     });
     tui.updateWorker("w2", {
-      cli: "gemini",
+      cli: "antigravity",
       status: "running",
       snapshot: "worker two",
       detail: "delta\nepsilon",
@@ -688,7 +688,7 @@ describe("createLogDashboard", () => {
       columns: 96,
     });
     tui.updateWorker("w1", { cli: "codex", status: "running" });
-    tui.updateWorker("w2", { cli: "gemini", status: "running" });
+    tui.updateWorker("w2", { cli: "antigravity", status: "running" });
     tui.updateWorker("w3", { cli: "claude", status: "running" });
 
     // 초기 선택은 w1
@@ -912,10 +912,10 @@ describe("createLogDashboard", () => {
     );
 
     output = "";
-    // 🔵 gemini (writer) → 이모지+CLI 제거 → "writer"만 남음
+    // 🔵 antigravity (writer) → 이모지+CLI 제거 → "writer"만 남음
     tui.updateWorker("worker-2", {
-      cli: "gemini",
-      role: "🔵 gemini (writer)",
+      cli: "antigravity",
+      role: "🔵 antigravity (writer)",
       status: "running",
     });
     tui.render();

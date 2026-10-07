@@ -325,9 +325,9 @@ describe("STATUS_ICON / CLI_ICON", () => {
     assert.ok(STATUS_ICON.pending);
   });
 
-  it("CLI_ICON: codex/gemini/claude 정의", () => {
+  it("CLI_ICON: codex/antigravity/claude 정의", () => {
     assert.ok(CLI_ICON.codex);
-    assert.ok(CLI_ICON.gemini);
+    assert.ok(CLI_ICON.antigravity);
     assert.ok(CLI_ICON.claude);
   });
 });

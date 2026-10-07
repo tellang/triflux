@@ -47,3 +47,7 @@ Codex CLI 공식 레퍼런스는 `codex mcp-server` 명령과 `codex-mcp-server`
 부정과 리스크: `TFX_CODEX_TRANSPORT=mcp` 를 명시하던 호출은 동작이 exec 로 바뀐다. 업스트림에 MCP 서버가 없어 기존에도 폴백으로 끝났으므로 실질 차이는 안내 문구뿐이다. MCP 워커 코드와 테스트가 은퇴 전까지 죽은 경로로 남는다.
 
 후속: MCP 워커, 위임 워커의 의존, 워커 팩토리 기본값, 관련 테스트의 은퇴. 되돌릴 조건: 업스트림이 MCP 서버를 되살리거나 app-server 가 exec 를 대체할 만큼 안정되면 새 번호 ADR 로 다시 정한다. 구현은 PR #503.
+
+## 2026-10-08 적용 상태
+
+`scripts/tfx-route.sh`는 Codex 실행을 exec 경로로 고정한다. `TFX_CODEX_TRANSPORT` 선택과 MCP 전송 안내는 제거됐다. 위 전송 선택 설명은 당시 결정의 기록이다. 허브 delegator가 사용하는 `hub/workers/codex-mcp.mjs`는 이 라우터 정리의 대상이 아니다.

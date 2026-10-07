@@ -121,8 +121,6 @@ function runRoute({
     TFX_BRIDGE_SCRIPT: BRIDGE,
     TFX_CAPTURE_ARGS: capture,
     TFX_CODEX_OK: "1",
-    TFX_CODEX_PLAN: "pro",
-    TFX_CODEX_TRANSPORT: "exec",
     TFX_ANTIGRAVITY_OK: "0",
     TFX_HUB_OK: "1",
     TFX_HUB_ENSURE_SCRIPT: fakeHubEnsure,
@@ -168,16 +166,6 @@ function profileValues(args) {
   return values;
 }
 
-function configValues(args, key) {
-  const values = [];
-  for (let i = 0; i < args.length; i += 1) {
-    if (args[i] !== "-c") continue;
-    const value = args[i + 1] || "";
-    if (value.startsWith(`${key}=`)) values.push(value.slice(key.length + 1));
-  }
-  return values;
-}
-
 describe("tfx-route retry snapshot profile plumbing", () => {
   it("keeps default argv without a retry snapshot despite ambient disable flags", () => {
     const dir = makeTempDir();
@@ -211,7 +199,7 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     assert.deepEqual(profileValues(args), ["gpt6_astra_xhigh"]);
   });
 
-  it("explicit max overrides a mutated ultra profile in final argv", () => {
+  it("explicit max selects the max profile in final argv", () => {
     const args = runRoute({
       env: { TFX_CODEX_PROFILE: "max" },
       profileFiles: {
@@ -221,8 +209,7 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     });
 
     assert.deepEqual(profileValues(args), ["gpt6_astra_max"]);
-    assert.equal(configValues(args, "model_reasoning_effort").at(-1), '"max"');
-    assert.equal(configValues(args, "model").at(-1), '"gpt-6-astra"');
+    assert.ok(!args.some((arg) => arg.startsWith("model=")));
   });
 
   it("allows ultra only for a top-level deep-executor", () => {
@@ -236,11 +223,7 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     });
 
     assert.deepEqual(profileValues(args), ["gpt6_astra_ultra"]);
-    assert.equal(
-      configValues(args, "model_reasoning_effort").at(-1),
-      '"ultra"',
-    );
-    assert.equal(configValues(args, "model").at(-1), '"gpt-6-astra"');
+    assert.ok(!args.some((arg) => arg.startsWith("model=")));
   });
 
   it("downgrades nested ultra to max", () => {
@@ -335,7 +318,7 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     assert.deepEqual(profileValues(missingCustom), ["gpt61_sol_high"]);
   });
 
-  it("nested default overrides a mutated ultra profile in final argv", () => {
+  it("nested default uses the max profile for a mutated ultra profile", () => {
     const args = runRoute({
       env: { TFX_TEAM_NAME: "nested-team" },
       profileFiles: {
@@ -344,6 +327,6 @@ describe("tfx-route retry snapshot profile plumbing", () => {
       },
     });
 
-    assert.equal(configValues(args, "model_reasoning_effort").at(-1), '"max"');
+    assert.deepEqual(profileValues(args), ["gpt6_astra_max"]);
   });
 });

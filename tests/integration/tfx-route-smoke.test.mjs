@@ -2,7 +2,7 @@
 //
 // 테스트 범위:
 //   - claude-native 에이전트(explore/verifier/test-engineer/qa-tester) 기본 라우팅
-//   - TFX_CLI_MODE=codex/gemini compatibility 오버라이드 메타데이터
+//   - TFX_CLI_MODE=codex 오버라이드 메타데이터
 //   - TFX_NO_CLAUDE_NATIVE 유효성 검증 (0/1만 허용)
 //   - 알 수 없는 에이전트 타입 오류
 //   - 인자 부족 시 오류
@@ -154,7 +154,6 @@ function runBash(command, extraEnv = {}) {
         TFX_CODEX_OK: "1",
         TFX_ANTIGRAVITY_OK: "0",
         TFX_NO_CLAUDE_NATIVE: "0",
-        TFX_CODEX_TRANSPORT: "exec",
         TFX_CTO_NORTH_STAR: "0",
         TFX_WORKER_INDEX: "",
         TFX_SEARCH_TOOL: "",
@@ -260,16 +259,6 @@ describe("tfx-route.sh — claude-native 에이전트 메타데이터 출력", {
 // ── TFX_CLI_MODE 오버라이드 ──
 
 describe("tfx-route.sh — TFX_CLI_MODE 오버라이드", () => {
-  it("TFX_CLI_MODE=gemini 일 때 explore는 claude-native 유지(gemini 모드에서는 no-claude-native 비적용)", () => {
-    // gemini 모드에서는 apply_no_claude_native_mode 가 early return하므로
-    // TFX_NO_CLAUDE_NATIVE=1이어도 claude-native가 유지됨
-    const result = runBash(
-      `TFX_CLI_MODE=gemini TFX_NO_CLAUDE_NATIVE=1 bash "${ROUTE_SCRIPT}" explore 'test-case'`,
-    );
-    assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /ROUTE_TYPE=claude-native/);
-  });
-
   it("TFX_CLI_MODE=codex 일 때 claude-native 에이전트는 여전히 claude-native를 반환해야 한다", () => {
     // TFX_CLI_MODE=codex는 claude-native를 변경하지 않는다.
     const result = runBash(
@@ -588,7 +577,7 @@ describe("tfx-route.sh — TFX_NO_CLAUDE_NATIVE 유효성 검증", () => {
   });
 });
 
-describe("tfx-route.sh — Codex MCP transport", () => {
+describe("tfx-route.sh — Codex exec result", () => {
   it("codex alias + implement(long prompt)에서도 empty phase 때문에 조기 종료되면 안 된다", () => {
     const longPrompt = `echo hi ${"x".repeat(1800)}`;
     const result = runBash(
@@ -605,7 +594,7 @@ describe("tfx-route.sh — Codex MCP transport", () => {
 
   it("-o 파일이 있으면 OUTPUT은 최종 메시지만 쓰고 raw trace는 stdout_log에 보존한다", () => {
     const result = runBash(
-      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-last-message' minimal`,
+      `bash "${ROUTE_SCRIPT}" executor 'hello-last-message' minimal`,
       fixtureEnv(
         { FAKE_CODEX_MODE: "exec-last-message" },
         { includeRoutePost: true },
@@ -626,7 +615,7 @@ describe("tfx-route.sh — Codex MCP transport", () => {
 
   it("최종 메시지가 byte cap을 넘으면 head가 아니라 tail을 유지한다", () => {
     const result = runBash(
-      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-long-output' minimal`,
+      `bash "${ROUTE_SCRIPT}" executor 'hello-long-output' minimal`,
       fixtureEnv({ FAKE_CODEX_MODE: "exec-long-last-message" }),
     );
 
@@ -636,47 +625,9 @@ describe("tfx-route.sh — Codex MCP transport", () => {
     assert.doesNotMatch(out(result), /HEAD-MARKER/);
   });
 
-  it("TFX_CODEX_TRANSPORT=auto는 MCP worker 없이 곧바로 exec를 사용한다", () => {
-    const result = runBash(
-      `TFX_CODEX_TRANSPORT=auto bash "${ROUTE_SCRIPT}" executor 'hello-auto-exec' minimal`,
-      fixtureEnv({ FAKE_CODEX_MODE: "mcp-ok" }),
-    );
-
-    assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /codex_transport_effective=exec/);
-    assert.match(out(result), /EXEC:hello-auto-exec/);
-    assert.doesNotMatch(out(result), /MCP:hello-auto-exec/);
-    assert.doesNotMatch(out(result), /exec-fallback/);
-  });
-
-  it("TFX_CODEX_TRANSPORT=mcp는 upstream 제거 안내 후 exec를 사용한다", () => {
-    const result = runBash(
-      `TFX_CODEX_TRANSPORT=mcp bash "${ROUTE_SCRIPT}" executor 'hello-mcp-request' minimal`,
-      fixtureEnv({ FAKE_CODEX_MODE: "mcp-ok" }),
-    );
-
-    assert.equal(result.status, 0, out(result));
-    assert.match(
-      out(result),
-      /codex mcp-server가 upstream에서 제거되어 exec로 계속합니다/,
-    );
-    assert.match(out(result), /codex_transport_effective=exec/);
-    assert.match(out(result), /EXEC:hello-mcp-request/);
-    assert.doesNotMatch(out(result), /MCP:hello-mcp-request/);
-  });
-
-  it("TFX_CODEX_TRANSPORT 값이 잘못되면 오류로 종료해야 한다", () => {
-    const result = runBash(
-      `TFX_CODEX_TRANSPORT=weird bash "${ROUTE_SCRIPT}" executor 'hello' minimal`,
-    );
-
-    assert.notEqual(result.status, 0, out(result));
-    assert.match(out(result), /auto, mcp, exec/);
-  });
-
   it("exit 0이어도 최종 메시지와 stdout이 모두 없으면 partial/no_final_message로 보고한다", () => {
     const result = runBash(
-      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-noop' minimal`,
+      `bash "${ROUTE_SCRIPT}" executor 'hello-noop' minimal`,
       fixtureEnv({ FAKE_CODEX_MODE: "exec-empty" }, { includeRoutePost: true }),
     );
 
@@ -689,7 +640,7 @@ describe("tfx-route.sh — Codex MCP transport", () => {
 
   it("Codex stdin 안내 문구만으로 success_with_warnings가 되지 않는다", () => {
     const result = runBash(
-      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-stdin-notice' minimal`,
+      `bash "${ROUTE_SCRIPT}" executor 'hello-stdin-notice' minimal`,
       fixtureEnv(
         { FAKE_CODEX_MODE: "exec-stdin-notice" },
         { includeRoutePost: true },
@@ -705,7 +656,7 @@ describe("tfx-route.sh — Codex MCP transport", () => {
 
   it("codex 0.155 의 stderr 배너와 실행 추적은 경고로 분류하지 않는다", () => {
     const result = runBash(
-      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-stderr-transcript' minimal`,
+      `bash "${ROUTE_SCRIPT}" executor 'hello-stderr-transcript' minimal`,
       fixtureEnv(
         { FAKE_CODEX_MODE: "exec-stderr-transcript" },
         { includeRoutePost: true },
@@ -720,7 +671,7 @@ describe("tfx-route.sh — Codex MCP transport", () => {
 
   it("stderr 의 tracing ERROR 줄은 여전히 경고로 올린다", () => {
     const result = runBash(
-      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-stderr-tracing-error' minimal`,
+      `bash "${ROUTE_SCRIPT}" executor 'hello-stderr-tracing-error' minimal`,
       fixtureEnv(
         { FAKE_CODEX_MODE: "exec-stderr-tracing-error" },
         { includeRoutePost: true },
@@ -735,7 +686,7 @@ describe("tfx-route.sh — Codex MCP transport", () => {
 
   it("stdout의 Codex stdin 안내 문구만 있으면 meaningful output으로 보지 않는다", () => {
     const result = runBash(
-      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-stdin-notice-only' minimal`,
+      `bash "${ROUTE_SCRIPT}" executor 'hello-stdin-notice-only' minimal`,
       fixtureEnv(
         { FAKE_CODEX_MODE: "exec-stdin-notice-only" },
         { includeRoutePost: true },
@@ -752,7 +703,7 @@ describe("tfx-route.sh — Codex MCP transport", () => {
     // 노이즈를 stdout 으로 backfill → 옛 가드는 `! -s STDOUT_LOG` 가 깨져 success
     // 로 오보고했다. 이제 복구 플래그 + transport 서명으로 실패(68)로 승격한다.
     const result = runBash(
-      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-mcp-crash' minimal`,
+      `bash "${ROUTE_SCRIPT}" executor 'hello-mcp-crash' minimal`,
       fixtureEnv({ FAKE_CODEX_MODE: "exec-mcp-crash" }),
     );
 
@@ -769,7 +720,7 @@ describe("tfx-route.sh — Codex MCP transport", () => {
     // false-positive 경계: 진짜 출력 + 채널 teardown 로그 공존 → recover 미진입
     // (flag=0) → no_genuine_output=no → 절대 승격 안 됨. 정상 성공을 지킨다.
     const result = runBash(
-      `TFX_CODEX_TRANSPORT=exec bash "${ROUTE_SCRIPT}" executor 'hello-real-output' minimal`,
+      `bash "${ROUTE_SCRIPT}" executor 'hello-real-output' minimal`,
       fixtureEnv({ FAKE_CODEX_MODE: "exec-output-and-crash" }),
     );
 
@@ -948,13 +899,10 @@ describe("tfx-route.sh — 오류 케이스", () => {
     assert.match(out(result), /agent=codex/);
   });
 
-  it("CLI 이름(gemini)을 역할 자리에 사용하면 antigravity alias로 허용된다", () => {
-    const result = runBash(
-      `bash "${ROUTE_SCRIPT}" gemini 'test-prompt' 2>&1 || true`,
-      fixtureEnv({ TFX_ANTIGRAVITY_OK: "1", AGY_BIN: "agy" }),
-    );
-    assert.match(out(result), /type=antigravity/);
-    assert.match(out(result), /agent=gemini/);
+  it("gemini 역할 별칭은 알 수 없는 에이전트 오류로 종료한다", () => {
+    const result = runBash(`bash "${ROUTE_SCRIPT}" gemini 'test-prompt'`);
+    assert.notEqual(result.status, 0);
+    assert.match(out(result), /알 수 없는 에이전트 타입/);
   });
 
   it("CLI 이름(claude)을 역할 자리에 사용하면 alias로 허용된다 (ROUTE_TYPE=claude-native)", () => {

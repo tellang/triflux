@@ -23,7 +23,6 @@
   "test-engineer": "codex",
   "qa-tester": "codex",
   "codex": "codex",
-  "gemini": "antigravity",
   "antigravity": "antigravity",
   "agy": "antigravity",
   "claude": "claude"

@@ -1,15 +1,7 @@
 #!/usr/bin/env bash
-# tfx-route.sh v2.7 — CLI 라우팅 래퍼 (triflux)
-#
-# v2.0: tfx-route.sh 리네임
-#   - 후처리 전부 tfx-route-post.mjs로 이관 (node 단일 ~100ms)
-#   - per-process 에이전트 등록 (race condition 구조적 제거)
-#   - get_mcp_hint 통합 (캐시/비캐시 단일 코드경로)
-#   - Gemini health check 지수 백오프 (30×1s → 5×exp)
-#   - 컨텍스트 파일 5번째 인자 지원
-#
+# CLI 라우팅 래퍼 (triflux)
 VERSION="2.7"
-#
+
 # 사용법:
 #   tfx-route.sh <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file]
 #   tfx-route.sh --async <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file]
@@ -27,6 +19,9 @@ VERSION="2.7"
 #   tfx-route.sh --job-result 1742400000-12345-9876
 
 set -euo pipefail
+
+_AGY_HEADLESS_BIN=""
+_AGY_HEADLESS_SUPPORTED=1
 
 # ── 영속 machine profile (env > profile > runtime observation) ──
 # 신뢰 경계: 파일을 source/eval 하지 않고 allowlist literal만 읽는다.
@@ -157,7 +152,7 @@ _rebind_pid_track_to_self() {
   _PID_TRACK="${TFX_TMP}/tfx-route-${self_pid}-pids"
 }
 
-# async 잡 서브셸의 공통 실행부. 운영 --async(main)와 self-test 가 같은 코드를 탄다.
+# async 잡 서브셸의 공통 실행부.
 # body 는 자체 EXIT trap(cleanup_workers)을 설치하므로 정상 종료는 straight-line 으로
 # 기록하고 시그널만 trap 한다. 서브셸 안에서 호출해야 한다.
 _run_async_job_body() {
@@ -214,16 +209,7 @@ _preflight_check_gh_auth() {
 }
 _preflight_check_gh_auth
 
-# ── config.toml sandbox/approval_mode 감지 ──
-# config.toml에 이미 설정되어 있으면 CLI 플래그 중복 시 Codex가 에러를 던짐.
-# 단, [mcp_servers.*.tools.*] 섹션 내부의 approval_mode는 tool 단위 승인 설정으로
-# top-level sandbox/approval_mode와 의미가 다르다. 이 값이 "approve"이면
-# codex exec이 non-TTY subprocess에서 승인 대기로 stall하므로 감지 대상에서 제외.
-# (refs: tellang/triflux#66, Yeachan-Heo/oh-my-codex#1478)
-# TFX_CODEX_CONFIG override: integration tests that run the full route script
-# point this at an isolated tmpdir config so the MCP config-swap never mutates
-# the real ~/.codex/config.toml (non-hermetic corruption guard). Defaults to the
-# real path for normal runs.
+# 테스트는 TFX_CODEX_CONFIG로 config swap 대상을 격리한다.
 _CODEX_CONFIG="${TFX_CODEX_CONFIG:-${HOME}/.codex/config.toml}"
 
 _sanitize_codex_legacy_profiles() {
@@ -249,37 +235,7 @@ _sanitize_codex_legacy_profiles() {
 
 _sanitize_codex_legacy_profiles "$_CODEX_CONFIG"
 
-_CODEX_HAS_SANDBOX=""
-if [[ -f "$_CODEX_CONFIG" ]] && awk '
-  /^\[{1,2}mcp_servers\..*\.tools\./ { in_mcp_tool=1; next }
-  /^\[/ { in_mcp_tool=0; next }
-  !in_mcp_tool && /^[[:space:]]*(sandbox|approval_mode)[[:space:]]*=/ { found=1; exit }
-  END { exit !found }
-' "$_CODEX_CONFIG" 2>/dev/null; then
-  _CODEX_HAS_SANDBOX="1"
-fi
-
-# ── MCP tool approval_mode stall 방지 (ISSUE-4) ──
-# oh-my-codex 업데이트가 MCP tool 블록의 approval_mode를 "approve"로 복원함.
-# codex exec는 non-TTY subprocess이므로 interactive 승인 대기 = output 0B stall.
-# 실행 전 자동으로 "full-auto"로 교체한다.
-if [[ -f "$_CODEX_CONFIG" ]] && grep -q 'approval_mode = "approve"' "$_CODEX_CONFIG" 2>/dev/null; then
-  _approve_count=$(grep -c 'approval_mode = "approve"' "$_CODEX_CONFIG" 2>/dev/null || echo 0)
-  if [[ "$_approve_count" -gt 0 ]]; then
-    cp "$_CODEX_CONFIG" "${_CODEX_CONFIG}.bak-$(date +%Y%m%d-%H%M%S)" 2>/dev/null || true
-    sed -i 's/approval_mode = "approve"/approval_mode = "full-auto"/g' "$_CODEX_CONFIG"
-    echo "[tfx-route] MCP tool approval_mode stall 방지: ${_approve_count}개 블록 approve→full-auto 자동 수정" >&2
-  fi
-fi
-
 build_codex_base() {
-  # codex exec는 항상 non-TTY subprocess에서 실행되므로 --dangerously-bypass 필수.
-  # --dangerously-bypass는 config.toml의 approval_mode/sandbox와 충돌하지 않음
-  # (--full-auto와 달리 bypass는 config 값을 override할 뿐 에러를 던지지 않음).
-  # 검증: approval_mode="auto" config에서 --dangerously-bypass 동시 사용 → exit 0 확인.
-  #
-  # Note: 위의 _CODEX_HAS_SANDBOX awk 감지는 현재 미사용이지만, 향후 codex가
-  # bypass와 config.toml 충돌을 감지하면 분기 로직을 재활성화할 수 있으므로 유지.
   echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
 }
 
@@ -380,88 +336,6 @@ if [[ "${1:-}" == "--job-wait" ]]; then
   exit 0
 fi
 
-# ── --async-self-test: 단위 테스트 전용 inert surface (CLI dispatch 우회) ──
-# Inert self-test surface for unit tests. Bypasses CLI dispatch, exercises wrapper only.
-if [[ "${1:-}" == "--async-self-test" ]]; then
-  shift
-  case "${1:-}" in
-    wrapper-sleep-3)
-      mkdir -p "$TFX_JOBS_DIR"
-      JOB_ID="selftest-$$-$RANDOM"
-      JOB_DIR="$TFX_JOBS_DIR/$JOB_ID"
-      mkdir -p "$JOB_DIR"
-      # Mirrors the wrapper pattern used by production --async (see Task E).
-      ( set +e
-        trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' INT TERM HUP
-        exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
-        sleep 3
-        _ec=$?
-        echo "$_ec" > "$JOB_DIR/exit_code"
-        touch "$JOB_DIR/done"
-        exit "$_ec"
-      ) &
-      bg_pid=$!
-      echo "$bg_pid" > "$JOB_DIR/pid"
-      disown "$bg_pid"
-      echo "$JOB_ID"
-      exit 0
-      ;;
-    main-overwrites-exit-trap)
-      mkdir -p "$TFX_JOBS_DIR"
-      JOB_ID="selftest-main-$$-$RANDOM"
-      JOB_DIR="$TFX_JOBS_DIR/$JOB_ID"
-      mkdir -p "$JOB_DIR"
-      ( set +e
-        selftest_main_overwrites_exit_trap() {
-          trap 'echo selftest-cleanup' EXIT
-          return 0
-        }
-        trap 'rc=$?; echo "$rc" > "$JOB_DIR/exit_code"; touch "$JOB_DIR/done"; exit "$rc"' INT TERM HUP
-        exec > "$JOB_DIR/result.log" 2>"$JOB_DIR/stderr.log"
-        selftest_main_overwrites_exit_trap
-        _ec=$?
-        echo "$_ec" > "$JOB_DIR/exit_code"
-        touch "$JOB_DIR/done"
-        exit "$_ec"
-      ) &
-      bg_pid=$!
-      echo "$bg_pid" > "$JOB_DIR/pid"
-      disown "$bg_pid"
-      echo "$JOB_ID"
-      exit 0
-      ;;
-    pid-track-owner)
-      # 운영 --async 처럼 부모가 먼저 끝난 뒤 서브셸이 워커를 추적한다.
-      # 추적 파일 소유자가 살아 있어야 session-stale-cleanup 이 워커를 고아로 보지 않는다.
-      mkdir -p "$TFX_JOBS_DIR"
-      JOB_ID="selftest-track-$$-$RANDOM"
-      JOB_DIR="$TFX_JOBS_DIR/$JOB_ID"
-      mkdir -p "$JOB_DIR"
-      selftest_track_worker() {
-        # main 과 같은 정리 경로(EXIT trap → cleanup_workers)를 쓴다.
-        trap 'cleanup_workers' EXIT
-        sleep "${TFX_SELFTEST_WORKER_SEC:-20}" &
-        local worker=$!
-        track_worker_pid "$worker"
-        echo "$worker" > "$JOB_DIR/worker_pid"
-        echo "$_PID_TRACK" > "$JOB_DIR/pid_track"
-        wait "$worker"
-        return 0
-      }
-      ( _run_async_job_body selftest_track_worker ) &
-      bg_pid=$!
-      echo "$bg_pid" > "$JOB_DIR/pid"
-      disown "$bg_pid"
-      echo "$JOB_ID"
-      exit 0
-      ;;
-    *)
-      echo "[tfx-route] unknown async-self-test target: ${1:-<empty>}" >&2
-      exit 2
-      ;;
-  esac
-fi
-
 # ── --async 플래그 감지 ──
 TFX_ASYNC_MODE=0
 if [[ "${1:-}" == "--async" ]]; then
@@ -491,7 +365,7 @@ esac
 if [[ "$MCP_PROFILE" == --* ]]; then
   echo "ERROR: MCP 프로필 위치(3번째 인자)에 플래그 '$MCP_PROFILE'가 들어왔습니다." >&2
   echo "사용법: tfx-route.sh <역할> \"프롬프트\" [mcp_profile] [timeout]" >&2
-  echo "지원 프로필: auto, executor, analyze, implement, review, minimal, full" >&2
+  echo "지원 프로필: auto, executor, analyze, implement, review, minimal" >&2
   exit 64
 fi
 
@@ -527,22 +401,14 @@ TFX_PROBE_DIR="${TFX_PROBE_DIR:-${TFX_TMP}/tfx-probe}"
 mkdir -p "$TFX_PROBE_DIR" 2>/dev/null || true
 
 estimate_expected_duration_sec() {
-  local agent="${1:-}" profile="${2:-}" prompt="${3:-}"
+  local profile="${1:-}" prompt="${2:-}"
   local text
   text=$(printf '%s' "$prompt" | tr '[:upper:]' '[:lower:]')
-  local expected=30
-
-  case "$agent" in
-    explore|style-reviewer) expected=30 ;;
-    writer|verifier|qa-tester) expected=90 ;;
-    executor|debugger|test-engineer) expected=300 ;;
-    code-reviewer|security-reviewer|architect|planner|critic|analyst) expected=600 ;;
-    scientist|scientist-deep|deep-executor|document-specialist) expected=900 ;;
-  esac
+  local expected="${ROLE_EXPECTED_DURATION:-30}"
 
   case "$profile" in
     minimal|default) [[ "$expected" -lt 60 ]] && expected=60 ;;
-    analyze|review|full) [[ "$expected" -lt 300 ]] && expected=300 ;;
+    analyze|review) [[ "$expected" -lt 300 ]] && expected=300 ;;
     implement|executor) [[ "$expected" -lt 300 ]] && expected=300 ;;
   esac
 
@@ -562,82 +428,7 @@ estimate_expected_duration_sec() {
   printf '%s\n' "$expected"
 }
 
-prepend_codex_north_star() {
-  local prompt="${1:-}"
-  local workdir="${WORKDIR:-$PWD}"
-  local resolved_workdir="$workdir"
-  if [[ -d "$workdir" ]]; then
-    resolved_workdir="$(cd "$workdir" 2>/dev/null && pwd -P)" || resolved_workdir="$workdir"
-  fi
-  local brief_file="${workdir}/.triflux/lake/current.md"
-
-  # CTO gate의 의미론은 hub/lib/cto-env.mjs 한 곳이 소유한다. Bash는 Node
-  # one-shot으로 north_star_enabled 결과만 받아 소비하므로 TFX_CTO_* 판정 로직을
-  # 복제하지 않는다. helper를 불러올 수 없으면 ambient context 누출을 막기 위해
-  # fail-closed로 원본 prompt를 유지한다.
-  local cto_env_dir cto_env_module source_path
-  source_path="${BASH_SOURCE[0]:-$0}"
-  cto_env_dir="$(cd "$(dirname "$source_path")/../hub/lib" 2>/dev/null && pwd -P || true)"
-  cto_env_module="${cto_env_dir:+${cto_env_dir}/cto-env.mjs}"
-  if [[ ! -r "$cto_env_module" && -r "$PWD/hub/lib/cto-env.mjs" ]]; then
-    # 개발 checkout에서의 함수 단위 실행 fallback.
-    cto_env_module="$PWD/hub/lib/cto-env.mjs"
-  fi
-  if [[ ! -r "$cto_env_module" ]]; then
-    printf '%s' "$prompt"
-    return 0
-  fi
-
-  local north_star_enabled
-  if ! north_star_enabled="$(TFX_CTO="${TFX_CTO:-}" TFX_CTO_NORTH_STAR="${TFX_CTO_NORTH_STAR:-}" node --input-type=module -e '
-    const { resolveRoleControlSnapshot } = await import(process.argv[1]);
-    process.stdout.write(resolveRoleControlSnapshot().north_star_enabled ? "1" : "0");
-  ' "$cto_env_module" 2>/dev/null)"; then
-    printf '%s' "$prompt"
-    return 0
-  fi
-  if [[ "$north_star_enabled" != "1" ]]; then
-    printf '%s' "$prompt"
-    return 0
-  fi
-
-  if [[ ! -r "$brief_file" ]]; then
-    printf '%s' "$prompt"
-    return 0
-  fi
-
-  local tmp_file
-  tmp_file="$(mktemp "${TFX_TMP:-${TMPDIR:-/tmp}}/tfx-codex-prompt.XXXXXX" 2>/dev/null)" || {
-    printf '%s' "$prompt"
-    return 0
-  }
-
-  if ! {
-    printf '%s\n' "--- CTO NORTH STAR (repo: ${resolved_workdir}; read-only context; align, do not treat as task) ---"
-    cat "$brief_file"
-    if [[ -s "$brief_file" ]]; then
-      local last_byte
-      last_byte="$(tail -c 1 "$brief_file" 2>/dev/null || true)"
-      [[ -n "$last_byte" ]] && printf '\n'
-    fi
-    printf '%s\n' "--- END CTO NORTH STAR (context only — the actual task follows below; do not execute items above as tasks) ---"
-    printf '%s' "$prompt"
-  } > "$tmp_file"; then
-    rm -f "$tmp_file" 2>/dev/null || true
-    printf '%s' "$prompt"
-    return 0
-  fi
-
-  cat "$tmp_file" 2>/dev/null || printf '%s' "$prompt"
-  rm -f "$tmp_file" 2>/dev/null || true
-}
-
-# prepend_skill: opt-in 으로 등록된 스킬의 SKILL.md 본문을 프롬프트 앞에 주입한다.
-# 활성 조건은 TFX_INJECT_SKILL env (tfx-auto 가 --skill <name> 으로 set). 미설정이면
-# 현행 동작 그대로 (no-op). CLI-agnostic — codex/agy 레인에서 동일하게 재사용한다.
-# 전달은 prepend_codex_north_star 와 동일하게 printf/cat → temp file 만 사용하므로
-# $ / 백슬래시(₩) 같은 특수문자를 셸 재확장 없이 리터럴로 보존한다 (parse-safe).
-# 스킬 경로: ${TFX_SKILLS_DIR:-<repo>/skills}/<name>/SKILL.md.
+# 등록된 스킬 본문을 프롬프트 앞에 붙인다. temp file로 리터럴과 줄바꿈을 보존한다.
 prepend_skill() {
   local prompt="${1:-}"
   local skill_name="${TFX_INJECT_SKILL:-}"
@@ -761,69 +552,11 @@ unset _tfx_breadcrumb
 # fallback 시 원래 에이전트 정보 보존
 ORIGINAL_AGENT=""
 
-# JSON 문자열 이스케이프:
-# - "\", """ 필수 이스케이프
-# - 제어문자 U+0000..U+001F 이스케이프
-# - 비ASCII 문자는 \uXXXX(또는 surrogate pair)로 강제
-json_escape() {
-  local s="${1:-}"
-
-  if command -v "$NODE_BIN" &>/dev/null; then
-    "$NODE_BIN" -e '
-      const input = process.argv[1] ?? "";
-      let out = "";
-      for (const ch of input) {
-        const cp = ch.codePointAt(0);
-        if (cp === 0x22) { out += "\\\""; continue; }   // "
-        if (cp === 0x5c) { out += "\\\\"; continue; }   // \
-        if (cp <= 0x1f) {
-          if (cp === 0x08) { out += "\\b"; continue; }
-          if (cp === 0x09) { out += "\\t"; continue; }
-          if (cp === 0x0a) { out += "\\n"; continue; }
-          if (cp === 0x0c) { out += "\\f"; continue; }
-          if (cp === 0x0d) { out += "\\r"; continue; }
-          out += `\\u${cp.toString(16).padStart(4, "0")}`;
-          continue;
-        }
-        if (cp >= 0x20 && cp <= 0x7e) {
-          out += ch;
-          continue;
-        }
-        if (cp <= 0xffff) {
-          out += `\\u${cp.toString(16).padStart(4, "0")}`;
-          continue;
-        }
-        const v = cp - 0x10000;
-        const hi = 0xd800 + (v >> 10);
-        const lo = 0xdc00 + (v & 0x3ff);
-        out += `\\u${hi.toString(16).padStart(4, "0")}\\u${lo.toString(16).padStart(4, "0")}`;
-      }
-      process.stdout.write(out);
-    ' -- "$s"
-    return
-  fi
-
-  echo "[tfx-route] ERROR: node 미설치로 안전한 JSON 이스케이프를 수행할 수 없습니다." >&2
-  return 1
-}
-
 # ── Per-process 에이전트 등록 (원자적, 락 불필요) ──
 register_agent() {
   local agent_file="${TFX_TMP}/tfx-agent-$$.json"
-  local safe_cli safe_agent started_at
-  safe_cli=$(json_escape "$CLI_TYPE" 2>/dev/null || true)
-  safe_agent=$(json_escape "$AGENT_TYPE" 2>/dev/null || true)
-  started_at=$(date +%s)
-
-  # fail-closed: 안전 인코딩 불가 시 agent 파일을 쓰지 않는다
-  if [[ -n "$CLI_TYPE" && -z "$safe_cli" ]]; then
-    return 0
-  fi
-  if [[ -n "$AGENT_TYPE" && -z "$safe_agent" ]]; then
-    return 0
-  fi
-
-  printf '{"pid":%s,"cli":"%s","agent":"%s","started":%s}\n' "$$" "$safe_cli" "$safe_agent" "$started_at" \
+  # route policy가 provider enum과 agent 토큰을 검증했다.
+  printf '{"pid":%s,"cli":"%s","agent":"%s","started":%s}\n' "$$" "$CLI_TYPE" "$AGENT_TYPE" "$(date +%s)" \
     > "$agent_file" 2>/dev/null || true
 }
 
@@ -1143,16 +876,19 @@ detect_quota_exceeded() {
 }
 
 agy_supports_headless() {
-  local agy_bin="$1"
-  local help_text
-  if ! command -v "$agy_bin" &>/dev/null; then
-    return 1
+  local agy_bin="$1" help_text
+  if [[ "${_AGY_HEADLESS_BIN:-}" == "$agy_bin" ]]; then
+    return "${_AGY_HEADLESS_SUPPORTED:-1}"
   fi
-  if ! help_text=$("$agy_bin" --help 2>&1); then
-    return 1
+  _AGY_HEADLESS_BIN="$agy_bin"
+  _AGY_HEADLESS_SUPPORTED=1
+  if command -v "$agy_bin" &>/dev/null && help_text=$("$agy_bin" --help 2>&1); then
+    help_text="${help_text:0:20000}"
+    if [[ "$help_text" == *"--print"* && "$help_text" == *"--dangerously-skip-permissions"* ]]; then
+      _AGY_HEADLESS_SUPPORTED=0
+    fi
   fi
-  help_text="${help_text:0:20000}"
-  [[ "$help_text" == *"--print"* && "$help_text" == *"--dangerously-skip-permissions"* ]]
+  return "${_AGY_HEADLESS_SUPPORTED:-1}"
 }
 
 # agy는 SSH 환경을 감지하면 macOS Keychain 대신 file token store를 사용한다.
@@ -1259,46 +995,8 @@ capture_workspace_signature() {
   git -c core.fsmonitor=false status --short --untracked-files=all --ignore-submodules=all < /dev/null 2>/dev/null || return 1
 }
 
-# ── Codex CLI 버전 감지 (캐시) ──
-_CODEX_VERSION=""
-get_codex_version() {
-  if [[ -n "$_CODEX_VERSION" ]]; then echo "$_CODEX_VERSION"; return; fi
-  local raw
-  raw=$("$CODEX_BIN" --version < /dev/null 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-  _CODEX_VERSION="${raw:-0.0.0}"
-  echo "$_CODEX_VERSION"
-}
-
-# codex_gte <min_version>: 현재 버전이 min 이상이면 true(0), 아니면 false(1)
-codex_gte() {
-  local min="$1"
-  local cur
-  cur=$(get_codex_version)
-  printf '%s\n%s' "$min" "$cur" | sort -V | head -1 | grep -q "^${min}$"
-}
-
-# ── Gemini 프로필 해석 (Codex --profile 대칭) ──
+# ── Gemini 모델 프로필 해석 ──
 _GEMINI_PROFILE_CACHE=""
-# resolve_gemini_profile_for_agent AGENT → 프로필 이름 (SSOT: scripts/lib/gemini-profiles.mjs)
-# 역할별 effort 분리. node 를 못 찾으면 medium(flash38) 으로 떨어진다.
-resolve_gemini_profile_for_agent() {
-  local agent="$1"
-  local sd; sd="$(_get_script_dir)"
-  local mod
-  mod="$(_resolve_script "${TFX_GEMINI_PROFILES_MODULE:-}" \
-    "$sd/lib/gemini-profiles.mjs" \
-    "$sd/../scripts/lib/gemini-profiles.mjs" \
-    ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/lib/gemini-profiles.mjs"})" || { echo "flash38"; return; }
-  local out
-  out="$("$NODE_BIN" -e '
-    const { pathToFileURL } = require("node:url");
-    import(pathToFileURL(process.argv[1]).href)
-      .then((m) => process.stdout.write(m.resolveGeminiProfileForPurpose(process.argv[2])))
-      .catch(() => process.stdout.write("flash38"));
-  ' "$mod" "$agent" 2>/dev/null)"
-  echo "${out:-flash38}"
-}
-
 resolve_gemini_profile() {
   local profile="$1"
   if [[ "$profile" == gemini-* ]]; then
@@ -1389,153 +1087,69 @@ resolve_gemini_profile() {
 }
 
 # ── 라우팅 테이블 ──
-# CLI_TYPE/CLI_CMD: agent-map.json 단일 소스. 상세 설정: 아래 case 문.
+# CLI_TYPE/CLI_CMD는 agent-map, 역할별 설정은 agent-route-policy에서 조회한다.
 # 반환: CLI_TYPE, CLI_CMD, CLI_ARGS, CLI_EFFORT, DEFAULT_TIMEOUT, RUN_MODE, OPUS_OVERSIGHT
 route_agent() {
-  local agent="$1"
-  local codex_base
-  codex_base="$(build_codex_base)"
-  echo "[tfx-route] Codex 버전: $(get_codex_version)" >&2
-  local map_file
-  map_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../hub/team/agent-map.json"
-  # ── breadcrumb 폴백 (synced 환경: ~/.claude/scripts/) ──
-  if [[ ! -f "$map_file" && -n "$TFX_PKG_ROOT" ]]; then
-    map_file="$TFX_PKG_ROOT/hub/team/agent-map.json"
-  fi
+  local agent="$1" sd map_file policy_file policy_row gemini_module
+  sd="$(_get_script_dir)"
+  map_file="$sd/../hub/team/agent-map.json"
+  [[ -f "$map_file" || -z "$TFX_PKG_ROOT" ]] || map_file="$TFX_PKG_ROOT/hub/team/agent-map.json"
   if [[ ! -f "$map_file" ]]; then
     echo "ERROR: agent-map.json 미발견 (경로: $map_file, TFX_PKG_ROOT=${TFX_PKG_ROOT:-unset})" >&2
     exit 1
   fi
-
-  # ── CLI_TYPE: 단일 소스 (agent-map.json) ──
-  local _raw_type
-  _raw_type=$("$NODE_BIN" -e "
-    const p=require('path').resolve(process.argv[1]);
-    const m=JSON.parse(require('fs').readFileSync(p,'utf8'));
-    const t=m[process.argv[2]];
-    if(t)process.stdout.write(t);
-  " "$map_file" "$agent" 2>/dev/null)
-
-  if [[ -z "$_raw_type" ]]; then
-    echo "ERROR: 알 수 없는 에이전트 타입: $agent" >&2
-    echo "사용 가능: $("$NODE_BIN" -e "console.log(Object.keys(JSON.parse(require('fs').readFileSync(require('path').resolve(process.argv[1]),'utf8'))).join(', '))" "$map_file" 2>/dev/null)" >&2
+  policy_file="$sd/lib/agent-route-policy.mjs"
+  [[ -f "$policy_file" || -z "$TFX_PKG_ROOT" ]] || policy_file="$TFX_PKG_ROOT/scripts/lib/agent-route-policy.mjs"
+  if [[ ! -f "$policy_file" ]]; then
+    echo "ERROR: agent route policy 미발견 (경로: $policy_file)" >&2
     exit 1
   fi
-
-  # "claude" → "claude-native" (headless.mjs는 "claude", route.sh는 "claude-native")
-  CLI_TYPE="$_raw_type"
-  [[ "$CLI_TYPE" == "claude" ]] && CLI_TYPE="claude-native"
-
-  # ── CLI_CMD: CLI_TYPE에서 파생 ──
-  case "$CLI_TYPE" in
-    codex)         CLI_CMD="codex" ;;
-    antigravity)   CLI_CMD="agy" ;;
-    claude-native) CLI_CMD=""; CLI_ARGS="" ;;
-  esac
-
-  # ── Codex role policy: Node SSOT의 enum-validated TSV만 shell이 조립한다. ──
-  if [[ "$CLI_TYPE" == "codex" ]]; then
-    local route_dir policy_file policy_row policy_profile policy_timeout policy_mode policy_oversight policy_mcp policy_subcommand
-    route_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    policy_file="$route_dir/lib/agent-route-policy.mjs"
-    if [[ ! -f "$policy_file" && -n "$TFX_PKG_ROOT" ]]; then
-      policy_file="$TFX_PKG_ROOT/scripts/lib/agent-route-policy.mjs"
-    fi
-    if [[ ! -f "$policy_file" ]]; then
-      echo "ERROR: agent route policy 미발견 (경로: $policy_file)" >&2
-      exit 1
-    fi
-    policy_row=$("$NODE_BIN" "$policy_file" --format tsv --agent "$agent") || {
-      echo "ERROR: Codex agent route policy 조회 실패: $agent" >&2
-      exit 1
-    }
-    IFS=$'\t' read -r policy_profile policy_timeout policy_mode policy_oversight policy_mcp policy_subcommand <<< "$policy_row"
-    case "$policy_profile" in gpt6_astra_xhigh|gpt61_sol_high|gpt61_sol_med|gpt6_luna_high|gpt6_luna_low) ;; *) echo "ERROR: invalid Codex profile policy" >&2; exit 1 ;; esac
-    [[ "$policy_timeout" =~ ^[1-9][0-9]*$ ]] || { echo "ERROR: invalid Codex timeout policy" >&2; exit 1; }
-    case "$policy_mode" in fg|bg) ;; *) echo "ERROR: invalid Codex run mode policy" >&2; exit 1 ;; esac
-    case "$policy_oversight" in true|false) ;; *) echo "ERROR: invalid Codex oversight policy" >&2; exit 1 ;; esac
-    case "$policy_mcp" in implement|analyze|review) ;; *) echo "ERROR: invalid Codex MCP hint policy" >&2; exit 1 ;; esac
-    case "$policy_subcommand" in exec|review) ;; *) echo "ERROR: invalid Codex subcommand policy" >&2; exit 1 ;; esac
-    CLI_ARGS="exec --profile ${policy_profile} ${codex_base}"
-    [[ "$policy_subcommand" == "review" ]] && CLI_ARGS+=" review"
-    CLI_EFFORT="$policy_profile"; DEFAULT_TIMEOUT="$policy_timeout"; RUN_MODE="$policy_mode"; OPUS_OVERSIGHT="$policy_oversight"
-    AGENT_MCP_HINT="$policy_mcp"
-    return
+  CODEX_PROFILE_MODULE="${policy_file%/*}/codex-profile-config.mjs"
+  local -a query=("$NODE_BIN" "$policy_file" --format route --map-file "$map_file" --agent "$agent" --profile-override "$TFX_CODEX_PROFILE")
+  gemini_module="$(_resolve_script "${TFX_GEMINI_PROFILES_MODULE:-}" \
+    "$sd/lib/gemini-profiles.mjs" \
+    ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/lib/gemini-profiles.mjs"} || true)"
+  [[ -z "$gemini_module" ]] || query+=(--gemini-profiles-module "$gemini_module")
+  is_nested_codex_runtime && query+=(--nested)
+  if ! policy_row=$("${query[@]}"); then
+    echo "ERROR: agent route policy 조회 실패: $agent (TFX_CODEX_PROFILE=$TFX_CODEX_PROFILE)" >&2
+    exit 1
   fi
-
-  # ── Non-Codex provider settings ──
-  case "$agent" in
-    # ─── Antigravity CLI lane ───
-    # effort 차등: agent 별 GEMINI_PROFILE 을 설정하면 run_antigravity_exec() 가
-    # resolve_gemini_profile 로 해석해 `--model "<display name>"`을 agy_args 에
-    # 주입한다. 우선순위는 TFX_GEMINI_PROFILE(env) > GEMINI_PROFILE(agent) > flash38.
-    # CLI_ARGS 는 read -a 로 word-split 되므로 공백 포함 모델명을 여기 넣지 않는다.
-    # #310: upstream callers are normalized through agent-map.json, but this
-    # direct route entrypoint intentionally keeps agy as a compatibility alias.
-    designer)
-      # effort 는 역할별 SSOT(scripts/lib/gemini-profiles.mjs)가 정한다: designer → High
-      CLI_ARGS="--print --dangerously-skip-permissions"
-      GEMINI_PROFILE="$(resolve_gemini_profile_for_agent designer)"
+  local normalized_profile _policy_mcp
+  IFS=$'\x1e' read -r CLI_TYPE CODEX_POLICY_PROFILE CODEX_POLICY_TIMEOUT CODEX_POLICY_MODE CODEX_POLICY_OVERSIGHT \
+    _policy_mcp CODEX_POLICY_SUBCOMMAND normalized_profile CODEX_OVERRIDE_PROFILE GEMINI_PROFILE \
+    MIN_TIMEOUT ROLE_EXPECTED_DURATION NATIVE_CODEX_ALLOWED <<< "$policy_row"
+  if [[ "$normalized_profile" != "$TFX_CODEX_PROFILE" ]]; then
+    echo "[tfx-route] legacy Codex profile remapped: ${TFX_CODEX_PROFILE} -> ${normalized_profile}" >&2
+  fi
+  TFX_CODEX_PROFILE="$normalized_profile"
+  case "$CLI_TYPE" in
+    codex) apply_codex_agent_policy ;;
+    antigravity)
+      CLI_CMD="agy"; CLI_ARGS="--print --dangerously-skip-permissions"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-    writer)
-      # writer → Medium (SSOT)
-      CLI_ARGS="--print --dangerously-skip-permissions"
-      GEMINI_PROFILE="$(resolve_gemini_profile_for_agent writer)"
-      CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-    gemini|antigravity|agy)
-      # 직접 호출 alias — Medium (SSOT). TFX_GEMINI_PROFILE 로 override 가능.
-      # 프롬프트는 run_antigravity_exec 가 `--print "$prompt"` 값으로 넘긴다
-      # (agy 1.1.27 부터 stdin 프롬프트 불가). --print 는 항상 마지막 인자다.
-      CLI_ARGS="--print --dangerously-skip-permissions"
-      GEMINI_PROFILE="$(resolve_gemini_profile_for_agent "$agent")"
-      CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-
-    # ─── 탐색 (Claude-native: Glob/Grep/Read 직접 접근) ───
-    explore|claude)
+    claude)
+      CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
       CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
-
-    # ─── agent-map.json에만 정의된 신규 에이전트 (CLI_TYPE별 기본값) ───
-    *)
-      case "$CLI_TYPE" in
-        antigravity)
-          CLI_ARGS="--print --dangerously-skip-permissions"
-          GEMINI_PROFILE="$(resolve_gemini_profile_for_agent "$agent")"
-          CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
-        claude-native)
-          CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
-      esac ;;
   esac
 }
 
-# ── CLI 모드 오버라이드 (tfx-codex / tfx-gemini 스킬용) ──
+apply_codex_agent_policy() {
+  CLI_TYPE="codex"; CLI_CMD="codex"
+  CLI_ARGS="exec --profile ${CODEX_POLICY_PROFILE} $(build_codex_base)"
+  [[ "$CODEX_POLICY_SUBCOMMAND" != "review" ]] || CLI_ARGS+=" review"
+  CLI_EFFORT="$CODEX_POLICY_PROFILE"; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
+  RUN_MODE="$CODEX_POLICY_MODE"; OPUS_OVERSIGHT="$CODEX_POLICY_OVERSIGHT"
+}
+
+# ── CLI 모드 오버라이드 ──
 TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
 TFX_DISABLE_CODEX="${TFX_DISABLE_CODEX:-0}"
 TFX_DISABLE_ANTIGRAVITY="${TFX_DISABLE_ANTIGRAVITY:-0}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
-TFX_CODEX_TRANSPORT="${TFX_CODEX_TRANSPORT:-auto}"
 TFX_CODEX_PROFILE="${TFX_CODEX_PROFILE:-auto}"
 
-normalize_codex_profile_name() {
-  case "$1" in
-    gpt56_sol_xhigh) echo "gpt6_astra_xhigh" ;;
-    gpt56_sol_max) echo "gpt6_astra_max" ;;
-    gpt56_sol_ultra) echo "gpt6_astra_ultra" ;;
-    gpt56_terra_high) echo "gpt61_sol_high" ;;
-    gpt56_terra_med) echo "gpt61_sol_med" ;;
-    gpt56_luna_low) echo "gpt6_luna_low" ;;
-    gpt6_sol_high) echo "gpt61_sol_high" ;;
-    gpt6_sol_med) echo "gpt61_sol_med" ;;
-    *) echo "$1" ;;
-  esac
-}
-
-_raw_tfx_codex_profile="$TFX_CODEX_PROFILE"
-TFX_CODEX_PROFILE="$(normalize_codex_profile_name "$TFX_CODEX_PROFILE")"
-if [[ "$TFX_CODEX_PROFILE" != "$_raw_tfx_codex_profile" ]]; then
-  echo "[tfx-route] legacy Codex profile remapped: ${_raw_tfx_codex_profile} -> ${TFX_CODEX_PROFILE}" >&2
-fi
-unset _raw_tfx_codex_profile
 # Preflight 캐시 일괄 로드 — CLI/Hub 가용성 + Codex 요금제를 환경변수로 내보냄
 # 하위 프로세스(스킬 포함)가 CLI/Hub 가용성을 즉시 참조 가능
 if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
@@ -1573,14 +1187,10 @@ if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
   [[ -n "${_pf_antigravity_status:-}" ]] && export TFX_ANTIGRAVITY_STATUS="$_pf_antigravity_status"
   [[ -n "${_pf_antigravity_source:-}" ]] && export TFX_ANTIGRAVITY_AUTH_SOURCE="$_pf_antigravity_source"
   [[ -n "${_pf_antigravity_reason:-}" ]] && export TFX_ANTIGRAVITY_REASON="$_pf_antigravity_reason"
-  [[ -n "${_pf_plan:-}" ]] && export TFX_CODEX_PLAN="$_pf_plan"
   [[ -n "${_pf_agents:-}" ]] && export TFX_AVAILABLE_AGENTS="$_pf_agents"
   export TFX_PREFLIGHT_LOADED=1
   unset _pf_codex _pf_antigravity _pf_hub _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason
 fi
-# TFX_PREFLIGHT_LOADED는 하위 route 호출에도 상속된다. 요금제도 같은 route policy로
-# 일관되게 상속해야 preflight가 빈 값을 반환한 자식이 set -u에서 죽지 않는다.
-export TFX_CODEX_PLAN="${TFX_CODEX_PLAN:-pro}"
 TFX_WORKER_INDEX="${TFX_WORKER_INDEX:-}"
 TFX_SEARCH_TOOL="${TFX_SEARCH_TOOL:-}"
 case "$TFX_NO_CLAUDE_NATIVE" in
@@ -1601,30 +1211,6 @@ case "$TFX_DISABLE_ANTIGRAVITY" in
   0|1) ;;
   *)
     echo "ERROR: TFX_DISABLE_ANTIGRAVITY 값은 0 또는 1이어야 합니다. (현재: $TFX_DISABLE_ANTIGRAVITY)" >&2
-    exit 1
-    ;;
-esac
-case "$TFX_CODEX_PLAN" in
-  pro|prolite|plus|free) ;;
-  *)
-    # 플랜 값은 preflight 가 Codex 인증 JWT 에서 읽어온다. OpenAI 가 요금제를
-    # 신설하면(예: prolite) 화이트리스트가 뒤처져 CLI 위임 전체가 죽었다.
-    # 미지값은 차단하지 말고 경고 후 pro 로 degrade 한다 (fail-open).
-    echo "WARN: 알 수 없는 TFX_CODEX_PLAN 값 '$TFX_CODEX_PLAN' — pro 로 degrade 합니다." >&2
-    TFX_CODEX_PLAN=pro
-    ;;
-esac
-case "$TFX_CODEX_TRANSPORT" in
-  auto|mcp|exec) ;;
-  *)
-    echo "ERROR: TFX_CODEX_TRANSPORT 값은 auto, mcp, exec 중 하나여야 합니다. (현재: $TFX_CODEX_TRANSPORT)" >&2
-    exit 1
-    ;;
-esac
-case "$TFX_CODEX_PROFILE" in
-  auto|max|ultra|gpt6_luna_low|gpt6_luna_high|gpt61_sol_med|gpt61_sol_high|gpt6_astra_xhigh|gpt6_astra_max|gpt6_astra_ultra) ;;
-  *)
-    echo "ERROR: TFX_CODEX_PROFILE 값은 auto, max, ultra 또는 canonical gpt6_*/gpt61_* profile이어야 합니다. (현재: $TFX_CODEX_PROFILE)" >&2
     exit 1
     ;;
 esac
@@ -1649,63 +1235,19 @@ case "$TFX_SEARCH_TOOL" in
     exit 1
     ;;
 esac
-CODEX_MCP_TRANSPORT_EXIT_CODE=70
 
 apply_cli_mode() {
-  local codex_base
-  codex_base="$(build_codex_base)"
-
   case "$TFX_CLI_MODE" in
     codex)
       if [[ "$CLI_TYPE" == "antigravity" ]]; then
-        CLI_TYPE="codex"; CLI_CMD="codex"
-        case "$AGENT_TYPE" in
-          designer|antigravity|agy|gemini)
-            CLI_ARGS="exec --profile gpt6_astra_xhigh ${codex_base}"; CLI_EFFORT="gpt6_astra_xhigh"; DEFAULT_TIMEOUT=3600 ;;
-          writer)
-            CLI_ARGS="exec --profile gpt6_luna_high ${codex_base}"; CLI_EFFORT="gpt6_luna_high"; DEFAULT_TIMEOUT=900 ;;
-          *)
-            CLI_ARGS="exec --profile gpt61_sol_high ${codex_base}"; CLI_EFFORT="gpt61_sol_high"; DEFAULT_TIMEOUT=1080 ;;
-        esac
+        apply_codex_agent_policy
         echo "[tfx-route] TFX_CLI_MODE=codex: $AGENT_TYPE → codex($CLI_EFFORT)로 리매핑" >&2
-      fi ;;
-    gemini)
-      if [[ "$CLI_TYPE" == "codex" ]]; then
-        case "$AGENT_TYPE" in
-          verifier)
-            CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-            CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
-            echo "[tfx-route] TFX_CLI_MODE=gemini: verifier는 claude-native 유지" >&2
-            return 0
-            ;;
-          test-engineer)
-            CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-            CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=1200; RUN_MODE="bg"; OPUS_OVERSIGHT="false"
-            echo "[tfx-route] TFX_CLI_MODE=gemini: test-engineer는 claude-native 유지" >&2
-            return 0
-            ;;
-        esac
-        # Gemini CLI deprecated — the mode name is retained as a compatibility
-        # alias only. Do not enter the legacy gemini binary path.
-        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && agy_supports_headless "${AGY_BIN:-agy}"; then
-          echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini → antigravity (Gemini CLI deprecated, use --cli antigravity)" >&2
-          TFX_CLI_MODE="antigravity"; apply_cli_mode; return
-        fi
-        if codex_is_available; then
-          echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy headless 불가 — codex fallback" >&2
-          TFX_CLI_MODE="codex"; apply_cli_mode; return
-        fi
-        CLI_TYPE="antigravity"; CLI_CMD="agy"
-        echo "[tfx-route] [deprecated] TFX_CLI_MODE=gemini: agy/codex 불가 — hard routing 검증으로 전달" >&2
       fi ;;
     antigravity)
       if [[ "$CLI_TYPE" != "claude-native" && "$CLI_TYPE" != "claude" ]]; then
         CLI_TYPE="antigravity"
         CLI_CMD="agy"
         CLI_ARGS="--print --dangerously-skip-permissions"
-        # effort 는 역할별 SSOT(scripts/lib/gemini-profiles.mjs)가 정한다.
-        # TFX_GEMINI_PROFILE 로 override 가능.
-        GEMINI_PROFILE="$(resolve_gemini_profile_for_agent "$AGENT_TYPE")"
         CLI_EFFORT="agy_v1"
         DEFAULT_TIMEOUT=900
         echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE → antigravity($CLI_EFFORT)로 리매핑" >&2
@@ -1791,83 +1333,16 @@ apply_cli_disable_policy() {
   return 78
 }
 
-# ── Codex legacy 프로필 가드 ──
-apply_plan_guard() {
-  [[ "$CLI_TYPE" != "codex" ]] && return
-
-  local replacement
-  replacement="$(normalize_codex_profile_name "$CLI_EFFORT")"
-  if [[ "$replacement" == "$CLI_EFFORT" ]]; then
-    replacement=""
-    case "$CLI_EFFORT" in
-      gpt55_low|spark53_low|codex53_low|gpt54_low|mini54_low) replacement="gpt6_luna_low" ;;
-      gpt55_med|spark53_med|codex53_med|mini54_med) replacement="gpt61_sol_med" ;;
-      gpt55_xhigh|codex53_xhigh|gpt54_xhigh) replacement="gpt6_astra_xhigh" ;;
-      gpt55_high|spark53_*|codex53_*|gpt54_*|mini54_*) replacement="gpt61_sol_high" ;;
-    esac
-  fi
-  [[ -z "$replacement" ]] && return
-
-  local codex_base
-  codex_base="$(build_codex_base)"
-  CLI_ARGS="exec --profile ${replacement} ${codex_base}"
-  CLI_EFFORT="$replacement"
-  echo "[tfx-route] legacy Codex profile remapped to ${replacement}" >&2
-}
-
 # ── Claude 네이티브 제거 (Codex 리드 환경에서 선택적 활성화) ──
 apply_no_claude_native_mode() {
-  local codex_base
-  codex_base="$(build_codex_base)"
-
-  [[ "$TFX_NO_CLAUDE_NATIVE" != "1" ]] && return
-  [[ "$TFX_CLI_MODE" == "gemini" || "$TFX_CLI_MODE" == "antigravity" ]] && return
-  [[ "$CLI_TYPE" != "claude-native" ]] && return
-
+  [[ "$TFX_NO_CLAUDE_NATIVE" == "1" && "$TFX_CLI_MODE" != "antigravity" ]] || return 0
+  [[ "$CLI_TYPE" == "claude-native" && "$NATIVE_CODEX_ALLOWED" == "true" ]] || return 0
   if ! codex_is_available; then
     echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1 이지만 codex가 preflight에서 가용하지 않아 claude-native 유지" >&2
-    return
+    return 0
   fi
-
-  ORIGINAL_AGENT="${AGENT_TYPE}"
-  CLI_TYPE="codex"; CLI_CMD="codex"
-
-  case "$AGENT_TYPE" in
-    explore)
-      CLI_ARGS="exec --profile gpt6_luna_low ${codex_base}"
-      CLI_EFFORT="gpt6_luna_low"
-      DEFAULT_TIMEOUT=600
-      RUN_MODE="fg"
-      OPUS_OVERSIGHT="false"
-      ;;
-    verifier)
-      CLI_ARGS="exec --profile gpt61_sol_high ${codex_base} review"
-      CLI_EFFORT="gpt61_sol_high"
-      DEFAULT_TIMEOUT=1200
-      RUN_MODE="fg"
-      OPUS_OVERSIGHT="false"
-      ;;
-    test-engineer)
-      CLI_ARGS="exec --profile gpt61_sol_high ${codex_base}"
-      CLI_EFFORT="gpt61_sol_high"
-      DEFAULT_TIMEOUT=1200
-      RUN_MODE="bg"
-      OPUS_OVERSIGHT="false"
-      ;;
-    qa-tester)
-      CLI_ARGS="exec --profile gpt61_sol_high ${codex_base} review"
-      CLI_EFFORT="gpt61_sol_high"
-      DEFAULT_TIMEOUT=1200
-      RUN_MODE="bg"
-      OPUS_OVERSIGHT="false"
-      ;;
-    *)
-      # claude-native 타입 중 위에 없는 경우는 보수적으로 유지
-      CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-      return
-      ;;
-  esac
-
+  ORIGINAL_AGENT="$AGENT_TYPE"
+  apply_codex_agent_policy
   echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1: $AGENT_TYPE -> codex($CLI_EFFORT) 리매핑" >&2
 }
 
@@ -1877,7 +1352,7 @@ apply_no_claude_native_mode() {
 ## resolution here.
 resolve_safe_retry_codex_profile() {
   local profile
-  profile="$(normalize_codex_profile_name "$1")"
+  profile="$1"
   case "$profile" in
     ultra|gpt6_astra_ultra|*_ultra)
       echo "gpt6_astra_max"
@@ -1889,22 +1364,15 @@ resolve_safe_retry_codex_profile() {
       ;;
   esac
 
-  local codex_home profile_file effort
+  local codex_home profile_file
   codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
   profile_file="${codex_home}/${profile}.config.toml"
   if [[ ! -f "$profile_file" ]]; then
     echo "gpt61_sol_high"
-    return
+    return 0
   fi
-  effort=$(awk -F= '
-    /^[[:space:]]*model_reasoning_effort[[:space:]]*=/ {
-      value=$2
-      sub(/[[:space:]]*#.*/, "", value)
-      gsub(/^[[:space:]"'"'']+|[[:space:]"'"'']+$/, "", value)
-      print tolower(value)
-      exit
-    }
-  ' "$profile_file" 2>/dev/null || true)
+  local effort
+  effort="$(read_codex_profile_effort "$profile")"
   case "$effort" in
     ultra) echo "gpt6_astra_max" ;;
     "") echo "gpt61_sol_high" ;;
@@ -1956,34 +1424,27 @@ apply_codex_concrete_effort_guard() {
   [[ -n "$profile" ]] || return 0
 
   local allow_ultra=0
-  if [[ "$TFX_CODEX_PROFILE" == "ultra" || "$TFX_CODEX_PROFILE" == "gpt6_astra_ultra" ]]; then
-    if ! is_nested_codex_runtime && [[ -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]]; then
-      case "$AGENT_TYPE" in
-        deep-executor|scientist-deep) allow_ultra=1 ;;
-      esac
-    fi
+  if [[ "$CODEX_OVERRIDE_PROFILE" == "gpt6_astra_ultra" && -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]]; then
+    allow_ultra=1
   fi
-
-  local effort target_effort=""
+  local effort target_profile=""
   effort="$(read_codex_profile_effort "$profile")"
   case "$profile" in
-    gpt6_astra_max) target_effort="max" ;;
-    gpt6_astra_ultra)
-      [[ "$allow_ultra" -eq 1 ]] && target_effort="ultra" || target_effort="max"
-      ;;
-    *)
-      if [[ "$effort" == "ultra" ]]; then
-        [[ "$allow_ultra" -eq 1 ]] && target_effort="ultra" || target_effort="max"
-      fi
-      ;;
+    gpt6_astra_max) target_profile="gpt6_astra_max" ;;
+    gpt6_astra_ultra) target_profile="gpt6_astra_max" ;;
+    *) [[ "$effort" != "ultra" ]] || target_profile="gpt6_astra_max" ;;
   esac
-  [[ -n "$target_effort" ]] || return 0
-
-  CLI_ARGS+=" -c model=\"gpt-6-astra\" -c model_reasoning_effort=\"${target_effort}\""
-  CLI_EFFORT="gpt6_astra_${target_effort}"
-  CODEX_MODEL_OVERRIDE="gpt-6-astra"
-  CODEX_REASONING_EFFORT_OVERRIDE="$target_effort"
-  echo "[tfx-route] final Codex effort guard: ${profile}/${effort:-unknown} -> ${target_effort}" >&2
+  [[ -n "$target_profile" ]] || return 0
+  [[ "$allow_ultra" -ne 1 ]] || target_profile="gpt6_astra_ultra"
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    case "${args[$i]}" in
+      --profile) args[$((i + 1))]="$target_profile" ;;
+      --profile=*) args[$i]="--profile=$target_profile" ;;
+    esac
+  done
+  CLI_ARGS="${args[*]}"
+  CLI_EFFORT="$target_profile"
+  echo "[tfx-route] final Codex effort guard: ${profile}/${effort:-unknown} -> ${target_profile}" >&2
 }
 
 apply_retry_snapshot_cli_invocation() {
@@ -1998,28 +1459,28 @@ apply_retry_snapshot_cli_invocation() {
     return
   fi
 
-  local invocation_cli
-  invocation_cli=$(bridge_json_get "$status_json" "cliInvocation.cli" 2>/dev/null || true)
-  [[ "$invocation_cli" == "codex" ]] || return 0
-
-  local argv_json
-  argv_json=$(bridge_json_get "$status_json" "cliInvocation.argv" 2>/dev/null || true)
-  [[ -n "$argv_json" ]] || return 0
-
   local retry_argv
-  if ! retry_argv=$("$NODE_BIN" -e '
-    const argv = JSON.parse(process.argv[1] || "[]");
+  if ! retry_argv=$("$NODE_BIN" --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const status = JSON.parse(process.argv[1] || "{}");
+    if (status.cliInvocation?.cli !== "codex") process.exit(0);
+    const argv = status.cliInvocation.argv;
     if (!Array.isArray(argv)) process.exit(1);
-    if (argv.length === 0) process.exit(0);
     for (const arg of argv) {
-      if (typeof arg !== "string" || arg.length === 0 || /\s/.test(arg)) {
-        process.exit(2);
+      if (typeof arg !== "string" || arg.length === 0 || /\s/.test(arg)) process.exit(2);
+    }
+    const { normalizeCodexProfileName } = await import(pathToFileURL(process.argv[2]).href);
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] === "--profile" && argv[i + 1]) {
+        argv[i + 1] = normalizeCodexProfileName(argv[i + 1]);
+      } else if (argv[i].startsWith("--profile=")) {
+        argv[i] = `--profile=${normalizeCodexProfileName(argv[i].slice(10))}`;
       }
     }
     process.stdout.write(argv.join(" "));
-  ' -- "$argv_json" 2>/dev/null); then
+  ' -- "$status_json" "$CODEX_PROFILE_MODULE" 2>/dev/null); then
     echo "[tfx-route] WARNING: retry snapshot argv unsupported; keeping existing codex args" >&2
-    return
+    return 0
   fi
   [[ -n "$retry_argv" ]] || return 0
 
@@ -2092,38 +1553,12 @@ is_nested_codex_runtime() {
 }
 
 apply_codex_profile_override() {
-  [[ "$CLI_TYPE" != "codex" ]] && return
-  [[ "$TFX_CODEX_PROFILE" == "auto" ]] && return
-
-  local requested="$TFX_CODEX_PROFILE"
-  local profile="$requested"
-  case "$requested" in
-    max) profile="gpt6_astra_max" ;;
-    ultra) profile="gpt6_astra_ultra" ;;
-  esac
-
-  if [[ "$profile" == "gpt6_astra_ultra" ]]; then
-    local downgrade_reason=""
-    case "$AGENT_TYPE" in
-      deep-executor|scientist-deep) ;;
-      *) downgrade_reason="agent ${AGENT_TYPE} is not ultra-eligible" ;;
-    esac
-    if is_nested_codex_runtime; then
-      downgrade_reason="nested team/worker runtime"
-    fi
-    if [[ -n "$downgrade_reason" ]]; then
-      echo "[tfx-route] Codex ultra -> max: ${downgrade_reason}" >&2
-      profile="gpt6_astra_max"
-    fi
-  fi
-
-  local codex_base
-  codex_base="$(build_codex_base)"
+  [[ "$CLI_TYPE" == "codex" && "$TFX_CODEX_PROFILE" != "auto" ]] || return 0
   local review_suffix=""
-  [[ "$CLI_ARGS" == *" review" ]] && review_suffix=" review"
-  CLI_ARGS="exec --profile ${profile} ${codex_base}${review_suffix}"
-  CLI_EFFORT="$profile"
-  echo "[tfx-route] Codex profile override: ${requested} -> ${profile}" >&2
+  [[ "$CLI_ARGS" != *" review" ]] || review_suffix=" review"
+  CLI_ARGS="exec --profile ${CODEX_OVERRIDE_PROFILE} $(build_codex_base)${review_suffix}"
+  CLI_EFFORT="$CODEX_OVERRIDE_PROFILE"
+  echo "[tfx-route] Codex profile override: ${TFX_CODEX_PROFILE} -> ${CODEX_OVERRIDE_PROFILE}" >&2
 }
 
 apply_verifier_override() {
@@ -2154,14 +1589,6 @@ MCP_RESOLVED_PROFILE="default"
 MCP_HINT=""
 ALLOWED_MCP_SERVERS=()
 CODEX_CONFIG_FLAGS=()
-CODEX_CONFIG_JSON=""
-
-get_cached_servers() {
-  local cli_type="$1"
-  if [[ -f "$MCP_CACHE" ]]; then
-    node -e 'const[,f,t]=process.argv;const inv=JSON.parse(require("fs").readFileSync(f,"utf8"));const s=(inv[t]||{}).servers||[];console.log(s.filter(x=>x.status==="enabled"||x.status==="configured").map(x=>x.name).join(","))' -- "$MCP_CACHE" "$cli_type" 2>/dev/null
-  fi
-}
 
 resolve_mcp_filter_script() {
   [[ -n "$MCP_FILTER_SCRIPT" && -f "$MCP_FILTER_SCRIPT" ]] && { printf '%s\n' "$MCP_FILTER_SCRIPT"; return 0; }
@@ -2173,7 +1600,7 @@ resolve_mcp_filter_script() {
 }
 
 resolve_mcp_policy() {
-  local filter_script available_servers
+  local filter_script
   if ! filter_script=$(resolve_mcp_filter_script); then
     echo "[tfx-route] 경고: mcp-filter.mjs를 찾지 못해 기본 MCP 정책을 사용합니다." >&2
     MCP_PROFILE_REQUESTED="$MCP_PROFILE"
@@ -2181,25 +1608,15 @@ resolve_mcp_policy() {
     MCP_HINT=""
     ALLOWED_MCP_SERVERS=()
     CODEX_CONFIG_FLAGS=()
-    CODEX_CONFIG_JSON=""
     return 0
-  fi
-
-  available_servers=$(get_cached_servers "$CLI_TYPE")
-  # Codex exec 모드에서도 config.toml의 MCP 서버를 전부 시작하므로,
-  # transport 모드와 관계없이 registered servers를 전달하여 불필요한 서버를
-  # enabled=false로 비활성화해야 한다.
-  # 캐시가 비어있으면 config.toml에서 직접 서버 목록을 추출한다.
-  if [[ -z "$available_servers" && "$CLI_TYPE" == "codex" && -f "$_CODEX_CONFIG" ]]; then
-    available_servers=$(sed -n 's/^\[mcp_servers\.\([^].]*\)\]$/\1/p' "$_CODEX_CONFIG" 2>/dev/null \
-      | sort -u | tr '\n' ',' | sed 's/,$//')
   fi
 
   local -a cmd=(
     "$NODE_BIN" "$filter_script" delimited
     "--agent" "$AGENT_TYPE"
     "--profile" "$MCP_PROFILE"
-    "--available" "$available_servers"
+    "--cli-type" "$CLI_TYPE"
+    "--codex-config" "$_CODEX_CONFIG"
     "--inventory-file" "$MCP_CACHE"
     "--task-text" "$PROMPT"
   )
@@ -2212,9 +1629,9 @@ resolve_mcp_policy() {
     return 1
   fi
 
-  local _allowed_servers _codex_flags _phase
+  local _allowed_servers _codex_flags _codex_config_json _phase
   IFS=$'\x1e' read -r MCP_PROFILE_REQUESTED MCP_RESOLVED_PROFILE MCP_HINT \
-    _allowed_servers _codex_flags CODEX_CONFIG_JSON _phase <<< "$_raw"
+    _allowed_servers _codex_flags _codex_config_json _phase <<< "$_raw"
   IFS=',' read -r -a ALLOWED_MCP_SERVERS <<< "$_allowed_servers"
   IFS=',' read -r -a CODEX_CONFIG_FLAGS <<< "$_codex_flags"
   # set -e 환경에서 함수 마지막 명령이 `[[ ... ]] && ...` 이면
@@ -2375,16 +1792,7 @@ heartbeat_monitor() {
     local codex_rollout_size=0
     codex_rollout_size=$(_codex_rollout_activity_bytes "$pid" $last_known_forks 2>/dev/null || echo 0)
     [[ "$codex_rollout_size" =~ ^[0-9]+$ ]] || codex_rollout_size=0
-    # MCP wrappers buffer final stdout. Its sidecar grows only on an actual
-    # in-flight MCP progress notification, so a silent/stuck request remains
-    # eligible for the existing stall kill ladder.
-    local mcp_activity_size=0
-    if [[ -n "${TFX_CODEX_MCP_ACTIVITY_FILE:-}" && -f "$TFX_CODEX_MCP_ACTIVITY_FILE" ]]; then
-      mcp_activity_size=$(wc -c < "$TFX_CODEX_MCP_ACTIVITY_FILE" 2>/dev/null || echo 0)
-    fi
-    mcp_activity_size="${mcp_activity_size//[[:space:]]/}"
-    [[ "$mcp_activity_size" =~ ^[0-9]+$ ]] || mcp_activity_size=0
-    current_size=$((current_size + stderr_size + codex_rollout_size + mcp_activity_size))
+    current_size=$((current_size + stderr_size + codex_rollout_size))
     local elapsed=$(($(date +%s) - TIMESTAMP))
     local expected_suffix=""
     if [[ -n "$expected_duration" && "$expected_duration" =~ ^[0-9]+$ && "$expected_duration" -gt 0 ]]; then
@@ -2676,13 +2084,6 @@ run_antigravity_exec() {
   return "$exit_code_local"
 }
 
-resolve_codex_mcp_script() {
-  local sd; sd="$(_get_script_dir)"
-  _resolve_script "${TFX_CODEX_MCP_SCRIPT:-}" \
-    ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/hub/workers/codex-mcp.mjs"} \
-    "$sd/hub/workers/codex-mcp.mjs" "$sd/../hub/workers/codex-mcp.mjs"
-}
-
 ## ── MCP Preflight: dead 서버 감지 후 CODEX_CONFIG_FLAGS 에서 제거 ──
 # Session 18 체크포인트 P3 root-cause fix. dead MCP 가 allowed_pat 에 포함되면
 # _codex_config_swap 이 section 을 유지 → Codex 가 init 시도 → -32000 으로 죽는다.
@@ -2777,12 +2178,7 @@ _mcp_preflight_filter_dead() {
   CODEX_CONFIG_FLAGS=("${new_flags[@]}")
   echo "[tfx-route] MCP preflight: ${#dead_names[@]}개 dead MCP 제외 (${dead_list})" >&2
 
-  # #170 graceful degradation (회귀 fix):
-  # all-dead 시 default 는 exec mode 자동 fallback. TFX_MCP_FAIL_ON_ALL_DEAD=1 로
-  # 명시 opt-in 시만 #148 기존 동작 (early fail). TFX_MCP_ALLOW_ALL_DEAD=1 은 호환성
-  # 유지 (alias for graceful default). 단 transport 가 auto 인 채로 run_codex_mcp 를
-  # 호출하면 dead MCP 와 connect 시도 → stall → 본 fix 의 _TFX_MCP_DEGRADED=1 marker
-  # 가 호출자 에서 transport=exec 강제 + MCP_HINT 자동 주입 skip 을 유발한다.
+  # 전부 dead일 때 명시적 early-fail만 중단하고, 기본은 도구 안내 없이 계속한다.
   local remaining_alive=0
   local rflag
   for rflag in "${CODEX_CONFIG_FLAGS[@]}"; do
@@ -2801,7 +2197,7 @@ _mcp_preflight_filter_dead() {
       return 78
     fi
     export _TFX_MCP_DEGRADED=1
-    echo "[tfx-route] graceful degradation: MCP 전부 dead → exec mode 자동 전환 (set TFX_MCP_FAIL_ON_ALL_DEAD=1 to revert to early-fail)" >&2
+    echo "[tfx-route] graceful degradation: MCP 전부 dead, 도구 안내 생략 (set TFX_MCP_FAIL_ON_ALL_DEAD=1 to revert to early-fail)" >&2
     return 0
   fi
 }
@@ -3060,98 +2456,6 @@ run_codex_exec() {
   return "$exit_code_local"
 }
 
-run_codex_mcp() {
-  local prompt="$1"
-  local use_tee_flag="$2"
-  local mcp_script
-  local exit_code_local=0
-  local worker_pid
-  local mcp_activity_file="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-mcp-activity.log"
-
-  if ! mcp_script=$(resolve_codex_mcp_script); then
-    echo "[tfx-route] 경고: Codex MCP 래퍼를 찾지 못했습니다." >&2
-    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
-  fi
-
-  if ! command -v "$NODE_BIN" &>/dev/null; then
-    echo "[tfx-route] 경고: node를 찾지 못해 Codex MCP 경로를 사용할 수 없습니다." >&2
-    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
-  fi
-
-  : > "$mcp_activity_file"
-  export TFX_CODEX_MCP_ACTIVITY_FILE="$mcp_activity_file"
-
-  local -a mcp_args=(
-    "$mcp_script"
-    "--prompt" "$prompt"
-    "--cwd" "$PWD"
-    "--profile" "$CLI_EFFORT"
-    "--approval-policy" "never"
-    "--sandbox" "danger-full-access"
-    "--timeout-ms" "$((HARD_CEILING_SEC * 1000))"
-    "--codex-command" "$CODEX_BIN"
-  )
-
-  if [[ -n "${CODEX_MODEL_OVERRIDE:-}" ]]; then
-    mcp_args+=("--model" "$CODEX_MODEL_OVERRIDE")
-  fi
-  if [[ -n "${CODEX_REASONING_EFFORT_OVERRIDE:-}" ]]; then
-    mcp_args+=("--reasoning-effort" "$CODEX_REASONING_EFFORT_OVERRIDE")
-  fi
-
-  if [[ -n "$CODEX_CONFIG_JSON" && "$CODEX_CONFIG_JSON" != "{}" ]]; then
-    mcp_args+=("--config-json" "$CODEX_CONFIG_JSON")
-  fi
-
-  case "$AGENT_TYPE" in
-    code-reviewer)
-      mcp_args+=(
-        "--developer-instructions"
-        "코드 리뷰 모드로 동작하라. 버그, 리스크, 회귀, 테스트 누락을 우선 식별하라."
-      )
-      ;;
-    security-reviewer)
-      mcp_args+=(
-        "--developer-instructions"
-        "보안 리뷰 모드로 동작하라. 취약점, 권한 경계, 비밀정보 노출 가능성을 우선 식별하라."
-      )
-      ;;
-    quality-reviewer)
-      mcp_args+=(
-        "--developer-instructions"
-        "품질 리뷰 모드로 동작하라. 로직 결함, 유지보수성 저하, 테스트 누락을 우선 식별하라."
-      )
-      ;;
-  esac
-
-  if [[ "$use_tee_flag" == "true" ]]; then
-    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$NODE_BIN" "${mcp_args[@]}" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
-  else
-    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$NODE_BIN" "${mcp_args[@]}" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
-  fi
-  worker_pid=$!
-  # Track codex MCP child PID so --job-status can detect orphan-running when wrapper dies (Issue #176).
-  if [[ -n "${JOB_DIR:-}" && -w "${JOB_DIR}" ]]; then
-    echo "$worker_pid" >> "$JOB_DIR/child_pids"
-  fi
-  _wait_with_heartbeat "$worker_pid" || exit_code_local=$?
-  unset TFX_CODEX_MCP_ACTIVITY_FILE
-
-  # 모듈 로드 실패(의존성 누락) → MCP transport exit code로 변환하여 fallback 트리거
-  if [[ "$exit_code_local" -ne 0 && "$exit_code_local" -ne 124 ]] && grep -q 'ERR_MODULE_NOT_FOUND' "$STDERR_LOG" 2>/dev/null; then
-    echo "[tfx-route] Codex MCP 모듈 로드 실패 — fallback 가능 exit code로 변환" >&2
-    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
-  fi
-
-  # MCP 연결 실패(서버 미응답, 연결 종료) → transport exit code로 변환
-  if [[ "$exit_code_local" -ne 0 && "$exit_code_local" -ne 124 ]] && grep -qE 'MCP error|Connection closed|연결 실패' "$STDOUT_LOG" 2>/dev/null; then
-    echo "[tfx-route] Codex MCP 연결 실패 — fallback 가능 exit code로 변환" >&2
-    return "$CODEX_MCP_TRANSPORT_EXIT_CODE"
-  fi
-
-  return "$exit_code_local"
-}
-
 # ── 메인 실행 ──
 main() {
   # 종료 시 per-process 에이전트 파일 + 워커 프로세스 정리
@@ -3160,7 +2464,6 @@ main() {
   route_agent "$AGENT_TYPE"
   apply_cli_mode
   apply_no_claude_native_mode
-  apply_plan_guard
   apply_verifier_override
   apply_codex_profile_override
   apply_retry_snapshot_cli_invocation
@@ -3174,16 +2477,7 @@ main() {
     claude) CLI_CMD="$CLAUDE_BIN" ;;
   esac
 
-  # 타임아웃 결정 (에이전트별 최소값 보장)
-  local MIN_TIMEOUT
-  case "$AGENT_TYPE" in
-    deep-executor|architect|planner|critic|analyst) MIN_TIMEOUT=900 ;;
-    document-specialist|scientist|scientist-deep) MIN_TIMEOUT=900 ;;
-    code-reviewer|security-reviewer|quality-reviewer) MIN_TIMEOUT=600 ;;
-    executor|debugger) MIN_TIMEOUT=300 ;;  # 기본값 300s
-    *) MIN_TIMEOUT=120 ;;
-  esac
-
+  # 타임아웃 결정 (정책에서 조회한 역할별 최소값 보장)
   if [[ -n "$USER_TIMEOUT" ]]; then
     if ! [[ "$USER_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
       echo "[tfx-route] 경고: 유효하지 않은 타임아웃 값 ($USER_TIMEOUT), 기본값 사용" >&2
@@ -3222,7 +2516,7 @@ main() {
   fi
 
   local _est_dur
-  _est_dur=$(estimate_expected_duration_sec "$AGENT_TYPE" "$MCP_PROFILE" "$PROMPT")
+  _est_dur=$(estimate_expected_duration_sec "$MCP_PROFILE" "$PROMPT")
   [[ "$TIMEOUT_SEC" -gt "$_est_dur" ]] && _est_dur="$TIMEOUT_SEC"
   TFX_EXPECTED_DURATION_SEC="${TFX_EXPECTED_DURATION_SEC:-$_est_dur}"
   export TFX_EXPECTED_DURATION_SEC
@@ -3300,7 +2594,6 @@ FALLBACK_EOF
   if [[ -n "$MCP_HINT" ]]; then
     FULL_PROMPT="${PROMPT}"$'\n\n'"[도구 안내] ${MCP_HINT}"
   fi
-  local codex_transport_effective="n/a"
 
   # 메타정보 (stderr)
   echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT mode=$RUN_MODE expected=${TIMEOUT_SEC}s stall=${STALL_THRESHOLD_SEC}s ceiling=${HARD_CEILING_SEC}s" >&2
@@ -3312,9 +2605,6 @@ FALLBACK_EOF
   fi
   if [[ -n "$TFX_WORKER_INDEX" || -n "$TFX_SEARCH_TOOL" ]]; then
     echo "[tfx-route] worker_index=${TFX_WORKER_INDEX:-auto} search_tool=${TFX_SEARCH_TOOL:-auto}" >&2
-  fi
-  if [[ "$CLI_TYPE" == "codex" ]]; then
-    echo "[tfx-route] codex_transport_request=$TFX_CODEX_TRANSPORT" >&2
   fi
   [[ -n "$TFX_TEAM_NAME" ]] && echo "[tfx-route] team=$TFX_TEAM_NAME task=$TFX_TEAM_TASK_ID agent=$TFX_TEAM_AGENT_NAME" >&2
   [[ -n "${TFX_REROUTED_FROM:-}" ]] && echo "[tfx-route] rerouted_from=$TFX_REROUTED_FROM" >&2
@@ -3352,12 +2642,6 @@ FALLBACK_EOF
   fi
 
   if [[ "$CLI_TYPE" == "codex" ]]; then
-    # codex mcp-server는 upstream에서 제거됐다. auto와 명시 mcp 모두 exec로
-    # 수렴시키되, 명시 mcp 요청에는 한 번만 이유를 알린다.
-    if [[ "$TFX_CODEX_TRANSPORT" == "mcp" ]]; then
-      echo "[tfx-route] TFX_CODEX_TRANSPORT=mcp 요청: codex mcp-server가 upstream에서 제거되어 exec로 계속합니다." >&2
-    fi
-    TFX_CODEX_TRANSPORT="exec"
     # Degraded is a per-invocation result, not an inherited process contract.
     # Test and wrapper environments can carry stale exported values from prior
     # route calls; clear it before the current MCP preflight decides.
@@ -3372,32 +2656,14 @@ FALLBACK_EOF
       exit 78
     fi
     # Config swap: 프로필에 맞는 MCP 서버만 남긴 임시 config 적용
-    # run_codex_mcp / run_codex_exec 어느 경로든 적용되도록 최상단에서 실행
     _codex_config_swap "filter"
     # swap 후 config override 플래그 클리어 — 제거된 서버에 override 보내면 "invalid transport" 에러
     CODEX_CONFIG_FLAGS=()
-    CODEX_CONFIG_JSON="{}"
-    # #170 graceful degradation: MCP 전부 dead 면 transport 무관 exec 강제.
-    # _mcp_preflight_filter_dead 가 _TFX_MCP_DEGRADED=1 를 export 했으면 이미 stall 보장 안 됨.
-    # 사용자가 TFX_CODEX_TRANSPORT=mcp 명시했더라도 dead MCP 와 connect 시도 = stall →
-    # warning + exec 강제 (transport 명시는 사용자 의도지만 stall 회피가 우선).
-    # MCP_HINT (e.g. "context7으로 조회하세요") 도 prompt 에서 제거 — degraded 환경에서
-    # 모델이 사용 불가 도구를 시도하면 stall/실패 trigger.
+    # 사용할 수 없는 MCP를 프롬프트가 안내하지 않게 한다.
     if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" ]]; then
-      if [[ "$TFX_CODEX_TRANSPORT" == "mcp" ]]; then
-        echo "[tfx-route] WARNING: TFX_CODEX_TRANSPORT=mcp + all-MCP-dead → exec 강제 (stall 회피)" >&2
-      fi
-      TFX_CODEX_TRANSPORT="exec"
       FULL_PROMPT="$PROMPT"
     fi
-    local _codex_north_star_file="${WORKDIR:-$PWD}/.triflux/lake/current.md"
-    if [[ -r "$_codex_north_star_file" ]]; then
-      local _codex_prompt_sentinel="__TFX_CODEX_PROMPT_END_${$}_${RANDOM}__"
-      local _codex_full_prompt_with_sentinel
-      _codex_full_prompt_with_sentinel="$(prepend_codex_north_star "$FULL_PROMPT"; printf '%s' "$_codex_prompt_sentinel")"
-      FULL_PROMPT="${_codex_full_prompt_with_sentinel%"$_codex_prompt_sentinel"}"
-    fi
-    # Opt-in 스킬 주입 (TFX_INJECT_SKILL). north-star 와 동일한 sentinel 패턴으로
+    # 스킬 주입은 sentinel로
     # trailing newline 을 보존한다. 미설정이면 prepend_skill 이 no-op.
     if [[ -n "${TFX_INJECT_SKILL:-}" ]]; then
       local _codex_skill_sentinel="__TFX_CODEX_SKILL_END_${$}_${RANDOM}__"
@@ -3406,8 +2672,6 @@ FALLBACK_EOF
       FULL_PROMPT="${_codex_skill_prompt%"$_codex_skill_sentinel"}"
     fi
     run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
-    codex_transport_effective="exec"
-    echo "[tfx-route] codex_transport_effective=$codex_transport_effective" >&2
     # Config swap 복원 (성공/실패 관계없이)
     _codex_config_swap "restore"
 
@@ -3415,17 +2679,6 @@ FALLBACK_EOF
     # Codex degraded branch strips MCP_HINT; keep agy parity when the marker is inherited.
     if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" ]]; then
       FULL_PROMPT="$PROMPT"
-    fi
-    # CTO north-star: codex lane(line ~2670)과 동일하게 brief 를 prompt 앞에 주입.
-    # prepend_codex_north_star 는 CLI-agnostic (TFX_CTO_NORTH_STAR opt-in +
-    # .triflux/lake/current.md 만 참조) 하므로 agy 워커에서도 그대로 재사용한다.
-    # sentinel 은 command-substitution 이 trailing newline 을 삼키는 것을 막는다.
-    local _agy_north_star_file="${WORKDIR:-$PWD}/.triflux/lake/current.md"
-    if [[ -r "$_agy_north_star_file" ]]; then
-      local _agy_prompt_sentinel="__TFX_AGY_PROMPT_END_${$}_${RANDOM}__"
-      local _agy_full_prompt_with_sentinel
-      _agy_full_prompt_with_sentinel="$(prepend_codex_north_star "$FULL_PROMPT"; printf '%s' "$_agy_prompt_sentinel")"
-      FULL_PROMPT="${_agy_full_prompt_with_sentinel%"$_agy_prompt_sentinel"}"
     fi
     # Opt-in 스킬 주입 (TFX_INJECT_SKILL) — codex 레인과 동일.
     if [[ -n "${TFX_INJECT_SKILL:-}" ]]; then
@@ -3594,46 +2847,8 @@ EOF
       --tee-active "$use_tee" \
       --clean-tui "${TFX_CLEAN_TUI:-true}"
   else
-    # post.mjs 없으면 기본 출력 (fallback)
-    echo "=== TFX-ROUTE RESULT ==="
-    echo "agent: $AGENT_TYPE"
-    echo "cli: $CLI_TYPE"
-    [[ -n "${TFX_REROUTED_FROM:-}" ]] && echo "rerouted_from: $TFX_REROUTED_FROM"
-    echo "exit_code: $exit_code"
-    echo "elapsed: ${elapsed}s"
-    echo "stdout_log: $STDOUT_LOG"
-    [[ "$CLI_TYPE" == "codex" ]] && echo "last_message_log: $CODEX_LAST_MESSAGE_LOG"
-    if [[ -n "$result_reason" ]]; then
-      echo "status: partial"
-      echo "reason: $result_reason"
-      echo "=== PARTIAL OUTPUT ==="
-    else
-      echo "status: $([ $exit_code -eq 0 ] && echo success || echo failed)"
-      echo "=== OUTPUT ==="
-    fi
-    local result_output_log="$STDOUT_LOG"
-    if [[ "$CLI_TYPE" == "codex" && -s "$CODEX_LAST_MESSAGE_LOG" ]]; then
-      result_output_log="$CODEX_LAST_MESSAGE_LOG"
-    fi
-    local capped_output_log="$result_output_log"
-    if [[ "${TFX_CLEAN_TUI:-1}" != "0" ]]; then
-      capped_output_log="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-clean-output.log"
-      sed 's/\x1b\[[0-9;]*[a-zA-Z]//g' "$result_output_log" 2>/dev/null \
-        | sed '/^[[:space:]]*[╭╮╰╯│─┌┐└┘├┤┬┴┼]/d' \
-        | sed '/^[[:space:]]*[›❯][[:space:]]*$/d' > "$capped_output_log"
-    fi
-    local output_bytes=0
-    [[ -f "$capped_output_log" ]] && output_bytes=$(wc -c < "$capped_output_log" 2>/dev/null | tr -d ' ')
-    if [[ "$output_bytes" -gt "$MAX_STDOUT_BYTES" ]]; then
-      echo "--- [출력 ${output_bytes}B → ${MAX_STDOUT_BYTES}B로 절삭됨; tail ${MAX_STDOUT_BYTES}B 유지] ---"
-      tail -c "$MAX_STDOUT_BYTES" "$capped_output_log" 2>/dev/null
-    else
-      cat "$capped_output_log" 2>/dev/null
-    fi
-    if [[ -n "$result_reason" && -s "$STDERR_LOG" ]]; then
-      echo "=== STDERR ==="
-      tail -n 20 "$STDERR_LOG"
-    fi
+    echo "[tfx-route] ERROR: 후처리기를 찾지 못했습니다: $post_script" >&2
+    return 1
   fi
 
   # 결과를 파일에도 저장 — run_in_background에서 TaskOutput이 stdout을 놓칠 때 대비

@@ -358,8 +358,8 @@ function ingest() {
 
     // CLI 타입 감지
     let cli = "codex";
-    if (pane.title.includes("gemini") || pane.title.includes("🔵"))
-      cli = "gemini";
+    if (pane.title.includes("antigravity") || pane.title.includes("🔵"))
+      cli = "antigravity";
     else if (pane.title.includes("claude") || pane.title.includes("🟠"))
       cli = "claude";
     ws.title = pane.title;

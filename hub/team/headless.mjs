@@ -78,7 +78,6 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 /** CLI별 브랜드 — 이모지 + 공식 색상 (HUD와 통일) */
 const CLI_BRAND = {
   codex: { emoji: "\u{26AA}", label: "Codex", ansi: "\x1b[97m" }, // ⚪ bright white (codexWhite)
-  gemini: { emoji: "\u{1F535}", label: "Gemini", ansi: "\x1b[38;5;39m" }, // 🔵 geminiBlue
   antigravity: {
     emoji: "\u{1F535}",
     label: "Antigravity",
@@ -107,11 +106,6 @@ const VALID_ROUTE_AGENTS = new Set(Object.keys(AGENT_TO_CLI));
  */
 export function resolveCliType(agentOrCli) {
   return AGENT_TO_CLI[agentOrCli] || agentOrCli;
-}
-
-function resolveHeadlessCliType(agentOrCli) {
-  const resolved = resolveCliType(agentOrCli);
-  return resolved === "gemini" ? "antigravity" : resolved;
 }
 
 function shellQuote(value) {
@@ -146,7 +140,7 @@ function resolveRouteAgentForHeadless(resolvedCli, opts = {}) {
   if (
     role &&
     VALID_ROUTE_AGENTS.has(role) &&
-    !["gemini", "antigravity", "agy"].includes(role)
+    !["antigravity", "agy"].includes(role)
   ) {
     return role;
   }
@@ -348,7 +342,7 @@ export function buildDashboardAttachArgs(
 
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const { handoff = true, mcp, contextFile, model, cwd } = opts;
-  const resolvedCli = resolveHeadlessCliType(cli);
+  const resolvedCli = resolveCliType(cli);
 
   // contextFile 처리: 32KB(32768 bytes) 초과 시 UTF-8 안전 절단
   let contextPrefix = "";
@@ -1021,7 +1015,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     const paneName = `worker-${i + 1}`;
     const displayName = resolveHeadlessDisplayName(assignment, paneName);
     const workerId = getHeadlessWorkerAgentId(sessionName, i);
-    const resolvedCli = resolveHeadlessCliType(assignment.cli);
+    const resolvedCli = resolveCliType(assignment.cli);
     const brand = CLI_BRAND[resolvedCli] || {
       emoji: "\u{25CF}",
       label: resolvedCli,
@@ -1150,7 +1144,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
       const paneName = `worker-${i + 1}`;
       const displayName = resolveHeadlessDisplayName(assignment, paneName);
       const workerId = getHeadlessWorkerAgentId(sessionName, i);
-      const resolvedCli = resolveHeadlessCliType(assignment.cli);
+      const resolvedCli = resolveCliType(assignment.cli);
       const resultFile = join(
         RESULT_DIR,
         `${sessionName}-${paneName}.txt`,
@@ -1215,7 +1209,7 @@ async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
       const paneName = `worker-${i + 1}`;
       const displayName = resolveHeadlessDisplayName(assignment, paneName);
       const workerId = getHeadlessWorkerAgentId(sessionName, i);
-      const resolvedCli = resolveHeadlessCliType(assignment.cli);
+      const resolvedCli = resolveCliType(assignment.cli);
       const resultFile = join(
         RESULT_DIR,
         `${sessionName}-${paneName}.txt`,
@@ -1897,7 +1891,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       const a = normalizedAssignments[i];
       const paneName = `worker-${i + 1}`;
       tui.updateWorker(paneName, {
-        cli: resolveHeadlessCliType(a.cli || "codex"),
+        cli: resolveCliType(a.cli || "codex"),
         displayName: resolveHeadlessDisplayName(a, paneName),
         role: a.role || "",
         status: "pending",

@@ -253,6 +253,29 @@ function loadInventory(inventoryFile = "") {
   }
 }
 
+function availableServersFromInventory(inventory, cliType) {
+  const servers = inventory?.[cliType]?.servers || [];
+  return uniqueStrings(
+    servers
+      .filter((server) => ["enabled", "configured"].includes(server.status))
+      .map((server) => server.name),
+  );
+}
+
+function codexServersFromConfig(configFile) {
+  if (!configFile) return [];
+  try {
+    return uniqueStrings(
+      readFileSync(configFile, "utf8")
+        .split(/\r?\n/)
+        .map((line) => /^\[mcp_servers\.([^\].]+)\]$/.exec(line)?.[1])
+        .filter(Boolean),
+    ).sort();
+  } catch {
+    return [];
+  }
+}
+
 function buildInventoryIndex(inventory = null) {
   const index = new Map();
   if (!inventory || typeof inventory !== "object") return index;
@@ -555,8 +578,14 @@ function resolveAllowedServers(options = {}) {
   );
   const profile = getProfileDefinition(resolvedProfile);
   const availableServers = parseAvailableServers(options.availableServers);
-  const inventory = options.inventory || loadInventory(options.inventoryFile);
-  const inventoryIndex = buildInventoryIndex(inventory);
+  const inventory =
+    options.inventory !== undefined
+      ? options.inventory
+      : loadInventory(options.inventoryFile);
+  const inventoryIndex =
+    options.inventoryIndex instanceof Map
+      ? options.inventoryIndex
+      : buildInventoryIndex(inventory);
   const baseServers = availableServers.length
     ? profile.allowedServers.filter((server) =>
         availableServers.includes(server),
@@ -579,8 +608,14 @@ export function buildPromptHint(options = {}) {
   );
   if (resolvedProfile === "none") return "";
 
-  const inventory = options.inventory || loadInventory(options.inventoryFile);
-  const inventoryIndex = buildInventoryIndex(inventory);
+  const inventory =
+    options.inventory !== undefined
+      ? options.inventory
+      : loadInventory(options.inventoryFile);
+  const inventoryIndex =
+    options.inventoryIndex instanceof Map
+      ? options.inventoryIndex
+      : buildInventoryIndex(inventory);
   const allowedServers = resolveAllowedServers({
     ...options,
     inventory,
@@ -702,9 +737,27 @@ export function getCodexConfigOverrides(options = {}) {
 }
 
 export function buildMcpPolicy(options = {}) {
-  const inventory = options.inventory || loadInventory(options.inventoryFile);
+  const inventory =
+    options.inventory !== undefined
+      ? options.inventory
+      : loadInventory(options.inventoryFile);
   const inventoryIndex = buildInventoryIndex(inventory);
-  const resolvedOptions = { ...options, inventory, inventoryIndex };
+  let availableServers = options.availableServers;
+  if (availableServers === undefined) {
+    availableServers = availableServersFromInventory(
+      inventory,
+      options.cliType,
+    );
+    if (availableServers.length === 0 && options.cliType === "codex") {
+      availableServers = codexServersFromConfig(options.codexConfig);
+    }
+  }
+  const resolvedOptions = {
+    ...options,
+    availableServers,
+    inventory,
+    inventoryIndex,
+  };
   const resolvedProfile = resolveMcpProfile(
     options.agentType,
     options.requestedProfile,
@@ -778,8 +831,10 @@ function parseCliArgs(argv) {
     command: "json",
     agentType: "",
     requestedProfile: "auto",
-    availableServers: [],
+    availableServers: undefined,
     inventoryFile: "",
+    cliType: "",
+    codexConfig: "",
     searchTool: "",
     taskText: "",
     workerIndex: undefined,
@@ -809,6 +864,12 @@ function parseCliArgs(argv) {
         break;
       case "--available":
         args.availableServers = parseAvailableServers(next());
+        break;
+      case "--cli-type":
+        args.cliType = next();
+        break;
+      case "--codex-config":
+        args.codexConfig = next();
         break;
       case "--inventory-file":
         args.inventoryFile = next();

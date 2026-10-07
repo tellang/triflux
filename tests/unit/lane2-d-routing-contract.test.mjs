@@ -3,7 +3,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
+  resolveAgentRoute,
   resolveCodexAgentPolicy,
+  resolveCodexAgentProfile,
   resolveNestedCodexAgentProfile,
 } from "../../scripts/lib/agent-route-policy.mjs";
 
@@ -11,6 +13,10 @@ describe("lane2-d routing contract: Codex agent policy SSOT", () => {
   it("unknown Codex role resolves to the canonical executor policy", () => {
     assert.deepEqual(
       resolveCodexAgentPolicy("unknown-lane"),
+      resolveCodexAgentPolicy("executor"),
+    );
+    assert.deepEqual(
+      resolveCodexAgentPolicy("explore"),
       resolveCodexAgentPolicy("executor"),
     );
   });
@@ -39,6 +45,40 @@ describe("lane2-d routing contract: Codex agent policy SSOT", () => {
     assert.equal(
       resolveNestedCodexAgentProfile("executor", { globalProfile: "max" }),
       "gpt6_astra_max",
+    );
+  });
+
+  it("route normalizes legacy profiles, downgrades nested ultra, and rejects invalid routing", () => {
+    const map = { explore: "claude", "deep-executor": "codex" };
+    assert.deepEqual(
+      resolveAgentRoute("explore", map, "gpt56_luna_low"),
+      resolveAgentRoute("explore", map, "gpt6_luna_low"),
+    );
+    const topLevel = resolveAgentRoute("deep-executor", map, "ultra");
+    const nested = resolveAgentRoute("deep-executor", map, "ultra", true);
+    assert.notEqual(nested[8], topLevel[8]);
+    assert.equal(
+      nested[8],
+      resolveCodexAgentProfile("deep-executor", {
+        profileOverride: "ultra",
+        nested: true,
+      }),
+    );
+    assert.throws(
+      () => resolveAgentRoute("gemini", { explore: "claude" }),
+      /알 수 없는 에이전트 타입/,
+    );
+    assert.throws(
+      () => resolveAgentRoute("bad;name", { "bad;name": "codex" }),
+      /invalid agent/,
+    );
+    assert.throws(
+      () => resolveAgentRoute("explore", { explore: "shell" }),
+      /invalid provider/,
+    );
+    assert.throws(
+      () => resolveAgentRoute("explore", { explore: "claude" }, "bad-profile"),
+      /TFX_CODEX_PROFILE/,
     );
   });
 });

@@ -47,7 +47,7 @@ export const FG = {
   gray: `${ESC}[90m`,
   // triflux 브랜드
   codex: `${ESC}[38;2;16;163;127m`, // #10a37f codex green
-  gemini: `${ESC}[38;5;39m`, // blue
+  antigravity: `${ESC}[38;5;39m`, // blue
   claude: `${ESC}[38;2;232;112;64m`, // orange
   triflux: `${ESC}[38;5;214m`, // amber
   accent: `${ESC}[38;5;75m`, // light blue (Catppuccin blue)
@@ -467,7 +467,7 @@ export const STATUS_ICON = {
 
 export const CLI_ICON = {
   codex: `${FG.codex}⚪${RESET}`,
-  gemini: `${FG.gemini}🔵${RESET}`,
+  antigravity: `${FG.antigravity}🔵${RESET}`,
   claude: `${FG.claude}🟠${RESET}`,
 };
 

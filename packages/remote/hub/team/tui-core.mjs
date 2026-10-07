@@ -195,7 +195,7 @@ export function normalizeWorkerState(existing = {}, state = {}, opts = {}) {
 
 // ── 색상 헬퍼 ─────────────────────────────────────────────────────────────
 export function cliColor(cli) {
-  if (cli === "gemini") return FG.gemini;
+  if (cli === "antigravity" || cli === "agy") return FG.antigravity;
   if (cli === "claude") return FG.claude;
   if (cli === "codex") return FG.codex;
   return FG.white;

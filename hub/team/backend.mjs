@@ -7,10 +7,6 @@ import { createRequire } from "node:module";
 import { buildExecArgs } from "../codex-adapter.mjs";
 import { IS_WINDOWS } from "../platform.mjs";
 
-export function buildGeminiCommand(prompt, resultFile, { isWindows } = {}) {
-  return buildAntigravityCommand(prompt, resultFile, { isWindows });
-}
-
 export function buildAntigravityCommand(
   prompt,
   resultFile,
@@ -49,23 +45,6 @@ export class CodexBackend {
    */
   buildArgs(prompt, resultFile, opts = {}) {
     return buildExecArgs({ prompt, resultFile, ...opts });
-  }
-
-  env() {
-    return {};
-  }
-}
-
-export class GeminiBackend {
-  name() {
-    return "gemini";
-  }
-  command() {
-    return "agy";
-  }
-
-  buildArgs(prompt, resultFile, opts = {}) {
-    return buildGeminiCommand(prompt, resultFile, { isWindows: IS_WINDOWS });
   }
 
   env() {
@@ -112,18 +91,17 @@ export class AntigravityBackend {
 
 // ── 레지스트리 ─────────────────────────────────────────────────────────────
 
-/** @type {Map<string, CodexBackend|GeminiBackend|ClaudeBackend|AntigravityBackend>} */
+/** @type {Map<string, CodexBackend|ClaudeBackend|AntigravityBackend>} */
 const backends = new Map([
   ["codex", new CodexBackend()],
-  ["gemini", new GeminiBackend()],
   ["claude", new ClaudeBackend()],
   ["antigravity", new AntigravityBackend()],
 ]);
 
 /**
  * 백엔드 이름으로 조회한다.
- * @param {string} name — "codex" | "gemini" | "claude" | "antigravity"
- * @returns {CodexBackend|GeminiBackend|ClaudeBackend|AntigravityBackend}
+ * @param {string} name: "codex" | "claude" | "antigravity"
+ * @returns {CodexBackend|ClaudeBackend|AntigravityBackend}
  * @throws {Error} 등록되지 않은 이름
  */
 export function getBackend(name) {
@@ -135,8 +113,8 @@ export function getBackend(name) {
 /**
  * 에이전트명 또는 CLI명을 Backend로 해석한다.
  * agent-map.json을 통해 에이전트명 → CLI명으로 변환 후 레지스트리에서 조회한다.
- * @param {string} agentOrCli — "executor", "codex", "designer" 등
- * @returns {CodexBackend|GeminiBackend|ClaudeBackend|AntigravityBackend}
+ * @param {string} agentOrCli: "executor", "codex", "designer" 등
+ * @returns {CodexBackend|ClaudeBackend|AntigravityBackend}
  */
 export function getBackendForAgent(agentOrCli) {
   const agentMap = _require("./agent-map.json");
@@ -146,7 +124,7 @@ export function getBackendForAgent(agentOrCli) {
 
 /**
  * 등록된 모든 백엔드를 반환한다.
- * @returns {Array<CodexBackend|GeminiBackend|ClaudeBackend|AntigravityBackend>}
+ * @returns {Array<CodexBackend|ClaudeBackend|AntigravityBackend>}
  */
 export function listBackends() {
   return Array.from(backends.values());

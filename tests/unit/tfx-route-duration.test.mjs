@@ -7,6 +7,7 @@ import fs from "node:fs";
 import { dirname, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { resolveAgentRoute } from "../../scripts/lib/agent-route-policy.mjs";
 import { BASH_EXE } from "../helpers/bash-path.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
@@ -23,21 +24,32 @@ function extractFunction(scriptPath, funcName) {
 
 const FUNC = extractFunction(ROUTE_SCRIPT, "estimate_expected_duration_sec");
 
+function durationScript(agent, profile, prompt) {
+  const expected = resolveAgentRoute(agent, { [agent]: "codex" })[11];
+  return `ROLE_EXPECTED_DURATION=${expected}\n${FUNC}\nestimate_expected_duration_sec "${profile}" "${prompt}"`;
+}
+
 function estimate(agent, profile, prompt) {
-  const script = `${FUNC}\nestimate_expected_duration_sec "${agent}" "${profile}" "${prompt}"`;
-  const result = spawnSync(BASH_EXE, ["-c", script], {
-    encoding: "utf8",
-    env: { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" },
-  });
+  const result = spawnSync(
+    BASH_EXE,
+    ["-c", durationScript(agent, profile, prompt)],
+    {
+      encoding: "utf8",
+      env: { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" },
+    },
+  );
   return parseInt(result.stdout.trim(), 10);
 }
 
 function estimateWithShell(shell, agent, profile, prompt) {
-  const script = `${FUNC}\nestimate_expected_duration_sec "${agent}" "${profile}" "${prompt}"`;
-  const result = spawnSync(shell, ["-c", script], {
-    encoding: "utf8",
-    env: { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" },
-  });
+  const result = spawnSync(
+    shell,
+    ["-c", durationScript(agent, profile, prompt)],
+    {
+      encoding: "utf8",
+      env: { ...process.env, LANG: "en_US.UTF-8", LC_ALL: "en_US.UTF-8" },
+    },
+  );
   assert.equal(
     result.status,
     0,
