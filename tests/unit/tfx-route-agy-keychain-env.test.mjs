@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { describe, it } from "node:test";
+import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
@@ -68,49 +68,53 @@ printf '%s|%s|%s\\n' "\${SSH_CONNECTION:-${UNSET}}" "\${SSH_CLIENT:-${UNSET}}" "
   return { root, bin };
 }
 
-function runRoute(overrides = {}) {
-  const { root, bin } = createStubBin();
-  const home = join(root, "home");
+let fixture;
+before(() => {
+  fixture = createStubBin();
+  fixture.home = join(fixture.root, "home");
+  const { home } = fixture;
   mkdirSync(join(home, ".codex"), { recursive: true });
   writeFileSync(join(home, ".codex", "config.toml"), "", "utf8");
+});
+after(() => rmSync(fixture.root, { recursive: true, force: true }));
 
-  try {
-    return spawnSync(
-      BASH_EXE,
-      ["-c", `bash "${ROUTE_SCRIPT}" antigravity 'env probe' minimal 10`],
-      {
-        cwd: PROJECT_ROOT,
-        encoding: "utf8",
-        timeout: 30_000,
-        env: hubServerTestEnv({
-          PATH: `${bin}:${process.env.PATH || ""}`,
-          HOME: home,
-          USERPROFILE: home,
-          XDG_CONFIG_HOME: join(home, ".config"),
-          TFX_MACHINE_PROFILE_PATH: join(home, "machine-profile.env"),
-          TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
-          TFX_HUB_URL: "",
-          TFX_TEAM_NAME: "",
-          TFX_TEAM_TASK_ID: "",
-          TFX_TEAM_AGENT_NAME: "",
-          TFX_TEAM_LEAD_NAME: "",
-          TFX_PREFLIGHT_LOADED: "1",
-          TFX_CODEX_OK: "0",
-          TFX_ANTIGRAVITY_OK: "1",
-          TFX_DISABLE_CODEX: "0",
-          TFX_DISABLE_ANTIGRAVITY: "0",
-          TFX_MCP_HEALTH_CHECK: "0",
-          TFX_HARD_CEILING_SEC: "0",
-          SSH_CONNECTION: "stale-connection",
-          SSH_CLIENT: "stale-client",
-          SSH_TTY: "stale-tty",
-          ...overrides,
-        }),
-      },
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+function runRoute(overrides = {}) {
+  const { bin, home } = fixture;
+  return spawnSync(
+    BASH_EXE,
+    ["-c", `bash "${ROUTE_SCRIPT}" antigravity 'env probe' minimal 10`],
+    {
+      cwd: PROJECT_ROOT,
+      encoding: "utf8",
+      timeout: 30_000,
+      env: hubServerTestEnv({
+        PATH: `${bin}:${process.env.PATH || ""}`,
+        HOME: home,
+        USERPROFILE: home,
+        XDG_CONFIG_HOME: join(home, ".config"),
+        TFX_MACHINE_PROFILE_PATH: join(home, "machine-profile.env"),
+        TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
+        TFX_HUB_URL: "",
+        TFX_TEAM_NAME: "",
+        TFX_TEAM_TASK_ID: "",
+        TFX_TEAM_AGENT_NAME: "",
+        TFX_TEAM_LEAD_NAME: "",
+        TFX_PREFLIGHT_LOADED: "1",
+        TFX_CODEX_OK: "0",
+        TFX_ANTIGRAVITY_OK: "1",
+        TFX_DISABLE_CODEX: "0",
+        TFX_DISABLE_ANTIGRAVITY: "0",
+        TFX_MCP_HEALTH_CHECK: "0",
+        TFX_HARD_CEILING_SEC: "0",
+        // SSH 환경 검증에는 heartbeat 대기가 필요 없다.
+        TFX_HEARTBEAT: "0",
+        SSH_CONNECTION: "stale-connection",
+        SSH_CLIENT: "stale-client",
+        SSH_TTY: "stale-tty",
+        ...overrides,
+      }),
+    },
+  );
 }
 
 function output(result) {

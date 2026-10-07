@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { describe, it } from "node:test";
+import { after, before, beforeEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { buildHeadlessCommand } from "../../hub/team/headless.mjs";
@@ -20,6 +20,7 @@ import { BASH_EXE } from "../helpers/bash-path.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../..");
 const ROUTE_SCRIPT = resolve(ROOT, "scripts/tfx-route.sh");
+const HUB_ENSURE_STUB = resolve(ROOT, "tests/fixtures/no-op-hub-ensure.mjs");
 
 function readIfPresent(path) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -128,6 +129,9 @@ function runCodexHeadless(fixture, overrides = {}) {
       TFX_NO_CLAUDE_NATIVE: "0",
       TFX_CODEX_TRANSPORT: "exec",
       TFX_HARD_CEILING_SEC: "0",
+      // CLI 차단 검증에는 heartbeat와 실제 hub 기동이 필요 없다.
+      TFX_HEARTBEAT: "0",
+      TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
       TFX_MCP_HEALTH_CHECK: "0",
       TFX_ALLOW_SMALL_CODEX_CONFIG: "1",
       TFX_CTO_NORTH_STAR: "0",
@@ -168,6 +172,9 @@ function runRouteWithPreflightLoaded(fixture) {
         TFX_NO_CLAUDE_NATIVE: "0",
         TFX_CODEX_TRANSPORT: "exec",
         TFX_HARD_CEILING_SEC: "0",
+        // CLI 차단 검증에는 heartbeat와 실제 hub 기동이 필요 없다.
+        TFX_HEARTBEAT: "0",
+        TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
         TFX_MCP_HEALTH_CHECK: "0",
         TFX_ALLOW_SMALL_CODEX_CONFIG: "1",
         TFX_CTO_NORTH_STAR: "0",
@@ -179,58 +186,61 @@ function runRouteWithPreflightLoaded(fixture) {
 }
 
 describe("headless Codex disable gate", { timeout: 90_000 }, () => {
-  it("preflight 완료 표시만 상속한 자식도 plan 없이 route-backed Codex를 실행한다", () => {
-    const fixture = createHeadlessFixture();
-    try {
-      const result = runRouteWithPreflightLoaded(fixture);
-
-      assert.equal(result.status, 0, result.stderr);
-      assert.doesNotMatch(result.stderr, /unbound variable|바인딩 해제한 변수/);
-      assert.match(readIfPresent(fixture.codexLog), /^exec\b/m);
-      assert.match(result.stdout, /CODEX_EXEC/);
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
+  let fixture;
+  let config;
+  before(() => {
+    fixture = createHeadlessFixture();
+    config = readFileSync(join(fixture.home, ".codex/config.toml"), "utf8");
+  });
+  beforeEach(() => {
+    for (const file of [
+      fixture.codexLog,
+      fixture.agyLog,
+      join(fixture.root, "result.txt"),
+      join(fixture.root, "result.txt.err"),
+    ]) {
+      rmSync(file, { force: true });
     }
+    writeFileSync(join(fixture.home, ".codex/config.toml"), config);
+  });
+  after(() => rmSync(fixture.root, { recursive: true, force: true }));
+
+  it("preflight 완료 표시만 상속한 자식도 plan 없이 route-backed Codex를 실행한다", () => {
+    const result = runRouteWithPreflightLoaded(fixture);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stderr, /unbound variable|바인딩 해제한 변수/);
+    assert.match(readIfPresent(fixture.codexLog), /^exec\b/m);
+    assert.match(result.stdout, /CODEX_EXEC/);
   });
 
   it("TFX_DISABLE_CODEX=1이면 Codex worker는 실행하지 않고 허용된 Antigravity로만 전환한다", () => {
-    const fixture = createHeadlessFixture();
-    try {
-      const outcome = runCodexHeadless(fixture, { TFX_DISABLE_CODEX: "1" });
+    const outcome = runCodexHeadless(fixture, { TFX_DISABLE_CODEX: "1" });
 
-      assert.equal(outcome.result.status, 0, outcome.stderr);
-      assert.match(outcome.stderr, /TFX_DISABLE_CODEX=1: codex 선택 차단/);
-      assert.equal(readIfPresent(fixture.codexLog), "");
-      assert.match(readIfPresent(fixture.agyLog), /--print/);
-      assert.match(outcome.stdout, /AGY_EXEC/);
-      assert.doesNotMatch(outcome.command, /codex exec/);
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
+    assert.equal(outcome.result.status, 0, outcome.stderr);
+    assert.match(outcome.stderr, /TFX_DISABLE_CODEX=1: codex 선택 차단/);
+    assert.equal(readIfPresent(fixture.codexLog), "");
+    assert.match(readIfPresent(fixture.agyLog), /--print/);
+    assert.match(outcome.stdout, /AGY_EXEC/);
+    assert.doesNotMatch(outcome.command, /codex exec/);
   });
 
   it("미차단 Codex worker는 route-backed 경로에서 정상 실행한다", () => {
-    const fixture = createHeadlessFixture();
-    try {
-      const outcome = runCodexHeadless(fixture);
+    const outcome = runCodexHeadless(fixture);
 
-      assert.equal(outcome.result.status, 0, outcome.stderr);
-      assert.match(
-        readIfPresent(fixture.codexLog),
-        /^exec\b/m,
-        `stdout=${outcome.stdout}\nstderr=${outcome.stderr}`,
-      );
-      assert.equal(readIfPresent(fixture.agyLog), "");
-      assert.match(outcome.stdout, /CODEX_EXEC/);
-      assert.match(outcome.command, /tfx-route\.sh/);
-      assert.doesNotMatch(outcome.command, /codex exec/);
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
+    assert.equal(outcome.result.status, 0, outcome.stderr);
+    assert.match(
+      readIfPresent(fixture.codexLog),
+      /^exec\b/m,
+      `stdout=${outcome.stdout}\nstderr=${outcome.stderr}`,
+    );
+    assert.equal(readIfPresent(fixture.agyLog), "");
+    assert.match(outcome.stdout, /CODEX_EXEC/);
+    assert.match(outcome.command, /tfx-route\.sh/);
+    assert.doesNotMatch(outcome.command, /codex exec/);
   });
 
   it("부모 XDG_CONFIG_HOME의 차단 프로파일을 상속하지 않는다", () => {
-    const fixture = createHeadlessFixture();
     const parentConfigHome = mkdtempSync(
       join(tmpdir(), "tfx-headless-parent-profile-"),
     );
@@ -257,26 +267,20 @@ describe("headless Codex disable gate", { timeout: 90_000 }, () => {
         process.env.XDG_CONFIG_HOME = previousXdgConfigHome;
       }
       rmSync(parentConfigHome, { recursive: true, force: true });
-      rmSync(fixture.root, { recursive: true, force: true });
     }
   });
 
   it("양쪽 CLI가 차단되면 Claude native로 강등하지 않고 fail-loud 한다", () => {
-    const fixture = createHeadlessFixture();
-    try {
-      const outcome = runCodexHeadless(fixture, {
-        TFX_DISABLE_CODEX: "1",
-        TFX_DISABLE_ANTIGRAVITY: "1",
-      });
+    const outcome = runCodexHeadless(fixture, {
+      TFX_DISABLE_CODEX: "1",
+      TFX_DISABLE_ANTIGRAVITY: "1",
+    });
 
-      assert.equal(outcome.result.status, 78, outcome.stderr);
-      assert.match(outcome.stderr, /TFX_DISABLE_CODEX=1: codex 선택 차단/);
-      assert.match(outcome.stderr, /허용되고 사용 가능한 외부 CLI가 없습니다/);
-      assert.equal(readIfPresent(fixture.codexLog), "");
-      assert.equal(readIfPresent(fixture.agyLog), "");
-      assert.doesNotMatch(outcome.stderr, /claude-native/i);
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
+    assert.equal(outcome.result.status, 78, outcome.stderr);
+    assert.match(outcome.stderr, /TFX_DISABLE_CODEX=1: codex 선택 차단/);
+    assert.match(outcome.stderr, /허용되고 사용 가능한 외부 CLI가 없습니다/);
+    assert.equal(readIfPresent(fixture.codexLog), "");
+    assert.equal(readIfPresent(fixture.agyLog), "");
+    assert.doesNotMatch(outcome.stderr, /claude-native/i);
   });
 });

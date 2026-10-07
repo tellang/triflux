@@ -18,11 +18,19 @@ const ROUTE_SCRIPT = toBashPath(ROUTE_SCRIPT_WIN);
 const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
 );
+const HUB_ENSURE_STUB = resolve(
+  PROJECT_ROOT,
+  "tests",
+  "fixtures",
+  "no-op-hub-ensure.mjs",
+);
 
 // Isolate tfx-route's codex config-swap so the full-route invocations below
 // never mutate the real ~/.codex/config.toml under concurrency.
 const isolatedCodex = makeIsolatedCodexConfig();
 after(() => isolatedCodex.cleanup());
+const isolatedHome = fs.mkdtempSync(resolve(os.tmpdir(), "tfx-quota-home-"));
+after(() => fs.rmSync(isolatedHome, { recursive: true, force: true }));
 
 // 헬퍼: bash 스크립트에서 특정 함수 내용만 추출
 function extractFunction(scriptPath, funcName) {
@@ -56,7 +64,7 @@ function out(result) {
 }
 
 describe("tfx-route.sh — Quota Functions", () => {
-  let tmpStdout, tmpStderr, dummyBashSource;
+  let tmpStdout, tmpStderr, dummyBashSource, fakeCodex;
   const detectFunc = extractFunction(ROUTE_SCRIPT_WIN, "detect_quota_exceeded");
   const agyHeadlessFunc = extractFunction(
     ROUTE_SCRIPT_WIN,
@@ -83,19 +91,53 @@ ${rerouteFunc}`;
     tmpStdout = resolve(os.tmpdir(), `tfx-quota-stdout-${Date.now()}.log`);
     tmpStderr = resolve(os.tmpdir(), `tfx-quota-stderr-${Date.now()}.log`);
     dummyBashSource = resolve(os.tmpdir(), `tfx-dummy-route-${Date.now()}.sh`);
+    fakeCodex = resolve(os.tmpdir(), `fake-codex-quota-${Date.now()}.sh`);
 
     // auto_reroute에서 exec bash "${BASH_SOURCE[0]}" 호출을 가로채기 위한 더미 스크립트
     fs.writeFileSync(
       dummyBashSource,
       'echo "REROUTED: MODE=$TFX_CLI_MODE FROM=$TFX_REROUTED_FROM"',
     );
+    fs.writeFileSync(
+      fakeCodex,
+      '#!/usr/bin/env bash\necho "Error: quota exceeded"\nexit 1\n',
+    );
+    fs.chmodSync(fakeCodex, 0o755);
   });
 
   after(() => {
     if (fs.existsSync(tmpStdout)) fs.unlinkSync(tmpStdout);
     if (fs.existsSync(tmpStderr)) fs.unlinkSync(tmpStderr);
     if (fs.existsSync(dummyBashSource)) fs.unlinkSync(dummyBashSource);
+    if (fs.existsSync(fakeCodex)) fs.unlinkSync(fakeCodex);
   });
+
+  function runFullRoute(extraEnv) {
+    return spawnSync(BASH_EXE, [ROUTE_SCRIPT, "executor", "test"], {
+      cwd: PROJECT_ROOT,
+      encoding: "utf8",
+      env: {
+        ...routeCliPolicyEnv(),
+        HOME: isolatedHome,
+        USERPROFILE: isolatedHome,
+        XDG_CONFIG_HOME: resolve(isolatedHome, ".config"),
+        TRIFLUX_TEST_HOME: isolatedHome,
+        TFX_CODEX_CONFIG: isolatedCodex.path,
+        TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
+        TFX_HUB_URL: "",
+        TFX_HEARTBEAT: "0",
+        TFX_MCP_HEALTH_CHECK: "0",
+        TFX_CTO_NORTH_STAR: "0",
+        TFX_CLI_MODE: "auto",
+        TFX_PREFLIGHT_LOADED: "1",
+        TFX_CODEX_OK: "1",
+        TFX_ANTIGRAVITY_OK: "0",
+        CODEX_BIN: fakeCodex,
+        TFX_TMP: os.tmpdir(),
+        ...extraEnv,
+      },
+    });
+  }
 
   describe("detect_quota_exceeded 테스트", () => {
     it('1. stdout에 "quota exceeded" 포함 시 감지 (exit 0)', () => {
@@ -344,34 +386,7 @@ auto_reroute codex
 
   describe("전체 스크립트 연동 테스트 (TFX_QUOTA_REROUTE 및 재귀 방지)", () => {
     it("6. TFX_QUOTA_REROUTE=0 시 detect는 동작하되 auto_reroute 미호출", () => {
-      // 강제로 쿼타 초과를 발생시키는 가짜 codex CLI 생성
-      const fakeCodex = resolve(
-        os.tmpdir(),
-        `fake-codex-quota-${Date.now()}.sh`,
-      );
-      fs.writeFileSync(
-        fakeCodex,
-        '#!/usr/bin/env bash\necho "Error: quota exceeded"\nexit 1\n',
-      );
-      fs.chmodSync(fakeCodex, 0o755);
-
-      const result = spawnSync(BASH_EXE, [ROUTE_SCRIPT, "executor", "test"], {
-        cwd: PROJECT_ROOT,
-        encoding: "utf8",
-        env: {
-          ...routeCliPolicyEnv(),
-          TFX_CODEX_CONFIG: isolatedCodex.path,
-          TFX_CLI_MODE: "auto",
-          TFX_PREFLIGHT_LOADED: "1",
-          TFX_CODEX_OK: "1",
-          TFX_ANTIGRAVITY_OK: "0",
-          TFX_QUOTA_REROUTE: "0",
-          CODEX_BIN: fakeCodex,
-          TFX_TMP: os.tmpdir(),
-        },
-      });
-
-      fs.unlinkSync(fakeCodex);
+      const result = runFullRoute({ TFX_QUOTA_REROUTE: "0" });
 
       assert.notEqual(result.status, 0); // 에러로 인해 종료되어야 함
       // TFX_QUOTA_REROUTE=0 조건에 의해 auto_reroute로 넘어가지 않아야 함
@@ -380,33 +395,7 @@ auto_reroute codex
     });
 
     it("3. TFX_REROUTED_FROM 설정 시 중복 재귀 전환 방지", () => {
-      const fakeCodex = resolve(
-        os.tmpdir(),
-        `fake-codex-reroute-${Date.now()}.sh`,
-      );
-      fs.writeFileSync(
-        fakeCodex,
-        '#!/usr/bin/env bash\necho "Error: quota exceeded"\nexit 1\n',
-      );
-      fs.chmodSync(fakeCodex, 0o755);
-
-      const result = spawnSync(BASH_EXE, [ROUTE_SCRIPT, "executor", "test"], {
-        cwd: PROJECT_ROOT,
-        encoding: "utf8",
-        env: {
-          ...routeCliPolicyEnv(),
-          TFX_CODEX_CONFIG: isolatedCodex.path,
-          TFX_CLI_MODE: "auto",
-          TFX_PREFLIGHT_LOADED: "1",
-          TFX_CODEX_OK: "1",
-          TFX_ANTIGRAVITY_OK: "0",
-          TFX_REROUTED_FROM: "gemini", // 이전에 gemini에서 넘어왔음을 가정
-          CODEX_BIN: fakeCodex,
-          TFX_TMP: os.tmpdir(),
-        },
-      });
-
-      fs.unlinkSync(fakeCodex);
+      const result = runFullRoute({ TFX_REROUTED_FROM: "gemini" });
 
       assert.notEqual(result.status, 0);
       assert.doesNotMatch(out(result), /\[tfx-quota\].*자동 전환/);
