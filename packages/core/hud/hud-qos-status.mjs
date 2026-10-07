@@ -5,6 +5,8 @@
 // 각 모듈에서 색상, 터미널, 프로바이더, 렌더러를 가져와 조합한다.
 // ============================================================================
 
+import { statSync } from "node:fs";
+import { join } from "node:path";
 import {
   resolveHudCliVisibility,
   shouldRenderGeminiFallbackRow,
@@ -22,6 +24,8 @@ import {
 import {
   ACCOUNTS_CONFIG_PATH,
   ACCOUNTS_STATE_PATH,
+  CLAUDE_BAND_MARKER_DIR,
+  CLAUDE_BAND_MARKER_TTL_MS,
   CLAUDE_REFRESH_FLAG,
   CODEX_REFRESH_FLAG,
   GEMINI_FLASH_POOL,
@@ -237,7 +241,11 @@ async function main() {
     session: geminiSession,
   };
 
-  const rows = [...getClaudeRows(CURRENT_TIER, contextView, claudeUsage)];
+  const rows = [
+    ...(isClaudeBandActive(stdin?.session_id)
+      ? []
+      : getClaudeRows(CURRENT_TIER, contextView, claudeUsage)),
+  ];
 
   // 정책으로 생략된 행이 있으면 뒤따르는 행의 인덱스가 밀린다. dim 래핑이
   // 하드코딩 인덱스를 쓰지 않도록 실제 위치를 기록해 둔다.
@@ -357,3 +365,14 @@ main().catch(() => {
     `\x1b[0m${bold(claudeOrange("c"))}: ${dim("5h:")}${green("0%")} ${dim("(n/a)")} ${dim("1w:")}${green("0%")} ${dim("(n/a)")} ${dim("|")} ${dim("ctx:")}${green("0%")}\n`,
   );
 });
+
+// 프롬프트 위 band 가 같은 정보를 그리는 세션에서는 Claude 행을 중복해 그리지 않는다.
+function isClaudeBandActive(sessionId) {
+  if (!sessionId) return false;
+  try {
+    const { mtimeMs } = statSync(join(CLAUDE_BAND_MARKER_DIR, sessionId));
+    return Date.now() - mtimeMs < CLAUDE_BAND_MARKER_TTL_MS;
+  } catch {
+    return false;
+  }
+}

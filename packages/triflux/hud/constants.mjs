@@ -28,6 +28,16 @@ export const ACCOUNTS_STATE_PATH = join(
   "cli_accounts_state.json",
 );
 
+// triflux-mods 의 Claude band 가 세션마다 갱신하는 표식. 있으면 Claude 행을 뺀다.
+export const CLAUDE_BAND_MARKER_DIR = join(
+  homedir(),
+  ".claude",
+  "cache",
+  "triflux",
+  "claude-band",
+);
+export const CLAUDE_BAND_MARKER_TTL_MS = 12 * 60 * 60 * 1000;
+
 // tfx-multi 상태 (v2.2 HUD 통합)
 export const TEAM_STATE_PATH = join(
   homedir(),
