@@ -1,9 +1,9 @@
 import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { test } from "node:test";
+import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
@@ -84,8 +84,13 @@ function createRouteHome() {
   return home;
 }
 
+let home;
+before(() => {
+  home = createRouteHome();
+});
+after(() => rmSync(home, { recursive: true, force: true }));
+
 function runBash(command, extraEnv = {}) {
-  const home = createRouteHome();
   return spawnSync(BASH_EXE, ["-c", command], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
@@ -107,12 +112,15 @@ function runBash(command, extraEnv = {}) {
       TFX_NO_CLAUDE_NATIVE: "0",
       // Route fixtures must not inherit preflight observations from the runner.
       // This file's route assertions all exercise the Antigravity path.
+      TFX_PREFLIGHT_LOADED: "1",
       TFX_CODEX_OK: "0",
       TFX_ANTIGRAVITY_OK: "1",
       TFX_DISABLE_CODEX: "0",
       TFX_DISABLE_ANTIGRAVITY: "0",
       TFX_CODEX_TRANSPORT: "exec",
       TFX_MCP_HEALTH_CHECK: "0",
+      // 프롬프트 전달 검증에는 heartbeat 대기가 필요 없다.
+      TFX_HEARTBEAT: "0",
       ...extraEnv,
     }),
   });

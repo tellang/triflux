@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, it } from "node:test";
+import { after, afterEach, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -59,27 +59,23 @@ function writeRetrySnapshot(file, profile) {
   );
 }
 
-function runRoute({
-  snapshot,
-  agent = "executor",
-  env: envOverrides = {},
-  profileFiles = {},
-} = {}) {
-  const dir = makeTempDir();
+let fixture;
+before(() => {
+  const dir = mkdtempSync(path.join(tmpdir(), "tfx-route-retry-profile-"));
   const binDir = path.join(dir, "bin");
   const home = path.join(dir, "home");
   const tfxTmp = path.join(dir, "tmp");
   const capture = path.join(dir, "codex-args.json");
   const fakeCodex = path.join(binDir, "codex");
-  const fakeHubEnsure = path.join(dir, "hub-ensure.mjs");
+  const fakeHubEnsure = path.join(
+    REPO_ROOT,
+    "tests/fixtures/no-op-hub-ensure.mjs",
+  );
 
   mkdirSync(binDir, { recursive: true });
   mkdirSync(home, { recursive: true });
   mkdirSync(path.join(home, ".codex"), { recursive: true });
   mkdirSync(tfxTmp, { recursive: true });
-  for (const [name, content] of Object.entries(profileFiles)) {
-    writeFileSync(path.join(home, ".codex", `${name}.config.toml`), content);
-  }
   writeFileSync(path.join(dir, ".keep"), "");
   writeExecutable(
     fakeCodex,
@@ -97,7 +93,25 @@ cat >/dev/null || true
 echo "fake codex ok"
 `,
   );
-  writeFileSync(fakeHubEnsure, "process.exit(0);\n", "utf8");
+
+  fixture = { dir, binDir, home, tfxTmp, capture, fakeCodex, fakeHubEnsure };
+});
+after(() => rmSync(fixture.dir, { recursive: true, force: true }));
+
+function runRoute({
+  snapshot,
+  agent = "executor",
+  env: envOverrides = {},
+  profileFiles = {},
+} = {}) {
+  const { binDir, home, tfxTmp, capture, fakeCodex, fakeHubEnsure } = fixture;
+  // 공유 준비가 이전 실행의 프로파일과 argv를 남기지 않게 한다.
+  rmSync(path.join(home, ".codex"), { recursive: true, force: true });
+  mkdirSync(path.join(home, ".codex"));
+  rmSync(capture, { force: true });
+  for (const [name, content] of Object.entries(profileFiles)) {
+    writeFileSync(path.join(home, ".codex", `${name}.config.toml`), content);
+  }
 
   const env = {
     ...process.env,
@@ -114,6 +128,11 @@ echo "fake codex ok"
     TFX_HUB_OK: "1",
     TFX_HUB_ENSURE_SCRIPT: fakeHubEnsure,
     TFX_HEARTBEAT: "0",
+    TFX_MCP_HEALTH_CHECK: "0",
+    TFX_HARD_CEILING_SEC: "0",
+    TFX_TEAM_TASK_ID: "",
+    TFX_TEAM_AGENT_NAME: "",
+    TFX_TEAM_LEAD_NAME: "",
     TFX_PREFLIGHT_LOADED: "1",
     TFX_TMP: tfxTmp,
     TFX_CODEX_PROFILE: "auto",
@@ -161,10 +180,26 @@ function configValues(args, key) {
 }
 
 describe("tfx-route retry snapshot profile plumbing", () => {
-  it("does not change codex argv when no retry snapshot is provided", () => {
-    const args = runRoute();
+  it("keeps default argv without a retry snapshot despite ambient disable flags", () => {
+    const dir = makeTempDir();
+    const configRoot = path.join(dir, "ambient-config");
+    const profileDir = path.join(configRoot, "triflux");
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(
+      path.join(profileDir, "machine-profile.env"),
+      "TFX_DISABLE_CODEX=1\nTFX_DISABLE_ANTIGRAVITY=1\n",
+      "utf8",
+    );
 
-    assert.deepEqual(profileValues(args), ["gpt61_sol_high"]);
+    const previousConfigHome = process.env.XDG_CONFIG_HOME;
+    try {
+      process.env.XDG_CONFIG_HOME = configRoot;
+      const args = runRoute();
+      assert.deepEqual(profileValues(args), ["gpt61_sol_high"]);
+    } finally {
+      if (previousConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previousConfigHome;
+    }
   });
 
   it("uses bridge cliInvocation.argv from TFX_RETRY_SNAPSHOT as the single codex profile", () => {
@@ -177,19 +212,35 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     assert.deepEqual(profileValues(args), ["gpt6_astra_xhigh"]);
   });
 
-  it("applies an explicit max profile override", () => {
-    const args = runRoute({ env: { TFX_CODEX_PROFILE: "max" } });
+  it("explicit max overrides a mutated ultra profile in final argv", () => {
+    const args = runRoute({
+      env: { TFX_CODEX_PROFILE: "max" },
+      profileFiles: {
+        gpt6_astra_max:
+          'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
+      },
+    });
 
     assert.deepEqual(profileValues(args), ["gpt6_astra_max"]);
+    assert.equal(configValues(args, "model_reasoning_effort").at(-1), '"max"');
+    assert.equal(configValues(args, "model").at(-1), '"gpt-6-astra"');
   });
 
   it("allows ultra only for a top-level deep-executor", () => {
     const args = runRoute({
       agent: "deep-executor",
       env: { TFX_CODEX_PROFILE: "ultra" },
+      profileFiles: {
+        gpt6_astra_ultra:
+          'model = "gpt-6-astra"\nmodel_reasoning_effort = "max"\n',
+      },
     });
 
     assert.deepEqual(profileValues(args), ["gpt6_astra_ultra"]);
+    assert.equal(
+      configValues(args, "model_reasoning_effort").at(-1),
+      '"ultra"',
+    );
     assert.equal(configValues(args, "model").at(-1), '"gpt-6-astra"');
   });
 
@@ -285,56 +336,15 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     assert.deepEqual(profileValues(missingCustom), ["gpt61_sol_high"]);
   });
 
-  it("final shell argv enforces concrete max/ultra semantics over mutable profile files", () => {
-    const mutatedMax =
-      'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n';
-    const mutatedUltra =
-      'model = "gpt-6-astra"\nmodel_reasoning_effort = "max"\n';
-    const mutatedDefault =
-      'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "ultra"\n';
-
-    const explicitMax = runRoute({
-      env: { TFX_CODEX_PROFILE: "max" },
-      profileFiles: { gpt6_astra_max: mutatedMax },
-    });
-    const explicitUltra = runRoute({
-      agent: "deep-executor",
-      env: { TFX_CODEX_PROFILE: "ultra" },
-      profileFiles: { gpt6_astra_ultra: mutatedUltra },
-    });
-    const nestedDefault = runRoute({
+  it("nested default overrides a mutated ultra profile in final argv", () => {
+    const args = runRoute({
       env: { TFX_TEAM_NAME: "nested-team" },
-      profileFiles: { gpt61_sol_high: mutatedDefault },
+      profileFiles: {
+        gpt61_sol_high:
+          'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "ultra"\n',
+      },
     });
 
-    assert.equal(
-      configValues(explicitMax, "model_reasoning_effort").at(-1),
-      '"max"',
-    );
-    assert.equal(configValues(explicitMax, "model").at(-1), '"gpt-6-astra"');
-    assert.equal(
-      configValues(explicitUltra, "model_reasoning_effort").at(-1),
-      '"ultra"',
-    );
-    assert.equal(
-      configValues(nestedDefault, "model_reasoning_effort").at(-1),
-      '"max"',
-    );
-  });
-
-  it("does not inherit CLI disable flags from an ambient machine profile", () => {
-    const dir = makeTempDir();
-    const configRoot = path.join(dir, "ambient-config");
-    const profileDir = path.join(configRoot, "triflux");
-    mkdirSync(profileDir, { recursive: true });
-    writeFileSync(
-      path.join(profileDir, "machine-profile.env"),
-      "TFX_DISABLE_CODEX=1\nTFX_DISABLE_ANTIGRAVITY=1\n",
-      "utf8",
-    );
-
-    const args = runRoute({ env: { XDG_CONFIG_HOME: configRoot } });
-
-    assert.deepEqual(profileValues(args), ["gpt61_sol_high"]);
+    assert.equal(configValues(args, "model_reasoning_effort").at(-1), '"max"');
   });
 });

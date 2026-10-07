@@ -10,7 +10,13 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
@@ -124,6 +130,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     }
   });
 
+  // 정수 heartbeat tick은 유지하고 테스트의 실제 대기만 줄인다.
   function buildStallScript({ killMode, stdoutLog, stderrLog, bridgeScript }) {
     const hb = extractFunction("heartbeat_monitor");
     const findForks = extractFunction("_find_fork_pids");
@@ -134,6 +141,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     return [
       "#!/usr/bin/env bash",
       "set -u",
+      "sleep() { command sleep 0.2; }",
       "export TFX_HEARTBEAT=1",
       "export TFX_HEARTBEAT_INTERVAL=1",
       "export TFX_STALL_THRESHOLD=2",
@@ -153,24 +161,45 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
       rolloutActivity,
       hb,
       "",
-      "sleep 30 &",
+      "command sleep 30 &",
       "CHILD_PID=$!",
       'echo "CHILD_PID=$CHILD_PID" >&2',
       "",
       'heartbeat_monitor "$CHILD_PID" 1 2 &',
       "HB_PID=$!",
+      "CHILD_KILLED=0",
       "",
       "for i in 1 2 3 4 5 6 7 8 9 10; do",
       "  sleep 1",
       '  if ! kill -0 "$CHILD_PID" 2>/dev/null; then',
-      '    echo "CHILD_KILLED_AFTER=${i}s" >&2',
+      '    echo "CHILD_KILLED_AFTER_TICK=$i" >&2',
+      "    CHILD_KILLED=1",
       "    break",
       "  fi",
       "done",
       "",
+      ...(killMode === "classify"
+        ? [
+            'if ! kill -0 "$CHILD_PID" 2>/dev/null; then',
+            '  echo "RESULT=classify_killed_child" >&2',
+            '  kill "$HB_PID" "$CHILD_PID" 2>/dev/null || true',
+            '  wait "$HB_PID" "$CHILD_PID" 2>/dev/null || true',
+            "  exit 1",
+            "fi",
+          ]
+        : [
+            'if [[ "$CHILD_KILLED" -ne 1 ]]; then',
+            '  echo "RESULT=heartbeat_did_not_kill_child" >&2',
+            '  kill "$HB_PID" "$CHILD_PID" 2>/dev/null || true',
+            '  wait "$HB_PID" "$CHILD_PID" 2>/dev/null || true',
+            "  exit 1",
+            "fi",
+          ]),
+      "",
       'kill "$HB_PID" 2>/dev/null || true',
       'wait "$HB_PID" 2>/dev/null || true',
       'kill "$CHILD_PID" 2>/dev/null || true',
+      'wait "$CHILD_PID" 2>/dev/null || true',
       "",
       'if kill -0 "$CHILD_PID" 2>/dev/null; then',
       '  echo "RESULT=child_still_alive" >&2',
@@ -186,6 +215,8 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     codexHome,
     stdoutLog,
     stderrLog,
+    evidenceLog,
+    stopFile,
   }) {
     const hb = extractFunction("heartbeat_monitor");
     const findForks = extractFunction("_find_fork_pids");
@@ -193,6 +224,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     return [
       "#!/usr/bin/env bash",
       "set -u",
+      "sleep() { command sleep 0.2; }",
       "export TFX_HEARTBEAT=1",
       "export TFX_HEARTBEAT_INTERVAL=1",
       "export TFX_STALL_THRESHOLD=2",
@@ -202,6 +234,8 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
       `export CODEX_HOME='${codexHome}'`,
       `STDOUT_LOG='${stdoutLog}'`,
       `STDERR_LOG='${stderrLog}'`,
+      `EVIDENCE_LOG='${evidenceLog}'`,
+      `STOP_FILE='${stopFile}'`,
       "TIMESTAMP=$(date +%s)",
       "",
       findForks,
@@ -214,23 +248,32 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
       ': > "$rollout_log"',
       "(",
       '  exec 3>>"$rollout_log"',
-      "  for i in 1 2 3 4 5; do",
+      "  for i in {1..50}; do",
       "    sleep 1",
       '    printf \'{"event":"tick","i":%s}\\n\' "$i" >&3',
+      '    [[ -f "$STOP_FILE" ]] && break',
       "  done",
       ") &",
       "CHILD_PID=$!",
       "",
-      'heartbeat_monitor "$CHILD_PID" 1 2 &',
+      'heartbeat_monitor "$CHILD_PID" 1 2 2>"$EVIDENCE_LOG" &',
       "HB_PID=$!",
       "",
+      "ACTIVE_COUNT=0",
+      "for i in {1..50}; do",
+      '  ACTIVE_COUNT=$(grep -c "status=active" "$EVIDENCE_LOG" 2>/dev/null || true)',
+      '  [[ "$ACTIVE_COUNT" -ge 4 ]] && break',
+      "  sleep 1",
+      "done",
+      ': > "$STOP_FILE"',
       'wait "$CHILD_PID"',
       "child_status=$?",
       'kill "$HB_PID" 2>/dev/null || true',
       'wait "$HB_PID" 2>/dev/null || true',
+      'cat "$EVIDENCE_LOG" >&2',
       "",
-      'if [[ "$child_status" -ne 0 ]]; then',
-      '  echo "RESULT=child_killed status=$child_status" >&2',
+      'if [[ "$child_status" -ne 0 || "$ACTIVE_COUNT" -lt 4 ]]; then',
+      '  echo "RESULT=child_killed status=$child_status active=$ACTIVE_COUNT" >&2',
       "  exit 1",
       "fi",
       'echo "RESULT=child_completed" >&2',
@@ -249,6 +292,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     return [
       "#!/usr/bin/env bash",
       "set -u",
+      "sleep() { command sleep 0.2; }",
       "export TFX_HEARTBEAT=1",
       "export TFX_HEARTBEAT_INTERVAL=1",
       "export TFX_STALL_THRESHOLD=2",
@@ -270,29 +314,41 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
       ': > "$rollout_log"',
       "(",
       '  exec 3>>"$rollout_log"',
-      "  for i in 1 2 3 4 5 6 7 8; do",
+      "  for i in {1..50}; do",
       "    sleep 1",
       '    printf \'{"event":"unrelated","i":%s}\\n\' "$i" >&3',
       "  done",
       ") &",
       "WRITER_PID=$!",
       "",
-      "sleep 30 &",
+      "command sleep 30 &",
       "CHILD_PID=$!",
       'heartbeat_monitor "$CHILD_PID" 1 2 &',
       "HB_PID=$!",
+      "CHILD_KILLED=0",
+      "WRITER_ALIVE_AT_KILL=0",
       "",
       "for i in 1 2 3 4 5 6 7 8 9 10; do",
       "  sleep 1",
       '  if ! kill -0 "$CHILD_PID" 2>/dev/null; then',
-      '    echo "CHILD_KILLED_AFTER=${i}s" >&2',
+      '    echo "CHILD_KILLED_AFTER_TICK=$i" >&2',
+      "    CHILD_KILLED=1",
+      '    kill -0 "$WRITER_PID" 2>/dev/null && WRITER_ALIVE_AT_KILL=1',
       "    break",
       "  fi",
       "done",
       "",
+      'if [[ "$CHILD_KILLED" -ne 1 || "$WRITER_ALIVE_AT_KILL" -ne 1 || ! -s "$rollout_log" ]]; then',
+      '  echo "RESULT=unrelated_activity_not_observed" >&2',
+      '  kill "$HB_PID" "$WRITER_PID" "$CHILD_PID" 2>/dev/null || true',
+      '  wait "$HB_PID" "$WRITER_PID" "$CHILD_PID" 2>/dev/null || true',
+      "  exit 1",
+      "fi",
+      "",
       'kill "$HB_PID" "$WRITER_PID" 2>/dev/null || true',
       'wait "$HB_PID" "$WRITER_PID" 2>/dev/null || true',
       'kill "$CHILD_PID" 2>/dev/null || true',
+      'wait "$CHILD_PID" 2>/dev/null || true',
       "",
       'if kill -0 "$CHILD_PID" 2>/dev/null; then',
       '  echo "RESULT=child_still_alive" >&2',
@@ -347,6 +403,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
       cwd: REPO_ROOT,
       timeout: 20_000,
     });
+    assert.equal(result.status, 0, result.stderr);
     // classify 는 kill 안 함 → child 는 우리가 수동 kill 하므로 terminated.
     // 중요한 건 STALL_KILL 은 안 뜨고 STALL_CLASSIFY 가 떴어야 한다.
     assert.match(
@@ -411,15 +468,24 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
   it("Codex rollout jsonl activity resets stall detection when stdout/stderr stay empty (#267)", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "tfx-codex-rollout-"));
     cleanupDirs.push(dir);
-    const codexHome = path.join(dir, "codex-home");
+    const codexHome = path.join(realpathSync.native(dir), "codex-home");
     const stdoutLog = path.join(dir, "stdout.log");
     const stderrLog = path.join(dir, "stderr.log");
+    const evidenceLog = path.join(dir, "heartbeat.log");
+    const stopFile = path.join(dir, "stop");
     const scriptFile = path.join(dir, "run.sh");
     writeFileSync(stdoutLog, "");
     writeFileSync(stderrLog, "");
+    writeFileSync(evidenceLog, "");
     writeFileSync(
       scriptFile,
-      buildCodexRolloutActivityScript({ codexHome, stdoutLog, stderrLog }),
+      buildCodexRolloutActivityScript({
+        codexHome,
+        stdoutLog,
+        stderrLog,
+        evidenceLog,
+        stopFile,
+      }),
     );
     const result = spawnSync("bash", [scriptFile], {
       encoding: "utf8",
@@ -442,7 +508,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
   it("unrelated Codex rollout activity does not hide a stalled worker (#267)", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "tfx-codex-rollout-scope-"));
     cleanupDirs.push(dir);
-    const codexHome = path.join(dir, "codex-home");
+    const codexHome = path.join(realpathSync.native(dir), "codex-home");
     const stdoutLog = path.join(dir, "stdout.log");
     const stderrLog = path.join(dir, "stderr.log");
     const scriptFile = path.join(dir, "run.sh");
