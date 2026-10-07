@@ -1365,12 +1365,18 @@ function ensureCloakBrowser({
   try {
     execFileSyncFn(
       "npm",
-      ["install", "--no-save", "cloakbrowser", "playwright-core"],
+      // 같은 패키지의 postinstall(setup)을 다시 부르면 무한 재귀가 된다.
+      [
+        "install",
+        "--no-save",
+        "--ignore-scripts",
+        "cloakbrowser",
+        "playwright-core",
+      ],
       {
         cwd: PLUGIN_ROOT,
         stdio: "ignore",
-        // 이 npm install 이 같은 패키지의 postinstall(setup)을 다시 부르면 무한 재귀가 된다.
-        env: { ...env, TFX_SKIP_CLOAKBROWSER_SETUP: "1" },
+        env,
         timeout: 120_000,
       },
     );
@@ -2695,7 +2701,17 @@ const isMain =
     process.argv[1].replace(/\\/g, "/").split("/").pop(),
   );
 
-if (isMain) {
+// 저장소 체크아웃의 npm ci/install 이 실제 HOME 을 바꾸지 않게, postinstall 은
+// node_modules 아래 설치본에서만 setup 한다.
+const isCheckoutPostinstall =
+  process.env.npm_lifecycle_event === "postinstall" &&
+  !PLUGIN_ROOT.split(/[\\/]/).includes("node_modules");
+
+if (isMain && isCheckoutPostinstall) {
+  console.log(
+    "[tfx-setup] 저장소 체크아웃의 postinstall 은 건너뜀. 필요하면 node scripts/setup.mjs 를 직접 실행한다.",
+  );
+} else if (isMain) {
   const result = await runDeferred({ argv: process.argv.slice(2) });
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
