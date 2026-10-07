@@ -44,7 +44,11 @@
     "!references/codex-snapshots",
     "!references/gemini-snapshots",
     "CLAUDE.md",
-    "docs/assets",
+    "docs/assets/demo-multi.gif",
+    "docs/assets/logo-dark.svg",
+    "docs/assets/logo-light.svg",
+    "docs/assets/social-preview.png",
+    "docs/assets/social-preview.svg",
     "README.md",
     "README.ko.md",
     "LICENSE"
