@@ -1,5 +1,4 @@
-// hub/team/remote-session.mjs — Remote session primitives for swarm integration
-// Extracted from scripts/remote-spawn.mjs for reuse by swarm-hypervisor.
+// Remote session primitives.
 // Pure functions + SSH operations. No psmux, no WT, no CLI arg parsing.
 
 import { execFileSync } from "node:child_process";

@@ -488,68 +488,6 @@ function hasExactGbrainServe(commandLine) {
   );
 }
 
-function hasGbrainServeCommand(commandLine) {
-  return /(^|\s)gbrain\s+serve(\s|$)/i.test(commandLine.trim());
-}
-
-function hasFsmonitorDaemonCommand(commandLine) {
-  return FSMONITOR_DAEMON_PATTERN.test(commandLine);
-}
-
-function categoryForShardProcess(proc, context) {
-  const name = normalizeName(proc.name);
-  const commandLine = normalizeCommandLine(proc.commandLine);
-  const worktreePath = normalizeCommandLine(context.worktreePath || "");
-  const shardMarker = context.shardName
-    ? `.codex-swarm\\wt-${context.shardName}`
-    : "";
-  const hasWorktree = worktreePath && commandLine.includes(worktreePath);
-  const hasShardMarker = shardMarker && commandLine.includes(shardMarker);
-
-  if (name === "node.exe" || name === "node") {
-    if (hasWorktree || hasShardMarker) return "node";
-  }
-
-  if (name === "bash.exe" || name === "bash" || name === "sh") {
-    if (hasWorktree) return "bash";
-  }
-
-  if (name === "conhost.exe" || name === "conhost") {
-    if (
-      context.sessionIds?.length > 0 &&
-      context.sessionIds.some((id) => id && commandLine.includes(id))
-    ) {
-      return "conhost";
-    }
-  }
-
-  if (name === "bun.exe" || name === "bun") {
-    if ((hasWorktree || hasShardMarker) && hasGbrainServeCommand(commandLine)) {
-      return "bun";
-    }
-  }
-
-  if (name === "git.exe" || name === "git") {
-    if (
-      (hasWorktree || hasShardMarker) &&
-      hasFsmonitorDaemonCommand(commandLine)
-    ) {
-      return "git";
-    }
-  }
-
-  return null;
-}
-
-function killPid(
-  pid,
-  { killFn = process.kill, protectedPids = new Set() } = {},
-) {
-  if (protectedPids.has(pid)) return false;
-  killFn(pid, "SIGKILL");
-  return true;
-}
-
 /**
  * Return a process tree rooted at `rootPid`.
  *
@@ -728,67 +666,6 @@ export function findProcessesByCommandLine(
       if (Number.isFinite(creationMs)) result.ageMs = nowMs - creationMs;
       return result;
     });
-}
-
-/**
- * Cleanup processes associated with a swarm shard.
- *
- * Sequence: kill known top PID snapshots, scan scoped command lines, skip
- * protected PIDs, and kill only narrowly gated runtime categories.
- *
- * @param {{worktreePath?: string, sessionIds?: string[], topPids?: Array<number | {pid: number}>, runId?: string, shardName?: string, dryRun?: boolean, isWindows?: boolean, spawnSyncFn?: typeof spawnSync, killFn?: typeof process.kill, protectedPids?: Set<number>}} opts
- * @returns {{killed: number, scanned: number, skipped: number, byCategory: {node: number, bash: number, conhost: number, bun: number, git: number}}}
- */
-export function cleanupShardProcesses({
-  worktreePath,
-  sessionIds = [],
-  topPids = [],
-  runId,
-  shardName,
-  dryRun = false,
-  isWindows = IS_WINDOWS,
-  spawnSyncFn = spawnSync,
-  killFn = process.kill,
-  protectedPids,
-} = {}) {
-  const protectedSet = getProtectedPids({
-    protectedPids,
-    isWindows,
-    spawnSyncFn,
-    includeAncestorScan: true,
-  });
-  const byCategory = { node: 0, bash: 0, conhost: 0, bun: 0, git: 0 };
-  let killed = 0;
-  let skipped = 0;
-
-  if (!dryRun && topPids.length > 0) {
-    killed += killProcessTreeSnapshot(topPids, {
-      killFn,
-      protectedPids: protectedSet,
-    }).killed;
-  }
-
-  const scanned = getProcessSnapshot({ isWindows, spawnSyncFn });
-
-  for (const proc of scanned) {
-    const category = categoryForShardProcess(proc, {
-      worktreePath,
-      sessionIds,
-      shardName,
-    });
-    if (!category) continue;
-    byCategory[category]++;
-    if (protectedSet.has(proc.pid)) {
-      skipped++;
-      continue;
-    }
-    if (dryRun) continue;
-    try {
-      if (killPid(proc.pid, { killFn, protectedPids: protectedSet })) killed++;
-    } catch {}
-  }
-
-  return { killed, scanned: scanned.length, skipped, byCategory };
 }
 
 /**

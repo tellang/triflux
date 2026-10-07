@@ -1,7 +1,7 @@
 # Codex CLI 실행 컨벤션
 
 > triflux에서 Codex CLI를 사용할 때 반드시 준수해야 하는 규칙.
-> `tfx-auto --cli codex`, `tfx-auto --parallel swarm --cli codex`, `tfx-route.sh`
+> `tfx-auto --cli codex`, `tfx-route.sh`
 > 모두 이 규칙을 따른다.
 
 ## 1. 실행 방식
@@ -45,9 +45,9 @@ codex exec "$PROMPT" --dangerously-bypass-approvals-and-sandbox
 
 ### 생성
 ```bash
-psmux new-session -s "codex-swarm-{id}" -d
+psmux new-session -s "codex-{id}" -d
 BASH_WIN='C:\\Program Files\\Git\\bin\\bash.exe'
-psmux send-keys -t "codex-swarm-{id}" \
+psmux send-keys -t "codex-{id}" \
   "& '${BASH_WIN}' '${LAUNCH_DIR}\\launch-{id}.sh'" Enter
 ```
 
@@ -67,14 +67,12 @@ psmux send-keys -t "codex-swarm-{id}" \
 
 | 항목 | 규칙 |
 |------|------|
-| 경로 | `.codex-swarm/wt-{slug}` |
+| 경로 | `.worktrees/{slug}` |
 | 브랜치 | `codex/{slug}` |
 | 정리 | 머지 완료 후 `git worktree remove` + `git worktree prune` |
 | 충돌 | 브랜치 존재 시 재사용, 경로 존재 시 `-v{timestamp}` suffix |
 
-`swarm/<runId>/merge` integration branch가 다른 worktree에 이미 checkout된 경우,
-integration branch를 강제로 reset하거나 checkout하지 않는다. 해당 swarm run은
-NO-GO로 실패하며, 기존 worktree와 branch는 그대로 유지한다.
+다른 worktree에서 이미 checkout한 브랜치를 강제로 reset하거나 checkout하지 않는다. 변경 통합은 각 worktree의 검증과 리뷰 후 사람이 결정한다.
 
 ## 4. MCP tool approval
 

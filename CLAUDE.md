@@ -86,7 +86,7 @@ mac에서 위 코드가 호출돼도 일찍 반환하므로 실행되지 않는 
 <account-broker>
 ## AccountBroker (계정 브로커)
 
-conductor·headless·swarm-hypervisor가 하나의 AccountBroker 단일 인스턴스를 공유한다.
+headless 워커는 AccountBroker를 사용한다.
 
 | 항목 | 설명 |
 |------|------|
@@ -94,7 +94,6 @@ conductor·headless·swarm-hypervisor가 하나의 AccountBroker 단일 인스�
 | 사용 중 플래그 | 동일 계정 이중 임대 방지 |
 | `/broker/reload` | 장시간 세션 중 accounts.json을 다시 불러온다. 활성 임대 소유권은 다시 불러온 뒤에도 보존한다. |
 | 어댑터의 임대 없음 정책 | headless 어댑터는 브로커가 비활성·비어 있음이면 기본 CLI 인증 경로로 실행하고, 브로커가 활성인데 임대가 없으면 `circuit_open`으로 실패한다. |
-| Conductor의 임대 없음 정책 | 로컬 Conductor 세션은 `broker_no_lease`를 이벤트 로그에 남기고 생성을 계속한다. accountId가 없으므로 해제는 호출하지 않는다. |
 | 공개 스냅숏 정책 | `/broker/snapshot`과 대시보드는 `publicSnapshot()`만 사용한다. `env`, `authFile`, `profile`, `host`, 파일 경로, 가공하지 않은 실패 시각은 공개하지 않는다. |
 | 진단 이벤트 | `securityViolation`, `authSyncError`는 허브가 가린 경고 로그(`broker.security_violation`, `broker.auth_sync_error`)로 처리한다. |
 | EventEmitter 이벤트 | `lease`, `release`, `cooldown`, `tierFallback`, `circuitOpen`, `circuitClose`, `noAvailableAccounts` — HUD 연동용 |
@@ -107,7 +106,6 @@ conductor·headless·swarm-hypervisor가 하나의 AccountBroker 단일 인스�
 
 | 스킬 | 대상 | 방식 |
 |------|------|------|
-| tfx-swarm | 로컬 worktree + shard `host:` 원격 분배 | PRD별 worktree, 다중 모델·기기 |
 | tfx-remote | Claude Code 원격 | SSH → Claude Code 세션 → 내부 tfx 라우팅 |
 
 Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TTY 문제가 있다.
@@ -149,8 +147,6 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 | 모드 | 기본값 | 행이 보이는 위치 |
 |------|---------|--------------------|
 | `tfx-auto` / `tfx multi`(비대화식) | 켬 | 로컬 `claude agents` |
-| `tfx swarm` 로컬 조각 | 켬 | 로컬 `claude agents`(`Triflux swarm <shard-name>`) |
-| `tfx swarm` 원격 조각 | **건너뛰고 경고** | 해당 없음 — `registerSwarmShard()`가 host!=local일 때 `{ ok: true, skipped: true }`를 반환하고 `"remote launcher must register on that host"`만 경고한다. 원격 데몬 실제 등록은 후속 PRD다. |
 | 대화식(tmux/wt) | 끔 | 해당 없음 |
 
 감시자가 종료되면 즉시 데몬의 `sendKillBySessionId`를 실행해 오래된 행을 남기지 않는다. PRD: `.triflux/plans/native-bridge-ui-default-expansion.md`(PR #323으로 병합).
@@ -181,7 +177,7 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 
 | 파일 | 내용 |
 |------|------|
-| `.claude/rules/tfx-execution-skill-map.md` | tfx-auto / multi / swarm 실행 엔진 매핑, 격리 기준, 안티패턴 |
+| `.claude/rules/tfx-execution-skill-map.md` | tfx-auto / multi 실행 경로와 코드 변경 병렬 작업의 worktree 격리 기준 |
 | `.claude/rules/tfx-autoplan-principles.md` | gstack autoplan의 여섯 가지 결정 원칙·단계 우선순위·충돌 해소 규칙 추출본 |
 | `.claude/rules/tfx-update-logic.md` | triflux / OMC / gstack / Codex / Antigravity 업데이트 로직 |
 | `.claude/rules/tfx-stack-coexistence.md` | gstack / superpowers / triflux 공존 원칙, 레이어 분리, 의존 방향, 충돌 해소 |

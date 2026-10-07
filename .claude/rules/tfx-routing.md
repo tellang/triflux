@@ -24,8 +24,8 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 | 검증 | `/superpowers:review` + `/gstack /qa` + `/superpowers:verification-before-completion` | 코드 판정은 review, 브라우저/워크플로우 게이트는 qa, 완료 주장 전 evidence 수집은 verification. |
 | 디자인 검토 | `/gstack /design-review` | 시각/UX 판정. 코드 판정과 분리. |
 | TDD 시작 | `/superpowers:test-driven-development` | 테스트부터 짜는 흐름. 구현 전에 invoke. |
-| PRD/worktree 격리 실행 | `/tfx-auto --parallel swarm --mode consensus --isolation worktree` | PRD 별 worktree + 다중 모델/기기. 코드 변경 포함 병렬에 필수. |
-| 병렬 작업 (read-only) | `/tfx-auto --parallel N --mode deep` 또는 `/superpowers:dispatching-parallel-agents` | cwd 공유 가능한 read-only 병렬. 코드 변경 시 swarm 으로 격상. |
+| 코드 변경 병렬 실행 | 작업별 worktree와 세션을 분리하고 각 세션에서 `/tfx-auto` 실행 | Claude Agent는 `isolation: worktree` 사용 가능. |
+| 병렬 작업 (read-only) | `/tfx-auto --parallel N --mode deep` 또는 `/superpowers:dispatching-parallel-agents` | cwd 공유가 가능한 read-only 병렬. 코드 변경은 작업별 worktree를 분리. |
 | plan 실행 (체크포인트 별도) | `/superpowers:executing-plans` | 다른 세션에서 plan 을 단계별 실행. |
 | 머지 직전 정리 | `/superpowers:finishing-a-development-branch` → `/tfx-ship` 또는 `/ship` | merge/PR/cleanup 결정 후 ship. |
 | 리뷰 응답 | `/superpowers:receiving-code-review` | 검토 의견에 기술적 rigor 로 응답. blind apply 금지. |
@@ -47,7 +47,7 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 - D7: 로컬 파일·심볼은 Claude 기본 Explore 에이전트(스킬 없음); 외부·최신·공식 문서는 `tfx-research`.
 - D8: 무수식 AI slop/deslop/refactor는 host `ai-slop-cleaner`; 명시 TFX 3자 cleanup만 `tfx-auto --mode consensus`; 회고는 `retro`. “정리” 한 단어로 cleanup을 강제하지 않는다.
 - D9: web/app flow는 `qa`; code verdict는 review backend; 완료 주장은 `verification-before-completion`이 필수다.
-- D10: 명확한 직접 구현은 TDD 필요 여부 뒤 `tfx-auto`; 2+ code-changing lane은 worktree/team/swarm.
+- D10: 명확한 직접 구현은 TDD 필요 여부 뒤 `tfx-auto`; 2+ code-changing lane은 worktree와 세션을 각각 분리.
 - D11: fresh verification 없이 ship 금지. triflux release는 `tfx-ship`, 일반 release는 `ship`, 중단/재개는 context save/restore.
 
 owner availability를 실제로 검출한 경우에만 `owner unavailable → tfx-X fallback`을 명시해 fallback할 수 있다. availability가 unknown이면 추측 fallback하지 않는다.
@@ -137,23 +137,22 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 **Layer 2 — Deep** (headless 3-CLI 합의)
 
 `tfx-auto --mode deep`, `tfx-auto --mode consensus --shape consensus|debate|panel`,
-`tfx-auto --parallel swarm --mode consensus --isolation worktree`, `tfx-auto --retry ralph`
+`tfx-auto --retry ralph`
 
 **Layer 3 — Remote/병렬**
 
 | 스킬 | 용도 |
 |------|------|
 | tfx-multi | 2+개 태스크 headless 병렬 |
-| tfx-swarm | PRD별 worktree + 다중 모델(Codex/Antigravity/Claude) + 다중 기기(로컬+원격) |
 | tfx-remote | Claude Code 원격 세션 (SSH, user-state hosts.json setup 필수) |
 
 **Claude 네이티브** (CLI 불필요): tfx-setup, tfx-doctor(hub 시작·중지·상태 포함)
 
-**Headless UI default** — `tfx-auto`, `tfx multi`, `tfx swarm` 로컬 shard 의 headless 워커는 default 로 `claude agents` 패널에 노출 (`--native-bridge-ui agents`). opt-out: `--no-native-bridge-ui`. interactive (tmux/wt) 경로는 default-off. `tfx swarm` 원격 shard 는 `registerSwarmShard()` 가 warn + skip 만 하고 원격 daemon 등록은 후속 PRD. 상세 행동표는 `CLAUDE.md` 의 `<native-bridge>` 섹션. 근거(why): [ADR-0008 — headless 워커 native-bridge 기본 노출](../../docs/adr/0008-native-bridge-ui-default-on.md).
+**Headless UI default** : `tfx-auto`, `tfx multi`의 headless 워커는 default 로 `claude agents` 패널에 노출 (`--native-bridge-ui agents`). opt-out: `--no-native-bridge-ui`. interactive (tmux/wt) 경로는 default-off. 상세 행동표는 `CLAUDE.md` 의 `<native-bridge>` 섹션. 근거(why): [ADR-0008 : headless 워커 native-bridge 기본 노출](../../docs/adr/0008-native-bridge-ui-default-on.md).
 
-자원 우선순위: remote-spawn > swarm > multi > Light > 로컬 단독
+자원 우선순위: remote-spawn > multi > Light > 로컬 단독
 
-**m2 오프로드 기본 정책** — 로컬(m5)은 fanless 16GB라 램이 빠듯해지면 무거운 작업을 원격으로 넘긴다. 판단 시점은 swarm PRD 작성과 병렬 dispatch 직전이다.
+**m2 오프로드 기본 정책** : 로컬(m5)은 fanless 16GB라 램이 빠듯해지면 무거운 작업을 원격으로 넘긴다. 판단 시점은 병렬 dispatch 직전이다.
 
 - 판정 명령: `sysctl -n kern.memorystatus_vm_pressure_level` (1=normal, 2=warn, 4=critical; Stats 앱·활성 상태 보기의 메모리 색과 같은 커널 신호, 노랑=2 빨강=4)
 - 4(critical): 무조건 오프로드
@@ -161,7 +160,7 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 - 1(normal): 로컬 유지
 - sysctl 실패 시 대체 신호: `vm_stat` 5초 간격 2회 측정에서 swapouts 증가
 - 원격으로 넘기기 전에 `tfx-remote probe <host>`(구현: `node scripts/remote-spawn.mjs --probe <host>`)로 호스트 상태를 먼저 확인한다.
-- 행동: 코드 변경 shard는 PRD에 `host: m2`를 지정(tfx-swarm), 탐색·대화형은 tfx-remote로 m2 세션을 띄운다
+- 행동: 원격 코드 변경은 별도 worktree와 세션에서 실행한다. 탐색·대화형은 tfx-remote로 m2 세션을 띄운다
 - 로컬 여유가 충분하면 로컬 유지. 사용자가 로컬/원격을 명시하면 그에 따른다
 - m2 부재 시(ssh 불응) 조용히 로컬로 강등하지 말고 한 줄 알린 뒤 로컬 진행
 
@@ -175,4 +174,4 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 - 복합 의도: "구현하고 리뷰까지" → tfx-auto 실행 후 리뷰 결과 확인
 - "합의해서 비교해" 류 요청은 기본적으로 `tfx-auto --mode consensus --shape debate` 로 fold 한다
 - `ralph` 표기는 항상 `--retry ralph` mode 를 지칭. persist 스킬도 동일 의미. `--retry auto-escalate` 와 동시 사용 불가 (escalation-chain.md 규약).
-- `tfx-auto` 자동 swarm escalate: 2+ 태스크 + 코드 변경 ≥ 1건 시 자동. 명시 `--parallel N` override 가능 (warning).
+- 코드 변경 병렬 작업은 작업별 worktree와 세션을 분리하고 각 세션에서 `tfx-auto`로 실행한다.

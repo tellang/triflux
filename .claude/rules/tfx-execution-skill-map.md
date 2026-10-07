@@ -2,53 +2,20 @@
 
 ## 멘탈 모델
 
-사용자는 `tfx-auto`만 알아도 된다. auto가 내부에서 multi/swarm을 자동 선택한다. 명시 오버라이드는 `--parallel` 플래그나 `tfx swarm`·`/tfx-multi`(또는 `tfx multi 로 돌려`) 명시 토큰이다. 자연어 요청은 대화 맥락에 따라 판단한다([ADR-0023](../../docs/adr/0023-remove-command-hooks-hub-and-adopt-mods.md)).
+단일 CLI 작업은 `tfx-auto`로 실행한다. 읽기 전용 병렬 작업은 `tfx multi`를 쓸 수 있다. 코드 변경을 병렬로 진행할 때는 작업마다 worktree를 나누고 세션을 하나씩 배정한다. Claude Agent를 쓰면 `isolation: worktree`를 지정할 수 있다. 각 세션의 CLI 실행은 `tfx-auto`를 거친다.
 
-실행 전 요구사항은 host `deep-interview`, 실행 계획은 superpowers `writing-plans`로 정리한다.
-TFX 다중모델 계획·실행은 `tfx-auto --mode deep`, 목표 변환은 Claude Code 기본 `/goal`을 쓴다.
-Codex 프로필은 `~/.codex/<프로필>.config.toml`에서 직접 관리한다.
+실행 전 요구사항은 host `deep-interview`, 실행 계획은 superpowers `writing-plans`로 정리한다. TFX 다중모델 계획·실행은 `tfx-auto --mode deep`, 목표 변환은 Claude Code 기본 `/goal`을 쓴다. Codex 프로필은 `~/.codex/<프로필>.config.toml`에서 직접 관리한다.
 
-## 내부 라우팅 (auto가 판정)
+## 실행 경로
 
-| 입력 특성 | auto가 dispatch할 엔진 |
-|-----------|---------------------|
-| 1 태스크 + 작음 (S) | 직접 실행 (fire-and-forget) |
-| 1 태스크 + 큼 (M+) | pipeline (plan → PRD → exec → verify) |
-| 2+ 태스크 + 코드 변경 **없음** | **tfx-multi** (로컬 병렬; mode 생략=`auto`) |
-| 2+ 태스크 + 코드 변경 **포함** | **tfx-swarm** (worktree 격리 필수) |
-| 원격 + 코드 변경 | **tfx-swarm** (shard `host:`) |
-| 원격 + 탐색/대화형 | **tfx-remote** (세션 관리 + resume) |
+| 입력 특성 | 실행 경로 |
+|---|---|
+| 단일 작업 | `tfx-auto` |
+| 공유 cwd에서 가능한 읽기 전용 병렬 작업 | `tfx multi` 또는 Claude Agent 병렬 |
+| 병렬 코드 변경 | 작업별 worktree와 세션을 나누고 각 세션에서 `tfx-auto` 실행 |
+| 원격 탐색·대화형 작업 | `tfx-remote` |
 
-## 엔진 역할
-
-| 엔진 | 역할 | 호출 경로 |
-|------|------|----------|
-| tfx-multi | 로컬 병렬 (cwd 공유, worktree 불필요; mode 생략=`auto`) | auto 내부 dispatch 또는 `/tfx-auto --parallel N --mode deep` |
-| tfx-swarm | 격리 + 다기기 + auto merge (로컬/원격) | auto 내부 dispatch 또는 `/tfx-auto --parallel swarm --mode consensus --isolation worktree` |
-| tfx-remote | 단일 세션 관리 (list/attach/send/resume/탐색) | 직접 호출: `/tfx-remote` |
-
-## 핵심 차이 (격리 기준)
-
-| 항목 | tfx-swarm | tfx-remote | tfx-multi |
-|------|-----------|------------------|-----------|
-| Working tree 격리 | **YES** (shard별 `.codex-swarm/wt-*`) | NO (cwd 공유) | NO (cwd 공유) |
-| 원격 지원 | shard별 `host:` 자동 분배 (격리 유지) | SSH 단일 세션 | 로컬 전용 |
-| 자동 merge | YES | NO | NO |
-| 입력 | PRD 파일 | 자연어 프롬프트 | `--assign 'cli:prompt:role'` |
-
-## 안티패턴 (실제 사고)
-
-| 패턴 | 문제 | 대체 |
-|------|------|------|
-| PR conflict 해결을 `tfx-remote`로 실행 | WT 세션 `git checkout feat/X` → 메인 세션 working tree도 함께 전환 → race (2026-04-17 PR #72 사고) | `tfx-swarm` |
-| 단일 파일 수정을 `tfx-swarm`으로 실행 | PRD + worktree 오버헤드 과잉 | `tfx-auto` (단일 태스크 직접 실행) |
-| `tfx-multi`로 코드 수정 병렬 | cwd 공유 파일 race | `tfx-swarm` |
-| `tfx-auto --parallel N` 명시 + 코드 변경 | warning 후 사용자 결정 존중 | swarm 권장이지만 사용자 명시 override 시 multi 진행 (Issue #281 closed) |
-
-## 핵심 룰
-
-> **코드 변경 = tfx-swarm 우선** (로컬/원격 동일). tfx-remote는 원격 대화형/탐색 전용. multi는 로컬 공유-cwd 병렬이며, headless는 명시 선택이다 (worktree 불필요 read-only 작업).
-> **MANDATORY**: `tfx-auto` 는 2+ 태스크 + 코드 변경 자동 감지 시 swarm 으로 escalate (Issue #281 closed). 사용자 명시 `--parallel N` override 시 warning 후 사용자 결정 존중.
+서로 다른 세션이 같은 작업 트리에서 코드를 수정하면 파일 충돌이 날 수 있다. worktree별 변경은 검증과 리뷰를 거쳐 통합한다. 자동 병합을 전제로 작업을 시작하지 않는다.
 
 ## OMC 비교 경계
 

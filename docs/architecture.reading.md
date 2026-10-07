@@ -22,7 +22,7 @@ created: "2026-07-07"
 triflux는 Claude Code용 **플러그인 + npm CLI**로, AI 코딩 작업을
 **Codex / Claude / Antigravity** 세 CLI에 라우팅하고 오케스트레이션하는
 멀티모델 도구다. 사용자는 `/tfx-auto`(Claude Code 스킬 프런트 도어) 또는
-`tfx`(셸 CLI) 하나만 알면 되고 그 뒤에서 로컬/원격 팀·스웜[^term-swarm] 실행,
+`tfx`(셸 CLI) 하나만 알면 되고 그 뒤에서 로컬/원격 팀 실행,
 가드[^en-guard], 허브[^en-hub] 메시지 버스가 실제 실행을 관리한다.
 
 ## 패키지 레이아웃
@@ -33,9 +33,9 @@ source of truth[^abbr-ssot]이고, `packages/*`는 배포용 미러다.
 | 레이어 | 역할 | 미러 방식 |
 |--------|------|-----------|
 | **root** | 개발 SSOT — 모든 런타임 파일의 정본 | — |
-| `packages/core` (`@triflux/core`) | 공용 라이브러리 (`hub/`, `hud/`, `mesh/`, `hooks/`, `scripts/` helper) | root와 byte-identical `cp` |
+| `packages/core` (`@triflux/core`) | 공용 라이브러리 (`hub/`, `hud/`, `hooks/`, `scripts/` helper) | root와 byte-identical `cp` |
 | `packages/remote` (`@triflux/remote`) | 원격 실행용 서브셋 (`hub/`, `cto/`, `scripts/`) | root 서브셋 + `@triflux/core/...` import 경로 변환 |
-| `packages/triflux` (`triflux` npm) | 사용자 대상 CLI/런타임 (`bin/`, `config/`, `hooks/`, `hub/`, `hud/`, `mesh/`, `cto/`, `scripts/`, `skills/`, `tui/`, `docs/`) | npm `files` 기준 byte-identical 미러 |
+| `packages/triflux` (`triflux` npm) | 사용자 대상 CLI/런타임 (`bin/`, `config/`, `hooks/`, `hub/`, `hud/`, `cto/`, `scripts/`, `skills/`, `tui/`, `docs/`) | npm `files` 기준 byte-identical 미러 |
 
 3-layer 미러의 상세 규칙(레이어별 cp/Edit 정책, tests 제외, binary 폭증 방지,
 검증 체크리스트)은 [`.claude/rules/tfx-mirror-policy.md`](../.claude/rules/tfx-mirror-policy.md)를
@@ -49,9 +49,8 @@ source of truth[^abbr-ssot]이고, `packages/*`는 배포용 미러다.
 |----------|------|-----------|
 | `bin/` | CLI 실행 엔트리포인트 | `triflux.mjs`(메인 `tfx`), `tfx-setup.mjs`, `tfx-doctor.mjs`, `tfx-live.mjs` |
 | `hub/` | 로컬 허브: 라우팅, 서버, MCP 브리지, 계정 브로커 | `router.mjs`, `server.mjs`, `bridge.mjs`, `hub-lifecycle.mjs`, `account-broker.mjs`, `codex-adapter.mjs` |
-| `hub/team/` | 팀/멀티에이전트 오케스트레이션 | `conductor.mjs`, `headless.mjs`, `dashboard.mjs`, `cto-auto-collect.mjs`, `claude-native-bridge.mjs`, `notify.mjs` |
+| `hub/team/` | 팀/멀티에이전트 오케스트레이션 | `headless.mjs`, `cto-auto-collect.mjs`, `claude-native-bridge.mjs`, `notify.mjs` |
 | `hub/` 하위 | 세분 모듈 | `delegator/`, `diagnostics/`, `lib/`, `middleware/`, `pipeline/`, `workers/` |
-| `mesh/` | 에이전트 간 메시지 메시 프로토콜 | `mesh-protocol.mjs`, `mesh-router.mjs`, `mesh-registry.mjs`, `mesh-queue.mjs`, `mesh-heartbeat.mjs`, `mesh-budget.mjs` |
 | `hooks/` | Codex 및 Antigravity 세션 연결과 전환용 stub | `codex-session-hook.mjs`, `agy-session-hook.mjs` |
 | `hud/` | 상태 표시(HUD) / 모니터 | `context-monitor.mjs`, `renderers.mjs`, `providers/` |
 | `cto/` | CTO 콘솔: 명시적 수집·조회·위생 dry-run | `collect.mjs`, `brief.mjs`, `status.mjs`, `hygiene.mjs` |
@@ -67,7 +66,7 @@ source of truth[^abbr-ssot]이고, `packages/*`는 배포용 미러다.
   → /tfx-auto (스킬 프런트 도어) 또는 tfx CLI
   → tfx-route.sh + 가드 (intent → mode/parallel/retry/risk-tier/CLI lane 정규화)
   → CLI lane 실행: Codex (기본) / Antigravity / Claude
-  → headless / swarm 워커 (로컬 병렬 또는 worktree 격리)
+  → headless 워커 (로컬 병렬)
   → Hub 가 team 메시지 · 리스 · retry · handoff · 상태를 기록
 ```
 
@@ -76,7 +75,7 @@ source of truth[^abbr-ssot]이고, `packages/*`는 배포용 미러다.
   lane이다.
 - 라우팅 판정(자연어 → 스킬, Layer 1~3, 충돌 해소)은
   [`.claude/rules/tfx-routing.md`](../.claude/rules/tfx-routing.md),
-  실행 엔진 매핑(auto가 multi/swarm 중 무엇을 dispatch하는지, 격리 기준)은
+  실행 경로와 코드 변경 병렬 작업의 격리 기준은
   [`.claude/rules/tfx-execution-skill-map.md`](../.claude/rules/tfx-execution-skill-map.md)를 따른다.
 
 ### Hub
@@ -111,7 +110,6 @@ triflux는 gstack·superpowers와 **레이어 분리** 관계로 공존한다.
 정책의 단일 정본은 [`.claude/rules/`](../.claude/rules/), 아키텍처 결정의 근거는 [`docs/adr/`](adr/README.md)에 있다.
 
 <!-- wiki-harness:start -->
-[^term-swarm]: 스웜 — PRD 단위로 worktree를 격리하고 여러 모델·기기에 워커를 병렬 배정해 코드 변경을 동시에 진행시키는 triflux 실행 모드(`tfx-swarm`). 완료 후 자동 병합까지 포함한다.
 [^en-guard]: guard.
 [^en-hub]: Hub.
 [^abbr-ssot]: SSOT — Single Source of Truth(단일 진실 공급원). 같은 정보가 여러 곳에 있을 때 "여기가 정본"이라고 가리키는 한 곳.

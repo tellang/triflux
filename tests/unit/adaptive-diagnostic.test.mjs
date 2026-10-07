@@ -41,7 +41,6 @@ describe("hub/adaptive-diagnostic.mjs", () => {
     assert.equal(diagnosis?.source, "known");
     assert.equal(diagnosis?.signature_id, "ssh-powershell-devnull");
     assert.match(diagnosis?.rule || "", /win-host/);
-    assert.match(diagnosis?.fix || "", /suppressStderr/);
     assert.ok(diagnosis?.confidence >= 0.95);
   });
 

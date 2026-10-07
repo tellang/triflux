@@ -39,7 +39,7 @@ frontmatter `platform: [win32]` 때문에 `tfx setup` 은 macOS/Linux 에 이 �
 macOS 사용자가 "탭 열어"라고 했는데 본 스킬로 들어오면 잘못된 라우팅. 사용자에게 다음을 안내한 뒤 종료:
 - "Windows Terminal 은 macOS 에 없습니다."
 - "macOS 에서 새 탭/패인 자동 생성이 필요하면 `terminal-opener.mjs` 의 tmux 경로를 사용하세요."
-- "오케스트레이션 (swarm worker 배치, dashboard) 은 자동으로 OS 분기됩니다."
+- "대시보드 배치는 자동으로 OS 분기됩니다."
 
 `wt-manager.mjs` 자체가 OS-aware 이므로 스킬 코드에서 platform 분기 불필요.
 
@@ -57,7 +57,7 @@ macOS 사용자가 "탭 열어"라고 했는데 본 스킬로 들어오면 잘�
 
 ## wt + psmux 통합 패턴 (Windows 기본 사용 흐름)
 
-triflux 의 WT `triflux` 프로파일은 **commandline = psmux** (wt-manager:319 의 `ensureWtProfile`). 즉 wt 의 새 탭/패인 = wt 가 컨테이너, **그 안에서 psmux 가 멀티플렉서로 도는 구조**. swarm worker, dashboard, 장기 세션 모두 이 형태.
+triflux 의 WT `triflux` 프로파일은 **commandline = psmux** (wt-manager:319 의 `ensureWtProfile`). 즉 wt 의 새 탭/패인 = wt 가 컨테이너, **그 안에서 psmux 가 멀티플렉서로 도는 구조**. 대시보드와 장기 세션에 이 형태를 쓴다.
 
 | 레이어 | 역할 |
 |--------|------|
@@ -72,7 +72,7 @@ wt.exe -w 0 sp -H -p triflux --title "worker" psmux attach-session -t SESSION
 
 이걸 본 스킬에서 호출하려면 `split-pane` 또는 `create-tab` 의 `command` 에 `psmux attach-session -t <session>` 을 넣는다. 다중 worker 동시 배치는 `layout`.
 
-### Swarm worker 다중 배치 (전형)
+### 세션 다중 배치 (전형)
 
 ```bash
 node scripts/wt-cli.mjs layout '[
@@ -135,7 +135,7 @@ node scripts/wt-cli.mjs split-pane '{"direction":"H","title":"logs","command":"t
 node scripts/wt-cli.mjs layout '[{"title":"w1","command":"...","direction":"H"},{"title":"w2","command":"...","direction":"V"}]'
 ```
 
-또는 객체 형태: `'{"panes":[...]}'`. dashboard / swarm worker 배치에 사용.
+또는 객체 형태: `'{"panes":[...]}'`. 대시보드와 여러 세션 배치에 사용.
 
 ### list — 탭 목록
 

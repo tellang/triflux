@@ -29,11 +29,6 @@ function makeCurrent(overrides = {}) {
         { id: "G3", title: "Goal three", status: "pending" },
         { id: "G4", title: "Goal four", status: "pending" },
       ],
-      swarm_shards: [
-        { id: "S1", status: "running" },
-        { id: "S2", status: "queued" },
-        { id: "S3", status: "queued" },
-      ],
     },
     ledger_tail: [
       {
@@ -71,7 +66,6 @@ describe("renderBrief", () => {
           active_goals: [
             { id: "G1", title: "x".repeat(10_000), status: "in_progress" },
           ],
-          swarm_shards: [{ id: "S1", status: "x".repeat(10_000) }],
         },
       }),
     );
@@ -81,7 +75,7 @@ describe("renderBrief", () => {
     assert.match(brief, /\.\.\. truncated$/u);
   });
 
-  it("limits active goals to 3, swarm shards to 2, and recent events to 2", () => {
+  it("limits active goals to 3 and recent events to 2", () => {
     const brief = renderBrief(makeCurrent());
 
     assert.match(brief, /^active_goals$/mu);
@@ -90,10 +84,7 @@ describe("renderBrief", () => {
     assert.match(brief, /G3/);
     assert.doesNotMatch(brief, /G4/);
 
-    assert.match(brief, /^swarm_shards$/mu);
-    assert.match(brief, /S1/);
-    assert.match(brief, /S2/);
-    assert.doesNotMatch(brief, /S3/);
+    assert.doesNotMatch(brief, /^swarm_shards$/mu);
 
     assert.match(brief, /^recent_events$/mu);
     assert.doesNotMatch(brief, /older/);

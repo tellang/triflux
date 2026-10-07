@@ -9,16 +9,14 @@ _tfx_completion() {
     words=("${COMP_WORDS[@]}")
     cword=$COMP_CWORD
 
-    local commands="setup doctor mcp update list ls handoff schema hub multi swarm synapse review why codex-team notion-read nr monitor version auto help"
-    local doctor_flags="--fix --reset --audit --diagnose --purge-logs --dynamic-routing --cleanup-stale-hubs --cleanup-stale-tmux --prefix --age-min --dry-run --apply --json --help"
+    local commands="setup doctor mcp update list ls handoff schema hub multi synapse review why codex-team notion-read nr monitor version auto help"
+    local doctor_flags="--fix --reset --audit --diagnose --purge-logs --cleanup-stale-hubs --cleanup-stale-tmux --prefix --age-min --dry-run --apply --json --help"
     local auto_flags="--cli --mode --parallel --json --help"
     local setup_flags="--dry-run --enable-hub-autostart --help"
     local hub_cmds="start stop status ensure help"
     local hub_flags="--port --json --help"
     local multi_cmds="status stop kill attach list help"
     local multi_flags="--dashboard --no-dashboard --dashboard-layout --json --help"
-    local swarm_cmds="run preflight plan list status help"
-    local swarm_flags="--dry-run --json --filter --max-restarts --logs-dir --help"
     local review_flags="--base --timeout --shard --json --help"
     local schema_flags="--help"
 
@@ -50,13 +48,6 @@ _tfx_completion() {
                 COMPREPLY=( $(compgen -W "${multi_cmds}" -- "$cur") )
             else
                 COMPREPLY=( $(compgen -W "${multi_flags}" -- "$cur") )
-            fi
-            ;;
-        swarm)
-            if [[ $cword -eq 2 && ! "$cur" == -* ]]; then
-                COMPREPLY=( $(compgen -W "${swarm_cmds}" -- "$cur") )
-            else
-                COMPREPLY=( $(compgen -W "${swarm_flags}" -- "$cur") )
             fi
             ;;
         review)

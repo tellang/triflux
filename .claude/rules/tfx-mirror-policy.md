@@ -36,9 +36,9 @@ triflux 는 root 와 `packages/{core,remote,triflux}/` 3개 published 레이어�
 
 | 위치 | import 형태 |
 |------|------------|
-| `hub/team/conductor.mjs` | `import { broker } from "../account-broker.mjs"` |
-| `packages/triflux/hub/team/conductor.mjs` | `import { broker } from "../account-broker.mjs"` (root 와 동일) |
-| `packages/remote/hub/team/conductor.mjs` | `import { broker } from "@triflux/core/hub/account-broker.mjs"` |
+| `hub/team/backend.mjs` | `import { buildExecArgs } from "../codex-adapter.mjs"` |
+| `packages/triflux/hub/team/backend.mjs` | root와 동일 |
+| `packages/remote/hub/team/backend.mjs` | `import { buildExecArgs } from "@triflux/core/hub/codex-adapter.mjs"` |
 
 mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (덮어쓰면 import path 가 revert 됨).
 
@@ -65,7 +65,6 @@ mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (�
 - `cto/*` → `packages/triflux/cto/` (byte-identical), `packages/remote/cto/` (root 상대 import 는 그대로, `../hub/lib/*` 등 hub 의존은 `@triflux/core/hub/...` 로 import 변환 — Edit 만, cp 는 변환 없는 파일 한정). remote 는 CLI 디스패처 `cto/index.mjs` 를 mirror 하지 않는다(모듈만). packages/core 는 cto/ 를 mirror 하지 않는다.
 - `hub/lib/*` → `packages/core/hub/lib/`, `packages/triflux/hub/lib/`
 - `hub/team/*`, `hub/*.mjs` (entry/runtime) → `packages/triflux/hub/`, `packages/remote/hub/` (해당 모듈만; `packages/core/hub/team/` 는 self-import 대상만 minimal mirror, 예: `retry-state-machine.mjs`)
-- `mesh/*` → `packages/core/mesh/`, `packages/triflux/mesh/` (PR #320 — root subset)
 - `scripts/lib/*` → `packages/core/scripts/lib/`, `packages/triflux/scripts/lib/`, `packages/remote/scripts/lib/` (PR #314 catch-up — remote 는 root subset, root-relative 의존 시 `@triflux/core/...` 로 import 변환)
 - `scripts/release/*`, `scripts/__tests__/*` → `packages/triflux/scripts/` (publish 포함)
 - `bin/*` → `packages/triflux/bin/`
@@ -97,9 +96,9 @@ shard 가 `references/{codex,gemini}-snapshots/` 같은 경로에 100MB+ binary 
 
 | 단계 | 명령 | 기대 결과 |
 |------|------|----------|
-| 1 | `git diff --name-only origin/main..HEAD \| grep -E '^(hub/|scripts/lib/|scripts/__tests__/|scripts/release/|bin/|hooks/|hud/|mesh/|config/)'` | mirror 가 필요한 root 변경 목록 |
+| 1 | `git diff --name-only origin/main..HEAD \| grep -E '^(hub/|scripts/lib/|scripts/__tests__/|scripts/release/|bin/|hooks/|hud/|config/)'` | mirror 가 필요한 root 변경 목록 |
 | 2 | 위 목록의 각 파일이 packages/triflux 에 byte-identical 로 존재하는지 `diff -q` | exit 0 |
-| 3 | hub/lib, scripts/lib, mesh, hooks, hud 변경분이 packages/core 에 cp 됐는지 `diff -q` | exit 0 |
+| 3 | hub/lib, scripts/lib, hooks, hud 변경분이 packages/core 에 cp 됐는지 `diff -q` | exit 0 |
 | 4 | packages/remote/hub/team/ 가 변경됐다면 `grep "@triflux/core/" packages/remote/hub/team/*.mjs` | import 경로 살아있음 |
 | 5 | tests/ 변경이 packages/{core,remote}/tests/ 에 untracked 로 추가됐는지 | **금지 — staging 회수** |
 | 6 | npm publish 영향 시 `cd packages/triflux && npm pack --dry-run` size | ~1MB |

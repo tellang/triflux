@@ -4,7 +4,7 @@
 
 _tfx() {
     local state
-    local -a commands hub_cmds multi_cmds swarm_cmds
+    local -a commands hub_cmds multi_cmds
 
     commands=(
         'setup:Setup and sync files'
@@ -17,8 +17,7 @@ _tfx() {
         'schema:Print CLI and Hub schema'
         'hub:Hub process management'
         'multi:Multi-CLI team mode'
-        'swarm:PRD worktree swarm'
-        'synapse:Show swarm registry'
+        'synapse:Show session registry'
         'review:Codex diff review'
         'why:Show X-Intent trailer'
         'codex-team:Codex team mode'
@@ -32,7 +31,6 @@ _tfx() {
 
     hub_cmds=('start:Start hub' 'stop:Stop hub' 'status:Show hub status' 'ensure:Ensure hub is healthy' 'help:Show hub help')
     multi_cmds=('status:Show status' 'stop:Stop multi' 'kill:Kill multi' 'attach:Attach to multi' 'list:List sessions' 'help:Show multi help')
-    swarm_cmds=('run:Run PRD swarm' 'preflight:Go/no-go report' 'plan:Plan only' 'list:List sessions' 'status:Alias for list' 'help:Show swarm help')
 
     _arguments -C \
         '1: :->cmds' \
@@ -61,7 +59,7 @@ _tfx() {
                     _arguments '--dry-run[Preview setup actions]' '--enable-hub-autostart[Register hub autostart]' '--help[Show help]'
                     ;;
                 auto)
-                    _arguments '--cli[Force lane: auto/codex/antigravity/claude]' '--mode[Mode: quick/deep/consensus]' '--parallel[Parallelism: 1/N/swarm]' '--json[JSON output]' '--help[Show help]'
+                    _arguments '--cli[Force lane: auto/codex/antigravity/claude]' '--mode[Mode: quick/deep/consensus]' '--parallel[Parallelism: 1/N]' '--json[JSON output]' '--help[Show help]'
                     ;;
                 hub)
                     if (( CURRENT == 3 )) && [[ $words[CURRENT] != -* ]]; then
@@ -75,13 +73,6 @@ _tfx() {
                         _describe -t multi_cmds 'multi commands' multi_cmds
                     else
                         _arguments '--dashboard[Enable dashboard]' '--no-dashboard[Disable dashboard]' '--dashboard-layout[Dashboard layout]' '--json[JSON output]' '--help[Show help]'
-                    fi
-                    ;;
-                swarm)
-                    if (( CURRENT == 3 )) && [[ $words[CURRENT] != -* ]]; then
-                        _describe -t swarm_cmds 'swarm commands' swarm_cmds
-                    else
-                        _arguments '--dry-run[Plan without execution]' '--json[JSON output]' '--filter[Shard filter]' '--max-restarts[Max restarts]' '--logs-dir[Logs directory]' '--help[Show help]'
                     fi
                     ;;
                 review)

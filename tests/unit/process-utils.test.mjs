@@ -4,7 +4,6 @@ import { describe, it } from "node:test";
 import {
   cleanupOrphanNodeProcesses,
   cleanupOrphanRuntimeProcesses,
-  cleanupShardProcesses,
   cleanupStaleFsmonitorDaemons,
   findFsmonitorDaemons,
   findProcessesByCommandLine,
@@ -335,70 +334,6 @@ describe("process tree cleanup helpers", () => {
       result.map((p) => p.pid),
       [310, 311, 314, 316, 317],
     );
-  });
-
-  it("cleanupShardProcesses scopes by worktreePath", () => {
-    const killed = [];
-    const result = cleanupShardProcesses({
-      worktreePath: "C:\\repo\\.codex-swarm\\wt-alpha",
-      sessionIds: ["session-1"],
-      topPids: [],
-      runId: "run-1",
-      shardName: "alpha",
-      isWindows: true,
-      spawnSyncFn: mockSpawnSync({ processRecords: SWARM_PROCS }),
-      killFn: (pid, signal) => killed.push([pid, signal]),
-      protectedPids: new Set(),
-    });
-
-    assert.equal(result.scanned, SWARM_PROCS.length);
-    assert.equal(result.killed, 5);
-    assert.equal(result.byCategory.node, 1);
-    assert.equal(result.byCategory.bash, 1);
-    assert.equal(result.byCategory.conhost, 1);
-    assert.equal(result.byCategory.bun, 1);
-    assert.equal(result.byCategory.git, 1);
-    assert.ok(killed.every(([pid]) => pid !== 312));
-    assert.ok(killed.every(([pid]) => pid !== 314));
-    assert.ok(killed.every(([pid]) => pid !== 315));
-  });
-
-  it("cleanupShardProcesses skips protected PIDs", () => {
-    const killed = [];
-    const result = cleanupShardProcesses({
-      worktreePath: "C:\\repo\\.codex-swarm\\wt-alpha",
-      sessionIds: ["session-1"],
-      topPids: [],
-      runId: "run-1",
-      shardName: "alpha",
-      isWindows: true,
-      spawnSyncFn: mockSpawnSync({ processRecords: SWARM_PROCS }),
-      killFn: (pid, signal) => killed.push([pid, signal]),
-      protectedPids: new Set([310]),
-    });
-
-    assert.equal(result.skipped, 1);
-    assert.ok(killed.every(([pid]) => pid !== 310));
-  });
-
-  it("cleanupShardProcesses dryRun=true kills nothing", () => {
-    const killed = [];
-    const result = cleanupShardProcesses({
-      worktreePath: "C:\\repo\\.codex-swarm\\wt-alpha",
-      sessionIds: ["session-1"],
-      topPids: [],
-      runId: "run-1",
-      shardName: "alpha",
-      dryRun: true,
-      isWindows: true,
-      spawnSyncFn: mockSpawnSync({ processRecords: SWARM_PROCS }),
-      killFn: (pid, signal) => killed.push([pid, signal]),
-      protectedPids: new Set(),
-    });
-
-    assert.equal(result.killed, 0);
-    assert.equal(result.byCategory.bun, 1);
-    assert.deepEqual(killed, []);
   });
 
   it("legacy cleanupOrphanNodeProcesses uses ancestor-chain orphan scope", () => {

@@ -43,9 +43,6 @@ const CORE_FILES = [
   "hub/adaptive-memory.mjs",
   "hub/memory-doctor.mjs",
   "hub/account-broker.mjs",
-  // Phase 1 dynamic routing (#251 + #263 + #264 + wire-ups)
-  "hub/dynamic-routing-engine.mjs",
-  "hub/routing-snapshot.mjs",
 ];
 
 const CORE_DIRS = [
@@ -63,7 +60,6 @@ const CORE_DIRS = [
   // dep-free helper imported by core's session-start/end hooks (peer-discovery)
   "hub/team/synapse-http.mjs",
   "hub/workers/worker-utils.mjs", // shared utility
-  "mesh",
 ];
 
 export const REMOTE_FILES = [
@@ -96,7 +92,6 @@ const TRIFLUX_DIRS = [
   "scripts",
   "hub",
   "cto",
-  "mesh",
   "references",
 ];
 
@@ -117,16 +112,7 @@ function copyItem(src, dest) {
 }
 
 function cleanDist(pkgDir) {
-  const dirs = [
-    "hub",
-    "bin",
-    "skills",
-    "scripts",
-    "hooks",
-    "hud",
-    "mesh",
-    "cto",
-  ];
+  const dirs = ["hub", "bin", "skills", "scripts", "hooks", "hud", "cto"];
   for (const d of dirs) {
     const target = join(pkgDir, d);
     if (existsSync(target)) rmSync(target, { recursive: true, force: true });
@@ -247,14 +233,6 @@ export { createPipeServer, getPipePath } from './pipe.mjs';
 // Team
 export { orchestrate, decomposeTask, buildLeadPrompt, buildPrompt } from './team/orchestrator.mjs';
 export { createPsmuxSession, startCapture } from './team/psmux.mjs';
-export { createConductor } from './team/conductor.mjs';
-
-// Swarm
-export { createSwarmLocks } from './team/swarm-locks.mjs';
-export { parseShards, buildFileLeaseMap, buildMcpManifest, computeMergeOrder, planSwarm } from './team/swarm-planner.mjs';
-export { createSwarmHypervisor, SWARM_STATES } from './team/swarm-hypervisor.mjs';
-export { reconcile, buildRedundantIds, shouldRunRedundant } from './team/swarm-reconciler.mjs';
-export { ensureWorktree, prepareIntegrationBranch, rebaseShardOntoIntegration, pruneWorktree, fetchRemoteShard } from './team/worktree-lifecycle.mjs';
 `;
 
 function writeIndex(dest, content) {
@@ -312,7 +290,6 @@ function packTriflux() {
     "scripts",
     "hub",
     "cto",
-    "mesh",
     "references",
   ]) {
     const target = join(dest, d);

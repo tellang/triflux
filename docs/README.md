@@ -6,7 +6,7 @@
 ## 🟢 처음이면 이 3개부터
 
 1. **[../README.md](../README.md)** — 제품 개요. triflux가 무엇이고 무엇을 하는지.
-2. **[../ARCHITECTURE.md](../ARCHITECTURE.md)** — 시스템 구조. 패키지 레이아웃(root + `packages/{core,remote,triflux}`), core/remote/cli 데이터 흐름, hub/mesh 역할.
+2. **[../ARCHITECTURE.md](../ARCHITECTURE.md)** : 시스템 구조. 패키지 레이아웃(root + `packages/{core,remote,triflux}`), core/remote/cli 데이터 흐름, hub 역할.
 3. **[adr/README.md](adr/README.md)** — 결정 상태보드. "왜 이렇게 정했나"는 전부 여기서 출발한다. 행이 없는 ADR은 존재로 인정하지 않는다.
 
 ## 🎯 목적별 진입점
@@ -17,6 +17,7 @@
 | **원문 요구 ↔ 확정 요구 (추적성)** | [req/](req/) — raw(원문 ask) ↔ refined(확정 요구사항) 양방향 링크. PRD보다 앞 단계 |
 | **왜 이렇게 정했나 (결정 근거)** | [adr/](adr/) — 번호화된 불변 ADR · 상태보드 [adr/README.md](adr/README.md) · 운영 규약 [adr/CONVENTIONS.md](adr/CONVENTIONS.md) · 경량 결정로그 [DECISIONS.md](DECISIONS.md) |
 | **CTO 조회 범위** | [ADR-0024](adr/0024-cto-explicit-queries-only.md) : 명시적 `collect`·`status`와 제거한 운영 기능 |
+| **swarm 퇴역** | [ADR-0025](adr/0025-retire-swarm-execution-engine.md) : 제거한 실행 엔진과 worktree 격리 방향 |
 | **항상 지킬 에이전트 규칙** | [../.claude/rules/](../.claude/rules/) — 정책 SSOT. 하네스가 auto-load한다. 문서는 이 규칙을 "가리키기만" 한다 |
 | **시스템 구조** | [../ARCHITECTURE.md](../ARCHITECTURE.md) — 패키지·데이터 흐름·미러 관계 · 각주 리딩 노트 [architecture.reading.md](architecture.reading.md)(옵시디언, wiki-harness) |
 | **개발 / 기여 프로세스** | [process/](process/) — 브랜치 정책·PR 리뷰 계약 · 진입점 [../CONTRIBUTING.md](../CONTRIBUTING.md) |
@@ -38,7 +39,8 @@
 
 ## 🗄️ 안 봐도 되는 것
 
-- **[_archive/](_archive/)** — Superseded/무효화된 문서 보존본(추적성 유지). 원위치엔 stub만 남는다.
+- **[_archive/](_archive/)** : Superseded/무효화된 문서 보존본(추적성 유지).
+  - [swarm 인프라 PRD](_archive/prd/p3-swarm-infra-fixes.md)와 [Issue #281 계획](_archive/triflux/plans/issue-281-auto-router-swarm-dispatch.md), [shard A](_archive/triflux/plans/issue-281-shard-a-staged-file-detect.md), [shard B](_archive/triflux/plans/issue-281-shard-b-router-escalate.md), [shard C](_archive/triflux/plans/issue-281-shard-c-integration-ssot-mirror.md), [swarm 실행 계획](_archive/triflux/plans/issue-281-swarm.md), [swarm smoke test](_archive/prd/archived/swarm-smoke-test.md), [mesh router/queue PRD](_archive/prd/archived/lake5-mesh-router-queue.md), [mesh 활성화 PRD](_archive/prd/archived/mesh-production-activation.md), [worktree lifecycle 테스트 PRD](_archive/prd/archived/worktree-lifecycle-test.md)를 ADR-0025에 따라 보존한다.
 - **`superpowers/plans/`** — LOCAL(git-ignore). 실행 중 산출물이라 공개 대상이 아니다.
 
 ## 메모

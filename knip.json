@@ -9,7 +9,6 @@
         "hud/**/*.mjs",
         "hooks/**/*.mjs",
         "cto/**/*.mjs",
-        "mesh/**/*.mjs",
         "tui/**/*.mjs"
       ],
       "project": [
@@ -19,13 +18,12 @@
         "hooks/**/*.mjs",
         "hud/**/*.mjs",
         "cto/**/*.mjs",
-        "mesh/**/*.mjs",
         "tui/**/*.mjs"
       ]
     },
     "packages/core": {
-      "entry": ["hub/**/*.mjs", "hud/**/*.mjs", "mesh/**/*.mjs"],
-      "project": ["hub/**/*.mjs", "hud/**/*.mjs", "mesh/**/*.mjs"]
+      "entry": ["hub/**/*.mjs", "hud/**/*.mjs"],
+      "project": ["hub/**/*.mjs", "hud/**/*.mjs"]
     },
     "packages/remote": {
       "entry": ["hub/**/*.mjs", "scripts/*.mjs", "cto/**/*.mjs"],
@@ -38,7 +36,6 @@
         "hub/**/*.mjs",
         "hooks/**/*.mjs",
         "cto/**/*.mjs",
-        "mesh/**/*.mjs",
         "tui/**/*.mjs"
       ],
       "project": [
@@ -47,7 +44,6 @@
         "hub/**/*.mjs",
         "hooks/**/*.mjs",
         "cto/**/*.mjs",
-        "mesh/**/*.mjs",
         "tui/**/*.mjs"
       ]
     }

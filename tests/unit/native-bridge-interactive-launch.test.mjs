@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import test, { describe, it } from "node:test";
+import test from "node:test";
 
 import {
   buildPtyControlFrame,
@@ -14,8 +14,6 @@ import {
   startClaudeNativeBridge,
 } from "../../hub/team/claude-native-bridge.mjs";
 import { parseTeamArgs } from "../../hub/team/cli/commands/start/parse-args.mjs";
-import { createSwarmHypervisor } from "../../hub/team/swarm-hypervisor.mjs";
-import { planSwarm } from "../../hub/team/swarm-planner.mjs";
 
 function createFakeTransportFactory() {
   const transports = [];
@@ -169,76 +167,4 @@ test("CLI start parser accepts native bridge interactive attach mode", () => {
 
   assert.equal(result.nativeBridge, true);
   assert.equal(result.nativeBridgeMode, "interactive-attach");
-});
-
-describe("swarm native bridge interactive shard registration", () => {
-  const INTERACTIVE_PRD = `
-## Shard: worker-a
-- agent: codex
-- interactive: true
-- files: src/a.mjs
-- prompt: echo test a
-`;
-
-  function makeTmpDir() {
-    const dir = path.join(
-      os.tmpdir(),
-      `tfx-native-int-hv-${process.pid}-${Date.now()}`,
-    );
-    return fs.mkdir(dir, { recursive: true }).then(() => dir);
-  }
-
-  it("passes interactive shard registration the shard worktree cwd", async () => {
-    const workdir = await makeTmpDir();
-    const logsDir = path.join(workdir, "logs");
-    const registerCalls = [];
-    const conductors = [];
-    const createConductor = () => {
-      const conductor = {
-        sessionConfig: null,
-        spawnSession(config) {
-          this.sessionConfig = config;
-        },
-        on() {},
-        getSnapshot() {
-          return [];
-        },
-        shutdown() {},
-      };
-      conductors.push(conductor);
-      return conductor;
-    };
-
-    const hv = createSwarmHypervisor({
-      workdir,
-      logsDir,
-      runId: "interactive-native-bridge",
-      nativeBridge: true,
-      graceMs: 1,
-      keepFailedWorktrees: true,
-      _deps: {
-        createConductor,
-        registerSwarmShard: async (opts) => {
-          registerCalls.push(opts);
-          return { displayName: "Triflux swarm interactive", close() {} };
-        },
-        ensureWorktree: async ({ slug, runId }) => ({
-          worktreePath: `${workdir}/.codex-swarm/wt-${slug}`,
-          branchName: `swarm/${runId}/${slug}`,
-        }),
-      },
-    });
-
-    try {
-      await hv.launch(planSwarm(null, { content: INTERACTIVE_PRD }));
-
-      assert.equal(registerCalls.length, 1);
-      assert.equal(registerCalls[0].interactive, true);
-      assert.equal(registerCalls[0].cwd, `${workdir}/.codex-swarm/wt-worker-a`);
-      assert.equal(registerCalls[0].sessionId, conductors[0].sessionConfig.id);
-    } finally {
-      await hv.shutdown("test_cleanup").catch(() => {});
-      await fs.rm(workdir, { recursive: true, force: true });
-    }
-  });
 });

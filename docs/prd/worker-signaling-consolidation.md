@@ -1,7 +1,9 @@
+부분 폐기: 2026-10-08 swarm 실행 및 상태 집계 항목 퇴역(ADR-0025). tfx-route 관련 요구사항은 별도 검토.
+
 # Worker Signaling Consolidation PRD
 
 date: 2026-04-25
-status: draft (단일 세션 부적절 — outline + 1차 분석. 실제 구현은 swarm 또는 multi-step)
+status: draft (swarm 실행 및 상태 집계 항목 부분 폐기, tfx-route 요구사항 별도 검토)
 related-checkpoint: `~/.gstack/projects/tellang-triflux/checkpoints/20260425-191243-v10150-shipped-remaining-meta-f-and-worker-signaling.md`
 
 ## 1. 통합 대상 (4 family)
@@ -58,29 +60,11 @@ status = match (process, heartbeat, commit, stdout):
 | AC4 | PR #185 silent-flush guard 가 cross-review codex critic 호출에서 자연 검증 | 다음 release cycle 의 cross-review 로그 확인 |
 | AC5 | 4 채널 합집합 결정 규칙이 단일 모듈 (`hub/team/worker-signal.mjs` 가칭) 에 위치 | 코드 리뷰 + grep `worker-signal.mjs` 단일 import |
 
-## 4. Shard 분할 안 (swarm 실행용)
+## 4. 남은 검토 범위
 
-이 PRD 를 swarm shard 로 분할 시:
+issue #176의 `tfx-route.sh --job-status` 조기 실패 판정과 PR #185의 silent-flush guard는 별도 검토한다. 위 표의 swarm 실행, `tfx swarm list`, `worker-signal.mjs` 및 4채널 집계 요구는 ADR-0025에 따라 실행 대상에서 제외한다.
 
-| shard | 범위 | 대상 파일 (예상) |
-|-------|------|---------------|
-| shard-1 | `worker-signal.mjs` 모듈 신설 — 4 채널 입력 → 결정 규칙 출력 | `hub/team/worker-signal.mjs` (신규), 단위 테스트 |
-| shard-2 | `tfx swarm list` union (메타 E #190) | `bin/tfx-swarm-list.mjs`, synapse-registry + swarm-logs 합집합 |
-| shard-3 | `tfx-route.sh --job-status` 4-channel cross-check (#176) | `bin/tfx-route.sh`, status reporter |
-| shard-4 | swarm orchestrator F7 (메타 B) cross-check | `hub/team/swarm-orchestrator.mjs` (또는 reconcile 위치) |
-| shard-5 | 통합 테스트 + cross-review 회수 | `tests/integration/worker-signaling.test.mjs` |
-
-shard 간 의존: shard-1 (모듈) 이 먼저, 나머지는 병렬 가능.
-
-worktree 격리 필수 (cwd 공유 race) → `tfx-swarm` 사용. 메모리 룰 `feedback_swarm_cherry_pick.md` 준수 (cherry-pick 만, branch merge 금지).
-
-## 5. 작업 순서 (multi-step)
-
-1. **이번 세션 (PRD draft)**: 본 문서 commit. 4-channel spec + AC + shard 분할 확정.
-2. **다음 세션 (shard-1 단독)**: `worker-signal.mjs` 모듈 + 단위 테스트 — 단일 PR.
-3. **shard-1 머지 후**: shard-2/3/4 swarm 병렬. PRD 를 swarm 에 입력.
-4. **shard-5 통합 테스트**: 합집합 후 prepare 에 npm test 통과 확인.
-5. **release**: v10.16.0 minor (4 family 통합 = 새 기능).
+코드 변경을 병렬로 진행할 경우 작업별 worktree와 세션을 분리한다. 각 세션의 CLI 실행은 `tfx-auto`를 사용한다. Claude Agent에는 `isolation: worktree`를 지정할 수 있다. 구현 범위와 테스트는 남은 두 family를 다시 검토한 뒤 정한다.
 
 ## 6. Out of scope (이 PRD 가 해소하지 않음)
 
@@ -96,4 +80,4 @@ worktree 격리 필수 (cwd 공유 race) → `tfx-swarm` 사용. 메모리 룰 `
 - silent-flush evidence: `bkzdlw1nu` task — `/c/Users/tellang/AppData/Local/Temp/claude/.../tasks/bkzdlw1nu.output` (72s × 0B, status=quiet, pid 267034)
 - 모델-직무 매핑 (PR [#184](https://github.com/tellang/triflux/pull/184)): gpt-5.5 메인 / gpt-5.4-mini 가성비 / gpt-5.3-codex escalation 중간
 - escalation chain: `.claude/rules/tfx-escalation-chain.md`
-- 메모리 룰: `feedback_swarm_cherry_pick.md` (cherry-pick 만, branch merge 금지), `feedback_tfx_async_false_failed.md` (#176 stdout.log 별도 경로 체크)
+- 메모리 룰: `feedback_tfx_async_false_failed.md` (#176 stdout.log 별도 경로 체크)

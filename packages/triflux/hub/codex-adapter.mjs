@@ -126,7 +126,6 @@ export function buildExecArgs(opts = {}) {
     cwd: opts.cwd,
     // stdinPrompt 가 명시되면 buildExecCommand 로 forward.
     // headless 워커 spawn (backend.mjs) 은 default (stdin on, macOS hook fix).
-    // launcher path (launcher-template.mjs) 는 결정론 위해 false 전달.
     stdinPrompt: opts.stdinPrompt,
   });
 

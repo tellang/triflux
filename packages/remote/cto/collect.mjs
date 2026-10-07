@@ -34,12 +34,6 @@ const SOURCE_REGISTRY = [
     enabled: true,
   },
   {
-    id: "tfx_swarm",
-    kind: "triflux-runtime-artifact",
-    probe: ".triflux/swarm-locks.json or .triflux/swarm/*.json",
-    enabled: true,
-  },
-  {
     id: "tfx_team",
     kind: "triflux-runtime-artifact",
     probe: ".triflux/team-state.json or host tfx-hub team cache",
@@ -306,70 +300,6 @@ function collectUltragoal(dirPath, rootDir, collectedAt) {
   }
 }
 
-export function collectSwarm(rootDir, collectedAt) {
-  const locksPath = join(rootDir, ".triflux", "swarm-locks.json");
-  const logsDir = join(rootDir, ".triflux", "swarm-logs");
-  if (!existsSync(locksPath) && !existsSync(logsDir)) {
-    return missingSource(
-      "no_shell_readable_artifact",
-      "no swarm locks or logs found",
-      collectedAt,
-    );
-  }
-  try {
-    const detail = { locks_path: null, locks: null, shards: [], log_runs: [] };
-    if (existsSync(locksPath)) {
-      const locks = readJson(locksPath);
-      detail.locks_path = relPath(rootDir, locksPath);
-      detail.locks = safeSummary(locks);
-      if (Array.isArray(locks?.shards)) detail.shards = locks.shards;
-      else if (Array.isArray(locks)) detail.shards = locks;
-      else if (locks && typeof locks === "object") {
-        // 실제 producer(hub/team/swarm-locks.mjs persist)는
-        // { "<file>": { workerId, leaseType, sessionMeta } } 형태의 lock map 을 쓴다.
-        // workerId 가 곧 shard.name 이다 — swarm-hypervisor 가
-        // acquire(shard.name, shard.files) 로 잠그기 때문(swarm-hypervisor.mjs:753).
-        // workerId 별로 묶어 active shard row 로 환원한다. (expired lock 정밀 필터는
-        // hub snapshot() 의 책임이라, 여기서는 persist 된 보유 lock 전부를 active 로 본다.)
-        const byWorker = new Map();
-        for (const entry of Object.values(locks)) {
-          const workerId =
-            entry && typeof entry.workerId === "string" ? entry.workerId : null;
-          if (!workerId) continue;
-          let row = byWorker.get(workerId);
-          if (!row) {
-            row = { shard_name: workerId, phase: "active", members: [] };
-            byWorker.set(workerId, row);
-          }
-          const host = entry?.sessionMeta?.host;
-          if (typeof host === "string" && host && !row.members.includes(host)) {
-            row.members.push(host);
-          }
-        }
-        detail.shards = [...byWorker.values()];
-      }
-    }
-    if (existsSync(logsDir)) {
-      detail.log_runs = readdirSync(logsDir, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && entry.name.startsWith("run-"))
-        .map((entry) => {
-          const path = join(logsDir, entry.name);
-          return { id: entry.name, mtime: statSync(path).mtime.toISOString() };
-        })
-        .sort((a, b) => b.mtime.localeCompare(a.mtime))
-        .slice(0, 5);
-    }
-    return sourceState(true, "ok", detail, collectedAt);
-  } catch (error) {
-    return sourceState(
-      true,
-      "read_error",
-      error?.message || "swarm read failed",
-      collectedAt,
-    );
-  }
-}
-
 function collectHandoffs(rootDir, collectedAt) {
   const dirPath = join(rootDir, ".omx", "handoffs");
   const files = listDirFiles(dirPath, rootDir, 10);
@@ -392,7 +322,6 @@ function buildSummary(current) {
   const repo = current.repo;
   const omxGoals = current.sources.ultragoal_omx.detail?.active_goals || [];
   const omcGoals = current.sources.ultragoal_omc.detail?.active_goals || [];
-  const swarmShards = current.sources.tfx_swarm.detail?.shards || [];
   const availableSources = Object.values(current.sources).filter(
     (source) => source.available,
   ).length;
@@ -400,7 +329,6 @@ function buildSummary(current) {
   return {
     repo_state: `branch ${repo.branch || "unknown"} at ${repo.head || "unknown"} is ${repo.dirty ? "dirty" : "clean"}`,
     active_goals: [...omxGoals, ...omcGoals].slice(0, 5),
-    swarm_shards: Array.isArray(swarmShards) ? swarmShards.slice(0, 5) : [],
     hub_status: current.sources.tfx_hub.status,
     available_sources: availableSources,
     missing_sources: SOURCE_IDS.length - availableSources,
@@ -581,7 +509,6 @@ function collectSources(rootDir, collectedAt, execFileSyncFn, opts = {}) {
       rootDir,
       collectedAt,
     ),
-    tfx_swarm: collectSwarm(rootDir, collectedAt),
     tfx_team: collectJsonArtifact(
       "tfx_team",
       [

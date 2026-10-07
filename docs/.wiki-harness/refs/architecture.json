@@ -20,7 +20,7 @@
       "label": "term-swarm",
       "type": "term",
       "word": "스웜",
-      "definition": "PRD 단위로 worktree를 격리하고 여러 모델·기기에 워커를 병렬 배정해 코드 변경을 동시에 진행시키는 triflux 실행 모드(`tfx-swarm`). 완료 후 자동 병합까지 포함한다."
+      "definition": "2026-10-08 ADR-0025에 따라 퇴역한 PRD shard 실행 엔진. 코드 변경 병렬 작업은 worktree와 세션을 나누고 각 세션에서 tfx-auto를 실행한다."
     },
     "en-guard": {
       "label": "en-guard",

@@ -3,7 +3,6 @@ import { setTimeout as delay } from "node:timers/promises";
 import { execFileSync, execSync, spawn } from "child_process";
 // triflux CLI — setup, doctor, version
 import {
-  appendFileSync,
   chmodSync,
   closeSync,
   copyFileSync,
@@ -133,7 +132,7 @@ const NORMALIZED_ARGS = RAW_ARGS.filter((arg) => arg !== "--json");
 const CLI_COMMAND_SCHEMAS = Object.freeze({
   auto: {
     usage:
-      "tfx auto [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus|live] [--rounds N] [--parallel 1|N|swarm] [--json]",
+      "tfx auto [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus|live] [--rounds N] [--parallel 1|N] [--json]",
     description:
       "tfx-auto 라우팅 결정을 CLI에서 미리보기/직렬화 (실행 skill front door와 같은 flag surface)",
     options: [
@@ -153,9 +152,9 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         description: "live peer 왕복 횟수 (기본 4, --mode live 전용)",
       },
       {
-        name: "--parallel <1|N|swarm>",
+        name: "--parallel <1|N>",
         type: "string",
-        description: "단일/로컬 병렬/PRD swarm 라우팅 힌트",
+        description: "단일/로컬 병렬 라우팅 힌트",
       },
       {
         name: "--json",
@@ -188,7 +187,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
   },
   doctor: {
     usage:
-      "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--purge-logs] [--dynamic-routing] [--cleanup-stale-hubs --dry-run|--apply] [--cleanup-stale-tmux --prefix tfx-* --age-min N --dry-run|--apply] [--json]",
+      "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--purge-logs] [--cleanup-stale-hubs --dry-run|--apply] [--cleanup-stale-tmux --prefix tfx-* --age-min N --dry-run|--apply] [--json]",
     description: "설치 상태 진단 및 자동 복구",
     options: [
       {
@@ -217,12 +216,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         type: "boolean",
         description:
           "--fix 와 함께 사용. cli-issues.jsonl 에서 7일 초과 항목 물리 삭제 (#144)",
-      },
-      {
-        name: "--dynamic-routing",
-        type: "boolean",
-        description:
-          "Phase 1 dynamic routing 상태 진단 (env / policy / snapshot cache / preview decision)",
       },
       {
         name: "--cleanup-stale-hubs",
@@ -394,46 +387,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         name: "--registry",
         type: "string",
         description: "registry 파일 경로 오버라이드",
-      },
-    ],
-  },
-  swarm: {
-    usage:
-      "tfx swarm [run|preflight] <prd-path> [--dry-run|--json|--filter <shard>]",
-    description: "PRD 기반 멀티모델 x 멀티기기 스웜 실행 (#93)",
-    subcommands: {
-      run: "tfx swarm run <prd-path> — verb 명시 실행 (기본 경로와 동일)",
-      preflight:
-        "tfx swarm preflight <prd-path> [--json] — 실행 전 go/no-go 리포트 출력",
-      plan: "tfx swarm plan <prd-path> [--json] — 실행 없이 계획만 출력",
-      list: "tfx swarm list [--json] — 활성 스웜 세션 조회 (synapse status)",
-      status: "tfx swarm status [--json] — list alias",
-    },
-    options: [
-      {
-        name: "--dry-run",
-        type: "boolean",
-        description: "PRD 분석만 수행, shard를 실행하지 않음",
-      },
-      {
-        name: "--json",
-        type: "boolean",
-        description: "구조화된 JSON 출력",
-      },
-      {
-        name: "--filter",
-        type: "string",
-        description: "특정 shard만 실행 (이름 매칭)",
-      },
-      {
-        name: "--max-restarts",
-        type: "number",
-        description: "shard별 최대 재시작 횟수 (기본 2)",
-      },
-      {
-        name: "--logs-dir",
-        type: "string",
-        description: "이벤트 로그 출력 디렉토리 오버라이드",
       },
     ],
   },
@@ -5035,7 +4988,6 @@ ${updateNotice}
     ${WHITE_BRIGHT}tfx schema${RESET}     ${GRAY}CLI/Hub schema JSON 출력${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
-    ${WHITE_BRIGHT}tfx swarm${RESET}       ${GRAY}PRD 기반 worktree 격리 병렬 실행 (run/plan/list)${RESET}
     ${WHITE_BRIGHT}tfx synapse${RESET}     ${GRAY}스웜 세션 registry 조회 / lease 관리${RESET}
     ${WHITE_BRIGHT}tfx review${RESET}      ${GRAY}Codex 기반 git diff review${RESET}
     ${WHITE_BRIGHT}tfx why${RESET}         ${GRAY}경로의 마지막 커밋 X-Intent 트레일러 추출${RESET}
@@ -5045,7 +4997,7 @@ ${updateNotice}
 
   ${BOLD}Skills${RESET} ${GRAY}(Claude Code 슬래시 커맨드)${RESET}
 
-    ${AMBER}/tfx-auto${RESET}       ${GRAY}자동 분류 + 병렬 실행 (--cli codex|antigravity|claude, --parallel N|swarm)${RESET}
+    ${AMBER}/tfx-auto${RESET}       ${GRAY}자동 분류 + 병렬 실행 (--cli codex|antigravity|claude, --parallel N)${RESET}
     ${AMBER}/tfx-setup${RESET}      ${GRAY}HUD 설정 + 진단${RESET}
     ${YELLOW}/tfx-doctor${RESET}     ${GRAY}진단 + 수리 + 캐시 초기화${RESET}
 
@@ -5925,23 +5877,6 @@ function applyAutoDispatchDecision(parsedArgs, decision = null) {
   if (resolved.warning) {
     process.stderr.write(`${resolved.warning}\n`);
   }
-  if (resolved.escalated) {
-    const logLine = `${JSON.stringify({
-      at: new Date().toISOString(),
-      issue: 281,
-      from: "multi",
-      to: "swarm",
-      tasksCount: Array.isArray(parsedArgs.tasks)
-        ? parsedArgs.tasks.length
-        : (parsedArgs.tasks ?? null),
-      reason: resolved.reason,
-    })}\n`;
-    try {
-      appendFileSync(".omc/state/auto-escalation.log", logLine, "utf8");
-    } catch {
-      // Fresh checkouts may not have .omc/state yet; dispatch should continue.
-    }
-  }
   return resolved;
 }
 
@@ -6025,45 +5960,6 @@ async function main() {
           } else {
             console.log(`\n  ${RED}✗${RESET} 진단 실패: ${result.error}\n`);
           }
-        }
-        return;
-      }
-      if (cmdArgs.includes("--dynamic-routing")) {
-        const { diagnoseDynamicRouting } = await import(
-          "../scripts/doctor-dynamic-routing.mjs"
-        );
-        const report = await diagnoseDynamicRouting();
-        if (JSON_OUTPUT) {
-          console.log(JSON.stringify(report, null, 2));
-        } else {
-          const mark = (b) =>
-            b ? `${GREEN_BRIGHT}✓${RESET}` : `${RED}✗${RESET}`;
-          console.log(
-            `\n  ${AMBER}${BOLD}⬡ triflux doctor — dynamic routing${RESET}\n`,
-          );
-          console.log(
-            `  ${mark(report.enabled)} enabled: ${report.enabled} (TRIFLUX_DYNAMIC_ROUTING=${report.envFlag ?? "미설정"})`,
-          );
-          console.log(
-            `  ${mark(report.policyLoaded)} policy loaded: ${report.policyLoaded} (scenarios=${report.policyScenarios.length})`,
-          );
-          console.log(
-            `  ${mark(report.snapshotCached)} snapshot cache: ${
-              report.snapshotCached
-                ? `hit (age=${report.snapshotAgeMs}ms)`
-                : "miss"
-            }`,
-          );
-          if (report.previewDecision) {
-            const d = report.previewDecision;
-            console.log(
-              `  ${GREEN_BRIGHT}→${RESET} preview decision: scenario=${d.scenario}, mode=${d.mode}, lane=${d.lane}, shards[0].cli=${d.shards?.[0]?.cli ?? "?"}`,
-            );
-          }
-          if (report.error) {
-            console.log(`  ${RED}✗${RESET} error: ${report.error}`);
-          }
-          console.log("");
         }
         return;
       }
@@ -6308,59 +6204,6 @@ async function main() {
         if (result.error) console.log(`error: ${result.error}`);
       }
       process.exit(result.ok ? 0 : 1);
-      return;
-    }
-    case "swarm": {
-      const sub = cmdArgs[0] || "";
-      if (sub === "help" || sub === "--help" || sub === "-h") {
-        const s = CLI_COMMAND_SCHEMAS.swarm;
-        console.log(`
-  ${AMBER}${BOLD}⬡ tfx swarm${RESET}
-
-  ${GRAY}${s.description}${RESET}
-
-  ${BOLD}Usage${RESET}
-    ${WHITE_BRIGHT}${s.usage}${RESET}
-
-  ${BOLD}Subcommands${RESET}
-    ${WHITE_BRIGHT}tfx swarm run <prd>${RESET}    ${GRAY}${s.subcommands.run}${RESET}
-    ${WHITE_BRIGHT}tfx swarm preflight <prd>${RESET} ${GRAY}${s.subcommands.preflight}${RESET}
-    ${WHITE_BRIGHT}tfx swarm plan <prd>${RESET}   ${GRAY}${s.subcommands.plan}${RESET}
-    ${WHITE_BRIGHT}tfx swarm list${RESET}         ${GRAY}${s.subcommands.list}${RESET}
-    ${WHITE_BRIGHT}tfx swarm status${RESET}       ${GRAY}${s.subcommands.status}${RESET}
-
-  ${BOLD}Options${RESET}
-${s.options.map((o) => `    ${DIM}${o.name.padEnd(16)}${RESET} ${GRAY}${o.description}${RESET}`).join("\n")}
-`);
-        return;
-      }
-      await checkHubRunning();
-      const { cmdSwarmRun, cmdSwarmPlan, cmdSwarmList, cmdSwarmPreflight } =
-        await import("../hub/team/swarm-cli.mjs");
-      if (sub === "list" || sub === "status") {
-        await cmdSwarmList(cmdArgs.slice(1), { json: JSON_OUTPUT });
-        return;
-      }
-      if (sub === "plan") {
-        await cmdSwarmPlan(cmdArgs.slice(1), { json: JSON_OUTPUT });
-        return;
-      }
-      if (sub === "preflight") {
-        await cmdSwarmPreflight(cmdArgs.slice(1), { json: JSON_OUTPUT });
-        return;
-      }
-      if (sub === "run") {
-        await cmdSwarmRun(cmdArgs.slice(1), { json: JSON_OUTPUT });
-        return;
-      }
-      if (!sub || sub.startsWith("--")) {
-        throw createCliError("PRD 경로가 필요합니다", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx swarm [run] <prd-path> [--dry-run|--json|--filter <shard>]",
-        });
-      }
-      await cmdSwarmRun(cmdArgs, { json: JSON_OUTPUT });
       return;
     }
     case "why": {

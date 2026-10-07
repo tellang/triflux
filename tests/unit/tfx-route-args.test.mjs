@@ -109,7 +109,7 @@ describe("tfx-route-args — parseArgs", () => {
 
     it("live 전용이 아닌 실행 플래그는 warning 후 기본값으로 무시", () => {
       const r = parseArgs(
-        "합의 --mode live --parallel 3 --isolation worktree --retry ralph --remote host1",
+        "합의 --mode live --parallel 3 --isolation none --retry ralph --remote none",
       );
 
       assert.equal(r.parallel, "1");
@@ -147,22 +147,23 @@ describe("tfx-route-args — parseArgs", () => {
   });
 
   describe("validation — 조합 규칙", () => {
-    it("--parallel 1 + --isolation worktree → warning + isolation 강제 none", () => {
-      const r = parseArgs("work --parallel 1 --isolation worktree");
-      assert.equal(r.isolation, "none");
-      assert.ok(
-        r.warnings.some((w) => w.includes("--isolation worktree requires")),
-      );
+    it("퇴역한 swarm 실행 옵션은 로컬 실행으로 바꾸지 않고 실패한다", () => {
+      for (const flags of [
+        "--parallel swarm",
+        "--isolation worktree",
+        "--remote host1",
+      ]) {
+        assert.throws(() => parseArgs(`work ${flags}`), {
+          message: /is retired/,
+          exitCode: 2,
+        });
+      }
     });
 
-    it("--remote host + --parallel 1 → warning (remote 무시)", () => {
-      const r = parseArgs("work --remote host1 --parallel 1");
-      assert.ok(r.warnings.some((w) => w.includes("--remote host1 ignored")));
-    });
-
-    it("--parallel swarm + --remote host 는 warning 없음", () => {
-      const r = parseArgs("work --parallel swarm --remote host1");
-      assert.deepEqual(r.warnings, []);
+    it("잘못된 --parallel 값은 기본값으로 바꾸지 않고 오류를 남긴다", () => {
+      const r = parseArgs("work --parallel bogus");
+      assert.equal(r.parallel, "bogus");
+      assert.ok(r.warnings.some((w) => w.includes("invalid --parallel=bogus")));
     });
 
     it("--cli 잘못된 값은 warning", () => {
@@ -208,16 +209,15 @@ describe("tfx-route-args — decideDispatchMode", () => {
     assert.equal(r.reason, "multi-no-code-change");
   });
 
-  it("case 2: 2+ tasks + 코드 변경 → swarm auto-escalate", () => {
+  it("case 2: 2+ tasks + 코드 변경 → multi와 worktree 안내", () => {
     const r = decideDispatchMode(
       { tasks: ["t1", "t2"] },
       { detector: withChange },
     );
-    assert.equal(r.mode, "swarm");
-    assert.equal(r.escalated, true);
-    assert.match(r.warning, /자동 escalate/);
-    assert.match(r.warning, /Issue #281/);
-    assert.equal(r.reason, "auto-escalate-code-change");
+    assert.equal(r.mode, "multi");
+    assert.equal(r.escalated, false);
+    assert.match(r.warning, /worktree/);
+    assert.equal(r.reason, "multi-with-code-change");
   });
 
   it("case 3: --parallel N 명시 + 코드 변경 → multi + warning", () => {
@@ -228,18 +228,7 @@ describe("tfx-route-args — decideDispatchMode", () => {
     assert.equal(r.mode, "multi");
     assert.equal(r.escalated, false);
     assert.match(r.warning, /WARNING: 코드 변경/);
-    assert.match(r.warning, /사용자 명시.*존중/);
+    assert.match(r.warning, /세션마다 tfx-auto/);
     assert.equal(r.reason, "user-explicit-multi-with-code-change");
-  });
-
-  it("user-explicit swarm 그대로", () => {
-    const r = decideDispatchMode(
-      { tasks: ["t1", "t2"], parallel: "swarm", isolation: "worktree" },
-      { detector: withChange },
-    );
-    assert.equal(r.mode, "swarm");
-    assert.equal(r.escalated, false);
-    assert.equal(r.warning, null);
-    assert.equal(r.reason, "user-explicit-swarm");
   });
 });

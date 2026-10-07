@@ -141,13 +141,7 @@ describe("runStatus", () => {
           started_at: "2026-06-02T00:01:00.000Z",
         },
       ]);
-      assert.deepEqual(parsed.active_shards, [
-        {
-          shard_name: "t4",
-          phase: "running",
-          members: ["agent-1"],
-        },
-      ]);
+      assert.deepEqual(parsed.active_shards, []);
       assert.deepEqual(parsed.hygiene, {
         active_tasks: 0,
         completed_tasks: 0,
