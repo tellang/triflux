@@ -34,7 +34,6 @@ import {
 } from "../hub/lib/tfx-route-args.mjs";
 import { getPipelineStateDbPath } from "../hub/pipeline/state.mjs";
 import { getVersionHash } from "../hub/state.mjs";
-import { forceCleanupTeam } from "../hub/team/nativeProxy.mjs";
 import {
   detectMultiplexer,
   getSessionAttachedCount,
@@ -42,15 +41,6 @@ import {
   listSessions,
   tmuxExec,
 } from "../hub/team/session.mjs";
-import {
-  cleanupStaleOmcTeams,
-  inspectStaleOmcTeams,
-} from "../hub/team/staleState.mjs";
-import {
-  ensureGlobalClaudeRoutingSection,
-  ensureTfxSection,
-  getLatestRoutingTable,
-} from "../scripts/claudemd-sync.mjs";
 import {
   commandExists,
   inspectMacTimeoutDependency,
@@ -77,23 +67,22 @@ import {
 } from "../scripts/lib/psmux-info.mjs";
 import { main as stealthFetchMain } from "../scripts/lib/stealth-fetch.mjs";
 import {
+  applyStatusLine,
   buildWindowsHubAutostartCommand,
-  cleanupStaleSkills,
   ensureCodexHubServerConfig,
   ensureCodexProfiles,
   getVersion,
   getWindowsHubAutostartStatus,
   isLocalDevSkillDir,
-  isSetupUserStateFile,
   isSkillSupportedOnPlatform,
   LEGACY_CODEX_MODELS,
   listInlineProfileNames,
+  persistSettings,
   REMOVED_SKILL_NAMES,
   REQUIRED_CODEX_PROFILES,
   SKILL_ALIASES,
   SYNC_MAP,
-  syncAliasedSkillDir,
-  syncCodexManagedSkills,
+  syncSkills,
 } from "../scripts/setup.mjs";
 import { cleanupTmpFiles } from "../scripts/tmp-cleanup.mjs";
 
@@ -1815,43 +1804,6 @@ function describeSyncAction(src, dst, label) {
   };
 }
 
-function syncClaudeRoutingSectionsForCli() {
-  try {
-    const routingTable = getLatestRoutingTable();
-    return [
-      ensureTfxSection(join(PKG_ROOT, "CLAUDE.md"), routingTable),
-      ensureGlobalClaudeRoutingSection(CLAUDE_DIR),
-    ];
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : "routing_sync_failed";
-    return [
-      {
-        action: "unchanged",
-        path: join(PKG_ROOT, "CLAUDE.md"),
-        skipped: true,
-        reason,
-      },
-    ];
-  }
-}
-
-function getClaudeRoutingSyncSummary(results) {
-  return results.reduce(
-    (summary, result) => ({
-      changed:
-        summary.changed +
-        (result.action === "created" ||
-        result.action === "updated" ||
-        result.action === "removed"
-          ? 1
-          : 0),
-      skipped: summary.skipped + (result.skipped ? 1 : 0),
-    }),
-    { changed: 0, skipped: 0 },
-  );
-}
-
 // ── 크로스 셸 진단 ──
 
 function checkCliCrossShell(cmd, installHint) {
@@ -1966,7 +1918,7 @@ function previewStatusLineAction() {
     change: currentCmd.includes("hud-qos-status.mjs")
       ? "noop"
       : currentCmd
-        ? "update"
+        ? "skip"
         : "create",
     current: currentCmd || null,
     target: hudPath,
@@ -2007,45 +1959,6 @@ function previewMcpRegistrationActions(mcpUrl) {
   return actions;
 }
 
-function previewClaudeRoutingAction() {
-  const globalClaudePath = join(CLAUDE_DIR, "CLAUDE.md");
-  const projectClaudePath = join(PKG_ROOT, "CLAUDE.md");
-
-  let _routingTable;
-  try {
-    _routingTable = getLatestRoutingTable();
-  } catch {
-    return {
-      type: "claude-guidance",
-      path: globalClaudePath,
-      source: projectClaudePath,
-      change: "skip",
-      reason: "project-section-missing",
-    };
-  }
-
-  if (!existsSync(globalClaudePath)) {
-    return {
-      type: "claude-guidance",
-      path: globalClaudePath,
-      source: projectClaudePath,
-      change: "create",
-    };
-  }
-
-  const globalContent = readFileSync(globalClaudePath, "utf8");
-  const hasRouting =
-    globalContent.includes("<routing>") ||
-    globalContent.includes("## triflux CLI 라우팅");
-
-  return {
-    type: "claude-guidance",
-    path: globalClaudePath,
-    source: projectClaudePath,
-    change: hasRouting ? "noop" : "create",
-  };
-}
-
 function buildSetupDryRunPlan() {
   const actions = [
     ...SYNC_MAP.map(({ src, dst, label }) =>
@@ -2053,7 +1966,6 @@ function buildSetupDryRunPlan() {
     ),
     ...listSkillSyncActions(),
   ];
-  actions.push(previewClaudeRoutingAction());
   const codexProfiles = previewCodexProfiles();
   actions.push({
     type: "codex-profiles",
@@ -2123,12 +2035,19 @@ export function runUpdatedSetup({
   });
 }
 
+function reportSkillSync() {
+  const result = syncSkills();
+  for (const warning of result.warnings) warn(warning);
+  if (!result.ok)
+    throw createCliError("스킬 동기화 실패", { exitCode: EXIT_CONFIG_ERROR });
+  ok(`스킬: ${result.total}개 확인, 파일 ${result.changed}개 반영`);
+}
+
 function cmdSetup(options = {}) {
   const {
     dryRun = false,
     fromUpdate = false,
     overrideVersion,
-    skipClaudeMdSync = false,
     enableHubAutostart = false,
   } = options;
   if (dryRun) {
@@ -2160,97 +2079,7 @@ function cmdSetup(options = {}) {
   for (const target of SYNC_MAP) {
     syncFile(target.src, target.dst, target.label);
   }
-  {
-    const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
-    if (claudeGuide.skipped && claudeGuide.reason !== "global_sync_disabled")
-      warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
-    else if (
-      claudeGuide.action === "created" ||
-      claudeGuide.action === "updated"
-    )
-      ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
-  }
-
-  // 스킬 동기화 (~/.claude/skills/{name}/SKILL.md)
-  const skillsSrc = join(PKG_ROOT, "skills");
-  const skillsDst = join(CLAUDE_DIR, "skills");
-  if (existsSync(skillsSrc)) {
-    let skillCount = 0;
-    let skillTotal = 0;
-    for (const name of readdirSync(skillsSrc)) {
-      const src = join(skillsSrc, name, "SKILL.md");
-      const dst = join(skillsDst, name, "SKILL.md");
-      if (!existsSync(src)) continue;
-      if (!isSkillSupportedOnPlatform(join(skillsSrc, name))) continue;
-      skillTotal++;
-
-      const dstDir = dirname(dst);
-      if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
-
-      if (!existsSync(dst)) {
-        copyFileSync(src, dst);
-        skillCount++;
-      } else {
-        const srcContent = readFileSync(src, "utf8");
-        const dstContent = readFileSync(dst, "utf8");
-        if (srcContent !== dstContent) {
-          copyFileSync(src, dst);
-          skillCount++;
-        }
-      }
-      // references/ 디렉토리 동기화 (존재하면)
-      const refSrc = join(skillsSrc, name, "references");
-      const refDst = join(skillsDst, name, "references");
-      if (existsSync(refSrc)) {
-        mkdirSync(refDst, { recursive: true });
-        for (const refFile of readdirSync(refSrc)) {
-          if (isSetupUserStateFile(refFile)) continue;
-          const rSrc = join(refSrc, refFile);
-          const rDst = join(refDst, refFile);
-          if (statSync(rSrc).isFile()) {
-            if (
-              !existsSync(rDst) ||
-              readFileSync(rSrc, "utf8") !== readFileSync(rDst, "utf8")
-            ) {
-              copyFileSync(rSrc, rDst);
-            }
-          }
-        }
-      }
-    }
-    for (const { alias, source } of SKILL_ALIASES) {
-      const srcDir = join(skillsSrc, source);
-      const src = join(srcDir, "SKILL.md");
-      if (!existsSync(src)) continue;
-      skillTotal++;
-      skillCount += syncAliasedSkillDir(srcDir, join(skillsDst, alias), {
-        alias,
-        source,
-      });
-    }
-    if (skillCount > 0) {
-      ok(`스킬: ${skillCount}/${skillTotal}개 업데이트됨`);
-    } else {
-      ok(`스킬: ${skillTotal}개 최신 상태`);
-    }
-  }
-
-  for (const installedDir of [skillsDst, join(CODEX_DIR, "skills")]) {
-    const stale = cleanupStaleSkills(installedDir, skillsSrc);
-    if (stale.count)
-      ok(`구형 스킬 ${stale.count}개 제거: ${stale.removed.join(", ")}`);
-    for (const name of stale.preserved)
-      warn(`구형 스킬 ${name}: 사용자 사본 보존`);
-  }
-  for (const skill of syncCodexManagedSkills()) {
-    if (!skill.ok) {
-      fail(`Codex ${skill.name}: ${skill.reason}`);
-      return;
-    }
-    if (skill.action === "synced") ok(`Codex ${skill.name}: 동기화됨`);
-    if (skill.action === "skipped")
-      warn(`Codex ${skill.name}: 사용자 스킬 보존`);
-  }
+  reportSkillSync();
 
   // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──
   if (process.platform === "win32" && which("psmux")) {
@@ -2278,54 +2107,8 @@ function cmdSetup(options = {}) {
     }
   }
 
-  // ── tmux 기본 셸 확인 (macOS/Linux) ──
-  if (process.platform !== "win32" && which("tmux")) {
-    try {
-      const shellOut = execSync(
-        "tmux show-options -g default-shell 2>/dev/null",
-        {
-          encoding: "utf8",
-          timeout: 3000,
-        },
-      ).trim();
-      if (shellOut) {
-        ok(`tmux 기본 셸: ${shellOut.split(/\s+/).pop() || "확인 완료"}`);
-      }
-    } catch {
-      /* tmux 서버 미실행 — 무시 */
-    }
-  }
-
   // ── 결과 추적 ──
   const summary = [];
-
-  if (!skipClaudeMdSync) {
-    const claudeRoutingResults = syncClaudeRoutingSectionsForCli();
-    const claudeRoutingSummary =
-      getClaudeRoutingSyncSummary(claudeRoutingResults);
-    if (claudeRoutingSummary.changed > 0) {
-      ok(`CLAUDE.md 라우팅: ${claudeRoutingSummary.changed}개 파일 반영`);
-      summary.push({
-        item: "CLAUDE.md 라우팅",
-        status: "✅",
-        detail: `${claudeRoutingSummary.changed}개 파일 반영`,
-      });
-    } else if (claudeRoutingSummary.skipped > 0) {
-      ok("CLAUDE.md 라우팅: 대상 파일 없음 (건너뜀)");
-      summary.push({
-        item: "CLAUDE.md 라우팅",
-        status: "⏭️",
-        detail: "대상 파일 없음",
-      });
-    } else {
-      ok("CLAUDE.md 라우팅: 최신 상태");
-      summary.push({
-        item: "CLAUDE.md 라우팅",
-        status: "✅",
-        detail: "최신 상태",
-      });
-    }
-  }
 
   const codexProfileResult = ensureCodexProfiles();
   if (!codexProfileResult.ok) {
@@ -2466,43 +2249,11 @@ function cmdSetup(options = {}) {
         settings = JSON.parse(readFileSync(settingsPath, "utf8"));
       }
 
-      const currentCmd = settings.statusLine?.command || "";
-      if (currentCmd.includes("hud-qos-status.mjs")) {
-        ok("statusLine 이미 설정됨");
-        summary.push({
-          item: "HUD statusLine",
-          status: "✅",
-          detail: "이미 설정됨",
-        });
-      } else {
-        const nodePath = process.execPath.replace(/\\/g, "/");
-        const hudForward = hudPath.replace(/\\/g, "/");
-        const nodeRef = nodePath.includes(" ") ? `"${nodePath}"` : nodePath;
-        const hudRef = hudForward.includes(" ")
-          ? `"${hudForward}"`
-          : hudForward;
-
-        if (currentCmd) {
-          warn(`기존 statusLine 덮어쓰기: ${currentCmd}`);
-        }
-
-        settings.statusLine = {
-          type: "command",
-          command: `${nodeRef} ${hudRef}`,
-        };
-
-        writeFileSync(
-          settingsPath,
-          JSON.stringify(settings, null, 2) + "\n",
-          "utf8",
-        );
-        ok("statusLine 설정 완료 — 세션 재시작 후 HUD 표시");
-        summary.push({
-          item: "HUD statusLine",
-          status: "✅",
-          detail: "설정 완료",
-        });
-      }
+      const changed = applyStatusLine(settings, { hudPath, warn });
+      if (changed) persistSettings(settings, settingsPath);
+      const detail = changed ? "설정 완료" : "기존 설정 유지";
+      ok(`statusLine: ${detail}`);
+      summary.push({ item: "HUD statusLine", status: "✅", detail });
     } catch (e) {
       throw createCliError(`settings.json 처리 실패: ${e.message}`, {
         exitCode: EXIT_CONFIG_ERROR,
@@ -2604,51 +2355,6 @@ function getOptionValue(args, optionName) {
   const index = args.indexOf(optionName);
   if (index === -1) return null;
   return args[index + 1] ?? null;
-}
-
-function extractTomlSection(content, sectionName) {
-  const lines = String(content ?? "").split(/\r?\n/);
-  const header = `[${sectionName}]`;
-  const start = lines.findIndex((line) => line.trim() === header);
-  if (start === -1) return "";
-  const collected = [];
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^\s*\[.+\]\s*$/.test(line)) break;
-    collected.push(line);
-  }
-  return collected.join("\n");
-}
-
-function inspectSerenaMcpConfig(configContent) {
-  const section = extractTomlSection(configContent, "mcp_servers.serena");
-  if (!section.trim()) {
-    return {
-      present: false,
-      hasProjectBinding: false,
-      hasContextCodex: false,
-      startupTimeoutSec: null,
-      timeoutRecommended: false,
-    };
-  }
-
-  const hasProjectBinding =
-    section.includes("--project-from-cwd") ||
-    /--project(?:\s|=|")/.test(section);
-  const hasContextCodex =
-    /--context(?:\s|",\s*")?codex/i.test(section) || /"codex"/i.test(section);
-  const timeoutMatch = section.match(/startup_timeout_sec\s*=\s*([0-9.]+)/i);
-  const startupTimeoutSec = timeoutMatch ? Number(timeoutMatch[1]) : null;
-  const timeoutRecommended =
-    startupTimeoutSec !== null && startupTimeoutSec >= 30;
-
-  return {
-    present: true,
-    hasProjectBinding,
-    hasContextCodex,
-    startupTimeoutSec,
-    timeoutRecommended,
-  };
 }
 
 function statusBadge(status) {
@@ -3015,44 +2721,7 @@ async function cmdDoctor(options = {}) {
           info("Homebrew 설치 후: brew install coreutils");
         }
       }
-      {
-        const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
-        if (
-          claudeGuide.skipped &&
-          claudeGuide.reason !== "global_sync_disabled"
-        )
-          warn(`CLAUDE.md 라우팅 섹션 확인 실패: ${claudeGuide.reason}`);
-        else if (
-          claudeGuide.action === "created" ||
-          claudeGuide.action === "updated"
-        )
-          ok("CLAUDE.md: 전역 triflux 라우팅 요약 갱신");
-      }
-      // 스킬 동기화
-      const fSkillsSrc = join(PKG_ROOT, "skills");
-      const fSkillsDst = join(CLAUDE_DIR, "skills");
-      if (existsSync(fSkillsSrc)) {
-        let sc = 0,
-          st = 0;
-        for (const name of readdirSync(fSkillsSrc)) {
-          const src = join(fSkillsSrc, name, "SKILL.md");
-          const dst = join(fSkillsDst, name, "SKILL.md");
-          if (!existsSync(src)) continue;
-          if (!isSkillSupportedOnPlatform(join(fSkillsSrc, name))) continue;
-          st++;
-          const dstDir = dirname(dst);
-          if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
-          if (!existsSync(dst)) {
-            copyFileSync(src, dst);
-            sc++;
-          } else if (readFileSync(src, "utf8") !== readFileSync(dst, "utf8")) {
-            copyFileSync(src, dst);
-            sc++;
-          }
-        }
-        if (sc > 0) ok(`스킬: ${sc}/${st}개 업데이트됨`);
-        else ok(`스킬: ${st}개 최신 상태`);
-      }
+      reportSkillSync();
       const profileFix = ensureCodexProfiles();
       if (!profileFix.ok) {
         warn(
@@ -3149,7 +2818,7 @@ async function cmdDoctor(options = {}) {
 
     let issues = 0;
 
-    // 1. tfx-route.sh
+    // tfx-route.sh
     section("tfx-route.sh");
     const routeSh = join(CLAUDE_DIR, "scripts", "tfx-route.sh");
     if (existsSync(routeSh)) {
@@ -3200,7 +2869,7 @@ async function cmdDoctor(options = {}) {
       issues++;
     }
 
-    // 2. HUD
+    // HUD
     section("HUD");
     const hud = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
     if (existsSync(hud)) {
@@ -3221,7 +2890,7 @@ async function cmdDoctor(options = {}) {
       warn(`미설치 ${GRAY}(선택사항)${RESET}`);
     }
 
-    // 3. Codex CLI
+    // Codex CLI
     section(`Codex CLI ${WHITE_BRIGHT}●${RESET}`);
     const codexCli = checkCliCrossShell(
       "codex",
@@ -3236,7 +2905,7 @@ async function cmdDoctor(options = {}) {
     });
     // API 키 검사 제거 — bash exec 기반이므로 API 키 불필요
 
-    // 4. Codex Profiles (0.134+: 별도 파일 ~/.codex/<name>.config.toml)
+    // Codex Profiles (0.134+: 별도 파일 ~/.codex/<name>.config.toml)
     section("Codex Profiles");
     {
       const codexConfig = existsSync(CODEX_CONFIG_PATH)
@@ -3300,45 +2969,7 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // 4.5 Serena MCP — 2026-06-10 core 에서 제거됨([Serena Core Removal]).
-    // serena 부재가 정상 상태이며, 잔존 시 부활로 간주해 제거를 권고한다(should-be-absent).
-    section("Serena MCP");
-    if (existsSync(CODEX_CONFIG_PATH)) {
-      const codexConfig = readFileSync(CODEX_CONFIG_PATH, "utf8");
-      const serenaConfig = inspectSerenaMcpConfig(codexConfig);
-      if (!serenaConfig.present) {
-        ok("serena 미설정 (정상 — 2026-06-10 core 제거)");
-        addDoctorCheck(report, {
-          name: "serena-mcp",
-          status: "ok",
-          path: CODEX_CONFIG_PATH,
-          note: "serena removed from core 2026-06-10; absence is expected.",
-        });
-      } else {
-        // 제거 결정 이후 serena 가 다시 나타났다 — 부활 감지(should-be-absent 위반).
-        warn("serena MCP 설정 잔존 — core 에서 제거됨(2026-06-10). 부활 감지");
-        info("제거 권장: ~/.codex/config.toml 의 [mcp_servers.serena] 삭제");
-        addDoctorCheck(report, {
-          name: "serena-mcp",
-          status: "issues",
-          path: CODEX_CONFIG_PATH,
-          resurrected: true,
-          fix: "serena 는 core 에서 제거되었습니다. ~/.codex/config.toml 의 [mcp_servers.serena] 항목을 삭제하세요.",
-        });
-        issues++;
-      }
-    } else {
-      // config.toml 미존재 — serena 부재는 정상. 이슈로 집계하지 않는다.
-      ok("config.toml 미존재 — serena 진단 불필요");
-      addDoctorCheck(report, {
-        name: "serena-mcp",
-        status: "ok",
-        path: CODEX_CONFIG_PATH,
-        note: "config.toml absent; serena not required.",
-      });
-    }
-
-    // 5. Antigravity CLI
+    // Antigravity CLI
     section(`Antigravity CLI ${BLUE}●${RESET}`);
     const antigravityCli = checkCliCrossShell(
       "agy",
@@ -3353,39 +2984,7 @@ async function cmdDoctor(options = {}) {
     });
     // API 키 검사 제거 — agy OAuth 기반이므로 API 키 불필요
 
-    // Gemini 구형 모델 감지
-    const geminiProfilesPath = join(
-      homedir(),
-      ".gemini",
-      "triflux-profiles.json",
-    );
-    const LEGACY_GEMINI_MODELS = [
-      "gemini-2.0-flash",
-      "gemini-1.5-pro",
-      "gemini-1.5-flash",
-      "gemini-2.5-pro-preview",
-    ];
-    if (existsSync(geminiProfilesPath)) {
-      try {
-        const geminiContent = readFileSync(geminiProfilesPath, "utf8");
-        const geminiLegacy = LEGACY_GEMINI_MODELS.filter((m) =>
-          geminiContent.includes(m),
-        );
-        if (geminiLegacy.length > 0) {
-          warn(`구형 모델 감지: ${geminiLegacy.join(", ")}`);
-          info("최신 프로필로 마이그레이션: tfx setup 또는 tfx profile");
-          addDoctorCheck(report, {
-            name: "gemini-legacy-models",
-            status: "issues",
-            models: geminiLegacy,
-            fix: "tfx setup",
-          });
-          issues++;
-        }
-      } catch {}
-    }
-
-    // 6. Claude Code
+    // Claude Code
     section(`Claude Code ${AMBER}●${RESET}`);
     const claudePath = which("claude");
     if (claudePath) {
@@ -3421,7 +3020,7 @@ async function cmdDoctor(options = {}) {
     });
     if (runtimeFlags.status === "warning") warn(runtimeFlags.summary);
 
-    // 7. psmux (Windows only)
+    // psmux (Windows only)
     if (process.platform === "win32") {
       section("psmux (터미널 멀티플렉서)");
       const psmuxPath = which("psmux");
@@ -3543,7 +3142,7 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // 8. 스킬 설치 상태
+    // 스킬 설치 상태
     section("Skills");
     const skillsSrc = join(PKG_ROOT, "skills");
     const skillsDst = join(CLAUDE_DIR, "skills");
@@ -3710,39 +3309,7 @@ async function cmdDoctor(options = {}) {
       });
     }
 
-    // 9. 플러그인 등록
-    section("Plugin");
-    const pluginsFile = join(CLAUDE_DIR, "plugins", "installed_plugins.json");
-    if (existsSync(pluginsFile)) {
-      const content = readFileSync(pluginsFile, "utf8");
-      if (content.includes("triflux")) {
-        addDoctorCheck(report, {
-          name: "plugin",
-          status: "ok",
-          path: pluginsFile,
-        });
-        ok("triflux 플러그인 등록됨");
-      } else {
-        addDoctorCheck(report, {
-          name: "plugin",
-          status: "missing",
-          path: pluginsFile,
-          optional: true,
-          fix: "/plugin marketplace add <repo-url>",
-        });
-        warn("triflux 플러그인 미등록 — npm 단독 사용 중");
-        info("플러그인 등록: /plugin marketplace add <repo-url>");
-      }
-    } else {
-      addDoctorCheck(report, {
-        name: "plugin",
-        status: "unavailable",
-        optional: true,
-      });
-      info("플러그인 시스템 감지 안 됨 — npm 단독 사용");
-    }
-
-    // 10. MCP 인벤토리
+    // MCP 인벤토리
     section("MCP Inventory");
     const mcpCache = join(CLAUDE_DIR, "cache", "mcp-inventory.json");
     if (existsSync(mcpCache)) {
@@ -3784,7 +3351,7 @@ async function cmdDoctor(options = {}) {
       info(`수동: node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}`);
     }
 
-    // 9.5. Phase 1 웜업 캐시
+    // Phase 1 웜업 캐시
     section("Warmup Cache");
     try {
       const { verifyCaches } = await import("../scripts/cache-doctor.mjs");
@@ -3805,7 +3372,7 @@ async function cmdDoctor(options = {}) {
       });
 
       if (brokenCaches.length === 0) {
-        ok("4개 웜업 캐시 정상");
+        ok(`${cacheVerification.results.length}개 웜업 캐시 정상`);
       } else {
         warn(`${brokenCaches.length}개 웜업 캐시 이슈 발견`);
         for (const entry of brokenCaches) {
@@ -3823,7 +3390,7 @@ async function cmdDoctor(options = {}) {
       issues++;
     }
 
-    // 11. CLI 이슈 트래커
+    // CLI 이슈 트래커
     section("CLI Issues");
     const issuesFile = join(CLAUDE_DIR, "cache", "cli-issues.jsonl");
     if (existsSync(issuesFile)) {
@@ -3864,38 +3431,11 @@ async function cmdDoctor(options = {}) {
             }
           }
 
-          // semver 비교 (lexicographic 비교 버그 방지)
-          function semverGte(a, b) {
-            const pa = a.split(".").map(Number);
-            const pb = b.split(".").map(Number);
-            for (let i = 0; i < 3; i++) {
-              if ((pa[i] || 0) > (pb[i] || 0)) return true;
-              if ((pa[i] || 0) < (pb[i] || 0)) return false;
-            }
-            return true;
-          }
-
-          // 알려진 해결 버전 (패턴별 수정된 triflux 버전)
-          const KNOWN_FIXES = {
-            "gemini:deprecated_flag": "1.8.9", // -p → --prompt
-          };
-
-          const currentVer = JSON.parse(
-            readFileSync(join(PKG_ROOT, "package.json"), "utf8"),
-          ).version;
-          let cleaned = 0;
-
           // #144: 오래된 로그 노이즈 완화 — 7일 초과 항목은 INFO 레벨로 downgrade.
           // --fix --purge-logs 플래그가 있으면 해당 오래된 항목은 실제 삭제.
           const STALE_AGE_MS = 7 * 24 * 3600 * 1000;
           let purged = 0;
-          for (const [key, g] of Object.entries(groups)) {
-            const fixVer = KNOWN_FIXES[key];
-            if (fixVer && semverGte(currentVer, fixVer)) {
-              // 해결된 이슈 — 자동 정리
-              cleaned += g.count;
-              continue;
-            }
+          for (const g of Object.values(groups)) {
             const age = Date.now() - g.ts;
             const ago =
               age < 3600000
@@ -3922,27 +3462,17 @@ async function cmdDoctor(options = {}) {
               warn(`[${sev}] ${g.cli}/${g.pattern} x${g.count} (최근: ${ago})`);
             }
             if (g.snippet) info(`  ${g.snippet.substring(0, 120)}`);
-            if (fixVer)
-              info(`  해결: triflux >= v${fixVer} (npm update -g triflux)`);
             if (isStale && !purgeLogs) {
               info(`  7일 초과 — 삭제: tfx doctor --fix --purge-logs`);
             }
             if (!isStale) issues++;
           }
 
-          // #144 Codex review P2: 두 filter (stale purge + KNOWN_FIXES) 가 각각 원본 entries 로
-          // write 하면 두 번째 write 가 첫 번째 결과를 되살린다. 단일 통합 필터로 한 번만 저장.
-          if (purged > 0 || cleaned > 0) {
+          if (purged > 0) {
             const now = Date.now();
-            const remaining = entries.filter((e) => {
-              // purge-logs 로 물리 삭제 대상: 7일 초과
-              if (purged > 0 && now - e.ts >= STALE_AGE_MS) return false;
-              // KNOWN_FIXES 해결된 이슈 제거
-              const key = `${e.cli}:${e.pattern}`;
-              const fixVer = KNOWN_FIXES[key];
-              if (fixVer && semverGte(currentVer, fixVer)) return false;
-              return true;
-            });
+            const remaining = entries.filter(
+              (entry) => now - entry.ts < STALE_AGE_MS,
+            );
             writeFileSync(
               issuesFile,
               remaining.map((e) => JSON.stringify(e)).join("\n") +
@@ -3955,9 +3485,6 @@ async function cmdDoctor(options = {}) {
                 status: "applied",
                 count: purged,
               });
-            }
-            if (cleaned > 0) {
-              ok(`${cleaned}개 해결된 이슈 자동 정리됨`);
             }
           }
           addDoctorCheck(report, {
@@ -3986,7 +3513,7 @@ async function cmdDoctor(options = {}) {
       ok("이슈 로그 없음 (정상)");
     }
 
-    // 12. Team Sessions
+    // Team Sessions
     section("Team Sessions");
     const teamSessionReport = inspectTeamSessions();
     if (!teamSessionReport.mux) {
@@ -4056,7 +3583,7 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // 12.5. detached tmux session report and opt-in cleanup
+    // detached tmux session report and opt-in cleanup
     section("Detached Tmux Sessions");
     const detachedTmuxReport = inspectDetachedTmuxSessions({
       prefix: cleanupStaleTmuxPrefix,
@@ -4156,79 +3683,7 @@ async function cmdDoctor(options = {}) {
       issues += detachedTmuxReport.staleCandidates.length;
     }
 
-    // 13. OMC stale team 상태
-    section("OMC Stale Teams");
-    const omcTeamReport = inspectStaleOmcTeams({
-      startDir: process.cwd(),
-      maxAgeMs: STALE_TEAM_MAX_AGE_SEC * 1000,
-      liveSessionNames: teamSessionReport.sessions.map(
-        (session) => session.sessionName,
-      ),
-    });
-    if (!omcTeamReport.stateRoot && !omcTeamReport.teamsRoot) {
-      addDoctorCheck(report, { name: "omc-stale-teams", status: "skipped" });
-      info(".omc/state 및 ~/.claude/teams 없음 — 검사 건너뜀");
-    } else if (omcTeamReport.entries.length === 0) {
-      addDoctorCheck(report, {
-        name: "omc-stale-teams",
-        status: "ok",
-        entries: 0,
-      });
-      const roots = [omcTeamReport.stateRoot, omcTeamReport.teamsRoot]
-        .filter(Boolean)
-        .join(", ");
-      ok(`stale team 없음 ${DIM}(${roots})${RESET}`);
-    } else {
-      addDoctorCheck(report, {
-        name: "omc-stale-teams",
-        status: "issues",
-        entries: omcTeamReport.entries.length,
-        fix: "tfx doctor --fix",
-      });
-      warn(`${omcTeamReport.entries.length}개 stale team 발견`);
-
-      for (const entry of omcTeamReport.entries) {
-        const ageLabel = formatElapsedAge(entry.ageSec);
-        const scopeLabel =
-          entry.scope === "root"
-            ? "root-state"
-            : entry.scope === "claude_team"
-              ? `claude-team:${entry.teamName || entry.sessionId}`
-              : entry.sessionId;
-        warn(`${scopeLabel}: stale team (경과=${ageLabel}, 프로세스 없음)`);
-        if (entry.teamName) info(`팀: ${entry.teamName}`);
-        info(`파일: ${entry.stateFile || entry.cleanupPath}`);
-      }
-
-      if (fix) {
-        const cleanupResult = await cleanupStaleOmcTeams(omcTeamReport.entries);
-        for (const result of cleanupResult.results) {
-          if (result.ok) {
-            const label =
-              result.entry.scope === "root"
-                ? "root-state"
-                : result.entry.scope === "claude_team"
-                  ? result.entry.teamName || result.entry.sessionId
-                  : result.entry.sessionId;
-            ok(`stale team 정리: ${label}`);
-          } else {
-            const label =
-              result.entry.scope === "root"
-                ? "root-state"
-                : result.entry.scope === "claude_team"
-                  ? result.entry.teamName || result.entry.sessionId
-                  : result.entry.sessionId;
-            fail(`stale team 정리 실패: ${label} — ${result.error.message}`);
-          }
-        }
-        issues += cleanupResult.failed;
-      } else {
-        info("정리: tfx doctor --fix");
-        issues += omcTeamReport.entries.length;
-      }
-    }
-
-    // 12.4. detached tfx-hub/server.mjs 누적 감지 및 opt-in 정리
+    // detached tfx-hub/server.mjs 누적 감지 및 opt-in 정리
     section("Hub Servers");
     try {
       const hubReport = await inspectDetachedHubProcesses();
@@ -4320,7 +3775,7 @@ async function cmdDoctor(options = {}) {
       issues++;
     }
 
-    // 12.5. 고아 node.exe 프로세스 정리 (Windows)
+    // 고아 node.exe 프로세스 정리 (Windows)
     section("Orphan Processes");
     if (process.platform === "win32") {
       try {
@@ -4413,294 +3868,20 @@ async function cmdDoctor(options = {}) {
       ok("Windows 전용 검사 — 건너뜀");
     }
 
-    // 14. Stale Teams (Claude teams/ + tasks/ 자동 감지)
-    section("Stale Teams");
-    const teamsDir = join(CLAUDE_DIR, "teams");
-    const _tasksDir = join(CLAUDE_DIR, "tasks");
-    if (existsSync(teamsDir)) {
-      try {
-        const teamDirs = readdirSync(teamsDir).filter((d) => {
-          try {
-            return statSync(join(teamsDir, d)).isDirectory();
-          } catch {
-            return false;
-          }
-        });
-        if (teamDirs.length === 0) {
-          addDoctorCheck(report, {
-            name: "stale-teams",
-            status: "ok",
-            entries: 0,
-          });
-          ok("잔존 팀 없음");
-        } else {
-          const nowMs = Date.now();
-          const staleMaxAgeMs = STALE_TEAM_MAX_AGE_SEC * 1000;
-          const staleTeams = [];
-          const activeTeams = [];
-
-          for (const d of teamDirs) {
-            const teamPath = join(teamsDir, d);
-            const configPath = join(teamPath, "config.json");
-            let teamConfig = null;
-            let configMtimeMs = null;
-            let missingConfig = false;
-
-            // config.json 읽기 — createdAt 또는 mtime으로 나이 판정
-            try {
-              const configStat = statSync(configPath);
-              configMtimeMs = configStat.mtimeMs;
-              teamConfig = JSON.parse(readFileSync(configPath, "utf8"));
-            } catch {
-              missingConfig = true;
-              // config.json 없으면 표시용 경과 시간만 디렉토리 기준으로 계산
-              try {
-                configMtimeMs = statSync(teamPath).mtimeMs;
-              } catch {}
-            }
-
-            const createdAtMs = teamConfig?.createdAt ?? configMtimeMs;
-            const ageMs =
-              createdAtMs != null ? Math.max(0, nowMs - createdAtMs) : null;
-            const ageSec = ageMs != null ? Math.floor(ageMs / 1000) : null;
-            const aged = ageMs != null && ageMs >= staleMaxAgeMs;
-
-            // 활성 멤버 확인 — leadSessionId 또는 멤버 agentId로 프로세스 검색
-            let hasActiveMember = false;
-            if (teamConfig?.members?.length > 0) {
-              const searchTokens = [];
-              if (teamConfig.leadSessionId)
-                searchTokens.push(teamConfig.leadSessionId.toLowerCase());
-              if (teamConfig.name)
-                searchTokens.push(teamConfig.name.toLowerCase());
-              for (const member of teamConfig.members) {
-                if (member.agentId)
-                  searchTokens.push(member.agentId.split("@")[0].toLowerCase());
-              }
-
-              // tmux 세션 이름과 매칭
-              const liveSessionNames = teamSessionReport.sessions.map((s) =>
-                s.sessionName.toLowerCase(),
-              );
-              hasActiveMember = searchTokens.some((token) =>
-                liveSessionNames.some((name) => name.includes(token)),
-              );
-
-              // 프로세스 명령줄에서 세션 ID 매칭 (tmux 없는 in-process 팀 지원)
-              if (!hasActiveMember && teamConfig.leadSessionId) {
-                try {
-                  const _sessionToken = teamConfig.leadSessionId.toLowerCase();
-                  const safeToken = teamConfig.leadSessionId
-                    .slice(0, 8)
-                    .replace(/[^a-zA-Z0-9-]/g, "");
-                  // Claude Code 프로세스에서 세션 ID 검색
-                  if (process.platform === "win32") {
-                    const psOut = execSync(
-                      `powershell -NoProfile -WindowStyle Hidden -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match '${safeToken}' } | Select-Object ProcessId | ConvertTo-Json -Compress"`,
-                      {
-                        encoding: "utf8",
-                        timeout: 8000,
-                        stdio: ["ignore", "pipe", "ignore"],
-                        windowsHide: true,
-                      },
-                    ).trim();
-                    if (psOut && psOut !== "null") {
-                      const parsed = JSON.parse(psOut);
-                      const procs = Array.isArray(parsed) ? parsed : [parsed];
-                      hasActiveMember = procs.some((p) => p.ProcessId > 0);
-                    }
-                  } else {
-                    const psOut = execSync(
-                      `ps -ax -o pid=,command= | grep -i '${safeToken}' | grep -v grep`,
-                      {
-                        encoding: "utf8",
-                        timeout: 5000,
-                        stdio: ["ignore", "pipe", "ignore"],
-                        windowsHide: true,
-                      },
-                    ).trim();
-                    hasActiveMember = psOut.length > 0;
-                  }
-                } catch {
-                  // 프로세스 검색 실패 — stale로 간주하지 않음 (보수적)
-                }
-              }
-            }
-
-            const stale = missingConfig || (aged && !hasActiveMember);
-            const teamEntry = {
-              name: d,
-              teamName: teamConfig?.name || d,
-              description: teamConfig?.description || null,
-              memberCount: teamConfig?.members?.length || 0,
-              ageSec,
-              stale,
-              hasActiveMember,
-              missingConfig,
-            };
-
-            if (stale) {
-              staleTeams.push(teamEntry);
-            } else {
-              activeTeams.push(teamEntry);
-            }
-          }
-
-          // 활성 팀 표시
-          for (const t of activeTeams) {
-            const ageLabel = formatElapsedAge(t.ageSec);
-            const memberLabel = `${t.memberCount}명`;
-            ok(`${t.name}: 활성 (경과=${ageLabel}, 멤버=${memberLabel})`);
-          }
-
-          // stale 팀 표시 및 정리
-          if (staleTeams.length === 0 && activeTeams.length > 0) {
-            addDoctorCheck(report, {
-              name: "stale-teams",
-              status: "ok",
-              active: activeTeams.length,
-              stale: 0,
-            });
-            ok("stale 팀 없음");
-          } else if (staleTeams.length > 0) {
-            addDoctorCheck(report, {
-              name: "stale-teams",
-              status: "issues",
-              active: activeTeams.length,
-              stale: staleTeams.length,
-              fix: "tfx doctor --fix",
-            });
-            warn(`${staleTeams.length}개 stale 팀 발견`);
-            for (const t of staleTeams) {
-              const ageLabel = formatElapsedAge(t.ageSec);
-              const reasonLabel = t.missingConfig
-                ? "config.json 없음"
-                : "활성 프로세스 없음";
-              warn(
-                `${t.name}: stale (경과=${ageLabel}, 멤버=${t.memberCount}명, ${reasonLabel})`,
-              );
-              if (t.description) info(`설명: ${t.description}`);
-            }
-
-            if (fix) {
-              let cleaned = 0;
-              for (const t of staleTeams) {
-                try {
-                  await forceCleanupTeam(t.name);
-                  cleaned++;
-                  ok(`stale 팀 정리: ${t.name}`);
-                } catch (e) {
-                  fail(`팀 정리 실패: ${t.name} — ${e.message}`);
-                }
-              }
-              info(`${cleaned}/${staleTeams.length}개 stale 팀 정리 완료`);
-            } else {
-              info("정리: tfx doctor --fix");
-              issues += staleTeams.length;
-            }
-          }
-        }
-      } catch (e) {
-        addDoctorCheck(report, {
-          name: "stale-teams",
-          status: "invalid",
-          fix: "teams 디렉토리 구조를 확인하세요.",
-        });
-        warn(`teams 디렉토리 읽기 실패: ${e.message}`);
-      }
-    } else {
-      addDoctorCheck(report, { name: "stale-teams", status: "ok", entries: 0 });
-      ok("잔존 팀 없음");
-    }
-
-    // ── Docs 동기화 상태 ──
-    section("Docs Sync");
-    {
-      const docsDirs = ["docs/design", "docs/research"];
-      const missingDocs = [];
-      for (const dir of docsDirs) {
-        const src = join(PKG_ROOT, dir);
-        const dest = join(CLAUDE_DIR, dir);
-        if (existsSync(src)) {
-          const srcFiles = readdirSync(src).filter((f) => f.endsWith(".md"));
-          if (!existsSync(dest)) {
-            missingDocs.push({
-              dir,
-              missing: srcFiles.length,
-              detail: "디렉토리 없음",
-            });
-          } else {
-            const destFiles = readdirSync(dest).filter((f) =>
-              f.endsWith(".md"),
-            );
-            const missing = srcFiles.filter((f) => !destFiles.includes(f));
-            if (missing.length > 0)
-              missingDocs.push({
-                dir,
-                missing: missing.length,
-                detail: missing.join(", "),
-              });
-          }
-        }
-      }
-      if (missingDocs.length === 0) {
-        addDoctorCheck(report, { name: "docs-sync", status: "ok" });
-        ok("레퍼런스 문서 동기화 정상");
-      } else {
-        addDoctorCheck(report, {
-          name: "docs-sync",
-          status: "issues",
-          missingDocs,
-          fix: "tfx setup",
-        });
-        warn(
-          `${missingDocs.reduce((s, d) => s + d.missing, 0)}개 레퍼런스 미동기화`,
-        );
-        for (const d of missingDocs) info(`${d.dir}: ${d.detail}`);
-        if (fix) {
-          for (const dir of docsDirs) {
-            const src = join(PKG_ROOT, dir);
-            const dest = join(CLAUDE_DIR, dir);
-            if (existsSync(src)) {
-              mkdirSync(dest, { recursive: true });
-              for (const f of readdirSync(src).filter((f) =>
-                f.endsWith(".md"),
-              )) {
-                copyFileSync(join(src, f), join(dest, f));
-              }
-            }
-          }
-          ok("레퍼런스 동기화 완료");
-        } else {
-          issues += missingDocs.length;
-        }
-      }
-    }
-
     // ── MCP 중앙 레지스트리 ──
     section("MCP Registry");
     {
-      let registryState = inspectRegistry();
-      if (!registryState.exists) {
-        saveRegistry(createDefaultRegistry());
-        registryState = inspectRegistry();
+      const registryState = inspectRegistry();
+      if (!registryState.valid) {
         addDoctorCheck(report, {
           name: "mcp-registry",
-          status: "fixed",
+          status: registryState.exists ? "invalid" : "missing",
           path: registryState.path,
-          action: "기본값으로 자동 생성됨",
+          errors: registryState.errors,
+          fix: "tfx doctor --fix",
         });
-        ok("mcp-registry.json 없음 → 기본값으로 자동 생성됨");
-      } else if (!registryState.valid) {
-        saveRegistry(createDefaultRegistry());
-        registryState = inspectRegistry();
-        addDoctorCheck(report, {
-          name: "mcp-registry",
-          status: "fixed",
-          path: registryState.path,
-          action: "손상 감지 → 기본값으로 재생성됨",
-        });
-        warn("mcp-registry.json 손상 → 기본값으로 재생성됨");
+        warn("MCP registry 없음 또는 손상: tfx doctor --fix");
+        issues++;
       } else {
         const statusInfo = inspectRegistryStatus(registryState.registry);
         const invalidConfigs = statusInfo.configs.filter(
@@ -4925,8 +4106,6 @@ async function cmdDoctor(options = {}) {
       const srcRoute = join(PKG_ROOT, "scripts", "tfx-route.sh");
       const destRoute = join(CLAUDE_DIR, "scripts", "tfx-route.sh");
       if (existsSync(srcRoute) && existsSync(destRoute)) {
-        const srcHash = readFileSync(srcRoute, "utf8").length;
-        const destHash = readFileSync(destRoute, "utf8").length;
         const srcContent = readFileSync(srcRoute, "utf8");
         const destContent = readFileSync(destRoute, "utf8");
         if (srcContent === destContent) {
@@ -4940,7 +4119,7 @@ async function cmdDoctor(options = {}) {
           });
           warn("tfx-route.sh 프로젝트 소스와 설치본 불일치");
           info(
-            `소스: ${srcRoute} (${srcHash}B) / 설치: ${destRoute} (${destHash}B)`,
+            `소스: ${srcRoute} (${Buffer.byteLength(srcContent)}B) / 설치: ${destRoute} (${Buffer.byteLength(destContent)}B)`,
           );
           if (fix) {
             copyFileSync(srcRoute, destRoute);

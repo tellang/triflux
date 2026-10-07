@@ -5,7 +5,7 @@
 ## 핵심 규칙 (triflux 환경 특화)
 - Codex 직접 호출 금지. `tfx-auto --cli codex`, 병렬은 `tfx-auto --parallel N|swarm` 플래그나 `tfx multi` / `tfx swarm` CLI를 거친다.
 - 프롬프트는 `--` 뒤의 인자로 넘기고 표준 입력은 닫는다(`… -- "$prompt" < /dev/null`). `codex < prompt.md`는 비대화식 실행이라 실패한다.
-- `config.toml`에 `approval_mode`, `sandbox` 기본값을 두고 CLI는 `--profile`만 지정한다. 중복 플래그를 쓰지 않는다.
+- `config.toml`에 `approval_policy`, `sandbox_mode` 기본값을 두고 CLI는 `--profile`만 지정한다. 중복 플래그를 쓰지 않는다.
 - Claude가 작성한 코드는 Codex로 교차 검증한다. 스스로 승인하지 않는다.
 - 비대화식 결과는 작업 알림이 완료된 뒤에만 읽는다.
 
@@ -31,8 +31,13 @@
 
 ## 작업 합의
 - 한국어 우선, 기술 용어는 원어 유지.
-- 커밋: `Type: 한국어 설명 (50자 이내)`. **`Co-Authored-By`와 AI 꼬리표를 넣지 않는다.**
+- 커밋: `type(scope): 한국어 설명`. type은 소문자이며 **`Co-Authored-By`와 AI 꼬리표를 넣지 않는다.**
 - 변경 후 린트·타입 검사·테스트를 실행한다. 비밀 정보(API 키·토큰·세션)를 하드코딩하지 않는다.
+
+## 코드 작성 원칙
+- 코드는 간결하게 쓰고 의미 있는 이름을 쓴다. 주석은 이유만 짧게 한국어로 쓴다.
+- 테스트는 회귀를 막는 핵심 경로만 최소한으로 둔다.
+- 제거 여부는 해당 파일을 끝까지 직접 읽고 판단한다.
 
 ## CTO 기준 방향
 - `.triflux/lake/current.md`는 에이전트 간 기준 방향 요약입니다. 정렬을 위해 읽되 새 작업으로 취급하지 않습니다.

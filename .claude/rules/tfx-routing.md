@@ -160,6 +160,7 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 - 2(warn): 무거운 shard(빌드·전체 테스트 스위트·대규모 리팩터)를 띄우거나 워커 3+개를 새로 만들 때만 오프로드
 - 1(normal): 로컬 유지
 - sysctl 실패 시 대체 신호: `vm_stat` 5초 간격 2회 측정에서 swapouts 증가
+- 원격으로 넘기기 전에 `tfx-remote probe <host>`(구현: `node scripts/remote-spawn.mjs --probe <host>`)로 호스트 상태를 먼저 확인한다.
 - 행동: 코드 변경 shard는 PRD에 `host: m2`를 지정(tfx-swarm), 탐색·대화형은 tfx-remote로 m2 세션을 띄운다
 - 로컬 여유가 충분하면 로컬 유지. 사용자가 로컬/원격을 명시하면 그에 따른다
 - m2 부재 시(ssh 불응) 조용히 로컬로 강등하지 말고 한 줄 알린 뒤 로컬 진행

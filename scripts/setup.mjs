@@ -15,8 +15,10 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
@@ -24,11 +26,6 @@ import { createRequire } from "module";
 import { homedir } from "os";
 import { basename, delimiter, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
-import {
-  ensureGlobalClaudeRoutingSection,
-  ensureTfxSection,
-  getLatestRoutingTable,
-} from "./claudemd-sync.mjs";
 import { ensureAgyHooks } from "./ensure-agy-hooks.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
 import { cleanupLegacyHooks } from "./lib/legacy-hook-cleanup.mjs";
@@ -1205,20 +1202,97 @@ function syncCodexHarnessAdapter({
   return { ok: true, action: "synced", sourceDir, destinationDir };
 }
 
-function syncCodexManagedSkills() {
+function syncCodexManagedSkills({
+  pluginRoot = PLUGIN_ROOT,
+  codexDir = CODEX_DIR,
+} = {}) {
+  const liveAdapter = join(
+    pluginRoot,
+    "adapters",
+    "codex",
+    "skills",
+    "tfx-live",
+  );
   return [
     [
       "tfx-harness",
-      join(PLUGIN_ROOT, "adapters", "codex", "skills", "tfx-harness"),
+      join(pluginRoot, "adapters", "codex", "skills", "tfx-harness"),
     ],
-    ["tfx-live", join(PLUGIN_ROOT, "skills", "tfx-live")],
+    [
+      "tfx-live",
+      existsSync(liveAdapter)
+        ? liveAdapter
+        : join(pluginRoot, "skills", "tfx-live"),
+    ],
   ].map(([name, sourceDir]) => ({
     name,
     ...syncCodexHarnessAdapter({
       sourceDir,
-      destinationDir: join(CODEX_DIR, "skills", name),
+      destinationDir: join(codexDir, "skills", name),
     }),
   }));
+}
+
+export function syncSkills({
+  pluginRoot = PLUGIN_ROOT,
+  claudeDir = CLAUDE_DIR,
+  codexDir = CODEX_DIR,
+  platform = process.platform,
+} = {}) {
+  const source = join(pluginRoot, "skills");
+  const destination = join(claudeDir, "skills");
+  const result = { ok: true, changed: 0, total: 0, warnings: [] };
+  function syncDirectory(src, dst) {
+    mkdirSync(dst, { recursive: true });
+    for (const entry of readdirSync(src, { withFileTypes: true })) {
+      if (isSetupUserStateFile(entry.name)) continue;
+      const from = join(src, entry.name);
+      const to = join(dst, entry.name);
+      if (entry.isDirectory()) syncDirectory(from, to);
+      else if (
+        entry.isFile() &&
+        entry.name.endsWith(".md") &&
+        shouldSyncTextFile(from, to)
+      ) {
+        copyFileSync(from, to);
+        result.changed++;
+      }
+    }
+  }
+  if (existsSync(source)) {
+    for (const name of readdirSync(source)) {
+      const skill = join(source, name);
+      if (
+        !existsSync(join(skill, "SKILL.md")) ||
+        !isSkillSupportedOnPlatform(skill, platform)
+      )
+        continue;
+      syncDirectory(skill, join(destination, name));
+      result.total++;
+    }
+    for (const { alias, source: name } of SKILL_ALIASES) {
+      result.changed += syncAliasedSkillDir(
+        join(source, name),
+        join(destination, alias),
+        { alias, source: name },
+      );
+    }
+  }
+  for (const installed of [destination, join(codexDir, "skills")]) {
+    const stale = cleanupStaleSkills(installed, source, { platform });
+    result.changed += stale.count;
+    for (const name of stale.preserved)
+      result.warnings.push(`구형 스킬 ${name}: 사용자 사본 보존`);
+  }
+  for (const skill of syncCodexManagedSkills({ pluginRoot, codexDir })) {
+    if (skill.action === "synced") result.changed++;
+    if (!skill.ok) {
+      result.ok = false;
+      result.warnings.push(`Codex ${skill.name}: ${skill.reason}`);
+    } else if (skill.action === "skipped")
+      result.warnings.push(`Codex ${skill.name}: 사용자 스킬 보존`);
+  }
+  return result;
 }
 
 function isProtectedCodexConfigMutationEnv(env = process.env) {
@@ -1499,27 +1573,6 @@ function ensureCodexProfiles() {
   }
 }
 
-function syncClaudeRoutingSections() {
-  try {
-    const routingTable = getLatestRoutingTable();
-    return [
-      ensureTfxSection(join(PLUGIN_ROOT, "CLAUDE.md"), routingTable),
-      ensureGlobalClaudeRoutingSection(CLAUDE_DIR),
-    ];
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : "routing_sync_failed";
-    return [
-      {
-        action: "unchanged",
-        path: join(PLUGIN_ROOT, "CLAUDE.md"),
-        skipped: true,
-        reason,
-      },
-    ];
-  }
-}
-
 function createCommandIo() {
   const stdout = [];
   const stderr = [];
@@ -1733,33 +1786,60 @@ function ensureWindowsHubAutostart({
 
 function loadSettings() {
   if (!existsSync(SETTINGS_PATH)) return {};
+  const settings = JSON.parse(readFileSync(SETTINGS_PATH, "utf8"));
+  if (!settings || typeof settings !== "object" || Array.isArray(settings))
+    throw new Error("settings.json은 객체여야 합니다.");
+  return settings;
+}
 
+export function persistSettings(settings, settingsPath = SETTINGS_PATH) {
+  const target = existsSync(settingsPath)
+    ? realpathSync(settingsPath)
+    : settingsPath;
+  mkdirSync(dirname(target), { recursive: true });
+  const temporary = `${target}.tfx-${process.pid}-${Date.now()}.tmp`;
   try {
-    return JSON.parse(readFileSync(SETTINGS_PATH, "utf8"));
-  } catch {
-    return {};
+    writeFileSync(temporary, `${JSON.stringify(settings, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: existsSync(target) ? statSync(target).mode : 0o600,
+    });
+    renameSync(temporary, target);
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
   }
 }
 
-function persistSettings(settings) {
-  writeFileSync(
-    SETTINGS_PATH,
-    JSON.stringify(settings, null, 2) + "\n",
-    "utf8",
-  );
-}
-
-function applyStatusLine(settings) {
-  if (!existsSync(HUD_PATH)) return false;
-  const currentCmd = settings.statusLine?.command || "";
-  const desiredCommand = buildNodeScriptCommand(HUD_PATH);
-  if (currentCmd.includes("hud-qos-status.mjs")) {
-    if (currentCmd === desiredCommand) return false;
-    settings.statusLine = { type: "command", command: desiredCommand };
-    return true;
+export function applyStatusLine(
+  settings,
+  { hudPath = HUD_PATH, warn = console.warn } = {},
+) {
+  if (!existsSync(hudPath)) return false;
+  const current = settings.statusLine;
+  const desiredCommand = buildNodeScriptCommand(hudPath);
+  if (current?.command === desiredCommand) return false;
+  if (current != null) {
+    const tokens = String(current.command || "").match(
+      /^(?:"([^"\n]+)"|'([^'\n]+)'|(\S+))\s+(?:"([^"\n]+)"|'([^'\n]+)'|(\S+))$/u,
+    );
+    const node = tokens?.[1] ?? tokens?.[2] ?? tokens?.[3] ?? "";
+    const script = tokens?.[4] ?? tokens?.[5] ?? tokens?.[6];
+    if (
+      current.type !== "command" ||
+      !/(?:^|[/\\])node(?:\.exe)?$/u.test(node) ||
+      script !== hudPath.replace(/\\/g, "/")
+    ) {
+      warn(
+        "기존 statusLine 유지: Triflux HUD를 쓰려면 settings.json에서 직접 선택하세요.",
+      );
+      return false;
+    }
   }
-
-  settings.statusLine = { type: "command", command: desiredCommand };
+  settings.statusLine = {
+    ...current,
+    type: "command",
+    command: desiredCommand,
+  };
   return true;
 }
 
@@ -2070,7 +2150,12 @@ export async function runCritical(stdinData) {
     io.log("  [sync] 명시적 재동기화 실행");
   }
 
-  ensureCriticalSetup();
+  try {
+    ensureCriticalSetup();
+  } catch (error) {
+    io.writeStderr(`[tfx-setup] settings.json 읽기 실패: ${error.message}\n`);
+    return io.result(1);
+  }
   return io.result(0);
 }
 
@@ -2136,32 +2221,9 @@ export async function runDeferred(stdinData) {
 
   const pkgVersion = getPackageVersion();
   const marker = readMarker();
-  const claudeRoutingResults = syncClaudeRoutingSections();
-  const claudeRoutingChangedCount = claudeRoutingResults.filter(
-    (result) =>
-      result.action === "created" ||
-      result.action === "updated" ||
-      result.action === "removed",
-  ).length;
-  const codexSkills = syncCodexManagedSkills();
-  for (const skill of codexSkills) {
-    if (!skill.ok) {
-      io.log(`  \x1b[31m✗\x1b[0m Codex ${skill.name}: ${skill.reason}`);
-      return io.result(1);
-    }
-    if (skill.action === "skipped") {
-      io.log(`  \x1b[33m⚠\x1b[0m Codex ${skill.name}: 사용자 스킬 보존`);
-    }
-  }
-  const staleSourceDir = join(PLUGIN_ROOT, "skills");
-  for (const installedDir of [
-    join(CLAUDE_DIR, "skills"),
-    join(CODEX_DIR, "skills"),
-  ]) {
-    const stale = cleanupStaleSkills(installedDir, staleSourceDir);
-    for (const name of stale.preserved)
-      io.log(`  \x1b[33m⚠\x1b[0m 구형 스킬 ${name}: 사용자 사본 보존`);
-  }
+  const skillSync = syncSkills();
+  for (const warning of skillSync.warnings) io.log(`  ⚠ ${warning}`);
+  if (!skillSync.ok) return io.result(1);
   const cloakBrowserResult = ensureCloakBrowser({
     warn: (message) => io.log(`  \x1b[33m⚠\x1b[0m ${message}`),
   });
@@ -2172,19 +2234,11 @@ export async function runDeferred(stdinData) {
     io.log("  \x1b[32m✓\x1b[0m cloakbrowser optional backend ready");
   }
   if (pkgVersion && marker?.version === pkgVersion && !isForce) {
-    if (claudeRoutingChangedCount > 0) {
-      io.log(
-        `setup: skip core sync (v${pkgVersion} already synced, CLAUDE.md ${claudeRoutingChangedCount}건 반영)`,
-      );
-    } else {
-      io.log(`setup: skip (v${pkgVersion} already synced)`);
-    }
+    io.log(`setup: skip (v${pkgVersion} already synced)`);
     return io.result(0);
   }
 
-  let synced =
-    claudeRoutingChangedCount +
-    codexSkills.filter((skill) => skill.action === "synced").length;
+  let synced = skillSync.changed;
 
   // ── Memory Doctor (P0 자동 수정) ──
   const isCIEnv = process.env.CI === "true" || process.env.DOCKER === "true";
@@ -2243,13 +2297,6 @@ export async function runDeferred(stdinData) {
         synced++;
       }
     }
-  }
-
-  try {
-    const claudeGuide = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
-    if (claudeGuide.changed) synced++;
-  } catch (e) {
-    io.log(`  \x1b[33m⚠\x1b[0m CLAUDE.md 라우팅: ${e.message}`);
   }
 
   // ── Worker 의존성 동기화 (MCP SDK + transitive deps) ──
@@ -2336,153 +2383,15 @@ export async function runDeferred(stdinData) {
     }
   }
 
-  // ── 스킬 동기화 ──
-  // SKILL.md + 하위 디렉토리(references/ 등)를 재귀적으로 동기화.
-  // hosts.json 같은 user-state 파일은 설치/동기화 대상이 아니다.
-
-  const skillsSrc = join(PLUGIN_ROOT, "skills");
-  const skillsDst = join(CLAUDE_DIR, "skills");
-
-  function syncSkillDir(srcDir, dstDir) {
-    if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
-
-    let count = 0;
-    for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
-      const srcPath = join(srcDir, entry.name);
-      const dstPath = join(dstDir, entry.name);
-      if (isSetupUserStateFile(entry.name)) continue;
-
-      if (entry.isDirectory()) {
-        count += syncSkillDir(srcPath, dstPath);
-      } else if (entry.name.endsWith(".md")) {
-        if (shouldSyncTextFile(srcPath, dstPath)) {
-          copyFileSync(srcPath, dstPath);
-          count++;
-        }
-      }
-    }
-    return count;
-  }
-
-  if (existsSync(skillsSrc)) {
-    for (const name of readdirSync(skillsSrc)) {
-      const skillDir = join(skillsSrc, name);
-      const skillMd = join(skillDir, "SKILL.md");
-      if (!existsSync(skillMd)) continue;
-
-      const installedDir = join(skillsDst, name);
-      // 플랫폼 비대상 사본은 앞선 관리 설치본 정리에서 판정한다.
-      if (!isSkillSupportedOnPlatform(skillDir)) {
-        continue;
-      }
-
-      synced += syncSkillDir(skillDir, installedDir);
-    }
-  }
-
-  // ── settings.json 통합 R/W ──
-  // 설정 섹션(statusLine, agentTeams, remoteControl)을 1회 read → 일괄 수정 → 1회 write
-
-  const settingsPath = join(CLAUDE_DIR, "settings.json");
-  const hudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
-
-  /**
-   * statusLine 섹션 적용.
-   * @param {object} s - settings 객체 (직접 변경)
-   * @returns {boolean} 변경 여부
-   */
-  function applyStatusLine(s) {
-    if (!existsSync(hudPath)) return false;
-    const currentCmd = s.statusLine?.command || "";
-    const desiredCommand = buildNodeScriptCommand(hudPath);
-    if (currentCmd.includes("hud-qos-status.mjs")) {
-      if (currentCmd === desiredCommand) return false;
-      s.statusLine = { type: "command", command: desiredCommand };
-      return true;
-    }
-
-    s.statusLine = { type: "command", command: desiredCommand };
-    return true;
-  }
-
-  /**
-   * Agent Teams 환경변수 섹션 적용.
-   * @param {object} s - settings 객체 (직접 변경)
-   * @returns {boolean} 변경 여부
-   */
-  function applyAgentTeams(s) {
-    if (!s.env) s.env = {};
-    let changed = false;
-
-    if (s.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS !== "1") {
-      s.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1";
-      changed = true;
-    }
-    // teammateMode: auto (tmux 밖이면 in-process, 안이면 split-pane)
-    if (!s.teammateMode) {
-      s.teammateMode = "auto";
-      changed = true;
-    }
-    return changed;
-  }
-
-  /**
-   * Remote Control 자동 활성화.
-   * 모든 세션에서 remote control URL을 자동 발급하도록 설정.
-   * @param {object} s - settings 객체 (직접 변경)
-   * @returns {boolean} 변경 여부
-   */
-  function applyRemoteControl(s) {
-    if (s.remoteControlAtStartup === true) return false;
-    if (process.env.TFX_REMOTE_CONTROL !== "1" && !detectDevMode())
-      return false;
-    s.remoteControlAtStartup = true;
-    return true;
-  }
-
-  // 1회 읽기
-  let settings = {};
-  if (existsSync(settingsPath)) {
-    try {
-      settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-    } catch {
-      /* 기존 설정 보존 */
-    }
-  }
-
-  // 3개 섹션 일괄 수정 (각각 try-catch로 독립 실행)
+  const settings = loadSettings();
   let settingsChanged = false;
-  try {
-    if (applyStatusLine(settings)) {
+  for (const apply of [applyStatusLine, applyAgentTeams, applyRemoteControl]) {
+    if (apply(settings)) {
       settingsChanged = true;
       synced++;
-    }
-  } catch {}
-  try {
-    if (applyAgentTeams(settings)) {
-      settingsChanged = true;
-      synced++;
-    }
-  } catch {}
-  try {
-    if (applyRemoteControl(settings)) {
-      settingsChanged = true;
-      synced++;
-    }
-  } catch {}
-
-  // 1회 쓰기
-  if (settingsChanged) {
-    try {
-      writeFileSync(
-        settingsPath,
-        JSON.stringify(settings, null, 2) + "\n",
-        "utf8",
-      );
-    } catch {
-      // settings.json 쓰기 실패 시 무시
     }
   }
+  if (settingsChanged) persistSettings(settings);
 
   // ── HUD 캐시 pre-warm (백그라운드) ──
 
@@ -2680,26 +2589,6 @@ export async function runDeferred(stdinData) {
     }
   }
 
-  // ── CLAUDE.md 라우팅 섹션 자동 동기화 ──
-
-  try {
-    const routingTable = getLatestRoutingTable();
-    const projectResult = ensureTfxSection(
-      join(PLUGIN_ROOT, "CLAUDE.md"),
-      routingTable,
-    );
-    if (projectResult.action !== "unchanged") {
-      io.log(`  \x1b[32m✓\x1b[0m CLAUDE.md (project): ${projectResult.action}`);
-      synced++;
-    }
-    const globalResult = ensureGlobalClaudeRoutingSection(CLAUDE_DIR);
-    if (globalResult.action !== "unchanged") {
-      io.log(`  \x1b[32m✓\x1b[0m CLAUDE.md (global): ${globalResult.action}`);
-      synced++;
-    }
-  } catch (error) {
-    io.log(`  \x1b[33m⚠\x1b[0m CLAUDE.md 동기화 실패: ${error.message}`);
-  }
   // ── MCP 인벤토리 백그라운드 갱신 ──
 
   const mcpCheck = join(PLUGIN_ROOT, "scripts", "mcp-check.mjs");
@@ -2773,7 +2662,7 @@ ${B}╚════════════════════════�
   ${G}✓${R} tfx-route.sh     → ~/.claude/scripts/
   ${G}✓${R} hud-qos-status   → ~/.claude/hud/
   ${G}✓${R} ${synced > 0 ? synced + " files synced" : "all files up to date"}
-  ${G}✓${R} HUD statusLine   → settings.json
+  ${D}HUD statusLine: 기존 설정을 보존하며 미설정 시 등록${R}
 
 ${B}Commands:${R}
   ${C}triflux${R} setup     파일 동기화 + HUD 설정

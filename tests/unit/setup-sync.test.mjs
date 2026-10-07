@@ -28,6 +28,7 @@ const {
   getWorkerPackageSyncEntries,
   syncCodexHarnessAdapter,
   syncWorkerPackages,
+  syncSkills,
 } = await import("../../scripts/setup.mjs");
 
 // ── helpers ──
@@ -151,7 +152,17 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
       "SKILL.md",
     );
     assert.equal(readFileSync(installed, "utf8"), readFileSync(source, "utf8"));
-    const liveSource = join(PROJECT_ROOT, "skills", "tfx-live", "SKILL.md");
+    const adapterLiveSource = join(
+      PROJECT_ROOT,
+      "adapters",
+      "codex",
+      "skills",
+      "tfx-live",
+      "SKILL.md",
+    );
+    const liveSource = existsSync(adapterLiveSource)
+      ? adapterLiveSource
+      : join(PROJECT_ROOT, "skills", "tfx-live", "SKILL.md");
     const liveInstalled = join(
       SETUP_TEST_HOME,
       ".codex",
@@ -510,13 +521,66 @@ describe("setup-sync: user-state file exclusions", () => {
     assert.equal(isSetupUserStateFile("SKILL.md"), false);
   });
 
-  it("tfx setup CLI path also skips user-state references", () => {
-    const source = readFileSync(
-      join(PROJECT_ROOT, "bin", "triflux.mjs"),
-      "utf8",
+  it("공용 스킬 동기화가 references를 갱신하고 사용자 파일을 보존한다", () => {
+    const root = join(TMP_DIR, "shared-skills");
+    const source = join(root, "package");
+    const claudeDir = join(root, "claude");
+    const codexDir = join(root, "codex");
+    for (const relative of [
+      "skills/tfx-live",
+      "adapters/codex/skills/tfx-harness",
+      "skills/tfx-example/references/nested",
+    ]) {
+      mkdirSync(join(source, relative), { recursive: true });
+      if (!relative.includes("references"))
+        writeFileSync(join(source, relative, "SKILL.md"), "skill");
+    }
+    writeFileSync(join(source, "skills/tfx-example/SKILL.md"), "example");
+    writeFileSync(
+      join(source, "skills/tfx-example/references/nested/guide.md"),
+      "new guide",
     );
-    assert.match(source, /isSetupUserStateFile/u);
-    assert.match(source, /if \(isSetupUserStateFile\(refFile\)\) continue;/u);
+    writeFileSync(
+      join(source, "skills/tfx-example/references/hosts.json"),
+      "do not copy",
+    );
+    const installed = join(claudeDir, "skills/tfx-example/references");
+    mkdirSync(installed, { recursive: true });
+    writeFileSync(join(installed, "hosts.json"), "user hosts");
+    const removed = join(claudeDir, "skills/tfx-plan");
+    mkdirSync(removed, { recursive: true });
+    writeFileSync(join(removed, ".triflux-managed-skill"), "managed");
+    try {
+      assert.equal(
+        syncSkills({ pluginRoot: source, claudeDir, codexDir }).ok,
+        true,
+      );
+      assert.equal(
+        readFileSync(join(installed, "nested/guide.md"), "utf8"),
+        "new guide",
+      );
+      assert.equal(
+        readFileSync(join(installed, "hosts.json"), "utf8"),
+        "user hosts",
+      );
+      assert.equal(existsSync(removed), false);
+      assert.equal(
+        syncSkills({ pluginRoot: source, claudeDir, codexDir }).changed,
+        0,
+      );
+      const liveInstalled = join(codexDir, "skills/tfx-live/SKILL.md");
+      assert.equal(readFileSync(liveInstalled, "utf8"), "skill");
+      const liveAdapter = join(source, "adapters/codex/skills/tfx-live");
+      mkdirSync(liveAdapter, { recursive: true });
+      writeFileSync(join(liveAdapter, "SKILL.md"), "Codex live skill");
+      assert.equal(
+        syncSkills({ pluginRoot: source, claudeDir, codexDir }).ok,
+        true,
+      );
+      assert.equal(readFileSync(liveInstalled, "utf8"), "Codex live skill");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
