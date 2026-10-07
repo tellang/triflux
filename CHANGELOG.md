@@ -2,6 +2,31 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.50.0] - 2026-10-08
+
+### Removed
+- hooks: command hook 일체(hook-orchestrator, hook-registry, safety-guard, permission-safe-allow, pipeline-stop, routing-weights, cross-review tracker/gate, tfx-gate-activate 등)와 키워드 라우팅을 지운다. Claude Code 가 네이티브로 하는 일이거나 쓰이지 않던 것이다. 설치본의 settings.json 에서는 triflux 가 등록한 hook 만 골라 지우고 백업을 남긴다 (ADR-0023)
+- mcp: 로컬 MCP gateway 를 지운다. `tfx setup`, `tfx doctor --fix`, npm 설치 직후 setup 이 `~/.claude.json`, 프로젝트 `.mcp.json`, `~/.codex/config.toml`, `~/.gemini/settings.json` 의 gateway 항목을 원래 stdio 정의로 바꾸고, 소유가 확인된 launchd/systemd/Windows 작업을 해제한 뒤 gateway 프로세스를 끝낸다. API 키는 복사하지 않고 환경변수 참조로 남긴다 (ADR-0023)
+- skills: `tfx-plan`, `tfx-interview`, `tfx-profile`, `merge-worktree`, `star-prompt` 를 지운다
+- doctor/setup: 끝난 점검(Serena, Docs Sync, Gemini 구형 모델·플래그, plugin 미등록 경고)과 패키지 CLAUDE.md 쓰기, OMC/teams 상태 삭제, 점검 모드의 registry 덮어쓰기를 지운다
+
+### Added
+- mods: Claude Code mod `mods/triflux` 를 더한다. 프롬프트 위 band 에 Claude 5h/1w 사용률, context, 비용을 그리고, 서브에이전트 effort 를 역할표로 맞춘다(탐색 low, 실행 medium, 판정 high, 직접 적은 effort 우선). band 가 있는 세션은 statusLine HUD 가 Claude 행을 뺀다
+- git: AI trailer(`Co-Authored-By:`, `Claude-Session:`, `Generated with [Claude`)를 막는 `.githooks/commit-msg`. 저장소 체크아웃에서만 `prepare` 가 설정한다
+
+### Changed
+- hud: context 를 `CTX:443K/1.0M` 대신 `CTX:44%` 로 표시한다
+- hud: Antigravity 가 GCP 프로젝트 인증이면 계정 칸에 프로젝트 ID 를 보여 준다
+- research: cloakbrowser 를 0.5.12 로 고정한다(키 없이 무료 바이너리 v146, 최신 v152 만 로그인 키 필요). setup 자동 설치도 그 버전으로 받는다. `tfx-research` 가 `tfx stealth-fetch` 를 WebFetch 보다 먼저 원문 수집에 쓴다
+- update: `tfx update` 가 갱신 뒤 새 버전의 setup 을 별도 프로세스로 실행한다
+- setup: 다른 statusLine 이 설정돼 있으면 덮어쓰지 않는다. Codex tfx-live 설치 원본은 `adapters/codex/skills/tfx-live` 를 우선한다
+
+### Fixed
+- setup: 저장소 체크아웃에서 `npm ci` 만 해도 postinstall setup 이 실제 HOME 을 바꾸던 문제. postinstall 은 node_modules 아래 설치본에서만 setup 한다
+- setup: cloakbrowser 자동 설치가 같은 패키지의 postinstall 을 다시 불러 무한 재귀하던 문제
+- setup: MCP 이주가 막히면 npm 설치와 `tfx setup` 이 실패하던 경로를 경고로 바꾼다
+- hub: `tfx multi --assign` 이 모든 시작 모드에서 assign 라우팅을 적용한다(쉼표 분할 문제)
+
 ## [10.49.0] - 2026-10-04
 
 ### Removed
