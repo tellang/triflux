@@ -4,59 +4,14 @@ import { dirname, join } from "node:path";
 
 import {
   CONTEXT_MONITOR_CACHE_PATH,
-  CONTEXT_MONITOR_LEGACY_PATH,
   CONTEXT_MONITOR_LOG_DIR,
 } from "./constants.mjs";
-import { clampPercent, formatTokenCount, readJsonMigrate } from "./utils.mjs";
+import { clampPercent, formatTokenCount } from "./utils.mjs";
 
 const DEFAULT_CONTEXT_LIMIT = 200_000;
 const MILLION_CONTEXT_LIMIT = 1_000_000;
 const MAX_CAPTURE_BYTES = 256 * 1024;
 const MAX_TOP_KEYS = 20;
-
-// stdin 이 context_window_size 를 제공하지 않을 때 모델 ID 로 한도를 추정한다.
-// Anthropic 공식 문서(2026-09-30 기준): Opus 4.6 이상, Sonnet 4.6/5/5.5,
-// Fable 5/5.1 = 1M. Sonnet 4.5 / Haiku 4.5 = 200K이며 [1m]도 유지한다.
-const MODEL_HINT_1M_PREFIXES = [
-  "claude-sonnet-4-6",
-  "claude-sonnet-5",
-  "claude-fable-5",
-];
-
-function normalizeModelId(modelId) {
-  if (!modelId) return "";
-  return String(modelId).toLowerCase();
-}
-
-function isMillionContextOpusModel(modelId) {
-  const match = /^claude-opus-(\d+)(?:-(\d+))?(?:$|[-[\s])/u.exec(modelId);
-  if (!match) return false;
-
-  const major = Number(match[1]);
-  const minor = Number(match[2] || 0);
-  return major > 4 || (major === 4 && minor >= 6);
-}
-
-function isMillionContextModel(modelId) {
-  const id = normalizeModelId(modelId);
-  if (!id) return false;
-  if (id.includes("[1m]")) return true;
-  if (isMillionContextOpusModel(id)) return true;
-  return MODEL_HINT_1M_PREFIXES.some((prefix) => id.startsWith(prefix));
-}
-
-function resolveModelLimit(modelId) {
-  return isMillionContextModel(modelId)
-    ? MILLION_CONTEXT_LIMIT
-    : DEFAULT_CONTEXT_LIMIT;
-}
-
-export function shouldSuppressInfoOnlyContextStatus(modelId, contextLimit = 0) {
-  const explicitLimit = Number(contextLimit);
-  return explicitLimit > 0
-    ? explicitLimit >= MILLION_CONTEXT_LIMIT
-    : isMillionContextModel(modelId);
-}
 
 const WARNING_LEVELS = Object.freeze({
   ok: { min: 0, message: "" },
@@ -244,14 +199,6 @@ export function formatContextUsage(usedTokens, limitTokens, percent = null) {
   return `${formatTokenCount(used)}/${formatTokenCount(limit)} (${pct}%)`;
 }
 
-export function readContextMonitorSnapshot() {
-  return readJsonMigrate(
-    CONTEXT_MONITOR_CACHE_PATH,
-    CONTEXT_MONITOR_LEGACY_PATH,
-    null,
-  );
-}
-
 function getStdinContextUsage(stdin) {
   const limitTokens = Number(stdin?.context_window?.context_window_size || 0);
   const nativePercent = Number(stdin?.context_window?.used_percentage);
@@ -284,14 +231,7 @@ function getStdinContextUsage(stdin) {
   return null;
 }
 
-export function deriveContextLimit(stdin) {
-  const explicit = Number(stdin?.context_window?.context_window_size || 0);
-  const modelHint = resolveModelLimit(stdin?.model?.id ?? stdin?.model);
-  return Math.max(explicit, modelHint);
-}
-
-export function buildContextUsageView(stdin, snapshot = null) {
-  const modelId = stdin?.model?.id ?? stdin?.model;
+export function buildContextUsageView(stdin) {
   const stdinUsage = getStdinContextUsage(stdin);
   if (!stdinUsage) {
     return {
@@ -312,8 +252,7 @@ export function buildContextUsageView(stdin, snapshot = null) {
 
   const warning = classifyContextThreshold(percent);
   const showInfoOnlyStatus = !(
-    warning.level === "info" &&
-    shouldSuppressInfoOnlyContextStatus(modelId, stdinUsage.limitTokens)
+    warning.level === "info" && stdinUsage.limitTokens >= MILLION_CONTEXT_LIMIT
   );
   return {
     usedTokens,

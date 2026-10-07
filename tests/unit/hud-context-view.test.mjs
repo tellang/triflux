@@ -4,28 +4,22 @@ import { describe, it } from "node:test";
 import { buildContextUsageView } from "../../hud/context-monitor.mjs";
 
 describe("buildContextUsageView stdin priority", () => {
-  it("stdin limitTokens가 modelHint보다 우선한다", () => {
-    const view = buildContextUsageView(
-      {
-        context_window: {
-          context_window_size: 1_000,
-          current_usage: {
-            input_tokens: 450,
-            cache_read_input_tokens: 150,
-          },
+  it("stdin context_window_size를 사용한다", () => {
+    const view = buildContextUsageView({
+      context_window: {
+        context_window_size: 1_000,
+        current_usage: {
+          input_tokens: 450,
+          cache_read_input_tokens: 150,
         },
       },
-      { usedTokens: 600, limitTokens: 1_000 },
-    );
+    });
     assert.equal(view.limitTokens, 1_000);
     assert.match(view.display, /600\/1K/);
   });
 
   it("stdin 없을 때 hub 누적 monitor 스냅샷을 현재 CTX로 렌더하지 않는다", () => {
-    const view = buildContextUsageView(
-      {},
-      { usedTokens: 2_444_783, limitTokens: 1_000_000 },
-    );
+    const view = buildContextUsageView({});
     assert.equal(view.display, "--");
     assert.equal(view.usedTokens, 0);
     assert.equal(view.limitTokens, 0);

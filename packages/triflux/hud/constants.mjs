@@ -6,13 +6,6 @@ import { join } from "node:path";
 
 export const VERSION = "2.0";
 
-export const QOS_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "tfx-hub",
-  "cli_qos_profile.json",
-);
 export const ACCOUNTS_CONFIG_PATH = join(
   homedir(),
   ".claude",
@@ -38,21 +31,9 @@ export const CLAUDE_BAND_MARKER_DIR = join(
 );
 export const CLAUDE_BAND_MARKER_TTL_MS = 12 * 60 * 60 * 1000;
 
-// tfx-multi 상태 (v2.2 HUD 통합)
-export const TEAM_STATE_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "tfx-hub",
-  "team-state.json",
-);
-export const CTO_LAKE_CURRENT_RELATIVE_PATH = join(
-  ".triflux",
-  "lake",
-  "current.md",
-);
-export const CTO_STATUS_STALE_MS = 60 * 60 * 1000; // 1시간
-export const CTO_STATUS_LINE_MAX_CHARS = 140;
+// tfx-multi 세션 상태 디렉터리
+export const TEAM_STATE_DIR =
+  process.env.TFX_HUB_PID_DIR || join(homedir(), ".claude", "cache", "tfx-hub");
 export const CONTEXT_MONITOR_CACHE_PATH = join(
   homedir(),
   ".claude",
@@ -67,12 +48,6 @@ export const HUB_REQUEST_MONITOR_CACHE_PATH = join(
   "tfx-hub",
   "hub-request-context-monitor.json",
 );
-export const CONTEXT_MONITOR_LEGACY_PATH = join(
-  homedir(),
-  ".omc",
-  "state",
-  "context-monitor.json",
-);
 export const CONTEXT_MONITOR_LOG_DIR = join(
   homedir(),
   ".claude",
@@ -80,16 +55,6 @@ export const CONTEXT_MONITOR_LOG_DIR = join(
   "tfx-hub",
   "logs",
 );
-
-// 원격 프로브 캐시 (tfx-remote)
-export const REMOTE_ENV_CACHE_DIR = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "tfx-hub",
-  "remote-env",
-);
-export const REMOTE_ENV_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24시간
 
 // Claude OAuth Usage API (api.anthropic.com/api/oauth/usage)
 export const CLAUDE_CREDENTIALS_PATH = join(
@@ -182,21 +147,8 @@ export const CODEX_REFRESH_LOCK_PATH = join(
   "cache",
   ".codex-refresh-lock",
 );
-export const GEMINI_QUOTA_REFRESH_LOCK_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  ".gemini-quota-refresh-lock",
-);
-export const GEMINI_SESSION_REFRESH_LOCK_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  ".gemini-session-refresh-lock",
-);
 export const SPAWN_LOCK_TTL_MS = 30 * 1000; // 30초 spawn dedup
 
-// Gemini 쿼터 API 관련
 export const GEMINI_OAUTH_PATH = join(homedir(), ".gemini", "oauth_creds.json");
 export const ANTIGRAVITY_OAUTH_PATHS = [
   join(homedir(), ".gemini", "antigravity-cli", "oauth_creds.json"),
@@ -212,10 +164,8 @@ export const ANTIGRAVITY_SETTINGS_PATH = join(
   "settings.json",
 );
 // Antigravity CLI 현재 장착 모델 라벨 → HUD 2자 약어 매핑
-// /usage 실측 (2026-05-22): Gemini 4개 모델이 동일 reset window 공유 (family-pool).
-// Claude/GPT-OSS family는 Gemini와 별도 quota 윈도우.
 export const ANTIGRAVITY_MODEL_ABBREV = {
-  // Gemini family — 통합 quota. 3.6+ Flash 는 세대 숫자 + 등급으로 구분한다.
+  // Flash 세대와 등급을 구분한다.
   "Gemini 3.8 Flash (High)": "8h",
   "Gemini 3.8 Flash (Medium)": "8m",
   "Gemini 3.8 Flash (Low)": "8l",
@@ -228,33 +178,7 @@ export const ANTIGRAVITY_MODEL_ABBREV = {
   "Gemini 3.5 Flash (High)": "Fh",
   "Gemini 3.5 Flash (Medium)": "Fm",
   "Gemini 3.5 Flash (Low)": "Fl",
-  "Gemini 3.1 Pro (High)": "Ph",
-  "Gemini 3.1 Pro (Low)": "Pl",
-  "Gemini 3 Flash": "F3",
-  // Claude family — 각자 별도 quota
-  "Claude Sonnet 4.6 (Thinking)": "Cs",
-  "Claude Opus 4.6 (Thinking)": "Co",
-  // GPT-OSS family — 각자 별도 quota
-  "GPT-OSS 120B (Medium)": "Go",
 };
-export const GEMINI_QUOTA_CACHE_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "gemini-quota-cache.json",
-);
-export const GEMINI_PROJECT_CACHE_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "gemini-project-id.json",
-);
-export const GEMINI_SESSION_CACHE_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "gemini-session-cache.json",
-);
 export const TFX_PREFLIGHT_CACHE_PATH = join(
   homedir(),
   ".claude",
@@ -262,42 +186,6 @@ export const TFX_PREFLIGHT_CACHE_PATH = join(
   "tfx-preflight.json",
 );
 export const TFX_PREFLIGHT_CACHE_STALE_MS = 60 * 60 * 1000;
-export const GEMINI_RPM_TRACKER_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "gemini-rpm-tracker.json",
-);
-// 이전 .omc/ 경로 fallback (기존 환경 호환)
-export const LEGACY_GEMINI_QUOTA_CACHE = join(
-  homedir(),
-  ".omc",
-  "state",
-  "gemini_quota_cache.json",
-);
-export const LEGACY_GEMINI_PROJECT_CACHE = join(
-  homedir(),
-  ".omc",
-  "state",
-  "gemini_project_id.json",
-);
-export const LEGACY_GEMINI_SESSION_CACHE = join(
-  homedir(),
-  ".omc",
-  "state",
-  "gemini_session_tokens_cache.json",
-);
-export const LEGACY_GEMINI_RPM_TRACKER = join(
-  homedir(),
-  ".omc",
-  "state",
-  "gemini_rpm_tracker.json",
-);
-
-export const GEMINI_RPM_WINDOW_MS = 60 * 1000; // 60초 슬라이딩 윈도우
-export const GEMINI_QUOTA_STALE_MS = 5 * 60 * 1000; // 5분
-export const GEMINI_SESSION_STALE_MS = 30 * 1000; // 30초
-export const GEMINI_API_TIMEOUT_MS = 3000; // 3초
 
 export const ACCOUNT_LABEL_WIDTH = 10;
 export const PROVIDER_PREFIX_WIDTH = 2;
@@ -306,27 +194,8 @@ export const TIME_CELL_INNER_WIDTH = 6;
 
 export const CLAUDE_REFRESH_FLAG = "--refresh-claude-usage";
 export const CODEX_REFRESH_FLAG = "--refresh-codex-rate-limits";
-export const GEMINI_REFRESH_FLAG = "--refresh-gemini-quota";
-export const GEMINI_SESSION_REFRESH_FLAG = "--refresh-gemini-session";
 
 // 모바일/Termux 컴팩트 모드 감지
 export const HUD_CONFIG_PATH = join(homedir(), ".omc", "config", "hud.json");
 export const COMPACT_COLS_THRESHOLD = 80;
 export const MINIMAL_COLS_THRESHOLD = 60;
-
-// rows 임계값 상수 (selectTier 에서 tier 결정에 사용)
-export const ROWS_BUDGET_FULL = 40;
-export const ROWS_BUDGET_LARGE = 35;
-export const ROWS_BUDGET_MEDIUM = 28;
-export const ROWS_BUDGET_SMALL = 22;
-
-// Gemini Pro 풀 공유 그룹: 같은 remainingFraction을 공유하는 모델 ID들
-export const GEMINI_PRO_POOL = new Set([
-  "gemini-2.5-pro",
-  "gemini-3-pro-preview",
-  "gemini-3.1-pro-preview",
-]);
-export const GEMINI_FLASH_POOL = new Set([
-  "gemini-2.5-flash",
-  "gemini-3-flash-preview",
-]);

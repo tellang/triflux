@@ -1,8 +1,7 @@
 // ============================================================================
 // 라인 렌더러 (tier별 행 생성)
 // ============================================================================
-import { existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   bold,
@@ -13,7 +12,6 @@ import {
   colorByPercent,
   colorByProvider,
   dim,
-  GEMINI_BLUE,
   geminiBlue,
   green,
   red,
@@ -22,13 +20,11 @@ import {
 import {
   ACCOUNT_LABEL_WIDTH,
   FIVE_HOUR_MS,
-  ONE_DAY_MS,
   PROVIDER_PREFIX_WIDTH,
   SEVEN_DAY_MS,
-  TEAM_STATE_PATH,
+  TEAM_STATE_DIR,
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
-import { deriveGeminiLimits } from "./providers/gemini.mjs";
 import { getTerminalColumns, tierBar, tierDimBar } from "./terminal.mjs";
 import {
   clampPercent,
@@ -37,88 +33,39 @@ import {
   formatPlaceholderPercentCell,
   formatResetRemaining,
   formatResetRemainingDayHour,
-  formatSavings,
   formatTimeCell,
   formatTimeCellDH,
-  formatTokenCount,
   padAnsiRight,
   readJson,
   stripAnsi,
   truncateAnsi,
 } from "./utils.mjs";
 
-function formatGeminiLimitValue(limit, provFn) {
-  if (limit?.unlimited) return provFn("\u221E");
-  const usedP = limit?.usedPct;
-  if (usedP == null) return dim(formatPlaceholderPercentCell());
-  return colorByProvider(usedP, formatPercentCell(usedP), provFn);
-}
-
-function getGeminiLimitUsedPercent(bucket, limit) {
-  if (limit?.unlimited) return null;
-  if (limit?.usedPct != null) return limit.usedPct;
-  return clampPercent(Math.round((1 - (bucket?.remainingFraction ?? 1)) * 100));
-}
-
-function formatGeminiCompactValue(bucket, limit, provFn) {
-  if (limit?.unlimited) return provFn("\u221E");
-  const usedP = getGeminiLimitUsedPercent(bucket, limit);
-  return usedP != null ? colorByProvider(usedP, `${usedP}`, provFn) : dim("--");
-}
-
-// ============================================================================
-// 최근 벤치마크 diff 파일 읽기
-// ============================================================================
-export function readLatestBenchmarkDiff() {
-  const diffsDir = join(homedir(), ".omc", "state", "cx-auto-tokens", "diffs");
-  if (!existsSync(diffsDir)) return null;
-  try {
-    const files = readdirSync(diffsDir)
-      .filter((f) => f.endsWith(".json"))
-      .sort()
-      .reverse();
-    if (files.length === 0) return null;
-    return readJson(join(diffsDir, files[0]), null);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 파이프라인 벤치마크 diff 결과를 HUD 요약 문자열로 포맷
- */
-export function formatTokenSummary(diff) {
-  if (!diff?.delta?.total || !diff?.savings) return "";
-  const t = diff.delta.total;
-  const s = diff.savings;
-
-  const inputStr = formatTokenCount(t.input);
-  const outputStr = formatTokenCount(t.output);
-  const actualStr = formatSavings(s.actualCost);
-  const _claudeStr = formatSavings(s.claudeCost);
-  const savedPct =
-    s.claudeCost > 0 ? Math.round((s.saved / s.claudeCost) * 100) : 0;
-
-  return (
-    `${dim("tok:")}${inputStr}${dim("in")} ${outputStr}${dim("out")} ` +
-    `${dim("cost:")}${actualStr} ` +
-    `${dim("sv:")}${green(formatSavings(s.saved))}${dim("(")}${savedPct}%${dim(")")}`
-  );
-}
-
 // ============================================================================
 // tfx-multi 상태 행 생성 (v2.2 HUD 통합)
 // ============================================================================
-export function getTeamRow(currentTier) {
-  const teamState = readJson(TEAM_STATE_PATH, null);
-  if (!teamState?.sessionName) return null;
-
-  // 팀 생존 확인: startedAt 기준 24시간 초과면 stale로 간주
-  if (
-    teamState.startedAt &&
-    Date.now() - teamState.startedAt > 24 * 60 * 60 * 1000
-  )
+export function getTeamRow(currentTier, stateDir = TEAM_STATE_DIR) {
+  let latestPath = null;
+  let latestMtime = Date.now() - 24 * 60 * 60 * 1000;
+  try {
+    for (const name of readdirSync(stateDir)) {
+      if (!/^team-state-.+\.json$/.test(name)) continue;
+      const path = join(stateDir, name);
+      try {
+        const stat = statSync(path);
+        if (stat.isFile() && stat.mtimeMs > latestMtime) {
+          latestPath = path;
+          latestMtime = stat.mtimeMs;
+        }
+      } catch {
+        // 세션 종료 중 사라진 파일은 제외한다.
+      }
+    }
+  } catch {
     return null;
+  }
+  const teamState = latestPath ? readJson(latestPath, null) : null;
+  if (!teamState?.sessionName) return null;
 
   const workers = (teamState.members || []).filter((m) => m.role === "worker");
   if (!workers.length) return null;
@@ -178,38 +125,6 @@ export function getTeamRow(currentTier) {
 }
 
 // ============================================================================
-// Mission Board 렌더러
-// ============================================================================
-
-const STATUS_ICON = {
-  active: "*",
-  idle: ".",
-  done: "+",
-  failed: "!",
-};
-
-/**
- * Mission Board 상태를 1줄 compact 포맷으로 렌더링한다.
- * 예: "MB: exec:+ ui:* perf:. [2/3 67%]"
- * @param {{ agents: Array<{name: string, status: string, progress: number}>, dagLevel: number, totalProgress: number } | null} state
- * @returns {string}
- */
-export function renderMissionBoard(state) {
-  if (!state) return "";
-
-  const { agents, totalProgress } = state;
-  const done = agents.filter((a) => a.status === "done").length;
-  const total = agents.length;
-
-  const parts = agents.map((a) => {
-    const icon = STATUS_ICON[a.status] ?? "?";
-    return `${a.name}:${icon}`;
-  });
-
-  return `MB: ${parts.join(" ")} [${done}/${total} ${totalProgress}%]`;
-}
-
-// ============================================================================
 // 행 정렬 렌더링
 // ============================================================================
 export function renderAlignedRows(rows) {
@@ -254,15 +169,11 @@ export function getMicroLine(
   contextView,
   claudeUsage,
   codexBuckets,
-  geminiSession,
-  geminiBucket,
-  geminiMarker = "g",
+  antigravityReady,
   options = {},
 ) {
-  // showCodex / showGemini 는 machine profile 의 TFX_DISABLE_* 게이트다. 기본값이
-  // true 라 8번째 인자를 주지 않는 기존 호출은 그대로 동작한다.
   const { showCodex = true, showGemini = true } = options;
-  const ctxView = contextView || buildContextUsageView({}, null);
+  const ctxView = contextView || buildContextUsageView({});
   // Claude 5h/1w
   const cF =
     claudeUsage?.fiveHourPercent != null
@@ -294,17 +205,6 @@ export function getMicroLine(
     }
   }
 
-  // Gemini
-  let gVal;
-  if (geminiBucket) {
-    const gl = deriveGeminiLimits(geminiBucket);
-    gVal = formatGeminiCompactValue(geminiBucket, gl, geminiBlue);
-  } else if ((geminiSession?.total || 0) > 0) {
-    gVal = geminiBlue("\u221E");
-  } else {
-    gVal = dim("--");
-  }
-
   const cols = getTerminalColumns() || 120;
   // 세그먼트를 모아 join 한다. 차단된 프로바이더를 뺄 때 공백이 겹치지 않는다.
   const segments = [`${bold(claudeOrange("c"))}${dim(":")}${cVal}`];
@@ -312,7 +212,9 @@ export function getMicroLine(
     segments.push(`${bold(codexWhite("x"))}${dim(":")}${xVal}`);
   }
   if (showGemini) {
-    segments.push(`${bold(geminiBlue(geminiMarker))}${dim(":")}${gVal}`);
+    segments.push(
+      `${bold(geminiBlue(antigravityReady ? "a" : "g"))}${dim(":")}${antigravityReady ? "agy" : dim("--")}`,
+    );
   }
   segments.push(`${dim("CTX:")}${contextPercentText(ctxView)}`);
   return truncateAnsi(segments.join(" "), cols);
@@ -328,7 +230,7 @@ function contextPercentText(ctxView) {
 // Claude 행 렌더러
 // ============================================================================
 export function getClaudeRows(currentTier, contextView, claudeUsage) {
-  const ctxView = contextView || buildContextUsageView({}, null);
+  const ctxView = contextView || buildContextUsageView({});
   const prefix = `${bold(claudeOrange("c"))}:`;
   // API 실측 데이터
   const fiveHourPercent = claudeUsage?.fiveHourPercent ?? null;
@@ -429,91 +331,38 @@ export function getAccountLabel(
   return label;
 }
 
-// 2슬롯: slot1 = 현재 장착 모델 약어 (Fh/Fm/Ph/Pl 등), slot2 = "Gn" Gemini family 통합
-// realQuota.pools.{current,gemini_family} 가 있으면 실데이터, 없으면 placeholder.
-function formatAntigravityQuotaSection(
-  currentTier,
-  realQuota,
-  provFn,
-  provAnsi,
-) {
-  const pools = realQuota?.pools || {};
-  const abbr = realQuota?.currentAbbrev || "??";
-  const currentBucket = pools.current;
-  const familyBucket = pools.gemini_family;
-  const hasData = Boolean(currentBucket || familyBucket);
-
-  if (!hasData) {
-    // 기존 placeholder 동작 유지
-    if (currentTier === "minimal") {
-      return `${dim(`${abbr}:`)}${dim(formatPlaceholderPercentCell())} ${dim("Gn:")}${dim(formatPlaceholderPercentCell())}`;
-    }
-    if (currentTier === "compact") {
-      return `${dim(`${abbr}:`)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("Gn:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
-    }
-    return `${dim(`${abbr}:`)}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("Gn:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
-  }
-
-  const slot = (bucket, label, { withBar, withTime }) => {
-    if (!bucket) {
-      const bar = withBar ? tierDimBar(currentTier) : "";
-      const base = `${dim(`${label}:`)}${bar}${dim(formatPlaceholderPercentCell())}`;
-      return withTime ? `${base} ${dim(formatTimeCell("n/a"))}` : base;
-    }
-    const gl = deriveGeminiLimits(bucket);
-    const usedP = getGeminiLimitUsedPercent(bucket, gl);
-    const bar =
-      withBar && usedP != null ? tierBar(currentTier, usedP, provAnsi) : "";
-    const base = `${dim(`${label}:`)}${bar}${formatGeminiLimitValue(gl, provFn)}`;
-    if (!withTime) return base;
-    const rstRemaining =
-      formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
-    return `${base} ${dim(formatTimeCell(rstRemaining))}`;
-  };
-
-  if (currentTier === "minimal") {
-    return `${slot(currentBucket, abbr, { withBar: false, withTime: false })} ${slot(familyBucket, "Gn", { withBar: false, withTime: false })}`;
-  }
-  if (currentTier === "compact") {
-    return `${slot(currentBucket, abbr, { withBar: false, withTime: true })} ${slot(familyBucket, "Gn", { withBar: false, withTime: true })}`;
-  }
-  return `${slot(currentBucket, abbr, { withBar: true, withTime: true })} ${slot(familyBucket, "Gn", { withBar: true, withTime: true })}`;
-}
-
 export function getProviderRow(
   currentTier,
   provider,
   marker,
   markerColor,
-  qosProfile,
   accountsConfig,
   accountsState,
   realQuota,
   codexEmail,
-  modelLabel,
 ) {
   const accountLabel = fitText(
     getAccountLabel(provider, accountsConfig, accountsState, codexEmail),
     ACCOUNT_LABEL_WIDTH,
   );
 
-  const _modelLabelStr = modelLabel ? ` ${markerColor(modelLabel)}` : "";
-
-  // 프로바이더별 색상 프로필
-  const isGeminiFamily = provider === "gemini" || provider === "antigravity";
-  const provAnsi =
-    provider === "codex" ? CODEX_WHITE : isGeminiFamily ? GEMINI_BLUE : GREEN;
-  const provFn =
-    provider === "codex" ? codexWhite : isGeminiFamily ? geminiBlue : green;
-
+  const prefix = `${bold(markerColor(marker))}:`;
+  if (provider === "antigravity" || provider === "gemini") {
+    return {
+      prefix,
+      left:
+        provider === "antigravity"
+          ? markerColor(realQuota?.currentAbbrev || "agy")
+          : dim("--"),
+      right: accountLabel ? markerColor(accountLabel) : "",
+    };
+  }
+  const provAnsi = CODEX_WHITE;
+  const provFn = codexWhite;
   let quotaSection;
-  const _extraRightSection = "";
 
   if (currentTier === "nano" || currentTier === "micro") {
     const minPrefix = `${bold(markerColor(`${marker}`))}:`;
-    if (provider === "antigravity") {
-      return { prefix: minPrefix, left: dim("--"), right: "" };
-    }
     if (realQuota?.type === "codex") {
       const main =
         realQuota.buckets.codex ||
@@ -542,36 +391,10 @@ export function getProviderRow(
         };
       }
     }
-    if (provider === "gemini" && realQuota?.type === "gemini") {
-      const pools = realQuota.pools || {};
-      if (pools.pro || pools.flash) {
-        const pP = pools.pro ? deriveGeminiLimits(pools.pro) : null;
-        const pF = pools.flash ? deriveGeminiLimits(pools.flash) : null;
-        const pStr = pools.pro
-          ? formatGeminiCompactValue(pools.pro, pP, provFn)
-          : dim("--");
-        const fStr = pools.flash
-          ? formatGeminiCompactValue(pools.flash, pF, provFn)
-          : dim("--");
-        return {
-          prefix: minPrefix,
-          left: `${pStr}${dim("/")}${fStr}`,
-          right: "",
-        };
-      }
-    }
     return { prefix: minPrefix, left: dim("--/--"), right: "" };
   }
 
   if (currentTier === "minimal") {
-    if (provider === "antigravity") {
-      quotaSection = formatAntigravityQuotaSection(
-        currentTier,
-        realQuota,
-        provFn,
-        provAnsi,
-      );
-    }
     if (realQuota?.type === "codex") {
       const main =
         realQuota.buckets.codex ||
@@ -596,24 +419,9 @@ export function getProviderRow(
         quotaSection = `${dim("5h:")}${fCell} ${dim("1w:")}${wCell}`;
       }
     }
-    if (provider === "gemini" && realQuota?.type === "gemini") {
-      const pools = realQuota.pools || {};
-      if (pools.pro || pools.flash) {
-        const slot = (bucket, label) => {
-          if (!bucket)
-            return `${dim(label + ":")}${dim(formatPlaceholderPercentCell())}`;
-          const gl = deriveGeminiLimits(bucket);
-          return `${dim(label + ":")}${formatGeminiLimitValue(gl, provFn)}`;
-        };
-        quotaSection = `${slot(pools.pro, "Pr")} ${slot(pools.flash, "Fl")}`;
-      } else {
-        quotaSection = `${dim("Pr:")}${dim(formatPlaceholderPercentCell())} ${dim("Fl:")}${dim(formatPlaceholderPercentCell())}`;
-      }
-    }
     if (!quotaSection) {
       quotaSection = `${dim("5h:")}${dim(formatPlaceholderPercentCell())} ${dim("1w:")}${dim(formatPlaceholderPercentCell())}`;
     }
-    const prefix = `${bold(markerColor(`${marker}`))}:`;
     return {
       prefix,
       left: quotaSection,
@@ -622,14 +430,6 @@ export function getProviderRow(
   }
 
   if (currentTier === "compact") {
-    if (provider === "antigravity") {
-      quotaSection = formatAntigravityQuotaSection(
-        currentTier,
-        realQuota,
-        provFn,
-        provAnsi,
-      );
-    }
     if (realQuota?.type === "codex") {
       const main =
         realQuota.buckets.codex ||
@@ -659,27 +459,9 @@ export function getProviderRow(
         if (main.mixedWindows) quotaSection += dim("*");
       }
     }
-    if (provider === "gemini" && realQuota?.type === "gemini") {
-      const pools = realQuota.pools || {};
-      const hasAnyPool = pools.pro || pools.flash;
-      if (hasAnyPool) {
-        const slot = (bucket, label) => {
-          if (!bucket)
-            return `${dim(label + ":")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
-          const gl = deriveGeminiLimits(bucket);
-          const rstRemaining =
-            formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
-          return `${dim(label + ":")}${formatGeminiLimitValue(gl, provFn)} ${dim(formatTimeCell(rstRemaining))}`;
-        };
-        quotaSection = `${slot(pools.pro, "Pr")} ${slot(pools.flash, "Fl")}`;
-      } else {
-        quotaSection = `${dim("Pr:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("Fl:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
-      }
-    }
     if (!quotaSection) {
       quotaSection = `${dim("5h:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("--d--h"))}`;
     }
-    const prefix = `${bold(markerColor(`${marker}`))}:`;
     const compactRight = [accountLabel ? markerColor(accountLabel) : ""]
       .filter(Boolean)
       .join(" ");
@@ -687,14 +469,6 @@ export function getProviderRow(
   }
 
   // full tier
-  if (provider === "antigravity") {
-    quotaSection = formatAntigravityQuotaSection(
-      currentTier,
-      realQuota,
-      provFn,
-      provAnsi,
-    );
-  }
 
   if (realQuota?.type === "codex") {
     const main =
@@ -737,43 +511,15 @@ export function getProviderRow(
     }
   }
 
-  if (provider === "gemini" && realQuota?.type === "gemini") {
-    const pools = realQuota.pools || {};
-    const hasAnyPool = pools.pro || pools.flash;
-
-    if (hasAnyPool) {
-      const slot = (bucket, label) => {
-        if (!bucket) {
-          return `${dim(label + ":")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
-        }
-        const gl = deriveGeminiLimits(bucket);
-        const usedP = getGeminiLimitUsedPercent(bucket, gl);
-        const rstRemaining =
-          formatResetRemaining(bucket.resetTime, ONE_DAY_MS) || "n/a";
-        const bar = usedP != null ? tierBar(currentTier, usedP, provAnsi) : "";
-        return `${dim(label + ":")}${bar}${formatGeminiLimitValue(gl, provFn)} ${dim(formatTimeCell(rstRemaining))}`;
-      };
-
-      quotaSection = `${slot(pools.pro, "Pr")} ${slot(pools.flash, "Fl")}`;
-    } else {
-      quotaSection =
-        `${dim("Pr:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ` +
-        `${dim("Fl:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))}`;
-    }
-  }
-
   // 폴백
   if (!quotaSection) {
     quotaSection = `${dim("5h:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("--d--h"))}`;
   }
 
-  const prefix = `${bold(markerColor(`${marker}`))}:`;
   const accountSection = `${markerColor(accountLabel)}`;
-  const modelLabelSection = modelLabel ? markerColor(modelLabel) : "";
-  const rightParts = [accountSection, modelLabelSection].filter(Boolean);
   return {
     prefix,
     left: quotaSection,
-    right: rightParts.join(` ${dim("|")} `),
+    right: accountSection,
   };
 }

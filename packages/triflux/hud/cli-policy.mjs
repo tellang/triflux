@@ -52,8 +52,6 @@ export function resolveHudCliVisibility(env = process.env, opts = {}) {
  *   antigravityAllowed?: boolean,
  *   antigravityReady?: boolean,
  *   geminiEmail?: unknown,
- *   geminiBucket?: unknown,
- *   geminiSession?: unknown,
  * }} [args]
  * @returns {boolean}
  */
@@ -61,9 +59,7 @@ export function shouldRenderGeminiFallbackRow({
   antigravityAllowed = true,
   antigravityReady = false,
   geminiEmail = null,
-  geminiBucket = null,
-  geminiSession = null,
 } = {}) {
   if (antigravityAllowed || antigravityReady) return true;
-  return Boolean(geminiEmail || geminiBucket || geminiSession);
+  return Boolean(geminiEmail);
 }

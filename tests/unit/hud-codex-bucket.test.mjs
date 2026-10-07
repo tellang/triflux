@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { CODEX_WHITE, codexWhite, dim } from "../../hud/colors.mjs";
 import {
   classifyBucket,
   expireStaleCodexBuckets,
@@ -11,12 +10,6 @@ import {
   hasBrokerCodexAccounts,
   normalizeBuckets,
 } from "../../hud/providers/codex.mjs";
-import { getProviderRow } from "../../hud/renderers.mjs";
-import { tierBar, tierDimBar } from "../../hud/terminal.mjs";
-import {
-  formatPercentCell,
-  formatPlaceholderPercentCell,
-} from "../../hud/utils.mjs";
 
 function sessionDirFor(sessionsRoot, date) {
   return join(
@@ -91,38 +84,19 @@ function weeklyOnlyEvent({ timestamp, usedPercent, resetsAt }) {
 }
 
 describe("Codex bucket normalization", () => {
-  // --- classifyBucket ---
-
-  it("classifies 300min as five_hour", () => {
-    assert.equal(classifyBucket({ window_minutes: 300 }), "five_hour");
-  });
-
-  it("classifies 360min as five_hour (upper bound)", () => {
-    assert.equal(classifyBucket({ window_minutes: 360 }), "five_hour");
-  });
-
-  it("classifies 10080min as weekly", () => {
-    assert.equal(classifyBucket({ window_minutes: 10080 }), "weekly");
-  });
-
-  it("classifies 7000min as weekly (lower bound)", () => {
-    assert.equal(classifyBucket({ window_minutes: 7000 }), "weekly");
-  });
-
-  it("returns null for 1440min (24h bucket — not weekly under tightened threshold)", () => {
-    assert.equal(classifyBucket({ window_minutes: 1440 }), null);
-  });
-
-  it("returns null for 6999min (just below weekly threshold)", () => {
-    assert.equal(classifyBucket({ window_minutes: 6999 }), null);
-  });
-
-  it("returns null for null bucket", () => {
-    assert.equal(classifyBucket(null), null);
-  });
-
-  it("returns null for bucket without window_minutes", () => {
-    assert.equal(classifyBucket({ used_percent: 50 }), null);
+  it("classifies supported window lengths", () => {
+    for (const [bucket, expected] of [
+      [{ window_minutes: 300 }, "five_hour"],
+      [{ window_minutes: 360 }, "five_hour"],
+      [{ window_minutes: 10080 }, "weekly"],
+      [{ window_minutes: 7000 }, "weekly"],
+      [{ window_minutes: 1440 }, null],
+      [{ window_minutes: 6999 }, null],
+      [null, null],
+      [{ used_percent: 50 }, null],
+    ]) {
+      assert.equal(classifyBucket(bucket), expected);
+    }
   });
 
   // --- normalizeBuckets ---
@@ -818,112 +792,5 @@ describe("Codex multi-window selection", () => {
       used_percent: 45,
       resets_at: nowSec + 1,
     });
-  });
-});
-
-describe("Codex quota rendering", () => {
-  function renderCodexRow(tier, snapshot) {
-    return getProviderRow(
-      tier,
-      "codex",
-      "x",
-      codexWhite,
-      {},
-      {},
-      {},
-      { type: "codex", buckets: { codex: snapshot } },
-      null,
-      null,
-      null,
-    );
-  }
-
-  it("renders legacy stale snapshots with provider colors and filled gauges", () => {
-    const staleTimestamp = new Date(Date.now() - 31 * 60 * 1000).toISOString();
-    const row = renderCodexRow("full", {
-      timestamp: staleTimestamp,
-      primary: { used_percent: 12 },
-      secondary: { used_percent: 43 },
-    });
-
-    assert.ok(row.left.includes(codexWhite(formatPercentCell(12))));
-    assert.ok(row.left.includes(codexWhite(formatPercentCell(43))));
-    assert.ok(row.left.includes(tierBar("full", 12, CODEX_WHITE)));
-    assert.ok(row.left.includes(tierBar("full", 43, CODEX_WHITE)));
-    assert.ok(!row.left.includes(dim(formatPercentCell(12))));
-    assert.ok(!row.left.includes(dim(formatPercentCell(43))));
-  });
-
-  it("renders a stale weekly window the same as a fresh five-hour window", () => {
-    const row = renderCodexRow("full", {
-      timestamp: new Date().toISOString(),
-      secondaryTimestamp: new Date(Date.now() - 31 * 60 * 1000).toISOString(),
-      primary: { used_percent: 12 },
-      secondary: { used_percent: 43 },
-    });
-
-    assert.ok(row.left.includes(codexWhite(formatPercentCell(12))));
-    assert.ok(row.left.includes(codexWhite(formatPercentCell(43))));
-    assert.ok(row.left.includes(tierBar("full", 12, CODEX_WHITE)));
-    assert.ok(row.left.includes(tierBar("full", 43, CODEX_WHITE)));
-    assert.ok(!row.left.includes(dim(formatPercentCell(43))));
-  });
-
-  it("renders stale values with provider colors in every tier", () => {
-    const snapshot = {
-      timestamp: new Date(Date.now() - 31 * 60 * 1000).toISOString(),
-      primary: { used_percent: 12 },
-      secondary: { used_percent: 43 },
-    };
-
-    for (const tier of ["nano", "micro"]) {
-      const row = renderCodexRow(tier, snapshot);
-      assert.ok(row.left.includes(codexWhite("12%")), tier);
-      assert.ok(row.left.includes(codexWhite("43%")), tier);
-      assert.ok(!row.left.includes(dim("12%")), tier);
-      assert.ok(!row.left.includes(dim("43%")), tier);
-    }
-
-    for (const tier of ["minimal", "compact"]) {
-      const row = renderCodexRow(tier, snapshot);
-      assert.ok(row.left.includes(codexWhite(formatPercentCell(12))), tier);
-      assert.ok(row.left.includes(codexWhite(formatPercentCell(43))), tier);
-      assert.ok(!row.left.includes(dim(formatPercentCell(12))), tier);
-      assert.ok(!row.left.includes(dim(formatPercentCell(43))), tier);
-    }
-  });
-
-  it("keeps null placeholders dimmed with empty gauges", () => {
-    const snapshot = {
-      timestamp: new Date(Date.now() - 31 * 60 * 1000).toISOString(),
-      primary: null,
-      secondary: null,
-    };
-    const fullRow = renderCodexRow("full", snapshot);
-
-    assert.equal(
-      fullRow.left.split(tierDimBar("full")).length - 1,
-      2,
-      "full tier should keep two dim empty gauges",
-    );
-    assert.equal(
-      fullRow.left.split(dim(formatPlaceholderPercentCell())).length - 1,
-      2,
-      "full tier should keep two dim percentage placeholders",
-    );
-
-    for (const tier of ["nano", "micro"]) {
-      const row = renderCodexRow(tier, snapshot);
-      assert.equal(row.left.split(dim("--%")).length - 1, 2, tier);
-    }
-
-    for (const tier of ["minimal", "compact"]) {
-      const row = renderCodexRow(tier, snapshot);
-      assert.equal(
-        row.left.split(dim(formatPlaceholderPercentCell())).length - 1,
-        2,
-        tier,
-      );
-    }
   });
 });

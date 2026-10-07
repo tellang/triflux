@@ -1061,8 +1061,6 @@ OUTPUT 추출: `echo "$result" | sed -n '/^=== OUTPUT ===/,/^=== /{/^=== OUTPUT 
 | # | 서브태스크 | Agent | CLI | MCP | 레벨 | 상태 | 시간 |
 ### 워커 {n}: {제목}
 (출력 요약)
-### Token Savings Report
-(node ~/.claude/scripts/token-snapshot.mjs report {session-id})
 ```
 
 ## 필수 조건
@@ -1093,4 +1091,4 @@ OUTPUT 추출: `echo "$result" | sed -n '/^=== OUTPUT ===/,/^=== /{/^=== OUTPUT 
 
 ## 상세 레퍼런스
 
-DAG 알고리즘, 컨텍스트 머지 규칙, 토큰 스냅샷, 보고서 상세는 `scripts/tfx-route.sh` 내부 주석 및 `hub/` 모듈 참조.
+DAG 알고리즘, 컨텍스트 머지 규칙, 보고서 상세는 `scripts/tfx-route.sh` 내부 주석 및 `hub/` 모듈 참조.

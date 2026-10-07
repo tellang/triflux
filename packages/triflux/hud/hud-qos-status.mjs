@@ -1,11 +1,7 @@
 #!/usr/bin/env node
 
-// ============================================================================
-// HUD QoS Status — 메인 오케스트레이터
-// 각 모듈에서 색상, 터미널, 프로바이더, 렌더러를 가져와 조합한다.
-// ============================================================================
-
-import { statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   resolveHudCliVisibility,
@@ -18,7 +14,6 @@ import {
   DIM,
   dim,
   geminiBlue,
-  green,
   RESET,
 } from "./colors.mjs";
 import {
@@ -28,107 +23,54 @@ import {
   CLAUDE_BAND_MARKER_TTL_MS,
   CLAUDE_REFRESH_FLAG,
   CODEX_REFRESH_FLAG,
-  GEMINI_FLASH_POOL,
-  GEMINI_PRO_POOL,
-  GEMINI_REFRESH_FLAG,
-  GEMINI_SESSION_REFRESH_FLAG,
-  QOS_PATH,
   TFX_PREFLIGHT_CACHE_PATH,
   TFX_PREFLIGHT_CACHE_STALE_MS,
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
-import { getMissionBoardState } from "./mission-board.mjs";
-// Claude provider
 import {
   fetchClaudeUsage,
-  readClaudeContextSnapshot,
   readClaudeUsageSnapshot,
   scheduleClaudeUsageRefresh,
 } from "./providers/claude.mjs";
-// Codex provider
 import {
   getCodexEmail,
+  hasBrokerCodexAccounts,
   readCodexRateLimitSnapshot,
   refreshCodexRateLimitsCache,
   scheduleCodexRateLimitRefresh,
 } from "./providers/codex.mjs";
-import { readCtoStatus } from "./providers/cto.mjs";
-// Gemini provider
 import {
-  buildGeminiAuthContext,
-  deriveGeminiFamilyBucket,
-  fetchGeminiQuota,
   getAntigravityAccountLabel,
   getAntigravityCurrentModel,
   getAntigravityModelAbbrev,
-  getAntigravityModelFamily,
   getGeminiEmail,
-  readGeminiQuotaSnapshot,
-  readGeminiSessionSnapshot,
-  refreshGeminiSessionCache,
-  scheduleGeminiQuotaRefresh,
-  scheduleGeminiSessionRefresh,
 } from "./providers/gemini.mjs";
-// Renderers
 import {
-  formatTokenSummary,
   getClaudeRows,
   getMicroLine,
   getProviderRow,
   getTeamRow,
-  readLatestBenchmarkDiff,
   renderAlignedRows,
-  renderMissionBoard,
 } from "./renderers.mjs";
 import { selectTier } from "./terminal.mjs";
-import {
-  getCliArgValue,
-  getProviderAccountId,
-  readJson,
-  readStdinJson,
-  stripAnsi,
-} from "./utils.mjs";
+import { readJson, readStdinJson } from "./utils.mjs";
 
-// ============================================================================
-// 메인
-// ============================================================================
 async function main() {
-  // 백그라운드 Claude 사용량 리프레시
   if (process.argv.includes(CLAUDE_REFRESH_FLAG)) {
     await fetchClaudeUsage(true);
     return;
   }
-
   if (process.argv.includes(CODEX_REFRESH_FLAG)) {
     await refreshCodexRateLimitsCache();
     return;
   }
 
-  if (process.argv.includes(GEMINI_SESSION_REFRESH_FLAG)) {
-    refreshGeminiSessionCache();
-    return;
-  }
-
-  // 백그라운드 Gemini 쿼터 리프레시 전용 실행 모드
-  if (process.argv.includes(GEMINI_REFRESH_FLAG)) {
-    const accountId = getCliArgValue("--account") || "gemini-main";
-    const authContext = buildGeminiAuthContext(accountId);
-    await fetchGeminiQuota(accountId, { authContext, forceRefresh: true });
-    return;
-  }
-
-  // 메인 HUD 경로: 즉시 렌더 우선
   const stdinPromise = readStdinJson();
-
-  const qosProfile = readJson(QOS_PATH, { providers: {} });
   const preflightCache = readJson(TFX_PREFLIGHT_CACHE_PATH, null);
   const preflightTimestamp = Number(preflightCache?.timestamp);
   const preflightFresh =
     Number.isFinite(preflightTimestamp) &&
     Date.now() - preflightTimestamp <= TFX_PREFLIGHT_CACHE_STALE_MS;
-  // machine profile 의 TFX_DISABLE_* 정책. 차단된 CLI 는 행 자체를 그리지 않는다.
-  // antigravity 가 꺼지면 antigravityReady 를 강제로 내려서 기존 슬롯 로직이 그대로
-  // gemini 폴백 경로를 타게 한다.
   const { showCodex, antigravityAllowed } = resolveHudCliVisibility();
   const antigravityReady =
     antigravityAllowed &&
@@ -137,236 +79,112 @@ async function main() {
   const accountsConfig = readJson(ACCOUNTS_CONFIG_PATH, { providers: {} });
   const accountsState = readJson(ACCOUNTS_STATE_PATH, { providers: {} });
   const claudeUsageSnapshot = readClaudeUsageSnapshot();
-  const contextSnapshot = readClaudeContextSnapshot();
-  if (claudeUsageSnapshot.shouldRefresh) {
+  const codexSnapshot = readCodexRateLimitSnapshot();
+  // 설정이 없는 홈에서는 갱신 프로세스를 시작하지 않는다.
+  if (
+    claudeUsageSnapshot.shouldRefresh &&
+    existsSync(join(homedir(), ".claude"))
+  ) {
     scheduleClaudeUsageRefresh();
   }
-  const geminiAccountId = getProviderAccountId(
-    "gemini",
-    accountsConfig,
-    accountsState,
-  );
-  const codexSnapshot = readCodexRateLimitSnapshot();
-  const geminiSessionSnapshot = readGeminiSessionSnapshot();
-  const geminiAuthContext = buildGeminiAuthContext(geminiAccountId);
-  const geminiQuotaSnapshot = readGeminiQuotaSnapshot(
-    geminiAccountId,
-    geminiAuthContext,
-  );
-  if (codexSnapshot.shouldRefresh) {
+  if (
+    showCodex &&
+    codexSnapshot.shouldRefresh &&
+    (existsSync(join(homedir(), ".codex")) || hasBrokerCodexAccounts())
+  ) {
     scheduleCodexRateLimitRefresh();
   }
-  if (geminiSessionSnapshot.shouldRefresh) {
-    scheduleGeminiSessionRefresh();
-  }
-  if (geminiQuotaSnapshot.shouldRefresh) {
-    scheduleGeminiQuotaRefresh(geminiAccountId);
-  }
 
-  // 실측 데이터 추출
   const stdin = await stdinPromise;
-  const contextView = buildContextUsageView(stdin, contextSnapshot);
+  const contextView = buildContextUsageView(stdin);
   const claudeUsage = claudeUsageSnapshot.data
     ? { ...claudeUsageSnapshot.data, stale: claudeUsageSnapshot.isStale }
-    : claudeUsageSnapshot.data;
-  const codexEmail = getCodexEmail();
-  const geminiEmail = getGeminiEmail();
-  const antigravityAccountLabel = getAntigravityAccountLabel();
+    : null;
   const codexBuckets = codexSnapshot.buckets;
-  const geminiSession = geminiSessionSnapshot.session;
-  const geminiQuota = geminiQuotaSnapshot.quota;
-  const missionBoardState = await getMissionBoardState();
-
-  // Gemini: 3풀 버킷 추출 (Pro/Flash/Lite — 각 풀 내 모델들은 쿼터 공유)
-  const geminiModel = geminiSession?.model || "gemini-3-flash-preview";
-  const geminiBuckets = geminiQuota?.buckets || [];
-  const geminiBucket =
-    geminiBuckets.find((b) => b.modelId === geminiModel) ||
-    geminiBuckets.find((b) => b.modelId === "gemini-3-flash-preview") ||
-    null;
-  const geminiProBucket =
-    geminiBuckets.find((b) => GEMINI_PRO_POOL.has(b.modelId)) || null;
-  const geminiFlashBucket =
-    geminiBuckets.find((b) => GEMINI_FLASH_POOL.has(b.modelId)) || null;
-  const geminiLiteBucket =
-    geminiBuckets.find((b) => b.modelId?.includes("flash-lite")) || null;
-
-  // Antigravity 현재 장착 모델 + family 통합 bucket (slot1 = 장착 모델 약어, slot2 = Gn family)
-  // slot1 quota: 현재 모델이 Gemini family면 family bucket, 아니면(Claude/GPT-OSS) placeholder.
-  const antigravityModel = getAntigravityCurrentModel();
-  const antigravityAbbrev = getAntigravityModelAbbrev(antigravityModel);
-  const antigravityModelFamily = getAntigravityModelFamily(antigravityModel);
-  const antigravityFamilyBucket = deriveGeminiFamilyBucket(geminiBuckets);
-  const antigravitySlot1Bucket =
-    antigravityModelFamily === "gemini" ? antigravityFamilyBucket : null;
-
-  // 인디케이터 인식 tier 선택 (stdin + Claude 사용량 기반)
-  const CURRENT_TIER = selectTier(stdin, claudeUsageSnapshot.data);
-
-  // antigravity/gemini 슬롯 표시 판정. nano 와 나머지 tier 가 같은 판정을 쓴다.
+  const currentTier = selectTier();
+  const geminiEmail = getGeminiEmail();
   const showGeminiRow = shouldRenderGeminiFallbackRow({
     antigravityAllowed,
     antigravityReady,
     geminiEmail,
-    geminiBucket,
-    geminiSession,
   });
 
-  // nano tier: 1줄 모드 (극소 폭 또는 알림 배너 대응)
-  if (CURRENT_TIER === "nano") {
+  if (currentTier === "nano") {
     const microLine = getMicroLine(
       contextView,
       claudeUsage,
       codexBuckets,
-      antigravityReady ? null : geminiSession,
-      antigravityReady ? null : geminiBucket,
-      antigravityReady ? "a" : "g",
+      antigravityReady,
       { showCodex, showGemini: showGeminiRow },
     );
     process.stdout.write(`\x1b[0m${microLine}\n`);
     return;
   }
 
-  const codexQuotaData = codexBuckets
-    ? { type: "codex", buckets: codexBuckets }
-    : null;
-  const geminiQuotaData = {
-    type: "gemini",
-    quotaBucket: geminiBucket,
-    pools: {
-      pro: geminiProBucket,
-      flash: geminiFlashBucket,
-      lite: geminiLiteBucket,
-    },
-    session: geminiSession,
-  };
-
-  const rows = [
-    ...(isClaudeBandActive(stdin?.session_id)
-      ? []
-      : getClaudeRows(CURRENT_TIER, contextView, claudeUsage)),
-  ];
-
-  // 정책으로 생략된 행이 있으면 뒤따르는 행의 인덱스가 밀린다. dim 래핑이
-  // 하드코딩 인덱스를 쓰지 않도록 실제 위치를 기록해 둔다.
+  const rows = isClaudeBandActive(stdin?.session_id)
+    ? []
+    : getClaudeRows(currentTier, contextView, claudeUsage);
   let codexRowIndex = -1;
   if (showCodex) {
     codexRowIndex = rows.length;
     rows.push(
       getProviderRow(
-        CURRENT_TIER,
+        currentTier,
         "codex",
         "x",
         codexWhite,
-        qosProfile,
         accountsConfig,
         accountsState,
-        codexQuotaData,
-        codexEmail,
-        null,
+        codexBuckets ? { type: "codex", buckets: codexBuckets } : null,
+        getCodexEmail(),
       ),
     );
   }
-
   let geminiRowIndex = -1;
   if (showGeminiRow) {
     geminiRowIndex = rows.length;
     rows.push(
       getProviderRow(
-        CURRENT_TIER,
+        currentTier,
         antigravityReady ? "antigravity" : "gemini",
         antigravityReady ? "a" : "g",
         geminiBlue,
-        qosProfile,
         accountsConfig,
         accountsState,
         antigravityReady
           ? {
-              type: "antigravity",
-              pools: {
-                current: antigravitySlot1Bucket,
-                gemini_family: antigravityFamilyBucket,
-              },
-              currentAbbrev: antigravityAbbrev,
-              currentModel: antigravityModel,
-              currentFamily: antigravityModelFamily,
+              currentAbbrev: getAntigravityModelAbbrev(
+                getAntigravityCurrentModel(),
+              ),
             }
-          : geminiQuotaData,
-        antigravityReady ? antigravityAccountLabel : geminiEmail,
-        null,
+          : null,
+        antigravityReady ? getAntigravityAccountLabel() : geminiEmail,
       ),
     );
   }
-
-  const ctoStatus = readCtoStatus();
-  if (ctoStatus) {
-    const rightTag =
-      CURRENT_TIER === "nano" || CURRENT_TIER === "micro"
-        ? ""
-        : stripAnsi(ctoStatus.rightTag || "").trim();
-    rows.push({
-      prefix: `${bold(claudeOrange("^"))}:`,
-      left: `${dim("cto:")}${stripAnsi(ctoStatus.line)}`,
-      right: rightTag ? dim(rightTag) : "",
-    });
-  }
-
-  // tfx-multi 활성 시 팀 상태 행 추가 (v2.2)
-  const teamRow = getTeamRow(CURRENT_TIER);
+  const teamRow = getTeamRow(currentTier);
   if (teamRow) rows.push(teamRow);
 
-  const missionBoard = renderMissionBoard(missionBoardState);
-  if (missionBoard) {
-    rows.push({
-      prefix: bold(claudeOrange("\u25B2")),
-      left: missionBoard,
-      right: "",
-    });
-  }
-
-  // 최근 벤치마크 diff → 토큰 요약 행 추가
-  const latestDiff = readLatestBenchmarkDiff();
-  if (latestDiff) {
-    const summary = formatTokenSummary(latestDiff);
-    if (summary) {
-      rows.push({ prefix: `${dim("$")}:`, left: summary, right: "" });
-    }
-  }
-
-  // 비활성 프로바이더 dim 처리: 데이터 없으면 전체 줄 dim
-  const codexActive = codexBuckets != null;
-  const geminiActive =
-    (geminiSession?.total || 0) > 0 ||
-    geminiBucket != null ||
-    geminiProBucket != null ||
-    geminiFlashBucket != null;
-
   const outputLines = renderAlignedRows(rows);
-
-  // 비활성 줄 dim 래핑. 정책으로 생략된 행은 인덱스가 -1 이라 건너뛴다.
-  if (!codexActive && outputLines[codexRowIndex] != null) {
+  if (!codexBuckets && outputLines[codexRowIndex] != null) {
     outputLines[codexRowIndex] = `${DIM}${outputLines[codexRowIndex]}${RESET}`;
   }
-  if (!geminiActive && outputLines[geminiRowIndex] != null) {
-    outputLines[geminiRowIndex] =
-      `${DIM}${outputLines[geminiRowIndex]}${RESET}`;
+  if (!antigravityReady && outputLines[geminiRowIndex] != null) {
+    outputLines[geminiRowIndex] = dim(outputLines[geminiRowIndex]);
   }
-
-  // 선행 개행: 알림 배너(노란 글씨)가 빈 첫 줄에 오도록 → HUD 내용 보호
-  const contextPercent = contextView.percent;
-  const leadingBreaks = contextPercent >= 85 ? "\n\n" : "\n";
-  // 줄별 RESET: Claude Code TUI 스타일 간섭 방지 (색상 밝기 버그 수정)
-  const resetedLines = outputLines.map((line) => `\x1b[0m${line}`);
-  process.stdout.write(`${leadingBreaks}${resetedLines.join("\n")}\n`);
+  // 알림 배너와 TUI 스타일이 HUD 내용에 겹치지 않도록 한다.
+  const leadingBreaks = contextView.percent >= 85 ? "\n\n" : "\n";
+  const resetLines = outputLines.map((line) => `\x1b[0m${line}`);
+  process.stdout.write(`${leadingBreaks}${resetLines.join("\n")}\n`);
 }
 
 main().catch(() => {
   process.stdout.write(
-    `\x1b[0m${bold(claudeOrange("c"))}: ${dim("5h:")}${green("0%")} ${dim("(n/a)")} ${dim("1w:")}${green("0%")} ${dim("(n/a)")} ${dim("|")} ${dim("ctx:")}${green("0%")}\n`,
+    `\x1b[0m${bold(claudeOrange("c"))}: ${dim("5h:--% (n/a) 1w:--% (n/a) | ctx:--%")}\n`,
   );
 });
 
-// 프롬프트 위 band 가 같은 정보를 그리는 세션에서는 Claude 행을 중복해 그리지 않는다.
+// 프롬프트 위 band가 같은 정보를 그리는 세션에서는 Claude 행을 생략한다.
 function isClaudeBandActive(sessionId) {
   if (!sessionId) return false;
   try {
