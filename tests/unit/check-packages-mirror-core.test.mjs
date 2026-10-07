@@ -28,6 +28,10 @@ const CORE_MIRRORS = new Map([
     "packages/core/hub/team/claude-daemon-control.mjs",
   ],
   [
+    "hub/team/claude-transcript.mjs",
+    "packages/core/hub/team/claude-transcript.mjs",
+  ],
+  [
     "hub/team/claude-session-projection.mjs",
     "packages/core/hub/team/claude-session-projection.mjs",
   ],

@@ -530,6 +530,7 @@ async function writeReadyFakeTmux(dir) {
       "  state.buffers[bufferName] = args[args.indexOf('--') + 1];",
       "  fs.writeFileSync(statePath, JSON.stringify(state));",
       "}",
+      "if (args[0] === 'show-buffer') process.stdout.write(state.buffers ? state.buffers[args[args.indexOf('-b') + 1]] : state.buffer);",
       "if (args[0] === 'paste-buffer') {",
       "  const bufferName = args[args.indexOf('-b') + 1];",
       "  const target = args[args.indexOf('-t') + 1];",
@@ -590,6 +591,8 @@ async function writeBusyFakeTmux(dir) {
       "const file = process.env.TMUX_STATE;",
       "const state = JSON.parse(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '{}');",
       "if (args[0] === 'display-message') console.log('codex\\tcodex');",
+      "if (args[0] === 'set-buffer') state.buffer = args[args.indexOf('--') + 1];",
+      "if (args[0] === 'show-buffer') process.stdout.write(state.buffer);",
       "if (args[0] === 'capture-pane') {",
       "  if (!args.includes('-S')) state.visible = (state.visible || 0) + 1;",
       "  if (!args.includes('-S') && !state.sent && state.visible > Number(process.env.TMUX_BUSY_CAPTURES || '0') && process.env.TMUX_IDLE_DELAY_MS) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.TMUX_IDLE_DELAY_MS));",
@@ -634,6 +637,7 @@ async function writeStaleMarkerFakeTmux(dir) {
       "if (args[0] === 'set-buffer') {",
       "  state.buffer = args[args.indexOf('--') + 1];",
       "}",
+      "if (args[0] === 'show-buffer') process.stdout.write(state.buffers ? state.buffers[args[args.indexOf('-b') + 1]] : state.buffer);",
       "if (args[0] === 'paste-buffer') {",
       "  state.prompt = state.buffer;",
       "}",
@@ -1126,6 +1130,7 @@ test("doAskViaTmux preserves a multiline prompt through a named tmux buffer", as
       "-b",
       setBuffer[2],
       "-d",
+      "-p",
       "-t",
       "multilineA",
     ]);
@@ -1822,6 +1827,10 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
     );
 
     assert.equal(result.ready, true);
+    assert.equal(result.nameGenerated, true);
+    assert.match(result.name, /^\d{1,2}\.\d{1,2} start-codex$/);
+    assert.equal(result.nameApplied, false);
+    assert.ok(log.some((args) => args.includes(`/rename ${result.name}`)));
     assert.deepEqual(launch, [
       "send-keys",
       "-t",
@@ -1953,7 +1962,7 @@ test("tfx-live peer maps side-specific model and effort flags", async () => {
         "send-keys",
         "-t",
         "peerB",
-        "DISABLE_OMC=1 OMC_SKIP_HOOKS=all TFX_SKIP_HOOKS=1 claude --model 'claude model' --effort high",
+        `DISABLE_OMC=1 OMC_SKIP_HOOKS=all TFX_SKIP_HOOKS=1 claude -n '${new Date().getMonth() + 1}.${new Date().getDate()} peerB' --model 'claude model' --effort high`,
         "Enter",
       ],
     ]);
@@ -1977,6 +1986,223 @@ test("tfx-live help documents UDS-first auto default", async () => {
     stdout,
     /auto is the default for Claude when --short\/--session-id is present/,
   );
+});
+
+test("help works before or after a subcommand without parsing other flags", async () => {
+  for (const args of [
+    ["ask", "--prompt", "--help"],
+    ["-h", "wait"],
+    ["start", "-h"],
+  ]) {
+    const text = await runTfxLive(args);
+    const verb = args.find((arg) => ["ask", "wait", "start"].includes(arg));
+    assert.match(text, new RegExp(`tfx-live ${verb} `));
+    assert.doesNotMatch(text, /tfx-live stop /);
+  }
+});
+
+test("Claude start passes the explicit display name through -n", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "live-name-"));
+  try {
+    await writeReadyFakeTmux(dir);
+    const logPath = path.join(dir, "tmux.jsonl");
+    const name = "10.8 운영 개선";
+    const result = JSON.parse(
+      await runTfxLive(
+        [
+          "start",
+          "--cli",
+          "claude",
+          "--session",
+          "namedB",
+          "--name",
+          name,
+          "--ready-timeout",
+          "0.2",
+          "--poll-interval",
+          "1",
+        ],
+        {
+          env: {
+            PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+            TMUX_LOG: logPath,
+            TMUX_STATE: path.join(dir, "state.json"),
+          },
+        },
+      ),
+    );
+    assert.equal(result.name, name);
+    assert.equal(result.nameGenerated, false);
+    assert.equal(result.nameApplied, true);
+    const log = await readTmuxLog(logPath);
+    assert.ok(
+      log.some((args) =>
+        args.some((arg) => arg.includes(`claude -n '${name}'`)),
+      ),
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Claude no-wait carries the request tag and guard flags; wait preserves the request id", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "live-submit-"));
+  try {
+    const logPath = path.join(dir, "bridge.json");
+    const bridge = await writeFakeBridge(
+      dir,
+      `
+if (verb === 'daemon-probe') console.log(JSON.stringify({ok:true,target:{short:'aaaa'},daemon:{configDir:'cfg'}}));
+else if (verb === 'daemon-attach') console.log(JSON.stringify({ok:true,status:'submitted',inputSent:true,done:false,submittedAt:'now',target:{short:'aaaa'}}));
+else if (verb === 'daemon-wait') console.log(JSON.stringify({ok:true,status:'completed',done:true,timedOut:false,response:'answer',estimatedContextTokens:42,requestId:payload.requestId}));
+`,
+    );
+    const args = [
+      "ask",
+      "--cli",
+      "claude",
+      "--short",
+      "aaaa",
+      "--bridge",
+      bridge,
+      "--prompt",
+      "hello",
+      "--no-wait",
+      "--max-context-tokens",
+      "0",
+    ];
+    const env = { FAKE_BRIDGE_LOG: logPath };
+    const result = JSON.parse(await runTfxLive(args, { env }));
+    assert.equal(result.status, "submitted");
+    assert.equal(result.done, false);
+    assert.equal(Object.hasOwn(result, "timedOut"), false);
+    const calls = JSON.parse(await fs.readFile(logPath, "utf8"));
+    assert.equal(
+      calls[1].payload.prompt,
+      `[tfx-live req=${result.requestId}]\nhello`,
+    );
+    assert.equal(calls[1].payload.noWait, true);
+    assert.equal(calls[1].payload.maxContextTokens, 0);
+    const waited = JSON.parse(
+      await runTfxLive(
+        [
+          "wait",
+          "--cli",
+          "claude",
+          "--short",
+          "aaaa",
+          "--request-id",
+          result.requestId,
+          "--bridge",
+          bridge,
+        ],
+        { env },
+      ),
+    );
+    assert.equal(waited.status, "completed");
+    assert.equal(waited.requestId, result.requestId);
+    await runTfxLive([...args, "--no-relay-tag"], { env });
+    const untagged = JSON.parse(await fs.readFile(logPath, "utf8")).at(-1);
+    assert.equal(untagged.payload.prompt, "hello");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("tmux no-wait confirms submission and reports submitted without waiting for an answer", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "live-send-"));
+  try {
+    await writeReadyFakeTmux(dir);
+    const log = path.join(dir, "tmux.jsonl");
+    const result = JSON.parse(
+      await runTfxLive(
+        [
+          "ask",
+          "--session",
+          "sendA",
+          "--prompt",
+          "hello",
+          "--no-wait",
+          "--settle",
+          "1",
+        ],
+        {
+          env: {
+            PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+            TMUX_LOG: log,
+            TMUX_STATE: path.join(dir, "state.json"),
+          },
+        },
+      ),
+    );
+    assert.equal(result.status, "submitted");
+    assert.equal(result.inputSent, true);
+    assert.equal(result.done, false);
+    assert.equal(Object.hasOwn(result, "timedOut"), false);
+    const calls = await readTmuxLog(log);
+    assert.equal(
+      calls.find((args) => args[0] === "set-buffer").at(-1),
+      `[tfx-live req=${result.requestId}]\nhello`,
+    );
+    assert.ok(calls.some((args) => args[0] === "show-buffer"));
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("auto does not resend uncertain UDS input or bypass the context guard", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "live-once-"));
+  try {
+    const bridge = await writeFakeBridge(
+      dir,
+      `
+if (verb === 'daemon-probe') console.log(JSON.stringify({ok:true,target:{short:'aaaa'}}));
+else console.log(process.env.ATTACH_RESULT);
+`,
+    );
+    await writeLoggingFakeTmux(dir);
+    const log = path.join(dir, "tmux.jsonl");
+    for (const attach of [
+      { ok: false, inputSent: true, timedOut: true },
+      { ok: false, error: "disconnected" },
+      { ok: false, errorCode: "context-limit", inputSent: false },
+    ]) {
+      const result = JSON.parse(
+        await runTfxLive(
+          [
+            "ask",
+            "--cli",
+            "claude",
+            "--short",
+            "aaaa",
+            "--session",
+            "fallback",
+            "--bridge",
+            bridge,
+            "--prompt",
+            "hello",
+          ],
+          {
+            env: {
+              PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+              TMUX_LOG: log,
+              ATTACH_RESULT: JSON.stringify(attach),
+            },
+          },
+        ),
+      );
+      assert.equal(
+        result.errorCode ?? result.status,
+        attach.errorCode ?? "unknown",
+      );
+    }
+    assert.equal(
+      (await readTmuxLog(log)).some((args) => args[0] === "set-buffer"),
+      false,
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("tfx-live runs main() when invoked through a symlink (npm global bin shim)", async () => {

@@ -13,6 +13,10 @@ import {
   removeClaudeSessionProjection,
   writeClaudeSessionProjection,
 } from "./claude-session-projection.mjs";
+import {
+  findClaudeTranscript,
+  readClaudeTranscript,
+} from "./claude-transcript.mjs";
 
 export function resolveClaudeConfigDir(env = process.env) {
   if (env.CLAUDE_CONFIG_DIR) return path.resolve(env.CLAUDE_CONFIG_DIR);
@@ -223,6 +227,21 @@ function sessionsFromDaemonList(listResponse) {
   return extractClaudeAgentSessions(listResponse);
 }
 
+async function addSessionContexts(sessions, candidate) {
+  return await Promise.all(
+    sessions.map(async (session) => {
+      const transcript = await findClaudeTranscript({
+        configDir: candidate.configDir,
+        sourceConfigDir: candidate.sourceConfigDir,
+        sessionId: session.sessionId,
+        cwd: session.cwd,
+      });
+      const snapshot = await readClaudeTranscript(transcript).catch(() => null);
+      return { ...session, context: snapshot?.context ?? null };
+    }),
+  );
+}
+
 function errorMessage(error) {
   return error?.message || String(error);
 }
@@ -322,6 +341,7 @@ export async function probeClaudeDaemonCandidates({
   sessionId,
   timeoutMs = 6000,
   tmpRoot = "/tmp",
+  includeContext = true,
 } = {}) {
   const candidates = await buildClaudeDaemonDiscoveryCandidates({
     configDir,
@@ -339,7 +359,10 @@ export async function probeClaudeDaemonCandidates({
         { proto: 1, op: "list" },
         { timeoutMs },
       );
-      const sessions = sessionsFromDaemonList(list);
+      const normalized = sessionsFromDaemonList(list);
+      const sessions = includeContext
+        ? await addSessionContexts(normalized, candidate)
+        : normalized;
       const ok = list?.ok !== false;
       results.push({
         ok,
@@ -1038,10 +1061,10 @@ function defaultClaudeAttachCompletionMatched(
   );
 }
 
-function writeClaudeAttachInput(socket, input) {
+function writeClaudeAttachInput(socket, input, onSubmitted) {
   socket.write("\x15");
   socket.write(`\x1b[200~${String(input)}\x1b[201~`);
-  socket.write("\r");
+  socket.write("\r", onSubmitted);
 }
 
 function requiresPostInputTransition(handshake) {
@@ -1066,6 +1089,7 @@ export function attachClaudeDaemonSession({
   timeoutMs = 30_000,
   completionQuiescenceMs = DEFAULT_ATTACH_COMPLETION_QUIESCENCE_MS,
   completionMatched = defaultClaudeAttachCompletionMatched,
+  noWait = false,
 } = {}) {
   if (!controlSock) throw new Error("controlSock is required");
   return new Promise((resolve, reject) => {
@@ -1198,8 +1222,24 @@ export function attachClaudeDaemonSession({
               { cols },
             );
             responseStartOffset = stream.length;
-            writeClaudeAttachInput(socket, input);
-            inputSent = true;
+            inputSent = noWait ? null : true;
+            writeClaudeAttachInput(
+              socket,
+              input,
+              noWait
+                ? (error) => {
+                    if (error) fail(error);
+                    else {
+                      inputSent = true;
+                      finish({
+                        timedOut: false,
+                        matchedCompletion: false,
+                        closed: false,
+                      });
+                    }
+                  }
+                : undefined,
+            );
           }, initialDrainMs);
         }
       } else {

@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs/promises";
 import net from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -15,6 +16,7 @@ import {
   createCodexExecEndpoint,
   extractClaudeUdsText,
   listCodexAppServerThreads,
+  renameCodexAppServerThread,
   runUdsOrchestration,
   subscribeClaudeUntilMarker,
 } from "../../hub/team/uds-orchestrator.mjs";
@@ -26,7 +28,7 @@ const FAKE_CODEX_SERVER = path.resolve(
 );
 
 async function withFakeCodexServer(env, fn) {
-  const dir = await fs.mkdtemp("/tmp/tfx-codex-uds-");
+  const dir = await fs.mkdtemp(path.join(tmpdir(), "cx-"));
   const socketPath = path.join(dir, "fake.sock");
   const child = spawn(process.execPath, [FAKE_CODEX_SERVER, socketPath], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -62,6 +64,34 @@ function scriptedEndpoint(name, replies) {
     },
   };
 }
+
+test("Codex rename uses thread/name/set empty success response and closes its client", async () => {
+  const calls = [];
+  let closed = false;
+  const result = await renameCodexAppServerThread({
+    socketPath: "/fake.sock",
+    threadId: "one",
+    name: "10.8 운영 개선",
+    clientFactory: () => ({
+      async connect() {},
+      notify() {},
+      close() {
+        closed = true;
+      },
+      async request(method, params) {
+        calls.push({ method, params });
+        return {};
+      },
+    }),
+  });
+  assert.deepEqual(calls.at(-1), {
+    method: "thread/name/set",
+    params: { threadId: "one", name: "10.8 운영 개선" },
+  });
+  assert.equal(result.nameApplied, true);
+  assert.equal(result.name, "10.8 운영 개선");
+  assert.equal(closed, true);
+});
 
 test("codex-led mode asks Codex, then Claude UDS, then Codex final", async () => {
   const codex = scriptedEndpoint("codex", ["CODEX_PLAN", "CODEX_FINAL"]);
@@ -127,7 +157,7 @@ test("peer mode asks Claude UDS and Codex as peers, then synthesizes", async () 
 });
 
 async function withFakeClaudeDaemon(handler, fn) {
-  const dir = await fs.mkdtemp("/tmp/tfx-uds-");
+  const dir = await fs.mkdtemp(path.join(tmpdir(), "cl-"));
   const paths = deriveClaudeDaemonPaths({
     configDir: path.join(dir, "claude"),
     tmpRoot: dir,

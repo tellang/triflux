@@ -44,6 +44,7 @@ async function runCodexAppServerTurn({
   timeoutMs,
   maxTurnMs,
   expectedTurnId,
+  noWait = false,
 }) {
   const messages = new Map();
   const pending = [];
@@ -159,6 +160,16 @@ async function runCodexAppServerTurn({
     turnId = started?.turn?.id || started?.turnId;
     if (!turnId)
       throw new Error("codex app-server turn/start returned no turn id");
+    if (noWait) {
+      return {
+        status: "submitted",
+        inputSent: true,
+        done: false,
+        turnId,
+        submittedAt: new Date().toISOString(),
+        target: threadId,
+      };
+    }
     for (const [kind, params] of pending) receive(kind, params);
     const result = await completion;
     const entries = [...messages.values()].map((item) => ({
@@ -264,6 +275,30 @@ export async function listCodexAppServerThreads({
   }
 }
 
+export async function renameCodexAppServerThread({
+  socketPath,
+  threadId,
+  name,
+  clientFactory = (opts) => new JsonRpcWsUdsClient(opts),
+} = {}) {
+  const timeoutMs = DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS;
+  const client = codexClient(socketPath, timeoutMs, clientFactory);
+  try {
+    await initializeCodexClient(client, timeoutMs);
+    await client.request("thread/name/set", { threadId, name }, timeoutMs);
+    return {
+      ok: true,
+      cli: "codex",
+      transport: "uds",
+      threadId,
+      name,
+      nameApplied: true,
+    };
+  } finally {
+    client.close();
+  }
+}
+
 export async function askCodexAppServerThread({
   socketPath,
   threadId,
@@ -274,6 +309,7 @@ export async function askCodexAppServerThread({
   ifBusy = "wait",
   busyTimeoutMs = timeoutMs,
   pollIntervalMs = 200,
+  noWait = false,
   clientFactory = (opts) => new JsonRpcWsUdsClient(opts),
 } = {}) {
   if (typeof prompt !== "string" || !prompt.trim())
@@ -371,9 +407,11 @@ export async function askCodexAppServerThread({
       timeoutMs,
       maxTurnMs,
       expectedTurnId,
+      noWait,
     });
     if (turn.message) throw new Error(turn.message);
     return {
+      ...turn,
       cli: "codex",
       transport: "uds",
       threadId: selectedId,
@@ -381,7 +419,8 @@ export async function askCodexAppServerThread({
       response: turn.response,
       done: turn.status === "completed",
       matchedCompletion: turn.matchedCompletion,
-      timedOut: turn.timedOut,
+      ...(noWait ? {} : { timedOut: turn.timedOut }),
+      ...(noWait ? { ok: true } : {}),
       status: turn.status,
       commentary: turn.commentary,
       meta: { retries: turn.retries },

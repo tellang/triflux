@@ -60,6 +60,10 @@ const CORE_FILE_MIRRORS = [
     target: "packages/core/hub/team/claude-daemon-control.mjs",
   },
   {
+    source: "hub/team/claude-transcript.mjs",
+    target: "packages/core/hub/team/claude-transcript.mjs",
+  },
+  {
     source: "hub/team/claude-session-projection.mjs",
     target: "packages/core/hub/team/claude-session-projection.mjs",
   },

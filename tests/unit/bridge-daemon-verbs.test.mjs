@@ -295,6 +295,7 @@ test("daemon-probe lists fake daemon sessions and resolves target by short", asy
           session_id: "sess-1",
           state: "ready",
           status: "ready",
+          context: null,
         },
       ]);
       assert.deepEqual(out.target, {
@@ -304,6 +305,7 @@ test("daemon-probe lists fake daemon sessions and resolves target by short", asy
         session_id: "sess-1",
         state: "ready",
         status: "ready",
+        context: null,
       });
       assert.deepEqual(fake.requests, [{ proto: 1, op: "list" }]);
     } finally {
@@ -531,6 +533,7 @@ test("daemon-probe discovers an OMC runtime daemon in ambient OMX caller env", a
           session_id: "omc-session",
           state: "unknown",
           status: "unknown",
+          context: null,
         },
       ]);
       assert.equal(Object.hasOwn(out.sessions[0], "daemon"), false);
@@ -714,7 +717,7 @@ test("daemon-attach rejects duplicate ambient targets before attaching", async (
   });
 });
 
-test("explicit configDir is exact-only and never falls back to ambient OMC", async () => {
+test("explicit stale daemon recovers a requested target from ambient OMC", async () => {
   await withTempClaudeHome(async ({ home, omcRuntime, customConfig }) => {
     const omcPaths = deriveClaudeDaemonPaths({
       configDir: omcRuntime,
@@ -745,21 +748,21 @@ test("explicit configDir is exact-only and never falls back to ambient OMC", asy
         },
       );
 
-      assert.equal(out.ok, false);
-      assert.equal(out.reason, "daemon-dir-missing");
-      assert.equal(out.daemon, null);
+      assert.equal(out.ok, true);
+      assert.equal(out.daemon.configDirSource, "omc-runtime");
+      assert.equal(out.recoveredFrom.configDirSource, "explicit");
       assert.deepEqual(
         out.candidateResults.map((candidate) => candidate.configDirSource),
-        ["explicit"],
+        ["omc-runtime", "default"],
       );
-      assert.deepEqual(fake.requests, []);
+      assert.deepEqual(fake.requests, [{ proto: 1, op: "list" }]);
     } finally {
       await new Promise((resolve) => fake.server.close(resolve));
     }
   });
 });
 
-test("CLAUDE_CONFIG_DIR env mode is strict and never falls back to ambient OMC", async () => {
+test("stale CLAUDE_CONFIG_DIR recovers a requested target from ambient OMC", async () => {
   await withTempClaudeHome(async ({ home, defaultConfig, omcRuntime }) => {
     const omcPaths = deriveClaudeDaemonPaths({
       configDir: omcRuntime,
@@ -775,8 +778,8 @@ test("CLAUDE_CONFIG_DIR env mode is strict and never falls back to ambient OMC",
           "--payload",
           JSON.stringify({
             short: "omc12345",
-            prompt: "must not attach",
-            timeoutMs: 100,
+            prompt: "recover attach",
+            timeoutMs: 1500,
           }),
         ],
         {
@@ -790,14 +793,17 @@ test("CLAUDE_CONFIG_DIR env mode is strict and never falls back to ambient OMC",
         },
       );
 
-      assert.equal(out.ok, false);
-      assert.equal(out.reason, "daemon-dir-missing");
-      assert.equal(out.inputSent, false);
+      assert.equal(out.ok, true);
+      assert.equal(out.inputSent, true);
+      assert.equal(out.recoveredFrom.configDirSource, "env");
       assert.deepEqual(
         out.candidateResults.map((candidate) => candidate.configDirSource),
-        ["env"],
+        ["omc-runtime", "default"],
       );
-      assert.deepEqual(fake.requests, []);
+      assert.deepEqual(
+        fake.requests.map((request) => request.op),
+        ["list", "attach"],
+      );
     } finally {
       await new Promise((resolve) => fake.server.close(resolve));
     }

@@ -1317,7 +1317,8 @@ function daemonAttachErrorResult(error) {
     matchedCompletion: false,
     timedOut: false,
     closed: false,
-    inputSent: error?.inputSent === true,
+    inputSent: error?.inputSent ?? null,
+    status: error?.inputSent === false ? "failed" : "unknown",
     error: error?.message || String(error),
   };
 }
@@ -1388,87 +1389,312 @@ async function cmdDaemonProbe(args) {
   try {
     const payload = readBridgePayload(args);
     const { probeClaudeDaemonCandidates } = await loadDaemonControl();
-    const probe = await probeClaudeDaemonCandidates({
-      configDir: payload.configDir,
-      env: process.env,
-      short: payload.short,
-      sessionId: payload.sessionId,
-      timeoutMs: numericOption(payload.timeoutMs, 6000),
-      tmpRoot: payload.tmpRoot,
-    });
-    return emitJson(probe);
+    const { probe, recoveredFrom } = await probeDaemonTarget(
+      payload,
+      probeClaudeDaemonCandidates,
+    );
+    return emitJson({ ...probe, ...(recoveredFrom ? { recoveredFrom } : {}) });
   } catch (error) {
     return emitJson(daemonErrorResult(error));
   }
+}
+
+function daemonRecovery(probe) {
+  return probe?.ok ? staleCandidate(probe) : null;
+}
+
+function staleCandidate(probe) {
+  return probe?.candidateResults?.find((candidate) =>
+    ["daemon-dir-missing", "stale-control-socket"].includes(
+      candidate.errorCode,
+    ),
+  );
+}
+
+async function probeDaemonTarget(
+  payload,
+  probeCandidates,
+  includeContext = true,
+) {
+  const options = {
+    configDir: payload.configDir,
+    env: process.env,
+    short: payload.short,
+    sessionId: payload.sessionId,
+    timeoutMs: numericOption(payload.timeoutMs, 6000),
+    tmpRoot: payload.tmpRoot,
+    includeContext,
+  };
+  const probe = await probeCandidates(options);
+  if (
+    probe.ok ||
+    !(payload.short || payload.sessionId) ||
+    !staleCandidate(probe)
+  ) {
+    return { probe, recoveredFrom: daemonRecovery(probe) };
+  }
+  const ambient = await probeCandidates({
+    ...options,
+    configDir: undefined,
+    env: { ...process.env, CLAUDE_CONFIG_DIR: "" },
+  });
+  return {
+    probe: ambient,
+    recoveredFrom: ambient.ok ? staleCandidate(probe) : null,
+  };
 }
 
 async function cmdDaemonAttach(args) {
   try {
     const payload = readBridgePayload(args);
     if (!payload.prompt) throw new Error("prompt is required");
-
     const {
       attachClaudeDaemonSession,
       buildDaemonControlAuth,
       probeClaudeDaemonCandidates,
     } = await loadDaemonControl();
-    const probe = await probeClaudeDaemonCandidates({
-      configDir: payload.configDir,
-      env: process.env,
-      short: payload.short,
-      sessionId: payload.sessionId,
-      timeoutMs: numericOption(payload.timeoutMs, 6000),
-      tmpRoot: payload.tmpRoot,
-    });
-    if (!probe.ok) return emitJson(daemonAttachProbeFailureResult(probe));
-    const short = payload.short ?? probe.target?.short;
-    if (!short) {
-      return emitJson(
-        daemonAttachProbeFailureResult({
-          ...probe,
-          ok: false,
-          reason: "target-not-found",
-          error: "short or resolvable sessionId is required",
-        }),
-      );
-    }
-    const controlAuth = await buildDaemonControlAuth(
-      probe.daemon?.configDir ?? payload.configDir,
+    let { probe, recoveredFrom } = await probeDaemonTarget(
+      payload,
+      probeClaudeDaemonCandidates,
+      false,
     );
-
+    if (!probe.ok) return emitJson(daemonAttachProbeFailureResult(probe));
+    const { findClaudeTranscript, readClaudeTranscript } = await import(
+      "./team/claude-transcript.mjs"
+    );
+    const maxContextTokens = numericOption(payload.maxContextTokens, 850_000);
+    const warnContextTokens = numericOption(payload.warnContextTokens, 600_000);
     let result;
-    try {
-      result = await attachClaudeDaemonSession({
-        controlSock: probe.controlSock,
-        short,
-        input: payload.prompt,
-        ...controlAuth,
-        cols: numericOption(payload.cols, undefined),
-        rows: numericOption(payload.rows, undefined),
-        timeoutMs: numericOption(payload.timeoutMs, 30_000),
+    let contextWarning;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const short = payload.short ?? probe.target?.short;
+      if (!short) {
+        return emitJson(
+          daemonAttachProbeFailureResult({
+            ...probe,
+            reason: "target-not-found",
+            error: "short or resolvable sessionId is required",
+          }),
+        );
+      }
+      const transcript = await findClaudeTranscript({
+        configDir: probe.daemon?.configDir,
+        sourceConfigDir: probe.daemon?.sourceConfigDir,
+        sessionId: probe.target?.sessionId,
+        cwd: probe.target?.cwd,
       });
-    } catch (error) {
-      return emitJson({
-        ...daemonAttachErrorResult(error),
-        ...daemonProbeMetadata(probe),
-      });
+      const contextTokens =
+        (await readClaudeTranscript(transcript).catch(() => null))?.context
+          ?.estimatedContextTokens ?? null;
+      if (maxContextTokens > 0 && contextTokens >= maxContextTokens) {
+        return emitJson({
+          ok: false,
+          errorCode: "context-limit",
+          contextTokens,
+          hint: "Claude 세션을 승계한 뒤 새 세션에 요청하라.",
+          inputSent: false,
+          ...(recoveredFrom ? { recoveredFrom } : {}),
+          ...daemonProbeMetadata(probe),
+        });
+      }
+      contextWarning =
+        warnContextTokens > 0 && contextTokens >= warnContextTokens
+          ? {
+              estimatedContextTokens: contextTokens,
+              threshold: warnContextTokens,
+            }
+          : undefined;
+      const controlAuth = await buildDaemonControlAuth(probe.daemon?.configDir);
+      try {
+        result = await attachClaudeDaemonSession({
+          controlSock: probe.controlSock,
+          short,
+          input: payload.prompt,
+          ...controlAuth,
+          cols: numericOption(payload.cols, undefined),
+          rows: numericOption(payload.rows, undefined),
+          timeoutMs: numericOption(payload.timeoutMs, 30_000),
+          noWait: payload.noWait === true,
+        });
+        break;
+      } catch (error) {
+        if (
+          attempt === 1 ||
+          error?.code !== "ENOENT" ||
+          error?.inputSent !== false
+        ) {
+          return emitJson({
+            ...daemonAttachErrorResult(error),
+            ...(recoveredFrom ? { recoveredFrom } : {}),
+            ...daemonProbeMetadata(probe),
+          });
+        }
+        const previousSock = probe.controlSock;
+        const recovered = await probeClaudeDaemonCandidates({
+          configDir: undefined,
+          env: { ...process.env, CLAUDE_CONFIG_DIR: "" },
+          short: payload.short,
+          sessionId: payload.sessionId,
+          timeoutMs: numericOption(payload.timeoutMs, 6000),
+          tmpRoot: payload.tmpRoot,
+          includeContext: false,
+        });
+        if (!recovered.ok || recovered.controlSock === previousSock) {
+          return emitJson({
+            ...daemonAttachErrorResult(error),
+            ...daemonProbeMetadata(recovered),
+          });
+        }
+        probe = recovered;
+        recoveredFrom = { controlSock: previousSock };
+      }
     }
 
     return emitJson({
-      ok: result.matchedCompletion === true,
+      ok:
+        payload.noWait === true
+          ? result.inputSent === true
+          : result.matchedCompletion === true,
+      ...(payload.noWait === true
+        ? {
+            status:
+              result.inputSent === true
+                ? "submitted"
+                : result.inputSent === false
+                  ? "failed"
+                  : "unknown",
+            done: false,
+            ...(result.inputSent === true
+              ? { submittedAt: new Date().toISOString() }
+              : {}),
+            target: probe.target,
+          }
+        : {}),
       text: result.text,
       raw: result.streamText,
       responseRaw: result.responseStreamText,
       matchedCompletion: result.matchedCompletion === true,
-      timedOut: result.timedOut === true,
+      ...(payload.noWait === true
+        ? {}
+        : { timedOut: result.timedOut === true }),
       closed: result.closed === true,
-      inputSent: result.inputSent === true,
+      inputSent: result.inputSent ?? null,
       error:
         result.handshake?.ok === false ? result.handshake?.error : undefined,
+      ...(contextWarning ? { contextWarning } : {}),
+      ...(recoveredFrom ? { recoveredFrom } : {}),
       ...daemonProbeMetadata(probe),
     });
   } catch (error) {
     return emitJson(daemonAttachErrorResult(error));
+  }
+}
+
+async function cmdDaemonWait(args) {
+  let requestId = null;
+  try {
+    const payload = readBridgePayload(args);
+    requestId = payload.requestId ?? null;
+    if (!payload.short && !payload.sessionId)
+      throw new Error("short or sessionId is required");
+    const { probeClaudeDaemonCandidates } = await loadDaemonControl();
+    const { findClaudeTranscript, readClaudeTranscript } = await import(
+      "./team/claude-transcript.mjs"
+    );
+    const timeoutMs = numericOption(payload.timeoutMs, 30_000);
+    const pollIntervalMs = Math.max(
+      10,
+      numericOption(payload.pollIntervalMs, 500),
+    );
+    const deadline = Date.now() + timeoutMs;
+    let last = null;
+    do {
+      const probe = await probeClaudeDaemonCandidates({
+        configDir: payload.configDir,
+        env: process.env,
+        short: payload.short,
+        sessionId: payload.sessionId,
+        timeoutMs: Math.max(1, Math.min(6000, deadline - Date.now())),
+        tmpRoot: payload.tmpRoot,
+        includeContext: false,
+      });
+      if (!probe.ok) {
+        if (Date.now() >= deadline) {
+          return emitJson({
+            ...(last ?? {}),
+            ok: true,
+            status: "working",
+            done: false,
+            timedOut: true,
+            estimatedContextTokens: last?.estimatedContextTokens ?? null,
+            requestId,
+          });
+        }
+        return emitJson({
+          ok: false,
+          status: "unknown",
+          done: false,
+          timedOut: false,
+          estimatedContextTokens: null,
+          requestId,
+          ...daemonProbeMetadata(probe),
+          error: probe.error || probe.reason,
+        });
+      }
+      const transcriptPath = await findClaudeTranscript({
+        configDir: probe.daemon?.configDir,
+        sourceConfigDir: probe.daemon?.sourceConfigDir,
+        sessionId: probe.target?.sessionId,
+        cwd: probe.target?.cwd,
+      });
+      const transcript = await readClaudeTranscript(transcriptPath, {
+        requestId: payload.requestId,
+      });
+      const estimatedContextTokens =
+        transcript?.context?.estimatedContextTokens ?? null;
+      const idle = ["idle", "done", "ready"].includes(
+        String(probe.target?.state || probe.target?.status || "").toLowerCase(),
+      );
+      last = {
+        ok: true,
+        status: transcript?.userSeen ? "working" : "submitted",
+        done: false,
+        timedOut: false,
+        response: transcript?.response || "",
+        estimatedContextTokens,
+        requestId,
+        target: probe.target,
+        ...daemonProbeMetadata(probe),
+      };
+      if (
+        (idle || transcript?.sectionClosed) &&
+        transcript?.userSeen &&
+        transcript.turnEnded
+      ) {
+        if (!transcript.response.trim())
+          return emitJson({
+            ...last,
+            ok: false,
+            status: "failed",
+            error: "turn ended without assistant text",
+          });
+        return emitJson({ ...last, status: "completed", done: true });
+      }
+      if (Date.now() >= deadline) break;
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(pollIntervalMs, deadline - Date.now())),
+      );
+    } while (Date.now() < deadline);
+    return emitJson({ ...last, status: "working", timedOut: true });
+  } catch (error) {
+    return emitJson({
+      ...daemonErrorResult(error),
+      status: "unknown",
+      done: false,
+      timedOut: false,
+      estimatedContextTokens: null,
+      requestId,
+    });
   }
 }
 
@@ -1807,6 +2033,8 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdDaemonProbe(args);
     case "daemon-attach":
       return await cmdDaemonAttach(args);
+    case "daemon-wait":
+      return await cmdDaemonWait(args);
     case "daemon-interrupt":
       return await cmdDaemonInterrupt(args);
     case "retry-run":
@@ -1817,7 +2045,7 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdInterveneRun(args);
     default:
       console.error(
-        "사용법: bridge.mjs <register|heartbeat|result|control|handoff|publish|takeover-role|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending|daemon-probe|daemon-attach|daemon-interrupt|retry-run|retry-status|intervene-run> [--옵션]",
+        "사용법: bridge.mjs <register|heartbeat|result|control|handoff|publish|takeover-role|send-input|context|deregister|assign-async|assign-result|assign-status|assign-retry|team-info|team-task-list|team-task-update|team-send-message|pipeline-state|pipeline-advance|pipeline-init|pipeline-list|ping|delegator-delegate|delegator-reply|delegator-status|hitl-request|hitl-submit|hitl-pending|daemon-probe|daemon-attach|daemon-wait|daemon-interrupt|retry-run|retry-status|intervene-run> [--옵션]",
       );
       process.exit(1);
   }

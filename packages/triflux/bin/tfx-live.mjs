@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import {
   mkdir,
@@ -51,7 +52,13 @@ const BRIDGE_TIMEOUT_BUFFER_MS = 15_000;
 // spill the JSON to a temp file and pass --payload-file instead.
 const PAYLOAD_FILE_THRESHOLD = 96 * 1024;
 const VALID_TRANSPORTS = ["tmux", "uds", "auto"];
-const BOOLEAN_FLAGS = new Set(["json", "attach-a", "attach-b"]);
+const BOOLEAN_FLAGS = new Set([
+  "json",
+  "attach-a",
+  "attach-b",
+  "no-wait",
+  "no-relay-tag",
+]);
 const PEER_HOP_DONE_MARKER = "<<<TFX_PEER_HOP_DONE>>>";
 // uds-fallback diagnostics land here, written async so a failed daemon attach
 // never blocks the tmux fallback path (see writeUdsBugReport / doAskAuto).
@@ -59,13 +66,16 @@ const BUG_REPORT_DIR =
   process.env.TFX_LIVE_BUG_REPORT_DIR ??
   pathJoin(homedir(), ".claude", "cache", "triflux", "tfx-live", "bug-reports");
 
-function usage() {
-  return [
+function usage(command) {
+  const lines = [
     "Usage:",
-    "  tfx-live start --session NAME [--cli codex|claude] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
+    "  tfx-live start --session NAME [--name NAME] [--cli codex|claude] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude] [--if-busy wait|fail|interrupt] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --cli codex --transport uds --thread ID|auto --prompt TEXT [--codex-socket PATH|default] [--cwd DIR] [--if-busy wait|fail|steer] [--busy-timeout 60] [--timeout 60] [--max-turn SECONDS]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
+    "    ask options: --no-wait --no-relay-tag --max-context-tokens 850000 --warn-context-tokens 600000 (max 0 disables the Claude UDS guard).",
+    "  tfx-live wait --cli claude (--short SHORT | --session-id ID) [--request-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 60] [--poll-interval 1500]",
+    "  tfx-live rename --cli codex --transport uds --thread ID --name NAME [--codex-socket PATH|default]",
     "    transport: auto is the default for Claude when --short/--session-id is present; otherwise tmux. bridge path: --bridge > $TFX_BRIDGE > $TFX_REPO_ROOT/hub/bridge.mjs > bundled Triflux hub/bridge.mjs.",
     "  tfx-live interrupt --session NAME [--cli codex|claude] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 5]",
     "  tfx-live stop --session NAME [--cli codex|claude] [--remote HOST]",
@@ -80,10 +90,27 @@ function usage() {
     "    Runs the Claude(UDS)+Codex orchestration engine. --codex-transport app-server-uds drives a real `codex app-server` over WebSocket-over-UDS (experimental); default exec keeps the codex stdio one-shot path.",
     "  tfx-live cto-hygiene-notify --root DIR --state-file PATH [--json]",
     "    One-shot CTO hygiene dry-run notification: sends only when actionable hygiene state changes; no polling or apply/steward lock.",
-  ].join("\n");
+  ];
+  if (!command) return lines.join("\n");
+  const selected = lines.filter(
+    (line) =>
+      line.startsWith(`  tfx-live ${command} `) ||
+      (command === "ask" && line.startsWith("    ask options:")),
+  );
+  return selected.length
+    ? ["Usage:", ...selected].join("\n")
+    : lines.join("\n");
 }
 
 function parseCli(argv) {
+  if (argv.some((arg) => arg === "--help" || arg === "-h")) {
+    const subcommand = argv.find((arg) =>
+      /^(start|ask|wait|rename|stop|interrupt|probe|list-sessions|converse|goal-driven|peer|orchestrate|cto-hygiene-notify)$/.test(
+        arg,
+      ),
+    );
+    return { command: "help", flags: { subcommand } };
+  }
   const [command, ...rest] = argv;
   if (!command || command === "--help" || command === "-h") {
     return { command: "help", flags: {} };
@@ -155,6 +182,13 @@ function integerFlag(flags, name, defaultValue) {
   if (!Number.isInteger(value) || value <= 0) {
     throw new Error(`--${name} must be a positive integer`);
   }
+  return value;
+}
+
+function contextTokenFlag(flags, name, defaultValue) {
+  const value = flags[name] === undefined ? defaultValue : Number(flags[name]);
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw new Error(`--${name} must be a non-negative integer`);
   return value;
 }
 
@@ -233,7 +267,16 @@ function buildRemoteLiveArgv(verb, opts) {
   if (opts.busyTimeoutMs)
     args.push("--busy-timeout", String(opts.busyTimeoutMs / 1000));
   if (opts.maxTurnMs) args.push("--max-turn", String(opts.maxTurnMs / 1000));
-  if (verb === "ask") args.push("--prompt", opts.prompt ?? "");
+  if (verb === "ask") {
+    args.push("--prompt", opts.prompt ?? "");
+    if (opts.noWait) args.push("--no-wait");
+    if (opts.noRelayTag) args.push("--no-relay-tag");
+    if (opts.requestId) args.push("--request-id", opts.requestId);
+    if (opts.maxContextTokens !== undefined)
+      args.push("--max-context-tokens", String(opts.maxContextTokens));
+    if (opts.warnContextTokens !== undefined)
+      args.push("--warn-context-tokens", String(opts.warnContextTokens));
+  }
   args.push("--timeout", timeoutSeconds(opts.timeoutMs));
   if (verb === "ask" && opts.settleMs) {
     args.push("--settle", String(opts.settleMs));
@@ -1665,10 +1708,10 @@ const ADAPTERS = {
   },
 };
 
-function buildLaunchKeys(adapter, { model, effort } = {}) {
+function buildLaunchKeys(adapter, { model, effort, name } = {}) {
   const hasModel = model !== undefined;
   const hasEffort = effort !== undefined;
-  if (!hasModel && !hasEffort) {
+  if (!hasModel && !hasEffort && !(adapter.cli === "claude" && name)) {
     return adapter.launchKeys;
   }
 
@@ -1684,6 +1727,7 @@ function buildLaunchKeys(adapter, { model, effort } = {}) {
       );
     }
   } else if (adapter.cli === "claude") {
+    if (name) overrideArgs.push("-n", name);
     if (hasModel) {
       overrideArgs.push("--model", model);
     }
@@ -1971,12 +2015,18 @@ async function doStart(adapter, opts) {
   } = opts;
   if (session.includes(":"))
     throw new Error("start --session accepts only a session name without ':'");
+  const now = new Date();
+  const name = opts.name ?? `${now.getMonth() + 1}.${now.getDate()} ${session}`;
+  if (!/^\d{1,2}\.\d{1,2} \S/u.test(name) || /[\r\n]/u.test(name))
+    throw new Error("--name must use '<month>.<day> <topic>' on one line");
   const launchKeys = resume
     ? [adapter.resumeById(resume), "Enter"]
     : resumeLast
       ? [adapter.resumeLast(), "Enter"]
-      : buildLaunchKeys(adapter, { model, effort });
+      : buildLaunchKeys(adapter, { model, effort, name });
   const resumed = Boolean(resume || resumeLast);
+  if (resumed && adapter.cli === "claude")
+    launchKeys[0] += ` ${shellQuote(["-n", name])}`;
   const resumeTarget = resume ?? (resumeLast ? "last" : null);
 
   await runTmux(remote, [
@@ -2006,6 +2056,34 @@ async function doStart(adapter, opts) {
     readyTimeoutMs,
     pollIntervalMs,
   );
+  let nameApplied = adapter.cli === "claude" && ready;
+  if (adapter.cli === "codex" && ready) {
+    try {
+      await runTmux(remote, [
+        "send-keys",
+        "-t",
+        session,
+        "-l",
+        "--",
+        `/rename ${name}`,
+      ]);
+      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+      const deadline = Date.now() + Math.min(readyTimeoutMs, 2000);
+      do {
+        const discovery = await discoverCodexTmuxSessions({ remote });
+        nameApplied =
+          discovery.sessions?.some(
+            (entry) =>
+              entry.session === session &&
+              entry.panes.some((pane) => pane.name === name),
+          ) === true;
+        if (nameApplied || remote) break;
+        await sleep(Math.min(pollIntervalMs, 200));
+      } while (Date.now() < deadline);
+    } catch {
+      nameApplied = false;
+    }
+  }
   return addLoginGuard(adapter, raw, {
     cli: adapter.cli,
     session,
@@ -2013,6 +2091,15 @@ async function doStart(adapter, opts) {
     resumed,
     resumeTarget,
     ready,
+    name,
+    nameGenerated: opts.name === undefined,
+    nameApplied,
+    ...(adapter.cli === "codex" && !nameApplied
+      ? {
+          nameWarning:
+            "name update could not be confirmed from the Codex session registry",
+        }
+      : {}),
     raw,
   });
 }
@@ -2071,18 +2158,27 @@ async function doAskViaTmux(adapter, opts) {
 
   const bufferName = tmuxBufferName(session);
   await runTmux(remote, ["set-buffer", "-b", bufferName, "--", prompt]);
+  const { stdout: buffered } = await runTmux(remote, [
+    "show-buffer",
+    "-b",
+    bufferName,
+  ]);
+  if (buffered !== prompt && buffered !== `${prompt}\n`)
+    throw new Error("tmux prompt buffer verification failed");
+  await runTmux(remote, ["send-keys", "-t", session, "C-u"]);
   await runTmux(remote, [
     "paste-buffer",
     "-b",
     bufferName,
     "-d",
+    "-p",
     "-t",
     session,
   ]);
   await sleep(settleMs);
 
   let promptSubmitted = !doneMarker;
-  if (doneMarker) {
+  if (doneMarker || opts.noWait) {
     for (let attempt = 1; attempt <= PROMPT_SUBMIT_MAX_ATTEMPTS; attempt += 1) {
       await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
       await sleep(PROMPT_SUBMIT_RETRY_DELAY_MS);
@@ -2099,6 +2195,23 @@ async function doAskViaTmux(adapter, opts) {
     }
   } else {
     await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+  }
+
+  if (opts.noWait) {
+    return {
+      ok: true,
+      cli: adapter.cli,
+      transport: "tmux",
+      session,
+      remote: remote ?? null,
+      status: "submitted",
+      inputSent: true,
+      done: false,
+      submittedAt: new Date().toISOString(),
+      target: session,
+      ifBusy,
+      busyWaitedMs,
+    };
   }
 
   const startedAt = Date.now();
@@ -2191,6 +2304,24 @@ async function doAskViaTmux(adapter, opts) {
 }
 
 async function doAsk(adapter, opts) {
+  const requestId = opts.requestId ?? randomBytes(6).toString("hex");
+  const tag = `[tfx-live req=${requestId}]`;
+  const prompt =
+    opts.noRelayTag || opts.prompt.startsWith(`${tag}\n`)
+      ? opts.prompt
+      : `${tag}\n${opts.prompt}`;
+  try {
+    return {
+      ...(await dispatchAsk(adapter, { ...opts, prompt, requestId })),
+      requestId,
+    };
+  } catch (error) {
+    error.requestId = requestId;
+    throw error;
+  }
+}
+
+async function dispatchAsk(adapter, opts) {
   const transport = opts.transport ?? "tmux";
   if (transport === "tmux") {
     return doAskViaTmux(adapter, opts);
@@ -2211,6 +2342,7 @@ async function doAsk(adapter, opts) {
       ifBusy: opts.ifBusy,
       busyTimeoutMs: opts.busyTimeoutMs,
       pollIntervalMs: opts.pollIntervalMs,
+      noWait: opts.noWait,
     });
   }
 
@@ -2262,6 +2394,11 @@ async function doAskViaDaemon(opts, meta = {}) {
   if (short) payload.short = short;
   if (sessionId) payload.sessionId = sessionId;
   if (configDir) payload.configDir = configDir;
+  if (opts.noWait) payload.noWait = true;
+  if (opts.maxContextTokens !== undefined)
+    payload.maxContextTokens = opts.maxContextTokens;
+  if (opts.warnContextTokens !== undefined)
+    payload.warnContextTokens = opts.warnContextTokens;
 
   const result = await callBridgeVerb(
     bridgePath,
@@ -2273,6 +2410,14 @@ async function doAskViaDaemon(opts, meta = {}) {
   // are surfaced but never counted as done.
   const matchedCompletion = result?.matchedCompletion === true;
   return {
+    ...result,
+    status:
+      result?.status ??
+      (matchedCompletion
+        ? "completed"
+        : result?.inputSent === false
+          ? "failed"
+          : "unknown"),
     cli: "claude",
     transport: "uds",
     short: short ?? null,
@@ -2280,9 +2425,11 @@ async function doAskViaDaemon(opts, meta = {}) {
     response: result?.text ?? "",
     raw: result?.raw ?? result?.responseRaw ?? "",
     matchedCompletion,
-    timedOut: result?.timedOut === true,
+    ...(result?.status === "submitted"
+      ? {}
+      : { timedOut: result?.timedOut === true }),
     closed: result?.closed === true,
-    inputSent: result?.inputSent === true,
+    inputSent: result?.inputSent ?? null,
     daemon: result?.daemon ?? null,
     daemons: result?.daemons ?? [],
     matches: result?.matches ?? [],
@@ -2431,10 +2578,20 @@ async function doAskAuto(adapter, opts) {
       {
         transportSelected: "uds",
         transportProbe: resolution.transportProbe,
+        ...(probe?.raw?.recoveredFrom
+          ? { recoveredFrom: probe.raw.recoveredFrom }
+          : {}),
       },
     );
-    if (udsResult.matchedCompletion) {
+    if (
+      udsResult.matchedCompletion ||
+      udsResult.status === "submitted" ||
+      udsResult.errorCode === "context-limit"
+    ) {
       return udsResult;
+    }
+    if (udsResult.inputSent !== false) {
+      return { ...udsResult, status: "unknown", done: false };
     }
     // Daemon was reachable but the attach round did not complete (error,
     // timeout, or socket close). File a report async, then keep the user moving
@@ -2630,6 +2787,7 @@ function startOpts(flags) {
     resumeLast: Object.hasOwn(flags, "resume-last"),
     model: flags.model,
     effort: flags.effort,
+    name: flags.name,
     readyTimeoutMs: secondsFlag(
       flags,
       "ready-timeout",
@@ -2701,6 +2859,11 @@ function askOpts(flags, adapter) {
     ),
     bridgePath: resolveBridgePath(flags),
     prompt: requireFlag(flags, "prompt"),
+    requestId: flags["request-id"],
+    noWait: Object.hasOwn(flags, "no-wait"),
+    noRelayTag: Object.hasOwn(flags, "no-relay-tag"),
+    maxContextTokens: contextTokenFlag(flags, "max-context-tokens", 850000),
+    warnContextTokens: contextTokenFlag(flags, "warn-context-tokens", 600000),
     remote: flags.remote,
     timeoutMs: secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
     maxTurnMs: codexUds
@@ -2752,7 +2915,69 @@ async function start(flags) {
 
 async function ask(flags) {
   const adapter = selectAdapter(flags);
-  printJson(await doAsk(adapter, askOpts(flags, adapter)));
+  const requestId = flags["request-id"] ?? randomBytes(6).toString("hex");
+  try {
+    printJson(
+      await doAsk(
+        adapter,
+        askOpts({ ...flags, "request-id": requestId }, adapter),
+      ),
+    );
+  } catch (error) {
+    error.requestId = requestId;
+    throw error;
+  }
+}
+
+async function wait(flags) {
+  if ((flags.cli ?? "claude") !== "claude")
+    throw new Error(
+      "wait supports Claude UDS only; Codex UDS wait is unavailable",
+    );
+  if (!flags.short && !flags["session-id"])
+    throw new Error("wait requires --short or --session-id");
+  if (flags.remote || (flags.transport && flags.transport !== "uds"))
+    throw new Error("wait supports local Claude UDS only");
+  const timeoutMs = secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS);
+  printJson(
+    await callBridgeVerb(
+      resolveBridgePath(flags),
+      "daemon-wait",
+      {
+        short: flags.short,
+        sessionId: flags["session-id"],
+        configDir: flags["config-dir"],
+        requestId: flags["request-id"],
+        timeoutMs,
+        pollIntervalMs: msFlag(
+          flags,
+          "poll-interval",
+          DEFAULT_POLL_INTERVAL_MS,
+        ),
+      },
+      timeoutMs,
+    ),
+  );
+}
+
+async function rename(flags) {
+  if (flags.cli !== "codex" || flags.transport !== "uds" || flags.remote)
+    throw new Error("rename requires local --cli codex --transport uds");
+  const name = requireFlag(flags, "name").trim();
+  if (!name) throw new Error("--name must not be blank");
+  const threadId = requireFlag(flags, "thread");
+  if (threadId === "auto")
+    throw new Error("rename requires an explicit --thread ID");
+  const { renameCodexAppServerThread } = await import(
+    "../hub/team/uds-orchestrator.mjs"
+  );
+  printJson(
+    await renameCodexAppServerThread({
+      socketPath: resolveCodexDaemonSocket(flags["codex-socket"] ?? "default"),
+      threadId,
+      name,
+    }),
+  );
 }
 
 async function stop(flags) {
@@ -2822,6 +3047,7 @@ async function listSessions(flags) {
 function startOptsForSession(flags, session, side) {
   return {
     session,
+    name: side ? flags[`name-${side}`] : flags.name,
     remote: flags.remote,
     cwd: flags.cwd,
     ...(side
@@ -2843,6 +3069,7 @@ function askOptsForSession(flags, session, prompt) {
   return {
     session,
     prompt,
+    noRelayTag: Object.hasOwn(flags, "no-relay-tag"),
     remote: flags.remote,
     timeoutMs: secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
     settleMs: msFlag(flags, "settle", DEFAULT_SETTLE_MS),
@@ -2894,6 +3121,7 @@ async function stopAfterLifecycle(stopSpecs, primaryError = null) {
 
 function turnFromAsk(prompt, result) {
   return {
+    requestId: result.requestId,
     prompt,
     response: result.response,
     done: result.done,
@@ -3344,6 +3572,9 @@ function peerSideBaseOpts(flags, side, adapter, session) {
   }
   return {
     session,
+    noRelayTag: Object.hasOwn(flags, "no-relay-tag"),
+    maxContextTokens: contextTokenFlag(flags, "max-context-tokens", 850000),
+    warnContextTokens: contextTokenFlag(flags, "warn-context-tokens", 600000),
     short,
     sessionId,
     threadId,
@@ -3592,6 +3823,7 @@ async function peer(flags) {
 
       hops.push({
         hop: hopIndex + 1,
+        requestId: result.requestId,
         from: isA ? "a" : "b",
         cli: adapter.cli,
         transport: result.transport ?? base.transport,
@@ -3767,7 +3999,7 @@ async function main() {
   const { command, flags } = parseCli(process.argv.slice(2));
 
   if (command === "help") {
-    process.stdout.write(`${usage()}\n`);
+    process.stdout.write(`${usage(flags.subcommand)}\n`);
     return;
   }
 
@@ -3775,6 +4007,10 @@ async function main() {
     await start(flags);
   } else if (command === "ask") {
     await ask(flags);
+  } else if (command === "wait") {
+    await wait(flags);
+  } else if (command === "rename") {
+    await rename(flags);
   } else if (command === "stop") {
     await stop(flags);
   } else if (command === "interrupt") {
@@ -3846,6 +4082,9 @@ if (isMainModule()) {
     printJson({
       ok: false,
       error: error.message,
+      ...(error.requestId || process.argv[2] === "ask"
+        ? { requestId: error.requestId ?? randomBytes(6).toString("hex") }
+        : {}),
     });
     process.exitCode = 1;
   });
