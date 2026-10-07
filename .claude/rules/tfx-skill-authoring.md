@@ -1,6 +1,8 @@
 ---
 paths:
   - "skills/**/*"
+  - "adapters/**/skills/**/*"
+  - "packages/**/skills/**/*"
   - "scripts/lint-skills.mjs"
 ---
 # TFX Skill Authoring SSOT
