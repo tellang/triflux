@@ -13,6 +13,8 @@ All notable changes to triflux will be documented in this file.
 ### Added
 - mods: Claude Code mod `mods/triflux` 를 더한다. 프롬프트 위 band 에 Claude 5h/1w 사용률, context, 비용을 그리고, 서브에이전트 effort 를 역할표로 맞춘다(탐색 low, 실행 medium, 판정 high, 직접 적은 effort 우선). band 가 있는 세션은 statusLine HUD 가 Claude 행을 뺀다
 - git: AI trailer(`Co-Authored-By:`, `Claude-Session:`, `Generated with [Claude`)를 막는 `.githooks/commit-msg`. 저장소 체크아웃에서만 `prepare` 가 설정한다
+- live: 리드가 다른 세션을 지휘할 때 보내기와 완료 확인을 나눈다(`tfx-live ask --no-wait`, `wait --request-id`, 요청 표식 `[tfx-live req=<id>]`). 받는 쪽 컨텍스트가 모델 창 대비 Claude 60/90%, Codex 15/22% 를 넘으면 경고하고 거부한다. `tfx-live compact`, `stop --short`, `start --name` 을 더하고 `<sub> --help` 가 사용법을 출력한다 (#590)
+- remote: `remote-spawn.mjs --probe` 가 메모리 압박, 부하, 디스크, CLI와 triflux 버전, 인증을 보고 `ready`, `warnings` 를 돌려준다. 라우팅 정책은 m2 로 넘기기 전에 probe 를 먼저 하라고 적는다 (#590)
 
 ### Changed
 - hud: context 를 `CTX:443K/1.0M` 대신 `CTX:44%` 로 표시한다
