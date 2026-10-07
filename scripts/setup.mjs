@@ -2235,40 +2235,6 @@ export async function runDeferred(stdinData) {
 
   let synced = skillSync.changed;
 
-  // ── Memory Doctor (P0 자동 수정) ──
-  const isCIEnv = process.env.CI === "true" || process.env.DOCKER === "true";
-  if (!isCIEnv) {
-    try {
-      const { createMemoryDoctor } = await import("../hub/memory-doctor.mjs");
-      const projectSlug = process
-        .cwd()
-        .replace(/^([A-Z]):/u, "$1-")
-        .replace(/[\\/]/gu, "-");
-      const memDir = join(CLAUDE_DIR, "projects", projectSlug, "memory");
-      if (existsSync(memDir)) {
-        const doctor = createMemoryDoctor({
-          memoryDir: memDir,
-          rulesDir: join(process.cwd(), ".claude", "rules"),
-          projectDir: process.cwd(),
-          claudeDir: CLAUDE_DIR,
-        });
-        const { checks, healthScore } = doctor.scan();
-        const p0Auto = checks.filter(
-          (c) => c.severity === "P0" && c.autofix && !c.passed,
-        );
-        if (p0Auto.length > 0) {
-          doctor.fixAll({ severity: "P0" });
-          io.log(
-            `  memory-doctor: ${p0Auto.length}건 P0 자동 수정 (health: ${healthScore})`,
-          );
-          synced += p0Auto.length;
-        }
-      }
-    } catch (err) {
-      io.log(`  memory-doctor: skip (${err.message})`);
-    }
-  }
-
   for (const { src, dst } of SYNC_MAP) {
     if (!existsSync(src)) continue;
 

@@ -30,7 +30,6 @@ const CORE_FILES = [
   "hub/state.mjs",
   "hub/role-contract.mjs",
   "hub/bridge.mjs",
-  "hub/memory-doctor.mjs",
   "hub/account-broker.mjs",
 ];
 

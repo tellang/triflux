@@ -1,7 +1,4 @@
-// hub/pipeline/state.mjs — Hub SQLite 파이프라인 상태 저장/로드
-//
-// store.mjs의 기존 SQLite 연결(db)을 활용한다.
-// pipeline_state 테이블은 schema.sql에 정의.
+// hub/pipeline/state.mjs: SQLite 파이프라인 상태 저장/로드
 
 import { join } from "node:path";
 
