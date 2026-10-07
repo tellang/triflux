@@ -2213,11 +2213,8 @@ export async function runDeferred(stdinData) {
     home: _TFX_HOME,
     repoRoot: process.env.INIT_CWD || process.cwd(),
   });
+  // 이주가 막혀도 설치는 계속한다. 남은 항목은 경고로 알린다.
   for (const warning of mcpCleanup.warnings) io.log(`  ⚠ ${warning}`);
-  if (!mcpCleanup.ok) {
-    io.writeStderr("[tfx-setup] 이전 MCP 연결 이주 미완료\n");
-    return io.result(1);
-  }
 
   const pkgVersion = getPackageVersion();
   const marker = readMarker();

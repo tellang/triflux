@@ -2065,13 +2065,8 @@ function cmdSetup(options = {}) {
       fix: `${join(CLAUDE_DIR, "settings.json")}의 JSON 문법과 쓰기 권한을 확인하세요.`,
     });
   }
-  const mcpCleanup = cleanupLegacyMcp();
-  for (const warning of mcpCleanup.warnings) warn(warning);
-  if (!mcpCleanup.ok) {
-    throw createCliError("이전 MCP 연결 이주 미완료", {
-      exitCode: EXIT_CONFIG_ERROR,
-    });
-  }
+  // 이주가 막혀도 setup 은 계속한다. 남은 항목은 경고로 알린다.
+  for (const warning of cleanupLegacyMcp().warnings) warn(warning);
   if (fromUpdate) refreshSetupCaches();
 
   console.log(`\n${BOLD}triflux setup${RESET}\n`);
@@ -2657,13 +2652,11 @@ async function cmdDoctor(options = {}) {
       section("Auto Fix");
       const mcpCleanup = cleanupLegacyMcp();
       for (const warning of mcpCleanup.warnings) warn(warning);
-      report.actions.push({ type: "legacy-mcp-cleanup", ...mcpCleanup });
-      if (!mcpCleanup.ok) {
-        report.status = "issues";
-        report.issue_count = 1;
-        if (json) printJson(report);
-        return report;
-      }
+      report.actions.push({
+        type: "legacy-mcp-cleanup",
+        ...mcpCleanup,
+        status: mcpCleanup.ok ? "ok" : "failed",
+      });
       for (const target of SYNC_MAP) {
         syncFile(target.src, target.dst, target.label);
       }
@@ -2816,7 +2809,10 @@ async function cmdDoctor(options = {}) {
       console.log("");
     }
 
-    let issues = 0;
+    // fix 단계에서 실패한 작업도 확인 필요 항목으로 센다.
+    let issues = report.actions.filter(
+      (action) => action.status === "failed",
+    ).length;
 
     // tfx-route.sh
     section("tfx-route.sh");
