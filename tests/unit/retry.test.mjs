@@ -6,7 +6,6 @@ import {
   CodexMcpTransportError,
   CodexMcpWorker,
 } from "../../hub/workers/codex-mcp.mjs";
-import { GeminiWorker } from "../../hub/workers/gemini-worker.mjs";
 import { withRetry } from "../../hub/workers/worker-utils.mjs";
 
 function createWorkerError(message, details = {}) {
@@ -37,37 +36,6 @@ class TestCodexWorker extends CodexMcpWorker {
     this.stopCalls += 1;
     this.ready = false;
     this.client = null;
-  }
-}
-
-class TestGeminiWorker extends GeminiWorker {
-  constructor(sequence, options = {}) {
-    super(options);
-    this.sequence = [...sequence];
-    this.runCalls = 0;
-  }
-
-  async run(prompt) {
-    this.runCalls += 1;
-    const next = this.sequence.shift();
-    if (next instanceof Error) throw next;
-    return {
-      type: "antigravity",
-      command: this.command,
-      args: [],
-      response: next?.response || `antigravity:${prompt}`,
-      events: [],
-      resultEvent: null,
-      usage: null,
-      stdout: "",
-      stderr: "",
-      exitCode: 0,
-      exitSignal: null,
-      timedOut: false,
-      startedAtMs: 0,
-      finishedAtMs: 0,
-      ...next,
-    };
   }
 }
 
@@ -212,57 +180,6 @@ describe("CodexMcpWorker.execute", () => {
       attempts: 3,
       category: "transient",
       recovery: "Retry after reconnecting the Codex MCP transport.",
-    });
-  });
-});
-
-describe("GeminiWorker compatibility execute", () => {
-  it("retries transient worker exits and succeeds", async () => {
-    const worker = new TestGeminiWorker(
-      [
-        createWorkerError("Antigravity route worker exited with code 1", {
-          code: "WORKER_EXIT",
-          stderr: "temporary failure",
-          result: { exitCode: 1, stderr: "temporary failure" },
-        }),
-        { response: "antigravity:ok" },
-      ],
-      {
-        retryOptions: { baseDelayMs: 0, maxDelayMs: 0 },
-      },
-    );
-
-    const result = await worker.execute("retry me");
-
-    assert.equal(result.exitCode, 0);
-    assert.equal(result.output, "antigravity:ok");
-    assert.equal(worker.runCalls, 2);
-  });
-
-  it("does not retry misuse exits and reports config metadata", async () => {
-    const worker = new TestGeminiWorker(
-      [
-        createWorkerError("Antigravity route worker exited with code 2", {
-          code: "WORKER_EXIT",
-          stderr: "bad args",
-          result: { exitCode: 2, stderr: "bad args" },
-        }),
-      ],
-      {
-        retryOptions: { baseDelayMs: 0, maxDelayMs: 0 },
-      },
-    );
-
-    const result = await worker.execute("bad config");
-
-    assert.equal(result.exitCode, 1);
-    assert.equal(worker.runCalls, 1);
-    assert.deepEqual(result.error, {
-      code: "WORKER_EXIT",
-      retryable: false,
-      attempts: 1,
-      category: "config",
-      recovery: "Check the Antigravity route worker configuration.",
     });
   });
 });

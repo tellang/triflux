@@ -159,36 +159,3 @@ describe("truncate: ANSI 색상 문자열 안전 처리", async () => {
     );
   });
 });
-
-// ========================================================================
-// 6. token-mode: expand 후 isCompactMode 리셋
-// ========================================================================
-describe("token-mode: compactify/expand 상태 전환", async () => {
-  const { compactify, expand, isCompactMode } = await import(
-    "../../hub/token-mode.mjs"
-  );
-
-  it("compactify 후 isCompactMode가 true여야 함", () => {
-    compactify("test configuration string");
-    assert.equal(isCompactMode(), true, "compactify 후 compact 모드여야 함");
-  });
-
-  it("expand 후 isCompactMode가 false여야 함", () => {
-    compactify("test implementation string");
-    assert.equal(isCompactMode(), true, "compactify 직후 true 확인");
-    expand("test impl string");
-    assert.equal(
-      isCompactMode(),
-      false,
-      "expand 후 compact 모드가 해제되어야 함",
-    );
-  });
-
-  it("compactify -> expand 순환 후 isCompactMode가 false", () => {
-    const original = "The configuration of the environment is complete.";
-    compactify(original);
-    assert.equal(isCompactMode(), true);
-    expand(compactify(original));
-    assert.equal(isCompactMode(), false, "순환 후 compact 모드 해제");
-  });
-});

@@ -135,7 +135,7 @@ function attachAdaptiveRuleStore(store) {
     return statements.pruneRules.run(cutoff, minConfidence).changes;
   };
 
-  // listAdaptiveRules: decayRules/getActiveAdaptiveRules에서 사용
+  // listAdaptiveRules: decayRules에서 사용
   const listStmt = store.db.prepare(
     "SELECT * FROM adaptive_rules WHERE project_slug = ? ORDER BY confidence DESC",
   );

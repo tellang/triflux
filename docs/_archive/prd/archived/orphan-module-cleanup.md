@@ -1,3 +1,5 @@
+폐기: 2026-10-08 슬롭 정리(.triflux/plans/slop-audit-2026-10.md 결정 S7 A29~A37)
+
 # PRD: 고아 모듈 정리 + Q-Learning 게이트 해제
 
 ## 목표

@@ -2,12 +2,10 @@
 // Adapters
 export { buildExecCommand, sleep, gte, FEATURES, CODEX_MCP_TRANSPORT_EXIT_CODE, normalizePathForShell, shellQuote } from './cli-adapter-base.mjs';
 export { execute as executeCodex, buildExecArgs as buildCodexArgs, buildLaunchScript, getCircuitState as getCodexCircuit } from './codex-adapter.mjs';
-export { execute as executeGemini, buildExecArgs as buildGeminiArgs, getCircuitState as getGeminiCircuit } from './gemini-adapter.mjs';
 export { getCodexVersion, runPreflight } from './codex-preflight.mjs';
 
-// Routing & Intent
+// Routing
 export { createRouter } from './router.mjs';
-export { classifyIntent, quickClassify, INTENT_CATEGORIES, refineClassification } from './intent.mjs';
 
 // State & Paths & Platform
 export * from './paths.mjs';
@@ -18,12 +16,8 @@ export { createHitlManager } from './hitl.mjs';
 export { createAssignCallbackServer } from './assign-callbacks.mjs';
 export { getHubUrl, getHubPipePath, requestJson, post, connectPipe, parseArgs, parseJsonSafe } from './bridge.mjs';
 
-// Fullcycle & Research
-export { createFullcycleRunId, getFullcycleRunDir, ensureFullcycleRunDir, saveFullcycleArtifact, readFullcycleArtifact, writeFullcycleState, readFullcycleState, shouldStopQaLoop } from './fullcycle.mjs';
-export { generateQueries, normalizeResults, buildReport, saveReport } from './research.mjs';
-
 // Reflexion (adaptive error learning)
-export { normalizeError, lookupSolution, learnFromError, reportOutcome, adaptiveRuleFromError, getActiveAdaptiveRules } from './reflexion.mjs';
+export { normalizeError, adaptiveRuleFromError } from './reflexion.mjs';
 
 // Neural Memory (Lake 1.5)
 export { createAdaptiveEngine } from './adaptive.mjs';

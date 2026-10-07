@@ -394,43 +394,6 @@ const AGENT_PROFILE_MAP = {
 };
 ```
 
-### 6.2 intent 기반 라우팅
-
-intent.mjs에서 작업 의도에 따라 에이전트 선택:
-
-```javascript
-// hub/intent.mjs
-const INTENT_MAP = {
-  implement: {
-    agent: 'executor',
-    mcp: 'implement',
-    effort: 'codex53_high'
-  },
-  research: {
-    agent: 'analyst',
-    mcp: 'research',
-    effort: 'gpt54_xhigh'
-  },
-  review: {
-    agent: 'code-reviewer',
-    mcp: 'review',
-    effort: 'codex53_high'
-  }
-};
-```
-
-### 6.3 사용 예
-
-```bash
-# tfx-route.sh를 통한 에이전트 호출
-# (자동으로 intent 기반 프로필 선택)
-scripts/tfx-route.sh executor "코드 구현" implement codex53_high
-
-# 또는 CLI 직접 호출
-codex -p $(intent-to-profile "implement") \
-  --dangerously-bypass-approvals-and-sandbox "$(cat prompt.md)"
-```
-
 ---
 
 ## 7. 통합 예제: 6워커 스웜 실행
@@ -629,4 +592,3 @@ timeout 600 codex -p codex53_xhigh \
 - [Windows Terminal CLI 레퍼런스](https://learn.microsoft.com/windows/terminal/command-line-arguments)
 - [Codex 공식 문서](https://openai.com/docs/)
 - [triflux delegator-mcp.mjs](../../hub/workers/delegator-mcp.mjs)
-- [triflux intent.mjs](../../hub/intent.mjs)

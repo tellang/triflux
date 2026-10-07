@@ -6,8 +6,6 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import {
   adaptiveRuleFromError,
   decayRules,
-  getActiveAdaptiveRules,
-  learnFromError,
   promoteRule,
 } from "../../hub/reflexion.mjs";
 import { createStoreAdapter } from "../../hub/store-adapter.mjs";
@@ -44,40 +42,6 @@ describe("reflexion adaptive rules", () => {
     assert.deepEqual(rule.adaptive_state.session_ids, ["session-1"]);
     assert.match(rule.error_pattern, /enoent/);
     assert.match(rule.solution, /npm test/);
-  });
-
-  it("keeps reflexion learning backward compatible when adaptive rules coexist", () => {
-    // learnFromError는 reflexion_entries 테이블 사용 (@deprecated)
-    // addAdaptiveRule은 adaptive_rules 테이블 사용
-    // 두 시스템이 독립적으로 공존 가능한지 검증
-    const error =
-      "TypeError: Cannot read properties of undefined at /tmp/example.js:10:2";
-
-    const adaptiveRule = adaptiveRuleFromError({
-      projectSlug: "alpha",
-      sessionId: "adaptive-session",
-      sessionCount: 1,
-      tool_name: "exec_command",
-      error,
-    });
-    const added = store.addAdaptiveRule({
-      project_slug: "alpha",
-      pattern: adaptiveRule.error_pattern,
-      confidence: 0.9,
-      hit_count: 1,
-      last_seen_ms: Date.now(),
-    });
-
-    // reflexion_entries에 별도 저장 (learnFromError는 reflexion_entries 사용)
-    const reflexion = learnFromError(store, {
-      error,
-      solution: "Guard before property access",
-    });
-
-    assert.ok(added);
-    assert.ok(reflexion);
-    // 다른 테이블이므로 ID가 다름
-    assert.notEqual(reflexion.id, `${added.project_slug}:${added.pattern}`);
   });
 
   it("promotes adaptive rules after the same pattern appears", () => {
@@ -140,50 +104,6 @@ describe("reflexion adaptive rules", () => {
     );
     assert.ok(survivorRule);
     assert.ok(survivorRule.confidence < 0.75); // decayed
-  });
-
-  it("returns only active adaptive rules for a project slug", () => {
-    store.addAdaptiveRule({
-      project_slug: "project-active",
-      pattern: "err_module_not_found",
-      confidence: 0.8,
-      hit_count: 5,
-      last_seen_ms: Date.now(),
-    });
-    store.addAdaptiveRule({
-      project_slug: "project-active",
-      pattern: "modulenotfounderror",
-      confidence: 0.4,
-      hit_count: 1,
-      last_seen_ms: Date.now(),
-    });
-    store.addAdaptiveRule({
-      project_slug: "project-other",
-      pattern: "fatal_not_a_git_repository",
-      confidence: 0.9,
-      hit_count: 10,
-      last_seen_ms: Date.now(),
-    });
-
-    const rules = getActiveAdaptiveRules(store, "project-active");
-
-    assert.equal(rules.length, 1);
-    assert.equal(rules[0].pattern, "err_module_not_found");
-    assert.equal(rules[0].confidence, 0.8);
-  });
-
-  it("includes rules at default confidence (0.5) in active results", () => {
-    store.addAdaptiveRule({
-      project_slug: "alpha",
-      pattern: "default_confidence_rule",
-      confidence: 0.5,
-      hit_count: 1,
-      last_seen_ms: Date.now(),
-    });
-
-    const rules = getActiveAdaptiveRules(store, "alpha");
-    assert.equal(rules.length, 1);
-    assert.equal(rules[0].confidence, 0.5);
   });
 
   it("promoteRule returns null for non-existing rule", () => {
@@ -414,18 +334,5 @@ describe("reflexion adaptive rules — memory-store fallback", () => {
     const result = decayRules(store, 1);
 
     assert.ok(result.deleted.length >= 1);
-  });
-
-  it("getActiveAdaptiveRules works with memory-store fallback", () => {
-    store.addAdaptiveRule({
-      project_slug: "mem",
-      pattern: "active_rule",
-      confidence: 0.7,
-      hit_count: 1,
-      last_seen_ms: Date.now(),
-    });
-
-    const rules = getActiveAdaptiveRules(store, "mem");
-    assert.equal(rules.length, 1);
   });
 });

@@ -300,7 +300,9 @@ codex [--profile <name>] exec \
 }
 ```
 
-### 4.3 Gemini CLI 실행 패턴 (실측 — gemini-adapter.mjs 기반)
+### 4.3 Gemini CLI 실행 패턴 (작성 당시 실측)
+
+실측에 사용한 호환 어댑터는 폐기되었다. 아래는 작성 당시의 기록이다.
 
 ```
 gemini \
@@ -861,10 +863,7 @@ tasks:
   1. hub/codex-adapter.mjs
      - execute() opts.profile → resolveProfileForCli() 경유
      - 기존 profile 직접 참조 유지 (패스스루 레이어)
-  2. hub/gemini-adapter.mjs
-     - execute() opts.model → resolveProfileForCli() 경유
-     - opts.unifiedProfile 파라미터 추가 (선택적)
-  3. hub/conductor.mjs (존재한다면)
+  2. hub/conductor.mjs (존재한다면)
      - 통일 프로파일 기반 fallback 체인 자동 적용
 ```
 
@@ -976,7 +975,7 @@ Claude Code를 headless로 실행하는 triflux의 경우, 현재 `explore`/`cla
      ↓ 의도 (flagship / coding / fast ...)
 [profile-resolver.mjs]  ← 통일 프로파일 TOML
      ↓ CLI 네이티브 파라미터
-[codex-adapter / gemini-adapter / claude]
+[CLI 라우팅]
      ↓
 [~/.codex/config.toml / ~/.gemini/settings.json / ~/.claude/settings.json]
 ```

@@ -1,10 +1,7 @@
-// hub/reflexion.mjs — Cross-Session Error Learning Engine
-// 에러를 구조화 저장 → 다음 세션에서 유사 에러 패턴 매칭 → 자동 솔루션 적용
+// 오류 패턴 정규화 및 adaptive rule 관리
 
-const DEFAULT_REFLEXION_TYPE = "reflexion";
 export const ADAPTIVE_RULE_TYPE = "adaptive";
 const DEFAULT_CONFIDENCE = 0.5;
-const ACTIVE_RULE_CONFIDENCE = 0.5;
 const ADAPTIVE_PROMOTION_STEP = 0.1;
 const ADAPTIVE_DECAY_STEP = 0.1;
 const ADAPTIVE_DELETE_THRESHOLD = 0.3;
@@ -100,12 +97,6 @@ function buildAdaptiveSolution(errorContext = {}, errorText = "") {
   return `${toolName} 재시도 전 실패 원인을 검증하세요: ${summary}`;
 }
 
-function filterEntriesByType(entries, type) {
-  return entries.filter(
-    (entry) => (entry.type || DEFAULT_REFLEXION_TYPE) === type,
-  );
-}
-
 function parseAdaptiveRuleId(ruleId, projectSlug = "") {
   const value = pickString(ruleId);
   if (!value) return null;
@@ -185,68 +176,6 @@ export function normalizeError(errorMessage) {
   p = p.replace(/\b\d{10,13}\b/g, "<TIME>");
   p = p.replace(/\b\d{4,}\b/g, "<NUM>");
   return p.toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-/**
- * 에러에 대한 기존 솔루션 검색
- * @deprecated reflexion_entries 기반. adaptive_rules로 통합 예정. 현재 런타임 호출 없음.
- * @param {object} store - createStore() 반환 객체
- * @param {string} errorMessage - 원본 에러 메시지
- * @param {object} [context={}] - { file, function, cli, agent }
- * @returns {{ found: boolean, entries: Array, bestMatch: object|null }}
- */
-export function lookupSolution(store, errorMessage, context = {}) {
-  const pattern = normalizeError(errorMessage);
-  if (!pattern) return { found: false, entries: [], bestMatch: null };
-  const entries = store.findReflexion(pattern, context);
-  if (!entries.length) return { found: false, entries: [], bestMatch: null };
-  return { found: true, entries, bestMatch: entries[0] };
-}
-
-/**
- * 에러 해결 후 학습 저장
- * @deprecated reflexion_entries 기반. adaptive_rules로 통합 예정. 현재 런타임 호출 없음.
- * 동일 패턴이 존재하면 hit 업데이트, 없으면 새로 생성
- * @param {object} store
- * @param {{ error: string, solution: string, context?: object, success?: boolean }} opts
- * @returns {object|null}
- */
-export function learnFromError(
-  store,
-  { error, solution, context = {}, success = false },
-) {
-  const pattern = normalizeError(error);
-  if (!pattern || !solution) return null;
-  const existing = filterEntriesByType(
-    store.findReflexion(pattern, context),
-    DEFAULT_REFLEXION_TYPE,
-  );
-  if (existing.length && existing[0].error_pattern === pattern) {
-    return store.updateReflexionHit(existing[0].id, success);
-  }
-  const newEntry = store.addReflexion({
-    type: DEFAULT_REFLEXION_TYPE,
-    error_pattern: pattern,
-    error_message: error,
-    context,
-    solution,
-    solution_code: null,
-  });
-  return success && newEntry
-    ? store.updateReflexionHit(newEntry.id, true)
-    : newEntry;
-}
-
-/**
- * 솔루션 적용 결과 피드백
- * @deprecated reflexion_entries 기반. adaptive_rules로 통합 예정. 현재 런타임 호출 없음.
- * @param {object} store
- * @param {string} entryId
- * @param {boolean} success
- * @returns {object|null}
- */
-export function reportOutcome(store, entryId, success) {
-  return store.updateReflexionHit(entryId, success);
 }
 
 /**
@@ -345,18 +274,6 @@ export function decayRules(store, _sessionCount, projectSlug) {
     }
   }
   return result;
-}
-
-/**
- * 현재 활성화된 adaptive rules 조회
- * @param {object} store — store-adapter 인스턴스 (listAdaptiveRules 필요)
- * @param {string} projectSlug
- * @returns {Array}
- */
-export function getActiveAdaptiveRules(store, projectSlug) {
-  return listAdaptiveRulesFromStore(store, projectSlug).filter(
-    (rule) => rule.confidence >= ACTIVE_RULE_CONFIDENCE,
-  );
 }
 
 /**
