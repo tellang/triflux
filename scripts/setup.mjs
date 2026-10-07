@@ -1299,7 +1299,7 @@ function isProtectedCodexConfigMutationEnv(env = process.env) {
   );
 }
 
-function isProtectedCloakBrowserInstallEnv(env = process.env) {
+function isProtectedSetupEnv(env = process.env) {
   return (
     env.NODE_ENV === "test" ||
     env.CI === "true" ||
@@ -1318,6 +1318,68 @@ function isCloakBrowserSupportedPlatform(platform, arch) {
     (platform === "darwin" && (arch === "x64" || arch === "arm64")) ||
     (platform === "win32" && arch === "x64")
   );
+}
+
+export function ensureTrifluxMods({
+  install = false,
+  env = process.env,
+  execFileSyncFn = execFileSync,
+  log = console.log,
+  warn = console.warn,
+} = {}) {
+  if (isProtectedSetupEnv(env) || env.npm_lifecycle_event === "postinstall") {
+    return { ok: true, skipped: true, reason: "protected-env" };
+  }
+  const run = (args) =>
+    execFileSyncFn("claude", args, {
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 60_000,
+      windowsHide: true,
+      shell: process.platform === "win32",
+    });
+  let version;
+  try {
+    version = String(run(["--version"]))
+      .trim()
+      .match(/^(\d+)\.(\d+)\.(\d+)(?:\s|$)/u);
+  } catch {
+    return { ok: true, skipped: true, reason: "claude-unavailable" };
+  }
+  const [major, minor, patch] = (version?.slice(1) || []).map(Number);
+  if (
+    !(
+      major > 2 ||
+      (major === 2 && (minor > 1 || (minor === 1 && patch >= 287)))
+    )
+  ) {
+    return { ok: true, skipped: true, reason: "unsupported-version" };
+  }
+  try {
+    const marketplaces = JSON.parse(
+      run(["plugin", "marketplace", "list", "--json"]),
+    );
+    const plugins = JSON.parse(run(["plugin", "list", "--json"]));
+    const installed = plugins.some(
+      (plugin) => plugin.id === "triflux-mods@triflux",
+    );
+    if (!marketplaces.some((marketplace) => marketplace.name === "triflux")) {
+      run(["plugin", "marketplace", "add", "tellang/triflux"]);
+    }
+    if (!installed) {
+      if (install) {
+        run(["plugin", "install", "triflux-mods@triflux"]);
+        log("mods 설치 완료: triflux-mods@triflux");
+      } else {
+        log("mods 설치: tfx setup --mods");
+      }
+    }
+    return { ok: true, installed: installed || install };
+  } catch (error) {
+    warn(`[setup] mods 설정 실패: ${_normalizeErrorMessage(error)}`);
+    return { ok: false, reason: "setup-failed" };
+  }
 }
 
 // 버전 없이 받으면 최신이 깔린다. 키 없이 쓰는 무료 바이너리(v146)가 확인된 래퍼 버전만
@@ -1363,7 +1425,7 @@ function ensureCloakBrowser({
   execFileSyncFn = execFileSync,
   warn = (message) => console.warn(message),
 } = {}) {
-  if (isProtectedCloakBrowserInstallEnv(env)) {
+  if (isProtectedSetupEnv(env)) {
     return {
       ok: true,
       installed: false,
@@ -2266,6 +2328,11 @@ export async function runDeferred(stdinData) {
   ) {
     io.log("  \x1b[32m✓\x1b[0m cloakbrowser optional backend ready");
   }
+  ensureTrifluxMods({
+    install: argv.includes("--mods"),
+    log: (message) => io.log(message),
+    warn: (message) => io.log(`  ⚠ ${message}`),
+  });
   if (pkgVersion && marker?.version === pkgVersion && !isForce) {
     io.log(`setup: skip (v${pkgVersion} already synced)`);
     return io.result(0);

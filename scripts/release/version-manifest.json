@@ -23,8 +23,16 @@
       "paths": [["version"]]
     },
     {
+      "file": "mods/triflux/.claude-plugin/plugin.json",
+      "paths": [["version"]]
+    },
+    {
       "file": ".claude-plugin/marketplace.json",
-      "paths": [["version"], ["plugins", 0, "version"]]
+      "paths": [
+        ["version"],
+        ["plugins", 0, "version"],
+        ["plugins", 1, "version"]
+      ]
     },
     {
       "file": "package-lock.json",
