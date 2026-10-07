@@ -32,6 +32,7 @@ import {
 import { ensureAgyHooks } from "./ensure-agy-hooks.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
 import { cleanupLegacyHooks } from "./lib/legacy-hook-cleanup.mjs";
+import { cleanupLegacyMcp } from "./lib/legacy-mcp-cleanup.mjs";
 import {
   MACHINE_PROFILE_KEYS,
   parseMachineProfileContent,
@@ -2122,6 +2123,16 @@ export async function runDeferred(stdinData) {
     io.log(`  \x1b[33m⚠\x1b[0m ${warning}`);
   }
   if (machineProfileOnly) return io.result(0);
+
+  const mcpCleanup = cleanupLegacyMcp({
+    home: _TFX_HOME,
+    repoRoot: process.env.INIT_CWD || process.cwd(),
+  });
+  for (const warning of mcpCleanup.warnings) io.log(`  ⚠ ${warning}`);
+  if (!mcpCleanup.ok) {
+    io.writeStderr("[tfx-setup] 이전 MCP 연결 이주 미완료\n");
+    return io.result(1);
+  }
 
   const pkgVersion = getPackageVersion();
   const marker = readMarker();

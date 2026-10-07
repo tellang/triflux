@@ -38,7 +38,6 @@ function registryFor(homeDir, extraServer) {
       auth: { safe: true, ...extraServer },
     },
     policies: {
-      stdio_action: "replace-with-hub",
       watched_paths: [
         join(homeDir, ".codex", "config.toml"),
         join(homeDir, "repo", ".mcp.json"),
@@ -248,7 +247,6 @@ describe("syncRegistryTargets HTTP headers", () => {
           },
         },
         policies: {
-          stdio_action: "replace-with-hub",
           watched_paths: [settingsPath],
         },
       },

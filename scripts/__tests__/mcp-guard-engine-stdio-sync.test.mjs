@@ -49,7 +49,6 @@ function registryFor(homeDir, envDescriptor = { env: "BRAVE_API_KEY" }) {
       },
     },
     policies: {
-      stdio_action: "replace-with-hub",
       watched_paths: [
         join(homeDir, "repo", ".mcp.json"),
         join(homeDir, "repo", ".claude", "mcp.json"),
@@ -64,7 +63,7 @@ function registryFor(homeDir, envDescriptor = { env: "BRAVE_API_KEY" }) {
 afterEach(restoreEnv);
 
 describe("syncRegistryTargets stdio servers", () => {
-  it("writes stdio command, args, and resolved env to all primary clients", () => {
+  it("writes stdio command, args, and env references to all primary clients", () => {
     const homeDir = createHomeDir();
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;
@@ -114,7 +113,7 @@ describe("syncRegistryTargets stdio servers", () => {
         command: "npx",
         args: ["-y", "@brave/brave-search-mcp-server", "--transport", "stdio"],
         env: {
-          BRAVE_API_KEY: "test-brave-key",
+          BRAVE_API_KEY: "${BRAVE_API_KEY}",
         },
       });
     }
@@ -129,7 +128,7 @@ describe("syncRegistryTargets stdio servers", () => {
       codexToml,
       /args = \["-y", "@brave\/brave-search-mcp-server", "--transport", "stdio"\]/,
     );
-    assert.match(codexToml, /env = \{ "BRAVE_API_KEY" = "test-brave-key" \}/);
+    assert.match(codexToml, /env_vars = \["BRAVE_API_KEY"\]/);
     assert.doesNotMatch(codexToml, /url = /);
   });
 
@@ -138,16 +137,16 @@ describe("syncRegistryTargets stdio servers", () => {
     process.env.HOME = homeDir;
     process.env.USERPROFILE = homeDir;
     process.env.TFX_CODEX_CONFIG_SYNC = "1";
-    delete process.env.TFX_MISSING_BRAVE_API_KEY;
+    delete process.env.BRAVE_API_KEY;
 
     const result = syncRegistryTargets({
-      registry: registryFor(homeDir, { env: "TFX_MISSING_BRAVE_API_KEY" }),
+      registry: registryFor(homeDir),
     });
 
     assert.ok(
       result.actions.some((action) =>
         (action.warnings || []).some((warning) =>
-          warning.includes("TFX_MISSING_BRAVE_API_KEY"),
+          warning.includes("BRAVE_API_KEY"),
         ),
       ),
     );
@@ -158,14 +157,30 @@ describe("syncRegistryTargets stdio servers", () => {
     assert.deepEqual(projectConfig.mcpServers["brave-search"], {
       command: "npx",
       args: ["-y", "@brave/brave-search-mcp-server", "--transport", "stdio"],
+      env: { BRAVE_API_KEY: "${BRAVE_API_KEY}" },
     });
 
     const codexToml = readFileSync(
       join(homeDir, ".codex", "config.toml"),
       "utf8",
     );
-    assert.doesNotMatch(codexToml, /TFX_MISSING_BRAVE_API_KEY/);
+    assert.match(codexToml, /env_vars = \["BRAVE_API_KEY"\]/);
     assert.doesNotMatch(codexToml, /env = /);
-    assert.doesNotMatch(codexToml, /""/);
+
+    const remapped = syncRegistryTargets({
+      registry: registryFor(homeDir, { env: "TFX_MISSING_BRAVE_API_KEY" }),
+    });
+    assert.equal(
+      readFileSync(join(homeDir, ".codex", "config.toml"), "utf8"),
+      codexToml,
+    );
+    assert.ok(
+      remapped.actions.some(
+        (action) =>
+          action.filePath === join(homeDir, ".codex", "config.toml") &&
+          action.status === "warning" &&
+          action.message?.includes("TFX_MISSING_BRAVE_API_KEY"),
+      ),
+    );
   });
 });

@@ -58,6 +58,7 @@ import {
 import { ensureGeminiProfiles } from "../scripts/lib/gemini-profiles.mjs";
 import { serializeHandoff } from "../scripts/lib/handoff.mjs";
 import { cleanupLegacyHooks } from "../scripts/lib/legacy-hook-cleanup.mjs";
+import { cleanupLegacyMcp } from "../scripts/lib/legacy-mcp-cleanup.mjs";
 import {
   addRegistryServer,
   createDefaultRegistry,
@@ -2145,6 +2146,13 @@ function cmdSetup(options = {}) {
       fix: `${join(CLAUDE_DIR, "settings.json")}의 JSON 문법과 쓰기 권한을 확인하세요.`,
     });
   }
+  const mcpCleanup = cleanupLegacyMcp();
+  for (const warning of mcpCleanup.warnings) warn(warning);
+  if (!mcpCleanup.ok) {
+    throw createCliError("이전 MCP 연결 이주 미완료", {
+      exitCode: EXIT_CONFIG_ERROR,
+    });
+  }
   if (fromUpdate) refreshSetupCaches();
 
   console.log(`\n${BOLD}triflux setup${RESET}\n`);
@@ -2941,6 +2949,15 @@ async function cmdDoctor(options = {}) {
     // ── fix 모드: 파일 동기화 + 캐시 정리 후 진단 ──
     if (fix) {
       section("Auto Fix");
+      const mcpCleanup = cleanupLegacyMcp();
+      for (const warning of mcpCleanup.warnings) warn(warning);
+      report.actions.push({ type: "legacy-mcp-cleanup", ...mcpCleanup });
+      if (!mcpCleanup.ok) {
+        report.status = "issues";
+        report.issue_count = 1;
+        if (json) printJson(report);
+        return report;
+      }
       for (const target of SYNC_MAP) {
         syncFile(target.src, target.dst, target.label);
       }
@@ -4823,68 +4840,6 @@ async function cmdDoctor(options = {}) {
         issues += invalidConfigs.length;
         issues += Math.max(0, mismatchRows.length - autoFixedMismatches);
         issues += stdioRows.length;
-      }
-    }
-
-    // ── MCP Gateway Health ──
-    // install-mcp-gateway-startup 으로 띄운 LaunchAgent/systemd daemon 의 stdout
-    // (~/.local/state/triflux/mcp-gateway.out.log) 를 파싱해 missing-env 등으로
-    // skip 된 server 를 잡는다. 로그가 없으면 gateway 미설치/미실행으로 침묵.
-    section("MCP Gateway Health");
-    {
-      const { checkMcpGatewayHealthLive, summarizeMcpGatewayHealth } =
-        await import("../scripts/lib/mcp-gateway-health-check.mjs");
-      const gatewayHealth = await checkMcpGatewayHealthLive();
-      const summary = summarizeMcpGatewayHealth(gatewayHealth);
-      addDoctorCheck(report, {
-        name: "mcp-gateway-health",
-        status: summary.level === "warn" ? "warning" : "ok",
-        log_path: gatewayHealth.logPath,
-        findings: gatewayHealth.findings,
-        started: gatewayHealth.started,
-        live: gatewayHealth.live,
-        skipped: gatewayHealth.skipped,
-        ...(summary.fix ? { fix: summary.fix } : {}),
-      });
-      if (summary.level === "skip") {
-        info(summary.message);
-      } else if (summary.level === "ok") {
-        ok(summary.message);
-      } else {
-        warn(summary.message);
-        if (summary.fix) info(`수정: ${summary.fix}`);
-        issues++;
-      }
-    }
-
-    // ── MCP Gateway Wrapper ──
-    // 로그가 생기기 전 단계에서 wrapper 자체가 secrets.env 를 source 하는지 확인한다.
-    section("MCP Gateway Wrapper");
-    {
-      const { checkWrapperSourcing } = await import(
-        "../scripts/lib/mcp-gateway-wrapper-check.mjs"
-      );
-      const wrapperCheck = await checkWrapperSourcing();
-      addDoctorCheck(report, {
-        name: "mcp-gateway-wrapper-sourcing",
-        status:
-          wrapperCheck.status === "warn" ? "warning" : wrapperCheck.status,
-        path: wrapperCheck.wrapperPath,
-        ...(wrapperCheck.message ? { message: wrapperCheck.message } : {}),
-        ...(wrapperCheck.suggestedFix
-          ? { fix: wrapperCheck.suggestedFix }
-          : {}),
-      });
-
-      if (wrapperCheck.status === "ok") {
-        ok("wrapper sources secrets.env");
-      } else if (wrapperCheck.status === "warn") {
-        warn(wrapperCheck.message);
-        info(`수정: ${wrapperCheck.suggestedFix}`);
-        issues++;
-      } else {
-        warn("mcp-gateway wrapper not installed");
-        if (wrapperCheck.message) info(wrapperCheck.message);
       }
     }
 
