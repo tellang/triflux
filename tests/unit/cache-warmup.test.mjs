@@ -131,6 +131,7 @@ function cleanupFixture({ homeDir, cwd }) {
 
 function execSyncStub(command) {
   if (command.startsWith("git rev-parse")) return `${process.cwd()}\n`;
+  if (command === "tmux -V") return "tmux 3.5\n";
   if (command.startsWith("psmux --version")) return "psmux 1.0.0\n";
   if (command.startsWith("where wt.exe"))
     return "C:\\Windows\\System32\\wt.exe\n";
@@ -144,7 +145,7 @@ describe("cache-warmup", () => {
       writeAuth(fixture.homeDir, "pro");
       const preflight = {
         codex: { ok: true, path: "codex" },
-        hub: { ok: true, state: "healthy" },
+        hub: { ok: false, state: "unreachable" },
       };
 
       const first = buildAll({
@@ -157,6 +158,15 @@ describe("cache-warmup", () => {
 
       assert.equal(first.ok, true);
       assert.equal(first.built, 4);
+      const tier = JSON.parse(
+        readFileSync(
+          resolveTargetPath("tierEnvironment", { cwd: fixture.cwd }),
+          "utf8",
+        ),
+      );
+      assert.equal(tier.tier, "full");
+      assert.equal("hub" in tier.checks, false);
+      assert.equal("hub_state" in tier.source, false);
 
       for (const target of [
         "codexSkills",
@@ -199,7 +209,7 @@ describe("cache-warmup", () => {
       writeAuth(fixture.homeDir, "pro", { sub: "user-1" });
       const preflight = {
         codex: { ok: true, path: "codex" },
-        hub: { ok: true, state: "healthy" },
+        hub: { ok: false, state: "unreachable" },
       };
 
       const first = buildAll({

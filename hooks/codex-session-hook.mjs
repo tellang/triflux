@@ -1,22 +1,12 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
 import { argv, exit, stdin, stdout } from "node:process";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { writeCodexSessionRecord } from "../hub/lib/codex-session-registry.mjs";
-import { drainPendingSynapse as defaultDrainPendingSynapse } from "../hub/team/synapse-http.mjs";
 import {
-  heartbeatInteractiveSession as defaultHeartbeatInteractiveSession,
-  registerInteractiveSession as defaultRegisterInteractiveSession,
+  emitParticipantSessionStarted,
+  shouldSkipInteractiveRegistration,
 } from "../scripts/lib/session-presence.mjs";
-
-// hub-ensure가 없는 core 미러도 불러올 수 있도록 지연 import한다.
-async function defaultHubEnsureRun(stdinData) {
-  const { run } = await import(
-    new URL("../scripts/hub-ensure.mjs", import.meta.url).href
-  );
-  return run(stdinData);
-}
 
 function parsePayload(stdinData) {
   try {
@@ -46,66 +36,6 @@ function normalizeMode(mode, payload) {
     return "heartbeat";
   }
   return "";
-}
-
-/**
- * Start a detached bridge call so Codex/OMX presence reaches both the Synapse
- * session registry and the hub agents table. This is intentionally independent
- * of the legacy session-start work below: a missing or unavailable hub must
- * never delay or fail SessionStart.
- */
-export function launchCodexPresenceRegistration(payload, opts = {}) {
-  try {
-    const sessionId = String(payload?.session_id || "").trim();
-    if (!sessionId) return false;
-
-    const cwd =
-      typeof payload?.cwd === "string" && payload.cwd.trim()
-        ? payload.cwd
-        : process.cwd();
-    const bridgePath =
-      opts.bridgePath ||
-      fileURLToPath(new URL("../hub/bridge.mjs", import.meta.url));
-    const spawnFn = opts.spawnFn || spawn;
-    const canonicalSessionId = String(process.env.OMX_SESSION_ID || "").trim();
-    const tmuxSession = String(
-      process.env.OMX_TMUX_SESSION_NAME || process.env.OMX_TMUX_SESSION || "",
-    ).trim();
-    const tmuxPane = String(process.env.TMUX_PANE || "").trim();
-    const args = [
-      bridgePath,
-      "register",
-      "--session-id",
-      sessionId,
-      "--cwd",
-      cwd,
-      "--worktree-path",
-      cwd,
-      "--session-kind",
-      "interactive",
-      "--host",
-      "local",
-      "--codex-session-id",
-      sessionId,
-    ];
-    if (canonicalSessionId && canonicalSessionId !== sessionId) {
-      args.push("--omx-session-id", canonicalSessionId);
-    }
-    if (tmuxSession) args.push("--tmux-session", tmuxSession);
-    if (tmuxPane) args.push("--tmux-pane", tmuxPane);
-
-    const child = spawnFn(process.execPath, args, {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: true,
-      env: process.env,
-    });
-    child?.once?.("error", () => {});
-    child?.unref?.();
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function swallowStdoutWrite(_chunk, encodingOrCallback, callback) {
@@ -142,15 +72,8 @@ export async function runCodexSessionHook(stdinData, opts = {}) {
     ? normalizeMode(opts.argvMode ?? argv[2], parsed.payload)
     : "";
   const writeSessionRecord = opts.writeSessionRecord || writeCodexSessionRecord;
-  const hubEnsureRun = opts.hubEnsureRun || defaultHubEnsureRun;
-  const registerInteractiveSession =
-    opts.registerInteractiveSession || defaultRegisterInteractiveSession;
-  const heartbeatInteractiveSession =
-    opts.heartbeatInteractiveSession || defaultHeartbeatInteractiveSession;
-  const drainPendingSynapse =
-    opts.drainPendingSynapse || defaultDrainPendingSynapse;
-  const launchPresenceRegistration =
-    opts.launchPresenceRegistration || launchCodexPresenceRegistration;
+  const emitSessionStarted =
+    opts.emitSessionStarted || emitParticipantSessionStarted;
 
   try {
     await runHookSideEffectsWithStdoutSuppressed(async () => {
@@ -159,30 +82,17 @@ export async function runCodexSessionHook(stdinData, opts = {}) {
           writeSessionRecord(parsed.payload);
         } catch {}
       }
-      if (mode === "register") {
+      if (
+        mode === "register" &&
+        !shouldSkipInteractiveRegistration(parsed.payload, opts)
+      ) {
         try {
-          launchPresenceRegistration(parsed.payload);
-        } catch {}
-        try {
-          await hubEnsureRun(stdinData);
-        } catch {}
-        try {
-          await Promise.resolve(registerInteractiveSession(stdinData));
-        } catch {}
-        try {
-          await drainPendingSynapse(1000);
-        } catch {}
-      } else if (mode === "heartbeat") {
-        try {
-          heartbeatInteractiveSession(stdinData);
-        } catch {}
-        try {
-          await drainPendingSynapse(500);
+          await emitSessionStarted(stdinData);
         } catch {}
       }
     });
   } catch {
-    // Codex session hooks are observational and must never block the session.
+    // 로컬 기록 실패가 세션을 막지 않게 한다.
   }
 
   if (opts.writeStdout !== false) {

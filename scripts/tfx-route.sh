@@ -660,110 +660,17 @@ team_send_message() {
   local summary="${2:-}"
   [[ -z "$TFX_TEAM_NAME" || -z "$text" ]] && return 0
 
-  if ! bridge_cli_with_restart "팀 메시지 전송" "Hub 재시작 후 팀 메시지 전송 성공." \
-    team-send-message \
+  if ! bridge_cli team-send-message \
     --team "$TFX_TEAM_NAME" \
     --from "$TFX_TEAM_AGENT_NAME" \
     --to "$TFX_TEAM_LEAD_NAME" \
     --text "$text" \
-    --summary "${summary:-status update}"; then
+    --summary "${summary:-status update}" >/dev/null 2>&1; then
     echo "[tfx-route] 경고: 팀 메시지 전송 실패 (team=$TFX_TEAM_NAME, to=$TFX_TEAM_LEAD_NAME)" >&2
     return 0
   fi
 
   return 0
-}
-
-# ── Hub 자동 재시작 (슬립 복귀 등으로 Hub 종료 시) ──
-is_ephemeral_hub_context() {
-  local normalized_cwd="${PWD//\\//}"
-  case "$normalized_cwd" in
-    *"/.claude/worktrees/"*|*"/.worktrees/"*|*"/.codex-swarm/wt-"*|*"/wt-"*)
-      return 0
-      ;;
-  esac
-
-  local key
-  for key in TFX_WORKER_SANDBOX_SCOPE TFX_WORKER_INDEX TFX_TEAM_TASK_ID TFX_TEAM_AGENT_NAME TFX_EPHEMERAL; do
-    if [[ -n "${!key:-}" ]]; then
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-try_restart_hub() {
-  local hub_server script_dir hub_port
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  hub_server=""
-  local _hub_candidates=()
-  [[ -n "$TFX_PKG_ROOT" ]] && _hub_candidates+=("$TFX_PKG_ROOT/hub/server.mjs")
-  _hub_candidates+=("$script_dir/../hub/server.mjs")
-  for _hc in "${_hub_candidates[@]}"; do
-    if [[ -f "$_hc" ]]; then hub_server="$_hc"; break; fi
-  done
-  unset _hub_candidates _hc
-
-  if [[ -z "$hub_server" ]]; then
-    echo "[tfx-route] Hub 서버 스크립트 미발견 (pkg_root=${TFX_PKG_ROOT:-unset}, script_dir=$script_dir)" >&2
-    return 1
-  fi
-
-  # TFX_HUB_URL에서 포트 추출 (기본 27888)
-  hub_port="${TFX_HUB_URL##*:}"
-  hub_port="${hub_port%%/*}"
-  [[ -z "$hub_port" || "$hub_port" == "$TFX_HUB_URL" ]] && hub_port=27888
-  # Test-only opt-in (TFX_HUB_ALLOW_EPHEMERAL_PORT=1): keep the TFX_HUB_URL-derived
-  # port in ephemeral context instead of forcing canonical 27888, so hub-restart
-  # integration tests bind an isolated port without thrashing the live hub.
-  # Default-off: unset/empty/non-"1" preserves the canonical force (production
-  # unchanged). The elif keeps the bash↔node parity assertion matching
-  # (then → hub_port=27888 stays adjacent).
-  if [[ "${TFX_HUB_ALLOW_EPHEMERAL_PORT:-0}" == "1" ]]; then
-    : # honor URL-derived hub_port (no canonical force)
-  elif is_ephemeral_hub_context; then
-    hub_port=27888
-  fi
-
-  echo "[tfx-route] Hub 미응답 — 자동 재시작 시도 (port=$hub_port)..." >&2
-  TFX_HUB_PORT="$hub_port" TFX_HUB_ALLOW_EPHEMERAL_PORT="${TFX_HUB_ALLOW_EPHEMERAL_PORT:-0}" "$NODE_BIN" "$hub_server" &>/dev/null &
-  local hub_pid=$!
-
-  # 최대 4초 대기 (0.5초 간격)
-  local i
-  for i in 1 2 3 4 5 6 7 8; do
-    sleep 0.5
-    if curl -sf "${TFX_HUB_URL}/status" >/dev/null 2>&1; then
-      echo "[tfx-route] Hub 재시작 성공 (pid=$hub_pid)" >&2
-      return 0
-    fi
-  done
-
-  echo "[tfx-route] Hub 재시작 실패 — claim 없이 계속 실행" >&2
-  return 1
-}
-
-bridge_cli_with_restart() {
-  local action_label="${1:-bridge 호출}"
-  local success_message="${2:-}"
-  shift 2 || true
-
-  if bridge_cli "$@" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if ! try_restart_hub; then
-    return 1
-  fi
-
-  if bridge_cli "$@" >/dev/null 2>&1; then
-    [[ -n "$success_message" ]] && echo "[tfx-route] ${success_message}" >&2
-    return 0
-  fi
-
-  echo "[tfx-route] 경고: Hub 재시작 후 ${action_label} 재시도 실패." >&2
-  return 1
 }
 
 team_claim_task() {
@@ -795,23 +702,7 @@ team_claim_task() {
         "task ${TFX_TEAM_TASK_ID} claim conflict"
       exit 0 ;;
     :|false:)
-      # Hub 연결 실패 → 자동 재시작 시도 후 claim 재시도
-      if try_restart_hub; then
-        response=$(bridge_cli team-task-update \
-          --team "$TFX_TEAM_NAME" \
-          --task-id "$TFX_TEAM_TASK_ID" \
-          --claim \
-          --owner "$TFX_TEAM_AGENT_NAME" \
-          --status in_progress || true)
-        ok=$(bridge_json_get "$response" "ok" || true)
-        if [[ "$ok" == "true" ]]; then
-          echo "[tfx-route] Hub 재시작 후 claim 성공." >&2
-        else
-          echo "[tfx-route] 경고: Hub 재시작 후 claim 실패. claim 없이 계속 실행." >&2
-        fi
-      else
-        echo "[tfx-route] 경고: Hub 연결 실패 (미실행?). claim 없이 계속 실행." >&2
-      fi ;;
+      echo "[tfx-route] 경고: bridge 연결 실패. claim 없이 계속 실행." >&2 ;;
     *)
       echo "[tfx-route] 경고: Hub claim 실패 (${error_code:-unknown}${error_message:+: ${error_message}}). claim 없이 계속 실행." >&2 ;;
   esac
@@ -831,12 +722,11 @@ team_complete_task() {
 
   # Hub result 발행 (poll_messages 채널 활성화)
   if [[ -n "$result_payload" ]]; then
-    if ! bridge_cli_with_restart "Hub result 발행" "Hub 재시작 후 Hub result 발행 성공." \
-      result \
+    if ! bridge_cli result \
       --agent "$TFX_TEAM_AGENT_NAME" \
       --topic task.result \
       --payload "$result_payload" \
-      --trace "$TFX_TEAM_NAME"; then
+      --trace "$TFX_TEAM_NAME" >/dev/null 2>&1; then
       echo "[tfx-route] 경고: Hub result 발행 실패 (agent=$TFX_TEAM_AGENT_NAME, task=$TFX_TEAM_TASK_ID)" >&2
     fi
   fi
@@ -1149,8 +1039,8 @@ TFX_DISABLE_ANTIGRAVITY="${TFX_DISABLE_ANTIGRAVITY:-0}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_PROFILE="${TFX_CODEX_PROFILE:-auto}"
 
-# Preflight 캐시 일괄 로드 — CLI/Hub 가용성 + Codex 요금제를 환경변수로 내보냄
-# 하위 프로세스(스킬 포함)가 CLI/Hub 가용성을 즉시 참조 가능
+# Preflight 캐시의 CLI 가용성과 Codex 요금제를 환경변수로 내보냄
+# 하위 프로세스(스킬 포함)가 CLI 가용성을 즉시 참조 가능
 if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
   # SessionStart 훅 없이도 route 진입 시 없거나 만료된 캐시를 갱신한다.
   _preflight_script="$(_resolve_script "" \
@@ -1162,14 +1052,13 @@ if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
   unset _preflight_script
   # eval 제거 — \x1e (ASCII 30, Record Separator) delimited read로 인젝션 위험 차단
   # F05: `|`에서 `\x1e`로 변경 — 계정 tier/agent 이름 등 값에 `|` 포함 시 필드 분리 오류 방지
-  IFS=$'\x1e' read -r _pf_codex _pf_antigravity _pf_hub _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason < <(
+  IFS=$'\x1e' read -r _pf_codex _pf_antigravity _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason < <(
     "$NODE_BIN" -e '
       try {
         const c = JSON.parse(require("fs").readFileSync(require("path").join(require("os").homedir(),".claude","cache","tfx-preflight.json"),"utf8"));
         const parts = [
           c?.codex?.ok ? "1" : "0",
           c?.antigravity?.ok ? "1" : "0",
-          c?.hub?.ok ? "1" : "0",
           (c?.codex_plan?.plan && c.codex_plan.plan !== "unknown" && c.codex_plan.plan !== "api") ? c.codex_plan.plan : "",
           Array.isArray(c?.available_agents) ? c.available_agents.join(",") : "",
           c?.antigravity?.status || "",
@@ -1177,18 +1066,17 @@ if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
           c?.antigravity?.reason || ""
         ];
         process.stdout.write(parts.join("\x1e"));
-      } catch { process.stdout.write("0\x1e0\x1e0\x1e\x1e\x1e\x1e\x1e"); }
+      } catch { process.stdout.write("0\x1e0\x1e\x1e\x1e\x1e\x1e"); }
     ' 2>/dev/null
   ) || true
   export TFX_CODEX_OK="${TFX_CODEX_OK:-${_pf_codex:-0}}"
   export TFX_ANTIGRAVITY_OK="${TFX_ANTIGRAVITY_OK:-${_pf_antigravity:-0}}"
-  export TFX_HUB_OK="${TFX_HUB_OK:-${_pf_hub:-0}}"
   [[ -n "${_pf_antigravity_status:-}" ]] && export TFX_ANTIGRAVITY_STATUS="$_pf_antigravity_status"
   [[ -n "${_pf_antigravity_source:-}" ]] && export TFX_ANTIGRAVITY_AUTH_SOURCE="$_pf_antigravity_source"
   [[ -n "${_pf_antigravity_reason:-}" ]] && export TFX_ANTIGRAVITY_REASON="$_pf_antigravity_reason"
   [[ -n "${_pf_agents:-}" ]] && export TFX_AVAILABLE_AGENTS="$_pf_agents"
   export TFX_PREFLIGHT_LOADED=1
-  unset _pf_codex _pf_antigravity _pf_hub _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason
+  unset _pf_codex _pf_antigravity _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason
 fi
 TFX_WORKER_INDEX="${TFX_WORKER_INDEX:-}"
 TFX_SEARCH_TOOL="${TFX_SEARCH_TOOL:-}"
@@ -2405,22 +2293,6 @@ FALLBACK_EOF
     fi
     emit_claude_native_metadata
     exit 0
-  fi
-
-  # Issue #156: hub-ensure 무조건 호출: codex/agy 가 tfx-hub MCP 를 쓸 수
-  # 있도록 사전 보장. Claude 세션 SessionStart 훅 외부에서 (Windows 재부팅 후
-  # codex 단독 실행, hub crash 후 Claude 미오픈, WSL/SSH 등) 도 hub 가 자동
-  # 기동된다. hub 가 이미 alive 면 /health 1회 호출로 no-op (저비용).
-  # best-effort: 실패해도 tfx-route 진행 차단하지 않음.
-  if command -v "$NODE_BIN" &>/dev/null; then
-    local _sd_he; _sd_he="$(_get_script_dir)"
-    local _hub_ensure_script
-    _hub_ensure_script="$(_resolve_script "${TFX_HUB_ENSURE_SCRIPT:-}" \
-      ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/hub-ensure.mjs"} \
-      "$_sd_he/hub-ensure.mjs" "$_sd_he/../scripts/hub-ensure.mjs" 2>/dev/null)" || _hub_ensure_script=""
-    if [[ -n "$_hub_ensure_script" && -f "$_hub_ensure_script" ]]; then
-      "$NODE_BIN" "$_hub_ensure_script" >/dev/null 2>&1 || true
-    fi
   fi
 
   local FULL_PROMPT="$PROMPT"

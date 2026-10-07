@@ -139,7 +139,7 @@ function commandUsesClaudePrintMode(command) {
   );
 }
 
-function shouldSkipInteractiveRegistration(payload, seams = {}) {
+export function shouldSkipInteractiveRegistration(payload, seams = {}) {
   const declaredKind = String(
     payload?.sessionKind || payload?.session_kind || "",
   )
