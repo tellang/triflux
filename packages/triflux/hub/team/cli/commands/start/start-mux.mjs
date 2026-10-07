@@ -10,7 +10,7 @@ import {
 import { BOLD, DIM, GREEN, RESET } from "../../../shared.mjs";
 import { ok, warn } from "../../render.mjs";
 import { toAgentId } from "../../services/member-selector.mjs";
-import { PKG_ROOT, TEAM_PROFILE } from "../../services/state-store.mjs";
+import { PKG_ROOT } from "../../services/state-store.mjs";
 import { buildTasks } from "../../services/task-model.mjs";
 
 export async function startMuxTeam({
@@ -106,9 +106,7 @@ export async function startMuxTeam({
       members.filter((member) => member.role === "worker"),
     ),
     postSave() {
-      const profilePrefix =
-        TEAM_PROFILE === "team" ? "" : `TFX_TEAM_PROFILE=${TEAM_PROFILE} `;
-      const taskListCommand = `${profilePrefix}${process.execPath} ${join(PKG_ROOT, "bin", "triflux.mjs")} team tasks`;
+      const taskListCommand = `${process.execPath} ${join(PKG_ROOT, "bin", "triflux.mjs")} team tasks`;
       configureTeammateKeybindings(sessionId, {
         inProcess: false,
         taskListCommand,

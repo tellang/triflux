@@ -417,31 +417,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       },
     ],
   },
-  "codex-team": {
-    usage:
-      "tfx codex-team [status|debug|send|attach|stop|<task>] [--layout 1xN|Nx1] [--json]",
-    description:
-      "Codex lead + Codex workers 기본값으로 tfx multi 팀 모드를 시작/제어",
-    subcommands: {
-      status: "현재 Codex team 상태 확인",
-      debug: "최근 로그/상태 진단 출력",
-      send: "워커에게 메시지 전송: tfx codex-team send <N> <msg>",
-      attach: "팀 pane/session attach",
-      stop: "팀 세션 정리",
-    },
-    options: [
-      {
-        name: "--layout <shape>",
-        type: "string",
-        description: "기본 1xN. Nx1 등 team layout 전달",
-      },
-      {
-        name: "--json",
-        type: "boolean",
-        description: "지원 subcommand의 출력을 JSON으로 전환",
-      },
-    ],
-  },
   "notion-read": {
     usage: "tfx notion-read <notion-url-or-page-id> [options]",
     description: "Notion page/database를 markdown/JSON으로 읽기 (nr alias)",
@@ -4656,7 +4631,6 @@ function cmdHelp() {
     ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
     ${WHITE_BRIGHT}tfx synapse${RESET}     ${GRAY}스웜 세션 registry 조회 / lease 관리${RESET}
     ${WHITE_BRIGHT}tfx why${RESET}         ${GRAY}경로의 마지막 커밋 X-Intent 트레일러 추출${RESET}
-    ${WHITE_BRIGHT}tfx codex-team${RESET} ${GRAY}Codex 전용 팀 모드 (기본 lead/agents: codex)${RESET}
     ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
 
@@ -4669,72 +4643,6 @@ function cmdHelp() {
   ${LINE}
   ${GRAY}github.com/tellang/triflux${RESET}
 `);
-}
-
-async function cmdCodexTeam(args = []) {
-  const sub = String(args[0] || "").toLowerCase();
-  const passthrough = new Set([
-    "status",
-    "attach",
-    "stop",
-    "kill",
-    "send",
-    "list",
-    "help",
-    "--help",
-    "-h",
-    "tasks",
-    "task",
-    "focus",
-    "interrupt",
-    "control",
-    "debug",
-  ]);
-
-  if (sub === "help" || sub === "--help" || sub === "-h") {
-    console.log(`
-  ${AMBER}${BOLD}⬡ tfx codex-team${RESET}
-
-    ${WHITE_BRIGHT}tfx codex-team "작업"${RESET}         ${GRAY}Codex 리드 + 워커 2개로 팀 시작${RESET}
-    ${WHITE_BRIGHT}tfx codex-team --layout 1xN "작업"${RESET}   ${GRAY}(세로 분할 컬럼)${RESET}
-    ${WHITE_BRIGHT}tfx codex-team --layout Nx1 "작업"${RESET}   ${GRAY}(가로 분할 스택)${RESET}
-    ${WHITE_BRIGHT}tfx codex-team status${RESET}
-    ${WHITE_BRIGHT}tfx codex-team debug --lines 30${RESET}
-    ${WHITE_BRIGHT}tfx codex-team send N "msg"${RESET}
-
-  ${DIM}내부적으로 tfx multi을 호출하며, 시작 시 --lead codex --agents codex,codex를 기본 주입합니다.${RESET}
-`);
-    return;
-  }
-
-  const hasAgents = args.includes("--agents");
-  const hasLead = args.includes("--lead");
-  const hasLayout = args.includes("--layout");
-  const isControl = passthrough.has(sub);
-  const normalizedArgs =
-    isControl && args.length ? [sub, ...args.slice(1)] : args;
-  const inject = [];
-  if (!isControl && !hasLead) inject.push("--lead", "codex");
-  if (!isControl && !hasAgents) inject.push("--agents", "codex,codex");
-  if (!isControl && !hasLayout) inject.push("--layout", "1xN");
-  const forwarded = isControl ? normalizedArgs : [...inject, ...args];
-
-  const prevArgv = process.argv;
-  const prevProfile = process.env.TFX_TEAM_PROFILE;
-  process.env.TFX_TEAM_PROFILE = "codex-team";
-  const { pathToFileURL } = await import("node:url");
-  const { cmdTeam } = await import(
-    pathToFileURL(join(PKG_ROOT, "hub", "team", "cli", "index.mjs")).href
-  );
-  process.argv = [prevArgv[0], prevArgv[1], "team", ...forwarded];
-  try {
-    await cmdTeam();
-  } finally {
-    process.argv = prevArgv;
-    if (typeof prevProfile === "string")
-      process.env.TFX_TEAM_PROFILE = prevProfile;
-    else delete process.env.TFX_TEAM_PROFILE;
-  }
 }
 
 // ── Hub preflight 체크 (multi/auto 실행 전) ──
@@ -5722,20 +5630,6 @@ async function main() {
       }
       return;
     }
-    case "codex-team":
-      if (cmdArgs.some(isHelpArg)) {
-        await cmdCodexTeam(["--help"]);
-        return;
-      }
-      if (JSON_OUTPUT) process.env.TFX_OUTPUT_JSON = "1";
-      else delete process.env.TFX_OUTPUT_JSON;
-      await checkHubRunning();
-      try {
-        await cmdCodexTeam(cmdArgs);
-      } finally {
-        delete process.env.TFX_OUTPUT_JSON;
-      }
-      return;
     case "notion-read":
     case "nr": {
       if (cmdArgs.some(isHelpArg)) {

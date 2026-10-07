@@ -55,7 +55,7 @@ describe("tfx --help 출력", () => {
       });
       const out = stripAnsi(raw);
       assert.match(out, new RegExp(`tfx ${command}`));
-      assert.match(out, /Usage|tfx codex-team/);
+      assert.match(out, /Usage/);
     });
   }
 });

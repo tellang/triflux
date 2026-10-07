@@ -350,7 +350,7 @@ USER_TIMEOUT="${4:-}"
 CONTEXT_FILE="${5:-}"
 
 case "$AGENT_TYPE" in
-  multi|team|codex-team)
+  multi|team)
     echo "ERROR: '$AGENT_TYPE' is a tfx CLI subcommand, not a tfx-route agent." >&2
     echo "Use: tfx multi ... for team/headless dispatch." >&2
     echo "macOS/Linux headless uses tmux; Windows uses psmux." >&2
