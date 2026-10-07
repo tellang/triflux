@@ -2583,26 +2583,6 @@ async function cmdDoctor(options = {}) {
           });
           warn("Codex 레이트 리밋 캐시 재생성 실패");
         }
-        try {
-          execFileSync(
-            process.execPath,
-            [hudScript, "--refresh-gemini-quota"],
-            { timeout: 15000, stdio: "ignore", windowsHide: true },
-          );
-          report.actions.push({
-            type: "rebuild",
-            name: "gemini-quota-cache",
-            status: "ok",
-          });
-          ok("Gemini 쿼터 캐시 재생성됨");
-        } catch {
-          report.actions.push({
-            type: "rebuild",
-            name: "gemini-quota-cache",
-            status: "failed",
-          });
-          warn("Gemini 쿼터 캐시 재생성 실패");
-        }
       }
       try {
         const { buildAll } = await import("../scripts/cache-warmup.mjs");

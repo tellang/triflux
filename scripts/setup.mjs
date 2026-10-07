@@ -650,11 +650,6 @@ const SYNC_MAP = [
     label: "notion-read.mjs",
   },
   {
-    src: join(PLUGIN_ROOT, "scripts", "tfx-batch-stats.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "tfx-batch-stats.mjs"),
-    label: "tfx-batch-stats.mjs",
-  },
-  {
     src: join(PLUGIN_ROOT, "hub", "team", "agent-map.json"),
     dst: join(CLAUDE_DIR, "hub", "team", "agent-map.json"),
     label: "hub/team/agent-map.json",
@@ -1334,6 +1329,30 @@ function optionalDependencySpecs(root = PLUGIN_ROOT) {
   return Object.entries(optionalDependencies).map(
     ([name, range]) => `${name}@${range}`,
   );
+}
+
+// 예전에 배포했다가 그만둔 설치 파일. 내용에 배포 표식이 있을 때만 지운다.
+const RETIRED_INSTALL_FILES = [
+  [
+    join(CLAUDE_DIR, "scripts", "tfx-batch-stats.mjs"),
+    "tfx-batch-stats.mjs v1.0",
+  ],
+  [join(CLAUDE_DIR, "agents", "slim-wrapper.md"), "name: slim-wrapper"],
+];
+
+function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
+  const removed = [];
+  for (const [file, marker] of files) {
+    try {
+      if (readFileSync(file, "utf8").includes(marker)) {
+        unlinkSync(file);
+        removed.push(file);
+      }
+    } catch {
+      // 없거나 읽을 수 없으면 건드리지 않는다.
+    }
+  }
+  return removed;
 }
 
 function ensureCloakBrowser({
@@ -2371,30 +2390,8 @@ export async function runDeferred(stdinData) {
     }
   }
 
-  // ── 에이전트 동기화 (.claude/agents/ → ~/.claude/agents/) ──
-  // slim-wrapper 등 커스텀 에이전트를 글로벌에 배포하여
-  // 다른 프로젝트에서도 subagent_type으로 참조 가능하게 한다.
-
-  const agentsSrc = join(PLUGIN_ROOT, ".claude", "agents");
-  const agentsDst = join(CLAUDE_DIR, "agents");
-
-  if (existsSync(agentsSrc)) {
-    if (!existsSync(agentsDst)) mkdirSync(agentsDst, { recursive: true });
-
-    for (const name of readdirSync(agentsSrc)) {
-      if (!name.endsWith(".md")) continue;
-
-      const src = join(agentsSrc, name);
-      const dst = join(agentsDst, name);
-
-      if (!existsSync(dst)) {
-        copyFileSync(src, dst);
-        synced++;
-      } else if (shouldSyncTextFile(src, dst)) {
-        copyFileSync(src, dst);
-        synced++;
-      }
-    }
+  for (const file of removeRetiredInstallFiles()) {
+    io.log(`  \x1b[32m✓\x1b[0m 더 쓰지 않는 설치 파일 제거: ${file}`);
   }
 
   const settings = loadSettings();
@@ -2414,7 +2411,6 @@ export async function runDeferred(stdinData) {
     const refreshFlags = [
       ["--refresh-claude-usage"],
       ["--refresh-codex-rate-limits"],
-      ["--refresh-gemini-quota", "--account", "gemini-main"],
       ["--refresh-gemini-session"],
     ];
     for (const args of refreshFlags) {
