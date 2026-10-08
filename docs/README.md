@@ -44,6 +44,7 @@
   - [Lake 4 공유 세그먼트 PRD](_archive/prd/archived/lake4-token-shared-segments.md)를 템플릿 엔진 폐기에 따라 보존한다.
   - [Lake 4 텔레메트리 PRD](_archive/prd/archived/lake4-token-telemetry.md)를 템플릿 엔진 폐기에 따라 보존한다.
   - [native bridge daemon adoption PRD](_archive/prd/native-bridge-daemon-adoption.md)와 [interactive-attach 계획](_archive/triflux/plans/native-bridge-interactive-attach.md)은 S5에서 interactive-attach 모드를 삭제해 보존한다.
+  - [MCP broker PRD](_archive/prd/mcp-broker.md)는 붙을 곳인 허브(`hub/server.mjs`)가 ADR-0023 에 따라 제거돼 구현하지 않은 채 보존한다.
 
 ## 문서 경계
 

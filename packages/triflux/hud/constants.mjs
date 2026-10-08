@@ -6,21 +6,6 @@ import { join } from "node:path";
 
 export const VERSION = "2.0";
 
-export const ACCOUNTS_CONFIG_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "tfx-hub",
-  "accounts.json",
-);
-export const ACCOUNTS_STATE_PATH = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "tfx-hub",
-  "cli_accounts_state.json",
-);
-
 // triflux-mods 의 Claude band 가 세션마다 갱신하는 표식. 있으면 Claude 행을 뺀다.
 export const CLAUDE_BAND_MARKER_DIR = join(
   homedir(),
