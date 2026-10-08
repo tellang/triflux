@@ -3259,7 +3259,7 @@ async function cmdUpdate(args = []) {
             .trim()
             .split(/\r?\n/)[0];
         }
-        ok(`${npmCmd} — ${result || "완료"}`);
+        ok(`${npmCmd}: ${result || "완료"}`);
         updated = true;
         break;
       }
@@ -3274,7 +3274,7 @@ async function cmdUpdate(args = []) {
         })
           .trim()
           .split(/\r?\n/)[0];
-        ok(`${npmLocalCmd} — ${result || "완료"}`);
+        ok(`${npmLocalCmd}: ${result || "완료"}`);
         updated = true;
         break;
       }
