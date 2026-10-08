@@ -6,6 +6,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import {
   basename,
@@ -1853,6 +1854,19 @@ export function removeServerFromTargets(name, options = {}) {
   return { actions };
 }
 
+// 간이 TOML 스캐너는 작은따옴표와 줄 끝 주석을 잘못 읽으므로 보호 판정에 쓸 Codex 항목은 실제 파서로 읽는다.
+function existingServerEntry(filePath, snapshot, name) {
+  const scanned = snapshot.servers.find((server) => server.name === name);
+  if (!isCodexConfig(filePath)) return scanned;
+  try {
+    const toml = createRequire(import.meta.url)("@iarna/toml");
+    return toml.parse(readFileSync(resolveFilePath(filePath), "utf8"))
+      .mcp_servers?.[name];
+  } catch {
+    return scanned;
+  }
+}
+
 export function syncRegistryTargets(options = {}) {
   const registry = options.registry || loadRegistryOrDefault();
   const syncTargets = Array.isArray(options.targets)
@@ -1958,10 +1972,11 @@ export function syncRegistryTargets(options = {}) {
       }
 
       // 사용자가 바꾼 stdio 항목은 덮어쓰지 않는다. 같은 패키지의 버전 차이만 고정 버전으로 맞춘다.
-      const existing = snapshot.servers.find((server) => server.name === name);
+      const existing = existingServerEntry(target.filePath, snapshot, name);
       if (
         serverPolicy(serverConfig) === "stdio" &&
-        existing?.command &&
+        typeof existing?.command === "string" &&
+        existing.command &&
         !(
           existing.command === serverConfig.command &&
           JSON.stringify(existing.args) === JSON.stringify(serverConfig.args)
@@ -1974,7 +1989,7 @@ export function syncRegistryTargets(options = {}) {
           label: target.label,
           status: "warning",
           server: name,
-          message: `${name}: 레지스트리와 다른 사용자 항목이라 덮어쓰지 않음 (${[existing.command, ...existing.args].join(" ")})`,
+          message: `${name}: 레지스트리와 다른 사용자 항목이라 덮어쓰지 않음 (${[existing.command, ...(existing.args ?? [])].join(" ")})`,
         });
         continue;
       }

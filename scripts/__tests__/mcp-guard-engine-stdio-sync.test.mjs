@@ -214,5 +214,14 @@ describe("syncRegistryTargets stdio servers", () => {
         (action) => action.filePath === custom && action.status === "warning",
       ),
     );
+    // 작은따옴표와 줄 끝 주석이 있는 Codex 항목도 버전 차이로 보고 고정한다.
+    process.env.TFX_CODEX_CONFIG_SYNC = "1";
+    const codex = join(homeDir, ".codex", "config.toml");
+    writeFileSync(
+      codex,
+      "[mcp_servers.brave-search]\ncommand = 'npx'\nargs = ['-y', '@brave/brave-search-mcp-server@2.0.0'] # pin\n",
+    );
+    syncRegistryTargets({ registry });
+    assert.match(readFileSync(codex, "utf8"), /mcp-server@2\.1\.4/);
   });
 });
