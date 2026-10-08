@@ -1,12 +1,15 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const HOSTS_LOCATIONS = [
-  ["references", "hosts.json"],
-  ["skills", "tfx-remote-spawn", "references", "hosts.json"],
-  ["packages", "triflux", "references", "hosts.json"],
-];
+// cwd 를 따르면 다른 저장소의 hosts.json 을 사용자 설정으로 복사하게 된다. 패키지 루트로 고정한다.
+const PACKAGE_ROOT = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+);
+const LEGACY_HOSTS_SEGMENTS = ["references", "hosts.json"];
 
 let migrated = false;
 
@@ -27,13 +30,14 @@ export function userStateHostsPath() {
   return join(homedir(), ".config", "triflux", "hosts.json");
 }
 
+function legacyHostsPath(repoRoot) {
+  return join(repoRoot || PACKAGE_ROOT, ...LEGACY_HOSTS_SEGMENTS);
+}
+
 function candidatePaths(repoRoot) {
-  const root = repoRoot || process.cwd();
-  const repoRootCandidates = HOSTS_LOCATIONS.map((segments) =>
-    join(root, ...segments),
-  );
+  const legacyPath = legacyHostsPath(repoRoot);
   const userPath = userStateHostsPath();
-  return userPath ? [userPath, ...repoRootCandidates] : repoRootCandidates;
+  return userPath ? [userPath, legacyPath] : [legacyPath];
 }
 
 export function migrateLegacyHosts(repoRoot) {
@@ -52,14 +56,11 @@ export function migrateLegacyHosts(repoRoot) {
       return { migrated: false, from: null, to, reason: "already-exists" };
     }
 
-    const root = repoRoot || process.cwd();
-    from =
-      HOSTS_LOCATIONS.map((segments) => join(root, ...segments)).find((path) =>
-        existsSync(path),
-      ) || null;
-    if (!from) {
+    const legacyPath = legacyHostsPath(repoRoot);
+    if (!existsSync(legacyPath)) {
       return { migrated: false, from: null, to, reason: "not-found" };
     }
+    from = legacyPath;
 
     mkdirSync(dirname(to), { recursive: true });
     copyFileSync(from, to);
@@ -269,51 +270,4 @@ export function resolveHost(nameOrAlias, repoRoot) {
 
 export function readHost(nameOrAlias, repoRoot) {
   return resolveHost(nameOrAlias, repoRoot)?.host ?? null;
-}
-
-export function selfTestFixtures() {
-  const v1 = normalizeHost(
-    {
-      description: "legacy",
-      aliases: ["desk"],
-      default_dir: "~/Desktop/Projects",
-      os: "win32",
-      ssh_user: "alice",
-      tailscale: { ip: "192.0.2.1", dns: "desk.example.ts.net" },
-      capabilities: ["codex", "claude"],
-    },
-    "win-host",
-  );
-  const v2 = normalizeHost(
-    {
-      description: "modern",
-      aliases: ["mac"],
-      default_dir: "~/projects",
-      os: "darwin kernel",
-      ssh: { user: "bob" },
-      tailscale: {
-        ip: "192.0.2.2",
-        dns: "mac.example.ts.net",
-        ssh_mode: "ssh-over-vpn",
-      },
-      capabilities_v2: { codex: true, claude: true, high_memory: true },
-      last_probe: { ok: true, ts: "2026-04-18T12:34:56Z", latency_ms: 143 },
-    },
-    "mac-host",
-  );
-  return {
-    v1,
-    v2,
-    checks: {
-      v1_os: v1.os === "windows",
-      v1_ssh_user: v1.ssh.user === "alice" && v1.ssh_user === "alice",
-      v2_os: v2.os === "darwin",
-      v2_caps: v2.capabilities.includes("high-memory"),
-      v2_probe: v2.last_probe?.ok === true && v2.last_probe?.latency_ms === 143,
-    },
-  };
-}
-
-if (process.argv.includes("--self-test")) {
-  process.stdout.write(`${JSON.stringify(selfTestFixtures(), null, 2)}\n`);
 }

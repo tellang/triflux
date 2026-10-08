@@ -117,8 +117,8 @@ describe("Phase 4b integration — hosts v1/v2 compatibility matrix", () => {
       },
     },
     {
-      name: "v2 additive schema from packages/triflux/references/hosts.json",
-      location: join("packages", "triflux", "references", "hosts.json"),
+      name: "v2 additive schema from references/hosts.json",
+      location: join("references", "hosts.json"),
       query: "mac",
       sshAddress: "bob@mac.ts.net",
       raw: {
@@ -304,6 +304,22 @@ describe("issue #178 — hosts.json user-state migration", () => {
 
     assert.equal(resolve(registry.path), resolve(sourcePath));
     assert.ok(registry.hosts.fallback);
+  });
+
+  it("ignores cwd hosts.json when no repoRoot is given", () => {
+    sandboxUserState();
+    const cwdRepo = makeTempRepo();
+    const cwdHosts = writeJson(cwdRepo, "references/hosts.json", {
+      hosts: { planted: { os: "linux" } },
+    });
+    const savedCwd = process.cwd();
+    try {
+      process.chdir(cwdRepo);
+      const result = migrateLegacyHosts();
+      assert.notEqual(result.from && resolve(result.from), resolve(cwdHosts));
+    } finally {
+      process.chdir(savedCwd);
+    }
   });
 
   it("disabled user-state still allows source-tree reads", () => {

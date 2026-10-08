@@ -34,4 +34,4 @@ argument-hint: "<host|list|attach|send|probe|monitor|kill> ..."
 
 ## 확인
 
-호스트 해석 검사는 `node hub/lib/hosts-compat.mjs --self-test`를 사용한다. 규칙 파일 해시는 Windows PowerShell에서 `Get-FileHash .claude/rules/tfx-psmux.md`, macOS에서 `shasum -a 256 .claude/rules/tfx-psmux.md`, Linux에서 `sha256sum .claude/rules/tfx-psmux.md`로 확인한다.
+규칙 파일 해시는 Windows PowerShell에서 `Get-FileHash .claude/rules/tfx-psmux.md`, macOS에서 `shasum -a 256 .claude/rules/tfx-psmux.md`, Linux에서 `sha256sum .claude/rules/tfx-psmux.md`로 확인한다.
