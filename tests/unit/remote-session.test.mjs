@@ -1,6 +1,8 @@
 // tests/unit/remote-session.test.mjs — remote-session 모듈 단위 테스트 (Lake 3)
 
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { describe, it } from "node:test";
 import {
   escapePwshDoubleQuoted,
@@ -117,9 +119,14 @@ describe("remote-session — resolveRemoteStageDir", () => {
 
 describe("remote-session — env cache", () => {
   it("R-11: 캐시는 cwd 가 아니라 사용자 상태 경로에 둔다", () => {
+    const stateHome = join(tmpdir(), "state");
     assert.equal(
-      remoteEnvCacheDir({ XDG_STATE_HOME: "/state" }),
-      "/state/triflux/remote-env",
+      remoteEnvCacheDir({ XDG_STATE_HOME: stateHome }),
+      join(stateHome, "triflux", "remote-env"),
+    );
+    assert.equal(
+      isAbsolute(remoteEnvCacheDir({ XDG_STATE_HOME: ".state" })),
+      true,
     );
   });
 
