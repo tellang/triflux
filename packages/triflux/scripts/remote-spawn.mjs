@@ -1696,9 +1696,9 @@ async function spawnRemoteViaTmux(args, promptContext, env) {
   );
 
   psmuxExec(buildTmuxSpawnSessionArgs(sessionName, paneCommand));
-  // 세션 생성에 성공한 실행만 기록한다. 동시에 같은 이름으로 띄운 실패한 쪽이 덮어쓰지 않게 한다.
-  writeSpawnRecord(sessionName, { host, runId });
   try {
+    // 세션 생성에 성공한 실행만 기록한다. 쓰기가 실패하면 아래 catch 가 세션을 정리한다.
+    writeSpawnRecord(sessionName, { host, runId });
     startSpawnSessionCleanupWatcher(sessionName, paneId);
 
     const waited = await waitForClaudeScreenState({
@@ -1793,8 +1793,8 @@ async function spawnRemote(args, promptContext) {
   }
 
   createPsmuxSession(sessionName, { layout: "1xN", paneCount: 1 });
-  writeSpawnRecord(sessionName, { host, runId });
   try {
+    writeSpawnRecord(sessionName, { host, runId });
     sendKeysToPane(paneId, buildRemoteBootstrapCommand(host));
     await waitForRemotePrompt(sessionName, paneId);
 
