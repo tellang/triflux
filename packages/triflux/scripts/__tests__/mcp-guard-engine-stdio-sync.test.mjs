@@ -223,5 +223,17 @@ describe("syncRegistryTargets stdio servers", () => {
     );
     syncRegistryTargets({ registry });
     assert.match(readFileSync(codex, "utf8"), /mcp-server@2\.1\.4/);
+
+    // 여러 줄 args 는 줄 단위로 고치면 파일이 깨지므로 남기고 경고한다.
+    const multiline =
+      '[mcp_servers.brave-search]\ncommand = "npx"\nargs = [\n  "-y",\n  "@brave/brave-search-mcp-server",\n]\n';
+    writeFileSync(codex, multiline);
+    const result = syncRegistryTargets({ registry });
+    assert.equal(readFileSync(codex, "utf8"), multiline);
+    assert.ok(
+      result.actions.some(
+        (action) => action.filePath === codex && action.status === "warning",
+      ),
+    );
   });
 });

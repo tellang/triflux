@@ -1131,6 +1131,17 @@ function updateCodexConfig(filePath, updates = [], removals = []) {
   if (finalRaw === previousRaw) {
     return { modified: false, filePath: resolvedPath };
   }
+  // 여러 줄 배열처럼 줄 단위 치환이 다루지 못하는 표기는 파일을 깨뜨리므로 쓰지 않는다.
+  try {
+    tomlParser()?.parse(finalRaw);
+  } catch {
+    return {
+      modified: false,
+      filePath: resolvedPath,
+      skipped: true,
+      reason: "toml-rewrite-unsafe",
+    };
+  }
 
   mkdirSync(dirname(resolvedPath), { recursive: true });
   // 헤더 비밀이 들어갈 수 있다. 새 파일은 0600, 기존 파일은 권한이 그대로 유지된다.
@@ -1854,14 +1865,24 @@ export function removeServerFromTargets(name, options = {}) {
   return { actions };
 }
 
+// packages/remote 는 @iarna/toml 을 의존으로 두지 않아 늦게 불러오고, 없으면 null.
+function tomlParser() {
+  try {
+    return createRequire(import.meta.url)("@iarna/toml");
+  } catch {
+    return null;
+  }
+}
+
 // 간이 TOML 스캐너는 작은따옴표와 줄 끝 주석을 잘못 읽으므로 보호 판정에 쓸 Codex 항목은 실제 파서로 읽는다.
 function existingServerEntry(filePath, snapshot, name) {
   const scanned = snapshot.servers.find((server) => server.name === name);
-  if (!isCodexConfig(filePath)) return scanned;
+  const toml = isCodexConfig(filePath) && tomlParser();
+  if (!toml) return scanned;
   try {
-    const toml = createRequire(import.meta.url)("@iarna/toml");
-    return toml.parse(readFileSync(resolveFilePath(filePath), "utf8"))
+    const entry = toml.parse(readFileSync(resolveFilePath(filePath), "utf8"))
       .mcp_servers?.[name];
+    return entry && { ...entry, args: entry.args ?? [] };
   } catch {
     return scanned;
   }
@@ -2007,6 +2028,18 @@ export function syncRegistryTargets(options = {}) {
     } else if (isJsonMcpConfig(target.filePath)) {
       result = updateJsonConfig(target.filePath, updates, []);
     } else {
+      continue;
+    }
+
+    if (result.reason === "toml-rewrite-unsafe") {
+      actions.push({
+        type: "sync",
+        filePath: target.filePath,
+        label: target.label,
+        status: "warning",
+        message:
+          "줄 단위로 고칠 수 없는 TOML 표기(여러 줄 값 등)라 파일을 바꾸지 않음",
+      });
       continue;
     }
 
