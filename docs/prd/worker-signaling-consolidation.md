@@ -3,7 +3,7 @@
 # Worker Signaling Consolidation PRD
 
 date: 2026-04-25
-status: 부분 폐기, 나머지 미착수 (swarm 실행 및 상태 집계 항목 폐기, tfx-route 요구사항 별도 검토)
+status: 부분 폐기. swarm 실행 및 상태 집계 항목은 폐기했다. tfx-route 쪽 결함은 #176(PR #213)과 PR #185 로 고쳤고, 4채널 통합 판정 규칙은 별도 검토한다.
 
 ## 1. 통합 대상 (4 family)
 
