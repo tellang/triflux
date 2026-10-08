@@ -40,6 +40,8 @@ tfx-live stop --cli codex --session cx1
 
 두 번째 compact 전에는 handoff가 맞는지 점검한다. compact 횟수는 고정하지 않는다.
 
+리드 역할 절차(역할별 모델, 지시서, 교차 리뷰, 릴리스 조율)는 `tfx-lead` 스킬을 따른다.
+
 ### Codex 메시지 전송
 
 1. 기본은 `codex queue --thread <UUID>`다. 입력창을 건드리지 않고, 바쁘면 쌓였다가 앞 턴이 끝난 직후 순서대로 들어간다. 유휴 TUI는 약 20초 주기로 큐를 가져간다.

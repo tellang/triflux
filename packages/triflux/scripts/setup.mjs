@@ -1198,6 +1198,7 @@ function syncCodexManagedSkills({
     "skills",
     "tfx-live",
   );
+  const leadSkill = join(pluginRoot, "skills", "tfx-lead");
   return [
     [
       "tfx-harness",
@@ -1209,6 +1210,7 @@ function syncCodexManagedSkills({
         ? liveAdapter
         : join(pluginRoot, "skills", "tfx-live"),
     ],
+    ...(existsSync(leadSkill) ? [["tfx-lead", leadSkill]] : []),
   ].map(([name, sourceDir]) => ({
     name,
     ...syncCodexHarnessAdapter({

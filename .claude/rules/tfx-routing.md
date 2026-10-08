@@ -56,6 +56,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 
 | 의도 | 자연어 신호 | 스킬 |
 |------|-----------|------|
+| 리드 운영 | 리드 맡아, 세션들 지휘, 워커 띄워서 조율, 승계·머지·릴리스 조율 | tfx-lead |
 | 구현/수정 | 만들어, 고쳐, 구현해, 짜줘, 수정해, 바꿔 | tfx-auto |
 | 리뷰 | 봐줘, 리뷰해, 검토해, 괜찮아? | `superpowers:requesting-code-review` (owner). 교차모델 판정이 필요할 때만 tfx-review |
 | 분석 | 분석해, 어떻게 돌아가?, 구조가 뭐야 | tfx-auto (`--mode consensus --shape panel`) |

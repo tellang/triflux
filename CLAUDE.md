@@ -7,7 +7,7 @@
 
 | 시스템 | 접두사 | 용도 | 스킬 수 |
 |--------|--------|------|---------|
-| **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·원격 실행 | 10개 |
+| **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·원격 실행 | 11개 |
 | **gstack** | `/` (접두사 없음) | QA·출시·조사·설계·검토·점검 지점 | ~35개 |
 | **omc** | `/oh-my-claudecode:*` | autopilot·ralph·team·execute·ultragoal | ~37개 |
 
