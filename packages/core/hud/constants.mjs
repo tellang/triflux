@@ -107,7 +107,13 @@ export const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1000;
 export const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
-export const CODEX_AUTH_PATH = join(homedir(), ".codex", "auth.json");
+// Codex CLI 는 CODEX_HOME 이 있으면 그 디렉터리를 쓴다. 호출 시점에 읽어 환경 변화를 따른다.
+export function getCodexHome() {
+  return process.env.CODEX_HOME || join(homedir(), ".codex");
+}
+export function getCodexAuthPath() {
+  return join(getCodexHome(), "auth.json");
+}
 export const CODEX_PROBE_STATE_PATH = join(
   homedir(),
   ".claude",

@@ -20,8 +20,9 @@ import {
   CLAUDE_BAND_MARKER_DIR,
   CLAUDE_BAND_MARKER_TTL_MS,
   CLAUDE_REFRESH_FLAG,
-  CODEX_AUTH_PATH,
   CODEX_REFRESH_FLAG,
+  getCodexAuthPath,
+  getCodexHome,
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
 import {
@@ -91,7 +92,7 @@ async function main() {
   if (
     showCodex &&
     codexSnapshot.shouldRefresh &&
-    (existsSync(join(homedir(), ".codex")) || hasBrokerCodexAccounts())
+    (existsSync(getCodexHome()) || hasBrokerCodexAccounts())
   ) {
     scheduleCodexRateLimitRefresh();
   }
@@ -106,9 +107,16 @@ async function main() {
     ? { ...antigravitySnapshot?.data, auth: getAntigravityAuthKind() }
     : null;
   const currentTier = selectTier();
+  // 회색은 로그인 안 된 경우에만 쓴다. 로그인 상태의 조회 공백은 --% 로만 보인다.
+  const codexLoggedOut =
+    showCodex &&
+    !codexBuckets &&
+    !existsSync(getCodexAuthPath()) &&
+    !hasBrokerCodexAccounts();
   if (currentTier === "nano") {
     const microLine = getMicroLine(contextView, claudeUsage, codexBuckets, {
       showCodex,
+      codexLoggedOut,
       showAntigravity: antigravityAllowed,
       antigravityQuota,
     });
@@ -151,13 +159,7 @@ async function main() {
   }
 
   const outputLines = renderAlignedRows(rows);
-  // 회색은 로그인 안 된 경우에만 쓴다. 로그인 상태의 조회 공백은 --% 로만 보인다.
-  if (
-    outputLines[codexRowIndex] != null &&
-    !codexBuckets &&
-    !existsSync(CODEX_AUTH_PATH) &&
-    !hasBrokerCodexAccounts()
-  ) {
+  if (outputLines[codexRowIndex] != null && codexLoggedOut) {
     outputLines[codexRowIndex] = `${DIM}${outputLines[codexRowIndex]}${RESET}`;
   }
   // 알림 배너와 TUI 스타일이 HUD 내용에 겹치지 않도록 한다.
