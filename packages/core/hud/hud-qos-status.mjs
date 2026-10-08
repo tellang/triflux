@@ -14,8 +14,6 @@ import {
   RESET,
 } from "./colors.mjs";
 import {
-  ACCOUNTS_CONFIG_PATH,
-  ACCOUNTS_STATE_PATH,
   ANTIGRAVITY_REFRESH_FLAG,
   CLAUDE_BAND_MARKER_DIR,
   CLAUDE_BAND_MARKER_TTL_MS,
@@ -50,12 +48,7 @@ import {
   renderAlignedRows,
 } from "./renderers.mjs";
 import { selectTier } from "./terminal.mjs";
-import {
-  formatTimeCell,
-  formatTimeCellDH,
-  readJson,
-  readStdinJson,
-} from "./utils.mjs";
+import { formatTimeCell, formatTimeCellDH, readStdinJson } from "./utils.mjs";
 
 async function main() {
   if (process.argv.includes(CLAUDE_REFRESH_FLAG)) {
@@ -73,8 +66,6 @@ async function main() {
 
   const stdinPromise = readStdinJson();
   const { showCodex, antigravityAllowed } = resolveHudCliVisibility();
-  const accountsConfig = readJson(ACCOUNTS_CONFIG_PATH, { providers: {} });
-  const accountsState = readJson(ACCOUNTS_STATE_PATH, { providers: {} });
   const claudeUsageSnapshot = readClaudeUsageSnapshot();
   const codexSnapshot = readCodexRateLimitSnapshot();
   const antigravitySnapshot = antigravityAllowed
@@ -128,8 +119,6 @@ async function main() {
         "codex",
         "x",
         codexWhite,
-        accountsConfig,
-        accountsState,
         codexBuckets ? { type: "codex", buckets: codexBuckets } : null,
         getCodexEmail(),
       ),
@@ -142,8 +131,6 @@ async function main() {
         "antigravity",
         "a",
         geminiBlue,
-        accountsConfig,
-        accountsState,
         antigravityQuota,
         getAntigravityAccountLabel(),
       ),

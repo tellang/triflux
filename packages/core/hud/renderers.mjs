@@ -251,24 +251,9 @@ export function getClaudeRows(currentTier, contextView, claudeUsage) {
 // ============================================================================
 // 계정 라벨 + 범용 프로바이더 행 렌더러
 // ============================================================================
-export function getAccountLabel(
-  provider,
-  accountsConfig,
-  accountsState,
-  codexEmail,
-) {
-  const providerConfig = accountsConfig?.providers?.[provider] || [];
-  const providerState = accountsState?.providers?.[provider] || {};
-  const lastId = providerState.last_selected_id;
-  const picked = providerConfig.find((a) => a.id === lastId) ||
-    providerConfig[0] || {
-      id: `${provider}-main`,
-      label: provider === "antigravity" ? "agy" : provider,
-    };
-  let label = picked.label || picked.id;
-  if (codexEmail) label = codexEmail;
-  if (label.includes("@")) label = label.split("@")[0];
-  return label;
+export function getAccountLabel(provider, accountName) {
+  const label = accountName || (provider === "antigravity" ? "agy" : provider);
+  return label.includes("@") ? label.split("@")[0] : label;
 }
 
 export function getProviderRow(
@@ -276,13 +261,11 @@ export function getProviderRow(
   provider,
   marker,
   markerColor,
-  accountsConfig,
-  accountsState,
   realQuota,
-  codexEmail,
+  accountName,
 ) {
   const accountLabel = fitText(
-    getAccountLabel(provider, accountsConfig, accountsState, codexEmail),
+    getAccountLabel(provider, accountName),
     ACCOUNT_LABEL_WIDTH,
   );
 

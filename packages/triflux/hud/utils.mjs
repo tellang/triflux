@@ -254,14 +254,6 @@ export function formatResetRemainingDayHour(isoOrUnix, cycleMs = 0) {
   return `${String(days).padStart(2, "0")}d${String(hours).padStart(2, "0")}h`;
 }
 
-export function getProviderAccountId(provider, accountsConfig, accountsState) {
-  const providerState = accountsState?.providers?.[provider] || {};
-  const selectedId = providerState.last_selected_id;
-  if (selectedId) return selectedId;
-  const providerConfig = accountsConfig?.providers?.[provider] || [];
-  return providerConfig[0]?.id || `${provider}-main`;
-}
-
 // JWT base64 디코딩 공통 헬퍼
 export function decodeJwtEmail(idToken) {
   if (!idToken) return null;
