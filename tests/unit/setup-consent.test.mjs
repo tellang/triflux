@@ -24,6 +24,11 @@ function fakeSteps({ interactive, answer, trusted = false }) {
       calls.hooks.push(opts);
       return { skipped: false, changedHooks: true, trusted };
     },
+    offerTmr: async (opts) => {
+      calls.tmr = opts;
+      return opts.platform === "darwin" ? "installed" : "not-needed";
+    },
+    home: "/fake-home",
     log: (message) => calls.logs.push(message),
     warn: (message) => calls.logs.push(message),
   };
@@ -48,7 +53,11 @@ describe("setup 동의 단계", () => {
   it("비대화형이면 winget 과 훅 승인을 하지 않고 안내만 남긴다", async () => {
     const { calls, options } = fakeSteps({ interactive: false });
     const result = await runConsentSteps(options);
-    assert.deepEqual(result, { psmux: "deferred", codexHooks: "deferred" });
+    assert.deepEqual(result, {
+      psmux: "deferred",
+      tmr: "not-needed",
+      codexHooks: "deferred",
+    });
     assert.equal(calls.asked.length, 0);
     assert.equal(calls.run.length, 0);
     assert.deepEqual(calls.hooks, [{ trust: false }]);
@@ -59,7 +68,11 @@ describe("setup 동의 단계", () => {
   it("동의하면 winget 을 --exact 로 실행하고 훅 승인을 기록한다", async () => {
     const { calls, options } = fakeSteps({ interactive: true, answer: true });
     const result = await runConsentSteps(options);
-    assert.deepEqual(result, { psmux: "installed", codexHooks: "approved" });
+    assert.deepEqual(result, {
+      psmux: "installed",
+      tmr: "not-needed",
+      codexHooks: "approved",
+    });
     const [[command, args]] = calls.run;
     assert.equal(command, "winget");
     assert.deepEqual(args.slice(0, 4), [
@@ -74,9 +87,22 @@ describe("setup 동의 단계", () => {
   it("거절하면 설치와 승인 기록을 하지 않는다", async () => {
     const { calls, options } = fakeSteps({ interactive: true, answer: false });
     const result = await runConsentSteps(options);
-    assert.deepEqual(result, { psmux: "declined", codexHooks: "declined" });
+    assert.deepEqual(result, {
+      psmux: "declined",
+      tmr: "not-needed",
+      codexHooks: "declined",
+    });
     assert.equal(calls.run.length, 0);
     assert.deepEqual(calls.hooks, [{ trust: false }]);
+  });
+
+  it("macOS 에서는 tmr 설치 단계에 동의 여부와 HOME 을 넘긴다", async () => {
+    const { calls, options } = fakeSteps({ interactive: true, answer: true });
+    const result = await runConsentSteps({ ...options, platform: "darwin" });
+    assert.equal(result.tmr, "installed");
+    assert.equal(calls.tmr.interactive, true);
+    assert.equal(calls.tmr.home, "/fake-home");
+    assert.equal(calls.run.length, 0);
   });
 
   it("이미 승인된 훅은 다시 묻지 않는다", async () => {
@@ -87,7 +113,11 @@ describe("setup 동의 단계", () => {
     });
     options.hasCommand = () => true;
     const result = await runConsentSteps(options);
-    assert.deepEqual(result, { psmux: "present", codexHooks: "trusted" });
+    assert.deepEqual(result, {
+      psmux: "present",
+      tmr: "not-needed",
+      codexHooks: "trusted",
+    });
     assert.equal(calls.asked.length, 0);
   });
 });
