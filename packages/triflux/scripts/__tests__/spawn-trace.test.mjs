@@ -42,12 +42,13 @@ describe("spawn-trace", () => {
     assert.equal(typeof mod.spawnSync, "function");
   });
 
-  it("redacts prompt-like args but keeps short tokens", async () => {
+  it("redacts prompts and key input but keeps control tokens", async () => {
     const mod = await loadSpawnTraceModule();
     const prompt = "리뷰해라 $(id) ".repeat(10);
     const entry = mod.redactTraceEntry({
       command: "tmux",
-      args: ["send-keys", "-t", "s:0.1", "-l", prompt],
+      args: ["send-keys", "-t", "s:0.1", "-l", "sk-short", "Enter"],
+      error: `Command failed: claude --print ${prompt}`,
     });
     assert.deepEqual(entry.args.slice(0, 4), [
       "send-keys",
@@ -55,8 +56,16 @@ describe("spawn-trace", () => {
       "s:0.1",
       "-l",
     ]);
-    assert.match(entry.args[4], /^<redacted len=\d+ sha256=[0-9a-f]{12}>$/);
-    assert.ok(!JSON.stringify(entry).includes("$(id)"));
+    assert.match(entry.args[4], /^<redacted len=8 sha256=[0-9a-f]{12}>$/);
+    assert.equal(entry.args[5], "Enter");
+    const print = mod.redactTraceEntry({ args: ["--print", "hi", "--seed=x"] });
+    assert.deepEqual(
+      print.args.map((a) => a.startsWith("--") || a.startsWith("<")),
+      [true, true, true],
+    );
+    assert.ok(
+      !JSON.stringify([entry, print]).match(/sk-short|\$\(id\)|"hi"|=x"/),
+    );
   });
 
   it("exports guard constants", async () => {

@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
 import { escapePwshSingleQuoted } from "@triflux/core/hub/cli-adapter-base.mjs";
@@ -85,28 +85,37 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
-// cwd 의 scripts/tfx-route.sh 는 후보에 넣지 않는다. 신뢰하지 않는 저장소에서 돌리면
-// 그 저장소의 스크립트가 실행된다. 다른 스크립트는 routeScript 나 env 로 지정한다.
+// 빈 항목과 상대 경로는 cwd 를 뜻하므로 건너뛴다.
+function findOnPath(name) {
+  for (const dir of String(process.env.PATH || "").split(delimiter)) {
+    if (!dir || !isAbsolute(dir)) continue;
+    const candidate = join(dir, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return "";
+}
+
+// cwd 의 스크립트는 후보에 넣지 않는다. 신뢰하지 않는 저장소에서 돌리면 그 저장소의 스크립트가
+// 실행된다. bash 에 맨 이름만 넘겨도 cwd 를 먼저 읽으므로 찾지 못하면 실행하지 않는다.
 function resolveHeadlessRouteScript(opts = {}) {
+  if (opts.routeScript) return opts.routeScript;
   const candidates = [
-    opts.routeScript,
     process.env.TFX_ROUTE_SCRIPT,
     process.env.TFX_DELEGATOR_ROUTE_SCRIPT,
     join(SCRIPT_DIR, "..", "..", "scripts", "tfx-route.sh"),
     process.env.HOME
       ? join(process.env.HOME, ".claude", "scripts", "tfx-route.sh")
       : "",
-    "tfx-route.sh",
   ];
-
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    if (candidate === "tfx-route.sh" || existsSync(candidate)) {
-      return candidate;
-    }
+  const found =
+    candidates.find((candidate) => candidate && existsSync(candidate)) ||
+    findOnPath("tfx-route.sh");
+  if (!found) {
+    throw new Error(
+      "tfx-route.sh 를 찾지 못했다. TFX_ROUTE_SCRIPT 로 경로를 지정한다.",
+    );
   }
-
-  return "tfx-route.sh";
+  return found;
 }
 
 function resolveRouteAgentForHeadless(resolvedCli, opts = {}) {

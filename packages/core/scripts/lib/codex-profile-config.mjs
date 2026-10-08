@@ -231,7 +231,8 @@ export function sanitizeCodexProfileConfig(
         skippedProfileFiles.push(profileName);
         continue;
       }
-      writeFileSync(profilePath, body, "utf8");
+      // 옮겨 온 프로필 본문에 MCP env 키가 있을 수 있다.
+      writeFileSync(profilePath, body, { encoding: "utf8", mode: 0o600 });
       migratedProfiles.push(profileName);
     }
   }

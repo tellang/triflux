@@ -214,14 +214,10 @@ v1은 `peer` 단일 경로만 지원한다. `--live-shape`, `--live-mode`, `tfx-
 디스패치:
 
 ```bash
-# Bash(run_in_background=true). 사용자 입력은 quoted heredoc 으로 넘긴다(아래 "실행" 절 참조).
-task=$(cat <<'TFX_INPUT'
-{task}
-TFX_INPUT
-)
+# Bash(run_in_background=true). {task_file} 은 Write 도구로 쓴 입력 파일이다(아래 "실행" 절 참조).
 tfx-live peer --cli-a codex --cli-b claude \
   --session-a {sid}-a --session-b {sid}-b \
-  --cwd {cwd} --mode freeform --seed "$task" \
+  --cwd {cwd} --mode freeform --seed "$(cat {task_file})" \
   --rounds {rounds} --timeout {timeout}
 ```
 
@@ -378,20 +374,18 @@ interactive(tmux/psmux)에서는 off다.
 
 ### CLI 에이전트 (Codex/Antigravity)
 
-사용자 입력을 따옴표 셸 인자에 직접 끼우지 않는다. 입력에 든 `'` 하나로 인용이 끝나고
-뒤의 `$(...)` 가 실행된다. quoted heredoc(`<<'TFX_INPUT'`)은 내용을 해석하지 않는다.
+사용자 입력은 Write 도구로 임시 파일에 쓰고 `"$(cat "$f")"` 로 넘긴다. 따옴표 인자에 직접 끼우면
+입력의 `'` 하나로 인용이 끝나고, heredoc 은 입력에 종료자 줄이 있으면 끝난다. 큰따옴표 안의
+명령 치환 결과는 다시 해석되지 않는다.
+`{prompt_file}` 은 그렇게 쓴 파일 경로다.
 
 ```bash
 # Bash(run_in_background=true)
-prompt=$(cat <<'TFX_INPUT'
-{prompt}
-TFX_INPUT
-)
 # Level 0 / INDEPENDENT
-bash ~/.claude/scripts/tfx-route.sh {agent} "$prompt" {mcp_profile}
+bash ~/.claude/scripts/tfx-route.sh {agent} "$(cat {prompt_file})" {mcp_profile}
 
 # Level 1+ (컨텍스트 의존): 4번째=timeout(빈값), 5번째=context_file
-bash ~/.claude/scripts/tfx-route.sh {agent} "$prompt" {mcp_profile} '' .omc/context/{sid}/combined-{tid}.md
+bash ~/.claude/scripts/tfx-route.sh {agent} "$(cat {prompt_file})" {mcp_profile} '' .omc/context/{sid}/combined-{tid}.md
 ```
 
 ### tmux 라이브 관전

@@ -262,15 +262,22 @@ export async function diagnose({ json = false } = {}) {
   );
 
   // 2. process report
-  // 기본 보고서에는 환경변수 전체(export 한 API 키 포함)와 호스트명, 네트워크 인터페이스가 들어간다.
+  // 공유용 번들이라 필요한 필드만 남긴다. 기본 보고서에는 환경변수 전체(export 한 API 키 포함),
+  // 호스트명, 네트워크 인터페이스, 명령줄, 작업 경로, 홈 경로가 든 공유 라이브러리 목록이 들어간다.
   let report;
   try {
-    report = process.report.getReport();
-    delete report.environmentVariables;
-    if (report.header) {
-      delete report.header.host;
-      delete report.header.networkInterfaces;
-    }
+    const full = process.report.getReport();
+    const { host, networkInterfaces, commandLine, cwd, ...header } =
+      full.header;
+    report = {
+      header,
+      javascriptStack: full.javascriptStack,
+      javascriptHeap: full.javascriptHeap,
+      nativeStack: full.nativeStack,
+      resourceUsage: full.resourceUsage,
+      uvthreadResourceUsage: full.uvthreadResourceUsage,
+      userLimits: full.userLimits,
+    };
   } catch {
     report = { error: "report generation failed" };
   }

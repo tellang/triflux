@@ -85,21 +85,55 @@ function restrictMode(path, mode) {
   }
 }
 
-// 프롬프트와 send-keys 원문이 로그에 남지 않게, 공백이 있거나 긴 값은 길이와 해시만 남긴다.
+function redacted(value) {
+  const digest = createHash("sha256").update(value).digest("hex").slice(0, 12);
+  return `<redacted len=${value.length} sha256=${digest}>`;
+}
+
+// 프롬프트가 로그에 남지 않게, 공백이 있거나 긴 값은 길이와 해시만 남긴다.
 export function redactTraceValue(value) {
   if (typeof value !== "string") return value;
   if (value.length <= MAX_PLAIN_TRACE_VALUE && !/\s/u.test(value)) return value;
-  const digest = createHash("sha256").update(value).digest("hex").slice(0, 12);
-  return `<redacted len=${value.length} sha256=${digest}>`;
+  return redacted(value);
+}
+
+const PROMPT_FLAGS = new Set(["--print", "--prompt", "--message", "--seed"]);
+const SEND_KEYS_VALUE_FLAGS = new Set(["-t", "-N", "-c"]);
+const NAMED_KEY =
+  /^(Enter|Escape|Tab|BSpace|Space|Up|Down|Left|Right|[CM]-.)$/u;
+
+// 짧은 토큰도 키 입력과 프롬프트 자리에 오면 항상 가린다. 길이만 보면 짧은 비밀이 샌다.
+function redactArgs(args) {
+  const sendKeysAt = args.indexOf("send-keys");
+  let keysFrom = -1;
+  if (sendKeysAt >= 0) {
+    let i = sendKeysAt + 1;
+    while (i < args.length && /^-./u.test(String(args[i]))) {
+      i += SEND_KEYS_VALUE_FLAGS.has(args[i]) ? 2 : 1;
+    }
+    keysFrom = i;
+  }
+  return args.map((arg, index) => {
+    if (typeof arg !== "string") return arg;
+    const promptFlag = arg.split("=")[0];
+    if (PROMPT_FLAGS.has(promptFlag) && arg.includes("=")) {
+      return `${promptFlag}=${redacted(arg.slice(promptFlag.length + 1))}`;
+    }
+    const afterPromptFlag = PROMPT_FLAGS.has(args[index - 1]);
+    const isKey = keysFrom >= 0 && index >= keysFrom && !NAMED_KEY.test(arg);
+    return afterPromptFlag || isKey ? redacted(arg) : redactTraceValue(arg);
+  });
 }
 
 export function redactTraceEntry(entry) {
   return {
     ...entry,
     command: redactTraceValue(entry.command),
-    args: Array.isArray(entry.args)
-      ? entry.args.map(redactTraceValue)
-      : entry.args,
+    args: Array.isArray(entry.args) ? redactArgs(entry.args) : entry.args,
+    // execFileSync 오류 메시지에는 명령과 인자 전체가 들어간다.
+    ...(typeof entry.error === "string"
+      ? { error: redactTraceValue(entry.error) }
+      : {}),
   };
 }
 
@@ -292,6 +326,7 @@ function trackChild(child, meta) {
   child.once("error", (error) => {
     finalize("error", {
       error: error.message,
+      error_code: error.code ?? null,
     });
   });
 
@@ -563,6 +598,7 @@ export function execFileSync(file, args, options) {
         signal: error?.signal ?? null,
         duration_ms: Date.now() - startedAt,
         error: error?.message,
+        error_code: error?.code ?? null,
         sync: true,
       },
       { sync: true },
