@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
@@ -20,8 +26,12 @@ it("공백과 한글이 든 경로에서도 직접 실행을 판정한다", () =
       script,
       `import { isMainModule } from ${JSON.stringify(helperUrl.href)};\nconsole.log(isMainModule(import.meta.url));\n`,
     );
-    const run = spawnSync(process.execPath, [script], { encoding: "utf8" });
-    assert.equal(run.stdout.trim(), "true", run.stderr);
+    const link = join(root, "link.mjs");
+    symlinkSync(script, link);
+    for (const args of [[script], ["--preserve-symlinks-main", link]]) {
+      const run = spawnSync(process.execPath, args, { encoding: "utf8" });
+      assert.equal(run.stdout.trim(), "true", run.stderr);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
