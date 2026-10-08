@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   classifyBucket,
+  createReverseLineReader,
   expireStaleCodexBuckets,
   getCodexRateLimits,
   normalizeBuckets,
@@ -729,6 +730,78 @@ describe("Codex multi-window selection", () => {
     assert.deepEqual(buckets.codex.secondary, {
       used_percent: 45,
       resets_at: nowSec + 1,
+    });
+  });
+
+  describe("tail read", () => {
+    it("reverse reader: 작은 청크에서도 옛 trim().split().reverse() 와 같은 줄을 낸다", () => {
+      const dir = mkdtempSync(join(tmpdir(), "triflux-codex-tail-"));
+      try {
+        const text = ["첫 줄", "", "가나다 ".repeat(40), '{"a":1}', "끝"].join(
+          "\n",
+        );
+        const file = join(dir, "a.jsonl");
+        writeFileSync(file, `${text}\n\n`);
+        const expected = text.trim().split("\n").reverse();
+        for (const chunk of [1, 3, 7, 64]) {
+          const reader = createReverseLineReader(file, chunk);
+          const got = [];
+          for (let l = reader.next(); l !== null; l = reader.next())
+            got.push(l);
+          reader.close();
+          assert.deepEqual(got, expected, `chunk=${chunk}`);
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("큰 파일에서 끝의 버킷만 읽고 결과는 그대로다", () => {
+      const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-big-"));
+      try {
+        const now = new Date("2026-07-11T06:30:00.000Z");
+        const nowSec = Math.floor(now.getTime() / 1000);
+        const filler = {
+          timestamp: "2026-07-11T05:00:00.000Z",
+          payload: { output: "한".repeat(40_000) },
+        };
+        const events = [
+          rateLimitEvent({
+            timestamp: "2026-07-11T05:10:00.000Z",
+            usedPercent: 10,
+            resetsAt: nowSec + 3600,
+          }),
+          ...Array.from({ length: 300 }, () => filler),
+          rateLimitEvent({
+            timestamp: "2026-07-11T06:20:00.000Z",
+            usedPercent: 33,
+            resetsAt: nowSec + 3600,
+          }),
+          filler,
+        ];
+        writeRollout(sessionsRoot, now, "rollout-big.jsonl", events);
+        const file = join(
+          sessionsRoot,
+          "2026",
+          "07",
+          "11",
+          "rollout-big.jsonl",
+        );
+
+        const reader = createReverseLineReader(file);
+        reader.next();
+        reader.next();
+        assert.ok(
+          reader.bytesRead <= 256 * 1024,
+          `bytesRead=${reader.bytesRead}`,
+        );
+        reader.close();
+
+        const buckets = getCodexRateLimits({ sessionsRoot, now });
+        assert.equal(buckets.codex.primary.used_percent, 33);
+      } finally {
+        rmSync(sessionsRoot, { recursive: true, force: true });
+      }
     });
   });
 });
