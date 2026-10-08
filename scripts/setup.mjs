@@ -28,7 +28,7 @@ import { fileURLToPath } from "url";
 import { ensureAgyHooks } from "./ensure-agy-hooks.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
 import { cleanupLegacyHooks } from "./lib/legacy-hook-cleanup.mjs";
-import { cleanupLegacyMcp } from "./lib/legacy-mcp-cleanup.mjs";
+import { cleanupLegacyMcp, cleanupTfxHub } from "./lib/legacy-mcp-cleanup.mjs";
 import {
   MACHINE_PROFILE_KEYS,
   parseMachineProfileContent,
@@ -1372,6 +1372,26 @@ const RETIRED_INSTALL_FILES = [
   ],
   [join(CLAUDE_DIR, "agents", "slim-wrapper.md"), "name: slim-wrapper"],
   [join(CLAUDE_DIR, "scripts", "notion-read.mjs"), "notion-read.mjs v"],
+  [
+    join(
+      CLAUDE_DIR,
+      "scripts",
+      "hub",
+      "workers",
+      "codex-app-server-worker.mjs",
+    ),
+    "hub/workers/codex-app-server-worker.mjs",
+  ],
+  [
+    join(CLAUDE_DIR, "scripts", "hub", "workers", "delegator-mcp.mjs"),
+    "hub/workers/delegator-mcp.mjs",
+  ],
+  [
+    join(CLAUDE_DIR, "scripts", "hub", "workers", "lib", "jsonrpc-stdio.mjs"),
+    "hub/workers/lib/jsonrpc-stdio.mjs",
+  ],
+  [join(CLAUDE_DIR, "scripts", "hub-ensure.mjs"), "[hub-ensure]"],
+  [join(CLAUDE_DIR, "scripts", "hub-watchdog.mjs"), "[hub-watchdog]"],
 ];
 
 function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
@@ -1658,28 +1678,6 @@ const WINDOWS_SCHTASKS_ACCESS_DENIED_PATTERNS = [
   "권한",
 ];
 
-// #161 P3: schtasks /TR 인자는 실질적으로 262자 미만으로 제한된다.
-// 초과 시 Create 자체는 성공해도 task 실행에서 인자 잘림/실행 실패 재발.
-// 따라서 Create 전에 사전 검증해 조기 실패를 보장한다.
-const SCHTASKS_TR_MAX_LENGTH = 261;
-
-// #161 P3: /TR 길이 검증 공용 함수.
-// schtasks 는 Windows 내부에서 wide-char 문자 수로 제한하므로 UTF-8 byte 가 아닌
-// JavaScript string .length (UTF-16 code units) 기준으로 비교한다.
-// Codex Round 1 P1 반영: UTF-8 byte 검증은 한글 경로에서 정상 명령을 오차단했다
-// (예: ~218자 한글 경로 = 578 bytes → false positive throw).
-// Codex Round 3 P2 반영: 테스트가 실행 경로와 동일한 이 함수를 exercise 하므로
-// 내부 구현이 회귀해 byte 기반으로 돌아가면 테스트가 즉시 포착한다.
-function validateSchtasksTrLength(command) {
-  const commandChars = command.length;
-  if (commandChars > SCHTASKS_TR_MAX_LENGTH) {
-    throw new Error(
-      `schtasks /TR 인자가 ${SCHTASKS_TR_MAX_LENGTH} 문자를 초과합니다 ` +
-        `(${commandChars} chars): ${command}`,
-    );
-  }
-}
-
 function classifySchtasksStderr(stderr) {
   const lower = String(stderr || "").toLowerCase();
   if (
@@ -1722,67 +1720,6 @@ function getWindowsHubAutostartStatus({
       stderr: stderr.slice(0, 200),
     };
   }
-}
-
-function ensureWindowsHubAutostart({
-  taskName = WINDOWS_HUB_AUTOSTART_TASK,
-  nodePath = process.execPath,
-  pluginRoot = PLUGIN_ROOT,
-  force = true,
-} = {}) {
-  if (process.platform !== "win32") {
-    return {
-      supported: false,
-      changed: false,
-      registered: false,
-      taskName,
-      reason: "non-windows",
-    };
-  }
-
-  const command = buildWindowsHubAutostartCommand({ nodePath, pluginRoot });
-
-  // #161 P3: /TR 262자 제한 사전 검증을 공용 함수로 위임해 테스트/실행 로직 일관성 보장.
-  validateSchtasksTrLength(command);
-
-  const args = [
-    "/Create",
-    "/TN",
-    taskName,
-    "/SC",
-    "ONLOGON",
-    "/TR",
-    command,
-    "/RL",
-    "LIMITED",
-  ];
-  if (force) args.push("/F");
-
-  try {
-    execFileSync("schtasks.exe", args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-  } catch (error) {
-    // #161 P3: stderr 를 error.message 에 노출해 호출자가 원인을 볼 수 있게 한다.
-    const stderr = String(error?.stderr || "").trim();
-    if (stderr) {
-      const wrapped = new Error(
-        `schtasks /Create 실패: ${stderr.slice(0, 200)}`,
-      );
-      wrapped.cause = error;
-      throw wrapped;
-    }
-    throw error;
-  }
-
-  return {
-    supported: true,
-    changed: true,
-    registered: true,
-    taskName,
-    command,
-  };
 }
 
 function loadSettings() {
@@ -2091,7 +2028,6 @@ export {
   ensureCodexHooks,
   ensureCodexHubServerConfig,
   ensureCodexProfiles,
-  ensureWindowsHubAutostart,
   extractProfileLines,
   getVersion,
   getWindowsHubAutostartStatus,
@@ -2112,7 +2048,6 @@ export {
   reapLegacyTrayProcesses,
   removeProfileSection,
   replaceProfileSection,
-  SCHTASKS_TR_MAX_LENGTH,
   SETUP_MARKER_PATH,
   SETUP_USER_STATE_FILES,
   SKILL_ALIASES,
@@ -2122,7 +2057,6 @@ export {
   syncCodexHarnessAdapter,
   syncCodexManagedSkills,
   syncWorkerPackages,
-  validateSchtasksTrLength,
   WINDOWS_HUB_AUTOSTART_TASK,
   writeMarker,
 };
@@ -2173,9 +2107,6 @@ export async function runDeferred(stdinData) {
   const reconfigureMachineProfile =
     machineProfileOnly || argv.includes("--machine-profile");
   const nonInteractiveProfile = argv.includes("--non-interactive");
-  const enableHubAutostart =
-    argv.includes("--enable-hub-autostart") ||
-    process.env.TFX_HUB_AUTOSTART === "1";
   const isDev = detectDevMode();
 
   if (isDev) {
@@ -2215,6 +2146,14 @@ export async function runDeferred(stdinData) {
   });
   // 이주가 막혀도 설치는 계속한다. 남은 항목은 경고로 알린다.
   for (const warning of mcpCleanup.warnings) io.log(`  ⚠ ${warning}`);
+
+  // 제거된 허브의 MCP 항목, 프로세스, 예약 작업을 정리한다. 개발 체크아웃의 스냅샷은 건드리지 않는다.
+  const hubCleanup = cleanupTfxHub({
+    home: _TFX_HOME,
+    pluginRoot: isDev ? undefined : PLUGIN_ROOT,
+  });
+  for (const warning of hubCleanup.warnings) io.log(`  ⚠ ${warning}`);
+  if (hubCleanup.changed) io.log("  허브 설정과 실행 흔적 정리");
 
   const pkgVersion = getPackageVersion();
   const marker = readMarker();
@@ -2352,21 +2291,6 @@ export async function runDeferred(stdinData) {
       }
     }
     io.log("  \x1b[32m✓\x1b[0m HUD cache pre-warm (background)");
-  }
-
-  // ── Stale PID 파일 정리 (hub 좀비 방지) ──
-
-  const HUB_PID_FILE = join(CLAUDE_DIR, "cache", "tfx-hub", "hub.pid");
-  if (existsSync(HUB_PID_FILE)) {
-    try {
-      const pidInfo = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-      process.kill(pidInfo.pid, 0); // 프로세스 존재 확인 (신호 미전송)
-    } catch {
-      try {
-        unlinkSync(HUB_PID_FILE);
-      } catch {} // 죽은 프로세스면 PID 파일 삭제
-      synced++;
-    }
   }
 
   const reapedTrays = reapLegacyTrayProcesses();
@@ -2507,22 +2431,6 @@ export async function runDeferred(stdinData) {
     io.log(
       `  \x1b[33m⚠\x1b[0m Antigravity hooks 등록 실패: ${error.message || error}`,
     );
-  }
-
-  // ── Windows Codex 단독 실행 보호: 로그인 시 hub-ensure 등록 ──
-  // Claude SessionStart 훅이 없는 순수 Codex 시작 경로에서도 tfx-hub가 살아있게 한다.
-  if (enableHubAutostart) {
-    try {
-      const result = ensureWindowsHubAutostart();
-      if (result.registered) {
-        io.log(`  \x1b[32m✓\x1b[0m Windows hub autostart: ${result.taskName}`);
-        synced++;
-      }
-    } catch (error) {
-      io.log(
-        `  \x1b[33m⚠\x1b[0m Windows hub autostart 등록 실패: ${error.message}`,
-      );
-    }
   }
 
   // ── MCP 인벤토리 백그라운드 갱신 ──

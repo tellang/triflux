@@ -9,6 +9,7 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
+  rmSync,
   statSync,
   unlinkSync,
   writeFileSync,
@@ -778,6 +779,251 @@ export function cleanupLegacyMcp({
   } catch (error) {
     result.ok = false;
     result.warnings.push(`시작 등록 해제 실패: ${error.message}`);
+  }
+  return result;
+}
+
+const HUB_SERVER = "tfx-hub";
+const HUB_TASK = "TrifluxHubEnsure";
+const HUB_CONFIG_FILES = [
+  [".claude.json", "json"],
+  [".claude/settings.json", "json"],
+  [".claude/mcp.json", "json"],
+  [".codex/config.json", "json"],
+  [".codex/config.toml", "toml"],
+  [".gemini/settings.json", "json"],
+  [".gemini/config/mcp_config.json", "json"],
+];
+
+// 허브가 등록한 항목은 loopback 의 /mcp 주소다. 다른 모양이면 사용자 항목으로 본다.
+function isHubEntry(config) {
+  if (!config || typeof config !== "object" || Array.isArray(config))
+    return false;
+  return [config.url, config.httpUrl, config.serverUrl].some((value) => {
+    try {
+      const url = new URL(value);
+      return (
+        url.protocol === "http:" &&
+        ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) &&
+        url.pathname === "/mcp"
+      );
+    } catch {
+      return false;
+    }
+  });
+}
+
+function removeHubFromJson(original, file, warnings) {
+  const data = JSON.parse(original);
+  if (!data || typeof data !== "object" || Array.isArray(data))
+    throw new Error(`${file}: JSON 객체가 아닙니다`);
+  const groups = [
+    data.mcpServers,
+    ...Object.values(data.projects ?? {}).map((project) => project?.mcpServers),
+  ];
+  let count = 0;
+  for (const entries of groups) {
+    if (
+      !entries ||
+      typeof entries !== "object" ||
+      Array.isArray(entries) ||
+      !(HUB_SERVER in entries)
+    )
+      continue;
+    if (!isHubEntry(entries[HUB_SERVER])) {
+      warnings.push(`${file}: ${HUB_SERVER} 항목의 소유를 확인할 수 없어 보존`);
+      continue;
+    }
+    delete entries[HUB_SERVER];
+    count++;
+  }
+  return {
+    output: count ? `${JSON.stringify(data, null, 2)}\n` : original,
+    count,
+  };
+}
+
+function removeHubFromToml(original, file, warnings) {
+  const data = toml.parse(original);
+  const entry = data.mcp_servers?.[HUB_SERVER];
+  if (!entry) return { output: original, count: 0 };
+  if (!isHubEntry(entry)) {
+    warnings.push(`${file}: ${HUB_SERVER} 항목의 소유를 확인할 수 없어 보존`);
+    return { output: original, count: 0 };
+  }
+  // [mcp_servers.tfx-hub] 와 그 하위 표만 다음 표 머리글 전까지 걷어낸다.
+  const hubHeader = new RegExp(
+    `^\\s*\\[\\s*mcp_servers\\s*\\.\\s*(?:"${HUB_SERVER}"|'${HUB_SERVER}'|${HUB_SERVER})\\s*(?:\\.[^\\]]*)?\\]`,
+  );
+  let skipping = false;
+  const output = original
+    .split(/(?<=\n)/)
+    .filter((line) => {
+      if (/^\s*\[/.test(line)) skipping = hubHeader.test(line);
+      return !skipping;
+    })
+    .join("");
+  delete data.mcp_servers[HUB_SERVER];
+  if (!Object.keys(data.mcp_servers).length) delete data.mcp_servers;
+  try {
+    if (!isDeepStrictEqual(toml.parse(output), data))
+      throw new Error("TOML 구조 불일치");
+  } catch {
+    warnings.push(`${file}: 이주 결과 TOML 검증 실패, 파일 보존`);
+    return { output: original, count: 0 };
+  }
+  return { output, count: 1 };
+}
+
+function hubCommandLine(pid, platform, run) {
+  const result =
+    platform === "win32"
+      ? runPowerShell(
+          run,
+          `(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CommandLine`,
+        )
+      : tryRun(run, "ps", ["-p", String(pid), "-o", "command="]);
+  if (result.ok) return result.output.trim() || null;
+  // ps 는 프로세스가 없을 때 status 1 로 끝난다.
+  return result.status === 1 ? null : undefined;
+}
+
+function stopHub(home, platform, run, result) {
+  const pidFile = join(home, ".claude/cache/tfx-hub/hub.pid");
+  const target = fileTarget(pidFile);
+  if (!target) return;
+  let pid;
+  try {
+    pid = Number(JSON.parse(readFileSync(target, "utf8")).pid);
+  } catch {
+    /* 아래에서 보존 처리 */
+  }
+  if (!Number.isInteger(pid) || pid <= 1) {
+    result.warnings.push(`${pidFile}: pid 를 읽을 수 없어 보존`);
+    return;
+  }
+  const command = hubCommandLine(pid, platform, run);
+  if (command === undefined) {
+    result.warnings.push(`${pidFile}: pid ${pid} 확인 실패, 종료하지 않음`);
+    return;
+  }
+  if (command !== null) {
+    if (!/[/\\]hub[/\\]server\.mjs(?:["'\s]|$)/.test(command)) {
+      result.warnings.push(
+        `${pidFile}: pid ${pid} 가 hub/server.mjs 가 아니라 종료하지 않음`,
+      );
+      return;
+    }
+    const stopped =
+      platform === "win32"
+        ? tryRun(run, "taskkill", ["/F", "/T", "/PID", String(pid)])
+        : tryRun(run, "kill", ["-TERM", String(pid)]);
+    let gone = false;
+    for (let attempt = 0; stopped.ok && attempt < 10 && !gone; attempt++) {
+      gone = hubCommandLine(pid, platform, run) === null;
+      if (!gone)
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+    if (!gone) {
+      result.warnings.push(`${pidFile}: pid ${pid} 종료 확인 실패, 파일 보존`);
+      return;
+    }
+    result.hubStopped = true;
+  }
+  unlinkSync(target);
+  result.changed = true;
+}
+
+function removeHubTask(run, result) {
+  const query = tryRun(run, "schtasks.exe", [
+    "/Query",
+    "/TN",
+    HUB_TASK,
+    "/FO",
+    "LIST",
+    "/V",
+  ]);
+  if (!query.ok) return;
+  if (!query.output.includes("hub-ensure.mjs")) {
+    result.warnings.push(`${HUB_TASK}: hub-ensure 작업이 아니라 보존`);
+    return;
+  }
+  const removed = tryRun(run, "schtasks.exe", [
+    "/Delete",
+    "/TN",
+    HUB_TASK,
+    "/F",
+  ]);
+  if (removed.ok) result.changed = true;
+  else result.warnings.push(`${HUB_TASK}: 예약 작업 삭제 실패`);
+}
+
+/** 제거된 허브의 설정 항목, 실행 중인 프로세스, 예약 작업, 설치본 스냅샷을 정리한다. */
+export function cleanupTfxHub({
+  home = homedir(),
+  platform = osPlatform(),
+  run = defaultRun,
+  pluginRoot,
+} = {}) {
+  const result = {
+    ok: true,
+    changed: false,
+    removed: 0,
+    backups: [],
+    warnings: [],
+    hubStopped: false,
+  };
+  const injected = run !== defaultRun;
+  // 테스트에서는 실제 홈과 시스템 명령을 건드리지 않는다.
+  if (
+    !injected &&
+    (process.env.NODE_TEST_CONTEXT || process.env.TRIFLUX_TEST_HOME)
+  ) {
+    result.skipped = true;
+    return result;
+  }
+  for (const [relative, kind] of HUB_CONFIG_FILES) {
+    const file = join(home, relative);
+    try {
+      const target = fileTarget(file);
+      if (!target) continue;
+      const original = readFileSync(target, "utf8");
+      const plan =
+        kind === "toml"
+          ? removeHubFromToml(original, file, result.warnings)
+          : removeHubFromJson(original, file, result.warnings);
+      if (!plan.count) continue;
+      result.backups.push(writeAtomic(file, target, plan.output));
+      result.removed += plan.count;
+      result.changed = true;
+    } catch {
+      result.warnings.push(`${file}: 설정 형식 또는 읽기 실패`);
+      result.ok = false;
+    }
+  }
+  const realSystem =
+    injected ||
+    (resolve(home) === resolve(homedir()) && platform === osPlatform());
+  if (realSystem) {
+    try {
+      stopHub(home, platform, run, result);
+      if (platform === "win32") removeHubTask(run, result);
+    } catch (error) {
+      result.ok = false;
+      result.warnings.push(`허브 프로세스 정리 실패: ${error.message}`);
+    }
+  } else {
+    result.warnings.push("격리 HOME: 허브 프로세스와 예약 작업 정리는 건너뜀");
+  }
+  const snapshots = pluginRoot
+    ? join(pluginRoot, "references", "gemini-snapshots")
+    : null;
+  if (snapshots) {
+    const entry = lstatSync(snapshots, { throwIfNoEntry: false });
+    if (entry?.isDirectory()) {
+      rmSync(snapshots, { recursive: true, force: true });
+      result.changed = true;
+    }
   }
   return result;
 }
