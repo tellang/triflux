@@ -1533,10 +1533,10 @@ resolve_mcp_policy() {
     return 1
   fi
 
-  # _phase 는 쓰지 않지만 7번째 필드를 받아야 _codex_config_json 에 섞이지 않는다.
-  local _allowed_servers _codex_flags _codex_config_json _phase
+  # mcp-filter delimited 출력의 6필드. 필드 수가 바뀌면 마지막 변수에 나머지가 섞인다.
+  local _allowed_servers _codex_flags _codex_config_json
   IFS=$'\x1e' read -r MCP_PROFILE_REQUESTED MCP_RESOLVED_PROFILE MCP_HINT \
-    _allowed_servers _codex_flags _codex_config_json _phase <<< "$_raw"
+    _allowed_servers _codex_flags _codex_config_json <<< "$_raw"
   IFS=',' read -r -a ALLOWED_MCP_SERVERS <<< "$_allowed_servers"
   IFS=$'\x1f' read -r -a CODEX_CONFIG_FLAGS <<< "$_codex_flags"
 

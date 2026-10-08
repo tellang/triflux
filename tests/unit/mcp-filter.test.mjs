@@ -33,7 +33,7 @@ writeFileSync(
 after(() => rmSync(fixtureDir, { recursive: true, force: true }));
 
 describe("mcp-filter", () => {
-  it("delimited 출력은 라우터가 읽는 7필드를 레코드 구분자로 잇는다", (t) => {
+  it("delimited 출력은 라우터가 읽는 6필드를 레코드 구분자로 잇는다", (t) => {
     const dir = mkdtempSync(join(tmpdir(), "tfx-mcp-filter-"));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const inventoryFile = join(dir, "inventory.json");
@@ -64,8 +64,6 @@ describe("mcp-filter", () => {
         inventoryFile,
         "--codex-config",
         config,
-        "--phase",
-        "verify",
       ],
       { encoding: "utf8" },
     );
@@ -91,7 +89,6 @@ describe("mcp-filter", () => {
           playwright: { enabled: false },
         },
       }),
-      "verify",
     ]);
   });
 
@@ -362,82 +359,7 @@ describe("mcp-filter", () => {
   });
 });
 
-describe("mcp-filter — phase-aware filtering (이슈 3)", () => {
-  it("T3-01: plan phase는 playwright를 차단해야 한다", () => {
-    const policy = buildMcpPolicy({
-      agentType: "executor",
-      requestedProfile: "executor",
-      availableServers: [
-        "context7",
-        "playwright",
-        "brave-search",
-        "exa",
-        "tavily",
-      ],
-      phase: "plan",
-    });
-    assert.ok(
-      !policy.allowedServers.includes("playwright"),
-      "plan 단계에서 playwright 차단",
-    );
-    assert.ok(
-      !policy.allowedServers.includes("tavily"),
-      "plan 단계에서 tavily 차단",
-    );
-    assert.ok(!policy.allowedServers.includes("exa"), "plan 단계에서 exa 차단");
-    assert.equal(policy.resolvedPhase, "plan");
-  });
-
-  it("T3-02: exec phase는 프로필 기반 전체 허용해야 한다", () => {
-    const policy = buildMcpPolicy({
-      agentType: "executor",
-      requestedProfile: "executor",
-      availableServers: ["context7", "playwright", "brave-search", "exa"],
-      phase: "exec",
-    });
-    // exec phase에는 blockedServers가 없으므로 프로필 기반 결과 그대로
-    assert.ok(policy.allowedServers.length > 0);
-    assert.equal(policy.resolvedPhase, "exec");
-  });
-
-  it("T3-03: verify phase는 playwright를 차단해야 한다", () => {
-    const policy = buildMcpPolicy({
-      agentType: "executor",
-      requestedProfile: "executor",
-      availableServers: ["context7", "playwright", "brave-search", "exa"],
-      phase: "verify",
-    });
-    assert.ok(
-      !policy.allowedServers.includes("playwright"),
-      "verify 단계에서 playwright 차단",
-    );
-    assert.equal(policy.resolvedPhase, "verify");
-  });
-
-  it("T3-04: phase 미지정 시 기존 동작 유지 (회귀 방지)", () => {
-    const withPhase = buildMcpPolicy({
-      agentType: "executor",
-      requestedProfile: "executor",
-      availableServers: ["context7", "brave-search"],
-    });
-    assert.equal(withPhase.resolvedPhase, null);
-    assert.ok(withPhase.allowedServers.includes("context7"));
-  });
-
-  it("T3-05: prd phase는 brave-search를 허용하고 playwright를 차단해야 한다", () => {
-    const policy = buildMcpPolicy({
-      agentType: "analyst",
-      requestedProfile: "analyze",
-      availableServers: ["context7", "playwright", "brave-search", "exa"],
-      phase: "prd",
-    });
-    assert.ok(
-      !policy.allowedServers.includes("playwright"),
-      "prd 단계에서 playwright 차단",
-    );
-    assert.equal(policy.resolvedPhase, "prd");
-  });
-
+describe("mcp-filter 프로필 폴백", () => {
   it("잘못된 MCP 프로필은 auto로 graceful fallback한다", () => {
     // --flag 형태는 auto로 폴백 (hard crash 방지)
     const policy = buildMcpPolicy({
