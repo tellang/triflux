@@ -20,6 +20,8 @@ Codex 프로필은 `~/.codex/<이름>.config.toml`로 관리한다. 기본 설�
 
 Antigravity 프로필은 `~/.gemini/triflux-profiles.json`에서 Gemini 3.8 Flash Low, Medium, High를 사용한다. `agy`와 `codex`가 설치되지 않았으면 선택적 CLI 누락으로 보고한다.
 
+mods(사용량 band, 서브에이전트 effort 강제)는 `tfx setup --mods`로 설치한다. Claude Code 2.1.287 이상이 필요하다. 기본 setup은 marketplace 등록과 안내 한 줄만 한다.
+
 기존 MCP 직접 연결 이주는 설치 과정에서 실행된다. 이주할 수 없는 항목과 누락된 API 키는 경고로 남긴다. 검색 MCP 키를 프로젝트 `.mcp.json`에 직접 쓰지 않는다.
 
 제거된 허브의 `tfx-hub` MCP 항목, 실행 중이던 프로세스, Windows 예약 작업, 설치본 스냅샷은 setup이 한 번 정리한다. 프로젝트 `.mcp.json`에 남은 항목은 지우지 않고 `tfx doctor`가 알린다. Windows의 로컬 세션은 psmux와 Windows Terminal을 사용한다. macOS/Linux는 tmux가 기본이며 macOS에서 tmux가 없으면 Terminal.app 대체 경로를 사용한다.

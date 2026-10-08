@@ -154,8 +154,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       {
         name: "--diagnose",
         type: "boolean",
-        description:
-          "진단 번들(zip) 생성: spawn-trace + hook timing + system info",
+        description: "진단 번들(zip) 생성: spawn-trace + system info",
       },
       {
         name: "--purge-logs",
@@ -1318,7 +1317,7 @@ function cmdSetup(options = {}) {
     summary.push({ item: "Codex profiles", status: "⚠️", detail: reason });
   } else if (codexProfileResult.changed > 0) {
     ok(
-      `Codex profiles: ${codexProfileResult.changed}개 반영됨 (~/.codex/config.toml)`,
+      `Codex profiles: ${codexProfileResult.changed}개 반영됨 (~/.codex/<프로필>.config.toml)`,
     );
     summary.push({
       item: "Codex profiles",
@@ -1671,7 +1670,8 @@ async function cmdDoctor(options = {}) {
             name: "mcp-inventory",
             status: "failed",
           });
-          warn("MCP 인벤토리 재생성 실패 — 다음 세션에서 자동 재시도");
+          warn("MCP 인벤토리 재생성 실패");
+          info(`수동: node ${mcpCheck}`);
         }
       }
       const hudScript = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
@@ -2126,7 +2126,7 @@ async function cmdDoctor(options = {}) {
           );
           if (psmuxSupport.missingOptionalCommands.includes("detach-client")) {
             info(
-              "  detach-client: WT 1.24 ConPTY close-race 회피용. WT 기반 병렬 실행(swarm dashboard, tfx-multi wt 모드) 에서 pane freeze/ConPTY hang 위험 증가.",
+              "  detach-client: WT 1.24 ConPTY close-race 회피용. WT 탭에서 psmux 세션을 닫을 때 pane freeze/ConPTY hang 위험 증가.",
             );
             info(
               "  해결: psmux v3.4+ 로 업그레이드. 현재 psmux 업그레이드 명령:",
@@ -2389,16 +2389,11 @@ async function cmdDoctor(options = {}) {
           status: "ok",
           path: mcpCache,
           codex_servers: inv.codex?.servers?.length || 0,
-          gemini_servers: inv.gemini?.servers?.length || 0,
         });
         ok(`캐시 존재 (${inv.timestamp})`);
         if (inv.codex?.servers?.length) {
           const names = inv.codex.servers.map((s) => s.name).join(", ");
           info(`Codex: ${inv.codex.servers.length}개 서버 (${names})`);
-        }
-        if (inv.gemini?.servers?.length) {
-          const names = inv.gemini.servers.map((s) => s.name).join(", ");
-          info(`Gemini: ${inv.gemini.servers.length}개 서버 (${names})`);
         }
       } catch {
         addDoctorCheck(report, {
@@ -2416,7 +2411,7 @@ async function cmdDoctor(options = {}) {
         path: mcpCache,
         fix: `node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}`,
       });
-      warn("캐시 없음 — 다음 세션 시작 시 자동 생성");
+      warn("캐시 없음: tfx update 또는 tfx doctor --reset 이 생성");
       info(`수동: node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}`);
     }
 
@@ -3704,16 +3699,22 @@ function cmdHelp() {
     ${DIM}  --fix${RESET}        ${GRAY}진단 + 자동 수정${RESET}
     ${DIM}  --reset${RESET}      ${GRAY}캐시 전체 초기화${RESET}
     ${DIM}  --json${RESET}       ${GRAY}구조화된 진단 결과 JSON 출력${RESET}
+    ${DIM}  --help${RESET}       ${GRAY}--audit, --diagnose 등 전체 옵션${RESET}
     ${WHITE_BRIGHT}tfx mcp${RESET}        ${GRAY}MCP registry 관리 (list/sync/add/remove)${RESET}
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
     ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
-    ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux)${RESET}
+    ${WHITE_BRIGHT}tfx multi${RESET}      ${GRAY}멀티-CLI 팀 모드 (tmux)${RESET}
+    ${WHITE_BRIGHT}tfx cto${RESET}        ${GRAY}저장소 스냅숏 수집과 조회 (collect/status/hygiene)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
+    ${WHITE_BRIGHT}tfx-live${RESET}       ${GRAY}Claude·Codex 라이브 세션 (tfx-live --help)${RESET}
 
   ${BOLD}Skills${RESET} ${GRAY}(Claude Code 슬래시 커맨드)${RESET}
 
     ${AMBER}/tfx-auto${RESET}       ${GRAY}자동 분류 + 병렬 실행 (--cli codex|antigravity|claude, --parallel N)${RESET}
+    ${AMBER}/tfx-live${RESET}       ${GRAY}Claude·Codex 라이브 세션 생성, 질의, 대기, 종료${RESET}
+    ${AMBER}/tfx-lead${RESET}       ${GRAY}여러 세션을 지휘하는 리드 역할${RESET}
+    ${AMBER}/tfx-remote${RESET}     ${GRAY}SSH 원격 Claude Code 세션${RESET}
     ${AMBER}/tfx-setup${RESET}      ${GRAY}HUD 설정 + 진단${RESET}
     ${YELLOW}/tfx-doctor${RESET}     ${GRAY}진단 + 수리 + 캐시 초기화${RESET}
 
@@ -3799,9 +3800,7 @@ async function main() {
             console.log(
               `\n  ${GREEN_BRIGHT}✓${RESET} 진단 번들 생성: ${result.zipPath}`,
             );
-            console.log(
-              `  spawn 이벤트: ${result.traceCount}건, 훅 타이밍: ${result.hookTimingCount}건\n`,
-            );
+            console.log(`  spawn 이벤트: ${result.traceCount}건\n`);
           } else {
             console.log(`\n  ${RED}✗${RESET} 진단 실패: ${result.error}\n`);
           }
