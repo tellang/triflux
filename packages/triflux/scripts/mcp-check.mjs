@@ -89,21 +89,6 @@ export function getCodexMcp() {
   }
 }
 
-export function getGeminiMcp() {
-  try {
-    const settingsPath = join(homedir(), ".gemini", "settings.json");
-    if (!existsSync(settingsPath)) return null;
-
-    const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
-    const mcpServers = settings.mcpServers || {};
-    return Object.entries(mcpServers).map(([name, config]) =>
-      createServerRecord(name, "configured", config || {}),
-    );
-  } catch {
-    return null;
-  }
-}
-
 // ── Claude MCP 서버 발견 ──
 
 const CLAUDE_DIR = join(homedir(), ".claude");
@@ -224,7 +209,6 @@ export function buildInventory(cwd = process.cwd()) {
   const inventory = {
     timestamp: new Date().toISOString(),
     codex: { available: false, servers: [] },
-    gemini: { available: false, servers: [] },
     claude: { available: true, servers: [] },
   };
 
@@ -232,12 +216,6 @@ export function buildInventory(cwd = process.cwd()) {
   if (codexServers !== null) {
     inventory.codex.available = true;
     inventory.codex.servers = codexServers;
-  }
-
-  const geminiServers = getGeminiMcp();
-  if (geminiServers !== null) {
-    inventory.gemini.available = true;
-    inventory.gemini.servers = geminiServers;
   }
 
   inventory.claude.servers = getClaudeMcp(cwd);

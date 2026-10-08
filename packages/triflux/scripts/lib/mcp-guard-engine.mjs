@@ -40,7 +40,6 @@ const DEFAULT_REGISTRY = Object.freeze({
     unknown_server_action: "warn",
     sync_denylist: [],
     watched_paths: [
-      "~/.gemini/settings.json",
       "~/.codex/config.toml",
       "~/.claude.json",
       "~/.claude/settings.json",
@@ -709,7 +708,7 @@ function serverTargets(serverConfig) {
       ),
     ];
   }
-  return ["claude", "gemini", "codex", "antigravity"];
+  return ["claude", "codex", "antigravity"];
 }
 
 function serverAppliesToClient(serverConfig, client) {
@@ -1718,7 +1717,7 @@ export function addRegistryServer(name, url, options = {}) {
                 .filter(Boolean),
             ),
           ]
-        : ["claude", "gemini", "codex", "antigravity"],
+        : ["claude", "codex", "antigravity"],
     description: options.description || `${trimmedName} MCP 서버`,
   };
 

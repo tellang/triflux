@@ -27,10 +27,6 @@ test("buildInventory returns stable MCP cache shape", () => {
   assert.ok(typeof inventory.timestamp === "string");
   assert.ok(inventory.codex && typeof inventory.codex.available === "boolean");
   assert.ok(Array.isArray(inventory.codex.servers));
-  assert.ok(
-    inventory.gemini && typeof inventory.gemini.available === "boolean",
-  );
-  assert.ok(Array.isArray(inventory.gemini.servers));
 });
 
 test("getClaudeMcp discovers project .claude/mcp.json", () => {

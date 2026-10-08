@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // scripts/doctor-diagnose.mjs — 진단 번들 생성기
 //
-// spawn-trace JSONL + process report + hook timing + spawn stats + system info
+// spawn-trace JSONL + process report + spawn stats + system info
 // → ~/.triflux/diagnostics/diag-{timestamp}.zip (PowerShell Compress-Archive)
 
 import { execFileSync, execSync } from "node:child_process";
@@ -181,36 +181,7 @@ function collectSystemInfo() {
   return info;
 }
 
-function collectHookTimings() {
-  // 과거 세션 시작 로그에서 타이밍 추출
-  const hookLogDir = join(TRIFLUX_DIR, "logs");
-  if (!existsSync(hookLogDir)) return [];
-
-  const timings = [];
-  for (const file of readdirSync(hookLogDir)) {
-    if (!file.startsWith("hook-") || !file.endsWith(".jsonl")) continue;
-    try {
-      const lines = readFileSync(join(hookLogDir, file), "utf8")
-        .split("\n")
-        .filter(Boolean);
-      const now = Date.now();
-      for (const line of lines) {
-        try {
-          const entry = JSON.parse(line);
-          const ts = new Date(entry.ts || entry.time).getTime();
-          if (now - ts <= ONE_HOUR_MS) timings.push(entry);
-        } catch {
-          /* skip */
-        }
-      }
-    } catch {
-      /* skip */
-    }
-  }
-  return timings;
-}
-
-function generateSummary(stats, sysInfo, hookTimings, traceCount) {
+function generateSummary(stats, sysInfo, traceCount) {
   const lines = [
     "=== triflux diagnostic summary ===",
     `generated: ${new Date().toISOString()}`,
@@ -247,18 +218,6 @@ function generateSummary(stats, sysInfo, hookTimings, traceCount) {
     lines.push(`    fix: ${mcpCheck.fix}`);
   } else {
     lines.push("  ✔ MCP tool approval_mode 정상");
-  }
-
-  lines.push("", "--- Hook Timings (last 1h) ---");
-
-  if (hookTimings.length === 0) {
-    lines.push("no hook timing data found");
-  } else {
-    for (const t of hookTimings.slice(-20)) {
-      const hook = t.hook || t.msg || "unknown";
-      const dur = t.dur_ms ?? t.duration_ms ?? "?";
-      lines.push(`  ${hook}: ${dur}ms`);
-    }
   }
 
   return lines.join("\n");
@@ -322,32 +281,25 @@ export async function diagnose({ json = false } = {}) {
     );
   }
 
-  // 3. hook timings
-  const hookTimings = collectHookTimings();
-  writeFileSync(
-    join(bundleDir, "hook-timings.jsonl"),
-    hookTimings.map((t) => JSON.stringify(t)).join("\n") + "\n",
-  );
-
-  // 4. spawn stats
+  // 3. spawn stats
   const stats = computeSpawnStats(traces);
   writeFileSync(
     join(bundleDir, "spawn-stats.json"),
     JSON.stringify(stats, null, 2),
   );
 
-  // 5. system info
+  // 4. system info
   const sysInfo = collectSystemInfo();
   writeFileSync(
     join(bundleDir, "system-info.json"),
     JSON.stringify(sysInfo, null, 2),
   );
 
-  // 6. summary
-  const summary = generateSummary(stats, sysInfo, hookTimings, traces.length);
+  // 5. summary
+  const summary = generateSummary(stats, sysInfo, traces.length);
   writeFileSync(join(bundleDir, "summary.txt"), summary);
 
-  // 7. zip via platform archive tool
+  // 6. zip via platform archive tool
   const zipPath = `${bundleDir}.zip`;
   try {
     createZipArchive(bundleDir, zipPath);
@@ -375,7 +327,6 @@ export async function diagnose({ json = false } = {}) {
     stats,
     sysInfo,
     traceCount: traces.length,
-    hookTimingCount: hookTimings.length,
     codexMcpApproval: mcpApprovalCheck,
   };
 
@@ -397,9 +348,7 @@ if (isMain) {
   if (!json) {
     if (result.ok) {
       console.log(`\n  진단 번들 생성: ${result.zipPath}`);
-      console.log(
-        `  spawn 이벤트: ${result.traceCount}건, 훅 타이밍: ${result.hookTimingCount}건\n`,
-      );
+      console.log(`  spawn 이벤트: ${result.traceCount}건\n`);
     } else {
       console.error(`  진단 실패: ${result.error}`);
       process.exit(1);

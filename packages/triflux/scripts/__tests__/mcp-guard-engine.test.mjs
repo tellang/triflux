@@ -54,7 +54,7 @@ describe("mcp guard engine", () => {
     const registry = loadRegistry();
     assert.equal(registry.version, 1);
     assert.equal(registry.servers.context7.url, "https://mcp.context7.com/mcp");
-    assert.equal(registry.policies.watched_paths.length, 8);
+    assert.equal(registry.policies.watched_paths.length, 7);
   });
 
   it("drops legacy hub-url servers from a user registry and reads its default transport as http", () => {
@@ -92,13 +92,13 @@ describe("mcp guard engine", () => {
     }
   });
 
-  it("matches watched paths for Gemini, Antigravity, Claude project MCP, and local .mcp.json", () => {
+  it("matches watched paths for Antigravity, Claude project MCP, and local .mcp.json", () => {
     const homeDir = createHomeDir();
     withHome(homeDir);
 
     assert.equal(
       isWatchedPath(join(homeDir, ".gemini", "settings.json")),
-      true,
+      false,
     );
     assert.equal(
       isWatchedPath(join(homeDir, ".gemini", "config", "mcp_config.json")),

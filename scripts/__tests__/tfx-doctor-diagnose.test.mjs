@@ -32,9 +32,8 @@ describe("doctor-diagnose: 진단 번들 생성", () => {
     assert.equal(typeof result.sysInfo.totalMemMB, "number");
   });
 
-  it("traceCount/hookTimingCount 숫자", () => {
+  it("traceCount 숫자", () => {
     assert.equal(typeof result.traceCount, "number");
-    assert.equal(typeof result.hookTimingCount, "number");
   });
 
   it("codexMcpApproval 진단 결과 포함", () => {
