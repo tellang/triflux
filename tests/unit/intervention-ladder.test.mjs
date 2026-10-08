@@ -258,8 +258,9 @@ describe("intervention ladder", () => {
     const before = read();
     writeFileSync(file, "changed");
     assert.notEqual(read(), before);
-    assert.equal(resolveStallThresholdMs({}), 1_200_000);
-    assert.equal(resolveHardCeilingMs({}), 21_600_000);
+    const noProfile = { TFX_MACHINE_PROFILE_PATH: "/nonexistent/profile.env" };
+    assert.equal(resolveStallThresholdMs(noProfile), 1_200_000);
+    assert.equal(resolveHardCeilingMs(noProfile), 21_600_000);
   });
 
   it("rollout 탐색은 주입된 lsof 결과만 사용해 hermetic하게 동작한다", async () => {

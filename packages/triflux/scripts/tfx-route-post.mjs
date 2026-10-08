@@ -292,27 +292,26 @@ function recordBatchEvent(result, agent) {
 }
 
 // ── CLI 이슈 추적 ──
-// 예전에는 걸러지지 않은 stderr 를 검사해 Codex 배너로 시작하는 오탐이 쌓였다. 한 번 지운다.
-function dropBannerIssues(issuesFile) {
-  if (!existsSync(issuesFile)) return;
-  const lines = readFileSync(issuesFile, "utf-8").split("\n").filter(Boolean);
-  const kept = lines.filter((line) => {
-    try {
-      return !/^OpenAI Codex v/.test(JSON.parse(line).snippet || "");
-    } catch {
-      return true;
-    }
-  });
-  if (kept.length === lines.length) return;
-  writeFileSync(issuesFile, kept.length ? `${kept.join("\n")}\n` : "");
+// Codex 는 배너, 설정, 프롬프트 에코를 stderr 로 낸다. 배너가 있으면 오류 줄 형태만 검사한다.
+const CODEX_TRANSPORT_CRASH = /Transport channel closed|rmcp::transport/i;
+
+function issueDiagnostics(stderrContent, cliType) {
+  if (cliType !== "codex" || !stderrContent) return stderrContent;
+  const lines = stderrContent.split("\n").map((line) => line.trim());
+  if (!lines.some((line) => /^OpenAI Codex v/.test(line))) return stderrContent;
+  return lines
+    .filter(
+      (line) =>
+        CODEX_TRACING_DIAGNOSTIC.test(line) ||
+        CODEX_PLAIN_DIAGNOSTIC.test(line) ||
+        CODEX_TRANSPORT_CRASH.test(line),
+    )
+    .join("\n");
 }
 
-// stderrText 는 filterBenignStderr 를 거친 진단 줄이다. 배너와 프롬프트 에코는 검사하지 않는다.
+// stderrText 는 issueDiagnostics 를 거친 진단 줄이다.
 function trackCliIssue(cliType, agent, stderrText, exitCode) {
   const issuesFile = join(CACHE_DIR, "cli-issues.jsonl");
-  try {
-    dropBannerIssues(issuesFile);
-  } catch {}
   if (!stderrText && exitCode === 0) return;
 
   const patterns = [
@@ -518,7 +517,12 @@ function main() {
   recordBatchEvent(aimdResult, agent);
 
   // 6. CLI 이슈 추적
-  trackCliIssue(cliType, agent, warningContent, exitCode);
+  trackCliIssue(
+    cliType,
+    agent,
+    issueDiagnostics(stderrContent, cliType),
+    exitCode,
+  );
 
   // 7. 구조화된 결과 출력
   console.log("=== TFX-ROUTE RESULT ===");

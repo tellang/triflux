@@ -36,6 +36,10 @@ describe("timeout-defaults", () => {
     assert.equal(resolveWorkerLeaseTtlMs(noProfile), 1_320_000);
     assert.equal(resolveStallKill(noProfile), "kill");
     assert.equal(
+      resolveHardCeilingMs({ ...noProfile, TFX_HARD_CEILING_SEC: "" }),
+      21_600_000,
+    );
+    assert.equal(
       resolveHardCeilingMs({ ...noProfile, TFX_HARD_CEILING_SEC: "-1" }),
       21_600_000,
     );

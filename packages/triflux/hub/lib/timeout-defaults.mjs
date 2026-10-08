@@ -18,7 +18,10 @@ function readSetting(env, name) {
 }
 
 function readSeconds(env, name, fallbackSec, { allowZero = false } = {}) {
-  const value = Number(readSetting(env, name));
+  const raw = String(readSetting(env, name) ?? "").trim();
+  // 셸의 ${VAR:-기본값} 처럼 빈 값은 기본값이다. Number("") 가 0 이 되는 것을 막는다.
+  if (!raw) return fallbackSec;
+  const value = Number(raw);
   const min = allowZero ? 0 : 1;
   return Number.isInteger(value) && value >= min ? value : fallbackSec;
 }
