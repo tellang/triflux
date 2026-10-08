@@ -5,6 +5,8 @@ import { describe, it } from "node:test";
 import {
   escapePwshDoubleQuoted,
   escapePwshSingleQuoted,
+  isEnvCacheFresh,
+  remoteEnvCacheDir,
   resolveRemoteDir,
   resolveRemoteStageDir,
   shellQuote,
@@ -110,5 +112,23 @@ describe("remote-session — resolveRemoteStageDir", () => {
     const result = resolveRemoteStageDir(WIN_ENV, "swarm-test-456");
     assert.ok(result.includes("tfx-remote/swarm-test-456"));
     assert.ok(!result.includes("\\\\"));
+  });
+});
+
+describe("remote-session — env cache", () => {
+  it("R-11: 캐시는 cwd 가 아니라 사용자 상태 경로에 둔다", () => {
+    assert.equal(
+      remoteEnvCacheDir({ XDG_STATE_HOME: "/state" }),
+      "/state/triflux/remote-env",
+    );
+  });
+
+  it("R-12: 미래 cachedAt 은 신선하지 않다", () => {
+    const now = 1_000_000_000;
+    assert.equal(isEnvCacheFresh({ cachedAt: now - 1000, env: {} }, now), true);
+    assert.equal(
+      isEnvCacheFresh({ cachedAt: now + 1000, env: {} }, now),
+      false,
+    );
   });
 });
