@@ -108,13 +108,6 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
     assert.ok(payload.actions.some((action) => action.type === "sync"));
     assert.equal(
       payload.actions.some(
-        (action) => action.label === "skill-alias:tfx-autopilot",
-      ),
-      false,
-      "삭제된 legacy alias는 dry-run 동기화 액션에 포함되면 안 된다",
-    );
-    assert.equal(
-      payload.actions.some(
         (action) => action.label === "tfx-gate-activate.mjs",
       ),
       false,

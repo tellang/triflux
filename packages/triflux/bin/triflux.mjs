@@ -71,7 +71,6 @@ import {
   REQUIRED_CODEX_PROFILES,
   retireOldInstallFiles,
   runConsentSteps,
-  SKILL_ALIASES,
   SYNC_MAP,
   syncSkills,
 } from "../scripts/setup.mjs";
@@ -1108,12 +1107,6 @@ function listSkillSyncActions() {
     if (!existsSync(src)) continue;
     if (!isSkillSupportedOnPlatform(join(skillsSrc, name))) continue;
     actions.push(describeSyncAction(src, dst, `skill:${name}`));
-  }
-  for (const { alias, source } of SKILL_ALIASES) {
-    const src = join(skillsSrc, source, "SKILL.md");
-    const dst = join(CLAUDE_DIR, "skills", alias, "SKILL.md");
-    if (!existsSync(src)) continue;
-    actions.push(describeSyncAction(src, dst, `skill-alias:${alias}`));
   }
   return actions;
 }
