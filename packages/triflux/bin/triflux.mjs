@@ -44,6 +44,7 @@ import {
   cleanupLegacyMcp,
   cleanupTfxHub,
   findProjectHubEntries,
+  pinRegistryMcpPackages,
 } from "../scripts/lib/legacy-mcp-cleanup.mjs";
 import {
   addRegistryServer,
@@ -1260,6 +1261,9 @@ async function cmdSetup(options = {}) {
   });
   for (const warning of hubCleanup.warnings) warn(warning);
   if (hubCleanup.changed) ok("제거된 허브의 설정과 실행 흔적 정리");
+  const mcpPins = pinRegistryMcpPackages({ backups: mcpBackups });
+  for (const warning of mcpPins.warnings) warn(warning);
+  if (mcpPins.pinned) ok(`MCP 패키지 고정 버전 반영: ${mcpPins.pinned}개 항목`);
   if (fromUpdate) refreshSetupCaches();
 
   console.log(`\n${BOLD}triflux setup${RESET}\n`);
