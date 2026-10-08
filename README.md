@@ -209,8 +209,8 @@ Package layout and execution paths: [ARCHITECTURE.md](ARCHITECTURE.md). Document
 | Linux | tmux | Supported. |
 | Windows | psmux + Windows Terminal | See below. |
 
-**Windows.** psmux (a tmux fork) runs PowerShell by default. safety-guard blocks direct `wt.exe`
-and raw `psmux kill-session`, so tabs and panes go through the `tfx-wt` skill (set up only on
+**Windows.** psmux (a tmux fork) runs PowerShell by default. Callers do not run `wt.exe` or raw
+`psmux kill-session` directly; tabs and panes go through the `tfx-wt` skill (set up only on
 Windows) and `hub/team/wt-manager.mjs`. Agent rules:
 [`.claude/rules/tfx-psmux.md`](.claude/rules/tfx-psmux.md).
 
@@ -219,7 +219,6 @@ Windows) and `hub/team/wt-manager.mjs`. Agent rules:
 | Layer | Protection |
 | --- | --- |
 | Managed routes | Codex and Antigravity are called through `tfx-route.sh`, headless workers, or `tfx`, never through a bare `codex exec` or `agy`. This is a rule for callers; no hook enforces it. |
-| safety-guard hook | Blocks destructive shell commands (root `rm -rf`, force push to main, `git clean -fd`, SQL `DROP`), direct `wt.exe`, raw psmux kill, and bash syntax sent over SSH to Windows hosts, and points to the managed alternative. |
 | MCP registry | Replaces stale or unsupported MCP entries with managed ones. |
 | Consensus | Deep and consensus runs report degraded or disputed results instead of hiding them. |
 

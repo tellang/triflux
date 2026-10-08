@@ -1,4 +1,4 @@
-// tests/fixtures/route-test-env.mjs — tfx-route.sh 를 띄우는 테스트의 공용 env
+// tests/fixtures/route-test-env.mjs: tfx-route.sh 를 띄우는 테스트의 공용 env
 
 import { ROUTE_CLI_POLICY_DEFAULTS } from "./route-cli-policy-env.mjs";
 

@@ -208,8 +208,8 @@ graph TD
 | Linux | tmux | 지원. |
 | Windows | psmux + Windows Terminal | 아래 참고. |
 
-**Windows.** psmux(tmux 포크)의 기본 셸은 PowerShell이다. safety-guard가 `wt.exe`와 psmux `kill-session`
-직접 호출을 막으므로 탭과 패인은 `tfx-wt` 스킬(Windows에만 설치)과
+**Windows.** psmux(tmux 포크)의 기본 셸은 PowerShell이다. `wt.exe`와 psmux `kill-session`은 직접 호출하지
+않고, 탭과 패인은 `tfx-wt` 스킬(Windows에만 설치)과
 `hub/team/wt-manager.mjs`를 거친다. 에이전트 규칙은
 [`.claude/rules/tfx-psmux.md`](.claude/rules/tfx-psmux.md).
 
@@ -218,7 +218,6 @@ graph TD
 | 층 | 보호 |
 | --- | --- |
 | 관리된 경로 | Codex와 Antigravity는 `tfx-route.sh`, headless 워커, `tfx`로만 부르고 맨 `codex exec`나 `agy`로 부르지 않는다. 호출자가 지키는 규칙이며 이를 막는 훅은 없다. |
-| safety-guard 훅 | 위험한 셸 명령(루트 `rm -rf`, main 강제 push, `git clean -fd`, SQL `DROP`), `wt.exe`·psmux 종료 직접 호출, Windows 호스트로 SSH 보내는 bash 문법을 막고 관리된 대안을 알려 준다. |
 | MCP 레지스트리 | 낡았거나 지원하지 않는 MCP 항목을 관리형 항목으로 바꾼다. |
 | 합의 결과 | deep·consensus 실행은 일부 레인이 빠졌거나 의견이 갈린 결과를 숨기지 않고 표시한다. |
 

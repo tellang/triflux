@@ -1050,9 +1050,16 @@ export function cleanupTfxHub({
     ? ["gemini-snapshots", "codex-snapshots"]
     : []) {
     const snapshots = join(pluginRoot, "references", name);
-    if (lstatSync(snapshots, { throwIfNoEntry: false })?.isDirectory()) {
-      rmSync(snapshots, { recursive: true, force: true });
-      result.changed = true;
+    // EBUSY, EPERM, 읽기 전용 설치 디렉터리에서도 setup 이 멈추지 않게 한다.
+    try {
+      if (lstatSync(snapshots, { throwIfNoEntry: false })?.isDirectory()) {
+        rmSync(snapshots, { recursive: true, force: true });
+        result.changed = true;
+      }
+    } catch (error) {
+      result.warnings.push(
+        `${snapshots}: 삭제 실패 (${error.code ?? error.message})`,
+      );
     }
   }
   return result;

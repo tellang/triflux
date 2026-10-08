@@ -2060,19 +2060,9 @@ export async function runDeferred(stdinData) {
   const mcpSdkPath = join(workerNodeModules, "@modelcontextprotocol", "sdk");
   const srcNodeModules = join(PLUGIN_ROOT, "node_modules");
 
-  // native 모듈은 제외 (플랫폼 의존적, worker에서 불필요)
-  const SKIP_PACKAGES = new Set([
-    "better-sqlite3",
-    "prebuild-install",
-    "node-abi",
-    "node-addon-api",
-  ]);
-
   if (!existsSync(mcpSdkPath) && existsSync(srcNodeModules)) {
     try {
       for (const entry of readdirSync(srcNodeModules)) {
-        if (SKIP_PACKAGES.has(entry)) continue;
-
         const src = join(srcNodeModules, entry);
         const dst = join(workerNodeModules, entry);
         if (existsSync(dst)) continue;
