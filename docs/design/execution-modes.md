@@ -58,9 +58,10 @@ tfx multi --teammate-mode headless \
 ### C. direct `codex` / `agy` in mux
 
 ```bash
-prompt=$(cat .codex-swarm/prompts/prompt-hook-integration.md)
-codex --profile gpt55_xhigh exec --dangerously-bypass-approvals-and-sandbox "$prompt"
+tfx-live start --cli codex --session <tmux> --name <이름>
 ```
+
+`codex exec` 직접 호출은 `.claude/rules/tfx-routing.md` 가 금지한다. 세션은 `tfx-live start` 로 띄운다(ADR-0031).
 
 - 장점
 - 실제 코드 읽기, 수정, 테스트, 커밋까지 이어질 수 있다.
@@ -145,12 +146,7 @@ codex --profile gpt55_xhigh exec --dangerously-bypass-approvals-and-sandbox "$pr
 - `codex --full-auto < prompt.md`처럼 stdin 파이프에 의존하지 않는다.
 - `-c 'model=...'` 하드코딩으로 프로필 체계를 우회하지 않는다.
 
-- 권장 패턴
-
-```bash
-prompt=$(cat prompt.md)
-codex --profile gpt55_xhigh exec --dangerously-bypass-approvals-and-sandbox "$prompt"
-```
+- 스웜 런처는 ADR-0025 로 퇴역했다. 병렬 코드 변경은 작업별 worktree 와 세션을 나누고 각 세션에서 `tfx-auto` 를 실행한다.
 
 ### 완료 감지
 

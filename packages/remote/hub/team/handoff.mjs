@@ -1,6 +1,6 @@
 // hub/team/handoff.mjs — Worker → Lead handoff 프로토콜
 // HANDOFF 블록 파싱, 검증, fallback 생성, Lead 포맷팅
-// 설계: docs/design/handoff-schema-v7.md
+// 설계: docs/design/handoff-schema-v7.md (PR #70 에서 삭제, c0722ecd 에 남아 있다)
 
 // ── enum 허용 값 ──
 const STATUS_VALUES = ["ok", "partial", "failed"];

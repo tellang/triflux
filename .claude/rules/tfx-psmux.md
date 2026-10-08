@@ -13,7 +13,7 @@ paths:
 
 <!-- TFX_PSMUX_RULES:START -->
 > **적용 범위: Windows 환경 한정.** macOS/Linux는 플랫폼 보호기(`hub/team/wt-manager.mjs`의 `createWtManager`, `hub/team/headless.mjs`의 `autoAttachTerminal`, `tfx-route.sh`의 `uname -s` 분기)가 코드 수준에서 아무 작업도 하지 않게 처리한다. mac 사용자는 이 규칙의 1~3, 5~6, 8번(WT·PowerShell 관련)을 모두 건너뛸 수 있다. 4번(Codex CLI)과 7번(모델 프로파일 정책)만 모든 플랫폼에 적용된다.
-> mac 인프라는 `hub/team/terminal-opener.mjs`의 3단계 대체 경로(win32 → wt-manager / tmux 감지 → tmux·psmux / darwin → Terminal.app)와 `hub/team/psmux.mjs`의 플랫폼 분기(`IS_WINDOWS`/`IS_MAC`)로 처리한다. 별도 iTerm2·tmux 관리자는 필요하지 않다.
+> mac 인프라는 `hub/team/terminal-opener.mjs`의 3단계 대체 경로(win32 → wt-manager / tmux 감지 → tmux·psmux / darwin → Terminal.app)와 `hub/team/psmux.mjs`의 플랫폼 분기(`IS_WINDOWS`)로 처리한다. 별도 iTerm2·tmux 관리자는 필요하지 않다.
 >
 > psmux 명령, launch 스크립트, Codex CLI 호출을 생성하는 모든 흐름은
 > 아래 규칙을 반드시 준수해야 한다. 위반 시 생성을 중단하고 수정한다.

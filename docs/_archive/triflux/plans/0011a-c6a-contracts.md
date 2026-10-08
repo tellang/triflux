@@ -4,12 +4,12 @@
 
 > 상태: **ADR-0011 acceptance 전 구현 게이트**  
 > 규범어 `MUST`, `MUST NOT`, `SHOULD`는 구현·테스트 요구사항이다.  
-> 현재 구현은 단일 `cto` 문자열, 메모리 상태, liveness 기반 즉시 선출에 묶여 있다([hub/router.mjs:14](../../../../hub/router.mjs:14), [hub/router.mjs:125](../../../../hub/router.mjs:125), [hub/router.mjs:253](../../../../hub/router.mjs:253)). C6a는 이를 scoped/durable/reachable 역할 kernel로 교체하는 규범이다.
+> 현재 구현은 단일 `cto` 문자열, 메모리 상태, liveness 기반 즉시 선출에 묶여 있다([hub/router.mjs:14](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L14), [hub/router.mjs:125](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L125), [hub/router.mjs:253](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L253)). C6a는 이를 scoped/durable/reachable 역할 kernel로 교체하는 규범이다.
 
 공통 구현 경계:
 
 - 역할 상태기계·RoleKey·projection은 순수 core 모듈이어야 한다.
-- 로컬 `tfx-live` 실행은 runtime adapter로 분리한다. remote server는 core router를 import하므로 로컬 실행기를 core에 넣으면 안 된다([scripts/pack.mjs:23](../../../../scripts/pack.mjs:23), [packages/remote/hub/server.mjs:63](../../../../packages/remote/hub/server.mjs:63)).
+- 로컬 `tfx-live` 실행은 runtime adapter로 분리한다. remote server는 core router를 import하므로 로컬 실행기를 core에 넣으면 안 된다([scripts/pack.mjs:23](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/scripts/pack.mjs#L23), [packages/remote/hub/server.mjs:63](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/packages/remote/hub/server.mjs#L63)).
 - 모든 시간·UUID·random·transport는 테스트에서 주입 가능해야 한다.
 
 ---
@@ -97,14 +97,14 @@ roleKeysByAgent: Map<AgentId, Set<RoleKeyWire>>;
 
 ### 영향 함수 `file:line`
 
-- 문자열 kind 검증과 정적 set: [hub/router.mjs:14](../../../../hub/router.mjs:14), [hub/router.mjs:28](../../../../hub/router.mjs:28)
-- 메모리 role state: [hub/router.mjs:159](../../../../hub/router.mjs:159)
-- `is_cto`/topic fallback 후보 판정: [hub/router.mjs:190](../../../../hub/router.mjs:190)
-- 정적 candidate 갱신: [hub/router.mjs:226](../../../../hub/router.mjs:226)
-- role message 판정/주소 해석: [hub/router.mjs:304](../../../../hub/router.mjs:304)
-- recipient 해석: [hub/router.mjs:545](../../../../hub/router.mjs:545)
-- register/heartbeat/status 정적 순회: [hub/router.mjs:857](../../../../hub/router.mjs:857), [hub/router.mjs:1506](../../../../hub/router.mjs:1506)
-- sweeper 정적 순회: [hub/router.mjs:1469](../../../../hub/router.mjs:1469)
+- 문자열 kind 검증과 정적 set: [hub/router.mjs:14](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L14), [hub/router.mjs:28](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L28)
+- 메모리 role state: [hub/router.mjs:159](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L159)
+- `is_cto`/topic fallback 후보 판정: [hub/router.mjs:190](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L190)
+- 정적 candidate 갱신: [hub/router.mjs:226](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L226)
+- role message 판정/주소 해석: [hub/router.mjs:304](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L304)
+- recipient 해석: [hub/router.mjs:545](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L545)
+- register/heartbeat/status 정적 순회: [hub/router.mjs:857](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L857), [hub/router.mjs:1506](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L1506)
+- sweeper 정적 순회: [hub/router.mjs:1469](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L1469)
 
 ### 수용 테스트
 
@@ -131,7 +131,7 @@ reachability = activator가 등록 transport를 probe/wake할 수 있음
 active      = liveness + reachability + 현재 epoch activation/charter ACK
 ```
 
-현재 코드는 online+lease만으로 leader를 active로 간주한다([hub/router.mjs:253](../../../../hub/router.mjs:253), [hub/router.mjs:409](../../../../hub/router.mjs:409)). v2에서는 lease가 살아 있어도 transport probe 전에는 `active`가 아니다.
+현재 코드는 online+lease만으로 leader를 active로 간주한다([hub/router.mjs:253](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L253), [hub/router.mjs:409](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L409)). v2에서는 lease가 살아 있어도 transport probe 전에는 `active`가 아니다.
 
 ### 구체 스펙
 
@@ -204,11 +204,11 @@ delay(n) =
 
 ### 영향 함수 `file:line`
 
-- liveness 판정: [hub/router.mjs:253](../../../../hub/router.mjs:253)
-- 현재 후보 정렬/선출: [hub/router.mjs:279](../../../../hub/router.mjs:279)
-- 현재 snapshot 상태 축약: [hub/router.mjs:409](../../../../hub/router.mjs:409)
-- 즉시 active로 만드는 선출: [hub/router.mjs:455](../../../../hub/router.mjs:455)
-- stale sweep: [hub/router.mjs:1469](../../../../hub/router.mjs:1469)
+- liveness 판정: [hub/router.mjs:253](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L253)
+- 현재 후보 정렬/선출: [hub/router.mjs:279](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L279)
+- 현재 snapshot 상태 축약: [hub/router.mjs:409](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L409)
+- 즉시 active로 만드는 선출: [hub/router.mjs:455](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L455)
+- stale sweep: [hub/router.mjs:1469](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L1469)
 
 ### 수용 테스트
 
@@ -323,12 +323,12 @@ publish 응답:
 
 ### 영향 함수 `file:line`
 
-- legacy `route()` no-recipient 보존: [hub/router.mjs:916](../../../../hub/router.mjs:916)
-- publish 경로: [hub/router.mjs:1061](../../../../hub/router.mjs:1061)
-- SessionStart registration: [hooks/session-start-fast.mjs:243](../../../../hooks/session-start-fast.mjs:243)
-- SessionStart가 현재 Synapse만 등록하는 경로: [hooks/session-start-fast.mjs:255](../../../../hooks/session-start-fast.mjs:255)
-- sweeper/lease expiry 연결점: [hub/router.mjs:1440](../../../../hub/router.mjs:1440)
-- pipe command dispatch: [hub/pipe.mjs:221](../../../../hub/pipe.mjs:221)
+- legacy `route()` no-recipient 보존: [hub/router.mjs:916](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L916)
+- publish 경로: [hub/router.mjs:1061](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L1061)
+- SessionStart registration: [hooks/session-start-fast.mjs:243](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hooks/session-start-fast.mjs#L243)
+- SessionStart가 현재 Synapse만 등록하는 경로: [hooks/session-start-fast.mjs:255](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hooks/session-start-fast.mjs#L255)
+- sweeper/lease expiry 연결점: [hub/router.mjs:1440](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L1440)
+- pipe command dispatch: [hub/pipe.mjs:221](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/pipe.mjs#L221)
 
 ### 수용 테스트
 
@@ -419,11 +419,11 @@ kill-switch·scope close·holder revoke는 activation token을 지우고 epoch�
 
 ### 영향 함수 `file:line`
 
-- 동시성 보호 없는 메모리 registry: [hub/router.mjs:125](../../../../hub/router.mjs:125)
-- 동기 선출: [hub/router.mjs:455](../../../../hub/router.mjs:455)
-- register/heartbeat 재선출 경쟁점: [hub/router.mjs:857](../../../../hub/router.mjs:857)
-- 명시 takeover 경쟁점: [hub/router.mjs:1095](../../../../hub/router.mjs:1095)
-- sweeper 경쟁점: [hub/router.mjs:1469](../../../../hub/router.mjs:1469)
+- 동시성 보호 없는 메모리 registry: [hub/router.mjs:125](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L125)
+- 동기 선출: [hub/router.mjs:455](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L455)
+- register/heartbeat 재선출 경쟁점: [hub/router.mjs:857](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L857)
+- 명시 takeover 경쟁점: [hub/router.mjs:1095](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L1095)
+- sweeper 경쟁점: [hub/router.mjs:1469](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L1469)
 
 ### 수용 테스트
 
@@ -442,11 +442,11 @@ kill-switch·scope close·holder revoke는 activation token을 지우고 epoch�
 
 ### 정의
 
-`role_registry`, holder, epoch, activation, candidate exclusion은 SQLite SSOT다. 메모리 map은 cache/index일 뿐이다. 현재 `roleStates`는 Hub 재시작 때 사라진다([hub/router.mjs:125](../../../../hub/router.mjs:125)).
+`role_registry`, holder, epoch, activation, candidate exclusion은 SQLite SSOT다. 메모리 map은 cache/index일 뿐이다. 현재 `roleStates`는 Hub 재시작 때 사라진다([hub/router.mjs:125](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L125)).
 
 ### 구체 스펙
 
-schema version은 `5 → 6`으로 증가한다([hub/store.mjs:119](../../../../hub/store.mjs:119)).
+schema version은 `5 → 6`으로 증가한다([hub/store.mjs:119](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/store.mjs#L119)).
 
 `agents` 추가 컬럼:
 
@@ -551,12 +551,12 @@ recoverRoleRegistry(now);
 
 ### 영향 함수 `file:line`
 
-- 현재 “SQLite는 감사 로그만” 계약: [hub/router.mjs:1](../../../../hub/router.mjs:1), [hub/store.mjs:1](../../../../hub/store.mjs:1)
-- agent schema: [hub/schema.sql:5](../../../../hub/schema.sql:5)
-- 현재 message/inbox schema: [hub/schema.sql:18](../../../../hub/schema.sql:18), [hub/schema.sql:35](../../../../hub/schema.sql:35)
-- schema migration: [hub/store.mjs:115](../../../../hub/store.mjs:115)
-- agent register persistence: [hub/store.mjs:374](../../../../hub/store.mjs:374)
-- lease/stale 처리: [hub/store.mjs:421](../../../../hub/store.mjs:421), [hub/store.mjs:455](../../../../hub/store.mjs:455)
+- 현재 “SQLite는 감사 로그만” 계약: [hub/router.mjs:1](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L1), [hub/store.mjs:1](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/store.mjs#L1)
+- agent schema: [hub/schema.sql:5](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/schema.sql#L5)
+- 현재 message/inbox schema: [hub/schema.sql:18](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/schema.sql#L18), [hub/schema.sql:35](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/schema.sql#L35)
+- schema migration: [hub/store.mjs:115](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/store.mjs#L115)
+- agent register persistence: [hub/store.mjs:374](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/store.mjs#L374)
+- lease/stale 처리: [hub/store.mjs:421](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/store.mjs#L421), [hub/store.mjs:455](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/store.mjs#L455)
 
 ### 수용 테스트
 
@@ -660,13 +660,13 @@ legacy `topic:cto`:
 
 ### 영향 함수 `file:line`
 
-- publish의 `topic:cto` 특례: [hub/router.mjs:1090](../../../../hub/router.mjs:1090)
-- 고정 `roles.cto`: [hub/router.mjs:1519](../../../../hub/router.mjs:1519)
-- pipe replay의 CTO 가정: [hub/pipe.mjs:471](../../../../hub/pipe.mjs:471)
-- tray status passthrough: [hub/tray-state.mjs:454](../../../../hub/tray-state.mjs:454)
-- tray `roles.cto` 소비: [hub/public/tray.html:376](../../../../hub/public/tray.html:376)
-- server tray merge: [hub/server.mjs:1481](../../../../hub/server.mjs:1481)
-- 기존 호환 회귀테스트: [tests/integration/router.test.mjs:319](../../../../tests/integration/router.test.mjs:319), [tests/integration/pipe.test.mjs:367](../../../../tests/integration/pipe.test.mjs:367)
+- publish의 `topic:cto` 특례: [hub/router.mjs:1090](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L1090)
+- 고정 `roles.cto`: [hub/router.mjs:1519](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L1519)
+- pipe replay의 CTO 가정: [hub/pipe.mjs:471](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/pipe.mjs#L471)
+- tray status passthrough: [hub/tray-state.mjs:454](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/tray-state.mjs#L454)
+- tray `roles.cto` 소비: [hub/public/tray.html:376](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/public/tray.html#L376)
+- server tray merge: [hub/server.mjs:1481](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/server.mjs#L1481)
+- 기존 호환 회귀테스트: [tests/integration/router.test.mjs:319](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/tests/integration/router.test.mjs#L319), [tests/integration/pipe.test.mjs:367](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/tests/integration/pipe.test.mjs#L367)
 
 ### 수용 테스트
 
@@ -792,22 +792,22 @@ eligible =
       AND locator.capabilities includes probe,wake,activate
 ```
 
-현재 `tfx-live probe`는 Claude daemon probe만 호출한다([bin/tfx-live.mjs:1874](../../../../bin/tfx-live.mjs:1874)). 확장 후에는:
+현재 `tfx-live probe`는 Claude daemon probe만 호출한다([bin/tfx-live.mjs:1874](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/bin/tfx-live.mjs#L1874)). 확장 후에는:
 
 - `probe --transport uds` → daemon probe
 - `probe --transport tmux` → session 존재+CLI readiness probe
 - `probe --transport auto` → 등록 locator 우선순위대로 probe
 - 호출자가 CLI/short/session 정보로 transport를 재추론하지 않고 등록 locator를 전달한다.
-- 기존 기본 transport 정책은 legacy CLI 명령에만 유지한다([bin/tfx-live.mjs:1783](../../../../bin/tfx-live.mjs:1783)).
+- 기존 기본 transport 정책은 legacy CLI 명령에만 유지한다([bin/tfx-live.mjs:1783](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/bin/tfx-live.mjs#L1783)).
 
 ### 영향 함수 `file:line`
 
-- agent schema에 locator 부재: [hub/schema.sql:5](../../../../hub/schema.sql:5)
-- store register 필드: [hub/store.mjs:374](../../../../hub/store.mjs:374)
-- bridge register payload: [hub/bridge.mjs:616](../../../../hub/bridge.mjs:616)
-- HTTP register plumbing: [hub/server.mjs:1707](../../../../hub/server.mjs:1707)
-- tmux start/wake 구현: [bin/tfx-live.mjs:1254](../../../../bin/tfx-live.mjs:1254), [bin/tfx-live.mjs:1300](../../../../bin/tfx-live.mjs:1300)
-- UDS attach 계약: [bin/tfx-live.mjs:1409](../../../../bin/tfx-live.mjs:1409)
+- agent schema에 locator 부재: [hub/schema.sql:5](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/schema.sql#L5)
+- store register 필드: [hub/store.mjs:374](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/store.mjs#L374)
+- bridge register payload: [hub/bridge.mjs:616](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/bridge.mjs#L616)
+- HTTP register plumbing: [hub/server.mjs:1707](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/server.mjs#L1707)
+- tmux start/wake 구현: [bin/tfx-live.mjs:1254](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/bin/tfx-live.mjs#L1254), [bin/tfx-live.mjs:1300](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/bin/tfx-live.mjs#L1300)
+- UDS attach 계약: [bin/tfx-live.mjs:1409](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/bin/tfx-live.mjs#L1409)
 
 ### 수용 테스트
 
@@ -871,10 +871,10 @@ truth table:
 
 ### 영향 함수 `file:line`
 
-- 현재 master/manager 판독: [hub/lib/cto-env.mjs:18](../../../../hub/lib/cto-env.mjs:18)
-- north-star가 master를 무시하는 경로: [hooks/session-start-lake.mjs:37](../../../../hooks/session-start-lake.mjs:37), [hooks/cto-north-star-brief.mjs:48](../../../../hooks/cto-north-star-brief.mjs:48)
-- auto-collect가 master를 무시하는 경로: [hub/team/cto-auto-collect.mjs:9](../../../../hub/team/cto-auto-collect.mjs:9)
-- Codex north-star shell 경로: [scripts/tfx-route.sh:456](../../../../scripts/tfx-route.sh:456)
+- 현재 master/manager 판독: [hub/lib/cto-env.mjs:18](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/lib/cto-env.mjs#L18)
+- north-star가 master를 무시하는 경로: [hooks/session-start-lake.mjs:37](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hooks/session-start-lake.mjs#L37), [hooks/cto-north-star-brief.mjs:48](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hooks/cto-north-star-brief.mjs#L48)
+- auto-collect가 master를 무시하는 경로: [hub/team/cto-auto-collect.mjs:9](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/team/cto-auto-collect.mjs#L9)
+- Codex north-star shell 경로: [scripts/tfx-route.sh:456](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/scripts/tfx-route.sh#L456)
 
 ### 수용 테스트
 
@@ -967,15 +967,15 @@ emitRoleControlEvent(log, input): void;
 - manager-disable 원인이 logger failure여도 fallback 출력 실패가 무한 재귀를 만들면 안 된다.
 - canary는 Hub startup, package/version fingerprint 변경, runtime adapter reload 때 실행한다.
 
-현재 logger는 service/env와 module만 자동으로 추가하며 `event`를 보장하지 않는다([scripts/lib/logger.mjs:34](../../../../scripts/lib/logger.mjs:34), [scripts/lib/logger.mjs:90](../../../../scripts/lib/logger.mjs:90)).
+현재 logger는 service/env와 module만 자동으로 추가하며 `event`를 보장하지 않는다([scripts/lib/logger.mjs:34](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/scripts/lib/logger.mjs#L34), [scripts/lib/logger.mjs:90](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/scripts/lib/logger.mjs#L90)).
 
 ### 영향 함수 `file:line`
 
-- logger base/formatter: [scripts/lib/logger.mjs:34](../../../../scripts/lib/logger.mjs:34)
-- module child logger: [scripts/lib/logger.mjs:90](../../../../scripts/lib/logger.mjs:90)
-- field allowlist 회귀테스트 패턴: [tests/unit/codex-mcp-profile-resolve.test.mjs:167](../../../../tests/unit/codex-mcp-profile-resolve.test.mjs:167)
-- transport fallback이 현재 진단 report만 쓰는 경로: [bin/tfx-live.mjs:1482](../../../../bin/tfx-live.mjs:1482)
-- 실제 dispatch 경로: [hub/router.mjs:653](../../../../hub/router.mjs:653)
+- logger base/formatter: [scripts/lib/logger.mjs:34](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/scripts/lib/logger.mjs#L34)
+- module child logger: [scripts/lib/logger.mjs:90](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/scripts/lib/logger.mjs#L90)
+- field allowlist 회귀테스트 패턴: [tests/unit/codex-mcp-profile-resolve.test.mjs:136](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/tests/unit/codex-mcp-profile-resolve.test.mjs#L136)
+- transport fallback이 현재 진단 report만 쓰는 경로: [bin/tfx-live.mjs:1482](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/bin/tfx-live.mjs#L1482)
+- 실제 dispatch 경로: [hub/router.mjs:653](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L653)
 
 ### 수용 테스트
 
@@ -1022,8 +1022,8 @@ repo에 다음 tracked manifest를 둔다.
 - `resolveLakeRootDir()`은 manifest를 찾는 local resolver로만 사용한다.
 - raw root는 role key, message, status, locator에 직렬화하지 않는다.
 - project ID는 scope identifier이지 인증 secret이 아니다.
-- 현재 `.triflux/*`가 ignore되므로 구현 시 manifest allowlist가 필요하다([.gitignore:3](../../../../.gitignore:3)).
-- linked worktree를 raw absolute common-dir로 식별하는 현재 방식은 local lake lookup에만 유지한다([cto/lake-root.mjs:10](../../../../cto/lake-root.mjs:10), [cto/lake-root.mjs:65](../../../../cto/lake-root.mjs:65)).
+- 현재 `.triflux/*`가 ignore되므로 구현 시 manifest allowlist가 필요하다([.gitignore:3](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/.gitignore#L3)).
+- linked worktree를 raw absolute common-dir로 식별하는 현재 방식은 local lake lookup에만 유지한다([cto/lake-root.mjs:10](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/cto/lake-root.mjs#L10), [cto/lake-root.mjs:65](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/cto/lake-root.mjs#L65)).
 
 #### 10.2 Principal
 
@@ -1169,13 +1169,13 @@ terminal 전환은 단일 트랜잭션에서:
 
 ### 영향 함수 `file:line`
 
-- 현재 topic/`is_cto` 기반 후보 판정: [hub/router.mjs:190](../../../../hub/router.mjs:190)
-- 현재 takeover가 `requested_by`를 검증하지 않음: [hub/router.mjs:1095](../../../../hub/router.mjs:1095)
-- MCP takeover schema도 요청 문자열을 직접 받음: [hub/tools.mjs:188](../../../../hub/tools.mjs:188)
-- HTTP takeover도 payload를 그대로 전달: [hub/server.mjs:1685](../../../../hub/server.mjs:1685)
-- 일반 SessionStart 등록: [hooks/session-start-fast.mjs:243](../../../../hooks/session-start-fast.mjs:243)
-- 현재 lead 생성 표면: [hub/team/orchestrator.mjs:52](../../../../hub/team/orchestrator.mjs:52)
-- raw canonical root resolver: [cto/lake-root.mjs:29](../../../../cto/lake-root.mjs:29)
+- 현재 topic/`is_cto` 기반 후보 판정: [hub/router.mjs:190](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L190)
+- 현재 takeover가 `requested_by`를 검증하지 않음: [hub/router.mjs:1095](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L1095)
+- MCP takeover schema도 요청 문자열을 직접 받음: [hub/tools.mjs:188](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/tools.mjs#L188)
+- HTTP takeover도 payload를 그대로 전달: [hub/server.mjs:1685](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/server.mjs#L1685)
+- 일반 SessionStart 등록: [hooks/session-start-fast.mjs:243](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hooks/session-start-fast.mjs#L243)
+- 현재 lead 생성 표면: [hub/team/orchestrator.mjs:52](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/team/orchestrator.mjs#L52)
+- raw canonical root resolver: [cto/lake-root.mjs:29](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/cto/lake-root.mjs#L29)
 
 ### 수용 테스트
 
