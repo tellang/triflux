@@ -15,6 +15,7 @@ import { afterEach, test } from "node:test";
 import {
   cleanupLegacyMcp,
   MCP_PACKAGE_PINS,
+  pinRegistryMcpPackages,
 } from "../../scripts/lib/legacy-mcp-cleanup.mjs";
 
 const dirs = [];
@@ -439,4 +440,43 @@ test("이주가 써 넣는 MCP 패키지는 버전이나 커밋으로 고정한�
     "-y",
     MCP_PACKAGE_PINS["brave-search"],
   ]);
+});
+
+test("레지스트리 고정은 버전만 다른 항목만 바꾸고 사용자 인자와 다른 패키지는 남긴다", () => {
+  const { home } = fixture();
+  const registry = {
+    servers: {
+      brave: {
+        command: "npx",
+        args: ["-y", "@brave/brave-search-mcp-server@2.1.4"],
+      },
+    },
+  };
+  const entry = (args) => ({ mcpServers: { brave: { command: "npx", args } } });
+  const files = {
+    ".claude.json": entry(["-y", "@brave/brave-search-mcp-server@2.0.0"]),
+    ".mcp.json": entry(["-y", "@brave/brave-search-mcp-server", "--x"]),
+    ".gemini/config/mcp_config.json": entry(["-y", "brave-search-fork"]),
+  };
+  for (const [path, data] of Object.entries(files))
+    writeFileSync(join(home, path), JSON.stringify(data));
+  writeFileSync(
+    join(home, ".codex/config.toml"),
+    '[mcp_servers.brave]\ncommand = "npx"\nargs = ["-y", "@brave/brave-search-mcp-server"]\n',
+  );
+  const result = pinRegistryMcpPackages({ home, registry });
+  assert.equal(result.pinned, 2);
+  const args = (path) =>
+    JSON.parse(readFileSync(join(home, path), "utf8")).mcpServers.brave.args;
+  assert.deepEqual(args(".claude.json"), registry.servers.brave.args);
+  assert.deepEqual(args(".mcp.json"), files[".mcp.json"].mcpServers.brave.args);
+  assert.deepEqual(
+    args(".gemini/config/mcp_config.json"),
+    files[".gemini/config/mcp_config.json"].mcpServers.brave.args,
+  );
+  assert.match(
+    readFileSync(join(home, ".codex/config.toml"), "utf8"),
+    /args = \["-y","@brave\/brave-search-mcp-server@2\.1\.4"\]/,
+  );
+  assert.equal(pinRegistryMcpPackages({ home, registry }).changed, false);
 });

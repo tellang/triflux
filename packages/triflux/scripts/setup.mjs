@@ -35,7 +35,11 @@ import {
   cleanupAgyHooks,
   cleanupLegacyHooks,
 } from "./lib/legacy-hook-cleanup.mjs";
-import { cleanupLegacyMcp, cleanupTfxHub } from "./lib/legacy-mcp-cleanup.mjs";
+import {
+  cleanupLegacyMcp,
+  cleanupTfxHub,
+  pinRegistryMcpPackages,
+} from "./lib/legacy-mcp-cleanup.mjs";
 import {
   MACHINE_PROFILE_KEYS,
   parseMachineProfileContent,
@@ -2014,6 +2018,14 @@ export async function runDeferred(stdinData) {
   });
   for (const warning of hubCleanup.warnings) io.log(`  ⚠ ${warning}`);
   if (hubCleanup.changed) io.log("  허브 설정과 실행 흔적 정리");
+
+  const mcpPins = pinRegistryMcpPackages({
+    home: _TFX_HOME,
+    backups: mcpBackups,
+  });
+  for (const warning of mcpPins.warnings) io.log(`  ⚠ ${warning}`);
+  if (mcpPins.pinned)
+    io.log(`  MCP 패키지 고정 버전 반영: ${mcpPins.pinned}개 항목`);
 
   const pkgVersion = getPackageVersion();
   const marker = readMarker();

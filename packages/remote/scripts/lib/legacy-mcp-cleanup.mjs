@@ -15,9 +15,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { homedir, platform as osPlatform } from "node:os";
+import { homedir, platform as osPlatform, userInfo } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { loadRegistryOrDefault } from "./mcp-guard-engine.mjs";
 
 const require = createRequire(import.meta.url);
 const toml = require("@iarna/toml");
@@ -1232,6 +1233,152 @@ export function cleanupTfxHub({
       result.warnings.push(
         `${snapshots}: 삭제 실패 (${error.code ?? error.message})`,
       );
+    }
+  }
+  return result;
+}
+
+// doctor 가 레지스트리와 비교하는 사용자 설정 파일. [HOME 기준 경로, 형식, 클라이언트]
+const REGISTRY_PIN_FILES = [
+  [".claude.json", "json", "claude"],
+  [".mcp.json", "json", "claude"],
+  [".claude/mcp.json", "json", "claude"],
+  [".codex/config.toml", "toml", "codex"],
+  [".gemini/config/mcp_config.json", "json", "antigravity"],
+];
+
+// 범위 이름(@scope/name)의 첫 @ 는 이름에 속한다.
+function splitPackageSpec(spec) {
+  const match = /^((?:@[^/@\s]+\/)?[^@\s]+)(?:@(\S+))?$/.exec(spec);
+  return match ? { name: match[1], version: match[2] ?? null } : null;
+}
+
+// 명령과 인자 수가 같고, 다른 자리는 레지스트리의 고정 패키지와 이름만 같을 때 고정 인자를 돌려준다.
+function pinnedArgs(entry, server) {
+  if (entry?.command !== server.command || !Array.isArray(entry.args))
+    return null;
+  if (entry.args.length !== server.args.length) return null;
+  let changed = false;
+  for (const [index, want] of server.args.entries()) {
+    const have = entry.args[index];
+    if (have === want) continue;
+    const pin = splitPackageSpec(want);
+    if (!pin?.version || typeof have !== "string") return null;
+    if (splitPackageSpec(have)?.name !== pin.name) return null;
+    changed = true;
+  }
+  return changed ? [...server.args] : null;
+}
+
+function pinJson(original, servers) {
+  const data = JSON.parse(original);
+  let count = 0;
+  for (const [name, server] of servers) {
+    const entry = data?.mcpServers?.[name];
+    const args = pinnedArgs(entry, server);
+    if (!args) continue;
+    entry.args = args;
+    count++;
+  }
+  return {
+    output: count ? `${JSON.stringify(data, null, 2)}\n` : original,
+    count,
+  };
+}
+
+// [mcp_servers.<name>] 머리글 다음 줄부터 다음 표 머리글 전까지의 범위.
+function tomlSectionBody(text, name) {
+  let offset = 0;
+  let start = -1;
+  for (const line of text.split(/(?<=\n)/)) {
+    if (start >= 0 && /^\s*\[/.test(line)) return { start, end: offset };
+    const match = line.match(
+      /^\[mcp_servers\.(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\]\s*(?:#.*)?\r?\n?$/,
+    );
+    offset += line.length;
+    if ((match?.[1] ?? match?.[2] ?? match?.[3]) === name) start = offset;
+  }
+  return start >= 0 ? { start, end: offset } : null;
+}
+
+function pinToml(original, servers) {
+  const data = toml.parse(original);
+  let output = original;
+  let count = 0;
+  for (const [name, server] of servers) {
+    const args = pinnedArgs(data.mcp_servers?.[name], server);
+    const section = args && tomlSectionBody(output, name);
+    if (!section) continue;
+    const body = output.slice(section.start, section.end);
+    const next = body.replace(
+      /^([ \t]*args[ \t]*=[ \t]*)\[[^\]]*\]/m,
+      `$1${JSON.stringify(args)}`,
+    );
+    if (next === body) continue;
+    output = output.slice(0, section.start) + next + output.slice(section.end);
+    data.mcp_servers[name].args = args;
+    count++;
+  }
+  if (count && !isDeepStrictEqual(toml.parse(output), data))
+    throw new Error("TOML 구조 불일치");
+  return { output, count };
+}
+
+/** 레지스트리 stdio 항목 중 패키지 버전만 다른 것을 레지스트리 고정 버전으로 바꾼다. */
+export function pinRegistryMcpPackages({
+  home = homedir(),
+  registry = loadRegistryOrDefault(),
+  backups,
+} = {}) {
+  const result = {
+    ok: true,
+    changed: false,
+    pinned: 0,
+    backups: [],
+    warnings: [],
+  };
+  // 테스트가 실제 홈의 설정을 바꾸지 않게 한다.
+  if (
+    process.env.NODE_TEST_CONTEXT &&
+    resolve(home) === resolve(userInfo().homedir)
+  ) {
+    result.skipped = true;
+    return result;
+  }
+  const stdio = Object.entries(registry?.servers ?? {}).filter(
+    ([, server]) =>
+      typeof server?.command === "string" && Array.isArray(server.args),
+  );
+  const seen = new Set();
+  for (const [relative, kind, client] of REGISTRY_PIN_FILES) {
+    const servers = stdio.filter(([, server]) =>
+      (server.targets ?? ["claude", "codex", "antigravity"]).includes(client),
+    );
+    if (!servers.length) continue;
+    const file = join(home, relative);
+    try {
+      const target = fileTarget(file);
+      if (!target || !markFirst(seen, target)) continue;
+      const original = readFileSync(target, "utf8");
+      if (!original.trim()) continue;
+      const plan =
+        kind === "toml"
+          ? pinToml(original, servers)
+          : pinJson(original, servers);
+      if (!plan.count) continue;
+      if (
+        fileTarget(file) !== target ||
+        readFileSync(target, "utf8") !== original
+      ) {
+        result.warnings.push(`${file}: 검사 후 변경되어 건너뜀`);
+        continue;
+      }
+      result.backups.push(writeAtomic(file, target, plan.output, backups));
+      result.pinned += plan.count;
+      result.changed = true;
+    } catch {
+      result.warnings.push(`${file}: MCP 버전 고정 반영 실패, 파일 보존`);
+      result.ok = false;
     }
   }
   return result;
