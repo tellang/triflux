@@ -415,8 +415,19 @@ export function getCodexRateLimits({
         try {
           let scanned = 0;
           let bytesAfterFirstBucket = 0;
-          for (let line = reader.next(); line !== null; line = reader.next()) {
-            if (++scanned > maxLinesPerFile) break;
+          // 다음 줄을 읽기 전에 한도를 본다. 안 볼 줄을 만들려고 큰 줄을 읽지 않기 위해서다.
+          while (
+            scanned < maxLinesPerFile &&
+            bytesAfterFirstBucket < EXTRA_BYTES_AFTER_FIRST_BUCKET
+          ) {
+            const line = reader.next();
+            if (line === null) break;
+            scanned++;
+            // 같은 시점의 다른 limit_id 는 인접해 기록된다. 첫 버킷을 찾은 뒤에는 일정 바이트만 더 보고 멈춰,
+            // 단일 버킷 계정에서 800줄(파일 거의 전체)을 끝까지 읽지 않는다.
+            if (Object.keys(found).length > 0) {
+              bytesAfterFirstBucket += Buffer.byteLength(line) + 1;
+            }
             try {
               const evt = JSON.parse(line);
               const rl = evt?.payload?.rate_limits;
@@ -454,15 +465,7 @@ export function getCodexRateLimits({
             } catch {
               /* 라인 파싱 실패 무시 */
             }
-            const foundCount = Object.keys(found).length;
-            if (foundCount >= CODEX_MIN_BUCKETS) break;
-            // 같은 시점의 다른 limit_id 는 인접해 기록된다. 첫 버킷 뒤로 일정 바이트만 더 보고 멈춰,
-            // 단일 버킷 계정에서 800줄(파일 거의 전체)을 끝까지 읽지 않는다.
-            if (foundCount > 0) {
-              bytesAfterFirstBucket += line.length;
-              if (bytesAfterFirstBucket >= EXTRA_BYTES_AFTER_FIRST_BUCKET)
-                break;
-            }
+            if (Object.keys(found).length >= CODEX_MIN_BUCKETS) break;
           }
         } finally {
           reader.close();
