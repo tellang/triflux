@@ -737,22 +737,72 @@ describe("Codex multi-window selection", () => {
     it("reverse reader: 작은 청크에서도 옛 trim().split().reverse() 와 같은 줄을 낸다", () => {
       const dir = mkdtempSync(join(tmpdir(), "triflux-codex-tail-"));
       try {
-        const text = ["첫 줄", "", "가나다 ".repeat(40), '{"a":1}', "끝"].join(
-          "\n",
-        );
         const file = join(dir, "a.jsonl");
-        writeFileSync(file, `${text}\n\n`);
-        const expected = text.trim().split("\n").reverse();
-        for (const chunk of [1, 3, 7, 64]) {
-          const reader = createReverseLineReader(file, chunk);
-          const got = [];
-          for (let l = reader.next(); l !== null; l = reader.next())
-            got.push(l);
-          reader.close();
-          assert.deepEqual(got, expected, `chunk=${chunk}`);
+        const samples = [
+          ["첫 줄", "", "가나다 ".repeat(40), '{"a":1}', "끝"].join("\n") +
+            "\n\n",
+          "\uFEFF\n \t첫\n\n끝\u00a0\n\r\n",
+          "   \n \n",
+          "",
+          "한 줄",
+        ];
+        for (const text of samples) {
+          writeFileSync(file, text);
+          const expected = text.trim().split("\n").reverse();
+          for (const chunk of [1, 3, 7, 64]) {
+            const reader = createReverseLineReader(file, chunk);
+            const got = [];
+            for (let l = reader.next(); l !== null; l = reader.next()) {
+              got.push(l);
+            }
+            reader.close();
+            assert.deepEqual(got, expected, `chunk=${chunk}`);
+          }
         }
       } finally {
         rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("첫 버킷 뒤 64KB 안에 다른 limit_id 가 없으면 첫 버킷만 반환한다", () => {
+      const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-cut-"));
+      try {
+        const now = new Date("2026-07-11T06:30:00.000Z");
+        const nowSec = Math.floor(now.getTime() / 1000);
+        const other = rateLimitEvent({
+          timestamp: "2026-07-11T05:00:00.000Z",
+          usedPercent: 50,
+          resetsAt: nowSec + 3600,
+        });
+        other.payload.rate_limits.limit_id = "codex_other";
+        const filler = {
+          timestamp: "2026-07-11T05:30:00.000Z",
+          payload: { output: "x".repeat(70_000) },
+        };
+        const newest = rateLimitEvent({
+          timestamp: "2026-07-11T06:20:00.000Z",
+          usedPercent: 33,
+          resetsAt: nowSec + 3600,
+        });
+        writeRollout(sessionsRoot, now, "rollout-far.jsonl", [
+          other,
+          filler,
+          newest,
+        ]);
+        const far = getCodexRateLimits({ sessionsRoot, now });
+        assert.equal(far.codex.primary.used_percent, 33);
+        assert.equal(far.codex_other, undefined);
+
+        const nearRoot = mkdtempSync(join(tmpdir(), "triflux-codex-near-"));
+        try {
+          writeRollout(nearRoot, now, "rollout-near.jsonl", [other, newest]);
+          const near = getCodexRateLimits({ sessionsRoot: nearRoot, now });
+          assert.equal(near.codex_other.primary.used_percent, 50);
+        } finally {
+          rmSync(nearRoot, { recursive: true, force: true });
+        }
+      } finally {
+        rmSync(sessionsRoot, { recursive: true, force: true });
       }
     });
 

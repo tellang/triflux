@@ -263,54 +263,93 @@ function mergeRateLimitSnapshots(snapshots, nowSec) {
 
 const EXTRA_BYTES_AFTER_FIRST_BUCKET = 64 * 1024;
 const REVERSE_READ_CHUNK_BYTES = 64 * 1024;
-const TRAILING_WHITESPACE = new Set([0x20, 0x09, 0x0a, 0x0d]);
 
 // 파일 끝에서 줄 단위로 거슬러 읽는다. 호출자가 멈추는 지점까지만 디스크를 읽는다.
 // 0x0A 로만 나누므로 멀티바이트 UTF-8 이 청크 경계에서 깨지지 않는다.
-// 끝의 공백은 버리고 중간의 빈 줄은 유지해 옛 trim().split("\n").reverse() 와 같은 줄을 낸다.
+// 파일 양끝의 공백은 문자열 trim() 과 같게 버리고 중간의 빈 줄은 유지해,
+// 옛 content.trim().split("\n").reverse() 와 같은 줄을 낸다.
 export function createReverseLineReader(
   path,
   chunkBytes = REVERSE_READ_CHUNK_BYTES,
 ) {
   const fd = openSync(path, "r");
-  let pos = fstatSync(fd).size;
-  let carry = Buffer.alloc(0); // 아직 줄 시작을 못 만난 앞부분
-  let trimming = true;
-  let queue = pos === 0 ? [""] : [];
+  let pos;
+  try {
+    pos = fstatSync(fd).size;
+  } catch (err) {
+    closeSync(fd);
+    throw err;
+  }
+  let carryParts = []; // 아직 줄 시작을 못 만난 뒷부분 조각(긴 줄도 한 번만 이어 붙인다)
+  let queue = [];
+  let trimmingTail = true;
+  let stash = [];
+  let yielded = false;
+  let emptyGiven = false;
+
+  function fill() {
+    const size = Math.min(chunkBytes, pos);
+    const chunk = Buffer.alloc(size);
+    pos -= size;
+    readSync(fd, chunk, 0, size, pos);
+    reader.bytesRead += size;
+    const pieces = [];
+    let start = 0;
+    for (
+      let i = chunk.indexOf(0x0a);
+      i !== -1;
+      i = chunk.indexOf(0x0a, start)
+    ) {
+      pieces.push(chunk.subarray(start, i));
+      start = i + 1;
+    }
+    pieces.push(chunk.subarray(start));
+    if (pieces.length === 1 && pos > 0) {
+      carryParts.unshift(chunk);
+      return;
+    }
+    const last = pieces.length - 1;
+    pieces[last] = Buffer.concat([pieces[last], ...carryParts]);
+    carryParts = [];
+    if (pos > 0) carryParts = [pieces.shift()];
+    const lines = pieces.map((piece) => piece.toString("utf-8"));
+    queue = lines;
+  }
+
+  // stash 에 되돌려 둔 줄을 먼저, 그다음 큐에서 줄을 꺼낸다.
+  function pull() {
+    if (stash.length > 0) return stash.shift();
+    while (queue.length === 0 && pos > 0) fill();
+    return queue.length > 0 ? queue.pop() : null;
+  }
+
   const reader = {
     bytesRead: 0,
     // 줄이 더 없으면 null
     next() {
-      while (queue.length === 0 && pos > 0) {
-        const size = Math.min(chunkBytes, pos);
-        const chunk = Buffer.alloc(size);
-        pos -= size;
-        readSync(fd, chunk, 0, size, pos);
-        reader.bytesRead += size;
-        let buf = carry.length ? Buffer.concat([chunk, carry]) : chunk;
-        if (trimming) {
-          let end = buf.length;
-          while (end > 0 && TRAILING_WHITESPACE.has(buf[end - 1])) end--;
-          buf = buf.subarray(0, end);
-          if (end > 0) trimming = false;
-        }
-        const pieces = [];
-        let start = 0;
-        for (
-          let i = buf.indexOf(0x0a);
-          i !== -1;
-          i = buf.indexOf(0x0a, start)
-        ) {
-          pieces.push(buf.subarray(start, i));
-          start = i + 1;
-        }
-        pieces.push(buf.subarray(start));
-        carry = pieces[0];
-        queue = pieces
-          .slice(pos === 0 ? 0 : 1)
-          .map((piece) => piece.toString("utf-8"));
+      let line = pull();
+      while (line !== null && trimmingTail && line.trim() === "") line = pull();
+      if (line === null) {
+        if (yielded || emptyGiven) return null;
+        emptyGiven = true; // 빈 파일도 옛 split 처럼 빈 줄 하나를 낸다
+        return "";
       }
-      return queue.length ? queue.pop() : null;
+      yielded = true;
+      if (trimmingTail) {
+        trimmingTail = false;
+        line = line.trimEnd();
+      }
+      if (line.trim() === "") return line;
+      // 파일 맨 앞의 공백 줄은 trim 으로 사라진다. 뒤에 내용이 이어지는지 미리 본다.
+      const blanks = [];
+      let following = pull();
+      while (following !== null && following.trim() === "") {
+        blanks.push(following);
+        following = pull();
+      }
+      if (following === null) return line.trimStart();
+      stash = [...blanks, following];
+      return line;
     },
     close() {
       try {
