@@ -41,6 +41,14 @@ function isGcpProjectAuth() {
   return Boolean(readJson(ANTIGRAVITY_SETTINGS_PATH, null)?.gcp?.project);
 }
 
+// Keychain 인증은 파일을 남기지 않으므로 쿼터 조회 성공 기록도 로그인 근거로 본다.
+export function getAntigravityAuthKind() {
+  if (isGcpProjectAuth()) return "project";
+  if (getAntigravityAccountLabel()) return "account";
+  const cache = readJson(ANTIGRAVITY_QUOTA_CACHE_PATH, null);
+  return Array.isArray(cache?.buckets) ? "account" : null;
+}
+
 export function readAntigravityQuotaSnapshot() {
   // 프로젝트 과금의 기본 응답을 개인 플랜의 0% 사용률로 표시하지 않는다.
   if (isGcpProjectAuth()) return { data: null, shouldRefresh: false };
