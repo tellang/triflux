@@ -82,10 +82,6 @@ function readProfileScalar(raw, key) {
  * naming convention when the file is absent. Returns the keys that resolve, in
  * `key="value"` TOML-scalar form ready to be shell-quoted by the caller.
  *
- * NOTE: the Codex MCP transport does the structured-arg equivalent in
- * hub/workers/codex-mcp.mjs (resolveCodexProfileConfig → model + config object);
- * this returns the CLI `-c` string form for the same per-profile file.
- *
  * @param {string} profileName
  * @param {{ codexHome?: string }} [opts]
  * @returns {string[]} e.g. ['model="gpt-6.1-sol"', 'model_reasoning_effort="high"']

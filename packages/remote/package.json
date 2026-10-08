@@ -14,9 +14,6 @@
   "peerDependencies": {
     "@triflux/core": "^10.0.0-alpha.1"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1"
-  },
   "files": [
     "hub",
     "scripts/lib"

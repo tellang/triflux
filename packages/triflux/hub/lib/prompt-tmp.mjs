@@ -1,4 +1,4 @@
-// macOS codex exec 의 훅이 4KB 넘는 argv 프롬프트에서 실패해 stdin 리다이렉트용 파일로 넘긴다.
+// 프롬프트를 argv 로 넘기면 ps 에 보이므로 stdin 리다이렉트용 파일로 넘긴다.
 // 파일은 매번 새 이름이고 정리는 OS 임시 디렉터리 정리에 맡긴다.
 
 import { writeFileSync } from "node:fs";

@@ -49,9 +49,9 @@ triflux 는 root 와 `packages/{core,remote,triflux}/` 3개 published 레이어�
 
 | 위치 | import 형태 |
 |------|------------|
-| `hub/team/backend.mjs` | `import { buildExecArgs } from "../codex-adapter.mjs"` |
+| `hub/team/backend.mjs` | `import { writePromptToTmpFile } from "../lib/prompt-tmp.mjs"` |
 | `packages/triflux/hub/team/backend.mjs` | root와 동일 |
-| `packages/remote/hub/team/backend.mjs` | `import { buildExecArgs } from "@triflux/core/hub/codex-adapter.mjs"` |
+| `packages/remote/hub/team/backend.mjs` | `import { writePromptToTmpFile } from "@triflux/core/hub/lib/prompt-tmp.mjs"` |
 
 mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (덮어쓰면 import path 가 revert 됨).
 
@@ -121,7 +121,7 @@ shard 가 `references/{codex,gemini}-snapshots/` 같은 경로에 100MB+ binary 
 
 | 패턴 | 문제 | 대체 |
 |------|------|------|
-| `cp hub/team/foo.mjs packages/remote/hub/team/` | import path 가 `../codex-adapter.mjs` 같은 상대 경로로 덮어써져 remote 패키지가 자기 모듈을 못 찾음 | `Edit` 으로 packages/remote 만 `@triflux/core/...` 유지 |
+| `cp hub/team/foo.mjs packages/remote/hub/team/` | import path 가 `../lib/prompt-tmp.mjs` 같은 상대 경로로 덮어써져 remote 패키지가 자기 모듈을 못 찾음 | `Edit` 으로 packages/remote 만 `@triflux/core/...` 유지 |
 | `cp -r tests/ packages/core/tests/` | npm files 미포함이라 publish 에 안 들어감, untracked 디렉토리만 늘어남 | tests 는 mirror 제외 — 시도 자체 금지 |
 | 신규 binary path 추가 시 `.gitignore` 만 추가 | `packages/triflux/package.json` files 가 root 와 다르므로 npm pack 이 binary 포함, tarball 폭증 → publish 실패 | files 부정 패턴 동반 추가 + `npm pack --dry-run` 검증 |
 | root 만 수정하고 packages 누락한 채 ship | v10.x.x 릴리즈 후 chore PR 로 늦게 sync (PR #219 패턴) | 코드 변경 PR 안에서 동시에 mirror — sync chore PR 은 backfill 용일 때만 |

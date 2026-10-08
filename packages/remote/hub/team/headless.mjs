@@ -252,12 +252,7 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const handoffHint = handoff ? `\n\n${HANDOFF_INSTRUCTION_SHORT}` : "";
   const fullPrompt = `${contextPrefix}${prompt}${mcpHint}${workspaceHint}${handoffHint}`;
 
-  // 보안: 프롬프트를 임시 파일에 쓰고 파일 참조로 전달 (셸 주입 방지).
-  // 이전 구현은 `"$(cat 'PATH')"` shell-expansion expression 을 만들어
-  // backend.buildArgs 에 전달했는데, 새 stdin-prompt 모드 (PR #252) 가
-  // 그 literal 을 user message 로 해석해서 codex 가 prompt 가 아닌
-  // shell expression 자체를 받는 회귀가 있었다. 이제 fullPrompt 를 그대로
-  // 전달하고 buildExecCommand 가 자체적으로 tmp file 작성 + stdin redirect.
+  // 보안: 프롬프트를 임시 파일에 쓰고 파일 참조로 전달한다(셸 주입 방지).
   const promptFile = join(
     resultDir(),
     "prompt-" + randomUUID().slice(0, 8) + ".txt",

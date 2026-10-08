@@ -12,7 +12,6 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
-  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -20,7 +19,6 @@ import {
   renameSync,
   rmSync,
   statSync,
-  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
@@ -1386,32 +1384,6 @@ function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
   return removed;
 }
 
-function linkHubNodeModules(
-  workerNodeModules,
-  log,
-  link = join(CLAUDE_DIR, "hub", "node_modules"),
-) {
-  const sdk = join("@modelcontextprotocol", "sdk", "package.json");
-  if (!existsSync(join(workerNodeModules, sdk)) || existsSync(join(link, sdk)))
-    return;
-  try {
-    // 끊어졌거나 다른 곳을 가리키는 링크만 바꾸고, 실제 디렉터리는 사용자 것일 수 있어 둔다.
-    const current = lstatSync(link, { throwIfNoEntry: false });
-    if (current && !current.isSymbolicLink()) {
-      log(`⚠ ${link}: SDK 가 없는 디렉터리라 codex worker 가 실패할 수 있음`);
-      return;
-    }
-    if (current) unlinkSync(link);
-    mkdirSync(dirname(link), { recursive: true });
-    // Windows 에서는 관리자 권한 없이 만들 수 있는 junction 을 쓴다.
-    symlinkSync(workerNodeModules, link, "junction");
-  } catch (error) {
-    log(
-      `⚠ ${link}: 링크 실패 (${error.code ?? error.message}), codex worker 가 SDK 를 못 찾음`,
-    );
-  }
-}
-
 /** 패키지에서 빠진 옛 설치 파일을 보관 디렉터리로 옮기고 이번 배포 목록을 매니페스트로 남긴다. */
 function retireOldInstallFiles(log = console.log) {
   const files = SYNC_MAP.map(({ label }) => label);
@@ -1903,7 +1875,6 @@ export {
   LEGACY_CODEX_MODELS,
   LEGACY_CODEX_PROFILE_NAMES,
   LOCAL_DEV_SKILL_MARKER,
-  linkHubNodeModules,
   listInlineProfileNames,
   PLUGIN_ROOT,
   REQUIRED_CODEX_PROFILES,
@@ -2069,33 +2040,8 @@ export async function runDeferred(stdinData) {
     }
   }
 
-  // ── Worker 의존성 동기화 (MCP SDK + transitive deps) ──
-
-  const workerNodeModules = join(CLAUDE_DIR, "scripts", "node_modules");
-  const mcpSdkPath = join(workerNodeModules, "@modelcontextprotocol", "sdk");
-  const srcNodeModules = join(PLUGIN_ROOT, "node_modules");
-
-  if (!existsSync(mcpSdkPath) && existsSync(srcNodeModules)) {
-    try {
-      for (const entry of readdirSync(srcNodeModules)) {
-        const src = join(srcNodeModules, entry);
-        const dst = join(workerNodeModules, entry);
-        if (existsSync(dst)) continue;
-
-        mkdirSync(dirname(dst), { recursive: true });
-        cpSync(src, dst, { recursive: true });
-      }
-      synced++;
-    } catch {
-      // best effort: 의존성 복사 실패 시 exec fallback으로 동작
-    }
-  }
-
-  // hub 사본(~/.claude/hub)은 scripts/node_modules 의 조상이 아니라 bare import 가 풀리지 않는다.
-  linkHubNodeModules(workerNodeModules, (message) => io.log(`  ${message}`));
-
   try {
-    synced += syncWorkerPackages({ workerNodeModules });
+    synced += syncWorkerPackages();
   } catch (error) {
     io.log(
       `  \x1b[33m⚠\x1b[0m worker package sync skipped: ${_normalizeErrorMessage(error)}`,
