@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
-  constants,
   copyFileSync,
   linkSync,
   lstatSync,
@@ -38,11 +37,14 @@ export function findTmr({ home, env = process.env }) {
     tmrBinDir(home),
     ...String(env.PATH || "").split(delimiter),
   ].filter(Boolean);
-  // 깨진 링크도 사용자 것으로 보고 건드리지 않는다.
+  // 깨진 링크도 사용자 것으로 보고 건드리지 않는다. 읽을 수 없는 PATH 항목은 건너뛴다.
   for (const dir of dirs)
-    for (const name of ["tmuxrooms", "tmr"])
-      if (lstatSync(join(dir, name), { throwIfNoEntry: false }))
-        return join(dir, name);
+    for (const name of ["tmuxrooms", "tmr"]) {
+      try {
+        if (lstatSync(join(dir, name), { throwIfNoEntry: false }))
+          return join(dir, name);
+      } catch {}
+    }
   return null;
 }
 
@@ -104,14 +106,18 @@ export async function installTmr({
     const binDir = tmrBinDir(home);
     mkdirSync(binDir, { recursive: true, mode: 0o755 });
     const target = join(binDir, "tmuxrooms");
-    const temporary = `${target}.tfx-${process.pid}.tmp`;
+    // 임시 파일은 이번 시도만 쓰는 디렉터리에 둔다. 정리할 때 남의 파일을 지우지 않는다.
+    const staging = mkdtempSync(join(binDir, ".tfx-tmr-"));
+    let published;
     try {
-      copyFileSync(extracted, temporary, constants.COPYFILE_EXCL);
+      const temporary = join(staging, "tmuxrooms");
+      copyFileSync(extracted, temporary);
       chmodSync(temporary, 0o755);
+      published = lstatSync(temporary).ino;
       // 묻는 사이 다른 쪽이 tmuxrooms 를 만들었으면 덮지 않고 실패한다(EEXIST).
       linkSync(temporary, target);
     } finally {
-      rmSync(temporary, { force: true });
+      rmSync(staging, { recursive: true, force: true });
     }
     const link = join(binDir, "tmr");
     try {
@@ -119,8 +125,9 @@ export async function installTmr({
       if (!lstatSync(link, { throwIfNoEntry: false }))
         symlink("tmuxrooms", link);
     } catch (error) {
-      // 링크까지 못 만들면 이번에 넣은 파일을 되돌려 다음 setup 이 다시 시도하게 한다.
-      rmSync(target, { force: true });
+      // 링크까지 못 만들면 이번에 넣은 파일만 되돌려 다음 setup 이 다시 시도하게 한다.
+      if (lstatSync(target, { throwIfNoEntry: false })?.ino === published)
+        rmSync(target, { force: true });
       throw error;
     }
 

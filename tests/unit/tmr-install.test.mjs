@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -156,4 +157,43 @@ test("묻는 사이 생긴 tmuxrooms 는 덮지 않고, 링크를 못 만들면 
     { code: "ENOSPC" },
   );
   assert.equal(existsSync(join(other, ".local", "bin", "tmuxrooms")), false);
+
+  // 실패 직전에 다른 쪽이 tmuxrooms 를 바꿔 놓았으면 그 파일은 남긴다.
+  const third = makeHome();
+  const thirdBin = join(third, ".local", "bin");
+  await assert.rejects(
+    installTmr({
+      ...options,
+      home: third,
+      extract: fakeExtract,
+      symlink: () => {
+        rmSync(join(thirdBin, "tmuxrooms"));
+        writeFileSync(join(thirdBin, "tmuxrooms"), "user");
+        throw Object.assign(new Error("no space"), { code: "ENOSPC" });
+      },
+    }),
+    { code: "ENOSPC" },
+  );
+  assert.equal(readFileSync(join(thirdBin, "tmuxrooms"), "utf8"), "user");
+});
+
+test("읽을 수 없는 PATH 항목이 있어도 동의 단계가 멈추지 않는다", {
+  skip: process.getuid?.() === 0,
+}, async () => {
+  const home = makeHome();
+  const locked = join(home, "locked");
+  mkdirSync(locked);
+  chmodSync(locked, 0o000);
+  try {
+    const result = await offerTmrInstall({
+      home,
+      env: { PATH: locked },
+      platform: "darwin",
+      arch: "arm64",
+      interactive: false,
+    });
+    assert.equal(result, "deferred");
+  } finally {
+    chmodSync(locked, 0o755);
+  }
 });
