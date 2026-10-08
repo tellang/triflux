@@ -223,6 +223,7 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
               type: "command",
               command:
                 '"/opt/node" "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
+              timeout: 15,
             },
           ],
         },

@@ -237,52 +237,97 @@ export function cleanupLegacyHooks({
 
 const AGY_HOOK_GROUP = "triflux-session";
 
-// 옛 ensure-agy-hooks 는 "<node 경로>" 뒤에 따옴표로 감싼 훅 스크립트 경로를 붙였다. node 경로는
-// 버전에 따라 따옴표가 없거나(공백 포함 가능) Windows 에서 백슬래시를 두 번 썼다.
-// 그래서 끝이 따옴표로 감싼 .../hooks/agy-session-hook.mjs 인 명령만 우리 것으로 본다.
-const AGY_HOOK_COMMAND =
-  /^\S.*\s"[^"]*hooks(?:\/|\\{1,2})agy-session-hook\.mjs"$/u;
+// 옛 ensure-agy-hooks 의 quoteCommandPath 와 같은 인용.
+function quoteAgyCommandPath(value) {
+  return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
 
-// 그룹의 모든 명령이 옛 setup 의 것일 때만 지운다. 사용자가 끈 그룹(enabled: false)은 둔다.
-function isTrifluxAgyGroup(group) {
-  if (!group || typeof group !== "object" || group.enabled === false)
-    return false;
-  const entries = Object.values(group).filter(Array.isArray).flat();
-  return (
-    entries.length > 0 &&
-    entries.every(
-      (entry) =>
-        entry?.type === "command" &&
-        AGY_HOOK_COMMAND.test(String(entry.command ?? "")),
-    )
+function unquoteAgyCommandPath(quoted) {
+  return quoted.slice(1, -1).replace(/\\(["\\])/g, "$1");
+}
+
+function lastSegments(path, count) {
+  return path.split(/[/\\]+/u).slice(-count);
+}
+
+// 옛 설치기가 만든 명령을 풀어 같은 공식으로 다시 만들었을 때 똑같아야 한다.
+// 첫 버전은 node 경로를 따옴표 없이, 이후 버전은 따옴표로 감쌌다.
+function isInstallerAgyCommand(command) {
+  const match = /^(?:("(?:[^"\\]|\\.)*")|([^"]+)) ("(?:[^"\\]|\\.)*")$/u.exec(
+    command,
   );
+  if (!match) return false;
+  const nodeBin = match[1] ? unquoteAgyCommandPath(match[1]) : match[2];
+  const script = unquoteAgyCommandPath(match[3]);
+  const [dir, file] = lastSegments(script, 2);
+  if (dir !== "hooks" || file !== "agy-session-hook.mjs") return false;
+  if (!/^node(?:\.exe)?$/iu.test(lastSegments(nodeBin, 1)[0])) return false;
+  const rebuilt = `${match[1] ? quoteAgyCommandPath(nodeBin) : nodeBin} ${quoteAgyCommandPath(script)}`;
+  return rebuilt === command;
+}
+
+// 모든 버전의 옛 설치기가 쓴 그룹 모양과 정확히 같을 때만 우리 것이다.
+function isInstallerAgyGroup(group) {
+  if (!group || typeof group !== "object" || Array.isArray(group)) return false;
+  const keys = Object.keys(group).sort().join(",");
+  if (keys !== "PreInvocation,enabled" || group.enabled !== true) return false;
+  const entries = group.PreInvocation;
+  if (!Array.isArray(entries) || entries.length !== 1) return false;
+  const [entry] = entries;
+  return (
+    Object.keys(entry || {})
+      .sort()
+      .join(",") === "command,timeout,type" &&
+    entry.type === "command" &&
+    entry.timeout === 15 &&
+    typeof entry.command === "string" &&
+    isInstallerAgyCommand(entry.command)
+  );
+}
+
+// 자동으로 지우지 않은 그룹 중 훅 스크립트를 언급하는 것. doctor 가 경고만 한다.
+function agyHookMentions(hooks) {
+  return Object.entries(hooks)
+    .filter(([, group]) =>
+      JSON.stringify(group ?? null).includes("agy-session-hook.mjs"),
+    )
+    .map(([name]) => name);
 }
 
 /** agy hooks.json 에서 옛 setup 이 등록한 triflux-session 훅을 지운다. */
 export function cleanupAgyHooks({ geminiConfigHome, dryRun = false } = {}) {
+  const hooksPath = join(
+    geminiConfigHome || join(homedir(), ".gemini", "config"),
+    "hooks.json",
+  );
   const result = {
     ok: true,
     changed: false,
     wouldChange: false,
     removed: 0,
+    leftover: [],
+    hooksPath,
     backupPath: null,
     error: null,
   };
   // 테스트 실행 중에는 명시 경로 없이 실제 HOME 을 고치지 않는다.
   if (!geminiConfigHome && process.env.TEST_LOCK_PID) return result;
-  const hooksPath = join(
-    geminiConfigHome || join(homedir(), ".gemini", "config"),
-    "hooks.json",
-  );
   try {
     if (!existsSync(hooksPath)) return result;
     const targetPath = realpathSync(hooksPath);
     const original = readFileSync(targetPath, "utf8");
     const hooks = JSON.parse(original);
-    if (!isTrifluxAgyGroup(hooks?.[AGY_HOOK_GROUP])) return result;
-    result.removed = 1;
-    result.wouldChange = true;
-    if (dryRun) return result;
+    if (!hooks || typeof hooks !== "object" || Array.isArray(hooks))
+      return result;
+    const ours = isInstallerAgyGroup(hooks[AGY_HOOK_GROUP]);
+    if (ours) {
+      result.removed = 1;
+      result.wouldChange = true;
+    }
+    result.leftover = agyHookMentions(hooks).filter(
+      (name) => !(ours && name === AGY_HOOK_GROUP),
+    );
+    if (!ours || dryRun) return result;
 
     delete hooks[AGY_HOOK_GROUP];
     const mode = statSync(targetPath).mode & 0o777;

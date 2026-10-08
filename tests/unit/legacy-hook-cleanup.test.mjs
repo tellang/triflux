@@ -117,77 +117,55 @@ test("triflux를 언급만 하는 다른 command는 보존한다", () => {
   assert.deepEqual(readdirSync(dir), ["settings.json"]);
 });
 
-test("agy hooks.json 에서 옛 triflux-session 훅만 지우고 다른 그룹과 같은 이름의 남의 훅은 둔다", () => {
+function agyGroup(command, extra = {}) {
+  return {
+    enabled: true,
+    PreInvocation: [{ type: "command", command, timeout: 15 }],
+    ...extra,
+  };
+}
+
+test("agy hooks.json 에서 옛 설치기 모양의 triflux-session 만 지우고 나머지는 경고로 남긴다", () => {
   const dir = mkdtempSync(join(tmpdir(), "tfx-agy-hook-test-"));
   dirs.push(dir);
   const hooksPath = join(dir, "hooks.json");
-  const other = { enabled: true, Stop: [{ type: "command", command: "x" }] };
-  const ours = {
-    enabled: true,
-    PreInvocation: [
-      {
-        type: "command",
-        command: '"/opt/node" "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
-      },
-    ],
+  const run = (hooks, opts = {}) => {
+    writeFileSync(hooksPath, JSON.stringify(hooks));
+    return cleanupAgyHooks({ geminiConfigHome: dir, ...opts });
   };
-  writeFileSync(hooksPath, JSON.stringify({ other, "triflux-session": ours }));
-
-  assert.equal(
-    cleanupAgyHooks({ geminiConfigHome: dir, dryRun: true }).removed,
-    1,
-  );
-  const result = cleanupAgyHooks({ geminiConfigHome: dir });
-  assert.equal(result.changed, true);
-  assert.deepEqual(JSON.parse(readFileSync(hooksPath, "utf8")), { other });
+  const other = { enabled: true, Stop: [{ type: "command", command: "x" }] };
+  // 첫 버전은 node 경로에 따옴표가 없었고, 이후 버전은 Windows 에서 백슬래시를 두 번 썼다.
+  for (const command of [
+    '/opt/My Node/node "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
+    '"C:\\\\Program Files\\\\nodejs\\\\node.exe" "C:\\\\npm\\\\triflux\\\\hooks\\\\agy-session-hook.mjs"',
+  ]) {
+    assert.equal(
+      run({ other, "triflux-session": agyGroup(command) }, { dryRun: true })
+        .removed,
+      1,
+    );
+    const result = run({ other, "triflux-session": agyGroup(command) });
+    assert.equal(result.changed, true);
+    assert.deepEqual(result.leftover, []);
+    assert.deepEqual(JSON.parse(readFileSync(hooksPath, "utf8")), { other });
+  }
   assert.ok(
     readdirSync(dir).some((name) => name.includes("bak-tfx-agy-hooks")),
   );
 
-  const mention = {
-    enabled: true,
-    Stop: [
-      { type: "command", command: "echo agy-session-hook.mjs >> /tmp/a.log" },
-    ],
-  };
-  for (const group of [other, mention, { ...ours, enabled: false }]) {
-    writeFileSync(hooksPath, JSON.stringify({ "triflux-session": group }));
-    assert.equal(cleanupAgyHooks({ geminiConfigHome: dir }).changed, false);
+  // 모양이 다르면 지우지 않고, 훅 스크립트를 가리키면 leftover 로 알린다.
+  const script = '"/opt/triflux/hooks/agy-session-hook.mjs"';
+  for (const group of [
+    agyGroup(`node /opt/tools/report.mjs ${script}`),
+    agyGroup('"/opt/node" "/opt/custom-hooks/agy-session-hook.mjs"'),
+    agyGroup(`"/opt/node" ${script}`, { enabled: false }),
+    agyGroup(`"/opt/node" ${script}`, { Stop: [] }),
+  ]) {
+    const hooks = { "triflux-session": group };
+    const result = run(hooks);
+    assert.equal(result.changed, false);
+    assert.deepEqual(result.leftover, ["triflux-session"]);
+    assert.deepEqual(JSON.parse(readFileSync(hooksPath, "utf8")), hooks);
   }
-  writeFileSync(
-    hooksPath,
-    JSON.stringify({
-      "triflux-session": {
-        PreInvocation: [
-          {
-            type: "command",
-            command:
-              '/opt/My Node/node "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
-          },
-        ],
-      },
-    }),
-  );
-  assert.equal(cleanupAgyHooks({ geminiConfigHome: dir }).changed, true);
-  // Windows 의 옛 설치기는 경로의 백슬래시를 두 번 썼다.
-  writeFileSync(
-    hooksPath,
-    JSON.stringify({
-      "triflux-session": {
-        PreInvocation: [
-          {
-            type: "command",
-            command:
-              '"C:\\\\Program Files\\\\nodejs\\\\node.exe" "C:\\\\npm\\\\triflux\\\\hooks\\\\agy-session-hook.mjs"',
-          },
-        ],
-      },
-    }),
-  );
-  assert.equal(cleanupAgyHooks({ geminiConfigHome: dir }).changed, true);
-
-  const foreign = { "triflux-session": other };
-  writeFileSync(hooksPath, JSON.stringify(foreign));
-  assert.equal(cleanupAgyHooks({ geminiConfigHome: dir }).changed, false);
-  assert.deepEqual(JSON.parse(readFileSync(hooksPath, "utf8")), foreign);
+  assert.deepEqual(run({ "triflux-session": other }).leftover, []);
 });

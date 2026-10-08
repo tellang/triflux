@@ -3077,23 +3077,41 @@ async function cmdDoctor(options = {}) {
     }
 
     // 옛 setup 이 agy hooks.json 에 넣은 triflux-session 훅. 스크립트가 사라져 실행되면 실패한다.
+    // 옛 설치기 모양과 같은 것만 지우고, 다른 모양은 사용자가 정리하도록 경고만 한다.
     const agyHooks = cleanupAgyHooks({ dryRun: !fix });
     const agyRemaining = agyHooks.ok && fix ? 0 : agyHooks.removed;
+    const agyLeftover = agyHooks.leftover;
     addDoctorCheck(report, {
       name: "legacy-agy-hooks",
-      status: !agyHooks.ok ? "error" : agyRemaining > 0 ? "issues" : "ok",
+      status: !agyHooks.ok
+        ? "error"
+        : agyRemaining + agyLeftover.length > 0
+          ? "issues"
+          : "ok",
       remaining: agyRemaining,
+      leftover: agyLeftover,
+      path: agyHooks.hooksPath,
       ...(agyHooks.ok ? {} : { error: agyHooks.error }),
       ...(agyRemaining > 0 ? { fix: "tfx doctor --fix" } : {}),
     });
     if (!agyHooks.ok) {
       fail(`agy 훅 점검 실패: ${agyHooks.error}`);
       issues++;
-    } else if (agyRemaining > 0) {
-      warn("agy hooks.json 에 옛 triflux-session 훅이 남음: tfx doctor --fix");
-      issues += agyRemaining;
-    } else if (fix && agyHooks.changed) {
-      ok("agy 옛 triflux-session 훅 정리됨");
+    } else {
+      if (agyRemaining > 0) {
+        warn(
+          "agy hooks.json 에 옛 triflux-session 훅이 남음: tfx doctor --fix",
+        );
+        issues += agyRemaining;
+      } else if (fix && agyHooks.changed) {
+        ok("agy 옛 triflux-session 훅 정리됨");
+      }
+      if (agyLeftover.length > 0) {
+        warn(
+          `agy 훅 ${agyLeftover.join(", ")} 이 지워진 agy-session-hook.mjs 를 가리킴. 직접 정리: ${agyHooks.hooksPath}`,
+        );
+        issues += agyLeftover.length;
+      }
     }
     if (fix) {
       try {
