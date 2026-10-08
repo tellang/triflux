@@ -250,6 +250,10 @@ test("Windows 에서는 따옴표 친 체크아웃 경로의 허브를 taskkill 
       return JSON.stringify([
         { pid: "4832", command: `"node.exe" "${checkout}\\hub\\server.mjs"` },
         {
+          pid: "4835",
+          command: `node.exe --run=probe ${checkout}\\hub\\server.mjs`,
+        },
+        {
           pid: "4834",
           command: `node.exe ${checkout}\\hub\\"server.mjs"\u00a0copy.mjs`,
         },

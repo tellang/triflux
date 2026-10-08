@@ -970,8 +970,9 @@ function splitWindowsCommandLine(command) {
   return { argv, exact: !command.includes('\\"') };
 }
 
-// 다음 인자를 값으로 받는 옵션과 값이 없는 옵션. 그 밖의 옵션은 인자 개수를 알 수 없어
-// entry 를 특정하지 못하므로 허브가 아닌 것으로 본다. --name=value 형태는 한 칸이다.
+// 허용 목록. 값을 받는 옵션(다음 인자 또는 --name=value)과 값이 없는 플래그만 건너뛴다.
+// 그 밖의 옵션(--run, --eval, --test, --watch 같은 실행 모드 포함)은 entry 를 특정할 수 없어
+// 허브가 아닌 것으로 본다.
 const NODE_VALUE_OPTIONS = new Set([
   "-r",
   "--require",
@@ -1001,10 +1002,8 @@ function trifluxHubRoot({ argv, exact }) {
   while (argv[index]?.startsWith("-")) {
     const [name, value] = argv[index].split("=");
     if (NODE_FLAG_OPTIONS.has(name) && value === undefined) index += 1;
-    else if (!exact || ["-e", "--eval", "-p", "--print"].includes(name))
-      return null;
-    else if (value !== undefined) index += 1;
-    else if (NODE_VALUE_OPTIONS.has(name)) index += 2;
+    else if (exact && NODE_VALUE_OPTIONS.has(name))
+      index += value === undefined ? 2 : 1;
     else return null;
   }
   // 공백이 든 경로가 잘린 조각은 상대 경로로 남으므로 절대 경로만 받는다.
