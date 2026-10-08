@@ -69,6 +69,7 @@ import {
   listInlineProfileNames,
   persistSettings,
   REQUIRED_CODEX_PROFILES,
+  retireOldInstallFiles,
   SKILL_ALIASES,
   SYNC_MAP,
   syncSkills,
@@ -1267,6 +1268,7 @@ function cmdSetup(options = {}) {
   for (const warning of cleanupLegacyMcp().warnings) warn(warning);
   const hubCleanup = cleanupTfxHub({
     pluginRoot: existsSync(join(PKG_ROOT, ".git")) ? undefined : PKG_ROOT,
+    log: info,
   });
   for (const warning of hubCleanup.warnings) warn(warning);
   if (hubCleanup.changed) ok("제거된 허브의 설정과 실행 흔적 정리");
@@ -1277,6 +1279,7 @@ function cmdSetup(options = {}) {
   for (const target of SYNC_MAP) {
     syncFile(target.src, target.dst, target.label);
   }
+  retireOldInstallFiles(info);
   reportSkillSync();
   ensureTrifluxMods({ install: mods, log: console.log, warn });
 

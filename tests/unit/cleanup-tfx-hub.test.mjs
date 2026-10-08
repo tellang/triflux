@@ -147,42 +147,131 @@ test("허브 주소가 아닌 tfx-hub 항목은 건드리지 않고 경고한다
   assert.ok(result.warnings.some((warning) => warning.includes("tfx-hub")));
 });
 
-function hubPidFixture(commandOfPid) {
-  const { home } = fixture();
+// 프로세스 목록 ps 출력을 흉내 낸다. kill 된 pid 는 다음 조회부터 사라진다.
+function processFixture() {
+  const { root, home } = fixture();
   const pidFile = join(home, ".claude/cache/tfx-hub/hub.pid");
   put(pidFile, { pid: 4321, port: 27888 });
+  const lines = [];
   const calls = [];
-  let killed = false;
+  const killed = new Set();
   const run = (command, args) => {
     calls.push([command, ...args]);
-    if (command === "ps") {
-      if (command === "ps" && killed) throw commandError(1);
-      return `${commandOfPid}\n`;
+    if (command === "ps" && args[0] === "-axo") return lines.join("\n");
+    if (command === "ps" && args[0] === "-p") {
+      const line = lines.find((entry) =>
+        entry.trim().startsWith(`${args[1]} `),
+      );
+      if (killed.has(args[1]) || !line) throw commandError(1);
+      return `${line.trim().replace(/^\d+\s+/, "")}\n`;
     }
     if (command === "kill") {
-      killed = true;
+      killed.add(args[1]);
       return "";
     }
     throw new Error("unexpected command");
   };
-  return { home, pidFile, calls, run };
+  return { root, home, pidFile, lines, calls, run };
 }
 
-test("hub.pid 가 hub/server.mjs 를 가리키면 종료하고 hub.pid 를 지운다", () => {
-  const { home, pidFile, calls, run } = hubPidFixture(
-    "/usr/local/bin/node /opt/triflux/hub/server.mjs",
+test("triflux 패키지의 허브는 설치본, 체크아웃 구분 없이 종료하고 hub.pid 를 지운다", () => {
+  const { root, home, pidFile, lines, calls, run } = processFixture();
+  const installed = join(root, "npm/node_modules/triflux");
+  const checkout = join(root, "checkout/triflux");
+  const other = join(root, "other");
+  put(join(installed, "package.json"), { name: "triflux" });
+  put(join(checkout, "package.json"), { name: "triflux" });
+  put(join(other, "package.json"), { name: "not-triflux" });
+  lines.push(
+    `  11 /usr/local/bin/node ${installed}/hub/server.mjs`,
+    `  12 node --no-warnings ${checkout}/hub/server.mjs`,
+    `  13 node ${other}/hub/server.mjs`,
+    `  14 /usr/bin/vim ${installed}/hub/server.mjs`,
+    `  15 node reader.mjs --input ${installed}/hub/server.mjs`,
+    // macOS ps 는 인자 경계가 없어 값 옵션이 붙은 명령은 허브로 판정하지 않는다.
+    `  16 node --require ./trace.cjs ${installed}/hub/server.mjs`,
+    `  17 node --eval=setTimeout(()=>{},800) ${installed}/hub/server.mjs`,
+    `  18 node --require /tmp/trace.cjs /tmp/reader.mjs ${installed}/hub/server.mjs`,
+    `  19 /bin/sh /tmp/reader.sh /opt/bin/node ${installed}/hub/server.mjs`,
+    `  21 node --conditions ${installed}/hub/server.mjs /tmp/reader.mjs`,
+    `  22 node --unknown-flag ${installed}/hub/server.mjs`,
+    `  23 node --conditions custom ${installed}/hub/server.mjs /tmp/reader.mjs`,
+    `  24 node --conditions=custom ${installed}/hub/server.mjs /tmp/reader.mjs`,
+    `  25 node ${installed}/hub/server.mjs copy.mjs`,
+    `  26 node ${installed}/hub/server.mjs --port 27888`,
+    // macOS ps 는 공백이 든 node 경로를 구분할 수 없어 종료하지 않는다.
+    `  20 ${root}/my tools/bin/node ${installed}/hub/server.mjs`,
   );
-  const result = cleanupTfxHub({ home, platform: "darwin", run });
+  const logs = [];
+  const result = cleanupTfxHub({
+    home,
+    platform: "darwin",
+    run,
+    log: (message) => logs.push(message),
+  });
   assert.equal(result.hubStopped, true);
   assert.deepEqual(
-    calls.filter(([command]) => command === "kill"),
-    [["kill", "-TERM", "4321"]],
+    calls.filter(([command]) => command === "kill").map((call) => call[2]),
+    ["11", "12"],
   );
+  assert.deepEqual(logs.slice(0, 2), [
+    `허브 종료: pid 11 (${installed})`,
+    `허브 종료: pid 12 (${checkout})`,
+  ]);
   assert.equal(existsSync(pidFile), false);
 });
 
-test("hub.pid 가 다른 프로세스를 가리키면 종료하지 않고 파일만 지운다", () => {
-  const { home, pidFile, calls, run } = hubPidFixture("/usr/bin/vim notes.md");
+test("허브로 판정하지 못한 hub/server.mjs 프로세스가 hub.pid 에 있으면 hub.pid 를 둔다", () => {
+  const { home, pidFile, lines, calls, run } = processFixture();
+  lines.push("  4321 node /unverified/hub/server.mjs");
+  const result = cleanupTfxHub({ home, platform: "darwin", run });
+  assert.equal(
+    calls.some(([command]) => command === "kill"),
+    false,
+  );
+  assert.equal(existsSync(pidFile), true);
+  assert.ok(result.warnings.some((warning) => warning.includes("보존")));
+});
+
+test("Windows 에서는 따옴표 친 체크아웃 경로의 허브를 taskkill 로 종료한다", () => {
+  const { root, home } = fixture();
+  const checkout = join(root, "Desktop Projects", "triflux");
+  put(join(checkout, "package.json"), { name: "triflux" });
+  const calls = [];
+  let killed = false;
+  const run = (command, args) => {
+    calls.push([command, ...args]);
+    if (command === "taskkill") {
+      killed = true;
+      return "";
+    }
+    const script = args.at(-1);
+    if (script.includes("ConvertTo-Json -InputObject $items"))
+      return JSON.stringify([
+        { pid: "4832", command: `"node.exe" "${checkout}\\hub\\server.mjs"` },
+        {
+          pid: "4834",
+          command: `node.exe ${checkout}\\hub\\"server.mjs"\u00a0copy.mjs`,
+        },
+        {
+          pid: "4833",
+          command: `node.exe "--conditions=custom "${checkout}\\hub\\server.mjs C:\\tools\\reader.mjs`,
+        },
+      ]);
+    if (script.includes("CommandLine")) return killed ? "" : "node";
+    throw commandError(1);
+  };
+  const result = cleanupTfxHub({ home, platform: "win32", run });
+  assert.equal(result.hubStopped, true);
+  assert.deepEqual(
+    calls.filter((call) => call[0] === "taskkill").map((call) => call.at(-1)),
+    ["4832"],
+  );
+});
+
+test("허브 프로세스가 없으면 죽은 pid 를 가리키는 hub.pid 만 지운다", () => {
+  const { home, pidFile, lines, calls, run } = processFixture();
+  lines.push("  99 /usr/bin/vim notes.md");
   const result = cleanupTfxHub({ home, platform: "darwin", run });
   assert.equal(result.hubStopped, false);
   assert.equal(
@@ -248,7 +337,7 @@ test("Windows 에서 PowerShell 조회가 실패하면 종료하지 않고 hub.p
   const result = cleanupTfxHub({ home, platform: "win32", run });
   assert.equal(calls.includes("taskkill"), false);
   assert.equal(existsSync(pidFile), true);
-  assert.ok(result.warnings.some((warning) => warning.includes("확인 실패")));
+  assert.ok(result.warnings.some((warning) => warning.includes("조회 실패")));
 });
 
 test("cwd 의 프로젝트 MCP 파일에서 허브 주소 tfx-hub 항목이 있는 파일만 찾는다", () => {
