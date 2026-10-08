@@ -177,79 +177,119 @@ test("queue 조회는 요청 표식을 뽑고 삭제는 이미 가져간 항목�
   }
 });
 
-test("ask --cli codex 는 queue 로 보내고 보낸 세션 이름을 첫 줄에 붙인다", async () => {
+test("ask --cli codex 는 app-server queue add 로 보내고 보낸 세션 이름을 첫 줄에 붙인다", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-queue-cli-"));
-  const log = path.join(dir, "codex.json");
-  await fs.writeFile(
-    path.join(dir, "codex"),
-    [
-      "#!/usr/bin/env node",
-      "require('node:fs').writeFileSync(process.env.CODEX_LOG, JSON.stringify(process.argv.slice(2)));",
-      "console.log('Queued message m1 for thread x.');",
-    ].join("\n"),
-    { mode: 0o755 },
-  );
-  const { stdout } = await execFileAsync(
-    process.execPath,
-    [
-      CLI,
-      "ask",
-      "--cli",
-      "codex",
-      "--thread",
-      THREAD,
-      "--prompt",
-      "안녕",
-      "--from",
-      "10.8 리드",
-      "--no-wait",
-    ],
-    {
-      env: {
-        ...process.env,
-        PATH: `${dir}${path.delimiter}${process.env.PATH}`,
-        HOME: dir,
-        CODEX_HOME: path.join(dir, "codex-home"),
-        CODEX_LOG: log,
+  try {
+    const server = await fakeAppServer(dir, {
+      initialize: [{ result: {} }],
+      "thread/queue/add": [{ result: { queuedSubmission: { id: "m1" } } }],
+    });
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        CLI,
+        "ask",
+        "--cli",
+        "codex",
+        "--thread",
+        THREAD,
+        "--prompt",
+        "안녕",
+        "--from",
+        "10.8 리드",
+        "--no-wait",
+      ],
+      {
+        env: {
+          ...process.env,
+          ...server.env,
+          CODEX_HOME: path.join(dir, "codex-home"),
+        },
       },
-    },
-  );
-  const result = JSON.parse(stdout);
-  assert.equal(result.transport, "queue");
-  assert.equal(result.status, "queued");
-  assert.equal(result.queuedMessageId, "m1");
-  const argv = JSON.parse(await fs.readFile(log, "utf8"));
-  assert.deepEqual(argv, [
-    "queue",
-    `--thread=${THREAD}`,
-    `--message=[from 10.8 리드] [tfx-live req=${result.requestId}]\n안녕`,
-  ]);
+    );
+    const result = JSON.parse(stdout);
+    assert.equal(result.transport, "queue");
+    assert.equal(result.status, "queued");
+    assert.equal(result.queuedMessageId, "m1");
+    assert.equal(result.queueVia, "app-server");
+    const [add] = await server.requests();
+    assert.equal(add.method, "thread/queue/add");
+    assert.equal(add.params.threadId, THREAD);
+    assert.deepEqual(add.params.input, [
+      {
+        type: "text",
+        text: `[from 10.8 리드] [tfx-live req=${result.requestId}]\n안녕`,
+        text_elements: [],
+      },
+    ]);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
-test("queue 가 비정상 종료해도 이미 쌓였을 수 있으면 폴백 재전송을 막는다", async () => {
-  const fail = (fields) => async () => {
-    throw Object.assign(new Error("codex failed"), fields);
-  };
-  const queued = await queueCodexMessage({
-    threadId: THREAD,
-    message: "m",
-    execFn: fail({ code: 1, stdout: "Queued message m2 for thread x.\n" }),
-  });
-  assert.equal(queued.queuedMessageId, "m2");
-  await assert.rejects(
-    queueCodexMessage({
+test("add 를 못 쓰면 codex queue 로 폴백하고, 쌓였을 수 있으면 재전송을 막는다", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-queue-add-"));
+  try {
+    const noAdd = await fakeAppServer(dir, {
+      initialize: [{ result: {} }],
+      "thread/queue/add": [
+        { error: { code: -32601, message: "method not found" } },
+      ],
+    });
+    const fail = (fields) => async () => {
+      throw Object.assign(new Error("codex failed"), fields);
+    };
+    let argv;
+    const queued = await queueCodexMessage({
       threadId: THREAD,
       message: "m",
-      execFn: fail({ killed: true, stdout: "" }),
-    }),
-    (error) => error.maybeQueued === true,
-  );
-  await assert.rejects(
-    queueCodexMessage({
-      threadId: THREAD,
-      message: "m",
-      execFn: fail({ code: 2, stdout: "" }),
-    }),
-    (error) => error.maybeQueued !== true,
-  );
+      env: noAdd.env,
+      execFn: async (_file, args) => {
+        argv = args;
+        return { stdout: "Queued message m3 for thread x.\n" };
+      },
+    });
+    assert.equal(queued.queuedMessageId, "m3");
+    assert.equal(queued.via, "codex-queue-argv");
+    assert.deepEqual(argv, ["queue", `--thread=${THREAD}`, "--message=m"]);
+    const fallback = (execFn) =>
+      queueCodexMessage({
+        threadId: THREAD,
+        message: "m",
+        env: noAdd.env,
+        execFn,
+      });
+    assert.equal(
+      (
+        await fallback(
+          fail({ code: 1, stdout: "Queued message m2 for thread x.\n" }),
+        )
+      ).queuedMessageId,
+      "m2",
+    );
+    await assert.rejects(
+      fallback(fail({ killed: true, stdout: "" })),
+      (error) => error.maybeQueued === true,
+    );
+    await assert.rejects(
+      fallback(fail({ code: 2, stdout: "" })),
+      (error) => error.maybeQueued !== true,
+    );
+    // add 가 오류 응답 없이 끝나면 이미 쌓였을 수 있어 argv 로 다시 보내지 않는다.
+    const odd = await fakeAppServer(dir, {
+      initialize: [{ result: {} }],
+      "thread/queue/add": [{}],
+    });
+    await assert.rejects(
+      queueCodexMessage({
+        threadId: THREAD,
+        message: "m",
+        env: odd.env,
+        execFn: fail({ code: 2, stdout: "" }),
+      }),
+      (error) => error.maybeQueued === true,
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });

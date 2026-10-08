@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { open, readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -175,16 +176,57 @@ export async function countCodexTuiInCwd(cwd, { execFn = execFileAsync } = {}) {
   }
 }
 
+// app-server 의 thread/queue/add 로 쌓아 프롬프트가 ps 에 보이지 않게 한다.
 export async function queueCodexMessage({
   threadId,
   message,
   env = process.env,
   execFn = execFileAsync,
+  spawnFn = spawn,
 }) {
+  let addSent = false;
+  try {
+    const result = await withCodexAppServer(
+      (request) => {
+        addSent = true;
+        return request("thread/queue/add", {
+          threadId,
+          input: [{ type: "text", text: message, text_elements: [] }],
+          clientUserMessageId: randomUUID(),
+        });
+      },
+      { env, spawnFn },
+    );
+    const id = result?.queuedSubmission?.id;
+    if (id) return { queuedMessageId: id, via: "app-server" };
+    throw new Error(
+      `unexpected thread/queue/add result: ${JSON.stringify(result)}`,
+    );
+  } catch (error) {
+    // 오류 응답이 아니면 add 가 이미 쌓였을 수 있어 재전송하지 않는다.
+    if (addSent && !error.rpcError) {
+      error.maybeQueued = true;
+      throw error;
+    }
+    const queued = await queueCodexMessageByArgv({
+      threadId,
+      message,
+      env,
+      execFn,
+    });
+    return {
+      ...queued,
+      via: "codex-queue-argv",
+      fallbackReason: error.message,
+    };
+  }
+}
+
+// add 를 못 쓰는 Codex(app-server 없음, 메서드 없음)만 이 경로로 와서 프롬프트가 argv 에 보인다.
+async function queueCodexMessageByArgv({ threadId, message, env, execFn }) {
   let stdout;
   try {
     // cwd 의 프로젝트 .codex/config.toml 이 깨져 있으면 queue 가 실패하므로 HOME 에서 실행한다.
-    // codex queue 는 메시지를 --message 인자로만 받아(stdin, 파일 옵션 없음) ps 노출을 피할 수 없다.
     ({ stdout } = await execFn(
       "codex",
       ["queue", `--thread=${threadId}`, `--message=${message}`],
@@ -216,7 +258,7 @@ export async function queueCodexMessage({
   return { queuedMessageId: match[1] };
 }
 
-// 공식 app-server 를 stdio 로 잠깐 띄워 요청을 보낸다. 큐 조회와 삭제가 실험 API 라 experimentalApi 를 켠다.
+// 공식 app-server 를 stdio 로 잠깐 띄워 요청을 보낸다. 큐 API 가 실험 API 라 experimentalApi 를 켠다.
 export async function withCodexAppServer(
   run,
   { env = process.env, timeoutMs = 30_000, spawnFn = spawn } = {},
@@ -251,7 +293,11 @@ export async function withCodexAppServer(
     if (!waiter) return;
     pending.delete(message.id);
     if (message.error)
-      waiter.reject(new Error(`${waiter.method}: ${message.error.message}`));
+      waiter.reject(
+        Object.assign(new Error(`${waiter.method}: ${message.error.message}`), {
+          rpcError: message.error,
+        }),
+      );
     else waiter.resolve(message.result);
   });
   const send = (message) =>
