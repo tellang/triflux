@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { getBackend } from "../../hub/team/backend.mjs";
 
-test("Claude receives a literal prompt and quoted output path", {
+test("Claude 는 프롬프트를 argv 가 아니라 stdin 으로 받는다", {
   skip: process.platform === "win32",
 }, () => {
   const dir = mkdtempSync(join(tmpdir(), "tfx-s5-backend-"));
@@ -22,7 +22,11 @@ test("Claude receives a literal prompt and quoted output path", {
     writeFileSync(
       fakeCli,
       `#!/usr/bin/env node
-process.stdout.write(JSON.stringify(process.argv.slice(2)));
+let stdin = "";
+process.stdin.on("data", (d) => (stdin += d));
+process.stdin.on("end", () =>
+  process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), stdin })),
+);
 `,
     );
     chmodSync(fakeCli, 0o755);
@@ -36,12 +40,10 @@ $(touch '${injectedFile}') \`touch '${injectedFile}'\``;
     execFileSync("/bin/sh", ["-c", command], {
       env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
     });
-    assert.deepEqual(JSON.parse(readFileSync(resultFile, "utf8")), [
-      "--print",
-      prompt,
-      "--output-format",
-      "text",
-    ]);
+    assert.deepEqual(JSON.parse(readFileSync(resultFile, "utf8")), {
+      argv: ["--print", "--output-format", "text"],
+      stdin: prompt,
+    });
     assert.equal(existsSync(injectedFile), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });

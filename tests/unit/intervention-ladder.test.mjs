@@ -246,11 +246,11 @@ describe("intervention ladder", () => {
     );
     assert.deepEqual(
       buildResumeArgv({ cli: "claude", sessionId: "s", prompt: "p" }),
-      ["claude", "-p", "--resume", "s", "p"],
+      ["claude", "-p", "--resume", "s"],
     );
     assert.deepEqual(
       buildResumeArgv({ cli: "codex", sessionId: "s", prompt: "p" }),
-      ["codex", "exec", "resume", "s", "p"],
+      ["codex", "exec", "resume", "s", "-"],
     );
     const file = join(tempDir(), "activity.log");
     writeFileSync(file, "a");
