@@ -144,6 +144,31 @@ test("agy hooks.json 에서 옛 triflux-session 훅만 지우고 다른 그룹�
     readdirSync(dir).some((name) => name.includes("bak-tfx-agy-hooks")),
   );
 
+  const mention = {
+    enabled: true,
+    Stop: [
+      { type: "command", command: "echo agy-session-hook.mjs >> /tmp/a.log" },
+    ],
+  };
+  for (const group of [other, mention, { ...ours, enabled: false }]) {
+    writeFileSync(hooksPath, JSON.stringify({ "triflux-session": group }));
+    assert.equal(cleanupAgyHooks({ geminiConfigHome: dir }).changed, false);
+  }
+  writeFileSync(
+    hooksPath,
+    JSON.stringify({
+      "triflux-session": {
+        PreInvocation: [
+          {
+            type: "command",
+            command: '/opt/node "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
+          },
+        ],
+      },
+    }),
+  );
+  assert.equal(cleanupAgyHooks({ geminiConfigHome: dir }).changed, true);
+
   const foreign = { "triflux-session": other };
   writeFileSync(hooksPath, JSON.stringify(foreign));
   assert.equal(cleanupAgyHooks({ geminiConfigHome: dir }).changed, false);

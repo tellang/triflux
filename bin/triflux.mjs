@@ -1245,6 +1245,10 @@ async function cmdSetup(options = {}) {
       fix: `${join(CLAUDE_DIR, "settings.json")}의 JSON 문법과 쓰기 권한을 확인하세요.`,
     });
   }
+  // agy 는 hooks.json 의 훅을 실행하므로 지워진 훅 스크립트를 가리키는 항목을 남기지 않는다.
+  const agyCleanup = cleanupAgyHooks();
+  if (agyCleanup.changed) ok("agy 옛 triflux-session 훅 정리됨");
+  else if (!agyCleanup.ok) warn(`agy 옛 훅 정리 실패: ${agyCleanup.error}`);
   // 이주가 막혀도 setup 은 계속한다. 남은 항목은 경고로 알린다.
   const mcpBackups = new Map();
   for (const warning of cleanupLegacyMcp({ backups: mcpBackups }).warnings)

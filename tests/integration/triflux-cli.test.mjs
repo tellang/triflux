@@ -208,6 +208,32 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
     assert.equal(payload.alive, false);
   });
 
+  it("setup은 agy hooks.json 의 옛 triflux-session 훅을 지워야 한다", () => {
+    const homeDir = createHomeDir();
+    const geminiConfig = join(homeDir, ".gemini", "config");
+    mkdirSync(geminiConfig, { recursive: true });
+    const hooksPath = join(geminiConfig, "hooks.json");
+    writeFileSync(
+      hooksPath,
+      JSON.stringify({
+        "triflux-session": {
+          enabled: true,
+          PreInvocation: [
+            {
+              type: "command",
+              command:
+                '"/opt/node" "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
+            },
+          ],
+        },
+      }),
+    );
+    // HOME 을 격리했으므로 테스트 가드를 끄고 실제 정리 경로를 탄다.
+    const result = runCli(["setup"], { homeDir, env: { TEST_LOCK_PID: "" } });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.deepEqual(JSON.parse(readFileSync(hooksPath, "utf8")), {});
+  });
+
   it("setup은 삭제된 tfx-auto legacy alias를 다시 생성하지 않아야 한다", () => {
     const homeDir = createHomeDir();
     const setupResult = runCli(["setup"], { homeDir });
