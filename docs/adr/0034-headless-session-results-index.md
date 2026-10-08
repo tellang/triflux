@@ -50,11 +50,11 @@ headless 세션마다 결과 색인 파일 하나를 둔다. 워커별 색인 �
 ```
 
 - 워커 `status` 는 `pending`, `running`, `completed`, `failed` 중 하나다. 디스패치되면 `running`, 끝나면 `matched && exitCode === 0` 일 때 `completed`, 아니면 `failed` 다. 화면 마커의 succeeded 판정과 같다.
-- 세션 `finishedAt` 은 실행이 끝나면 채운다. `completed` 는 모든 워커의 대기와 결과 수집이 예외 없이 끝났을 때만 `true` 다. 실행 중 예외로 끝나면 `finishedAt` 은 채우고 `completed` 는 `false` 로 남긴다.
-- 쓰기 시점: 워커가 디스패치될 때, 워커가 끝날 때, 세션이 끝날 때마다 파일 전체를 다시 쓴다.
+- 세션 `finishedAt` 은 실행이 끝나면 채운다. `completed` 는 모든 워커의 대기와 결과 수집이 예외 없이 끝났을 때만 `true` 다. 실행 중 예외로 끝나면 `finishedAt` 은 채우고 `completed` 는 `false` 로 남기며, 아직 `pending` 이나 `running` 인 워커는 `failed` 로 확정한다.
+- 쓰기 시점: 멀티플렉서 세션이 만들어질 때(모든 워커 `pending`), 워커가 디스패치될 때, 워커가 끝날 때, 세션이 끝날 때마다 파일 전체를 다시 쓴다. 같은 이름의 이전 실행 색인은 세션 생성 시점에 덮인다.
 - 원자적 쓰기: 같은 디렉터리의 `<색인>.<pid>.tmp` 에 쓴 뒤 `rename` 한다. 읽는 쪽은 반쯤 쓴 JSON 을 보지 않는다.
 - 소유권: 실행이 그 이름의 멀티플렉서 세션을 소유한 동안만 쓴다. 세션 이름이 겹쳐 생성이 실패하면 남의 색인을 덮어쓰지 않는다.
-- 쓰기 실패는 실행을 멈추지 않는다. 색인은 보조 산출물이다.
+- 쓰기 실패는 실행을 멈추지 않는다. 색인은 보조 산출물이다. rename 이 실패하면 임시 파일을 지우고 이전 내용을 그대로 둔다.
 
 `finishedAt` 이 `null` 인데 같은 이름의 멀티플렉서 세션(`tmux has-session -t <sessionName>`)이 없으면, 실행이 중간에 죽은 것으로 판단하고 `running` 워커는 결과가 없는 것으로 본다. 그 워커의 출력은 `resultFile` 과 `.partial`, `.err` 에 남은 만큼만 있다.
 

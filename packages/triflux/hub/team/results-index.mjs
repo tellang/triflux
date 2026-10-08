@@ -1,5 +1,5 @@
 // headless 세션 결과 색인. 화면의 HEADLESS_COMPLETE 문자열 대신 읽도록 세션당 JSON 하나를 둔다 (ADR-0034).
-import { renameSync, writeFileSync } from "node:fs";
+import { renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const RESULTS_INDEX_VERSION = 1;
@@ -12,14 +12,10 @@ export function resultsIndexPath(dir, sessionName) {
  * @param {string} path
  * @param {string} sessionName
  * @param {Array<{paneName: string, displayName?: string, cli: string, role?: string, resultFile: string}>} workers
- * @param {{canWrite?: () => boolean, now?: () => string}} [opts]
+ * @param {() => boolean} canWrite
  */
-export function createResultsIndex(
-  path,
-  sessionName,
-  workers,
-  { canWrite = () => true, now = () => new Date().toISOString() } = {},
-) {
+export function createResultsIndex(path, sessionName, workers, canWrite) {
+  const now = () => new Date().toISOString();
   const index = {
     version: RESULTS_INDEX_VERSION,
     sessionName,
@@ -51,13 +47,14 @@ export function createResultsIndex(
       writeFileSync(tmp, `${JSON.stringify(index, null, 2)}\n`, "utf8");
       renameSync(tmp, path);
     } catch {
-      /* best-effort */
+      rmSync(tmp, { force: true });
     }
   };
-  flush();
 
   return {
     path,
+    // 같은 이름의 이전 실행 색인이 남아 있으면 세션을 잡자마자 덮어 오판을 막는다.
+    begin: flush,
     workerStarted(paneName) {
       const w = byPane.get(paneName);
       if (!w || w.status !== "pending") return;
@@ -76,6 +73,13 @@ export function createResultsIndex(
       flush();
     },
     finish(completed) {
+      // 예외로 끝나면 끝나지 못한 워커를 failed 로 확정해 "아직 도는 중"과 구분한다.
+      for (const w of index.workers) {
+        if (w.status === "pending" || w.status === "running") {
+          w.status = "failed";
+          w.finishedAt = now();
+        }
+      }
       index.finishedAt = now();
       index.completed = Boolean(completed);
       flush();

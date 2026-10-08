@@ -935,7 +935,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       };
     }),
     // 같은 이름의 남의 세션 색인을 덮어쓰지 않도록 세션을 소유한 동안만 쓴다.
-    { canWrite: () => sessionOwnership.owned },
+    () => sessionOwnership.owned,
   );
 
   let runCompleted = false;
@@ -1016,7 +1016,9 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
-    if (event.type === "dispatched") resultsIndex.workerStarted(event.paneName);
+    if (event.type === "session_created") resultsIndex.begin();
+    else if (event.type === "dispatched")
+      resultsIndex.workerStarted(event.paneName);
     else if (event.type === "completed")
       resultsIndex.workerFinished(event.paneName, event);
     feedTui(event);
