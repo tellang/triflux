@@ -32,6 +32,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0023](0023-remove-command-hooks-hub-and-adopt-mods.md) | command hook, 키워드 라우팅, MCP gateway, synapse, 허브를 걷어내고 Claude Code mods 로 옮긴다 | Proposed | 0007, 0010, 0013, 0018, 0020, 0021, 0022 |
 | [0024](0024-cto-explicit-queries-only.md) | CTO 는 조회만 남긴다 | Accepted | 0010, 0018, 0022 |
 | [0025](0025-retire-swarm-execution-engine.md) | swarm 실행 엔진 퇴역 | Accepted | 0005, 0008, 0024 |
+| [0027](0027-codex-message-queue-default.md) | Codex 세션 메시지 전송은 codex queue 기본, tmux 입력은 폴백과 슬래시 명령 전용 | Proposed | 0015 |
 | [0028](0028-per-run-codex-mcp-selection.md) | Codex MCP 선택은 전역 설정 교체 대신 실행별 -c 설정으로 한다 | Accepted | 0015 |
 | [0029](0029-lead-session-operating-model.md) | 리드가 세션의 생성부터 종료까지 소유한다 | Proposed | 0004, 0023 |
 | [0030](0030-tests-and-worktrees-do-not-write-user-state.md) | 테스트와 worktree는 실제 사용자 상태에 쓰지 않는다 | Proposed | 0028 |

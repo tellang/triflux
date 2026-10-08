@@ -4,7 +4,7 @@
 // Deterministic codex app-server stub that speaks the SAME JSON-RPC protocol as
 // fake-codex-app-server.mjs, but over WebSocket-over-Unix-Domain-Socket — the
 // real transport of `codex app-server --listen unix://PATH`. Lets CI exercise
-// JsonRpcWsUdsClient + createCodexAppServerUdsEndpoint without the real codex
+// JsonRpcWsUdsClient and askCodexAppServerThread without the real codex
 // binary, with zero model quota.
 //
 //   argv[2] (or $FAKE_WS_UDS_SOCK) = absolute unix socket path to bind.

@@ -72,7 +72,7 @@ claude plugin install triflux@triflux
 | 스킬 | 용도 |
 | --- | --- |
 | `/tfx-auto` | 구현, 수정, 리뷰, 병렬 작업의 진입점. 동작은 아래 플래그로 정한다. |
-| `/tfx-live` | Claude↔Codex 라이브 세션. `start`/`ask`/`stop`, `peer` 중계, `orchestrate`, `list-sessions`. |
+| `/tfx-live` | Claude↔Codex 라이브 세션. `start`/`ask`/`wait`/`stop`, `peer` 중계, `list-sessions`. |
 | `/tfx-remote` | SSH 원격 Claude Code 세션 시작, 조회, 재부착, 메시지 전송, 준비 상태 확인, 모니터링, 종료. |
 | `/tfx-setup` | 대화형 설정. 파일 동기화, HUD, Codex 프로필, MCP, 훅 우선순위. |
 | `/tfx-doctor` | 진단과 복구. Hub 시작·중지·상태 확인도 여기서 한다. |
@@ -150,8 +150,9 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 
 **라이브 세션.** `tfx-live`는 Claude Code와 Codex TUI 세션을 조종한다. Claude 데몬 대상
 (`--short`/`--session-id`)은 UDS를 먼저 시도하고, `--session`도 주면 실패 시 tmux로 넘어간다.
-Codex는 tmux를 쓰거나 `--transport uds --thread <id|auto>`로 UDS를 쓴다. `peer`는 두 세션 사이를
-`--rounds`만큼 중계하고, `orchestrate`는 한 작업에 Claude와 Codex를 함께 붙인다. triflux의 Codex
+Codex `ask`는 `codex queue`로 메시지를 쌓고(TUI에 `[from <보낸 세션>]` 첫 줄로 보인다) 못 쓰면 이유를
+남기고 tmux로 보낸다. `--transport uds --thread <id|auto>`로 UDS도 쓸 수 있다. `peer`는 두 세션 사이를
+`--rounds`만큼 중계한다. triflux의 Codex
 훅이 실행 중인 Codex 세션을 `~/.local/state/triflux/codex-sessions/`에 기록하므로
 `tfx-live list-sessions --cli codex|claude`로 직접 띄운 tmux 세션도 찾을 수 있다.
 

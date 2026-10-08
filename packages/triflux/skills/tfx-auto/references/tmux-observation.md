@@ -94,4 +94,4 @@ busy가 아닌 상태가 일정 횟수 지속). 결과는 `response`(정제된 �
 `matchedCompletion` 필드로 온다. `response`가 실제 답변인지와 셸 프롬프트 잔재가
 섞이지 않았는지를 확인한다.
 
-**전송 방식**: `start`와 기본 `ask`는 tmux 화면과 입력을 사용한다. 구조화된 Codex 채널은 `ask --cli codex --transport uds --thread <id|auto>`로 선택하며 세션 thread와 daemon의 이벤트로 응답을 수집한다. `tfx-live orchestrate --codex-transport app-server-uds`도 WebSocket-over-UDS의 JSON-RPC를 사용한다. `orchestrate`의 기본 transport는 `exec`다.
+**전송 방식**: `start`는 tmux 화면과 입력을 사용한다. Codex `ask`는 기본으로 `codex queue`에 쌓고 rollout에서 응답을 읽는다. 슬래시 명령과 queue를 못 쓰는 경우만 tmux 입력을 쓴다. 구조화된 Codex 채널은 `ask --cli codex --transport uds --thread <id|auto>`로 선택하며 세션 thread와 daemon의 이벤트로 응답을 수집한다.
