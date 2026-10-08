@@ -345,6 +345,8 @@ export function changedRealHomeFiles(before, after) {
 
 export function testHomeEnv(home) {
   return {
+    // setup 은 이 신호가 있어야 테스트 중 홈에 쓴다(scripts/lib/test-env.mjs).
+    TFX_TEST_HOME_ISOLATED: "1",
     HOME: home,
     USERPROFILE: home,
     CODEX_HOME: join(home, ".codex"),
