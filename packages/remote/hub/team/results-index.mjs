@@ -47,7 +47,11 @@ export function createResultsIndex(path, sessionName, workers, canWrite) {
       writeFileSync(tmp, `${JSON.stringify(index, null, 2)}\n`, "utf8");
       renameSync(tmp, path);
     } catch {
-      rmSync(tmp, { force: true });
+      try {
+        rmSync(tmp, { force: true });
+      } catch {
+        /* best-effort */
+      }
     }
   };
 
