@@ -241,23 +241,13 @@ async function loadedCodexThreads(client, cwd, timeoutMs) {
 export async function listCodexAppServerThreads({
   socketPath,
   cwd,
+  timeoutMs = DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS,
   clientFactory = (opts) => new JsonRpcWsUdsClient(opts),
 } = {}) {
-  const client = codexClient(
-    socketPath,
-    DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS,
-    clientFactory,
-  );
+  const client = codexClient(socketPath, timeoutMs, clientFactory);
   try {
-    await initializeCodexClient(
-      client,
-      DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS,
-    );
-    return await loadedCodexThreads(
-      client,
-      cwd,
-      DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS,
-    );
+    await initializeCodexClient(client, timeoutMs);
+    return await loadedCodexThreads(client, cwd, timeoutMs);
   } finally {
     client.close();
   }

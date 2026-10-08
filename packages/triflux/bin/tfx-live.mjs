@@ -2068,8 +2068,8 @@ async function resolveAskTransport(adapter, opts, deps = {}) {
   };
 }
 
-// 공유 app-server daemon 에 로드된 thread 중 cwd 가 같은 것. daemon 이 없으면 빈 목록.
-async function loadedCodexThreadIds(cwd) {
+// 공유 app-server daemon 에 로드된 thread 중 cwd 가 같은 것. daemon 이 없거나 늦으면 빈 목록.
+async function loadedCodexThreadIds(cwd, timeoutMs) {
   try {
     const { listCodexAppServerThreads } = await import(
       "../hub/team/uds-orchestrator.mjs"
@@ -2077,6 +2077,7 @@ async function loadedCodexThreadIds(cwd) {
     const threads = await listCodexAppServerThreads({
       socketPath: resolveCodexDaemonSocket("default"),
       cwd,
+      timeoutMs,
     });
     return threads.map((thread) => thread.threadId);
   } catch {
@@ -2084,50 +2085,55 @@ async function loadedCodexThreadIds(cwd) {
   }
 }
 
-// Codex 는 thread 를 resume 할 때만 rollout 에 thread_settings_applied 를 남긴다.
+const ROLLOUT_TAIL_BYTES = 256 * 1024;
+
+// thread_settings_applied 는 resume 과 설정 변경 때 쓰인다. 끝부분이 sinceMs 이후를 다 덮지
+// 못하면 "unknown" 이다.
 async function resumedSince(rollout, sinceMs) {
   const info = await stat(rollout).catch(() => null);
-  if (!info || info.mtimeMs < sinceMs) return false;
+  if (!info || info.mtimeMs < sinceMs) return "no";
   const handle = await open(rollout, "r");
+  let text;
   try {
-    const length = Math.min(info.size, 64 * 1024);
+    const length = Math.min(info.size, ROLLOUT_TAIL_BYTES);
     const { buffer } = await handle.read(
       Buffer.alloc(length),
       0,
       length,
       info.size - length,
     );
-    return buffer
-      .toString("utf8")
-      .split("\n")
-      .some((line) => {
-        try {
-          const entry = JSON.parse(line);
-          return (
-            entry.payload?.type === "thread_settings_applied" &&
-            Date.parse(entry.timestamp) >= sinceMs
-          );
-        } catch {
-          return false;
-        }
-      });
+    text = buffer.toString("utf8");
   } finally {
     await handle.close();
   }
+  let covered = info.size <= ROLLOUT_TAIL_BYTES;
+  for (const line of text.split("\n")) {
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const at = Date.parse(entry.timestamp);
+    if (at < sinceMs) covered = true;
+    else if (entry.payload?.type === "thread_settings_applied")
+      return "resumed";
+  }
+  return covered ? "no" : "unknown";
 }
 
 // resume --last 는 pane 인자에 UUID 가 남지 않아 Codex 가 실제로 연 thread 를 사후에 찾는다.
-// 띄운 뒤 resume 기록이 생긴 thread 가 정확히 하나일 때만 인정한다. 둘 이상이면 같은 cwd 에서
-// 다른 TUI 가 동시에 resume 했을 수 있어 고르지 않는다.
+// 띄운 뒤 기록이 생긴 thread 가 정확히 하나이고 나머지 후보가 모두 확인됐을 때만 인정한다.
 async function resumedCodexThread(
-  { cwd, launchedAtMs },
+  { cwd, launchedAtMs, timeoutMs },
   { loadedIds = loadedCodexThreadIds, findRollout = findCodexRollout } = {},
 ) {
   const matches = [];
-  for (const id of await loadedIds(cwd)) {
+  for (const id of await loadedIds(cwd, timeoutMs)) {
     const rollout = isCodexThreadId(id) && (await findRollout(id));
-    if (rollout && (await resumedSince(rollout, launchedAtMs)))
-      matches.push(id);
+    const state = rollout ? await resumedSince(rollout, launchedAtMs) : "no";
+    if (state === "unknown") return null;
+    if (state === "resumed") matches.push(id);
   }
   return matches.length === 1 ? matches[0] : null;
 }
@@ -2202,14 +2208,17 @@ async function doStart(adapter, opts) {
   let nameApplied = Boolean(name) && adapter.cli === "claude" && ready;
   let threadId =
     adapter.cli === "codex" && isCodexThreadId(resume) ? resume : null;
-  // 입력창이 뜬 직후에는 resume 기록이 아직 없을 수 있어 잠깐 다시 본다.
-  for (let attempt = 0; trackResumeLast && ready && attempt < 10; attempt++) {
+  // 입력창이 뜬 직후에는 resume 기록이 아직 없을 수 있어 5초 안에서 다시 본다.
+  const threadDeadline = Date.now() + 5000;
+  while (trackResumeLast && ready && !threadId) {
+    const timeoutMs = threadDeadline - Date.now();
+    if (timeoutMs <= 0) break;
     threadId = await resumedCodexThread({
       cwd: cwd ?? process.cwd(),
       launchedAtMs,
+      timeoutMs,
     });
-    if (threadId) break;
-    await sleep(500);
+    if (!threadId) await sleep(Math.min(500, threadDeadline - Date.now()));
   }
   if (name && adapter.cli === "codex" && ready) {
     try {

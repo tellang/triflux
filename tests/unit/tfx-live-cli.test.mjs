@@ -3156,6 +3156,16 @@ test("resume --last thread 는 띄운 뒤 resume 기록이 하나일 때만 인�
       ),
       ids[1],
     );
+    // 띄운 뒤 기록이 끝부분 밖으로 밀려 확인할 수 없는 후보가 있으면 고르지 않는다.
+    await fs.writeFile(
+      path.join(dir, ids[2]),
+      `${JSON.stringify({ timestamp: "2026-10-08T03:00:07Z", type: "event_msg", payload: { type: "agent_message", message: "x".repeat(300 * 1024) } })}\n`,
+    );
+    assert.equal(
+      await tfxLive.resumedCodexThread({ cwd: dir, launchedAtMs }, deps(ids)),
+      null,
+    );
+    await resumedAt(ids[2], "2026-10-08T03:00:06Z");
     // 같은 cwd 에서 동시에 두 thread 가 resume 되면 고르지 않는다.
     assert.equal(
       await tfxLive.resumedCodexThread({ cwd: dir, launchedAtMs }, deps(ids)),
