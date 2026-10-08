@@ -36,7 +36,7 @@ description: >
   - 인계 파일을 쓴다. 목표, 완료 조건, 체크아웃 상태, 확정 결정, 증거 경로, 미완료, 다음 행동, `predecessorSessionId`를 담는다.
   - 승계 세션이 경로를 읽고 ACK 한다.
   - ACK 를 받은 뒤에만 원 세션을 닫는다.
-- 닫은 뒤에는 남은 세션이 없는지 `tmr ls --json`으로 확인한다. tmr 이 없으면 `tmux ls`로 본다. tmr 은 macOS 에서 tfx setup 이 설치를 묻는다.
+- 닫은 뒤에는 남은 세션이 없는지 `tmr ls --json`으로 확인한다. tmr 이 없으면 `tmux ls`로 본다.
 
 ```bash
 tmr ls --json   # tmr 이 있으면
