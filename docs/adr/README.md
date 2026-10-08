@@ -38,6 +38,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0029](0029-lead-session-operating-model.md) | 리드가 세션의 생성부터 종료까지 소유한다 | Proposed | 0004, 0023 |
 | [0030](0030-tests-and-worktrees-do-not-write-user-state.md) | 테스트와 worktree는 실제 사용자 상태에 쓰지 않는다 | Proposed | 0028 |
 | [0031](0031-cli-and-distribution-surface-reduction.md) | CLI와 배포 표면을 줄인다 (2026-10 슬롭 정리 2단계) | Proposed | 0020, 0023, 0025 |
+| [0032](0032-lead-role-skill-tfx-lead.md) | 리드 역할 절차를 tfx-lead 스킬로 분리한다 | Proposed | 0020, 0029 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 

@@ -19,13 +19,13 @@ description: >
 | --- | --- | --- |
 | 세션 띄우기, 보내기, 기다리기, compact, 닫기 | `tfx-live` 명령 (공통) | `tfx-live` 명령 (공통) |
 | 같은 세션 안 서브에이전트 | Agent 도구 (`model`, `effort`, `run_in_background`) | `spawn_agent`, 끝나면 반드시 `close_agent` |
-| Claude 세션에 보내기 | `SendMessage` | `tfx-live ask --cli claude --transport uds --short <8hex> --no-wait` 뒤 `tfx-live wait --request-id` |
+| Claude 세션에 보내기 | `SendMessage`(팀원), 그 밖은 `tfx-live ask --cli claude` | `tfx-live ask --cli claude --transport uds --short <8hex> --no-wait`(백그라운드 세션), tmux 세션은 `--session <이름> --no-wait` |
 | Codex 세션에 보내기 | `tfx-live ask --cli codex` (기본 codex queue) | `tfx-live ask --cli codex` (기본 codex queue) |
 | 사용자에게 묻기 | `AskUserQuestion` | 답변에서 짧은 선택지로 묻는다 |
-| 배경 대기 | `run_in_background`와 완료 알림 | 백그라운드 셸 또는 `tfx-live wait` |
+| 배경 대기 | `run_in_background`와 완료 알림 | 백그라운드 셸 또는 `tfx-live wait`(아래 5절의 지원 범위 안에서) |
 
 - Codex 리드는 `spawn_agent`를 29회 부르고 `close_agent`를 한 번도 부르지 않은 사고가 있었다. 서브에이전트는 결과를 받은 즉시 닫는다.
-- Codex 리드는 보내기 전용으로 `--timeout 5`를 남발하고 `tmux capture-pane`으로 완료를 확인한 사고가 있었다. 보낼 때는 `--no-wait`, 완료는 `wait --request-id`로만 확인한다.
+- Codex 리드는 보내기 전용으로 `--timeout 5`를 남발하고 `tmux capture-pane`으로 완료를 확인한 사고가 있었다. 보낼 때는 `--no-wait`, 완료는 5절의 확인 수단으로만 확인한다.
 
 ## 1. 역할과 수명
 
@@ -36,11 +36,11 @@ description: >
   - 인계 파일을 쓴다. 목표, 완료 조건, 체크아웃 상태, 확정 결정, 증거 경로, 미완료, 다음 행동, `predecessorSessionId`를 담는다.
   - 승계 세션이 경로를 읽고 ACK 한다.
   - ACK 를 받은 뒤에만 원 세션을 닫는다.
-- 닫은 뒤에는 남은 세션이 없는지 확인한다.
+- 닫은 뒤에는 남은 세션이 없는지 확인한다. `tmux ls`가 기본이고, `tmr`가 있으면 `tmr ls --json`을 쓴다.
 
 ```bash
-tmr ls --json
 tmux ls
+tmr ls --json   # 선택 도구, 있을 때만
 ```
 
 ## 2. 역할별 모델
@@ -61,14 +61,14 @@ tmux ls
 | Codex 시험용 | 역할 프로필에 effort low | 연결 확인용 |
 
 - Codex 주간 한도가 낮으면 새 Codex 워커 대신 Claude 로 돌린다.
-- 세션을 띄울 때마다 사용자에게 한 줄로 알린다: "이 역할에 이 모델, tmux 세션명 `<이름>`(tmr 대상)".
+- 세션을 띄울 때마다 사용자에게 한 줄로 알린다: "이 역할에 이 모델, tmux 세션명 `<이름>`(`tmr` 대상)".
 - 서브에이전트(Agent 도구, `spawn_agent`)는 tmux 에 보이지 않는다. 알릴 때 그렇다고 밝힌다.
 
 ## 3. 부르는 방법
 
 | 용도 | 수단 |
 | --- | --- |
-| 오래 가는 작업 세션 | `tfx-live start`로 tmux 에 띄운다. 사람이 `tmr`로 본다 |
+| 오래 가는 작업 세션 | `tfx-live start`로 tmux 에 띄운다. 사람이 tmux 로(`tmr`가 있으면 그것으로) 본다 |
 | 일회성 판단, 리뷰 | 서브에이전트. 리드 CLI 별 도구는 위 표, model과 effort 를 지정하고 백그라운드로 |
 | 일회성 Codex 작업 | `tfx-route.sh` 역할 호출 |
 | 기존 Claude 세션에 요청 | 위 표의 "Claude 세션에 보내기" |
@@ -100,15 +100,20 @@ tfx-live ask --cli codex --session cx-impl --prompt "<지시서 경로>를 읽�
 결과는 파일(`.result.md`)과 짧은 보고로 받는다.
 
 - 화면 폴링(`tmux capture-pane` 반복)은 하지 않는다.
-- 완료 확인은 세 가지 중 하나로 한다.
-  - 서브에이전트의 완료 알림(Claude 는 `run_in_background`, Codex 는 `spawn_agent` 결과).
-  - `tfx-live wait --request-id <id>`를 백그라운드로 실행.
-  - PR CI 감시를 백그라운드로 실행.
 - 대기하는 동안 리드는 다른 레인을 진행한다.
+- 서브에이전트의 완료는 알림으로 안다(Claude 는 `run_in_background`, Codex 는 `spawn_agent` 결과). PR CI 는 백그라운드로 감시한다.
+- 띄워 둔 세션의 완료는 `tfx-live wait`가 지원하는 범위에서만 쓴다.
+
+| 대상 세션 | 완료 확인 |
+| --- | --- |
+| Claude 백그라운드(daemon) 세션 | `tfx-live wait --cli claude --short <8hex> --request-id <id>` (로컬 UDS 만, `--session`은 받지 않는다) |
+| Codex 세션 | `tfx-live wait --cli codex --session <tmux 이름> --request-id <id>` 또는 `--thread <UUID>` |
+| tmux 로 띄운 대화형 Claude 세션, Claude 리드 | 그 세션이 지시서의 보고 규칙에 따라 `SendMessage`로 보고한다 |
+| tmux 로 띄운 대화형 Claude 세션, Codex 리드 | 현재 `wait` 미지원. 지시서에 결과 파일 경로를 정해 두고 그 파일의 생성을 백그라운드 셸로 감시한다 |
 
 ```bash
-tfx-live ask --cli claude --session cl-doc --prompt "<지시서 경로>" --no-wait
-tfx-live wait --cli claude --session cl-doc --request-id <requestId> --timeout 600
+tfx-live ask --cli claude --transport uds --short <8hex> --prompt "<지시서 경로>" --no-wait
+tfx-live wait --cli claude --short <8hex> --request-id <requestId> --timeout 600
 ```
 
 - `timedOut: true`는 완료가 아니다. 재전송하지 않고 상태를 먼저 확인한다.
@@ -116,13 +121,15 @@ tfx-live wait --cli claude --session cl-doc --request-id <requestId> --timeout 6
 
 ## 6. 교차 리뷰와 머지
 
-작성 모델과 다른 모델이 리뷰한다.
+작성 모델과 다른 모델이 리뷰한다. 기본은 CLAUDE.md 의 교차 검증 규칙이다.
 
 | 작성 | 리뷰 |
 | --- | --- |
+| Claude | Codex |
 | Codex | Claude |
-| Claude `opus` | `fable` 또는 `sonnet` |
-| Claude `sonnet` | `opus` |
+
+- Codex 를 못 쓸 때(주간 한도, 미설치)만 폴백한다. 작성과 다른 Claude 모델(`opus`로 쓴 글은 `fable` 또는 `sonnet`, `sonnet`으로 쓴 글은 `opus`)이나 Antigravity 로 리뷰한다.
+- 한도가 낮을 때의 대체 순서는 `.claude/rules/tfx-routing.md`의 CLI 우선순위(1차 Codex, 2차 Antigravity)를 따른다.
 
 - 머지 조건은 CI 통과와 교차 리뷰 통과, 둘 다다.
 - 리뷰에서 사실 오류가 나오면 처음 작성자에게 되돌려 고친다. 같은 리뷰어가 재확인한다.
@@ -167,7 +174,7 @@ tfx-live wait --cli claude --session cl-doc --request-id <requestId> --timeout 6
 - 가장 쉬운 방법은 `tfx-live probe`다. 결과의 `contextPct`를 본다.
 - 직접 재야 하면 세션 transcript 의 마지막 assistant 항목 `usage`에서 입력 계열 토큰(`input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`)을 더한다. 이 합을 공식 모델 창과 실행 한도 중 작은 값으로 나눈다.
 - Codex 는 rollout 의 마지막 토큰 사용량 이벤트로 같은 계산을 한다.
-- 처음 지시서에 넣는다: "컨텍스트가 60%를 넘으면 작업을 멈추고 리드에게 보고하라."
+- 지시서에 보고 기준을 넣는다. 비율은 받는 세션의 CLI 에 맞춰 `tfx-live` 표의 준비·경고 열을 쓴다. 예: Claude 는 60%, Codex 는 15%, agy 는 12%. 예시: "컨텍스트가 <비율>을 넘으면 작업을 멈추고 리드에게 보고하라."
 - 재개한 세션(`--resume`)은 이전 사용량을 그대로 이어받는다. 재개 직후 한 번 잰다.
 - 85%에 닿은 Claude 세션에는 새 작업을 주지 않고 바로 승계한다.
 
@@ -179,10 +186,10 @@ tfx-live wait --cli claude --session cl-doc --request-id <requestId> --timeout 6
 - [ ] 역할에 맞는 모델과 effort 를 골랐다
 - [ ] 사용자에게 모델과 tmux 세션명을 알렸다
 - [ ] 지시서 경로를 보냈고 작업 시작을 확인했다
-- [ ] 60% 보고 지시가 지시서에 있다
+- [ ] 세션 CLI 에 맞는 컨텍스트 보고 기준이 지시서에 있다
 
 세션을 닫을 때:
 
 - [ ] 결과 파일을 읽었다
 - [ ] 필요하면 인계 파일과 승계 ACK 를 확인했다
-- [ ] 닫은 뒤 `tmr ls --json`이나 `tmux ls`로 확인했다
+- [ ] 닫은 뒤 `tmux ls`(또는 `tmr ls --json`)로 확인했다
