@@ -1,42 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ClaudeWorker } from "../../hub/workers/claude-worker.mjs";
-import {
-  CODEX_MCP_EXECUTION_EXIT_CODE,
-  CodexMcpTransportError,
-  CodexMcpWorker,
-} from "../../hub/workers/codex-mcp.mjs";
 import { withRetry } from "../../hub/workers/worker-utils.mjs";
 
 function createWorkerError(message, details = {}) {
   return Object.assign(new Error(message), details);
-}
-
-class TestCodexWorker extends CodexMcpWorker {
-  constructor(sequence, options = {}) {
-    super(options);
-    this.sequence = [...sequence];
-    this.startCalls = 0;
-    this.stopCalls = 0;
-  }
-
-  async start() {
-    this.startCalls += 1;
-    this.ready = true;
-    this.client = {
-      callTool: async () => {
-        const next = this.sequence.shift();
-        if (next instanceof Error) throw next;
-        return next;
-      },
-    };
-  }
-
-  async stop() {
-    this.stopCalls += 1;
-    this.ready = false;
-    this.client = null;
-  }
 }
 
 class TestClaudeWorker extends ClaudeWorker {
@@ -128,59 +96,6 @@ describe("withRetry", () => {
     );
 
     assert.equal(attempts, 1);
-  });
-});
-
-describe("CodexMcpWorker.execute", () => {
-  it("retries retryable transport failures after reconnecting", async () => {
-    const worker = new TestCodexWorker(
-      [
-        new CodexMcpTransportError("temporary bootstrap failure"),
-        {
-          content: [{ type: "text", text: "codex:ok" }],
-          structuredContent: { threadId: "thread-1", content: "codex:ok" },
-          isError: false,
-        },
-      ],
-      {
-        retryOptions: { baseDelayMs: 0, maxDelayMs: 0 },
-      },
-    );
-
-    const result = await worker.execute("retry me", { sessionKey: "job-1" });
-
-    assert.equal(result.exitCode, 0);
-    assert.equal(result.output, "codex:ok");
-    assert.equal(result.threadId, "thread-1");
-    assert.equal(worker.startCalls, 2);
-    assert.equal(worker.stopCalls, 1);
-  });
-
-  it("returns structured error metadata after retry exhaustion", async () => {
-    const worker = new TestCodexWorker(
-      [
-        new CodexMcpTransportError("transport down"),
-        new CodexMcpTransportError("transport down"),
-        new CodexMcpTransportError("transport down"),
-      ],
-      {
-        retryOptions: { baseDelayMs: 0, maxDelayMs: 0 },
-      },
-    );
-
-    const result = await worker.execute("still broken", {
-      sessionKey: "job-2",
-    });
-
-    assert.equal(result.exitCode, CODEX_MCP_EXECUTION_EXIT_CODE);
-    assert.match(result.output, /transport down/);
-    assert.deepEqual(result.error, {
-      code: "CODEX_TRANSPORT_ERROR",
-      retryable: true,
-      attempts: 3,
-      category: "transient",
-      recovery: "Retry after reconnecting the Codex MCP transport.",
-    });
   });
 });
 

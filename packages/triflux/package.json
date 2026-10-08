@@ -17,8 +17,7 @@
     "postinstall": "node scripts/setup.mjs"
   },
   "dependencies": {
-    "@iarna/toml": "^2.2.5",
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@iarna/toml": "^2.2.5"
   },
   "files": [
     "adapters",

@@ -1,4 +1,4 @@
-// tests/unit/factory-lazy-import.test.mjs — SDK-missing factory import guard
+// tests/unit/factory-lazy-import.test.mjs: node_modules 없는 설치 사본에서 factory import 확인
 
 import assert from "node:assert/strict";
 import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -7,16 +7,14 @@ import { dirname, join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { createWorker as createInstalledWorker } from "../../hub/workers/factory.mjs";
-
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
 const WORKERS_DIR = resolve(PROJECT_ROOT, "hub", "workers");
 const HUB_LIB_DIR = resolve(PROJECT_ROOT, "hub", "lib");
 const FIXTURE_HUB_LIB_FILES = ["worker-lifecycle.mjs", "timeout-defaults.mjs"];
 
-async function importFactoryFromSdkMissingTree() {
-  const root = mkdtempSync(join(tmpdir(), "triflux-factory-no-sdk-"));
+async function importFactoryFromIsolatedTree() {
+  const root = mkdtempSync(join(tmpdir(), "triflux-factory-no-modules-"));
   mkdirSync(join(root, "hub"), { recursive: true });
   cpSync(WORKERS_DIR, join(root, "hub", "workers"), { recursive: true });
   mkdirSync(join(root, "hub", "lib"), { recursive: true });
@@ -42,9 +40,9 @@ function removeTree(path) {
   rmSync(path, { recursive: true, force: true });
 }
 
-describe("worker factory lazy imports SDK-dependent workers", () => {
-  it("creates ClaudeWorker when @modelcontextprotocol/sdk is absent", async () => {
-    const { root, factory } = await importFactoryFromSdkMissingTree();
+describe("worker factory loads without node_modules", () => {
+  it("creates ClaudeWorker without node_modules", async () => {
+    const { root, factory } = await importFactoryFromIsolatedTree();
     try {
       const worker = await factory.createWorker("claude");
       assert.equal(worker.constructor.name, "ClaudeWorker");
@@ -52,25 +50,5 @@ describe("worker factory lazy imports SDK-dependent workers", () => {
     } finally {
       removeTree(root);
     }
-  });
-
-  it("rejects codex-mcp creation clearly when @modelcontextprotocol/sdk is absent", async () => {
-    const { root, factory } = await importFactoryFromSdkMissingTree();
-    try {
-      await assert.rejects(
-        () => factory.createWorker("codex", { transport: "mcp" }),
-        (error) =>
-          error?.code === "ERR_MODULE_NOT_FOUND" &&
-          /@modelcontextprotocol\/sdk/.test(error.message),
-      );
-    } finally {
-      removeTree(root);
-    }
-  });
-
-  it("creates CodexMcpWorker when @modelcontextprotocol/sdk is installed", async () => {
-    const worker = await createInstalledWorker("codex", { transport: "mcp" });
-    assert.equal(worker.constructor.name, "CodexMcpWorker");
-    assert.equal(worker.type, "codex");
   });
 });
