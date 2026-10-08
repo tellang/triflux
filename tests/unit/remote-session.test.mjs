@@ -117,7 +117,7 @@ describe("remote-session — resolveRemoteStageDir", () => {
   });
 });
 
-describe("remote-session — env cache", () => {
+describe("remote-session: env cache", () => {
   it("R-11: 캐시는 cwd 가 아니라 사용자 상태 경로에 둔다", () => {
     const stateHome = join(tmpdir(), "state");
     assert.equal(

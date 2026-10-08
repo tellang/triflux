@@ -202,7 +202,7 @@ function writeEnvCache(host, env, cacheDir) {
  * @param {string} host — SSH host
  * @param {object} [opts]
  * @param {boolean} [opts.force=false] — bypass cache
- * @param {string} [opts.cacheDir] — cache directory (default: remoteEnvCacheDir())
+ * @param {string} [opts.cacheDir]: cache directory (default: remoteEnvCacheDir())
  * @returns {Readonly<RemoteEnv>}
  */
 export function probeRemoteEnv(host, opts = {}) {
