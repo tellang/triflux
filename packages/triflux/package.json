@@ -6,7 +6,6 @@
   "bin": {
     "triflux": "bin/triflux.mjs",
     "tfx": "bin/triflux.mjs",
-    "tfl": "bin/triflux.mjs",
     "tfx-live": "bin/tfx-live.mjs",
     "tfx-setup": "bin/tfx-setup.mjs",
     "tfx-doctor": "bin/tfx-doctor.mjs"
