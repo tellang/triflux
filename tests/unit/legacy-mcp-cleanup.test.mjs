@@ -431,4 +431,12 @@ test("서비스 해제 실패를 보존하고 성공 후에만 소유 프로세�
 test("이주가 써 넣는 MCP 패키지는 버전이나 커밋으로 고정한다", () => {
   for (const [name, spec] of Object.entries(MCP_PACKAGE_PINS))
     assert.match(spec, /@(?:\d+\.\d+\.\d+|[0-9a-f]{40})$/, name);
+  // 레지스트리와 버전이 다르면 doctor 가 이주한 항목을 불일치로 본다.
+  const registry = JSON.parse(
+    readFileSync(new URL("../../config/mcp-registry.json", import.meta.url)),
+  );
+  assert.deepEqual(registry.servers["brave-search"].args, [
+    "-y",
+    MCP_PACKAGE_PINS["brave-search"],
+  ]);
 });

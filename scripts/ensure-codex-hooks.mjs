@@ -156,6 +156,13 @@ function stateBlock(key, hash) {
   return `[hooks.state.${escapeTomlKey(key)}]\ntrusted_hash = "${hash}"`;
 }
 
+// Windows 경로 키는 백슬래시가 이스케이프돼 저장된다. 원래 키로 풀어야 비교가 맞는다.
+function unescapeTomlKey(raw) {
+  return String(raw)
+    .replace(/^"|"$/g, "")
+    .replace(/\\(["\\])/g, "$1");
+}
+
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -209,7 +216,7 @@ function collectManagedState(content, managedKeys, hooksPath) {
   for (const re of [inlineRe, tableRe]) {
     let m = re.exec(content);
     while (m) {
-      found.push({ key: m[1].replace(/^"|"$/g, ""), hash: m[2] });
+      found.push({ key: unescapeTomlKey(m[1]), hash: m[2] });
       m = re.exec(content);
     }
   }
@@ -233,7 +240,28 @@ function mergeHooksState(content, entries, hooksPath) {
   if (hooksStateConverged(content, entries, hooksPath)) {
     return content;
   }
-  let updated = stripManagedStateLines(content, managedKeys, hooksPath);
+  return appendStateBlocks(
+    stripManagedStateLines(content, managedKeys, hooksPath),
+    entries,
+  );
+}
+
+// 승인 없이 부를 때는 새 해시를 쓰지 않는다. 다만 같은 키가 두 번 있으면
+// Codex 가 설정을 읽지 못하므로 기존 승인 하나만 남긴다.
+function dedupeHooksState(content, entries, hooksPath) {
+  const managedKeys = new Set(entries.map((entry) => entry.key));
+  const found = collectManagedState(content, managedKeys, hooksPath);
+  const kept = new Map();
+  for (const { key, hash } of found) if (!kept.has(key)) kept.set(key, hash);
+  if (kept.size === found.length) return content;
+  return appendStateBlocks(
+    stripManagedStateLines(content, managedKeys, hooksPath),
+    [...kept].map(([key, hash]) => ({ key, hash })),
+  );
+}
+
+function appendStateBlocks(content, entries) {
+  let updated = content;
   const blocks = entries.map((entry) => stateBlock(entry.key, entry.hash));
   // table-header 서브테이블은 TOML 상 부모 [hooks.state] 재선언이 아니므로
   // 파일 끝 append 가 항상 유효하다. 빈 [hooks.state] 헤더가 남아 있어도
@@ -329,7 +357,7 @@ export function ensureCodexHooks(opts = {}) {
   // 신뢰 해시는 사용자가 승인했을 때만 쓴다. 쓰지 않으면 Codex 가 첫 실행 때 직접 묻는다.
   const nextConfig = opts.trust
     ? mergeHooksState(profileSanitized.toml, stateEntries, hooksPath)
-    : profileSanitized.toml;
+    : dedupeHooksState(profileSanitized.toml, stateEntries, hooksPath);
   const changedConfig = originalConfig !== nextConfig;
   if (changedConfig) {
     if (existsSync(configPath)) {

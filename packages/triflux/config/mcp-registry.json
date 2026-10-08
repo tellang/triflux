@@ -36,7 +36,7 @@
       "policy": "stdio",
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@brave/brave-search-mcp-server"],
+      "args": ["-y", "@brave/brave-search-mcp-server@2.1.4"],
       "env": {
         "BRAVE_API_KEY": { "env": "BRAVE_API_KEY" }
       },

@@ -7,6 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -16,6 +17,7 @@ import {
   ensureCodexHooks,
 } from "../../scripts/ensure-codex-hooks.mjs";
 
+const toml = createRequire(import.meta.url)("@iarna/toml");
 const tmpRoots = [];
 
 function makeCodexHome() {
@@ -191,6 +193,46 @@ describe("ensureCodexHooks", () => {
       ? readFileSync(join(codexHome, "config.toml"), "utf8")
       : "";
     assert.doesNotMatch(config, /trusted_hash/);
+  });
+
+  it("dedupes duplicated hooks.state keys without adding approval", () => {
+    const codexHome = makeCodexHome();
+    const opts = {
+      codexHome,
+      hookScriptPath: "/repo/hooks/codex-session-hook.mjs",
+      nodeBin: "/n",
+    };
+    const { configPath, hooksPath } = ensureCodexHooks({
+      ...opts,
+      trust: true,
+    });
+    const key = `${hooksPath}:session_start:0:0`;
+    const hash = readFileSync(configPath, "utf8").match(
+      /trusted_hash = "([^"]+)"/,
+    )[1];
+    writeFileSync(
+      configPath,
+      `[hooks.state]\n"${key}" = { trusted_hash = "${hash}" }\n\n${readFileSync(configPath, "utf8")}`,
+    );
+    const result = ensureCodexHooks(opts);
+    const config = readFileSync(configPath, "utf8");
+    assert.doesNotThrow(() => toml.parse(config));
+    assert.equal(result.trusted, true);
+    assert.equal(config.split(key).length - 1, 1);
+  });
+
+  it("reads back approval when the Codex home path has backslashes", () => {
+    const codexHome = join(makeCodexHome(), "a\\b");
+    mkdirSync(codexHome);
+    const opts = {
+      codexHome,
+      hookScriptPath: "/repo/hooks/codex-session-hook.mjs",
+      nodeBin: "/n",
+    };
+    assert.equal(ensureCodexHooks({ ...opts, trust: true }).trusted, true);
+    const again = ensureCodexHooks(opts);
+    assert.equal(again.trusted, true);
+    assert.equal(again.changedConfig, false);
   });
 
   it("quotes the Windows node path without doubling backslashes", () => {
