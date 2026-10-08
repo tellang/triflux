@@ -210,25 +210,6 @@ const MCP_PROFILE_HINTS = {
   docs: "Focus on documentation and explanation tasks.",
 };
 
-export function buildDashboardAttachArgs(
-  sessionName,
-  layout,
-  workerCount,
-  anchor = "window",
-) {
-  const safeName = String(sessionName).replace(/[^a-zA-Z0-9_-]/g, "");
-  const base = anchor === "tab" ? ["-w", "0", "nt"] : ["-w", "new"];
-  return [
-    ...base,
-    "--session",
-    safeName,
-    "--layout",
-    layout,
-    "--workers",
-    String(workerCount),
-  ];
-}
-
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const { handoff = true, mcp, contextFile, model, cwd } = opts;
   const resolvedCli = resolveCliType(cli);
