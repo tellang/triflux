@@ -310,15 +310,10 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     },
   },
   update: {
-    usage: "tfx update [--dev]",
+    usage: "tfx update",
     description:
       "설치 방식(plugin/npm/git)을 감지해 triflux를 업데이트하고 setup/cache를 재동기화",
     options: [
-      {
-        name: "--dev / dev",
-        type: "boolean",
-        description: "npm 설치 모드에서 dev tag로 업데이트",
-      },
       {
         name: "--help",
         type: "boolean",
@@ -547,12 +542,6 @@ function whichInShell(cmd, shell) {
   } catch {
     return null;
   }
-}
-
-function isDevUpdateRequested(argv = process.argv) {
-  return (
-    argv.includes("--dev") || argv.includes("@dev") || argv.includes("dev")
-  );
 }
 
 function checkShellAvailable(shell) {
@@ -3149,9 +3138,7 @@ async function cmdUpdate(args = []) {
     return;
   }
 
-  const isDev = isDevUpdateRequested(args);
-  const tagLabel = isDev ? ` ${YELLOW}--dev${RESET}` : "";
-  console.log(`\n${BOLD}triflux update${RESET}${tagLabel}\n`);
+  console.log(`\n${BOLD}triflux update${RESET}\n`);
 
   // 1. 설치 방식 감지
   const pluginsFile = join(CLAUDE_DIR, "plugins", "installed_plugins.json");
@@ -3249,9 +3236,7 @@ async function cmdUpdate(args = []) {
         break;
       }
       case "npm-global": {
-        const npmCmd = isDev
-          ? "npm install -g triflux@dev"
-          : "npm install -g triflux@latest";
+        const npmCmd = "npm install -g triflux@latest";
         let result;
         try {
           result = execSync(npmCmd, {
@@ -3279,9 +3264,7 @@ async function cmdUpdate(args = []) {
         break;
       }
       case "npm-local": {
-        const npmLocalCmd = isDev
-          ? "npm install triflux@dev"
-          : "npm update triflux";
+        const npmLocalCmd = "npm update triflux";
         const result = execSync(npmLocalCmd, {
           encoding: "utf8",
           timeout: 60000,
@@ -3291,9 +3274,7 @@ async function cmdUpdate(args = []) {
         })
           .trim()
           .split(/\r?\n/)[0];
-        ok(
-          `${isDev ? "npm install triflux@dev" : "npm update triflux"} — ${result || "완료"}`,
-        );
+        ok(`${npmLocalCmd} — ${result || "완료"}`);
         updated = true;
         break;
       }
@@ -3692,7 +3673,6 @@ function cmdHelp() {
     ${DIM}  --help${RESET}       ${GRAY}--audit, --diagnose 등 전체 옵션${RESET}
     ${WHITE_BRIGHT}tfx mcp${RESET}        ${GRAY}MCP registry 관리 (list/sync/add/remove)${RESET}
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
-    ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}      ${GRAY}멀티-CLI 팀 모드 (tmux)${RESET}
     ${WHITE_BRIGHT}tfx cto${RESET}        ${GRAY}저장소 스냅숏 수집과 조회 (collect/status/hygiene)${RESET}

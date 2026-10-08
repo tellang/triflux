@@ -1437,10 +1437,7 @@ export async function autoAttachTerminal(
         opts.dashboardLayout || "single",
         workerCount,
       );
-      const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(
-        /\\/g,
-        "/",
-      );
+      const viewerPath = join(SCRIPT_DIR, "tui-viewer.mjs").replace(/\\/g, "/");
       await wt.createTab({
         title: buildAttachTitle(safeSession, "dashboard"),
         profile: "triflux",
@@ -1510,10 +1507,7 @@ export async function attachDashboardTab(
   try {
     const safeSession = sanitizeSessionName(sessionName);
     const resolvedLayout = resolveDashboardLayout(dashboardLayout, workerCount);
-    const viewerPath = join(import.meta.dirname, "tui-viewer.mjs").replace(
-      /\\/g,
-      "/",
-    );
+    const viewerPath = join(SCRIPT_DIR, "tui-viewer.mjs").replace(/\\/g, "/");
 
     await wt.createTab({
       title: buildAttachTitle(safeSession, "dashboard"),

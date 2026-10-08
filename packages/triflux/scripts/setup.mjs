@@ -2358,7 +2358,6 @@ ${B}Commands:${R}
   ${C}triflux${R} doctor    CLI 진단 (Codex/Antigravity 확인)
   ${C}triflux${R} list      설치된 스킬 목록
   ${C}triflux${R} update    최신 안정 버전으로 업데이트
-  ${C}triflux${R} update --dev  dev 채널로 업데이트 (${D}dev 별칭 지원${R})
 
 ${B}Shortcuts:${R}
   ${C}tfx${R}                 triflux 축약
