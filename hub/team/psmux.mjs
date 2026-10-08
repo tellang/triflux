@@ -1140,7 +1140,9 @@ export function pruneStale(opts = {}) {
  */
 export function psmuxSessionExists(sessionName) {
   try {
-    psmuxExec(["has-session", "-t", sessionName], { stdio: "ignore" });
+    psmuxExec(["has-session", "-t", exactSessionTarget(sessionName)], {
+      stdio: "ignore",
+    });
     return true;
   } catch {
     return false;

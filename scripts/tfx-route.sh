@@ -179,7 +179,7 @@ _run_async_job_body() {
 }
 
 # 그룹 kill 대상 워커의 명령 서명. timeout 래퍼가 리더면 인자에 CLI 이름이 남는다.
-_TFX_WORKER_CMD_RE='tfx-route|(^|[ /])(codex|agy|claude)([ .]|$)'
+_TFX_WORKER_CMD_RE='tfx-route|antigravity|(^|[ /])(codex|agy|claude)([ .]|$)'
 
 # Unix: 추적 PID 를 종료한다. timeout 래퍼가 없거나 tee 가 마지막 단계면 워커가
 # 이 스크립트와 같은 그룹이라, 그룹 kill 이 자기와 호출자 그룹을 죽인다(#548).

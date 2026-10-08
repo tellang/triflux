@@ -54,7 +54,10 @@ sleep 30 & echo $! > "$DIR/sibling"
   elif [ "$MODE" = tee ]; then
     printf x | _exec_tracked _no_timeout 0 bash -c 'sleep 30 & echo $! > "$DIR/worker"; wait' 2>/dev/null | tee /dev/null > /dev/null &
     echo $! >> "$_PID_TRACK"
-    sleep 0.3
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+      [ -s "$DIR/worker" ] && break
+      sleep 0.1
+    done
   else
     cat "$DIR/sibling" >> "$_PID_TRACK"
   fi
@@ -62,6 +65,15 @@ sleep 30 & echo $! > "$DIR/sibling"
 )
 echo reached > "$DIR/after"
 `;
+
+// 종료 직후 좀비가 잠깐 남을 수 있어 짧게 재확인한다.
+async function staysAlive(pid) {
+  for (let i = 0; i < 20; i += 1) {
+    if (!isAlive(pid)) return false;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return true;
+}
 
 function isAlive(pid) {
   try {
@@ -86,7 +98,7 @@ async function runCleanup(mode) {
   const result = {
     reached: existsSync(path.join(dir, "after")),
     siblingAlive: isAlive(sibling),
-    workerAlive: mode === "foreign" ? null : isAlive(read("worker")),
+    workerAlive: mode === "foreign" ? null : await staysAlive(read("worker")),
   };
   for (const pid of [sibling, mode === "foreign" ? 0 : read("worker")]) {
     if (pid && isAlive(pid)) process.kill(pid, "SIGKILL");
@@ -167,6 +179,11 @@ describe("#548 tmux 세션 이름 접두사", {
     try {
       tmux("new-session", "-d", "-s", "tfx548-gone-other", "sleep 30");
       const { killPsmuxSession } = await import("../../hub/team/psmux.mjs");
+      const { killSession, sessionExists } = await import(
+        "../../hub/team/session.mjs"
+      );
+      assert.equal(sessionExists("tfx548-gone"), false);
+      killSession("tfx548-gone");
       killPsmuxSession("tfx548-gone");
       assert.doesNotThrow(() =>
         tmux("has-session", "-t", "=tfx548-gone-other"),
