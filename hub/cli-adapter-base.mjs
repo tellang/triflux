@@ -44,12 +44,12 @@ export const CODEX_MCP_EXECUTION_EXIT_CODE = 1;
  *
  * macOS 회귀 fix (codex v0.130.0 oh-my-codex hook lifecycle): 매우 긴
  * argv-inline prompt 가 SessionStart Failed 를 유발하므로 default 가 prompt
- * 를 stdin 으로 전달하는 패턴. 셸별 분기:
- *   - Unix (bash/zsh): `codex exec ... < '/tmp/triflux-codex-prompt/prompt-*.txt'`
- *   - Windows (pwsh7): `Get-Content -Raw 'path' | codex exec ...`
- *     (pwsh7 의 `<` 는 reserved future syntax 라 호환성 보장 안 됨)
+ * 를 stdin 으로 전달하는 패턴. 셸(opts.shell)별 분기:
+ *   - posix: `codex exec ... < '<prompt 파일>'`
+ *   - pwsh(Windows 기본): `Get-Content -LiteralPath '<prompt 파일>' -Raw -Encoding UTF8 | codex exec ...`
+ *   - cmd(runProcess): `codex exec ... < "<prompt 파일>"`, argv 모드에서도 파일로 넘긴다
  *
- * 환경 변수 `TFX_CODEX_STDIN_PROMPT=0` 이면 legacy argv-inline 으로 회귀.
+ * 환경 변수 `TFX_CODEX_STDIN_PROMPT=0` 이면 legacy argv-inline 으로 회귀(cmd 제외).
  * 결정론 보장이 필요한 launcher path 는 호출 시 `stdinPrompt: false` 명시.
  *
  * @param {string} prompt
@@ -103,9 +103,10 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
   const hasPrompt = typeof prompt === "string" && prompt.length > 0;
   if (useStdin && hasPrompt) {
     const promptFile = writePromptToTmpFile(prompt);
-    // pwsh7 의 `<` 는 예약 문법이라 Get-Content -Raw 파이프로 stdin 에 넣는다.
+    // pwsh 의 `<` 는 예약 문법이라 Get-Content 파이프로 stdin 에 넣는다. 5.1 은 BOM 없는 파일을 ANSI 로
+    // 읽고 파이프를 ASCII 로 보내서 UTF-8 을 명시하고, -LiteralPath 로 [] 를 와일드카드로 읽지 않는다.
     if (shell === "pwsh")
-      return `Get-Content -Raw ${quote(promptFile)} | ${parts.join(" ")}`;
+      return `$OutputEncoding = [System.Text.UTF8Encoding]::new($false); Get-Content -LiteralPath ${quote(promptFile)} -Raw -Encoding UTF8 | ${parts.join(" ")}`;
     return `${parts.join(" ")} < ${quote(promptFile)}`;
   }
 

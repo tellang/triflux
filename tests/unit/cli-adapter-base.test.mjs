@@ -357,6 +357,11 @@ test("buildExecCommand: Windows 셸별 인용 (#672)", async () => {
     });
     assert.ok(pwsh.endsWith(`'$(calc) "x" %PATH% it''s'`), pwsh);
     assert.match(pwsh, /--output-last-message 'C:\/r\.txt'/);
+    const pwshStdin = base.buildExecCommand(prompt, null, { shell: "pwsh" });
+    assert.match(
+      pwshStdin,
+      /Get-Content -LiteralPath '[^']+' -Raw -Encoding UTF8 \| codex exec /,
+    );
 
     // cmd.exe 는 임의 문자열을 안전하게 인용할 수 없어 stdinPrompt:false 여도 파일로 넘긴다.
     const cmd = base.buildExecCommand(prompt, "C:/r.txt", {
