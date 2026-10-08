@@ -9,6 +9,7 @@
 | **왜 이렇게 정했나 (결정 근거)** | [adr/](adr/): 번호화된 불변 ADR · 상태보드 [adr/README.md](adr/README.md) · 운영 규약 [adr/CONVENTIONS.md](adr/CONVENTIONS.md) · 경량 결정로그 [DECISIONS.md](DECISIONS.md) |
 | **CTO 조회 범위** | [ADR-0024](adr/0024-cto-explicit-queries-only.md) : 명시적 `collect`·`status`와 제거한 운영 기능 |
 | **swarm 퇴역** | [ADR-0025](adr/0025-retire-swarm-execution-engine.md) : 제거한 실행 엔진과 worktree 격리 방향 |
+| **claude agents 행** | [ADR-0026](adr/0026-agents-row-tmux-attach.md) : Enter 로 워커 tmux 방을 여는 행과 터미널 응답 누수 차단 |
 | **Codex 메시지 전송** | [ADR-0027](adr/0027-codex-message-queue-default.md) : `codex queue` 기본, tmux 입력은 폴백과 슬래시 명령 전용 |
 | **항상 지킬 에이전트 규칙** | [../.claude/rules/](../.claude/rules/): 정책 SSOT. 하네스가 auto-load한다. 문서는 이 규칙을 "가리키기만" 한다 |
 | **Codex 실행 관례** | [codex-conventions.md](codex-conventions.md) |

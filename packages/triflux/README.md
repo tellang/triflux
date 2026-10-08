@@ -165,7 +165,8 @@ gets past Claude Code's 600-second Bash limit. Follow up with `--job-status`, `-
 **Hub.** A local message bus for teams, remote sessions, MCP tools, and status surfaces. It binds
 to `127.0.0.1:27888` by default (`TFX_HUB_PORT` overrides) and accepts a bearer token from
 `TFX_HUB_TOKEN`. Headless workers from `tfx-auto` and `tfx multi` appear in
-the `claude agents` panel unless you pass `--no-native-bridge-ui`.
+the `claude agents` panel unless you pass `--no-native-bridge-ui`. Press Enter on a row to open the
+tmux pane the worker runs in.
 
 **Retry and escalation.** `--retry ralph` loops until done or stuck (three identical failures).
 `--retry auto-escalate` steps from Codex `gpt6_astra_max` to Claude `fable`; override the chain in

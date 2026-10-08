@@ -20,6 +20,7 @@ import {
   registryDir,
 } from "../hub/lib/codex-session-registry.mjs";
 import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
+import { exposeLiveSession } from "../hub/team/agents-row.mjs";
 import {
   findClaudeTranscript,
   readClaudeTranscript,
@@ -2175,6 +2176,14 @@ async function doStart(adapter, opts) {
             "name update could not be confirmed from Codex session_index",
         }
       : {}),
+    ...(await exposeLiveSession({
+      cli: adapter.cli,
+      session,
+      name,
+      cwd,
+      remote,
+      ready,
+    })),
     raw,
   });
 }

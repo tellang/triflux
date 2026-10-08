@@ -1775,8 +1775,7 @@ export async function dispatchClaudeDaemonJob({
 /**
  * dispatchClaudeDaemonJob 의 대칭 정리 경로.
  * removeProjection + killDaemonJob (+ optional removeClaudeJobState) 를
- * 모두 시도하며, 각 스텝 오류는 기존 close()/cleanupDaemonDispatches 와
- * 동일하게 .catch 로 삼킨다.
+ * 모두 시도하며, 각 스텝 오류는 .catch 로 삼킨다.
  */
 export async function teardownClaudeDaemonJob({
   controlSock,

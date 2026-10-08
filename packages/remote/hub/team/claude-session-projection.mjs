@@ -1,12 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export function normalizeClaudeBridgeSessionId(bridgeSessionId, short) {
+// 실제 bridge ID 가 없으면 만들어 내지 않는다. 추정 ID 는 붙을 수 있는 세션처럼 보이게 한다.
+export function normalizeClaudeBridgeSessionId(bridgeSessionId) {
   const value = String(bridgeSessionId || "").trim();
-  if (value.startsWith("session_")) return value;
   if (value.startsWith("cse_")) return `session_${value.slice(4)}`;
-  if (value) return value;
-  return `session_${short}`;
+  return value;
 }
 
 export function buildClaudeSessionProjection({
@@ -30,6 +29,7 @@ export function buildClaudeSessionProjection({
   if (!cwd) throw new Error("cwd is required");
   if (!name) throw new Error("name is required");
   if (!agent) throw new Error("agent is required");
+  const bridge = normalizeClaudeBridgeSessionId(bridgeSessionId);
   return {
     pid,
     sessionId,
@@ -45,7 +45,7 @@ export function buildClaudeSessionProjection({
     jobId: short,
     status,
     updatedAt,
-    bridgeSessionId: normalizeClaudeBridgeSessionId(bridgeSessionId, short),
+    ...(bridge ? { bridgeSessionId: bridge } : {}),
   };
 }
 
@@ -56,74 +56,6 @@ export async function writeClaudeSessionProjection(sessionsDir, projection) {
   await fs.writeFile(tmpPath, `${JSON.stringify(projection)}\n`, "utf8");
   await fs.rename(tmpPath, sessionPath);
   return sessionPath;
-}
-
-export async function updateClaudeSessionProjection(sessionPath, patch) {
-  const parsed = JSON.parse(await fs.readFile(sessionPath, "utf8"));
-  const next = {
-    ...parsed,
-    ...patch,
-    updatedAt: patch.updatedAt || Date.now(),
-  };
-  await fs.writeFile(sessionPath, `${JSON.stringify(next)}\n`, "utf8");
-  return next;
-}
-
-function projectionSessionId(projection) {
-  return String(
-    projection?.sessionId ?? projection?.session_id ?? projection?.id ?? "",
-  ).trim();
-}
-
-export async function findClaudeSessionProjectionBySessionId(
-  sessionsDir,
-  sessionId,
-) {
-  const expected = String(sessionId || "").trim();
-  if (!sessionsDir || !expected) return null;
-  let entries;
-  try {
-    entries = await fs.readdir(sessionsDir, { withFileTypes: true });
-  } catch (error) {
-    if (error?.code === "ENOENT") return null;
-    throw error;
-  }
-
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-    const filePath = path.join(sessionsDir, entry.name);
-    try {
-      const projection = JSON.parse(await fs.readFile(filePath, "utf8"));
-      if (projectionSessionId(projection) === expected) {
-        return { path: filePath, projection };
-      }
-    } catch (error) {
-      if (error instanceof SyntaxError) continue;
-      if (error?.code === "ENOENT") continue;
-      throw error;
-    }
-  }
-  return null;
-}
-
-export async function refreshClaudeSessionProjectionCwd({
-  sessionsDir,
-  sessionId,
-  cwd,
-  updatedAt = Date.now(),
-} = {}) {
-  const nextCwd = String(cwd || "").trim();
-  if (!nextCwd) return { updated: false, reason: "missing_cwd" };
-  const found = await findClaudeSessionProjectionBySessionId(
-    sessionsDir,
-    sessionId,
-  );
-  if (!found) return { updated: false, reason: "projection_not_found" };
-  const projection = await updateClaudeSessionProjection(found.path, {
-    cwd: nextCwd,
-    updatedAt,
-  });
-  return { updated: true, path: found.path, projection };
 }
 
 export async function removeClaudeSessionProjection(sessionPath) {

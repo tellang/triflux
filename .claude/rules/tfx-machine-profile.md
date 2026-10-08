@@ -40,7 +40,7 @@ TFX_STALL_KILL=classify
 OS 파생 multiplexer 정책은 `darwin|linux → tmux`, `win32 → psmux`다.
 non-Windows의 `auto` 모드는 psmux 감지를 무시하고, 명시적 `psmux`는 오류로 처리한다.
 WT 팀 모드와 in-process 모드는 지원하지 않는다. 대화형 실행에 멀티플렉서가 없으면
-설치 안내 오류로 끝내고, 비TTY에서 사용할 멀티플렉서가 없으면 headless로 실행한다.
+설치 안내 오류로 끝낸다. headless도 tmux/psmux 방에서 돌기 때문에 멀티플렉서가 필요하다.
 
 ## 설치 캡처
 

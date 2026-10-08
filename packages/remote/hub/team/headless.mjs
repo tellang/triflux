@@ -12,7 +12,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,26 +24,15 @@ import {
   resolveStallInterventionMs,
 } from "@triflux/core/hub/lib/worker-lifecycle.mjs";
 import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
+import { createAgentsRowOwnership, openAgentsRow } from "./agents-row.mjs";
 import { getBackend } from "./backend.mjs";
-import {
-  buildDaemonControlAuth,
-  buildDaemonExecDispatchPayload,
-  deriveClaudeDaemonPaths as deriveClaudeControlPaths,
-  dispatchClaudeDaemonJob,
-  killDaemonJob,
-  sendKillBySessionId,
-} from "./claude-daemon-control.mjs";
-import { removeClaudeSessionProjection } from "./claude-session-projection.mjs";
 import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import {
   formatHandoffForLead,
   HANDOFF_INSTRUCTION_SHORT,
   processHandoff,
 } from "./handoff.mjs";
-import {
-  createFileActivitySource,
-  createInterventionLadder,
-} from "./intervention.mjs";
+import { createInterventionLadder } from "./intervention.mjs";
 import {
   capturePsmuxPane,
   createPsmuxSession,
@@ -52,7 +40,6 @@ import {
   killPsmuxSession,
   psmuxExec,
   psmuxSessionExists,
-  sendKeysToPane,
   startCapture,
   waitForCompletion,
 } from "./psmux.mjs";
@@ -60,7 +47,6 @@ import { createLogDashboard } from "./tui.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
 const RESULT_DIR = join(tmpdir(), "tfx-headless");
-const DAEMON_COMPLETION_PREFIX = "__TFX_HEADLESS_DONE__:";
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 /** CLI별 브랜드 — 이모지 + 공식 색상 (HUD와 통일) */
@@ -235,7 +221,11 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
     let ctx = readFileSync(contextFile, "utf8");
     let truncated = false;
     if (Buffer.byteLength(ctx, "utf8") > 32768) {
-      ctx = Buffer.from(ctx).subarray(0, 32768).toString("utf8");
+      // 바이트 경계에서 잘린 다바이트 글자는 U+FFFD 로 디코딩되므로 떼어 낸다.
+      ctx = Buffer.from(ctx)
+        .subarray(0, 32768)
+        .toString("utf8")
+        .replace(/�+$/u, "");
       truncated = true;
     }
     if (truncated) {
@@ -309,48 +299,6 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   return `cd '${safeCwd.replace(/'/g, "'\\''")}' && ${backendCommand}`;
 }
 
-function escapeRegExp(value) {
-  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-export function buildDaemonWrappedCommand(command, token) {
-  return `{ ${command}; __ec=$?; echo "${DAEMON_COMPLETION_PREFIX}${token}:$__ec"; }`;
-}
-
-export function waitForDaemonCompletionFromMessages(
-  messages,
-  { token, resultFile } = {},
-) {
-  const completionRegex = new RegExp(
-    `${escapeRegExp(DAEMON_COMPLETION_PREFIX)}${escapeRegExp(token)}:(\\d+)`,
-  );
-  const stream = [];
-  let matched = false;
-  let exitCode = null;
-
-  for (const message of messages) {
-    if (Array.isArray(message?.streamTail)) {
-      stream.push(...message.streamTail.map((line) => `${line}\n`));
-    }
-    if (typeof message?.line !== "string") continue;
-    const match = completionRegex.exec(message.line);
-    if (match) {
-      const beforeCompletion = message.line.slice(0, match.index);
-      if (beforeCompletion) stream.push(beforeCompletion);
-      matched = true;
-      exitCode = Number.parseInt(match[1], 10);
-      continue;
-    }
-    stream.push(message.line);
-  }
-
-  if (resultFile) {
-    writeFileSync(`${resultFile}.partial`, stream.join(""), "utf8");
-  }
-
-  return { matched, exitCode };
-}
-
 /**
  * 이전 run 의 stale .txt / .partial / .err 를 제거한다.
  * Issue #118 Codex review R1 HIGH: resultFile 경로 재사용 시 (워커 restart 또는
@@ -413,43 +361,28 @@ function createHeadlessIntervention(dispatch, fallback) {
     if (typeof fallback === "function")
       return (await fallback(context)) === true;
 
-    const isDaemon = context.channel === "daemon";
-    const readActivitySignature = isDaemon
-      ? createFileActivitySource({ files: [dispatch.resultFile] })
-      : () => {
-          let mtime = 0;
-          try {
-            mtime = statSync(dispatch.resultFile).mtimeMs;
-          } catch {
-            /* result file has not been written yet */
-          }
-          return `${capturePsmuxPane(context.paneId || dispatch.paneId, 50)}\0${mtime}`;
-        };
+    const readActivitySignature = () => {
+      let mtime = 0;
+      try {
+        mtime = statSync(dispatch.resultFile).mtimeMs;
+      } catch {
+        /* result file has not been written yet */
+      }
+      return `${capturePsmuxPane(context.paneId || dispatch.paneId, 50)}\0${mtime}`;
+    };
     const ladder = createInterventionLadder({
-      target: isDaemon
-        ? {
-            channel: "claude-daemon",
-            cli: dispatch.cli || "claude",
-            sessionId: dispatch.sessionId,
-            daemon: {
-              controlSock: dispatch.controlSock,
-              short: dispatch.daemonShort,
-              sessionId: dispatch.sessionId,
-              configDir: dispatch.daemonPaths?.configDir,
-            },
-          }
-        : {
-            channel: "tmux-pane",
-            paneId: context.paneId || dispatch.paneId,
-            cli: dispatch.cli,
-            sessionId: dispatch.sessionId,
-          },
+      target: {
+        channel: "tmux-pane",
+        paneId: context.paneId || dispatch.paneId,
+        cli: dispatch.cli,
+        sessionId: dispatch.sessionId,
+      },
       readActivitySignature,
       deps: {
         // 이 트랙이 재실행 소유자다. pane 채널은 기존 completion wrapper를 다시
         // dispatch하여 token/result 계약을 보존한다.
         resumeHandler: async () => {
-          if (isDaemon || !dispatch.command) return { ok: false };
+          if (!dispatch.command) return { ok: false };
           const restarted = dispatchCommand(
             context.sessionName,
             context.paneId || dispatch.paneId,
@@ -752,133 +685,6 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
   );
 }
 
-async function dispatchDaemonBatch(sessionName, assignments, opts = {}) {
-  const { safeProgress, configDir } = opts;
-  const paths = deriveClaudeControlPaths({ configDir });
-  const dispatches = [];
-
-  try {
-    for (let i = 0; i < assignments.length; i += 1) {
-      const assignment = assignments[i];
-      const paneName = `worker-${i + 1}`;
-      const displayName = resolveHeadlessDisplayName(assignment, paneName);
-      const workerId = getHeadlessWorkerAgentId(sessionName, i);
-      const resolvedCli = resolveCliType(assignment.cli);
-      const resultFile = join(
-        RESULT_DIR,
-        `${sessionName}-${paneName}.txt`,
-      ).replace(/\\/g, "/");
-      cleanStaleResultArtifacts(resultFile);
-      const command = buildHeadlessCommand(
-        assignment.cli,
-        assignment.prompt,
-        resultFile,
-        {
-          mcp: assignment.mcp,
-          role: assignment.role,
-          model: assignment.model,
-          profile: assignment.profile,
-          cwd: assignment.cwd || assignment.workdir,
-        },
-      );
-      const token = randomUUID().slice(0, 10);
-      const short = randomUUID().replace(/-/g, "").slice(0, 8);
-      const name = `Triflux ${resolvedCli || "worker"} ${displayName}`;
-      const record = {
-        paneId: `daemon:${short}`,
-        paneName,
-        displayName,
-        resultFile,
-        cli: resolvedCli,
-        role: assignment.role,
-        command,
-        token,
-        workerId,
-        cwd: assignment.cwd || assignment.workdir,
-        daemonShort: short,
-        daemonPaths: paths,
-        controlSock: paths.controlSock,
-        sessionId: "",
-        sessionProjectionPath: "",
-        daemonCompletionMatched: false,
-      };
-      dispatches.push(record);
-
-      const payload = buildDaemonExecDispatchPayload({
-        short,
-        cwd: assignment.cwd || assignment.workdir || process.cwd(),
-        command: buildDaemonWrappedCommand(command, token),
-        name,
-      });
-      record.sessionId = payload.sessionId;
-      // buildDaemonWrappedCommand + token completion 시맨틱은 헬퍼 밖(headless 전용)에
-      // 남기고, dispatch→pid→bridge→projection 시퀀스만 공유 헬퍼로 위임한다.
-      // CRITICAL: waitForDaemonCompletion 이 나중에 record.daemonCompletionMatched 를
-      // 변경하고 cleanupDaemonDispatches 가 같은 record 를 읽으므로, 헬퍼가 새 객체를
-      // 반환해도 record 를 교체하지 말고 plain 필드를 Object.assign 한다.
-      const dispatched = await dispatchClaudeDaemonJob({
-        paths,
-        controlSock: paths.controlSock,
-        payload,
-        agent: resolvedCli || "codex",
-        name,
-        cwd: assignment.cwd || assignment.workdir || process.cwd(),
-        dispatchTimeoutMs: 5000,
-      }).catch((error) => {
-        throw new Error(
-          `[headless] Claude daemon dispatch failed for ${paneName}: ${
-            error?.message || error
-          }`,
-        );
-      });
-      Object.assign(record, {
-        sessionId: dispatched.sessionId,
-        sessionProjectionPath: dispatched.sessionProjectionPath,
-      });
-      if (safeProgress) {
-        safeProgress({ type: "dispatched", paneName, cli: resolvedCli });
-      }
-    }
-  } catch (error) {
-    await cleanupDaemonDispatches(dispatches);
-    throw error;
-  }
-
-  return dispatches;
-}
-
-export async function cleanupDaemonDispatches(dispatches) {
-  await Promise.all(
-    dispatches.map(async (dispatch) => {
-      if (dispatch.sessionProjectionPath) {
-        await removeClaudeSessionProjection(
-          dispatch.sessionProjectionPath,
-        ).catch(() => {});
-      }
-      if (
-        dispatch.daemonCompletionMatched === true &&
-        dispatch.daemonPaths &&
-        dispatch.sessionId
-      ) {
-        await sendKillBySessionId({
-          daemonPaths: dispatch.daemonPaths,
-          sessionId: dispatch.sessionId,
-        }).catch(() => {});
-      }
-      if (dispatch.controlSock && dispatch.daemonShort) {
-        const controlAuth = await buildDaemonControlAuth(
-          dispatch.daemonPaths?.configDir,
-        ).catch(() => ({}));
-        await killDaemonJob(
-          dispatch.controlSock,
-          dispatch.daemonShort,
-          controlAuth,
-        ).catch(() => {});
-      }
-    }),
-  );
-}
-
 /**
  * 모든 dispatch를 병렬 대기하며 완료 결과를 수집한다.
  * @param {string} sessionName
@@ -998,169 +804,6 @@ async function awaitAll(
   );
 }
 
-export async function waitForDaemonCompletion(
-  dispatch,
-  timeoutSec,
-  safeProgress,
-  progressIntervalSec,
-  lifecycle = null,
-) {
-  const messages = [];
-  const socket = net.connect(dispatch.controlSock);
-  let buffer = "";
-  let settled = false;
-  let lastProgressAt = 0;
-  const activity = lifecycle?.enabled
-    ? createActivityLifecycle({
-        interventionMs: lifecycle.interventionMs,
-        hardCeilingMs: lifecycle.hardCeilingMs,
-        onIntervene: createHeadlessIntervention(
-          dispatch,
-          lifecycle.onIntervene,
-        ),
-      })
-    : null;
-
-  return await new Promise((resolve) => {
-    const finish = (completion, timeoutReason = "") => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      clearInterval(timer);
-      socket.destroy();
-      const finalCompletion =
-        completion ||
-        waitForDaemonCompletionFromMessages(messages, {
-          token: dispatch.token,
-          resultFile: dispatch.resultFile,
-        });
-      if (!finalCompletion.matched && timeoutReason) {
-        finalCompletion.timedOut = true;
-        finalCompletion.timeoutReason = timeoutReason;
-      }
-      if (finalCompletion.matched) {
-        dispatch.daemonCompletionMatched = true;
-        cleanupDaemonDispatches([dispatch]).catch(() => {});
-      } else {
-        buildDaemonControlAuth(dispatch.daemonPaths?.configDir)
-          .catch(() => ({}))
-          .then((controlAuth) =>
-            killDaemonJob(
-              dispatch.controlSock,
-              dispatch.daemonShort,
-              controlAuth,
-            ),
-          )
-          .catch(() => {});
-      }
-      resolve(finalCompletion);
-    };
-
-    const timer = activity
-      ? setInterval(() => {
-          void activity
-            .check({
-              channel: "daemon",
-              controlSock: dispatch.controlSock,
-              daemonShort: dispatch.daemonShort,
-              resultFile: dispatch.resultFile,
-            })
-            .then((reason) => {
-              if (reason) finish(null, reason);
-            });
-        }, lifecycle.checkIntervalMs ?? 5_000)
-      : setTimeout(
-          () => finish(null, "wall_clock"),
-          Math.max(0, timeoutSec * 1000),
-        );
-    if (typeof timer.unref === "function") timer.unref();
-
-    socket.on("error", () => finish(null, "socket_error"));
-    socket.on("close", () => {
-      if (!settled) finish(null, "socket_closed");
-    });
-    socket.on("connect", () => {
-      socket.write(
-        `${JSON.stringify({
-          proto: 1,
-          op: "subscribe",
-          short: dispatch.daemonShort,
-          tail: 20,
-        })}\n`,
-      );
-    });
-    socket.on("data", (chunk) => {
-      buffer += chunk.toString("utf8");
-      while (buffer.includes("\n")) {
-        const index = buffer.indexOf("\n");
-        const line = buffer.slice(0, index);
-        buffer = buffer.slice(index + 1);
-        if (!line.trim()) continue;
-        const message = JSON.parse(line);
-        messages.push(message);
-        activity?.observe();
-        if (
-          safeProgress &&
-          progressIntervalSec > 0 &&
-          typeof message.line === "string"
-        ) {
-          const now = Date.now();
-          if (now - lastProgressAt >= progressIntervalSec * 1000) {
-            lastProgressAt = now;
-            safeProgress({
-              type: "progress",
-              paneName: dispatch.paneName,
-              displayName: dispatch.displayName,
-              cli: dispatch.cli,
-              snapshot: message.line.split("\n").slice(-15).join("\n"),
-            });
-          }
-        }
-        const completion = waitForDaemonCompletionFromMessages(messages, {
-          token: dispatch.token,
-          resultFile: dispatch.resultFile,
-        });
-        if (completion.matched) finish(completion);
-      }
-    });
-  });
-}
-
-async function awaitAllDaemon(
-  dispatches,
-  timeoutSec,
-  safeProgress,
-  progressIntervalSec,
-  lifecycle,
-) {
-  return Promise.all(
-    dispatches.map(async (d) => {
-      const completion = await waitForDaemonCompletion(
-        d,
-        timeoutSec,
-        safeProgress,
-        progressIntervalSec,
-        lifecycle,
-      );
-      const output = readResult(d.resultFile, d.paneId);
-
-      if (safeProgress) {
-        safeProgress({
-          type: "completed",
-          paneName: d.paneName,
-          displayName: d.displayName,
-          cli: d.cli,
-          matched: completion.matched,
-          exitCode: completion.exitCode,
-          sessionDead: false,
-        });
-      }
-
-      return { d, completion, output };
-    }),
-  );
-}
-
 /**
  * git diff + handoff 파이프라인을 적용하여 최종 결과 배열을 반환한다.
  * @param {Array<{d, completion, output}>} results
@@ -1243,20 +886,18 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   const sessionOwnership =
     opts._sessionOwnership ||
     createHeadlessSessionOwnership(deps.killPsmuxSession || killPsmuxSession);
+  const agentsRows = opts._agentsRows || createAgentsRowOwnership();
   let {
     timeoutSec = 900,
     layout = "2x2",
     onProgress,
     progressIntervalSec = 0,
     progressive = true,
-    autoAttach = false,
     dashboard = false,
     dashboardLayout = "single",
     nativeBridge = false,
     nativeBridgeMode = "agents",
     onIntervene,
-    leadPane = null,
-    leadTmux = null,
   } = opts;
   if (!Number.isFinite(Number(timeoutSec)) || Number(timeoutSec) <= 0)
     timeoutSec = 900;
@@ -1274,10 +915,9 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   );
 
   if (normalizedAssignments.length === 0) {
-    return { sessionName, results: [], sessionOwnership };
+    return { sessionName, results: [], sessionOwnership, agentsRows };
   }
 
-  let daemonDispatches = [];
   let runCompleted = false;
   let completedResults = [];
   let runFailed = false;
@@ -1376,79 +1016,36 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   try {
     const progressiveDispatch = deps.dispatchProgressive || dispatchProgressive;
     const batchDispatch = deps.dispatchBatch || dispatchBatch;
-    const dispatches =
-      nativeBridge && nativeBridgeMode === "agents"
-        ? await dispatchDaemonBatch(sessionName, normalizedAssignments, {
-            safeProgress,
-          })
-        : progressive
-          ? await progressiveDispatch(sessionName, normalizedAssignments, {
-              layout,
-              safeProgress,
-              dashboardLayout,
-              sessionOwnership,
-              _deps: deps,
-            })
-          : await batchDispatch(sessionName, normalizedAssignments, {
-              layout,
-              safeProgress,
-              dashboardLayout,
-              sessionOwnership,
-              _deps: deps,
-            });
-    if (nativeBridge && nativeBridgeMode === "agents") {
-      daemonDispatches = dispatches;
-      const createObservationSession =
-        deps.createDaemonObservationSession || createDaemonObservationSession;
-      let observation = null;
-      try {
-        observation = createObservationSession(sessionName, dispatches, {
-          autoAttach,
-          dashboard,
+    const dispatches = progressive
+      ? await progressiveDispatch(sessionName, normalizedAssignments, {
+          layout,
+          safeProgress,
           dashboardLayout,
-          leadPane,
-          leadTmux,
-          onProgress: safeProgress,
+          sessionOwnership,
+          _deps: deps,
+        })
+      : await batchDispatch(sessionName, normalizedAssignments, {
+          layout,
+          safeProgress,
+          dashboardLayout,
+          sessionOwnership,
           _deps: deps,
         });
-      } catch (error) {
-        emitObserverWarning(
-          safeProgress,
-          sessionName,
-          "observer_session_create",
-          error,
-          "observer setup failed",
-        );
-      }
-      if (observation) {
-        sessionOwnership.acquire(observation.sessionName);
-        safeProgress({
-          type: "session_created",
-          sessionName: observation.sessionName,
-          panes: observation.panes,
-          dashboardLayout: observation.dashboardLayout,
-          observationSource: "daemon-files",
-        });
-      }
+    if (nativeBridge && nativeBridgeMode === "agents") {
+      await openHeadlessAgentsRows(sessionName, dispatches, agentsRows, {
+        safeProgress,
+        _deps: deps,
+      });
     }
 
-    const results =
-      nativeBridge && nativeBridgeMode === "agents"
-        ? await awaitAllDaemon(
-            dispatches,
-            timeoutSec,
-            safeProgress,
-            progressIntervalSec,
-            lifecycle,
-          )
-        : await awaitAll(
-            sessionName,
-            dispatches,
-            timeoutSec,
-            safeProgress,
-            progressIntervalSec,
-            lifecycle,
-          );
+    const results = await (deps.awaitAll || awaitAll)(
+      sessionName,
+      dispatches,
+      timeoutSec,
+      safeProgress,
+      progressIntervalSec,
+      lifecycle,
+    );
     const collected = await collectResults(results);
 
     // 완료 시 TUI에 최종 상태 반영 후 닫기
@@ -1481,21 +1078,17 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     runError = error;
   }
 
-  if (!runCompleted) sessionOwnership.release();
-  try {
-    if (daemonDispatches.length > 0) {
-      await cleanupDaemonDispatches(daemonDispatches);
-    }
-  } catch (error) {
+  if (!runCompleted) {
     sessionOwnership.release();
-    if (!runFailed) {
-      runFailed = true;
-      runError = error;
-    }
+    await agentsRows.release();
   }
-
   if (runFailed) throw runError;
-  return { sessionName, results: completedResults, sessionOwnership };
+  return {
+    sessionName,
+    results: completedResults,
+    sessionOwnership,
+    agentsRows,
+  };
 }
 
 /**
@@ -1514,13 +1107,16 @@ export async function runHeadlessWithCleanup(assignments, opts = {}) {
   const sessionOwnership = createHeadlessSessionOwnership(
     deps.killPsmuxSession || killPsmuxSession,
   );
+  const agentsRows = createAgentsRowOwnership();
 
   try {
     return await run(sessionName, assignments, {
       ...runOpts,
       _sessionOwnership: sessionOwnership,
+      _agentsRows: agentsRows,
     });
   } finally {
+    await agentsRows.release();
     sessionOwnership.release();
     // WT split pane은 psmux 종료 시 셸이 끝나면서 자동으로 닫힘
     // 수동 close-pane 불필요 (레이스 컨디션으로 WT 에러 발생)
@@ -1603,97 +1199,51 @@ function emitObserverWarning(
   });
 }
 
-// ─── v6.0.0: Lead-Direct Interactive Mode ───
-
 /**
- * daemon/native-bridge worker를 read-only로 관찰하는 tmux session을 만든다.
- * 실제 worker process는 daemon에 남고, viewer는 result/partial/stderr 파일만 읽는다.
- *
- * @param {string} sessionName
- * @param {Array<{resultFile:string}>} dispatches
- * @param {object} [opts]
- * @returns {{sessionName:string, panes:string[], dashboardLayout:string}|null}
+ * 워커 pane 마다 `claude agents` 행을 연다. 행은 그 pane 을 읽기 전용으로 보여 준다.
+ * 행을 못 열어도 워커는 tmux 에서 계속 돈다. 실패는 observer_warning 으로 알린다.
  */
-export function createDaemonObservationSession(
+async function openHeadlessAgentsRows(
   sessionName,
   dispatches,
+  rows,
   opts = {},
 ) {
   const deps = opts._deps || {};
   const platform = deps.platform ?? process.platform;
-  const leadPane = String(opts.leadPane || "");
-  const leadTmux = String(opts.leadTmux || "");
-  if (!opts.autoAttach) return null;
-  if (platform !== "darwin" && platform !== "linux") return null;
-  if (!leadTmux.trim()) return null;
-  if (!/^%\d+$/u.test(leadPane)) return null;
-  if (!Array.isArray(dispatches) || dispatches.length === 0) return null;
-
-  const safeSessionName = sanitizeSessionName(sessionName);
-  const resolvedLayout = opts.dashboard
-    ? resolveDashboardLayout(opts.dashboardLayout, dispatches.length)
-    : "lite";
-  const createSession = deps.createPsmuxSession || createPsmuxSession;
-  const applyTheme = deps.applyTrifluxTheme || applyTrifluxTheme;
-  const sendKeys = deps.sendKeysToPane || sendKeysToPane;
-  const killSession = deps.killPsmuxSession || killPsmuxSession;
-  let created = false;
-  let stage = "observer_session_create";
-
-  try {
-    const session = createSession(safeSessionName, {
-      layout: "2x2",
-      paneCount: 1,
-    });
-    created = true;
-    stage = "observer_theme";
-    applyTheme(safeSessionName);
-    stage = "observer_viewer_start";
-    const targetPane = session.panes?.[0];
-    if (!targetPane) throw new Error("observer pane was not created");
-
-    const viewerCommand = [
-      "exec",
-      shellQuote(process.execPath),
-      shellQuote(join(SCRIPT_DIR, "tui-viewer.mjs")),
-      "--session",
-      shellQuote(safeSessionName),
-      "--result-dir",
-      shellQuote(RESULT_DIR),
-      "--layout",
-      shellQuote(resolvedLayout),
-      "--source",
-      "files",
-      "--workers",
-      String(dispatches.length),
-      "--lead-pane",
-      shellQuote(leadPane),
-    ].join(" ");
-    sendKeys(targetPane, viewerCommand, true);
-
-    return {
-      sessionName: safeSessionName,
-      panes: session.panes,
-      dashboardLayout: resolvedLayout,
-    };
-  } catch (error) {
-    if (created) {
-      try {
-        killSession(safeSessionName);
-      } catch {
-        /* fail-open: observer failure must not stop daemon workers */
-      }
-    }
+  if (platform !== "darwin" && platform !== "linux") {
     emitObserverWarning(
-      opts.onProgress,
-      safeSessionName,
-      stage,
-      error,
-      "observer setup failed",
+      opts.safeProgress,
+      sessionName,
+      "agents_row",
+      null,
+      `claude agents rows need tmux on macOS/Linux (platform: ${platform})`,
     );
-    return null;
+    return;
+  }
+  const open = deps.openAgentsRow || openAgentsRow;
+  for (const d of dispatches) {
+    try {
+      const row = await open({
+        name: `${d.cli} ${d.displayName || d.paneName}`,
+        target: d.paneId,
+        cwd: d.cwd || process.cwd(),
+      });
+      rows.add(row.short);
+      d.agentsRowShort = row.short;
+    } catch (error) {
+      emitObserverWarning(
+        opts.safeProgress,
+        sessionName,
+        "agents_row",
+        error,
+        `claude agents row failed for ${d.paneName}`,
+      );
+    }
   }
 }
+
+// ─── v6.0.0: Lead-Direct Interactive Mode ───
 
 /**
  * attached tmux의 현재 leader pane 옆에 headless session view를 연다.
@@ -2054,11 +1604,13 @@ export async function runHeadlessInteractive(
   let sessionOwnership = createHeadlessSessionOwnership(
     deps.killPsmuxSession || killPsmuxSession,
   );
+  const agentsRows = createAgentsRowOwnership();
 
   // Phase 1: 세션 생성 → 즉시 관찰 pane/tab attach → dispatch → 대기 → 결과 수집
   const runResult = await run(sessionName, assignments, {
     ...interactiveRunOpts,
     _sessionOwnership: sessionOwnership,
+    _agentsRows: agentsRows,
   });
   const { results } = runResult;
   sessionOwnership = runResult.sessionOwnership || sessionOwnership;
@@ -2141,6 +1693,7 @@ export async function runHeadlessInteractive(
     kill() {
       if (this._killed) return;
       this._killed = true;
+      void agentsRows.release();
       sessionOwnership.release();
       // attach pane/tab은 psmux 종료 → attach client 종료 → 자동 닫힘
       // 수동 close-pane 불필요 (레이스 컨디션으로 WT 0x80070002 에러 발생)
