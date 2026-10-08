@@ -48,7 +48,7 @@ macOS/Linux는 플랫폼 보호기가 아무 작업도 하지 않게 처리하�
 
 | 후보 | 필요성 | 이유 |
 |------|--------|------|
-| iTerm2 관리자 | **불필요** | `hub/lib/env-detect.mjs:96`이 `TERM_PROGRAM === "iTerm.app"`을 감지하지만 별도 GUI 패인 조작은 tmux로 처리한다. 새 창은 `open -a Terminal` 대체 경로로 충분하다. |
+| iTerm2 관리자 | **불필요** | `hub/lib/env-detect.mjs`의 `detectTerminal`이 `TERM_PROGRAM === "iTerm.app"`을 감지하지만 별도 GUI 패인 조작은 tmux로 처리한다. 새 창은 `open -a Terminal` 대체 경로로 충분하다. |
 | tmux 관리자 | **불필요** | `terminal-opener.mjs`가 `tmux new-window`로 직접 호출한다. |
 | psmux 관리자 | **이미 있음** | `hub/team/psmux.mjs`가 Windows에서는 psmux, macOS/Linux에서는 tmux를 사용한다. |
 

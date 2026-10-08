@@ -1,6 +1,6 @@
 // hub/team/retry-state-machine.mjs
 // Phase 3 Step A — true ralph / auto-escalate retry state machine.
-// 설계 문서: .triflux/plans/phase3-lead-codex-ralph-escalate.md
+// 설계: 이슈 #112 Phase 3, 규칙은 .claude/rules/tfx-escalation-chain.md
 //
 // Modes:
 //   bounded       — --retry 1 (기본): maxIterations 도달 시 BUDGET_EXCEEDED.

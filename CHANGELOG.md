@@ -401,8 +401,6 @@ All notable changes to triflux will be documented in this file.
 ### Changed
 - GEMINI.md에 gstack 스킬 라우팅/health stack 규칙 추가
 
-## [Unreleased]
-
 ## [10.34.0] - 2026-06-10
 
 ### Fixed
