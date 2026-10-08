@@ -198,6 +198,27 @@ describe("setup machine profile non-interactive install", () => {
     }
   });
 
+  it("Windows 에서는 node 로 볼 수 없는 Git Bash timeout 을 없다고 경고하지 않는다", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "tfx-machine-profile-unit-"));
+    try {
+      const result = await ensureMachineProfile({
+        platform: "win32",
+        home: dir,
+        env: { TFX_MACHINE_PROFILE_PATH: join(dir, "machine-profile.env") },
+        force: true,
+        interactive: false,
+        commandAvailable: () => false,
+        timeoutCommandAvailable: () => false,
+      });
+      assert.doesNotMatch(
+        result.warnings.join("\n"),
+        /hard ceiling.*비활성|brew/u,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("--machine-profile-only --non-interactive는 TTY 없이 종료하고 프로파일을 만든다", () => {
     const dir = mkdtempSync(join(tmpdir(), "tfx-machine-profile-spawn-"));
     const profilePath = join(dir, "config", "machine-profile.env");

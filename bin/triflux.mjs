@@ -60,15 +60,14 @@ import {
 } from "../scripts/lib/psmux-info.mjs";
 import {
   applyStatusLine,
+  cleanupStaleSkills,
   ensureCodexProfiles,
   ensureTrifluxMods,
   getVersion,
-  isLocalDevSkillDir,
   isSkillSupportedOnPlatform,
   LEGACY_CODEX_MODELS,
   listInlineProfileNames,
   persistSettings,
-  REMOVED_SKILL_NAMES,
   REQUIRED_CODEX_PROFILES,
   SKILL_ALIASES,
   SYNC_MAP,
@@ -2260,38 +2259,29 @@ async function cmdDoctor(options = {}) {
       });
     }
 
-    // Stale 스킬 체크
-    const staleSkills = [];
-    const userSkillsDir = join(CLAUDE_DIR, "skills");
-    if (existsSync(userSkillsDir)) {
-      const pkgSkillsDir = join(PKG_ROOT, "skills");
-      const pkgSkills = new Set();
-      if (existsSync(pkgSkillsDir)) {
-        for (const n of readdirSync(pkgSkillsDir)) {
-          if (isSkillSupportedOnPlatform(join(pkgSkillsDir, n)))
-            pkgSkills.add(n);
-        }
-      }
-      for (const { alias } of SKILL_ALIASES) pkgSkills.add(alias);
-
-      for (const n of readdirSync(userSkillsDir)) {
-        if (
-          !REMOVED_SKILL_NAMES.includes(n) &&
-          !existsSync(join(pkgSkillsDir, n))
-        )
-          continue;
-        if (isLocalDevSkillDir(join(userSkillsDir, n))) continue;
-        if (!pkgSkills.has(n)) staleSkills.push(n);
-      }
-    }
+    // Stale 스킬 체크: setup 과 같은 판정으로 지울 관리 사본과 보존할 사용자 사본을 나눈다.
+    const { removed: staleSkills, preserved: keptSkills } = cleanupStaleSkills(
+      join(CLAUDE_DIR, "skills"),
+      join(PKG_ROOT, "skills"),
+      { dryRun: true },
+    );
     if (staleSkills.length > 0) {
       warn(`구형 스킬 ${staleSkills.length}개 감지: ${staleSkills.join(", ")}`);
       info("관리 사본 정리: tfx setup 또는 tfx update");
+    }
+    if (keptSkills.length > 0) {
+      warn(
+        `구형 스킬 사용자 사본 ${keptSkills.length}개: ${keptSkills.join(", ")}`,
+      );
+      info("setup 은 고친 사본을 보존한다. 필요 없으면 직접 지우세요.");
+    }
+    if (staleSkills.length + keptSkills.length > 0) {
       addDoctorCheck(report, {
         name: "stale-skills",
         status: "issues",
         skills: staleSkills,
-        fix: "tfx setup",
+        preserved: keptSkills,
+        ...(staleSkills.length > 0 ? { fix: "tfx setup" } : {}),
       });
       issues++;
     } else {

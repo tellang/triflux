@@ -64,21 +64,17 @@ const packageTarget = new RegExp(
 const pluginRootTarget = new RegExp(
   String.raw`^\$\{(?:CLAUDE_)?PLUGIN_ROOT\}[/\\](?:hooks|scripts)[/\\](?:${uniqueTargetNames})$`,
 );
-const gateSuffix = ".claude/scripts/tfx-gate-activate.mjs";
-
-function isInstalledGateTarget(target) {
+// 옛 setup 이 ~/.claude/scripts 에 복사하고 직접 등록한 스크립트.
+function isInstalledScript(target, name) {
   const normalized = target.replaceAll("\\", "/");
+  const suffix = `.claude/scripts/${name}`;
   if (
-    ["${HOME}", "$HOME", "~"].some(
-      (root) => normalized === `${root}/${gateSuffix}`,
-    )
+    ["${HOME}", "$HOME", "~"].some((root) => normalized === `${root}/${suffix}`)
   )
     return true;
-  const installedTargets = [join(homedir(), gateSuffix)];
+  const installedTargets = [join(homedir(), suffix)];
   if (process.env.CLAUDE_CONFIG_DIR)
-    installedTargets.push(
-      join(process.env.CLAUDE_CONFIG_DIR, "scripts/tfx-gate-activate.mjs"),
-    );
+    installedTargets.push(join(process.env.CLAUDE_CONFIG_DIR, "scripts", name));
   return installedTargets.some(
     (installed) => normalized === installed.replaceAll("\\", "/"),
   );
@@ -99,7 +95,7 @@ function matchesTarget(target) {
   return (
     packageTarget.test(resolvedFallback) ||
     pluginRootTarget.test(target) ||
-    isInstalledGateTarget(target)
+    isInstalledScript(target, "tfx-gate-activate.mjs")
   );
 }
 
@@ -108,8 +104,17 @@ export function isLegacyTrifluxHook(hook) {
     return false;
   const command = hook.command;
   const executable = readCommandToken(command);
-  if (!executable || !/(?:^|[/\\])node(?:\.exe)?$/.test(executable.value))
-    return false;
+  if (!executable) return false;
+  // headless-guard 는 2026-09-07 에 제거됐지만 옛 setup 이 bash 로 등록한 항목이 남는다.
+  if (/(?:^|[/\\])bash(?:\.exe)?$/.test(executable.value)) {
+    const script = readCommandToken(executable.rest);
+    return (
+      !!script &&
+      !script.rest.trim() &&
+      isInstalledScript(script.value, "headless-guard-fast.sh")
+    );
+  }
+  if (!/(?:^|[/\\])node(?:\.exe)?$/.test(executable.value)) return false;
   const target = readCommandToken(executable.rest);
   if (!target) return false;
   // 옛 inline bootstrap만 제거한다.

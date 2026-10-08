@@ -4,13 +4,13 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  realpathSync,
   renameSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveStableNodeBin } from "./lib/stable-node.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = dirname(__dirname);
@@ -80,34 +80,7 @@ function timestamp() {
     .slice(0, 14);
 }
 
-// process.execPath resolves through Homebrew's `bin/node` symlink to the
-// versioned Cellar binary (/opt/homebrew/Cellar/node/<ver>/bin/node). That path
-// disappears on `brew upgrade node` and leaves agy with a dead hook command,
-// while the `bin/node` alias keeps working. Prefer the alias when it points at
-// the same binary; otherwise keep execPath (nvm, volta, system node, Windows).
-export function resolveStableNodeBin(execPath = process.execPath, opts = {}) {
-  const env = opts.env || process.env;
-  const realpath = opts.realpath || realpathSync;
-  const candidates = [];
-  if (env.HOMEBREW_PREFIX)
-    candidates.push(join(env.HOMEBREW_PREFIX, "bin", "node"));
-  candidates.push("/opt/homebrew/bin/node", "/usr/local/bin/node");
-  let target;
-  try {
-    target = realpath(execPath);
-  } catch {
-    return execPath;
-  }
-  for (const candidate of candidates) {
-    if (candidate === execPath) return execPath;
-    try {
-      if (realpath(candidate) === target) return candidate;
-    } catch {
-      // candidate absent on this machine
-    }
-  }
-  return execPath;
-}
+export { resolveStableNodeBin };
 
 export function ensureAgyHooks(opts = {}) {
   // agy's customization directory. Skip cleanly when the user has no agy

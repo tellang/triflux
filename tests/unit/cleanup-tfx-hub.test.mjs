@@ -109,6 +109,25 @@ test("모든 설정 파일에서 tfx-hub 만 빠지고 다른 항목과 백업�
   );
 });
 
+test("HOME 의 .mcp.json 과 .claude/.mcp.json 도 정리하고 빈 파일은 건너뛴다", () => {
+  const { home } = fixture();
+  const homeMcp = join(home, ".mcp.json");
+  const claudeDotMcp = join(home, ".claude/.mcp.json");
+  put(homeMcp, { mcpServers: { "tfx-hub": HUB, other: OTHER } });
+  put(claudeDotMcp, { mcpServers: { "tfx-hub": HUB } });
+  put(join(home, ".gemini/config/mcp_config.json"), "");
+  const result = cleanupTfxHub({
+    home,
+    platform: "darwin",
+    run: () => {
+      throw commandError(1);
+    },
+  });
+  assert.equal(result.ok, true, result.warnings.join("\n"));
+  assert.deepEqual(read(homeMcp).mcpServers, { other: OTHER });
+  assert.deepEqual(read(claudeDotMcp).mcpServers, {});
+});
+
 test("허브 주소가 아닌 tfx-hub 항목은 건드리지 않고 경고한다", () => {
   const { home } = fixture();
   const file = join(home, ".claude.json");
@@ -174,23 +193,45 @@ test("hub.pid 가 다른 프로세스를 가리키면 종료하지 않고 파일
   assert.deepEqual(result.warnings, []);
 });
 
-test("Windows 의 hub-ensure 예약 작업만 지운다", () => {
-  for (const [listing, deleted] of [
-    ["Task To Run: node C:\\pkg\\scripts\\hub-ensure.mjs", true],
-    ["Task To Run: C:\\other\\backup.exe", false],
+const taskXml = (command, args, description = "") =>
+  `<Task><RegistrationInfo><Description>${description}</Description></RegistrationInfo><Actions Context="Author"><Exec id="HubAction"><Command>${command}</Command><Arguments>${args}</Arguments></Exec></Actions></Task>`;
+
+test("Windows 의 허브 예약 작업은 실행 명령으로만 판정해 지운다", () => {
+  for (const [task, xml, deleted] of [
+    [
+      "TrifluxHubEnsure",
+      taskXml("node", "C:\\pkg\\scripts\\hub-ensure.mjs"),
+      true,
+    ],
+    ["TrifluxHubEnsure", taskXml("C:\\other\\backup.exe", ""), false],
+    [
+      "\\Triflux\\Hub",
+      taskXml("powershell.exe", "-WindowStyle Hidden -Command tfx hub ensure"),
+      true,
+    ],
+    [
+      "\\Triflux\\Hub",
+      taskXml(
+        "C:\\Tools\\backup.exe",
+        "",
+        "Replaces the old tfx hub ensure task",
+      ),
+      false,
+    ],
   ]) {
     const { home } = fixture();
     const calls = [];
     const run = (command, args) => {
       calls.push([command, ...args]);
-      return args[0] === "/Query" ? listing : "";
+      if (args[0] !== "/Query") return "";
+      if (args[2] !== task) throw commandError(1);
+      return xml;
     };
     cleanupTfxHub({ home, platform: "win32", run });
     assert.equal(
-      calls.some(
-        (call) => call[1] === "/Delete" && call[3] === "TrifluxHubEnsure",
-      ),
+      calls.some((call) => call[1] === "/Delete" && call[3] === task),
       deleted,
+      `${task}: ${xml}`,
     );
   }
 });

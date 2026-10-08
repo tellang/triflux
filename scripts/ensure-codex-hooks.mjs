@@ -12,6 +12,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { sanitizeCodexProfileConfig } from "./lib/codex-profile-config.mjs";
+import { resolveStableNodeBin } from "./lib/stable-node.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = dirname(__dirname);
@@ -24,12 +25,16 @@ function atomicWriteFile(path, content) {
   renameSync(tmpPath, path);
 }
 
-function quoteCommandPath(value) {
-  return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+// Codex 는 Windows 에서 훅을 cmd.exe /C 로 실행한다. cmd 는 백슬래시를 이스케이프로 읽지 않고, Windows 경로에는 따옴표가 들어갈 수 없다.
+function quoteCommandPath(value, platform) {
+  const text = String(value);
+  if (platform === "win32") return `"${text}"`;
+  return `"${text.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-function buildCommand(nodeBin, hookScriptPath, mode) {
-  return `${nodeBin} ${quoteCommandPath(hookScriptPath)} ${mode}`;
+// node 경로도 감싼다. C:\Program Files\nodejs\node.exe 가 공백에서 잘린다.
+function buildCommand(nodeBin, hookScriptPath, mode, platform) {
+  return `${quoteCommandPath(nodeBin, platform)} ${quoteCommandPath(hookScriptPath, platform)} ${mode}`;
 }
 
 export function canonicalJson(value) {
@@ -102,14 +107,14 @@ function upsertHookGroup(groups, desired) {
   return { groups: list, index: list.length - 1 };
 }
 
-function buildDesiredGroups({ nodeBin, hookScriptPath }) {
+function buildDesiredGroups({ nodeBin, hookScriptPath, platform }) {
   return {
     SessionStart: {
       matcher: SESSION_START_MATCHER,
       hooks: [
         {
           type: "command",
-          command: buildCommand(nodeBin, hookScriptPath, "register"),
+          command: buildCommand(nodeBin, hookScriptPath, "register", platform),
           timeout: 15,
         },
       ],
@@ -118,7 +123,7 @@ function buildDesiredGroups({ nodeBin, hookScriptPath }) {
       hooks: [
         {
           type: "command",
-          command: buildCommand(nodeBin, hookScriptPath, "heartbeat"),
+          command: buildCommand(nodeBin, hookScriptPath, "heartbeat", platform),
           timeout: 10,
         },
       ],
@@ -258,8 +263,12 @@ export function ensureCodexHooks(opts = {}) {
   const hookScriptPath = resolve(
     opts.hookScriptPath || join(PROJECT_ROOT, "hooks", TRIFLUX_HOOK_BASENAME),
   );
-  const nodeBin = opts.nodeBin || process.execPath;
-  const desired = buildDesiredGroups({ nodeBin, hookScriptPath });
+  const nodeBin = opts.nodeBin || resolveStableNodeBin();
+  const desired = buildDesiredGroups({
+    nodeBin,
+    hookScriptPath,
+    platform: opts.platform || process.platform,
+  });
 
   const hooksJson = normalizeHooksJson(
     existsSync(hooksPath) ? readFileSync(hooksPath, "utf8") : "",

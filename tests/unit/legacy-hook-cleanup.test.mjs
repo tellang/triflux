@@ -6,7 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
 import { cleanupLegacyHooks } from "../../scripts/lib/legacy-hook-cleanup.mjs";
@@ -32,10 +32,12 @@ const hook = (command) => ({ type: "command", command });
 const entry = (...hooks) => ({ hooks });
 const readSettings = (path) => JSON.parse(readFileSync(path, "utf8"));
 
-test("직접 경로, PLUGIN_ROOT fallback, inline bootstrap을 제거한다", () => {
+test("직접 경로, PLUGIN_ROOT fallback, inline bootstrap, bash 가드를 제거한다", () => {
   const commands = [
     'node "/opt/triflux/hooks/hook-orchestrator.mjs"',
     'node "${PLUGIN_ROOT:-/opt/triflux}/scripts/setup.mjs"',
+    'bash "${HOME}/.claude/scripts/headless-guard-fast.sh"',
+    `bash "${join(homedir(), ".claude/scripts/headless-guard-fast.sh").replaceAll("\\", "/")}"`,
     "node -e \"const root=fs.readFileSync(path.join(os.homedir(),'.claude','scripts','.tfx-pkg-root'));cp.spawnSync(process.execPath,[path.join(root,'hooks','hook-orchestrator.mjs')]);\"",
   ];
   for (const command of commands) {
