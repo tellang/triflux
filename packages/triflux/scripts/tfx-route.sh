@@ -168,25 +168,48 @@ _run_async_job_body() {
   exit "$_ec"
 }
 
+# 그룹 kill 대상 워커의 명령 서명. timeout 래퍼가 리더면 인자에 CLI 이름이 남는다.
+_TFX_WORKER_CMD_RE='tfx-route|(^|[ /])(codex|agy|claude)([ .]|$)'
+
+# Unix: 추적 PID 를 종료한다. timeout 래퍼가 없거나 tee 가 마지막 단계면 워커가
+# 이 스크립트와 같은 그룹이라, 그룹 kill 이 자기와 호출자 그룹을 죽인다(#548).
+# 그래서 자기 자식(재사용 PID 아님)만 다루고, 그룹 리더이면서 서명이 맞을 때만 그룹 kill,
+# 아니면 그 PID 와 자손만 종료한다.
+_kill_tracked_worker_unix() {
+  local pid="$1" self_pid="$2" info ppid pgid cmd
+  info=$(ps -o ppid=,pgid=,command= -p "$pid" 2>/dev/null) || return 0
+  read -r ppid pgid cmd <<< "$info"
+  [[ "$ppid" == "$self_pid" ]] || return 0
+  if [[ "$pgid" == "$pid" && "$cmd" =~ $_TFX_WORKER_CMD_RE ]]; then
+    kill -- "-$pgid" 2>/dev/null || true
+    return 0
+  fi
+  local queue="$pid" all="" cur child
+  while [[ -n "$queue" ]]; do
+    cur="${queue%% *}"
+    [[ "$queue" == *" "* ]] && queue="${queue#* }" || queue=""
+    all="$all $cur"
+    for child in $(pgrep -P "$cur" 2>/dev/null); do
+      queue="${queue:+$queue }$child"
+    done
+  done
+  kill $all 2>/dev/null || true
+}
+
 cleanup_workers() {
   deregister_agent 2>/dev/null || true
   [[ ! -f "$_PID_TRACK" ]] && return
+  local self_pid="${BASHPID:-}"
+  [[ -n "$self_pid" ]] || self_pid="$(exec sh -c 'echo "$PPID"')"
   while IFS= read -r pid; do
-    [[ -z "$pid" ]] && continue
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
     kill -0 "$pid" 2>/dev/null || continue
     case "$(uname -s)" in
       MINGW*|MSYS*)
         # Windows: taskkill /T /F로 프로세스 트리 전체 종료
         MSYS_NO_PATHCONV=1 cmd.exe //c "taskkill /T /F /PID $pid" 2>/dev/null || true ;;
       *)
-        # Unix: 프로세스 그룹 kill
-        local pgid
-        pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
-        if [[ -n "$pgid" && "$pgid" != "0" ]]; then
-          kill -- "-$pgid" 2>/dev/null || true
-        else
-          kill "$pid" 2>/dev/null || true
-        fi ;;
+        _kill_tracked_worker_unix "$pid" "$self_pid" ;;
     esac
   done < "$_PID_TRACK"
   rm -f "$_PID_TRACK"
