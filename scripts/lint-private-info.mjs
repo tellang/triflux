@@ -129,9 +129,9 @@ function main() {
   console.log(`[lint-private] PASS: ${files.length} file(s) checked.`);
 }
 
-// Node 는 메인 모듈 경로의 심볼릭 링크를 푼다. 공백, Windows 표기와 함께 실제 경로로 비교한다.
+// 심볼릭 링크(--preserve-symlinks-main 포함), 공백, Windows 표기와 상관없이 양쪽 실제 경로로 비교한다.
 if (
   process.argv[1] &&
-  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
+  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
 )
   main();
