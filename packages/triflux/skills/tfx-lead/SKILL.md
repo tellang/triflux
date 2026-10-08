@@ -36,10 +36,11 @@ description: >
   - 인계 파일을 쓴다. 목표, 완료 조건, 체크아웃 상태, 확정 결정, 증거 경로, 미완료, 다음 행동, `predecessorSessionId`를 담는다.
   - 승계 세션이 경로를 읽고 ACK 한다.
   - ACK 를 받은 뒤에만 원 세션을 닫는다.
-- 닫은 뒤에는 `tmux ls`로 남은 세션이 없는지 확인한다.
+- 닫은 뒤에는 남은 세션이 없는지 `tmr ls --json`으로 확인한다. tmr 이 없으면 `tmux ls`로 본다. tmr 은 macOS 에서 tfx setup 이 설치를 묻는다.
 
 ```bash
-tmux ls
+tmr ls --json   # tmr 이 있으면
+tmux ls         # 없으면
 ```
 
 ## 2. 역할별 모델
@@ -60,14 +61,14 @@ tmux ls
 | Codex 시험용 | 역할 프로필에 effort low | 연결 확인용 |
 
 - Codex 주간 한도가 낮으면 새 Codex 워커 대신 Claude 로 돌린다.
-- 세션을 띄울 때마다 사용자에게 한 줄로 알린다: "이 역할에 이 모델, tmux 세션명 `<이름>`".
+- 세션을 띄울 때마다 사용자에게 한 줄로 알린다: "이 역할에 이 모델, tmux 세션명 `<이름>`(tmr 이나 tmux 로 여는 대상)".
 - 서브에이전트(Agent 도구, `spawn_agent`)는 tmux 에 보이지 않는다. 알릴 때 그렇다고 밝힌다.
 
 ## 3. 부르는 방법
 
 | 용도 | 수단 |
 | --- | --- |
-| 오래 가는 작업 세션 | `tfx-live start`로 tmux 에 띄운다. 사람이 `tmux attach -t <세션>`으로 본다(읽기 전용은 `-r`) |
+| 오래 가는 작업 세션 | `tfx-live start`로 tmux 에 띄운다. 사람이 tmr 의 목록 화면으로 본다. tmr 이 없으면 `tmux attach -r -t <세션>` |
 | 일회성 판단, 리뷰 | 서브에이전트. 리드 CLI 별 도구는 위 표, model과 effort 를 지정하고 백그라운드로 |
 | 일회성 Codex 작업 | `tfx-route.sh` 역할 호출 |
 | 기존 Claude 세션에 요청 | 위 표의 "Claude 세션에 보내기" |
@@ -195,7 +196,7 @@ tfx-live wait --cli claude --short <8hex> --request-id <requestId> --timeout 600
 
 - [ ] 결과 파일을 읽었다
 - [ ] 필요하면 인계 파일과 승계 ACK 를 확인했다
-- [ ] 닫은 뒤 `tmux ls`로 확인했다
+- [ ] 닫은 뒤 `tmr ls --json`(없으면 `tmux ls`)으로 확인했다
 
 ## 13. 정리, 삭제, 결함 수정 레인
 

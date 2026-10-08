@@ -114,7 +114,7 @@ Codex `wait`는 `--session` 또는 `--thread UUID`의 rollout에서 표식이 �
 
 명시한 `--config-dir`은 정확히 일치하는 daemon만 선택한다. `CLAUDE_CONFIG_DIR`도 해당 env 디렉터리로 제한한다. stale endpoint 복구는 같은 source configDir 안에서만 재시도한다. attach 전 예외는 `inputSent: false`이므로 `auto`의 tmux fallback이 가능하다. attach 뒤 전송 여부가 불명확하면 `status: "unknown"`으로 보고하고 재전송하지 않는다.
 
-직접 `tmux capture-pane`과 `tmux send-keys`를 쓸 때는 전송·pane 진단에 한정한다. Claude pane에 `C-c`를 보내지 않는다. 자동 세션 탐색에는 아래 `tfx-live list-sessions`를 쓰고, 붙은 클라이언트 수는 `tmux ls -F '#{session_name} #{session_attached}'`로 본다.
+직접 `tmux capture-pane`과 `tmux send-keys`를 쓸 때는 전송·pane 진단에 한정한다. Claude pane에 `C-c`를 보내지 않는다. 자동 세션 탐색에는 `tmr ls --json`으로 pane 별 에이전트, 상태, 클라이언트 수, 마지막 활동을 본다. tmr 이 없으면 아래 `tfx-live list-sessions`와 `tmux ls -F '#{session_name} #{session_attached}'`를 쓴다. tmr 은 macOS 에서 tfx setup 이 설치를 묻는다.
 
 ## 세션 탐색과 연결
 
