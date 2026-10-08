@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { it } from "node:test";
-import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
+import { routeTestEnv } from "../fixtures/route-test-env.mjs";
 import { BASH_EXE } from "../helpers/bash-path.mjs";
 import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
@@ -29,7 +29,7 @@ process.exit(1);
         cwd: process.cwd(),
         encoding: "utf8",
         timeout: 30000,
-        env: hubServerTestEnv({
+        env: routeTestEnv({
           PATH: `${resolve("tests/fixtures/bin")}:${process.env.PATH || ""}`,
           HOME: config.dir,
           CODEX_HOME: config.dir,

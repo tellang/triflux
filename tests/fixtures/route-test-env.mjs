@@ -1,8 +1,8 @@
-// tests/fixtures/hub-test-env.mjs — shared env for hub-spawning tests
+// tests/fixtures/route-test-env.mjs — tfx-route.sh 를 띄우는 테스트의 공용 env
 
 import { ROUTE_CLI_POLICY_DEFAULTS } from "./route-cli-policy-env.mjs";
 
-export function hubServerTestEnv(overrides = {}, baseEnv = process.env) {
+export function routeTestEnv(overrides = {}, baseEnv = process.env) {
   return {
     ...baseEnv,
     // 머신 전역 CLI disable 정책을 자식 route 프로세스가 물려받지 않게 한다.

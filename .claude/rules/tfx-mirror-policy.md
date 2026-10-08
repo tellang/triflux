@@ -23,7 +23,7 @@ triflux 는 root 와 `packages/{core,remote,triflux}/` 3개 published 레이어�
 | 레이어 | 역할 | mirror 룰 |
 |--------|------|----------|
 | `packages/core` (`@triflux/core`) | 공용 라이브러리 (hub primitives, scripts/lib helper) | root 와 byte-identical cp |
-| `packages/remote` (`@triflux/remote`) | 원격 entry / store / pipe / server / scripts helper | root subset + `@triflux/core/...` import path 변환 |
+| `packages/remote` (`@triflux/remote`) | 원격 entry / team / workers / cto / scripts helper | root subset + `@triflux/core/...` import path 변환 |
 | `packages/triflux` (`triflux` npm) | 사용자 facing CLI / runtime / skills | npm publish files 기준 byte-identical mirror |
 
 ## 레이어별 정책

@@ -27,20 +27,20 @@ and Antigravity. You describe the task once with `/tfx-auto`; triflux picks the 
 (Codex by default), runs it through managed routes instead of ad-hoc shell commands, and
 can fan the work out to parallel workers, live Claude↔Codex sessions, or remote
 hosts. Parallel code changes use separate worktrees and one session per worktree.
-The `tfx` shell CLI covers setup, diagnostics, the local Hub,
+The `tfx` shell CLI covers setup, diagnostics,
 and team orchestration.
 
 ## Install
 
 ```bash
 npm install -g triflux   # postinstall runs the setup script
-tfx doctor               # check CLIs, tmux, Hub, MCP, profiles, skills
+tfx doctor               # check CLIs, tmux, MCP, profiles, skills
 ```
 
-npm 12 and newer block install scripts by default. Allow the setup and native dependency scripts:
+npm 12 and newer block install scripts by default. Allow the setup script:
 
 ```bash
-npm i -g triflux --allow-scripts=triflux,better-sqlite3
+npm i -g triflux --allow-scripts=triflux
 ```
 
 Setup registers the `triflux` marketplace and prints a mods installation hint. To install
@@ -77,7 +77,7 @@ Skills you invoke directly:
 | `/tfx-live` | Live Claude↔Codex sessions: `start`/`ask`/`wait`/`stop`, `peer` relay, `list-sessions`. |
 | `/tfx-remote` | SSH 원격 Claude Code 세션 시작, 조회, 재부착, 메시지 전송, 준비 상태 확인, 모니터링, 종료. |
 | `/tfx-setup` | Interactive setup: file sync, HUD, Codex profiles, MCP, hook priority. |
-| `/tfx-doctor` | Diagnose and repair; also starts, stops, and checks the Hub. |
+| `/tfx-doctor` | Diagnose and repair. |
 | `/tfx-ship` | triflux release flow (maintainers). |
 | `/tfx-wt` | Windows Terminal tabs and panes. `tfx setup` installs it on Windows only. |
 
@@ -134,13 +134,11 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 | Command | Use |
 | --- | --- |
 | `tfx setup` / `tfx doctor` | Sync files, HUD, MCP, profiles / diagnose and repair (`--fix`, `--json`) |
-| `tfx multi` | Local multi-CLI team in tmux + Hub |
-| `tfx synapse` | Session registry and leases |
-| `tfx hub` | Local Hub: `start`, `stop`, `status`, `ensure` |
+| `tfx multi` | Local multi-CLI team in tmux |
 | `tfx mcp` | Managed MCP registry: `list`, `sync`, `add`, `remove` |
 | `tfx cto` | Repo-local authority console: `collect`, `status`, `hygiene` (dry-run) |
 | `bash ~/.claude/scripts/tfx-route.sh code-reviewer "<instruction>"` | Send review to Codex (`codex exec review` via policy) |
-| `tfx why`, `tfx list`, `tfx update`, `tfx version` | Commit intent trailers, installed skills, update, version |
+| `tfx list`, `tfx update`, `tfx version` | Installed skills, update, version |
 | `tfx-live` | Live session bridge (same as the `/tfx-live` skill) |
 
 `tfx <command> --help` prints the exact arguments.
@@ -159,9 +157,7 @@ also finds sessions you started yourself in tmux.
 gets past Claude Code's 600-second Bash limit. Follow up with `--job-status`, `--job-wait`, and
 `--job-result`.
 
-**Hub.** A local message bus for teams, remote sessions, MCP tools, and status surfaces. It binds
-to `127.0.0.1:27888` by default (`TFX_HUB_PORT` overrides) and accepts a bearer token from
-`TFX_HUB_TOKEN`. Headless workers from `tfx-auto` and `tfx multi` appear in
+**Headless workers.** Workers from `tfx-auto` and `tfx multi` appear in
 the `claude agents` panel unless you pass `--no-native-bridge-ui`. Press Enter on a row to open the
 tmux pane the worker runs in.
 
@@ -197,11 +193,8 @@ graph TD
     Route --> Claude[Claude Code]
     Team --> Route
     Live -->|UDS or tmux| Sessions[Claude / Codex TUI sessions]
-    Route --> Hub["Hub 127.0.0.1:27888"]
-    Team --> Hub
-    Hub --> Store[(SQLite or memory store)]
-    Hub --> MCP[MCP tools]
-    Hub --> UI["HUD · claude agents panel"]
+    Route --> UI["HUD · claude agents panel"]
+    Team --> UI
     CLI --> Lake[(".triflux/lake (tfx cto)")]
 ```
 
@@ -225,9 +218,8 @@ Windows) and `hub/team/wt-manager.mjs`. Agent rules:
 
 | Layer | Protection |
 | --- | --- |
-| Managed routes | Codex and Antigravity are called through `tfx-route.sh`, Hub workers, or `tfx`, never through a bare `codex exec` or `agy`. This is a rule for callers; no hook enforces it. |
+| Managed routes | Codex and Antigravity are called through `tfx-route.sh`, headless workers, or `tfx`, never through a bare `codex exec` or `agy`. This is a rule for callers; no hook enforces it. |
 | safety-guard hook | Blocks destructive shell commands (root `rm -rf`, force push to main, `git clean -fd`, SQL `DROP`), direct `wt.exe`, raw psmux kill, and bash syntax sent over SSH to Windows hosts, and points to the managed alternative. |
-| Hub | Binds to localhost; optional bearer token (`TFX_HUB_TOKEN`). |
 | MCP registry | Replaces stale or unsupported MCP entries with managed ones. |
 | Consensus | Deep and consensus runs report degraded or disputed results instead of hiding them. |
 

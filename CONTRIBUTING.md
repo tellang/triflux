@@ -7,8 +7,7 @@ triflux는 Claude Code · Codex · Antigravity 를 라우팅하는 CLI-first 멀
 
 ## 빌드와 설치
 
-- **Node 20+** 필요(`package.json` `engines.node = ">=20"`). 의존성 `better-sqlite3` 12.x 가
-  Node 20 이상을 요구한다. CI 는 Node 20, 릴리즈 워크플로는 Node 24 로 돈다.
+- **Node 20+** 필요(`package.json` `engines.node = ">=20"`). CI 는 Node 20, 릴리즈 워크플로는 Node 24 로 돈다.
 - 의존성 설치:
 
 ```bash
@@ -37,9 +36,7 @@ npm run release:check-sync
 npm run release:check-mirror
 ```
 
-문서 변경은 관련 문서 테스트와 미러·동기화 검사를 실행한다. 스킬 변경은 `lint:skills`도 실행한다. 전체 통합 테스트는
-Hub 서버를 띄우므로 macOS 에서 `node` 의 localhost 포트 수신을 묻는 방화벽 창이 뜰 수 있다.
-Hub·팀·MCP 흐름을 실제로 시험할 때만 허용하면 된다.
+문서 변경은 관련 문서 테스트와 미러·동기화 검사를 실행한다. 스킬 변경은 `lint:skills`도 실행한다.
 
 ## 패키지 경계
 
@@ -53,7 +50,7 @@ triflux 를 고치거나 디버깅할 때 아래 표면을 섞지 않는다.
 | 호스트 로컬 Codex 실험 | `~/.codex/skills/*` | 아니요 |
 
 호스트 로컬 Codex 하네스가 추천하는 흐름은 그 머신에서만 통하는 조언이다. 패키지 계약은 위의
-CLI, 스킬, 훅, Hub 표면이다. Codex 로컬 실험은 패키지 경계를 일부러 바꾸는 경우가 아니면
+CLI, 스킬, 훅 표면이다. Codex 로컬 실험은 패키지 경계를 일부러 바꾸는 경우가 아니면
 `~/.codex/skills` 에 둔다.
 
 ## 미러·릴리즈 점검

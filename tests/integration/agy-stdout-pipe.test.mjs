@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
+import { routeTestEnv } from "../fixtures/route-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 
 /**
@@ -86,7 +86,7 @@ function runBash(command, extraEnv = {}) {
   return spawnSync(BASH_EXE, ["-c", command], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
-    env: hubServerTestEnv({
+    env: routeTestEnv({
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
       AGY_BIN: "agy",
       HOME: home,

@@ -12,7 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
+import { routeTestEnv } from "../fixtures/route-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -81,7 +81,7 @@ function runRoute(overrides = {}) {
       cwd: PROJECT_ROOT,
       encoding: "utf8",
       timeout: 30_000,
-      env: hubServerTestEnv({
+      env: routeTestEnv({
         PATH: `${bin}:${process.env.PATH || ""}`,
         HOME: home,
         USERPROFILE: home,

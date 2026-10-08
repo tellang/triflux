@@ -2,9 +2,8 @@
 name: tfx-doctor
 description: >
   triflux 설치, CLI, HUD, 스킬, 캐시와 MCP 연결을 진단하고 관리 대상만 복구합니다.
-  허브 시작·중지·상태 확인도 안내합니다.
-  Use when: not working, broken, error, 안 돼, 이상해, 에러, 캐시, reset, doctor, hub 상태, 허브 시작
-argument-hint: "[--fix|--reset|hub <start|stop|status|ensure>]"
+  Use when: not working, broken, error, 안 돼, 이상해, 에러, 캐시, reset, doctor
+argument-hint: "[--fix|--reset]"
 ---
 
 # tfx-doctor
@@ -23,6 +22,6 @@ argument-hint: "[--fix|--reset|hub <start|stop|status|ensure>]"
 
 설치된 `tfx-route.sh`, HUD, Claude·Codex·Antigravity CLI, Codex 프로필, 스킬, psmux/tmux, MCP 설정과 인벤토리, route script 동기화 상태를 확인한다. 발견한 문제마다 출력된 복구 명령을 따른다. 사용자 소유 설정이나 깨진 파일은 원인을 먼저 보고한다.
 
-## 허브 관리
+## 제거된 허브 흔적
 
-허브 제거 전에는 `tfx hub status --json`, `tfx hub start`, `tfx hub ensure --json`, `tfx hub stop`으로 상태를 관리한다. 기본 MCP URL은 `http://127.0.0.1:27888/mcp`이고 포트는 `TFX_HUB_PORT`로 바꿀 수 있다. 중지나 재시작 뒤에는 `status`로 실제 결과를 확인한다.
+허브는 제거됐다. 현재 디렉터리의 `.mcp.json`과 `.claude/mcp.json`에 허브가 만든 `tfx-hub` 항목이 남아 있으면 `tfx doctor`가 경로를 알린다. 사용자 파일과 구분할 수 없어 자동으로 지우지 않으므로 직접 지운다. 전역 설정의 항목, 실행 중이던 프로세스, 예약 작업은 `tfx setup`이 한 번 정리한다.

@@ -25,20 +25,20 @@
 triflux는 코딩 작업을 Claude, Codex, Antigravity 사이에서 나눠 맡기는 Claude Code 플러그인이자
 npm CLI다. `/tfx-auto`에 할 일을 한 번 적으면 triflux가 CLI 레인(기본은 Codex)을 고르고, 임의
 셸 명령 대신 관리된 경로로 실행한다. 필요하면 로컬 병렬 워커, Claude↔Codex 라이브 세션, 원격 호스트로 작업을 나눈다.
-코드 변경을 병렬로 진행할 때는 작업별 worktree와 세션을 분리한다. 설치, 진단, 로컬 Hub, 팀 실행은 `tfx`
+코드 변경을 병렬로 진행할 때는 작업별 worktree와 세션을 분리한다. 설치, 진단, 팀 실행은 `tfx`
 셸 CLI가 맡는다.
 
 ## 설치
 
 ```bash
 npm install -g triflux   # postinstall이 setup 스크립트를 실행한다
-tfx doctor               # CLI, tmux, Hub, MCP, 프로필, 스킬 점검
+tfx doctor               # CLI, tmux, MCP, 프로필, 스킬 점검
 ```
 
-npm 12 이상은 기본적으로 설치 스크립트를 막는다. setup과 네이티브 의존성의 스크립트를 허용해 설치한다.
+npm 12 이상은 기본적으로 설치 스크립트를 막는다. setup 스크립트를 허용해 설치한다.
 
 ```bash
-npm i -g triflux --allow-scripts=triflux,better-sqlite3
+npm i -g triflux --allow-scripts=triflux
 ```
 
 기본 setup은 `triflux` 마켓플레이스를 등록하고 mods 설치 안내만 출력한다. 사용량 band와
@@ -75,7 +75,7 @@ claude plugin install triflux@triflux
 | `/tfx-live` | Claude↔Codex 라이브 세션. `start`/`ask`/`wait`/`stop`, `peer` 중계, `list-sessions`. |
 | `/tfx-remote` | SSH 원격 Claude Code 세션 시작, 조회, 재부착, 메시지 전송, 준비 상태 확인, 모니터링, 종료. |
 | `/tfx-setup` | 대화형 설정. 파일 동기화, HUD, Codex 프로필, MCP, 훅 우선순위. |
-| `/tfx-doctor` | 진단과 복구. Hub 시작·중지·상태 확인도 여기서 한다. |
+| `/tfx-doctor` | 진단과 복구. |
 | `/tfx-ship` | triflux 릴리즈 절차(메인테이너용). |
 | `/tfx-wt` | Windows Terminal 탭·패인 조작. `tfx setup`은 Windows에만 설치한다. |
 
@@ -132,13 +132,11 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 | 명령 | 용도 |
 | --- | --- |
 | `tfx setup` / `tfx doctor` | 파일·HUD·MCP·프로필 동기화 / 진단과 복구(`--fix`, `--json`) |
-| `tfx multi` | tmux + Hub 기반 로컬 멀티 CLI 팀 |
-| `tfx synapse` | 세션 레지스트리와 lease |
-| `tfx hub` | 로컬 Hub: `start`, `stop`, `status`, `ensure` |
+| `tfx multi` | tmux 기반 로컬 멀티 CLI 팀 |
 | `tfx mcp` | 관리형 MCP 레지스트리: `list`, `sync`, `add`, `remove` |
 | `tfx cto` | 저장소 단위 권위 콘솔: `collect`, `status`, `hygiene`(dry-run) |
 | `bash ~/.claude/scripts/tfx-route.sh code-reviewer "<지시>"` | 정책에 따라 `codex exec review`로 리뷰 전달 |
-| `tfx why`, `tfx list`, `tfx update`, `tfx version` | 커밋 intent 트레일러, 설치된 스킬, 업데이트, 버전 |
+| `tfx list`, `tfx update`, `tfx version` | 설치된 스킬, 업데이트, 버전 |
 | `tfx-live` | 라이브 세션 브리지(`/tfx-live` 스킬과 같은 명령) |
 
 정확한 인자는 `tfx <명령> --help`로 확인한다.
@@ -157,9 +155,7 @@ Codex `ask`는 `codex queue`로 메시지를 쌓고(TUI에 `[from <보낸 세션
 Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-status`, `--job-wait`,
 `--job-result`로 확인한다.
 
-**Hub.** 팀, 원격 세션, MCP 도구, 상태 표시를 잇는 로컬 메시지 버스다. 기본으로
-`127.0.0.1:27888`에 붙고(`TFX_HUB_PORT`로 변경), `TFX_HUB_TOKEN`이 있으면 bearer 토큰을 요구한다.
-`tfx-auto`, `tfx multi`의 headless 워커는 `claude agents` 패널에 행으로 보인다.
+**Headless 워커.** `tfx-auto`, `tfx multi`의 headless 워커는 `claude agents` 패널에 행으로 보인다.
 행에서 Enter를 누르면 그 워커가 도는 tmux pane이 열린다. 끄려면 `--no-native-bridge-ui`를 준다.
 
 **재시도와 승격.** `--retry ralph`는 끝나거나 막힐 때(같은 실패 3회 연속)까지 반복한다.
@@ -175,7 +171,7 @@ Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-s
 **CTO lake.** `tfx cto collect`로 `.triflux/lake/`의 저장소 스냅샷을 갱신하고,
 `tfx cto status`로 생성 시각과 경과 시간을 확인한다. `tfx cto hygiene --dry-run`는 dry-run 결과를
 보고한다. 트레이와 쓰이지 않는 CTO 운영 명령은 제거하였다
-([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)). 자동 수집은 기본으로 꺼져 있고 `TFX_CTO_AUTO_COLLECT=1` 로 켠다([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)).
+([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)). 자동 수집은 기본으로 꺼져 있고 `TFX_CTO_AUTO_COLLECT=1` 로 켠다([ADR-0018](docs/_archive/adr/0018-cto-auto-behaviors-opt-in.md)).
 
 **원격 호스트.** `/tfx-remote`는 `~/.config/triflux/hosts.json`
 (Windows는 `%APPDATA%\triflux\hosts.json`)에서 호스트를 읽는다. 세션 시작은
@@ -196,11 +192,8 @@ graph TD
     Route --> Claude[Claude Code]
     Team --> Route
     Live -->|UDS 또는 tmux| Sessions[Claude / Codex TUI 세션]
-    Route --> Hub["Hub 127.0.0.1:27888"]
-    Team --> Hub
-    Hub --> Store[(SQLite 또는 메모리 저장소)]
-    Hub --> MCP[MCP 도구]
-    Hub --> UI["HUD · claude agents 패널"]
+    Route --> UI["HUD · claude agents 패널"]
+    Team --> UI
     CLI --> Lake[(".triflux/lake (tfx cto)")]
 ```
 
@@ -224,9 +217,8 @@ graph TD
 
 | 층 | 보호 |
 | --- | --- |
-| 관리된 경로 | Codex와 Antigravity는 `tfx-route.sh`, Hub 워커, `tfx`로만 부르고 맨 `codex exec`나 `agy`로 부르지 않는다. 호출자가 지키는 규칙이며 이를 막는 훅은 없다. |
+| 관리된 경로 | Codex와 Antigravity는 `tfx-route.sh`, headless 워커, `tfx`로만 부르고 맨 `codex exec`나 `agy`로 부르지 않는다. 호출자가 지키는 규칙이며 이를 막는 훅은 없다. |
 | safety-guard 훅 | 위험한 셸 명령(루트 `rm -rf`, main 강제 push, `git clean -fd`, SQL `DROP`), `wt.exe`·psmux 종료 직접 호출, Windows 호스트로 SSH 보내는 bash 문법을 막고 관리된 대안을 알려 준다. |
-| Hub | localhost에만 붙는다. bearer 토큰(`TFX_HUB_TOKEN`)은 선택. |
 | MCP 레지스트리 | 낡았거나 지원하지 않는 MCP 항목을 관리형 항목으로 바꾼다. |
 | 합의 결과 | deep·consensus 실행은 일부 레인이 빠졌거나 의견이 갈린 결과를 숨기지 않고 표시한다. |
 

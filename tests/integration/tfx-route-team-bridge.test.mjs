@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
+import { routeTestEnv } from "../fixtures/route-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
@@ -30,7 +30,7 @@ function runBash(command, extraEnv = {}) {
   return spawnSync(BASH_EXE, ["-c", command], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
-    env: hubServerTestEnv({
+    env: routeTestEnv({
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
       HOME: isolatedCodex.dir,
       USERPROFILE: isolatedCodex.dir,
