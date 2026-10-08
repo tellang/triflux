@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -24,8 +24,14 @@ const THROW_UNDEFINED_CODEX_CONFIG_FIXTURE = join(
   "throw-undefined-codex-config.cjs",
 ).replace(/\\/g, "/");
 
+// CLI 와 setup 은 시작할 때 tmpdir 의 오래된 triflux-cli-* 를 지운다. 공유 tmpdir 을
+// 쓰면 다른 테스트 파일이 띄운 CLI 가 이 파일의 HOME 을 지울 수 있으므로, HOME 과
+// 자식 프로세스의 TMPDIR 을 이 파일 전용 디렉터리 아래에 둔다.
+const TEST_TMP = mkdtempSync(join(tmpdir(), "tfx-cli-test-"));
+after(() => rmSync(TEST_TMP, { recursive: true, force: true }));
+
 function createHomeDir() {
-  const homeDir = mkdtempSync(join(tmpdir(), "triflux-cli-"));
+  const homeDir = mkdtempSync(join(TEST_TMP, "triflux-cli-"));
   mkdirSync(join(homeDir, ".claude"), { recursive: true });
   mkdirSync(join(homeDir, ".codex"), { recursive: true });
   return homeDir;
@@ -39,6 +45,9 @@ function runCli(args, { homeDir = createHomeDir(), env = {} } = {}) {
       ...process.env,
       HOME: homeDir,
       USERPROFILE: homeDir,
+      TMPDIR: TEST_TMP,
+      TEMP: TEST_TMP,
+      TMP: TEST_TMP,
       ...env,
     },
   });
