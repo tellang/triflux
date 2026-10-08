@@ -21,7 +21,6 @@ import {
 import { homedir } from "os";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
-import { loadDelegatorSchemaBundle } from "../hub/delegator/tool-definitions.mjs";
 import { inspectClaudeRuntimeFlags } from "../hub/diagnostics/claude-runtime-flags.mjs";
 import {
   checkNetworkAvailability,
@@ -236,17 +235,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         name: "--json",
         type: "boolean",
         description: "스킬 목록을 JSON으로 출력",
-      },
-    ],
-  },
-  schema: {
-    usage: "tfx schema [command-or-tool]",
-    description: "CLI 커맨드 파라미터와 Hub delegator schema 번들 출력",
-    options: [
-      {
-        name: "command-or-tool",
-        type: "string",
-        description: "예: doctor, setup, delegate, delegate-reply, status",
       },
     ],
   },
@@ -4305,61 +4293,6 @@ function cmdVersion(options = {}) {
   console.log("");
 }
 
-function cmdSchema(args = []) {
-  const bundle = loadDelegatorSchemaBundle();
-  const selector = String(args[0] || "").trim();
-  const toolEntry = Array.isArray(bundle["x-triflux-mcp-tools"])
-    ? bundle["x-triflux-mcp-tools"].find((tool) => tool.name === selector)
-    : null;
-
-  if (isHelpArg(selector)) {
-    printCommandHelp("schema");
-    return;
-  }
-
-  if (!selector) {
-    printJson({
-      $schema: bundle.$schema,
-      title: "Triflux CLI Schema Bundle",
-      global_options: [
-        {
-          name: "--json",
-          type: "boolean",
-          description: "지원 커맨드의 출력을 JSON으로 전환",
-        },
-      ],
-      commands: CLI_COMMAND_SCHEMAS,
-      hub_tools: bundle,
-    });
-    return;
-  }
-
-  if (CLI_COMMAND_SCHEMAS[selector]) {
-    printJson({
-      command: selector,
-      ...CLI_COMMAND_SCHEMAS[selector],
-    });
-    return;
-  }
-
-  if (toolEntry) {
-    printJson({
-      tool: toolEntry.name,
-      description: toolEntry.description,
-      pipeAction: toolEntry.pipeAction,
-      inputSchema: bundle.$defs?.[toolEntry.inputSchemaDef] || null,
-      outputSchema: bundle.$defs?.[toolEntry.outputSchemaDef] || null,
-    });
-    return;
-  }
-
-  throw createCliError(`알 수 없는 schema 대상: ${selector}`, {
-    exitCode: EXIT_ARG_ERROR,
-    reason: "argError",
-    fix: "tfx schema 또는 tfx schema <command>를 실행해 사용 가능한 대상을 확인하세요.",
-  });
-}
-
 function cmdMcp(args = [], options = {}) {
   const { json = false } = options;
   const sub = String(args[0] || "list")
@@ -4614,7 +4547,6 @@ function cmdHelp() {
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
     ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
-    ${WHITE_BRIGHT}tfx schema${RESET}     ${GRAY}CLI/Hub schema JSON 출력${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
     ${WHITE_BRIGHT}tfx synapse${RESET}     ${GRAY}스웜 세션 registry 조회 / lease 관리${RESET}
@@ -5541,9 +5473,6 @@ async function main() {
     }
     case "mcp":
       cmdMcp(cmdArgs, { json: JSON_OUTPUT });
-      return;
-    case "schema":
-      cmdSchema(cmdArgs);
       return;
     case "update":
       await cmdUpdate(cmdArgs);

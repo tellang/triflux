@@ -138,10 +138,10 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 | `tfx mcp` | 관리형 MCP 레지스트리: `list`, `sync`, `add`, `remove` |
 | `tfx cto` | 저장소 단위 권위 콘솔: `collect`, `status`, `hygiene`(dry-run) |
 | `bash ~/.claude/scripts/tfx-route.sh code-reviewer "<지시>"` | 정책에 따라 `codex exec review`로 리뷰 전달 |
-| `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | 커밋 intent 트레일러, CLI 스키마, 설치된 스킬, TUI 모니터, 업데이트, 버전 |
+| `tfx why`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | 커밋 intent 트레일러, 설치된 스킬, TUI 모니터, 업데이트, 버전 |
 | `tfx-live` | 라이브 세션 브리지(`/tfx-live` 스킬과 같은 명령) |
 
-정확한 인자는 `tfx <명령> --help`나 `tfx schema <명령>`으로 확인한다.
+정확한 인자는 `tfx <명령> --help`로 확인한다.
 
 ## 런타임 기능
 
