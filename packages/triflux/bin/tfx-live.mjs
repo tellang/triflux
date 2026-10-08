@@ -8,6 +8,7 @@ import {
   readdir,
   readFile,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -46,6 +47,7 @@ import {
 import {
   CONTEXT_THRESHOLDS,
   contextGuard,
+  findCodexRollout,
   modelContext,
   readCodexContext,
 } from "../hub/team/session-context.mjs";
@@ -2066,6 +2068,70 @@ async function resolveAskTransport(adapter, opts, deps = {}) {
   };
 }
 
+// 공유 app-server daemon 에 로드된 thread 중 cwd 가 같은 것. daemon 이 없으면 빈 목록.
+async function loadedCodexThreadIds(cwd) {
+  try {
+    const { listCodexAppServerThreads } = await import(
+      "../hub/team/uds-orchestrator.mjs"
+    );
+    const threads = await listCodexAppServerThreads({
+      socketPath: resolveCodexDaemonSocket("default"),
+      cwd,
+    });
+    return threads.map((thread) => thread.threadId);
+  } catch {
+    return [];
+  }
+}
+
+// Codex 는 thread 를 resume 할 때만 rollout 에 thread_settings_applied 를 남긴다.
+async function resumedSince(rollout, sinceMs) {
+  const info = await stat(rollout).catch(() => null);
+  if (!info || info.mtimeMs < sinceMs) return false;
+  const handle = await open(rollout, "r");
+  try {
+    const length = Math.min(info.size, 64 * 1024);
+    const { buffer } = await handle.read(
+      Buffer.alloc(length),
+      0,
+      length,
+      info.size - length,
+    );
+    return buffer
+      .toString("utf8")
+      .split("\n")
+      .some((line) => {
+        try {
+          const entry = JSON.parse(line);
+          return (
+            entry.payload?.type === "thread_settings_applied" &&
+            Date.parse(entry.timestamp) >= sinceMs
+          );
+        } catch {
+          return false;
+        }
+      });
+  } finally {
+    await handle.close();
+  }
+}
+
+// resume --last 는 pane 인자에 UUID 가 남지 않아 Codex 가 실제로 연 thread 를 사후에 찾는다.
+// 띄운 뒤 resume 기록이 생긴 thread 가 정확히 하나일 때만 인정한다. 둘 이상이면 같은 cwd 에서
+// 다른 TUI 가 동시에 resume 했을 수 있어 고르지 않는다.
+async function resumedCodexThread(
+  { cwd, launchedAtMs },
+  { loadedIds = loadedCodexThreadIds, findRollout = findCodexRollout } = {},
+) {
+  const matches = [];
+  for (const id of await loadedIds(cwd)) {
+    const rollout = isCodexThreadId(id) && (await findRollout(id));
+    if (rollout && (await resumedSince(rollout, launchedAtMs)))
+      matches.push(id);
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
 async function doStart(adapter, opts) {
   const {
     session,
@@ -2098,6 +2164,8 @@ async function doStart(adapter, opts) {
   if (resumed && name && adapter.cli === "claude")
     launchKeys[0] += ` ${shellQuote(["-n", name])}`;
   const resumeTarget = resume ?? (resumeLast ? "last" : null);
+  const trackResumeLast = resumeLast && adapter.cli === "codex" && !remote;
+  const launchedAtMs = Date.now();
 
   // 분리 세션 기본 80x24 에서는 긴 입력이 화면 높이를 넘으므로 넓게 만든다. 붙으면 클라이언트 크기를 따른다.
   await runTmux(remote, [
@@ -2134,6 +2202,15 @@ async function doStart(adapter, opts) {
   let nameApplied = Boolean(name) && adapter.cli === "claude" && ready;
   let threadId =
     adapter.cli === "codex" && isCodexThreadId(resume) ? resume : null;
+  // 입력창이 뜬 직후에는 resume 기록이 아직 없을 수 있어 잠깐 다시 본다.
+  for (let attempt = 0; trackResumeLast && ready && attempt < 10; attempt++) {
+    threadId = await resumedCodexThread({
+      cwd: cwd ?? process.cwd(),
+      launchedAtMs,
+    });
+    if (threadId) break;
+    await sleep(500);
+  }
   if (name && adapter.cli === "codex" && ready) {
     try {
       const command = `/rename ${name}`;
@@ -4515,6 +4592,7 @@ export {
   peerSideBaseOpts,
   resolveAskTransport,
   resolveCodexDaemonSocket,
+  resumedCodexThread,
   splitTmuxTarget,
   stopOpts,
   tmuxBufferName,
