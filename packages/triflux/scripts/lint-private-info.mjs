@@ -2,7 +2,8 @@
 // 공개 저장소에 개인 홈 경로, 실제 tailnet 이름, CGNAT(100.64/10) 주소, 알려진 계정명이 들어가지 않게 막는다.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 // 검사기와 그 테스트는 잡아야 할 형식을 일부러 담는다.
 const SKIP = new Set([
@@ -40,8 +41,10 @@ const DENY_HASHES = new Set([
   "7837a3ae3733ed53",
 ]);
 
+// 사용자명은 구분자와 인용 경계까지 잡는다. 한글 같은 비ASCII 이름도 빠지지 않게 한다.
+// Windows 경로는 대소문자를 가리지 않으므로 i 플래그를 쓴다.
 const HOME_PATH =
-  /(?:\/Users\/|\/home\/|\b[A-Za-z]:(?:\\\\|\\|\/)Users(?:\\\\|\\|\/))([A-Za-z0-9._-]+)/g;
+  /(?:\/Users\/|\/home\/|\b[a-z]:(?:\\\\|\\|\/)Users(?:\\\\|\\|\/))([^\\/\s"'`<>:*?|,;()[\]{}]+)/giu;
 const CGNAT = /\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b/g;
 const TAILNET = /\b[a-z0-9-]+\.([a-z0-9-]+)\.ts\.net\b/gi;
 
@@ -51,17 +54,21 @@ const hash = (value) =>
 const extraTerms = new Set(
   String(process.env.TFX_PRIVATE_TERMS || "")
     .split(",")
-    .map((term) => term.trim().toLowerCase())
+    .map((term) => term.trim().toLowerCase().replaceAll("_", "-"))
     .filter(Boolean)
     .map(hash),
 );
 
+// 하이픈, 밑줄로 이어 붙인 토큰은 연속한 조각 묶음을 모두 비교한다(접두사, 접미사가 붙어도 잡힌다).
 function isDenied(token) {
-  const parts = [token, ...token.split(/[-_]/)];
-  return parts.some((part) => {
-    const digest = hash(part);
-    return DENY_HASHES.has(digest) || extraTerms.has(digest);
-  });
+  const parts = token.split(/[-_]/);
+  for (let i = 0; i < parts.length; i += 1) {
+    for (let j = i + 1; j <= parts.length; j += 1) {
+      const digest = hash(parts.slice(i, j).join("-"));
+      if (DENY_HASHES.has(digest) || extraTerms.has(digest)) return true;
+    }
+  }
+  return false;
 }
 
 // CI 로그도 공개라 찾은 값은 첫 글자만 보인다.
@@ -72,9 +79,10 @@ export function scanText(text) {
   text.split("\n").forEach((line, index) => {
     const add = (kind, value) =>
       findings.push({ line: index + 1, kind, value: mask(value) });
-    for (const [, user] of line.matchAll(HOME_PATH)) {
-      // "/c/Users/x", "/Users/..." 같은 짧은 자리표시는 넘긴다.
-      if (user.length <= 2 || /^\.+$/.test(user)) continue;
+    for (let [, user] of line.matchAll(HOME_PATH)) {
+      // "/c/Users/x", "/Users/...", "$USER", "%USERNAME%" 같은 자리표시는 넘긴다.
+      user = user.replace(/\.+$/u, "");
+      if (user.length <= 2 || /^[$%]/u.test(user)) continue;
       if (!PLACEHOLDER_USERS.has(user.toLowerCase())) add("home-path", user);
     }
     for (const [address] of line.matchAll(CGNAT)) {
@@ -121,4 +129,9 @@ function main() {
   console.log(`[lint-private] PASS: ${files.length} file(s) checked.`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+// Node 는 메인 모듈 경로의 심볼릭 링크를 푼다. 공백, Windows 표기와 함께 실제 경로로 비교한다.
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
+)
+  main();
