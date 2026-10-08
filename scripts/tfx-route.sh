@@ -142,6 +142,16 @@ track_worker_pid() {
   echo "$1" >> "$_PID_TRACK"
 }
 
+# tee 파이프라인에서 $! 는 tee 라 실제 워커가 추적되지 않는다. 파이프라인 단계 안에서
+# 자기 PID 를 남기고 워커로 exec 한다. 이 PID 는 스크립트의 직속 자식이다.
+_exec_tracked() {
+  local self_pid="${BASHPID:-}"
+  [[ -n "$self_pid" ]] || self_pid="$(exec sh -c 'echo "$PPID"')"
+  track_worker_pid "$self_pid"
+  [[ "$1" == "_no_timeout" ]] && shift 2
+  exec "$@"
+}
+
 # --async 서브셸은 job id 를 찍고 끝나는 맨 위 프로세스($$)보다 오래 산다. 추적 파일이
 # 끝난 $$ 이름이면 SessionStart 의 session-stale-cleanup 이 소유자 사망으로 보고
 # 실행 중인 워커를 SIGTERM 한다. 서브셸 안에서 자기 PID 로 다시 묶는다.
@@ -1881,7 +1891,7 @@ run_stream_worker() {
   )
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "${worker_cmd[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    printf '%s' "$prompt" | _exec_tracked "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "${worker_cmd[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
     printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "${worker_cmd[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
@@ -1944,7 +1954,7 @@ run_antigravity_exec() {
   fi
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" ${agy_exec_env[@]+"${agy_exec_env[@]}"} "$CLI_CMD" "${agy_args[@]}" </dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    _exec_tracked "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" ${agy_exec_env[@]+"${agy_exec_env[@]}"} "$CLI_CMD" "${agy_args[@]}" </dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
     "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" ${agy_exec_env[@]+"${agy_exec_env[@]}"} "$CLI_CMD" "${agy_args[@]}" </dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
@@ -2107,7 +2117,7 @@ run_codex_exec() {
     # `--` end-of-options: prompt가 '--'/'---' (front-matter 등)로 시작하면
     # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
     if [[ "$use_tee_flag" == "true" ]]; then
-      "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+      _exec_tracked "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
     else
       "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
     fi
