@@ -7,7 +7,11 @@ All notable changes to triflux will be documented in this file.
 ### Breaking
 - engines: Node 하한을 22 로 올린다(네 package.json `>=22`). CI 는 Node 22 와 24 에서 돈다. Node 20 은 지원하지 않는다 (#685)
 - cli: `tfx cto`(collect, status, hygiene)와 CTO lake 기록을 지운다. Codex, agy 세션 훅이 `.triflux/lake/ledger.jsonl` 에 쓰던 `session_started` 기록이 없어진다. 이미 쌓인 `.triflux/lake` 는 지우지 않는다. ADR-0024 는 superseded (ADR-0035, #682)
-- headless: 결과 색인, 잡, 프롬프트 임시 파일 경로가 `$TMPDIR/triflux-<uid>/` 아래로 옮겨진다(예: `$TMPDIR/triflux-<uid>/tfx-headless/<세션>.results.json`). 업데이트 전에 시작한 async 잡은 새 버전에서 조회되지 않는다 (#680, #688)
+- headless: macOS, Linux 에서 결과 색인, 잡, 프롬프트 임시 파일 경로가 `$TMPDIR/triflux-<uid>/` 아래로 옮겨진다(예: `$TMPDIR/triflux-<uid>/tfx-headless/<세션>.results.json`). 업데이트 전에 시작한 async 잡은 새 버전에서 조회되지 않는다. Windows 는 기존 `%TEMP%` 경로를 그대로 쓴다. `@triflux/core` 의 `pipePath()` 가 돌려주는 Unix 기본 IPC 소켓 경로도 `/tmp/<이름>-<pid>.sock` 에서 `/tmp/triflux-<uid>/<이름>-<pid>.sock` 으로 바뀐다(명시한 `tempDir` 과 Windows named pipe 는 그대로) (#680, #688)
+- core: `@triflux/core` 에서 `buildExecCommand`, `sleep`, `CODEX_MCP_TRANSPORT_EXIT_CODE`, `normalizePathForShell`, `shellQuote`, `executeCodex`, `buildCodexArgs`, `buildLaunchScript`, `getCodexVersion`, `runPreflight` export 를 제거한다 (#705)
+- route: mcp-filter 의 `--phase` 를 제거한다(주면 exit 64). delimited 출력은 7필드에서 6필드로 줄고 JSON 의 `resolvedPhase` 와 셸 출력의 `MCP_PIPELINE_PHASE` 가 빠진다 (#703)
+- remote: `remote-spawn --kill <세션>` 은 그 세션의 셸 그룹과 자손만 정리한다. 원격 Claude 데몬 전체 정지는 `--kill <세션> --stop-daemon` 으로 요청한다. 이 버전 전에 띄운 원격 세션은 기록이 없어 원격 정리에 실패한다 (#694)
+- cli: `tfx update` 의 dev 채널 선택(`--dev`, `dev`, `@dev`)을 제거해 일반 업데이트 경로를 쓴다. npm 전역 설치는 `triflux@latest`, npm 로컬 설치는 의존성 범위 안에서 `npm update triflux` 를 실행한다 (#679)
 - setup: npm 설치(postinstall)는 psmux winget 설치와 Codex 훅 신뢰 기록을 하지 않고 안내만 남긴다. 대화형 `tfx setup` 이 동의를 묻고 수행한다. 비대화형 설치에서는 둘 다 하지 않는다 (#693)
 
 ### Added
@@ -16,21 +20,19 @@ All notable changes to triflux will be documented in this file.
 - lint: `npm run lint` 끝에 공개 트리의 개인 홈 경로, 100.64/10 주소, tailnet 이름, 등록된 계정명을 잡는 검사를 붙인다 (#657)
 
 ### Changed
-- setup: hub 와 remote-spawn 사본을 패키지 배치대로 복사해 설치본의 상대 import 가 깨지지 않게 한다. `~/.claude/hub/node_modules` 를 링크한다 (#677)
-- setup: 같은 대상의 설정과 훅 백업은 최근 5개만 남기고 원본 권한(0600)을 따른다. setup 한 번에 같은 MCP 파일은 한 벌만 백업한다. Codex 설정 파일을 0600 으로 만든다. MCP 이주 항목의 패키지 버전을 고정한다. winget ID 는 `marlocarlo.psmux` 에 `--exact` (#693, #697)
+- setup: hub 와 remote-spawn 사본을 패키지 배치대로 복사해 설치본의 상대 import 가 깨지지 않게 한다 (#677)
+- setup: Codex 훅, 프로필 등 회전 대상 백업은 파일과 백업 종류별로 최근 5개만 남기고 원본 권한(0600)을 따른다(legacy cleanup 의 `.tfx-bak-*` 백업은 제외). setup 한 번에 같은 MCP 파일은 한 벌만 백업한다. Codex 설정 파일을 0600 으로 만든다. MCP 이주 항목의 패키지 버전을 고정한다. winget ID 는 `marlocarlo.psmux` 에 `--exact` (#693, #697)
 - packages: 게시되는 triflux 가 `@triflux/core`, `@triflux/remote` 를 의존하지 않고 실제로 쓰는 `@iarna/toml` 만 선언한다. core 에 pane 관련 파일(psmux, pane, session, agent-map.json)이 함께 실린다. `release:check-mirror` 가 pack 목록 기준으로 core 를 비교하고 core 의 상대 import 해석을 검사한다. npm files 에서 CLAUDE.md 와 `scripts/__tests__` 가 빠지고 references 의 분석 문서 두 개를 npm 배포에서 뺀다 (#678, #685, #687)
 - ci: `permissions: contents: read`, `persist-credentials: false`, `npm ci --ignore-scripts`(폴백 없음), release dispatch 의 version, channel 입력 검증 (#687)
 - remote: remote-spawn 원격 환경 캐시를 XDG 상태 경로(Windows 는 LOCALAPPDATA)로 옮기고, hosts.json 이주 원본을 패키지 루트로 고정한다. 원격 명령은 문자열 하나로 넘기고 Windows 원격은 pwsh `-EncodedCommand` 를 쓴다. tmux 호출은 인자 배열로 한다 (#686, #694)
-- remote: `remote-spawn --kill` 은 그 세션의 셸 그룹과 자손만 끝낸다. 원격 Claude 데몬 전체 정지는 `--stop-daemon` 으로 나눈다. 이 버전 전에 띄운 원격 세션은 기록이 없어 `--kill` 이 실패로 보고된다 (#694)
-- route: Codex 시작 배너가 있으면 성공한 실행은 tracing WARN, ERROR 줄만, 실패한 실행은 오류 형태 줄과 transport 크래시까지 검사해 rate_limit, auth_error 오탐을 없앤다. Node 쪽 수명주기가 `TFX_HARD_CEILING_SEC=0` 과 machine profile 을 따른다. spawn-trace 로그를 7일 보관한다. mcp-filter 셸 출력이 6필드가 된다 (#695, #703)
-- hud: Codex 새로고침이 세션 jsonl 을 끝에서 64KB 청크로 거슬러 읽는다(실측 읽기량 370MB 에서 45MB). 다른 limit_id 가 최신 이벤트보다 64KB 넘게 앞에만 있으면 첫 버킷만 돌려준다 (#653)
+- route: Codex 시작 배너가 있으면 성공한 실행은 tracing WARN, ERROR 줄만, 실패한 실행은 오류 형태 줄과 transport 크래시까지 검사해 rate_limit, auth_error 오탐을 없앤다. Node 쪽 수명주기가 `TFX_HARD_CEILING_SEC=0` 과 machine profile 을 따른다. spawn-trace 로그를 7일 보관한다 (#695)
+- hud: Codex 새로고침이 세션 jsonl 을 끝에서 64KB 청크로 거슬러 읽는다(실측 읽기량 370MB 에서 45MB). 다른 limit_id 가 최신 이벤트보다 64KB 넘게 앞에만 있으면 첫 버킷만 돌려준다. 버킷에 토큰 정보가 없고 합성 토큰 폴백 줄이 같은 읽기 범위 밖에 있으면 토큰 폴백도 생략한다 (#653)
 - docs: README 두 벌과 ARCHITECTURE.md 를 현재 구조로 갱신하고 옛 데모 GIF 를 뺀다. 공개 문서의 개인 메모리 참조, 세션 원문, 기기 실측값을 예시값으로 바꾸고 깨진 링크와 경로를 고친다 (#645, #684, #690)
 
 ### Removed
-- hub: 옛 Codex 실행 경로(`hub/codex-adapter`, `codex-preflight`, Codex 0.154 에서 없어진 `mcp-server` 를 부르던 `workers/codex-mcp`, `buildExecCommand`)와 MCP SDK 의존을 지운다. `@triflux/core` 에서 `executeCodex`, `getCodexVersion`, `runPreflight` 등 export 가 빠진다 (#705)
-- hub: 쓰는 곳이 없던 `process-cleanup`, `worker-signal`, `staleState`, `notify`(macOS 알림), `forceCleanupTeam`, `claudemd-sync`, `mcp-cleanup.ps1`, `hooks/lib/resolve-root`, mcp-filter `--phase` 를 지운다 (#679, #703, #698, #704)
+- hub: 옛 Codex 실행 경로(`hub/codex-adapter`, `codex-preflight`, Codex 0.154 에서 없어진 `mcp-server` 를 부르던 `workers/codex-mcp`, `buildExecCommand`)와 MCP SDK 의존을 지운다. 공개 export 제거 목록은 Breaking 참고 (#705)
+- hub: 쓰는 곳이 없던 `process-cleanup`, `worker-signal`, `staleState`, `notify`(macOS 알림), `forceCleanupTeam`, `claudemd-sync`, `mcp-cleanup.ps1`, `hooks/lib/resolve-root` 를 지운다 (#679, #703, #698, #704)
 - hooks: ADR-0023 전환 stub(`hook-orchestrator.mjs`, `claude-cwd-projection-refresh.mjs`)과 agy 세션 훅을 지운다. 옛 설치가 남긴 command hook 과 agy `triflux-session` 그룹은 `tfx setup` 또는 `tfx doctor --fix` 가 정리한다(옛 설치기가 만든 모양과 같은 항목만, 다른 모양은 doctor 경고) (#699, #706)
-- cli: `tfx update --dev` 를 지운다. `--dev` 를 줘도 latest 로 업데이트한다 (#679)
 - repo: `.claudeignore`, `.codexignore`, `.env.example` 를 지운다 (#700)
 
 ### Fixed
@@ -38,12 +40,12 @@ All notable changes to triflux will be documented in this file.
 - setup: triflux 허브 서버 프로세스를 argv 로 판정해 종료한다(package.json name 확인, 모르는 node 옵션은 판정 보류). 허브 캐시를 정리하고 인증 사본은 바로 지운다 (#677)
 - cli: `tfx doctor --audit` 실패를 비0 으로 돌려주고, 스크립트 직접 실행 판정이 공백과 한글 경로에서 동작한다. macOS 터미널 열기 대체 경로가 명령을 버리고 성공을 돌려주던 문제 (#691)
 - multi: tmux 모드에서 antigravity 계열 역할을 `agy` 로 실행하고, 여러 줄 프롬프트를 bracketed paste 로 넣어 줄마다 제출되지 않게 한다 (#701)
-- route: 그룹 kill 을 자기 자식이고 서명이 맞을 때만 하고, tmux 세션 정리를 `=이름` 정확 지정으로 한다(접두사가 같은 다른 세션을 죽이던 문제). Windows codex 실행을 셸별로 인용한다(pwsh 작은따옴표, cmd 는 프롬프트 파일 리다이렉트) (#655, #696)
+- route: 그룹 kill 을 자기 자식이고 서명이 맞을 때만 하고, tmux 세션 정리를 `=이름` 정확 지정으로 한다(접두사가 같은 다른 세션을 죽이던 문제) (#655)
 - tests: test-lock 이 HOME, USERPROFILE, CODEX_HOME, XDG_CONFIG_HOME, APPDATA 를 임시 디렉터리로 돌리고 실행 전후 실제 설치본이 바뀌면 실패한다. setup 진입점은 홈 격리 신호 없이 테스트에서 돌면 첫 쓰기 전에 끝난다. 테스트 스크래치를 임시 디렉터리로 옮긴다 (#683, #698, #702, #708)
 
 ### Security
 - 셸 주입과 비밀 노출을 막는다: hub 셸 인용, headless 가 cwd 의 tfx-route.sh 를 패키지 내장본보다 먼저 실행하던 문제, remote-spawn PowerShell 폴백 인용, `doctor --diagnose` 번들의 환경변수 전체, spawn-trace 로그의 프롬프트 전문, Codex 설정과 훅 백업의 0600 소실, 프로젝트 `.mcp.json` 평문 Bearer, tfx-review 스킬의 diff 원문 셸 인자 (#656)
-- 프롬프트와 임시 파일을 사용자별 0700 디렉터리(소유자와 링크 검사)에 두고, headless Claude 프롬프트를 stdin 으로, Codex resume argv 에서 프롬프트를 뺀다. 4032B 를 넘는 HUD Keychain 항목은 argv 로 되쓰지 않는다. `codex queue` 는 CLI 가 stdin 을 받지 않아 argv 로 남는다 (#680, #688, #692)
+- 프롬프트와 임시 파일을 macOS, Linux 에서 사용자별 0700 디렉터리(소유자와 링크 검사)에 두고(Windows 는 `%TEMP%`), headless Claude 프롬프트를 stdin 으로, Codex resume argv 에서 프롬프트를 뺀다. 4032B 를 넘는 HUD Keychain 항목은 argv 로 되쓰지 않고, 그런 항목은 HUD 가 만료 토큰 자동 갱신도 하지 않고 Claude Code 에 맡긴다. `codex queue` 는 CLI 가 stdin 을 받지 않아 argv 로 남는다 (#680, #688, #692)
 - 공개 트리의 계정명, 홈 경로, 회사 이름을 걷어낸다 (#657)
 
 ## [10.53.0] - 2026-10-08
