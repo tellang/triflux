@@ -76,7 +76,7 @@ CLI 호출은 `tfx-route.sh` / headless 워커 / `tfx` CLI를 경유해야 한�
 
 ### 세션 전송과 결과 회수
 
-- **Codex 세션 메시지**: `tfx-live ask --cli codex`는 `codex queue`로 메시지를 쌓는다.
+- **Codex 세션 메시지**: `tfx-live ask --cli codex`는 Codex 큐(app-server `thread/queue/add`)에 메시지를 쌓는다.
   queue를 못 쓰거나 슬래시 명령이면 tmux 입력으로 폴백하고 이유를 남긴다
   ([ADR-0027](docs/adr/0027-codex-message-queue-default.md)).
 - **리드 흐름**: `/tfx-lead`를 맡은 세션이 `tfx-live`로 Claude, Codex 세션을 띄우고

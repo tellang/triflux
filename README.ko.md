@@ -141,7 +141,7 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 
 **라이브 세션.** `tfx-live`는 Claude Code와 Codex TUI 세션을 조종한다. Claude 데몬 대상
 (`--short`/`--session-id`)은 UDS를 먼저 시도하고, `--session`도 주면 실패 시 tmux로 넘어간다.
-Codex `ask`는 `codex queue`로 메시지를 쌓고(TUI에 `[from <보낸 세션>]` 첫 줄로 보인다) 못 쓰면 이유를
+Codex `ask`는 Codex 큐(app-server `thread/queue/add`)에 메시지를 쌓고(TUI에 `[from <보낸 세션>]` 첫 줄로 보인다) 못 쓰면 이유를
 남기고 tmux로 보낸다. `--transport uds --thread <id|auto>`로 UDS도 쓸 수 있다. `peer`는 두 세션 사이를
 `--rounds`만큼 중계한다. triflux의 Codex
 훅이 실행 중인 Codex 세션을 `~/.local/state/triflux/codex-sessions/`에 기록하므로

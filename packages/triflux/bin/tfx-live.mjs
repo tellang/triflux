@@ -95,7 +95,7 @@ function usage(command) {
     "  tfx-live start --session NAME [--name NAME] [--cli codex|claude] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude] [--if-busy wait|fail|interrupt] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --cli codex [--transport queue|tmux] (--session NAME[:WINDOW.PANE] | --thread UUID) --prompt TEXT [--from NAME] [--timeout 60] [--no-wait]",
-    "    Codex ask defaults to `codex queue` (queued, delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands.",
+    "    Codex ask defaults to the app-server queue (thread/queue/add, `codex queue --message` only when add is unavailable; delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands.",
     "  tfx-live ask --cli codex --transport uds --thread ID|auto --prompt TEXT [--codex-socket PATH|default] [--cwd DIR] [--if-busy wait|fail|steer] [--busy-timeout 60] [--timeout 60] [--max-turn SECONDS]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
     "    ask options: --no-wait --no-relay-tag --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 15/22).",
@@ -2725,6 +2725,10 @@ async function doAskViaQueue(adapter, opts, deps = {}) {
     ok: true,
     inputSent: true,
     queuedMessageId: queued.queuedMessageId,
+    queueVia: queued.via,
+    ...(queued.fallbackReason
+      ? { queueFallbackReason: queued.fallbackReason }
+      : {}),
     submittedAt: new Date().toISOString(),
   };
   // 표식이 없으면 rollout 에서 이 요청의 턴을 가려낼 수 없다.

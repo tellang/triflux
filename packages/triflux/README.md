@@ -143,7 +143,7 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 
 **Live sessions.** `tfx-live` drives Claude Code and Codex TUI sessions. Claude daemon targets
 (`--short`/`--session-id`) try UDS first and fall back to tmux when `--session` is also given;
-Codex `ask` queues the message with `codex queue` (shown in the TUI with a
+Codex `ask` queues the message through the app-server `thread/queue/add` API (shown in the TUI with a
 `[from <sender>]` first line) and falls back to tmux with a reported reason; UDS stays available with
 `--transport uds --thread <id|auto>`. `peer` relays between two sessions for `--rounds`. triflux's Codex hook records running Codex
 sessions under `~/.local/state/triflux/codex-sessions/`, so `tfx-live list-sessions --cli codex|claude`
