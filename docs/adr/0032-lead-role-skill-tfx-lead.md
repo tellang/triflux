@@ -28,7 +28,7 @@ ADR-0029는 세션을 띄운 쪽이 생성부터 종료까지 소유한다고 �
 - `skills/tfx-lead/SKILL.md`가 역할별 모델, 부르는 방법, 지시 전달, 결과 회수, 교차 리뷰, 겹침 관리, 사용자 결정, 릴리스, 안전, 컨텍스트 점검 절차의 정본이다. Claude 리드와 Codex 리드가 같은 문서를 쓰고, 수단 차이는 문서 안의 "리드 CLI 별 수단" 표로 나눈다.
 - ADR-0029가 정한 규칙(리드 소유, 승계 ACK, 즉시 종료, 교차 리뷰)은 바뀌지 않는다. 리드 역할 절차의 정본 위치만 `tfx-live`의 "리드 운영" 절에서 `tfx-lead`로 옮긴다.
 - 세션 조작 명령의 상세와 컨텍스트 비율 표는 `tfx-live`에 남긴다. `tfx-lead`는 명령을 복제하지 않고 참조한다. `tfx-live`의 "리드 운영" 절에는 `tfx-lead`로 가는 한 줄만 둔다.
-- ADR-0020의 스킬 목록은 `tfx-lead`가 더해져 12개에서 13개, Windows 포함 시 14개가 된다. ADR-0020은 accepted라 고치지 않고 이 ADR이 목록을 부분 갱신한다.
+- ADR-0020 뒤 커밋 9d6d20b9가 `tfx-plan`, `tfx-interview`, `tfx-profile`을 지워 현재 스킬은 macOS/Linux 9개, Windows 포함 10개다. `tfx-lead`가 더해져 macOS/Linux 10개, Windows 포함 11개가 된다. ADR-0020은 accepted라 고치지 않고 이 ADR이 목록을 부분 갱신한다.
 - 설치는 두 경로에 걸친다. Claude 쪽은 기존 스킬 동기화가 `skills/tfx-lead`를 복사하고, Codex 쪽은 `scripts/setup.mjs`의 managed 스킬 동기화 목록에 `tfx-lead`를 더해 `~/.codex/skills/tfx-lead`로 복사한다.
 
 ## 검토한 대안 (Considered Options)
