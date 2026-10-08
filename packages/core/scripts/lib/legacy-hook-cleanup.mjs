@@ -237,10 +237,11 @@ export function cleanupLegacyHooks({
 
 const AGY_HOOK_GROUP = "triflux-session";
 
-// 옛 ensure-agy-hooks 가 만든 명령 형태: "<node>" "<경로>/hooks/agy-session-hook.mjs"
-// (예전 버전은 node 경로에 따옴표가 없었다). 파일명을 언급만 하는 명령은 우리 것이 아니다.
+// 옛 ensure-agy-hooks 는 "<node 경로>" 뒤에 따옴표로 감싼 훅 스크립트 경로를 붙였다. node 경로는
+// 버전에 따라 따옴표가 없거나(공백 포함 가능) Windows 에서 백슬래시를 두 번 썼다.
+// 그래서 끝이 따옴표로 감싼 .../hooks/agy-session-hook.mjs 인 명령만 우리 것으로 본다.
 const AGY_HOOK_COMMAND =
-  /^(?:"[^"]+"|[^\s"]+)\s+"[^"]*[/\\]hooks[/\\]agy-session-hook\.mjs"$/u;
+  /^\S.*\s"[^"]*hooks(?:\/|\\{1,2})agy-session-hook\.mjs"$/u;
 
 // 그룹의 모든 명령이 옛 setup 의 것일 때만 지운다. 사용자가 끈 그룹(enabled: false)은 둔다.
 function isTrifluxAgyGroup(group) {

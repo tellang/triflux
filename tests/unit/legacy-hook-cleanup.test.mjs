@@ -161,7 +161,24 @@ test("agy hooks.json 에서 옛 triflux-session 훅만 지우고 다른 그룹�
         PreInvocation: [
           {
             type: "command",
-            command: '/opt/node "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
+            command:
+              '/opt/My Node/node "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
+          },
+        ],
+      },
+    }),
+  );
+  assert.equal(cleanupAgyHooks({ geminiConfigHome: dir }).changed, true);
+  // Windows 의 옛 설치기는 경로의 백슬래시를 두 번 썼다.
+  writeFileSync(
+    hooksPath,
+    JSON.stringify({
+      "triflux-session": {
+        PreInvocation: [
+          {
+            type: "command",
+            command:
+              '"C:\\\\Program Files\\\\nodejs\\\\node.exe" "C:\\\\npm\\\\triflux\\\\hooks\\\\agy-session-hook.mjs"',
           },
         ],
       },
