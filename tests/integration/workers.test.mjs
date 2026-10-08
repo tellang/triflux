@@ -2,8 +2,9 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ClaudeWorker } from "../../hub/workers/claude-worker.mjs";
@@ -19,6 +20,9 @@ import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
 const FIXTURE_DIR = resolve(PROJECT_ROOT, "tests", "fixtures");
+// 저장소 안에 스크래치를 만들지 않는다(#530).
+const SCRATCH = mkdtempSync(join(tmpdir(), "tfx-workers-test-"));
+after(() => rmSync(SCRATCH, { recursive: true, force: true }));
 const FIXTURE_BIN = toBashPath(resolve(FIXTURE_DIR, "bin"));
 const CLAUDE_FIXTURE = resolve(FIXTURE_DIR, "fake-claude-cli.mjs");
 const ROUTE_SCRIPT = toBashPath(
@@ -87,10 +91,7 @@ describe("ClaudeWorker", { timeout: 15000 }, () => {
   });
 
   it("passes --model and --effort through to the claude CLI", async () => {
-    const argvOut = resolve(
-      PROJECT_ROOT,
-      `.tmp-claude-argv-${process.pid}-${Date.now()}.json`,
-    );
+    const argvOut = join(SCRATCH, `claude-argv-${Date.now()}.json`);
     argvOutFiles.add(argvOut);
     const worker = new ClaudeWorker({
       command: process.execPath,
@@ -118,10 +119,7 @@ describe("ClaudeWorker", { timeout: 15000 }, () => {
   });
 
   it("omits --effort when no claude effort is provided", async () => {
-    const argvOut = resolve(
-      PROJECT_ROOT,
-      `.tmp-claude-argv-${process.pid}-${Date.now()}.json`,
-    );
+    const argvOut = join(SCRATCH, `claude-argv-${Date.now()}.json`);
     argvOutFiles.add(argvOut);
     const worker = new ClaudeWorker({
       command: process.execPath,
@@ -163,15 +161,6 @@ describe("worker-utils", () => {
 });
 
 describe("tfx-route.sh wrapper integration", { timeout: 15000 }, () => {
-  after(() => {
-    for (const dir of [
-      ".tmp-home-route-codex",
-      ".tmp-home-route-antigravity",
-    ]) {
-      rmSync(resolve(PROJECT_ROOT, dir), { recursive: true, force: true });
-    }
-  });
-
   it("designer는 Antigravity route wrapper를 통해 실행되어야 한다", () => {
     const result = spawnSync(
       BASH_EXE,
@@ -180,7 +169,7 @@ describe("tfx-route.sh wrapper integration", { timeout: 15000 }, () => {
         cwd: PROJECT_ROOT,
         encoding: "utf8",
         env: buildRouteEnv({
-          HOME: resolve(PROJECT_ROOT, ".tmp-home-route-antigravity"),
+          HOME: join(SCRATCH, "home-route-antigravity"),
           TFX_TEAM_NAME: "phase3-team",
           AGY_BIN: "agy",
           TFX_ANTIGRAVITY_OK: "1",
@@ -203,7 +192,7 @@ describe("tfx-route.sh wrapper integration", { timeout: 15000 }, () => {
         cwd: PROJECT_ROOT,
         encoding: "utf8",
         env: buildRouteEnv({
-          HOME: resolve(PROJECT_ROOT, ".tmp-home-route-codex"),
+          HOME: join(SCRATCH, "home-route-codex"),
           TFX_TEAM_NAME: "phase3-team",
           CODEX_BIN: "codex",
           TFX_CODEX_OK: "1",
@@ -225,7 +214,7 @@ describe("tfx-route.sh wrapper integration", { timeout: 15000 }, () => {
         cwd: PROJECT_ROOT,
         encoding: "utf8",
         env: buildRouteEnv({
-          HOME: resolve(PROJECT_ROOT, ".tmp-home-route-codex"),
+          HOME: join(SCRATCH, "home-route-codex"),
           TFX_TEAM_NAME: "phase3-team",
           TFX_NO_CLAUDE_NATIVE: "1",
           CODEX_BIN: "codex",

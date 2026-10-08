@@ -3,10 +3,12 @@ import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -17,7 +19,7 @@ const SETUP_SCRIPT = join(PROJECT_ROOT, "scripts", "setup.mjs");
 const PACKAGE_VERSION = JSON.parse(
   readFileSync(join(PROJECT_ROOT, "package.json"), "utf8"),
 ).version;
-const TMP_ROOT = join(PROJECT_ROOT, "tests", ".tmp-setup-version-cache");
+const TMP_ROOT = mkdtempSync(join(tmpdir(), "tfx-setup-version-cache-"));
 
 function createTempHome(testName) {
   const tempHome = join(TMP_ROOT, testName);

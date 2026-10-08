@@ -396,3 +396,47 @@ test("late macrotask failure", () => {
     cleanupHarness(harness);
   }
 });
+
+test("자식 테스트는 임시 홈을 쓰고, 실제 홈의 설치본이 바뀌면 실패한다", async () => {
+  const harness = createHarness();
+  const realHome = mkdtempSync(join(tmpdir(), "triflux-test-lock-real-home-"));
+  try {
+    mkdirSync(join(realHome, ".claude", "scripts"), { recursive: true });
+    writeFileSync(join(realHome, ".claude/scripts/.tfx-pkg-root"), "/pkg\n");
+    const homeScript = writeScript(
+      harness,
+      "home.mjs",
+      `
+import { writeFileSync } from "node:fs";
+console.log(JSON.stringify({ home: process.env.HOME, codex: process.env.CODEX_HOME }));
+if (process.env.TOUCH_REAL_HOME) writeFileSync(process.env.TOUCH_REAL_HOME, "/worktree\\n");
+`,
+    );
+
+    const isolated = await waitForExit(
+      spawnWrapper(harness, [homeScript], {
+        HOME: realHome,
+        USERPROFILE: realHome,
+      }),
+    );
+    assert.equal(isolated.code, 0);
+    const seen = JSON.parse(isolated.stdout.trim().split("\n").at(-1));
+    assert.notEqual(seen.home, realHome);
+    assert.equal(seen.codex, join(seen.home, ".codex"));
+    assert.equal(existsSync(seen.home), false);
+
+    const touched = await waitForExit(
+      spawnWrapper(harness, [homeScript], {
+        HOME: realHome,
+        // Windows 의 homedir() 는 USERPROFILE 을 본다.
+        USERPROFILE: realHome,
+        TOUCH_REAL_HOME: join(realHome, ".claude/scripts/.tfx-pkg-root"),
+      }),
+    );
+    assert.equal(touched.code, 1);
+    assert.match(touched.stderr, /실제 홈의 설치본이 바뀌었다/);
+  } finally {
+    cleanupHarness(harness);
+    rmSync(realHome, { recursive: true, force: true });
+  }
+});

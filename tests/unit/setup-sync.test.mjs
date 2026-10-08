@@ -32,7 +32,7 @@ const {
 
 // ── helpers ──
 
-const TMP_DIR = join(PROJECT_ROOT, "tests", ".tmp-setup-sync");
+const TMP_DIR = mkdtempSync(join(tmpdir(), "tfx-setup-sync-tmp-"));
 const SETUP_TEST_HOME = mkdtempSync(join(tmpdir(), "tfx-setup-sync-"));
 const SETUP_TEST_ENV = {
   ...process.env,
@@ -217,8 +217,8 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
     ensureTmpDir();
     const sourceDir = join(TMP_DIR, "managed-source");
     const destinationDir = join(TMP_DIR, "managed-destination");
-    const stagingRoot = join(dirname(TMP_DIR), ".tmp-setup-sync-staging");
-    rmSync(stagingRoot, { recursive: true, force: true });
+    // staging 은 discovery root(TMP_DIR) 밖이어야 한다.
+    const stagingRoot = mkdtempSync(join(tmpdir(), "tfx-setup-sync-staging-"));
     mkdirSync(sourceDir, { recursive: true });
     mkdirSync(destinationDir, { recursive: true });
     writeFileSync(join(sourceDir, "SKILL.md"), "tracked adapter v2\n");

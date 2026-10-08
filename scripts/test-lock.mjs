@@ -8,6 +8,7 @@
 // 사용: node scripts/test-lock.mjs [-- ...node --test args]
 
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   mkdirSync,
   mkdtempSync,
@@ -17,7 +18,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -317,10 +318,51 @@ function terminateChild(child, signal) {
   }
 }
 
+// 테스트가 실제 홈의 설치본을 바꾸면 이후 모든 세션이 테스트 트리 코드를 돈다(#526, #529).
+// 테스트 동안 홈을 임시 디렉터리로 돌리고, 실제 홈의 표식 파일이 그대로인지 확인한다.
+const REAL_HOME_SENTINELS = [
+  ".claude/scripts/.tfx-pkg-root",
+  ".claude/scripts/tfx-route.sh",
+];
+
+function snapshotRealHome(home = homedir()) {
+  return REAL_HOME_SENTINELS.map((relative) => {
+    try {
+      return createHash("sha256")
+        .update(readFileSync(join(home, relative)))
+        .digest("hex");
+    } catch {
+      return null;
+    }
+  });
+}
+
+export function changedRealHomeFiles(before, after) {
+  return REAL_HOME_SENTINELS.filter(
+    (_, index) => before[index] !== after[index],
+  );
+}
+
+export function testHomeEnv(home) {
+  return {
+    HOME: home,
+    USERPROFILE: home,
+    CODEX_HOME: join(home, ".codex"),
+    XDG_CONFIG_HOME: join(home, ".config"),
+    APPDATA: join(home, "AppData", "Roaming"),
+  };
+}
+
 export function main(argv = process.argv.slice(2)) {
   const timeoutMs = parseTimeoutMs();
   const lock = acquireLock(timeoutMs);
   const testHubPidDir = mkdtempSync(join(tmpdir(), "tfx-test-hub-pid-"));
+  // 실제 홈이 꼭 필요한 실행만 TFX_TEST_REAL_HOME=1 로 끈다.
+  const isolateHome = process.env.TFX_TEST_REAL_HOME !== "1";
+  const testHome = isolateHome
+    ? mkdtempSync(join(tmpdir(), "tfx-test-home-"))
+    : null;
+  const realHomeBefore = snapshotRealHome();
   let child = null;
   let finished = false;
   let requestedExitCode = null;
@@ -339,10 +381,19 @@ export function main(argv = process.argv.slice(2)) {
     finished = true;
     clearTimers();
     releaseLock();
-    try {
-      rmSync(testHubPidDir, { recursive: true, force: true });
-    } catch {
-      // best-effort cleanup only
+    const changed = changedRealHomeFiles(realHomeBefore, snapshotRealHome());
+    if (changed.length) {
+      console.error(
+        `\x1b[31m✗ 테스트 중 실제 홈의 설치본이 바뀌었다: ${changed.join(", ")}\x1b[0m`,
+      );
+      if (code === 0) code = 1;
+    }
+    for (const dir of [testHubPidDir, testHome]) {
+      try {
+        if (dir) rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup only
+      }
     }
     process.exit(code);
   }
@@ -394,6 +445,7 @@ export function main(argv = process.argv.slice(2)) {
     stdio: ["pipe", "inherit", "inherit"],
     env: {
       ...process.env,
+      ...(testHome ? testHomeEnv(testHome) : {}),
       TEST_LOCK_PID: String(process.pid),
       TFX_HUB_PID_DIR: process.env.TFX_HUB_PID_DIR || testHubPidDir,
       // 테스트 러너 밀폐화: 머신 전역 CLI disable 정책을 자식 테스트가 상속하지
