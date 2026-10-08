@@ -134,21 +134,7 @@ Interpretation:
 
 ### Detached tmux sessions and zombies
 
-Detached sessions observed:
-
-```text
-omx-projects-detached-1778545119011-924vgc
-omx-projects-detached-1778550044173-9cxefn
-omx-projects-detached-1778804860192-a4p8pm
-omx-tpcg-mailrouter-main-1778811369664-0uuxot
-omx-triflux-fix-codex-exec-stdin-redirect-1778823416380-nujufh
-omx-work-detached-1778633591273-xqcz4d
-tfx-mac-multi-smoke-6ncsss
-tfx-multi-wsn7jknb
-tpcg-brief-53631
-tpcg-brief-8878
-tpcg-demo-server
-```
+Detached sessions observed: 11. Three were triflux sessions (`omx-triflux-*`, `tfx-mac-multi-smoke-*`, `tfx-multi-*`); the other eight belonged to unrelated projects and are omitted.
 
 Zombie count:
 

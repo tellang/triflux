@@ -97,8 +97,3 @@ Approach B를 추천한다.
 1. 이번에 만든 3개 PRD 중 우선순위를 고른다. 추천 순서는 02 → 03 → 01 이다. 버전 소스 오브 트루스부터 고정해야 나머지가 덜 흔들린다.
 2. 다음 구현 턴에서 `.github/`, `docs/process/`, `scripts/release/`를 실제 생성한다.
 3. 마지막에 `npm pack --dry-run`, `node scripts/release/check-sync.mjs`, local install smoke test로 릴리즈 전 검증 체인을 붙인다.
-
-## What I noticed about how you think
-- 당신은 그냥 “릴리즈 자동화 해줘”라고 하지 않고, “브랜치 전략 이슈 및 pr 양식”, “릴리즈 전략 버저닝 전략”, “npm 배포 깃 릴리즈 클로드 코드 마켓 배포”를 따로 찢어서 말했다. 이건 문제를 surface별로 나눠 보는 사람의 말이다.
-- “이 세가지를 좀 통일해서”라는 표현이 핵심이었다. 기능 추가보다 운영 계약 정렬이 먼저라는 감각이 있다.
-- “각각 필요한 범위의 클로드 코드 생성을 위한 prd 및 초안”이라고 한 것도 좋다. 구현보다 생성 입력의 품질을 먼저 챙기고 있다.

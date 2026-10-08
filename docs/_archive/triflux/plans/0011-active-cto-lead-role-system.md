@@ -61,7 +61,7 @@
 ### C6 — ADR/문서 관리
 
 - CTO=accountable owner, lead=draft+evidence, worker=사실만. document-harness는 CTO 소유·lead가 transaction executor. **charter는 repo calibration(`.document-harness.toml`) 우선.**
-- **mnk 번호 이중배정 방어 백포트**: `docs/adr/CONVENTIONS.md`에 "발번 = `max(로컬, git ls-tree origin/main)+1` 교차확인" 추가(triflux는 멀티세션/swarm이라 선제 가치). 현행 규약엔 이 방어 없음.
+- **번호 이중배정 방어 백포트**: `docs/adr/CONVENTIONS.md`에 "발번 = `max(로컬, git ls-tree origin/main)+1` 교차확인" 추가(triflux는 멀티세션/swarm이라 선제 가치). 현행 규약엔 이 방어 없음.
 - 역할별 책임을 `.claude/rules/tfx-cto-hub-boundary.md`에 추가.
 
 ### C8 — 트레이 iTerm2+tmux CTO 세션 버튼

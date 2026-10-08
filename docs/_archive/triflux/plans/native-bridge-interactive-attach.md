@@ -62,13 +62,13 @@
 
 ### live Codex TUI PoC는 있다
 
-- machine-local `codex-live` skill은 tmux 안의 live Codex TUI를 `start/ask/stop`으로 구동하고 `tmux send-keys`와 `capture-pane`를 쓴다고 명시한다(`/Users/tellang/.claude/skills/codex-live/SKILL.md:6-18`, `/Users/tellang/.claude/skills/codex-live/SKILL.md:71-87`).
-- `codex-live` driver는 local/SSH tmux 명령을 구성한다(`/Users/tellang/.claude/skills/codex-live/scripts/codex-live.mjs:143-178`).
-- driver는 Codex adapter에 bare `codex` launch key를 둔다(`/Users/tellang/.claude/skills/codex-live/scripts/codex-live.mjs:509-529`).
-- driver의 `doStart()`는 detached tmux session을 만들고 launch key를 전송한다(`/Users/tellang/.claude/skills/codex-live/scripts/codex-live.mjs:709-733`).
-- driver의 `doAskViaTmux()`는 prompt를 `send-keys`, 지연, 별도 Enter로 넣고, visible/capture output에서 완료와 응답을 판정한다(`/Users/tellang/.claude/skills/codex-live/scripts/codex-live.mjs:735-786`).
-- interview artifact는 m2에서 `PONG-4242` round trip이 검증됐다고 기록한다(`/Users/tellang/Projects/.tfx/plans/interview-codex-live-bridge-20260526.md:23-33`).
-- user-local `tfx-live` skill은 Triflux-owned live bridge로 tmux TUI control과 daemon UDS attach를 지원한다고 설명한다(`/Users/tellang/.claude/skills/tfx-live/SKILL.md:13-24`).
+- machine-local `codex-live` skill은 tmux 안의 live Codex TUI를 `start/ask/stop`으로 구동하고 `tmux send-keys`와 `capture-pane`를 쓴다고 명시한다(`~/.claude/skills/codex-live/SKILL.md:6-18`, `~/.claude/skills/codex-live/SKILL.md:71-87`).
+- `codex-live` driver는 local/SSH tmux 명령을 구성한다(`~/.claude/skills/codex-live/scripts/codex-live.mjs:143-178`).
+- driver는 Codex adapter에 bare `codex` launch key를 둔다(`~/.claude/skills/codex-live/scripts/codex-live.mjs:509-529`).
+- driver의 `doStart()`는 detached tmux session을 만들고 launch key를 전송한다(`~/.claude/skills/codex-live/scripts/codex-live.mjs:709-733`).
+- driver의 `doAskViaTmux()`는 prompt를 `send-keys`, 지연, 별도 Enter로 넣고, visible/capture output에서 완료와 응답을 판정한다(`~/.claude/skills/codex-live/scripts/codex-live.mjs:735-786`).
+- interview artifact는 m2에서 `PONG-4242` round trip이 검증됐다고 기록한다(`~/Projects/.tfx/plans/interview-codex-live-bridge-20260526.md:23-33`).
+- user-local `tfx-live` skill은 Triflux-owned live bridge로 tmux TUI control과 daemon UDS attach를 지원한다고 설명한다(`~/.claude/skills/tfx-live/SKILL.md:13-24`).
 
 ## 3. 설계 A: interactive Codex launch mode
 
@@ -78,9 +78,9 @@
 
 이유:
 
-- Codex interactive TUI가 tmux에서 실제로 동작한다는 근거가 있다(`/Users/tellang/.claude/skills/codex-live/SKILL.md:8-12`, `/Users/tellang/Projects/.tfx/plans/interview-codex-live-bridge-20260526.md:31-37`).
+- Codex interactive TUI가 tmux에서 실제로 동작한다는 근거가 있다(`~/.claude/skills/codex-live/SKILL.md:8-12`, `~/Projects/.tfx/plans/interview-codex-live-bridge-20260526.md:31-37`).
 - 현재 package dependency에는 `node-pty`가 없고 새 native dependency를 넣으면 install/build blast radius가 커진다(`package.json:79-88`).
-- 기존 `codex-live`는 startup prompt 처리, trust prompt 처리, update prompt skip, send-keys 2단계, output extraction 경험을 이미 갖고 있다(`/Users/tellang/.claude/skills/codex-live/SKILL.md:71-87`).
+- 기존 `codex-live`는 startup prompt 처리, trust prompt 처리, update prompt skip, send-keys 2단계, output extraction 경험을 이미 갖고 있다(`~/.claude/skills/codex-live/SKILL.md:71-87`).
 - Claude private UDS 기반 product path는 기존 live bridge 계획에서 명시적으로 배제됐다(`docs/superpowers/plans/2026-05-26-triflux-live-tui-bridge.md:620-631`).
 
 ### 옵션 비교
@@ -102,7 +102,7 @@
 
 - swarm shard: `nativeBridgeInteractive === true` 또는 shard metadata `interactive: true`일 때만 interactive. 기본은 기존 headless row 등록 유지.
 - headless team: `--native-bridge-mode interactive-attach` 같은 명시 flag에서만 interactive. 기존 `agents`, `roster`, `claude-wrapper reserved` 의미는 바꾸지 않는다(`hub/team/headless.mjs:1422-1455`, `hub/team/headless.mjs:1588-1618`).
-- provider: 1차는 `cli === "codex"`만 허용한다. Claude interactive는 `claude-live`/`tfx-live` 별도 경로가 이미 있으므로 이 PRD의 product target이 아니다(`/Users/tellang/.claude/skills/tfx-live/SKILL.md:26-59`).
+- provider: 1차는 `cli === "codex"`만 허용한다. Claude interactive는 `claude-live`/`tfx-live` 별도 경로가 이미 있으므로 이 PRD의 product target이 아니다(`~/.claude/skills/tfx-live/SKILL.md:26-59`).
 
 ### launch 세부안
 
@@ -110,8 +110,8 @@
 2. `workerCwd`는 shard worktree다. row display/projection cwd는 현재 테스트와 같이 parent project cwd를 유지해도 된다(`tests/unit/swarm-hypervisor.test.mjs:604-614`). 단, launch cwd는 실제 shard worktree여야 한다.
 3. tmux session 이름은 `tfx-int-${short}`처럼 short 기반으로 충돌을 줄인다.
 4. launch command는 bare `codex`를 기본으로 한다. profile/env는 기존 AccountBroker lease에서 받은 `CODEX_HOME`/env를 적용하되, projection이나 public snapshot에는 노출하지 않는다.
-5. output stream은 가능하면 `tmux pipe-pane` 기반으로 live bytes를 받고, 첫 구현에서 어렵다면 `capture-pane -e` polling을 100-250ms 주기로 시작한다. `codex-live`가 현재 `capture-pane`으로 응답을 회수한다는 근거는 있다(`/Users/tellang/.claude/skills/codex-live/scripts/codex-live.mjs:382-391`, `/Users/tellang/.claude/skills/codex-live/scripts/codex-live.mjs:771-785`).
-6. startup prompt 처리는 `codex-live`의 trust/update prompt 처리 규칙을 포팅한다(`/Users/tellang/.claude/skills/codex-live/scripts/codex-live.mjs:428-479`, `/Users/tellang/.claude/skills/codex-live/scripts/codex-live.mjs:553-611`).
+5. output stream은 가능하면 `tmux pipe-pane` 기반으로 live bytes를 받고, 첫 구현에서 어렵다면 `capture-pane -e` polling을 100-250ms 주기로 시작한다. `codex-live`가 현재 `capture-pane`으로 응답을 회수한다는 근거는 있다(`~/.claude/skills/codex-live/scripts/codex-live.mjs:382-391`, `~/.claude/skills/codex-live/scripts/codex-live.mjs:771-785`).
+6. startup prompt 처리는 `codex-live`의 trust/update prompt 처리 규칙을 포팅한다(`~/.claude/skills/codex-live/scripts/codex-live.mjs:428-479`, `~/.claude/skills/codex-live/scripts/codex-live.mjs:553-611`).
 
 ## 4. 설계 B: 양방향 attach protocol
 
@@ -197,7 +197,7 @@ remote 확장 조건:
 
 - remote host에서 같은 `registerInteractiveSwarmShard()`를 실행해 remote Claude daemon에 row를 등록한다.
 - remote attach socket을 local Claude Agents에서 볼 방법이 필요하다. 없으면 remote row는 remote Claude Agents에서만 보인다.
-- remote tmux transport의 quoting은 `codex-live`가 가진 SSH/tmux command builder를 재사용한다(`/Users/tellang/.claude/skills/codex-live/scripts/codex-live.mjs:143-178`).
+- remote tmux transport의 quoting은 `codex-live`가 가진 SSH/tmux command builder를 재사용한다(`~/.claude/skills/codex-live/scripts/codex-live.mjs:143-178`).
 
 ## 6. 보안
 
@@ -341,7 +341,7 @@ remote 확장 조건:
 - key mapping: printable text는 쉽지만 Ctrl/Alt/arrow/function keys는 tmux key name mapping이 필요하다.
 - Claude Agents private attach behavior: `messagingSocketPath`가 실제 attach input path인지, ptySock data frame으로 input이 오는지 live smoke로 재확인해야 한다. 사용자 제공 grep 전제상 관련 식별자는 아직 없고, 현재 command switch와 roster entry shape도 해당 input socket을 노출하지 않는다(`hub/bridge.mjs:1266-1333`, `hub/team/claude-native-bridge.mjs:427-463`).
 - lease TTL: interactive session이 30분을 넘으면 현재 lease pruning과 충돌할 수 있다(`hub/account-broker.mjs:68`, `hub/account-broker.mjs:827-839`).
-- startup prompt automation: `folder-trust` 자동 yes는 편하지만 민감 디렉터리에서는 위험하다. `codex-live`도 이 한계를 기록한다(`/Users/tellang/.claude/skills/codex-live/SKILL.md:79-84`).
+- startup prompt automation: `folder-trust` 자동 yes는 편하지만 민감 디렉터리에서는 위험하다. `codex-live`도 이 한계를 기록한다(`~/.claude/skills/codex-live/SKILL.md:79-84`).
 
 open questions:
 
@@ -352,8 +352,8 @@ open questions:
 
 E항목 재평가 결론:
 
-- "Codex 내부 injection surface가 없다"는 문장은 여전히 맞다. interview artifact도 Codex TUI에 native prompt injection API가 없고 tmux send-keys만 가능하다고 기록한다(`/Users/tellang/Projects/.tfx/plans/interview-codex-live-bridge-20260526.md:16-22`).
-- 그러나 "Codex TUI 통합은 사실상 불가"라는 제품 결론은 뒤집힌다. tmux가 Codex interactive surface 공급원이 될 수 있고, m2 round trip도 검증됐다(`/Users/tellang/Projects/.tfx/plans/interview-codex-live-bridge-20260526.md:23-33`).
+- "Codex 내부 injection surface가 없다"는 문장은 여전히 맞다. interview artifact도 Codex TUI에 native prompt injection API가 없고 tmux send-keys만 가능하다고 기록한다(`~/Projects/.tfx/plans/interview-codex-live-bridge-20260526.md:16-22`).
+- 그러나 "Codex TUI 통합은 사실상 불가"라는 제품 결론은 뒤집힌다. tmux가 Codex interactive surface 공급원이 될 수 있고, m2 round trip도 검증됐다(`~/Projects/.tfx/plans/interview-codex-live-bridge-20260526.md:23-33`).
 - 따라서 E항목은 "Codex private/native API 통합"이 아니라 "tmux PTY 기반 Codex TUI surface를 native-bridge attach row에 연결"로 재정의해 구현 가능하다.
 
 ## 검증 및 완료 조건

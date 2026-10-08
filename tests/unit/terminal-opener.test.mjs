@@ -61,7 +61,7 @@ describe("terminal-opener adapter", () => {
     const opened = await opener.openCommand({
       title: "Worker 1",
       command: "echo $HOME && pwd",
-      cwd: "C:\\Users\\SSAFY\\Project",
+      cwd: "C:\\Users\\example\\Project",
     });
 
     assert.equal(opened, true);
@@ -69,7 +69,7 @@ describe("terminal-opener adapter", () => {
       {
         title: "Worker 1",
         command: "echo $HOME && pwd",
-        cwd: "C:\\Users\\SSAFY\\Project",
+        cwd: "C:\\Users\\example\\Project",
         profile: "triflux",
       },
     ]);
@@ -112,7 +112,7 @@ describe("terminal-opener adapter", () => {
     });
 
     const opened = await opener.openSession("team one; rm 'x'", {
-      cwd: "C:\\Users\\SSAFY\\Project",
+      cwd: "C:\\Users\\example\\Project",
     });
 
     assert.equal(opened, true);
@@ -120,7 +120,7 @@ describe("terminal-opener adapter", () => {
       {
         title: "team one; rm 'x'",
         command: "psmux attach-session -t 'team one; rm ''x'''",
-        cwd: "C:\\Users\\SSAFY\\Project",
+        cwd: "C:\\Users\\example\\Project",
         profile: "triflux",
       },
     ]);

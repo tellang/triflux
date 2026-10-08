@@ -194,7 +194,7 @@ gh run view 24946484889 --log-failed | grep -oE "tests/[a-z/-]+/[a-z-]+\.test\.m
 ## Phase 7 fix 결과
 
 - Commit hash: Phase 7 커밋 생성 후 deliverable에 기록
-- Run analyzed: PR #199 run 24947877546 (`C:\Users\tellang\AppData\Local\Temp\ci-pr199-r2.log` 재수집)
+- Run analyzed: PR #199 run 24947877546 (`%USERPROFILE%\AppData\Local\Temp\ci-pr199-r2.log` 재수집)
 - Files changed:
   - `hub/workers/codex-app-server-worker.mjs`
   - `hub/team/codex-review.mjs`

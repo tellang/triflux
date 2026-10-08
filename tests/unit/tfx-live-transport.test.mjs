@@ -781,7 +781,7 @@ test("buildRemoteLiveCommand wraps darwin zsh remote tfx-live ask", () => {
     "m2",
     "ask",
     {
-      configDir: "/Users/tellang/.claude/.omc-launch",
+      configDir: "/Users/example/.claude/.omc-launch",
       prompt: "say 'ok'",
       short: "facefeed",
       timeoutMs: 7000,
@@ -800,7 +800,7 @@ test("buildRemoteLiveCommand wraps darwin zsh remote tfx-live ask", () => {
   assert.match(plan.args[1], /ok/);
   assert.match(
     plan.args[1],
-    /'\\''--config-dir'\\'' '\\''\/Users\/tellang\/\.claude\/\.omc-launch'\\''/,
+    /'\\''--config-dir'\\'' '\\''\/Users\/example\/\.claude\/\.omc-launch'\\''/,
   );
   assert.match(plan.args[1], /'\\''--timeout'\\'' '\\''7'\\''/);
   assert.doesNotMatch(plan.args[1], /'\\''--json'\\''/);

@@ -1,7 +1,7 @@
 # OpenAI `codex-plugin-cc` 리버스 엔지니어링 분석
 
 작성일: 2026-04-17
-대상 리포지토리: `C:\Users\tellang\Desktop\Projects\triflux`
+대상 리포지토리: `triflux`
 산출물 목적: OpenAI `codex-plugin-cc`의 배포/구조/런타임/스킬/훅 설계를 Claude Code marketplace plugin 관점에서 해부하고, `triflux`와의 기능·아키텍처 차이를 정리한다.
 
 ---

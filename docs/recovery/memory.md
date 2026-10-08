@@ -1,7 +1,7 @@
 # Memory/Checkpoints Recovery Report
 
 ## 스캔 메모
-- `C:/Users/tellang/.claude/projects/C--Users-tellang-Desktop-Projects-triflux/memory/`의 `MEMORY.md`, `feedback_*.md`, `user_*.md`, `project_*.md`, `reference_*.md`를 전수 확인했다.
+- `~/.claude/projects/<project>/memory/`의 `MEMORY.md`, `feedback_*.md`, `user_*.md`, `project_*.md`, `reference_*.md`를 전수 확인했다.
 - `~/.gstack/projects/triflux/`에서는 `checkpoints/`, `routing-weights.json`, `tellang-main-design-20260412-143422.md`를 확인했다.
 - `.claude/settings.local.json`에는 TODO/FIXME가 없었다.
 - 최근 실패 세션 후보 중 `timeout-and-parsing`은 이후 커밋(`315e294`, `8a6d31e`, `540286f`, `eb473ae`, `f99bdbd`)로 후속 수정 흔적이 확인되어 **현재 미해결 항목**에서는 제외했다.

@@ -153,7 +153,7 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 
 자원 우선순위: remote-spawn > multi > Light > 로컬 단독
 
-**m2 오프로드 기본 정책** : 로컬(m5)은 fanless 16GB라 램이 빠듯해지면 무거운 작업을 원격으로 넘긴다. 판단 시점은 병렬 dispatch 직전이다.
+**원격 오프로드 기본 정책** : 로컬 기기의 램이 빠듯해지면 무거운 작업을 `hosts.json` 에 등록한 원격 호스트로 넘긴다. 판단 시점은 병렬 dispatch 직전이다.
 
 - 판정 명령: `sysctl -n kern.memorystatus_vm_pressure_level` (1=normal, 2=warn, 4=critical; Stats 앱·활성 상태 보기의 메모리 색과 같은 커널 신호, 노랑=2 빨강=4)
 - 4(critical): 무조건 오프로드
@@ -161,9 +161,9 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 - 1(normal): 로컬 유지
 - sysctl 실패 시 대체 신호: `vm_stat` 5초 간격 2회 측정에서 swapouts 증가
 - 원격으로 넘기기 전에 `node scripts/remote-spawn.mjs --probe <host>`로 호스트 상태를 먼저 확인한다.
-- 행동: 원격 코드 변경은 별도 worktree와 세션에서 실행한다. 탐색·대화형은 tfx-remote로 m2 세션을 띄운다
+- 행동: 원격 코드 변경은 별도 worktree와 세션에서 실행한다. 탐색·대화형은 tfx-remote로 원격 세션을 띄운다
 - 로컬 여유가 충분하면 로컬 유지. 사용자가 로컬/원격을 명시하면 그에 따른다
-- m2 부재 시(ssh 불응) 조용히 로컬로 강등하지 말고 한 줄 알린 뒤 로컬 진행
+- 원격 호스트 부재 시(ssh 불응) 조용히 로컬로 강등하지 말고 한 줄 알린 뒤 로컬 진행
 
 원격 hosts 설정은 user-state 경로만 참조한다: macOS/Linux `~/.config/triflux/hosts.json`, Windows `%APPDATA%\triflux\hosts.json`. 기존 source-tree `references/hosts.json` 은 라우팅 입력으로 사용하지 않으며 첫 실행 lazy auto-migration 대상이다.
 

@@ -15,17 +15,17 @@ import {
   splitTomlSections,
 } from "../../scripts/check-codex-config-stable.mjs";
 
-const HOOKS_STATE_BLOCK_BEFORE = `[hooks.state."/Users/tellang/.codex/hooks.json:stop:0:0"]
+const HOOKS_STATE_BLOCK_BEFORE = `[hooks.state."/Users/example/.codex/hooks.json:stop:0:0"]
 trusted_hash = "sha256:0585a6"
 
-[hooks.state."/Users/tellang/.codex/hooks.json:user_prompt_submit:0:0"]
+[hooks.state."/Users/example/.codex/hooks.json:user_prompt_submit:0:0"]
 trusted_hash = "sha256:624a4a"
 `;
 
-const HOOKS_STATE_BLOCK_AFTER = `[hooks.state."/Users/tellang/.codex/hooks.json:stop:0:0"]
+const HOOKS_STATE_BLOCK_AFTER = `[hooks.state."/Users/example/.codex/hooks.json:stop:0:0"]
 trusted_hash = "sha256:NEWHASH1"
 
-[hooks.state."/Users/tellang/.codex/hooks.json:user_prompt_submit:0:0"]
+[hooks.state."/Users/example/.codex/hooks.json:user_prompt_submit:0:0"]
 trusted_hash = "sha256:NEWHASH2"
 `;
 
@@ -45,7 +45,7 @@ const OPENAI_RUNTIME_PLUGIN_BLOCK = `[plugins."pdf@openai-primary-runtime"]
 enabled = true
 
 [marketplaces.openai-primary-runtime]
-source = "/Users/tellang/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+source = "/Users/example/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
 `;
 
 const OPENAI_RUNTIME_PLUGIN_BLOCK_AFTER = `[plugins."pdf@openai-primary-runtime"]
@@ -53,7 +53,7 @@ enabled = true
 version = "26.601.10930"
 
 [marketplaces.openai-primary-runtime]
-source = "/Users/tellang/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
+source = "/Users/example/.cache/codex-runtimes/codex-primary-runtime/plugins/openai-primary-runtime"
 last_sync = "2026-06-18T00:00:00Z"
 `;
 

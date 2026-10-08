@@ -104,7 +104,7 @@ psmux send-keys -t work:0 "npm run build > /tmp/work.log 2>&1; touch /tmp/work.d
                 "name": "triflux",
                 "guid": "{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}",
                 "commandline": "C:\\Program Files\\Git\\bin\\bash.exe",
-                "startingDirectory": "C:\\Users\\SSAFY\\Desktop\\Projects\\cli\\triflux",
+                "startingDirectory": "C:\\Users\\<user>\\Desktop\\Projects\\cli\\triflux",
                 "icon": "⚡",
                 "opacity": 95,
                 "useAcrylic": true,

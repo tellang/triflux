@@ -31,7 +31,7 @@
        - lease() 직전 `syncAuthFromSource` 자동 호출 (옵션 `autoSync=true` 기본)
     2. `hub/server.mjs` startup에서 등록된 각 account에 대해 syncAuthFromSource 호출
     3. `scripts/sync-codex-auth.mjs` 수동 실행용 헬퍼:
-       - `node scripts/sync-codex-auth.mjs --account pte1024 --direction from-source`
+       - `node scripts/sync-codex-auth.mjs --account <account> --direction from-source`
        - `--direction from-source|to-source|both`
 
     Acceptance:

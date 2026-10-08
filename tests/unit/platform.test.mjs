@@ -27,10 +27,10 @@ describe("hub/platform.mjs", () => {
 
   it("normalizes Windows paths for comparison-friendly slash output", () => {
     assert.equal(
-      normalizePath("C:\\Users\\tellang\\Desktop\\..\\tmp\\file.txt", {
+      normalizePath("C:\\Users\\example\\Desktop\\..\\tmp\\file.txt", {
         platform: "win32",
       }),
-      "C:/Users/tellang/tmp/file.txt",
+      "C:/Users/example/tmp/file.txt",
     );
   });
 

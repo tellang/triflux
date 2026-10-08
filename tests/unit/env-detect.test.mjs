@@ -92,7 +92,7 @@ describe("hub/lib/env-detect.mjs", () => {
         return "7.5.0\r\n";
       }
       if (argv === "where wt.exe") {
-        return "C:\\Users\\tellang\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe\r\n";
+        return "C:\\Users\\example\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe\r\n";
       }
       if (argv === "where tmux") {
         throw new Error("not found");

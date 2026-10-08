@@ -136,8 +136,8 @@ describe("collectRemoteBinDirs() / spawn 명령 조립", () => {
     os: "darwin",
     raw: {
       capabilities_v2: {
-        claude: "/Users/tellang/.nvm/versions/node/v22.22.2/bin/claude",
-        codex: "/Users/tellang/.nvm/versions/node/v22.22.2/bin/codex",
+        claude: "/Users/example/.nvm/versions/node/v22.22.2/bin/claude",
+        codex: "/Users/example/.nvm/versions/node/v22.22.2/bin/codex",
         tmux: "/opt/homebrew/bin/tmux",
       },
     },
@@ -145,7 +145,7 @@ describe("collectRemoteBinDirs() / spawn 명령 조립", () => {
 
   it("claude 경로 디렉터리를 맨 앞에 두고 중복을 제거한다", () => {
     assert.deepEqual(collectRemoteBinDirs(m2Host), [
-      "/Users/tellang/.nvm/versions/node/v22.22.2/bin",
+      "/Users/example/.nvm/versions/node/v22.22.2/bin",
       "/opt/homebrew/bin",
     ]);
   });
@@ -156,7 +156,7 @@ describe("collectRemoteBinDirs() / spawn 명령 조립", () => {
         os: "windows",
         raw: {
           capabilities_v2: {
-            claude: "C:\\Users\\tellang\\AppData\\Roaming\\npm\\claude.ps1",
+            claude: "C:\\Users\\example\\AppData\\Roaming\\npm\\claude.ps1",
           },
         },
       }),
@@ -179,19 +179,19 @@ describe("collectRemoteBinDirs() / spawn 명령 조립", () => {
     const commands = buildRemotePosixSpawnCommands({
       binDirs: collectRemoteBinDirs(host),
       claudePath: "/usr/local/bin/claude",
-      dir: "/Users/tellang/projects/triflux",
+      dir: "/Users/example/projects/triflux",
       permissionFlags: "--dangerously-skip-permissions",
     });
     assert.equal(commands.length, 2);
-    assert.equal(commands[0], "cd '/Users/tellang/projects/triflux'");
+    assert.equal(commands[0], "cd '/Users/example/projects/triflux'");
     assert.ok(!commands.some((command) => command.includes("export PATH")));
   });
 
   it("posix spawn 명령은 PATH prefix → cd → claude 순서다", () => {
     const commands = buildRemotePosixSpawnCommands({
       binDirs: collectRemoteBinDirs(m2Host),
-      claudePath: "/Users/tellang/.nvm/versions/node/v22.22.2/bin/claude",
-      dir: "/Users/tellang/projects/triflux",
+      claudePath: "/Users/example/.nvm/versions/node/v22.22.2/bin/claude",
+      dir: "/Users/example/projects/triflux",
       permissionFlags: "--dangerously-skip-permissions",
     });
 
@@ -199,10 +199,10 @@ describe("collectRemoteBinDirs() / spawn 명령 조립", () => {
     assert.match(commands[0], /^export PATH=/);
     assert.match(
       commands[0],
-      /'\/Users\/tellang\/\.nvm\/versions\/node\/v22\.22\.2\/bin'/,
+      /'\/Users\/example\/\.nvm\/versions\/node\/v22\.22\.2\/bin'/,
     );
     assert.match(commands[0], /:"\$PATH"$/);
-    assert.equal(commands[1], "cd '/Users/tellang/projects/triflux'");
+    assert.equal(commands[1], "cd '/Users/example/projects/triflux'");
     assert.match(commands[2], /--dangerously-skip-permissions/);
     assert.match(commands[2], /exit \$\?$/);
   });
@@ -642,9 +642,9 @@ describe("resolveSpawnLane() 레인 선택", () => {
 
 describe("tmux 원격 레인 명령 조립", () => {
   const posixCommands = buildRemotePosixSpawnCommands({
-    binDirs: ["/Users/tellang/.nvm/versions/node/v22.22.2/bin"],
-    claudePath: "/Users/tellang/.nvm/versions/node/v22.22.2/bin/claude",
-    dir: "/Users/tellang/projects/triflux",
+    binDirs: ["/Users/example/.nvm/versions/node/v22.22.2/bin"],
+    claudePath: "/Users/example/.nvm/versions/node/v22.22.2/bin/claude",
+    dir: "/Users/example/projects/triflux",
     permissionFlags: "--dangerously-skip-permissions",
   });
 
