@@ -70,6 +70,7 @@ import {
   persistSettings,
   REQUIRED_CODEX_PROFILES,
   retireOldInstallFiles,
+  runConsentSteps,
   SKILL_ALIASES,
   SYNC_MAP,
   syncSkills,
@@ -1221,7 +1222,7 @@ function reportSkillSync() {
   ok(`스킬: ${result.total}개 확인, 파일 ${result.changed}개 반영`);
 }
 
-function cmdSetup(options = {}) {
+async function cmdSetup(options = {}) {
   const {
     dryRun = false,
     fromUpdate = false,
@@ -1261,32 +1262,6 @@ function cmdSetup(options = {}) {
   retireOldInstallFiles(info);
   reportSkillSync();
   ensureTrifluxMods({ install: mods, log: console.log, warn });
-
-  // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──
-  if (process.platform === "win32" && which("psmux")) {
-    try {
-      const shellOut = execSync("psmux show-options -g default-shell 2>NUL", {
-        encoding: "utf8",
-        timeout: 3000,
-      }).trim();
-      if (!/powershell|pwsh/i.test(shellOut)) {
-        const pwsh = which("pwsh")
-          ? "pwsh"
-          : which("powershell.exe")
-            ? "powershell.exe"
-            : "";
-        if (pwsh) {
-          execSync(`psmux set-option -g default-shell "${pwsh}"`, {
-            timeout: 3000,
-            stdio: "pipe",
-          });
-          ok(`psmux 기본 셸 → ${pwsh}`);
-        }
-      }
-    } catch {
-      /* psmux 서버 미실행 — 무시 */
-    }
-  }
 
   // ── 결과 추적 ──
   const summary = [];
@@ -1381,6 +1356,35 @@ function cmdSetup(options = {}) {
       status: "⚠️",
       detail: "HUD 파일 없음",
     });
+  }
+
+  // Codex 프로필 정리가 끝난 뒤에 훅을 다룬다.
+  await runConsentSteps({ log: info, warn });
+
+  // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──
+  if (process.platform === "win32" && which("psmux")) {
+    try {
+      const shellOut = execSync("psmux show-options -g default-shell 2>NUL", {
+        encoding: "utf8",
+        timeout: 3000,
+      }).trim();
+      if (!/powershell|pwsh/i.test(shellOut)) {
+        const pwsh = which("pwsh")
+          ? "pwsh"
+          : which("powershell.exe")
+            ? "powershell.exe"
+            : "";
+        if (pwsh) {
+          execSync(`psmux set-option -g default-shell "${pwsh}"`, {
+            timeout: 3000,
+            stdio: "pipe",
+          });
+          ok(`psmux 기본 셸 → ${pwsh}`);
+        }
+      }
+    } catch {
+      /* psmux 서버 미실행이면 무시 */
+    }
   }
 
   // CLI 존재 확인
@@ -3723,7 +3727,7 @@ async function main() {
         printCommandHelp("setup");
         return;
       }
-      cmdSetup({
+      await cmdSetup({
         dryRun: cmdArgs.includes("--dry-run"),
         fromUpdate: cmdArgs.includes("--from-update"),
         mods: cmdArgs.includes("--mods"),

@@ -48,7 +48,11 @@ function managedKeyCounts(content, hooksPath) {
 describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
   it("fresh install: table-header 형식으로 각 키 1회 기록", () => {
     const codexHome = makeCodexHome();
-    const result = ensureCodexHooks({ codexHome, backupTimestamp: "t0" });
+    const result = ensureCodexHooks({
+      codexHome,
+      backupTimestamp: "t0",
+      trust: true,
+    });
 
     assert.equal(result.skipped, false);
     assert.equal(result.changedHooks, true);
@@ -64,10 +68,18 @@ describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
 
   it("멱등: 2회 실행 시 changedConfig=false, 내용 불변", () => {
     const codexHome = makeCodexHome();
-    const first = ensureCodexHooks({ codexHome, backupTimestamp: "t0" });
+    const first = ensureCodexHooks({
+      codexHome,
+      backupTimestamp: "t0",
+      trust: true,
+    });
     const before = readFileSync(first.configPath, "utf8");
 
-    const second = ensureCodexHooks({ codexHome, backupTimestamp: "t1" });
+    const second = ensureCodexHooks({
+      codexHome,
+      backupTimestamp: "t1",
+      trust: true,
+    });
     assert.equal(second.changedConfig, false, "2회차 config 무변경");
     assert.equal(second.changedHooks, false, "2회차 hooks 무변경");
     assert.equal(readFileSync(first.configPath, "utf8"), before);
@@ -75,7 +87,11 @@ describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
 
   it("재발 시나리오: inline+table 이중화 config 를 단일 table 로 dedupe", () => {
     const codexHome = makeCodexHome();
-    const first = ensureCodexHooks({ codexHome, backupTimestamp: "t0" });
+    const first = ensureCodexHooks({
+      codexHome,
+      backupTimestamp: "t0",
+      trust: true,
+    });
     const config = readFileSync(first.configPath, "utf8");
 
     // 과거 설치기(inline)와 codex 재직렬화(table)가 공존하는 오염 상태 재현:
@@ -102,7 +118,11 @@ describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
     ].join("\n");
     writeFileSync(first.configPath, polluted, "utf8");
 
-    const second = ensureCodexHooks({ codexHome, backupTimestamp: "t1" });
+    const second = ensureCodexHooks({
+      codexHome,
+      backupTimestamp: "t1",
+      trust: true,
+    });
     assert.equal(second.changedConfig, true, "오염 감지 시 재기록");
     const cleaned = readFileSync(first.configPath, "utf8");
     const counts = managedKeyCounts(cleaned, first.hooksPath);
@@ -114,14 +134,22 @@ describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
 
   it("codex 가 table 로만 재직렬화한 config 는 수렴 상태로 보고 무변경", () => {
     const codexHome = makeCodexHome();
-    const first = ensureCodexHooks({ codexHome, backupTimestamp: "t0" });
+    const first = ensureCodexHooks({
+      codexHome,
+      backupTimestamp: "t0",
+      trust: true,
+    });
     const config = readFileSync(first.configPath, "utf8");
 
     // codex 재직렬화 시뮬레이션: 동일 키/해시가 table 형식으로만 존재
     // (이미 우리 기록이 table 이므로 그대로가 그 상태다). 위에 무관 설정만 추가.
     writeFileSync(first.configPath, `model = "gpt-5.5"\n\n${config}`, "utf8");
 
-    const second = ensureCodexHooks({ codexHome, backupTimestamp: "t1" });
+    const second = ensureCodexHooks({
+      codexHome,
+      backupTimestamp: "t1",
+      trust: true,
+    });
     assert.equal(second.changedConfig, false, "수렴 상태 무변경");
     const after = readFileSync(first.configPath, "utf8");
     assert.ok(after.startsWith('model = "gpt-5.5"'), "비관리 설정 보존");
@@ -134,7 +162,11 @@ describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
       '[hooks.state."oh-my-codex@local:hooks/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:aaaa"\n';
     writeFileSync(configPath, foreign, "utf8");
 
-    const result = ensureCodexHooks({ codexHome, backupTimestamp: "t0" });
+    const result = ensureCodexHooks({
+      codexHome,
+      backupTimestamp: "t0",
+      trust: true,
+    });
     const config = readFileSync(result.configPath, "utf8");
     assert.ok(
       config.includes("oh-my-codex@local:hooks/hooks.json:stop:0:0"),
@@ -151,7 +183,11 @@ describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
 
   it("hash 불일치(stale trust) 시 양 형식 strip 후 table 1회 재기록", () => {
     const codexHome = makeCodexHome();
-    const first = ensureCodexHooks({ codexHome, backupTimestamp: "t0" });
+    const first = ensureCodexHooks({
+      codexHome,
+      backupTimestamp: "t0",
+      trust: true,
+    });
     const config = readFileSync(first.configPath, "utf8");
     // 해시를 임의 값으로 바꿔 stale trust 상태 재현
     writeFileSync(
@@ -163,7 +199,11 @@ describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
       "utf8",
     );
 
-    const second = ensureCodexHooks({ codexHome, backupTimestamp: "t1" });
+    const second = ensureCodexHooks({
+      codexHome,
+      backupTimestamp: "t1",
+      trust: true,
+    });
     assert.equal(second.changedConfig, true);
     const after = readFileSync(first.configPath, "utf8");
     const counts = managedKeyCounts(after, first.hooksPath);

@@ -21,57 +21,61 @@ import { isDeepStrictEqual } from "node:util";
 
 const require = createRequire(import.meta.url);
 const toml = require("@iarna/toml");
+// 이주가 써 넣는 직접 연결 패키지. 버전은 이 표 한 곳에서만 올린다(2026-10-08 npm 최신, serena 는 v1.7.0 커밋).
+export const MCP_PACKAGE_PINS = Object.freeze({
+  context7: "@upstash/context7-mcp@4.2.0",
+  "brave-search": "@brave/brave-search-mcp-server@2.1.4",
+  exa: "exa-mcp-server@3.4.2",
+  tavily: "tavily-mcp@0.2.22",
+  jira: "mcp-jira-cloud@4.4.0",
+  serena:
+    "git+https://github.com/oraios/serena@949a27ef1e5fda1a6e7b561e777bcece345c6ffd",
+  notion: "@notionhq/notion-mcp-server@2.5.2",
+});
+// gatewayCmd 는 옛 게이트웨이가 띄운 명령 그대로다. 남은 프로세스를 알아보는 데만 쓴다.
 const SERVERS = [
-  ["context7", 8100, "npx", ["-y", "@upstash/context7-mcp@latest"], []],
+  ["context7", 8100, "npx -y @upstash/context7-mcp@latest", []],
   [
     "brave-search",
     8101,
-    "npx",
-    ["-y", "@brave/brave-search-mcp-server"],
+    "npx -y @brave/brave-search-mcp-server",
     ["BRAVE_API_KEY"],
   ],
-  ["exa", 8102, "npx", ["-y", "exa-mcp-server"], ["EXA_API_KEY"]],
-  ["tavily", 8103, "npx", ["-y", "tavily-mcp@latest"], ["TAVILY_API_KEY"]],
+  ["exa", 8102, "npx -y exa-mcp-server", ["EXA_API_KEY"]],
+  ["tavily", 8103, "npx -y tavily-mcp@latest", ["TAVILY_API_KEY"]],
   [
     "jira",
     8104,
-    "npx",
-    ["-y", "mcp-jira-cloud@latest"],
+    "npx -y mcp-jira-cloud@latest",
     ["JIRA_API_TOKEN", "JIRA_EMAIL", "JIRA_INSTANCE_URL"],
   ],
   [
     "serena",
     8105,
-    "uvx",
-    [
-      "--from",
-      "git+https://github.com/oraios/serena",
-      "serena",
-      "start-mcp-server",
-    ],
+    "uvx --from git+https://github.com/oraios/serena serena start-mcp-server",
     [],
   ],
-  [
-    "notion",
-    8106,
-    "npx",
-    ["-y", "@notionhq/notion-mcp-server"],
-    ["NOTION_TOKEN"],
-  ],
+  ["notion", 8106, "npx -y @notionhq/notion-mcp-server", ["NOTION_TOKEN"]],
   [
     "notion-guest",
     8107,
-    "npx",
-    ["-y", "@notionhq/notion-mcp-server"],
+    "npx -y @notionhq/notion-mcp-server",
     ["NOTION_TOKEN"],
   ],
-].map(([name, port, command, args, envVars]) => ({
-  name,
-  port,
-  command,
-  args,
-  envVars,
-}));
+].map(([name, port, gatewayCmd, envVars]) => {
+  const pin = MCP_PACKAGE_PINS[name === "notion-guest" ? "notion" : name];
+  return {
+    name,
+    port,
+    gatewayCmd,
+    command: name === "serena" ? "uvx" : "npx",
+    args:
+      name === "serena"
+        ? ["--from", pin, "serena", "start-mcp-server"]
+        : ["-y", pin],
+    envVars,
+  };
+});
 // 게이트웨이 이주와 허브 정리가 함께 쓰는 사용자 MCP 설정 파일. HOME 기준 경로와 형식.
 // ~/.mcp.json 은 HOME 에서 Claude 를 열 때 읽는 파일이라 프로젝트 파일이 아니라 사용자 파일로 본다.
 const USER_MCP_FILES = [
@@ -621,9 +625,9 @@ function ownedCommand(command) {
       "--healthEndpoint /healthz",
     ].every((flag) => command.includes(flag)) &&
     SERVERS.some(
-      ({ port, command: executable, args }) =>
+      ({ port, gatewayCmd }) =>
         new RegExp(`\\s--port\\s+${port}(?:\\s|$)`).test(command) &&
-        command.includes([executable, ...args].join(" ")),
+        command.includes(gatewayCmd),
     )
   );
 }
