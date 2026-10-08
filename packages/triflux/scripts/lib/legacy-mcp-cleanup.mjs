@@ -930,32 +930,130 @@ function hubCommandLine(pid, platform, run) {
   return platform !== "win32" && result.status === 1 ? null : undefined;
 }
 
-function stopHub(home, platform, run, result) {
-  const pidFile = join(home, ".claude/cache/tfx-hub/hub.pid");
-  const target = fileTarget(pidFile);
-  if (!target) return;
-  let pid;
-  try {
-    pid = Number(JSON.parse(readFileSync(target, "utf8")).pid);
-  } catch {
-    /* 아래에서 보존 처리 */
-  }
-  if (!Number.isInteger(pid) || pid <= 1) {
-    result.warnings.push(`${pidFile}: pid 를 읽을 수 없어 보존`);
-    return;
-  }
-  const command = hubCommandLine(pid, platform, run);
-  if (command === undefined) {
-    result.warnings.push(`${pidFile}: pid ${pid} 확인 실패, 종료하지 않음`);
-    return;
-  }
-  if (command !== null) {
-    if (!/[/\\]hub[/\\]server\.mjs(?:["'\s]|$)/.test(command)) {
-      // 허브가 아닌 프로세스는 건드리지 않고 우리 파일만 지운다.
-      unlinkSync(target);
-      result.changed = true;
-      return;
+// 명령줄을 argv 로 나눈다. Linux 는 /proc 의 실제 argv, Windows 는 따옴표 규칙을 쓴다.
+// macOS ps 는 인자 경계를 보존하지 않아 공백으로 나누고 exact 를 false 로 둔다.
+function processArgv(pid, command, platform) {
+  if (platform === "linux") {
+    try {
+      const argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+      if (argv.at(-1) === "") argv.pop();
+      if (argv.length) return { argv, exact: true };
+    } catch {
+      // 프로세스가 사라졌거나 /proc 를 읽을 수 없다.
     }
+  }
+  if (platform === "win32") return splitWindowsCommandLine(command);
+  return { argv: command.trim().split(/\s+/), exact: false };
+}
+
+// 따옴표 밖 space, tab 에서만 끊고 따옴표 구간은 앞뒤 글자와 한 인자로 잇는다(Windows CRT 규칙).
+// 백슬래시로 가린 따옴표는 규칙이 복잡해 경계를 믿지 않는다.
+function splitWindowsCommandLine(command) {
+  const argv = [];
+  let current = "";
+  let quoted = false;
+  let started = false;
+  for (const char of command) {
+    if (char === '"') {
+      quoted = !quoted;
+      started = true;
+    } else if ((char === " " || char === "\t") && !quoted) {
+      if (started) argv.push(current);
+      current = "";
+      started = false;
+    } else {
+      current += char;
+      started = true;
+    }
+  }
+  if (started) argv.push(current);
+  return { argv, exact: !command.includes('\\"') };
+}
+
+// 허용 목록. 값을 받는 옵션(다음 인자 또는 --name=value)과 값이 없는 플래그만 건너뛴다.
+// 그 밖의 옵션(--run, --eval, --test, --watch 같은 실행 모드 포함)은 entry 를 특정할 수 없어
+// 허브가 아닌 것으로 본다.
+const NODE_VALUE_OPTIONS = new Set([
+  "-r",
+  "--require",
+  "--import",
+  "--loader",
+  "--experimental-loader",
+  "--env-file",
+  "--input-type",
+  "-C",
+  "--conditions",
+]);
+const NODE_FLAG_OPTIONS = new Set([
+  "--no-warnings",
+  "--enable-source-maps",
+  "--trace-warnings",
+  "--trace-uncaught",
+  "--inspect",
+  "--expose-gc",
+]);
+
+// node 의 entry script 가 triflux 패키지의 hub/server.mjs 일 때만 패키지 루트를 돌려준다.
+// 같은 경로를 인자로 받거나 편집하는 다른 프로세스는 허브가 아니다.
+// argv 경계를 믿을 수 없으면(exact=false) 값이 붙는 옵션은 공백 든 값일 수 있어 판정하지 않는다.
+function trifluxHubRoot({ argv, exact }) {
+  if (!/(?:^|[/\\])node(?:\.exe)?$/i.test(argv[0] ?? "")) return null;
+  let index = 1;
+  while (argv[index]?.startsWith("-")) {
+    const [name, value] = argv[index].split("=");
+    if (NODE_FLAG_OPTIONS.has(name) && value === undefined) index += 1;
+    else if (exact && NODE_VALUE_OPTIONS.has(name))
+      index += value === undefined ? 2 : 1;
+    else return null;
+  }
+  // 공백이 든 경로가 잘린 조각은 상대 경로로 남으므로 절대 경로만 받는다.
+  const entry = argv[index]?.match(
+    /^((?:[A-Za-z]:)?[/\\].*)[/\\]hub[/\\]server\.mjs$/,
+  );
+  if (!entry) return null;
+  // 공백 든 entry 가 잘린 조각일 수 있으므로 뒤에 인자가 남으면 판정하지 않는다.
+  if (!exact && argv.length > index + 1) return null;
+  try {
+    const pkg = JSON.parse(
+      readFileSync(join(entry[1], "package.json"), "utf8"),
+    );
+    return pkg?.name === "triflux" ? entry[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+function listHubProcesses(platform, run) {
+  if (platform === "win32") {
+    const result = runPowerShell(
+      run,
+      "$items=@(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | ForEach-Object { @{ pid=[string]$_.ProcessId; command=$_.CommandLine } }); ConvertTo-Json -InputObject $items -Compress",
+    );
+    if (!result.ok) return null;
+    return JSON.parse(result.output || "[]");
+  }
+  const result = tryRun(run, "ps", ["-axo", "pid=,command="]);
+  if (!result.ok) return null;
+  return result.output.split(/\r?\n/).flatMap((line) => {
+    const match = line.match(/^\s*(\d+)\s+(.+)$/);
+    return match ? [{ pid: match[1], command: match[2] }] : [];
+  });
+}
+
+// 허브는 제거됐으므로 triflux 패키지의 hub/server.mjs 로 확인된 프로세스는 설치본,
+// 체크아웃, worktree 를 가리지 않고 종료한다(2026-10-08 결정).
+function stopHubs(home, platform, run, result, log) {
+  const processes = listHubProcesses(platform, run);
+  if (!processes) {
+    result.warnings.push("허브 프로세스 조회 실패, 종료하지 않음");
+    return;
+  }
+  let allStopped = true;
+  for (const { pid, command } of processes) {
+    if (Number(pid) === process.pid || typeof command !== "string") continue;
+    const root = trifluxHubRoot(processArgv(pid, command, platform));
+    if (!root) continue;
+    log(`허브 종료: pid ${pid} (${root})`);
     const stopped =
       platform === "win32"
         ? tryRun(run, "taskkill", ["/F", "/T", "/PID", String(pid)])
@@ -966,13 +1064,29 @@ function stopHub(home, platform, run, result) {
       if (!gone)
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
     }
-    if (!gone) {
-      result.warnings.push(`${pidFile}: pid ${pid} 종료 확인 실패, 파일 보존`);
-      return;
+    if (gone) result.hubStopped = true;
+    else {
+      allStopped = false;
+      result.warnings.push(`허브 pid ${pid}: 종료 확인 실패`);
     }
-    result.hubStopped = true;
   }
-  unlinkSync(target);
+  const pidFile = join(home, ".claude/cache/tfx-hub/hub.pid");
+  if (!allStopped || !fileTarget(pidFile)) return;
+  // 판정을 못 했지만 허브로 보이는 프로세스가 hub.pid 에 있으면 단서를 남긴다.
+  let pid;
+  try {
+    pid = Number(JSON.parse(readFileSync(pidFile, "utf8")).pid);
+  } catch {
+    /* 읽을 수 없는 pid 파일은 지운다 */
+  }
+  const command = Number.isInteger(pid)
+    ? hubCommandLine(pid, platform, run)
+    : null;
+  if (command && /[/\\]hub[/\\]server\.mjs/.test(command)) {
+    result.warnings.push(`${pidFile}: pid ${pid} 를 허브로 확인하지 못해 보존`);
+    return;
+  }
+  unlinkSync(pidFile);
   result.changed = true;
 }
 
@@ -1032,6 +1146,7 @@ export function cleanupTfxHub({
   platform = osPlatform(),
   run = defaultRun,
   pluginRoot,
+  log = () => {},
 } = {}) {
   const result = {
     ok: true,
@@ -1083,7 +1198,7 @@ export function cleanupTfxHub({
     (resolve(home) === resolve(homedir()) && platform === osPlatform());
   if (realSystem) {
     try {
-      stopHub(home, platform, run, result);
+      stopHubs(home, platform, run, result, log);
       if (platform === "win32") removeHubTasks(run, result);
     } catch (error) {
       result.ok = false;

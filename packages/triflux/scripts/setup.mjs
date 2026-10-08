@@ -12,6 +12,7 @@ import {
   copyFileSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -19,6 +20,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "fs";
@@ -28,6 +30,10 @@ import { fileURLToPath } from "url";
 import { ensureAgyHooks } from "./ensure-agy-hooks.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
 import { ensureGeminiProfiles } from "./lib/gemini-profiles.mjs";
+import {
+  retireInstallLeftovers,
+  writeInstallManifest,
+} from "./lib/install-retire.mjs";
 import { cleanupLegacyHooks } from "./lib/legacy-hook-cleanup.mjs";
 import { cleanupLegacyMcp, cleanupTfxHub } from "./lib/legacy-mcp-cleanup.mjs";
 import {
@@ -500,157 +506,83 @@ function isSetupUserStateFile(fileName) {
   return SETUP_USER_STATE_FILES.has(fileName);
 }
 
-/**
- * scripts/lib/*.mjs 및 *.sh 자동 스캔.
- * 수동 리스트 대신 glob으로 탐색하여 lib 파일 추가 시 sync 누락 방지.
- */
-function scanLibFiles(pluginRoot, claudeDir) {
-  const libDir = join(pluginRoot, "scripts", "lib");
-  if (!existsSync(libDir)) return [];
-  return readdirSync(libDir)
-    .sort()
-    .filter((f) => f.endsWith(".mjs") || f.endsWith(".sh"))
-    .map((f) => ({
-      src: join(libDir, f),
-      dst: join(claudeDir, "scripts", "lib", f),
-      label: `lib/${f}`,
-    }));
+// 설치본은 ~/.claude 를 패키지 루트처럼 쓴다(scripts/ 와 hub/ 가 형제).
+// 설치본에서 실행되는 진입 파일과, 그 파일이 상대 import 로 끌어오는 파일만 같은 상대 경로로 복사한다.
+// Dirent.parentPath 는 Node 20.12 부터라 재귀는 직접 한다.
+function listFiles(pluginRoot, dir, extensions) {
+  const root = join(pluginRoot, dir);
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { withFileTypes: true })
+    .flatMap((entry) => {
+      const rel = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) return listFiles(pluginRoot, rel, extensions);
+      return entry.isFile() &&
+        extensions.some((ext) => entry.name.endsWith(ext)) &&
+        !HUD_SYNC_EXCLUDES.has(entry.name)
+        ? [rel]
+        : [];
+    })
+    .sort();
 }
 
-/**
- * hub/workers/**\/*.mjs + hub/ 루트의 worker 의존성 파일을 자동 스캔.
- * 서브디렉토리의 파일이 sync 에서 빠지지 않도록 재귀로 탐색한다.
- */
-export function scanHubWorkerFiles(pluginRoot, claudeDir) {
-  const results = [];
-  const hubRoot = join(pluginRoot, "hub");
-  if (!existsSync(hubRoot)) return results;
+function installEntries(pluginRoot) {
+  return [
+    "scripts/tfx-route.sh",
+    "scripts/tfx-route-post.mjs",
+    "scripts/tfx-route-worker.mjs",
+    // tfx-route-worker.mjs 가 경로로 찾아 import 한다.
+    "hub/workers/factory.mjs",
+    // tfx-route.sh 가 $sd/../hub/team 에서 읽는다.
+    "hub/team/agent-map.json",
+    // tfx-remote 스킬이 ~/.claude/scripts/remote-spawn.mjs 를 실행한다.
+    "scripts/remote-spawn.mjs",
+    // tfx-route.sh 가 $sd/lib 에서 찾는다.
+    ...listFiles(pluginRoot, "scripts/lib", [".mjs", ".sh"]),
+    ...listFiles(pluginRoot, "hud", [".mjs"]),
+  ];
+}
 
-  // hub/workers/**/*.mjs 전체 (서브디렉토리 포함)
-  const workersDir = join(hubRoot, "workers");
-  if (existsSync(workersDir)) {
-    const walkWorkers = (currentDir) => {
-      const entries = readdirSync(currentDir, { withFileTypes: true }).sort(
-        (l, r) => l.name.localeCompare(r.name),
-      );
-      for (const entry of entries) {
-        const absPath = join(currentDir, entry.name);
-        if (entry.isDirectory()) {
-          walkWorkers(absPath);
-          continue;
-        }
-        if (!entry.isFile() || !entry.name.endsWith(".mjs")) continue;
-        const rel = relative(workersDir, absPath).replace(/\\/g, "/");
-        results.push({
-          src: absPath,
-          dst: join(claudeDir, "scripts", "hub", "workers", rel),
-          label: `hub/workers/${rel}`,
-        });
+const RELATIVE_IMPORT =
+  /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["'](\.\.?\/[^"']+)["']/g;
+
+/** 진입 파일에서 상대 import 를 따라가 복사할 파일을 의존성이 먼저 오는 순서로 돌려준다. */
+export function collectInstallFiles(
+  pluginRoot = PLUGIN_ROOT,
+  entries = installEntries(pluginRoot),
+) {
+  const ordered = [];
+  const seen = new Set();
+  const visit = (file) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    const source = join(pluginRoot, file);
+    if (!existsSync(source)) return;
+    if (file.endsWith(".mjs")) {
+      for (const [, spec] of readFileSync(source, "utf8").matchAll(
+        RELATIVE_IMPORT,
+      )) {
+        visit(
+          relative(pluginRoot, resolve(dirname(source), spec)).replace(
+            /\\/g,
+            "/",
+          ),
+        );
       }
-    };
-    walkWorkers(workersDir);
-  }
-
-  // hub/ 루트: worker가 import하는 의존성 (cli-adapter-base, platform 등)
-  const hubRootDeps = ["cli-adapter-base.mjs", "platform.mjs"];
-  for (const f of hubRootDeps) {
-    if (existsSync(join(hubRoot, f))) {
-      results.push({
-        src: join(hubRoot, f),
-        dst: join(claudeDir, "scripts", "hub", f),
-        label: `hub/${f}`,
-      });
     }
-  }
-
-  return results;
-}
-
-function scanHudFiles(pluginRoot, claudeDir) {
-  const hudRoot = join(pluginRoot, "hud");
-  if (!existsSync(hudRoot)) return [];
-
-  const walk = (currentDir) => {
-    const entries = readdirSync(currentDir, { withFileTypes: true }).sort(
-      (left, right) => left.name.localeCompare(right.name),
-    );
-
-    return entries.flatMap((entry) => {
-      const absolutePath = join(currentDir, entry.name);
-      if (entry.isDirectory()) {
-        return walk(absolutePath);
-      }
-
-      if (
-        !entry.isFile() ||
-        HUD_SYNC_EXCLUDES.has(entry.name) ||
-        !entry.name.endsWith(".mjs")
-      ) {
-        return [];
-      }
-
-      const hudRelativePath = relative(hudRoot, absolutePath);
-      const normalizedRelativePath = hudRelativePath.replace(/\\/g, "/");
-
-      return [
-        {
-          src: absolutePath,
-          dst: join(claudeDir, "hud", hudRelativePath),
-          label:
-            normalizedRelativePath === "hud-qos-status.mjs"
-              ? "hud-qos-status.mjs"
-              : `hud/${normalizedRelativePath}`,
-        },
-      ];
-    });
+    ordered.push(file);
   };
-
-  return walk(hudRoot);
+  for (const entry of entries) visit(entry);
+  return ordered;
 }
 
 // ── 파일 동기화 ──
 
-const SYNC_MAP = [
-  {
-    src: join(PLUGIN_ROOT, "scripts", "tfx-route.sh"),
-    dst: join(CLAUDE_DIR, "scripts", "tfx-route.sh"),
-    label: "tfx-route.sh",
-  },
-  {
-    src: join(PLUGIN_ROOT, "scripts", "tfx-route-post.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "tfx-route-post.mjs"),
-    label: "tfx-route-post.mjs",
-  },
-  {
-    src: join(PLUGIN_ROOT, "scripts", "tfx-route-worker.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "tfx-route-worker.mjs"),
-    label: "tfx-route-worker.mjs",
-  },
-  ...scanHubWorkerFiles(PLUGIN_ROOT, CLAUDE_DIR),
-  // lib 는 hud 보다 먼저 복사한다. hud/cli-policy.mjs 가 ../scripts/lib/machine-profile.mjs
-  // 를 정적 import 하므로, 동기화가 중간에 끊겨도 소비자만 있고 리더가 없는
-  // 설치본이 남지 않게 한다. hooks/ 는 플러그인 루트에서 직접 import 되는 경로라
-  // 이 복사 목록의 대상이 아니다.
-  ...scanLibFiles(PLUGIN_ROOT, CLAUDE_DIR),
-  // hud/providers/cto.mjs 가 ../../hub/lib/cto-env.mjs 를 정적 import 한다(ADR-0018).
-  // 의존성 없는 env 판독 모듈이라 이 파일 하나만 hud 보다 먼저 복사한다.
-  {
-    src: join(PLUGIN_ROOT, "hub", "lib", "cto-env.mjs"),
-    dst: join(CLAUDE_DIR, "hub", "lib", "cto-env.mjs"),
-    label: "hub/lib/cto-env.mjs",
-  },
-  ...scanHudFiles(PLUGIN_ROOT, CLAUDE_DIR),
-  {
-    src: join(PLUGIN_ROOT, "hub", "team", "agent-map.json"),
-    dst: join(CLAUDE_DIR, "hub", "team", "agent-map.json"),
-    label: "hub/team/agent-map.json",
-  },
-  {
-    src: join(PLUGIN_ROOT, "scripts", "remote-spawn.mjs"),
-    dst: join(CLAUDE_DIR, "scripts", "remote-spawn.mjs"),
-    label: "remote-spawn.mjs",
-  },
-];
+// 의존성이 먼저 복사되므로 동기화가 중간에 끊겨도 소비자만 있고 대상이 없는 설치본이 남지 않는다.
+const SYNC_MAP = collectInstallFiles().map((file) => ({
+  src: join(PLUGIN_ROOT, file),
+  dst: join(CLAUDE_DIR, file),
+  label: file,
+}));
 
 function getVersion(filePath) {
   try {
@@ -1415,6 +1347,50 @@ function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
   return removed;
 }
 
+function linkHubNodeModules(
+  workerNodeModules,
+  log,
+  link = join(CLAUDE_DIR, "hub", "node_modules"),
+) {
+  const sdk = join("@modelcontextprotocol", "sdk", "package.json");
+  if (!existsSync(join(workerNodeModules, sdk)) || existsSync(join(link, sdk)))
+    return;
+  try {
+    // 끊어졌거나 다른 곳을 가리키는 링크만 바꾸고, 실제 디렉터리는 사용자 것일 수 있어 둔다.
+    const current = lstatSync(link, { throwIfNoEntry: false });
+    if (current && !current.isSymbolicLink()) {
+      log(`⚠ ${link}: SDK 가 없는 디렉터리라 codex worker 가 실패할 수 있음`);
+      return;
+    }
+    if (current) unlinkSync(link);
+    mkdirSync(dirname(link), { recursive: true });
+    // Windows 에서는 관리자 권한 없이 만들 수 있는 junction 을 쓴다.
+    symlinkSync(workerNodeModules, link, "junction");
+  } catch (error) {
+    log(
+      `⚠ ${link}: 링크 실패 (${error.code ?? error.message}), codex worker 가 SDK 를 못 찾음`,
+    );
+  }
+}
+
+/** 패키지에서 빠진 옛 설치 파일을 보관 디렉터리로 옮기고 이번 배포 목록을 매니페스트로 남긴다. */
+function retireOldInstallFiles(log = console.log) {
+  const files = SYNC_MAP.map(({ label }) => label);
+  const result = retireInstallLeftovers({
+    claudeDir: CLAUDE_DIR,
+    keep: new Set(files),
+  });
+  if (result.moved.length)
+    log(
+      `옛 설치 파일 ${result.moved.length}개를 ${join(CLAUDE_DIR, ".tfx-retired")} 로 옮김 (30일 뒤 삭제)`,
+    );
+  if (result.deleted.length)
+    log(`옛 허브 인증 사본 ${result.deleted.length}개 삭제`);
+  for (const warning of result.warnings) log(`⚠ ${warning}`);
+  writeInstallManifest(CLAUDE_DIR, files, result.failed);
+  return result;
+}
+
 // Top-level config.toml keys that must exist with these defaults.
 // Only injected when the key is completely absent — existing user values are
 // never overwritten, regardless of what value was set.
@@ -1884,6 +1860,7 @@ export {
   LEGACY_CODEX_MODELS,
   LEGACY_CODEX_PROFILE_NAMES,
   LOCAL_DEV_SKILL_MARKER,
+  linkHubNodeModules,
   listInlineProfileNames,
   PLUGIN_ROOT,
   REQUIRED_CODEX_PROFILES,
@@ -1892,11 +1869,11 @@ export {
   reapLegacyTrayProcesses,
   removeProfileSection,
   replaceProfileSection,
+  retireOldInstallFiles,
   SETUP_MARKER_PATH,
   SETUP_USER_STATE_FILES,
   SKILL_ALIASES,
   SYNC_MAP,
-  scanHudFiles,
   syncAliasedSkillDir,
   syncCodexHarnessAdapter,
   syncCodexManagedSkills,
@@ -1994,6 +1971,7 @@ export async function runDeferred(stdinData) {
   const hubCleanup = cleanupTfxHub({
     home: _TFX_HOME,
     pluginRoot: isDev ? undefined : PLUGIN_ROOT,
+    log: (message) => io.log(`  ${message}`),
   });
   for (const warning of hubCleanup.warnings) io.log(`  ⚠ ${warning}`);
   if (hubCleanup.changed) io.log("  허브 설정과 실행 흔적 정리");
@@ -2062,6 +2040,9 @@ export async function runDeferred(stdinData) {
     }
   }
 
+  // hub 사본(~/.claude/hub)은 scripts/node_modules 의 조상이 아니라 bare import 가 풀리지 않는다.
+  linkHubNodeModules(workerNodeModules, (message) => io.log(`  ${message}`));
+
   try {
     synced += syncWorkerPackages({ workerNodeModules });
   } catch (error) {
@@ -2091,6 +2072,7 @@ export async function runDeferred(stdinData) {
   for (const file of removeRetiredInstallFiles()) {
     io.log(`  \x1b[32m✓\x1b[0m 더 쓰지 않는 설치 파일 제거: ${file}`);
   }
+  retireOldInstallFiles((message) => io.log(`  ${message}`));
 
   const settings = loadSettings();
   let settingsChanged = false;

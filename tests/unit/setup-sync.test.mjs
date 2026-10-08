@@ -357,7 +357,9 @@ describe("setup-sync: SYNC_MAP", () => {
   });
 
   it("scripts/lib/*.sh도 SYNC_MAP에 포함한다 (#227)", () => {
-    const entry = SYNC_MAP.find((e) => e.label === "lib/codex-recovery.sh");
+    const entry = SYNC_MAP.find(
+      (e) => e.label === "scripts/lib/codex-recovery.sh",
+    );
     assert.ok(entry, "SYNC_MAP must include lib/codex-recovery.sh");
     assert.ok(
       entry.src.replace(/\\/g, "/").endsWith("/scripts/lib/codex-recovery.sh"),
@@ -392,13 +394,13 @@ describe("setup-sync: SYNC_MAP", () => {
     assert.ok(
       entry.dst
         .replace(/\\/g, "/")
-        .endsWith("/scripts/hub/workers/worker-utils.mjs"),
-      "dst path must sync worker-utils.mjs into ~/.claude/scripts",
+        .endsWith("/.claude/hub/workers/worker-utils.mjs"),
+      "dst path must sync worker-utils.mjs into ~/.claude/hub",
     );
   });
 
   it("agent-map.json의 synced 경로가 tfx-route.sh 상대경로와 일치한다", () => {
-    const routeEntry = SYNC_MAP.find((e) => e.label === "tfx-route.sh");
+    const routeEntry = SYNC_MAP.find((e) => e.label === "scripts/tfx-route.sh");
     const mapEntry = SYNC_MAP.find(
       (e) => e.label === "hub/team/agent-map.json",
     );
