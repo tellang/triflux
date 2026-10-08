@@ -2,6 +2,7 @@
 import {
   resolveHardCeilingMs,
   resolveStallInterventionMs,
+  resolveStallKill,
 } from "./timeout-defaults.mjs";
 
 export { resolveHardCeilingMs, resolveStallInterventionMs };
@@ -19,6 +20,7 @@ export function createActivityLifecycle({
   enabled = isActivityLifecycleEnabled(),
   interventionMs = resolveStallInterventionMs(),
   hardCeilingMs = resolveHardCeilingMs(),
+  stallKill = resolveStallKill(),
   maxInterventions = 1,
   onIntervene,
   now = Date.now,
@@ -77,6 +79,7 @@ export function createActivityLifecycle({
       }
       if (current - lastActivityAt < interventionMs || pendingIntervention)
         return "";
+      if (stallKill === "classify") return "";
       if (await intervene(context)) return "";
       timeoutReason = "inactivity";
       return timeoutReason;

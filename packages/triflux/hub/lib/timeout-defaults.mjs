@@ -1,4 +1,5 @@
 // hub 조율 평면 타임아웃/TTL의 단일 기준값. 환경은 호출 시점에 읽는다.
+import { readMachineProfile } from "../../scripts/lib/machine-profile.mjs";
 
 export const MIN_DURATION_MS = 1_000;
 export const MAX_DURATION_MS = 86_400_000;
@@ -10,22 +11,46 @@ export const REGISTER_HEARTBEAT_GRACE_MS = 120_000;
 export const DEFAULT_STALL_INTERVENTION_SEC = 1_200;
 export const DEFAULT_HARD_CEILING_SEC = 21_600;
 
-function readEnvSeconds(env, name, fallbackSec) {
-  const value = Number(env?.[name]);
-  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : fallbackSec;
+// 셸(tfx-route.sh)과 같은 우선순위: 명시 env, 그다음 machine profile, 그다음 기본값.
+function readSetting(env, name) {
+  if (env?.[name] !== undefined) return env[name];
+  return readMachineProfile({ env }).values[name];
+}
+
+function readSeconds(env, name, fallbackSec, { allowZero = false } = {}) {
+  const value = Number(readSetting(env, name));
+  const min = allowZero ? 0 : 1;
+  return Number.isInteger(value) && value >= min ? value : fallbackSec;
 }
 
 export function resolveStallInterventionMs(env = process.env) {
   return (
-    readEnvSeconds(env, "TFX_STALL_THRESHOLD", DEFAULT_STALL_INTERVENTION_SEC) *
+    readSeconds(env, "TFX_STALL_THRESHOLD", DEFAULT_STALL_INTERVENTION_SEC) *
     1000
   );
 }
 
+// 0 은 셸과 같이 상한 없음이다.
 export function resolveHardCeilingMs(env = process.env) {
-  return (
-    readEnvSeconds(env, "TFX_HARD_CEILING_SEC", DEFAULT_HARD_CEILING_SEC) * 1000
+  const sec = readSeconds(
+    env,
+    "TFX_HARD_CEILING_SEC",
+    DEFAULT_HARD_CEILING_SEC,
+    {
+      allowZero: true,
+    },
   );
+  return sec === 0 ? Number.POSITIVE_INFINITY : sec * 1000;
+}
+
+// 셸 heartbeat 와 같은 값 해석. classify 는 무활동이어도 끝내지 않는다.
+export function resolveStallKill(env = process.env) {
+  const value = String(readSetting(env, "TFX_STALL_KILL") || "kill")
+    .trim()
+    .toLowerCase();
+  if (["1", "on", "kill"].includes(value)) return "kill";
+  if (["intervene", "ladder"].includes(value)) return "intervene";
+  return "classify";
 }
 
 export function resolveWorkerLeaseTtlMs(env = process.env) {
