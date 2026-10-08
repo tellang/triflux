@@ -15,12 +15,12 @@ function codexClient(socketPath, timeoutMs, clientFactory) {
   return clientFactory({ socketPath, connectTimeoutMs: timeoutMs });
 }
 
-async function initializeCodexClient(client, timeoutMs) {
+async function initializeCodexClient(client, timeoutMs, remainingMs) {
   await client.connect();
   await client.request(
     "initialize",
     { clientInfo: { name: "triflux-tfx-live", version: "1.0.0" } },
-    timeoutMs,
+    remainingMs ? Math.max(1, remainingMs()) : timeoutMs,
   );
   client.notify("initialized", {});
 }
@@ -211,7 +211,14 @@ async function normalizedCwd(cwd) {
   }
 }
 
-async function loadedCodexThreads(client, cwd, timeoutMs) {
+// timeoutMs 는 RPC 하나의 상한이다. remainingMs 를 주면 조회 전체가 그 안에 끝나야 한다.
+async function loadedCodexThreads(client, cwd, timeoutMs, remainingMs) {
+  const limit = () => {
+    if (!remainingMs) return timeoutMs;
+    const left = remainingMs();
+    if (left <= 0) throw new Error("codex thread listing timed out");
+    return left;
+  };
   const wantedCwd = await normalizedCwd(cwd);
   const threads = [];
   let cursor;
@@ -219,10 +226,10 @@ async function loadedCodexThreads(client, cwd, timeoutMs) {
     const result = await client.request(
       "thread/loaded/list",
       cursor ? { cursor } : {},
-      timeoutMs,
+      limit(),
     );
     for (const threadId of result?.data || []) {
-      const thread = await readCodexThread(client, threadId, timeoutMs);
+      const thread = await readCodexThread(client, threadId, limit());
       if (wantedCwd && (await normalizedCwd(thread.cwd)) !== wantedCwd)
         continue;
       threads.push({
@@ -244,10 +251,12 @@ export async function listCodexAppServerThreads({
   timeoutMs = DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS,
   clientFactory = (opts) => new JsonRpcWsUdsClient(opts),
 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  const remainingMs = () => deadline - Date.now();
   const client = codexClient(socketPath, timeoutMs, clientFactory);
   try {
-    await initializeCodexClient(client, timeoutMs);
-    return await loadedCodexThreads(client, cwd, timeoutMs);
+    await initializeCodexClient(client, timeoutMs, remainingMs);
+    return await loadedCodexThreads(client, cwd, timeoutMs, remainingMs);
   } finally {
     client.close();
   }
