@@ -215,7 +215,7 @@ describe("#661 임시 디렉터리와 추적 파일 소유자", {
 }, () => {
   const uid = process.getuid();
 
-  it("resolve_tmp_dir 는 uid 0700 루트를 쓰고 링크 루트는 건너뛴다", () => {
+  it("resolve_tmp_dir 는 uid 0700 루트를 쓰고 링크 루트에서는 실패한다", () => {
     const fn = extract(/^resolve_tmp_dir\(\) \{[\s\S]*?^\}$/m);
     const base = mkdtempSync(path.join(tmpdir(), "tfx661-"));
     const other = mkdtempSync(path.join(tmpdir(), "tfx661-other-"));
@@ -230,8 +230,9 @@ describe("#661 임시 디렉터리와 추적 파일 소유자", {
       assert.equal(root, path.join(base, `triflux-${uid}`));
       assert.equal(statSync(root).mode & 0o777, 0o700);
 
+      // 남의 루트를 만나면 다른 후보로 넘어가지 않고 실패한다(정리기와 경로를 맞춘다).
       symlinkSync(base, path.join(other, `triflux-${uid}`));
-      assert.equal(run({ TMPDIR: other, TMP: base }), root);
+      assert.throws(() => run({ TMPDIR: other, TMP: base }));
     } finally {
       rmSync(base, { recursive: true, force: true });
       rmSync(other, { recursive: true, force: true });
