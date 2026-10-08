@@ -67,7 +67,9 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
     codexHome,
     disallowUltra,
     enforceCanonicalProfile,
+    shell = IS_WINDOWS ? "pwsh" : "posix",
   } = opts;
+  const quote = (value) => quoteForShell(value, shell);
 
   const parts = ["codex", "exec"];
   // Select the effort profile via `-c` config overrides instead of
@@ -85,10 +87,9 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
 
   if (sandboxBypass) parts.push("--dangerously-bypass-approvals-and-sandbox");
   if (skipGitRepoCheck) parts.push("--skip-git-repo-check");
-  if (resultFile) parts.push("--output-last-message", shellQuote(resultFile));
+  if (resultFile) parts.push("--output-last-message", quote(resultFile));
   parts.push("--color", "never");
-  for (const override of profileOverrides)
-    parts.push("-c", shellQuote(override));
+  for (const override of profileOverrides) parts.push("-c", quote(override));
   // `codex exec`는 --cwd를 받지 않아 child process의 cwd로 제어한다.
   if (Array.isArray(mcpServers)) {
     for (const server of mcpServers) {
@@ -96,20 +97,28 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
     }
   }
 
-  const useStdin = resolveStdinPromptMode(stdinPrompt);
+  // cmd.exe 는 %VAR% 확장과 \" 의 인용 상태 반전 때문에 임의 문자열을 안전하게 인용할 수 없어
+  // 프롬프트는 늘 파일 리다이렉트로 넘긴다.
+  const useStdin = shell === "cmd" || resolveStdinPromptMode(stdinPrompt);
   const hasPrompt = typeof prompt === "string" && prompt.length > 0;
   if (useStdin && hasPrompt) {
     const promptFile = writePromptToTmpFile(prompt);
-    if (IS_WINDOWS) {
-      // pwsh7 호환: `<` redirect 는 reserved future syntax 라 동작 불안정.
-      // Get-Content -Raw stdin pipe 로 prompt 를 codex stdin 에 주입.
-      return `Get-Content -Raw '${escapePwshSingleQuoted(promptFile)}' | ${parts.join(" ")}`;
-    }
-    return `${parts.join(" ")} < ${shellQuote(promptFile)}`;
+    // pwsh7 의 `<` 는 예약 문법이라 Get-Content -Raw 파이프로 stdin 에 넣는다.
+    if (shell === "pwsh")
+      return `Get-Content -Raw ${quote(promptFile)} | ${parts.join(" ")}`;
+    return `${parts.join(" ")} < ${quote(promptFile)}`;
   }
 
-  parts.push(shellQuote(prompt));
+  parts.push(quote(prompt));
   return parts.join(" ");
+}
+
+// Windows 는 같은 명령을 cmd.exe(runProcess 의 shell: true)나 PowerShell(psmux pane)에서 실행한다.
+// PowerShell 큰따옴표는 $() 를 확장하므로 작은따옴표로 감싸고, cmd 에는 경로와 설정값만 넣는다.
+export function quoteForShell(value, shell) {
+  if (shell === "pwsh") return `'${escapePwshSingleQuoted(value)}'`;
+  if (shell === "cmd") return JSON.stringify(String(value));
+  return posixQuote(value);
 }
 
 function resolveStdinPromptMode(explicit) {

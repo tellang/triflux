@@ -344,3 +344,26 @@ test("runProcess terminates only after stdout becomes inactive", async () => {
     }),
   );
 });
+
+test("buildExecCommand: Windows 셸별 인용 (#672)", async () => {
+  await withSandbox(async () => {
+    const base = await importFresh("../../hub/cli-adapter-base.mjs");
+    const prompt = `$(calc) "x" %PATH% it's`;
+
+    // PowerShell 은 큰따옴표 안의 $() 를 확장하므로 작은따옴표로 감싼다.
+    const pwsh = base.buildExecCommand(prompt, "C:/r.txt", {
+      stdinPrompt: false,
+      shell: "pwsh",
+    });
+    assert.ok(pwsh.endsWith(`'$(calc) "x" %PATH% it''s'`), pwsh);
+    assert.match(pwsh, /--output-last-message 'C:\/r\.txt'/);
+
+    // cmd.exe 는 임의 문자열을 안전하게 인용할 수 없어 stdinPrompt:false 여도 파일로 넘긴다.
+    const cmd = base.buildExecCommand(prompt, "C:/r.txt", {
+      stdinPrompt: false,
+      shell: "cmd",
+    });
+    assert.ok(!cmd.includes("calc"), cmd);
+    assert.match(cmd, /^codex exec .* < "[^"]+prompt-[\d-]+\.txt"$/u);
+  });
+});

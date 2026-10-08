@@ -151,6 +151,8 @@ async function runCodex(prompt, workdir, preflight, attempt) {
       profile: attempt.profile,
       skipGitRepoCheck: true,
       sandboxBypass: attempt.forceBypass,
+      // runProcess 는 shell: true 라 Windows 에서 cmd.exe 로 실행된다.
+      shell: IS_WINDOWS ? "cmd" : "posix",
     }),
     prompt,
     preflight.codexPath,
