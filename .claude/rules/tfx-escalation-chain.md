@@ -82,6 +82,6 @@ TFX_CODEX_PROFILE=ultra bash scripts/tfx-route.sh scientist-deep "research the a
 
 ## 관련
 
-- 설계: 이슈 #112 의 Phase 3 (계획서는 저장소에 커밋되지 않았다)
+- 설계: 구현 커밋 565a2bad 의 메시지 (계획서는 저장소에 커밋되지 않았다)
 - 구현: `hub/team/retry-state-machine.mjs` (STATES / MODES / createRetryStateMachine)
 - Bridge: `hub/bridge.mjs retry-run --snapshot X --mode auto-escalate ...`

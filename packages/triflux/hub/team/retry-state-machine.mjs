@@ -1,6 +1,6 @@
 // hub/team/retry-state-machine.mjs
 // Phase 3 Step A — true ralph / auto-escalate retry state machine.
-// 설계: 이슈 #112 Phase 3, 규칙은 .claude/rules/tfx-escalation-chain.md
+// 설계: 구현 커밋 565a2bad 메시지, 규칙은 .claude/rules/tfx-escalation-chain.md
 //
 // Modes:
 //   bounded       — --retry 1 (기본): maxIterations 도달 시 BUDGET_EXCEEDED.

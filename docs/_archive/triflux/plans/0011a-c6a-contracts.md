@@ -973,7 +973,7 @@ emitRoleControlEvent(log, input): void;
 
 - logger base/formatter: [scripts/lib/logger.mjs:34](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/scripts/lib/logger.mjs#L34)
 - module child logger: [scripts/lib/logger.mjs:90](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/scripts/lib/logger.mjs#L90)
-- field allowlist 회귀테스트 패턴: [tests/unit/codex-mcp-profile-resolve.test.mjs:167](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/tests/unit/codex-mcp-profile-resolve.test.mjs#L167)
+- field allowlist 회귀테스트 패턴: [tests/unit/codex-mcp-profile-resolve.test.mjs:136](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/tests/unit/codex-mcp-profile-resolve.test.mjs#L136)
 - transport fallback이 현재 진단 report만 쓰는 경로: [bin/tfx-live.mjs:1482](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/bin/tfx-live.mjs#L1482)
 - 실제 dispatch 경로: [hub/router.mjs:653](https://github.com/tellang/triflux/blob/7464db6bafc303be919b9cba132a5afff13da68e/hub/router.mjs#L653)
 
