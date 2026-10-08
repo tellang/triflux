@@ -162,7 +162,7 @@ tfx-live wait --cli claude --session cl-doc --request-id <requestId> --timeout 6
 
 ## 11. 컨텍스트 점검
 
-비율 기준은 `SKILL.md`의 "컨텍스트 판단" 표를 따른다. 여기서는 재는 방법만 적는다.
+비율 기준은 `tfx-live` 스킬의 "컨텍스트 판단" 표를 따른다. 여기서는 재는 방법만 적는다.
 
 - 가장 쉬운 방법은 `tfx-live probe`다. 결과의 `contextPct`를 본다.
 - 직접 재야 하면 세션 transcript 의 마지막 assistant 항목 `usage`에서 입력 계열 토큰(`input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`)을 더한다. 이 합을 공식 모델 창과 실행 한도 중 작은 값으로 나눈다.
