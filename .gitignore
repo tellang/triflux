@@ -6,8 +6,6 @@
 .omc/
 .omx/
 .claude/**
-!.claude/agents/
-!.claude/agents/*.md
 !.claude/rules/
 !.claude/rules/*.md
 .codex/
@@ -21,11 +19,9 @@
 docs/*
 !docs/assets/
 !docs/design/
-!docs/mcp/
 !docs/prd/
 !docs/research/
 !docs/codex-conventions.md
-!docs/legacy-skill-aliases.md
 # 문서 파운데이션 공개 경계 (ADR-0002) — 의도적 공개 하위트리 명시
 !docs/adr/
 !docs/adr/**
@@ -41,91 +37,38 @@ docs/*
 !docs/req/**
 !docs/DECISIONS.md
 !docs/README.md
-# docs/superpowers: 부모가 docs/* 로 막혀 있어 2단계 re-include (specs 공개, plans LOCAL 유지)
-!docs/superpowers/
-docs/superpowers/*
-!docs/superpowers/specs/
-!docs/superpowers/specs/**
+docs/research/*reverse*
+docs/research/*competitor*
 
 # 리서치 (대외비 — 클론 레포, 분석 보고서, 설계문서)
-research/
-!docs/research/
-
-# 슬롭 분석 보고서
-slop-report.json
+/research/
 
 # native-bridge feasibility 스모크 생성물 (휘발성 — 실행 시 재생성)
 experiments/native-bridge-feasibility/*-latest-report.json
 
-# 프로젝트 인덱스 (세션별 자동 생성)
-PROJECT_INDEX.md
-PROJECT_INDEX.json
-
-# 내부 스킬 (OMC 전용)
-skills/auto-verify/
-skills/manage-skills/
-skills/verify-implementation/
-
-# 프로토타입
-scripts/psmux-steering-prototype.sh
-
 # 내부 이슈 추적
 .issues/
 .prompts/
-ISSUES-*.md
-# recovery 보고서는 추적한다(대소문자를 무시하면 위 규칙에 걸린다)
-!docs/recovery/issues-prs.md
+/ISSUES-*.md
 
 # 빌드/캐시
-node_modules/
+node_modules
 dist/
 .cache/
-.tmp-research/
-.codex-artifacts/
 .codex-swarm/
 .worktrees/
+.test-lock/
 
 # 기타
 *.bak
 *.tgz
 .env
 .npmrc
-tmp-*.log
-tests/hud/__mock_home__/
-
-# 바이너리/임시
-download.bin
-
-# 내부 문서 (공개 금지)
-docs/insights/
-docs/GAP-*
-docs/META-*
-docs/HANDOFF-*
-docs/BUGFIX-*
-docs/SESSION-*
-.venv/
-
-.test-lock/
-.tmp-home-setup-check/
-.tmp-home-route-*/
-tests/.tmp-setup-version-cache/
-*.codex-npm-test*.log
-docs/research/*reverse*
-docs/research/*competitor*
-
-# local-only cleanup bypass flag (Issue #89 대안, local workflow)
-.claude/cleanup-bypass
 
 # ad-hoc swarm/fix scratch scripts
 .tmp-*.mjs
-# atomic write tmp files (sync-hub-mcp-settings, mcp-health) — race 시 잔존 가능
+# atomic write tmp files (nativeProxy, ensure-codex-hooks, codex-profile-config). race 때 남을 수 있다
 *.tmp-[0-9]*-[0-9]*
-
-# git worktrees (PR-specific)
-.worktrees/
-.codex-swarm/
-# swarm preservation artifacts (covered by .codex-swarm/ above, listed explicitly)
-.codex-swarm/recovery/
 
 # user-state hosts.json source-tree fallback (PR #183)
 # 사용자 환경 데이터 (Tailscale IP / SSH user) 노출 방지.
@@ -137,27 +80,14 @@ docs/research/*competitor*
 **/references/codex-snapshots/
 **/references/gemini-snapshots/
 
-# .mcp.json atomic write backups (sync-hub-mcp-settings.mjs writeTextAtomic)
-# 정상 흐름에서는 finally 에서 정리되지만, rollback 실패 시 수동 복구용으로
-# 보존된다. repo 에 staged 되면 안 된다.
-.mcp.json.bak-*
-**/.mcp.json.bak-*
+# setup 의 MCP 정리(legacy-mcp-cleanup)가 .mcp.json 을 고치기 전에 남기는 백업
+.mcp.json.tfx-bak-*
 
-# Codex/Gemini state snapshots (local backup, too large for git)
-references/codex-snapshots/
-references/gemini-snapshots/
-
-# ad-hoc research/eval scratch from earlier projects (2026-04-11)
-# 다른 프로젝트 잔재가 다른 브랜치 체크아웃 시 따라다니지 않도록 ignore
-swarm-logs/
-swarm-prompts/
-.claude/settings.local.json
 .gstack/
 .superpowers/
 
 # macOS Finder metadata
 .DS_Store
-**/.DS_Store
 
 # 스킬 평가 산출물(skill-creator eval)은 추적하지 않는다
 skills/*-workspace/
