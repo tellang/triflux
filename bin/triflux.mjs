@@ -2337,33 +2337,6 @@ async function cmdDoctor(options = {}) {
           warn("Codex 레이트 리밋 캐시 재생성 실패");
         }
       }
-      try {
-        const { buildAll } = await import("../scripts/cache-warmup.mjs");
-        const warmupSummary = buildAll({ cwd: process.cwd(), force: true });
-        if (warmupSummary.ok) {
-          report.actions.push({
-            type: "rebuild",
-            name: "warmup-caches",
-            status: "ok",
-            built: warmupSummary.built,
-          });
-          ok("Phase 1 웜업 캐시 재생성됨");
-        } else {
-          report.actions.push({
-            type: "rebuild",
-            name: "warmup-caches",
-            status: "failed",
-          });
-          warn("Phase 1 웜업 캐시 재생성 실패");
-        }
-      } catch {
-        report.actions.push({
-          type: "rebuild",
-          name: "warmup-caches",
-          status: "failed",
-        });
-        warn("Phase 1 웜업 캐시 재생성 실패");
-      }
       console.log(`\n  ${LINE}`);
       console.log(
         `  ${GREEN_BRIGHT}${BOLD}✓ 캐시 초기화 + 재생성 완료${RESET}\n`,
@@ -2485,19 +2458,6 @@ async function cmdDoctor(options = {}) {
         }
       }
       if (cleaned === 0) info("에러 캐시 없음");
-      try {
-        const { fixCaches } = await import("../scripts/cache-doctor.mjs");
-        const cacheRepair = await fixCaches({ cwd: process.cwd() });
-        if (cacheRepair.fixed.length > 0 && cacheRepair.ok) {
-          ok(`웜업 캐시 자동 복구: ${cacheRepair.fixed.join(", ")}`);
-        } else if (cacheRepair.fixed.length > 0) {
-          warn(`웜업 캐시 자동 복구 실패: ${cacheRepair.fixed.join(", ")}`);
-        } else {
-          info("웜업 캐시: 이미 정상 상태");
-        }
-      } catch {
-        warn("웜업 캐시 자동 복구 실패");
-      }
       const registryStateForFix = inspectRegistry();
       if (registryStateForFix.valid) {
         try {
@@ -3078,45 +3038,6 @@ async function cmdDoctor(options = {}) {
       });
       warn("캐시 없음 — 다음 세션 시작 시 자동 생성");
       info(`수동: node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}`);
-    }
-
-    // Phase 1 웜업 캐시
-    section("Warmup Cache");
-    try {
-      const { verifyCaches } = await import("../scripts/cache-doctor.mjs");
-      const cacheVerification = verifyCaches({ cwd: process.cwd() });
-      const brokenCaches = cacheVerification.results.filter(
-        (result) => result.status !== "ok",
-      );
-
-      addDoctorCheck(report, {
-        name: "warmup-cache",
-        status: cacheVerification.ok ? "ok" : "issues",
-        files: cacheVerification.results.map((result) => ({
-          target: result.target,
-          status: result.status,
-          path: result.file,
-        })),
-        ...(cacheVerification.ok ? {} : { fix: "tfx doctor --fix" }),
-      });
-
-      if (brokenCaches.length === 0) {
-        ok(`${cacheVerification.results.length}개 웜업 캐시 정상`);
-      } else {
-        warn(`${brokenCaches.length}개 웜업 캐시 이슈 발견`);
-        for (const entry of brokenCaches) {
-          info(`${entry.target}: ${entry.status}`);
-        }
-        if (!fix) issues += brokenCaches.length;
-      }
-    } catch (error) {
-      addDoctorCheck(report, {
-        name: "warmup-cache",
-        status: "invalid",
-        fix: "node scripts/cache-doctor.mjs --fix",
-      });
-      warn(`웜업 캐시 검사 실패: ${error.message}`);
-      issues++;
     }
 
     // CLI 이슈 트래커

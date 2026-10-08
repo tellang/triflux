@@ -21,7 +21,7 @@ argument-hint: "[--fix|--reset|hub <start|stop|status|ensure>]"
 
 ## 주요 점검
 
-설치된 `tfx-route.sh`, HUD, Claude·Codex·Antigravity CLI, Codex 프로필, 스킬, psmux/tmux, MCP 설정과 인벤토리, 웜업 캐시, route script 동기화 상태를 확인한다. 발견한 문제마다 출력된 복구 명령을 따른다. 사용자 소유 설정이나 깨진 파일은 원인을 먼저 보고한다.
+설치된 `tfx-route.sh`, HUD, Claude·Codex·Antigravity CLI, Codex 프로필, 스킬, psmux/tmux, MCP 설정과 인벤토리, route script 동기화 상태를 확인한다. 발견한 문제마다 출력된 복구 명령을 따른다. 사용자 소유 설정이나 깨진 파일은 원인을 먼저 보고한다.
 
 ## 허브 관리
 

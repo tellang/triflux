@@ -196,7 +196,6 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
     assert.equal(readFileSync(settingsPath, "utf8"), original);
     assert.ok(payload.checks.some((check) => check.name === "tfx-route.sh"));
     assert.ok(payload.checks.some((check) => check.name === "codex"));
-    assert.ok(payload.checks.some((check) => check.name === "warmup-cache"));
     rmSync(homeDir, { recursive: true, force: true });
   });
 
