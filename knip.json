@@ -8,8 +8,7 @@
         "hub/**/*.mjs",
         "hud/**/*.mjs",
         "hooks/**/*.mjs",
-        "cto/**/*.mjs",
-        "tui/**/*.mjs"
+        "cto/**/*.mjs"
       ],
       "project": [
         "bin/**/*.mjs",
@@ -17,8 +16,7 @@
         "hub/**/*.mjs",
         "hooks/**/*.mjs",
         "hud/**/*.mjs",
-        "cto/**/*.mjs",
-        "tui/**/*.mjs"
+        "cto/**/*.mjs"
       ]
     },
     "packages/core": {
@@ -35,16 +33,14 @@
         "scripts/*.mjs",
         "hub/**/*.mjs",
         "hooks/**/*.mjs",
-        "cto/**/*.mjs",
-        "tui/**/*.mjs"
+        "cto/**/*.mjs"
       ],
       "project": [
         "bin/**/*.mjs",
         "scripts/**/*.mjs",
         "hub/**/*.mjs",
         "hooks/**/*.mjs",
-        "cto/**/*.mjs",
-        "tui/**/*.mjs"
+        "cto/**/*.mjs"
       ]
     }
   },

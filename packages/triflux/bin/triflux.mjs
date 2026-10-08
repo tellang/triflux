@@ -405,10 +405,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       },
     ],
   },
-  monitor: {
-    usage: "tfx monitor",
-    description: "터미널 TUI 모니터 실행",
-  },
 });
 
 // ── 유틸리티 ──
@@ -5495,16 +5491,6 @@ async function main() {
           JSON_OUTPUT && ["status", "ensure"].includes(cmdArgs[0] || "status"),
       });
       return;
-    case "monitor": {
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("monitor");
-        return;
-      }
-      const { createMonitor } = await import("../tui/monitor.mjs");
-      const mon = createMonitor({ targetPane: process.env.TMUX_PANE });
-      await mon.start();
-      break;
-    }
     case "cto": {
       if (cmdArgs.some(isHelpArg)) {
         printCommandHelp("cto");

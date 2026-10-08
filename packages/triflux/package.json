@@ -9,9 +9,7 @@
     "tfl": "bin/triflux.mjs",
     "tfx-live": "bin/tfx-live.mjs",
     "tfx-setup": "bin/tfx-setup.mjs",
-    "tfx-doctor": "bin/tfx-doctor.mjs",
-    "tfx-doctor-tui": "bin/tfx-doctor-tui.mjs",
-    "tfx-setup-tui": "bin/tfx-setup-tui.mjs"
+    "tfx-doctor": "bin/tfx-doctor.mjs"
   },
   "engines": {
     "node": ">=20"
@@ -27,7 +25,6 @@
   "files": [
     "adapters",
     "bin",
-    "tui",
     "config",
     "cto",
     "skills",
