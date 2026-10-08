@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  chmodSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -53,6 +54,23 @@ test("같은 시각 이름에 다른 원문이 오면 번호를 붙여 따로 �
     const second = writeRotatedBackup(target, "second", options);
     assert.notEqual(second, first);
     assert.equal(readFileSync(second, "utf8"), "second");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("같은 이름의 백업을 읽지 못하면 덮어쓰지 않고 오류를 낸다", {
+  skip: process.platform === "win32" || process.getuid?.() === 0,
+}, () => {
+  const dir = mkdtempSync(join(tmpdir(), "tfx-backup-rotation-"));
+  try {
+    const target = join(dir, "config.toml");
+    const options = { label: "bak-test", suffix: "20261008-000000" };
+    const first = writeRotatedBackup(target, "first", options);
+    chmodSync(first, 0o000);
+    assert.throws(() => writeRotatedBackup(target, "second", options), {
+      code: "EACCES",
+    });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

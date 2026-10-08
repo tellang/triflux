@@ -14,12 +14,13 @@ export const BACKUP_KEEP = 5;
 // 시각 suffix 만 받는다. label 이 더 긴 다른 백업(예: <label>-manual-...)은 남긴다.
 const STAMP_SUFFIX = /^[\dT]+(?:-\d+)*$/i;
 
-// 읽는 사이 다른 프로세스가 지웠으면 같은 것으로 보고 아래에서 다시 쓴다.
+// 읽는 사이 다른 프로세스가 지웠으면 같은 것으로 보고 아래에서 다시 쓴다. 다른 읽기 오류는 그대로 던진다.
 function sameContent(path, content) {
   try {
     return readFileSync(path, "utf8") === content;
-  } catch {
-    return true;
+  } catch (error) {
+    if (error?.code === "ENOENT") return true;
+    throw error;
   }
 }
 
