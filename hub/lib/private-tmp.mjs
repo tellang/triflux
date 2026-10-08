@@ -11,18 +11,25 @@ export function privateTmpRoot({
   uid = process.getuid?.(),
 } = {}) {
   if (uid === undefined) return base;
-  const root = join(base, `triflux-${uid}`);
-  mkdirSync(root, { recursive: true, mode: 0o700 });
-  const st = lstatSync(root);
-  if (!st.isDirectory() || st.uid !== uid) {
-    throw new Error(`unsafe temp dir (not owned by uid ${uid}): ${root}`);
-  }
-  if ((st.mode & 0o077) !== 0) chmodSync(root, 0o700);
-  return root;
+  return ensureOwnedDir(join(base, `triflux-${uid}`), uid);
 }
 
-export function privateTmpDir(name, options) {
-  const dir = join(privateTmpRoot(options), name);
+// 루트가 예전에 느슨했다면 그 사이 남이 하위에 링크를 심었을 수 있어 하위도 같은 검사를 한다.
+export function privateTmpDir(name, { base, uid = process.getuid?.() } = {}) {
+  const dir = join(privateTmpRoot({ base, uid }), name);
+  if (uid === undefined) {
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+  return ensureOwnedDir(dir, uid);
+}
+
+function ensureOwnedDir(dir, uid) {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const st = lstatSync(dir);
+  if (!st.isDirectory() || st.uid !== uid) {
+    throw new Error(`unsafe temp dir (not owned by uid ${uid}): ${dir}`);
+  }
+  if ((st.mode & 0o777) !== 0o700) chmodSync(dir, 0o700);
   return dir;
 }

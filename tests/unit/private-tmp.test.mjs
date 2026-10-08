@@ -36,8 +36,12 @@ describe("private-tmp", { skip: !posix }, () => {
     assert.equal(statSync(root).mode & 0o777, 0o700);
   });
 
-  it("남의 uid 루트와 심볼릭 링크 루트는 거부한다", () => {
+  it("남의 uid 루트와 심볼릭 링크 루트, 링크 하위는 거부한다", () => {
     mkdirSync(join(base, "elsewhere"));
+    privateTmpRoot({ base });
+    symlinkSync(join(base, "elsewhere"), join(base, `triflux-${uid}`, "sub"));
+    assert.throws(() => privateTmpDir("sub", { base }), /unsafe temp dir/);
+    rmSync(join(base, `triflux-${uid}`), { recursive: true });
     symlinkSync(join(base, "elsewhere"), join(base, `triflux-${uid}`));
     assert.throws(() => privateTmpRoot({ base }), /unsafe temp dir/);
     mkdirSync(join(base, `triflux-${uid + 1}`));
