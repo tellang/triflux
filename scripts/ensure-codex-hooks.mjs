@@ -16,6 +16,7 @@ import {
   privateFileMode,
   sanitizeCodexProfileConfig,
 } from "./lib/codex-profile-config.mjs";
+import { isMainModule } from "./lib/process-utils.mjs";
 import { resolveStableNodeBin } from "./lib/stable-node.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -383,7 +384,7 @@ export function ensureCodexHooks(opts = {}) {
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   const result = ensureCodexHooks({ trust: process.argv.includes("--trust") });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }

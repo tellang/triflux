@@ -344,21 +344,9 @@ describe("terminal-opener adapter", () => {
     });
   }
 
-  it("macOS without mux falls back to exec open -a Terminal", async () => {
-    const calls = [];
-    const opener = createTerminalOpener({
-      platform: "darwin",
-      mux: null,
-      exec: (command, options, callback) => {
-        calls.push({ command, options });
-        callback(null);
-      },
-    });
-
-    assert.equal(await opener.openCommand({ command: "echo hi" }), true);
-    assert.deepEqual(calls, [
-      { command: "open -a Terminal", options: { timeout: 5000 } },
-    ]);
+  it("macOS without mux reports failure instead of an empty Terminal", async () => {
+    const opener = createTerminalOpener({ platform: "darwin", mux: null });
+    assert.equal(await opener.openCommand({ command: "echo hi" }), false);
   });
 
   it("focusPane uses psmuxExec for psmux", () => {
