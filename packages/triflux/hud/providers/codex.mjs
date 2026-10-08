@@ -4,10 +4,8 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import {
-  CODEX_AUTH_PATH,
   CODEX_BROKER_AUTH_CACHE_DIR,
   CODEX_MIN_BUCKETS,
   CODEX_PROBE_STATE_PATH,
@@ -17,6 +15,8 @@ import {
   CODEX_QUOTA_STALE_MS,
   CODEX_REFRESH_FLAG,
   CODEX_REFRESH_LOCK_PATH,
+  getCodexAuthPath,
+  getCodexHome,
   SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
 import { decodeJwtEmail, readJson, writeJsonSafe } from "../utils.mjs";
@@ -59,7 +59,7 @@ export function normalizeBuckets(rl) {
 
 export function getCodexEmail() {
   try {
-    const auth = JSON.parse(readFileSync(CODEX_AUTH_PATH, "utf-8"));
+    const auth = JSON.parse(readFileSync(getCodexAuthPath(), "utf-8"));
     return decodeJwtEmail(auth?.tokens?.id_token);
   } catch {
     return null;
@@ -275,7 +275,7 @@ function mergeRateLimitSnapshots(snapshots, nowSec, replaceEndedWindows) {
 // 합성 버킷(token_count 기반)은 2일 이내 데이터만 허용하여 stale 방지.
 // ============================================================================
 export function getCodexRateLimits({
-  sessionsRoot = join(homedir(), ".codex", "sessions"),
+  sessionsRoot = join(getCodexHome(), "sessions"),
   now = new Date(),
   maxLinesPerFile = 800,
   extraSnapshots = [],
@@ -407,7 +407,7 @@ export async function collectProbeSnapshots(now = new Date()) {
   let targets = [];
   try {
     targets = listProbeTargets({
-      codexAuthPath: CODEX_AUTH_PATH,
+      codexAuthPath: getCodexAuthPath(),
       brokerCacheDir: CODEX_BROKER_AUTH_CACHE_DIR,
       stateFilePath: CODEX_PROBE_STATE_PATH,
       ttlMs: Number(process.env.TFX_CODEX_PROBE_TTL_MS) || CODEX_PROBE_TTL_MS,

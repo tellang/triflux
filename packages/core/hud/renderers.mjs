@@ -85,7 +85,11 @@ export function getMicroLine(
   codexBuckets,
   options = {},
 ) {
-  const { showCodex = true, showAntigravity = true } = options;
+  const {
+    showCodex = true,
+    showAntigravity = true,
+    codexLoggedOut = false,
+  } = options;
   const ctxView = contextView || buildContextUsageView({});
   // Claude 5h/1w
   const cF =
@@ -98,11 +102,11 @@ export function getMicroLine(
       : null;
   const cVal =
     claudeUsage != null
-      ? `${cF != null ? colorByProvider(cF, `${cF}`, claudeOrange) : dim("--")}${dim("/")}${cW != null ? colorByProvider(cW, `${cW}`, claudeOrange) : dim("--")}`
-      : dim("--/--");
+      ? `${cF != null ? colorByProvider(cF, `${cF}%`, claudeOrange) : dim("--%")}${dim("/")}${cW != null ? colorByProvider(cW, `${cW}%`, claudeOrange) : dim("--%")}`
+      : dim("--%/--%");
 
   // Codex 5h/1w
-  let xVal = dim("--/--");
+  let xVal = dim("--%/--%");
   if (codexBuckets) {
     const mb = codexBuckets.codex || codexBuckets[Object.keys(codexBuckets)[0]];
     if (mb) {
@@ -114,7 +118,7 @@ export function getMicroLine(
         mb.secondary?.used_percent != null
           ? clampPercent(mb.secondary.used_percent)
           : null;
-      xVal = `${xF != null ? colorByProvider(xF, `${xF}`, codexWhite) : dim("--")}${dim("/")}${xW != null ? colorByProvider(xW, `${xW}`, codexWhite) : dim("--")}`;
+      xVal = `${xF != null ? colorByProvider(xF, `${xF}%`, codexWhite) : dim("--%")}${dim("/")}${xW != null ? colorByProvider(xW, `${xW}%`, codexWhite) : dim("--%")}`;
     }
   }
 
@@ -122,7 +126,8 @@ export function getMicroLine(
   // 세그먼트를 모아 join 한다. 차단된 프로바이더를 뺄 때 공백이 겹치지 않는다.
   const segments = [`${bold(claudeOrange("c"))}${dim(":")}${cVal}`];
   if (showCodex) {
-    segments.push(`${bold(codexWhite("x"))}${dim(":")}${xVal}`);
+    const xMarker = codexLoggedOut ? dim("x") : bold(codexWhite("x"));
+    segments.push(`${xMarker}${dim(":")}${xVal}`);
   }
   if (showAntigravity) {
     const marker = options.antigravityQuota?.auth
