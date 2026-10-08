@@ -44,10 +44,12 @@ import {
   startCapture,
   waitForPattern,
 } from "../hub/team/psmux.mjs";
+import {
+  isEnvCacheFresh,
+  remoteEnvCacheDir,
+} from "../hub/team/remote-session.mjs";
 
 const MAX_HANDOFF_BYTES = 1 * 1024 * 1024; // 1 MB
-const REMOTE_ENV_TTL_MS = 86_400_000;
-const REMOTE_ENV_CACHE_DIR = resolve(".omc", "state", "remote-env");
 const REMOTE_STAGE_ROOT = "tfx-remote";
 const SSH_PROMPT_PATTERN = /(\$|%|#|PS |>)\s*$/;
 const IS_WINDOWS_LOCAL = getPlatform() === "win32";
@@ -898,7 +900,7 @@ function normalizePosixProbeEnv(host, parsed, localVersions = null) {
 }
 
 function getRemoteEnvCachePath(host) {
-  return join(REMOTE_ENV_CACHE_DIR, `${host}.json`);
+  return join(remoteEnvCacheDir(), `${host}.json`);
 }
 
 function readRemoteEnvCache(host) {
@@ -915,17 +917,8 @@ function readRemoteEnvCache(host) {
   }
 }
 
-function isRemoteEnvCacheFresh(cacheEntry) {
-  return Boolean(
-    cacheEntry &&
-      typeof cacheEntry.cachedAt === "number" &&
-      cacheEntry.env &&
-      Date.now() - cacheEntry.cachedAt < REMOTE_ENV_TTL_MS,
-  );
-}
-
 function writeRemoteEnvCache(host, env) {
-  mkdirSync(REMOTE_ENV_CACHE_DIR, { recursive: true });
+  mkdirSync(remoteEnvCacheDir(), { recursive: true });
   writeFileSync(
     getRemoteEnvCachePath(host),
     JSON.stringify({ cachedAt: Date.now(), env }, null, 2),
@@ -994,7 +987,7 @@ function probeRemoteEnv(host, opts = {}) {
 
   if (!force) {
     const cached = readRemoteEnvCache(host);
-    if (isRemoteEnvCacheFresh(cached)) {
+    if (isEnvCacheFresh(cached)) {
       return cached.env;
     }
   }

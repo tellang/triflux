@@ -3,8 +3,10 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import {
   basename,
+  isAbsolute,
   join,
   posix as posixPath,
   win32 as win32Path,
@@ -148,6 +150,20 @@ function probeRemoteEnvViaPosix(host) {
 
 // ── Cache ───────────────────────────────────────────────────────
 
+// cwd 의 .omc 에 두면 실행한 저장소마다 원격 홈 경로가 흩어져 남는다. 사용자 상태 경로에 둔다.
+export function remoteEnvCacheDir(env = process.env) {
+  // XDG 명세대로 상대 경로는 무시한다. 받아들이면 캐시가 다시 cwd 아래로 간다.
+  const xdgState = isAbsolute(env.XDG_STATE_HOME || "")
+    ? env.XDG_STATE_HOME
+    : "";
+  const stateRoot =
+    xdgState ||
+    (process.platform === "win32"
+      ? env.LOCALAPPDATA || join(homedir(), "AppData", "Local")
+      : join(homedir(), ".local", "state"));
+  return join(stateRoot, "triflux", "remote-env");
+}
+
 function getEnvCachePath(host, cacheDir) {
   return join(cacheDir, `${host}.json`);
 }
@@ -163,13 +179,11 @@ function readEnvCache(host, cacheDir) {
   }
 }
 
-function isEnvCacheFresh(entry) {
-  return Boolean(
-    entry &&
-      typeof entry.cachedAt === "number" &&
-      entry.env &&
-      Date.now() - entry.cachedAt < REMOTE_ENV_TTL_MS,
-  );
+export function isEnvCacheFresh(entry, now = Date.now()) {
+  if (!entry?.env || typeof entry.cachedAt !== "number") return false;
+  const age = now - entry.cachedAt;
+  // 미래 시각을 허용하면 그 캐시가 영원히 신선하게 남는다.
+  return age >= 0 && age < REMOTE_ENV_TTL_MS;
 }
 
 function writeEnvCache(host, env, cacheDir) {
@@ -188,13 +202,13 @@ function writeEnvCache(host, env, cacheDir) {
  * @param {string} host — SSH host
  * @param {object} [opts]
  * @param {boolean} [opts.force=false] — bypass cache
- * @param {string} [opts.cacheDir] — cache directory (default: .omc/state/remote-env)
+ * @param {string} [opts.cacheDir]: cache directory (default: remoteEnvCacheDir())
  * @returns {Readonly<RemoteEnv>}
  */
 export function probeRemoteEnv(host, opts = {}) {
   validateHost(host);
   const force = opts.force === true;
-  const cacheDir = opts.cacheDir || join(".omc", "state", "remote-env");
+  const cacheDir = opts.cacheDir || remoteEnvCacheDir();
 
   if (!force) {
     const cached = readEnvCache(host, cacheDir);
