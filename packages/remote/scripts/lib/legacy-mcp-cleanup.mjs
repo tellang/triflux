@@ -1239,6 +1239,7 @@ export function cleanupTfxHub({
 }
 
 // doctor 가 레지스트리와 비교하는 사용자 설정 파일. [HOME 기준 경로, 형식, 클라이언트]
+// 프로젝트의 .mcp.json 은 저장소에 커밋될 수 있어 setup 이 바꾸지 않는다(doctor --fix, mcp sync 몫).
 const REGISTRY_PIN_FILES = [
   [".claude.json", "json", "claude"],
   [".mcp.json", "json", "claude"],
@@ -1293,7 +1294,7 @@ function tomlSectionBody(text, name) {
   for (const line of text.split(/(?<=\n)/)) {
     if (start >= 0 && /^\s*\[/.test(line)) return { start, end: offset };
     const match = line.match(
-      /^\[mcp_servers\.(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\]\s*(?:#.*)?\r?\n?$/,
+      /^\s*\[mcp_servers\.(?:"([^"]+)"|'([^']+)'|([A-Za-z0-9_-]+))\]\s*(?:#.*)?\r?\n?$/,
     );
     offset += line.length;
     if ((match?.[1] ?? match?.[2] ?? match?.[3]) === name) start = offset;
@@ -1311,7 +1312,7 @@ function pinToml(original, servers) {
     if (!section) continue;
     const body = output.slice(section.start, section.end);
     const next = body.replace(
-      /^([ \t]*args[ \t]*=[ \t]*)\[[^\]]*\]/m,
+      /^([ \t]*(?:args|"args"|'args')[ \t]*=[ \t]*)\[[^\]]*\]/m,
       `$1${JSON.stringify(args)}`,
     );
     if (next === body) continue;
@@ -1352,7 +1353,11 @@ export function pinRegistryMcpPackages({
   const seen = new Set();
   for (const [relative, kind, client] of REGISTRY_PIN_FILES) {
     const servers = stdio.filter(([, server]) =>
-      (server.targets ?? ["claude", "codex", "antigravity"]).includes(client),
+      // mcp-guard-engine 의 serverTargets 처럼 빈 targets 는 기본 세 클라이언트다.
+      (server.targets?.length
+        ? server.targets
+        : ["claude", "codex", "antigravity"]
+      ).includes(client),
     );
     if (!servers.length) continue;
     const file = join(home, relative);
