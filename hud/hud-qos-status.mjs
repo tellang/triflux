@@ -20,6 +20,7 @@ import {
   CLAUDE_BAND_MARKER_DIR,
   CLAUDE_BAND_MARKER_TTL_MS,
   CLAUDE_REFRESH_FLAG,
+  CODEX_AUTH_PATH,
   CODEX_REFRESH_FLAG,
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
@@ -37,6 +38,7 @@ import {
 } from "./providers/codex.mjs";
 import {
   getAntigravityAccountLabel,
+  getAntigravityAuthKind,
   readAntigravityQuotaSnapshot,
   refreshAntigravityQuotaCache,
   scheduleAntigravityQuotaRefresh,
@@ -48,7 +50,12 @@ import {
   renderAlignedRows,
 } from "./renderers.mjs";
 import { selectTier } from "./terminal.mjs";
-import { readJson, readStdinJson } from "./utils.mjs";
+import {
+  formatTimeCell,
+  formatTimeCellDH,
+  readJson,
+  readStdinJson,
+} from "./utils.mjs";
 
 async function main() {
   if (process.argv.includes(CLAUDE_REFRESH_FLAG)) {
@@ -95,12 +102,15 @@ async function main() {
     ? { ...claudeUsageSnapshot.data, stale: claudeUsageSnapshot.isStale }
     : null;
   const codexBuckets = codexSnapshot.buckets;
+  const antigravityQuota = antigravityAllowed
+    ? { ...antigravitySnapshot?.data, auth: getAntigravityAuthKind() }
+    : null;
   const currentTier = selectTier();
   if (currentTier === "nano") {
     const microLine = getMicroLine(contextView, claudeUsage, codexBuckets, {
       showCodex,
       showAntigravity: antigravityAllowed,
-      antigravityQuota: antigravitySnapshot?.data,
+      antigravityQuota,
     });
     process.stdout.write(`\x1b[0m${microLine}\n`);
     return;
@@ -134,14 +144,20 @@ async function main() {
         geminiBlue,
         accountsConfig,
         accountsState,
-        antigravitySnapshot?.data,
+        antigravityQuota,
         getAntigravityAccountLabel(),
       ),
     );
   }
 
   const outputLines = renderAlignedRows(rows);
-  if (!codexBuckets && outputLines[codexRowIndex] != null) {
+  // 회색은 로그인 안 된 경우에만 쓴다. 로그인 상태의 조회 공백은 --% 로만 보인다.
+  if (
+    outputLines[codexRowIndex] != null &&
+    !codexBuckets &&
+    !existsSync(CODEX_AUTH_PATH) &&
+    !hasBrokerCodexAccounts()
+  ) {
     outputLines[codexRowIndex] = `${DIM}${outputLines[codexRowIndex]}${RESET}`;
   }
   // 알림 배너와 TUI 스타일이 HUD 내용에 겹치지 않도록 한다.
@@ -152,7 +168,7 @@ async function main() {
 
 main().catch(() => {
   process.stdout.write(
-    `\x1b[0m${bold(claudeOrange("c"))}: ${dim("5h:--% (n/a) 1w:--% (n/a) | ctx:--%")}\n`,
+    `\x1b[0m${bold(claudeOrange("c"))}: ${dim(`5h:--% ${formatTimeCell("")} 1w:--% ${formatTimeCellDH("")} | CTX:--%`)}\n`,
   );
 });
 

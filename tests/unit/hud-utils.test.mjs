@@ -7,8 +7,12 @@ import { dim } from "../../hud/colors.mjs";
 import {
   clampPercent,
   decodeJwtEmail,
+  formatPercentCell,
+  formatPlaceholderPercentCell,
   formatResetRemaining,
   formatResetRemainingDayHour,
+  formatTimeCell,
+  formatTimeCellDH,
   getContextPercent,
   isResetPast,
   padAnsiLeft,
@@ -54,6 +58,27 @@ afterEach(() => {
 });
 
 describe("hud/utils.mjs", () => {
+  it("값이 없는 칸도 정상 값과 같은 폭이다", () => {
+    assert.equal(
+      formatPlaceholderPercentCell().length,
+      formatPercentCell(7).length,
+    );
+    for (const empty of ["", null, undefined]) {
+      assert.equal(
+        formatTimeCell(empty).length,
+        formatTimeCell("0h24m").length,
+      );
+      assert.equal(
+        formatTimeCellDH(empty).length,
+        formatTimeCellDH("04d00h").length,
+      );
+      assert.doesNotMatch(
+        formatTimeCell(empty) + formatTimeCellDH(empty),
+        /\d|n\/a/,
+      );
+    }
+  });
+
   it("ANSI padding helpers use visible width instead of escape length", () => {
     const colored = dim("ok");
 

@@ -128,9 +128,13 @@ describe("HUD provider visibility", () => {
     };
     writeFileSync(quotaPath, JSON.stringify(quota));
     const disabledOutput = runHud();
-    assert.match(disabledOutput, /^a:.*--.*n\/a.*hud-prj/m);
-    assert.doesNotMatch(disabledOutput, /^a:.*(?:25%|Fh|[█▓▒░])/m);
-    assert.match(runHud({}, { preserveAnsi: true }), /^\x1b\[0m\x1b\[2ma:/m);
+    // GCP 프로젝트 과금은 로그인된 정상 상태라 회색이 아니고, 쿼터 대신 과금 방식을 보인다.
+    assert.match(disabledOutput, /^a:.*GCP.*hud-prj/m);
+    assert.doesNotMatch(disabledOutput, /^a:.*(?:\d+%|n\/a|[█▓▒░])/m);
+    assert.doesNotMatch(
+      runHud({}, { preserveAnsi: true }),
+      /^\x1b\[0m\x1b\[2ma:/m,
+    );
     writeFileSync(
       quotaPath,
       JSON.stringify({ ...quota, accountLabel: "other-project" }),
@@ -214,21 +218,48 @@ describe("HUD provider visibility", () => {
         );
         assert.equal(agy.indexOf("|"), claude.indexOf("|"));
         assert.equal(
-          agy.indexOf(active ? "25%" : "-- ") + (active ? 3 : 2),
+          agy.indexOf(active ? "25%" : "--%") + 3,
           claude.indexOf("17%") + 3,
         );
         assert.match(
           agy,
-          active ? /^a: --:.*25%.*quota-user$/ : /^a: --:.*--.*quota-user$/,
+          active ? /^a: --:.*25%.*quota-user$/ : /^a: --:.*--%.*quota-user$/,
         );
         if (tier !== "minimal") {
           assert.equal(agy.indexOf("("), claude.indexOf("("));
           assert.equal(agy.indexOf("("), codex.indexOf("("));
         }
         if (tier === "full") {
-          assert.equal(agy.slice(6, 11), active ? "█░░░░" : "     ");
+          assert.equal(agy.slice(6, 11), active ? "█░░░░" : "░░░░░");
         }
       }
     }
+  });
+
+  it("회색은 로그인 안 된 행에만 쓴다", () => {
+    const dimRow = (output, marker) =>
+      new RegExp(
+        `^\\x1b\\[0m\\x1b\\[2m(?:\\x1b\\[[0-9;]*m)*${marker}`,
+        "m",
+      ).test(output);
+    rmSync(join(mockHomeDir, ".gemini"), { recursive: true, force: true });
+    rmSync(join(cacheDir, "antigravity-quota-cache.json"), { force: true });
+    rmSync(join(cacheDir, "codex-rate-limits-cache.json"), { force: true });
+    rmSync(join(mockHomeDir, ".omc"), { recursive: true, force: true });
+    const loggedOut = runHud(
+      { TFX_DISABLE_CODEX: "0" },
+      { preserveAnsi: true },
+    );
+    assert.ok(dimRow(loggedOut, "a"), loggedOut);
+    assert.ok(dimRow(loggedOut, "x"), loggedOut);
+
+    mkdirSync(join(mockHomeDir, ".codex"), { recursive: true });
+    writeFileSync(join(mockHomeDir, ".codex", "auth.json"), "{}");
+    const codexLoggedIn = runHud(
+      { TFX_DISABLE_CODEX: "0" },
+      { preserveAnsi: true },
+    );
+    assert.ok(!dimRow(codexLoggedIn, "x"), codexLoggedIn);
+    assert.match(codexLoggedIn.replace(/\x1b\[[0-9;]*m/g, ""), /^x:.*--%/m);
   });
 });

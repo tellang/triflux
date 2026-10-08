@@ -7,6 +7,7 @@ import {
   ANTIGRAVITY_REFRESH_FLAG,
   ANTIGRAVITY_REFRESH_LOCK_PATH,
   ANTIGRAVITY_SETTINGS_PATH,
+  ANTIGRAVITY_SIGNED_IN_GRACE_MS,
   SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
 import { decodeJwtEmail, readJson, writeJsonSafe } from "../utils.mjs";
@@ -39,6 +40,18 @@ export function getAntigravityAccountLabel() {
 
 function isGcpProjectAuth() {
   return Boolean(readJson(ANTIGRAVITY_SETTINGS_PATH, null)?.gcp?.project);
+}
+
+// Keychain 인증은 파일을 남기지 않으므로 최근 쿼터 조회 성공도 로그인 근거로 본다.
+export function getAntigravityAuthKind() {
+  if (isGcpProjectAuth()) return "project";
+  if (getAntigravityAccountLabel()) return "account";
+  const cache = readJson(ANTIGRAVITY_QUOTA_CACHE_PATH, null);
+  const signedInAge = Date.now() - Number(cache?.signedInAt);
+  return cache?.accountLabel == null &&
+    signedInAge < ANTIGRAVITY_SIGNED_IN_GRACE_MS
+    ? "account"
+    : null;
 }
 
 export function readAntigravityQuotaSnapshot() {
@@ -103,10 +116,17 @@ export function refreshAntigravityQuotaCache(execFileSyncFn = execFileSync) {
     // 실패도 캐시해 인증 오류나 CLI 부재 시 매 렌더마다 실행하지 않는다.
   }
   if (accountLabel === getAntigravityAccountLabel()) {
+    const previous = readJson(ANTIGRAVITY_QUOTA_CACHE_PATH, null);
+    const signedInAt = buckets
+      ? Date.now()
+      : previous?.accountLabel === accountLabel
+        ? previous?.signedInAt
+        : undefined;
     writeJsonSafe(ANTIGRAVITY_QUOTA_CACHE_PATH, {
       timestamp: Date.now(),
       accountLabel,
       buckets,
+      signedInAt,
     });
   }
   return buckets;

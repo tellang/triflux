@@ -145,7 +145,7 @@ export function formatPlaceholderPercentCell() {
 }
 
 export function normalizeTimeToken(value) {
-  const text = String(value || "n/a");
+  const text = String(value || "");
   const hourMinute = text.match(/^(\d+)h(\d+)m$/);
   if (hourMinute) {
     return `${Number(hourMinute[1])}h${String(Number(hourMinute[2])).padStart(2, "0")}m`;
@@ -157,16 +157,20 @@ export function normalizeTimeToken(value) {
   return text;
 }
 
-export function formatTimeCell(value) {
-  const text = normalizeTimeToken(value);
-  // 시간값(숫자 포함)은 0패딩, 비시간값(n/a 등)은 공백패딩
-  const padChar = /\d/.test(text) ? "0" : " ";
-  return `(${text.padStart(TIME_CELL_INNER_WIDTH, padChar)})`;
+// 값이 없는 시간 칸은 단위 모양을 남겨 정상 값과 같은 폭으로 그린다.
+function emptyTimeCell(unit) {
+  return unit === "dh" ? "(--d--h)" : "(--h--m)";
 }
 
-// n/a도 정상 주간 시간과 같은 너비를 유지한다.
+export function formatTimeCell(value) {
+  const text = normalizeTimeToken(value);
+  if (!/\d/.test(text)) return emptyTimeCell("hm");
+  return `(${text.padStart(TIME_CELL_INNER_WIDTH, "0")})`;
+}
+
 export function formatTimeCellDH(value) {
   const text = normalizeTimeToken(value);
+  if (!/\d/.test(text)) return emptyTimeCell("dh");
   return `(${text.padStart(TIME_CELL_INNER_WIDTH, " ")})`;
 }
 

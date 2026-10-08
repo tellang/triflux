@@ -22,6 +22,7 @@ import {
   PERCENT_CELL_WIDTH,
   PROVIDER_PREFIX_WIDTH,
   SEVEN_DAY_MS,
+  TIME_CELL_INNER_WIDTH,
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
 import { getTerminalColumns, tierBar, tierDimBar } from "./terminal.mjs";
@@ -124,7 +125,9 @@ export function getMicroLine(
     segments.push(`${bold(codexWhite("x"))}${dim(":")}${xVal}`);
   }
   if (showAntigravity) {
-    const marker = options.antigravityQuota ? bold(geminiBlue("a")) : dim("a");
+    const marker = options.antigravityQuota?.auth
+      ? bold(geminiBlue("a"))
+      : dim("a");
     segments.push(
       `${marker}${dim(":")}${antigravityPercentText(options.antigravityQuota)}${options.antigravityQuota?.stale ? dim("*") : ""}`,
     );
@@ -134,19 +137,22 @@ export function getMicroLine(
 }
 
 function antigravityPercentText(quota) {
+  if (quota?.auth === "project") {
+    return geminiBlue("GCP".padStart(PERCENT_CELL_WIDTH));
+  }
   return quota?.usedPercent != null
     ? colorByProvider(
         quota.usedPercent,
         formatPercentCell(quota.usedPercent),
         geminiBlue,
       )
-    : dim("--".padStart(PERCENT_CELL_WIDTH));
+    : dim(formatPlaceholderPercentCell());
 }
 
 // context 는 토큰 수 대신 사용률만 보여 준다.
 function contextPercentText(ctxView) {
-  const text = ctxView.display === "--" ? "--" : `${ctxView.percent}%`;
-  return colorByPercent(ctxView.percent, text);
+  if (ctxView.display === "--") return dim("--%");
+  return colorByPercent(ctxView.percent, `${ctxView.percent}%`);
 }
 
 // ============================================================================
@@ -160,10 +166,10 @@ export function getClaudeRows(currentTier, contextView, claudeUsage) {
   const weeklyPercent = claudeUsage?.weeklyPercent ?? null;
   const fiveHourReset = claudeUsage?.fiveHourResetsAt
     ? formatResetRemaining(claudeUsage.fiveHourResetsAt, FIVE_HOUR_MS)
-    : "n/a";
+    : "";
   const weeklyReset = claudeUsage?.weeklyResetsAt
     ? formatResetRemainingDayHour(claudeUsage.weeklyResetsAt, SEVEN_DAY_MS)
-    : "n/a";
+    : "";
 
   const hasData = claudeUsage != null;
 
@@ -198,11 +204,11 @@ export function getClaudeRows(currentTier, contextView, claudeUsage) {
     const fShort =
       hasData && fiveHourPercent != null
         ? colorByProvider(fiveHourPercent, `${fiveHourPercent}%`, claudeOrange)
-        : dim("--");
+        : dim("--%");
     const wShort =
       hasData && weeklyPercent != null
         ? colorByProvider(weeklyPercent, `${weeklyPercent}%`, claudeOrange)
-        : dim("--");
+        : dim("--%");
     const quotaSection = `${fShort}${dim("/")}${wShort}`;
     return [{ prefix, left: quotaSection, right: "" }];
   }
@@ -274,34 +280,13 @@ export function getProviderRow(
 
   const prefix = `${bold(markerColor(marker))}:`;
   if (provider === "antigravity") {
-    const usedPercent = realQuota?.usedPercent;
-    const active = usedPercent != null;
-    const quotaPercent = antigravityPercentText(realQuota);
-    const right = `${active ? markerColor(accountLabel) : dim(accountLabel)}${realQuota?.stale ? dim(" [stale]") : ""}`;
-    if (currentTier === "nano" || currentTier === "micro") {
-      return {
-        prefix: active ? prefix : dim(`${marker}:`),
-        left: quotaPercent,
-        right,
-      };
-    }
-    const bar = active
-      ? tierBar(currentTier, usedPercent, GEMINI_BLUE)
-      : currentTier === "full"
-        ? " ".repeat(GAUGE_WIDTH + 1)
-        : "";
-    const reset =
-      (Date.parse(realQuota?.resetTime) - Date.now() >= ONE_DAY_MS
-        ? formatResetRemainingDayHour(realQuota.resetTime)
-        : formatResetRemaining(realQuota?.resetTime)) || "n/a";
-    const showTime = currentTier === "full" || currentTier === "compact";
-    // /usage의 모델별 값에는 5h/1w 식별자가 없으므로 창을 추측하지 않는다.
-    const slot = `${dim("--:")}${bar}${quotaPercent}${showTime ? ` ${dim(formatTimeCell(reset))}` : ""}`;
-    return {
-      prefix: active ? prefix : dim(`${marker}:`),
-      left: `${slot} ${" ".repeat(stripAnsi(slot).length)}`,
-      right,
-    };
+    return getAntigravityRow(
+      currentTier,
+      marker,
+      markerColor,
+      accountLabel,
+      realQuota,
+    );
   }
   const provAnsi = CODEX_WHITE;
   const provFn = codexWhite;
@@ -337,7 +322,7 @@ export function getProviderRow(
         };
       }
     }
-    return { prefix: minPrefix, left: dim("--/--"), right: "" };
+    return { prefix: minPrefix, left: dim("--%/--%"), right: "" };
   }
 
   if (currentTier === "minimal") {
@@ -397,16 +382,16 @@ export function getProviderRow(
           weekP != null
             ? colorByProvider(weekP, formatPercentCell(weekP), provFn)
             : dim(formatPlaceholderPercentCell());
-        const fiveReset =
-          formatResetRemaining(main.primary?.resets_at) || "n/a";
-        const weekReset =
-          formatResetRemainingDayHour(main.secondary?.resets_at) || "n/a";
+        const fiveReset = formatResetRemaining(main.primary?.resets_at);
+        const weekReset = formatResetRemainingDayHour(
+          main.secondary?.resets_at,
+        );
         quotaSection = `${dim("5h:")}${fCell} ${dim(formatTimeCell(fiveReset))} ${dim("1w:")}${wCell} ${dim(formatTimeCellDH(weekReset))}`;
         if (main.mixedWindows) quotaSection += dim("*");
       }
     }
     if (!quotaSection) {
-      quotaSection = `${dim("5h:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("--d--h"))}`;
+      quotaSection = `${dim("5h:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell(""))} ${dim("1w:")}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH(""))}`;
     }
     const compactRight = [accountLabel ? markerColor(accountLabel) : ""]
       .filter(Boolean)
@@ -429,9 +414,8 @@ export function getProviderRow(
         main.secondary?.used_percent != null
           ? clampPercent(main.secondary.used_percent)
           : null;
-      const fiveReset = formatResetRemaining(main.primary?.resets_at) || "n/a";
-      const weekReset =
-        formatResetRemainingDayHour(main.secondary?.resets_at) || "n/a";
+      const fiveReset = formatResetRemaining(main.primary?.resets_at);
+      const weekReset = formatResetRemainingDayHour(main.secondary?.resets_at);
       const fCell =
         fiveP != null
           ? colorByProvider(fiveP, formatPercentCell(fiveP), provFn)
@@ -459,7 +443,7 @@ export function getProviderRow(
 
   // 폴백
   if (!quotaSection) {
-    quotaSection = `${dim("5h:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell("n/a"))} ${dim("1w:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH("--d--h"))}`;
+    quotaSection = `${dim("5h:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell(""))} ${dim("1w:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH(""))}`;
   }
 
   const accountSection = `${markerColor(accountLabel)}`;
@@ -468,4 +452,53 @@ export function getProviderRow(
     left: quotaSection,
     right: accountSection,
   };
+}
+
+// 회색은 로그인 안 된 경우에만 쓴다. GCP 프로젝트 과금은 개인 쿼터가 없을 뿐 정상 상태다.
+function getAntigravityRow(
+  currentTier,
+  marker,
+  markerColor,
+  accountLabel,
+  quota,
+) {
+  const usedPercent = quota?.usedPercent;
+  const hasValue = usedPercent != null;
+  const loggedIn = quota?.auth != null;
+  const project = quota?.auth === "project";
+  const tint = loggedIn ? markerColor : dim;
+  const prefix = loggedIn ? `${bold(markerColor(marker))}:` : dim(`${marker}:`);
+  const stale = quota?.stale ? dim(" [stale]") : "";
+  const right = `${tint(accountLabel)}${stale}`;
+  const percent = antigravityPercentText(quota);
+  if (currentTier === "nano" || currentTier === "micro") {
+    return { prefix, left: percent, right };
+  }
+  const isFull = currentTier === "full";
+  const showTime = isFull || currentTier === "compact";
+  const reset =
+    Date.parse(quota?.resetTime) - Date.now() >= ONE_DAY_MS
+      ? formatResetRemainingDayHour(quota.resetTime)
+      : formatResetRemaining(quota?.resetTime);
+  const timeCell = showTime ? ` ${dim(formatTimeCell(reset))}` : "";
+  // /usage의 모델별 값에는 5h/1w 식별자가 없으므로 창을 추측하지 않는다.
+  // 두 창(5h, 1w) 폭에 맞춰 c, x 행과 구분자 열을 맞춘다.
+  const windowWidth =
+    "5h:".length +
+    (isFull ? GAUGE_WIDTH + 1 : 0) +
+    PERCENT_CELL_WIDTH +
+    (showTime ? TIME_CELL_INNER_WIDTH + 3 : 0);
+  let slot;
+  if (project) {
+    // 쿼터 대신 과금 방식을 막대 자리(막대가 없는 표시에서는 퍼센트 자리)에 보인다.
+    const mark = isFull ? `${markerColor("GCP".padEnd(GAUGE_WIDTH))} ` : "";
+    const cell = isFull ? dim(formatPlaceholderPercentCell()) : percent;
+    slot = `${dim("--:")}${mark}${cell}${timeCell}`;
+  } else {
+    const bar = hasValue
+      ? tierBar(currentTier, usedPercent, GEMINI_BLUE)
+      : tierDimBar(currentTier);
+    slot = `${dim("--:")}${bar}${percent}${timeCell}`;
+  }
+  return { prefix, left: padAnsiRight(slot, windowWidth * 2 + 1), right };
 }
