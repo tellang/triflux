@@ -70,7 +70,9 @@ export function parseCodexMcpList(output) {
 
     const name = cols[0].trim();
     // stdio 표와 HTTP 표가 따로 찍혀 두 번째 표의 머리글도 행으로 들어온다.
-    if (name === "Name") continue;
+    // 서버 이름이 Name 일 수 있으므로 두 번째 열까지 머리글 모양인지 본다.
+    if (name === "Name" && ["Command", "Url"].includes(cols[1]?.trim()))
+      continue;
     const statusMatch = lines[i].match(/\b(enabled|disabled)\b/i);
     const status = statusMatch ? statusMatch[1].toLowerCase() : "unknown";
     if (!name || name.startsWith("-")) continue;

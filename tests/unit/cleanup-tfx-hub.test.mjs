@@ -193,22 +193,29 @@ test("hub.pid 가 다른 프로세스를 가리키면 종료하지 않고 파일
   assert.deepEqual(result.warnings, []);
 });
 
-test("Windows 의 허브 예약 작업만 지운다", () => {
-  for (const [task, listing, deleted] of [
+const taskXml = (command, args, description = "") =>
+  `<Task><RegistrationInfo><Description>${description}</Description></RegistrationInfo><Actions Context="Author"><Exec><Command>${command}</Command><Arguments>${args}</Arguments></Exec></Actions></Task>`;
+
+test("Windows 의 허브 예약 작업은 실행 명령으로만 판정해 지운다", () => {
+  for (const [task, xml, deleted] of [
     [
       "TrifluxHubEnsure",
-      "Task To Run: node C:\\pkg\\scripts\\hub-ensure.mjs",
+      taskXml("node", "C:\\pkg\\scripts\\hub-ensure.mjs"),
       true,
     ],
-    ["TrifluxHubEnsure", "Task To Run: C:\\other\\backup.exe", false],
+    ["TrifluxHubEnsure", taskXml("C:\\other\\backup.exe", ""), false],
     [
       "\\Triflux\\Hub",
-      "Task To Run: powershell.exe -WindowStyle Hidden -Command tfx hub ensure",
+      taskXml("powershell.exe", "-WindowStyle Hidden -Command tfx hub ensure"),
       true,
     ],
     [
       "\\Triflux\\Hub",
-      "Task To Run: powershell.exe -Command tfx doctor",
+      taskXml(
+        "C:\\Tools\\backup.exe",
+        "",
+        "Replaces the old tfx hub ensure task",
+      ),
       false,
     ],
   ]) {
@@ -218,13 +225,13 @@ test("Windows 의 허브 예약 작업만 지운다", () => {
       calls.push([command, ...args]);
       if (args[0] !== "/Query") return "";
       if (args[2] !== task) throw commandError(1);
-      return listing;
+      return xml;
     };
     cleanupTfxHub({ home, platform: "win32", run });
     assert.equal(
       calls.some((call) => call[1] === "/Delete" && call[3] === task),
       deleted,
-      `${task}: ${listing}`,
+      `${task}: ${xml}`,
     );
   }
 });

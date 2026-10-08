@@ -286,6 +286,18 @@ describe("resolveStableNodeBin", () => {
     assert.equal(resolveStableNodeBin(exec, { env: {}, realpath }), exec);
   });
 
+  it("returns the fallback instead of a versioned path when no alias matches", () => {
+    const exec = "/home/u/.nvm/versions/node/v22.0.0/bin/node";
+    const realpath = (path) => {
+      if (path === exec) return exec;
+      throw new Error("absent");
+    };
+    assert.equal(
+      resolveStableNodeBin(exec, { env: {}, realpath, fallback: "node" }),
+      "node",
+    );
+  });
+
   it("keeps execPath when the alias points at a different node", () => {
     const exec = "/opt/homebrew/Cellar/node/26.0.0/bin/node";
     const realpath = (p) => {

@@ -54,10 +54,11 @@ test("getClaudeMcp discovers project .claude/mcp.json", () => {
   }
 });
 
-test("parseCodexMcpList skips the header of the second (HTTP) table", () => {
+test("parseCodexMcpList skips the second table header but keeps a server named Name", () => {
   const output = [
     "Name          Command  Args  Env  Cwd  Status   Auth",
     "brave-search  npx      -y    -    -    enabled  Unsupported",
+    "Name          node     x.js  -    -    enabled  Unsupported",
     "",
     "Name      Url                           Bearer Token Env Var  Status   Auth",
     "context7  https://mcp.context7.com/mcp  -                     enabled  Not logged in",
@@ -66,6 +67,7 @@ test("parseCodexMcpList skips the header of the second (HTTP) table", () => {
     parseCodexMcpList(output).map(({ name, status }) => [name, status]),
     [
       ["brave-search", "enabled"],
+      ["Name", "enabled"],
       ["context7", "enabled"],
     ],
   );

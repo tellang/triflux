@@ -108,6 +108,13 @@ function fileTarget(file) {
   return target;
 }
 
+function markFirst(seen, target) {
+  const key = realpathSync(target);
+  if (seen.has(key)) return false;
+  seen.add(key);
+  return true;
+}
+
 function ownedUrl(value) {
   if (typeof value !== "string") return null;
   let url;
@@ -734,11 +741,13 @@ export function cleanupLegacyMcp({
   if (resolve(repoRoot) !== resolve(home))
     files.push([join(repoRoot, ".mcp.json"), "json"]);
   const plans = [];
+  const seen = new Set();
   let blocked = false;
   for (const [file, kind] of files) {
     try {
       const target = fileTarget(file);
-      if (!target) continue;
+      // symlink 별칭이 같은 파일을 두 번 계획하면 두 번째 쓰기가 원문 검증에서 막힌다.
+      if (!target || !markFirst(seen, target)) continue;
       const original = readFileSync(target, "utf8");
       // 빈 파일은 항목이 없는 것이다. 형식 오류로 보면 이주 전체가 멈춘다.
       if (!original.trim()) continue;
@@ -955,18 +964,34 @@ function stopHub(home, platform, run, result) {
   result.changed = true;
 }
 
+// 작업 XML 에서 실행 동작만 꺼낸다. 설명 같은 다른 필드의 문구로 판정하지 않는다.
+function taskExecCommand(xml) {
+  const decode = (text = "") =>
+    text
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&");
+  const actions = xml.match(/<Actions\b[^>]*>([\s\S]*?)<\/Actions>/)?.[1] ?? "";
+  const execs = [...actions.matchAll(/<Exec>([\s\S]*?)<\/Exec>/g)];
+  if (
+    execs.length !== 1 ||
+    /<(?:ComHandler|SendEmail|ShowMessage)\b/.test(actions)
+  )
+    return null;
+  const field = (name) =>
+    decode(
+      execs[0][1].match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`))?.[1],
+    );
+  return `${field("Command")} ${field("Arguments")}`;
+}
+
 function removeHubTasks(run, result) {
   for (const [task, marker] of HUB_TASKS) {
-    const query = tryRun(run, "schtasks.exe", [
-      "/Query",
-      "/TN",
-      task,
-      "/FO",
-      "LIST",
-      "/V",
-    ]);
+    const query = tryRun(run, "schtasks.exe", ["/Query", "/TN", task, "/XML"]);
     if (!query.ok) continue;
-    if (!query.output.includes(marker)) {
+    if (!taskExecCommand(query.output)?.includes(marker)) {
       result.warnings.push(`${task}: 허브 작업이 아니라 보존`);
       continue;
     }
@@ -1013,11 +1038,12 @@ export function cleanupTfxHub({
     result.skipped = true;
     return result;
   }
+  const seen = new Set();
   for (const [relative, kind] of USER_MCP_FILES) {
     const file = join(home, relative);
     try {
       const target = fileTarget(file);
-      if (!target) continue;
+      if (!target || !markFirst(seen, target)) continue;
       const original = readFileSync(target, "utf8");
       if (!original.trim()) continue;
       const plan =

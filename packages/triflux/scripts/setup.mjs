@@ -1569,7 +1569,7 @@ function quoteShellCommandArg(value) {
 }
 
 function buildNodeScriptCommand(scriptPath) {
-  return `${quoteShellCommandArg(resolveStableNodeBin())} ${quoteShellCommandArg(scriptPath)}`;
+  return `${quoteShellCommandArg(resolveStableNodeBin(process.execPath, { fallback: "node" }))} ${quoteShellCommandArg(scriptPath)}`;
 }
 
 function loadSettings() {
