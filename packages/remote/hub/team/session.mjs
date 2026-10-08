@@ -113,8 +113,8 @@ function bashArg(value) {
 
 /**
  * tmux/psmux 커맨드 실행
- * @param {string[]|string} args — tmux 서브커맨드 + 인자. 문자열은 psmux 와 같은 규칙으로 쪼갠다.
- * @param {object} opts — execFileSync 옵션
+ * @param {string[]|string} args: tmux 서브커맨드 + 인자. 문자열은 psmux 와 같은 규칙으로 쪼갠다.
+ * @param {object} opts: execFileSync 옵션
  * @returns {string} stdout
  */
 function tmux(args, opts = {}) {

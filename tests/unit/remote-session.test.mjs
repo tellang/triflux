@@ -142,7 +142,7 @@ describe("remote-session: env cache", () => {
   });
 });
 
-describe("remote-session — ssh 원격 명령 조립", () => {
+describe("remote-session: ssh 원격 명령 조립", () => {
   it("R-13: posix 스크립트는 원격 셸이 한 번 파싱해도 인자가 보존된다", async () => {
     const { execFileSync } = await import("node:child_process");
     const { existsSync, mkdtempSync, rmSync } = await import("node:fs");
