@@ -643,6 +643,8 @@ function installEntries(pluginRoot) {
     "hub/team/agent-map.json",
     // tfx-remote 스킬이 ~/.claude/scripts/remote-spawn.mjs 를 실행한다.
     "scripts/remote-spawn.mjs",
+    // tfx-route.sh 가 자기 옆에서 찾는다.
+    "scripts/codex-profile-sanitize.mjs",
     // tfx-route.sh 가 $sd/lib 에서 찾는다.
     ...listFiles(pluginRoot, "scripts/lib", [".mjs", ".sh"]),
     ...listFiles(pluginRoot, "hud", [".mjs"]),

@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
-import { syncRegistryTargets } from "../lib/mcp-guard-engine.mjs";
+import {
+  inspectRegistryStatus,
+  syncRegistryTargets,
+} from "../lib/mcp-guard-engine.mjs";
 
 const originalEnv = {
   HOME: process.env.HOME,
@@ -267,5 +270,36 @@ describe("syncRegistryTargets HTTP headers", () => {
       "Bearer sync-secret",
     );
     assert.equal(statSync(settingsPath).mode & 0o777, 0o600);
+  });
+});
+
+describe("inspectRegistryStatus HTTP headers", () => {
+  it("env 가 없는 셸에서는 그 env 로 만든 헤더를 불일치로 보지 않는다", () => {
+    const homeDir = createHomeDir("mcp-guard-status-");
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+    process.env.TFX_TEST_TOKEN = "status-secret";
+    const claudePath = join(homeDir, ".claude.json");
+    writeFileSync(claudePath, "{}\n");
+    const registry = {
+      ...registryFor(homeDir, {
+        transport: "http",
+        url: "https://example.com/mcp",
+        targets: ["claude"],
+        headers: {
+          Authorization: { env: "TFX_TEST_TOKEN", prefix: "Bearer " },
+        },
+      }),
+      policies: { watched_paths: [claudePath] },
+    };
+    syncRegistryTargets({ registry });
+    const statusOf = () =>
+      inspectRegistryStatus(registry).rows.find((row) => row.name === "auth")
+        .status;
+    assert.equal(statusOf(), "present");
+    delete process.env.TFX_TEST_TOKEN;
+    assert.equal(statusOf(), "present");
+    process.env.TFX_TEST_TOKEN = "other-secret";
+    assert.equal(statusOf(), "mismatch");
   });
 });

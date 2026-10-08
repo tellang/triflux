@@ -1593,7 +1593,21 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
         : descriptorsFromJsonConfig(desired.config);
       const actual =
         config.servers.find((server) => server.name === name) || null;
-      const actualHeaders = actual?.headerDescriptors || {};
+      // JSON 설정의 기대 헤더는 지금 셸의 env 로 만든다. 키를 export 하지 않은 셸에서는
+      // 기대 헤더가 비어 같은 설정도 mismatch 로 보였다. 만들 수 없는 헤더는 비교에서 뺀다.
+      const unresolvedHeaders = isCodexConfig(config.filePath)
+        ? []
+        : Object.entries(desired.headerDescriptors || {})
+            .filter(
+              ([, descriptor]) =>
+                descriptor.env && !process.env[descriptor.env],
+            )
+            .map(([headerName]) => headerName);
+      const actualHeaders = Object.fromEntries(
+        Object.entries(actual?.headerDescriptors || {}).filter(
+          ([headerName]) => !unresolvedHeaders.includes(headerName),
+        ),
+      );
       const currentHeaderStatus = headerStatus(expectedHeaders, actualHeaders);
       let status = "missing";
 
@@ -1628,8 +1642,10 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
         filePath: config.filePath,
         expectedUrl,
         expectedCommand,
+        expectedArgs: desired.config.args || [],
         actualUrl: actual?.url || "",
         actualCommand: actual?.command || "",
+        actualArgs: actual?.args || [],
         status,
         migrated: Boolean(config.migrated),
         message: config.message || "",

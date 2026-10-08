@@ -374,8 +374,13 @@ function backupStartup(home, file) {
   return backupFile(join(directory, basename(file)), readFileSync(file));
 }
 
+// setup 은 게이트웨이 이주와 허브 정리를 한 프로세스에서 잇달아 돌린다.
+// 같은 파일은 처음 바꾸기 직전의 원본만 백업한다.
+const backupByTarget = new Map();
+
 function writeAtomic(file, target, output) {
-  const backup = backupFile(file);
+  const backup = backupByTarget.get(target) ?? backupFile(file);
+  backupByTarget.set(target, backup);
   const temp = join(
     dirname(target),
     `.tfx-mcp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`,
