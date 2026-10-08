@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// wt-cli.mjs — wt-manager CLI wrapper for Claude Code
-// safety-guard가 wt.exe 직접 호출을 차단하므로 이 스크립트를 경유한다.
+// wt-manager CLI 래퍼. wt.exe 를 직접 호출하지 않고 이 스크립트를 거친다.
 import { createWtManager } from "../hub/team/wt-manager.mjs";
 
 const [action, ...rest] = process.argv.slice(2);
