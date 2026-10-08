@@ -1,6 +1,9 @@
 # 남은 이슈 일괄 처리
 
 ## Shard: kill-signal-fix
+
+> 삭제됨(#571): `process-cleanup.mjs`
+
 - agent: codex
 - files: hub/team/process-cleanup.mjs, hub/lib/process-utils.mjs, packages/triflux/hub/team/process-cleanup.mjs, packages/triflux/hub/lib/process-utils.mjs
 - prompt: |

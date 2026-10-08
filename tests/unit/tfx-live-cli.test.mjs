@@ -306,8 +306,6 @@ test("peer attached tmux session survives SIGINT and SIGTERM", async () => {
             TMUX_STATE: statePath,
             TMUX_BUSY_CAPTURES: "10000",
             TFX_LIVE_ARTIFACT_DIR: dir,
-            TRIFLUX_NOTIFY_BELL: "0",
-            TRIFLUX_NOTIFY_TOAST: "0",
           },
         },
       );
@@ -453,8 +451,6 @@ async function runTfxLive(args, options = {}) {
         ...execOptions,
         env: {
           ...process.env,
-          TRIFLUX_NOTIFY_BELL: "0",
-          TRIFLUX_NOTIFY_TOAST: "0",
           TFX_LIVE_ARTIFACT_DIR: artifactDir,
           TFX_CODEX_SESSION_REGISTRY_DIR: path.join(
             artifactDir,
@@ -1616,8 +1612,6 @@ test("tfx-live peer SIGINT emits aborted output and leaves transcript/status fil
         stdio: ["ignore", "pipe", "pipe"],
         env: {
           ...process.env,
-          TRIFLUX_NOTIFY_BELL: "0",
-          TRIFLUX_NOTIFY_TOAST: "0",
           FAKE_BRIDGE_LOG: logPath,
           TFX_LIVE_ARTIFACT_DIR: artifactDir,
           TFX_CODEX_SESSION_REGISTRY_DIR: path.join(

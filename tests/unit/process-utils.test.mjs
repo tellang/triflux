@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 
 import {
   cleanupOrphanNodeProcesses,
-  cleanupOrphanRuntimeProcesses,
   cleanupStaleFsmonitorDaemons,
   findFsmonitorDaemons,
   findProcessesByCommandLine,
@@ -506,77 +505,6 @@ describe("process tree cleanup helpers", () => {
             ParentProcessId: 524,
             Name: "gemini.exe",
             CommandLine: "gemini --prompt hello",
-          },
-        ],
-      }),
-      killFn: (pid, signal) => killed.push([pid, signal]),
-      protectedPids: new Set(),
-    });
-
-    assert.equal(result.killed, 0);
-    assert.deepEqual(killed, []);
-  });
-
-  it("cleanupOrphanRuntimeProcesses includes bun.exe", () => {
-    const killed = [];
-    const result = cleanupOrphanRuntimeProcesses({
-      isWindows: true,
-      spawnSyncFn: mockSpawnSync({ processRecords: SWARM_PROCS }),
-      killFn: (pid, signal) => killed.push([pid, signal]),
-      protectedPids: new Set(),
-    });
-
-    assert.equal(result.killed, 1);
-    assert.deepEqual(killed, [[314, "SIGKILL"]]);
-  });
-
-  it("cleanupOrphanRuntimeProcesses kills orphaned bun gbrain cli.ts serve duplicates", () => {
-    const killed = [];
-    const result = cleanupOrphanRuntimeProcesses({
-      isWindows: true,
-      spawnSyncFn: mockSpawnSync({
-        processRecords: [
-          {
-            ProcessId: 610,
-            ParentProcessId: 999991,
-            Name: "bun.exe",
-            CommandLine:
-              'bun "C:\\Users\\example\\.bun\\install\\global\\node_modules\\gbrain\\src\\cli.ts" serve',
-          },
-        ],
-      }),
-      killFn: (pid, signal) => killed.push([pid, signal]),
-      protectedPids: new Set(),
-    });
-
-    assert.equal(result.killed, 1);
-    assert.deepEqual(killed, [[610, "SIGKILL"]]);
-  });
-
-  it("cleanupOrphanRuntimeProcesses preserves bun gbrain serve under live Claude", () => {
-    const killed = [];
-    const result = cleanupOrphanRuntimeProcesses({
-      isWindows: true,
-      spawnSyncFn: mockSpawnSync({
-        processRecords: [
-          {
-            ProcessId: 620,
-            ParentProcessId: 999990,
-            Name: "claude.exe",
-            CommandLine: "claude --resume",
-          },
-          {
-            ProcessId: 621,
-            ParentProcessId: 620,
-            Name: "gbrain.exe",
-            CommandLine: "gbrain serve",
-          },
-          {
-            ProcessId: 622,
-            ParentProcessId: 621,
-            Name: "bun.exe",
-            CommandLine:
-              'bun "C:\\Users\\example\\.bun\\install\\global\\node_modules\\gbrain\\src\\cli.ts" serve',
           },
         ],
       }),

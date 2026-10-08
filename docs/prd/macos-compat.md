@@ -4,6 +4,9 @@
 triflux의 macOS 비호환 부분을 수정하여 macOS를 1등 시민으로 지원한다.
 
 ## Shard: process-cleanup-bsd
+
+> 삭제됨(#571): `process-cleanup.mjs`, `staleState.mjs`
+
 - agent: codex
 - files: hub/team/process-cleanup.mjs, packages/remote/hub/team/process-cleanup.mjs
 - prompt: |
@@ -13,6 +16,9 @@ triflux의 macOS 비호환 부분을 수정하여 macOS를 1등 시민으로 지
   기존 파싱 로직(공백 split)은 유지.
 
 ## Shard: notify-macos
+
+> 삭제됨(#571): `notify.mjs`
+
 - agent: codex
 - files: hub/team/notify.mjs, packages/remote/hub/team/notify.mjs, packages/triflux/hub/team/notify.mjs
 - prompt: |

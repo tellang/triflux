@@ -171,8 +171,6 @@ else if (!command.startsWith('tmux has-session')) process.exit(92);
           PATH: `${dir}${path.delimiter}${process.env.PATH}`,
           SSH_LOG: log,
           TFX_LIVE_ARTIFACT_DIR: dir,
-          TRIFLUX_NOTIFY_BELL: "0",
-          TRIFLUX_NOTIFY_TOAST: "0",
         },
         timeout: 5000,
       },
@@ -380,8 +378,6 @@ async function withCodexCliFixture(env, fn) {
           CODEX_HOME: dir,
           PATH: `${dir}${path.delimiter}${process.env.PATH}`,
           TFX_LIVE_ARTIFACT_DIR: dir,
-          TRIFLUX_NOTIFY_BELL: "0",
-          TRIFLUX_NOTIFY_TOAST: "0",
         },
       });
       return JSON.parse(stdout);

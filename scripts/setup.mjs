@@ -859,10 +859,7 @@ function extractProfileLines(tomlContent, profileName) {
     .filter((line) => line.length > 0 && !line.startsWith("#"));
 }
 
-// Legacy aliases were removed from the packaged skill surface, so setup must
-// not recreate them. Existing local aliases remain protected from cleanup for
-// the v10 migration window.
-const SKILL_ALIASES = [];
+// 패키지에서 빠진 옛 별칭 스킬. v10 전환 기간에는 기존 설치본을 cleanup 에서 보호한다.
 const LEGACY_ALIAS_TOMBSTONES = new Set([
   "tfx-autopilot",
   "tfx-persist",
@@ -946,42 +943,6 @@ const REMOVED_SKILL_HASHES = {
 const LEGACY_CODEX_MODELS = ["o4-mini", "o3", "codex-mini-latest"];
 
 /**
- * 별칭 스킬 디렉토리를 동기화한다.
- * 소스 스킬의 SKILL.md와 하위 파일을 별칭 디렉토리에 복사하면서
- * SKILL.md 내부의 소스 이름 참조를 별칭으로 치환한다.
- * @param {string} srcDir - 소스 스킬 디렉토리
- * @param {string} dstDir - 대상(별칭) 디렉토리
- * @param {{ alias: string, source: string }} meta - 별칭 메타 정보
- * @returns {number} 동기화된 파일 수
- */
-function syncAliasedSkillDir(srcDir, dstDir, { alias, source }) {
-  if (!existsSync(srcDir)) return 0;
-  if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
-
-  let count = 0;
-  for (const entry of readdirSync(srcDir, { withFileTypes: true })) {
-    const srcPath = join(srcDir, entry.name);
-    const dstPath = join(dstDir, entry.name);
-    if (isSetupUserStateFile(entry.name)) continue;
-
-    if (entry.isDirectory()) {
-      count += syncAliasedSkillDir(srcPath, dstPath, { alias, source });
-      continue;
-    }
-    if (!entry.name.endsWith(".md")) continue;
-
-    const srcContent = readFileSync(srcPath, "utf8");
-    const aliased = srcContent.replaceAll(source, alias);
-    const existing = existsSync(dstPath) ? readFileSync(dstPath, "utf8") : null;
-    if (aliased !== existing) {
-      writeFileSync(dstPath, aliased, "utf8");
-      count++;
-    }
-  }
-  return count;
-}
-
-/**
  * SKILL.md frontmatter 의 `platform:` 목록(process.platform 값)을 읽는다.
  * SKILL.md의 `platform` 필드가 없거나 비어 있으면
  * 모든 플랫폼에 설치한다.
@@ -1054,7 +1015,6 @@ function cleanupStaleSkills(
         pkgNames.add(n);
     }
   }
-  for (const { alias } of SKILL_ALIASES) pkgNames.add(alias);
   for (const alias of LEGACY_ALIAS_TOMBSTONES) pkgNames.add(alias);
   for (const dep of DEPRECATED_SKILLS) pkgNames.add(dep);
 
@@ -1283,13 +1243,6 @@ export function syncSkills({
         continue;
       syncDirectory(skill, join(destination, name));
       result.total++;
-    }
-    for (const { alias, source: name } of SKILL_ALIASES) {
-      result.changed += syncAliasedSkillDir(
-        join(source, name),
-        join(destination, alias),
-        { alias, source: name },
-      );
     }
   }
   for (const installed of [destination, join(codexDir, "skills")]) {
@@ -1961,9 +1914,7 @@ export {
   retireOldInstallFiles,
   SETUP_MARKER_PATH,
   SETUP_USER_STATE_FILES,
-  SKILL_ALIASES,
   SYNC_MAP,
-  syncAliasedSkillDir,
   syncCodexHarnessAdapter,
   syncCodexManagedSkills,
   syncWorkerPackages,
