@@ -4,20 +4,11 @@
 // (bin, config, hooks, hub, hud, mesh, scripts, skills).
 
 import assert from "node:assert/strict";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { compareMirror } from "../../scripts/release/check-packages-mirror.mjs";
-
-const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 test("packages/triflux mirror is byte-identical to root", () => {
   const result = compareMirror({ fix: false });
@@ -36,23 +27,28 @@ test("packages/triflux mirror is byte-identical to root", () => {
 // Lock-in coverage for mirrored tops. Without these in MIRROR_TOPS the
 // release gate silently ignores drift in those root directories — caught by
 // Codex review on PR #319 follow-up and mirror-policy follow-ups.
+// 저장소 안에 프로브를 쓰면 동시 실행 중인 다른 테스트의 git status 에 섞이므로
+// 프로브만 담은 임시 저장소를 검사 대상으로 넘긴다.
 function withMirrorProbe(rel, fn) {
-  const probePath = join(REPO_ROOT, rel);
-  const probeDir = dirname(probePath);
-  const createdDir = !existsSync(probeDir);
-  mkdirSync(probeDir, { recursive: true });
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "triflux-mirror-probe-"));
+  const probePath = join(fixtureRoot, rel);
+  mkdirSync(dirname(probePath), { recursive: true });
   writeFileSync(probePath, "probe");
   try {
-    fn();
+    fn(() =>
+      compareMirror({
+        repoRoot: fixtureRoot,
+        mirrorRoot: join(fixtureRoot, "packages", "triflux"),
+      }),
+    );
   } finally {
-    rmSync(probePath, { force: true });
-    if (createdDir) rmSync(probeDir, { recursive: true, force: true });
+    rmSync(fixtureRoot, { recursive: true, force: true });
   }
 }
 
 test("check-packages-mirror walks hooks/ top-level dir", () => {
-  withMirrorProbe("hooks/__mirror_probe_temp__.txt", () => {
-    const result = compareMirror({ fix: false });
+  withMirrorProbe("hooks/__mirror_probe_temp__.txt", (compare) => {
+    const result = compare();
     const found = result.issues.find((i) =>
       i.path.endsWith("hooks/__mirror_probe_temp__.txt"),
     );
@@ -65,8 +61,8 @@ test("check-packages-mirror walks hooks/ top-level dir", () => {
 });
 
 test("check-packages-mirror walks hud/ top-level dir", () => {
-  withMirrorProbe("hud/__mirror_probe_temp__.txt", () => {
-    const result = compareMirror({ fix: false });
+  withMirrorProbe("hud/__mirror_probe_temp__.txt", (compare) => {
+    const result = compare();
     const found = result.issues.find((i) =>
       i.path.endsWith("hud/__mirror_probe_temp__.txt"),
     );
@@ -79,8 +75,8 @@ test("check-packages-mirror walks hud/ top-level dir", () => {
 });
 
 test("check-packages-mirror walks config/ top-level dir", () => {
-  withMirrorProbe("config/__mirror_probe_temp__.json", () => {
-    const result = compareMirror({ fix: false });
+  withMirrorProbe("config/__mirror_probe_temp__.json", (compare) => {
+    const result = compare();
     const found = result.issues.find((i) =>
       i.path.endsWith("config/__mirror_probe_temp__.json"),
     );
@@ -93,8 +89,8 @@ test("check-packages-mirror walks config/ top-level dir", () => {
 });
 
 test("check-packages-mirror walks skills/ top-level dir", () => {
-  withMirrorProbe("skills/__mirror_probe_temp__.txt", () => {
-    const result = compareMirror({ fix: false });
+  withMirrorProbe("skills/__mirror_probe_temp__.txt", (compare) => {
+    const result = compare();
     const found = result.issues.find((i) =>
       i.path.endsWith("skills/__mirror_probe_temp__.txt"),
     );
@@ -107,8 +103,8 @@ test("check-packages-mirror walks skills/ top-level dir", () => {
 });
 
 test("check-packages-mirror walks adapters/ top-level dir", () => {
-  withMirrorProbe("adapters/__mirror_probe_temp__.txt", () => {
-    const result = compareMirror({ fix: false });
+  withMirrorProbe("adapters/__mirror_probe_temp__.txt", (compare) => {
+    const result = compare();
     const found = result.issues.find((i) =>
       i.path.endsWith("adapters/__mirror_probe_temp__.txt"),
     );
@@ -124,17 +120,20 @@ test("check-packages-mirror skips skills/tfx-workspace", () => {
   // tfx-workspace is excluded from npm tarball via
   // packages/triflux/package.json files negation ("!skills/tfx-workspace"),
   // so source-tree drift in that subtree must not fail the release gate.
-  withMirrorProbe("skills/tfx-workspace/__mirror_probe_temp__.txt", () => {
-    const result = compareMirror({ fix: false });
-    const leaked = result.issues.find((i) =>
-      i.path.includes("tfx-workspace/__mirror_probe_temp__"),
-    );
-    assert.equal(
-      leaked,
-      undefined,
-      "tfx-workspace drift was flagged — SKIP_RELS regression",
-    );
-  });
+  withMirrorProbe(
+    "skills/tfx-workspace/__mirror_probe_temp__.txt",
+    (compare) => {
+      const result = compare();
+      const leaked = result.issues.find((i) =>
+        i.path.includes("tfx-workspace/__mirror_probe_temp__"),
+      );
+      assert.equal(
+        leaked,
+        undefined,
+        "tfx-workspace drift was flagged — SKIP_RELS regression",
+      );
+    },
+  );
 });
 
 test("check-packages-mirror skips generated skills/.omc state", () => {
