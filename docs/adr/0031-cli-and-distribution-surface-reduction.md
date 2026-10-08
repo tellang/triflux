@@ -37,7 +37,7 @@ pr: null
 | `tfx-route.sh`의 timeout 경고와 `result_file` | 4번째 인자 timeout과 `MIN_TIMEOUT` 경고는 아무것도 강제하지 않고, `result_file`은 읽는 코드가 없이 임시 디렉터리에 쌓인다 | 경고와 로그 라벨만 정리하고 인자 규약은 유지, `result_file`은 삭제 |
 | `packages/triflux` 배포 파일과 `@triflux/core` 배럴 | 저장소 개발 도구까지 배포하고, 배럴이 죽은 모듈을 공개 API로 재수출한다. 미러 절차를 서로 다르게 설명하는 문서가 있다 | `files`에서 개발 도구 제외, 배럴 축소(릴리스 노트에 명시), 미러 정본은 `pack.mjs`로 정하고 규칙 문서를 맞춘다 |
 | 계정 브로커(`hub/account-broker.mjs`) | `accounts.json`이 없어 꺼져 있다. 소비자가 9곳이다 | 다계정을 쓰지 않으면 삭제. 허브 제거 뒤에 판단한다 |
-| `experiments/native-bridge-feasibility/` | 일회성 프로브와 보고서 | 카나리로 쓰는 2개(`codex-app-server-uds-smoke`, `claude-native-worker-adoption-probe`)만 남기고 삭제 |
+| `experiments/native-bridge-feasibility/` | 일회성 프로브와 보고서 | 카나리 `codex-app-server-uds-smoke` 만 남기고 삭제(`claude-native-worker-adoption-probe` 는 #625 에서 공식 `claude --bg --exec` 경로로 대체되어 함께 삭제) |
 
 **Codex 워커 진행 관찰이라는 의도의 보존**: 삭제한 워커가 겨냥한 "Codex 워커 진행을 실시간으로 본다"는 기능은 다른 경로가 맡는다.
 
