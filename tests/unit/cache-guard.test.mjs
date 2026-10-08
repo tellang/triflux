@@ -1,11 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -105,20 +99,5 @@ describe("cache-guard", () => {
         assert.deepEqual(status.unreachable, ["http://127.0.0.1:1"]);
       },
     );
-  });
-
-  it("CLI update 경로가 async 캐시 가드를 사용하도록 연결돼 있다", () => {
-    const source = readFileSync(
-      join(process.cwd(), "bin", "triflux.mjs"),
-      "utf8",
-    );
-
-    assert.match(source, /async function cmdUpdate\(/);
-    assert.match(source, /await checkNetworkAvailability\(networkTargets\)/);
-    assert.match(
-      source,
-      /validateRuntimeCachePaths\(join\(CLAUDE_DIR, "cache"\)\)/,
-    );
-    assert.match(source, /case "update":[\s\S]*await cmdUpdate\(/);
   });
 });

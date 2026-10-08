@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const PROJECT_ROOT = join(__dirname, "..", "..");
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 const {
   extractProfileLines,
@@ -19,7 +16,7 @@ const {
 
 // ── helpers ──
 
-const TMP_DIR = join(PROJECT_ROOT, "tests", ".tmp-codex-profiles");
+const TMP_DIR = mkdtempSync(join(tmpdir(), "tfx-codex-profiles-"));
 
 function ensureTmpDir() {
   if (!existsSync(TMP_DIR)) mkdirSync(TMP_DIR, { recursive: true });
