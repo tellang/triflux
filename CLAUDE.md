@@ -187,9 +187,3 @@ Windows Terminal의 독립 탭 열기는 유지한다.
 | `.claude/rules/tfx-skill-authoring.md` | 스킬 frontmatter, 프로필 표기, 검증 규약 |
 
 Claude Code는 `.claude/rules/*.md`를 자동으로 불러온다. Codex CLI는 `@import`를 지원하지 않으므로 필요하면 `AGENTS.md`를 독립적으로 유지한다.
-
-## GBrain
-
-설정 정본은 `~/Projects/CLAUDE.md`다.
-
-- 이 저장소 정책: 읽기·쓰기(github.com/tellang/triflux)

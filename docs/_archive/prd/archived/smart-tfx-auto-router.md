@@ -9,7 +9,7 @@ tfx-auto를 스마트 라우터로 강화하여 40개 tfx 스킬의 구현 진�
 
 ## 설계 문서
 
-`~/.gstack/projects/tellang-triflux/tellang-main-design-20260406-004604.md`
+gstack 설계 문서(2026-04-06, 저장소 밖)
 
 ## 파일
 

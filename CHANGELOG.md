@@ -130,7 +130,7 @@ All notable changes to triflux will be documented in this file.
 ### Changed
 - skills: `tfx-interview --format goal` 이 자연어 목표를 `/goal` 블록(End state / Check / Constraints / Stop bound)으로 바꾼다. `tfx-setup` 에 훅 우선순위 관리 절, `tfx-doctor` 에 tfx-hub 시작·중지·상태 절을 둔다. `tfx-auto` 의 panel 설명에 3관점 분석 roster 를, consensus 설명에 3자 합의 cleanup 기준을 더한다. `tfx-review` 가 코드 판정, gstack `/qa` 가 브라우저·흐름 게이트를 맡는다
 - hooks: 키워드 규칙 `tfx-analysis`·`tfx-prune` 은 `tfx-auto`, `tfx-qa` 는 `tfx-review`, `tfx-hub` 는 `tfx-doctor` 로 보낸다. 패턴은 그대로다
-- hooks: 키워드 훅이 명시 토큰(문장 중간 `/tfx-harness`, `tfx-auto 로 돌려`, `tfx review`, `deslop` 등)에만 MUST 호출 문구를 주입하고, 자연어 매칭은 "실행 요청이면 고려하고 질문·대화면 무시하라"는 제안(`strength: suggest`)으로 낮춘다. 규칙 필드 `strength`·`suggest_when`·`exclude_patterns` 를 더한다. `tfx-unified` 는 광역 동사 단독 대신 "대상 명사 + 구현·수정 동사"와 `tfx auto` 토큰만 잡고, `tfx-ship` 은 배포·릴리즈 동사형만 잡으며 둘 다 질문형을 뺀다. `tfx-auto`·`tfx-harness`·`tfx-multi` 는 슬래시 없는 이름 언급을 잡지 않는다. 주입문이 프롬프트 원문을 다시 붙이거나 OMC 키워드를 무시하라고 적지 않는다. 두 머신 60일 프롬프트 재생 기준 주입 2,439건(오탐 2,208) → 102건(오탐 40) (ADR-0021)
+- hooks: 키워드 훅이 명시 토큰(문장 중간 `/tfx-harness`, `tfx-auto 로 돌려`, `tfx review`, `deslop` 등)에만 MUST 호출 문구를 주입하고, 자연어 매칭은 "실행 요청이면 고려하고 질문·대화면 무시하라"는 제안(`strength: suggest`)으로 낮춘다. 규칙 필드 `strength`·`suggest_when`·`exclude_patterns` 를 더한다. `tfx-unified` 는 광역 동사 단독 대신 "대상 명사 + 구현·수정 동사"와 `tfx auto` 토큰만 잡고, `tfx-ship` 은 배포·릴리즈 동사형만 잡으며 둘 다 질문형을 뺀다. `tfx-auto`·`tfx-harness`·`tfx-multi` 는 슬래시 없는 이름 언급을 잡지 않는다. 주입문이 프롬프트 원문을 다시 붙이거나 OMC 키워드를 무시하라고 적지 않는다. 60일 프롬프트 기록 재생 기준 주입 2,439건(오탐 2,208) → 102건(오탐 40) (ADR-0021)
 - hooks: gstack 규칙은 스킬 이름을 고정하지 않고 `skill_candidates`(`ship`/`gstack-ship` 등)에서 실제 설치된 이름을 골라 주입한다. 설치된 후보가 없으면 주입하지 않는다 (ADR-0021)
 - setup: SKILL.md frontmatter `platform:` 목록(keyword-rules 의 `platform` 과 같은 뜻)이 있으면 현재 플랫폼이 목록에 있을 때만 스킬을 설치하고, 아니면 이미 깔린 사본을 지운다. `tfx doctor` 의 스킬 집계·stale 감지와 Codex managed 스킬 동기화도 같은 규칙을 따른다. `tfx-wt` 는 `platform: [win32]` 다
 - docs: 라우팅 정본(D2·D6·D7·D8, ladder, 행동 유형 표, Claude 네이티브 목록), 스택 공존·실행 스킬 맵이 지운 스킬을 owner 로 돌려주지 않게 고친다
@@ -263,7 +263,7 @@ All notable changes to triflux will be documented in this file.
 
 ### Fixed
 - hud: CTX 평면 혼동 — hub request-logger의 데몬 누적 토큰 카운터가 세션 컨텍스트로 오독·영구 100% critical 표시되던 결함. hub monitor 캐시 경로 분리 + stdin 컨텍스트 부재 시 `CTX:--`
-- hud: codex 5h 창 멀티계정 last-writer-wins — 최신 이벤트를 낸 경량 계정 창이 주력 계정 소진(실측 70%)을 가리던 결함. resets_at 90s 클러스터링 + 활성 창 중 max-used 선택 + 오늘·어제 병합 스캔(자정 넘김 세션 가림 제거)
+- hud: codex 5h 창 멀티계정 last-writer-wins: 최신 이벤트를 낸 경량 계정 창이 주력 계정 소진을 가리던 결함. resets_at 90s 클러스터링 + 활성 창 중 max-used 선택 + 오늘·어제 병합 스캔(자정 넘김 세션 가림 제거)
 - hud: 1w 주간 창을 5h 선택에 얹지 않고 독립 선택 — 5h 창이 만료된 계정의 주간 소진(실측 40~43%)이 표시되지 않던 결함
 - mirror: packages/remote uds-orchestrator import 변환 복원
 
@@ -889,7 +889,7 @@ All notable changes to triflux will be documented in this file.
 ### Fixed
 
 - **`fix(macos)` (PR #233)** macOS 환경 두 회귀 해결:
-  - **#231**: `hooks/hook-registry.json`의 `ext-session-vault-{start,export}` 가 `enabled: true`로 박혀 doctor `--fix` 실행 시 source 디렉토리 부재 여부 검사 없이 settings.json 에 무조건 등록됐다. 이제 두 항목은 `enabled: false` + `requires: "$HOME/Desktop/Projects/tools/session-vault"` 로 마킹되고, 등록 로직이 `requires` 경로 부재 시 silent skip 한다. 외부 통합 hook 일반 패턴으로도 재사용 가능. (Closes #231)
+  - **#231**: `hooks/hook-registry.json`의 `ext-session-vault-{start,export}` 가 `enabled: true`로 박혀 doctor `--fix` 실행 시 source 디렉토리 부재 여부 검사 없이 settings.json 에 무조건 등록됐다. 이제 두 항목은 `enabled: false` + `requires: <외부 도구 경로>` 로 마킹되고, 등록 로직이 `requires` 경로 부재 시 silent skip 한다. 외부 통합 hook 일반 패턴으로도 재사용 가능. (Closes #231)
   - **#232**: `scripts/tfx-route.sh:368` 의 `local text="${prompt,,}"` 가 bash 4+ 전용 case-conversion syntax 라 macOS 디폴트 `/bin/bash 3.2.57` 환경에서 `bad substitution` 으로 dispatch 자체가 실패했다. portable `tr '[:upper:]' '[:lower:]'` 로 교체. 추가로 코드베이스 전반에 동일 패턴 sweep — 단일 occurrence 였음을 확인. (Closes #232)
 
 ### Tests
@@ -975,7 +975,7 @@ All notable changes to triflux will be documented in this file.
 
 - Prevented the hub orphan-process cleanup from terminating active Claude Code or Codex sessions. The periodic cleanup now treats live `claude.exe` and `codex.exe` processes as protected session roots, while still reclaiming narrow legacy runtime leftovers.
 - Added `TFX_DISABLE_ORPHAN_CLEANUP=1` as an emergency gate for hub orphan cleanup and expanded cleanup logs with killed process details so future incidents show the exact PID, process name, command line, and caller.
-- Extended hub runtime cleanup to remove orphaned duplicate `bun ... gbrain/src/cli.ts serve` processes while preserving the live `gbrain` runtime under the active Claude/Codex session.
+- Extended hub runtime cleanup to remove orphaned duplicate external MCP runtime processes while preserving the live runtime under the active Claude/Codex session.
 - Disabled the broad Stop-hook MCP cleanup by default. `mcp-cleanup.ps1` is now opt-in via `TFX_ENABLE_STOP_MCP_CLEANUP=1`, preventing normal Claude Code response-stop events from killing live MCP runtimes.
 - Hardened SessionStart stale PID cleanup against Windows PID reuse and live Claude/Codex ancestor chains, so stale `tfx-route-*-pids` files cannot kill runtime children from the current session.
 - Cleaned up stray SS3 cursor escape fragments such as `[O[` from routed CLI output.
@@ -1033,7 +1033,7 @@ All notable changes to triflux will be documented in this file.
 
 - **`fix(swarm-cli)` (#116-C policy reversal)** non-TTY 환경 fail-fast → warn-and-proceed (3d881fc) — `assertTtyForSwarm` 이 양측 stdout/stdin non-TTY 시 더 이상 차단하지 않고 warning 출력 후 진행. **이유**: 기존 fail-fast 는 첫 사용자에게 묻기 효과 (실제 user terminal 은 TTY 인데 Claude Code `run_in_background` 같은 spawn 환경에서 child stdio 만 non-TTY) → 다른 사용자도 동일 마찰. **신설**: `TFX_BLOCK_NON_TTY_SWARM=1` opt-out env (안전 망 — 실제 hang 환경에서 차단). 기존 `TFX_ALLOW_NON_TTY_SWARM=1` 은 silent OK 호환 유지 (warning suppress). main + `packages/{triflux,remote}` mirror 3개 byte-equal 동기화.
 - **`chore(scripts)` (#197, shard D)** `release:bump --write` 누락 시 warning + codex-config guard CI 통합 (99742c5) — release bump 가 `--write` 플래그 없이 호출되면 dry-run 임을 명시 stderr 경고. `.github/workflows/ci.yml` 에 codex-config guard step 추가 (production `~/.codex/config.toml` mutation 회귀 가드). **Constraint**: PRD 가 CI 통합만 선택 → husky 는 본 shard 에서 documentation-only 유지. `tests/unit/bump-version-warning.test.mjs` + `scripts/__tests__/release-governance.test.mjs` + `npx js-yaml .github/workflows/ci.yml` PASS.
-- **`chore(gitignore)`** `references/{codex,gemini}-snapshots/` 제외 (0d8f41c) — manual codex state snapshot (141MB) 이 GitHub 100MB 제한 초과 → `~/.codex-backups/codex-state-20260426-092115.tar.gz` 외부 이동. shard E 의 auto-snapshot watcher 도 동일 path 사용 → git tracking 시 repo size 폭증 방지.
+- **`chore(gitignore)`** `references/{codex,gemini}-snapshots/` 제외 (0d8f41c): manual codex state snapshot (141MB) 이 GitHub 100MB 제한 초과 → 저장소 밖으로 이동. shard E 의 auto-snapshot watcher 도 동일 path 사용 → git tracking 시 repo size 폭증 방지.
 - **`chore(hub)`** spawn stdio 를 log file 로 redirect (abcd4de) — `bin/triflux.mjs:5043` + `:5231` 의 hub server spawn 이 `stdio: "ignore"` 사용 → stdout/stderr 가 어디로도 가지 않아 crash root cause 추적 불가. `openHubLogFd()` helper 추가, `~/.claude/cache/tfx-hub/hub.log` 에 fd 열어 두 spawn 위치 모두 적용. `tfx hub start` startup `errFd` 는 keep (#102 패턴) 하면서 runtime stderr 도 hub.log fallback 으로 캡처.
 - **`chore(test-lock)`** spawn stdio 분리 + stdin close (4f8076e) — `scripts/test-lock.mjs` spawn 이 stdin 을 열린 채 두던 패턴 → child 가 stdin EOF 받지 못하면 hang. stdin close 로 robustness 개선.
 - **`chore(release)`** `runCommand` maxBuffer floor + per-step override (4c36be4) — release prepare 가 npm test/lint 출력 OOM 으로 silent fail 하던 패턴 차단. floor 값 + 단계별 override 가능.
@@ -1134,7 +1134,7 @@ All notable changes to triflux will be documented in this file.
 - **`fix(tfx-route)` (#153)** preflight 정규식이 dotted server 이름 허용 (83b03fb) — `_mcp_preflight_filter_dead` 의 candidate 추출 정규식이 `[^.]+` 로 첫 dot 에서 끊어, `[mcp_servers.foo.bar]` 같은 dotted 서버는 probe/filter 대상에서 통째로 누락되던 문제. `(.+)\.enabled=true$` 로 변경해 end anchor 활용한 정확한 캡처. mcp-health.mjs 파서 (`[a-zA-Z0-9_.-]+`) 와 일관성 회복. drop 루프는 이미 prefix 매칭이라 dead 이름 그대로 받아 모든 override 제거.
 - **`fix(mcp-health)` (#149, #154)** binary fingerprint cache key + atomic cache write (02b792d) — (#149) 기존 cache 가 configMtime + TTL 만으로 fresh 판정해 `npm i -g <mcp-bin>` 설치/제거를 5분간 감지 못하던 문제. 서버별 fingerprint (resolved binary path+mtime+size 또는 url) 을 cache 에 포함하고 일치할 때만 hit 으로 판정. legacy cache (fingerprint 없음) 는 stale → 자동 migration. (#154) `writeCache` 가 비원자적 `writeFileSync` 라 swarm/병렬 실행 시 reader 가 partial JSON → null 받아 cache 효용 손실. tmp (`pid.timestamp` 이름) + `renameSync` atomic write 로 변경.
 - **`fix(tfx-route)` (#148)** all-dead preflight 조기 실패 (50ec35f) — profile-allowed MCP 가 전부 dead 일 때 BUG-H (#132) fail-safe 가 swap 을 skip → 원본 config.toml 전체가 Codex 에 전달되어 비필요 MCP 다수까지 spawn 되는 역효과. preflight 끝에서 남은 `enabled=true` 개수 검사 → 0 이면 `exit 78` 조기 실패. opt-in escape: `TFX_MCP_ALLOW_ALL_DEAD=1`.
-- **`fix(mcp-sync)` (#152)** support root-level `.mcp.json` alongside `.claude/mcp.json` (657771a) — Claude Code 는 두 경로 모두 읽지만 과거 sync 는 `.claude/mcp.json` 만 처리해 root-only 레이아웃 (research-fold7-terminal 등) 은 sync 가 작동하지 않았음. 이제 둘 다 처리.
+- **`fix(mcp-sync)` (#152)** support root-level `.mcp.json` alongside `.claude/mcp.json` (657771a): Claude Code 는 두 경로 모두 읽지만 과거 sync 는 `.claude/mcp.json` 만 처리해 root-only 레이아웃 프로젝트는 sync 가 작동하지 않았음. 이제 둘 다 처리.
 - **`fix(mcp-health)`** tighten preflight accuracy — multiline TOML args + HTTP validation (1f8d508) — (A1) 멀티라인 array 값 (`args = [\n  "run",\n  "server.js"\n]`) 을 single-line 파서가 `"["` 문자열로 오인해 정상 서버를 dead 로 오탐. bracket depth tracker 로 `]` 까지 누적해 array 로 파싱. (A2) HTTP probe 가 status 2xx-4xx 전부 alive 로 취급해 404/401 HTML 페이지를 healthy 로 오판. 200 + JSON-RPC envelope (id 일치, result|error 존재) 둘 다 검증.
 - **`fix(mcp-sync)`** project mcp.json type 필드도 rewrite (legacy url→http) (50b5f0d) — Claude Code 현재 스키마는 `type: "http"` 만 허용. 과거 `type: "url"` 는 parse 실패로 MCP 전체 단절. url 일치만으로 skip 하면 legacy 가 영원히 안 고쳐지던 문제. 이제 type 필드도 함께 rewrite.
 - **`fix(tfx-route)`** preflight env + codex MCP exec fallback (923aa1a) — preflight env 변수 누락 + codex MCP exec fallback 경로 보강.
@@ -1178,7 +1178,7 @@ All notable changes to triflux will be documented in this file.
 ### Fixed
 
 - **`fix(hud)`** `buildContextUsageView` limit priority regression — stdin 이 명시한 `context_window_size` 가 modelHint fallback (DEFAULT 200K) 에 의해 override 되어 `600/1K (60%)` 기대값 대신 `600/200K (0%)` 로 떨어지던 lake4-integration 실패. stdin > (modelId present ? `Math.max(monitor,hint)` : `monitor||hint`) 우선순위로 재정렬. Opus 4.7 warn/critical 분류가 modelHint 우선 로직에 의존하므로 modelId 존재 여부로 분기 (opus-duplicate-status 3 cases + lake4-integration 2 cases 동시 만족). `hud/context-monitor.mjs` + packages mirror.
-- **`fix(release)`** `prepare.mjs` preflight stale test-lock cleanup — 이전 `release:prepare` 실행이 남긴 `.test-lock/pid.lock` 으로 인한 반복 실패 (MEMORY `feedback_test_lock_stale.md` 재확인, v10.13.6 ship 시 수동 `rm -f` 우회 필요했던 패턴). `prepareRelease()` 진입 직후 exported `cleanupStaleTestLock()` 호출로 lockfile 자동 제거. `rmSync` 실패 시 warn fallback (prepare 진행은 유지). `scripts/release/prepare.mjs` + packages mirror.
+- **`fix(release)`** `prepare.mjs` preflight stale test-lock cleanup: 이전 `release:prepare` 실행이 남긴 `.test-lock/pid.lock` 으로 인한 반복 실패 (v10.13.6 ship 시 수동 `rm -f` 우회 필요했던 패턴). `prepareRelease()` 진입 직후 exported `cleanupStaleTestLock()` 호출로 lockfile 자동 제거. `rmSync` 실패 시 warn fallback (prepare 진행은 유지). `scripts/release/prepare.mjs` + packages mirror.
 
 ### Added
 

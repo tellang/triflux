@@ -1,6 +1,6 @@
 # Debug Blackbox + Startup Performance Fix
 
-> Design doc: ~/.gstack/projects/tellang-triflux/tellang-main-design-20260409-093911.md
+> Design doc: gstack 설계 문서(2026-04-09, 저장소 밖)
 > Eng review: CLEARED (2026-04-09, 7 issues resolved, Codex outside voice 반영)
 
 ## Problem
