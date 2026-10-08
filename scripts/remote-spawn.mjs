@@ -46,6 +46,8 @@ import {
 } from "../hub/team/psmux.mjs";
 import {
   isEnvCacheFresh,
+  posixRemoteCommand,
+  pwshRemoteCommand,
   remoteEnvCacheDir,
 } from "../hub/team/remote-session.mjs";
 
@@ -1179,24 +1181,13 @@ function resolveRemoteStageDir(env, stageId) {
 }
 
 function ensureRemoteStageDir(host, env, remoteStageDir) {
-  if (env.os === "win32") {
-    const safePath = escapePwshSingleQuoted(remoteStageDir);
-    const command = `New-Item -ItemType Directory -Path '${safePath}' -Force | Out-Null`;
-    execFileSync("ssh", [host, "pwsh", "-NoProfile", "-Command", command], {
-      timeout: 10000,
-      stdio: "pipe",
-    });
-    return;
-  }
-
-  execFileSync(
-    "ssh",
-    [host, "sh", "-lc", `mkdir -p ${shellQuote(remoteStageDir)}`],
-    {
-      timeout: 10000,
-      stdio: "pipe",
-    },
-  );
+  const command =
+    env.os === "win32"
+      ? pwshRemoteCommand(
+          `New-Item -ItemType Directory -Path '${escapePwshSingleQuoted(remoteStageDir)}' -Force | Out-Null`,
+        )
+      : posixRemoteCommand(`mkdir -p ${shellQuote(remoteStageDir)}`);
+  execFileSync("ssh", [host, command], { timeout: 10000, stdio: "pipe" });
 }
 
 function uploadFileToRemote(host, localPath, remotePath) {
@@ -2165,7 +2156,7 @@ export function parseRemoteProcessCount(stdout) {
 }
 
 function defaultRunRemoteCommand(host, command) {
-  const stdout = execFileSync("ssh", [host, "sh", "-lc", command], {
+  const stdout = execFileSync("ssh", [host, posixRemoteCommand(command)], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 30_000,
