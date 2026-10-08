@@ -27,7 +27,7 @@ TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh executor "$prompt" 
 
 - Windows psmux와 WT 실행 규칙은 `.claude/rules/tfx-psmux.md`에 있다.
 - 원격 실행은 `tfx-remote`를 사용한다.
-- 비대화식 결과는 작업 완료 알림 뒤에 읽는다. 완료 마커는 `=== HEADLESS_COMPLETE succeeded=N failed=N total=N ===`다.
+- 비대화식 결과는 작업 완료 알림 뒤에 읽는다. 완료 마커는 `=== HEADLESS_COMPLETE succeeded=N failed=N total=N ===`다. 워커별 상태와 exit 코드는 `$TMPDIR/tfx-headless/{sessionName}.results.json` 결과 색인을 읽는다(ADR-0034).
 - Claude 작성 코드는 Codex로, Antigravity 작성 코드는 Claude 또는 Codex로 교차 검증한다. 동일 모델이 스스로 승인하지 않는다.
 
 ## 스킬 라우팅
