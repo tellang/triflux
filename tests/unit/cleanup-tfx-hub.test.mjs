@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
+  cleanupLegacyMcp,
   cleanupTfxHub,
   findProjectHubEntries,
 } from "../../scripts/lib/legacy-mcp-cleanup.mjs";
@@ -351,4 +352,39 @@ test("cwd 의 프로젝트 MCP 파일에서 허브 주소 tfx-hub 항목이 있�
     mcpServers: { "tfx-hub": { command: "node" }, other: OTHER },
   });
   assert.deepEqual(findProjectHubEntries(root), [join(root, ".mcp.json")]);
+});
+
+test("게이트웨이 이주와 허브 정리가 같은 파일을 바꿔도 백업은 한 벌이다", () => {
+  const { root, home } = fixture();
+  const claude = join(home, ".claude.json");
+  put(claude, {
+    mcpServers: {
+      context7: { url: "http://127.0.0.1:8100/mcp" },
+      "tfx-hub": HUB,
+    },
+  });
+  const run = (command) => {
+    if (command === "ps") return "";
+    throw new Error("unexpected command");
+  };
+  const backups = new Map();
+  const migrated = cleanupLegacyMcp({
+    home,
+    repoRoot: join(root, "repo"),
+    platform: "darwin",
+    run,
+    uid: 500,
+    env: {},
+    backups,
+  });
+  const hub = cleanupTfxHub({ home, platform: "darwin", run, backups });
+  assert.equal(migrated.ok && hub.ok, true);
+  assert.deepEqual(hub.backups, migrated.backups);
+  const servers = JSON.parse(readFileSync(claude, "utf8")).mcpServers;
+  assert.equal(servers["tfx-hub"], undefined);
+  assert.equal(servers.context7.command, "npx");
+  assert.equal(
+    readdirSync(home).filter((name) => name.includes(".tfx-bak-")).length,
+    1,
+  );
 });

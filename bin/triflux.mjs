@@ -1245,10 +1245,13 @@ async function cmdSetup(options = {}) {
     });
   }
   // 이주가 막혀도 setup 은 계속한다. 남은 항목은 경고로 알린다.
-  for (const warning of cleanupLegacyMcp().warnings) warn(warning);
+  const mcpBackups = new Map();
+  for (const warning of cleanupLegacyMcp({ backups: mcpBackups }).warnings)
+    warn(warning);
   const hubCleanup = cleanupTfxHub({
     pluginRoot: existsSync(join(PKG_ROOT, ".git")) ? undefined : PKG_ROOT,
     log: info,
+    backups: mcpBackups,
   });
   for (const warning of hubCleanup.warnings) warn(warning);
   if (hubCleanup.changed) ok("제거된 허브의 설정과 실행 흔적 정리");
@@ -1495,6 +1498,16 @@ function statusBadge(status) {
   }
 }
 
+// URL 은 같고 헤더만 다르면 그렇게 보여 준다. URL 만 찍으면 같은 값끼리 불일치로 보인다.
+function isHeaderOnlyMismatch(row) {
+  return Boolean(row.expectedUrl) && row.expectedUrl === row.actualUrl;
+}
+
+// stdio 항목은 명령이 같고 인자만 다를 수 있어 인자까지 보여 준다.
+function mcpTarget(url, command, args = []) {
+  return url || [command, ...args].filter(Boolean).join(" ");
+}
+
 function buildMcpStatusRows(statusInfo) {
   const registryRows = statusInfo.rows
     .filter((row) => row.type === "registry")
@@ -1505,7 +1518,9 @@ function buildMcpStatusRows(statusInfo) {
       else if (row.status === "missing") detail = "registry only";
       else if (row.status === "missing-file") detail = "config missing";
       else if (row.status === "mismatch")
-        detail = `expected ${row.expectedUrl || row.expectedCommand}`;
+        detail = isHeaderOnlyMismatch(row)
+          ? `header ${row.headerStatus}: ${row.expectedHeaderNames.join(", ")}`
+          : `expected ${mcpTarget(row.expectedUrl, row.expectedCommand, row.expectedArgs)}`;
       else if (row.status === "invalid-config") detail = "parse error";
       else if (row.status === "skipped") detail = row.message || "skipped";
       else if (row.status === "stdio") detail = "configured as stdio";
@@ -2851,9 +2866,22 @@ async function cmdDoctor(options = {}) {
         }
 
         for (const row of mismatchRows) {
-          warn(`${row.label}: ${row.name} URL 불일치`);
-          info(`expected ${row.expectedUrl}`);
-          if (row.actualUrl) info(`actual   ${row.actualUrl}`);
+          if (isHeaderOnlyMismatch(row)) {
+            warn(`${row.label}: ${row.name} 헤더 불일치 (${row.headerStatus})`);
+            info(`expected ${row.expectedHeaderNames.join(", ") || "없음"}`);
+            info(`actual   ${row.actualHeaderNames.join(", ") || "없음"}`);
+            continue;
+          }
+          warn(`${row.label}: ${row.name} 설정 불일치`);
+          info(
+            `expected ${mcpTarget(row.expectedUrl, row.expectedCommand, row.expectedArgs)}`,
+          );
+          const actualTarget = mcpTarget(
+            row.actualUrl,
+            row.actualCommand,
+            row.actualArgs,
+          );
+          if (actualTarget) info(`actual   ${actualTarget}`);
         }
 
         for (const row of missingFileRows) {

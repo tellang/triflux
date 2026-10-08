@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { writeRotatedBackup } from "./backup-rotation.mjs";
 
 const EFFORT_BY_SUFFIX = {
   ultra: "ultra",
@@ -280,8 +281,9 @@ export function sanitizeCodexProfileConfigFile(
   const sanitized = sanitizeCodexProfileConfig(source, { codexHome });
   if (!sanitized.changed) return sanitized;
   const mode = privateFileMode(configPath);
-  writeFileSync(`${configPath}.${backupPrefix}-${stamp(now)}`, source, {
-    encoding: "utf8",
+  writeRotatedBackup(configPath, source, {
+    label: backupPrefix,
+    suffix: stamp(now),
     mode,
   });
   // Atomic replace. config.toml is shared global state: a codex session may be

@@ -10,6 +10,8 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeRotatedBackup } from "./lib/backup-rotation.mjs";
+import { privateFileMode } from "./lib/codex-profile-config.mjs";
 import { resolveStableNodeBin } from "./lib/stable-node.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -21,7 +23,10 @@ const HOOK_GROUP_NAME = "triflux-session";
 
 function atomicWriteFile(path, content) {
   const tmpPath = `${path}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmpPath, content, "utf8");
+  writeFileSync(tmpPath, content, {
+    encoding: "utf8",
+    mode: privateFileMode(path),
+  });
   renameSync(tmpPath, path);
 }
 
@@ -119,10 +124,11 @@ export function ensureAgyHooks(opts = {}) {
   if (changed) {
     mkdirSync(dirname(hooksPath), { recursive: true });
     if (original) {
-      const backupPath = `${hooksPath}.bak-tfx-agy-hooks-${opts.backupTimestamp || timestamp()}`;
-      if (!existsSync(backupPath)) {
-        writeFileSync(backupPath, original, "utf8");
-      }
+      writeRotatedBackup(hooksPath, original, {
+        label: "bak-tfx-agy-hooks",
+        suffix: opts.backupTimestamp || timestamp(),
+        mode: privateFileMode(hooksPath),
+      });
     }
     atomicWriteFile(hooksPath, next);
   }

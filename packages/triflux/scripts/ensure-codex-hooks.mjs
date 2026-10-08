@@ -11,6 +11,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { writeRotatedBackup } from "./lib/backup-rotation.mjs";
 import {
   privateFileMode,
   sanitizeCodexProfileConfig,
@@ -361,13 +362,11 @@ export function ensureCodexHooks(opts = {}) {
   const changedConfig = originalConfig !== nextConfig;
   if (changedConfig) {
     if (existsSync(configPath)) {
-      const backupPath = `${configPath}.bak-tfx-codex-hooks-${opts.backupTimestamp || timestamp()}`;
-      if (!existsSync(backupPath)) {
-        writeFileSync(backupPath, originalConfig, {
-          encoding: "utf8",
-          mode: privateFileMode(configPath),
-        });
-      }
+      writeRotatedBackup(configPath, originalConfig, {
+        label: "bak-tfx-codex-hooks",
+        suffix: opts.backupTimestamp || timestamp(),
+        mode: privateFileMode(configPath),
+      });
     }
     atomicWriteFile(configPath, nextConfig);
   }
