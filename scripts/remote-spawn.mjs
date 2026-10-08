@@ -1656,7 +1656,6 @@ async function spawnRemoteViaTmux(args, promptContext, env) {
   );
   const paneId = `${sessionName}:0.0`;
   const runId = randomUUID().slice(0, 8);
-  writeSpawnRecord(sessionName, { host, runId });
   const permissionFlags = getPermissionFlag().join(" ");
   let prompt = promptContext.prompt;
 
@@ -1697,6 +1696,8 @@ async function spawnRemoteViaTmux(args, promptContext, env) {
   );
 
   psmuxExec(buildTmuxSpawnSessionArgs(sessionName, paneCommand));
+  // 세션 생성에 성공한 실행만 기록한다. 동시에 같은 이름으로 띄운 실패한 쪽이 덮어쓰지 않게 한다.
+  writeSpawnRecord(sessionName, { host, runId });
   try {
     startSpawnSessionCleanupWatcher(sessionName, paneId);
 
@@ -1774,7 +1775,6 @@ async function spawnRemote(args, promptContext) {
   const sessionName = deduplicateSessionName(`tfx-spawn-${host}-${slug}`);
   const paneId = `${sessionName}:0.0`;
   const runId = randomUUID().slice(0, 8);
-  writeSpawnRecord(sessionName, { host, runId });
   const permissionFlags = getPermissionFlag().join(" ");
   let prompt = promptContext.prompt;
 
@@ -1793,6 +1793,7 @@ async function spawnRemote(args, promptContext) {
   }
 
   createPsmuxSession(sessionName, { layout: "1xN", paneCount: 1 });
+  writeSpawnRecord(sessionName, { host, runId });
   try {
     sendKeysToPane(paneId, buildRemoteBootstrapCommand(host));
     await waitForRemotePrompt(sessionName, paneId);
@@ -2186,7 +2187,8 @@ export function buildRemoteSessionStopCommand(sessionName, runId) {
   return [
     readRunPidScript(remoteRunDir(sessionName, runId), "exit 0"),
     'tree() { for c in $(pgrep -P "$1"); do echo "$c"; tree "$c"; done; }',
-    '{ echo "$pid"; pgrep -g "$pid"; tree "$pid"; } | sort -u > "$d/procs"',
+    // 다시 kill 할 때 앞서 잡은 고아 손자를 잃지 않게 이전 목록과 합친다.
+    '{ cat "$d/procs" 2>/dev/null; echo "$pid"; pgrep -g "$pid"; tree "$pid"; } | sort -u > "$d/procs.new" && mv "$d/procs.new" "$d/procs"',
     'kill -TERM $(cat "$d/procs") 2>/dev/null; true',
   ].join("; ");
 }
@@ -2197,9 +2199,13 @@ export function buildRemoteClaudeProcessCountCommand(sessionName, runId) {
     readRunPidScript(remoteRunDir(sessionName, runId), "echo missing; exit 0"),
     '[ -f "$d/procs" ] || { echo missing; exit 0; }',
     'n=$( { cat "$d/procs"; pgrep -g "$pid"; pgrep -P "$pid"; } | sort -u | while read -r p; do kill -0 "$p" 2>/dev/null && echo "$p"; done | wc -l)',
-    '[ "$n" -eq 0 ] && rm -f "$d/shell.pid" "$d/procs" && rmdir "$d" 2>/dev/null',
     "echo $n",
   ].join("; ");
+}
+
+/** 요청 전체가 성공한 뒤에만 지운다. 실패 뒤 다시 --kill 할 때 기록이 남아 있어야 한다. */
+export function buildRemoteRunCleanupCommand(sessionName, runId) {
+  return `d=${remoteRunDir(sessionName, runId)}; rm -f "$d/shell.pid" "$d/procs"; rmdir "$d" 2>/dev/null; true`;
 }
 
 /** 로컬 세션별 spawn 기록. --kill 이 원격 기록 디렉터리를 찾는 데 쓴다. */
@@ -2221,7 +2227,9 @@ function readSpawnRecord(sessionName) {
   }
 }
 
-function removeSpawnRecord(sessionName) {
+// 기다리는 사이 같은 이름으로 새로 spawn 했을 수 있어 runId 가 같을 때만 지운다.
+function removeSpawnRecord(sessionName, runId) {
+  if (readSpawnRecord(sessionName)?.runId !== runId) return;
   try {
     unlinkSync(spawnRecordPath(sessionName));
   } catch {}
@@ -2363,7 +2371,10 @@ export async function killSpawnSession(sessionName, options = {}) {
   // 명시로 요청한 데몬 정지가 실패하면 전체도 실패다.
   remote.ok =
     remote.remaining === 0 && (!options.stopDaemon || remote.daemonStop.ok);
-  if (remote.remaining === 0) removeSpawnRecord(sessionName);
+  if (remote.ok) {
+    runStep(buildRemoteRunCleanupCommand(sessionName, runId));
+    removeSpawnRecord(sessionName, runId);
+  }
   result.remote = remote;
   result.ok = result.local.ok && remote.ok;
   return result;

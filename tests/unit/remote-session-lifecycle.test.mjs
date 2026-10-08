@@ -8,6 +8,7 @@ import {
   buildRemoteDaemonStopCommand,
   buildRemotePathExportCommand,
   buildRemotePosixSpawnCommands,
+  buildRemoteRunCleanupCommand,
   buildRemoteSessionStopCommand,
   buildTmuxAttachSplitArgs,
   buildTmuxRemoteLaneCommand,
@@ -392,6 +393,7 @@ describe("killSpawnSession()", () => {
       [
         buildRemoteSessionStopCommand("tfx-spawn-m2-lifecycle", "r1"),
         buildRemoteClaudeProcessCountCommand("tfx-spawn-m2-lifecycle", "r1"),
+        buildRemoteRunCleanupCommand("tfx-spawn-m2-lifecycle", "r1"),
       ],
     );
     assert.ok(!commands.some(([, command]) => command.includes("daemon stop")));
@@ -441,12 +443,14 @@ describe("killSpawnSession()", () => {
     assert.match(result.remote.readbackError, /spawn 기록/);
   });
 
-  it("요청한 데몬 정지가 실패하면 전체도 실패다", async () => {
+  it("요청한 데몬 정지가 실패하면 전체도 실패이고 원격 기록을 남긴다", async () => {
+    const commands = [];
     const result = await killSpawnSession("tfx-spawn-m2-lifecycle", {
       runId: "r1",
       hostNames,
       killLocal: () => {},
       runRemote: (_host, command) => {
+        commands.push(command);
         if (command.includes("daemon stop")) throw new Error("daemon busy");
         return { ok: true, stdout: command.includes("wc -l") ? "0\n" : "" };
       },
@@ -454,6 +458,11 @@ describe("killSpawnSession()", () => {
     });
     assert.equal(result.remote.remaining, 0);
     assert.equal(result.ok, false);
+    assert.ok(
+      !commands.includes(
+        buildRemoteRunCleanupCommand("tfx-spawn-m2-lifecycle", "r1"),
+      ),
+    );
   });
 
   it("spawn 명령은 claude 보다 먼저 셸 PID 를 실행별 기록에 남긴다", () => {
