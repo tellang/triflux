@@ -233,5 +233,15 @@ describe("syncRegistryTargets stdio servers", () => {
     const rewritten = readFileSync(codex, "utf8");
     assert.match(rewritten, /mcp-server@2\.1\.4/);
     assert.doesNotMatch(rewritten, /^\s*"BRAVE_API_KEY",$|^\s*\]$/m);
+
+    // 관리 키 값 안의 [ 때문에 뒤의 사용자 키와 표를 지우지 않는다.
+    writeFileSync(
+      codex,
+      `[mcp_servers.brave-search]\ncommand = "npx"\nargs = ["-y", "@brave/brave-search-mcp-server"]\nenv = { T = '''it's [draft''' }\nenabled = false\n\n[mcp_servers.mine]\ncommand = "mine"\n`,
+    );
+    syncRegistryTargets({ registry });
+    const kept = readFileSync(codex, "utf8");
+    assert.match(kept, /enabled = false/);
+    assert.match(kept, /\[mcp_servers\.mine\]/);
   });
 });

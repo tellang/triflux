@@ -17,6 +17,7 @@ import {
   resolve,
 } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DEFAULT_REGISTRY_PATH = join(PROJECT_ROOT, "config", "mcp-registry.json");
@@ -636,25 +637,28 @@ function formatTomlArray(values = []) {
 // 한 줄에서 열린 [ 와 닫힌 ] 의 차. 문자열과 주석 안의 괄호는 세지 않는다.
 function arrayDepth(text) {
   const code = text
+    .replace(/"""[\s\S]*?"""|'''[\s\S]*?'''/g, "")
     .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, "")
     .replace(/#.*$/, "");
   return (code.match(/\[/g) || []).length - (code.match(/\]/g) || []).length;
 }
 
+const TOML_MANAGED_KEYS = new Set([
+  "url",
+  "transport",
+  "command",
+  "args",
+  "bearer_token_env_var",
+  "http_headers",
+  "env_http_headers",
+  "env",
+  "env_vars",
+]);
+
 function upsertTomlServer(raw, name, config, codex = {}) {
   const lines = String(raw || "").split(/\r?\n/);
   const header = `[mcp_servers.${name}]`;
-  const managedKeys = new Set([
-    "url",
-    "transport",
-    "command",
-    "args",
-    "bearer_token_env_var",
-    "http_headers",
-    "env_http_headers",
-    "env",
-    "env_vars",
-  ]);
+  const managedKeys = TOML_MANAGED_KEYS;
   const nextManagedLines = [];
   if (typeof config.url === "string") {
     nextManagedLines.push(`url = ${formatTomlString(config.url)}`);
@@ -707,8 +711,16 @@ function upsertTomlServer(raw, name, config, codex = {}) {
         preserved.push(lines[index]);
       } else {
         // 여러 줄 배열 값은 닫는 ] 까지 함께 걷어낸다. 남기면 다음 줄들이 고아가 되어 파일이 깨진다.
-        let depth = arrayDepth(lines[index].slice(keyMatch[0].length));
-        while (depth > 0 && index + 1 < lines.length) {
+        // 배열 값일 때만, 다음 키나 표 머리글 앞에서는 멈춘다.
+        const value = lines[index].slice(keyMatch[0].length);
+        let depth = value.trimStart().startsWith("[") ? arrayDepth(value) : 0;
+        while (
+          depth > 0 &&
+          index + 1 < lines.length &&
+          !/^\s*(?:[A-Za-z0-9_-]+\s*=|\[\[?\s*[A-Za-z0-9_"'-])/.test(
+            lines[index + 1],
+          )
+        ) {
           index += 1;
           depth += arrayDepth(lines[index]);
         }
@@ -1146,11 +1158,19 @@ function updateCodexConfig(filePath, updates = [], removals = []) {
   if (finalRaw === previousRaw) {
     return { modified: false, filePath: resolvedPath };
   }
-  // 여러 줄 배열처럼 줄 단위 치환이 다루지 못하는 표기는 파일을 깨뜨리므로 쓰지 않는다.
+  // 줄 단위 치환이 파일을 깨뜨리거나 관리 키 밖의 값을 지우면 쓰지 않는다.
   // 파서가 원본부터 못 읽는 표기(파서가 모르는 TOML 1.0 문법)는 판정할 수 없어 예전처럼 쓴다.
   const toml = tomlParser();
   try {
-    if (toml && parsesAsToml(toml, previousRaw)) toml.parse(finalRaw);
+    if (
+      toml &&
+      parsesAsToml(toml, previousRaw) &&
+      !isDeepStrictEqual(
+        withoutManagedServers(toml.parse(previousRaw), updates, removals),
+        withoutManagedServers(toml.parse(finalRaw), updates, removals),
+      )
+    )
+      throw new Error("unmanaged TOML changed");
   } catch {
     return {
       modified: false,
@@ -1889,6 +1909,20 @@ function tomlParser() {
   } catch {
     return null;
   }
+}
+
+// 갱신한 서버의 관리 키만 뺀다. 남은 값이 원본과 같아야 치환이 사용자 값을 건드리지 않은 것이다.
+function withoutManagedServers(data, updates, removals) {
+  for (const name of removals) delete data.mcp_servers?.[name];
+  for (const { name } of updates) {
+    const server = data.mcp_servers?.[name];
+    if (!server) continue;
+    for (const key of TOML_MANAGED_KEYS) delete server[key];
+    if (!Object.keys(server).length) delete data.mcp_servers[name];
+  }
+  if (data.mcp_servers && !Object.keys(data.mcp_servers).length)
+    delete data.mcp_servers;
+  return data;
 }
 
 function parsesAsToml(toml, raw) {
