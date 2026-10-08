@@ -45,6 +45,8 @@ function runCli(args, { homeDir = createHomeDir(), env = {} } = {}) {
       ...process.env,
       HOME: homeDir,
       USERPROFILE: homeDir,
+      // test-lock 없이 node --test 로 직접 돌릴 때도 setup 이 임시 HOME 을 격리된 홈으로 본다.
+      TRIFLUX_TEST_HOME: homeDir,
       TMPDIR: TEST_TMP,
       TEMP: TEST_TMP,
       TMP: TEST_TMP,
