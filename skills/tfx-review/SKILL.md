@@ -203,11 +203,18 @@ Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분�
 ```
 
 ### Step 2: Codex 리뷰 실행
+
+변경사항 원문을 셸 인자에 넣지 않는다. diff 안의 `$(...)` 와 백틱이 실행된다.
+리뷰 대상을 파일로 쓰고 다섯 번째 인자(context_file)로 경로만 넘긴다.
+
 ```bash
+ctx=$(mktemp "${TMPDIR:-/tmp}/tfx-review.XXXXXX")
+git diff HEAD > "$ctx"   # 대상이 파일이면: cat -- '<파일>' > "$ctx"
 bash ~/.claude/scripts/tfx-route.sh code-reviewer \
-  "다음 코드 변경을 리뷰하라. 심각도별 분류(critical/high/medium/low).
-   체크: 로직 결함, 보안 취약점, 성능 문제, SOLID 위반, 에러 핸들링.
-   변경사항: {diff_or_file_content}"
+  "prior_context 의 코드 변경을 리뷰하라. 심각도별 분류(critical/high/medium/low).
+   체크: 로직 결함, 보안 취약점, 성능 문제, SOLID 위반, 에러 핸들링." \
+  auto "" "$ctx"
+rm -f "$ctx"
 ```
 
 ### Step 3: 결과 포맷

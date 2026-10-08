@@ -155,6 +155,10 @@ function isMigratedAntigravityConfig(filePath, raw = null) {
   return String(contents || "").trim() === "";
 }
 
+function isProjectMcpJson(filePath) {
+  return /(^|\/)\.mcp\.json$/.test(normalizeForMatch(filePath));
+}
+
 function plaintextSecretHeaderClient(filePath) {
   const client = detectClient(filePath);
   return client === "gemini" || client === "antigravity" ? client : null;
@@ -481,6 +485,12 @@ function resolveHeaderDescriptors(name, serverConfig, filePath) {
       warnings.push(
         `[mcp-guard] ${name}.${headerName} header skipped: env ${envName} is not set`,
       );
+      continue;
+    }
+
+    // 프로젝트 .mcp.json 은 저장소에 커밋될 수 있다. Claude Code 가 실행 시 ${VAR} 를 확장하므로 값 대신 참조를 쓴다.
+    if (isProjectMcpJson(filePath)) {
+      headers[headerName] = `${prefix}\${${envName}}`;
       continue;
     }
 
@@ -1101,7 +1111,8 @@ function updateCodexConfig(filePath, updates = [], removals = []) {
   }
 
   mkdirSync(dirname(resolvedPath), { recursive: true });
-  writeFileSync(resolvedPath, finalRaw, "utf8");
+  // 헤더 비밀이 들어갈 수 있다. 새 파일은 0600, 기존 파일은 권한이 그대로 유지된다.
+  writeFileSync(resolvedPath, finalRaw, { encoding: "utf8", mode: 0o600 });
   return { modified: true, filePath: resolvedPath };
 }
 

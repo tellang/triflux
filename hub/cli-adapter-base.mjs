@@ -21,12 +21,19 @@ export function normalizePathForShell(value) {
   return IS_WINDOWS ? String(value).replace(/\\/g, "/") : String(value);
 }
 
-export function shellQuote(value) {
-  return JSON.stringify(String(value));
+// POSIX 셸은 큰따옴표 안의 $(), 백틱을 실행하므로 작은따옴표로 감싼다.
+export function posixQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
+// Windows 는 shell: true 가 cmd.exe 라 작은따옴표를 인용으로 읽지 않는다.
+export function shellQuote(value) {
+  return IS_WINDOWS ? JSON.stringify(String(value)) : posixQuote(value);
+}
+
+// PowerShell 은 ‘ ’ ‚ ‛ 도 작은따옴표로 읽는다. 따옴표 문자를 모두 겹쳐 써야 인용이 안 끝난다.
 export function escapePwshSingleQuoted(value) {
-  return String(value).replace(/'/g, "''");
+  return String(value).replace(/['\u2018\u2019\u201A\u201B]/g, "$&$&");
 }
 
 export const CODEX_MCP_TRANSPORT_EXIT_CODE = 70;
@@ -78,7 +85,7 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
 
   if (sandboxBypass) parts.push("--dangerously-bypass-approvals-and-sandbox");
   if (skipGitRepoCheck) parts.push("--skip-git-repo-check");
-  if (resultFile) parts.push("--output-last-message", resultFile);
+  if (resultFile) parts.push("--output-last-message", shellQuote(resultFile));
   parts.push("--color", "never");
   for (const override of profileOverrides)
     parts.push("-c", shellQuote(override));
@@ -101,7 +108,7 @@ export function buildExecCommand(prompt, resultFile = null, opts = {}) {
     return `${parts.join(" ")} < ${shellQuote(promptFile)}`;
   }
 
-  parts.push(JSON.stringify(prompt));
+  parts.push(shellQuote(prompt));
   return parts.join(" ");
 }
 

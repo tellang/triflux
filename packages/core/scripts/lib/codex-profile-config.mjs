@@ -3,6 +3,7 @@ import {
   mkdirSync,
   readFileSync,
   renameSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -254,6 +255,15 @@ function stamp(now = () => new Date()) {
     .replace("T", "-");
 }
 
+// config.toml 에는 MCP env 키가 들어갈 수 있다. 다시 쓸 때 원본 권한을 지키고 없으면 0600 으로 만든다.
+export function privateFileMode(path) {
+  try {
+    return statSync(path).mode & 0o777;
+  } catch {
+    return 0o600;
+  }
+}
+
 export function sanitizeCodexProfileConfigFile(
   configPath,
   {
@@ -268,7 +278,11 @@ export function sanitizeCodexProfileConfigFile(
   const source = readFileSync(configPath, "utf8");
   const sanitized = sanitizeCodexProfileConfig(source, { codexHome });
   if (!sanitized.changed) return sanitized;
-  writeFileSync(`${configPath}.${backupPrefix}-${stamp(now)}`, source, "utf8");
+  const mode = privateFileMode(configPath);
+  writeFileSync(`${configPath}.${backupPrefix}-${stamp(now)}`, source, {
+    encoding: "utf8",
+    mode,
+  });
   // Atomic replace. config.toml is shared global state: a codex session may be
   // reading it while another entry point (tfx-route, the codex session hook, or
   // a parallel swarm worker) sanitizes it. Write the sanitized content to a
@@ -278,7 +292,7 @@ export function sanitizeCodexProfileConfigFile(
   // without corruption (the content is identical anyway since the migration is
   // deterministic). The pid keeps temp names unique across separate processes.
   const tmpPath = `${configPath}.tmp-${process.pid}-${stamp(now)}`;
-  writeFileSync(tmpPath, sanitized.toml, "utf8");
+  writeFileSync(tmpPath, sanitized.toml, { encoding: "utf8", mode });
   renameSync(tmpPath, configPath);
   return sanitized;
 }

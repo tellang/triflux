@@ -53,11 +53,17 @@ describe("remote-session — shell quoting", () => {
 
   it("R-04: escapePwshSingleQuoted — doubles single quotes", () => {
     assert.equal(escapePwshSingleQuoted("it's"), "it''s");
+    // PowerShell 은 U+2018~U+201B 도 작은따옴표로 읽는다
+    assert.equal(
+      escapePwshSingleQuoted("a\u2019b\u2018c"),
+      "a\u2019\u2019b\u2018\u2018c",
+    );
   });
 
   it("R-05: escapePwshDoubleQuoted — escapes backticks and double quotes", () => {
     assert.equal(escapePwshDoubleQuoted('say "hello"'), 'say `"hello`"');
     assert.equal(escapePwshDoubleQuoted("`tick`"), "``tick``");
+    assert.equal(escapePwshDoubleQuoted("$(x)\u201D"), "`$(x)`\u201D");
   });
 });
 

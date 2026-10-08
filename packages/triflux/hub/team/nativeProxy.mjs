@@ -23,7 +23,8 @@ import { isPidAlive } from "../lib/process-utils.mjs";
 import { IS_WINDOWS } from "../platform.mjs";
 
 const TEAM_NAME_RE = /^[a-z0-9][a-z0-9-]*$/;
-const CLAUDE_HOME = join(homedir(), ".claude");
+// Claude Code 와 같은 규칙으로 CLAUDE_CONFIG_DIR 를 따른다. 테스트도 이걸로 실제 ~/.claude 를 피한다.
+const CLAUDE_HOME = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
 const TEAMS_ROOT = join(CLAUDE_HOME, "teams");
 const TASKS_ROOT = join(CLAUDE_HOME, "tasks");
 const LOCK_STALE_MS = 30000;

@@ -1,6 +1,7 @@
 import * as childProcess from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { createWriteStream, mkdirSync } from "node:fs";
+import { chmodSync, createWriteStream, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -8,6 +9,7 @@ const LOG_DIR = join(homedir(), ".triflux", "logs");
 const DEDUPE_WINDOW_MS = 5_000;
 const RATE_WINDOW_MS = 1_000;
 const DEFAULT_MAX_SPAWN_PER_SEC = 100;
+const MAX_PLAIN_TRACE_VALUE = 64;
 // multi-worker headless dispatch 가 1 초 안에 ~25-30+ psmux/tmux 명령을 호출한다.
 // 2-worker dispatchBatch 가 default 30 limit 을 초과해 `rate_limit` throw 로 mac
 // 호환성 회귀 (smoke test 발견, 2026-05-15). 100 으로 상향 — 폭주 안전망은
@@ -54,7 +56,8 @@ function ensureLogStream() {
     return logStream;
   }
 
-  mkdirSync(LOG_DIR, { recursive: true });
+  mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 });
+  restrictMode(LOG_DIR, 0o700);
 
   if (logStream) {
     try {
@@ -65,20 +68,48 @@ function ensureLogStream() {
   }
 
   logDay = day;
-  logStream = createWriteStream(getLogPath(day), { flags: "a" });
+  logStream = createWriteStream(getLogPath(day), { flags: "a", mode: 0o600 });
+  restrictMode(getLogPath(day), 0o600);
   logStream.on("error", () => {
     /* ignore logging failures */
   });
   return logStream;
 }
 
+// 예전 버전이 0644 로 만든 로그도 좁힌다. Windows 는 chmod 가 의미 없어 실패를 무시한다.
+function restrictMode(path, mode) {
+  try {
+    chmodSync(path, mode);
+  } catch {
+    /* ignore */
+  }
+}
+
+// 프롬프트와 send-keys 원문이 로그에 남지 않게, 공백이 있거나 긴 값은 길이와 해시만 남긴다.
+export function redactTraceValue(value) {
+  if (typeof value !== "string") return value;
+  if (value.length <= MAX_PLAIN_TRACE_VALUE && !/\s/u.test(value)) return value;
+  const digest = createHash("sha256").update(value).digest("hex").slice(0, 12);
+  return `<redacted len=${value.length} sha256=${digest}>`;
+}
+
+export function redactTraceEntry(entry) {
+  return {
+    ...entry,
+    command: redactTraceValue(entry.command),
+    args: Array.isArray(entry.args)
+      ? entry.args.map(redactTraceValue)
+      : entry.args,
+  };
+}
+
 function appendTrace(data, { sync = false } = {}) {
-  const entry = {
+  const entry = redactTraceEntry({
     ts: nowIso(),
     session_id: process.env.TRIFLUX_SESSION_ID ?? null,
     parent_pid: process.pid,
     ...data,
-  };
+  });
 
   try {
     ensureLogStream().write(`${JSON.stringify(entry)}\n`);

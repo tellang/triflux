@@ -85,12 +85,13 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
+// cwd 의 scripts/tfx-route.sh 는 후보에 넣지 않는다. 신뢰하지 않는 저장소에서 돌리면
+// 그 저장소의 스크립트가 실행된다. 다른 스크립트는 routeScript 나 env 로 지정한다.
 function resolveHeadlessRouteScript(opts = {}) {
   const candidates = [
     opts.routeScript,
     process.env.TFX_ROUTE_SCRIPT,
     process.env.TFX_DELEGATOR_ROUTE_SCRIPT,
-    join(process.cwd(), "scripts", "tfx-route.sh"),
     join(SCRIPT_DIR, "..", "..", "scripts", "tfx-route.sh"),
     process.env.HOME
       ? join(process.env.HOME, ".claude", "scripts", "tfx-route.sh")

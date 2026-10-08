@@ -149,20 +149,20 @@ describe("mcp guard policy sync", () => {
     });
     assert.equal((statSync(claudeUserPath).mode & 0o777).toString(8), "600");
 
-    for (const jsonPath of [
-      join(homeDir, "repo", ".mcp.json"),
-      join(homeDir, ".gemini", "settings.json"),
-      join(homeDir, ".gemini", "config", "mcp_config.json"),
+    for (const [jsonPath, authorization] of [
+      [join(homeDir, "repo", ".mcp.json"), "Bearer ${EXA_API_KEY}"],
+      [join(homeDir, ".gemini", "settings.json"), "Bearer test-exa-key"],
+      [
+        join(homeDir, ".gemini", "config", "mcp_config.json"),
+        "Bearer test-exa-key",
+      ],
     ]) {
       const config = JSON.parse(readFileSync(jsonPath, "utf8"));
       assert.equal(
         config.mcpServers.context7.url,
         "https://mcp.context7.com/mcp",
       );
-      assert.equal(
-        config.mcpServers.exa.headers.Authorization,
-        "Bearer test-exa-key",
-      );
+      assert.equal(config.mcpServers.exa.headers.Authorization, authorization);
       assert.equal(config.mcpServers["brave-search"].command, "npx");
       assert.deepEqual(config.mcpServers["brave-search"].env, {
         BRAVE_API_KEY: "${BRAVE_API_KEY}",

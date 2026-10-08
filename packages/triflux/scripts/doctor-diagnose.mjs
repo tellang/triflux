@@ -22,6 +22,7 @@ import {
   totalmem,
 } from "node:os";
 import { join } from "node:path";
+import { redactTraceEntry } from "../hub/lib/spawn-trace.mjs";
 
 const TRIFLUX_DIR = join(homedir(), ".triflux");
 const LOGS_DIR = join(TRIFLUX_DIR, "logs");
@@ -44,7 +45,8 @@ function collectSpawnTraces(cutoffMs = ONE_HOUR_MS) {
       try {
         const entry = JSON.parse(line);
         const ts = new Date(entry.ts).getTime();
-        if (now - ts <= cutoffMs) entries.push(entry);
+        // 예전 버전 로그에는 프롬프트 원문이 있다. 번들에 넣기 전에 가린다.
+        if (now - ts <= cutoffMs) entries.push(redactTraceEntry(entry));
       } catch {
         /* skip malformed */
       }
@@ -246,11 +248,11 @@ function createZipArchive(bundleDir, zipPath) {
 }
 
 export async function diagnose({ json = false } = {}) {
-  mkdirSync(DIAG_DIR, { recursive: true });
+  mkdirSync(DIAG_DIR, { recursive: true, mode: 0o700 });
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const bundleDir = join(DIAG_DIR, `diag-${timestamp}`);
-  mkdirSync(bundleDir, { recursive: true });
+  mkdirSync(bundleDir, { recursive: true, mode: 0o700 });
 
   // 1. spawn-trace JSONL
   const traces = collectSpawnTraces();
@@ -260,26 +262,22 @@ export async function diagnose({ json = false } = {}) {
   );
 
   // 2. process report
+  // 기본 보고서에는 환경변수 전체(export 한 API 키 포함)와 호스트명, 네트워크 인터페이스가 들어간다.
+  let report;
   try {
-    const reportPath = process.report.writeReport(
-      join(bundleDir, "process-report.json"),
-    );
-    // writeReport returns the path it wrote to
-    if (reportPath && reportPath !== join(bundleDir, "process-report.json")) {
-      // move if written elsewhere
-      const { renameSync } = await import("node:fs");
-      try {
-        renameSync(reportPath, join(bundleDir, "process-report.json"));
-      } catch {
-        /* ignore */
-      }
+    report = process.report.getReport();
+    delete report.environmentVariables;
+    if (report.header) {
+      delete report.header.host;
+      delete report.header.networkInterfaces;
     }
   } catch {
-    writeFileSync(
-      join(bundleDir, "process-report.json"),
-      JSON.stringify({ error: "report generation failed" }),
-    );
+    report = { error: "report generation failed" };
   }
+  writeFileSync(
+    join(bundleDir, "process-report.json"),
+    JSON.stringify(report, null, 2),
+  );
 
   // 3. spawn stats
   const stats = computeSpawnStats(traces);

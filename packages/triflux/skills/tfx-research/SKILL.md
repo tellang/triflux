@@ -68,11 +68,16 @@ Agent(
 )
 ```
 
-**Bash (Codex + Brave):**
-```
-Bash("tfx multi \
-  --assign 'codex:서브쿼리를 Brave Search 로 검색. 서브쿼리: {sub_queries}. 관점: 실용/산업. brave_web_search + brave_news_search, freshness=pw. 각 쿼리 상위 5개 구조화.:scientist' \
-  --timeout 1800", run_in_background=true)
+**Bash (Codex + Brave):** 사용자 입력은 quoted heredoc 으로 받아 큰따옴표 변수로 넘긴다. 작은따옴표 인자에 끼우면 입력의 `'` 뒤가 셸 명령이 된다.
+```bash
+# Bash(run_in_background=true)
+q=$(cat <<'TFX_INPUT'
+{sub_queries}
+TFX_INPUT
+)
+tfx multi \
+  --assign "codex:서브쿼리를 Brave Search 로 검색. 서브쿼리: $q. 관점: 실용/산업. brave_web_search + brave_news_search, freshness=pw. 각 쿼리 상위 5개 구조화.:scientist" \
+  --timeout 1800
 ```
 
 > 배리어: 위 dispatch는 background로 실행한다. task-notification 완료 후 team runtime 결과에서 검색 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
@@ -129,8 +134,12 @@ AskUserQuestion:
 
 ### Step 2: Antigravity Google Search 위임
 
-```
-Bash("bash ~/.claude/scripts/tfx-route.sh antigravity 'Research: use Google Search, return structured markdown with sources. Query: {optimized_query}' auto 120")
+```bash
+q=$(cat <<'TFX_INPUT'
+{optimized_query}
+TFX_INPUT
+)
+bash ~/.claude/scripts/tfx-route.sh antigravity "Research: use Google Search, return structured markdown with sources. Query: $q" auto 120
 ```
 
 **Fallback**: Antigravity 실패 시 MCP 순서: context7 → WebSearch → Brave → Exa → Tavily.

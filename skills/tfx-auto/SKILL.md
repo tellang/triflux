@@ -214,10 +214,15 @@ v1은 `peer` 단일 경로만 지원한다. `--live-shape`, `--live-mode`, `tfx-
 디스패치:
 
 ```bash
-Bash("tfx-live peer --cli-a codex --cli-b claude \
+# Bash(run_in_background=true). 사용자 입력은 quoted heredoc 으로 넘긴다(아래 "실행" 절 참조).
+task=$(cat <<'TFX_INPUT'
+{task}
+TFX_INPUT
+)
+tfx-live peer --cli-a codex --cli-b claude \
   --session-a {sid}-a --session-b {sid}-b \
-  --cwd {cwd} --mode freeform --seed '{task}' \
-  --rounds {rounds} --timeout {timeout}", run_in_background=true)
+  --cwd {cwd} --mode freeform --seed "$task" \
+  --rounds {rounds} --timeout {timeout}
 ```
 
 **Closure**: `rounds * 2` hop 예산을 늘리지 않고 마지막 B(`--cli-b`) hop을 closure turn으로 대체한다. B는 `agreement_status`, `unresolved_questions`, `needs_more_rounds`를 포함한 구조화 선언을 반환해야 한다.
@@ -373,12 +378,20 @@ interactive(tmux/psmux)에서는 off다.
 
 ### CLI 에이전트 (Codex/Antigravity)
 
+사용자 입력을 따옴표 셸 인자에 직접 끼우지 않는다. 입력에 든 `'` 하나로 인용이 끝나고
+뒤의 `$(...)` 가 실행된다. quoted heredoc(`<<'TFX_INPUT'`)은 내용을 해석하지 않는다.
+
 ```bash
+# Bash(run_in_background=true)
+prompt=$(cat <<'TFX_INPUT'
+{prompt}
+TFX_INPUT
+)
 # Level 0 / INDEPENDENT
-Bash("bash ~/.claude/scripts/tfx-route.sh {agent} '{prompt}' {mcp_profile}", run_in_background=true)
+bash ~/.claude/scripts/tfx-route.sh {agent} "$prompt" {mcp_profile}
 
 # Level 1+ (컨텍스트 의존): 4번째=timeout(빈값), 5번째=context_file
-Bash("bash ~/.claude/scripts/tfx-route.sh {agent} '{prompt}' {mcp_profile} '' .omc/context/{sid}/combined-{tid}.md", run_in_background=true)
+bash ~/.claude/scripts/tfx-route.sh {agent} "$prompt" {mcp_profile} '' .omc/context/{sid}/combined-{tid}.md
 ```
 
 ### tmux 라이브 관전

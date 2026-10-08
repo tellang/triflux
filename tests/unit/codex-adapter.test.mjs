@@ -141,7 +141,7 @@ test("buildLaunchScript emits headless codex exec wrapper", async () => {
   // --profile X against an inline [profiles.X] in config.toml).
   assert.doesNotMatch(script, /--profile/);
   assert.ok(
-    script.includes('-c "model_reasoning_effort=\\"high\\""'),
+    script.includes(`-c 'model_reasoning_effort="high"'`),
     `expected -c effort override, got: ${script}`,
   );
 });

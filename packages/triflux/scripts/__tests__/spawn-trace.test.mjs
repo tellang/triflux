@@ -42,6 +42,23 @@ describe("spawn-trace", () => {
     assert.equal(typeof mod.spawnSync, "function");
   });
 
+  it("redacts prompt-like args but keeps short tokens", async () => {
+    const mod = await loadSpawnTraceModule();
+    const prompt = "리뷰해라 $(id) ".repeat(10);
+    const entry = mod.redactTraceEntry({
+      command: "tmux",
+      args: ["send-keys", "-t", "s:0.1", "-l", prompt],
+    });
+    assert.deepEqual(entry.args.slice(0, 4), [
+      "send-keys",
+      "-t",
+      "s:0.1",
+      "-l",
+    ]);
+    assert.match(entry.args[4], /^<redacted len=\d+ sha256=[0-9a-f]{12}>$/);
+    assert.ok(!JSON.stringify(entry).includes("$(id)"));
+  });
+
   it("exports guard constants", async () => {
     const mod = await loadSpawnTraceModule();
     assert.equal(typeof mod.MAX_SPAWN_PER_SEC, "number");

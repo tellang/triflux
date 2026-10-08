@@ -91,10 +91,11 @@ describe("syncRegistryTargets HTTP headers", () => {
       type: "http",
       url: "https://example.com/mcp",
       headers: {
-        Authorization: "Bearer sync-secret",
+        Authorization: "Bearer ${TFX_TEST_TOKEN}",
         "X-Client": "triflux",
       },
     });
+    assert.doesNotMatch(readFileSync(projectMcpPath, "utf8"), /sync-secret/);
   });
 
   it("preserves unrelated MCP entries and unrelated fields on the managed server", () => {
@@ -175,7 +176,7 @@ describe("syncRegistryTargets HTTP headers", () => {
     assert.equal(projectConfig.mcpServers.auth.disabled, true);
     assert.equal(projectConfig.mcpServers.auth.url, "https://example.com/mcp");
     assert.deepEqual(projectConfig.mcpServers.auth.headers, {
-      Authorization: "Bearer sync-secret",
+      Authorization: "Bearer ${TFX_TEST_TOKEN}",
     });
   });
 

@@ -104,9 +104,14 @@ describe("tfx mcp HTTP headers regression", () => {
       type: "http",
       url: "https://mcp.example.com/mcp",
     });
+    // 커밋될 수 있는 프로젝트 파일에는 토큰 대신 Claude Code 가 확장하는 env 참조를 쓴다.
     assert.equal(
       projectConfig.mcpServers.auth.headers.Authorization,
-      "Bearer regression-secret",
+      "Bearer ${TFX_TEST_TOKEN}",
+    );
+    assert.doesNotMatch(
+      readFileSync(join(project, ".mcp.json"), "utf8"),
+      /regression-secret/,
     );
 
     const listResultRaw = runTfx(["mcp", "list", "--json"], env, project);
