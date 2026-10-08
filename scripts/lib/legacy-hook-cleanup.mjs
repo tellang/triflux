@@ -257,11 +257,16 @@ function isInstallerAgyCommand(command) {
     command,
   );
   if (!match) return false;
+  // 따옴표 없는 node 경로(첫 버전의 process.execPath)는 줄바꿈이나 셸 기호 없는 절대 경로여야 한다.
+  if (match[2] && !/^(?:\/|[A-Za-z]:\\)[^\r\n"';&|`$<>]*$/u.test(match[2]))
+    return false;
   const nodeBin = match[1] ? unquoteAgyCommandPath(match[1]) : match[2];
   const script = unquoteAgyCommandPath(match[3]);
+  if (/[\r\n]/u.test(nodeBin + script)) return false;
   const [dir, file] = lastSegments(script, 2);
   if (dir !== "hooks" || file !== "agy-session-hook.mjs") return false;
-  if (!/^node(?:\.exe)?$/iu.test(lastSegments(nodeBin, 1)[0])) return false;
+  if (!/^node(?:js)?(?:\.exe)?$/iu.test(lastSegments(nodeBin, 1)[0]))
+    return false;
   const rebuilt = `${match[1] ? quoteAgyCommandPath(nodeBin) : nodeBin} ${quoteAgyCommandPath(script)}`;
   return rebuilt === command;
 }
