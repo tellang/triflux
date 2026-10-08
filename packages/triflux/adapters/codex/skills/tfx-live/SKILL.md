@@ -3,7 +3,7 @@ name: tfx-live
 description: >
   Claude·Codex 세션을 실시간으로 생성·질의·대기·압축·종료하거나,
   tmux/daemon UDS 연결과 peer 중계를 운영할 때 사용한다.
-argument-hint: "<start|ask|wait|compact|stop|rename|interrupt|probe|list-sessions|peer|converse|goal-driven> ..."
+argument-hint: "<start|ask|wait|queue|compact|stop|rename|interrupt|probe|list-sessions|peer|converse|goal-driven> ..."
 ---
 
 # tfx-live
@@ -56,6 +56,14 @@ tfx-live stop --cli codex --session cx1
 
 결과의 `status`는 `queued`(쌓임), `working`(TUI가 가져가 턴 시작), `completed`, `failed`로 나뉘고 `delivered`, `deliveredAt`, `turnId`가 배달을 구분한다. queue는 바쁜 세션에도 쌓으므로 `--if-busy wait`는 의미가 없다.
 
+```bash
+tfx-live queue --cli codex --session cx1
+tfx-live queue --cli codex --session cx1 --request-id <requestId> --delete all
+tfx-live queue --cli codex --thread <UUID> --delete <queuedMessageId>
+```
+
+`queue`는 TUI가 아직 가져가지 않은 항목을 보고 지운다. Codex app-server의 실험 API `thread/queue/list`·`thread/queue/delete`를 stdio로 호출하며 큐 저장소 파일은 건드리지 않는다. 목록 항목은 `id`(ask 결과의 `queuedMessageId`와 같다), `requestId`, `text`다. 삭제 결과의 `missing`은 이미 TUI가 가져갔거나 없는 항목이다. 유휴 TUI는 쌓인 항목을 곧 가져가므로 지울 수 있는 것은 사실상 바쁜 세션과 닫힌 세션의 항목이다. 가져간 뒤의 처리 여부는 `wait`로 확인한다.
+
 ### 컨텍스트 판단
 
 분모는 공식 모델 창이고 실행 한도가 더 작으면 그 한도 아래에서 운영한다. 아래 비율은 공식 권고가 아닌 **[추론] 운영값**이다. 모델 문서가 바뀌면 한도도 갱신한다.
@@ -90,6 +98,8 @@ tfx-live stop --session cl1
 ```bash
 tfx-live ask --cli claude --transport uds --short <8hex> --prompt "진행 상황을 보고해줘" --no-wait
 tfx-live wait --cli claude --short <8hex> --request-id <requestId> --timeout 120 --poll-interval 500
+tfx-live ask --cli claude --session cl1 --prompt "진행 상황을 보고해줘" --no-wait
+tfx-live wait --cli claude --session cl1 --request-id <requestId> --timeout 120
 tfx-live ask --cli codex --session cx1 --prompt "진행 상황을 보고해줘" --no-wait
 tfx-live wait --cli codex --session cx1 --request-id <requestId> --timeout 120
 ```
@@ -97,6 +107,8 @@ tfx-live wait --cli codex --session cx1 --request-id <requestId> --timeout 120
 `ask --no-wait`는 Claude와 tmux에서 `status: "submitted"`, Codex queue에서 `status: "queued"`와 함께 `inputSent: true`, `done: false`, `submittedAt`, `target`, `requestId`를 반환한다. `ask`, `peer`, `converse`, `goal-driven`은 `[tfx-live req=<requestId>]`를 프롬프트 앞에 붙인다. `--no-relay-tag`로 제거하면 `wait --request-id`가 해당 요청을 찾을 수 없다.
 
 `wait`는 Claude transcript에서 표식을 user 메시지, `queue-operation`의 `enqueue` content, queued command attachment에서 찾는다. 표식이 소비된 턴이 끝난 뒤 마지막 assistant 텍스트를 응답으로 쓴다. 표식 없는 `wait`는 최신 user turn을 본다. `isSidechain`과 합성 API 오류 메시지는 정상 응답에서 제외한다. 요청을 소비한 턴에서 합성 오류가 나타나면 오류 문구와 `status: "failed"`를 반환한다. daemon의 `idle`만으로 완료를 단정하지 않는다. timeout은 `status: "working"`, `timedOut: true`, `done: false`다.
+
+tmux로 띄운 대화형 Claude는 `wait --session <tmux 대상>`을 쓴다. pane에 붙은 Claude 세션 기록(`~/.claude/sessions`)에서 sessionId를 찾아 같은 transcript 규칙으로 판정하고, daemon의 idle 대신 세션 기록의 `status: "idle"`을 쓴다. transcript는 처음 찾은 것을 끝까지 쓰므로 대기 중 `/clear`로 바뀐 세션은 따라가지 않는다. 로컬 전용이다.
 
 Codex `wait`는 `--session` 또는 `--thread UUID`의 rollout에서 표식이 든 user 메시지의 `turn_id`를 찾고, 같은 턴의 `task_complete.last_agent_message`를 응답으로 쓴다. `turn_aborted`는 `status: "failed"`다. 표식이 아직 없으면 `status: "queued"`, `timedOut: true`다. `--timeout 0`은 한 번만 확인한다.
 
