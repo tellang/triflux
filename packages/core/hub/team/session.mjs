@@ -1,5 +1,5 @@
 // tmux/psmux 세션 생명주기 관리
-import { execSync, spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { resolveGitBashExecutable } from "../lib/bash-path.mjs";
 import { getEnvironment } from "../lib/env-detect.mjs";
 import {
@@ -14,6 +14,7 @@ import {
   listPsmuxSessions,
   psmuxExec,
   psmuxSessionExists,
+  tokenizeCommand,
 } from "./psmux.mjs";
 
 /** Windows Terminal 실행 파일 존재 여부 */
@@ -29,7 +30,11 @@ export function hasWindowsTerminalSession() {
 /** tmux 실행 가능 여부 확인 */
 function hasTmux() {
   try {
-    execSync("tmux -V", { stdio: "ignore", timeout: 3000, windowsHide: true });
+    execFileSync("tmux", ["-V"], {
+      stdio: "ignore",
+      timeout: 3000,
+      windowsHide: true,
+    });
     return true;
   } catch {
     return false;
@@ -100,10 +105,16 @@ export function detectMultiplexer() {
   return _cachedMux;
 }
 
+function bashArg(value) {
+  return /^[\w@%+=:,./-]+$/u.test(value)
+    ? value
+    : `'${value.replace(/'/g, "'\\''")}'`;
+}
+
 /**
  * tmux/psmux 커맨드 실행
- * @param {string} args — tmux 서브커맨드 + 인자
- * @param {object} opts — execSync 옵션
+ * @param {string[]|string} args — tmux 서브커맨드 + 인자. 문자열은 psmux 와 같은 규칙으로 쪼갠다.
+ * @param {object} opts — execFileSync 옵션
  * @returns {string} stdout
  */
 function tmux(args, opts = {}) {
@@ -120,16 +131,22 @@ function tmux(args, opts = {}) {
   if (mux === "psmux") {
     return psmuxExec(args, opts);
   }
+  // 셸을 거치지 않게 인자 배열로 넘긴다. 세션 이름이나 pane 대상이 셸 문법으로 읽히지 않는다.
+  const argv = Array.isArray(args) ? args.map(String) : tokenizeCommand(args);
   if (mux === "git-bash-tmux") {
     const bash = resolveGitBashExecutable();
     if (!bash) throw new Error("git-bash-tmux 감지 실패");
-    const r = spawnSync(bash, ["-lc", `tmux ${args}`], {
-      encoding: "utf8",
-      timeout: 10000,
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-      ...opts,
-    });
+    const r = spawnSync(
+      bash,
+      ["-lc", ["tmux", ...argv.map(bashArg)].join(" ")],
+      {
+        encoding: "utf8",
+        timeout: 10000,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+        ...opts,
+      },
+    );
     if ((r.status ?? 1) !== 0) {
       const e = new Error(r.stderr || "tmux command failed");
       e.status = r.status;
@@ -138,7 +155,7 @@ function tmux(args, opts = {}) {
     return (r.stdout || "").trim();
   }
 
-  const result = execSync(`tmux ${args}`, {
+  const result = execFileSync("tmux", argv, {
     encoding: "utf8",
     timeout: 10000,
     stdio: ["pipe", "pipe", "pipe"],
@@ -150,7 +167,7 @@ function tmux(args, opts = {}) {
 
 /**
  * tmux 명령 직접 실행 (고수준 모듈에서 재사용)
- * @param {string} args
+ * @param {string[]|string} args
  * @param {object} opts
  * @returns {string}
  */
@@ -181,7 +198,7 @@ export function resolveAttachCommand(sessionName, opts = {}) {
     if (!bash) throw new Error("git-bash-tmux 감지 실패");
     return {
       command: bash,
-      args: ["-lc", `tmux attach-session -t ${sessionName}`],
+      args: ["-lc", `tmux attach-session -t ${bashArg(sessionName)}`],
     };
   }
 
@@ -213,17 +230,17 @@ export function createSession(sessionName, opts = {}) {
   }
 
   // 새 세션 생성 (detached)
-  tmux(`new-session -d -s ${sessionName} -x 220 -y 55`);
+  tmux(["new-session", "-d", "-s", sessionName, "-x", "220", "-y", "55"]);
 
   const panes = [`${sessionName}:0.0`];
 
   if (layout === "2x2" && paneCount >= 3) {
     // 3-pane 기본: lead 왼쪽, workers 오른쪽 상/하
     // 4-pane: 좌/우 각각 상/하(균등 2x2)
-    tmux(`split-window -h -t ${sessionName}:0.0`);
-    tmux(`split-window -v -t ${sessionName}:0.1`);
+    tmux(["split-window", "-h", "-t", `${sessionName}:0.0`]);
+    tmux(["split-window", "-v", "-t", `${sessionName}:0.1`]);
     if (paneCount >= 4) {
-      tmux(`split-window -v -t ${sessionName}:0.0`);
+      tmux(["split-window", "-v", "-t", `${sessionName}:0.0`]);
     }
     // pane ID 재수집
     panes.length = 0;
@@ -233,9 +250,9 @@ export function createSession(sessionName, opts = {}) {
   } else if (layout === "1xN") {
     // 세로 분할(좌/우 컬럼 확장)
     for (let i = 1; i < paneCount; i++) {
-      tmux(`split-window -h -t ${sessionName}:0`);
+      tmux(["split-window", "-h", "-t", `${sessionName}:0`]);
     }
-    tmux(`select-layout -t ${sessionName}:0 even-horizontal`);
+    tmux(["select-layout", "-t", `${sessionName}:0`, "even-horizontal"]);
     panes.length = 0;
     for (let i = 0; i < paneCount; i++) {
       panes.push(`${sessionName}:0.${i}`);
@@ -243,9 +260,9 @@ export function createSession(sessionName, opts = {}) {
   } else {
     // Nx1 가로 분할(상/하 스택)
     for (let i = 1; i < paneCount; i++) {
-      tmux(`split-window -v -t ${sessionName}:0`);
+      tmux(["split-window", "-v", "-t", `${sessionName}:0`]);
     }
-    tmux(`select-layout -t ${sessionName}:0 even-vertical`);
+    tmux(["select-layout", "-t", `${sessionName}:0`, "even-vertical"]);
     panes.length = 0;
     for (let i = 0; i < paneCount; i++) {
       panes.push(`${sessionName}:0.${i}`);
@@ -263,10 +280,10 @@ export function createSession(sessionName, opts = {}) {
  */
 export function focusPane(target, opts = {}) {
   const { zoom = false } = opts;
-  tmux(`select-pane -t ${target}`);
+  tmux(["select-pane", "-t", target]);
   if (zoom) {
     try {
-      tmux(`resize-pane -t ${target} -Z`);
+      tmux(["resize-pane", "-t", target, "-Z"]);
     } catch {}
   }
 }
@@ -296,45 +313,46 @@ export function configureTeammateKeybindings(sessionName, opts = {}) {
   // Shift+Up이 터미널/호스트 조합에 따라 전달되지 않는 경우가 있어
   // 좌/우/Shift+Tab 대체 키를 함께 바인딩한다.
   const bindNext = inProcess
-    ? `'select-pane -t :.+ \\; resize-pane -Z'`
-    : `'select-pane -t :.+'`;
+    ? "select-pane -t :.+ \\; resize-pane -Z"
+    : "select-pane -t :.+";
   const bindPrev = inProcess
-    ? `'select-pane -t :.- \\; resize-pane -Z'`
-    : `'select-pane -t :.-'`;
+    ? "select-pane -t :.- \\; resize-pane -Z"
+    : "select-pane -t :.-";
+  const bindIf = (key, onMatch, otherwise) =>
+    tmux([
+      "bind-key",
+      "-T",
+      "root",
+      "-n",
+      key,
+      "if-shell",
+      "-F",
+      cond,
+      onMatch,
+      otherwise,
+    ]);
 
-  tmux(
-    `bind-key -T root -n S-Down if-shell -F '${cond}' ${bindNext} 'send-keys S-Down'`,
-  );
-  tmux(
-    `bind-key -T root -n S-Up if-shell -F '${cond}' ${bindPrev} 'send-keys S-Up'`,
-  );
+  bindIf("S-Down", bindNext, "send-keys S-Down");
+  bindIf("S-Up", bindPrev, "send-keys S-Up");
 
   // 대체 키: 일부 환경에서 S-Up이 누락될 때 사용
-  tmux(
-    `bind-key -T root -n S-Right if-shell -F '${cond}' ${bindNext} 'send-keys S-Right'`,
-  );
-  tmux(
-    `bind-key -T root -n S-Left if-shell -F '${cond}' ${bindPrev} 'send-keys S-Left'`,
-  );
-  tmux(
-    `bind-key -T root -n BTab if-shell -F '${cond}' ${bindPrev} 'send-keys BTab'`,
-  );
+  bindIf("S-Right", bindNext, "send-keys S-Right");
+  bindIf("S-Left", bindPrev, "send-keys S-Left");
+  bindIf("BTab", bindPrev, "send-keys BTab");
 
   // 현재 활성 pane 인터럽트
-  tmux(
-    `bind-key -T root -n Escape if-shell -F '${cond}' 'send-keys C-c' 'send-keys Escape'`,
-  );
+  bindIf("Escape", "send-keys C-c", "send-keys Escape");
 
   // 태스크 목록 토글 (tmux 3.2+ popup 우선, 실패 시 안내 메시지)
   if (taskListCommand) {
     const escaped = taskListCommand.replace(/'/g, "'\\''");
     try {
-      tmux(
-        `bind-key -T root -n C-t if-shell -F '${cond}' "display-popup -E '${escaped}'" "send-keys C-t"`,
-      );
+      bindIf("C-t", `display-popup -E '${escaped}'`, "send-keys C-t");
     } catch {
-      tmux(
-        `bind-key -T root -n C-t if-shell -F '${cond}' 'display-message "tfx multi tasks 명령으로 태스크 확인"' 'send-keys C-t'`,
+      bindIf(
+        "C-t",
+        'display-message "tfx multi tasks 명령으로 태스크 확인"',
+        "send-keys C-t",
       );
     }
   }
@@ -433,7 +451,7 @@ export function sessionExists(sessionName) {
 
   try {
     // '=' 가 없으면 tmux 가 접두사로 다른 세션을 잡는다(#548).
-    tmux(`has-session -t =${sessionName}`, { stdio: "ignore" });
+    tmux(["has-session", "-t", `=${sessionName}`], { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -451,7 +469,7 @@ export function killSession(sessionName) {
   }
 
   try {
-    tmux(`kill-session -t =${sessionName}`, { stdio: "ignore" });
+    tmux(["kill-session", "-t", `=${sessionName}`], { stdio: "ignore" });
   } catch {
     // 이미 종료된 세션 — 무시
   }
@@ -467,7 +485,7 @@ export function listSessions() {
   }
 
   try {
-    const output = tmux('list-sessions -F "#{session_name}"');
+    const output = tmux(["list-sessions", "-F", "#{session_name}"]);
     return output.split("\n").filter((s) => s.startsWith("tfx-multi-"));
   } catch {
     return [];
@@ -485,9 +503,11 @@ export function getSessionAttachedCount(sessionName) {
   }
 
   try {
-    const output = tmux(
-      'list-sessions -F "#{session_name} #{session_attached}"',
-    );
+    const output = tmux([
+      "list-sessions",
+      "-F",
+      "#{session_name} #{session_attached}",
+    ]);
     const line = output
       .split("\n")
       .find((l) => l.startsWith(`${sessionName} `));
@@ -512,7 +532,7 @@ export function capturePaneOutput(target, lines = 5) {
 
   try {
     // -l 플래그는 일부 tmux 빌드(MSYS2)에서 미지원 → 전체 캡처 후 JS에서 절삭
-    const full = tmux(`capture-pane -t ${target} -p`);
+    const full = tmux(["capture-pane", "-t", target, "-p"]);
     const nonEmpty = full.split("\n").filter((l) => l.trim() !== "");
     return nonEmpty.slice(-lines).join("\n");
   } catch {
