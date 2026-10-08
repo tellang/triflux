@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
+  readFileSync,
   readlinkSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -68,11 +71,13 @@ test("비대화형이면 받지 않고, 이미 있으면 묻지 않는다", asyn
     }),
     "deferred",
   );
-  writeFileSync(join(home, "tmr"), "");
+  // 깨진 링크도 있는 것으로 본다.
+  mkdirSync(join(home, ".local", "bin"), { recursive: true });
+  symlinkSync("missing", join(home, ".local", "bin", "tmuxrooms"));
   assert.equal(
     await offerTmrInstall({
       ...base,
-      env: { PATH: home },
+      env: { PATH: "" },
       interactive: true,
       ask: async () => assert.fail("물으면 안 된다"),
       install,
@@ -112,4 +117,43 @@ test("체크섬이 맞으면 0755 tmuxrooms 와 상대 링크 tmr 을 만든다"
   assert.equal(result.runs, true);
   assert.equal(statSync(result.target).mode & 0o777, 0o755);
   assert.equal(readlinkSync(result.link), "tmuxrooms");
+});
+
+test("묻는 사이 생긴 tmuxrooms 는 덮지 않고, 링크를 못 만들면 넣은 파일을 되돌린다", async () => {
+  const zip = Buffer.from("zip-bytes");
+  const sha = createHash("sha256").update(zip).digest("hex");
+  const options = {
+    release: { ...TMR_RELEASE, sha256: sha },
+    fetchFn: fakeFetch({ zip, sums: `${sha}  ${TMR_RELEASE.asset}\n` }),
+    run: () => {},
+  };
+  const home = makeHome();
+  const bin = join(home, ".local", "bin");
+  await assert.rejects(
+    installTmr({
+      ...options,
+      home,
+      extract: (zipPath, out) => {
+        fakeExtract(zipPath, out);
+        mkdirSync(bin, { recursive: true });
+        writeFileSync(join(bin, "tmuxrooms"), "user");
+      },
+    }),
+    { code: "EEXIST" },
+  );
+  assert.equal(readFileSync(join(bin, "tmuxrooms"), "utf8"), "user");
+
+  const other = makeHome();
+  await assert.rejects(
+    installTmr({
+      ...options,
+      home: other,
+      extract: fakeExtract,
+      symlink: () => {
+        throw Object.assign(new Error("no space"), { code: "ENOSPC" });
+      },
+    }),
+    { code: "ENOSPC" },
+  );
+  assert.equal(existsSync(join(other, ".local", "bin", "tmuxrooms")), false);
 });

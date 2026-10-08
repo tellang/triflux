@@ -2,13 +2,13 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  constants,
   copyFileSync,
-  existsSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -38,9 +38,11 @@ export function findTmr({ home, env = process.env }) {
     tmrBinDir(home),
     ...String(env.PATH || "").split(delimiter),
   ].filter(Boolean);
+  // 깨진 링크도 사용자 것으로 보고 건드리지 않는다.
   for (const dir of dirs)
     for (const name of ["tmuxrooms", "tmr"])
-      if (existsSync(join(dir, name))) return join(dir, name);
+      if (lstatSync(join(dir, name), { throwIfNoEntry: false }))
+        return join(dir, name);
   return null;
 }
 
@@ -68,6 +70,7 @@ export async function installTmr({
   fetchFn = fetch,
   extract = extractWithDitto,
   run = execFileSync,
+  symlink = symlinkSync,
 }) {
   const base = releaseBase(release);
   const zip = await download(`${base}/${release.asset}`, fetchFn);
@@ -103,16 +106,23 @@ export async function installTmr({
     const target = join(binDir, "tmuxrooms");
     const temporary = `${target}.tfx-${process.pid}.tmp`;
     try {
-      copyFileSync(extracted, temporary);
+      copyFileSync(extracted, temporary, constants.COPYFILE_EXCL);
       chmodSync(temporary, 0o755);
-      renameSync(temporary, target);
+      // 묻는 사이 다른 쪽이 tmuxrooms 를 만들었으면 덮지 않고 실패한다(EEXIST).
+      linkSync(temporary, target);
     } finally {
       rmSync(temporary, { force: true });
     }
     const link = join(binDir, "tmr");
-    // 이미 있는 tmr 은 사용자 것일 수 있어 건드리지 않는다.
-    if (!lstatSync(link, { throwIfNoEntry: false }))
-      symlinkSync("tmuxrooms", link);
+    try {
+      // 이미 있는 tmr 은 사용자 것일 수 있어 건드리지 않는다.
+      if (!lstatSync(link, { throwIfNoEntry: false }))
+        symlink("tmuxrooms", link);
+    } catch (error) {
+      // 링크까지 못 만들면 이번에 넣은 파일을 되돌려 다음 setup 이 다시 시도하게 한다.
+      rmSync(target, { force: true });
+      throw error;
+    }
 
     let runs = true;
     try {
