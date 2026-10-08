@@ -174,3 +174,40 @@ describe("session.mjs wt-manager migration", () => {
     );
   });
 });
+
+describe("session.mjs tmux argv 호출", () => {
+  it("작은따옴표, 세미콜론, $ 가 든 세션 이름을 셸 없이 그대로 넘긴다", async (t) => {
+    if (process.platform === "win32") return t.skip("tmux 전용");
+    const { execFileSync } = await import("node:child_process");
+    const { mkdtempSync, rmSync } = await import("node:fs");
+    try {
+      execFileSync("tmux", ["-V"], { stdio: "ignore" });
+    } catch {
+      return t.skip("tmux 없음");
+    }
+    // 사용자 tmux 서버와 분리한 소켓 디렉터리. 소켓 경로 길이 제한 때문에 /tmp 에 둔다.
+    const sockDir = mkdtempSync("/tmp/tfx671-");
+    const saved = {
+      TMUX: process.env.TMUX,
+      TMUX_TMPDIR: process.env.TMUX_TMPDIR,
+    };
+    delete process.env.TMUX;
+    process.env.TMUX_TMPDIR = sockDir;
+    const name = "tfx671 it's;$HOME";
+    try {
+      execFileSync("tmux", ["new-session", "-d", "-s", name, "sleep 30"]);
+      assert.equal(sessionExists(name), true);
+      sessionModule.killSession(name);
+      assert.equal(sessionExists(name), false);
+    } finally {
+      try {
+        execFileSync("tmux", ["kill-server"], { stdio: "ignore" });
+      } catch {}
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      rmSync(sockDir, { recursive: true, force: true });
+    }
+  });
+});

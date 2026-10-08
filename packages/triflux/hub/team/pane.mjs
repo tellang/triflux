@@ -6,10 +6,6 @@ import { join } from "node:path";
 import { psmuxExec } from "./psmux.mjs";
 import { detectMultiplexer, tmuxExec } from "./session.mjs";
 
-function quoteArg(value) {
-  return `"${String(value).replace(/"/g, '\\"')}"`;
-}
-
 function getPsmuxSessionName(target) {
   return String(target).split(":")[0]?.trim() || "";
 }
@@ -105,7 +101,7 @@ function capturePaneText(target) {
           "",
       );
     }
-    return String(muxExec(`capture-pane -t ${target} -p`) ?? "");
+    return String(muxExec(["capture-pane", "-t", target, "-p"]) ?? "");
   } catch {
     return "";
   }
@@ -294,10 +290,10 @@ export function injectPrompt(
 
     // tmux load-buffer → paste-buffer → (정착 지연 + 제출 확인) Enter
     waitForComposerReady(target);
-    muxExec(`load-buffer ${quoteArg(toMuxPath(tmpFile))}`);
-    muxExec(`paste-buffer -t ${target}`);
+    muxExec(["load-buffer", toMuxPath(tmpFile)]);
+    muxExec(["paste-buffer", "-t", target]);
     confirmSubmit(target, prompt, cli, () =>
-      muxExec(`send-keys -t ${target} Enter`),
+      muxExec(["send-keys", "-t", target, "Enter"]),
     );
   } finally {
     try {
@@ -312,5 +308,10 @@ export function injectPrompt(
  * @param {string} keys — tmux 키 표현 (예: 'C-c', 'Enter')
  */
 export function sendKeys(target, keys) {
-  muxExec(`send-keys -t ${target} ${keys}`);
+  muxExec([
+    "send-keys",
+    "-t",
+    target,
+    ...String(keys).split(/\s+/u).filter(Boolean),
+  ]);
 }
