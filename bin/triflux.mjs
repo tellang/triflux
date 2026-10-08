@@ -1670,7 +1670,8 @@ async function cmdDoctor(options = {}) {
             name: "mcp-inventory",
             status: "failed",
           });
-          warn("MCP 인벤토리 재생성 실패 — tfx setup 으로 다시 생성");
+          warn("MCP 인벤토리 재생성 실패");
+          info(`수동: node ${mcpCheck}`);
         }
       }
       const hudScript = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
@@ -2410,7 +2411,7 @@ async function cmdDoctor(options = {}) {
         path: mcpCache,
         fix: `node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}`,
       });
-      warn("캐시 없음 — tfx setup 이 생성");
+      warn("캐시 없음: tfx update 또는 tfx doctor --reset 이 생성");
       info(`수동: node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}`);
     }
 
@@ -3704,7 +3705,7 @@ function cmdHelp() {
     ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}      ${GRAY}멀티-CLI 팀 모드 (tmux)${RESET}
-    ${WHITE_BRIGHT}tfx cto${RESET}        ${GRAY}저장소 스냅숏 조회 (collect/status/hygiene)${RESET}
+    ${WHITE_BRIGHT}tfx cto${RESET}        ${GRAY}저장소 스냅숏 수집과 조회 (collect/status/hygiene)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
     ${WHITE_BRIGHT}tfx-live${RESET}       ${GRAY}Claude·Codex 라이브 세션 (tfx-live --help)${RESET}
 
