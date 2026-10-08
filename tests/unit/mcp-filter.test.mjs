@@ -34,7 +34,7 @@ after(() => rmSync(fixtureDir, { recursive: true, force: true }));
 
 describe("mcp-filter", () => {
   it("delimited 출력은 라우터가 읽는 7필드를 레코드 구분자로 잇는다", (t) => {
-    const dir = mkdtempSync(new URL("./mcp-filter-", import.meta.url));
+    const dir = mkdtempSync(join(tmpdir(), "tfx-mcp-filter-"));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const inventoryFile = join(dir, "inventory.json");
     const config = join(dir, "config.toml");
@@ -318,7 +318,7 @@ describe("mcp-filter", () => {
   });
 
   it("Codex inventory가 비면 config의 단순 MCP 섹션으로 fallback한다", () => {
-    const dir = mkdtempSync(join(process.cwd(), ".tfx-mcp-filter-"));
+    const dir = mkdtempSync(join(tmpdir(), "tfx-mcp-filter-"));
     const config = join(dir, "config.toml");
     try {
       writeFileSync(config, "[mcp_servers.context7]\n[mcp_servers.foo.bar]\n");

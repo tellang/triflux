@@ -8,6 +8,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
@@ -21,7 +22,7 @@ import {
 } from "../../hub/lib/codex-session-registry.mjs";
 
 function withTempDir(fn) {
-  const dir = mkdtempSync(join(process.cwd(), ".tmp-codex-registry-"));
+  const dir = mkdtempSync(join(tmpdir(), "tfx-codex-registry-"));
   try {
     return fn(dir);
   } finally {
