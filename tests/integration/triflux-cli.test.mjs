@@ -230,7 +230,10 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
       }),
     );
     // HOME 을 격리했으므로 테스트 가드를 끄고 실제 정리 경로를 탄다.
-    const result = runCli(["setup"], { homeDir, env: { TEST_LOCK_PID: "" } });
+    const result = runCli(["setup"], {
+      homeDir,
+      env: { TEST_LOCK_PID: "", TFX_TEST_HOME_ISOLATED: "1" },
+    });
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.deepEqual(JSON.parse(readFileSync(hooksPath, "utf8")), {});
   });

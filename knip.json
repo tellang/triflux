@@ -16,7 +16,6 @@
         "scripts/lib/mcp-filter.mjs",
         "scripts/lib/mcp-health.mjs",
         "hooks/codex-session-hook.mjs",
-        "hooks/agy-session-hook.mjs",
         "hud/hud-qos-status.mjs",
         "hub/team/cli/index.mjs",
         "hub/team/cli/help.mjs",
