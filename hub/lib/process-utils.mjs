@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { IS_WINDOWS, killProcess } from "../platform.mjs";
+import { IS_WINDOWS } from "../platform.mjs";
 
 const CLEANUP_SCRIPT_DIR = join(tmpdir(), "tfx-process-utils");
 const SCAN_SCRIPT_PATH = join(CLEANUP_SCRIPT_DIR, "scan-processes.ps1");
@@ -52,80 +52,6 @@ export function isPidAlive(pid) {
     if (e?.code === "ESRCH") return false;
     return false;
   }
-}
-
-/**
- * 동기적 sleep. Atomics.wait 우선, 불가 시 busy-wait 폴백.
- */
-function sleepSyncMs(ms) {
-  try {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  } catch {
-    const end = Date.now() + ms;
-    while (Date.now() < end) {
-      /* spin */
-    }
-  }
-}
-
-/**
- * 고아 PID 목록에 SIGTERM → 3초 대기 → SIGKILL 에스컬레이션을 적용한다.
- * PID 재사용 레이스 방어: SIGTERM 전 alive 확인, SIGKILL 전 재검증.
- * @param {number[]} orphanPids
- * @param {Map<number, {ppid: number, name: string}>} [procMap] PID 재사용 감지용 스냅샷
- * @returns {number} killed count
- */
-function killWithEscalation(orphanPids, procMap) {
-  if (orphanPids.length === 0) return 0;
-
-  // SIGTERM 전 alive 스냅샷 — 이미 죽은 PID는 카운트에서 제외
-  const aliveBeforeKill = new Set(orphanPids.filter((pid) => isPidAlive(pid)));
-
-  for (const pid of aliveBeforeKill) {
-    killProcess(pid, { signal: "SIGTERM" });
-  }
-
-  sleepSyncMs(3000);
-
-  let killed = 0;
-  for (const pid of aliveBeforeKill) {
-    if (isPidAlive(pid)) {
-      // PID 재사용 방어: procMap이 있으면 스캔 시점의 ppid와 현재 ppid 비교
-      // ppid가 변경되었으면 PID가 재사용된 것이므로 kill하지 않���
-      if (procMap) {
-        const snapshot = procMap.get(pid);
-        if (snapshot) {
-          try {
-            const current = execSync(
-              IS_WINDOWS
-                ? `powershell -NoProfile -WindowStyle Hidden -Command "(Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction SilentlyContinue).ParentProcessId"`
-                : `ps -o ppid= -p ${pid}`,
-              {
-                encoding: "utf8",
-                timeout: 3000,
-                stdio: ["pipe", "pipe", "pipe"],
-                windowsHide: true,
-              },
-            );
-            const currentPpid = Number.parseInt(current.trim(), 10);
-            if (Number.isFinite(currentPpid) && currentPpid !== snapshot.ppid) {
-              continue; // PID 재사용 감지 — skip
-            }
-          } catch {
-            // 조회 실패 시 안전하게 skip
-            continue;
-          }
-        }
-      }
-      killProcess(pid, {
-        signal: "SIGKILL",
-        force: true,
-        tree: IS_WINDOWS,
-      });
-    }
-    if (!isPidAlive(pid)) killed++;
-  }
-  return killed;
 }
 
 /**
@@ -261,12 +187,12 @@ function hasLiveCliDescendant(pid, procMap) {
 }
 
 /**
- * Legacy wrapper for scoped orphan node runtime cleanup.
+ * `tfx doctor --fix` 가 쓰는 이름. cleanupOrphanRuntimeProcesses 와 같다.
  * @param {Parameters<typeof cleanupOrphanRuntimeProcesses>[0]} opts
- * @returns {{ killed: number, remaining: number, killedProcesses: Array<{pid: number, ppid: number, name: string, commandLine: string, killReason: string}> }}
+ * @returns {ReturnType<typeof cleanupOrphanRuntimeProcesses>}
  */
 export function cleanupOrphanNodeProcesses(opts = {}) {
-  return cleanupOrphanRuntimeProcesses({ ...opts, legacy: true });
+  return cleanupOrphanRuntimeProcesses(opts);
 }
 
 function normalizePowerShellJson(output) {
@@ -295,10 +221,6 @@ function normalizePid(value) {
 
 function normalizeName(name) {
   return String(name || "").toLowerCase();
-}
-
-function normalizeCommandLine(commandLine) {
-  return String(commandLine || "").replace(/\//g, "\\");
 }
 
 function processRecordFromCim(record) {
@@ -458,16 +380,6 @@ function matchesPattern(commandLine, pattern, { exact = false } = {}) {
   const text = String(pattern || "");
   if (!text) return false;
   return exact ? commandLine === text : commandLine.includes(text);
-}
-
-function hasExactGbrainServe(commandLine) {
-  const normalized = commandLine.trim();
-  return (
-    /^("?[^"\s]*bun(?:\.exe)?"?\s+)?gbrain\s+serve$/i.test(normalized) ||
-    /^("?[^"\s]*bun(?:\.exe)?"?\s+)"?[^"]*gbrain[\\/]+src[\\/]+cli\.ts"?\s+serve$/i.test(
-      normalized,
-    )
-  );
 }
 
 /**
@@ -651,75 +563,41 @@ export function findProcessesByCommandLine(
 }
 
 /**
- * Cleanup narrowly gated orphan runtime processes.
+ * Windows 고아 node/bash/cmd/uvx 런타임을 정리한다.
  *
- * Windows scans node/bash/bun and optional conhost command lines. POSIX is a
- * best-effort fallback. `legacy: true` preserves `cleanupOrphanNodeProcesses`
- * behavior by targeting scoped orphan node runtimes only.
+ * 조상 체인이 살아 있거나 Claude/Codex/Gemini 자손이 있으면 건드리지 않는다.
+ * 운영 호출자가 Windows `tfx doctor --fix` 하나라 다른 OS 에서는 아무것도 하지 않는다.
  *
- * @param {{legacy?: boolean, includeConhost?: boolean, sessionIds?: string[], isWindows?: boolean, spawnSyncFn?: typeof spawnSync, killFn?: typeof process.kill, protectedPids?: Set<number>}} opts
+ * @param {{isWindows?: boolean, spawnSyncFn?: typeof spawnSync, killFn?: typeof process.kill, protectedPids?: Set<number>}} opts
  * @returns {{killed: number, remaining: number, killedProcesses: Array<{pid: number, ppid: number, name: string, commandLine: string, killReason: string}>}}
  */
 export function cleanupOrphanRuntimeProcesses({
-  legacy = false,
-  includeConhost = false,
-  sessionIds = [],
   isWindows = IS_WINDOWS,
   spawnSyncFn = spawnSync,
   killFn = process.kill,
   protectedPids,
 } = {}) {
-  if (!isWindows) return cleanupOrphansUnix();
+  if (!isWindows) return { killed: 0, remaining: 0, killedProcesses: [] };
 
   const protectedSet = getProtectedPids({
     protectedPids,
     isWindows,
     spawnSyncFn,
-    includeAncestorScan: legacy,
+    includeAncestorScan: true,
   });
   const processes = getProcessSnapshot({ isWindows, spawnSyncFn });
+  const procMap = new Map(processes.map((proc) => [proc.pid, proc]));
   let killed = 0;
   const killedProcesses = [];
-  const procMap = legacy
-    ? new Map(processes.map((proc) => [proc.pid, proc]))
-    : new Map(processes.map((proc) => [proc.pid, proc]));
 
   for (const proc of processes) {
-    if (protectedSet.has(proc.pid)) continue;
-    const name = normalizeName(proc.name);
-    const commandLine = normalizeCommandLine(proc.commandLine);
-    let shouldKill = false;
-    let killReason = null;
-
-    if (legacy) {
-      if (
-        LEGACY_ORPHAN_KILLABLE_NAMES.has(name) &&
-        !hasLiveAncestorChain(proc.pid, procMap, protectedSet) &&
-        !hasLiveCliDescendant(proc.pid, procMap)
-      ) {
-        shouldKill = true;
-        killReason = "legacy_orphan_ancestor_chain_dead";
-      }
-    } else if (name === "bun.exe") {
-      if (
-        hasExactGbrainServe(proc.commandLine) &&
-        !hasLiveAncestorChain(proc.pid, procMap, protectedSet) &&
-        !hasLiveCliDescendant(proc.pid, procMap)
-      ) {
-        shouldKill = true;
-        killReason = "bun_gbrain_serve_orphan";
-      }
-    } else if (includeConhost && name === "conhost.exe") {
-      if (
-        sessionIds.length > 0 &&
-        sessionIds.some((id) => id && commandLine.includes(id))
-      ) {
-        shouldKill = true;
-        killReason = "conhost_session_match";
-      }
-    }
-
-    if (!shouldKill) continue;
+    if (
+      protectedSet.has(proc.pid) ||
+      !LEGACY_ORPHAN_KILLABLE_NAMES.has(normalizeName(proc.name)) ||
+      hasLiveAncestorChain(proc.pid, procMap, protectedSet) ||
+      hasLiveCliDescendant(proc.pid, procMap)
+    )
+      continue;
     try {
       killFn(proc.pid, "SIGKILL");
       killed++;
@@ -728,7 +606,7 @@ export function cleanupOrphanRuntimeProcesses({
         ppid: proc.ppid,
         name: proc.name,
         commandLine: String(proc.commandLine || "").slice(0, 200),
-        killReason,
+        killReason: "legacy_orphan_ancestor_chain_dead",
       });
     } catch {}
   }
@@ -817,83 +695,4 @@ export function cleanupStaleFsmonitorDaemons({
   }
 
   return { killed, stale };
-}
-
-/**
- * Unix/macOS 고아 프로세스 정리.
- * `ps -eo pid,ppid,comm` 기반 프로세스 맵 → 동일한 조상 체인 판정 → SIGKILL 에스컬레이션.
- * @returns {{ killed: number, remaining: number }}
- */
-function cleanupOrphansUnix() {
-  const myPid = process.pid;
-
-  const protectedPids = new Set();
-  protectedPids.add(myPid);
-
-  // 현재 프로세스의 조상 트리 보호
-  try {
-    let current = myPid;
-    for (let i = 0; i < 10; i++) {
-      protectedPids.add(current);
-      const output = execSync(`ps -o ppid= -p ${current}`, {
-        encoding: "utf8",
-        timeout: 3000,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      const ppid = Number.parseInt(output.trim(), 10);
-      if (!Number.isFinite(ppid) || ppid <= 1) break;
-      current = ppid;
-    }
-  } catch {}
-
-  // 프로세스 맵 구축 (런타임 + CLI — 체인 추적 정확도를 위해 CLI도 포함)
-  const procMap = new Map();
-  try {
-    const output = execSync("ps -eo pid,ppid,comm", {
-      encoding: "utf8",
-      timeout: 10000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    for (const line of output.split("\n").slice(1)) {
-      const parts = line.trim().split(/\s+/);
-      if (parts.length < 3) continue;
-      const pid = Number.parseInt(parts[0], 10);
-      const ppid = Number.parseInt(parts[1], 10);
-      const name = parts.slice(2).join(" ");
-      if (
-        Number.isFinite(pid) &&
-        pid > 0 &&
-        /^(node|bash|sh|python|codex|claude|gemini|uvx)/.test(name)
-      ) {
-        procMap.set(pid, { ppid, name });
-      }
-    }
-  } catch {}
-
-  // kill 대상: node, python, codex, claude, uvx — bash/sh는 사용자 인터랙티브 쉘 가능성
-  const killableUnix = /^(node|python|codex|claude|gemini|uvx)/;
-
-  // 고아 판정 + SIGKILL 에스컬레이션
-  const orphanPids = [];
-  for (const [pid, info] of procMap) {
-    if (protectedPids.has(pid)) continue;
-    if (!killableUnix.test(info.name)) continue;
-    if (hasLiveAncestorChain(pid, procMap, protectedPids)) continue;
-    if (hasLiveCliDescendant(pid, procMap)) continue;
-    orphanPids.push(pid);
-  }
-
-  const killed = killWithEscalation(orphanPids, procMap);
-
-  let remaining = 0;
-  try {
-    const output = execSync("ps -eo comm | grep -c '^node$'", {
-      encoding: "utf8",
-      timeout: 3000,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    remaining = Number.parseInt(output.trim(), 10) || 0;
-  } catch {}
-
-  return { killed, remaining };
 }
