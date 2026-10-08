@@ -45,6 +45,7 @@ import {
 import { parseFrontmatter } from "./lib/skill-template.mjs";
 import { resolveStableNodeBin } from "./lib/stable-node.mjs";
 import { isTestRun, writesRealHomeInTest } from "./lib/test-env.mjs";
+import { offerTmrInstall } from "./lib/tmr-install.mjs";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -457,10 +458,16 @@ export async function runConsentSteps({
   hasCommand = (command) => commandAvailableOnPath(command, { env, platform }),
   run = execFileSync,
   ensureHooks = ensureCodexHooks,
+  offerTmr = offerTmrInstall,
+  home = _TFX_HOME,
   log = console.log,
   warn = console.warn,
 } = {}) {
-  const result = { psmux: "not-needed", codexHooks: "skipped" };
+  const result = {
+    psmux: "not-needed",
+    tmr: "not-needed",
+    codexHooks: "skipped",
+  };
 
   if (platform === "win32") {
     if (hasCommand("psmux")) result.psmux = "present";
@@ -486,6 +493,16 @@ export async function runConsentSteps({
       log(`psmux 설치를 건너뜀. 나중에 설치: ${PSMUX_MANUAL_INSTALL}`);
     }
   }
+
+  result.tmr = await offerTmr({
+    interactive,
+    ask,
+    home,
+    env,
+    platform,
+    log,
+    warn,
+  });
 
   try {
     const hooks = ensureHooks({ trust: false });
