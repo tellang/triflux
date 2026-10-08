@@ -61,7 +61,7 @@ status = match (process, heartbeat, commit, stdout):
 
 ## 4. 남은 검토 범위
 
-issue #176의 `tfx-route.sh --job-status` 조기 실패 판정은 PR #213으로 고쳤고, PR #185의 silent-flush guard는 머지됐다. 위 표의 swarm 실행, `tfx swarm list`, `worker-signal.mjs` 및 4채널 집계 요구는 ADR-0025에 따라 실행 대상에서 제외한다.
+issue #176의 `tfx-route.sh --job-status` 조기 실패 판정은 PR #213으로 고쳤고, PR #185의 silent-flush guard는 머지됐다. 위 표의 swarm 실행, `tfx swarm list`, `worker-signal.mjs` 및 4채널 집계 요구는 ADR-0025에 따라 실행 대상에서 제외한다. `worker-signal.mjs`는 삭제됨(#571).
 
 코드 변경을 병렬로 진행할 경우 작업별 worktree와 세션을 분리한다. 각 세션의 CLI 실행은 `tfx-auto`를 사용한다. Claude Agent에는 `isolation: worktree`를 지정할 수 있다.
 

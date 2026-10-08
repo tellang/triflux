@@ -60,10 +60,6 @@ macOS/Linux는 플랫폼 보호기가 아무 작업도 하지 않게 처리하�
 | `scripts/tfx-route.sh` | `resolve_machine_profile_path`, `heartbeat_monitor` | `case "$(uname -s)"` 분기 |
 
 Windows 전용 경로는 플랫폼과 `WT_SESSION` 조건을 확인한다.
-
-### macOS 알림
-
-`hub/team/notify.mjs`의 `sendToast`가 `osascript`로 macOS 기본 알림을 보낸다. 별도 의존성은 없다.
 </macos-terminal>
 
 <codex-config>
