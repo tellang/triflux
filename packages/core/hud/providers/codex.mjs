@@ -280,10 +280,10 @@ export function createReverseLineReader(
     closeSync(fd);
     throw err;
   }
-  let carryParts = []; // 아직 줄 시작을 못 만난 뒷부분 조각(긴 줄도 한 번만 이어 붙인다)
+  let carryParts = []; // 아직 줄 시작을 못 만난 뒷부분 조각. 나중에 읽은(앞쪽) 조각이 뒤에 쌓인다
   let queue = [];
+  let leadingBlank = -1; // 파일 맨 앞의 빈 줄 수. 끝까지 읽은 뒤에만 정해진다
   let trimmingTail = true;
-  let stash = [];
   let yielded = false;
   let emptyGiven = false;
 
@@ -305,30 +305,43 @@ export function createReverseLineReader(
     }
     pieces.push(chunk.subarray(start));
     if (pieces.length === 1 && pos > 0) {
-      carryParts.unshift(chunk);
+      carryParts.push(chunk);
       return;
     }
     const last = pieces.length - 1;
-    pieces[last] = Buffer.concat([pieces[last], ...carryParts]);
-    carryParts = [];
-    if (pos > 0) carryParts = [pieces.shift()];
-    const lines = pieces.map((piece) => piece.toString("utf-8"));
-    queue = lines;
+    pieces[last] = Buffer.concat([pieces[last], ...carryParts.reverse()]);
+    carryParts = pos > 0 ? [pieces.shift()] : [];
+    queue = pieces.map((piece) => piece.toString("utf-8"));
+    if (pos === 0) {
+      leadingBlank = 0;
+      while (leadingBlank < queue.length && queue[leadingBlank].trim() === "") {
+        leadingBlank++;
+      }
+    }
   }
 
-  // stash 에 되돌려 둔 줄을 먼저, 그다음 큐에서 줄을 꺼낸다.
-  function pull() {
-    if (stash.length > 0) return stash.shift();
-    while (queue.length === 0 && pos > 0) fill();
-    return queue.length > 0 ? queue.pop() : null;
-  }
+  // 옛 trim() 은 파일 맨 앞의 공백과 빈 줄을 지운다. 이미 읽은 줄만으로 알 수 있을 때만 적용해
+  // 앞선 큰 줄을 미리 읽지 않는다.
+  const isFileHead = () => leadingBlank >= 0 && queue.length <= leadingBlank;
 
   const reader = {
     bytesRead: 0,
     // 줄이 더 없으면 null
     next() {
-      let line = pull();
-      while (line !== null && trimmingTail && line.trim() === "") line = pull();
+      let line = null;
+      while (queue.length > 0 || pos > 0) {
+        if (queue.length === 0) {
+          fill();
+          continue;
+        }
+        line = queue.pop();
+        const blank = line.trim() === "";
+        if (blank && (trimmingTail || isFileHead())) {
+          line = null;
+          continue;
+        }
+        break;
+      }
       if (line === null) {
         if (yielded || emptyGiven) return null;
         emptyGiven = true; // 빈 파일도 옛 split 처럼 빈 줄 하나를 낸다
@@ -339,17 +352,7 @@ export function createReverseLineReader(
         trimmingTail = false;
         line = line.trimEnd();
       }
-      if (line.trim() === "") return line;
-      // 파일 맨 앞의 공백 줄은 trim 으로 사라진다. 뒤에 내용이 이어지는지 미리 본다.
-      const blanks = [];
-      let following = pull();
-      while (following !== null && following.trim() === "") {
-        blanks.push(following);
-        following = pull();
-      }
-      if (following === null) return line.trimStart();
-      stash = [...blanks, following];
-      return line;
+      return isFileHead() ? line.trimStart() : line;
     },
     close() {
       try {

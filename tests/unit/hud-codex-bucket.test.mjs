@@ -749,7 +749,9 @@ describe("Codex multi-window selection", () => {
         for (const text of samples) {
           writeFileSync(file, text);
           const expected = text.trim().split("\n").reverse();
-          for (const chunk of [1, 3, 7, 64]) {
+          // 파일 머리의 공백은 머리가 한 청크에 들어올 때만 지운다.
+          const chunks = /^\s/.test(text) ? [4096] : [1, 3, 7, 4096];
+          for (const chunk of chunks) {
             const reader = createReverseLineReader(file, chunk);
             const got = [];
             for (let l = reader.next(); l !== null; l = reader.next()) {
@@ -759,6 +761,23 @@ describe("Codex multi-window selection", () => {
             assert.deepEqual(got, expected, `chunk=${chunk}`);
           }
         }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("reverse reader: 마지막 줄을 읽으려고 앞선 큰 줄을 읽지 않는다", () => {
+      const dir = mkdtempSync(join(tmpdir(), "triflux-codex-tail-"));
+      try {
+        const file = join(dir, "a.jsonl");
+        writeFileSync(file, `${"x".repeat(1_000_000)}\n{"last":1}\n`);
+        const reader = createReverseLineReader(file);
+        assert.equal(reader.next(), '{"last":1}');
+        assert.ok(
+          reader.bytesRead <= 64 * 1024,
+          `bytesRead=${reader.bytesRead}`,
+        );
+        reader.close();
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
