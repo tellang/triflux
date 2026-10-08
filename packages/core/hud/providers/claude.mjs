@@ -182,8 +182,19 @@ function readClaudeKeychainCredentials(
   const entry = readClaudeKeychainEntry({ execFileSyncFn, env });
   if (!entry) return null;
   const creds = normalizeClaudeCredentials(entry.raw, "keychain");
+  if (!creds) return null;
   // 만료된 항목도 그대로 돌려준다. 호출자가 refreshToken 으로 갱신한 뒤 같은 항목에 되쓴다.
-  return creds ? { ...creds, keychainAccount: entry.account } : null;
+  const lineLength = keychainWriteLine(
+    entry.account,
+    entry.serviceName,
+    entry.raw,
+  ).length;
+  return {
+    ...creds,
+    keychainAccount: entry.account,
+    keychainWritable:
+      lineLength + KEYCHAIN_TOKEN_GROWTH_MARGIN <= KEYCHAIN_STDIN_LINE_LIMIT,
+  };
 }
 
 // 읽기 순서는 Claude Code 와 같다. macOS 에서는 Keychain 이 정본이고 평문 파일은 Keychain 을 못 쓸 때의
@@ -316,8 +327,16 @@ function mergeClaudeCredentials(creds, existingRaw) {
 }
 
 // Claude Code 와 같은 쓰기 경로: 비밀값을 argv 에 두지 않도록 `security -i` 표준입력으로 명령 한 줄을
-// 넘기고 payload 는 `-X` 16진수로 싣는다. 한 줄 상한(4032B)을 넘는 큰 항목만 argv 로 내려간다.
+// 넘기고 payload 는 `-X` 16진수로 싣는다. 한 줄 상한(4032B)을 넘는 큰 항목은 argv 로 넘기면 토큰이
+// ps 에 보여서 되쓰지 않는다.
 const KEYCHAIN_STDIN_LINE_LIMIT = 4032;
+// 갱신 뒤 토큰 길이가 조금 달라져도 상한을 넘지 않도록 둔 여유(글자 수).
+const KEYCHAIN_TOKEN_GROWTH_MARGIN = 512;
+
+function keychainWriteLine(account, serviceName, payload) {
+  const hex = Buffer.from(JSON.stringify(payload), "utf8").toString("hex");
+  return `add-generic-password -U -a "${account}" -s "${serviceName}" -X "${hex}"\n`;
+}
 
 function writeClaudeKeychainCredentials(
   creds,
@@ -333,20 +352,17 @@ function writeClaudeKeychainCredentials(
     execFileSyncFn,
   );
   const payload = mergeClaudeCredentials(creds, existingRaw);
-  const hex = Buffer.from(JSON.stringify(payload), "utf8").toString("hex");
-  const line = `add-generic-password -U -a "${account}" -s "${serviceName}" -X "${hex}"\n`;
-  if (line.length <= KEYCHAIN_STDIN_LINE_LIMIT) {
-    execFileSyncFn("security", ["-i"], {
-      input: line,
-      stdio: ["pipe", "ignore", "ignore"],
-    });
+  const line = keychainWriteLine(account, serviceName, payload);
+  if (line.length > KEYCHAIN_STDIN_LINE_LIMIT) {
+    process.stderr.write(
+      "[hud] Keychain 항목이 커서 갱신한 토큰을 되쓰지 않습니다\n",
+    );
     return;
   }
-  execFileSyncFn(
-    "security",
-    ["add-generic-password", "-U", "-a", account, "-s", serviceName, "-X", hex],
-    { stdio: "ignore" },
-  );
+  execFileSyncFn("security", ["-i"], {
+    input: line,
+    stdio: ["pipe", "ignore", "ignore"],
+  });
 }
 
 function writeClaudeFileCredentials(
@@ -631,7 +647,11 @@ export async function fetchClaudeUsage(forceRefresh = false) {
 
   // 토큰 만료 시 리프레시
   if (creds.expiresAt && creds.expiresAt <= Date.now() && creds.refreshToken) {
-    const refreshed = await refreshClaudeAccessToken(creds.refreshToken);
+    // 되쓰지 못할 갱신은 회전된 refreshToken 을 잃어 Claude Code 로그인을 풀 수 있다. 갱신은 Claude Code 에 맡긴다.
+    const refreshed =
+      creds.keychainWritable === false
+        ? null
+        : await refreshClaudeAccessToken(creds.refreshToken);
     if (refreshed) {
       creds = { ...creds, ...refreshed };
       writeBackClaudeCredentials(creds);

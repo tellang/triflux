@@ -252,6 +252,7 @@ describe("readClaudeCredentials", () => {
       source: "keychain",
       supportsUsageApi: true,
       keychainAccount: account,
+      keychainWritable: true,
     });
   });
 
@@ -794,36 +795,42 @@ describe("writeBackClaudeCredentials 출처 일치", () => {
     });
   });
 
-  it("한 줄 상한(4032B)을 넘는 큰 항목은 -X 16진수 argv 로 내려간다", () => {
+  it("한 줄 상한(4032B)을 넘는 큰 항목은 argv 로 넘기지 않고 갱신 대상에서도 뺀다", () => {
     const calls = [];
-    const big = "x".repeat(3000);
-    writeBackClaudeCredentials(
-      {
-        accessToken: "n",
-        source: "keychain",
-        keychainAccount: "alice",
-        supportsUsageApi: true,
+    const big = JSON.stringify({
+      claudeAiOauth: {
+        accessToken: "o",
+        refreshToken: "r",
+        expiresAt: 1,
+        mcpOAuth: { blob: "x".repeat(3000) },
       },
-      {
-        platform: "darwin",
-        execFileSyncFn: (command, args, options) => {
-          calls.push({ command, args, options });
-          if (args[0] === "find-generic-password") {
-            return JSON.stringify({
-              claudeAiOauth: { accessToken: "o", mcpOAuth: { blob: big } },
-            });
-          }
-          return "";
-        },
-        env: {},
-      },
+    });
+    const execFileSyncFn = (command, args, options) => {
+      calls.push({ command, args, options });
+      return args[0] === "find-generic-password" ? big : "";
+    };
+    const creds = readClaudeCredentials({
+      readCredentialFile: () => null,
+      platform: "darwin",
+      execFileSyncFn,
+      env: { USER: "alice" },
+    });
+    assert.equal(creds.keychainWritable, false);
+
+    const stderrWrite = process.stderr.write;
+    process.stderr.write = () => true;
+    try {
+      writeBackClaudeCredentials(
+        { ...creds, accessToken: "n" },
+        { platform: "darwin", execFileSyncFn, env: {} },
+      );
+    } finally {
+      process.stderr.write = stderrWrite;
+    }
+    assert.equal(
+      calls.some((c) => c.args[0] !== "find-generic-password"),
+      false,
     );
-    const write = parseKeychainWrite(calls);
-    assert.equal(write.via, "argv");
-    assert.equal(write.hasPlainPassword, false);
-    assert.equal(write.account, "alice");
-    assert.equal(write.payload.claudeAiOauth.mcpOAuth.blob, big);
-    assert.equal(write.payload.claudeAiOauth.accessToken, "n");
   });
 
   it("file 출처 자격증명은 읽은 파일 경로에 되쓴다", () => {
