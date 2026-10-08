@@ -292,7 +292,27 @@ function recordBatchEvent(result, agent) {
 }
 
 // ── CLI 이슈 추적 ──
+// 예전에는 걸러지지 않은 stderr 를 검사해 Codex 배너로 시작하는 오탐이 쌓였다. 한 번 지운다.
+function dropBannerIssues(issuesFile) {
+  if (!existsSync(issuesFile)) return;
+  const lines = readFileSync(issuesFile, "utf-8").split("\n").filter(Boolean);
+  const kept = lines.filter((line) => {
+    try {
+      return !/^OpenAI Codex v/.test(JSON.parse(line).snippet || "");
+    } catch {
+      return true;
+    }
+  });
+  if (kept.length === lines.length) return;
+  writeFileSync(issuesFile, kept.length ? `${kept.join("\n")}\n` : "");
+}
+
+// stderrText 는 filterBenignStderr 를 거친 진단 줄이다. 배너와 프롬프트 에코는 검사하지 않는다.
 function trackCliIssue(cliType, agent, stderrText, exitCode) {
+  const issuesFile = join(CACHE_DIR, "cli-issues.jsonl");
+  try {
+    dropBannerIssues(issuesFile);
+  } catch {}
   if (!stderrText && exitCode === 0) return;
 
   const patterns = [
@@ -312,7 +332,7 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
       severity: "warn",
     },
     {
-      regex: /rate.limit|429|too many requests/i,
+      regex: /rate.?limit|\b429\b|too many requests/i,
       pattern: "rate_limit",
       msg: "API rate limit exceeded",
       severity: "warn",
@@ -330,7 +350,7 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
       severity: "warn",
     },
     {
-      regex: /API_KEY.*not.set|auth.*fail|unauthorized|401/i,
+      regex: /API_KEY.*not.set|auth.*fail|unauthorized|\b401\b/i,
       pattern: "auth_error",
       msg: "Authentication failed",
       severity: "error",
@@ -368,7 +388,6 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
 
   if (!matched) return;
 
-  const issuesFile = join(CACHE_DIR, "cli-issues.jsonl");
   try {
     mkdirSync(CACHE_DIR, { recursive: true });
 
@@ -499,7 +518,7 @@ function main() {
   recordBatchEvent(aimdResult, agent);
 
   // 6. CLI 이슈 추적
-  trackCliIssue(cliType, agent, stderrContent, exitCode);
+  trackCliIssue(cliType, agent, warningContent, exitCode);
 
   // 7. 구조화된 결과 출력
   console.log("=== TFX-ROUTE RESULT ===");

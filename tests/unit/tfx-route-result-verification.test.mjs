@@ -6,7 +6,13 @@
 // transport 크래시 서명을 검출해 가드가 실패로 승격한다. 진짜 출력 있는 성공은 무영향.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -115,6 +121,56 @@ describe("tfx-route.sh no-op 가드 배선", () => {
 });
 
 describe("tfx-route-post.mjs — mcp_transport 이슈 추적(관측성)", () => {
+  it("Codex 배너와 프롬프트 에코의 단어는 이슈로 기록하지 않고, 배너로 시작하는 옛 오탐은 지운다", () => {
+    const home = mkdtempSync(join(tmpdir(), "tfx-rv-banner-"));
+    const logdir = mkdtempSync(join(tmpdir(), "tfx-rv-banner-logs-"));
+    const stderrLog = join(logdir, "stderr.log");
+    const stdoutLog = join(logdir, "stdout.log");
+    writeFileSync(
+      stderrLog,
+      "OpenAI Codex v0.156.1\n--------\nuser\nrate limit 429 과 401 오류를 고쳐라\n",
+    );
+    writeFileSync(stdoutLog, "완료\n");
+    const issues = join(home, ".claude", "cache", "cli-issues.jsonl");
+    mkdirSync(join(home, ".claude", "cache"), { recursive: true });
+    const legacy = {
+      ts: 1,
+      cli: "codex",
+      pattern: "rate_limit",
+      snippet: "OpenAI Codex v0.156.1 ---",
+    };
+    const real = { ts: 2, cli: "codex", pattern: "oom", snippet: "ENOMEM" };
+    writeFileSync(
+      issues,
+      `${JSON.stringify(legacy)}\n${JSON.stringify(real)}\n`,
+    );
+    const res = spawnSync(
+      process.execPath,
+      [
+        POST,
+        "--agent",
+        "tester",
+        "--cli",
+        "codex",
+        "--exit-code",
+        "0",
+        "--stderr-log",
+        stderrLog,
+        "--stdout-log",
+        stdoutLog,
+      ],
+      { encoding: "utf-8", env: { ...process.env, HOME: home } },
+    );
+    const patterns = readFileSync(issues, "utf-8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l).pattern);
+    rmSync(home, { recursive: true, force: true });
+    rmSync(logdir, { recursive: true, force: true });
+    assert.equal(res.status, 0, res.stderr);
+    assert.deepEqual(patterns, ["oom"]);
+  });
+
   it("stderr 에 transport 크래시 서명이 있으면 cli-issues.jsonl 에 mcp_transport 기록", () => {
     const home = mkdtempSync(join(tmpdir(), "tfx-rv-home-"));
     const logdir = mkdtempSync(join(tmpdir(), "tfx-rv-logs-"));
