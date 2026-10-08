@@ -1,15 +1,15 @@
-부분 폐기: 2026-10-08 swarm 실행 및 상태 집계 항목 퇴역(ADR-0025). tfx-route 관련 요구사항은 별도 검토.
+부분 폐기: 2026-10-08 swarm 실행, 상태 집계, 4채널 통합 판정 요구 퇴역(ADR-0025). tfx-route 결함은 #176(PR #213)과 PR #185 로 처리했다.
 
 # Worker Signaling Consolidation PRD
 
 date: 2026-04-25
-status: 부분 폐기. swarm 실행 및 상태 집계 항목은 폐기했다. tfx-route 쪽 결함은 #176(PR #213)과 PR #185 로 고쳤고, 4채널 통합 판정 규칙은 별도 검토한다.
+status: 부분 폐기, 나머지 완료. swarm 실행, 상태 집계, 4채널 통합 판정 요구는 폐기했다. tfx-route 결함은 #176(PR #213)과 PR #185 로 고쳤다.
 
 ## 1. 통합 대상 (4 family)
 
 | # | Source | Status | 증상 | 회귀 매핑 |
 |---|--------|--------|------|----------|
-| 1 | issue [#176](https://github.com/tellang/triflux/issues/176) | open | `tfx-route.sh --async --job-status` 가 stdout.log 가 별도 경로에 쓰이는 동안 조기 "failed" 반환 | — |
+| 1 | issue [#176](https://github.com/tellang/triflux/issues/176) | closed (PR #213) | `tfx-route.sh --async --job-status` 가 stdout.log 가 별도 경로에 쓰이는 동안 조기 "failed" 반환 | - |
 | 2 | 메타 B | closed [#115](https://github.com/tellang/triflux/issues/115) (PR #184 fix landed, regression 위험 잔존) | F7 worker did not commit — worker 죽었는데 synapse 에 commit 안 됨 → silent loss | #115 |
 | 3 | 메타 E | open [#190](https://github.com/tellang/triflux/issues/190) | `tfx swarm list` 가 synapse-registry 만 조회 → inflight swarm-logs run 누락 → 거짓 보고 | (신규) |
 | 4 | PR [#185](https://github.com/tellang/triflux/pull/185) silent-flush guard | merged | codex 0.124.0 silent-success 회귀 detect + exec fallback | (신규) |
@@ -61,9 +61,9 @@ status = match (process, heartbeat, commit, stdout):
 
 ## 4. 남은 검토 범위
 
-issue #176의 `tfx-route.sh --job-status` 조기 실패 판정과 PR #185의 silent-flush guard는 별도 검토한다. 위 표의 swarm 실행, `tfx swarm list`, `worker-signal.mjs` 및 4채널 집계 요구는 ADR-0025에 따라 실행 대상에서 제외한다.
+issue #176의 `tfx-route.sh --job-status` 조기 실패 판정은 PR #213으로 고쳤고, PR #185의 silent-flush guard는 머지됐다. 위 표의 swarm 실행, `tfx swarm list`, `worker-signal.mjs` 및 4채널 집계 요구는 ADR-0025에 따라 실행 대상에서 제외한다.
 
-코드 변경을 병렬로 진행할 경우 작업별 worktree와 세션을 분리한다. 각 세션의 CLI 실행은 `tfx-auto`를 사용한다. Claude Agent에는 `isolation: worktree`를 지정할 수 있다. 구현 범위와 테스트는 남은 두 family를 다시 검토한 뒤 정한다.
+코드 변경을 병렬로 진행할 경우 작업별 worktree와 세션을 분리한다. 각 세션의 CLI 실행은 `tfx-auto`를 사용한다. Claude Agent에는 `isolation: worktree`를 지정할 수 있다.
 
 ## 6. Out of scope (이 PRD 가 해소하지 않음)
 
