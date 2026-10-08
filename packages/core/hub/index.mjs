@@ -4,8 +4,7 @@ export { buildExecCommand, sleep, CODEX_MCP_TRANSPORT_EXIT_CODE, normalizePathFo
 export { execute as executeCodex, buildExecArgs as buildCodexArgs, buildLaunchScript, getCircuitState as getCodexCircuit } from './codex-adapter.mjs';
 export { getCodexVersion, runPreflight } from './codex-preflight.mjs';
 
-// State & Paths & Platform
-export * from './paths.mjs';
+// Platform
 export { IS_WINDOWS, IS_MAC, IS_LINUX, TEMP_DIR, normalizePath, whichCommand, killProcess, pipePath } from './platform.mjs';
 
 // Core services

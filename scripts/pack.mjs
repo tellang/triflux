@@ -25,16 +25,12 @@ const CORE_FILES = [
   "hub/cli-adapter-base.mjs",
   "hub/codex-adapter.mjs",
   "hub/codex-preflight.mjs",
-  "hub/paths.mjs",
   "hub/platform.mjs",
-  "hub/state.mjs",
   "hub/bridge.mjs",
   "hub/account-broker.mjs",
 ];
 
 const CORE_DIRS = [
-  "hub/pipeline",
-  "hub/delegator",
   "hub/lib",
   "hub/team/intervention.mjs",
   "hub/team/nativeProxy.mjs",
@@ -173,8 +169,7 @@ export { buildExecCommand, sleep, CODEX_MCP_TRANSPORT_EXIT_CODE, normalizePathFo
 export { execute as executeCodex, buildExecArgs as buildCodexArgs, buildLaunchScript, getCircuitState as getCodexCircuit } from './codex-adapter.mjs';
 export { getCodexVersion, runPreflight } from './codex-preflight.mjs';
 
-// State & Paths & Platform
-export * from './paths.mjs';
+// Platform
 export { IS_WINDOWS, IS_MAC, IS_LINUX, TEMP_DIR, normalizePath, whichCommand, killProcess, pipePath } from './platform.mjs';
 
 // Core services

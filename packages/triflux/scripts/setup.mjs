@@ -419,7 +419,6 @@ function detectDevMode(root = PLUGIN_ROOT) {
 const BREADCRUMB_PATH = join(CLAUDE_DIR, "scripts", ".tfx-pkg-root");
 const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 const HUD_PATH = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
-const WINDOWS_HUB_AUTOSTART_TASK = "TrifluxHubEnsure";
 
 const REQUIRED_CODEX_PROFILES = [
   // GPT-6 Astra: max/ultra are explicit exception lanes, not role defaults.
@@ -1409,68 +1408,6 @@ function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
   return removed;
 }
 
-/**
- * Codex config.json에 tfx-hub MCP 서버 엔트리를 보장한다.
- * @param {{ mcpUrl: string, createIfMissing?: boolean, enabled?: boolean }} opts
- * @returns {{ ok: boolean, changed: boolean, reason?: string }}
- */
-function ensureCodexHubServerConfig({
-  configFile,
-  mcpUrl,
-  createIfMissing = false,
-  enabled = false,
-}) {
-  try {
-    const codexConfigDir = join(homedir(), ".codex");
-    const hasExplicitConfigFile =
-      typeof configFile === "string" && configFile.length > 0;
-    const configPath = hasExplicitConfigFile
-      ? configFile
-      : join(codexConfigDir, "config.json");
-
-    if (
-      !hasExplicitConfigFile &&
-      process.env.TFX_CODEX_CONFIG_SYNC !== "1" &&
-      isProtectedCodexConfigMutationEnv()
-    ) {
-      return { ok: true, changed: false, reason: "protected-env" };
-    }
-
-    if (!existsSync(configPath)) {
-      if (!createIfMissing)
-        return { ok: true, changed: false, reason: "no-config" };
-      const dir = dirname(configPath);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      const config = { mcpServers: { "tfx-hub": { url: mcpUrl, enabled } } };
-      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
-      return { ok: true, changed: true };
-    }
-
-    const config = JSON.parse(readFileSync(configPath, "utf8"));
-    if (!config.mcpServers) config.mcpServers = {};
-
-    const existing = config.mcpServers["tfx-hub"];
-    const desired = { ...(existing || {}), url: mcpUrl, enabled };
-
-    if (
-      existing &&
-      existing.url === desired.url &&
-      existing.enabled === desired.enabled
-    ) {
-      return { ok: true, changed: false };
-    }
-
-    const updated = {
-      ...config,
-      mcpServers: { ...config.mcpServers, "tfx-hub": desired },
-    };
-    writeFileSync(configPath, JSON.stringify(updated, null, 2) + "\n", "utf8");
-    return { ok: true, changed: true };
-  } catch (err) {
-    return { ok: false, changed: false, reason: err?.message || "unknown" };
-  }
-}
-
 // Top-level config.toml keys that must exist with these defaults.
 // Only injected when the key is completely absent — existing user values are
 // never overwritten, regardless of what value was set.
@@ -1618,10 +1555,6 @@ function getSetupArgv(stdinData) {
   return Array.isArray(stdinData?.argv) ? stdinData.argv : [];
 }
 
-function quoteWindowsTaskArg(value) {
-  return `"${String(value).replace(/"/g, '\\"')}"`;
-}
-
 const STABLE_NODE_COMMAND_CANDIDATES = Object.freeze([
   "/opt/homebrew/bin/node",
   "/usr/local/bin/node",
@@ -1649,77 +1582,6 @@ function resolveStableNodeCommand({ existsSyncFn = existsSync } = {}) {
 
 function buildNodeScriptCommand(scriptPath) {
   return `${quoteShellCommandArg(resolveStableNodeCommand())} ${quoteShellCommandArg(scriptPath)}`;
-}
-
-function buildWindowsHubAutostartCommand({
-  nodePath = process.execPath,
-  pluginRoot = PLUGIN_ROOT,
-} = {}) {
-  return [
-    quoteWindowsTaskArg(nodePath),
-    quoteWindowsTaskArg(join(pluginRoot, "scripts", "hub-ensure.mjs")),
-  ].join(" ");
-}
-
-// #161 P2: schtasks /Query 실패 시 stderr 를 해석해 미등록/권한거부/기타 실패를 구분한다.
-// 기존 구현은 stdio=ignore + catch 후 항상 registered:false 였기 때문에
-// Access Denied 같은 해결 가능한 문제가 "미등록" 으로 묻혔다.
-const WINDOWS_SCHTASKS_NOT_FOUND_PATTERNS = [
-  "cannot find the file",
-  "does not exist",
-  "지정된 파일",
-  "찾을 수 없",
-];
-const WINDOWS_SCHTASKS_ACCESS_DENIED_PATTERNS = [
-  "access is denied",
-  "access denied",
-  "permission",
-  "액세스가 거부",
-  "권한",
-];
-
-function classifySchtasksStderr(stderr) {
-  const lower = String(stderr || "").toLowerCase();
-  if (
-    WINDOWS_SCHTASKS_NOT_FOUND_PATTERNS.some((p) =>
-      lower.includes(p.toLowerCase()),
-    )
-  ) {
-    return "not_registered";
-  }
-  if (
-    WINDOWS_SCHTASKS_ACCESS_DENIED_PATTERNS.some((p) =>
-      lower.includes(p.toLowerCase()),
-    )
-  ) {
-    return "access_denied";
-  }
-  return "unknown";
-}
-
-function getWindowsHubAutostartStatus({
-  taskName = WINDOWS_HUB_AUTOSTART_TASK,
-} = {}) {
-  if (process.platform !== "win32") {
-    return { supported: false, registered: false, taskName };
-  }
-  try {
-    execFileSync("schtasks.exe", ["/Query", "/TN", taskName], {
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    return { supported: true, registered: true, taskName };
-  } catch (error) {
-    const stderr = String(error?.stderr || "").trim();
-    const reason = classifySchtasksStderr(stderr);
-    return {
-      supported: true,
-      registered: false,
-      taskName,
-      reason,
-      stderr: stderr.slice(0, 200),
-    };
-  }
 }
 
 function loadSettings() {
@@ -2017,20 +1879,16 @@ function ensureCriticalSetup() {
 
 export {
   BREADCRUMB_PATH,
-  buildWindowsHubAutostartCommand,
   CLAUDE_DIR,
-  classifySchtasksStderr,
   cleanupStaleSkills,
   collectLegacyTrayProcesses,
   DEPRECATED_SKILLS,
   detectDevMode,
   ensureAgyHooks,
   ensureCodexHooks,
-  ensureCodexHubServerConfig,
   ensureCodexProfiles,
   extractProfileLines,
   getVersion,
-  getWindowsHubAutostartStatus,
   getWorkerPackageSyncEntries,
   hasProfileSection,
   isLocalDevSkillDir,
@@ -2057,7 +1915,6 @@ export {
   syncCodexHarnessAdapter,
   syncCodexManagedSkills,
   syncWorkerPackages,
-  WINDOWS_HUB_AUTOSTART_TASK,
   writeMarker,
 };
 

@@ -969,6 +969,19 @@ function removeHubTask(run, result) {
   else result.warnings.push(`${HUB_TASK}: 예약 작업 삭제 실패`);
 }
 
+/** cwd 의 프로젝트 MCP 파일 중 제거된 허브가 만든 tfx-hub 항목이 있는 파일을 돌려준다. */
+export function findProjectHubEntries(cwd = process.cwd()) {
+  return [".mcp.json", ".claude/mcp.json"].flatMap((relative) => {
+    const file = join(cwd, relative);
+    try {
+      const data = JSON.parse(readFileSync(file, "utf8"));
+      return isHubEntry(data?.mcpServers?.[HUB_SERVER]) ? [file] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 /** 제거된 허브의 설정 항목, 실행 중인 프로세스, 예약 작업, 설치본 스냅샷(gemini, codex)을 정리한다. */
 export function cleanupTfxHub({
   home = homedir(),

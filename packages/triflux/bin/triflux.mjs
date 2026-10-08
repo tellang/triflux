@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 import { setTimeout as delay } from "node:timers/promises";
-import { execFileSync, execSync, spawn } from "child_process";
+import { execFileSync, execSync } from "child_process";
 // triflux CLI — setup, doctor, version
 import {
   chmodSync,
-  closeSync,
   copyFileSync,
   existsSync,
   mkdirSync,
-  openSync,
   readdirSync,
   readFileSync,
   readSync,
@@ -26,8 +24,6 @@ import {
   checkNetworkAvailability,
   validateRuntimeCachePaths,
 } from "../hub/lib/cache-guard.mjs";
-import { getPipelineStateDbPath } from "../hub/pipeline/state.mjs";
-import { getVersionHash } from "../hub/state.mjs";
 import {
   detectMultiplexer,
   getSessionAttachedCount,
@@ -41,7 +37,11 @@ import {
 } from "../scripts/lib/doctor-env-checks.mjs";
 import { ensureGeminiProfiles } from "../scripts/lib/gemini-profiles.mjs";
 import { cleanupLegacyHooks } from "../scripts/lib/legacy-hook-cleanup.mjs";
-import { cleanupLegacyMcp } from "../scripts/lib/legacy-mcp-cleanup.mjs";
+import {
+  cleanupLegacyMcp,
+  cleanupTfxHub,
+  findProjectHubEntries,
+} from "../scripts/lib/legacy-mcp-cleanup.mjs";
 import {
   addRegistryServer,
   createDefaultRegistry,
@@ -60,12 +60,9 @@ import {
 } from "../scripts/lib/psmux-info.mjs";
 import {
   applyStatusLine,
-  buildWindowsHubAutostartCommand,
-  ensureCodexHubServerConfig,
   ensureCodexProfiles,
   ensureTrifluxMods,
   getVersion,
-  getWindowsHubAutostartStatus,
   isLocalDevSkillDir,
   isSkillSupportedOnPlatform,
   LEGACY_CODEX_MODELS,
@@ -107,13 +104,10 @@ const STALE_TEAM_MAX_AGE_SEC = 3600;
 const DEFAULT_TMUX_CLEANUP_PREFIX = "tfx-*";
 const DEFAULT_TMUX_CLEANUP_AGE_MIN = 60;
 const ANSI_PATTERN = /\x1B\[[0-?]*[ -/]*[@-~]/g;
-const HUB_DEFAULT_PORT = 27888;
-const DOCTOR_HUB_PID_FILE = join(CLAUDE_DIR, "cache", "tfx-hub", "hub.pid");
 
 const EXIT_ERROR = 1;
 const EXIT_ARG_ERROR = 2;
 const EXIT_CLI_MISSING = 3;
-const EXIT_HUB_ERROR = 4;
 const EXIT_CONFIG_ERROR = 5;
 
 const RAW_ARGS = process.argv.slice(2);
@@ -122,7 +116,7 @@ const NORMALIZED_ARGS = RAW_ARGS.filter((arg) => arg !== "--json");
 
 const CLI_COMMAND_SCHEMAS = Object.freeze({
   setup: {
-    usage: "tfx setup [--dry-run] [--enable-hub-autostart] [--mods]",
+    usage: "tfx setup [--dry-run] [--mods]",
     description: "파일 동기화 + HUD/MCP 설정",
     options: [
       {
@@ -135,17 +129,11 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         type: "boolean",
         description: "실제 변경 없이 예정 작업을 JSON으로 출력",
       },
-      {
-        name: "--enable-hub-autostart",
-        type: "boolean",
-        description:
-          "Windows 로그인 시 tfx-hub를 보장하는 Task Scheduler 항목 등록",
-      },
     ],
   },
   doctor: {
     usage:
-      "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--purge-logs] [--cleanup-stale-hubs --dry-run|--apply] [--cleanup-stale-tmux --prefix tfx-* --age-min N --dry-run|--apply] [--json]",
+      "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--purge-logs] [--cleanup-stale-tmux --prefix tfx-* --age-min N --dry-run|--apply] [--json]",
     description: "설치 상태 진단 및 자동 복구",
     options: [
       {
@@ -176,12 +164,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
           "--fix 와 함께 사용. cli-issues.jsonl 에서 7일 초과 항목 물리 삭제 (#144)",
       },
       {
-        name: "--cleanup-stale-hubs",
-        type: "boolean",
-        description:
-          "PPID=1 hub/server.mjs 후보를 보고하고 opt-in 정리 모드를 활성화",
-      },
-      {
         name: "--cleanup-stale-tmux",
         type: "boolean",
         description:
@@ -200,14 +182,12 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       {
         name: "--dry-run",
         type: "boolean",
-        description:
-          "--cleanup-stale-hubs/--cleanup-stale-tmux 와 함께 사용. 정리 후보만 표시",
+        description: "--cleanup-stale-tmux 와 함께 사용. 정리 후보만 표시",
       },
       {
         name: "--apply",
         type: "boolean",
-        description:
-          "--cleanup-stale-hubs/--cleanup-stale-tmux 와 함께 사용. stale 대상 종료",
+        description: "--cleanup-stale-tmux 와 함께 사용. stale 대상 종료",
       },
       {
         name: "--json",
@@ -281,63 +261,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
             name: "--json",
             type: "boolean",
             description: "제거 결과를 JSON으로 출력",
-          },
-        ],
-      },
-    },
-  },
-  synapse: {
-    usage: "tfx synapse status [--json] [--registry <path>]",
-    description: "Synapse v1 세션 레지스트리 조회 (활성 스웜 세션 목록)",
-    subcommands: {
-      status: "활성 세션 테이블 표시 (host/branch/dirty/state/task)",
-    },
-    options: [
-      {
-        name: "--json",
-        type: "boolean",
-        description: "구조화된 JSON 출력",
-      },
-      {
-        name: "--registry",
-        type: "string",
-        description: "registry 파일 경로 오버라이드",
-      },
-    ],
-  },
-  why: {
-    usage: "tfx why <path> [--json]",
-    description: "해당 경로의 마지막 커밋에서 X-Intent 트레일러 추출",
-    options: [
-      {
-        name: "path",
-        type: "string",
-        description: "intent를 조회할 파일 경로",
-      },
-      {
-        name: "--json",
-        type: "boolean",
-        description: "구조화된 JSON 출력",
-      },
-    ],
-  },
-  hub: {
-    usage: "tfx hub <start|stop|status|ensure> [--port N] [--json]",
-    description: "tfx-hub 프로세스 제어",
-    subcommands: {
-      start: { usage: "tfx hub start [--port N]" },
-      stop: { usage: "tfx hub stop" },
-      ensure: {
-        usage: "tfx hub ensure [--port N] [--json]",
-        description: "헬스체크 + 자동 시작 (idempotent)",
-      },
-      status: {
-        usage: "tfx hub status [--json]",
-        options: [
-          {
-            name: "--json",
-            type: "boolean",
-            description: "허브 상태를 JSON으로 출력",
           },
         ],
       },
@@ -505,431 +428,6 @@ function createCliError(
   return error;
 }
 
-function parseHubPort(value) {
-  const parsed = Number.parseInt(String(value ?? ""), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-function isPidAliveForHub(pid, killFn = process.kill) {
-  const resolvedPid = Number(pid);
-  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return false;
-  try {
-    killFn(resolvedPid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === "EPERM";
-  }
-}
-
-function isHubServerCommand(command) {
-  return /(^|[\\/,\s])hub[\\/]server\.mjs(?=$|[\s"'`])/i.test(
-    String(command || ""),
-  );
-}
-
-function parsePortFromAddress(address) {
-  const match = String(address || "").match(/:(\d+)(?:\s|$)/);
-  return parseHubPort(match?.[1]);
-}
-
-export function parseDetachedHubProcessRows(output) {
-  const rows = [];
-  for (const line of String(output || "").split(/\r?\n/)) {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/);
-    if (!match) continue;
-    const [, pidText, ppidText, rssText, uptime, command] = match;
-    const pid = Number.parseInt(pidText, 10);
-    const ppid = Number.parseInt(ppidText, 10);
-    const rssKb = Number.parseInt(rssText, 10);
-    if (!Number.isFinite(pid) || !Number.isFinite(ppid)) continue;
-    if (ppid !== 1) continue;
-    if (!isHubServerCommand(command)) continue;
-    rows.push({
-      pid,
-      ppid,
-      rssKb: Number.isFinite(rssKb) ? rssKb : null,
-      uptime,
-      command: command.trim(),
-    });
-  }
-  return rows;
-}
-
-function queryDetachedHubProcessRows({
-  platform = process.platform,
-  execFile = execFileSync,
-} = {}) {
-  if (platform === "win32") return [];
-  try {
-    const output = execFile("ps", ["-axo", "pid=,ppid=,rss=,etime=,command="], {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
-    });
-    return parseDetachedHubProcessRows(output);
-  } catch {
-    return [];
-  }
-}
-
-function parseLsofListeningPorts(output) {
-  const ports = new Set();
-  for (const line of String(output || "").split(/\r?\n/)) {
-    if (!/\(LISTEN\)/i.test(line)) continue;
-    const match = line.match(/TCP\s+\S+:(\d+)\s+\(LISTEN\)/i);
-    const port = parseHubPort(match?.[1]) ?? parsePortFromAddress(line);
-    if (port) ports.add(port);
-  }
-  return [...ports];
-}
-
-function queryListeningPortsForPid(
-  pid,
-  { platform = process.platform, execFile = execFileSync } = {},
-) {
-  const resolvedPid = Number(pid);
-  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return [];
-  if (platform === "win32") return [];
-  try {
-    const output = execFile(
-      "lsof",
-      ["-nP", "-Pan", "-p", String(resolvedPid), "-iTCP", "-sTCP:LISTEN"],
-      {
-        encoding: "utf8",
-        timeout: 5000,
-        stdio: ["ignore", "pipe", "ignore"],
-        windowsHide: true,
-      },
-    );
-    return parseLsofListeningPorts(output);
-  } catch {
-    return [];
-  }
-}
-
-function queryEstablishedCountForPid(
-  pid,
-  { platform = process.platform, execFile = execFileSync } = {},
-) {
-  const resolvedPid = Number(pid);
-  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return 0;
-  if (platform === "win32") return 0;
-  try {
-    const output = execFile(
-      "lsof",
-      ["-nP", "-Pan", "-p", String(resolvedPid), "-iTCP", "-sTCP:ESTABLISHED"],
-      {
-        encoding: "utf8",
-        timeout: 5000,
-        stdio: ["ignore", "pipe", "ignore"],
-        windowsHide: true,
-      },
-    );
-    return Math.max(0, output.trim().split(/\r?\n/).filter(Boolean).length - 1);
-  } catch {
-    return 0;
-  }
-}
-
-function queryPidCommand(
-  pid,
-  { platform = process.platform, execFile = execFileSync } = {},
-) {
-  const resolvedPid = Number(pid);
-  if (!Number.isFinite(resolvedPid) || resolvedPid <= 0) return "";
-  try {
-    if (platform === "win32") return "";
-    return execFile("ps", ["-p", String(resolvedPid), "-o", "command="], {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["ignore", "pipe", "ignore"],
-      windowsHide: true,
-    }).trim();
-  } catch {
-    return "";
-  }
-}
-
-function queryListeningPidByPort(
-  port,
-  { platform = process.platform, execFile = execFileSync } = {},
-) {
-  const targetPort = parseHubPort(port);
-  if (!targetPort || platform === "win32") return null;
-  try {
-    const output = execFile(
-      "lsof",
-      ["-nP", "-iTCP:" + targetPort, "-sTCP:LISTEN", "-t"],
-      {
-        encoding: "utf8",
-        timeout: 5000,
-        stdio: ["ignore", "pipe", "ignore"],
-        windowsHide: true,
-      },
-    );
-    const pid = Number.parseInt(output.trim().split(/\r?\n/)[0] ?? "", 10);
-    return Number.isFinite(pid) && pid > 0 ? pid : null;
-  } catch {
-    return null;
-  }
-}
-
-async function fetchHubHealthForDoctor(
-  host,
-  port,
-  { fetchImpl = fetch, timeoutMs = 1000 } = {},
-) {
-  try {
-    const urlHost = String(host || "127.0.0.1").includes(":")
-      ? `[${host}]`
-      : host || "127.0.0.1";
-    const response = await fetchImpl(`http://${urlHost}:${port}/health`, {
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (!response.ok) return { ok: false, version: null };
-    const body = await response.json().catch(() => null);
-    return {
-      ok: body?.ok === true,
-      version: typeof body?.version === "string" ? body.version : null,
-      raw: body,
-    };
-  } catch (error) {
-    return { ok: false, version: null, error };
-  }
-}
-
-function readHubPidInfo({
-  pidFilePath = DOCTOR_HUB_PID_FILE,
-  exists = existsSync,
-  readFile = readFileSync,
-} = {}) {
-  if (!exists(pidFilePath)) return null;
-  try {
-    return JSON.parse(readFile(pidFilePath, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-async function resolveActiveHealthyHub({
-  expectedVersion = getVersionHash(),
-  pidFilePath = DOCTOR_HUB_PID_FILE,
-  exists = existsSync,
-  readFile = readFileSync,
-  killFn = process.kill,
-  platform = process.platform,
-  execFile = execFileSync,
-  fetchImpl = fetch,
-} = {}) {
-  const info = readHubPidInfo({ pidFilePath, exists, readFile });
-  const pid = Number(info?.pid);
-  const port = parseHubPort(info?.port);
-  const host =
-    typeof info?.host === "string" && info.host.trim()
-      ? info.host.trim()
-      : "127.0.0.1";
-  if (pid && port && isPidAliveForHub(pid, killFn)) {
-    const command = queryPidCommand(pid, { platform, execFile });
-    const health = await fetchHubHealthForDoctor(host, port, { fetchImpl });
-    if (
-      isHubServerCommand(command) &&
-      health.ok &&
-      health.version === expectedVersion
-    ) {
-      return { pid, port, host, version: health.version, source: "pid-file" };
-    }
-  }
-
-  const defaultPid = queryListeningPidByPort(HUB_DEFAULT_PORT, {
-    platform,
-    execFile,
-  });
-  if (!defaultPid || !isPidAliveForHub(defaultPid, killFn)) return null;
-  const command = queryPidCommand(defaultPid, { platform, execFile });
-  if (!isHubServerCommand(command)) return null;
-  const health = await fetchHubHealthForDoctor("127.0.0.1", HUB_DEFAULT_PORT, {
-    fetchImpl,
-  });
-  if (!health.ok || health.version !== expectedVersion) return null;
-  return {
-    pid: defaultPid,
-    port: HUB_DEFAULT_PORT,
-    host: "127.0.0.1",
-    version: health.version,
-    source: "default-port",
-  };
-}
-
-export async function inspectDetachedHubProcesses({
-  expectedVersion = getVersionHash(),
-  pidFilePath = DOCTOR_HUB_PID_FILE,
-  exists = existsSync,
-  readFile = readFileSync,
-  killFn = process.kill,
-  platform = process.platform,
-  execFile = execFileSync,
-  fetchImpl = fetch,
-} = {}) {
-  const rows = queryDetachedHubProcessRows({ platform, execFile });
-  const activeHealthy = await resolveActiveHealthyHub({
-    expectedVersion,
-    pidFilePath,
-    exists,
-    readFile,
-    killFn,
-    platform,
-    execFile,
-    fetchImpl,
-  });
-
-  const hubs = [];
-  for (const row of rows) {
-    const ports = queryListeningPortsForPid(row.pid, { platform, execFile });
-    const established = queryEstablishedCountForPid(row.pid, {
-      platform,
-      execFile,
-    });
-    let version = null;
-    let healthy = false;
-    for (const port of ports) {
-      const health = await fetchHubHealthForDoctor("127.0.0.1", port, {
-        fetchImpl,
-      });
-      if (!health.ok) continue;
-      version = health.version;
-      healthy = true;
-      break;
-    }
-    const activeByPidFile = activeHealthy?.pid === row.pid;
-    const activeByConnection = established >= 1;
-    const isActiveHealthy = activeByPidFile || activeByConnection;
-    hubs.push({
-      ...row,
-      ports,
-      established,
-      version,
-      healthy: healthy || activeByConnection,
-      activeHealthy: isActiveHealthy,
-      activeReason: activeByPidFile
-        ? "pid-file-health"
-        : activeByConnection
-          ? "established-connection"
-          : null,
-      healthStatus: isActiveHealthy ? "healthy" : "stale",
-      staleCandidate: !isActiveHealthy,
-    });
-  }
-
-  return {
-    expectedVersion,
-    activeHealthy,
-    hubs,
-    staleCandidates: hubs.filter((hub) => hub.staleCandidate),
-  };
-}
-
-async function waitForHubProcessExit(
-  pid,
-  { killFn = process.kill, graceMs = 5000, pollMs = 100 } = {},
-) {
-  const deadline = Date.now() + Math.max(0, graceMs);
-  while (Date.now() <= deadline) {
-    if (!isPidAliveForHub(pid, killFn)) return true;
-    await delay(pollMs);
-  }
-  return !isPidAliveForHub(pid, killFn);
-}
-
-async function retireDetachedHubPid(
-  pid,
-  { killFn = process.kill, graceMs = 5000, pollMs = 100 } = {},
-) {
-  if (!isPidAliveForHub(pid, killFn)) return { ok: true, reason: "dead" };
-  try {
-    killFn(pid, "SIGTERM");
-  } catch (error) {
-    return { ok: false, reason: "sigterm_failed", error };
-  }
-  if (await waitForHubProcessExit(pid, { killFn, graceMs, pollMs })) {
-    return { ok: true, reason: "sigterm" };
-  }
-  try {
-    killFn(pid, "SIGKILL");
-  } catch (error) {
-    return { ok: false, reason: "sigkill_failed", error };
-  }
-  const exited = await waitForHubProcessExit(pid, {
-    killFn,
-    graceMs: 1000,
-    pollMs,
-  });
-  return { ok: exited, reason: exited ? "sigkill" : "still_alive" };
-}
-
-export async function cleanupDetachedHubProcesses({
-  hubs,
-  activeHealthy,
-  dryRun = true,
-  apply = false,
-  killFn = process.kill,
-  graceMs = 5000,
-  pollMs = 100,
-} = {}) {
-  const results = [];
-  for (const hub of hubs || []) {
-    const classification =
-      activeHealthy?.pid === hub.pid ||
-      hub.activeHealthy ||
-      Number(hub.established) >= 1
-        ? "healthy"
-        : "stale";
-    if (classification === "healthy") {
-      results.push({
-        pid: hub.pid,
-        classification,
-        action: "excluded-active",
-        ok: true,
-        hub,
-      });
-      continue;
-    }
-    if (!apply || dryRun) {
-      results.push({
-        pid: hub.pid,
-        classification,
-        action: "dry-run-skip",
-        ok: true,
-        hub,
-      });
-      continue;
-    }
-    const retired = await retireDetachedHubPid(hub.pid, {
-      killFn,
-      graceMs,
-      pollMs,
-    });
-    results.push({
-      pid: hub.pid,
-      classification,
-      action: retired.ok ? "retired" : "failed",
-      ok: retired.ok,
-      reason: retired.reason,
-      hub,
-    });
-  }
-  return {
-    dryRun: !apply || dryRun,
-    results,
-    failed: results.filter((result) => result.ok === false).length,
-    retired: results.filter((result) => result.action === "retired").length,
-    skipped: results.filter((result) => result.action === "dry-run-skip")
-      .length,
-    excluded: results.filter((result) => result.action === "excluded-active")
-      .length,
-  };
-}
-
 function inferExitCode(error) {
   if (Number.isInteger(error?.exitCode)) return error.exitCode;
   if (error?.code === "ENOENT") return EXIT_CLI_MISSING;
@@ -940,7 +438,6 @@ function inferReason(error, exitCode) {
   if (typeof error?.reason === "string" && error.reason) return error.reason;
   if (exitCode === EXIT_ARG_ERROR) return "argError";
   if (exitCode === EXIT_CLI_MISSING) return "cliMissing";
-  if (exitCode === EXIT_HUB_ERROR) return "hubError";
   if (exitCode === EXIT_CONFIG_ERROR) return "configError";
   return "error";
 }
@@ -950,8 +447,6 @@ function inferFix(error, exitCode) {
   if (exitCode === EXIT_ARG_ERROR) return "tfx --help";
   if (exitCode === EXIT_CLI_MISSING)
     return "필수 CLI를 설치한 뒤 `tfx doctor`로 상태를 다시 확인하세요.";
-  if (exitCode === EXIT_HUB_ERROR)
-    return "`tfx hub start`로 허브를 다시 시작하거나 설치 상태를 확인하세요.";
   if (exitCode === EXIT_CONFIG_ERROR)
     return "설정 파일 JSON/TOML 문법을 수정한 뒤 다시 실행하세요.";
   return null;
@@ -1676,40 +1171,6 @@ function previewStatusLineAction() {
   };
 }
 
-function previewMcpRegistrationActions(mcpUrl) {
-  const actions = [];
-
-  if (which("codex")) {
-    actions.push({
-      type: "mcp-register",
-      cli: "codex",
-      target: "tfx-hub",
-      url: mcpUrl,
-      change: "check",
-    });
-  }
-  if (which("gemini")) {
-    actions.push({
-      type: "mcp-register",
-      cli: "gemini",
-      target: "tfx-hub",
-      url: mcpUrl,
-      change: "check",
-    });
-  }
-
-  actions.push({
-    type: "mcp-register",
-    cli: "claude",
-    target: "tfx-hub",
-    path: join(process.cwd(), ".claude", "mcp.json"),
-    url: mcpUrl,
-    change: "check",
-  });
-
-  return actions;
-}
-
 function buildSetupDryRunPlan() {
   const actions = [
     ...SYNC_MAP.map(({ src, dst, label }) =>
@@ -1726,19 +1187,7 @@ function buildSetupDryRunPlan() {
     windowsSandbox: codexProfiles.windowsSandbox,
   });
 
-  const defaultHubUrl = `http://127.0.0.1:${process.env.TFX_HUB_PORT || "27888"}/mcp`;
-  actions.push(...previewMcpRegistrationActions(defaultHubUrl));
   actions.push(previewStatusLineAction());
-  const autostart = getWindowsHubAutostartStatus();
-  actions.push({
-    type: "hub-autostart",
-    platform: process.platform,
-    taskName: autostart.taskName,
-    change: autostart.supported && !autostart.registered ? "available" : "noop",
-    registered: autostart.registered,
-    command: autostart.supported ? buildWindowsHubAutostartCommand() : null,
-    enableWith: "tfx setup --enable-hub-autostart",
-  });
 
   return {
     dry_run: true,
@@ -1799,7 +1248,6 @@ function cmdSetup(options = {}) {
     dryRun = false,
     fromUpdate = false,
     overrideVersion,
-    enableHubAutostart = false,
     mods = false,
   } = options;
   if (dryRun) {
@@ -1819,6 +1267,11 @@ function cmdSetup(options = {}) {
   }
   // 이주가 막혀도 setup 은 계속한다. 남은 항목은 경고로 알린다.
   for (const warning of cleanupLegacyMcp().warnings) warn(warning);
+  const hubCleanup = cleanupTfxHub({
+    pluginRoot: existsSync(join(PKG_ROOT, ".git")) ? undefined : PKG_ROOT,
+  });
+  for (const warning of hubCleanup.warnings) warn(warning);
+  if (hubCleanup.changed) ok("제거된 허브의 설정과 실행 흔적 정리");
   if (fromUpdate) refreshSetupCaches();
 
   console.log(`\n${BOLD}triflux setup${RESET}\n`);
@@ -1914,75 +1367,6 @@ function cmdSetup(options = {}) {
       status: "✅",
       detail: `${geminiResult.count}개 준비됨`,
     });
-  }
-
-  // hub MCP 사전 등록 (서버 미실행이어도 설정만 등록 — hub start 시 즉시 사용 가능)
-  if (existsSync(join(PKG_ROOT, "hub", "server.mjs"))) {
-    const defaultHubUrl = `http://127.0.0.1:${process.env.TFX_HUB_PORT || "27888"}/mcp`;
-    autoRegisterMcp(defaultHubUrl, { codexEnabled: false });
-    summary.push({ item: "Hub MCP", status: "✅", detail: "등록됨" });
-    console.log("");
-  }
-
-  if (process.platform === "win32") {
-    const status = getWindowsHubAutostartStatus();
-    if (enableHubAutostart) {
-      try {
-        const script = join(PKG_ROOT, "scripts", "setup.mjs");
-        execFileSync(
-          process.execPath,
-          [script, "--enable-hub-autostart", "--sync"],
-          {
-            stdio: ["ignore", "pipe", "pipe"],
-            timeout: 10000,
-            windowsHide: true,
-          },
-        );
-        // subprocess silent-catch 회귀 가드: schtasks /Query 로 실제 등록 재검증.
-        const verified = getWindowsHubAutostartStatus();
-        if (verified.registered) {
-          ok(`Hub autostart: ${verified.taskName} 등록됨`);
-          summary.push({
-            item: "Hub autostart",
-            status: "✅",
-            detail: `${verified.taskName} 등록됨`,
-          });
-        } else {
-          warn(
-            "Hub autostart 등록 실패: subprocess 성공했으나 /Query 에서 미발견",
-          );
-          summary.push({
-            item: "Hub autostart",
-            status: "⚠️",
-            detail: "등록 실패 (subprocess silent catch 의심)",
-          });
-        }
-      } catch (error) {
-        warn(`Hub autostart 등록 실패: ${renderErrorMessage(error.message)}`);
-        summary.push({
-          item: "Hub autostart",
-          status: "⚠️",
-          detail: "등록 실패",
-        });
-      }
-    } else if (status.registered) {
-      ok(`Hub autostart: ${status.taskName} 이미 등록됨`);
-      summary.push({
-        item: "Hub autostart",
-        status: "✅",
-        detail: "이미 등록됨",
-      });
-    } else {
-      warn(
-        "Hub autostart 미등록 — Codex 단독 시작 전 hub가 죽어 있으면 MCP가 실패할 수 있음",
-      );
-      info("등록: tfx setup --enable-hub-autostart");
-      summary.push({
-        item: "Hub autostart",
-        status: "⏭️",
-        detail: "미등록",
-      });
-    }
   }
 
   // HUD statusLine 설정
@@ -2187,9 +1571,6 @@ async function cmdDoctor(options = {}) {
     fix = false,
     reset = false,
     purgeLogs = false,
-    cleanupStaleHubs = false,
-    cleanupStaleHubsDryRun = true,
-    cleanupStaleHubsApply = false,
     cleanupStaleTmux = false,
     cleanupStaleTmuxDryRun = true,
     cleanupStaleTmuxApply = false,
@@ -2204,7 +1585,6 @@ async function cmdDoctor(options = {}) {
     actions: [],
     legacy_hooks: { remaining: 0, removed: 0 },
     fsmonitorDaemons: { stale: 0, killed: 0 },
-    hubServers: { detached: 0, stale: 0, activeHealthy: null },
     tmuxSessions: {
       detached: 0,
       stale: 0,
@@ -3333,98 +2713,6 @@ async function cmdDoctor(options = {}) {
       issues += detachedTmuxReport.staleCandidates.length;
     }
 
-    // detached tfx-hub/server.mjs 누적 감지 및 opt-in 정리
-    section("Hub Servers");
-    try {
-      const hubReport = await inspectDetachedHubProcesses();
-      report.hubServers = {
-        detached: hubReport.hubs.length,
-        stale: hubReport.staleCandidates.length,
-        activeHealthy: hubReport.activeHealthy,
-        expectedVersion: hubReport.expectedVersion,
-        hubs: hubReport.hubs.map((hub) => ({
-          pid: hub.pid,
-          ppid: hub.ppid,
-          version: hub.version,
-          uptime: hub.uptime,
-          ports: hub.ports,
-          established: hub.established,
-          rssKb: hub.rssKb,
-          activeHealthy: hub.activeHealthy,
-          activeReason: hub.activeReason,
-          healthStatus: hub.healthStatus,
-          staleCandidate: hub.staleCandidate,
-        })),
-      };
-      addDoctorCheck(report, {
-        name: "hub-server-processes",
-        status: hubReport.staleCandidates.length > 0 ? "warning" : "ok",
-        detached: hubReport.hubs.length,
-        stale: hubReport.staleCandidates.length,
-        activeHealthy: hubReport.activeHealthy,
-      });
-
-      if (hubReport.hubs.length === 0) {
-        ok("PPID=1 hub/server.mjs 없음");
-      } else {
-        for (const hub of hubReport.hubs) {
-          const portLabel = hub.ports.length > 0 ? hub.ports.join(",") : "?";
-          const versionLabel = hub.version || "unknown";
-          const rssLabel = hub.rssKb == null ? "?" : `${hub.rssKb}KB`;
-          const activeLabel = hub.activeHealthy
-            ? ` healthy excluded${hub.activeReason ? ` (${hub.activeReason})` : ""}`
-            : " stale candidate";
-          const line = `PID=${hub.pid} PPID=${hub.ppid} status=${hub.healthStatus} version=${versionLabel} uptime=${hub.uptime} port=${portLabel} ESTABLISHED=${hub.established} RSS=${rssLabel}${activeLabel}`;
-          if (hub.activeHealthy) ok(line);
-          else warn(line);
-        }
-      }
-
-      if (cleanupStaleHubs) {
-        const cleanupResult = await cleanupDetachedHubProcesses({
-          hubs: hubReport.hubs,
-          activeHealthy: hubReport.activeHealthy,
-          dryRun: cleanupStaleHubsDryRun,
-          apply: cleanupStaleHubsApply,
-        });
-        report.actions.push({
-          type: "cleanup-stale-hubs",
-          status: cleanupResult.failed > 0 ? "failed" : "ok",
-          dryRun: cleanupResult.dryRun,
-          retired: cleanupResult.retired,
-          skipped: cleanupResult.skipped,
-          excluded: cleanupResult.excluded,
-          failed: cleanupResult.failed,
-        });
-        for (const result of cleanupResult.results) {
-          if (result.action === "excluded-active") {
-            ok(`dry-run healthy hub excluded: PID=${result.pid}`);
-          } else if (result.action === "dry-run-skip") {
-            info(`dry-run stale hub target: PID=${result.pid}`);
-          } else if (result.action === "retired") {
-            ok(`stale hub retired: PID=${result.pid} (${result.reason})`);
-          } else {
-            fail(`stale hub cleanup failed: PID=${result.pid}`);
-          }
-        }
-        issues += cleanupResult.failed;
-        if (cleanupResult.dryRun && hubReport.staleCandidates.length > 0) {
-          issues += hubReport.staleCandidates.length;
-        }
-      } else if (hubReport.staleCandidates.length > 0) {
-        info("정리: tfx doctor --cleanup-stale-hubs --dry-run|--apply");
-        issues += hubReport.staleCandidates.length;
-      }
-    } catch (error) {
-      addDoctorCheck(report, {
-        name: "hub-server-processes",
-        status: "warning",
-        error: error.message,
-      });
-      warn(`hub/server.mjs 검사 실패: ${error.message}`);
-      issues++;
-    }
-
     // 고아 node.exe 프로세스 정리 (Windows)
     section("Orphan Processes");
     if (process.platform === "win32") {
@@ -3597,56 +2885,6 @@ async function cmdDoctor(options = {}) {
           if (row.actualUrl) info(`actual   ${row.actualUrl}`);
         }
 
-        // #144: --fix 모드에서 tfx-hub URL 불일치를 hub status 기준으로 자동 갱신.
-        // Project MCP (.mcp.json) 와 Codex/Claude/Gemini settings 모두 대상.
-        // Codex review P2: fix 성공 시 issues 집계에서 차감해야 doctor 결과가 ok 로 반영됨.
-        let autoFixedMismatches = 0;
-        if (fix && mismatchRows.some((r) => r.name === "tfx-hub")) {
-          try {
-            const hubUrl = mismatchRows.find(
-              (r) => r.name === "tfx-hub",
-            )?.expectedUrl;
-            if (hubUrl) {
-              const { syncHubMcpSettings, syncProjectMcpJson } = await import(
-                "../scripts/sync-hub-mcp-settings.mjs"
-              );
-              const settingsResult = await syncHubMcpSettings({
-                hubUrl,
-                logger: { log() {}, warn() {}, error() {} },
-              });
-              const projectResult = await syncProjectMcpJson({
-                hubUrl,
-                projectRoot: process.cwd(),
-                logger: { log() {}, warn() {}, error() {} },
-              });
-              const totalUpdated =
-                (settingsResult?.updated?.length || 0) +
-                (projectResult?.updated?.length || 0);
-              if (totalUpdated > 0) {
-                ok(`tfx-hub URL ${totalUpdated}개 파일 자동 갱신 (${hubUrl})`);
-                report.actions.push({
-                  name: "sync-hub-url",
-                  status: "applied",
-                  files: [
-                    ...(settingsResult?.updated || []),
-                    ...(projectResult?.updated || []),
-                  ],
-                });
-                // fix 성공 — mismatchRows 중 tfx-hub 엔트리는 해결된 것으로 집계
-                autoFixedMismatches = mismatchRows.filter(
-                  (r) => r.name === "tfx-hub",
-                ).length;
-              } else {
-                info("tfx-hub URL 자동 갱신: 대상 파일 없음");
-              }
-            }
-          } catch (e) {
-            warn(
-              `tfx-hub URL 자동 갱신 실패: ${e?.message?.split(/\r?\n/)[0] || e}`,
-            );
-          }
-        }
-
         for (const row of missingFileRows) {
           info(
             `${row.label}: ${row.name} 미배치 (${formatPathForDisplay(row.filePath)})`,
@@ -3669,8 +2907,28 @@ async function cmdDoctor(options = {}) {
         }
 
         issues += invalidConfigs.length;
-        issues += Math.max(0, mismatchRows.length - autoFixedMismatches);
+        issues += mismatchRows.length;
         issues += stdioRows.length;
+      }
+    }
+
+    // 제거된 허브가 cwd 에 만든 항목은 사용자 파일과 구분할 수 없어 자동으로 지우지 않는다.
+    section("제거된 허브 흔적");
+    {
+      const leftovers = findProjectHubEntries();
+      addDoctorCheck(report, {
+        name: "legacy-hub-mcp-entries",
+        status: leftovers.length > 0 ? "warning" : "ok",
+        paths: leftovers,
+      });
+      if (leftovers.length === 0) {
+        ok("현재 디렉터리에 tfx-hub MCP 항목 없음");
+      } else {
+        for (const file of leftovers) {
+          warn(`tfx-hub MCP 항목: ${formatPathForDisplay(file)}`);
+        }
+        info("제거된 허브가 만든 항목입니다. 직접 지우세요.");
+        issues += leftovers.length;
       }
     }
 
@@ -3990,7 +3248,6 @@ async function cmdUpdate(args = []) {
   // 2. 설치 방식에 따라 업데이트
   const oldVer = PKG.version;
   let updated = false;
-  let stoppedHubInfo = null;
 
   try {
     switch (installMode) {
@@ -4007,10 +3264,6 @@ async function cmdUpdate(args = []) {
         break;
       }
       case "npm-global": {
-        stoppedHubInfo = stopHubForUpdate();
-        if (stoppedHubInfo?.pid) {
-          info(`실행 중 hub 정지 (PID ${stoppedHubInfo.pid})`);
-        }
         const npmCmd = isDev
           ? "npm install -g triflux@dev"
           : "npm install -g triflux@latest";
@@ -4076,9 +3329,6 @@ async function cmdUpdate(args = []) {
         return;
     }
   } catch (e) {
-    if (stoppedHubInfo && startHubAfterUpdate(stoppedHubInfo)) {
-      info("업데이트 실패 후 hub 재기동 시도");
-    }
     const stderr = e.stderr?.toString().trim();
     fail(
       `업데이트 실패: ${e.message}${stderr ? `\n  ${stderr.split(/\r?\n/)[0]}` : ""}`,
@@ -4109,16 +3359,10 @@ async function cmdUpdate(args = []) {
     try {
       runUpdatedSetup({ packageRoot: updatedRoot });
     } catch (error) {
-      if (stoppedHubInfo) startHubAfterUpdate(stoppedHubInfo);
       throw createCliError(`업데이트 후 설정 동기화 실패: ${error.message}`, {
         exitCode: error.status || EXIT_ERROR,
         reason: "error",
       });
-    }
-
-    if (stoppedHubInfo) {
-      if (startHubAfterUpdate(stoppedHubInfo)) ok("hub 재기동 완료");
-      else warn("hub 재기동 실패 — `tfx hub start`로 수동 시작 필요");
     }
   }
 
@@ -4464,10 +3708,7 @@ function cmdHelp() {
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
     ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
-    ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
-    ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
-    ${WHITE_BRIGHT}tfx synapse${RESET}     ${GRAY}스웜 세션 registry 조회 / lease 관리${RESET}
-    ${WHITE_BRIGHT}tfx why${RESET}         ${GRAY}경로의 마지막 커밋 X-Intent 트레일러 추출${RESET}
+    ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
 
   ${BOLD}Skills${RESET} ${GRAY}(Claude Code 슬래시 커맨드)${RESET}
@@ -4479,782 +3720,6 @@ function cmdHelp() {
   ${LINE}
   ${GRAY}github.com/tellang/triflux${RESET}
 `);
-}
-
-// ── Hub preflight 체크 (multi/auto 실행 전) ──
-
-async function checkHubRunning() {
-  // preflight 캐시 먼저 확인 — 히트 시 fetch 스킵
-  try {
-    const cacheFile = join(homedir(), ".claude", "cache", "tfx-preflight.json");
-    const cached = JSON.parse(readFileSync(cacheFile, "utf8"));
-    if (Date.now() - cached.timestamp < 3_600_000 && cached.hub?.ok)
-      return true;
-  } catch {}
-  const port = Number(process.env.TFX_HUB_PORT || "27888");
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/status`, {
-      signal: AbortSignal.timeout(2000),
-    });
-    if (res.ok) return true;
-  } catch {}
-  console.log("");
-  warn(`${AMBER}tfx-hub${RESET}가 실행되고 있지 않습니다.`);
-  info(
-    `Hub 없이 실행하면 Claude 네이티브 에이전트로 폴백되어 토큰이 소비됩니다.`,
-  );
-  info(`Codex(무료) 위임을 활용하려면 먼저 Hub를 시작하세요:\n`);
-  console.log(`    ${WHITE_BRIGHT}tfx hub start${RESET}\n`);
-  return false;
-}
-
-// ── hub 서브커맨드 ──
-
-const HUB_PID_DIR = join(homedir(), ".claude", "cache", "tfx-hub");
-const HUB_PID_FILE = join(HUB_PID_DIR, "hub.pid");
-
-function sleepMs(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function stopHubForUpdate() {
-  if (!existsSync(HUB_PID_FILE)) return null;
-  let info = null;
-  try {
-    info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-    process.kill(info.pid, 0);
-  } catch {
-    try {
-      unlinkSync(HUB_PID_FILE);
-    } catch {}
-    return null;
-  }
-
-  try {
-    if (process.platform === "win32") {
-      execFileSync("taskkill", ["/PID", String(info.pid), "/T", "/F"], {
-        stdio: ["pipe", "pipe", "ignore"],
-        timeout: 10000,
-        windowsHide: true,
-      });
-    } else {
-      process.kill(info.pid, "SIGTERM");
-    }
-  } catch {
-    try {
-      process.kill(info.pid, "SIGKILL");
-    } catch {}
-  }
-
-  // Windows에서 better-sqlite3.node 파일 핸들 해제 대기
-  // taskkill 후 프로세스 종료 + 파일 핸들 해제까지 최대 5초
-  const sqliteNode = join(
-    PKG_ROOT,
-    "node_modules",
-    "better-sqlite3",
-    "build",
-    "Release",
-    "better_sqlite3.node",
-  );
-  for (let i = 0; i < 10; i++) {
-    sleepMs(500);
-    try {
-      process.kill(info.pid, 0);
-    } catch {
-      break;
-    }
-  }
-  // 파일 잠금 해제 확인 (Windows EBUSY 방지)
-  if (existsSync(sqliteNode)) {
-    for (let i = 0; i < 6; i++) {
-      try {
-        const fd = openSync(sqliteNode, "r");
-        closeSync(fd);
-        break;
-      } catch {
-        sleepMs(500);
-      }
-    }
-  }
-  try {
-    unlinkSync(HUB_PID_FILE);
-  } catch {}
-  return info;
-}
-
-function openHubLogFd() {
-  try {
-    const logDir = join(homedir(), ".claude", "cache", "tfx-hub");
-    mkdirSync(logDir, { recursive: true });
-    return openSync(join(logDir, "hub.log"), "a");
-  } catch {
-    return undefined;
-  }
-}
-
-function startHubAfterUpdate(info) {
-  if (!info) return false;
-  const serverPath = join(PKG_ROOT, "hub", "server.mjs");
-  if (!existsSync(serverPath)) return false;
-  const port =
-    Number(info?.port) > 0
-      ? String(info.port)
-      : String(process.env.TFX_HUB_PORT || "27888");
-
-  try {
-    const logFd = openHubLogFd();
-    const child = spawn(process.execPath, [serverPath], {
-      env: { ...process.env, TFX_HUB_PORT: port },
-      stdio: ["ignore", logFd ?? "ignore", logFd ?? "ignore"],
-      detached: true,
-      windowsHide: true,
-    });
-    child.unref();
-    if (logFd !== undefined) {
-      try {
-        closeSync(logFd);
-      } catch {}
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// 설치된 CLI에 tfx-hub MCP 서버 자동 등록 (1회 설정, 이후 재실행 불필요)
-function autoRegisterMcp(mcpUrl, { codexEnabled = false } = {}) {
-  section("MCP 자동 등록");
-
-  // Codex — config.json에 기본 disabled 엔트리로 등록.
-  // Hub startup must keep the MCP config fresh even on CI/dev machines where
-  // the Codex CLI binary itself is not installed.
-  try {
-    const result = ensureCodexHubServerConfig({
-      mcpUrl,
-      createIfMissing: true,
-      enabled: codexEnabled,
-    });
-    if (!result.ok) throw new Error(result.reason || "unknown");
-    const suffix = which("codex") ? "" : " (CLI 미설치)";
-    if (result.changed) {
-      ok(
-        `Codex: config.json에 등록 완료 (${codexEnabled ? "enabled" : "기본 disabled"})${suffix}`,
-      );
-    } else {
-      ok(
-        `Codex: 이미 등록됨 (${codexEnabled ? "enabled" : "기본 disabled"})${suffix}`,
-      );
-    }
-  } catch (e) {
-    warn(`Codex 등록 실패: ${e.message}`);
-  }
-
-  // Gemini — settings.json 직접 수정
-  if (which("gemini")) {
-    try {
-      const geminiDir = join(homedir(), ".gemini");
-      const settingsFile = join(geminiDir, "settings.json");
-      let settings = {};
-      if (existsSync(settingsFile))
-        settings = JSON.parse(readFileSync(settingsFile, "utf8"));
-      if (!settings.mcpServers) settings.mcpServers = {};
-      const current = settings.mcpServers["tfx-hub"];
-      if (!current || current.url !== mcpUrl) {
-        settings.mcpServers["tfx-hub"] = {
-          ...(current && typeof current === "object" ? current : {}),
-          url: mcpUrl,
-        };
-        if (!existsSync(geminiDir)) mkdirSync(geminiDir, { recursive: true });
-        writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + "\n");
-        ok(
-          current
-            ? "Gemini: settings.json URL 갱신 완료"
-            : "Gemini: settings.json에 등록 완료",
-        );
-      } else {
-        ok("Gemini: 이미 등록됨");
-      }
-    } catch (e) {
-      warn(`Gemini 등록 실패: ${e.message}`);
-    }
-  } else {
-    info("Gemini: 미설치 (건너뜀)");
-  }
-
-  // Claude — .claude/mcp.json에 등록 (Claude Code 공식 경로)
-  try {
-    const claudeDir = join(process.cwd(), ".claude");
-    if (!existsSync(claudeDir)) mkdirSync(claudeDir, { recursive: true });
-    const mcpJsonPath = join(claudeDir, "mcp.json");
-    let mcpJson = {};
-    if (existsSync(mcpJsonPath))
-      mcpJson = JSON.parse(readFileSync(mcpJsonPath, "utf8"));
-    if (!mcpJson.mcpServers) mcpJson.mcpServers = {};
-    const current = mcpJson.mcpServers["tfx-hub"];
-    if (!current || current.type !== "http" || current.url !== mcpUrl) {
-      mcpJson.mcpServers["tfx-hub"] = {
-        ...(current && typeof current === "object" ? current : {}),
-        type: "http",
-        url: mcpUrl,
-      };
-      writeFileSync(mcpJsonPath, JSON.stringify(mcpJson, null, 2) + "\n");
-      ok(
-        current
-          ? "Claude: .claude/mcp.json URL/type 갱신 완료"
-          : "Claude: .claude/mcp.json에 등록 완료",
-      );
-    } else {
-      ok("Claude: 이미 등록됨");
-    }
-  } catch (e) {
-    warn(`Claude 등록 실패: ${e.message}`);
-  }
-}
-
-async function cmdHub(args = [], options = {}) {
-  const { json = false } = options;
-  const sub = args[0] || "status";
-  const defaultPortRaw = Number(process.env.TFX_HUB_PORT || "27888");
-  const probePort =
-    Number.isFinite(defaultPortRaw) && defaultPortRaw > 0
-      ? defaultPortRaw
-      : 27888;
-  const formatHostForUrl = (host) => (host.includes(":") ? `[${host}]` : host);
-  const probeHubStatus = async (
-    host = "127.0.0.1",
-    port = probePort,
-    timeoutMs = 3000,
-  ) => {
-    try {
-      const res = await fetch(
-        `http://${formatHostForUrl(host)}:${port}/status`,
-        {
-          signal: AbortSignal.timeout(timeoutMs),
-        },
-      );
-      if (!res.ok) return null;
-      const data = await res.json();
-      return data?.hub ? data : null;
-    } catch {
-      return null;
-    }
-  };
-  const recoverPidFile = (statusData, defaultHost = "127.0.0.1") => {
-    const pid = Number(statusData?.pid);
-    const port = Number(statusData?.port) || probePort;
-    if (!Number.isFinite(pid) || pid <= 0) return;
-    try {
-      mkdirSync(HUB_PID_DIR, { recursive: true });
-      writeFileSync(
-        HUB_PID_FILE,
-        JSON.stringify({
-          pid,
-          port,
-          host: defaultHost,
-          url: `http://${formatHostForUrl(defaultHost)}:${port}/mcp`,
-          started: Date.now(),
-        }),
-      );
-    } catch {}
-  };
-  const emitHubStatus = (payload) => {
-    if (!json) return false;
-    printJson(payload);
-    return true;
-  };
-
-  switch (sub) {
-    case "start": {
-      // 이미 실행 중인지 확인
-      if (existsSync(HUB_PID_FILE)) {
-        try {
-          const info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-          process.kill(info.pid, 0); // 프로세스 존재 확인
-          const host =
-            typeof info.host === "string" && info.host.trim()
-              ? info.host.trim()
-              : "127.0.0.1";
-          const port = Number(info.port) || probePort;
-          const probed = await probeHubStatus(host, port, 1500);
-          if (probed?.hub) {
-            const url = `http://${formatHostForUrl(host)}:${probed.port || port}/mcp`;
-            recoverPidFile(probed, host);
-            autoRegisterMcp(url, { codexEnabled: true });
-            console.log(
-              `\n  ${YELLOW}⚠${RESET} hub 이미 실행 중 (PID ${probed.pid || info.pid}, ${url})\n`,
-            );
-            return;
-          }
-          warn(
-            `stale hub PID 파일 감지: PID ${info.pid}는 살아있지만 hub status 응답이 없음. PID 파일을 정리합니다.`,
-          );
-          unlinkSync(HUB_PID_FILE);
-        } catch {
-          // PID 파일 있지만 프로세스 없음 — 정리
-          try {
-            unlinkSync(HUB_PID_FILE);
-          } catch {}
-        }
-      }
-
-      const portArg = args.indexOf("--port");
-      const port = portArg !== -1 ? args[portArg + 1] : String(probePort);
-      const serverPath = join(PKG_ROOT, "hub", "server.mjs");
-
-      if (!existsSync(serverPath)) {
-        throw createCliError("hub/server.mjs 없음 — hub 모듈이 설치되지 않음", {
-          exitCode: EXIT_HUB_ERROR,
-          reason: "hubError",
-          fix: "hub 모듈이 포함된 triflux 설치본인지 확인한 뒤 다시 실행하세요.",
-        });
-      }
-
-      // Issue #102 + hub-detach fix: spawn stdout/stderr 를 두 채널로 redirect.
-      // - startupErrPath (tmp): 3초 안의 startup 실패 진단 (성공 시 cleanup)
-      // - hub.log (cache): runtime stdout/stderr 영구 보존 (crash 추적)
-      // detached spawn 은 pipe 유지가 까다로우니 fd 리다이렉트로 접근.
-      const { openSync: _openSync, closeSync: _closeSync } = await import(
-        "node:fs"
-      );
-      const { tmpdir: _tmpdir } = await import("node:os");
-      const startupErrPath = join(
-        _tmpdir(),
-        `tfx-hub-start-${Date.now()}-${process.pid}.err`,
-      );
-      let errFd;
-      try {
-        errFd = _openSync(startupErrPath, "w");
-      } catch {
-        errFd = undefined;
-      }
-      const logFd = openHubLogFd();
-
-      const child = spawn(process.execPath, [serverPath], {
-        env: { ...process.env, TFX_HUB_PORT: port },
-        stdio: ["ignore", logFd ?? "ignore", errFd ?? logFd ?? "ignore"],
-        detached: true,
-        windowsHide: true,
-      });
-      child.unref();
-      if (errFd !== undefined) {
-        try {
-          _closeSync(errFd);
-        } catch {}
-      }
-      if (logFd !== undefined) {
-        try {
-          _closeSync(logFd);
-        } catch {}
-      }
-
-      // PID 파일 확인 (최대 3초 대기, 100ms 폴링)
-      let started = false;
-      const deadline = Date.now() + 3000;
-      while (Date.now() < deadline) {
-        if (existsSync(HUB_PID_FILE)) {
-          started = true;
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 100));
-      }
-
-      if (started) {
-        const hubInfo = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-        console.log(`\n  ${GREEN_BRIGHT}✓${RESET} ${BOLD}tfx-hub 시작${RESET}`);
-        console.log(`    URL:  ${AMBER}${hubInfo.url}${RESET}`);
-        console.log(`    PID:  ${hubInfo.pid}`);
-        console.log(
-          `    DB:   ${DIM}${getPipelineStateDbPath(PKG_ROOT)}${RESET}`,
-        );
-        console.log("");
-        autoRegisterMcp(hubInfo.url, { codexEnabled: true });
-        console.log("");
-        // 성공했으면 임시 stderr 파일 정리
-        try {
-          unlinkSync(startupErrPath);
-        } catch {}
-      } else {
-        // Issue #102: 캡처된 stderr 에서 root cause 추출
-        let rootCause = "";
-        try {
-          rootCause = readFileSync(startupErrPath, "utf8").trim();
-        } catch {}
-
-        console.log(`\n  ${YELLOW}⚠${RESET} 백그라운드 시작 실패`);
-
-        if (rootCause) {
-          // 가장 유용한 에러 라인 강조 (ERR_*, Error:, throw)
-          const highlight = rootCause
-            .split(/\r?\n/)
-            .find((line) => /ERR_[A-Z_]+|^Error:|cannot find/i.test(line));
-          if (highlight) {
-            console.log(`    ${RED}▸ ${highlight.trim()}${RESET}`);
-          }
-          console.log(`\n  ${DIM}전체 로그: ${startupErrPath}${RESET}`);
-          // 원인별 실전 힌트
-          if (/Cannot find package/i.test(rootCause)) {
-            console.log(
-              `  ${DIM}힌트: \`cd ${PKG_ROOT} && npm install\` 로 의존성 복구 (특히 \`npm link\` 환경).${RESET}`,
-            );
-          } else if (/EADDRINUSE/i.test(rootCause)) {
-            console.log(
-              `  ${DIM}힌트: 포트 ${port} 이 이미 사용 중. \`tfx hub stop\` 후 재시도.${RESET}`,
-            );
-          }
-        } else {
-          console.log(
-            `    ${DIM}stderr 캡처 실패 — 아래 명령으로 포그라운드 실행해 원인 확인:${RESET}`,
-          );
-        }
-
-        console.log(
-          `\n  ${DIM}포그라운드 실행: TFX_HUB_PORT=${port} node ${serverPath}${RESET}\n`,
-        );
-      }
-      break;
-    }
-
-    case "stop": {
-      if (!existsSync(HUB_PID_FILE)) {
-        const probed =
-          (await probeHubStatus("127.0.0.1", probePort, 1500)) ||
-          (probePort === 27888
-            ? null
-            : await probeHubStatus("127.0.0.1", 27888, 1500));
-        if (probed && Number.isFinite(Number(probed.pid))) {
-          try {
-            process.kill(Number(probed.pid), "SIGTERM");
-            console.log(
-              `\n  ${GREEN_BRIGHT}✓${RESET} hub 종료됨 (PID ${probed.pid})${DIM} (probe)${RESET}\n`,
-            );
-            return;
-          } catch {}
-        }
-        console.log(`\n  ${DIM}hub 미실행${RESET}\n`);
-        return;
-      }
-      try {
-        const info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-        process.kill(info.pid, "SIGTERM");
-        try {
-          unlinkSync(HUB_PID_FILE);
-        } catch {}
-        console.log(
-          `\n  ${GREEN_BRIGHT}✓${RESET} hub 종료됨 (PID ${info.pid})\n`,
-        );
-      } catch (_e) {
-        try {
-          unlinkSync(HUB_PID_FILE);
-        } catch {}
-        console.log(`\n  ${DIM}hub 프로세스 없음 — PID 파일 정리됨${RESET}\n`);
-      }
-      break;
-    }
-
-    case "status": {
-      if (!existsSync(HUB_PID_FILE)) {
-        const probed = await probeHubStatus();
-        if (!probed) {
-          const fallback =
-            probePort === 27888
-              ? null
-              : await probeHubStatus("127.0.0.1", 27888, 1500);
-          if (fallback) {
-            recoverPidFile(fallback, "127.0.0.1");
-            if (
-              emitHubStatus({
-                status: "online",
-                source: "default-port-probe",
-                url: `http://127.0.0.1:${fallback.port || 27888}/mcp`,
-                pid: fallback.pid,
-                state: fallback.hub?.state || null,
-                sessions: fallback.sessions,
-              })
-            )
-              return;
-            console.log(
-              `\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(default port probe 성공)${RESET}`,
-            );
-            console.log(
-              `    URL:     http://127.0.0.1:${fallback.port || 27888}/mcp`,
-            );
-            if (fallback.pid !== undefined)
-              console.log(`    PID:     ${fallback.pid}`);
-            if (fallback.hub?.state)
-              console.log(`    State:   ${fallback.hub.state}`);
-            if (fallback.sessions !== undefined)
-              console.log(`    Sessions: ${fallback.sessions}`);
-            console.log("");
-            return;
-          }
-          if (
-            emitHubStatus({
-              status: "offline",
-              source: "probe",
-              url: null,
-              pid: null,
-              state: null,
-              sessions: 0,
-            })
-          )
-            return;
-          console.log(
-            `\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${RED}offline${RESET}\n`,
-          );
-          return;
-        }
-        recoverPidFile(probed, "127.0.0.1");
-        if (
-          emitHubStatus({
-            status: "online",
-            source: "probe",
-            url: `http://127.0.0.1:${probed.port || probePort}/mcp`,
-            pid: probed.pid,
-            state: probed.hub?.state || null,
-            sessions: probed.sessions,
-          })
-        )
-          return;
-        console.log(
-          `\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(pid file 없음 / probe 성공)${RESET}`,
-        );
-        console.log(
-          `    URL:     http://127.0.0.1:${probed.port || probePort}/mcp`,
-        );
-        if (probed.pid !== undefined) console.log(`    PID:     ${probed.pid}`);
-        if (probed.hub?.state) console.log(`    State:   ${probed.hub.state}`);
-        if (probed.sessions !== undefined)
-          console.log(`    Sessions: ${probed.sessions}`);
-        console.log("");
-        return;
-      }
-      try {
-        const info = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-        process.kill(info.pid, 0); // 생존 확인
-        const uptime = Date.now() - info.started;
-        const uptimeStr =
-          uptime < 60000
-            ? `${Math.round(uptime / 1000)}초`
-            : uptime < 3600000
-              ? `${Math.round(uptime / 60000)}분`
-              : `${Math.round(uptime / 3600000)}시간`;
-
-        let data = null;
-        try {
-          const host = typeof info.host === "string" ? info.host : "127.0.0.1";
-          const port = Number(info.port) || probePort;
-          data = await probeHubStatus(host, port, 3000);
-        } catch {}
-
-        if (
-          emitHubStatus({
-            status: "online",
-            source: "pid-file",
-            url: info.url,
-            pid: info.pid,
-            uptime_ms: uptime,
-            state: data?.hub?.state || null,
-            sessions: data?.sessions,
-          })
-        )
-          return;
-        console.log(
-          `\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET}`,
-        );
-        console.log(`    URL:     ${info.url}`);
-        console.log(`    PID:     ${info.pid}`);
-        console.log(`    Uptime:  ${uptimeStr}`);
-        if (data?.hub) {
-          console.log(`    State:   ${data.hub.state}`);
-        }
-        if (data?.sessions !== undefined) {
-          console.log(`    Sessions: ${data.sessions}`);
-        }
-        console.log("");
-      } catch {
-        try {
-          unlinkSync(HUB_PID_FILE);
-        } catch {}
-        const probed = await probeHubStatus();
-        if (!probed) {
-          if (
-            emitHubStatus({
-              status: "offline",
-              source: "stale-pid",
-              url: null,
-              pid: null,
-              state: null,
-              sessions: 0,
-            })
-          )
-            break;
-          console.log(
-            `\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${RED}offline${RESET} ${DIM}(stale PID 정리됨)${RESET}\n`,
-          );
-          break;
-        }
-        recoverPidFile(probed, "127.0.0.1");
-        if (
-          emitHubStatus({
-            status: "online",
-            source: "stale-pid-probe",
-            url: `http://127.0.0.1:${probed.port || probePort}/mcp`,
-            pid: probed.pid,
-            state: probed.hub?.state || null,
-            sessions: probed.sessions,
-          })
-        )
-          break;
-        console.log(
-          `\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET} ${GREEN_BRIGHT}online${RESET} ${DIM}(stale PID 정리 후 probe 성공)${RESET}`,
-        );
-        console.log(
-          `    URL:     http://127.0.0.1:${probed.port || probePort}/mcp`,
-        );
-        if (probed.pid !== undefined) console.log(`    PID:     ${probed.pid}`);
-        if (probed.hub?.state) console.log(`    State:   ${probed.hub.state}`);
-        if (probed.sessions !== undefined)
-          console.log(`    Sessions: ${probed.sessions}`);
-        console.log("");
-      }
-      break;
-    }
-
-    case "ensure": {
-      // 사일런트 idempotent 보장 — 스킬 환경 프로브용.
-      // Hub 살아있으면 즉시 종료, 죽어있으면 자동 시작 + ready 대기.
-      const portArg = args.indexOf("--port");
-      const ensurePort =
-        portArg !== -1
-          ? args[portArg + 1]
-          : process.env.TFX_HUB_PORT || "27888";
-
-      // 1. 이미 healthy?
-      const ensureProbed = await probeHubStatus(
-        "127.0.0.1",
-        Number(ensurePort),
-        1500,
-      );
-      if (ensureProbed?.hub?.state === "healthy") {
-        if (json)
-          printJson({
-            status: "ok",
-            pid: ensureProbed.pid,
-            port: Number(ensurePort),
-          });
-        else process.stdout.write("hub: ok\n");
-        return;
-      }
-
-      // 2. PID 파일 있는데 프로세스 죽었으면 정리
-      if (existsSync(HUB_PID_FILE)) {
-        try {
-          const staleInfo = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-          process.kill(staleInfo.pid, 0);
-          // 프로세스 살아있지만 healthy가 아님 — 잠시 더 대기
-          const retryDeadline = Date.now() + 3000;
-          while (Date.now() < retryDeadline) {
-            await new Promise((r) => setTimeout(r, 250));
-            const retry = await probeHubStatus(
-              "127.0.0.1",
-              Number(ensurePort),
-              1000,
-            );
-            if (retry?.hub?.state === "healthy") {
-              if (json)
-                printJson({
-                  status: "ok",
-                  pid: retry.pid,
-                  port: Number(ensurePort),
-                });
-              else process.stdout.write("hub: ok\n");
-              return;
-            }
-          }
-        } catch {
-          try {
-            unlinkSync(HUB_PID_FILE);
-          } catch {}
-        }
-      }
-
-      // 3. 시작
-      const serverPath = join(PKG_ROOT, "hub", "server.mjs");
-      if (!existsSync(serverPath)) {
-        if (json) printJson({ status: "error", reason: "server_missing" });
-        else process.stderr.write("hub: server.mjs not found\n");
-        process.exitCode = 1;
-        return;
-      }
-
-      if (process.platform === "win32") {
-        const child = spawn(
-          "cmd.exe",
-          ["/c", "start", "/b", "", process.execPath, serverPath],
-          {
-            env: { ...process.env, TFX_HUB_PORT: String(ensurePort) },
-            stdio: "ignore",
-            windowsHide: true,
-          },
-        );
-        child.unref();
-      } else {
-        const child = spawn(process.execPath, [serverPath], {
-          env: { ...process.env, TFX_HUB_PORT: String(ensurePort) },
-          detached: true,
-          stdio: "ignore",
-        });
-        child.unref();
-      }
-
-      // 4. ready 대기 (최대 5초)
-      const readyDeadline = Date.now() + 5000;
-      while (Date.now() < readyDeadline) {
-        await new Promise((r) => setTimeout(r, 250));
-        if (existsSync(HUB_PID_FILE)) {
-          const readyProbe = await probeHubStatus(
-            "127.0.0.1",
-            Number(ensurePort),
-            1000,
-          );
-          if (readyProbe?.hub?.state === "healthy") {
-            if (json)
-              printJson({
-                status: "ok",
-                pid: readyProbe.pid,
-                port: Number(ensurePort),
-                started: true,
-              });
-            else process.stdout.write("hub: started\n");
-            return;
-          }
-        }
-      }
-
-      // 5. 타임아웃이지만 프로세스는 기동 중일 수 있음
-      if (json) printJson({ status: "starting", port: Number(ensurePort) });
-      else process.stdout.write("hub: starting\n");
-      break;
-    }
-
-    default:
-      console.log(`\n  ${AMBER}${BOLD}⬡ tfx-hub${RESET}\n`);
-      console.log(
-        `    ${WHITE_BRIGHT}tfx hub start${RESET}    ${GRAY}허브 데몬 시작${RESET}`,
-      );
-      console.log(
-        `    ${DIM}  --port N${RESET}       ${GRAY}포트 지정 (기본 27888)${RESET}`,
-      );
-      console.log(
-        `    ${WHITE_BRIGHT}tfx hub stop${RESET}     ${GRAY}허브 중지${RESET}`,
-      );
-      console.log(
-        `    ${WHITE_BRIGHT}tfx hub status${RESET}   ${GRAY}상태 확인${RESET}`,
-      );
-      console.log(
-        `    ${WHITE_BRIGHT}tfx hub ensure${RESET}   ${GRAY}헬스체크 + 자동 시작 (스킬 프로브용)${RESET}\n`,
-      );
-  }
 }
 
 // ── 메인 ──
@@ -5298,7 +3763,6 @@ async function main() {
       cmdSetup({
         dryRun: cmdArgs.includes("--dry-run"),
         fromUpdate: cmdArgs.includes("--from-update"),
-        enableHubAutostart: cmdArgs.includes("--enable-hub-autostart"),
         mods: cmdArgs.includes("--mods"),
       });
       return;
@@ -5347,15 +3811,10 @@ async function main() {
       const fix = cmdArgs.includes("--fix");
       const reset = cmdArgs.includes("--reset");
       const purgeLogs = cmdArgs.includes("--purge-logs");
-      const cleanupStaleHubs = cmdArgs.includes("--cleanup-stale-hubs");
       const cleanupStaleTmux = cmdArgs.includes("--cleanup-stale-tmux");
       const cleanupApply = cmdArgs.includes("--apply");
       const cleanupDryRun = cmdArgs.includes("--dry-run") || !cleanupApply;
-      if (
-        (cleanupStaleHubs || cleanupStaleTmux) &&
-        cleanupApply &&
-        cmdArgs.includes("--dry-run")
-      ) {
+      if (cleanupStaleTmux && cleanupApply && cmdArgs.includes("--dry-run")) {
         throw createCliError(
           "cleanup 옵션에서는 --dry-run 과 --apply 중 하나만 지정하세요",
           {
@@ -5376,9 +3835,6 @@ async function main() {
         fix,
         reset,
         purgeLogs,
-        cleanupStaleHubs,
-        cleanupStaleHubsDryRun: cleanupDryRun,
-        cleanupStaleHubsApply: cleanupApply,
         cleanupStaleTmux,
         cleanupStaleTmuxDryRun: cleanupDryRun,
         cleanupStaleTmuxApply: cleanupApply,
@@ -5402,16 +3858,6 @@ async function main() {
       }
       cmdList({ json: JSON_OUTPUT });
       return;
-    case "hub":
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("hub");
-        return;
-      }
-      await cmdHub(cmdArgs, {
-        json:
-          JSON_OUTPUT && ["status", "ensure"].includes(cmdArgs[0] || "status"),
-      });
-      return;
     case "cto": {
       if (cmdArgs.some(isHelpArg)) {
         printCommandHelp("cto");
@@ -5425,7 +3871,6 @@ async function main() {
       return;
     }
     case "multi": {
-      const subcommand = cmdArgs[0] || "";
       if (cmdArgs.some(isHelpArg)) {
         const { pathToFileURL } = await import("node:url");
         const { renderTeamHelp } = await import(
@@ -5436,9 +3881,6 @@ async function main() {
       }
       if (JSON_OUTPUT) process.env.TFX_OUTPUT_JSON = "1";
       else delete process.env.TFX_OUTPUT_JSON;
-      if (subcommand !== "status") {
-        await checkHubRunning();
-      }
       const { pathToFileURL } = await import("node:url");
       const { cmdTeam } = await import(
         pathToFileURL(join(PKG_ROOT, "hub", "team", "cli", "index.mjs")).href
@@ -5451,32 +3893,6 @@ async function main() {
         process.argv = prevArgv;
         delete process.env.TFX_OUTPUT_JSON;
       }
-      return;
-    }
-    case "synapse": {
-      const { cmdSynapseStatus } = await import("../hub/team/synapse-cli.mjs");
-      const sub = cmdArgs[0] || "status";
-      if (isHelpArg(sub)) {
-        printCommandHelp("synapse");
-        return;
-      }
-      if (sub !== "status") {
-        throw createCliError(`synapse 서브커맨드 미지원: ${sub}`, {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx synapse status [--json] [--registry <path>]",
-        });
-      }
-      await cmdSynapseStatus(cmdArgs.slice(1), { json: JSON_OUTPUT });
-      return;
-    }
-    case "why": {
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("why");
-        return;
-      }
-      const { cmdSynapseWhy } = await import("../hub/team/synapse-cli.mjs");
-      await cmdSynapseWhy(cmdArgs, { json: JSON_OUTPUT });
       return;
     }
     case "version":

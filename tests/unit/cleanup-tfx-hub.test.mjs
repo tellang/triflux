@@ -11,7 +11,10 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
-import { cleanupTfxHub } from "../../scripts/lib/legacy-mcp-cleanup.mjs";
+import {
+  cleanupTfxHub,
+  findProjectHubEntries,
+} from "../../scripts/lib/legacy-mcp-cleanup.mjs";
 
 const dirs = [];
 afterEach(() => {
@@ -205,4 +208,13 @@ test("Windows 에서 PowerShell 조회가 실패하면 종료하지 않고 hub.p
   assert.equal(calls.includes("taskkill"), false);
   assert.equal(existsSync(pidFile), true);
   assert.ok(result.warnings.some((warning) => warning.includes("확인 실패")));
+});
+
+test("cwd 의 프로젝트 MCP 파일에서 허브 주소 tfx-hub 항목이 있는 파일만 찾는다", () => {
+  const { root } = fixture();
+  put(join(root, ".mcp.json"), { mcpServers: { "tfx-hub": HUB } });
+  put(join(root, ".claude/mcp.json"), {
+    mcpServers: { "tfx-hub": { command: "node" }, other: OTHER },
+  });
+  assert.deepEqual(findProjectHubEntries(root), [join(root, ".mcp.json")]);
 });

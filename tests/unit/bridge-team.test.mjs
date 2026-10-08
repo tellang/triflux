@@ -1,4 +1,4 @@
-// tests/pipeline/bridge-team.test.mjs: bridge team 하위 명령이 nativeProxy 를 직접 호출하는지 검증
+// tests/unit/bridge-team.test.mjs: bridge team 하위 명령이 nativeProxy 를 직접 호출하는지 검증
 import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import { main } from "../../hub/bridge.mjs";
