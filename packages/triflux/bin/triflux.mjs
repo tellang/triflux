@@ -1245,10 +1245,13 @@ async function cmdSetup(options = {}) {
     });
   }
   // 이주가 막혀도 setup 은 계속한다. 남은 항목은 경고로 알린다.
-  for (const warning of cleanupLegacyMcp().warnings) warn(warning);
+  const mcpBackups = new Map();
+  for (const warning of cleanupLegacyMcp({ backups: mcpBackups }).warnings)
+    warn(warning);
   const hubCleanup = cleanupTfxHub({
     pluginRoot: existsSync(join(PKG_ROOT, ".git")) ? undefined : PKG_ROOT,
     log: info,
+    backups: mcpBackups,
   });
   for (const warning of hubCleanup.warnings) warn(warning);
   if (hubCleanup.changed) ok("제거된 허브의 설정과 실행 흔적 정리");

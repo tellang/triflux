@@ -1594,18 +1594,22 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
       const actual =
         config.servers.find((server) => server.name === name) || null;
       // JSON 설정의 기대 헤더는 지금 셸의 env 로 만든다. 키를 export 하지 않은 셸에서는
-      // 기대 헤더가 비어 같은 설정도 mismatch 로 보였다. 만들 수 없는 헤더는 비교에서 뺀다.
-      const unresolvedHeaders = isCodexConfig(config.filePath)
-        ? []
-        : Object.entries(desired.headerDescriptors || {})
-            .filter(
-              ([, descriptor]) =>
-                descriptor.env && !process.env[descriptor.env],
-            )
-            .map(([headerName]) => headerName);
+      // 기대 헤더가 비어 같은 설정도 mismatch 로 보였다. 그 env 를 가리키는 참조이거나
+      // 확인할 수 없는 평문 값이면 비교에서 빼고, 다른 참조면 불일치로 남긴다.
+      const unverifiableHeader = (headerName, actualDescriptor) => {
+        const expected = desired.headerDescriptors?.[headerName];
+        if (isCodexConfig(config.filePath) || !expected?.env) return false;
+        if (process.env[expected.env]) return false;
+        const value = String(actualDescriptor?.value ?? "");
+        const prefix = expected.prefix || "";
+        return value.includes("${")
+          ? value === `${prefix}\${${expected.env}}`
+          : value.startsWith(prefix);
+      };
       const actualHeaders = Object.fromEntries(
         Object.entries(actual?.headerDescriptors || {}).filter(
-          ([headerName]) => !unresolvedHeaders.includes(headerName),
+          ([headerName, descriptor]) =>
+            !unverifiableHeader(headerName, descriptor),
         ),
       );
       const currentHeaderStatus = headerStatus(expectedHeaders, actualHeaders);

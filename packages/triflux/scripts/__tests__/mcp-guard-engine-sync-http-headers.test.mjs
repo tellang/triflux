@@ -301,5 +301,10 @@ describe("inspectRegistryStatus HTTP headers", () => {
     assert.equal(statusOf(), "present");
     process.env.TFX_TEST_TOKEN = "other-secret";
     assert.equal(statusOf(), "mismatch");
+    delete process.env.TFX_TEST_TOKEN;
+    const claude = JSON.parse(readFileSync(claudePath, "utf8"));
+    claude.mcpServers.auth.headers.Authorization = "Bearer ${WRONG_TOKEN}";
+    writeFileSync(claudePath, JSON.stringify(claude));
+    assert.equal(statusOf(), "mismatch");
   });
 });

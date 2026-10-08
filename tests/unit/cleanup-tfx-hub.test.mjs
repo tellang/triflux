@@ -367,6 +367,7 @@ test("게이트웨이 이주와 허브 정리가 같은 파일을 바꿔도 백�
     if (command === "ps") return "";
     throw new Error("unexpected command");
   };
+  const backups = new Map();
   const migrated = cleanupLegacyMcp({
     home,
     repoRoot: join(root, "repo"),
@@ -374,8 +375,9 @@ test("게이트웨이 이주와 허브 정리가 같은 파일을 바꿔도 백�
     run,
     uid: 500,
     env: {},
+    backups,
   });
-  const hub = cleanupTfxHub({ home, platform: "darwin", run });
+  const hub = cleanupTfxHub({ home, platform: "darwin", run, backups });
   assert.equal(migrated.ok && hub.ok, true);
   assert.deepEqual(hub.backups, migrated.backups);
   const servers = JSON.parse(readFileSync(claude, "utf8")).mcpServers;

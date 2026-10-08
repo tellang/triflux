@@ -2073,9 +2073,11 @@ export async function runDeferred(stdinData) {
   }
   if (machineProfileOnly) return io.result(0);
 
+  const mcpBackups = new Map();
   const mcpCleanup = cleanupLegacyMcp({
     home: _TFX_HOME,
     repoRoot: process.env.INIT_CWD || process.cwd(),
+    backups: mcpBackups,
   });
   // 이주가 막혀도 설치는 계속한다. 남은 항목은 경고로 알린다.
   for (const warning of mcpCleanup.warnings) io.log(`  ⚠ ${warning}`);
@@ -2085,6 +2087,7 @@ export async function runDeferred(stdinData) {
     home: _TFX_HOME,
     pluginRoot: isDev ? undefined : PLUGIN_ROOT,
     log: (message) => io.log(`  ${message}`),
+    backups: mcpBackups,
   });
   for (const warning of hubCleanup.warnings) io.log(`  ⚠ ${warning}`);
   if (hubCleanup.changed) io.log("  허브 설정과 실행 흔적 정리");
