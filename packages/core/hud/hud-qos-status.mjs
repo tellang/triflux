@@ -32,7 +32,6 @@ import {
 } from "./providers/claude.mjs";
 import {
   getCodexEmail,
-  hasBrokerCodexAccounts,
   readCodexRateLimitSnapshot,
   refreshCodexRateLimitsCache,
   scheduleCodexRateLimitRefresh,
@@ -89,11 +88,7 @@ async function main() {
   ) {
     scheduleClaudeUsageRefresh();
   }
-  if (
-    showCodex &&
-    codexSnapshot.shouldRefresh &&
-    (existsSync(getCodexHome()) || hasBrokerCodexAccounts())
-  ) {
+  if (showCodex && codexSnapshot.shouldRefresh && existsSync(getCodexHome())) {
     scheduleCodexRateLimitRefresh();
   }
 
@@ -109,10 +104,7 @@ async function main() {
   const currentTier = selectTier();
   // 회색은 로그인 안 된 경우에만 쓴다. 로그인 상태의 조회 공백은 --% 로만 보인다.
   const codexLoggedOut =
-    showCodex &&
-    !codexBuckets &&
-    !existsSync(getCodexAuthPath()) &&
-    !hasBrokerCodexAccounts();
+    showCodex && !codexBuckets && !existsSync(getCodexAuthPath());
   if (currentTier === "nano") {
     const microLine = getMicroLine(contextView, claudeUsage, codexBuckets, {
       showCodex,

@@ -81,22 +81,6 @@ Windows 전용 경로는 플랫폼과 `WT_SESSION` 조건을 확인한다.
 프로필은 `$CODEX_HOME/<이름>.config.toml` 파일이다(인라인 `[profiles.*]` 아님).
 </codex-config>
 
-<account-broker>
-## AccountBroker (계정 브로커)
-
-headless 워커는 AccountBroker를 사용한다.
-
-| 항목 | 설명 |
-|------|------|
-| 계정별 회로 차단기 | 장애 격리: 한 계정 오류가 다른 계정에 전파되지 않음 |
-| 사용 중 플래그 | 동일 계정 이중 임대 방지 |
-| `reloadBroker()` | accounts.json을 다시 불러온다. 활성 임대 소유권은 다시 불러온 뒤에도 보존한다. 허브가 없어 HTTP 엔드포인트는 없고 모듈 함수로만 부를 수 있다. |
-| 어댑터의 임대 없음 정책 | headless 어댑터는 브로커가 비활성·비어 있음이면 기본 CLI 인증 경로로 실행하고, 브로커가 활성인데 임대가 없으면 `circuit_open`으로 실패한다. |
-| 공개 스냅숏 정책 | 밖에 보여 줄 때는 `publicSnapshot()`만 쓴다. `env`, `authFile`, `profile`, `host`, 파일 경로, 가공하지 않은 실패 시각은 공개하지 않는다. |
-| 진단 이벤트 | `securityViolation`, `authSyncError`는 이벤트로만 내보낸다. 구독하는 쪽이 없으면 기록되지 않는다. |
-| EventEmitter 이벤트 | `lease`, `release`, `cooldown`, `tierFallback`, `circuitOpen`, `circuitClose`, `noAvailableAccounts`: HUD 연동용 |
-</account-broker>
-
 <remote>
 ## 원격 실행
 

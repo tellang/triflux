@@ -1,11 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { codexProfileConfigOverrides } from "../scripts/lib/codex-profile-config.mjs";
 import {
   buildExecCommand,
-  createResult,
-  executeWithCircuitBroker,
+  executeWithAttempts,
   normalizePathForShell,
   runProcess,
   shellQuote,
@@ -113,7 +112,7 @@ export function buildLaunchScript(opts = {}) {
 
 // CTO boundary: this adapter assembles Codex prompts outside
 // scripts/tfx-route.sh. Keep north-star injection in tfx-route.sh until
-// launcher/circuit-broker workdir contracts have focused coverage.
+// launcher workdir contracts have focused coverage.
 export function buildExecArgs(opts = {}) {
   const prompt = typeof opts.prompt === "string" ? opts.prompt : "";
   const command = buildExecCommand(prompt, opts.resultFile || null, {
@@ -153,7 +152,7 @@ export function buildExecArgs(opts = {}) {
 
 // ── Codex execution ─────────────────────────────────────────────
 
-async function runCodex(prompt, workdir, preflight, attempt, lease) {
+async function runCodex(prompt, workdir, preflight, attempt) {
   const dir = join(tmpdir(), "triflux-codex-exec");
   mkdirSync(dir, { recursive: true });
   const resultFile = join(
@@ -162,7 +161,7 @@ async function runCodex(prompt, workdir, preflight, attempt, lease) {
   );
   const command = commandWithOverrides(
     buildExecCommand(prompt, resultFile, {
-      profile: lease?.profile ?? attempt.profile,
+      profile: attempt.profile,
       skipGitRepoCheck: true,
       sandboxBypass: attempt.forceBypass,
     }),
@@ -170,125 +169,17 @@ async function runCodex(prompt, workdir, preflight, attempt, lease) {
     preflight.codexPath,
     buildOverrides(attempt.requested, attempt.excluded),
   );
-  // PRD A1 — lease 메타데이터를 spawn env 에 적용한다. lease.authFile 이 있으면
-  // 해당 파일이 위치한 디렉토리를 CODEX_HOME 으로 export 해서 codex CLI 가 그
-  // account 의 auth.json 을 사용하게 한다. lease 가 null 이면 default ~/.codex
-  // 동작 유지 (회귀 없음). lease.env 는 추가 환경변수 (provider 고정 등) 주입용.
-  const spawnEnv = lease ? buildLeaseSpawnEnv(lease) : undefined;
-  const authCheck = validateLeaseAuth(lease, spawnEnv);
-  if (!authCheck.ok) {
-    return createResult(false, {
-      stderr: authCheck.error,
-      failureMode: "auth_sync",
-      skipCircuit: true,
-    });
-  }
   return runProcess(command, workdir, attempt.timeout, {
     resultFile,
     inferStallMode,
-    spawnEnv,
     cli: "codex",
-    codexHome: spawnEnv?.CODEX_HOME,
   });
-}
-
-function buildLeaseSpawnEnv(lease) {
-  const extra = {};
-  if (lease.authFile) {
-    // lease.authFile 은 보통 ~/.claude/cache/tfx-hub/codex-auth-<account>.json 형식.
-    // codex CLI 는 CODEX_HOME 을 통해 auth.json 위치를 결정하므로, 이 cache 파일을
-    // 직접 CODEX_HOME 후보 디렉토리로 사용한다. cache 파일 자체가 auth.json 이름이
-    // 아니라면 후속 PR 에서 isolated dir + symlink/복사 처리한다 (PRD Open Question).
-    // 현재는 lease.authFile 의 dirname 을 export 하되, 그 dirname 안에 auth.json 이
-    // 실제로 있을 때만 적용한다 (false-positive 회피).
-    try {
-      const dir = dirnameOf(lease.authFile);
-      if (dir) extra.CODEX_HOME = dir;
-    } catch {}
-  }
-  if (lease.env && typeof lease.env === "object") {
-    Object.assign(extra, lease.env);
-  }
-  return Object.keys(extra).length ? { ...process.env, ...extra } : undefined;
-}
-
-function validateLeaseAuth(lease, spawnEnv) {
-  if (!lease?.authFile) return { ok: true };
-  if (basename(lease.authFile) !== "auth.json") {
-    return {
-      ok: false,
-      error: `lease authFile must resolve to auth.json for account ${lease.id}`,
-    };
-  }
-  if (!existsSync(lease.authFile)) {
-    return {
-      ok: false,
-      error: `lease authFile missing for account ${lease.id}: ${lease.authFile}`,
-    };
-  }
-  if (dirnameOf(lease.authFile) !== spawnEnv?.CODEX_HOME) {
-    return {
-      ok: false,
-      // This is currently expected to match because buildLeaseSpawnEnv derives
-      // CODEX_HOME from authFile. Keep the guard so future lease.env overrides
-      // cannot silently point Codex at a different account home.
-      error: `CODEX_HOME mismatch for account ${lease.id}`,
-    };
-  }
-  try {
-    const parsed = JSON.parse(readFileSync(lease.authFile, "utf8"));
-    const accountId =
-      parsed?.tokens?.account_id ??
-      parsed?.account_id ??
-      parsed?.accountId ??
-      null;
-    if (!accountId) {
-      return {
-        ok: false,
-        error: `lease authFile has no account_id for account ${lease.id}`,
-      };
-    }
-    if (accountId !== lease.id) {
-      return {
-        ok: false,
-        error: `lease authFile account mismatch: expected ${lease.id}, got ${accountId}`,
-      };
-    }
-  } catch (error) {
-    return {
-      ok: false,
-      error: `lease authFile unreadable for account ${lease.id}: ${error?.message || error}`,
-    };
-  }
-  return { ok: true };
-}
-
-function dirnameOf(filePath) {
-  if (typeof filePath !== "string" || !filePath) return null;
-  const lastSep = Math.max(
-    filePath.lastIndexOf("/"),
-    filePath.lastIndexOf("\\"),
-  );
-  if (lastSep < 0) return null;
-  return filePath.slice(0, lastSep);
 }
 
 // ── Public API ──────────────────────────────────────────────────
 
-export async function getCircuitState() {
-  const brokerMod = await import("./account-broker.mjs");
-  if (!brokerMod.broker) return { state: "closed", failures: [] };
-  const snap = brokerMod.broker
-    .snapshot()
-    .filter((a) => a.provider === "codex");
-  return snap.length
-    ? { state: snap[0].circuitState, accounts: snap }
-    : { state: "closed", failures: [] };
-}
-
 export function execute(opts = {}) {
-  return executeWithCircuitBroker({
-    provider: "codex",
+  return executeWithAttempts({
     runFn: runCodex,
     preflightFn: (o) =>
       runPreflight({

@@ -7,7 +7,6 @@ import {
   classifyBucket,
   expireStaleCodexBuckets,
   getCodexRateLimits,
-  hasBrokerCodexAccounts,
   normalizeBuckets,
 } from "../../hud/providers/codex.mjs";
 
@@ -579,42 +578,6 @@ describe("Codex multi-window selection", () => {
     }
   });
 
-  it("keeps max-used when broker Codex accounts may still use the older window", () => {
-    const sessionsRoot = mkdtempSync(
-      join(tmpdir(), "triflux-codex-weekly-broker-"),
-    );
-    const now = new Date("2026-09-23T13:50:00.000Z");
-    try {
-      // 조기 리셋 실측과 같은 데이터지만, 브로커 계정이 있으면 옛 창이 전환 전
-      // 계정의 창일 수 있어 교체로 판정하지 않는다.
-      writeRollout(sessionsRoot, now, "rollout-old-window.jsonl", [
-        weeklyOnlyEvent({
-          timestamp: "2026-09-23T07:53:16.809Z",
-          usedPercent: 100,
-          resetsAt: 1790561788,
-        }),
-      ]);
-      writeRollout(sessionsRoot, now, "rollout-new-window.jsonl", [
-        weeklyOnlyEvent({
-          timestamp: "2026-09-23T13:49:00.000Z",
-          usedPercent: 34,
-          resetsAt: 1790754846,
-        }),
-      ]);
-
-      const buckets = getCodexRateLimits({
-        sessionsRoot,
-        now,
-        replaceEndedWindows: false,
-      });
-
-      assert.equal(buckets.codex.secondary.used_percent, 100);
-      assert.equal(buckets.codex.mixedWindows, true);
-    } finally {
-      rmSync(sessionsRoot, { recursive: true, force: true });
-    }
-  });
-
   it("uses the session window length when the newest probe omits it", () => {
     const sessionsRoot = mkdtempSync(
       join(tmpdir(), "triflux-codex-five-hour-length-less-probe-"),
@@ -672,31 +635,6 @@ describe("Codex multi-window selection", () => {
     }
   });
 
-  it("hasBrokerCodexAccounts: accounts.json codex 항목이나 인증 캐시가 있으면 true", () => {
-    const brokerDir = mkdtempSync(join(tmpdir(), "triflux-codex-broker-dir-"));
-    try {
-      assert.equal(hasBrokerCodexAccounts({ brokerDir }), false);
-
-      writeFileSync(
-        join(brokerDir, "accounts.json"),
-        JSON.stringify({ codex: [], gemini: [{ id: "g1" }] }),
-      );
-      assert.equal(hasBrokerCodexAccounts({ brokerDir }), false);
-
-      writeFileSync(
-        join(brokerDir, "accounts.json"),
-        JSON.stringify({ codex: [{ id: "c1" }] }),
-      );
-      assert.equal(hasBrokerCodexAccounts({ brokerDir }), true);
-
-      rmSync(join(brokerDir, "accounts.json"));
-      writeFileSync(join(brokerDir, "codex-auth-work.json"), "{}");
-      assert.equal(hasBrokerCodexAccounts({ brokerDir }), true);
-    } finally {
-      rmSync(brokerDir, { recursive: true, force: true });
-    }
-  });
-
   it("keeps a window observed shortly after the newer window opened", () => {
     const sessionsRoot = mkdtempSync(
       join(tmpdir(), "triflux-codex-weekly-just-after-open-"),
@@ -734,7 +672,7 @@ describe("Codex multi-window selection", () => {
     );
     const now = new Date("2026-09-23T13:50:00.000Z");
     try {
-      // 브로커 계정은 자기 CODEX_HOME 에 세션을 쓰므로 프로브로만 보인다.
+      // 프로브는 세션 로그와 다른 계정(로그인 전환 뒤)의 창을 볼 수 있다.
       writeRollout(sessionsRoot, now, "rollout-current-account.jsonl", [
         weeklyOnlyEvent({
           timestamp: "2026-09-23T07:53:16.809Z",
@@ -742,7 +680,7 @@ describe("Codex multi-window selection", () => {
           resetsAt: 1790561788,
         }),
       ]);
-      const brokerProbe = {
+      const probeSnapshot = {
         limitId: "codex",
         limitName: null,
         primary: {
@@ -761,7 +699,7 @@ describe("Codex multi-window selection", () => {
       const buckets = getCodexRateLimits({
         sessionsRoot,
         now,
-        extraSnapshots: [brokerProbe],
+        extraSnapshots: [probeSnapshot],
       });
 
       assert.equal(buckets.codex.secondary.used_percent, 100);
