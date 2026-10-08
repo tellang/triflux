@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { __remoteSpawnTest } from "../../scripts/remote-spawn.mjs";
+
+const REMOTE_SPAWN = fileURLToPath(
+  new URL("../../scripts/remote-spawn.mjs", import.meta.url),
+);
 
 const {
   buildPromptContext,
@@ -14,12 +20,14 @@ const {
 } = __remoteSpawnTest;
 
 function withTempDir(run) {
-  const parent = resolve("tests", ".tmp-remote-spawn");
-  mkdirSync(parent, { recursive: true });
-  const dir = mkdtempSync(join(parent, "case-"));
+  // handoff 와 전송 파일은 cwd 안에 있어야 하므로 임시 디렉터리를 cwd 로 삼는다.
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "tfx-remote-spawn-")));
+  const previous = process.cwd();
+  process.chdir(dir);
   try {
     return run(dir);
   } finally {
+    process.chdir(previous);
     rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -47,7 +55,6 @@ describe("remote-spawn parseArgs()", () => {
 
 it("POSIX probe reports health and blocks memory pressure level 4", () => {
   const probe = normalizePosixProbeEnv(
-    "example-host",
     {
       os: "darwin",
       shell: "zsh",
@@ -71,7 +78,6 @@ it("POSIX probe reports health and blocks memory pressure level 4", () => {
   assert.equal(probe.warnings.length, 3);
 
   const warning = normalizePosixProbeEnv(
-    "example-host",
     { os: "darwin", home: "/Users/remote", memoryPressureLevel: "2" },
     {},
   );
@@ -168,14 +174,14 @@ describe("remote-spawn CLI fail-fast", () => {
       const result = spawnSync(
         process.execPath,
         [
-          "scripts/remote-spawn.mjs",
+          REMOTE_SPAWN,
           "--host",
           "example-host",
           "--transfer",
           missingPath,
           "hello",
         ],
-        { cwd: resolve("."), encoding: "utf8" },
+        { cwd: dir, encoding: "utf8" },
       );
 
       assert.equal(result.status, 1);
@@ -191,14 +197,14 @@ describe("remote-spawn CLI fail-fast", () => {
       const result = spawnSync(
         process.execPath,
         [
-          "scripts/remote-spawn.mjs",
+          REMOTE_SPAWN,
           "--host",
           "example-host",
           "--transfer",
           largePath,
           "hello",
         ],
-        { cwd: resolve("."), encoding: "utf8" },
+        { cwd: dir, encoding: "utf8" },
       );
 
       assert.equal(result.status, 1);
