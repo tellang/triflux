@@ -11,7 +11,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join as pathJoin, resolve as pathResolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -20,6 +20,7 @@ import {
   readCodexSessionRecords,
   registryDir,
 } from "../hub/lib/codex-session-registry.mjs";
+import { privateTmpDir } from "../hub/lib/private-tmp.mjs";
 import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
 import { exposeLiveSession } from "../hub/team/agents-row.mjs";
 import {
@@ -1932,8 +1933,9 @@ async function callBridgeVerb(bridgePath, verb, payload, timeoutMs) {
   let payloadFile = null;
   let args;
   if (json.length > PAYLOAD_FILE_THRESHOLD) {
+    // 페이로드에 프롬프트가 들어 있어 사용자별 0700 디렉터리에 쓴다.
     payloadFile = pathJoin(
-      tmpdir(),
+      privateTmpDir("tfx-live"),
       `codex-live-payload-${process.pid}-${Date.now()}.json`,
     );
     await writeFile(payloadFile, json, "utf8");
@@ -4098,13 +4100,11 @@ function peerArtifactPaths(sessionA, sessionB) {
   const preferredDir =
     process.env.TFX_LIVE_ARTIFACT_DIR ??
     pathJoin(homedir(), ".claude", "cache", "triflux", "tfx-live", "peer-runs");
-  const fallbackDir = pathJoin(tmpdir(), "triflux-live");
   let artifactDir = preferredDir;
   try {
     mkdirSync(artifactDir, { recursive: true });
   } catch {
-    artifactDir = fallbackDir;
-    mkdirSync(artifactDir, { recursive: true });
+    artifactDir = privateTmpDir("tfx-live");
   }
   const safe = (value) =>
     String(value)

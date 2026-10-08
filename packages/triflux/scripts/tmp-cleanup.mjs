@@ -7,6 +7,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { privateTmpRoot } from "../hub/lib/private-tmp.mjs";
 
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7일
 const TRIFLUX_CLI_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 1일
@@ -44,11 +45,23 @@ function buildProtectedPathSet(protectPaths = []) {
  */
 export async function cleanupTmpFiles({ protectPaths = [] } = {}) {
   const now = Date.now();
-  let cleaned = 0;
-  const tmp = tmpdir();
   const protectedPaths = buildProtectedPathSet(protectPaths);
+  // 새 버전은 uid 0700 루트에 쓰고, tmpdir() 는 예전 버전이 남긴 항목용이다.
+  const roots = new Set([tmpdir()]);
+  try {
+    roots.add(privateTmpRoot());
+  } catch {
+    /* 남의 루트면 건너뛴다 */
+  }
+  let cleaned = 0;
+  for (const root of roots) cleaned += cleanupRoot(root, now, protectedPaths);
+  return cleaned;
+}
 
-  // 1) tmpdir() 직하위의 관리 대상 항목 정리
+function cleanupRoot(tmp, now, protectedPaths) {
+  let cleaned = 0;
+
+  // 1) 루트 직하위의 관리 대상 항목 정리
   let topEntries;
   try {
     topEntries = readdirSync(tmp);

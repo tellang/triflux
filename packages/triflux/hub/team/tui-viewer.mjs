@@ -6,9 +6,9 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
+import { privateTmpDir } from "../lib/private-tmp.mjs";
 import { openHeadlessDashboardTarget } from "./dashboard-open.mjs";
 import { processHandoff } from "./handoff.mjs";
 import { getMultiplexerType } from "./psmux.mjs";
@@ -23,7 +23,7 @@ function argVal(flag) {
 }
 
 const SESSION = argVal("--session");
-const RESULT_DIR = argVal("--result-dir") ?? join(tmpdir(), "tfx-headless");
+const RESULT_DIR = argVal("--result-dir") ?? privateTmpDir("tfx-headless");
 const LAYOUT = argVal("--layout") ?? "single";
 const LEAD_PANE = argVal("--lead-pane");
 const MUX_BIN = getMultiplexerType();

@@ -118,18 +118,30 @@ else
 fi
 
 # ── 임시 디렉토리 정규화 ──
+# 공용 /tmp 의 고정 이름은 다른 사용자가 선점하거나 읽을 수 있어 uid 0700 루트를 쓴다.
+# hub/lib/private-tmp.mjs 와 같은 규칙이고, 후보 순서도 node os.tmpdir() 와 맞춘다.
+# Windows(Git Bash)는 TEMP 가 이미 사용자별이라 그대로 쓴다.
 resolve_tmp_dir() {
-  local candidate=""
-  for candidate in "${TMPDIR:-}" "${TEMP:-}" "${TMP:-}" "/tmp"; do
+  local candidate="" root
+  for candidate in "${TMPDIR:-}" "${TMP:-}" "${TEMP:-}" "/tmp"; do
     [[ -n "$candidate" ]] || continue
-    if mkdir -p "$candidate" >/dev/null 2>&1; then
-      printf '%s\n' "$candidate"
+    mkdir -p "$candidate" >/dev/null 2>&1 || continue
+    candidate="${candidate%/}"
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*) printf '%s\n' "$candidate"; return 0 ;;
+    esac
+    root="${candidate}/triflux-$(id -u)"
+    mkdir -m 700 "$root" >/dev/null 2>&1
+    if [[ -d "$root" && ! -L "$root" && -O "$root" ]]; then
+      chmod 700 "$root" 2>/dev/null
+      printf '%s\n' "$root"
       return 0
     fi
+    echo "[tfx-route] 경고: $root 가 다른 사용자 소유이거나 링크라 쓰지 않습니다" >&2
   done
 
   candidate="$(pwd)/.tfx-tmp"
-  mkdir -p "$candidate" >/dev/null 2>&1 || true
+  mkdir -m 700 -p "$candidate" >/dev/null 2>&1 || true
   printf '%s\n' "$candidate"
 }
 
