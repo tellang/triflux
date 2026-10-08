@@ -53,7 +53,7 @@ export function resolveCli(cli) {
 
 /**
  * CLI 에이전트 시작 커맨드 생성. 역할명과 별칭은 agent-map 으로 CLI 를 고른다.
- * @param {string} cli — CLI 이름, 별칭(agy) 또는 역할명
+ * @param {string} cli: CLI 이름, 별칭(agy) 또는 역할명
  * @returns {string} 실행할 셸 커맨드
  */
 export function buildCliCommand(cli) {
