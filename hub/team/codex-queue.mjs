@@ -1,8 +1,9 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { open, readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { StringDecoder } from "node:string_decoder";
 import { promisify } from "node:util";
 import { codexThreadNames } from "../lib/codex-session-registry.mjs";
@@ -212,6 +213,112 @@ export async function queueCodexMessage({
     throw error;
   }
   return { queuedMessageId: match[1] };
+}
+
+// 공식 app-server 를 stdio 로 잠깐 띄워 요청을 보낸다. 큐 조회와 삭제가 실험 API 라 experimentalApi 를 켠다.
+export async function withCodexAppServer(
+  run,
+  { env = process.env, timeoutMs = 30_000, spawnFn = spawn } = {},
+) {
+  const child = spawnFn("codex", ["app-server"], {
+    env,
+    cwd: env.HOME || homedir(),
+    stdio: ["pipe", "pipe", "ignore"],
+  });
+  const pending = new Map();
+  let nextId = 0;
+  let closed = null;
+  const settleAll = (error) => {
+    closed ??= error;
+    for (const { reject } of pending.values()) reject(closed);
+    pending.clear();
+  };
+  child.on("error", settleAll);
+  // 먼저 끝난 app-server 에 쓰면 EPIPE 가 stdin 에서 나므로 요청 실패로 돌린다.
+  child.stdin.on("error", settleAll);
+  child.on("exit", (code) =>
+    settleAll(new Error(`codex app-server exited (${code})`)),
+  );
+  createInterface({ input: child.stdout }).on("line", (line) => {
+    let message;
+    try {
+      message = JSON.parse(line);
+    } catch {
+      return;
+    }
+    const waiter = pending.get(message.id);
+    if (!waiter) return;
+    pending.delete(message.id);
+    if (message.error)
+      waiter.reject(new Error(`${waiter.method}: ${message.error.message}`));
+    else waiter.resolve(message.result);
+  });
+  const send = (message) =>
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+  const request = (method, params) => {
+    if (closed) return Promise.reject(closed);
+    const id = ++nextId;
+    return new Promise((resolve, reject) => {
+      pending.set(id, { method, resolve, reject });
+      send({ id, method, params });
+    });
+  };
+  const timer = setTimeout(
+    () => settleAll(new Error("codex app-server timed out")),
+    timeoutMs,
+  );
+  try {
+    await request("initialize", {
+      clientInfo: { name: "triflux-tfx-live", version: "1.0.0" },
+      capabilities: { experimentalApi: true },
+    });
+    send({ method: "initialized", params: {} });
+    return await run(request);
+  } finally {
+    clearTimeout(timer);
+    child.kill();
+  }
+}
+
+function queuedRequestId(texts) {
+  return texts.join("\n").match(/\[tfx-live req=([^\]\s]+)\]/)?.[1] ?? null;
+}
+
+// TUI 가 가져가기 전의 항목만 보인다. 가져간 뒤의 처리 여부는 wait 가 rollout 으로 본다.
+export function listCodexQueue(threadId, options = {}) {
+  return withCodexAppServer(async (request) => {
+    const items = [];
+    let cursor = null;
+    do {
+      const page = await request("thread/queue/list", { threadId, cursor });
+      for (const item of page?.data ?? []) {
+        const texts = (item.input ?? []).map((part) => part.text ?? "");
+        items.push({
+          id: item.id,
+          requestId: queuedRequestId(texts),
+          text: texts.join("\n"),
+        });
+      }
+      cursor = page?.nextCursor ?? null;
+    } while (cursor);
+    return items;
+  }, options);
+}
+
+// 지우기 전에 TUI 가 가져간 항목은 deleted: false 라 missing 으로 돌려준다.
+export function deleteCodexQueueItems(threadId, ids, options = {}) {
+  return withCodexAppServer(async (request) => {
+    const deleted = [];
+    const missing = [];
+    for (const id of ids) {
+      const result = await request("thread/queue/delete", {
+        threadId,
+        queuedSubmissionId: id,
+      });
+      (result?.deleted === true ? deleted : missing).push(id);
+    }
+    return { deleted, missing };
+  }, options);
 }
 
 function userTexts(entry) {

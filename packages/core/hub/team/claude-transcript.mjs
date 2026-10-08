@@ -157,6 +157,25 @@ function acceptLine(state, line, marker) {
   }
 }
 
+// daemon 과 tmux wait 가 같은 기준으로 끝을 판정한다. 아직이면 null.
+export function claudeWaitVerdict(transcript, idle) {
+  if (transcript?.error)
+    return { ok: false, status: "failed", error: transcript.error };
+  if (
+    !transcript?.userSeen ||
+    !transcript.turnEnded ||
+    !(idle || transcript.sectionClosed)
+  )
+    return null;
+  if (!transcript.response.trim())
+    return {
+      ok: false,
+      status: "failed",
+      error: "turn ended without assistant text",
+    };
+  return { status: "completed", done: true };
+}
+
 export async function readClaudeTranscript(transcriptPath, { requestId } = {}) {
   if (!transcriptPath) return null;
   const marker = requestId ? `[tfx-live req=${requestId}]` : null;

@@ -2861,6 +2861,76 @@ test("Claude list-sessions CLI reads the overridden registry and uses pane cwd",
   }
 });
 
+test("Claude tmux wait reads the pane transcript and waits for the idle record", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-tmux-wait-"));
+  try {
+    const sessionsDir = path.join(dir, "sessions");
+    const configDir = path.join(dir, "claude");
+    const projectDir = path.join(configDir, "projects", "p");
+    await fs.mkdir(sessionsDir);
+    await fs.mkdir(projectDir, { recursive: true });
+    const record = (status) =>
+      fs.writeFile(
+        path.join(sessionsDir, `${process.pid}.json`),
+        JSON.stringify({
+          pid: process.pid,
+          sessionId: "abcdef12-tmux",
+          tmux: "cl1:@4.%17",
+          status,
+        }),
+      );
+    await fs.writeFile(
+      path.join(projectDir, "abcdef12-tmux.jsonl"),
+      [
+        {
+          type: "user",
+          message: { content: "[tfx-live req=r1] 보고해줘" },
+        },
+        {
+          type: "assistant",
+          message: {
+            content: [{ type: "text", text: "끝났다" }],
+            stop_reason: "end_turn",
+          },
+        },
+      ]
+        .map((entry) => JSON.stringify(entry))
+        .join("\n"),
+    );
+    await fs.writeFile(
+      path.join(dir, "tmux"),
+      [
+        "#!/usr/bin/env node",
+        "if (process.argv.includes('display-message')) console.log('%17');",
+        `else console.log(${JSON.stringify(`cl1\t0\t0\t0\t0\t${dir}\tclaude\tclaude\t/dev/ttys1\t${process.pid}\t%17`)});`,
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const env = {
+      HOME: dir,
+      CLAUDE_CONFIG_DIR: configDir,
+      TFX_CLAUDE_SESSIONS_DIR: sessionsDir,
+      PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+    };
+    const args = ["wait", "--cli", "claude", "--session", "cl1"];
+    const waitArgs = [...args, "--request-id", "r1", "--timeout", "1"];
+
+    await record("busy");
+    const busy = JSON.parse(await runTfxLive(waitArgs, { env }));
+    assert.equal(busy.status, "working");
+    assert.equal(busy.timedOut, true);
+
+    await record("idle");
+    const done = JSON.parse(await runTfxLive(waitArgs, { env }));
+    assert.equal(done.status, "completed");
+    assert.equal(done.done, true);
+    assert.equal(done.response, "끝났다");
+    assert.equal(done.target.sessionId, "abcdef12-tmux");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 const claudeTitleFixtures = [
   {
     label: "derived names use the latest trimmed custom title",

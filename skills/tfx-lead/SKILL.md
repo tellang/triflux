@@ -84,6 +84,7 @@ tfx-live ask --cli codex --session cx-impl --prompt "<지시서 경로>를 읽�
 - Codex 에 슬래시 명령(`/compact`, `/rename`, `/new`)을 보낼 때만 tmux 직접 입력을 쓴다. queue 로 보내면 일반 텍스트가 된다.
 - 원격 호스트나 thread 를 못 찾는 경우의 tmux 폴백은 결과의 `fallbackReason`으로 확인한다.
 - 같은 cwd 에 Codex TUI 가 여럿이면 `--thread UUID`를 명시한다.
+- 잘못 보낸 queue 요청은 TUI 가 가져가기 전에만 `tfx-live queue --cli codex --session <이름> --request-id <id> --delete all`로 지운다. 결과의 `missing`은 이미 배달된 것이다.
 
 ## 4. 지시 전달
 
@@ -109,8 +110,7 @@ tfx-live ask --cli codex --session cx-impl --prompt "<지시서 경로>를 읽�
 | Claude 백그라운드(daemon) 세션 | `tfx-live wait --cli claude --short <8hex> --request-id <id>` (로컬 UDS 만, `--session`은 받지 않는다) |
 | Codex 세션 | `tfx-live wait --cli codex --session <tmux 이름> --request-id <id>` 또는 `--thread <UUID>` |
 | tmux 로 띄운 대화형 Claude 세션, Claude 리드 | 그 세션이 지시서의 보고 규칙에 따라 `SendMessage`로 보고한다 |
-| `tfx multi` headless 실행 | 백그라운드 작업 알림 뒤 `$TMPDIR/tfx-headless/<세션>.results.json` 의 `completed` 와 워커별 `status`, `exitCode` 를 읽는다. 완료 마커 문자열은 해석하지 않는다 |
-| tmux 로 띄운 대화형 Claude 세션, Codex 리드 | 현재 `wait` 미지원. 지시서에 결과 파일 경로를 정해 두고 그 파일의 생성을 백그라운드 셸로 감시한다 |
+| tmux 로 띄운 대화형 Claude 세션, Codex 리드 | `tfx-live wait --cli claude --session <tmux 이름> --request-id <id>` (로컬만) |
 
 ```bash
 tfx-live ask --cli claude --transport uds --short <8hex> --prompt "<지시서 경로>" --no-wait

@@ -22,14 +22,17 @@ import {
 import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
 import { exposeLiveSession } from "../hub/team/agents-row.mjs";
 import {
+  claudeWaitVerdict,
   findClaudeTranscript,
   readClaudeTranscript,
 } from "../hub/team/claude-transcript.mjs";
 import {
   codexThreadIdByName,
   countCodexTuiInCwd,
+  deleteCodexQueueItems,
   findCodexThreadByCwd,
   isCodexThreadId,
+  listCodexQueue,
   queueCodexMessage,
   resolveSenderName,
   waitCodexRequest,
@@ -94,8 +97,10 @@ function usage(command) {
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
     "    ask options: --no-wait --no-relay-tag --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 15/22).",
     "  tfx-live compact --cli claude --session NAME [--instructions TEXT] [--if-busy fail|wait] [--timeout 60]",
-    "  tfx-live wait --cli claude (--short SHORT | --session-id ID) [--request-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 60] [--poll-interval 1500]",
+    "  tfx-live wait --cli claude (--short SHORT | --session-id ID | --session NAME[:WINDOW.PANE]) [--request-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 60] [--poll-interval 1500]",
     "  tfx-live wait --cli codex (--session NAME[:WINDOW.PANE] | --thread UUID) --request-id ID [--timeout 60] [--poll-interval 1500]",
+    "  tfx-live queue --cli codex (--session NAME[:WINDOW.PANE] | --thread UUID) [--request-id ID] [--delete QUEUED_ID|all]",
+    "    queue lists or deletes items the TUI has not picked up yet (official app-server thread/queue API); missing means already delivered or gone.",
     "  tfx-live rename --cli codex --transport uds --thread ID --name NAME [--codex-socket PATH|default]",
     "    transport: auto is the default for Claude when --short/--session-id is present; otherwise tmux. bridge path: --bridge > $TFX_BRIDGE > $TFX_REPO_ROOT/hub/bridge.mjs > bundled Triflux hub/bridge.mjs.",
     "  tfx-live interrupt --session NAME [--cli codex|claude] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 5]",
@@ -3272,19 +3277,24 @@ async function ask(flags) {
   printJson(await doAsk(adapter, askOpts(flags, adapter)));
 }
 
+async function codexThreadFromFlags(flags) {
+  if (flags.thread) {
+    if (!isCodexThreadId(flags.thread))
+      throw new Error("--thread must be a Codex session UUID");
+    return { threadId: flags.thread, threadSource: "flag" };
+  }
+  const thread = await resolveCodexTmuxThread(
+    splitTmuxTarget(requireFlag(flags, "session")).target,
+  );
+  if (!thread.threadId)
+    throw new Error(`Codex thread unavailable: ${thread.reason}`);
+  return thread;
+}
+
 async function waitCodex(flags) {
   if (flags.remote) throw new Error("Codex wait supports local sessions only");
   const requestId = requireFlag(flags, "request-id");
-  let thread = { threadId: flags.thread, threadSource: "flag" };
-  if (flags.thread && !isCodexThreadId(flags.thread))
-    throw new Error("--thread must be a Codex session UUID");
-  if (!flags.thread) {
-    thread = await resolveCodexTmuxThread(
-      splitTmuxTarget(requireFlag(flags, "session")).target,
-    );
-    if (!thread.threadId)
-      throw new Error(`Codex thread unavailable: ${thread.reason}`);
-  }
+  const thread = await codexThreadFromFlags(flags);
   printJson({
     ...(await waitCodexRequest({
       threadId: thread.threadId,
@@ -3296,12 +3306,74 @@ async function waitCodex(flags) {
   });
 }
 
+// tmux 대화형 Claude 는 daemon 이 없어 pane 의 세션 레코드 status 와 transcript 로 판정한다.
+async function waitClaudeTmux(flags) {
+  if (flags.remote)
+    throw new Error("Claude tmux wait supports local sessions only");
+  const session = splitTmuxTarget(flags.session).target;
+  const requestId = flags["request-id"] ?? null;
+  const timeoutMs = secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS);
+  const pollIntervalMs = msFlag(
+    flags,
+    "poll-interval",
+    DEFAULT_POLL_INTERVAL_MS,
+  );
+  const deadline = Date.now() + timeoutMs;
+  let transcriptPath = null;
+  for (;;) {
+    const target = await claudeTmuxTarget(session);
+    if (!target)
+      throw new Error(`no live Claude session in tmux target ${session}`);
+    // 처음 찾은 transcript 를 고정해 /clear 로 바뀐 세션을 따라가지 않는다.
+    transcriptPath ??= await claudeTmuxTranscript(
+      session,
+      flags["config-dir"],
+      target,
+    );
+    const transcript = await readClaudeTranscript(transcriptPath, {
+      requestId,
+    });
+    const result = {
+      ok: true,
+      status: transcript?.userSeen ? "working" : "submitted",
+      done: false,
+      timedOut: false,
+      response: transcript?.response || "",
+      ...(transcript?.context ?? modelContext("claude", null)),
+      requestId,
+      target,
+    };
+    const verdict = claudeWaitVerdict(transcript, target.status === "idle");
+    if (verdict) return { ...result, ...verdict };
+    if (Date.now() >= deadline) return { ...result, timedOut: true };
+    await sleep(Math.min(pollIntervalMs, deadline - Date.now()));
+  }
+}
+
+// 배달 전 항목은 공식 app-server 큐 API 로만 보고 지운다. 큐 저장소 파일은 건드리지 않는다.
+async function queue(flags) {
+  if ((flags.cli ?? "codex") !== "codex" || flags.remote)
+    throw new Error("queue supports local --cli codex only");
+  const { threadId, threadSource } = await codexThreadFromFlags(flags);
+  const requestId = flags["request-id"];
+  const items = (await listCodexQueue(threadId)).filter(
+    (item) => !requestId || item.requestId === requestId,
+  );
+  const result = { ok: true, cli: "codex", threadId, threadSource };
+  if (!flags.delete) return printJson({ ...result, items });
+  const ids =
+    flags.delete === "all" ? items.map((item) => item.id) : [flags.delete];
+  printJson({ ...result, ...(await deleteCodexQueueItems(threadId, ids)) });
+}
+
 async function wait(flags) {
   if (flags.cli === "codex") return waitCodex(flags);
   if ((flags.cli ?? "claude") !== "claude")
     throw new Error("wait supports --cli claude or codex");
+  if (flags.session && !flags.short && !flags["session-id"])
+    return printJson(await waitClaudeTmux(flags));
   if (!flags.short && !flags["session-id"])
-    throw new Error("wait requires --short or --session-id");
+    throw new Error("wait requires --short, --session-id or --session");
   if (flags.remote || (flags.transport && flags.transport !== "uds"))
     throw new Error("wait supports local Claude UDS only");
   const timeoutMs = secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS);
@@ -3354,7 +3426,7 @@ async function stop(flags) {
   printJson(await doStop(adapter, stopOpts(flags)));
 }
 
-async function claudeTmuxTranscript(session, configDir) {
+async function claudeTmuxTarget(session) {
   const { stdout: paneId } = await runTmux(null, [
     "display-message",
     "-p",
@@ -3363,9 +3435,13 @@ async function claudeTmuxTranscript(session, configDir) {
     "#{pane_id}",
   ]);
   const discovery = await discoverClaudeTmuxSessions();
-  const target = discovery.sessions.find(
-    (entry) => entry.paneId === paneId.trim(),
+  return (
+    discovery.sessions.find((entry) => entry.paneId === paneId.trim()) ?? null
   );
+}
+
+async function claudeTmuxTranscript(session, configDir, target) {
+  target ??= await claudeTmuxTarget(session);
   return findClaudeTranscript({
     configDir:
       configDir ||
@@ -4389,6 +4465,8 @@ async function main() {
     await ask(flags);
   } else if (command === "wait") {
     await wait(flags);
+  } else if (command === "queue") {
+    await queue(flags);
   } else if (command === "compact") {
     await compact(flags);
   } else if (command === "rename") {
