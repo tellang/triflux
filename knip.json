@@ -4,36 +4,35 @@
     ".": {
       "entry": [
         "bin/*.mjs",
-        "scripts/*.mjs",
-        "hub/**/*.mjs",
-        "hud/**/*.mjs",
-        "hooks/**/*.mjs"
+        "hub/bridge.mjs",
+        "scripts/preflight-cache.mjs",
+        "scripts/tfx-route-worker.mjs",
+        "scripts/tfx-route-post.mjs",
+        "scripts/codex-profile-sanitize.mjs",
+        "scripts/lib/agent-route-policy.mjs",
+        "scripts/lib/cli-claude.mjs",
+        "scripts/lib/codex-profile-config.mjs",
+        "scripts/lib/gemini-profiles.mjs",
+        "scripts/lib/mcp-filter.mjs",
+        "scripts/lib/mcp-health.mjs",
+        "hooks/codex-session-hook.mjs",
+        "hooks/agy-session-hook.mjs",
+        "hud/hud-qos-status.mjs",
+        "hub/team/cli/index.mjs",
+        "hub/team/cli/help.mjs",
+        "hub/team/tui-viewer.mjs",
+        "scripts/config-audit.mjs",
+        "scripts/wt-cli.mjs"
       ],
       "project": [
         "bin/**/*.mjs",
-        "scripts/**/*.mjs",
+        "scripts/**/*.{mjs,cjs}",
         "hub/**/*.mjs",
         "hooks/**/*.mjs",
         "hud/**/*.mjs"
       ]
-    },
-    "packages/core": {
-      "entry": ["hub/**/*.mjs", "hud/**/*.mjs"],
-      "project": ["hub/**/*.mjs", "hud/**/*.mjs"]
-    },
-    "packages/remote": {
-      "entry": ["hub/**/*.mjs", "scripts/*.mjs"],
-      "project": ["hub/**/*.mjs", "scripts/**/*.mjs"]
-    },
-    "packages/triflux": {
-      "entry": ["bin/*.mjs", "scripts/*.mjs", "hub/**/*.mjs", "hooks/**/*.mjs"],
-      "project": [
-        "bin/**/*.mjs",
-        "scripts/**/*.mjs",
-        "hub/**/*.mjs",
-        "hooks/**/*.mjs"
-      ]
     }
   },
-  "ignore": ["tests/**", "skills/**"]
+  "ignoreWorkspaces": ["packages/*"],
+  "ignore": ["tests/**", "skills/**", "mods/**", "**/__tests__/**"]
 }
