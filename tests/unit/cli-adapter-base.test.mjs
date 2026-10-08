@@ -124,12 +124,18 @@ function createRunProcessHarness() {
 
 async function withActivityLifecycle(fn) {
   const previous = process.env.TFX_ACTIVITY_LIFECYCLE;
+  const previousProfile = process.env.TFX_MACHINE_PROFILE_PATH;
   process.env.TFX_ACTIVITY_LIFECYCLE = "1";
+  // 기기의 machine profile 이 stall 정책을 바꾸지 않게 한다.
+  process.env.TFX_MACHINE_PROFILE_PATH = "/nonexistent/profile.env";
   try {
     await fn();
   } finally {
     if (previous === undefined) delete process.env.TFX_ACTIVITY_LIFECYCLE;
     else process.env.TFX_ACTIVITY_LIFECYCLE = previous;
+    if (previousProfile === undefined)
+      delete process.env.TFX_MACHINE_PROFILE_PATH;
+    else process.env.TFX_MACHINE_PROFILE_PATH = previousProfile;
   }
 }
 

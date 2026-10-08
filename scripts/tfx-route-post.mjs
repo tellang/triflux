@@ -292,7 +292,29 @@ function recordBatchEvent(result, agent) {
 }
 
 // ── CLI 이슈 추적 ──
+// Codex 는 배너, 설정, 프롬프트 에코, 명령 출력을 stderr 로 낸다. 그 안의 "error:" 줄은
+// 지시문이나 읽은 파일 내용일 수 있다. 성공 실행은 Codex 자체 tracing 줄만, 실패 실행은
+// 오류 형태 줄과 transport 크래시 줄까지 검사한다.
+const CODEX_TRANSPORT_CRASH = /Transport channel closed|rmcp::transport/i;
+
+function issueDiagnostics(stderrContent, cliType, exitCode) {
+  if (cliType !== "codex" || !stderrContent) return stderrContent;
+  const lines = stderrContent.split("\n").map((line) => line.trim());
+  if (!lines.some((line) => /^OpenAI Codex v/.test(line))) return stderrContent;
+  return lines
+    .filter(
+      (line) =>
+        CODEX_TRACING_DIAGNOSTIC.test(line) ||
+        (exitCode !== 0 &&
+          (CODEX_PLAIN_DIAGNOSTIC.test(line) ||
+            CODEX_TRANSPORT_CRASH.test(line))),
+    )
+    .join("\n");
+}
+
+// stderrText 는 issueDiagnostics 를 거친 진단 줄이다.
 function trackCliIssue(cliType, agent, stderrText, exitCode) {
+  const issuesFile = join(CACHE_DIR, "cli-issues.jsonl");
   if (!stderrText && exitCode === 0) return;
 
   const patterns = [
@@ -312,7 +334,7 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
       severity: "warn",
     },
     {
-      regex: /rate.limit|429|too many requests/i,
+      regex: /rate.?limit|\b429\b|too many requests/i,
       pattern: "rate_limit",
       msg: "API rate limit exceeded",
       severity: "warn",
@@ -330,7 +352,7 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
       severity: "warn",
     },
     {
-      regex: /API_KEY.*not.set|auth.*fail|unauthorized|401/i,
+      regex: /API_KEY.*not.set|auth.*fail|unauthorized|\b401\b/i,
       pattern: "auth_error",
       msg: "Authentication failed",
       severity: "error",
@@ -368,7 +390,6 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
 
   if (!matched) return;
 
-  const issuesFile = join(CACHE_DIR, "cli-issues.jsonl");
   try {
     mkdirSync(CACHE_DIR, { recursive: true });
 
@@ -499,7 +520,12 @@ function main() {
   recordBatchEvent(aimdResult, agent);
 
   // 6. CLI 이슈 추적
-  trackCliIssue(cliType, agent, stderrContent, exitCode);
+  trackCliIssue(
+    cliType,
+    agent,
+    issueDiagnostics(stderrContent, cliType, exitCode),
+    exitCode,
+  );
 
   // 7. 구조화된 결과 출력
   console.log("=== TFX-ROUTE RESULT ===");

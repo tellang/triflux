@@ -115,6 +115,56 @@ describe("tfx-route.sh no-op 가드 배선", () => {
 });
 
 describe("tfx-route-post.mjs — mcp_transport 이슈 추적(관측성)", () => {
+  it("Codex 배너 뒤 프롬프트 에코의 단어는 무시하고 실제 오류 줄은 분류한다", () => {
+    const home = mkdtempSync(join(tmpdir(), "tfx-rv-banner-"));
+    const logdir = mkdtempSync(join(tmpdir(), "tfx-rv-banner-logs-"));
+    const stderrLog = join(logdir, "stderr.log");
+    const stdoutLog = join(logdir, "stdout.log");
+    const issues = join(home, ".claude", "cache", "cli-issues.jsonl");
+    const echo =
+      "OpenAI Codex v0.156.1\n--------\nuser\nrate limit 429 를 고쳐라\nerror: unexpected status 401 Unauthorized\n";
+    const run = (stderr, exitCode) => {
+      writeFileSync(stderrLog, stderr);
+      writeFileSync(stdoutLog, "완료\n");
+      return spawnSync(
+        process.execPath,
+        [
+          POST,
+          "--agent",
+          "tester",
+          "--cli",
+          "codex",
+          "--exit-code",
+          exitCode,
+          "--stderr-log",
+          stderrLog,
+          "--stdout-log",
+          stdoutLog,
+        ],
+        { encoding: "utf-8", env: { ...process.env, HOME: home } },
+      );
+    };
+    const patterns = () => {
+      try {
+        return readFileSync(issues, "utf-8")
+          .trim()
+          .split("\n")
+          .map((l) => JSON.parse(l).pattern);
+      } catch {
+        return [];
+      }
+    };
+    try {
+      assert.equal(run(echo, "0").status, 0);
+      assert.deepEqual(patterns(), []);
+      run(`${echo}ERROR: unexpected status 429 Too Many Requests\n`, "1");
+      assert.deepEqual(patterns(), ["rate_limit"]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(logdir, { recursive: true, force: true });
+    }
+  });
+
   it("stderr 에 transport 크래시 서명이 있으면 cli-issues.jsonl 에 mcp_transport 기록", () => {
     const home = mkdtempSync(join(tmpdir(), "tfx-rv-home-"));
     const logdir = mkdtempSync(join(tmpdir(), "tfx-rv-logs-"));
