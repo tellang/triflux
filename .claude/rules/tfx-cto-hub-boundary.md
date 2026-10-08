@@ -4,12 +4,12 @@ paths:
   - "hub/**/*"
   - "hooks/**/*"
   - "tests/cto/**/*"
-  - "docs/adr/0010-*.md"
+  - "docs/_archive/adr/0010-*.md"
   - "docs/adr/0024-*.md"
 ---
 # CTO lake 경계 규칙
 
-> 근거(why): [ADR-0023: 허브 제거](../../docs/adr/0023-remove-command-hooks-hub-and-adopt-mods.md), [ADR-0024: CTO 조회 축소](../../docs/adr/0024-cto-explicit-queries-only.md). 허브가 있던 시기의 평면 구분은 [ADR-0010](../../docs/adr/0010-cto-lake-hub-role-boundary.md)에 남아 있다. 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
+> 근거(why): [ADR-0023: 허브 제거](../../docs/adr/0023-remove-command-hooks-hub-and-adopt-mods.md), [ADR-0024: CTO 조회 축소](../../docs/adr/0024-cto-explicit-queries-only.md). 허브가 있던 시기의 평면 구분은 [ADR-0010](../../docs/_archive/adr/0010-cto-lake-hub-role-boundary.md)에 남아 있다. 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
 
 ## 데이터 평면
 

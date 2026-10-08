@@ -1,11 +1,11 @@
 ---
 id: 0010
 title: CTO lake ↔ Hub role 경계 — liveness/history 평면 분리
-status: accepted
+status: superseded
 date: 2026-07-07
 deciders: [tellang]
 supersedes: []
-superseded_by: null
+superseded_by: 0023
 relates: [0005, 0007]
 pr: null
 ---

@@ -1,7 +1,7 @@
 ---
 id: 0007
 title: hub 기본 포트를 27888로 고정한다
-status: accepted
+status: deprecated
 date: 2026-04-17
 deciders: [tellang]
 supersedes: []

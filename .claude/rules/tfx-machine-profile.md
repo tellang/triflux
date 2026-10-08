@@ -75,7 +75,7 @@ node scripts/setup.mjs --machine-profile-only --non-interactive
 | ---: | --- | --- |
 | 1 | 명시 runtime env (`TFX_DISABLE_*`, `TFX_HARD_CEILING_SEC`, `TFX_STALL_*`) | 이번 실행의 최종 사용자 override |
 | 2 | 영속 machine profile | 설치 시 확인한 머신 정책 |
-| 3 | preflight (`TFX_CODEX_OK`, `TFX_ANTIGRAVITY_OK`, `TFX_GEMINI_OK`, `TFX_HUB_OK`) | 현재 가용성 관측; `OK=0`인 CLI는 binary가 있어도 선택 불가, 금지 권한도 되살릴 수 없음 |
+| 3 | preflight (`TFX_CODEX_OK`, `TFX_ANTIGRAVITY_OK`, `TFX_GEMINI_OK`) | 현재 가용성 관측; `OK=0`인 CLI는 binary가 있어도 선택 불가, 금지 권한도 되살릴 수 없음 |
 | 4 | built-in default | 프로파일 미설정 시 기존 호환값 |
 
 `TFX_CLI_MODE`는 선호/강제 선택이고 `TFX_*_OK`는 관측값이라는 기존 구분을

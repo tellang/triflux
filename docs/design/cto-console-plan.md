@@ -47,7 +47,7 @@ Because host-local cache files may be shared by multiple checkouts, every collec
 
 ## Prompt Boundary
 
-`current.md` is available for people and agents to read directly as a direction summary. Route prompt injection was removed on 2026-10-08. The earlier opt-in design is recorded in [ADR-0018](../adr/0018-cto-auto-behaviors-opt-in.md).
+`current.md` is available for people and agents to read directly as a direction summary. Route prompt injection was removed on 2026-10-08. The earlier opt-in design is recorded in [ADR-0018](../_archive/adr/0018-cto-auto-behaviors-opt-in.md).
 
 ## Commands
 

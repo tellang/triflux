@@ -1,11 +1,11 @@
 ---
 id: 0018
 title: CTO 자동 동작을 명시적으로 켜야 실행한다
-status: proposed
+status: superseded
 date: 2026-09-24
 deciders: [tellang]
 supersedes: []
-superseded_by: null
+superseded_by: 0023
 relates: [0010, 0011]
 pr: null
 ---

@@ -175,7 +175,7 @@ Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-s
 **CTO lake.** `tfx cto collect`로 `.triflux/lake/`의 저장소 스냅샷을 갱신하고,
 `tfx cto status`로 생성 시각과 경과 시간을 확인한다. `tfx cto hygiene --dry-run`는 dry-run 결과를
 보고한다. 트레이와 쓰이지 않는 CTO 운영 명령은 제거하였다
-([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)). 자동 수집은 기본으로 꺼져 있고 `TFX_CTO_AUTO_COLLECT=1` 로 켠다([ADR-0018](docs/adr/0018-cto-auto-behaviors-opt-in.md)).
+([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)). 자동 수집은 기본으로 꺼져 있고 `TFX_CTO_AUTO_COLLECT=1` 로 켠다([ADR-0018](docs/_archive/adr/0018-cto-auto-behaviors-opt-in.md)).
 
 **원격 호스트.** `/tfx-remote`는 `~/.config/triflux/hosts.json`
 (Windows는 `%APPDATA%\triflux\hosts.json`)에서 호스트를 읽는다. 세션 시작은

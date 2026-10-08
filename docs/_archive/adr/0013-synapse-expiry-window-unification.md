@@ -1,7 +1,7 @@
 ---
 id: 0013
 title: synapse 만료 창 단일화
-status: proposed
+status: deprecated
 date: 2026-09-15
 deciders: [tellang]
 supersedes: []

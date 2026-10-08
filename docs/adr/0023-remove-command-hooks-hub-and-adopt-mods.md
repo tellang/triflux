@@ -4,7 +4,7 @@ title: command hook, 키워드 라우팅, MCP gateway, synapse, 허브를 걷어
 status: proposed
 date: 2026-10-08
 deciders: [tellang]
-supersedes: [0021]
+supersedes: [0010, 0018, 0021]
 superseded_by: null
 relates: [0007, 0010, 0013, 0018, 0020, 0022]
 pr: null
