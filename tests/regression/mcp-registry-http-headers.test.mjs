@@ -100,7 +100,7 @@ describe("tfx mcp HTTP headers regression", () => {
     const projectConfig = JSON.parse(
       readFileSync(join(project, ".mcp.json"), "utf8"),
     );
-    assert.deepEqual(projectConfig.mcpServers["sample"], {
+    assert.deepEqual(projectConfig.mcpServers.sample, {
       type: "http",
       url: "https://mcp.example.com/mcp",
     });
@@ -141,9 +141,8 @@ describe("tfx mcp HTTP headers regression", () => {
       '[mcp_servers.sample]\nurl = "https://mcp.example.com/mcp"\n',
     );
     assert.deepEqual(
-      JSON.parse(readFileSync(join(project, ".mcp.json"), "utf8")).mcpServers[
-        "sample"
-      ],
+      JSON.parse(readFileSync(join(project, ".mcp.json"), "utf8")).mcpServers
+        .sample,
       {
         type: "http",
         url: "https://mcp.example.com/mcp",
@@ -230,7 +229,7 @@ describe("tfx mcp HTTP headers regression", () => {
       readFileSync(join(alpha, ".mcp.json"), "utf8"),
     );
     assert.equal(alphaConfig.custom, true);
-    assert.deepEqual(alphaConfig.mcpServers["sample"], {
+    assert.deepEqual(alphaConfig.mcpServers.sample, {
       type: "http",
       url: "https://mcp.example.com/mcp",
     });
@@ -239,7 +238,7 @@ describe("tfx mcp HTTP headers regression", () => {
       readFileSync(join(beta, ".claude", "mcp.json"), "utf8"),
     );
     assert.equal(betaConfig.other, "keep");
-    assert.deepEqual(betaConfig.mcpServers["sample"], {
+    assert.deepEqual(betaConfig.mcpServers.sample, {
       type: "http",
       url: "https://mcp.example.com/mcp",
     });

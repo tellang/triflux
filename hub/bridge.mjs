@@ -131,7 +131,9 @@ async function cmdTeamTaskUpdate(args) {
       subject: args.subject,
       description: args.description,
       activeForm: args["active-form"],
-      add_blocks: args["add-blocks"] ? splitList(args["add-blocks"]) : undefined,
+      add_blocks: args["add-blocks"]
+        ? splitList(args["add-blocks"])
+        : undefined,
       add_blocked_by: args["add-blocked-by"]
         ? splitList(args["add-blocked-by"])
         : undefined,

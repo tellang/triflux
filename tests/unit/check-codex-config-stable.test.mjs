@@ -172,9 +172,7 @@ describe("#193 describeChange", () => {
 
   it("classifies mcp server mutation as sha-changed + hooksStateOnly=false", () => {
     const before = snapshot(`${MCP_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`);
-    const after = snapshot(
-      `${MCP_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_BEFORE}`,
-    );
+    const after = snapshot(`${MCP_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_BEFORE}`);
     const change = describeChange(before, after);
     assert.ok(change !== null, "expected change");
     assert.equal(change.kind, "sha-changed");
@@ -184,9 +182,7 @@ describe("#193 describeChange", () => {
 
   it("rejects whitelist when hooks.state churn is mixed with other section drift", () => {
     const before = snapshot(`${MCP_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`);
-    const after = snapshot(
-      `${MCP_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_AFTER}`,
-    );
+    const after = snapshot(`${MCP_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_AFTER}`);
     const change = describeChange(before, after);
     assert.ok(change !== null, "expected change");
     assert.equal(change.kind, "sha-changed");
