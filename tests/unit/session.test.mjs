@@ -176,7 +176,7 @@ describe("session.mjs wt-manager migration", () => {
 });
 
 describe("session.mjs tmux argv 호출", () => {
-  it("작은따옴표, 세미콜론, $ 가 든 세션 이름을 셸 없이 그대로 넘긴다", async (t) => {
+  it("작은따옴표, 세미콜론, 공백이 든 세션 이름을 셸 없이 그대로 넘긴다", async (t) => {
     if (process.platform === "win32") return t.skip("tmux 전용");
     const { execFileSync } = await import("node:child_process");
     const { mkdtempSync, rmSync } = await import("node:fs");
@@ -193,7 +193,8 @@ describe("session.mjs tmux argv 호출", () => {
     };
     delete process.env.TMUX;
     process.env.TMUX_TMPDIR = sockDir;
-    const name = "tfx671 it's;$HOME";
+    // tmux 3.4 는 이름의 $ 를 \$ 로 바꿔 저장하므로 $ 는 넣지 않는다.
+    const name = "tfx671 it's;x";
     try {
       execFileSync("tmux", ["new-session", "-d", "-s", name, "sleep 30"]);
       assert.equal(sessionExists(name), true);
