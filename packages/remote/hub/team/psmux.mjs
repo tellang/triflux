@@ -136,7 +136,7 @@ function sleepMsAsync(ms) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
 }
 
-function tokenizeCommand(command) {
+export function tokenizeCommand(command) {
   const source = String(command || "").trim();
   if (!source) return [];
 

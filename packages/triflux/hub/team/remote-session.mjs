@@ -33,6 +33,17 @@ export function escapePwshDoubleQuoted(value) {
   return String(value).replace(/[`$"\u201C\u201D\u201E]/g, "`$&");
 }
 
+// ssh 는 원격 명령 인자를 공백으로 이어 원격 셸에 다시 넘긴다. 스크립트는 인용한 문자열 하나로 만든다.
+export function posixRemoteCommand(script) {
+  return `sh -lc ${shellQuote(script)}`;
+}
+
+// pwsh 스크립트는 base64 로 넘겨 원격 기본 셸(cmd 나 pwsh)이 따옴표와 파이프를 해석하지 않게 한다.
+export function pwshRemoteCommand(script) {
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  return `pwsh -NoProfile -EncodedCommand ${encoded}`;
+}
+
 function normalizeCommandPath(value) {
   return String(value).replace(/\\/g, "/");
 }
@@ -151,7 +162,7 @@ function probeRemoteEnvViaPosix(host) {
 // ── Cache ───────────────────────────────────────────────────────
 
 // cwd 의 .omc 에 두면 실행한 저장소마다 원격 홈 경로가 흩어져 남는다. 사용자 상태 경로에 둔다.
-export function remoteEnvCacheDir(env = process.env) {
+export function tfxStateDir(env = process.env) {
   // XDG 명세대로 상대 경로는 무시한다. 받아들이면 캐시가 다시 cwd 아래로 간다.
   const xdgState = isAbsolute(env.XDG_STATE_HOME || "")
     ? env.XDG_STATE_HOME
@@ -161,7 +172,11 @@ export function remoteEnvCacheDir(env = process.env) {
     (process.platform === "win32"
       ? env.LOCALAPPDATA || join(homedir(), "AppData", "Local")
       : join(homedir(), ".local", "state"));
-  return join(stateRoot, "triflux", "remote-env");
+  return join(stateRoot, "triflux");
+}
+
+export function remoteEnvCacheDir(env = process.env) {
+  return join(tfxStateDir(env), "remote-env");
 }
 
 function getEnvCachePath(host, cacheDir) {
@@ -282,26 +297,13 @@ export function resolveRemoteStageDir(env, stageId) {
  * @param {string} remoteStageDir
  */
 export function ensureRemoteStageDir(host, env, remoteStageDir) {
-  if (env.os === "win32") {
-    const safePath = escapePwshSingleQuoted(remoteStageDir);
-    execFileSync(
-      "ssh",
-      [
-        host,
-        "pwsh",
-        "-NoProfile",
-        "-Command",
-        `New-Item -ItemType Directory -Path '${safePath}' -Force | Out-Null`,
-      ],
-      { timeout: 10000, stdio: "pipe" },
-    );
-    return;
-  }
-  execFileSync(
-    "ssh",
-    [host, "sh", "-lc", `mkdir -p ${shellQuote(remoteStageDir)}`],
-    { timeout: 10000, stdio: "pipe" },
-  );
+  const command =
+    env.os === "win32"
+      ? pwshRemoteCommand(
+          `New-Item -ItemType Directory -Path '${escapePwshSingleQuoted(remoteStageDir)}' -Force | Out-Null`,
+        )
+      : posixRemoteCommand(`mkdir -p ${shellQuote(remoteStageDir)}`);
+  execFileSync("ssh", [host, command], { timeout: 10000, stdio: "pipe" });
 }
 
 /**
@@ -358,29 +360,21 @@ export function stageRemotePromptFiles(host, env, transferCandidates, stageId) {
  * @returns {string} stdout
  */
 export function remoteGit(host, env, gitArgs, cwd) {
-  const gitCmd = ["git", ...gitArgs].map((a) => shellQuote(a)).join(" ");
-
-  if (env.os === "win32") {
-    const cdPath = escapePwshSingleQuoted(cwd);
-    const command = `Set-Location '${cdPath}'; ${gitCmd}`;
-    return execFileSync(
-      "ssh",
-      [host, "pwsh", "-NoProfile", "-Command", command],
-      {
-        encoding: "utf8",
-        timeout: 30_000,
-        stdio: ["pipe", "pipe", "pipe"],
-      },
-    ).trim();
-  }
-
-  return execFileSync(
-    "ssh",
-    [host, "sh", "-lc", `cd ${shellQuote(cwd)} && ${gitCmd}`],
-    {
-      encoding: "utf8",
-      timeout: 30_000,
-      stdio: ["pipe", "pipe", "pipe"],
-    },
-  ).trim();
+  const command =
+    env.os === "win32"
+      ? pwshRemoteCommand(
+          [
+            `Set-Location '${escapePwshSingleQuoted(cwd)}';`,
+            "git",
+            ...gitArgs.map((arg) => `'${escapePwshSingleQuoted(arg)}'`),
+          ].join(" "),
+        )
+      : posixRemoteCommand(
+          `cd ${shellQuote(cwd)} && ${["git", ...gitArgs].map(shellQuote).join(" ")}`,
+        );
+  return execFileSync("ssh", [host, command], {
+    encoding: "utf8",
+    timeout: 30_000,
+    stdio: ["pipe", "pipe", "pipe"],
+  }).trim();
 }

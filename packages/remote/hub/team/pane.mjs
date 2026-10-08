@@ -1,14 +1,10 @@
 // hub/team/pane.mjs — pane별 CLI 실행 + stdin 주입
 // 의존성: child_process, fs, os, path (Node.js 내장)만 사용
-import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { privateTmpDir } from "@triflux/core/hub/lib/private-tmp.mjs";
 import { psmuxExec } from "./psmux.mjs";
 import { detectMultiplexer, tmuxExec } from "./session.mjs";
-
-function quoteArg(value) {
-  return `"${String(value).replace(/"/g, '\\"')}"`;
-}
 
 function getPsmuxSessionName(target) {
   return String(target).split(":")[0]?.trim() || "";
@@ -105,7 +101,7 @@ function capturePaneText(target) {
           "",
       );
     }
-    return String(muxExec(`capture-pane -t ${target} -p`) ?? "");
+    return String(muxExec(["capture-pane", "-t", target, "-p"]) ?? "");
   } catch {
     return "";
   }
@@ -239,8 +235,7 @@ export function injectPrompt(
   prompt,
   { useFileRef = false, cli = null } = {},
 ) {
-  const tmpDir = join(tmpdir(), "tfx-multi");
-  mkdirSync(tmpDir, { recursive: true });
+  const tmpDir = privateTmpDir("tfx-multi");
 
   const safeTarget = target.replace(/[:.]/g, "-");
   const tmpFile = join(tmpDir, `prompt-${safeTarget}-${Date.now()}.txt`);
@@ -294,10 +289,10 @@ export function injectPrompt(
 
     // tmux load-buffer → paste-buffer → (정착 지연 + 제출 확인) Enter
     waitForComposerReady(target);
-    muxExec(`load-buffer ${quoteArg(toMuxPath(tmpFile))}`);
-    muxExec(`paste-buffer -t ${target}`);
+    muxExec(["load-buffer", toMuxPath(tmpFile)]);
+    muxExec(["paste-buffer", "-t", target]);
     confirmSubmit(target, prompt, cli, () =>
-      muxExec(`send-keys -t ${target} Enter`),
+      muxExec(["send-keys", "-t", target, "Enter"]),
     );
   } finally {
     try {
@@ -312,5 +307,10 @@ export function injectPrompt(
  * @param {string} keys — tmux 키 표현 (예: 'C-c', 'Enter')
  */
 export function sendKeys(target, keys) {
-  muxExec(`send-keys -t ${target} ${keys}`);
+  muxExec([
+    "send-keys",
+    "-t",
+    target,
+    ...String(keys).split(/\s+/u).filter(Boolean),
+  ]);
 }

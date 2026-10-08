@@ -8,6 +8,8 @@ import {
   escapePwshDoubleQuoted,
   escapePwshSingleQuoted,
   isEnvCacheFresh,
+  posixRemoteCommand,
+  pwshRemoteCommand,
   remoteEnvCacheDir,
   resolveRemoteDir,
   resolveRemoteStageDir,
@@ -137,5 +139,33 @@ describe("remote-session: env cache", () => {
       isEnvCacheFresh({ cachedAt: now + 1000, env: {} }, now),
       false,
     );
+  });
+});
+
+describe("remote-session: ssh 원격 명령 조립", () => {
+  it("R-13: posix 스크립트는 원격 셸이 한 번 파싱해도 인자가 보존된다", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { existsSync, mkdtempSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = mkdtempSync(join(tmpdir(), "tfx670-"));
+    const target = join(root, "a b'c;$HOME");
+    try {
+      // ssh 가 원격에서 하는 일: 명령 문자열 하나를 사용자 셸이 다시 파싱한다.
+      execFileSync("sh", [
+        "-c",
+        posixRemoteCommand(`mkdir -p ${shellQuote(target)}`),
+      ]);
+      assert.equal(existsSync(target), true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("R-14: pwsh 스크립트는 UTF-16LE base64 로 감싼다", () => {
+    const script = "Set-Location 'C:\\a''b'; git 'status'";
+    const [, , flag, encoded] = pwshRemoteCommand(script).split(" ");
+    assert.equal(flag, "-EncodedCommand");
+    assert.equal(Buffer.from(encoded, "base64").toString("utf16le"), script);
   });
 });

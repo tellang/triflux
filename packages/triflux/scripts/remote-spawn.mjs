@@ -20,9 +20,10 @@ import {
   unlinkSync,
   writeFileSync,
 } from "fs";
-import { platform as getPlatform, homedir, tmpdir } from "os";
+import { platform as getPlatform, homedir } from "os";
 import {
   basename,
+  dirname,
   join,
   posix as posixPath,
   resolve,
@@ -30,6 +31,7 @@ import {
 } from "path";
 import { fileURLToPath } from "url";
 import { readHost, readHosts } from "../hub/lib/hosts-compat.mjs";
+import { privateTmpDir } from "../hub/lib/private-tmp.mjs";
 import { spawn } from "../hub/lib/spawn-trace.mjs";
 import {
   attachPsmuxSession,
@@ -46,7 +48,10 @@ import {
 } from "../hub/team/psmux.mjs";
 import {
   isEnvCacheFresh,
+  posixRemoteCommand,
+  pwshRemoteCommand,
   remoteEnvCacheDir,
+  tfxStateDir,
 } from "../hub/team/remote-session.mjs";
 
 const MAX_HANDOFF_BYTES = 1 * 1024 * 1024; // 1 MB
@@ -280,7 +285,8 @@ Options:
   --capture <name> 세션 pane 내용 캡처 출력
   --wait <name>    세션의 Claude 준비 완료 대기 (기본 60초)
   --monitor <name> 화면 상태 폴링 — stall/needs_input/trust 구조화 보고
-  --kill <name>    로컬 세션 종료 + 원격 claude daemon 정리 + readback
+  --kill <name>    로컬 세션 종료 + 그 세션의 원격 프로세스 정리 + readback
+  --stop-daemon    --kill 과 함께 원격 claude daemon 전체도 멈춤(다른 작업 포함)
   --auto-trust     trust 화면 감지 시 Enter 자동 응대 (기본 off)
   --no-attach      spawn 후 자동 attach 생략`;
 }
@@ -301,6 +307,7 @@ function parseArgs(argv) {
   let watchPollMs = null;
   let watchMaxMs = null;
   let autoTrust = false;
+  let stopDaemon = false;
   let attach = true;
   const promptParts = [];
 
@@ -317,6 +324,10 @@ function parseArgs(argv) {
     }
     if (arg === "--no-attach") {
       attach = false;
+      continue;
+    }
+    if (arg === "--stop-daemon") {
+      stopDaemon = true;
       continue;
     }
     if (arg === "--kill" && argv[index + 1]) {
@@ -439,6 +450,7 @@ function parseArgs(argv) {
     prompt: mergedPrompt,
     sessionName,
     spawnName,
+    stopDaemon,
     transferFiles,
     watchGraceMs,
     watchMaxMs,
@@ -677,7 +689,7 @@ async function spawnLocalFallback(args, claudePath, prompt) {
   if (prompt) {
     // 프롬프트를 명령줄에 넣지 않는다. 바깥 큰따옴표 층은 PowerShell 이스케이프로 못 막는다.
     const promptFile = join(
-      tmpdir(),
+      privateTmpDir("remote-spawn"),
       `tfx-prompt-${randomUUID().slice(0, 8)}.md`,
     );
     writeFileSync(promptFile, prompt, { encoding: "utf8", mode: 0o600 });
@@ -696,6 +708,19 @@ async function spawnLocalFallback(args, claudePath, prompt) {
   }
 }
 
+function detectWindowsRemoteHome(host) {
+  try {
+    const home = execFileSync(
+      "ssh",
+      [host, pwshRemoteCommand("Write-Output $env:USERPROFILE")],
+      { encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    return isWindowsAbsolutePath(home) ? home : null;
+  } catch {
+    return null;
+  }
+}
+
 async function spawnRemoteFallback(args, promptContext) {
   const { host } = args;
   if (!host) {
@@ -707,45 +732,28 @@ async function spawnRemoteFallback(args, promptContext) {
   const permFlags = getPermissionFlag();
   let prompt = promptContext.prompt;
 
-  let remoteHome;
-  try {
-    remoteHome = execFileSync("ssh", [host, "echo", "$env:USERPROFILE"], {
-      encoding: "utf8",
-      timeout: 5000,
-    }).trim();
-  } catch {
-    try {
-      remoteHome = execFileSync("ssh", [host, "echo", "$HOME"], {
-        encoding: "utf8",
-        timeout: 5000,
-      }).trim();
-    } catch {
-      // 원격 홈 감지 실패 시 transfer 기능을 사용할 수 없음
-      console.warn(
-        `[tfx] 원격 홈 디렉토리 감지 실패 (${host}) — file transfer 비활성화`,
-      );
-      remoteHome = null;
-    }
+  // 이 폴백은 .ps1 을 pwsh 로 실행하므로 Windows 원격만 받는다. POSIX 셸은 $env:USERPROFILE 을 엉뚱한 문자열로 펼친다.
+  const remoteHome = detectWindowsRemoteHome(host);
+  if (!remoteHome) {
+    failFast(
+      `${host}: 폴백 레인은 pwsh 가 있는 Windows 원격만 지원한다. mac, Linux 원격은 로컬 tmux 가 있어야 한다.`,
+    );
   }
 
-  if (remoteHome) {
-    try {
-      const fallbackEnv = { home: remoteHome, os: "win32", shell: "pwsh" };
-      const stageId = `spawn-${randomUUID().slice(0, 8)}`;
-      const { stagedFiles } = stageRemotePromptFiles(
-        host,
-        fallbackEnv,
-        promptContext.transferCandidates,
-        stageId,
-      );
-      prompt = rewritePromptPaths(prompt, stagedFiles);
-    } catch (error) {
-      failFast(
-        `failed to stage remote files: ${error?.message || String(error)}`,
-      );
-    }
-  } else if (promptContext.transferCandidates.length > 0) {
-    console.warn("[tfx] 원격 홈 미감지 — --transfer 파일이 무시됩니다");
+  try {
+    const fallbackEnv = { home: remoteHome, os: "win32", shell: "pwsh" };
+    const stageId = `spawn-${randomUUID().slice(0, 8)}`;
+    const { stagedFiles } = stageRemotePromptFiles(
+      host,
+      fallbackEnv,
+      promptContext.transferCandidates,
+      stageId,
+    );
+    prompt = rewritePromptPaths(prompt, stagedFiles);
+  } catch (error) {
+    failFast(
+      `failed to stage remote files: ${error?.message || String(error)}`,
+    );
   }
 
   const scriptLines = [`cd '${escapePwshSingleQuoted(dir)}'`];
@@ -761,7 +769,10 @@ async function spawnRemoteFallback(args, promptContext) {
   }
 
   const scriptContent = scriptLines.join("\n");
-  const localScript = join(tmpdir(), "tfx-remote-spawn.ps1");
+  const localScript = join(
+    privateTmpDir("remote-spawn"),
+    "tfx-remote-spawn.ps1",
+  );
   writeFileSync(localScript, scriptContent, "utf8");
 
   try {
@@ -1112,12 +1123,19 @@ export function buildRemotePosixSpawnCommands(spec = {}) {
     dir,
     permissionFlags = "",
     promptFile = null,
+    runId = null,
+    sessionName = null,
   } = spec;
   if (!claudePath) {
     throw new Error("buildRemotePosixSpawnCommands requires claudePath");
   }
 
   const commands = [];
+  // --kill 이 이 세션만 정리하도록 claude 를 띄울 셸의 PID 를 남긴다.
+  if (sessionName && runId) {
+    const runDir = remoteRunDir(sessionName, runId);
+    commands.push(`mkdir -p ${runDir} && echo $$ > ${runDir}/shell.pid`);
+  }
   const pathExport = buildRemotePathExportCommand(binDirs);
   if (pathExport) commands.push(pathExport);
   if (dir) commands.push(`cd ${shellQuote(dir)}`);
@@ -1179,24 +1197,13 @@ function resolveRemoteStageDir(env, stageId) {
 }
 
 function ensureRemoteStageDir(host, env, remoteStageDir) {
-  if (env.os === "win32") {
-    const safePath = escapePwshSingleQuoted(remoteStageDir);
-    const command = `New-Item -ItemType Directory -Path '${safePath}' -Force | Out-Null`;
-    execFileSync("ssh", [host, "pwsh", "-NoProfile", "-Command", command], {
-      timeout: 10000,
-      stdio: "pipe",
-    });
-    return;
-  }
-
-  execFileSync(
-    "ssh",
-    [host, "sh", "-lc", `mkdir -p ${shellQuote(remoteStageDir)}`],
-    {
-      timeout: 10000,
-      stdio: "pipe",
-    },
-  );
+  const command =
+    env.os === "win32"
+      ? pwshRemoteCommand(
+          `New-Item -ItemType Directory -Path '${escapePwshSingleQuoted(remoteStageDir)}' -Force | Out-Null`,
+        )
+      : posixRemoteCommand(`mkdir -p ${shellQuote(remoteStageDir)}`);
+  execFileSync("ssh", [host, command], { timeout: 10000, stdio: "pipe" });
 }
 
 function uploadFileToRemote(host, localPath, remotePath) {
@@ -1245,7 +1252,7 @@ function uploadRemotePromptFile(host, env, stageId, prompt) {
   ensureRemoteStageDir(host, env, stageDir);
 
   const localPromptFile = join(
-    tmpdir(),
+    privateTmpDir("remote-spawn"),
     `tfx-prompt-${randomUUID().slice(0, 8)}.md`,
   );
   writeFileSync(localPromptFile, prompt, { encoding: "utf8" });
@@ -1569,7 +1576,10 @@ function spawnLocal(args, claudePath, prompt) {
   // 정리는 pwsh 스크립트 내부에서 수행 (Node exit 시 삭제하면 pane 실행 전 사라짐)
   let tmpFile = null;
   if (prompt) {
-    tmpFile = join(tmpdir(), `tfx-prompt-${randomUUID().slice(0, 8)}.md`);
+    tmpFile = join(
+      privateTmpDir("remote-spawn"),
+      `tfx-prompt-${randomUUID().slice(0, 8)}.md`,
+    );
     writeFileSync(tmpFile, prompt, { encoding: "utf8" });
   }
 
@@ -1599,7 +1609,7 @@ function spawnLocal(args, claudePath, prompt) {
         `exit $trifluxExit`,
       ].join("\n");
       const scriptFile = join(
-        tmpdir(),
+        privateTmpDir("remote-spawn"),
         `tfx-spawn-${randomUUID().slice(0, 8)}.ps1`,
       );
       writeFileSync(scriptFile, scriptContent, { encoding: "utf8" });
@@ -1645,6 +1655,7 @@ async function spawnRemoteViaTmux(args, promptContext, env) {
     `${SPAWN_SESSION_PREFIX}${host}-${slug}`,
   );
   const paneId = `${sessionName}:0.0`;
+  const runId = randomUUID().slice(0, 8);
   const permissionFlags = getPermissionFlag().join(" ");
   let prompt = promptContext.prompt;
 
@@ -1675,6 +1686,8 @@ async function spawnRemoteViaTmux(args, promptContext, env) {
     host,
     buildRemotePosixSpawnCommands({
       binDirs: resolveRemoteBinDirs(host),
+      runId,
+      sessionName,
       claudePath: env.claudePath,
       dir: resolvedDir,
       permissionFlags,
@@ -1684,6 +1697,8 @@ async function spawnRemoteViaTmux(args, promptContext, env) {
 
   psmuxExec(buildTmuxSpawnSessionArgs(sessionName, paneCommand));
   try {
+    // 세션 생성에 성공한 실행만 기록한다. 쓰기가 실패하면 아래 catch 가 세션을 정리한다.
+    writeSpawnRecord(sessionName, { host, runId });
     startSpawnSessionCleanupWatcher(sessionName, paneId);
 
     const waited = await waitForClaudeScreenState({
@@ -1759,6 +1774,7 @@ async function spawnRemote(args, promptContext) {
   const slug = buildSessionSlug(args.spawnName);
   const sessionName = deduplicateSessionName(`tfx-spawn-${host}-${slug}`);
   const paneId = `${sessionName}:0.0`;
+  const runId = randomUUID().slice(0, 8);
   const permissionFlags = getPermissionFlag().join(" ");
   let prompt = promptContext.prompt;
 
@@ -1778,6 +1794,7 @@ async function spawnRemote(args, promptContext) {
 
   createPsmuxSession(sessionName, { layout: "1xN", paneCount: 1 });
   try {
+    writeSpawnRecord(sessionName, { host, runId });
     sendKeysToPane(paneId, buildRemoteBootstrapCommand(host));
     await waitForRemotePrompt(sessionName, paneId);
 
@@ -1794,7 +1811,7 @@ async function spawnRemote(args, promptContext) {
       ensureRemoteStageDir(host, env, stageDir);
 
       const localPromptFile = join(
-        tmpdir(),
+        privateTmpDir("remote-spawn"),
         `tfx-prompt-${randomUUID().slice(0, 8)}.md`,
       );
       writeFileSync(localPromptFile, prompt, { encoding: "utf8" });
@@ -1820,7 +1837,7 @@ async function spawnRemote(args, promptContext) {
           `exit $trifluxExit`,
         ].join("\n");
         const localScript = join(
-          tmpdir(),
+          privateTmpDir("remote-spawn"),
           `tfx-spawn-${randomUUID().slice(0, 8)}.ps1`,
         );
         writeFileSync(localScript, scriptContent, { encoding: "utf8" });
@@ -1840,6 +1857,8 @@ async function spawnRemote(args, promptContext) {
       } else {
         for (const command of buildRemotePosixSpawnCommands({
           binDirs: remoteBinDirs,
+          runId,
+          sessionName,
           claudePath: env.claudePath,
           dir: resolvedDir,
           permissionFlags,
@@ -1853,6 +1872,8 @@ async function spawnRemote(args, promptContext) {
     } else {
       for (const command of buildRemotePosixSpawnCommands({
         binDirs: remoteBinDirs,
+        runId,
+        sessionName,
         claudePath: env.claudePath,
         dir: resolvedDir,
         permissionFlags,
@@ -2146,16 +2167,79 @@ function listKnownHostNames() {
   }
 }
 
-/** 원격 백그라운드 세션까지 정리하는 공식 명령. */
+/**
+ * spawn 한 번마다 쓰는 원격 기록 디렉터리. 세션 이름만 쓰면 다른 기기의 같은 이름 spawn 이 덮어쓴다.
+ * 원격 셸이 $HOME 을 펼친다.
+ */
+export function remoteRunDir(sessionName, runId) {
+  return `"$HOME"/${REMOTE_STAGE_ROOT}/${shellQuote(sessionName)}/${shellQuote(`run-${runId}`)}`;
+}
+
+function readRunPidScript(runDir, onMissing) {
+  return `d=${runDir}; pid=$(cat "$d/shell.pid" 2>/dev/null); case "$pid" in ''|*[!0-9]*) ${onMissing};; esac`;
+}
+
+/**
+ * 기록한 셸의 그룹과 모든 자손을 먼저 procs 에 적고 TERM 한다.
+ * 대화형 셸(psmux 레인)에서는 claude 가 새 그룹을 받고, 부모가 죽으면 손자는 PPID 가 바뀌므로 죽이기 전에 목록을 잡는다.
+ */
+export function buildRemoteSessionStopCommand(sessionName, runId) {
+  return [
+    readRunPidScript(remoteRunDir(sessionName, runId), "exit 0"),
+    'tree() { for c in $(pgrep -P "$1"); do echo "$c"; tree "$c"; done; }',
+    // 다시 kill 할 때 앞서 잡은 고아 손자를 잃지 않게 이전 목록과 합친다.
+    '{ cat "$d/procs" 2>/dev/null; echo "$pid"; pgrep -g "$pid"; tree "$pid"; } | sort -u > "$d/procs.new" && mv "$d/procs.new" "$d/procs"',
+    'kill -TERM $(cat "$d/procs") 2>/dev/null; true',
+  ].join("; ");
+}
+
+/** readback 용 잔존 프로세스 카운트. 기록이 없으면 숫자 대신 missing 을 내 거짓 성공을 막는다. */
+export function buildRemoteClaudeProcessCountCommand(sessionName, runId) {
+  return [
+    readRunPidScript(remoteRunDir(sessionName, runId), "echo missing; exit 0"),
+    '[ -f "$d/procs" ] || { echo missing; exit 0; }',
+    'n=$( { cat "$d/procs"; pgrep -g "$pid"; pgrep -P "$pid"; } | sort -u | while read -r p; do kill -0 "$p" 2>/dev/null && echo "$p"; done | wc -l)',
+    "echo $n",
+  ].join("; ");
+}
+
+/** 요청 전체가 성공한 뒤에만 지운다. 실패 뒤 다시 --kill 할 때 기록이 남아 있어야 한다. */
+export function buildRemoteRunCleanupCommand(sessionName, runId) {
+  return `d=${remoteRunDir(sessionName, runId)}; rm -f "$d/shell.pid" "$d/procs"; rmdir "$d" 2>/dev/null; true`;
+}
+
+/** 로컬 세션별 spawn 기록. --kill 이 원격 기록 디렉터리를 찾는 데 쓴다. */
+function spawnRecordPath(sessionName) {
+  return join(tfxStateDir(), "remote-spawn", `${sessionName}.json`);
+}
+
+function writeSpawnRecord(sessionName, record) {
+  const path = spawnRecordPath(sessionName);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(record), "utf8");
+}
+
+function readSpawnRecord(sessionName) {
+  try {
+    return JSON.parse(readFileSync(spawnRecordPath(sessionName), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+// 기다리는 사이 같은 이름으로 새로 spawn 했을 수 있어 runId 가 같을 때만 지운다.
+function removeSpawnRecord(sessionName, runId) {
+  if (readSpawnRecord(sessionName)?.runId !== runId) return;
+  try {
+    unlinkSync(spawnRecordPath(sessionName));
+  } catch {}
+}
+
+/** 원격 claude 데몬 전체 정지. 다른 작업의 데몬도 멈추므로 --stop-daemon 일 때만 쓴다. */
 export function buildRemoteDaemonStopCommand(binDirs = [], claudePath = null) {
   const pathExport = buildRemotePathExportCommand(binDirs);
   const binary = claudePath ? shellQuote(claudePath) : "claude";
   return `${pathExport ? `${pathExport}; ` : ""}${binary} daemon stop --any`;
-}
-
-/** readback 용 잔존 프로세스 카운트. `[c]laude` 로 자기 자신 매칭을 피한다. */
-export function buildRemoteClaudeProcessCountCommand() {
-  return "pgrep -f '[c]laude' | wc -l";
 }
 
 /** @returns {number|null} 파싱 실패 시 null (거짓 성공 금지) */
@@ -2165,7 +2249,7 @@ export function parseRemoteProcessCount(stdout) {
 }
 
 function defaultRunRemoteCommand(host, command) {
-  const stdout = execFileSync("ssh", [host, "sh", "-lc", command], {
+  const stdout = execFileSync("ssh", [host, posixRemoteCommand(command)], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 30_000,
@@ -2208,41 +2292,65 @@ export async function killSpawnSession(sessionName, options = {}) {
     result.local = { error: error?.message || String(error), ok: false };
   }
 
+  const record = options.runId ? null : readSpawnRecord(sessionName);
+  const runId = options.runId || record?.runId || null;
   const hostNames = options.hostNames || listKnownHostNames();
   const host =
-    options.host || inferRemoteHostFromSessionName(sessionName, hostNames);
+    options.host ||
+    record?.host ||
+    inferRemoteHostFromSessionName(sessionName, hostNames);
   if (!host) {
     result.ok = result.local.ok;
     return result;
   }
 
-  const binDirs = options.binDirs || resolveRemoteBinDirs(host, options);
-  const claudePath =
-    options.claudePath || resolveRemoteClaudePath(host, options);
   const remote = {
     attempted: true,
-    daemonStop: { ok: false },
     host,
     ok: false,
     remaining: null,
+    sessionStop: { ok: false },
   };
 
-  try {
-    const stopped = runRemote(
-      host,
+  const runStep = (command) => {
+    try {
+      const out = runRemote(host, command);
+      return {
+        ok: out?.ok !== false,
+        output: String(out?.stdout ?? "").trim(),
+      };
+    } catch (error) {
+      return { error: error?.message || String(error), ok: false };
+    }
+  };
+
+  remote.sessionStop = runId
+    ? runStep(buildRemoteSessionStopCommand(sessionName, runId))
+    : { error: "spawn 기록이 없어 원격 세션을 특정할 수 없다", ok: false };
+  if (options.stopDaemon) {
+    const binDirs = options.binDirs || resolveRemoteBinDirs(host, options);
+    const claudePath =
+      options.claudePath || resolveRemoteClaudePath(host, options);
+    remote.daemonStop = runStep(
       buildRemoteDaemonStopCommand(binDirs, claudePath),
     );
-    remote.daemonStop = {
-      ok: stopped?.ok !== false,
-      output: String(stopped?.stdout ?? "").trim(),
-    };
-  } catch (error) {
-    remote.daemonStop = { error: error?.message || String(error), ok: false };
   }
 
   const readRemaining = () => {
     try {
-      const probe = runRemote(host, buildRemoteClaudeProcessCountCommand());
+      if (!runId) {
+        remote.readbackError = remote.sessionStop.error;
+        return null;
+      }
+      const probe = runRemote(
+        host,
+        buildRemoteClaudeProcessCountCommand(sessionName, runId),
+      );
+      if (String(probe?.stdout ?? "").includes("missing")) {
+        remote.readbackError =
+          "spawn 기록(shell.pid)이 없어 이 세션의 원격 프로세스를 확인할 수 없다";
+        return null;
+      }
       return parseRemoteProcessCount(probe?.stdout);
     } catch (error) {
       remote.readbackError = error?.message || String(error);
@@ -2252,10 +2360,7 @@ export async function killSpawnSession(sessionName, options = {}) {
 
   remote.remaining = readRemaining();
 
-  // `[c]laude` 는 claude 본체 외에 경로에 claude 가 든 프로세스도 잡는다.
-  // 세션 종료 직후 OMC SessionEnd 훅 워커가 몇 초간 걸리는 실측이 있어,
-  // remaining>0 이면 한 번만 재측정하고 그 값으로 판정한다.
-  // 패턴을 좁히면 과소 매칭으로 거짓 성공이 나므로 패턴은 그대로 둔다.
+  // TERM 직후 종료 훅이 몇 초 걸리는 실측이 있어 remaining>0 이면 한 번만 재측정한다.
   if (typeof remote.remaining === "number" && remote.remaining > 0) {
     await sleep(retryDelayMs);
     remote.firstRemaining = remote.remaining;
@@ -2263,7 +2368,13 @@ export async function killSpawnSession(sessionName, options = {}) {
     remote.retried = true;
   }
 
-  remote.ok = remote.remaining === 0;
+  // 명시로 요청한 데몬 정지가 실패하면 전체도 실패다.
+  remote.ok =
+    remote.remaining === 0 && (!options.stopDaemon || remote.daemonStop.ok);
+  if (remote.ok) {
+    runStep(buildRemoteRunCleanupCommand(sessionName, runId));
+    removeSpawnRecord(sessionName, runId);
+  }
   result.remote = remote;
   result.ok = result.local.ok && remote.ok;
   return result;
@@ -2350,6 +2461,7 @@ async function main() {
     }
     const killResult = await killSpawnSession(args.sessionName, {
       host: args.host,
+      stopDaemon: args.stopDaemon,
     });
     console.log(JSON.stringify(killResult, null, 2));
     if (!killResult.ok) process.exit(1);

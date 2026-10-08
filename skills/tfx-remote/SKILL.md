@@ -24,7 +24,7 @@ argument-hint: "<host|list|attach|send|probe|monitor|kill> ..."
 | 화면 캡처 | `--capture <session>` |
 | 준비 완료 대기 | `--wait <session>` |
 | 화면 상태 관찰 | `--monitor <session>` |
-| 세션 종료 | `--kill <session>` |
+| 세션 종료 | `--kill <session>`. 그 세션이 띄운 원격 프로세스만 정리한다. 원격 claude 데몬 전체를 멈추려면 `--stop-daemon` 을 더한다(같은 호스트의 다른 작업도 멈춘다). |
 
 예를 들어 원격 세션을 시작하기 전에는 `node ~/.claude/scripts/remote-spawn.mjs --probe <host>`로 준비 상태를 확인한다. 세션 시작 시 `--dir`, `--name`, `--handoff`, `--transfer`, `--no-attach` 옵션을 추가할 수 있다. 스크립트의 실제 옵션과 실패 처리는 `scripts/remote-spawn.mjs`의 `parseArgs`와 `main`을 따른다.
 
