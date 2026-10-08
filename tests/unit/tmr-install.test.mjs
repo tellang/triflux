@@ -144,37 +144,18 @@ test("묻는 사이 생긴 tmuxrooms 는 덮지 않고, 링크를 못 만들면 
   );
   assert.equal(readFileSync(join(bin, "tmuxrooms"), "utf8"), "user");
 
+  // 링크를 못 만들어도 받은 파일과 사용자 파일을 지우지 않는다.
   const other = makeHome();
-  await assert.rejects(
-    installTmr({
-      ...options,
-      home: other,
-      extract: fakeExtract,
-      symlink: () => {
-        throw Object.assign(new Error("no space"), { code: "ENOSPC" });
-      },
-    }),
-    { code: "ENOSPC" },
-  );
-  assert.equal(existsSync(join(other, ".local", "bin", "tmuxrooms")), false);
-
-  // 실패 직전에 다른 쪽이 tmuxrooms 를 바꿔 놓았으면 그 파일은 남긴다.
-  const third = makeHome();
-  const thirdBin = join(third, ".local", "bin");
-  await assert.rejects(
-    installTmr({
-      ...options,
-      home: third,
-      extract: fakeExtract,
-      symlink: () => {
-        rmSync(join(thirdBin, "tmuxrooms"));
-        writeFileSync(join(thirdBin, "tmuxrooms"), "user");
-        throw Object.assign(new Error("no space"), { code: "ENOSPC" });
-      },
-    }),
-    { code: "ENOSPC" },
-  );
-  assert.equal(readFileSync(join(thirdBin, "tmuxrooms"), "utf8"), "user");
+  const result = await installTmr({
+    ...options,
+    home: other,
+    extract: fakeExtract,
+    symlink: () => {
+      throw Object.assign(new Error("no space"), { code: "ENOSPC" });
+    },
+  });
+  assert.equal(result.linked, false);
+  assert.equal(existsSync(result.target), true);
 });
 
 test("읽을 수 없는 PATH 항목이 있어도 동의 단계가 멈추지 않는다", {

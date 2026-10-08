@@ -108,28 +108,25 @@ export async function installTmr({
     const target = join(binDir, "tmuxrooms");
     // 임시 파일은 이번 시도만 쓰는 디렉터리에 둔다. 정리할 때 남의 파일을 지우지 않는다.
     const staging = mkdtempSync(join(binDir, ".tfx-tmr-"));
-    let published;
     try {
       const temporary = join(staging, "tmuxrooms");
       copyFileSync(extracted, temporary);
       chmodSync(temporary, 0o755);
-      published = lstatSync(temporary).ino;
       // 묻는 사이 다른 쪽이 tmuxrooms 를 만들었으면 덮지 않고 실패한다(EEXIST).
       linkSync(temporary, target);
     } finally {
       rmSync(staging, { recursive: true, force: true });
     }
     const link = join(binDir, "tmr");
+    // 이미 있는 tmr 은 사용자 것일 수 있어 건드리지 않는다. 링크를 못 만들어도
+    // 체크섬이 맞는 tmuxrooms 는 완전한 설치본이라 지우지 않고 안내만 남긴다.
+    let linked = false;
     try {
-      // 이미 있는 tmr 은 사용자 것일 수 있어 건드리지 않는다.
-      if (!lstatSync(link, { throwIfNoEntry: false }))
+      if (!lstatSync(link, { throwIfNoEntry: false })) {
         symlink("tmuxrooms", link);
-    } catch (error) {
-      // 링크까지 못 만들면 이번에 넣은 파일만 되돌려 다음 setup 이 다시 시도하게 한다.
-      if (lstatSync(target, { throwIfNoEntry: false })?.ino === published)
-        rmSync(target, { force: true });
-      throw error;
-    }
+        linked = true;
+      }
+    } catch {}
 
     let runs = true;
     try {
@@ -137,7 +134,7 @@ export async function installTmr({
     } catch {
       runs = false;
     }
-    return { target, link, runs };
+    return { target, link, linked, runs };
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -166,8 +163,10 @@ export async function offerTmrInstall({
     return "declined";
   }
   try {
-    const { target, runs } = await install({ home });
+    const { target, link, linked, runs } = await install({ home });
     log(`tmr ${TMR_RELEASE.version} 설치: ${target}`);
+    if (!linked && !lstatSync(link, { throwIfNoEntry: false }))
+      warn(`tmr 링크를 만들지 못했다. 직접 만든다: ln -s tmuxrooms ${link}`);
     if (!runs) warn(`설치한 ${target} 가 실행되지 않는다.`);
     const binDir = tmrBinDir(home);
     if (
