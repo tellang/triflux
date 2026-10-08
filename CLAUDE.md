@@ -41,14 +41,13 @@ macOS/Linux는 플랫폼 보호기가 아무 작업도 하지 않게 처리하�
 |---------|------|------|-----|
 | 1 | `platform === "win32"` | `wt-manager.createTab` | `hub/team/wt-manager.mjs` |
 | 2 | `isTmuxLikeMux(mux)` (`detectMultiplexer()` → `getMultiplexerType()`/`hasMultiplexer()`/`hasTmux()`) | `tmux new-window -n <title> <command>` | 셸 직접 호출 |
-| 3 | `platform === "darwin"` (대체 경로) | `open -a Terminal` | macOS `open` 명령 |
-| 없음 | Linux(멀티플렉서 없음) | 미지원(`false` 반환) | 없음 |
+| 없음 | 멀티플렉서 없음(macOS, Linux) | 미지원(`false` 반환) | 없음 |
 
 ### 터미널 관리 방식
 
 | 후보 | 필요성 | 이유 |
 |------|--------|------|
-| iTerm2 관리자 | **불필요** | `hub/lib/env-detect.mjs`의 `detectTerminal`이 `TERM_PROGRAM === "iTerm.app"`을 감지하지만 별도 GUI 패인 조작은 tmux로 처리한다. 새 창은 `open -a Terminal` 대체 경로로 충분하다. |
+| iTerm2 관리자 | **불필요** | `hub/lib/env-detect.mjs`의 `detectTerminal`이 `TERM_PROGRAM === "iTerm.app"`을 감지하지만 별도 GUI 패인 조작은 tmux로 처리한다. |
 | tmux 관리자 | **불필요** | `terminal-opener.mjs`가 `tmux new-window`로 직접 호출한다. |
 | psmux 관리자 | **이미 있음** | `hub/team/psmux.mjs`가 Windows에서는 psmux, macOS/Linux에서는 tmux를 사용한다. |
 

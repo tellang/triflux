@@ -1,4 +1,4 @@
-import { exec as defaultExec, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { platform as osPlatform } from "node:os";
 import { psmuxExec as defaultPsmuxExec } from "./psmux.mjs";
 import { tmuxExec as defaultTmuxExec, detectMultiplexer } from "./session.mjs";
@@ -47,14 +47,6 @@ function createTabSpec(spec, title) {
     cwd: spec.cwd,
     profile: spec.profile ?? "triflux",
   };
-}
-
-function execOpenTerminal(execFn) {
-  return new Promise((resolve) => {
-    execFn("open -a Terminal", { timeout: 5000 }, (error) => {
-      resolve(!error);
-    });
-  });
 }
 
 function isTmuxLikeMux(mux) {
@@ -126,7 +118,6 @@ export function createTerminalOpener(deps = {}) {
   const platform = resolvePlatform(deps);
   const tmuxExec = deps.tmuxExec || defaultTmuxExec;
   const psmuxExec = deps.psmuxExec || defaultPsmuxExec;
-  const exec = deps.exec || defaultExec;
   const createWtManager = deps.createWtManager || defaultCreateWtManager;
 
   async function openCommand(spec = {}) {
@@ -163,10 +154,8 @@ export function createTerminalOpener(deps = {}) {
       }
     }
 
-    if (platform === "darwin") {
-      return execOpenTerminal(exec);
-    }
-
+    // 멀티플렉서가 없으면 명령을 실을 경로가 없다. 빈 Terminal 창을 띄우고
+    // 성공이라 하지 않고 실패를 돌려준다(macOS 포함).
     return false;
   }
 
