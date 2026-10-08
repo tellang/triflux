@@ -72,6 +72,20 @@ const SERVERS = [
   args,
   envVars,
 }));
+// 게이트웨이 이주와 허브 정리가 함께 쓰는 사용자 MCP 설정 파일. HOME 기준 경로와 형식.
+// ~/.mcp.json 은 HOME 에서 Claude 를 열 때 읽는 파일이라 프로젝트 파일이 아니라 사용자 파일로 본다.
+const USER_MCP_FILES = [
+  [".claude.json", "json"],
+  [".mcp.json", "json"],
+  [".claude/mcp.json", "json"],
+  [".claude/.mcp.json", "json"],
+  [".claude/settings.json", "json"],
+  [".codex/config.json", "json"],
+  [".codex/config.toml", "toml"],
+  [".gemini/settings.json", "json"],
+  // agy 는 \${VAR} 참조를 풀지 않으므로 env 없이 바꾸고 셸 환경을 물려받게 한다.
+  [".gemini/config/mcp_config.json", "agy"],
+];
 const BY_PORT = new Map(SERVERS.map((server) => [server.port, server]));
 const LABEL = "com.tellang.mcp-gateway";
 const TASK = "MCP Gateway";
@@ -713,14 +727,12 @@ export function cleanupLegacyMcp({
     result.warnings.push("별도 HOME과 실제 작업 디렉터리가 섞여 이주를 중단함");
     return result;
   }
-  const files = [
-    [join(home, ".claude.json"), "json"],
-    [join(repoRoot, ".mcp.json"), "json"],
-    [join(home, ".codex/config.toml"), "toml"],
-    [join(home, ".gemini/settings.json"), "json"],
-    // agy 는 \${VAR} 참조를 풀지 않으므로 env 없이 바꾸고 셸 환경을 물려받게 한다.
-    [join(home, ".gemini/config/mcp_config.json"), "agy"],
-  ];
+  const files = USER_MCP_FILES.map(([relative, kind]) => [
+    join(home, relative),
+    kind,
+  ]);
+  if (resolve(repoRoot) !== resolve(home))
+    files.push([join(repoRoot, ".mcp.json"), "json"]);
   const plans = [];
   let blocked = false;
   for (const [file, kind] of files) {
@@ -728,6 +740,8 @@ export function cleanupLegacyMcp({
       const target = fileTarget(file);
       if (!target) continue;
       const original = readFileSync(target, "utf8");
+      // 빈 파일은 항목이 없는 것이다. 형식 오류로 보면 이주 전체가 멈춘다.
+      if (!original.trim()) continue;
       const plan =
         kind === "toml"
           ? patchToml(original, file, home, env, result.warnings)
@@ -784,15 +798,11 @@ export function cleanupLegacyMcp({
 }
 
 const HUB_SERVER = "tfx-hub";
-const HUB_TASK = "TrifluxHubEnsure";
-const HUB_CONFIG_FILES = [
-  [".claude.json", "json"],
-  [".claude/settings.json", "json"],
-  [".claude/mcp.json", "json"],
-  [".codex/config.json", "json"],
-  [".codex/config.toml", "toml"],
-  [".gemini/settings.json", "json"],
-  [".gemini/config/mcp_config.json", "json"],
+// [작업 이름, 그 작업이 허브용임을 보여 주는 실행 명령 조각]
+// \Triflux\Hub 는 만든 코드가 이력에 없지만 지워진 `tfx hub ensure` 를 실행해 로그온마다 실패한다.
+const HUB_TASKS = [
+  ["TrifluxHubEnsure", "hub-ensure.mjs"],
+  ["\\Triflux\\Hub", "tfx hub ensure"],
 ];
 
 // 허브가 등록한 항목은 loopback 의 /mcp 주소다. 다른 모양이면 사용자 항목으로 본다.
@@ -945,28 +955,25 @@ function stopHub(home, platform, run, result) {
   result.changed = true;
 }
 
-function removeHubTask(run, result) {
-  const query = tryRun(run, "schtasks.exe", [
-    "/Query",
-    "/TN",
-    HUB_TASK,
-    "/FO",
-    "LIST",
-    "/V",
-  ]);
-  if (!query.ok) return;
-  if (!query.output.includes("hub-ensure.mjs")) {
-    result.warnings.push(`${HUB_TASK}: hub-ensure 작업이 아니라 보존`);
-    return;
+function removeHubTasks(run, result) {
+  for (const [task, marker] of HUB_TASKS) {
+    const query = tryRun(run, "schtasks.exe", [
+      "/Query",
+      "/TN",
+      task,
+      "/FO",
+      "LIST",
+      "/V",
+    ]);
+    if (!query.ok) continue;
+    if (!query.output.includes(marker)) {
+      result.warnings.push(`${task}: 허브 작업이 아니라 보존`);
+      continue;
+    }
+    const removed = tryRun(run, "schtasks.exe", ["/Delete", "/TN", task, "/F"]);
+    if (removed.ok) result.changed = true;
+    else result.warnings.push(`${task}: 예약 작업 삭제 실패`);
   }
-  const removed = tryRun(run, "schtasks.exe", [
-    "/Delete",
-    "/TN",
-    HUB_TASK,
-    "/F",
-  ]);
-  if (removed.ok) result.changed = true;
-  else result.warnings.push(`${HUB_TASK}: 예약 작업 삭제 실패`);
 }
 
 /** cwd 의 프로젝트 MCP 파일 중 제거된 허브가 만든 tfx-hub 항목이 있는 파일을 돌려준다. */
@@ -1006,12 +1013,13 @@ export function cleanupTfxHub({
     result.skipped = true;
     return result;
   }
-  for (const [relative, kind] of HUB_CONFIG_FILES) {
+  for (const [relative, kind] of USER_MCP_FILES) {
     const file = join(home, relative);
     try {
       const target = fileTarget(file);
       if (!target) continue;
       const original = readFileSync(target, "utf8");
+      if (!original.trim()) continue;
       const plan =
         kind === "toml"
           ? removeHubFromToml(original, file, result.warnings)
@@ -1038,7 +1046,7 @@ export function cleanupTfxHub({
   if (realSystem) {
     try {
       stopHub(home, platform, run, result);
-      if (platform === "win32") removeHubTask(run, result);
+      if (platform === "win32") removeHubTasks(run, result);
     } catch (error) {
       result.ok = false;
       result.warnings.push(`허브 프로세스 정리 실패: ${error.message}`);

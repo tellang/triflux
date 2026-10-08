@@ -8,6 +8,7 @@ import {
   buildInventory,
   createServerRecord,
   getClaudeMcp,
+  parseCodexMcpList,
 } from "../../scripts/mcp-check.mjs";
 
 test("createServerRecord fills tool_count and domain_tags from config and catalog", () => {
@@ -51,4 +52,21 @@ test("getClaudeMcp discovers project .claude/mcp.json", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("parseCodexMcpList skips the header of the second (HTTP) table", () => {
+  const output = [
+    "Name          Command  Args  Env  Cwd  Status   Auth",
+    "brave-search  npx      -y    -    -    enabled  Unsupported",
+    "",
+    "Name      Url                           Bearer Token Env Var  Status   Auth",
+    "context7  https://mcp.context7.com/mcp  -                     enabled  Not logged in",
+  ].join("\n");
+  assert.deepEqual(
+    parseCodexMcpList(output).map(({ name, status }) => [name, status]),
+    [
+      ["brave-search", "enabled"],
+      ["context7", "enabled"],
+    ],
+  );
 });

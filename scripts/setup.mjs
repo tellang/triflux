@@ -27,6 +27,7 @@ import { basename, delimiter, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { ensureAgyHooks } from "./ensure-agy-hooks.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
+import { ensureGeminiProfiles } from "./lib/gemini-profiles.mjs";
 import { cleanupLegacyHooks } from "./lib/legacy-hook-cleanup.mjs";
 import { cleanupLegacyMcp, cleanupTfxHub } from "./lib/legacy-mcp-cleanup.mjs";
 import {
@@ -36,6 +37,7 @@ import {
   resolveTrifluxHome,
 } from "./lib/machine-profile.mjs";
 import { parseFrontmatter } from "./lib/skill-template.mjs";
+import { resolveStableNodeBin } from "./lib/stable-node.mjs";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -369,7 +371,10 @@ export async function ensureMachineProfile({
     ? await promptMachineProfile(defaults, { input, output })
     : defaults;
   const warnings = [];
+  // Windows 의 timeout 은 tfx-route.sh 를 돌리는 Git Bash 의 /usr/bin/timeout 이라
+  // node 에서는 보이지 않는다. 그쪽 확인은 tfx-route.sh 가 실행 때 한다.
   if (
+    platform !== "win32" &&
     Number(profile.TFX_HARD_CEILING_SEC) > 0 &&
     !timeoutBackendAvailable({
       platform,
@@ -379,7 +384,7 @@ export async function ensureMachineProfile({
     })
   ) {
     warnings.push(
-      "hard ceiling이 요청됐지만 timeout/gtimeout이 없어 비활성 상태입니다. macOS: brew install coreutils",
+      `hard ceiling이 요청됐지만 timeout/gtimeout이 없어 비활성 상태입니다. ${platform === "darwin" ? "macOS: brew install coreutils" : "coreutils 패키지를 설치하세요"}`,
     );
   }
   if (!canPrompt) {
@@ -909,7 +914,6 @@ const REMOVED_SKILL_HASHES = {
     "b5ff7ca412dab7152d1661bcafa9735d12fa64f0e10c674eb9e6f0ecb535a1b7",
   ],
 };
-const REMOVED_SKILL_NAMES = Object.freeze(Object.keys(REMOVED_SKILL_HASHES));
 
 // ── 구형 Codex 모델 (마이그레이션 안내 대상) ──
 
@@ -1007,10 +1011,11 @@ function skillTreeHash(skillDir, skillOnly = false) {
   return visit(skillDir) ? hash.digest("hex") : null;
 }
 
+// dryRun 은 doctor 가 setup 과 같은 기준으로 지울 사본과 보존할 사본을 나눌 때 쓴다.
 function cleanupStaleSkills(
   installedDir,
   pkgDir,
-  { platform = process.platform } = {},
+  { platform = process.platform, dryRun = false } = {},
 ) {
   const removed = [];
   const preserved = [];
@@ -1055,7 +1060,7 @@ function cleanupStaleSkills(
       continue;
     }
     try {
-      rmSync(skillPath, { recursive: true, force: true });
+      if (!dryRun) rmSync(skillPath, { recursive: true, force: true });
       removed.push(name);
     } catch {
       preserved.push(name);
@@ -1557,33 +1562,14 @@ function getSetupArgv(stdinData) {
   return Array.isArray(stdinData?.argv) ? stdinData.argv : [];
 }
 
-const STABLE_NODE_COMMAND_CANDIDATES = Object.freeze([
-  "/opt/homebrew/bin/node",
-  "/usr/local/bin/node",
-  "/home/linuxbrew/.linuxbrew/bin/node",
-]);
-
 function quoteShellCommandArg(value) {
   const normalized = String(value).replace(/\\/g, "/");
   if (/^[A-Za-z0-9_./:@%+=,-]+$/u.test(normalized)) return normalized;
   return `"${normalized.replace(/(["\\$`])/gu, "\\$1")}"`;
 }
 
-function resolveStableNodeCommand({ existsSyncFn = existsSync } = {}) {
-  if (process.platform !== "win32") {
-    for (const candidate of STABLE_NODE_COMMAND_CANDIDATES) {
-      try {
-        if (existsSyncFn(candidate)) return candidate;
-      } catch {
-        /* ignore candidate probe errors */
-      }
-    }
-  }
-  return "node";
-}
-
 function buildNodeScriptCommand(scriptPath) {
-  return `${quoteShellCommandArg(resolveStableNodeCommand())} ${quoteShellCommandArg(scriptPath)}`;
+  return `${quoteShellCommandArg(resolveStableNodeBin())} ${quoteShellCommandArg(scriptPath)}`;
 }
 
 function loadSettings() {
@@ -1893,7 +1879,6 @@ export {
   getVersion,
   getWorkerPackageSyncEntries,
   hasProfileSection,
-  isLocalDevSkillDir,
   isSetupUserStateFile,
   isSkillSupportedOnPlatform,
   LEGACY_CODEX_MODELS,
@@ -1901,7 +1886,6 @@ export {
   LOCAL_DEV_SKILL_MARKER,
   listInlineProfileNames,
   PLUGIN_ROOT,
-  REMOVED_SKILL_NAMES,
   REQUIRED_CODEX_PROFILES,
   REQUIRED_TOP_LEVEL_SETTINGS,
   readMarker,
@@ -2251,6 +2235,18 @@ export async function runDeferred(stdinData) {
   const codexProfilesResult = ensureCodexProfiles();
   if (codexProfilesResult.ok && codexProfilesResult.changed > 0) {
     synced++;
+  }
+
+  // tfx setup 과 같은 결과가 되게 postinstall 에서도 agy 프로필을 채운다.
+  // agy 가 없는 기기에는 ~/.gemini 를 새로 만들지 않는다.
+  const geminiDir = join(_TFX_HOME, ".gemini");
+  if (!isProtectedSetupEnv() && existsSync(geminiDir)) {
+    const geminiProfilesResult = ensureGeminiProfiles({ geminiDir });
+    if (geminiProfilesResult.ok && geminiProfilesResult.added > 0) synced++;
+    else if (!geminiProfilesResult.ok)
+      io.log(
+        `  \x1b[33m⚠\x1b[0m Antigravity/Gemini profiles 설정 실패: ${geminiProfilesResult.message}`,
+      );
   }
 
   try {

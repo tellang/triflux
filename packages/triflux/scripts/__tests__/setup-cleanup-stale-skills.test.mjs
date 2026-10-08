@@ -84,3 +84,13 @@ it("원본 외 파일이 추가되거나 로컬 표식이 있으면 보존한다
   assert.deepEqual(result.preserved, ["tfx-plan", "tfx-wt"]);
   assert.equal(existsSync(local), true);
 });
+
+it("dryRun 은 setup 과 같은 분류만 돌려주고 지우지 않는다", () => {
+  const { installed, pkg } = fixture();
+  skill(installed, "tfx-plan", "legacy", ".triflux-managed-skill");
+  skill(installed, "tfx-interview", "사용자가 고친 사본");
+  const result = cleanupStaleSkills(installed, pkg, { dryRun: true });
+  assert.deepEqual(result.removed, ["tfx-plan"]);
+  assert.deepEqual(result.preserved, ["tfx-interview"]);
+  assert.equal(existsSync(path.join(installed, "tfx-plan")), true);
+});

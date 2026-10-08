@@ -138,6 +138,35 @@ test("5개 설정의 소유 URL만 직접 연결로 이주하고 백업 후 멱�
   );
 });
 
+test("빈 설정 파일은 건너뛰고 허브 정리와 같은 사용자 파일을 이주한다", () => {
+  const { home, repoRoot } = fixture();
+  put(join(home, ".gemini", "config", "mcp_config.json"), "");
+  const claudeMcp = join(home, ".claude", "mcp.json");
+  mkdirSync(join(home, ".claude"), { recursive: true });
+  put(claudeMcp, {
+    mcpServers: {
+      "brave-search": { type: "http", url: "http://127.0.0.1:8101/mcp" },
+    },
+  });
+  const result = cleanupLegacyMcp({
+    home,
+    repoRoot,
+    platform: "darwin",
+    run: (command) => {
+      if (command === "ps") return "";
+      throw new Error("unexpected command");
+    },
+    uid: 500,
+    env: { BRAVE_API_KEY: "x" },
+  });
+  assert.equal(result.ok, true, result.warnings.join("\n"));
+  assert.equal(
+    JSON.parse(readFileSync(claudeMcp, "utf8")).mcpServers["brave-search"]
+      .command,
+    "npx",
+  );
+});
+
 test("깨진 설정과 소유 불명 URL은 원본을 보존하고 해제를 막는다", () => {
   const { home, repoRoot } = fixture();
   const claude = join(home, ".claude.json");

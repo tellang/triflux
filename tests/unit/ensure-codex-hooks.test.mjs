@@ -142,14 +142,14 @@ describe("ensureCodexHooks", () => {
     assert.equal(sessionStart.matcher, "startup|resume|clear");
     assert.deepEqual(sessionStart.hooks[0], {
       type: "command",
-      command: '/opt/node "/repo/hooks/codex-session-hook.mjs" register',
+      command: '"/opt/node" "/repo/hooks/codex-session-hook.mjs" register',
       timeout: 15,
     });
     assert.deepEqual(promptSubmit, {
       hooks: [
         {
           type: "command",
-          command: '/opt/node "/repo/hooks/codex-session-hook.mjs" heartbeat',
+          command: '"/opt/node" "/repo/hooks/codex-session-hook.mjs" heartbeat',
           timeout: 10,
         },
       ],
@@ -173,6 +173,23 @@ describe("ensureCodexHooks", () => {
     assert.match(
       configAfterFirst,
       /\[hooks\.state\."\S+hooks\.json:user_prompt_submit:1:0"\]\ntrusted_hash = "sha256:[0-9a-f]{64}"/,
+    );
+  });
+
+  it("quotes the Windows node path without doubling backslashes", () => {
+    const codexHome = makeCodexHome();
+    ensureCodexHooks({
+      codexHome,
+      hookScriptPath: "/repo/hooks/codex-session-hook.mjs",
+      nodeBin: "C:\\Program Files\\nodejs\\node.exe",
+      platform: "win32",
+    });
+    const hooksJson = JSON.parse(
+      readFileSync(join(codexHome, "hooks.json"), "utf8"),
+    );
+    assert.equal(
+      hooksJson.hooks.SessionStart[0].hooks[0].command,
+      '"C:\\Program Files\\nodejs\\node.exe" "/repo/hooks/codex-session-hook.mjs" register',
     );
   });
 

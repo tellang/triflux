@@ -58,6 +58,27 @@ export function createServerRecord(name, status, config = {}) {
   };
 }
 
+export function parseCodexMcpList(output) {
+  const lines = output
+    .trim()
+    .split(/\r?\n/)
+    .filter((line) => line.trim());
+  const servers = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    const cols = lines[i].split(/\s{2,}/);
+    if (cols.length < 2) continue;
+
+    const name = cols[0].trim();
+    // stdio 표와 HTTP 표가 따로 찍혀 두 번째 표의 머리글도 행으로 들어온다.
+    if (name === "Name") continue;
+    const statusMatch = lines[i].match(/\b(enabled|disabled)\b/i);
+    const status = statusMatch ? statusMatch[1].toLowerCase() : "unknown";
+    if (!name || name.startsWith("-")) continue;
+    servers.push(createServerRecord(name, status));
+  }
+  return servers;
+}
+
 export function getCodexMcp() {
   try {
     const output = execSync("codex mcp list", {
@@ -66,24 +87,7 @@ export function getCodexMcp() {
       stdio: ["pipe", "pipe", "ignore"],
       windowsHide: true,
     });
-    const lines = output
-      .trim()
-      .split(/\r?\n/)
-      .filter((line) => line.trim());
-    if (lines.length < 2) return [];
-
-    const servers = [];
-    for (let i = 1; i < lines.length; i += 1) {
-      const cols = lines[i].split(/\s{2,}/);
-      if (cols.length < 2) continue;
-
-      const name = cols[0].trim();
-      const statusMatch = lines[i].match(/\b(enabled|disabled)\b/i);
-      const status = statusMatch ? statusMatch[1].toLowerCase() : "unknown";
-      if (!name || name.startsWith("-")) continue;
-      servers.push(createServerRecord(name, status));
-    }
-    return servers;
+    return parseCodexMcpList(output);
   } catch {
     return null;
   }
