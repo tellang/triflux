@@ -4,13 +4,16 @@ import { join } from "node:path";
 import { codexProfileConfigOverrides } from "../scripts/lib/codex-profile-config.mjs";
 import {
   buildExecCommand,
+  escapePwshSingleQuoted,
   executeWithAttempts,
   normalizePathForShell,
+  posixQuote,
   runProcess,
   shellQuote,
 } from "./cli-adapter-base.mjs";
 import { runPreflight } from "./codex-preflight.mjs";
 import { isActivityLifecycleEnabled } from "./lib/worker-lifecycle.mjs";
+import { IS_WINDOWS } from "./platform.mjs";
 
 // ── Codex-specific stall inference ──────────────────────────────
 
@@ -36,7 +39,7 @@ function commandWithOverrides(command, prompt, codexPath, overrides = []) {
     ? command.replace(/^codex\b/u, shellQuote(codexPath))
     : command;
   if (!overrides.length) return next;
-  const promptArg = JSON.stringify(prompt);
+  const promptArg = shellQuote(prompt);
   const flags = overrides
     .flatMap((value) => ["-c", shellQuote(value)])
     .join(" ");
@@ -85,16 +88,16 @@ function createLaunchScriptText(opts) {
   // X` whenever config.toml still contains an inline [profiles.X] table.
   if (opts.profile) {
     for (const override of codexProfileConfigOverrides(opts.profile)) {
-      parts.push("-c", shellQuote(override));
+      parts.push("-c", posixQuote(override));
     }
   }
   parts.push('$(cat "$PROMPT_FILE")');
   return [
     "#!/usr/bin/env bash",
     "set -euo pipefail",
-    `cd ${shellQuote(normalizePathForShell(opts.workdir))}`,
-    `PROMPT_FILE=${shellQuote(normalizePathForShell(opts.promptFile))}`,
-    `TFX_CODEX_TIMEOUT_MS=${shellQuote(String(opts.timeout ?? ""))}`,
+    `cd ${posixQuote(normalizePathForShell(opts.workdir))}`,
+    `PROMPT_FILE=${posixQuote(normalizePathForShell(opts.promptFile))}`,
+    `TFX_CODEX_TIMEOUT_MS=${posixQuote(String(opts.timeout ?? ""))}`,
     parts.join(" "),
     "",
   ].join("\n");
@@ -128,26 +131,15 @@ export function buildExecArgs(opts = {}) {
     stdinPrompt: opts.stdinPrompt,
   });
 
-  if (!prompt) return command.replace(/\s+""$/u, "");
-
-  let result;
-  const quotedPrompt = JSON.stringify(prompt);
-  // PowerShell: (Get-Content -Raw '...'), bash: "$(cat '...')"
-  if (
-    (/^\(Get-Content\b[\s\S]*\)$/u.test(prompt) ||
-      /^"\$\(cat\b[\s\S]*\)"$/u.test(prompt)) &&
-    command.endsWith(quotedPrompt)
-  ) {
-    result = `${command.slice(0, -quotedPrompt.length)}${prompt}`;
-  } else {
-    result = command;
-  }
+  if (!prompt) return command.replace(/\s+(""|'')$/u, "");
 
   // stderr 캡처: codex 실패 시에도 원인 추적 가능 (resultFile.err)
-  if (opts.resultFile) {
-    result += ` 2>'${opts.resultFile}.err'`;
-  }
-  return result;
+  if (!opts.resultFile) return command;
+  const errFile = `${opts.resultFile}.err`;
+  const quoted = IS_WINDOWS
+    ? `'${escapePwshSingleQuoted(errFile)}'`
+    : posixQuote(errFile);
+  return `${command} 2>${quoted}`;
 }
 
 // ── Codex execution ─────────────────────────────────────────────

@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -108,6 +109,7 @@ describe("codex legacy profile config sanitizer", () => {
         'model_reasoning_effort = "medium"',
         "",
       ].join("\n"),
+      { mode: 0o600 },
     );
 
     const first = sanitizeCodexProfileConfigFile(configPath, {
@@ -128,6 +130,13 @@ describe("codex legacy profile config sanitizer", () => {
       false,
     );
     assert.doesNotMatch(readFileSync(configPath, "utf8"), /^\[profiles\./m);
+    // config.toml 에 비밀이 있을 수 있어 0600 이 다시 쓰기와 백업에서 유지돼야 한다.
+    const mode = (path) => statSync(path).mode & 0o777;
+    assert.equal(mode(configPath), 0o600);
+    assert.equal(
+      mode(`${configPath}.bak-codex-profile-sanitize-20260617-000000`),
+      0o600,
+    );
     // Atomic write must not leave behind a `.tmp-*` staging file; rename
     // consumes it. A leftover temp would mean a torn/aborted write.
     assert.equal(

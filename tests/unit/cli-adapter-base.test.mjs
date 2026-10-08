@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import {
   chmodSync,
@@ -139,7 +140,7 @@ test("buildExecCommand: stdin-prompt mode (macOS hook regression fix) keeps argv
     const command = base.buildExecCommand(longPrompt, "/tmp/result.txt", {
       stdinPrompt: true,
     });
-    // stdin redirect: command 끝이 `< "/path/to/prompt-*.txt"` 패턴이고
+    // stdin redirect: command 끝이 `< '/path/to/prompt-*.txt'` 패턴이고
     // 전체 길이가 입력 prompt 길이와 무관하게 짧다.
     assert.ok(
       command.length < 500,
@@ -147,7 +148,7 @@ test("buildExecCommand: stdin-prompt mode (macOS hook regression fix) keeps argv
     );
     assert.match(
       command,
-      /< "[^"]+\/triflux-codex-prompt\/prompt-\d+-\d+-\d+\.txt"$/u,
+      /< '[^']+\/triflux-codex-prompt\/prompt-\d+-\d+-\d+\.txt'$/u,
     );
     assert.ok(!command.includes("xxxxxxxx"), "prompt must NOT be argv-inlined");
   });
@@ -159,12 +160,12 @@ test("buildExecCommand: empty prompt falls back to argv even in stdin mode", asy
     const command = base.buildExecCommand("", "/tmp/result.txt", {
       stdinPrompt: true,
     });
-    // 빈 prompt 는 stdin redirect 안 함 (그대로 argv "" 로 inline).
+    // 빈 prompt 는 stdin redirect 안 함 (그대로 argv '' 로 inline).
     assert.ok(
       !command.includes("< "),
       `empty prompt should not trigger stdin redirect: ${command}`,
     );
-    assert.ok(command.endsWith('""'));
+    assert.ok(command.endsWith("''"));
   });
 });
 
@@ -175,7 +176,7 @@ test("buildExecCommand: TFX_CODEX_STDIN_PROMPT=0 env opts out of stdin mode", as
     try {
       const base = await importFresh("../../hub/cli-adapter-base.mjs");
       const command = base.buildExecCommand("hello", "/tmp/result.txt", {});
-      assert.ok(command.endsWith('"hello"'));
+      assert.ok(command.endsWith("'hello'"));
       assert.ok(!command.includes("< "));
     } finally {
       if (prev === undefined) delete process.env.TFX_CODEX_STDIN_PROMPT;
@@ -201,22 +202,39 @@ test("cli-adapter-base exports the shared codex exec builder (legacy argv-inline
     assert.doesNotMatch(command, /--profile/);
     assert.match(command, /^codex exec /);
     assert.ok(
-      command.includes('-c "model_reasoning_effort=\\"high\\""'),
+      command.includes(`-c 'model_reasoning_effort="high"'`),
       `expected -c effort override, got: ${command}`,
     );
     assert.match(command, /--dangerously-bypass-approvals-and-sandbox/);
     assert.match(command, /--skip-git-repo-check/);
-    assert.match(command, /--output-last-message \/tmp\/result\.txt/);
+    assert.match(command, /--output-last-message '\/tmp\/result\.txt'/);
     assert.match(command, /--color never/);
     assert.ok(
       !command.includes("--cwd"),
       `codex exec should not receive --cwd directly: ${command}`,
     );
-    assert.ok(command.endsWith('"hello"'));
+    assert.ok(command.endsWith("'hello'"));
 
     assert.equal(base.escapePwshSingleQuoted("it's"), "it''s");
     assert.equal(base.CODEX_MCP_TRANSPORT_EXIT_CODE, 70);
     assert.equal(base.CODEX_MCP_EXECUTION_EXIT_CODE, 1);
+  });
+});
+
+test("legacy argv-inline prompt does not run shell substitutions", async () => {
+  await withSandbox(async ({ root }) => {
+    const { buildExecCommand } = await importFresh(
+      "../../hub/cli-adapter-base.mjs",
+    );
+    const marker = join(root, "pwned");
+    const prompt = `$(touch ${marker}) \`touch ${marker}\` it's`;
+    const command = buildExecCommand(prompt, null, { stdinPrompt: false });
+    const echoed = execSync(
+      command.replace(/^codex exec\b/u, "printf '%s\\n'"),
+      { shell: "/bin/sh", encoding: "utf8" },
+    );
+    assert.equal(existsSync(marker), false);
+    assert.ok(echoed.trimEnd().endsWith(prompt));
   });
 });
 

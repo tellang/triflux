@@ -197,8 +197,8 @@ describe("mcp guard HTTP transport + headers schema", () => {
       type: "http",
       url: "https://example.com/mcp",
       headers: {
-        Authorization: "Bearer secret-token",
-        "X-API-Key": "other-token",
+        Authorization: "Bearer ${TFX_TEST_TOKEN}",
+        "X-API-Key": "${TFX_OTHER_TOKEN}",
         "X-Client": "triflux",
       },
     });

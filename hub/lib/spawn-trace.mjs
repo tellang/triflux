@@ -1,6 +1,7 @@
 import * as childProcess from "node:child_process";
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { createWriteStream, mkdirSync } from "node:fs";
+import { chmodSync, createWriteStream, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -8,6 +9,7 @@ const LOG_DIR = join(homedir(), ".triflux", "logs");
 const DEDUPE_WINDOW_MS = 5_000;
 const RATE_WINDOW_MS = 1_000;
 const DEFAULT_MAX_SPAWN_PER_SEC = 100;
+const MAX_PLAIN_TRACE_VALUE = 64;
 // multi-worker headless dispatch 가 1 초 안에 ~25-30+ psmux/tmux 명령을 호출한다.
 // 2-worker dispatchBatch 가 default 30 limit 을 초과해 `rate_limit` throw 로 mac
 // 호환성 회귀 (smoke test 발견, 2026-05-15). 100 으로 상향 — 폭주 안전망은
@@ -54,7 +56,8 @@ function ensureLogStream() {
     return logStream;
   }
 
-  mkdirSync(LOG_DIR, { recursive: true });
+  mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 });
+  restrictMode(LOG_DIR, 0o700);
 
   if (logStream) {
     try {
@@ -65,20 +68,99 @@ function ensureLogStream() {
   }
 
   logDay = day;
-  logStream = createWriteStream(getLogPath(day), { flags: "a" });
+  logStream = createWriteStream(getLogPath(day), { flags: "a", mode: 0o600 });
+  restrictMode(getLogPath(day), 0o600);
   logStream.on("error", () => {
     /* ignore logging failures */
   });
   return logStream;
 }
 
+// 예전 버전이 0644 로 만든 로그도 좁힌다. Windows 는 chmod 가 의미 없어 실패를 무시한다.
+function restrictMode(path, mode) {
+  try {
+    chmodSync(path, mode);
+  } catch {
+    /* ignore */
+  }
+}
+
+function redacted(value) {
+  const digest = createHash("sha256").update(value).digest("hex").slice(0, 12);
+  return `<redacted len=${value.length} sha256=${digest}>`;
+}
+
+// 프롬프트가 로그에 남지 않게, 공백이 있거나 긴 값은 길이와 해시만 남긴다.
+export function redactTraceValue(value) {
+  if (typeof value !== "string") return value;
+  if (value.length <= MAX_PLAIN_TRACE_VALUE && !/\s/u.test(value)) return value;
+  return redacted(value);
+}
+
+const PROMPT_FLAGS = new Set(["--print", "--prompt", "--message", "--seed"]);
+const SEND_KEYS_VALUE_FLAGS = new Set(["t", "N", "c"]);
+const NAMED_KEY =
+  /^(Enter|Escape|Tab|BSpace|Space|Up|Down|Left|Right|[CM]-.)$/u;
+
+// send-keys 옵션을 getopt 처럼 읽어 키 자리의 시작과 -l(문자 그대로 입력) 여부를 찾는다.
+function parseSendKeys(args, from) {
+  let literal = false;
+  let i = from;
+  while (i < args.length && /^-./u.test(String(args[i]))) {
+    const flag = String(args[i]);
+    i += 1;
+    if (flag === "--") break;
+    for (let j = 1; j < flag.length; j += 1) {
+      if (flag[j] === "l") literal = true;
+      if (SEND_KEYS_VALUE_FLAGS.has(flag[j])) {
+        if (j === flag.length - 1) i += 1;
+        break;
+      }
+    }
+  }
+  return { keysFrom: i, literal };
+}
+
+// 짧은 토큰도 키 입력과 프롬프트 자리에 오면 항상 가린다. 길이만 보면 짧은 비밀이 샌다.
+// -l 이면 Enter 같은 이름도 글자 그대로 입력되므로 가린다.
+function redactArgs(args) {
+  const sendKeysAt = args.indexOf("send-keys");
+  const { keysFrom, literal } =
+    sendKeysAt >= 0
+      ? parseSendKeys(args, sendKeysAt + 1)
+      : { keysFrom: -1, literal: false };
+  return args.map((arg, index) => {
+    if (typeof arg !== "string") return arg;
+    const promptFlag = arg.split("=")[0];
+    if (PROMPT_FLAGS.has(promptFlag) && arg.includes("=")) {
+      return `${promptFlag}=${redacted(arg.slice(promptFlag.length + 1))}`;
+    }
+    const afterPromptFlag = PROMPT_FLAGS.has(args[index - 1]);
+    const isKey =
+      keysFrom >= 0 && index >= keysFrom && (literal || !NAMED_KEY.test(arg));
+    return afterPromptFlag || isKey ? redacted(arg) : redactTraceValue(arg);
+  });
+}
+
+export function redactTraceEntry(entry) {
+  return {
+    ...entry,
+    command: redactTraceValue(entry.command),
+    args: Array.isArray(entry.args) ? redactArgs(entry.args) : entry.args,
+    // execFileSync 오류 메시지에는 명령과 인자 전체가 들어간다.
+    ...(typeof entry.error === "string"
+      ? { error: redactTraceValue(entry.error) }
+      : {}),
+  };
+}
+
 function appendTrace(data, { sync = false } = {}) {
-  const entry = {
+  const entry = redactTraceEntry({
     ts: nowIso(),
     session_id: process.env.TRIFLUX_SESSION_ID ?? null,
     parent_pid: process.pid,
     ...data,
-  };
+  });
 
   try {
     ensureLogStream().write(`${JSON.stringify(entry)}\n`);
@@ -261,6 +343,7 @@ function trackChild(child, meta) {
   child.once("error", (error) => {
     finalize("error", {
       error: error.message,
+      error_code: error.code ?? null,
     });
   });
 
@@ -532,6 +615,7 @@ export function execFileSync(file, args, options) {
         signal: error?.signal ?? null,
         duration_ms: Date.now() - startedAt,
         error: error?.message,
+        error_code: error?.code ?? null,
         sync: true,
       },
       { sync: true },

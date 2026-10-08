@@ -42,6 +42,42 @@ describe("spawn-trace", () => {
     assert.equal(typeof mod.spawnSync, "function");
   });
 
+  it("redacts prompts and key input but keeps control tokens", async () => {
+    const mod = await loadSpawnTraceModule();
+    const prompt = "리뷰해라 $(id) ".repeat(10);
+    const entry = mod.redactTraceEntry({
+      command: "tmux",
+      args: ["send-keys", "-t", "s:0.1", "-l", "sk-short", "Enter"],
+      error: `Command failed: claude --print ${prompt}`,
+    });
+    assert.deepEqual(entry.args.slice(0, 4), [
+      "send-keys",
+      "-t",
+      "s:0.1",
+      "-l",
+    ]);
+    assert.match(entry.args[4], /^<redacted len=8 sha256=[0-9a-f]{12}>$/);
+    // -l 이면 Enter 도 글자 그대로 입력된다
+    assert.match(entry.args[5], /^<redacted/);
+    const named = mod.redactTraceEntry({
+      args: ["send-keys", "-t", "s", "Enter", "--", "-tok"],
+    }).args;
+    assert.equal(named[3], "Enter");
+    const dashed = mod.redactTraceEntry({
+      args: ["send-keys", "-lt", "s", "--", "-tok"],
+    }).args;
+    assert.deepEqual(dashed.slice(0, 3), ["send-keys", "-lt", "s"]);
+    assert.match(dashed[4], /^<redacted/);
+    const print = mod.redactTraceEntry({ args: ["--print", "hi", "--seed=x"] });
+    assert.deepEqual(
+      print.args.map((a) => a.startsWith("--") || a.startsWith("<")),
+      [true, true, true],
+    );
+    assert.ok(
+      !JSON.stringify([entry, print]).match(/sk-short|\$\(id\)|"hi"|=x"/),
+    );
+  });
+
   it("exports guard constants", async () => {
     const mod = await loadSpawnTraceModule();
     assert.equal(typeof mod.MAX_SPAWN_PER_SEC, "number");

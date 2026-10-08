@@ -11,7 +11,10 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { sanitizeCodexProfileConfig } from "./lib/codex-profile-config.mjs";
+import {
+  privateFileMode,
+  sanitizeCodexProfileConfig,
+} from "./lib/codex-profile-config.mjs";
 import { resolveStableNodeBin } from "./lib/stable-node.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -21,7 +24,10 @@ const TRIFLUX_HOOK_BASENAME = "codex-session-hook.mjs";
 
 function atomicWriteFile(path, content) {
   const tmpPath = `${path}.tmp-${process.pid}-${Date.now()}`;
-  writeFileSync(tmpPath, content, "utf8");
+  writeFileSync(tmpPath, content, {
+    encoding: "utf8",
+    mode: privateFileMode(path),
+  });
   renameSync(tmpPath, path);
 }
 
@@ -330,7 +336,10 @@ export function ensureCodexHooks(opts = {}) {
     if (existsSync(configPath)) {
       const backupPath = `${configPath}.bak-tfx-codex-hooks-${opts.backupTimestamp || timestamp()}`;
       if (!existsSync(backupPath)) {
-        writeFileSync(backupPath, originalConfig, "utf8");
+        writeFileSync(backupPath, originalConfig, {
+          encoding: "utf8",
+          mode: privateFileMode(configPath),
+        });
       }
     }
     atomicWriteFile(configPath, nextConfig);

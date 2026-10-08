@@ -50,8 +50,9 @@ jobs:
           esac
           echo "NPM_TAG=$NPM_TAG" >> "$GITHUB_ENV"
 
+      # id-token: write 잡이라 lockfile 밖 설치와 의존성 설치 스크립트를 막는다.
       - name: Install dependencies
-        run: npm ci || npm install --no-audit --no-fund
+        run: npm ci --ignore-scripts
 
       # Each npm package needs a Trusted Publisher entry for OIDC/provenance.
       - name: Publish @triflux/core

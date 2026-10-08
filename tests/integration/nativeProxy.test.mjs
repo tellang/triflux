@@ -4,26 +4,30 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
-import {
+// nativeProxy 는 import 시점에 CLAUDE_CONFIG_DIR 를 읽는다. 실제 ~/.claude 에 쓰지 않게 먼저 임시 경로로 돌린다.
+const CLAUDE_HOME = mkdtempSync(join(tmpdir(), "tfx-native-proxy-"));
+process.env.CLAUDE_CONFIG_DIR = CLAUDE_HOME;
+after(() => rmSync(CLAUDE_HOME, { recursive: true, force: true }));
+
+const {
   resolveTeamPaths,
   teamInfo,
   teamSendMessage,
   teamTaskList,
   teamTaskUpdate,
-} from "../../hub/team/nativeProxy.mjs";
+} = await import("../../hub/team/nativeProxy.mjs");
 
-// ── 픽스처 헬퍼 ──
-// nativeProxy.mjs는 homedir()/.claude/teams|tasks 경로를 하드코딩.
-// 환경변수로 오버라이드할 수 없으므로 실제 ~/.claude 아래에 임시 팀 디렉토리를 생성하고
-// 테스트 후 정리한다. 팀 이름을 유니크하게 만들어 충돌을 방지.
-
-import { homedir } from "node:os";
-
-const CLAUDE_HOME = join(homedir(), ".claude");
 const TEAMS_ROOT = join(CLAUDE_HOME, "teams");
 const TASKS_ROOT = join(CLAUDE_HOME, "tasks");
 

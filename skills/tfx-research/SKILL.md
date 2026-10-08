@@ -68,11 +68,12 @@ Agent(
 )
 ```
 
-**Bash (Codex + Brave):**
-```
-Bash("tfx multi \
-  --assign 'codex:서브쿼리를 Brave Search 로 검색. 서브쿼리: {sub_queries}. 관점: 실용/산업. brave_web_search + brave_news_search, freshness=pw. 각 쿼리 상위 5개 구조화.:scientist' \
-  --timeout 1800", run_in_background=true)
+**Bash (Codex + Brave):** 사용자 입력은 Write 도구로 임시 파일에 쓰고 `"$(cat "$f")"` 로 넘긴다. 따옴표 인자에 직접 끼우면 입력의 `'` 하나로 인용이 끝나고, heredoc 은 입력에 종료자 줄이 있으면 끝난다. 큰따옴표 안의 명령 치환 결과는 다시 해석되지 않는다. `{queries_file}` 은 서브쿼리를 쓴 파일이다.
+```bash
+# Bash(run_in_background=true)
+tfx multi \
+  --assign "codex:서브쿼리를 Brave Search 로 검색. 서브쿼리: $(cat {queries_file}). 관점: 실용/산업. brave_web_search + brave_news_search, freshness=pw. 각 쿼리 상위 5개 구조화.:scientist" \
+  --timeout 1800
 ```
 
 > 배리어: 위 dispatch는 background로 실행한다. task-notification 완료 후 team runtime 결과에서 검색 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
@@ -129,8 +130,10 @@ AskUserQuestion:
 
 ### Step 2: Antigravity Google Search 위임
 
-```
-Bash("bash ~/.claude/scripts/tfx-route.sh antigravity 'Research: use Google Search, return structured markdown with sources. Query: {optimized_query}' auto 120")
+`{query_file}` 은 Write 도구로 최적화 쿼리를 쓴 파일이다(위 Codex + Brave 절의 규칙).
+
+```bash
+bash ~/.claude/scripts/tfx-route.sh antigravity "Research: use Google Search, return structured markdown with sources. Query: $(cat {query_file})" auto 120
 ```
 
 **Fallback**: Antigravity 실패 시 MCP 순서: context7 → WebSearch → Brave → Exa → Tavily.

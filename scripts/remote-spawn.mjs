@@ -112,12 +112,14 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
+// PowerShell 은 ‘ ’ ‚ ‛ 도 작은따옴표로 읽는다. 따옴표 문자를 모두 겹쳐 써야 인용이 안 끝난다.
 function escapePwshSingleQuoted(value) {
-  return String(value).replace(/'/g, "''");
+  return String(value).replace(/['\u2018\u2019\u201A\u201B]/g, "$&$&");
 }
 
+// 큰따옴표 안에서는 $ 가 확장되고 “ ” „ 도 따옴표로 읽힌다. 모두 백틱으로 막는다.
 function escapePwshDoubleQuoted(value) {
-  return String(value).replace(/`/g, "``").replace(/"/g, '`"');
+  return String(value).replace(/[`$"\u201C\u201D\u201E]/g, "`$&");
 }
 
 function normalizeCommandPath(value) {
@@ -671,8 +673,13 @@ async function spawnLocalFallback(args, claudePath, prompt) {
   let command;
 
   if (prompt) {
-    const psQuoted = `'${prompt.replace(/'/g, "''")}'`;
-    command = `pwsh -NoProfile -Command "& '${claudeForward}' ${getPermissionFlag().join(" ")} ${psQuoted}"`;
+    // 프롬프트를 명령줄에 넣지 않는다. 바깥 큰따옴표 층은 PowerShell 이스케이프로 못 막는다.
+    const promptFile = join(
+      tmpdir(),
+      `tfx-prompt-${randomUUID().slice(0, 8)}.md`,
+    );
+    writeFileSync(promptFile, prompt, { encoding: "utf8", mode: 0o600 });
+    command = `pwsh -NoProfile -Command "& '${escapePwshSingleQuoted(claudeForward)}' ${getPermissionFlag().join(" ")} (Get-Content -Raw -LiteralPath '${escapePwshSingleQuoted(promptFile)}')"`;
   } else {
     command = `${claudeForward} ${getPermissionFlag().join(" ")}`;
   }
@@ -739,12 +746,11 @@ async function spawnRemoteFallback(args, promptContext) {
     console.warn("[tfx] 원격 홈 미감지 — --transfer 파일이 무시됩니다");
   }
 
-  const scriptLines = [`cd '${dir.replace(/'/g, "''")}'`];
+  const scriptLines = [`cd '${escapePwshSingleQuoted(dir)}'`];
 
   if (prompt) {
-    const safePrompt = prompt.replace(/'/g, "''");
     scriptLines.push(
-      `& "$env:USERPROFILE\\.local\\bin\\claude.exe" ${permFlags.join(" ")} '${safePrompt}'`,
+      `& "$env:USERPROFILE\\.local\\bin\\claude.exe" ${permFlags.join(" ")} '${escapePwshSingleQuoted(prompt)}'`,
     );
   } else {
     scriptLines.push(
