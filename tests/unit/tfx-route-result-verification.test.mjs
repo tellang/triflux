@@ -122,7 +122,7 @@ describe("tfx-route-post.mjs — mcp_transport 이슈 추적(관측성)", () => 
     const stdoutLog = join(logdir, "stdout.log");
     const issues = join(home, ".claude", "cache", "cli-issues.jsonl");
     const echo =
-      "OpenAI Codex v0.156.1\n--------\nuser\nrate limit 429 과 401 오류를 고쳐라\n";
+      "OpenAI Codex v0.156.1\n--------\nuser\nrate limit 429 를 고쳐라\nerror: unexpected status 401 Unauthorized\n";
     const run = (stderr, exitCode) => {
       writeFileSync(stderrLog, stderr);
       writeFileSync(stdoutLog, "완료\n");

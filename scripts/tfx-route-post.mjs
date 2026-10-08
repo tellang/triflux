@@ -292,10 +292,12 @@ function recordBatchEvent(result, agent) {
 }
 
 // ── CLI 이슈 추적 ──
-// Codex 는 배너, 설정, 프롬프트 에코를 stderr 로 낸다. 배너가 있으면 오류 줄 형태만 검사한다.
+// Codex 는 배너, 설정, 프롬프트 에코, 명령 출력을 stderr 로 낸다. 그 안의 "error:" 줄은
+// 지시문이나 읽은 파일 내용일 수 있다. 성공 실행은 Codex 자체 tracing 줄만, 실패 실행은
+// 오류 형태 줄과 transport 크래시 줄까지 검사한다.
 const CODEX_TRANSPORT_CRASH = /Transport channel closed|rmcp::transport/i;
 
-function issueDiagnostics(stderrContent, cliType) {
+function issueDiagnostics(stderrContent, cliType, exitCode) {
   if (cliType !== "codex" || !stderrContent) return stderrContent;
   const lines = stderrContent.split("\n").map((line) => line.trim());
   if (!lines.some((line) => /^OpenAI Codex v/.test(line))) return stderrContent;
@@ -303,8 +305,9 @@ function issueDiagnostics(stderrContent, cliType) {
     .filter(
       (line) =>
         CODEX_TRACING_DIAGNOSTIC.test(line) ||
-        CODEX_PLAIN_DIAGNOSTIC.test(line) ||
-        CODEX_TRANSPORT_CRASH.test(line),
+        (exitCode !== 0 &&
+          (CODEX_PLAIN_DIAGNOSTIC.test(line) ||
+            CODEX_TRANSPORT_CRASH.test(line))),
     )
     .join("\n");
 }
@@ -520,7 +523,7 @@ function main() {
   trackCliIssue(
     cliType,
     agent,
-    issueDiagnostics(stderrContent, cliType),
+    issueDiagnostics(stderrContent, cliType, exitCode),
     exitCode,
   );
 
