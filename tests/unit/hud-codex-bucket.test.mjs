@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   classifyBucket,
+  createReverseLineReader,
   expireStaleCodexBuckets,
   getCodexRateLimits,
   normalizeBuckets,
@@ -729,6 +730,145 @@ describe("Codex multi-window selection", () => {
     assert.deepEqual(buckets.codex.secondary, {
       used_percent: 45,
       resets_at: nowSec + 1,
+    });
+  });
+
+  describe("tail read", () => {
+    it("reverse reader: 작은 청크에서도 옛 trim().split().reverse() 와 같은 줄을 낸다", () => {
+      const dir = mkdtempSync(join(tmpdir(), "triflux-codex-tail-"));
+      try {
+        const file = join(dir, "a.jsonl");
+        const samples = [
+          ["첫 줄", "", "가나다 ".repeat(40), '{"a":1}', "끝"].join("\n") +
+            "\n\n",
+          "\uFEFF\n \t첫\n\n끝\u00a0\n\r\n",
+          "   \n \n",
+          "",
+          "한 줄",
+        ];
+        for (const text of samples) {
+          writeFileSync(file, text);
+          const expected = text.trim().split("\n").reverse();
+          // 파일 머리의 공백은 머리가 한 청크에 들어올 때만 지운다.
+          const chunks = /^\s/.test(text) ? [4096] : [1, 3, 7, 4096];
+          for (const chunk of chunks) {
+            const reader = createReverseLineReader(file, chunk);
+            const got = [];
+            for (let l = reader.next(); l !== null; l = reader.next()) {
+              got.push(l);
+            }
+            reader.close();
+            assert.deepEqual(got, expected, `chunk=${chunk}`);
+          }
+        }
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("reverse reader: 마지막 줄을 읽으려고 앞선 큰 줄을 읽지 않는다", () => {
+      const dir = mkdtempSync(join(tmpdir(), "triflux-codex-tail-"));
+      try {
+        const file = join(dir, "a.jsonl");
+        writeFileSync(file, `${"x".repeat(1_000_000)}\n{"last":1}\n`);
+        const reader = createReverseLineReader(file);
+        assert.equal(reader.next(), '{"last":1}');
+        assert.ok(
+          reader.bytesRead <= 64 * 1024,
+          `bytesRead=${reader.bytesRead}`,
+        );
+        reader.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("첫 버킷 뒤 64KB(바이트) 안에 다른 limit_id 가 없으면 첫 버킷만 반환한다", () => {
+      const now = new Date("2026-07-11T06:30:00.000Z");
+      const nowSec = Math.floor(now.getTime() / 1000);
+      const other = rateLimitEvent({
+        timestamp: "2026-07-11T05:00:00.000Z",
+        usedPercent: 50,
+        resetsAt: nowSec + 3600,
+      });
+      other.payload.rate_limits.limit_id = "codex_other";
+      const newest = rateLimitEvent({
+        timestamp: "2026-07-11T06:20:00.000Z",
+        usedPercent: 33,
+        resetsAt: nowSec + 3600,
+      });
+      const run = (output) => {
+        const root = mkdtempSync(join(tmpdir(), "triflux-codex-cut-"));
+        try {
+          const filler = {
+            timestamp: "2026-07-11T05:30:00.000Z",
+            payload: { output },
+          };
+          writeRollout(root, now, "rollout.jsonl", [other, filler, newest]);
+          return getCodexRateLimits({ sessionsRoot: root, now });
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      };
+
+      // 첫 버킷 줄 자체는 예산에 넣지 않는다: 60KB 앞의 다른 버킷은 보인다.
+      assert.equal(
+        run("x".repeat(60_000)).codex_other.primary.used_percent,
+        50,
+      );
+      // 바이트 기준: 글자 수는 3만이지만 9만 바이트라 넘는다.
+      for (const far of [run("x".repeat(70_000)), run("한".repeat(30_000))]) {
+        assert.equal(far.codex.primary.used_percent, 33);
+        assert.equal(far.codex_other, undefined);
+      }
+    });
+
+    it("큰 파일에서 끝의 버킷만 읽고 결과는 그대로다", () => {
+      const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-big-"));
+      try {
+        const now = new Date("2026-07-11T06:30:00.000Z");
+        const nowSec = Math.floor(now.getTime() / 1000);
+        const filler = {
+          timestamp: "2026-07-11T05:00:00.000Z",
+          payload: { output: "한".repeat(40_000) },
+        };
+        const events = [
+          rateLimitEvent({
+            timestamp: "2026-07-11T05:10:00.000Z",
+            usedPercent: 10,
+            resetsAt: nowSec + 3600,
+          }),
+          ...Array.from({ length: 300 }, () => filler),
+          rateLimitEvent({
+            timestamp: "2026-07-11T06:20:00.000Z",
+            usedPercent: 33,
+            resetsAt: nowSec + 3600,
+          }),
+          filler,
+        ];
+        writeRollout(sessionsRoot, now, "rollout-big.jsonl", events);
+        const file = join(
+          sessionsRoot,
+          "2026",
+          "07",
+          "11",
+          "rollout-big.jsonl",
+        );
+
+        const reader = createReverseLineReader(file);
+        reader.next();
+        reader.next();
+        assert.ok(
+          reader.bytesRead <= 256 * 1024,
+          `bytesRead=${reader.bytesRead}`,
+        );
+        reader.close();
+
+        const buckets = getCodexRateLimits({ sessionsRoot, now });
+        assert.equal(buckets.codex.primary.used_percent, 33);
+      } finally {
+        rmSync(sessionsRoot, { recursive: true, force: true });
+      }
     });
   });
 });

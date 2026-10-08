@@ -3,7 +3,15 @@
 // ============================================================================
 
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   CODEX_MIN_BUCKETS,
@@ -253,6 +261,110 @@ function mergeRateLimitSnapshots(snapshots, nowSec) {
   return merged;
 }
 
+const EXTRA_BYTES_AFTER_FIRST_BUCKET = 64 * 1024;
+const REVERSE_READ_CHUNK_BYTES = 64 * 1024;
+
+// 파일 끝에서 줄 단위로 거슬러 읽는다. 호출자가 멈추는 지점까지만 디스크를 읽는다.
+// 0x0A 로만 나누므로 멀티바이트 UTF-8 이 청크 경계에서 깨지지 않는다.
+// 파일 양끝의 공백은 문자열 trim() 과 같게 버리고 중간의 빈 줄은 유지해,
+// 옛 content.trim().split("\n").reverse() 와 같은 줄을 낸다.
+export function createReverseLineReader(
+  path,
+  chunkBytes = REVERSE_READ_CHUNK_BYTES,
+) {
+  const fd = openSync(path, "r");
+  let pos;
+  try {
+    pos = fstatSync(fd).size;
+  } catch (err) {
+    closeSync(fd);
+    throw err;
+  }
+  let carryParts = []; // 아직 줄 시작을 못 만난 뒷부분 조각. 나중에 읽은(앞쪽) 조각이 뒤에 쌓인다
+  let queue = [];
+  let leadingBlank = -1; // 파일 맨 앞의 빈 줄 수. 끝까지 읽은 뒤에만 정해진다
+  let trimmingTail = true;
+  let yielded = false;
+  let emptyGiven = false;
+
+  function fill() {
+    const size = Math.min(chunkBytes, pos);
+    const chunk = Buffer.alloc(size);
+    pos -= size;
+    readSync(fd, chunk, 0, size, pos);
+    reader.bytesRead += size;
+    const pieces = [];
+    let start = 0;
+    for (
+      let i = chunk.indexOf(0x0a);
+      i !== -1;
+      i = chunk.indexOf(0x0a, start)
+    ) {
+      pieces.push(chunk.subarray(start, i));
+      start = i + 1;
+    }
+    pieces.push(chunk.subarray(start));
+    if (pieces.length === 1 && pos > 0) {
+      carryParts.push(chunk);
+      return;
+    }
+    const last = pieces.length - 1;
+    pieces[last] = Buffer.concat([pieces[last], ...carryParts.reverse()]);
+    carryParts = pos > 0 ? [pieces.shift()] : [];
+    queue = pieces.map((piece) => piece.toString("utf-8"));
+    if (pos === 0) {
+      leadingBlank = 0;
+      while (leadingBlank < queue.length && queue[leadingBlank].trim() === "") {
+        leadingBlank++;
+      }
+    }
+  }
+
+  // 옛 trim() 은 파일 맨 앞의 공백과 빈 줄을 지운다. 이미 읽은 줄만으로 알 수 있을 때만 적용해
+  // 앞선 큰 줄을 미리 읽지 않는다.
+  const isFileHead = () => leadingBlank >= 0 && queue.length <= leadingBlank;
+
+  const reader = {
+    bytesRead: 0,
+    // 줄이 더 없으면 null
+    next() {
+      let line = null;
+      while (queue.length > 0 || pos > 0) {
+        if (queue.length === 0) {
+          fill();
+          continue;
+        }
+        line = queue.pop();
+        const blank = line.trim() === "";
+        if (blank && (trimmingTail || isFileHead())) {
+          line = null;
+          continue;
+        }
+        break;
+      }
+      if (line === null) {
+        if (yielded || emptyGiven) return null;
+        emptyGiven = true; // 빈 파일도 옛 split 처럼 빈 줄 하나를 낸다
+        return "";
+      }
+      yielded = true;
+      if (trimmingTail) {
+        trimmingTail = false;
+        line = line.trimEnd();
+      }
+      return isFileHead() ? line.trimStart() : line;
+    },
+    close() {
+      try {
+        closeSync(fd);
+      } catch {
+        /* 이미 닫힘 */
+      }
+    },
+  };
+  return reader;
+}
+
 // ============================================================================
 // Codex 세션 JSONL에서 실제 rate limits 추출
 // 한계: rate_limits는 세션별 스냅샷이므로 여러 세션 간 토큰 합산은 불가.
@@ -298,50 +410,65 @@ export function getCodexRateLimits({
     const daySnapshots = [];
     for (const file of files) {
       try {
-        const content = readFileSync(join(sessDir, file), "utf-8");
         const found = {};
-        const lines = content.trim().split("\n").reverse();
-        let scanned = 0;
-        for (const line of lines) {
-          if (++scanned > maxLinesPerFile) break;
-          try {
-            const evt = JSON.parse(line);
-            const rl = evt?.payload?.rate_limits;
-            if (rl?.limit_id && !found[rl.limit_id]) {
-              // window_minutes 기준으로 5h/1w 슬롯 정규화
-              const { primary, secondary } = normalizeBuckets(rl);
-              found[rl.limit_id] = {
-                limitId: rl.limit_id,
-                limitName: rl.limit_name,
-                primary,
-                secondary,
-                credits: rl.credits,
-                tokens: evt.payload?.info?.total_token_usage,
-                contextWindow: evt.payload?.info?.model_context_window,
-                timestamp: evt.timestamp,
-              };
-            } else if (
-              dayOffset <= 1 &&
-              !rl &&
-              evt?.payload?.info?.total_token_usage &&
-              !syntheticBucket
-            ) {
-              // 2일 이내 token_count: 합성 버킷 (rate_limits가 null일 때 행 활성화용, stale 방지)
-              syntheticBucket = {
-                limitId: "codex",
-                limitName: "codex-session",
-                primary: null,
-                secondary: null,
-                credits: null,
-                tokens: evt.payload.info.total_token_usage,
-                contextWindow: evt.payload.info.model_context_window,
-                timestamp: evt.timestamp,
-              };
+        const reader = createReverseLineReader(join(sessDir, file));
+        try {
+          let scanned = 0;
+          let bytesAfterFirstBucket = 0;
+          // 다음 줄을 읽기 전에 한도를 본다. 안 볼 줄을 만들려고 큰 줄을 읽지 않기 위해서다.
+          while (
+            scanned < maxLinesPerFile &&
+            bytesAfterFirstBucket < EXTRA_BYTES_AFTER_FIRST_BUCKET
+          ) {
+            const line = reader.next();
+            if (line === null) break;
+            scanned++;
+            // 같은 시점의 다른 limit_id 는 인접해 기록된다. 첫 버킷을 찾은 뒤에는 일정 바이트만 더 보고 멈춰,
+            // 단일 버킷 계정에서 800줄(파일 거의 전체)을 끝까지 읽지 않는다.
+            if (Object.keys(found).length > 0) {
+              bytesAfterFirstBucket += Buffer.byteLength(line) + 1;
             }
-          } catch {
-            /* 라인 파싱 실패 무시 */
+            try {
+              const evt = JSON.parse(line);
+              const rl = evt?.payload?.rate_limits;
+              if (rl?.limit_id && !found[rl.limit_id]) {
+                // window_minutes 기준으로 5h/1w 슬롯 정규화
+                const { primary, secondary } = normalizeBuckets(rl);
+                found[rl.limit_id] = {
+                  limitId: rl.limit_id,
+                  limitName: rl.limit_name,
+                  primary,
+                  secondary,
+                  credits: rl.credits,
+                  tokens: evt.payload?.info?.total_token_usage,
+                  contextWindow: evt.payload?.info?.model_context_window,
+                  timestamp: evt.timestamp,
+                };
+              } else if (
+                dayOffset <= 1 &&
+                !rl &&
+                evt?.payload?.info?.total_token_usage &&
+                !syntheticBucket
+              ) {
+                // 2일 이내 token_count: 합성 버킷 (rate_limits가 null일 때 행 활성화용, stale 방지)
+                syntheticBucket = {
+                  limitId: "codex",
+                  limitName: "codex-session",
+                  primary: null,
+                  secondary: null,
+                  credits: null,
+                  tokens: evt.payload.info.total_token_usage,
+                  contextWindow: evt.payload.info.model_context_window,
+                  timestamp: evt.timestamp,
+                };
+              }
+            } catch {
+              /* 라인 파싱 실패 무시 */
+            }
+            if (Object.keys(found).length >= CODEX_MIN_BUCKETS) break;
           }
-          if (Object.keys(found).length >= CODEX_MIN_BUCKETS) break;
+        } finally {
+          reader.close();
         }
         daySnapshots.push(...Object.values(found));
       } catch {
