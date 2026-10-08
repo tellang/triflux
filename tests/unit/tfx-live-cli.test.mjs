@@ -3126,3 +3126,52 @@ test("stop parses one Claude daemon target", () => {
     /one of/,
   );
 });
+
+test("resume --last thread 는 띄운 뒤 resume 기록이 하나일 때만 인정한다", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-resume-last-"));
+  try {
+    const ids = [
+      "01a11962-e6cc-7ff3-893c-281bb4c057a1",
+      "01a11962-e6cc-7ff3-893c-281bb4c057a2",
+      "01a11962-e6cc-7ff3-893c-281bb4c057a3",
+    ];
+    const launchedAtMs = Date.parse("2026-10-08T03:00:00Z");
+    const resumedAt = (id, at) =>
+      fs.writeFile(
+        path.join(dir, id),
+        `${JSON.stringify({ timestamp: at, type: "event_msg", payload: { type: "thread_settings_applied" } })}\n`,
+      );
+    await resumedAt(ids[0], "2026-10-08T02:59:00Z");
+    await resumedAt(ids[1], "2026-10-08T03:00:05Z");
+    await resumedAt(ids[2], "2026-10-08T03:00:06Z");
+    const deps = (loaded) => ({
+      loadedIds: async () => loaded,
+      findRollout: async (id) => path.join(dir, id),
+    });
+    // 띄우기 전의 resume 기록은 우리 TUI 가 아니다.
+    assert.equal(
+      await tfxLive.resumedCodexThread(
+        { cwd: dir, launchedAtMs },
+        deps(ids.slice(0, 2)),
+      ),
+      ids[1],
+    );
+    // 띄운 뒤 기록이 끝부분 밖으로 밀려 확인할 수 없는 후보가 있으면 고르지 않는다.
+    await fs.writeFile(
+      path.join(dir, ids[2]),
+      `${JSON.stringify({ timestamp: "2026-10-08T03:00:07Z", type: "event_msg", payload: { type: "agent_message", message: "x".repeat(300 * 1024) } })}\n`,
+    );
+    assert.equal(
+      await tfxLive.resumedCodexThread({ cwd: dir, launchedAtMs }, deps(ids)),
+      null,
+    );
+    await resumedAt(ids[2], "2026-10-08T03:00:06Z");
+    // 같은 cwd 에서 동시에 두 thread 가 resume 되면 고르지 않는다.
+    assert.equal(
+      await tfxLive.resumedCodexThread({ cwd: dir, launchedAtMs }, deps(ids)),
+      null,
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

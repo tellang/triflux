@@ -8,6 +8,7 @@ import {
   readdir,
   readFile,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -46,6 +47,7 @@ import {
 import {
   CONTEXT_THRESHOLDS,
   contextGuard,
+  findCodexRollout,
   modelContext,
   readCodexContext,
 } from "../hub/team/session-context.mjs";
@@ -2066,6 +2068,76 @@ async function resolveAskTransport(adapter, opts, deps = {}) {
   };
 }
 
+// 공유 app-server daemon 에 로드된 thread 중 cwd 가 같은 것. daemon 이 없거나 늦으면 빈 목록.
+async function loadedCodexThreadIds(cwd, timeoutMs) {
+  try {
+    const { listCodexAppServerThreads } = await import(
+      "../hub/team/uds-orchestrator.mjs"
+    );
+    const threads = await listCodexAppServerThreads({
+      socketPath: resolveCodexDaemonSocket("default"),
+      cwd,
+      timeoutMs,
+    });
+    return threads.map((thread) => thread.threadId);
+  } catch {
+    return [];
+  }
+}
+
+const ROLLOUT_TAIL_BYTES = 256 * 1024;
+
+// thread_settings_applied 는 resume 과 설정 변경 때 쓰인다. 끝부분이 sinceMs 이후를 다 덮지
+// 못하면 "unknown" 이다.
+async function resumedSince(rollout, sinceMs) {
+  const info = await stat(rollout).catch(() => null);
+  if (!info || info.mtimeMs < sinceMs) return "no";
+  const handle = await open(rollout, "r");
+  let text;
+  try {
+    const length = Math.min(info.size, ROLLOUT_TAIL_BYTES);
+    const { buffer } = await handle.read(
+      Buffer.alloc(length),
+      0,
+      length,
+      info.size - length,
+    );
+    text = buffer.toString("utf8");
+  } finally {
+    await handle.close();
+  }
+  let covered = info.size <= ROLLOUT_TAIL_BYTES;
+  for (const line of text.split("\n")) {
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const at = Date.parse(entry.timestamp);
+    if (at < sinceMs) covered = true;
+    else if (entry.payload?.type === "thread_settings_applied")
+      return "resumed";
+  }
+  return covered ? "no" : "unknown";
+}
+
+// resume --last 는 pane 인자에 UUID 가 남지 않아 Codex 가 실제로 연 thread 를 사후에 찾는다.
+// 띄운 뒤 기록이 생긴 thread 가 정확히 하나이고 나머지 후보가 모두 확인됐을 때만 인정한다.
+async function resumedCodexThread(
+  { cwd, launchedAtMs, timeoutMs },
+  { loadedIds = loadedCodexThreadIds, findRollout = findCodexRollout } = {},
+) {
+  const matches = [];
+  for (const id of await loadedIds(cwd, timeoutMs)) {
+    const rollout = isCodexThreadId(id) && (await findRollout(id));
+    const state = rollout ? await resumedSince(rollout, launchedAtMs) : "no";
+    if (state === "unknown") return null;
+    if (state === "resumed") matches.push(id);
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
 async function doStart(adapter, opts) {
   const {
     session,
@@ -2098,6 +2170,8 @@ async function doStart(adapter, opts) {
   if (resumed && name && adapter.cli === "claude")
     launchKeys[0] += ` ${shellQuote(["-n", name])}`;
   const resumeTarget = resume ?? (resumeLast ? "last" : null);
+  const trackResumeLast = resumeLast && adapter.cli === "codex" && !remote;
+  const launchedAtMs = Date.now();
 
   // 분리 세션 기본 80x24 에서는 긴 입력이 화면 높이를 넘으므로 넓게 만든다. 붙으면 클라이언트 크기를 따른다.
   await runTmux(remote, [
@@ -2134,6 +2208,23 @@ async function doStart(adapter, opts) {
   let nameApplied = Boolean(name) && adapter.cli === "claude" && ready;
   let threadId =
     adapter.cli === "codex" && isCodexThreadId(resume) ? resume : null;
+  // 우리 TUI 의 resume 기록이 늦게 반영되면 남의 기록만 보일 수 있어, 1.5초 뒤에도 같은 후보가
+  // 유일할 때만 확정한다. 5초 안에 확인하지 못하면 null 로 둔다.
+  const threadDeadline = Date.now() + 5000;
+  let candidate = null;
+  while (trackResumeLast && ready && !threadId) {
+    const timeoutMs = threadDeadline - Date.now();
+    if (timeoutMs <= 0) break;
+    const found = await resumedCodexThread({
+      cwd: cwd ?? process.cwd(),
+      launchedAtMs,
+      timeoutMs,
+    });
+    if (found && found === candidate) threadId = found;
+    candidate = found;
+    if (!threadId)
+      await sleep(Math.min(found ? 1500 : 500, threadDeadline - Date.now()));
+  }
   if (name && adapter.cli === "codex" && ready) {
     try {
       const command = `/rename ${name}`;
@@ -4515,6 +4606,7 @@ export {
   peerSideBaseOpts,
   resolveAskTransport,
   resolveCodexDaemonSocket,
+  resumedCodexThread,
   splitTmuxTarget,
   stopOpts,
   tmuxBufferName,
