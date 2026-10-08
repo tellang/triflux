@@ -4,7 +4,6 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -17,7 +16,6 @@ import {
   PHASE_ENUM,
   PHASE_STATUS,
   readPhase,
-  syncToGstack,
   writePhase,
 } from "../../hub/lib/phase-manager.mjs";
 
@@ -28,28 +26,6 @@ function registerTempDir(prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   TEMP_DIRS.push(dir);
   return dir;
-}
-
-function setEnv(name, value) {
-  const previous = process.env[name];
-  if (value == null) {
-    delete process.env[name];
-  } else {
-    process.env[name] = value;
-  }
-
-  RESTORES.push(() => {
-    if (previous == null) {
-      delete process.env[name];
-    } else {
-      process.env[name] = previous;
-    }
-  });
-}
-
-function setHomeDir(homeDir) {
-  setEnv("HOME", homeDir);
-  setEnv("USERPROFILE", homeDir);
 }
 
 function pushCwd(nextCwd) {
@@ -252,136 +228,6 @@ describe("hub/lib/phase-manager.mjs", () => {
     assert.equal(state.phase_status, "failed");
     assert.equal(state.current_phase, "strategy");
     assert.equal(state.extra, "keep");
-  });
-
-  it("syncToGstack is a no-op when ~/.gstack is missing", async () => {
-    const root = setupWorkspace();
-    const homeDir = registerTempDir("tfx-no-gstack-home-");
-    setHomeDir(homeDir);
-
-    writeJson(fullcycleStatePath(root, "run-noop"), {
-      run_id: "run-noop",
-      phase: "Research",
-      phase_status: "active",
-    });
-
-    await assert.doesNotReject(syncToGstack("run-noop", "triflux"));
-    assert.equal(
-      readFileSync(fullcycleStatePath(root, "run-noop"), "utf8").length > 0,
-      true,
-    );
-  });
-
-  it("syncToGstack injects phase and triflux_run_id into the latest checkpoint frontmatter", async () => {
-    const root = setupWorkspace();
-    const homeDir = registerTempDir("tfx-gstack-home-");
-    const slug = "triflux";
-    const runId = "run-sync";
-    const checkpointsDir = join(
-      homeDir,
-      ".gstack",
-      "projects",
-      slug,
-      "checkpoints",
-    );
-    const olderPath = join(checkpointsDir, "older.md");
-    const latestPath = join(checkpointsDir, "latest.md");
-
-    setHomeDir(homeDir);
-    mkdirSync(checkpointsDir, { recursive: true });
-    writeJson(fullcycleStatePath(root, runId), {
-      run_id: runId,
-      phase: "Execution",
-      phase_status: "active",
-    });
-
-    writeFileSync(
-      olderPath,
-      "---\nstatus: in-progress\nbranch: main\n---\nold\n",
-      "utf8",
-    );
-    writeFileSync(
-      latestPath,
-      "---\nstatus: in-progress\nbranch: feature/phase\n---\nnew\n",
-      "utf8",
-    );
-
-    const now = new Date();
-    utimesSync(olderPath, now, new Date(now.getTime() - 10_000));
-    utimesSync(latestPath, now, new Date(now.getTime() + 10_000));
-
-    await syncToGstack(runId, slug);
-
-    const updated = readFileSync(latestPath, "utf8");
-    assert.match(updated, /^---\r?\n/m);
-    assert.match(updated, /phase: Execution/);
-    assert.match(updated, /triflux_run_id: run-sync/);
-
-    const older = readFileSync(olderPath, "utf8");
-    assert.doesNotMatch(older, /triflux_run_id:/);
-  });
-
-  it("syncToGstack skips when no checkpoint markdown files exist", async () => {
-    const root = setupWorkspace();
-    const homeDir = registerTempDir("tfx-empty-gstack-home-");
-    const slug = "triflux";
-    const runId = "run-empty";
-
-    setHomeDir(homeDir);
-    mkdirSync(join(homeDir, ".gstack", "projects", slug, "checkpoints"), {
-      recursive: true,
-    });
-    writeJson(fullcycleStatePath(root, runId), {
-      run_id: runId,
-      phase: "Validation",
-      phase_status: "active",
-    });
-
-    await assert.doesNotReject(syncToGstack(runId, slug));
-  });
-
-  it("syncToGstack preserves exact frontmatter delimiters and body newlines", async () => {
-    const root = setupWorkspace();
-    const homeDir = registerTempDir("tfx-gstack-frontmatter-");
-    setHomeDir(homeDir);
-    const runId = "run-frontmatter";
-    writeJson(fullcycleStatePath(root, runId), {
-      run_id: runId,
-      phase: "Execution",
-      phase_status: "active",
-    });
-    const checkpointDir = join(
-      homeDir,
-      ".gstack",
-      "projects",
-      "triflux",
-      "checkpoints",
-    );
-    mkdirSync(checkpointDir, { recursive: true });
-    const checkpointPath = join(checkpointDir, "latest.md");
-
-    for (const eol of ["\n", "\r\n"]) {
-      for (const bodyLines of [[], [""], ["body"], ["", "body", ""]]) {
-        const lines = ["---", "status: in-progress", "--- ", "----"];
-        writeFileSync(
-          checkpointPath,
-          [...lines, "---", ...bodyLines].join(eol),
-        );
-
-        await syncToGstack(runId, "triflux");
-
-        assert.equal(
-          readFileSync(checkpointPath, "utf8"),
-          [
-            ...lines,
-            "phase: Execution",
-            `triflux_run_id: ${runId}`,
-            "---",
-            ...bodyLines,
-          ].join(eol),
-        );
-      }
-    }
   });
 
   it("coerceLegacyPhase maps research, strategy, execution, validation, complete and unknown cases", () => {

@@ -1035,10 +1035,6 @@ async function writePhaseSafely(runId, phase, status) {
     if (typeof mod?.writePhase === "function") {
       await mod.writePhase(runId, phase, status);
     }
-    if (typeof mod?.syncToGstack === "function") {
-      const slug = process.cwd().split(/[\\/]/).pop();
-      await mod.syncToGstack(runId, slug);
-    }
   } catch {
     /* silent — phase tracking is best-effort */
   }
@@ -1059,10 +1055,6 @@ async function writePhaseSafelyFromLegacy(runId, legacyStatus) {
       return;
     }
     await mod.writePhase(runId, coerced, "active");
-    if (typeof mod?.syncToGstack === "function") {
-      const slug = process.cwd().split(/[\\/]/).pop();
-      await mod.syncToGstack(runId, slug);
-    }
   } catch {
     /* silent */
   }

@@ -1,14 +1,5 @@
 import { existsSync } from "node:fs";
-import {
-  mkdir,
-  readdir,
-  readFile,
-  rename,
-  stat,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
-import os from "node:os";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 /**
@@ -41,13 +32,6 @@ export const PHASE_STATUS = Object.freeze(["active", "complete", "failed"]);
 
 const PHASE_SET = new Set(PHASE_ENUM);
 const PHASE_STATUS_SET = new Set(PHASE_STATUS);
-
-/**
- * @returns {string}
- */
-function getHomeDir() {
-  return process.env.HOME || process.env.USERPROFILE || os.homedir();
-}
 
 /**
  * @param {unknown} value
@@ -161,21 +145,6 @@ async function writeJsonAtomic(targetPath, payload) {
 }
 
 /**
- * @param {string} targetPath
- * @param {string} content
- * @returns {Promise<void>}
- */
-async function writeTextAtomic(targetPath, content) {
-  const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
-  await mkdir(dirname(targetPath), { recursive: true });
-  await writeFile(tempPath, content, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  await safeReplaceFile(tempPath, targetPath);
-}
-
-/**
  * @param {string} filePath
  * @returns {Promise<Record<string, unknown> | null>}
  */
@@ -272,68 +241,6 @@ function applyPhaseRecord(data, record) {
 }
 
 /**
- * @param {string} content
- * @returns {{lines: string[], bodyLines: string[], eol: string} | null}
- */
-function parseFrontmatter(content) {
-  const eol = content.includes("\r\n") ? "\r\n" : "\n";
-  const lines = content.split(/\r?\n/);
-
-  if (lines[0] !== "---") {
-    return null;
-  }
-
-  const closingIndex = lines.indexOf("---", 1);
-  if (closingIndex === -1) {
-    return null;
-  }
-
-  return {
-    lines: lines.slice(1, closingIndex),
-    bodyLines: lines.slice(closingIndex + 1),
-    eol,
-  };
-}
-
-/**
- * @param {string[]} lines
- * @param {Record<string, string>} fields
- * @returns {string[]}
- */
-function upsertFrontmatterLines(lines, fields) {
-  const nextLines = [...lines];
-
-  for (const [key, value] of Object.entries(fields)) {
-    const keyPrefix = `${key}:`;
-    const index = nextLines.findIndex((line) => line.startsWith(keyPrefix));
-
-    if (index >= 0) {
-      nextLines[index] = `${key}: ${value}`;
-      continue;
-    }
-
-    nextLines.push(`${key}: ${value}`);
-  }
-
-  return nextLines;
-}
-
-/**
- * @param {string} content
- * @param {Record<string, string>} fields
- * @returns {string | null}
- */
-function injectFrontmatterFields(content, fields) {
-  const parsed = parseFrontmatter(content);
-  if (!parsed) {
-    return null;
-  }
-
-  const updatedLines = upsertFrontmatterLines(parsed.lines, fields);
-  return ["---", ...updatedLines, "---", ...parsed.bodyLines].join(parsed.eol);
-}
-
-/**
  * @param {string} runId
  * @returns {Promise<PhaseRecord | null>}
  */
@@ -391,68 +298,6 @@ export async function writePhase(runId, phase, status = "active") {
   }
 
   await writeJsonAtomic(statePath, next);
-}
-
-/**
- * @param {string} runId
- * @param {string} slug
- * @returns {Promise<void>}
- */
-export async function syncToGstack(runId, slug) {
-  const gstackRoot = join(getHomeDir(), ".gstack");
-  if (!existsSync(gstackRoot)) {
-    return;
-  }
-
-  const record = await readPhase(runId);
-  if (!record) {
-    return;
-  }
-
-  const phase = record.phase === "complete" ? record.lastPhase : record.phase;
-  if (!phase) {
-    return;
-  }
-
-  const checkpointsDir = join(gstackRoot, "projects", slug, "checkpoints");
-  if (!existsSync(checkpointsDir)) {
-    return;
-  }
-
-  const entries = await readdir(checkpointsDir, { withFileTypes: true });
-  const markdownFiles = entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
-    .map((entry) => join(checkpointsDir, entry.name));
-
-  if (markdownFiles.length === 0) {
-    return;
-  }
-
-  const latestFile = (
-    await Promise.all(
-      markdownFiles.map(async (filePath) => ({
-        filePath,
-        stats: await stat(filePath),
-      })),
-    )
-  ).sort((left, right) => right.stats.mtimeMs - left.stats.mtimeMs)[0]
-    ?.filePath;
-
-  if (!latestFile) {
-    return;
-  }
-
-  const currentContent = await readFile(latestFile, "utf8");
-  const nextContent = injectFrontmatterFields(currentContent, {
-    phase,
-    triflux_run_id: runId,
-  });
-
-  if (!nextContent || nextContent === currentContent) {
-    return;
-  }
-
-  await writeTextAtomic(latestFile, nextContent);
 }
 
 /**
