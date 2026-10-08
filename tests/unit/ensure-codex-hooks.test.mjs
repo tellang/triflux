@@ -96,6 +96,7 @@ describe("ensureCodexHooks", () => {
       hookScriptPath: "/repo/hooks/codex-session-hook.mjs",
       nodeBin: "/opt/node",
       backupTimestamp: "20260608T010203",
+      trust: true,
     };
     const first = ensureCodexHooks(opts);
     const hooksAfterFirst = readFileSync(join(codexHome, "hooks.json"), "utf8");
@@ -176,6 +177,22 @@ describe("ensureCodexHooks", () => {
     );
   });
 
+  it("registers hooks without trusted_hash unless trust is approved", () => {
+    const codexHome = makeCodexHome();
+    const result = ensureCodexHooks({
+      codexHome,
+      hookScriptPath: "/repo/hooks/codex-session-hook.mjs",
+      nodeBin: "/opt/node",
+    });
+    assert.equal(result.changedHooks, true);
+    assert.equal(result.trusted, false);
+    assert.ok(existsSync(join(codexHome, "hooks.json")));
+    const config = existsSync(join(codexHome, "config.toml"))
+      ? readFileSync(join(codexHome, "config.toml"), "utf8")
+      : "";
+    assert.doesNotMatch(config, /trusted_hash/);
+  });
+
   it("quotes the Windows node path without doubling backslashes", () => {
     const codexHome = makeCodexHome();
     ensureCodexHooks({
@@ -237,6 +254,7 @@ describe("ensureCodexHooks", () => {
       hookScriptPath: "/repo/hooks/codex-session-hook.mjs",
       nodeBin: "/opt/node",
       backupTimestamp: "20260617T010203",
+      trust: true,
     });
     const configAfter = readFileSync(join(codexHome, "config.toml"), "utf8");
 

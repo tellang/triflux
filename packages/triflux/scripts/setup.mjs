@@ -54,6 +54,8 @@ const _TFX_HOME = resolveTrifluxHome();
 const CLAUDE_DIR = join(_TFX_HOME, ".claude");
 const CODEX_DIR = join(_TFX_HOME, ".codex");
 const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
+// Codex 설정에는 MCP env 키가 들어갈 수 있다. mode 는 새로 만들 때만 적용되고 기존 파일 권한은 그대로 둔다.
+const CODEX_FILE_WRITE = { encoding: "utf8", mode: 0o600 };
 const SETUP_MARKER_PATH = join(CLAUDE_DIR, "cache", "tfx-setup-marker.json");
 
 // machine profile 판독은 공용 리더로 이관했다. 기존 import 표면을 유지하려고
@@ -360,13 +362,7 @@ export async function ensureMachineProfile({
   }
 
   const canPrompt =
-    interactive ??
-    (!nonInteractive &&
-      !isEnabledEnvironmentFlag(env.CI) &&
-      !isEnabledEnvironmentFlag(env.DOCKER) &&
-      env.npm_lifecycle_event !== "postinstall" &&
-      Boolean(input?.isTTY) &&
-      Boolean(output?.isTTY));
+    interactive ?? (!nonInteractive && canAskUser({ env, input, output }));
   const defaults = buildMachineProfileDefaults({
     platform,
     env,
@@ -414,6 +410,117 @@ export async function ensureMachineProfile({
     warnings,
     interactive: canPrompt,
   };
+}
+
+// 사람이 보는 터미널에서만 묻는다. npm postinstall, CI, 파이프 입력에서는 묻지 않는다.
+export function canAskUser({
+  env = process.env,
+  input = process.stdin,
+  output = process.stdout,
+} = {}) {
+  return (
+    !isEnabledEnvironmentFlag(env.CI) &&
+    !isEnabledEnvironmentFlag(env.DOCKER) &&
+    env.npm_lifecycle_event !== "postinstall" &&
+    Boolean(input?.isTTY) &&
+    Boolean(output?.isTTY)
+  );
+}
+
+async function askYesNo(question, { input, output }) {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input, output });
+  try {
+    const answer = (await rl.question(`  ${question} [y/N] `))
+      .trim()
+      .toLowerCase();
+    return answer === "y" || answer === "yes";
+  } finally {
+    rl.close();
+  }
+}
+
+// --exact 가 없으면 winget 이 이름이 비슷한 다른 패키지(psmux.TerminalMap)와 섞는다.
+const PSMUX_WINGET_ARGS = [
+  "install",
+  "--exact",
+  "--id",
+  "marlocarlo.psmux",
+  "--accept-package-agreements",
+  "--accept-source-agreements",
+];
+const PSMUX_MANUAL_INSTALL = "winget install --exact --id marlocarlo.psmux";
+
+// psmux 설치와 Codex 훅 승인은 사용자 동의 뒤에만 한다. 물을 수 없으면 하지 않고 안내만 남긴다.
+export async function runConsentSteps({
+  platform = process.platform,
+  env = process.env,
+  input = process.stdin,
+  output = process.stdout,
+  interactive = canAskUser({ env, input, output }),
+  ask = (question) => askYesNo(question, { input, output }),
+  hasCommand = (command) => commandAvailableOnPath(command, { env, platform }),
+  run = execFileSync,
+  ensureHooks = ensureCodexHooks,
+  log = console.log,
+  warn = console.warn,
+} = {}) {
+  const result = { psmux: "not-needed", codexHooks: "skipped" };
+
+  if (platform === "win32") {
+    if (hasCommand("psmux")) result.psmux = "present";
+    else if (!interactive) {
+      result.psmux = "deferred";
+      log(
+        `psmux 가 없다. tfx setup 을 실행하거나 직접 설치한다: ${PSMUX_MANUAL_INSTALL}`,
+      );
+    } else if (await ask("psmux 를 설치할까요? (winget)")) {
+      try {
+        run("winget", PSMUX_WINGET_ARGS, {
+          stdio: ["ignore", "inherit", "inherit"],
+          timeout: 300_000,
+        });
+        result.psmux = "installed";
+        log("psmux 설치 완료");
+      } catch {
+        result.psmux = "failed";
+        warn(`psmux 설치 실패. 직접 설치: ${PSMUX_MANUAL_INSTALL}`);
+      }
+    } else {
+      result.psmux = "declined";
+      log(`psmux 설치를 건너뜀. 나중에 설치: ${PSMUX_MANUAL_INSTALL}`);
+    }
+  }
+
+  try {
+    const hooks = ensureHooks({ trust: false });
+    if (hooks?.skipped) return result;
+    if (hooks.changedHooks) log("Codex hooks: 세션 동기화 훅 등록");
+    if (hooks.trusted) result.codexHooks = "trusted";
+    else if (!interactive) {
+      result.codexHooks = "deferred";
+      log(
+        "Codex 훅은 아직 승인 전이다. tfx setup 에서 승인하거나, Codex 를 처음 띄울 때 Codex 가 직접 묻는다.",
+      );
+    } else if (
+      await ask(
+        "Codex 훅을 승인해 둘까요? (Codex 세션 시작과 프롬프트 입력 때 triflux 세션 동기화 훅이 돈다)",
+      )
+    ) {
+      ensureHooks({ trust: true });
+      result.codexHooks = "approved";
+      log("Codex hooks: 승인 기록");
+    } else {
+      result.codexHooks = "declined";
+      log(
+        "Codex 훅 승인을 건너뜀. Codex 를 처음 띄울 때 Codex 가 직접 묻는다.",
+      );
+    }
+  } catch (error) {
+    result.codexHooks = "failed";
+    warn(`Codex hooks 등록 실패: ${error?.message || error}`);
+  }
+  return result;
 }
 
 // ── 로컬 개발 모드 감지 ──
@@ -1465,7 +1572,7 @@ function ensureCodexProfiles() {
         ? readFileSync(profilePath, "utf8")
         : null;
       if (existingContent !== desiredContent) {
-        writeFileSync(profilePath, desiredContent, "utf8");
+        writeFileSync(profilePath, desiredContent, CODEX_FILE_WRITE);
         changed++;
       }
     }
@@ -1484,7 +1591,11 @@ function ensureCodexProfiles() {
         if (!existsSync(customPath)) {
           const lines = extractProfileLines(updated, name);
           if (lines.length > 0) {
-            writeFileSync(customPath, `${lines.join("\n")}\n`, "utf8");
+            writeFileSync(
+              customPath,
+              `${lines.join("\n")}\n`,
+              CODEX_FILE_WRITE,
+            );
           }
         }
       }
@@ -1501,7 +1612,7 @@ function ensureCodexProfiles() {
     }
 
     if (updated !== original) {
-      writeFileSync(CODEX_CONFIG_PATH, updated, "utf8");
+      writeFileSync(CODEX_CONFIG_PATH, updated, CODEX_FILE_WRITE);
     }
 
     return { ok: true, changed };
@@ -2116,39 +2227,6 @@ export async function runDeferred(stdinData) {
     synced++;
   }
 
-  // ── psmux 자동 설치 (Windows tmux-compatible mux) ──
-
-  if (process.platform === "win32") {
-    try {
-      execFileSync("where", ["psmux"], { stdio: "ignore" });
-    } catch {
-      // psmux 미설치 — winget으로 자동 설치 시도
-      io.log("  psmux 미설치 — winget으로 설치 중...");
-      try {
-        execFileSync(
-          "winget",
-          [
-            "install",
-            "--id",
-            "psmux",
-            "--accept-package-agreements",
-            "--accept-source-agreements",
-          ],
-          {
-            stdio: ["ignore", "pipe", "pipe"],
-            timeout: 60000,
-          },
-        );
-        io.log("  \x1b[32m✓\x1b[0m psmux 설치 완료");
-        synced++;
-      } catch {
-        io.log(
-          "  \x1b[33m⚠\x1b[0m psmux 자동 설치 실패 — 수동 설치: winget install psmux",
-        );
-      }
-    }
-  }
-
   // ── HUD 에러 캐시 자동 클리어 (업데이트/재설치 시) ──
 
   const cacheDir = join(CLAUDE_DIR, "cache");
@@ -2231,20 +2309,10 @@ export async function runDeferred(stdinData) {
       );
   }
 
-  try {
-    const codexHooksResult = ensureCodexHooks();
-    if (
-      !codexHooksResult?.skipped &&
-      (codexHooksResult?.changedHooks || codexHooksResult?.changedConfig)
-    ) {
-      io.log("  \x1b[32m✓\x1b[0m Codex hooks: registered session sync hooks");
-      synced++;
-    }
-  } catch (error) {
-    io.log(
-      `  \x1b[33m⚠\x1b[0m Codex hooks 등록 실패: ${error.message || error}`,
-    );
-  }
+  await runConsentSteps({
+    log: (message) => io.log(`  ${message}`),
+    warn: (message) => io.log(`  \x1b[33m⚠\x1b[0m ${message}`),
+  });
 
   try {
     const agyHooksResult = ensureAgyHooks();
@@ -2353,6 +2421,7 @@ ${B}Skills (Claude Code):${R}
   ${C}/tfx-auto${R} "작업" --cli antigravity    Antigravity 전용 lane
   ${C}/tfx-setup${R}           HUD 설정 + 진단
 
+${Y}!${R} ${C}tfx setup${R} 을 한 번 실행한다. psmux 설치(Windows)와 Codex 훅 승인을 묻는다
 ${Y}!${R} 세션 재시작 후 스킬이 활성화됩니다
 ${D}https://github.com/tellang/triflux${R}
 `);

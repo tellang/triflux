@@ -12,7 +12,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { cleanupLegacyMcp } from "../../scripts/lib/legacy-mcp-cleanup.mjs";
+import {
+  cleanupLegacyMcp,
+  MCP_PACKAGE_PINS,
+} from "../../scripts/lib/legacy-mcp-cleanup.mjs";
 
 const dirs = [];
 afterEach(() => {
@@ -104,13 +107,13 @@ test("5개 설정의 소유 URL만 직접 연결로 이주하고 백업 후 멱�
   const claudeServers = JSON.parse(readFileSync(claude, "utf8")).mcpServers;
   assert.deepEqual(claudeServers["brave-search"], {
     command: "npx",
-    args: ["-y", "@brave/brave-search-mcp-server"],
+    args: ["-y", "@brave/brave-search-mcp-server@2.1.4"],
     env: { BRAVE_API_KEY: "${BRAVE_API_KEY}" },
   });
   assert.deepEqual(claudeServers.other, { url: "https://example.test/mcp" });
   assert.deepEqual(
     JSON.parse(readFileSync(agy, "utf8")).mcpServers["brave-search"],
-    { command: "npx", args: ["-y", "@brave/brave-search-mcp-server"] },
+    { command: "npx", args: ["-y", "@brave/brave-search-mcp-server@2.1.4"] },
   );
   assert.equal(
     JSON.parse(readFileSync(claude, "utf8")).projects.sample.mcpServers.context7
@@ -423,4 +426,9 @@ test("서비스 해제 실패를 보존하고 성공 후에만 소유 프로세�
       [["kill", ["-TERM", "12345"]]],
     );
   }
+});
+
+test("이주가 써 넣는 MCP 패키지는 버전이나 커밋으로 고정한다", () => {
+  for (const [name, spec] of Object.entries(MCP_PACKAGE_PINS))
+    assert.match(spec, /@(?:\d+\.\d+\.\d+|[0-9a-f]{40})$/, name);
 });

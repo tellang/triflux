@@ -326,11 +326,10 @@ export function ensureCodexHooks(opts = {}) {
   const profileSanitized = sanitizeCodexProfileConfig(originalConfig, {
     codexHome,
   });
-  const nextConfig = mergeHooksState(
-    profileSanitized.toml,
-    stateEntries,
-    hooksPath,
-  );
+  // 신뢰 해시는 사용자가 승인했을 때만 쓴다. 쓰지 않으면 Codex 가 첫 실행 때 직접 묻는다.
+  const nextConfig = opts.trust
+    ? mergeHooksState(profileSanitized.toml, stateEntries, hooksPath)
+    : profileSanitized.toml;
   const changedConfig = originalConfig !== nextConfig;
   if (changedConfig) {
     if (existsSync(configPath)) {
@@ -349,6 +348,7 @@ export function ensureCodexHooks(opts = {}) {
     skipped: false,
     changedHooks,
     changedConfig,
+    trusted: hooksStateConverged(nextConfig, stateEntries, hooksPath),
     removedLegacyProfiles: profileSanitized.removedProfiles,
     migratedLegacyProfiles: profileSanitized.migratedProfiles,
     hooksPath,
@@ -357,6 +357,6 @@ export function ensureCodexHooks(opts = {}) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const result = ensureCodexHooks();
+  const result = ensureCodexHooks({ trust: process.argv.includes("--trust") });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
