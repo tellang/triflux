@@ -136,7 +136,8 @@ test("agy hooks.json 에서 옛 설치기 모양의 triflux-session 만 지우�
   const other = { enabled: true, Stop: [{ type: "command", command: "x" }] };
   // 첫 버전은 node 경로에 따옴표가 없었고, 이후 버전은 Windows 에서 백슬래시를 두 번 썼다.
   for (const command of [
-    '/opt/My Node/node "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
+    '/opt/homebrew/bin/node "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
+    'C:/node/node.exe "C:\\\\npm\\\\triflux\\\\hooks\\\\agy-session-hook.mjs"',
     '"/usr/bin/nodejs" "/usr/lib/triflux/hooks/agy-session-hook.mjs"',
     '"C:\\\\Program Files\\\\nodejs\\\\node.exe" "C:\\\\npm\\\\triflux\\\\hooks\\\\agy-session-hook.mjs"',
   ]) {
@@ -158,6 +159,8 @@ test("agy hooks.json 에서 옛 설치기 모양의 triflux-session 만 지우�
   const script = '"/opt/triflux/hooks/agy-session-hook.mjs"';
   for (const group of [
     agyGroup(`node /opt/tools/report.mjs ${script}`),
+    agyGroup(`/usr/bin/node /opt/user/nodejs ${script}`),
+    agyGroup(`/opt/My Node/node ${script}`),
     agyGroup(`echo user\n/opt/node ${script}`),
     agyGroup(`"echo user\n/opt/node" ${script}`),
     agyGroup('"/opt/node" "/opt/custom-hooks/agy-session-hook.mjs"'),

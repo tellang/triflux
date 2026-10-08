@@ -257,8 +257,12 @@ function isInstallerAgyCommand(command) {
     command,
   );
   if (!match) return false;
-  // 따옴표 없는 node 경로(첫 버전의 process.execPath)는 줄바꿈이나 셸 기호 없는 절대 경로여야 한다.
-  if (match[2] && !/^(?:\/|[A-Za-z]:\\)[^\r\n"';&|`$<>]*$/u.test(match[2]))
+  // 따옴표 없는 node 경로(첫 버전의 process.execPath)는 공백과 셸 기호가 없는 절대 경로만 인정한다.
+  // 공백이 있으면 "node 사용자스크립트" 와 구분할 수 없어 지우지 않고 doctor 경고로 남긴다.
+  if (
+    match[2] &&
+    !/^(?:\/|[A-Za-z]:[\\/]|\\\\)[^\s"';&|`$<>]*$/u.test(match[2])
+  )
     return false;
   const nodeBin = match[1] ? unquoteAgyCommandPath(match[1]) : match[2];
   const script = unquoteAgyCommandPath(match[3]);
