@@ -7,7 +7,7 @@ triflux는 Claude Code · Codex · Antigravity 를 라우팅하는 CLI-first 멀
 
 ## 빌드와 설치
 
-- **Node 20+** 필요(`package.json` `engines.node = ">=20"`). CI 는 Node 20, 릴리즈 워크플로는 Node 24 로 돈다.
+- **Node 22+** 필요(`package.json` `engines.node = ">=22"`). CI 는 Node 22 와 24, 릴리즈 워크플로는 Node 24 로 돈다.
 - 의존성 설치:
 
 ```bash

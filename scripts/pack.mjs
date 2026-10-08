@@ -32,6 +32,10 @@ const CORE_FILES = [
 const CORE_DIRS = [
   "hub/lib",
   "hub/team/intervention.mjs",
+  // intervention 의 pane 채널이 동적 import 한다
+  "hub/team/psmux.mjs",
+  "hub/team/pane.mjs",
+  "hub/team/session.mjs",
   "hub/team/nativeProxy.mjs",
   "hub/team/retry-state-machine.mjs",
   "hub/team/claude-agent-session-normalizer.mjs",
