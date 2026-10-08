@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -40,6 +40,22 @@ describe("spawn-trace", () => {
     assert.equal(typeof mod.execSync, "function");
     assert.equal(typeof mod.fork, "function");
     assert.equal(typeof mod.spawnSync, "function");
+  });
+
+  it("removes trace logs older than the retention window", async () => {
+    const mod = await loadSpawnTraceModule();
+    const dir = join(TEST_LOG_DIR, "retention");
+    mkdirSync(dir, { recursive: true });
+    for (const day of ["2026-09-30", "2026-10-01"]) {
+      writeFileSync(join(dir, `spawn-trace-${day}.jsonl`), "{}\n");
+    }
+    writeFileSync(join(dir, "other.jsonl"), "{}\n");
+
+    mod.pruneOldTraceLogs(dir, "2026-10-08");
+
+    assert.equal(existsSync(join(dir, "spawn-trace-2026-09-30.jsonl")), false);
+    assert.equal(existsSync(join(dir, "spawn-trace-2026-10-01.jsonl")), true);
+    assert.equal(existsSync(join(dir, "other.jsonl")), true);
   });
 
   it("redacts prompts and key input but keeps control tokens", async () => {

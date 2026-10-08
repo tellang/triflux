@@ -1,11 +1,18 @@
 import * as childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { chmodSync, createWriteStream, mkdirSync } from "node:fs";
+import {
+  chmodSync,
+  createWriteStream,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const LOG_DIR = join(homedir(), ".triflux", "logs");
+const RETENTION_DAYS = 7;
 const DEDUPE_WINDOW_MS = 5_000;
 const RATE_WINDOW_MS = 1_000;
 const DEFAULT_MAX_SPAWN_PER_SEC = 100;
@@ -68,12 +75,28 @@ function ensureLogStream() {
   }
 
   logDay = day;
+  pruneOldTraceLogs(LOG_DIR, day);
   logStream = createWriteStream(getLogPath(day), { flags: "a", mode: 0o600 });
   restrictMode(getLogPath(day), 0o600);
   logStream.on("error", () => {
     /* ignore logging failures */
   });
   return logStream;
+}
+
+// 날짜별 파일이 끝없이 쌓이지 않게, 그날 첫 파일을 열 때 보관 기간이 지난 파일을 지운다.
+export function pruneOldTraceLogs(logDir, today) {
+  const cutoff = new Date(Date.parse(today) - RETENTION_DAYS * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  try {
+    for (const name of readdirSync(logDir)) {
+      const day = /^spawn-trace-(\d{4}-\d{2}-\d{2})\.jsonl$/u.exec(name)?.[1];
+      if (day && day < cutoff) rmSync(join(logDir, name), { force: true });
+    }
+  } catch {
+    /* ignore */
+  }
 }
 
 // 예전 버전이 0644 로 만든 로그도 좁힌다. Windows 는 chmod 가 의미 없어 실패를 무시한다.
