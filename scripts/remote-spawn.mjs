@@ -282,7 +282,8 @@ Options:
   --capture <name> 세션 pane 내용 캡처 출력
   --wait <name>    세션의 Claude 준비 완료 대기 (기본 60초)
   --monitor <name> 화면 상태 폴링 — stall/needs_input/trust 구조화 보고
-  --kill <name>    로컬 세션 종료 + 원격 claude daemon 정리 + readback
+  --kill <name>    로컬 세션 종료 + 그 세션의 원격 프로세스 정리 + readback
+  --stop-daemon    --kill 과 함께 원격 claude daemon 전체도 멈춤(다른 작업 포함)
   --auto-trust     trust 화면 감지 시 Enter 자동 응대 (기본 off)
   --no-attach      spawn 후 자동 attach 생략`;
 }
@@ -303,6 +304,7 @@ function parseArgs(argv) {
   let watchPollMs = null;
   let watchMaxMs = null;
   let autoTrust = false;
+  let stopDaemon = false;
   let attach = true;
   const promptParts = [];
 
@@ -319,6 +321,10 @@ function parseArgs(argv) {
     }
     if (arg === "--no-attach") {
       attach = false;
+      continue;
+    }
+    if (arg === "--stop-daemon") {
+      stopDaemon = true;
       continue;
     }
     if (arg === "--kill" && argv[index + 1]) {
@@ -441,6 +447,7 @@ function parseArgs(argv) {
     prompt: mergedPrompt,
     sessionName,
     spawnName,
+    stopDaemon,
     transferFiles,
     watchGraceMs,
     watchMaxMs,
@@ -698,6 +705,19 @@ async function spawnLocalFallback(args, claudePath, prompt) {
   }
 }
 
+function detectWindowsRemoteHome(host) {
+  try {
+    const home = execFileSync(
+      "ssh",
+      [host, pwshRemoteCommand("Write-Output $env:USERPROFILE")],
+      { encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"] },
+    ).trim();
+    return isWindowsAbsolutePath(home) ? home : null;
+  } catch {
+    return null;
+  }
+}
+
 async function spawnRemoteFallback(args, promptContext) {
   const { host } = args;
   if (!host) {
@@ -709,45 +729,28 @@ async function spawnRemoteFallback(args, promptContext) {
   const permFlags = getPermissionFlag();
   let prompt = promptContext.prompt;
 
-  let remoteHome;
-  try {
-    remoteHome = execFileSync("ssh", [host, "echo", "$env:USERPROFILE"], {
-      encoding: "utf8",
-      timeout: 5000,
-    }).trim();
-  } catch {
-    try {
-      remoteHome = execFileSync("ssh", [host, "echo", "$HOME"], {
-        encoding: "utf8",
-        timeout: 5000,
-      }).trim();
-    } catch {
-      // 원격 홈 감지 실패 시 transfer 기능을 사용할 수 없음
-      console.warn(
-        `[tfx] 원격 홈 디렉토리 감지 실패 (${host}) — file transfer 비활성화`,
-      );
-      remoteHome = null;
-    }
+  // 이 폴백은 .ps1 을 pwsh 로 실행하므로 Windows 원격만 받는다. POSIX 셸은 $env:USERPROFILE 을 엉뚱한 문자열로 펼친다.
+  const remoteHome = detectWindowsRemoteHome(host);
+  if (!remoteHome) {
+    failFast(
+      `${host}: 폴백 레인은 pwsh 가 있는 Windows 원격만 지원한다. mac, Linux 원격은 로컬 tmux 가 있어야 한다.`,
+    );
   }
 
-  if (remoteHome) {
-    try {
-      const fallbackEnv = { home: remoteHome, os: "win32", shell: "pwsh" };
-      const stageId = `spawn-${randomUUID().slice(0, 8)}`;
-      const { stagedFiles } = stageRemotePromptFiles(
-        host,
-        fallbackEnv,
-        promptContext.transferCandidates,
-        stageId,
-      );
-      prompt = rewritePromptPaths(prompt, stagedFiles);
-    } catch (error) {
-      failFast(
-        `failed to stage remote files: ${error?.message || String(error)}`,
-      );
-    }
-  } else if (promptContext.transferCandidates.length > 0) {
-    console.warn("[tfx] 원격 홈 미감지 — --transfer 파일이 무시됩니다");
+  try {
+    const fallbackEnv = { home: remoteHome, os: "win32", shell: "pwsh" };
+    const stageId = `spawn-${randomUUID().slice(0, 8)}`;
+    const { stagedFiles } = stageRemotePromptFiles(
+      host,
+      fallbackEnv,
+      promptContext.transferCandidates,
+      stageId,
+    );
+    prompt = rewritePromptPaths(prompt, stagedFiles);
+  } catch (error) {
+    failFast(
+      `failed to stage remote files: ${error?.message || String(error)}`,
+    );
   }
 
   const scriptLines = [`cd '${escapePwshSingleQuoted(dir)}'`];
@@ -1114,12 +1117,18 @@ export function buildRemotePosixSpawnCommands(spec = {}) {
     dir,
     permissionFlags = "",
     promptFile = null,
+    sessionName = null,
   } = spec;
   if (!claudePath) {
     throw new Error("buildRemotePosixSpawnCommands requires claudePath");
   }
 
   const commands = [];
+  // --kill 이 이 세션만 정리하도록 claude 를 띄울 셸의 PID 를 남긴다.
+  if (sessionName) {
+    const pidFile = remoteSessionPidFile(sessionName);
+    commands.push(`mkdir -p "$(dirname ${pidFile})" && echo $$ > ${pidFile}`);
+  }
   const pathExport = buildRemotePathExportCommand(binDirs);
   if (pathExport) commands.push(pathExport);
   if (dir) commands.push(`cd ${shellQuote(dir)}`);
@@ -1666,6 +1675,7 @@ async function spawnRemoteViaTmux(args, promptContext, env) {
     host,
     buildRemotePosixSpawnCommands({
       binDirs: resolveRemoteBinDirs(host),
+      sessionName,
       claudePath: env.claudePath,
       dir: resolvedDir,
       permissionFlags,
@@ -1831,6 +1841,7 @@ async function spawnRemote(args, promptContext) {
       } else {
         for (const command of buildRemotePosixSpawnCommands({
           binDirs: remoteBinDirs,
+          sessionName,
           claudePath: env.claudePath,
           dir: resolvedDir,
           permissionFlags,
@@ -1844,6 +1855,7 @@ async function spawnRemote(args, promptContext) {
     } else {
       for (const command of buildRemotePosixSpawnCommands({
         binDirs: remoteBinDirs,
+        sessionName,
         claudePath: env.claudePath,
         dir: resolvedDir,
         permissionFlags,
@@ -2137,16 +2149,34 @@ function listKnownHostNames() {
   }
 }
 
-/** 원격 백그라운드 세션까지 정리하는 공식 명령. */
+/** spawn 때 원격 셸 PID 를 적는 파일. 원격 셸이 $HOME 을 펼친다. */
+export function remoteSessionPidFile(sessionName) {
+  return `"$HOME"/${REMOTE_STAGE_ROOT}/${shellQuote(sessionName)}/shell.pid`;
+}
+
+function readSessionPidScript(sessionName, onMissing) {
+  return `pid=$(cat ${remoteSessionPidFile(sessionName)} 2>/dev/null); case "$pid" in ''|*[!0-9]*) ${onMissing};; esac`;
+}
+
+/**
+ * spawn 이 기록한 셸의 프로세스 그룹과 자식만 끝낸다.
+ * tmux 레인은 claude 가 셸 그룹에 남고, psmux 레인은 대화형 셸이라 claude 가 새 그룹을 받으므로 둘 다 본다.
+ */
+export function buildRemoteSessionStopCommand(sessionName) {
+  return `${readSessionPidScript(sessionName, "exit 0")}; pkill -TERM -P "$pid" 2>/dev/null; kill -TERM -- "-$pid" 2>/dev/null; true`;
+}
+
+/** readback 용 잔존 프로세스 카운트. 기록이 없으면 숫자 대신 missing 을 내 거짓 성공을 막는다. */
+export function buildRemoteClaudeProcessCountCommand(sessionName) {
+  const pidFile = remoteSessionPidFile(sessionName);
+  return `${readSessionPidScript(sessionName, "echo missing; exit 0")}; n=$( { pgrep -g "$pid"; pgrep -P "$pid"; } | sort -u | wc -l); [ "$n" -eq 0 ] && rm -f ${pidFile}; echo $n`;
+}
+
+/** 원격 claude 데몬 전체 정지. 다른 작업의 데몬도 멈추므로 --stop-daemon 일 때만 쓴다. */
 export function buildRemoteDaemonStopCommand(binDirs = [], claudePath = null) {
   const pathExport = buildRemotePathExportCommand(binDirs);
   const binary = claudePath ? shellQuote(claudePath) : "claude";
   return `${pathExport ? `${pathExport}; ` : ""}${binary} daemon stop --any`;
-}
-
-/** readback 용 잔존 프로세스 카운트. `[c]laude` 로 자기 자신 매칭을 피한다. */
-export function buildRemoteClaudeProcessCountCommand() {
-  return "pgrep -f '[c]laude' | wc -l";
 }
 
 /** @returns {number|null} 파싱 실패 시 null (거짓 성공 금지) */
@@ -2207,33 +2237,47 @@ export async function killSpawnSession(sessionName, options = {}) {
     return result;
   }
 
-  const binDirs = options.binDirs || resolveRemoteBinDirs(host, options);
-  const claudePath =
-    options.claudePath || resolveRemoteClaudePath(host, options);
   const remote = {
     attempted: true,
-    daemonStop: { ok: false },
     host,
     ok: false,
     remaining: null,
+    sessionStop: { ok: false },
   };
 
-  try {
-    const stopped = runRemote(
-      host,
+  const runStep = (command) => {
+    try {
+      const out = runRemote(host, command);
+      return {
+        ok: out?.ok !== false,
+        output: String(out?.stdout ?? "").trim(),
+      };
+    } catch (error) {
+      return { error: error?.message || String(error), ok: false };
+    }
+  };
+
+  remote.sessionStop = runStep(buildRemoteSessionStopCommand(sessionName));
+  if (options.stopDaemon) {
+    const binDirs = options.binDirs || resolveRemoteBinDirs(host, options);
+    const claudePath =
+      options.claudePath || resolveRemoteClaudePath(host, options);
+    remote.daemonStop = runStep(
       buildRemoteDaemonStopCommand(binDirs, claudePath),
     );
-    remote.daemonStop = {
-      ok: stopped?.ok !== false,
-      output: String(stopped?.stdout ?? "").trim(),
-    };
-  } catch (error) {
-    remote.daemonStop = { error: error?.message || String(error), ok: false };
   }
 
   const readRemaining = () => {
     try {
-      const probe = runRemote(host, buildRemoteClaudeProcessCountCommand());
+      const probe = runRemote(
+        host,
+        buildRemoteClaudeProcessCountCommand(sessionName),
+      );
+      if (String(probe?.stdout ?? "").includes("missing")) {
+        remote.readbackError =
+          "spawn 기록(shell.pid)이 없어 이 세션의 원격 프로세스를 확인할 수 없다";
+        return null;
+      }
       return parseRemoteProcessCount(probe?.stdout);
     } catch (error) {
       remote.readbackError = error?.message || String(error);
@@ -2243,10 +2287,7 @@ export async function killSpawnSession(sessionName, options = {}) {
 
   remote.remaining = readRemaining();
 
-  // `[c]laude` 는 claude 본체 외에 경로에 claude 가 든 프로세스도 잡는다.
-  // 세션 종료 직후 OMC SessionEnd 훅 워커가 몇 초간 걸리는 실측이 있어,
-  // remaining>0 이면 한 번만 재측정하고 그 값으로 판정한다.
-  // 패턴을 좁히면 과소 매칭으로 거짓 성공이 나므로 패턴은 그대로 둔다.
+  // TERM 직후 종료 훅이 몇 초 걸리는 실측이 있어 remaining>0 이면 한 번만 재측정한다.
   if (typeof remote.remaining === "number" && remote.remaining > 0) {
     await sleep(retryDelayMs);
     remote.firstRemaining = remote.remaining;
@@ -2341,6 +2382,7 @@ async function main() {
     }
     const killResult = await killSpawnSession(args.sessionName, {
       host: args.host,
+      stopDaemon: args.stopDaemon,
     });
     console.log(JSON.stringify(killResult, null, 2));
     if (!killResult.ok) process.exit(1);

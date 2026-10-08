@@ -8,6 +8,7 @@ import {
   buildRemoteDaemonStopCommand,
   buildRemotePathExportCommand,
   buildRemotePosixSpawnCommands,
+  buildRemoteSessionStopCommand,
   buildTmuxAttachSplitArgs,
   buildTmuxRemoteLaneCommand,
   buildTmuxSpawnSessionArgs,
@@ -18,6 +19,7 @@ import {
   killSpawnSession,
   monitorClaudeSession,
   parseRemoteProcessCount,
+  remoteSessionPidFile,
   resolveRemoteBinDirs,
   resolveSpawnLane,
   resolveStallThresholdSec,
@@ -369,11 +371,9 @@ describe("killSpawnSession()", () => {
     assert.equal(parseRemoteProcessCount(undefined), null);
   });
 
-  it("readback이 0이면 양측 성공으로 보고한다", async () => {
+  it("readback이 0이면 양측 성공으로 보고하고 데몬 전체는 건드리지 않는다", async () => {
     const commands = [];
     const result = await killSpawnSession("tfx-spawn-m2-lifecycle", {
-      binDirs: ["/opt/homebrew/bin"],
-      claudePath: "/opt/homebrew/bin/claude",
       hostNames,
       killLocal: () => {},
       runRemote: (host, command) => {
@@ -386,10 +386,55 @@ describe("killSpawnSession()", () => {
     assert.equal(result.local.ok, true);
     assert.equal(result.remote.host, "m2");
     assert.equal(result.remote.remaining, 0);
-    assert.equal(commands.length, 2);
-    assert.match(commands[0][1], /daemon stop --any$/);
-    assert.match(commands[0][1], /^export PATH='\/opt\/homebrew\/bin'/);
-    assert.equal(commands[1][1], buildRemoteClaudeProcessCountCommand());
+    assert.deepEqual(
+      commands.map(([, command]) => command),
+      [
+        buildRemoteSessionStopCommand("tfx-spawn-m2-lifecycle"),
+        buildRemoteClaudeProcessCountCommand("tfx-spawn-m2-lifecycle"),
+      ],
+    );
+    assert.ok(!commands.some(([, command]) => command.includes("daemon stop")));
+  });
+
+  it("--stop-daemon 일 때만 원격 데몬 전체를 멈춘다", async () => {
+    const commands = [];
+    await killSpawnSession("tfx-spawn-m2-lifecycle", {
+      binDirs: ["/opt/homebrew/bin"],
+      claudePath: "/opt/homebrew/bin/claude",
+      hostNames,
+      killLocal: () => {},
+      runRemote: (_host, command) => {
+        commands.push(command);
+        return { ok: true, stdout: command.includes("pgrep") ? "0\n" : "" };
+      },
+      stopDaemon: true,
+    });
+    assert.ok(commands.some((command) => /daemon stop --any$/.test(command)));
+  });
+
+  it("spawn 기록이 없으면 성공으로 보고하지 않는다", async () => {
+    const result = await killSpawnSession("tfx-spawn-m2-lifecycle", {
+      hostNames,
+      killLocal: () => {},
+      runRemote: (_host, command) => ({
+        ok: true,
+        stdout: command.includes("pgrep") ? "missing\n" : "",
+      }),
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.remote.remaining, null);
+    assert.match(result.remote.readbackError, /shell\.pid/);
+  });
+
+  it("spawn 명령은 claude 보다 먼저 셸 PID 를 세션 기록에 남긴다", () => {
+    const commands = buildRemotePosixSpawnCommands({
+      claudePath: "/usr/local/bin/claude",
+      sessionName: "tfx-spawn-m2-lifecycle",
+    });
+    assert.equal(
+      commands[0],
+      `mkdir -p "$(dirname ${remoteSessionPidFile("tfx-spawn-m2-lifecycle")})" && echo $$ > ${remoteSessionPidFile("tfx-spawn-m2-lifecycle")}`,
+    );
   });
 
   it("잔존 프로세스가 있으면 ok:false와 남은 수를 명시한다", async () => {
@@ -438,7 +483,7 @@ describe("killSpawnSession()", () => {
 
     assert.equal(localKilled, 1);
     assert.equal(result.local.ok, true);
-    assert.equal(result.remote.daemonStop.ok, false);
+    assert.equal(result.remote.sessionStop.ok, false);
     assert.equal(result.ok, false);
   });
 
