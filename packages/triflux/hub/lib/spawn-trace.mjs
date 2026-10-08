@@ -98,21 +98,37 @@ export function redactTraceValue(value) {
 }
 
 const PROMPT_FLAGS = new Set(["--print", "--prompt", "--message", "--seed"]);
-const SEND_KEYS_VALUE_FLAGS = new Set(["-t", "-N", "-c"]);
+const SEND_KEYS_VALUE_FLAGS = new Set(["t", "N", "c"]);
 const NAMED_KEY =
   /^(Enter|Escape|Tab|BSpace|Space|Up|Down|Left|Right|[CM]-.)$/u;
 
+// send-keys 옵션을 getopt 처럼 읽어 키 자리의 시작과 -l(문자 그대로 입력) 여부를 찾는다.
+function parseSendKeys(args, from) {
+  let literal = false;
+  let i = from;
+  while (i < args.length && /^-./u.test(String(args[i]))) {
+    const flag = String(args[i]);
+    i += 1;
+    if (flag === "--") break;
+    for (let j = 1; j < flag.length; j += 1) {
+      if (flag[j] === "l") literal = true;
+      if (SEND_KEYS_VALUE_FLAGS.has(flag[j])) {
+        if (j === flag.length - 1) i += 1;
+        break;
+      }
+    }
+  }
+  return { keysFrom: i, literal };
+}
+
 // 짧은 토큰도 키 입력과 프롬프트 자리에 오면 항상 가린다. 길이만 보면 짧은 비밀이 샌다.
+// -l 이면 Enter 같은 이름도 글자 그대로 입력되므로 가린다.
 function redactArgs(args) {
   const sendKeysAt = args.indexOf("send-keys");
-  let keysFrom = -1;
-  if (sendKeysAt >= 0) {
-    let i = sendKeysAt + 1;
-    while (i < args.length && /^-./u.test(String(args[i]))) {
-      i += SEND_KEYS_VALUE_FLAGS.has(args[i]) ? 2 : 1;
-    }
-    keysFrom = i;
-  }
+  const { keysFrom, literal } =
+    sendKeysAt >= 0
+      ? parseSendKeys(args, sendKeysAt + 1)
+      : { keysFrom: -1, literal: false };
   return args.map((arg, index) => {
     if (typeof arg !== "string") return arg;
     const promptFlag = arg.split("=")[0];
@@ -120,7 +136,8 @@ function redactArgs(args) {
       return `${promptFlag}=${redacted(arg.slice(promptFlag.length + 1))}`;
     }
     const afterPromptFlag = PROMPT_FLAGS.has(args[index - 1]);
-    const isKey = keysFrom >= 0 && index >= keysFrom && !NAMED_KEY.test(arg);
+    const isKey =
+      keysFrom >= 0 && index >= keysFrom && (literal || !NAMED_KEY.test(arg));
     return afterPromptFlag || isKey ? redacted(arg) : redactTraceValue(arg);
   });
 }

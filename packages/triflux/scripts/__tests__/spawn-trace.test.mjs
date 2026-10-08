@@ -57,7 +57,17 @@ describe("spawn-trace", () => {
       "-l",
     ]);
     assert.match(entry.args[4], /^<redacted len=8 sha256=[0-9a-f]{12}>$/);
-    assert.equal(entry.args[5], "Enter");
+    // -l 이면 Enter 도 글자 그대로 입력된다
+    assert.match(entry.args[5], /^<redacted/);
+    const named = mod.redactTraceEntry({
+      args: ["send-keys", "-t", "s", "Enter", "--", "-tok"],
+    }).args;
+    assert.equal(named[3], "Enter");
+    const dashed = mod.redactTraceEntry({
+      args: ["send-keys", "-lt", "s", "--", "-tok"],
+    }).args;
+    assert.deepEqual(dashed.slice(0, 3), ["send-keys", "-lt", "s"]);
+    assert.match(dashed[4], /^<redacted/);
     const print = mod.redactTraceEntry({ args: ["--print", "hi", "--seed=x"] });
     assert.deepEqual(
       print.args.map((a) => a.startsWith("--") || a.startsWith("<")),
