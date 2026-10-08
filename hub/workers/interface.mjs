@@ -59,10 +59,3 @@
  * @property {() => boolean} isReady
  * @property {'codex'|'gemini'|'antigravity'|'claude'} type
  */
-
-export const WORKER_TYPES = Object.freeze([
-  "codex",
-  "gemini",
-  "antigravity",
-  "claude",
-]);

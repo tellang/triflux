@@ -41,8 +41,6 @@ function printWorkerPreview(agents, subtasks) {
   console.log("");
 }
 
-export { parseTeamArgs };
-
 export function resolveTeamWorkers({ agents, task, assigns = [] }) {
   if (assigns.length > 0) {
     return {

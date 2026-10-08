@@ -290,8 +290,6 @@ const SUMMARY_KEYS = [
   "partial_output",
 ];
 
-// 텍스트/상태/색상 유틸은 tui-core.mjs에서 import (위 참조)
-
 // ── MOCHA RGB (gradual fade 보간용) ──
 const MOCHA_RGB = {
   ok: { r: 166, g: 227, b: 161 },
@@ -380,8 +378,6 @@ function dedupeRole(role, name, cli) {
   return r;
 }
 
-// wrapLine, wrapTextAll → tui-core.mjs에서 import
-
 // ── virtual row buffer ────────────────────────────────────────────────────
 class RowBuffer {
   constructor() {
@@ -414,8 +410,6 @@ class RowBuffer {
     return this._prev.length;
   }
 }
-
-// countStatuses → tui-core.mjs에서 import
 
 // ── Tier1: 상단 고정 1행 ─────────────────────────────────────────────────
 function phaseColor(phase, time = Date.now()) {

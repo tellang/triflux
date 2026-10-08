@@ -279,7 +279,7 @@ export function buildReleaseNotes({
     `- npm: \`npm install -g triflux@${version}\``,
     "- Claude Code:",
     "  - `/plugin marketplace add tellang/triflux`",
-    "  - `/plugin install triflux@tellang`",
+    "  - `/plugin install triflux@triflux`",
     "",
   ].join("\n");
 }

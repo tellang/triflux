@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import {
-  parseTeamArgs,
-  resolveTeamWorkers,
-} from "../../hub/team/cli/commands/start/index.mjs";
+import { resolveTeamWorkers } from "../../hub/team/cli/commands/start/index.mjs";
+import { parseTeamArgs } from "../../hub/team/cli/commands/start/parse-args.mjs";
 
 describe("multi --assign worker routing", () => {
   const prompt = "Claude Code(Anthropic CLI, 2026-10 기준) 조사";
