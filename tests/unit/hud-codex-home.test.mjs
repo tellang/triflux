@@ -46,4 +46,23 @@ describe("hud/renderers: nano 한 줄", () => {
     assert.match(render(false), boldX);
     assert.doesNotMatch(render(true), boldX);
   });
+
+  it("최악 값에 stale 이 겹쳐도 39칸을 넘지 않는다", () => {
+    const worst = { fiveHourPercent: 100, weeklyPercent: 100 };
+    const bucket = {
+      codex: {
+        primary: { used_percent: 100 },
+        secondary: { used_percent: 100 },
+      },
+    };
+    const line = getMicroLine(
+      { display: "100%", percent: 100 },
+      worst,
+      bucket,
+      {
+        antigravityQuota: { auth: "oauth", usedPercent: 100, stale: true },
+      },
+    ).replace(/\x1b\[[0-9;]*m/g, "");
+    assert.ok(line.length <= 39, `${line.length}칸: ${line}`);
+  });
 });

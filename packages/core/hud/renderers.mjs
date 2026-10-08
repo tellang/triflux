@@ -133,9 +133,12 @@ export function getMicroLine(
     const marker = options.antigravityQuota?.auth
       ? bold(geminiBlue("a"))
       : dim("a");
-    segments.push(
-      `${marker}${dim(":")}${antigravityPercentText(options.antigravityQuota)}${options.antigravityQuota?.stale ? dim("*") : ""}`,
-    );
+    // stale 은 값을 dim 으로 보인다. 표식을 덧붙이면 최악 폭이 39칸을 넘는다.
+    const agyText = antigravityPercentText(options.antigravityQuota);
+    const agyValue = options.antigravityQuota?.stale
+      ? dim(stripAnsi(agyText))
+      : agyText;
+    segments.push(`${marker}${dim(":")}${agyValue}`);
   }
   segments.push(`${dim("CTX:")}${contextPercentText(ctxView)}`);
   return truncateAnsi(segments.join(" "), cols);

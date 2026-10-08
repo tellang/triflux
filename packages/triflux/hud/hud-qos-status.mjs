@@ -109,6 +109,7 @@ async function main() {
   const currentTier = selectTier();
   // 회색은 로그인 안 된 경우에만 쓴다. 로그인 상태의 조회 공백은 --% 로만 보인다.
   const codexLoggedOut =
+    showCodex &&
     !codexBuckets &&
     !existsSync(getCodexAuthPath()) &&
     !hasBrokerCodexAccounts();
