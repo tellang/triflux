@@ -120,12 +120,6 @@ export const CODEX_PROBE_STATE_PATH = join(
   "cache",
   "codex-probe-state.json",
 );
-export const CODEX_BROKER_AUTH_CACHE_DIR = join(
-  homedir(),
-  ".claude",
-  "cache",
-  "tfx-hub",
-);
 export const CODEX_PROBE_TTL_MS = 5 * 60 * 1000;
 export const CODEX_PROBE_TIMEOUT_MS = 10_000;
 export const CODEX_QUOTA_CACHE_PATH = join(

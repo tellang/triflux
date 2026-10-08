@@ -6,7 +6,6 @@ import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  CODEX_BROKER_AUTH_CACHE_DIR,
   CODEX_MIN_BUCKETS,
   CODEX_PROBE_STATE_PATH,
   CODEX_PROBE_TIMEOUT_MS,
@@ -117,8 +116,8 @@ function positiveWindowMinutes(bucket) {
   return minutes > 0 ? minutes : null;
 }
 
-// 계정 하나에는 같은 종류의 창이 한 번에 하나만 열린다. 브로커 계정이 없으면
-// Codex 홈(CODEX_HOME)의 sessions 와 HUD 라벨이 모두 auth.json 계정 하나의 것이다. 그래서
+// 계정 하나에는 같은 종류의 창이 한 번에 하나만 열린다. Codex 홈(CODEX_HOME)의
+// sessions 와 HUD 라벨은 모두 auth.json 계정 하나의 것이다. 그래서
 // 세션 로그에 더 늦게 리셋되는 창이 나타났고 옛 창이 그 창이 열리기 전에만 관측됐다면,
 // 옛 창은 조기 리셋(2026-09-23 실측)이나 계정 전환으로 끝난 창이다. 프로브로만 본 창은
 // 다른 계정일 수 있어 근거로 쓰지 않는다. 새 창이 열린 뒤에도 관측된 창은 함께 도는
@@ -135,12 +134,7 @@ function isReplacedWindowGroup(group, other) {
   return lastSeenMs <= otherOpenedAtMs;
 }
 
-function selectCodexWindowSnapshot(
-  snapshots,
-  nowSec,
-  windowKey,
-  replaceEndedWindows,
-) {
+function selectCodexWindowSnapshot(snapshots, nowSec, windowKey) {
   const groups = [];
   const ungrouped = [];
 
@@ -179,12 +173,9 @@ function selectCodexWindowSnapshot(
   const openGroups = groups.filter(
     (group) => Number(group.latest[windowKey]?.resets_at) > nowSec,
   );
-  const activeGroups = replaceEndedWindows
-    ? openGroups.filter(
-        (group) =>
-          !openGroups.some((other) => isReplacedWindowGroup(group, other)),
-      )
-    : openGroups;
+  const activeGroups = openGroups.filter(
+    (group) => !openGroups.some((other) => isReplacedWindowGroup(group, other)),
+  );
   let selected = null;
   if (activeGroups.length > 0) {
     selected = activeGroups
@@ -214,18 +205,16 @@ function selectCodexWindowSnapshot(
   return { snapshot: selected, activeGroupCount: activeGroups.length };
 }
 
-function selectCodexSnapshot(snapshots, nowSec, replaceEndedWindows) {
+function selectCodexSnapshot(snapshots, nowSec) {
   const primarySelection = selectCodexWindowSnapshot(
     snapshots,
     nowSec,
     "primary",
-    replaceEndedWindows,
   );
   const secondarySelection = selectCodexWindowSnapshot(
     snapshots,
     nowSec,
     "secondary",
-    replaceEndedWindows,
   );
   const primarySnapshot = primarySelection.snapshot;
   if (!primarySnapshot) return null;
@@ -246,7 +235,7 @@ function selectCodexSnapshot(snapshots, nowSec, replaceEndedWindows) {
   return selected;
 }
 
-function mergeRateLimitSnapshots(snapshots, nowSec, replaceEndedWindows) {
+function mergeRateLimitSnapshots(snapshots, nowSec) {
   const merged = {};
   const codexSnapshots = [];
   for (const snapshot of snapshots) {
@@ -259,11 +248,7 @@ function mergeRateLimitSnapshots(snapshots, nowSec, replaceEndedWindows) {
     }
   }
 
-  const codex = selectCodexSnapshot(
-    codexSnapshots,
-    nowSec,
-    replaceEndedWindows,
-  );
+  const codex = selectCodexSnapshot(codexSnapshots, nowSec);
   if (codex) merged.codex = codex;
   return merged;
 }
@@ -279,8 +264,6 @@ export function getCodexRateLimits({
   now = new Date(),
   maxLinesPerFile = 800,
   extraSnapshots = [],
-  // 교체된 창 판정(isReplacedWindowGroup). 브로커 Codex 계정이 있으면 끈다.
-  replaceEndedWindows = true,
 } = {}) {
   let syntheticBucket = null; // 최근 token_count에서 합성 (행 활성화 + 토큰 데이터용)
   // 프로브도 세션 로그와 같은 window_minutes 기준으로 5h/1w 슬롯을 정한다.
@@ -372,11 +355,7 @@ export function getCodexRateLimits({
     }
 
     const snapshots = dayOffset <= 1 ? recentSnapshots : daySnapshots;
-    const mergedBuckets = mergeRateLimitSnapshots(
-      snapshots,
-      nowSec,
-      replaceEndedWindows,
-    );
+    const mergedBuckets = mergeRateLimitSnapshots(snapshots, nowSec);
     if (Object.keys(mergedBuckets).length > 0) {
       if (syntheticBucket) {
         const main =
@@ -408,7 +387,6 @@ export async function collectProbeSnapshots(now = new Date()) {
   try {
     targets = listProbeTargets({
       codexAuthPath: getCodexAuthPath(),
-      brokerCacheDir: CODEX_BROKER_AUTH_CACHE_DIR,
       stateFilePath: CODEX_PROBE_STATE_PATH,
       ttlMs: Number(process.env.TFX_CODEX_PROBE_TTL_MS) || CODEX_PROBE_TTL_MS,
       nowMs: now.getTime(),
@@ -432,30 +410,10 @@ export async function collectProbeSnapshots(now = new Date()) {
   );
 }
 
-// 브로커 계정은 자기 CODEX_HOME 에서 돌기 때문에, 옛 창이 전환 전 계정의 창이어도 그
-// 계정이 아직 쓰이고 있을 수 있다. accounts.json 의 codex 항목과 프로브용 인증 캐시로 판정한다.
-export function hasBrokerCodexAccounts({
-  brokerDir = CODEX_BROKER_AUTH_CACHE_DIR,
-} = {}) {
-  const accounts = readJson(join(brokerDir, "accounts.json"), null);
-  if (Array.isArray(accounts?.codex) && accounts.codex.length > 0) return true;
-  try {
-    return readdirSync(brokerDir).some((file) =>
-      /^codex-auth-.+\.json$/.test(file),
-    );
-  } catch {
-    return false;
-  }
-}
-
 export async function refreshCodexRateLimitsCache() {
   const now = new Date();
   const extraSnapshots = await collectProbeSnapshots(now);
-  const buckets = getCodexRateLimits({
-    now,
-    extraSnapshots,
-    replaceEndedWindows: !hasBrokerCodexAccounts(),
-  });
+  const buckets = getCodexRateLimits({ now, extraSnapshots });
   // buckets가 null이어도 캐시 갱신 (stale 데이터 제거)
   writeJsonSafe(CODEX_QUOTA_CACHE_PATH, { timestamp: Date.now(), buckets });
   return buckets;

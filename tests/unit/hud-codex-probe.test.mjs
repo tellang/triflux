@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -178,51 +178,27 @@ function makeAuthDir(root, name, expSec) {
   return dir;
 }
 
-test("listProbeTargets: 현재 계정 + 브로커 캐시 열거, 만료 임박 제외, TTL 스로틀", () => {
+test("listProbeTargets: 현재 계정 열거, 만료 임박 제외, TTL 스로틀", () => {
   const root = mkdtempSync(join(tmpdir(), "tfx-probe-targets-"));
   const nowMs = Date.parse("2026-07-11T09:00:00Z");
   const okExp = Math.floor(nowMs / 1000) + 3600;
   const nearExp = Math.floor(nowMs / 1000) + 60;
   const codexDir = makeAuthDir(root, "codex-home", okExp);
-  const brokerDir = join(root, "broker");
-  mkdirSync(brokerDir, { recursive: true });
-  writeFileSync(
-    join(brokerDir, "codex-auth-alpha.json"),
-    JSON.stringify({ tokens: { access_token: jwtWithExp(okExp) } }),
-  );
-  writeFileSync(
-    join(brokerDir, "codex-auth-beta.json"),
-    JSON.stringify({ tokens: { access_token: jwtWithExp(nearExp) } }),
-  );
+  const nearDir = makeAuthDir(root, "near-home", nearExp);
   const stateFile = join(root, "probe-state.json");
+  const list = (authDir, at) =>
+    listProbeTargets({
+      codexAuthPath: join(authDir, "auth.json"),
+      stateFilePath: stateFile,
+      ttlMs: 300000,
+      nowMs: at,
+    });
 
-  const targets = listProbeTargets({
-    codexAuthPath: join(codexDir, "auth.json"),
-    brokerCacheDir: brokerDir,
-    stateFilePath: stateFile,
-    ttlMs: 300000,
-    nowMs,
-  });
-  const keys = targets.map((target) => target.key).sort();
-  assert.deepEqual(keys, ["alpha", "current"]);
-  for (const target of targets) {
-    assert.ok(target.codexHome, `codexHome 필요: ${target.key}`);
-    const auth = JSON.parse(
-      readFileSync(join(target.codexHome, "auth.json"), "utf-8"),
-    );
-    assert.ok(auth.tokens.access_token);
-  }
+  assert.deepEqual(list(codexDir, nowMs), [
+    { key: "current", codexHome: codexDir },
+  ]);
+  assert.deepEqual(list(nearDir, nowMs), []);
 
-  recordProbe(stateFile, "alpha", nowMs);
-  const second = listProbeTargets({
-    codexAuthPath: join(codexDir, "auth.json"),
-    brokerCacheDir: brokerDir,
-    stateFilePath: stateFile,
-    ttlMs: 300000,
-    nowMs: nowMs + 1000,
-  });
-  assert.deepEqual(
-    second.map((target) => target.key),
-    ["current"],
-  );
+  recordProbe(stateFile, "current", nowMs);
+  assert.deepEqual(list(codexDir, nowMs + 1000), []);
 });

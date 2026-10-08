@@ -30,7 +30,7 @@ ADR-0031 은 이 모듈을 "다계정을 쓰지 않으면 삭제, 허브 제거 
 - `@triflux/core` 배럴에서 `accountBroker`, `getCodexCircuit` export 를 뺀다.
 - setup 은 더 이상 `account-broker.mjs` 를 설치하지 않고, 이전 설치본에 남은 파일은 퇴역 파일 목록으로 지운다.
 - 특정 계정을 강제로 쓰는 단일 경로인 `tfx-route.sh` 의 `TFX_CODEX_HOME`, `TFX_CODEX_AUTH_FILE` 은 남긴다.
-- HUD 가 `accounts.json` 과 계정별 인증 캐시로 브로커 계정 유무를 판정하던 코드는 같은 HUD 파일을 고치는 다른 PR 뒤에 따로 정리한다.
+- HUD 가 `accounts.json` 과 계정별 인증 캐시로 브로커 계정을 찾던 코드를 지운다. 로그아웃 판정, 사용량 갱신 조건, 프로브 대상은 `CODEX_HOME` 의 `auth.json` 계정 하나만 본다. 브로커 계정이 있을 때 교체된 사용량 창 판정을 끄던 옵션도 함께 뺀다.
 
 ## 검토한 대안
 

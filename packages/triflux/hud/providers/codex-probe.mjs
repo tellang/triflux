@@ -2,16 +2,8 @@
 // 세션 이벤트(snake_case) 파이프라인에 합류 가능한 스냅샷을 만든다.
 
 import { spawn } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 function readJwtExpSec(token) {
   try {
@@ -54,7 +46,6 @@ export function recordProbe(stateFilePath, key, nowMs) {
 
 export function listProbeTargets({
   codexAuthPath,
-  brokerCacheDir,
   stateFilePath,
   ttlMs,
   nowMs,
@@ -67,26 +58,6 @@ export function listProbeTargets({
   const currentAuth = readJsonFile(codexAuthPath);
   if (currentAuth && accessTokenUsable(currentAuth, nowMs) && due("current")) {
     targets.push({ key: "current", codexHome: dirname(codexAuthPath) });
-  }
-
-  if (brokerCacheDir && existsSync(brokerCacheDir)) {
-    let files = [];
-    try {
-      files = readdirSync(brokerCacheDir).filter((file) =>
-        /^codex-auth-.+\.json$/.test(file),
-      );
-    } catch {
-      files = [];
-    }
-    for (const file of files) {
-      const key = file.replace(/^codex-auth-/, "").replace(/\.json$/, "");
-      if (!due(key)) continue;
-      const auth = readJsonFile(join(brokerCacheDir, file));
-      if (!auth || !accessTokenUsable(auth, nowMs)) continue;
-      const home = mkdtempSync(join(tmpdir(), `tfx-probe-home-${key}-`));
-      writeFileSync(join(home, "auth.json"), JSON.stringify(auth));
-      targets.push({ key, codexHome: home });
-    }
   }
   return targets;
 }
