@@ -75,6 +75,21 @@ triflux는 위험한 실행을 관리된 경로 뒤에 둔다. 직접 `codex exe
 관리 API를 사용한다.
 CLI 호출은 `tfx-route.sh` / headless 워커 / `tfx` CLI를 경유해야 한다.
 
+### 세션 전송과 결과 회수
+
+- **Codex 세션 메시지**: `tfx-live ask --cli codex`는 `codex queue`로 메시지를 쌓는다.
+  queue를 못 쓰거나 슬래시 명령이면 tmux 입력으로 폴백하고 이유를 남긴다
+  ([ADR-0027](docs/adr/0027-codex-message-queue-default.md)).
+- **리드 흐름**: `/tfx-lead`를 맡은 세션이 `tfx-live`로 Claude, Codex 세션을 띄우고
+  지시서, 교차 리뷰, 머지, 종료까지 소유한다
+  ([ADR-0029](docs/adr/0029-lead-session-operating-model.md), [ADR-0032](docs/adr/0032-lead-role-skill-tfx-lead.md)).
+- **headless 결과 색인**: 실행마다 `$TMPDIR/tfx-headless/<세션>.results.json` 하나에 워커별 상태,
+  exit 코드, 출력 경로를 기록한다. 결과를 읽는 쪽은 화면 문자열 대신 이 파일을 읽는다
+  ([ADR-0034](docs/adr/0034-headless-session-results-index.md)).
+- **`claude agents` 행**: headless 워커는 tmux 방에서 돌고, 행은 그 방에 붙는 attach client다.
+  행에서 Enter를 누르면 워커 tmux pane이 열린다
+  ([ADR-0026](docs/adr/0026-agents-row-tmux-attach.md)).
+
 ## 스택 공존
 
 triflux는 gstack·superpowers와 **레이어 분리** 관계로 공존한다.

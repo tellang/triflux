@@ -18,10 +18,6 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
 
-<p align="center">
-  <img alt="triflux demo" src="docs/assets/demo-multi.gif" width="680">
-</p>
-
 triflux는 코딩 작업을 Claude, Codex, Antigravity 사이에서 나눠 맡기는 Claude Code 플러그인이자
 npm CLI다. `/tfx-auto`에 할 일을 한 번 적으면 triflux가 CLI 레인(기본은 Codex)을 고르고, 임의
 셸 명령 대신 관리된 경로로 실행한다. 필요하면 로컬 병렬 워커, Claude↔Codex 라이브 세션, 원격 호스트로 작업을 나눈다.
@@ -184,17 +180,22 @@ Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-s
 ```mermaid
 graph TD
     User([Claude Code 프롬프트 / 셸]) --> Skills["/tfx-auto · /tfx-live · /tfx-remote"]
+    User --> Lead["/tfx-lead"]
     User --> CLI[tfx CLI]
+    Lead -->|"지시서, 교차 리뷰, 머지"| Live
     Skills --> Route[tfx-route.sh]
     Skills --> Live[tfx-live]
     CLI --> Team["tfx multi"]
     Route --> Codex[Codex CLI]
     Route --> Agy[Antigravity agy]
     Route --> Claude[Claude Code]
-    Team --> Route
-    Live -->|UDS 또는 tmux| Sessions[Claude / Codex TUI 세션]
-    Route --> UI["HUD · claude agents 패널"]
-    Team --> UI
+    Team -->|headless 워커| Route
+    Team --> Index[("결과 색인: tfx-headless/*.results.json")]
+    Team --> Rows["claude agents 행"]
+    Rows -->|Enter| Room["워커 tmux 방"]
+    Live -->|"codex queue, tmux 폴백"| CodexTUI[Codex TUI 세션]
+    Live -->|"UDS 또는 tmux"| ClaudeTUI[Claude Code 세션]
+    Route --> HUD[HUD]
     CLI --> Lake[(".triflux/lake (tfx cto)")]
 ```
 

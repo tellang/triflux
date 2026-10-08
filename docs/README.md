@@ -21,7 +21,7 @@
 
 ## 보조 파일
 
-- 공개 자산: [assets/](assets/). README가 사용하는 [demo-multi.gif](assets/demo-multi.gif)를 유지한다.
+- 공개 자산: [assets/](assets/). README 로고 SVG 두 개와 GitHub 소셜 미리보기 이미지를 둔다.
 - 폐기한 리딩 노트와 부속 설정은 [보관 인덱스](_archive/README.md)에 원래 경로와 함께 등재한다.
 
 ## 공개 범위
@@ -32,7 +32,7 @@
 |---|---|---|
 | **GitHub (공개 커밋)** | `.gitignore` | `docs/{adr,prd,req,design,research,process,recovery,troubleshooting,_archive}/`, `docs/DECISIONS.md`, `../.claude/rules/`, 루트 `README`·`CONTRIBUTING`·`ARCHITECTURE`·`CHANGELOG`·`CLAUDE`·`AGENTS`·`CODEX`·`GEMINI`, `.document-harness.toml`, `.triflux/plans/` |
 | **LOCAL (git-ignore, 커밋 안 함)** | `.gitignore` | `.omx/`·`.omc/`·`.tfx/` 런타임, `.triflux/{lake,reports,swarm-logs,subagents}/`, `docs/superpowers/plans/`, 토큰·시크릿·호스트 등 비공개 값 |
-| **npm tarball** | `package.json`의 `files` | `docs/assets`의 README 데모·로고·공유 이미지 5개만 명시적으로 포함(나머지 docs 제외) |
+| **npm tarball** | `package.json`의 `files` | `docs/assets`의 README 로고 2개와 공유 이미지 2개만 명시적으로 포함(나머지 docs 제외) |
 
 > 규칙: ADR·문서에 토큰·계정명·개인 호스트·로컬 절대경로·비공개 고객 내용은 넣지 않는다. 그런 값은 LOCAL 문서에만 둔다.
 
