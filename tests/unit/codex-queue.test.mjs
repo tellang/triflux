@@ -7,7 +7,9 @@ import test from "node:test";
 import { promisify } from "node:util";
 import {
   codexThreadIdByName,
+  deleteCodexQueueItems,
   findCodexThreadByCwd,
+  listCodexQueue,
   queueCodexMessage,
   waitCodexRequest,
 } from "../../hub/team/codex-queue.mjs";
@@ -107,6 +109,72 @@ test("thread 찾기는 이름의 등록 시각과 cwd 유일성을 지킨다", a
     (await findCodexThreadByCwd(home, { env })).reason,
     "thread-ambiguous",
   );
+});
+
+// 받은 요청을 기록하고 메서드별 고정 응답을 돌려주는 가짜 app-server.
+async function fakeAppServer(dir, responses) {
+  const log = path.join(dir, "requests.jsonl");
+  await fs.writeFile(
+    path.join(dir, "codex"),
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const responses = ${JSON.stringify(responses)};
+const counts = {};
+require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
+  const msg = JSON.parse(line);
+  fs.appendFileSync(${JSON.stringify(log)}, line + "\\n");
+  if (msg.id === undefined) return;
+  const list = responses[msg.method] ?? [{}];
+  const n = (counts[msg.method] = (counts[msg.method] ?? 0) + 1);
+  process.stdout.write(JSON.stringify({ id: msg.id, ...list[Math.min(n, list.length) - 1] }) + "\\n");
+});
+`,
+    { mode: 0o755 },
+  );
+  return {
+    env: { HOME: dir, PATH: `${dir}${path.delimiter}${process.env.PATH}` },
+    requests: async () =>
+      (await fs.readFile(log, "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .filter((msg) => msg.id !== undefined && msg.method !== "initialize"),
+  };
+}
+
+test("queue 조회는 요청 표식을 뽑고 삭제는 이미 가져간 항목을 missing 으로 나눈다", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-app-server-"));
+  try {
+    const server = await fakeAppServer(dir, {
+      initialize: [{ result: {} }],
+      "thread/queue/list": [
+        {
+          result: {
+            data: [
+              {
+                id: "q1",
+                input: [{ type: "text", text: "[tfx-live req=r1] 일" }],
+              },
+            ],
+            nextCursor: null,
+          },
+        },
+      ],
+      "thread/queue/delete": [
+        { result: { deleted: true } },
+        { result: { deleted: false } },
+      ],
+    });
+    assert.deepEqual(await listCodexQueue(THREAD, { env: server.env }), [
+      { id: "q1", requestId: "r1", text: "[tfx-live req=r1] 일" },
+    ]);
+    assert.deepEqual(
+      await deleteCodexQueueItems(THREAD, ["q1", "q2"], { env: server.env }),
+      { deleted: ["q1"], missing: ["q2"] },
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("ask --cli codex 는 queue 로 보내고 보낸 세션 이름을 첫 줄에 붙인다", async () => {

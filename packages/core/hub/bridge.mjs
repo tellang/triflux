@@ -465,9 +465,8 @@ async function cmdDaemonWait(args) {
     if (!payload.short && !payload.sessionId)
       throw new Error("short or sessionId is required");
     const { probeClaudeDaemonCandidates } = await loadDaemonControl();
-    const { findClaudeTranscript, readClaudeTranscript } = await import(
-      "./team/claude-transcript.mjs"
-    );
+    const { claudeWaitVerdict, findClaudeTranscript, readClaudeTranscript } =
+      await import("./team/claude-transcript.mjs");
     const timeoutMs = numericOption(payload.timeoutMs, 30_000);
     const pollIntervalMs = Math.max(
       10,
@@ -535,28 +534,8 @@ async function cmdDaemonWait(args) {
         target: probe.target,
         ...daemonProbeMetadata(probe),
       };
-      if (transcript?.error) {
-        return emitJson({
-          ...last,
-          ok: false,
-          status: "failed",
-          error: transcript.error,
-        });
-      }
-      if (
-        (idle || transcript?.sectionClosed) &&
-        transcript?.userSeen &&
-        transcript.turnEnded
-      ) {
-        if (!transcript.response.trim())
-          return emitJson({
-            ...last,
-            ok: false,
-            status: "failed",
-            error: "turn ended without assistant text",
-          });
-        return emitJson({ ...last, status: "completed", done: true });
-      }
+      const verdict = claudeWaitVerdict(transcript, idle);
+      if (verdict) return emitJson({ ...last, ...verdict });
       if (Date.now() >= deadline) break;
       await new Promise((resolve) =>
         setTimeout(resolve, Math.min(pollIntervalMs, deadline - Date.now())),
