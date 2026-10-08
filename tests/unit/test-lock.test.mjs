@@ -76,12 +76,13 @@ function writeHoldingScript(harness, name) {
     `
 import { writeFileSync } from "node:fs";
 
-writeFileSync(process.env.CHILD_PID_FILE, String(process.pid));
-
+// 테스트는 pid 파일을 보자마자 SIGTERM 을 보내므로 핸들러를 먼저 건다.
 process.on("SIGTERM", () => {
   writeFileSync(process.env.CHILD_SIGNAL_FILE, "SIGTERM");
   process.exit(0);
 });
+
+writeFileSync(process.env.CHILD_PID_FILE, String(process.pid));
 
 setInterval(() => {}, 1000);
 `,
