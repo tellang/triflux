@@ -134,6 +134,7 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 | `psmux capture-pane`으로 중간 확인 | 아니요 | 워커 진행 중이면 빈 화면일 수 있음 |
 
 완료 마커: `=== HEADLESS_COMPLETE succeeded=N failed=N total=N ===`
+결과 색인: `$TMPDIR/tfx-headless/{sessionName}.results.json`. 워커별 상태, exit 코드, 출력 경로는 화면 문자열 대신 이 파일을 읽는다([ADR-0034](docs/adr/0034-headless-session-results-index.md)).
 워커 상세: `$TMPDIR/tfx-headless/{sessionName}-worker-N.txt`
 </headless-retrieval>
 

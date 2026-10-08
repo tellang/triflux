@@ -43,6 +43,7 @@ import {
   startCapture,
   waitForCompletion,
 } from "./psmux.mjs";
+import { createResultsIndex, resultsIndexPath } from "./results-index.mjs";
 import { createLogDashboard } from "./tui.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
@@ -124,6 +125,14 @@ export function normalizeHeadlessRole(role) {
     .trim()
     .toLowerCase();
   return normalized && VALID_ROUTE_AGENTS.has(normalized) ? normalized : "";
+}
+
+export function headlessResultFile(sessionName, paneName) {
+  return join(RESULT_DIR, `${sessionName}-${paneName}.txt`).replace(/\\/g, "/");
+}
+
+export function headlessResultsIndexPath(sessionName) {
+  return resultsIndexPath(RESULT_DIR, sessionName).replace(/\\/g, "/");
 }
 
 export function resolveHeadlessDisplayName(assignment = {}, paneName = "") {
@@ -543,10 +552,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       });
 
     // 캡처 시작 + 컬러 배너 + 명령 dispatch
-    const resultFile = join(
-      RESULT_DIR,
-      `${sessionName}-${paneName}.txt`,
-    ).replace(/\\/g, "/");
+    const resultFile = headlessResultFile(sessionName, paneName);
     // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
     cleanStaleResultArtifacts(resultFile);
     const cmd = buildHeadlessCommand(
@@ -634,10 +640,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
       const displayName = resolveHeadlessDisplayName(assignment, paneName);
       const workerId = getHeadlessWorkerAgentId(sessionName, i);
       const resolvedCli = resolveCliType(assignment.cli);
-      const resultFile = join(
-        RESULT_DIR,
-        `${sessionName}-${paneName}.txt`,
-      ).replace(/\\/g, "/");
+      const resultFile = headlessResultFile(sessionName, paneName);
       // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
       cleanStaleResultArtifacts(resultFile);
       const cmd = buildHeadlessCommand(
@@ -918,6 +921,23 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     return { sessionName, results: [], sessionOwnership, agentsRows };
   }
 
+  const resultsIndex = createResultsIndex(
+    headlessResultsIndexPath(sessionName),
+    sessionName,
+    normalizedAssignments.map((a, i) => {
+      const paneName = `worker-${i + 1}`;
+      return {
+        paneName,
+        displayName: a.displayName,
+        cli: resolveCliType(a.cli),
+        role: a.role,
+        resultFile: headlessResultFile(sessionName, paneName),
+      };
+    }),
+    // 같은 이름의 남의 세션 색인을 덮어쓰지 않도록 세션을 소유한 동안만 쓴다.
+    () => sessionOwnership.owned,
+  );
+
   let runCompleted = false;
   let completedResults = [];
   let runFailed = false;
@@ -996,6 +1016,11 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
+    if (event.type === "session_created") resultsIndex.begin();
+    else if (event.type === "dispatched")
+      resultsIndex.workerStarted(event.paneName);
+    else if (event.type === "completed")
+      resultsIndex.workerFinished(event.paneName, event);
     feedTui(event);
     if (onProgress) {
       try {
@@ -1077,6 +1102,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     runFailed = true;
     runError = error;
   }
+  resultsIndex.finish(runCompleted);
 
   if (!runCompleted) {
     sessionOwnership.release();
@@ -1086,6 +1112,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   return {
     sessionName,
     results: completedResults,
+    resultsIndexPath: resultsIndex.path,
     sessionOwnership,
     agentsRows,
   };
@@ -1638,6 +1665,7 @@ export async function runHeadlessInteractive(
   const handle = {
     sessionName,
     results,
+    resultsIndexPath: runResult.resultsIndexPath,
     dispatches,
     _killed: false,
 

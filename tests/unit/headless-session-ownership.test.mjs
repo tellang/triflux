@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
+import { rmSync } from "node:fs";
 import { after, describe, it } from "node:test";
 
 const originalPsmuxBin = process.env.PSMUX_BIN;
 process.env.PSMUX_BIN = "/usr/bin/false";
 
-const { runHeadless, runHeadlessInteractive, runHeadlessWithCleanup } =
-  await import("../../hub/team/headless.mjs?session-ownership-test");
+const {
+  headlessResultsIndexPath,
+  runHeadless,
+  runHeadlessInteractive,
+  runHeadlessWithCleanup,
+} = await import("../../hub/team/headless.mjs?session-ownership-test");
 
 after(() => {
+  for (const name of ["owned-progressive", "owned-batch", "owned-success"])
+    rmSync(headlessResultsIndexPath(name), { force: true });
   if (originalPsmuxBin === undefined) delete process.env.PSMUX_BIN;
   else process.env.PSMUX_BIN = originalPsmuxBin;
 });

@@ -173,6 +173,8 @@ export async function startHeadlessTeam({
     console.log(
       `=== HEADLESS_COMPLETE succeeded=${succeeded.length} failed=${failed.length} total=${results.length} ===`,
     );
+    if (handle.resultsIndexPath)
+      console.log(`  ${DIM}결과 색인: ${handle.resultsIndexPath}${RESET}`);
 
     if (failed.length > 0) {
       for (const r of failed)
