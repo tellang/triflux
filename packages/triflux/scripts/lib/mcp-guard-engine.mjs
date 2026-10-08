@@ -218,8 +218,6 @@ function detectLabel(filePath) {
   if (normalized.endsWith("/.gemini/config/mcp_config.json"))
     return "Antigravity";
   if (normalized.endsWith("/.gemini/settings.json")) return "Gemini";
-  if (normalized.endsWith("/.gemini/config/mcp_config.json"))
-    return "Antigravity";
   if (normalized.endsWith("/.codex/config.toml")) return "Codex";
   if (normalized.endsWith("/.claude.json")) return "Claude User MCP";
   if (normalized.endsWith("/.claude/settings.json")) return "Claude User";
@@ -1130,10 +1128,6 @@ function scanConfig(filePath) {
     servers: [],
     stdioServers: [],
   };
-}
-
-export function getRegistryPath() {
-  return registryPath();
 }
 
 export function createDefaultRegistry() {
