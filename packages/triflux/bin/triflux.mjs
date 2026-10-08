@@ -58,6 +58,7 @@ import {
   formatPsmuxUpdateGuidance,
   probePsmuxSupport,
 } from "../scripts/lib/psmux-info.mjs";
+import { writesRealHomeInTest } from "../scripts/lib/test-env.mjs";
 import {
   applyStatusLine,
   cleanupStaleSkills,
@@ -1231,6 +1232,10 @@ async function cmdSetup(options = {}) {
   } = options;
   if (dryRun) {
     printJson(buildSetupDryRunPlan());
+    return;
+  }
+  if (writesRealHomeInTest()) {
+    info("setup: skip (테스트가 홈을 격리하지 않음)");
     return;
   }
 

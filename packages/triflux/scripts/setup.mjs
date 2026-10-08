@@ -44,6 +44,7 @@ import {
 } from "./lib/machine-profile.mjs";
 import { parseFrontmatter } from "./lib/skill-template.mjs";
 import { resolveStableNodeBin } from "./lib/stable-node.mjs";
+import { isTestRun, writesRealHomeInTest } from "./lib/test-env.mjs";
 import { cleanupTmpFiles } from "./tmp-cleanup.mjs";
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -331,13 +332,7 @@ export async function ensureMachineProfile({
 } = {}) {
   const profilePath = resolveMachineProfilePath({ platform, env, home });
   const implicitTestRun =
-    !env.TFX_MACHINE_PROFILE_PATH &&
-    !env.TRIFLUX_TEST_HOME &&
-    (env.NODE_ENV === "test" ||
-      env.TFX_TEST === "1" ||
-      Boolean(env.TEST_LOCK_PID) ||
-      Boolean(env.NODE_TEST_CONTEXT) ||
-      Boolean(env.NODE_TEST_WORKER_ID));
+    !env.TFX_MACHINE_PROFILE_PATH && writesRealHomeInTest(env);
   if (implicitTestRun) {
     return {
       changed: false,
@@ -1334,15 +1329,7 @@ function isProtectedCodexConfigMutationEnv(env = process.env) {
 }
 
 function isProtectedSetupEnv(env = process.env) {
-  return (
-    env.NODE_ENV === "test" ||
-    env.CI === "true" ||
-    env.TFX_TEST === "1" ||
-    Boolean(env.TRIFLUX_TEST_HOME) ||
-    Boolean(env.TEST_LOCK_PID) ||
-    Boolean(env.NODE_TEST_CONTEXT) ||
-    Boolean(env.NODE_TEST_WORKER_ID)
-  );
+  return env.CI === "true" || Boolean(env.TRIFLUX_TEST_HOME) || isTestRun(env);
 }
 
 export function ensureTrifluxMods({
@@ -1996,6 +1983,10 @@ export {
 
 export async function runCritical(stdinData) {
   const io = createCommandIo();
+  if (writesRealHomeInTest()) {
+    io.log("setup: skip (테스트가 홈을 격리하지 않음)");
+    return io.result(0);
+  }
   const cleanup = cleanupLegacyHooks({ settingsPath: SETTINGS_PATH });
   if (!cleanup.ok) {
     io.writeStderr(`[tfx-setup] 이전 hook 정리 실패: ${cleanup.error}\n`);
@@ -2028,6 +2019,10 @@ export async function runCritical(stdinData) {
 
 export async function runDeferred(stdinData) {
   const io = createCommandIo();
+  if (writesRealHomeInTest()) {
+    io.log("setup: skip (테스트가 홈을 격리하지 않음)");
+    return io.result(0);
+  }
   const cleanup = cleanupLegacyHooks({ settingsPath: SETTINGS_PATH });
   if (!cleanup.ok) {
     io.writeStderr(`[tfx-setup] 이전 hook 정리 실패: ${cleanup.error}\n`);
@@ -2203,7 +2198,7 @@ export async function runDeferred(stdinData) {
   // ── HUD 캐시 pre-warm (백그라운드) ──
 
   const preWarmHudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
-  if (existsSync(preWarmHudPath)) {
+  if (!isTestRun() && existsSync(preWarmHudPath)) {
     const refreshFlags = [
       ["--refresh-claude-usage"],
       ["--refresh-codex-rate-limits"],
@@ -2336,7 +2331,7 @@ export async function runDeferred(stdinData) {
   // ── MCP 인벤토리 백그라운드 갱신 ──
 
   const mcpCheck = join(PLUGIN_ROOT, "scripts", "mcp-check.mjs");
-  if (existsSync(mcpCheck)) {
+  if (!isTestRun() && existsSync(mcpCheck)) {
     const child = spawn(process.execPath, [mcpCheck], {
       detached: true,
       stdio: "ignore",

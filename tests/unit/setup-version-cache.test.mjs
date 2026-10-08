@@ -51,6 +51,7 @@ function runSetup(tempHome, args = []) {
       ...process.env,
       HOME: tempHome,
       USERPROFILE: tempHome,
+      TRIFLUX_TEST_HOME: tempHome,
     },
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 20000,
