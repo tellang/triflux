@@ -142,6 +142,16 @@ track_worker_pid() {
   echo "$1" >> "$_PID_TRACK"
 }
 
+# tee 파이프라인에서 $! 는 tee 라 실제 워커가 추적되지 않는다. 파이프라인 단계 안에서
+# 자기 PID 를 남기고 워커로 exec 한다. 이 PID 는 스크립트의 직속 자식이다.
+_exec_tracked() {
+  local self_pid="${BASHPID:-}"
+  [[ -n "$self_pid" ]] || self_pid="$(exec sh -c 'echo "$PPID"')"
+  track_worker_pid "$self_pid"
+  [[ "$1" == "_no_timeout" ]] && shift 2
+  exec "$@"
+}
+
 # --async 서브셸은 job id 를 찍고 끝나는 맨 위 프로세스($$)보다 오래 산다. 추적 파일이
 # 끝난 $$ 이름이면 SessionStart 의 session-stale-cleanup 이 소유자 사망으로 보고
 # 실행 중인 워커를 SIGTERM 한다. 서브셸 안에서 자기 PID 로 다시 묶는다.
@@ -168,25 +178,48 @@ _run_async_job_body() {
   exit "$_ec"
 }
 
+# 그룹 kill 대상 워커의 명령 서명. timeout 래퍼가 리더면 인자에 CLI 이름이 남는다.
+_TFX_WORKER_CMD_RE='tfx-route|antigravity|(^|[ /])(codex|agy|claude)([ .]|$)'
+
+# Unix: 추적 PID 를 종료한다. timeout 래퍼가 없거나 tee 가 마지막 단계면 워커가
+# 이 스크립트와 같은 그룹이라, 그룹 kill 이 자기와 호출자 그룹을 죽인다(#548).
+# 그래서 자기 자식(재사용 PID 아님)만 다루고, 그룹 리더이면서 서명이 맞을 때만 그룹 kill,
+# 아니면 그 PID 와 자손만 종료한다.
+_kill_tracked_worker_unix() {
+  local pid="$1" self_pid="$2" info ppid pgid cmd
+  info=$(ps -o ppid=,pgid=,command= -p "$pid" 2>/dev/null) || return 0
+  read -r ppid pgid cmd <<< "$info"
+  [[ "$ppid" == "$self_pid" ]] || return 0
+  if [[ "$pgid" == "$pid" && "$cmd" =~ $_TFX_WORKER_CMD_RE ]]; then
+    kill -- "-$pgid" 2>/dev/null || true
+    return 0
+  fi
+  local queue="$pid" all="" cur child
+  while [[ -n "$queue" ]]; do
+    cur="${queue%% *}"
+    [[ "$queue" == *" "* ]] && queue="${queue#* }" || queue=""
+    all="$all $cur"
+    for child in $(pgrep -P "$cur" 2>/dev/null); do
+      queue="${queue:+$queue }$child"
+    done
+  done
+  kill $all 2>/dev/null || true
+}
+
 cleanup_workers() {
   deregister_agent 2>/dev/null || true
   [[ ! -f "$_PID_TRACK" ]] && return
+  local self_pid="${BASHPID:-}"
+  [[ -n "$self_pid" ]] || self_pid="$(exec sh -c 'echo "$PPID"')"
   while IFS= read -r pid; do
-    [[ -z "$pid" ]] && continue
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
     kill -0 "$pid" 2>/dev/null || continue
     case "$(uname -s)" in
       MINGW*|MSYS*)
         # Windows: taskkill /T /F로 프로세스 트리 전체 종료
         MSYS_NO_PATHCONV=1 cmd.exe //c "taskkill /T /F /PID $pid" 2>/dev/null || true ;;
       *)
-        # Unix: 프로세스 그룹 kill
-        local pgid
-        pgid=$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')
-        if [[ -n "$pgid" && "$pgid" != "0" ]]; then
-          kill -- "-$pgid" 2>/dev/null || true
-        else
-          kill "$pid" 2>/dev/null || true
-        fi ;;
+        _kill_tracked_worker_unix "$pid" "$self_pid" ;;
     esac
   done < "$_PID_TRACK"
   rm -f "$_PID_TRACK"
@@ -1858,7 +1891,7 @@ run_stream_worker() {
   )
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "${worker_cmd[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    printf '%s' "$prompt" | _exec_tracked "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "${worker_cmd[@]}" 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
     printf '%s' "$prompt" | "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "${worker_cmd[@]}" >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
@@ -1921,7 +1954,7 @@ run_antigravity_exec() {
   fi
 
   if [[ "$use_tee_flag" == "true" ]]; then
-    "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" ${agy_exec_env[@]+"${agy_exec_env[@]}"} "$CLI_CMD" "${agy_args[@]}" </dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+    _exec_tracked "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" ${agy_exec_env[@]+"${agy_exec_env[@]}"} "$CLI_CMD" "${agy_args[@]}" </dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
   else
     "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" ${agy_exec_env[@]+"${agy_exec_env[@]}"} "$CLI_CMD" "${agy_args[@]}" </dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
   fi
@@ -2084,7 +2117,7 @@ run_codex_exec() {
     # `--` end-of-options: prompt가 '--'/'---' (front-matter 등)로 시작하면
     # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
     if [[ "$use_tee_flag" == "true" ]]; then
-      "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
+      _exec_tracked "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null 2>"$STDERR_LOG" | tee "$STDOUT_LOG" &
     else
       "${TIMEOUT_CMD[@]}" "$HARD_CEILING_SEC" "$CLI_CMD" "${codex_args[@]}" --output-last-message "$CODEX_LAST_MESSAGE_LOG" -- "$prompt" < /dev/null >"$STDOUT_LOG" 2>"$STDERR_LOG" &
     fi

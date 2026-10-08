@@ -432,7 +432,8 @@ export function sessionExists(sessionName) {
   }
 
   try {
-    tmux(`has-session -t ${sessionName}`, { stdio: "ignore" });
+    // '=' 가 없으면 tmux 가 접두사로 다른 세션을 잡는다(#548).
+    tmux(`has-session -t =${sessionName}`, { stdio: "ignore" });
     return true;
   } catch {
     return false;
@@ -450,7 +451,7 @@ export function killSession(sessionName) {
   }
 
   try {
-    tmux(`kill-session -t ${sessionName}`, { stdio: "ignore" });
+    tmux(`kill-session -t =${sessionName}`, { stdio: "ignore" });
   } catch {
     // 이미 종료된 세션 — 무시
   }

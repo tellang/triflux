@@ -115,11 +115,13 @@ describe("psmux safe wrapper API", () => {
       killedCount: 2,
       sessions: ["team-alpha", "team-beta"],
     });
+    // tmux 는 접두사 매칭을 막는 '=' 를 붙인다(#548).
+    const exact = process.platform === "win32" ? "" : "=";
     assert.deepEqual(
       calls.filter((args) => args[0] === "kill-session"),
       [
-        ["kill-session", "-t", "team-alpha"],
-        ["kill-session", "-t", "team-beta"],
+        ["kill-session", "-t", `${exact}team-alpha`],
+        ["kill-session", "-t", `${exact}team-beta`],
       ],
     );
   });

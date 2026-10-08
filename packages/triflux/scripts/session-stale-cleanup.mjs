@@ -10,7 +10,7 @@
  * @see scripts/tfx-route.sh — PID tracking 파일 생산자
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
@@ -34,6 +34,10 @@ const PROTECTED_ANCESTOR_NAMES = new Set([
   "gemini.exe",
 ]);
 const PID_REUSE_GRACE_MS = 1000;
+// ps etime 은 초 단위로 잘려 시작 시각이 최대 1초 늦게 계산된다.
+const POSIX_PID_REUSE_GRACE_MS = 2000;
+const WORKER_CMD_RE =
+  /codex|antigravity|claude|(^|[\s/])agy(\s|$)|--bg-pty-host|--bg-spare|--agent-id|tfx-route/;
 const DEFAULT_FSMONITOR_ALERT_THRESHOLD = 50;
 const FSMONITOR_STALE_MS = 24 * 60 * 60 * 1000;
 
@@ -112,6 +116,42 @@ function collectWindowsProcessTable() {
   }
 }
 
+// ps etime: [[dd-]hh:]mm:ss
+export function parseEtimeMs(value) {
+  const m = String(value || "")
+    .trim()
+    .match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/);
+  if (!m) return null;
+  const [, d = 0, h = 0, min, sec] = m;
+  return (
+    (((Number(d) * 24 + Number(h)) * 60 + Number(min)) * 60 + Number(sec)) *
+    1000
+  );
+}
+
+function readPosixProcess(pid) {
+  try {
+    const out = execFileSync(
+      "ps",
+      ["-o", "ppid=,pgid=,etime=,command=", "-p", String(pid)],
+      { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+    const m = out.match(/^(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/);
+    if (!m) return null;
+    const ageMs = parseEtimeMs(m[3]);
+    return {
+      pid: Number(pid),
+      ppid: Number(m[1]),
+      pgid: Number(m[2]),
+      name: "",
+      creationMs: ageMs === null ? null : Date.now() - ageMs,
+      commandLine: m[4],
+    };
+  } catch {
+    return null;
+  }
+}
+
 function hasProtectedAncestor(pid, procMap) {
   let current = Number(pid);
   const seen = new Set();
@@ -152,15 +192,15 @@ export function shouldKillTrackedPid({
   procMap = new Map(),
   isWindows = platform() === "win32",
 } = {}) {
-  if (!isWindows) return true;
-
   const proc = procMap.get(Number(pid));
   if (!proc) return false;
 
+  // PID 파일을 마지막으로 쓴 뒤 시작한 프로세스는 재사용된 PID 다.
+  const graceMs = isWindows ? PID_REUSE_GRACE_MS : POSIX_PID_REUSE_GRACE_MS;
   if (
     Number.isFinite(proc.creationMs) &&
     Number.isFinite(pidFileMtimeMs) &&
-    proc.creationMs > pidFileMtimeMs + PID_REUSE_GRACE_MS
+    proc.creationMs > pidFileMtimeMs + graceMs
   ) {
     return false;
   }
@@ -171,7 +211,7 @@ export function shouldKillTrackedPid({
   return true;
 }
 
-function treeKill(pid) {
+function treeKill(pid, proc) {
   try {
     if (platform() === "win32") {
       execSync(`taskkill /T /F /PID ${pid}`, {
@@ -179,39 +219,15 @@ function treeKill(pid) {
         timeout: 5000,
         windowsHide: true,
       });
-    } else {
-      // POSIX: detached 워커의 손자까지 회수하려면 프로세스 '그룹' 을 종료해야 한다
-      // (Windows `taskkill /T` 와 동일 의미). 단 PID 재사용/공유 그룹 때문에 그룹
-      // kill 이 무관한 live 프로세스 그룹을 죽일 수 있다 (Codex review PR #365 P1).
-      // 그래서 그룹 kill 은 다음을 모두 만족할 때만 한다:
-      //   - 대상이 자기 그룹의 leader (pgid === pid → 그룹 = 그 워커의 subtree 뿐)
-      //   - 여전히 triflux 가 띄운 워커처럼 보임 (command signature)
-      //   - init 류 그룹 아님 (pgid > 1)
-      // 그 외에는 기존과 동일하게 단일 PID SIGTERM 으로 폴백한다 (회귀 없음).
-      let pgid = null;
-      let cmd = "";
-      try {
-        const out = execSync(`ps -o pgid=,command= -p ${pid}`, {
-          timeout: 2000,
-        })
-          .toString()
-          .trim();
-        const m = out.match(/^(\d+)\s+(.*)$/);
-        if (m) {
-          pgid = parseInt(m[1], 10);
-          cmd = m[2];
-        }
-      } catch {
-        /* 조회 실패 — bare pid 폴백 */
-      }
-      const isWorker =
-        /codex|antigravity|claude|--bg-pty-host|--bg-spare|--agent-id|tfx-route/.test(
-          cmd,
-        );
-      const safeGroupKill =
-        Number.isInteger(pgid) && pgid > 1 && pgid === pid && isWorker;
-      process.kill(safeGroupKill ? -pgid : pid, "SIGTERM");
+      return;
     }
+    // POSIX: 손자까지 회수하려면 그룹 kill 이 필요하지만, 공유 그룹이면 무관한
+    // 프로세스까지 죽는다. 리더이고 워커 서명일 때만 그룹, 아니면 단일 PID.
+    const safeGroupKill =
+      proc.pgid > 1 &&
+      proc.pgid === pid &&
+      WORKER_CMD_RE.test(proc.commandLine);
+    process.kill(safeGroupKill ? -pid : pid, "SIGTERM");
   } catch {
     /* already dead */
   }
@@ -260,7 +276,8 @@ function cleanupOrphanPidFiles() {
   } catch {
     return;
   }
-  const procMap = collectWindowsProcessTable();
+  const isWindows = platform() === "win32";
+  const winProcMap = collectWindowsProcessTable();
 
   for (const f of files) {
     const m = PID_FILE_RE.exec(f);
@@ -280,6 +297,9 @@ function cleanupOrphanPidFiles() {
 
       for (const pid of pids) {
         if (pid > 0 && isProcessAlive(pid)) {
+          const procMap = isWindows
+            ? winProcMap
+            : new Map([[pid, readPosixProcess(pid)]]);
           if (!shouldKillTrackedPid({ pid, pidFileMtimeMs, procMap })) {
             console.error(
               `[session-stale-cleanup] skip pid=${pid} from ${f} (pid-reuse-or-live-cli-root)`,
@@ -289,7 +309,7 @@ function cleanupOrphanPidFiles() {
           console.error(
             `[session-stale-cleanup] orphan worker kill: pid=${pid} (from ${f})`,
           );
-          treeKill(pid);
+          treeKill(pid, procMap.get(pid));
         }
       }
     } catch {

@@ -454,11 +454,17 @@ function parsePaneDetails(output) {
     .filter((entry) => entry.paneId);
 }
 
+// tmux 는 -t 세션 이름을 접두사로도 매칭해, 대상이 이미 없으면 이름이 이어지는
+// 다른 세션을 잡는다(#548). psmux 는 정확히만 매칭하고 3.3.8 전에는 '=' 를 모른다.
+function exactSessionTarget(sessionName, windowSuffix = "") {
+  return `${IS_WINDOWS ? "" : "="}${sessionName}${windowSuffix}`;
+}
+
 function collectSessionPanes(sessionName) {
   const output = psmuxExec([
     "list-panes",
     "-t",
-    `${sessionName}:0`,
+    exactSessionTarget(sessionName, ":0"),
     "-F",
     "#{pane_index}\t#{session_name}:#{window_index}.#{pane_index}",
   ]);
@@ -762,7 +768,7 @@ function collectPanePids(sessionName) {
     const output = psmuxExec([
       "list-panes",
       "-t",
-      sessionName,
+      exactSessionTarget(sessionName, ":"),
       "-F",
       "#{pane_pid}",
     ]);
@@ -1025,7 +1031,9 @@ export function killPsmuxSession(sessionName) {
 
   // 3. psmux 세션 자체 종료
   try {
-    psmuxExec(["kill-session", "-t", sessionName], { stdio: "ignore" });
+    psmuxExec(["kill-session", "-t", exactSessionTarget(sessionName)], {
+      stdio: "ignore",
+    });
   } catch {
     // 이미 종료된 세션 — 무시
   }
@@ -1064,7 +1072,9 @@ export function killSessionByTitle(titlePattern) {
   const sessions = listSessions({ filterTitle: titlePattern });
   const killed = [];
   for (const session of sessions) {
-    psmuxExec(["kill-session", "-t", session.sessionName], { stdio: "ignore" });
+    psmuxExec(["kill-session", "-t", exactSessionTarget(session.sessionName)], {
+      stdio: "ignore",
+    });
     killed.push(session.sessionName);
   }
   return {
@@ -1130,7 +1140,9 @@ export function pruneStale(opts = {}) {
  */
 export function psmuxSessionExists(sessionName) {
   try {
-    psmuxExec(["has-session", "-t", sessionName], { stdio: "ignore" });
+    psmuxExec(["has-session", "-t", exactSessionTarget(sessionName)], {
+      stdio: "ignore",
+    });
     return true;
   } catch {
     return false;
