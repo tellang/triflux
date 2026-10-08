@@ -194,7 +194,7 @@ test("hub.pid 가 다른 프로세스를 가리키면 종료하지 않고 파일
 });
 
 const taskXml = (command, args, description = "") =>
-  `<Task><RegistrationInfo><Description>${description}</Description></RegistrationInfo><Actions Context="Author"><Exec><Command>${command}</Command><Arguments>${args}</Arguments></Exec></Actions></Task>`;
+  `<Task><RegistrationInfo><Description>${description}</Description></RegistrationInfo><Actions Context="Author"><Exec id="HubAction"><Command>${command}</Command><Arguments>${args}</Arguments></Exec></Actions></Task>`;
 
 test("Windows 의 허브 예약 작업은 실행 명령으로만 판정해 지운다", () => {
   for (const [task, xml, deleted] of [

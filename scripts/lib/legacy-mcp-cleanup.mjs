@@ -741,13 +741,25 @@ export function cleanupLegacyMcp({
   if (resolve(repoRoot) !== resolve(home))
     files.push([join(repoRoot, ".mcp.json"), "json"]);
   const plans = [];
-  const seen = new Set();
+  const kinds = new Map();
   let blocked = false;
   for (const [file, kind] of files) {
     try {
       const target = fileTarget(file);
+      if (!target) continue;
       // symlink 별칭이 같은 파일을 두 번 계획하면 두 번째 쓰기가 원문 검증에서 막힌다.
-      if (!target || !markFirst(seen, target)) continue;
+      // 형식이 다른 별칭(agy 와 json)은 env 처리가 달라 한쪽이 깨지므로 이주를 멈춘다.
+      const key = realpathSync(target);
+      if (kinds.has(key)) {
+        if (kinds.get(key) !== kind) {
+          result.warnings.push(
+            `${file}: 형식이 다른 설정과 같은 파일이라 이주를 멈춤`,
+          );
+          blocked = true;
+        }
+        continue;
+      }
+      kinds.set(key, kind);
       const original = readFileSync(target, "utf8");
       // 빈 파일은 항목이 없는 것이다. 형식 오류로 보면 이주 전체가 멈춘다.
       if (!original.trim()) continue;
@@ -974,7 +986,7 @@ function taskExecCommand(xml) {
       .replace(/&gt;/g, ">")
       .replace(/&amp;/g, "&");
   const actions = xml.match(/<Actions\b[^>]*>([\s\S]*?)<\/Actions>/)?.[1] ?? "";
-  const execs = [...actions.matchAll(/<Exec>([\s\S]*?)<\/Exec>/g)];
+  const execs = [...actions.matchAll(/<Exec\b[^>]*>([\s\S]*?)<\/Exec>/g)];
   if (
     execs.length !== 1 ||
     /<(?:ComHandler|SendEmail|ShowMessage)\b/.test(actions)

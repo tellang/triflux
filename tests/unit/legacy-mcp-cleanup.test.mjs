@@ -199,6 +199,29 @@ test("symlink 별칭은 한 번만 이주하고 뒤의 설정도 이어서 이�
   );
 });
 
+test("형식이 다른 설정이 같은 파일이면 쓰기와 해제 없이 멈춘다", () => {
+  const { home, repoRoot } = fixture();
+  const gemini = join(home, ".gemini", "settings.json");
+  const original = JSON.stringify({
+    mcpServers: { "brave-search": { url: "http://127.0.0.1:8101/mcp" } },
+  });
+  put(gemini, original);
+  symlinkSync(gemini, join(home, ".gemini", "config", "mcp_config.json"));
+  const result = cleanupLegacyMcp({
+    home,
+    repoRoot,
+    platform: "darwin",
+    run: () => {
+      throw new Error("unexpected command");
+    },
+    uid: 500,
+    env: {},
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.teardown.attempted, false);
+  assert.equal(readFileSync(gemini, "utf8"), original);
+});
+
 test("깨진 설정과 소유 불명 URL은 원본을 보존하고 해제를 막는다", () => {
   const { home, repoRoot } = fixture();
   const claude = join(home, ".claude.json");
