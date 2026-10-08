@@ -178,7 +178,6 @@ Windows Terminal의 독립 탭 열기는 유지한다.
 | `.claude/rules/tfx-update-logic.md` | triflux / OMC / gstack / Codex / Antigravity 업데이트 로직 |
 | `.claude/rules/tfx-stack-coexistence.md` | gstack / superpowers / triflux 공존 원칙, 레이어 분리, 의존 방향, 충돌 해소 |
 | `.claude/rules/tfx-mirror-policy.md` | packages/ 3계층 미러 정책(핵심 단순 복사 / 원격 가져오기 변환 / triflux 바이트 동일), 테스트 제외 규칙, 불일치 차단 |
-| `.claude/rules/tfx-cto-hub-boundary.md` | CTO lake 조회 표면과 의존 방향 |
 | `.claude/rules/tfx-doc-governance.md` | 실행 규칙, ADR, 설계, 계획 문서의 배치 |
 | `.claude/rules/tfx-escalation-chain.md` | 자동 재시도와 CLI 전환 체인 |
 | `.claude/rules/tfx-machine-profile.md` | 기기 프로필 우선순위와 실행 정책 |

@@ -46,18 +46,7 @@ const CORE_DIRS = [
   "hub/workers/worker-utils.mjs", // shared utility
 ];
 
-export const REMOTE_FILES = [
-  "cto/brief.mjs",
-  "cto/collect.mjs",
-  "cto/events.mjs",
-  "cto/hygiene.mjs",
-  "cto/lake-root.mjs",
-  "cto/status.mjs",
-  "cto/current.schema.json",
-];
-
 const REMOTE_DIRS = ["hub/team", "hub/workers"];
-const REMOTE_CORE_PROXIES = ["hub/lib/cto-env.mjs"];
 
 const TRIFLUX_DIRS = [
   "adapters",
@@ -67,7 +56,6 @@ const TRIFLUX_DIRS = [
   "hud",
   "scripts",
   "hub",
-  "cto",
 ];
 
 const TRIFLUX_FILES = ["README.md", "README.ko.md", "LICENSE", "CLAUDE.md"];
@@ -211,14 +199,7 @@ function packRemote() {
   const coreDest = join(ROOT, "packages", "core");
   console.log("\n@triflux/remote");
   cleanDist(dest);
-  for (const f of REMOTE_FILES) copyItem(f, dest);
   for (const d of REMOTE_DIRS) copyItem(d, dest);
-  for (const proxy of REMOTE_CORE_PROXIES) {
-    const target = join(dest, proxy);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, `export * from "@triflux/core/${proxy}";\n`);
-    console.log(`  WRITE ${proxy}`);
-  }
   // hub/team 이 쓰는 공용 scripts/lib
   copyItem("scripts/lib", dest);
   writeIndex(dest, REMOTE_INDEX);
@@ -231,7 +212,7 @@ function packTriflux() {
   const dest = join(ROOT, "packages", "triflux");
   console.log("\ntriflux (meta)");
   cleanDist(dest);
-  // clean extra dirs that triflux now includes. references 는 npm 에 싣지 않지만 옛 사본을 지우려고 남긴다.
+  // clean extra dirs that triflux now includes. cto, references 는 싣지 않지만 옛 사본을 지우려고 남긴다.
   for (const d of [
     "adapters",
     "hooks",

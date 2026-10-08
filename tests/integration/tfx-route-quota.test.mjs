@@ -119,7 +119,6 @@ ${rerouteFunc}`;
         TFX_CODEX_CONFIG: isolatedCodex.path,
         TFX_HEARTBEAT: "0",
         TFX_MCP_HEALTH_CHECK: "0",
-        TFX_CTO_NORTH_STAR: "0",
         TFX_CLI_MODE: "auto",
         TFX_PREFLIGHT_LOADED: "1",
         TFX_CODEX_OK: "1",

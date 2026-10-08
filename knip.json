@@ -7,16 +7,14 @@
         "scripts/*.mjs",
         "hub/**/*.mjs",
         "hud/**/*.mjs",
-        "hooks/**/*.mjs",
-        "cto/**/*.mjs"
+        "hooks/**/*.mjs"
       ],
       "project": [
         "bin/**/*.mjs",
         "scripts/**/*.mjs",
         "hub/**/*.mjs",
         "hooks/**/*.mjs",
-        "hud/**/*.mjs",
-        "cto/**/*.mjs"
+        "hud/**/*.mjs"
       ]
     },
     "packages/core": {
@@ -24,23 +22,16 @@
       "project": ["hub/**/*.mjs", "hud/**/*.mjs"]
     },
     "packages/remote": {
-      "entry": ["hub/**/*.mjs", "scripts/*.mjs", "cto/**/*.mjs"],
-      "project": ["hub/**/*.mjs", "scripts/**/*.mjs", "cto/**/*.mjs"]
+      "entry": ["hub/**/*.mjs", "scripts/*.mjs"],
+      "project": ["hub/**/*.mjs", "scripts/**/*.mjs"]
     },
     "packages/triflux": {
-      "entry": [
-        "bin/*.mjs",
-        "scripts/*.mjs",
-        "hub/**/*.mjs",
-        "hooks/**/*.mjs",
-        "cto/**/*.mjs"
-      ],
+      "entry": ["bin/*.mjs", "scripts/*.mjs", "hub/**/*.mjs", "hooks/**/*.mjs"],
       "project": [
         "bin/**/*.mjs",
         "scripts/**/*.mjs",
         "hub/**/*.mjs",
-        "hooks/**/*.mjs",
-        "cto/**/*.mjs"
+        "hooks/**/*.mjs"
       ]
     }
   },

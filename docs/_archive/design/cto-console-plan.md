@@ -1,3 +1,5 @@
+> 폐기: `tfx cto` 와 CTO lake 기록을 지웠다. ADR-0035, ADR-0012.
+
 # CTO Console Plan
 
 ## Purpose

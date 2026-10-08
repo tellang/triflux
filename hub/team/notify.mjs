@@ -7,7 +7,6 @@ export const NOTIFY_EVENT_TYPES = Object.freeze([
   "completed",
   "failed",
   "inputWait",
-  "ctoHygiene",
 ]);
 export const NOTIFY_CHANNELS = Object.freeze(["bell", "toast", "webhook"]);
 
@@ -154,8 +153,6 @@ function formatEventTitle(event) {
       return "Triflux failed";
     case "inputWait":
       return "Triflux waiting for input";
-    case "ctoHygiene":
-      return "Triflux CTO hygiene needs action";
     default:
       return "Triflux notification";
   }

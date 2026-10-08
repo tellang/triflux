@@ -1,11 +1,11 @@
 ---
 id: 0024
 title: CTO 는 조회만 남긴다
-status: accepted
+status: superseded
 date: 2026-10-08
 deciders: [tellang]
 supersedes: []
-superseded_by: null
+superseded_by: 0035
 relates: [0010, 0018, 0022]
 pr: null
 ---

@@ -38,7 +38,6 @@ process.exit(1);
           TFX_MACHINE_PROFILE_PATH: join(config.dir, "machine-profile.env"),
           TFX_CODEX_CONFIG: config.path,
           TFX_CODEX_TRANSPORT: "exec",
-          TFX_CTO_NORTH_STAR: "0",
           TFX_CODEX_OK: "1",
           TFX_ANTIGRAVITY_OK: "0",
           TFX_PREFLIGHT_LOADED: "1",

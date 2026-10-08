@@ -133,7 +133,6 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 | `tfx setup` / `tfx doctor` | Sync files, HUD, MCP, profiles / diagnose and repair (`--fix`, `--json`) |
 | `tfx multi` | Local multi-CLI team in tmux |
 | `tfx mcp` | Managed MCP registry: `list`, `sync`, `add`, `remove` |
-| `tfx cto` | Repo-local authority console: `collect`, `status`, `hygiene` (dry-run) |
 | `bash ~/.claude/scripts/tfx-route.sh code-reviewer "<instruction>"` | Send review to Codex (`codex exec review` via policy) |
 | `tfx list`, `tfx update`, `tfx version` | Installed skills, update, version |
 | `tfx-live` | Live session bridge (same as the `/tfx-live` skill) |
@@ -167,11 +166,6 @@ tmux pane the worker runs in.
 removes a CLI from routing; if no allowed CLI is available the route fails instead of silently
 falling back. Details: [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tfx-machine-profile.md).
 
-**CTO lake.** Run `tfx cto collect` to refresh the repo snapshot in `.triflux/lake/`, then
-`tfx cto status` to inspect it with its generation time and age. `tfx cto hygiene --dry-run` reports
-dry-run findings. The tray and unused CTO operating commands were removed
-([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)). Automatic collection stays off unless `TFX_CTO_AUTO_COLLECT=1` is set ([ADR-0018](docs/_archive/adr/0018-cto-auto-behaviors-opt-in.md)).
-
 **Remote hosts.** `/tfx-remote` reads hosts from `~/.config/triflux/hosts.json`
 (Windows: `%APPDATA%\triflux\hosts.json`). Start a session with `remote-spawn.mjs`
 `--host <host> --prompt "<request>"`. Options: [skills/tfx-remote/SKILL.md](skills/tfx-remote/SKILL.md).
@@ -197,7 +191,6 @@ graph TD
     Live -->|"codex queue, tmux fallback"| CodexTUI[Codex TUI sessions]
     Live -->|"UDS or tmux"| ClaudeTUI[Claude Code sessions]
     Route --> HUD[HUD]
-    CLI --> Lake[(".triflux/lake (tfx cto)")]
 ```
 
 Package layout and execution paths: [ARCHITECTURE.md](ARCHITECTURE.md). Documentation map:

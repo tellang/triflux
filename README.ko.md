@@ -131,7 +131,6 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 | `tfx setup` / `tfx doctor` | 파일·HUD·MCP·프로필 동기화 / 진단과 복구(`--fix`, `--json`) |
 | `tfx multi` | tmux 기반 로컬 멀티 CLI 팀 |
 | `tfx mcp` | 관리형 MCP 레지스트리: `list`, `sync`, `add`, `remove` |
-| `tfx cto` | 저장소 단위 권위 콘솔: `collect`, `status`, `hygiene`(dry-run) |
 | `bash ~/.claude/scripts/tfx-route.sh code-reviewer "<지시>"` | 정책에 따라 `codex exec review`로 리뷰 전달 |
 | `tfx list`, `tfx update`, `tfx version` | 설치된 스킬, 업데이트, 버전 |
 | `tfx-live` | 라이브 세션 브리지(`/tfx-live` 스킬과 같은 명령) |
@@ -165,11 +164,6 @@ Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-s
 다른 경로로 넘어가지 않고 실패한다. 자세한 내용은
 [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tfx-machine-profile.md).
 
-**CTO lake.** `tfx cto collect`로 `.triflux/lake/`의 저장소 스냅샷을 갱신하고,
-`tfx cto status`로 생성 시각과 경과 시간을 확인한다. `tfx cto hygiene --dry-run`는 dry-run 결과를
-보고한다. 트레이와 쓰이지 않는 CTO 운영 명령은 제거하였다
-([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)). 자동 수집은 기본으로 꺼져 있고 `TFX_CTO_AUTO_COLLECT=1` 로 켠다([ADR-0018](docs/_archive/adr/0018-cto-auto-behaviors-opt-in.md)).
-
 **원격 호스트.** `/tfx-remote`는 `~/.config/triflux/hosts.json`
 (Windows는 `%APPDATA%\triflux\hosts.json`)에서 호스트를 읽는다. 세션 시작은
 `remote-spawn.mjs`의 `--host <host> --prompt "<요청>"` 옵션을 사용한다.
@@ -196,7 +190,6 @@ graph TD
     Live -->|"codex queue, tmux 폴백"| CodexTUI[Codex TUI 세션]
     Live -->|"UDS 또는 tmux"| ClaudeTUI[Claude Code 세션]
     Route --> HUD[HUD]
-    CLI --> Lake[(".triflux/lake (tfx cto)")]
 ```
 
 패키지 구성과 실행 경로는 [ARCHITECTURE.md](ARCHITECTURE.md), 문서 지도는
