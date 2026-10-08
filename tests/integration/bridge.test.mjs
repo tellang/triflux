@@ -3,28 +3,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-  buildInteractiveSessionRegistrationPayload,
-  parseArgs,
-  parseJsonSafe,
-} from "../../hub/bridge.mjs";
+import { parseArgs, parseJsonSafe } from "../../hub/bridge.mjs";
 
 describe("bridge.mjs parseArgs()", () => {
-  it("--agent 플래그를 올바르게 파싱해야 한다", () => {
-    const args = parseArgs(["--agent", "my-agent-01"]);
-    assert.equal(args.agent, "my-agent-01");
-  });
-
-  it("--cli 플래그를 올바르게 파싱해야 한다", () => {
-    const args = parseArgs(["--cli", "codex"]);
-    assert.equal(args.cli, "codex");
-  });
-
-  it("--topics 콤마 구분 값을 파싱해야 한다", () => {
-    const args = parseArgs(["--topics", "task.result,task.done"]);
-    assert.deepEqual(args.topics.split(","), ["task.result", "task.done"]);
-  });
-
   it("--claim boolean 플래그를 파싱해야 한다", () => {
     const args = parseArgs(["--claim"]);
     assert.equal(args.claim, true);
@@ -52,69 +33,6 @@ describe("bridge.mjs parseArgs()", () => {
     assert.equal(args["metadata-patch"], '{"result":"running"}');
   });
 
-  it("control/assign/pipeline 옵션을 파싱해야 한다", () => {
-    const args = parseArgs([
-      "--to",
-      "worker-1",
-      "--command",
-      "pause",
-      "--session-id",
-      "sess-01",
-      "--reason",
-      "check",
-      "--supervisor-agent",
-      "lead-1",
-      "--worker-agent",
-      "worker-1",
-      "--job-id",
-      "job-001",
-      "--task",
-      "assign this",
-      "--payload",
-      '{"k":"v"}',
-      "--result",
-      '{"ok":true}',
-      "--error",
-      '{"message":"boom"}',
-      "--metadata",
-      '{"result":"failed"}',
-      "--requested-by",
-      "tester",
-      "--ttl-ms",
-      "9000",
-      "--timeout-ms",
-      "12000",
-      "--max-retries",
-      "2",
-      "--attempt",
-      "3",
-      "--fix-max",
-      "4",
-      "--ralph-max",
-      "5",
-    ]);
-
-    assert.equal(args.to, "worker-1");
-    assert.equal(args.command, "pause");
-    assert.equal(args["session-id"], "sess-01");
-    assert.equal(args.reason, "check");
-    assert.equal(args["supervisor-agent"], "lead-1");
-    assert.equal(args["worker-agent"], "worker-1");
-    assert.equal(args["job-id"], "job-001");
-    assert.equal(args.task, "assign this");
-    assert.equal(args.payload, '{"k":"v"}');
-    assert.equal(args.result, '{"ok":true}');
-    assert.equal(args.error, '{"message":"boom"}');
-    assert.equal(args.metadata, '{"result":"failed"}');
-    assert.equal(args["requested-by"], "tester");
-    assert.equal(args["ttl-ms"], "9000");
-    assert.equal(args["timeout-ms"], "12000");
-    assert.equal(args["max-retries"], "2");
-    assert.equal(args.attempt, "3");
-    assert.equal(args["fix-max"], "4");
-    assert.equal(args["ralph-max"], "5");
-  });
-
   it("포지셔널 인자를 숫자 키와 배열로 함께 보존해야 한다", () => {
     const args = parseArgs(["lead", "worker", '{"task":"ship"}']);
     assert.equal(args[1], "lead");
@@ -125,9 +43,8 @@ describe("bridge.mjs parseArgs()", () => {
 
   it("플래그 없을 때 undefined를 반환해야 한다", () => {
     const args = parseArgs([]);
-    assert.equal(args.agent, undefined);
-    assert.equal(args.command, undefined);
-    assert.equal(args["job-id"], undefined);
+    assert.equal(args.team, undefined);
+    assert.equal(args.status, undefined);
   });
 
   it("위치 인자를 1-based 키로 함께 노출해야 한다", () => {
@@ -158,83 +75,5 @@ describe("bridge.mjs parseJsonSafe()", () => {
 
   it("배열 JSON을 올바르게 파싱해야 한다", () => {
     assert.deepEqual(parseJsonSafe("[1,2,3]", []), [1, 2, 3]);
-  });
-});
-
-describe("bridge.mjs interactive session registration", () => {
-  it("converts a Codex SessionStart into synapse and agents-table registration data", () => {
-    const payload = buildInteractiveSessionRegistrationPayload({
-      "session-id": "codex-session-01",
-      cwd: "/tmp/codex-worktree",
-      "worktree-path": "/tmp/codex-worktree",
-      branch: "feature/presence",
-      host: "local",
-      "session-kind": "interactive",
-      "tmux-session": "omx-presence",
-      "omx-session-id": "omx-session-01",
-      "codex-session-id": "codex-session-01",
-    });
-
-    assert.deepEqual(
-      {
-        sessionId: payload.sessionId,
-        cwd: payload.cwd,
-        worktreePath: payload.worktreePath,
-        branch: payload.branch,
-        host: payload.host,
-        sessionKind: payload.sessionKind,
-        isRemote: payload.isRemote,
-        agent_id: payload.agent_id,
-        cli: payload.cli,
-        capabilities: payload.capabilities,
-        topics: payload.topics,
-        heartbeat_ttl_ms: payload.heartbeat_ttl_ms,
-        session_id: payload.session_id,
-        metadata: {
-          cwd: payload.metadata.cwd,
-          worktree_path: payload.metadata.worktree_path,
-          branch: payload.metadata.branch,
-          host: payload.metadata.host,
-          session_kind: payload.metadata.session_kind,
-          is_remote: payload.metadata.is_remote,
-          tmux_session: payload.metadata.tmux_session,
-          omx_session_id: payload.metadata.omx_session_id,
-          codex_session_id: payload.metadata.codex_session_id,
-        },
-      },
-      {
-        sessionId: "codex-session-01",
-        cwd: "/tmp/codex-worktree",
-        worktreePath: "/tmp/codex-worktree",
-        branch: "feature/presence",
-        host: "local",
-        sessionKind: "interactive",
-        isRemote: false,
-        agent_id: "codex-session-codex-session-01",
-        cli: "codex",
-        capabilities: ["code"],
-        topics: [],
-        heartbeat_ttl_ms: 300000,
-        session_id: "codex-session-01",
-        metadata: {
-          cwd: "/tmp/codex-worktree",
-          worktree_path: "/tmp/codex-worktree",
-          branch: "feature/presence",
-          host: "local",
-          session_kind: "interactive",
-          is_remote: false,
-          tmux_session: "omx-presence",
-          omx_session_id: "omx-session-01",
-          codex_session_id: "codex-session-01",
-        },
-      },
-    );
-  });
-
-  it("does not turn legacy agent registration into an interactive session registration", () => {
-    assert.equal(
-      buildInteractiveSessionRegistrationPayload({ agent: "legacy-agent" }),
-      null,
-    );
   });
 });

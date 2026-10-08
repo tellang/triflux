@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
+import { routeTestEnv } from "../fixtures/route-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 
 /**
@@ -27,14 +27,6 @@ const ROUTE_SCRIPT = toBashPath(
 );
 const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
-);
-// Stub hub-ensure so full-route invocations never bind/spawn a hub on the
-// canonical port (27888) against the live dev hub (v10.33.1 follow-up #1).
-const HUB_ENSURE_STUB = resolve(
-  PROJECT_ROOT,
-  "tests",
-  "fixtures",
-  "no-op-hub-ensure.mjs",
 );
 
 function getAgyPath() {
@@ -94,7 +86,7 @@ function runBash(command, extraEnv = {}) {
   return spawnSync(BASH_EXE, ["-c", command], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
-    env: hubServerTestEnv({
+    env: routeTestEnv({
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
       AGY_BIN: "agy",
       HOME: home,
@@ -105,8 +97,6 @@ function runBash(command, extraEnv = {}) {
       TFX_TEAM_TASK_ID: "",
       TFX_TEAM_AGENT_NAME: "",
       TFX_TEAM_LEAD_NAME: "",
-      TFX_HUB_URL: "",
-      TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
       TMUX: "",
       TFX_CLI_MODE: "auto",
       TFX_NO_CLAUDE_NATIVE: "0",

@@ -146,7 +146,7 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 | `tfx multi` CLI | 2+개 태스크 headless 병렬 |
 | tfx-remote | Claude Code 원격 세션 (SSH, user-state hosts.json setup 필수) |
 
-**Claude 네이티브** (CLI 불필요): tfx-setup, tfx-doctor(hub 시작·중지·상태 포함)
+**Claude 네이티브** (CLI 불필요): tfx-setup, tfx-doctor
 
 **Headless UI default** : `tfx-auto`, `tfx multi`의 headless 워커는 default 로 `claude agents` 패널에 노출 (`--native-bridge-ui agents`). opt-out: `--no-native-bridge-ui`. interactive (tmux/wt) 경로는 default-off. 행에서 Enter 를 누르면 워커가 도는 tmux pane 이 열린다. 상세 행동표는 `CLAUDE.md` 의 `<native-bridge>` 섹션. 근거(why): [ADR-0008 : headless 워커 native-bridge 기본 노출](../../docs/adr/0008-native-bridge-ui-default-on.md), [ADR-0026 : agents 행을 워커 tmux 방의 attach client 로](../../docs/adr/0026-agents-row-tmux-attach.md).
 

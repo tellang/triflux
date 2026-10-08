@@ -16,7 +16,6 @@ import { syncRegistryTargets } from "../lib/mcp-guard-engine.mjs";
 const originalEnv = {
   HOME: process.env.HOME,
   USERPROFILE: process.env.USERPROFILE,
-  TFX_HUB_PORT: process.env.TFX_HUB_PORT,
   TFX_TEST: process.env.TFX_TEST,
 };
 const originalCwd = process.cwd();
@@ -54,17 +53,14 @@ function readJson(filePath) {
 function registryFor(settingsPath, overrides = {}) {
   return {
     version: 1,
-    defaults: {
-      transport: "hub-url",
-      hub_base: "http://127.0.0.1:27888",
-    },
+    defaults: { transport: "http" },
     servers: {
-      "tfx-hub": {
-        transport: "hub-url",
-        url: "http://127.0.0.1:27888/mcp",
+      context7: {
+        transport: "http",
+        url: "https://mcp.context7.com/mcp",
         safe: true,
         targets: ["gemini"],
-        description: "triflux Hub MCP 서버",
+        description: "Context7 MCP 서버",
       },
       ...(overrides.servers || {}),
     },
@@ -79,7 +75,6 @@ function registryFor(settingsPath, overrides = {}) {
 
 beforeEach(() => {
   restoreEnv();
-  process.env.TFX_HUB_PORT = "30123";
   process.env.TFX_TEST = "1";
 });
 
@@ -95,7 +90,7 @@ afterEach(() => {
 });
 
 describe("mcp guard proactive registry sync", () => {
-  it("creates tfx-hub for empty Gemini mcpServers with resolved Hub URL", () => {
+  it("creates the managed server for empty Gemini mcpServers", () => {
     const homeDir = makeTempRoot();
     useHome(homeDir);
     const settingsPath = writeGeminiSettings(homeDir, { mcpServers: {} });
@@ -104,8 +99,8 @@ describe("mcp guard proactive registry sync", () => {
     const updated = readJson(settingsPath);
 
     assert.equal(
-      updated.mcpServers["tfx-hub"].url,
-      "http://127.0.0.1:30123/mcp",
+      updated.mcpServers.context7.url,
+      "https://mcp.context7.com/mcp",
     );
     assert.equal(
       result.actions.some((action) => action.status === "updated"),
@@ -113,7 +108,7 @@ describe("mcp guard proactive registry sync", () => {
     );
   });
 
-  it("adds only tfx-hub and preserves unrelated Gemini MCP servers", () => {
+  it("adds only the managed server and preserves unrelated Gemini MCP servers", () => {
     const homeDir = makeTempRoot();
     useHome(homeDir);
     const unrelated = {
@@ -131,12 +126,12 @@ describe("mcp guard proactive registry sync", () => {
 
     assert.deepEqual(updated.mcpServers.unrelated, unrelated);
     assert.deepEqual(Object.keys(updated.mcpServers).sort(), [
-      "tfx-hub",
+      "context7",
       "unrelated",
     ]);
   });
 
-  it("preserves direct stdio entries while adding the Hub entry", () => {
+  it("preserves direct stdio entries while adding the managed entry", () => {
     const homeDir = makeTempRoot();
     useHome(homeDir);
     const settingsPath = writeGeminiSettings(homeDir, {
@@ -153,8 +148,8 @@ describe("mcp guard proactive registry sync", () => {
       args: ["server.js"],
     });
     assert.equal(
-      updated.mcpServers["tfx-hub"].url,
-      "http://127.0.0.1:30123/mcp",
+      updated.mcpServers.context7.url,
+      "https://mcp.context7.com/mcp",
     );
     assert.equal(
       result.actions.some((action) => action.type === "remediate"),
@@ -162,14 +157,14 @@ describe("mcp guard proactive registry sync", () => {
     );
   });
 
-  it("skips missing managed entries when sync_denylist contains gemini:tfx-hub", () => {
+  it("skips missing managed entries when sync_denylist contains gemini:context7", () => {
     const homeDir = makeTempRoot();
     useHome(homeDir);
     const settingsPath = writeGeminiSettings(homeDir, { mcpServers: {} });
 
     const result = syncRegistryTargets({
       registry: registryFor(settingsPath, {
-        policies: { sync_denylist: ["gemini:tfx-hub"] },
+        policies: { sync_denylist: ["gemini:context7"] },
       }),
     });
     const updated = readJson(settingsPath);
@@ -181,7 +176,7 @@ describe("mcp guard proactive registry sync", () => {
     assert.equal(policySkips.length, 1);
     assert.equal(
       policySkips[0].message,
-      "[mcp-guard] policy skip: gemini:tfx-hub",
+      "[mcp-guard] policy skip: gemini:context7",
     );
     assert.equal(policySkips[0].message.includes("\n"), false);
   });

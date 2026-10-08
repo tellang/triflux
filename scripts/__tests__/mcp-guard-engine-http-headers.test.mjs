@@ -17,7 +17,7 @@ function registryWith(server) {
     server.policy || (server.transport === "stdio" ? "stdio" : "hosted");
   return {
     version: 1,
-    defaults: { transport: "hub-url", hub_base: "http://127.0.0.1:27888" },
+    defaults: { transport: "http" },
     servers: { auth: { policy, ...server } },
     policies: { watched_paths: [] },
   };
@@ -205,19 +205,19 @@ describe("mcp guard HTTP transport + headers schema", () => {
     assert.deepEqual(desired.warnings, []);
   });
 
-  it("keeps hub-url records URL-only when no headers are configured", () => {
+  it("keeps http records URL-only when no headers are configured", () => {
     const desired = buildDesiredServerRecord(
-      "tfx-hub",
+      "sample",
       {
-        transport: "hub-url",
-        url: "http://127.0.0.1:27888/mcp",
+        transport: "http",
+        url: "https://mcp.example.com/mcp",
       },
       join("repo", ".mcp.json"),
     );
 
     assert.deepEqual(desired.config, {
       type: "http",
-      url: "http://127.0.0.1:27888/mcp",
+      url: "https://mcp.example.com/mcp",
     });
   });
 });

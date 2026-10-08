@@ -34,16 +34,12 @@ const MIRROR_TOPS = [
 ];
 const CORE_FILE_MIRRORS = [
   {
-    source: "hub/lib/memory-store.mjs",
-    target: "packages/core/hub/lib/memory-store.mjs",
-  },
-  {
     source: "hub/bridge.mjs",
     target: "packages/core/hub/bridge.mjs",
   },
   {
-    source: "hub/router.mjs",
-    target: "packages/core/hub/router.mjs",
+    source: "hub/team/nativeProxy.mjs",
+    target: "packages/core/hub/team/nativeProxy.mjs",
   },
   {
     source: "hub/team/retry-state-machine.mjs",

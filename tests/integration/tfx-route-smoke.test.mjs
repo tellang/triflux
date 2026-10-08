@@ -35,14 +35,6 @@ const ROUTE_SCRIPT = toBashPath(
 const FIXTURE_BIN = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "bin"),
 );
-// Stub hub-ensure so full-route invocations never bind/spawn a hub on the
-// canonical port (27888) against the live dev hub (v10.33.1 follow-up #1).
-const HUB_ENSURE_STUB = resolve(
-  PROJECT_ROOT,
-  "tests",
-  "fixtures",
-  "no-op-hub-ensure.mjs",
-);
 const MACHINE_PROFILE_ENV_KEYS = new Set([
   "TFX_DISABLE_CODEX",
   "TFX_DISABLE_ANTIGRAVITY",
@@ -144,8 +136,6 @@ function runBash(command, extraEnv = {}) {
         TFX_TEAM_TASK_ID: "",
         TFX_TEAM_AGENT_NAME: "",
         TFX_TEAM_LEAD_NAME: "",
-        TFX_HUB_URL: "",
-        TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
         TMUX: "",
         TFX_CLI_MODE: "auto",
         TFX_DISABLE_CODEX: "0",

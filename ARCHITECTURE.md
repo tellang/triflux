@@ -9,7 +9,7 @@
 triflux는 Claude Code용 **플러그인 + npm CLI**로, AI 코딩 작업을
 **Codex / Claude / Antigravity** 세 CLI에 라우팅하고 오케스트레이션하는
 멀티모델 도구다. 사용자는 `/tfx-auto` 스킬 또는 `tfx` CLI로 작업을 요청한다. 로컬·원격 팀 실행,
-가드(guard), 허브(Hub) 메시지 버스가 실제 실행을 관리한다.
+가드(guard)가 실제 실행을 관리한다.
 
 ## 패키지 레이아웃
 
@@ -34,9 +34,9 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 | 디렉토리 | 역할 | 대표 파일 |
 |----------|------|-----------|
 | `bin/` | CLI 실행 엔트리포인트 | `triflux.mjs`(메인 `tfx`), `tfx-setup.mjs`, `tfx-doctor.mjs`, `tfx-live.mjs` |
-| `hub/` | 로컬 허브: 라우팅, 서버, MCP 브리지, 계정 브로커 | `router.mjs`, `server.mjs`, `bridge.mjs`, `hub-lifecycle.mjs`, `account-broker.mjs`, `codex-adapter.mjs` |
-| `hub/team/` | 팀/멀티에이전트 오케스트레이션 | `headless.mjs`, `cto-auto-collect.mjs`, `claude-daemon-control.mjs`, `notify.mjs` |
-| `hub/` 하위 | 세분 모듈 | `delegator/`, `diagnostics/`, `lib/`, `middleware/`, `pipeline/`, `workers/` |
+| `hub/` | 실행 엔진 공용부: bridge CLI, 계정 브로커, CLI 어댑터 | `bridge.mjs`, `account-broker.mjs`, `codex-adapter.mjs`, `cli-adapter-base.mjs` |
+| `hub/team/` | 팀/멀티에이전트 오케스트레이션 | `headless.mjs`, `claude-daemon-control.mjs`, `notify.mjs` |
+| `hub/` 하위 | 세분 모듈 | `delegator/`, `diagnostics/`, `lib/`, `pipeline/`, `workers/` |
 | `hooks/` | Codex 및 Antigravity 세션 연결과 전환용 stub | `codex-session-hook.mjs`, `agy-session-hook.mjs` |
 | `hud/` | 상태 표시(HUD) / 모니터 | `context-monitor.mjs`, `renderers.mjs`, `providers/` |
 | `cto/` | CTO 콘솔: 멀티세션 수집·요약·위생(hygiene) | `collect.mjs`, `brief.mjs`, `status.mjs`, `hygiene.mjs` |
@@ -57,7 +57,7 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
   → tfx-route.sh + 가드 (intent → mode/parallel/retry/CLI lane 정규화)
   → CLI lane 실행: Codex (기본) / Antigravity / Claude
   → headless 워커 (로컬 병렬)
-  → Hub 가 team 메시지 · 리스 · retry · handoff · 상태를 기록
+  → retry · 결과 백업 · 상태는 로컬 파일로 기록
 ```
 
 - **기본 CLI lane은 Codex다.** Antigravity는 cross-check / quota 대체,
@@ -67,18 +67,13 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
   실행 경로와 코드 변경 병렬 작업의 격리 기준은
   [`.claude/rules/tfx-execution-skill-map.md`](.claude/rules/tfx-execution-skill-map.md)를 따른다.
 
-### Hub
-
-Hub는 팀·원격 세션·MCP 도구·상태 표면을 잇는 로컬 메시지 버스다. localhost에
-바인딩하며 `tfx hub ensure` / `tfx hub status` / `tfx hub stop`으로 관리한다.
-
 ### 실행 경계
 
 triflux는 위험한 실행을 관리된 경로 뒤에 둔다. 직접 `codex exec`,
 관리되지 않은 `agy`, 폐기된 `gemini` 경로는 라우팅 규약으로 금지한다(자동 차단
 훅 headless-guard 는 2026-09-07 에 제거). psmux/Windows Terminal 흐름은
 관리 API를 사용한다.
-CLI 호출은 `tfx-route.sh` / Hub 워커 / `tfx` CLI를 경유해야 한다.
+CLI 호출은 `tfx-route.sh` / headless 워커 / `tfx` CLI를 경유해야 한다.
 
 ## 스택 공존
 

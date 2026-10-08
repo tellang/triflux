@@ -931,22 +931,8 @@ function killOrphanPipeHelpers(sessionName) {
  */
 function killOrphanMcpProcesses(sessionName) {
   if (!IS_WINDOWS) {
-    // macOS/Linux: 세션별 스코핑 + Hub PID 보호
+    // macOS/Linux: 세션별 스코핑
     const safeSessionUnix = sanitizePathPart(sessionName);
-    let hubPidUnix = 0;
-    try {
-      const hubPidFile = join(
-        homedir(),
-        ".claude",
-        "cache",
-        "tfx-hub",
-        "hub.pid",
-      );
-      if (existsSync(hubPidFile)) {
-        const info = JSON.parse(readFileSync(hubPidFile, "utf8"));
-        hubPidUnix = Number(info.pid) || 0;
-      }
-    } catch {}
     try {
       // MCP/result files live under `tfx-headless/<session>-<pane>.txt`, so
       // match `tfx-headless/<session>` with a trailing boundary to avoid
@@ -963,7 +949,7 @@ function killOrphanMcpProcesses(sessionName) {
       if (pids) {
         for (const p of pids.split("\n").filter(Boolean)) {
           const numPid = Number(p);
-          if (numPid === hubPidUnix || numPid <= 0) continue;
+          if (numPid <= 0) continue;
           try {
             process.kill(numPid, "SIGTERM");
           } catch {}
@@ -974,22 +960,6 @@ function killOrphanMcpProcesses(sessionName) {
   }
   // Windows: escape + trailing boundary (mirror of the macOS branch).
   const safeSession = escapeRegex(sanitizePathPart(sessionName));
-
-  // Hub PID 보호 — Hub 프로세스를 고아로 잘못 식별하지 않도록
-  let hubPid = null;
-  try {
-    const hubPidPath = join(
-      homedir(),
-      ".claude",
-      "cache",
-      "tfx-hub",
-      "hub.pid",
-    );
-    if (existsSync(hubPidPath)) {
-      const hubInfo = JSON.parse(readFileSync(hubPidPath, "utf8"));
-      hubPid = Number(hubInfo?.pid);
-    }
-  } catch {}
 
   try {
     // 세션 결과 디렉토리 패턴으로 MCP 서버 프로세스 식별
@@ -1005,7 +975,7 @@ function killOrphanMcpProcesses(sessionName) {
     const pids = output
       .split(/\r?\n/)
       .map((l) => Number.parseInt(l.trim(), 10))
-      .filter((p) => Number.isFinite(p) && p > 0 && p !== hubPid);
+      .filter((p) => Number.isFinite(p) && p > 0);
     for (const pid of pids) {
       killProcessTree(pid);
     }

@@ -28,7 +28,7 @@ import { fileURLToPath } from "url";
 import { ensureAgyHooks } from "./ensure-agy-hooks.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
 import { cleanupLegacyHooks } from "./lib/legacy-hook-cleanup.mjs";
-import { cleanupLegacyMcp } from "./lib/legacy-mcp-cleanup.mjs";
+import { cleanupLegacyMcp, cleanupTfxHub } from "./lib/legacy-mcp-cleanup.mjs";
 import {
   MACHINE_PROFILE_KEYS,
   parseMachineProfileContent,
@@ -419,7 +419,6 @@ function detectDevMode(root = PLUGIN_ROOT) {
 const BREADCRUMB_PATH = join(CLAUDE_DIR, "scripts", ".tfx-pkg-root");
 const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 const HUD_PATH = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
-const WINDOWS_HUB_AUTOSTART_TASK = "TrifluxHubEnsure";
 
 const REQUIRED_CODEX_PROFILES = [
   // GPT-6 Astra: max/ultra are explicit exception lanes, not role defaults.
@@ -515,9 +514,7 @@ function scanLibFiles(pluginRoot, claudeDir) {
 
 /**
  * hub/workers/**\/*.mjs + hub/ 루트의 worker 의존성 파일을 자동 스캔.
- * 수동 리스트 대신 재귀 walk로 탐색하여 파일/서브디렉토리 추가 시 sync
- * 누락 방지. 2026-04-20 `workers/lib/jsonrpc-stdio.mjs` 가 top-level 전용
- * 스캔 때문에 누락되어 codex app-server worker 기동 실패 → 수정.
+ * 서브디렉토리의 파일이 sync 에서 빠지지 않도록 재귀로 탐색한다.
  */
 export function scanHubWorkerFiles(pluginRoot, claudeDir) {
   const results = [];
@@ -1374,6 +1371,26 @@ const RETIRED_INSTALL_FILES = [
   ],
   [join(CLAUDE_DIR, "agents", "slim-wrapper.md"), "name: slim-wrapper"],
   [join(CLAUDE_DIR, "scripts", "notion-read.mjs"), "notion-read.mjs v"],
+  [
+    join(
+      CLAUDE_DIR,
+      "scripts",
+      "hub",
+      "workers",
+      "codex-app-server-worker.mjs",
+    ),
+    "hub/workers/codex-app-server-worker.mjs",
+  ],
+  [
+    join(CLAUDE_DIR, "scripts", "hub", "workers", "delegator-mcp.mjs"),
+    "hub/workers/delegator-mcp.mjs",
+  ],
+  [
+    join(CLAUDE_DIR, "scripts", "hub", "workers", "lib", "jsonrpc-stdio.mjs"),
+    "hub/workers/lib/jsonrpc-stdio.mjs",
+  ],
+  [join(CLAUDE_DIR, "scripts", "hub-ensure.mjs"), "[hub-ensure]"],
+  [join(CLAUDE_DIR, "scripts", "hub-watchdog.mjs"), "[hub-watchdog]"],
 ];
 
 function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
@@ -1389,68 +1406,6 @@ function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
     }
   }
   return removed;
-}
-
-/**
- * Codex config.json에 tfx-hub MCP 서버 엔트리를 보장한다.
- * @param {{ mcpUrl: string, createIfMissing?: boolean, enabled?: boolean }} opts
- * @returns {{ ok: boolean, changed: boolean, reason?: string }}
- */
-function ensureCodexHubServerConfig({
-  configFile,
-  mcpUrl,
-  createIfMissing = false,
-  enabled = false,
-}) {
-  try {
-    const codexConfigDir = join(homedir(), ".codex");
-    const hasExplicitConfigFile =
-      typeof configFile === "string" && configFile.length > 0;
-    const configPath = hasExplicitConfigFile
-      ? configFile
-      : join(codexConfigDir, "config.json");
-
-    if (
-      !hasExplicitConfigFile &&
-      process.env.TFX_CODEX_CONFIG_SYNC !== "1" &&
-      isProtectedCodexConfigMutationEnv()
-    ) {
-      return { ok: true, changed: false, reason: "protected-env" };
-    }
-
-    if (!existsSync(configPath)) {
-      if (!createIfMissing)
-        return { ok: true, changed: false, reason: "no-config" };
-      const dir = dirname(configPath);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      const config = { mcpServers: { "tfx-hub": { url: mcpUrl, enabled } } };
-      writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
-      return { ok: true, changed: true };
-    }
-
-    const config = JSON.parse(readFileSync(configPath, "utf8"));
-    if (!config.mcpServers) config.mcpServers = {};
-
-    const existing = config.mcpServers["tfx-hub"];
-    const desired = { ...(existing || {}), url: mcpUrl, enabled };
-
-    if (
-      existing &&
-      existing.url === desired.url &&
-      existing.enabled === desired.enabled
-    ) {
-      return { ok: true, changed: false };
-    }
-
-    const updated = {
-      ...config,
-      mcpServers: { ...config.mcpServers, "tfx-hub": desired },
-    };
-    writeFileSync(configPath, JSON.stringify(updated, null, 2) + "\n", "utf8");
-    return { ok: true, changed: true };
-  } catch (err) {
-    return { ok: false, changed: false, reason: err?.message || "unknown" };
-  }
 }
 
 // Top-level config.toml keys that must exist with these defaults.
@@ -1600,10 +1555,6 @@ function getSetupArgv(stdinData) {
   return Array.isArray(stdinData?.argv) ? stdinData.argv : [];
 }
 
-function quoteWindowsTaskArg(value) {
-  return `"${String(value).replace(/"/g, '\\"')}"`;
-}
-
 const STABLE_NODE_COMMAND_CANDIDATES = Object.freeze([
   "/opt/homebrew/bin/node",
   "/usr/local/bin/node",
@@ -1631,160 +1582,6 @@ function resolveStableNodeCommand({ existsSyncFn = existsSync } = {}) {
 
 function buildNodeScriptCommand(scriptPath) {
   return `${quoteShellCommandArg(resolveStableNodeCommand())} ${quoteShellCommandArg(scriptPath)}`;
-}
-
-function buildWindowsHubAutostartCommand({
-  nodePath = process.execPath,
-  pluginRoot = PLUGIN_ROOT,
-} = {}) {
-  return [
-    quoteWindowsTaskArg(nodePath),
-    quoteWindowsTaskArg(join(pluginRoot, "scripts", "hub-ensure.mjs")),
-  ].join(" ");
-}
-
-// #161 P2: schtasks /Query 실패 시 stderr 를 해석해 미등록/권한거부/기타 실패를 구분한다.
-// 기존 구현은 stdio=ignore + catch 후 항상 registered:false 였기 때문에
-// Access Denied 같은 해결 가능한 문제가 "미등록" 으로 묻혔다.
-const WINDOWS_SCHTASKS_NOT_FOUND_PATTERNS = [
-  "cannot find the file",
-  "does not exist",
-  "지정된 파일",
-  "찾을 수 없",
-];
-const WINDOWS_SCHTASKS_ACCESS_DENIED_PATTERNS = [
-  "access is denied",
-  "access denied",
-  "permission",
-  "액세스가 거부",
-  "권한",
-];
-
-// #161 P3: schtasks /TR 인자는 실질적으로 262자 미만으로 제한된다.
-// 초과 시 Create 자체는 성공해도 task 실행에서 인자 잘림/실행 실패 재발.
-// 따라서 Create 전에 사전 검증해 조기 실패를 보장한다.
-const SCHTASKS_TR_MAX_LENGTH = 261;
-
-// #161 P3: /TR 길이 검증 공용 함수.
-// schtasks 는 Windows 내부에서 wide-char 문자 수로 제한하므로 UTF-8 byte 가 아닌
-// JavaScript string .length (UTF-16 code units) 기준으로 비교한다.
-// Codex Round 1 P1 반영: UTF-8 byte 검증은 한글 경로에서 정상 명령을 오차단했다
-// (예: ~218자 한글 경로 = 578 bytes → false positive throw).
-// Codex Round 3 P2 반영: 테스트가 실행 경로와 동일한 이 함수를 exercise 하므로
-// 내부 구현이 회귀해 byte 기반으로 돌아가면 테스트가 즉시 포착한다.
-function validateSchtasksTrLength(command) {
-  const commandChars = command.length;
-  if (commandChars > SCHTASKS_TR_MAX_LENGTH) {
-    throw new Error(
-      `schtasks /TR 인자가 ${SCHTASKS_TR_MAX_LENGTH} 문자를 초과합니다 ` +
-        `(${commandChars} chars): ${command}`,
-    );
-  }
-}
-
-function classifySchtasksStderr(stderr) {
-  const lower = String(stderr || "").toLowerCase();
-  if (
-    WINDOWS_SCHTASKS_NOT_FOUND_PATTERNS.some((p) =>
-      lower.includes(p.toLowerCase()),
-    )
-  ) {
-    return "not_registered";
-  }
-  if (
-    WINDOWS_SCHTASKS_ACCESS_DENIED_PATTERNS.some((p) =>
-      lower.includes(p.toLowerCase()),
-    )
-  ) {
-    return "access_denied";
-  }
-  return "unknown";
-}
-
-function getWindowsHubAutostartStatus({
-  taskName = WINDOWS_HUB_AUTOSTART_TASK,
-} = {}) {
-  if (process.platform !== "win32") {
-    return { supported: false, registered: false, taskName };
-  }
-  try {
-    execFileSync("schtasks.exe", ["/Query", "/TN", taskName], {
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-    return { supported: true, registered: true, taskName };
-  } catch (error) {
-    const stderr = String(error?.stderr || "").trim();
-    const reason = classifySchtasksStderr(stderr);
-    return {
-      supported: true,
-      registered: false,
-      taskName,
-      reason,
-      stderr: stderr.slice(0, 200),
-    };
-  }
-}
-
-function ensureWindowsHubAutostart({
-  taskName = WINDOWS_HUB_AUTOSTART_TASK,
-  nodePath = process.execPath,
-  pluginRoot = PLUGIN_ROOT,
-  force = true,
-} = {}) {
-  if (process.platform !== "win32") {
-    return {
-      supported: false,
-      changed: false,
-      registered: false,
-      taskName,
-      reason: "non-windows",
-    };
-  }
-
-  const command = buildWindowsHubAutostartCommand({ nodePath, pluginRoot });
-
-  // #161 P3: /TR 262자 제한 사전 검증을 공용 함수로 위임해 테스트/실행 로직 일관성 보장.
-  validateSchtasksTrLength(command);
-
-  const args = [
-    "/Create",
-    "/TN",
-    taskName,
-    "/SC",
-    "ONLOGON",
-    "/TR",
-    command,
-    "/RL",
-    "LIMITED",
-  ];
-  if (force) args.push("/F");
-
-  try {
-    execFileSync("schtasks.exe", args, {
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
-  } catch (error) {
-    // #161 P3: stderr 를 error.message 에 노출해 호출자가 원인을 볼 수 있게 한다.
-    const stderr = String(error?.stderr || "").trim();
-    if (stderr) {
-      const wrapped = new Error(
-        `schtasks /Create 실패: ${stderr.slice(0, 200)}`,
-      );
-      wrapped.cause = error;
-      throw wrapped;
-    }
-    throw error;
-  }
-
-  return {
-    supported: true,
-    changed: true,
-    registered: true,
-    taskName,
-    command,
-  };
 }
 
 function loadSettings() {
@@ -2082,21 +1879,16 @@ function ensureCriticalSetup() {
 
 export {
   BREADCRUMB_PATH,
-  buildWindowsHubAutostartCommand,
   CLAUDE_DIR,
-  classifySchtasksStderr,
   cleanupStaleSkills,
   collectLegacyTrayProcesses,
   DEPRECATED_SKILLS,
   detectDevMode,
   ensureAgyHooks,
   ensureCodexHooks,
-  ensureCodexHubServerConfig,
   ensureCodexProfiles,
-  ensureWindowsHubAutostart,
   extractProfileLines,
   getVersion,
-  getWindowsHubAutostartStatus,
   getWorkerPackageSyncEntries,
   hasProfileSection,
   isLocalDevSkillDir,
@@ -2114,7 +1906,6 @@ export {
   reapLegacyTrayProcesses,
   removeProfileSection,
   replaceProfileSection,
-  SCHTASKS_TR_MAX_LENGTH,
   SETUP_MARKER_PATH,
   SETUP_USER_STATE_FILES,
   SKILL_ALIASES,
@@ -2124,8 +1915,6 @@ export {
   syncCodexHarnessAdapter,
   syncCodexManagedSkills,
   syncWorkerPackages,
-  validateSchtasksTrLength,
-  WINDOWS_HUB_AUTOSTART_TASK,
   writeMarker,
 };
 
@@ -2175,9 +1964,6 @@ export async function runDeferred(stdinData) {
   const reconfigureMachineProfile =
     machineProfileOnly || argv.includes("--machine-profile");
   const nonInteractiveProfile = argv.includes("--non-interactive");
-  const enableHubAutostart =
-    argv.includes("--enable-hub-autostart") ||
-    process.env.TFX_HUB_AUTOSTART === "1";
   const isDev = detectDevMode();
 
   if (isDev) {
@@ -2218,6 +2004,14 @@ export async function runDeferred(stdinData) {
   // 이주가 막혀도 설치는 계속한다. 남은 항목은 경고로 알린다.
   for (const warning of mcpCleanup.warnings) io.log(`  ⚠ ${warning}`);
 
+  // 제거된 허브의 MCP 항목, 프로세스, 예약 작업을 정리한다. 개발 체크아웃의 스냅샷은 건드리지 않는다.
+  const hubCleanup = cleanupTfxHub({
+    home: _TFX_HOME,
+    pluginRoot: isDev ? undefined : PLUGIN_ROOT,
+  });
+  for (const warning of hubCleanup.warnings) io.log(`  ⚠ ${warning}`);
+  if (hubCleanup.changed) io.log("  허브 설정과 실행 흔적 정리");
+
   const pkgVersion = getPackageVersion();
   const marker = readMarker();
   const skillSync = syncSkills();
@@ -2234,40 +2028,6 @@ export async function runDeferred(stdinData) {
   }
 
   let synced = skillSync.changed;
-
-  // ── Memory Doctor (P0 자동 수정) ──
-  const isCIEnv = process.env.CI === "true" || process.env.DOCKER === "true";
-  if (!isCIEnv) {
-    try {
-      const { createMemoryDoctor } = await import("../hub/memory-doctor.mjs");
-      const projectSlug = process
-        .cwd()
-        .replace(/^([A-Z]):/u, "$1-")
-        .replace(/[\\/]/gu, "-");
-      const memDir = join(CLAUDE_DIR, "projects", projectSlug, "memory");
-      if (existsSync(memDir)) {
-        const doctor = createMemoryDoctor({
-          memoryDir: memDir,
-          rulesDir: join(process.cwd(), ".claude", "rules"),
-          projectDir: process.cwd(),
-          claudeDir: CLAUDE_DIR,
-        });
-        const { checks, healthScore } = doctor.scan();
-        const p0Auto = checks.filter(
-          (c) => c.severity === "P0" && c.autofix && !c.passed,
-        );
-        if (p0Auto.length > 0) {
-          doctor.fixAll({ severity: "P0" });
-          io.log(
-            `  memory-doctor: ${p0Auto.length}건 P0 자동 수정 (health: ${healthScore})`,
-          );
-          synced += p0Auto.length;
-        }
-      }
-    } catch (err) {
-      io.log(`  memory-doctor: skip (${err.message})`);
-    }
-  }
 
   for (const { src, dst } of SYNC_MAP) {
     if (!existsSync(src)) continue;
@@ -2300,19 +2060,9 @@ export async function runDeferred(stdinData) {
   const mcpSdkPath = join(workerNodeModules, "@modelcontextprotocol", "sdk");
   const srcNodeModules = join(PLUGIN_ROOT, "node_modules");
 
-  // native 모듈은 제외 (플랫폼 의존적, worker에서 불필요)
-  const SKIP_PACKAGES = new Set([
-    "better-sqlite3",
-    "prebuild-install",
-    "node-abi",
-    "node-addon-api",
-  ]);
-
   if (!existsSync(mcpSdkPath) && existsSync(srcNodeModules)) {
     try {
       for (const entry of readdirSync(srcNodeModules)) {
-        if (SKIP_PACKAGES.has(entry)) continue;
-
         const src = join(srcNodeModules, entry);
         const dst = join(workerNodeModules, entry);
         if (existsSync(dst)) continue;
@@ -2335,7 +2085,7 @@ export async function runDeferred(stdinData) {
   }
 
   // ── 패키지 루트 breadcrumb 기록 ──
-  // tfx-route.sh가 hub/server.mjs, hub/bridge.mjs를 찾을 수 있도록
+  // tfx-route.sh가 hub/bridge.mjs를 찾을 수 있도록
   // 패키지 루트 경로를 ~/.claude/scripts/.tfx-pkg-root에 기록한다.
   // dev mode에서는 항상 최신 경로를 기록 (--sync 시 강제 갱신).
   {
@@ -2388,21 +2138,6 @@ export async function runDeferred(stdinData) {
       }
     }
     io.log("  \x1b[32m✓\x1b[0m HUD cache pre-warm (background)");
-  }
-
-  // ── Stale PID 파일 정리 (hub 좀비 방지) ──
-
-  const HUB_PID_FILE = join(CLAUDE_DIR, "cache", "tfx-hub", "hub.pid");
-  if (existsSync(HUB_PID_FILE)) {
-    try {
-      const pidInfo = JSON.parse(readFileSync(HUB_PID_FILE, "utf8"));
-      process.kill(pidInfo.pid, 0); // 프로세스 존재 확인 (신호 미전송)
-    } catch {
-      try {
-        unlinkSync(HUB_PID_FILE);
-      } catch {} // 죽은 프로세스면 PID 파일 삭제
-      synced++;
-    }
   }
 
   const reapedTrays = reapLegacyTrayProcesses();
@@ -2543,22 +2278,6 @@ export async function runDeferred(stdinData) {
     io.log(
       `  \x1b[33m⚠\x1b[0m Antigravity hooks 등록 실패: ${error.message || error}`,
     );
-  }
-
-  // ── Windows Codex 단독 실행 보호: 로그인 시 hub-ensure 등록 ──
-  // Claude SessionStart 훅이 없는 순수 Codex 시작 경로에서도 tfx-hub가 살아있게 한다.
-  if (enableHubAutostart) {
-    try {
-      const result = ensureWindowsHubAutostart();
-      if (result.registered) {
-        io.log(`  \x1b[32m✓\x1b[0m Windows hub autostart: ${result.taskName}`);
-        synced++;
-      }
-    } catch (error) {
-      io.log(
-        `  \x1b[33m⚠\x1b[0m Windows hub autostart 등록 실패: ${error.message}`,
-      );
-    }
   }
 
   // ── MCP 인벤토리 백그라운드 갱신 ──

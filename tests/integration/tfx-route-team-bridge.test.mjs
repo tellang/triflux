@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { hubServerTestEnv } from "../fixtures/hub-test-env.mjs";
+import { routeTestEnv } from "../fixtures/route-test-env.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 import { makeIsolatedCodexConfig } from "../helpers/codex-config-fixture.mjs";
 
@@ -20,14 +20,6 @@ const FIXTURE_BIN = toBashPath(
 const FAKE_BRIDGE = toBashPath(
   resolve(PROJECT_ROOT, "tests", "fixtures", "fake-bridge.mjs"),
 );
-// Stub hub-ensure so the full-route invocations below never bind/spawn a hub on
-// the canonical port (27888) against the live dev hub (v10.33.1 follow-up #1).
-const HUB_ENSURE_STUB = resolve(
-  PROJECT_ROOT,
-  "tests",
-  "fixtures",
-  "no-op-hub-ensure.mjs",
-);
 
 // Isolate tfx-route's codex config-swap to a throwaway file so the full-route
 // invocations below never mutate the real ~/.codex/config.toml under concurrency.
@@ -38,7 +30,7 @@ function runBash(command, extraEnv = {}) {
   return spawnSync(BASH_EXE, ["-c", command], {
     cwd: PROJECT_ROOT,
     encoding: "utf8",
-    env: hubServerTestEnv({
+    env: routeTestEnv({
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
       HOME: isolatedCodex.dir,
       USERPROFILE: isolatedCodex.dir,
@@ -54,7 +46,6 @@ function runBash(command, extraEnv = {}) {
       // #148: 테스트 환경 MCP probe 결과는 모두 dead → preflight 가 early-fail.
       // 라우팅/bridge 검증이 목적이므로 preflight 스킵.
       TFX_MCP_HEALTH_CHECK: "0",
-      TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
       ...extraEnv,
     }),
   });
@@ -65,7 +56,7 @@ function output(result) {
 }
 
 describe("tfx-route.sh — team bridge integration", () => {
-  it("team claim/start-message/result를 bridge CLI 단일 경로로 호출하고 완료는 backup 파일로 남겨야 한다", () => {
+  it("team claim/start-message를 bridge CLI 단일 경로로 호출하고 완료는 backup 파일로 남겨야 한다", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "tfx-route-team-bridge-"));
     const logPath = join(tempDir, "bridge.log");
     const resultDir = join(tempDir, "results");
@@ -94,7 +85,7 @@ describe("tfx-route.sh — team bridge integration", () => {
         .filter(Boolean)
         .map((line) => JSON.parse(line).argv);
 
-      assert.equal(calls.length, 3, JSON.stringify(calls, null, 2));
+      assert.equal(calls.length, 2, JSON.stringify(calls, null, 2));
       assert.equal(calls[0][0], "team-task-update");
       assert.ok(calls[0].includes("--claim"));
       assert.equal(calls[1][0], "team-send-message");
@@ -102,13 +93,6 @@ describe("tfx-route.sh — team bridge integration", () => {
         calls[1][calls[1].indexOf("--text") + 1],
         /작업 시작: executor-worker-test/,
       );
-      assert.equal(calls[2][0], "result");
-
-      const resultPayload = calls[2][calls[2].indexOf("--payload") + 1];
-      assert.deepEqual(JSON.parse(resultPayload), {
-        task_id: "task-001",
-        result: "success",
-      });
 
       const backup = JSON.parse(
         readFileSync(join(resultDir, "task-001.json"), "utf8"),
@@ -167,10 +151,9 @@ describe("tfx-route.sh — team bridge integration", () => {
         .filter(Boolean)
         .map((line) => JSON.parse(line).argv);
 
-      assert.equal(calls.length, 3, JSON.stringify(calls, null, 2));
+      assert.equal(calls.length, 2, JSON.stringify(calls, null, 2));
       assert.equal(calls[0][0], "team-task-update");
       assert.equal(calls[1][0], "team-send-message");
-      assert.equal(calls[2][0], "result");
 
       const backup = JSON.parse(
         readFileSync(join(resultDir, "task-002.json"), "utf8"),

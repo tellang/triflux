@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
-  checkHub,
   detectCodexAuthState,
   detectCodexPlan,
 } from "../../scripts/lib/env-probe.mjs";
@@ -94,38 +93,5 @@ describe("env-probe detectCodexAuthState", () => {
     } finally {
       rmSync(homeDir, { recursive: true, force: true });
     }
-  });
-});
-
-describe("env-probe hub status", () => {
-  it("restart 요청에도 허브를 띄우지 않는다", () => {
-    const calls = [];
-    const result = checkHub({
-      restart: true,
-      execSyncFn: (command) => {
-        calls.push(command);
-        throw new Error("down");
-      },
-      spawnFn: () => assert.fail("unexpected spawn"),
-    });
-    assert.deepEqual(result, {
-      ok: false,
-      state: "unreachable",
-      restart: "disabled",
-    });
-    assert.equal(calls.length, 1);
-  });
-
-  it("조회 포트 해석과 healthy 응답은 유지한다", () => {
-    let command;
-    const result = checkHub({
-      env: { TFX_HUB_PORT: "30124", TFX_HUB_ALLOW_EPHEMERAL_PORT: "1" },
-      execSyncFn: (value) => {
-        command = value;
-        return JSON.stringify({ hub: { state: "healthy" }, pid: 1234 });
-      },
-    });
-    assert.match(command, /:30124\/status/);
-    assert.deepEqual(result, { ok: true, state: "healthy", pid: 1234 });
   });
 });

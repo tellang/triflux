@@ -67,10 +67,6 @@ before(() => {
   const tfxTmp = path.join(dir, "tmp");
   const capture = path.join(dir, "codex-args.json");
   const fakeCodex = path.join(binDir, "codex");
-  const fakeHubEnsure = path.join(
-    REPO_ROOT,
-    "tests/fixtures/no-op-hub-ensure.mjs",
-  );
 
   mkdirSync(binDir, { recursive: true });
   mkdirSync(home, { recursive: true });
@@ -94,7 +90,7 @@ echo "fake codex ok"
 `,
   );
 
-  fixture = { dir, binDir, home, tfxTmp, capture, fakeCodex, fakeHubEnsure };
+  fixture = { dir, binDir, home, tfxTmp, capture, fakeCodex };
 });
 after(() => rmSync(fixture.dir, { recursive: true, force: true }));
 
@@ -104,7 +100,7 @@ function runRoute({
   env: envOverrides = {},
   profileFiles = {},
 } = {}) {
-  const { binDir, home, tfxTmp, capture, fakeCodex, fakeHubEnsure } = fixture;
+  const { binDir, home, tfxTmp, capture, fakeCodex } = fixture;
   // 공유 준비가 이전 실행의 프로파일과 argv를 남기지 않게 한다.
   rmSync(path.join(home, ".codex"), { recursive: true, force: true });
   mkdirSync(path.join(home, ".codex"));
@@ -122,8 +118,6 @@ function runRoute({
     TFX_CAPTURE_ARGS: capture,
     TFX_CODEX_OK: "1",
     TFX_ANTIGRAVITY_OK: "0",
-    TFX_HUB_OK: "1",
-    TFX_HUB_ENSURE_SCRIPT: fakeHubEnsure,
     TFX_HEARTBEAT: "0",
     TFX_MCP_HEALTH_CHECK: "0",
     TFX_HARD_CEILING_SEC: "0",

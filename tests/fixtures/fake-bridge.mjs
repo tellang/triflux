@@ -62,14 +62,6 @@ switch (cmd) {
       }),
     );
     break;
-  case "result":
-    console.log(
-      JSON.stringify({
-        ok: true,
-        data: { message_id: "fake-result-id" },
-      }),
-    );
-    break;
   default:
     console.log(JSON.stringify({ ok: true, data: {} }));
     break;

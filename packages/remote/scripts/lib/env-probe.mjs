@@ -1,62 +1,11 @@
-import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { resolveHubPortForContext } from "../../hub/hub-lifecycle.mjs";
 import { whichCommand, whichCommandAsync } from "@triflux/core/hub/platform.mjs";
 
-const HUB_DEFAULT_PORT = 27888;
 const CLI_PROBE_CACHE = new Map();
 const CLI_PROBE_PROMISES = new Map();
-
-function fetchHubStatus({
-  execSyncFn = execSync,
-  statusUrl = resolveDefaultStatusUrl(),
-  timeout = 3000,
-} = {}) {
-  const response = execSyncFn(`curl -sf ${statusUrl}`, {
-    timeout,
-    encoding: "utf8",
-    windowsHide: true,
-  });
-  const data = JSON.parse(response);
-  return {
-    ok: true,
-    state: data?.hub?.state || "unknown",
-    pid: data?.pid,
-  };
-}
-
-function resolveDefaultStatusUrl(env = process.env, cwd = process.cwd()) {
-  const port = resolveHubPortForContext({
-    env,
-    cwd,
-    defaultPort: HUB_DEFAULT_PORT,
-  });
-  return `http://127.0.0.1:${port}/status`;
-}
-
-function resolveStatusUrlForContext({
-  statusUrl,
-  env = process.env,
-  cwd = process.cwd(),
-} = {}) {
-  try {
-    const url = new URL(String(statusUrl));
-    url.port = String(
-      resolveHubPortForContext({
-        port: url.port,
-        env,
-        cwd,
-        defaultPort: HUB_DEFAULT_PORT,
-      }),
-    );
-    return url.toString();
-  } catch {
-    return resolveDefaultStatusUrl(env, cwd);
-  }
-}
 
 function normalizeCliName(name) {
   return String(name ?? "").trim() || null;
@@ -218,23 +167,4 @@ export function detectCodexAuthState({
 export function detectCodexPlan(options = {}) {
   const { plan, source } = detectCodexAuthState(options);
   return { plan, source };
-}
-
-export function checkHub({
-  env = process.env,
-  cwd = process.cwd(),
-  statusUrl = resolveDefaultStatusUrl(env, cwd),
-  requestTimeoutMs = 3000,
-  execSyncFn = execSync,
-} = {}) {
-  const guardedStatusUrl = resolveStatusUrlForContext({ statusUrl, env, cwd });
-  try {
-    return fetchHubStatus({
-      execSyncFn,
-      statusUrl: guardedStatusUrl,
-      timeout: requestTimeoutMs,
-    });
-  } catch {
-    return { ok: false, state: "unreachable", restart: "disabled" };
-  }
 }

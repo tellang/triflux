@@ -1,11 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  normalizeLiveSession,
-  readJsonLines,
-  readSynapseSnapshot,
-  resolveLakeRootDir,
-} from "./lake-root.mjs";
+import { readJsonLines, resolveLakeRootDir } from "./lake-root.mjs";
 
 const COUNT_KEYS = [
   "active_tasks",
@@ -26,37 +21,6 @@ function writeJson(stdout, payload) {
 
 function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, "utf8"));
-}
-
-function normalizeOverlay(value) {
-  const sessions = Array.isArray(value)
-    ? value
-    : Array.isArray(value?.sessions)
-      ? value.sessions
-      : Array.isArray(value?.live_sessions)
-        ? value.live_sessions
-        : [];
-  return {
-    live_sessions: sessions
-      .map(normalizeLiveSession)
-      .filter((session) => session.sessionId),
-  };
-}
-
-async function readLiveOverlay(opts = {}) {
-  if (opts.overlay) return normalizeOverlay(opts.overlay);
-  try {
-    const reader = opts.synapseReader || readSynapseSnapshot;
-    return normalizeOverlay(
-      await reader({
-        rootDir: opts.rootDir,
-        lakeRoot: opts.lakeRoot,
-        synapsePersistPath: opts.synapsePersistPath,
-      }),
-    );
-  } catch {
-    return { live_sessions: [] };
-  }
 }
 
 function eventTime(entry) {
@@ -157,11 +121,7 @@ export function compactHygieneCounts(projection) {
   return Object.fromEntries(COUNT_KEYS.map((key) => [key, counts[key] || 0]));
 }
 
-export function projectCtoHygiene({
-  current = {},
-  ledger = null,
-  overlay = {},
-} = {}) {
+export function projectCtoHygiene({ current = {}, ledger = null } = {}) {
   const events = Array.isArray(ledger)
     ? ledger
     : Array.isArray(current?.ledger_tail)
@@ -270,23 +230,6 @@ export function projectCtoHygiene({
     );
   }
 
-  for (const session of overlay?.live_sessions || []) {
-    const phase = String(session?.phase || session?.status || "").toLowerCase();
-    if (phase !== "stale") continue;
-    const sessionId = String(
-      session?.sessionId || session?.session_id || "",
-    ).trim();
-    if (!sessionId || staleSessions.has(sessionId)) continue;
-    rows.push({
-      kind: "session",
-      id: sessionId,
-      status: "stale",
-      last_event_at: session?.started_at || null,
-      action: "archive_or_resume_session",
-      owner: session?.agent_id ? undefined : "unknown",
-    });
-  }
-
   for (const [key, item] of worktrees) {
     if (item.entry?.event === "worktree_removed") continue;
     const status = statusOf(item.ref, "active");
@@ -363,11 +306,9 @@ export async function runHygiene(args = [], opts = {}) {
   const currentPath = join(lakeRoot, "current.json");
   const current = existsSync(currentPath) ? readJson(currentPath) : {};
   const ledger = readJsonLines(join(lakeRoot, "ledger.jsonl"));
-  const overlay = await readLiveOverlay({ ...opts, rootDir, lakeRoot });
   const projection = projectCtoHygiene({
     current,
     ledger: ledger.length ? ledger : null,
-    overlay,
   });
   if (opts.json === true || hasFlag(args, "--json"))
     writeJson(stdout, projection);

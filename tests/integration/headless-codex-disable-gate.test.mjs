@@ -20,7 +20,6 @@ import { BASH_EXE } from "../helpers/bash-path.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "../..");
 const ROUTE_SCRIPT = resolve(ROOT, "scripts/tfx-route.sh");
-const HUB_ENSURE_STUB = resolve(ROOT, "tests/fixtures/no-op-hub-ensure.mjs");
 
 function readIfPresent(path) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -129,13 +128,11 @@ function runCodexHeadless(fixture, overrides = {}) {
       TFX_NO_CLAUDE_NATIVE: "0",
       TFX_CODEX_TRANSPORT: "exec",
       TFX_HARD_CEILING_SEC: "0",
-      // CLI 차단 검증에는 heartbeat와 실제 hub 기동이 필요 없다.
+      // CLI 차단 검증에는 heartbeat가 필요 없다.
       TFX_HEARTBEAT: "0",
-      TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
       TFX_MCP_HEALTH_CHECK: "0",
       TFX_ALLOW_SMALL_CODEX_CONFIG: "1",
       TFX_CTO_NORTH_STAR: "0",
-      TFX_HUB_URL: "",
       TFX_TEAM_NAME: "",
       ...overrides,
     },
@@ -172,13 +169,11 @@ function runRouteWithPreflightLoaded(fixture) {
         TFX_NO_CLAUDE_NATIVE: "0",
         TFX_CODEX_TRANSPORT: "exec",
         TFX_HARD_CEILING_SEC: "0",
-        // CLI 차단 검증에는 heartbeat와 실제 hub 기동이 필요 없다.
+        // CLI 차단 검증에는 heartbeat가 필요 없다.
         TFX_HEARTBEAT: "0",
-        TFX_HUB_ENSURE_SCRIPT: HUB_ENSURE_STUB,
         TFX_MCP_HEALTH_CHECK: "0",
         TFX_ALLOW_SMALL_CODEX_CONFIG: "1",
         TFX_CTO_NORTH_STAR: "0",
-        TFX_HUB_URL: "",
         TFX_TEAM_NAME: "",
       },
     },

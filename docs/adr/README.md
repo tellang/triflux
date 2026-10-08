@@ -13,18 +13,18 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0004](0004-codex-as-default-cli.md) | 기본 구현 CLI = Codex | Accepted | 0002 |
 | [0005](0005-packages-three-layer-mirror.md) | packages/ 3-layer single-source 미러 | Accepted | 0002 |
 | [0006](../_archive/adr/0006-escalation-chain-codex-to-claude-opus.md) | 재시도 승격 체인 codex→claude opus 2단계 | Superseded | 0002, 0004, 0016 |
-| [0007](0007-hub-default-port-27888.md) | hub 기본 포트 27888 고정 | Accepted | 0002 |
+| [0007](../_archive/adr/0007-hub-default-port-27888.md) | hub 기본 포트 27888 고정 | Deprecated | 0002, 0023 |
 | [0008](0008-native-bridge-ui-default-on.md) | headless 워커 native-bridge 기본 노출 | Accepted | 0002 |
 | [0009](0009-stack-coexistence-three-layer.md) | gstack·sp·triflux 단방향 3-layer 공존 | Accepted | 0002 |
-| [0010](0010-cto-lake-hub-role-boundary.md) | CTO lake ↔ Hub role 경계 — liveness/history 평면 분리 | Accepted | 0005, 0007 |
+| [0010](../_archive/adr/0010-cto-lake-hub-role-boundary.md) | CTO lake ↔ Hub role 경계 — liveness/history 평면 분리 | Superseded | 0005, 0007, 0023 |
 | [0011](../_archive/adr/0011-active-role-system-cto-scoped-lead.md) | 능동 역할 시스템 — CTO + scoped lead (C+A 하이브리드) | Superseded | 0010, 0024 |
 | [0012](0012-orphaned-design-doc-deprecation.md) | 제거된 구현의 설계 문서 폐기 표시 | Accepted | 0002 |
-| [0013](0013-synapse-expiry-window-unification.md) | synapse 만료 창 단일화 | Proposed | 0010 |
+| [0013](../_archive/adr/0013-synapse-expiry-window-unification.md) | synapse 만료 창 단일화 | Withdrawn | 0010, 0023 |
 | [0014](0014-claude-credentials-keychain-source-of-truth.md) | Claude 자격증명은 macOS Keychain 정본, 읽은 저장소에만 되쓰기 | Accepted | 0002 |
 | [0015](0015-codex-lane-exec-transport-and-last-message.md) | Codex 레인은 exec 전송 + 최종 메시지 파일이 결과 계약 | Accepted | 0004, 0006 |
 | [0016](0016-codex-astra-top-tier-and-fable-escalation.md) | Codex 최상위 tier = Astra, 최종 승격 = Fable | Accepted | 0004, 0006, 0015 |
 | [0017](0017-gpt6-sol-luna-lanes.md) | Terra/Luna 레인 = GPT-6 Sol/Luna | Accepted | 0004, 0015, 0016 |
-| [0018](0018-cto-auto-behaviors-opt-in.md) | CTO 자동 동작은 명시적으로 켜야 실행 | Proposed | 0010, 0011 |
+| [0018](../_archive/adr/0018-cto-auto-behaviors-opt-in.md) | CTO 자동 동작은 명시적으로 켜야 실행 | Superseded | 0010, 0011, 0023 |
 | [0019](0019-gpt61-sol-and-sonnet-55.md) | Sol 레인 = GPT-6.1 Sol, sonnet 별칭 = Sonnet 5.5 | Accepted | 0004, 0016, 0017 |
 | [0020](0020-skill-surface-reduction.md) | tfx 스킬 표면 = 12개 + Windows 1개, 스킬 frontmatter `platform` 필터 | Accepted | 0004, 0009 |
 | [0021](0021-keyword-hook-explicit-first.md) | 키워드 훅은 명시 토큰만 MUST, 자연어는 제안(suggest), gstack 이름은 설치본 기준 | Accepted | 0009, 0020 |

@@ -7,7 +7,6 @@ import { dirname, resolve } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ClaudeWorker } from "../../hub/workers/claude-worker.mjs";
-import { createWorker } from "../../hub/workers/factory.mjs";
 import {
   createWorkerError,
   DEFAULT_KILL_GRACE_MS,
@@ -141,20 +140,6 @@ describe("ClaudeWorker", { timeout: 15000 }, () => {
     await worker.stop();
     rmSync(argvOut, { force: true });
     argvOutFiles.delete(argvOut);
-  });
-});
-
-describe("createWorker()", { timeout: 15000 }, () => {
-  it("타입별 worker 인스턴스를 생성해야 한다", async () => {
-    assert.equal(
-      (await createWorker("claude")).constructor.name,
-      "ClaudeWorker",
-    );
-    assert.equal(
-      (await createWorker("delegator")).constructor.name,
-      "DelegatorMcpWorker",
-    );
-    await assert.rejects(() => createWorker("unknown"), /Unknown worker type/);
   });
 });
 

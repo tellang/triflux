@@ -22,37 +22,33 @@ Research basis: `.omx/goals/autoresearch/cto-lake-existing-feature-research/evid
 
 Every source reports `{ available, status, detail, collected_at }`.
 
-Collection scope is durable artifacts only. Live Claude `/goal` state is not shell-collectable. The collector reads durable artifacts such as `.omx/ultragoal/{goals.json,ledger.jsonl,brief.md}`, `.omc/ultragoal/*`, gstack checkpoints, tfx synapse/hub/swarm/team status, and `.omx/handoffs`. A source uses `available:false` when the surface exposes no shell-readable artifact.
+Collection scope is durable artifacts only. Live Claude `/goal` state is not shell-collectable. The collector reads durable artifacts such as `.omx/ultragoal/{goals.json,ledger.jsonl,brief.md}`, `.omc/ultragoal/*`, gstack checkpoints, and `.omx/handoffs`. A source uses `available:false` when the surface exposes no shell-readable artifact.
 
 Required source IDs:
 
 - `git`: repo root, branch, head, dirty state, and recent status context.
-- `tfx_hub`: hub availability and status.
-- `tfx_swarm`: swarm runtime status.
-- `tfx_team`: team runtime status.
-- `tfx_synapse`: synapse status.
 - `ultragoal_omx`: `.omx/ultragoal` state.
 - `ultragoal_omc`: `.omc/ultragoal` state.
 - `handoffs`: `.omx/handoffs` references.
 
-Collectors must be read-only against upstream engines. They may write only the lake files they own. `tfx cto status` reads live-session data from synapse (persisted synapse snapshots) rather than re-deriving it.
+Collectors must be read-only against upstream engines. They may write only the lake files they own.
 
 `ledger.jsonl` is append-only and single-writer. A collector must acquire `.triflux/lake/ledger.jsonl.lock` before appending so concurrent collectors on this machine cannot interleave or corrupt JSONL lines.
 
 ## Host-Local Source Boundary
 
-The collector is repo-local first. It reads `.triflux/*`, `.omx/*`, `.omc/*`, and other durable repo artifacts before considering host-local Triflux caches under `~/.claude/cache/tfx-hub/*`. Host-local cache reads are a discovery fallback for operators who want one CTO view of active local Triflux runtime state; they are not written back to upstream engines and can be disabled in tests or library calls with `includeHostArtifacts:false`.
+The collector is repo-local. It reads `.triflux/*`, `.omx/*`, `.omc/*`, and other durable repo artifacts, and does not read host-local Triflux caches.
 
-Because host-local cache files may be shared by multiple checkouts, every collected source remains tagged by `sources.{id}` plus `.triflux/lake/sources.json`. Consumers must treat the lake as a snapshot of readable evidence, not as ownership over the underlying systems.
+Every collected source remains tagged by `sources.{id}` plus `.triflux/lake/sources.json`. Consumers must treat the lake as a snapshot of readable evidence, not as ownership over the underlying systems.
 
 ## Prompt Boundary
 
-`current.md` is available for people and agents to read directly as a direction summary. Route prompt injection was removed on 2026-10-08. The earlier opt-in design is recorded in [ADR-0018](../adr/0018-cto-auto-behaviors-opt-in.md).
+`current.md` is available for people and agents to read directly as a direction summary. Route prompt injection was removed on 2026-10-08. The earlier opt-in design is recorded in [ADR-0018](../_archive/adr/0018-cto-auto-behaviors-opt-in.md).
 
 ## Commands
 
 - `tfx cto collect`: refresh `.triflux/lake/current.json`, `.triflux/lake/current.md`, and append `.triflux/lake/ledger.jsonl` events.
-- `tfx cto status`: print the current authority summary from `.triflux/lake/current.json`, with live sessions read through synapse.
+- `tfx cto status`: print the current authority summary from `.triflux/lake/current.json`.
 - `tfx cto hygiene --dry-run`: report dry-run hygiene findings without moving files.
 
 ## Cadence Defaults

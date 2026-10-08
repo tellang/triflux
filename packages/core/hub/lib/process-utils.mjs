@@ -9,7 +9,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { IS_WINDOWS, killProcess } from "../platform.mjs";
 
@@ -387,23 +387,6 @@ function getProcessSnapshot({
   }
 }
 
-function addHubPid(protectedPids) {
-  try {
-    const hubPidPath = join(
-      homedir(),
-      ".claude",
-      "cache",
-      "tfx-hub",
-      "hub.pid",
-    );
-    if (existsSync(hubPidPath)) {
-      const hubInfo = JSON.parse(readFileSync(hubPidPath, "utf8"));
-      const hubPid = normalizePid(hubInfo?.pid);
-      if (hubPid) protectedPids.add(hubPid);
-    }
-  } catch {}
-}
-
 function getProtectedPids({
   protectedPids,
   isWindows = IS_WINDOWS,
@@ -415,7 +398,6 @@ function getProtectedPids({
   if (Number.isInteger(process.ppid) && process.ppid > 0) {
     result.add(process.ppid);
   }
-  addHubPid(result);
   if (!includeAncestorScan) return result;
 
   const snapshot = getProcessSnapshot({ isWindows, spawnSyncFn });
@@ -845,22 +827,8 @@ export function cleanupStaleFsmonitorDaemons({
 function cleanupOrphansUnix() {
   const myPid = process.pid;
 
-  // Hub PID 보호
   const protectedPids = new Set();
   protectedPids.add(myPid);
-  try {
-    const hubPidPath = join(
-      homedir(),
-      ".claude",
-      "cache",
-      "tfx-hub",
-      "hub.pid",
-    );
-    if (existsSync(hubPidPath)) {
-      const hubPid = Number(JSON.parse(readFileSync(hubPidPath, "utf8"))?.pid);
-      if (Number.isFinite(hubPid) && hubPid > 0) protectedPids.add(hubPid);
-    }
-  } catch {}
 
   // 현재 프로세스의 조상 트리 보호
   try {

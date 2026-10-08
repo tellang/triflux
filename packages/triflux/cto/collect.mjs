@@ -6,14 +6,12 @@ import {
   readFileSync,
   statSync,
 } from "node:fs";
-import { homedir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { renderBrief } from "./brief.mjs";
 import { appendCtoEvent } from "./events.mjs";
 import {
-  firstExisting,
   readJsonLines,
   resolveLakeRootDir,
   writeAtomic,
@@ -25,24 +23,6 @@ const SOURCE_REGISTRY = [
     id: "git",
     kind: "repo",
     probe: "git rev-parse, git branch, git status",
-    enabled: true,
-  },
-  {
-    id: "tfx_hub",
-    kind: "triflux-runtime-artifact",
-    probe: ".triflux/hub/status.json or host tfx-hub cache",
-    enabled: true,
-  },
-  {
-    id: "tfx_team",
-    kind: "triflux-runtime-artifact",
-    probe: ".triflux/team-state.json or host tfx-hub team cache",
-    enabled: true,
-  },
-  {
-    id: "tfx_synapse",
-    kind: "triflux-runtime-artifact",
-    probe: ".triflux/synapse registry or host tfx-hub synapse cache",
     enabled: true,
   },
   {
@@ -121,14 +101,6 @@ function listDirFiles(dirPath, rootDir, limit = 10) {
   }
 }
 
-function safeSummary(value) {
-  if (value === null || value === undefined) return null;
-  if (Array.isArray(value)) return { type: "array", count: value.length };
-  if (typeof value === "object")
-    return { type: "object", keys: Object.keys(value).slice(0, 20) };
-  return String(value).slice(0, 200);
-}
-
 function execGit(args, rootDir, execFileSyncFn) {
   return execFileSyncFn("git", args, {
     cwd: rootDir,
@@ -180,45 +152,6 @@ function collectGit(rootDir, collectedAt, execFileSyncFn) {
         collectedAt,
       ),
     };
-  }
-}
-
-function collectJsonArtifact(
-  id,
-  candidates,
-  rootDir,
-  collectedAt,
-  summarize = safeSummary,
-) {
-  const filePath = firstExisting(candidates);
-  if (!filePath) {
-    return missingSource(
-      "no_shell_readable_artifact",
-      "no durable artifact found",
-      collectedAt,
-    );
-  }
-  try {
-    const parsed = readJson(filePath);
-    return sourceState(
-      true,
-      "ok",
-      {
-        path: relPath(rootDir, filePath),
-        summary: summarize(parsed),
-      },
-      collectedAt,
-    );
-  } catch (error) {
-    return sourceState(
-      true,
-      "read_error",
-      {
-        path: relPath(rootDir, filePath),
-        error: error?.message || `${id} artifact read failed`,
-      },
-      collectedAt,
-    );
   }
 }
 
@@ -329,7 +262,6 @@ function buildSummary(current) {
   return {
     repo_state: `branch ${repo.branch || "unknown"} at ${repo.head || "unknown"} is ${repo.dirty ? "dirty" : "clean"}`,
     active_goals: [...omxGoals, ...omcGoals].slice(0, 5),
-    hub_status: current.sources.tfx_hub.status,
     available_sources: availableSources,
     missing_sources: SOURCE_IDS.length - availableSources,
   };
@@ -467,67 +399,10 @@ function validateCurrent(current) {
   }
 }
 
-function collectSources(rootDir, collectedAt, execFileSyncFn, opts = {}) {
-  const home = homedir();
-  const hostArtifactCandidates =
-    opts.includeHostArtifacts === false
-      ? {
-          hub: [],
-          team: [],
-          synapse: [],
-        }
-      : {
-          hub: [
-            join(home, ".claude", "cache", "tfx-hub", "hub.pid"),
-            join(home, ".claude", "cache", "tfx-hub", "hub-state.json"),
-          ],
-          team: [
-            join(
-              home,
-              ".claude",
-              "cache",
-              "tfx-hub",
-              `team-state-${process.env.CLAUDE_SESSION_ID || ""}.json`,
-            ),
-            join(home, ".claude", "cache", "tfx-hub", "team-state.json"),
-          ],
-          synapse: [
-            join(home, ".claude", "cache", "tfx-hub", "synapse-registry.json"),
-            join(home, ".claude", "cache", "tfx-hub", "synapse-sessions.json"),
-          ],
-        };
+function collectSources(rootDir, collectedAt, execFileSyncFn) {
   const git = collectGit(rootDir, collectedAt, execFileSyncFn);
   const sources = {
     git: git.source,
-    tfx_hub: collectJsonArtifact(
-      "tfx_hub",
-      [
-        join(rootDir, ".triflux", "hub", "status.json"),
-        join(rootDir, ".triflux", "hub-state.json"),
-        ...hostArtifactCandidates.hub,
-      ],
-      rootDir,
-      collectedAt,
-    ),
-    tfx_team: collectJsonArtifact(
-      "tfx_team",
-      [
-        join(rootDir, ".triflux", "team-state.json"),
-        ...hostArtifactCandidates.team,
-      ],
-      rootDir,
-      collectedAt,
-    ),
-    tfx_synapse: collectJsonArtifact(
-      "tfx_synapse",
-      [
-        join(rootDir, ".triflux", "synapse-registry.json"),
-        join(rootDir, ".triflux", "synapse", "registry.json"),
-        ...hostArtifactCandidates.synapse,
-      ],
-      rootDir,
-      collectedAt,
-    ),
     ultragoal_omx: collectUltragoal(
       join(rootDir, ".omx", "ultragoal"),
       rootDir,
@@ -568,7 +443,6 @@ export async function runCollect(args = [], opts = {}) {
     rootDir,
     generatedAt,
     execFileSyncFn,
-    opts,
   );
   const current = {
     schema_version: SCHEMA_VERSION,

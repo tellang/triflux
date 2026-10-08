@@ -396,7 +396,6 @@ export function main(argv = process.argv.slice(2)) {
       ...process.env,
       TEST_LOCK_PID: String(process.pid),
       TFX_HUB_PID_DIR: process.env.TFX_HUB_PID_DIR || testHubPidDir,
-      TFX_HUB_STATE_DIR: process.env.TFX_HUB_STATE_DIR || testHubPidDir,
       // 테스트 러너 밀폐화: 머신 전역 CLI disable 정책을 자식 테스트가 상속하지
       // 않게 고정한다. 이 개발 머신은 ~/.zshenv 와
       // ~/.config/triflux/machine-profile.env 두 곳에서 TFX_DISABLE_CODEX=1 과

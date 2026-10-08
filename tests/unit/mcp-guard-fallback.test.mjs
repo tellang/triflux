@@ -35,15 +35,15 @@ describe("mcp-guard-engine fallback", () => {
   it("loadRegistryOrDefault: 파일 없으면 DEFAULT_REGISTRY fallback", () => {
     assert.ok(!existsSync(REGISTRY_PATH), "registry should be missing");
     const registry = loadRegistryOrDefault();
-    assert.ok(registry.servers["tfx-hub"], "should have tfx-hub from default");
-    assert.equal(registry.defaults.transport, "hub-url");
+    assert.deepEqual(registry.servers, {});
+    assert.equal(registry.defaults.transport, "http");
   });
 
   it("loadRegistryOrDefault: invalid JSON이면 DEFAULT_REGISTRY fallback", () => {
     mkdirSync(join(REGISTRY_PATH, ".."), { recursive: true });
     writeFileSync(REGISTRY_PATH, "{ invalid json !!!", "utf8");
     const registry = loadRegistryOrDefault();
-    assert.ok(registry.servers["tfx-hub"], "should fallback to default");
+    assert.deepEqual(registry.servers, {});
   });
 
   it("removeRegistryServer: 파일 없으면 null 반환", () => {
@@ -55,7 +55,7 @@ describe("mcp-guard-engine fallback", () => {
   it("removeRegistryServer: invalid 파일이면 null 반환", () => {
     mkdirSync(join(REGISTRY_PATH, ".."), { recursive: true });
     writeFileSync(REGISTRY_PATH, "not json", "utf8");
-    const result = removeRegistryServer("tfx-hub");
+    const result = removeRegistryServer("context7");
     assert.equal(result, null);
   });
 });

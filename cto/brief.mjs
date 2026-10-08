@@ -12,11 +12,6 @@ function oneLine(value, fallback = "n/a") {
   return String(text).replace(/\s+/g, " ").trim() || fallback;
 }
 
-function compactDetail(value) {
-  const text = oneLine(value);
-  return text.length > 140 ? `${text.slice(0, 137)}...` : text;
-}
-
 function formatGoal(goal) {
   const id = oneLine(goal?.id, "goal");
   const status = oneLine(goal?.status, "unknown");
@@ -50,7 +45,6 @@ function enforceCap(text) {
 export function renderBrief(current) {
   const repo = current?.repo || {};
   const summary = current?.summary || {};
-  const hub = current?.sources?.tfx_hub || {};
   const activeGoals = Array.isArray(summary.active_goals)
     ? summary.active_goals.slice(0, 3)
     : [];
@@ -65,8 +59,6 @@ export function renderBrief(current) {
     `summary: ${oneLine(summary.repo_state, "no repo summary")}`,
     "active_goals",
     ...(activeGoals.length > 0 ? activeGoals.map(formatGoal) : ["- none"]),
-    "hub_status",
-    `status: ${oneLine(hub.status, "unknown")} available: ${hub.available === true} detail: ${compactDetail(hub.detail)}`,
     "recent_events",
     ...(recentEvents.length > 0 ? recentEvents.map(formatEvent) : ["- none"]),
     "generated_at",

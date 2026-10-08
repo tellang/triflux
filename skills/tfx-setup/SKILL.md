@@ -22,7 +22,7 @@ Antigravity 프로필은 `~/.gemini/triflux-profiles.json`에서 Gemini 3.8 Flas
 
 기존 MCP 직접 연결 이주는 설치 과정에서 실행된다. 이주할 수 없는 항목과 누락된 API 키는 경고로 남긴다. 검색 MCP 키를 프로젝트 `.mcp.json`에 직접 쓰지 않는다.
 
-Hub MCP 등록과 선택적 Windows Hub 자동 시작은 허브 제거 전까지 유지한다. Windows의 로컬 세션은 psmux와 Windows Terminal을 사용한다. macOS/Linux는 tmux가 기본이며 macOS에서 tmux가 없으면 Terminal.app 대체 경로를 사용한다.
+제거된 허브의 `tfx-hub` MCP 항목, 실행 중이던 프로세스, Windows 예약 작업, 설치본 스냅샷은 setup이 한 번 정리한다. 프로젝트 `.mcp.json`에 남은 항목은 지우지 않고 `tfx doctor`가 알린다. Windows의 로컬 세션은 psmux와 Windows Terminal을 사용한다. macOS/Linux는 tmux가 기본이며 macOS에서 tmux가 없으면 Terminal.app 대체 경로를 사용한다.
 
 ## 확인
 

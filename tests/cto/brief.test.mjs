@@ -13,14 +13,7 @@ function makeCurrent(overrides = {}) {
       head: "abcdef123456",
       dirty: true,
     },
-    sources: {
-      tfx_hub: {
-        available: true,
-        status: "ok",
-        detail: { port: 27888 },
-        collected_at: "2026-06-02T00:00:00.000Z",
-      },
-    },
+    sources: {},
     summary: {
       repo_state: "main has local changes",
       active_goals: [

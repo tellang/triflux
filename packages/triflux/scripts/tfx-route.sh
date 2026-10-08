@@ -537,8 +537,6 @@ TFX_TEAM_NAME="${TFX_TEAM_NAME:-}"
 TFX_TEAM_TASK_ID="${TFX_TEAM_TASK_ID:-}"
 TFX_TEAM_AGENT_NAME="${TFX_TEAM_AGENT_NAME:-${AGENT_TYPE}-worker-$$}"
 TFX_TEAM_LEAD_NAME="${TFX_TEAM_LEAD_NAME:-team-lead}"
-TFX_HUB_PIPE="${TFX_HUB_PIPE:-}"
-TFX_HUB_URL="${TFX_HUB_URL:-http://127.0.0.1:27888}"  # bridge.mjs HTTP fallback hint
 
 # ── 패키지 루트 해석 (setup.mjs가 기록한 breadcrumb) ──
 TFX_PKG_ROOT=""
@@ -599,7 +597,7 @@ _resolve_script() {
   return 1
 }
 
-# ── 팀 Hub Bridge 통신 ──
+# ── 팀 Bridge 통신 ──
 resolve_bridge_script() {
   local sd; sd="$(_get_script_dir)"
   _resolve_script "${TFX_BRIDGE_SCRIPT:-}" \
@@ -617,8 +615,7 @@ bridge_cli() {
     return 127
   fi
 
-  TFX_HUB_PIPE="$TFX_HUB_PIPE" TFX_HUB_URL="$TFX_HUB_URL" TFX_HUB_TOKEN="${TFX_HUB_TOKEN:-}" \
-    "$NODE_BIN" "$bridge_script" "$@" 2>/dev/null
+  "$NODE_BIN" "$bridge_script" "$@" 2>/dev/null
 }
 
 bridge_json_get() {
@@ -634,25 +631,6 @@ bridge_json_get() {
     if (value === undefined || value === null) process.exit(1);
     process.stdout.write(typeof value === "object" ? JSON.stringify(value) : String(value));
   ' -- "$json" "$path" 2>/dev/null
-}
-
-bridge_json_stringify() {
-  local mode="${1:-}"
-  shift || true
-
-  case "$mode" in
-    task-result)
-      "$NODE_BIN" -e '
-        process.stdout.write(JSON.stringify({
-          task_id: process.argv[1] || "",
-          result: process.argv[2] || "",
-        }));
-      ' -- "${1:-}" "${2:-}"
-      ;;
-    *)
-      return 1
-      ;;
-  esac
 }
 
 team_send_message() {
@@ -704,7 +682,7 @@ team_claim_task() {
     :|false:)
       echo "[tfx-route] 경고: bridge 연결 실패. claim 없이 계속 실행." >&2 ;;
     *)
-      echo "[tfx-route] 경고: Hub claim 실패 (${error_code:-unknown}${error_message:+: ${error_message}}). claim 없이 계속 실행." >&2 ;;
+      echo "[tfx-route] 경고: claim 실패 (${error_code:-unknown}${error_message:+: ${error_message}}). claim 없이 계속 실행." >&2 ;;
   esac
 }
 
@@ -713,23 +691,11 @@ team_complete_task() {
   local result_summary="${2:-작업 완료}"
   [[ -z "$TFX_TEAM_NAME" || -z "$TFX_TEAM_TASK_ID" ]] && return 0
 
-  local summary_trimmed result_payload
+  local summary_trimmed
   summary_trimmed=$(echo "$result_summary" | head -c 4096)
-  result_payload=$(bridge_json_stringify task-result "$TFX_TEAM_TASK_ID" "$result" 2>/dev/null || true)
 
   # task 파일 completion 쓰기는 Worker Step 6 TaskUpdate가 authority다.
-  # route 레벨에서는 task.result 발행 + 로컬 backup만 유지한다.
-
-  # Hub result 발행 (poll_messages 채널 활성화)
-  if [[ -n "$result_payload" ]]; then
-    if ! bridge_cli result \
-      --agent "$TFX_TEAM_AGENT_NAME" \
-      --topic task.result \
-      --payload "$result_payload" \
-      --trace "$TFX_TEAM_NAME" >/dev/null 2>&1; then
-      echo "[tfx-route] 경고: Hub result 발행 실패 (agent=$TFX_TEAM_AGENT_NAME, task=$TFX_TEAM_TASK_ID)" >&2
-    fi
-  fi
+  # route 레벨에서는 로컬 backup만 유지한다.
 
   # 로컬 결과 파일 백업 (세션 끊김 복구용)
   # Claude 재로그인 시 Agent 래퍼가 죽어도 이 파일로 결과 수집 가능

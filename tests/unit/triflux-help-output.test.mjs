@@ -18,18 +18,6 @@ function stripAnsi(str) {
 }
 
 describe("tfx --help 출력", () => {
-  it("#109: Commands 섹션에 tfx synapse 포함", () => {
-    const raw = execSync(`node "${binPath}" --help`, { encoding: "utf8" });
-    const out = stripAnsi(raw);
-    assert.match(out, /tfx synapse/);
-  });
-
-  it("#109: Commands 섹션에 tfx why 포함", () => {
-    const raw = execSync(`node "${binPath}" --help`, { encoding: "utf8" });
-    const out = stripAnsi(raw);
-    assert.match(out, /tfx why\b/);
-  });
-
   it("stale: tfx update --help 는 업데이트를 실행하지 않고 도움말만 출력", () => {
     const raw = execSync(`node "${binPath}" update --help`, {
       encoding: "utf8",
@@ -40,7 +28,7 @@ describe("tfx --help 출력", () => {
     assert.doesNotMatch(out, /npm install -g|업데이트 완료|git pull/);
   });
 
-  for (const command of ["setup", "doctor", "synapse", "multi", "why"]) {
+  for (const command of ["setup", "doctor", "multi"]) {
     it(`stale: tfx ${command} --help 는 side-effect 없이 help 출력`, () => {
       const raw = execSync(`node "${binPath}" ${command} --help`, {
         encoding: "utf8",
