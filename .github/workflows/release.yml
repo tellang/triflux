@@ -39,6 +39,7 @@ jobs:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
+          persist-credentials: false
 
       - name: Resolve release
         id: resolve
@@ -72,8 +73,9 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
+      # 쓰기 토큰이 남은 잡이라 의존성 설치 스크립트를 막는다. 테스트는 setup 결과에 기대지 않는다(ci.yml 과 같음).
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Prepare release
         env:

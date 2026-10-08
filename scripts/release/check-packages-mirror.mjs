@@ -15,9 +15,11 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  statSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CORE_ENTRIES } from "../pack.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO_ROOT = join(SCRIPT_DIR, "..", "..");
@@ -31,48 +33,15 @@ const MIRROR_TOPS = [
   "scripts",
   "skills",
 ];
-const CORE_FILE_MIRRORS = [
-  {
-    source: "hub/bridge.mjs",
-    target: "packages/core/hub/bridge.mjs",
-  },
-  {
-    source: "hub/team/nativeProxy.mjs",
-    target: "packages/core/hub/team/nativeProxy.mjs",
-  },
-  {
-    source: "hub/team/retry-state-machine.mjs",
-    target: "packages/core/hub/team/retry-state-machine.mjs",
-  },
-  {
-    source: "hub/team/claude-agent-session-normalizer.mjs",
-    target: "packages/core/hub/team/claude-agent-session-normalizer.mjs",
-  },
-  {
-    source: "hub/team/claude-daemon-control.mjs",
-    target: "packages/core/hub/team/claude-daemon-control.mjs",
-  },
-  {
-    source: "hub/team/claude-transcript.mjs",
-    target: "packages/core/hub/team/claude-transcript.mjs",
-  },
-  {
-    source: "hub/team/session-context.mjs",
-    target: "packages/core/hub/team/session-context.mjs",
-  },
-  {
-    source: "hub/team/claude-session-projection.mjs",
-    target: "packages/core/hub/team/claude-session-projection.mjs",
-  },
-];
-// Whole directories under packages/core that must be byte-identical to root.
-// Mirror policy (§packages/core): hooks/hud are byte-identical cp mirrors.
-// See .claude/rules/tfx-mirror-policy.md and PR #377.
-const CORE_DIR_MIRRORS = ["hooks", "hud"];
-const CORE_MJS_DIR_MIRRORS = [
-  { source: "hub", target: "packages/core/hub" },
-  { source: "scripts/lib", target: "packages/core/scripts/lib" },
-];
+// core 미러 대상은 pack.mjs 의 CORE_ENTRIES 하나로 정한다. 검사기가 따로 손 목록을 두면
+// 하위 디렉터리나 새 파일이 빠져도 OK 가 나왔다(#674).
+const CORE_NON_MIRROR = new Set([
+  "package.json",
+  "README.md",
+  "README.ko.md",
+  "LICENSE",
+  "hub/index.mjs", // pack 이 만드는 배럴(CORE_INDEX)
+]);
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage"]);
 // Per-top relative paths to skip. Mirror policy excludes these via
 // packages/triflux/package.json "files" negation patterns (e.g.
@@ -192,6 +161,26 @@ function checkRemoteMirror(repoRoot) {
   return issues;
 }
 
+function checkCoreImports(coreRoot) {
+  const issues = [];
+  for (const rel of walkRelFiles(coreRoot)) {
+    if (!rel.endsWith(".mjs")) continue;
+    const corePath = join(coreRoot, rel);
+    for (const spec of extractImportSpecifiers(
+      readFileSync(corePath, "utf8"),
+    )) {
+      if (!spec.startsWith(".")) continue;
+      if (!existsSync(join(dirname(corePath), spec))) {
+        issues.push({
+          path: `packages/core/${rel}`,
+          kind: `core-unresolvable-import (${spec})`,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
 function compareMirror({
   fix = false,
   repoRoot = DEFAULT_REPO_ROOT,
@@ -246,103 +235,67 @@ function compareMirror({
     }
   }
 
-  for (const mirror of CORE_FILE_MIRRORS) {
-    const srcPath = join(repoRoot, mirror.source);
-    const dstPath = join(repoRoot, mirror.target);
-    const srcExists = existsSync(srcPath);
-    const dstExists = existsSync(dstPath);
+  const coreRoot = join(repoRoot, "packages", "core");
+  const coreDirs = [];
+  const coreFiles = [];
+  for (const entry of CORE_ENTRIES) {
+    const srcPath = join(repoRoot, entry);
+    const dstPath = join(coreRoot, entry);
+    const probe = existsSync(srcPath) ? srcPath : dstPath;
+    if (!existsSync(probe)) continue; // pack 도 원본이 없으면 건너뛴다
+    if (statSync(probe).isDirectory()) coreDirs.push(entry);
+    else coreFiles.push(entry);
+  }
 
-    if (!srcExists) {
-      issues.push({ path: mirror.source, kind: "missing-source" });
-      continue;
-    }
-
-    if (!dstExists) {
+  const syncCoreFile = (rel, inSrc, inDst) => {
+    const srcPath = join(repoRoot, rel);
+    const dstPath = join(coreRoot, rel);
+    const displayPath = `packages/core/${rel}`;
+    if (!inSrc) {
+      issues.push({ path: displayPath, kind: "orphan-in-mirror" });
+    } else if (!inDst) {
       if (fix) {
         mkdirSync(dirname(dstPath), { recursive: true });
         copyFileSync(srcPath, dstPath);
-        fixed.push({ path: mirror.target, kind: "added" });
+        fixed.push({ path: displayPath, kind: "added" });
       } else {
-        issues.push({ path: mirror.target, kind: "missing-in-mirror" });
+        issues.push({ path: displayPath, kind: "missing-in-mirror" });
       }
-      continue;
-    }
-
-    const a = readFileSync(srcPath);
-    const b = readFileSync(dstPath);
-    if (!a.equals(b)) {
+    } else if (!readFileSync(srcPath).equals(readFileSync(dstPath))) {
       if (fix) {
         copyFileSync(srcPath, dstPath);
-        fixed.push({ path: mirror.target, kind: "updated" });
+        fixed.push({ path: displayPath, kind: "updated" });
       } else {
-        issues.push({ path: mirror.target, kind: "content-diff" });
+        issues.push({ path: displayPath, kind: "content-diff" });
       }
     }
+  };
+
+  for (const rel of coreFiles) {
+    syncCoreFile(
+      rel,
+      existsSync(join(repoRoot, rel)),
+      existsSync(join(coreRoot, rel)),
+    );
   }
-
-  for (const mirror of CORE_MJS_DIR_MIRRORS) {
-    const srcDir = join(repoRoot, mirror.source);
-    const dstDir = join(repoRoot, mirror.target);
-    for (const rel of walkRelFiles(dstDir)) {
-      if (!rel.endsWith(".mjs") || rel.includes("/")) continue;
-      const srcPath = join(srcDir, rel);
-      const dstPath = join(dstDir, rel);
-      const displayPath = `${mirror.target}/${rel}`;
-
-      if (!existsSync(srcPath)) continue;
-      if (!readFileSync(srcPath).equals(readFileSync(dstPath))) {
-        if (fix) {
-          copyFileSync(srcPath, dstPath);
-          fixed.push({ path: displayPath, kind: "updated" });
-        } else {
-          issues.push({ path: displayPath, kind: "content-diff" });
-        }
-      }
+  for (const dir of coreDirs) {
+    const srcFiles = new Set(walkRelFiles(join(repoRoot, dir)));
+    const dstFiles = new Set(walkRelFiles(join(coreRoot, dir)));
+    for (const rel of new Set([...srcFiles, ...dstFiles])) {
+      syncCoreFile(`${dir}/${rel}`, srcFiles.has(rel), dstFiles.has(rel));
     }
   }
-
-  for (const dir of CORE_DIR_MIRRORS) {
-    const srcDir = join(repoRoot, dir);
-    const dstDir = join(repoRoot, "packages", "core", dir);
-    const srcFiles = new Set(walkRelFiles(srcDir));
-    const dstFiles = new Set(walkRelFiles(dstDir));
-    const allFiles = new Set([...srcFiles, ...dstFiles]);
-
-    for (const rel of allFiles) {
-      const srcPath = join(srcDir, rel);
-      const dstPath = join(dstDir, rel);
-      const inSrc = srcFiles.has(rel);
-      const inDst = dstFiles.has(rel);
-      const displayPath = `packages/core/${dir}/${rel}`;
-
-      if (inSrc && !inDst) {
-        if (fix) {
-          mkdirSync(dirname(dstPath), { recursive: true });
-          copyFileSync(srcPath, dstPath);
-          fixed.push({ path: displayPath, kind: "added" });
-        } else {
-          issues.push({ path: displayPath, kind: "missing-in-mirror" });
-        }
-        continue;
-      }
-
-      if (!inSrc && inDst) {
-        issues.push({ path: displayPath, kind: "orphan-in-mirror" });
-        continue;
-      }
-
-      const a = readFileSync(srcPath);
-      const b = readFileSync(dstPath);
-      if (!a.equals(b)) {
-        if (fix) {
-          copyFileSync(srcPath, dstPath);
-          fixed.push({ path: displayPath, kind: "updated" });
-        } else {
-          issues.push({ path: displayPath, kind: "content-diff" });
-        }
-      }
-    }
+  // 목록 밖 core 파일도 root 와 어긋나면 잡는다.
+  const covered = (rel) =>
+    coreFiles.includes(rel) ||
+    coreDirs.some((dir) => rel.startsWith(`${dir}/`));
+  for (const rel of walkRelFiles(coreRoot)) {
+    if (CORE_NON_MIRROR.has(rel) || covered(rel)) continue;
+    syncCoreFile(rel, existsSync(join(repoRoot, rel)), true);
   }
+
+  // 개별 미러는 의존 파일이 빠져도 바이트 비교로는 안 보이므로 import 해석으로 잡는다(#648).
+  for (const issue of checkCoreImports(coreRoot)) issues.push(issue);
 
   // packages/remote structural validation (not a byte-mirror — see above).
   for (const issue of checkRemoteMirror(repoRoot)) issues.push(issue);

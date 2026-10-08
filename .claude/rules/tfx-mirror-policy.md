@@ -76,9 +76,10 @@ mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (�
 
 **mirror 대상** (root → packages 동기 필수):
 - `hub/lib/*` → `packages/core/hub/lib/`, `packages/triflux/hub/lib/`
+- core 의 `hub/lib`, `scripts/lib`, `hooks`, `hud` 는 통째 미러다. 그 밖의 core 파일은 `scripts/pack.mjs` 의 CORE_FILES, CORE_DIRS 가 고른 것만 두고, `release:check-mirror` 가 root 와 바이트 비교와 import 해석을 한다
 - `hub/team/*`, `hub/*.mjs` (entry/runtime) → `packages/triflux/hub/`, `packages/remote/hub/` (해당 모듈만; `packages/core/hub/team/` 는 self-import 대상만 minimal mirror, 예: `retry-state-machine.mjs`)
 - `scripts/lib/*` → `packages/core/scripts/lib/`, `packages/triflux/scripts/lib/`, `packages/remote/scripts/lib/` (PR #314 catch-up — remote 는 root subset, root-relative 의존 시 `@triflux/core/...` 로 import 변환)
-- `scripts/release/*`, `scripts/__tests__/*` → `packages/triflux/scripts/` (publish 포함)
+- `scripts/release/*`, `scripts/__tests__/*` → `packages/triflux/scripts/`. `scripts/__tests__` 는 files 의 `!scripts/__tests__` 로 게시본에서 뺀다
 - `bin/*` → `packages/triflux/bin/`
 - `hooks/*`, `hud/*` → `packages/triflux/{hooks,hud}/` + `packages/core/{hooks,hud}/` (core 도 `package.json` files 에 `hooks`, `hud` 포함하므로 byte-identical cp 2곳)
 - `config/*` → `packages/triflux/config/` (core·remote 는 config 미러 안 함)
