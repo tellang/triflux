@@ -98,8 +98,18 @@ function writeMachineProfile(home, lines) {
   );
 }
 
+// 라우터는 cwd 의 git status 를 실행 전후로 비교해 무변화 no-op 을 승격한다.
+// 저장소 루트를 쓰면 동시 실행 중인 다른 테스트의 파일 변경이 섞이므로,
+// no-op 승격을 검증하는 테스트는 변동 없는 임시 git 저장소에서 돌린다.
+function createQuietWorkspace() {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "tfx-route-ws-")));
+  const init = spawnSync("git", ["init", "-q"], { cwd: dir });
+  assert.equal(init.status, 0, "임시 워크스페이스 git init 실패");
+  return dir;
+}
+
 // bash 실행 헬퍼 — stdout + stderr 합산 반환
-function runBash(command, extraEnv = {}) {
+function runBash(command, extraEnv = {}, { cwd = PROJECT_ROOT } = {}) {
   const fallbackHome = extraEnv.HOME ? null : createRouteHome();
   const home = extraEnv.HOME ?? fallbackHome;
   const outputDir = mkdtempSync(join(tmpdir(), "tfx-route-output-"));
@@ -118,7 +128,7 @@ function runBash(command, extraEnv = {}) {
 
   try {
     const result = spawnSync(BASH_EXE, ["-c", command], {
-      cwd: PROJECT_ROOT,
+      cwd,
       encoding: "utf8",
       // Per-call timeout: a slow or hung command must not block the synchronous
       // spawnSync and hang the entire suite (a describe/test-level timeout cannot
@@ -616,10 +626,20 @@ describe("tfx-route.sh — Codex exec result", () => {
   });
 
   it("exit 0이어도 최종 메시지와 stdout이 모두 없으면 partial/no_final_message로 보고한다", () => {
-    const result = runBash(
-      `bash "${ROUTE_SCRIPT}" executor 'hello-noop' minimal`,
-      fixtureEnv({ FAKE_CODEX_MODE: "exec-empty" }, { includeRoutePost: true }),
-    );
+    const workspace = createQuietWorkspace();
+    let result;
+    try {
+      result = runBash(
+        `bash "${ROUTE_SCRIPT}" executor 'hello-noop' minimal`,
+        fixtureEnv(
+          { FAKE_CODEX_MODE: "exec-empty" },
+          { includeRoutePost: true },
+        ),
+        { cwd: workspace },
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
 
     assert.notEqual(result.status, 0, out(result));
     assert.match(out(result), /exit_code: 68/);
@@ -675,15 +695,23 @@ describe("tfx-route.sh — Codex exec result", () => {
   });
 
   it("stdout의 Codex stdin 안내 문구만 있으면 meaningful output으로 보지 않는다", () => {
-    const result = runBash(
-      `bash "${ROUTE_SCRIPT}" executor 'hello-stdin-notice-only' minimal`,
-      fixtureEnv(
-        { FAKE_CODEX_MODE: "exec-stdin-notice-only" },
-        { includeRoutePost: true },
-      ),
-    );
+    const workspace = createQuietWorkspace();
+    let result;
+    try {
+      result = runBash(
+        `bash "${ROUTE_SCRIPT}" executor 'hello-stdin-notice-only' minimal`,
+        fixtureEnv(
+          { FAKE_CODEX_MODE: "exec-stdin-notice-only" },
+          { includeRoutePost: true },
+        ),
+        { cwd: workspace },
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
 
     assert.notEqual(result.status, 0, out(result));
+    assert.match(out(result), /exit_code: 68/);
     assert.match(out(result), /status: partial/);
     assert.match(out(result), /reason: no_final_message/);
   });
