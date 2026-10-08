@@ -224,16 +224,14 @@ describe("syncRegistryTargets stdio servers", () => {
     syncRegistryTargets({ registry });
     assert.match(readFileSync(codex, "utf8"), /mcp-server@2\.1\.4/);
 
-    // 여러 줄 args 는 줄 단위로 고치면 파일이 깨지므로 남기고 경고한다.
-    const multiline =
-      '[mcp_servers.brave-search]\ncommand = "npx"\nargs = [\n  "-y",\n  "@brave/brave-search-mcp-server",\n]\n';
-    writeFileSync(codex, multiline);
-    const result = syncRegistryTargets({ registry });
-    assert.equal(readFileSync(codex, "utf8"), multiline);
-    assert.ok(
-      result.actions.some(
-        (action) => action.filePath === codex && action.status === "warning",
-      ),
+    // 여러 줄 배열은 닫는 ] 까지 바꿔 파일이 깨지지 않는다(TOML 1.0 여러 줄 문자열이 같이 있어도).
+    writeFileSync(
+      codex,
+      'note = """Say "hi""""\n\n[mcp_servers.brave-search]\ncommand = "npx"\nargs = ["-y", "@brave/brave-search-mcp-server"]\nenv_vars = [\n  "BRAVE_API_KEY",\n]\n',
     );
+    syncRegistryTargets({ registry });
+    const rewritten = readFileSync(codex, "utf8");
+    assert.match(rewritten, /mcp-server@2\.1\.4/);
+    assert.doesNotMatch(rewritten, /^\s*"BRAVE_API_KEY",$|^\s*\]$/m);
   });
 });

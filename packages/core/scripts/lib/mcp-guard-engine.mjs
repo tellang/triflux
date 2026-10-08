@@ -633,6 +633,14 @@ function formatTomlArray(values = []) {
   return `[${values.map((value) => formatTomlString(value)).join(", ")}]`;
 }
 
+// 한 줄에서 열린 [ 와 닫힌 ] 의 차. 문자열과 주석 안의 괄호는 세지 않는다.
+function arrayDepth(text) {
+  const code = text
+    .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, "")
+    .replace(/#.*$/, "");
+  return (code.match(/\[/g) || []).length - (code.match(/\]/g) || []).length;
+}
+
 function upsertTomlServer(raw, name, config, codex = {}) {
   const lines = String(raw || "").split(/\r?\n/);
   const header = `[mcp_servers.${name}]`;
@@ -697,6 +705,13 @@ function upsertTomlServer(raw, name, config, codex = {}) {
       const keyMatch = lines[index].match(/^\s*([A-Za-z0-9_]+)\s*=/);
       if (!keyMatch || !managedKeys.has(keyMatch[1])) {
         preserved.push(lines[index]);
+      } else {
+        // 여러 줄 배열 값은 닫는 ] 까지 함께 걷어낸다. 남기면 다음 줄들이 고아가 되어 파일이 깨진다.
+        let depth = arrayDepth(lines[index].slice(keyMatch[0].length));
+        while (depth > 0 && index + 1 < lines.length) {
+          index += 1;
+          depth += arrayDepth(lines[index]);
+        }
       }
       index += 1;
     }
