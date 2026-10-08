@@ -28,7 +28,8 @@ ADR-0008 은 headless 워커를 `claude agents` 패널에 기본으로 노출하
 우리는 워커를 실제 tmux 방에서 실행하고, `claude agents` 행은 `claude --bg --exec` 로 띄운 그 방의 attach client 로 만든다.
 
 - 대상은 socket path, session ID(`$N`), pane ID(`%N`)로 고정한다. 백킹 명령은 pane 이 등록한 세션에 그대로 있는 동안 attach 를 반복하고, 방이 사라지면 `CLAUDE_JOB_DIR` 로 자기 행을 `claude rm` 한다.
-- headless 워커 행은 `attach-session -f read-only` 로 연다. 입력이 필요 없고, 읽기 전용 client 는 새는 응답도 버린다.
+- headless 워커 행은 `attach-session -r`(read-only, ignore-size) 로 연다. 입력이 필요 없고, 읽기 전용 client 는 새는 응답도 버린다. `-r` 은 tmux 3.2 이전에도 있다.
+- attach 가 바로 끝나기를 5번 연달아 반복하면 고칠 수 없는 실패로 보고 반복을 멈춘다.
 - `tfx-live start` 로 띄운 Claude 외 세션 행은 입력이 필요하다. 그래서 python3 PTY 중계(`hub/team/agents-row-attach.py`)로 터미널 응답 시퀀스만 걸러 낸다. python3 가 없으면 읽기 전용으로 열고 행 이름에 `[read-only]` 를 붙인다.
 - control.sock exec dispatch, daemon 완료 토큰 대기, 파일 뷰어 관찰 방, 추정 bridge ID 는 이 경로에서 지운다.
 - headless 도 tmux 방이 필요하므로 멀티플렉서가 없으면 시작할 때 설치 안내 오류로 끝낸다.
@@ -49,4 +50,6 @@ ADR-0008 의 기본 노출 결정은 그대로 둔다. 이 ADR 은 노출 방식
 - 부정: `CLAUDE_JOB_DIR` 과 `--exec` 동작은 Claude 업데이트로 바뀔 수 있다. 바뀌면 행이 방보다 오래 남을 수 있고, headless 는 실행 종료 때의 stop+rm 으로 정리된다.
 - 부정: 행 생성은 cwd 가 Claude 에서 trust 된 워크스페이스여야 한다. 실패하면 워커는 그대로 돌고 경고만 남는다.
 - 부정: 멀티플렉서가 없는 비TTY 환경에서 headless 를 돌리던 경로는 없어졌다. 그 경로는 daemon 이 워커를 직접 실행할 때만 성립했다.
+- 부정: 행마다 `claude --bg-pty-host` 와 tmux client 가 하나씩 상주한다. 정리는 행당 `claude rm` 한 번이다(실행 중인 job 도 멈춘다).
+- 부정: headless 워커 여럿이 한 방을 나눠 쓰면 행마다 방 전체가 보이고 활성 pane 은 행끼리 공유한다. client 별 활성 pane(`-f active-pane`)은 읽기 전용 client 에서 `select-pane` 이 막혀 쓰지 못했다.
 - 되돌릴 조건: Claude 가 행에 임의 attach 명령을 등록하는 공식 API 를 내거나, `--exec` 가 사라지면 다시 검토한다.

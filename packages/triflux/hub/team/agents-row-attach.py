@@ -10,6 +10,7 @@ import select
 import signal
 import sys
 import termios
+import time
 import tty
 
 # DA1/DA2/DA3, 창 크기 보고(CSI ... t), DECRQM, kitty 키보드 플래그 응답, DCS, OSC
@@ -57,16 +58,18 @@ def relay(argv, env):
     if saved:
         tty.setraw(stdin)
     pending = b""
+    deadline = 0.0
     try:
         while True:
+            # 자식 출력이 계속 바빠도 보류한 바이트가 HOLD_SEC 를 넘겨 묶이지 않게 마감을 둔다.
+            timeout = max(0.0, deadline - time.monotonic()) if pending else None
             try:
-                ready, _, _ = select.select([stdin, fd], [], [], HOLD_SEC if pending else None)
+                ready, _, _ = select.select([stdin, fd], [], [], timeout)
             except InterruptedError:
                 continue
-            if not ready and pending:
+            if pending and time.monotonic() >= deadline:
                 os.write(fd, pending)
                 pending = b""
-                continue
             if fd in ready:
                 try:
                     data = os.read(fd, 65536)
@@ -76,15 +79,25 @@ def relay(argv, env):
                     break
                 os.write(stdout, data)
             if stdin in ready:
-                data = os.read(stdin, 65536)
+                # 행 PTY 가 닫히면 slave 읽기는 EIO 를 던진다.
+                try:
+                    data = os.read(stdin, 65536)
+                except OSError:
+                    break
                 if not data:
                     break
-                out, pending = strip_replies(pending + data)
+                out, held = strip_replies(pending + data)
+                if held and not pending:
+                    deadline = time.monotonic() + HOLD_SEC
+                pending = held
                 if out:
                     os.write(fd, out)
     finally:
         if saved:
-            termios.tcsetattr(stdin, termios.TCSADRAIN, saved)
+            try:
+                termios.tcsetattr(stdin, termios.TCSADRAIN, saved)
+            except termios.error:
+                pass
     # 행 PTY 가 닫히면 attach client 도 끝낸다. 워커 방은 그대로 남는다.
     os.close(fd)
     _, status = os.waitpid(pid, 0)

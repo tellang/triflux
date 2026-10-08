@@ -156,6 +156,7 @@ Windows Terminal의 독립 탭 열기는 유지한다.
 | 대화형 `tfx multi`(tmux/psmux) | 끔 | 해당 없음 |
 
 - 행을 닫거나 Ctrl+Z로 목록에 돌아가도 워커는 계속 돈다.
+- headless 워커 여럿이 한 방을 나눠 쓰면 행마다 방 전체가 보이고, 활성 pane은 행끼리 공유한다.
 - 방이 사라지면 행이 스스로 지워진다. headless 실행은 끝날 때 자기가 연 행을 직접 지운다.
 - 바깥 터미널의 질의 응답이 방 입력으로 새지 않게, 읽기 전용 attach 또는 `hub/team/agents-row-attach.py` 중계를 쓴다.
 - 행 생성에는 cwd가 Claude에서 trust 된 워크스페이스여야 한다. 실패하면 워커는 그대로 돌고 경고만 남는다.

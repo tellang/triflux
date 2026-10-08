@@ -74,16 +74,28 @@ export function buildAgentsRowCommand({
     "env -u TMUX -u TMUX_PANE",
     tmux,
     `attach-session -t ${q(pane.paneId)}`,
-    ...(readOnly ? ["-f read-only"] : []),
+    // -r 은 read-only,ignore-size 와 같고 tmux 3.2 이전에도 있다.
+    ...(readOnly ? ["-r"] : []),
   ].join(" ");
   // 같은 번호의 다른 방에 붙지 않도록 pane 의 세션 ID 를 매번 대조한다.
   const alive = `[ "$(${tmux} display-message -p -t ${q(pane.paneId)} '#{session_id}' 2>/dev/null)" = ${q(pane.sessionId)} ]`;
   // CLAUDE_JOB_DIR 의 끝이 이 job 의 short id 다. job 이 끝난 뒤 지우도록 nohup 으로 띄운다.
   const removeSelf = `nohup sh -c 'sleep 1; exec "$0" rm "\${CLAUDE_JOB_DIR##*/}"' ${q(claudeBin)} >/dev/null 2>&1 &`;
-  return {
-    readOnly,
-    command: `while ${alive}; do ${attach}; sleep 1; done; ${removeSelf}`,
-  };
+  // attach 가 바로 끝나기를 5번 연달아 반복하면 고칠 수 없는 실패로 보고 멈춘다.
+  const loop = `n=0; while ${alive}; do t=$(date +%s); ${attach}; if [ $(($(date +%s) - t)) -lt 2 ]; then n=$((n + 1)); else n=0; fi; [ "$n" -ge 5 ] && break; sleep 1; done`;
+  return { readOnly, command: `${loop}; ${removeSelf}` };
+}
+
+// macOS 에는 CLT 설치 안내만 띄우는 /usr/bin/python3 스텁이 있어 실제로 한 번 돌려 본다.
+async function usablePython(resolve, run) {
+  const python = resolve("python3");
+  if (!python) return "";
+  try {
+    await run(python, ["-c", "import pty"], { timeout: 5_000 });
+    return python;
+  } catch {
+    return "";
+  }
 }
 
 export function parseBackgroundShort(stdout) {
@@ -109,7 +121,7 @@ export async function openAgentsRow({
   const pane = resolveTmuxPane(target, { tmux });
   const tmuxBin = resolve(getMultiplexerType()) || getMultiplexerType();
   const claudeBin = _deps.claudeBin || resolve("claude") || "claude";
-  const python = interactive ? resolve("python3") : "";
+  const python = interactive ? await usablePython(resolve, run) : "";
   const { command, readOnly } = buildAgentsRowCommand({
     tmuxBin,
     claudeBin,
@@ -131,14 +143,13 @@ export async function openAgentsRow({
   return { short, name: rowName, readOnly, pane };
 }
 
-/** 행을 멈추고 목록에서 지운다. 워커 tmux 방은 건드리지 않는다. */
+/** 행을 지운다. rm 은 실행 중인 job 도 멈춘다. 워커 tmux 방은 건드리지 않는다. */
 export async function closeAgentsRow(short, { _deps = {} } = {}) {
   if (!short) return;
   const run = _deps.execFile || execFileAsync;
-  const claude = _deps.claudeBin || "claude";
-  for (const verb of ["stop", "rm"]) {
-    await run(claude, [verb, short], { timeout: 10_000 }).catch(() => {});
-  }
+  await run(_deps.claudeBin || "claude", ["rm", short], {
+    timeout: 10_000,
+  }).catch(() => {});
 }
 
 /** 실행이 연 행만 정확히 한 번 닫는다. */
@@ -167,6 +178,7 @@ export async function exposeLiveSession(
   { cli, session, name, cwd, remote, ready },
   _deps,
 ) {
+  if (process.env.TFX_AGENTS_ROW === "0") return {};
   if (remote || cli === "claude" || !ready) return {};
   try {
     const row = await openAgentsRow({

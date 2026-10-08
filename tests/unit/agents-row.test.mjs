@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import {
   buildAgentsRowCommand,
   createAgentsRowOwnership,
+  exposeLiveSession,
   openAgentsRow,
   resolveTmuxPane,
 } from "../../hub/team/agents-row.mjs";
@@ -40,14 +41,11 @@ describe("agents row", () => {
   it("헤드리스 행은 읽기 전용 attach, 대화형 행은 응답 필터 중계를 쓴다", () => {
     const ro = buildAgentsRowCommand({ tmuxBin: "/bin/tmux", pane });
     assert.equal(ro.readOnly, true);
-    assert.match(
-      ro.command,
-      /attach-session -t '%12' -f read-only; sleep 1; done/u,
-    );
+    assert.match(ro.command, /attach-session -t '%12' -r; if /u);
     // 방이 사라지거나 같은 pane 번호가 다른 세션 것이 되면 반복을 멈추고 행을 지운다.
     assert.match(
       ro.command,
-      /^while \[ "\$\(.*'%12' '#\{session_id\}' 2>\/dev\/null\)" = '\$3' \]/u,
+      /^n=0; while \[ "\$\(.*'%12' '#\{session_id\}' 2>\/dev\/null\)" = '\$3' \]/u,
     );
     assert.match(ro.command, /rm "\$\{CLAUDE_JOB_DIR##\*\/\}"/u);
 
@@ -59,19 +57,23 @@ describe("agents row", () => {
     });
     assert.equal(relay.readOnly, false);
     assert.match(relay.command, /agents-row-attach\.py' -- env -u TMUX/u);
-    assert.doesNotMatch(relay.command, /read-only/u);
+    assert.doesNotMatch(relay.command, / -r;/u);
   });
 
-  it("python3 가 없으면 읽기 전용으로 열고 행 이름에 표시한다", async () => {
+  it("python3 가 실행되지 않으면(macOS 스텁 등) 읽기 전용으로 열고 행 이름에 표시한다", async () => {
     const calls = [];
+    const claude = fakeClaude(calls);
     const row = await openAgentsRow({
       name: "10.8 codex",
       target: "live:0.0",
       interactive: true,
       _deps: {
         tmux: display,
-        execFile: fakeClaude(calls),
-        resolveExecutable: (name) => (name === "python3" ? "" : `/bin/${name}`),
+        execFile: async (bin, args, opts) => {
+          if (bin === "/bin/python3") throw new Error("xcode-select stub");
+          return claude(bin, args, opts);
+        },
+        resolveExecutable: (name) => `/bin/${name}`,
       },
     });
     assert.deepEqual(row.short, "527b4ae1");
@@ -83,6 +85,34 @@ describe("agents row", () => {
       "--name",
       "10.8 codex [read-only]",
     ]);
+  });
+
+  it("tfx-live 노출은 Claude, 원격, 끈 경우를 건너뛰고 실패는 경고로만 돌려준다", async () => {
+    const opened = [];
+    const _deps = {
+      tmux: () => {
+        opened.push("tmux");
+        return "bad";
+      },
+    };
+    const base = { cli: "codex", session: "s", ready: true };
+    assert.deepEqual(
+      await exposeLiveSession({ ...base, cli: "claude" }, _deps),
+      {},
+    );
+    assert.deepEqual(
+      await exposeLiveSession({ ...base, remote: "m2" }, _deps),
+      {},
+    );
+    process.env.TFX_AGENTS_ROW = "0";
+    try {
+      assert.deepEqual(await exposeLiveSession(base, _deps), {});
+    } finally {
+      delete process.env.TFX_AGENTS_ROW;
+    }
+    assert.deepEqual(opened, []);
+    const failed = await exposeLiveSession(base, _deps);
+    assert.match(failed.agentsRowWarning, /tmux pane/u);
   });
 
   it("소유한 행만 한 번 닫는다", async () => {
