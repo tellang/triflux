@@ -53,3 +53,14 @@ $(touch '${injectedFile}') \`touch '${injectedFile}'\``;
 test("unsupported headless backend fails explicitly", () => {
   assert.throws(() => getBackend("unknown"), /지원하지 않는 CLI/);
 });
+
+test("Windows 는 프롬프트 파일을 리터럴 경로, UTF-8 로 읽어 파이프한다", () => {
+  const command = getBackend("claude").buildArgs("p", "C:/r.txt", {
+    isWindows: true,
+    promptFile: "C:/t[1]/prompt.txt",
+  });
+  assert.match(
+    command,
+    /^\$OutputEncoding = .*Get-Content -LiteralPath 'C:\/t\[1\]\/prompt\.txt' -Raw -Encoding UTF8 \| claude --print /,
+  );
+});
