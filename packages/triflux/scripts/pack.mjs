@@ -35,6 +35,8 @@ const CORE_DIRS = [
   // intervention 의 pane 채널이 동적 import 한다
   "hub/team/psmux.mjs",
   "hub/team/pane.mjs",
+  // pane 이 CLI 이름을 실행 파일로 풀 때 읽는다
+  "hub/team/agent-map.json",
   "hub/team/session.mjs",
   "hub/team/nativeProxy.mjs",
   "hub/team/retry-state-machine.mjs",

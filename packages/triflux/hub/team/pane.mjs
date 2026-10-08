@@ -1,6 +1,7 @@
 // hub/team/pane.mjs — pane별 CLI 실행 + stdin 주입
 // 의존성: child_process, fs, os, path (Node.js 내장)만 사용
 import { unlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { privateTmpDir } from "../lib/private-tmp.mjs";
 import { psmuxExec } from "./psmux.mjs";
@@ -42,15 +43,20 @@ function muxExec(args, opts = {}) {
   });
 }
 
+const AGENT_TO_CLI = createRequire(import.meta.url)("./agent-map.json");
+
 /**
- * CLI 에이전트 시작 커맨드 생성
- * @param {'codex'|'antigravity'|'claude'} cli
+ * CLI 에이전트 시작 커맨드 생성. 역할명과 별칭은 agent-map 으로 CLI 를 고른다.
+ * @param {string} cli — CLI 이름, 별칭(agy) 또는 역할명
  * @returns {string} 실행할 셸 커맨드
  */
 export function buildCliCommand(cli) {
-  switch (cli) {
+  switch (AGENT_TO_CLI[cli] ?? cli) {
     case "codex":
       return "codex --dangerously-bypass-approvals-and-sandbox";
+    case "antigravity":
+      // 실행 파일은 agy 다. antigravity 는 셸 별칭이라 비대화형 셸에 없다.
+      return "agy";
     case "claude":
       // interactive 모드
       return "claude";
@@ -290,7 +296,8 @@ export function injectPrompt(
     // tmux load-buffer → paste-buffer → (정착 지연 + 제출 확인) Enter
     waitForComposerReady(target);
     muxExec(["load-buffer", toMuxPath(tmpFile)]);
-    muxExec(["paste-buffer", "-t", target]);
+    // -p 가 없으면 줄바꿈이 CR(Enter)로 들어가 여러 줄 지시문이 줄마다 제출된다.
+    muxExec(["paste-buffer", "-p", "-t", target]);
     confirmSubmit(target, prompt, cli, () =>
       muxExec(["send-keys", "-t", target, "Enter"]),
     );

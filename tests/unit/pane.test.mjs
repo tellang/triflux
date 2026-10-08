@@ -11,8 +11,11 @@ describe("pane.mjs", () => {
     assert.doesNotMatch(command, /dangerously-bypass-hook-trust/u);
   });
 
-  it("buildCliCommand 은 모르는 CLI 이름을 그대로 돌려준다", () => {
+  it("buildCliCommand 은 antigravity 와 역할명을 실행 파일로 바꾸고 모르는 이름은 그대로 둔다", () => {
+    assert.equal(buildCliCommand("antigravity"), "agy");
     assert.equal(buildCliCommand("agy"), "agy");
+    assert.equal(buildCliCommand("designer"), "agy");
+    assert.equal(buildCliCommand("my-cli"), "my-cli");
   });
 });
 
