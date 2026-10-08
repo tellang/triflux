@@ -31,7 +31,6 @@ const MIRROR_TOPS = [
   "hud",
   "scripts",
   "skills",
-  "tui",
 ];
 const CORE_FILE_MIRRORS = [
   {

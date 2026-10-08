@@ -5,7 +5,7 @@
 // on the socket — it speaks WebSocket (RFC 6455) after a standard HTTP/1.1
 // Upgrade handshake, one JSON-RPC message per text frame. Confirmed live against
 // codex-cli 0.135.0 (see experiments/native-bridge-feasibility/
-// codex-app-server-uds-probe.mjs). This is the UDS sibling of the stdio
+// codex-app-server-uds-smoke.mjs). This is the UDS sibling of the stdio
 // `JsonRpcStdioClient`: same public surface (request/notify/onNotification/
 // close/isOpen), different framing.
 //

@@ -40,23 +40,14 @@ describe("tfx --help 출력", () => {
     assert.doesNotMatch(out, /npm install -g|업데이트 완료|git pull/);
   });
 
-  for (const command of [
-    "setup",
-    "doctor",
-    "handoff",
-    "schema",
-    "synapse",
-    "multi",
-    "notion-read",
-    "why",
-  ]) {
+  for (const command of ["setup", "doctor", "synapse", "multi", "why"]) {
     it(`stale: tfx ${command} --help 는 side-effect 없이 help 출력`, () => {
       const raw = execSync(`node "${binPath}" ${command} --help`, {
         encoding: "utf8",
       });
       const out = stripAnsi(raw);
       assert.match(out, new RegExp(`tfx ${command}`));
-      assert.match(out, /Usage|tfx codex-team/);
+      assert.match(out, /Usage/);
     });
   }
 });

@@ -56,9 +56,9 @@ describe("lane2-d routing contract: Codex agent policy SSOT", () => {
     );
     const topLevel = resolveAgentRoute("deep-executor", map, "ultra");
     const nested = resolveAgentRoute("deep-executor", map, "ultra", true);
-    assert.notEqual(nested[8], topLevel[8]);
+    assert.notEqual(nested[6], topLevel[6]);
     assert.equal(
-      nested[8],
+      nested[6],
       resolveCodexAgentProfile("deep-executor", {
         profileOverride: "ultra",
         nested: true,

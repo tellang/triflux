@@ -25,7 +25,7 @@ function extractFunction(scriptPath, funcName) {
 const FUNC = extractFunction(ROUTE_SCRIPT, "estimate_expected_duration_sec");
 
 function durationScript(agent, profile, prompt) {
-  const expected = resolveAgentRoute(agent, { [agent]: "codex" })[11];
+  const expected = resolveAgentRoute(agent, { [agent]: "codex" })[8];
   return `ROLE_EXPECTED_DURATION=${expected}\n${FUNC}\nestimate_expected_duration_sec "${profile}" "${prompt}"`;
 }
 

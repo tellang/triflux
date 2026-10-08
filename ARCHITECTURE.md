@@ -21,7 +21,7 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 | **root** | 개발 SSOT: 모든 런타임 파일의 정본 | 해당 없음 |
 | `packages/core` (`@triflux/core`) | 공용 라이브러리 (`hub/`, `hud/`, `hooks/`, `scripts/` helper) | root와 byte-identical `cp` |
 | `packages/remote` (`@triflux/remote`) | 원격 실행용 서브셋 (`hub/`, `cto/`, `scripts/`) | root 서브셋 + `@triflux/core/...` import 경로 변환 |
-| `packages/triflux` (`triflux` npm) | 사용자 대상 CLI/런타임 (`bin/`, `config/`, `hooks/`, `hub/`, `hud/`, `cto/`, `scripts/`, `skills/`, `tui/`, `docs/`) | npm `files` 기준 byte-identical 미러 |
+| `packages/triflux` (`triflux` npm) | 사용자 대상 CLI/런타임 (`bin/`, `config/`, `hooks/`, `hub/`, `hud/`, `cto/`, `scripts/`, `skills/`, `docs/`) | npm `files` 기준 byte-identical 미러 |
 
 3-layer 미러의 상세 규칙(레이어별 cp/Edit 정책, tests 제외, binary 폭증 방지,
 검증 체크리스트)은 [`.claude/rules/tfx-mirror-policy.md`](.claude/rules/tfx-mirror-policy.md)를
@@ -42,7 +42,6 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 | `cto/` | CTO 콘솔: 멀티세션 수집·요약·위생(hygiene) | `collect.mjs`, `brief.mjs`, `status.mjs`, `hygiene.mjs` |
 | `scripts/` | 라우팅 스크립트 + 릴리즈 게이트 | `tfx-route.sh`(라우팅 엔진), `scripts/release/`(릴리즈 자동화), `scripts/lib/`(공용 helper) |
 | `skills/` | Claude Code 스킬 정의 (`SKILL.md`) | `tfx-auto`, `tfx-remote`, `tfx-doctor` 등 |
-| `tui/` | 터미널 UI와 상태 모니터 | `core.mjs`, `monitor.mjs`, `doctor.mjs`, `setup.mjs` |
 | `config/` | MCP 서버 설정 | `mcp-registry.json` |
 | `adapters/` | CLI 어댑터 지원 파일 | `codex/` |
 | `experiments/` | 실험 자료 | `native-bridge-feasibility/` |

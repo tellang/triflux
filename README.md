@@ -138,15 +138,12 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 | `tfx synapse` | Session registry and leases |
 | `tfx hub` | Local Hub: `start`, `stop`, `status`, `ensure` |
 | `tfx mcp` | Managed MCP registry: `list`, `sync`, `add`, `remove` |
-| `tfx handoff` | Serialize the current context for another session or host |
 | `tfx cto` | Repo-local authority console: `collect`, `status`, `hygiene` (dry-run) |
-| `tfx codex-team` | Codex-led team mode |
 | `bash ~/.claude/scripts/tfx-route.sh code-reviewer "<instruction>"` | Send review to Codex (`codex exec review` via policy) |
-| `tfx stealth-fetch <url>` | Fetch one URL through cloakbrowser (JSON on stdout) |
-| `tfx notion-read`, `tfx why`, `tfx schema`, `tfx list`, `tfx monitor`, `tfx update`, `tfx version` | Notion → Markdown, commit intent trailers, CLI schemas, installed skills, TUI monitor, update, version |
+| `tfx why`, `tfx list`, `tfx update`, `tfx version` | Commit intent trailers, installed skills, update, version |
 | `tfx-live` | Live session bridge (same as the `/tfx-live` skill) |
 
-`tfx <command> --help` and `tfx schema <command>` print the exact arguments.
+`tfx <command> --help` prints the exact arguments.
 
 ## Runtime features
 

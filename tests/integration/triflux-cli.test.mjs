@@ -52,7 +52,7 @@ function parseStdoutJson(result) {
   return JSON.parse(match[0]);
 }
 
-describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
+describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
   it("CLI startup should sweep stale triflux-cli temp dirs without deleting the active HOME dir", () => {
     const activeHomeDir = createHomeDir();
     const staleHomeDir = createHomeDir();
@@ -89,22 +89,6 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.ok(payload.node);
     assert.equal(Object.hasOwn(payload, "tfx_route"), true);
     assert.equal(Object.hasOwn(payload, "hud"), true);
-  });
-
-  it("schema는 CLI 명세와 hub tool schema를 노출해야 한다", () => {
-    const bundle = parseStdoutJson(runCli(["schema"]));
-    assert.ok(bundle.commands.doctor);
-    for (const command of ["update", "codex-team", "notion-read", "monitor"]) {
-      assert.ok(bundle.commands[command], `schema command missing: ${command}`);
-    }
-    // CTO 트레이는 제거됐다(ADR-0022).
-    assert.equal(bundle.commands.tray, undefined);
-    assert.ok(Array.isArray(bundle.hub_tools["x-triflux-mcp-tools"]));
-
-    const delegate = parseStdoutJson(runCli(["schema", "delegate"]));
-    assert.equal(delegate.tool, "delegate");
-    assert.ok(delegate.inputSchema);
-    assert.ok(delegate.outputSchema);
   });
 
   it("setup --dry-run은 JSON 액션 목록을 반환해야 한다", () => {
@@ -212,7 +196,6 @@ describe("triflux CLI JSON and schema surface", { timeout: 30000 }, () => {
     assert.equal(readFileSync(settingsPath, "utf8"), original);
     assert.ok(payload.checks.some((check) => check.name === "tfx-route.sh"));
     assert.ok(payload.checks.some((check) => check.name === "codex"));
-    assert.ok(payload.checks.some((check) => check.name === "warmup-cache"));
     rmSync(homeDir, { recursive: true, force: true });
   });
 

@@ -8,7 +8,7 @@ describe("state-store — Issue #116-B auto-discover", () => {
   let tmpDir;
   const savedEnv = {};
 
-  const ENV_KEYS = ["TFX_HUB_PID_DIR", "CLAUDE_SESSION_ID", "TFX_TEAM_PROFILE"];
+  const ENV_KEYS = ["TFX_HUB_PID_DIR", "CLAUDE_SESSION_ID"];
 
   beforeEach(() => {
     tmpDir = join(
@@ -90,17 +90,6 @@ describe("state-store — Issue #116-B auto-discover", () => {
     );
     const mod = await freshImport();
     assert.equal(mod.loadTeamState("nonexistent"), null);
-  });
-
-  it("skips auto-discovered files with a mismatched profile", async () => {
-    delete process.env.CLAUDE_SESSION_ID;
-    process.env.TFX_TEAM_PROFILE = "team";
-    writeFileSync(
-      join(tmpDir, "team-state-codex.json"),
-      JSON.stringify({ sessionName: "codex", profile: "codex-team" }),
-    );
-    const mod = await freshImport();
-    assert.equal(mod.loadTeamState(), null);
   });
 
   it("falls back to legacy team-state.json before auto-discovering", async () => {

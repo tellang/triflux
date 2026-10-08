@@ -6,7 +6,7 @@ import {
 } from "../../session.mjs";
 import { AMBER, BOLD, DIM, RESET } from "../../shared.mjs";
 import { isTeamAlive } from "../services/runtime-mode.mjs";
-import { loadTeamState, TEAM_PROFILE } from "../services/state-store.mjs";
+import { loadTeamState } from "../services/state-store.mjs";
 
 export async function teamDebug(args = []) {
   const state = loadTeamState();
@@ -33,7 +33,6 @@ export async function teamDebug(args = []) {
 
   console.log(`\n  ${BOLD}state${RESET}`);
   console.log(`    session:   ${state.sessionName}`);
-  console.log(`    profile:   ${state.profile || TEAM_PROFILE}`);
   console.log(`    mode:      ${state.teammateMode || "tmux"}`);
   console.log(`    lead:      ${state.lead}`);
   console.log(`    agents:    ${(state.agents || []).join(", ")}`);

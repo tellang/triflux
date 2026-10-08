@@ -234,8 +234,6 @@ function logExecution(params) {
       agent: params.agent,
       cli: params.cli,
       effort: params.effort,
-      run_mode: params.run_mode,
-      opus_oversight: params.opus,
       status: params.status,
       exit_code: params.exit_code,
       elapsed_sec: params.elapsed,
@@ -437,8 +435,6 @@ function main() {
   const agent = a.agent || "unknown";
   const cliType = a.cli || "codex";
   const effort = a.effort || "high";
-  const runMode = a.run_mode || "bg";
-  const opus = a.opus || "false";
   const exitCode = parseInt(a.exit_code || "0", 10);
   const elapsed = parseInt(a.elapsed || "0", 10);
   const timeout = parseInt(a.timeout || "300", 10);
@@ -486,8 +482,6 @@ function main() {
     agent,
     cli: cliType,
     effort,
-    run_mode: runMode,
-    opus,
     status,
     exit_code: exitCode,
     elapsed,
@@ -512,8 +506,6 @@ function main() {
   console.log(`agent: ${agent}`);
   console.log(`cli: ${cliType} (${cliCmd})`);
   console.log(`effort: ${effort}`);
-  console.log(`run_mode: ${runMode}`);
-  console.log(`opus_oversight: ${opus}`);
   console.log(`exit_code: ${exitCode}`);
   console.log(`timeout: ${timeout}s`);
   console.log(`elapsed: ${elapsed}s`);

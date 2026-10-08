@@ -21,7 +21,6 @@ import {
 import { homedir } from "os";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
-import { loadDelegatorSchemaBundle } from "../hub/delegator/tool-definitions.mjs";
 import { inspectClaudeRuntimeFlags } from "../hub/diagnostics/claude-runtime-flags.mjs";
 import {
   checkNetworkAvailability,
@@ -41,7 +40,6 @@ import {
   inspectMacTimeoutDependency,
 } from "../scripts/lib/doctor-env-checks.mjs";
 import { ensureGeminiProfiles } from "../scripts/lib/gemini-profiles.mjs";
-import { serializeHandoff } from "../scripts/lib/handoff.mjs";
 import { cleanupLegacyHooks } from "../scripts/lib/legacy-hook-cleanup.mjs";
 import { cleanupLegacyMcp } from "../scripts/lib/legacy-mcp-cleanup.mjs";
 import {
@@ -60,7 +58,6 @@ import {
   formatPsmuxUpdateGuidance,
   probePsmuxSupport,
 } from "../scripts/lib/psmux-info.mjs";
-import { main as stealthFetchMain } from "../scripts/lib/stealth-fetch.mjs";
 import {
   applyStatusLine,
   buildWindowsHubAutostartCommand,
@@ -146,11 +143,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       },
     ],
   },
-  "stealth-fetch": {
-    usage: "tfx stealth-fetch <url>",
-    description:
-      "cloakbrowser 기반 단일 URL fetch (http/https only, JSON stdout)",
-  },
   doctor: {
     usage:
       "tfx doctor [--fix] [--reset] [--audit] [--diagnose] [--purge-logs] [--cleanup-stale-hubs --dry-run|--apply] [--cleanup-stale-tmux --prefix tfx-* --age-min N --dry-run|--apply] [--json]",
@@ -235,38 +227,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       },
     ],
   },
-  handoff: {
-    usage:
-      "tfx handoff [--target local|remote] [--decision <text>] [--decision-file <path>] [--output <path>] [--json]",
-    description: "현재 작업 컨텍스트를 세션 핸드오프 프롬프트로 직렬화",
-    options: [
-      {
-        name: "--target",
-        type: "string",
-        description: "주입 대상 (local|remote, 기본값 remote)",
-      },
-      {
-        name: "--decision",
-        type: "string",
-        description: "핸드오프 결정사항 (반복 지정 가능)",
-      },
-      {
-        name: "--decision-file",
-        type: "string",
-        description: "결정사항 파일 (라인/불릿 단위)",
-      },
-      {
-        name: "--output",
-        type: "string",
-        description: "생성한 핸드오프 프롬프트 저장 경로",
-      },
-      {
-        name: "--json",
-        type: "boolean",
-        description: "핸드오프 결과를 JSON으로 출력",
-      },
-    ],
-  },
   list: {
     usage: "tfx list [--json]",
     description: "패키지 스킬과 사용자 스킬 목록 표시",
@@ -275,17 +235,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         name: "--json",
         type: "boolean",
         description: "스킬 목록을 JSON으로 출력",
-      },
-    ],
-  },
-  schema: {
-    usage: "tfx schema [command-or-tool]",
-    description: "CLI 커맨드 파라미터와 Hub delegator schema 번들 출력",
-    options: [
-      {
-        name: "command-or-tool",
-        type: "string",
-        description: "예: doctor, setup, delegate, delegate-reply, status",
       },
     ],
   },
@@ -455,47 +404,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         description: "업데이트를 실행하지 않고 도움말만 출력",
       },
     ],
-  },
-  "codex-team": {
-    usage:
-      "tfx codex-team [status|debug|send|attach|stop|<task>] [--layout 1xN|Nx1] [--json]",
-    description:
-      "Codex lead + Codex workers 기본값으로 tfx multi 팀 모드를 시작/제어",
-    subcommands: {
-      status: "현재 Codex team 상태 확인",
-      debug: "최근 로그/상태 진단 출력",
-      send: "워커에게 메시지 전송: tfx codex-team send <N> <msg>",
-      attach: "팀 pane/session attach",
-      stop: "팀 세션 정리",
-    },
-    options: [
-      {
-        name: "--layout <shape>",
-        type: "string",
-        description: "기본 1xN. Nx1 등 team layout 전달",
-      },
-      {
-        name: "--json",
-        type: "boolean",
-        description: "지원 subcommand의 출력을 JSON으로 전환",
-      },
-    ],
-  },
-  "notion-read": {
-    usage: "tfx notion-read <notion-url-or-page-id> [options]",
-    description: "Notion page/database를 markdown/JSON으로 읽기 (nr alias)",
-    aliases: ["nr"],
-    options: [
-      {
-        name: "--json",
-        type: "boolean",
-        description: "가능한 경우 구조화된 JSON 출력",
-      },
-    ],
-  },
-  monitor: {
-    usage: "tfx monitor",
-    description: "터미널 TUI 모니터 실행",
   },
 });
 
@@ -2429,33 +2337,6 @@ async function cmdDoctor(options = {}) {
           warn("Codex 레이트 리밋 캐시 재생성 실패");
         }
       }
-      try {
-        const { buildAll } = await import("../scripts/cache-warmup.mjs");
-        const warmupSummary = buildAll({ cwd: process.cwd(), force: true });
-        if (warmupSummary.ok) {
-          report.actions.push({
-            type: "rebuild",
-            name: "warmup-caches",
-            status: "ok",
-            built: warmupSummary.built,
-          });
-          ok("Phase 1 웜업 캐시 재생성됨");
-        } else {
-          report.actions.push({
-            type: "rebuild",
-            name: "warmup-caches",
-            status: "failed",
-          });
-          warn("Phase 1 웜업 캐시 재생성 실패");
-        }
-      } catch {
-        report.actions.push({
-          type: "rebuild",
-          name: "warmup-caches",
-          status: "failed",
-        });
-        warn("Phase 1 웜업 캐시 재생성 실패");
-      }
       console.log(`\n  ${LINE}`);
       console.log(
         `  ${GREEN_BRIGHT}${BOLD}✓ 캐시 초기화 + 재생성 완료${RESET}\n`,
@@ -2577,19 +2458,6 @@ async function cmdDoctor(options = {}) {
         }
       }
       if (cleaned === 0) info("에러 캐시 없음");
-      try {
-        const { fixCaches } = await import("../scripts/cache-doctor.mjs");
-        const cacheRepair = await fixCaches({ cwd: process.cwd() });
-        if (cacheRepair.fixed.length > 0 && cacheRepair.ok) {
-          ok(`웜업 캐시 자동 복구: ${cacheRepair.fixed.join(", ")}`);
-        } else if (cacheRepair.fixed.length > 0) {
-          warn(`웜업 캐시 자동 복구 실패: ${cacheRepair.fixed.join(", ")}`);
-        } else {
-          info("웜업 캐시: 이미 정상 상태");
-        }
-      } catch {
-        warn("웜업 캐시 자동 복구 실패");
-      }
       const registryStateForFix = inspectRegistry();
       if (registryStateForFix.valid) {
         try {
@@ -3170,45 +3038,6 @@ async function cmdDoctor(options = {}) {
       });
       warn("캐시 없음 — 다음 세션 시작 시 자동 생성");
       info(`수동: node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}`);
-    }
-
-    // Phase 1 웜업 캐시
-    section("Warmup Cache");
-    try {
-      const { verifyCaches } = await import("../scripts/cache-doctor.mjs");
-      const cacheVerification = verifyCaches({ cwd: process.cwd() });
-      const brokenCaches = cacheVerification.results.filter(
-        (result) => result.status !== "ok",
-      );
-
-      addDoctorCheck(report, {
-        name: "warmup-cache",
-        status: cacheVerification.ok ? "ok" : "issues",
-        files: cacheVerification.results.map((result) => ({
-          target: result.target,
-          status: result.status,
-          path: result.file,
-        })),
-        ...(cacheVerification.ok ? {} : { fix: "tfx doctor --fix" }),
-      });
-
-      if (brokenCaches.length === 0) {
-        ok(`${cacheVerification.results.length}개 웜업 캐시 정상`);
-      } else {
-        warn(`${brokenCaches.length}개 웜업 캐시 이슈 발견`);
-        for (const entry of brokenCaches) {
-          info(`${entry.target}: ${entry.status}`);
-        }
-        if (!fix) issues += brokenCaches.length;
-      }
-    } catch (error) {
-      addDoctorCheck(report, {
-        name: "warmup-cache",
-        status: "invalid",
-        fix: "node scripts/cache-doctor.mjs --fix",
-      });
-      warn(`웜업 캐시 검사 실패: ${error.message}`);
-      issues++;
     }
 
     // CLI 이슈 트래커
@@ -4381,188 +4210,6 @@ function cmdVersion(options = {}) {
   console.log("");
 }
 
-function cmdHandoff(args = [], options = {}) {
-  if (args.some(isHelpArg)) {
-    printCommandHelp("handoff");
-    return;
-  }
-
-  const { json = false } = options;
-  const parsed = {
-    target: "remote",
-    decisions: [],
-    decisionFile: null,
-    output: null,
-    cwd: process.cwd(),
-  };
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    const next = args[index + 1];
-
-    if (arg === "--target") {
-      if (!next || next.startsWith("-")) {
-        throw createCliError("--target 값이 필요합니다 (local|remote)", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx handoff --target remote",
-        });
-      }
-      if (!["local", "remote"].includes(next)) {
-        throw createCliError(`지원하지 않는 --target 값: ${next}`, {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx handoff --target local|remote",
-        });
-      }
-      parsed.target = next;
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--decision") {
-      if (!next || next.startsWith("-")) {
-        throw createCliError("--decision 값이 필요합니다", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: 'tfx handoff --decision "결정사항"',
-        });
-      }
-      parsed.decisions.push(next);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--decision-file") {
-      if (!next || next.startsWith("-")) {
-        throw createCliError("--decision-file 경로가 필요합니다", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx handoff --decision-file .omx/notepad.md",
-        });
-      }
-      parsed.decisionFile = resolve(next);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--output" || arg === "--out") {
-      if (!next || next.startsWith("-")) {
-        throw createCliError(`${arg} 경로가 필요합니다`, {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx handoff --output .omx/handoff.md",
-        });
-      }
-      parsed.output = resolve(next);
-      index += 1;
-      continue;
-    }
-
-    if (arg === "--cwd") {
-      if (!next || next.startsWith("-")) {
-        throw createCliError("--cwd 경로가 필요합니다", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx handoff --cwd <project-path>",
-        });
-      }
-      parsed.cwd = resolve(next);
-      index += 1;
-      continue;
-    }
-
-    throw createCliError(`알 수 없는 handoff 옵션: ${arg}`, {
-      exitCode: EXIT_ARG_ERROR,
-      reason: "argError",
-      fix: "tfx handoff --target remote --output .omx/handoff.md",
-    });
-  }
-
-  const result = serializeHandoff({
-    target: parsed.target,
-    decisions: parsed.decisions,
-    decisionFile: parsed.decisionFile,
-    cwd: parsed.cwd,
-  });
-
-  if (parsed.output) {
-    const outputDir = dirname(parsed.output);
-    if (!existsSync(outputDir)) mkdirSync(outputDir, { recursive: true });
-    writeFileSync(parsed.output, `${result.prompt}\n`, "utf8");
-  }
-
-  if (json) {
-    printJson({
-      handoff: {
-        ...result,
-        ...(parsed.output ? { output: parsed.output } : {}),
-      },
-    });
-    return;
-  }
-
-  console.log(result.prompt);
-  if (parsed.output) {
-    console.log(`\n${DIM}saved:${RESET} ${parsed.output}`);
-  }
-}
-
-function cmdSchema(args = []) {
-  const bundle = loadDelegatorSchemaBundle();
-  const selector = String(args[0] || "").trim();
-  const toolEntry = Array.isArray(bundle["x-triflux-mcp-tools"])
-    ? bundle["x-triflux-mcp-tools"].find((tool) => tool.name === selector)
-    : null;
-
-  if (isHelpArg(selector)) {
-    printCommandHelp("schema");
-    return;
-  }
-
-  if (!selector) {
-    printJson({
-      $schema: bundle.$schema,
-      title: "Triflux CLI Schema Bundle",
-      global_options: [
-        {
-          name: "--json",
-          type: "boolean",
-          description: "지원 커맨드의 출력을 JSON으로 전환",
-        },
-      ],
-      commands: CLI_COMMAND_SCHEMAS,
-      hub_tools: bundle,
-    });
-    return;
-  }
-
-  if (CLI_COMMAND_SCHEMAS[selector]) {
-    printJson({
-      command: selector,
-      ...CLI_COMMAND_SCHEMAS[selector],
-    });
-    return;
-  }
-
-  if (toolEntry) {
-    printJson({
-      tool: toolEntry.name,
-      description: toolEntry.description,
-      pipeAction: toolEntry.pipeAction,
-      inputSchema: bundle.$defs?.[toolEntry.inputSchemaDef] || null,
-      outputSchema: bundle.$defs?.[toolEntry.outputSchemaDef] || null,
-    });
-    return;
-  }
-
-  throw createCliError(`알 수 없는 schema 대상: ${selector}`, {
-    exitCode: EXIT_ARG_ERROR,
-    reason: "argError",
-    fix: "tfx schema 또는 tfx schema <command>를 실행해 사용 가능한 대상을 확인하세요.",
-  });
-}
-
 function cmdMcp(args = [], options = {}) {
   const { json = false } = options;
   const sub = String(args[0] || "list")
@@ -4797,51 +4444,11 @@ function cmdMcp(args = [], options = {}) {
   }
 }
 
-function checkForUpdate() {
-  const cacheFile = join(CLAUDE_DIR, "cache", "triflux-update-check.json");
-  const cacheDir = dirname(cacheFile);
-
-  // 캐시 확인 (1시간 이내면 캐시 사용)
-  try {
-    if (existsSync(cacheFile)) {
-      const cache = JSON.parse(readFileSync(cacheFile, "utf8"));
-      if (Date.now() - cache.timestamp < 3600000) {
-        return cache.latest !== PKG.version ? cache.latest : null;
-      }
-    }
-  } catch {}
-
-  // npm registry 조회
-  try {
-    const result = execSync("npm view triflux version", {
-      encoding: "utf8",
-      timeout: 5000,
-      stdio: ["pipe", "pipe", "ignore"],
-      windowsHide: true,
-    }).trim();
-
-    if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
-    writeFileSync(
-      cacheFile,
-      JSON.stringify({ latest: result, timestamp: Date.now() }),
-    );
-
-    return result !== PKG.version ? result : null;
-  } catch {
-    return null;
-  }
-}
-
 function cmdHelp() {
-  const latestVer = checkForUpdate();
-  const updateNotice = latestVer
-    ? `\n  ${YELLOW}${BOLD}↑ v${latestVer} 사용 가능${RESET}  ${GRAY}npm update -g triflux${RESET}\n`
-    : "";
-
   console.log(`
   ${AMBER}${BOLD}⬡ triflux${RESET} ${DIM}v${PKG.version}${RESET}
   ${GRAY}CLI-first multi-model orchestrator for Claude Code${RESET}
-${updateNotice}
+
   ${LINE}
 
   ${BOLD}Commands${RESET}
@@ -4853,19 +4460,14 @@ ${updateNotice}
     ${DIM}  --fix${RESET}        ${GRAY}진단 + 자동 수정${RESET}
     ${DIM}  --reset${RESET}      ${GRAY}캐시 전체 초기화${RESET}
     ${DIM}  --json${RESET}       ${GRAY}구조화된 진단 결과 JSON 출력${RESET}
-    ${WHITE_BRIGHT}tfx stealth-fetch${RESET} ${GRAY}cloakbrowser 기반 URL fetch (JSON stdout)${RESET}
     ${WHITE_BRIGHT}tfx mcp${RESET}        ${GRAY}MCP registry 관리 (list/sync/add/remove)${RESET}
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
     ${DIM}  --dev / dev${RESET}   ${GRAY}dev 태그로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
-    ${WHITE_BRIGHT}tfx handoff${RESET}    ${GRAY}현재 컨텍스트를 원격/로컬 핸드오프 프롬프트로 생성${RESET}
-    ${WHITE_BRIGHT}tfx schema${RESET}     ${GRAY}CLI/Hub schema JSON 출력${RESET}
     ${WHITE_BRIGHT}tfx hub${RESET}        ${GRAY}MCP 메시지 버스 관리 (start/stop/status)${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}       ${GRAY}멀티-CLI 팀 모드 (tmux + Hub)${RESET}
     ${WHITE_BRIGHT}tfx synapse${RESET}     ${GRAY}스웜 세션 registry 조회 / lease 관리${RESET}
     ${WHITE_BRIGHT}tfx why${RESET}         ${GRAY}경로의 마지막 커밋 X-Intent 트레일러 추출${RESET}
-    ${WHITE_BRIGHT}tfx codex-team${RESET} ${GRAY}Codex 전용 팀 모드 (기본 lead/agents: codex)${RESET}
-    ${WHITE_BRIGHT}tfx notion-read${RESET} ${GRAY}Notion 페이지 → 마크다운 (Codex/Gemini MCP)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
 
   ${BOLD}Skills${RESET} ${GRAY}(Claude Code 슬래시 커맨드)${RESET}
@@ -4877,72 +4479,6 @@ ${updateNotice}
   ${LINE}
   ${GRAY}github.com/tellang/triflux${RESET}
 `);
-}
-
-async function cmdCodexTeam(args = []) {
-  const sub = String(args[0] || "").toLowerCase();
-  const passthrough = new Set([
-    "status",
-    "attach",
-    "stop",
-    "kill",
-    "send",
-    "list",
-    "help",
-    "--help",
-    "-h",
-    "tasks",
-    "task",
-    "focus",
-    "interrupt",
-    "control",
-    "debug",
-  ]);
-
-  if (sub === "help" || sub === "--help" || sub === "-h") {
-    console.log(`
-  ${AMBER}${BOLD}⬡ tfx codex-team${RESET}
-
-    ${WHITE_BRIGHT}tfx codex-team "작업"${RESET}         ${GRAY}Codex 리드 + 워커 2개로 팀 시작${RESET}
-    ${WHITE_BRIGHT}tfx codex-team --layout 1xN "작업"${RESET}   ${GRAY}(세로 분할 컬럼)${RESET}
-    ${WHITE_BRIGHT}tfx codex-team --layout Nx1 "작업"${RESET}   ${GRAY}(가로 분할 스택)${RESET}
-    ${WHITE_BRIGHT}tfx codex-team status${RESET}
-    ${WHITE_BRIGHT}tfx codex-team debug --lines 30${RESET}
-    ${WHITE_BRIGHT}tfx codex-team send N "msg"${RESET}
-
-  ${DIM}내부적으로 tfx multi을 호출하며, 시작 시 --lead codex --agents codex,codex를 기본 주입합니다.${RESET}
-`);
-    return;
-  }
-
-  const hasAgents = args.includes("--agents");
-  const hasLead = args.includes("--lead");
-  const hasLayout = args.includes("--layout");
-  const isControl = passthrough.has(sub);
-  const normalizedArgs =
-    isControl && args.length ? [sub, ...args.slice(1)] : args;
-  const inject = [];
-  if (!isControl && !hasLead) inject.push("--lead", "codex");
-  if (!isControl && !hasAgents) inject.push("--agents", "codex,codex");
-  if (!isControl && !hasLayout) inject.push("--layout", "1xN");
-  const forwarded = isControl ? normalizedArgs : [...inject, ...args];
-
-  const prevArgv = process.argv;
-  const prevProfile = process.env.TFX_TEAM_PROFILE;
-  process.env.TFX_TEAM_PROFILE = "codex-team";
-  const { pathToFileURL } = await import("node:url");
-  const { cmdTeam } = await import(
-    pathToFileURL(join(PKG_ROOT, "hub", "team", "cli", "index.mjs")).href
-  );
-  process.argv = [prevArgv[0], prevArgv[1], "team", ...forwarded];
-  try {
-    await cmdTeam();
-  } finally {
-    process.argv = prevArgv;
-    if (typeof prevProfile === "string")
-      process.env.TFX_TEAM_PROFILE = prevProfile;
-    else delete process.env.TFX_TEAM_PROFILE;
-  }
 }
 
 // ── Hub preflight 체크 (multi/auto 실행 전) ──
@@ -5766,13 +5302,6 @@ async function main() {
         mods: cmdArgs.includes("--mods"),
       });
       return;
-    case "stealth-fetch":
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("stealth-fetch");
-        return;
-      }
-      await stealthFetchMain([process.argv[0], "stealth-fetch", ...cmdArgs]);
-      return;
     case "doctor": {
       if (cmdArgs.some(isHelpArg)) {
         printCommandHelp("doctor");
@@ -5862,9 +5391,6 @@ async function main() {
     case "mcp":
       cmdMcp(cmdArgs, { json: JSON_OUTPUT });
       return;
-    case "schema":
-      cmdSchema(cmdArgs);
-      return;
     case "update":
       await cmdUpdate(cmdArgs);
       return;
@@ -5876,9 +5402,6 @@ async function main() {
       }
       cmdList({ json: JSON_OUTPUT });
       return;
-    case "handoff":
-      cmdHandoff(cmdArgs, { json: JSON_OUTPUT });
-      return;
     case "hub":
       if (cmdArgs.some(isHelpArg)) {
         printCommandHelp("hub");
@@ -5889,16 +5412,6 @@ async function main() {
           JSON_OUTPUT && ["status", "ensure"].includes(cmdArgs[0] || "status"),
       });
       return;
-    case "monitor": {
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("monitor");
-        return;
-      }
-      const { createMonitor } = await import("../tui/monitor.mjs");
-      const mon = createMonitor({ targetPane: process.env.TMUX_PANE });
-      await mon.start();
-      break;
-    }
     case "cto": {
       if (cmdArgs.some(isHelpArg)) {
         printCommandHelp("cto");
@@ -5937,41 +5450,6 @@ async function main() {
       } finally {
         process.argv = prevArgv;
         delete process.env.TFX_OUTPUT_JSON;
-      }
-      return;
-    }
-    case "codex-team":
-      if (cmdArgs.some(isHelpArg)) {
-        await cmdCodexTeam(["--help"]);
-        return;
-      }
-      if (JSON_OUTPUT) process.env.TFX_OUTPUT_JSON = "1";
-      else delete process.env.TFX_OUTPUT_JSON;
-      await checkHubRunning();
-      try {
-        await cmdCodexTeam(cmdArgs);
-      } finally {
-        delete process.env.TFX_OUTPUT_JSON;
-      }
-      return;
-    case "notion-read":
-    case "nr": {
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("notion-read");
-        return;
-      }
-      const scriptPath = join(PKG_ROOT, "scripts", "notion-read.mjs");
-      try {
-        execFileSync(process.execPath, [scriptPath, ...cmdArgs], {
-          stdio: "inherit",
-          timeout: 660000,
-          windowsHide: true,
-        });
-      } catch (e) {
-        throw createCliError(e.message || "notion-read 실행 실패", {
-          exitCode: e.status || EXIT_ERROR,
-          reason: "error",
-        });
       }
       return;
     }
