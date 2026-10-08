@@ -33,7 +33,7 @@ function restoreEnv() {
 function registryFor(homeDir, extraServer) {
   return {
     version: 1,
-    defaults: { transport: "hub-url", hub_base: "http://127.0.0.1:27888" },
+    defaults: { transport: "http" },
     servers: {
       auth: { safe: true, ...extraServer },
     },
@@ -234,7 +234,7 @@ describe("syncRegistryTargets HTTP headers", () => {
     const result = syncRegistryTargets({
       registry: {
         version: 1,
-        defaults: { transport: "hub-url", hub_base: "http://127.0.0.1:27888" },
+        defaults: { transport: "http" },
         servers: {
           auth: {
             safe: true,

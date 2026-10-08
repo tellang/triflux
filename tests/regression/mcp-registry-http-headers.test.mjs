@@ -27,18 +27,15 @@ function writeRegistry(filePath, home, project, server) {
     JSON.stringify(
       {
         version: 1,
-        defaults: {
-          transport: "hub-url",
-          hub_base: "http://127.0.0.1:27888",
-        },
+        defaults: { transport: "http" },
         servers: {
-          "tfx-hub": {
+          sample: {
             policy: "hosted",
-            transport: "hub-url",
-            url: "http://127.0.0.1:27888/mcp",
+            transport: "http",
+            url: "https://mcp.example.com/mcp",
             safe: true,
             targets: ["codex", "claude"],
-            description: "triflux Hub MCP 서버",
+            description: "sample MCP 서버",
           },
           ...(server
             ? { auth: { policy: "hosted", safe: true, ...server } }
@@ -94,8 +91,8 @@ describe("tfx mcp HTTP headers regression", () => {
     assert.ok(syncResult.actions.length >= 2);
 
     const codexToml = readFileSync(join(home, ".codex", "config.toml"), "utf8");
-    assert.match(codexToml, /\[mcp_servers\.tfx-hub\]/);
-    assert.match(codexToml, /url = "http:\/\/127\.0\.0\.1:27888\/mcp"/);
+    assert.match(codexToml, /\[mcp_servers\.sample\]/);
+    assert.match(codexToml, /url = "https:\/\/mcp\.example\.com\/mcp"/);
     assert.match(codexToml, /\[mcp_servers\.auth\]/);
     assert.match(codexToml, /bearer_token_env_var = "TFX_TEST_TOKEN"/);
     assert.doesNotMatch(codexToml, /regression-secret/);
@@ -103,9 +100,9 @@ describe("tfx mcp HTTP headers regression", () => {
     const projectConfig = JSON.parse(
       readFileSync(join(project, ".mcp.json"), "utf8"),
     );
-    assert.deepEqual(projectConfig.mcpServers["tfx-hub"], {
+    assert.deepEqual(projectConfig.mcpServers["sample"], {
       type: "http",
-      url: "http://127.0.0.1:27888/mcp",
+      url: "https://mcp.example.com/mcp",
     });
     assert.equal(
       projectConfig.mcpServers.auth.headers.Authorization,
@@ -125,8 +122,8 @@ describe("tfx mcp HTTP headers regression", () => {
     );
   });
 
-  it("keeps existing tfx-hub URL-only sync unchanged", () => {
-    const { root, home, project } = createFixture("tfx-mcp-hub-url-only");
+  it("keeps URL-only sync unchanged", () => {
+    const { root, home, project } = createFixture("tfx-mcp-url-only");
     const registryPath = join(root, "mcp-registry.json");
     writeRegistry(registryPath, home, project, null);
 
@@ -141,15 +138,15 @@ describe("tfx mcp HTTP headers regression", () => {
 
     assert.equal(
       readFileSync(join(home, ".codex", "config.toml"), "utf8"),
-      '[mcp_servers.tfx-hub]\nurl = "http://127.0.0.1:27888/mcp"\n',
+      '[mcp_servers.sample]\nurl = "https://mcp.example.com/mcp"\n',
     );
     assert.deepEqual(
       JSON.parse(readFileSync(join(project, ".mcp.json"), "utf8")).mcpServers[
-        "tfx-hub"
+        "sample"
       ],
       {
         type: "http",
-        url: "http://127.0.0.1:27888/mcp",
+        url: "https://mcp.example.com/mcp",
       },
     );
   });
@@ -233,18 +230,18 @@ describe("tfx mcp HTTP headers regression", () => {
       readFileSync(join(alpha, ".mcp.json"), "utf8"),
     );
     assert.equal(alphaConfig.custom, true);
-    assert.deepEqual(alphaConfig.mcpServers["tfx-hub"], {
+    assert.deepEqual(alphaConfig.mcpServers["sample"], {
       type: "http",
-      url: "http://127.0.0.1:27888/mcp",
+      url: "https://mcp.example.com/mcp",
     });
 
     const betaConfig = JSON.parse(
       readFileSync(join(beta, ".claude", "mcp.json"), "utf8"),
     );
     assert.equal(betaConfig.other, "keep");
-    assert.deepEqual(betaConfig.mcpServers["tfx-hub"], {
+    assert.deepEqual(betaConfig.mcpServers["sample"], {
       type: "http",
-      url: "http://127.0.0.1:27888/mcp",
+      url: "https://mcp.example.com/mcp",
     });
 
     assert.deepEqual(

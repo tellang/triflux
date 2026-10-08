@@ -35,7 +35,7 @@ function restoreEnv() {
 function registryFor(homeDir, envDescriptor = { env: "BRAVE_API_KEY" }) {
   return {
     version: 1,
-    defaults: { transport: "hub-url", hub_base: "http://127.0.0.1:27888" },
+    defaults: { transport: "http" },
     servers: {
       "brave-search": {
         transport: "stdio",

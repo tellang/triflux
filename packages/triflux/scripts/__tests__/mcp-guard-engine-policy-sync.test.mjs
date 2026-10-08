@@ -39,10 +39,7 @@ function createHomeDir(prefix = "mcp-policy-sync-") {
 function policyRegistry(homeDir) {
   return {
     version: 1,
-    defaults: {
-      transport: "hub-url",
-      hub_base: "http://127.0.0.1:27888",
-    },
+    defaults: { transport: "http" },
     servers: {
       context7: {
         policy: "hosted",

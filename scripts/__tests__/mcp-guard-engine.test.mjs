@@ -10,7 +10,6 @@ import {
   isWatchedPath,
   loadRegistry,
   removeServerFromTargets,
-  resolveHubUrl,
   scanForStdioServers,
   syncRegistryTargets,
 } from "../lib/mcp-guard-engine.mjs";
@@ -20,7 +19,6 @@ const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
 const originalHome = {
   HOME: process.env.HOME,
   USERPROFILE: process.env.USERPROFILE,
-  TFX_HUB_PORT: process.env.TFX_HUB_PORT,
   EXA_API_KEY: process.env.EXA_API_KEY,
 };
 
@@ -31,7 +29,6 @@ function createHomeDir(prefix = "mcp-guard-") {
   );
   mkdirSync(base, { recursive: true });
   mkdirSync(join(base, ".gemini"), { recursive: true });
-  mkdirSync(join(base, ".claude", "cache", "tfx-hub"), { recursive: true });
   mkdirSync(join(base, ".codex"), { recursive: true });
   return base;
 }
@@ -48,9 +45,6 @@ afterEach(() => {
   if (originalHome.USERPROFILE === undefined) delete process.env.USERPROFILE;
   else process.env.USERPROFILE = originalHome.USERPROFILE;
 
-  if (originalHome.TFX_HUB_PORT === undefined) delete process.env.TFX_HUB_PORT;
-  else process.env.TFX_HUB_PORT = originalHome.TFX_HUB_PORT;
-
   if (originalHome.EXA_API_KEY === undefined) delete process.env.EXA_API_KEY;
   else process.env.EXA_API_KEY = originalHome.EXA_API_KEY;
 });
@@ -59,7 +53,7 @@ describe("mcp guard engine", () => {
   it("loads the MCP registry", () => {
     const registry = loadRegistry();
     assert.equal(registry.version, 1);
-    assert.equal(registry.servers["tfx-hub"].url, "http://127.0.0.1:27888/mcp");
+    assert.equal(registry.servers.context7.url, "https://mcp.context7.com/mcp");
     assert.equal(registry.policies.watched_paths.length, 8);
   });
 
@@ -100,7 +94,7 @@ describe("mcp guard engine", () => {
         {
           mcpServers: {
             "unsafe-stdio": { command: "node", args: ["server.js"] },
-            "safe-url": { url: "http://127.0.0.1:27888/mcp" },
+            "safe-url": { url: "https://mcp.example.com/mcp" },
           },
         },
         null,
@@ -141,30 +135,6 @@ describe("mcp guard engine", () => {
     );
   });
 
-  it("uses TFX_HUB_PORT env as single source when resolving Hub URL", () => {
-    const homeDir = createHomeDir();
-    withHome(homeDir);
-    process.env.TFX_HUB_PORT = "29991";
-
-    assert.equal(resolveHubUrl(), "http://127.0.0.1:29991/mcp");
-  });
-
-  it("ignores hub.pid port (pid is host hint only, PR #158 policy)", () => {
-    const homeDir = createHomeDir();
-    withHome(homeDir);
-    delete process.env.TFX_HUB_PORT;
-
-    writeFileSync(
-      join(homeDir, ".claude", "cache", "tfx-hub", "hub.pid"),
-      JSON.stringify({ host: "127.0.0.1", port: 29991 }),
-      "utf8",
-    );
-
-    // env 없음 + hub.pid port 존재 → registry/default 27888 fallback.
-    // pid port cascade 가 제거되어 29991 이 쓰이면 안 됨.
-    assert.equal(resolveHubUrl(), "http://127.0.0.1:27888/mcp");
-  });
-
   it("treats migrated empty Antigravity mcp_config.json as skipped instead of invalid", () => {
     const homeDir = createHomeDir();
     withHome(homeDir);
@@ -181,14 +151,11 @@ describe("mcp guard engine", () => {
 
     const registry = {
       version: 1,
-      defaults: {
-        transport: "hub-url",
-        hub_base: "http://127.0.0.1:27888",
-      },
+      defaults: { transport: "http" },
       servers: {
-        "tfx-hub": {
-          transport: "hub-url",
-          url: "http://127.0.0.1:27888/mcp",
+        sample: {
+          transport: "http",
+          url: "https://mcp.example.com/mcp",
           safe: true,
           targets: ["antigravity"],
         },
@@ -223,14 +190,11 @@ describe("mcp guard engine", () => {
 
     const registry = {
       version: 1,
-      defaults: {
-        transport: "hub-url",
-        hub_base: "http://127.0.0.1:27888",
-      },
+      defaults: { transport: "http" },
       servers: {
-        "tfx-hub": {
-          transport: "hub-url",
-          url: "http://127.0.0.1:27888/mcp",
+        sample: {
+          transport: "http",
+          url: "https://mcp.example.com/mcp",
           safe: true,
           targets: ["antigravity"],
         },
@@ -271,14 +235,11 @@ describe("mcp guard engine", () => {
 
     const registry = {
       version: 1,
-      defaults: {
-        transport: "hub-url",
-        hub_base: "http://127.0.0.1:27888",
-      },
+      defaults: { transport: "http" },
       servers: {
-        "tfx-hub": {
-          transport: "hub-url",
-          url: "http://127.0.0.1:27888/mcp",
+        sample: {
+          transport: "http",
+          url: "https://mcp.example.com/mcp",
           safe: true,
           targets: ["antigravity"],
         },
@@ -290,7 +251,7 @@ describe("mcp guard engine", () => {
       },
     };
 
-    const result = removeServerFromTargets("tfx-hub", {
+    const result = removeServerFromTargets("sample", {
       registry,
       targets: ["antigravity"],
     });
@@ -319,14 +280,11 @@ describe("mcp guard engine", () => {
     );
     const registry = {
       version: 1,
-      defaults: {
-        transport: "hub-url",
-        hub_base: "http://127.0.0.1:27888",
-      },
+      defaults: { transport: "http" },
       servers: {
-        "tfx-hub": {
-          transport: "hub-url",
-          url: "http://127.0.0.1:27888/mcp",
+        sample: {
+          transport: "http",
+          url: "https://mcp.example.com/mcp",
           safe: true,
           targets: ["gemini", "antigravity"],
         },
@@ -366,8 +324,8 @@ describe("mcp guard engine", () => {
     );
     assert.deepEqual(updated, {
       mcpServers: {
-        "tfx-hub": {
-          url: "http://127.0.0.1:27888/mcp",
+        sample: {
+          url: "https://mcp.example.com/mcp",
           type: "http",
         },
         exa: {

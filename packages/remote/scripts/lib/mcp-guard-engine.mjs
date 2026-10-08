@@ -19,35 +19,23 @@ import { fileURLToPath } from "node:url";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DEFAULT_REGISTRY_PATH = join(PROJECT_ROOT, "config", "mcp-registry.json");
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
-const DEFAULT_HUB_PATH = "/mcp";
 const SERVER_POLICIES = new Set(["hosted", "stdio"]);
 const DEFAULT_REGISTRY = Object.freeze({
   $schema: "mcp-registry-schema",
   version: 1,
   description: "MCP 서버 중앙 레지스트리 — 진실의 원천",
   defaults: {
-    transport: "hub-url",
-    hub_base: "http://127.0.0.1:27888",
+    transport: "http",
   },
   policy_notes: {
     transport:
-      'Server transport accepts "hub-url" for triflux Hub URL flow, "http" for direct Streamable HTTP MCP endpoints, or "stdio" for upstream-stdio-only MCP servers (rare; only for servers that have no hosted HTTP endpoint, e.g. brave-search). stdio servers require command, args, and may include env.',
+      'Server transport accepts "http" for direct Streamable HTTP MCP endpoints, or "stdio" for upstream-stdio-only MCP servers (rare; only for servers that have no hosted HTTP endpoint, e.g. brave-search). stdio servers require command, args, and may include env.',
     headers:
       'Optional headers are allowed only for HTTP-compatible transports. Each header value must be a descriptor: {"value":"literal"} for non-secret static values, {"env":"ENV_VAR_NAME"} for secrets resolved at sync/runtime, or {"env":"ENV_VAR_NAME","prefix":"Bearer "} for common authorization formats.',
     secret_safety:
       "Resolved secret values must not be written back to this registry file. Missing env vars warn during sync and do not emit empty secret headers.",
   },
-  servers: {
-    "tfx-hub": {
-      policy: "hosted",
-      transport: "hub-url",
-      url: "http://127.0.0.1:27888/mcp",
-      safe: true,
-      targets: ["claude", "gemini", "codex", "antigravity"],
-      description: "triflux Hub MCP 서버",
-    },
-  },
+  servers: {},
   policies: {
     unknown_server_action: "warn",
     sync_denylist: [],
@@ -711,28 +699,6 @@ function upsertTomlServer(raw, name, config, codex = {}) {
   return output.join("\n");
 }
 
-function getHubServerEntry(registry) {
-  const entries = Object.entries(registry?.servers || {});
-  if (entries.length === 0) {
-    return [
-      "tfx-hub",
-      {
-        url: `${registry?.defaults?.hub_base || "http://127.0.0.1:27888"}${DEFAULT_HUB_PATH}`,
-      },
-    ];
-  }
-
-  return (
-    entries.find(([name]) => name === "tfx-hub") ||
-    entries.find(([, config]) => config?.transport === "hub-url") ||
-    entries[0]
-  );
-}
-
-function _makeHubRuntimeConfig() {
-  return { url: resolveHubUrl() };
-}
-
 function serverTargets(serverConfig) {
   if (Array.isArray(serverConfig?.targets) && serverConfig.targets.length > 0) {
     return [
@@ -806,10 +772,7 @@ export function buildDesiredServerRecord(name, serverConfig, filePath) {
     };
   }
 
-  const url =
-    serverConfig?.transport === "hub-url"
-      ? resolveHubUrl()
-      : normalizeUrl(serverConfig?.url || "");
+  const url = normalizeUrl(serverConfig?.url || "");
   const basenameValue = pathBasename(filePath);
   const resolvedHeaders = resolveHeaderDescriptors(
     name,
@@ -1205,10 +1168,8 @@ export function validateRegistry(registry) {
         errors.push(`registry.servers.${name}.policy must be hosted or stdio`);
       }
       const transport = server.transport || registry.defaults?.transport;
-      if (!["hub-url", "http", "stdio"].includes(transport)) {
-        errors.push(
-          `registry.servers.${name}.transport must be hub-url, http, or stdio`,
-        );
+      if (!["http", "stdio"].includes(transport)) {
+        errors.push(`registry.servers.${name}.transport must be http or stdio`);
       }
       if (
         policy === "hosted" &&
@@ -1669,56 +1630,6 @@ export function scanForStdioServers(filePath) {
   return scanConfig(filePath).stdioServers;
 }
 
-export function resolveHubUrl() {
-  const registryState = inspectRegistry();
-  const registry = registryState.valid
-    ? registryState.registry
-    : cloneDefaultRegistry();
-  const [, hubServer] = getHubServerEntry(registry);
-  const fallbackRaw =
-    hubServer?.url ||
-    `${registry?.defaults?.hub_base || "http://127.0.0.1:27888"}${DEFAULT_HUB_PATH}`;
-
-  let fallback;
-  try {
-    fallback = new URL(fallbackRaw);
-  } catch {
-    fallback = new URL(`http://127.0.0.1:27888${DEFAULT_HUB_PATH}`);
-  }
-
-  const envPortRaw = Number(process.env.TFX_HUB_PORT || "");
-  const envPort =
-    Number.isFinite(envPortRaw) && envPortRaw > 0 ? envPortRaw : null;
-  const target = {
-    protocol: fallback.protocol || "http:",
-    host: fallback.hostname || "127.0.0.1",
-    port: envPort || Number(fallback.port || 27888),
-    pathname:
-      fallback.pathname && fallback.pathname !== "/"
-        ? fallback.pathname
-        : DEFAULT_HUB_PATH,
-  };
-
-  // PR #158 정책: port = TFX_HUB_PORT env (없으면 registry/default 27888) single source.
-  // hub.pid 는 loopback host 힌트 전용. 과거 pid port cascade 는 오염된 port 영속화의
-  // 원인이었고 hub-ensure.resolveHubTarget 에서 이미 제거됨. 여기도 일관 적용.
-  const hubPidPath = join(homedir(), ".claude", "cache", "tfx-hub", "hub.pid");
-  if (existsSync(hubPidPath)) {
-    try {
-      const info = readJsonFile(hubPidPath);
-      if (typeof info?.host === "string") {
-        const host = info.host.trim();
-        if (LOOPBACK_HOSTS.has(host)) target.host = host;
-      }
-    } catch {
-      // pid 파일 파싱 실패 시 registry 기본값 사용
-    }
-  }
-
-  const hostPart = target.host.includes(":") ? `[${target.host}]` : target.host;
-  return `${target.protocol}//${hostPart}:${target.port}${target.pathname}`;
-}
-
 export function isWatchedPath(filePath) {
   const registryState = inspectRegistry();
   const registry = registryState.valid
@@ -1758,8 +1669,7 @@ export function addRegistryServer(name, url, options = {}) {
   const registry = registryState.valid
     ? loadRegistry()
     : cloneDefaultRegistry();
-  const transport =
-    options.transport || (trimmedName === "tfx-hub" ? "hub-url" : "http");
+  const transport = options.transport || "http";
   const policy = options.policy || (transport === "stdio" ? "stdio" : "hosted");
 
   registry.servers[trimmedName] = {

@@ -17,7 +17,7 @@
 //   Codex plugin mode also auto-materializes OpenAI primary runtime plugin
 //   registry sections (for example pdf@openai-primary-runtime); those are
 //   likewise Codex-owned external churn, not triflux-owned MCP drift.
-//   triflux 자체 mutation (e.g. tfx-hub URL drift) 은 기존대로 exit 2.
+//   그 밖의 변경은 기존대로 exit 2.
 //
 // Exit codes:
 //   0  = config 안정. wrap 한 명령의 exit code 그대로 반환 (보통 0).
@@ -34,32 +34,11 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 const CODEX_CONFIG = join(homedir(), ".codex", "config.toml");
-const EXPECTED_TFX_HUB_URL = "http://127.0.0.1:27888/mcp";
 const HOOKS_STATE_PREFIX = "hooks.state.";
 const OPENAI_PRIMARY_RUNTIME_MARKETPLACE =
   "marketplaces.openai-primary-runtime";
 const OPENAI_PRIMARY_RUNTIME_PLUGIN_RE =
   /^plugins\."[^"]+@openai-primary-runtime"$/u;
-
-function readTfxHubUrl(raw) {
-  const headerMatch =
-    /^[ \t]*\[[ \t]*mcp_servers[ \t]*\.[ \t]*(?:tfx-hub|"tfx-hub"|'tfx-hub')[ \t]*\][ \t]*\r?$/m.exec(
-      raw,
-    );
-  if (!headerMatch) return null;
-  const headerLineEnd = raw.indexOf("\n", headerMatch.index);
-  const bodyStart = headerLineEnd === -1 ? raw.length : headerLineEnd + 1;
-  const nextSectionRegex = /^[ \t]*\[/gm;
-  nextSectionRegex.lastIndex = bodyStart;
-  const nextSectionMatch = nextSectionRegex.exec(raw);
-  const sectionEnd = nextSectionMatch ? nextSectionMatch.index : raw.length;
-  const sectionBody = raw.slice(bodyStart, sectionEnd);
-  const urlMatch =
-    /^[ \t]*url[ \t]*=[ \t]*(?:"([^"]+)"|'([^']+)')[ \t]*(?:#.*)?\r?$/m.exec(
-      sectionBody,
-    );
-  return urlMatch?.[1] ?? urlMatch?.[2] ?? "";
-}
 
 // Split a TOML payload into section blocks. Pre-header content (top-level
 // keys, comments) becomes a single anonymous section with header "".
@@ -146,7 +125,6 @@ function snapshotConfig() {
       mtimeMs: stat.mtimeMs,
       sha,
       raw,
-      tfxHubUrl: readTfxHubUrl(raw),
     };
   } catch {
     return { exists: false };
@@ -186,13 +164,6 @@ export function describeChange(before, after) {
   return null;
 }
 
-function describePortDrift(snapshot) {
-  if (!snapshot.exists) return null;
-  if (snapshot.tfxHubUrl === null) return null;
-  if (snapshot.tfxHubUrl === EXPECTED_TFX_HUB_URL) return null;
-  return `tfx-hub url is ${JSON.stringify(snapshot.tfxHubUrl)}; expected ${JSON.stringify(EXPECTED_TFX_HUB_URL)}`;
-}
-
 // CLI entry only when this script is the main module — keeps unit tests
 // import-safe.
 const isMain = (() => {
@@ -223,16 +194,13 @@ if (isMain) {
   );
 
   const change = describeChange(before, after);
-  const portDrift = describePortDrift(after);
   const hooksStateOnly =
     change?.kind === "sha-changed" && change.hooksStateOnly === true;
   const externalChurnOnly =
     change?.kind === "sha-changed" && change.externalChurnOnly === true;
 
-  // External Codex-owned churn + port drift 없음 = informational warning + pass.
-  // port drift 가 같이 잡혔으면 그건 triflux-owned section mutation 이라
-  // 기존 fail path 를 탄다.
-  if (externalChurnOnly && !portDrift) {
+  // External Codex-owned churn 만 있으면 informational warning + pass.
+  if (externalChurnOnly) {
     process.stderr.write(
       [
         "",
@@ -252,7 +220,7 @@ if (isMain) {
     process.exit(result.status ?? 0);
   }
 
-  if (change || portDrift) {
+  if (change) {
     process.stderr.write(
       [
         "",
@@ -262,7 +230,6 @@ if (isMain) {
         change?.changedSections?.length
           ? `Sections: ${change.changedSections.join(", ")}`
           : null,
-        portDrift ? `Port:    ${portDrift}` : null,
         "Action:  즉시 backup 으로 복원 + mutation source 추적 필요.",
         "Context: https://github.com/tellang/triflux/issues/193",
         "",

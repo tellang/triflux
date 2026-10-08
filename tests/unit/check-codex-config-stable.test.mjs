@@ -29,12 +29,12 @@ trusted_hash = "sha256:NEWHASH1"
 trusted_hash = "sha256:NEWHASH2"
 `;
 
-const TFX_HUB_BLOCK = `[mcp_servers.tfx-hub]
-url = "http://127.0.0.1:27888/mcp"
+const MCP_BLOCK = `[mcp_servers.context7]
+url = "https://mcp.context7.com/mcp"
 `;
 
-const TFX_HUB_BLOCK_DRIFTED = `[mcp_servers.tfx-hub]
-url = "http://127.0.0.1:27999/mcp"
+const MCP_BLOCK_DRIFTED = `[mcp_servers.context7]
+url = "https://mcp.example.com/mcp"
 `;
 
 const PROFILE_BLOCK = `[profiles.codex53_low]
@@ -64,7 +64,6 @@ function snapshot(raw) {
     mtimeMs: 0,
     sha: createHash("sha256").update(raw).digest("hex"),
     raw,
-    tfxHubUrl: null,
   };
 }
 
@@ -88,15 +87,15 @@ describe("#193 splitTomlSections", () => {
 
 describe("#193 classifySectionDiff", () => {
   it("returns hooksStateOnly=false when payloads are identical", () => {
-    const raw = HOOKS_STATE_BLOCK_BEFORE + TFX_HUB_BLOCK;
+    const raw = HOOKS_STATE_BLOCK_BEFORE + MCP_BLOCK;
     const result = classifySectionDiff(raw, raw);
     assert.equal(result.hooksStateOnly, false);
     assert.deepEqual(result.changedSections, []);
   });
 
   it("flags hooks.state-only churn as whitelisted", () => {
-    const before = `${TFX_HUB_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`;
-    const after = `${TFX_HUB_BLOCK}\n${HOOKS_STATE_BLOCK_AFTER}`;
+    const before = `${MCP_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`;
+    const after = `${MCP_BLOCK}\n${HOOKS_STATE_BLOCK_AFTER}`;
     const result = classifySectionDiff(before, after);
     assert.equal(result.hooksStateOnly, true);
     assert.equal(result.externalChurnOnly, true);
@@ -107,8 +106,8 @@ describe("#193 classifySectionDiff", () => {
   });
 
   it("flags OpenAI primary runtime plugin churn as external-only", () => {
-    const before = `${TFX_HUB_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK}`;
-    const after = `${TFX_HUB_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK_AFTER}`;
+    const before = `${MCP_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK}`;
+    const after = `${MCP_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK_AFTER}`;
     const result = classifySectionDiff(before, after);
     assert.equal(result.hooksStateOnly, false);
     assert.equal(result.externalChurnOnly, true);
@@ -118,15 +117,15 @@ describe("#193 classifySectionDiff", () => {
     ]);
   });
 
-  it("rejects whitelist when tfx-hub also drifts", () => {
-    const before = `${TFX_HUB_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`;
-    const after = `${TFX_HUB_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_AFTER}`;
+  it("rejects whitelist when an mcp server section also drifts", () => {
+    const before = `${MCP_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`;
+    const after = `${MCP_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_AFTER}`;
     const result = classifySectionDiff(before, after);
     assert.equal(result.hooksStateOnly, false);
     assert.equal(result.externalChurnOnly, false);
     assert.ok(
-      result.changedSections.some((h) => h === "mcp_servers.tfx-hub"),
-      `expected mcp_servers.tfx-hub in ${JSON.stringify(result.changedSections)}`,
+      result.changedSections.some((h) => h === "mcp_servers.context7"),
+      `expected mcp_servers.context7 in ${JSON.stringify(result.changedSections)}`,
     );
   });
 
@@ -142,15 +141,15 @@ describe("#193 classifySectionDiff", () => {
 
 describe("#193 describeChange", () => {
   it("returns null when before and after are identical", () => {
-    const raw = `${TFX_HUB_BLOCK}${HOOKS_STATE_BLOCK_BEFORE}`;
+    const raw = `${MCP_BLOCK}${HOOKS_STATE_BLOCK_BEFORE}`;
     const before = snapshot(raw);
     const after = snapshot(raw);
     assert.equal(describeChange(before, after), null);
   });
 
   it("classifies hooks.state-only churn as sha-changed + hooksStateOnly=true", () => {
-    const before = snapshot(`${TFX_HUB_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`);
-    const after = snapshot(`${TFX_HUB_BLOCK}\n${HOOKS_STATE_BLOCK_AFTER}`);
+    const before = snapshot(`${MCP_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`);
+    const after = snapshot(`${MCP_BLOCK}\n${HOOKS_STATE_BLOCK_AFTER}`);
     const change = describeChange(before, after);
     assert.ok(change !== null, "expected change");
     assert.equal(change.kind, "sha-changed");
@@ -160,9 +159,9 @@ describe("#193 describeChange", () => {
   });
 
   it("classifies OpenAI runtime plugin churn as externalChurnOnly=true", () => {
-    const before = snapshot(`${TFX_HUB_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK}`);
+    const before = snapshot(`${MCP_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK}`);
     const after = snapshot(
-      `${TFX_HUB_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK_AFTER}`,
+      `${MCP_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK_AFTER}`,
     );
     const change = describeChange(before, after);
     assert.ok(change !== null, "expected change");
@@ -171,10 +170,10 @@ describe("#193 describeChange", () => {
     assert.equal(change.externalChurnOnly, true);
   });
 
-  it("classifies tfx-hub mutation as sha-changed + hooksStateOnly=false", () => {
-    const before = snapshot(`${TFX_HUB_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`);
+  it("classifies mcp server mutation as sha-changed + hooksStateOnly=false", () => {
+    const before = snapshot(`${MCP_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`);
     const after = snapshot(
-      `${TFX_HUB_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_BEFORE}`,
+      `${MCP_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_BEFORE}`,
     );
     const change = describeChange(before, after);
     assert.ok(change !== null, "expected change");
@@ -184,22 +183,22 @@ describe("#193 describeChange", () => {
   });
 
   it("rejects whitelist when hooks.state churn is mixed with other section drift", () => {
-    const before = snapshot(`${TFX_HUB_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`);
+    const before = snapshot(`${MCP_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`);
     const after = snapshot(
-      `${TFX_HUB_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_AFTER}`,
+      `${MCP_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_AFTER}`,
     );
     const change = describeChange(before, after);
     assert.ok(change !== null, "expected change");
     assert.equal(change.kind, "sha-changed");
     assert.equal(change.hooksStateOnly, false);
     assert.ok(
-      change.changedSections.includes("mcp_servers.tfx-hub"),
-      `expected mcp_servers.tfx-hub in ${JSON.stringify(change.changedSections)}`,
+      change.changedSections.includes("mcp_servers.context7"),
+      `expected mcp_servers.context7 in ${JSON.stringify(change.changedSections)}`,
     );
   });
 
   it("flags mtime-only drift even when sha matches", () => {
-    const raw = `${TFX_HUB_BLOCK}${HOOKS_STATE_BLOCK_BEFORE}`;
+    const raw = `${MCP_BLOCK}${HOOKS_STATE_BLOCK_BEFORE}`;
     const before = snapshot(raw);
     const after = { ...snapshot(raw), mtimeMs: before.mtimeMs + 1000 };
     const change = describeChange(before, after);
