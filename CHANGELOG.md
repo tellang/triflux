@@ -2,6 +2,24 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.53.0] - 2026-10-08
+
+### Added
+- headless: 세션마다 결과 색인 `$TMPDIR/tfx-headless/<세션>.results.json` 을 쓴다. 워커별 CLI, 상태(pending, running, completed, failed), exit 코드, 시작과 끝 시각, 결과 파일 경로를 담고 임시 파일에 쓴 뒤 rename 한다. 세션이 예외로 끝나면 끝나지 못한 워커를 failed 로 확정한다. `runHeadless` 반환값과 `runHeadlessInteractive` 핸들에 `resultsIndexPath` 가 생기고, `HEADLESS_COMPLETE` 표시 다음 줄에 색인 경로를 출력한다. `HEADLESS_COMPLETE` 표시는 그대로 둔다 (ADR-0034, #635)
+- live: tmux 로 띄운 대화형 Claude 세션에 `tfx-live wait --cli claude --session <tmux>` 를 지원한다. `tfx-live queue --cli codex (--session NAME | --thread UUID) [--delete ID|all]` 로 TUI 가 아직 가져가지 않은 codex queue 항목을 조회하고 지운다. 바쁘거나 닫힌 세션의 항목이 대상이고, 쉬는 TUI 는 항목을 곧바로 가져가 지울 틈이 거의 없다. Codex app-server 의 실험 API(`thread/queue/list`, `thread/queue/delete`)를 쓰고 큐 파일은 건드리지 않는다 (#641)
+
+### Changed
+- skills: `tfx-lead` 에 정리, 삭제, 결함 수정 레인의 기준(삭제는 사용자 결정과 동작 동등성으로, 간헐 실패는 원인 확정 뒤에만 수정)과 리뷰 반복 규칙(반영 커밋 재확인, 같은 지적이 이어지면 방식 재검토)을 더한다 (#643)
+- hud: nano 표시의 c, x 쌍을 `34%/48%`, 값이 없으면 `--%/--%` 로 쓴다. nano 에서도 로그인 안 된 Codex 를 회색으로 그린다. Codex 로그인 판정과 계정 표시가 `CODEX_HOME` 을 따른다 (#633)
+- cli: `tfx --help`, doctor, setup 안내를 10.52.0 표면에 맞춘다. MCP 레지스트리 대상에서 Gemini CLI(`~/.gemini/settings.json`)를 빼서 doctor 가 점검하지 않고 `tfx mcp sync` 가 쓰지 않는다(agy 대상은 그대로). MCP 인벤토리 캐시에서 `gemini` 키가, `tfx doctor --json` 의 `mcp-inventory` 항목에서 `gemini_servers` 키가 빠진다. `tfx doctor --diagnose` 가 훅 타이밍을 모으지 않아 `--json` 의 `hookTimingCount` 가 빠진다 (#634)
+
+### Removed
+- hub: 계정 브로커(`hub/account-broker.mjs`)를 지운다. headless 어댑터는 기본 CLI 인증으로만 실행하며, 이전의 "브로커 비어 있음" 동작과 같다. 어댑터 실패 결과의 `failureMode` 로 `circuit_open` 과 `auth_sync` 가 더는 나오지 않는다. HUD 의 브로커 계정 판정과 다계정 선택 파일 경로가 빠진다. 다음 setup 이 옛 설치본의 `account-broker.mjs` 를 지운다. `@triflux/core` 에서 `accountBroker`, `getCodexCircuit` export 와 zod 의존성이 빠진다 (ADR-0033, #636, #639)
+
+### Fixed
+- live: `tfx-live start --resume-last 1` 로 이은 Codex 세션에서 thread 를 못 찾아 queue 대신 tmux 직접 입력으로 떨어지던 문제. daemon 에 로드된 thread 와 rollout 의 resume 기록으로 확정하고, 5 초 안에 확신하지 못하면 기존 tmux 경로를 쓴다 (#642)
+- tests: 바깥 `CODEX_HOME` 과 Codex 환경변수, 동시 실행 중인 다른 테스트의 저장소 변경에 따라 결과가 달라지던 테스트를 격리한다. packages 미러 테스트가 저장소에 임시 파일을 만들지 않는다 (ADR-0030, #632, #637, #638, #640)
+
 ## [10.52.0] - 2026-10-08
 
 ### Added
