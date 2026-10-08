@@ -64,7 +64,6 @@ const TRIFLUX_DIRS = [
   "scripts",
   "hub",
   "cto",
-  "references",
 ];
 
 const TRIFLUX_FILES = ["README.md", "README.ko.md", "LICENSE", "CLAUDE.md"];
@@ -228,7 +227,7 @@ function packTriflux() {
   const dest = join(ROOT, "packages", "triflux");
   console.log("\ntriflux (meta)");
   cleanDist(dest);
-  // clean extra dirs that triflux now includes
+  // clean extra dirs that triflux now includes. references 는 npm 에 싣지 않지만 옛 사본을 지우려고 남긴다.
   for (const d of [
     "adapters",
     "hooks",
