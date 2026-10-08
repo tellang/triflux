@@ -265,16 +265,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       },
     },
   },
-  cto: {
-    usage: "tfx cto <collect|status|hygiene> [options]",
-    description: "repo-local authority layer console",
-    subcommands: {
-      collect: "refresh .triflux/lake/current.json from authority sources",
-      status: "print the current authority summary",
-      hygiene:
-        "project CTO hygiene counts and actionable dry-run rows (--dry-run)",
-    },
-  },
   multi: {
     usage:
       "tfx multi [--dashboard-layout lite|single|split-2col|split-3col|auto] <subcommand|task>",
@@ -3678,7 +3668,6 @@ function cmdHelp() {
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}      ${GRAY}멀티-CLI 팀 모드 (tmux)${RESET}
-    ${WHITE_BRIGHT}tfx cto${RESET}        ${GRAY}저장소 스냅숏 수집과 조회 (collect/status/hygiene)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
     ${WHITE_BRIGHT}tfx-live${RESET}       ${GRAY}Claude·Codex 라이브 세션 (tfx-live --help)${RESET}
 
@@ -3830,18 +3819,6 @@ async function main() {
       }
       cmdList({ json: JSON_OUTPUT });
       return;
-    case "cto": {
-      if (cmdArgs.some(isHelpArg)) {
-        printCommandHelp("cto");
-        return;
-      }
-      const { pathToFileURL } = await import("node:url");
-      const { cmdCto } = await import(
-        pathToFileURL(join(PKG_ROOT, "cto", "index.mjs")).href
-      );
-      await cmdCto(cmdArgs, { json: JSON_OUTPUT });
-      return;
-    }
     case "multi": {
       if (cmdArgs.some(isHelpArg)) {
         const { pathToFileURL } = await import("node:url");

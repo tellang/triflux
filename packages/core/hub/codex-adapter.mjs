@@ -113,9 +113,6 @@ export function buildLaunchScript(opts = {}) {
 
 // ── Exec args builder ───────────────────────────────────────────
 
-// CTO boundary: this adapter assembles Codex prompts outside
-// scripts/tfx-route.sh. Keep north-star injection in tfx-route.sh until
-// launcher workdir contracts have focused coverage.
 export function buildExecArgs(opts = {}) {
   const prompt = typeof opts.prompt === "string" ? opts.prompt : "";
   const command = buildExecCommand(prompt, opts.resultFile || null, {

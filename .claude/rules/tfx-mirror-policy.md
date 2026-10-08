@@ -6,7 +6,6 @@ paths:
   - "bin/**/*"
   - "hooks/**/*"
   - "hud/**/*"
-  - "cto/**/*"
   - "config/**/*"
   - "skills/**/*"
   - "adapters/**/*"
@@ -23,7 +22,7 @@ triflux 는 root 와 `packages/{core,remote,triflux}/` 3개 published 레이어�
 | 레이어 | 역할 | mirror 룰 |
 |--------|------|----------|
 | `packages/core` (`@triflux/core`) | 공용 라이브러리 (hub primitives, scripts/lib helper) | root 와 byte-identical cp |
-| `packages/remote` (`@triflux/remote`) | 원격 entry / team / workers / cto / scripts helper | root subset + `@triflux/core/...` import path 변환 |
+| `packages/remote` (`@triflux/remote`) | 원격 entry / team / workers / scripts helper | root subset + `@triflux/core/...` import path 변환 |
 | `packages/triflux` (`triflux` npm) | 사용자 facing CLI / runtime / skills | npm publish files 기준 byte-identical mirror |
 
 ## 레이어별 정책
@@ -76,7 +75,6 @@ mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (�
 ## mirror 범위 (in / out)
 
 **mirror 대상** (root → packages 동기 필수):
-- `cto/*` → `packages/triflux/cto/` (byte-identical), `packages/remote/cto/` (root 상대 import 는 그대로, `../hub/lib/*` 등 hub 의존은 `@triflux/core/hub/...` 로 import 변환 — Edit 만, cp 는 변환 없는 파일 한정). remote 는 CLI 디스패처 `cto/index.mjs` 를 mirror 하지 않는다(모듈만). packages/core 는 cto/ 를 mirror 하지 않는다.
 - `hub/lib/*` → `packages/core/hub/lib/`, `packages/triflux/hub/lib/`
 - `hub/team/*`, `hub/*.mjs` (entry/runtime) → `packages/triflux/hub/`, `packages/remote/hub/` (해당 모듈만; `packages/core/hub/team/` 는 self-import 대상만 minimal mirror, 예: `retry-state-machine.mjs`)
 - `scripts/lib/*` → `packages/core/scripts/lib/`, `packages/triflux/scripts/lib/`, `packages/remote/scripts/lib/` (PR #314 catch-up — remote 는 root subset, root-relative 의존 시 `@triflux/core/...` 로 import 변환)

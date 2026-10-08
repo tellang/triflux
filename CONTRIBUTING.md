@@ -44,7 +44,7 @@ triflux 를 고치거나 디버깅할 때 아래 표면을 섞지 않는다.
 
 | 표면 | 정본 | npm·플러그인에 포함? |
 | --- | --- | --- |
-| 공개 CLI·런타임 | `bin/`, `scripts/`, `hub/`, `hooks/`, `hud/`, `cto/`, `skills/` | 예 |
+| 공개 CLI·런타임 | `bin/`, `scripts/`, `hub/`, `hooks/`, `hud/`, `skills/` | 예 |
 | 게시용 미러 | `packages/triflux/`, `packages/core/`, `packages/remote/` | 예. 루트와 맞아야 한다 |
 | Claude 플러그인 메타데이터 | `.claude-plugin/` | 예. npm 패키지 내용을 가리킨다 |
 | 호스트 로컬 Codex 실험 | `~/.codex/skills/*` | 아니요 |

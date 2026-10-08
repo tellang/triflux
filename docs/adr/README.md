@@ -30,7 +30,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0021](0021-keyword-hook-explicit-first.md) | 키워드 훅은 명시 토큰만 MUST, 자연어는 제안(suggest), gstack 이름은 설치본 기준 | Accepted | 0009, 0020 |
 | [0022](0022-remove-cto-tray.md) | CTO 트레이를 패키지에서 제거 | Accepted | 0010, 0018 |
 | [0023](0023-remove-command-hooks-hub-and-adopt-mods.md) | command hook, 키워드 라우팅, MCP gateway, synapse, 허브를 걷어내고 Claude Code mods 로 옮긴다 | Proposed | 0007, 0010, 0013, 0018, 0020, 0021, 0022 |
-| [0024](0024-cto-explicit-queries-only.md) | CTO 는 조회만 남긴다 | Accepted | 0010, 0018, 0022 |
+| [0024](../_archive/adr/0024-cto-explicit-queries-only.md) | CTO 는 조회만 남긴다 | Superseded | 0010, 0018, 0022 |
 | [0025](0025-retire-swarm-execution-engine.md) | swarm 실행 엔진 퇴역 | Accepted | 0005, 0008, 0024 |
 | [0026](0026-agents-row-tmux-attach.md) | claude agents 행을 워커 tmux 방의 attach client 로 만든다 | Proposed | 0008, 0025 |
 | [0027](0027-codex-message-queue-default.md) | Codex 세션 메시지 전송은 codex queue 기본, tmux 입력은 폴백과 슬래시 명령 전용 | Proposed | 0015 |
@@ -41,6 +41,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0032](0032-lead-role-skill-tfx-lead.md) | 리드 역할 절차를 tfx-lead 스킬로 분리한다 | Proposed | 0020, 0029 |
 | [0033](0033-remove-account-broker.md) | 계정 브로커 삭제 | Proposed | 0023, 0031 |
 | [0034](0034-headless-session-results-index.md) | headless 세션마다 결과 색인 JSON 하나를 둔다 | Proposed | 0015, 0029 |
+| [0035](0035-remove-cto.md) | CTO 삭제 | Proposed | 0022, 0024 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 

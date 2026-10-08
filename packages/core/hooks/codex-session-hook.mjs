@@ -3,10 +3,6 @@
 import { argv, exit, stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import { writeCodexSessionRecord } from "../hub/lib/codex-session-registry.mjs";
-import {
-  emitParticipantSessionStarted,
-  shouldSkipInteractiveRegistration,
-} from "../scripts/lib/session-presence.mjs";
 
 function parsePayload(stdinData) {
   try {
@@ -72,23 +68,11 @@ export async function runCodexSessionHook(stdinData, opts = {}) {
     ? normalizeMode(opts.argvMode ?? argv[2], parsed.payload)
     : "";
   const writeSessionRecord = opts.writeSessionRecord || writeCodexSessionRecord;
-  const emitSessionStarted =
-    opts.emitSessionStarted || emitParticipantSessionStarted;
 
   try {
     await runHookSideEffectsWithStdoutSuppressed(async () => {
       if (mode === "register" || mode === "heartbeat") {
-        try {
-          writeSessionRecord(parsed.payload);
-        } catch {}
-      }
-      if (
-        mode === "register" &&
-        !shouldSkipInteractiveRegistration(parsed.payload, opts)
-      ) {
-        try {
-          await emitSessionStarted(stdinData);
-        } catch {}
+        writeSessionRecord(parsed.payload);
       }
     });
   } catch {

@@ -24,7 +24,6 @@
     "adapters",
     "bin",
     "config",
-    "cto",
     "skills",
     "!skills/tfx-workspace",
     "hooks",

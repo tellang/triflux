@@ -7,8 +7,8 @@
 // 신뢰 경계: 파일을 source 하거나 eval 하지 않는다. allowlist key 와 안전한
 // literal 값만 읽으므로 셸 표현식은 실행되지 않는다.
 //
-// 부수효과: 모듈 로드 시 파일을 읽지 않고 환경도 바꾸지 않는다. hub/lib/cto-env.mjs
-// 처럼 순수 함수만 노출하므로 HUD, hook, hub 어느 소비자에서도 안전하게 import 한다.
+// 부수효과: 모듈 로드 시 파일을 읽지 않고 환경도 바꾸지 않는다. 순수 함수만
+// 노출하므로 HUD, hook, hub 어느 소비자에서도 안전하게 import 한다.
 
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";

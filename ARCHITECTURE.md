@@ -20,8 +20,8 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 |--------|------|-----------|
 | **root** | 개발 SSOT: 모든 런타임 파일의 정본 | 해당 없음 |
 | `packages/core` (`@triflux/core`) | 공용 라이브러리 (`hub/`, `hud/`, `hooks/`, `scripts/` helper) | root와 byte-identical `cp` |
-| `packages/remote` (`@triflux/remote`) | 원격 실행용 서브셋 (`hub/`, `cto/`, `scripts/`) | root 서브셋 + `@triflux/core/...` import 경로 변환 |
-| `packages/triflux` (`triflux` npm) | 사용자 대상 CLI/런타임 (`bin/`, `config/`, `hooks/`, `hub/`, `hud/`, `cto/`, `scripts/`, `skills/`, `docs/`) | npm `files` 기준 byte-identical 미러 |
+| `packages/remote` (`@triflux/remote`) | 원격 실행용 서브셋 (`hub/`, `scripts/`) | root 서브셋 + `@triflux/core/...` import 경로 변환 |
+| `packages/triflux` (`triflux` npm) | 사용자 대상 CLI/런타임 (`bin/`, `config/`, `hooks/`, `hub/`, `hud/`, `scripts/`, `skills/`, `docs/`) | npm `files` 기준 byte-identical 미러 |
 
 3-layer 미러의 상세 규칙(레이어별 cp/Edit 정책, tests 제외, binary 폭증 방지,
 검증 체크리스트)은 [`.claude/rules/tfx-mirror-policy.md`](.claude/rules/tfx-mirror-policy.md)를
@@ -37,9 +37,8 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 | `hub/` | 실행 엔진 공용부: bridge CLI, CLI 어댑터 | `bridge.mjs`, `codex-adapter.mjs`, `cli-adapter-base.mjs` |
 | `hub/team/` | 팀/멀티에이전트 오케스트레이션 | `headless.mjs`, `claude-daemon-control.mjs`, `notify.mjs` |
 | `hub/` 하위 | 세분 모듈 | `diagnostics/`, `lib/`, `workers/` |
-| `hooks/` | Codex 및 Antigravity 세션 연결과 전환용 stub | `codex-session-hook.mjs`, `agy-session-hook.mjs` |
+| `hooks/` | Codex 세션 기록과 Antigravity 빈 훅 | `codex-session-hook.mjs`, `agy-session-hook.mjs` |
 | `hud/` | 상태 표시(HUD) / 모니터 | `context-monitor.mjs`, `renderers.mjs`, `providers/` |
-| `cto/` | CTO 콘솔: 멀티세션 수집·요약·위생(hygiene) | `collect.mjs`, `brief.mjs`, `status.mjs`, `hygiene.mjs` |
 | `scripts/` | 라우팅 스크립트 + 릴리즈 게이트 | `tfx-route.sh`(라우팅 엔진), `scripts/release/`(릴리즈 자동화), `scripts/lib/`(공용 helper) |
 | `skills/` | Claude Code 스킬 정의 (`SKILL.md`) | `tfx-auto`, `tfx-remote`, `tfx-doctor` 등 |
 | `config/` | MCP 서버 설정 | `mcp-registry.json` |

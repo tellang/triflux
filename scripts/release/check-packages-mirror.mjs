@@ -25,7 +25,6 @@ const MIRROR_TOPS = [
   "adapters",
   "bin",
   "config",
-  "cto",
   "hooks",
   "hub",
   "hud",

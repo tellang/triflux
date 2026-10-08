@@ -38,7 +38,6 @@ function runBash(command, extraEnv = {}) {
       TFX_MACHINE_PROFILE_PATH: join(isolatedCodex.dir, "machine-profile.env"),
       TFX_CODEX_CONFIG: isolatedCodex.path,
       TFX_CODEX_TRANSPORT: "exec",
-      TFX_CTO_NORTH_STAR: "0",
       TFX_DISABLE_CODEX: "0",
       TFX_DISABLE_ANTIGRAVITY: "0",
       TFX_CODEX_OK: "1",

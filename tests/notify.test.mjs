@@ -122,9 +122,9 @@ describe("createNotifier", () => {
     });
 
     const result = await notifier.notify({
-      type: "ctoHygiene",
-      sessionId: "cto-hygiene",
-      summary: "CTO hygiene needs action: 1 active task",
+      type: "completed",
+      sessionId: "session-1",
+      summary: "Task finished",
       timestamp: "2026-06-17T00:00:00.000Z",
     });
 
@@ -158,9 +158,9 @@ describe("createNotifier", () => {
       .setChannel("webhook", false);
 
     const result = await notifier.notify({
-      type: "ctoHygiene",
-      sessionId: "cto-hygiene",
-      summary: "CTO hygiene needs action: 1 active task",
+      type: "completed",
+      sessionId: "session-1",
+      summary: "Task finished",
       timestamp: "2026-06-17T00:00:00.000Z",
     });
 
@@ -246,53 +246,6 @@ describe("createNotifier", () => {
       host: "webhook-host",
       summary: "Need approval",
       timestamp: "2026-04-04T00:00:03.000Z",
-    });
-  });
-  it("normalizes and formats CTO hygiene notification events", async () => {
-    const requests = [];
-    const toastCalls = [];
-    const fetch = async (url, init) => {
-      requests.push({ url, init });
-      return { ok: true, status: 202 };
-    };
-    const execFile = (command, args, options, callback) => {
-      toastCalls.push({ command, args, options });
-      callback(null, "", "");
-    };
-
-    const notifier = createNotifier({
-      stdout: {
-        write() {
-          return true;
-        },
-      },
-      platform: "win32",
-      env: { TRIFLUX_NOTIFY_WEBHOOK: "https://example.test/cto" },
-      deps: { execFile, fetch },
-      hostname: "cto-host",
-    }).setChannel("bell", false);
-
-    const result = await notifier.notify({
-      type: "ctoHygiene",
-      sessionId: "cto-hygiene",
-      summary: "CTO hygiene needs action: 1 active task",
-      timestamp: "2026-06-17T00:00:00.000Z",
-    });
-
-    assert.equal(result.results.toast.status, "sent");
-    assert.match(toastCalls[0].args[3], /Triflux CTO hygiene needs action/u);
-    assert.match(
-      toastCalls[0].args[3],
-      /CTO hygiene needs action: 1 active task/u,
-    );
-    assert.equal(result.results.webhook.status, "sent");
-    assert.equal(requests.length, 1);
-    assert.deepEqual(JSON.parse(requests[0].init.body), {
-      type: "ctoHygiene",
-      sessionId: "cto-hygiene",
-      host: "cto-host",
-      summary: "CTO hygiene needs action: 1 active task",
-      timestamp: "2026-06-17T00:00:00.000Z",
     });
   });
 });
