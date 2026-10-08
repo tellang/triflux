@@ -184,6 +184,7 @@ export async function queueCodexMessage({
   let stdout;
   try {
     // cwd 의 프로젝트 .codex/config.toml 이 깨져 있으면 queue 가 실패하므로 HOME 에서 실행한다.
+    // codex queue 는 메시지를 --message 인자로만 받아(stdin, 파일 옵션 없음) ps 노출을 피할 수 없다.
     ({ stdout } = await execFn(
       "codex",
       ["queue", `--thread=${threadId}`, `--message=${message}`],

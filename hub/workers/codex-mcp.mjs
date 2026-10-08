@@ -721,6 +721,10 @@ function parseCliArgs(argv) {
       case "--prompt":
         options.prompt = next();
         break;
+      // --prompt 값은 ps 에 보여서 파일로 넘기는 길을 둔다.
+      case "--prompt-file":
+        options.prompt = readFileSync(next(), "utf8");
+        break;
       case "--thread-id":
         options.threadId = next();
         break;
@@ -772,7 +776,7 @@ function parseCliArgs(argv) {
   }
 
   if (typeof options.prompt !== "string" || !options.prompt) {
-    throw new Error("--prompt는 필수입니다.");
+    throw new Error("--prompt 또는 --prompt-file 이 필요합니다.");
   }
 
   return options;

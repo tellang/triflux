@@ -125,10 +125,12 @@ export async function resolveCodexRolloutFile({
   return null;
 }
 
-export function buildResumeArgv({ cli, sessionId, prompt } = {}) {
+// 프롬프트는 argv 에 두면 ps 에 보여서 넣지 않는다. 실행하는 쪽이 prompt 를 stdin 으로 넘긴다.
+// claude -p 는 프롬프트 인자가 없으면, codex exec resume 은 `-` 를 받으면 stdin 을 읽는다.
+export function buildResumeArgv({ cli, sessionId } = {}) {
   if (!sessionId) return null;
-  if (cli === "claude") return ["claude", "-p", "--resume", sessionId, prompt];
-  if (cli === "codex") return ["codex", "exec", "resume", sessionId, prompt];
+  if (cli === "claude") return ["claude", "-p", "--resume", sessionId];
+  if (cli === "codex") return ["codex", "exec", "resume", sessionId, "-"];
   return null;
 }
 
@@ -474,7 +476,7 @@ export function createInterventionLadder({
         sessionId,
         prompt: reinstructPrompt,
         target,
-        argv: buildResumeArgv({ cli, sessionId, prompt: reinstructPrompt }),
+        argv: buildResumeArgv({ cli, sessionId }),
       });
       return resumed?.ok === false
         ? { ok: false, detail: "resume_dispatch_failed" }
