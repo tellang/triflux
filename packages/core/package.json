@@ -1,7 +1,7 @@
 {
   "name": "@triflux/core",
   "version": "10.52.0",
-  "description": "triflux core — CLI routing, adapters, account broker. Zero native dependencies.",
+  "description": "triflux core — CLI routing, adapters. Zero native dependencies.",
   "type": "module",
   "main": "hub/index.mjs",
   "exports": {
