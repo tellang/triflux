@@ -5,17 +5,17 @@ All notable changes to triflux will be documented in this file.
 ## [10.52.0] - 2026-10-08
 
 ### Added
-- native bridge: Codex, agy, headless 워커가 `claude agents` 행으로 뜨고, 행에서 Enter 를 누르면 그 워커가 도는 tmux 방이 열린다. 행은 공식 `claude --bg --exec` 로 만들고 방이 사라지면 스스로 지운다. attach 때 바깥 터미널의 응답 바이트가 방 입력으로 섞이지 않게 막는다(headless 는 읽기 전용, 대화형은 python3 중계, python3 가 없으면 읽기 전용) (ADR-0026, #625)
 - skills: 여러 Claude, Codex 세션을 지휘하는 리드 역할 스킬 `tfx-lead` 를 추가한다. Claude 리드와 Codex 리드가 같이 쓴다. setup 이 Codex 스킬로도 배포한다 (ADR-0032, #627)
 
 ### Changed
+- native bridge: `claude agents` 의 Codex, agy, headless 워커 행에서 Enter 를 누르면 그 워커가 도는 tmux 방이 열린다. 행은 공식 `claude --bg --exec` 로 만들고 방이 사라지면 스스로 지운다. attach 때 바깥 터미널의 응답 바이트가 방 입력으로 섞이지 않게 막는다(headless 는 읽기 전용, 대화형은 python3 중계, python3 가 없으면 읽기 전용) (ADR-0026, #625)
 - live: Codex 세션에 보내는 `tfx-live ask` 의 기본 전송을 공식 `codex queue` 로 옮긴다. 입력창을 오염시키지 않고, 바쁠 때 큐에 쌓이며, 첫 줄에 보낸 세션 이름을 붙인다. 슬래시 명령과 `--if-busy fail|interrupt` 는 tmux 직접 입력으로 가고 결과에 `transportReason` 을 남긴다. `tfx-live wait --request-id` 가 Codex 세션을 지원한다. 새 세션을 240x60 으로 만든다 (ADR-0027, #624)
 - hud: 상태 표시를 하나로 맞춘다. 값이 없는 퍼센트는 모든 행 `--%`, 남은 시간이 없으면 `(--h--m)` 로 쓴다. 회색은 로그인 안 됨과 정책상 꺼짐에만 쓰고, 로그인된 Antigravity 가 GCP 프로젝트 과금이면 정상 색으로 막대 자리에 `GCP` 를 표시한다 (#629)
 - setup: `tfx setup` 과 설치 직후 setup 이 허브 흔적을 정리한다. Claude, Codex, Gemini, agy 설정의 tfx-hub MCP 항목, 명령줄을 확인한 허브 프로세스, Windows 작업, 설치본 안의 스냅숏을 지우고 백업을 남긴다 (ADR-0023, #628)
 
 ### Removed
 - hub: 허브 서버, synapse, Codex app-server 워커, 서버 전용 모듈을 지운다. `tfx hub`, `tfx synapse status`, `setup --enable-hub-autostart`, `doctor --cleanup-stale-hubs` 가 빠진다. `tfx cto status --json` 에서 `live_sessions`, `live_session_groups`, `active_shards` 키가 빠진다. `@triflux/core` 에서 허브 클라이언트, adaptive, paths 등 export 가 빠진다. 의존성 better-sqlite3, pino 를 뺀다. ADR-0007 은 deprecated, 0010 과 0018 은 superseded, 0013 은 withdrawn (ADR-0023, #628)
-- cli: bin 하위 명령 `handoff`, `codex-team`, `notion-read`, `monitor`, `stealth-fetch` 와 bin `tfl`, `tfx-setup-tui`, `tfx-doctor-tui`, 셸 completions 를 지운다. `tfx` 와 `tfx help` 의 업데이트 확인, 캐시 스크립트 셋, experiments 일회성 프로브, `.geminiignore` 를 지운다. 환경변수 `TFX_TEAM_PROFILE`, `TFX_SKIP_CLOAKBROWSER_SETUP` 과 `@triflux/core` 의 handoff, stealth-fetch, claudemd-scanner export, cloakbrowser 계열 optionalDependencies 가 빠진다 (ADR-0031, #626)
+- cli: bin 하위 명령 `handoff`, `codex-team`, `notion-read`, `schema`, `monitor`, `stealth-fetch` 와 bin `tfl`, `tfx-setup-tui`, `tfx-doctor-tui`, 셸 completions 를 지운다. `tfx` 와 `tfx help` 의 업데이트 확인, 캐시 스크립트 셋, experiments 일회성 프로브, `.geminiignore` 를 지운다. 환경변수 `TFX_TEAM_PROFILE`, `TFX_SKIP_CLOAKBROWSER_SETUP` 과 `@triflux/core` 의 handoff, stealth-fetch, claudemd-scanner export, cloakbrowser 계열 optionalDependencies 가 빠진다 (ADR-0031, #626)
 - route: tfx-route.sh 의 timeout 경고와 로그 라벨, 읽는 곳이 없던 `result_file` 을 지운다. `TFX_TIMEOUT_MODE=wallclock` 에서 4번째 timeout 인자의 최소값 올림이 없어진다 (#626)
 - live: `tfx-live orchestrate` 동사와 uds-orchestrator 의 orchestrate 모드를 지운다. ask 경로는 그대로다 (#624)
 
