@@ -15,6 +15,11 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines 하한(22)과 릴리즈가 쓰는 24 를 함께 검사한다.
+        node: [22, 24]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,7 +27,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Install dependencies

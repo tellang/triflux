@@ -1,0 +1,1761 @@
+// hub/team/psmux.mjs — terminal multiplexer 세션/키바인딩/캡처/steering 관리
+//
+// 역사: psmux 는 Windows pwsh7 환경용 tmux 호환 클론 (Windows 에서 tmux 가
+// 깔리지 않거나 ConPTY 호환이 부족할 때 대안). triflux 는 원래 Windows 첫
+// 운영 환경이었고 그래서 변수 명에 `PSMUX_` prefix 가 남아있다. 실제 의미는
+// "OS 별 primary multiplexer" 다:
+//   - mac/Linux: tmux 가 primary (POSIX 표준)
+//   - Windows: psmux 가 primary (Windows pwsh7 전용)
+// 이전 코드는 mac 에서 psmux 를 시도하고 tmux 로 silent fallback 했는데,
+// 운영 fact 는 mac 표준이 tmux 라 fallback 이 아닌 정식 primary 다.
+// (PSMUX_BIN 변수 명은 backward-compat 위해 유지)
+//
+// 의존성: child_process, fs, os, path (Node.js 내장)만 사용
+
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
+import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
+import { resolveGitBashExecutable } from "../lib/bash-path.mjs";
+import childProcess from "../lib/spawn-trace.mjs";
+import { IS_WINDOWS } from "../platform.mjs";
+
+// OS 별 primary multiplexer 를 명시적으로 결정한다.
+//   - PSMUX_BIN env 가 있으면 user override (가장 우선)
+//   - Windows: psmux 가 primary. PATH + 기본 설치 경로에서 탐색.
+//   - mac/Linux: tmux 가 primary. 탐색 없이 PATH 의 tmux 를 쓴다.
+// silent fallback 은 두지 않는다. primary 가 없으면 의도된 fail.
+const PSMUX_BIN = (() => {
+  if (process.env.PSMUX_BIN) return process.env.PSMUX_BIN;
+
+  if (IS_WINDOWS) {
+    // Windows primary: psmux
+    try {
+      childProcess.execFileSync("psmux", ["-V"], {
+        stdio: "ignore",
+        timeout: 2000,
+        windowsHide: true,
+      });
+      return "psmux";
+    } catch {
+      /* not in PATH */
+    }
+    const candidates = [
+      join(process.env.LOCALAPPDATA || "", "psmux", "psmux.exe"),
+      join(process.env.APPDATA || "", "npm", "psmux.cmd"),
+      join(homedir(), "AppData", "Local", "psmux", "psmux.exe"),
+      join(homedir(), "scoop", "shims", "psmux.exe"),
+    ];
+    for (const p of candidates) {
+      if (existsSync(p)) return p;
+    }
+    return "psmux"; // 최종 — hasPsmux/hasMultiplexer 가 검증
+  }
+
+  // mac/Linux primary: tmux
+  return "tmux";
+})();
+
+/** Windows psmux 세션의 기본 셸을 PowerShell로 강제한다 (pwsh7 우선, ps5 fallback). */
+const PWSH_BIN = (() => {
+  if (!IS_WINDOWS) return "";
+  if (process.env.PSMUX_SHELL) return process.env.PSMUX_SHELL;
+  // pwsh 7 우선
+  try {
+    childProcess.execFileSync(
+      "pwsh",
+      ["-NoLogo", "-NoProfile", "-Command", "exit 0"],
+      { stdio: "ignore", timeout: 3000, windowsHide: true },
+    );
+    return "pwsh";
+  } catch {
+    /* not found */
+  }
+  // powershell 5 fallback
+  try {
+    childProcess.execFileSync(
+      "powershell.exe",
+      ["-NoLogo", "-NoProfile", "-Command", "exit 0"],
+      { stdio: "ignore", timeout: 3000, windowsHide: true },
+    );
+    return "powershell.exe";
+  } catch {
+    /* not found */
+  }
+  return ""; // 둘 다 없으면 psmux 기본 셸 사용
+})();
+const PSMUX_TIMEOUT_MS = 10000;
+const COMPLETION_PREFIX = "__TRIFLUX_DONE__:";
+const CAPTURE_ROOT =
+  process.env.PSMUX_CAPTURE_ROOT || join(tmpdir(), "psmux-steering");
+const CAPTURE_HELPER_PATH = join(
+  CAPTURE_ROOT,
+  IS_WINDOWS ? "pipe-pane-capture.ps1" : "pipe-pane-capture.sh",
+);
+const POLL_INTERVAL_MS = (() => {
+  const ms = Number.parseInt(process.env.PSMUX_POLL_INTERVAL_MS || "", 10);
+  if (Number.isFinite(ms) && ms > 0) return ms;
+  const sec = Number.parseFloat(process.env.PSMUX_POLL_INTERVAL_SEC || "1");
+  return Number.isFinite(sec) && sec > 0
+    ? Math.max(100, Math.trunc(sec * 1000))
+    : 1000;
+})();
+const PSMUX_SESSION_LIST_FORMAT =
+  "#{session_name}\t#{session_created}\t#{session_activity}\t#{session_attached}";
+
+function quoteArg(value) {
+  const str = String(value);
+  if (!/[\s"]/u.test(str)) return str;
+  return `"${str.replace(/"/g, '\\"')}"`;
+}
+
+function sanitizePathPart(value) {
+  return String(value).replace(/[<>:"/\\|?*\u0000-\u001f']/gu, "_");
+}
+
+// session names retain regex metacharacters (`.`, `-`, `+`, …) even after
+// sanitizePathPart, so escape before embedding into a pgrep regex.
+export function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function toPaneTitle(index) {
+  return index === 0 ? "lead" : `worker-${index}`;
+}
+
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.max(0, ms));
+}
+
+function sleepMsAsync(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, ms)));
+}
+
+function tokenizeCommand(command) {
+  const source = String(command || "").trim();
+  if (!source) return [];
+
+  const tokens = [];
+  let current = "";
+  let quote = null;
+
+  const pushCurrent = () => {
+    if (current.length > 0) {
+      tokens.push(current);
+      current = "";
+    }
+  };
+
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+
+    if (quote === "'") {
+      if (char === "'") {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (quote === '"') {
+      if (char === '"') {
+        quote = null;
+        continue;
+      }
+      if (char === "\\" && (next === '"' || next === "\\")) {
+        current += next;
+        index += 1;
+        continue;
+      }
+      current += char;
+      continue;
+    }
+
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+
+    if (char === "\\" && next && /[\s"'\\;]/u.test(next)) {
+      current += next;
+      index += 1;
+      continue;
+    }
+
+    if (/\s/u.test(char)) {
+      pushCurrent();
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (quote) {
+    throw new Error(`psmux 인자 파싱 실패: 닫히지 않은 인용부호 (${command})`);
+  }
+
+  pushCurrent();
+  return tokens;
+}
+
+function normalizePsmuxArgs(args) {
+  if (Array.isArray(args)) {
+    return args.map((arg) => String(arg));
+  }
+  return tokenizeCommand(args);
+}
+
+function randomToken(prefix) {
+  const base = sanitizePathPart(prefix).replace(/_+/g, "-") || "pane";
+  const entropy = Math.random().toString(36).slice(2, 10);
+  return `${base}-${Date.now()}-${entropy}`;
+}
+
+function ensurePsmuxInstalled() {
+  if (!hasMultiplexer()) {
+    const mux = IS_WINDOWS ? "psmux" : "tmux";
+    throw new Error(
+      `${mux}가 설치되어 있지 않습니다.\n\n` +
+        "설치 방법 (택 1):\n" +
+        `${formatPsmuxInstallGuidance("  ")}\n\n` +
+        "설치 후 터미널을 재시작하세요.",
+    );
+  }
+}
+
+function getCaptureSessionDir(sessionName) {
+  return join(CAPTURE_ROOT, sanitizePathPart(sessionName));
+}
+
+function getCaptureLogPath(sessionName, paneName) {
+  return join(
+    getCaptureSessionDir(sessionName),
+    `${sanitizePathPart(paneName)}.log`,
+  );
+}
+
+function ensureCaptureHelper() {
+  mkdirSync(CAPTURE_ROOT, { recursive: true });
+  if (IS_WINDOWS) {
+    writeFileSync(
+      CAPTURE_HELPER_PATH,
+      [
+        "param(",
+        "  [Parameter(Mandatory = $true)][string]$Path",
+        ")",
+        "",
+        "$parent = Split-Path -Parent $Path",
+        "if ($parent) {",
+        "  New-Item -ItemType Directory -Force -Path $parent | Out-Null",
+        "}",
+        "",
+        "# Force UTF-8 encoding — CP949 등 non-UTF-8 codepage에서 Gemini stdout 캡처 실패 방지",
+        "# InputEncoding: pipe-pane에서 읽어들이는 바이트 해석",
+        "# OutputEncoding: 네이티브 명령(gemini/codex CLI)의 stdout 디코딩",
+        "# $OutputEncoding: PowerShell 파이프라인 기본 인코딩 (BOM 없는 UTF-8)",
+        "[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+        "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+        "",
+        "$reader = [Console]::In",
+        "while (($line = $reader.ReadLine()) -ne $null) {",
+        "  Add-Content -LiteralPath $Path -Value $line -Encoding utf8",
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+  } else {
+    // macOS/Linux: bash 스크립트로 pipe-pane 캡처
+    writeFileSync(
+      CAPTURE_HELPER_PATH,
+      [
+        "#!/bin/bash",
+        'mkdir -p "$(dirname "$1")" 2>/dev/null',
+        'exec tee -a "$1"',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    chmodSync(CAPTURE_HELPER_PATH, 0o755);
+  }
+  return CAPTURE_HELPER_PATH;
+}
+
+function readCaptureLog(logPath) {
+  return existsSync(logPath) ? readFileSync(logPath, "utf8") : "";
+}
+
+function parsePaneList(output) {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [indexText, target] = line.split("\t");
+      return {
+        index: parseInt(indexText, 10),
+        target: target?.trim() || "",
+      };
+    })
+    .filter((entry) => Number.isFinite(entry.index) && entry.target)
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => entry.target);
+}
+
+function parsePsmuxEpoch(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const numeric = Number.parseInt(raw, 10);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return numeric >= 1_000_000_000_000 ? numeric : numeric * 1000;
+}
+
+function normalizeOlderThanMs(value, fallback = 0) {
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(0, Math.trunc(value));
+}
+
+function toTitleMatcher(pattern) {
+  if (!pattern) return () => true;
+  if (pattern instanceof RegExp) return (title) => pattern.test(title);
+
+  const raw = String(pattern).trim();
+  if (!raw) return () => true;
+  const regexMatch = raw.match(/^\/(.+)\/([a-z]*)$/i);
+  if (regexMatch) {
+    const [, source, flags] = regexMatch;
+    const regex = new RegExp(source, flags);
+    return (title) => regex.test(title);
+  }
+
+  return (title) => String(title).startsWith(raw);
+}
+
+function parseLegacySessionInventory(output) {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const colonIndex = line.indexOf(":");
+      if (colonIndex === -1) return null;
+
+      const sessionName = line.slice(0, colonIndex).trim();
+      const flags = [...line.matchAll(/\(([^)]*)\)/g)]
+        .map((match) => match[1])
+        .join(", ");
+      const attachedMatch = flags.match(/(\d+)\s+attached/);
+      const attachedCount = attachedMatch
+        ? Number.parseInt(attachedMatch[1], 10)
+        : /\battached\b/.test(flags)
+          ? 1
+          : 0;
+
+      if (!sessionName) return null;
+      return Object.freeze({
+        sessionName,
+        title: sessionName,
+        createdAt: null,
+        lastActivityAt: null,
+        attachedCount: Number.isFinite(attachedCount) ? attachedCount : 0,
+        isAttached: Number.isFinite(attachedCount) ? attachedCount > 0 : false,
+        ageMs: null,
+        idleMs: null,
+      });
+    })
+    .filter(Boolean);
+}
+
+function parseSessionInventory(output, now = Date.now()) {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [
+        sessionName = "",
+        createdText = "",
+        activityText = "",
+        attached = "0",
+      ] = line.split("\t");
+      const createdAt = parsePsmuxEpoch(createdText);
+      const lastActivityAt = parsePsmuxEpoch(activityText) ?? createdAt;
+      const attachedCount = Number.parseInt(attached, 10);
+      const ageMs = createdAt == null ? null : Math.max(0, now - createdAt);
+      const idleMs =
+        lastActivityAt == null ? ageMs : Math.max(0, now - lastActivityAt);
+
+      if (!sessionName) return null;
+      return Object.freeze({
+        sessionName,
+        title: sessionName,
+        createdAt,
+        lastActivityAt,
+        attachedCount: Number.isFinite(attachedCount) ? attachedCount : 0,
+        isAttached: Number.isFinite(attachedCount) ? attachedCount > 0 : false,
+        ageMs,
+        idleMs,
+      });
+    })
+    .filter(Boolean);
+}
+
+function listSessionInventoryRaw() {
+  const output = psmuxExec(["list-sessions", "-F", PSMUX_SESSION_LIST_FORMAT]);
+  const hasStructuredRows = output
+    .split("\n")
+    .some((line) => line.trim().includes("\t"));
+  return hasStructuredRows
+    ? parseSessionInventory(output)
+    : parseLegacySessionInventory(output);
+}
+
+function parsePaneDetails(output) {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split("\t");
+      // tmux는 마지막 필드가 빈 문자열이면 trailing tab을 생략할 수 있음 (4개 필드)
+      // psmux는 항상 5개 필드를 반환
+      // paneId 패턴(session:N.N)이 parts[2]에 있으면 pane_index 포함 형식
+      const hasPaneIndex = parts.length >= 4 && /\S+:\d+\.\d+$/.test(parts[2]);
+      const [
+        paneIndexText = "",
+        title = "",
+        paneId = "",
+        dead = "0",
+        deadStatus = "",
+      ] = hasPaneIndex ? parts : ["", ...parts];
+      const exitCode = dead === "1" ? Number.parseInt(deadStatus, 10) : null;
+      const paneIndex = Number.parseInt(paneIndexText, 10);
+      return {
+        title,
+        paneId,
+        paneIndex: Number.isFinite(paneIndex) ? paneIndex : null,
+        isDead: dead === "1",
+        exitCode: Number.isFinite(exitCode)
+          ? exitCode
+          : dead === "1"
+            ? 0
+            : null,
+      };
+    })
+    .filter((entry) => entry.paneId);
+}
+
+// tmux 는 -t 세션 이름을 접두사로도 매칭해, 대상이 이미 없으면 이름이 이어지는
+// 다른 세션을 잡는다(#548). psmux 는 정확히만 매칭하고 3.3.8 전에는 '=' 를 모른다.
+function exactSessionTarget(sessionName, windowSuffix = "") {
+  return `${IS_WINDOWS ? "" : "="}${sessionName}${windowSuffix}`;
+}
+
+function collectSessionPanes(sessionName) {
+  const output = psmuxExec([
+    "list-panes",
+    "-t",
+    exactSessionTarget(sessionName, ":0"),
+    "-F",
+    "#{pane_index}\t#{session_name}:#{window_index}.#{pane_index}",
+  ]);
+  return parsePaneList(output);
+}
+
+function listPaneDetails(sessionName) {
+  const output = psmuxExec([
+    "list-panes",
+    "-t",
+    sessionName,
+    "-F",
+    "#{pane_index}\t#{pane_title}\t#{session_name}:#{window_index}.#{pane_index}\t#{pane_dead}\t#{pane_dead_status}",
+  ]);
+  return parsePaneDetails(output);
+}
+
+function paneTitleToIndex(name) {
+  const lower = String(name).toLowerCase();
+  if (lower === "lead") return 0;
+  const m = /^worker-(\d+)$/.exec(lower);
+  if (!m) return -1;
+  const idx = parseInt(m[1], 10);
+  // worker-0은 유효하지 않음 (lead와 충돌, toPaneTitle은 worker-0을 생성하지 않음)
+  return idx >= 1 ? idx : -1;
+}
+
+function resolvePane(sessionName, paneNameOrTarget) {
+  const wanted = String(paneNameOrTarget);
+  const panes = listPaneDetails(sessionName);
+
+  // 1차: title 또는 paneId 직접 매칭
+  const direct = panes.find(
+    (entry) => entry.title === wanted || entry.paneId === wanted,
+  );
+  if (direct) return direct;
+
+  // 2차: psmux title 미설정 fallback — "lead"→0, "worker-N"→N 인덱스 매칭
+  const idx = paneTitleToIndex(wanted);
+  if (idx >= 0 && idx < panes.length) return panes[idx];
+
+  throw new Error(`Pane을 찾을 수 없습니다: ${paneNameOrTarget}`);
+}
+
+function refreshCaptureSnapshot(sessionName, paneNameOrTarget) {
+  const pane = resolvePane(sessionName, paneNameOrTarget);
+  const paneName = pane.title || paneNameOrTarget;
+  const logPath = getCaptureLogPath(sessionName, paneName);
+  mkdirSync(getCaptureSessionDir(sessionName), { recursive: true });
+  const snapshot = psmuxExec([
+    "capture-pane",
+    "-t",
+    pane.paneId,
+    "-p",
+    "-S",
+    "-",
+  ]);
+  writeFileSync(logPath, snapshot, "utf8");
+  return { paneId: pane.paneId, paneName, logPath, snapshot };
+}
+
+function disablePipeCapture(paneId) {
+  try {
+    psmuxExec(["pipe-pane", "-t", paneId]);
+  } catch {
+    // 기존 pipe가 없으면 무시
+  }
+}
+
+export function sendKeysToPane(paneId, text, submit = true) {
+  psmuxExec(["send-keys", "-t", paneId, "-l", text]);
+  if (submit) {
+    psmuxExec(["send-keys", "-t", paneId, "Enter"]);
+  }
+}
+
+function toPatternRegExp(pattern) {
+  if (pattern instanceof RegExp) {
+    const flags = pattern.flags.includes("m")
+      ? pattern.flags
+      : `${pattern.flags}m`;
+    return new RegExp(pattern.source, flags);
+  }
+  return new RegExp(String(pattern), "m");
+}
+
+function psmux(args, opts = {}) {
+  const normalizedArgs = normalizePsmuxArgs(args);
+  // PSMUX_SESSION 제거 — 기존 psmux 세션 내에서 호출 시 중첩 세션 차단 방지
+  const { PSMUX_SESSION: _, ...cleanEnv } = process.env;
+  try {
+    const result = childProcess.execFileSync(PSMUX_BIN, normalizedArgs, {
+      encoding: "utf8",
+      timeout: PSMUX_TIMEOUT_MS,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+      env: cleanEnv,
+      ...opts,
+    });
+    return result != null ? String(result).trim() : "";
+  } catch (error) {
+    const stderr =
+      typeof error?.stderr === "string"
+        ? error.stderr
+        : error?.stderr?.toString?.("utf8") || "";
+    const stdout =
+      typeof error?.stdout === "string"
+        ? error.stdout
+        : error?.stdout?.toString?.("utf8") || "";
+    const wrapped = new Error(
+      (stderr || stdout || error.message || "psmux command failed").trim(),
+    );
+    wrapped.status = error.status;
+    throw wrapped;
+  }
+}
+
+/** primary terminal multiplexer (Windows=psmux, mac/Linux=tmux) 실행 가능 여부 */
+export function hasMultiplexer() {
+  try {
+    childProcess.execFileSync(PSMUX_BIN, ["-V"], {
+      stdio: "ignore",
+      timeout: 3000,
+      windowsHide: true,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * backward-compat alias — historical 이름 `hasPsmux` 는 OS 별 primary 의 의미를
+ * 가린다. 외부 caller (scripts/remote-spawn.mjs,
+ * tests) 호환을 위해 alias 로 보존. 신규 코드는 hasMultiplexer 사용.
+ */
+export const hasPsmux = hasMultiplexer;
+
+/**
+ * 현재 resolved multiplexer 종류 — "psmux" | "tmux" | <user override path>.
+ * isTmuxFallback() 의 후속 — mac/Linux 에서 tmux 는 fallback 이 아닌 primary 라
+ * "fallback" 표현이 부정확해서 type 으로 정정.
+ */
+export function getMultiplexerType() {
+  return PSMUX_BIN;
+}
+
+/**
+ * psmux 커맨드 실행 래퍼
+ * @param {string|string[]} args
+ * @param {object} opts
+ * @returns {string}
+ */
+export function psmuxExec(args, opts = {}) {
+  return psmux(args, opts);
+}
+
+/**
+ * psmux 세션 생성 + 레이아웃 분할
+ * @param {string} sessionName
+ * @param {object} opts
+ * @param {'2x2'|'1xN'|'Nx1'} opts.layout
+ * @param {number} opts.paneCount
+ * @returns {{ sessionName: string, panes: string[] }}
+ */
+export function createPsmuxSession(sessionName, opts = {}) {
+  const layout =
+    opts.layout === "1xN" || opts.layout === "Nx1" ? opts.layout : "2x2";
+  const paneCount = Math.max(
+    1,
+    Number.isFinite(opts.paneCount) ? Math.trunc(opts.paneCount) : 4,
+  );
+  const limitedPaneCount =
+    layout === "2x2" ? Math.min(paneCount, 4) : paneCount;
+  const sessionTarget = `${sessionName}:0`;
+
+  const newSessionArgs = [
+    "new-session",
+    "-d",
+    "-P",
+    "-F",
+    "#{session_name}:#{window_index}.#{pane_index}",
+    "-s",
+    sessionName,
+    "-x",
+    "220",
+    "-y",
+    "55",
+  ];
+  // Windows: psmux 기본 셸이 cmd.exe일 수 있으므로 PowerShell 강제
+  // macOS/Linux: 기본 셸 사용 (PowerShell 플래그 불필요)
+  if (PWSH_BIN && IS_WINDOWS)
+    newSessionArgs.push(PWSH_BIN, "-NoLogo", "-NoProfile");
+  const leadPane = psmuxExec(newSessionArgs);
+
+  try {
+    // split-window로 생성되는 pane도 동일 셸 사용 (Windows: PowerShell 강제)
+    if (PWSH_BIN && IS_WINDOWS) {
+      try {
+        psmuxExec([
+          "set-option",
+          "-t",
+          sessionName,
+          "default-command",
+          `${PWSH_BIN} -NoLogo -NoProfile`,
+        ]);
+      } catch {
+        /* 미지원 시 무시 */
+      }
+    }
+
+    if (layout === "2x2" && limitedPaneCount >= 3) {
+      const rightPane = psmuxExec([
+        "split-window",
+        "-h",
+        "-P",
+        "-F",
+        "#{session_name}:#{window_index}.#{pane_index}",
+        "-t",
+        leadPane,
+      ]);
+      psmuxExec([
+        "split-window",
+        "-v",
+        "-P",
+        "-F",
+        "#{session_name}:#{window_index}.#{pane_index}",
+        "-t",
+        rightPane,
+      ]);
+      if (limitedPaneCount >= 4) {
+        psmuxExec([
+          "split-window",
+          "-v",
+          "-P",
+          "-F",
+          "#{session_name}:#{window_index}.#{pane_index}",
+          "-t",
+          leadPane,
+        ]);
+      }
+      psmuxExec(["select-layout", "-t", sessionTarget, "tiled"]);
+    } else if (layout === "1xN") {
+      for (let index = 1; index < limitedPaneCount; index += 1) {
+        psmuxExec(["split-window", "-h", "-t", sessionTarget]);
+      }
+      psmuxExec(["select-layout", "-t", sessionTarget, "even-horizontal"]);
+    } else {
+      for (let index = 1; index < limitedPaneCount; index += 1) {
+        psmuxExec(["split-window", "-v", "-t", sessionTarget]);
+      }
+      psmuxExec(["select-layout", "-t", sessionTarget, "even-vertical"]);
+    }
+
+    psmuxExec(["select-pane", "-t", leadPane]);
+
+    const panes = collectSessionPanes(sessionName).slice(0, limitedPaneCount);
+    panes.forEach((pane, index) => {
+      try {
+        psmuxExec(["select-pane", "-t", pane, "-T", toPaneTitle(index)]);
+      } catch {
+        // tmux 2.6 미만: select-pane -T 미지원 — pane title 없이 계속 진행
+      }
+    });
+
+    // CP949 등 non-UTF-8 codepage 환경에서 CLI stdout 깨짐 방지:
+    // pane 생성 직후 UTF-8 인코딩을 강제 설정한다.
+    // chcp 65001: 프로세스 코드 페이지를 UTF-8로 전환
+    // OutputEncoding: 네이티브 명령(gemini/codex) stdout 디코딩
+    // $OutputEncoding: PowerShell 파이프라인 기본 인코딩
+    if (IS_WINDOWS) {
+      const encodingInit = [
+        "chcp 65001 > $null",
+        "[Console]::InputEncoding = [System.Text.Encoding]::UTF8",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+        "$OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+      ].join("; ");
+      panes.forEach((paneId) => {
+        sendKeysToPane(paneId, encodingInit, true);
+      });
+    }
+
+    return { sessionName, panes };
+  } catch (error) {
+    try {
+      killPsmuxSession(sessionName);
+    } catch {
+      /* rollback is best-effort; preserve the initialization error */
+    }
+    throw error;
+  }
+}
+
+/**
+ * psmux 세션의 모든 pane PID를 수집
+ * @param {string} sessionName
+ * @returns {number[]}
+ */
+function collectPanePids(sessionName) {
+  try {
+    const output = psmuxExec([
+      "list-panes",
+      "-t",
+      exactSessionTarget(sessionName, ":"),
+      "-F",
+      "#{pane_pid}",
+    ]);
+    return output
+      .split(/\r?\n/)
+      .map((l) => Number.parseInt(l.trim(), 10))
+      .filter((pid) => Number.isFinite(pid) && pid > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Windows 프로세스 트리 강제 종료 (taskkill /T /F)
+ * @param {number} pid
+ */
+function killProcessTree(pid) {
+  if (!pid) return;
+  if (!IS_WINDOWS) {
+    // macOS/Linux: BFS로 전체 자손 수집 → SIGTERM → SIGKILL 에스컬레이션
+    const collectChildren = (parentPid) => {
+      try {
+        return childProcess
+          .execFileSync("pgrep", ["-P", String(parentPid)], {
+            encoding: "utf8",
+            timeout: 3000,
+            stdio: ["ignore", "pipe", "ignore"],
+          })
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .map(Number);
+      } catch {
+        return [];
+      }
+    };
+    const allDesc = [];
+    const queue = [pid];
+    const seen = new Set([pid]);
+    while (queue.length > 0) {
+      const cur = queue.shift();
+      for (const child of collectChildren(cur)) {
+        if (!seen.has(child)) {
+          seen.add(child);
+          allDesc.push(child);
+          queue.push(child);
+        }
+      }
+    }
+    // SIGTERM 먼저
+    for (const c of allDesc) {
+      try {
+        process.kill(c, "SIGTERM");
+      } catch {}
+    }
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {}
+    // 1초 대기 후 생존자 SIGKILL
+    try {
+      childProcess.execFileSync("sleep", ["1"], {
+        timeout: 2000,
+        stdio: "ignore",
+      });
+    } catch {}
+    for (const c of allDesc) {
+      try {
+        process.kill(c, "SIGKILL");
+      } catch {}
+    }
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {}
+    return;
+  }
+  try {
+    childProcess.execSync(`taskkill /T /F /PID ${pid}`, {
+      stdio: "ignore",
+      timeout: 5000,
+    });
+  } catch {
+    // 이미 종료된 프로세스 — 무시
+  }
+}
+
+/**
+ * 세션의 모든 pane에서 pipe-pane 캡처를 해제한다.
+ * pipe-pane을 인자 없이 호출하면 psmux가 reader 프로세스에 EOF를 보내 정상 종료시킨다.
+ * @param {string} sessionName
+ * @param {string[]} paneIds — collectSessionPanes() 결과
+ */
+function disableAllPipeCaptures(sessionName, paneIds) {
+  for (const paneId of paneIds) {
+    try {
+      psmuxExec(["pipe-pane", "-t", paneId]);
+    } catch {
+      // pane이 이미 죽었거나 pipe가 없으면 무시
+    }
+  }
+}
+
+/**
+ * 세션과 관련된 고아 pipe-pane 헬퍼 프로세스를 찾아 종료한다.
+ * pipe-pane disable 후에도 reader가 종료되지 않는 경우의 안전망.
+ * @param {string} sessionName
+ */
+function killOrphanPipeHelpers(sessionName) {
+  if (!IS_WINDOWS) {
+    // macOS/Linux: pipe-pane helper cmdline contains
+    // `<CAPTURE_ROOT>/<session>/<pane>.log`, so anchor on `/<session>/`.
+    const safeSessionUnix = escapeRegex(sanitizePathPart(sessionName));
+    try {
+      const pids = childProcess
+        .execFileSync(
+          "pgrep",
+          ["-f", `pipe-pane-capture.*/${safeSessionUnix}/`],
+          {
+            encoding: "utf8",
+            timeout: 5000,
+            stdio: ["ignore", "pipe", "ignore"],
+          },
+        )
+        .trim();
+      if (pids) {
+        for (const p of pids.split("\n").filter(Boolean)) {
+          try {
+            process.kill(Number(p), "SIGTERM");
+          } catch {}
+        }
+      }
+    } catch {
+      /* 프로세스 없으면 pgrep exit 1 — 무시 */
+    }
+    return;
+  }
+  // Windows: escape regex metacharacters and require a trailing path
+  // boundary so sibling sessions (e.g. `<session>2-...`) don't match.
+  const safeSession = escapeRegex(sanitizePathPart(sessionName));
+  try {
+    const output = childProcess.execSync(
+      `powershell -NoProfile -WindowStyle Hidden -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'pipe-pane-capture' -and $_.CommandLine -match 'tfx-headless[/\\\\]${safeSession}[-./\\\\]' } | Select-Object -ExpandProperty ProcessId"`,
+      {
+        encoding: "utf8",
+        timeout: 8000,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      },
+    );
+    const pids = output
+      .split(/\r?\n/)
+      .map((l) => Number.parseInt(l.trim(), 10))
+      .filter((p) => Number.isFinite(p) && p > 0);
+    for (const pid of pids) {
+      killProcessTree(pid);
+    }
+  } catch {
+    // WMI 조회 실패 — 무시
+  }
+}
+
+/**
+ * 세션이 spawn한 CLI(codex/gemini)의 고아 MCP 서버 프로세스를 찾아 종료한다.
+ * headless 워커가 codex/gemini를 실행하면 MCP 서버(node.exe)가 자식으로 생성되는데,
+ * 부모가 죽어도 Windows에서는 자식이 자동 종료되지 않아 고아가 된다.
+ * @param {string} sessionName
+ */
+function killOrphanMcpProcesses(sessionName) {
+  if (!IS_WINDOWS) {
+    // macOS/Linux: 세션별 스코핑
+    const safeSessionUnix = sanitizePathPart(sessionName);
+    try {
+      // MCP/result files live under `tfx-headless/<session>-<pane>.txt`, so
+      // match `tfx-headless/<session>` with a trailing boundary to avoid
+      // killing sibling sessions whose names share a prefix
+      // (e.g. `<session>2-worker-1.txt`).
+      const escSession = escapeRegex(safeSessionUnix);
+      const pids = childProcess
+        .execFileSync("pgrep", ["-f", `tfx-headless/${escSession}[-./]`], {
+          encoding: "utf8",
+          timeout: 5000,
+          stdio: ["ignore", "pipe", "ignore"],
+        })
+        .trim();
+      if (pids) {
+        for (const p of pids.split("\n").filter(Boolean)) {
+          const numPid = Number(p);
+          if (numPid <= 0) continue;
+          try {
+            process.kill(numPid, "SIGTERM");
+          } catch {}
+        }
+      }
+    } catch {}
+    return;
+  }
+  // Windows: escape + trailing boundary (mirror of the macOS branch).
+  const safeSession = escapeRegex(sanitizePathPart(sessionName));
+
+  try {
+    // 세션 결과 디렉토리 패턴으로 MCP 서버 프로세스 식별
+    const output = childProcess.execSync(
+      `powershell -NoProfile -WindowStyle Hidden -Command "$ErrorActionPreference='SilentlyContinue'; Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -match 'tfx-headless[/\\\\]${safeSession}[-./\\\\]' } | Select-Object -ExpandProperty ProcessId"`,
+      {
+        encoding: "utf8",
+        timeout: 8000,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      },
+    );
+    const pids = output
+      .split(/\r?\n/)
+      .map((l) => Number.parseInt(l.trim(), 10))
+      .filter((p) => Number.isFinite(p) && p > 0);
+    for (const pid of pids) {
+      killProcessTree(pid);
+    }
+  } catch {
+    // WMI 조회 실패 — 무시
+  }
+}
+
+function detachAttachedClients(sessionName, waitMs = 750) {
+  const attachedCount = getPsmuxSessionAttachedCount(sessionName);
+  if (!Number.isFinite(attachedCount) || attachedCount <= 0) return false;
+  try {
+    psmuxExec(["detach-client", "-t", sessionName], { stdio: "ignore" });
+    sleepMs(waitMs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * psmux 세션 종료
+ * 순서: pipe-pane 해제 → pane 프로세스 트리 정리 → 세션 종료 → 고아 정리
+ * @param {string} sessionName
+ */
+export function killPsmuxSession(sessionName) {
+  // attach된 WT/ConPTY 클라이언트가 있으면 먼저 안전하게 분리한다.
+  detachAttachedClients(sessionName);
+
+  // 1. pipe-pane 캡처 해제 — reader 프로세스에 EOF 전송하여 정상 종료 유도
+  let paneIds = [];
+  try {
+    paneIds = collectSessionPanes(sessionName);
+  } catch {
+    // 세션이 이미 죽었으면 pane 목록 수집 불가 — 계속 진행
+  }
+  disableAllPipeCaptures(sessionName, paneIds);
+
+  // pipe-pane reader가 EOF를 처리하고 정상 종료할 시간 확보
+  sleepMs(500);
+
+  // 2. pane 프로세스 트리 강제 종료 (MCP 서버 포함)
+  const pids = collectPanePids(sessionName);
+  for (const pid of pids) {
+    killProcessTree(pid);
+  }
+
+  // 3. psmux 세션 자체 종료
+  try {
+    psmuxExec(["kill-session", "-t", exactSessionTarget(sessionName)], {
+      stdio: "ignore",
+    });
+  } catch {
+    // 이미 종료된 세션 — 무시
+  }
+
+  // 4. 고아 프로세스 정리 (pipe-pane 헬퍼 + MCP 서버)
+  killOrphanPipeHelpers(sessionName);
+  killOrphanMcpProcesses(sessionName);
+}
+
+/**
+ * 활성 psmux 세션 메타데이터 조회
+ * @param {object} [opts]
+ * @param {string|RegExp} [opts.filterTitle] - 세션명 prefix 또는 /regex/flags
+ * @param {number} [opts.olderThanMs] - 생성 후 경과 시간 필터
+ * @returns {Array<{sessionName: string, title: string, createdAt: number|null, lastActivityAt: number|null, attachedCount: number, isAttached: boolean, ageMs: number|null, idleMs: number|null}>}
+ */
+export function listSessions(opts = {}) {
+  ensurePsmuxInstalled();
+  const matcher = toTitleMatcher(opts.filterTitle);
+  const olderThanMs = normalizeOlderThanMs(opts.olderThanMs, 0);
+
+  return listSessionInventoryRaw().filter((session) => {
+    if (!matcher(session.title)) return false;
+    if (olderThanMs <= 0) return true;
+    return Number.isFinite(session.ageMs) && session.ageMs >= olderThanMs;
+  });
+}
+
+/**
+ * 세션명 prefix/regex 역조회 후 세션 종료
+ * @param {string|RegExp} titlePattern
+ * @returns {{ matchedCount: number, killedCount: number, sessions: string[] }}
+ */
+export function killSessionByTitle(titlePattern) {
+  ensurePsmuxInstalled();
+  const sessions = listSessions({ filterTitle: titlePattern });
+  const killed = [];
+  for (const session of sessions) {
+    psmuxExec(["kill-session", "-t", exactSessionTarget(session.sessionName)], {
+      stdio: "ignore",
+    });
+    killed.push(session.sessionName);
+  }
+  return {
+    matchedCount: sessions.length,
+    killedCount: killed.length,
+    sessions: killed,
+  };
+}
+
+/**
+ * 오래 idle 상태인 detached 세션 일괄 정리
+ * @param {object} [opts]
+ * @param {number} [opts.olderThanMs=3600000]
+ * @param {boolean} [opts.dryRun=false]
+ * @returns {{ dryRun: boolean, matchedCount: number, killedCount: number, sessions: string[] }}
+ */
+export function pruneStale(opts = {}) {
+  ensurePsmuxInstalled();
+  const olderThanMs = normalizeOlderThanMs(opts.olderThanMs, 3600000);
+  const dryRun = opts.dryRun === true;
+  const sessions = listSessionInventoryRaw().filter((session) => {
+    if (session.isAttached) return false;
+    return Number.isFinite(session.idleMs) && session.idleMs >= olderThanMs;
+  });
+
+  if (dryRun) {
+    return {
+      dryRun: true,
+      matchedCount: sessions.length,
+      killedCount: 0,
+      sessions: sessions.map((session) => session.sessionName),
+    };
+  }
+
+  if (sessions.length === 0) {
+    return {
+      dryRun: false,
+      matchedCount: 0,
+      killedCount: 0,
+      sessions: [],
+    };
+  }
+
+  const result = killSessionByTitle(
+    new RegExp(
+      `^(?:${sessions
+        .map((session) => escapeRegex(session.title))
+        .join("|")})$`,
+    ),
+  );
+  return {
+    dryRun: false,
+    matchedCount: sessions.length,
+    killedCount: result.killedCount,
+    sessions: result.sessions,
+  };
+}
+
+/**
+ * psmux 세션 존재 확인
+ * @param {string} sessionName
+ * @returns {boolean}
+ */
+export function psmuxSessionExists(sessionName) {
+  try {
+    psmuxExec(["has-session", "-t", exactSessionTarget(sessionName)], {
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * tfx-multi- 접두사 psmux 세션 목록
+ * @returns {string[]}
+ */
+export function listPsmuxSessions() {
+  try {
+    return listSessionInventoryRaw()
+      .map((session) => session.sessionName)
+      .filter((sessionName) => sessionName.startsWith("tfx-multi-"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * pane 마지막 N줄 캡처
+ * @param {string} target
+ * @param {number} lines
+ * @returns {string}
+ */
+export function capturePsmuxPane(target, lines = 5) {
+  try {
+    const full = psmuxExec(["capture-pane", "-t", target, "-p", "-S", "-"]);
+    const nonEmpty = full.split("\n").filter((line) => line.trim() !== "");
+    return nonEmpty.slice(-lines).join("\n");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * psmux 세션 연결
+ * @param {string} sessionName
+ */
+export function attachPsmuxSession(sessionName) {
+  const result = childProcess.spawnSync(
+    PSMUX_BIN,
+    ["attach-session", "-t", sessionName],
+    {
+      stdio: "inherit",
+      timeout: 0,
+      windowsHide: false,
+    },
+  );
+  if ((result.status ?? 1) !== 0) {
+    throw new Error(`psmux attach 실패 (exit=${result.status})`);
+  }
+}
+
+/**
+ * 세션 attach client 수 조회
+ * @param {string} sessionName
+ * @returns {number|null}
+ */
+export function getPsmuxSessionAttachedCount(sessionName) {
+  try {
+    const session = listSessionInventoryRaw().find(
+      (entry) => entry.sessionName === sessionName,
+    );
+    return session ? session.attachedCount : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 팀메이트 조작 키 바인딩 설정
+ * @param {string} sessionName
+ * @param {object} opts
+ * @param {boolean} opts.inProcess
+ * @param {string} opts.taskListCommand
+ */
+export function configurePsmuxKeybindings(sessionName, opts = {}) {
+  const { inProcess = false, taskListCommand = "" } = opts;
+  const cond = `#{==:#{session_name},${sessionName}}`;
+  const target = `${sessionName}:0`;
+  const bindNext = inProcess
+    ? "select-pane -t :.+ \\; resize-pane -Z"
+    : "select-pane -t :.+";
+  const bindPrev = inProcess
+    ? "select-pane -t :.- \\; resize-pane -Z"
+    : "select-pane -t :.-";
+
+  // psmux는 세션별 서버이므로 -t target으로 세션 컨텍스트를 전달해야 한다.
+  const bindSafe = (args) => {
+    try {
+      psmuxExec(["-t", target, ...args]);
+    } catch {
+      // 미지원 시 무시
+    }
+  };
+
+  bindSafe([
+    "bind-key",
+    "-T",
+    "root",
+    "-n",
+    "S-Down",
+    "if-shell",
+    "-F",
+    cond,
+    bindNext,
+    "send-keys S-Down",
+  ]);
+  bindSafe([
+    "bind-key",
+    "-T",
+    "root",
+    "-n",
+    "S-Up",
+    "if-shell",
+    "-F",
+    cond,
+    bindPrev,
+    "send-keys S-Up",
+  ]);
+  bindSafe([
+    "bind-key",
+    "-T",
+    "root",
+    "-n",
+    "S-Right",
+    "if-shell",
+    "-F",
+    cond,
+    bindNext,
+    "send-keys S-Right",
+  ]);
+  bindSafe([
+    "bind-key",
+    "-T",
+    "root",
+    "-n",
+    "S-Left",
+    "if-shell",
+    "-F",
+    cond,
+    bindPrev,
+    "send-keys S-Left",
+  ]);
+  bindSafe([
+    "bind-key",
+    "-T",
+    "root",
+    "-n",
+    "BTab",
+    "if-shell",
+    "-F",
+    cond,
+    bindPrev,
+    "send-keys BTab",
+  ]);
+  bindSafe([
+    "bind-key",
+    "-T",
+    "root",
+    "-n",
+    "Escape",
+    "if-shell",
+    "-F",
+    cond,
+    "send-keys C-c",
+    "send-keys Escape",
+  ]);
+
+  if (taskListCommand) {
+    bindSafe([
+      "bind-key",
+      "-T",
+      "root",
+      "-n",
+      "C-t",
+      "if-shell",
+      "-F",
+      cond,
+      `display-popup -E ${quoteArg(taskListCommand)}`,
+      "send-keys C-t",
+    ]);
+  }
+}
+
+// ─── steering 기능 ───
+
+/**
+ * pane 출력 pipe-pane 캡처를 시작하고 즉시 snapshot을 기록한다.
+ * @param {string} sessionName
+ * @param {string} paneNameOrTarget
+ * @returns {{ paneId: string, paneName: string, logPath: string }}
+ */
+export function startCapture(sessionName, paneNameOrTarget) {
+  ensurePsmuxInstalled();
+  const pane = resolvePane(sessionName, paneNameOrTarget);
+  const paneName = pane.title || paneNameOrTarget;
+  const logPath = getCaptureLogPath(sessionName, paneName);
+  const helperPath = ensureCaptureHelper();
+  mkdirSync(getCaptureSessionDir(sessionName), { recursive: true });
+  writeFileSync(logPath, "", "utf8");
+
+  disablePipeCapture(pane.paneId);
+  const pipePaneCmd = IS_WINDOWS
+    ? `powershell.exe -NoLogo -NoProfile -File ${quoteArg(helperPath)} ${quoteArg(logPath)}`
+    : `${quoteArg(helperPath)} ${quoteArg(logPath)}`;
+  psmuxExec(["pipe-pane", "-t", pane.paneId, pipePaneCmd]);
+
+  refreshCaptureSnapshot(sessionName, pane.paneId);
+  return { paneId: pane.paneId, paneName, logPath };
+}
+
+/**
+ * PowerShell 명령을 pane에 비동기 전송하고 완료 토큰을 반환한다.
+ * @param {string} sessionName
+ * @param {string} paneNameOrTarget
+ * @param {string} commandText
+ * @returns {{ paneId: string, paneName: string, token: string, logPath: string }}
+ */
+/**
+ * CLI 명령(codex/legacy Gemini)이 psmux pane의 PowerShell 환경에서 단축 플래그 충돌을
+ * 일으키는 문제를 방지하기 위해 bash -c '...' 로 감싼다.
+ * - codex -o flag → PS -OutVariable/OutBuffer 충돌
+ * - legacy Gemini prompt flag (v8.6.0: -p → long-form prompt flag, PS 충돌 해소)
+ * @param {string} cmd
+ * @returns {string}
+ */
+// Windows: PowerShell의 bash가 WSL을 가리킬 수 있음. Git Bash를 명시적으로 사용.
+// WSL bash에서는 /c/Users/... 경로가 유효하지 않아 exit 127 발생.
+// psmux pane 용 (PowerShell → bash 실행): & "path" 형식
+// Node.js execSync 용 (직접 실행): "path" 형식
+const _gitBashPath = IS_WINDOWS ? resolveGitBashExecutable() : null;
+// PowerShell call operator(&)가 필요: & "C:\...\bash.exe" -c '...'
+const GIT_BASH_BIN_PS = _gitBashPath ? `& "${_gitBashPath}"` : "bash";
+// Node.js execSync에서 직접 실행할 때는 따옴표만
+const GIT_BASH_BIN_EXEC = _gitBashPath ? `"${_gitBashPath}"` : "bash";
+
+// CLI 바이너리 절대 경로 캐시 (세션 중 1회만 resolve)
+const _cliPathCache = new Map();
+function resolveCliAbsPath(name) {
+  if (_cliPathCache.has(name)) return _cliPathCache.get(name);
+  try {
+    const resolved = childProcess
+      .execSync(`${GIT_BASH_BIN_EXEC} -c "which ${name}"`, {
+        encoding: "utf8",
+        timeout: 3000,
+      })
+      .trim();
+    if (resolved) _cliPathCache.set(name, resolved);
+    return resolved || name;
+  } catch {
+    return name;
+  }
+}
+
+function wrapCliForBash(cmd) {
+  const trimmed = cmd.trimStart();
+  // PowerShell 구문(Clear-Host, Get-Content 등) 또는 completion token이 포함되면 PowerShell 직통
+  if (/Clear-Host|Get-Content|__TRIFLUX_DONE__/i.test(trimmed)) return cmd;
+  const cliMatch = trimmed.match(/^(codex|gemini)\b/u);
+  if (!cliMatch) return cmd;
+  // Node.js 측에서 절대 경로 resolve → psmux pane의 bash PATH 불일치 문제 해결 (exit 127)
+  const absPath = resolveCliAbsPath(cliMatch[1]);
+  const resolved =
+    absPath !== cliMatch[1]
+      ? trimmed.replace(new RegExp(`^${cliMatch[1]}\\b`), absPath)
+      : trimmed;
+  // 단일 따옴표 이스케이프: ' → '\''
+  const escaped = resolved.replace(/'/g, "'\\''");
+  return `${GIT_BASH_BIN_PS} -c '${escaped}'`;
+}
+
+export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
+  ensurePsmuxInstalled();
+  const pane = resolvePane(sessionName, paneNameOrTarget);
+  const paneName = pane.title || paneNameOrTarget;
+  const logPath = getCaptureLogPath(sessionName, paneName);
+
+  if (!existsSync(logPath)) {
+    startCapture(sessionName, paneName);
+  }
+
+  const token = randomToken(paneName);
+  const safeCommand = IS_WINDOWS ? wrapCliForBash(commandText) : commandText;
+
+  let wrapped;
+  if (IS_WINDOWS) {
+    // CP949 등 non-UTF-8 codepage 환경에서 CLI stdout이 깨지는 문제 방지 (belt-and-suspenders)
+    const chcpPrefix = "chcp 65001 > $null; ";
+    wrapped = `${chcpPrefix}try { ${safeCommand} } finally { $trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }; Write-Output "${COMPLETION_PREFIX}${token}:$trifluxExit" }`;
+  } else {
+    // macOS/Linux: bash 구문으로 완료 토큰 출력
+    wrapped = `{ ${safeCommand}; __ec=$?; echo "${COMPLETION_PREFIX}${token}:$__ec"; }`;
+  }
+
+  sendKeysToPane(pane.paneId, wrapped, true);
+
+  return { paneId: pane.paneId, paneName, token, logPath };
+}
+
+/**
+ * pane 캡처 로그에서 정규식 패턴을 polling으로 대기한다.
+ * @param {string} sessionName
+ * @param {string} paneNameOrTarget
+ * @param {string|RegExp} pattern
+ * @param {number} timeoutSec
+ * @param {object} [opts]
+ * @param {(snapshot: {content: string, paneId: string, paneName: string, elapsed: number}) => void} [opts.onPoll] — 각 폴링 주기마다 호출
+ * @param {AbortSignal} [opts.signal] — 외부에서 폴링 중단 요청 시 사용
+ * @returns {{ matched: boolean, paneId: string, paneName: string, logPath: string, match: string|null, aborted?: boolean }}
+ */
+export async function waitForPattern(
+  sessionName,
+  paneNameOrTarget,
+  pattern,
+  timeoutSec = 300,
+  opts = {},
+) {
+  ensurePsmuxInstalled();
+
+  // E4 크래시 복구: 초기 resolvePane도 세션 사망을 감지
+  let pane;
+  try {
+    pane = resolvePane(sessionName, paneNameOrTarget);
+  } catch (resolveError) {
+    if (!psmuxSessionExists(sessionName)) {
+      return {
+        matched: false,
+        paneId: "",
+        paneName: String(paneNameOrTarget),
+        logPath: "",
+        match: null,
+        sessionDead: true,
+      };
+    }
+    throw resolveError; // 세션은 살아있지만 pane을 못 찾음 → 원래 에러 전파
+  }
+
+  const paneName = pane.title || paneNameOrTarget;
+  // opts.logPath: dispatch 시 확정된 캡처 로그 경로 직접 지정 (타이틀 변경 내성)
+  const logPath =
+    opts.logPath && existsSync(opts.logPath)
+      ? opts.logPath
+      : getCaptureLogPath(sessionName, paneName);
+  if (!existsSync(logPath)) {
+    throw new Error(
+      `캡처 로그가 없습니다. 먼저 startCapture(${sessionName}, ${paneName})를 호출하세요.`,
+    );
+  }
+
+  const startTime = Date.now();
+  const deadline = startTime + Math.max(0, Math.trunc(timeoutSec * 1000));
+  const regex = toPatternRegExp(pattern);
+
+  if (opts?.signal?.aborted) {
+    return {
+      matched: false,
+      paneId: pane.paneId,
+      paneName,
+      logPath,
+      match: null,
+      aborted: true,
+    };
+  }
+
+  while (Date.now() <= deadline) {
+    if (opts?.signal?.aborted) {
+      return {
+        matched: false,
+        paneId: pane.paneId,
+        paneName,
+        logPath,
+        match: null,
+        aborted: true,
+      };
+    }
+    // E4 크래시 복구: capture 실패 시 세션 생존 체크
+    try {
+      if (opts.logPath) {
+        // logPath 직접 지정 시 — 셸 타이틀 변경과 무관하게 올바른 파일에 기록
+        const snapshot = psmuxExec([
+          "capture-pane",
+          "-t",
+          pane.paneId,
+          "-p",
+          "-S",
+          "-",
+        ]);
+        writeFileSync(logPath, snapshot, "utf8");
+      } else {
+        refreshCaptureSnapshot(sessionName, pane.paneId);
+      }
+    } catch {
+      if (!psmuxSessionExists(sessionName)) {
+        return {
+          matched: false,
+          paneId: pane.paneId,
+          paneName,
+          logPath,
+          match: null,
+          sessionDead: true,
+        };
+      }
+      // 일시적 오류 — 다음 폴링에서 재시도
+    }
+
+    const content = readCaptureLog(logPath);
+
+    // onPoll 콜백 — 각 폴링 주기마다 중간 상태 전달
+    if (opts.onPoll) {
+      try {
+        opts.onPoll({
+          content,
+          paneId: pane.paneId,
+          paneName,
+          elapsed: Date.now() - startTime,
+        });
+      } catch {
+        /* 콜백 예외는 삼킴 — 폴링 루프 보호 */
+      }
+    }
+
+    const match = regex.exec(content);
+    if (match) {
+      return {
+        matched: true,
+        paneId: pane.paneId,
+        paneName,
+        logPath,
+        match: match[0],
+      };
+    }
+
+    if (Date.now() > deadline) {
+      break;
+    }
+    await sleepMsAsync(POLL_INTERVAL_MS);
+    if (opts?.signal?.aborted) {
+      return {
+        matched: false,
+        paneId: pane.paneId,
+        paneName,
+        logPath,
+        match: null,
+        aborted: true,
+      };
+    }
+  }
+
+  return {
+    matched: false,
+    paneId: pane.paneId,
+    paneName,
+    logPath,
+    match: null,
+  };
+}
+
+/**
+ * 완료 토큰이 찍힐 때까지 대기하고 exit code를 파싱한다.
+ * @param {string} sessionName
+ * @param {string} paneNameOrTarget
+ * @param {string} token
+ * @param {number} timeoutSec
+ * @param {object} [opts] — waitForPattern에 전달할 옵션 (onPoll 등)
+ * @returns {{ matched: boolean, paneId: string, paneName: string, logPath: string, match: string|null, token: string, exitCode: number|null }}
+ */
+export async function waitForCompletion(
+  sessionName,
+  paneNameOrTarget,
+  token,
+  timeoutSec = 300,
+  opts = {},
+) {
+  const completionRegex = new RegExp(
+    `${escapeRegex(COMPLETION_PREFIX)}${escapeRegex(token)}:(\\d+)`,
+    "m",
+  );
+  const result = await waitForPattern(
+    sessionName,
+    paneNameOrTarget,
+    completionRegex,
+    timeoutSec,
+    opts,
+  );
+
+  // 타이밍 이슈 대응: matched=false인 경우 500ms 대기 후 최종 1회 캡처 재시도
+  if (!result.matched && !result.sessionDead && result.logPath) {
+    await new Promise((r) => setTimeout(r, 500));
+    try {
+      const pane = resolvePane(sessionName, paneNameOrTarget);
+      const snapshot = psmuxExec([
+        "capture-pane",
+        "-t",
+        pane.paneId,
+        "-p",
+        "-S",
+        "-",
+      ]);
+      writeFileSync(result.logPath, snapshot, "utf8");
+      const content = readCaptureLog(result.logPath);
+      const retryMatch = completionRegex.exec(content);
+      if (retryMatch) {
+        return {
+          ...result,
+          matched: true,
+          match: retryMatch[0],
+          token,
+          exitCode: Number.parseInt(retryMatch[1], 10),
+        };
+      }
+    } catch {
+      // 세션 이미 종료 — 무시
+    }
+  }
+
+  const exitMatch = result.match ? completionRegex.exec(result.match) : null;
+  return {
+    ...result,
+    token,
+    exitCode: exitMatch ? Number.parseInt(exitMatch[1], 10) : null,
+  };
+}
+
+// ─── CLI 진입점 ───
+
+if (process.argv[1]?.endsWith("psmux.mjs")) {
+  (() => {
+    const rawArgs = process.argv.slice(2);
+    const internalMode = rawArgs[0] === "--internal";
+    const cmd = internalMode ? rawArgs[1] : rawArgs[0];
+    const args = internalMode ? rawArgs.slice(2) : rawArgs.slice(1);
+
+    // CLI 인자 파싱 헬퍼
+    function getArg(name) {
+      const idx = args.indexOf(`--${name}`);
+      return idx !== -1 && idx + 1 < args.length ? args[idx + 1] : null;
+    }
+
+    try {
+      if (internalMode) {
+        switch (cmd) {
+          case "list": {
+            const olderThanMs = getArg("olderThanMs");
+            const filterTitle = getArg("filterTitle");
+            console.log(
+              JSON.stringify(
+                listSessions({
+                  filterTitle,
+                  olderThanMs:
+                    olderThanMs == null
+                      ? undefined
+                      : Number.parseInt(olderThanMs, 10),
+                }),
+                null,
+                2,
+              ),
+            );
+            break;
+          }
+          case "kill-by-title": {
+            const pattern = args[0];
+            if (!pattern) {
+              console.error(
+                "사용법: node psmux.mjs --internal kill-by-title <title-prefix|/regex/>",
+              );
+              process.exit(1);
+            }
+            console.log(JSON.stringify(killSessionByTitle(pattern), null, 2));
+            break;
+          }
+          case "prune-stale": {
+            const olderThanMs = getArg("olderThanMs");
+            const dryRun = args.includes("--dry-run");
+            console.log(
+              JSON.stringify(
+                pruneStale({
+                  olderThanMs:
+                    olderThanMs == null
+                      ? undefined
+                      : Number.parseInt(olderThanMs, 10),
+                  dryRun,
+                }),
+                null,
+                2,
+              ),
+            );
+            break;
+          }
+          default:
+            console.error(
+              "사용법: node psmux.mjs --internal list [--filterTitle <prefix|/regex/>] [--olderThanMs <ms>]",
+            );
+            console.error(
+              "    또는: node psmux.mjs --internal kill-by-title <prefix|/regex/>",
+            );
+            console.error(
+              "    또는: node psmux.mjs --internal prune-stale [--olderThanMs <ms>] [--dry-run]",
+            );
+            process.exit(1);
+        }
+        return;
+      }
+
+      console.error(
+        "사용법: node psmux.mjs --internal list|kill-by-title|prune-stale [args]",
+      );
+      process.exit(1);
+    } catch (err) {
+      console.error(`오류: ${err.message}`);
+      process.exit(1);
+    }
+  })();
+}

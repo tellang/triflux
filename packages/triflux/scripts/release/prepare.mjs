@@ -104,6 +104,8 @@ export async function prepareRelease({
       name: "npm-pack-dry-run",
       command: "npm",
       args: ["pack", "--dry-run"],
+      // 게시는 packages/triflux 에서 하므로 그 레이아웃을 검사한다.
+      options: { cwd: join(rootDir, "packages", "triflux") },
     },
   ];
 

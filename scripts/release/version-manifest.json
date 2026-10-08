@@ -36,7 +36,13 @@
     },
     {
       "file": "package-lock.json",
-      "paths": [["version"], ["packages", "", "version"]]
+      "paths": [
+        ["version"],
+        ["packages", "", "version"],
+        ["packages", "packages/core", "version"],
+        ["packages", "packages/remote", "version"],
+        ["packages", "packages/triflux", "version"]
+      ]
     }
   ]
 }

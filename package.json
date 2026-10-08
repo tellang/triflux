@@ -1,6 +1,7 @@
 {
   "name": "triflux",
   "version": "10.53.0",
+  "private": true,
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Antigravity, and Claude",
   "type": "module",
   "bin": {
@@ -64,7 +65,7 @@
     "release:verify": "node scripts/release/verify.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "repository": {
     "type": "git",

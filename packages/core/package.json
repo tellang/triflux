@@ -10,7 +10,7 @@
     "./scripts/*": "./scripts/*"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5"

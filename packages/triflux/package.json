@@ -11,15 +11,14 @@
     "tfx-doctor": "bin/tfx-doctor.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "postinstall": "node scripts/setup.mjs"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
-    "@triflux/core": "^10.25.0",
-    "@triflux/remote": "^10.25.0"
+    "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "files": [
     "adapters",

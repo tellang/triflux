@@ -9,7 +9,7 @@
     "./hub/*": "./hub/*"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "peerDependencies": {
     "@triflux/core": "^10.0.0-alpha.1"
