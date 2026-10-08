@@ -132,3 +132,49 @@ it("공식 usage 응답을 현재 모델의 사용률로 바꾸고 실패를 0%�
     rmSync(homeDir, { recursive: true, force: true });
   }
 });
+
+it("로그인 판정: 프로젝트, 계정 파일, 최근 조회 성공만 로그인으로 본다", () => {
+  const homeDir = mkdtempSync(join(tmpdir(), "triflux-agy-auth-"));
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      import assert from "node:assert/strict";
+      import { mkdirSync, writeFileSync } from "node:fs";
+      import { dirname } from "node:path";
+      import { getAntigravityAuthKind, refreshAntigravityQuotaCache } from ${JSON.stringify(providerUrl.href)};
+      import { ANTIGRAVITY_OAUTH_PATHS, ANTIGRAVITY_QUOTA_CACHE_PATH, ANTIGRAVITY_SETTINGS_PATH } from ${JSON.stringify(new URL("../../hud/constants.mjs", import.meta.url).href)};
+      const write = (path, value) => {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, JSON.stringify(value));
+      };
+      const ok = () => JSON.stringify({ status: "SUCCESS", command: { name: "usage", data: { groups: [] } } });
+      const fail = () => { throw new Error("timeout"); };
+      assert.equal(getAntigravityAuthKind(), null);
+      write(ANTIGRAVITY_QUOTA_CACHE_PATH, { accountLabel: "old@example.test", buckets: [], signedInAt: Date.now() });
+      assert.equal(getAntigravityAuthKind(), null, "다른 계정의 캐시는 근거가 아니다");
+      refreshAntigravityQuotaCache(ok);
+      assert.equal(getAntigravityAuthKind(), "account", "Keychain 로그인은 조회 성공으로 판정한다");
+      refreshAntigravityQuotaCache(fail);
+      assert.equal(getAntigravityAuthKind(), "account", "일시 실패로 회색이 되지 않는다");
+      write(ANTIGRAVITY_QUOTA_CACHE_PATH, { accountLabel: null, buckets: null, signedInAt: 1 });
+      assert.equal(getAntigravityAuthKind(), null, "오래전 성공은 근거가 아니다");
+      write(ANTIGRAVITY_OAUTH_PATHS[0], { email: "user@example.test" });
+      assert.equal(getAntigravityAuthKind(), "account");
+      write(ANTIGRAVITY_SETTINGS_PATH, { gcp: { project: "p" } });
+      assert.equal(getAntigravityAuthKind(), "project");
+    `,
+      ],
+      {
+        encoding: "utf8",
+        env: { ...process.env, HOME: homeDir, USERPROFILE: homeDir },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(homeDir, { recursive: true, force: true });
+  }
+});

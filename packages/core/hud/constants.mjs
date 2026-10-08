@@ -171,6 +171,8 @@ export const ANTIGRAVITY_REFRESH_LOCK_PATH = join(
   ".antigravity-refresh-lock",
 );
 export const ANTIGRAVITY_QUOTA_STALE_MS = 5 * 60 * 1000;
+// 조회가 잠시 실패해도 이 시간 안에 성공한 적이 있으면 로그인 상태로 본다.
+export const ANTIGRAVITY_SIGNED_IN_GRACE_MS = 60 * 60 * 1000;
 export const ANTIGRAVITY_REFRESH_FLAG = "--refresh-antigravity-quota";
 export const ACCOUNT_LABEL_WIDTH = 10;
 export const PROVIDER_PREFIX_WIDTH = 2;

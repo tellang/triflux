@@ -137,6 +137,9 @@ export function getMicroLine(
 }
 
 function antigravityPercentText(quota) {
+  if (quota?.auth === "project") {
+    return geminiBlue("GCP".padStart(PERCENT_CELL_WIDTH));
+  }
   return quota?.usedPercent != null
     ? colorByProvider(
         quota.usedPercent,
@@ -489,9 +492,7 @@ function getAntigravityRow(
   if (project) {
     // 쿼터 대신 과금 방식을 막대 자리(막대가 없는 표시에서는 퍼센트 자리)에 보인다.
     const mark = isFull ? `${markerColor("GCP".padEnd(GAUGE_WIDTH))} ` : "";
-    const cell = isFull
-      ? percent
-      : markerColor("GCP".padStart(PERCENT_CELL_WIDTH));
+    const cell = isFull ? dim(formatPlaceholderPercentCell()) : percent;
     slot = `${dim("--:")}${mark}${cell}${timeCell}`;
   } else {
     const bar = hasValue
