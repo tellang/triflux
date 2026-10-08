@@ -1,8 +1,8 @@
 // hub/team/pane.mjs — pane별 CLI 실행 + stdin 주입
 // 의존성: child_process, fs, os, path (Node.js 내장)만 사용
-import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { privateTmpDir } from "../lib/private-tmp.mjs";
 import { psmuxExec } from "./psmux.mjs";
 import { detectMultiplexer, tmuxExec } from "./session.mjs";
 
@@ -235,8 +235,7 @@ export function injectPrompt(
   prompt,
   { useFileRef = false, cli = null } = {},
 ) {
-  const tmpDir = join(tmpdir(), "tfx-multi");
-  mkdirSync(tmpDir, { recursive: true });
+  const tmpDir = privateTmpDir("tfx-multi");
 
   const safeTarget = target.replace(/[:.]/g, "-");
   const tmpFile = join(tmpDir, `prompt-${safeTarget}-${Date.now()}.txt`);

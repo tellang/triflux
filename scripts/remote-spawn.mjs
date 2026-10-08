@@ -20,7 +20,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "fs";
-import { platform as getPlatform, homedir, tmpdir } from "os";
+import { platform as getPlatform, homedir } from "os";
 import {
   basename,
   dirname,
@@ -31,6 +31,7 @@ import {
 } from "path";
 import { fileURLToPath } from "url";
 import { readHost, readHosts } from "../hub/lib/hosts-compat.mjs";
+import { privateTmpDir } from "../hub/lib/private-tmp.mjs";
 import { spawn } from "../hub/lib/spawn-trace.mjs";
 import {
   attachPsmuxSession,
@@ -688,7 +689,7 @@ async function spawnLocalFallback(args, claudePath, prompt) {
   if (prompt) {
     // 프롬프트를 명령줄에 넣지 않는다. 바깥 큰따옴표 층은 PowerShell 이스케이프로 못 막는다.
     const promptFile = join(
-      tmpdir(),
+      privateTmpDir("remote-spawn"),
       `tfx-prompt-${randomUUID().slice(0, 8)}.md`,
     );
     writeFileSync(promptFile, prompt, { encoding: "utf8", mode: 0o600 });
@@ -768,7 +769,10 @@ async function spawnRemoteFallback(args, promptContext) {
   }
 
   const scriptContent = scriptLines.join("\n");
-  const localScript = join(tmpdir(), "tfx-remote-spawn.ps1");
+  const localScript = join(
+    privateTmpDir("remote-spawn"),
+    "tfx-remote-spawn.ps1",
+  );
   writeFileSync(localScript, scriptContent, "utf8");
 
   try {
@@ -1248,7 +1252,7 @@ function uploadRemotePromptFile(host, env, stageId, prompt) {
   ensureRemoteStageDir(host, env, stageDir);
 
   const localPromptFile = join(
-    tmpdir(),
+    privateTmpDir("remote-spawn"),
     `tfx-prompt-${randomUUID().slice(0, 8)}.md`,
   );
   writeFileSync(localPromptFile, prompt, { encoding: "utf8" });
@@ -1572,7 +1576,10 @@ function spawnLocal(args, claudePath, prompt) {
   // 정리는 pwsh 스크립트 내부에서 수행 (Node exit 시 삭제하면 pane 실행 전 사라짐)
   let tmpFile = null;
   if (prompt) {
-    tmpFile = join(tmpdir(), `tfx-prompt-${randomUUID().slice(0, 8)}.md`);
+    tmpFile = join(
+      privateTmpDir("remote-spawn"),
+      `tfx-prompt-${randomUUID().slice(0, 8)}.md`,
+    );
     writeFileSync(tmpFile, prompt, { encoding: "utf8" });
   }
 
@@ -1602,7 +1609,7 @@ function spawnLocal(args, claudePath, prompt) {
         `exit $trifluxExit`,
       ].join("\n");
       const scriptFile = join(
-        tmpdir(),
+        privateTmpDir("remote-spawn"),
         `tfx-spawn-${randomUUID().slice(0, 8)}.ps1`,
       );
       writeFileSync(scriptFile, scriptContent, { encoding: "utf8" });
@@ -1803,7 +1810,7 @@ async function spawnRemote(args, promptContext) {
       ensureRemoteStageDir(host, env, stageDir);
 
       const localPromptFile = join(
-        tmpdir(),
+        privateTmpDir("remote-spawn"),
         `tfx-prompt-${randomUUID().slice(0, 8)}.md`,
       );
       writeFileSync(localPromptFile, prompt, { encoding: "utf8" });
@@ -1829,7 +1836,7 @@ async function spawnRemote(args, promptContext) {
           `exit $trifluxExit`,
         ].join("\n");
         const localScript = join(
-          tmpdir(),
+          privateTmpDir("remote-spawn"),
           `tfx-spawn-${randomUUID().slice(0, 8)}.ps1`,
         );
         writeFileSync(localScript, scriptContent, { encoding: "utf8" });
