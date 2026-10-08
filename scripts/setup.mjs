@@ -822,16 +822,6 @@ function hasProfileSection(tomlContent, profileName) {
   return new RegExp(section, "m").test(tomlContent);
 }
 
-function replaceProfileSection(tomlContent, profileName, lines) {
-  const header = `[profiles.${profileName}]`;
-  const sectionRe = new RegExp(
-    `^\\[profiles\\.${escapeRegExp(profileName)}\\]\\s*\\n?(?:(?!\\[)[^\\n]*\\n?)*`,
-    "m",
-  );
-  const replacement = `${header}\n${lines.join("\n")}\n`;
-  return tomlContent.replace(sectionRe, replacement);
-}
-
 // Codex 0.134+ 마이그레이션: config.toml 의 inline [profiles.NAME] 테이블을 제거한다.
 // (프로필은 별도 파일 ~/.codex/NAME.config.toml 로 이동했고, inline 테이블은 0.134 에서
 //  `--profile NAME` 사용 시 거부되므로 잔존 inline 을 정리해야 한다.)
@@ -1968,7 +1958,6 @@ export {
   readMarker,
   reapLegacyTrayProcesses,
   removeProfileSection,
-  replaceProfileSection,
   retireOldInstallFiles,
   SETUP_MARKER_PATH,
   SETUP_USER_STATE_FILES,

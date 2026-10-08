@@ -684,7 +684,7 @@ function sumMemoryEstimateMb(panes, { execFile = execFileSync } = {}) {
   return seen ? total : null;
 }
 
-export function inspectDetachedTmuxSessions({
+function inspectDetachedTmuxSessions({
   prefix = DEFAULT_TMUX_CLEANUP_PREFIX,
   ageMin = DEFAULT_TMUX_CLEANUP_AGE_MIN,
   platform = process.platform,
@@ -763,7 +763,7 @@ export function inspectDetachedTmuxSessions({
   };
 }
 
-export async function cleanupDetachedTmuxSessions({
+async function cleanupDetachedTmuxSessions({
   sessions,
   dryRun = true,
   apply = false,
@@ -2353,7 +2353,6 @@ async function cmdDoctor(options = {}) {
           // --fix 모드: npm install 실행 (Windows 호환 shell: true)
           info(`npm install 실행 중 (${PKG_ROOT})...`);
           try {
-            const { execFileSync } = await import("node:child_process");
             execFileSync("npm", ["install", "--no-audit", "--no-fund"], {
               cwd: PKG_ROOT,
               stdio: "inherit",
@@ -2724,10 +2723,7 @@ async function cmdDoctor(options = {}) {
           }
         } else {
           // --fix 없이는 개수만 보고
-          const { execSync: execSyncDoctor } = await import(
-            "node:child_process"
-          );
-          const countStr = execSyncDoctor(
+          const countStr = execSync(
             `powershell -NoProfile -WindowStyle Hidden -Command "(Get-Process node -ErrorAction SilentlyContinue).Count"`,
             { encoding: "utf8", timeout: 5000 },
           ).trim();
