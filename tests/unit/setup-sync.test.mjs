@@ -586,9 +586,9 @@ describe("setup-sync: user-state file exclusions", () => {
 });
 
 describe("setup-sync: dry-run 실행", () => {
-  // 훅 설치기(ensureCodexHooks/ensureAgyHooks)는 TEST_LOCK_PID 가 설정된 테스트
+  // 훅 설치기(ensureCodexHooks)와 agy 옛 훅 정리(cleanupAgyHooks)는 TEST_LOCK_PID 가 설정된 테스트
   // 실행 중에는 explicit seam 없이 실제 HOME 에 쓰지 않도록 자체 가드되어 있다
-  // (scripts/ensure-*-hooks.mjs 참조). spawn 된 setup.mjs 도 TEST_LOCK_PID 를
+  // (scripts/ensure-codex-hooks.mjs, scripts/lib/legacy-hook-cleanup.mjs 참조). spawn 된 setup.mjs 도 TEST_LOCK_PID 를
   // 상속하므로 이 dry-run 은 실제 CLI config 를 오염시키지 않는다. setup.mjs 가
   // 백그라운드 프로세스(HUD pre-warm, MCP 점검)를 띄우기 때문에 HOME 자체를 tmp 로
   // 격리하면 정리 race(ENOTEMPTY)가 발생하므로 가드 방식을 쓴다.

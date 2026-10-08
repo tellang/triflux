@@ -9,7 +9,10 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { cleanupLegacyHooks } from "../../scripts/lib/legacy-hook-cleanup.mjs";
+import {
+  cleanupAgyHooks,
+  cleanupLegacyHooks,
+} from "../../scripts/lib/legacy-hook-cleanup.mjs";
 
 const dirs = [];
 afterEach(() => {
@@ -112,4 +115,63 @@ test("triflux를 언급만 하는 다른 command는 보존한다", () => {
   assert.equal(result.changed, false);
   assert.equal(readFileSync(settingsPath, "utf8"), original);
   assert.deepEqual(readdirSync(dir), ["settings.json"]);
+});
+
+function agyGroup(command, extra = {}) {
+  return {
+    enabled: true,
+    PreInvocation: [{ type: "command", command, timeout: 15 }],
+    ...extra,
+  };
+}
+
+test("agy hooks.json 에서 옛 설치기 모양의 triflux-session 만 지우고 나머지는 경고로 남긴다", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tfx-agy-hook-test-"));
+  dirs.push(dir);
+  const hooksPath = join(dir, "hooks.json");
+  const run = (hooks, opts = {}) => {
+    writeFileSync(hooksPath, JSON.stringify(hooks));
+    return cleanupAgyHooks({ geminiConfigHome: dir, ...opts });
+  };
+  const other = { enabled: true, Stop: [{ type: "command", command: "x" }] };
+  // 첫 버전은 node 경로에 따옴표가 없었고, 이후 버전은 Windows 에서 백슬래시를 두 번 썼다.
+  for (const command of [
+    '/opt/homebrew/bin/node "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
+    'C:/node/node.exe "C:\\\\npm\\\\triflux\\\\hooks\\\\agy-session-hook.mjs"',
+    '"/usr/bin/nodejs" "/usr/lib/triflux/hooks/agy-session-hook.mjs"',
+    '"C:\\\\Program Files\\\\nodejs\\\\node.exe" "C:\\\\npm\\\\triflux\\\\hooks\\\\agy-session-hook.mjs"',
+  ]) {
+    assert.equal(
+      run({ other, "triflux-session": agyGroup(command) }, { dryRun: true })
+        .removed,
+      1,
+    );
+    const result = run({ other, "triflux-session": agyGroup(command) });
+    assert.equal(result.changed, true);
+    assert.deepEqual(result.leftover, []);
+    assert.deepEqual(JSON.parse(readFileSync(hooksPath, "utf8")), { other });
+  }
+  assert.ok(
+    readdirSync(dir).some((name) => name.includes("bak-tfx-agy-hooks")),
+  );
+
+  // 모양이 다르면 지우지 않고, 훅 스크립트를 가리키면 leftover 로 알린다.
+  const script = '"/opt/triflux/hooks/agy-session-hook.mjs"';
+  for (const group of [
+    agyGroup(`node /opt/tools/report.mjs ${script}`),
+    agyGroup(`/usr/bin/node /opt/user/nodejs ${script}`),
+    agyGroup(`/opt/My Node/node ${script}`),
+    agyGroup(`echo user\n/opt/node ${script}`),
+    agyGroup(`"echo user\n/opt/node" ${script}`),
+    agyGroup('"/opt/node" "/opt/custom-hooks/agy-session-hook.mjs"'),
+    agyGroup(`"/opt/node" ${script}`, { enabled: false }),
+    agyGroup(`"/opt/node" ${script}`, { Stop: [] }),
+  ]) {
+    const hooks = { "triflux-session": group };
+    const result = run(hooks);
+    assert.equal(result.changed, false);
+    assert.deepEqual(result.leftover, ["triflux-session"]);
+    assert.deepEqual(JSON.parse(readFileSync(hooksPath, "utf8")), hooks);
+  }
+  assert.deepEqual(run({ "triflux-session": other }).leftover, []);
 });

@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { writeRotatedBackup } from "./backup-rotation.mjs";
 
 // 설치된 Triflux 실행 대상만 식별한다.
 const MANAGED_FILENAMES = [
@@ -226,6 +227,135 @@ export function cleanupLegacyHooks({
       }
       throw error;
     }
+    result.changed = true;
+  } catch (error) {
+    result.ok = false;
+    result.error = error.message;
+  }
+  return result;
+}
+
+const AGY_HOOK_GROUP = "triflux-session";
+
+// 옛 ensure-agy-hooks 의 quoteCommandPath 와 같은 인용.
+function quoteAgyCommandPath(value) {
+  return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function unquoteAgyCommandPath(quoted) {
+  return quoted.slice(1, -1).replace(/\\(["\\])/g, "$1");
+}
+
+function lastSegments(path, count) {
+  return path.split(/[/\\]+/u).slice(-count);
+}
+
+// 옛 설치기가 만든 명령을 풀어 같은 공식으로 다시 만들었을 때 똑같아야 한다.
+// 첫 버전은 node 경로를 따옴표 없이, 이후 버전은 따옴표로 감쌌다.
+function isInstallerAgyCommand(command) {
+  const match = /^(?:("(?:[^"\\]|\\.)*")|([^"]+)) ("(?:[^"\\]|\\.)*")$/u.exec(
+    command,
+  );
+  if (!match) return false;
+  // 따옴표 없는 node 경로(첫 버전의 process.execPath)는 공백과 셸 기호가 없는 절대 경로만 인정한다.
+  // 공백이 있으면 "node 사용자스크립트" 와 구분할 수 없어 지우지 않고 doctor 경고로 남긴다.
+  if (
+    match[2] &&
+    !/^(?:\/|[A-Za-z]:[\\/]|\\\\)[^\s"';&|`$<>]*$/u.test(match[2])
+  )
+    return false;
+  const nodeBin = match[1] ? unquoteAgyCommandPath(match[1]) : match[2];
+  const script = unquoteAgyCommandPath(match[3]);
+  if (/[\r\n]/u.test(nodeBin + script)) return false;
+  const [dir, file] = lastSegments(script, 2);
+  if (dir !== "hooks" || file !== "agy-session-hook.mjs") return false;
+  if (!/^node(?:js)?(?:\.exe)?$/iu.test(lastSegments(nodeBin, 1)[0]))
+    return false;
+  const rebuilt = `${match[1] ? quoteAgyCommandPath(nodeBin) : nodeBin} ${quoteAgyCommandPath(script)}`;
+  return rebuilt === command;
+}
+
+// 모든 버전의 옛 설치기가 쓴 그룹 모양과 정확히 같을 때만 우리 것이다.
+function isInstallerAgyGroup(group) {
+  if (!group || typeof group !== "object" || Array.isArray(group)) return false;
+  const keys = Object.keys(group).sort().join(",");
+  if (keys !== "PreInvocation,enabled" || group.enabled !== true) return false;
+  const entries = group.PreInvocation;
+  if (!Array.isArray(entries) || entries.length !== 1) return false;
+  const [entry] = entries;
+  return (
+    Object.keys(entry || {})
+      .sort()
+      .join(",") === "command,timeout,type" &&
+    entry.type === "command" &&
+    entry.timeout === 15 &&
+    typeof entry.command === "string" &&
+    isInstallerAgyCommand(entry.command)
+  );
+}
+
+// 자동으로 지우지 않은 그룹 중 훅 스크립트를 언급하는 것. doctor 가 경고만 한다.
+function agyHookMentions(hooks) {
+  return Object.entries(hooks)
+    .filter(([, group]) =>
+      JSON.stringify(group ?? null).includes("agy-session-hook.mjs"),
+    )
+    .map(([name]) => name);
+}
+
+/** agy hooks.json 에서 옛 setup 이 등록한 triflux-session 훅을 지운다. */
+export function cleanupAgyHooks({ geminiConfigHome, dryRun = false } = {}) {
+  const hooksPath = join(
+    geminiConfigHome || join(homedir(), ".gemini", "config"),
+    "hooks.json",
+  );
+  const result = {
+    ok: true,
+    changed: false,
+    wouldChange: false,
+    removed: 0,
+    leftover: [],
+    hooksPath,
+    backupPath: null,
+    error: null,
+  };
+  // 테스트 실행 중에는 명시 경로 없이 실제 HOME 을 고치지 않는다.
+  if (!geminiConfigHome && process.env.TEST_LOCK_PID) return result;
+  try {
+    if (!existsSync(hooksPath)) return result;
+    const targetPath = realpathSync(hooksPath);
+    const original = readFileSync(targetPath, "utf8");
+    const hooks = JSON.parse(original);
+    if (!hooks || typeof hooks !== "object" || Array.isArray(hooks))
+      return result;
+    const ours = isInstallerAgyGroup(hooks[AGY_HOOK_GROUP]);
+    if (ours) {
+      result.removed = 1;
+      result.wouldChange = true;
+    }
+    result.leftover = agyHookMentions(hooks).filter(
+      (name) => !(ours && name === AGY_HOOK_GROUP),
+    );
+    if (!ours || dryRun) return result;
+
+    delete hooks[AGY_HOOK_GROUP];
+    const mode = statSync(targetPath).mode & 0o777;
+    const stamp = new Date()
+      .toISOString()
+      .replace(/[-:.TZ]/g, "")
+      .slice(0, 14);
+    result.backupPath = writeRotatedBackup(targetPath, original, {
+      label: "bak-tfx-agy-hooks",
+      suffix: stamp,
+      mode,
+    });
+    const temporary = `${targetPath}.tfx-${process.pid}-${Date.now()}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(hooks, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode,
+    });
+    renameSync(temporary, targetPath);
     result.changed = true;
   } catch (error) {
     result.ok = false;

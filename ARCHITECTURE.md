@@ -37,7 +37,7 @@ source of truth(SSOT)이고, `packages/*`는 배포용 미러다.
 | `hub/` | 실행 엔진 공용부: bridge CLI, CLI 어댑터 | `bridge.mjs`, `cli-adapter-base.mjs` |
 | `hub/team/` | 팀/멀티에이전트 오케스트레이션 | `headless.mjs`, `claude-daemon-control.mjs` |
 | `hub/` 하위 | 세분 모듈 | `diagnostics/`, `lib/`, `workers/` |
-| `hooks/` | Codex 세션 기록과 Antigravity 빈 훅 | `codex-session-hook.mjs`, `agy-session-hook.mjs` |
+| `hooks/` | Codex 세션 기록 | `codex-session-hook.mjs` |
 | `hud/` | 상태 표시(HUD) / 모니터 | `context-monitor.mjs`, `renderers.mjs`, `providers/` |
 | `scripts/` | 라우팅 스크립트 + 릴리즈 게이트 | `tfx-route.sh`(라우팅 엔진), `scripts/release/`(릴리즈 자동화), `scripts/lib/`(공용 helper) |
 | `skills/` | Claude Code 스킬 정의 (`SKILL.md`) | `tfx-auto`, `tfx-remote`, `tfx-doctor` 등 |
