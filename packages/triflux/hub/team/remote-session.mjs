@@ -162,7 +162,7 @@ function probeRemoteEnvViaPosix(host) {
 // ── Cache ───────────────────────────────────────────────────────
 
 // cwd 의 .omc 에 두면 실행한 저장소마다 원격 홈 경로가 흩어져 남는다. 사용자 상태 경로에 둔다.
-export function remoteEnvCacheDir(env = process.env) {
+export function tfxStateDir(env = process.env) {
   // XDG 명세대로 상대 경로는 무시한다. 받아들이면 캐시가 다시 cwd 아래로 간다.
   const xdgState = isAbsolute(env.XDG_STATE_HOME || "")
     ? env.XDG_STATE_HOME
@@ -172,7 +172,11 @@ export function remoteEnvCacheDir(env = process.env) {
     (process.platform === "win32"
       ? env.LOCALAPPDATA || join(homedir(), "AppData", "Local")
       : join(homedir(), ".local", "state"));
-  return join(stateRoot, "triflux", "remote-env");
+  return join(stateRoot, "triflux");
+}
+
+export function remoteEnvCacheDir(env = process.env) {
+  return join(tfxStateDir(env), "remote-env");
 }
 
 function getEnvCachePath(host, cacheDir) {

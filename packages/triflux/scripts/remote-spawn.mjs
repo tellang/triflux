@@ -23,6 +23,7 @@ import {
 import { platform as getPlatform, homedir, tmpdir } from "os";
 import {
   basename,
+  dirname,
   join,
   posix as posixPath,
   resolve,
@@ -49,6 +50,7 @@ import {
   posixRemoteCommand,
   pwshRemoteCommand,
   remoteEnvCacheDir,
+  tfxStateDir,
 } from "../hub/team/remote-session.mjs";
 
 const MAX_HANDOFF_BYTES = 1 * 1024 * 1024; // 1 MB
@@ -1117,6 +1119,7 @@ export function buildRemotePosixSpawnCommands(spec = {}) {
     dir,
     permissionFlags = "",
     promptFile = null,
+    runId = null,
     sessionName = null,
   } = spec;
   if (!claudePath) {
@@ -1125,9 +1128,9 @@ export function buildRemotePosixSpawnCommands(spec = {}) {
 
   const commands = [];
   // --kill 이 이 세션만 정리하도록 claude 를 띄울 셸의 PID 를 남긴다.
-  if (sessionName) {
-    const pidFile = remoteSessionPidFile(sessionName);
-    commands.push(`mkdir -p "$(dirname ${pidFile})" && echo $$ > ${pidFile}`);
+  if (sessionName && runId) {
+    const runDir = remoteRunDir(sessionName, runId);
+    commands.push(`mkdir -p ${runDir} && echo $$ > ${runDir}/shell.pid`);
   }
   const pathExport = buildRemotePathExportCommand(binDirs);
   if (pathExport) commands.push(pathExport);
@@ -1645,6 +1648,8 @@ async function spawnRemoteViaTmux(args, promptContext, env) {
     `${SPAWN_SESSION_PREFIX}${host}-${slug}`,
   );
   const paneId = `${sessionName}:0.0`;
+  const runId = randomUUID().slice(0, 8);
+  writeSpawnRecord(sessionName, { host, runId });
   const permissionFlags = getPermissionFlag().join(" ");
   let prompt = promptContext.prompt;
 
@@ -1675,6 +1680,7 @@ async function spawnRemoteViaTmux(args, promptContext, env) {
     host,
     buildRemotePosixSpawnCommands({
       binDirs: resolveRemoteBinDirs(host),
+      runId,
       sessionName,
       claudePath: env.claudePath,
       dir: resolvedDir,
@@ -1760,6 +1766,8 @@ async function spawnRemote(args, promptContext) {
   const slug = buildSessionSlug(args.spawnName);
   const sessionName = deduplicateSessionName(`tfx-spawn-${host}-${slug}`);
   const paneId = `${sessionName}:0.0`;
+  const runId = randomUUID().slice(0, 8);
+  writeSpawnRecord(sessionName, { host, runId });
   const permissionFlags = getPermissionFlag().join(" ");
   let prompt = promptContext.prompt;
 
@@ -1841,6 +1849,7 @@ async function spawnRemote(args, promptContext) {
       } else {
         for (const command of buildRemotePosixSpawnCommands({
           binDirs: remoteBinDirs,
+          runId,
           sessionName,
           claudePath: env.claudePath,
           dir: resolvedDir,
@@ -1855,6 +1864,7 @@ async function spawnRemote(args, promptContext) {
     } else {
       for (const command of buildRemotePosixSpawnCommands({
         binDirs: remoteBinDirs,
+        runId,
         sessionName,
         claudePath: env.claudePath,
         dir: resolvedDir,
@@ -2149,27 +2159,65 @@ function listKnownHostNames() {
   }
 }
 
-/** spawn 때 원격 셸 PID 를 적는 파일. 원격 셸이 $HOME 을 펼친다. */
-export function remoteSessionPidFile(sessionName) {
-  return `"$HOME"/${REMOTE_STAGE_ROOT}/${shellQuote(sessionName)}/shell.pid`;
+/**
+ * spawn 한 번마다 쓰는 원격 기록 디렉터리. 세션 이름만 쓰면 다른 기기의 같은 이름 spawn 이 덮어쓴다.
+ * 원격 셸이 $HOME 을 펼친다.
+ */
+export function remoteRunDir(sessionName, runId) {
+  return `"$HOME"/${REMOTE_STAGE_ROOT}/${shellQuote(sessionName)}/${shellQuote(`run-${runId}`)}`;
 }
 
-function readSessionPidScript(sessionName, onMissing) {
-  return `pid=$(cat ${remoteSessionPidFile(sessionName)} 2>/dev/null); case "$pid" in ''|*[!0-9]*) ${onMissing};; esac`;
+function readRunPidScript(runDir, onMissing) {
+  return `d=${runDir}; pid=$(cat "$d/shell.pid" 2>/dev/null); case "$pid" in ''|*[!0-9]*) ${onMissing};; esac`;
 }
 
 /**
- * spawn 이 기록한 셸의 프로세스 그룹과 자식만 끝낸다.
- * tmux 레인은 claude 가 셸 그룹에 남고, psmux 레인은 대화형 셸이라 claude 가 새 그룹을 받으므로 둘 다 본다.
+ * 기록한 셸의 그룹과 모든 자손을 먼저 procs 에 적고 TERM 한다.
+ * 대화형 셸(psmux 레인)에서는 claude 가 새 그룹을 받고, 부모가 죽으면 손자는 PPID 가 바뀌므로 죽이기 전에 목록을 잡는다.
  */
-export function buildRemoteSessionStopCommand(sessionName) {
-  return `${readSessionPidScript(sessionName, "exit 0")}; pkill -TERM -P "$pid" 2>/dev/null; kill -TERM -- "-$pid" 2>/dev/null; true`;
+export function buildRemoteSessionStopCommand(sessionName, runId) {
+  return [
+    readRunPidScript(remoteRunDir(sessionName, runId), "exit 0"),
+    'tree() { for c in $(pgrep -P "$1"); do echo "$c"; tree "$c"; done; }',
+    '{ echo "$pid"; pgrep -g "$pid"; tree "$pid"; } | sort -u > "$d/procs"',
+    'kill -TERM $(cat "$d/procs") 2>/dev/null; true',
+  ].join("; ");
 }
 
 /** readback 용 잔존 프로세스 카운트. 기록이 없으면 숫자 대신 missing 을 내 거짓 성공을 막는다. */
-export function buildRemoteClaudeProcessCountCommand(sessionName) {
-  const pidFile = remoteSessionPidFile(sessionName);
-  return `${readSessionPidScript(sessionName, "echo missing; exit 0")}; n=$( { pgrep -g "$pid"; pgrep -P "$pid"; } | sort -u | wc -l); [ "$n" -eq 0 ] && rm -f ${pidFile}; echo $n`;
+export function buildRemoteClaudeProcessCountCommand(sessionName, runId) {
+  return [
+    readRunPidScript(remoteRunDir(sessionName, runId), "echo missing; exit 0"),
+    '[ -f "$d/procs" ] || { echo missing; exit 0; }',
+    'n=$( { cat "$d/procs"; pgrep -g "$pid"; pgrep -P "$pid"; } | sort -u | while read -r p; do kill -0 "$p" 2>/dev/null && echo "$p"; done | wc -l)',
+    '[ "$n" -eq 0 ] && rm -f "$d/shell.pid" "$d/procs" && rmdir "$d" 2>/dev/null',
+    "echo $n",
+  ].join("; ");
+}
+
+/** 로컬 세션별 spawn 기록. --kill 이 원격 기록 디렉터리를 찾는 데 쓴다. */
+function spawnRecordPath(sessionName) {
+  return join(tfxStateDir(), "remote-spawn", `${sessionName}.json`);
+}
+
+function writeSpawnRecord(sessionName, record) {
+  const path = spawnRecordPath(sessionName);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(record), "utf8");
+}
+
+function readSpawnRecord(sessionName) {
+  try {
+    return JSON.parse(readFileSync(spawnRecordPath(sessionName), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function removeSpawnRecord(sessionName) {
+  try {
+    unlinkSync(spawnRecordPath(sessionName));
+  } catch {}
 }
 
 /** 원격 claude 데몬 전체 정지. 다른 작업의 데몬도 멈추므로 --stop-daemon 일 때만 쓴다. */
@@ -2229,9 +2277,13 @@ export async function killSpawnSession(sessionName, options = {}) {
     result.local = { error: error?.message || String(error), ok: false };
   }
 
+  const record = options.runId ? null : readSpawnRecord(sessionName);
+  const runId = options.runId || record?.runId || null;
   const hostNames = options.hostNames || listKnownHostNames();
   const host =
-    options.host || inferRemoteHostFromSessionName(sessionName, hostNames);
+    options.host ||
+    record?.host ||
+    inferRemoteHostFromSessionName(sessionName, hostNames);
   if (!host) {
     result.ok = result.local.ok;
     return result;
@@ -2257,7 +2309,9 @@ export async function killSpawnSession(sessionName, options = {}) {
     }
   };
 
-  remote.sessionStop = runStep(buildRemoteSessionStopCommand(sessionName));
+  remote.sessionStop = runId
+    ? runStep(buildRemoteSessionStopCommand(sessionName, runId))
+    : { error: "spawn 기록이 없어 원격 세션을 특정할 수 없다", ok: false };
   if (options.stopDaemon) {
     const binDirs = options.binDirs || resolveRemoteBinDirs(host, options);
     const claudePath =
@@ -2269,9 +2323,13 @@ export async function killSpawnSession(sessionName, options = {}) {
 
   const readRemaining = () => {
     try {
+      if (!runId) {
+        remote.readbackError = remote.sessionStop.error;
+        return null;
+      }
       const probe = runRemote(
         host,
-        buildRemoteClaudeProcessCountCommand(sessionName),
+        buildRemoteClaudeProcessCountCommand(sessionName, runId),
       );
       if (String(probe?.stdout ?? "").includes("missing")) {
         remote.readbackError =
@@ -2295,7 +2353,10 @@ export async function killSpawnSession(sessionName, options = {}) {
     remote.retried = true;
   }
 
-  remote.ok = remote.remaining === 0;
+  // 명시로 요청한 데몬 정지가 실패하면 전체도 실패다.
+  remote.ok =
+    remote.remaining === 0 && (!options.stopDaemon || remote.daemonStop.ok);
+  if (remote.remaining === 0) removeSpawnRecord(sessionName);
   result.remote = remote;
   result.ok = result.local.ok && remote.ok;
   return result;
