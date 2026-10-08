@@ -82,7 +82,7 @@ CLI 호출은 `tfx-route.sh` / headless 워커 / `tfx` CLI를 경유해야 한�
 - **리드 흐름**: `/tfx-lead`를 맡은 세션이 `tfx-live`로 Claude, Codex 세션을 띄우고
   지시서, 교차 리뷰, 머지, 종료까지 소유한다
   ([ADR-0029](docs/adr/0029-lead-session-operating-model.md), [ADR-0032](docs/adr/0032-lead-role-skill-tfx-lead.md)).
-- **headless 결과 색인**: 실행마다 `$TMPDIR/tfx-headless/<세션>.results.json` 하나에 워커별 상태,
+- **headless 결과 색인**: 실행마다 `$TMPDIR/triflux-<uid>/tfx-headless/<세션>.results.json` 하나에 워커별 상태,
   exit 코드, 출력 경로를 기록한다. 결과를 읽는 쪽은 화면 문자열 대신 이 파일을 읽는다
   ([ADR-0034](docs/adr/0034-headless-session-results-index.md)).
 - **`claude agents` 행**: headless 워커는 tmux 방에서 돌고, 행은 그 방에 붙는 attach client다.

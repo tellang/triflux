@@ -14,14 +14,15 @@ import { execFileSync, execSync } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
-  statSync,
   unlinkSync,
 } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
+import { privateTmpRoot } from "../hub/lib/private-tmp.mjs";
 import { findFsmonitorDaemons } from "../hub/lib/process-utils.mjs";
 import { isProcessAlive } from "./lib/process-utils.mjs";
 
@@ -269,58 +270,86 @@ function cleanupMultiState() {
 }
 
 // ── 2. orphan PID tracking 파일 정리 ──
-function cleanupOrphanPidFiles() {
-  let files;
+// tfx-route.sh 는 uid 0700 루트에 추적 파일을 쓴다. tmpdir() 는 예전 버전이 남긴 파일용이다.
+function pidFileDirs() {
+  const dirs = [tmpdir()];
   try {
-    files = readdirSync(tmpdir());
+    dirs.unshift(privateTmpRoot());
   } catch {
-    return;
+    /* 남의 루트면 건너뛴다 */
   }
+  return [...new Set(dirs)];
+}
+
+// 공용 /tmp 에 남이 쓴 추적 파일의 PID 를 믿으면 내 프로세스를 죽이게 된다.
+export function cleanupOrphanPidFiles({
+  dirs = pidFileDirs(),
+  uid = process.getuid?.(),
+} = {}) {
   const isWindows = platform() === "win32";
   const winProcMap = collectWindowsProcessTable();
 
-  for (const f of files) {
-    const m = PID_FILE_RE.exec(f);
-    if (!m) continue;
-
-    const ownerPid = Number(m[1]);
-    if (isProcessAlive(ownerPid)) continue; // 세션 살아있음, 건드리지 않음
-
-    const filePath = join(tmpdir(), f);
+  for (const dir of dirs) {
+    let files;
     try {
-      const pidFileMtimeMs = statSync(filePath).mtimeMs;
-      const pids = readFileSync(filePath, "utf8")
-        .split("\n")
-        .map((l) => l.trim())
-        .filter(Boolean)
-        .map(Number);
+      files = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const f of files) {
+      const m = PID_FILE_RE.exec(f);
+      if (m)
+        cleanupPidFile(join(dir, f), Number(m[1]), uid, isWindows, winProcMap);
+    }
+  }
+}
 
-      for (const pid of pids) {
-        if (pid > 0 && isProcessAlive(pid)) {
-          const procMap = isWindows
-            ? winProcMap
-            : new Map([[pid, readPosixProcess(pid)]]);
-          if (!shouldKillTrackedPid({ pid, pidFileMtimeMs, procMap })) {
-            console.error(
-              `[session-stale-cleanup] skip pid=${pid} from ${f} (pid-reuse-or-live-cli-root)`,
-            );
-            continue;
-          }
+function cleanupPidFile(filePath, ownerPid, uid, isWindows, winProcMap) {
+  if (isProcessAlive(ownerPid)) return; // 세션 살아있음, 건드리지 않음
+
+  let st;
+  try {
+    st = lstatSync(filePath);
+  } catch {
+    return;
+  }
+  if (!st.isFile() || (uid !== undefined && st.uid !== uid)) return;
+
+  const f = basename(filePath);
+  try {
+    const pids = readFileSync(filePath, "utf8")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map(Number);
+
+    for (const pid of pids) {
+      if (pid > 0 && isProcessAlive(pid)) {
+        const procMap = isWindows
+          ? winProcMap
+          : new Map([[pid, readPosixProcess(pid)]]);
+        if (
+          !shouldKillTrackedPid({ pid, pidFileMtimeMs: st.mtimeMs, procMap })
+        ) {
           console.error(
-            `[session-stale-cleanup] orphan worker kill: pid=${pid} (from ${f})`,
+            `[session-stale-cleanup] skip pid=${pid} from ${f} (pid-reuse-or-live-cli-root)`,
           );
-          treeKill(pid, procMap.get(pid));
+          continue;
         }
+        console.error(
+          `[session-stale-cleanup] orphan worker kill: pid=${pid} (from ${f})`,
+        );
+        treeKill(pid, procMap.get(pid));
       }
-    } catch {
-      /* 읽기 실패 무시 */
     }
+  } catch {
+    /* 읽기 실패 무시 */
+  }
 
-    try {
-      unlinkSync(filePath);
-    } catch {
-      /* ignore */
-    }
+  try {
+    unlinkSync(filePath);
+  } catch {
+    /* ignore */
   }
 }
 

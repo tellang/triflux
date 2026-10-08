@@ -5,18 +5,17 @@ import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   existsSync,
-  mkdirSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
 import { escapePwshSingleQuoted } from "@triflux/core/hub/cli-adapter-base.mjs";
+import { privateTmpDir } from "@triflux/core/hub/lib/private-tmp.mjs";
 import {
   createActivityLifecycle,
   isActivityLifecycleEnabled,
@@ -47,7 +46,10 @@ import { createResultsIndex, resultsIndexPath } from "./results-index.mjs";
 import { createLogDashboard } from "./tui.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
-const RESULT_DIR = join(tmpdir(), "tfx-headless");
+// 결과와 프롬프트, 실행 스크립트가 남으므로 사용자별 0700 디렉터리에 둔다.
+function resultDir() {
+  return privateTmpDir("tfx-headless");
+}
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
 /** CLI별 브랜드 — 이모지 + 공식 색상 (HUD와 통일) */
@@ -138,11 +140,14 @@ export function normalizeHeadlessRole(role) {
 }
 
 export function headlessResultFile(sessionName, paneName) {
-  return join(RESULT_DIR, `${sessionName}-${paneName}.txt`).replace(/\\/g, "/");
+  return join(resultDir(), `${sessionName}-${paneName}.txt`).replace(
+    /\\/g,
+    "/",
+  );
 }
 
 export function headlessResultsIndexPath(sessionName) {
-  return resultsIndexPath(RESULT_DIR, sessionName).replace(/\\/g, "/");
+  return resultsIndexPath(resultDir(), sessionName).replace(/\\/g, "/");
 }
 
 export function resolveHeadlessDisplayName(assignment = {}, paneName = "") {
@@ -253,9 +258,8 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   // 그 literal 을 user message 로 해석해서 codex 가 prompt 가 아닌
   // shell expression 자체를 받는 회귀가 있었다. 이제 fullPrompt 를 그대로
   // 전달하고 buildExecCommand 가 자체적으로 tmp file 작성 + stdin redirect.
-  if (!existsSync(RESULT_DIR)) mkdirSync(RESULT_DIR, { recursive: true });
   const promptFile = join(
-    RESULT_DIR,
+    resultDir(),
     "prompt-" + randomUUID().slice(0, 8) + ".txt",
   ).replace(/\\/g, "/");
   writeFileSync(promptFile, fullPrompt, "utf8");
@@ -646,7 +650,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
           cwd: assignment.cwd || assignment.workdir,
         },
       );
-      const scriptDir = join(RESULT_DIR, sessionName);
+      const scriptDir = join(resultDir(), sessionName);
       const dispatch = dispatchCommand(sessionName, paneName, cmd, {
         scriptDir,
         scriptName: paneName,
@@ -903,7 +907,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     onIntervene,
   };
 
-  mkdirSync(RESULT_DIR, { recursive: true });
+  resultDir();
   const normalizedAssignments = (assignments || []).map((assignment, index) =>
     normalizeHeadlessAssignment(assignment, index),
   );
@@ -961,7 +965,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     }
   } else if (dashboard) {
     // stdout은 결과 파싱 대상이므로 안내는 stderr로 보낸다.
-    const logDir = join(tmpdir(), "tfx-headless");
+    const logDir = resultDir();
     process.stderr.write(
       `\n⚠ stdout is not a TTY; dashboard is skipped.\n` +
         `  Session is running in background. Worker logs:\n` +
@@ -1441,7 +1445,7 @@ export async function autoAttachTerminal(
       await wt.createTab({
         title: buildAttachTitle(safeSession, "dashboard"),
         profile: "triflux",
-        command: `node "${viewerPath}" --session ${safeSession} --result-dir "${RESULT_DIR}" --layout ${resolvedLayout}`,
+        command: `node "${viewerPath}" --session ${safeSession} --result-dir "${resultDir()}" --layout ${resolvedLayout}`,
       });
     } else {
       const panes = [];
@@ -1512,7 +1516,7 @@ export async function attachDashboardTab(
     await wt.createTab({
       title: buildAttachTitle(safeSession, "dashboard"),
       profile: "triflux",
-      command: `node "${viewerPath}" --session ${safeSession} --result-dir "${RESULT_DIR}" --layout ${resolvedLayout}`,
+      command: `node "${viewerPath}" --session ${safeSession} --result-dir "${resultDir()}" --layout ${resolvedLayout}`,
     });
     return true;
   } catch {

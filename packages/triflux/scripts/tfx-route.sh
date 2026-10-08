@@ -118,22 +118,42 @@ else
 fi
 
 # ── 임시 디렉토리 정규화 ──
+# 공용 /tmp 의 고정 이름은 다른 사용자가 선점하거나 읽을 수 있어 uid 0700 루트를 쓴다.
+# hub/lib/private-tmp.mjs 와 같은 규칙이고, 후보 순서도 node os.tmpdir() 와 맞춘다.
+# 루트가 남의 것이면 다른 후보로 넘어가지 않고 실패한다. 넘어가면 node 쪽 정리기가 그 경로를 모른다.
+# Windows(Git Bash)는 TEMP 가 이미 사용자별이라 그대로 쓴다.
 resolve_tmp_dir() {
-  local candidate=""
-  for candidate in "${TMPDIR:-}" "${TEMP:-}" "${TMP:-}" "/tmp"; do
+  local candidate="" root windows=0
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) windows=1 ;;
+  esac
+  local -a candidates=("${TMPDIR:-}" "${TMP:-}" "${TEMP:-}" "/tmp")
+  [[ "$windows" == 1 ]] && candidates=("${TEMP:-}" "${TMP:-}" "/tmp")
+  for candidate in "${candidates[@]}"; do
     [[ -n "$candidate" ]] || continue
-    if mkdir -p "$candidate" >/dev/null 2>&1; then
+    mkdir -p "$candidate" >/dev/null 2>&1 || continue
+    candidate="${candidate%/}"
+    if [[ "$windows" == 1 ]]; then
       printf '%s\n' "$candidate"
       return 0
     fi
+    root="${candidate}/triflux-$(id -u)"
+    mkdir -m 700 "$root" >/dev/null 2>&1
+    if [[ -d "$root" && ! -L "$root" && -O "$root" ]]; then
+      chmod 700 "$root" 2>/dev/null
+      printf '%s\n' "$root"
+      return 0
+    fi
+    echo "[tfx-route] ERROR: $root 가 다른 사용자 소유이거나 링크라 쓸 수 없습니다" >&2
+    return 1
   done
 
   candidate="$(pwd)/.tfx-tmp"
-  mkdir -p "$candidate" >/dev/null 2>&1 || true
+  mkdir -m 700 -p "$candidate" >/dev/null 2>&1 || true
   printf '%s\n' "$candidate"
 }
 
-TFX_TMP="$(resolve_tmp_dir)"
+TFX_TMP="$(resolve_tmp_dir)" || exit 1
 
 # ── Worker PID 추적 (EXIT trap에서 정리) ──
 _PID_TRACK="${TFX_TMP}/tfx-route-$$-pids"

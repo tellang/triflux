@@ -3,13 +3,22 @@
 
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  cleanupOrphanPidFiles,
   parseEtimeMs,
   shouldKillTrackedPid,
 } from "../../scripts/session-stale-cleanup.mjs";
@@ -197,6 +206,50 @@ describe("#548 tmux 세션 이름 접두사", {
         else process.env[key] = value;
       }
       rmSync(sockDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("#661 임시 디렉터리와 추적 파일 소유자", {
+  skip: process.platform === "win32",
+}, () => {
+  const uid = process.getuid();
+
+  it("resolve_tmp_dir 는 uid 0700 루트를 쓰고 링크 루트에서는 실패한다", () => {
+    const fn = extract(/^resolve_tmp_dir\(\) \{[\s\S]*?^\}$/m);
+    const base = mkdtempSync(path.join(tmpdir(), "tfx661-"));
+    const other = mkdtempSync(path.join(tmpdir(), "tfx661-other-"));
+    try {
+      const run = (env) =>
+        execFileSync("bash", ["-c", `${fn}\nresolve_tmp_dir`], {
+          env: { PATH: process.env.PATH, ...env },
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+      const root = run({ TMPDIR: `${base}/` });
+      assert.equal(root, path.join(base, `triflux-${uid}`));
+      assert.equal(statSync(root).mode & 0o777, 0o700);
+
+      // 남의 루트를 만나면 다른 후보로 넘어가지 않고 실패한다(정리기와 경로를 맞춘다).
+      symlinkSync(base, path.join(other, `triflux-${uid}`));
+      assert.throws(() => run({ TMPDIR: other, TMP: base }));
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it("남의 소유인 추적 파일은 읽지도 지우지도 않는다", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "tfx661-pids-"));
+    const deadOwner = path.join(dir, "tfx-route-999999-pids");
+    try {
+      writeFileSync(deadOwner, "");
+      cleanupOrphanPidFiles({ dirs: [dir], uid: uid + 1 });
+      assert.ok(existsSync(deadOwner));
+      cleanupOrphanPidFiles({ dirs: [dir], uid });
+      assert.ok(!existsSync(deadOwner));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

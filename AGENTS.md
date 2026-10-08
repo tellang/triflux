@@ -22,8 +22,8 @@
 
 ## 비대화식 결과 회수
 - 완료 마커: `=== HEADLESS_COMPLETE succeeded=N failed=N total=N ===`
-- 결과 색인: `$TMPDIR/tfx-headless/{sessionName}.results.json`. 워커별 상태, exit 코드, 출력 경로는 이 파일을 읽는다(ADR-0034).
-- 워커 상세: `$TMPDIR/tfx-headless/{sessionName}-worker-N.txt`
+- 결과 색인: `$TMPDIR/triflux-<uid>/tfx-headless/{sessionName}.results.json`. 워커별 상태, exit 코드, 출력 경로는 이 파일을 읽는다(ADR-0034).
+- 워커 상세: `$TMPDIR/triflux-<uid>/tfx-headless/{sessionName}-worker-N.txt`
 
 ## SSH 방식
 - `hosts.json`의 `os` 필드로 셸을 판단합니다 (windows=PowerShell, darwin=zsh, linux=bash).

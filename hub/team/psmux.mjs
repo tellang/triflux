@@ -19,10 +19,11 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { formatPsmuxInstallGuidance } from "../../scripts/lib/psmux-info.mjs";
 import { resolveGitBashExecutable } from "../lib/bash-path.mjs";
+import { privateTmpDir } from "../lib/private-tmp.mjs";
 import childProcess from "../lib/spawn-trace.mjs";
 import { IS_WINDOWS } from "../platform.mjs";
 
@@ -92,12 +93,10 @@ const PWSH_BIN = (() => {
 })();
 const PSMUX_TIMEOUT_MS = 10000;
 const COMPLETION_PREFIX = "__TRIFLUX_DONE__:";
-const CAPTURE_ROOT =
-  process.env.PSMUX_CAPTURE_ROOT || join(tmpdir(), "psmux-steering");
-const CAPTURE_HELPER_PATH = join(
-  CAPTURE_ROOT,
-  IS_WINDOWS ? "pipe-pane-capture.ps1" : "pipe-pane-capture.sh",
-);
+// 실행되는 캡처 스크립트가 있어 남이 바꿀 수 없는 사용자별 0700 디렉터리에 둔다.
+function captureRoot() {
+  return process.env.PSMUX_CAPTURE_ROOT || privateTmpDir("psmux-steering");
+}
 const POLL_INTERVAL_MS = (() => {
   const ms = Number.parseInt(process.env.PSMUX_POLL_INTERVAL_MS || "", 10);
   if (Number.isFinite(ms) && ms > 0) return ms;
@@ -232,7 +231,7 @@ function ensurePsmuxInstalled() {
 }
 
 function getCaptureSessionDir(sessionName) {
-  return join(CAPTURE_ROOT, sanitizePathPart(sessionName));
+  return join(captureRoot(), sanitizePathPart(sessionName));
 }
 
 function getCaptureLogPath(sessionName, paneName) {
@@ -243,10 +242,15 @@ function getCaptureLogPath(sessionName, paneName) {
 }
 
 function ensureCaptureHelper() {
-  mkdirSync(CAPTURE_ROOT, { recursive: true });
+  const root = captureRoot();
+  mkdirSync(root, { recursive: true });
+  const helperPath = join(
+    root,
+    IS_WINDOWS ? "pipe-pane-capture.ps1" : "pipe-pane-capture.sh",
+  );
   if (IS_WINDOWS) {
     writeFileSync(
-      CAPTURE_HELPER_PATH,
+      helperPath,
       [
         "param(",
         "  [Parameter(Mandatory = $true)][string]$Path",
@@ -276,7 +280,7 @@ function ensureCaptureHelper() {
   } else {
     // macOS/Linux: bash 스크립트로 pipe-pane 캡처
     writeFileSync(
-      CAPTURE_HELPER_PATH,
+      helperPath,
       [
         "#!/bin/bash",
         'mkdir -p "$(dirname "$1")" 2>/dev/null',
@@ -285,9 +289,9 @@ function ensureCaptureHelper() {
       ].join("\n"),
       "utf8",
     );
-    chmodSync(CAPTURE_HELPER_PATH, 0o755);
+    chmodSync(helperPath, 0o755);
   }
-  return CAPTURE_HELPER_PATH;
+  return helperPath;
 }
 
 function readCaptureLog(logPath) {
@@ -878,7 +882,7 @@ function disableAllPipeCaptures(sessionName, paneIds) {
 function killOrphanPipeHelpers(sessionName) {
   if (!IS_WINDOWS) {
     // macOS/Linux: pipe-pane helper cmdline contains
-    // `<CAPTURE_ROOT>/<session>/<pane>.log`, so anchor on `/<session>/`.
+    // `<captureRoot()>/<session>/<pane>.log`, so anchor on `/<session>/`.
     const safeSessionUnix = escapeRegex(sanitizePathPart(sessionName));
     try {
       const pids = childProcess

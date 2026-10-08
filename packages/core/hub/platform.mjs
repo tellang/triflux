@@ -1,6 +1,7 @@
 import { execFile, execFileSync, execSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { privateTmpRoot } from "./lib/private-tmp.mjs";
 
 export const IS_WINDOWS = process.platform === "win32";
 export const IS_MAC = process.platform === "darwin";
@@ -209,7 +210,8 @@ export function pipePath(name, pid = process.pid, options = {}) {
     return `\\\\.\\pipe\\${suffix}`;
   }
 
-  const baseDir = options.tempDir || TEMP_DIR;
+  // 공용 /tmp 의 소켓은 다른 사용자가 접속하거나 선점할 수 있다. 짧은 경로를 위해 /tmp 를 기준으로 둔다.
+  const baseDir = options.tempDir || privateTmpRoot({ base: TEMP_DIR });
   return path.posix.join(baseDir, `${suffix}.sock`);
 }
 

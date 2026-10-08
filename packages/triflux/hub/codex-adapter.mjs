@@ -1,5 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { codexProfileConfigOverrides } from "../scripts/lib/codex-profile-config.mjs";
 import {
@@ -12,6 +11,7 @@ import {
   shellQuote,
 } from "./cli-adapter-base.mjs";
 import { runPreflight } from "./codex-preflight.mjs";
+import { privateTmpDir } from "./lib/private-tmp.mjs";
 import { isActivityLifecycleEnabled } from "./lib/worker-lifecycle.mjs";
 import { IS_WINDOWS } from "./platform.mjs";
 
@@ -104,8 +104,7 @@ function createLaunchScriptText(opts) {
 }
 
 export function buildLaunchScript(opts = {}) {
-  const dir = join(tmpdir(), "triflux-codex-launch");
-  mkdirSync(dir, { recursive: true });
+  const dir = privateTmpDir("triflux-codex-launch");
   const path = join(dir, `${String(opts.id || "launch")}.sh`);
   writeFileSync(path, createLaunchScriptText(opts), "utf8");
   return path;
@@ -142,8 +141,7 @@ export function buildExecArgs(opts = {}) {
 // ── Codex execution ─────────────────────────────────────────────
 
 async function runCodex(prompt, workdir, preflight, attempt) {
-  const dir = join(tmpdir(), "triflux-codex-exec");
-  mkdirSync(dir, { recursive: true });
+  const dir = privateTmpDir("triflux-codex-exec");
   const resultFile = join(
     dir,
     `codex-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`,
