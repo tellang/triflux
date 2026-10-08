@@ -1132,8 +1132,10 @@ function updateCodexConfig(filePath, updates = [], removals = []) {
     return { modified: false, filePath: resolvedPath };
   }
   // 여러 줄 배열처럼 줄 단위 치환이 다루지 못하는 표기는 파일을 깨뜨리므로 쓰지 않는다.
+  // 파서가 원본부터 못 읽는 표기(파서가 모르는 TOML 1.0 문법)는 판정할 수 없어 예전처럼 쓴다.
+  const toml = tomlParser();
   try {
-    tomlParser()?.parse(finalRaw);
+    if (toml && parsesAsToml(toml, previousRaw)) toml.parse(finalRaw);
   } catch {
     return {
       modified: false,
@@ -1871,6 +1873,15 @@ function tomlParser() {
     return createRequire(import.meta.url)("@iarna/toml");
   } catch {
     return null;
+  }
+}
+
+function parsesAsToml(toml, raw) {
+  try {
+    toml.parse(raw);
+    return true;
+  } catch {
+    return false;
   }
 }
 
