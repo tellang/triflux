@@ -8,7 +8,7 @@ ADR-0023 이 걷어내기로 한 command hook, 키워드 라우팅, MCP gateway,
 
 찾는 대상은 다음 중 하나에 해당하는 코드, 스크립트, 스킬, 규칙 문서, 설정, 테스트다.
 
-- 예전 모델이나 예전 CLI 한계를 메우려고 만들었는데 지금(이 기기 기준 Claude Code 2.1.292, Codex 0.160.1, agy 1.3.1, gemini CLI 미설치, psmux 와 wt 미설치)은 필요 없는 것
+- 예전 모델이나 예전 CLI 한계를 메우려고 만들었는데 지금(조사 시점 기준 Claude Code 2.1.292, Codex 0.160.1, agy 1.3.1, gemini CLI 미설치, psmux 와 wt 미설치)은 필요 없는 것
 - Claude Code, Codex, agy 에 네이티브 기능이 있는 것
 - 이미 잘 동작하는 것을 감싸기만 하는 래퍼
 - 의도와 다르게 동작하는 것, 문서와 코드가 다른 것
@@ -45,7 +45,7 @@ ADR-0023 이 걷어내기로 한 command hook, 키워드 라우팅, MCP gateway,
 
 ### 한계
 
-- transcript 집계는 이 기기의 Claude 세션만 본다. 다른 호스트(m2, ryzen), agy 세션, 훅이 유도한 호출과 자연 호출의 구분이 없다. 사람이 터미널에서 직접 친 `tfx` 명령은 집계에 없다. 파일 mtime 으로 1차 선별하므로 90일 전에 끝난 세션은 빠진다. 정규식 추출이라 산문 적중이 섞여 있어 표의 수치는 상한이다.
+- transcript 집계는 이 기기의 Claude 세션만 본다. 다른 호스트, agy 세션, 훅이 유도한 호출과 자연 호출의 구분이 없다. 사람이 터미널에서 직접 친 `tfx` 명령은 집계에 없다. 파일 mtime 으로 1차 선별하므로 90일 전에 끝난 세션은 빠진다. 정규식 추출이라 산문 적중이 섞여 있어 표의 수치는 상한이다.
 - Codex 로그 집계는 중복 제거를 하지 않았다. 순위 비교에만 쓴다.
 - knip 은 정적 import 그래프만 본다. bash 에서 `node scripts/x.mjs` 로 실행하는 파일, package.json `bin`, 스킬 문서가 안내하는 명령, 동적 import 는 "사용"으로 잡지 못한다(K 절의 mcp-health 가 그 예). knip.json 의 project 패턴에 `cto/`, `mesh/`, `tui/` 가 없어 그 디렉터리는 분석 밖이다.
 - importers.tsv 는 basename 매칭이라 같은 이름의 파일이 여럿이면 과대 집계한다(A16 routing.mjs).
@@ -221,7 +221,7 @@ ADR-0023 이 걷어내기로 한 command hook, 키워드 라우팅, MCP gateway,
 | R2 | route | `approval_mode = "approve"` → `"full-auto"` sed(274~282), `_CODEX_HAS_SANDBOX` awk(261~269), 주석 290~291 | 즉시 제거 | 함수 | (a) macOS BSD sed 에서 `sed -i 's/…/…/g'` 는 실패하고 `set -euo pipefail` 때문에 스크립트가 죽을 수 있다. (b) `full-auto` 는 공식 `approval_mode` 허용값(auto, prompt, writes, approve)에 없다. (c) `_CODEX_HAS_SANDBOX` 는 주석이 "현재 미사용" 인정. 이 기기 config 에 해당 줄 0개라 아직 발동 안 함 | ISSUE-4 "OMX 업데이트가 approve 복원하면 stall" 방어(주장 미검증) | 하 |
 | R3 | scripts/lib | `toml.mjs`(132) `patchMcpApprovalMode`, `patchCodexConfigFile`, 폴백 파서 | 사용자 결정(N1 에 종속) | 집계 | R2 와 같은 무효값 치환을 JS 로 한 번 더. `@iarna/toml` 재직렬화가 주석을 지우고, 폴백 파서는 문자열 값만 보존해 불리언·숫자·배열이 유실될 수 있다. 소비자는 tfx-route.mjs(opt-in 레인)뿐 | `@iarna/toml` 의존을 뺄 수 있다 | 중 |
 | R4 | route | `apply_plan_guard`(1839~1860) | 즉시 제거 | 함수 | 호출 시점의 CLI_EFFORT 는 route_agent 가 검증한 정식 프로필 5개뿐(1478 이 그 밖은 exit). case 가 맞을 일이 없다 | 없음 | 하 |
-| R5 | route | `normalize_codex_profile_name`(1544~1563) + `scripts/lib/codex-profile-config.mjs:34~48` `LEGACY_CANONICAL_PROFILE_ALIASES` | 대체 후 제거 | 함수, 집계 | 같은 별칭표가 JS 와 bash 두 곳. 살아 있는 경로는 사용자가 `TFX_CODEX_PROFILE=gpt56_*` 를 주거나 옛 retry 스냅샷을 읽을 때뿐. 이 기기 `~/.codex` 에 gpt56_*, gpt6_sol_* 프로필 파일이 남아 있다(setup 정리 목록에 없음, 인프라 세션) | 옛 이름 환경변수와 옛 스냅샷이 오류로 바뀜. m2, ryzen 환경 미확인 | 중 |
+| R5 | route | `normalize_codex_profile_name`(1544~1563) + `scripts/lib/codex-profile-config.mjs:34~48` `LEGACY_CANONICAL_PROFILE_ALIASES` | 대체 후 제거 | 함수, 집계 | 같은 별칭표가 JS 와 bash 두 곳. 살아 있는 경로는 사용자가 `TFX_CODEX_PROFILE=gpt56_*` 를 주거나 옛 retry 스냅샷을 읽을 때뿐. 기존 설치의 `~/.codex` 에 옛 프로필 파일이 남을 수 있다(setup 정리 목록에 없음, 인프라 세션) | 옛 이름 환경변수와 옛 스냅샷이 오류로 바뀜. 다른 기기 환경 미확인 | 중 |
 | R6 | route | `apply_dynamic_routing_override`(2139~2186) | 즉시 제거 | 함수 | `${REPO_ROOT:-}/scripts/lib/dynamic-route-cli.mjs` 의 REPO_ROOT 는 이 파일에서 대입도 export 도 없다(저장소 전체 0). 결과 경로 `/scripts/lib/…` 가 없어 항상 return. 켜도 `TRIFLUX_DYNAMIC_ROUTING=1` 필요. 분기 안에 `agy_v1`, `--print --dangerously-skip-permissions` 하드코딩 중복 | 없음 | 하 |
 | R7 | route | `apply_codex_concrete_effort_guard`(1993~2036) 의 `-c model="gpt-6-astra"` 하드코딩 | 대체 후 제거 | 함수 | 규칙(skill-authoring §3, psmux 규칙 4-1)이 모델 ID 하드코딩과 `codex -c 'model=…'` 을 금지. 프로필 파일이 같은 값을 갖는다 | ultra 가 새는 경우의 최후 방어(새는 경로 못 찾음) | 하~중 |
 | R8 | route | 역할 규칙 중복: `apply_cli_mode` codex 모드(1695~1702), `apply_no_claude_native_mode`(1879~1906), `MIN_TIMEOUT`(3288~3294), `estimate_expected_duration_sec`(549~555) | 대체 후 제거 | 함수 | agent-route-policy.mjs 가 역할별 프로필·타임아웃·모드를 소유하고 route_agent 가 조회하는데 다섯 곳이 bash 에 다시 적는다. 이미 어긋남: designer 타임아웃 bash 3600, 정책 900 | 없음 | 중 |
@@ -247,7 +247,7 @@ ADR-0023 이 걷어내기로 한 command hook, 키워드 라우팅, MCP gateway,
 | H6 | hud | `context-monitor.mjs` `MODEL_HINT_1M_PREFIXES`, `isMillionContextModel`, `resolveModelLimit`, `deriveContextLimit` | 즉시 제거 | 함수 | statusLine stdin 이 `context_window_size` 를 주고 `getStdinContextUsage` 가 한도 0 이면 null 을 돌려 모델 ID 추정은 HUD 경로에서 도달 안 함. `deriveContextLimit` 소비자는 테스트 8곳뿐. 주석 "Codex GPT-5.6 family" | 모델 ID 한도 표 테스트 | 하 |
 | H7 | hud | 죽은 export: `colors.mjs`(`colorCooldown`, `colorParallel`, `GAUGE_BLOCKS`), `terminal.mjs`(`getTerminalRows`, `tierInfBar`, `_resetTerminalCache`, `selectTier` 미사용 인자 2개), `utils.mjs`(`formatDuration`, `calcCooldownLeftSeconds`), `constants.mjs`(`ROWS_BUDGET_*` 4, `REMOTE_ENV_CACHE_*` 2) | 즉시 제거 | 집계 | `rg -w` 로 hud 밖 비테스트 소비자 0 | 테스트 일부 | 하 |
 | H8 | hud | `providers/cto.mjs`(76), hud-qos-status:293~304, constants:39~45 | 즉시 제거 | 집계 | `TFX_CTO_AUTO_COLLECT=1` 이 아니면 null. 켜도 current.md 가 3주 전이라 stale. 이 import 가 2026-09-24 설치본 HUD 를 죽인 P1 의 원인(cto-env 결합) | 환경변수를 켠 경우의 한 줄 | 하 |
-| H9 | hud | `providers/gemini.mjs` 쿼터 조회(`fetchGeminiQuota`, `buildGeminiAuthContext`, `getAntigravityTokenFromKeychain`, `scheduleGeminiQuotaRefresh`), hud-qos-status 의 agy/gemini 행 | 사용자 결정 | 집계 | 지금 데이터를 못 가져온다: `gemini-quota-cache.json` 이 `errorType:auth`(2026-10-07), `oauth_creds.json` 은 `.legacy-removed-20260528`, agy keychain 토큰으로 `cloudcode-pa.googleapis.com` 호출이 거부. 그래서 agy 행은 `8h --%`. 메모리 "NEXT: agy HUD Redesign" 과 같은 원인 | agy 쿼터 행(현재도 `--%`) | 상(공식 사용량 표면 확인 필요) |
+| H9 | hud | `providers/gemini.mjs` 쿼터 조회(`fetchGeminiQuota`, `buildGeminiAuthContext`, `getAntigravityTokenFromKeychain`, `scheduleGeminiQuotaRefresh`), hud-qos-status 의 agy/gemini 행 | 사용자 결정 | 집계 | 지금 데이터를 못 가져온다: `gemini-quota-cache.json` 이 `errorType:auth`(2026-10-07), 옛 OAuth 자격증명 파일은 이미 치워졌고, agy keychain 토큰으로 `cloudcode-pa.googleapis.com` 호출이 거부. 그래서 agy 행은 `8h --%` | agy 쿼터 행(현재도 `--%`) | 상(공식 사용량 표면 확인 필요) |
 | H10 | hud | `renderers.mjs` `getProviderRow`(약 290줄, tier 4개에 같은 계산 반복), `getMicroLine` 중복 파싱, 501행 import 없는 `GREEN`(도달 불가), `hud-qos-status.mjs` `main().catch` 의 녹색 `0%` 폴백, `main` 260줄 지역 변수 54개, `constants.mjs` `join(homedir(),".claude","cache",…)` 블록 34개 | 대체 후 제거 | 집계 | 장황코드. 다른 코드는 "가짜 0% 방지"로 `--%` 를 쓴다. H1~H8 정리 뒤 다시 재는 편이 낫다 | 없음 | 중 |
 | H11 | hud | `terminal.mjs` `getTerminalColumns`(매 렌더 `tput cols` 셸), `detectCompactMode`·`detectMinimalMode`·`selectTier` 가 `hud.json` 을 세 번 읽음 | 사용자 결정 | 집계 | statusLine 은 파이프 실행이라 columns 가 비어 셸이 뜰 가능성. 실행 측정은 하지 않음 | 터미널 폭 자동 감지 | 하 |
 | H12 | hud | `providers/claude.mjs` 날짜 붙은 실측 주석(119~123, 173~175, 376~379), `gemini.mjs:185`, `constants.mjs:205` | 대체 후 제거 | 집계 | 변경 이력과 측정 기록이 코드 주석에. git 과 memory 의 일 | 측정 근거 일부(memory, PR #499 에 있음) | 하 |
@@ -535,7 +535,6 @@ A42~A46 외 추가.
 
 | 대상 | 발견 |
 |---|---|
-| `.claude/mcp.json`(추적 안 됨) | exa, tavily 평문 Bearer 토큰 2개. 조사 중 출력에 한 번 노출되었다. 저장소 유출은 아니나 토큰 교체 검토 |
 | `~/.omc/state/cx-auto-tokens/savings-total.json` 등 | `tests/unit/token-benchmark.test.mjs`, `tests/unit/account-broker.test.mjs` 추정, `tests/integration/nativeProxy.test.mjs:26`, `hub-server.test.mjs:31`, `tests/unit/native-wrapper.test.mjs:157` 이 실제 홈에 쓴다(본 표 X 묶음) |
 | ADR-0023 | 이 브랜치에 없다(인프라 세션 worktree 에만 있음). 보고서가 인용하는 번호 |
 
@@ -545,7 +544,6 @@ A42~A46 외 추가.
 |---|---|---|
 | 인프라 | infra 브랜치 `tfx-route.sh` 1564 부근 | route 진입마다 `preflight-cache.mjs --if-stale` node 프로세스를 하나 더 띄운다. R11 의 "한 실행에 node 10회"에 1회가 더해진다. 캐시가 신선하면 바로 끝나지만 기동 비용(약 0.07초)은 남는다 |
 | 인프라 | `scripts/claude-login-detect.mjs` | 묶음 1 머지 뒤 호출자가 없다(테스트만). 같이 지울 후보 |
-| 인프라 | `~/.gemini/settings.json` | 허브 동기화가 MCP 다섯 개(tfx-hub, context7, exa, brave-search, tavily)를 계속 쓴다(오늘 01:25 갱신). Gemini CLI 는 이 기기에 없다. agy 설정(`~/.gemini/antigravity-cli/settings.json`)에는 `mcpServers` 가 없다. agy 가 앞 파일을 읽는지 확인한 뒤 동기화 대상에서 뺄지 정한다 |
 | 인프라(setup) | `~/.claude/agents/slim-wrapper.md` | setup.mjs:2420 이 배포한 설치본 사본. R17 로 저장소에서 지워도 설치본은 setup 이 지워야 한다 |
 | 인프라(setup) | `scripts/setup.mjs:654` SYNC_MAP | A7(`tfx-batch-stats.mjs`) 삭제 시 이 줄도 같이. agy 교차 검증이 지적 |
 | 인프라(묶음 3) | `tfx why` 파서 측, `cto/hygiene.mjs` 나머지, `hub/workers/delegator-mcp.mjs` 의 codex-mcp import, 허브·delegator 의 `gemini` enum | synapse-cli, 허브, delegator 를 지울 때 B12(h), A41, A44, G2 의 해당 부분을 같이 처리 |
@@ -655,7 +653,7 @@ A42~A46 외 추가.
 
 ### 사고 기록
 
-- 이 기기에서 `node --test` 의 파일 목록이 비어 전체 스위트가 세 번 돌았다(02:50, 04:21, 05:00 무렵). 실행 중인 허브가 worktree 경로로 재바인딩되었고 한 번은 `~/.codex/config.toml` 의 MCP 항목이 지워져 인프라 세션이 백업에서 복구하였다. 원인은 zsh 에서 글롭 하나가 안 맞으면 `$(ls a b*)` 전체가 비는 것. 이후 `find` 결과만 쓰고 비어 있으면 실행하지 않게 하였고, 허브는 `tfx hub stop` 과 `ensure` 로 되돌렸다.
+- worktree 에서 `node --test` 의 파일 목록이 비어 전체 스위트가 세 번 돌았다(02:50, 04:21, 05:00 무렵). 실행 중인 허브가 worktree 경로로 재바인딩되었고 한 번은 Codex 설정의 MCP 항목이 지워져 인프라 세션이 백업에서 복구하였다. 원인은 zsh 에서 글롭 하나가 안 맞으면 `$(ls a b*)` 전체가 비는 것. 이후 `find` 결과만 쓰고 비어 있으면 실행하지 않게 하였고, 허브는 `tfx hub stop` 과 `ensure` 로 되돌렸다.
 - Codex executor 안에서 tfx-route.sh 를 실행하는 테스트를 돌리면 바깥 executor 의 config swap 과 겹쳐 실제 설정이 깨질 수 있다. 지시서에 금지를 넣었다.
 - 보관 디렉터리 관례는 `docs/_archive/triflux/plans/` 다. Codex 가 `docs/_archive/plans/`, `docs/_archive/.triflux/plans/` 를 만들어 매번 옮겼다.
 

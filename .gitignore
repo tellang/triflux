@@ -73,6 +73,8 @@ scripts/psmux-steering-prototype.sh
 .issues/
 .prompts/
 ISSUES-*.md
+# recovery 보고서는 추적한다(대소문자를 무시하면 위 규칙에 걸린다)
+!docs/recovery/issues-prs.md
 
 # 빌드/캐시
 node_modules/

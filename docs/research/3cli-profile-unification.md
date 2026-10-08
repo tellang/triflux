@@ -1,7 +1,7 @@
 # 3-CLI Profile Unification Research
 
 > Date: 2026-04-09 | Target: Claude Code, Codex CLI, Gemini CLI
-> Status: Expanded — actual config files verified (v2)
+> Status: Expanded (v2). 설정 블록은 구조를 보여 주는 예시값이다.
 
 현재 상태: `hub/gemini-adapter.mjs`와 Gemini CLI 실행 경로는 제거됐다. 아래 내용은 2026-04-09 조사 기록이다.
 
@@ -27,37 +27,24 @@
 
 ## 2. Claude Code — 실제 설정 체계 상세
 
-### 2.1 `~/.claude/settings.json` 실측 구조
+### 2.1 `~/.claude/settings.json` 구조 예시
 
 ```json
 {
   "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
-    "CLAUDE_CODE_EFFORT_LEVEL": "max",
-    "CLAUDE_CODE_GIT_BASH_PATH": "C:\\Program Files\\Git\\bin\\bash.exe",
-    "DISABLE_AUTOUPDATER": "1"
+    "CLAUDE_CODE_EFFORT_LEVEL": "high"
   },
-  "includeCoAuthoredBy": false,
   "permissions": {
     "defaultMode": "default"
   },
   "hooks": {
     "PreToolUse": [...],
-    "PostToolUse": [...],
-    "UserPromptSubmit": [...],
     "SessionStart": [...],
-    "Stop": [...],
-    "SubagentStop": [...]
+    "Stop": [...]
   },
-  "statusLine": { "type": "command", "command": "..." },
-  "enabledPlugins": { ... },
   "mcpServers": {
     "tfx-hub": { "url": "http://127.0.0.1:27888/mcp" }
-  },
-  "language": "한국어",
-  "skipDangerousModePermissionPrompt": true,
-  "teammateMode": "auto",
-  "remoteControlAtStartup": true
+  }
 }
 ```
 
@@ -69,7 +56,6 @@ Claude Code에는 Codex의 `--profile` 플래그에 해당하는 네이티브 �
 1. **환경 변수**: `CLAUDE_CODE_EFFORT_LEVEL` — `low | medium | high | max`
    - 이 값은 API 요청의 `thinking budget`에 매핑됨
    - settings.json `env` 섹션에서 전역 기본값 설정 가능
-   - 현재 실측값: `"max"` (전역 기본)
 
 2. **API 파라미터**: 모델 ID를 직접 지정 (`claude-opus-4-6`, `claude-sonnet-4-6`, `claude-haiku-4-5`)
    - Claude Code CLI에서는 세션 시작 시 `--model` 플래그로 지정
@@ -104,27 +90,17 @@ settings.json hooks 섹션은 triflux hook-orchestrator.mjs를 모든 이벤트�
 
 ## 3. Codex CLI — 실제 설정 체계 상세
 
-### 3.1 `~/.codex/config.toml` 최상위 필드 (실측)
+### 3.1 `~/.codex/config.toml` 최상위 필드 예시
 
 ```toml
-notify = ["node", "path/to/notify-hook.js"]
-model_reasoning_effort = "high"          # 전역 기본 effort
-developer_instructions = "..."           # 전역 시스템 프롬프트
-model_instructions_file = "path.md"      # 외부 시스템 프롬프트 파일
-
-model_context_window = 1000000
-model_auto_compact_token_limit = 900000
-
 model = "gpt-5.4"                        # 전역 기본 모델
-personality = "pragmatic"
+model_reasoning_effort = "high"          # 전역 기본 effort
+model_context_window = 1000000
 approval_mode = "full-auto"
-suppress_unstable_features_warning = true
-
 project_doc_fallback_filenames = ["CODEX.md", "AGENTS.md"]
-service_tier = "fast"
 ```
 
-### 3.2 Profiles 섹션 — 12개 실측
+### 3.2 Profiles 섹션 예시 12개
 
 **5.4 시리즈** (에이전틱, 1M 컨텍스트, computer use)
 
@@ -238,41 +214,25 @@ codex [--profile <name>] exec \
 
 ## 4. Gemini CLI — 실제 설정 체계 상세
 
-### 4.1 `~/.gemini/settings.json` 실측 구조
+### 4.1 `~/.gemini/settings.json` 구조 예시
 
 ```json
 {
-  "tools": {
-    "shell": { "enableInteractiveShell": false }
-  },
   "security": {
     "auth": { "selectedType": "oauth-personal" }
   },
   "mcpServers": {
     "tfx-hub": { "url": "http://127.0.0.1:27888/mcp" }
   },
-  "general": {
-    "sessionRetention": {
-      "warningAcknowledged": true,
-      "enabled": true,
-      "maxAge": "30d"
-    }
-  },
   "model": {
     "name": "gemini-3-flash-preview"
-  },
-  "context": {
-    "fileFiltering": {
-      "respectGitIgnore": false,
-      "respectGeminiIgnore": false
-    }
   }
 }
 ```
 
 주목할 점: `model.name` 필드가 기본 모델을 설정하지만, CLI에서 `--model` 플래그로 항상 오버라이드할 수 있다.
 
-### 4.2 `~/.gemini/triflux-profiles.json` 실측 구조
+### 4.2 `~/.gemini/triflux-profiles.json` 구조
 
 ```json
 {
@@ -340,26 +300,14 @@ resolve_gemini_profile() {
 
 이 함수가 중간 레이어 역할을 하지만, JSON 파싱에 node를 직접 호출하는 구조여서 프로세스 오버헤드가 있다.
 
-### 4.5 `~/.gemini/` 디렉토리 전체 구조
+### 4.5 `~/.gemini/` 디렉토리 주요 파일
 
 ```
 ~/.gemini/
 ├── settings.json           # 공식 설정 (auth, model, mcpServers, tools)
 ├── triflux-profiles.json   # triflux 커스텀 프로파일 레지스트리
 ├── GEMINI.md               # 전역 시스템 프롬프트 (Codex CODEX.md 대응)
-├── google_accounts.json    # OAuth 계정 정보
-├── gemini-credentials.json # API 자격증명
-├── oauth_creds.json        # OAuth 토큰
-├── trustedFolders.json     # 신뢰 폴더 목록
-├── projects.json           # 프로젝트 등록
-├── extension_integrity.json
-├── extensions/             # 확장 디렉토리
-├── skills/                 # 커스텀 스킬
-├── commands/               # 커스텀 명령
-├── history/                # 대화 이력
-├── logs/                   # 실행 로그
-├── tmp/                    # 임시 파일
-└── backups/                # 설정 백업
+└── ...                     # 인증 파일, 확장, 이력, 로그
 ```
 
 ---

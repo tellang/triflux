@@ -95,7 +95,7 @@
 
 - `1e5cd04 chore: bump v10.9.29 — packages sync` 이후 PR #72 충돌의 직접 원인
 - `packages/remote/**`, `packages/triflux/**`의 미러 파일이 주기적으로 원본과 sync되는데, 이 sync 타이밍과 PR 라이프사이클이 맞물리면서 충돌 발생
-- **연관**: feedback_pack_crlf_issue.md (CRLF 경고 대량 발생 기록)
+- **연관**: pack 실행 때 CRLF 경고가 대량으로 나던 기록
 
 ## 종합
 

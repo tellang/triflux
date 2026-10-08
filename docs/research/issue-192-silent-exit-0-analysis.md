@@ -3,7 +3,7 @@
 분석 시점: 2026-04-30, HEAD `5501c25`
 
 본 문서는 reproduce 미확보 상태에서 진행된 **코드 분석 + 가설 갱신 + 재현 방법론** 설계물이다.
-fix 시도는 포함하지 않는다 — `feedback_no_fix_without_root_cause.md` iron law 준수.
+fix 시도는 포함하지 않는다. 원인을 확정하기 전에는 고치지 않는다는 원칙을 따른다.
 
 ## 1. 컨텍스트
 
@@ -211,7 +211,7 @@ Process Terminate 이벤트의 ImageFileName + ParentPID 확인. 가장 강력�
 7. **회귀 가드** 추가:
    - 기존 mock 가드 유지
    - 가능하면 integration 가드 (실제 prepare.mjs 가 npm wrapper context 에서 모든 step 완주하는지) 추가
-8. **메모리 업데이트** — `feedback_release_prepare_silent_npm_test_return.md` 에 root cause 확정 기록 + K2/K3 결과
+8. **기록 업데이트**: 이슈 #192 에 root cause 확정 기록 + K2/K3 결과
 
 ## 6. 회귀 가드 보강 후보 (root cause 확정 후)
 
@@ -232,9 +232,6 @@ Process Terminate 이벤트의 ImageFileName + ParentPID 확인. 가장 강력�
 
 ## 8. 참고
 
-- Memory: `feedback_release_prepare_silent_npm_test_return.md`
-- Memory: `feedback_no_fix_without_root_cause.md`
-- Memory: `feedback_codex_exec_recovery_guard.md` (4-fixture 가드 패턴, 본 분석에 직접 적용 안 됨)
 - PR #220: 회귀 가드 step sequence
 - PR #221: F3 fix npm wrapper bypass
 - 코드: `scripts/release/prepare.mjs:64-94` (npm-test step 정의)

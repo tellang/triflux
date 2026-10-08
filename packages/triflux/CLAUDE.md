@@ -7,7 +7,7 @@
 
 | 시스템 | 접두사 | 용도 | 스킬 수 |
 |--------|--------|------|---------|
-| **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·원격 실행 | 10개 |
+| **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·원격 실행 | 11개 |
 | **gstack** | `/` (접두사 없음) | QA·출시·조사·설계·검토·점검 지점 | ~35개 |
 | **omc** | `/oh-my-claudecode:*` | autopilot·ralph·team·execute·ultragoal | ~37개 |
 
@@ -118,6 +118,7 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 | `psmux capture-pane`으로 중간 확인 | 아니요 | 워커 진행 중이면 빈 화면일 수 있음 |
 
 완료 마커: `=== HEADLESS_COMPLETE succeeded=N failed=N total=N ===`
+결과 색인: `$TMPDIR/tfx-headless/{sessionName}.results.json`. 워커별 상태, exit 코드, 출력 경로는 화면 문자열 대신 이 파일을 읽는다([ADR-0034](docs/adr/0034-headless-session-results-index.md)).
 워커 상세: `$TMPDIR/tfx-headless/{sessionName}-worker-N.txt`
 </headless-retrieval>
 
@@ -186,9 +187,3 @@ Windows Terminal의 독립 탭 열기는 유지한다.
 | `.claude/rules/tfx-skill-authoring.md` | 스킬 frontmatter, 프로필 표기, 검증 규약 |
 
 Claude Code는 `.claude/rules/*.md`를 자동으로 불러온다. Codex CLI는 `@import`를 지원하지 않으므로 필요하면 `AGENTS.md`를 독립적으로 유지한다.
-
-## GBrain
-
-설정 정본은 `~/Projects/CLAUDE.md`다.
-
-- 이 저장소 정책: 읽기·쓰기(github.com/tellang/triflux)
