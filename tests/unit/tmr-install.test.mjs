@@ -120,7 +120,7 @@ test("체크섬이 맞으면 0755 tmuxrooms 와 상대 링크 tmr 을 만든다"
   assert.equal(readlinkSync(result.link), "tmuxrooms");
 });
 
-test("묻는 사이 생긴 tmuxrooms 는 덮지 않고, 링크를 못 만들면 넣은 파일을 되돌린다", async () => {
+test("묻는 사이 생긴 tmuxrooms 는 덮지 않고, 링크를 못 만들어도 설치본을 남긴다", async () => {
   const zip = Buffer.from("zip-bytes");
   const sha = createHash("sha256").update(zip).digest("hex");
   const options = {

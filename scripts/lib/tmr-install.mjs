@@ -166,7 +166,7 @@ export async function offerTmrInstall({
     const { target, link, linked, runs } = await install({ home });
     log(`tmr ${TMR_RELEASE.version} 설치: ${target}`);
     if (!linked && !lstatSync(link, { throwIfNoEntry: false }))
-      warn(`tmr 링크를 만들지 못했다. 직접 만든다: ln -s tmuxrooms ${link}`);
+      warn(`tmr 링크를 만들지 못했다. 직접 만든다: ln -s tmuxrooms "${link}"`);
     if (!runs) warn(`설치한 ${target} 가 실행되지 않는다.`);
     const binDir = tmrBinDir(home);
     if (
