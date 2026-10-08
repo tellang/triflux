@@ -1864,6 +1864,9 @@ async function cmdDoctor(options = {}) {
             status: invalidCount > 0 ? "issues" : "ok",
             actions: mcpSync.actions,
           });
+          for (const action of mcpSync.actions)
+            if (action.status === "warning" && action.message)
+              warn(`${action.label}: ${action.message}`);
           if (updatedCount > 0)
             ok(`MCP registry 동기화: ${updatedCount}개 설정 반영됨`);
           else info("MCP registry: 이미 최신 상태");
@@ -3611,7 +3614,10 @@ function cmdMcp(args = [], options = {}) {
         }
         const label = `${action.label} ${DIM}(${formatPathForDisplay(action.filePath)})${RESET}`;
         if (action.status === "updated") ok(`${label} → updated`);
-        else if (action.status === "warning") warn(`${label} → warning`);
+        else if (action.status === "warning")
+          warn(
+            `${label} → warning${action.message ? `: ${action.message}` : ""}`,
+          );
         else if (action.status === "invalid-config")
           fail(`${label} → invalid-config`);
         else info(`${stripAnsi(label)} → ${action.status}`);

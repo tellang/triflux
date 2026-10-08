@@ -6,6 +6,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import {
   basename,
@@ -16,6 +17,7 @@ import {
   resolve,
 } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const DEFAULT_REGISTRY_PATH = join(PROJECT_ROOT, "config", "mcp-registry.json");
@@ -632,20 +634,31 @@ function formatTomlArray(values = []) {
   return `[${values.map((value) => formatTomlString(value)).join(", ")}]`;
 }
 
+// 한 줄에서 열린 [ 와 닫힌 ] 의 차. 문자열과 주석 안의 괄호는 세지 않는다.
+function arrayDepth(text) {
+  const code = text
+    .replace(/"""[\s\S]*?"""|'''[\s\S]*?'''/g, "")
+    .replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, "")
+    .replace(/#.*$/, "");
+  return (code.match(/\[/g) || []).length - (code.match(/\]/g) || []).length;
+}
+
+const TOML_MANAGED_KEYS = new Set([
+  "url",
+  "transport",
+  "command",
+  "args",
+  "bearer_token_env_var",
+  "http_headers",
+  "env_http_headers",
+  "env",
+  "env_vars",
+]);
+
 function upsertTomlServer(raw, name, config, codex = {}) {
   const lines = String(raw || "").split(/\r?\n/);
   const header = `[mcp_servers.${name}]`;
-  const managedKeys = new Set([
-    "url",
-    "transport",
-    "command",
-    "args",
-    "bearer_token_env_var",
-    "http_headers",
-    "env_http_headers",
-    "env",
-    "env_vars",
-  ]);
+  const managedKeys = TOML_MANAGED_KEYS;
   const nextManagedLines = [];
   if (typeof config.url === "string") {
     nextManagedLines.push(`url = ${formatTomlString(config.url)}`);
@@ -696,6 +709,21 @@ function upsertTomlServer(raw, name, config, codex = {}) {
       const keyMatch = lines[index].match(/^\s*([A-Za-z0-9_]+)\s*=/);
       if (!keyMatch || !managedKeys.has(keyMatch[1])) {
         preserved.push(lines[index]);
+      } else {
+        // 여러 줄 배열 값은 닫는 ] 까지 함께 걷어낸다. 남기면 다음 줄들이 고아가 되어 파일이 깨진다.
+        // 배열 값일 때만, 다음 키나 표 머리글 앞에서는 멈춘다.
+        const value = lines[index].slice(keyMatch[0].length);
+        let depth = value.trimStart().startsWith("[") ? arrayDepth(value) : 0;
+        while (
+          depth > 0 &&
+          index + 1 < lines.length &&
+          !/^\s*(?:[A-Za-z0-9_-]+\s*=|\[\[?\s*[A-Za-z0-9_"'-])/.test(
+            lines[index + 1],
+          )
+        ) {
+          index += 1;
+          depth += arrayDepth(lines[index]);
+        }
       }
       index += 1;
     }
@@ -749,6 +777,29 @@ function syncDenylistKey(client, serverName) {
     .toLowerCase()}:${String(serverName || "")
     .trim()
     .toLowerCase()}`;
+}
+
+// 범위 이름(@scope/name)의 첫 @ 는 이름에 속한다.
+function splitPackageSpec(spec) {
+  const match = /^((?:@[^/@\s]+\/)?[^@\s]+)(?:@(\S+))?$/.exec(spec);
+  return match ? { name: match[1], version: match[2] ?? null } : null;
+}
+
+// 명령과 인자 수가 같고, 다른 자리는 레지스트리의 고정 패키지와 이름만 같을 때 고정 인자를 돌려준다.
+export function pinnedArgs(entry, server) {
+  if (entry?.command !== server.command || !Array.isArray(entry.args))
+    return null;
+  if (entry.args.length !== server.args.length) return null;
+  let changed = false;
+  for (const [index, want] of server.args.entries()) {
+    const have = entry.args[index];
+    if (have === want) continue;
+    const pin = splitPackageSpec(want);
+    if (!pin?.version || typeof have !== "string") return null;
+    if (splitPackageSpec(have)?.name !== pin.name) return null;
+    changed = true;
+  }
+  return changed ? [...server.args] : null;
 }
 
 export function buildDesiredServerRecord(name, serverConfig, filePath) {
@@ -1106,6 +1157,27 @@ function updateCodexConfig(filePath, updates = [], removals = []) {
     : "";
   if (finalRaw === previousRaw) {
     return { modified: false, filePath: resolvedPath };
+  }
+  // 줄 단위 치환이 파일을 깨뜨리거나 관리 키 밖의 값을 지우면 쓰지 않는다.
+  // 파서가 원본부터 못 읽는 표기(파서가 모르는 TOML 1.0 문법)는 판정할 수 없어 예전처럼 쓴다.
+  const toml = tomlParser();
+  try {
+    if (
+      toml &&
+      parsesAsToml(toml, previousRaw) &&
+      !isDeepStrictEqual(
+        withoutManagedServers(toml.parse(previousRaw), updates, removals),
+        withoutManagedServers(toml.parse(finalRaw), updates, removals),
+      )
+    )
+      throw new Error("unmanaged TOML changed");
+  } catch {
+    return {
+      modified: false,
+      filePath: resolvedPath,
+      skipped: true,
+      reason: "toml-rewrite-unsafe",
+    };
   }
 
   mkdirSync(dirname(resolvedPath), { recursive: true });
@@ -1830,6 +1902,52 @@ export function removeServerFromTargets(name, options = {}) {
   return { actions };
 }
 
+// packages/remote 는 @iarna/toml 을 의존으로 두지 않아 늦게 불러오고, 없으면 null.
+function tomlParser() {
+  try {
+    return createRequire(import.meta.url)("@iarna/toml");
+  } catch {
+    return null;
+  }
+}
+
+// 갱신한 서버의 관리 키만 뺀다. 남은 값이 원본과 같아야 치환이 사용자 값을 건드리지 않은 것이다.
+function withoutManagedServers(data, updates, removals) {
+  for (const name of removals) delete data.mcp_servers?.[name];
+  for (const { name } of updates) {
+    const server = data.mcp_servers?.[name];
+    if (!server) continue;
+    for (const key of TOML_MANAGED_KEYS) delete server[key];
+    if (!Object.keys(server).length) delete data.mcp_servers[name];
+  }
+  if (data.mcp_servers && !Object.keys(data.mcp_servers).length)
+    delete data.mcp_servers;
+  return data;
+}
+
+function parsesAsToml(toml, raw) {
+  try {
+    toml.parse(raw);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// 간이 TOML 스캐너는 작은따옴표와 줄 끝 주석을 잘못 읽으므로 보호 판정에 쓸 Codex 항목은 실제 파서로 읽는다.
+function existingServerEntry(filePath, snapshot, name) {
+  const scanned = snapshot.servers.find((server) => server.name === name);
+  const toml = isCodexConfig(filePath) && tomlParser();
+  if (!toml) return scanned;
+  try {
+    const entry = toml.parse(readFileSync(resolveFilePath(filePath), "utf8"))
+      .mcp_servers?.[name];
+    return entry && { ...entry, args: entry.args ?? [] };
+  } catch {
+    return scanned;
+  }
+}
+
 export function syncRegistryTargets(options = {}) {
   const registry = options.registry || loadRegistryOrDefault();
   const syncTargets = Array.isArray(options.targets)
@@ -1934,6 +2052,29 @@ export function syncRegistryTargets(options = {}) {
         continue;
       }
 
+      // 사용자가 바꾼 stdio 항목은 덮어쓰지 않는다. 같은 패키지의 버전 차이만 고정 버전으로 맞춘다.
+      const existing = existingServerEntry(target.filePath, snapshot, name);
+      if (
+        serverPolicy(serverConfig) === "stdio" &&
+        typeof existing?.command === "string" &&
+        existing.command &&
+        !(
+          existing.command === serverConfig.command &&
+          JSON.stringify(existing.args) === JSON.stringify(serverConfig.args)
+        ) &&
+        !pinnedArgs(existing, serverConfig)
+      ) {
+        actions.push({
+          type: "sync",
+          filePath: target.filePath,
+          label: target.label,
+          status: "warning",
+          server: name,
+          message: `${name}: 레지스트리와 다른 사용자 항목이라 덮어쓰지 않음 (${[existing.command, ...(existing.args ?? [])].join(" ")})`,
+        });
+        continue;
+      }
+
       updates.push(
         buildDesiredServerRecord(name, serverConfig, target.filePath),
       );
@@ -1947,6 +2088,18 @@ export function syncRegistryTargets(options = {}) {
     } else if (isJsonMcpConfig(target.filePath)) {
       result = updateJsonConfig(target.filePath, updates, []);
     } else {
+      continue;
+    }
+
+    if (result.reason === "toml-rewrite-unsafe") {
+      actions.push({
+        type: "sync",
+        filePath: target.filePath,
+        label: target.label,
+        status: "warning",
+        message:
+          "줄 단위로 고칠 수 없는 TOML 표기(여러 줄 값 등)라 파일을 바꾸지 않음",
+      });
       continue;
     }
 

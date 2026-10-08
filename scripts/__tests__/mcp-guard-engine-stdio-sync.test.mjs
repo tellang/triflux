@@ -183,4 +183,65 @@ describe("syncRegistryTargets stdio servers", () => {
       ),
     );
   });
+
+  it("keeps user-changed stdio entries and only pins version differences", () => {
+    const homeDir = createHomeDir();
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+    const registry = registryFor(homeDir);
+    const brave = registry.servers["brave-search"];
+    brave.args = ["-y", "@brave/brave-search-mcp-server@2.1.4"];
+    const write = (file, args) =>
+      writeFileSync(
+        file,
+        JSON.stringify({
+          mcpServers: { "brave-search": { command: "npx", args } },
+        }),
+      );
+    const unpinned = join(homeDir, "repo", ".mcp.json");
+    const custom = join(homeDir, "repo", ".claude", "mcp.json");
+    const userArgs = ["-y", "@brave/brave-search-mcp-server", "--x"];
+    write(unpinned, ["-y", "@brave/brave-search-mcp-server"]);
+    write(custom, userArgs);
+
+    const { actions } = syncRegistryTargets({ registry });
+    const args = (file) =>
+      JSON.parse(readFileSync(file, "utf8")).mcpServers["brave-search"].args;
+    assert.deepEqual(args(unpinned), brave.args);
+    assert.deepEqual(args(custom), userArgs);
+    assert.ok(
+      actions.some(
+        (action) => action.filePath === custom && action.status === "warning",
+      ),
+    );
+    // 작은따옴표와 줄 끝 주석이 있는 Codex 항목도 버전 차이로 보고 고정한다.
+    process.env.TFX_CODEX_CONFIG_SYNC = "1";
+    const codex = join(homeDir, ".codex", "config.toml");
+    writeFileSync(
+      codex,
+      "[mcp_servers.brave-search]\ncommand = 'npx'\nargs = ['-y', '@brave/brave-search-mcp-server@2.0.0'] # pin\n",
+    );
+    syncRegistryTargets({ registry });
+    assert.match(readFileSync(codex, "utf8"), /mcp-server@2\.1\.4/);
+
+    // 여러 줄 배열은 닫는 ] 까지 바꿔 파일이 깨지지 않는다(TOML 1.0 여러 줄 문자열이 같이 있어도).
+    writeFileSync(
+      codex,
+      'note = """Say "hi""""\n\n[mcp_servers.brave-search]\ncommand = "npx"\nargs = ["-y", "@brave/brave-search-mcp-server"]\nenv_vars = [\n  "BRAVE_API_KEY",\n]\n',
+    );
+    syncRegistryTargets({ registry });
+    const rewritten = readFileSync(codex, "utf8");
+    assert.match(rewritten, /mcp-server@2\.1\.4/);
+    assert.doesNotMatch(rewritten, /^\s*"BRAVE_API_KEY",$|^\s*\]$/m);
+
+    // 관리 키 값 안의 [ 때문에 뒤의 사용자 키와 표를 지우지 않는다.
+    writeFileSync(
+      codex,
+      `[mcp_servers.brave-search]\ncommand = "npx"\nargs = ["-y", "@brave/brave-search-mcp-server"]\nenv = { T = '''it's [draft''' }\nenabled = false\n\n[mcp_servers.mine]\ncommand = "mine"\n`,
+    );
+    syncRegistryTargets({ registry });
+    const kept = readFileSync(codex, "utf8");
+    assert.match(kept, /enabled = false/);
+    assert.match(kept, /\[mcp_servers\.mine\]/);
+  });
 });
