@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   utimesSync,
@@ -37,6 +38,21 @@ test("같은 label 의 백업은 최근 BACKUP_KEEP 개만 남는다", () => {
     assert.ok(readdirSync(dir).includes("config.toml.bak-test-manual-1"));
     if (process.platform !== "win32")
       assert.equal(statSync(join(dir, left[0])).mode & 0o777, 0o600);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("같은 시각 이름에 다른 원문이 오면 번호를 붙여 따로 백업한다", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tfx-backup-rotation-"));
+  try {
+    const target = join(dir, "config.toml");
+    const options = { label: "bak-test", suffix: "20261008-000000" };
+    const first = writeRotatedBackup(target, "first", options);
+    assert.equal(writeRotatedBackup(target, "first", options), first);
+    const second = writeRotatedBackup(target, "second", options);
+    assert.notEqual(second, first);
+    assert.equal(readFileSync(second, "utf8"), "second");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

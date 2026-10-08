@@ -303,8 +303,10 @@ describe("inspectRegistryStatus HTTP headers", () => {
     assert.equal(statusOf(), "mismatch");
     delete process.env.TFX_TEST_TOKEN;
     const claude = JSON.parse(readFileSync(claudePath, "utf8"));
-    claude.mcpServers.auth.headers.Authorization = "Bearer ${WRONG_TOKEN}";
-    writeFileSync(claudePath, JSON.stringify(claude));
-    assert.equal(statusOf(), "mismatch");
+    for (const header of ["Bearer ${WRONG_TOKEN}", "Bearer "]) {
+      claude.mcpServers.auth.headers.Authorization = header;
+      writeFileSync(claudePath, JSON.stringify(claude));
+      assert.equal(statusOf(), "mismatch", header);
+    }
   });
 });

@@ -1604,7 +1604,8 @@ export function inspectRegistryStatus(registry = loadRegistryOrDefault()) {
         const prefix = expected.prefix || "";
         return value.includes("${")
           ? value === `${prefix}\${${expected.env}}`
-          : value.startsWith(prefix);
+          : value.startsWith(prefix) &&
+              value.slice(prefix.length).trim() !== "";
       };
       const actualHeaders = Object.fromEntries(
         Object.entries(actual?.headerDescriptors || {}).filter(
