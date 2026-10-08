@@ -36,7 +36,10 @@ import {
   inspectMacTimeoutDependency,
 } from "../scripts/lib/doctor-env-checks.mjs";
 import { ensureGeminiProfiles } from "../scripts/lib/gemini-profiles.mjs";
-import { cleanupLegacyHooks } from "../scripts/lib/legacy-hook-cleanup.mjs";
+import {
+  cleanupAgyHooks,
+  cleanupLegacyHooks,
+} from "../scripts/lib/legacy-hook-cleanup.mjs";
 import {
   cleanupLegacyMcp,
   cleanupTfxHub,
@@ -3067,6 +3070,26 @@ async function cmdDoctor(options = {}) {
           ? `이전 hook ${legacyHooks.removed}개 정리됨`
           : "남은 triflux command hook 없음",
       );
+    }
+
+    // 옛 setup 이 agy hooks.json 에 넣은 triflux-session 훅. 스크립트가 사라져 실행되면 실패한다.
+    const agyHooks = cleanupAgyHooks({ dryRun: !fix });
+    const agyRemaining = agyHooks.ok && fix ? 0 : agyHooks.removed;
+    addDoctorCheck(report, {
+      name: "legacy-agy-hooks",
+      status: !agyHooks.ok ? "error" : agyRemaining > 0 ? "issues" : "ok",
+      remaining: agyRemaining,
+      ...(agyHooks.ok ? {} : { error: agyHooks.error }),
+      ...(agyRemaining > 0 ? { fix: "tfx doctor --fix" } : {}),
+    });
+    if (!agyHooks.ok) {
+      fail(`agy 훅 점검 실패: ${agyHooks.error}`);
+      issues++;
+    } else if (agyRemaining > 0) {
+      warn("agy hooks.json 에 옛 triflux-session 훅이 남음: tfx doctor --fix");
+      issues += agyRemaining;
+    } else if (fix && agyHooks.changed) {
+      ok("agy 옛 triflux-session 훅 정리됨");
     }
     if (fix) {
       try {

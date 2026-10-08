@@ -9,7 +9,10 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
-import { cleanupLegacyHooks } from "../../scripts/lib/legacy-hook-cleanup.mjs";
+import {
+  cleanupAgyHooks,
+  cleanupLegacyHooks,
+} from "../../scripts/lib/legacy-hook-cleanup.mjs";
 
 const dirs = [];
 afterEach(() => {
@@ -112,4 +115,37 @@ test("triflux를 언급만 하는 다른 command는 보존한다", () => {
   assert.equal(result.changed, false);
   assert.equal(readFileSync(settingsPath, "utf8"), original);
   assert.deepEqual(readdirSync(dir), ["settings.json"]);
+});
+
+test("agy hooks.json 에서 옛 triflux-session 훅만 지우고 다른 그룹과 같은 이름의 남의 훅은 둔다", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tfx-agy-hook-test-"));
+  dirs.push(dir);
+  const hooksPath = join(dir, "hooks.json");
+  const other = { enabled: true, Stop: [{ type: "command", command: "x" }] };
+  const ours = {
+    enabled: true,
+    PreInvocation: [
+      {
+        type: "command",
+        command: '"/opt/node" "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
+      },
+    ],
+  };
+  writeFileSync(hooksPath, JSON.stringify({ other, "triflux-session": ours }));
+
+  assert.equal(
+    cleanupAgyHooks({ geminiConfigHome: dir, dryRun: true }).removed,
+    1,
+  );
+  const result = cleanupAgyHooks({ geminiConfigHome: dir });
+  assert.equal(result.changed, true);
+  assert.deepEqual(JSON.parse(readFileSync(hooksPath, "utf8")), { other });
+  assert.ok(
+    readdirSync(dir).some((name) => name.includes("bak-tfx-agy-hooks")),
+  );
+
+  const foreign = { "triflux-session": other };
+  writeFileSync(hooksPath, JSON.stringify(foreign));
+  assert.equal(cleanupAgyHooks({ geminiConfigHome: dir }).changed, false);
+  assert.deepEqual(JSON.parse(readFileSync(hooksPath, "utf8")), foreign);
 });

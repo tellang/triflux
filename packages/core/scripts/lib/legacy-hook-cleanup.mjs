@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { writeRotatedBackup } from "./backup-rotation.mjs";
 
 // 설치된 Triflux 실행 대상만 식별한다.
 const MANAGED_FILENAMES = [
@@ -226,6 +227,73 @@ export function cleanupLegacyHooks({
       }
       throw error;
     }
+    result.changed = true;
+  } catch (error) {
+    result.ok = false;
+    result.error = error.message;
+  }
+  return result;
+}
+
+const AGY_HOOK_GROUP = "triflux-session";
+
+// 그룹 이름만으로 지우지 않는다. 옛 setup 이 넣은 훅 스크립트를 실제로 가리킬 때만 우리 것이다.
+function isTrifluxAgyGroup(group) {
+  if (!group || typeof group !== "object") return false;
+  return Object.values(group)
+    .filter(Array.isArray)
+    .flat()
+    .some(
+      (entry) =>
+        typeof entry?.command === "string" &&
+        /agy-session-hook\.mjs/u.test(entry.command),
+    );
+}
+
+/** agy hooks.json 에서 옛 setup 이 등록한 triflux-session 훅을 지운다. */
+export function cleanupAgyHooks({ geminiConfigHome, dryRun = false } = {}) {
+  const result = {
+    ok: true,
+    changed: false,
+    wouldChange: false,
+    removed: 0,
+    backupPath: null,
+    error: null,
+  };
+  // 테스트 실행 중에는 명시 경로 없이 실제 HOME 을 고치지 않는다.
+  if (!geminiConfigHome && process.env.TEST_LOCK_PID) return result;
+  const hooksPath = join(
+    geminiConfigHome || join(homedir(), ".gemini", "config"),
+    "hooks.json",
+  );
+  try {
+    if (!existsSync(hooksPath)) return result;
+    const targetPath = realpathSync(hooksPath);
+    const original = readFileSync(targetPath, "utf8");
+    const hooks = JSON.parse(original);
+    if (!isTrifluxAgyGroup(hooks?.[AGY_HOOK_GROUP])) return result;
+    result.removed = 1;
+    result.wouldChange = true;
+    if (dryRun) return result;
+
+    delete hooks[AGY_HOOK_GROUP];
+    const mode = statSync(targetPath).mode & 0o777;
+    const stamp = new Date()
+      .toISOString()
+      .replace(/[-:.TZ]/g, "")
+      .slice(0, 14);
+    result.backupPath = writeRotatedBackup(targetPath, original, {
+      label: "bak-tfx-agy-hooks",
+      suffix: stamp,
+      mode,
+    });
+    const temporary = `${targetPath}.tfx-${process.pid}-${Date.now()}.tmp`;
+    writeFileSync(temporary, `${JSON.stringify(hooks, null, 2)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode,
+    });
+    renameSync(temporary, targetPath);
     result.changed = true;
   } catch (error) {
     result.ok = false;

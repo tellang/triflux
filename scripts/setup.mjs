@@ -25,14 +25,16 @@ import {
 import { homedir } from "os";
 import { basename, delimiter, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
-import { ensureAgyHooks } from "./ensure-agy-hooks.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
 import { ensureGeminiProfiles } from "./lib/gemini-profiles.mjs";
 import {
   retireInstallLeftovers,
   writeInstallManifest,
 } from "./lib/install-retire.mjs";
-import { cleanupLegacyHooks } from "./lib/legacy-hook-cleanup.mjs";
+import {
+  cleanupAgyHooks,
+  cleanupLegacyHooks,
+} from "./lib/legacy-hook-cleanup.mjs";
 import { cleanupLegacyMcp, cleanupTfxHub } from "./lib/legacy-mcp-cleanup.mjs";
 import {
   MACHINE_PROFILE_KEYS,
@@ -1847,11 +1849,10 @@ function ensureCriticalSetup() {
       `[tfx-setup] ensureCodexHooks 실패: ${error?.message || error}\n`,
     );
   }
-  try {
-    ensureAgyHooks();
-  } catch (error) {
+  const agyCleanup = cleanupAgyHooks();
+  if (!agyCleanup.ok) {
     process.stderr.write(
-      `[tfx-setup] ensureAgyHooks 실패: ${error?.message || error}\n`,
+      `[tfx-setup] 옛 agy 훅 정리 실패: ${agyCleanup.error}\n`,
     );
   }
 }
@@ -1863,7 +1864,6 @@ export {
   collectLegacyTrayProcesses,
   DEPRECATED_SKILLS,
   detectDevMode,
-  ensureAgyHooks,
   ensureCodexHooks,
   ensureCodexProfiles,
   extractProfileLines,
@@ -2200,17 +2200,13 @@ export async function runDeferred(stdinData) {
     warn: (message) => io.log(`  \x1b[33m⚠\x1b[0m ${message}`),
   });
 
-  try {
-    const agyHooksResult = ensureAgyHooks();
-    if (!agyHooksResult?.skipped && agyHooksResult?.changed) {
-      io.log(
-        "  \x1b[32m✓\x1b[0m Antigravity hooks: registered session sync hook",
-      );
-      synced++;
-    }
-  } catch (error) {
+  const agyCleanup = cleanupAgyHooks();
+  if (agyCleanup.changed) {
+    io.log("  \x1b[32m✓\x1b[0m Antigravity: 옛 triflux 세션 훅을 지움");
+    synced++;
+  } else if (!agyCleanup.ok) {
     io.log(
-      `  \x1b[33m⚠\x1b[0m Antigravity hooks 등록 실패: ${error.message || error}`,
+      `  \x1b[33m⚠\x1b[0m Antigravity 옛 훅 정리 실패: ${agyCleanup.error}`,
     );
   }
 
