@@ -57,6 +57,41 @@ describe("mcp guard engine", () => {
     assert.equal(registry.policies.watched_paths.length, 8);
   });
 
+  it("drops legacy hub-url servers from a user registry and reads its default transport as http", () => {
+    const registryPath = join(createHomeDir(), "mcp-registry.json");
+    writeFileSync(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        defaults: { transport: "hub-url", hub_base: "http://127.0.0.1:27888" },
+        servers: {
+          "tfx-hub": {
+            policy: "hosted",
+            transport: "hub-url",
+            url: "http://127.0.0.1:27888/mcp",
+          },
+          context7: {
+            policy: "hosted",
+            transport: "http",
+            url: "https://mcp.context7.com/mcp",
+          },
+        },
+        policies: { watched_paths: [] },
+      }),
+    );
+    const previous = process.env.TFX_MCP_REGISTRY_PATH;
+    process.env.TFX_MCP_REGISTRY_PATH = registryPath;
+    try {
+      const registry = loadRegistry();
+      assert.deepEqual(Object.keys(registry.servers), ["context7"]);
+      assert.equal(registry.defaults.transport, "http");
+      assert.equal("hub_base" in registry.defaults, false);
+    } finally {
+      if (previous === undefined) delete process.env.TFX_MCP_REGISTRY_PATH;
+      else process.env.TFX_MCP_REGISTRY_PATH = previous;
+    }
+  });
+
   it("matches watched paths for Gemini, Antigravity, Claude project MCP, and local .mcp.json", () => {
     const homeDir = createHomeDir();
     withHome(homeDir);

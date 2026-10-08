@@ -63,7 +63,7 @@ test("모든 설정 파일에서 tfx-hub 만 빠지고 다른 항목과 백업�
   });
   put(
     codex,
-    'model = "gpt"\n\n[mcp_servers.context7]\nurl = "https://mcp.context7.com/mcp"\n\n[mcp_servers.tfx-hub]\nurl = "http://127.0.0.1:27888/mcp"\nenabled = true\n\n[mcp_servers.tfx-hub.env]\nA = "1"\n\n[profiles.keep]\nmodel = "x"\n',
+    'model = "gpt"\n\n[mcp_servers.context7]\nurl = "https://mcp.context7.com/mcp"\n\n[mcp_servers.tfx-hub]\nurl = "http://127.0.0.1:27888/mcp"\nenabled = true\n\n[mcp_servers.tfx-hub.env]\nA = "1"\n\n# 내 프로필 설명\n[profiles.keep]\nmodel = "x"\n',
   );
   const pluginRoot = join(root, "pkg");
   put(join(pluginRoot, "references/gemini-snapshots/a.json"), {});
@@ -86,7 +86,7 @@ test("모든 설정 파일에서 tfx-hub 만 빠지고 다른 항목과 백업�
   assert.deepEqual(read(gemini).mcpServers, { other: OTHER });
   assert.equal(
     readFileSync(codex, "utf8"),
-    'model = "gpt"\n\n[mcp_servers.context7]\nurl = "https://mcp.context7.com/mcp"\n\n[profiles.keep]\nmodel = "x"\n',
+    'model = "gpt"\n\n[mcp_servers.context7]\nurl = "https://mcp.context7.com/mcp"\n\n# 내 프로필 설명\n[profiles.keep]\nmodel = "x"\n',
   );
   assert.equal(
     existsSync(join(pluginRoot, "references/gemini-snapshots")),
@@ -94,7 +94,7 @@ test("모든 설정 파일에서 tfx-hub 만 빠지고 다른 항목과 백업�
   );
   assert.equal(
     existsSync(join(pluginRoot, "references/codex-snapshots")),
-    true,
+    false,
   );
 
   const second = cleanupTfxHub(options);
@@ -159,7 +159,7 @@ test("hub.pid 가 hub/server.mjs 를 가리키면 종료하고 hub.pid 를 지�
   assert.equal(existsSync(pidFile), false);
 });
 
-test("hub.pid 가 다른 프로세스를 가리키면 종료하지 않고 파일을 보존한다", () => {
+test("hub.pid 가 다른 프로세스를 가리키면 종료하지 않고 파일만 지운다", () => {
   const { home, pidFile, calls, run } = hubPidFixture("/usr/bin/vim notes.md");
   const result = cleanupTfxHub({ home, platform: "darwin", run });
   assert.equal(result.hubStopped, false);
@@ -167,8 +167,8 @@ test("hub.pid 가 다른 프로세스를 가리키면 종료하지 않고 파일
     calls.some(([command]) => command === "kill"),
     false,
   );
-  assert.equal(existsSync(pidFile), true);
-  assert.ok(result.warnings.some((warning) => warning.includes("hub.pid")));
+  assert.equal(existsSync(pidFile), false);
+  assert.deepEqual(result.warnings, []);
 });
 
 test("Windows 의 hub-ensure 예약 작업만 지운다", () => {
@@ -190,4 +190,19 @@ test("Windows 의 hub-ensure 예약 작업만 지운다", () => {
       deleted,
     );
   }
+});
+
+test("Windows 에서 PowerShell 조회가 실패하면 종료하지 않고 hub.pid 를 보존한다", () => {
+  const { home } = fixture();
+  const pidFile = join(home, ".claude/cache/tfx-hub/hub.pid");
+  put(pidFile, { pid: 4321 });
+  const calls = [];
+  const run = (command) => {
+    calls.push(command);
+    throw commandError(1);
+  };
+  const result = cleanupTfxHub({ home, platform: "win32", run });
+  assert.equal(calls.includes("taskkill"), false);
+  assert.equal(existsSync(pidFile), true);
+  assert.ok(result.warnings.some((warning) => warning.includes("확인 실패")));
 });

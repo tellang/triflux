@@ -19,7 +19,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0010](../_archive/adr/0010-cto-lake-hub-role-boundary.md) | CTO lake ↔ Hub role 경계 — liveness/history 평면 분리 | Superseded | 0005, 0007, 0023 |
 | [0011](../_archive/adr/0011-active-role-system-cto-scoped-lead.md) | 능동 역할 시스템 — CTO + scoped lead (C+A 하이브리드) | Superseded | 0010, 0024 |
 | [0012](0012-orphaned-design-doc-deprecation.md) | 제거된 구현의 설계 문서 폐기 표시 | Accepted | 0002 |
-| [0013](../_archive/adr/0013-synapse-expiry-window-unification.md) | synapse 만료 창 단일화 | Deprecated | 0010, 0023 |
+| [0013](../_archive/adr/0013-synapse-expiry-window-unification.md) | synapse 만료 창 단일화 | Withdrawn | 0010, 0023 |
 | [0014](0014-claude-credentials-keychain-source-of-truth.md) | Claude 자격증명은 macOS Keychain 정본, 읽은 저장소에만 되쓰기 | Accepted | 0002 |
 | [0015](0015-codex-lane-exec-transport-and-last-message.md) | Codex 레인은 exec 전송 + 최종 메시지 파일이 결과 계약 | Accepted | 0004, 0006 |
 | [0016](0016-codex-astra-top-tier-and-fable-escalation.md) | Codex 최상위 tier = Astra, 최종 승격 = Fable | Accepted | 0004, 0006, 0015 |

@@ -1368,6 +1368,38 @@ export function validateRegistry(registry) {
   return errors;
 }
 
+const warnedLegacyHub = new Set();
+
+// 허브가 있던 시기의 사용자 레지스트리는 hub-url 항목을 걸러내고 기본 transport 를 http 로 읽는다.
+function dropLegacyHub(registry) {
+  if (!registry || typeof registry !== "object" || Array.isArray(registry))
+    return registry;
+  const next = { ...registry };
+  if (next.defaults?.transport === "hub-url") {
+    const { hub_base: _hubBase, ...defaults } = next.defaults;
+    next.defaults = { ...defaults, transport: "http" };
+  }
+  if (
+    next.servers &&
+    typeof next.servers === "object" &&
+    !Array.isArray(next.servers)
+  ) {
+    next.servers = Object.fromEntries(
+      Object.entries(next.servers).filter(([name, server]) => {
+        if (server?.transport !== "hub-url") return true;
+        if (!warnedLegacyHub.has(name)) {
+          warnedLegacyHub.add(name);
+          process.stderr.write(
+            `[mcp-guard] 제거된 hub-url 서버 ${name} 항목을 무시합니다\n`,
+          );
+        }
+        return false;
+      }),
+    );
+  }
+  return next;
+}
+
 export function inspectRegistry() {
   if (!existsSync(registryPath())) {
     return {
@@ -1380,7 +1412,7 @@ export function inspectRegistry() {
   }
 
   try {
-    const registry = readJsonFile(registryPath());
+    const registry = dropLegacyHub(readJsonFile(registryPath()));
     const errors = validateRegistry(registry);
     return {
       path: registryPath(),

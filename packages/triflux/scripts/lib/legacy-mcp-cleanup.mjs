@@ -855,14 +855,25 @@ function removeHubFromToml(original, file, warnings) {
   const hubHeader = new RegExp(
     `^\\s*\\[\\s*mcp_servers\\s*\\.\\s*(?:"${HUB_SERVER}"|'${HUB_SERVER}'|${HUB_SERVER})\\s*(?:\\.[^\\]]*)?\\]`,
   );
+  const kept = [];
   let skipping = false;
-  const output = original
-    .split(/(?<=\n)/)
-    .filter((line) => {
-      if (/^\s*\[/.test(line)) skipping = hubHeader.test(line);
-      return !skipping;
-    })
-    .join("");
+  let trailing = [];
+  for (const line of original.split(/(?<=\n)/)) {
+    if (/^\s*\[/.test(line)) {
+      skipping = hubHeader.test(line);
+      if (!skipping) {
+        while (trailing[0]?.trim() === "" && kept.at(-1)?.trim() === "")
+          trailing.shift();
+        kept.push(...trailing);
+      }
+      trailing = [];
+    } else if (skipping) {
+      trailing = /^\s*(?:#.*)?\r?\n?$/.test(line) ? [...trailing, line] : [];
+      continue;
+    }
+    if (!skipping) kept.push(line);
+  }
+  const output = kept.join("");
   delete data.mcp_servers[HUB_SERVER];
   if (!Object.keys(data.mcp_servers).length) delete data.mcp_servers;
   try {
@@ -884,8 +895,8 @@ function hubCommandLine(pid, platform, run) {
         )
       : tryRun(run, "ps", ["-p", String(pid), "-o", "command="]);
   if (result.ok) return result.output.trim() || null;
-  // ps 는 프로세스가 없을 때 status 1 로 끝난다.
-  return result.status === 1 ? null : undefined;
+  // ps 는 프로세스가 없을 때 status 1 로 끝난다. PowerShell 실패는 확인 불가다.
+  return platform !== "win32" && result.status === 1 ? null : undefined;
 }
 
 function stopHub(home, platform, run, result) {
@@ -909,9 +920,9 @@ function stopHub(home, platform, run, result) {
   }
   if (command !== null) {
     if (!/[/\\]hub[/\\]server\.mjs(?:["'\s]|$)/.test(command)) {
-      result.warnings.push(
-        `${pidFile}: pid ${pid} 가 hub/server.mjs 가 아니라 종료하지 않음`,
-      );
+      // 허브가 아닌 프로세스는 건드리지 않고 우리 파일만 지운다.
+      unlinkSync(target);
+      result.changed = true;
       return;
     }
     const stopped =
@@ -958,7 +969,7 @@ function removeHubTask(run, result) {
   else result.warnings.push(`${HUB_TASK}: 예약 작업 삭제 실패`);
 }
 
-/** 제거된 허브의 설정 항목, 실행 중인 프로세스, 예약 작업, 설치본 스냅샷을 정리한다. */
+/** 제거된 허브의 설정 항목, 실행 중인 프로세스, 예약 작업, 설치본 스냅샷(gemini, codex)을 정리한다. */
 export function cleanupTfxHub({
   home = homedir(),
   platform = osPlatform(),
@@ -993,6 +1004,13 @@ export function cleanupTfxHub({
           ? removeHubFromToml(original, file, result.warnings)
           : removeHubFromJson(original, file, result.warnings);
       if (!plan.count) continue;
+      if (
+        fileTarget(file) !== target ||
+        readFileSync(target, "utf8") !== original
+      ) {
+        result.warnings.push(`${file}: 검사 후 변경되어 건너뜀`);
+        continue;
+      }
       result.backups.push(writeAtomic(file, target, plan.output));
       result.removed += plan.count;
       result.changed = true;
@@ -1015,12 +1033,11 @@ export function cleanupTfxHub({
   } else {
     result.warnings.push("격리 HOME: 허브 프로세스와 예약 작업 정리는 건너뜀");
   }
-  const snapshots = pluginRoot
-    ? join(pluginRoot, "references", "gemini-snapshots")
-    : null;
-  if (snapshots) {
-    const entry = lstatSync(snapshots, { throwIfNoEntry: false });
-    if (entry?.isDirectory()) {
+  for (const name of pluginRoot
+    ? ["gemini-snapshots", "codex-snapshots"]
+    : []) {
+    const snapshots = join(pluginRoot, "references", name);
+    if (lstatSync(snapshots, { throwIfNoEntry: false })?.isDirectory()) {
       rmSync(snapshots, { recursive: true, force: true });
       result.changed = true;
     }
