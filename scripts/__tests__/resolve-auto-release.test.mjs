@@ -186,6 +186,19 @@ describe("automatic release resolution", () => {
     );
   });
 
+  it("rejects dispatch inputs that could inject workflow outputs", () => {
+    const dispatch = (version, channel) =>
+      resolveAutoRelease({
+        eventName: "workflow_dispatch",
+        version,
+        channel,
+        headSha: "dispatch-sha",
+        execFileSyncFn: () => assert.fail("dispatch must not query git"),
+      });
+    assert.throws(() => dispatch("1.0.0\nsha=evil", "stable"), /version/);
+    assert.throws(() => dispatch("1.0.0", "stable\nrelease=true"), /channel/);
+  });
+
   it("writes all six workflow outputs for dispatch", () => {
     const root = mkdtempSync(join(tmpdir(), "tfx-resolve-output-"));
     const output = join(root, "output");

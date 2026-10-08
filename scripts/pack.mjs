@@ -46,6 +46,15 @@ const CORE_DIRS = [
   "hub/workers/worker-utils.mjs", // shared utility
 ];
 
+// core 에 들어가는 전부. release:check-mirror 도 이 목록으로 검사한다.
+export const CORE_ENTRIES = [
+  ...CORE_FILES,
+  ...CORE_DIRS,
+  "scripts/lib",
+  "hooks",
+  "hud",
+];
+
 const REMOTE_DIRS = ["hub/team", "hub/workers"];
 
 const TRIFLUX_DIRS = [
@@ -58,7 +67,8 @@ const TRIFLUX_DIRS = [
   "hub",
 ];
 
-const TRIFLUX_FILES = ["README.md", "README.ko.md", "LICENSE", "CLAUDE.md"];
+// CLAUDE.md 는 저장소 운영 지침이라 게시본에 넣지 않는다.
+const TRIFLUX_FILES = ["README.md", "README.ko.md", "LICENSE"];
 
 // ── 복사 유틸 ───────────────────────────────────────────────────
 
@@ -184,12 +194,7 @@ function packCore() {
   const dest = join(ROOT, "packages", "core");
   console.log("\n@triflux/core");
   cleanDist(dest);
-  for (const f of CORE_FILES) copyItem(f, dest);
-  for (const d of CORE_DIRS) copyItem(d, dest);
-  // shared scripts/lib for logger, context
-  copyItem("scripts/lib", dest);
-  copyItem("hooks", dest);
-  copyItem("hud", dest);
+  for (const entry of CORE_ENTRIES) copyItem(entry, dest);
   writeIndex(dest, CORE_INDEX);
   console.log("  DONE");
 }
@@ -232,15 +237,18 @@ function packTriflux() {
 
 // ── Main ────────────────────────────────────────────────────────
 
-const target = process.argv[2] || "all";
+// 목록만 읽으려고 import 할 때는 조립하지 않는다.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const target = process.argv[2] || "all";
 
-console.log(`pack: assembling packages (target=${target})`);
-console.log(`root: ${ROOT}`);
+  console.log(`pack: assembling packages (target=${target})`);
+  console.log(`root: ${ROOT}`);
 
-if (target === "core" || target === "all") packCore();
-if (target === "remote" || target === "all") packRemote();
-if (target === "triflux" || target === "all") packTriflux();
+  if (target === "core" || target === "all") packCore();
+  if (target === "remote" || target === "all") packRemote();
+  if (target === "triflux" || target === "all") packTriflux();
 
-console.log(
-  "\nPack complete. Run `npm pack` in each package to create tarballs.",
-);
+  console.log(
+    "\nPack complete. Run `npm pack` in each package to create tarballs.",
+  );
+}

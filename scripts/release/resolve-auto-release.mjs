@@ -22,6 +22,17 @@ export function resolveAutoRelease({
   execFileSyncFn = execFileSync,
 } = {}) {
   if (eventName === "workflow_dispatch") {
+    // 입력이 그대로 $GITHUB_OUTPUT 줄이 되므로 줄바꿈 섞인 값으로 다른 출력을 덮지 못하게 막는다.
+    if (
+      typeof version !== "string" ||
+      version !== version.trim() ||
+      !isSemver(version)
+    ) {
+      throw new Error(`Invalid dispatch version: ${JSON.stringify(version)}`);
+    }
+    if (channel !== "stable" && channel !== "canary") {
+      throw new Error(`Invalid dispatch channel: ${JSON.stringify(channel)}`);
+    }
     return {
       release: true,
       version,

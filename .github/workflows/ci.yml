@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 # PR은 새 커밋이 오면 이전 실행을 취소한다. main push는 release.yml이 커밋마다 결과를 기다리므로
 # 실행마다 고유 그룹을 써서 대기 중 교체도 막는다.
 concurrency:
@@ -23,6 +26,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -31,9 +36,8 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        # npm ci fail (lock sync mismatch — e.g. @emnapi/core peer dep platform skew) 시
-        # npm install fallback. deterministic 손실 trade-off 있으나 CI 미실행 보다 낫다.
-        run: npm ci || npm install --no-audit --no-fund
+        # 의존성 설치 스크립트를 막는다. 서드파티 설치 스크립트가 없고 테스트는 setup 결과에 기대지 않는다.
+        run: npm ci --ignore-scripts
 
       - name: Biome lint
         # ci.yml 이 `npm run lint` (biome) 를 안 돌려서 format/arg drift 가 main 에
@@ -53,5 +57,5 @@ jobs:
         # root vs packages/{core,remote,triflux} package.json version drift 감지.
         run: npm run release:check-sync
 
-      - name: Codex config stability guard
+      - name: Test (Codex config stability guard)
         run: npm run test:guard-codex-config
