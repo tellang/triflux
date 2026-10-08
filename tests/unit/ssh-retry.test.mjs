@@ -8,7 +8,7 @@ describe("ssh-retry", () => {
   describe("isTransientSshError", () => {
     it("connection reset 감지", () => {
       const err = new Error(
-        "ssh: connect to host 100.110.136.64: Connection reset by peer",
+        "ssh: connect to host 192.0.2.64: Connection reset by peer",
       );
       assert.ok(isTransientSshError(err));
     });

@@ -26,7 +26,7 @@ triflux 문서는 양은 많지만(docs/ 100+ 파일, 루트 MD 9개, `.claude/r
 - **공개/비공개** — ADR·prd·design·research·process·rules = PUBLIC(GitHub commit). runtime 상태(`.omx/`·`.omc/`·`.tfx/`·`.triflux/{lake,reports,swarm-logs,subagents}`)·secrets·hosts = LOCAL(git-ignore). 공개 표면 3개(GitHub `.gitignore` / npm `package.json.files` / agent `.claudeignore`)를 구분하고, `.gitignore` grandfathering을 explicit allowlist로 교체한다. **ADR은 GitHub 공개**(민감정보 sanitize; 보안취약점·NDA만 carve-out).
 
 ## 검토한 대안 (Considered Options)
-- **ADR 포맷 — MADR-minimal(채택) vs Nygard-only vs 전체 MADR**: Nygard는 대안 기록을 강제하지 않고, 전체 MADR(Decision Drivers 등)은 소규모/솔로에 과중. MADR-minimal이 "왜 그 안을 안 골랐나"를 최저비용으로 포착. mnk-callbot 실사용 + 2개 독립 리서치가 수렴.
+- **ADR 포맷 — MADR-minimal(채택) vs Nygard-only vs 전체 MADR**: Nygard는 대안 기록을 강제하지 않고, 전체 MADR(Decision Drivers 등)은 소규모/솔로에 과중. MADR-minimal이 "왜 그 안을 안 골랐나"를 최저비용으로 포착. 다른 저장소의 실사용 + 2개 독립 리서치가 수렴.
 - **폴더 — 제자리 유지 + allowlist(채택) vs operations/ 통합**: 제자리 유지가 저위험(되는 것을 부수지 않음). `operations/` 통합은 후순위 옵션으로 남긴다.
 - **결정 프로세스 — ADR-only(채택) vs RFC repo**: RFC/KEP식 무거운 프로세스는 외부 기여자 커뮤니티 형성 전까지 과잉. 드문 횡단 제안은 GitHub Discussion → 결론을 ADR로 fold.
 - **정책 위치 — `.claude/rules/` 유지(채택) vs docs로 흡수**: 흡수 시 harness auto-load 강제력을 잃고 수동 위키로 전락.

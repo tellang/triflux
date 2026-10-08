@@ -4,8 +4,8 @@
 // 왜 삭제가 아니라 "0" 고정인가:
 // scripts/tfx-route.sh 는 env 가 비어 있을 때만 machine profile 값을 채운다
 // (`[[ -n "${TFX_DISABLE_CODEX+x}" ]] || TFX_DISABLE_CODEX="$value"`).
-// 이 머신의 ~/.config/triflux/machine-profile.env 에 TFX_DISABLE_CODEX=1 과
-// TFX_DISABLE_ANTIGRAVITY=1 이 들어 있어서, 부모 셸 변수를 지우기만 하면
+// 개발 기기의 ~/.config/triflux/machine-profile.env 에 TFX_DISABLE_CODEX=1 이나
+// TFX_DISABLE_ANTIGRAVITY=1 이 있으면, 부모 셸 변수를 지우기만 해도
 // 프로파일 파일이 다시 1 을 공급한다. env 를 "0" 으로 명시해야 두 경로를
 // 모두 덮는다. 기존 격리 커밋(4aaf0897, f49ed3ac, e89c0bd4)도 같은 방식이다.
 //

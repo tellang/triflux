@@ -8,7 +8,7 @@
 - 사용자 지정 grep 명령인 `grep -rE "mcpServers|mcp_config|expandEnv|envVar|\$\{" $(npm root -g)/@google/gemini-cli/dist`는 현재 설치본에 `dist`가 없어 매칭이 없었다. 실제 설치본은 `@google/gemini-cli/bundle` 아래에 있다.
 - Gemini CLI 번들에는 `createTransportRequestInit()`에서 `mcpServerConfig.headers` 값을 `expandEnvVars(value, sanitizedEnv)`로 처리하는 코드가 있다. 따라서 headers 문자열 보간 자체는 존재한다.
 - 다만 headers 보간 입력은 `sanitizeEnvironment(... enableEnvironmentVariableRedaction: true)`를 거친 값이다. Gemini 문서는 `env` block의 `$VAR` / `${VAR}` 확장을 명시하고, 민감 환경변수는 기본 redaction 대상이며 필요 시 `security.allowedEnvironmentVariables`로 명시 허용해야 한다고 설명한다. `EXA_API_KEY` 같은 이름은 secret pattern에 걸릴 수 있으므로, `${EXA_API_KEY}` header만 쓰는 마이그레이션은 기본 설정에서 빈 header가 될 수 있다.
-- Antigravity CLI(`agy`)는 `strings /Users/tellang/.local/bin/agy | grep -E '\$\{|expandEnv|envSubst'`에서 설정 header 보간으로 판단할 수 있는 안정적인 흔적을 찾지 못했다.
+- Antigravity CLI(`agy`)는 `strings ~/.local/bin/agy | grep -E '\$\{|expandEnv|envSubst'`에서 설정 header 보간으로 판단할 수 있는 안정적인 흔적을 찾지 못했다.
 - Antigravity MCP 공식 문서(`https://antigravity.google/docs/mcp`)는 WebFetch 시도에서 SPA HTML만 반환되어 본문 근거를 확보하지 못했다.
 - Antigravity plugin sample인 `~/.gemini/antigravity-cli/plugins/chrome-devtools-mcp/mcp_config.json`은 `env: null` 형태이며 header/env 보간 예시를 제공하지 않는다.
 

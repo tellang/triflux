@@ -14,7 +14,6 @@ paths:
 | **gstack** | `~/.gstack/last-update-check` 훅 / 세션 시작 배너 | `/gstack-upgrade` 스킬 (git install이면 `git merge --ff-only origin/main` + `./setup` + migrations) |
 | **Codex CLI** | `codex --version` / `~/.codex/auth.json` mtime | `npm i -g @openai/codex` / 토큰 만료 시 `codex login` (인터랙티브) + 메시지 한 번 날려 refresh 트리거 |
 | **Antigravity CLI** | `agy --version` | CLI: `curl -fsSL https://antigravity.google/cli/install.sh \| bash`. IDE Cask: `brew install --cask antigravity`. 인증: ChainedAuth (Mac Keychain → oauth_creds.json). 자세히는 memory:[[reference-antigravity-cli-sanity-matrix]] |
-| **Codex auth 캐시** (pte1024 등) | 병렬 codex exec 시 `refresh_token_reused` | `cp ~/.codex/auth.json ~/.claude/cache/tfx-hub/codex-auth-<account>.json` 수동 (Issue #78 자동화 대기) |
 
 ## 주의
 

@@ -77,7 +77,7 @@ issue #176의 `tfx-route.sh --job-status` 조기 실패 판정과 PR #185의 sil
 ## 7. References
 
 - 체크포인트: `20260425-191243-v10150-shipped-remaining-meta-f-and-worker-signaling.md`
-- silent-flush evidence: `bkzdlw1nu` task — `/c/Users/tellang/AppData/Local/Temp/claude/.../tasks/bkzdlw1nu.output` (72s × 0B, status=quiet, pid 267034)
+- silent-flush evidence: `bkzdlw1nu` task — `~/AppData/Local/Temp/claude/.../tasks/bkzdlw1nu.output` (72s × 0B, status=quiet, pid 267034)
 - 모델-직무 매핑 (PR [#184](https://github.com/tellang/triflux/pull/184)): gpt-5.5 메인 / gpt-5.4-mini 가성비 / gpt-5.3-codex escalation 중간
 - escalation chain: `.claude/rules/tfx-escalation-chain.md`
 - 메모리 룰: `feedback_tfx_async_false_failed.md` (#176 stdout.log 별도 경로 체크)

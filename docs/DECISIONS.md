@@ -86,9 +86,9 @@
 
 ## 2026-06-26: triflux 릴리즈 계정
 
-- **결정**: 로컬 `gh`가 기본 활성 계정(`taeeon-tpcg`)인 상태로 triflux를
-  릴리즈하면 머지·푸시·`release.yml` dispatch가 전부 403. 릴리즈 직전
-  `gh auth switch --user tellang`, 끝나면 `taeeon-tpcg`로 원복.
-- **근거**: 머신에 2개 `gh` 계정이 등록되어 있고 `tellang/triflux` 쓰기 권한은
-  `tellang` 계정에만 있음(v10.40.0 릴리즈에서 실측 확인).
+- **결정**: 로컬 `gh`의 기본 활성 계정이 저장소 쓰기 권한이 없는 업무 계정이면
+  머지·푸시·`release.yml` dispatch가 전부 403. 릴리즈 직전 저장소 소유자 계정으로
+  `gh auth switch`, 끝나면 원래 계정으로 원복.
+- **근거**: 한 기기에 `gh` 계정이 둘 이상 등록되면 `tellang/triflux` 쓰기 권한은
+  소유자 계정에만 있다(v10.40.0 릴리즈에서 확인).
 - **관련**: ADR 승격 대상 아님: 계정 운영 절차.

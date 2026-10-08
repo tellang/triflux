@@ -66,7 +66,7 @@ gh run list --workflow release.yml -L1
 gh run watch "$(gh run list --workflow release.yml -L1 --json databaseId -q '.[0].databaseId')"
 ```
 
-- gh 인증이 없는 환경(예: SSH→m2, hosts.yml PAT 만료)이면 **gh 가 정상인 머신(m5)에서** dispatch 하거나 **GitHub 웹 UI**(Actions → release → Run workflow)로 대체.
+- gh 인증이 없는 환경(예: SSH 로 들어간 원격 세션, gh 토큰 만료)이면 **gh 가 정상인 머신에서** dispatch 하거나 **GitHub 웹 UI**(Actions → release → Run workflow)로 대체.
 - CHANGELOG 가 필요하면 dispatch 전에 main 에 별도 커밋으로 반영(아래 로컬 플로우 Step 4 양식 참조).
 
 ### 경량 경로 - 태그만 push

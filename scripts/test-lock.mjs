@@ -397,9 +397,9 @@ export function main(argv = process.argv.slice(2)) {
       TEST_LOCK_PID: String(process.pid),
       TFX_HUB_PID_DIR: process.env.TFX_HUB_PID_DIR || testHubPidDir,
       // 테스트 러너 밀폐화: 머신 전역 CLI disable 정책을 자식 테스트가 상속하지
-      // 않게 고정한다. 이 개발 머신은 ~/.zshenv 와
-      // ~/.config/triflux/machine-profile.env 두 곳에서 TFX_DISABLE_CODEX=1 과
-      // TFX_DISABLE_ANTIGRAVITY=1 을 공급한다.
+      // 않게 고정한다. 개발 기기는 셸 설정이나
+      // ~/.config/triflux/machine-profile.env 로 TFX_DISABLE_CODEX=1 과
+      // TFX_DISABLE_ANTIGRAVITY=1 을 공급할 수 있다.
       //
       // "0" 고정이지 `||` 폴백이 아닌 이유: 리더 규칙상 env 에 키가 존재하면
       // profile 은 그 키를 읽지 않는다. 그래서 "0" 을 명시해야 셸 export 와

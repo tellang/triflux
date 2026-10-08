@@ -85,7 +85,7 @@ describe("Phase 4b integration — hosts v1/v2 compatibility matrix", () => {
       name: "v1 legacy schema from references/hosts.json",
       location: join("references", "hosts.json"),
       query: "desktop",
-      sshAddress: "SSAFY@desk.ts.net",
+      sshAddress: "alice@desk.ts.net",
       raw: {
         hosts: {
           ultra4: {
@@ -93,7 +93,7 @@ describe("Phase 4b integration — hosts v1/v2 compatibility matrix", () => {
             aliases: ["desktop", "ultra"],
             default_dir: "~/Desktop/Projects",
             os: "win32",
-            ssh_user: "SSAFY",
+            ssh_user: "alice",
             tailscale: {
               ip: "100.64.0.1",
               dns: "desk.ts.net",
@@ -106,7 +106,7 @@ describe("Phase 4b integration — hosts v1/v2 compatibility matrix", () => {
       },
       expected: {
         os: "windows",
-        ssh_user: "SSAFY",
+        ssh_user: "alice",
         capabilities: ["codex", "claude"],
         capabilities_v2: {
           codex: true,
@@ -120,7 +120,7 @@ describe("Phase 4b integration — hosts v1/v2 compatibility matrix", () => {
       name: "v2 additive schema from packages/triflux/references/hosts.json",
       location: join("packages", "triflux", "references", "hosts.json"),
       query: "mac",
-      sshAddress: "tellang@mac.ts.net",
+      sshAddress: "bob@mac.ts.net",
       raw: {
         hosts: {
           m2: {
@@ -129,7 +129,7 @@ describe("Phase 4b integration — hosts v1/v2 compatibility matrix", () => {
             default_dir: "~/projects",
             os: "darwin kernel",
             ssh: {
-              user: "tellang",
+              user: "bob",
             },
             tailscale: {
               ip: "100.64.0.2",
@@ -153,7 +153,7 @@ describe("Phase 4b integration — hosts v1/v2 compatibility matrix", () => {
       },
       expected: {
         os: "darwin",
-        ssh_user: "tellang",
+        ssh_user: "bob",
         capabilities: ["codex", "gemini", "high-memory"],
         capabilities_v2: {
           codex: true,

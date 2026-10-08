@@ -82,7 +82,7 @@ graph TD
 ### Phase 3: 원격 측정(Telemetry) 기반 검증 및 쉘 배포 해제
 * **목표**: 구형 Bash 스크립트 실행 감시 후 영구 제거.
 * **상세 작업**:
-  1. 구형 `tfx-route.sh` 실행 시 경고 데퍼케이션 마커(Deprecation warning)를 표준 에러로 출력하되, 사내 모니터링 API에 실행 로깅(Telemetry)을 전송하는 훅 주입.
+  1. 구형 `tfx-route.sh` 실행 시 경고 데퍼케이션 마커(Deprecation warning)를 표준 에러로 출력한다.
   2. 약 4주간 운영 및 전체 CI/CD 환경 모니터링 수행.
   3. 구형 `tfx-route.sh` 사용량이 0%에 도달했음을 검증한 즉시 레포지토리 내에서 완전 삭제하고 `scripts/tfx-route.mjs`를 표준 배포 사양의 단일 심볼릭 링크나 주 엔트리로 승격.
 * **추정 일정**: 2일 (모니터링 유지 기간 4주 별도 진행)

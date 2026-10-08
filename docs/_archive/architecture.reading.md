@@ -119,5 +119,5 @@ triflux는 gstack·superpowers와 **레이어 분리** 관계로 공존한다.
 [^term-meta-routing]: 메타 라우팅 — Claude가 직접 코드를 실행하지 않고 "이 작업을 어떤 스킬·CLI로 보낼지"만 판정하는 역할. `/tfx-harness`가 대표적이다.
 [^abbr-mcp]: MCP — Model Context Protocol. 에이전트가 외부 도구(hub 포함)를 표준화된 방식으로 호출하게 해주는 프로토콜.
 [^term-psmux]: psmux — Windows 전용 tmux 유사 터미널 멀티플렉서. triflux가 Windows Terminal 패인·세션을 관리 API 경유로만 조작하도록 강제할 때 대상이 되는 도구다.
-[^code-tfx-route]: `scripts/tfx-route.sh:290` · `case "${1:-}" in` · CLI 라우팅 엔진 진입점 — agent_type/prompt/mcp_profile/timeout/context_file 인자를 받아 Codex/Antigravity/Claude lane으로 dispatch한다. [▸ 코드 열기](vscode://file/Users/tellang/Projects/tools/triflux/scripts/tfx-route.sh:290)
+[^code-tfx-route]: `scripts/tfx-route.sh:290` · `case "${1:-}" in` · CLI 라우팅 엔진 진입점 — agent_type/prompt/mcp_profile/timeout/context_file 인자를 받아 Codex/Antigravity/Claude lane으로 dispatch한다. [▸ 코드 열기](vscode://file/<repo>/scripts/tfx-route.sh:290)
 <!-- wiki-harness:end -->

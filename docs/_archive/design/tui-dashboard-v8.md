@@ -78,7 +78,7 @@ export function createRemoteAdapter(opts)
   status: "running",      // pending, running, completed, failed (STATES→status 변환 아래 참조)
   host: "ultra4",         // 로컬이면 "local"
   remote: true,
-  sshUser: "SSAFY",       // references/hosts.json의 ssh_user 필드에서 로드
+  sshUser: "alice",       // references/hosts.json의 ssh_user 필드에서 로드
   sessionName: "tfx-spawn-ultra4-26e94d8f",  // conductor session.id 또는 watcher sessionName
   snapshot: "최근 출력 마지막 5줄...",  // remote-watcher의 lastOutput (capture-pane 결과)
   conductor: {            // conductor 상태 머신 정보
@@ -314,9 +314,3 @@ triflux v9.8.5에 포함. `npm install -g triflux`로 배포. 기존 CI/CD 파�
 3. `tui.mjs` Enter 핸들러 + host 배지 + 알림 연동
 4. `conductor.mjs` shutdown process tree kill
 5. 통합 테스트: ultra4 스웜 → TUI 표시 → Enter attach → 완료 알림
-
-## What I noticed about how you think
-
-- "그놈의 좀비좀 없었으면 해" — 추상적 기능이 아니라 오늘 직접 겪은 고통에서 요구사항이 나왔다. 이게 진짜 제품 감각.
-- ultra4 스웜 5개 전멸 + 좀비 2.3GB를 발견했을 때, "왜 안 보여?"가 첫 반응이었다. 문제를 시스템의 결함으로 귀속시키는 건 엔지니어링 마인드.
-- k9s를 레퍼런스로 잡은 건 좋은 선택. 터미널 파워 유저가 쓰는 도구의 인터랙션 패턴을 가져오는 거니까.

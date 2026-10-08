@@ -74,7 +74,7 @@
       "line": "290",
       "signature": "case \"${1:-}\" in",
       "role": "CLI 라우팅 엔진 진입점 dispatch",
-      "vscode_link": "vscode://file/Users/tellang/Projects/tools/triflux/scripts/tfx-route.sh:290"
+      "vscode_link": "vscode://file/<repo>/scripts/tfx-route.sh:290"
     }
   }
 }

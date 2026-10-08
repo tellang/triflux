@@ -69,12 +69,12 @@ describe("setup stable node command (#253)", () => {
                 hooks: [
                   {
                     type: "command",
-                    command: `"${staleNode}" "/Users/tellang/Projects/tools/triflux/scripts/setup.mjs"`,
+                    command: `"${staleNode}" "/Users/example/Projects/tools/triflux/scripts/setup.mjs"`,
                     timeout: 10,
                   },
                   {
                     type: "command",
-                    command: `"${staleNode}" "/Users/tellang/Projects/tools/triflux/scripts/hub-ensure.mjs"`,
+                    command: `"${staleNode}" "/Users/example/Projects/tools/triflux/scripts/hub-ensure.mjs"`,
                     timeout: 8,
                   },
                 ],

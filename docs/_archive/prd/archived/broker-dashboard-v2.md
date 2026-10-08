@@ -14,7 +14,7 @@ v10.9.7~9에서 broker dashboard + quota-refresh API를 추가했으나:
 - files: hub/server.mjs, packages/triflux/hub/server.mjs
 - prompt: |
   `/broker/quota-refresh` POST 엔드포인트가 Hub를 크래시시킨다.
-  `refreshAllAccountQuotas()`는 11개 계정에 fetch 호출하는 async 함수.
+  `refreshAllAccountQuotas()`는 등록된 모든 계정에 fetch 호출하는 async 함수.
 
   디버그:
   1. server.mjs에서 `refreshAllAccountQuotas` 함수를 찾아 읽어라

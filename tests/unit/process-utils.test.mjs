@@ -473,7 +473,7 @@ describe("process tree cleanup helpers", () => {
             ParentProcessId: 999991,
             Name: "node.exe",
             CommandLine:
-              "node C:\\Users\\tellang\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js resume --last",
+              "node C:\\Users\\example\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex\\bin\\codex.js resume --last",
           },
           {
             ProcessId: 521,
@@ -486,7 +486,7 @@ describe("process tree cleanup helpers", () => {
             ParentProcessId: 999992,
             Name: "node.exe",
             CommandLine:
-              "node C:\\Users\\tellang\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js --resume",
+              "node C:\\Users\\example\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js --resume",
           },
           {
             ProcessId: 523,
@@ -499,7 +499,7 @@ describe("process tree cleanup helpers", () => {
             ParentProcessId: 999993,
             Name: "node.exe",
             CommandLine:
-              "node C:\\Users\\tellang\\AppData\\Roaming\\npm\\node_modules\\@google\\gemini-cli\\dist\\index.js --prompt hello",
+              "node C:\\Users\\example\\AppData\\Roaming\\npm\\node_modules\\@google\\gemini-cli\\dist\\index.js --prompt hello",
           },
           {
             ProcessId: 525,
@@ -541,7 +541,7 @@ describe("process tree cleanup helpers", () => {
             ParentProcessId: 999991,
             Name: "bun.exe",
             CommandLine:
-              'bun "C:\\Users\\tellang\\.bun\\install\\global\\node_modules\\gbrain\\src\\cli.ts" serve',
+              'bun "C:\\Users\\example\\.bun\\install\\global\\node_modules\\gbrain\\src\\cli.ts" serve',
           },
         ],
       }),
@@ -576,7 +576,7 @@ describe("process tree cleanup helpers", () => {
             ParentProcessId: 621,
             Name: "bun.exe",
             CommandLine:
-              'bun "C:\\Users\\tellang\\.bun\\install\\global\\node_modules\\gbrain\\src\\cli.ts" serve',
+              'bun "C:\\Users\\example\\.bun\\install\\global\\node_modules\\gbrain\\src\\cli.ts" serve',
           },
         ],
       }),

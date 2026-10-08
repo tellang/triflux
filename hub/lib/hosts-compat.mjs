@@ -278,11 +278,11 @@ export function selfTestFixtures() {
       aliases: ["desk"],
       default_dir: "~/Desktop/Projects",
       os: "win32",
-      ssh_user: "SSAFY",
-      tailscale: { ip: "100.64.0.1", dns: "desk.ts.net" },
+      ssh_user: "alice",
+      tailscale: { ip: "192.0.2.1", dns: "desk.example.ts.net" },
       capabilities: ["codex", "claude"],
     },
-    "ultra4",
+    "win-host",
   );
   const v2 = normalizeHost(
     {
@@ -290,23 +290,23 @@ export function selfTestFixtures() {
       aliases: ["mac"],
       default_dir: "~/projects",
       os: "darwin kernel",
-      ssh: { user: "tellang" },
+      ssh: { user: "bob" },
       tailscale: {
-        ip: "100.64.0.2",
-        dns: "mac.ts.net",
+        ip: "192.0.2.2",
+        dns: "mac.example.ts.net",
         ssh_mode: "ssh-over-vpn",
       },
       capabilities_v2: { codex: true, claude: true, high_memory: true },
       last_probe: { ok: true, ts: "2026-04-18T12:34:56Z", latency_ms: 143 },
     },
-    "m2",
+    "mac-host",
   );
   return {
     v1,
     v2,
     checks: {
       v1_os: v1.os === "windows",
-      v1_ssh_user: v1.ssh.user === "SSAFY" && v1.ssh_user === "SSAFY",
+      v1_ssh_user: v1.ssh.user === "alice" && v1.ssh_user === "alice",
       v2_os: v2.os === "darwin",
       v2_caps: v2.capabilities.includes("high-memory"),
       v2_probe: v2.last_probe?.ok === true && v2.last_probe?.latency_ms === 143,
