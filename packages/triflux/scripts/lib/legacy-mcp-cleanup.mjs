@@ -18,7 +18,7 @@ import { createRequire } from "node:module";
 import { homedir, platform as osPlatform, userInfo } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { loadRegistryOrDefault } from "./mcp-guard-engine.mjs";
+import { loadRegistryOrDefault, pinnedArgs } from "./mcp-guard-engine.mjs";
 
 const require = createRequire(import.meta.url);
 const toml = require("@iarna/toml");
@@ -1247,29 +1247,6 @@ const REGISTRY_PIN_FILES = [
   [".codex/config.toml", "toml", "codex"],
   [".gemini/config/mcp_config.json", "json", "antigravity"],
 ];
-
-// 범위 이름(@scope/name)의 첫 @ 는 이름에 속한다.
-function splitPackageSpec(spec) {
-  const match = /^((?:@[^/@\s]+\/)?[^@\s]+)(?:@(\S+))?$/.exec(spec);
-  return match ? { name: match[1], version: match[2] ?? null } : null;
-}
-
-// 명령과 인자 수가 같고, 다른 자리는 레지스트리의 고정 패키지와 이름만 같을 때 고정 인자를 돌려준다.
-function pinnedArgs(entry, server) {
-  if (entry?.command !== server.command || !Array.isArray(entry.args))
-    return null;
-  if (entry.args.length !== server.args.length) return null;
-  let changed = false;
-  for (const [index, want] of server.args.entries()) {
-    const have = entry.args[index];
-    if (have === want) continue;
-    const pin = splitPackageSpec(want);
-    if (!pin?.version || typeof have !== "string") return null;
-    if (splitPackageSpec(have)?.name !== pin.name) return null;
-    changed = true;
-  }
-  return changed ? [...server.args] : null;
-}
 
 function pinJson(original, servers) {
   const data = JSON.parse(original);

@@ -751,6 +751,29 @@ function syncDenylistKey(client, serverName) {
     .toLowerCase()}`;
 }
 
+// 범위 이름(@scope/name)의 첫 @ 는 이름에 속한다.
+function splitPackageSpec(spec) {
+  const match = /^((?:@[^/@\s]+\/)?[^@\s]+)(?:@(\S+))?$/.exec(spec);
+  return match ? { name: match[1], version: match[2] ?? null } : null;
+}
+
+// 명령과 인자 수가 같고, 다른 자리는 레지스트리의 고정 패키지와 이름만 같을 때 고정 인자를 돌려준다.
+export function pinnedArgs(entry, server) {
+  if (entry?.command !== server.command || !Array.isArray(entry.args))
+    return null;
+  if (entry.args.length !== server.args.length) return null;
+  let changed = false;
+  for (const [index, want] of server.args.entries()) {
+    const have = entry.args[index];
+    if (have === want) continue;
+    const pin = splitPackageSpec(want);
+    if (!pin?.version || typeof have !== "string") return null;
+    if (splitPackageSpec(have)?.name !== pin.name) return null;
+    changed = true;
+  }
+  return changed ? [...server.args] : null;
+}
+
 export function buildDesiredServerRecord(name, serverConfig, filePath) {
   const policy = serverPolicy(serverConfig);
   if (policy === "stdio") {
@@ -1931,6 +1954,28 @@ export function syncRegistryTargets(options = {}) {
             message: `[mcp-guard] policy skip: ${denyKey}`,
           });
         }
+        continue;
+      }
+
+      // 사용자가 바꾼 stdio 항목은 덮어쓰지 않는다. 같은 패키지의 버전 차이만 고정 버전으로 맞춘다.
+      const existing = snapshot.servers.find((server) => server.name === name);
+      if (
+        serverPolicy(serverConfig) === "stdio" &&
+        existing?.command &&
+        !(
+          existing.command === serverConfig.command &&
+          JSON.stringify(existing.args) === JSON.stringify(serverConfig.args)
+        ) &&
+        !pinnedArgs(existing, serverConfig)
+      ) {
+        actions.push({
+          type: "sync",
+          filePath: target.filePath,
+          label: target.label,
+          status: "warning",
+          server: name,
+          message: `${name}: 레지스트리와 다른 사용자 항목이라 덮어쓰지 않음 (${[existing.command, ...existing.args].join(" ")})`,
+        });
         continue;
       }
 

@@ -183,4 +183,36 @@ describe("syncRegistryTargets stdio servers", () => {
       ),
     );
   });
+
+  it("keeps user-changed stdio entries and only pins version differences", () => {
+    const homeDir = createHomeDir();
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+    const registry = registryFor(homeDir);
+    const brave = registry.servers["brave-search"];
+    brave.args = ["-y", "@brave/brave-search-mcp-server@2.1.4"];
+    const write = (file, args) =>
+      writeFileSync(
+        file,
+        JSON.stringify({
+          mcpServers: { "brave-search": { command: "npx", args } },
+        }),
+      );
+    const unpinned = join(homeDir, "repo", ".mcp.json");
+    const custom = join(homeDir, "repo", ".claude", "mcp.json");
+    const userArgs = ["-y", "@brave/brave-search-mcp-server", "--x"];
+    write(unpinned, ["-y", "@brave/brave-search-mcp-server"]);
+    write(custom, userArgs);
+
+    const { actions } = syncRegistryTargets({ registry });
+    const args = (file) =>
+      JSON.parse(readFileSync(file, "utf8")).mcpServers["brave-search"].args;
+    assert.deepEqual(args(unpinned), brave.args);
+    assert.deepEqual(args(custom), userArgs);
+    assert.ok(
+      actions.some(
+        (action) => action.filePath === custom && action.status === "warning",
+      ),
+    );
+  });
 });
