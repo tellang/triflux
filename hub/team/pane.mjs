@@ -45,13 +45,19 @@ function muxExec(args, opts = {}) {
 
 const AGENT_TO_CLI = createRequire(import.meta.url)("./agent-map.json");
 
+// 역할명(designer)과 별칭(agy)을 CLI 종류로 푼다. 실행과 주입 판정이 같은 값을 본다.
+export function resolveCli(cli) {
+  const name = String(cli || "").toLowerCase();
+  return AGENT_TO_CLI[name] ?? name;
+}
+
 /**
  * CLI 에이전트 시작 커맨드 생성. 역할명과 별칭은 agent-map 으로 CLI 를 고른다.
  * @param {string} cli — CLI 이름, 별칭(agy) 또는 역할명
  * @returns {string} 실행할 셸 커맨드
  */
 export function buildCliCommand(cli) {
-  switch (AGENT_TO_CLI[cli] ?? cli) {
+  switch (resolveCli(cli)) {
     case "codex":
       return "codex --dangerously-bypass-approvals-and-sandbox";
     case "antigravity":
@@ -84,7 +90,7 @@ export function startCliInPane(target, command) {
  * @param {{ multiplexer: string, useFileRef: boolean, cli: string|null }} args
  */
 export function shouldUseFileRef({ multiplexer, useFileRef, cli }) {
-  return multiplexer === "psmux" && useFileRef && cli !== "codex";
+  return multiplexer === "psmux" && useFileRef && resolveCli(cli) !== "codex";
 }
 
 /** 동기 sleep — injectPrompt는 sync 경로라 setTimeout을 쓸 수 없다 */
@@ -138,7 +144,7 @@ function waitForComposerReady(target) {
  * capture 불가 또는 재시도 소진을 성공으로 숨기지 않고 오류로 반환한다.
  */
 function isAntigravityCli(cli) {
-  return ["agy", "antigravity"].includes(String(cli || "").toLowerCase());
+  return resolveCli(cli) === "antigravity";
 }
 
 function promptComposerNeedle(prompt) {

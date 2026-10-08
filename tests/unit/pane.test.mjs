@@ -17,6 +17,13 @@ describe("pane.mjs", () => {
     assert.equal(buildCliCommand("designer"), "agy");
     assert.equal(buildCliCommand("my-cli"), "my-cli");
   });
+
+  it("주입 판정도 역할명을 CLI 로 푼다", () => {
+    const fileRef = (cli) =>
+      shouldUseFileRef({ multiplexer: "psmux", useFileRef: true, cli });
+    assert.equal(fileRef("executor"), false);
+    assert.equal(fileRef("designer"), true);
+  });
 });
 
 describe("Antigravity prompt submission", () => {
