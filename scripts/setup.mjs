@@ -547,11 +547,7 @@ export function scanHubWorkerFiles(pluginRoot, claudeDir) {
   }
 
   // hub/ 루트: worker가 import하는 의존성 (cli-adapter-base, platform 등)
-  const hubRootDeps = [
-    "cli-adapter-base.mjs",
-    "platform.mjs",
-    "account-broker.mjs",
-  ];
+  const hubRootDeps = ["cli-adapter-base.mjs", "platform.mjs"];
   for (const f of hubRootDeps) {
     if (existsSync(join(hubRoot, f))) {
       results.push({
@@ -1390,6 +1386,10 @@ const RETIRED_INSTALL_FILES = [
   [
     join(CLAUDE_DIR, "scripts", "hub", "workers", "lib", "jsonrpc-stdio.mjs"),
     "hub/workers/lib/jsonrpc-stdio.mjs",
+  ],
+  [
+    join(CLAUDE_DIR, "scripts", "hub", "account-broker.mjs"),
+    "// hub/account-broker.mjs",
   ],
   [join(CLAUDE_DIR, "scripts", "hub-ensure.mjs"), "[hub-ensure]"],
   [join(CLAUDE_DIR, "scripts", "hub-watchdog.mjs"), "[hub-watchdog]"],

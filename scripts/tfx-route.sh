@@ -377,8 +377,7 @@ CLAUDE_BIN_ARGS_JSON="${CLAUDE_BIN_ARGS_JSON:-[]}"
 
 # ── Codex auth/home 명시 라우팅 (Issue #78 race 차단) ──
 # TFX_CODEX_HOME 또는 TFX_CODEX_AUTH_FILE 설정 시 codex CLI에 명시적 CODEX_HOME 적용.
-# AccountBroker 가 disable 되었거나 (TFX_DISABLE_ACCOUNT_BROKER=1) 호출자가
-# 단일 account 를 강제 라우팅하고 싶을 때 사용. 미설정 시 codex default (~/.codex) 유지.
+# 호출자가 특정 account 를 강제 라우팅하고 싶을 때 사용. 미설정 시 codex default (~/.codex) 유지.
 if [[ -n "${TFX_CODEX_HOME:-}" ]]; then
   export CODEX_HOME="$TFX_CODEX_HOME"
 elif [[ -n "${TFX_CODEX_AUTH_FILE:-}" && -f "${TFX_CODEX_AUTH_FILE}" ]]; then

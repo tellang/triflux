@@ -15,61 +15,6 @@ import {
 import { IS_WINDOWS, killProcess } from "./platform.mjs";
 import { createInterventionLadder } from "./team/intervention.mjs";
 
-// ── Quota retry-after 파싱 ──────────────────────────────────────
-
-const FALLBACK_COOLDOWN_MS = { codex: 5 * 3600_000, gemini: 86400_000 };
-
-/**
- * 에러 텍스트에서 retry-after 시간을 동적 파싱.
- * "try again at 2026-04-11T10:00:00Z", "retry after 3600 seconds",
- * "resets in 7 days", "wait 5 hours" 등을 감지.
- */
-export function parseRetryAfterMs(text, provider) {
-  // 1. ISO timestamp: "try again at 2026-04-11T10:00:00"
-  const isoMatch = text.match(
-    /(?:try again|retry|available|resets?)\s+(?:at|after)\s+(\d{4}-\d{2}-\d{2}T[\d:.]+Z?)/i,
-  );
-  if (isoMatch) {
-    const target = new Date(isoMatch[1]).getTime();
-    if (target > Date.now()) return target - Date.now();
-  }
-
-  // 2. Duration: "N seconds/minutes/hours/days"
-  const durMatch = text.match(
-    /(?:retry|wait|resets?|again)\s+(?:in\s+|after\s+)?(\d+)\s*(second|minute|hour|day|week)/i,
-  );
-  if (durMatch) {
-    const n = Number(durMatch[1]);
-    const unit = durMatch[2].toLowerCase();
-    const multipliers = {
-      second: 1000,
-      minute: 60_000,
-      hour: 3600_000,
-      day: 86400_000,
-      week: 604800_000,
-    };
-    return n * (multipliers[unit] || 3600_000);
-  }
-
-  // 3. "7 days" / "24 hours" 단독 (context 없이)
-  const standaloneMatch = text.match(/(\d+)\s*(day|hour|week|minute)/i);
-  if (standaloneMatch) {
-    const n = Number(standaloneMatch[1]);
-    const unit = standaloneMatch[2].toLowerCase();
-    const multipliers = {
-      minute: 60_000,
-      hour: 3600_000,
-      day: 86400_000,
-      week: 604800_000,
-    };
-    const parsed = n * (multipliers[unit] || 3600_000);
-    if (parsed >= 3600_000) return parsed; // 1시간 이상만 신뢰
-  }
-
-  // 4. fallback: provider 기본값
-  return FALLBACK_COOLDOWN_MS[provider] || 5 * 3600_000;
-}
-
 // ── Shell utilities ─────────────────────────────────────────────
 
 export function normalizePathForShell(value) {
@@ -195,47 +140,28 @@ export function appendWarnings(stderr, warnings = []) {
   return [stderr, text].filter(Boolean).join("\n");
 }
 
-// ── Broker-integrated execution ─────────────────────────────────
+// ── Attempt execution ───────────────────────────────────────────
 
 /**
- * Shared execute() logic that uses account-broker for per-account circuit
- * breaking instead of a global breaker.
+ * preflight 뒤 buildAttemptsFn 이 만든 시도를 순서대로 실행한다.
  *
  * @param {object} params
- * @param {string} params.provider — 'codex' | 'gemini'
  * @param {(prompt: string, workdir: string, preflight: object, attempt: object) => Promise<object>} params.runFn
  * @param {(opts: object) => Promise<object>} params.preflightFn
  * @param {(opts: object, preflight: object) => object[]} params.buildAttemptsFn
  * @param {object} params.opts — caller-supplied execute options
  * @returns {Promise<object>} createResult-shaped result
  */
-export async function executeWithCircuitBroker({
-  provider,
+export async function executeWithAttempts({
   runFn,
   preflightFn,
   buildAttemptsFn,
   opts = {},
 }) {
-  // late-import to avoid circular dependency at module load time
-  const brokerMod = await import("./account-broker.mjs");
   const { withRetry } = await import("./workers/worker-utils.mjs");
-
-  // access broker as live binding property (not destructured) so reloadBroker() propagates
-  const hasBroker = brokerMod.broker != null;
-  // Empty broker (TFX_DISABLE_ACCOUNT_BROKER=1 or zero accounts) must not
-  // gate execution. lease() is null because there are no accounts to lease,
-  // not because all accounts are busy/cooldown/circuit. Treat it like
-  // hasBroker=false and fall through to the default auth path.
-  const brokerDisabled = hasBroker && brokerMod.broker.isDisabled === true;
-  const effectiveBroker = hasBroker && !brokerDisabled;
-  const lease = effectiveBroker ? brokerMod.broker.lease({ provider }) : null;
-  if (effectiveBroker && !lease) {
-    return createResult(false, { fellBack: true, failureMode: "circuit_open" });
-  }
 
   const preflight = await preflightFn(opts);
   if (!preflight.ok) {
-    if (lease) brokerMod.broker.release(lease.id, { ok: false });
     return createResult(false, {
       stderr: appendWarnings("", preflight.warnings),
       fellBack: opts.fallbackToClaude !== false,
@@ -250,15 +176,11 @@ export async function executeWithCircuitBroker({
   try {
     lastResult = await withRetry(
       async () => {
-        // PRD A1: lease 메타데이터를 runFn 에 전달해서 adapter 가 실제 spawn 시
-        // 해당 account 의 authFile/env/profile 을 적용할 수 있게 한다. lease=null
-        // 이면 adapter 는 default 경로 (단일 ~/.codex/auth.json) 로 동작한다.
         const result = await runFn(
           opts.prompt || "",
           opts.workdir || process.cwd(),
           preflight,
           attempts[attemptIndex],
-          lease,
         );
         const current = {
           ...result,
@@ -286,26 +208,7 @@ export async function executeWithCircuitBroker({
       createResult(false, { stderr: String(error?.message || error) });
   }
 
-  if (lastResult.ok) {
-    if (lease) brokerMod.broker.release(lease.id, { ok: true });
-    return lastResult;
-  }
-
-  if (lease) {
-    if (lastResult.failureMode === "rate_limited") {
-      const text = `${lastResult.output || ""}\n${lastResult.stderr || ""}`;
-      const coolMs = parseRetryAfterMs(text, provider);
-      brokerMod.broker.markRateLimited(lease.id, coolMs);
-      brokerMod.broker.emit("cooldown", {
-        id: lease.id,
-        provider,
-        coolMs,
-        reason: "quota_exhausted",
-      });
-    } else {
-      brokerMod.broker.release(lease.id, { ok: false });
-    }
-  }
+  if (lastResult.ok) return lastResult;
   return {
     ...lastResult,
     retried: attempts.length > 1,
@@ -374,13 +277,10 @@ export async function runProcess(command, workdir, timeout, opts = {}) {
   let child;
 
   try {
-    // PRD A1: opts.spawnEnv 가 있으면 그 env 로 spawn (lease 의 authFile/env 적용).
-    // undefined 면 spawn 의 default 동작 (부모 process env inherit) 유지.
     child = spawnProcess(command, {
       cwd: workdir,
       shell: true,
       windowsHide: true,
-      env: opts.spawnEnv,
     });
   } catch (error) {
     return createResult(false, {
