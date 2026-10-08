@@ -3783,6 +3783,7 @@ async function main() {
         } catch (e) {
           process.stdout.write(e.stdout || "");
           if (e.stderr) process.stderr.write(e.stderr);
+          process.exitCode = Number.isInteger(e.status) ? e.status : EXIT_ERROR;
         }
         return;
       }

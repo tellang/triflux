@@ -32,6 +32,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { isMainModule } from "./lib/process-utils.mjs";
 
 const CODEX_CONFIG = join(homedir(), ".codex", "config.toml");
 const HOOKS_STATE_PREFIX = "hooks.state.";
@@ -164,17 +165,7 @@ export function describeChange(before, after) {
   return null;
 }
 
-// CLI entry only when this script is the main module — keeps unit tests
-// import-safe.
-const isMain = (() => {
-  try {
-    return import.meta.url === `file://${process.argv[1]}`;
-  } catch {
-    return false;
-  }
-})();
-
-if (isMain) {
+if (isMainModule(import.meta.url)) {
   const argv = process.argv.slice(2);
   const command = argv.length > 0 ? argv : ["npm", "test"];
 
