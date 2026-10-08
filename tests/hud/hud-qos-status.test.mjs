@@ -40,6 +40,8 @@ function runHud(extraEnv = {}, { preserveAnsi = false } = {}) {
       ...process.env,
       HOME: mockHomeDir,
       USERPROFILE: mockHomeDir,
+      // 로그인 판정이 바깥 CODEX_HOME 의 auth.json 을 읽지 않게 목 HOME 에 고정한다.
+      CODEX_HOME: join(mockHomeDir, ".codex"),
       COLUMNS: "120",
       LINES: "40",
       OMC_HUD_COMPACT: "",
