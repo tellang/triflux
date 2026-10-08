@@ -18,10 +18,6 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
 
-<p align="center">
-  <img alt="triflux demo" src="docs/assets/demo-multi.gif" width="680">
-</p>
-
 triflux is a Claude Code plugin and npm CLI that routes coding work across Claude, Codex,
 and Antigravity. You describe the task once with `/tfx-auto`; triflux picks the CLI lane
 (Codex by default), runs it through managed routes instead of ad-hoc shell commands, and
@@ -176,26 +172,31 @@ falling back. Details: [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tf
 dry-run findings. The tray and unused CTO operating commands were removed
 ([ADR-0024](docs/adr/0024-cto-explicit-queries-only.md)). Automatic collection stays off unless `TFX_CTO_AUTO_COLLECT=1` is set ([ADR-0018](docs/_archive/adr/0018-cto-auto-behaviors-opt-in.md)).
 
-**원격 호스트.** `/tfx-remote`는 `~/.config/triflux/hosts.json`에서 호스트를 읽는다
-(Windows: `%APPDATA%\triflux\hosts.json`). 세션 시작은 `remote-spawn.mjs`의
-`--host <host> --prompt "<요청>"` 옵션을 사용한다. [실행 옵션](skills/tfx-remote/SKILL.md)을 따른다.
+**Remote hosts.** `/tfx-remote` reads hosts from `~/.config/triflux/hosts.json`
+(Windows: `%APPDATA%\triflux\hosts.json`). Start a session with `remote-spawn.mjs`
+`--host <host> --prompt "<request>"`. Options: [skills/tfx-remote/SKILL.md](skills/tfx-remote/SKILL.md).
 
 ## Architecture
 
 ```mermaid
 graph TD
     User([Claude Code prompt / shell]) --> Skills["/tfx-auto · /tfx-live · /tfx-remote"]
+    User --> Lead["/tfx-lead"]
     User --> CLI[tfx CLI]
+    Lead -->|"briefs, cross review, merge"| Live
     Skills --> Route[tfx-route.sh]
     Skills --> Live[tfx-live]
     CLI --> Team["tfx multi"]
     Route --> Codex[Codex CLI]
     Route --> Agy[Antigravity agy]
     Route --> Claude[Claude Code]
-    Team --> Route
-    Live -->|UDS or tmux| Sessions[Claude / Codex TUI sessions]
-    Route --> UI["HUD · claude agents panel"]
-    Team --> UI
+    Team -->|headless workers| Route
+    Team --> Index[("results index: tfx-headless/*.results.json")]
+    Team --> Rows["claude agents rows"]
+    Rows -->|Enter| Room["worker tmux room"]
+    Live -->|"codex queue, tmux fallback"| CodexTUI[Codex TUI sessions]
+    Live -->|"UDS or tmux"| ClaudeTUI[Claude Code sessions]
+    Route --> HUD[HUD]
     CLI --> Lake[(".triflux/lake (tfx cto)")]
 ```
 
