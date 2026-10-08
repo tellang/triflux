@@ -12,32 +12,22 @@ export const command = null;
 const AGENT_PROFILES = {
   explore: {
     timeoutSec: 600,
-    runMode: "fg",
-    opusOversight: false,
     model: "haiku",
   },
   claude: {
     timeoutSec: 600,
-    runMode: "fg",
-    opusOversight: false,
     model: "haiku",
   },
   "test-engineer": {
     timeoutSec: 1200,
-    runMode: "bg",
-    opusOversight: false,
     model: "sonnet",
   },
   "qa-tester": {
     timeoutSec: 1200,
-    runMode: "bg",
-    opusOversight: false,
     model: "sonnet",
   },
   verifier: {
     timeoutSec: 1200,
-    runMode: "fg",
-    opusOversight: false,
     model: "sonnet",
   },
 };
@@ -62,8 +52,6 @@ export function plan({
     profile: "claude-native",
     effort: "n/a",
     timeoutMs: effectiveTimeoutSec * 1000,
-    runMode: cfg.runMode,
-    opusOversight: cfg.opusOversight,
     model: cfg.model,
     mcpProfile: mcpProfile === "auto" ? null : mcpProfile,
     promptLength: prompt.length,

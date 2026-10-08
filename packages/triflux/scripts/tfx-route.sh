@@ -977,7 +977,7 @@ resolve_gemini_profile() {
 
 # ── 라우팅 테이블 ──
 # CLI_TYPE/CLI_CMD는 agent-map, 역할별 설정은 agent-route-policy에서 조회한다.
-# 반환: CLI_TYPE, CLI_CMD, CLI_ARGS, CLI_EFFORT, DEFAULT_TIMEOUT, RUN_MODE, OPUS_OVERSIGHT
+# 반환: CLI_TYPE, CLI_CMD, CLI_ARGS, CLI_EFFORT, DEFAULT_TIMEOUT
 route_agent() {
   local agent="$1" sd map_file policy_file policy_row gemini_module
   sd="$(_get_script_dir)"
@@ -1005,9 +1005,9 @@ route_agent() {
     exit 1
   fi
   local normalized_profile _policy_mcp
-  IFS=$'\x1e' read -r CLI_TYPE CODEX_POLICY_PROFILE CODEX_POLICY_TIMEOUT CODEX_POLICY_MODE CODEX_POLICY_OVERSIGHT \
+  IFS=$'\x1e' read -r CLI_TYPE CODEX_POLICY_PROFILE CODEX_POLICY_TIMEOUT \
     _policy_mcp CODEX_POLICY_SUBCOMMAND normalized_profile CODEX_OVERRIDE_PROFILE GEMINI_PROFILE \
-    MIN_TIMEOUT ROLE_EXPECTED_DURATION NATIVE_CODEX_ALLOWED <<< "$policy_row"
+    ROLE_EXPECTED_DURATION NATIVE_CODEX_ALLOWED <<< "$policy_row"
   if [[ "$normalized_profile" != "$TFX_CODEX_PROFILE" ]]; then
     echo "[tfx-route] legacy Codex profile remapped: ${TFX_CODEX_PROFILE} -> ${normalized_profile}" >&2
   fi
@@ -1016,10 +1016,10 @@ route_agent() {
     codex) apply_codex_agent_policy ;;
     antigravity)
       CLI_CMD="agy"; CLI_ARGS="--print --dangerously-skip-permissions"
-      CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900; RUN_MODE="bg"; OPUS_OVERSIGHT="false" ;;
+      CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900 ;;
     claude)
       CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600; RUN_MODE="fg"; OPUS_OVERSIGHT="false" ;;
+      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600 ;;
   esac
 }
 
@@ -1028,7 +1028,6 @@ apply_codex_agent_policy() {
   CLI_ARGS="exec --profile ${CODEX_POLICY_PROFILE} $(build_codex_base)"
   [[ "$CODEX_POLICY_SUBCOMMAND" != "review" ]] || CLI_ARGS+=" review"
   CLI_EFFORT="$CODEX_POLICY_PROFILE"; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
-  RUN_MODE="$CODEX_POLICY_MODE"; OPUS_OVERSIGHT="$CODEX_POLICY_OVERSIGHT"
 }
 
 # ── CLI 모드 오버라이드 ──
@@ -1460,7 +1459,7 @@ apply_verifier_override() {
       CLI_TYPE="claude-native"
       CLI_CMD=""
       CLI_ARGS=""
-      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=1200; RUN_MODE="fg"; OPUS_OVERSIGHT="false"
+      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=1200
       echo "[tfx-route] TFX_VERIFIER_OVERRIDE=claude: verifier -> claude-native" >&2
       ;;
   esac
@@ -1568,8 +1567,6 @@ emit_claude_native_metadata() {
   echo "AGENT=$AGENT_TYPE"
   echo "MODEL=$model"
   echo "EFFORT=$effort"
-  echo "RUN_MODE=$RUN_MODE"
-  echo "OPUS_OVERSIGHT=$OPUS_OVERSIGHT"
   echo "TIMEOUT=$TIMEOUT_SEC"
   echo "MCP_PROFILE=$MCP_PROFILE"
   [[ -n "$ORIGINAL_AGENT" ]] && echo "ORIGINAL_AGENT=$ORIGINAL_AGENT"
@@ -2198,15 +2195,12 @@ main() {
     claude) CLI_CMD="$CLAUDE_BIN" ;;
   esac
 
-  # 타임아웃 결정 (정책에서 조회한 역할별 최소값 보장)
+  # 타임아웃 결정
   if [[ -n "$USER_TIMEOUT" ]]; then
     if ! [[ "$USER_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
       echo "[tfx-route] 경고: 유효하지 않은 타임아웃 값 ($USER_TIMEOUT), 기본값 사용" >&2
       USER_TIMEOUT=""
       TIMEOUT_SEC="$DEFAULT_TIMEOUT"
-    elif [[ "$USER_TIMEOUT" -lt "$MIN_TIMEOUT" ]]; then
-      echo "[tfx-route] 경고: 타임아웃 ${USER_TIMEOUT}s < 최소 ${MIN_TIMEOUT}s ($AGENT_TYPE), 최소값 적용" >&2
-      TIMEOUT_SEC="$MIN_TIMEOUT"
     else
       TIMEOUT_SEC="$USER_TIMEOUT"
     fi
@@ -2301,8 +2295,8 @@ FALLBACK_EOF
   fi
 
   # 메타정보 (stderr)
-  echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT mode=$RUN_MODE expected=${TIMEOUT_SEC}s stall=${STALL_THRESHOLD_SEC}s ceiling=${HARD_CEILING_SEC}s" >&2
-  echo "[tfx-route] opus_oversight=$OPUS_OVERSIGHT mcp_profile=$MCP_PROFILE resolved_profile=$MCP_RESOLVED_PROFILE verifier_override=$TFX_VERIFIER_OVERRIDE" >&2
+  echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT expected=${TIMEOUT_SEC}s stall=${STALL_THRESHOLD_SEC}s ceiling=${HARD_CEILING_SEC}s" >&2
+  echo "[tfx-route] mcp_profile=$MCP_PROFILE resolved_profile=$MCP_RESOLVED_PROFILE verifier_override=$TFX_VERIFIER_OVERRIDE" >&2
   if [[ ${#ALLOWED_MCP_SERVERS[@]} -gt 0 ]]; then
     echo "[tfx-route] allowed_mcp_servers=$(IFS=,; echo "${ALLOWED_MCP_SERVERS[*]}")" >&2
   else
@@ -2527,8 +2521,6 @@ EOF
       --cli "$CLI_TYPE" \
       --cli-cmd "$CLI_CMD" \
       --effort "$CLI_EFFORT" \
-      --run-mode "$RUN_MODE" \
-      --opus "$OPUS_OVERSIGHT" \
       --exit-code "$exit_code" \
       --elapsed "$elapsed" \
       --timeout "$TIMEOUT_SEC" \
@@ -2545,24 +2537,6 @@ EOF
     echo "[tfx-route] ERROR: 후처리기를 찾지 못했습니다: $post_script" >&2
     return 1
   fi
-
-  # 결과를 파일에도 저장 — run_in_background에서 TaskOutput이 stdout을 놓칠 때 대비
-  local result_file="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-result.log"
-  {
-    echo "agent: $AGENT_TYPE"
-    echo "cli: $CLI_TYPE"
-    echo "exit_code: $exit_code"
-    echo "elapsed: ${elapsed}s"
-    if [[ -n "$result_reason" ]]; then
-      echo "status: partial"
-      echo "reason: $result_reason"
-    else
-      echo "status: $([ $exit_code -eq 0 ] && echo success || echo failed)"
-    fi
-    echo "stdout_log: $STDOUT_LOG"
-    echo "result_file: $result_file"
-  } > "$result_file" 2>/dev/null
-  echo "[tfx-route] result_file=$result_file" >&2
 
   return "$exit_code"
 }
