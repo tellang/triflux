@@ -2208,17 +2208,22 @@ async function doStart(adapter, opts) {
   let nameApplied = Boolean(name) && adapter.cli === "claude" && ready;
   let threadId =
     adapter.cli === "codex" && isCodexThreadId(resume) ? resume : null;
-  // 입력창이 뜬 직후에는 resume 기록이 아직 없을 수 있어 5초 안에서 다시 본다.
+  // 우리 TUI 의 resume 기록이 늦게 반영되면 남의 기록만 보일 수 있어, 1.5초 뒤에도 같은 후보가
+  // 유일할 때만 확정한다. 5초 안에 확인하지 못하면 null 로 둔다.
   const threadDeadline = Date.now() + 5000;
+  let candidate = null;
   while (trackResumeLast && ready && !threadId) {
     const timeoutMs = threadDeadline - Date.now();
     if (timeoutMs <= 0) break;
-    threadId = await resumedCodexThread({
+    const found = await resumedCodexThread({
       cwd: cwd ?? process.cwd(),
       launchedAtMs,
       timeoutMs,
     });
-    if (!threadId) await sleep(Math.min(500, threadDeadline - Date.now()));
+    if (found && found === candidate) threadId = found;
+    candidate = found;
+    if (!threadId)
+      await sleep(Math.min(found ? 1500 : 500, threadDeadline - Date.now()));
   }
   if (name && adapter.cli === "codex" && ready) {
     try {
