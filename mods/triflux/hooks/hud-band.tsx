@@ -179,27 +179,29 @@ export function registerHudBand(on: On, options: PluginOptions) {
     ]
     const costParts: Part[] = snapshot.costUsd === null ? [] : [{ text: ` $${snapshot.costUsd.toFixed(2)}`, dim: true }]
 
-    // 한 줄에 안 들어가면 비용부터 빼고, 그래도 넘치면 micro 행으로 줄이고, 그것도 안 되면 그리지 않는다.
+    // 한 줄에 안 들어가면 비용부터 빼고, 그래도 넘치면 micro 행으로 줄이고, 그것도 넘치면 끝을 자른다.
+    // 생략하면 표식 때문에 HUD 의 c 행까지 숨어서 둘 다 사라진다.
     const fits = (parts: Part[]) => parts.reduce((n, p) => n + p.text.length, 0) <= width
-    const candidates =
+    const microRow = [...prefix, ...microParts]
+    const wideRows =
       tier === 'micro' || tier === 'nano'
-        ? [[...prefix, ...microParts]]
+        ? []
         : [
             [...prefix, ...windowParts, ...contextParts, ...costParts],
             [...prefix, ...windowParts, ...contextParts],
-            [...prefix, ...microParts],
           ]
-    const parts = candidates.find(fits)
-    if (!parts) return next(e)
+    const parts = wideRows.find(fits) ?? microRow
 
-    // Fragment 로 묶으면 Text 가 세로로 쌓여서 한 줄짜리 배열로 편다.
+    // Fragment 로 묶으면 Text 가 세로로 쌓여서 바깥 Text 하나에 넣고 한 줄로 자른다.
     return (
       <Box>
-        {parts.map(p => (
-          <Text color={p.color} dimColor={p.dim} bold={p.bold}>
-            {p.text}
-          </Text>
-        ))}
+        <Text wrap="truncate-end">
+          {parts.map(p => (
+            <Text color={p.color} dimColor={p.dim} bold={p.bold}>
+              {p.text}
+            </Text>
+          ))}
+        </Text>
       </Box>
     )
   })
