@@ -42,24 +42,26 @@ export type HudConfig = {
   autoResize?: boolean
   compactThreshold?: number | string
 }
-type TierInput = { config: HudConfig | null; compactEnv?: string; minimalEnv?: string }
+type TierInput = { config: HudConfig | null; compactEnv?: string; minimalEnv?: string; termux?: boolean }
 
 const TIERS: readonly string[] = ['full', 'compact', 'minimal', 'micro', 'nano']
 
 // hud/terminal.mjs selectTier, detectCompactMode, detectMinimalMode 를 옮긴 것이다. 같은 설정에서 같은 단계를 골라야 한다.
-export function selectTier(columns: number, { config, compactEnv, minimalEnv }: TierInput): HudTier {
+export function selectTier(columns: number, input: TierInput): HudTier {
+  const { config, minimalEnv } = input
   if (config?.tier && TIERS.includes(config.tier)) return config.tier as HudTier
   const lines = Number(config?.lines)
   if (lines === 1 || columns < 40) return 'nano'
   const minimal = minimalEnv === '1' || (minimalEnv !== '0' && (config?.compact === 'minimal' || columns < 60))
   if (minimal) return 'micro'
-  if (compactModeOn(columns, lines, { config, compactEnv })) return 'compact'
+  if (compactModeOn(columns, lines, input)) return 'compact'
   if (config?.autoResize === false) return 'full'
   return columns >= 120 ? 'full' : columns >= 80 ? 'compact' : columns >= 60 ? 'minimal' : 'micro'
 }
 
-// 환경변수, 설정 파일, 폭 순서. detectCompactMode 와 우선순위가 같아야 한다.
-function compactModeOn(columns: number, lines: number, { config, compactEnv }: TierInput) {
+// Termux, 환경변수, 설정 파일, 폭 순서. detectCompactMode 와 우선순위가 같아야 한다.
+function compactModeOn(columns: number, lines: number, { config, compactEnv, termux }: TierInput) {
+  if (termux) return true
   if (compactEnv === '1') return true
   if (compactEnv === '0') return false
   if (config?.compact === true || config?.compact === 'always') return true
@@ -68,16 +70,17 @@ function compactModeOn(columns: number, lines: number, { config, compactEnv }: T
 }
 
 async function readTierInput($: EngineInterface): Promise<TierInput> {
-  const [home, compactEnv, minimalEnv] = await Promise.all([
+  const [home, compactEnv, minimalEnv, termuxVersion] = await Promise.all([
     $.env.get('HOME'),
     $.env.get('OMC_HUD_COMPACT'),
     $.env.get('OMC_HUD_MINIMAL'),
+    $.env.get('TERMUX_VERSION'),
   ])
   let config: HudConfig | null = null
   try {
     config = JSON.parse(String(await $.fs.read(`${home}/.omc/config/hud.json`)))
   } catch {}
-  return { config, compactEnv, minimalEnv }
+  return { config, compactEnv, minimalEnv, termux: Boolean(termuxVersion) }
 }
 
 export function formatRemaining(kind: string, resetsAt: string | undefined, now: number) {
