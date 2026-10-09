@@ -13,6 +13,11 @@ const WINDOW_LABEL: Record<string, string> = { five_hour: '5h', seven_day: '1w',
 // 'statusline' 이면 band 를 그리지 않고 statusLine HUD 가 입력창 아래에서 Claude 행을 그린다.
 export type BandPosition = 'above' | 'statusline'
 
+// statusLine 은 os.homedir() 를 쓴다. Windows 에는 HOME 이 없을 수 있다.
+async function homeDir($: EngineInterface) {
+  return (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'))
+}
+
 // 선택 기능이라 실패를 삼킨다. hook 오류가 쌓이면 mod 전체가 꺼진다.
 async function refreshUsage($: EngineInterface, position: BandPosition) {
   try {
@@ -28,7 +33,7 @@ async function refreshUsage($: EngineInterface, position: BandPosition) {
     await update($, usage, () => snapshot)
     // 표식이 "off" 가 아니고 신선할 때만 statusLine HUD 가 Claude 행을 뺀다(hud/hud-qos-status.mjs).
     // statusline 은 사용량이 아직 없어도 off 를 써야 같은 세션의 이전 above 표식이 c 행을 숨기지 않는다.
-    const home = await $.env.get('HOME')
+    const home = await homeDir($)
     const marker = position === 'statusline' ? 'off' : snapshot.windows.length > 0 ? String(await $.clock.now()) : null
     if (home && marker) await $.fs.write(`${home}/.claude/cache/triflux/claude-band/${await $.session.id()}`, marker)
   } catch {}
@@ -69,18 +74,23 @@ function compactModeOn(columns: number, lines: number, { config, compactEnv, ter
   return (lines > 0 && lines < 3) || columns < (Number(config?.compactThreshold) || 80)
 }
 
+// 설정 파일이 없거나 깨졌으면 설정 없이 폭으로만 고른다.
 async function readTierInput($: EngineInterface): Promise<TierInput> {
-  const [home, compactEnv, minimalEnv, termuxVersion] = await Promise.all([
-    $.env.get('HOME'),
-    $.env.get('OMC_HUD_COMPACT'),
-    $.env.get('OMC_HUD_MINIMAL'),
-    $.env.get('TERMUX_VERSION'),
-  ])
-  let config: HudConfig | null = null
   try {
-    config = JSON.parse(String(await $.fs.read(`${home}/.omc/config/hud.json`)))
-  } catch {}
-  return { config, compactEnv, minimalEnv, termux: Boolean(termuxVersion) }
+    const [home, compactEnv, minimalEnv, termuxVersion] = await Promise.all([
+      homeDir($),
+      $.env.get('OMC_HUD_COMPACT'),
+      $.env.get('OMC_HUD_MINIMAL'),
+      $.env.get('TERMUX_VERSION'),
+    ])
+    let config: HudConfig | null = null
+    try {
+      config = JSON.parse(String(await $.fs.read(`${home}/.omc/config/hud.json`)))
+    } catch {}
+    return { config, compactEnv, minimalEnv, termux: Boolean(termuxVersion) }
+  } catch {
+    return { config: null }
+  }
 }
 
 export function formatRemaining(kind: string, resetsAt: string | undefined, now: number) {
@@ -118,10 +128,9 @@ export function registerHudBand(on: On, options: PluginOptions) {
   const position: BandPosition = options.position === 'statusline' ? 'statusline' : 'above'
   let tierInput: TierInput = { config: null }
 
+  // HUD 설정은 statusLine 이 매번 읽으므로 band 도 갱신 때마다 다시 읽는다.
   on('session.start', async ($, e, next) => {
-    try {
-      tierInput = await readTierInput($)
-    } catch {}
+    tierInput = await readTierInput($)
     await refreshUsage($, position)
     return next(e)
   })
@@ -129,6 +138,7 @@ export function registerHudBand(on: On, options: PluginOptions) {
   // 응답이 끝날 때마다 rate limit 과 비용이 바뀐다.
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
+    tierInput = await readTierInput($)
     await refreshUsage($, position)
     return result
   })
@@ -141,44 +151,54 @@ export function registerHudBand(on: On, options: PluginOptions) {
 
     const { Box, Text } = $.ui.resolve(e)
     const now = await $.clock.now()
-    // bodyColumns 는 오른쪽 5칸을 뺀 폭이다.
-    const tier = selectTier(e.props.bodyColumns + 5, tierInput)
-    const prefix = [
-      <Text bold color={CLAUDE_ORANGE}>c</Text>,
-      <Text>: </Text>,
-    ]
+    const width = e.props.bodyColumns
+    // bodyColumns 는 오른쪽 5칸을 뺀 폭이라 HUD 와 같은 터미널 폭으로 되돌려 단계를 고른다.
+    const tier = selectTier(width + 5, tierInput)
+    type Part = { text: string; color?: string; dim?: boolean; bold?: boolean }
+    const prefix: Part[] = [{ text: '  ' }, { text: 'c', color: CLAUDE_ORANGE, bold: true }, { text: ': ' }]
 
     // hud/renderers.mjs getClaudeRows 의 micro, nano 행: 퍼센트만 / 로 잇는다.
-    if (tier === 'micro' || tier === 'nano') {
-      const percents = snapshot.windows.flatMap((w, i) => [
-        ...(i > 0 ? [<Text dimColor>/</Text>] : []),
-        <Text color={quotaColor(w.percentUsed)}>{`${Math.round(w.percentUsed)}%`}</Text>,
-      ])
-      return <Box paddingLeft={2}>{[...prefix, ...percents]}</Box>
-    }
+    const microParts = snapshot.windows.flatMap((w, i): Part[] => [
+      ...(i > 0 ? [{ text: '/', dim: true }] : []),
+      { text: `${Math.round(w.percentUsed)}%`, color: quotaColor(w.percentUsed) },
+    ])
 
-    // Fragment 로 묶으면 Text 가 세로로 쌓여서 한 줄짜리 배열로 편다.
-    const windowCells = snapshot.windows.flatMap((w, i) => {
+    const windowParts = snapshot.windows.flatMap((w, i): Part[] => {
       const color = quotaColor(w.percentUsed)
       const [filled, empty] = gaugeParts(w.percentUsed)
-      const cells = [<Text dimColor>{`${i > 0 ? ' ' : ''}${WINDOW_LABEL[w.kind]}:`}</Text>]
-      if (tier === 'full') cells.push(<Text color={color}>{filled}</Text>, <Text dimColor>{`${empty} `}</Text>)
-      cells.push(<Text color={color}>{`${Math.round(w.percentUsed)}%`.padStart(4)}</Text>)
-      if (tier !== 'minimal') cells.push(<Text dimColor>{` ${formatRemaining(w.kind, w.resetsAt, now)}`}</Text>)
-      return cells
+      const parts: Part[] = [{ text: `${i > 0 ? ' ' : ''}${WINDOW_LABEL[w.kind]}:`, dim: true }]
+      if (tier === 'full') parts.push({ text: filled, color }, { text: `${empty} `, dim: true })
+      parts.push({ text: `${Math.round(w.percentUsed)}%`.padStart(4), color })
+      if (tier !== 'minimal') parts.push({ text: ` ${formatRemaining(w.kind, w.resetsAt, now)}`, dim: true })
+      return parts
     })
+    const ctx = snapshot.contextPercent
+    const contextParts: Part[] = [
+      { text: ' | CTX:', dim: true },
+      ctx === null ? { text: '--%', dim: true } : { text: `${ctx}%`, color: contextColor(ctx) },
+    ]
+    const costParts: Part[] = snapshot.costUsd === null ? [] : [{ text: ` $${snapshot.costUsd.toFixed(2)}`, dim: true }]
 
+    // 한 줄에 안 들어가면 비용부터 빼고, 그래도 넘치면 micro 행으로 줄인다.
+    const fits = (parts: Part[]) => parts.reduce((n, p) => n + p.text.length, 0) <= width
+    const candidates =
+      tier === 'micro' || tier === 'nano'
+        ? [[...prefix, ...microParts]]
+        : [
+            [...prefix, ...windowParts, ...contextParts, ...costParts],
+            [...prefix, ...windowParts, ...contextParts],
+            [...prefix, ...microParts],
+          ]
+    const parts = candidates.find(fits) ?? candidates[candidates.length - 1]
+
+    // Fragment 로 묶으면 Text 가 세로로 쌓여서 한 줄짜리 배열로 편다.
     return (
-      <Box paddingLeft={2}>
-        {prefix}
-        {windowCells}
-        <Text dimColor> | CTX:</Text>
-        {snapshot.contextPercent === null ? (
-          <Text dimColor>--%</Text>
-        ) : (
-          <Text color={contextColor(snapshot.contextPercent)}>{`${snapshot.contextPercent}%`}</Text>
-        )}
-        {snapshot.costUsd !== null && <Text dimColor>{` $${snapshot.costUsd.toFixed(2)}`}</Text>}
+      <Box>
+        {parts.map(p => (
+          <Text color={p.color} dimColor={p.dim} bold={p.bold}>
+            {p.text}
+          </Text>
+        ))}
       </Box>
     )
   })
