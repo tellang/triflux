@@ -1353,18 +1353,24 @@ export function inspectTrifluxMods({
     const marketplaces = JSON.parse(
       run(["plugin", "marketplace", "list", "--json"]),
     );
-    const plugin = JSON.parse(run(["plugin", "list", "--json"])).find(
+    const installs = JSON.parse(run(["plugin", "list", "--json"])).filter(
       (entry) => entry.id === MODS_PLUGIN_ID,
     );
     const hasMarketplace = marketplaces.some(
       (marketplace) => marketplace.name === "triflux",
     );
-    // 버전을 모르면 차이로 보지 않는다.
-    const outdated =
-      Boolean(plugin?.version && pkgVersion) && plugin.version !== pkgVersion;
+    // scope 마다 따로 설치되므로 버전이 다른 설치를 모두 고른다. 버전을 모르면 차이로 보지 않는다.
+    const stale = installs.filter(
+      (entry) => entry.version && pkgVersion && entry.version !== pkgVersion,
+    );
     return {
-      status: !plugin ? "missing" : outdated ? "outdated" : "current",
-      installedVersion: plugin?.version,
+      status: !installs.length
+        ? "missing"
+        : stale.length
+          ? "outdated"
+          : "current",
+      installedVersion: (stale[0] || installs[0])?.version,
+      staleScopes: stale.map((entry) => entry.scope),
       pkgVersion,
       hasMarketplace,
     };
@@ -1423,7 +1429,14 @@ export async function ensureTrifluxMods({
       return "update-declined";
     }
     run(["plugin", "marketplace", "update", "triflux"]);
-    run(["plugin", "update", MODS_PLUGIN_ID]);
+    // scope 를 빼면 CLI 가 고른 한 곳만 바뀌어 판정한 설치가 남을 수 있다.
+    for (const scope of new Set(mods.staleScopes))
+      run([
+        "plugin",
+        "update",
+        MODS_PLUGIN_ID,
+        ...(scope ? ["--scope", scope] : []),
+      ]);
     log("mods 업데이트 완료. Claude Code 를 다시 시작하면 적용된다.");
     return "updated";
   } catch (error) {
