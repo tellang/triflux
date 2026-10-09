@@ -24,9 +24,7 @@ const READS = [
 const ADD = "plugin marketplace add tellang/triflux";
 const INSTALL = "plugin install triflux-mods@triflux";
 const REFRESH = "plugin marketplace update triflux";
-const updateAt = (scope) =>
-  `plugin update triflux-mods@triflux --scope ${scope}`;
-const UPDATE = [REFRESH, updateAt("user")];
+const UPDATE = [REFRESH, "plugin update triflux-mods@triflux --scope user"];
 const REGISTERED = [{ name: "triflux" }];
 const installedAt = (version) => [
   { id: "triflux-mods@triflux", scope: "user", version },
@@ -67,12 +65,7 @@ async function runMods({
       if (call === "plugin marketplace list --json")
         return JSON.stringify(marketplaces);
       if (call === "plugin list --json") return JSON.stringify(plugins);
-      assert.ok(
-        [ADD, INSTALL, REFRESH, updateAt("user"), updateAt("project")].includes(
-          call,
-        ),
-        call,
-      );
+      assert.ok([ADD, INSTALL, ...UPDATE].includes(call), call);
       return "";
     },
   });
@@ -172,23 +165,25 @@ test("설치됨: 같은 버전이나 버전을 모르면 묻지 않고, 다르�
     assert.deepEqual(updated.calls, [...READS, ...UPDATE]);
   }
 
-  // scope 마다 설치가 따로 있으면 버전이 다른 scope 만 골라 그 scope 로 업데이트한다.
+  // project/local 설치는 다른 프로젝트 것일 수 있어 보지 않는다.
   const project = (version) => ({
     ...installedAt(version)[0],
     scope: "project",
   });
-  const mixed = await runMods({
+  const userCurrent = await runMods({
     marketplaces: REGISTERED,
-    plugins: [...installedAt(PKG), project("10.50.2")],
+    plugins: [project("10.50.2"), ...installedAt(PKG)],
     install: true,
   });
-  assert.deepEqual(mixed.calls, [...READS, REFRESH, updateAt("project")]);
-  const both = await runMods({
+  assert.equal(userCurrent.status, "present");
+  assert.deepEqual(userCurrent.calls, READS);
+  const projectOnly = await runMods({
     marketplaces: REGISTERED,
-    plugins: [...installedAt("10.50.2"), project("10.53.0")],
+    plugins: [project(PKG)],
     install: true,
   });
-  assert.deepEqual(both.calls, [...READS, ...UPDATE, updateAt("project")]);
+  assert.equal(projectOnly.status, "installed");
+  assert.deepEqual(projectOnly.calls, [...READS, INSTALL]);
 });
 
 test("doctor 판정은 읽기만 하고 상태와 두 버전을 돌려준다", () => {
@@ -214,7 +209,6 @@ test("doctor 판정은 읽기만 하고 상태와 두 버전을 돌려준다", (
     {
       status: "outdated",
       installedVersion: "10.50.2",
-      staleScopes: ["user"],
       pkgVersion: PKG,
       hasMarketplace: true,
     },

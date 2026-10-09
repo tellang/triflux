@@ -1311,7 +1311,7 @@ function isProtectedSetupEnv(env = process.env) {
 
 const MODS_PLUGIN_ID = "triflux-mods@triflux";
 export const MODS_UPDATE_COMMAND =
-  "claude plugin marketplace update triflux && claude plugin update triflux-mods@triflux";
+  "claude plugin marketplace update triflux && claude plugin update triflux-mods@triflux --scope user";
 
 function claudeCli(env, execFileSyncFn) {
   return (args) =>
@@ -1353,24 +1353,20 @@ export function inspectTrifluxMods({
     const marketplaces = JSON.parse(
       run(["plugin", "marketplace", "list", "--json"]),
     );
-    const installs = JSON.parse(run(["plugin", "list", "--json"])).filter(
-      (entry) => entry.id === MODS_PLUGIN_ID,
+    // setup 은 user scope 에만 설치한다. project/local 설치는 다른 프로젝트 것일 수 있어 보지 않는다.
+    const plugin = JSON.parse(run(["plugin", "list", "--json"])).find(
+      (entry) =>
+        entry.id === MODS_PLUGIN_ID && (entry.scope ?? "user") === "user",
     );
     const hasMarketplace = marketplaces.some(
       (marketplace) => marketplace.name === "triflux",
     );
-    // scope 마다 따로 설치되므로 버전이 다른 설치를 모두 고른다. 버전을 모르면 차이로 보지 않는다.
-    const stale = installs.filter(
-      (entry) => entry.version && pkgVersion && entry.version !== pkgVersion,
-    );
+    // 버전을 모르면 차이로 보지 않는다.
+    const outdated =
+      Boolean(plugin?.version && pkgVersion) && plugin.version !== pkgVersion;
     return {
-      status: !installs.length
-        ? "missing"
-        : stale.length
-          ? "outdated"
-          : "current",
-      installedVersion: (stale[0] || installs[0])?.version,
-      staleScopes: stale.map((entry) => entry.scope),
+      status: !plugin ? "missing" : outdated ? "outdated" : "current",
+      installedVersion: plugin?.version,
       pkgVersion,
       hasMarketplace,
     };
@@ -1429,14 +1425,8 @@ export async function ensureTrifluxMods({
       return "update-declined";
     }
     run(["plugin", "marketplace", "update", "triflux"]);
-    // scope 를 빼면 CLI 가 고른 한 곳만 바뀌어 판정한 설치가 남을 수 있다.
-    for (const scope of new Set(mods.staleScopes))
-      run([
-        "plugin",
-        "update",
-        MODS_PLUGIN_ID,
-        ...(scope ? ["--scope", scope] : []),
-      ]);
+    // scope 를 빼면 CLI 가 다른 scope 설치를 고를 수 있다.
+    run(["plugin", "update", MODS_PLUGIN_ID, "--scope", "user"]);
     log("mods 업데이트 완료. Claude Code 를 다시 시작하면 적용된다.");
     return "updated";
   } catch (error) {
