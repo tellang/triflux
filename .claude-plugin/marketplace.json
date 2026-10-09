@@ -9,7 +9,7 @@
     {
       "name": "triflux",
       "description": "Tri-CLI orchestrator for Claude Code. Routes tasks across Claude + Codex + Antigravity with consensus modes, live Claude↔Codex sessions, worktree-isolated swarms, and cross-model review.",
-      "version": "10.55.0",
+      "version": "10.55.1",
       "author": {
         "name": "tellang"
       },
@@ -32,7 +32,7 @@
     {
       "name": "triflux-mods",
       "description": "사용량 band 표시와 서브에이전트 effort 정책 강제",
-      "version": "10.55.0",
+      "version": "10.55.1",
       "author": {
         "name": "tellang"
       },
@@ -40,5 +40,5 @@
       "category": "productivity"
     }
   ],
-  "version": "10.55.0"
+  "version": "10.55.1"
 }

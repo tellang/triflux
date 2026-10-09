@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.55.1] - 2026-10-09
+
+### Changed
+- doctor: 레지스트리 밖 stdio MCP(사용자가 직접 추가한 서버)를 문제 수에서 빼고 안내 한 줄과 목록으로만 보인다. `--json` 의 mcp-registry 상태는 설정 파싱 실패와 레지스트리 항목 불일치가 있을 때만 issues 이고, rows 에는 그대로 남는다 (#719)
+
 ## [10.55.0] - 2026-10-09
 
 ### Added
