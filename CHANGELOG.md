@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.56.0] - 2026-10-10
+
+### Changed
+- mods: Claude 사용량 band 를 statusLine HUD 의 Claude 행과 같은 모양(막대, 고정폭 퍼센트와 시간 칸, `| CTX:`)으로 그린다. 폭 단계는 HUD 와 같은 규칙(`~/.omc/config/hud.json`, `OMC_HUD_*`, Termux)을 따르고, 폭이 모자라면 비용을 빼고 micro 행으로 줄인 뒤 끝을 자른다 (#721)
+
+### Added
+- mods: `/config` 의 `position` 으로 Claude 사용량 위치를 고른다. `above`(기본)는 입력창 위 band, `statusline` 은 band 를 그리지 않고 statusLine HUD 가 입력창 아래에서 c 행을 그린다 (#721)
+
 ## [10.55.1] - 2026-10-09
 
 ### Changed
