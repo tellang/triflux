@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 
 type Effort = 'low' | 'medium' | 'high'
 
-// 서브에이전트는 부모 effort 를 물려받지 않는다(Sonnet 기본 xhigh). 탐색은 낮게, 판정은 높게.
+// effort 없이 부른 서브에이전트는 부모 effort 를 물려받는다(2.1.292 실측). 탐색은 낮게, 판정은 높게 고정한다.
 const EFFORT_BY_AGENT: Record<string, Effort> = {
   Explore: 'low',
   'oh-my-claudecode:explore': 'low',
