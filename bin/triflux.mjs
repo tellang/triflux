@@ -67,11 +67,12 @@ import {
   applyStatusLine,
   cleanupStaleSkills,
   ensureCodexProfiles,
-  ensureTrifluxMods,
   getVersion,
+  inspectTrifluxMods,
   isSkillSupportedOnPlatform,
   LEGACY_CODEX_MODELS,
   listInlineProfileNames,
+  MODS_UPDATE_COMMAND,
   persistSettings,
   REQUIRED_CODEX_PROFILES,
   retireOldInstallFiles,
@@ -1273,7 +1274,6 @@ async function cmdSetup(options = {}) {
   }
   retireOldInstallFiles(info);
   reportSkillSync();
-  ensureTrifluxMods({ install: mods, log: console.log, warn });
 
   // ── 결과 추적 ──
   const summary = [];
@@ -1371,7 +1371,7 @@ async function cmdSetup(options = {}) {
   }
 
   // Codex 프로필 정리가 끝난 뒤에 훅을 다룬다.
-  await runConsentSteps({ log: info, warn });
+  await runConsentSteps({ modsInstall: mods, log: info, warn });
 
   // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──
   if (process.platform === "win32" && which("psmux")) {
@@ -1970,6 +1970,21 @@ async function cmdDoctor(options = {}) {
       });
       warn(`미설치 ${GRAY}(선택사항)${RESET}`);
     }
+
+    // mods 가 없으면 effort 없이 부른 서브에이전트가 리드 effort 를 물려받는다.
+    section("Claude mods");
+    const mods = inspectTrifluxMods({ pkgVersion: PKG.version });
+    addDoctorCheck(report, { name: "triflux-mods", ...mods });
+    if (mods.status === "current")
+      ok(`설치됨 ${DIM}v${mods.installedVersion}${RESET}`);
+    else if (mods.status === "missing") {
+      warn("미설치");
+      info("수정: tfx setup --mods");
+    } else if (mods.status === "outdated") {
+      warn(`버전 차이: 설치 ${mods.installedVersion}, 패키지 ${PKG.version}`);
+      info(`수정: ${MODS_UPDATE_COMMAND}`);
+    } else if (mods.status === "failed") warn(`확인 실패: ${mods.error}`);
+    else info(`건너뜀 (${mods.reason})`);
 
     // Codex CLI
     section(`Codex CLI ${WHITE_BRIGHT}●${RESET}`);
