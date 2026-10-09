@@ -2846,11 +2846,8 @@ async function cmdDoctor(options = {}) {
         const stdioRows = statusInfo.rows.filter((row) => row.type === "stdio");
         const hasHardIssues =
           invalidConfigs.length > 0 || mismatchRows.length > 0;
-        const status = hasHardIssues
-          ? "issues"
-          : stdioRows.length > 0
-            ? "warning"
-            : "ok";
+        // 레지스트리 밖 stdio MCP 는 사용자가 직접 둔 서버라 문제로 세지 않는다.
+        const status = hasHardIssues ? "issues" : "ok";
 
         addDoctorCheck(report, {
           name: "mcp-registry",
@@ -2863,7 +2860,7 @@ async function cmdDoctor(options = {}) {
             file: config.filePath,
             error: config.parseError?.message || "parse error",
           })),
-          ...(stdioRows.length > 0
+          ...(hasHardIssues
             ? { fix: "tfx doctor --fix 또는 tfx mcp sync" }
             : {}),
         });
@@ -2920,7 +2917,9 @@ async function cmdDoctor(options = {}) {
         if (stdioRows.length === 0) {
           ok("미등록 stdio MCP 없음");
         } else {
-          warn(`${stdioRows.length}개 미등록 stdio MCP 감지`);
+          info(
+            `레지스트리 밖 stdio MCP ${stdioRows.length}개(사용자 설정, 점검 대상 아님)`,
+          );
           for (const row of stdioRows) {
             info(
               `${row.label}: ${row.name}${row.command ? ` (${row.command})` : ""}`,
@@ -2930,7 +2929,6 @@ async function cmdDoctor(options = {}) {
 
         issues += invalidConfigs.length;
         issues += mismatchRows.length;
-        issues += stdioRows.length;
       }
     }
 
