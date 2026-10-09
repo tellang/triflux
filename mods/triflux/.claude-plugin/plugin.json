@@ -5,5 +5,14 @@
   "author": {
     "name": "tellang"
   },
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "position": {
+      "type": "string",
+      "title": "Claude 사용량 표시 위치",
+      "description": "above: 입력창 위 band. statusline: 입력창 아래 statusLine HUD 의 c 행",
+      "default": "above",
+      "options": ["above", "statusline"]
+    }
+  }
 }

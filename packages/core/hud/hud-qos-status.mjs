@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveHudCliVisibility } from "./cli-policy.mjs";
@@ -157,8 +157,10 @@ main().catch(() => {
 function isClaudeBandActive(sessionId) {
   if (!sessionId) return false;
   try {
-    const { mtimeMs } = statSync(join(CLAUDE_BAND_MARKER_DIR, sessionId));
-    return Date.now() - mtimeMs < CLAUDE_BAND_MARKER_TTL_MS;
+    const marker = join(CLAUDE_BAND_MARKER_DIR, sessionId);
+    // band 위치를 statusline 으로 고른 세션은 표식에 "off" 를 쓴다.
+    if (readFileSync(marker, "utf8").trim() === "off") return false;
+    return Date.now() - statSync(marker).mtimeMs < CLAUDE_BAND_MARKER_TTL_MS;
   } catch {
     return false;
   }

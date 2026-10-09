@@ -74,6 +74,8 @@ describe("HUD provider visibility", () => {
       const bandOutput = runHud({ TFX_DISABLE_CODEX: "0" });
       assert.doesNotMatch(bandOutput, /^c:/m);
       assert.match(bandOutput, /^x:/m);
+      writeFileSync(marker, "off");
+      assert.match(runHud({ TFX_DISABLE_CODEX: "0" }), /^c:/m);
     } finally {
       rmSync(marker);
     }
