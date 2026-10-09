@@ -451,7 +451,7 @@ const PSMUX_WINGET_ARGS = [
 ];
 const PSMUX_MANUAL_INSTALL = "winget install --exact --id marlocarlo.psmux";
 
-// psmux 설치와 Codex 훅 승인은 사용자 동의 뒤에만 한다. 물을 수 없으면 하지 않고 안내만 남긴다.
+// psmux, tmr, mods 설치와 Codex 훅 승인은 사용자 동의 뒤에만 한다. 물을 수 없으면 하지 않고 안내만 남긴다.
 export async function runConsentSteps({
   platform = process.platform,
   env = process.env,
@@ -463,6 +463,8 @@ export async function runConsentSteps({
   run = execFileSync,
   ensureHooks = ensureCodexHooks,
   offerTmr = offerTmrInstall,
+  modsInstall = false,
+  offerMods = ensureTrifluxMods,
   home = _TFX_HOME,
   log = console.log,
   warn = console.warn,
@@ -470,6 +472,7 @@ export async function runConsentSteps({
   const result = {
     psmux: "not-needed",
     tmr: "not-needed",
+    mods: "not-needed",
     codexHooks: "skipped",
   };
 
@@ -504,6 +507,16 @@ export async function runConsentSteps({
     home,
     env,
     platform,
+    log,
+    warn,
+  });
+
+  result.mods = await offerMods({
+    install: modsInstall,
+    interactive,
+    ask,
+    env,
+    execFileSyncFn: run,
     log,
     warn,
   });
@@ -1296,17 +1309,12 @@ function isProtectedSetupEnv(env = process.env) {
   return env.CI === "true" || Boolean(env.TRIFLUX_TEST_HOME) || isTestRun(env);
 }
 
-export function ensureTrifluxMods({
-  install = false,
-  env = process.env,
-  execFileSyncFn = execFileSync,
-  log = console.log,
-  warn = console.warn,
-} = {}) {
-  if (isProtectedSetupEnv(env) || env.npm_lifecycle_event === "postinstall") {
-    return { ok: true, skipped: true, reason: "protected-env" };
-  }
-  const run = (args) =>
+const MODS_PLUGIN_ID = "triflux-mods@triflux";
+export const MODS_UPDATE_COMMAND =
+  "claude plugin marketplace update triflux && claude plugin update triflux-mods@triflux";
+
+function claudeCli(env, execFileSyncFn) {
+  return (args) =>
     execFileSyncFn("claude", args, {
       env,
       encoding: "utf8",
@@ -1315,13 +1323,23 @@ export function ensureTrifluxMods({
       windowsHide: true,
       shell: process.platform === "win32",
     });
+}
+
+/** mods 설치 상태를 읽기만 한다. setup 과 doctor 가 같은 판정을 쓴다. */
+export function inspectTrifluxMods({
+  env = process.env,
+  pkgVersion = getPackageVersion(),
+  run = claudeCli(env, execFileSync),
+} = {}) {
+  if (isProtectedSetupEnv(env) || env.npm_lifecycle_event === "postinstall")
+    return { status: "skipped", reason: "protected-env" };
   let version;
   try {
     version = String(run(["--version"]))
       .trim()
       .match(/^(\d+)\.(\d+)\.(\d+)(?:\s|$)/u);
   } catch {
-    return { ok: true, skipped: true, reason: "claude-unavailable" };
+    return { status: "skipped", reason: "claude-unavailable" };
   }
   const [major, minor, patch] = (version?.slice(1) || []).map(Number);
   if (
@@ -1329,32 +1347,88 @@ export function ensureTrifluxMods({
       major > 2 ||
       (major === 2 && (minor > 1 || (minor === 1 && patch >= 287)))
     )
-  ) {
-    return { ok: true, skipped: true, reason: "unsupported-version" };
-  }
+  )
+    return { status: "skipped", reason: "unsupported-version" };
   try {
     const marketplaces = JSON.parse(
       run(["plugin", "marketplace", "list", "--json"]),
     );
-    const plugins = JSON.parse(run(["plugin", "list", "--json"]));
-    const installed = plugins.some(
-      (plugin) => plugin.id === "triflux-mods@triflux",
+    const plugin = JSON.parse(run(["plugin", "list", "--json"])).find(
+      (entry) => entry.id === MODS_PLUGIN_ID,
     );
-    if (!marketplaces.some((marketplace) => marketplace.name === "triflux")) {
+    const hasMarketplace = marketplaces.some(
+      (marketplace) => marketplace.name === "triflux",
+    );
+    // 버전을 모르면 차이로 보지 않는다.
+    const outdated =
+      Boolean(plugin?.version && pkgVersion) && plugin.version !== pkgVersion;
+    return {
+      status: !plugin ? "missing" : outdated ? "outdated" : "current",
+      installedVersion: plugin?.version,
+      pkgVersion,
+      hasMarketplace,
+    };
+  } catch (error) {
+    return { status: "failed", error: _normalizeErrorMessage(error) };
+  }
+}
+
+// 설치와 업데이트는 --mods 나 대화형 동의가 있을 때만 한다. 물을 수 없으면 안내만 남긴다.
+export async function ensureTrifluxMods({
+  install = false,
+  interactive = false,
+  ask = async () => false,
+  env = process.env,
+  pkgVersion = getPackageVersion(),
+  execFileSyncFn = execFileSync,
+  log = console.log,
+  warn = console.warn,
+} = {}) {
+  const run = claudeCli(env, execFileSyncFn);
+  const mods = inspectTrifluxMods({ env, pkgVersion, run });
+  if (mods.status === "skipped") return "not-needed";
+  if (mods.status === "current") return "present";
+  try {
+    if (mods.status === "failed") throw new Error(mods.error);
+    if (!mods.hasMarketplace)
       run(["plugin", "marketplace", "add", "tellang/triflux"]);
-    }
-    if (!installed) {
-      if (install) {
-        run(["plugin", "install", "triflux-mods@triflux"]);
-        log("mods 설치 완료: triflux-mods@triflux");
-      } else {
+    if (mods.status === "missing") {
+      if (!install && !interactive) {
         log("mods 설치: tfx setup --mods");
+        return "deferred";
       }
+      if (
+        !install &&
+        !(await ask(
+          "triflux mods 플러그인(HUD band, 서브에이전트 effort 정책)을 설치할까요?",
+        ))
+      ) {
+        log("mods 설치를 건너뜀. 나중에 설치: tfx setup --mods");
+        return "declined";
+      }
+      run(["plugin", "install", MODS_PLUGIN_ID]);
+      log(`mods 설치 완료: ${MODS_PLUGIN_ID}`);
+      return "installed";
     }
-    return { ok: true, installed: installed || install };
+    const gap = `${mods.installedVersion}, 패키지 ${mods.pkgVersion}`;
+    if (!install && !interactive) {
+      log(`mods 버전이 다르다(설치 ${gap}). 업데이트: ${MODS_UPDATE_COMMAND}`);
+      return "outdated";
+    }
+    if (
+      !install &&
+      !(await ask(`triflux mods 를 업데이트할까요? (설치 ${gap})`))
+    ) {
+      log(`mods 업데이트를 건너뜀. 나중에: ${MODS_UPDATE_COMMAND}`);
+      return "update-declined";
+    }
+    run(["plugin", "marketplace", "update", "triflux"]);
+    run(["plugin", "update", MODS_PLUGIN_ID]);
+    log("mods 업데이트 완료. Claude Code 를 다시 시작하면 적용된다.");
+    return "updated";
   } catch (error) {
     warn(`[setup] mods 설정 실패: ${_normalizeErrorMessage(error)}`);
-    return { ok: false, reason: "setup-failed" };
+    return "failed";
   }
 }
 
@@ -2032,12 +2106,14 @@ export async function runDeferred(stdinData) {
   const skillSync = syncSkills();
   for (const warning of skillSync.warnings) io.log(`  ⚠ ${warning}`);
   if (!skillSync.ok) return io.result(1);
-  ensureTrifluxMods({
-    install: argv.includes("--mods"),
-    log: (message) => io.log(message),
-    warn: (message) => io.log(`  ⚠ ${message}`),
-  });
-  if (pkgVersion && marker?.version === pkgVersion && !isForce) {
+  // --mods 는 동의 단계에서 처리하므로 이미 동기화된 버전이어도 건너뛰지 않는다.
+  const modsInstall = argv.includes("--mods");
+  if (
+    pkgVersion &&
+    marker?.version === pkgVersion &&
+    !isForce &&
+    !modsInstall
+  ) {
     io.log(`setup: skip (v${pkgVersion} already synced)`);
     return io.result(0);
   }
@@ -2225,6 +2301,7 @@ export async function runDeferred(stdinData) {
   }
 
   await runConsentSteps({
+    modsInstall,
     log: (message) => io.log(`  ${message}`),
     warn: (message) => io.log(`  \x1b[33m⚠\x1b[0m ${message}`),
   });

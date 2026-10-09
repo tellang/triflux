@@ -28,6 +28,10 @@ function fakeSteps({ interactive, answer, trusted = false }) {
       calls.tmr = opts;
       return opts.platform === "darwin" ? "installed" : "not-needed";
     },
+    offerMods: async (opts) => {
+      calls.mods = opts;
+      return opts.install || opts.interactive ? "installed" : "deferred";
+    },
     home: "/fake-home",
     log: (message) => calls.logs.push(message),
     warn: (message) => calls.logs.push(message),
@@ -56,6 +60,7 @@ describe("setup 동의 단계", () => {
     assert.deepEqual(result, {
       psmux: "deferred",
       tmr: "not-needed",
+      mods: "deferred",
       codexHooks: "deferred",
     });
     assert.equal(calls.asked.length, 0);
@@ -71,6 +76,7 @@ describe("setup 동의 단계", () => {
     assert.deepEqual(result, {
       psmux: "installed",
       tmr: "not-needed",
+      mods: "installed",
       codexHooks: "approved",
     });
     const [[command, args]] = calls.run;
@@ -90,6 +96,7 @@ describe("setup 동의 단계", () => {
     assert.deepEqual(result, {
       psmux: "declined",
       tmr: "not-needed",
+      mods: "installed",
       codexHooks: "declined",
     });
     assert.equal(calls.run.length, 0);
@@ -105,6 +112,16 @@ describe("setup 동의 단계", () => {
     assert.equal(calls.run.length, 0);
   });
 
+  it("mods 단계에 --mods 여부, 대화형 여부, ask, run 을 그대로 넘긴다", async () => {
+    const { calls, options } = fakeSteps({ interactive: false });
+    const result = await runConsentSteps({ ...options, modsInstall: true });
+    assert.equal(result.mods, "installed");
+    assert.equal(calls.mods.install, true);
+    assert.equal(calls.mods.interactive, false);
+    assert.equal(calls.mods.ask, options.ask);
+    assert.equal(calls.mods.execFileSyncFn, options.run);
+  });
+
   it("이미 승인된 훅은 다시 묻지 않는다", async () => {
     const { calls, options } = fakeSteps({
       interactive: true,
@@ -116,6 +133,7 @@ describe("setup 동의 단계", () => {
     assert.deepEqual(result, {
       psmux: "present",
       tmr: "not-needed",
+      mods: "installed",
       codexHooks: "trusted",
     });
     assert.equal(calls.asked.length, 0);
