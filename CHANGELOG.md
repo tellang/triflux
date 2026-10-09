@@ -2,6 +2,24 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.55.0] - 2026-10-09
+
+### Added
+- setup: 대화형 `tfx setup` 이 triflux mods 플러그인(`triflux-mods@triflux`, HUD band 와 서브에이전트 effort 정책) 설치를 묻고, 설치돼 있지만 패키지와 버전이 다르면 업데이트를 묻는다(기본 아니오, user scope, Claude Code 2.1.287 이상). 비대화형은 안내만 남기고, `--mods` 는 묻지 않고 설치하거나 업데이트한다. `tfx doctor` 가 mods 미설치와 버전 차이를 "Claude mods" 경고로 알린다 (#717)
+
+### Changed
+- setup: 레지스트리가 관리하는 MCP 항목에서 패키지 이름이 같고 버전만 없거나 다를 때 레지스트리 고정 버전으로 바꾼다(10.54.0 뒤 brave-search 불일치 경고). 사용자가 인자를 더한 항목과 프로젝트 cwd 의 `.mcp.json` 은 바꾸지 않는다 (#712)
+- mcp: `tfx doctor --fix` 와 `tfx mcp sync` 도 같은 규칙을 따른다. 사용자가 인자를 더한 stdio 항목은 덮어쓰지 않고 경고로 남긴다 (#714)
+
+### Fixed
+- mcp: Codex `config.toml` 의 MCP 항목을 갱신할 때 여러 줄 배열(`args`, `env_vars`)이 깨지던 문제. 원본이 파싱되면 관리 키 밖 내용이 원본과 같을 때만 쓴다. `@iarna/toml` 이 읽지 못하는 TOML 1.0 표기에서는 예전 동작이다 (#714)
+
+### Security
+- live: `tfx-live` 의 Codex 큐 전송을 app-server `thread/queue/add` 로 보내 프롬프트가 프로세스 인자(ps)에 나오지 않는다. add 를 쓸 수 없을 때만 `codex queue --message` 로 폴백하고 결과에 `queueVia`, `queueFallbackReason` 을 남긴다 (#711)
+
+### Docs
+- mods: effort 없이 부른 서브에이전트는 부모 effort 를 물려받는다(Claude Code 2.1.292 실측)고 agent-effort 훅 주석을 바로잡는다. mods 가 없는 기기에서는 리드 effort 가 그대로 서브에이전트에 간다 (#715)
+
 ## [10.54.0] - 2026-10-08
 
 ### Breaking
