@@ -53,15 +53,18 @@ export function selectTier(columns: number, { config, compactEnv, minimalEnv }: 
   if (lines === 1 || columns < 40) return 'nano'
   const minimal = minimalEnv === '1' || (minimalEnv !== '0' && (config?.compact === 'minimal' || columns < 60))
   if (minimal) return 'micro'
-  const compactSetting =
-    compactEnv === '1' || config?.compact === true || config?.compact === 'always'
-      ? true
-      : compactEnv === '0' || config?.compact === false || config?.compact === 'never'
-        ? false
-        : (lines > 0 && lines < 3) || columns < (Number(config?.compactThreshold) || 80)
-  if (compactSetting) return 'compact'
+  if (compactModeOn(columns, lines, { config, compactEnv })) return 'compact'
   if (config?.autoResize === false) return 'full'
   return columns >= 120 ? 'full' : columns >= 80 ? 'compact' : columns >= 60 ? 'minimal' : 'micro'
+}
+
+// 환경변수, 설정 파일, 폭 순서. detectCompactMode 와 우선순위가 같아야 한다.
+function compactModeOn(columns: number, lines: number, { config, compactEnv }: TierInput) {
+  if (compactEnv === '1') return true
+  if (compactEnv === '0') return false
+  if (config?.compact === true || config?.compact === 'always') return true
+  if (config?.compact === false || config?.compact === 'never') return false
+  return (lines > 0 && lines < 3) || columns < (Number(config?.compactThreshold) || 80)
 }
 
 async function readTierInput($: EngineInterface): Promise<TierInput> {

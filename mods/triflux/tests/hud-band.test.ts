@@ -16,4 +16,5 @@ test('폭 단계를 statusLine HUD 의 selectTier 와 같은 기준으로 고른
   expect([130, 100, 70, 50, 30].map(c => selectTier(c, none))).toEqual(['full', 'compact', 'compact', 'micro', 'nano'])
   expect(selectTier(50, { config: { tier: 'full' } })).toBe('full')
   expect(selectTier(130, { config: null, compactEnv: '1' })).toBe('compact')
+  expect(selectTier(130, { config: { compact: 'always' }, compactEnv: '0' })).toBe('full')
 })
