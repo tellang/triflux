@@ -179,7 +179,7 @@ export function registerHudBand(on: On, options: PluginOptions) {
     ]
     const costParts: Part[] = snapshot.costUsd === null ? [] : [{ text: ` $${snapshot.costUsd.toFixed(2)}`, dim: true }]
 
-    // 한 줄에 안 들어가면 비용부터 빼고, 그래도 넘치면 micro 행으로 줄인다.
+    // 한 줄에 안 들어가면 비용부터 빼고, 그래도 넘치면 micro 행으로 줄이고, 그것도 안 되면 그리지 않는다.
     const fits = (parts: Part[]) => parts.reduce((n, p) => n + p.text.length, 0) <= width
     const candidates =
       tier === 'micro' || tier === 'nano'
@@ -189,7 +189,8 @@ export function registerHudBand(on: On, options: PluginOptions) {
             [...prefix, ...windowParts, ...contextParts],
             [...prefix, ...microParts],
           ]
-    const parts = candidates.find(fits) ?? candidates[candidates.length - 1]
+    const parts = candidates.find(fits)
+    if (!parts) return next(e)
 
     // Fragment 로 묶으면 Text 가 세로로 쌓여서 한 줄짜리 배열로 편다.
     return (
