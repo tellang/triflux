@@ -10,7 +10,12 @@ import {
   ANTIGRAVITY_SIGNED_IN_GRACE_MS,
   SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
-import { decodeJwtEmail, readJson, writeJsonSafe } from "../utils.mjs";
+import {
+  acquireSpawnLock,
+  decodeJwtEmail,
+  readJson,
+  writeJsonSafe,
+} from "../utils.mjs";
 
 function getCredentialEmail(credential) {
   return (
@@ -140,9 +145,8 @@ export function scheduleAntigravityQuotaRefresh() {
     isGcpProjectAuth()
   )
     return;
-  const lock = readJson(ANTIGRAVITY_REFRESH_LOCK_PATH, null);
-  if (Date.now() - Number(lock?.t || 0) < SPAWN_LOCK_TTL_MS) return;
-  writeJsonSafe(ANTIGRAVITY_REFRESH_LOCK_PATH, { t: Date.now() });
+  if (!acquireSpawnLock(ANTIGRAVITY_REFRESH_LOCK_PATH, SPAWN_LOCK_TTL_MS))
+    return;
   try {
     const child = spawn(
       process.execPath,

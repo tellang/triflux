@@ -1698,9 +1698,10 @@ function commandTokens(command) {
 }
 
 // macOS/Linux 는 sh 래퍼로 돌려 mods band 가 그리는 세션에서 node 를 띄우지 않는다(hud/hud-statusline.sh).
-function buildStatusLineCommand(hudPath) {
+// willSyncWrapper: 미리보기처럼 래퍼를 아직 복사하기 전이지만 setup 이 곧 복사할 때.
+function buildStatusLineCommand(hudPath, { willSyncWrapper = false } = {}) {
   const wrapper = join(dirname(hudPath), HUD_STATUSLINE_SCRIPT);
-  if (process.platform === "win32" || !existsSync(wrapper))
+  if (process.platform === "win32" || !(willSyncWrapper || existsSync(wrapper)))
     return buildNodeScriptCommand(hudPath);
   const node = resolveStableNodeBin(process.execPath, { fallback: "node" });
   return `sh ${quoteShellCommandArg(wrapper)} ${quoteShellCommandArg(node)}`;
@@ -1722,10 +1723,14 @@ function isTrifluxStatusLine(command, hudPath) {
 }
 
 // 미리보기와 실제 적용이 같은 판정을 쓴다. 사용자가 직접 넣은 statusLine 은 skip 이다.
-export function planStatusLine(settings, { hudPath = HUD_PATH } = {}) {
+export function planStatusLine(
+  settings,
+  { hudPath = HUD_PATH, willSyncWrapper = false } = {},
+) {
   const current = settings.statusLine;
   if (current == null) return "create";
-  if (current.command === buildStatusLineCommand(hudPath)) return "noop";
+  if (current.command === buildStatusLineCommand(hudPath, { willSyncWrapper }))
+    return "noop";
   return current.type === "command" &&
     isTrifluxStatusLine(current.command, hudPath)
     ? "update"

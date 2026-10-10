@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { dim } from "../../hud/colors.mjs";
 import {
+  acquireSpawnLock,
   clampPercent,
   decodeJwtEmail,
   formatPercentCell,
@@ -14,6 +15,7 @@ import {
   formatTimeCell,
   formatTimeCellDH,
   padAnsiRight,
+  parseRetryAfterMs,
   readJsonMigrate,
   stripAnsi,
 } from "../../hud/utils.mjs";
@@ -171,5 +173,32 @@ describe("hud/utils.mjs", () => {
 
     assert.equal(decodeJwtEmail(token), "dev@example.com");
     assert.equal(decodeJwtEmail("not-a-jwt"), null);
+  });
+});
+
+describe("갱신 락과 Retry-After", () => {
+  it("락은 ttl 안에서만 막고, 시계가 뒤로 간 락은 깨진 것으로 본다", () => {
+    const lock = join(tmpdir(), `tfx-hud-lock-${process.pid}`);
+    const now = 1_000_000;
+    try {
+      assert.equal(acquireSpawnLock(lock, 30_000, now), true);
+      assert.equal(acquireSpawnLock(lock, 30_000, now + 10_000), false);
+      assert.equal(acquireSpawnLock(lock, 30_000, now + 31_000), true);
+      writeFileSync(lock, JSON.stringify({ t: now + 3_600_000 }));
+      assert.equal(acquireSpawnLock(lock, 30_000, now), true);
+    } finally {
+      rmSync(lock, { force: true });
+    }
+  });
+
+  it("Retry-After 는 초와 HTTP 날짜를 받는다", () => {
+    const now = Date.parse("2026-10-10T00:00:00Z");
+    assert.equal(parseRetryAfterMs("120", now), 120_000);
+    assert.equal(
+      parseRetryAfterMs("Sat, 10 Oct 2026 00:05:00 GMT", now),
+      300_000,
+    );
+    assert.equal(parseRetryAfterMs("0", now), null);
+    assert.equal(parseRetryAfterMs(undefined, now), null);
   });
 });
