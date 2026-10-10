@@ -2,6 +2,17 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.57.1] - 2026-10-10
+
+### Changed
+- hud: Claude Code 2.1.251+ 가 statusLine 입력에 넣는 `rate_limits` 로 c 행을 그리고, 있으면 Claude 사용량 API 를 조회하지 않는다. c 행 CTX 뒤에 세션 비용을 붙인다 (#725)
+- hud: macOS/Linux statusLine 을 `hud/hud-statusline.sh` 래퍼로 등록한다. mods band 가 그리는 세션에서는 node 를 띄우지 않고 끝난다. 예전 `node <hud>` 명령은 setup 이 래퍼로 바꾼다 (#725)
+- hud: statusLine 은 엔진의 양옆 여백과 첫 행 오른쪽 알림 자리만큼 좁게 그린다 (#725)
+- mods: band 는 `session.measure` 로 갱신하고, 뒤에 오는 mods 의 band 내용을 함께 남긴다 (#725)
+
+### Fixed
+- hud: 갱신 락이 시계가 뒤로 가면 풀리지 않던 문제. 만료 시각과 상한을 쓴다. Claude 사용량 429 는 `Retry-After` 를 따른다(최대 1시간). stdin 은 JSON 이 읽히는 즉시 끝낸다 (#725)
+
 ## [10.57.0] - 2026-10-10
 
 ### Changed
