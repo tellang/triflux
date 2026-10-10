@@ -21,19 +21,22 @@ host capability evidence를 판정한다. 정책 표, keyword 표, owner 매트�
 2. git 메인 워크트리 — `$(git rev-parse --git-common-dir)`의 부모 아래
    `.claude/rules/tfx-routing.md`
 3. cwd에서 위로 올라가며 `.claude/rules/tfx-routing.md`
+4. 이 스킬 디렉터리의 `references/tfx-routing.md` (`tfx setup`이 패키지에서 복사한 사본)
+
+4순위는 clone이 없는 기기를 위한 것이다. 설치한 버전의 정책이라 clone보다 늦을 수 있으므로
+1~3순위 뒤에 둔다.
 
 2순위에 `--show-toplevel`을 쓰지 않는다. linked worktree 안에서는 worktree 루트를
 반환하는데 그곳의 SSOT는 브랜치 분기 시점 사본이라, blocked 없이 stale 정책으로
 조용히 오판정한다. `--git-common-dir`은 worktree 안에서도 메인 repo의 `.git`을 가리킨다.
 
-blocked를 반환할 때는 해소 방법을 한 줄 덧붙인다:
-`export TFX_ROUTING_SSOT=<triflux clone>/.claude/rules/tfx-routing.md`
-(`~/.zshrc`가 아니라 `~/.zshenv`에 둔다. zshrc는 interactive 전용이라 훅·headless
-워커·툴 셸에서는 1순위가 통째로 죽는다.)
+blocked를 반환할 때는 해소 방법을 한 줄 덧붙인다: `tfx setup`을 다시 실행해 4순위 사본을 설치한다.
+clone의 최신 정책을 쓰려면 `export TFX_ROUTING_SSOT=<triflux clone>/.claude/rules/tfx-routing.md`
+를 `~/.zshenv`에 둔다. `~/.zshrc`는 interactive 전용이라 훅·headless 워커·툴 셸에서는 읽히지 않는다.
 
 `~/.claude/rules/`에 사본이나 symlink를 두지 않는다. 그 디렉터리는 Claude가 모든 세션에
 자동 로드하므로 tfx와 무관한 세션까지 SSOT 전문을 매번 컨텍스트에 싣게 된다.
-npm 패키지에도 `.claude/`는 없다(`tfx-mirror-policy.md` mirror 제외 대상).
+npm 패키지에는 `.claude/` 중 `rules/tfx-routing.md` 한 파일만 들어 있다.
 
 반환 형식:
 

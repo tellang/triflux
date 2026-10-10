@@ -585,6 +585,41 @@ describe("setup-sync: user-state file exclusions", () => {
   });
 });
 
+describe("setup-sync: tfx-harness 라우팅 문서", () => {
+  it("clone 없는 기기용으로 패키지의 라우팅 문서를 두 harness 스킬 옆에 둔다", () => {
+    const root = join(TMP_DIR, "harness-routing");
+    const source = join(root, "package");
+    const claudeDir = join(root, "claude");
+    const codexDir = join(root, "codex");
+    for (const relative of [
+      "skills/tfx-harness",
+      "adapters/codex/skills/tfx-harness",
+    ]) {
+      mkdirSync(join(source, relative), { recursive: true });
+      writeFileSync(join(source, relative, "SKILL.md"), "skill");
+    }
+    mkdirSync(join(source, ".claude/rules"), { recursive: true });
+    writeFileSync(join(source, ".claude/rules/tfx-routing.md"), "D0-D11");
+    try {
+      syncSkills({ pluginRoot: source, claudeDir, codexDir });
+      for (const dir of [claudeDir, codexDir])
+        assert.equal(
+          readFileSync(
+            join(dir, "skills/tfx-harness/references/tfx-routing.md"),
+            "utf8",
+          ),
+          "D0-D11",
+        );
+      assert.equal(
+        syncSkills({ pluginRoot: source, claudeDir, codexDir }).changed,
+        0,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("setup-sync: dry-run 실행", () => {
   // 훅 설치기(ensureCodexHooks)와 agy 옛 훅 정리(cleanupAgyHooks)는 TEST_LOCK_PID 가 설정된 테스트
   // 실행 중에는 explicit seam 없이 실제 HOME 에 쓰지 않도록 자체 가드되어 있다

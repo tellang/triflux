@@ -33,6 +33,8 @@ const MIRROR_TOPS = [
   "scripts",
   "skills",
 ];
+// 디렉터리 전체가 아니라 한 파일만 게시하는 경로. tfx-harness 가 clone 없는 기기에서 읽는다.
+const MIRROR_FILES = [".claude/rules/tfx-routing.md"];
 // core 미러 대상은 pack.mjs 의 CORE_ENTRIES 하나로 정한다. 검사기가 따로 손 목록을 두면
 // 하위 디렉터리나 새 파일이 빠져도 OK 가 나왔다(#674).
 const CORE_NON_MIRROR = new Set([
@@ -189,48 +191,55 @@ function compareMirror({
   const issues = [];
   const fixed = [];
 
+  const pairs = [];
   for (const top of MIRROR_TOPS) {
-    const srcDir = join(repoRoot, top);
-    const dstDir = join(mirrorRoot, top);
     const skipRels = SKIP_RELS.get(top) ?? new Set();
-    const srcFiles = new Set(walkRelFiles(srcDir, skipRels));
-    const dstFiles = new Set(walkRelFiles(dstDir, skipRels));
-    const allFiles = new Set([...srcFiles, ...dstFiles]);
+    const srcFiles = new Set(walkRelFiles(join(repoRoot, top), skipRels));
+    const dstFiles = new Set(walkRelFiles(join(mirrorRoot, top), skipRels));
+    for (const rel of new Set([...srcFiles, ...dstFiles]))
+      pairs.push({
+        rel: `${top}/${rel}`,
+        inSrc: srcFiles.has(rel),
+        inDst: dstFiles.has(rel),
+      });
+  }
+  for (const rel of MIRROR_FILES) {
+    const inSrc = existsSync(join(repoRoot, rel));
+    const inDst = existsSync(join(mirrorRoot, rel));
+    if (inSrc || inDst) pairs.push({ rel, inSrc, inDst });
+  }
 
-    for (const rel of allFiles) {
-      const srcPath = join(srcDir, rel);
-      const dstPath = join(dstDir, rel);
-      const inSrc = srcFiles.has(rel);
-      const inDst = dstFiles.has(rel);
-      const displayPath = `packages/triflux/${top}/${rel}`;
+  for (const { rel, inSrc, inDst } of pairs) {
+    const srcPath = join(repoRoot, rel);
+    const dstPath = join(mirrorRoot, rel);
+    const displayPath = `packages/triflux/${rel}`;
 
-      if (inSrc && !inDst) {
-        if (fix) {
-          mkdirSync(dirname(dstPath), { recursive: true });
-          copyFileSync(srcPath, dstPath);
-          fixed.push({ path: displayPath, kind: "added" });
-        } else {
-          issues.push({ path: displayPath, kind: "missing-in-mirror" });
-        }
-        continue;
+    if (inSrc && !inDst) {
+      if (fix) {
+        mkdirSync(dirname(dstPath), { recursive: true });
+        copyFileSync(srcPath, dstPath);
+        fixed.push({ path: displayPath, kind: "added" });
+      } else {
+        issues.push({ path: displayPath, kind: "missing-in-mirror" });
       }
+      continue;
+    }
 
-      if (!inSrc && inDst) {
-        // Orphan in mirror — source of truth is root, mirror must not have
-        // extra files. Do not auto-delete; require manual decision.
-        issues.push({ path: displayPath, kind: "orphan-in-mirror" });
-        continue;
-      }
+    if (!inSrc && inDst) {
+      // Orphan in mirror — source of truth is root, mirror must not have
+      // extra files. Do not auto-delete; require manual decision.
+      issues.push({ path: displayPath, kind: "orphan-in-mirror" });
+      continue;
+    }
 
-      const a = readFileSync(srcPath);
-      const b = readFileSync(dstPath);
-      if (!a.equals(b)) {
-        if (fix) {
-          copyFileSync(srcPath, dstPath);
-          fixed.push({ path: displayPath, kind: "updated" });
-        } else {
-          issues.push({ path: displayPath, kind: "content-diff" });
-        }
+    const a = readFileSync(srcPath);
+    const b = readFileSync(dstPath);
+    if (!a.equals(b)) {
+      if (fix) {
+        copyFileSync(srcPath, dstPath);
+        fixed.push({ path: displayPath, kind: "updated" });
+      } else {
+        issues.push({ path: displayPath, kind: "content-diff" });
       }
     }
   }

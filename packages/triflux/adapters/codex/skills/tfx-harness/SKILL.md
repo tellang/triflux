@@ -15,24 +15,26 @@ tree, keyword rules, or owner matrix into this file.
 ## Locate the routing SSOT
 
 This skill is installed globally but the SSOT belongs to the Triflux project.
-Try these locations in order and return blocked only when all three fail:
+Try these locations in order and return blocked only when all four fail:
 
 1. `$TFX_ROUTING_SSOT`, when set.
 2. `.claude/rules/tfx-routing.md` below the main Git worktree, derived from
    the parent of `git rev-parse --git-common-dir`.
 3. Walk upward from the current working directory looking for
    `.claude/rules/tfx-routing.md`.
+4. `references/tfx-routing.md` inside this skill directory, copied from the
+   package by `tfx setup`. It serves machines without a clone and may lag the
+   clone, so it comes last.
 
 Do not use `git rev-parse --show-toplevel` for step 2. In a linked worktree it
 returns that worktree root, whose SSOT may be a stale branch snapshot.
 `--git-common-dir` still points to the main repository's `.git` directory.
 
-When blocked, include this one-line remedy:
-
-`export TFX_ROUTING_SSOT=<triflux clone>/.claude/rules/tfx-routing.md`
-
-Prefer `~/.zshenv` for this variable because hooks and headless workers may not
-load interactive `~/.zshrc`. Do not create a global copy or symlink under
+When blocked, include this one-line remedy: rerun `tfx setup` to install the
+step 4 copy. To follow a clone's latest policy instead, set
+`export TFX_ROUTING_SSOT=<triflux clone>/.claude/rules/tfx-routing.md` in
+`~/.zshenv`, because hooks and headless workers may not load interactive
+`~/.zshrc`. Do not create a global copy or symlink under
 `~/.claude/rules/`; Claude auto-loads that directory into unrelated sessions.
 
 ## Return contract
