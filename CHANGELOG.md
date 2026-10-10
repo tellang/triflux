@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.57.2] - 2026-10-10
+
+### Fixed
+- skills: clone 이 없거나 `TFX_ROUTING_SSOT` 가 없는 기기에서 triflux 밖 tfx-harness 가 라우팅 문서를 못 찾아 blocked 로 끝나던 문제. 라우팅 문서를 패키지에 넣고, setup 이 Claude 와 Codex 의 tfx-harness 스킬 옆 `references/tfx-routing.md` 로 복사한다. 스킬은 이 사본을 4순위로 읽는다 (#727)
+
 ## [10.57.1] - 2026-10-10
 
 ### Changed
