@@ -9,6 +9,9 @@ const rows = atom({ plugin: 'triflux-mods', key: 'rows' } as const, null)
 export type BandPosition = 'above' | 'statusline'
 
 const REFRESH_MS = 60_000
+const HUD_TIMEOUT_MS = 5_000
+// hud/constants.mjs BAND_HEADER. 10.56.0 이하 HUD 는 --band 를 몰라 이 줄이 없다.
+const BAND_HEADER = 'tfx-band 1'
 const NODE_CANDIDATES = ['node', '/opt/homebrew/bin/node', '/usr/local/bin/node']
 const NAMED_COLORS: Record<number, string> = {
   30: 'black', 31: 'red', 32: 'green', 33: 'yellow', 34: 'blue', 35: 'magenta', 36: 'cyan', 37: 'white',
@@ -69,17 +72,27 @@ async function homeDir($: EngineInterface) {
   return (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'))
 }
 
+// 실행 파일이 없을 때만 다음 node 를 시도한다. 시작한 뒤 멎었으면 같은 HUD 를 다시 돌려도 멎는다.
 async function runHud($: EngineInterface, hudPath: string, stdin: string, columns: number) {
   for (const node of NODE_CANDIDATES) {
+    const startedAt = await $.clock.now()
     try {
       return await $.process.run([node, hudPath, '--band'], {
         stdin,
         env: { COLUMNS: String(columns) },
-        timeoutMs: 10_000,
+        timeoutMs: HUD_TIMEOUT_MS,
       })
-    } catch {}
+    } catch {
+      if ((await $.clock.now()) - startedAt >= HUD_TIMEOUT_MS) return null
+    }
   }
   return null
+}
+
+async function writeMarker($: EngineInterface, marker: string, content: string) {
+  try {
+    await $.fs.write(marker, content)
+  } catch {}
 }
 
 // 선택 기능이라 실패를 삼킨다. hook 오류가 쌓이면 mod 전체가 꺼진다.
@@ -91,7 +104,7 @@ async function refreshRows($: EngineInterface, position: BandPosition, columns: 
     const sessionId = await $.session.id()
     const marker = `${home}/.claude/cache/triflux/claude-band/${sessionId}`
     if (position === 'statusline') {
-      await $.fs.write(marker, 'off')
+      await writeMarker($, marker, 'off')
       return
     }
     const { rateLimits, context } = await $.session.usage()
@@ -107,15 +120,20 @@ async function refreshRows($: EngineInterface, position: BandPosition, columns: 
     // TFX_HUD_PATH 는 설치본 대신 저장소의 HUD 를 돌려 볼 때 쓴다.
     const hudPath = (await $.env.get('TFX_HUD_PATH')) || `${home}/.claude/hud/hud-qos-status.mjs`
     const result = await runHud($, hudPath, stdin, columns)
-    const lines = (result?.exitCode === 0 ? result.stdout : '')
-      .split('\n')
-      .map(parseAnsi)
-      .filter(spans => spans.some(s => s.text.trim()))
-    // HUD 를 못 돌리면 band 를 비우고 statusLine 이 그리게 둔다.
+    const [header, ...body] = (result?.exitCode === 0 ? result.stdout : '').split('\n')
+    const lines = header === BAND_HEADER ? body.map(parseAnsi).filter(spans => spans.some(s => s.text.trim())) : []
+    // HUD 를 못 돌리거나 --band 를 모르면 band 를 비우고 statusLine 이 그리게 둔다.
     const snapshot: BandRows | null = lines.length > 0 ? { columns, lines } : null
     await update($, rows, () => snapshot)
-    await $.fs.write(marker, snapshot ? `all:${await $.clock.now()}` : 'off')
-  } catch {}
+    await writeMarker($, marker, snapshot ? `all:${await $.clock.now()}` : 'off')
+  } catch {
+    // 이전 all 표식이 남으면 band 도 statusLine 도 비게 된다.
+    try {
+      await update($, rows, () => null)
+      const home = await homeDir($)
+      if (home) await writeMarker($, `${home}/.claude/cache/triflux/claude-band/${await $.session.id()}`, 'off')
+    } catch {}
+  }
 }
 
 export function registerHudBand(on: On, options: PluginOptions) {

@@ -92,7 +92,7 @@ describe("HUD provider visibility", () => {
           },
         },
       );
-      assert.match(bandRows, /^c:.*1w:.*42%/);
+      assert.match(bandRows, /^tfx-band 1\nc:.*1w:.*42%/);
       assert.match(bandRows, /^x:/m);
     } finally {
       rmSync(marker);

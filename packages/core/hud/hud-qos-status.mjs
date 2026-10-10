@@ -16,6 +16,7 @@ import {
 import {
   ANTIGRAVITY_REFRESH_FLAG,
   BAND_FLAG,
+  BAND_HEADER,
   CLAUDE_BAND_MARKER_DIR,
   CLAUDE_BAND_MARKER_TTL_MS,
   CLAUDE_REFRESH_FLAG,
@@ -113,7 +114,8 @@ async function main() {
       showAntigravity: antigravityAllowed,
       antigravityQuota,
     });
-    process.stdout.write(`\x1b[0m${microLine}\n`);
+    const header = bandMode ? `${BAND_HEADER}\n` : "";
+    process.stdout.write(`${header}\x1b[0m${microLine}\n`);
     return;
   }
 
@@ -159,7 +161,9 @@ async function main() {
       ? "\n\n"
       : "\n";
   const resetLines = outputLines.map((line) => `\x1b[0m${line}`);
-  process.stdout.write(`${leadingBreaks}${resetLines.join("\n")}\n`);
+  // band 는 첫 줄 표지로 이 HUD 가 --band 를 아는지 확인한다.
+  const header = bandMode ? `${BAND_HEADER}\n` : "";
+  process.stdout.write(`${header}${leadingBreaks}${resetLines.join("\n")}\n`);
 }
 
 main().catch(() => {
