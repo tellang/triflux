@@ -71,11 +71,9 @@ async function main() {
   // --band: triflux mods 가 입력창 위에 그릴 줄을 만든다. statusLine 은 band 가 다 그리는 세션에서 비운다.
   const bandMode = process.argv.includes(BAND_FLAG);
   // statusLine 은 엔진이 양옆에 2칸씩 여백을 두고, 첫 행 오른쪽에 알림을 띄운다(공식 문서). 그만큼 좁게 그린다.
-  const columns = Number(process.env.COLUMNS);
-  if (!bandMode && columns > 0)
-    process.env.COLUMNS = String(
-      Math.max(40, columns - STATUSLINE_RESERVE_COLS),
-    );
+  // 알림 자리를 빼고 40칸이 안 남는 좁은 화면은 그대로 두어 원래 축소 단계를 따른다.
+  const reserved = Number(process.env.COLUMNS) - STATUSLINE_RESERVE_COLS;
+  if (!bandMode && reserved >= 40) process.env.COLUMNS = String(reserved);
   const stdin = await readStdinJson();
   const bandState = bandMode ? "none" : readBandState(stdin?.session_id);
   if (bandState === "all") return;
