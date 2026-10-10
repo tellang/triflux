@@ -100,10 +100,13 @@ export function getMicroLine(
     claudeUsage?.weeklyPercent != null
       ? clampPercent(claudeUsage.weeklyPercent)
       : null;
+  const cSpend = spendOnlyPercent(claudeUsage);
   const cVal =
-    claudeUsage != null
-      ? `${cF != null ? colorByProvider(cF, `${cF}%`, claudeOrange) : dim("--%")}${dim("/")}${cW != null ? colorByProvider(cW, `${cW}%`, claudeOrange) : dim("--%")}`
-      : dim("--%/--%");
+    cSpend != null
+      ? colorByProvider(cSpend, `$${cSpend}%`, claudeOrange)
+      : claudeUsage != null
+        ? `${cF != null ? colorByProvider(cF, `${cF}%`, claudeOrange) : dim("--%")}${dim("/")}${cW != null ? colorByProvider(cW, `${cW}%`, claudeOrange) : dim("--%")}`
+        : dim("--%/--%");
 
   // Codex 5h/1w
   let xVal = dim("--%/--%");
@@ -163,12 +166,31 @@ function contextPercentText(ctxView) {
   return colorByPercent(ctxView.percent, `${ctxView.percent}%`);
 }
 
+// gateway 세션은 5h, 1w 대신 spend_limit 창 하나만 받는다.
+function spendOnlyPercent(claudeUsage) {
+  if (claudeUsage?.spendLimitPercent == null) return null;
+  if (claudeUsage.fiveHourPercent != null || claudeUsage.weeklyPercent != null)
+    return null;
+  return clampPercent(claudeUsage.spendLimitPercent);
+}
+
 // ============================================================================
 // Claude 행 렌더러
 // ============================================================================
 export function getClaudeRows(currentTier, contextView, claudeUsage) {
   const ctxView = contextView || buildContextUsageView({});
   const prefix = `${bold(claudeOrange("c"))}:`;
+  const spend = spendOnlyPercent(claudeUsage);
+  if (spend != null) {
+    if (currentTier === "nano" || currentTier === "micro") {
+      const left = colorByProvider(spend, `${spend}%`, claudeOrange);
+      return [{ prefix, left, right: "" }];
+    }
+    const pct = colorByProvider(spend, formatPercentCell(spend), claudeOrange);
+    const left = `${dim("$:")}${tierBar(currentTier, spend, CLAUDE_ORANGE)}${pct}`;
+    const right = `${dim("CTX:")}${contextPercentText(ctxView)}`;
+    return [{ prefix, left, right }];
+  }
   // API 실측 데이터
   const fiveHourPercent = claudeUsage?.fiveHourPercent ?? null;
   const weeklyPercent = claudeUsage?.weeklyPercent ?? null;

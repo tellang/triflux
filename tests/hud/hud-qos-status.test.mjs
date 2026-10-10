@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -94,6 +100,20 @@ describe("HUD provider visibility", () => {
       );
       assert.match(bandRows, /^tfx-band 1\nc:.*1w:.*42%/);
       assert.match(bandRows, /^x:/m);
+      const spendRows = runHud(
+        {},
+        {
+          args: ["--band"],
+          input: {
+            claude_rate_limits: [{ kind: "spend_limit", percentUsed: 83 }],
+          },
+        },
+      );
+      assert.match(spendRows, /^c: \$:.*83%/m);
+      // band 가 3분 넘게 갱신하지 않으면 statusLine 이 다시 다 그린다.
+      const stale = new Date(Date.now() - 4 * 60 * 1000);
+      utimesSync(marker, stale, stale);
+      assert.match(runHud({ TFX_DISABLE_CODEX: "0" }), /^c:/m);
     } finally {
       rmSync(marker);
     }

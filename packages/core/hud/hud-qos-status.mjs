@@ -15,6 +15,7 @@ import {
 } from "./colors.mjs";
 import {
   ANTIGRAVITY_REFRESH_FLAG,
+  BAND_ALL_TTL_MS,
   BAND_FLAG,
   BAND_HEADER,
   CLAUDE_BAND_MARKER_DIR,
@@ -180,9 +181,11 @@ function readBandState(sessionId) {
     const marker = join(CLAUDE_BAND_MARKER_DIR, sessionId);
     const content = readFileSync(marker, "utf8").trim();
     if (content === "off") return "none";
-    if (Date.now() - statSync(marker).mtimeMs >= CLAUDE_BAND_MARKER_TTL_MS)
-      return "none";
-    return content.startsWith("all:") ? "all" : "claude";
+    const age = Date.now() - statSync(marker).mtimeMs;
+    // all 표식은 band 가 1분마다 다시 쓴다. band 가 멈추면 짧게 끊어 statusLine 이 다시 그린다.
+    if (content.startsWith("all:"))
+      return age < BAND_ALL_TTL_MS ? "all" : "none";
+    return age < CLAUDE_BAND_MARKER_TTL_MS ? "claude" : "none";
   } catch {
     return "none";
   }
@@ -194,7 +197,8 @@ function claudeUsageFromRateLimits(rateLimits) {
   const find = (kind) => rateLimits.find((w) => w?.kind === kind);
   const fiveHour = find("five_hour");
   const weekly = find("seven_day");
-  if (!fiveHour && !weekly) return null;
+  const spendLimit = find("spend_limit");
+  if (!fiveHour && !weekly && !spendLimit) return null;
   const percent = (w) =>
     Number.isFinite(w?.percentUsed) ? Math.round(w.percentUsed) : null;
   return {
@@ -202,5 +206,6 @@ function claudeUsageFromRateLimits(rateLimits) {
     weeklyPercent: percent(weekly),
     fiveHourResetsAt: fiveHour?.resetsAt || null,
     weeklyResetsAt: weekly?.resetsAt || null,
+    spendLimitPercent: percent(spendLimit),
   };
 }
