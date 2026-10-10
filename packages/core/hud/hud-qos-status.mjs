@@ -72,8 +72,8 @@ async function main() {
   const stdin = await readStdinJson();
   const bandState = bandMode ? "none" : readBandState(stdin?.session_id);
   if (bandState === "all") return;
-  // mods 가 넘긴 세션 사용량이 있으면 Claude API 를 따로 조회하지 않는다.
-  const bandClaudeUsage = claudeUsageFromRateLimits(stdin?.claude_rate_limits);
+  // Claude Code 가 넘긴 세션 사용량이 있으면 Claude API 를 따로 조회하지 않는다.
+  const stdinClaudeUsage = claudeUsageFromStdin(stdin);
 
   const { showCodex, antigravityAllowed } = resolveHudCliVisibility();
   const claudeUsageSnapshot = readClaudeUsageSnapshot();
@@ -84,7 +84,7 @@ async function main() {
   if (antigravitySnapshot?.shouldRefresh) scheduleAntigravityQuotaRefresh();
   // 설정이 없는 홈에서는 갱신 프로세스를 시작하지 않는다.
   if (
-    !bandClaudeUsage &&
+    !stdinClaudeUsage &&
     claudeUsageSnapshot.shouldRefresh &&
     existsSync(join(homedir(), ".claude"))
   ) {
@@ -96,7 +96,7 @@ async function main() {
 
   const contextView = buildContextUsageView(stdin);
   const claudeUsage =
-    bandClaudeUsage ??
+    stdinClaudeUsage ??
     (claudeUsageSnapshot.data
       ? { ...claudeUsageSnapshot.data, stale: claudeUsageSnapshot.isStale }
       : null);
@@ -196,16 +196,30 @@ function readBandState(sessionId) {
   }
 }
 
-// mods 의 $.session.usage() rateLimits 를 HUD 의 Claude 사용량 형식으로 바꾼다.
-function claudeUsageFromRateLimits(rateLimits) {
-  if (!Array.isArray(rateLimits)) return null;
-  const find = (kind) => rateLimits.find((w) => w?.kind === kind);
-  const fiveHour = find("five_hour");
-  const weekly = find("seven_day");
-  const spendLimit = find("spend_limit");
+// statusLine 입력의 rate_limits(Claude Code 2.1.251+, Pro/Max 와 gateway)를 HUD 의 Claude 사용량 형식으로 바꾼다.
+// 10.57.0 mods 가 넘기던 claude_rate_limits 배열도 받는다.
+function claudeUsageFromStdin(stdin) {
+  const windows = {};
+  const limits = stdin?.rate_limits;
+  if (limits && typeof limits === "object" && !Array.isArray(limits)) {
+    for (const kind of ["five_hour", "seven_day", "spend_limit"]) {
+      const w = limits[kind];
+      if (w)
+        windows[kind] = { percent: w.used_percentage, resetsAt: w.resets_at };
+    }
+  } else if (Array.isArray(stdin?.claude_rate_limits)) {
+    for (const w of stdin.claude_rate_limits)
+      if (w?.kind)
+        windows[w.kind] = { percent: w.percentUsed, resetsAt: w.resetsAt };
+  }
+  const {
+    five_hour: fiveHour,
+    seven_day: weekly,
+    spend_limit: spendLimit,
+  } = windows;
   if (!fiveHour && !weekly && !spendLimit) return null;
   const percent = (w) =>
-    Number.isFinite(w?.percentUsed) ? Math.round(w.percentUsed) : null;
+    Number.isFinite(w?.percent) ? Math.round(w.percent) : null;
   return {
     fiveHourPercent: percent(fiveHour),
     weeklyPercent: percent(weekly),

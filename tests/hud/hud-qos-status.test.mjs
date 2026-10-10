@@ -94,7 +94,7 @@ describe("HUD provider visibility", () => {
         {
           args: ["--band"],
           input: {
-            claude_rate_limits: [{ kind: "seven_day", percentUsed: 42.4 }],
+            rate_limits: { seven_day: { used_percentage: 42.4 } },
           },
         },
       );

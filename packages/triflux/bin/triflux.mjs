@@ -74,6 +74,7 @@ import {
   listInlineProfileNames,
   MODS_UPDATE_COMMAND,
   persistSettings,
+  planStatusLine,
   REQUIRED_CODEX_PROFILES,
   retireOldInstallFiles,
   runConsentSteps,
@@ -1139,11 +1140,7 @@ function previewStatusLineAction() {
   return {
     type: "statusLine",
     path: settingsPath,
-    change: /hud-qos-status\.mjs|hud-statusline\.sh/u.test(currentCmd)
-      ? "noop"
-      : currentCmd
-        ? "skip"
-        : "create",
+    change: planStatusLine(settings, { hudPath }),
     current: currentCmd || null,
     target: hudPath,
   };

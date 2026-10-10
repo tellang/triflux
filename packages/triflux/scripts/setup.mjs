@@ -1721,28 +1721,34 @@ function isTrifluxStatusLine(command, hudPath) {
   return false;
 }
 
+// 미리보기와 실제 적용이 같은 판정을 쓴다. 사용자가 직접 넣은 statusLine 은 skip 이다.
+export function planStatusLine(settings, { hudPath = HUD_PATH } = {}) {
+  const current = settings.statusLine;
+  if (current == null) return "create";
+  if (current.command === buildStatusLineCommand(hudPath)) return "noop";
+  return current.type === "command" &&
+    isTrifluxStatusLine(current.command, hudPath)
+    ? "update"
+    : "skip";
+}
+
 export function applyStatusLine(
   settings,
   { hudPath = HUD_PATH, warn = console.warn } = {},
 ) {
   if (!existsSync(hudPath)) return false;
-  const current = settings.statusLine;
-  const desiredCommand = buildStatusLineCommand(hudPath);
-  if (current?.command === desiredCommand) return false;
-  if (
-    current != null &&
-    (current.type !== "command" ||
-      !isTrifluxStatusLine(current.command, hudPath))
-  ) {
+  const change = planStatusLine(settings, { hudPath });
+  if (change === "noop") return false;
+  if (change === "skip") {
     warn(
       "기존 statusLine 유지: Triflux HUD를 쓰려면 settings.json에서 직접 선택하세요.",
     );
     return false;
   }
   settings.statusLine = {
-    ...current,
+    ...settings.statusLine,
     type: "command",
-    command: desiredCommand,
+    command: buildStatusLineCommand(hudPath),
   };
   return true;
 }

@@ -229,7 +229,7 @@ test("statusLine 을 sh 래퍼로 등록하고 예전 node 명령도 triflux 것
   const legacy = {
     statusLine: {
       type: "command",
-      command: `/opt/homebrew/bin/node ${hudPath}`,
+      command: `/opt/homebrew/bin/node "${hudPath.replace(/\\/g, "/")}"`,
     },
   };
   assert.equal(applyStatusLine(legacy, opts), true);
