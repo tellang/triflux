@@ -2,6 +2,12 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.57.0] - 2026-10-10
+
+### Changed
+- mods: `position: above`(기본) band 가 statusLine HUD 의 c, x, a 행을 모두 입력창 위에 그린다. 세션 시작, 응답 끝, 1분 주기에만 HUD 를 `--band` 로 한 번 돌리고 ANSI 색을 그대로 옮긴다. band 가 그리는 세션에서 statusLine 은 비고, band 가 3분 넘게 멈추면 다시 그린다 (#723)
+- hud: `--band` 는 mods 가 넘긴 세션 rate limit 으로 c 행을 그리고 Claude 사용량 API 조회를 건너뛴다. gateway 세션의 `spend_limit` 은 `$:` 로 그린다 (#723)
+
 ## [10.56.0] - 2026-10-10
 
 ### Changed

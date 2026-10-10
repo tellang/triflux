@@ -1,6 +1,6 @@
 {
   "name": "triflux-mods",
-  "version": "10.56.0",
+  "version": "10.57.0",
   "description": "triflux 의 Claude Code mods: HUD band 와 서브에이전트 effort 정책",
   "author": {
     "name": "tellang"
@@ -12,7 +12,10 @@
       "title": "HUD 표시 위치",
       "description": "above: 입력창 위 band 에 c, x, a 행을 그린다. statusline: 입력창 아래 statusLine HUD 가 그린다",
       "default": "above",
-      "options": ["above", "statusline"]
+      "options": [
+        "above",
+        "statusline"
+      ]
     }
   }
 }
