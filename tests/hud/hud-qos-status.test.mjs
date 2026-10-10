@@ -305,3 +305,23 @@ describe("HUD provider visibility", () => {
     assert.match(codexLoggedIn.replace(/\x1b\[[0-9;]*m/g, ""), /^x:.*--%/m);
   });
 });
+
+describe("HUD statusLine sh 래퍼", {
+  skip: process.platform === "win32",
+}, () => {
+  it("band 가 그리는 세션에서만 HUD 를 건너뛴다", () => {
+    const wrapper = join(dirname(hudScriptPath), "hud-statusline.sh");
+    const marker = join(cacheDir, "triflux", "claude-band", "wrap-session");
+    mkdirSync(dirname(marker), { recursive: true });
+    const run = () =>
+      spawnSync("sh", [wrapper, process.execPath], {
+        input: JSON.stringify({ session_id: "wrap-session" }),
+        env: { ...process.env, HOME: mockHomeDir, COLUMNS: "120" },
+        encoding: "utf8",
+      }).stdout.replace(/\x1b\[[0-9;]*m/g, "");
+    writeFileSync(marker, "all:1");
+    assert.equal(run().trim(), "");
+    writeFileSync(marker, "off");
+    assert.match(run(), /^c:/m);
+  });
+});

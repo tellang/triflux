@@ -676,7 +676,7 @@ function installEntries(pluginRoot) {
     "scripts/codex-profile-sanitize.mjs",
     // tfx-route.sh 가 $sd/lib 에서 찾는다.
     ...listFiles(pluginRoot, "scripts/lib", [".mjs", ".sh"]),
-    ...listFiles(pluginRoot, "hud", [".mjs"]),
+    ...listFiles(pluginRoot, "hud", [".mjs", ".sh"]),
   ];
 }
 
@@ -1689,59 +1689,55 @@ export function persistSettings(settings, settingsPath = SETTINGS_PATH) {
   }
 }
 
-// triflux mods band 가 HUD 행을 입력창 위에 모두 그리면 statusLine 은 필요 없다(mods/triflux/hooks/hud-band.tsx).
-// 켜짐 설정만 남고 플러그인이 지워졌거나 훅이 꺼졌으면 band 가 안 돌아 HUD 가 통째로 사라지므로 등록한다.
-export function hudBandDrawsAllRows(settings, { claudeDir = CLAUDE_DIR } = {}) {
-  const plugin = "triflux-mods@triflux";
-  if (settings?.enabledPlugins?.[plugin] !== true) return false;
-  if (settings?.disableAllHooks === true) return false;
-  if (settings?.pluginConfigs?.[plugin]?.options?.position === "statusline")
-    return false;
-  let installed;
-  try {
-    installed = JSON.parse(
-      readFileSync(
-        join(claudeDir, "plugins", "installed_plugins.json"),
-        "utf8",
-      ),
-    )?.plugins?.[plugin];
-  } catch {
-    return false;
-  }
-  return (
-    Array.isArray(installed) &&
-    installed.some(
-      (entry) => entry?.installPath && existsSync(entry.installPath),
-    )
+const HUD_STATUSLINE_SCRIPT = "hud-statusline.sh";
+
+function commandTokens(command) {
+  return [
+    ...String(command || "").matchAll(/"([^"\n]+)"|'([^'\n]+)'|(\S+)/gu),
+  ].map((m) => m[1] ?? m[2] ?? m[3]);
+}
+
+// macOS/Linux 는 sh 래퍼로 돌려 mods band 가 그리는 세션에서 node 를 띄우지 않는다(hud/hud-statusline.sh).
+function buildStatusLineCommand(hudPath) {
+  const wrapper = join(dirname(hudPath), HUD_STATUSLINE_SCRIPT);
+  if (process.platform === "win32" || !existsSync(wrapper))
+    return buildNodeScriptCommand(hudPath);
+  const node = resolveStableNodeBin(process.execPath, { fallback: "node" });
+  return `sh ${quoteShellCommandArg(wrapper)} ${quoteShellCommandArg(node)}`;
+}
+
+// triflux 가 등록한 statusLine 인지: node <hud> 또는 sh <래퍼> <node>.
+function isTrifluxStatusLine(command, hudPath) {
+  const isNode = (bin) => /(?:^|[/\\])node(?:\.exe)?$/u.test(bin ?? "");
+  const tokens = commandTokens(command);
+  const hud = hudPath.replace(/\\/g, "/");
+  const wrapper = join(dirname(hudPath), HUD_STATUSLINE_SCRIPT).replace(
+    /\\/g,
+    "/",
   );
+  if (tokens.length === 2) return isNode(tokens[0]) && tokens[1] === hud;
+  if (tokens.length === 3)
+    return tokens[0] === "sh" && tokens[1] === wrapper && isNode(tokens[2]);
+  return false;
 }
 
 export function applyStatusLine(
   settings,
-  { hudPath = HUD_PATH, warn = console.warn, claudeDir = CLAUDE_DIR } = {},
+  { hudPath = HUD_PATH, warn = console.warn } = {},
 ) {
   if (!existsSync(hudPath)) return false;
   const current = settings.statusLine;
-  if (current == null && hudBandDrawsAllRows(settings, { claudeDir }))
-    return false;
-  const desiredCommand = buildNodeScriptCommand(hudPath);
+  const desiredCommand = buildStatusLineCommand(hudPath);
   if (current?.command === desiredCommand) return false;
-  if (current != null) {
-    const tokens = String(current.command || "").match(
-      /^(?:"([^"\n]+)"|'([^'\n]+)'|(\S+))\s+(?:"([^"\n]+)"|'([^'\n]+)'|(\S+))$/u,
+  if (
+    current != null &&
+    (current.type !== "command" ||
+      !isTrifluxStatusLine(current.command, hudPath))
+  ) {
+    warn(
+      "기존 statusLine 유지: Triflux HUD를 쓰려면 settings.json에서 직접 선택하세요.",
     );
-    const node = tokens?.[1] ?? tokens?.[2] ?? tokens?.[3] ?? "";
-    const script = tokens?.[4] ?? tokens?.[5] ?? tokens?.[6];
-    if (
-      current.type !== "command" ||
-      !/(?:^|[/\\])node(?:\.exe)?$/u.test(node) ||
-      script !== hudPath.replace(/\\/g, "/")
-    ) {
-      warn(
-        "기존 statusLine 유지: Triflux HUD를 쓰려면 settings.json에서 직접 선택하세요.",
-      );
-      return false;
-    }
+    return false;
   }
   settings.statusLine = {
     ...current,

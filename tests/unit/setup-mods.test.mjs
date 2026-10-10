@@ -215,31 +215,26 @@ test("doctor 판정은 읽기만 하고 상태와 두 버전을 돌려준다", (
   );
 });
 
-test("mods band 가 실제로 돌 때만 비어 있는 statusLine 을 등록하지 않는다", () => {
-  const hudPath = join(home, "hud-qos-status.mjs");
+test("statusLine 을 sh 래퍼로 등록하고 예전 node 명령도 triflux 것으로 알아본다", () => {
+  const hudDir = join(home, "hud");
+  mkdirSync(hudDir, { recursive: true });
+  const hudPath = join(hudDir, "hud-qos-status.mjs");
   writeFileSync(hudPath, "");
-  const claudeDir = join(home, "claude-band");
-  const opts = { hudPath, warn() {}, claudeDir };
-  const enabled = { enabledPlugins: { "triflux-mods@triflux": true } };
-  // 켜짐 설정만 있고 설치 기록이 없으면 등록한다.
-  assert.equal(applyStatusLine({ ...enabled }, opts), true);
-  mkdirSync(join(claudeDir, "plugins"), { recursive: true });
-  writeFileSync(
-    join(claudeDir, "plugins", "installed_plugins.json"),
-    JSON.stringify({
-      plugins: { "triflux-mods@triflux": [{ installPath: claudeDir }] },
-    }),
-  );
-  assert.equal(applyStatusLine({ ...enabled }, opts), false);
-  assert.equal(
-    applyStatusLine({ ...enabled, disableAllHooks: true }, opts),
-    true,
-  );
-  const statusline = {
-    ...enabled,
-    pluginConfigs: {
-      "triflux-mods@triflux": { options: { position: "statusline" } },
+  writeFileSync(join(hudDir, "hud-statusline.sh"), "");
+  const opts = { hudPath, warn() {} };
+  const fresh = {};
+  assert.equal(applyStatusLine(fresh, opts), true);
+  if (process.platform !== "win32")
+    assert.match(fresh.statusLine.command, /^sh \S*hud-statusline\.sh \S*node/);
+  const legacy = {
+    statusLine: {
+      type: "command",
+      command: `/opt/homebrew/bin/node ${hudPath}`,
     },
   };
-  assert.equal(applyStatusLine(statusline, opts), true);
+  assert.equal(applyStatusLine(legacy, opts), true);
+  assert.equal(legacy.statusLine.command, fresh.statusLine.command);
+  assert.equal(applyStatusLine(legacy, opts), false);
+  const custom = { statusLine: { type: "command", command: "my-status" } };
+  assert.equal(applyStatusLine(custom, opts), false);
 });
