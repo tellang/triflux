@@ -16,6 +16,7 @@
     "bin",
     "hub",
     "config",
+    ".claude/rules/tfx-routing.md",
     "skills",
     "!skills/tfx-workspace",
     "!**/failure-reports",

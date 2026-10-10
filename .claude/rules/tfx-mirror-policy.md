@@ -87,7 +87,7 @@ mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (�
 **mirror 제외**:
 - `tests/` (root + `packages/{core,remote}/tests/`) — npm files 에 없음. 만약 packages 쪽에 untracked tests 디렉토리가 만들어졌으면 그건 잘못된 mirror 시도다.
 - `references/codex-snapshots/`, `references/gemini-snapshots/` — packages/triflux files 부정 패턴 (`!references/codex-snapshots`) 으로 명시 제외.
-- `.tfx/`, `.omc/`, `.claude/`, `.gemini/`, `.codex/` — runtime / config 디렉토리.
+- `.tfx/`, `.omc/`, `.claude/`, `.gemini/`, `.codex/` — runtime / config 디렉토리. 예외: `.claude/rules/tfx-routing.md` 한 파일은 게시하고 packages/triflux 에 바이트 동일로 둔다. clone 이 없는 기기의 tfx-harness 가 setup 이 스킬 옆에 복사한 사본을 읽는다. 검사기는 `check-packages-mirror.mjs` 의 MIRROR_FILES 다.
 - `skills/tfx-workspace` — 사용자별 workspace, packages/triflux files 부정 패턴 (`!skills/tfx-workspace`).
 - `failure-reports/` (any depth) — 진단 산출물.
 

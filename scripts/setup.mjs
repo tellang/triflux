@@ -1241,6 +1241,19 @@ function syncCodexManagedSkills({
   }));
 }
 
+// tfx-harness 는 triflux clone 밖에서도 호출된다. clone 이 없는 기기에서도 라우팅 문서를
+// 읽도록 패키지에 든 사본을 설치된 스킬 옆에 둔다. ~/.claude/rules 는 모든 세션이 자동
+// 로드하므로 쓰지 않는다.
+function installRoutingSsot(pluginRoot, skillDir) {
+  const src = join(pluginRoot, ".claude", "rules", "tfx-routing.md");
+  const dst = join(skillDir, "references", "tfx-routing.md");
+  if (!existsSync(src) || !existsSync(join(skillDir, "SKILL.md"))) return false;
+  if (!shouldSyncTextFile(src, dst)) return false;
+  mkdirSync(dirname(dst), { recursive: true });
+  copyFileSync(src, dst);
+  return true;
+}
+
 export function syncSkills({
   pluginRoot = PLUGIN_ROOT,
   claudeDir = CLAUDE_DIR,
@@ -1293,6 +1306,12 @@ export function syncSkills({
     } else if (skill.action === "skipped")
       result.warnings.push(`Codex ${skill.name}: 사용자 스킬 보존`);
   }
+  const harnessDirs = [join(destination, "tfx-harness")];
+  const codexHarness = join(codexDir, "skills", "tfx-harness");
+  if (existsSync(join(codexHarness, MANAGED_CODEX_SKILL_MARKER)))
+    harnessDirs.push(codexHarness);
+  for (const dir of harnessDirs)
+    if (installRoutingSsot(pluginRoot, dir)) result.changed++;
   return result;
 }
 
