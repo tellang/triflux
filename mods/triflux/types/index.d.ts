@@ -1,13 +1,10 @@
-export type UsageWindow = { kind: string; percentUsed: number; resetsAt?: string }
+export type BandSpan = { text: string; color?: string; bold?: boolean; dim?: boolean }
 
-export type UsageSnapshot = {
-  windows: UsageWindow[]
-  contextPercent: number | null
-  costUsd: number | null
-}
+// statusLine HUD 가 --band 로 그린 줄들. columns 는 그때 넘긴 폭이다.
+export type BandRows = { columns: number; lines: BandSpan[][] }
 
 declare module 'claude-code' {
   interface PluginState {
-    'triflux-mods': { usage: UsageSnapshot | null }
+    'triflux-mods': { rows: BandRows | null }
   }
 }

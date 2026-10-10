@@ -1,20 +1,15 @@
 import { expect, test } from 'claude-code/testing'
 
-import { formatRemaining, gaugeParts, selectTier } from '../hooks/hud-band.tsx'
+import { parseAnsi } from '../hooks/hud-band.tsx'
 
-test('막대와 남은 시간을 statusLine HUD 의 Claude 행과 같은 모양으로 만든다', async () => {
-  expect(gaugeParts(19)).toEqual(['▓', '░░░░'])
-  expect(gaugeParts(82)).toEqual(['████░', ''])
-  const now = Date.parse('2026-10-09T00:00:00Z')
-  expect(formatRemaining('five_hour', '2026-10-09T01:37:30Z', now)).toBe('(01h37m)')
-  expect(formatRemaining('seven_day', '2026-10-11T10:05:00Z', now)).toBe('(02d10h)')
-  expect(formatRemaining('seven_day', undefined, now)).toBe('(--d--h)')
-})
-
-test('폭 단계를 statusLine HUD 의 selectTier 와 같은 기준으로 고른다', async () => {
-  const none = { config: null }
-  expect([130, 100, 70, 50, 30].map(c => selectTier(c, none))).toEqual(['full', 'compact', 'compact', 'micro', 'nano'])
-  expect(selectTier(50, { config: { tier: 'full' } })).toBe('full')
-  expect(selectTier(130, { config: null, compactEnv: '1' })).toBe('compact')
-  expect(selectTier(130, { config: { compact: 'always' }, compactEnv: '0' })).toBe('full')
+test('HUD 의 ANSI 색 코드를 Text 조각으로 바꾼다', async () => {
+  const line = '\x1b[0m\x1b[1m\x1b[38;2;232;112;64mc\x1b[0m: \x1b[2m5h:\x1b[0m\x1b[33m 83%\x1b[0m \x1b[38;5;39mGCP\x1b[0m'
+  expect(parseAnsi(line)).toEqual([
+    { text: 'c', bold: true, color: '#e87040' },
+    { text: ': ' },
+    { text: '5h:', dim: true },
+    { text: ' 83%', color: 'yellow' },
+    { text: ' ' },
+    { text: 'GCP', color: '#00afff' },
+  ])
 })

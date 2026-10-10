@@ -23,18 +23,22 @@ after(() => {
   if (mockHomeDir) rmSync(mockHomeDir, { recursive: true, force: true });
 });
 
-function runHud(extraEnv = {}, { preserveAnsi = false } = {}) {
+function runHud(
+  extraEnv = {},
+  { preserveAnsi = false, args = [], input = {} } = {},
+) {
   for (const name of ["claude", "codex", "antigravity"]) {
     writeFileSync(
       join(cacheDir, `.${name}-refresh-lock`),
       JSON.stringify({ t: Date.now() }),
     );
   }
-  const result = spawnSync(process.execPath, [hudScriptPath], {
+  const result = spawnSync(process.execPath, [hudScriptPath, ...args], {
     cwd: mockHomeDir,
     input: JSON.stringify({
       session_id: "hud-test-session",
       context_window: { used_percentage: 25, context_window_size: 200000 },
+      ...input,
     }),
     env: {
       ...process.env,
@@ -76,6 +80,20 @@ describe("HUD provider visibility", () => {
       assert.match(bandOutput, /^x:/m);
       writeFileSync(marker, "off");
       assert.match(runHud({ TFX_DISABLE_CODEX: "0" }), /^c:/m);
+      writeFileSync(marker, "all:1");
+      assert.equal(runHud({ TFX_DISABLE_CODEX: "0" }).trim(), "");
+      // band 가 돌리는 HUD 는 표식과 상관없이 c 행을 mods 가 넘긴 사용량으로 그린다.
+      const bandRows = runHud(
+        { TFX_DISABLE_CODEX: "0" },
+        {
+          args: ["--band"],
+          input: {
+            claude_rate_limits: [{ kind: "seven_day", percentUsed: 42.4 }],
+          },
+        },
+      );
+      assert.match(bandRows, /^c:.*1w:.*42%/);
+      assert.match(bandRows, /^x:/m);
     } finally {
       rmSync(marker);
     }
