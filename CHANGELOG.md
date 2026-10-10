@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.57.3] - 2026-10-11
+
+### Fixed
+- update: triflux-mods 플러그인이 깔린 기기에서 `tfx update` 가 npm global 설치를 플러그인 설치로 오판해 git 저장소가 아닌 mods 캐시에서 `git pull` 하다 실패하던 문제. 플러그인 키의 이름이 정확히 `triflux` 일 때만 플러그인 설치로 본다 (#728)
+
 ## [10.57.2] - 2026-10-10
 
 ### Fixed
