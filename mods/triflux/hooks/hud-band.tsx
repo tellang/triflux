@@ -1,207 +1,181 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
 
-import type { UsageSnapshot } from '../types'
+import type { BandRows, BandSpan } from '../types'
 
-const usage = atom({ plugin: 'triflux-mods', key: 'usage' } as const, null)
+const rows = atom({ plugin: 'triflux-mods', key: 'rows' } as const, null)
 
-// statusLine HUD(hud/renderers.mjs 의 Claude 행)와 같은 모양으로 그린다.
-const CLAUDE_ORANGE = '#E87040'
-const GAUGE_WIDTH = 5
-const WINDOW_LABEL: Record<string, string> = { five_hour: '5h', seven_day: '1w', spend_limit: '$' }
-
-// 'statusline' 이면 band 를 그리지 않고 statusLine HUD 가 입력창 아래에서 Claude 행을 그린다.
+// 'above' 는 statusLine HUD 의 c, x, a 행을 입력창 위 band 에 그리고, 'statusline' 은 statusLine 에 맡긴다.
 export type BandPosition = 'above' | 'statusline'
+
+const REFRESH_MS = 60_000
+const HUD_TIMEOUT_MS = 5_000
+// hud/constants.mjs BAND_HEADER. 10.56.0 이하 HUD 는 --band 를 몰라 이 줄이 없다.
+const BAND_HEADER = 'tfx-band 1'
+const NODE_CANDIDATES = ['node', '/opt/homebrew/bin/node', '/usr/local/bin/node']
+const NAMED_COLORS: Record<number, string> = {
+  30: 'black', 31: 'red', 32: 'green', 33: 'yellow', 34: 'blue', 35: 'magenta', 36: 'cyan', 37: 'white',
+  90: 'gray', 91: 'redBright', 92: 'greenBright', 93: 'yellowBright', 94: 'blueBright', 95: 'magentaBright',
+  96: 'cyanBright', 97: 'whiteBright',
+}
+
+function hex(r: number, g: number, b: number) {
+  return `#${[r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')}`
+}
+
+function xterm256(n: number) {
+  if (n < 16) return NAMED_COLORS[n < 8 ? 30 + n : 82 + n]
+  if (n >= 232) return hex(8 + 10 * (n - 232), 8 + 10 * (n - 232), 8 + 10 * (n - 232))
+  const level = (v: number) => (v ? 55 + v * 40 : 0)
+  const i = n - 16
+  return hex(level(Math.floor(i / 36)), level(Math.floor(i / 6) % 6), level(i % 6))
+}
+
+function applySgr(style: Omit<BandSpan, 'text'>, params: string) {
+  const codes = params === '' ? [0] : params.split(';').map(Number)
+  let next = { ...style }
+  for (let i = 0; i < codes.length; i++) {
+    const code = codes[i]
+    if (code === 0) next = {}
+    else if (code === 1) next.bold = true
+    else if (code === 2) next.dim = true
+    else if (code === 22) next = { ...next, bold: false, dim: false }
+    else if (code === 39) next.color = undefined
+    else if (code === 38 && codes[i + 1] === 2) {
+      next.color = hex(codes[i + 2] ?? 0, codes[i + 3] ?? 0, codes[i + 4] ?? 0)
+      i += 4
+    } else if (code === 38 && codes[i + 1] === 5) {
+      next.color = xterm256(codes[i + 2] ?? 0)
+      i += 2
+    } else if (code !== undefined && NAMED_COLORS[code]) next.color = NAMED_COLORS[code]
+  }
+  return next
+}
+
+// HUD 의 ANSI 색 코드를 Text 조각으로 바꾼다. HUD 가 쓰는 SGR(굵게, 흐리게, 16/256/트루컬러)만 다룬다.
+export function parseAnsi(line: string): BandSpan[] {
+  const spans: BandSpan[] = []
+  const pattern = /\x1b\[([0-9;]*)m/g
+  let style: Omit<BandSpan, 'text'> = {}
+  let last = 0
+  for (let match = pattern.exec(line); match; match = pattern.exec(line)) {
+    if (match.index > last) spans.push({ text: line.slice(last, match.index), ...style })
+    style = applySgr(style, match[1] ?? '')
+    last = pattern.lastIndex
+  }
+  if (last < line.length) spans.push({ text: line.slice(last), ...style })
+  return spans
+}
 
 // statusLine 은 os.homedir() 를 쓴다. Windows 에는 HOME 이 없을 수 있다.
 async function homeDir($: EngineInterface) {
   return (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'))
 }
 
-// 선택 기능이라 실패를 삼킨다. hook 오류가 쌓이면 mod 전체가 꺼진다.
-async function refreshUsage($: EngineInterface, position: BandPosition) {
-  try {
-    const { rateLimits, context, cost } = await $.session.usage()
-    const snapshot: UsageSnapshot = {
-      // 그릴 수 있는 창만 남겨야 band 표시와 HUD 표식이 같은 조건을 본다.
-      windows: rateLimits
-        .filter(({ kind }) => WINDOW_LABEL[kind])
-        .map(({ kind, percentUsed, resetsAt }) => ({ kind, percentUsed, resetsAt })),
-      contextPercent: context.percent ?? null,
-      costUsd: cost?.usd ?? null,
+// 실행 파일이 없을 때만 다음 node 를 시도한다. 시작한 뒤 멎었으면 같은 HUD 를 다시 돌려도 멎는다.
+async function runHud($: EngineInterface, hudPath: string, stdin: string, columns: number) {
+  for (const node of NODE_CANDIDATES) {
+    const startedAt = await $.clock.now()
+    try {
+      return await $.process.run([node, hudPath, '--band'], {
+        stdin,
+        env: { COLUMNS: String(columns) },
+        timeoutMs: HUD_TIMEOUT_MS,
+      })
+    } catch {
+      if ((await $.clock.now()) - startedAt >= HUD_TIMEOUT_MS) return null
     }
-    await update($, usage, () => snapshot)
-    // 표식이 "off" 가 아니고 신선할 때만 statusLine HUD 가 Claude 행을 뺀다(hud/hud-qos-status.mjs).
-    // statusline 은 사용량이 아직 없어도 off 를 써야 같은 세션의 이전 above 표식이 c 행을 숨기지 않는다.
-    const home = await homeDir($)
-    const marker = position === 'statusline' ? 'off' : snapshot.windows.length > 0 ? String(await $.clock.now()) : null
-    if (home && marker) await $.fs.write(`${home}/.claude/cache/triflux/claude-band/${await $.session.id()}`, marker)
+  }
+  return null
+}
+
+async function writeMarker($: EngineInterface, marker: string, content: string) {
+  try {
+    await $.fs.write(marker, content)
   } catch {}
 }
 
-export type HudTier = 'full' | 'compact' | 'minimal' | 'micro' | 'nano'
-export type HudConfig = {
-  tier?: string
-  lines?: number | string
-  compact?: boolean | string
-  autoResize?: boolean
-  compactThreshold?: number | string
-}
-type TierInput = { config: HudConfig | null; compactEnv?: string; minimalEnv?: string; termux?: boolean }
-
-const TIERS: readonly string[] = ['full', 'compact', 'minimal', 'micro', 'nano']
-
-// hud/terminal.mjs selectTier, detectCompactMode, detectMinimalMode 를 옮긴 것이다. 같은 설정에서 같은 단계를 골라야 한다.
-export function selectTier(columns: number, input: TierInput): HudTier {
-  const { config, minimalEnv } = input
-  if (config?.tier && TIERS.includes(config.tier)) return config.tier as HudTier
-  const lines = Number(config?.lines)
-  if (lines === 1 || columns < 40) return 'nano'
-  const minimal = minimalEnv === '1' || (minimalEnv !== '0' && (config?.compact === 'minimal' || columns < 60))
-  if (minimal) return 'micro'
-  if (compactModeOn(columns, lines, input)) return 'compact'
-  if (config?.autoResize === false) return 'full'
-  return columns >= 120 ? 'full' : columns >= 80 ? 'compact' : columns >= 60 ? 'minimal' : 'micro'
-}
-
-// Termux, 환경변수, 설정 파일, 폭 순서. detectCompactMode 와 우선순위가 같아야 한다.
-function compactModeOn(columns: number, lines: number, { config, compactEnv, termux }: TierInput) {
-  if (termux) return true
-  if (compactEnv === '1') return true
-  if (compactEnv === '0') return false
-  if (config?.compact === true || config?.compact === 'always') return true
-  if (config?.compact === false || config?.compact === 'never') return false
-  return (lines > 0 && lines < 3) || columns < (Number(config?.compactThreshold) || 80)
-}
-
-// 설정 파일이 없거나 깨졌으면 설정 없이 폭으로만 고른다.
-async function readTierInput($: EngineInterface): Promise<TierInput> {
+// 선택 기능이라 실패를 삼킨다. hook 오류가 쌓이면 mod 전체가 꺼진다.
+// 표식이 "all:" 이면 statusLine HUD 가 아무것도 그리지 않고, "off" 면 다 그린다(hud/hud-qos-status.mjs).
+async function refreshRows($: EngineInterface, position: BandPosition, columns: number) {
   try {
-    const [home, compactEnv, minimalEnv, termuxVersion] = await Promise.all([
-      homeDir($),
-      $.env.get('OMC_HUD_COMPACT'),
-      $.env.get('OMC_HUD_MINIMAL'),
-      $.env.get('TERMUX_VERSION'),
-    ])
-    let config: HudConfig | null = null
-    try {
-      config = JSON.parse(String(await $.fs.read(`${home}/.omc/config/hud.json`)))
-    } catch {}
-    return { config, compactEnv, minimalEnv, termux: Boolean(termuxVersion) }
+    const home = await homeDir($)
+    if (!home) return
+    const sessionId = await $.session.id()
+    const marker = `${home}/.claude/cache/triflux/claude-band/${sessionId}`
+    if (position === 'statusline') {
+      await writeMarker($, marker, 'off')
+      return
+    }
+    const { rateLimits, context } = await $.session.usage()
+    const stdin = JSON.stringify({
+      session_id: sessionId,
+      context_window: {
+        context_window_size: context.window,
+        used_percentage: context.percent,
+        current_usage: { total_tokens: context.tokens },
+      },
+      claude_rate_limits: rateLimits,
+    })
+    // TFX_HUD_PATH 는 설치본 대신 저장소의 HUD 를 돌려 볼 때 쓴다.
+    const hudPath = (await $.env.get('TFX_HUD_PATH')) || `${home}/.claude/hud/hud-qos-status.mjs`
+    const result = await runHud($, hudPath, stdin, columns)
+    const [header, ...body] = (result?.exitCode === 0 ? result.stdout : '').split('\n')
+    const lines = header === BAND_HEADER ? body.map(parseAnsi).filter(spans => spans.some(s => s.text.trim())) : []
+    // HUD 를 못 돌리거나 --band 를 모르면 band 를 비우고 statusLine 이 그리게 둔다.
+    const snapshot: BandRows | null = lines.length > 0 ? { columns, lines } : null
+    await update($, rows, () => snapshot)
+    await writeMarker($, marker, snapshot ? `all:${await $.clock.now()}` : 'off')
   } catch {
-    return { config: null }
+    // 이전 all 표식이 남으면 band 도 statusLine 도 비게 된다.
+    try {
+      await update($, rows, () => null)
+      const home = await homeDir($)
+      if (home) await writeMarker($, `${home}/.claude/cache/triflux/claude-band/${await $.session.id()}`, 'off')
+    } catch {}
   }
-}
-
-export function formatRemaining(kind: string, resetsAt: string | undefined, now: number) {
-  const dayHour = kind !== 'five_hour'
-  if (!resetsAt) return dayHour ? '(--d--h)' : '(--h--m)'
-  const minutes = Math.max(0, Math.floor((Date.parse(resetsAt) - now) / 60000))
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return dayHour
-    ? `(${pad(Math.floor(minutes / 1440))}d${pad(Math.floor((minutes % 1440) / 60))}h)`
-    : `(${pad(Math.floor(minutes / 60))}h${pad(minutes % 60)}m)`
-}
-
-function quotaColor(percent: number) {
-  return percent >= 85 ? 'red' : percent >= 70 ? 'yellow' : CLAUDE_ORANGE
-}
-
-function contextColor(percent: number) {
-  return percent >= 85 ? 'red' : percent >= 70 ? 'yellow' : percent >= 50 ? 'cyan' : 'green'
-}
-
-// hud/colors.mjs coloredBar 와 같은 블록 규칙. [채운 부분, 빈 부분]
-export function gaugeParts(percent: number): [string, string] {
-  const safe = Math.min(100, Math.max(0, percent))
-  const perBlock = 100 / GAUGE_WIDTH
-  let bar = ''
-  for (let i = 0; i < GAUGE_WIDTH; i++) {
-    const progress = (safe - i * perBlock) / perBlock
-    bar += progress >= 1 ? '█' : progress >= 0.75 ? '▓' : progress >= 0.33 ? '▒' : '░'
-  }
-  const filled = Math.ceil(safe / perBlock)
-  return [bar.slice(0, filled), bar.slice(filled)]
 }
 
 export function registerHudBand(on: On, options: PluginOptions) {
   const position: BandPosition = options.position === 'statusline' ? 'statusline' : 'above'
-  let tierInput: TierInput = { config: null }
+  // 다음 갱신 때 HUD 에 넘길 터미널 폭. band 를 그릴 때마다 맞춘다.
+  let columns = 120
 
-  // HUD 설정은 statusLine 이 매번 읽으므로 band 도 갱신 때마다 다시 읽는다.
   on('session.start', async ($, e, next) => {
-    tierInput = await readTierInput($)
-    await refreshUsage($, position)
+    await refreshRows($, position, columns)
+    // 남은 시간 표시와 Codex, Antigravity 캐시 갱신을 응답 없이도 따라간다.
+    if (position === 'above') $.clock.every(REFRESH_MS, () => refreshRows($, position, columns))
     return next(e)
   })
 
-  // 응답이 끝날 때마다 rate limit 과 비용이 바뀐다.
+  // 응답이 끝날 때마다 rate limit 과 context 가 바뀐다.
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
-    tierInput = await readTierInput($)
-    await refreshUsage($, position)
+    await refreshRows($, position, columns)
     return result
   })
 
   if (position === 'statusline') return
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const snapshot = await read($, usage)
-    if (e.props.hasSurvey || !snapshot || snapshot.windows.length === 0) return next(e)
+    // bodyColumns 는 오른쪽 5칸을 뺀 폭이라 HUD 가 보는 터미널 폭으로 되돌린다.
+    columns = e.props.bodyColumns + 5
+    const snapshot = await read($, rows)
+    if (e.props.hasSurvey || !snapshot) return next(e)
 
     const { Box, Text } = $.ui.resolve(e)
-    const now = await $.clock.now()
-    const width = e.props.bodyColumns
-    // bodyColumns 는 오른쪽 5칸을 뺀 폭이라 HUD 와 같은 터미널 폭으로 되돌려 단계를 고른다.
-    const tier = selectTier(width + 5, tierInput)
-    type Part = { text: string; color?: string; dim?: boolean; bold?: boolean }
-    const prefix: Part[] = [{ text: '  ' }, { text: 'c', color: CLAUDE_ORANGE, bold: true }, { text: ': ' }]
-
-    // hud/renderers.mjs getClaudeRows 의 micro, nano 행: 퍼센트만 / 로 잇는다.
-    const microParts = snapshot.windows.flatMap((w, i): Part[] => [
-      ...(i > 0 ? [{ text: '/', dim: true }] : []),
-      { text: `${Math.round(w.percentUsed)}%`, color: quotaColor(w.percentUsed) },
-    ])
-
-    const windowParts = snapshot.windows.flatMap((w, i): Part[] => {
-      const color = quotaColor(w.percentUsed)
-      const [filled, empty] = gaugeParts(w.percentUsed)
-      const parts: Part[] = [{ text: `${i > 0 ? ' ' : ''}${WINDOW_LABEL[w.kind]}:`, dim: true }]
-      if (tier === 'full') parts.push({ text: filled, color }, { text: `${empty} `, dim: true })
-      parts.push({ text: `${Math.round(w.percentUsed)}%`.padStart(4), color })
-      if (tier !== 'minimal') parts.push({ text: ` ${formatRemaining(w.kind, w.resetsAt, now)}`, dim: true })
-      return parts
-    })
-    const ctx = snapshot.contextPercent
-    const contextParts: Part[] = [
-      { text: ' | CTX:', dim: true },
-      ctx === null ? { text: '--%', dim: true } : { text: `${ctx}%`, color: contextColor(ctx) },
-    ]
-    const costParts: Part[] = snapshot.costUsd === null ? [] : [{ text: ` $${snapshot.costUsd.toFixed(2)}`, dim: true }]
-
-    // 한 줄에 안 들어가면 비용부터 빼고, 그래도 넘치면 micro 행으로 줄이고, 그것도 넘치면 끝을 자른다.
-    // 생략하면 표식 때문에 HUD 의 c 행까지 숨어서 둘 다 사라진다.
-    const fits = (parts: Part[]) => parts.reduce((n, p) => n + p.text.length, 0) <= width
-    const microRow = [...prefix, ...microParts]
-    const wideRows =
-      tier === 'micro' || tier === 'nano'
-        ? []
-        : [
-            [...prefix, ...windowParts, ...contextParts, ...costParts],
-            [...prefix, ...windowParts, ...contextParts],
-          ]
-    const parts = wideRows.find(fits) ?? microRow
-
-    // Fragment 로 묶으면 Text 가 세로로 쌓여서 바깥 Text 하나에 넣고 한 줄로 자른다.
+    // statusLine 처럼 두 칸 들여 쓰고, 폭이 줄면 다음 갱신 전까지 끝을 자른다.
     return (
-      <Box>
-        <Text wrap="truncate-end">
-          {parts.map(p => (
-            <Text color={p.color} dimColor={p.dim} bold={p.bold}>
-              {p.text}
-            </Text>
-          ))}
-        </Text>
+      <Box flexDirection="column">
+        {snapshot.lines.map(spans => (
+          <Text wrap="truncate-end">
+            {[{ text: '  ' }, ...spans].map(s => (
+              <Text color={s.color} bold={s.bold} dimColor={s.dim}>
+                {s.text}
+              </Text>
+            ))}
+          </Text>
+        ))}
       </Box>
     )
   })

@@ -15,6 +15,9 @@ import {
 } from "./colors.mjs";
 import {
   ANTIGRAVITY_REFRESH_FLAG,
+  BAND_ALL_TTL_MS,
+  BAND_FLAG,
+  BAND_HEADER,
   CLAUDE_BAND_MARKER_DIR,
   CLAUDE_BAND_MARKER_TTL_MS,
   CLAUDE_REFRESH_FLAG,
@@ -64,7 +67,14 @@ async function main() {
     return;
   }
 
-  const stdinPromise = readStdinJson();
+  // --band: triflux mods 가 입력창 위에 그릴 줄을 만든다. statusLine 은 band 가 다 그리는 세션에서 비운다.
+  const bandMode = process.argv.includes(BAND_FLAG);
+  const stdin = await readStdinJson();
+  const bandState = bandMode ? "none" : readBandState(stdin?.session_id);
+  if (bandState === "all") return;
+  // mods 가 넘긴 세션 사용량이 있으면 Claude API 를 따로 조회하지 않는다.
+  const bandClaudeUsage = claudeUsageFromRateLimits(stdin?.claude_rate_limits);
+
   const { showCodex, antigravityAllowed } = resolveHudCliVisibility();
   const claudeUsageSnapshot = readClaudeUsageSnapshot();
   const codexSnapshot = readCodexRateLimitSnapshot();
@@ -74,6 +84,7 @@ async function main() {
   if (antigravitySnapshot?.shouldRefresh) scheduleAntigravityQuotaRefresh();
   // 설정이 없는 홈에서는 갱신 프로세스를 시작하지 않는다.
   if (
+    !bandClaudeUsage &&
     claudeUsageSnapshot.shouldRefresh &&
     existsSync(join(homedir(), ".claude"))
   ) {
@@ -83,11 +94,12 @@ async function main() {
     scheduleCodexRateLimitRefresh();
   }
 
-  const stdin = await stdinPromise;
   const contextView = buildContextUsageView(stdin);
-  const claudeUsage = claudeUsageSnapshot.data
-    ? { ...claudeUsageSnapshot.data, stale: claudeUsageSnapshot.isStale }
-    : null;
+  const claudeUsage =
+    bandClaudeUsage ??
+    (claudeUsageSnapshot.data
+      ? { ...claudeUsageSnapshot.data, stale: claudeUsageSnapshot.isStale }
+      : null);
   const codexBuckets = codexSnapshot.buckets;
   const antigravityQuota = antigravityAllowed
     ? { ...antigravitySnapshot?.data, auth: getAntigravityAuthKind() }
@@ -103,13 +115,15 @@ async function main() {
       showAntigravity: antigravityAllowed,
       antigravityQuota,
     });
-    process.stdout.write(`\x1b[0m${microLine}\n`);
+    const header = bandMode ? `${BAND_HEADER}\n` : "";
+    process.stdout.write(`${header}\x1b[0m${microLine}\n`);
     return;
   }
 
-  const rows = isClaudeBandActive(stdin?.session_id)
-    ? []
-    : getClaudeRows(currentTier, contextView, claudeUsage);
+  const rows =
+    bandState === "claude"
+      ? []
+      : getClaudeRows(currentTier, contextView, claudeUsage);
   let codexRowIndex = -1;
   if (showCodex) {
     codexRowIndex = rows.length;
@@ -141,10 +155,16 @@ async function main() {
   if (outputLines[codexRowIndex] != null && codexLoggedOut) {
     outputLines[codexRowIndex] = `${DIM}${outputLines[codexRowIndex]}${RESET}`;
   }
-  // 알림 배너와 TUI 스타일이 HUD 내용에 겹치지 않도록 한다.
-  const leadingBreaks = contextView.percent >= 85 ? "\n\n" : "\n";
+  // 알림 배너와 TUI 스타일이 HUD 내용에 겹치지 않도록 한다. band 는 자기 자리에 그리니 띄우지 않는다.
+  const leadingBreaks = bandMode
+    ? ""
+    : contextView.percent >= 85
+      ? "\n\n"
+      : "\n";
   const resetLines = outputLines.map((line) => `\x1b[0m${line}`);
-  process.stdout.write(`${leadingBreaks}${resetLines.join("\n")}\n`);
+  // band 는 첫 줄 표지로 이 HUD 가 --band 를 아는지 확인한다.
+  const header = bandMode ? `${BAND_HEADER}\n` : "";
+  process.stdout.write(`${header}${leadingBreaks}${resetLines.join("\n")}\n`);
 }
 
 main().catch(() => {
@@ -153,15 +173,39 @@ main().catch(() => {
   );
 });
 
-// 프롬프트 위 band가 같은 정보를 그리는 세션에서는 Claude 행을 생략한다.
-function isClaudeBandActive(sessionId) {
-  if (!sessionId) return false;
+// 입력창 위 band 가 무엇을 그리는지: "all" 은 모든 행, "claude" 는 c 행만(10.56.0 mods), "none" 은 없음.
+// band 위치를 statusline 으로 고른 세션은 표식에 "off" 를 쓴다.
+function readBandState(sessionId) {
+  if (!sessionId) return "none";
   try {
     const marker = join(CLAUDE_BAND_MARKER_DIR, sessionId);
-    // band 위치를 statusline 으로 고른 세션은 표식에 "off" 를 쓴다.
-    if (readFileSync(marker, "utf8").trim() === "off") return false;
-    return Date.now() - statSync(marker).mtimeMs < CLAUDE_BAND_MARKER_TTL_MS;
+    const content = readFileSync(marker, "utf8").trim();
+    if (content === "off") return "none";
+    const age = Date.now() - statSync(marker).mtimeMs;
+    // all 표식은 band 가 1분마다 다시 쓴다. band 가 멈추면 짧게 끊어 statusLine 이 다시 그린다.
+    if (content.startsWith("all:"))
+      return age < BAND_ALL_TTL_MS ? "all" : "none";
+    return age < CLAUDE_BAND_MARKER_TTL_MS ? "claude" : "none";
   } catch {
-    return false;
+    return "none";
   }
+}
+
+// mods 의 $.session.usage() rateLimits 를 HUD 의 Claude 사용량 형식으로 바꾼다.
+function claudeUsageFromRateLimits(rateLimits) {
+  if (!Array.isArray(rateLimits)) return null;
+  const find = (kind) => rateLimits.find((w) => w?.kind === kind);
+  const fiveHour = find("five_hour");
+  const weekly = find("seven_day");
+  const spendLimit = find("spend_limit");
+  if (!fiveHour && !weekly && !spendLimit) return null;
+  const percent = (w) =>
+    Number.isFinite(w?.percentUsed) ? Math.round(w.percentUsed) : null;
+  return {
+    fiveHourPercent: percent(fiveHour),
+    weeklyPercent: percent(weekly),
+    fiveHourResetsAt: fiveHour?.resetsAt || null,
+    weeklyResetsAt: weekly?.resetsAt || null,
+    spendLimitPercent: percent(spendLimit),
+  };
 }

@@ -14,6 +14,9 @@ export const CLAUDE_BAND_MARKER_DIR = join(
   "triflux",
   "claude-band",
 );
+export const BAND_FLAG = "--band";
+export const BAND_HEADER = "tfx-band 1";
+export const BAND_ALL_TTL_MS = 3 * 60 * 1000;
 export const CLAUDE_BAND_MARKER_TTL_MS = 12 * 60 * 60 * 1000;
 
 export const CONTEXT_MONITOR_CACHE_PATH = join(

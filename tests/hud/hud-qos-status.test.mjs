@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -23,18 +29,22 @@ after(() => {
   if (mockHomeDir) rmSync(mockHomeDir, { recursive: true, force: true });
 });
 
-function runHud(extraEnv = {}, { preserveAnsi = false } = {}) {
+function runHud(
+  extraEnv = {},
+  { preserveAnsi = false, args = [], input = {} } = {},
+) {
   for (const name of ["claude", "codex", "antigravity"]) {
     writeFileSync(
       join(cacheDir, `.${name}-refresh-lock`),
       JSON.stringify({ t: Date.now() }),
     );
   }
-  const result = spawnSync(process.execPath, [hudScriptPath], {
+  const result = spawnSync(process.execPath, [hudScriptPath, ...args], {
     cwd: mockHomeDir,
     input: JSON.stringify({
       session_id: "hud-test-session",
       context_window: { used_percentage: 25, context_window_size: 200000 },
+      ...input,
     }),
     env: {
       ...process.env,
@@ -75,6 +85,34 @@ describe("HUD provider visibility", () => {
       assert.doesNotMatch(bandOutput, /^c:/m);
       assert.match(bandOutput, /^x:/m);
       writeFileSync(marker, "off");
+      assert.match(runHud({ TFX_DISABLE_CODEX: "0" }), /^c:/m);
+      writeFileSync(marker, "all:1");
+      assert.equal(runHud({ TFX_DISABLE_CODEX: "0" }).trim(), "");
+      // band 가 돌리는 HUD 는 표식과 상관없이 c 행을 mods 가 넘긴 사용량으로 그린다.
+      const bandRows = runHud(
+        { TFX_DISABLE_CODEX: "0" },
+        {
+          args: ["--band"],
+          input: {
+            claude_rate_limits: [{ kind: "seven_day", percentUsed: 42.4 }],
+          },
+        },
+      );
+      assert.match(bandRows, /^tfx-band 1\nc:.*1w:.*42%/);
+      assert.match(bandRows, /^x:/m);
+      const spendRows = runHud(
+        {},
+        {
+          args: ["--band"],
+          input: {
+            claude_rate_limits: [{ kind: "spend_limit", percentUsed: 83 }],
+          },
+        },
+      );
+      assert.match(spendRows, /^c: \$:.*83%/m);
+      // band 가 3분 넘게 갱신하지 않으면 statusLine 이 다시 다 그린다.
+      const stale = new Date(Date.now() - 4 * 60 * 1000);
+      utimesSync(marker, stale, stale);
       assert.match(runHud({ TFX_DISABLE_CODEX: "0" }), /^c:/m);
     } finally {
       rmSync(marker);
