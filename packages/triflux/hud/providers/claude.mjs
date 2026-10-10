@@ -26,8 +26,10 @@ import {
   SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
 import {
+  acquireSpawnLock,
   advanceToNextCycle,
   clampPercent,
+  parseRetryAfterMs,
   readJson,
   writeJsonSafe,
 } from "../utils.mjs";
@@ -77,10 +79,27 @@ export function computeClaudeUsagePollState({
   };
 }
 
+// 서버가 Retry-After 로 더 기다리라고 하면 따르되, 잘못된 큰 값에 오래 묶이지 않게 1시간에서 자른다.
+const MAX_RETRY_AFTER_MS = 60 * 60 * 1000;
+function withRetryAfter(pollState, retryAfterMs) {
+  if (!retryAfterMs) return pollState;
+  return {
+    ...pollState,
+    delayMs: Math.max(
+      pollState.delayMs,
+      Math.min(retryAfterMs, MAX_RETRY_AFTER_MS),
+    ),
+  };
+}
+
 function getSnapshotSchedule(cache) {
   const timestamp = Number(cache?.timestamp);
   const nextRefreshAt = Number(cache?.nextRefreshAt);
-  if (Number.isFinite(nextRefreshAt)) {
+  // 다음 갱신이 상한보다 멀면 시계가 뒤로 간 것이다. 그대로 두면 갱신이 오래 멈춘다.
+  if (
+    Number.isFinite(nextRefreshAt) &&
+    nextRefreshAt - Date.now() <= MAX_RETRY_AFTER_MS
+  ) {
     return {
       nextRefreshAt,
       shouldRefresh: Date.now() >= nextRefreshAt,
@@ -448,7 +467,11 @@ export function fetchClaudeUsageFromApi(accessToken) {
               resolve({ ok: false, status: 0 });
             }
           } else {
-            resolve({ ok: false, status: res.statusCode });
+            resolve({
+              ok: false,
+              status: res.statusCode,
+              retryAfterMs: parseRetryAfterMs(res.headers?.["retry-after"]),
+            });
           }
         });
       },
@@ -674,10 +697,13 @@ export async function fetchClaudeUsage(forceRefresh = false) {
             : "unknown";
     const pollState =
       errorType === "rate_limit"
-        ? computeClaudeUsagePollState({
-            consecutive429s,
-            outcome: "rate_limit",
-          })
+        ? withRetryAfter(
+            computeClaudeUsagePollState({
+              consecutive429s,
+              outcome: "rate_limit",
+            }),
+            result.retryAfterMs,
+          )
         : null;
     writeClaudeUsageCache(
       existingSnapshot.data,
@@ -720,11 +746,7 @@ export function scheduleClaudeUsageRefresh() {
 
   // 스폰 락: 30초 내 이미 스폰했으면 중복 방지 (첫 설치 시 429 방지)
   try {
-    if (existsSync(CLAUDE_REFRESH_LOCK_PATH)) {
-      const lockAge = Date.now() - readJson(CLAUDE_REFRESH_LOCK_PATH, {}).t;
-      if (lockAge < SPAWN_LOCK_TTL_MS) return;
-    }
-    writeJsonSafe(CLAUDE_REFRESH_LOCK_PATH, { t: Date.now() });
+    if (!acquireSpawnLock(CLAUDE_REFRESH_LOCK_PATH, SPAWN_LOCK_TTL_MS)) return;
   } catch {
     /* 락 실패 무시 — 스폰 진행 */
   }

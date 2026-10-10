@@ -24,6 +24,7 @@ import {
   CODEX_REFRESH_FLAG,
   getCodexAuthPath,
   getCodexHome,
+  STATUSLINE_RESERVE_COLS,
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
 import {
@@ -69,11 +70,15 @@ async function main() {
 
   // --band: triflux mods 가 입력창 위에 그릴 줄을 만든다. statusLine 은 band 가 다 그리는 세션에서 비운다.
   const bandMode = process.argv.includes(BAND_FLAG);
+  // statusLine 은 엔진이 양옆에 2칸씩 여백을 두고, 첫 행 오른쪽에 알림을 띄운다(공식 문서). 그만큼 좁게 그린다.
+  // 알림 자리를 빼고 40칸이 안 남는 좁은 화면은 그대로 두어 원래 축소 단계를 따른다.
+  const reserved = Number(process.env.COLUMNS) - STATUSLINE_RESERVE_COLS;
+  if (!bandMode && reserved >= 40) process.env.COLUMNS = String(reserved);
   const stdin = await readStdinJson();
   const bandState = bandMode ? "none" : readBandState(stdin?.session_id);
   if (bandState === "all") return;
-  // mods 가 넘긴 세션 사용량이 있으면 Claude API 를 따로 조회하지 않는다.
-  const bandClaudeUsage = claudeUsageFromRateLimits(stdin?.claude_rate_limits);
+  // Claude Code 가 넘긴 세션 사용량이 있으면 Claude API 를 따로 조회하지 않는다.
+  const stdinClaudeUsage = claudeUsageFromStdin(stdin);
 
   const { showCodex, antigravityAllowed } = resolveHudCliVisibility();
   const claudeUsageSnapshot = readClaudeUsageSnapshot();
@@ -84,7 +89,7 @@ async function main() {
   if (antigravitySnapshot?.shouldRefresh) scheduleAntigravityQuotaRefresh();
   // 설정이 없는 홈에서는 갱신 프로세스를 시작하지 않는다.
   if (
-    !bandClaudeUsage &&
+    !stdinClaudeUsage &&
     claudeUsageSnapshot.shouldRefresh &&
     existsSync(join(homedir(), ".claude"))
   ) {
@@ -96,7 +101,7 @@ async function main() {
 
   const contextView = buildContextUsageView(stdin);
   const claudeUsage =
-    bandClaudeUsage ??
+    stdinClaudeUsage ??
     (claudeUsageSnapshot.data
       ? { ...claudeUsageSnapshot.data, stale: claudeUsageSnapshot.isStale }
       : null);
@@ -123,7 +128,12 @@ async function main() {
   const rows =
     bandState === "claude"
       ? []
-      : getClaudeRows(currentTier, contextView, claudeUsage);
+      : getClaudeRows(
+          currentTier,
+          contextView,
+          claudeUsage,
+          Number(stdin?.cost?.total_cost_usd ?? Number.NaN),
+        );
   let codexRowIndex = -1;
   if (showCodex) {
     codexRowIndex = rows.length;
@@ -191,16 +201,30 @@ function readBandState(sessionId) {
   }
 }
 
-// mods 의 $.session.usage() rateLimits 를 HUD 의 Claude 사용량 형식으로 바꾼다.
-function claudeUsageFromRateLimits(rateLimits) {
-  if (!Array.isArray(rateLimits)) return null;
-  const find = (kind) => rateLimits.find((w) => w?.kind === kind);
-  const fiveHour = find("five_hour");
-  const weekly = find("seven_day");
-  const spendLimit = find("spend_limit");
+// statusLine 입력의 rate_limits(Claude Code 2.1.251+, Pro/Max 와 gateway)를 HUD 의 Claude 사용량 형식으로 바꾼다.
+// 10.57.0 mods 가 넘기던 claude_rate_limits 배열도 받는다.
+function claudeUsageFromStdin(stdin) {
+  const windows = {};
+  const limits = stdin?.rate_limits;
+  if (limits && typeof limits === "object" && !Array.isArray(limits)) {
+    for (const kind of ["five_hour", "seven_day", "spend_limit"]) {
+      const w = limits[kind];
+      if (w)
+        windows[kind] = { percent: w.used_percentage, resetsAt: w.resets_at };
+    }
+  } else if (Array.isArray(stdin?.claude_rate_limits)) {
+    for (const w of stdin.claude_rate_limits)
+      if (w?.kind)
+        windows[w.kind] = { percent: w.percentUsed, resetsAt: w.resetsAt };
+  }
+  const {
+    five_hour: fiveHour,
+    seven_day: weekly,
+    spend_limit: spendLimit,
+  } = windows;
   if (!fiveHour && !weekly && !spendLimit) return null;
   const percent = (w) =>
-    Number.isFinite(w?.percentUsed) ? Math.round(w.percentUsed) : null;
+    Number.isFinite(w?.percent) ? Math.round(w.percent) : null;
   return {
     fiveHourPercent: percent(fiveHour),
     weeklyPercent: percent(weekly),

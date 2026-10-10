@@ -74,6 +74,7 @@ import {
   listInlineProfileNames,
   MODS_UPDATE_COMMAND,
   persistSettings,
+  planStatusLine,
   REQUIRED_CODEX_PROFILES,
   retireOldInstallFiles,
   runConsentSteps,
@@ -1139,11 +1140,11 @@ function previewStatusLineAction() {
   return {
     type: "statusLine",
     path: settingsPath,
-    change: currentCmd.includes("hud-qos-status.mjs")
-      ? "noop"
-      : currentCmd
-        ? "skip"
-        : "create",
+    // setup 은 statusLine 을 다루기 전에 HUD 파일(래퍼 포함)을 먼저 복사한다.
+    change: planStatusLine(settings, {
+      hudPath,
+      willSyncWrapper: existsSync(join(PKG_ROOT, "hud", "hud-statusline.sh")),
+    }),
     current: currentCmd || null,
     target: hudPath,
   };

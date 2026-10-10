@@ -107,7 +107,7 @@ async function refreshRows($: EngineInterface, position: BandPosition, columns: 
       await writeMarker($, marker, 'off')
       return
     }
-    const { rateLimits, context } = await $.session.usage()
+    const { rateLimits, context, cost } = await $.session.usage()
     const stdin = JSON.stringify({
       session_id: sessionId,
       context_window: {
@@ -115,7 +115,14 @@ async function refreshRows($: EngineInterface, position: BandPosition, columns: 
         used_percentage: context.percent,
         current_usage: { total_tokens: context.tokens },
       },
-      claude_rate_limits: rateLimits,
+      cost: { total_cost_usd: cost?.usd },
+      // statusLine 입력과 같은 모양(resets_at 은 epoch 초)으로 넘겨 HUD 가 한 경로로 읽는다.
+      rate_limits: Object.fromEntries(
+        rateLimits.map(w => [
+          w.kind,
+          { used_percentage: w.percentUsed, resets_at: w.resetsAt ? Math.floor(Date.parse(w.resetsAt) / 1000) : undefined },
+        ]),
+      ),
     })
     // TFX_HUD_PATH 는 설치본 대신 저장소의 HUD 를 돌려 볼 때 쓴다.
     const hudPath = (await $.env.get('TFX_HUD_PATH')) || `${home}/.claude/hud/hud-qos-status.mjs`
@@ -148,8 +155,8 @@ export function registerHudBand(on: On, options: PluginOptions) {
     return next(e)
   })
 
-  // 응답이 끝날 때마다 rate limit 과 context 가 바뀐다.
-  on('turn.complete', async ($, e, next) => {
+  // 응답이 끝날 때와 사용률이 바뀔 때 발생한다(공식 문서의 session.measure).
+  on('session.measure', async ($, e, next) => {
     const result = await next(e)
     await refreshRows($, position, columns)
     return result
@@ -164,6 +171,8 @@ export function registerHudBand(on: On, options: PluginOptions) {
     if (e.props.hasSurvey || !snapshot) return next(e)
 
     const { Box, Text } = $.ui.resolve(e)
+    // band 는 모든 mods 가 같이 쓴다. 뒤에 오는 mods 가 그린 것도 아래에 남긴다.
+    const others = await next(e)
     // statusLine 처럼 두 칸 들여 쓰고, 폭이 줄면 다음 갱신 전까지 끝을 자른다.
     return (
       <Box flexDirection="column">
@@ -176,6 +185,7 @@ export function registerHudBand(on: On, options: PluginOptions) {
             ))}
           </Text>
         ))}
+        {others}
       </Box>
     )
   })

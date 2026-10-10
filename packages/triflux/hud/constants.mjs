@@ -17,6 +17,8 @@ export const CLAUDE_BAND_MARKER_DIR = join(
 export const BAND_FLAG = "--band";
 export const BAND_HEADER = "tfx-band 1";
 export const BAND_ALL_TTL_MS = 3 * 60 * 1000;
+// 양옆 여백 4칸과 첫 행 오른쪽 알림 자리 30칸.
+export const STATUSLINE_RESERVE_COLS = 34;
 export const CLAUDE_BAND_MARKER_TTL_MS = 12 * 60 * 60 * 1000;
 
 export const CONTEXT_MONITOR_CACHE_PATH = join(

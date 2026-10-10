@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -9,7 +9,7 @@ const previousEnv = { ...process.env };
 process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.TRIFLUX_TEST_HOME = home;
-const { ensureTrifluxMods, inspectTrifluxMods } = await import(
+const { applyStatusLine, ensureTrifluxMods, inspectTrifluxMods } = await import(
   "../../scripts/setup.mjs"
 );
 process.env = previousEnv;
@@ -213,4 +213,28 @@ test("doctor 판정은 읽기만 하고 상태와 두 버전을 돌려준다", (
       hasMarketplace: true,
     },
   );
+});
+
+test("statusLine 을 sh 래퍼로 등록하고 예전 node 명령도 triflux 것으로 알아본다", () => {
+  const hudDir = join(home, "hud");
+  mkdirSync(hudDir, { recursive: true });
+  const hudPath = join(hudDir, "hud-qos-status.mjs");
+  writeFileSync(hudPath, "");
+  writeFileSync(join(hudDir, "hud-statusline.sh"), "");
+  const opts = { hudPath, warn() {} };
+  const fresh = {};
+  assert.equal(applyStatusLine(fresh, opts), true);
+  if (process.platform !== "win32")
+    assert.match(fresh.statusLine.command, /^sh \S*hud-statusline\.sh \S*node/);
+  const legacy = {
+    statusLine: {
+      type: "command",
+      command: `/opt/homebrew/bin/node "${hudPath.replace(/\\/g, "/")}"`,
+    },
+  };
+  assert.equal(applyStatusLine(legacy, opts), true);
+  assert.equal(legacy.statusLine.command, fresh.statusLine.command);
+  assert.equal(applyStatusLine(legacy, opts), false);
+  const custom = { statusLine: { type: "command", command: "my-status" } };
+  assert.equal(applyStatusLine(custom, opts), false);
 });

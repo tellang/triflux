@@ -26,7 +26,12 @@ import {
   getCodexHome,
   SPAWN_LOCK_TTL_MS,
 } from "../constants.mjs";
-import { decodeJwtEmail, readJson, writeJsonSafe } from "../utils.mjs";
+import {
+  acquireSpawnLock,
+  decodeJwtEmail,
+  readJson,
+  writeJsonSafe,
+} from "../utils.mjs";
 import {
   listProbeTargets,
   probeRateLimitsViaAppServer,
@@ -552,11 +557,7 @@ export function scheduleCodexRateLimitRefresh() {
 
   // 스폰 락: 30초 내 이미 스폰했으면 중복 방지
   try {
-    if (existsSync(CODEX_REFRESH_LOCK_PATH)) {
-      const lockAge = Date.now() - readJson(CODEX_REFRESH_LOCK_PATH, {}).t;
-      if (lockAge < SPAWN_LOCK_TTL_MS) return;
-    }
-    writeJsonSafe(CODEX_REFRESH_LOCK_PATH, { t: Date.now() });
+    if (!acquireSpawnLock(CODEX_REFRESH_LOCK_PATH, SPAWN_LOCK_TTL_MS)) return;
   } catch {
     /* 락 실패 무시 — 스폰 진행 */
   }

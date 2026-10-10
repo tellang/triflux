@@ -177,9 +177,20 @@ function spendOnlyPercent(claudeUsage) {
 // ============================================================================
 // Claude 행 렌더러
 // ============================================================================
-export function getClaudeRows(currentTier, contextView, claudeUsage) {
+export function getClaudeRows(
+  currentTier,
+  contextView,
+  claudeUsage,
+  costUsd = null,
+) {
   const ctxView = contextView || buildContextUsageView({});
   const prefix = `${bold(claudeOrange("c"))}:`;
+  // 이번 세션 비용. 폭이 넉넉한 full, compact 에서만 CTX 뒤에 붙인다.
+  const costText =
+    Number.isFinite(costUsd) &&
+    (currentTier === "full" || currentTier === "compact")
+      ? ` ${dim(`$${costUsd.toFixed(2)}`)}`
+      : "";
   const spend = spendOnlyPercent(claudeUsage);
   if (spend != null) {
     if (currentTier === "nano" || currentTier === "micro") {
@@ -188,7 +199,7 @@ export function getClaudeRows(currentTier, contextView, claudeUsage) {
     }
     const pct = colorByProvider(spend, formatPercentCell(spend), claudeOrange);
     const left = `${dim("$:")}${tierBar(currentTier, spend, CLAUDE_ORANGE)}${pct}`;
-    const right = `${dim("CTX:")}${contextPercentText(ctxView)}`;
+    const right = `${dim("CTX:")}${contextPercentText(ctxView)}${costText}`;
     return [{ prefix, left, right }];
   }
   // API 실측 데이터
@@ -256,7 +267,7 @@ export function getClaudeRows(currentTier, contextView, claudeUsage) {
     const warning = ctxView.warningTag
       ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
       : "";
-    const contextSection = `${dim("CTX:")}${contextPercentText(ctxView)}${warning}`;
+    const contextSection = `${dim("CTX:")}${contextPercentText(ctxView)}${costText}${warning}`;
     return [{ prefix, left: quotaSection, right: contextSection }];
   }
 
@@ -266,7 +277,7 @@ export function getClaudeRows(currentTier, contextView, claudeUsage) {
   const warning = ctxView.warningTag
     ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
     : "";
-  const contextSection = `${dim("CTX:")}${contextPercentText(ctxView)}${warning}`;
+  const contextSection = `${dim("CTX:")}${contextPercentText(ctxView)}${costText}${warning}`;
   return [{ prefix, left: quotaSection, right: contextSection }];
 }
 

@@ -7,32 +7,40 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { PERCENT_CELL_WIDTH, TIME_CELL_INNER_WIDTH } from "./constants.mjs";
 
+const STDIN_MAX_BYTES = 1024 * 1024;
+
+// 입력이 JSON 으로 읽히는 순간 끝낸다. Claude Code 가 stdin 을 늦게 닫아도 기다리지 않는다.
 export async function readStdinJson() {
   if (process.stdin.isTTY) return {};
   return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
+    let raw = "";
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timeout);
+      process.stdin.removeAllListeners("data");
       process.stdin.destroy();
-      resolve({});
-    }, 200);
-    const chunks = [];
-    process.stdin.on("data", (chunk) => chunks.push(chunk));
-    process.stdin.on("end", () => {
-      clearTimeout(timeout);
-      const raw = chunks.join("").trim();
-      if (!raw) {
-        resolve({});
-        return;
-      }
+      resolve(value);
+    };
+    const tryParse = () => {
       try {
-        resolve(JSON.parse(raw));
+        return JSON.parse(raw);
       } catch {
-        resolve({});
+        return null;
       }
+    };
+    // 200ms 안에 다 못 받으면 받은 만큼으로 판정한다.
+    const timeout = setTimeout(() => finish(tryParse() ?? {}), 200);
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => {
+      raw += chunk;
+      if (raw.length > STDIN_MAX_BYTES) return finish({});
+      const parsed = tryParse();
+      if (parsed) finish(parsed);
     });
-    process.stdin.on("error", () => {
-      clearTimeout(timeout);
-      resolve({});
-    });
+    process.stdin.on("end", () => finish(tryParse() ?? {}));
+    process.stdin.on("error", () => finish({}));
     process.stdin.resume();
   });
 }
@@ -56,6 +64,28 @@ export function writeJsonSafe(filePath, data) {
 }
 
 // .omc/ → .claude/cache/ 마이그레이션: 새 경로 우선, 없으면 레거시 읽고 복사
+// 갱신 프로세스를 겹쳐 띄우지 않는 락. 만료 시각을 적고, 남은 시간이 ttl 보다 길면(시계가 뒤로 감) 깨진 락으로 본다.
+// 예전 { t } 락도 읽는다.
+export function acquireSpawnLock(lockPath, ttlMs, now = Date.now()) {
+  const lock = readJson(lockPath, null);
+  const until = Number(lock?.until ?? Number(lock?.t) + ttlMs);
+  const remaining = until - now;
+  if (Number.isFinite(remaining) && remaining > 0 && remaining <= ttlMs)
+    return false;
+  writeJsonSafe(lockPath, { until: now + ttlMs });
+  return true;
+}
+
+// Retry-After 헤더(초 또는 HTTP 날짜)를 ms 로 바꾼다. 없거나 지난 값이면 null.
+export function parseRetryAfterMs(value, now = Date.now()) {
+  if (value == null || value === "") return null;
+  const seconds = Number(value);
+  const ms = Number.isFinite(seconds)
+    ? seconds * 1000
+    : Date.parse(value) - now;
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+
 export function readJsonMigrate(newPath, legacyPath, fallback) {
   const data = readJson(newPath, null);
   if (data != null) return data;
