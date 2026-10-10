@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -215,12 +215,26 @@ test("doctor 판정은 읽기만 하고 상태와 두 버전을 돌려준다", (
   );
 });
 
-test("mods band 가 HUD 를 그리면 비어 있는 statusLine 을 다시 등록하지 않는다", () => {
+test("mods band 가 실제로 돌 때만 비어 있는 statusLine 을 등록하지 않는다", () => {
   const hudPath = join(home, "hud-qos-status.mjs");
   writeFileSync(hudPath, "");
-  const opts = { hudPath, warn() {} };
+  const claudeDir = join(home, "claude-band");
+  const opts = { hudPath, warn() {}, claudeDir };
   const enabled = { enabledPlugins: { "triflux-mods@triflux": true } };
+  // 켜짐 설정만 있고 설치 기록이 없으면 등록한다.
+  assert.equal(applyStatusLine({ ...enabled }, opts), true);
+  mkdirSync(join(claudeDir, "plugins"), { recursive: true });
+  writeFileSync(
+    join(claudeDir, "plugins", "installed_plugins.json"),
+    JSON.stringify({
+      plugins: { "triflux-mods@triflux": [{ installPath: claudeDir }] },
+    }),
+  );
   assert.equal(applyStatusLine({ ...enabled }, opts), false);
+  assert.equal(
+    applyStatusLine({ ...enabled, disableAllHooks: true }, opts),
+    true,
+  );
   const statusline = {
     ...enabled,
     pluginConfigs: {
@@ -228,5 +242,4 @@ test("mods band 가 HUD 를 그리면 비어 있는 statusLine 을 다시 등록
     },
   };
   assert.equal(applyStatusLine(statusline, opts), true);
-  assert.equal(applyStatusLine({}, opts), true);
 });

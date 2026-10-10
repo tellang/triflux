@@ -1690,21 +1690,40 @@ export function persistSettings(settings, settingsPath = SETTINGS_PATH) {
 }
 
 // triflux mods band 가 HUD 행을 입력창 위에 모두 그리면 statusLine 은 필요 없다(mods/triflux/hooks/hud-band.tsx).
-export function hudBandDrawsAllRows(settings) {
+// 켜짐 설정만 남고 플러그인이 지워졌거나 훅이 꺼졌으면 band 가 안 돌아 HUD 가 통째로 사라지므로 등록한다.
+export function hudBandDrawsAllRows(settings, { claudeDir = CLAUDE_DIR } = {}) {
   const plugin = "triflux-mods@triflux";
+  if (settings?.enabledPlugins?.[plugin] !== true) return false;
+  if (settings?.disableAllHooks === true) return false;
+  if (settings?.pluginConfigs?.[plugin]?.options?.position === "statusline")
+    return false;
+  let installed;
+  try {
+    installed = JSON.parse(
+      readFileSync(
+        join(claudeDir, "plugins", "installed_plugins.json"),
+        "utf8",
+      ),
+    )?.plugins?.[plugin];
+  } catch {
+    return false;
+  }
   return (
-    settings?.enabledPlugins?.[plugin] === true &&
-    settings?.pluginConfigs?.[plugin]?.options?.position !== "statusline"
+    Array.isArray(installed) &&
+    installed.some(
+      (entry) => entry?.installPath && existsSync(entry.installPath),
+    )
   );
 }
 
 export function applyStatusLine(
   settings,
-  { hudPath = HUD_PATH, warn = console.warn } = {},
+  { hudPath = HUD_PATH, warn = console.warn, claudeDir = CLAUDE_DIR } = {},
 ) {
   if (!existsSync(hudPath)) return false;
   const current = settings.statusLine;
-  if (current == null && hudBandDrawsAllRows(settings)) return false;
+  if (current == null && hudBandDrawsAllRows(settings, { claudeDir }))
+    return false;
   const desiredCommand = buildNodeScriptCommand(hudPath);
   if (current?.command === desiredCommand) return false;
   if (current != null) {
