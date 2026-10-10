@@ -1689,12 +1689,22 @@ export function persistSettings(settings, settingsPath = SETTINGS_PATH) {
   }
 }
 
+// triflux mods band 가 HUD 행을 입력창 위에 모두 그리면 statusLine 은 필요 없다(mods/triflux/hooks/hud-band.tsx).
+export function hudBandDrawsAllRows(settings) {
+  const plugin = "triflux-mods@triflux";
+  return (
+    settings?.enabledPlugins?.[plugin] === true &&
+    settings?.pluginConfigs?.[plugin]?.options?.position !== "statusline"
+  );
+}
+
 export function applyStatusLine(
   settings,
   { hudPath = HUD_PATH, warn = console.warn } = {},
 ) {
   if (!existsSync(hudPath)) return false;
   const current = settings.statusLine;
+  if (current == null && hudBandDrawsAllRows(settings)) return false;
   const desiredCommand = buildNodeScriptCommand(hudPath);
   if (current?.command === desiredCommand) return false;
   if (current != null) {

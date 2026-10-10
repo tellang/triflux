@@ -68,6 +68,7 @@ import {
   cleanupStaleSkills,
   ensureCodexProfiles,
   getVersion,
+  hudBandDrawsAllRows,
   inspectTrifluxMods,
   isSkillSupportedOnPlatform,
   LEGACY_CODEX_MODELS,
@@ -1141,7 +1142,7 @@ function previewStatusLineAction() {
     path: settingsPath,
     change: currentCmd.includes("hud-qos-status.mjs")
       ? "noop"
-      : currentCmd
+      : currentCmd || hudBandDrawsAllRows(settings)
         ? "skip"
         : "create",
     current: currentCmd || null,
@@ -1350,7 +1351,11 @@ async function cmdSetup(options = {}) {
 
       const changed = applyStatusLine(settings, { hudPath, warn });
       if (changed) persistSettings(settings, settingsPath);
-      const detail = changed ? "설정 완료" : "기존 설정 유지";
+      const detail = changed
+        ? "설정 완료"
+        : !settings.statusLine && hudBandDrawsAllRows(settings)
+          ? "mods band 가 입력창 위에 그림"
+          : "기존 설정 유지";
       ok(`statusLine: ${detail}`);
       summary.push({ item: "HUD statusLine", status: "✅", detail });
     } catch (e) {

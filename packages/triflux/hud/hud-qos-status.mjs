@@ -123,7 +123,12 @@ async function main() {
   const rows =
     bandState === "claude"
       ? []
-      : getClaudeRows(currentTier, contextView, claudeUsage);
+      : getClaudeRows(
+          currentTier,
+          contextView,
+          claudeUsage,
+          Number(stdin?.cost?.total_cost_usd ?? Number.NaN),
+        );
   let codexRowIndex = -1;
   if (showCodex) {
     codexRowIndex = rows.length;

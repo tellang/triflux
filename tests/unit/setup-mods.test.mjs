@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -9,7 +9,7 @@ const previousEnv = { ...process.env };
 process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.TRIFLUX_TEST_HOME = home;
-const { ensureTrifluxMods, inspectTrifluxMods } = await import(
+const { applyStatusLine, ensureTrifluxMods, inspectTrifluxMods } = await import(
   "../../scripts/setup.mjs"
 );
 process.env = previousEnv;
@@ -213,4 +213,20 @@ test("doctor 판정은 읽기만 하고 상태와 두 버전을 돌려준다", (
       hasMarketplace: true,
     },
   );
+});
+
+test("mods band 가 HUD 를 그리면 비어 있는 statusLine 을 다시 등록하지 않는다", () => {
+  const hudPath = join(home, "hud-qos-status.mjs");
+  writeFileSync(hudPath, "");
+  const opts = { hudPath, warn() {} };
+  const enabled = { enabledPlugins: { "triflux-mods@triflux": true } };
+  assert.equal(applyStatusLine({ ...enabled }, opts), false);
+  const statusline = {
+    ...enabled,
+    pluginConfigs: {
+      "triflux-mods@triflux": { options: { position: "statusline" } },
+    },
+  };
+  assert.equal(applyStatusLine(statusline, opts), true);
+  assert.equal(applyStatusLine({}, opts), true);
 });

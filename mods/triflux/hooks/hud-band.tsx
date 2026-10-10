@@ -107,7 +107,7 @@ async function refreshRows($: EngineInterface, position: BandPosition, columns: 
       await writeMarker($, marker, 'off')
       return
     }
-    const { rateLimits, context } = await $.session.usage()
+    const { rateLimits, context, cost } = await $.session.usage()
     const stdin = JSON.stringify({
       session_id: sessionId,
       context_window: {
@@ -115,6 +115,7 @@ async function refreshRows($: EngineInterface, position: BandPosition, columns: 
         used_percentage: context.percent,
         current_usage: { total_tokens: context.tokens },
       },
+      cost: { total_cost_usd: cost?.usd },
       claude_rate_limits: rateLimits,
     })
     // TFX_HUD_PATH 는 설치본 대신 저장소의 HUD 를 돌려 볼 때 쓴다.
