@@ -3217,6 +3217,14 @@ function resolveUpdateTargets({ installMode, pluginPath }) {
   return [];
 }
 
+// 키는 "<플러그인>@<마켓플레이스>"다. 접두어로 비교하면 triflux-mods@triflux 를
+// triflux 본체로 잡아 npm 설치본에서 git pull 을 시도한다.
+export function findTrifluxPluginEntry(installedPlugins) {
+  for (const [key, entries] of Object.entries(installedPlugins?.plugins || {}))
+    if (key.split("@")[0] === "triflux") return entries[0] ?? null;
+  return null;
+}
+
 async function cmdUpdate(args = []) {
   if (args.some(isHelpArg)) {
     printCommandHelp("update");
@@ -3233,13 +3241,12 @@ async function cmdUpdate(args = []) {
   // 플러그인 모드 감지
   if (existsSync(pluginsFile)) {
     try {
-      const plugins = JSON.parse(readFileSync(pluginsFile, "utf8"));
-      for (const [key, entries] of Object.entries(plugins.plugins || {})) {
-        if (key.startsWith("triflux")) {
-          pluginPath = entries[0]?.installPath;
-          installMode = "plugin";
-          break;
-        }
+      const entry = findTrifluxPluginEntry(
+        JSON.parse(readFileSync(pluginsFile, "utf8")),
+      );
+      if (entry) {
+        pluginPath = entry.installPath;
+        installMode = "plugin";
       }
     } catch {}
   }
