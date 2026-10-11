@@ -2,6 +2,12 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.60.0] - 2026-10-11
+
+### Added
+- live: `tfx-live` 가 agy(Antigravity CLI) tmux 세션을 띄우고 질의, 대기, 중단, 종료, 목록 조회한다. 바쁠 때 입력은 agy 대기열에 쌓이고, 완료는 agy 대화 DB 의 step 상태로 판정한다 (#736)
+- live: `start --unset-env 'PREFIX_*,NAME'` 이 pane 셸 환경에서 변수를 지운 뒤 CLI 를 띄우고, 읽을 수 있으면 CLI 프로세스 환경을 확인한다 (#736)
+
 ## [10.59.2] - 2026-10-11
 
 ### Fixed
