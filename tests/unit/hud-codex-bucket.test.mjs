@@ -198,7 +198,7 @@ describe("Codex bucket normalization", () => {
 });
 
 describe("Codex multi-window selection", () => {
-  it("가장 최근 수정된 세션의 마지막 token_count 로 30분 캐시 만료를 정한다", async (t) => {
+  it("가장 최근 수정된 세션의 마지막 응답 기록으로 30분 캐시 만료를 정한다", async (t) => {
     const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-cache-"));
     const now = new Date("2026-07-11T09:00:00.000Z");
     t.mock.method(Date, "now", () => now.getTime());
@@ -211,18 +211,23 @@ describe("Codex multi-window selection", () => {
       });
       return JSON.parse(readFileSync(cachePath, "utf8")).promptCache;
     };
-    const event = (timestamp, cached = 0, written = 0) => ({
+    const response = (timestamp, cached = 0, written = 0) => ({
+      timestamp,
+      type: "token_usage_record",
+      payload: {
+        usage: {
+          cached_input_tokens: cached,
+          cache_write_input_tokens: written,
+        },
+      },
+    });
+    // 쿼터 갱신 때 이전 사용량을 다시 보내는 token_count. 응답이 아니므로 만료를 늘리면 안 된다.
+    const quotaResend = (timestamp) => ({
       timestamp,
       type: "event_msg",
       payload: {
         type: "token_count",
-        info: {
-          last_token_usage: {
-            cached_input_tokens: cached,
-            cache_write_input_tokens: written,
-          },
-        },
-        rate_limits: null,
+        info: { last_token_usage: { cached_input_tokens: 999 } },
       },
     });
     // 8일 전에 만든 세션을 재개한 경우: 7일 쿼터 탐색 범위 밖이어도 수정 시각으로 골라야 한다.
@@ -234,17 +239,18 @@ describe("Codex multi-window selection", () => {
     const touch = (path, at) => utimesSync(path, at, at);
     try {
       writeRollout(sessionsRoot, now, "rollout-z.jsonl", [
-        event("2026-07-11T08:59:00.000Z", 999),
+        response("2026-07-11T08:59:00.000Z", 999),
       ]);
       touch(join(sessionDirFor(sessionsRoot, now), "rollout-z.jsonl"), now);
       writeRollout(sessionsRoot, resumedDay, "rollout-a.jsonl", [
-        event("2026-07-11T08:30:00.000Z", 100),
-        event("2026-07-11T08:50:00.000Z", 0, 200),
+        response("2026-07-11T08:30:00.000Z", 100),
+        response("2026-07-11T08:50:00.000Z", 0, 200),
+        quotaResend("2026-07-11T08:58:00.000Z"),
       ]);
       touch(resumedPath, new Date(now.getTime() + 10_000));
-      // 하위 세션만 띄운 부모 세션처럼 token_count 가 없는 파일은 건너뛴다.
+      // 하위 세션만 띄운 부모 세션처럼 응답 기록이 없는 파일은 건너뛴다.
       writeRollout(sessionsRoot, now, "rollout-parent.jsonl", [
-        { timestamp: "2026-07-11T08:59:30.000Z", type: "event_msg" },
+        quotaResend("2026-07-11T08:59:30.000Z"),
       ]);
       touch(
         join(sessionDirFor(sessionsRoot, now), "rollout-parent.jsonl"),
@@ -256,8 +262,8 @@ describe("Codex multi-window selection", () => {
       });
       // 마지막 응답에 캐시 토큰이 없으면 식은 것으로 본다.
       writeRollout(sessionsRoot, resumedDay, "rollout-a.jsonl", [
-        event("2026-07-11T08:50:00.000Z", 100),
-        event("2026-07-11T08:55:00.000Z"),
+        response("2026-07-11T08:50:00.000Z", 100),
+        response("2026-07-11T08:55:00.000Z"),
       ]);
       touch(resumedPath, new Date(now.getTime() + 10_000));
       assert.equal(await refresh(), null);

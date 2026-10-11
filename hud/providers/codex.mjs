@@ -402,9 +402,10 @@ function recentRollouts(sessionsRoot, sinceMs) {
   return found.sort((a, b) => b.mtimeMs - a.mtimeMs).map((f) => f.path);
 }
 
-// 마지막 token_count 하나로 판정한다. Claude Code 의 prompt_cache.warm 처럼
-// 마지막 응답이 캐시 토큰을 보고했을 때만 살아 있다. token_count 가 없으면 undefined.
-function lastTokenCountCache(path, maxLines = 200) {
+// 응답마다 한 줄인 token_usage_record 의 마지막 값으로 판정한다. token_count 는 쿼터 갱신 때
+// 이전 사용량을 다시 보내므로 쓰지 않는다. Claude Code 의 prompt_cache.warm 처럼 마지막 응답이
+// 캐시 토큰을 보고했을 때만 살아 있다. 응답 기록이 없으면 undefined.
+function lastResponseCache(path, maxLines = 200) {
   let reader;
   try {
     reader = createReverseLineReader(path);
@@ -421,11 +422,12 @@ function lastTokenCountCache(path, maxLines = 200) {
       } catch {
         continue;
       }
-      if (evt?.payload?.type !== "token_count") continue;
-      const usage = evt.payload.info?.last_token_usage;
+      const usage =
+        evt?.type === "token_usage_record" ? evt.payload?.usage : null;
+      if (!usage) continue;
       const cached =
-        (usage?.cached_input_tokens ?? 0) +
-        (usage?.cache_write_input_tokens ?? 0);
+        (usage.cached_input_tokens ?? 0) +
+        (usage.cache_write_input_tokens ?? 0);
       const at = Date.parse(evt.timestamp);
       if (cached <= 0 || !Number.isFinite(at)) return null;
       return {
@@ -445,7 +447,7 @@ export function readCodexPromptCache(sessionsRoot, now = Date.now()) {
     sessionsRoot,
     now - CODEX_PROMPT_CACHE_TTL_MS,
   )) {
-    const cache = lastTokenCountCache(path);
+    const cache = lastResponseCache(path);
     if (cache !== undefined) return cache;
   }
   return null;
