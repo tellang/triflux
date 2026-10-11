@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import { appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -98,6 +98,56 @@ test("사람 TTY update는 새 packageRoot의 CLI 자식이 consent를 실행한
   assert.match(output, /Codex hooks: 승인 기록/);
   assert.doesNotMatch(output, /승인 전|경고|설정 완료/);
   assert.doesNotMatch(output, /Codex hooks: 세션 동기화 훅 등록/);
+  const manual = success(
+    cli.run(["setup", "--from-update", "--consent-only"], { FIXTURE_TTY: "1" }),
+  );
+  assert.equal(JSON.parse(manual.trim().split("\n").at(-1)).outcome, "ok");
+});
+
+test("동의 자식 실패는 경고 하나로 합치고 update 결과를 보존한다", (t) => {
+  for (const json of [false, true]) {
+    for (const consentJson of [false, true]) {
+      const cli = cliFixture(t);
+      cli.setVersion("10.57.3");
+      success(cli.run(["setup"]));
+      appendFileSync(
+        join(cli.root, "preload.cjs"),
+        `
+if (process.argv.includes('--consent-only')) {
+  if (${consentJson}) fs.writeSync(process.argv.includes('--json') ? 1 : 3, JSON.stringify({
+    outcome: 'failed', message: 'consent denied', exitCode: 7,
+    steps: [], notices: [], warnings: [], targets: [], alreadyInGoalState: false
+  }) + '\\n');
+  process.exit(7);
+}
+`,
+      );
+      const output = success(
+        cli.run(["update", ...(json ? ["--json"] : [])], {
+          FIXTURE_TTY: "1",
+          FIXTURE_LATEST: version,
+          NO_COLOR: "1",
+        }),
+      );
+      const warning = `동의 단계 실패: ${consentJson ? "consent denied" : "종료 코드 7"}. 다시 실행: tfx setup`;
+      if (json) {
+        const report = JSON.parse(output);
+        assert.equal(report.outcome, "ok");
+        assert.deepEqual(report.changed, ["hud/renderers.mjs"]);
+        assert.equal(report.to, version);
+        assert.deepEqual(
+          report.warnings.map(({ message }) => message),
+          [warning],
+        );
+      } else {
+        assert.match(output, new RegExp(`^✓ triflux 10.57.3 -> ${version}`));
+        assert.match(output, /파일 1개 반영/);
+        assert.match(output, /~ hud\/renderers.mjs/);
+        assert.ok(output.includes(warning));
+        assert.match(output, /경고 1건/);
+      }
+    }
+  }
 });
 
 test("update 는 triflux-mods 플러그인을 triflux 본체 플러그인 설치로 보지 않는다", () => {

@@ -1283,43 +1283,52 @@ export async function runUpdatedSetup({
   const result = JSON.parse(stdout.trim().split(/\r?\n/).at(-1));
   if (result.outcome === "ok") {
     const interactive = !options.nonInteractive;
-    const child = spawnSync(
-      process.execPath,
-      [
-        cli,
-        "setup",
-        "--from-update",
-        "--consent-only",
-        ...(interactive ? [] : ["--json"]),
-      ],
-      {
-        encoding: "utf8",
-        stdio: interactive
-          ? ["inherit", "inherit", "inherit", "pipe"]
-          : ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-      },
-    );
-    if (child.error) throw child.error;
-    const consentOutput = interactive ? child.output[3] : child.stdout;
-    if (!consentOutput?.trim())
-      throw new Error(
-        commandErrorMessage({
-          message: "동의 단계 실행 실패",
-          stderr: child.stderr,
-        }),
+    let consent;
+    try {
+      const child = spawnSync(
+        process.execPath,
+        [
+          cli,
+          "setup",
+          "--from-update",
+          "--consent-only",
+          ...(interactive ? [] : ["--json"]),
+        ],
+        {
+          encoding: "utf8",
+          env: { ...process.env, TFX_CONSENT_FD: interactive ? "3" : "" },
+          stdio: interactive
+            ? ["inherit", "inherit", "inherit", "pipe"]
+            : ["ignore", "pipe", "pipe"],
+          windowsHide: true,
+        },
       );
-    const consent = JSON.parse(consentOutput.trim().split(/\r?\n/).at(-1));
+      if (child.error) throw child.error;
+      const consentOutput = interactive ? child.output[3] : child.stdout;
+      if (!consentOutput?.trim())
+        throw new Error(
+          commandErrorMessage({
+            message: child.signal
+              ? `시그널 ${child.signal}`
+              : `종료 코드 ${child.status}`,
+            stderr: child.stderr,
+          }),
+        );
+      consent = JSON.parse(consentOutput.trim().split(/\r?\n/).at(-1));
+      if (consent.outcome !== "ok") throw new Error(consent.message);
+    } catch (error) {
+      addWarning(
+        result,
+        "consent",
+        `동의 단계 실패: ${commandErrorMessage(error)}. 다시 실행: tfx setup`,
+      );
+      return result;
+    }
     result.steps.push(...consent.steps);
     result.notices.push(...consent.notices);
     for (const warning of consent.warnings)
       addWarning(result, warning.code, warning.message);
     result.alreadyInGoalState &&= consent.alreadyInGoalState;
-    if (consent.outcome !== "ok") {
-      result.outcome = consent.outcome;
-      result.message = consent.message;
-      result.exitCode = consent.exitCode;
-    }
     const hooks = consent.targets.find(({ name }) => name === "codex");
     const codex = result.targets.find(({ name }) => name === "codex");
     if (codex && hooks && hooks.status !== "skipped") {
@@ -1354,8 +1363,11 @@ async function cmdConsentOnly(options, report) {
     report.exitCode = error.exitCode ?? EXIT_ERROR;
     process.exitCode = report.exitCode;
   }
-  // 사람 TTY 는 질문 출력과 부모가 회수할 JSON 을 분리한다.
-  writeSync(options.nonInteractive ? 1 : 3, `${JSON.stringify(report)}\n`);
+  // 부모가 연 파이프가 있을 때만 질문 출력과 JSON 을 분리한다.
+  writeSync(
+    process.env.TFX_CONSENT_FD === "3" ? 3 : 1,
+    `${JSON.stringify(report)}\n`,
+  );
   return report;
 }
 
