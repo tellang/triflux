@@ -12,7 +12,9 @@ import {
   dim,
   GAUGE_WIDTH,
   GEMINI_BLUE,
+  GEMINI_BLUE_BG,
   geminiBlue,
+  RESET,
   yellow,
 } from "./colors.mjs";
 import {
@@ -161,9 +163,9 @@ function antigravityPercentText(quota) {
     : dim(formatPlaceholderPercentCell());
 }
 
-// 배경색 대신 게이지의 거의 찬 칸(▓)으로 감싸 게이지와 같은 결로 보인다.
+// 게이지의 거의 찬 칸(▓)으로 감싸고 글자만 반전한다. band 도 그리도록 SGR 7 대신 배경색을 쓴다.
 function gcpBadge(lead, trail = "") {
-  return geminiBlue(`${lead}${bold("GCP")}${GEMINI_BLUE}${trail}`);
+  return `${geminiBlue(lead)}${GEMINI_BLUE_BG}\x1b[30m\x1b[1mGCP${RESET}${geminiBlue(trail)}`;
 }
 
 // context 는 토큰 수 대신 사용률만 보여 준다.
