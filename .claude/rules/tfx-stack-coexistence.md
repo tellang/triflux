@@ -5,7 +5,7 @@
 ## 공존 원칙
 
 - 세 시스템은 흡수/대체 관계가 아니라 레이어 분리 관계다.
-- triflux 코어는 gstack·superpowers에 **절대 의존하지 않는다** (단방향: gstack/sp → triflux만 허용).
+- triflux 코어는 gstack과 superpowers에 의존하지 않는다(gstack과 superpowers가 triflux를 호출하는 방향만 허용).
 - 스킬의 역할이 겹칠 때 기본 진입점은 `tfx-*`다. gstack/sp는 명시 호출 또는 워크플로우 통합 시점에만 쓴다.
 - 각 시스템의 책임 경계를 침범하지 않는다. 동일 기능이 여러 곳에 있으면 아래 우선순위 규칙을 따른다.
 - 스택 공존 정책 변경은 이 파일만 수정한다. 개별 스킬에 공존 로직을 분산하지 않는다.
@@ -88,7 +88,6 @@ triflux  →  superpowers  (금지)
 | Review / 코드 판정 | superpowers `requesting-code-review` | `tfx-auto --mode consensus` | 없음 |
 | QA / 테스트 검증 | gstack `/gstack-qa` → `tfx-review` | `tfx-auto --mode deep` | 없음 |
 | Checkpoint / 스냅샷 | gstack `/gstack-context-save` | 없음 | 없음 |
-| 문서 작성 | 문서 담당 에이전트 또는 직접 작성 | 없음 | 없음 |
 
 > 규칙: 기능 경계가 명확하면 owner 시스템 1순위. 경계가 모호하면 triflux 우선.
 

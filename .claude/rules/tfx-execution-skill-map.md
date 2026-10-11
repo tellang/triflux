@@ -26,7 +26,7 @@ CLI/tmux worker lifecycle은 분리하고, Triflux가 CLI launch·observation·c
 
 ## CLI tmux 관전 기본값
 
-> **MANDATORY**: 개별 Codex/Antigravity CLI 디스패치는 사람이 진행을 관전할 수 있도록 기본적으로 tmux split-pane으로 연다. 사용자가 "조용히"/"백그라운드로만"을 명시했거나 tmux가 불가한 경우에만 raw background로 되돌아간다.
+> 개별 Codex/Antigravity CLI 디스패치는 사람이 진행을 관전할 수 있도록 기본적으로 tmux split-pane으로 연다. 사용자가 "조용히"/"백그라운드로만"을 명시했거나 tmux가 불가한 경우에만 raw background로 되돌아간다.
 
 이 절이 **언제 관전할지**의 auto-load 정책 SSOT다. 명시적으로 headless를 택한 엔진 경로는
 그 명시 선택을 따른다. 세션 생성, 시작 배너 확인, attach, 정리, `tfx-live` 및 폭 기반 pane

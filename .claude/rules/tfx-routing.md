@@ -46,7 +46,7 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 - D6: 실패/버그/test failure는 `systematic-debugging` 후 `tfx-auto`; 정상 구조 설명은 `tfx-auto --mode consensus --shape panel`.
 - D7: 로컬 파일·심볼은 Claude 기본 Explore 에이전트(스킬 없음); 외부·최신·공식 문서는 `tfx-research`.
 - D8: 무수식 AI slop/deslop/refactor는 host `ai-slop-cleaner`; 명시 TFX 3자 cleanup만 `tfx-auto --mode consensus`; 회고는 `retro`. “정리” 한 단어로 cleanup을 강제하지 않는다.
-- D9: web/app flow는 `qa`; code verdict는 review backend; 완료 주장은 `verification-before-completion`이 필수다.
+- D9: web/app flow는 `qa`, code verdict는 review backend, 완료 주장 전 근거 수집은 `verification-before-completion`.
 - D10: 명확한 직접 구현은 TDD 필요 여부 뒤 `tfx-auto`; 2+ code-changing lane은 worktree와 세션을 각각 분리.
 - D11: fresh verification 없이 ship 금지. triflux release는 `tfx-ship`, 일반 release는 `ship`, 중단/재개는 context save/restore.
 
@@ -90,8 +90,6 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 
 > 근거(why): [ADR-0004: 기본 구현 CLI = Codex](../../docs/adr/0004-codex-as-default-cli.md). 이 절이 SSOT(어떻게), ADR은 결정 이력(왜).
 
-triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR) 이 거의 전부 Codex 단독 또는 Codex worker spawn 으로 진행되었다. 이 운영 fact 를 default policy 로 명시한다.
-
 | 우선순위 | CLI / 모델 | default 적용 lane |
 |---------|-----------|-------------------|
 | 1차 (default) | **Codex** (프로필 설정 기준) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
@@ -123,7 +121,7 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 
 ## CLI 라우팅
 
-`codex exec` / `agy -y -p` 직접 호출은 금지한다. tfx 스킬 경유 필수. 자동 차단 훅(headless-guard)은 제거되었으므로 호출자가 지킨다.
+`codex exec`와 `agy --print`를 직접 호출하지 않고 tfx 스킬을 거친다. headless-guard 훅은 제거되었으므로 호출자가 지킨다.
 
 **Layer 1: Light** (tfx-route.sh → 단일 CLI)
 
@@ -169,10 +167,8 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 
 ## 충돌 해소
 
-- ralph = persist alias
 - "auto" 단독 → tfx-auto. "알아서 해" → autopilot 모드 (위 깊이 수정자)
 - "코드에서 찾아" → Claude 기본 Explore 에이전트. "알아봐" → tfx-research
 - 복합 의도: "구현하고 리뷰까지" → tfx-auto 실행 후 리뷰 결과 확인
 - "합의해서 비교해" 류 요청은 기본적으로 `tfx-auto --mode consensus --shape debate` 로 fold 한다
-- `ralph` 표기는 항상 `--retry ralph` mode 를 지칭. persist 스킬도 동일 의미. `--retry auto-escalate` 와 동시 사용 불가 (escalation-chain.md 규약).
-- 코드 변경 병렬 작업은 작업별 worktree와 세션을 분리하고 각 세션에서 `tfx-auto`로 실행한다.
+- `ralph` 표기는 항상 `--retry ralph` mode를 지칭한다. `--retry auto-escalate`와 동시에 쓸 수 없다(escalation-chain.md 규약).

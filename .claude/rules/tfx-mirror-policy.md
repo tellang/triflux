@@ -129,5 +129,5 @@ shard 가 `references/{codex,gemini}-snapshots/` 같은 경로에 100MB+ binary 
 
 ## 메모
 
-- 이 문서는 정책 추출본이다. 실제 mirror 자동화 (있다면 `scripts/pack.mjs`) 의 구현 세부는 코드 주석 참조.
+- 이 문서는 정책 추출본이다. mirror 자동화 구현은 `scripts/pack.mjs`와 `scripts/release/check-packages-mirror.mjs`다.
 - packages 구조가 변경되면 (예: `packages/cli` 신설) 이 문서를 가장 먼저 업데이트한 뒤 코드 작업한다.

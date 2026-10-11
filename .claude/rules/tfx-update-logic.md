@@ -22,4 +22,3 @@ paths:
 - gstack 업그레이드 후 `~/.gstack/just-upgraded-from`을 체크해서 CHANGELOG 하이라이트 표시
 - 원격 머신 업그레이드 전파는 `tfx-remote` + SSH scp로 수동 (자동화 예정)
 - Antigravity headless fallback readiness 는 `tfx-route.sh` 가 캐시가 없거나 오래됐을 때 `TFX_ANTIGRAVITY_OK` 를 갱신한다. `scripts/preflight-cache.mjs` 참조.
-- Antigravity CLI 인증은 ChainedAuth (Mac Keychain → oauth_creds.json 순) 기반. 별도 sign-in 일반적으로 불필요.
