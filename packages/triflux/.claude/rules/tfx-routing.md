@@ -21,7 +21,7 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 | 직접 구현/수정 | `/tfx-auto` (Codex 우선) | "이거 고쳐줘", "구현해줘". 기존 작업 연장이면 `/gstack-context-restore` 먼저. |
 | 디버그 | Claude 기본 Explore 에이전트 → `/superpowers:systematic-debugging` → `/tfx-auto` | 코드 위치/사용처 확인과 원인 분석을 분리한다. |
 | 리서치 | `/tfx-research` 또는 `/multilingual-parallel-research` | 외부/최신/도구 가능 여부 의문문은 `/tfx-research`; 언어권 병렬 조사는 multilingual 경로. |
-| 검증 | `/superpowers:requesting-code-review` + `/gstack-qa` + `/superpowers:verification-before-completion` | 코드 판정은 review, 브라우저/워크플로우 게이트는 qa, 완료 주장 전 evidence 수집은 verification. |
+| 검증 | `/tfx-review` + `/gstack-qa` + `/superpowers:verification-before-completion` | 코드 판정은 review, 브라우저/워크플로우 게이트는 qa, 완료 주장 전 evidence 수집은 verification. |
 | 디자인 검토 | `/gstack-design-review` | 시각/UX 판정. 코드 판정과 분리. |
 | TDD 시작 | `/superpowers:test-driven-development` | 테스트부터 짜는 흐름. 구현 전에 invoke. |
 | 코드 변경 병렬 실행 | 작업별 worktree와 세션을 분리하고 각 세션에서 `/tfx-auto` 실행 | Claude Agent는 `isolation: worktree` 사용 가능. |
@@ -58,7 +58,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 |------|-----------|------|
 | 리드 운영 | 리드 맡아, 세션들 지휘, 워커 띄워서 조율, 승계·머지·릴리스 조율 | tfx-lead |
 | 구현/수정 | 만들어, 고쳐, 구현해, 짜줘, 수정해, 바꿔 | tfx-auto |
-| 리뷰 | 봐줘, 리뷰해, 검토해, 괜찮아? | `superpowers:requesting-code-review` (owner). 교차모델 판정이 필요할 때만 tfx-review |
+| 리뷰 | 봐줘, 리뷰해, 검토해, 괜찮아? | tfx-review |
 | 분석 | 분석해, 어떻게 돌아가?, 구조가 뭐야 | tfx-auto (`--mode consensus --shape panel`) |
 | 계획 | 계획, 어떻게 하지, 설계해 | superpowers `writing-plans`; TFX 다중모델 계획·실행은 `tfx-auto --mode deep` |
 | 요구사항 명확화 | 요구사항, 인터뷰, 목표 구체화 | host `deep-interview`; 목표 변환은 Claude Code 기본 `/goal` |

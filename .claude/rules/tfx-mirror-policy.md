@@ -11,11 +11,11 @@ paths:
   - "adapters/**/*"
   - "package.json"
 ---
-# packages/ mirror 정책 — 3-layer single source
+# packages/ mirror 정책: 3-layer single source
 
 ## 멘탈 모델
 
-> 근거(why): [ADR-0005 — packages/ 3-layer single-source 미러](../../docs/adr/0005-packages-three-layer-mirror.md). 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
+> 근거(why): [ADR-0005: packages/를 3-layer single-source로 미러링한다](../../docs/adr/0005-packages-three-layer-mirror.md). 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
 
 triflux 는 root 와 `packages/{core,remote,triflux}/` 3개 published 레이어를 동시에 유지한다. root 가 source of truth 다. mirror 작업은 drift 가 생기지 않도록 레이어별 룰을 다르게 적용한다.
 
@@ -27,7 +27,7 @@ triflux 는 root 와 `packages/{core,remote,triflux}/` 3개 published 레이어�
 
 ## 레이어별 정책
 
-### `packages/core` — byte-identical cp
+### `packages/core`: byte-identical cp
 
 `packages/core/hub/lib/`, `packages/core/scripts/lib/` 같은 helper 묶음은 root 와 같은 내용이다. import 변환 없음. 단순 cp.
 
@@ -37,13 +37,13 @@ triflux 는 root 와 `packages/{core,remote,triflux}/` 3개 published 레이어�
 | root `hub/lib/foo.mjs` 수정 | 같은 cp 또는 두 곳 동시 Edit |
 | 검증 | `diff -q hub/lib/foo.mjs packages/core/hub/lib/foo.mjs` exit 0 |
 
-#### `packages/core/hub/team` — minimal individual mirror
+#### `packages/core/hub/team`: minimal individual mirror
 
 `hub/team/*` 전체는 `packages/triflux/hub/team/` 와 `packages/remote/hub/team/` mirror 대상이다. `packages/core` 는 `hub/team/*` 전체를 mirror 하지 않는다. 다만 `packages/core/hub/bridge.mjs` 가 `./team/*` 를 self-import 하는 개별 파일은 `packages/core/hub/team/` 에 byte-identical cp 한다.
 
-현재 minimal mirror 예시는 PR #314 의 `packages/core/hub/team/retry-state-machine.mjs` 다. 신규 파일을 추가할 때는 먼저 `grep -n './team/' packages/core/hub/bridge.mjs` 로 `bridge.mjs` 의 `./team/*` 의존 파일을 식별하고, 필요한 파일만 `packages/core/hub/team/` 으로 cp 한 뒤 root 파일과 `diff -q` 로 확인한다.
+현재 minimal mirror 예시는 `packages/core/hub/team/retry-state-machine.mjs` 다. 신규 파일을 추가할 때는 먼저 `grep -n './team/' packages/core/hub/bridge.mjs` 로 `bridge.mjs` 의 `./team/*` 의존 파일을 식별하고, 필요한 파일만 `packages/core/hub/team/` 으로 cp 한 뒤 root 파일과 `diff -q` 로 확인한다.
 
-### `packages/remote` — import path 변환
+### `packages/remote`: import path 변환
 
 `packages/remote/` 는 `packages/core` 를 외부 dep 로 import 한다. 그래서 root 의 상대 경로 import 를 그대로 cp 하면 깨진다.
 
@@ -53,7 +53,7 @@ triflux 는 root 와 `packages/{core,remote,triflux}/` 3개 published 레이어�
 | `packages/triflux/hub/team/backend.mjs` | root와 동일 |
 | `packages/remote/hub/team/backend.mjs` | `import { writePromptToTmpFile } from "@triflux/core/hub/lib/prompt-tmp.mjs"` |
 
-mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (덮어쓰면 import path 가 revert 됨).
+내부 dep 가 있을 때 mirror 변경은 **`Edit` 도구로 개별 수정**한다. 이때 `cp` 사용 금지 (덮어쓰면 import path 가 revert 됨).
 
 | 행위 | 처리 |
 |------|------|
@@ -61,7 +61,7 @@ mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (�
 | root 수정 | `Edit` 으로 3 곳 동시 수정. import path 만 packages/remote 에서 다름 |
 | 검증 | `git diff` 로 `@triflux/core/...` 경로가 살아있는지 확인. cp 후 import 경로 revert 여부 점검 |
 
-### `packages/triflux` — npm files 기준 byte-identical
+### `packages/triflux`: npm files 기준 byte-identical
 
 `packages/triflux/` 는 사용자가 `npm install -g triflux` 로 받는 패키지다. root `package.json` 의 `files` 필드와 `packages/triflux/package.json` 의 `files` 필드 교집합에 들어가는 것은 byte-identical 로 mirror 한다.
 
@@ -78,18 +78,18 @@ mirror 변경은 **`Edit` 도구로 개별 수정**한다. `cp` 사용 금지 (�
 - `hub/lib/*` → `packages/core/hub/lib/`, `packages/triflux/hub/lib/`
 - core 의 `hub/lib`, `scripts/lib`, `hooks`, `hud` 는 통째 미러다. 그 밖의 core 파일은 `scripts/pack.mjs` 의 CORE_FILES, CORE_DIRS 가 고른 것만 두고, `release:check-mirror` 가 root 와 바이트 비교와 import 해석을 한다
 - `hub/team/*`, `hub/*.mjs` (entry/runtime) → `packages/triflux/hub/`, `packages/remote/hub/` (해당 모듈만; `packages/core/hub/team/` 는 self-import 대상만 minimal mirror, 예: `retry-state-machine.mjs`)
-- `scripts/lib/*` → `packages/core/scripts/lib/`, `packages/triflux/scripts/lib/`, `packages/remote/scripts/lib/` (PR #314 catch-up — remote 는 root subset, root-relative 의존 시 `@triflux/core/...` 로 import 변환)
+- `scripts/lib/*` → `packages/core/scripts/lib/`, `packages/triflux/scripts/lib/`, `packages/remote/scripts/lib/` (PR #314 catch-up, remote 는 root subset, root-relative 의존 시 `@triflux/core/...` 로 import 변환)
 - `scripts/release/*`, `scripts/__tests__/*` → `packages/triflux/scripts/`. `scripts/__tests__` 는 files 의 `!scripts/__tests__` 로 게시본에서 뺀다
 - `bin/*` → `packages/triflux/bin/`
 - `hooks/*`, `hud/*` → `packages/triflux/{hooks,hud}/` + `packages/core/{hooks,hud}/` (core 도 `package.json` files 에 `hooks`, `hud` 포함하므로 byte-identical cp 2곳)
 - `config/*` → `packages/triflux/config/` (core·remote 는 config 미러 안 함)
 
 **mirror 제외**:
-- `tests/` (root + `packages/{core,remote}/tests/`) — npm files 에 없음. 만약 packages 쪽에 untracked tests 디렉토리가 만들어졌으면 그건 잘못된 mirror 시도다.
-- `references/codex-snapshots/`, `references/gemini-snapshots/` — packages/triflux files 부정 패턴 (`!references/codex-snapshots`) 으로 명시 제외.
-- `.tfx/`, `.omc/`, `.claude/`, `.gemini/`, `.codex/` — runtime / config 디렉토리. 예외: `.claude/rules/tfx-routing.md` 한 파일은 게시하고 packages/triflux 에 바이트 동일로 둔다. clone 이 없는 기기의 tfx-harness 가 setup 이 스킬 옆에 복사한 사본을 읽는다. 검사기는 `check-packages-mirror.mjs` 의 MIRROR_FILES 다.
-- `skills/tfx-workspace` — 사용자별 workspace, packages/triflux files 부정 패턴 (`!skills/tfx-workspace`).
-- `failure-reports/` (any depth) — 진단 산출물.
+- `tests/` (root + `packages/{core,remote}/tests/`): npm files 에 없음. 만약 packages 쪽에 untracked tests 디렉토리가 만들어졌으면 그건 잘못된 mirror 시도다.
+- `references/codex-snapshots/`, `references/gemini-snapshots/`: packages/triflux files 부정 패턴 (`!references/codex-snapshots`) 으로 명시 제외.
+- `.tfx/`, `.omc/`, `.claude/`, `.gemini/`, `.codex/`: runtime / config 디렉토리. 예외: `.claude/rules/tfx-routing.md` 한 파일은 게시하고 packages/triflux 에 바이트 동일로 둔다. clone 이 없는 기기의 tfx-harness 가 setup 이 스킬 옆에 복사한 사본을 읽는다. 검사기는 `check-packages-mirror.mjs` 의 MIRROR_FILES 다.
+- `skills/tfx-workspace`: 사용자별 workspace, packages/triflux files 부정 패턴 (`!skills/tfx-workspace`).
+- `failure-reports/` (any depth): 진단 산출물.
 
 ## 신규 binary 산출물 추가 시
 
@@ -113,18 +113,18 @@ shard 가 `references/{codex,gemini}-snapshots/` 같은 경로에 100MB+ binary 
 | 2 | 위 목록의 각 파일이 packages/triflux 에 byte-identical 로 존재하는지 `diff -q` | exit 0 |
 | 3 | hub/lib, scripts/lib, hooks, hud 변경분이 packages/core 에 cp 됐는지 `diff -q` | exit 0 |
 | 4 | packages/remote/hub/team/ 가 변경됐다면 `grep "@triflux/core/" packages/remote/hub/team/*.mjs` | import 경로 살아있음 |
-| 5 | tests/ 변경이 packages/{core,remote}/tests/ 에 untracked 로 추가됐는지 | **금지 — staging 회수** |
+| 5 | tests/ 변경이 packages/{core,remote}/tests/ 에 untracked 로 추가됐는지 | **금지: staging 회수** |
 | 6 | npm publish 영향 시 `cd packages/triflux && npm pack --dry-run` size | ~1MB |
-| 7 | mirror 동기화 PR 이라면 PR body 에 IDENTICAL/DIFFERENT 카운트 (PR #219 패턴 — 13 modified + 3 new = 16 files, 9 IDENTICAL + 4 DIFFERENT) | 명시 |
+| 7 | mirror 동기화 PR 이라면 PR body 에 IDENTICAL/DIFFERENT 카운트 | 명시 |
 
 ## 안티패턴
 
 | 패턴 | 문제 | 대체 |
 |------|------|------|
 | `cp hub/team/foo.mjs packages/remote/hub/team/` | import path 가 `../lib/prompt-tmp.mjs` 같은 상대 경로로 덮어써져 remote 패키지가 자기 모듈을 못 찾음 | `Edit` 으로 packages/remote 만 `@triflux/core/...` 유지 |
-| `cp -r tests/ packages/core/tests/` | npm files 미포함이라 publish 에 안 들어감, untracked 디렉토리만 늘어남 | tests 는 mirror 제외 — 시도 자체 금지 |
+| `cp -r tests/ packages/core/tests/` | npm files 미포함이라 publish 에 안 들어감, untracked 디렉토리만 늘어남 | tests 는 mirror 제외. 시도 자체 금지 |
 | 신규 binary path 추가 시 `.gitignore` 만 추가 | `packages/triflux/package.json` files 가 root 와 다르므로 npm pack 이 binary 포함, tarball 폭증 → publish 실패 | files 부정 패턴 동반 추가 + `npm pack --dry-run` 검증 |
-| root 만 수정하고 packages 누락한 채 ship | v10.x.x 릴리즈 후 chore PR 로 늦게 sync (PR #219 패턴) | 코드 변경 PR 안에서 동시에 mirror — sync chore PR 은 backfill 용일 때만 |
+| root 만 수정하고 packages 누락한 채 ship | v10.x.x 릴리즈 후 chore PR 로 늦게 sync (사례는 [ADR-0005](../../docs/adr/0005-packages-three-layer-mirror.md) 참조) | 코드 변경 PR 안에서 동시에 mirror. sync chore PR 은 backfill 용일 때만 |
 | packages/remote 변경 후 import path 검증 생략 | 머지 후 `npm install @triflux/remote` 한 사용자가 `Cannot find module` 으로 깨짐 | `git diff` 로 `@triflux/core/...` 경로 1회 grep 확인 |
 
 ## 메모

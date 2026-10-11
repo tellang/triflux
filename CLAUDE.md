@@ -3,13 +3,14 @@
 <core-systems>
 ## 스킬 시스템
 
-이 프로젝트는 3개의 스킬 시스템을 동시에 사용한다. 어떤 작업이든 해당 시스템의 스킬이 있는지 먼저 확인한다.
+이 프로젝트는 gstack, superpowers, triflux 3계층을 동시에 사용한다(공존 규칙은 `.claude/rules/tfx-stack-coexistence.md`). OMC는 호스트 스킬(`deep-interview`, `ai-slop-cleaner` 등)과 `ralph`·`autopilot`을 제공하는 보조 도구다. 어떤 작업이든 해당 시스템의 스킬이 있는지 먼저 확인한다.
 
-| 시스템 | 접두사 | 용도 | 스킬 수 |
-|--------|--------|------|---------|
-| **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·원격 실행 | 11개 |
-| **gstack** | `/gstack-*` | QA·출시·조사·설계·검토·점검 지점 | ~35개 |
-| **omc** | `/oh-my-claudecode:*` | autopilot·ralph·team·execute·ultragoal | ~37개 |
+| 시스템 | 접두사 | 용도 |
+|--------|--------|------|
+| **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·원격 실행 |
+| **gstack** | `/gstack-*` | QA·출시·조사·설계·검토·점검 지점 |
+| **superpowers** | `/superpowers:*` | 계획 작성·디버깅·TDD·리뷰 응답·완료 검증 |
+| **omc** | `/oh-my-claudecode:*` | autopilot·ralph·team·execute·ultragoal |
 
 </core-systems>
 
@@ -180,4 +181,4 @@ Windows Terminal의 독립 탭 열기는 유지한다.
 | `.claude/rules/tfx-routing.md` | 역할별 CLI 라우팅과 직접 호출 제한 |
 | `.claude/rules/tfx-skill-authoring.md` | 스킬 frontmatter, 프로필 표기, 검증 규약 |
 
-Claude Code는 `.claude/rules/*.md`를 자동으로 불러온다. Codex CLI는 `@import`를 지원하지 않으므로 필요하면 `AGENTS.md`를 독립적으로 유지한다.
+Claude Code는 `.claude/rules/*.md`를 `paths`가 맞는 파일을 다룰 때 로드한다(`paths`가 없는 규칙은 항상 로드된다). Codex CLI는 `@import`를 지원하지 않으므로 필요하면 `AGENTS.md`를 독립적으로 유지한다.

@@ -60,7 +60,7 @@ PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escal
 # 단계당 상한 2회
 /tfx-auto "복구" --retry auto-escalate --max-iterations 2
 
-# ralph 와 조합 불가 — auto-escalate 가 우선
+# ralph 와 조합 불가: auto-escalate 가 우선
 /tfx-auto "복구" --retry auto-escalate --retry ralph   # 마지막 값 사용
 ```
 
@@ -82,6 +82,5 @@ TFX_CODEX_PROFILE=ultra bash scripts/tfx-route.sh scientist-deep "research the a
 
 ## 관련
 
-- 설계: 구현 커밋 565a2bad 의 메시지 (계획서는 저장소에 커밋되지 않았다)
 - 구현: `hub/team/retry-state-machine.mjs` (STATES / MODES / createRetryStateMachine)
 - Bridge: `hub/bridge.mjs retry-run --snapshot X --mode auto-escalate ...`

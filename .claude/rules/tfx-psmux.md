@@ -124,7 +124,7 @@ for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep "$PREFIX"
 done
 ```
 
-> 참고: `detach-client`는 `|| true`로 감싸므로 **지원하지 않는 구버전 psmux(≤3.3.x)에서는 아무 작업도 하지 않고** 종료로 진행한다. 먼저 연결을 끊는 순서는 버전과 관계없이 안전하다. `scripts/lib/psmux-info.mjs`가 `detach-client`를 `OPTIONAL`로 두는 것과 맞으며, `docs/codex-conventions.md`의 옛 `exit`→5초 대기 안내는 이 규칙으로 넘기고 폐기했다.
+> 참고: `detach-client`는 `|| true`로 감싸므로 **지원하지 않는 구버전 psmux(≤3.3.x)에서는 아무 작업도 하지 않고** 종료로 진행한다. 먼저 연결을 끊는 순서는 버전과 관계없이 안전하다. `scripts/lib/psmux-info.mjs`가 `detach-client`를 `OPTIONAL`로 두는 것과 맞다.
 
 ### 금지
 
@@ -199,7 +199,7 @@ tfx doctor --json
 
 ## 규칙 8: WT 배치 선택 필수
 
-WT에 패인을 배치하기 전에 반드시 사용자에게 레이아웃을 확인한다.
+WT에 패인을 배치하기 전에 사용자에게 레이아웃을 확인한다.
 새 탭(`nt`)은 금지이며 분할과 대시보드가 기본이다.
 
 선택지: 새 창에서 분할 / 현재 창에서 분할 / 대시보드 / 연결하지 않음
