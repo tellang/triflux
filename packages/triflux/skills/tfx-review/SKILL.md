@@ -100,7 +100,7 @@ ELSE:
 |-----|------|------|
 | Claude Opus | 로직+아키텍처 | 로직 결함, 아키텍처 위반, 설계 패턴 |
 | Codex | 보안+성능 | OWASP Top 10, O(n²) 패턴, 누락된 에러 핸들링 |
-| Antigravity | 가독성+DX | 네이밍 컨벤션, 가독성, 주석 필요성, 타입 안전성 |
+| Antigravity | 가독성+DX | 요청 범위를 넘은 변경, 과잉 추상화, 불필요한 주석, 타입 안전성 |
 
 ### 실행 단계
 
@@ -123,7 +123,7 @@ Agent(
 
 **Codex + Antigravity multi dispatch (auto):**
 ```
-Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분석하라. OWASP Top 10 취약점 확인. O(n²) 이상의 성능 병목 식별. 누락된 에러 핸들링 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:code-reviewer' --assign 'antigravity:코드 품질 전문가로서 이 코드를 분석하라. 가독성과 네이밍 컨벤션 평가. 주석이 필요한 복잡한 로직 식별. 타입 안전성 문제 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:code-reviewer' --timeout 1800", run_in_background=true)
+Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분석하라. OWASP Top 10 취약점 확인. O(n²) 이상의 성능 병목 식별. 누락된 에러 핸들링 지적. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:code-reviewer' --assign 'antigravity:코드 품질 리뷰어로서 이 diff를 분석하라. ~/Projects/tools/agent-conventions/review.md 가 있으면 그 기준을 따른다. 없으면 요청 범위를 넘은 변경, 한 번만 쓰는 추상화, 코드만 봐도 아는 주석, 구현을 되풀이하는 테스트를 찾는다. 주석, 테스트, 추상화를 더하자는 제안은 하지 않는다. JSON: { findings: [{ id, file, line, severity, category, description, suggestion }] }:code-reviewer' --timeout 1800", run_in_background=true)
 ```
 
 > 배리어: 위 dispatch는 background로 실행한다. task-notification 완료 후 team runtime 결과에서 Codex/Antigravity findings를 회수하고, Agent 결과도 TaskOutput으로 수집한 다음에만 Step 3을 진행한다.
@@ -215,7 +215,7 @@ git diff HEAD > "$ctx"                    # Step 1 의 2번
 bash ~/.claude/scripts/tfx-route.sh code-reviewer \
   "리뷰 대상은 $ctx 파일이다. 파일 전체를 끝까지 읽고 리뷰하라. 경로 목록이면 그 파일들을 읽는다.
    심각도별 분류(critical/high/medium/low).
-   체크: 로직 결함, 보안 취약점, 성능 문제, SOLID 위반, 에러 핸들링."
+   체크: 로직 결함, 보안 취약점, 성능 문제, 에러 핸들링, 과잉 설계(요청 범위를 넘은 변경, 한 번만 쓰는 추상화)."
 rm -f "$ctx"
 ```
 

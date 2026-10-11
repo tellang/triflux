@@ -3,21 +3,21 @@
 <core-systems>
 ## 스킬 시스템
 
-이 프로젝트는 3개의 스킬 시스템을 동시에 사용한다. 어떤 작업이든 해당 시스템의 스킬이 있는지 먼저 확인한다.
+이 프로젝트는 gstack, superpowers, triflux 3계층을 동시에 사용한다(공존 규칙은 `.claude/rules/tfx-stack-coexistence.md`). OMC는 호스트 스킬(`deep-interview`, `ai-slop-cleaner` 등)과 `ralph`·`autopilot`을 제공하는 보조 도구다. 어떤 작업이든 해당 시스템의 스킬이 있는지 먼저 확인한다.
 
-| 시스템 | 접두사 | 용도 | 스킬 수 |
-|--------|--------|------|---------|
-| **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·원격 실행 | 11개 |
-| **gstack** | `/` (접두사 없음) | QA·출시·조사·설계·검토·점검 지점 | ~35개 |
-| **omc** | `/oh-my-claudecode:*` | autopilot·ralph·team·execute·ultragoal | ~37개 |
+| 시스템 | 접두사 | 용도 |
+|--------|--------|------|
+| **triflux** | `/tfx-*` | CLI 라우팅·다중 모델 조정·원격 실행 |
+| **gstack** | `/gstack-*` | QA·출시·조사·설계·검토·점검 지점 |
+| **superpowers** | `/superpowers:*` | 계획 작성·디버깅·TDD·리뷰 응답·완료 검증 |
+| **omc** | `/oh-my-claudecode:*` | autopilot·ralph·team·execute·ultragoal |
 
-필요한 스킬은 이름으로 호출한다.
 </core-systems>
 
 <code-principles>
 ## 코드 작성 원칙
 
-코드는 간결하게 쓰고 의미 있는 이름을 쓴다. 주석은 이유만 짧게 한국어로 쓴다. 테스트는 회귀를 막는 핵심 경로만 최소한으로 둔다. 제거 여부는 해당 파일을 끝까지 직접 읽고 판단한다.
+주석은 한국어로 쓴다. 제거 여부는 해당 파일을 끝까지 직접 읽고 판단한다.
 </code-principles>
 
 <psmux-wt>
@@ -25,7 +25,7 @@
 
 macOS/Linux는 플랫폼 보호기가 아무 작업도 하지 않게 처리하므로 이 항목 자체를 건너뛰어도 된다. mac 인프라는
 아래 `<macos-terminal>`을 참조한다. 정책·래퍼 API·Codex 호출 형태는 모두
-`.claude/rules/tfx-psmux.md`의 규칙 1~8이 정본이며 Claude가 자동으로 불러온다.
+`.claude/rules/tfx-psmux.md`의 규칙 1~8이 정본이다. `paths`에 맞는 파일을 다룰 때 로드된다.
 </psmux-wt>
 
 <macos-terminal>
@@ -104,7 +104,7 @@ Codex를 SSH 너머로 직접 실행하지 않는다. `config.toml` 충돌과 TT
 <headless-retrieval>
 ## 비대화식 결과 회수
 
-백그라운드로 실행한 비대화식 결과는 **반드시 작업 알림 완료 후** 읽는다.
+백그라운드로 실행한 비대화식 결과는 작업 알림이 온 뒤에 읽는다.
 
 | 패턴 | 올바름 | 이유 |
 |------|--------|------|
@@ -181,4 +181,4 @@ Windows Terminal의 독립 탭 열기는 유지한다.
 | `.claude/rules/tfx-routing.md` | 역할별 CLI 라우팅과 직접 호출 제한 |
 | `.claude/rules/tfx-skill-authoring.md` | 스킬 frontmatter, 프로필 표기, 검증 규약 |
 
-Claude Code는 `.claude/rules/*.md`를 자동으로 불러온다. Codex CLI는 `@import`를 지원하지 않으므로 필요하면 `AGENTS.md`를 독립적으로 유지한다.
+Claude Code는 `.claude/rules/*.md`를 `paths`가 맞는 파일을 다룰 때 로드한다(`paths`가 없는 규칙은 항상 로드된다). Codex CLI는 `@import`를 지원하지 않으므로 필요하면 `AGENTS.md`를 독립적으로 유지한다.

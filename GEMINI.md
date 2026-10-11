@@ -6,7 +6,6 @@ Antigravity CLI는 웹 검색, 코드 검토, consensus·debate·panel 분석과
 ## 행동 규칙
 
 - 한국어로 답하고 코드 식별자·명령어·로그는 원래 언어를 유지한다.
-- 확인한 사실과 추정을 구분한다.
 - 커밋 형식은 `type(scope): 한국어 설명`이다. `Co-Authored-By`와 AI 꼬리표를 넣지 않는다.
 - API 키, 토큰, 세션 값을 하드코딩하지 않는다.
 
@@ -32,8 +31,6 @@ TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh executor "$prompt" 
 
 ## 스킬 라우팅
 
-설치된 스킬의 description과 사용자 요청이 맞으면 해당 스킬을 호출한다.
-
 | 작업 | 스킬 |
 | --- | --- |
 | 제품 아이디어 | `/gstack-office-hours` |
@@ -52,6 +49,6 @@ TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh executor "$prompt" 
 
 ## 검증
 
-변경 영역의 lint, 타입 검사, 테스트를 실행한다. 스킬 문서는 `npm run lint:skills`로 검사한다.
+스킬 문서는 `npm run lint:skills`로 검사한다.
 패키지 미러와 버전은 `node scripts/release/check-packages-mirror.mjs`와
 `node scripts/release/check-sync.mjs`로 확인한다.

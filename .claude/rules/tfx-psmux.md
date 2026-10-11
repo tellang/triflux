@@ -14,8 +14,7 @@ paths:
 > **적용 범위: Windows 환경 한정.** macOS/Linux는 플랫폼 보호기(`hub/team/wt-manager.mjs`의 `createWtManager`, `hub/team/headless.mjs`의 `autoAttachTerminal`, `tfx-route.sh`의 `uname -s` 분기)가 코드 수준에서 아무 작업도 하지 않게 처리한다. mac 사용자는 이 규칙의 1~3, 5~6, 8번(WT·PowerShell 관련)을 모두 건너뛸 수 있다. 4번(Codex CLI)과 7번(모델 프로파일 정책)만 모든 플랫폼에 적용된다.
 > mac 인프라는 `hub/team/terminal-opener.mjs`의 분기(win32 는 wt-manager, tmux 가 있으면 tmux·psmux, 그 밖에는 false 반환)와 `hub/team/psmux.mjs`의 플랫폼 분기(`IS_WINDOWS`)로 처리한다. 별도 iTerm2·tmux 관리자는 필요하지 않다.
 >
-> psmux 명령, launch 스크립트, Codex CLI 호출을 생성하는 모든 흐름은
-> 아래 규칙을 반드시 준수해야 한다. 위반 시 생성을 중단하고 수정한다.
+> psmux 명령, launch 스크립트, Codex CLI 호출을 생성하는 흐름은 아래 규칙을 따른다. 위반을 발견하면 생성을 멈추고 고친다.
 
 ## 적용 시점
 
@@ -125,7 +124,7 @@ for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep "$PREFIX"
 done
 ```
 
-> 참고: `detach-client`는 `|| true`로 감싸므로 **지원하지 않는 구버전 psmux(≤3.3.x)에서는 아무 작업도 하지 않고** 종료로 진행한다. 먼저 연결을 끊는 순서는 버전과 관계없이 안전하다. `scripts/lib/psmux-info.mjs`가 `detach-client`를 `OPTIONAL`로 두는 것과 맞으며, `docs/codex-conventions.md`의 옛 `exit`→5초 대기 안내는 이 규칙으로 넘기고 폐기했다.
+> 참고: `detach-client`는 `|| true`로 감싸므로 **지원하지 않는 구버전 psmux(≤3.3.x)에서는 아무 작업도 하지 않고** 종료로 진행한다. 먼저 연결을 끊는 순서는 버전과 관계없이 안전하다. `scripts/lib/psmux-info.mjs`가 `detach-client`를 `OPTIONAL`로 두는 것과 맞다.
 
 ### 금지
 
@@ -200,14 +199,9 @@ tfx doctor --json
 
 ## 규칙 8: WT 배치 선택 필수
 
-WT에 패인을 배치하기 전에 반드시 사용자에게 레이아웃을 확인한다.
+WT에 패인을 배치하기 전에 사용자에게 레이아웃을 확인한다.
 새 탭(`nt`)은 금지이며 분할과 대시보드가 기본이다.
 
 선택지: 새 창에서 분할 / 현재 창에서 분할 / 대시보드 / 연결하지 않음
 
-## 위반 감지 시 행동
-
-1. 생성한 명령/스크립트가 위 규칙을 위반하면 즉시 수정한다.
-2. 수정 불가능하면 생성을 중단하고 사용자에게 알린다.
-3. 다른 스킬이 이 규칙을 무시하고 명령을 생성하면 경고를 출력한다.
 <!-- TFX_PSMUX_RULES:END -->

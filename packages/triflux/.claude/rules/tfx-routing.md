@@ -21,7 +21,7 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 | 직접 구현/수정 | `/tfx-auto` (Codex 우선) | "이거 고쳐줘", "구현해줘". 기존 작업 연장이면 `/gstack-context-restore` 먼저. |
 | 디버그 | Claude 기본 Explore 에이전트 → `/superpowers:systematic-debugging` → `/tfx-auto` | 코드 위치/사용처 확인과 원인 분석을 분리한다. |
 | 리서치 | `/tfx-research` 또는 `/multilingual-parallel-research` | 외부/최신/도구 가능 여부 의문문은 `/tfx-research`; 언어권 병렬 조사는 multilingual 경로. |
-| 검증 | `/superpowers:requesting-code-review` + `/gstack-qa` + `/superpowers:verification-before-completion` | 코드 판정은 review, 브라우저/워크플로우 게이트는 qa, 완료 주장 전 evidence 수집은 verification. |
+| 검증 | `/tfx-review` + `/gstack-qa` + `/superpowers:verification-before-completion` | 코드 판정은 review, 브라우저/워크플로우 게이트는 qa, 완료 주장 전 evidence 수집은 verification. |
 | 디자인 검토 | `/gstack-design-review` | 시각/UX 판정. 코드 판정과 분리. |
 | TDD 시작 | `/superpowers:test-driven-development` | 테스트부터 짜는 흐름. 구현 전에 invoke. |
 | 코드 변경 병렬 실행 | 작업별 worktree와 세션을 분리하고 각 세션에서 `/tfx-auto` 실행 | Claude Agent는 `isolation: worktree` 사용 가능. |
@@ -46,7 +46,7 @@ description에는 해당 스킬을 고르는 데 필요한 좁은 activation phr
 - D6: 실패/버그/test failure는 `systematic-debugging` 후 `tfx-auto`; 정상 구조 설명은 `tfx-auto --mode consensus --shape panel`.
 - D7: 로컬 파일·심볼은 Claude 기본 Explore 에이전트(스킬 없음); 외부·최신·공식 문서는 `tfx-research`.
 - D8: 무수식 AI slop/deslop/refactor는 host `ai-slop-cleaner`; 명시 TFX 3자 cleanup만 `tfx-auto --mode consensus`; 회고는 `retro`. “정리” 한 단어로 cleanup을 강제하지 않는다.
-- D9: web/app flow는 `qa`; code verdict는 review backend; 완료 주장은 `verification-before-completion`이 필수다.
+- D9: web/app flow는 `qa`, code verdict는 review backend, 완료 주장 전 근거 수집은 `verification-before-completion`.
 - D10: 명확한 직접 구현은 TDD 필요 여부 뒤 `tfx-auto`; 2+ code-changing lane은 worktree와 세션을 각각 분리.
 - D11: fresh verification 없이 ship 금지. triflux release는 `tfx-ship`, 일반 release는 `ship`, 중단/재개는 context save/restore.
 
@@ -58,7 +58,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 |------|-----------|------|
 | 리드 운영 | 리드 맡아, 세션들 지휘, 워커 띄워서 조율, 승계·머지·릴리스 조율 | tfx-lead |
 | 구현/수정 | 만들어, 고쳐, 구현해, 짜줘, 수정해, 바꿔 | tfx-auto |
-| 리뷰 | 봐줘, 리뷰해, 검토해, 괜찮아? | `superpowers:requesting-code-review` (owner). 교차모델 판정이 필요할 때만 tfx-review |
+| 리뷰 | 봐줘, 리뷰해, 검토해, 괜찮아? | tfx-review |
 | 분석 | 분석해, 어떻게 돌아가?, 구조가 뭐야 | tfx-auto (`--mode consensus --shape panel`) |
 | 계획 | 계획, 어떻게 하지, 설계해 | superpowers `writing-plans`; TFX 다중모델 계획·실행은 `tfx-auto --mode deep` |
 | 요구사항 명확화 | 요구사항, 인터뷰, 목표 구체화 | host `deep-interview`; 목표 변환은 Claude Code 기본 `/goal` |
@@ -89,8 +89,6 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 ## CLI 우선순위 정책: default = Codex
 
 > 근거(why): [ADR-0004: 기본 구현 CLI = Codex](../../docs/adr/0004-codex-as-default-cli.md). 이 절이 SSOT(어떻게), ADR은 결정 이력(왜).
-
-triflux 본체 개발의 실측 운영 패턴 (v10.18.0 ~ v10.20.2, 2주, 25+ PR) 이 거의 전부 Codex 단독 또는 Codex worker spawn 으로 진행되었다. 이 운영 fact 를 default policy 로 명시한다.
 
 | 우선순위 | CLI / 모델 | default 적용 lane |
 |---------|-----------|-------------------|
@@ -123,7 +121,7 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 
 ## CLI 라우팅
 
-`codex exec` / `agy -y -p` 직접 호출은 금지한다. tfx 스킬 경유 필수. 자동 차단 훅(headless-guard)은 제거되었으므로 호출자가 지킨다.
+`codex exec`와 `agy --print`를 직접 호출하지 않고 tfx 스킬을 거친다. headless-guard 훅은 제거되었으므로 호출자가 지킨다.
 
 **Layer 1: Light** (tfx-route.sh → 단일 CLI)
 
@@ -169,10 +167,8 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 
 ## 충돌 해소
 
-- ralph = persist alias
 - "auto" 단독 → tfx-auto. "알아서 해" → autopilot 모드 (위 깊이 수정자)
 - "코드에서 찾아" → Claude 기본 Explore 에이전트. "알아봐" → tfx-research
 - 복합 의도: "구현하고 리뷰까지" → tfx-auto 실행 후 리뷰 결과 확인
 - "합의해서 비교해" 류 요청은 기본적으로 `tfx-auto --mode consensus --shape debate` 로 fold 한다
-- `ralph` 표기는 항상 `--retry ralph` mode 를 지칭. persist 스킬도 동일 의미. `--retry auto-escalate` 와 동시 사용 불가 (escalation-chain.md 규약).
-- 코드 변경 병렬 작업은 작업별 worktree와 세션을 분리하고 각 세션에서 `tfx-auto`로 실행한다.
+- `ralph` 표기는 항상 `--retry ralph` mode를 지칭한다. `--retry auto-escalate`와 동시에 쓸 수 없다(escalation-chain.md 규약).

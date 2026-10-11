@@ -39,19 +39,10 @@ paths:
 ## 4. SKILL.md가 단일 정본
 
 - `skills/**/SKILL.md`가 배포·리뷰·lint 기준의 단일 정본이다.
-- `SKILL.md.tmpl` 기반 생성 파이프라인은 deprecated 상태이며 새 변경을
-  추가하지 않는다.
-- 현재 `.tmpl` 파일은 없다.
+- `SKILL.md.tmpl` 생성 파이프라인과 별도 manifest는 쓰지 않는다. `skill.json`이
+  있어도 `SKILL.md` frontmatter를 대체하지 않는다.
 
-## 5. Lake4 manifest는 영구 보류
-
-- Lake4 manifest 분리는 영구 보류한다.
-- Claude Code가 frontmatter를 필수 표면으로 요구하므로, manifest만 별도
-  정본으로 분리할 수 없다.
-- manifest 생성 스크립트는 제거되었다. `skill.json`이 있어도 `SKILL.md`
-  frontmatter를 대체하지 않는다.
-
-## 6. 변경 검증
+## 5. 변경 검증
 
 - 스킬 문서를 바꾼 뒤 `npm run lint:skills`를 실행한다.
 - `npm test`는 `lint:skills`를 포함하므로, 테스트 파이프라인에서도 동일한
