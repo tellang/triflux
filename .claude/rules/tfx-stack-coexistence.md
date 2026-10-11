@@ -1,6 +1,6 @@
 # 스택 공존 가이드: gstack + superpowers + triflux
 
-> 근거(why): [ADR-0009: gstack·sp·triflux 단방향 3-layer 공존](../../docs/adr/0009-stack-coexistence-three-layer.md). 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
+> 근거(why): [ADR-0036: 3-layer 공존에서 코드 판정은 triflux tfx-review](../../docs/adr/0036-code-verdict-owner-tfx-review.md). ADR-0009 를 대체한다. 이 문서가 SSOT(어떻게), ADR은 결정 이력(왜).
 
 ## 공존 원칙
 
@@ -73,7 +73,7 @@ triflux  →  superpowers  (금지)
   → 각 세션에서 tfx-auto로 구현
 
 리뷰
-  → superpowers requesting-code-review  (sp 엔진: diff → verdict)
+  → tfx-review  (triflux: diff → verdict)
   → gstack-context-save   (gstack 무대: 스냅샷 기록)
   ← 최종 머지 승인
 ```
@@ -99,4 +99,4 @@ triflux  →  superpowers  (금지)
 | 스킬 키워드 충돌 시 임의 선택 | 비결정적 라우팅 | 이 문서 §충돌 해소 표에서 1순위를 명확히 따름 |
 | gstack `/gstack-ship`이 triflux를 우회하고 codex 직접 호출 | 라우팅 규약 위반 | gstack → triflux → headless 경로 필수 |
 | 발표자 영상 워크플로우에서 tfx-auto만 사용 | /gstack-office-hours 게이트 없이 배포 → QA 누락 | gstack /gstack-office-hours → tfx-auto --mode deep → 작업별 worktree와 세션 분리 |
-| sp 판정 없이 triflux auto-merge | 미검증 코드 머지 | worktree별 superpowers review verdict 수신 확인 후 merge |
+| tfx-review 판정 없이 auto-merge | 미검증 코드 머지 | worktree별 tfx-review verdict 확인 후 merge |

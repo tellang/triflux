@@ -74,7 +74,7 @@
 - **근거**: 두 문서가 plan/review owner를 두고 어긋난다는 지적이 있었으나,
   `writing-plans`는 ladder의 한 *단계*이고 Plan 기능의 *owner*는 triflux라 모순이
   아니었다. 통합하였다면 검증된 워크플로 체인이 깨졌을 것이다.
-- **관련**: commit `98ee2423` · [ADR-0009](adr/0009-stack-coexistence-three-layer.md)
+- **관련**: commit `98ee2423` · [ADR-0009](_archive/adr/0009-stack-coexistence-three-layer.md)(ADR-0036 으로 대체)
 
 ## 2026-07-07: docs/req/ raw↔refined 링크 수준
 

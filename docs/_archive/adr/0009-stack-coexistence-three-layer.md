@@ -1,11 +1,11 @@
 ---
 id: 0009
 title: gstack·superpowers·triflux를 단방향 3-layer로 공존시킨다
-status: accepted
+status: superseded
 date: 2026-07-01
 deciders: [tellang]
 supersedes: []
-superseded_by: null
+superseded_by: 0036
 relates: [0002]
 pr: null
 ---

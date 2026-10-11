@@ -15,7 +15,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0006](../_archive/adr/0006-escalation-chain-codex-to-claude-opus.md) | 재시도 승격 체인 codex→claude opus 2단계 | Superseded | 0002, 0004, 0016 |
 | [0007](../_archive/adr/0007-hub-default-port-27888.md) | hub 기본 포트 27888 고정 | Deprecated | 0002, 0023 |
 | [0008](0008-native-bridge-ui-default-on.md) | headless 워커 native-bridge 기본 노출 | Accepted | 0002 |
-| [0009](0009-stack-coexistence-three-layer.md) | gstack·sp·triflux 단방향 3-layer 공존 | Accepted | 0002 |
+| [0009](../_archive/adr/0009-stack-coexistence-three-layer.md) | gstack·sp·triflux 단방향 3-layer 공존 | Superseded | 0002, 0036 |
 | [0010](../_archive/adr/0010-cto-lake-hub-role-boundary.md) | CTO lake ↔ Hub role 경계 — liveness/history 평면 분리 | Superseded | 0005, 0007, 0023 |
 | [0011](../_archive/adr/0011-active-role-system-cto-scoped-lead.md) | 능동 역할 시스템 — CTO + scoped lead (C+A 하이브리드) | Superseded | 0010, 0024 |
 | [0012](0012-orphaned-design-doc-deprecation.md) | 제거된 구현의 설계 문서 폐기 표시 | Accepted | 0002 |
@@ -42,6 +42,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0033](0033-remove-account-broker.md) | 계정 브로커 삭제 | Proposed | 0023, 0031 |
 | [0034](0034-headless-session-results-index.md) | headless 세션마다 결과 색인 JSON 하나를 둔다 | Proposed | 0015, 0029 |
 | [0035](0035-remove-cto.md) | CTO 삭제 | Proposed | 0022, 0024 |
+| [0036](0036-code-verdict-owner-tfx-review.md) | 3-layer 공존에서 코드 판정은 triflux tfx-review | Accepted | 0002, 0009 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 
