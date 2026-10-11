@@ -1,14 +1,14 @@
 ---
 name: tfx-live
 description: >
-  Claude·Codex 세션을 실시간으로 생성·질의·대기·압축·종료하거나,
+  Claude·Codex·agy 세션을 실시간으로 생성·질의·대기·압축·종료하거나,
   tmux/daemon UDS 연결과 peer 중계를 운영할 때 사용한다.
-argument-hint: "<start|ask|wait|queue|compact|stop|rename|interrupt|probe|list-sessions|peer|converse|goal-driven> ..."
+argument-hint: "<start|ask|wait|queue|compact|stop|rename|interrupt|probe|list-sessions|peer|converse|goal-driven> [--cli codex|claude|agy] ..."
 ---
 
 # tfx-live
 
-`tfx-live`는 Claude Code와 Codex 세션을 tmux 또는 daemon UDS로 제어한다.
+`tfx-live`는 Claude Code와 Codex 세션을 tmux 또는 daemon UDS로, agy 세션을 로컬 tmux로 제어한다.
 `tfx-live --help`와 `tfx-live <동사> --help`로 사용법을 확인한다.
 
 ## 전송 경로
@@ -25,7 +25,25 @@ tfx-live ask --cli codex --session cx1 --prompt "현재 변경사항을 요약�
 tfx-live stop --cli codex --session cx1
 ```
 
-새 세션 이름은 `<월>.<일> <주제>`로 짓는다. `start --name`을 생략하면 자동으로 만들고 `nameGenerated: true`를 보고한다. `--resume` 또는 `--resume-last`는 `--name`을 명시한 경우에만 이름을 적용한다. 승계 세션에는 기존 이름 뒤에 ` 2`, 이후 ` 3`을 붙인다. 이름 적용을 요청한 경우 결과의 `nameApplied: false`는 적용 실패를 뜻한다. Codex `start`는 `/rename` 제출을 입력창이 빌 때까지 확인하고, 이름으로 찾은 thread UUID를 `threadId`로 돌려주며 tmux 세션 옵션 `@tfx_codex_thread`에 남긴다. 로컬 Codex `--resume-last`는 Codex가 고른 thread를 사후에 찾는다. 띄운 뒤 공유 app-server daemon에 로드된 같은 cwd의 thread 중 rollout에 그 시각 이후의 resume 기록(`thread_settings_applied`)이 생긴 것이 정확히 하나이고 1.5초 뒤에도 같을 때만 `threadId`로 쓴다. 이 확인은 5초 안에 끝난다. TUI가 daemon을 쓰지 않거나 같은 cwd에서 동시에 resume이 일어나면 `null`이다. 기존 Codex UDS thread는 `tfx-live rename --cli codex --transport uds --thread ID --name "<이름>"`으로 이름을 바꾼다.
+새 세션 이름은 `<월>.<일> <주제>`로 짓는다. `start --name`을 생략하면 자동으로 만들고 `nameGenerated: true`를 보고한다. `--resume` 또는 `--resume-last`는 `--name`을 명시한 경우에만 이름을 적용한다. 승계 세션에는 기존 이름 뒤에 ` 2`, 이후 ` 3`을 붙인다. 이름 적용을 요청한 경우 결과의 `nameApplied: false`는 미적용을 뜻한다. agy의 `namePending: true`는 첫 일반 ask에서 적용할 이름이 보류됐다는 뜻이다. Codex `start`는 `/rename` 제출을 입력창이 빌 때까지 확인하고, 이름으로 찾은 thread UUID를 `threadId`로 돌려주며 tmux 세션 옵션 `@tfx_codex_thread`에 남긴다. 로컬 Codex `--resume-last`는 Codex가 고른 thread를 사후에 찾는다. 띄운 뒤 공유 app-server daemon에 로드된 같은 cwd의 thread 중 rollout에 그 시각 이후의 resume 기록(`thread_settings_applied`)이 생긴 것이 정확히 하나이고 1.5초 뒤에도 같을 때만 `threadId`로 쓴다. 이 확인은 5초 안에 끝난다. TUI가 daemon을 쓰지 않거나 같은 cwd에서 동시에 resume이 일어나면 `null`이다. 기존 Codex UDS thread는 `tfx-live rename --cli codex --transport uds --thread ID --name "<이름>"`으로 이름을 바꾼다.
+
+## agy 세션
+
+```bash
+tfx-live start --cli agy --session ag1 --cwd ~/Projects --name "10.11 구현 검토" --effort low --unset-env 'TOSSINVEST_*,PRIVATE_KEY'
+tfx-live ask --cli agy --session ag1 --prompt "현재 변경사항을 요약해줘" --no-wait
+tfx-live wait --cli agy --session ag1 --request-id <requestId> --timeout 120
+tfx-live list-sessions --cli agy --cwd ~/Projects
+tfx-live stop --cli agy --session ag1
+```
+
+`start`는 `--model ID`, `--effort low|medium|high|xhigh|max`, `--sandbox`를 agy에 넘긴다. `--sandbox`의 실효는 미검증이다. `--resume ID`와 `--resume-last 1`로 대화를 재개한다. 준비 뒤 `/rename <이름>`의 확인 문구가 보이면 `nameApplied: true`다. 새 대화는 첫 메시지 전 `/rename`이 실패하므로 이름을 tmux 옵션 `@tfx_agy_name`에 남기고 `nameApplied: false`, `namePending: true`로 보류한다. 첫 일반 ask는 제출 확인 뒤 현재 대화 DB에 사용자 step이 생길 때까지 최대 5초 기다리고, 유휴를 기다리지 않고 `/rename`을 보낸다. 확인 문구가 보이면 옵션을 지우고 `nameApplied: true`를 반환하며, 실패하면 옵션을 남기고 `nameApplied: false`를 반환한다. `--no-wait`에도 적용한다. 열린 presence lock에서 찾은 대화 ID는 `conversationId`로 보고한다.
+
+agy `ask`의 기본 `--if-busy queue`는 바쁜 턴에도 바로 전송한다. agy 자체 대기열에 쌓이며 앞 입력을 덮어쓰지 않는다. `wait|fail|interrupt`도 선택할 수 있다. `ask --no-wait`는 `inputSent: true`, `requestId`와 함께 유휴 시 `status: "submitted"`, 바쁠 때 `status: "queued"`를 반환한다. `queue` 정책은 agy 전용이다. 슬래시 명령은 중계 표식 없이 보내고 바빠도 즉시 실행한다. DB step을 만들지 않아 `wait`로 추적하지 않으며, `--no-wait` 여부와 무관하게 제출 확인 뒤 `status: "submitted"`, `slashCommand: true`로 반환한다. `/clear`는 대화 ID를 바꾼다.
+
+`wait`는 `node:sqlite`(Node 22.13+)로 대화 DB의 사용자 입력 표식과 뒤따르는 step 상태를 읽는다. 요청 뒤부터 다음 사용자 입력 전까지 모델 응답 step이 하나 이상 있고 그 구간의 모든 step이 끝났으며, pane이 유휴 상태이거나 다음 요청이 시작됐으면 완료다. 같은 구간의 마지막 비어 있지 않은 모델 텍스트를 응답으로 쓴다. Escape로 취소된 step도 완료 상태로 기록된다. `--timeout 0`은 한 번만 확인한다. `/clear`는 대화 ID를 바꾸며 진행 중 `wait`는 처음 연 DB를 계속 본다. agy 설정의 `toolPermission`에 따라 도구 승인 화면이 뜰 수 있다. 승인을 기다리는 동안 턴이 멈추고 `wait`는 `working`으로 남는다. `tfx-live`는 agy에 `--dangerously-skip-permissions`를 쓰지 않는다. agy에는 compact가 없으므로 `/clear` 또는 handoff를 쓴다. `--remote`, `peer`, `converse`, `goal-driven`은 지원하지 않는다.
+
+`start --unset-env 'PREFIX_*,EXACT_NAME'`은 모든 CLI에 쓸 수 있다. 쉼표로 구분한 환경변수 이름과 끝의 `*`로 지정한 접두만 허용한다. tmux pane 셸의 환경에서 변수를 지우고 CLI를 실행하며 resume에도 적용한다. 로컬에서는 준비 후 CLI 프로세스 환경을 확인한다. macOS는 `ps -E` 출력에 `PATH=`가 있고 Linux는 `/proc/PID/environ`이 비어 있지 않을 때만 환경을 읽은 것으로 판정한다. 일치하는 변수가 실제로 남은 경우에만 생성한 세션을 종료하고 오류를 낸다. 환경을 읽지 못하면 세션을 유지하고 `unsetEnvVerified: false`, `unsetEnvWarning: "CLI environment unreadable; removal not verified"`를 반환한다. 결과의 `unsetEnv`는 요청 목록이고 `unsetEnvVerified`는 확인 여부다. 원격에서는 확인하지 않아 `false`이고 Windows에서는 이 옵션을 지원하지 않는다.
 
 ## 리드 운영
 
@@ -70,7 +88,7 @@ tfx-live queue --cli codex --thread <UUID> --delete <queuedMessageId>
 | Codex | 15% | 18% | 20% | 22% |
 | agy | 12% | 없음 | 15% | 18% |
 
-Claude는 85% 도달 시 바로 handoff를 지시한다. agy 행은 운영 지침이며 `tfx-live` 전송 대상이 아니다. `model_context_window`와 `model_auto_compact_token_limit`은 올리지 않는다.
+Claude는 85% 도달 시 바로 handoff를 지시한다. agy 행은 운영 지침이며 agy도 `tfx-live` 전송 대상이지만 컨텍스트 비율은 자동으로 읽지 못해 `null`로 보고하고 가드를 건너뛴다. `model_context_window`와 `model_auto_compact_token_limit`은 올리지 않는다.
 
 결과에는 `estimatedContextTokens`, `contextLimitTokens`, `contextLimitSource`, `contextPct`가 포함된다. Claude 실행 한도는 `executionContextLimitTokens`로 별도 보고하며 `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`이면 200,000이다. 판정에는 공식 창과 실행 한도 중 작은 값을 쓴다. 한도를 모르면 비율은 `null`로 두고 경고만 한다. 사용량이 없는 `probe`는 `context: null`이다. 컨텍스트를 확인하려면 직접 `tfx-live probe`를 실행한다. `interrupt`, 자동 `ask`의 daemon probe, `stop --short`는 transcript를 읽지 않는다.
 
