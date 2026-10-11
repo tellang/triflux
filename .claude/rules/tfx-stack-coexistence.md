@@ -15,10 +15,10 @@
 | 레이어 | 시스템 | 역할 | 진입 방식 |
 |--------|--------|------|-----------|
 | **무대 (Stage)** | gstack | 워크플로우 게이트: 언제 어떤 작업을 부를지 결정 | `/gstack-ship`, `/gstack-qa`, `/gstack-context-save`, `/gstack-investigate` 등 |
-| **엔진 (Engine)** | superpowers | 리뷰 프리미티브: 입력 diff, 출력 verdict | `/superpowers:requesting-code-review`, `/superpowers:receiving-code-review` |
+| **엔진 (Engine)** | superpowers | 작업 방식 프리미티브: 브레인스토밍, 계획, TDD, 리뷰 반영 | `/superpowers:brainstorming`, `/superpowers:writing-plans`, `/superpowers:receiving-code-review` 등 |
 | **백엔드 (Backend)** | triflux | 오케스트레이션: 병렬 worker 배분, 프로필 선택, 실행 | `/tfx-*` 스킬 전체 |
 
-> 사용자 → gstack(게이트) → triflux(실행) → superpowers(판정) → gstack(결과 처리)
+> 흐름: 사용자가 gstack 게이트를 거쳐 triflux 로 실행하고, 코드 판정도 triflux `tfx-review` 가 한다. 결과 처리는 gstack 이 맡고, superpowers 는 작업 방식(계획, TDD, 리뷰 반영)을 맡는다.
 
 ## 의존 방향 규칙
 
@@ -36,7 +36,6 @@ triflux  →  superpowers  (금지)
 | 상황 | Fallback |
 |------|---------|
 | gstack 스킬 없음 | `tfx-auto`로 직접 라우팅 |
-| superpowers review 실패 | triflux `--mode consensus` 3-CLI 합의로 대체 |
 | triflux 라우팅 오류 | 오류 즉시 서페이스. gstack/sp 우회 금지 |
 
 ## 책임 매트릭스
