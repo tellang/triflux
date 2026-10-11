@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.59.2] - 2026-10-11
+
+### Fixed
+- harness: SSOT 탐색 순서를 SKILL.md 의 고정 셸 블록으로 준다. 호출마다 모델이 한 줄 명령을 새로 짜다 따옴표 중첩으로 실패하던 문제를 막고, 오래된 git 과 `set -eu` 에서도 링크 워크트리가 메인 SSOT 를 고른다 (#734)
+
 ## [10.59.1] - 2026-10-11
 
 ### Fixed
