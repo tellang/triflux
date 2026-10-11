@@ -12,9 +12,7 @@ import {
   dim,
   GAUGE_WIDTH,
   GEMINI_BLUE,
-  GEMINI_BLUE_BG,
   geminiBlue,
-  RESET,
   yellow,
 } from "./colors.mjs";
 import {
@@ -152,7 +150,7 @@ export function getMicroLine(
 
 function antigravityPercentText(quota) {
   if (quota?.auth === "project") {
-    return gcpBadge("▓".repeat(PERCENT_CELL_WIDTH - 3));
+    return geminiBlue("GCP".padStart(PERCENT_CELL_WIDTH));
   }
   return quota?.usedPercent != null
     ? colorByProvider(
@@ -161,11 +159,6 @@ function antigravityPercentText(quota) {
         geminiBlue,
       )
     : dim(formatPlaceholderPercentCell());
-}
-
-// 게이지의 거의 찬 칸(▓)으로 감싸고 글자만 반전한다. band 도 그리도록 SGR 7 대신 배경색을 쓴다.
-function gcpBadge(lead, trail = "") {
-  return `${geminiBlue(lead)}${GEMINI_BLUE_BG}\x1b[30m\x1b[1mGCP${RESET}${geminiBlue(trail)}`;
 }
 
 // context 는 토큰 수 대신 사용률만 보여 준다.
@@ -537,7 +530,7 @@ function getAntigravityRow(
   let slot;
   if (project) {
     // 쿼터 대신 과금 방식을 막대 자리(막대가 없는 표시에서는 퍼센트 자리)에 보인다.
-    const mark = isFull ? `${gcpBadge("▓", "▓")} ` : "";
+    const mark = isFull ? `${geminiBlue(" GCP ")} ` : "";
     const cell = isFull ? dim(formatPlaceholderPercentCell()) : percent;
     slot = `${dim("--:")}${mark}${cell}${timeCell}`;
   } else {
