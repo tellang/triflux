@@ -41,12 +41,11 @@ function applySgr(style: Omit<BandSpan, 'text'>, params: string) {
     else if (code === 2) next.dim = true
     else if (code === 22) next = { ...next, bold: false, dim: false }
     else if (code === 39) next.color = undefined
-    else if (code === 49) next.backgroundColor = undefined
-    else if ((code === 38 || code === 48) && codes[i + 1] === 2) {
-      next[code === 38 ? 'color' : 'backgroundColor'] = hex(codes[i + 2] ?? 0, codes[i + 3] ?? 0, codes[i + 4] ?? 0)
+    else if (code === 38 && codes[i + 1] === 2) {
+      next.color = hex(codes[i + 2] ?? 0, codes[i + 3] ?? 0, codes[i + 4] ?? 0)
       i += 4
-    } else if ((code === 38 || code === 48) && codes[i + 1] === 5) {
-      next[code === 38 ? 'color' : 'backgroundColor'] = xterm256(codes[i + 2] ?? 0)
+    } else if (code === 38 && codes[i + 1] === 5) {
+      next.color = xterm256(codes[i + 2] ?? 0)
       i += 2
     } else if (code !== undefined && NAMED_COLORS[code]) next.color = NAMED_COLORS[code]
   }
@@ -179,7 +178,7 @@ export function registerHudBand(on: On, options: PluginOptions) {
         {snapshot.lines.map(spans => (
           <Text wrap="truncate-end">
             {[{ text: '  ' }, ...spans].map(s => (
-              <Text color={s.color} backgroundColor={s.backgroundColor} bold={s.bold} dimColor={s.dim}>
+              <Text color={s.color} bold={s.bold} dimColor={s.dim}>
                 {s.text}
               </Text>
             ))}
