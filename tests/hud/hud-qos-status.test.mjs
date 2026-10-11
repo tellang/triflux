@@ -173,7 +173,11 @@ describe("HUD provider visibility", () => {
     const disabledOutput = runHud();
     // GCP 프로젝트 과금은 로그인된 정상 상태라 회색이 아니고, 쿼터 대신 과금 방식을 보인다.
     assert.match(disabledOutput, /^a:.*GCP.*hud-prj/m);
-    assert.doesNotMatch(disabledOutput, /^a:.*(?:\d+%|n\/a|[█▓▒░])/m);
+    // 배지의 ▓ 는 장식이라 걷어낸 뒤 쿼터 게이지가 없는지 본다.
+    assert.doesNotMatch(
+      disabledOutput.replace(/▓GCP▓?/g, "GCP"),
+      /^a:.*(?:\d+%|n\/a|[█▓▒░])/m,
+    );
     assert.doesNotMatch(
       runHud({}, { preserveAnsi: true }),
       /^\x1b\[0m\x1b\[2ma:/m,

@@ -104,7 +104,7 @@ describe("HUD 표시", () => {
     assert.ok(getMicroLine(context, usage, null).includes(dim("ctx:")));
   });
 
-  it("GCP 배지는 파란 배경과 흰 굵은 글씨이며 기존 칸 폭을 유지한다", () => {
+  it("GCP 배지는 배경색 없이 ▓ 로 감싸고 기존 칸 폭을 유지한다", () => {
     const project = { auth: "project" };
     const row = getProviderRow(
       "full",
@@ -114,13 +114,12 @@ describe("HUD 표시", () => {
       project,
       "project",
     );
-    const badge = /\x1b\[48;5;39m\x1b\[1m\x1b\[97m( GCP )/;
-    assert.match(row.left, badge);
-    assert.equal(stripAnsi(row.left).slice(3, 3 + GAUGE_WIDTH), " GCP ");
+    assert.doesNotMatch(row.left, /\x1b\[48;/);
+    assert.equal(stripAnsi(row.left).slice(3, 3 + GAUGE_WIDTH), "▓GCP▓");
     const micro = getMicroLine(context, usage, null, {
       antigravityQuota: project,
     });
-    assert.match(micro, /\x1b\[48;5;39m\x1b\[1m\x1b\[97m( GCP)/);
+    assert.match(stripAnsi(micro), /a:▓GCP ctx:/);
     assert.equal(
       stripAnsi(micro).match(/a:(.*?) ctx:/)[1].length,
       PERCENT_CELL_WIDTH,
