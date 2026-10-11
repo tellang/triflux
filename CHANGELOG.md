@@ -2,6 +2,17 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.58.0] - 2026-10-11
+
+### Added
+- hud: full 단계에서 5h 게이지 뒤 공백 한 칸에 프롬프트 캐시 상태를 보인다. 살아 있으면 제공자 색 `+`, 남은 시간이 5분과 TTL 20% 중 작은 값 이하면 흐린 `+`, 식으면 공백이라 폭은 늘지 않는다. Claude 는 statusLine 입력의 `prompt_cache`, Codex 는 최근 30분 안에 수정된 세션 기록의 마지막 응답 기록(`token_usage_record`)에 30분 TTL 을 더해 판정한다 (#730)
+- hud: c 행 오른쪽에 Claude 계정 라벨을 붙이고 그 뒤에 ctx 를 둔다. `$CLAUDE_CONFIG_DIR/.claude.json` 의 `oauthAccount` 를 읽는다 (#730)
+
+### Changed
+- hud: c 행의 세션 비용 표시를 뺀다. statusLine 과 mods band 입력 모두. gateway `spend_limit`(`$:`)는 그대로다 (#730)
+- hud: `CTX:` 라벨을 흐린 소문자 `ctx:` 로 바꾸고, daemon attach 의 HUD 줄 필터도 맞춘다 (#730)
+- hud: GCP 프로젝트 인증 표시를 full 단계에서 앞뒤 공백을 둔 ` GCP ` 로 그린다 (#730)
+
 ## [10.57.3] - 2026-10-11
 
 ### Fixed
