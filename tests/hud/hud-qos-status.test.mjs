@@ -52,6 +52,7 @@ function runHud(
       USERPROFILE: mockHomeDir,
       // 로그인 판정이 바깥 CODEX_HOME 의 auth.json 을 읽지 않게 목 HOME 에 고정한다.
       CODEX_HOME: join(mockHomeDir, ".codex"),
+      CLAUDE_CONFIG_DIR: mockHomeDir,
       COLUMNS: "120",
       LINES: "40",
       OMC_HUD_COMPACT: "",
@@ -73,7 +74,7 @@ describe("HUD provider visibility", () => {
   it("정책이 Codex 를 차단하면 x 행을 숨긴다", () => {
     const output = runHud({ TFX_DISABLE_CODEX: "0" });
     assert.match(output, /^x:/m);
-    assert.match(output, /CTX:25%/);
+    assert.match(output, /ctx:25%/);
     assert.doesNotMatch(output, /50K\/200K/);
     assert.doesNotMatch(runHud({ TFX_DISABLE_CODEX: "1" }), /^x:/m);
     const bandDir = join(cacheDir, "triflux", "claude-band");
@@ -275,6 +276,60 @@ describe("HUD provider visibility", () => {
           assert.equal(agy.slice(6, 11), active ? "█░░░░" : "░░░░░");
         }
       }
+    }
+  });
+
+  it("Claude 계정과 캐시를 stdin 에서 표시하고 세션 비용은 숨긴다", () => {
+    rmSync(join(mockHomeDir, ".omc"), { recursive: true, force: true });
+    const configDir = join(mockHomeDir, "claude-account");
+    mkdirSync(configDir);
+    writeFileSync(
+      join(configDir, ".claude.json"),
+      JSON.stringify({
+        oauthAccount: {
+          emailAddress: "claude-dev@example.test",
+          displayName: "Other Name",
+        },
+      }),
+    );
+    const input = {
+      cost: { total_cost_usd: 12.09 },
+      prompt_cache: {
+        warm: true,
+        caching_observed: true,
+        expires_at: Date.now() / 1000 + 210,
+      },
+    };
+    const env = { CLAUDE_CONFIG_DIR: configDir, COLUMNS: "200" };
+    const output = runHud(env, { input });
+    assert.match(output, /^c:.*ctx:25% cache 3m claude-dev$/m);
+    assert.doesNotMatch(output, /\$12\.09|Other Name/);
+    assert.match(
+      runHud(env, {
+        input: {
+          ...input,
+          rate_limits: { spend_limit: { used_percentage: 83 } },
+        },
+      }),
+      /^c: \$:.*83%.*ctx:25% cache 3m claude-dev$/m,
+    );
+    rmSync(join(configDir, ".claude.json"));
+    writeFileSync(join(configDir, ".claude.json"), "{}");
+    assert.doesNotMatch(runHud(env, { input }), /claude-dev/);
+    const homeConfig = join(mockHomeDir, ".claude.json");
+    writeFileSync(
+      homeConfig,
+      JSON.stringify({
+        oauthAccount: { emailAddress: "home-dev@example.test" },
+      }),
+    );
+    try {
+      assert.match(
+        runHud({ ...env, CLAUDE_CONFIG_DIR: "" }, { input }),
+        /^c:.*home-dev$/m,
+      );
+    } finally {
+      rmSync(homeConfig);
     }
   });
 

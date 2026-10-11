@@ -41,11 +41,12 @@ function applySgr(style: Omit<BandSpan, 'text'>, params: string) {
     else if (code === 2) next.dim = true
     else if (code === 22) next = { ...next, bold: false, dim: false }
     else if (code === 39) next.color = undefined
-    else if (code === 38 && codes[i + 1] === 2) {
-      next.color = hex(codes[i + 2] ?? 0, codes[i + 3] ?? 0, codes[i + 4] ?? 0)
+    else if (code === 49) next.backgroundColor = undefined
+    else if ((code === 38 || code === 48) && codes[i + 1] === 2) {
+      next[code === 38 ? 'color' : 'backgroundColor'] = hex(codes[i + 2] ?? 0, codes[i + 3] ?? 0, codes[i + 4] ?? 0)
       i += 4
-    } else if (code === 38 && codes[i + 1] === 5) {
-      next.color = xterm256(codes[i + 2] ?? 0)
+    } else if ((code === 38 || code === 48) && codes[i + 1] === 5) {
+      next[code === 38 ? 'color' : 'backgroundColor'] = xterm256(codes[i + 2] ?? 0)
       i += 2
     } else if (code !== undefined && NAMED_COLORS[code]) next.color = NAMED_COLORS[code]
   }
@@ -107,7 +108,7 @@ async function refreshRows($: EngineInterface, position: BandPosition, columns: 
       await writeMarker($, marker, 'off')
       return
     }
-    const { rateLimits, context, cost } = await $.session.usage()
+    const { rateLimits, context } = await $.session.usage()
     const stdin = JSON.stringify({
       session_id: sessionId,
       context_window: {
@@ -115,7 +116,6 @@ async function refreshRows($: EngineInterface, position: BandPosition, columns: 
         used_percentage: context.percent,
         current_usage: { total_tokens: context.tokens },
       },
-      cost: { total_cost_usd: cost?.usd },
       // statusLine 입력과 같은 모양(resets_at 은 epoch 초)으로 넘겨 HUD 가 한 경로로 읽는다.
       rate_limits: Object.fromEntries(
         rateLimits.map(w => [
@@ -179,7 +179,7 @@ export function registerHudBand(on: On, options: PluginOptions) {
         {snapshot.lines.map(spans => (
           <Text wrap="truncate-end">
             {[{ text: '  ' }, ...spans].map(s => (
-              <Text color={s.color} bold={s.bold} dimColor={s.dim}>
+              <Text color={s.color} backgroundColor={s.backgroundColor} bold={s.bold} dimColor={s.dim}>
                 {s.text}
               </Text>
             ))}

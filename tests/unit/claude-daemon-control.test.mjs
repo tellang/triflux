@@ -170,6 +170,19 @@ test("extractClaudeDaemonAttachText returns the last assistant block without chr
   );
 });
 
+test("extractClaudeDaemonAttachText excludes HUD summaries with either ctx label", () => {
+  for (const hud of [
+    "c:17%/42% x:31%/54% a: GCP ctx:25%",
+    "c:--%/--% x:--%/--% ctx:--%",
+    "c:17%/42% CTX:25%",
+  ]) {
+    assert.equal(
+      extractClaudeDaemonAttachText(["⏺ final answer", hud].join("\n")),
+      "final answer",
+    );
+  }
+});
+
 test("extractClaudeDaemonAttachText stops before settings overlays", () => {
   const text = [
     "⏺ ACK",

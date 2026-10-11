@@ -13,6 +13,7 @@ import {
   GAUGE_WIDTH,
   GEMINI_BLUE,
   geminiBlue,
+  geminiBlueBackground,
   yellow,
 } from "./colors.mjs";
 import {
@@ -143,13 +144,13 @@ export function getMicroLine(
       : agyText;
     segments.push(`${marker}${dim(":")}${agyValue}`);
   }
-  segments.push(`${dim("CTX:")}${contextPercentText(ctxView)}`);
+  segments.push(`${dim("ctx:")}${contextPercentText(ctxView)}`);
   return truncateAnsi(segments.join(" "), cols);
 }
 
 function antigravityPercentText(quota) {
   if (quota?.auth === "project") {
-    return geminiBlue("GCP".padStart(PERCENT_CELL_WIDTH));
+    return gcpBadge("GCP".padStart(PERCENT_CELL_WIDTH));
   }
   return quota?.usedPercent != null
     ? colorByProvider(
@@ -158,6 +159,19 @@ function antigravityPercentText(quota) {
         geminiBlue,
       )
     : dim(formatPlaceholderPercentCell());
+}
+
+function gcpBadge(text) {
+  return geminiBlueBackground(bold(codexWhite(text)));
+}
+
+function promptCacheText(cache) {
+  if (!cache?.caching_observed) return "";
+  const remaining = cache.expires_at * 1000 - Date.now();
+  if (!cache.warm || cache.expires_at == null || remaining <= 0)
+    return ` ${dim("cache --")}`;
+  const minutes = Math.floor(remaining / 60000);
+  return ` ${dim(`cache ${minutes < 1 ? "<1m" : `${minutes}m`}`)}`;
 }
 
 // context 는 토큰 수 대신 사용률만 보여 준다.
@@ -181,16 +195,19 @@ export function getClaudeRows(
   currentTier,
   contextView,
   claudeUsage,
-  costUsd = null,
+  { accountName, promptCache } = {},
 ) {
   const ctxView = contextView || buildContextUsageView({});
-  const prefix = `${bold(claudeOrange("c"))}:`;
-  // 이번 세션 비용. 폭이 넉넉한 full, compact 에서만 CTX 뒤에 붙인다.
-  const costText =
-    Number.isFinite(costUsd) &&
-    (currentTier === "full" || currentTier === "compact")
-      ? ` ${dim(`$${costUsd.toFixed(2)}`)}`
+  const markerColor = claudeOrange;
+  const prefix = `${bold(markerColor("c"))}:`;
+  const accountText = accountName
+    ? ` ${markerColor(fitText(getAccountLabel("claude", accountName), ACCOUNT_LABEL_WIDTH))}`
+    : "";
+  const cacheText =
+    currentTier === "full" || currentTier === "compact"
+      ? promptCacheText(promptCache)
       : "";
+  const contextSection = `${dim("ctx:")}${contextPercentText(ctxView)}${cacheText}`;
   const spend = spendOnlyPercent(claudeUsage);
   if (spend != null) {
     if (currentTier === "nano" || currentTier === "micro") {
@@ -199,7 +216,7 @@ export function getClaudeRows(
     }
     const pct = colorByProvider(spend, formatPercentCell(spend), claudeOrange);
     const left = `${dim("$:")}${tierBar(currentTier, spend, CLAUDE_ORANGE)}${pct}`;
-    const right = `${dim("CTX:")}${contextPercentText(ctxView)}${costText}`;
+    const right = `${contextSection}${accountText}`;
     return [{ prefix, left, right }];
   }
   // API 실측 데이터
@@ -257,7 +274,7 @@ export function getClaudeRows(
   if (currentTier === "minimal") {
     const staleTag = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
     const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}${staleTag}`;
-    const right = `${dim("CTX:")}${contextPercentText(ctxView)}`;
+    const right = `${contextSection}${accountText}`;
     return [{ prefix, left: quotaSection, right }];
   }
 
@@ -267,8 +284,13 @@ export function getClaudeRows(
     const warning = ctxView.warningTag
       ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
       : "";
-    const contextSection = `${dim("CTX:")}${contextPercentText(ctxView)}${costText}${warning}`;
-    return [{ prefix, left: quotaSection, right: contextSection }];
+    return [
+      {
+        prefix,
+        left: quotaSection,
+        right: `${contextSection}${warning}${accountText}`,
+      },
+    ];
   }
 
   // full tier (>= 120 cols)
@@ -277,8 +299,13 @@ export function getClaudeRows(
   const warning = ctxView.warningTag
     ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
     : "";
-  const contextSection = `${dim("CTX:")}${contextPercentText(ctxView)}${costText}${warning}`;
-  return [{ prefix, left: quotaSection, right: contextSection }];
+  return [
+    {
+      prefix,
+      left: quotaSection,
+      right: `${contextSection}${warning}${accountText}`,
+    },
+  ];
 }
 
 // ============================================================================
@@ -515,7 +542,7 @@ function getAntigravityRow(
   let slot;
   if (project) {
     // 쿼터 대신 과금 방식을 막대 자리(막대가 없는 표시에서는 퍼센트 자리)에 보인다.
-    const mark = isFull ? `${markerColor("GCP".padEnd(GAUGE_WIDTH))} ` : "";
+    const mark = isFull ? `${gcpBadge(" GCP ".padEnd(GAUGE_WIDTH))} ` : "";
     const cell = isFull ? dim(formatPlaceholderPercentCell()) : percent;
     slot = `${dim("--:")}${mark}${cell}${timeCell}`;
   } else {

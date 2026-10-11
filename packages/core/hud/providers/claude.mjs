@@ -6,7 +6,8 @@ import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
 import https from "node:https";
-import { userInfo } from "node:os";
+import { homedir, userInfo } from "node:os";
+import { join } from "node:path";
 import {
   CLAUDE_API_TIMEOUT_MS,
   CLAUDE_CREDENTIALS_PATH,
@@ -33,6 +34,14 @@ import {
   readJson,
   writeJsonSafe,
 } from "../utils.mjs";
+
+export function getClaudeEmail() {
+  const config = readJson(
+    join(process.env.CLAUDE_CONFIG_DIR || homedir(), ".claude.json"),
+    null,
+  );
+  return config?.oauthAccount?.emailAddress || null;
+}
 
 export const CLAUDE_USAGE_POLL_BASE_MS = 5_000;
 export const CLAUDE_USAGE_POLL_JITTER_RATIO = 0.2;
@@ -559,7 +568,7 @@ export function readClaudeUsageSnapshot() {
     return { data, shouldRefresh: schedule.shouldRefresh, isStale: false };
   }
 
-  // 2차: 에러 backoff — 최근 에러 시 재시도 억제 (무한 spawn 방지)
+  // 2차: 에러 backoff, 최근 에러 시 재시도 억제 (무한 spawn 방지)
   if (cache?.error && Number.isFinite(ts)) {
     if (!schedule.shouldRefresh) {
       const omcCache = readJson(OMC_PLUGIN_USAGE_CACHE_PATH, null);
@@ -748,7 +757,7 @@ export function scheduleClaudeUsageRefresh() {
   try {
     if (!acquireSpawnLock(CLAUDE_REFRESH_LOCK_PATH, SPAWN_LOCK_TTL_MS)) return;
   } catch {
-    /* 락 실패 무시 — 스폰 진행 */
+    /* 락 실패 무시, 스폰 진행 */
   }
 
   try {
