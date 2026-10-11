@@ -2,6 +2,17 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.59.0] - 2026-10-11
+
+### Added
+- cli: `tfx update` 와 `tfx setup` 에 `--check`(triflux 관리 파일을 쓰지 않고 업데이트 여부만 확인), `--json`(stdout 마지막 줄에 결과 JSON 하나, 프롬프트 없음), `-q`, `--verbose` 를 더한다 (#731)
+- cli: 에이전트 안에서 실행되면(`AI_AGENT`, `CLAUDECODE`, `CODEX_*`, `GEMINI_CLI` 등) 질문 없이 진행하고 첫 줄에 밝힌다 (#731)
+
+### Changed
+- cli: `tfx update`, `tfx setup`, npm postinstall 출력을 같은 모양으로 바꾼다. 이미 최신이면 한 줄로 끝내고, 바뀌면 버전 변화와 릴리스 링크, 바뀐 파일, 대상(claude, codex, agy)별 한 줄, 경고, 되돌리기 명령 순으로 보인다. 사용자가 거절하거나 보류한 항목은 경고가 아니라 안내로 보인다 (#731)
+- update: 레지스트리 버전이 실행 중인 버전과 같으면 npm 재설치를 건너뛴다. `--force` 재시도는 Windows 에서만 한다. 실패하면 npm 이 낸 원인과 설치 방식(npm, git)에 맞는 직접 실행 명령을 보인다 (#731)
+- update: 업데이트 뒤 mods 업데이트, Codex 훅 승인, tmr 설치 질문은 새로 설치된 CLI 가 실행한다. 이 단계가 실패해도 설치와 동기화 결과는 남고 경고 한 줄만 붙는다 (#731)
+
 ## [10.58.0] - 2026-10-11
 
 ### Added
