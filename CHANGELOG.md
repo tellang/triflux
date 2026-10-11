@@ -2,6 +2,12 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.59.1] - 2026-10-11
+
+### Fixed
+- review: 품질 리뷰 기준을 공용 작성 원칙에 맞춰 불필요한 주석·테스트·추상화 추가 제안을 막는다. Quick 리뷰의 SOLID 점검은 과잉 설계 점검으로 바꾼다 (#732)
+- rules: 코드 판정 담당과 머지 기준을 `tfx-review`로 통일하고, ADR-0036에 책임 변경을 기록한다 (#732)
+
 ## [10.59.0] - 2026-10-11
 
 ### Added
