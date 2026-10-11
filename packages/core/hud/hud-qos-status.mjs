@@ -118,8 +118,6 @@ async function main() {
     const microLine = getMicroLine(contextView, claudeUsage, codexBuckets, {
       showCodex,
       codexLoggedOut,
-      promptCache: stdin?.prompt_cache,
-      codexPromptCache: codexSnapshot.promptCache,
       showAntigravity: antigravityAllowed,
       antigravityQuota,
     });

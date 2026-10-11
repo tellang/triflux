@@ -50,53 +50,38 @@ describe("HUD 표시", () => {
     for (const tier of ["nano", "micro"]) assert.equal(claude(tier).right, "");
   });
 
-  it("살아 있는 캐시는 모든 단계와 요약에서 마커만 반전한다", (t) => {
+  it("살아 있는 캐시는 full 5h 게이지 뒤 공백을 + 로 바꾸고 폭은 그대로다", (t) => {
     t.mock.method(Date, "now", () => 0);
-    for (const tier of ["full", "compact", "minimal", "micro", "nano"]) {
-      const row = claude(tier);
-      assert.match(row.prefix, /\x1b\[48;2;232;112;64m/);
-      assert.match(row.prefix, /\x1b\[30m\x1b\[1mc/);
-      assert.doesNotMatch(row.prefix, /\x1b\[[57]m/);
-      assert.equal(stripAnsi(row.prefix), "c:");
-      assert.doesNotMatch(stripAnsi(row.right), /cache/);
-      const x = getProviderRow(tier, "codex", "x", codexWhite, null, "dev", {
-        promptCache: { expiresAt: 1_800_000, ttlMs: 1_800_000 },
-      });
-      assert.match(x.prefix, /\x1b\[48;5;15m/);
-      assert.equal(stripAnsi(x.prefix), "x:");
-    }
-    const line = getMicroLine(context, usage, null, {
-      ...options,
-      codexPromptCache: { expiresAt: 1_800_000, ttlMs: 1_800_000 },
+    const warm = claude("full");
+    const cold = claude("full", { promptCache: undefined });
+    assert.ok(warm.left.includes(claudeOrange("+")));
+    assert.match(stripAnsi(warm.left), /^5h:\S{5}\+/);
+    assert.equal(stripAnsi(warm.left).length, stripAnsi(cold.left).length);
+    assert.equal(warm.prefix, cold.prefix);
+    const x = getProviderRow("full", "codex", "x", codexWhite, null, "dev", {
+      promptCache: { expiresAt: 1_800_000, ttlMs: 1_800_000 },
     });
-    assert.match(line, /\x1b\[48;2;232;112;64m/);
-    assert.match(line, /\x1b\[48;5;15m/);
-    assert.doesNotMatch(stripAnsi(line), /cache|developer/);
+    assert.ok(x.left.includes(codexWhite("+")));
+    for (const tier of ["compact", "minimal", "micro", "nano"])
+      assert.doesNotMatch(stripAnsi(claude(tier).left), /\+/);
   });
 
-  it("곧 식음 경계는 TTL의 20%와 5분 중 작은 값이다", (t) => {
+  it("곧 식음 경계는 TTL의 20%와 5분 중 작은 값이고 흐린 + 로 보인다", (t) => {
     t.mock.method(Date, "now", () => 0);
     for (const [ttl, boundary] of [
       ["5m", 60],
       ["1h", 300],
     ]) {
-      for (const [seconds, blinking] of [
-        [boundary + 1, false],
-        [boundary, true],
-      ]) {
-        const row = claude("full", {
+      const left = (seconds) =>
+        claude("full", {
           promptCache: { ...options.promptCache, ttl, expires_at: seconds },
-        });
-        assert.equal(row.prefix.includes("\x1b[5m"), blinking);
-      }
+        }).left;
+      assert.ok(left(boundary + 1).includes(claudeOrange("+")));
+      assert.ok(left(boundary).includes(dim("+")));
     }
-    const x = getProviderRow("nano", "codex", "x", codexWhite, null, "dev", {
-      promptCache: { expiresAt: 300_000, ttlMs: 1_800_000 },
-    });
-    assert.match(x.prefix, /\x1b\[5m/);
   });
 
-  it("식거나 정보 없는 캐시와 로그아웃 x는 기존 마커를 쓴다", (t) => {
+  it("식거나 정보 없는 캐시는 원래 공백을 쓴다", (t) => {
     t.mock.method(Date, "now", () => 0);
     for (const promptCache of [
       undefined,
@@ -104,18 +89,12 @@ describe("HUD 표시", () => {
       { ...options.promptCache, warm: false },
       { ...options.promptCache, expires_at: null },
       { ...options.promptCache, expires_at: 0 },
-      { ...options.promptCache, expires_at: -1 },
     ]) {
-      const row = claude("full", { promptCache });
-      assert.doesNotMatch(row.prefix, /\x1b\[(?:48;|5m)/);
-      assert.doesNotMatch(stripAnsi(row.right), /cache/);
+      assert.match(
+        stripAnsi(claude("full", { promptCache }).left),
+        /^5h:\S{5} /,
+      );
     }
-    const line = getMicroLine(context, usage, null, {
-      codexLoggedOut: true,
-      codexPromptCache: { expiresAt: 1_800_000, ttlMs: 1_800_000 },
-    });
-    assert.ok(line.includes(dim("x")));
-    assert.doesNotMatch(line, /\x1b\[48;/);
   });
 
   it("ctx 라벨은 모든 표시 단계와 한 줄 요약에서 흐린 소문자다", () => {

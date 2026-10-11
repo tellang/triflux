@@ -26,7 +26,7 @@ import {
   TIME_CELL_INNER_WIDTH,
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
-import { claudePromptCache, renderCacheMarker } from "./prompt-cache.mjs";
+import { cacheGap, claudePromptCache } from "./prompt-cache.mjs";
 import { getTerminalColumns, tierBar, tierDimBar } from "./terminal.mjs";
 import {
   clampPercent,
@@ -129,13 +129,9 @@ export function getMicroLine(
 
   const cols = getTerminalColumns() || 120;
   // 세그먼트를 모아 join 한다. 차단된 프로바이더를 뺄 때 공백이 겹치지 않는다.
-  const segments = [
-    `${renderCacheMarker("c", claudeOrange, claudePromptCache(options.promptCache))}${dim(":")}${cVal}`,
-  ];
+  const segments = [`${bold(claudeOrange("c"))}${dim(":")}${cVal}`];
   if (showCodex) {
-    const xMarker = codexLoggedOut
-      ? dim("x")
-      : renderCacheMarker("x", codexWhite, options.codexPromptCache);
+    const xMarker = codexLoggedOut ? dim("x") : bold(codexWhite("x"));
     segments.push(`${xMarker}${dim(":")}${xVal}`);
   }
   if (showAntigravity) {
@@ -195,7 +191,7 @@ export function getClaudeRows(
 ) {
   const ctxView = contextView || buildContextUsageView({});
   const markerColor = claudeOrange;
-  const prefix = `${renderCacheMarker("c", markerColor, claudePromptCache(promptCache))}:`;
+  const prefix = `${bold(markerColor("c"))}:`;
   // 계정을 ctx 앞에 둬서 x, a 행의 계정 라벨과 같은 열에서 시작하게 한다.
   const accountText = accountName
     ? `${markerColor(fitText(getAccountLabel("claude", accountName), ACCOUNT_LABEL_WIDTH))} `
@@ -240,10 +236,11 @@ export function getClaudeRows(
           claudeOrange,
         )
       : dim(formatPlaceholderPercentCell());
+  const gap = cacheGap(claudePromptCache(promptCache), claudeOrange);
   const fBar =
     hasData && fiveHourPercent != null
-      ? tierBar(currentTier, fiveHourPercent, CLAUDE_ORANGE)
-      : tierDimBar(currentTier);
+      ? tierBar(currentTier, fiveHourPercent, CLAUDE_ORANGE, gap)
+      : tierDimBar(currentTier, gap);
   const wBar =
     hasData && weeklyPercent != null
       ? tierBar(currentTier, weeklyPercent, CLAUDE_ORANGE)
@@ -325,7 +322,7 @@ export function getProviderRow(
 
   const prefix = loggedOut
     ? dim(`${marker}:`)
-    : `${renderCacheMarker(marker, markerColor, promptCache)}:`;
+    : `${bold(markerColor(marker))}:`;
   if (provider === "antigravity") {
     return getAntigravityRow(
       currentTier,
@@ -446,6 +443,7 @@ export function getProviderRow(
   }
 
   // full tier
+  const gap = cacheGap(promptCache, markerColor);
 
   if (realQuota?.type === "codex") {
     const main =
@@ -472,8 +470,8 @@ export function getProviderRow(
           : dim(formatPlaceholderPercentCell());
       const fBar =
         fiveP != null
-          ? tierBar(currentTier, fiveP, provAnsi)
-          : tierDimBar(currentTier);
+          ? tierBar(currentTier, fiveP, provAnsi, gap)
+          : tierDimBar(currentTier, gap);
       const wBar =
         weekP != null
           ? tierBar(currentTier, weekP, provAnsi)
@@ -489,7 +487,7 @@ export function getProviderRow(
 
   // 폴백
   if (!quotaSection) {
-    quotaSection = `${dim("5h:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell(""))} ${dim("1w:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH(""))}`;
+    quotaSection = `${dim("5h:")}${tierDimBar(currentTier, gap)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell(""))} ${dim("1w:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH(""))}`;
   }
 
   const accountSection = `${markerColor(accountLabel)}`;
