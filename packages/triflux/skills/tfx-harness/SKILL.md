@@ -27,10 +27,10 @@ host capability evidence를 판정한다. 정책 표, keyword 표, owner 매트�
 출력이 비면 blocked다.
 
 ```sh
-common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+common=$(git rev-parse --git-common-dir 2>/dev/null) && common=$(cd "$common" && pwd)
 d=$PWD
 while [ "$d" != / ] && [ ! -f "$d/.claude/rules/tfx-routing.md" ]; do d=$(dirname "$d"); done
-for f in "$TFX_ROUTING_SSOT" "${common%/*}/.claude/rules/tfx-routing.md" "$d/.claude/rules/tfx-routing.md" "$HOME/.claude/skills/tfx-harness/references/tfx-routing.md"; do
+for f in "${TFX_ROUTING_SSOT:-}" "${common%/*}/.claude/rules/tfx-routing.md" "$d/.claude/rules/tfx-routing.md" "$HOME/.claude/skills/tfx-harness/references/tfx-routing.md"; do
   [ -f "$f" ] && { echo "$f"; break; }
 done
 ```
