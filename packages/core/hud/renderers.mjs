@@ -196,8 +196,9 @@ export function getClaudeRows(
   const ctxView = contextView || buildContextUsageView({});
   const markerColor = claudeOrange;
   const prefix = `${renderCacheMarker("c", markerColor, claudePromptCache(promptCache))}:`;
+  // 계정을 ctx 앞에 둬서 x, a 행의 계정 라벨과 같은 열에서 시작하게 한다.
   const accountText = accountName
-    ? ` ${markerColor(fitText(getAccountLabel("claude", accountName), ACCOUNT_LABEL_WIDTH))}`
+    ? `${markerColor(fitText(getAccountLabel("claude", accountName), ACCOUNT_LABEL_WIDTH))} `
     : "";
   const contextSection = `${dim("ctx:")}${contextPercentText(ctxView)}`;
   const spend = spendOnlyPercent(claudeUsage);
@@ -208,7 +209,7 @@ export function getClaudeRows(
     }
     const pct = colorByProvider(spend, formatPercentCell(spend), claudeOrange);
     const left = `${dim("$:")}${tierBar(currentTier, spend, CLAUDE_ORANGE)}${pct}`;
-    const right = `${contextSection}${accountText}`;
+    const right = `${accountText}${contextSection}`;
     return [{ prefix, left, right }];
   }
   // API 실측 데이터
@@ -266,7 +267,7 @@ export function getClaudeRows(
   if (currentTier === "minimal") {
     const staleTag = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
     const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}${staleTag}`;
-    const right = `${contextSection}${accountText}`;
+    const right = `${accountText}${contextSection}`;
     return [{ prefix, left: quotaSection, right }];
   }
 
@@ -280,7 +281,7 @@ export function getClaudeRows(
       {
         prefix,
         left: quotaSection,
-        right: `${contextSection}${warning}${accountText}`,
+        right: `${accountText}${contextSection}${warning}`,
       },
     ];
   }
@@ -295,7 +296,7 @@ export function getClaudeRows(
     {
       prefix,
       left: quotaSection,
-      right: `${contextSection}${warning}${accountText}`,
+      right: `${accountText}${contextSection}${warning}`,
     },
   ];
 }

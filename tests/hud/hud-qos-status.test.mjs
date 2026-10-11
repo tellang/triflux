@@ -303,7 +303,7 @@ describe("HUD provider visibility", () => {
     };
     const env = { CLAUDE_CONFIG_DIR: configDir, COLUMNS: "200" };
     const output = runHud(env, { input });
-    assert.match(output, /^c:.*ctx:25% claude-dev$/m);
+    assert.match(output, /^c:.*claude-dev ctx:25%$/m);
     assert.doesNotMatch(output, /\$12\.09|Other Name/);
     assert.match(
       runHud(env, {
@@ -312,7 +312,7 @@ describe("HUD provider visibility", () => {
           rate_limits: { spend_limit: { used_percentage: 83 } },
         },
       }),
-      /^c: \$:.*83%.*ctx:25% claude-dev$/m,
+      /^c: \$:.*83%.*claude-dev ctx:25%$/m,
     );
     rmSync(join(configDir, ".claude.json"));
     writeFileSync(join(configDir, ".claude.json"), "{}");
@@ -327,7 +327,7 @@ describe("HUD provider visibility", () => {
     try {
       assert.match(
         runHud({ ...env, CLAUDE_CONFIG_DIR: "" }, { input }),
-        /^c:.*home-dev$/m,
+        /^c:.*home-dev ctx:/m,
       );
     } finally {
       rmSync(homeConfig);

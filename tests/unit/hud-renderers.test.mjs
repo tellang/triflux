@@ -36,11 +36,11 @@ function claude(tier, overrides = {}) {
 describe("HUD 표시", () => {
   it("Claude 계정은 이메일 앞부분을 같은 폭과 색으로 표시한다", () => {
     for (const tier of ["full", "compact", "minimal"]) {
-      assert.ok(claude(tier).right.endsWith(claudeOrange("developer")));
+      assert.ok(claude(tier).right.startsWith(`${claudeOrange("developer")} `));
       assert.ok(
         claude(tier, {
           accountName: "long-developer@example.test",
-        }).right.endsWith(claudeOrange("long-deve…")),
+        }).right.startsWith(claudeOrange("long-deve…")),
       );
       assert.doesNotMatch(
         stripAnsi(claude(tier, { accountName: null }).right),
