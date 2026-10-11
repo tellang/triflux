@@ -107,7 +107,7 @@ test("미설치: --mods 는 묻지 않고 설치, 대화형은 동의할 때만,
   const deferred = await runMods();
   assert.equal(deferred.status, "deferred");
   assert.deepEqual(deferred.calls, [...READS, ADD]);
-  assert.deepEqual(deferred.logs, ["mods 설치: tfx setup --mods"]);
+  assert.deepEqual(deferred.warnings, ["mods 설치: tfx setup --mods"]);
   assert.deepEqual(deferred.asked, []);
 
   const forced = await runMods({ install: true, marketplaces: REGISTERED });
@@ -149,7 +149,7 @@ test("설치됨: 같은 버전이나 버전을 모르면 묻지 않고, 다르�
   const outdated = await runMods(old);
   assert.equal(outdated.status, "outdated");
   assert.deepEqual(outdated.calls, READS);
-  assert.ok(outdated.logs[0].includes("claude plugin update"));
+  assert.ok(outdated.warnings[0].includes("claude plugin update"));
 
   const declined = await runMods({ ...old, interactive: true });
   assert.equal(declined.status, "update-declined");

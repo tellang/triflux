@@ -96,10 +96,7 @@ describe("setup version cache", () => {
 
     const output = runSetup(tempHome);
 
-    assert.match(
-      output,
-      new RegExp(`setup: skip \\(v${PACKAGE_VERSION} already synced\\)`),
-    );
+    assert.match(output, new RegExp(`^triflux ${PACKAGE_VERSION} setup`));
     const marker = JSON.parse(readFileSync(markerPath, "utf8"));
     assert.equal(
       marker.timestamp,

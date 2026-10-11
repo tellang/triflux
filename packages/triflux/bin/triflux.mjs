@@ -32,6 +32,14 @@ import {
   tmuxExec,
 } from "../hub/team/session.mjs";
 import {
+  addStep,
+  addWarning,
+  createCliResult,
+  outputOptions,
+  recordFile,
+  renderCliResult,
+} from "../scripts/lib/cli-output.mjs";
+import {
   commandExists,
   inspectMacTimeoutDependency,
 } from "../scripts/lib/doctor-env-checks.mjs";
@@ -91,7 +99,6 @@ const PKG = JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8"));
 
 // ── 색상 체계 (triflux brand: amber/orange accent) ──
 const CYAN = "\x1b[36m";
-const GREEN = "\x1b[32m";
 const RED = "\x1b[31m";
 const YELLOW = "\x1b[33m";
 const DIM = "\x1b[2m";
@@ -123,9 +130,25 @@ const NORMALIZED_ARGS = RAW_ARGS.filter((arg) => arg !== "--json");
 
 const CLI_COMMAND_SCHEMAS = Object.freeze({
   setup: {
-    usage: "tfx setup [--dry-run] [--mods]",
+    usage: "tfx setup [--dry-run] [--mods] [--json] [-q|--quiet] [--verbose]",
     description: "파일 동기화 + HUD/MCP 설정",
     options: [
+      {
+        name: "--json",
+        type: "boolean",
+        description: "비대화식 JSON 결과 출력",
+      },
+      {
+        name: "-q, --quiet",
+        type: "boolean",
+        description: "경고와 오류만 출력",
+      },
+      {
+        name: "--verbose",
+        type: "boolean",
+        description: "최신 파일도 모두 표시",
+      },
+
       {
         name: "--mods",
         type: "boolean",
@@ -308,10 +331,30 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     },
   },
   update: {
-    usage: "tfx update",
+    usage: "tfx update [--check] [--json] [-q|--quiet] [--verbose]",
     description:
       "설치 방식(plugin/npm/git)을 감지해 triflux를 업데이트하고 setup/cache를 재동기화",
     options: [
+      {
+        name: "--json",
+        type: "boolean",
+        description: "비대화식 JSON 결과 출력",
+      },
+      {
+        name: "-q, --quiet",
+        type: "boolean",
+        description: "경고와 오류만 출력",
+      },
+      {
+        name: "--verbose",
+        type: "boolean",
+        description: "최신 파일도 모두 표시",
+      },
+      {
+        name: "--check",
+        type: "boolean",
+        description: "파일 변경 없이 registry 버전만 확인",
+      },
       {
         name: "--help",
         type: "boolean",
@@ -382,14 +425,19 @@ function printCommandHelp(command) {
   const aliases = schema.aliases?.length
     ? `\n  ${BOLD}Aliases${RESET}\n    ${schema.aliases.join(", ")}\n`
     : "";
-  console.log(`
+  const help = `
   ${AMBER}${BOLD}⬡ tfx ${command}${RESET}
 
   ${GRAY}${schema.description || ""}${RESET}
 
   ${BOLD}Usage${RESET}
     ${WHITE_BRIGHT}${schema.usage}${RESET}
-${aliases}${subcommands ? `\n  ${BOLD}Subcommands${RESET}\n${subcommands}\n` : ""}${options ? `\n  ${BOLD}Options${RESET}\n${options}\n` : ""}`);
+${aliases}${subcommands ? `\n  ${BOLD}Subcommands${RESET}\n${subcommands}\n` : ""}${options ? `\n  ${BOLD}Options${RESET}\n${options}\n` : ""}`;
+  console.log(
+    ["setup", "update"].includes(command) && !outputOptions(RAW_ARGS).color
+      ? stripAnsi(help)
+      : help,
+  );
   return true;
 }
 
@@ -966,7 +1014,7 @@ function previewCodexProfiles() {
   };
 }
 
-function syncFile(src, dst, label, { onlyChanges = false } = {}) {
+function syncFile(src, dst, label) {
   const dstDir = dirname(dst);
   if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
 
@@ -983,9 +1031,7 @@ function syncFile(src, dst, label, { onlyChanges = false } = {}) {
     try {
       chmodSync(dst, 0o755);
     } catch {}
-    ok(
-      `${label}: ${onlyChanges ? "업데이트됨" : "설치됨"} ${srcVer ? `(v${srcVer})` : ""}`,
-    );
+    ok(`${label}: 설치됨 ${srcVer ? `(v${srcVer})` : ""}`);
     return true;
   }
 
@@ -1006,7 +1052,7 @@ function syncFile(src, dst, label, { onlyChanges = false } = {}) {
     return true;
   }
 
-  if (!onlyChanges) ok(`${label}: 최신 상태 ${srcVer ? `(v${srcVer})` : ""}`);
+  ok(`${label}: 최신 상태 ${srcVer ? `(v${srcVer})` : ""}`);
   return false;
 }
 
@@ -1176,13 +1222,12 @@ function buildSetupDryRunPlan() {
   };
 }
 
-function refreshSetupCaches() {
+function refreshSetupCaches(report) {
   const cacheDir = join(CLAUDE_DIR, "cache");
   for (const name of ["tfx-preflight.json", "mcp-inventory.json"]) {
     const file = join(cacheDir, name);
     if (existsSync(file)) unlinkSync(file);
   }
-  let refreshed = 0;
   for (const [name, timeout] of [
     ["preflight-cache.mjs", 15000],
     ["mcp-check.mjs", 10000],
@@ -1194,14 +1239,14 @@ function refreshSetupCaches() {
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       });
-      refreshed++;
     } catch (error) {
-      warn(
+      addWarning(
+        report,
+        "cache-refresh",
         `${name}: 캐시 갱신 실패: ${error.message?.split(/\r?\n/)[0] || "unknown"}`,
       );
     }
   }
-  if (refreshed > 0) ok("런타임 캐시 갱신");
 }
 
 export function runUpdatedSetup({
@@ -1212,197 +1257,205 @@ export function runUpdatedSetup({
   for (const file of [cli, join(packageRoot, "scripts", "setup.mjs")]) {
     if (!existsSync(file)) throw new Error(`업데이트 핵심 파일 누락: ${file}`);
   }
-  execFileSyncFn(process.execPath, [cli, "setup", "--from-update"], {
-    stdio: "inherit",
-    windowsHide: true,
-  });
-}
-
-function reportSkillSync() {
-  const result = syncSkills();
-  for (const warning of result.warnings) warn(warning);
-  if (!result.ok)
-    throw createCliError("스킬 동기화 실패", { exitCode: EXIT_CONFIG_ERROR });
-  ok(`스킬: ${result.total}개 확인, 파일 ${result.changed}개 반영`);
+  let stdout;
+  try {
+    stdout = execFileSyncFn(
+      process.execPath,
+      [cli, "setup", "--from-update", "--json"],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      },
+    );
+  } catch (error) {
+    if (!error.stdout?.toString().trim()) throw error;
+    stdout = error.stdout.toString();
+  }
+  const result = JSON.parse(stdout.trim().split(/\r?\n/).at(-1));
+  return result;
 }
 
 async function cmdSetup(options = {}) {
-  const {
-    dryRun = false,
-    fromUpdate = false,
-    overrideVersion,
-    mods = false,
-  } = options;
+  const { dryRun = false, fromUpdate = false, mods = false } = options;
   if (dryRun) {
     printJson(buildSetupDryRunPlan());
     return;
   }
+  const report = createCliResult("setup", PKG.version);
+  const warning = (code) => (message) => addWarning(report, code, message);
   if (writesRealHomeInTest()) {
-    info("setup: skip (테스트가 홈을 격리하지 않음)");
-    return;
+    report.message = "테스트가 홈을 격리하지 않아 건너뜀";
+    process.stdout.write(renderCliResult(report, options));
+    return report;
   }
-
-  const cleanup = cleanupLegacyHooks({
-    settingsPath: join(CLAUDE_DIR, "settings.json"),
-  });
-  if (!cleanup.ok) {
-    throw createCliError(`이전 hook 정리 실패: ${cleanup.error}`, {
-      exitCode: EXIT_CONFIG_ERROR,
-      reason: "configError",
-      fix: `${join(CLAUDE_DIR, "settings.json")}의 JSON 문법과 쓰기 권한을 확인하세요.`,
+  try {
+    const cleanup = cleanupLegacyHooks({
+      settingsPath: join(CLAUDE_DIR, "settings.json"),
     });
-  }
-  // agy 는 hooks.json 의 훅을 실행하므로 지워진 훅 스크립트를 가리키는 항목을 남기지 않는다.
-  const agyCleanup = cleanupAgyHooks();
-  if (agyCleanup.changed) ok("agy 옛 triflux-session 훅 정리됨");
-  else if (!agyCleanup.ok) warn(`agy 옛 훅 정리 실패: ${agyCleanup.error}`);
-  // 이주가 막혀도 setup 은 계속한다. 남은 항목은 경고로 알린다.
-  const mcpBackups = new Map();
-  for (const warning of cleanupLegacyMcp({ backups: mcpBackups }).warnings)
-    warn(warning);
-  const hubCleanup = cleanupTfxHub({
-    pluginRoot: existsSync(join(PKG_ROOT, ".git")) ? undefined : PKG_ROOT,
-    log: info,
-    backups: mcpBackups,
-  });
-  for (const warning of hubCleanup.warnings) warn(warning);
-  if (hubCleanup.changed) ok("제거된 허브의 설정과 실행 흔적 정리");
-  const mcpPins = pinRegistryMcpPackages({ backups: mcpBackups });
-  for (const warning of mcpPins.warnings) warn(warning);
-  if (mcpPins.pinned) ok(`MCP 패키지 고정 버전 반영: ${mcpPins.pinned}개 항목`);
-  console.log(`\n${BOLD}triflux setup${RESET}\n`);
-  if (fromUpdate) refreshSetupCaches();
+    if (!cleanup.ok) throw new Error(`이전 hook 정리 실패: ${cleanup.error}`);
+    if (cleanup.changed)
+      addStep(report, `옛 Claude 훅 ${cleanup.removed}개 정리`);
+    const agyCleanup = cleanupAgyHooks();
+    if (agyCleanup.changed) addStep(report, "agy 옛 triflux-session 훅 정리");
+    else if (!agyCleanup.ok)
+      addWarning(
+        report,
+        "agy-cleanup",
+        `agy 옛 훅 정리 실패: ${agyCleanup.error}`,
+      );
+    const mcpBackups = new Map();
+    const mcpCleanup = cleanupLegacyMcp({ backups: mcpBackups });
+    if (!mcpCleanup.skipped)
+      mcpCleanup.warnings.forEach(warning("mcp-cleanup"));
+    if (mcpCleanup.changed) addStep(report, "옛 MCP 설정 정리");
+    const hubCleanup = cleanupTfxHub({
+      pluginRoot: existsSync(join(PKG_ROOT, ".git")) ? undefined : PKG_ROOT,
+      log: () => {},
+      backups: mcpBackups,
+    });
+    hubCleanup.warnings.forEach(warning("hub-cleanup"));
+    if (hubCleanup.changed)
+      addStep(report, "제거된 허브의 설정과 실행 흔적 정리");
+    const mcpPins = pinRegistryMcpPackages({ backups: mcpBackups });
+    mcpPins.warnings.forEach(warning("mcp-pins"));
+    if (mcpPins.pinned)
+      addStep(report, `MCP 패키지 고정 버전 반영: ${mcpPins.pinned}개 항목`);
+    if (fromUpdate) refreshSetupCaches(report);
 
-  let changedFiles = 0;
-  for (const target of SYNC_MAP) {
-    if (syncFile(target.src, target.dst, target.label, { onlyChanges: true }))
-      changedFiles++;
-  }
-  ok(`파일 ${SYNC_MAP.length}개 확인, ${changedFiles}개 반영`);
-  retireOldInstallFiles(info);
-  reportSkillSync();
-
-  const codexProfileResult = ensureCodexProfiles();
-  if (!codexProfileResult.ok) {
-    const reason = renderErrorMessage(codexProfileResult.message);
-    warn(`Codex profiles 설정 실패: ${reason}`);
-  } else if (codexProfileResult.changed > 0) {
-    ok(
-      `Codex profiles: ${codexProfileResult.changed}개 반영됨 (~/.codex/<프로필>.config.toml)`,
-    );
-  } else {
-    ok("Codex profiles: 이미 준비됨");
-  }
-
-  // Antigravity/Gemini 호환 프로필
-  const geminiResult = ensureGeminiProfiles();
-  if (!geminiResult.ok) {
-    const reason = renderErrorMessage(geminiResult.message);
-    warn(`Antigravity/Gemini profiles 설정 실패: ${reason}`);
-  } else if (geminiResult.created) {
-    ok(
-      `Antigravity/Gemini profiles: ${geminiResult.count}개 생성됨 (~/.gemini/triflux-profiles.json)`,
-    );
-  } else if (geminiResult.added > 0) {
-    ok(
-      `Antigravity/Gemini profiles: ${geminiResult.added}개 추가됨 (총 ${geminiResult.count}개)`,
-    );
-  } else {
-    ok(`Antigravity/Gemini profiles: ${geminiResult.count}개 준비됨`);
-  }
-
-  // HUD statusLine 설정
-  const settingsPath = join(CLAUDE_DIR, "settings.json");
-  const hudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
-
-  if (existsSync(hudPath)) {
-    try {
-      let settings = {};
-      if (existsSync(settingsPath)) {
-        settings = JSON.parse(readFileSync(settingsPath, "utf8"));
+    for (const { src, dst, label } of SYNC_MAP) {
+      const { change } = describeSyncAction(src, dst, label);
+      if (change !== "noop") {
+        mkdirSync(dirname(dst), { recursive: true });
+        copyFileSync(src, dst);
+        try {
+          chmodSync(dst, 0o755);
+        } catch {}
       }
-
-      const changed = applyStatusLine(settings, { hudPath, warn });
-      if (changed) persistSettings(settings, settingsPath);
-      const detail = changed ? "설정 완료" : "기존 설정 유지";
-      ok(`HUD statusLine: ${detail}`);
-    } catch (e) {
-      throw createCliError(`settings.json 처리 실패: ${e.message}`, {
-        exitCode: EXIT_CONFIG_ERROR,
-        reason: "configError",
-        fix: `${settingsPath}의 JSON 문법을 수정하세요.`,
-        cause: e,
-      });
+      recordFile(report, label, change);
     }
-  } else {
-    warn("HUD 파일 없음: 먼저 파일 동기화 필요");
-  }
+    const retired = retireOldInstallFiles(() => {});
+    retired.warnings.forEach(warning("retired-files"));
+    if (retired.moved.length || retired.deleted.length)
+      addStep(
+        report,
+        `옛 설치 파일 ${retired.moved.length + retired.deleted.length}개 정리`,
+      );
+    const skills = syncSkills();
+    skills.warnings.forEach(warning("skills"));
+    if (!skills.ok) throw new Error("스킬 동기화 실패");
+    if (skills.changed) report.alreadyInGoalState = false;
+    if (skills.removed) addStep(report, `구형 스킬 ${skills.removed}개 정리`);
 
-  // Codex 프로필 정리가 끝난 뒤에 훅을 다룬다.
-  await runConsentSteps({ modsInstall: mods, log: info, warn });
+    const codex = ensureCodexProfiles();
+    if (!codex.ok)
+      addWarning(
+        report,
+        "codex-profiles",
+        `Codex profiles 설정 실패: ${renderErrorMessage(codex.message)}`,
+      );
+    if (codex.changed) report.alreadyInGoalState = false;
+    const gemini = ensureGeminiProfiles();
+    if (!gemini.ok)
+      addWarning(
+        report,
+        "gemini-profiles",
+        `Antigravity/Gemini profiles 설정 실패: ${renderErrorMessage(gemini.message)}`,
+      );
+    if (gemini.added) report.alreadyInGoalState = false;
 
-  // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──
-  if (process.platform === "win32" && which("psmux")) {
-    try {
-      const shellOut = execSync("psmux show-options -g default-shell 2>NUL", {
-        encoding: "utf8",
-        timeout: 3000,
-      }).trim();
-      if (!/powershell|pwsh/i.test(shellOut)) {
-        const pwsh = which("pwsh")
-          ? "pwsh"
-          : which("powershell.exe")
-            ? "powershell.exe"
-            : "";
-        if (pwsh) {
-          execSync(`psmux set-option -g default-shell "${pwsh}"`, {
-            timeout: 3000,
-            stdio: "pipe",
-          });
-          ok(`psmux 기본 셸 → ${pwsh}`);
+    const settingsPath = join(CLAUDE_DIR, "settings.json");
+    const hudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
+    if (existsSync(hudPath)) {
+      const settings = existsSync(settingsPath)
+        ? JSON.parse(readFileSync(settingsPath, "utf8"))
+        : {};
+      if (applyStatusLine(settings, { hudPath, warn: warning("statusline") })) {
+        persistSettings(settings, settingsPath);
+        report.alreadyInGoalState = false;
+      }
+    } else
+      addWarning(report, "statusline", "HUD 파일 없음: 먼저 파일 동기화 필요");
+
+    const consent = await runConsentSteps({
+      modsInstall: mods,
+      interactive: !options.nonInteractive,
+      log: () => {},
+      warn: warning("consent"),
+    });
+    if (consent.changed) report.alreadyInGoalState = false;
+    const agyInstalled = Boolean(which("agy"));
+    report.targets = [
+      {
+        name: "claude",
+        status: "ok",
+        detail: fromUpdate
+          ? "~/.claude"
+          : `스킬 ${skills.total}개, 파일 ${SYNC_MAP.length}개, HUD statusLine`,
+      },
+      {
+        name: "codex",
+        status:
+          !codex.ok || consent.codexHooks === "failed"
+            ? "failed"
+            : codex.reason
+              ? "skipped"
+              : "ok",
+        detail: !codex.ok
+          ? codex.message
+          : codex.reason
+            ? "설정 건너뜀"
+            : `프로필 ${REQUIRED_CODEX_PROFILES.length}개${consent.codexHooks !== "skipped" ? ", 훅 등록" : ""}`,
+      },
+      {
+        name: "agy",
+        status: gemini.ok ? (agyInstalled ? "ok" : "skipped") : "failed",
+        detail: gemini.ok
+          ? agyInstalled
+            ? `프로필 ${gemini.count}개`
+            : "설치 안 됨, 건너뜀"
+          : gemini.message,
+      },
+    ];
+    if (report.targets.some(({ status }) => status === "failed"))
+      report.alreadyInGoalState = false;
+    // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──
+    if (process.platform === "win32" && which("psmux")) {
+      try {
+        const shellOut = execSync("psmux show-options -g default-shell 2>NUL", {
+          encoding: "utf8",
+          timeout: 3000,
+        }).trim();
+        if (!/powershell|pwsh/i.test(shellOut)) {
+          const pwsh = which("pwsh")
+            ? "pwsh"
+            : which("powershell.exe")
+              ? "powershell.exe"
+              : "";
+          if (pwsh) {
+            execSync(`psmux set-option -g default-shell "${pwsh}"`, {
+              timeout: 3000,
+              stdio: "pipe",
+            });
+            addStep(report, `psmux 기본 셸: ${pwsh}`);
+          }
         }
+      } catch {
+        /* psmux 서버 미실행이면 무시 */
       }
-    } catch {
-      /* psmux 서버 미실행이면 무시 */
     }
-  }
 
-  // CLI 존재 확인
-  const summary = [];
-  const cliChecks = [
-    { name: "codex", install: "npm i -g @openai/codex" },
-    {
-      name: "agy",
-      label: "Antigravity",
-      install: "Install Google Antigravity and ensure `agy` is on PATH",
-    },
-  ];
-  for (const { name, label, install } of cliChecks) {
-    const displayName = label || name;
-    if (which(name)) {
-      summary.push({
-        item: `${displayName} CLI`,
-        status: "✅",
-        detail: "설치됨",
-      });
-    } else {
-      summary.push({
-        item: `${displayName} CLI`,
-        status: "⏭️",
-        detail: `미설치 (${install})`,
-      });
-    }
+    report.message = "설정 완료";
+  } catch (error) {
+    report.outcome = "failed";
+    report.alreadyInGoalState = false;
+    report.message = error.message;
+    process.exitCode = EXIT_ERROR;
   }
-
-  // ── 결과 요약 테이블 ──
-  console.log(`\n${BOLD}── 설정 요약 ──${RESET}`);
-  const maxItem = Math.max(...summary.map((s) => s.item.length));
-  for (const { item, status, detail } of summary) {
-    console.log(`  ${status} ${item.padEnd(maxItem)}  ${DIM}${detail}${RESET}`);
-  }
-
-  console.log(`\n${DIM}동기화 위치: ${CLAUDE_DIR}${RESET}`);
-  console.log(`${DIM}버전: v${overrideVersion || PKG.version}${RESET}\n`);
+  process.stdout.write(
+    renderCliResult(report, { ...options, details: fromUpdate }),
+  );
+  return report;
 }
 
 function addDoctorCheck(report, entry) {
@@ -1778,7 +1831,16 @@ async function cmdDoctor(options = {}) {
           info("Homebrew 설치 후: brew install coreutils");
         }
       }
-      reportSkillSync();
+      const skillFix = syncSkills();
+      for (const warning of skillFix.warnings) warn(warning);
+      report.actions.push({
+        type: "skill-sync",
+        status: skillFix.ok ? "ok" : "failed",
+        changed: skillFix.changed,
+      });
+      if (!skillFix.ok) warn("스킬 동기화 실패");
+      else if (skillFix.changed) ok(`스킬 ${skillFix.changed}개 반영됨`);
+      else info("스킬: 이미 최신 상태");
       const profileFix = ensureCodexProfiles();
       if (!profileFix.ok) {
         warn(
@@ -3198,214 +3260,179 @@ async function cmdUpdate(args = []) {
     printCommandHelp("update");
     return;
   }
-
-  console.log(`\n${BOLD}triflux update${RESET}\n`);
-
-  // 1. 설치 방식 감지
-  const pluginsFile = join(CLAUDE_DIR, "plugins", "installed_plugins.json");
-  let installMode = "unknown";
-  let pluginPath = null;
-
-  // 플러그인 모드 감지
-  if (existsSync(pluginsFile)) {
-    try {
-      const entry = findTrifluxPluginEntry(
-        JSON.parse(readFileSync(pluginsFile, "utf8")),
-      );
-      if (entry) {
-        pluginPath = entry.installPath;
-        installMode = "plugin";
-      }
-    } catch {}
-  }
-
-  // PKG_ROOT가 플러그인 캐시 내에 있으면 플러그인 모드
-  if (
-    installMode === "unknown" &&
-    PKG_ROOT.includes(join(".claude", "plugins"))
-  ) {
-    installMode = "plugin";
-    pluginPath = PKG_ROOT;
-  }
-
-  // npm global 감지
-  if (installMode === "unknown") {
-    try {
-      const npmList = execSync("npm list -g triflux --depth=0", {
-        encoding: "utf8",
-        timeout: 10000,
-        stdio: ["pipe", "pipe", "ignore"],
-        windowsHide: true,
-      });
-      if (npmList.includes("triflux")) installMode = "npm-global";
-    } catch {}
-  }
-
-  // npm local 감지
-  if (installMode === "unknown") {
-    const localPkg = join(process.cwd(), "node_modules", "triflux");
-    if (existsSync(localPkg)) installMode = "npm-local";
-  }
-
-  // git 저장소 직접 사용
-  if (installMode === "unknown" && existsSync(join(PKG_ROOT, ".git"))) {
-    installMode = "git-local";
-  }
-
-  info(
-    `설치 방식: ${installMode === "plugin" ? "플러그인" : installMode === "npm-global" ? "npm global" : installMode === "npm-local" ? "npm local" : installMode === "git-local" ? "git 로컬 저장소" : "알 수 없음"}`,
-  );
-
-  const networkTargets = resolveUpdateTargets({ installMode, pluginPath });
-  if (networkTargets.length > 0) {
-    const networkStatus = await checkNetworkAvailability(networkTargets);
-    if (!networkStatus.online) {
-      fail(`네트워크 확인 실패: ${networkStatus.unreachable.join(", ")}`);
-      info("네트워크 연결을 확인한 뒤 다시 시도하세요.");
-      return;
-    }
-    ok(`네트워크 확인 완료 (${networkStatus.reachable.join(", ")})`);
-  }
-
-  const cacheValidation = validateRuntimeCachePaths(join(CLAUDE_DIR, "cache"));
-  if (!cacheValidation.ok) {
-    warn(`런타임 캐시 검증 이슈 ${cacheValidation.issues.length}건 발견`);
-    for (const issue of cacheValidation.issues) {
-      info(`${issue.file}: ${issue.error}`);
-    }
-  }
-
-  // 2. 설치 방식에 따라 업데이트
-  const oldVer = PKG.version;
-  let updated = false;
-
+  const options = outputOptions(RAW_ARGS);
+  const report = createCliResult("update", PKG.version);
+  const started = Date.now();
+  const registryVersion = () =>
+    execSync("npm view triflux version", {
+      encoding: "utf8",
+      timeout: 10000,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    }).trim();
   try {
-    switch (installMode) {
-      case "plugin": {
-        const gitDir = pluginPath || PKG_ROOT;
-        const result = execSync("git pull", {
-          encoding: "utf8",
-          timeout: 30000,
-          cwd: gitDir,
-          windowsHide: true,
-        }).trim();
-        ok(`git pull — ${result}`);
-        updated = true;
-        break;
-      }
-      case "npm-global": {
-        let latestVersion;
+    if (options.check) {
+      const registry =
+        process.env.npm_config_registry ||
+        process.env.NPM_CONFIG_REGISTRY ||
+        "https://registry.npmjs.org";
+      const response = await fetch(
+        `${registry.replace(/\/$/, "")}/triflux/latest`,
+        {
+          signal: AbortSignal.timeout(10000),
+        },
+      );
+      if (!response.ok)
+        throw new Error(`레지스트리 조회 실패: HTTP ${response.status}`);
+      report.to = (await response.json()).version;
+      if (!report.to) throw new Error("레지스트리 버전 응답이 비어 있음");
+      report.alreadyInGoalState = report.from === report.to;
+    } else {
+      // 1. 설치 방식 감지
+      const pluginsFile = join(CLAUDE_DIR, "plugins", "installed_plugins.json");
+      let installMode = "unknown";
+      let pluginPath = null;
+
+      // 플러그인 모드 감지
+      if (existsSync(pluginsFile)) {
         try {
-          latestVersion = execSync("npm view triflux version", {
+          const entry = findTrifluxPluginEntry(
+            JSON.parse(readFileSync(pluginsFile, "utf8")),
+          );
+          if (entry) {
+            pluginPath = entry.installPath;
+            installMode = "plugin";
+          }
+        } catch {}
+      }
+
+      // PKG_ROOT가 플러그인 캐시 내에 있으면 플러그인 모드
+      if (
+        installMode === "unknown" &&
+        PKG_ROOT.includes(join(".claude", "plugins"))
+      ) {
+        installMode = "plugin";
+        pluginPath = PKG_ROOT;
+      }
+
+      // npm global 감지
+      if (installMode === "unknown") {
+        try {
+          const npmList = execSync("npm list -g triflux --depth=0", {
             encoding: "utf8",
             timeout: 10000,
+            stdio: ["pipe", "pipe", "ignore"],
+            windowsHide: true,
+          });
+          if (npmList.includes("triflux")) installMode = "npm-global";
+        } catch {}
+      }
+
+      // npm local 감지
+      if (installMode === "unknown") {
+        const localPkg = join(process.cwd(), "node_modules", "triflux");
+        if (existsSync(localPkg)) installMode = "npm-local";
+      }
+
+      // git 저장소 직접 사용
+      if (installMode === "unknown" && existsSync(join(PKG_ROOT, ".git"))) {
+        installMode = "git-local";
+      }
+
+      const networkTargets = resolveUpdateTargets({ installMode, pluginPath });
+      if (networkTargets.length) {
+        const network = await checkNetworkAvailability(networkTargets);
+        if (!network.online)
+          throw new Error(
+            `네트워크 확인 실패: ${network.unreachable.join(", ")}`,
+          );
+      }
+      const cache = validateRuntimeCachePaths(join(CLAUDE_DIR, "cache"));
+      for (const issue of cache.issues)
+        addWarning(report, "cache", `${issue.file}: ${issue.error}`);
+      switch (installMode) {
+        case "plugin":
+        case "git-local":
+          execSync("git pull", {
+            encoding: "utf8",
+            timeout: 30000,
+            cwd: pluginPath || PKG_ROOT,
+            stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true,
+          });
+          break;
+        case "npm-global": {
+          let latest;
+          try {
+            latest = registryVersion();
+          } catch {}
+          if (latest === PKG.version) break;
+          const command = "npm install -g triflux@latest";
+          const installOptions = {
+            encoding: "utf8",
+            timeout: 90000,
             stdio: ["pipe", "pipe", "pipe"],
             windowsHide: true,
-          }).trim();
-        } catch {}
-        // 같은 버전이어도 설치본 파일을 다시 동기화한다.
-        if (latestVersion === oldVer) {
-          updated = true;
+          };
+          try {
+            execSync(command, installOptions);
+          } catch (error) {
+            if (process.platform !== "win32") throw error;
+            execSync(`${command} --force`, installOptions);
+          }
           break;
         }
-        const npmCmd = "npm install -g triflux@latest";
-        let result;
-        try {
-          result = execSync(npmCmd, {
+        case "npm-local":
+          execSync("npm update triflux", {
             encoding: "utf8",
-            timeout: 90000,
+            timeout: 60000,
+            cwd: process.cwd(),
             stdio: ["pipe", "pipe", "pipe"],
             windowsHide: true,
-          })
-            .trim()
-            .split(/\r?\n/)[0];
-        } catch (error) {
-          if (process.platform !== "win32") throw error;
-          // Windows에서 자기 파일 잠금으로 실패하면 한 번 재시도한다.
-          info("첫 시도 실패, --force 재시도 중...");
-          result = execSync(`${npmCmd} --force`, {
-            encoding: "utf8",
-            timeout: 90000,
-            stdio: ["pipe", "pipe", "pipe"],
-            windowsHide: true,
-          })
-            .trim()
-            .split(/\r?\n/)[0];
-        }
-        ok(`${npmCmd}: ${result || "완료"}`);
-        updated = true;
-        break;
+          });
+          break;
+        default:
+          throw new Error("설치 방식을 감지할 수 없음");
       }
-      case "npm-local": {
-        const npmLocalCmd = "npm update triflux";
-        const result = execSync(npmLocalCmd, {
-          encoding: "utf8",
-          timeout: 60000,
-          cwd: process.cwd(),
-          stdio: ["pipe", "pipe", "ignore"],
-          windowsHide: true,
-        })
-          .trim()
-          .split(/\r?\n/)[0];
-        ok(`${npmLocalCmd}: ${result || "완료"}`);
-        updated = true;
-        break;
-      }
-      case "git-local": {
-        const result = execSync("git pull", {
-          encoding: "utf8",
-          timeout: 30000,
-          cwd: PKG_ROOT,
-          windowsHide: true,
-        }).trim();
-        ok(`git pull — ${result}`);
-        updated = true;
-        break;
-      }
-      default:
-        fail("설치 방식을 감지할 수 없음");
-        info("수동 업데이트: cd <triflux-dir> && git pull");
-        return;
-    }
-  } catch (e) {
-    const stderr = e.stderr?.toString().trim();
-    fail(
-      `업데이트 실패: ${e.message}${stderr ? `\n  ${stderr.split(/\r?\n/)[0]}` : ""}`,
-    );
-    return;
-  }
-
-  // 3. setup 재실행 (파일 동기화, 프로파일, HUD, CLI 확인)
-  if (updated) {
-    console.log("");
-    const updatedRoot =
-      installMode === "plugin" ? pluginPath || PKG_ROOT : PKG_ROOT;
-    // 업데이트 후 새 버전 읽기
-    let newVer = oldVer;
-    try {
-      const newPkg = JSON.parse(
+      const updatedRoot =
+        installMode === "plugin" ? pluginPath || PKG_ROOT : PKG_ROOT;
+      report.to = JSON.parse(
         readFileSync(join(updatedRoot, "package.json"), "utf8"),
-      );
-      newVer = newPkg.version;
-    } catch {}
-
-    if (newVer !== oldVer) {
-      ok(`버전: v${oldVer} → v${newVer}`);
-    } else {
-      ok(`버전: v${oldVer} (이미 최신)`);
-    }
-
-    try {
-      runUpdatedSetup({ packageRoot: updatedRoot });
-    } catch (error) {
-      throw createCliError(`업데이트 후 설정 동기화 실패: ${error.message}`, {
-        exitCode: error.status || EXIT_ERROR,
-        reason: "error",
+      ).version;
+      const setup = runUpdatedSetup({ packageRoot: updatedRoot });
+      Object.assign(report, {
+        outcome: setup.outcome,
+        message: setup.message,
+        to: setup.to,
+        changed: setup.changed,
+        unchanged: setup.unchanged,
+        targets: setup.targets,
+        files: setup.files,
+        steps: setup.steps,
+        alreadyInGoalState:
+          setup.alreadyInGoalState && report.from === setup.to,
       });
+      for (const warning of setup.warnings)
+        addWarning(report, warning.code, warning.message);
+      if (setup.outcome !== "ok") {
+        process.exitCode = EXIT_ERROR;
+        return process.stdout.write(renderCliResult(report, options));
+      }
     }
+    report.message =
+      report.from === report.to
+        ? "최신"
+        : options.check
+          ? "업데이트 있음"
+          : "업데이트 완료";
+  } catch (error) {
+    report.outcome = "failed";
+    report.alreadyInGoalState = false;
+    report.message = error.message.split(/\r?\n/)[0];
+    process.exitCode = EXIT_ERROR;
   }
-
-  console.log(`${GREEN}${BOLD}✓ 업데이트 완료${RESET}\n`);
+  report.elapsed = Date.now() - started;
+  process.stdout.write(renderCliResult(report, options));
 }
 
 function cmdList(options = {}) {
@@ -3796,9 +3823,10 @@ async function main() {
   const cmd = NORMALIZED_ARGS[0] || "help";
   const cmdArgs = NORMALIZED_ARGS.slice(1);
 
-  cleanupTmpFiles({
-    protectPaths: [process.env.HOME, process.env.USERPROFILE],
-  }).catch(() => {});
+  if (!(cmd === "update" && cmdArgs.includes("--check")))
+    cleanupTmpFiles({
+      protectPaths: [process.env.HOME, process.env.USERPROFILE],
+    }).catch(() => {});
 
   switch (cmd) {
     case "setup":
@@ -3807,6 +3835,7 @@ async function main() {
         return;
       }
       await cmdSetup({
+        ...outputOptions(RAW_ARGS),
         dryRun: cmdArgs.includes("--dry-run"),
         fromUpdate: cmdArgs.includes("--from-update"),
         mods: cmdArgs.includes("--mods"),
