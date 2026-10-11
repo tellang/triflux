@@ -966,7 +966,7 @@ function previewCodexProfiles() {
   };
 }
 
-function syncFile(src, dst, label) {
+function syncFile(src, dst, label, { onlyChanges = false } = {}) {
   const dstDir = dirname(dst);
   if (!existsSync(dstDir)) mkdirSync(dstDir, { recursive: true });
 
@@ -983,7 +983,9 @@ function syncFile(src, dst, label) {
     try {
       chmodSync(dst, 0o755);
     } catch {}
-    ok(`${label}: 설치됨 ${srcVer ? `(v${srcVer})` : ""}`);
+    ok(
+      `${label}: ${onlyChanges ? "업데이트됨" : "설치됨"} ${srcVer ? `(v${srcVer})` : ""}`,
+    );
     return true;
   }
 
@@ -1004,7 +1006,7 @@ function syncFile(src, dst, label) {
     return true;
   }
 
-  ok(`${label}: 최신 상태 ${srcVer ? `(v${srcVer})` : ""}`);
+  if (!onlyChanges) ok(`${label}: 최신 상태 ${srcVer ? `(v${srcVer})` : ""}`);
   return false;
 }
 
@@ -1180,6 +1182,7 @@ function refreshSetupCaches() {
     const file = join(cacheDir, name);
     if (existsSync(file)) unlinkSync(file);
   }
+  let refreshed = 0;
   for (const [name, timeout] of [
     ["preflight-cache.mjs", 15000],
     ["mcp-check.mjs", 10000],
@@ -1191,13 +1194,14 @@ function refreshSetupCaches() {
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       });
-      ok(`${name}: 캐시 갱신 완료`);
+      refreshed++;
     } catch (error) {
       warn(
         `${name}: 캐시 갱신 실패: ${error.message?.split(/\r?\n/)[0] || "unknown"}`,
       );
     }
   }
+  if (refreshed > 0) ok("런타임 캐시 갱신");
 }
 
 export function runUpdatedSetup({
@@ -1266,40 +1270,28 @@ async function cmdSetup(options = {}) {
   const mcpPins = pinRegistryMcpPackages({ backups: mcpBackups });
   for (const warning of mcpPins.warnings) warn(warning);
   if (mcpPins.pinned) ok(`MCP 패키지 고정 버전 반영: ${mcpPins.pinned}개 항목`);
+  console.log(`\n${BOLD}triflux setup${RESET}\n`);
   if (fromUpdate) refreshSetupCaches();
 
-  console.log(`\n${BOLD}triflux setup${RESET}\n`);
-
+  let changedFiles = 0;
   for (const target of SYNC_MAP) {
-    syncFile(target.src, target.dst, target.label);
+    if (syncFile(target.src, target.dst, target.label, { onlyChanges: true }))
+      changedFiles++;
   }
+  ok(`파일 ${SYNC_MAP.length}개 확인, ${changedFiles}개 반영`);
   retireOldInstallFiles(info);
   reportSkillSync();
-
-  // ── 결과 추적 ──
-  const summary = [];
 
   const codexProfileResult = ensureCodexProfiles();
   if (!codexProfileResult.ok) {
     const reason = renderErrorMessage(codexProfileResult.message);
     warn(`Codex profiles 설정 실패: ${reason}`);
-    summary.push({ item: "Codex profiles", status: "⚠️", detail: reason });
   } else if (codexProfileResult.changed > 0) {
     ok(
       `Codex profiles: ${codexProfileResult.changed}개 반영됨 (~/.codex/<프로필>.config.toml)`,
     );
-    summary.push({
-      item: "Codex profiles",
-      status: "✅",
-      detail: `${codexProfileResult.changed}개 반영됨`,
-    });
   } else {
     ok("Codex profiles: 이미 준비됨");
-    summary.push({
-      item: "Codex profiles",
-      status: "✅",
-      detail: "이미 준비됨",
-    });
   }
 
   // Antigravity/Gemini 호환 프로필
@@ -1307,38 +1299,19 @@ async function cmdSetup(options = {}) {
   if (!geminiResult.ok) {
     const reason = renderErrorMessage(geminiResult.message);
     warn(`Antigravity/Gemini profiles 설정 실패: ${reason}`);
-    summary.push({
-      item: "Antigravity/Gemini profiles",
-      status: "⚠️",
-      detail: reason,
-    });
   } else if (geminiResult.created) {
     ok(
       `Antigravity/Gemini profiles: ${geminiResult.count}개 생성됨 (~/.gemini/triflux-profiles.json)`,
     );
-    summary.push({
-      item: "Antigravity/Gemini profiles",
-      status: "✅",
-      detail: `${geminiResult.count}개 생성됨`,
-    });
   } else if (geminiResult.added > 0) {
-    ok(`Antigravity/Gemini profiles: ${geminiResult.added}개 추가됨`);
-    summary.push({
-      item: "Antigravity/Gemini profiles",
-      status: "✅",
-      detail: `${geminiResult.added}개 추가됨 (총 ${geminiResult.count}개)`,
-    });
+    ok(
+      `Antigravity/Gemini profiles: ${geminiResult.added}개 추가됨 (총 ${geminiResult.count}개)`,
+    );
   } else {
     ok(`Antigravity/Gemini profiles: ${geminiResult.count}개 준비됨`);
-    summary.push({
-      item: "Antigravity/Gemini profiles",
-      status: "✅",
-      detail: `${geminiResult.count}개 준비됨`,
-    });
   }
 
   // HUD statusLine 설정
-  console.log(`${CYAN}[HUD 설정]${RESET}`);
   const settingsPath = join(CLAUDE_DIR, "settings.json");
   const hudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
 
@@ -1352,8 +1325,7 @@ async function cmdSetup(options = {}) {
       const changed = applyStatusLine(settings, { hudPath, warn });
       if (changed) persistSettings(settings, settingsPath);
       const detail = changed ? "설정 완료" : "기존 설정 유지";
-      ok(`statusLine: ${detail}`);
-      summary.push({ item: "HUD statusLine", status: "✅", detail });
+      ok(`HUD statusLine: ${detail}`);
     } catch (e) {
       throw createCliError(`settings.json 처리 실패: ${e.message}`, {
         exitCode: EXIT_CONFIG_ERROR,
@@ -1363,12 +1335,7 @@ async function cmdSetup(options = {}) {
       });
     }
   } else {
-    warn("HUD 파일 없음 — 먼저 파일 동기화 필요");
-    summary.push({
-      item: "HUD statusLine",
-      status: "⚠️",
-      detail: "HUD 파일 없음",
-    });
+    warn("HUD 파일 없음: 먼저 파일 동기화 필요");
   }
 
   // Codex 프로필 정리가 끝난 뒤에 훅을 다룬다.
@@ -1401,6 +1368,7 @@ async function cmdSetup(options = {}) {
   }
 
   // CLI 존재 확인
+  const summary = [];
   const cliChecks = [
     { name: "codex", install: "npm i -g @openai/codex" },
     {
@@ -1433,7 +1401,7 @@ async function cmdSetup(options = {}) {
     console.log(`  ${status} ${item.padEnd(maxItem)}  ${DIM}${detail}${RESET}`);
   }
 
-  console.log(`\n${DIM}설치 위치: ${CLAUDE_DIR}${RESET}`);
+  console.log(`\n${DIM}동기화 위치: ${CLAUDE_DIR}${RESET}`);
   console.log(`${DIM}버전: v${overrideVersion || PKG.version}${RESET}\n`);
 }
 
@@ -3285,7 +3253,7 @@ async function cmdUpdate(args = []) {
   }
 
   info(
-    `검색: ${installMode === "plugin" ? "플러그인" : installMode === "npm-global" ? "npm global" : installMode === "npm-local" ? "npm local" : installMode === "git-local" ? "git 로컬 저장소" : "알 수 없음"} 설치 감지`,
+    `설치 방식: ${installMode === "plugin" ? "플러그인" : installMode === "npm-global" ? "npm global" : installMode === "npm-local" ? "npm local" : installMode === "git-local" ? "git 로컬 저장소" : "알 수 없음"}`,
   );
 
   const networkTargets = resolveUpdateTargets({ installMode, pluginPath });
@@ -3305,8 +3273,6 @@ async function cmdUpdate(args = []) {
     for (const issue of cacheValidation.issues) {
       info(`${issue.file}: ${issue.error}`);
     }
-  } else {
-    ok("런타임 캐시 검증 완료");
   }
 
   // 2. 설치 방식에 따라 업데이트
@@ -3328,6 +3294,20 @@ async function cmdUpdate(args = []) {
         break;
       }
       case "npm-global": {
+        let latestVersion;
+        try {
+          latestVersion = execSync("npm view triflux version", {
+            encoding: "utf8",
+            timeout: 10000,
+            stdio: ["pipe", "pipe", "pipe"],
+            windowsHide: true,
+          }).trim();
+        } catch {}
+        // 같은 버전이어도 설치본 파일을 다시 동기화한다.
+        if (latestVersion === oldVer) {
+          updated = true;
+          break;
+        }
         const npmCmd = "npm install -g triflux@latest";
         let result;
         try {
@@ -3339,8 +3319,9 @@ async function cmdUpdate(args = []) {
           })
             .trim()
             .split(/\r?\n/)[0];
-        } catch {
-          // Windows: 자기 자신의 파일 잠금으로 첫 시도 실패 가능 → --force 재시도
+        } catch (error) {
+          if (process.platform !== "win32") throw error;
+          // Windows에서 자기 파일 잠금으로 실패하면 한 번 재시도한다.
           info("첫 시도 실패, --force 재시도 중...");
           result = execSync(`${npmCmd} --force`, {
             encoding: "utf8",
