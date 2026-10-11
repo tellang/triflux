@@ -130,13 +130,13 @@ function positiveWindowMinutes(bucket) {
 }
 
 // 계정 하나에는 같은 종류의 창이 한 번에 하나만 열린다. Codex 홈(CODEX_HOME)의
-// sessions 와 HUD 라벨은 모두 auth.json 계정 하나의 것이다. 그래서
-// 세션 로그에 더 늦게 리셋되는 창이 나타났고 옛 창이 그 창이 열리기 전에만 관측됐다면,
-// 옛 창은 조기 리셋(2026-09-23 실측)이나 계정 전환으로 끝난 창이다. 프로브로만 본 창은
-// 다른 계정일 수 있어 근거로 쓰지 않는다. 새 창이 열린 뒤에도 관측된 창은 함께 도는
-// 계정이므로 max-used 후보로 남긴다.
+// sessions, 프로브, HUD 라벨은 모두 auth.json 계정 하나의 것이다. 그래서
+// 더 늦게 리셋되는 창이 나타났고 옛 창이 그 창이 열리기 전에만 관측됐다면,
+// 옛 창은 조기 리셋(2026-09-23, 2026-10-11 실측)이나 계정 전환으로 끝난 창이다.
+// 리셋 뒤 세션을 열기 전에는 새 창이 프로브에만 보이므로 프로브도 근거로 쓴다.
+// 새 창이 열린 뒤에도 관측된 창은 함께 도는 계정이므로 max-used 후보로 남긴다.
 function isReplacedWindowGroup(group, other) {
-  if (other === group || !other.seenInSessions) return false;
+  if (other === group) return false;
   if (other.minResetAt <= group.maxResetAt || !other.windowMinutes) {
     return false;
   }
@@ -169,14 +169,12 @@ function selectCodexWindowSnapshot(snapshots, nowSec, windowKey) {
         minResetAt: resetAt,
         maxResetAt: resetAt,
         latest: snapshot,
-        seenInSessions: !snapshot.probe,
         windowMinutes: positiveWindowMinutes(snapshot[windowKey]),
       };
       groups.push(group);
       continue;
     }
 
-    if (!snapshot.probe) group.seenInSessions = true;
     group.windowMinutes ??= positiveWindowMinutes(snapshot[windowKey]);
     group.minResetAt = Math.min(group.minResetAt, resetAt);
     group.maxResetAt = Math.max(group.maxResetAt, resetAt);
@@ -542,12 +540,43 @@ export async function collectProbeSnapshots(now = new Date()) {
   );
 }
 
-export async function refreshCodexRateLimitsCache() {
+function getCodexProbeOwner() {
+  try {
+    const auth = JSON.parse(readFileSync(getCodexAuthPath(), "utf-8"));
+    return `${getCodexHome()}|${auth?.tokens?.account_id ?? ""}`;
+  } catch {
+    return null;
+  }
+}
+
+// 프로브는 TTL 마다 한 번만 돈다. 그 사이 갱신도 마지막 프로브를 근거로 써야
+// 조기 리셋으로 밀려난 창이 다시 살아나지 않는다. 다른 계정의 결과나, 프로브가
+// 계속 실패해 낡은 결과가 더 최신 세션 로그를 가리지 않도록 이월 범위를 좁힌다.
+function carryProbe(cached, owner, nowMs) {
+  if (!owner || cached?.owner !== owner) return null;
+  if (!(nowMs - Number(cached.at) < CODEX_PROBE_TTL_MS * 2)) return null;
+  return Array.isArray(cached.snapshots) ? cached : null;
+}
+
+export async function refreshCodexRateLimitsCache({
+  cachePath = CODEX_QUOTA_CACHE_PATH,
+  sessionsRoot,
+  collect = collectProbeSnapshots,
+  owner = getCodexProbeOwner(),
+} = {}) {
   const now = new Date();
-  const extraSnapshots = await collectProbeSnapshots(now);
-  const buckets = getCodexRateLimits({ now, extraSnapshots });
+  const probed = await collect(now);
+  const probe =
+    probed.length > 0
+      ? { owner, at: now.getTime(), snapshots: probed }
+      : carryProbe(readJson(cachePath, null)?.probe, owner, now.getTime());
+  const buckets = getCodexRateLimits({
+    sessionsRoot,
+    now,
+    extraSnapshots: probe?.snapshots || [],
+  });
   // buckets가 null이어도 캐시 갱신 (stale 데이터 제거)
-  writeJsonSafe(CODEX_QUOTA_CACHE_PATH, { timestamp: Date.now(), buckets });
+  writeJsonSafe(cachePath, { timestamp: Date.now(), buckets, probe });
   return buckets;
 }
 

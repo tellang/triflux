@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -9,6 +15,7 @@ import {
   expireStaleCodexBuckets,
   getCodexRateLimits,
   normalizeBuckets,
+  refreshCodexRateLimitsCache,
 } from "../../hud/providers/codex.mjs";
 
 function sessionDirFor(sessionsRoot, date) {
@@ -667,13 +674,13 @@ describe("Codex multi-window selection", () => {
     }
   });
 
-  it("does not let a probe-only window replace a session window", () => {
+  it("lets a probe-only window replace a session window after an early reset", () => {
     const sessionsRoot = mkdtempSync(
       join(tmpdir(), "triflux-codex-weekly-probe-only-"),
     );
     const now = new Date("2026-09-23T13:50:00.000Z");
     try {
-      // 프로브는 세션 로그와 다른 계정(로그인 전환 뒤)의 창을 볼 수 있다.
+      // 2026-10-11 실측: 조기 리셋 뒤 세션을 열기 전에는 새 창이 프로브에만 보인다.
       writeRollout(sessionsRoot, now, "rollout-current-account.jsonl", [
         weeklyOnlyEvent({
           timestamp: "2026-09-23T07:53:16.809Z",
@@ -703,8 +710,66 @@ describe("Codex multi-window selection", () => {
         extraSnapshots: [probeSnapshot],
       });
 
-      assert.equal(buckets.codex.secondary.used_percent, 100);
-      assert.equal(buckets.codex.mixedWindows, true);
+      assert.equal(buckets.codex.secondary.used_percent, 34);
+      assert.equal(buckets.codex.mixedWindows, undefined);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the last probe's early reset on refreshes that skip the probe", async () => {
+    const sessionsRoot = mkdtempSync(
+      join(tmpdir(), "triflux-codex-probe-carry-"),
+    );
+    const cachePath = join(sessionsRoot, "cache.json");
+    const now = new Date();
+    const nowSec = Math.floor(now.getTime() / 1000);
+    try {
+      writeRollout(sessionsRoot, now, "rollout-old-window.jsonl", [
+        weeklyOnlyEvent({
+          timestamp: new Date(now.getTime() - 60 * 60 * 1000).toISOString(),
+          usedPercent: 100,
+          resetsAt: nowSec + 3 * 24 * 60 * 60,
+        }),
+      ]);
+      const probeSnapshot = {
+        limitId: "codex",
+        primary: {
+          used_percent: 0,
+          window_minutes: 10080,
+          resets_at: nowSec + 7 * 24 * 60 * 60,
+        },
+        secondary: null,
+        timestamp: now.toISOString(),
+        probe: true,
+      };
+
+      const refresh = (probes, owner = "home|acct-a") =>
+        refreshCodexRateLimitsCache({
+          cachePath,
+          sessionsRoot,
+          owner,
+          collect: async () => probes,
+        });
+
+      assert.equal(
+        (await refresh([probeSnapshot])).codex.secondary.used_percent,
+        0,
+      );
+      // 프로브 TTL 안의 다음 갱신은 프로브를 건너뛴다.
+      assert.equal((await refresh([])).codex.secondary.used_percent, 0);
+      // 계정이 바뀌면 이전 계정의 프로브를 이월하지 않는다.
+      assert.equal(
+        (await refresh([], "home|acct-b")).codex.secondary.used_percent,
+        100,
+      );
+
+      await refresh([probeSnapshot]);
+      const cache = JSON.parse(readFileSync(cachePath, "utf-8"));
+      cache.probe.at -= 60 * 60 * 1000;
+      writeFileSync(cachePath, JSON.stringify(cache));
+      // 프로브가 오래 실패하면 낡은 결과 대신 세션 로그로 돌아간다.
+      assert.equal((await refresh([])).codex.secondary.used_percent, 100);
     } finally {
       rmSync(sessionsRoot, { recursive: true, force: true });
     }
