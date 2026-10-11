@@ -41,7 +41,7 @@ const trace = (event) => {
   const fd = fs.openSync(process.env.FIXTURE_TRACE, 'a');
   fs.writeSync(fd, JSON.stringify({ pid: process.pid, ...event }) + '\n'); fs.closeSync(fd);
 };
-trace({ argv: process.argv.slice(2) });
+trace({ cli: process.argv[1], argv: process.argv.slice(2) });
 for (const [name, indexes] of Object.entries({ writeFileSync: [0], appendFileSync: [0], mkdirSync: [0], rmSync: [0], unlinkSync: [0], chmodSync: [0], renameSync: [0, 1], copyFileSync: [1], cpSync: [1], symlinkSync: [1] })) {
   const original = fs[name];
   fs[name] = (...args) => {
@@ -90,7 +90,11 @@ if (process.env.FIXTURE_TTY) {
   require('node:readline/promises').createInterface = () => ({ question: async (question) => { trace({ question }); return 'y'; }, close() {} });
 }
 cp.spawn = () => ({ unref() {} });
-cp.spawnSync = () => ({ status: 1, stdout: '', stderr: '' });
+const spawnSync = cp.spawnSync;
+cp.spawnSync = (command, args, options) => {
+  if (command === process.execPath && args[0] === path.join(pkg, 'bin/triflux.mjs')) return spawnSync(command, args, options);
+  return { status: 1, stdout: '', stderr: '' };
+};
 process.kill = () => { throw new Error('fixture forbids process kill'); };
 syncBuiltinESMExports();
 `,

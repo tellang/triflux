@@ -45,6 +45,10 @@ export function outputOptions(
   };
 }
 
+// setup/update JSON 계약: command, outcome, message, alreadyInGoalState,
+// from, to, changed, unchanged, targets, warnings, notices.
+// 해당 결과에만 포함: installMode, installPath, exitCode.
+// 내부 자식 결과에만 포함: files, steps, elapsed.
 export function createCliResult(command, version) {
   return {
     command,

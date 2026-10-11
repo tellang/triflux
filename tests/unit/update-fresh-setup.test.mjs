@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { installNpmGlobal, runUpdatedSetup } from "../../bin/triflux.mjs";
+import {
+  findTrifluxPluginEntry,
+  installNpmGlobal,
+  runUpdatedSetup,
+} from "../../bin/triflux.mjs";
 import { cliFixture, version } from "../helpers/cli-output-fixture.mjs";
 
 function success(result) {
@@ -68,7 +72,7 @@ test("비TTY setup은 묻지 않고 보류 안내는 경고와 quiet 출력에�
   );
 });
 
-test("사람 TTY update는 자식 setup 뒤에 부모가 consent를 실행하며 갱신한 버전으로 묻는다", (t) => {
+test("사람 TTY update는 새 packageRoot의 CLI 자식이 consent를 실행한다", (t) => {
   const cli = cliFixture(t);
   cli.setVersion("10.57.3");
   const output = success(
@@ -81,14 +85,34 @@ test("사람 TTY update는 자식 setup 뒤에 부모가 consent를 실행하며
   const trace = cli.trace();
   const parent = trace.find((entry) => entry.argv?.[0] === "update");
   const child = trace.find((entry) => entry.argv?.includes("--from-update"));
+  const consent = trace.find((entry) => entry.argv?.includes("--consent-only"));
   const questions = trace.filter((entry) => entry.question);
   assert.notEqual(parent.pid, child.pid);
   assert.equal(questions.length, 2);
-  assert.ok(questions.every((entry) => entry.pid === parent.pid));
+  assert.notEqual(consent.pid, parent.pid);
+  assert.notEqual(consent.pid, child.pid);
+  assert.equal(consent.cli, join(cli.pkg, "bin/triflux.mjs"));
+  assert.ok(questions.every((entry) => entry.pid === consent.pid));
   assert.match(questions[0].question, new RegExp(`패키지 ${version}`));
   assert.match(output, /mods 업데이트 완료/);
   assert.match(output, /Codex hooks: 승인 기록/);
   assert.doesNotMatch(output, /승인 전|경고|설정 완료/);
+  assert.doesNotMatch(output, /Codex hooks: 세션 동기화 훅 등록/);
+});
+
+test("update 는 triflux-mods 플러그인을 triflux 본체 플러그인 설치로 보지 않는다", () => {
+  const mods = { installPath: "/plugins/cache/triflux/triflux-mods/10.57.1" };
+  const core = { installPath: "/plugins/cache/triflux/triflux/10.57.1" };
+  assert.equal(
+    findTrifluxPluginEntry({ plugins: { "triflux-mods@triflux": [mods] } }),
+    null,
+  );
+  assert.equal(
+    findTrifluxPluginEntry({
+      plugins: { "triflux-mods@triflux": [mods], "triflux@triflux": [core] },
+    }),
+    core,
+  );
 });
 
 test("update 실패는 npm과 JSON 없는 자식의 stderr 첫 원인을 보여준다", async (t) => {

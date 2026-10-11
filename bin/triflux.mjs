@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { setTimeout as delay } from "node:timers/promises";
-import { execFileSync, execSync } from "child_process";
+import { execFileSync, execSync, spawnSync } from "child_process";
 // triflux CLI — setup, doctor, version
 import {
   chmodSync,
@@ -15,6 +15,7 @@ import {
   statSync,
   unlinkSync,
   writeFileSync,
+  writeSync,
 } from "fs";
 import { homedir } from "os";
 import { dirname, join, resolve } from "path";
@@ -355,7 +356,8 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       {
         name: "--check",
         type: "boolean",
-        description: "파일 변경 없이 registry 버전만 확인",
+        description:
+          "registry 버전만 확인. triflux 관리 파일(~/.claude, ~/.codex 등)은 변경하지 않음 (npm 캐시와 로그는 기록될 수 있음)",
       },
       {
         name: "--help",
@@ -1280,18 +1282,81 @@ export async function runUpdatedSetup({
   }
   const result = JSON.parse(stdout.trim().split(/\r?\n/).at(-1));
   if (result.outcome === "ok") {
-    const consent = await runConsentSteps({
-      interactive: !options.nonInteractive,
-      report: result,
-    });
-    if (consent.changed) result.alreadyInGoalState = false;
+    const interactive = !options.nonInteractive;
+    const child = spawnSync(
+      process.execPath,
+      [
+        cli,
+        "setup",
+        "--from-update",
+        "--consent-only",
+        ...(interactive ? [] : ["--json"]),
+      ],
+      {
+        encoding: "utf8",
+        stdio: interactive
+          ? ["inherit", "inherit", "inherit", "pipe"]
+          : ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+      },
+    );
+    if (child.error) throw child.error;
+    const consentOutput = interactive ? child.output[3] : child.stdout;
+    if (!consentOutput?.trim())
+      throw new Error(
+        commandErrorMessage({
+          message: "동의 단계 실행 실패",
+          stderr: child.stderr,
+        }),
+      );
+    const consent = JSON.parse(consentOutput.trim().split(/\r?\n/).at(-1));
+    result.steps.push(...consent.steps);
+    result.notices.push(...consent.notices);
+    for (const warning of consent.warnings)
+      addWarning(result, warning.code, warning.message);
+    result.alreadyInGoalState &&= consent.alreadyInGoalState;
+    if (consent.outcome !== "ok") {
+      result.outcome = consent.outcome;
+      result.message = consent.message;
+      result.exitCode = consent.exitCode;
+    }
+    const hooks = consent.targets.find(({ name }) => name === "codex");
     const codex = result.targets.find(({ name }) => name === "codex");
-    if (codex && consent.codexHooks !== "skipped") {
-      if (consent.codexHooks === "failed") codex.status = "failed";
+    if (codex && hooks && hooks.status !== "skipped") {
+      if (hooks.status === "failed") codex.status = "failed";
       else if (codex.status === "ok") codex.detail += ", 훅 등록";
     }
   }
   return result;
+}
+
+async function cmdConsentOnly(options, report) {
+  try {
+    const consent = await runConsentSteps({
+      interactive: !options.nonInteractive,
+      report,
+    });
+    if (consent.changed) report.alreadyInGoalState = false;
+    report.targets.push({
+      name: "codex",
+      status:
+        consent.codexHooks === "skipped"
+          ? "skipped"
+          : consent.codexHooks === "failed"
+            ? "failed"
+            : "ok",
+      detail: "훅 등록",
+    });
+  } catch (error) {
+    report.outcome = "failed";
+    report.alreadyInGoalState = false;
+    report.message = error.message;
+    report.exitCode = error.exitCode ?? EXIT_ERROR;
+    process.exitCode = report.exitCode;
+  }
+  // 사람 TTY 는 질문 출력과 부모가 회수할 JSON 을 분리한다.
+  writeSync(options.nonInteractive ? 1 : 3, `${JSON.stringify(report)}\n`);
+  return report;
 }
 
 export function installNpmGlobal({
@@ -1327,6 +1392,8 @@ async function cmdSetup(options = {}) {
     process.stdout.write(renderCliResult(report, options));
     return report;
   }
+  if (options.fromUpdate && options.consentOnly)
+    return cmdConsentOnly(options, report);
   try {
     const cleanup = cleanupLegacyHooks({
       settingsPath: join(CLAUDE_DIR, "settings.json"),
@@ -3848,6 +3915,7 @@ async function main() {
         ...outputOptions(RAW_ARGS),
         dryRun: cmdArgs.includes("--dry-run"),
         fromUpdate: cmdArgs.includes("--from-update"),
+        consentOnly: cmdArgs.includes("--consent-only"),
         mods: cmdArgs.includes("--mods"),
       });
       return;

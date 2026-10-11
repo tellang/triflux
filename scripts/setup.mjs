@@ -529,7 +529,6 @@ export async function runConsentSteps({
     const hooks = ensureHooks({ trust: false });
     result.changed ||= Boolean(hooks?.changedHooks || hooks?.changedConfig);
     if (hooks?.skipped) return result;
-    if (hooks.changedHooks) log("Codex hooks: 세션 동기화 훅 등록");
     if (hooks.trusted) result.codexHooks = "trusted";
     else if (!interactive) {
       result.codexHooks = "deferred";
