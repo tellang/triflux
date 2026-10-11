@@ -34,7 +34,7 @@ export function resolveClaudeHomeDir(
     const userProfile = nullableEnv(env.USERPROFILE);
     return userProfile ? path.resolve(userProfile) : os.homedir();
   }
-  // POSIX 는 HOME 우선 — sandbox HOME 오버라이드를 추적하는 provenance
+  // POSIX 는 HOME 우선, sandbox HOME 오버라이드를 추적하는 provenance
   // 해석(#382)과 일치 (os.homedir() 도 POSIX 에서는 HOME 을 우선한다).
   const home = nullableEnv(env.HOME);
   return home ? path.resolve(home) : os.homedir();
@@ -223,7 +223,7 @@ export function publicClaudeDaemonCandidate(candidate) {
 
 function sessionsFromDaemonList(listResponse) {
   // probe 경로도 list/find 경로와 같은 정규화 row 를 내보내야 한다
-  // (jobs/sessions, snake_case, dispatch 중첩 변형 흡수 — 8016b724).
+  // (jobs/sessions, snake_case, dispatch 중첩 변형 흡수, 8016b724).
   return extractClaudeAgentSessions(listResponse);
 }
 
@@ -501,7 +501,7 @@ export function sendClaudeControlRequest(
 // 발급한다. control.sock 은 runtime config hash 를 쓰더라도 auth 는 발급 config
 // 에서 읽어야 한다. 일반 daemon 은 <configDir>/daemon/control.key 를 사용한다.
 // 어느 경로에도 파일이 없으면 인증 미강제 daemon 으로 보고 auth 를 생략한다
-// (fail-open — 구버전 호환).
+// (fail-open, 구버전 호환).
 export async function readDaemonControlKey(
   configDir = resolveClaudeConfigDir(),
   { diagnostics } = {},
@@ -933,7 +933,7 @@ function isClaudeAttachChromeLine(line) {
     ) ||
     /^[-─━▔╭╮╰╯│┌┐└┘├┤┬┴┼\s]+$/.test(trimmed) ||
     /^(c|x|g):\s/.test(trimmed) ||
-    /CTX:\d+/.test(trimmed) ||
+    /ctx:(?:\d+|--)/i.test(trimmed) ||
     /auto mode on/.test(trimmed)
   );
 }
@@ -1720,7 +1720,7 @@ export async function dispatchClaudeDaemonJob({
     { timeoutMs: dispatchTimeoutMs },
   );
   if (dispatch?.ok !== true) {
-    // daemon 거부 사유를 보존한다 — generic 메시지만 던지면 EAUTH 같은
+    // daemon 거부 사유를 보존한다, generic 메시지만 던지면 EAUTH 같은
     // 실원인이 묻혀 진단이 어려워진다.
     const reason = dispatch?.error ? `: ${dispatch.error}` : "";
     throw new Error(

@@ -136,13 +136,13 @@ export function selectTier() {
 }
 
 // full tier 전용: 게이지 바 접두사 (normal 이하 tier에서는 빈 문자열)
-export function tierBar(currentTier, percent, baseColor = null) {
+export function tierBar(currentTier, percent, baseColor = null, gap = " ") {
   return currentTier === "full"
-    ? coloredBar(percent, GAUGE_WIDTH, baseColor) + " "
+    ? coloredBar(percent, GAUGE_WIDTH, baseColor) + gap
     : "";
 }
-export function tierDimBar(currentTier) {
+export function tierDimBar(currentTier, gap = " ") {
   return currentTier === "full"
-    ? DIM + "░".repeat(GAUGE_WIDTH) + RESET + " "
+    ? DIM + "░".repeat(GAUGE_WIDTH) + RESET + gap
     : "";
 }

@@ -25,6 +25,7 @@ import {
   TIME_CELL_INNER_WIDTH,
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
+import { cacheGap, claudePromptCache } from "./prompt-cache.mjs";
 import { getTerminalColumns, tierBar, tierDimBar } from "./terminal.mjs";
 import {
   clampPercent,
@@ -143,7 +144,7 @@ export function getMicroLine(
       : agyText;
     segments.push(`${marker}${dim(":")}${agyValue}`);
   }
-  segments.push(`${dim("CTX:")}${contextPercentText(ctxView)}`);
+  segments.push(`${dim("ctx:")}${contextPercentText(ctxView)}`);
   return truncateAnsi(segments.join(" "), cols);
 }
 
@@ -181,16 +182,16 @@ export function getClaudeRows(
   currentTier,
   contextView,
   claudeUsage,
-  costUsd = null,
+  { accountName, promptCache } = {},
 ) {
   const ctxView = contextView || buildContextUsageView({});
-  const prefix = `${bold(claudeOrange("c"))}:`;
-  // 이번 세션 비용. 폭이 넉넉한 full, compact 에서만 CTX 뒤에 붙인다.
-  const costText =
-    Number.isFinite(costUsd) &&
-    (currentTier === "full" || currentTier === "compact")
-      ? ` ${dim(`$${costUsd.toFixed(2)}`)}`
-      : "";
+  const markerColor = claudeOrange;
+  const prefix = `${bold(markerColor("c"))}:`;
+  // 계정을 ctx 앞에 둬서 x, a 행의 계정 라벨과 같은 열에서 시작하게 한다.
+  const accountText = accountName
+    ? `${markerColor(fitText(getAccountLabel("claude", accountName), ACCOUNT_LABEL_WIDTH))} `
+    : "";
+  const contextSection = `${dim("ctx:")}${contextPercentText(ctxView)}`;
   const spend = spendOnlyPercent(claudeUsage);
   if (spend != null) {
     if (currentTier === "nano" || currentTier === "micro") {
@@ -199,7 +200,7 @@ export function getClaudeRows(
     }
     const pct = colorByProvider(spend, formatPercentCell(spend), claudeOrange);
     const left = `${dim("$:")}${tierBar(currentTier, spend, CLAUDE_ORANGE)}${pct}`;
-    const right = `${dim("CTX:")}${contextPercentText(ctxView)}${costText}`;
+    const right = `${accountText}${contextSection}`;
     return [{ prefix, left, right }];
   }
   // API 실측 데이터
@@ -230,10 +231,11 @@ export function getClaudeRows(
           claudeOrange,
         )
       : dim(formatPlaceholderPercentCell());
+  const gap = cacheGap(claudePromptCache(promptCache), claudeOrange);
   const fBar =
     hasData && fiveHourPercent != null
-      ? tierBar(currentTier, fiveHourPercent, CLAUDE_ORANGE)
-      : tierDimBar(currentTier);
+      ? tierBar(currentTier, fiveHourPercent, CLAUDE_ORANGE, gap)
+      : tierDimBar(currentTier, gap);
   const wBar =
     hasData && weeklyPercent != null
       ? tierBar(currentTier, weeklyPercent, CLAUDE_ORANGE)
@@ -257,7 +259,7 @@ export function getClaudeRows(
   if (currentTier === "minimal") {
     const staleTag = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
     const quotaSection = `${dim("5h:")}${fStr} ${dim("1w:")}${wStr}${staleTag}`;
-    const right = `${dim("CTX:")}${contextPercentText(ctxView)}`;
+    const right = `${accountText}${contextSection}`;
     return [{ prefix, left: quotaSection, right }];
   }
 
@@ -267,8 +269,13 @@ export function getClaudeRows(
     const warning = ctxView.warningTag
       ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
       : "";
-    const contextSection = `${dim("CTX:")}${contextPercentText(ctxView)}${costText}${warning}`;
-    return [{ prefix, left: quotaSection, right: contextSection }];
+    return [
+      {
+        prefix,
+        left: quotaSection,
+        right: `${accountText}${contextSection}${warning}`,
+      },
+    ];
   }
 
   // full tier (>= 120 cols)
@@ -277,8 +284,13 @@ export function getClaudeRows(
   const warning = ctxView.warningTag
     ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
     : "";
-  const contextSection = `${dim("CTX:")}${contextPercentText(ctxView)}${costText}${warning}`;
-  return [{ prefix, left: quotaSection, right: contextSection }];
+  return [
+    {
+      prefix,
+      left: quotaSection,
+      right: `${accountText}${contextSection}${warning}`,
+    },
+  ];
 }
 
 // ============================================================================
@@ -296,13 +308,16 @@ export function getProviderRow(
   markerColor,
   realQuota,
   accountName,
+  { promptCache, loggedOut = false } = {},
 ) {
   const accountLabel = fitText(
     getAccountLabel(provider, accountName),
     ACCOUNT_LABEL_WIDTH,
   );
 
-  const prefix = `${bold(markerColor(marker))}:`;
+  const prefix = loggedOut
+    ? dim(`${marker}:`)
+    : `${bold(markerColor(marker))}:`;
   if (provider === "antigravity") {
     return getAntigravityRow(
       currentTier,
@@ -317,7 +332,6 @@ export function getProviderRow(
   let quotaSection;
 
   if (currentTier === "nano" || currentTier === "micro") {
-    const minPrefix = `${bold(markerColor(`${marker}`))}:`;
     if (realQuota?.type === "codex") {
       const main =
         realQuota.buckets.codex ||
@@ -340,13 +354,13 @@ export function getProviderRow(
             ? colorByProvider(weekP, `${weekP}%`, provFn)
             : dim("--%");
         return {
-          prefix: minPrefix,
+          prefix,
           left: `${fCellN}${dim("/")}${wCellN}`,
           right: "",
         };
       }
     }
-    return { prefix: minPrefix, left: dim("--%/--%"), right: "" };
+    return { prefix, left: dim("--%/--%"), right: "" };
   }
 
   if (currentTier === "minimal") {
@@ -424,6 +438,7 @@ export function getProviderRow(
   }
 
   // full tier
+  const gap = cacheGap(promptCache, markerColor);
 
   if (realQuota?.type === "codex") {
     const main =
@@ -450,8 +465,8 @@ export function getProviderRow(
           : dim(formatPlaceholderPercentCell());
       const fBar =
         fiveP != null
-          ? tierBar(currentTier, fiveP, provAnsi)
-          : tierDimBar(currentTier);
+          ? tierBar(currentTier, fiveP, provAnsi, gap)
+          : tierDimBar(currentTier, gap);
       const wBar =
         weekP != null
           ? tierBar(currentTier, weekP, provAnsi)
@@ -467,7 +482,7 @@ export function getProviderRow(
 
   // 폴백
   if (!quotaSection) {
-    quotaSection = `${dim("5h:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell(""))} ${dim("1w:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH(""))}`;
+    quotaSection = `${dim("5h:")}${tierDimBar(currentTier, gap)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell(""))} ${dim("1w:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH(""))}`;
   }
 
   const accountSection = `${markerColor(accountLabel)}`;
@@ -515,7 +530,7 @@ function getAntigravityRow(
   let slot;
   if (project) {
     // 쿼터 대신 과금 방식을 막대 자리(막대가 없는 표시에서는 퍼센트 자리)에 보인다.
-    const mark = isFull ? `${markerColor("GCP".padEnd(GAUGE_WIDTH))} ` : "";
+    const mark = isFull ? `${geminiBlue(" GCP ")} ` : "";
     const cell = isFull ? dim(formatPlaceholderPercentCell()) : percent;
     slot = `${dim("--:")}${mark}${cell}${timeCell}`;
   } else {

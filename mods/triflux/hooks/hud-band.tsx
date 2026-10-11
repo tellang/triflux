@@ -107,7 +107,7 @@ async function refreshRows($: EngineInterface, position: BandPosition, columns: 
       await writeMarker($, marker, 'off')
       return
     }
-    const { rateLimits, context, cost } = await $.session.usage()
+    const { rateLimits, context } = await $.session.usage()
     const stdin = JSON.stringify({
       session_id: sessionId,
       context_window: {
@@ -115,7 +115,6 @@ async function refreshRows($: EngineInterface, position: BandPosition, columns: 
         used_percentage: context.percent,
         current_usage: { total_tokens: context.tokens },
       },
-      cost: { total_cost_usd: cost?.usd },
       // statusLine 입력과 같은 모양(resets_at 은 epoch 초)으로 넘겨 HUD 가 한 경로로 읽는다.
       rate_limits: Object.fromEntries(
         rateLimits.map(w => [

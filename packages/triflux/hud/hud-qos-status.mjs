@@ -29,6 +29,7 @@ import {
 import { buildContextUsageView } from "./context-monitor.mjs";
 import {
   fetchClaudeUsage,
+  getClaudeEmail,
   readClaudeUsageSnapshot,
   scheduleClaudeUsageRefresh,
 } from "./providers/claude.mjs";
@@ -128,12 +129,10 @@ async function main() {
   const rows =
     bandState === "claude"
       ? []
-      : getClaudeRows(
-          currentTier,
-          contextView,
-          claudeUsage,
-          Number(stdin?.cost?.total_cost_usd ?? Number.NaN),
-        );
+      : getClaudeRows(currentTier, contextView, claudeUsage, {
+          accountName: getClaudeEmail(),
+          promptCache: stdin?.prompt_cache,
+        });
   let codexRowIndex = -1;
   if (showCodex) {
     codexRowIndex = rows.length;
@@ -145,6 +144,7 @@ async function main() {
         codexWhite,
         codexBuckets ? { type: "codex", buckets: codexBuckets } : null,
         getCodexEmail(),
+        { promptCache: codexSnapshot.promptCache, loggedOut: codexLoggedOut },
       ),
     );
   }
@@ -179,7 +179,7 @@ async function main() {
 
 main().catch(() => {
   process.stdout.write(
-    `\x1b[0m${bold(claudeOrange("c"))}: ${dim(`5h:--% ${formatTimeCell("")} 1w:--% ${formatTimeCellDH("")} | CTX:--%`)}\n`,
+    `\x1b[0m${bold(claudeOrange("c"))}: ${dim(`5h:--% ${formatTimeCell("")} 1w:--% ${formatTimeCellDH("")} | ctx:--%`)}\n`,
   );
 });
 

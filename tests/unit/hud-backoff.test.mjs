@@ -89,7 +89,6 @@ describe("hud stale marker", () => {
         tier,
         { percent: 42, display: "42%" },
         { fiveHourPercent: 11, weeklyPercent: 22, stale: true },
-        0,
       );
 
       assert.equal(rows.length, 1);
@@ -102,7 +101,6 @@ describe("hud stale marker", () => {
       "minimal",
       { percent: 42, display: "42%" },
       null,
-      0,
     );
 
     assert.equal(rows.length, 1);
@@ -122,7 +120,6 @@ describe("Claude unified weekly markers", () => {
           sonnetWeeklyPercent: 33,
           opusWeeklyPercent: 44,
         },
-        0,
       );
 
       const left = stripAnsi(rows[0].left);

@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -197,6 +198,80 @@ describe("Codex bucket normalization", () => {
 });
 
 describe("Codex multi-window selection", () => {
+  it("가장 최근 수정된 세션의 마지막 응답 기록으로 30분 캐시 만료를 정한다", async (t) => {
+    const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-cache-"));
+    const now = new Date("2026-07-11T09:00:00.000Z");
+    t.mock.method(Date, "now", () => now.getTime());
+    const cachePath = join(sessionsRoot, "cache.json");
+    const refresh = async () => {
+      await refreshCodexRateLimitsCache({
+        sessionsRoot,
+        cachePath,
+        collect: async () => [],
+      });
+      return JSON.parse(readFileSync(cachePath, "utf8")).promptCache;
+    };
+    const response = (timestamp, cached = 0, written = 0) => ({
+      timestamp,
+      type: "token_usage_record",
+      payload: {
+        usage: {
+          cached_input_tokens: cached,
+          cache_write_input_tokens: written,
+        },
+      },
+    });
+    // 쿼터 갱신 때 이전 사용량을 다시 보내는 token_count. 응답이 아니므로 만료를 늘리면 안 된다.
+    const quotaResend = (timestamp) => ({
+      timestamp,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: { last_token_usage: { cached_input_tokens: 999 } },
+      },
+    });
+    // 8일 전에 만든 세션을 재개한 경우: 7일 쿼터 탐색 범위 밖이어도 수정 시각으로 골라야 한다.
+    const resumedDay = new Date("2026-07-03T09:00:00.000Z");
+    const resumedPath = join(
+      sessionDirFor(sessionsRoot, resumedDay),
+      "rollout-a.jsonl",
+    );
+    const touch = (path, at) => utimesSync(path, at, at);
+    try {
+      writeRollout(sessionsRoot, now, "rollout-z.jsonl", [
+        response("2026-07-11T08:59:00.000Z", 999),
+      ]);
+      touch(join(sessionDirFor(sessionsRoot, now), "rollout-z.jsonl"), now);
+      writeRollout(sessionsRoot, resumedDay, "rollout-a.jsonl", [
+        response("2026-07-11T08:30:00.000Z", 100),
+        response("2026-07-11T08:50:00.000Z", 0, 200),
+        quotaResend("2026-07-11T08:58:00.000Z"),
+      ]);
+      touch(resumedPath, new Date(now.getTime() + 10_000));
+      // 하위 세션만 띄운 부모 세션처럼 응답 기록이 없는 파일은 건너뛴다.
+      writeRollout(sessionsRoot, now, "rollout-parent.jsonl", [
+        quotaResend("2026-07-11T08:59:30.000Z"),
+      ]);
+      touch(
+        join(sessionDirFor(sessionsRoot, now), "rollout-parent.jsonl"),
+        new Date(now.getTime() + 20_000),
+      );
+      assert.deepEqual(await refresh(), {
+        expiresAt: Date.parse("2026-07-11T09:20:00.000Z"),
+        ttlMs: 1_800_000,
+      });
+      // 마지막 응답에 캐시 토큰이 없으면 식은 것으로 본다.
+      writeRollout(sessionsRoot, resumedDay, "rollout-a.jsonl", [
+        response("2026-07-11T08:50:00.000Z", 100),
+        response("2026-07-11T08:55:00.000Z"),
+      ]);
+      touch(resumedPath, new Date(now.getTime() + 10_000));
+      assert.equal(await refresh(), null);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
   it("getCodexRateLimits: probe extraSnapshots가 낡은 세션 데이터를 이긴다", () => {
     const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-probe-"));
     const now = new Date("2026-07-11T09:00:00.000Z");

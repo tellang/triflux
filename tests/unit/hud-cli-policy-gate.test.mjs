@@ -101,17 +101,17 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
 
   it("showCodex 가 false 면 x 세그먼트만 빠진다", () => {
     const line = micro({ showCodex: false });
-    assert.ok(!line.includes("x:"), `x 세그먼트가 남아 있다: ${line}`);
+    assert.ok(!/\bx:/.test(line), `x 세그먼트가 남아 있다: ${line}`);
     assert.ok(line.includes("c:"), "claude 세그먼트는 남아야 한다");
     assert.ok(line.includes("a:"), "agy 세그먼트는 남아야 한다");
     assert.ok(!line.includes("sv:"), "sv 세그먼트는 제거됐다");
-    assert.ok(line.includes("CTX:"), "CTX 세그먼트는 남아야 한다");
+    assert.ok(line.includes("ctx:"), "ctx 세그먼트는 남아야 한다");
   });
 
   it("showAntigravity 가 false 면 a 세그먼트만 빠진다", () => {
     const line = micro({ showAntigravity: false });
     assert.ok(!line.includes("a:"), `a 세그먼트가 남아 있다: ${line}`);
-    assert.ok(line.includes("x:"), "codex 세그먼트는 남아야 한다");
+    assert.ok(/\bx:/.test(line), "codex 세그먼트는 남아야 한다");
     assert.ok(line.includes("c:"), "claude 세그먼트는 남아야 한다");
   });
 
@@ -121,9 +121,9 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
       !line.includes("  "),
       `이중 공백이 있다: ${JSON.stringify(line)}`,
     );
-    assert.ok(!line.includes("x:"), "codex 세그먼트가 남아 있다");
+    assert.ok(!/\bx:/.test(line), "codex 세그먼트가 남아 있다");
     assert.ok(!line.includes("a:"), "agy 세그먼트가 남아 있다");
-    assert.ok(line.includes("c:") && line.includes("CTX:"));
+    assert.ok(line.includes("c:") && line.includes("ctx:"));
   });
 
   it("세그먼트를 빼도 나머지 순서는 유지된다", () => {
@@ -132,6 +132,6 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
       line.indexOf("c:") < line.indexOf("a:"),
       `순서가 바뀌었다: ${line}`,
     );
-    assert.ok(line.indexOf("a:") < line.indexOf("CTX:"));
+    assert.ok(line.indexOf("a:") < line.indexOf("ctx:"));
   });
 });
