@@ -35,6 +35,7 @@ function fakeSteps({ interactive, answer, trusted = false }) {
     home: "/fake-home",
     log: (message) => calls.logs.push(message),
     warn: (message) => calls.logs.push(message),
+    notice: (message) => calls.logs.push(message),
   };
   return { calls, options };
 }
@@ -62,12 +63,13 @@ describe("setup 동의 단계", () => {
       tmr: "not-needed",
       mods: "deferred",
       codexHooks: "deferred",
+      changed: true,
     });
     assert.equal(calls.asked.length, 0);
     assert.equal(calls.run.length, 0);
     assert.deepEqual(calls.hooks, [{ trust: false }]);
     assert.ok(calls.logs.some((line) => line.includes("tfx setup")));
-    assert.ok(calls.logs.some((line) => line.includes("Codex 가 직접 묻는다")));
+    assert.ok(calls.logs.some((line) => line.includes("Codex 훅 승인 전")));
   });
 
   it("동의하면 winget 을 --exact 로 실행하고 훅 승인을 기록한다", async () => {
@@ -78,6 +80,7 @@ describe("setup 동의 단계", () => {
       tmr: "not-needed",
       mods: "installed",
       codexHooks: "approved",
+      changed: true,
     });
     const [[command, args]] = calls.run;
     assert.equal(command, "winget");
@@ -98,6 +101,7 @@ describe("setup 동의 단계", () => {
       tmr: "not-needed",
       mods: "installed",
       codexHooks: "declined",
+      changed: true,
     });
     assert.equal(calls.run.length, 0);
     assert.deepEqual(calls.hooks, [{ trust: false }]);
@@ -135,6 +139,7 @@ describe("setup 동의 단계", () => {
       tmr: "not-needed",
       mods: "installed",
       codexHooks: "trusted",
+      changed: true,
     });
     assert.equal(calls.asked.length, 0);
   });

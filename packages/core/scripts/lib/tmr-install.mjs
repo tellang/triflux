@@ -151,15 +151,16 @@ export async function offerTmrInstall({
   install = installTmr,
   log = console.log,
   warn = console.warn,
+  notice = console.log,
 }) {
   if (!tmrSupported(platform, arch)) return "not-needed";
   if (findTmr({ home, env })) return "present";
   if (!interactive) {
-    log("tmr 이 없다. tfx setup 에서 설치를 물을 수 있다.");
+    notice("tmr 이 없다. tfx setup 에서 설치를 물을 수 있다.");
     return "deferred";
   }
   if (!(await ask("tmr 을 설치할까요? (tmux 세션 목록 도구, ~/.local/bin)"))) {
-    log("tmr 설치를 건너뜀.");
+    notice("tmr 설치를 건너뜀.");
     return "declined";
   }
   try {
@@ -174,7 +175,7 @@ export async function offerTmrInstall({
         .split(delimiter)
         .includes(binDir)
     )
-      log(`${binDir} 가 PATH 에 없다. 셸 설정에 추가한다.`);
+      warn(`${binDir} 가 PATH 에 없다. 셸 설정에 추가한다.`);
     return "installed";
   } catch (error) {
     warn(`tmr 설치 실패: ${error?.message || error}`);

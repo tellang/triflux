@@ -203,22 +203,16 @@ test("triflux 패키지의 허브는 설치본, 체크아웃 구분 없이 종�
     // macOS ps 는 공백이 든 node 경로를 구분할 수 없어 종료하지 않는다.
     `  20 ${root}/my tools/bin/node ${installed}/hub/server.mjs`,
   );
-  const logs = [];
   const result = cleanupTfxHub({
     home,
     platform: "darwin",
     run,
-    log: (message) => logs.push(message),
   });
   assert.equal(result.hubStopped, true);
   assert.deepEqual(
     calls.filter(([command]) => command === "kill").map((call) => call[2]),
     ["11", "12"],
   );
-  assert.deepEqual(logs.slice(0, 2), [
-    `허브 종료: pid 11 (${installed})`,
-    `허브 종료: pid 12 (${checkout})`,
-  ]);
   assert.equal(existsSync(pidFile), false);
 });
 

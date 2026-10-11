@@ -1053,7 +1053,7 @@ function listHubProcesses(platform, run) {
 
 // 허브는 제거됐으므로 triflux 패키지의 hub/server.mjs 로 확인된 프로세스는 설치본,
 // 체크아웃, worktree 를 가리지 않고 종료한다(2026-10-08 결정).
-function stopHubs(home, platform, run, result, log) {
+function stopHubs(home, platform, run, result) {
   const processes = listHubProcesses(platform, run);
   if (!processes) {
     result.warnings.push("허브 프로세스 조회 실패, 종료하지 않음");
@@ -1064,7 +1064,6 @@ function stopHubs(home, platform, run, result, log) {
     if (Number(pid) === process.pid || typeof command !== "string") continue;
     const root = trifluxHubRoot(processArgv(pid, command, platform));
     if (!root) continue;
-    log(`허브 종료: pid ${pid} (${root})`);
     const stopped =
       platform === "win32"
         ? tryRun(run, "taskkill", ["/F", "/T", "/PID", String(pid)])
@@ -1157,7 +1156,6 @@ export function cleanupTfxHub({
   platform = osPlatform(),
   run = defaultRun,
   pluginRoot,
-  log = () => {},
   backups,
 } = {}) {
   const result = {
@@ -1210,7 +1208,7 @@ export function cleanupTfxHub({
     (resolve(home) === resolve(homedir()) && platform === osPlatform());
   if (realSystem) {
     try {
-      stopHubs(home, platform, run, result, log);
+      stopHubs(home, platform, run, result);
       if (platform === "win32") removeHubTasks(run, result);
     } catch (error) {
       result.ok = false;

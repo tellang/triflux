@@ -258,7 +258,7 @@ describe("setup machine profile non-interactive install", () => {
       assert.equal(result.signal, null);
       assert.equal(existsSync(profilePath), true);
       assert.match(readFileSync(profilePath, "utf8"), /TFX_DISABLE_CODEX=1/u);
-      assert.match(result.stdout, /machine profile/u);
+      assert.match(result.stdout, /설정 완료/u);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

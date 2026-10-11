@@ -44,6 +44,7 @@ async function runMods({
   const asked = [];
   const logs = [];
   const warnings = [];
+  const notices = [];
   const status = await ensureTrifluxMods({
     install,
     interactive,
@@ -55,6 +56,7 @@ async function runMods({
     env: { HOME: home, USERPROFILE: home, ...env },
     log: (message) => logs.push(message),
     warn: (message) => warnings.push(message),
+    notice: (message) => notices.push(message),
     execFileSyncFn(command, args, options) {
       assert.equal(command, "claude");
       assert.equal(options.env.HOME, home);
@@ -69,7 +71,7 @@ async function runMods({
       return "";
     },
   });
-  return { status, calls, asked, logs, warnings };
+  return { status, calls, asked, logs, warnings, notices };
 }
 
 test("보호 환경, 옛 CLI, claude 없음은 아무것도 하지 않고 실패는 경고만 남긴다", async () => {
@@ -107,7 +109,8 @@ test("미설치: --mods 는 묻지 않고 설치, 대화형은 동의할 때만,
   const deferred = await runMods();
   assert.equal(deferred.status, "deferred");
   assert.deepEqual(deferred.calls, [...READS, ADD]);
-  assert.deepEqual(deferred.logs, ["mods 설치: tfx setup --mods"]);
+  assert.deepEqual(deferred.warnings, []);
+  assert.deepEqual(deferred.notices, ["mods 설치: tfx setup --mods"]);
   assert.deepEqual(deferred.asked, []);
 
   const forced = await runMods({ install: true, marketplaces: REGISTERED });
@@ -149,7 +152,7 @@ test("설치됨: 같은 버전이나 버전을 모르면 묻지 않고, 다르�
   const outdated = await runMods(old);
   assert.equal(outdated.status, "outdated");
   assert.deepEqual(outdated.calls, READS);
-  assert.ok(outdated.logs[0].includes("claude plugin update"));
+  assert.ok(outdated.warnings[0].includes("claude plugin update"));
 
   const declined = await runMods({ ...old, interactive: true });
   assert.equal(declined.status, "update-declined");

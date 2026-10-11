@@ -87,8 +87,8 @@ describe("setup-sync: BREADCRUMB_PATH", () => {
   });
 });
 
-describe("setup-sync: --sync 플래그 파싱", () => {
-  it("--sync 플래그 전달 시 [sync] 메시지를 출력한다", () => {
+describe("setup-sync: --sync 출력", () => {
+  it("명시적 동기화도 배너 없이 설정 결과 한 번만 출력한다", () => {
     const result = execFileSync(
       process.execPath,
       [join(PROJECT_ROOT, "scripts", "setup.mjs"), "--sync"],
@@ -99,27 +99,9 @@ describe("setup-sync: --sync 플래그 파싱", () => {
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
-    assert.ok(
-      result.includes("[sync]"),
-      `Expected [sync] in output, got: ${result}`,
-    );
-  });
-
-  it("--sync 플래그 없이 실행 시 [sync] 메시지가 출력되지 않는다", () => {
-    const result = execFileSync(
-      process.execPath,
-      [join(PROJECT_ROOT, "scripts", "setup.mjs")],
-      {
-        timeout: 15000,
-        encoding: "utf8",
-        env: SETUP_TEST_ENV,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    assert.ok(
-      !result.includes("[sync]"),
-      `Expected no [sync] in output, got: ${result}`,
-    );
+    assert.match(result, /^triflux \S+ setup/);
+    assert.equal(result.split("설정 완료").length, 2);
+    assert.doesNotMatch(result, /\[sync\]|\[dev\]|background|주입한 run/);
   });
 });
 

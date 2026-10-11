@@ -26,6 +26,16 @@ import { homedir } from "os";
 import { basename, delimiter, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
+import {
+  addNotice,
+  addStep,
+  addWarning,
+  createCliResult,
+  outputOptions,
+  postinstallMessage,
+  recordFile,
+  renderCliResult,
+} from "./lib/cli-output.mjs";
 import { ensureGeminiProfiles } from "./lib/gemini-profiles.mjs";
 import {
   retireInstallLeftovers,
@@ -101,11 +111,6 @@ function parseSetupBoolean(env, key, fallback) {
   if (raw === "1") return true;
   if (raw === "0") return false;
   throw new Error(`${key} 값은 0 또는 1이어야 합니다. (현재: ${raw})`);
-}
-
-function isEnabledEnvironmentFlag(value) {
-  if (value === undefined || value === null || value === "") return false;
-  return !/^(0|false|no|off)$/iu.test(String(value));
 }
 
 function parseSetupNonNegativeInteger(env, key, fallback) {
@@ -389,11 +394,6 @@ export async function ensureMachineProfile({
       `hard ceiling이 요청됐지만 timeout/gtimeout이 없어 비활성 상태입니다. ${platform === "darwin" ? "macOS: brew install coreutils" : "coreutils 패키지를 설치하세요"}`,
     );
   }
-  if (!canPrompt) {
-    warnings.push(
-      "non-interactive 설치: CLI 사용 여부는 자동감지/TFX_SETUP_* 값, timeout은 unattended-safe 기본값을 사용했습니다.",
-    );
-  }
   if (
     profile.TFX_HARD_CEILING_SEC === "0" &&
     profile.TFX_STALL_KILL === "classify"
@@ -418,13 +418,7 @@ export function canAskUser({
   input = process.stdin,
   output = process.stdout,
 } = {}) {
-  return (
-    !isEnabledEnvironmentFlag(env.CI) &&
-    !isEnabledEnvironmentFlag(env.DOCKER) &&
-    env.npm_lifecycle_event !== "postinstall" &&
-    Boolean(input?.isTTY) &&
-    Boolean(output?.isTTY)
-  );
+  return !outputOptions([], { env, input, output }).nonInteractive;
 }
 
 async function askYesNo(question, { input, output }) {
@@ -466,27 +460,32 @@ export async function runConsentSteps({
   modsInstall = false,
   offerMods = ensureTrifluxMods,
   home = _TFX_HOME,
-  log = console.log,
-  warn = console.warn,
+  report,
+  log = report ? (message) => addStep(report, message) : console.log,
+  warn = report
+    ? (message) => addWarning(report, "consent", message)
+    : console.warn,
+  notice = report ? (message) => addNotice(report, message) : console.log,
 } = {}) {
   const result = {
     psmux: "not-needed",
     tmr: "not-needed",
     mods: "not-needed",
     codexHooks: "skipped",
+    changed: false,
   };
 
   if (platform === "win32") {
     if (hasCommand("psmux")) result.psmux = "present";
     else if (!interactive) {
       result.psmux = "deferred";
-      log(
+      notice(
         `psmux 가 없다. tfx setup 을 실행하거나 직접 설치한다: ${PSMUX_MANUAL_INSTALL}`,
       );
     } else if (await ask("psmux 를 설치할까요? (winget)")) {
       try {
         run("winget", PSMUX_WINGET_ARGS, {
-          stdio: ["ignore", "inherit", "inherit"],
+          stdio: "inherit",
           timeout: 300_000,
         });
         result.psmux = "installed";
@@ -497,7 +496,7 @@ export async function runConsentSteps({
       }
     } else {
       result.psmux = "declined";
-      log(`psmux 설치를 건너뜀. 나중에 설치: ${PSMUX_MANUAL_INSTALL}`);
+      notice(`psmux 설치를 건너뜀. 나중에 설치: ${PSMUX_MANUAL_INSTALL}`);
     }
   }
 
@@ -509,6 +508,7 @@ export async function runConsentSteps({
     platform,
     log,
     warn,
+    notice,
   });
 
   result.mods = await offerMods({
@@ -519,18 +519,20 @@ export async function runConsentSteps({
     execFileSyncFn: run,
     log,
     warn,
+    notice,
   });
 
   try {
+    result.changed = [result.psmux, result.tmr, result.mods].some(
+      (status) => status === "installed" || status === "updated",
+    );
     const hooks = ensureHooks({ trust: false });
+    result.changed ||= Boolean(hooks?.changedHooks || hooks?.changedConfig);
     if (hooks?.skipped) return result;
-    if (hooks.changedHooks) log("Codex hooks: 세션 동기화 훅 등록");
     if (hooks.trusted) result.codexHooks = "trusted";
     else if (!interactive) {
       result.codexHooks = "deferred";
-      log(
-        "Codex 훅은 아직 승인 전이다. tfx setup 에서 승인하거나, Codex 를 처음 띄울 때 Codex 가 직접 묻는다.",
-      );
+      notice("Codex 훅 승인 전. tfx setup 에서 승인한다");
     } else if (
       await ask(
         "Codex 훅을 승인해 둘까요? (Codex 세션 시작과 프롬프트 입력 때 triflux 세션 동기화 훅이 돈다)",
@@ -538,12 +540,11 @@ export async function runConsentSteps({
     ) {
       ensureHooks({ trust: true });
       result.codexHooks = "approved";
+      result.changed = true;
       log("Codex hooks: 승인 기록");
     } else {
       result.codexHooks = "declined";
-      log(
-        "Codex 훅 승인을 건너뜀. Codex 를 처음 띄울 때 Codex 가 직접 묻는다.",
-      );
+      notice("Codex 훅 승인 전. tfx setup 에서 승인한다");
     }
   } catch (error) {
     result.codexHooks = "failed";
@@ -1262,7 +1263,7 @@ export function syncSkills({
 } = {}) {
   const source = join(pluginRoot, "skills");
   const destination = join(claudeDir, "skills");
-  const result = { ok: true, changed: 0, total: 0, warnings: [] };
+  const result = { ok: true, changed: 0, removed: 0, total: 0, warnings: [] };
   function syncDirectory(src, dst) {
     mkdirSync(dst, { recursive: true });
     for (const entry of readdirSync(src, { withFileTypes: true })) {
@@ -1295,6 +1296,7 @@ export function syncSkills({
   for (const installed of [destination, join(codexDir, "skills")]) {
     const stale = cleanupStaleSkills(installed, source, { platform });
     result.changed += stale.count;
+    result.removed += stale.count;
     for (const name of stale.preserved)
       result.warnings.push(`구형 스킬 ${name}: 사용자 사본 보존`);
   }
@@ -1404,6 +1406,7 @@ export async function ensureTrifluxMods({
   execFileSyncFn = execFileSync,
   log = console.log,
   warn = console.warn,
+  notice = console.log,
 } = {}) {
   const run = claudeCli(env, execFileSyncFn);
   const mods = inspectTrifluxMods({ env, pkgVersion, run });
@@ -1415,7 +1418,7 @@ export async function ensureTrifluxMods({
       run(["plugin", "marketplace", "add", "tellang/triflux"]);
     if (mods.status === "missing") {
       if (!install && !interactive) {
-        log("mods 설치: tfx setup --mods");
+        notice("mods 설치: tfx setup --mods");
         return "deferred";
       }
       if (
@@ -1424,7 +1427,7 @@ export async function ensureTrifluxMods({
           "triflux mods 플러그인(HUD band, 서브에이전트 effort 정책)을 설치할까요?",
         ))
       ) {
-        log("mods 설치를 건너뜀. 나중에 설치: tfx setup --mods");
+        notice("mods 설치를 건너뜀. 나중에 설치: tfx setup --mods");
         return "declined";
       }
       run(["plugin", "install", MODS_PLUGIN_ID]);
@@ -1433,14 +1436,15 @@ export async function ensureTrifluxMods({
     }
     const gap = `${mods.installedVersion}, 패키지 ${mods.pkgVersion}`;
     if (!install && !interactive) {
-      log(`mods 버전이 다르다(설치 ${gap}). 업데이트: ${MODS_UPDATE_COMMAND}`);
+      warn(`mods 버전이 다르다(설치 ${gap}). 업데이트: ${MODS_UPDATE_COMMAND}`);
       return "outdated";
     }
     if (
       !install &&
       !(await ask(`triflux mods 를 업데이트할까요? (설치 ${gap})`))
     ) {
-      log(`mods 업데이트를 건너뜀. 나중에: ${MODS_UPDATE_COMMAND}`);
+      warn(`mods 버전이 다르다(설치 ${gap}). 업데이트: ${MODS_UPDATE_COMMAND}`);
+      notice(`mods 업데이트를 건너뜀. 나중에: ${MODS_UPDATE_COMMAND}`);
       return "update-declined";
     }
     run(["plugin", "marketplace", "update", "triflux"]);
@@ -1504,19 +1508,12 @@ function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
 }
 
 /** 패키지에서 빠진 옛 설치 파일을 보관 디렉터리로 옮기고 이번 배포 목록을 매니페스트로 남긴다. */
-function retireOldInstallFiles(log = console.log) {
+function retireOldInstallFiles() {
   const files = SYNC_MAP.map(({ label }) => label);
   const result = retireInstallLeftovers({
     claudeDir: CLAUDE_DIR,
     keep: new Set(files),
   });
-  if (result.moved.length)
-    log(
-      `옛 설치 파일 ${result.moved.length}개를 ${join(CLAUDE_DIR, ".tfx-retired")} 로 옮김 (30일 뒤 삭제)`,
-    );
-  if (result.deleted.length)
-    log(`옛 허브 인증 사본 ${result.deleted.length}개 삭제`);
-  for (const warning of result.warnings) log(`⚠ ${warning}`);
   writeInstallManifest(CLAUDE_DIR, files, result.failed);
   return result;
 }
@@ -1548,10 +1545,11 @@ function ensureCodexProfiles() {
     // Safety guard: if the file exists but is suspiciously small (< 100 bytes)
     // skip all writes to avoid perpetuating a corrupted state.
     if (original.length > 0 && original.length < 100) {
-      process.stderr.write(
-        `[tfx-setup] config.toml 크기 이상 (${original.length} bytes) — 쓰기 스킵. 수동 확인 필요: ${CODEX_CONFIG_PATH}\n`,
-      );
-      return { ok: false, changed: 0, message: "config too small, skipped" };
+      return {
+        ok: false,
+        changed: 0,
+        message: `config too small, skipped (${original.length} bytes): ${CODEX_CONFIG_PATH}`,
+      };
     }
 
     let updated = original;
@@ -1648,24 +1646,85 @@ function ensureCodexProfiles() {
   }
 }
 
-function createCommandIo() {
-  const stdout = [];
-  const stderr = [];
-
+function createCommandIo(stdinData) {
+  const options = outputOptions(getSetupArgv(stdinData));
+  const report = createCliResult("setup", getPackageVersion());
   return {
-    log(message = "") {
-      stdout.push(`${message}\n`);
+    report,
+    options,
+    warn(code, message) {
+      addWarning(report, code, message);
     },
-    writeStdout(message = "") {
-      stdout.push(message);
-    },
-    writeStderr(message = "") {
-      stderr.push(message);
+    step(message) {
+      addStep(report, message);
     },
     result(code = 0) {
-      return { code, stdout: stdout.join(""), stderr: stderr.join("") };
+      report.message ||= code ? "설정 단계 실패" : "설정 완료";
+      if (code) {
+        report.outcome = "failed";
+        report.alreadyInGoalState = false;
+      }
+      return {
+        code,
+        stdout:
+          process.env.npm_lifecycle_event === "postinstall" && !options.json
+            ? postinstallMessage(report.to, report)
+            : renderCliResult(report, options),
+        stderr: "",
+      };
     },
   };
+}
+
+export function setupTargets(
+  report,
+  { skills = 0, files = 0, codex, gemini, hooks = "skipped" } = {},
+) {
+  const agyInstalled = commandAvailableOnPath("agy");
+  const codexInstalled = commandAvailableOnPath("codex");
+  report.targets = [
+    {
+      name: "claude",
+      status: "ok",
+      detail: `스킬 ${skills}개, 파일 ${files}개${existsSync(HUD_PATH) ? ", HUD statusLine" : ""}`,
+    },
+    {
+      name: "codex",
+      status:
+        codex?.ok === false || hooks === "failed"
+          ? "failed"
+          : !codexInstalled || codex?.reason
+            ? "skipped"
+            : "ok",
+      detail:
+        codex?.ok === false
+          ? codex.message
+          : !codexInstalled
+            ? "미설치 (npm i -g @openai/codex)"
+            : codex?.reason
+              ? "설정 건너뜀"
+              : `프로필 ${REQUIRED_CODEX_PROFILES.length}개${hooks !== "skipped" ? ", 훅 등록" : ""}`,
+    },
+    {
+      name: "agy",
+      status:
+        gemini?.ok === false
+          ? "failed"
+          : agyInstalled && gemini
+            ? "ok"
+            : "skipped",
+      detail:
+        gemini?.ok === false
+          ? gemini.message
+          : agyInstalled
+            ? gemini
+              ? `프로필 ${gemini.count}개`
+              : "설정 건너뜀"
+            : "설치 안 됨, 건너뜀",
+    },
+  ];
+  if (report.targets.some(({ status }) => status === "failed"))
+    report.alreadyInGoalState = false;
 }
 
 function getSetupArgv(stdinData) {
@@ -1954,60 +2013,70 @@ function reapLegacyTrayProcesses({
   return reaped;
 }
 
-function ensureCriticalSetup() {
+function ensureCriticalSetup(io) {
   const settings = loadSettings();
   let settingsChanged = false;
-
-  try {
-    if (applyStatusLine(settings)) settingsChanged = true;
-  } catch {}
-  try {
-    if (applyAgentTeams(settings)) settingsChanged = true;
-  } catch {}
-  try {
-    if (applyRemoteControl(settings)) settingsChanged = true;
-  } catch {}
-
+  for (const apply of [
+    () =>
+      applyStatusLine(settings, {
+        warn: (message) => io.warn("statusline", message),
+      }),
+    () => applyAgentTeams(settings),
+    () => applyRemoteControl(settings),
+  ]) {
+    try {
+      if (apply()) settingsChanged = true;
+    } catch (error) {
+      io.warn("settings", error.message);
+    }
+  }
   if (settingsChanged) {
     try {
       persistSettings(settings);
-    } catch {}
+      io.report.alreadyInGoalState = false;
+    } catch (error) {
+      io.warn("settings", error.message);
+    }
   }
-
   try {
     const pkgRootForward = PLUGIN_ROOT.replace(/\\/g, "/");
     const currentBreadcrumb = existsSync(BREADCRUMB_PATH)
       ? readFileSync(BREADCRUMB_PATH, "utf8").trim()
       : "";
     if (currentBreadcrumb !== pkgRootForward) {
-      const breadcrumbDir = dirname(BREADCRUMB_PATH);
-      if (!existsSync(breadcrumbDir)) {
-        mkdirSync(breadcrumbDir, { recursive: true });
-      }
+      mkdirSync(dirname(BREADCRUMB_PATH), { recursive: true });
       writeFileSync(BREADCRUMB_PATH, pkgRootForward + "\n", "utf8");
+      io.report.alreadyInGoalState = false;
     }
-  } catch {}
-
-  try {
-    ensureCodexProfiles();
   } catch (error) {
-    process.stderr.write(
-      `[tfx-setup] ensureCodexProfiles 실패: ${error?.message || error}\n`,
-    );
+    io.warn("breadcrumb", error.message);
   }
+  const codex = ensureCodexProfiles();
+  if (!codex.ok)
+    io.warn("codex-profiles", `Codex profiles 설정 실패: ${codex.message}`);
+  if (codex.changed) io.report.alreadyInGoalState = false;
+  let hooks;
   try {
-    ensureCodexHooks();
+    hooks = ensureCodexHooks();
+    if (hooks.changedHooks || hooks.changedConfig)
+      io.report.alreadyInGoalState = false;
+    if (!hooks.skipped && !hooks.trusted)
+      addNotice(io.report, "Codex 훅 승인 전. tfx setup 에서 승인한다");
   } catch (error) {
-    process.stderr.write(
-      `[tfx-setup] ensureCodexHooks 실패: ${error?.message || error}\n`,
-    );
+    io.warn("codex-hooks", `Codex hooks 등록 실패: ${error.message}`);
   }
   const agyCleanup = cleanupAgyHooks();
-  if (!agyCleanup.ok) {
-    process.stderr.write(
-      `[tfx-setup] 옛 agy 훅 정리 실패: ${agyCleanup.error}\n`,
-    );
-  }
+  if (agyCleanup.changed) io.step("agy 옛 triflux-session 훅 정리");
+  if (!agyCleanup.ok)
+    io.warn("agy-cleanup", `옛 agy 훅 정리 실패: ${agyCleanup.error}`);
+  setupTargets(io.report, {
+    codex,
+    skills: readdirSync(join(PLUGIN_ROOT, "skills")).filter((name) =>
+      existsSync(join(CLAUDE_DIR, "skills", name, "SKILL.md")),
+    ).length,
+    hooks: hooks?.skipped ? "skipped" : hooks ? "registered" : "failed",
+    files: SYNC_MAP.filter(({ dst }) => existsSync(dst)).length,
+  });
 }
 
 export {
@@ -2046,50 +2115,52 @@ export {
 };
 
 export async function runCritical(stdinData) {
-  const io = createCommandIo();
+  const io = createCommandIo(stdinData);
   if (writesRealHomeInTest()) {
-    io.log("setup: skip (테스트가 홈을 격리하지 않음)");
+    io.report.outcome = "skipped";
+    io.report.message = "테스트가 홈을 격리하지 않아 건너뜀";
     return io.result(0);
   }
   const cleanup = cleanupLegacyHooks({ settingsPath: SETTINGS_PATH });
   if (!cleanup.ok) {
-    io.writeStderr(`[tfx-setup] 이전 hook 정리 실패: ${cleanup.error}\n`);
+    io.report.message = `이전 hook 정리 실패: ${cleanup.error}`;
     return io.result(1);
   }
-  const argv = getSetupArgv(stdinData);
-  const isSync = argv.includes("--sync");
-  const isDev = detectDevMode();
-
-  // version check remains part of the critical path for in-process callers.
-  getPackageVersion();
+  if (cleanup.changed) io.step(`옛 Claude 훅 ${cleanup.removed}개 정리`);
   readMarker();
-
-  if (isDev) {
-    io.log("  [dev] 로컬 개발 모드 감지");
-  }
-
-  if (isSync) {
-    io.log("  [sync] 명시적 재동기화 실행");
-  }
-
   try {
-    ensureCriticalSetup();
+    ensureCriticalSetup(io);
   } catch (error) {
-    io.writeStderr(`[tfx-setup] settings.json 읽기 실패: ${error.message}\n`);
+    io.report.message = `settings.json 읽기 실패: ${error.message}`;
     return io.result(1);
   }
   return io.result(0);
 }
 
 export async function runDeferred(stdinData) {
-  const io = createCommandIo();
+  const io = createCommandIo(stdinData);
+  if (io.options.check) {
+    io.report.message =
+      "setup 은 --check 를 지원하지 않습니다. tfx setup --dry-run 을 쓰세요.";
+    return io.result(2);
+  }
+  try {
+    return await runDeferredWithIo(stdinData, io);
+  } catch (error) {
+    io.report.message = error.message;
+    return io.result(1);
+  }
+}
+
+async function runDeferredWithIo(stdinData, io) {
   if (writesRealHomeInTest()) {
-    io.log("setup: skip (테스트가 홈을 격리하지 않음)");
+    io.report.outcome = "skipped";
+    io.report.message = "테스트가 홈을 격리하지 않아 건너뜀";
     return io.result(0);
   }
   const cleanup = cleanupLegacyHooks({ settingsPath: SETTINGS_PATH });
   if (!cleanup.ok) {
-    io.writeStderr(`[tfx-setup] 이전 hook 정리 실패: ${cleanup.error}\n`);
+    io.report.message = `이전 hook 정리 실패: ${cleanup.error}`;
     return io.result(1);
   }
   const argv = getSetupArgv(stdinData);
@@ -2101,35 +2172,21 @@ export async function runDeferred(stdinData) {
   const nonInteractiveProfile = argv.includes("--non-interactive");
   const isDev = detectDevMode();
 
-  if (isDev) {
-    io.log("  [dev] \uB85C\uCEEC \uAC1C\uBC1C \uBAA8\uB4DC \uAC10\uC9C0");
-  }
-
-  if (isSync) {
-    io.log("  [sync] \uBA85\uC2DC\uC801 \uC7AC\uB3D9\uAE30\uD654 \uC2E4\uD589");
-  }
+  if (cleanup.changed) io.step(`옛 Claude 훅 ${cleanup.removed}개 정리`);
 
   let machineProfileResult;
   try {
     machineProfileResult = await ensureMachineProfile({
       force: reconfigureMachineProfile,
-      nonInteractive: nonInteractiveProfile,
+      nonInteractive: nonInteractiveProfile || io.options.nonInteractive,
     });
   } catch (error) {
-    io.writeStderr(
-      `[tfx-setup] machine profile 실패: ${error?.message || error}\n`,
-    );
+    io.report.message = `machine profile 실패: ${error?.message || error}`;
     return io.result(1);
   }
-  if (machineProfileResult.changed || reconfigureMachineProfile) {
-    const action = machineProfileResult.changed ? "saved" : "unchanged";
-    io.log(
-      `  machine profile ${action}: ${machineProfileResult.path} (${machineProfileResult.profile.TFX_MACHINE_OS}/${machineProfileResult.profile.TFX_MULTIPLEXER_POLICY})`,
-    );
-  }
-  for (const warning of machineProfileResult.warnings) {
-    io.log(`  \x1b[33m⚠\x1b[0m ${warning}`);
-  }
+  if (machineProfileResult.changed) io.report.alreadyInGoalState = false;
+  for (const warning of machineProfileResult.warnings)
+    io.warn("machine-profile", warning);
   if (machineProfileOnly) return io.result(0);
 
   const mcpBackups = new Map();
@@ -2139,30 +2196,33 @@ export async function runDeferred(stdinData) {
     backups: mcpBackups,
   });
   // 이주가 막혀도 설치는 계속한다. 남은 항목은 경고로 알린다.
-  for (const warning of mcpCleanup.warnings) io.log(`  ⚠ ${warning}`);
+  if (!mcpCleanup.skipped)
+    for (const warning of mcpCleanup.warnings) io.warn("mcp-cleanup", warning);
+  if (mcpCleanup.changed) io.step("옛 MCP 설정 정리");
 
   // 제거된 허브의 MCP 항목, 프로세스, 예약 작업을 정리한다. 개발 체크아웃의 스냅샷은 건드리지 않는다.
   const hubCleanup = cleanupTfxHub({
     home: _TFX_HOME,
     pluginRoot: isDev ? undefined : PLUGIN_ROOT,
-    log: (message) => io.log(`  ${message}`),
     backups: mcpBackups,
   });
-  for (const warning of hubCleanup.warnings) io.log(`  ⚠ ${warning}`);
-  if (hubCleanup.changed) io.log("  허브 설정과 실행 흔적 정리");
+  for (const warning of hubCleanup.warnings) io.warn("hub-cleanup", warning);
+  if (hubCleanup.changed) io.step("허브 설정과 실행 흔적 정리");
 
   const mcpPins = pinRegistryMcpPackages({
     home: _TFX_HOME,
     backups: mcpBackups,
   });
-  for (const warning of mcpPins.warnings) io.log(`  ⚠ ${warning}`);
+  for (const warning of mcpPins.warnings) io.warn("mcp-pins", warning);
   if (mcpPins.pinned)
-    io.log(`  MCP 패키지 고정 버전 반영: ${mcpPins.pinned}개 항목`);
+    io.step(`MCP 패키지 고정 버전 반영: ${mcpPins.pinned}개 항목`);
 
   const pkgVersion = getPackageVersion();
   const marker = readMarker();
   const skillSync = syncSkills();
-  for (const warning of skillSync.warnings) io.log(`  ⚠ ${warning}`);
+  for (const warning of skillSync.warnings) io.warn("skills", warning);
+  if (skillSync.changed) io.report.alreadyInGoalState = false;
+  if (skillSync.removed) io.step(`구형 스킬 ${skillSync.removed}개 정리`);
   if (!skillSync.ok) return io.result(1);
   // --mods 는 동의 단계에서 처리하므로 이미 동기화된 버전이어도 건너뛰지 않는다.
   const modsInstall = argv.includes("--mods");
@@ -2172,28 +2232,37 @@ export async function runDeferred(stdinData) {
     !isForce &&
     !modsInstall
   ) {
-    io.log(`setup: skip (v${pkgVersion} already synced)`);
+    setupTargets(io.report, {
+      skills: skillSync.total,
+      files: SYNC_MAP.filter(({ dst }) => existsSync(dst)).length,
+      codex: { reason: "version-cache" },
+    });
     return io.result(0);
   }
 
   let synced = skillSync.changed;
 
-  for (const { src, dst } of SYNC_MAP) {
+  for (const { src, dst, label } of SYNC_MAP) {
     if (!existsSync(src)) continue;
 
+    const change = !existsSync(dst)
+      ? "create"
+      : shouldSyncTextFile(src, dst)
+        ? "update"
+        : "noop";
     const dstDir = dirname(dst);
     if (!existsSync(dstDir)) {
       mkdirSync(dstDir, { recursive: true });
     }
 
-    if (!existsSync(dst)) {
+    if (change === "create") {
       copyFileSync(src, dst);
       try {
         chmodSync(dst, 0o755);
       } catch {}
       synced++;
     } else {
-      if (shouldSyncTextFile(src, dst)) {
+      if (change === "update") {
         copyFileSync(src, dst);
         try {
           chmodSync(dst, 0o755);
@@ -2201,13 +2270,15 @@ export async function runDeferred(stdinData) {
         synced++;
       }
     }
+    recordFile(io.report, label, change);
   }
 
   try {
     synced += syncWorkerPackages();
   } catch (error) {
-    io.log(
-      `  \x1b[33m⚠\x1b[0m worker package sync skipped: ${_normalizeErrorMessage(error)}`,
+    io.warn(
+      "worker-packages",
+      `worker package sync 실패: ${_normalizeErrorMessage(error)}`,
     );
   }
 
@@ -2229,15 +2300,22 @@ export async function runDeferred(stdinData) {
     }
   }
 
-  for (const file of removeRetiredInstallFiles()) {
-    io.log(`  \x1b[32m✓\x1b[0m 더 쓰지 않는 설치 파일 제거: ${file}`);
-  }
-  retireOldInstallFiles((message) => io.log(`  ${message}`));
+  const removedFiles = removeRetiredInstallFiles();
+  if (removedFiles.length)
+    io.step(`더 쓰지 않는 설치 파일 ${removedFiles.length}개 제거`);
+  const retired = retireOldInstallFiles();
+  for (const warning of retired.warnings) io.warn("retired-files", warning);
+  if (retired.moved.length || retired.deleted.length)
+    io.step(
+      `옛 설치 파일 ${retired.moved.length + retired.deleted.length}개 정리`,
+    );
 
   const settings = loadSettings();
   let settingsChanged = false;
   for (const apply of [applyStatusLine, applyAgentTeams, applyRemoteControl]) {
-    if (apply(settings)) {
+    if (
+      apply(settings, { warn: (message) => io.warn("statusline", message) })
+    ) {
       settingsChanged = true;
       synced++;
     }
@@ -2265,14 +2343,11 @@ export async function runDeferred(stdinData) {
         /* pre-warm 실패 무시 */
       }
     }
-    io.log("  \x1b[32m✓\x1b[0m HUD cache pre-warm (background)");
   }
 
   const reapedTrays = reapLegacyTrayProcesses();
   if (reapedTrays.length > 0) {
-    io.log(
-      `  \x1b[32m✓\x1b[0m 제거된 CTO 트레이 프로세스 ${reapedTrays.length}개 종료`,
-    );
+    io.step(`제거된 CTO 트레이 프로세스 ${reapedTrays.length}개 종료`);
     synced++;
   }
 
@@ -2285,6 +2360,7 @@ export async function runDeferred(stdinData) {
     "codex-rate-limits-cache.json",
   ];
 
+  let clearedCaches = 0;
   for (const name of staleFiles) {
     const fp = join(cacheDir, name);
     if (!existsSync(fp)) continue;
@@ -2294,15 +2370,19 @@ export async function runDeferred(stdinData) {
       // 에러 상태이거나 락 파일이면 삭제 → 새 세션에서 fresh start
       if (parsed.error || name.startsWith(".")) {
         unlinkSync(fp);
+        clearedCaches++;
         synced++;
       }
     } catch {
       // 파싱 실패 파일도 삭제
       try {
         unlinkSync(fp);
+        clearedCaches++;
       } catch {}
     }
   }
+
+  if (clearedCaches) io.step(`HUD 오류 캐시 ${clearedCaches}개 정리`);
 
   // ── Windows bash PATH 자동 설정 ──
   // Codex/Antigravity가 cmd에는 있지만 bash에서 못 찾는 문제 해결
@@ -2348,30 +2428,30 @@ export async function runDeferred(stdinData) {
 
   // tfx setup 과 같은 결과가 되게 postinstall 에서도 agy 프로필을 채운다.
   // agy 가 없는 기기에는 ~/.gemini 를 새로 만들지 않는다.
+  let geminiProfilesResult;
   const geminiDir = join(_TFX_HOME, ".gemini");
   if (!isProtectedSetupEnv() && existsSync(geminiDir)) {
-    const geminiProfilesResult = ensureGeminiProfiles({ geminiDir });
+    geminiProfilesResult = ensureGeminiProfiles({ geminiDir });
     if (geminiProfilesResult.ok && geminiProfilesResult.added > 0) synced++;
     else if (!geminiProfilesResult.ok)
-      io.log(
-        `  \x1b[33m⚠\x1b[0m Antigravity/Gemini profiles 설정 실패: ${geminiProfilesResult.message}`,
+      io.warn(
+        "gemini-profiles",
+        `Antigravity/Gemini profiles 설정 실패: ${geminiProfilesResult.message}`,
       );
   }
 
-  await runConsentSteps({
+  const consent = await runConsentSteps({
+    interactive: !io.options.nonInteractive,
     modsInstall,
-    log: (message) => io.log(`  ${message}`),
-    warn: (message) => io.log(`  \x1b[33m⚠\x1b[0m ${message}`),
+    report: io.report,
   });
 
   const agyCleanup = cleanupAgyHooks();
   if (agyCleanup.changed) {
-    io.log("  \x1b[32m✓\x1b[0m Antigravity: 옛 triflux 세션 훅을 지움");
+    io.step("agy 옛 triflux-session 훅 정리");
     synced++;
   } else if (!agyCleanup.ok) {
-    io.log(
-      `  \x1b[33m⚠\x1b[0m Antigravity 옛 훅 정리 실패: ${agyCleanup.error}`,
-    );
+    io.warn("agy-cleanup", `Antigravity 옛 훅 정리 실패: ${agyCleanup.error}`);
   }
 
   // ── MCP 인벤토리 백그라운드 갱신 ──
@@ -2407,15 +2487,17 @@ export async function runDeferred(stdinData) {
       const installedVer = parsed?.dependencies?.triflux?.version;
       if (installedVer && installedVer !== pkgVersion) {
         const tag = pkgVersion.includes("alpha") ? "alpha" : "latest";
-        io.log(
-          `  npm: triflux global ${installedVer} → ${pkgVersion} (npm i -g triflux@${tag})`,
+        io.warn(
+          "npm-version",
+          `npm: triflux global ${installedVer} -> ${pkgVersion} (npm i -g triflux@${tag})`,
         );
       }
     } catch {
       // npm list 실패 = 글로벌 미설치. 안내만 출력.
       if (pkgVersion.includes("alpha")) {
-        io.log(
-          "  npm: triflux global 미설치 (npm i -g triflux@alpha 로 설치 가능)",
+        io.warn(
+          "npm-version",
+          "npm: triflux global 미설치 (npm i -g triflux@alpha 로 설치 가능)",
         );
       }
     }
@@ -2425,53 +2507,19 @@ export async function runDeferred(stdinData) {
     writeMarker({ version: pkgVersion, timestamp: Date.now() });
   }
 
-  // ── postinstall 배너 (npm install 시에만 출력) ──
-
-  if (process.env.npm_lifecycle_event === "postinstall") {
-    const G = "\x1b[32m";
-    const C = "\x1b[36m";
-    const Y = "\x1b[33m";
-    const D = "\x1b[2m";
-    const B = "\x1b[1m";
-    const R = "\x1b[0m";
-
-    const ver = (() => {
-      return pkgVersion || "?";
-    })();
-
-    io.log(`
-${B}╔═══════════════════════════════════════════════╗${R}
-${B}║${R}  ${C}triflux${R} ${D}v${ver}${R} ${B}— Setup Complete${R}             ${B}║${R}
-${B}╚═══════════════════════════════════════════════╝${R}
-
-  ${G}✓${R} tfx-route.sh     → ~/.claude/scripts/
-  ${G}✓${R} hud-qos-status   → ~/.claude/hud/
-  ${G}✓${R} ${synced > 0 ? synced + " files synced" : "all files up to date"}
-  ${D}HUD statusLine: 기존 설정을 보존하며 미설정 시 등록${R}
-
-${B}Commands:${R}
-  ${C}triflux${R} setup     파일 동기화 + HUD 설정
-  ${C}triflux${R} doctor    CLI 진단 (Codex/Antigravity 확인)
-  ${C}triflux${R} list      설치된 스킬 목록
-  ${C}triflux${R} update    최신 안정 버전으로 업데이트
-
-${B}Shortcuts:${R}
-  ${C}tfx${R}                 triflux 축약
-  ${C}tfx-setup${R}            triflux setup
-  ${C}tfx-doctor${R}           triflux doctor
-
-${B}Skills (Claude Code):${R}
-  ${C}/tfx-auto${R} "작업"                 자동 분류 + 병렬 실행
-  ${C}/tfx-auto${R} "작업" --mode deep     계획 + 검증 포함
-  ${C}/tfx-auto${R} "작업" --cli codex     Codex 전용 lane
-  ${C}/tfx-auto${R} "작업" --cli antigravity    Antigravity 전용 lane
-  ${C}/tfx-setup${R}           HUD 설정 + 진단
-
-${Y}!${R} ${C}tfx setup${R} 을 한 번 실행한다. psmux 설치(Windows)와 Codex 훅 승인을 묻는다
-${Y}!${R} 세션 재시작 후 스킬이 활성화됩니다
-${D}https://github.com/tellang/triflux${R}
-`);
-  }
+  if (!codexProfilesResult.ok)
+    io.warn(
+      "codex-profiles",
+      `Codex profiles 설정 실패: ${codexProfilesResult.message}`,
+    );
+  if (synced || consent.changed) io.report.alreadyInGoalState = false;
+  setupTargets(io.report, {
+    skills: skillSync.total,
+    files: SYNC_MAP.length,
+    codex: codexProfilesResult,
+    gemini: geminiProfilesResult,
+    hooks: consent.codexHooks,
+  });
 
   return io.result(0);
 }
@@ -2488,12 +2536,21 @@ const isCheckoutPostinstall =
   process.env.npm_lifecycle_event === "postinstall" &&
   !PLUGIN_ROOT.split(/[\\/]/).includes("node_modules");
 
-if (isMain && isCheckoutPostinstall) {
-  console.log(
-    "[tfx-setup] 저장소 체크아웃의 postinstall 은 건너뜀. 필요하면 node scripts/setup.mjs 를 직접 실행한다.",
-  );
+if (
+  isMain &&
+  process.env.npm_lifecycle_event === "postinstall" &&
+  isCheckoutPostinstall
+) {
+  process.stdout.write(postinstallMessage(getPackageVersion()));
 } else if (isMain) {
-  const result = await runDeferred({ argv: process.argv.slice(2) });
+  let result;
+  try {
+    result = await runDeferred({ argv: process.argv.slice(2) });
+  } catch (error) {
+    const io = createCommandIo({ argv: process.argv.slice(2) });
+    io.report.message = error.message;
+    result = io.result(1);
+  }
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   process.exit(result.code);

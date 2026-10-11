@@ -24,6 +24,7 @@ describe("tfx --help 출력", () => {
     });
     const out = stripAnsi(raw);
     assert.match(out, /tfx update/);
+    assert.doesNotMatch(raw, /\x1b\[/);
     assert.match(out, /Usage/);
     assert.doesNotMatch(out, /npm install -g|업데이트 완료|git pull/);
   });
@@ -36,6 +37,9 @@ describe("tfx --help 출력", () => {
       const out = stripAnsi(raw);
       assert.match(out, new RegExp(`tfx ${command}`));
       assert.match(out, /Usage/);
+      if (command === "setup") {
+        assert.doesNotMatch(raw, /\x1b\[/);
+      }
     });
   }
 });
