@@ -26,6 +26,7 @@ import {
   TIME_CELL_INNER_WIDTH,
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
+import { claudePromptCache, renderCacheMarker } from "./prompt-cache.mjs";
 import { getTerminalColumns, tierBar, tierDimBar } from "./terminal.mjs";
 import {
   clampPercent,
@@ -128,9 +129,13 @@ export function getMicroLine(
 
   const cols = getTerminalColumns() || 120;
   // 세그먼트를 모아 join 한다. 차단된 프로바이더를 뺄 때 공백이 겹치지 않는다.
-  const segments = [`${bold(claudeOrange("c"))}${dim(":")}${cVal}`];
+  const segments = [
+    `${renderCacheMarker("c", claudeOrange, claudePromptCache(options.promptCache))}${dim(":")}${cVal}`,
+  ];
   if (showCodex) {
-    const xMarker = codexLoggedOut ? dim("x") : bold(codexWhite("x"));
+    const xMarker = codexLoggedOut
+      ? dim("x")
+      : renderCacheMarker("x", codexWhite, options.codexPromptCache);
     segments.push(`${xMarker}${dim(":")}${xVal}`);
   }
   if (showAntigravity) {
@@ -165,15 +170,6 @@ function gcpBadge(text) {
   return geminiBlueBackground(bold(codexWhite(text)));
 }
 
-function promptCacheText(cache) {
-  if (!cache?.caching_observed) return "";
-  const remaining = cache.expires_at * 1000 - Date.now();
-  if (!cache.warm || cache.expires_at == null || remaining <= 0)
-    return ` ${dim("cache --")}`;
-  const minutes = Math.floor(remaining / 60000);
-  return ` ${dim(`cache ${minutes < 1 ? "<1m" : `${minutes}m`}`)}`;
-}
-
 // context 는 토큰 수 대신 사용률만 보여 준다.
 function contextPercentText(ctxView) {
   if (ctxView.display === "--") return dim("--%");
@@ -199,15 +195,11 @@ export function getClaudeRows(
 ) {
   const ctxView = contextView || buildContextUsageView({});
   const markerColor = claudeOrange;
-  const prefix = `${bold(markerColor("c"))}:`;
+  const prefix = `${renderCacheMarker("c", markerColor, claudePromptCache(promptCache))}:`;
   const accountText = accountName
     ? ` ${markerColor(fitText(getAccountLabel("claude", accountName), ACCOUNT_LABEL_WIDTH))}`
     : "";
-  const cacheText =
-    currentTier === "full" || currentTier === "compact"
-      ? promptCacheText(promptCache)
-      : "";
-  const contextSection = `${dim("ctx:")}${contextPercentText(ctxView)}${cacheText}`;
+  const contextSection = `${dim("ctx:")}${contextPercentText(ctxView)}`;
   const spend = spendOnlyPercent(claudeUsage);
   if (spend != null) {
     if (currentTier === "nano" || currentTier === "micro") {
@@ -323,13 +315,16 @@ export function getProviderRow(
   markerColor,
   realQuota,
   accountName,
+  { promptCache, loggedOut = false } = {},
 ) {
   const accountLabel = fitText(
     getAccountLabel(provider, accountName),
     ACCOUNT_LABEL_WIDTH,
   );
 
-  const prefix = `${bold(markerColor(marker))}:`;
+  const prefix = loggedOut
+    ? dim(`${marker}:`)
+    : `${renderCacheMarker(marker, markerColor, promptCache)}:`;
   if (provider === "antigravity") {
     return getAntigravityRow(
       currentTier,
@@ -344,7 +339,6 @@ export function getProviderRow(
   let quotaSection;
 
   if (currentTier === "nano" || currentTier === "micro") {
-    const minPrefix = `${bold(markerColor(`${marker}`))}:`;
     if (realQuota?.type === "codex") {
       const main =
         realQuota.buckets.codex ||
@@ -367,13 +361,13 @@ export function getProviderRow(
             ? colorByProvider(weekP, `${weekP}%`, provFn)
             : dim("--%");
         return {
-          prefix: minPrefix,
+          prefix,
           left: `${fCellN}${dim("/")}${wCellN}`,
           right: "",
         };
       }
     }
-    return { prefix: minPrefix, left: dim("--%/--%"), right: "" };
+    return { prefix, left: dim("--%/--%"), right: "" };
   }
 
   if (currentTier === "minimal") {

@@ -298,11 +298,12 @@ describe("HUD provider visibility", () => {
         warm: true,
         caching_observed: true,
         expires_at: Date.now() / 1000 + 210,
+        ttl: "5m",
       },
     };
     const env = { CLAUDE_CONFIG_DIR: configDir, COLUMNS: "200" };
     const output = runHud(env, { input });
-    assert.match(output, /^c:.*ctx:25% cache 3m claude-dev$/m);
+    assert.match(output, /^c:.*ctx:25% claude-dev$/m);
     assert.doesNotMatch(output, /\$12\.09|Other Name/);
     assert.match(
       runHud(env, {
@@ -311,7 +312,7 @@ describe("HUD provider visibility", () => {
           rate_limits: { spend_limit: { used_percentage: 83 } },
         },
       }),
-      /^c: \$:.*83%.*ctx:25% cache 3m claude-dev$/m,
+      /^c: \$:.*83%.*ctx:25% claude-dev$/m,
     );
     rmSync(join(configDir, ".claude.json"));
     writeFileSync(join(configDir, ".claude.json"), "{}");

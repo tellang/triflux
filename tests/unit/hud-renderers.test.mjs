@@ -21,7 +21,12 @@ const context = { percent: 25, display: "25%" };
 const usage = { fiveHourPercent: 17, weeklyPercent: 42 };
 const options = {
   accountName: "developer@example.test",
-  promptCache: { warm: true, caching_observed: true, expires_at: 180 },
+  promptCache: {
+    warm: true,
+    caching_observed: true,
+    expires_at: 180,
+    ttl: "5m",
+  },
 };
 
 function claude(tier, overrides = {}) {
@@ -45,46 +50,72 @@ describe("HUD 표시", () => {
     for (const tier of ["nano", "micro"]) assert.equal(claude(tier).right, "");
   });
 
-  it("full 과 compact 에서만 캐시 남은 시간과 만료 상태를 표시한다", (t) => {
+  it("살아 있는 캐시는 모든 단계와 요약에서 마커만 반전한다", (t) => {
     t.mock.method(Date, "now", () => 0);
-    for (const tier of ["full", "compact"]) {
-      assert.match(stripAnsi(claude(tier).right), /ctx:25% cache 3m/);
-      assert.match(
-        stripAnsi(
-          claude(tier, {
-            promptCache: { ...options.promptCache, expires_at: 59 },
-          }).right,
-        ),
-        /cache <1m/,
-      );
-      for (const change of [
-        { warm: false },
-        { expires_at: null },
-        { expires_at: 0 },
+    for (const tier of ["full", "compact", "minimal", "micro", "nano"]) {
+      const row = claude(tier);
+      assert.match(row.prefix, /\x1b\[48;2;232;112;64m/);
+      assert.match(row.prefix, /\x1b\[30m\x1b\[1mc/);
+      assert.doesNotMatch(row.prefix, /\x1b\[[57]m/);
+      assert.equal(stripAnsi(row.prefix), "c:");
+      assert.doesNotMatch(stripAnsi(row.right), /cache/);
+      const x = getProviderRow(tier, "codex", "x", codexWhite, null, "dev", {
+        promptCache: { expiresAt: 1_800_000, ttlMs: 1_800_000 },
+      });
+      assert.match(x.prefix, /\x1b\[48;5;15m/);
+      assert.equal(stripAnsi(x.prefix), "x:");
+    }
+    const line = getMicroLine(context, usage, null, {
+      ...options,
+      codexPromptCache: { expiresAt: 1_800_000, ttlMs: 1_800_000 },
+    });
+    assert.match(line, /\x1b\[48;2;232;112;64m/);
+    assert.match(line, /\x1b\[48;5;15m/);
+    assert.doesNotMatch(stripAnsi(line), /cache|developer/);
+  });
+
+  it("곧 식음 경계는 TTL의 20%와 5분 중 작은 값이다", (t) => {
+    t.mock.method(Date, "now", () => 0);
+    for (const [ttl, boundary] of [
+      ["5m", 60],
+      ["1h", 300],
+    ]) {
+      for (const [seconds, blinking] of [
+        [boundary + 1, false],
+        [boundary, true],
       ]) {
-        assert.ok(
-          claude(tier, {
-            promptCache: { ...options.promptCache, ...change },
-          }).right.includes(dim("cache --")),
-        );
-      }
-      for (const promptCache of [
-        undefined,
-        { ...options.promptCache, caching_observed: false },
-      ]) {
-        assert.doesNotMatch(
-          stripAnsi(claude(tier, { promptCache }).right),
-          /cache/,
-        );
+        const row = claude("full", {
+          promptCache: { ...options.promptCache, ttl, expires_at: seconds },
+        });
+        assert.equal(row.prefix.includes("\x1b[5m"), blinking);
       }
     }
-    for (const tier of ["minimal", "micro", "nano"]) {
-      assert.doesNotMatch(stripAnsi(claude(tier).right), /cache/);
+    const x = getProviderRow("nano", "codex", "x", codexWhite, null, "dev", {
+      promptCache: { expiresAt: 300_000, ttlMs: 1_800_000 },
+    });
+    assert.match(x.prefix, /\x1b\[5m/);
+  });
+
+  it("식거나 정보 없는 캐시와 로그아웃 x는 기존 마커를 쓴다", (t) => {
+    t.mock.method(Date, "now", () => 0);
+    for (const promptCache of [
+      undefined,
+      { ...options.promptCache, caching_observed: false },
+      { ...options.promptCache, warm: false },
+      { ...options.promptCache, expires_at: null },
+      { ...options.promptCache, expires_at: 0 },
+      { ...options.promptCache, expires_at: -1 },
+    ]) {
+      const row = claude("full", { promptCache });
+      assert.doesNotMatch(row.prefix, /\x1b\[(?:48;|5m)/);
+      assert.doesNotMatch(stripAnsi(row.right), /cache/);
     }
-    assert.doesNotMatch(
-      stripAnsi(getMicroLine(context, usage, null, options)),
-      /cache|developer/,
-    );
+    const line = getMicroLine(context, usage, null, {
+      codexLoggedOut: true,
+      codexPromptCache: { expiresAt: 1_800_000, ttlMs: 1_800_000 },
+    });
+    assert.ok(line.includes(dim("x")));
+    assert.doesNotMatch(line, /\x1b\[48;/);
   });
 
   it("ctx 라벨은 모든 표시 단계와 한 줄 요약에서 흐린 소문자다", () => {

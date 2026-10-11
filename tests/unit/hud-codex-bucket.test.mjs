@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -197,6 +198,78 @@ describe("Codex bucket normalization", () => {
 });
 
 describe("Codex multi-window selection", () => {
+  it("최근 수정 세션의 마지막 캐시 write/reuse부터 30분 만료를 계산한다", async (t) => {
+    const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-cache-"));
+    const now = new Date("2026-07-11T09:00:00.000Z");
+    t.mock.method(Date, "now", () => now.getTime());
+    const cachePath = join(sessionsRoot, "cache.json");
+    const refresh = async () => {
+      await refreshCodexRateLimitsCache({
+        sessionsRoot,
+        cachePath,
+        collect: async () => [],
+        now,
+      });
+      return JSON.parse(readFileSync(cachePath, "utf8"));
+    };
+    const olderDay = new Date("2026-07-08T09:00:00.000Z");
+    const event = (timestamp, cached = 0, written = 0) => ({
+      timestamp,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: { total_tokens: 5000, cached_input_tokens: 4000 },
+          last_token_usage: {
+            cached_input_tokens: cached,
+            cache_write_input_tokens: written,
+          },
+        },
+        rate_limits: null,
+      },
+    });
+    try {
+      writeRollout(sessionsRoot, now, "rollout-z.jsonl", [
+        event("2026-07-11T08:59:00.000Z", 999),
+      ]);
+      const latestPath = join(
+        sessionDirFor(sessionsRoot, olderDay),
+        "rollout-a.jsonl",
+      );
+      writeRollout(sessionsRoot, olderDay, "rollout-a.jsonl", [
+        event("2026-07-11T08:30:00.000Z", 100),
+        event("2026-07-11T08:40:00.000Z", 0, 200),
+        event("2026-07-11T08:50:00.000Z"),
+      ]);
+      utimesSync(
+        latestPath,
+        now.getTime() / 1000 + 10,
+        now.getTime() / 1000 + 10,
+      );
+      utimesSync(
+        join(sessionDirFor(sessionsRoot, now), "rollout-z.jsonl"),
+        now,
+        now,
+      );
+      const snapshot = await refresh();
+      assert.deepEqual(snapshot.promptCache, {
+        expiresAt: Date.parse("2026-07-11T09:10:00.000Z"),
+        ttlMs: 1_800_000,
+      });
+      writeRollout(sessionsRoot, olderDay, "rollout-a.jsonl", [
+        event("2026-07-11T08:55:00.000Z"),
+      ]);
+      utimesSync(
+        latestPath,
+        now.getTime() / 1000 + 10,
+        now.getTime() / 1000 + 10,
+      );
+      assert.equal((await refresh()).promptCache, null);
+    } finally {
+      rmSync(sessionsRoot, { recursive: true, force: true });
+    }
+  });
+
   it("getCodexRateLimits: probe extraSnapshots가 낡은 세션 데이터를 이긴다", () => {
     const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-probe-"));
     const now = new Date("2026-07-11T09:00:00.000Z");
