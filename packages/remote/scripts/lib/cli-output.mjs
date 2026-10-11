@@ -57,6 +57,7 @@ export function createCliResult(command, version) {
     unchanged: 0,
     targets: [],
     warnings: [],
+    notices: [],
     files: [],
     steps: [],
   };
@@ -81,6 +82,30 @@ export function addStep(result, message) {
   result.alreadyInGoalState = false;
 }
 
+export function addNotice(result, message) {
+  if (!result.notices.includes(message)) result.notices.push(message);
+}
+
+export function commandErrorMessage(error) {
+  const message = error.message.split(/\r?\n/)[0];
+  const cause = String(error.stderr || "")
+    .split(/\r?\n/)
+    .find((line) => line.trim())
+    ?.trim();
+  return cause && !message.includes(cause) ? `${message}: ${cause}` : message;
+}
+
+function updateCommand(result, rollback = false) {
+  if (["git-local", "plugin"].includes(result.installMode))
+    return rollback ? `git checkout v${result.from}` : "git pull";
+  const version = rollback ? result.from : "latest";
+  return result.installMode === "npm-local"
+    ? rollback
+      ? `npm i triflux@${version}`
+      : "npm update triflux"
+    : `npm i -g triflux@${version}`;
+}
+
 export function renderCliResult(result, options = {}) {
   const { json, quiet, verbose, check, agent, nonInteractive, color, details } =
     options;
@@ -97,8 +122,14 @@ export function renderCliResult(result, options = {}) {
     lines.push(
       `${mark("✗")} ${result.command === "update" ? "업데이트" : "설정"} 실패: ${result.message}`,
     );
-    if (result.command === "update")
-      lines.push("직접 실행: npm i -g triflux@latest");
+    if (result.command === "update") {
+      if (result.installPath) lines.push(`실행 경로: ${result.installPath}`);
+      lines.push(`직접 실행: ${updateCommand(result)}`);
+      if (result.from !== result.to)
+        lines.push(`되돌리기: ${updateCommand(result, true)}`);
+    }
+  } else if (result.outcome === "skipped") {
+    if (!quiet) lines.push(`skipped: ${result.message}`);
   } else if (!quiet) {
     if (result.command === "update") {
       const versionChanged = result.from !== result.to;
@@ -159,6 +190,8 @@ export function renderCliResult(result, options = {}) {
   }
   for (const warning of result.warnings)
     lines.push(`${mark("!")} ${warning.message}`);
+  if (!quiet)
+    for (const notice of result.notices) lines.push(`안내: ${notice}`);
   if (!quiet && result.outcome === "ok" && !check) {
     if (result.command === "setup") {
       lines.push(
@@ -166,14 +199,26 @@ export function renderCliResult(result, options = {}) {
         "다음: tfx doctor",
       );
     } else if (result.warnings.length || result.from !== result.to) {
+      if (result.from !== result.to && result.installPath)
+        lines.push(`되돌리기 실행 경로: ${result.installPath}`);
       lines.push(
-        `${result.warnings.length ? `경고 ${result.warnings.length}건. ` : ""}${result.from !== result.to ? `되돌리기: npm i -g triflux@${result.from}` : ""}`.trim(),
+        `${result.warnings.length ? `경고 ${result.warnings.length}건. ` : ""}${result.from !== result.to ? `되돌리기: ${updateCommand(result, true)}` : ""}`.trim(),
       );
     }
   }
   return lines.length ? `${lines.join("\n")}\n` : "";
 }
 
-export function postinstallMessage(version) {
-  return `triflux ${version} 설치됨. 설정: tfx setup  (CI 에서는 건너뜀)\n`;
+export function postinstallMessage(version, report) {
+  if (!report) return "저장소 체크아웃이라 setup 을 건너뜀. 설정: tfx setup\n";
+  const status =
+    report.outcome === "failed"
+      ? `실패: ${report.message}`
+      : report.outcome === "skipped"
+        ? `건너뜀: ${report.message}`
+        : "완료";
+  const warnings = report.warnings
+    .map(({ message }) => `! ${message}\n`)
+    .join("");
+  return `triflux ${version} 설치됨. 설정 ${status}${report.warnings.length ? `, 경고 ${report.warnings.length}건` : ""}. 확인: tfx setup\n${warnings}`;
 }

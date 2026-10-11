@@ -27,6 +27,7 @@ import { basename, delimiter, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
 import {
+  addNotice,
   addStep,
   addWarning,
   createCliResult,
@@ -459,8 +460,12 @@ export async function runConsentSteps({
   modsInstall = false,
   offerMods = ensureTrifluxMods,
   home = _TFX_HOME,
-  log = console.log,
-  warn = console.warn,
+  report,
+  log = report ? (message) => addStep(report, message) : console.log,
+  warn = report
+    ? (message) => addWarning(report, "consent", message)
+    : console.warn,
+  notice = report ? (message) => addNotice(report, message) : console.log,
 } = {}) {
   const result = {
     psmux: "not-needed",
@@ -474,13 +479,13 @@ export async function runConsentSteps({
     if (hasCommand("psmux")) result.psmux = "present";
     else if (!interactive) {
       result.psmux = "deferred";
-      warn(
+      notice(
         `psmux 가 없다. tfx setup 을 실행하거나 직접 설치한다: ${PSMUX_MANUAL_INSTALL}`,
       );
     } else if (await ask("psmux 를 설치할까요? (winget)")) {
       try {
         run("winget", PSMUX_WINGET_ARGS, {
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: "inherit",
           timeout: 300_000,
         });
         result.psmux = "installed";
@@ -491,7 +496,7 @@ export async function runConsentSteps({
       }
     } else {
       result.psmux = "declined";
-      warn(`psmux 설치를 건너뜀. 나중에 설치: ${PSMUX_MANUAL_INSTALL}`);
+      notice(`psmux 설치를 건너뜀. 나중에 설치: ${PSMUX_MANUAL_INSTALL}`);
     }
   }
 
@@ -503,6 +508,7 @@ export async function runConsentSteps({
     platform,
     log,
     warn,
+    notice,
   });
 
   result.mods = await offerMods({
@@ -513,6 +519,7 @@ export async function runConsentSteps({
     execFileSyncFn: run,
     log,
     warn,
+    notice,
   });
 
   try {
@@ -526,7 +533,7 @@ export async function runConsentSteps({
     if (hooks.trusted) result.codexHooks = "trusted";
     else if (!interactive) {
       result.codexHooks = "deferred";
-      warn("Codex 훅 승인 전. tfx setup 에서 승인한다");
+      notice("Codex 훅 승인 전. tfx setup 에서 승인한다");
     } else if (
       await ask(
         "Codex 훅을 승인해 둘까요? (Codex 세션 시작과 프롬프트 입력 때 triflux 세션 동기화 훅이 돈다)",
@@ -538,7 +545,7 @@ export async function runConsentSteps({
       log("Codex hooks: 승인 기록");
     } else {
       result.codexHooks = "declined";
-      warn("Codex 훅 승인 전. tfx setup 에서 승인한다");
+      notice("Codex 훅 승인 전. tfx setup 에서 승인한다");
     }
   } catch (error) {
     result.codexHooks = "failed";
@@ -1400,6 +1407,7 @@ export async function ensureTrifluxMods({
   execFileSyncFn = execFileSync,
   log = console.log,
   warn = console.warn,
+  notice = console.log,
 } = {}) {
   const run = claudeCli(env, execFileSyncFn);
   const mods = inspectTrifluxMods({ env, pkgVersion, run });
@@ -1411,7 +1419,7 @@ export async function ensureTrifluxMods({
       run(["plugin", "marketplace", "add", "tellang/triflux"]);
     if (mods.status === "missing") {
       if (!install && !interactive) {
-        warn("mods 설치: tfx setup --mods");
+        notice("mods 설치: tfx setup --mods");
         return "deferred";
       }
       if (
@@ -1420,7 +1428,7 @@ export async function ensureTrifluxMods({
           "triflux mods 플러그인(HUD band, 서브에이전트 effort 정책)을 설치할까요?",
         ))
       ) {
-        warn("mods 설치를 건너뜀. 나중에 설치: tfx setup --mods");
+        notice("mods 설치를 건너뜀. 나중에 설치: tfx setup --mods");
         return "declined";
       }
       run(["plugin", "install", MODS_PLUGIN_ID]);
@@ -1436,7 +1444,8 @@ export async function ensureTrifluxMods({
       !install &&
       !(await ask(`triflux mods 를 업데이트할까요? (설치 ${gap})`))
     ) {
-      warn(`mods 업데이트를 건너뜀. 나중에: ${MODS_UPDATE_COMMAND}`);
+      warn(`mods 버전이 다르다(설치 ${gap}). 업데이트: ${MODS_UPDATE_COMMAND}`);
+      notice(`mods 업데이트를 건너뜀. 나중에: ${MODS_UPDATE_COMMAND}`);
       return "update-declined";
     }
     run(["plugin", "marketplace", "update", "triflux"]);
@@ -1500,19 +1509,12 @@ function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
 }
 
 /** 패키지에서 빠진 옛 설치 파일을 보관 디렉터리로 옮기고 이번 배포 목록을 매니페스트로 남긴다. */
-function retireOldInstallFiles(log = console.log) {
+function retireOldInstallFiles() {
   const files = SYNC_MAP.map(({ label }) => label);
   const result = retireInstallLeftovers({
     claudeDir: CLAUDE_DIR,
     keep: new Set(files),
   });
-  if (result.moved.length)
-    log(
-      `옛 설치 파일 ${result.moved.length}개를 ${join(CLAUDE_DIR, ".tfx-retired")} 로 옮김 (30일 뒤 삭제)`,
-    );
-  if (result.deleted.length)
-    log(`옛 허브 인증 사본 ${result.deleted.length}개 삭제`);
-  for (const warning of result.warnings) log(`⚠ ${warning}`);
   writeInstallManifest(CLAUDE_DIR, files, result.failed);
   return result;
 }
@@ -1663,16 +1665,24 @@ function createCommandIo(stdinData) {
         report.outcome = "failed";
         report.alreadyInGoalState = false;
       }
-      return { code, stdout: renderCliResult(report, options), stderr: "" };
+      return {
+        code,
+        stdout:
+          process.env.npm_lifecycle_event === "postinstall" && !options.json
+            ? postinstallMessage(report.to, report)
+            : renderCliResult(report, options),
+        stderr: "",
+      };
     },
   };
 }
 
-function setupTargets(
+export function setupTargets(
   report,
   { skills = 0, files = 0, codex, gemini, hooks = "skipped" } = {},
 ) {
   const agyInstalled = commandAvailableOnPath("agy");
+  const codexInstalled = commandAvailableOnPath("codex");
   report.targets = [
     {
       name: "claude",
@@ -1684,15 +1694,17 @@ function setupTargets(
       status:
         codex?.ok === false || hooks === "failed"
           ? "failed"
-          : codex?.reason
+          : !codexInstalled || codex?.reason
             ? "skipped"
             : "ok",
       detail:
         codex?.ok === false
           ? codex.message
-          : codex?.reason
-            ? "설정 건너뜀"
-            : `프로필 ${REQUIRED_CODEX_PROFILES.length}개${hooks !== "skipped" ? ", 훅 등록" : ""}`,
+          : !codexInstalled
+            ? "미설치 (npm i -g @openai/codex)"
+            : codex?.reason
+              ? "설정 건너뜀"
+              : `프로필 ${REQUIRED_CODEX_PROFILES.length}개${hooks !== "skipped" ? ", 훅 등록" : ""}`,
     },
     {
       name: "agy",
@@ -2050,7 +2062,7 @@ function ensureCriticalSetup(io) {
     if (hooks.changedHooks || hooks.changedConfig)
       io.report.alreadyInGoalState = false;
     if (!hooks.skipped && !hooks.trusted)
-      io.warn("codex-hooks", "Codex 훅 승인 전. tfx setup 에서 승인한다");
+      addNotice(io.report, "Codex 훅 승인 전. tfx setup 에서 승인한다");
   } catch (error) {
     io.warn("codex-hooks", `Codex hooks 등록 실패: ${error.message}`);
   }
@@ -2106,6 +2118,7 @@ export {
 export async function runCritical(stdinData) {
   const io = createCommandIo(stdinData);
   if (writesRealHomeInTest()) {
+    io.report.outcome = "skipped";
     io.report.message = "테스트가 홈을 격리하지 않아 건너뜀";
     return io.result(0);
   }
@@ -2127,6 +2140,11 @@ export async function runCritical(stdinData) {
 
 export async function runDeferred(stdinData) {
   const io = createCommandIo(stdinData);
+  if (io.options.check) {
+    io.report.message =
+      "setup 은 --check 를 지원하지 않습니다. tfx setup --dry-run 을 쓰세요.";
+    return io.result(2);
+  }
   try {
     return await runDeferredWithIo(stdinData, io);
   } catch (error) {
@@ -2137,6 +2155,7 @@ export async function runDeferred(stdinData) {
 
 async function runDeferredWithIo(stdinData, io) {
   if (writesRealHomeInTest()) {
+    io.report.outcome = "skipped";
     io.report.message = "테스트가 홈을 격리하지 않아 건너뜀";
     return io.result(0);
   }
@@ -2186,7 +2205,6 @@ async function runDeferredWithIo(stdinData, io) {
   const hubCleanup = cleanupTfxHub({
     home: _TFX_HOME,
     pluginRoot: isDev ? undefined : PLUGIN_ROOT,
-    log: () => {},
     backups: mcpBackups,
   });
   for (const warning of hubCleanup.warnings) io.warn("hub-cleanup", warning);
@@ -2286,7 +2304,7 @@ async function runDeferredWithIo(stdinData, io) {
   const removedFiles = removeRetiredInstallFiles();
   if (removedFiles.length)
     io.step(`더 쓰지 않는 설치 파일 ${removedFiles.length}개 제거`);
-  const retired = retireOldInstallFiles(() => {});
+  const retired = retireOldInstallFiles();
   for (const warning of retired.warnings) io.warn("retired-files", warning);
   if (retired.moved.length || retired.deleted.length)
     io.step(
@@ -2426,8 +2444,7 @@ async function runDeferredWithIo(stdinData, io) {
   const consent = await runConsentSteps({
     interactive: !io.options.nonInteractive,
     modsInstall,
-    log: () => {},
-    warn: (message) => io.warn("consent", message),
+    report: io.report,
   });
 
   const agyCleanup = cleanupAgyHooks();
@@ -2523,8 +2540,7 @@ const isCheckoutPostinstall =
 if (
   isMain &&
   process.env.npm_lifecycle_event === "postinstall" &&
-  (isCheckoutPostinstall ||
-    (process.env.CI && !/^(0|false|no|off)$/iu.test(process.env.CI)))
+  isCheckoutPostinstall
 ) {
   process.stdout.write(postinstallMessage(getPackageVersion()));
 } else if (isMain) {

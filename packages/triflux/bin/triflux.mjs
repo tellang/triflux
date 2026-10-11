@@ -34,6 +34,7 @@ import {
 import {
   addStep,
   addWarning,
+  commandErrorMessage,
   createCliResult,
   outputOptions,
   recordFile,
@@ -87,6 +88,7 @@ import {
   retireOldInstallFiles,
   runConsentSteps,
   SYNC_MAP,
+  setupTargets,
   syncSkills,
 } from "../scripts/setup.mjs";
 import { cleanupTmpFiles } from "../scripts/tmp-cleanup.mjs";
@@ -1249,9 +1251,10 @@ function refreshSetupCaches(report) {
   }
 }
 
-export function runUpdatedSetup({
+export async function runUpdatedSetup({
   packageRoot = PKG_ROOT,
   execFileSyncFn = execFileSync,
+  options = outputOptions(RAW_ARGS),
 } = {}) {
   const cli = join(packageRoot, "bin", "triflux.mjs");
   for (const file of [cli, join(packageRoot, "scripts", "setup.mjs")]) {
@@ -1269,11 +1272,45 @@ export function runUpdatedSetup({
       },
     );
   } catch (error) {
-    if (!error.stdout?.toString().trim()) throw error;
+    if (!error.stdout?.toString().trim()) {
+      error.message = commandErrorMessage(error);
+      throw error;
+    }
     stdout = error.stdout.toString();
   }
   const result = JSON.parse(stdout.trim().split(/\r?\n/).at(-1));
+  if (result.outcome === "ok") {
+    const consent = await runConsentSteps({
+      interactive: !options.nonInteractive,
+      report: result,
+    });
+    if (consent.changed) result.alreadyInGoalState = false;
+    const codex = result.targets.find(({ name }) => name === "codex");
+    if (codex && consent.codexHooks !== "skipped") {
+      if (consent.codexHooks === "failed") codex.status = "failed";
+      else if (codex.status === "ok") codex.detail += ", 훅 등록";
+    }
+  }
   return result;
+}
+
+export function installNpmGlobal({
+  platform = process.platform,
+  exec = execSync,
+} = {}) {
+  const command = "npm install -g triflux@latest";
+  const options = {
+    encoding: "utf8",
+    timeout: 90000,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  };
+  try {
+    exec(command, options);
+  } catch (error) {
+    if (platform !== "win32") throw error;
+    exec(`${command} --force`, options);
+  }
 }
 
 async function cmdSetup(options = {}) {
@@ -1285,6 +1322,7 @@ async function cmdSetup(options = {}) {
   const report = createCliResult("setup", PKG.version);
   const warning = (code) => (message) => addWarning(report, code, message);
   if (writesRealHomeInTest()) {
+    report.outcome = "skipped";
     report.message = "테스트가 홈을 격리하지 않아 건너뜀";
     process.stdout.write(renderCliResult(report, options));
     return report;
@@ -1293,7 +1331,12 @@ async function cmdSetup(options = {}) {
     const cleanup = cleanupLegacyHooks({
       settingsPath: join(CLAUDE_DIR, "settings.json"),
     });
-    if (!cleanup.ok) throw new Error(`이전 hook 정리 실패: ${cleanup.error}`);
+    if (!cleanup.ok)
+      throw createCliError(`settings.json 처리 실패: ${cleanup.error}`, {
+        exitCode: EXIT_CONFIG_ERROR,
+        reason: "configError",
+        fix: "settings.json의 JSON 문법과 쓰기 권한을 확인하세요.",
+      });
     if (cleanup.changed)
       addStep(report, `옛 Claude 훅 ${cleanup.removed}개 정리`);
     const agyCleanup = cleanupAgyHooks();
@@ -1311,7 +1354,6 @@ async function cmdSetup(options = {}) {
     if (mcpCleanup.changed) addStep(report, "옛 MCP 설정 정리");
     const hubCleanup = cleanupTfxHub({
       pluginRoot: existsSync(join(PKG_ROOT, ".git")) ? undefined : PKG_ROOT,
-      log: () => {},
       backups: mcpBackups,
     });
     hubCleanup.warnings.forEach(warning("hub-cleanup"));
@@ -1334,7 +1376,7 @@ async function cmdSetup(options = {}) {
       }
       recordFile(report, label, change);
     }
-    const retired = retireOldInstallFiles(() => {});
+    const retired = retireOldInstallFiles();
     retired.warnings.forEach(warning("retired-files"));
     if (retired.moved.length || retired.deleted.length)
       addStep(
@@ -1377,48 +1419,21 @@ async function cmdSetup(options = {}) {
     } else
       addWarning(report, "statusline", "HUD 파일 없음: 먼저 파일 동기화 필요");
 
-    const consent = await runConsentSteps({
-      modsInstall: mods,
-      interactive: !options.nonInteractive,
-      log: () => {},
-      warn: warning("consent"),
-    });
+    const consent = fromUpdate
+      ? { changed: false, codexHooks: "skipped" }
+      : await runConsentSteps({
+          modsInstall: mods,
+          interactive: !options.nonInteractive,
+          report,
+        });
     if (consent.changed) report.alreadyInGoalState = false;
-    const agyInstalled = Boolean(which("agy"));
-    report.targets = [
-      {
-        name: "claude",
-        status: "ok",
-        detail: fromUpdate
-          ? "~/.claude"
-          : `스킬 ${skills.total}개, 파일 ${SYNC_MAP.length}개, HUD statusLine`,
-      },
-      {
-        name: "codex",
-        status:
-          !codex.ok || consent.codexHooks === "failed"
-            ? "failed"
-            : codex.reason
-              ? "skipped"
-              : "ok",
-        detail: !codex.ok
-          ? codex.message
-          : codex.reason
-            ? "설정 건너뜀"
-            : `프로필 ${REQUIRED_CODEX_PROFILES.length}개${consent.codexHooks !== "skipped" ? ", 훅 등록" : ""}`,
-      },
-      {
-        name: "agy",
-        status: gemini.ok ? (agyInstalled ? "ok" : "skipped") : "failed",
-        detail: gemini.ok
-          ? agyInstalled
-            ? `프로필 ${gemini.count}개`
-            : "설치 안 됨, 건너뜀"
-          : gemini.message,
-      },
-    ];
-    if (report.targets.some(({ status }) => status === "failed"))
-      report.alreadyInGoalState = false;
+    setupTargets(report, {
+      skills: skills.total,
+      files: SYNC_MAP.length,
+      codex,
+      gemini,
+      hooks: consent.codexHooks,
+    });
     // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──
     if (process.platform === "win32" && which("psmux")) {
       try {
@@ -1450,7 +1465,8 @@ async function cmdSetup(options = {}) {
     report.outcome = "failed";
     report.alreadyInGoalState = false;
     report.message = error.message;
-    process.exitCode = EXIT_ERROR;
+    report.exitCode = error.exitCode ?? EXIT_ERROR;
+    process.exitCode = report.exitCode;
   }
   process.stdout.write(
     renderCliResult(report, { ...options, details: fromUpdate }),
@@ -3272,19 +3288,7 @@ async function cmdUpdate(args = []) {
     }).trim();
   try {
     if (options.check) {
-      const registry =
-        process.env.npm_config_registry ||
-        process.env.NPM_CONFIG_REGISTRY ||
-        "https://registry.npmjs.org";
-      const response = await fetch(
-        `${registry.replace(/\/$/, "")}/triflux/latest`,
-        {
-          signal: AbortSignal.timeout(10000),
-        },
-      );
-      if (!response.ok)
-        throw new Error(`레지스트리 조회 실패: HTTP ${response.status}`);
-      report.to = (await response.json()).version;
+      report.to = registryVersion();
       if (!report.to) throw new Error("레지스트리 버전 응답이 비어 있음");
       report.alreadyInGoalState = report.from === report.to;
     } else {
@@ -3339,6 +3343,10 @@ async function cmdUpdate(args = []) {
         installMode = "git-local";
       }
 
+      report.installMode = installMode;
+      if (["git-local", "plugin", "npm-local"].includes(installMode))
+        report.installPath =
+          installMode === "npm-local" ? process.cwd() : pluginPath || PKG_ROOT;
       const networkTargets = resolveUpdateTargets({ installMode, pluginPath });
       if (networkTargets.length) {
         const network = await checkNetworkAvailability(networkTargets);
@@ -3367,19 +3375,7 @@ async function cmdUpdate(args = []) {
             latest = registryVersion();
           } catch {}
           if (latest === PKG.version) break;
-          const command = "npm install -g triflux@latest";
-          const installOptions = {
-            encoding: "utf8",
-            timeout: 90000,
-            stdio: ["pipe", "pipe", "pipe"],
-            windowsHide: true,
-          };
-          try {
-            execSync(command, installOptions);
-          } catch (error) {
-            if (process.platform !== "win32") throw error;
-            execSync(`${command} --force`, installOptions);
-          }
+          installNpmGlobal();
           break;
         }
         case "npm-local":
@@ -3399,7 +3395,10 @@ async function cmdUpdate(args = []) {
       report.to = JSON.parse(
         readFileSync(join(updatedRoot, "package.json"), "utf8"),
       ).version;
-      const setup = runUpdatedSetup({ packageRoot: updatedRoot });
+      const setup = await runUpdatedSetup({
+        packageRoot: updatedRoot,
+        options,
+      });
       Object.assign(report, {
         outcome: setup.outcome,
         message: setup.message,
@@ -3409,13 +3408,15 @@ async function cmdUpdate(args = []) {
         targets: setup.targets,
         files: setup.files,
         steps: setup.steps,
+        notices: setup.notices,
         alreadyInGoalState:
           setup.alreadyInGoalState && report.from === setup.to,
       });
       for (const warning of setup.warnings)
         addWarning(report, warning.code, warning.message);
       if (setup.outcome !== "ok") {
-        process.exitCode = EXIT_ERROR;
+        process.exitCode =
+          setup.exitCode ?? (setup.outcome === "skipped" ? 0 : EXIT_ERROR);
         return process.stdout.write(renderCliResult(report, options));
       }
     }
@@ -3428,8 +3429,8 @@ async function cmdUpdate(args = []) {
   } catch (error) {
     report.outcome = "failed";
     report.alreadyInGoalState = false;
-    report.message = error.message.split(/\r?\n/)[0];
-    process.exitCode = EXIT_ERROR;
+    report.message = commandErrorMessage(error);
+    process.exitCode = error.exitCode ?? EXIT_ERROR;
   }
   report.elapsed = Date.now() - started;
   process.stdout.write(renderCliResult(report, options));
@@ -3823,7 +3824,7 @@ async function main() {
   const cmd = NORMALIZED_ARGS[0] || "help";
   const cmdArgs = NORMALIZED_ARGS.slice(1);
 
-  if (!(cmd === "update" && cmdArgs.includes("--check")))
+  if (!(["update", "setup"].includes(cmd) && cmdArgs.includes("--check")))
     cleanupTmpFiles({
       protectPaths: [process.env.HOME, process.env.USERPROFILE],
     }).catch(() => {});
@@ -3834,6 +3835,15 @@ async function main() {
         printCommandHelp("setup");
         return;
       }
+      if (cmdArgs.includes("--check"))
+        throw createCliError(
+          "setup 은 --check 를 지원하지 않습니다. --dry-run 을 쓰세요.",
+          {
+            exitCode: EXIT_ARG_ERROR,
+            reason: "argError",
+            fix: "tfx setup --dry-run",
+          },
+        );
       await cmdSetup({
         ...outputOptions(RAW_ARGS),
         dryRun: cmdArgs.includes("--dry-run"),

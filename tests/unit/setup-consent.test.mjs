@@ -35,6 +35,7 @@ function fakeSteps({ interactive, answer, trusted = false }) {
     home: "/fake-home",
     log: (message) => calls.logs.push(message),
     warn: (message) => calls.logs.push(message),
+    notice: (message) => calls.logs.push(message),
   };
   return { calls, options };
 }
