@@ -81,6 +81,7 @@ const BOOLEAN_FLAGS = new Set([
   "attach-b",
   "no-wait",
   "no-relay-tag",
+  "sandbox",
 ]);
 const PEER_HOP_DONE_MARKER = "<<<TFX_PEER_HOP_DONE>>>";
 // uds-fallback diagnostics land here, written async so a failed daemon attach
@@ -92,8 +93,8 @@ const BUG_REPORT_DIR =
 function usage(command) {
   const lines = [
     "Usage:",
-    "  tfx-live start --session NAME [--name NAME] [--cli codex|claude] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
-    "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude] [--if-busy wait|fail|interrupt] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
+    "  tfx-live start --session NAME [--name NAME] [--cli codex|claude|agy] [--sandbox] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
+    "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude|agy] [--if-busy wait|fail|interrupt|queue] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --cli codex [--transport queue|tmux] (--session NAME[:WINDOW.PANE] | --thread UUID) --prompt TEXT [--from NAME] [--timeout 60] [--no-wait]",
     "    Codex ask defaults to the app-server queue (thread/queue/add, `codex queue --message` only when add is unavailable; delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands.",
     "  tfx-live ask --cli codex --transport uds --thread ID|auto --prompt TEXT [--codex-socket PATH|default] [--cwd DIR] [--if-busy wait|fail|steer] [--busy-timeout 60] [--timeout 60] [--max-turn SECONDS]",
@@ -102,16 +103,17 @@ function usage(command) {
     "  tfx-live compact --cli claude --session NAME [--instructions TEXT] [--if-busy fail|wait] [--timeout 60]",
     "  tfx-live wait --cli claude (--short SHORT | --session-id ID | --session NAME[:WINDOW.PANE]) [--request-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 60] [--poll-interval 1500]",
     "  tfx-live wait --cli codex (--session NAME[:WINDOW.PANE] | --thread UUID) --request-id ID [--timeout 60] [--poll-interval 1500]",
+    "  tfx-live wait --cli agy --session NAME[:WINDOW.PANE] [--request-id ID] [--timeout 60] [--poll-interval 1500]",
     "  tfx-live queue --cli codex (--session NAME[:WINDOW.PANE] | --thread UUID) [--request-id ID] [--delete QUEUED_ID|all]",
     "    queue lists or deletes items the TUI has not picked up yet (official app-server thread/queue API); missing means already delivered or gone.",
     "  tfx-live rename --cli codex --transport uds --thread ID --name NAME [--codex-socket PATH|default]",
     "    transport: auto is the default for Claude when --short/--session-id is present; otherwise tmux. bridge path: --bridge > $TFX_BRIDGE > $TFX_REPO_ROOT/hub/bridge.mjs > bundled Triflux hub/bridge.mjs.",
-    "  tfx-live interrupt --session NAME [--cli codex|claude] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 5]",
-    "  tfx-live stop --session NAME [--cli codex|claude] [--remote HOST]",
+    "  tfx-live interrupt --session NAME [--cli codex|claude|agy] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 5]",
+    "  tfx-live stop --session NAME [--cli codex|claude|agy] [--remote HOST]",
     "  tfx-live stop --cli claude (--short SHORT | --session-id ID) [--config-dir DIR]",
     "  tfx-live probe [--short SHORT] [--session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 10]",
-    "  tfx-live list-sessions --cli codex|claude [--transport tmux|uds] [--codex-socket PATH|default] [--cwd DIR] [--remote HOST (codex tmux only)]",
-    "    Claude list-sessions supports local tmux only; --transport uds requires --cli codex.",
+    "  tfx-live list-sessions --cli codex|claude|agy [--transport tmux|uds] [--codex-socket PATH|default] [--cwd DIR] [--remote HOST (codex tmux only)]",
+    "    Claude and agy list-sessions support local tmux only; --transport uds requires --cli codex.",
     "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
     "  tfx-live goal-driven --session NAME --goal TEXT [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500] [--max-rounds 8] [--done-token DONE]",
     "  tfx-live peer [--cli-a codex] [--cli-b claude] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--session-a NAME[:WINDOW.PANE]] [--session-b NAME[:WINDOW.PANE]] [--attach-a] [--attach-b] [--transport-a tmux|uds|auto] [--transport-b tmux|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--thread-a ID|auto] [--thread-b ID|auto] [--codex-socket-a PATH|default] [--codex-socket-b PATH|default] [--bridge ABS] [--remote HOST] [--cwd DIR] [--if-busy wait|fail] [--if-busy-a POLICY] [--if-busy-b POLICY] [--busy-timeout 60] [--max-turn SECONDS] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60]",
@@ -214,6 +216,7 @@ function contextPctFlag(flags, name, defaultValue) {
 }
 
 function contextOpts(flags, cli) {
+  if (cli === "agy") return {};
   return {
     warnContextPct: contextPctFlag(
       flags,
@@ -236,6 +239,12 @@ function selectAdapter(flags) {
       `--cli must be one of: ${Object.keys(ADAPTERS).join(", ")}`,
     );
   }
+  if (cli === "agy" && flags.remote)
+    throw new Error("agy supports local tmux only; --remote is unavailable");
+  if (flags.sandbox && cli !== "agy")
+    throw new Error("--sandbox is only supported with --cli agy");
+  if (flags["if-busy"] === "queue" && cli !== "agy")
+    throw new Error("--if-busy queue is only supported with --cli agy");
   return adapter;
 }
 
@@ -259,6 +268,270 @@ function shellQuote(args) {
       return `'${text.replace(/'/g, `'"'"'`)}'`;
     })
     .join(" ");
+}
+
+function withUnsetEnv(command, patterns) {
+  if (!patterns.length) return command;
+  if (patterns.some((pattern) => !/^[A-Za-z_][A-Za-z0-9_]*\*?$/.test(pattern)))
+    throw new Error(
+      "--unset-env requires comma-separated environment names or prefixes ending in '*'",
+    );
+  if (process.platform === "win32")
+    throw new Error("--unset-env is unavailable on Windows");
+  const exact = patterns.filter((pattern) => !pattern.endsWith("*"));
+  const prefixes = patterns.filter((pattern) => pattern.endsWith("*"));
+  const expressions = prefixes.flatMap((pattern) => [
+    "-e",
+    `s/^\\(${pattern.slice(0, -1)}[A-Za-z0-9_]*\\)=.*/-u \\1/p`,
+  ]);
+  return [
+    "env",
+    ...exact.flatMap((name) => ["-u", name]),
+    ...(expressions.length
+      ? [`$(env | sed -n ${shellQuote(expressions)})`]
+      : []),
+    command,
+  ].join(" ");
+}
+
+function inspectUnsetEnv(environment, patterns, platform) {
+  const readable =
+    platform === "darwin"
+      ? /(?:^|\s)PATH=/.test(environment)
+      : environment.length > 0;
+  if (!readable) return { readable: false, remaining: [] };
+  const names =
+    platform === "darwin"
+      ? [...environment.matchAll(/(?:^|\s)([A-Za-z_][A-Za-z0-9_]*)=/g)].map(
+          (match) => match[1],
+        )
+      : environment.split("\0").map((entry) => entry.split("=", 1)[0]);
+  return {
+    readable,
+    remaining: names.filter((name) =>
+      patterns.some((pattern) =>
+        pattern.endsWith("*")
+          ? name.startsWith(pattern.slice(0, -1))
+          : name === pattern,
+      ),
+    ),
+  };
+}
+
+async function paneCliProcess(session, cli, panePid) {
+  if (!panePid) {
+    const { stdout } = await runTmux(null, [
+      "display-message",
+      "-p",
+      "-t",
+      session,
+      "#{pane_pid}",
+    ]);
+    panePid = Number(stdout.trim());
+  }
+  const { stdout } = await execFileAsync("ps", ["-eo", "pid=,ppid=,args="], {
+    timeout: 5000,
+    maxBuffer: MAX_BUFFER,
+  });
+  for (const line of stdout.split(/\r?\n/)) {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
+    if (!match) continue;
+    const pid = Number(match[1]);
+    if (pid !== panePid && Number(match[2]) !== panePid) continue;
+    if (
+      cli === "codex"
+        ? isCodexProcessCommand(match[3])
+        : new RegExp(`^(?:\\S*/)?${cli}(?:\\s|$)`).test(match[3])
+    )
+      return { pid, command: match[3] };
+  }
+  return null;
+}
+
+async function agyConversation(pid) {
+  if (!pid) return null;
+  try {
+    const { stdout } = await execFileAsync("lsof", ["-Fn", "-p", String(pid)], {
+      timeout: 5000,
+      maxBuffer: MAX_BUFFER,
+    });
+    const match = stdout.match(
+      /^n(.*\/antigravity-cli)\/presence\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.lock$/im,
+    );
+    return match
+      ? {
+          conversationId: match[2],
+          dbPath: pathJoin(match[1], "conversations", `${match[2]}.db`),
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function discoverAgyTmuxSessions({ cwd = null } = {}) {
+  const result = { ok: true, cli: "agy", cwd: normalizeCwd(cwd), sessions: [] };
+  let stdout;
+  try {
+    ({ stdout } = await runTmux(null, [
+      "list-panes",
+      "-a",
+      "-F",
+      TMUX_DISCOVERY_FORMAT,
+    ]));
+  } catch (error) {
+    return {
+      ...result,
+      ok: false,
+      reason: "tmux-unavailable",
+      error: error.message,
+    };
+  }
+  for (const line of stdout.split(/\r?\n/)) {
+    const [session, , , window, pane, paneCwd, , , , pid, paneId] =
+      line.split("\t");
+    if (!paneId || (result.cwd && normalizeCwd(paneCwd) !== result.cwd))
+      continue;
+    const target = `${session}:${window}.${pane}`;
+    const agyProcess = await paneCliProcess(target, "agy", Number(pid));
+    if (!agyProcess) continue;
+    const conversation = await agyConversation(agyProcess.pid);
+    result.sessions.push({
+      session,
+      target,
+      paneId,
+      cwd: normalizeCwd(paneCwd),
+      ...agyProcess,
+      conversationId: conversation?.conversationId ?? null,
+    });
+  }
+  return result;
+}
+
+function agyStepText(payload, stepType) {
+  const fieldPath = stepType === 14 ? [19, 2] : [20, 1];
+  let bytes = Buffer.from(payload);
+  for (const wanted of fieldPath) {
+    let offset = 0;
+    let found = null;
+    const varint = () => {
+      let value = 0;
+      let factor = 1;
+      for (let count = 0; count < 10 && offset < bytes.length; count++) {
+        const byte = bytes[offset++];
+        value += (byte & 127) * factor;
+        if (!(byte & 128)) return value;
+        factor *= 128;
+      }
+      throw new Error("Invalid agy protobuf varint");
+    };
+    while (offset < bytes.length) {
+      const tag = varint();
+      const field = Math.floor(tag / 8);
+      const wire = tag % 8;
+      if (!field) throw new Error("Invalid agy protobuf field");
+      if (wire === 0) {
+        varint();
+      } else if (wire === 1 || wire === 5) {
+        offset += wire === 1 ? 8 : 4;
+        if (offset > bytes.length)
+          throw new Error("Invalid agy protobuf length");
+      } else if (wire === 2) {
+        const length = varint();
+        if (!Number.isSafeInteger(length) || offset + length > bytes.length)
+          throw new Error("Invalid agy protobuf length");
+        if (field === wanted) found = bytes.subarray(offset, offset + length);
+        offset += length;
+      } else {
+        throw new Error(`Unsupported agy protobuf wire type: ${wire}`);
+      }
+    }
+    if (!found) return "";
+    bytes = found;
+  }
+  return bytes.toString("utf8");
+}
+
+function agyWaitVerdict(steps, requestId, visible) {
+  const request = steps.findLastIndex(
+    (step) =>
+      step.step_type === 14 &&
+      (!requestId ||
+        agyStepText(step.step_payload, 14).includes(
+          `[tfx-live req=${requestId}]`,
+        )),
+  );
+  if (request < 0)
+    return {
+      status: isAgyQueuedCapture(visible) ? "queued" : "submitted",
+      done: false,
+      response: "",
+    };
+  const nextRequest = steps.findIndex(
+    (step, index) => index > request && step.step_type === 14,
+  );
+  // 다음 사용자 입력이 시작됐으면 그 턴의 진행 상태는 이 요청의 완료를 막지 않는다.
+  const turn = steps.slice(
+    request + 1,
+    nextRequest < 0 ? undefined : nextRequest,
+  );
+  let response = "";
+  for (const step of turn) {
+    if (step.step_type !== 15) continue;
+    const text = agyStepText(step.step_payload, 15);
+    if (text) response = text;
+  }
+  const done =
+    turn.some((step) => step.step_type === 15) &&
+    turn.every((step) => step.status === 3) &&
+    (nextRequest >= 0 || !ADAPTERS.agy.isBusy(visible));
+  return { status: done ? "completed" : "working", done, response };
+}
+
+async function waitAgy({
+  session,
+  requestId = null,
+  timeoutMs,
+  pollIntervalMs,
+}) {
+  let DatabaseSync;
+  try {
+    ({ DatabaseSync } = await import("node:sqlite"));
+  } catch {
+    throw new Error("agy wait requires node:sqlite (Node 22.13+)");
+  }
+  const agyProcess = await paneCliProcess(session, "agy");
+  if (!agyProcess)
+    throw new Error(`no live agy process in tmux target ${session}`);
+  const conversation = await agyConversation(agyProcess.pid);
+  if (!conversation)
+    throw new Error(`agy conversation unavailable in tmux target ${session}`);
+  // 처음 연 DB 를 고정해 대기 중 /clear 로 바뀐 대화를 따라가지 않는다.
+  const db = new DatabaseSync(conversation.dbPath, { readOnly: true });
+  const deadline = Date.now() + timeoutMs;
+  try {
+    const query = db.prepare(
+      "SELECT idx, step_type, status, step_payload FROM steps ORDER BY idx",
+    );
+    for (;;) {
+      const visible = await captureVisible(null, session);
+      const verdict = agyWaitVerdict(query.all(), requestId, visible);
+      const timedOut = !verdict.done && Date.now() >= deadline;
+      const result = {
+        ok: true,
+        cli: "agy",
+        ...verdict,
+        timedOut,
+        requestId,
+        conversationId: conversation.conversationId,
+        session,
+      };
+      if (verdict.done || timedOut) return result;
+      await sleep(Math.min(pollIntervalMs, deadline - Date.now()));
+    }
+  } finally {
+    db.close();
+  }
 }
 
 function buildTmuxCommand(remote, tmuxArgs) {
@@ -1139,7 +1412,8 @@ function promptLineIndex(lines, prompt) {
   return -1;
 }
 
-function isComposerPromptLine(line) {
+function isComposerPromptLine(line, cli) {
+  if (cli === "agy") return /^\s*>(?:\s|$)/.test(stripAnsi(line));
   return hasCodexComposerPrompt(line) || hasClaudeComposerPrompt(line);
 }
 
@@ -1156,21 +1430,21 @@ function promptComposerNeedle(prompt) {
   );
 }
 
-function composerLineMatchesPrompt(line, prompt) {
+function composerLineMatchesPrompt(line, prompt, cli) {
   const needle = promptComposerNeedle(prompt);
   return (
     Boolean(needle) &&
-    isComposerPromptLine(line) &&
+    isComposerPromptLine(line, cli) &&
     String(line).includes(needle)
   );
 }
 
-function composerShowsPrompt(text, prompt) {
+function composerShowsPrompt(text, prompt, cli) {
   const activeComposerLine = String(text)
     .split("\n")
-    .filter(isComposerPromptLine)
+    .filter((line) => isComposerPromptLine(line, cli))
     .at(-1);
-  return composerLineMatchesPrompt(activeComposerLine, prompt);
+  return composerLineMatchesPrompt(activeComposerLine, prompt, cli);
 }
 
 function nextComposerPromptIndex(lines, startIndex) {
@@ -1671,6 +1945,28 @@ async function dismissClaudeTourPrompt(remote, session) {
   return { dismissed: true, raw };
 }
 
+function isAgyTrustPrompt(text) {
+  return /Do you trust the contents of this project\?/.test(stripAnsi(text));
+}
+
+function isAgyQueuedCapture(text) {
+  return /Press up to edit queued messages/i.test(stripAnsi(text));
+}
+
+async function dismissAgyTrustPrompt(remote, session) {
+  let raw = await captureVisible(remote, session);
+  for (let attempt = 0; attempt < 4 && isAgyTrustPrompt(raw); attempt++) {
+    if (/^\s*>\s+Yes, I trust this folder\s*$/m.test(stripAnsi(raw))) {
+      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+      return { dismissed: true, raw };
+    }
+    await runTmux(remote, ["send-keys", "-t", session, "Up"]);
+    await sleep(200);
+    raw = await captureVisible(remote, session);
+  }
+  return { dismissed: false, raw };
+}
+
 const ADAPTERS = {
   codex: {
     cli: "codex",
@@ -1774,12 +2070,36 @@ const ADAPTERS = {
       },
     ],
   },
+  agy: {
+    cli: "agy",
+    launchKeys: ["agy", "Enter"],
+    resumeById: (id) => shellQuote(["agy", "--conversation", id]),
+    resumeLast: () => shellQuote(["agy", "--continue"]),
+    isReady: (text) =>
+      !isAgyTrustPrompt(text) && /^\s*>(?:\s|$)/m.test(stripAnsi(text)),
+    isBusy: (text) =>
+      /esc to cancel/i.test(stripAnsi(text)) || isAgyQueuedCapture(text),
+    contextPct: () => null,
+    hasLoginGuard: () => false,
+    startupScreens: [
+      {
+        name: "trust",
+        isPresent: isAgyTrustPrompt,
+        dismiss: dismissAgyTrustPrompt,
+      },
+    ],
+  },
 };
 
-function buildLaunchKeys(adapter, { model, effort, name } = {}) {
+function buildLaunchKeys(adapter, { model, effort, name, sandbox } = {}) {
   const hasModel = model !== undefined;
   const hasEffort = effort !== undefined;
-  if (!hasModel && !hasEffort && !(adapter.cli === "claude" && name)) {
+  if (
+    !hasModel &&
+    !hasEffort &&
+    !sandbox &&
+    !(adapter.cli === "claude" && name)
+  ) {
     return adapter.launchKeys;
   }
 
@@ -1802,6 +2122,16 @@ function buildLaunchKeys(adapter, { model, effort, name } = {}) {
     if (hasEffort) {
       overrideArgs.push("--effort", effort);
     }
+  } else if (adapter.cli === "agy") {
+    if (hasModel) overrideArgs.push("--model", model);
+    if (hasEffort) {
+      if (!["low", "medium", "high", "xhigh", "max"].includes(effort))
+        throw new Error(
+          "agy --effort must be low, medium, high, xhigh, or max",
+        );
+      overrideArgs.push("--effort", effort);
+    }
+    if (sandbox) overrideArgs.push("--sandbox");
   } else {
     throw new Error(`Unsupported adapter: ${adapter.cli}`);
   }
@@ -2164,11 +2494,27 @@ async function doStart(adapter, opts) {
     (!/^\d{1,2}\.\d{1,2} \S/u.test(name) || /[\r\n]/u.test(name))
   )
     throw new Error("--name must use '<month>.<day> <topic>' on one line");
-  const launchKeys = resume
-    ? [adapter.resumeById(resume), "Enter"]
-    : resumeLast
-      ? [adapter.resumeLast(), "Enter"]
-      : buildLaunchKeys(adapter, { model, effort, name });
+  const launchKeys = [
+    ...(resume
+      ? [adapter.resumeById(resume), "Enter"]
+      : resumeLast
+        ? [adapter.resumeLast(), "Enter"]
+        : buildLaunchKeys(adapter, {
+            model,
+            effort,
+            name,
+            sandbox: opts.sandbox,
+          })),
+  ];
+  if (resumed && adapter.cli === "agy") {
+    const overrides = buildLaunchKeys(adapter, {
+      model,
+      effort,
+      sandbox: opts.sandbox,
+    });
+    launchKeys[0] += overrides[0].slice("agy".length);
+  }
+  launchKeys[0] = withUnsetEnv(launchKeys[0], opts.unsetEnv ?? []);
   if (resumed && name && adapter.cli === "claude")
     launchKeys[0] += ` ${shellQuote(["-n", name])}`;
   const resumeTarget = resume ?? (resumeLast ? "last" : null);
@@ -2207,6 +2553,41 @@ async function doStart(adapter, opts) {
     readyTimeoutMs,
     pollIntervalMs,
   );
+  let unsetEnvVerified = false;
+  let unsetEnvWarning;
+  if (ready && !remote && opts.unsetEnv?.length) {
+    let environment = "";
+    try {
+      const target = await paneCliProcess(session, adapter.cli);
+      if (target)
+        environment =
+          process.platform === "darwin"
+            ? (
+                await execFileAsync(
+                  "ps",
+                  ["-E", "-ww", "-o", "command=", "-p", String(target.pid)],
+                  { timeout: 5000, maxBuffer: MAX_BUFFER },
+                )
+              ).stdout
+            : await readFile(`/proc/${target.pid}/environ`, "utf8");
+    } catch {
+      // 읽기 실패는 변수 잔존의 증거가 아니므로 세션을 유지한다.
+    }
+    const { readable, remaining } = inspectUnsetEnv(
+      environment,
+      opts.unsetEnv,
+      process.platform,
+    );
+    if (remaining.length) {
+      await runTmux(null, ["kill-session", "-t", session]);
+      throw new Error(
+        "--unset-env verification failed: matching variables remain in CLI environment",
+      );
+    }
+    unsetEnvVerified = readable;
+    if (!readable)
+      unsetEnvWarning = "CLI environment unreadable; removal not verified";
+  }
   let nameApplied = Boolean(name) && adapter.cli === "claude" && ready;
   let threadId =
     adapter.cli === "codex" && isCodexThreadId(resume) ? resume : null;
@@ -2248,6 +2629,25 @@ async function doStart(adapter, opts) {
       nameApplied = false;
     }
   }
+  if (name && adapter.cli === "agy" && ready) {
+    try {
+      nameApplied = await renameAgyConversation(
+        session,
+        name,
+        Math.min(readyTimeoutMs, 5000),
+        pollIntervalMs,
+      );
+    } catch {
+      nameApplied = false;
+    }
+  }
+  const namePending = adapter.cli === "agy" && Boolean(name) && !nameApplied;
+  if (namePending)
+    await runTmux(null, ["set-option", "-t", session, "@tfx_agy_name", name]);
+  const conversation =
+    adapter.cli === "agy" && ready
+      ? await agyConversation((await paneCliProcess(session, "agy"))?.pid)
+      : null;
   // ask 의 queue 전송이 레지스트리 없이도 thread 를 찾도록 세션에 남긴다.
   if (threadId && !remote)
     await runTmux(null, [
@@ -2268,6 +2668,12 @@ async function doStart(adapter, opts) {
     nameGenerated: !resumed && opts.name === undefined,
     nameApplied,
     ...(adapter.cli === "codex" ? { threadId } : {}),
+    ...(adapter.cli === "agy"
+      ? { conversationId: conversation?.conversationId ?? null, namePending }
+      : {}),
+    unsetEnv: opts.unsetEnv ?? [],
+    unsetEnvVerified,
+    ...(unsetEnvWarning ? { unsetEnvWarning } : {}),
     ...(name && adapter.cli === "codex" && !nameApplied
       ? {
           nameWarning:
@@ -2287,21 +2693,43 @@ async function doStart(adapter, opts) {
 }
 
 // 빠른 입력 직후의 Enter 는 Codex 입력창이 버릴 수 있어 입력창이 빌 때까지 다시 누른다.
-async function submitComposerLine(remote, session, line) {
+async function submitComposerLine(remote, session, line, cli) {
   await sleep(300);
   for (let attempt = 1; attempt <= PROMPT_SUBMIT_MAX_ATTEMPTS; attempt += 1) {
     await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
     await sleep(300);
-    if (!composerShowsPrompt(await captureVisible(remote, session), line))
+    if (!composerShowsPrompt(await captureVisible(remote, session), line, cli))
       return true;
   }
   return false;
 }
 
+async function renameAgyConversation(session, name, timeoutMs, pollIntervalMs) {
+  const command = `/rename ${name}`;
+  await runTmux(null, ["send-keys", "-t", session, "-l", "--", command]);
+  if (!(await submitComposerLine(null, session, command, "agy"))) return false;
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const visible = stripAnsi(await captureVisible(null, session));
+    if (visible.includes(`Conversation renamed to: ${name}`)) return true;
+    await sleep(Math.min(pollIntervalMs, 200));
+  } while (Date.now() < deadline);
+  return false;
+}
+
 async function waitForTmuxIdle(adapter, opts) {
   const { session, remote, pollIntervalMs, busyTimeoutMs, ifBusy } = opts;
-  if (!["wait", "fail", "interrupt"].includes(ifBusy)) {
-    throw new Error("--if-busy must be wait, fail, or interrupt for tmux");
+  if (
+    ![
+      "wait",
+      "fail",
+      "interrupt",
+      ...(adapter.cli === "agy" ? ["queue"] : []),
+    ].includes(ifBusy)
+  ) {
+    throw new Error(
+      "--if-busy must be wait, fail, or interrupt for tmux (agy also supports queue)",
+    );
   }
   const startedAt = Date.now();
   let interrupted = false;
@@ -2309,9 +2737,9 @@ async function waitForTmuxIdle(adapter, opts) {
     const visible = await captureVisible(remote, session);
     const elapsedMs = Date.now() - startedAt;
     const busy =
-      isBusyByEsc(visible) ||
+      adapter.isBusy(visible) ||
       (adapter.cli === "codex" && isCodexLoadingCapture(visible));
-    if (!busy) return elapsedMs;
+    if (!busy || ifBusy === "queue") return elapsedMs;
     if (ifBusy === "fail") throw new Error("target busy (--if-busy fail)");
     if (elapsedMs >= busyTimeoutMs) {
       throw new Error(
@@ -2337,22 +2765,32 @@ async function doAskViaTmux(adapter, opts) {
     settleMs,
     pollIntervalMs,
     doneMarker,
-    ifBusy = "wait",
+    ifBusy = adapter.cli === "agy" ? "queue" : "wait",
     busyTimeoutMs = timeoutMs,
   } = opts;
+  const slashCommand = adapter.cli === "agy" && isSlashCommand(prompt);
   const busyWaitedMs = await waitForTmuxIdle(adapter, {
     session,
     remote,
     pollIntervalMs,
     busyTimeoutMs,
-    ifBusy,
+    ifBusy: slashCommand ? "queue" : ifBusy,
   });
+  const queued =
+    adapter.cli === "agy" &&
+    adapter.isBusy(await captureVisible(remote, session));
   const beforeRaw = await capturePane(remote, session);
   const contextPctBefore = adapter.contextPct(beforeRaw);
-  const context = opts.skipContextGuard ? {} : await tmuxContext(adapter, opts);
-  const guard = opts.skipContextGuard
-    ? {}
-    : contextGuard(adapter.cli, context, opts);
+  const context =
+    adapter.cli === "agy"
+      ? modelContext("agy", null)
+      : opts.skipContextGuard
+        ? {}
+        : await tmuxContext(adapter, opts);
+  const guard =
+    opts.skipContextGuard || adapter.cli === "agy"
+      ? {}
+      : contextGuard(adapter.cli, context, opts);
   if (guard.ok === false)
     return {
       ...guard,
@@ -2376,13 +2814,13 @@ async function doAskViaTmux(adapter, opts) {
   ]);
   await sleep(settleMs);
 
-  let promptSubmitted = !doneMarker;
-  if (doneMarker || opts.noWait) {
+  let promptSubmitted = adapter.cli === "agy" ? false : !doneMarker;
+  if (doneMarker || opts.noWait || adapter.cli === "agy") {
     for (let attempt = 1; attempt <= PROMPT_SUBMIT_MAX_ATTEMPTS; attempt += 1) {
       await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
       await sleep(PROMPT_SUBMIT_RETRY_DELAY_MS);
       const submissionVisible = await captureVisible(remote, session);
-      if (!composerShowsPrompt(submissionVisible, prompt)) {
+      if (!composerShowsPrompt(submissionVisible, prompt, adapter.cli)) {
         promptSubmitted = true;
         break;
       }
@@ -2396,7 +2834,61 @@ async function doAskViaTmux(adapter, opts) {
     await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
   }
 
-  if (opts.noWait) {
+  let nameApplied;
+  if (adapter.cli === "agy" && !slashCommand) {
+    const { stdout } = await runTmux(null, [
+      "show-options",
+      "-qv",
+      "-t",
+      splitTmuxTarget(session).session,
+      "@tfx_agy_name",
+    ]);
+    const pendingName = stdout.trim();
+    if (pendingName) {
+      nameApplied = false;
+      let db;
+      try {
+        const { DatabaseSync } = await import("node:sqlite");
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline) {
+          if (!db) {
+            const agyProcess = await paneCliProcess(session, "agy");
+            const conversation = await agyConversation(agyProcess?.pid);
+            if (conversation)
+              db = new DatabaseSync(conversation.dbPath, { readOnly: true });
+          }
+          if (
+            db
+              ?.prepare("SELECT 1 FROM steps WHERE step_type = 14 LIMIT 1")
+              .get()
+          ) {
+            nameApplied = await renameAgyConversation(
+              session,
+              pendingName,
+              5000,
+              pollIntervalMs,
+            );
+            if (nameApplied)
+              await runTmux(null, [
+                "set-option",
+                "-u",
+                "-t",
+                splitTmuxTarget(session).session,
+                "@tfx_agy_name",
+              ]);
+            break;
+          }
+          await sleep(Math.min(pollIntervalMs, 200));
+        }
+      } catch {
+        nameApplied = false;
+      } finally {
+        db?.close();
+      }
+    }
+  }
+
+  if (opts.noWait || slashCommand) {
     return {
       ...context,
       ...guard,
@@ -2405,7 +2897,9 @@ async function doAskViaTmux(adapter, opts) {
       transport: "tmux",
       session,
       remote: remote ?? null,
-      status: "submitted",
+      status: queued && !slashCommand ? "queued" : "submitted",
+      ...(slashCommand ? { slashCommand: true } : {}),
+      ...(nameApplied !== undefined ? { nameApplied } : {}),
       inputSent: true,
       done: false,
       submittedAt: new Date().toISOString(),
@@ -2415,6 +2909,22 @@ async function doAskViaTmux(adapter, opts) {
     };
   }
 
+  if (adapter.cli === "agy") {
+    return {
+      ...context,
+      ...(await waitAgy({
+        session,
+        requestId: opts.noRelayTag ? null : opts.requestId,
+        timeoutMs,
+        pollIntervalMs,
+      })),
+      transport: "tmux",
+      inputSent: true,
+      ...(nameApplied !== undefined ? { nameApplied } : {}),
+      ifBusy,
+      busyWaitedMs,
+    };
+  }
   const startedAt = Date.now();
   let raw = "";
   let visible = "";
@@ -2512,7 +3022,8 @@ async function doAsk(adapter, opts) {
   // Codex 는 접힌 발신자 표시가 없어 첫 줄 머리말로 보낸 세션을 드러낸다.
   // 슬래시 명령은 첫 글자가 / 여야 실행되므로 표식을 붙이지 않는다.
   const bare =
-    opts.noRelayTag || (adapter.cli === "codex" && isSlashCommand(opts.prompt));
+    opts.noRelayTag ||
+    (["codex", "agy"].includes(adapter.cli) && isSlashCommand(opts.prompt));
   const from =
     adapter.cli === "codex" && !bare
       ? (opts.from ?? (await resolveSenderName()))
@@ -3067,6 +3578,13 @@ async function doStop(adapter, opts) {
 
 async function doInterruptViaTmux(adapter, opts) {
   await runTmux(opts.remote, ["send-keys", "-t", opts.session, "Escape"]);
+  if (adapter.cli === "agy")
+    await waitForTmuxIdle(adapter, {
+      ...opts,
+      ifBusy: "wait",
+      busyTimeoutMs: opts.timeoutMs,
+      pollIntervalMs: DEFAULT_POLL_INTERVAL_MS,
+    });
   return {
     cli: adapter.cli,
     session: opts.session,
@@ -3173,6 +3691,8 @@ async function doInterrupt(adapter, opts) {
 }
 
 function startOpts(flags) {
+  const unsetEnv =
+    flags["unset-env"] === undefined ? [] : flags["unset-env"].split(",");
   const session = requireFlag(flags, "session");
   if (session.includes(":"))
     throw new Error("start --session accepts only a session name without ':'");
@@ -3185,6 +3705,8 @@ function startOpts(flags) {
     model: flags.model,
     effort: flags.effort,
     name: flags.name,
+    sandbox: Object.hasOwn(flags, "sandbox"),
+    unsetEnv,
     readyTimeoutMs: secondsFlag(
       flags,
       "ready-timeout",
@@ -3243,6 +3765,8 @@ function askOpts(flags, adapter) {
     short,
     sessionId,
   );
+  if (adapter.cli === "agy" && transport !== "tmux")
+    throw new Error("agy ask supports local --transport tmux only");
   const codexUds = adapter.cli === "codex" && transport === "uds";
   const codexQueue = transport === "queue";
   if (adapter.cli === "codex" && transport === "auto")
@@ -3292,7 +3816,7 @@ function askOpts(flags, adapter) {
         ? resolveCodexDaemonSocket(flags["codex-socket"] ?? "default")
         : null,
     cwd: flags.cwd,
-    ifBusy: flags["if-busy"] ?? "wait",
+    ifBusy: flags["if-busy"] ?? (adapter.cli === "agy" ? "queue" : "wait"),
     busyTimeoutMs: secondsFlag(
       flags,
       "busy-timeout",
@@ -3343,6 +3867,8 @@ function interruptOpts(flags, adapter) {
   const short = flags.short;
   const sessionId = flags["session-id"];
   const transport = transportFlag(flags, adapter, short, sessionId);
+  if (adapter.cli === "agy" && transport !== "tmux")
+    throw new Error("agy interrupt supports local --transport tmux only");
   if (transport === "queue")
     throw new Error("interrupt uses tmux; queue cannot send keys");
   if (adapter.cli === "codex" && transport === "uds")
@@ -3464,6 +3990,26 @@ async function queue(flags) {
 }
 
 async function wait(flags) {
+  if (flags.cli === "agy") {
+    selectAdapter(flags);
+    if (flags.transport && flags.transport !== "tmux")
+      throw new Error("agy wait supports local --transport tmux only");
+    return printJson(
+      await waitAgy({
+        session: splitTmuxTarget(requireFlag(flags, "session")).target,
+        requestId: flags["request-id"] ?? null,
+        timeoutMs:
+          flags.timeout === "0"
+            ? 0
+            : secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
+        pollIntervalMs: msFlag(
+          flags,
+          "poll-interval",
+          DEFAULT_POLL_INTERVAL_MS,
+        ),
+      }),
+    );
+  }
   if (flags.cli === "codex") return waitCodex(flags);
   if ((flags.cli ?? "claude") !== "claude")
     throw new Error("wait supports --cli claude or codex");
@@ -3568,6 +4114,8 @@ async function tmuxContext(adapter, opts) {
 }
 
 async function compact(flags) {
+  if (flags.cli === "agy")
+    throw new Error("agy has no compact; use /clear or a handoff");
   if (
     (flags.cli ?? "claude") !== "claude" ||
     flags.remote ||
@@ -3654,6 +4202,11 @@ async function probe(flags) {
 
 async function listSessions(flags) {
   const adapter = selectAdapter(flags);
+  if (adapter.cli === "agy") {
+    if (flags.transport && flags.transport !== "tmux")
+      throw new Error("agy list-sessions supports local --transport tmux only");
+    return printJson(await discoverAgyTmuxSessions({ cwd: flags.cwd }));
+  }
   if (adapter.cli === "claude") {
     if (flags.remote || flags.transport === "uds") {
       throw new Error(
@@ -3788,6 +4341,7 @@ function parseFirstInteger(response) {
 
 async function converse(flags) {
   const adapter = selectAdapter(flags);
+  if (adapter.cli === "agy") throw new Error("agy is unavailable for converse");
   const session = requireFlag(flags, "session");
   const promptsFile = requireFlag(flags, "prompts-file");
   const prompts = await readPromptsFile(promptsFile);
@@ -3823,6 +4377,8 @@ async function converse(flags) {
 
 async function goalDriven(flags) {
   const adapter = selectAdapter(flags);
+  if (adapter.cli === "agy")
+    throw new Error("agy is unavailable for goal-driven");
   const session = requireFlag(flags, "session");
   const goal = requireFlag(flags, "goal");
   const maxRounds = integerFlag(flags, "max-rounds", 8);
@@ -4317,6 +4873,8 @@ function addStopSpecOnce(stopSpecs, adapter, opts) {
 async function peer(flags) {
   const adapterA = selectAdapterName(flags["cli-a"] ?? "codex", "cli-a");
   const adapterB = selectAdapterName(flags["cli-b"] ?? "claude", "cli-b");
+  if (adapterA.cli === "agy" || adapterB.cli === "agy")
+    throw new Error("agy is unavailable for peer");
   peerSideBusyPolicy(
     flags,
     "a",
@@ -4587,12 +5145,15 @@ async function main() {
 
 export {
   ADAPTERS,
+  agyStepText,
+  agyWaitVerdict,
   buildLaunchKeys,
   buildPeerClosurePrompt,
   buildRemoteLiveCommand,
   buildTmuxCommand,
   callRemoteLive,
   classifyPeerExitReason,
+  composerShowsPrompt,
   createPeerSignalController,
   derivePeerStatus,
   discoverClaudeTmuxSessions,
@@ -4603,6 +5164,7 @@ export {
   extractResponseSinceMarker,
   hasClaudeCompletedTaskListResponse,
   inspectCodexTmuxPane,
+  inspectUnsetEnv,
   isCodexLoadingCapture,
   parseCodexTmuxSessions,
   parsePeerClosure,
@@ -4615,6 +5177,7 @@ export {
   stopOpts,
   tmuxBufferName,
   verifyAttachedPeerSide,
+  withUnsetEnv,
 };
 
 function isMainModule() {
