@@ -198,7 +198,7 @@ describe("Codex bucket normalization", () => {
 });
 
 describe("Codex multi-window selection", () => {
-  it("최근 수정 세션의 마지막 캐시 write/reuse부터 30분 만료를 계산한다", async (t) => {
+  it("가장 최근 수정된 세션의 마지막 token_count 로 30분 캐시 만료를 정한다", async (t) => {
     const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-cache-"));
     const now = new Date("2026-07-11T09:00:00.000Z");
     t.mock.method(Date, "now", () => now.getTime());
@@ -208,18 +208,15 @@ describe("Codex multi-window selection", () => {
         sessionsRoot,
         cachePath,
         collect: async () => [],
-        now,
       });
-      return JSON.parse(readFileSync(cachePath, "utf8"));
+      return JSON.parse(readFileSync(cachePath, "utf8")).promptCache;
     };
-    const olderDay = new Date("2026-07-08T09:00:00.000Z");
     const event = (timestamp, cached = 0, written = 0) => ({
       timestamp,
       type: "event_msg",
       payload: {
         type: "token_count",
         info: {
-          total_token_usage: { total_tokens: 5000, cached_input_tokens: 4000 },
           last_token_usage: {
             cached_input_tokens: cached,
             cache_write_input_tokens: written,
@@ -228,43 +225,42 @@ describe("Codex multi-window selection", () => {
         rate_limits: null,
       },
     });
+    // 8일 전에 만든 세션을 재개한 경우: 7일 쿼터 탐색 범위 밖이어도 수정 시각으로 골라야 한다.
+    const resumedDay = new Date("2026-07-03T09:00:00.000Z");
+    const resumedPath = join(
+      sessionDirFor(sessionsRoot, resumedDay),
+      "rollout-a.jsonl",
+    );
+    const touch = (path, at) => utimesSync(path, at, at);
     try {
       writeRollout(sessionsRoot, now, "rollout-z.jsonl", [
         event("2026-07-11T08:59:00.000Z", 999),
       ]);
-      const latestPath = join(
-        sessionDirFor(sessionsRoot, olderDay),
-        "rollout-a.jsonl",
-      );
-      writeRollout(sessionsRoot, olderDay, "rollout-a.jsonl", [
+      touch(join(sessionDirFor(sessionsRoot, now), "rollout-z.jsonl"), now);
+      writeRollout(sessionsRoot, resumedDay, "rollout-a.jsonl", [
         event("2026-07-11T08:30:00.000Z", 100),
-        event("2026-07-11T08:40:00.000Z", 0, 200),
-        event("2026-07-11T08:50:00.000Z"),
+        event("2026-07-11T08:50:00.000Z", 0, 200),
       ]);
-      utimesSync(
-        latestPath,
-        now.getTime() / 1000 + 10,
-        now.getTime() / 1000 + 10,
+      touch(resumedPath, new Date(now.getTime() + 10_000));
+      // 하위 세션만 띄운 부모 세션처럼 token_count 가 없는 파일은 건너뛴다.
+      writeRollout(sessionsRoot, now, "rollout-parent.jsonl", [
+        { timestamp: "2026-07-11T08:59:30.000Z", type: "event_msg" },
+      ]);
+      touch(
+        join(sessionDirFor(sessionsRoot, now), "rollout-parent.jsonl"),
+        new Date(now.getTime() + 20_000),
       );
-      utimesSync(
-        join(sessionDirFor(sessionsRoot, now), "rollout-z.jsonl"),
-        now,
-        now,
-      );
-      const snapshot = await refresh();
-      assert.deepEqual(snapshot.promptCache, {
-        expiresAt: Date.parse("2026-07-11T09:10:00.000Z"),
+      assert.deepEqual(await refresh(), {
+        expiresAt: Date.parse("2026-07-11T09:20:00.000Z"),
         ttlMs: 1_800_000,
       });
-      writeRollout(sessionsRoot, olderDay, "rollout-a.jsonl", [
+      // 마지막 응답에 캐시 토큰이 없으면 식은 것으로 본다.
+      writeRollout(sessionsRoot, resumedDay, "rollout-a.jsonl", [
+        event("2026-07-11T08:50:00.000Z", 100),
         event("2026-07-11T08:55:00.000Z"),
       ]);
-      utimesSync(
-        latestPath,
-        now.getTime() / 1000 + 10,
-        now.getTime() / 1000 + 10,
-      );
-      assert.equal((await refresh()).promptCache, null);
+      touch(resumedPath, new Date(now.getTime() + 10_000));
+      assert.equal(await refresh(), null);
     } finally {
       rmSync(sessionsRoot, { recursive: true, force: true });
     }

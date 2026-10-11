@@ -369,20 +369,95 @@ export function createReverseLineReader(
   return reader;
 }
 
+// GPT-5.6 이후 캐시는 마지막 write/reuse 부터 30분 동안 재사용할 수 있다.
+const CODEX_PROMPT_CACHE_TTL_MS = 30 * 60_000;
+
+// 재개한 세션은 생성일 디렉터리의 파일에 계속 쓰므로 날짜가 아니라 수정 시각으로 고른다.
+// TTL 보다 오래 안 바뀐 파일의 캐시는 이미 식었으니 후보에서 뺀다.
+function recentRollouts(sessionsRoot, sinceMs) {
+  const found = [];
+  const walk = (dir, depth) => {
+    let names;
+    try {
+      names = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      const path = join(dir, name);
+      if (depth < 3) {
+        walk(path, depth + 1);
+        continue;
+      }
+      if (!name.endsWith(".jsonl")) continue;
+      try {
+        const mtimeMs = statSync(path).mtimeMs;
+        if (mtimeMs >= sinceMs) found.push({ path, mtimeMs });
+      } catch {
+        /* 순회 중 사라진 파일 */
+      }
+    }
+  };
+  walk(sessionsRoot, 0);
+  return found.sort((a, b) => b.mtimeMs - a.mtimeMs).map((f) => f.path);
+}
+
+// 마지막 token_count 하나로 판정한다. Claude Code 의 prompt_cache.warm 처럼
+// 마지막 응답이 캐시 토큰을 보고했을 때만 살아 있다. token_count 가 없으면 undefined.
+function lastTokenCountCache(path, maxLines = 200) {
+  let reader;
+  try {
+    reader = createReverseLineReader(path);
+  } catch {
+    return undefined;
+  }
+  try {
+    for (let i = 0; i < maxLines; i++) {
+      const line = reader.next();
+      if (line === null) return undefined;
+      let evt;
+      try {
+        evt = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (evt?.payload?.type !== "token_count") continue;
+      const usage = evt.payload.info?.last_token_usage;
+      const cached =
+        (usage?.cached_input_tokens ?? 0) +
+        (usage?.cache_write_input_tokens ?? 0);
+      const at = Date.parse(evt.timestamp);
+      if (cached <= 0 || !Number.isFinite(at)) return null;
+      return {
+        expiresAt: at + CODEX_PROMPT_CACHE_TTL_MS,
+        ttlMs: CODEX_PROMPT_CACHE_TTL_MS,
+      };
+    }
+    return undefined;
+  } finally {
+    reader.close();
+  }
+}
+
+// 모델 호출이 없는 부모 세션(하위 세션만 띄운 경우)은 건너뛰고 가장 최근 응답을 쓴다.
+export function readCodexPromptCache(sessionsRoot, now = Date.now()) {
+  for (const path of recentRollouts(
+    sessionsRoot,
+    now - CODEX_PROMPT_CACHE_TTL_MS,
+  )) {
+    const cache = lastTokenCountCache(path);
+    if (cache !== undefined) return cache;
+  }
+  return null;
+}
+
 // ============================================================================
 // Codex 세션 JSONL에서 실제 rate limits 추출
 // 한계: rate_limits는 세션별 스냅샷이므로 여러 세션 간 토큰 합산은 불가.
 // 최근 7일간 세션 파일을 스캔해 가장 최신 rate_limits 버킷을 수집한다.
 // 합성 버킷(token_count 기반)은 2일 이내 데이터만 허용하여 stale 방지.
 // ============================================================================
-// GPT-5.6 이후 캐시는 마지막 write/reuse부터 30분 동안 재사용할 수 있다.
-const CODEX_PROMPT_CACHE_TTL_MS = 30 * 60_000;
-
-export function getCodexRateLimits(options) {
-  return getCodexSessionSnapshot(options).buckets;
-}
-
-function getCodexSessionSnapshot({
+export function getCodexRateLimits({
   sessionsRoot = join(getCodexHome(), "sessions"),
   now = new Date(),
   maxLinesPerFile = 800,
@@ -397,9 +472,7 @@ function getCodexSessionSnapshot({
   }));
   const nowSec = Math.floor(now.getTime() / 1000);
 
-  const days = [];
-  let latestFile = null;
-  // 세션 생성일과 수정일은 다르므로 같은 디렉터리 순회에서 최신 파일을 고른다.
+  // 7일간 스캔: 실제 rate_limits 우선, 합성 버킷은 폴백
   for (let dayOffset = 0; dayOffset <= 6; dayOffset++) {
     const d = new Date(now.getTime() - dayOffset * 86_400_000);
     const sessDir = join(
@@ -420,47 +493,19 @@ function getCodexSessionSnapshot({
       }
     }
 
-    const paths = [];
+    const daySnapshots = [];
     for (const file of files) {
       try {
-        const path = join(sessDir, file);
-        const mtimeMs = statSync(path).mtimeMs;
-        paths.push(path);
-        if (!latestFile || mtimeMs > latestFile.mtimeMs)
-          latestFile = { path, mtimeMs };
-      } catch {
-        /* 파일이 순회 중 사라지면 건너뛴다 */
-      }
-    }
-    days.push(paths);
-  }
-
-  let buckets = null;
-  let promptCache = null;
-  for (const [dayOffset, files] of days.entries()) {
-    const daySnapshots = [];
-    for (const path of files) {
-      const isLatest = path === latestFile?.path;
-      if (buckets && !isLatest) continue;
-      try {
         const found = {};
-        const reader = createReverseLineReader(path);
+        const reader = createReverseLineReader(join(sessDir, file));
         try {
           let scanned = 0;
           let bytesAfterFirstBucket = 0;
-          let quotaDone = buckets != null;
-          let cacheDone = !isLatest;
-          // 쿼터의 읽기 한도는 유지하고, 최신 세션의 아직 식지 않은 캐시만 더 찾는다.
+          // 다음 줄을 읽기 전에 한도를 본다. 안 볼 줄을 만들려고 큰 줄을 읽지 않기 위해서다.
           while (
-            (!quotaDone &&
-              scanned < maxLinesPerFile &&
-              bytesAfterFirstBucket < EXTRA_BYTES_AFTER_FIRST_BUCKET) ||
-            !cacheDone
+            scanned < maxLinesPerFile &&
+            bytesAfterFirstBucket < EXTRA_BYTES_AFTER_FIRST_BUCKET
           ) {
-            const scanQuota =
-              !quotaDone &&
-              scanned < maxLinesPerFile &&
-              bytesAfterFirstBucket < EXTRA_BYTES_AFTER_FIRST_BUCKET;
             const line = reader.next();
             if (line === null) break;
             scanned++;
@@ -471,32 +516,6 @@ function getCodexSessionSnapshot({
             }
             try {
               const evt = JSON.parse(line);
-              const lastUsage = evt?.payload?.info?.last_token_usage;
-              if (
-                isLatest &&
-                !cacheDone &&
-                evt?.payload?.type === "token_count" &&
-                (lastUsage?.cached_input_tokens ?? 0) +
-                  (lastUsage?.cache_write_input_tokens ?? 0) >
-                  0
-              ) {
-                const writtenAt = Date.parse(evt.timestamp);
-                if (Number.isFinite(writtenAt)) {
-                  promptCache = {
-                    expiresAt: writtenAt + CODEX_PROMPT_CACHE_TTL_MS,
-                    ttlMs: CODEX_PROMPT_CACHE_TTL_MS,
-                  };
-                }
-              }
-              // 역순으로 30분 전까지 왔으면 앞의 캐시도 모두 식었다.
-              if (
-                isLatest &&
-                (promptCache ||
-                  Date.parse(evt.timestamp) <=
-                    now.getTime() - CODEX_PROMPT_CACHE_TTL_MS)
-              )
-                cacheDone = true;
-              if (!scanQuota) continue;
               const rl = evt?.payload?.rate_limits;
               if (rl?.limit_id && !found[rl.limit_id]) {
                 // window_minutes 기준으로 5h/1w 슬롯 정규화
@@ -532,8 +551,7 @@ function getCodexSessionSnapshot({
             } catch {
               /* 라인 파싱 실패 무시 */
             }
-            if (Object.keys(found).length >= CODEX_MIN_BUCKETS)
-              quotaDone = true;
+            if (Object.keys(found).length >= CODEX_MIN_BUCKETS) break;
           }
         } finally {
           reader.close();
@@ -544,7 +562,6 @@ function getCodexSessionSnapshot({
       }
     }
 
-    if (buckets) continue;
     if (dayOffset <= 1) {
       recentSnapshots.push(...daySnapshots);
       if (dayOffset === 0) continue;
@@ -558,17 +575,11 @@ function getCodexSessionSnapshot({
           mergedBuckets.codex || mergedBuckets[Object.keys(mergedBuckets)[0]];
         if (main && !main.tokens) main.tokens = syntheticBucket.tokens;
       }
-      buckets = mergedBuckets;
+      return expireStaleCodexBuckets(mergedBuckets, nowSec);
     }
   }
   // 실제 rate_limits 없음 → 합성 버킷이라도 반환 (행 활성화)
-  return {
-    buckets: expireStaleCodexBuckets(
-      buckets || (syntheticBucket ? { codex: syntheticBucket } : null),
-      nowSec,
-    ),
-    promptCache,
-  };
+  return syntheticBucket ? { codex: syntheticBucket } : null;
 }
 
 export function readCodexRateLimitSnapshot() {
@@ -576,7 +587,7 @@ export function readCodexRateLimitSnapshot() {
   if (!cache?.buckets) {
     return {
       buckets: null,
-      promptCache: cache?.promptCache,
+      promptCache: cache?.promptCache ?? null,
       shouldRefresh: true,
     };
   }
@@ -584,7 +595,11 @@ export function readCodexRateLimitSnapshot() {
   const ts = Number(cache.timestamp);
   const ageMs = Number.isFinite(ts) ? Date.now() - ts : Number.MAX_SAFE_INTEGER;
   const isFresh = ageMs < CODEX_QUOTA_STALE_MS;
-  return { buckets, promptCache: cache.promptCache, shouldRefresh: !isFresh };
+  return {
+    buckets,
+    promptCache: cache.promptCache ?? null,
+    shouldRefresh: !isFresh,
+  };
 }
 
 export async function collectProbeSnapshots(now = new Date()) {
@@ -639,18 +654,21 @@ export async function refreshCodexRateLimitsCache({
   sessionsRoot,
   collect = collectProbeSnapshots,
   owner = getCodexProbeOwner(),
-  now = new Date(),
 } = {}) {
+  const now = new Date();
   const probed = await collect(now);
   const probe =
     probed.length > 0
       ? { owner, at: now.getTime(), snapshots: probed }
       : carryProbe(readJson(cachePath, null)?.probe, owner, now.getTime());
-  const { buckets, promptCache } = getCodexSessionSnapshot({
+  const buckets = getCodexRateLimits({
     sessionsRoot,
     now,
     extraSnapshots: probe?.snapshots || [],
   });
+  const promptCache = readCodexPromptCache(
+    sessionsRoot || join(getCodexHome(), "sessions"),
+  );
   // buckets가 null이어도 캐시 갱신 (stale 데이터 제거)
   writeJsonSafe(cachePath, {
     timestamp: Date.now(),
