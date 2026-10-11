@@ -26,6 +26,19 @@ Try these locations in order and return blocked only when all four fail:
    package by `tfx setup`. It serves machines without a clone and may lag the
    clone, so it comes last.
 
+Run the block below verbatim to apply this order. Do not rewrite it or join
+it into one line. Empty output means blocked. On Windows without a POSIX
+shell, follow the numbered list instead.
+
+```sh
+common=$(git rev-parse --git-common-dir 2>/dev/null) && common=$(cd "$common" && pwd)
+d=$PWD
+while [ "$d" != / ] && [ ! -f "$d/.claude/rules/tfx-routing.md" ]; do d=$(dirname "$d"); done
+for f in "${TFX_ROUTING_SSOT:-}" "${common%/*}/.claude/rules/tfx-routing.md" "$d/.claude/rules/tfx-routing.md" "$HOME/.codex/skills/tfx-harness/references/tfx-routing.md"; do
+  [ -f "$f" ] && { echo "$f"; break; }
+done
+```
+
 Do not use `git rev-parse --show-toplevel` for step 2. In a linked worktree it
 returns that worktree root, whose SSOT may be a stale branch snapshot.
 `--git-common-dir` still points to the main repository's `.git` directory.

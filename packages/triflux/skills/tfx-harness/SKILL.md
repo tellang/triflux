@@ -23,6 +23,18 @@ host capability evidence를 판정한다. 정책 표, keyword 표, owner 매트�
 3. cwd에서 위로 올라가며 `.claude/rules/tfx-routing.md`
 4. 이 스킬 디렉터리의 `references/tfx-routing.md` (`tfx setup`이 패키지에서 복사한 사본)
 
+위 순서는 아래 블록을 그대로 실행해 확인한다. 한 줄로 합치거나 다시 짜지 않는다.
+출력이 비면 blocked다.
+
+```sh
+common=$(git rev-parse --git-common-dir 2>/dev/null) && common=$(cd "$common" && pwd)
+d=$PWD
+while [ "$d" != / ] && [ ! -f "$d/.claude/rules/tfx-routing.md" ]; do d=$(dirname "$d"); done
+for f in "${TFX_ROUTING_SSOT:-}" "${common%/*}/.claude/rules/tfx-routing.md" "$d/.claude/rules/tfx-routing.md" "$HOME/.claude/skills/tfx-harness/references/tfx-routing.md"; do
+  [ -f "$f" ] && { echo "$f"; break; }
+done
+```
+
 4순위는 clone이 없는 기기를 위한 것이다. 설치한 버전의 정책이라 clone보다 늦을 수 있으므로
 1~3순위 뒤에 둔다.
 
