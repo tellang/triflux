@@ -32,7 +32,7 @@ test("core 의 하위 디렉터리 누락과 깨진 import 를 잡는다", () =>
   }
 });
 
-test("remote 본문 드리프트를 잡고 import 경로만 다른 미러는 통과시킨다", () => {
+test("remote 본문 드리프트를 잡고 pack:remote 리라이트만 다른 미러는 통과시킨다", () => {
   const root = mkdtempSync(join(tmpdir(), "tfx-mirror-"));
   const remoteIssues = () =>
     compareMirror({ repoRoot: root }).issues.filter((issue) =>
@@ -43,9 +43,18 @@ test("remote 본문 드리프트를 잡고 import 경로만 다른 미러는 통
     write(root, "packages/core/hub/lib/a.mjs", "export const a = 1;\n");
     write(root, "hub/team/b.mjs", "export const b = 2;\n");
     write(root, "packages/remote/hub/team/b.mjs", "export const b = 2;\n");
+    // 비정규 상대 경로는 정규화돼 바뀌고, root 에 원래 있던 @triflux/core import 와 그 인용 주석은 pack 이 그대로 둔다.
     const body = (spec) =>
-      `import { a } from "${spec}";\nimport { b } from "./b.mjs";\nconst m = await import("${spec}");\nexport const x = a + b + m.a;\n`;
-    write(root, "hub/team/x.mjs", body("../lib/a.mjs"));
+      [
+        `import { a } from "${spec}";`,
+        'import { b } from "./b.mjs";',
+        'import { a as c } from "@triflux/core/hub/lib/a.mjs";',
+        '// import { a } from "@triflux/core/hub/lib/a.mjs";',
+        `const m = await import("${spec}");`,
+        "export const x = a + b + c + m.a;",
+        "",
+      ].join("\n");
+    write(root, "hub/team/x.mjs", body("./../lib/a.mjs"));
     write(
       root,
       "packages/remote/hub/team/x.mjs",
@@ -63,7 +72,7 @@ test("remote 본문 드리프트를 잡고 import 경로만 다른 미러는 통
         path: "packages/remote/hub/team/x.mjs",
         kind: "remote-content-diff",
         detail:
-          'line 4: root "export const x = a + b + m.a;" / remote "export const x = a - b + m.a;"',
+          'line 6: root "export const x = a + b + c + m.a;" / remote "export const x = a - b + c + m.a;"',
       },
     ]);
   } finally {

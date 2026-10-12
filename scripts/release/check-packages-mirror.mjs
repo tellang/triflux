@@ -17,9 +17,9 @@ import {
   readFileSync,
   statSync,
 } from "node:fs";
-import { dirname, join, posix } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CORE_ENTRIES } from "../pack.mjs";
+import { CORE_ENTRIES, rewriteRemoteSource } from "../pack.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO_ROOT = join(SCRIPT_DIR, "..", "..");
@@ -77,7 +77,7 @@ function walkRelFiles(root, skipRels = new Set()) {
 // the two drift classes that shipped silently in v10.33.0: a broken remote
 // import (relative specifier to a core-only module) and a stale non-JS asset
 // (the tray UI), neither of which the triflux/core byte-mirror check can see.
-// .mjs 본문도 import 를 되돌려 root 와 비교한다. 해석만 보면 옛 구현이 남아도 OK 였다.
+// .mjs 본문도 pack:remote 리라이트를 거친 root 와 비교한다. 해석만 보면 옛 구현이 남아도 OK 였다.
 const REMOTE_NON_MIRROR = new Set([
   "package.json",
   "package-lock.json",
@@ -98,19 +98,6 @@ function extractImportSpecifiers(content) {
   let match;
   while ((match = re.exec(code)) !== null) specs.push(match[1]);
   return specs;
-}
-
-// pack:remote 는 remote 에 없는 상대 import 대상을 @triflux/core/<같은 경로> 로 바꾼다.
-// 그 경로를 이 파일 기준 상대 경로로 되돌리면 root 원본과 같아야 한다.
-function restoreRemoteCoreImports(rel, content) {
-  const fromDir = posix.dirname(rel);
-  return content.replace(
-    /((?:from\s+|import\(\s*)["'])@triflux\/core\/([^"']+)(["'])/g,
-    (_, pre, target, post) => {
-      const spec = posix.relative(fromDir, target);
-      return `${pre}${spec.startsWith(".") ? spec : `./${spec}`}${post}`;
-    },
-  );
 }
 
 function firstDiffLine(expected, actual) {
@@ -152,13 +139,18 @@ function checkRemoteMirror(repoRoot) {
       }
       const rootPath = join(repoRoot, rel);
       if (existsSync(rootPath)) {
-        const expected = readFileSync(rootPath, "utf8");
-        const restored = restoreRemoteCoreImports(rel, content);
-        if (restored !== expected) {
+        // pack:remote 와 같은 리라이트를 root 원본에 적용한 기대본과 비교한다.
+        const { content: expected } = rewriteRemoteSource(
+          readFileSync(rootPath, "utf8"),
+          remotePath,
+          remoteRoot,
+          coreRoot,
+        );
+        if (content !== expected) {
           issues.push({
             path: displayPath,
             kind: "remote-content-diff",
-            detail: firstDiffLine(expected, restored),
+            detail: firstDiffLine(expected, content),
           });
         }
       }
