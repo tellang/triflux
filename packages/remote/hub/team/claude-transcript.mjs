@@ -58,6 +58,28 @@ function beginTurn(state) {
 function acceptEntry(state, entry, marker) {
   if (entry?.isSidechain) return;
   const message = entry?.message;
+  if (
+    entry?.type === "attachment" &&
+    entry.attachment?.type === "goal_status"
+  ) {
+    const goal = entry.attachment;
+    const cleared = goal.met === true && goal.sentinel === true;
+    state.goal = {
+      state: cleared ? "none" : goal.met ? "complete" : "active",
+      objective: cleared ? null : goal.condition,
+      judgedBy: "evaluator",
+      ...(goal.reason !== undefined ? { reason: goal.reason } : {}),
+      ...(goal.tokens !== undefined ? { tokensUsed: goal.tokens } : {}),
+      updatedAt: entry.timestamp ?? null,
+    };
+    if (goal.sentinel === true) {
+      state.goalSentinel = {
+        ...goal,
+        updatedAt: entry.timestamp,
+        count: (state.goalSentinel?.count ?? 0) + 1,
+      };
+    }
+  }
   if (entry?.type === "system" && entry.subtype === "compact_boundary") {
     state.compactCount += 1;
     state.compact = {
@@ -211,6 +233,8 @@ export async function readClaudeTranscript(transcriptPath, { requestId } = {}) {
       measuredAt: null,
       compactCount: 0,
       compact: null,
+      goal: { state: "none", objective: null, judgedBy: "evaluator" },
+      goalSentinel: null,
     };
   }
   try {
@@ -256,5 +280,7 @@ export async function readClaudeTranscript(transcriptPath, { requestId } = {}) {
     sectionClosed: state.sectionClosed,
     compactCount: state.compactCount,
     compact: state.compact,
+    goal: state.goal,
+    goalSentinel: state.goalSentinel,
   };
 }
