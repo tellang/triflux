@@ -1796,12 +1796,13 @@ function isCodexTrustFolderPrompt(text) {
   );
 }
 
+// 다중 선택 항목은 한 글자 체크박스로 그린다. 바이너리 상수: [ ] [×] [✔] [√] ☐ ☒, 라디오 ( ) (*) ◯ ◉.
 function isClaudeMcpApprovalPrompt(text) {
   const menu = splitAtLastSelector(text, "❯");
   return (
     Boolean(menu) &&
     /new MCP servers? found in this project/i.test(menu.above) &&
-    /^❯\s*(?:\d+\.\s*)?(?:use this|continue without using this MCP server|enable selected|\[[ ×]\]|[☐☒])/i.test(
+    /^❯\s*(?:\d+\.\s*)?(?:use this|continue without using this MCP server|enable selected|\[.\]|\(.\)|[☐☒◯◉])/iu.test(
       menu.selected,
     )
   );

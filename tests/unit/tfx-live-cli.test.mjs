@@ -1860,6 +1860,12 @@ test("tfx-live start reports approval screens as blocked without answering them"
       {
         cli: "claude",
         screen:
+          "5 new MCP servers found in this project\n❯ [✔] github\n  [ ] linear",
+        blockedBy: "claude-mcp-approval",
+      },
+      {
+        cli: "claude",
+        screen:
           "New MCP server found in this project: github\n❯ 1. Use this and all future MCP servers in this project\n  2. Use this MCP server",
         blockedBy: "claude-mcp-approval",
       },
