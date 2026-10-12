@@ -4,12 +4,13 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 
-// https://platform.claude.com/docs/en/build-with-claude/context-windows 2026-10-08
+// https://platform.claude.com/docs/en/build-with-claude/context-windows 2026-10-12
 // https://developers.openai.com/api/docs/models 2026-10-08
 const MODEL_CONTEXT = [
   {
     cli: "claude",
-    model: /^(?:claude-)?(?:fable-5[.-]1|opus-5[.-]5|sonnet-5[.-]5)(?:$|[-[])/i,
+    model:
+      /^(?:claude-)?(?:fable-5[.-]1|opus-5[.-]5|sonnet-5[.-]5|haiku-5[.-]5)(?:$|[-[])/i,
     tokens: 1_000_000,
     source:
       "https://platform.claude.com/docs/en/build-with-claude/context-windows",
