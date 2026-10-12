@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.61.1] - 2026-10-12
+
+### Fixed
+- live: ssh 로 들어온 셸처럼 리드가 그 기기의 iTerm2 창에 없으면 탭을 열지 않는다. macOS ssh 가 `LC_TERMINAL` 을 넘겨 원격 기기 화면에 탭이 열리던 문제다
+
 ## [10.61.0] - 2026-10-12
 
 ### Added
