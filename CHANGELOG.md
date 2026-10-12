@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.61.0] - 2026-10-12
+
+### Added
+- live: macOS iTerm2 에서 `tfx-live start` 로 띄운 로컬 tmux 세션을 리드가 있는 창에 연다. 같은 `--group` 은 한 탭을 나누고 다른 그룹은 새 탭을 열며, 탭 제목은 그룹 이름으로 고정한다. `stop --session` 은 그 패인도 닫는다. 실패하면 `itermWarning` 만 남긴다 (#738)
+
 ## [10.60.0] - 2026-10-11
 
 ### Added
