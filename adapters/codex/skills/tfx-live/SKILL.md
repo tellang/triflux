@@ -105,19 +105,20 @@ Claude와 Codex는 네이티브 goal을 우선 쓰고, goal-driven은 agy처럼 
 
 ### 컨텍스트 판단
 
-분모는 공식 모델 창이고 실행 한도가 더 작으면 그 한도 아래에서 운영한다. 아래 비율은 공식 권고가 아닌 **[추론] 운영값**이다. 모델 문서가 바뀌면 한도도 갱신한다.
+분모는 공식 모델 창과 실행 한도 중 작은 값이다. 아래 비율은 공식 권고가 아닌 **[추론] 운영값**이다. 모델 문서가 바뀌면 한도도 갱신한다.
 
 | CLI | 준비와 경고 | compact | 신규 배정 중지·handoff | 전송 거부 |
 | --- | ---: | ---: | ---: | ---: |
 | Claude Code 1M 모델 | 60% | 75% | 85% | 90% |
-| Codex | 15% | 18% | 20% | 22% |
+| Codex rollout 실행 창 | 60% | 70% | 80% | 85% |
+| Codex 실행 창 없음(1.05M 분모) | 15% | 18% | 20% | 22% |
 | agy | 12% | 없음 | 15% | 18% |
 
 Claude는 85% 도달 시 바로 handoff를 지시한다. agy 행은 운영 지침이며 agy도 `tfx-live` 전송 대상이지만 컨텍스트 비율은 자동으로 읽지 못해 `null`로 보고하고 가드를 건너뛴다. `model_context_window`와 `model_auto_compact_token_limit`은 올리지 않는다.
 
-결과에는 `estimatedContextTokens`, `contextLimitTokens`, `contextLimitSource`, `contextPct`가 포함된다. Claude 실행 한도는 `executionContextLimitTokens`로 별도 보고하며 `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`이면 200,000이다. 판정에는 공식 창과 실행 한도 중 작은 값을 쓴다. 한도를 모르면 비율은 `null`로 두고 경고만 한다. 사용량이 없는 `probe`는 `context: null`이다. 컨텍스트를 확인하려면 직접 `tfx-live probe`를 실행한다. `interrupt`, 자동 `ask`의 daemon probe, `stop --short`는 transcript를 읽지 않는다.
+결과에는 `estimatedContextTokens`, `contextLimitTokens`, `contextLimitSource`, `contextPct`가 포함된다. Claude 실행 한도는 `executionContextLimitTokens`로 별도 보고하며 `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`이면 200,000이다. Codex는 rollout `token_count`의 `model_context_window`를 `executionContextLimitTokens`로 보고한다. 이 값이 없으면 1,050,000 표 값을 분모로 쓴다. 판정에는 공식 창과 실행 한도 중 작은 값을 쓴다. 한도를 모르면 비율은 `null`로 두고 경고만 한다. 사용량이 없는 `probe`는 `context: null`이다. 컨텍스트를 확인하려면 직접 `tfx-live probe`를 실행한다. `interrupt`, 자동 `ask`의 daemon probe, `stop --short`는 transcript를 읽지 않는다.
 
-`ask`의 `--warn-context-pct`와 `--max-context-pct`는 경고·거부 비율을 덮어쓰며 0이면 해당 가드를 끈다. 기본값은 표의 경고·전송 거부 열이다. 거부 결과는 `status: "failed"`, `done: false`, `context-limit`와 컨텍스트 필드를 돌려준다. 자세한 근거와 실측은 [컨텍스트 정책 연구](../../docs/research/tfx-live-context-policy-2026-10.md)에 둔다.
+`ask`의 `--warn-context-pct`와 `--max-context-pct`는 경고·거부 비율을 덮어쓰며 0이면 해당 가드를 끈다. 기본값은 표의 경고·전송 거부 열이다. Codex는 `executionContextLimitTokens`가 있으면 실행 창 행을, 없으면 1.05M 분모 행을 쓴다. 거부 결과는 `status: "failed"`, `done: false`, `context-limit`, 컨텍스트 필드와 적용한 거부 비율 `thresholdPct`를 돌려준다. 경고의 `thresholdPct`는 적용한 경고 비율이다. 자세한 근거와 실측은 [컨텍스트 정책 연구](../../docs/research/tfx-live-context-policy-2026-10.md)에 둔다.
 
 ### 수동 compact와 종료
 
