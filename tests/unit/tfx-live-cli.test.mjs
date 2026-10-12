@@ -1969,9 +1969,33 @@ test("tfx-live start answers trust screens by default and blocks on them with --
           "Do you trust the contents of this project?\n> Yes, I trust this folder\n  No, exit",
         blockedBy: "agy-trust-folder",
       },
+      // Claude 2.1.296 신뢰 화면은 취소 항목이 먼저 오고 거기에 초점이 있다.
+      {
+        cli: "claude",
+        screen:
+          "Quick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder",
+        blockedBy: "claude-trust-folder",
+        flagOnly: true,
+      },
+      // 신뢰 문구를 인용한 재개 대화 아래 입력창이 보이는 정상 화면.
+      {
+        cli: "claude",
+        screen:
+          "⏺ Quick safety check: trust this folder?\n  ❯ No, exit\n────────\n❯ \n────────\nCTX:0/100 (0%)",
+        flagOnly: true,
+      },
+      {
+        cli: "codex",
+        screen:
+          "• Do you trust the contents of this directory?\n  › 1. Yes, continue\n\n› \n  gpt-6.1-sol · Context 3% used",
+        flagOnly: true,
+      },
     ];
-    for (const [index, { cli, screen, blockedBy }] of cases.entries()) {
-      for (const noAutoTrust of [false, true]) {
+    for (const [
+      index,
+      { cli, screen, blockedBy, flagOnly },
+    ] of cases.entries()) {
+      for (const noAutoTrust of flagOnly ? [true] : [false, true]) {
         const logPath = path.join(
           dir,
           `tmux-log-${index}-${noAutoTrust}.jsonl`,
@@ -1984,6 +2008,8 @@ test("tfx-live start answers trust screens by default and blocks on them with --
               cli,
               "--session",
               `trust-${index}`,
+              "--resume",
+              "r1",
               ...(noAutoTrust ? ["--no-auto-trust"] : []),
               "--ready-timeout",
               "0.2",
@@ -2005,10 +2031,11 @@ test("tfx-live start answers trust screens by default and blocks on them with --
         const answered = (await readTmuxLog(logPath)).filter(
           (args) => args[0] === "send-keys" && args.length === 4,
         );
-        assert.equal(result.ready, false, cli);
+        assert.equal(result.ready, noAutoTrust && !blockedBy, cli);
         if (noAutoTrust) {
           assert.equal(result.blockedBy, blockedBy, cli);
-          assert.match(result.warning, /attach to the tmux session/);
+          if (blockedBy)
+            assert.match(result.warning, /attach to the tmux session/);
           assert.deepEqual(answered, [], `${cli} trust screen was answered`);
         } else {
           assert.equal(result.blockedBy, undefined, cli);

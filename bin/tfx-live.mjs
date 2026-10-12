@@ -1794,6 +1794,29 @@ function isCodexTrustFolderPrompt(text) {
   );
 }
 
+// --no-auto-trust 차단 판정. 문구만 보면 재개 대화의 인용에도 걸리므로 메뉴 구조까지 본다.
+// 항목 문구는 Claude 2.1.296 바이너리, 0.162.1 에 없는 예전 Codex 문구는 dismissCodexTrustPrompt 기준.
+function isClaudeTrustMenu(text) {
+  const menu = splitAtLastSelector(text, "❯");
+  return (
+    Boolean(menu) &&
+    !menu.inComposerBox &&
+    isClaudeTrustPrompt(menu.above) &&
+    /^❯\s*(?:\d+\.\s*)?(?:yes, i trust this folder|no, exit|no, continue without these permissions)/i.test(
+      menu.selected,
+    )
+  );
+}
+
+function isLegacyCodexTrustMenu(text) {
+  const menu = splitAtLastSelector(text, "›");
+  return (
+    Boolean(menu) &&
+    isCodexTrustPrompt(menu.above) &&
+    /^›\s*(?:\d+\.\s*)?(?:yes, continue|no, quit)/i.test(menu.selected)
+  );
+}
+
 // 다중 선택 항목은 한 글자 체크박스로 그린다. 바이너리 상수: [ ] [×] [✔] [√] ☐ ☒, 라디오 ( ) (*) ◯ ◉.
 function isClaudeMcpApprovalPrompt(text) {
   const menu = splitAtLastSelector(text, "❯");
@@ -1998,6 +2021,16 @@ function isAgyTrustPrompt(text) {
   return /Do you trust the contents of this project\?/.test(stripAnsi(text));
 }
 
+// 항목 문구는 agy 1.3.3 바이너리 문자열 기준.
+function isAgyTrustMenu(text) {
+  const menu = splitAtLastSelector(text, ">");
+  return (
+    Boolean(menu) &&
+    isAgyTrustPrompt(menu.above) &&
+    /^>\s*(?:yes, i trust this folder|no, exit)/i.test(menu.selected)
+  );
+}
+
 function isAgyQueuedCapture(text) {
   return /Press up to edit queued messages/i.test(stripAnsi(text));
 }
@@ -2048,6 +2081,7 @@ const ADAPTERS = {
       {
         name: "trust",
         blockedBy: "codex-trust-folder",
+        isBlocking: isLegacyCodexTrustMenu,
         isPresent: isCodexTrustPrompt,
         dismiss: dismissCodexTrustPrompt,
         warning:
@@ -2117,6 +2151,7 @@ const ADAPTERS = {
       {
         name: "trust",
         blockedBy: "claude-trust-folder",
+        isBlocking: isClaudeTrustMenu,
         isPresent: isClaudeTrustPrompt,
         dismiss: dismissClaudeTrustPrompt,
         warning:
@@ -2157,6 +2192,7 @@ const ADAPTERS = {
       {
         name: "trust",
         blockedBy: "agy-trust-folder",
+        isBlocking: isAgyTrustMenu,
         isPresent: isAgyTrustPrompt,
         dismiss: dismissAgyTrustPrompt,
         warning:
@@ -2715,7 +2751,11 @@ async function doStart(launchAdapter, opts) {
       (screen) => !trustScreens.includes(screen),
     ),
     blockingScreens: [
-      ...trustScreens.map((screen) => ({ ...screen, name: screen.blockedBy })),
+      ...trustScreens.map((screen) => ({
+        name: screen.blockedBy,
+        isPresent: screen.isBlocking,
+        warning: screen.warning,
+      })),
       ...(launchAdapter.blockingScreens ?? []),
     ],
   };
