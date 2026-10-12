@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.61.2] - 2026-10-12
+
+### Added
+- live: Claude Haiku 5.5 의 1M 컨텍스트 한도를 인식해 Haiku 5.5 세션의 `contextPct` 를 계산한다. Haiku 4.5 는 200K 라서 대상에서 뺀다
+
 ## [10.61.1] - 2026-10-12
 
 ### Fixed
