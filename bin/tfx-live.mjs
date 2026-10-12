@@ -2520,6 +2520,24 @@ async function openItermSession(session, group) {
   const leaderId = appleScriptString(
     process.env.ITERM_SESSION_ID?.split(":")[1] ?? "",
   );
+  // tmux 안의 리드는 ITERM_SESSION_ID 가 tmux 를 처음 띄운 터미널 값이라, 지금 붙어 있는 클라이언트 tty 로 창을 찾는다.
+  const clients = process.env.TMUX_PANE
+    ? await runTmux(null, [
+        "list-clients",
+        "-t",
+        process.env.TMUX_PANE,
+        "-F",
+        "#{client_activity} #{client_tty}",
+      ]).catch(() => ({ stdout: "" }))
+    : { stdout: "" };
+  const leaderTty = appleScriptString(
+    clients.stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.split(" "))
+      .sort((a, b) => Number(b[0]) - Number(a[0]))[0]?.[1] ?? "",
+  );
   const { stdout: tmuxPath } = await execFileAsync("which", ["tmux"], {
     timeout: 2000,
   });
@@ -2528,14 +2546,20 @@ async function openItermSession(session, group) {
   );
   const script = `tell application "iTerm2"
   set leaderWindow to current window
-  if ${leaderId} is not "" then
-    repeat with candidateWindow in windows
-      repeat with candidateTab in tabs of candidateWindow
-        repeat with candidateSession in sessions of candidateTab
-          if id of candidateSession is ${leaderId} then set leaderWindow to candidateWindow
-        end repeat
+  set ttyWindow to missing value
+  set idWindow to missing value
+  repeat with candidateWindow in windows
+    repeat with candidateTab in tabs of candidateWindow
+      repeat with candidateSession in sessions of candidateTab
+        if ${leaderTty} is not "" and tty of candidateSession is ${leaderTty} then set ttyWindow to candidateWindow
+        if ${leaderId} is not "" and id of candidateSession is ${leaderId} then set idWindow to candidateWindow
       end repeat
     end repeat
+  end repeat
+  if ttyWindow is not missing value then
+    set leaderWindow to ttyWindow
+  else if idWindow is not missing value then
+    set leaderWindow to idWindow
   end if
   set groupSession to missing value
   repeat with candidateTab in tabs of leaderWindow
