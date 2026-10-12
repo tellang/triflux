@@ -89,6 +89,7 @@ const BOOLEAN_FLAGS = new Set([
   "no-wait",
   "no-relay-tag",
   "sandbox",
+  "no-auto-trust",
 ]);
 const PEER_HOP_DONE_MARKER = "<<<TFX_PEER_HOP_DONE>>>";
 // uds-fallback diagnostics land here, written async so a failed daemon attach
@@ -100,7 +101,7 @@ const BUG_REPORT_DIR =
 function usage(command) {
   const lines = [
     "Usage:",
-    "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--sandbox] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
+    "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--sandbox] [--no-auto-trust] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude|agy] [--if-busy wait|fail|interrupt|queue] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --cli codex [--transport queue|tmux] (--session NAME[:WINDOW.PANE] | --thread UUID) --prompt TEXT [--from NAME] [--timeout 60] [--no-wait]",
     "    Codex ask defaults to the app-server queue (thread/queue/add, `codex queue --message` only when add is unavailable; delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands.",
@@ -2046,8 +2047,11 @@ const ADAPTERS = {
     startupScreens: [
       {
         name: "trust",
+        blockedBy: "codex-trust-folder",
         isPresent: isCodexTrustPrompt,
         dismiss: dismissCodexTrustPrompt,
+        warning:
+          "Codex is asking whether to trust this folder; attach to the tmux session and answer it yourself",
       },
       {
         name: "update",
@@ -2112,8 +2116,11 @@ const ADAPTERS = {
     startupScreens: [
       {
         name: "trust",
+        blockedBy: "claude-trust-folder",
         isPresent: isClaudeTrustPrompt,
         dismiss: dismissClaudeTrustPrompt,
+        warning:
+          "Claude is asking whether to trust this folder; attach to the tmux session and answer it yourself",
       },
       {
         name: "external-imports",
@@ -2149,8 +2156,11 @@ const ADAPTERS = {
     startupScreens: [
       {
         name: "trust",
+        blockedBy: "agy-trust-folder",
         isPresent: isAgyTrustPrompt,
         dismiss: dismissAgyTrustPrompt,
+        warning:
+          "agy is asking whether to trust this folder; attach to the tmux session and answer it yourself",
       },
     ],
   },
@@ -2694,7 +2704,21 @@ end tell`;
   });
 }
 
-async function doStart(adapter, opts) {
+async function doStart(launchAdapter, opts) {
+  // --no-auto-trust 면 신뢰 화면을 고르지 않고 승인 화면과 같이 ready:false 로 끝낸다.
+  const trustScreens = opts.noAutoTrust
+    ? launchAdapter.startupScreens.filter((screen) => screen.blockedBy)
+    : [];
+  const adapter = {
+    ...launchAdapter,
+    startupScreens: launchAdapter.startupScreens.filter(
+      (screen) => !trustScreens.includes(screen),
+    ),
+    blockingScreens: [
+      ...trustScreens.map((screen) => ({ ...screen, name: screen.blockedBy })),
+      ...(launchAdapter.blockingScreens ?? []),
+    ],
+  };
   const {
     session,
     remote,
@@ -4053,6 +4077,7 @@ function startOpts(flags) {
     name: flags.name,
     group: flags.group,
     sandbox: Object.hasOwn(flags, "sandbox"),
+    noAutoTrust: Object.hasOwn(flags, "no-auto-trust"),
     unsetEnv,
     readyTimeoutMs: secondsFlag(
       flags,

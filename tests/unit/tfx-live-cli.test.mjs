@@ -1935,6 +1935,95 @@ test("tfx-live start reports approval screens as blocked without answering them"
   }
 });
 
+test("tfx-live start answers trust screens by default and blocks on them with --no-auto-trust", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-start-trust-"));
+  try {
+    const tmuxPath = path.join(dir, "tmux");
+    await fs.writeFile(
+      tmuxPath,
+      [
+        "#!/usr/bin/env node",
+        "import fs from 'node:fs';",
+        "const args = process.argv.slice(2);",
+        "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
+        "if (args[0] === 'capture-pane') console.log(process.env.TMUX_SCREEN);",
+      ].join("\n"),
+    );
+    await fs.chmod(tmuxPath, 0o755);
+    const cases = [
+      {
+        cli: "claude",
+        screen:
+          "Quick safety check\n❯ 1. Yes, I trust this folder\n  2. No, exit",
+        blockedBy: "claude-trust-folder",
+      },
+      {
+        cli: "codex",
+        screen:
+          "> Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit",
+        blockedBy: "codex-trust-folder",
+      },
+      {
+        cli: "agy",
+        screen:
+          "Do you trust the contents of this project?\n> Yes, I trust this folder\n  No, exit",
+        blockedBy: "agy-trust-folder",
+      },
+    ];
+    for (const [index, { cli, screen, blockedBy }] of cases.entries()) {
+      for (const noAutoTrust of [false, true]) {
+        const logPath = path.join(
+          dir,
+          `tmux-log-${index}-${noAutoTrust}.jsonl`,
+        );
+        const result = JSON.parse(
+          await runTfxLive(
+            [
+              "start",
+              "--cli",
+              cli,
+              "--session",
+              `trust-${index}`,
+              ...(noAutoTrust ? ["--no-auto-trust"] : []),
+              "--ready-timeout",
+              "0.2",
+              "--poll-interval",
+              "1",
+            ],
+            {
+              env: {
+                PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+                TMUX_LOG: logPath,
+                TMUX_SCREEN: screen,
+                TFX_AGENTS_ROW: "0",
+                LC_TERMINAL: "",
+                TERM_PROGRAM: "",
+              },
+            },
+          ),
+        );
+        const answered = (await readTmuxLog(logPath)).filter(
+          (args) => args[0] === "send-keys" && args.length === 4,
+        );
+        assert.equal(result.ready, false, cli);
+        if (noAutoTrust) {
+          assert.equal(result.blockedBy, blockedBy, cli);
+          assert.match(result.warning, /attach to the tmux session/);
+          assert.deepEqual(answered, [], `${cli} trust screen was answered`);
+        } else {
+          assert.equal(result.blockedBy, undefined, cli);
+          assert.ok(
+            answered.some((args) => args[3] === "Enter"),
+            `${cli} trust screen was not answered`,
+          );
+        }
+      }
+    }
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("tfx-live start keeps resume launch keys ahead of model overrides", async () => {
   const dir = await fs.mkdtemp(
     path.join(os.tmpdir(), "tfx-live-resume-flags-"),
