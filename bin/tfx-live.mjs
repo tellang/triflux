@@ -3993,12 +3993,13 @@ function transportFlag(flags, adapter, short, sessionId) {
 // 절대 경로로 시작하는 프롬프트는 슬래시 명령이 아니다.
 function isSlashCommand(prompt) {
   const word = String(prompt ?? "").match(/^\/[a-z][\w-]*(?=\s|$)/i)?.[0];
-  // `/tmp 를 확인해` 처럼 실제 경로로 시작하는 문장은 명령이 아니다.
+  // `/tmp 를 확인해` 처럼 이 기기에 실제로 있는 경로로 시작하는 문장은 명령이 아니다.
   return Boolean(word) && !existsSync(word);
 }
 
 // 응답 턴을 만들지 않는 Claude 내장 명령. 스킬 명령은 응답을 만드므로 기다린다.
-const CLAUDE_SILENT_SLASH = /^\/(?:rename|clear|model|effort|color)(?:\s|$)/i;
+const CLAUDE_SILENT_SLASH =
+  /^\/(?:rename|clear|compact|model|effort|color)(?:\s|$)/i;
 
 function askOpts(flags, adapter) {
   const short = flags.short;
