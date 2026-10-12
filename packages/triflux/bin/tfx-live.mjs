@@ -1794,7 +1794,7 @@ function isCodexTrustFolderPrompt(text) {
   );
 }
 
-// --no-auto-trust 차단 판정. 문구만 보면 재개 대화의 인용에도 걸리므로 메뉴 구조까지 본다.
+// 신뢰 화면 판정. 자동 승인과 --no-auto-trust 차단이 같이 쓴다. 문구만 보면 재개 대화의 인용에도 걸리므로 메뉴 구조까지 본다.
 // 항목 문구는 Claude 2.1.296 바이너리, 0.162.1 에 없는 예전 Codex 문구는 dismissCodexTrustPrompt 기준.
 function isClaudeTrustMenu(text) {
   const menu = splitAtLastSelector(text, "❯");
@@ -1865,7 +1865,7 @@ function isSafeSkipLine(line) {
 
 async function dismissCodexTrustPrompt(remote, session) {
   let raw = await captureVisible(remote, session);
-  if (!isCodexTrustPrompt(raw)) {
+  if (!isLegacyCodexTrustMenu(raw)) {
     return { dismissed: false, raw };
   }
 
@@ -1941,7 +1941,7 @@ async function dismissCodexDaemonSettingsPrompt(remote, session) {
 
 async function dismissClaudeTrustPrompt(remote, session) {
   let raw = await captureVisible(remote, session);
-  if (!isClaudeTrustPrompt(raw)) {
+  if (!isClaudeTrustMenu(raw)) {
     return { dismissed: false, raw };
   }
 
@@ -2021,7 +2021,7 @@ function isAgyTrustPrompt(text) {
   return /Do you trust the contents of this project\?/.test(stripAnsi(text));
 }
 
-// 항목 문구는 agy 1.3.3 바이너리 문자열 기준.
+// --no-auto-trust 차단에만 쓴다. agy 1.3.3 바이너리에서 "No, exit" 가 신뢰 화면 항목인지 확정하지 못해 자동 승인과 isReady 는 문구 판정을 유지한다.
 function isAgyTrustMenu(text) {
   const menu = splitAtLastSelector(text, ">");
   return (
@@ -2081,8 +2081,7 @@ const ADAPTERS = {
       {
         name: "trust",
         blockedBy: "codex-trust-folder",
-        isBlocking: isLegacyCodexTrustMenu,
-        isPresent: isCodexTrustPrompt,
+        isPresent: isLegacyCodexTrustMenu,
         dismiss: dismissCodexTrustPrompt,
         warning:
           "Codex is asking whether to trust this folder; attach to the tmux session and answer it yourself",
@@ -2151,8 +2150,7 @@ const ADAPTERS = {
       {
         name: "trust",
         blockedBy: "claude-trust-folder",
-        isBlocking: isClaudeTrustMenu,
-        isPresent: isClaudeTrustPrompt,
+        isPresent: isClaudeTrustMenu,
         dismiss: dismissClaudeTrustPrompt,
         warning:
           "Claude is asking whether to trust this folder; attach to the tmux session and answer it yourself",
@@ -2753,7 +2751,7 @@ async function doStart(launchAdapter, opts) {
     blockingScreens: [
       ...trustScreens.map((screen) => ({
         name: screen.blockedBy,
-        isPresent: screen.isBlocking,
+        isPresent: screen.isBlocking ?? screen.isPresent,
         warning: screen.warning,
       })),
       ...(launchAdapter.blockingScreens ?? []),

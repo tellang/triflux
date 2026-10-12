@@ -1982,13 +1982,11 @@ test("tfx-live start answers trust screens by default and blocks on them with --
         cli: "claude",
         screen:
           "⏺ Quick safety check: trust this folder?\n  ❯ No, exit\n────────\n❯ \n────────\nCTX:0/100 (0%)",
-        flagOnly: true,
       },
       {
         cli: "codex",
         screen:
           "• Do you trust the contents of this directory?\n  › 1. Yes, continue\n\n› \n  gpt-6.1-sol · Context 3% used",
-        flagOnly: true,
       },
     ];
     for (const [
@@ -2031,11 +2029,13 @@ test("tfx-live start answers trust screens by default and blocks on them with --
         const answered = (await readTmuxLog(logPath)).filter(
           (args) => args[0] === "send-keys" && args.length === 4,
         );
-        assert.equal(result.ready, noAutoTrust && !blockedBy, cli);
-        if (noAutoTrust) {
+        assert.equal(result.ready, !blockedBy, cli);
+        if (!blockedBy) {
+          assert.equal(result.blockedBy, undefined, cli);
+          assert.deepEqual(answered, [], `${cli} resumed session got keys`);
+        } else if (noAutoTrust) {
           assert.equal(result.blockedBy, blockedBy, cli);
-          if (blockedBy)
-            assert.match(result.warning, /attach to the tmux session/);
+          assert.match(result.warning, /attach to the tmux session/);
           assert.deepEqual(answered, [], `${cli} trust screen was answered`);
         } else {
           assert.equal(result.blockedBy, undefined, cli);
