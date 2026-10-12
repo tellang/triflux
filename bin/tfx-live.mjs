@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import {
+  chmod,
   mkdir,
   open,
   readdir,
@@ -2470,6 +2471,31 @@ async function resumedCodexThread(
   return matches.length === 1 ? matches[0] : null;
 }
 
+const ITERM_TITLE_SCRIPT_NAME = "com.triflux.live-title.py";
+const ITERM_TITLE_SCRIPT = String.raw`#!/usr/bin/env python3
+import sys
+
+import iterm2
+
+
+async def main(connection):
+    session_id, group, name = sys.argv[1:]
+    app = await iterm2.async_get_app(connection)
+    session = app.get_session_by_id(session_id)
+    if session is None:
+        raise RuntimeError(f"iTerm session not found: {session_id}")
+    update = iterm2.LocalWriteOnlyProfile()
+    update.set_allow_title_setting(False)
+    update.set_name(name)
+    await session.async_set_profile_properties(update)
+    await session.tab.async_set_variable("user.tfxLiveGroup", group)
+    await session.tab.async_set_title(r"\(user.tfxLiveGroup)")
+    await session.async_set_variable("user.tfxLiveTitleApplied", "1")
+
+
+iterm2.run_until_complete(main)
+`;
+
 function appleScriptString(value) {
   if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value))
     throw new Error("iTerm values must not contain control characters");
@@ -2534,7 +2560,6 @@ async function openItermSession(session, group) {
   tell newSession
     set variable named "user.tfx_group" to ${groupLiteral}
     set variable named "user.tfx_session" to ${sessionLiteral}
-    set name to ${groupLiteral}
   end tell
   return (id of newSession) & linefeed & (didSplit as text)
 end tell`;
@@ -2766,6 +2791,50 @@ async function doStart(adapter, opts) {
         "@tfx_iterm_session",
         iterm.sessionId,
       ]);
+      const scriptsDir = pathJoin(
+        homedir(),
+        "Library",
+        "Application Support",
+        "iTerm2",
+        "Scripts",
+      );
+      const scriptPath = pathJoin(scriptsDir, ITERM_TITLE_SCRIPT_NAME);
+      await mkdir(scriptsDir, { recursive: true });
+      const installed = await readFile(scriptPath, "utf8").catch((error) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (installed !== ITERM_TITLE_SCRIPT)
+        await writeFile(scriptPath, ITERM_TITLE_SCRIPT, { mode: 0o700 });
+      await chmod(scriptPath, 0o700);
+      const titleArgs = [iterm.sessionId, iterm.group, opts.name ?? session]
+        .map(appleScriptString)
+        .join(", ");
+      // 절대 경로는 최초 설치 직후의 메뉴 캐시 지연을 피하고, 적용 표식은 비동기 실패를 잡는다.
+      const titleScript = `tell application "iTerm2"
+  set titleSession to missing value
+  repeat with candidateWindow in windows
+    repeat with candidateTab in tabs of candidateWindow
+      repeat with candidateSession in sessions of candidateTab
+        if id of candidateSession is ${appleScriptString(iterm.sessionId)} then set titleSession to candidateSession
+      end repeat
+    end repeat
+  end repeat
+  if titleSession is missing value then error "iTerm title session not found"
+  launch API script named ${appleScriptString(scriptPath)} arguments {${titleArgs}}
+  repeat 30 times
+    try
+      tell titleSession to set titleApplied to variable named "user.tfxLiveTitleApplied"
+      if titleApplied is "1" then return
+    end try
+    delay 0.1
+  end repeat
+  error "iTerm title update was not confirmed; check the iTerm2 Python runtime and Script Console"
+end tell`;
+      await execFileAsync("/usr/bin/osascript", ["-e", titleScript], {
+        timeout: 5000,
+        maxBuffer: 64 * 1024,
+      });
     } catch (error) {
       itermWarning = error.message;
     }
