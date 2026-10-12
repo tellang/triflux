@@ -57,10 +57,12 @@ agy `ask`의 기본 `--if-busy queue`는 바쁜 턴에도 바로 전송한다. a
 
 | 동작 | 적용 조건과 실행 |
 | --- | --- |
-| compact | 같은 목표와 담당이 이어지고 파일과 git에서 상태를 복구할 수 있을 때. Claude는 `tfx-live compact` 또는 `/compact <보존 지침>`, Codex는 `/compact` 뒤 리드가 파일 경로와 검증 명령을 다시 전달한다. agy는 수동 compact가 없어 handoff한다. |
+| compact | 같은 목표와 담당이 이어지고 파일과 git에서 상태를 복구할 수 있을 때. Claude와 Codex는 `tfx-live compact --then "다음 지시" --no-wait`로 압축 제출을 확인하고 다음 지시를 미리 넣는다. 압축 뒤에 필요한 파일 경로와 검증 명령도 `--then`에 싣는다. agy는 수동 compact가 없어 handoff한다. |
 | clear | 무관한 작업으로 전환하거나 같은 문제를 두 번 넘게 고쳐도 실패할 때, 스펙에서 구현으로 또는 작성자에서 리뷰어로 바뀔 때. 미완료 상태를 정리한 뒤 Claude는 `/rename`과 `/clear`, Codex는 작업 종료 뒤 `/new <이름>`, agy는 `/clear`를 쓴다. |
 | handoff | 담당·CLI·모델·소유자가 바뀌거나 긴 작업이 창을 넘길 때. 인계 파일에 목표, 완료 조건, 체크아웃과 변경 상태, 확정 결정, 증거 경로, PASS/FAIL/SKIP, 미완료 작업과 프로세스, 다음 행동과 소유자, `predecessorSessionId`를 적는다. 승계 세션이 경로를 확인하면 이전 세션을 닫는다. |
 | close | 결과와 인계를 확인한 즉시 닫는다. Claude 백그라운드는 `claude stop <id>`, tmux는 `tfx-live stop --session`, Claude 팀원은 shutdown, Codex 서브에이전트는 `close_agent`, agy 서브에이전트는 `/agents` 패널의 K를 쓴다. |
+
+Claude TUI는 바쁠 때 들어온 입력을 대기열에 넣고 현재 턴(압축 포함)이 끝나면 순서대로 처리한다. transcript에는 `queue-operation`의 `enqueue`와 `dequeue`로 남는다. Codex app-server 큐도 바쁜 턴 뒤에 순서대로 처리한다. 리드는 compact를 보내고 `--then`으로 다음 지시를 넣는 것을 기본 절차로 쓴다.
 
 두 번째 compact 전에는 handoff가 맞는지 점검한다. compact 횟수는 고정하지 않는다.
 
@@ -120,13 +122,19 @@ Claude는 85% 도달 시 바로 handoff를 지시한다. agy 행은 운영 지�
 ### 수동 compact와 종료
 
 ```bash
-tfx-live compact --cli claude --session cl1 --instructions "변경 파일과 검증 명령을 보존하라" --timeout 120
+tfx-live compact --cli claude --session cl1 --instructions "변경 파일과 검증 명령을 보존하라" --then "인계 파일을 읽고 검증을 이어가라" --no-wait
+tfx-live compact --cli codex --session cx1 --then "src/main.mjs를 확인하고 지정된 단위 테스트를 실행하라" --no-wait
+tfx-live wait --cli codex --session cx1 --request-id <then.requestId> --timeout 120
 tfx-live stop --cli claude --short <8hex>
 tfx-live stop --cli claude --session-id <id>
 tfx-live stop --session cl1
 ```
 
-`compact`는 로컬 Claude tmux `--session`에서 `/compact <instructions>`를 중계 표식 없이 보낸다. 기본 `--if-busy fail`이며 바쁜 세션에는 전송하지 않는다. 새 `compact_boundary`를 확인하면 `compacted: true`, `preTokens`, `postTokens`를 반환한다. 시간 안에 없으면 `compacted: false, timedOut: true`다. UDS compact는 지원하지 않는다.
+`compact --session S [--cli claude|codex] [--instructions TEXT] [--then PROMPT] [--no-wait]`는 로컬 tmux에서 `/compact`를 중계 표식 없이 보낸다. CLI 기본값은 Claude다. `--instructions`는 Claude에서만 받으며 Codex는 인자를 받지 않아 거부한다. 기본 `--if-busy fail`이며 바쁜 세션에는 compact를 전송하지 않는다. UDS compact는 지원하지 않는다.
+
+`--no-wait`는 압축 진행 표시 또는 새 완료 기록으로 제출을 확인한 뒤 반환한다. Codex에서 확인되지 않으면 Enter를 한 번 더 보내고, 그래도 확인되지 않으면 `--then`을 보내지 않고 오류로 끝낸다. `--then`은 일반 텍스트 지시만 받으며 슬래시 명령은 거부한다. 제출 확인 직후 Claude에는 표식을 붙여 tmux로 보내고 화면의 `queued messages` 또는 transcript의 `enqueue`로 확인한다. Claude 압축이 먼저 끝나 지시가 이미 처리에 들어갔으면 `then.queued: false, delivered: true`로 보고한다. Codex에는 기존 queue 경로로만 보내며 tmux로 전환하지 않는다. 결과의 `then.requestId`로 `wait --request-id`에서 압축 뒤 응답을 받는다.
+
+`--no-wait`가 없으면 Claude의 새 `compact_boundary`, Codex rollout의 새 `compacted`까지 기다린다. 결과에 `compact: {submitted: true, done}`과 `then: {requestId, queued, transport}`를 추가하고 기존 `compacted`, `preTokens`, `postTokens`를 유지한다. 토큰 수는 기록에 있는 값만 보고하며 Codex의 압축 후 token_count가 아직 없으면 `postTokens`는 `null`이다. 시간 안에 완료 기록이 없으면 `compacted: false, timedOut: true`다.
 
 `stop --short`와 `stop --session-id`는 `claude stop <id>`를 호출하고 `stopped: true, conversationKept: true`를 반환한다. `claude attach`로 대화를 재개할 수 있다. `/exit`, `←`, Ctrl+Z는 백그라운드 세션의 연결만 끊는다. macOS의 `sysctl -n kern.memorystatus_vm_pressure_level`이 2 이상이면 새 세션을 띄우기 전 정리한다. 원격 배정 전에는 `tfx-remote probe <host>`의 `ready`와 `warnings`를 확인한다.
 

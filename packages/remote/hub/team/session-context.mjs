@@ -137,12 +137,19 @@ function acceptCodexLine(state, line) {
   } catch {
     return false;
   }
+  if (entry?.type === "compacted") {
+    state.compactCount += 1;
+    state.compact = { preTokens: state.tokens, postTokens: null };
+  }
   if (entry?.type === "turn_context")
     state.model = entry.payload?.model || state.model;
   if (entry?.type === "event_msg" && entry.payload?.type === "token_count") {
     const info = entry.payload.info;
-    if (Number.isFinite(info?.last_token_usage?.total_tokens))
+    if (Number.isFinite(info?.last_token_usage?.total_tokens)) {
       state.tokens = info.last_token_usage.total_tokens;
+      if (state.compact && state.compact.postTokens === null)
+        state.compact.postTokens = state.tokens;
+    }
     if (Number.isFinite(info?.model_context_window))
       state.executionContextLimitTokens = info.model_context_window;
   }
@@ -172,6 +179,8 @@ export async function readCodexContext(rolloutPath, threadId) {
       decoder: new StringDecoder("utf8"),
       model: null,
       tokens: null,
+      compactCount: 0,
+      compact: null,
       executionContextLimitTokens: null,
     };
   }
@@ -199,6 +208,8 @@ export async function readCodexContext(rolloutPath, threadId) {
   return {
     ...modelContext("codex", state.model, state.tokens),
     model: state.model,
+    compactCount: state.compactCount,
+    compact: state.compact,
     executionContextLimitTokens: state.executionContextLimitTokens,
   };
 }
