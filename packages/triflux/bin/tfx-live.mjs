@@ -4697,9 +4697,17 @@ async function goal(action, flags) {
       if (confirmed || snapshot.state === null || Date.now() >= deadline) break;
       await sleep(Math.min(opts.pollIntervalMs, deadline - Date.now()));
     } while (Date.now() < deadline);
-    if (!confirmed && snapshot.state !== null)
-      throw new Error("No matching Codex goal observed after input");
-    return { ...base, ...codexResult, ...snapshot, inputSent: true, confirmed };
+    // 입력은 이미 들어갔으므로 오류로 끝내면 재전송을 부른다. 미확인으로만 알린다.
+    return {
+      ...base,
+      ...codexResult,
+      ...snapshot,
+      inputSent: true,
+      confirmed,
+      ...(!confirmed && snapshot.state !== null
+        ? { warning: "No matching Codex goal observed after input" }
+        : {}),
+    };
   }
   // 갓 띄운 세션은 첫 입력 뒤에야 자기 transcript 가 생기므로 매번 경로를 다시 찾는다.
   do {

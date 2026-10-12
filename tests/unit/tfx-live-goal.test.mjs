@@ -312,21 +312,13 @@ if (args[0] === 'send-keys' && args.at(-1) === 'Enter' && process.env.GOAL_WRITE
         "INSERT OR REPLACE INTO thread_goals VALUES (?, ?, ?, NULL, 0, ?)",
       ).run(threadId, objective, status, updatedAt);
       db.close();
-      await assert.rejects(
-        run("set", ["--condition", "finish"], "skip"),
-        (error) => {
-          assert.match(
-            JSON.parse(error.stdout).error,
-            /No matching Codex goal/,
-          );
-          return true;
-        },
-      );
+      const unmatched = await run("set", ["--condition", "finish"], "skip");
+      assert.equal(unmatched.confirmed, false);
+      assert.match(unmatched.warning, /No matching Codex goal/);
     }
-    await assert.rejects(run("clear", [], "skip"), (error) => {
-      assert.match(JSON.parse(error.stdout).error, /No matching Codex goal/);
-      return true;
-    });
+    const uncleared = await run("clear", [], "skip");
+    assert.equal(uncleared.confirmed, false);
+    assert.match(uncleared.warning, /No matching Codex goal/);
     await rm(join(dir, "goals_1.sqlite"));
     const missing = await run("clear", [], "skip");
     assert.equal(missing.confirmed, false);
