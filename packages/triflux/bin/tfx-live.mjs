@@ -4542,16 +4542,22 @@ async function codexGoal(action, opts, deps = {}) {
     }
     const result =
       action === "set"
-        ? await client.request(
-            "thread/goal/set",
-            {
-              ...params,
-              objective,
-              status: "active",
-              ...(tokenBudget !== undefined ? { tokenBudget } : {}),
-            },
-            10000,
-          )
+        ? await client
+            .request(
+              "thread/goal/set",
+              {
+                ...params,
+                objective,
+                status: "active",
+                ...(tokenBudget !== undefined ? { tokenBudget } : {}),
+              },
+              10000,
+            )
+            .catch((error) => {
+              throw new Error(
+                `${error.message}; clear was applied and there is currently no goal`,
+              );
+            })
         : await client.request("thread/goal/get", { threadId }, 10000);
     return {
       ...codexGoalStatus(result.goal),
@@ -4588,15 +4594,21 @@ async function goal(action, flags) {
   if (tokenBudget !== undefined && !Number.isSafeInteger(tokenBudget))
     throw new Error("--budget must be a safe positive integer");
   const objective =
-    action === "set" ? requireFlag(flags, "condition").trim() : null;
-  if (action === "set" && (!objective || objective === "clear"))
+    action === "set"
+      ? requireFlag(flags, "condition").replace(/\s+/gu, " ").trim()
+      : null;
+  if (
+    action === "set" &&
+    (!objective || /^(clear|pause|resume|edit)(?: |$)/i.test(objective))
+  )
     throw new Error(
-      '--condition must not be blank or the reserved command "clear"',
+      "--condition must not be blank or start with a reserved command (clear, pause, resume, edit)",
     );
   const base = { cli, session };
   let codexResult;
+  let threadId;
   if (cli === "codex") {
-    const { threadId } = await codexThreadFromFlags(flags);
+    ({ threadId } = await codexThreadFromFlags(flags));
     codexResult = await codexGoal(action, {
       threadId,
       objective,
@@ -4636,6 +4648,8 @@ async function goal(action, flags) {
     {
       ...flags,
       cli,
+      "if-busy":
+        flags["if-busy"] ?? (action === "clear" ? "interrupt" : "wait"),
       transport: "tmux",
       "no-wait": true,
       "no-relay-tag": true,
@@ -4643,7 +4657,23 @@ async function goal(action, flags) {
     },
     adapter,
   );
+  let interrupted = false;
+  if (action === "clear" && opts.ifBusy === "interrupt") {
+    const visible = await captureVisible(null, session);
+    // Claude 반복 턴은 화면에 esc 안내가 없어도 active goal 을 계속 실행할 수 있다.
+    if (
+      snapshot?.goal?.state === "active" ||
+      adapter.isBusy(visible) ||
+      (cli === "codex" && isCodexLoadingCapture(visible))
+    ) {
+      await doInterruptViaTmux(adapter, opts);
+      await sleep(opts.pollIntervalMs);
+      interrupted = true;
+    }
+  }
   await waitForTmuxIdle(adapter, opts);
+  // Esc 가 직전 입력을 복원해도 clear 명령 앞에 붙지 않게 비운다.
+  if (interrupted) await runTmux(null, ["send-keys", "-t", session, "C-u"]);
   snapshot =
     cli === "claude" ? await readClaudeTranscript(transcriptPath) : null;
   const beforeCount = snapshot?.goalSentinel?.count ?? 0;
@@ -4653,11 +4683,25 @@ async function goal(action, flags) {
     ifBusy: "fail",
     skipContextGuard: true,
   });
-  if (cli === "codex")
-    return { ...base, ...codexResult, inputSent: true, confirmed: false };
-  // 갓 띄운 세션은 첫 입력 뒤에야 자기 transcript 가 생기므로 매번 경로를 다시 찾는다.
   const deadline = Date.now() + Math.min(opts.timeoutMs, 15_000);
   let confirmed = false;
+  if (cli === "codex") {
+    do {
+      snapshot = await readCodexGoal(threadId);
+      confirmed =
+        action === "set"
+          ? snapshot.state === "active" &&
+            snapshot.objective === objective &&
+            Date.parse(snapshot.updatedAt) >= inputStartedAt
+          : snapshot.state === "none";
+      if (confirmed || snapshot.state === null || Date.now() >= deadline) break;
+      await sleep(Math.min(opts.pollIntervalMs, deadline - Date.now()));
+    } while (Date.now() < deadline);
+    if (!confirmed && snapshot.state !== null)
+      throw new Error("No matching Codex goal observed after input");
+    return { ...base, ...codexResult, ...snapshot, inputSent: true, confirmed };
+  }
+  // 갓 띄운 세션은 첫 입력 뒤에야 자기 transcript 가 생기므로 매번 경로를 다시 찾는다.
   do {
     snapshot = await readClaudeTranscript(
       await claudeTmuxTranscript(session, flags["config-dir"]),

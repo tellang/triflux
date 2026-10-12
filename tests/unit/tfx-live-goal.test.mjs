@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import test from "node:test";
@@ -150,7 +150,7 @@ test("Codex write errors do not replay the goal through fallback", async () => {
   const fake = daemon({ failSet: true });
   await assert.rejects(
     codexGoal("set", { threadId, objective: "new" }, fake.deps),
-    /connection lost/,
+    /connection lost.*clear was applied and there is currently no goal/,
   );
   assert.equal(fake.isClosed(), true);
 });
@@ -178,6 +178,161 @@ test("goal CLI rejects Claude budget, agy and remote before contacting sessions"
         return true;
       },
     );
+  }
+});
+
+test("goal set rejects reserved first words regardless of CLI and case", async () => {
+  for (const cli of ["claude", "codex"]) {
+    for (const condition of [
+      "clear",
+      "PAUSE later",
+      "Resume\nwork",
+      "eDiT goal",
+    ]) {
+      await assert.rejects(
+        exec(process.execPath, [
+          resolve("bin/tfx-live.mjs"),
+          "goal",
+          "set",
+          "--cli",
+          cli,
+          "--session",
+          "missing",
+          "--condition",
+          condition,
+        ]),
+        (failure) => {
+          assert.match(JSON.parse(failure.stdout).error, /reserved command/);
+          return true;
+        },
+      );
+    }
+  }
+});
+
+test("Codex tmux goals normalize whitespace and confirm fresh matching sqlite state", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tfx-goal-tmux-"));
+  try {
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(join(dir, "goals_1.sqlite"));
+    db.exec(
+      "CREATE TABLE thread_goals (thread_id TEXT PRIMARY KEY, objective TEXT, status TEXT, token_budget INTEGER, tokens_used INTEGER, updated_at_ms INTEGER)",
+    );
+    db.close();
+    await writeFile(
+      join(dir, "tmux"),
+      `#!/usr/bin/env node
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+const root = process.env.CODEX_HOME;
+const args = process.argv.slice(2);
+appendFileSync(root + '/calls', JSON.stringify(args) + '\\n');
+if (args[0] === 'capture-pane') console.log(existsSync(root + '/busy') ? 'esc to interrupt' : '›');
+if (args[0] === 'set-buffer') writeFileSync(root + '/prompt', args.at(-1));
+if (args[0] === 'send-keys' && args.at(-1) === 'Escape') {
+  const { unlinkSync } = await import('node:fs');
+  unlinkSync(root + '/busy');
+}
+if (args[0] === 'send-keys' && args.at(-1) === 'Enter' && process.env.GOAL_WRITE !== 'skip') {
+  const db = new DatabaseSync(root + '/goals_1.sqlite');
+  const prompt = readFileSync(root + '/prompt', 'utf8');
+  if (prompt === '/goal clear') db.prepare('DELETE FROM thread_goals WHERE thread_id = ?').run('${threadId}');
+  else db.prepare('INSERT OR REPLACE INTO thread_goals VALUES (?, ?, ?, NULL, 0, ?)').run('${threadId}', prompt.slice(6), 'active', Date.now());
+  db.close();
+}
+`,
+      { mode: 0o755 },
+    );
+    const run = async (action, args = [], write = "apply") => {
+      const { stdout } = await exec(
+        process.execPath,
+        [
+          resolve("bin/tfx-live.mjs"),
+          "goal",
+          action,
+          "--cli",
+          "codex",
+          "--session",
+          "fake",
+          "--thread",
+          threadId,
+          "--codex-socket",
+          join(dir, "missing.sock"),
+          "--settle",
+          "1",
+          "--poll-interval",
+          "10",
+          "--timeout",
+          "1",
+          ...args,
+        ],
+        {
+          env: {
+            ...process.env,
+            CODEX_HOME: dir,
+            PATH: `${dir}${delimiter}${process.env.PATH}`,
+            GOAL_WRITE: write,
+          },
+        },
+      );
+      return JSON.parse(stdout);
+    };
+    const condition = "  finish\r\n all\u2028 steps\u2029\t now  ";
+    const set = await run("set", ["--condition", condition]);
+    assert.equal(
+      await readFile(join(dir, "prompt"), "utf8"),
+      "/goal finish all steps now",
+    );
+    assert.equal(set.confirmed, true);
+    assert.equal(set.state, "active");
+    assert.equal(set.objective, "finish all steps now");
+    assert.equal(set.transport, "tmux");
+
+    await writeFile(join(dir, "busy"), "");
+    await assert.rejects(run("clear", ["--if-busy", "fail"]), (error) => {
+      assert.match(JSON.parse(error.stdout).error, /target busy/);
+      return true;
+    });
+    const clear = await run("clear");
+    assert.equal(clear.confirmed, true);
+    assert.equal(clear.state, "none");
+    const calls = (await readFile(join(dir, "calls"), "utf8"))
+      .trim()
+      .split("\n")
+      .map(JSON.parse);
+    assert.ok(calls.some((args) => args.at(-1) === "Escape"));
+
+    for (const [objective, status, updatedAt] of [
+      ["finish", "active", 0],
+      ["other", "active", Date.now() + 60_000],
+      ["finish", "paused", Date.now() + 60_000],
+    ]) {
+      const db = new DatabaseSync(join(dir, "goals_1.sqlite"));
+      db.prepare(
+        "INSERT OR REPLACE INTO thread_goals VALUES (?, ?, ?, NULL, 0, ?)",
+      ).run(threadId, objective, status, updatedAt);
+      db.close();
+      await assert.rejects(
+        run("set", ["--condition", "finish"], "skip"),
+        (error) => {
+          assert.match(
+            JSON.parse(error.stdout).error,
+            /No matching Codex goal/,
+          );
+          return true;
+        },
+      );
+    }
+    await assert.rejects(run("clear", [], "skip"), (error) => {
+      assert.match(JSON.parse(error.stdout).error, /No matching Codex goal/);
+      return true;
+    });
+    await rm(join(dir, "goals_1.sqlite"));
+    const missing = await run("clear", [], "skip");
+    assert.equal(missing.confirmed, false);
+    assert.match(missing.warning, /Goal status unavailable/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });
 
