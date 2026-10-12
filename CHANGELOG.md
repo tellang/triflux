@@ -2,6 +2,15 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.62.0] - 2026-10-12
+
+### Added
+- live: `tfx-live goal set|status|clear` 로 리드가 Claude, Codex 세션의 네이티브 `/goal` 을 설정, 관찰, 해제한다. Claude 는 transcript 의 `goal_status`, Codex 는 app-server daemon 의 `thread/goal/*` 를 쓰고 `--budget` 은 Codex 만 받는다. 결과의 `judgedBy` 로 판정 주체(평가자, 모델 자기 판정)를 밝힌다 (#742)
+- models: Codex 와 Antigravity 프로필을 가족 별칭(`sol_high`, `astra_max`, `luna_low`, `flash_high` 등)으로 바꾸고, 디스패치 때 모델 목록에서 같은 가족의 최신 버전을 골라 쓴다. `~/.config/triflux/models.json` 으로 가족별 고정을 할 수 있고 옛 프로필 이름은 그대로 동작한다 (#744)
+
+### Fixed
+- live: Claude 세션에 `ask` 로 보낸 `/rename`, `/clear` 같은 슬래시 명령에 중계 표식이 붙어 일반 텍스트로 들어가던 문제. 응답 턴이 없는 내장 명령은 기다리지 않고 `submitted` 로 반환한다 (#743)
+
 ## [10.61.2] - 2026-10-12
 
 ### Added
