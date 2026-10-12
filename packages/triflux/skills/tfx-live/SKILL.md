@@ -137,7 +137,7 @@ tfx-live ask --cli codex --session cx1 --prompt "진행 상황을 보고해줘" 
 tfx-live wait --cli codex --session cx1 --request-id <requestId> --timeout 120
 ```
 
-`ask --no-wait`는 Claude와 tmux에서 `status: "submitted"`, Codex queue에서 `status: "queued"`와 함께 `inputSent: true`, `done: false`, `submittedAt`, `target`, `requestId`를 반환한다. `ask`, `peer`, `converse`, `goal-driven`은 `[tfx-live req=<requestId>]`를 프롬프트 앞에 붙인다. `--no-relay-tag`로 제거하면 `wait --request-id`가 해당 요청을 찾을 수 없다.
+`ask --no-wait`는 Claude와 tmux에서 `status: "submitted"`, Codex queue에서 `status: "queued"`와 함께 `inputSent: true`, `done: false`, `submittedAt`, `target`, `requestId`를 반환한다. `ask`, `peer`, `converse`, `goal-driven`은 `[tfx-live req=<requestId>]`를 프롬프트 앞에 붙인다. `--no-relay-tag`로 제거하면 `wait --request-id`가 해당 요청을 찾을 수 없다. 슬래시 명령(`/rename`, `/clear` 등)은 CLI와 상관없이 표식 없이 보낸다. 응답 턴이 없는 Claude 내장 명령(`/rename`, `/clear`, `/compact`, `/model`, `/effort`, `/color`)은 기다리지 않고 `status: "submitted"`로 반환한다. 압축 완료까지 기다리려면 `compact` 명령을 쓴다.
 
 `wait`는 Claude transcript에서 표식을 user 메시지, `queue-operation`의 `enqueue` content, queued command attachment에서 찾는다. 표식이 소비된 턴이 끝난 뒤 마지막 assistant 텍스트를 응답으로 쓴다. 표식 없는 `wait`는 최신 user turn을 본다. `isSidechain`과 합성 API 오류 메시지는 정상 응답에서 제외한다. 요청을 소비한 턴에서 합성 오류가 나타나면 오류 문구와 `status: "failed"`를 반환한다. daemon의 `idle`만으로 완료를 단정하지 않는다. timeout은 `status: "working"`, `timedOut: true`, `done: false`다.
 

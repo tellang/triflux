@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import {
   chmod,
   mkdir,
@@ -3238,10 +3244,8 @@ async function doAsk(adapter, opts) {
   const requestId = opts.requestId ?? randomBytes(6).toString("hex");
   const tag = `[tfx-live req=${requestId}]`;
   // Codex 는 접힌 발신자 표시가 없어 첫 줄 머리말로 보낸 세션을 드러낸다.
-  // 슬래시 명령은 첫 글자가 / 여야 실행되므로 표식을 붙이지 않는다.
-  const bare =
-    opts.noRelayTag ||
-    (["codex", "agy"].includes(adapter.cli) && isSlashCommand(opts.prompt));
+  // 슬래시 명령은 CLI 와 상관없이 첫 글자가 / 여야 실행되므로 표식을 붙이지 않는다.
+  const bare = opts.noRelayTag || isSlashCommand(opts.prompt);
   const from =
     adapter.cli === "codex" && !bare
       ? (opts.from ?? (await resolveSenderName()))
@@ -3253,7 +3257,15 @@ async function doAsk(adapter, opts) {
       : `${header}\n${opts.prompt}`;
   try {
     return {
-      ...(await dispatchAsk(adapter, { ...opts, prompt, requestId })),
+      ...(await dispatchAsk(adapter, {
+        ...opts,
+        prompt,
+        requestId,
+        noRelayTag: bare,
+        noWait:
+          opts.noWait ||
+          (adapter.cli === "claude" && CLAUDE_SILENT_SLASH.test(opts.prompt)),
+      })),
       requestId,
       ...(opts.transportReason
         ? { transportReason: opts.transportReason }
@@ -3985,8 +3997,14 @@ function transportFlag(flags, adapter, short, sessionId) {
 
 // 절대 경로로 시작하는 프롬프트는 슬래시 명령이 아니다.
 function isSlashCommand(prompt) {
-  return /^\/[a-z][\w-]*(?:\s|$)/i.test(String(prompt ?? ""));
+  const word = String(prompt ?? "").match(/^\/[a-z][\w-]*(?=\s|$)/i)?.[0];
+  // `/tmp 를 확인해` 처럼 이 기기에 실제로 있는 경로로 시작하는 문장은 명령이 아니다.
+  return Boolean(word) && !existsSync(word);
 }
+
+// 응답 턴을 만들지 않는 Claude 내장 명령. 스킬 명령은 응답을 만드므로 기다린다.
+const CLAUDE_SILENT_SLASH =
+  /^\/(?:rename|clear|compact|model|effort|color)(?:\s|$)/i;
 
 function askOpts(flags, adapter) {
   const short = flags.short;
@@ -5726,6 +5744,7 @@ export {
   inspectCodexTmuxPane,
   inspectUnsetEnv,
   isCodexLoadingCapture,
+  isSlashCommand,
   parseCodexTmuxSessions,
   parsePeerClosure,
   parseRemoteLiveJson,
