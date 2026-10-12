@@ -17,7 +17,7 @@ import {
   readFileSync,
   statSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CORE_ENTRIES } from "../pack.mjs";
 
@@ -77,6 +77,7 @@ function walkRelFiles(root, skipRels = new Set()) {
 // the two drift classes that shipped silently in v10.33.0: a broken remote
 // import (relative specifier to a core-only module) and a stale non-JS asset
 // (the tray UI), neither of which the triflux/core byte-mirror check can see.
+// .mjs 본문도 import 를 되돌려 root 와 비교한다. 해석만 보면 옛 구현이 남아도 OK 였다.
 const REMOTE_NON_MIRROR = new Set([
   "package.json",
   "package-lock.json",
@@ -99,16 +100,25 @@ function extractImportSpecifiers(content) {
   return specs;
 }
 
-function restoreRemoteCoreHubImports(content) {
-  return content
-    .replace(
-      /(from\s+["'])@triflux\/core\/hub\/([^"']+)(["'])/g,
-      "$1../../hub/$2$3",
-    )
-    .replace(
-      /(import\(\s*["'])@triflux\/core\/hub\/([^"']+)(["']\s*\))/g,
-      "$1../../hub/$2$3",
-    );
+// pack:remote 는 remote 에 없는 상대 import 대상을 @triflux/core/<같은 경로> 로 바꾼다.
+// 그 경로를 이 파일 기준 상대 경로로 되돌리면 root 원본과 같아야 한다.
+function restoreRemoteCoreImports(rel, content) {
+  const fromDir = posix.dirname(rel);
+  return content.replace(
+    /((?:from\s+|import\(\s*)["'])@triflux\/core\/([^"']+)(["'])/g,
+    (_, pre, target, post) => {
+      const spec = posix.relative(fromDir, target);
+      return `${pre}${spec.startsWith(".") ? spec : `./${spec}`}${post}`;
+    },
+  );
+}
+
+function firstDiffLine(expected, actual) {
+  const a = expected.split("\n");
+  const b = actual.split("\n");
+  let i = 0;
+  while (a[i] === b[i]) i++;
+  return `line ${i + 1}: root ${JSON.stringify(a[i] ?? "<EOF>")} / remote ${JSON.stringify(b[i] ?? "<EOF>")}`;
 }
 
 function checkRemoteMirror(repoRoot) {
@@ -140,15 +150,16 @@ function checkRemoteMirror(repoRoot) {
           });
         }
       }
-      if (rel.startsWith("scripts/lib/")) {
-        const rootPath = join(repoRoot, rel);
-        if (
-          existsSync(rootPath) &&
-          !readFileSync(rootPath).equals(
-            Buffer.from(restoreRemoteCoreHubImports(content)),
-          )
-        ) {
-          issues.push({ path: displayPath, kind: "remote-content-diff" });
+      const rootPath = join(repoRoot, rel);
+      if (existsSync(rootPath)) {
+        const expected = readFileSync(rootPath, "utf8");
+        const restored = restoreRemoteCoreImports(rel, content);
+        if (restored !== expected) {
+          issues.push({
+            path: displayPath,
+            kind: "remote-content-diff",
+            detail: firstDiffLine(expected, restored),
+          });
         }
       }
     } else {
@@ -329,13 +340,14 @@ function main() {
       }
     } else {
       console.log(
-        "Mirror OK — packages/triflux + packages/core (byte) and packages/remote (imports + assets) match root",
+        "Mirror OK — packages/triflux + packages/core (byte) and packages/remote (import-normalized content) match root",
       );
     }
   } else {
     console.log(`Mirror mismatch (${result.issues.length} issues):`);
     for (const i of result.issues) {
       console.log(`  ${i.kind.padEnd(18)} ${i.path}`);
+      if (i.detail) console.log(`    ${i.detail}`);
     }
     if (result.fixed.length > 0) {
       console.log(`Fixed during run (${result.fixed.length}):`);
