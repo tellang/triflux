@@ -3233,10 +3233,8 @@ async function doAsk(adapter, opts) {
   const requestId = opts.requestId ?? randomBytes(6).toString("hex");
   const tag = `[tfx-live req=${requestId}]`;
   // Codex 는 접힌 발신자 표시가 없어 첫 줄 머리말로 보낸 세션을 드러낸다.
-  // 슬래시 명령은 첫 글자가 / 여야 실행되므로 표식을 붙이지 않는다.
-  const bare =
-    opts.noRelayTag ||
-    (["codex", "agy"].includes(adapter.cli) && isSlashCommand(opts.prompt));
+  // 슬래시 명령은 CLI 와 상관없이 첫 글자가 / 여야 실행되므로 표식을 붙이지 않는다.
+  const bare = opts.noRelayTag || isSlashCommand(opts.prompt);
   const from =
     adapter.cli === "codex" && !bare
       ? (opts.from ?? (await resolveSenderName()))
@@ -3248,7 +3246,16 @@ async function doAsk(adapter, opts) {
       : `${header}\n${opts.prompt}`;
   try {
     return {
-      ...(await dispatchAsk(adapter, { ...opts, prompt, requestId })),
+      ...(await dispatchAsk(adapter, {
+        ...opts,
+        prompt,
+        requestId,
+        noRelayTag: bare,
+        // Claude 슬래시 명령은 응답 턴을 만들지 않아 기다리면 timeout 까지 간다.
+        noWait:
+          opts.noWait ||
+          (adapter.cli === "claude" && isSlashCommand(opts.prompt)),
+      })),
       requestId,
       ...(opts.transportReason
         ? { transportReason: opts.transportReason }
