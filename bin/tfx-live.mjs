@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import {
   chmod,
   mkdir,
@@ -3251,10 +3257,9 @@ async function doAsk(adapter, opts) {
         prompt,
         requestId,
         noRelayTag: bare,
-        // Claude 슬래시 명령은 응답 턴을 만들지 않아 기다리면 timeout 까지 간다.
         noWait:
           opts.noWait ||
-          (adapter.cli === "claude" && isSlashCommand(opts.prompt)),
+          (adapter.cli === "claude" && CLAUDE_SILENT_SLASH.test(opts.prompt)),
       })),
       requestId,
       ...(opts.transportReason
@@ -3987,8 +3992,13 @@ function transportFlag(flags, adapter, short, sessionId) {
 
 // 절대 경로로 시작하는 프롬프트는 슬래시 명령이 아니다.
 function isSlashCommand(prompt) {
-  return /^\/[a-z][\w-]*(?:\s|$)/i.test(String(prompt ?? ""));
+  const word = String(prompt ?? "").match(/^\/[a-z][\w-]*(?=\s|$)/i)?.[0];
+  // `/tmp 를 확인해` 처럼 실제 경로로 시작하는 문장은 명령이 아니다.
+  return Boolean(word) && !existsSync(word);
 }
+
+// 응답 턴을 만들지 않는 Claude 내장 명령. 스킬 명령은 응답을 만드므로 기다린다.
+const CLAUDE_SILENT_SLASH = /^\/(?:rename|clear|model|effort|color)(?:\s|$)/i;
 
 function askOpts(flags, adapter) {
   const short = flags.short;
@@ -5412,6 +5422,7 @@ export {
   inspectCodexTmuxPane,
   inspectUnsetEnv,
   isCodexLoadingCapture,
+  isSlashCommand,
   parseCodexTmuxSessions,
   parsePeerClosure,
   parseRemoteLiveJson,
