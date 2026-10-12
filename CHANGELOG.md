@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.65.0] - 2026-10-12
+
+### Added
+- live: `start --no-auto-trust` 로 폴더 신뢰 화면 자동 승인을 끈다. 키를 보내지 않고 `ready: false`, `blockedBy`(`claude-trust-folder`, `codex-trust-folder`, `agy-trust-folder`)로 보고한다 (#752)
+
+### Fixed
+- live: 기본 자동 승인이 재개 대화에 인용된 신뢰 문구에 반응해, 재개된 Claude 세션에 키를 보내던 문제. 실제 신뢰 메뉴일 때만 자동 승인한다 (#752)
+
 ## [10.64.0] - 2026-10-12
 
 ### Changed
