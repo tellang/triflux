@@ -19,7 +19,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CORE_ENTRIES } from "../pack.mjs";
+import { CORE_ENTRIES, rewriteRemoteSource } from "../pack.mjs";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO_ROOT = join(SCRIPT_DIR, "..", "..");
@@ -77,6 +77,7 @@ function walkRelFiles(root, skipRels = new Set()) {
 // the two drift classes that shipped silently in v10.33.0: a broken remote
 // import (relative specifier to a core-only module) and a stale non-JS asset
 // (the tray UI), neither of which the triflux/core byte-mirror check can see.
+// .mjs 본문도 pack:remote 리라이트를 거친 root 와 비교한다. 해석만 보면 옛 구현이 남아도 OK 였다.
 const REMOTE_NON_MIRROR = new Set([
   "package.json",
   "package-lock.json",
@@ -99,16 +100,12 @@ function extractImportSpecifiers(content) {
   return specs;
 }
 
-function restoreRemoteCoreHubImports(content) {
-  return content
-    .replace(
-      /(from\s+["'])@triflux\/core\/hub\/([^"']+)(["'])/g,
-      "$1../../hub/$2$3",
-    )
-    .replace(
-      /(import\(\s*["'])@triflux\/core\/hub\/([^"']+)(["']\s*\))/g,
-      "$1../../hub/$2$3",
-    );
+function firstDiffLine(expected, actual) {
+  const a = expected.split("\n");
+  const b = actual.split("\n");
+  let i = 0;
+  while (a[i] === b[i]) i++;
+  return `line ${i + 1}: root ${JSON.stringify(a[i] ?? "<EOF>")} / remote ${JSON.stringify(b[i] ?? "<EOF>")}`;
 }
 
 function checkRemoteMirror(repoRoot) {
@@ -140,15 +137,21 @@ function checkRemoteMirror(repoRoot) {
           });
         }
       }
-      if (rel.startsWith("scripts/lib/")) {
-        const rootPath = join(repoRoot, rel);
-        if (
-          existsSync(rootPath) &&
-          !readFileSync(rootPath).equals(
-            Buffer.from(restoreRemoteCoreHubImports(content)),
-          )
-        ) {
-          issues.push({ path: displayPath, kind: "remote-content-diff" });
+      const rootPath = join(repoRoot, rel);
+      if (existsSync(rootPath)) {
+        // pack:remote 와 같은 리라이트를 root 원본에 적용한 기대본과 비교한다.
+        const { content: expected } = rewriteRemoteSource(
+          readFileSync(rootPath, "utf8"),
+          remotePath,
+          remoteRoot,
+          coreRoot,
+        );
+        if (content !== expected) {
+          issues.push({
+            path: displayPath,
+            kind: "remote-content-diff",
+            detail: firstDiffLine(expected, content),
+          });
         }
       }
     } else {
@@ -329,13 +332,14 @@ function main() {
       }
     } else {
       console.log(
-        "Mirror OK — packages/triflux + packages/core (byte) and packages/remote (imports + assets) match root",
+        "Mirror OK — packages/triflux + packages/core (byte) and packages/remote (import-normalized content) match root",
       );
     }
   } else {
     console.log(`Mirror mismatch (${result.issues.length} issues):`);
     for (const i of result.issues) {
       console.log(`  ${i.kind.padEnd(18)} ${i.path}`);
+      if (i.detail) console.log(`    ${i.detail}`);
     }
     if (result.fixed.length > 0) {
       console.log(`Fixed during run (${result.fixed.length}):`);

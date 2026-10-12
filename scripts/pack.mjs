@@ -120,42 +120,54 @@ function buildFileSet(baseDir) {
 }
 
 /**
- * remote 패키지 내 .mjs 파일에서 core 모듈을 참조하는 상대 import를
- * @triflux/core 패키지 경로로 리라이팅한다.
+ * remote 패키지 내 .mjs 파일 하나에서 core 모듈을 참조하는 상대 import를
+ * @triflux/core 패키지 경로로 리라이팅한다. release:check-mirror 도 이 함수로 기대본을 만든다.
  */
+export function rewriteRemoteSource(
+  content,
+  filePath,
+  remotePkgDir,
+  corePkgDir,
+  coreFiles = buildFileSet(corePkgDir),
+) {
+  let rewrites = 0;
+  const rewriteRelativeSpecifier = (match, pre, importPath, post) => {
+    const resolved = normalize(join(dirname(filePath), importPath));
+    // import 대상이 remote 패키지 내에 있으면 그대로 유지
+    if (existsSync(resolved)) return match;
+    // core 패키지에 동일 상대경로로 존재하는지 확인
+    const relToRemote = relative(remotePkgDir, resolved).replace(/\\/g, "/");
+    const coreEquiv = normalize(join(corePkgDir, relToRemote));
+    if (coreFiles.has(coreEquiv)) {
+      rewrites++;
+      return `${pre}@triflux/core/${relToRemote}${post}`;
+    }
+    return match;
+  };
+
+  const rewritten = content
+    .replace(/(from\s+['"])(\.[^'"]+)(['"])/g, rewriteRelativeSpecifier)
+    .replace(
+      /(import\(\s*['"])(\.[^'"]+)(['"]\s*\))/g,
+      rewriteRelativeSpecifier,
+    );
+  return { content: rewritten, rewrites };
+}
+
 function rewriteRemoteImports(remotePkgDir, corePkgDir) {
   const coreFiles = buildFileSet(corePkgDir);
   let totalRewrites = 0;
 
   for (const filePath of walkMjs(remotePkgDir)) {
-    let content = readFileSync(filePath, "utf8");
-    let changed = false;
-
-    const rewriteRelativeSpecifier = (match, pre, importPath, post) => {
-      const resolved = normalize(join(dirname(filePath), importPath));
-      // import 대상이 remote 패키지 내에 있으면 그대로 유지
-      if (existsSync(resolved)) return match;
-      // core 패키지에 동일 상대경로로 존재하는지 확인
-      const relToRemote = relative(remotePkgDir, resolved).replace(/\\/g, "/");
-      const coreEquiv = normalize(join(corePkgDir, relToRemote));
-      if (coreFiles.has(coreEquiv)) {
-        changed = true;
-        totalRewrites++;
-        return `${pre}@triflux/core/${relToRemote}${post}`;
-      }
-      return match;
-    };
-
-    content = content.replace(
-      /(from\s+['"])(\.[^'"]+)(['"])/g,
-      rewriteRelativeSpecifier,
+    const { content, rewrites } = rewriteRemoteSource(
+      readFileSync(filePath, "utf8"),
+      filePath,
+      remotePkgDir,
+      corePkgDir,
+      coreFiles,
     );
-    content = content.replace(
-      /(import\(\s*['"])(\.[^'"]+)(['"]\s*\))/g,
-      rewriteRelativeSpecifier,
-    );
-
-    if (changed) writeFileSync(filePath, content);
+    if (rewrites > 0) writeFileSync(filePath, content);
+    totalRewrites += rewrites;
   }
 
   return totalRewrites;
