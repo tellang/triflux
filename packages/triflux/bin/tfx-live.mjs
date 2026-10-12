@@ -4623,6 +4623,15 @@ async function goal(action, flags) {
       ...(snapshot?.goal ?? unavailable),
       transport: "tmux",
     };
+  // 달성 뒤 자동 해제됐거나 없던 goal 은 /goal clear 가 기록을 남기지 않아 확인할 수 없다.
+  if (action === "clear" && snapshot?.goal && snapshot.goal.state !== "active")
+    return {
+      ...base,
+      ...snapshot.goal,
+      transport: "tmux",
+      confirmed: true,
+      alreadyCleared: true,
+    };
   const opts = askOpts(
     {
       ...flags,
@@ -4646,12 +4655,12 @@ async function goal(action, flags) {
   });
   if (cli === "codex")
     return { ...base, ...codexResult, inputSent: true, confirmed: false };
-  const deadline = Date.now() + Math.min(opts.timeoutMs, 5000);
+  // 갓 띄운 세션은 첫 입력 뒤에야 자기 transcript 가 생기므로 매번 경로를 다시 찾는다.
+  const deadline = Date.now() + Math.min(opts.timeoutMs, 15_000);
   let confirmed = false;
   do {
     snapshot = await readClaudeTranscript(
-      transcriptPath ??
-        (await claudeTmuxTranscript(session, flags["config-dir"])),
+      await claudeTmuxTranscript(session, flags["config-dir"]),
     );
     const sentinel = snapshot?.goalSentinel;
     confirmed =
