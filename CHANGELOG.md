@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.65.1] - 2026-10-12
+
+### Fixed
+- remote: `@triflux/remote` 에 `hub/team/codex-queue.mjs` 가 빠져 있던 미러 누락. `pack:remote` 산출물을 반영한다
+
 ## [10.65.0] - 2026-10-12
 
 ### Added
