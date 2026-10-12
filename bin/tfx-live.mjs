@@ -93,7 +93,7 @@ const BUG_REPORT_DIR =
 function usage(command) {
   const lines = [
     "Usage:",
-    "  tfx-live start --session NAME [--name NAME] [--cli codex|claude|agy] [--sandbox] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
+    "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--sandbox] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude|agy] [--if-busy wait|fail|interrupt|queue] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --cli codex [--transport queue|tmux] (--session NAME[:WINDOW.PANE] | --thread UUID) --prompt TEXT [--from NAME] [--timeout 60] [--no-wait]",
     "    Codex ask defaults to the app-server queue (thread/queue/add, `codex queue --message` only when add is unavailable; delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands.",
@@ -2470,6 +2470,103 @@ async function resumedCodexThread(
   return matches.length === 1 ? matches[0] : null;
 }
 
+function appleScriptString(value) {
+  if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value))
+    throw new Error("iTerm values must not contain control characters");
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function shouldUseIterm(
+  remote,
+  platform = process.platform,
+  env = process.env,
+) {
+  return (
+    !remote &&
+    platform === "darwin" &&
+    (env.LC_TERMINAL === "iTerm2" || env.TERM_PROGRAM === "iTerm.app")
+  );
+}
+
+async function openItermSession(session, group) {
+  const groupLiteral = appleScriptString(group);
+  const sessionLiteral = appleScriptString(session);
+  const leaderId = appleScriptString(
+    process.env.ITERM_SESSION_ID?.split(":")[1] ?? "",
+  );
+  const { stdout: tmuxPath } = await execFileAsync("which", ["tmux"], {
+    timeout: 2000,
+  });
+  const command = appleScriptString(
+    `${shellQuote([realpathSync(tmuxPath.trim()), "attach-session", "-t"])} '=${session.replace(/'/g, `'"'"'`)}'`,
+  );
+  const script = `tell application "iTerm2"
+  set leaderWindow to current window
+  if ${leaderId} is not "" then
+    repeat with candidateWindow in windows
+      repeat with candidateTab in tabs of candidateWindow
+        repeat with candidateSession in sessions of candidateTab
+          if id of candidateSession is ${leaderId} then set leaderWindow to candidateWindow
+        end repeat
+      end repeat
+    end repeat
+  end if
+  set groupSession to missing value
+  repeat with candidateTab in tabs of leaderWindow
+    repeat with candidateSession in sessions of candidateTab
+      try
+        tell candidateSession to set candidateGroup to variable named "user.tfx_group"
+        if candidateGroup is ${groupLiteral} then
+          set groupSession to candidateSession
+          exit repeat
+        end if
+      end try
+    end repeat
+    if groupSession is not missing value then exit repeat
+  end repeat
+  set didSplit to groupSession is not missing value
+  if didSplit then
+    tell groupSession to set newSession to split vertically with default profile command ${command}
+  else
+    tell leaderWindow to set newTab to create tab with default profile command ${command}
+    set newSession to current session of newTab
+  end if
+  tell newSession
+    set variable named "user.tfx_group" to ${groupLiteral}
+    set variable named "user.tfx_session" to ${sessionLiteral}
+    set name to ${groupLiteral}
+  end tell
+  return (id of newSession) & linefeed & (didSplit as text)
+end tell`;
+  const { stdout } = await execFileAsync("/usr/bin/osascript", ["-e", script], {
+    timeout: 5000,
+    maxBuffer: 64 * 1024,
+  });
+  const [sessionId, split] = stdout.trim().split("\n");
+  if (!sessionId || !["true", "false"].includes(split))
+    throw new Error("iTerm did not return a session ID and split status");
+  return { sessionId, group, split: split === "true" };
+}
+
+async function closeItermSession(sessionId) {
+  const script = `tell application "iTerm2"
+  repeat with candidateWindow in windows
+    repeat with candidateTab in tabs of candidateWindow
+      repeat with candidateSession in sessions of candidateTab
+        if id of candidateSession is ${appleScriptString(sessionId)} then
+          tell candidateSession to close
+          return
+        end if
+      end repeat
+    end repeat
+  end repeat
+end tell`;
+  await execFileAsync("/usr/bin/osascript", ["-e", script], {
+    timeout: 5000,
+    maxBuffer: 64 * 1024,
+  });
+}
+
 async function doStart(adapter, opts) {
   const {
     session,
@@ -2657,6 +2754,22 @@ async function doStart(adapter, opts) {
       "@tfx_codex_thread",
       threadId,
     ]).catch(() => {});
+  let iterm;
+  let itermWarning;
+  if (ready && shouldUseIterm(remote)) {
+    try {
+      iterm = await openItermSession(session, opts.group || adapter.cli);
+      await runTmux(null, [
+        "set-option",
+        "-t",
+        session,
+        "@tfx_iterm_session",
+        iterm.sessionId,
+      ]);
+    } catch (error) {
+      itermWarning = error.message;
+    }
+  }
   return addLoginGuard(adapter, raw, {
     cli: adapter.cli,
     session,
@@ -2673,6 +2786,8 @@ async function doStart(adapter, opts) {
       : {}),
     unsetEnv: opts.unsetEnv ?? [],
     unsetEnvVerified,
+    ...(iterm ? { iterm } : {}),
+    ...(itermWarning ? { itermWarning } : {}),
     ...(unsetEnvWarning ? { unsetEnvWarning } : {}),
     ...(name && adapter.cli === "codex" && !nameApplied
       ? {
@@ -3567,12 +3682,36 @@ async function doStop(adapter, opts) {
     throw new Error(
       "stop --session accepts only a session name; pass the session name without a pane target",
     );
+  let itermSessionId;
+  let itermWarning;
+  if (shouldUseIterm(remote)) {
+    try {
+      const { stdout } = await runTmux(null, [
+        "show-options",
+        "-qv",
+        "-t",
+        session,
+        "@tfx_iterm_session",
+      ]);
+      itermSessionId = stdout.trim();
+    } catch (error) {
+      itermWarning = error.message;
+    }
+  }
   await runTmux(remote, ["kill-session", "-t", session]);
+  if (itermSessionId) {
+    try {
+      await closeItermSession(itermSessionId);
+    } catch (error) {
+      itermWarning = error.message;
+    }
+  }
   return {
     cli: adapter.cli,
     session,
     remote: remote ?? null,
     stopped: true,
+    ...(itermWarning ? { itermWarning } : {}),
   };
 }
 
@@ -3705,6 +3844,7 @@ function startOpts(flags) {
     model: flags.model,
     effort: flags.effort,
     name: flags.name,
+    group: flags.group,
     sandbox: Object.hasOwn(flags, "sandbox"),
     unsetEnv,
     readyTimeoutMs: secondsFlag(
@@ -5147,6 +5287,7 @@ export {
   ADAPTERS,
   agyStepText,
   agyWaitVerdict,
+  appleScriptString,
   buildLaunchKeys,
   buildPeerClosurePrompt,
   buildRemoteLiveCommand,
@@ -5173,6 +5314,7 @@ export {
   resolveAskTransport,
   resolveCodexDaemonSocket,
   resumedCodexThread,
+  shouldUseIterm,
   splitTmuxTarget,
   stopOpts,
   tmuxBufferName,

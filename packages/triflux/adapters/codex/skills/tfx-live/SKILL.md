@@ -29,6 +29,8 @@ tfx-live ask --cli codex --session cx1 --prompt "현재 변경사항을 요약�
 tfx-live stop --cli codex --session cx1
 ```
 
+macOS의 iTerm2에서 로컬 tmux 세션을 `start`하면 리드가 있는 창에 attach 탭이나 패인을 연다. `LC_TERMINAL=iTerm2` 또는 `TERM_PROGRAM=iTerm.app`일 때만 적용하며, 원격과 tmux 세션이 없는 daemon 경로는 제외한다. 같은 `--group NAME`은 한 탭에서 세로로 나누고 다른 그룹은 새 탭을 연다. `--group`을 생략하면 대상 CLI인 `claude`, `codex`, `agy`를 그룹으로 쓴다. `stop --session`은 tmux 종료 뒤 남은 iTerm 패인도 닫는다. 연동이 실패해도 세션 시작과 종료는 계속하며 결과의 `itermWarning`에 원인을 남긴다.
+
 새 세션 이름은 `<월>.<일> <주제>`로 짓는다. `start --name`을 생략하면 자동으로 만들고 `nameGenerated: true`를 보고한다. `--resume` 또는 `--resume-last`는 `--name`을 명시한 경우에만 이름을 적용한다. 승계 세션에는 기존 이름 뒤에 ` 2`, 이후 ` 3`을 붙인다. 이름 적용을 요청한 경우 결과의 `nameApplied: false`는 미적용을 뜻한다. agy의 `namePending: true`는 첫 일반 ask에서 적용할 이름이 보류됐다는 뜻이다. Codex `start`는 `/rename` 제출을 입력창이 빌 때까지 확인하고, 이름으로 찾은 thread UUID를 `threadId`로 돌려주며 tmux 세션 옵션 `@tfx_codex_thread`에 남긴다. 로컬 Codex `--resume-last`는 Codex가 고른 thread를 사후에 찾는다. 띄운 뒤 공유 app-server daemon에 로드된 같은 cwd의 thread 중 rollout에 그 시각 이후의 resume 기록(`thread_settings_applied`)이 생긴 것이 정확히 하나이고 1.5초 뒤에도 같을 때만 `threadId`로 쓴다. 이 확인은 5초 안에 끝난다. TUI가 daemon을 쓰지 않거나 같은 cwd에서 동시에 resume이 일어나면 `null`이다. 기존 Codex UDS thread는 `tfx-live rename --cli codex --transport uds --thread ID --name "<이름>"`으로 이름을 바꾼다.
 
 ## agy 세션
