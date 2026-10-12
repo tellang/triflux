@@ -28,23 +28,20 @@ describe("lane2-d routing contract: Codex agent policy SSOT", () => {
   }
 
   it("preserves direct-Codex designer and writer overrides in the policy", () => {
-    assert.equal(
-      resolveCodexAgentPolicy("designer").profile,
-      "gpt6_astra_xhigh",
-    );
-    assert.equal(resolveCodexAgentPolicy("writer").profile, "gpt6_luna_high");
+    assert.equal(resolveCodexAgentPolicy("designer").profile, "astra_xhigh");
+    assert.equal(resolveCodexAgentPolicy("writer").profile, "luna_high");
   });
 
   it("headless roles ignore ordinary global profiles but retain max/ultra lanes", () => {
     assert.equal(
       resolveNestedCodexAgentProfile("architect", {
-        globalProfile: "gpt61_sol_high",
+        globalProfile: "sol_high",
       }),
-      "gpt6_astra_xhigh",
+      "astra_xhigh",
     );
     assert.equal(
       resolveNestedCodexAgentProfile("executor", { globalProfile: "max" }),
-      "gpt6_astra_max",
+      "astra_max",
     );
   });
 
@@ -52,7 +49,7 @@ describe("lane2-d routing contract: Codex agent policy SSOT", () => {
     const map = { explore: "claude", "deep-executor": "codex" };
     assert.deepEqual(
       resolveAgentRoute("explore", map, "gpt56_luna_low"),
-      resolveAgentRoute("explore", map, "gpt6_luna_low"),
+      resolveAgentRoute("explore", map, "luna_low"),
     );
     const topLevel = resolveAgentRoute("deep-executor", map, "ultra");
     const nested = resolveAgentRoute("deep-executor", map, "ultra", true);

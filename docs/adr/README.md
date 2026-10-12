@@ -22,10 +22,10 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0013](../_archive/adr/0013-synapse-expiry-window-unification.md) | synapse 만료 창 단일화 | Withdrawn | 0010, 0023 |
 | [0014](0014-claude-credentials-keychain-source-of-truth.md) | Claude 자격증명은 macOS Keychain 정본, 읽은 저장소에만 되쓰기 | Accepted | 0002 |
 | [0015](0015-codex-lane-exec-transport-and-last-message.md) | Codex 레인은 exec 전송 + 최종 메시지 파일이 결과 계약 | Accepted | 0004, 0006 |
-| [0016](0016-codex-astra-top-tier-and-fable-escalation.md) | Codex 최상위 tier = Astra, 최종 승격 = Fable | Accepted | 0004, 0006, 0015 |
-| [0017](0017-gpt6-sol-luna-lanes.md) | Terra/Luna 레인 = GPT-6 Sol/Luna | Accepted | 0004, 0015, 0016 |
+| [0016](../_archive/adr/0016-codex-astra-top-tier-and-fable-escalation.md) | Codex 최상위 tier = Astra, 최종 승격 = Fable | Superseded | 0004, 0006, 0015 |
+| [0017](../_archive/adr/0017-gpt6-sol-luna-lanes.md) | Terra/Luna 레인 = GPT-6 Sol/Luna | Superseded | 0004, 0015, 0016 |
 | [0018](../_archive/adr/0018-cto-auto-behaviors-opt-in.md) | CTO 자동 동작은 명시적으로 켜야 실행 | Superseded | 0010, 0011, 0023 |
-| [0019](0019-gpt61-sol-and-sonnet-55.md) | Sol 레인 = GPT-6.1 Sol, sonnet 별칭 = Sonnet 5.5 | Accepted | 0004, 0016, 0017 |
+| [0019](../_archive/adr/0019-gpt61-sol-and-sonnet-55.md) | Sol 레인 = GPT-6.1 Sol, sonnet 별칭 = Sonnet 5.5 | Superseded | 0004, 0016, 0017 |
 | [0020](0020-skill-surface-reduction.md) | tfx 스킬 표면 = 12개 + Windows 1개, 스킬 frontmatter `platform` 필터 | Accepted | 0004, 0009 |
 | [0021](0021-keyword-hook-explicit-first.md) | 키워드 훅은 명시 토큰만 MUST, 자연어는 제안(suggest), gstack 이름은 설치본 기준 | Accepted | 0009, 0020 |
 | [0022](0022-remove-cto-tray.md) | CTO 트레이를 패키지에서 제거 | Accepted | 0010, 0018 |
@@ -43,6 +43,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0034](0034-headless-session-results-index.md) | headless 세션마다 결과 색인 JSON 하나를 둔다 | Proposed | 0015, 0029 |
 | [0035](0035-remove-cto.md) | CTO 삭제 | Proposed | 0022, 0024 |
 | [0036](0036-code-verdict-owner-tfx-review.md) | 3-layer 공존에서 코드 판정은 triflux tfx-review | Accepted | 0002, 0009 |
+| [0037](0037-model-family-aliases.md) | Codex와 Antigravity 가족 별칭을 실행 때 최신 모델로 해석한다 | Accepted | 0016, 0017, 0019 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 

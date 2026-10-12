@@ -1,11 +1,11 @@
 ---
 id: 0016
 title: Codex 최상위 tier를 Astra로 하고 최종 승격을 Fable로 한다
-status: accepted
+status: superseded
 date: 2026-09-22
 deciders: [tellang]
 supersedes: [0006]
-superseded_by: null
+superseded_by: 0037
 relates: [0004, 0015]
 pr: null
 ---

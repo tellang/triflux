@@ -23,10 +23,8 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
-import {
-  canonicalCodexProfileModel,
-  normalizeCodexProfileName,
-} from "../../scripts/lib/codex-profile-config.mjs";
+import { normalizeCodexProfileName } from "../../scripts/lib/codex-profile-config.mjs";
+import { CODEX_FAMILY_PROFILES } from "../../scripts/lib/model-family-resolver.mjs";
 
 export const STATES = Object.freeze({
   PLANNING: "PLANNING",
@@ -47,13 +45,12 @@ const ESCALATION_CHAIN_CONFIG_PATH = ".triflux/config/escalation-chain.json";
 const DEFAULT_CLAUDE_MODEL = "fable";
 
 // Escalation chain (2026-09-22 정책):
-//   1. codex gpt-6-astra max: 최난도 단일 작업용 Codex escalation 단계
+//   1. codex astra_max: 최난도 단일 작업용 Codex escalation 단계
 //   2. claude fable alias: Claude CLI가 최신 Fable tier로 해석하는 최종 수단
 const DEFAULT_ESCALATION_CHAIN = Object.freeze([
   Object.freeze({
     cli: "codex",
-    model: "gpt-6-astra",
-    profile: "gpt6_astra_max",
+    profile: "astra_max",
   }),
   Object.freeze({ cli: "claude", model: DEFAULT_CLAUDE_MODEL }),
 ]);
@@ -62,8 +59,8 @@ const STUCK_THRESHOLD = 3;
 
 function normalizeEscalationProfile(profile) {
   const normalized = normalizeCodexProfileName(profile);
-  return normalized === "ultra" || normalized === "gpt6_astra_ultra"
-    ? "gpt6_astra_max"
+  return normalized === "ultra" || normalized === "astra_ultra"
+    ? "astra_max"
     : normalized;
 }
 
@@ -307,26 +304,21 @@ function normalizeEscalationChainEntry(entry, index, source) {
       `${source}: chain[${index}].cli must be a non-empty string`,
     );
   }
+  const profile = typeof entry.profile === "string" ? entry.profile.trim() : "";
+  const normalizedProfile = normalizeEscalationProfile(profile);
+  if (
+    entry.cli === "codex" &&
+    Object.hasOwn(CODEX_FAMILY_PROFILES, normalizedProfile)
+  ) {
+    return { cli: entry.cli, profile: normalizedProfile };
+  }
   if (typeof entry.model !== "string" || entry.model.trim() === "") {
     throw new Error(
       `${source}: chain[${index}].model must be a non-empty string`,
     );
   }
-
-  const normalized = {
-    cli: entry.cli,
-    model: entry.model,
-  };
-  if (typeof entry.profile === "string" && entry.profile.trim() !== "") {
-    const profile = entry.profile.trim();
-    normalized.profile =
-      entry.cli === "codex" ? normalizeEscalationProfile(profile) : profile;
-    // A remapped legacy profile must not keep reporting its old model.
-    if (normalized.profile !== profile) {
-      normalized.model =
-        canonicalCodexProfileModel(normalized.profile) ?? normalized.model;
-    }
-  }
+  const normalized = { cli: entry.cli, model: entry.model };
+  if (profile) normalized.profile = profile;
   return normalized;
 }
 

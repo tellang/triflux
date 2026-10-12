@@ -154,13 +154,13 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.equal(last.reason, "escalation-chain-exhausted");
     });
 
-    it("DEFAULT_ESCALATION_CHAIN 은 gpt-6-astra → 최신 Fable 별칭 2단계 순", () => {
+    it("DEFAULT_ESCALATION_CHAIN 은 astra_max → 최신 Fable 별칭 2단계 순", () => {
       assert.equal(DEFAULT_ESCALATION_CHAIN.length, 2);
       const [s1, s2] = DEFAULT_ESCALATION_CHAIN;
 
       assert.equal(s1.cli, "codex");
-      assert.equal(s1.model, "gpt-6-astra");
-      assert.equal(s1.profile, "gpt6_astra_max");
+      assert.equal(s1.model, undefined);
+      assert.equal(s1.profile, "astra_max");
 
       assert.equal(s2.cli, "claude");
       assert.equal(s2.model, "fable");
@@ -201,20 +201,20 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
           {
             cli: "codex",
             model: "gpt-6-astra",
-            profile: "gpt6_astra_ultra",
+            profile: "astra_ultra",
           },
           { cli: "claude", model: "opus" },
         ],
       });
 
-      assert.equal(sm.getCurrent().cliChain[0].profile, "gpt6_astra_max");
+      assert.equal(sm.getCurrent().cliChain[0].profile, "astra_max");
     });
 
     it("옛 Sol profile 이름 세 개를 Astra profile로 정규화한다", () => {
       const aliases = [
-        ["gpt56_sol_xhigh", "gpt6_astra_xhigh"],
-        ["gpt56_sol_max", "gpt6_astra_max"],
-        ["gpt56_sol_ultra", "gpt6_astra_max"],
+        ["gpt56_sol_xhigh", "astra_xhigh"],
+        ["gpt56_sol_max", "astra_max"],
+        ["gpt56_sol_ultra", "astra_max"],
       ];
 
       for (const [legacy, canonical] of aliases) {
@@ -229,15 +229,15 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       }
     });
 
-    it("옛 GPT-5.6 스냅샷은 profile과 model을 함께 GPT-6 값으로 맞춘다", () => {
+    it("옛 스냅샷은 가족 profile로 정규화하고 고정 model을 버린다", () => {
       const cases = [
-        ["gpt-5.6-terra", "gpt56_terra_high", "gpt61_sol_high", "gpt-6.1-sol"],
-        ["gpt-5.6-terra", "gpt56_terra_med", "gpt61_sol_med", "gpt-6.1-sol"],
-        ["gpt-5.6-luna", "gpt56_luna_low", "gpt6_luna_low", "gpt-6-luna"],
-        ["gpt-5.6-sol", "gpt56_sol_max", "gpt6_astra_max", "gpt-6-astra"],
+        ["gpt-5.6-terra", "gpt56_terra_high", "sol_high"],
+        ["gpt-5.6-terra", "gpt56_terra_med", "sol_med"],
+        ["gpt-5.6-luna", "gpt56_luna_low", "luna_low"],
+        ["gpt-5.6-sol", "gpt56_sol_max", "astra_max"],
       ];
 
-      for (const [legacyModel, legacyProfile, profile, model] of cases) {
+      for (const [legacyModel, legacyProfile, profile] of cases) {
         const sm = createRetryStateMachine({
           mode: "auto-escalate",
           cliChain: [
@@ -247,19 +247,19 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
         });
         const [step] = sm.getCurrent().cliChain;
         assert.equal(step.profile, profile);
-        assert.equal(step.model, model);
+        assert.equal(step.model, undefined);
       }
     });
 
-    it("canonical profile은 사용자가 지정한 model을 바꾸지 않는다", () => {
+    it("관리 profile은 실행 시 해석하므로 스냅샷에 model을 고정하지 않는다", () => {
       const sm = createRetryStateMachine({
         mode: "auto-escalate",
         cliChain: [
-          { cli: "codex", model: "custom-model", profile: "gpt61_sol_high" },
+          { cli: "codex", model: "custom-model", profile: "sol_high" },
           { cli: "claude", model: "fable" },
         ],
       });
-      assert.equal(sm.getCurrent().cliChain[0].model, "custom-model");
+      assert.equal(sm.getCurrent().cliChain[0].model, undefined);
     });
 
     it(".triflux/config/escalation-chain.json의 옛 Sol profile을 정규화한다", () => {
@@ -299,18 +299,15 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.deepEqual(sm.getCurrent().cliChain, [
         {
           cli: "codex",
-          model: "gpt-6-astra",
-          profile: "gpt6_astra_xhigh",
+          profile: "astra_xhigh",
         },
         {
           cli: "codex",
-          model: "gpt-6-astra",
-          profile: "gpt6_astra_max",
+          profile: "astra_max",
         },
         {
           cli: "codex",
-          model: "gpt-6-astra",
-          profile: "gpt6_astra_max",
+          profile: "astra_max",
         },
         { cli: "claude", model: "opus" },
       ]);
@@ -462,7 +459,7 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       const loaded = loadSnapshot(file);
       assert.deepEqual(
         loaded.cliChain.map((entry) => entry.profile),
-        ["gpt6_astra_xhigh", "gpt6_astra_max", "gpt6_astra_max"],
+        ["astra_xhigh", "astra_max", "astra_max"],
       );
 
       const restored = createRetryStateMachine({ mode: "auto-escalate" });

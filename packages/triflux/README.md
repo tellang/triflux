@@ -14,7 +14,7 @@
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/dm/triflux?style=flat-square&color=F5C242" alt="npm downloads"></a>
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D20-374151?style=flat-square" alt="Node >= 20">
+  <img src="https://img.shields.io/badge/node-%3E%3D22-374151?style=flat-square" alt="Node >= 22">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
 
@@ -112,14 +112,17 @@ The full contract, including `--lead`, `--options`, `--experts`, and conflict ru
 
 Codex runs through named profiles; model IDs live in `~/.codex/<profile>.config.toml`, and the
 role → profile map lives in [`scripts/lib/agent-route-policy.mjs`](scripts/lib/agent-route-policy.mjs).
-Claude is called by alias, so the newest model in each tier is picked up automatically.
+Codex and Antigravity family profiles select the newest available model at dispatch, setup, and update. Codex reads its local model cache and checks supported effort; Antigravity caches `agy models` for one day. Old profile names remain compatible. Claude keeps its existing aliases.
+
+Pin a family in `~/.config/triflux/models.json`, for example `{"sol":"gpt-6-sol","flash":"gemini-3.7-flash"}` (Windows: `%APPDATA%\triflux`). Without a usable catalog, resolution keeps the last result or the built-in default.
 
 | Profile / alias | Lanes |
 | --- | --- |
-| `gpt6_astra_xhigh` | Architecture, planning, critique, debugging, security review, deep execution |
-| `gpt6_astra_max`, `gpt6_astra_ultra` | Hardest single tasks (`TFX_CODEX_PROFILE=max\|ultra`); `max` is the first `auto-escalate` step |
-| `gpt61_sol_high` / `gpt61_sol_med` | Default implementation, review, verification, tests, docs / cleanup |
-| `gpt6_luna_high` / `gpt6_luna_low` | Build fixes, writing / latency-first lookups |
+| `astra_xhigh` | Architecture, planning, critique, debugging, security review, deep execution |
+| `astra_max`, `astra_ultra` | Hardest single tasks (`TFX_CODEX_PROFILE=max\|ultra`); `max` is the first `auto-escalate` step |
+| `sol_high` / `sol_med` | Default implementation, review, verification, tests, docs / cleanup |
+| `luna_high` / `luna_low` | Build fixes, writing / latency-first lookups |
+| `flash_low` / `flash` / `flash_high` | Antigravity classification / generation / review |
 | Claude `fable` | Final `--retry auto-escalate` step |
 | Claude `opus` / `sonnet` / `haiku` | Meta routing and planning gates / Claude-native QA and verification / fast exploration |
 
@@ -158,7 +161,7 @@ the `claude agents` panel unless you pass `--no-native-bridge-ui`. Press Enter o
 tmux pane the worker runs in.
 
 **Retry and escalation.** `--retry ralph` loops until done or stuck (three identical failures).
-`--retry auto-escalate` steps from Codex `gpt6_astra_max` to Claude `fable`; override the chain in
+`--retry auto-escalate` steps from Codex `astra_max` to Claude `fable`; override the chain in
 `.triflux/config/escalation-chain.json`.
 
 **Machine profile.** Setup records which CLIs this machine may use and its timeout policy in
@@ -219,7 +222,7 @@ Windows) and `hub/team/wt-manager.mjs`. Agent rules:
 
 ## Contributing
 
-Node 20 or newer. See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, lint, package boundaries,
+Node 22 or newer. See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, lint, package boundaries,
 mirror and release checks, and state snapshots. Releases are automated: merging a version-bump
 commit to `main` runs `release.yml` after CI passes; it tags, creates the GitHub release, and publishes to npm
 through OIDC Trusted Publishing. Decisions are recorded in [docs/adr/](docs/adr/README.md).

@@ -148,8 +148,7 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
         cliChain: [
           {
             cli: "codex",
-            model: "gpt-6.1-sol",
-            profile: "gpt61_sol_high",
+            profile: "sol_high",
           },
           { cli: "claude", model: "opus" },
         ],
@@ -163,22 +162,20 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
     const status = runBridge(["retry-status", "--snapshot", snapshot]);
     assert.deepEqual(status.cli, {
       cli: "codex",
-      model: "gpt-6.1-sol",
-      profile: "gpt61_sol_high",
+      profile: "sol_high",
     });
     assert.deepEqual(status.cliInvocation, {
       cli: "codex",
-      model: "gpt-6.1-sol",
-      profile: "gpt61_sol_high",
-      argv: ["--profile", "gpt61_sol_high"],
+      profile: "sol_high",
+      argv: ["--profile", "sol_high"],
     });
   });
 
   it("retry-status 는 옛 xhigh/max/ultra snapshot profile을 정규화한 argv로 방출한다", () => {
     for (const [legacy, canonical] of [
-      ["gpt56_sol_xhigh", "gpt6_astra_xhigh"],
-      ["gpt56_sol_max", "gpt6_astra_max"],
-      ["gpt56_sol_ultra", "gpt6_astra_max"],
+      ["gpt56_sol_xhigh", "astra_xhigh"],
+      ["gpt56_sol_max", "astra_max"],
+      ["gpt56_sol_ultra", "astra_max"],
     ]) {
       const dir = makeTempDir();
       const snapshot = join(dir, `${legacy}.json`);
@@ -204,7 +201,6 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
         runBridge(["retry-status", "--snapshot", snapshot]).cliInvocation,
         {
           cli: "codex",
-          model: "gpt-6-astra",
           profile: canonical,
           argv: ["--profile", canonical],
         },
@@ -212,10 +208,10 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
     }
   });
 
-  it("retry-status 는 옛 GPT-5.6 snapshot의 model도 새 profile에 맞춘다", () => {
-    for (const [legacyModel, legacy, model, canonical] of [
-      ["gpt-5.6-terra", "gpt56_terra_high", "gpt-6.1-sol", "gpt61_sol_high"],
-      ["gpt-5.6-luna", "gpt56_luna_low", "gpt-6-luna", "gpt6_luna_low"],
+  it("retry-status 는 옛 snapshot의 고정 model을 버리고 가족 profile을 전달한다", () => {
+    for (const [legacyModel, legacy, canonical] of [
+      ["gpt-5.6-terra", "gpt56_terra_high", "sol_high"],
+      ["gpt-5.6-luna", "gpt56_luna_low", "luna_low"],
     ]) {
       const dir = makeTempDir();
       const snapshot = join(dir, `${legacy}.json`);
@@ -241,7 +237,6 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
         runBridge(["retry-status", "--snapshot", snapshot]).cliInvocation,
         {
           cli: "codex",
-          model,
           profile: canonical,
           argv: ["--profile", canonical],
         },

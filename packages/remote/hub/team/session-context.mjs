@@ -3,13 +3,18 @@ import fs from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import {
+  modelFamilyPaths,
+  readCodexModelCatalog,
+} from "../../scripts/lib/model-family-resolver.mjs";
 
-// https://platform.claude.com/docs/en/build-with-claude/context-windows 2026-10-08
+// https://platform.claude.com/docs/en/build-with-claude/context-windows 2026-10-12
 // https://developers.openai.com/api/docs/models 2026-10-08
 const MODEL_CONTEXT = [
   {
     cli: "claude",
-    model: /^(?:claude-)?(?:fable-5[.-]1|opus-5[.-]5|sonnet-5[.-]5)(?:$|[-[])/i,
+    model:
+      /^(?:claude-)?(?:fable|opus|sonnet|haiku)-(?:[5-9]|[1-9]\d+)(?:[.-]\d+)*(?:$|[-[])/i,
     tokens: 1_000_000,
     source:
       "https://platform.claude.com/docs/en/build-with-claude/context-windows",
@@ -29,11 +34,24 @@ export const CONTEXT_THRESHOLDS = {
 
 const rolloutCache = new Map();
 
-export function modelContext(cli, model, estimatedContextTokens = null) {
+export function modelContext(
+  cli,
+  model,
+  estimatedContextTokens = null,
+  opts = {},
+) {
   const entry = MODEL_CONTEXT.find(
     (item) => item.cli === cli && item.model.test(model || ""),
   );
-  const contextLimitTokens = entry?.tokens ?? null;
+  const cached =
+    cli === "codex"
+      ? readCodexModelCatalog(opts)?.models.find((item) => item?.slug === model)
+      : null;
+  const hasCachedLimit =
+    Number.isFinite(cached?.context_window) && cached.context_window > 0;
+  const contextLimitTokens = hasCachedLimit
+    ? cached.context_window
+    : (entry?.tokens ?? null);
   const executionContextLimitTokens =
     cli === "claude" && process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT === "1"
       ? 200_000
@@ -45,7 +63,9 @@ export function modelContext(cli, model, estimatedContextTokens = null) {
   return {
     estimatedContextTokens,
     contextLimitTokens,
-    contextLimitSource: entry?.source ?? null,
+    contextLimitSource: hasCachedLimit
+      ? path.join(modelFamilyPaths(opts).codexHome, "models_cache.json")
+      : (entry?.source ?? null),
     ...(executionContextLimitTokens ? { executionContextLimitTokens } : {}),
     contextPct:
       contextLimitTokens && Number.isFinite(estimatedContextTokens)

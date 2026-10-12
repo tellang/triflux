@@ -10,127 +10,127 @@ import { resolveGeminiProfileForPurpose } from "./gemini-profiles.mjs";
 
 const policy = {
   executor: {
-    profile: "gpt61_sol_high",
+    profile: "sol_high",
     timeoutSec: 1080,
     mcpHint: "implement",
     subcommand: "exec",
   },
   codex: {
-    profile: "gpt61_sol_high",
+    profile: "sol_high",
     timeoutSec: 1080,
     mcpHint: "implement",
     subcommand: "exec",
   },
   "build-fixer": {
-    profile: "gpt6_luna_high",
+    profile: "luna_high",
     timeoutSec: 540,
     mcpHint: "implement",
     subcommand: "exec",
   },
   cleanup: {
-    profile: "gpt61_sol_med",
+    profile: "sol_med",
     timeoutSec: 540,
     mcpHint: "implement",
     subcommand: "exec",
   },
   deslop: {
-    profile: "gpt61_sol_med",
+    profile: "sol_med",
     timeoutSec: 540,
     mcpHint: "implement",
     subcommand: "exec",
   },
   debugger: {
-    profile: "gpt6_astra_xhigh",
+    profile: "astra_xhigh",
     timeoutSec: 900,
     mcpHint: "implement",
     subcommand: "exec",
   },
   "deep-executor": {
-    profile: "gpt6_astra_xhigh",
+    profile: "astra_xhigh",
     timeoutSec: 3600,
     mcpHint: "implement",
     subcommand: "exec",
   },
   architect: {
-    profile: "gpt6_astra_xhigh",
+    profile: "astra_xhigh",
     timeoutSec: 3600,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   critic: {
-    profile: "gpt6_astra_xhigh",
+    profile: "astra_xhigh",
     timeoutSec: 3600,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   planner: {
-    profile: "gpt6_astra_xhigh",
+    profile: "astra_xhigh",
     timeoutSec: 3600,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   analyst: {
-    profile: "gpt6_astra_xhigh",
+    profile: "astra_xhigh",
     timeoutSec: 3600,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   "code-reviewer": {
-    profile: "gpt61_sol_high",
+    profile: "sol_high",
     timeoutSec: 1800,
     mcpHint: "review",
     subcommand: "review",
   },
   "quality-reviewer": {
-    profile: "gpt61_sol_high",
+    profile: "sol_high",
     timeoutSec: 1800,
     mcpHint: "review",
     subcommand: "review",
   },
   "security-reviewer": {
-    profile: "gpt6_astra_xhigh",
+    profile: "astra_xhigh",
     timeoutSec: 1800,
     mcpHint: "review",
     subcommand: "review",
   },
   scientist: {
-    profile: "gpt61_sol_high",
+    profile: "sol_high",
     timeoutSec: 1440,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   "document-specialist": {
-    profile: "gpt61_sol_high",
+    profile: "sol_high",
     timeoutSec: 1440,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   "scientist-deep": {
-    profile: "gpt6_astra_xhigh",
+    profile: "astra_xhigh",
     timeoutSec: 3600,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   verifier: {
-    profile: "gpt61_sol_high",
+    profile: "sol_high",
     timeoutSec: 1200,
     mcpHint: "review",
     subcommand: "review",
   },
   "test-engineer": {
-    profile: "gpt61_sol_high",
+    profile: "sol_high",
     timeoutSec: 1200,
     mcpHint: "implement",
     subcommand: "exec",
   },
   "qa-tester": {
-    profile: "gpt61_sol_high",
+    profile: "sol_high",
     timeoutSec: 1200,
     mcpHint: "review",
     subcommand: "review",
   },
   spark: {
-    profile: "gpt6_luna_low",
+    profile: "luna_low",
     timeoutSec: 180,
     mcpHint: "implement",
     subcommand: "exec",
@@ -138,13 +138,13 @@ const policy = {
   // These entries are only for explicit direct-Codex overrides. agent-map.json
   // remains the provider-selection authority for their normal execution.
   designer: {
-    profile: "gpt6_astra_xhigh",
+    profile: "astra_xhigh",
     timeoutSec: 900,
     mcpHint: "implement",
     subcommand: "exec",
   },
   writer: {
-    profile: "gpt6_luna_high",
+    profile: "luna_high",
     timeoutSec: 900,
     mcpHint: "implement",
     subcommand: "exec",
@@ -167,13 +167,13 @@ const DEFAULT_CODEX_AGENT = "executor";
 
 const CANONICAL_CODEX_PROFILE_OVERRIDES = Object.freeze(
   new Set([
-    "gpt6_luna_low",
-    "gpt6_luna_high",
-    "gpt61_sol_med",
-    "gpt61_sol_high",
-    "gpt6_astra_xhigh",
-    "gpt6_astra_max",
-    "gpt6_astra_ultra",
+    "luna_low",
+    "luna_high",
+    "sol_med",
+    "sol_high",
+    "astra_xhigh",
+    "astra_max",
+    "astra_ultra",
   ]),
 );
 const ULTRA_ELIGIBLE_CODEX_AGENTS = Object.freeze(
@@ -183,8 +183,8 @@ const ULTRA_ELIGIBLE_CODEX_AGENTS = Object.freeze(
 const NESTED_GLOBAL_PROFILE_OVERRIDES = new Set([
   "max",
   "ultra",
-  "gpt6_astra_max",
-  "gpt6_astra_ultra",
+  "astra_max",
+  "astra_ultra",
 ]);
 
 export function resolveCodexAgentPolicy(agent) {
@@ -219,9 +219,9 @@ export function resolveCodexAgentProfile(
 
   const canonical =
     requested === "max"
-      ? "gpt6_astra_max"
+      ? "astra_max"
       : requested === "ultra"
-        ? "gpt6_astra_ultra"
+        ? "astra_ultra"
         : requested;
   if (!CANONICAL_CODEX_PROFILE_OVERRIDES.has(canonical)) {
     if (allowCustom) return requested;
@@ -229,9 +229,9 @@ export function resolveCodexAgentProfile(
       `[agent-route-policy] unsupported profile override: ${requested}`,
     );
   }
-  if (canonical !== "gpt6_astra_ultra") return canonical;
+  if (canonical !== "astra_ultra") return canonical;
   return nested || !ULTRA_ELIGIBLE_CODEX_AGENTS.has(agent)
-    ? "gpt6_astra_max"
+    ? "astra_max"
     : canonical;
 }
 
@@ -270,7 +270,7 @@ export function resolveNestedCodexAgentProfile(
   });
   const { effort } = resolveCodexProfileConfigValues(candidate, { codexHome });
   if (!effort) return fallback;
-  return effort.toLowerCase() === "ultra" ? "gpt6_astra_max" : candidate;
+  return effort.toLowerCase() === "ultra" ? "astra_max" : candidate;
 }
 
 const EXPECTED_DURATION_BY_AGENT = Object.freeze({
@@ -408,13 +408,13 @@ async function runCli() {
         const module = await import(pathToFileURL(geminiProfilesModule).href);
         resolver = (agent) => {
           try {
-            return module.resolveGeminiProfileForPurpose(agent) || "flash38";
+            return module.resolveGeminiProfileForPurpose(agent) || "flash";
           } catch {
-            return "flash38";
+            return "flash";
           }
         };
       } catch {
-        resolver = () => "flash38";
+        resolver = () => "flash";
       }
     }
     process.stdout.write(

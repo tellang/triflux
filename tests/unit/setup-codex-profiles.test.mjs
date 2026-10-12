@@ -47,13 +47,13 @@ function _withTempCodex(configContent, fn) {
 
 describe("REQUIRED_CODEX_PROFILES: 확장된 프로필 목록 검증", () => {
   const requiredNames = [
-    "gpt6_astra_ultra",
-    "gpt6_astra_max",
-    "gpt6_astra_xhigh",
-    "gpt61_sol_high",
-    "gpt61_sol_med",
-    "gpt6_luna_high",
-    "gpt6_luna_low",
+    "astra_ultra",
+    "astra_max",
+    "astra_xhigh",
+    "sol_high",
+    "sol_med",
+    "luna_high",
+    "luna_low",
   ];
 
   for (const name of requiredNames) {
@@ -78,11 +78,11 @@ describe("REQUIRED_CODEX_PROFILES: 확장된 프로필 목록 검증", () => {
 
   it("Astra max/ultra 프로필은 서로 다른 reasoning effort를 고정한다", () => {
     const byName = new Map(REQUIRED_CODEX_PROFILES.map((p) => [p.name, p]));
-    assert.deepEqual(byName.get("gpt6_astra_max")?.lines, [
+    assert.deepEqual(byName.get("astra_max")?.lines, [
       'model = "gpt-6-astra"',
       'model_reasoning_effort = "max"',
     ]);
-    assert.deepEqual(byName.get("gpt6_astra_ultra")?.lines, [
+    assert.deepEqual(byName.get("astra_ultra")?.lines, [
       'model = "gpt-6-astra"',
       'model_reasoning_effort = "ultra"',
     ]);

@@ -50,14 +50,14 @@ tmux ls         # 없으면
 | 역할 | 모델 | 비고 |
 | --- | --- | --- |
 | 리드 (Claude) | Claude 최상위 tier, effort high | 지휘와 판정만 맡는다 |
-| 리드 (Codex) | `gpt6_astra_xhigh` | 지휘와 판정만 맡는다 |
+| 리드 (Codex) | `astra_xhigh` | 지휘와 판정만 맡는다 |
 | 판단 중심 긴 작업 | Claude `opus` | 설계 검토, 긴 구현 |
 | 반복 검증, 정형 문서 | Claude `sonnet` | 테스트 재실행, 표 갱신 |
 | `opus`로 안 풀리는 난제 | Claude `fable` | 최종 수단 |
-| Codex 설계, 비평, 디버그 | `gpt6_astra_xhigh` | |
-| Codex 일반 구현, 리뷰 | `gpt61_sol_high` | |
-| Codex 정리 | `gpt61_sol_med` | |
-| Codex 반복 작업 | `gpt6_luna_high` | |
+| Codex 설계, 비평, 디버그 | `astra_xhigh` | |
+| Codex 일반 구현, 리뷰 | `sol_high` | |
+| Codex 정리 | `sol_med` | |
+| Codex 반복 작업 | `luna_high` | |
 | Codex 시험용 | 역할 프로필에 effort low | 연결 확인용 |
 
 - Codex 주간 한도가 낮으면 새 Codex 워커 대신 Claude 로 돌린다.

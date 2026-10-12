@@ -166,7 +166,7 @@ agy 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율
 
 `DEFAULT_ESCALATION_CHAIN`의 프로필 설정은 `.claude/rules/tfx-escalation-chain.md`와 CLI 프로필 설정을 따른다.
 
-1. Codex: `gpt6_astra_max` 프로필
+1. Codex: `astra_max` 프로필
 2. Claude: 최종 수단 프로필
 
 체인 규칙:

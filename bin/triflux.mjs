@@ -67,6 +67,7 @@ import {
   saveRegistry,
   syncRegistryTargets,
 } from "../scripts/lib/mcp-guard-engine.mjs";
+import { resolveModelFamilies } from "../scripts/lib/model-family-resolver.mjs";
 import {
   formatPsmuxInstallGuidance,
   formatPsmuxUpdateGuidance,
@@ -988,11 +989,17 @@ function previewCodexProfiles() {
     ? readFileSync(CODEX_CONFIG_PATH, "utf8")
     : "";
   const profiles = [];
+  const resolved = resolveModelFamilies("codex", {
+    codexHome: CODEX_DIR,
+    allowCommand: false,
+    persist: false,
+  }).profiles;
 
   // Codex 0.134+: 프로필은 별도 파일 ~/.codex/<name>.config.toml 로 관리한다.
   for (const profile of REQUIRED_CODEX_PROFILES) {
     const profilePath = join(CODEX_DIR, `${profile.name}.config.toml`);
-    const desiredContent = `${profile.lines.join("\n")}\n`;
+    const { model, effort } = resolved[profile.name];
+    const desiredContent = `model = "${model}"\nmodel_reasoning_effort = "${effort}"\n`;
     const existingContent = existsSync(profilePath)
       ? readFileSync(profilePath, "utf8")
       : null;
@@ -1483,7 +1490,7 @@ async function cmdSetup(options = {}) {
         "gemini-profiles",
         `Antigravity/Gemini profiles 설정 실패: ${renderErrorMessage(gemini.message)}`,
       );
-    if (gemini.added) report.alreadyInGoalState = false;
+    if (gemini.changed) report.alreadyInGoalState = false;
 
     const settingsPath = join(CLAUDE_DIR, "settings.json");
     const hudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
