@@ -3,10 +3,6 @@ import fs from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import {
-  modelFamilyPaths,
-  readCodexModelCatalog,
-} from "../../scripts/lib/model-family-resolver.mjs";
 
 // https://platform.claude.com/docs/en/build-with-claude/context-windows 2026-10-12
 // https://developers.openai.com/api/docs/models 2026-10-08
@@ -34,24 +30,11 @@ export const CONTEXT_THRESHOLDS = {
 
 const rolloutCache = new Map();
 
-export function modelContext(
-  cli,
-  model,
-  estimatedContextTokens = null,
-  opts = {},
-) {
+export function modelContext(cli, model, estimatedContextTokens = null) {
   const entry = MODEL_CONTEXT.find(
     (item) => item.cli === cli && item.model.test(model || ""),
   );
-  const cached =
-    cli === "codex"
-      ? readCodexModelCatalog(opts)?.models.find((item) => item?.slug === model)
-      : null;
-  const hasCachedLimit =
-    Number.isFinite(cached?.context_window) && cached.context_window > 0;
-  const contextLimitTokens = hasCachedLimit
-    ? cached.context_window
-    : (entry?.tokens ?? null);
+  const contextLimitTokens = entry?.tokens ?? null;
   const executionContextLimitTokens =
     cli === "claude" && process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT === "1"
       ? 200_000
@@ -63,9 +46,7 @@ export function modelContext(
   return {
     estimatedContextTokens,
     contextLimitTokens,
-    contextLimitSource: hasCachedLimit
-      ? path.join(modelFamilyPaths(opts).codexHome, "models_cache.json")
-      : (entry?.source ?? null),
+    contextLimitSource: entry?.source ?? null,
     ...(executionContextLimitTokens ? { executionContextLimitTokens } : {}),
     contextPct:
       contextLimitTokens && Number.isFinite(estimatedContextTokens)
