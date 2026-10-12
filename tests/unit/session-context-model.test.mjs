@@ -40,14 +40,18 @@ test("200K 인 Haiku 4.5 는 1M 으로 잡지 않는다", () => {
   );
 });
 
-async function codexRolloutContext(tokens, modelContextWindow) {
+async function codexRolloutContext(
+  tokens,
+  modelContextWindow,
+  model = "gpt-6-astra",
+) {
   const dir = await fs.mkdtemp(path.join(tmpdir(), "cx-window-"));
   const rolloutPath = path.join(dir, "rollout.jsonl");
   try {
     await fs.writeFile(
       rolloutPath,
       [
-        { type: "turn_context", payload: { model: "gpt-6-astra" } },
+        { type: "turn_context", payload: { model } },
         {
           type: "event_msg",
           payload: {
@@ -111,4 +115,22 @@ test("사용자 비율 플래그가 Codex 기본값보다 우선한다", async (
     }).thresholdPct,
     15,
   );
+});
+
+test("Codex 실행 창은 모델 표에 없는 모델에도 적용한다", async () => {
+  const guard = contextGuard(
+    "codex",
+    await codexRolloutContext(220_000, 258_400, "gpt-5.4"),
+  );
+  assert.equal(guard.errorCode, "context-limit");
+  assert.equal(guard.contextPct, (220_000 / 258_400) * 100);
+});
+
+test("Codex 실행 창이 표 값보다 커도 표 값으로 깎지 않는다", async () => {
+  const guard = contextGuard(
+    "codex",
+    await codexRolloutContext(1_000_000, 1_500_000),
+  );
+  assert.equal(guard.ok, undefined);
+  assert.equal(guard.contextWarning.contextPct, (1_000_000 / 1_500_000) * 100);
 });

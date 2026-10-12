@@ -46,17 +46,19 @@ export function modelContext(
     cli === "claude" && process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT === "1"
       ? 200_000
       : rolloutContextWindow;
-  const effectiveLimit = Math.min(
-    contextLimitTokens ?? Infinity,
-    executionContextLimitTokens ?? Infinity,
-  );
+  // Codex 는 rollout 이 보고한 창이 실제 실행 한도라 표 값과 무관하게 그 창을 쓴다.
+  const effectiveLimit =
+    cli === "codex"
+      ? (executionContextLimitTokens ?? contextLimitTokens)
+      : contextLimitTokens &&
+        Math.min(contextLimitTokens, executionContextLimitTokens ?? Infinity);
   return {
     estimatedContextTokens,
     contextLimitTokens,
     contextLimitSource: entry?.source ?? null,
     ...(executionContextLimitTokens ? { executionContextLimitTokens } : {}),
     contextPct:
-      contextLimitTokens && Number.isFinite(estimatedContextTokens)
+      effectiveLimit && Number.isFinite(estimatedContextTokens)
         ? (estimatedContextTokens / effectiveLimit) * 100
         : null,
   };
