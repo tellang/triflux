@@ -1770,20 +1770,41 @@ function isClaudeExternalImportsPrompt(text) {
   );
 }
 
-// 박스 테두리와 줄바꿈이 문구를 끊어도 맞도록 공백 하나로 접는다.
-function screenText(text) {
-  return stripAnsi(text).replace(/[│┃]/g, " ").replace(/\s+/g, " ");
+// 승인 화면에서는 마지막 선택 글리프 줄이 메뉴 항목이다. 문구를 인용한 대화라면
+// 그 아래 입력창이 마지막 글리프 줄이 되므로 걸러진다. 위쪽 문구는 테두리와
+// 줄바꿈이 끊어도 맞도록 공백 하나로 접는다.
+function splitAtLastSelector(text, glyph) {
+  const lines = stripAnsi(text)
+    .split("\n")
+    .map((line) => line.replace(/^[\s│┃]+/, ""));
+  const index = lines.findLastIndex((line) => line.startsWith(glyph));
+  if (index < 0) return null;
+  return {
+    above: lines.slice(0, index).join(" ").replace(/\s+/g, " "),
+    selected: lines[index],
+  };
 }
 
 function isCodexTrustFolderPrompt(text) {
-  const screen = screenText(text);
+  const menu = splitAtLastSelector(text, "›");
   return (
-    /trust this folder\?/i.test(screen) && /trust and continue/i.test(screen)
+    Boolean(menu) &&
+    /trust this folder\?/i.test(menu.above) &&
+    /^›\s*(?:\d+\.\s*)?(?:trust and continue|open restricted)/i.test(
+      menu.selected,
+    )
   );
 }
 
 function isClaudeMcpApprovalPrompt(text) {
-  return /new MCP servers? found in this project/i.test(screenText(text));
+  const menu = splitAtLastSelector(text, "❯");
+  return (
+    Boolean(menu) &&
+    /new MCP servers? found in this project/i.test(menu.above) &&
+    /^❯\s*(?:\d+\.\s*)?(?:use this|continue without using this MCP server|enable selected|\[[ ×]\]|[☐☒])/i.test(
+      menu.selected,
+    )
+  );
 }
 
 function isClaudeTourPrompt(text) {

@@ -1842,7 +1842,8 @@ test("tfx-live start reports approval screens as blocked without answering them"
       ].join("\n"),
     );
     await fs.chmod(tmuxPath, 0o755);
-    // 문구는 Codex 0.162.1, Claude Code 2.1.296 바이너리 문자열 기준. 줄바꿈이 문구를 끊는 경우를 넣었다.
+    // 문구와 체크박스 글리프는 Codex 0.162.1, Claude Code 2.1.296 바이너리 문자열 기준.
+    // 줄바꿈이 문구를 끊는 경우와, 문구를 인용한 재개 대화 아래 입력창이 있는 정상 화면을 넣었다.
     const cases = [
       {
         cli: "codex",
@@ -1853,11 +1854,27 @@ test("tfx-live start reports approval screens as blocked without answering them"
       {
         cli: "claude",
         screen:
-          "│ 5 new MCP servers found in this\n│ project\n│ Select any you wish to enable.\n│ ❯ ◯ github",
+          "│ 5 new MCP servers found in this\n│ project\n│ Select any you wish to enable.\n│ ❯ ☐ github\n│   ☐ linear",
+        blockedBy: "claude-mcp-approval",
+      },
+      {
+        cli: "claude",
+        screen:
+          "New MCP server found in this project: github\n❯ 1. Use this and all future MCP servers in this project\n  2. Use this MCP server",
         blockedBy: "claude-mcp-approval",
       },
       { cli: "codex", screen: "›" },
       { cli: "claude", screen: "❯\nCTX:0/100 (0%)" },
+      {
+        cli: "codex",
+        screen:
+          "• Trust this folder?\n  › 1. Trust and continue\n\n› \n  gpt-6.1-sol · Context 3% used",
+      },
+      {
+        cli: "claude",
+        screen:
+          "⏺ 5 new MCP servers found in this project\n  ❯ ☐ github\n────────\n❯ \n────────\nCTX:0/100 (0%)",
+      },
     ];
     for (const [index, { cli, screen, blockedBy }] of cases.entries()) {
       const logPath = path.join(dir, `tmux-log-${index}.jsonl`);
