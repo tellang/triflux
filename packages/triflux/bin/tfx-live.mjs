@@ -53,7 +53,6 @@ import {
   validateHost as validateRemoteHost,
 } from "../hub/team/remote-session.mjs";
 import {
-  CONTEXT_THRESHOLDS,
   contextGuard,
   findCodexRollout,
   modelContext,
@@ -107,7 +106,7 @@ function usage(command) {
     "    Codex ask defaults to the app-server queue (thread/queue/add, `codex queue --message` only when add is unavailable; delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands.",
     "  tfx-live ask --cli codex --transport uds --thread ID|auto --prompt TEXT [--codex-socket PATH|default] [--cwd DIR] [--if-busy wait|fail|steer] [--busy-timeout 60] [--timeout 60] [--max-turn SECONDS]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
-    "    ask options: --no-wait --no-relay-tag --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 15/22).",
+    "    ask options: --no-wait --no-relay-tag --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 60/85 of rollout window or 15/22 of 1.05M).",
     "  tfx-live compact --session NAME [--cli claude|codex] [--instructions TEXT] [--then PROMPT] [--no-wait] [--if-busy fail|wait] [--timeout 60]",
     "  tfx-live goal set --session NAME [--cli claude|codex] --condition TEXT [--budget N]",
     "  tfx-live goal status --session NAME [--cli claude|codex]",
@@ -220,8 +219,10 @@ function integerFlag(flags, name, defaultValue) {
   return value;
 }
 
-function contextPctFlag(flags, name, defaultValue) {
-  const value = flags[name] === undefined ? defaultValue : Number(flags[name]);
+// 기본값은 contextGuard 가 읽은 실행 창에 맞춰 고른다.
+function contextPctFlag(flags, name) {
+  if (flags[name] === undefined) return undefined;
+  const value = Number(flags[name]);
   if (!Number.isFinite(value) || value < 0 || value > 100)
     throw new Error(`--${name} must be between 0 and 100`);
   return value;
@@ -230,16 +231,8 @@ function contextPctFlag(flags, name, defaultValue) {
 function contextOpts(flags, cli) {
   if (cli === "agy") return {};
   return {
-    warnContextPct: contextPctFlag(
-      flags,
-      "warn-context-pct",
-      CONTEXT_THRESHOLDS[cli].warnContextPct,
-    ),
-    maxContextPct: contextPctFlag(
-      flags,
-      "max-context-pct",
-      CONTEXT_THRESHOLDS[cli].maxContextPct,
-    ),
+    warnContextPct: contextPctFlag(flags, "warn-context-pct"),
+    maxContextPct: contextPctFlag(flags, "max-context-pct"),
   };
 }
 

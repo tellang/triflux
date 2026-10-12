@@ -23,14 +23,21 @@ const MODEL_CONTEXT = [
   },
 ];
 
-export const CONTEXT_THRESHOLDS = {
+const CONTEXT_THRESHOLDS = {
   claude: { warnContextPct: 60, maxContextPct: 90 },
-  codex: { warnContextPct: 15, maxContextPct: 22 },
+  codex: { warnContextPct: 60, maxContextPct: 85 },
 };
+// rollout 실행 창을 못 읽으면 1.05M 표 값이 분모라 실제 창보다 비율이 작게 나온다.
+const CODEX_MODEL_WINDOW_THRESHOLDS = { warnContextPct: 15, maxContextPct: 22 };
 
 const rolloutCache = new Map();
 
-export function modelContext(cli, model, estimatedContextTokens = null) {
+export function modelContext(
+  cli,
+  model,
+  estimatedContextTokens = null,
+  rolloutContextWindow = null,
+) {
   const entry = MODEL_CONTEXT.find(
     (item) => item.cli === cli && item.model.test(model || ""),
   );
@@ -38,18 +45,20 @@ export function modelContext(cli, model, estimatedContextTokens = null) {
   const executionContextLimitTokens =
     cli === "claude" && process.env.CLAUDE_CODE_DISABLE_1M_CONTEXT === "1"
       ? 200_000
-      : null;
-  const effectiveLimit = Math.min(
-    contextLimitTokens ?? Infinity,
-    executionContextLimitTokens ?? Infinity,
-  );
+      : rolloutContextWindow;
+  // Codex 는 rollout 이 보고한 창이 실제 실행 한도라 표 값과 무관하게 그 창을 쓴다.
+  const effectiveLimit =
+    cli === "codex"
+      ? (executionContextLimitTokens ?? contextLimitTokens)
+      : contextLimitTokens &&
+        Math.min(contextLimitTokens, executionContextLimitTokens ?? Infinity);
   return {
     estimatedContextTokens,
     contextLimitTokens,
     contextLimitSource: entry?.source ?? null,
     ...(executionContextLimitTokens ? { executionContextLimitTokens } : {}),
     contextPct:
-      contextLimitTokens && Number.isFinite(estimatedContextTokens)
+      effectiveLimit && Number.isFinite(estimatedContextTokens)
         ? (estimatedContextTokens / effectiveLimit) * 100
         : null,
   };
@@ -60,7 +69,10 @@ export function contextGuard(
   context,
   { warnContextPct, maxContextPct } = {},
 ) {
-  const defaults = CONTEXT_THRESHOLDS[cli];
+  const defaults =
+    cli === "codex" && !context?.executionContextLimitTokens
+      ? CODEX_MODEL_WINDOW_THRESHOLDS
+      : CONTEXT_THRESHOLDS[cli];
   const warn = warnContextPct ?? defaults?.warnContextPct ?? 0;
   const max = maxContextPct ?? defaults?.maxContextPct ?? 0;
   const fields = {
@@ -90,6 +102,7 @@ export function contextGuard(
       inputSent: false,
       hint: "세션을 승계한 뒤 새 세션에 요청하라.",
       ...fields,
+      thresholdPct: max,
     };
   }
   return warn > 0 && fields.contextPct >= warn
@@ -206,7 +219,12 @@ export async function readCodexContext(rolloutPath, threadId) {
   state.mtimeMs = stat.mtimeMs;
   rolloutCache.set(rolloutPath, state);
   return {
-    ...modelContext("codex", state.model, state.tokens),
+    ...modelContext(
+      "codex",
+      state.model,
+      state.tokens,
+      state.executionContextLimitTokens,
+    ),
     model: state.model,
     compactCount: state.compactCount,
     compact: state.compact,
