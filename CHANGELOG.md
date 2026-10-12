@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.63.0] - 2026-10-12
+
+### Added
+- live: `compact --then PROMPT` 로 압축 제출을 확인한 뒤 다음 지시를 큐에 넣는다. Claude 는 TUI 대기열, Codex 는 app-server 큐로 들어가 압축이 끝나면 처리된다. `--no-wait` 로 완료를 기다리지 않는다. Codex compact 를 새로 지원한다 (#746)
+
+### Fixed
+- remote: `@triflux/remote` 의 claude-transcript 에 goal_status 판독이 빠져 있던 미러 누락 (#746)
+
 ## [10.62.0] - 2026-10-12
 
 ### Added
