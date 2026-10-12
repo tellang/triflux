@@ -53,6 +53,7 @@ import {
   modelContext,
   readCodexContext,
 } from "../hub/team/session-context.mjs";
+import { JsonRpcWsUdsClient } from "../hub/workers/lib/jsonrpc-ws-uds.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -102,6 +103,9 @@ function usage(command) {
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
     "    ask options: --no-wait --no-relay-tag --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 15/22).",
     "  tfx-live compact --cli claude --session NAME [--instructions TEXT] [--if-busy fail|wait] [--timeout 60]",
+    "  tfx-live goal set --session NAME [--cli claude|codex] --condition TEXT [--budget N]",
+    "  tfx-live goal status --session NAME [--cli claude|codex]",
+    "  tfx-live goal clear --session NAME [--cli claude|codex]",
     "  tfx-live wait --cli claude (--short SHORT | --session-id ID | --session NAME[:WINDOW.PANE]) [--request-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 60] [--poll-interval 1500]",
     "  tfx-live wait --cli codex (--session NAME[:WINDOW.PANE] | --thread UUID) --request-id ID [--timeout 60] [--poll-interval 1500]",
     "  tfx-live wait --cli agy --session NAME[:WINDOW.PANE] [--request-id ID] [--timeout 60] [--poll-interval 1500]",
@@ -141,6 +145,7 @@ function parseCli(argv) {
   }
 
   const flags = {};
+  const action = command === "goal" ? rest.shift() : undefined;
   for (let index = 0; index < rest.length; index += 1) {
     const arg = rest[index];
     if (!arg.startsWith("--")) {
@@ -165,7 +170,7 @@ function parseCli(argv) {
     index += 1;
   }
 
-  return { command, flags };
+  return { command, flags, action };
 }
 
 function requireFlag(flags, name) {
@@ -4417,6 +4422,258 @@ async function compact(flags) {
   });
 }
 
+function codexGoalStatus(goal) {
+  return {
+    state: goal
+      ? ({ usageLimited: "usage_limited", budgetLimited: "budget_limited" }[
+          goal.status
+        ] ?? goal.status)
+      : "none",
+    objective: goal?.objective ?? null,
+    judgedBy: "model",
+    ...(goal
+      ? {
+          tokensUsed: goal.tokensUsed,
+          tokenBudget: goal.tokenBudget ?? null,
+          updatedAt: new Date(goal.updatedAt * 1000).toISOString(),
+        }
+      : {}),
+  };
+}
+
+async function readCodexGoal(threadId) {
+  let db;
+  try {
+    const [major, minor] = process.versions.node.split(".").map(Number);
+    if (
+      major < 22 ||
+      (major === 22 && minor < 13) ||
+      (major === 23 && minor < 4)
+    )
+      throw new Error("Node 22.13+ with read-only node:sqlite is required");
+    const { DatabaseSync } = await import("node:sqlite");
+    db = new DatabaseSync(
+      pathJoin(
+        process.env.CODEX_HOME ?? pathJoin(homedir(), ".codex"),
+        "goals_1.sqlite",
+      ),
+      { readOnly: true },
+    );
+    const row = db
+      .prepare(
+        "SELECT objective, status, token_budget AS tokenBudget, tokens_used AS tokensUsed, updated_at_ms / 1000.0 AS updatedAt FROM thread_goals WHERE thread_id = ?",
+      )
+      .get(threadId);
+    return codexGoalStatus(row);
+  } catch (error) {
+    // Node >=22 전체에서 sqlite 를 지원하지는 않으므로 미확인을 none 으로 보고하지 않는다.
+    return {
+      state: null,
+      objective: null,
+      judgedBy: "model",
+      warning: `Goal status unavailable (read-only node:sqlite): ${error.message}`,
+    };
+  } finally {
+    db?.close();
+  }
+}
+
+async function codexGoal(action, opts, deps = {}) {
+  const { threadId, objective, tokenBudget } = opts;
+  let fallbackReason;
+  let client;
+  try {
+    const socketPath = (deps.resolveSocket ?? resolveCodexDaemonSocket)(
+      opts.codexSocket,
+    );
+    client = (
+      deps.clientFactory ?? ((options) => new JsonRpcWsUdsClient(options))
+    )({ socketPath, connectTimeoutMs: 5000 });
+    await client.connect();
+    await client.request(
+      "initialize",
+      {
+        clientInfo: { name: "triflux-tfx-live", version: "1.0.0" },
+        capabilities: { experimentalApi: true },
+      },
+      5000,
+    );
+    client.notify("initialized", {});
+    let cursor;
+    let loaded = false;
+    do {
+      const page = await client.request(
+        "thread/loaded/list",
+        cursor ? { cursor } : {},
+        5000,
+      );
+      loaded = page.data.includes(threadId);
+      cursor = page.nextCursor;
+    } while (!loaded && cursor);
+    if (!loaded) fallbackReason = "thread-not-loaded";
+  } catch (error) {
+    fallbackReason = `daemon-unavailable: ${error.message}`;
+  }
+  try {
+    if (fallbackReason) {
+      if (tokenBudget !== undefined)
+        throw new Error(
+          `--budget requires a loaded Codex daemon thread; tmux fallback cannot set a budget (${fallbackReason})`,
+        );
+      return {
+        ...(action === "status"
+          ? await (deps.readGoal ?? readCodexGoal)(threadId)
+          : {}),
+        transport: action === "status" ? "sqlite" : "tmux",
+        fallbackReason,
+      };
+    }
+    const params = { threadId, origin: "user" };
+    // 쓰기를 시도한 뒤의 오류는 폴백하지 않는다. 성공 여부가 불명확한 명령을 중복 전송할 수 있다.
+    if (action !== "status") {
+      const cleared = await client.request("thread/goal/clear", params, 10000);
+      if (action === "clear")
+        return {
+          ...codexGoalStatus(null),
+          ...cleared,
+          confirmed: true,
+          transport: "daemon",
+        };
+    }
+    const result =
+      action === "set"
+        ? await client.request(
+            "thread/goal/set",
+            {
+              ...params,
+              objective,
+              status: "active",
+              ...(tokenBudget !== undefined ? { tokenBudget } : {}),
+            },
+            10000,
+          )
+        : await client.request("thread/goal/get", { threadId }, 10000);
+    return {
+      ...codexGoalStatus(result.goal),
+      ...(action === "set" ? { confirmed: true } : {}),
+      transport: "daemon",
+    };
+  } finally {
+    client?.close();
+  }
+}
+
+async function goal(action, flags) {
+  if (!["set", "status", "clear"].includes(action))
+    throw new Error("goal requires set, status, or clear");
+  if (flags.remote !== undefined)
+    throw new Error("goal does not support --remote");
+  const session = splitTmuxTarget(requireFlag(flags, "session")).target;
+  let cli = flags.cli;
+  if (!cli) {
+    for (const candidate of ["claude", "codex", "agy"]) {
+      if (await paneCliProcess(session, candidate)) {
+        cli = candidate;
+        break;
+      }
+    }
+    if (!cli)
+      throw new Error("Cannot infer session CLI; specify --cli claude|codex");
+  }
+  if (cli === "agy") throw new Error("agy has no native goal");
+  const adapter = selectAdapter({ ...flags, cli });
+  if (flags.budget !== undefined && (cli !== "codex" || action !== "set"))
+    throw new Error("--budget is supported only by goal set --cli codex");
+  const tokenBudget = integerFlag(flags, "budget", undefined);
+  if (tokenBudget !== undefined && !Number.isSafeInteger(tokenBudget))
+    throw new Error("--budget must be a safe positive integer");
+  const objective =
+    action === "set" ? requireFlag(flags, "condition").trim() : null;
+  if (action === "set" && (!objective || objective === "clear"))
+    throw new Error(
+      '--condition must not be blank or the reserved command "clear"',
+    );
+  const base = { cli, session };
+  let codexResult;
+  if (cli === "codex") {
+    const { threadId } = await codexThreadFromFlags(flags);
+    codexResult = await codexGoal(action, {
+      threadId,
+      objective,
+      tokenBudget,
+      codexSocket: flags["codex-socket"],
+    });
+    if (codexResult.transport !== "tmux") return { ...base, ...codexResult };
+  }
+  const transcriptPath =
+    cli === "claude"
+      ? await claudeTmuxTranscript(session, flags["config-dir"])
+      : null;
+  let snapshot =
+    cli === "claude" ? await readClaudeTranscript(transcriptPath) : null;
+  const unavailable = {
+    state: null,
+    objective: null,
+    judgedBy: "evaluator",
+    warning: "Claude transcript unavailable for this tmux pane",
+  };
+  if (action === "status")
+    return {
+      ...base,
+      ...(snapshot?.goal ?? unavailable),
+      transport: "tmux",
+    };
+  const opts = askOpts(
+    {
+      ...flags,
+      cli,
+      transport: "tmux",
+      "no-wait": true,
+      "no-relay-tag": true,
+      prompt: `/goal ${action === "set" ? objective : "clear"}`,
+    },
+    adapter,
+  );
+  await waitForTmuxIdle(adapter, opts);
+  snapshot =
+    cli === "claude" ? await readClaudeTranscript(transcriptPath) : null;
+  const beforeCount = snapshot?.goalSentinel?.count ?? 0;
+  const inputStartedAt = Date.now();
+  await doAskViaTmux(adapter, {
+    ...opts,
+    ifBusy: "fail",
+    skipContextGuard: true,
+  });
+  if (cli === "codex")
+    return { ...base, ...codexResult, inputSent: true, confirmed: false };
+  const deadline = Date.now() + Math.min(opts.timeoutMs, 5000);
+  let confirmed = false;
+  do {
+    snapshot = await readClaudeTranscript(
+      transcriptPath ??
+        (await claudeTmuxTranscript(session, flags["config-dir"])),
+    );
+    const sentinel = snapshot?.goalSentinel;
+    confirmed =
+      sentinel?.count > beforeCount &&
+      Date.parse(sentinel.updatedAt) >= inputStartedAt &&
+      (action === "set"
+        ? sentinel.met === false && sentinel.condition === objective
+        : sentinel.met === true);
+    if (confirmed || Date.now() >= deadline) break;
+    await sleep(Math.min(opts.pollIntervalMs, deadline - Date.now()));
+  } while (Date.now() < deadline);
+  return {
+    ...base,
+    ...(snapshot?.goal ?? unavailable),
+    transport: "tmux",
+    confirmed,
+    ...(!confirmed
+      ? { warning: "No new matching goal_status sentinel observed after input" }
+      : {}),
+  };
+}
+
 async function interrupt(flags) {
   const adapter = selectAdapter(flags);
   printJson(await doInterrupt(adapter, interruptOpts(flags, adapter)));
@@ -5343,7 +5600,7 @@ function printJson(value) {
 }
 
 async function main() {
-  const { command, flags } = parseCli(process.argv.slice(2));
+  const { command, flags, action } = parseCli(process.argv.slice(2));
 
   if (command === "help") {
     process.stdout.write(`${usage(flags.subcommand)}\n`);
@@ -5360,6 +5617,8 @@ async function main() {
     await queue(flags);
   } else if (command === "compact") {
     await compact(flags);
+  } else if (command === "goal") {
+    printJson(await goal(action, flags));
   } else if (command === "rename") {
     await rename(flags);
   } else if (command === "stop") {
@@ -5392,6 +5651,7 @@ export {
   buildTmuxCommand,
   callRemoteLive,
   classifyPeerExitReason,
+  codexGoal,
   composerShowsPrompt,
   createPeerSignalController,
   derivePeerStatus,

@@ -3,7 +3,7 @@ name: tfx-live
 description: >
   Claude·Codex·agy 세션을 실시간으로 생성·질의·대기·압축·종료하거나,
   tmux/daemon UDS 연결과 peer 중계를 운영할 때 사용한다.
-argument-hint: "<start|ask|wait|queue|compact|stop|rename|interrupt|probe|list-sessions|peer|converse|goal-driven> [--cli codex|claude|agy] ..."
+argument-hint: "<start|ask|wait|queue|goal|compact|stop|rename|interrupt|probe|list-sessions|peer|converse|goal-driven> [--cli codex|claude|agy] ..."
 ---
 
 # tfx-live
@@ -79,6 +79,23 @@ tfx-live queue --cli codex --thread <UUID> --delete <queuedMessageId>
 ```
 
 `queue`는 TUI가 아직 가져가지 않은 항목을 보고 지운다. Codex app-server의 실험 API `thread/queue/list`·`thread/queue/delete`를 stdio로 호출하며 큐 저장소 파일은 건드리지 않는다. 목록 항목은 `id`(ask 결과의 `queuedMessageId`와 같다), `requestId`, `text`다. 삭제 결과의 `missing`은 이미 TUI가 가져갔거나 없는 항목이다. 유휴 TUI는 쌓인 항목을 곧 가져가므로 지울 수 있는 것은 사실상 바쁜 세션과 닫힌 세션의 항목이다. 가져간 뒤의 처리 여부는 `wait`로 확인한다.
+
+### 네이티브 goal
+
+```bash
+tfx-live goal set --session cl1 --condition "관련 단위 테스트가 모두 통과한다"
+tfx-live goal set --session cx1 --cli codex --condition "관련 단위 테스트가 모두 통과한다" --budget 100000
+tfx-live goal status --session cx1
+tfx-live goal clear --session cx1
+```
+
+`--cli`를 생략하면 세션 프로세스에서 추정한다. 로컬 Claude와 Codex만 지원하며 `--remote`와 agy는 거부한다. `--budget`은 Codex set의 daemon 경로에서만 받고 Claude와 tmux 폴백에서는 오류로 거부한다.
+
+Claude는 tmux로 `/goal <조건>`과 `/goal clear`를 보내고 transcript의 마지막 `goal_status`로 상태를 읽는다. 별도 평가자의 완료는 `complete`, 수동 해제는 `none`이며 `judgedBy: "evaluator"`와 평가 이유를 보고한다. transcript를 찾지 못하면 상태는 `null`이고 경고를 남긴다. set/clear 뒤 새 sentinel을 최대 5초 확인하며 없으면 `confirmed: false`와 경고를 반환한다. 바쁜 세션은 기본 `--if-busy wait`로 기다리며 `fail|interrupt`도 받는다.
+
+Codex는 공유 daemon UDS의 `thread/goal/*`를 우선 쓴다. `--codex-socket PATH|default`로 소켓을 고르고 기존 thread 해석 순서와 `--thread UUID`를 따른다. 새 goal은 `origin: "user"`로 clear 후 active set한다. 소켓이 없거나 thread가 미적재면 set/clear는 tmux 슬래시로, status는 `$CODEX_HOME/goals_1.sqlite`의 읽기 전용 조회로 폴백한다. `node:sqlite`를 지원하지 않는 Node에서는 상태를 `null`로 두고 경고한다. 결과에 `transport: "daemon"|"tmux"|"sqlite"`와 폴백 이유를 남긴다. tmux 제출만으로 설정을 확정하지 않으며 status로 확인한다. Codex의 `judgedBy: "model"`, `complete`는 모델 자기 판정이므로 리드의 교차 검증이 필요하다.
+
+Claude와 Codex는 네이티브 goal을 우선 쓰고, goal-driven은 agy처럼 네이티브 goal이 없을 때 쓰는 방식이다. 현재 agy의 goal-driven 실행은 지원하지 않는다.
 
 ### 컨텍스트 판단
 
