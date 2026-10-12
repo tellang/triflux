@@ -2,6 +2,15 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.64.0] - 2026-10-12
+
+### Changed
+- live: Codex 컨텍스트 경고와 차단을 rollout 의 실제 실행 창 기준 60%, 85% 로 계산한다. 창을 못 읽으면 기존처럼 1,050,000 기준 15%, 22% 다. Astra/Luna 는 지금과 비슷하고(약 155K/220K) Sol 은 약 285K/404K 까지 쓴다 (#749)
+
+### Fixed
+- live: `start` 가 Codex 폴더 신뢰 화면이나 Claude 프로젝트 MCP 승인 화면에서 멈춰 있는데 `ready: true` 를 돌려주던 문제. 이제 `ready: false` 와 `blockedBy` 로 보고하고 화면에 답하지 않는다 (#750)
+- release: 미러 검사가 `packages/remote` 의 본문 드리프트를 잡는다 (#748)
+
 ## [10.63.0] - 2026-10-12
 
 ### Added
