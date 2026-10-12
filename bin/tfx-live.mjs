@@ -2545,7 +2545,6 @@ async function openItermSession(session, group) {
     `${shellQuote([realpathSync(tmuxPath.trim()), "attach-session", "-t"])} '=${session.replace(/'/g, `'"'"'`)}'`,
   );
   const script = `tell application "iTerm2"
-  set leaderWindow to current window
   set ttyWindow to missing value
   set idWindow to missing value
   repeat with candidateWindow in windows
@@ -2556,10 +2555,13 @@ async function openItermSession(session, group) {
       end repeat
     end repeat
   end repeat
+  -- 리드가 이 기기의 iTerm 창에 없으면(ssh 로 LC_TERMINAL 만 넘어온 경우 등) 열지 않는다.
   if ttyWindow is not missing value then
     set leaderWindow to ttyWindow
   else if idWindow is not missing value then
     set leaderWindow to idWindow
+  else
+    return ""
   end if
   set groupSession to missing value
   repeat with candidateTab in tabs of leaderWindow
@@ -2591,6 +2593,7 @@ end tell`;
     timeout: 5000,
     maxBuffer: 64 * 1024,
   });
+  if (!stdout.trim()) return null;
   const [sessionId, split] = stdout.trim().split("\n");
   if (!sessionId || !["true", "false"].includes(split))
     throw new Error("iTerm did not return a session ID and split status");
@@ -2808,34 +2811,35 @@ async function doStart(adapter, opts) {
   if (ready && shouldUseIterm(remote)) {
     try {
       iterm = await openItermSession(session, opts.group || adapter.cli);
-      await runTmux(null, [
-        "set-option",
-        "-t",
-        session,
-        "@tfx_iterm_session",
-        iterm.sessionId,
-      ]);
-      const scriptsDir = pathJoin(
-        homedir(),
-        "Library",
-        "Application Support",
-        "iTerm2",
-        "Scripts",
-      );
-      const scriptPath = pathJoin(scriptsDir, ITERM_TITLE_SCRIPT_NAME);
-      await mkdir(scriptsDir, { recursive: true });
-      const installed = await readFile(scriptPath, "utf8").catch((error) => {
-        if (error.code === "ENOENT") return null;
-        throw error;
-      });
-      if (installed !== ITERM_TITLE_SCRIPT)
-        await writeFile(scriptPath, ITERM_TITLE_SCRIPT, { mode: 0o700 });
-      await chmod(scriptPath, 0o700);
-      const titleArgs = [iterm.sessionId, iterm.group, opts.name ?? session]
-        .map(appleScriptString)
-        .join(", ");
-      // 절대 경로는 최초 설치 직후의 메뉴 캐시 지연을 피하고, 적용 표식은 비동기 실패를 잡는다.
-      const titleScript = `tell application "iTerm2"
+      if (iterm) {
+        await runTmux(null, [
+          "set-option",
+          "-t",
+          session,
+          "@tfx_iterm_session",
+          iterm.sessionId,
+        ]);
+        const scriptsDir = pathJoin(
+          homedir(),
+          "Library",
+          "Application Support",
+          "iTerm2",
+          "Scripts",
+        );
+        const scriptPath = pathJoin(scriptsDir, ITERM_TITLE_SCRIPT_NAME);
+        await mkdir(scriptsDir, { recursive: true });
+        const installed = await readFile(scriptPath, "utf8").catch((error) => {
+          if (error.code === "ENOENT") return null;
+          throw error;
+        });
+        if (installed !== ITERM_TITLE_SCRIPT)
+          await writeFile(scriptPath, ITERM_TITLE_SCRIPT, { mode: 0o700 });
+        await chmod(scriptPath, 0o700);
+        const titleArgs = [iterm.sessionId, iterm.group, opts.name ?? session]
+          .map(appleScriptString)
+          .join(", ");
+        // 절대 경로는 최초 설치 직후의 메뉴 캐시 지연을 피하고, 적용 표식은 비동기 실패를 잡는다.
+        const titleScript = `tell application "iTerm2"
   set titleSession to missing value
   repeat with candidateWindow in windows
     repeat with candidateTab in tabs of candidateWindow
@@ -2855,10 +2859,11 @@ async function doStart(adapter, opts) {
   end repeat
   error "iTerm title update was not confirmed; check the iTerm2 Python runtime and Script Console"
 end tell`;
-      await execFileAsync("/usr/bin/osascript", ["-e", titleScript], {
-        timeout: 5000,
-        maxBuffer: 64 * 1024,
-      });
+        await execFileAsync("/usr/bin/osascript", ["-e", titleScript], {
+          timeout: 5000,
+          maxBuffer: 64 * 1024,
+        });
+      }
     } catch (error) {
       itermWarning = error.message;
     }
