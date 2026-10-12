@@ -89,6 +89,7 @@ const BOOLEAN_FLAGS = new Set([
   "no-wait",
   "no-relay-tag",
   "sandbox",
+  "no-auto-trust",
 ]);
 const PEER_HOP_DONE_MARKER = "<<<TFX_PEER_HOP_DONE>>>";
 // uds-fallback diagnostics land here, written async so a failed daemon attach
@@ -100,7 +101,7 @@ const BUG_REPORT_DIR =
 function usage(command) {
   const lines = [
     "Usage:",
-    "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--sandbox] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
+    "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--sandbox] [--no-auto-trust] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude|agy] [--if-busy wait|fail|interrupt|queue] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --cli codex [--transport queue|tmux] (--session NAME[:WINDOW.PANE] | --thread UUID) --prompt TEXT [--from NAME] [--timeout 60] [--no-wait]",
     "    Codex ask defaults to the app-server queue (thread/queue/add, `codex queue --message` only when add is unavailable; delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands.",
@@ -1793,6 +1794,29 @@ function isCodexTrustFolderPrompt(text) {
   );
 }
 
+// 신뢰 화면 판정. 자동 승인과 --no-auto-trust 차단이 같이 쓴다. 문구만 보면 재개 대화의 인용에도 걸리므로 메뉴 구조까지 본다.
+// 항목 문구는 Claude 2.1.296 바이너리, 0.162.1 에 없는 예전 Codex 문구는 dismissCodexTrustPrompt 기준.
+function isClaudeTrustMenu(text) {
+  const menu = splitAtLastSelector(text, "❯");
+  return (
+    Boolean(menu) &&
+    !menu.inComposerBox &&
+    isClaudeTrustPrompt(menu.above) &&
+    /^❯\s*(?:\d+\.\s*)?(?:yes, i trust this folder|no, exit|no, continue without these permissions)/i.test(
+      menu.selected,
+    )
+  );
+}
+
+function isLegacyCodexTrustMenu(text) {
+  const menu = splitAtLastSelector(text, "›");
+  return (
+    Boolean(menu) &&
+    isCodexTrustPrompt(menu.above) &&
+    /^›\s*(?:\d+\.\s*)?(?:yes, continue|no, quit)/i.test(menu.selected)
+  );
+}
+
 // 다중 선택 항목은 한 글자 체크박스로 그린다. 바이너리 상수: [ ] [×] [✔] [√] ☐ ☒, 라디오 ( ) (*) ◯ ◉.
 function isClaudeMcpApprovalPrompt(text) {
   const menu = splitAtLastSelector(text, "❯");
@@ -1841,7 +1865,7 @@ function isSafeSkipLine(line) {
 
 async function dismissCodexTrustPrompt(remote, session) {
   let raw = await captureVisible(remote, session);
-  if (!isCodexTrustPrompt(raw)) {
+  if (!isLegacyCodexTrustMenu(raw)) {
     return { dismissed: false, raw };
   }
 
@@ -1917,7 +1941,7 @@ async function dismissCodexDaemonSettingsPrompt(remote, session) {
 
 async function dismissClaudeTrustPrompt(remote, session) {
   let raw = await captureVisible(remote, session);
-  if (!isClaudeTrustPrompt(raw)) {
+  if (!isClaudeTrustMenu(raw)) {
     return { dismissed: false, raw };
   }
 
@@ -1997,6 +2021,16 @@ function isAgyTrustPrompt(text) {
   return /Do you trust the contents of this project\?/.test(stripAnsi(text));
 }
 
+// --no-auto-trust 차단에만 쓴다. agy 1.3.3 바이너리에서 "No, exit" 가 신뢰 화면 항목인지 확정하지 못해 자동 승인과 isReady 는 문구 판정을 유지한다.
+function isAgyTrustMenu(text) {
+  const menu = splitAtLastSelector(text, ">");
+  return (
+    Boolean(menu) &&
+    isAgyTrustPrompt(menu.above) &&
+    /^>\s*(?:yes, i trust this folder|no, exit)/i.test(menu.selected)
+  );
+}
+
 function isAgyQueuedCapture(text) {
   return /Press up to edit queued messages/i.test(stripAnsi(text));
 }
@@ -2046,8 +2080,11 @@ const ADAPTERS = {
     startupScreens: [
       {
         name: "trust",
-        isPresent: isCodexTrustPrompt,
+        blockedBy: "codex-trust-folder",
+        isPresent: isLegacyCodexTrustMenu,
         dismiss: dismissCodexTrustPrompt,
+        warning:
+          "Codex is asking whether to trust this folder; attach to the tmux session and answer it yourself",
       },
       {
         name: "update",
@@ -2112,8 +2149,11 @@ const ADAPTERS = {
     startupScreens: [
       {
         name: "trust",
-        isPresent: isClaudeTrustPrompt,
+        blockedBy: "claude-trust-folder",
+        isPresent: isClaudeTrustMenu,
         dismiss: dismissClaudeTrustPrompt,
+        warning:
+          "Claude is asking whether to trust this folder; attach to the tmux session and answer it yourself",
       },
       {
         name: "external-imports",
@@ -2149,8 +2189,12 @@ const ADAPTERS = {
     startupScreens: [
       {
         name: "trust",
+        blockedBy: "agy-trust-folder",
+        isBlocking: isAgyTrustMenu,
         isPresent: isAgyTrustPrompt,
         dismiss: dismissAgyTrustPrompt,
+        warning:
+          "agy is asking whether to trust this folder; attach to the tmux session and answer it yourself",
       },
     ],
   },
@@ -2694,7 +2738,25 @@ end tell`;
   });
 }
 
-async function doStart(adapter, opts) {
+async function doStart(launchAdapter, opts) {
+  // --no-auto-trust 면 신뢰 화면을 고르지 않고 승인 화면과 같이 ready:false 로 끝낸다.
+  const trustScreens = opts.noAutoTrust
+    ? launchAdapter.startupScreens.filter((screen) => screen.blockedBy)
+    : [];
+  const adapter = {
+    ...launchAdapter,
+    startupScreens: launchAdapter.startupScreens.filter(
+      (screen) => !trustScreens.includes(screen),
+    ),
+    blockingScreens: [
+      ...trustScreens.map((screen) => ({
+        name: screen.blockedBy,
+        isPresent: screen.isBlocking ?? screen.isPresent,
+        warning: screen.warning,
+      })),
+      ...(launchAdapter.blockingScreens ?? []),
+    ],
+  };
   const {
     session,
     remote,
@@ -4053,6 +4115,7 @@ function startOpts(flags) {
     name: flags.name,
     group: flags.group,
     sandbox: Object.hasOwn(flags, "sandbox"),
+    noAutoTrust: Object.hasOwn(flags, "no-auto-trust"),
     unsetEnv,
     readyTimeoutMs: secondsFlag(
       flags,

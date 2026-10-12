@@ -31,6 +31,8 @@ macOS의 iTerm2에서 로컬 tmux 세션을 `start`하면 리드가 있는 창�
 
 Codex 폴더 신뢰 화면이나 Claude 프로젝트 MCP 승인 화면이 뜨면 `start`는 화면에 답하지 않고 `ready: false`, `blockedBy`(`codex-trust-folder` 또는 `claude-mcp-approval`), 할 일을 적은 `warning`을 반환한다. 세션은 남아 있으므로 tmux 세션에 붙어 직접 고른 뒤 지시를 보낸다.
 
+Claude, agy, 예전 Codex 문구(`Do you trust the contents of this directory`)의 폴더 신뢰 화면은 기본으로 자동 승인한다. `start --no-auto-trust`를 주면 이 화면에도 키를 보내지 않고 같은 형식으로 `blockedBy`(`claude-trust-folder`, `agy-trust-folder`, `codex-trust-folder`)를 반환한다. `--resume`, `--resume-last`, `--remote`에도 똑같이 적용된다.
+
 ## agy 세션
 
 ```bash
