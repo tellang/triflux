@@ -1881,6 +1881,18 @@ test("tfx-live start reports approval screens as blocked without answering them"
         screen:
           "⏺ 5 new MCP servers found in this project\n  ❯ ☐ github\n────────\n❯ \n────────\nCTX:0/100 (0%)",
       },
+      // 입력창 상자 모양은 tfx-live-task-list-extract.test.mjs 의 Claude 캡처를 따른다.
+      ...["(1)", "[x]"].map((marker) => ({
+        cli: "claude",
+        screen: [
+          "⏺ 5 new MCP servers found in this project",
+          "  ❯ [✔] github",
+          "─".repeat(80),
+          `❯ ${marker} 위 내용을 설명해 줘`,
+          "─".repeat(80),
+          "  ? for shortcuts",
+        ].join("\n"),
+      })),
     ];
     for (const [index, { cli, screen, blockedBy }] of cases.entries()) {
       const logPath = path.join(dir, `tmux-log-${index}.jsonl`);

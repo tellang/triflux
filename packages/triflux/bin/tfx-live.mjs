@@ -1779,9 +1779,13 @@ function splitAtLastSelector(text, glyph) {
     .map((line) => line.replace(/^[\s│┃]+/, ""));
   const index = lines.findLastIndex((line) => line.startsWith(glyph));
   if (index < 0) return null;
+  const isRule = (line = "") => /^─{3,}/.test(line);
   return {
     above: lines.slice(0, index).join(" ").replace(/\s+/g, " "),
     selected: lines[index],
+    // Claude 입력창은 위아래 가로줄 상자다. 여러 줄 입력이면 아래 가로줄이 몇 줄 뒤에 온다.
+    inComposerBox:
+      isRule(lines[index - 1]) && lines.slice(index + 1).some(isRule),
   };
 }
 
@@ -1801,6 +1805,7 @@ function isClaudeMcpApprovalPrompt(text) {
   const menu = splitAtLastSelector(text, "❯");
   return (
     Boolean(menu) &&
+    !menu.inComposerBox &&
     /new MCP servers? found in this project/i.test(menu.above) &&
     /^❯\s*(?:\d+\.\s*)?(?:use this|continue without using this MCP server|enable selected|\[.\]|\(.\)|[☐☒◯◉])/iu.test(
       menu.selected,
