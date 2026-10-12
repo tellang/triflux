@@ -272,6 +272,7 @@ export async function readClaudeTranscript(transcriptPath, { requestId } = {}) {
             model: state.model,
             measuredAt: state.measuredAt,
           },
+    enqueued: state.queuedContent !== null,
     userSeen: state.userSeen,
     response: state.response,
     error: state.error,

@@ -108,7 +108,7 @@ function usage(command) {
     "  tfx-live ask --cli codex --transport uds --thread ID|auto --prompt TEXT [--codex-socket PATH|default] [--cwd DIR] [--if-busy wait|fail|steer] [--busy-timeout 60] [--timeout 60] [--max-turn SECONDS]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
     "    ask options: --no-wait --no-relay-tag --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 15/22).",
-    "  tfx-live compact --cli claude --session NAME [--instructions TEXT] [--if-busy fail|wait] [--timeout 60]",
+    "  tfx-live compact --session NAME [--cli claude|codex] [--instructions TEXT] [--then PROMPT] [--no-wait] [--if-busy fail|wait] [--timeout 60]",
     "  tfx-live goal set --session NAME [--cli claude|codex] --condition TEXT [--budget N]",
     "  tfx-live goal status --session NAME [--cli claude|codex]",
     "  tfx-live goal clear --session NAME [--cli claude|codex]",
@@ -2941,7 +2941,10 @@ async function renameAgyConversation(session, name, timeoutMs, pollIntervalMs) {
   return false;
 }
 
-async function waitForTmuxIdle(adapter, opts) {
+async function waitForTmuxIdle(adapter, opts, deps = {}) {
+  const capture = deps.captureVisible ?? captureVisible;
+  const tmux = deps.runTmux ?? runTmux;
+  const pause = deps.sleep ?? sleep;
   const { session, remote, pollIntervalMs, busyTimeoutMs, ifBusy } = opts;
   if (
     ![
@@ -2958,7 +2961,7 @@ async function waitForTmuxIdle(adapter, opts) {
   const startedAt = Date.now();
   let interrupted = false;
   while (true) {
-    const visible = await captureVisible(remote, session);
+    const visible = await capture(remote, session);
     const elapsedMs = Date.now() - startedAt;
     const busy =
       adapter.isBusy(visible) ||
@@ -2971,16 +2974,20 @@ async function waitForTmuxIdle(adapter, opts) {
       );
     }
     if (ifBusy === "interrupt" && !interrupted) {
-      await runTmux(remote, ["send-keys", "-t", session, "Escape"]);
+      await tmux(remote, ["send-keys", "-t", session, "Escape"]);
       interrupted = true;
     }
-    await sleep(
+    await pause(
       Math.min(pollIntervalMs, Math.max(1, busyTimeoutMs - elapsedMs)),
     );
   }
 }
 
-async function doAskViaTmux(adapter, opts) {
+async function doAskViaTmux(adapter, opts, deps = {}) {
+  const tmux = deps.runTmux ?? runTmux;
+  const capture = deps.captureVisible ?? captureVisible;
+  const captureHistory = deps.capturePane ?? capturePane;
+  const pause = deps.sleep ?? sleep;
   const {
     session,
     prompt,
@@ -2993,17 +3000,22 @@ async function doAskViaTmux(adapter, opts) {
     busyTimeoutMs = timeoutMs,
   } = opts;
   const slashCommand = adapter.cli === "agy" && isSlashCommand(prompt);
-  const busyWaitedMs = await waitForTmuxIdle(adapter, {
-    session,
-    remote,
-    pollIntervalMs,
-    busyTimeoutMs,
-    ifBusy: slashCommand ? "queue" : ifBusy,
-  });
+  const busyWaitedMs = opts.skipBusyCheck
+    ? 0
+    : await waitForTmuxIdle(
+        adapter,
+        {
+          session,
+          remote,
+          pollIntervalMs,
+          busyTimeoutMs,
+          ifBusy: slashCommand ? "queue" : ifBusy,
+        },
+        deps,
+      );
   const queued =
-    adapter.cli === "agy" &&
-    adapter.isBusy(await captureVisible(remote, session));
-  const beforeRaw = await capturePane(remote, session);
+    adapter.cli === "agy" && adapter.isBusy(await capture(remote, session));
+  const beforeRaw = await captureHistory(remote, session);
   const contextPctBefore = adapter.contextPct(beforeRaw);
   const context =
     adapter.cli === "agy"
@@ -3026,8 +3038,8 @@ async function doAskViaTmux(adapter, opts) {
     };
 
   const bufferName = tmuxBufferName(session);
-  await runTmux(remote, ["set-buffer", "-b", bufferName, "--", prompt]);
-  await runTmux(remote, [
+  await tmux(remote, ["set-buffer", "-b", bufferName, "--", prompt]);
+  await tmux(remote, [
     "paste-buffer",
     "-b",
     bufferName,
@@ -3036,31 +3048,42 @@ async function doAskViaTmux(adapter, opts) {
     "-t",
     session,
   ]);
-  await sleep(settleMs);
+  await pause(settleMs);
 
-  let promptSubmitted = adapter.cli === "agy" ? false : !doneMarker;
+  let promptSubmitted =
+    adapter.cli === "agy" || opts.confirmSubmission ? false : !doneMarker;
   if (doneMarker || opts.noWait || adapter.cli === "agy") {
-    for (let attempt = 1; attempt <= PROMPT_SUBMIT_MAX_ATTEMPTS; attempt += 1) {
-      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
-      await sleep(PROMPT_SUBMIT_RETRY_DELAY_MS);
-      const submissionVisible = await captureVisible(remote, session);
-      if (!composerShowsPrompt(submissionVisible, prompt, adapter.cli)) {
+    for (
+      let attempt = 1;
+      attempt <= (opts.submitAttempts ?? PROMPT_SUBMIT_MAX_ATTEMPTS);
+      attempt += 1
+    ) {
+      await tmux(remote, ["send-keys", "-t", session, "Enter"]);
+      await pause(PROMPT_SUBMIT_RETRY_DELAY_MS);
+      const submissionVisible = await capture(remote, session);
+      if (
+        opts.confirmSubmission
+          ? await opts.confirmSubmission(submissionVisible)
+          : !composerShowsPrompt(submissionVisible, prompt, adapter.cli)
+      ) {
         promptSubmitted = true;
         break;
       }
     }
     if (!promptSubmitted) {
       throw new Error(
-        `Prompt did not submit after ${PROMPT_SUBMIT_MAX_ATTEMPTS} attempts`,
+        opts.confirmSubmission
+          ? "compact submission could not be confirmed (it may still have started, or /compact may remain in the composer); --then was not sent"
+          : `Prompt did not submit after ${PROMPT_SUBMIT_MAX_ATTEMPTS} attempts`,
       );
     }
   } else {
-    await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+    await tmux(remote, ["send-keys", "-t", session, "Enter"]);
   }
 
   let nameApplied;
   if (adapter.cli === "agy" && !slashCommand) {
-    const { stdout } = await runTmux(null, [
+    const { stdout } = await tmux(null, [
       "show-options",
       "-qv",
       "-t",
@@ -3093,7 +3116,7 @@ async function doAskViaTmux(adapter, opts) {
               pollIntervalMs,
             );
             if (nameApplied)
-              await runTmux(null, [
+              await tmux(null, [
                 "set-option",
                 "-u",
                 "-t",
@@ -3102,7 +3125,7 @@ async function doAskViaTmux(adapter, opts) {
               ]);
             break;
           }
-          await sleep(Math.min(pollIntervalMs, 200));
+          await pause(Math.min(pollIntervalMs, 200));
         }
       } catch {
         nameApplied = false;
@@ -3160,8 +3183,8 @@ async function doAskViaTmux(adapter, opts) {
 
   while (Date.now() - startedAt < timeoutMs) {
     visible = doneMarker
-      ? await capturePane(remote, session)
-      : await captureVisible(remote, session);
+      ? await captureHistory(remote, session)
+      : await capture(remote, session);
     contextPctAfter = adapter.contextPct(visible);
 
     quietPolls = visible === previousVisible ? quietPolls + 1 : 0;
@@ -3184,7 +3207,7 @@ async function doAskViaTmux(adapter, opts) {
       quietPolls >= FALLBACK_QUIET_POLLS &&
       hasTmuxAssistantResponseAfterCurrentPrompt(
         adapter,
-        await capturePane(remote, session),
+        await captureHistory(remote, session),
         prompt,
         beforeRaw,
       );
@@ -3193,10 +3216,10 @@ async function doAskViaTmux(adapter, opts) {
       break;
     }
 
-    await sleep(pollIntervalMs);
+    await pause(pollIntervalMs);
   }
 
-  raw = await capturePane(remote, session);
+  raw = await captureHistory(remote, session);
   const markerResponse = promptSubmitted
     ? extractResponseSinceMarker({
         beforeRaw,
@@ -3412,11 +3435,15 @@ async function resolveCodexTmuxThread(session, deps = {}) {
 
 async function doAskViaQueue(adapter, opts, deps = {}) {
   // queue 를 못 쓰면 tmux 붙여넣기로 보내고 그 이유를 결과에 남긴다.
-  const fallback = async (reason) => ({
-    ...(await doAskViaTmux(adapter, { ...opts, transport: "tmux" })),
-    transportRequested: "queue",
-    fallbackReason: reason,
-  });
+  const fallback = async (reason) => {
+    if (opts.queueOnly)
+      throw new Error(`compact --then requires Codex queue: ${reason}`);
+    return {
+      ...(await doAskViaTmux(adapter, { ...opts, transport: "tmux" })),
+      transportRequested: "queue",
+      fallbackReason: reason,
+    };
+  };
   if (opts.remote) return fallback("remote-host");
   const thread = opts.threadId
     ? { threadId: opts.threadId, threadSource: "flag" }
@@ -4374,70 +4401,208 @@ async function tmuxContext(adapter, opts) {
   }
 }
 
-async function compact(flags) {
-  if (flags.cli === "agy")
+async function doCompact(flags, deps = {}) {
+  const cli = flags.cli ?? "claude";
+  if (cli === "agy")
     throw new Error("agy has no compact; use /clear or a handoff");
   if (
-    (flags.cli ?? "claude") !== "claude" ||
+    !["claude", "codex"].includes(cli) ||
     flags.remote ||
     flags.short ||
     flags["session-id"] ||
     (flags.transport && flags.transport !== "tmux")
   )
     throw new Error(
-      "compact supports local --cli claude --session NAME only; UDS slash execution is unverified",
+      "compact supports local --cli claude|codex --session NAME only",
     );
+  if (cli === "codex" && flags.instructions)
+    throw new Error(
+      "Codex /compact does not accept --instructions; use --then for follow-up instructions",
+    );
+  const thenPrompt = flags.then?.trim();
+  if (flags.then !== undefined && !thenPrompt)
+    throw new Error("--then must not be blank");
+  if (isSlashCommand(thenPrompt))
+    throw new Error("--then accepts text instructions, not slash commands");
   const ifBusy = flags["if-busy"] ?? "fail";
   if (!["fail", "wait"].includes(ifBusy))
     throw new Error("compact --if-busy must be fail or wait");
+  const adapter = ADAPTERS[cli];
   const opts = askOpts(
     {
       ...flags,
-      cli: "claude",
+      cli,
       transport: "tmux",
       "if-busy": ifBusy,
       "no-wait": true,
       prompt: `/compact${flags.instructions ? ` ${flags.instructions}` : ""}`,
     },
-    ADAPTERS.claude,
+    adapter,
   );
-  if (ifBusy === "wait") await waitForTmuxIdle(ADAPTERS.claude, opts);
-  const transcriptPath = await claudeTmuxTranscript(
-    opts.session,
-    opts.configDir,
-  );
-  const before = await readClaudeTranscript(transcriptPath);
-  if (!before)
+  const pause = deps.sleep ?? sleep;
+  const capture = deps.captureVisible ?? captureVisible;
+  await waitForTmuxIdle(adapter, opts, deps);
+  let transcriptPath;
+  let threadId;
+  if (cli === "claude") {
+    transcriptPath = await (deps.claudeTmuxTranscript ?? claudeTmuxTranscript)(
+      opts.session,
+      opts.configDir,
+    );
+  } else {
+    const thread = await (
+      deps.resolveCodexTmuxThread ?? resolveCodexTmuxThread
+    )(opts.session, deps);
+    threadId = thread.threadId;
+    transcriptPath = await (deps.findCodexRollout ?? findCodexRollout)(
+      threadId,
+    );
+  }
+  const readSnapshot = () =>
+    cli === "claude"
+      ? readClaudeTranscript(transcriptPath)
+      : readCodexContext(transcriptPath, threadId);
+  const before = transcriptPath && (await readSnapshot());
+  if (!before || !Number.isInteger(before.compactCount))
     throw new Error(
-      "compact requires a discoverable Claude transcript for this tmux pane",
+      `compact requires a discoverable ${cli === "claude" ? "Claude transcript" : "Codex rollout"} for this tmux pane`,
     );
-  await doAskViaTmux(ADAPTERS.claude, {
-    ...opts,
-    ifBusy: "fail",
-    skipContextGuard: true,
-  });
+  let snapshot = before;
+  const done = () => snapshot?.compactCount > before.compactCount;
   const deadline = Date.now() + opts.timeoutMs;
-  do {
-    const snapshot = await readClaudeTranscript(transcriptPath);
-    if (snapshot?.compactCount > before.compactCount) {
-      printJson({
-        cli: "claude",
-        session: opts.session,
-        compacted: true,
-        ...snapshot.compact,
-      });
-      return;
-    }
-    await sleep(
-      Math.min(opts.pollIntervalMs, Math.max(0, deadline - Date.now())),
+  const confirmSubmission = async (visible) => {
+    const submissionDeadline = Math.min(
+      deadline,
+      Date.now() + (cli === "codex" ? 1000 : 5000),
     );
-  } while (Date.now() < deadline);
-  printJson({
-    cli: "claude",
+    do {
+      snapshot = await readSnapshot();
+      if (
+        done() ||
+        (cli === "claude"
+          ? /Compacting conversation/i.test(stripAnsi(visible))
+          : /Compacting context/i.test(stripAnsi(visible)))
+      )
+        return true;
+      await pause(
+        Math.min(
+          opts.pollIntervalMs,
+          Math.max(0, submissionDeadline - Date.now()),
+        ),
+      );
+      visible = await capture(null, opts.session);
+    } while (Date.now() < submissionDeadline);
+    return false;
+  };
+  await doAskViaTmux(
+    adapter,
+    {
+      ...opts,
+      skipBusyCheck: true,
+      skipContextGuard: true,
+      submitAttempts: cli === "codex" ? 2 : 1,
+      confirmSubmission,
+    },
+    deps,
+  );
+  const result = {
+    cli,
     session: opts.session,
-    compacted: false,
-    timedOut: true,
-  });
+    compact: { submitted: true, done: done() },
+    compacted: done(),
+  };
+  if (thenPrompt) {
+    const requestId = randomBytes(6).toString("hex");
+    const thenOpts = {
+      ...opts,
+      prompt: `[tfx-live req=${requestId}]\n${thenPrompt}`,
+      requestId,
+      threadId,
+      noWait: true,
+      settleMs: 0,
+      transport: cli === "codex" ? "queue" : "tmux",
+      skipBusyCheck: true,
+      skipContextGuard: true,
+      queueOnly: true,
+    };
+    try {
+      if (cli === "codex") {
+        const queued = await doAskViaQueue(adapter, thenOpts, deps);
+        // biome-ignore lint/suspicious/noThenProperty: CLI 계약의 then은 함수가 아닌 큐 결과다.
+        result.then = {
+          ...queued,
+          requestId,
+          queued: queued.inputSent === true,
+        };
+        if (!result.then.queued) {
+          result.ok = false;
+          result.error =
+            queued.status === "unknown"
+              ? `${queued.error}; --then may already be queued, use wait --request-id and do not resend`
+              : queued.error;
+        }
+      } else {
+        await doAskViaTmux(adapter, thenOpts, deps);
+        const queueDeadline = Date.now() + Math.min(opts.timeoutMs, 5000);
+        let confirmedBy;
+        do {
+          const transcript = await readClaudeTranscript(transcriptPath, {
+            requestId,
+          });
+          if (transcript?.enqueued) confirmedBy = "enqueue";
+          else if (transcript?.userSeen) confirmedBy = "user";
+          else if (
+            /queued messages/i.test(
+              stripAnsi(await capture(null, opts.session)),
+            )
+          )
+            confirmedBy = "tui";
+          if (confirmedBy) break;
+          await pause(
+            Math.min(
+              opts.pollIntervalMs,
+              Math.max(0, queueDeadline - Date.now()),
+            ),
+          );
+        } while (Date.now() < queueDeadline);
+        // biome-ignore lint/suspicious/noThenProperty: CLI 계약의 then은 함수가 아닌 큐 결과다.
+        result.then = {
+          requestId,
+          queued: Boolean(confirmedBy) && confirmedBy !== "user",
+          transport: "tmux",
+          ...(confirmedBy === "user" ? { delivered: true } : {}),
+          ...(confirmedBy ? { confirmedBy } : {}),
+        };
+        if (!confirmedBy) {
+          result.ok = false;
+          result.error =
+            "Claude --then was sent but enqueue could not be confirmed; use wait --request-id, do not resend";
+        }
+      }
+    } catch (error) {
+      // compact 는 이미 제출됐으므로 그 정보를 지우지 않고 then 실패만 결과에 담는다.
+      // biome-ignore lint/suspicious/noThenProperty: CLI 계약의 then은 함수가 아닌 큐 결과다.
+      result.then = { requestId, queued: false, error: error.message };
+      result.ok = false;
+      result.error = `compact was submitted but --then failed: ${error.message}`;
+    }
+  }
+  if (!Object.hasOwn(flags, "no-wait")) {
+    do {
+      snapshot = await readSnapshot();
+      if (done()) break;
+      await pause(
+        Math.min(opts.pollIntervalMs, Math.max(0, deadline - Date.now())),
+      );
+    } while (Date.now() < deadline);
+    if (!done()) result.timedOut = true;
+  }
+  result.compacted = result.compact.done = done();
+  if (done()) {
+    Object.assign(result, snapshot.compact);
+    Object.assign(result.compact, snapshot.compact);
+  }
+  return result;
 }
 
 function codexGoalStatus(goal) {
@@ -5695,7 +5860,9 @@ async function main() {
   } else if (command === "queue") {
     await queue(flags);
   } else if (command === "compact") {
-    await compact(flags);
+    const result = await doCompact(flags);
+    printJson(result);
+    if (result.ok === false) process.exitCode = 1;
   } else if (command === "goal") {
     printJson(await goal(action, flags));
   } else if (command === "rename") {
@@ -5737,6 +5904,7 @@ export {
   discoverClaudeTmuxSessions,
   discoverCodexTmuxSessions,
   doAskViaTmux,
+  doCompact,
   extractAssistantResponse,
   extractClaudeCompletedTaskListResponse,
   extractResponseSinceMarker,
