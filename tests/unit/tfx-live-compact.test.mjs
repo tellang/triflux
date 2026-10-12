@@ -212,10 +212,15 @@ test("Codex 큐 오류는 바쁜 tmux로 then을 재전송하지 않는다", asy
     queueError: new Error("queue unavailable"),
   });
   try {
-    await assert.rejects(
-      doCompact({ ...fake.flags, then: "다음 작업" }, fake.deps),
-      /queue unavailable/,
+    // compact 는 이미 제출됐으므로 오류로 던지지 않고 그 사실을 결과에 남긴다.
+    const result = await doCompact(
+      { ...fake.flags, then: "다음 작업" },
+      fake.deps,
     );
+    assert.equal(result.ok, false);
+    assert.equal(result.compact.submitted, true);
+    assert.equal(result.then.queued, false);
+    assert.match(result.then.error, /queue unavailable/);
     assert.equal(fake.calls.includes("then-tmux"), false);
   } finally {
     await fake.cleanup();

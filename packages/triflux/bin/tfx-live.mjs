@@ -3073,7 +3073,7 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
     if (!promptSubmitted) {
       throw new Error(
         opts.confirmSubmission
-          ? "compact submission could not be confirmed; --then was not sent"
+          ? "compact submission could not be confirmed (it may still have started, or /compact may remain in the composer); --then was not sent"
           : `Prompt did not submit after ${PROMPT_SUBMIT_MAX_ATTEMPTS} attempts`,
       );
     }
@@ -4536,7 +4536,10 @@ async function doCompact(flags, deps = {}) {
         };
         if (!result.then.queued) {
           result.ok = false;
-          result.error = queued.error;
+          result.error =
+            queued.status === "unknown"
+              ? `${queued.error}; --then may already be queued, use wait --request-id and do not resend`
+              : queued.error;
         }
       } else {
         await doAskViaTmux(adapter, thenOpts, deps);
@@ -4577,8 +4580,11 @@ async function doCompact(flags, deps = {}) {
         }
       }
     } catch (error) {
-      error.requestId = requestId;
-      throw error;
+      // compact 는 이미 제출됐으므로 그 정보를 지우지 않고 then 실패만 결과에 담는다.
+      // biome-ignore lint/suspicious/noThenProperty: CLI 계약의 then은 함수가 아닌 큐 결과다.
+      result.then = { requestId, queued: false, error: error.message };
+      result.ok = false;
+      result.error = `compact was submitted but --then failed: ${error.message}`;
     }
   }
   if (!Object.hasOwn(flags, "no-wait")) {
