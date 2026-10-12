@@ -1827,6 +1827,114 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
   }
 });
 
+test("tfx-live start reports approval screens as blocked without answering them", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-start-gate-"));
+  try {
+    const tmuxPath = path.join(dir, "tmux");
+    await fs.writeFile(
+      tmuxPath,
+      [
+        "#!/usr/bin/env node",
+        "import fs from 'node:fs';",
+        "const args = process.argv.slice(2);",
+        "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
+        "if (args[0] === 'capture-pane') console.log(process.env.TMUX_SCREEN);",
+      ].join("\n"),
+    );
+    await fs.chmod(tmuxPath, 0o755);
+    // 문구와 체크박스 글리프는 Codex 0.162.1, Claude Code 2.1.296 바이너리 문자열 기준.
+    // 줄바꿈이 문구를 끊는 경우와, 문구를 인용한 재개 대화 아래 입력창이 있는 정상 화면을 넣었다.
+    const cases = [
+      {
+        cli: "codex",
+        screen:
+          "  TRUST THIS\n  folder? Codex can read, edit, and run files here.\n› 1. Trust and continue\n  2. Open restricted",
+        blockedBy: "codex-trust-folder",
+      },
+      {
+        cli: "claude",
+        screen:
+          "│ 5 new MCP servers found in this\n│ project\n│ Select any you wish to enable.\n│ ❯ ☐ github\n│   ☐ linear",
+        blockedBy: "claude-mcp-approval",
+      },
+      {
+        cli: "claude",
+        screen:
+          "5 new MCP servers found in this project\n❯ [✔] github\n  [ ] linear",
+        blockedBy: "claude-mcp-approval",
+      },
+      {
+        cli: "claude",
+        screen:
+          "New MCP server found in this project: github\n❯ 1. Use this and all future MCP servers in this project\n  2. Use this MCP server",
+        blockedBy: "claude-mcp-approval",
+      },
+      { cli: "codex", screen: "›" },
+      { cli: "claude", screen: "❯\nCTX:0/100 (0%)" },
+      {
+        cli: "codex",
+        screen:
+          "• Trust this folder?\n  › 1. Trust and continue\n\n› \n  gpt-6.1-sol · Context 3% used",
+      },
+      {
+        cli: "claude",
+        screen:
+          "⏺ 5 new MCP servers found in this project\n  ❯ ☐ github\n────────\n❯ \n────────\nCTX:0/100 (0%)",
+      },
+      // 입력창 상자 모양은 tfx-live-task-list-extract.test.mjs 의 Claude 캡처를 따른다.
+      ...["(1)", "[x]"].map((marker) => ({
+        cli: "claude",
+        screen: [
+          "⏺ 5 new MCP servers found in this project",
+          "  ❯ [✔] github",
+          "─".repeat(80),
+          `❯ ${marker} 위 내용을 설명해 줘`,
+          "─".repeat(80),
+          "  ? for shortcuts",
+        ].join("\n"),
+      })),
+    ];
+    for (const [index, { cli, screen, blockedBy }] of cases.entries()) {
+      const logPath = path.join(dir, `tmux-log-${index}.jsonl`);
+      const result = JSON.parse(
+        await runTfxLive(
+          [
+            "start",
+            "--cli",
+            cli,
+            "--session",
+            `gate-${index}`,
+            "--ready-timeout",
+            "0.2",
+            "--poll-interval",
+            "1",
+          ],
+          {
+            env: {
+              PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+              TMUX_LOG: logPath,
+              TMUX_SCREEN: screen,
+              TFX_AGENTS_ROW: "0",
+              LC_TERMINAL: "",
+              TERM_PROGRAM: "",
+            },
+          },
+        ),
+      );
+      assert.equal(result.ready, !blockedBy, cli);
+      assert.equal(result.blockedBy, blockedBy, cli);
+      if (!blockedBy) continue;
+      assert.match(result.warning, /attach to the tmux session/);
+      const answered = (await readTmuxLog(logPath)).filter(
+        (args) => args[0] === "send-keys" && args.length === 4,
+      );
+      assert.deepEqual(answered, [], `${cli} approval screen was answered`);
+    }
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("tfx-live start keeps resume launch keys ahead of model overrides", async () => {
   const dir = await fs.mkdtemp(
     path.join(os.tmpdir(), "tfx-live-resume-flags-"),
