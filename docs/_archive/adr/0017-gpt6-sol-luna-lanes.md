@@ -1,11 +1,11 @@
 ---
 id: 0017
 title: Terra와 Luna 레인을 GPT-6 Sol과 Luna로 옮긴다
-status: accepted
+status: superseded
 date: 2026-09-23
 deciders: [tellang]
 supersedes: []
-superseded_by: null
+superseded_by: 0037
 relates: [0004, 0015, 0016]
 pr: null
 ---

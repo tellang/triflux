@@ -10,7 +10,7 @@ const MODEL_CONTEXT = [
   {
     cli: "claude",
     model:
-      /^(?:claude-)?(?:fable-5[.-]1|opus-5[.-]5|sonnet-5[.-]5|haiku-5[.-]5)(?:$|[-[])/i,
+      /^(?:claude-)?(?:fable|opus|sonnet|haiku)-(?:[5-9]|[1-9]\d+)(?:[.-]\d+)*(?:$|[-[])/i,
     tokens: 1_000_000,
     source:
       "https://platform.claude.com/docs/en/build-with-claude/context-windows",

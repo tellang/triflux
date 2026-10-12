@@ -27,7 +27,15 @@ function makeTempPaths() {
   const geminiDir = join(root, ".gemini");
   const profilesPath = join(geminiDir, "triflux-profiles.json");
   mkdirSync(geminiDir, { recursive: true });
-  return { geminiDir, profilesPath };
+  return {
+    geminiDir,
+    profilesPath,
+    home: root,
+    stateDir: join(root, "state"),
+    runCommand: () => {
+      throw new Error("offline");
+    },
+  };
 }
 
 afterEach(() => {
@@ -38,14 +46,16 @@ afterEach(() => {
 
 describe("ensureGeminiProfiles()", () => {
   it("설정 파일이 없으면 기본 프로필을 생성하고 추가 수를 반환한다", () => {
-    const { geminiDir, profilesPath } = makeTempPaths();
+    const opts = makeTempPaths();
+    const { profilesPath } = opts;
     const expectedCount = Object.keys(DEFAULT_GEMINI_PROFILES.profiles).length;
 
-    const result = ensureGeminiProfiles({ geminiDir, profilesPath });
+    const result = ensureGeminiProfiles(opts);
 
     assert.deepEqual(result, {
       ok: true,
       created: true,
+      changed: true,
       added: expectedCount,
       count: expectedCount,
       message: null,
@@ -58,13 +68,14 @@ describe("ensureGeminiProfiles()", () => {
   });
 
   it("누락된 프로필만 보완하고 총 개수를 유지한다", () => {
-    const { geminiDir, profilesPath } = makeTempPaths();
+    const opts = makeTempPaths();
+    const { profilesPath } = opts;
     writeFileSync(
       profilesPath,
       JSON.stringify(
         {
           profiles: {
-            flash38_high: DEFAULT_GEMINI_PROFILES.profiles.flash38_high,
+            flash_high: DEFAULT_GEMINI_PROFILES.profiles.flash_high,
           },
         },
         null,
@@ -72,7 +83,7 @@ describe("ensureGeminiProfiles()", () => {
       ),
     );
 
-    const result = ensureGeminiProfiles({ geminiDir, profilesPath });
+    const result = ensureGeminiProfiles(opts);
     const saved = JSON.parse(readFileSync(profilesPath, "utf8"));
 
     assert.equal(result.ok, true);
@@ -90,10 +101,11 @@ describe("ensureGeminiProfiles()", () => {
   });
 
   it("기존 파일 파싱에 실패하면 백업 후 기본 프로필로 재생성한다", () => {
-    const { geminiDir, profilesPath } = makeTempPaths();
+    const opts = makeTempPaths();
+    const { geminiDir, profilesPath } = opts;
     writeFileSync(profilesPath, "{broken json", "utf8");
 
-    const result = ensureGeminiProfiles({ geminiDir, profilesPath });
+    const result = ensureGeminiProfiles(opts);
     const backupFiles = readdirSync(geminiDir).filter((name) =>
       name.startsWith("triflux-profiles.json.bak."),
     );
@@ -113,8 +125,9 @@ describe("ensureGeminiProfiles()", () => {
 });
 
 describe("ensureGeminiProfiles() 기존 설정", () => {
-  it("기존 프로필과 기본 모델을 유지하며 새 기본 프로필만 추가한다", () => {
-    const { geminiDir, profilesPath } = makeTempPaths();
+  it("커스텀 프로필을 보존하고 관리 기본 모델을 갱신한다", () => {
+    const opts = makeTempPaths();
+    const { geminiDir, profilesPath } = opts;
     const oldModel = "Gemini 3.5 Flash (Medium)";
     const oldProfile = { model: oldModel, hint: "custom" };
     writeFileSync(
@@ -122,18 +135,18 @@ describe("ensureGeminiProfiles() 기존 설정", () => {
       JSON.stringify({ model: oldModel, profiles: { flash35: oldProfile } }),
     );
 
-    const result = ensureGeminiProfiles({ geminiDir, profilesPath });
+    const result = ensureGeminiProfiles(opts);
     const saved = JSON.parse(readFileSync(profilesPath, "utf8"));
 
     assert.equal(
       result.added,
       Object.keys(DEFAULT_GEMINI_PROFILES.profiles).length,
     );
-    assert.equal(saved.model, oldModel);
+    assert.equal(saved.model, DEFAULT_GEMINI_PROFILES.model);
     assert.deepEqual(saved.profiles.flash35, oldProfile);
     assert.deepEqual(
-      saved.profiles.flash38,
-      DEFAULT_GEMINI_PROFILES.profiles.flash38,
+      saved.profiles.flash,
+      DEFAULT_GEMINI_PROFILES.profiles.flash,
     );
     assert.equal(
       readdirSync(geminiDir).filter((name) => name.includes(".bak.")).length,
@@ -143,35 +156,32 @@ describe("ensureGeminiProfiles() 기존 설정", () => {
 });
 
 describe("용도별 effort 분리 (SSOT)", () => {
-  it("역할을 3.8 Flash effort 프로필로 매핑한다", () => {
-    assert.equal(resolveGeminiProfileForPurpose("designer"), "flash38_high");
-    assert.equal(resolveGeminiProfileForPurpose("reviewer"), "flash38_high");
-    assert.equal(
-      resolveGeminiProfileForPurpose("Code-Reviewer"),
-      "flash38_high",
-    );
-    assert.equal(resolveGeminiProfileForPurpose("writer"), "flash38");
-    assert.equal(resolveGeminiProfileForPurpose("antigravity"), "flash38");
-    assert.equal(resolveGeminiProfileForPurpose("summarizer"), "flash38_low");
-    assert.equal(resolveGeminiProfileForPurpose("no-such-role"), "flash38");
-    assert.equal(resolveGeminiProfileForPurpose(""), "flash38");
+  it("역할을 Flash effort 프로필로 매핑한다", () => {
+    assert.equal(resolveGeminiProfileForPurpose("designer"), "flash_high");
+    assert.equal(resolveGeminiProfileForPurpose("reviewer"), "flash_high");
+    assert.equal(resolveGeminiProfileForPurpose("Code-Reviewer"), "flash_high");
+    assert.equal(resolveGeminiProfileForPurpose("writer"), "flash");
+    assert.equal(resolveGeminiProfileForPurpose("antigravity"), "flash");
+    assert.equal(resolveGeminiProfileForPurpose("summarizer"), "flash_low");
+    assert.equal(resolveGeminiProfileForPurpose("no-such-role"), "flash");
+    assert.equal(resolveGeminiProfileForPurpose(""), "flash");
   });
 
   it("프로필 이름을 display name 으로 푼다 (사용자 파일 우선, 없으면 기본값)", () => {
     const { profilesPath } = makeTempPaths();
     assert.equal(
-      resolveGeminiModel("flash38_high", { profilesPath }),
+      resolveGeminiModel("flash_high", { profilesPath }),
       "Gemini 3.8 Flash (High)",
     );
     writeFileSync(
       profilesPath,
       JSON.stringify({
         model: "Gemini 3.8 Flash (Low)",
-        profiles: { flash38: { model: "Gemini 3.7 Flash (Medium)" } },
+        profiles: { flash: { model: "Gemini 3.7 Flash (Medium)" } },
       }),
     );
     assert.equal(
-      resolveGeminiModel("flash38", { profilesPath }),
+      resolveGeminiModel("flash", { profilesPath }),
       "Gemini 3.7 Flash (Medium)",
     );
     assert.equal(

@@ -36,6 +36,10 @@ import {
   recordFile,
   renderCliResult,
 } from "./lib/cli-output.mjs";
+import {
+  ensureManagedCodexProfiles,
+  normalizeCodexProfileName,
+} from "./lib/codex-profile-config.mjs";
 import { ensureGeminiProfiles } from "./lib/gemini-profiles.mjs";
 import {
   retireInstallLeftovers,
@@ -56,6 +60,7 @@ import {
   resolveMachineProfilePath,
   resolveTrifluxHome,
 } from "./lib/machine-profile.mjs";
+import { CODEX_FAMILY_PROFILES } from "./lib/model-family-resolver.mjs";
 import { parseFrontmatter } from "./lib/skill-template.mjs";
 import { resolveStableNodeBin } from "./lib/stable-node.mjs";
 import { isTestRun, writesRealHomeInTest } from "./lib/test-env.mjs";
@@ -568,39 +573,12 @@ const BREADCRUMB_PATH = join(CLAUDE_DIR, "scripts", ".tfx-pkg-root");
 const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 const HUD_PATH = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
 
-const REQUIRED_CODEX_PROFILES = [
-  // GPT-6 Astra: max/ultra are explicit exception lanes, not role defaults.
-  {
-    name: "gpt6_astra_ultra",
-    lines: ['model = "gpt-6-astra"', 'model_reasoning_effort = "ultra"'],
-  },
-  {
-    name: "gpt6_astra_max",
-    lines: ['model = "gpt-6-astra"', 'model_reasoning_effort = "max"'],
-  },
-  {
-    name: "gpt6_astra_xhigh",
-    lines: ['model = "gpt-6-astra"', 'model_reasoning_effort = "xhigh"'],
-  },
-  // GPT-6.1 Sol: implementation, review, and verification role defaults.
-  {
-    name: "gpt61_sol_high",
-    lines: ['model = "gpt-6.1-sol"', 'model_reasoning_effort = "high"'],
-  },
-  {
-    name: "gpt61_sol_med",
-    lines: ['model = "gpt-6.1-sol"', 'model_reasoning_effort = "medium"'],
-  },
-  // GPT-6 Luna: high for focused lanes, low for latency-first lanes.
-  {
-    name: "gpt6_luna_high",
-    lines: ['model = "gpt-6-luna"', 'model_reasoning_effort = "high"'],
-  },
-  {
-    name: "gpt6_luna_low",
-    lines: ['model = "gpt-6-luna"', 'model_reasoning_effort = "low"'],
-  },
-];
+const REQUIRED_CODEX_PROFILES = Object.entries(CODEX_FAMILY_PROFILES).map(
+  ([name, { model, effort }]) => ({
+    name,
+    lines: [`model = "${model}"`, `model_reasoning_effort = "${effort}"`],
+  }),
+);
 
 // Codex 0.134 마이그레이션: triflux 가 과거에 inline [profiles.*] 로 썼던 구형 프로필.
 // config.toml 에서 제거 대상 (retired 모델 — 별도 파일로 만들지 않는다).
@@ -1586,19 +1564,12 @@ function ensureCodexProfiles() {
     // 키)을 읽고, config.toml 의 inline [profiles.X] 테이블은 거부한다. 따라서
     // (a) 각 프로필을 별도 파일로 쓰고 (b) config.toml 의 inline 테이블을 제거한다.
     // ref: developers.openai.com/codex/config-advanced#profiles
-    for (const profile of REQUIRED_CODEX_PROFILES) {
-      const profilePath = join(CODEX_DIR, `${profile.name}.config.toml`);
-      const desiredContent = `${profile.lines.join("\n")}\n`;
-      const existingContent = existsSync(profilePath)
-        ? readFileSync(profilePath, "utf8")
-        : null;
-      if (existingContent !== desiredContent) {
-        writeFileSync(profilePath, desiredContent, CODEX_FILE_WRITE);
-        changed++;
-      }
-    }
+    changed += ensureManagedCodexProfiles({
+      home: _TFX_HOME,
+      codexHome: CODEX_DIR,
+    }).changed;
     // config.toml 의 모든 inline [profiles.*] 마이그레이션 (Codex 0.134 는 inline 거부).
-    //   - 관리 gpt6_*: 위에서 canonical 별도 파일을 썼으므로 inline 만 제거.
+    //   - 관리 가족 별칭과 옛 이름: 위에서 별도 파일을 썼으므로 inline 만 제거.
     //   - 구형 retired (codex53/spark53/gpt54/mini54): inline 제거, 재생성 안 함.
     //   - 그 외 사용자 커스텀: 본문을 보존해 별도 파일로 이관한 뒤 inline 제거.
     //     (별도 파일이 이미 있으면 덮어쓰지 않는다 — 사용자 수정 보존.)
@@ -1607,7 +1578,10 @@ function ensureCodexProfiles() {
     );
     const retiredProfileNames = new Set(LEGACY_CODEX_PROFILE_NAMES);
     for (const name of listInlineProfileNames(updated)) {
-      if (!managedProfileNames.has(name) && !retiredProfileNames.has(name)) {
+      if (
+        !managedProfileNames.has(normalizeCodexProfileName(name)) &&
+        !retiredProfileNames.has(name)
+      ) {
         const customPath = join(CODEX_DIR, `${name}.config.toml`);
         if (!existsSync(customPath)) {
           const lines = extractProfileLines(updated, name);
@@ -2432,7 +2406,7 @@ async function runDeferredWithIo(stdinData, io) {
   const geminiDir = join(_TFX_HOME, ".gemini");
   if (!isProtectedSetupEnv() && existsSync(geminiDir)) {
     geminiProfilesResult = ensureGeminiProfiles({ geminiDir });
-    if (geminiProfilesResult.ok && geminiProfilesResult.added > 0) synced++;
+    if (geminiProfilesResult.ok && geminiProfilesResult.changed) synced++;
     else if (!geminiProfilesResult.ok)
       io.warn(
         "gemini-profiles",

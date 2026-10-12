@@ -9,6 +9,12 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { writeRotatedBackup } from "./backup-rotation.mjs";
+import {
+  CODEX_FAMILY_PROFILES,
+  modelFamilyPaths,
+  resolveModelFamilies,
+  writeModelFile,
+} from "./model-family-resolver.mjs";
 
 const EFFORT_BY_SUFFIX = {
   ultra: "ultra",
@@ -20,41 +26,38 @@ const EFFORT_BY_SUFFIX = {
   low: "low",
 };
 
-const CANONICAL_PROFILE_VALUES = Object.freeze({
-  gpt6_luna_low: { model: "gpt-6-luna", effort: "low" },
-  gpt6_luna_high: { model: "gpt-6-luna", effort: "high" },
-  gpt61_sol_med: { model: "gpt-6.1-sol", effort: "medium" },
-  gpt61_sol_high: { model: "gpt-6.1-sol", effort: "high" },
-  gpt6_astra_xhigh: { model: "gpt-6-astra", effort: "xhigh" },
-  gpt6_astra_max: { model: "gpt-6-astra", effort: "max" },
-  gpt6_astra_ultra: { model: "gpt-6-astra", effort: "ultra" },
-});
-
-// GPT-5.6 lane names map to the GPT-6 lane with the same effort. GPT-6 has no
-// Terra tier, so Terra lanes move to Sol. GPT-6 Sol lane names map to GPT-6.1
-// Sol with the same effort.
 const LEGACY_CANONICAL_PROFILE_ALIASES = Object.freeze({
-  gpt56_sol_xhigh: "gpt6_astra_xhigh",
-  gpt56_sol_max: "gpt6_astra_max",
-  gpt56_sol_ultra: "gpt6_astra_ultra",
-  gpt56_terra_high: "gpt61_sol_high",
-  gpt56_terra_med: "gpt61_sol_med",
-  gpt56_luna_low: "gpt6_luna_low",
-  gpt6_sol_high: "gpt61_sol_high",
-  gpt6_sol_med: "gpt61_sol_med",
+  gpt56_sol_xhigh: "astra_xhigh",
+  gpt56_sol_max: "astra_max",
+  gpt56_sol_ultra: "astra_ultra",
+  gpt56_terra_high: "sol_high",
+  gpt56_terra_med: "sol_med",
 });
 
 export function normalizeCodexProfileName(profileName) {
   const normalized = String(profileName ?? "").trim();
-  return LEGACY_CANONICAL_PROFILE_ALIASES[normalized] || normalized;
+  const legacy = LEGACY_CANONICAL_PROFILE_ALIASES[normalized];
+  if (legacy) return legacy;
+  const familyName = normalized.replace(/^gpt\d+_(sol|astra|luna)_/, "$1_");
+  return Object.hasOwn(CODEX_FAMILY_PROFILES, familyName)
+    ? familyName
+    : normalized;
 }
 
-/** Model ID of a canonical profile (after legacy normalization), or null. */
-export function canonicalCodexProfileModel(profileName) {
-  return (
-    CANONICAL_PROFILE_VALUES[normalizeCodexProfileName(profileName)]?.model ??
-    null
-  );
+export function ensureManagedCodexProfiles(opts = {}) {
+  const { codexHome } = modelFamilyPaths(opts);
+  const { profiles } = resolveModelFamilies("codex", opts);
+  let changed = 0;
+  for (const [name, { model, effort }] of Object.entries(profiles)) {
+    if (
+      writeModelFile(
+        join(codexHome, `${name}.config.toml`),
+        `model = "${model}"\nmodel_reasoning_effort = "${effort}"\n`,
+      )
+    )
+      changed++;
+  }
+  return { changed, profiles };
 }
 
 function readProfileScalar(raw, key) {
@@ -70,7 +73,7 @@ function readProfileScalar(raw, key) {
 }
 
 /**
- * Resolve a Codex effort profile name (e.g. "gpt61_sol_high") to the `-c key=value`
+ * Resolve a Codex effort profile name (e.g. "sol_high") to the `-c key=value`
  * config overrides that `codex exec` accepts, so the headless CLI lanes can
  * select a profile WITHOUT `codex exec --profile <name>`. codex 0.134+ rejects
  * `--profile X` whenever config.toml still contains an inline `[profiles.X]`
@@ -118,12 +121,20 @@ export function codexProfileConfigOverrides(profileName, opts = {}) {
     opts,
   );
   if (opts.enforceCanonicalProfile === true) {
-    const canonical = CANONICAL_PROFILE_VALUES[normalizedProfileName];
-    if (canonical) ({ model, effort } = canonical);
+    if (Object.hasOwn(CODEX_FAMILY_PROFILES, normalizedProfileName)) {
+      ({ model, effort } = resolveModelFamilies("codex", {
+        ...opts,
+        allowCommand: false,
+        persist: false,
+      }).profiles[normalizedProfileName]);
+    }
   }
   if (opts.disallowUltra === true && effort?.toLowerCase() === "ultra") {
-    model = "gpt-6-astra";
-    effort = "max";
+    ({ model, effort } = resolveModelFamilies("codex", {
+      ...opts,
+      allowCommand: false,
+      persist: false,
+    }).profiles.astra_max);
   }
   const overrides = [];
   if (model) overrides.push(`model="${model}"`);

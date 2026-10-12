@@ -67,6 +67,7 @@ before(() => {
   const tfxTmp = path.join(dir, "tmp");
   const capture = path.join(dir, "codex-args.json");
   const fakeCodex = path.join(binDir, "codex");
+  const fakeAgy = path.join(binDir, "agy");
 
   mkdirSync(binDir, { recursive: true });
   mkdirSync(home, { recursive: true });
@@ -90,7 +91,20 @@ echo "fake codex ok"
 `,
   );
 
-  fixture = { dir, binDir, home, tfxTmp, capture, fakeCodex };
+  writeExecutable(
+    fakeAgy,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+if (args[0] === "--help") console.log("--print --dangerously-skip-permissions");
+else if (args[0] === "models") console.log("gemini-4.2-flash-high\\tGemini 4.2 Flash (High)");
+else {
+  fs.writeFileSync(process.env.TFX_CAPTURE_ARGS, JSON.stringify(args));
+  console.log("fake agy ok");
+}
+`,
+  );
+  fixture = { dir, binDir, home, tfxTmp, capture, fakeCodex, fakeAgy };
 });
 after(() => rmSync(fixture.dir, { recursive: true, force: true }));
 
@@ -99,6 +113,7 @@ function runRoute({
   agent = "executor",
   env: envOverrides = {},
   profileFiles = {},
+  modelsCache,
 } = {}) {
   const { binDir, home, tfxTmp, capture, fakeCodex } = fixture;
   // 공유 준비가 이전 실행의 프로파일과 argv를 남기지 않게 한다.
@@ -108,12 +123,20 @@ function runRoute({
   for (const [name, content] of Object.entries(profileFiles)) {
     writeFileSync(path.join(home, ".codex", `${name}.config.toml`), content);
   }
+  if (modelsCache)
+    writeFileSync(
+      path.join(home, ".codex", "models_cache.json"),
+      JSON.stringify(modelsCache),
+    );
 
   const env = {
     ...process.env,
     PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
     HOME: home,
     CODEX_BIN: fakeCodex,
+    AGY_BIN: fixture.fakeAgy,
+    GEMINI_PROFILES_PATH: path.join(home, ".gemini", "triflux-profiles.json"),
+    TRIFLUX_TEST_HOME: home,
     TFX_BRIDGE_SCRIPT: BRIDGE,
     TFX_CAPTURE_ARGS: capture,
     TFX_CODEX_OK: "1",
@@ -169,6 +192,38 @@ function profileValues(args) {
 }
 
 describe("tfx-route retry snapshot profile plumbing", () => {
+  it("agy 실행 전에 모델 목록을 해석하고 옛 flash 별칭을 display name으로 전달한다", () => {
+    const args = runRoute({
+      agent: "designer",
+      env: { TFX_ANTIGRAVITY_OK: "1", TFX_GEMINI_PROFILE: "flash38_high" },
+    });
+    assert.equal(args[args.indexOf("--model") + 1], "Gemini 4.2 Flash (High)");
+  });
+
+  it("실행 직전에 옛 별칭을 정규화하고 최신 가족 모델의 프로필을 만든다", () => {
+    const args = runRoute({
+      env: { TFX_CODEX_PROFILE: "gpt61_sol_high" },
+      modelsCache: {
+        fetched_at: "2030-01-01T00:00:00Z",
+        models: [
+          {
+            slug: "gpt-7.2-sol",
+            visibility: "list",
+            supported_reasoning_levels: [{ effort: "high" }],
+          },
+        ],
+      },
+    });
+    assert.deepEqual(profileValues(args), ["sol_high"]);
+    assert.match(
+      readFileSync(
+        path.join(fixture.home, ".codex", "sol_high.config.toml"),
+        "utf8",
+      ),
+      /model = "gpt-7\.2-sol"/,
+    );
+  });
+
   it("keeps default argv without a retry snapshot despite ambient disable flags", () => {
     const dir = makeTempDir();
     const configRoot = path.join(dir, "ambient-config");
@@ -184,7 +239,7 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     try {
       process.env.XDG_CONFIG_HOME = configRoot;
       const args = runRoute();
-      assert.deepEqual(profileValues(args), ["gpt61_sol_high"]);
+      assert.deepEqual(profileValues(args), ["sol_high"]);
     } finally {
       if (previousConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
       else process.env.XDG_CONFIG_HOME = previousConfigHome;
@@ -194,23 +249,22 @@ describe("tfx-route retry snapshot profile plumbing", () => {
   it("uses bridge cliInvocation.argv from TFX_RETRY_SNAPSHOT as the single codex profile", () => {
     const dir = makeTempDir();
     const snapshot = path.join(dir, "retry-snapshot.json");
-    writeRetrySnapshot(snapshot, "gpt6_astra_xhigh");
+    writeRetrySnapshot(snapshot, "astra_xhigh");
 
     const args = runRoute({ snapshot });
 
-    assert.deepEqual(profileValues(args), ["gpt6_astra_xhigh"]);
+    assert.deepEqual(profileValues(args), ["astra_xhigh"]);
   });
 
   it("explicit max selects the max profile in final argv", () => {
     const args = runRoute({
       env: { TFX_CODEX_PROFILE: "max" },
       profileFiles: {
-        gpt6_astra_max:
-          'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
+        astra_max: 'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
       },
     });
 
-    assert.deepEqual(profileValues(args), ["gpt6_astra_max"]);
+    assert.deepEqual(profileValues(args), ["astra_max"]);
     assert.ok(!args.some((arg) => arg.startsWith("model=")));
   });
 
@@ -219,12 +273,11 @@ describe("tfx-route retry snapshot profile plumbing", () => {
       agent: "deep-executor",
       env: { TFX_CODEX_PROFILE: "ultra" },
       profileFiles: {
-        gpt6_astra_ultra:
-          'model = "gpt-6-astra"\nmodel_reasoning_effort = "max"\n',
+        astra_ultra: 'model = "gpt-6-astra"\nmodel_reasoning_effort = "max"\n',
       },
     });
 
-    assert.deepEqual(profileValues(args), ["gpt6_astra_ultra"]);
+    assert.deepEqual(profileValues(args), ["astra_ultra"]);
     assert.ok(!args.some((arg) => arg.startsWith("model=")));
   });
 
@@ -234,13 +287,13 @@ describe("tfx-route retry snapshot profile plumbing", () => {
       env: { TFX_CODEX_PROFILE: "ultra", TFX_TEAM_NAME: "nested-team" },
     });
 
-    assert.deepEqual(profileValues(args), ["gpt6_astra_max"]);
+    assert.deepEqual(profileValues(args), ["astra_max"]);
   });
 
   it("retry snapshot remains authoritative over the explicit profile override", () => {
     const dir = makeTempDir();
     const snapshot = path.join(dir, "retry-snapshot.json");
-    writeRetrySnapshot(snapshot, "gpt6_astra_max");
+    writeRetrySnapshot(snapshot, "astra_max");
 
     const args = runRoute({
       snapshot,
@@ -248,13 +301,13 @@ describe("tfx-route retry snapshot profile plumbing", () => {
       env: { TFX_CODEX_PROFILE: "ultra" },
     });
 
-    assert.deepEqual(profileValues(args), ["gpt6_astra_max"]);
+    assert.deepEqual(profileValues(args), ["astra_max"]);
   });
 
   it("retry snapshot cannot reintroduce ultra inside a nested runtime", () => {
     const dir = makeTempDir();
     const snapshot = path.join(dir, "retry-snapshot.json");
-    writeRetrySnapshot(snapshot, "gpt6_astra_ultra");
+    writeRetrySnapshot(snapshot, "astra_ultra");
 
     const args = runRoute({
       snapshot,
@@ -262,14 +315,14 @@ describe("tfx-route retry snapshot profile plumbing", () => {
       env: { TFX_TEAM_NAME: "nested-team" },
     });
 
-    assert.deepEqual(profileValues(args), ["gpt6_astra_max"]);
+    assert.deepEqual(profileValues(args), ["astra_max"]);
   });
 
   it("normalizes all old Sol profiles from retry snapshots", () => {
     for (const [legacy, canonical] of [
-      ["gpt56_sol_xhigh", "gpt6_astra_xhigh"],
-      ["gpt56_sol_max", "gpt6_astra_max"],
-      ["gpt56_sol_ultra", "gpt6_astra_max"],
+      ["gpt56_sol_xhigh", "astra_xhigh"],
+      ["gpt56_sol_max", "astra_max"],
+      ["gpt56_sol_ultra", "astra_max"],
     ]) {
       const dir = makeTempDir();
       const snapshot = path.join(dir, `${legacy}.json`);
@@ -280,14 +333,14 @@ describe("tfx-route retry snapshot profile plumbing", () => {
 
   it("normalizes old GPT-5.6 and GPT-6 Sol profiles from TFX_CODEX_PROFILE", () => {
     for (const [legacy, canonical] of [
-      ["gpt56_sol_xhigh", "gpt6_astra_xhigh"],
-      ["gpt56_sol_max", "gpt6_astra_max"],
-      ["gpt56_sol_ultra", "gpt6_astra_ultra"],
-      ["gpt56_terra_high", "gpt61_sol_high"],
-      ["gpt56_terra_med", "gpt61_sol_med"],
-      ["gpt56_luna_low", "gpt6_luna_low"],
-      ["gpt6_sol_high", "gpt61_sol_high"],
-      ["gpt6_sol_med", "gpt61_sol_med"],
+      ["gpt56_sol_xhigh", "astra_xhigh"],
+      ["gpt56_sol_max", "astra_max"],
+      ["gpt56_sol_ultra", "astra_ultra"],
+      ["gpt56_terra_high", "sol_high"],
+      ["gpt56_terra_med", "sol_med"],
+      ["gpt56_luna_low", "luna_low"],
+      ["gpt6_sol_high", "sol_high"],
+      ["gpt6_sol_med", "sol_med"],
     ]) {
       const args = runRoute({
         agent: "deep-executor",
@@ -316,19 +369,18 @@ describe("tfx-route retry snapshot profile plumbing", () => {
       agent: "deep-executor",
     });
 
-    assert.deepEqual(profileValues(customUltra), ["gpt6_astra_max"]);
-    assert.deepEqual(profileValues(missingCustom), ["gpt61_sol_high"]);
+    assert.deepEqual(profileValues(customUltra), ["astra_max"]);
+    assert.deepEqual(profileValues(missingCustom), ["sol_high"]);
   });
 
   it("nested default uses the max profile for a mutated ultra profile", () => {
     const args = runRoute({
       env: { TFX_TEAM_NAME: "nested-team" },
       profileFiles: {
-        gpt61_sol_high:
-          'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "ultra"\n',
+        sol_high: 'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "ultra"\n',
       },
     });
 
-    assert.deepEqual(profileValues(args), ["gpt6_astra_max"]);
+    assert.deepEqual(profileValues(args), ["astra_max"]);
   });
 });

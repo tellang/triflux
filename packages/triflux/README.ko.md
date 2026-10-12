@@ -14,7 +14,7 @@
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/dm/triflux?style=flat-square&color=F5C242" alt="npm downloads"></a>
   <a href="https://github.com/tellang/triflux/stargazers"><img src="https://img.shields.io/github/stars/tellang/triflux?style=flat-square&color=FFAF00" alt="GitHub stars"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D20-374151?style=flat-square" alt="Node >= 20">
+  <img src="https://img.shields.io/badge/node-%3E%3D22-374151?style=flat-square" alt="Node >= 22">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
 
@@ -109,15 +109,17 @@ Codex 프로필은 `~/.codex/<프로필>.config.toml`에서 직접 관리한다.
 ## 모델과 프로필
 
 Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로필>.config.toml`이, 역할별 프로필
-배정은 [`scripts/lib/agent-route-policy.mjs`](scripts/lib/agent-route-policy.mjs)가 정한다. Claude는
-별칭으로 부르므로 등급마다 가장 새 모델이 자동으로 잡힌다.
+배정은 [`scripts/lib/agent-route-policy.mjs`](scripts/lib/agent-route-policy.mjs)가 정한다. 실행·setup·update 때 Codex와 Antigravity 가족 프로필을 사용 가능한 최신 버전으로 갱신한다. Codex는 로컬 모델 캐시에서 effort 지원 여부를 확인하고, Antigravity는 `agy models` 결과를 하루 동안 캐시한다. 옛 프로필 이름도 계속 동작한다. Claude는 기존 별칭을 유지한다.
+
+`~/.config/triflux/models.json`에 `{"sol":"gpt-6-sol","flash":"gemini-3.7-flash"}`처럼 적으면 가족별로 고정한다(Windows: `%APPDATA%\triflux`). 목록을 읽지 못하면 마지막 해석 결과, 그다음 내장 기본값을 쓴다.
 
 | 프로필 / 별칭 | 레인 |
 | --- | --- |
-| `gpt6_astra_xhigh` | 아키텍처, 계획, 비평, 디버깅, 보안 리뷰, 깊은 실행 |
-| `gpt6_astra_max`, `gpt6_astra_ultra` | 가장 어려운 단일 작업(`TFX_CODEX_PROFILE=max\|ultra`). `max`는 `auto-escalate` 첫 단계 |
-| `gpt61_sol_high` / `gpt61_sol_med` | 기본 구현, 리뷰, 검증, 테스트, 문서 / 정리 작업 |
-| `gpt6_luna_high` / `gpt6_luna_low` | 빌드 수정, 글쓰기 / 지연 우선 조회 |
+| `astra_xhigh` | 아키텍처, 계획, 비평, 디버깅, 보안 리뷰, 깊은 실행 |
+| `astra_max`, `astra_ultra` | 가장 어려운 단일 작업(`TFX_CODEX_PROFILE=max\|ultra`). `max`는 `auto-escalate` 첫 단계 |
+| `sol_high` / `sol_med` | 기본 구현, 리뷰, 검증, 테스트, 문서 / 정리 작업 |
+| `luna_high` / `luna_low` | 빌드 수정, 글쓰기 / 지연 우선 조회 |
+| `flash_low` / `flash` / `flash_high` | Antigravity 분류 / 생성 / 검토 |
 | Claude `fable` | `--retry auto-escalate` 마지막 단계 |
 | Claude `opus` / `sonnet` / `haiku` | 메타 라우팅과 계획 게이트 / Claude 네이티브 QA·검증 / 빠른 탐색 |
 
@@ -155,7 +157,7 @@ Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-s
 행에서 Enter를 누르면 그 워커가 도는 tmux pane이 열린다. 끄려면 `--no-native-bridge-ui`를 준다.
 
 **재시도와 승격.** `--retry ralph`는 끝나거나 막힐 때(같은 실패 3회 연속)까지 반복한다.
-`--retry auto-escalate`는 Codex `gpt6_astra_max`에서 Claude `fable`로 올라간다. 체인은
+`--retry auto-escalate`는 Codex `astra_max`에서 Claude `fable`로 올라간다. 체인은
 `.triflux/config/escalation-chain.json`으로 바꿀 수 있다.
 
 **머신 프로파일.** setup은 이 머신에서 쓸 CLI와 timeout 정책을
@@ -218,7 +220,7 @@ graph TD
 
 ## 기여
 
-Node 20 이상이 필요하다. 테스트, 린트, 패키지 경계, 미러·릴리즈 점검, 상태 스냅샷은
+Node 22 이상이 필요하다. 테스트, 린트, 패키지 경계, 미러·릴리즈 점검, 상태 스냅샷은
 [CONTRIBUTING.md](CONTRIBUTING.md)에 있다. 릴리즈는 자동이다. 버전을 올린 커밋이 `main`에
 머지되면 CI 통과 뒤 `release.yml`이 태그, GitHub 릴리즈, OIDC Trusted Publishing을 통한 npm 게시까지 진행한다.
 결정 기록은 [docs/adr/](docs/adr/README.md)에 있다.

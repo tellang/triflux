@@ -34,6 +34,10 @@ function createHomeDir() {
   const homeDir = mkdtempSync(join(TEST_TMP, "triflux-cli-"));
   mkdirSync(join(homeDir, ".claude"), { recursive: true });
   mkdirSync(join(homeDir, ".codex"), { recursive: true });
+  writeFileSync(
+    join(homeDir, ".codex", "models_cache.json"),
+    JSON.stringify({ fetched_at: "2026-10-12T00:00:00Z", models: [] }),
+  );
   return homeDir;
 }
 
@@ -45,6 +49,10 @@ function runCli(args, { homeDir = createHomeDir(), env = {} } = {}) {
       ...process.env,
       HOME: homeDir,
       USERPROFILE: homeDir,
+      CODEX_HOME: join(homeDir, ".codex"),
+      XDG_CONFIG_HOME: join(homeDir, ".config"),
+      APPDATA: join(homeDir, "AppData", "Roaming"),
+      GEMINI_PROFILES_PATH: join(homeDir, ".gemini", "triflux-profiles.json"),
       // test-lock 없이 node --test 로 직접 돌릴 때도 setup 이 임시 HOME 을 격리된 홈으로 본다.
       TRIFLUX_TEST_HOME: homeDir,
       TMPDIR: TEST_TMP,
@@ -152,13 +160,13 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
     assert.ok(codexProfiles, "codex-profiles action missing");
     assert.equal(codexProfiles.change, "update");
     assert.deepEqual(codexProfiles.profiles, [
-      "gpt6_astra_ultra",
-      "gpt6_astra_max",
-      "gpt6_astra_xhigh",
-      "gpt61_sol_high",
-      "gpt61_sol_med",
-      "gpt6_luna_high",
-      "gpt6_luna_low",
+      "sol_high",
+      "sol_med",
+      "astra_xhigh",
+      "astra_max",
+      "astra_ultra",
+      "luna_high",
+      "luna_low",
     ]);
     if (process.platform === "win32") {
       assert.equal(codexProfiles.windowsSandbox, true);
@@ -333,27 +341,27 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
     );
     const codexDir = join(homeDir, ".codex");
     assert.equal(
-      readFileSync(join(codexDir, "gpt61_sol_high.config.toml"), "utf8"),
+      readFileSync(join(codexDir, "sol_high.config.toml"), "utf8"),
       'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "high"\n',
     );
     assert.equal(
-      readFileSync(join(codexDir, "gpt6_astra_xhigh.config.toml"), "utf8"),
+      readFileSync(join(codexDir, "astra_xhigh.config.toml"), "utf8"),
       'model = "gpt-6-astra"\nmodel_reasoning_effort = "xhigh"\n',
     );
     assert.equal(
-      readFileSync(join(codexDir, "gpt6_astra_max.config.toml"), "utf8"),
+      readFileSync(join(codexDir, "astra_max.config.toml"), "utf8"),
       'model = "gpt-6-astra"\nmodel_reasoning_effort = "max"\n',
     );
     assert.equal(
-      readFileSync(join(codexDir, "gpt6_astra_ultra.config.toml"), "utf8"),
+      readFileSync(join(codexDir, "astra_ultra.config.toml"), "utf8"),
       'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
     );
     assert.equal(
-      readFileSync(join(codexDir, "gpt6_luna_high.config.toml"), "utf8"),
+      readFileSync(join(codexDir, "luna_high.config.toml"), "utf8"),
       'model = "gpt-6-luna"\nmodel_reasoning_effort = "high"\n',
     );
     assert.equal(
-      readFileSync(join(codexDir, "gpt6_luna_low.config.toml"), "utf8"),
+      readFileSync(join(codexDir, "luna_low.config.toml"), "utf8"),
       'model = "gpt-6-luna"\nmodel_reasoning_effort = "low"\n',
     );
     for (const name of retiredSolProfiles) {

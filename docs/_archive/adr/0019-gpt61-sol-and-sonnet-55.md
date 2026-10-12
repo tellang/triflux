@@ -1,11 +1,11 @@
 ---
 id: 0019
 title: Sol 레인을 GPT-6.1 Sol로 옮기고 sonnet 별칭은 Sonnet 5.5를 따른다
-status: accepted
+status: superseded
 date: 2026-09-30
 deciders: [tellang]
 supersedes: []
-superseded_by: null
+superseded_by: 0037
 relates: [0004, 0016, 0017]
 pr: null
 ---

@@ -903,94 +903,24 @@ capture_workspace_signature() {
 }
 
 # ── Gemini 모델 프로필 해석 ──
-_GEMINI_PROFILE_CACHE=""
 resolve_gemini_profile() {
-  local profile="$1"
-  if [[ "$profile" == gemini-* ]]; then
-    echo "$profile"
-    return
-  fi
-  if [[ -z "$_GEMINI_PROFILE_CACHE" && -f "$GEMINI_PROFILES_PATH" ]]; then
-    _GEMINI_PROFILE_CACHE=$(cat "$GEMINI_PROFILES_PATH" 2>/dev/null || echo "{}")
-  fi
   local result
-  result=$("$NODE_BIN" -e "
-    const name = process.argv[1];
-    const primaryRaw = process.argv[2] || '{}';
-    const defaults = {
-      flash38_low: 'Gemini 3.8 Flash (Low)',
-      flash38: 'Gemini 3.8 Flash (Medium)',
-      flash38_high: 'Gemini 3.8 Flash (High)'
-    };
-
-    if (typeof name === 'string' && name.startsWith('gemini-')) {
-      process.stdout.write(name);
-      process.exit(0);
-    }
-
-    const parseJson = (raw) => {
-      try {
-        const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === 'object' ? parsed : {};
-      } catch {
-        return {};
-      }
-    };
-
-    const getModelValue = (entry) => {
-      if (!entry) return '';
-      if (typeof entry === 'string') return entry;
-      if (typeof entry !== 'object') return '';
-      if (typeof entry.model === 'string') return entry.model;
-      if (typeof entry.name === 'string' && entry.name.startsWith('gemini-')) return entry.name;
-      if (entry.model && typeof entry.model.name === 'string') return entry.model.name;
-      return '';
-    };
-
-    const getProfileBuckets = (cfg) => {
-      const buckets = [];
-      if (cfg.profiles && typeof cfg.profiles === 'object') buckets.push(cfg.profiles);
-      if (cfg.model?.profiles && typeof cfg.model.profiles === 'object') buckets.push(cfg.model.profiles);
-      if (cfg.modelProfiles && typeof cfg.modelProfiles === 'object') buckets.push(cfg.modelProfiles);
-      if (cfg.models && typeof cfg.models === 'object') buckets.push(cfg.models);
-      return buckets;
-    };
-
-    const getDefaultModel = (cfg) => {
-      return (
-        (typeof cfg.defaultModel === 'string' && cfg.defaultModel) ||
-        (typeof cfg.default_profile === 'string' && cfg.default_profile) ||
-        (typeof cfg.defaultProfile === 'string' && cfg.defaultProfile) ||
-        (typeof cfg.model === 'string' && cfg.model) ||
-        (typeof cfg.model?.default === 'string' && cfg.model.default) ||
-        ''
-      );
-    };
-
-    const sources = [parseJson(primaryRaw)];
-    for (const cfg of sources) {
-      for (const bucket of getProfileBuckets(cfg)) {
-        const value = getModelValue(bucket[name]);
-        if (value) {
-          process.stdout.write(value);
-          process.exit(0);
-        }
-      }
-    }
-
-    if (name === 'default') {
-      for (const cfg of sources) {
-        const value = getDefaultModel(cfg);
-        if (value) {
-          process.stdout.write(value);
-          process.exit(0);
-        }
-      }
-    }
-
-    process.stdout.write(defaults[name] || defaults[process.env.TFX_GEMINI_DEFAULT_PROFILE] || defaults.flash38);
-  " "$profile" "$_GEMINI_PROFILE_CACHE" 2>/dev/null)
+  result=$("$NODE_BIN" --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const { ensureGeminiProfiles, resolveGeminiModel } = await import(pathToFileURL(process.argv[1]).href);
+    const opts = { profilesPath: process.argv[3], command: process.argv[4] };
+    ensureGeminiProfiles(opts);
+    process.stdout.write(resolveGeminiModel(process.argv[2], opts));
+  ' "${CODEX_PROFILE_MODULE%/*}/gemini-profiles.mjs" "$1" "$GEMINI_PROFILES_PATH" "$CLI_CMD" 2>/dev/null)
   echo "${result:-Gemini 3.8 Flash (Medium)}"
+}
+
+refresh_codex_profiles() {
+  "$NODE_BIN" --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const { ensureManagedCodexProfiles } = await import(pathToFileURL(process.argv[1]).href);
+    ensureManagedCodexProfiles({ command: process.argv[2] });
+  ' "$CODEX_PROFILE_MODULE" "$CLI_CMD" 2>/dev/null || true
 }
 
 # ── 라우팅 테이블 ──
@@ -1258,11 +1188,11 @@ resolve_safe_retry_codex_profile() {
   local profile
   profile="$1"
   case "$profile" in
-    ultra|gpt6_astra_ultra|*_ultra)
-      echo "gpt6_astra_max"
+    ultra|astra_ultra|*_ultra)
+      echo "astra_max"
       return
       ;;
-    gpt6_luna_low|gpt6_luna_high|gpt61_sol_med|gpt61_sol_high|gpt6_astra_xhigh|gpt6_astra_max)
+    luna_low|luna_high|sol_med|sol_high|astra_xhigh|astra_max)
       echo "$profile"
       return
       ;;
@@ -1272,14 +1202,14 @@ resolve_safe_retry_codex_profile() {
   codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
   profile_file="${codex_home}/${profile}.config.toml"
   if [[ ! -f "$profile_file" ]]; then
-    echo "gpt61_sol_high"
+    echo "sol_high"
     return 0
   fi
   local effort
   effort="$(read_codex_profile_effort "$profile")"
   case "$effort" in
-    ultra) echo "gpt6_astra_max" ;;
-    "") echo "gpt61_sol_high" ;;
+    ultra) echo "astra_max" ;;
+    "") echo "sol_high" ;;
     *) echo "$profile" ;;
   esac
 }
@@ -1328,18 +1258,18 @@ apply_codex_concrete_effort_guard() {
   [[ -n "$profile" ]] || return 0
 
   local allow_ultra=0
-  if [[ "$CODEX_OVERRIDE_PROFILE" == "gpt6_astra_ultra" && -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]]; then
+  if [[ "$CODEX_OVERRIDE_PROFILE" == "astra_ultra" && -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]]; then
     allow_ultra=1
   fi
   local effort target_profile=""
   effort="$(read_codex_profile_effort "$profile")"
   case "$profile" in
-    gpt6_astra_max) target_profile="gpt6_astra_max" ;;
-    gpt6_astra_ultra) target_profile="gpt6_astra_max" ;;
-    *) [[ "$effort" != "ultra" ]] || target_profile="gpt6_astra_max" ;;
+    astra_max) target_profile="astra_max" ;;
+    astra_ultra) target_profile="astra_max" ;;
+    *) [[ "$effort" != "ultra" ]] || target_profile="astra_max" ;;
   esac
   [[ -n "$target_profile" ]] || return 0
-  [[ "$allow_ultra" -ne 1 ]] || target_profile="gpt6_astra_ultra"
+  [[ "$allow_ultra" -ne 1 ]] || target_profile="astra_ultra"
   for ((i = 0; i < ${#args[@]}; i++)); do
     case "${args[$i]}" in
       --profile) args[$((i + 1))]="$target_profile" ;;
@@ -1944,7 +1874,7 @@ run_antigravity_exec() {
   # "${agy_args[@]}" expand 시 단일 인자로 보존된다. 모델 SSOT 는 프로필 설정이다.
   if [[ -z "${TFX_GEMINI_NO_MODEL:-}" ]]; then
     local _agy_model
-    _agy_model="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-flash38}}")"
+    _agy_model="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-flash}}")"
     if [[ -n "$_agy_model" ]]; then
       agy_args+=("--model" "$_agy_model")
     fi
@@ -2118,6 +2048,7 @@ _codex_stdout_has_meaningful_output() {
 }
 
 run_codex_exec() {
+  refresh_codex_profiles
   local prompt="$1"
   local use_tee_flag="$2"
   local exit_code_local=0
@@ -2152,7 +2083,7 @@ run_codex_exec() {
   if [[ "$exit_code_local" -ne 0 ]] && grep -qE "is not supported when using Codex with a ChatGPT account" "$STDERR_LOG" 2>/dev/null; then
     local fallback_profile=""
     case "$CLI_EFFORT" in
-      gpt6_astra_ultra|gpt6_astra_max|gpt6_astra_xhigh|gpt61_sol_high|gpt61_sol_med|gpt6_luna_high) fallback_profile="gpt6_luna_low" ;;
+      astra_ultra|astra_max|astra_xhigh|sol_high|sol_med|luna_high) fallback_profile="luna_low" ;;
     esac
     if [[ -n "$fallback_profile" ]]; then
       echo "[tfx-route] tier fallback: $CLI_EFFORT not supported on ChatGPT account → retry with $fallback_profile" >&2

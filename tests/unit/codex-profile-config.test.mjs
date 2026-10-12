@@ -171,12 +171,11 @@ describe("codexProfileConfigOverrides", () => {
 
   it("derives max and ultra from canonical Astra profile suffixes", () => {
     const codexHome = makeHome();
+    assert.deepEqual(codexProfileConfigOverrides("astra_max", { codexHome }), [
+      'model_reasoning_effort="max"',
+    ]);
     assert.deepEqual(
-      codexProfileConfigOverrides("gpt6_astra_max", { codexHome }),
-      ['model_reasoning_effort="max"'],
-    );
-    assert.deepEqual(
-      codexProfileConfigOverrides("gpt6_astra_ultra", { codexHome }),
+      codexProfileConfigOverrides("astra_ultra", { codexHome }),
       ['model_reasoning_effort="ultra"'],
     );
   });
@@ -184,9 +183,9 @@ describe("codexProfileConfigOverrides", () => {
   it("normalizes old Sol canonical names before reading profile files", () => {
     const codexHome = makeHome();
     for (const [legacy, canonical, effort] of [
-      ["gpt56_sol_xhigh", "gpt6_astra_xhigh", "xhigh"],
-      ["gpt56_sol_max", "gpt6_astra_max", "max"],
-      ["gpt56_sol_ultra", "gpt6_astra_ultra", "ultra"],
+      ["gpt56_sol_xhigh", "astra_xhigh", "xhigh"],
+      ["gpt56_sol_max", "astra_max", "max"],
+      ["gpt56_sol_ultra", "astra_ultra", "ultra"],
     ]) {
       writeFileSync(
         join(codexHome, `${canonical}.config.toml`),
@@ -202,11 +201,11 @@ describe("codexProfileConfigOverrides", () => {
   it("normalizes old Terra, Luna, and GPT-6 Sol names to the current lane with the same effort", () => {
     const codexHome = makeHome();
     for (const [legacy, canonical, model, effort] of [
-      ["gpt56_terra_high", "gpt61_sol_high", "gpt-6.1-sol", "high"],
-      ["gpt56_terra_med", "gpt61_sol_med", "gpt-6.1-sol", "medium"],
-      ["gpt56_luna_low", "gpt6_luna_low", "gpt-6-luna", "low"],
-      ["gpt6_sol_high", "gpt61_sol_high", "gpt-6.1-sol", "high"],
-      ["gpt6_sol_med", "gpt61_sol_med", "gpt-6.1-sol", "medium"],
+      ["gpt56_terra_high", "sol_high", "gpt-6.1-sol", "high"],
+      ["gpt56_terra_med", "sol_med", "gpt-6.1-sol", "medium"],
+      ["gpt56_luna_low", "luna_low", "gpt-6-luna", "low"],
+      ["gpt6_sol_high", "sol_high", "gpt-6.1-sol", "high"],
+      ["gpt6_sol_med", "sol_med", "gpt-6.1-sol", "medium"],
     ]) {
       writeFileSync(
         join(codexHome, `${canonical}.config.toml`),
@@ -223,11 +222,11 @@ describe("codexProfileConfigOverrides", () => {
   it("can enforce canonical values for nested role profiles", () => {
     const codexHome = makeHome();
     writeFileSync(
-      join(codexHome, "gpt6_astra_xhigh.config.toml"),
+      join(codexHome, "astra_xhigh.config.toml"),
       'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "high"\n',
     );
     assert.deepEqual(
-      codexProfileConfigOverrides("gpt6_astra_xhigh", {
+      codexProfileConfigOverrides("astra_xhigh", {
         codexHome,
         enforceCanonicalProfile: true,
       }),
