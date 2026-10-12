@@ -1770,6 +1770,22 @@ function isClaudeExternalImportsPrompt(text) {
   );
 }
 
+// 박스 테두리와 줄바꿈이 문구를 끊어도 맞도록 공백 하나로 접는다.
+function screenText(text) {
+  return stripAnsi(text).replace(/[│┃]/g, " ").replace(/\s+/g, " ");
+}
+
+function isCodexTrustFolderPrompt(text) {
+  const screen = screenText(text);
+  return (
+    /trust this folder\?/i.test(screen) && /trust and continue/i.test(screen)
+  );
+}
+
+function isClaudeMcpApprovalPrompt(text) {
+  return /new MCP servers? found in this project/i.test(screenText(text));
+}
+
 function isClaudeTourPrompt(text) {
   // Claude's post-update welcome/tour screen ("Take the tour" / "Skip for now").
   // Claude has no codex-style "Update available / Skip until next version" menu
@@ -2024,6 +2040,15 @@ const ADAPTERS = {
         dismiss: dismissCodexDaemonSettingsPrompt,
       },
     ],
+    // 사람의 보안 판단이 필요한 화면이라 고르지 않고 start 를 ready:false 로 끝낸다.
+    blockingScreens: [
+      {
+        name: "codex-trust-folder",
+        isPresent: isCodexTrustFolderPrompt,
+        warning:
+          "Codex is asking whether to trust this folder; attach to the tmux session and answer it yourself",
+      },
+    ],
   },
   claude: {
     cli: "claude",
@@ -2079,6 +2104,14 @@ const ADAPTERS = {
         name: "tour",
         isPresent: isClaudeTourPrompt,
         dismiss: dismissClaudeTourPrompt,
+      },
+    ],
+    blockingScreens: [
+      {
+        name: "claude-mcp-approval",
+        isPresent: isClaudeMcpApprovalPrompt,
+        warning:
+          "Claude is asking to approve project MCP servers; attach to the tmux session and answer it yourself",
       },
     ],
   },
@@ -2204,6 +2237,17 @@ async function waitForReady(
 
   while (Date.now() - startedAt < timeoutMs) {
     raw = await captureVisible(remote, session);
+    const blocking = adapter.blockingScreens?.find((screen) =>
+      screen.isPresent(raw),
+    );
+    if (blocking) {
+      return {
+        ready: false,
+        raw,
+        blockedBy: blocking.name,
+        warning: blocking.warning,
+      };
+    }
     if (isStartupScreen(adapter, raw)) {
       await dismissStartupScreens(adapter, remote, session);
       await sleep(pollIntervalMs);
@@ -2706,7 +2750,7 @@ async function doStart(adapter, opts) {
   await runTmux(remote, ["send-keys", "-t", session, ...launchKeys]);
   await dismissStartupScreens(adapter, remote, session);
 
-  const { ready, raw } = await waitForReady(
+  const { ready, raw, blockedBy, warning } = await waitForReady(
     adapter,
     remote,
     session,
@@ -2886,6 +2930,7 @@ end tell`;
     resumed,
     resumeTarget,
     ready,
+    ...(blockedBy ? { blockedBy, warning } : {}),
     name,
     nameGenerated: !resumed && opts.name === undefined,
     nameApplied,

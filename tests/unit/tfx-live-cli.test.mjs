@@ -1827,6 +1827,79 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
   }
 });
 
+test("tfx-live start reports approval screens as blocked without answering them", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-start-gate-"));
+  try {
+    const tmuxPath = path.join(dir, "tmux");
+    await fs.writeFile(
+      tmuxPath,
+      [
+        "#!/usr/bin/env node",
+        "import fs from 'node:fs';",
+        "const args = process.argv.slice(2);",
+        "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
+        "if (args[0] === 'capture-pane') console.log(process.env.TMUX_SCREEN);",
+      ].join("\n"),
+    );
+    await fs.chmod(tmuxPath, 0o755);
+    // 문구는 Codex 0.162.1, Claude Code 2.1.296 바이너리 문자열 기준. 줄바꿈이 문구를 끊는 경우를 넣었다.
+    const cases = [
+      {
+        cli: "codex",
+        screen:
+          "  TRUST THIS\n  folder? Codex can read, edit, and run files here.\n› 1. Trust and continue\n  2. Open restricted",
+        blockedBy: "codex-trust-folder",
+      },
+      {
+        cli: "claude",
+        screen:
+          "│ 5 new MCP servers found in this\n│ project\n│ Select any you wish to enable.\n│ ❯ ◯ github",
+        blockedBy: "claude-mcp-approval",
+      },
+      { cli: "codex", screen: "›" },
+      { cli: "claude", screen: "❯\nCTX:0/100 (0%)" },
+    ];
+    for (const [index, { cli, screen, blockedBy }] of cases.entries()) {
+      const logPath = path.join(dir, `tmux-log-${index}.jsonl`);
+      const result = JSON.parse(
+        await runTfxLive(
+          [
+            "start",
+            "--cli",
+            cli,
+            "--session",
+            `gate-${index}`,
+            "--ready-timeout",
+            "0.2",
+            "--poll-interval",
+            "1",
+          ],
+          {
+            env: {
+              PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+              TMUX_LOG: logPath,
+              TMUX_SCREEN: screen,
+              TFX_AGENTS_ROW: "0",
+              LC_TERMINAL: "",
+              TERM_PROGRAM: "",
+            },
+          },
+        ),
+      );
+      assert.equal(result.ready, !blockedBy, cli);
+      assert.equal(result.blockedBy, blockedBy, cli);
+      if (!blockedBy) continue;
+      assert.match(result.warning, /attach to the tmux session/);
+      const answered = (await readTmuxLog(logPath)).filter(
+        (args) => args[0] === "send-keys" && args.length === 4,
+      );
+      assert.deepEqual(answered, [], `${cli} approval screen was answered`);
+    }
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("tfx-live start keeps resume launch keys ahead of model overrides", async () => {
   const dir = await fs.mkdtemp(
     path.join(os.tmpdir(), "tfx-live-resume-flags-"),
