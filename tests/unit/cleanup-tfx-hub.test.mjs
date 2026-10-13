@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -388,6 +389,23 @@ test("doctor --fix 는 상위 폴더의 tfx-hub 를 지우고 gateway 항목을 
   assert.deepEqual(servers.other, OTHER);
   assert.equal(read(result.backups[0]).mcpServers["tfx-hub"].url, HUB.url);
   assert.deepEqual(findProjectLegacyMcpEntries(join(parent, "repo"), home), []);
+});
+
+test("doctor --fix 는 다른 설정을 가리키는 심볼릭 링크를 고치지 않는다", () => {
+  const root = realpathSync(fixture().root);
+  const home = join(root, "home");
+  const agy = join(home, ".gemini/config/mcp_config.json");
+  const original = {
+    mcpServers: {
+      "brave-search": { type: "http", url: "http://127.0.0.1:8101/mcp" },
+    },
+  };
+  put(agy, original);
+  mkdirSync(join(home, "Projects"), { recursive: true });
+  symlinkSync(agy, join(home, "Projects/.mcp.json"));
+  const result = cleanupProjectLegacyMcp({ cwd: join(home, "Projects"), home });
+  assert.deepEqual(result.changed, []);
+  assert.deepEqual(read(agy), original);
 });
 
 test("게이트웨이 이주와 허브 정리가 같은 파일을 바꿔도 백업은 한 벌이다", () => {
