@@ -1870,6 +1870,20 @@ async function cmdDoctor(options = {}) {
     // ── fix 모드: 파일 동기화 + 캐시 정리 후 진단 ──
     if (fix) {
       section("Auto Fix");
+      // cleanupLegacyMcp 는 cwd 의 .mcp.json 도 이주하며 백업을 저장소 안에 둔다.
+      // 프로젝트 파일을 먼저 정리해 원본 백업이 저장소 밖에 남게 한다.
+      const projectCleanup = cleanupProjectLegacyMcp();
+      projectCleanup.changed.forEach((file, index) => {
+        ok(
+          `정리함: ${formatPathForDisplay(file)} (원본 ${formatPathForDisplay(projectCleanup.backups[index])})`,
+        );
+      });
+      for (const warning of projectCleanup.warnings) warn(warning);
+      report.actions.push({
+        type: "project-legacy-mcp-cleanup",
+        ...projectCleanup,
+        status: projectCleanup.ok ? "ok" : "failed",
+      });
       const mcpCleanup = cleanupLegacyMcp();
       for (const warning of mcpCleanup.warnings) warn(warning);
       report.actions.push({
@@ -3066,18 +3080,9 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // 프로젝트 파일은 커밋될 수 있어 setup 이 바꾸지 않는다. --fix 일 때만 정리한다.
+    // 프로젝트 파일은 커밋될 수 있어 setup 이 바꾸지 않는다. 정리는 위 Auto Fix 가 한다.
     section("제거된 허브와 gateway 흔적");
     {
-      if (fix) {
-        const cleaned = cleanupProjectLegacyMcp();
-        cleaned.changed.forEach((file, index) => {
-          ok(
-            `정리함: ${formatPathForDisplay(file)} (원본 ${formatPathForDisplay(cleaned.backups[index])})`,
-          );
-        });
-        for (const warning of cleaned.warnings) warn(warning);
-      }
       const leftovers = findProjectLegacyMcpEntries();
       addDoctorCheck(report, {
         name: "legacy-hub-mcp-entries",
