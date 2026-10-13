@@ -35,6 +35,7 @@ test("tfx-lead and tfx-live agree on how Claude sends to a local Claude session"
     assert.match(rule, /같은 기기/);
     assert.match(rule, /SendMessage/);
     assert.match(rule, /tfx-live list-sessions --cli claude/);
-    assert.match(rule, /이름을 못 찾거나 원격/);
+    assert.match(rule, /이름을 못 찾거나 원격[^.]*`(tfx-live )?ask/);
   }
+  assert.match(claudeLeadCell, /팀원 포함/);
 });
