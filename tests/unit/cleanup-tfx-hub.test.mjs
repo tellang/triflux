@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -14,7 +15,7 @@ import { afterEach, test } from "node:test";
 import {
   cleanupLegacyMcp,
   cleanupTfxHub,
-  findProjectHubEntries,
+  findProjectLegacyMcpEntries,
 } from "../../scripts/lib/legacy-mcp-cleanup.mjs";
 
 const dirs = [];
@@ -339,13 +340,26 @@ test("Windows 에서 PowerShell 조회가 실패하면 종료하지 않고 hub.p
   assert.ok(result.warnings.some((warning) => warning.includes("조회 실패")));
 });
 
-test("cwd 의 프로젝트 MCP 파일에서 허브 주소 tfx-hub 항목이 있는 파일만 찾는다", () => {
-  const { root } = fixture();
-  put(join(root, ".mcp.json"), { mcpServers: { "tfx-hub": HUB } });
-  put(join(root, ".claude/mcp.json"), {
+test("cwd 부터 HOME 아래까지 허브와 gateway 가 남긴 프로젝트 MCP 항목만 찾는다", () => {
+  const root = realpathSync(fixture().root);
+  const home = join(root, "home");
+  const parent = join(home, "Projects");
+  const cwd = join(parent, "repo");
+  put(join(home, ".mcp.json"), { mcpServers: { "tfx-hub": HUB } });
+  put(join(parent, ".mcp.json"), {
+    mcpServers: {
+      "tfx-hub": HUB,
+      "brave-search": { type: "http", url: "http://127.0.0.1:8101/mcp" },
+      context7: { type: "http", url: "http://127.0.0.1:8100/custom-mcp" },
+      other: OTHER,
+    },
+  });
+  put(join(cwd, ".claude/mcp.json"), {
     mcpServers: { "tfx-hub": { command: "node" }, other: OTHER },
   });
-  assert.deepEqual(findProjectHubEntries(root), [join(root, ".mcp.json")]);
+  assert.deepEqual(findProjectLegacyMcpEntries(cwd, home), [
+    { file: join(parent, ".mcp.json"), names: ["tfx-hub", "brave-search"] },
+  ]);
 });
 
 test("게이트웨이 이주와 허브 정리가 같은 파일을 바꿔도 백업은 한 벌이다", () => {

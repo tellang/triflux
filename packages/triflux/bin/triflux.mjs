@@ -18,7 +18,7 @@ import {
   writeSync,
 } from "fs";
 import { homedir } from "os";
-import { dirname, join, resolve } from "path";
+import { basename, dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { inspectClaudeRuntimeFlags } from "../hub/diagnostics/claude-runtime-flags.mjs";
 import {
@@ -53,7 +53,7 @@ import {
 import {
   cleanupLegacyMcp,
   cleanupTfxHub,
-  findProjectHubEntries,
+  findProjectLegacyMcpEntries,
   pinRegistryMcpPackages,
 } from "../scripts/lib/legacy-mcp-cleanup.mjs";
 import {
@@ -3065,22 +3065,34 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // 제거된 허브가 cwd 에 만든 항목은 사용자 파일과 구분할 수 없어 자동으로 지우지 않는다.
-    section("제거된 허브 흔적");
+    // 프로젝트 파일의 항목은 사용자 파일과 구분할 수 없어 자동으로 지우지 않는다.
+    section("제거된 허브와 gateway 흔적");
     {
-      const leftovers = findProjectHubEntries();
+      const leftovers = findProjectLegacyMcpEntries();
       addDoctorCheck(report, {
         name: "legacy-hub-mcp-entries",
         status: leftovers.length > 0 ? "warning" : "ok",
-        paths: leftovers,
+        paths: leftovers.map(({ file }) => file),
+        entries: leftovers,
       });
       if (leftovers.length === 0) {
-        ok("현재 디렉터리에 tfx-hub MCP 항목 없음");
+        ok("현재 디렉터리와 상위 폴더에 tfx-hub, gateway MCP 항목 없음");
       } else {
-        for (const file of leftovers) {
-          warn(`tfx-hub MCP 항목: ${formatPathForDisplay(file)}`);
+        for (const { file, names } of leftovers) {
+          warn(`${formatPathForDisplay(file)}: ${names.join(", ")}`);
+          // claude mcp remove -s project 는 그 폴더의 .mcp.json 만 고친다.
+          if (basename(file) === ".mcp.json") {
+            const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+            for (const name of names) {
+              info(
+                `  (cd ${quote(dirname(file))} && claude mcp remove ${quote(name)} -s project)`,
+              );
+            }
+          }
         }
-        info("제거된 허브가 만든 항목입니다. 직접 지우세요.");
+        info(
+          "제거된 허브와 MCP gateway 가 남긴 항목입니다. 위 명령으로 지우거나 파일에서 직접 지우세요.",
+        );
         issues += leftovers.length;
       }
     }
