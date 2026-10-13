@@ -18,13 +18,15 @@ description: >
 | 동작 | Claude 리드 | Codex 리드 |
 | --- | --- | --- |
 | 세션 띄우기, 보내기, 기다리기, compact, 닫기 | `tfx-live` 명령 (공통) | `tfx-live` 명령 (공통) |
-| 같은 세션 안 서브에이전트 | Agent 도구 (`model`, `effort`, `run_in_background`) | `spawn_agent`, 끝나면 반드시 `close_agent` |
-| Claude 세션에 보내기 | `SendMessage`(팀원), 그 밖은 `tfx-live ask --cli claude` | `tfx-live ask --cli claude --transport uds --short <8hex> --no-wait`(백그라운드 세션), tmux 세션은 `--session <이름> --no-wait` |
+| 같은 세션 안 서브에이전트 | Agent 도구 (`model`, `effort`, `run_in_background`) | `spawn_agent`, 추가 지시는 `followup_task`. `close_agent`가 있으면 끝나면 반드시 닫는다 |
+| Claude 세션에 보내기 | 같은 기기 Claude 세션(팀원 포함)은 `SendMessage`, 이름은 `tfx-live list-sessions --cli claude`의 `name`. 이름을 못 찾거나 원격이면 `tfx-live ask --cli claude` | `tfx-live ask --cli claude --transport uds --short <8hex> --no-wait`(백그라운드 세션), tmux 세션은 `--session <이름> --no-wait` |
 | Codex 세션에 보내기 | `tfx-live ask --cli codex` (기본 codex queue) | `tfx-live ask --cli codex` (기본 codex queue) |
 | 사용자에게 묻기 | `AskUserQuestion` | 답변에서 짧은 선택지로 묻는다 |
 | 배경 대기 | `run_in_background`와 완료 알림 | 백그라운드 셸 또는 `tfx-live wait`(아래 5절의 지원 범위 안에서) |
 
 - Codex 리드는 `spawn_agent`를 29회 부르고 `close_agent`를 한 번도 부르지 않은 사고가 있었다. 서브에이전트는 결과를 받은 즉시 닫는다.
+- Codex 0.162.1 에서 모델에 노출된 협업 도구는 `spawn_agent`, `wait_agent`, `send_message`, `followup_task`, `list_agents`, `interrupt_agent`이고 `close_agent`와 `send_input`은 없었다. `send_message`는 하위 에이전트의 턴을 시작하지 않고 다음 `followup_task` 턴에 함께 전달된다. 대상은 자기가 띄운 하위 에이전트(`/root/...`)다.
+- Codex 리드가 다른 Codex 세션에 보낼 때도 셸에서 `tfx-live ask --cli codex`를 실행한다. workspace-write 샌드박스에서 보내고 받는 것을 확인했다.
 - Codex 리드는 보내기 전용으로 `--timeout 5`를 남발하고 `tmux capture-pane`으로 완료를 확인한 사고가 있었다. 보낼 때는 `--no-wait`, 완료는 5절의 확인 수단으로만 확인한다.
 
 ## 1. 역할과 수명

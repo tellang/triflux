@@ -20,3 +20,21 @@ test("Codex tfx-live adapter keeps the canonical skill body", () => {
     body.replace("\n# tfx-live\n", `\n# tfx-live\n${hostContract}`),
   );
 });
+
+test("tfx-lead and tfx-live agree on how Claude sends to a local Claude session", () => {
+  const lead = readFileSync("skills/tfx-lead/SKILL.md", "utf8");
+  const live = readFileSync("skills/tfx-live/SKILL.md", "utf8");
+  const leadRow = lead
+    .split("\n")
+    .find((line) => line.startsWith("| Claude 세션에 보내기 |"));
+  const claudeLeadCell = leadRow.split("|")[2];
+  const liveRule = live
+    .split("\n")
+    .find((line) => line.includes("SendMessage 도구로 보낸다"));
+  for (const rule of [claudeLeadCell, liveRule]) {
+    assert.match(rule, /같은 기기/);
+    assert.match(rule, /SendMessage/);
+    assert.match(rule, /tfx-live list-sessions --cli claude/);
+    assert.match(rule, /이름을 못 찾거나 원격/);
+  }
+});
