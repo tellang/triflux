@@ -1197,8 +1197,9 @@ export function cleanupProjectLegacyMcp({
   const result = { ok: true, changed: [], backups: [], warnings: [] };
   for (const { file } of findProjectLegacyMcpEntries(cwd, home)) {
     try {
-      // 링크는 다른 클라이언트 설정(agy 등)을 가리킬 수 있고 대상이 바뀔 수도 있어 고치지 않는다.
-      if (lstatSync(file).isSymbolicLink()) {
+      // 파일이나 .claude 가 링크면 다른 클라이언트 설정(agy 등)을 가리킬 수 있고 대상이 바뀔 수도 있어 고치지 않는다.
+      // 폴더 목록은 실제 경로이므로 실제 경로가 같으면 경로 어디에도 링크가 없다.
+      if (realpathSync(file) !== file) {
         result.warnings.push(`${file}: 심볼릭 링크라 건너뜀`);
         continue;
       }
@@ -1208,7 +1209,7 @@ export function cleanupProjectLegacyMcp({
       const plan = removeHubFromJson(migrated.output, file, result.warnings);
       if (!migrated.count && !plan.count) continue;
       if (
-        lstatSync(file).isSymbolicLink() ||
+        realpathSync(file) !== file ||
         readFileSync(file, "utf8") !== original
       ) {
         result.warnings.push(`${file}: 검사 후 변경되어 건너뜀`);
