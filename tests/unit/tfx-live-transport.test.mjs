@@ -247,6 +247,29 @@ test("remote Codex relay allows the lifecycle check after a nonaligned hard ceil
   );
 });
 
+test("peer sends to Codex through queue unless remote or busy policy needs tmux", () => {
+  const transport = (flags) =>
+    live.peerSideBaseOpts(flags, "a", ADAPTERS.codex, "A").transport;
+  assert.equal(transport({}), "queue");
+  assert.equal(transport({ remote: "host" }), "tmux");
+  assert.equal(transport({ "if-busy-a": "fail" }), "tmux");
+  assert.equal(transport({ "if-busy": "interrupt" }), "tmux");
+  assert.throws(
+    () => transport({ "transport-a": "queue", "if-busy-a": "fail" }),
+    /--if-busy-a/,
+  );
+  assert.throws(
+    () =>
+      live.peerSideBaseOpts(
+        { "transport-b": "queue" },
+        "b",
+        ADAPTERS.claude,
+        "B",
+      ),
+    /not supported for --cli-b claude/,
+  );
+});
+
 test("peer validates busy policies for each transport before any side starts", async () => {
   const flags = {
     remote: "host",

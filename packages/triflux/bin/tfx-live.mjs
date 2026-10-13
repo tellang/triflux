@@ -92,6 +92,8 @@ const BOOLEAN_FLAGS = new Set([
   "no-auto-trust",
 ]);
 const PEER_HOP_DONE_MARKER = "<<<TFX_PEER_HOP_DONE>>>";
+const PEER_DEFAULT_SEED =
+  "Introduce yourself in one sentence, then ask the other party one short question.";
 // uds-fallback diagnostics land here, written async so a failed daemon attach
 // never blocks the tmux fallback path (see writeUdsBugReport / doAskAuto).
 const BUG_REPORT_DIR =
@@ -127,7 +129,8 @@ function usage(command) {
     "    Claude and agy list-sessions support local tmux only; --transport uds requires --cli codex.",
     "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
     "  tfx-live goal-driven --session NAME --goal TEXT [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500] [--max-rounds 8] [--done-token DONE]",
-    "  tfx-live peer [--cli-a codex] [--cli-b claude] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--session-a NAME[:WINDOW.PANE]] [--session-b NAME[:WINDOW.PANE]] [--attach-a] [--attach-b] [--transport-a tmux|uds|auto] [--transport-b tmux|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--thread-a ID|auto] [--thread-b ID|auto] [--codex-socket-a PATH|default] [--codex-socket-b PATH|default] [--bridge ABS] [--remote HOST] [--cwd DIR] [--if-busy wait|fail] [--if-busy-a POLICY] [--if-busy-b POLICY] [--busy-timeout 60] [--max-turn SECONDS] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60]",
+    "  tfx-live peer [--cli-a codex] [--cli-b claude] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--session-a NAME[:WINDOW.PANE]] [--session-b NAME[:WINDOW.PANE]] [--attach-a] [--attach-b] [--transport-a tmux|queue|uds|auto] [--transport-b tmux|queue|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--thread-a ID|auto] [--thread-b ID|auto] [--codex-socket-a PATH|default] [--codex-socket-b PATH|default] [--bridge ABS] [--remote HOST] [--cwd DIR] [--if-busy wait|fail] [--if-busy-a POLICY] [--if-busy-b POLICY] [--busy-timeout 60] [--max-turn SECONDS] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60] [--via relay|message] [--report-to NAME]",
+    "    --via message (Claude x Claude): sends each side the other's session name once, then they talk with SendMessage; reports to --report-to or the calling Claude session.",
     "    Codex TUI may use a shared app-server daemon. UDS ask resumes the thread to receive answer events; sending to an active thread with --if-busy steer merges input into that turn.",
   ];
   if (!command) return lines.join("\n");
@@ -5583,22 +5586,32 @@ function peerSideTransport(flags, side, adapter) {
   const globalTransport = flags.transport;
   const short = sideFlag(flags, side, "short");
   const sessionId = sideFlag(flags, side, "session-id");
+  // Codex 는 ask 와 같이 queue 가 기본이다. 원격과 바쁠 때 거부·중단은 tmux 만 할 수 있다.
+  const codexDefault =
+    flags.remote ||
+    ["fail", "interrupt"].includes(sideFlag(flags, side, "if-busy"))
+      ? "tmux"
+      : "queue";
   const transport =
     explicit ??
     (adapter.cli === "claude"
       ? (globalTransport ?? defaultTransportFor(adapter, short, sessionId))
-      : undefined) ??
+      : adapter.cli === "codex"
+        ? codexDefault
+        : undefined) ??
     "tmux";
-  if (!VALID_TRANSPORTS.includes(transport) || transport === "queue") {
-    throw new Error(`--transport-${side} must be one of: tmux, uds, auto`);
-  }
-  if (
-    transport !== "tmux" &&
-    adapter.cli !== "claude" &&
-    !(adapter.cli === "codex" && transport === "uds")
-  ) {
+  if (!VALID_TRANSPORTS.includes(transport)) {
     throw new Error(
-      `--transport-${side} ${transport} is only supported when --cli-${side} is claude`,
+      `--transport-${side} must be one of: ${VALID_TRANSPORTS.join(", ")}`,
+    );
+  }
+  const supported =
+    transport === "tmux" ||
+    (adapter.cli === "claude" && transport !== "queue") ||
+    (adapter.cli === "codex" && (transport === "uds" || transport === "queue"));
+  if (!supported) {
+    throw new Error(
+      `--transport-${side} ${transport} is not supported for --cli-${side} ${adapter.cli}`,
     );
   }
   return transport;
@@ -5608,7 +5621,9 @@ function peerSideBusyPolicy(flags, side, adapter, transport) {
   const allowed =
     adapter.cli === "codex" && transport === "uds"
       ? ["wait", "fail", "steer"]
-      : ["wait", "fail", "interrupt"];
+      : transport === "queue"
+        ? ["wait"]
+        : ["wait", "fail", "interrupt"];
   for (const name of ["if-busy", `if-busy-${side}`]) {
     if (flags[name] !== undefined && !allowed.includes(flags[name]))
       throw new Error(
@@ -5626,6 +5641,8 @@ function peerSideBaseOpts(flags, side, adapter, session) {
   const threadId = sideFlag(flags, side, "thread");
   if (transport === "uds" && adapter.cli === "codex" && !threadId)
     throw new Error(`--transport-${side} uds requires --thread-${side}`);
+  if (transport === "queue" && threadId && !isCodexThreadId(threadId))
+    throw new Error(`--thread-${side} for queue must be a Codex session UUID`);
   if (
     transport !== "tmux" &&
     adapter.cli === "claude" &&
@@ -5686,12 +5703,13 @@ function askOptsFromPeerBase(base, prompt) {
   return { ...base, prompt, doneMarker: PEER_HOP_DONE_MARKER };
 }
 
-function shouldPrestartPeerSide(base) {
-  return base.transport === "tmux";
+// Codex queue 도 tmux pane 의 TUI 에 쌓이므로 tmux 와 같이 띄우고 확인한다.
+function peerSideUsesTmuxPane(base) {
+  return base.transport === "tmux" || base.transport === "queue";
 }
 
 async function verifyAttachedPeerSide(adapter, base, deps = {}) {
-  if (base.transport !== "tmux") return;
+  if (!peerSideUsesTmuxPane(base)) return;
   const tmux = deps.runTmux ?? runTmux;
   const { session, target } = splitTmuxTarget(base.session);
   try {
@@ -5737,11 +5755,111 @@ function addStopSpecOnce(stopSpecs, adapter, opts) {
   }
 }
 
+// Claude 끼리는 SendMessage 로 직접 주고받게 한다. tfx-live 는 양쪽에 상대 이름과
+// 끝낼 조건을 한 번 넣고 빠지므로 왕복 횟수와 기록은 두 세션이 맡는다.
+async function peerViaMessage(flags, adapterA, adapterB) {
+  if (adapterA.cli !== "claude" || adapterB.cli !== "claude")
+    throw new Error("--via message requires --cli-a claude --cli-b claude");
+  if (flags.remote)
+    throw new Error("--via message supports local sessions only");
+  const sides = [
+    ["a", adapterA, "peerA"],
+    ["b", adapterB, "peerB"],
+  ].map(([side, adapter, fallback]) => {
+    const session = flags[`session-${side}`] ?? fallback;
+    const base = peerSideBaseOpts(flags, side, adapter, session);
+    if (base.transport !== "tmux")
+      throw new Error(
+        `--via message needs a tmux Claude session (side ${side})`,
+      );
+    return {
+      side,
+      adapter,
+      base,
+      session,
+      attached: Object.hasOwn(flags, `attach-${side}`),
+    };
+  });
+  const stopSpecs = [];
+  try {
+    for (const entry of sides) {
+      if (entry.attached) {
+        await verifyAttachedPeerSide(entry.adapter, entry.base);
+        const tmuxSession = splitTmuxTarget(entry.session).session;
+        const { sessions } = await discoverClaudeTmuxSessions();
+        entry.name =
+          sessions.find((found) => found.session === tmuxSession)?.name ?? null;
+      } else {
+        const started = await doStart(
+          entry.adapter,
+          startOptsForSession(flags, entry.session, entry.side),
+        );
+        addStopSpecOnce(stopSpecs, entry.adapter, entry.base);
+        entry.name = started.nameApplied ? started.name : null;
+      }
+      if (!entry.name)
+        throw new Error(
+          `Claude session name unknown (side ${entry.side}): ${entry.session}`,
+        );
+    }
+  } catch (error) {
+    await stopAfterLifecycle(stopSpecs, error);
+  }
+  const [a, b] = sides;
+  // 보고 받을 쪽은 SendMessage 가 닿는 Claude 세션이어야 한다.
+  const reportTo =
+    flags["report-to"] ??
+    (process.env.CLAUDE_PID ? await resolveSenderName() : null);
+  const finish = reportTo
+    ? `send the final agreement to "${reportTo}" with SendMessage as`
+    : "reply in this session with";
+  const kickoff = [
+    [
+      b,
+      `You are in a direct conversation with the Claude session "${a.name}". It will message you with the SendMessage tool. Answer each of its messages with SendMessage to "${a.name}". No reply to this note is needed.`,
+    ],
+    [
+      a,
+      [
+        flags.seed ?? PEER_DEFAULT_SEED,
+        `Discuss this directly with the Claude session "${b.name}" using the SendMessage tool. Its replies arrive here as messages. Keep it to at most ${integerFlag(flags, "rounds", 4)} exchanges.`,
+        `When you are done, ${finish} one JSON object: {"agreement_status":"complete|partial","unresolved_questions":[],"summary":"short final agreement"}`,
+      ].join("\n"),
+    ],
+  ];
+  const sent = [];
+  for (const [entry, prompt] of kickoff) {
+    const result = await doAsk(entry.adapter, {
+      ...entry.base,
+      prompt,
+      noWait: true,
+    });
+    sent.push({
+      side: entry.side,
+      requestId: result.requestId,
+      status: result.status,
+    });
+  }
+  printJson({
+    via: "message",
+    status: "started",
+    sessionA: a.session,
+    sessionB: b.session,
+    nameA: a.name,
+    nameB: b.name,
+    reportTo,
+    kickoff: sent,
+  });
+}
+
 async function peer(flags) {
   const adapterA = selectAdapterName(flags["cli-a"] ?? "codex", "cli-a");
   const adapterB = selectAdapterName(flags["cli-b"] ?? "claude", "cli-b");
   if (adapterA.cli === "agy" || adapterB.cli === "agy")
     throw new Error("agy is unavailable for peer");
+  if (flags.via === "message") return peerViaMessage(flags, adapterA, adapterB);
+  if (flags.via !== undefined && flags.via !== "relay")
+    throw new Error("--via must be one of: relay, message");
   peerSideBusyPolicy(
     flags,
     "a",
@@ -5786,11 +5904,7 @@ async function peer(flags) {
   if (mode === "counting") {
     output.numbers = numbers;
   }
-  let previous =
-    mode === "freeform"
-      ? (flags.seed ??
-        "Introduce yourself in one sentence, then ask the other party one short question.")
-      : null;
+  let previous = mode === "freeform" ? (flags.seed ?? PEER_DEFAULT_SEED) : null;
   let primaryError = null;
   let stopError = null;
   let closure = null;
@@ -5840,11 +5954,11 @@ async function peer(flags) {
         });
       }
     }
-    if (!attachedA && shouldPrestartPeerSide(baseA)) {
+    if (!attachedA && peerSideUsesTmuxPane(baseA)) {
       await doStart(adapterA, startOptsForSession(flags, sessionA, "a"));
       addStopSpecOnce(stopSpecs, adapterA, baseA);
     }
-    if (!attachedB && shouldPrestartPeerSide(baseB)) {
+    if (!attachedB && peerSideUsesTmuxPane(baseB)) {
       await doStart(adapterB, startOptsForSession(flags, sessionB, "b"));
       addStopSpecOnce(stopSpecs, adapterB, baseB);
     }
@@ -5862,9 +5976,10 @@ async function peer(flags) {
         ? buildPeerClosurePrompt(previous)
         : peerPrompt(mode, hopIndex, previous);
       const result = await doAsk(adapter, askOptsFromPeerBase(base, sent));
+      // tmux 는 화면에서 표식 앞까지만 읽는다. 기록에서 읽는 uds 와 queue 는 표식 줄을 뺀다.
       if (
-        (result.transportSelected ?? result.transport ?? base.transport) ===
-        "uds"
+        (result.transportSelected ?? result.transport ?? base.transport) !==
+        "tmux"
       ) {
         result.response = String(result.response ?? "")
           .split(/\r?\n/)
@@ -5896,6 +6011,7 @@ async function peer(flags) {
         transport: result.transport ?? base.transport,
         transportSelected: result.transportSelected,
         transportProbe: result.transportProbe,
+        fallbackReason: result.fallbackReason,
         sent,
         response: result.response,
         done: result.done,
