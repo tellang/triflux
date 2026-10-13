@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.66.0] - 2026-10-13
+
+### Added
+- live: `peer --via message` 로 Claude 두 세션이 `SendMessage` 로 직접 대화한다. tfx-live 는 양쪽에 상대 세션 이름과 끝낼 조건을 한 번 보내고 빠지며, 합의는 `--report-to` 또는 호출한 Claude 세션으로 간다 (#755)
+
+### Changed
+- live: `peer` 의 Codex 쪽 기본 전송을 tmux 직접 입력에서 `codex queue` 로 바꾼다. 응답은 rollout 에서 읽고, `--remote`, `--if-busy fail|interrupt`, `--no-relay-tag` 이면 tmux 로 보낸다 (#755)
+
 ## [10.65.1] - 2026-10-12
 
 ### Fixed
