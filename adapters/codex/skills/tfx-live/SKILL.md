@@ -136,10 +136,10 @@ tfx-live stop --cli claude --session-id <id>
 tfx-live stop --session cl1
 ```
 
-tmux 안에서 도는 Claude 세션은 자기 자신도 compact 할 수 있다. 자기 턴이 도는 동안에는 바쁜 세션이라 거부되므로, 턴이 끝난 뒤 실행되게 백그라운드로 예약한다. 사용자에게 `/compact` 입력을 부탁하기 전에 이 방법을 쓴다.
+tmux 안에서 도는 Claude 세션은 자기 자신도 compact 할 수 있다. 자기 턴이 도는 동안에는 세션이 바쁘므로, 백그라운드로 띄우고 `--if-busy wait`로 턴이 끝나기를 기다리게 한다. 기본 `fail`로 두면 턴이 끝나기 전에 거부된다. 결과는 파일에 남겨 다음 턴에 확인한다. 사용자에게 `/compact` 입력을 부탁하기 전에 이 방법을 쓴다.
 
 ```bash
-(sleep 25; tfx-live compact --session "$TMUX_PANE" --instructions "상태 파일 경로와 남은 일을 보존하라" --then "상태 파일을 다시 읽고 이어가라" --no-wait) >/dev/null 2>&1 &
+tfx-live compact --session "$TMUX_PANE" --if-busy wait --busy-timeout 600 --instructions "상태 파일 경로와 남은 일을 보존하라" --then "상태 파일을 다시 읽고 이어가라" --no-wait > "${TMPDIR:-/tmp}/tfx-self-compact.json" 2>&1 &
 ```
 
 `compact --session S [--cli claude|codex] [--instructions TEXT] [--then PROMPT] [--no-wait]`는 로컬 tmux에서 `/compact`를 중계 표식 없이 보낸다. CLI 기본값은 Claude다. `--instructions`는 Claude에서만 받으며 Codex는 인자를 받지 않아 거부한다. 기본 `--if-busy fail`이며 바쁜 세션에는 compact를 전송하지 않는다. UDS compact는 지원하지 않는다.
