@@ -5586,9 +5586,10 @@ function peerSideTransport(flags, side, adapter) {
   const globalTransport = flags.transport;
   const short = sideFlag(flags, side, "short");
   const sessionId = sideFlag(flags, side, "session-id");
-  // Codex 는 ask 와 같이 queue 가 기본이다. 원격과 바쁠 때 거부·중단은 tmux 만 할 수 있다.
+  // Codex 는 ask 와 같이 queue 가 기본이다. 원격, 바쁠 때 거부·중단, 표식 없는 응답 대기는 tmux 만 할 수 있다.
   const codexDefault =
     flags.remote ||
+    Object.hasOwn(flags, "no-relay-tag") ||
     ["fail", "interrupt"].includes(sideFlag(flags, side, "if-busy"))
       ? "tmux"
       : "queue";
@@ -5614,6 +5615,10 @@ function peerSideTransport(flags, side, adapter) {
       `--transport-${side} ${transport} is not supported for --cli-${side} ${adapter.cli}`,
     );
   }
+  if (transport === "queue" && Object.hasOwn(flags, "no-relay-tag"))
+    throw new Error(
+      `--transport-${side} queue cannot wait with --no-relay-tag`,
+    );
   return transport;
 }
 
@@ -5762,6 +5767,7 @@ async function peerViaMessage(flags, adapterA, adapterB) {
     throw new Error("--via message requires --cli-a claude --cli-b claude");
   if (flags.remote)
     throw new Error("--via message supports local sessions only");
+  const rounds = integerFlag(flags, "rounds", 4);
   const sides = [
     ["a", adapterA, "peerA"],
     ["b", adapterB, "peerB"],
@@ -5780,31 +5786,6 @@ async function peerViaMessage(flags, adapterA, adapterB) {
       attached: Object.hasOwn(flags, `attach-${side}`),
     };
   });
-  const stopSpecs = [];
-  try {
-    for (const entry of sides) {
-      if (entry.attached) {
-        await verifyAttachedPeerSide(entry.adapter, entry.base);
-        const tmuxSession = splitTmuxTarget(entry.session).session;
-        const { sessions } = await discoverClaudeTmuxSessions();
-        entry.name =
-          sessions.find((found) => found.session === tmuxSession)?.name ?? null;
-      } else {
-        const started = await doStart(
-          entry.adapter,
-          startOptsForSession(flags, entry.session, entry.side),
-        );
-        addStopSpecOnce(stopSpecs, entry.adapter, entry.base);
-        entry.name = started.nameApplied ? started.name : null;
-      }
-      if (!entry.name)
-        throw new Error(
-          `Claude session name unknown (side ${entry.side}): ${entry.session}`,
-        );
-    }
-  } catch (error) {
-    await stopAfterLifecycle(stopSpecs, error);
-  }
   const [a, b] = sides;
   // 보고 받을 쪽은 SendMessage 가 닿는 Claude 세션이어야 한다.
   const reportTo =
@@ -5813,32 +5794,66 @@ async function peerViaMessage(flags, adapterA, adapterB) {
   const finish = reportTo
     ? `send the final agreement to "${reportTo}" with SendMessage as`
     : "reply in this session with";
-  const kickoff = [
-    [
-      b,
-      `You are in a direct conversation with the Claude session "${a.name}". It will message you with the SendMessage tool. Answer each of its messages with SendMessage to "${a.name}". No reply to this note is needed.`,
-    ],
-    [
-      a,
-      [
-        flags.seed ?? PEER_DEFAULT_SEED,
-        `Discuss this directly with the Claude session "${b.name}" using the SendMessage tool. Its replies arrive here as messages. Keep it to at most ${integerFlag(flags, "rounds", 4)} exchanges.`,
-        `When you are done, ${finish} one JSON object: {"agreement_status":"complete|partial","unresolved_questions":[],"summary":"short final agreement"}`,
-      ].join("\n"),
-    ],
-  ];
+  const stopSpecs = [];
   const sent = [];
-  for (const [entry, prompt] of kickoff) {
-    const result = await doAsk(entry.adapter, {
-      ...entry.base,
-      prompt,
-      noWait: true,
-    });
-    sent.push({
-      side: entry.side,
-      requestId: result.requestId,
-      status: result.status,
-    });
+  try {
+    for (const entry of sides) {
+      if (entry.attached) {
+        await verifyAttachedPeerSide(entry.adapter, entry.base);
+      } else {
+        await doStart(
+          entry.adapter,
+          startOptsForSession(flags, entry.session, entry.side),
+        );
+        addStopSpecOnce(stopSpecs, entry.adapter, entry.base);
+      }
+      // 같은 이름이 이미 있으면 Claude 가 이름 뒤에 번호를 붙이므로 등록된 이름을 읽는다.
+      // pane 을 적지 않았으면 그 tmux 세션의 Claude 가 하나일 때만 대상이 분명하다.
+      const { sessions } = await discoverClaudeTmuxSessions();
+      const matches = sessions.filter((found) =>
+        entry.session.includes(":")
+          ? found.target === entry.session
+          : found.session === entry.session,
+      );
+      entry.name = matches.length === 1 ? matches[0].name : null;
+      if (!entry.name)
+        throw new Error(
+          `Claude session name unknown or ambiguous (side ${entry.side}): ${entry.session}`,
+        );
+    }
+    const kickoff = [
+      [
+        b,
+        `You are in a direct conversation with the Claude session "${a.name}". It will message you with the SendMessage tool. Answer each of its messages with SendMessage to "${a.name}". No reply to this note is needed.`,
+      ],
+      [
+        a,
+        [
+          flags.seed ?? PEER_DEFAULT_SEED,
+          `Discuss this directly with the Claude session "${b.name}" using the SendMessage tool. Its replies arrive here as messages. Keep it to at most ${rounds} exchanges.`,
+          `When you are done, ${finish} one JSON object: {"agreement_status":"complete|partial","unresolved_questions":[],"summary":"short final agreement"}`,
+        ].join("\n"),
+      ],
+    ];
+    for (const [entry, prompt] of kickoff) {
+      const result = await doAsk(entry.adapter, {
+        ...entry.base,
+        prompt,
+        noWait: true,
+      });
+      if (result.inputSent !== true)
+        throw new Error(
+          result.error ??
+            `kickoff not sent (side ${entry.side}): ${result.status}`,
+        );
+      sent.push({
+        side: entry.side,
+        requestId: result.requestId,
+        status: result.status,
+      });
+    }
+  } catch (error) {
+    await stopAfterLifecycle(stopSpecs, error);
   }
   printJson({
     via: "message",
