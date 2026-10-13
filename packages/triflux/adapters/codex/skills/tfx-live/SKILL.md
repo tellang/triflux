@@ -190,9 +190,12 @@ tfx-live ask --cli codex --transport uds --thread auto --cwd ~/Projects/my-workt
 ```bash
 tfx-live peer --cli-a codex --cli-b claude --session-a cx-peer --session-b cl-peer --cwd ~/Projects --mode freeform --seed "변경을 함께 검토해줘" --rounds 2 --timeout 180
 tfx-live peer --cli-a codex --transport-a uds --thread-a <id|auto> --cli-b claude --transport-b uds --short-b <8hex> --cwd ~/Projects/my-worktree --mode freeform --seed "변경을 검토해줘"
+tfx-live peer --via message --cli-a claude --cli-b claude --session-a cl-a --session-b cl-b --attach-a --attach-b --seed "변경을 함께 검토해줘" --rounds 3
 ```
 
-`peer`는 이전 응답을 반대쪽의 다음 프롬프트로 전달한다. 기존 tmux pane은 `--attach-a`·`--attach-b`로 연결하며 종료하지 않는다. UDS 쪽도 기존 세션으로 취급한다. Codex tmux 쪽은 화면에서 응답을 읽으므로 queue가 아니라 tmux로 보낸다. `--if-busy-a`·`--if-busy-b`로 각 쪽의 정책을 정한다. 소유한 세션을 실제 종료한 경우에만 `stoppedA`·`stoppedB`가 참이다.
+`peer`는 이전 응답을 반대쪽의 다음 프롬프트로 전달한다. 기존 tmux pane은 `--attach-a`·`--attach-b`로 연결하며 종료하지 않는다. UDS 쪽도 기존 세션으로 취급한다. Codex 쪽은 `ask`와 같이 queue가 기본이고 응답은 rollout에서 읽는다. thread를 못 찾으면 tmux 직접 입력으로 바꾸고 hop에 `fallbackReason`을 남긴다. `--remote`이거나 `--if-busy fail|interrupt`이면 처음부터 tmux로 보낸다. `--if-busy-a`·`--if-busy-b`로 각 쪽의 정책을 정한다. 소유한 세션을 실제 종료한 경우에만 `stoppedA`·`stoppedB`가 참이다.
+
+Claude끼리는 `--via message`를 쓴다. tfx-live는 양쪽에 상대 세션 이름과 끝낼 조건을 한 번씩 보내고 `status: "started"`로 바로 끝난다. 그 뒤 두 세션은 `SendMessage`로 직접 주고받는다. 왕복 횟수는 `--rounds`를 지시문으로만 전하므로 tfx-live가 강제하지 않는다. transcript도 남기지 않는다. A는 끝나면 합의 JSON을 `--report-to` 세션에 `SendMessage`로 보낸다. `--report-to`가 없으면 tfx-live를 호출한 Claude 세션에 보내고, 그 세션도 찾지 못하면 A 세션 화면에 남긴다. 띄운 세션은 대화가 이어지도록 종료하지 않으므로 끝나면 `stop`으로 닫는다. 로컬 tmux 대화형 Claude만 지원하고 세션 이름을 찾지 못하면 실패한다.
 
 ## 진단
 
