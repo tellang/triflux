@@ -1137,17 +1137,49 @@ function removeHubTasks(run, result) {
   }
 }
 
-/** cwd 의 프로젝트 MCP 파일 중 제거된 허브가 만든 tfx-hub 항목이 있는 파일을 돌려준다. */
-export function findProjectHubEntries(cwd = process.cwd()) {
-  return [".mcp.json", ".claude/mcp.json"].flatMap((relative) => {
-    const file = join(cwd, relative);
+/**
+ * cwd 부터 HOME 바로 아래까지 프로젝트 MCP 파일에서 제거된 허브와 gateway 가 남긴 항목을 찾는다.
+ * Claude Code 는 상위 폴더의 .mcp.json 도 읽는다. HOME 의 파일은 setup 이 정리하므로 보지 않는다.
+ * @returns {{ file: string, names: string[] }[]}
+ */
+export function findProjectLegacyMcpEntries(
+  cwd = process.cwd(),
+  home = homedir(),
+) {
+  // macOS 의 /var 와 /private/var 처럼 링크가 낀 경로도 HOME 에서 멈추도록 실제 경로로 비교한다.
+  const real = (path) => {
     try {
-      const data = JSON.parse(readFileSync(file, "utf8"));
-      return isHubEntry(data?.mcpServers?.[HUB_SERVER]) ? [file] : [];
+      return realpathSync(path);
     } catch {
-      return [];
+      return resolve(path);
     }
-  });
+  };
+  const stop = real(home);
+  const dirs = [];
+  for (let dir = real(cwd); dir !== stop; dir = dirname(dir)) {
+    dirs.push(dir);
+    if (dirname(dir) === dir) break;
+  }
+  return dirs.flatMap((dir) =>
+    [".mcp.json", ".claude/mcp.json"].flatMap((relative) => {
+      const file = join(dir, relative);
+      let servers;
+      try {
+        servers = JSON.parse(readFileSync(file, "utf8"))?.mcpServers;
+      } catch {
+        return [];
+      }
+      if (!servers || typeof servers !== "object") return [];
+      const names = Object.entries(servers)
+        .filter(([name, config]) =>
+          name === HUB_SERVER
+            ? isHubEntry(config)
+            : [config?.url, config?.httpUrl].some(ownedUrl),
+        )
+        .map(([name]) => name);
+      return names.length ? [{ file, names }] : [];
+    }),
+  );
 }
 
 /** 제거된 허브의 설정 항목, 실행 중인 프로세스, 예약 작업, 설치본 스냅샷(gemini, codex)을 정리한다. */
