@@ -18,7 +18,7 @@ import {
   writeSync,
 } from "fs";
 import { homedir } from "os";
-import { basename, dirname, join, resolve } from "path";
+import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { inspectClaudeRuntimeFlags } from "../hub/diagnostics/claude-runtime-flags.mjs";
 import {
@@ -52,6 +52,7 @@ import {
 } from "../scripts/lib/legacy-hook-cleanup.mjs";
 import {
   cleanupLegacyMcp,
+  cleanupProjectLegacyMcp,
   cleanupTfxHub,
   findProjectLegacyMcpEntries,
   pinRegistryMcpPackages,
@@ -3065,33 +3066,31 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // 프로젝트 파일의 항목은 사용자 파일과 구분할 수 없어 자동으로 지우지 않는다.
+    // 프로젝트 파일은 커밋될 수 있어 setup 이 바꾸지 않는다. --fix 일 때만 정리한다.
     section("제거된 허브와 gateway 흔적");
     {
+      if (fix) {
+        const cleaned = cleanupProjectLegacyMcp();
+        for (const file of cleaned.changed)
+          ok(`정리함: ${formatPathForDisplay(file)}`);
+        for (const warning of cleaned.warnings) warn(warning);
+      }
       const leftovers = findProjectLegacyMcpEntries();
       addDoctorCheck(report, {
         name: "legacy-hub-mcp-entries",
         status: leftovers.length > 0 ? "warning" : "ok",
         paths: leftovers.map(({ file }) => file),
         entries: leftovers,
+        ...(leftovers.length > 0 ? { fix: "tfx doctor --fix" } : {}),
       });
       if (leftovers.length === 0) {
         ok("현재 디렉터리와 상위 폴더에 tfx-hub, gateway MCP 항목 없음");
       } else {
         for (const { file, names } of leftovers) {
           warn(`${formatPathForDisplay(file)}: ${names.join(", ")}`);
-          // claude mcp remove -s project 는 그 폴더의 .mcp.json 만 고친다.
-          if (basename(file) === ".mcp.json") {
-            const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
-            for (const name of names) {
-              info(
-                `  (cd ${quote(dirname(file))} && claude mcp remove ${quote(name)} -s project)`,
-              );
-            }
-          }
         }
         info(
-          "제거된 허브와 MCP gateway 가 남긴 항목입니다. 위 명령으로 지우거나 파일에서 직접 지우세요.",
+          "제거된 허브와 MCP gateway 가 남긴 항목입니다. `tfx doctor --fix` 가 tfx-hub 는 지우고 gateway 항목은 직접 연결로 바꿉니다. 원본은 .tfx-bak 으로 남습니다.",
         );
         issues += leftovers.length;
       }

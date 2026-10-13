@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, platform as osPlatform, userInfo } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { loadRegistryOrDefault, pinnedArgs } from "./mcp-guard-engine.mjs";
 
@@ -1155,11 +1155,12 @@ export function findProjectLegacyMcpEntries(
     }
   };
   const stop = real(home);
-  const dirs = [];
-  for (let dir = real(cwd); dir !== stop; dir = dirname(dir)) {
-    dirs.push(dir);
-    if (dirname(dir) === dir) break;
-  }
+  const start = real(cwd);
+  const dirs = start === stop ? [] : [start];
+  // HOME 밖에서 실행하면 cwd 만 본다. --fix 가 HOME 밖 상위 폴더를 고치지 않게 한다.
+  if (start.startsWith(stop + sep))
+    for (let dir = dirname(start); dir !== stop; dir = dirname(dir))
+      dirs.push(dir);
   return dirs.flatMap((dir) =>
     [".mcp.json", ".claude/mcp.json"].flatMap((relative) => {
       const file = join(dir, relative);
@@ -1182,6 +1183,38 @@ export function findProjectLegacyMcpEntries(
       return names.length ? [{ file, names }] : [];
     }),
   );
+}
+
+/**
+ * doctor --fix: 위에서 찾은 프로젝트 파일에서 tfx-hub 를 지우고 gateway 항목은 setup 과 같이 직접 연결로 바꾼다.
+ * 파일마다 원본을 .tfx-bak 으로 남긴다. 소유를 확인할 수 없는 항목이 있는 파일은 건드리지 않는다.
+ */
+export function cleanupProjectLegacyMcp({
+  cwd = process.cwd(),
+  home = homedir(),
+  env = process.env,
+} = {}) {
+  const result = { ok: true, changed: [], backups: [], warnings: [] };
+  for (const { file } of findProjectLegacyMcpEntries(cwd, home)) {
+    try {
+      const target = fileTarget(file);
+      const original = readFileSync(target, "utf8");
+      const migrated = patchJson(original, file, home, env, result.warnings);
+      if (migrated.blocked) continue;
+      const plan = removeHubFromJson(migrated.output, file, result.warnings);
+      if (!migrated.count && !plan.count) continue;
+      if (readFileSync(target, "utf8") !== original) {
+        result.warnings.push(`${file}: 검사 후 변경되어 건너뜀`);
+        continue;
+      }
+      result.backups.push(writeAtomic(file, target, plan.output));
+      result.changed.push(file);
+    } catch {
+      result.ok = false;
+      result.warnings.push(`${file}: 설정 형식 또는 읽기 실패`);
+    }
+  }
+  return result;
 }
 
 /** 제거된 허브의 설정 항목, 실행 중인 프로세스, 예약 작업, 설치본 스냅샷(gemini, codex)을 정리한다. */
