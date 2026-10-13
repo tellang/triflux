@@ -5807,9 +5807,11 @@ async function peerViaMessage(flags, adapterA, adapterB) {
         );
         addStopSpecOnce(stopSpecs, entry.adapter, entry.base);
       }
-      // 같은 이름이 이미 있으면 Claude 가 이름 뒤에 번호를 붙이므로, 안내가 들어갈 pane 에
-      // 등록된 실제 이름을 읽는다.
-      entry.name = (await claudeTmuxTarget(entry.session))?.name ?? null;
+      // 같은 이름이 이미 있으면 Claude 가 이름 뒤에 번호를 붙이므로 pane 에 등록된 실제 이름을
+      // 읽는다. 그 사이 활성 pane 이 바뀌어도 안내가 같은 pane 에 가도록 pane ID 로 보낸다.
+      const target = await claudeTmuxTarget(entry.session);
+      entry.name = target?.name ?? null;
+      entry.paneId = target?.paneId;
       if (!entry.name)
         throw new Error(
           `Claude session name unknown (side ${entry.side}): ${entry.session}`,
@@ -5832,6 +5834,7 @@ async function peerViaMessage(flags, adapterA, adapterB) {
     for (const [entry, prompt] of kickoff) {
       const result = await doAsk(entry.adapter, {
         ...entry.base,
+        session: entry.paneId,
         prompt,
         noWait: true,
       });
