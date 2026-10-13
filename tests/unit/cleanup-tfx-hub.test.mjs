@@ -6,7 +6,9 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +16,7 @@ import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 import {
   cleanupLegacyMcp,
+  cleanupProjectLegacyMcp,
   cleanupTfxHub,
   findProjectLegacyMcpEntries,
 } from "../../scripts/lib/legacy-mcp-cleanup.mjs";
@@ -360,6 +363,56 @@ test("cwd 부터 HOME 아래까지 허브와 gateway 가 남긴 프로젝트 MCP
   assert.deepEqual(findProjectLegacyMcpEntries(cwd, home), [
     { file: join(parent, ".mcp.json"), names: ["tfx-hub", "brave-search"] },
   ]);
+});
+
+test("doctor --fix 는 상위 폴더의 tfx-hub 를 지우고 gateway 항목을 직접 연결로 바꾼 뒤 백업을 남긴다", () => {
+  const root = realpathSync(fixture().root);
+  const home = join(root, "home");
+  const parent = join(home, "Projects");
+  const file = join(parent, ".mcp.json");
+  put(file, {
+    mcpServers: {
+      "tfx-hub": HUB,
+      "brave-search": { type: "http", url: "http://127.0.0.1:8101/mcp" },
+      other: OTHER,
+    },
+  });
+  const result = cleanupProjectLegacyMcp({
+    cwd: join(parent, "repo"),
+    home,
+    env: { BRAVE_API_KEY: "set" },
+  });
+  assert.deepEqual(result.changed, [file]);
+  const servers = read(file).mcpServers;
+  assert.equal(servers["tfx-hub"], undefined);
+  assert.equal(servers["brave-search"].command, "npx");
+  assert.equal(servers["brave-search"].url, undefined);
+  assert.deepEqual(servers.other, OTHER);
+  assert.equal(read(result.backups[0]).mcpServers["tfx-hub"].url, HUB.url);
+  assert.ok(result.backups[0].startsWith(join(home, ".config/triflux/")));
+  assert.deepEqual(findProjectLegacyMcpEntries(join(parent, "repo"), home), []);
+});
+
+test("doctor --fix 는 파일이나 .claude 폴더가 심볼릭 링크면 고치지 않는다", () => {
+  const root = realpathSync(fixture().root);
+  const home = join(root, "home");
+  const agy = join(home, ".gemini/config/mcp_config.json");
+  const original = {
+    mcpServers: {
+      "brave-search": { type: "http", url: "http://127.0.0.1:8101/mcp" },
+    },
+  };
+  put(agy, original);
+  mkdirSync(join(home, "Projects"), { recursive: true });
+  symlinkSync(agy, join(home, "Projects/.mcp.json"));
+  const result = cleanupProjectLegacyMcp({ cwd: join(home, "Projects"), home });
+  mkdirSync(join(home, "repo"));
+  symlinkSync(dirname(agy), join(home, "repo/.claude"));
+  renameSync(agy, join(dirname(agy), "mcp.json"));
+  const viaDir = cleanupProjectLegacyMcp({ cwd: join(home, "repo"), home });
+  assert.deepEqual(result.changed, []);
+  assert.deepEqual(viaDir.changed, []);
+  assert.deepEqual(read(join(dirname(agy), "mcp.json")), original);
 });
 
 test("게이트웨이 이주와 허브 정리가 같은 파일을 바꿔도 백업은 한 벌이다", () => {

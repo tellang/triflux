@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   constants,
@@ -16,7 +17,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir, platform as osPlatform, userInfo } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { loadRegistryOrDefault, pinnedArgs } from "./mcp-guard-engine.mjs";
 
@@ -1155,11 +1156,12 @@ export function findProjectLegacyMcpEntries(
     }
   };
   const stop = real(home);
-  const dirs = [];
-  for (let dir = real(cwd); dir !== stop; dir = dirname(dir)) {
-    dirs.push(dir);
-    if (dirname(dir) === dir) break;
-  }
+  const start = real(cwd);
+  const dirs = start === stop ? [] : [start];
+  // HOME 밖에서 실행하면 cwd 만 본다. --fix 가 HOME 밖 상위 폴더를 고치지 않게 한다.
+  if (start.startsWith(stop + sep))
+    for (let dir = dirname(start); dir !== stop; dir = dirname(dir))
+      dirs.push(dir);
   return dirs.flatMap((dir) =>
     [".mcp.json", ".claude/mcp.json"].flatMap((relative) => {
       const file = join(dir, relative);
@@ -1182,6 +1184,58 @@ export function findProjectLegacyMcpEntries(
       return names.length ? [{ file, names }] : [];
     }),
   );
+}
+
+/**
+ * doctor --fix: 위에서 찾은 프로젝트 파일에서 tfx-hub 를 지우고 gateway 항목은 setup 과 같이 직접 연결로 바꾼다.
+ * 원본은 저장소에 커밋되지 않게 ~/.config/triflux/backups/project-mcp 에 남긴다. 소유를 확인할 수 없는 항목이 있거나 심볼릭 링크인 파일은 건드리지 않는다.
+ */
+export function cleanupProjectLegacyMcp({
+  cwd = process.cwd(),
+  home = homedir(),
+  env = process.env,
+} = {}) {
+  const result = { ok: true, changed: [], backups: [], warnings: [] };
+  const backupDir = join(home, ".config/triflux/backups/project-mcp");
+  for (const { file } of findProjectLegacyMcpEntries(cwd, home)) {
+    try {
+      // 파일이나 .claude 가 링크면 다른 클라이언트 설정(agy 등)을 가리킬 수 있고 대상이 바뀔 수도 있어 고치지 않는다.
+      // 폴더 목록은 실제 경로이므로 실제 경로가 같으면 경로 어디에도 링크가 없다.
+      if (realpathSync(file) !== file) {
+        result.warnings.push(`${file}: 심볼릭 링크라 건너뜀`);
+        continue;
+      }
+      const original = readFileSync(file, "utf8");
+      const migrated = patchJson(original, file, home, env, result.warnings);
+      if (migrated.blocked) continue;
+      const plan = removeHubFromJson(migrated.output, file, result.warnings);
+      if (!migrated.count && !plan.count) continue;
+      if (
+        realpathSync(file) !== file ||
+        readFileSync(file, "utf8") !== original
+      ) {
+        result.warnings.push(`${file}: 검사 후 변경되어 건너뜀`);
+        continue;
+      }
+      mkdirSync(backupDir, { recursive: true });
+      chmodSync(backupDir, 0o700);
+      // 경로 전체를 이름에 쓰면 255바이트를 넘을 수 있어 경로 해시로 짓는다. 원래 경로는 결과의 backups 와 짝을 이룬다.
+      const backup = backupFile(
+        join(
+          backupDir,
+          `${createHash("sha256").update(file).digest("hex").slice(0, 16)}-${basename(file)}`,
+        ),
+        original,
+      );
+      writeAtomic(file, file, plan.output, new Map([[file, backup]]));
+      result.backups.push(backup);
+      result.changed.push(file);
+    } catch {
+      result.ok = false;
+      result.warnings.push(`${file}: 설정 형식 또는 읽기 실패`);
+    }
+  }
+  return result;
 }
 
 /** 제거된 허브의 설정 항목, 실행 중인 프로세스, 예약 작업, 설치본 스냅샷(gemini, codex)을 정리한다. */

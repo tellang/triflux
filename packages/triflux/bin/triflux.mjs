@@ -18,7 +18,7 @@ import {
   writeSync,
 } from "fs";
 import { homedir } from "os";
-import { basename, dirname, join, resolve } from "path";
+import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 import { inspectClaudeRuntimeFlags } from "../hub/diagnostics/claude-runtime-flags.mjs";
 import {
@@ -52,6 +52,7 @@ import {
 } from "../scripts/lib/legacy-hook-cleanup.mjs";
 import {
   cleanupLegacyMcp,
+  cleanupProjectLegacyMcp,
   cleanupTfxHub,
   findProjectLegacyMcpEntries,
   pinRegistryMcpPackages,
@@ -1869,6 +1870,20 @@ async function cmdDoctor(options = {}) {
     // ── fix 모드: 파일 동기화 + 캐시 정리 후 진단 ──
     if (fix) {
       section("Auto Fix");
+      // cleanupLegacyMcp 는 cwd 의 .mcp.json 도 이주하며 백업을 저장소 안에 둔다.
+      // 프로젝트 파일을 먼저 정리해 원본 백업이 저장소 밖에 남게 한다.
+      const projectCleanup = cleanupProjectLegacyMcp();
+      projectCleanup.changed.forEach((file, index) => {
+        ok(
+          `정리함: ${formatPathForDisplay(file)} (원본 ${formatPathForDisplay(projectCleanup.backups[index])})`,
+        );
+      });
+      for (const warning of projectCleanup.warnings) warn(warning);
+      report.actions.push({
+        type: "project-legacy-mcp-cleanup",
+        ...projectCleanup,
+        status: projectCleanup.ok ? "ok" : "failed",
+      });
       const mcpCleanup = cleanupLegacyMcp();
       for (const warning of mcpCleanup.warnings) warn(warning);
       report.actions.push({
@@ -3065,7 +3080,7 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // 프로젝트 파일의 항목은 사용자 파일과 구분할 수 없어 자동으로 지우지 않는다.
+    // 프로젝트 파일은 커밋될 수 있어 setup 이 바꾸지 않는다. 정리는 위 Auto Fix 가 한다.
     section("제거된 허브와 gateway 흔적");
     {
       const leftovers = findProjectLegacyMcpEntries();
@@ -3074,24 +3089,16 @@ async function cmdDoctor(options = {}) {
         status: leftovers.length > 0 ? "warning" : "ok",
         paths: leftovers.map(({ file }) => file),
         entries: leftovers,
+        ...(leftovers.length > 0 ? { fix: "tfx doctor --fix" } : {}),
       });
       if (leftovers.length === 0) {
         ok("현재 디렉터리와 상위 폴더에 tfx-hub, gateway MCP 항목 없음");
       } else {
         for (const { file, names } of leftovers) {
           warn(`${formatPathForDisplay(file)}: ${names.join(", ")}`);
-          // claude mcp remove -s project 는 그 폴더의 .mcp.json 만 고친다.
-          if (basename(file) === ".mcp.json") {
-            const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
-            for (const name of names) {
-              info(
-                `  (cd ${quote(dirname(file))} && claude mcp remove ${quote(name)} -s project)`,
-              );
-            }
-          }
         }
         info(
-          "제거된 허브와 MCP gateway 가 남긴 항목입니다. 위 명령으로 지우거나 파일에서 직접 지우세요.",
+          "제거된 허브와 MCP gateway 가 남긴 항목입니다. `tfx doctor --fix` 가 tfx-hub 는 지우고 gateway 항목은 직접 연결로 바꿉니다. 원본은 ~/.config/triflux/backups/project-mcp 에 남습니다.",
         );
         issues += leftovers.length;
       }
