@@ -136,6 +136,12 @@ tfx-live stop --cli claude --session-id <id>
 tfx-live stop --session cl1
 ```
 
+tmux 안에서 도는 Claude 세션은 자기 자신도 compact 할 수 있다. 자기 턴이 도는 동안에는 바쁜 세션이라 거부되므로, 턴이 끝난 뒤 실행되게 백그라운드로 예약한다. 사용자에게 `/compact` 입력을 부탁하기 전에 이 방법을 쓴다.
+
+```bash
+(sleep 25; tfx-live compact --session "$TMUX_PANE" --instructions "상태 파일 경로와 남은 일을 보존하라" --then "상태 파일을 다시 읽고 이어가라" --no-wait) >/dev/null 2>&1 &
+```
+
 `compact --session S [--cli claude|codex] [--instructions TEXT] [--then PROMPT] [--no-wait]`는 로컬 tmux에서 `/compact`를 중계 표식 없이 보낸다. CLI 기본값은 Claude다. `--instructions`는 Claude에서만 받으며 Codex는 인자를 받지 않아 거부한다. 기본 `--if-busy fail`이며 바쁜 세션에는 compact를 전송하지 않는다. UDS compact는 지원하지 않는다.
 
 `--no-wait`는 압축 진행 표시 또는 새 완료 기록으로 제출을 확인한 뒤 반환한다. Codex에서 확인되지 않으면 Enter를 한 번 더 보내고, 그래도 확인되지 않으면 `--then`을 보내지 않고 오류로 끝낸다. `--then`은 일반 텍스트 지시만 받으며 슬래시 명령은 거부한다. 제출 확인 직후 Claude에는 표식을 붙여 tmux로 보내고 화면의 `queued messages` 또는 transcript의 `enqueue`로 확인한다. Claude 압축이 먼저 끝나 지시가 이미 처리에 들어갔으면 `then.queued: false, delivered: true`로 보고한다. Codex에는 기존 queue 경로로만 보내며 tmux로 전환하지 않는다. 결과의 `then.requestId`로 `wait --request-id`에서 압축 뒤 응답을 받는다.
