@@ -247,6 +247,129 @@ test("remote Codex relay allows the lifecycle check after a nonaligned hard ceil
   );
 });
 
+test("peer sends to Codex through queue unless remote or busy policy needs tmux", () => {
+  const transport = (flags) =>
+    live.peerSideBaseOpts(flags, "a", ADAPTERS.codex, "A").transport;
+  assert.equal(transport({}), "queue");
+  assert.equal(transport({ remote: "host" }), "tmux");
+  assert.equal(transport({ "if-busy-a": "fail" }), "tmux");
+  assert.equal(transport({ "if-busy": "interrupt" }), "tmux");
+  assert.equal(transport({ "no-relay-tag": "1" }), "tmux");
+  assert.throws(
+    () => transport({ "transport-a": "queue", "if-busy-a": "fail" }),
+    /--if-busy-a/,
+  );
+  assert.throws(
+    () =>
+      live.peerSideBaseOpts(
+        { "transport-b": "queue" },
+        "b",
+        ADAPTERS.claude,
+        "B",
+      ),
+    /not supported for --cli-b claude/,
+  );
+});
+
+test("peer --via message names each side by the pane tmux resolves and sends nothing when one is unknown", async () => {
+  const dir = await fs.mkdtemp(path.join(tmpdir(), "via-message-"));
+  const log = path.join(dir, "tmux.jsonl");
+  const sessions = path.join(dir, "sessions");
+  try {
+    await fs.mkdir(sessions);
+    const panes = [];
+    for (const [index, name] of [
+      [0, "10.13 left"],
+      [1, "10.13 right"],
+    ]) {
+      panes.push(
+        [
+          "shared",
+          "0",
+          "1",
+          "0",
+          String(index),
+          dir,
+          "claude",
+          "",
+          "",
+          String(process.pid),
+          `%${index}`,
+        ].join("\t"),
+      );
+      await fs.writeFile(
+        path.join(sessions, `${index}.json`),
+        JSON.stringify({
+          pid: process.pid,
+          sessionId: `s${index}`,
+          name,
+          tmux: `shared:@0.%${index}`,
+        }),
+      );
+    }
+    await fs.writeFile(
+      path.join(dir, "tmux"),
+      `#!${process.execPath}
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(process.env.TMUX_LOG, JSON.stringify(args) + '\\n');
+if (args[0] === 'list-panes') console.log(${JSON.stringify(panes.join("\n"))});
+if (args[0] === 'display-message' && args.includes('shared:0')) console.log('%1');
+`,
+      { mode: 0o755 },
+    );
+    const run = (session) =>
+      execFileAsync(
+        process.execPath,
+        [
+          CLI,
+          "peer",
+          "--via",
+          "message",
+          "--cli-a",
+          "claude",
+          "--cli-b",
+          "claude",
+          "--attach-a",
+          "--attach-b",
+          "--session-a",
+          session,
+          "--session-b",
+          "missing",
+          "--report-to",
+          "lead",
+        ],
+        {
+          env: {
+            ...process.env,
+            PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+            TMUX_LOG: log,
+            TFX_CLAUDE_SESSIONS_DIR: sessions,
+          },
+          timeout: 5000,
+        },
+      );
+    await assert.rejects(run("shared:0"), (error) => {
+      assert.match(
+        JSON.parse(error.stdout).error,
+        /unknown \(side b\): missing$/,
+      );
+      return true;
+    });
+    const commands = (await fs.readFile(log, "utf8"))
+      .trim()
+      .split("\n")
+      .map(JSON.parse);
+    assert.ok(
+      commands.every(
+        ([command]) => !/paste-buffer|send-keys|new-session/.test(command),
+      ),
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("peer validates busy policies for each transport before any side starts", async () => {
   const flags = {
     remote: "host",
