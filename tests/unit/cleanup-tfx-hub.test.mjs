@@ -389,6 +389,7 @@ test("doctor --fix 는 상위 폴더의 tfx-hub 를 지우고 gateway 항목을 
   assert.equal(servers["brave-search"].url, undefined);
   assert.deepEqual(servers.other, OTHER);
   assert.equal(read(result.backups[0]).mcpServers["tfx-hub"].url, HUB.url);
+  assert.ok(result.backups[0].startsWith(join(home, ".config/triflux/")));
   assert.deepEqual(findProjectLegacyMcpEntries(join(parent, "repo"), home), []);
 });
 

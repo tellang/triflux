@@ -3090,7 +3090,7 @@ async function cmdDoctor(options = {}) {
           warn(`${formatPathForDisplay(file)}: ${names.join(", ")}`);
         }
         info(
-          "제거된 허브와 MCP gateway 가 남긴 항목입니다. `tfx doctor --fix` 가 tfx-hub 는 지우고 gateway 항목은 직접 연결로 바꿉니다. 원본은 .tfx-bak 으로 남습니다.",
+          "제거된 허브와 MCP gateway 가 남긴 항목입니다. `tfx doctor --fix` 가 tfx-hub 는 지우고 gateway 항목은 직접 연결로 바꿉니다. 원본은 ~/.config/triflux/backups/project-mcp 에 남습니다.",
         );
         issues += leftovers.length;
       }

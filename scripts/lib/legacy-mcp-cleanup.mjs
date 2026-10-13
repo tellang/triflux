@@ -1187,7 +1187,7 @@ export function findProjectLegacyMcpEntries(
 
 /**
  * doctor --fix: 위에서 찾은 프로젝트 파일에서 tfx-hub 를 지우고 gateway 항목은 setup 과 같이 직접 연결로 바꾼다.
- * 파일마다 원본을 .tfx-bak 으로 남긴다. 소유를 확인할 수 없는 항목이 있거나 심볼릭 링크인 파일은 건드리지 않는다.
+ * 원본은 저장소에 커밋되지 않게 ~/.config/triflux/backups/project-mcp 에 남긴다. 소유를 확인할 수 없는 항목이 있거나 심볼릭 링크인 파일은 건드리지 않는다.
  */
 export function cleanupProjectLegacyMcp({
   cwd = process.cwd(),
@@ -1195,6 +1195,7 @@ export function cleanupProjectLegacyMcp({
   env = process.env,
 } = {}) {
   const result = { ok: true, changed: [], backups: [], warnings: [] };
+  const backupDir = join(home, ".config/triflux/backups/project-mcp");
   for (const { file } of findProjectLegacyMcpEntries(cwd, home)) {
     try {
       // 파일이나 .claude 가 링크면 다른 클라이언트 설정(agy 등)을 가리킬 수 있고 대상이 바뀔 수도 있어 고치지 않는다.
@@ -1215,7 +1216,13 @@ export function cleanupProjectLegacyMcp({
         result.warnings.push(`${file}: 검사 후 변경되어 건너뜀`);
         continue;
       }
-      result.backups.push(writeAtomic(file, file, plan.output));
+      mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+      const backup = backupFile(
+        join(backupDir, file.replace(/[\\/:]/g, "%")),
+        original,
+      );
+      writeAtomic(file, file, plan.output, new Map([[file, backup]]));
+      result.backups.push(backup);
       result.changed.push(file);
     } catch {
       result.ok = false;
