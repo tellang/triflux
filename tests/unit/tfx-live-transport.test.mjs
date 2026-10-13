@@ -271,7 +271,7 @@ test("peer sends to Codex through queue unless remote or busy policy needs tmux"
   );
 });
 
-test("peer --via message refuses a tmux session holding two Claude panes before sending", async () => {
+test("peer --via message names each side by the pane tmux resolves and sends nothing when one is unknown", async () => {
   const dir = await fs.mkdtemp(path.join(tmpdir(), "via-message-"));
   const log = path.join(dir, "tmux.jsonl");
   const sessions = path.join(dir, "sessions");
@@ -314,6 +314,7 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.TMUX_LOG, JSON.stringify(args) + '\\n');
 if (args[0] === 'list-panes') console.log(${JSON.stringify(panes.join("\n"))});
+if (args[0] === 'display-message' && args.includes('shared:0')) console.log('%1');
 `,
       { mode: 0o755 },
     );
@@ -334,7 +335,7 @@ if (args[0] === 'list-panes') console.log(${JSON.stringify(panes.join("\n"))});
           "--session-a",
           session,
           "--session-b",
-          "shared:0.1",
+          "missing",
           "--report-to",
           "lead",
         ],
@@ -348,10 +349,10 @@ if (args[0] === 'list-panes') console.log(${JSON.stringify(panes.join("\n"))});
           timeout: 5000,
         },
       );
-    await assert.rejects(run("shared"), (error) => {
+    await assert.rejects(run("shared:0"), (error) => {
       assert.match(
         JSON.parse(error.stdout).error,
-        /ambiguous \(side a\): shared$/,
+        /unknown \(side b\): missing$/,
       );
       return true;
     });

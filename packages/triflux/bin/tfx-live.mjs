@@ -5807,18 +5807,12 @@ async function peerViaMessage(flags, adapterA, adapterB) {
         );
         addStopSpecOnce(stopSpecs, entry.adapter, entry.base);
       }
-      // 같은 이름이 이미 있으면 Claude 가 이름 뒤에 번호를 붙이므로 등록된 이름을 읽는다.
-      // pane 을 적지 않았으면 그 tmux 세션의 Claude 가 하나일 때만 대상이 분명하다.
-      const { sessions } = await discoverClaudeTmuxSessions();
-      const matches = sessions.filter((found) =>
-        entry.session.includes(":")
-          ? found.target === entry.session
-          : found.session === entry.session,
-      );
-      entry.name = matches.length === 1 ? matches[0].name : null;
+      // 같은 이름이 이미 있으면 Claude 가 이름 뒤에 번호를 붙이므로, 안내가 들어갈 pane 에
+      // 등록된 실제 이름을 읽는다.
+      entry.name = (await claudeTmuxTarget(entry.session))?.name ?? null;
       if (!entry.name)
         throw new Error(
-          `Claude session name unknown or ambiguous (side ${entry.side}): ${entry.session}`,
+          `Claude session name unknown (side ${entry.side}): ${entry.session}`,
         );
     }
     const kickoff = [
