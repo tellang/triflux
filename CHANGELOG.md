@@ -2,6 +2,12 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.67.1] - 2026-10-14
+
+### Changed
+- lead: "Claude 세션에 보내기" 규칙을 tfx-live 와 맞춘다. 같은 기기 Claude 세션(팀원 포함)은 `tfx-live list-sessions --cli claude` 의 `name` 으로 `SendMessage` 를 쓰고, 이름을 못 찾거나 원격이면 `tfx-live ask --cli claude` 를 쓴다. 두 스킬의 규칙이 다시 어긋나면 테스트가 실패한다 (#761)
+- lead, live: Codex 0.162.1 실측을 적는다. 모델에 노출된 협업 도구에 `close_agent`, `send_input` 이 없고, `send_message` 는 하위 에이전트의 턴을 시작하지 않는다. Codex 가 셸에서 `tfx-live ask --cli codex` 로 다른 Codex 세션에 보내는 경로는 workspace-write 샌드박스에서 확인했다 (#761)
+
 ## [10.67.0] - 2026-10-13
 
 ### Added
