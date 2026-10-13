@@ -2,6 +2,15 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.67.0] - 2026-10-13
+
+### Added
+- doctor: `--fix` 가 제거된 허브의 `tfx-hub` 항목을 프로젝트 `.mcp.json`, `.claude/mcp.json` 에서 지우고, MCP gateway(127.0.0.1:8100~8107) 항목은 setup 과 같은 npx 직접 연결로 바꾼다. 원본은 저장소 밖 `~/.config/triflux/backups/project-mcp/` 에 남기고, 링크가 낀 파일과 소유를 확인할 수 없는 항목은 건드리지 않는다 (#759)
+
+### Changed
+- doctor: 제거된 허브와 gateway 흔적 점검이 현재 폴더부터 HOME 바로 아래까지 상위 폴더를 본다. Claude Code 가 상위 폴더의 `.mcp.json` 도 읽어서, 현재 폴더만 보면 남은 `tfx-hub` 를 놓쳤다. HOME 밖에서 실행하면 현재 폴더만 본다 (#757, #759)
+- live: 스킬에 같은 기기의 Claude 끼리는 `ask` 대신 `SendMessage` 를 쓰는 방법과, Claude 세션이 `compact --session "$TMUX_PANE" --if-busy wait` 로 턴이 끝난 뒤 자기 자신을 압축하는 방법을 적는다 (#757, #758)
+
 ## [10.66.0] - 2026-10-13
 
 ### Added
