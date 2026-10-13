@@ -3071,8 +3071,11 @@ async function cmdDoctor(options = {}) {
     {
       if (fix) {
         const cleaned = cleanupProjectLegacyMcp();
-        for (const file of cleaned.changed)
-          ok(`정리함: ${formatPathForDisplay(file)}`);
+        cleaned.changed.forEach((file, index) => {
+          ok(
+            `정리함: ${formatPathForDisplay(file)} (원본 ${formatPathForDisplay(cleaned.backups[index])})`,
+          );
+        });
         for (const warning of cleaned.warnings) warn(warning);
       }
       const leftovers = findProjectLegacyMcpEntries();

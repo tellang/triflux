@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   constants,
@@ -1216,9 +1217,14 @@ export function cleanupProjectLegacyMcp({
         result.warnings.push(`${file}: 검사 후 변경되어 건너뜀`);
         continue;
       }
-      mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+      mkdirSync(backupDir, { recursive: true });
+      chmodSync(backupDir, 0o700);
+      // 경로 전체를 이름에 쓰면 255바이트를 넘을 수 있어 경로 해시로 짓는다. 원래 경로는 결과의 backups 와 짝을 이룬다.
       const backup = backupFile(
-        join(backupDir, file.replace(/[\\/:]/g, "%")),
+        join(
+          backupDir,
+          `${createHash("sha256").update(file).digest("hex").slice(0, 16)}-${basename(file)}`,
+        ),
         original,
       );
       writeAtomic(file, file, plan.output, new Map([[file, backup]]));
