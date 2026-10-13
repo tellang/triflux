@@ -1174,7 +1174,9 @@ export function findProjectLegacyMcpEntries(
         .filter(([name, config]) =>
           name === HUB_SERVER
             ? isHubEntry(config)
-            : [config?.url, config?.httpUrl].some(ownedUrl),
+            : [config?.url, config?.httpUrl].some(
+                (value) => ownedUrl(value)?.valid,
+              ),
         )
         .map(([name]) => name);
       return names.length ? [{ file, names }] : [];

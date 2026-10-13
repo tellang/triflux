@@ -350,6 +350,7 @@ test("cwd 부터 HOME 아래까지 허브와 gateway 가 남긴 프로젝트 MCP
     mcpServers: {
       "tfx-hub": HUB,
       "brave-search": { type: "http", url: "http://127.0.0.1:8101/mcp" },
+      context7: { type: "http", url: "http://127.0.0.1:8100/custom-mcp" },
       other: OTHER,
     },
   });

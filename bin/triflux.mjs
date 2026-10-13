@@ -3082,9 +3082,10 @@ async function cmdDoctor(options = {}) {
           warn(`${formatPathForDisplay(file)}: ${names.join(", ")}`);
           // claude mcp remove -s project 는 그 폴더의 .mcp.json 만 고친다.
           if (basename(file) === ".mcp.json") {
+            const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
             for (const name of names) {
               info(
-                `  (cd "${dirname(file)}" && claude mcp remove ${name} -s project)`,
+                `  (cd ${quote(dirname(file))} && claude mcp remove ${quote(name)} -s project)`,
               );
             }
           }
