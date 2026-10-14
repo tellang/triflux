@@ -25,6 +25,7 @@ description: >
 | 사용자에게 묻기 | `AskUserQuestion` | 답변에서 짧은 선택지로 묻는다 |
 | 배경 대기 | `run_in_background`와 완료 알림 | 백그라운드 셸 또는 `tfx-live wait`(아래 5절의 지원 범위 안에서) |
 
+- Claude 는 SendMessage 의 `to` 에 `codex:이름`, `agy:이름` 을 쓰면 mods 가 `tfx-live send` 로 전달한다.
 - Codex 리드는 `spawn_agent`를 29회 부르고 `close_agent`를 한 번도 부르지 않은 사고가 있었다. 서브에이전트는 결과를 받은 즉시 닫는다.
 - Codex 0.162.1 에서 모델에 노출된 협업 도구는 `spawn_agent`, `wait_agent`, `send_message`, `followup_task`, `list_agents`, `interrupt_agent`이고 `close_agent`와 `send_input`은 없었다. `send_message`는 하위 에이전트의 턴을 시작하지 않고 다음 `followup_task` 턴에 함께 전달된다. 대상은 자기가 띄운 하위 에이전트(`/root/...`)다.
 - Codex 리드가 다른 Codex 세션에 보낼 때도 셸에서 `tfx-live ask --cli codex`를 실행한다. workspace-write 샌드박스에서 보내고 받는 것을 확인했다.
