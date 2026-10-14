@@ -535,7 +535,12 @@ describe("setup-sync: user-state file exclusions", () => {
     writeFileSync(join(removed, ".triflux-managed-skill"), "managed");
     try {
       assert.equal(
-        syncSkills({ pluginRoot: source, claudeDir, codexDir }).ok,
+        syncSkills({
+          pluginRoot: source,
+          claudeDir,
+          codexDir,
+          env: { PATH: "" },
+        }).ok,
         true,
       );
       assert.equal(
@@ -548,7 +553,12 @@ describe("setup-sync: user-state file exclusions", () => {
       );
       assert.equal(existsSync(removed), false);
       assert.equal(
-        syncSkills({ pluginRoot: source, claudeDir, codexDir }).changed,
+        syncSkills({
+          pluginRoot: source,
+          claudeDir,
+          codexDir,
+          env: { PATH: "" },
+        }).changed,
         0,
       );
       const liveInstalled = join(codexDir, "skills/tfx-live/SKILL.md");
@@ -557,7 +567,12 @@ describe("setup-sync: user-state file exclusions", () => {
       mkdirSync(liveAdapter, { recursive: true });
       writeFileSync(join(liveAdapter, "SKILL.md"), "Codex live skill");
       assert.equal(
-        syncSkills({ pluginRoot: source, claudeDir, codexDir }).ok,
+        syncSkills({
+          pluginRoot: source,
+          claudeDir,
+          codexDir,
+          env: { PATH: "" },
+        }).ok,
         true,
       );
       assert.equal(readFileSync(liveInstalled, "utf8"), "Codex live skill");
@@ -583,7 +598,12 @@ describe("setup-sync: tfx-harness 라우팅 문서", () => {
     mkdirSync(join(source, ".claude/rules"), { recursive: true });
     writeFileSync(join(source, ".claude/rules/tfx-routing.md"), "D0-D11");
     try {
-      syncSkills({ pluginRoot: source, claudeDir, codexDir });
+      syncSkills({
+        pluginRoot: source,
+        claudeDir,
+        codexDir,
+        env: { PATH: "" },
+      });
       for (const dir of [claudeDir, codexDir])
         assert.equal(
           readFileSync(
@@ -593,7 +613,12 @@ describe("setup-sync: tfx-harness 라우팅 문서", () => {
           "D0-D11",
         );
       assert.equal(
-        syncSkills({ pluginRoot: source, claudeDir, codexDir }).changed,
+        syncSkills({
+          pluginRoot: source,
+          claudeDir,
+          codexDir,
+          env: { PATH: "" },
+        }).changed,
         0,
       );
     } finally {

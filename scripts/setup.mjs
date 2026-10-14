@@ -1190,6 +1190,7 @@ function syncCodexHarnessAdapter({
 function syncCodexManagedSkills({
   pluginRoot = PLUGIN_ROOT,
   codexDir = CODEX_DIR,
+  platform = process.platform,
 } = {}) {
   const liveAdapter = join(
     pluginRoot,
@@ -1216,6 +1217,27 @@ function syncCodexManagedSkills({
     ...syncCodexHarnessAdapter({
       sourceDir,
       destinationDir: join(codexDir, "skills", name),
+      platform,
+    }),
+  }));
+}
+
+function syncAgyManagedSkills({
+  pluginRoot = PLUGIN_ROOT,
+  agyDir = join(_TFX_HOME, ".gemini", "antigravity-cli"),
+  platform = process.platform,
+  env = process.env,
+} = {}) {
+  if (!commandAvailableOnPath("agy", { platform, env })) return [];
+  return [
+    ["tfx-live", join(pluginRoot, "adapters", "agy", "skills", "tfx-live")],
+    ["tfx-lead", join(pluginRoot, "skills", "tfx-lead")],
+  ].map(([name, sourceDir]) => ({
+    name,
+    ...syncCodexHarnessAdapter({
+      sourceDir,
+      destinationDir: join(agyDir, "skills", name),
+      platform,
     }),
   }));
 }
@@ -1237,7 +1259,9 @@ export function syncSkills({
   pluginRoot = PLUGIN_ROOT,
   claudeDir = CLAUDE_DIR,
   codexDir = CODEX_DIR,
+  agyDir = join(dirname(claudeDir), ".gemini", "antigravity-cli"),
   platform = process.platform,
+  env = process.env,
 } = {}) {
   const source = join(pluginRoot, "skills");
   const destination = join(claudeDir, "skills");
@@ -1278,13 +1302,21 @@ export function syncSkills({
     for (const name of stale.preserved)
       result.warnings.push(`구형 스킬 ${name}: 사용자 사본 보존`);
   }
-  for (const skill of syncCodexManagedSkills({ pluginRoot, codexDir })) {
-    if (skill.action === "synced") result.changed++;
-    if (!skill.ok) {
-      result.ok = false;
-      result.warnings.push(`Codex ${skill.name}: ${skill.reason}`);
-    } else if (skill.action === "skipped")
-      result.warnings.push(`Codex ${skill.name}: 사용자 스킬 보존`);
+  result.managedSkills = {
+    codex: syncCodexManagedSkills({ pluginRoot, codexDir, platform }),
+    agy: syncAgyManagedSkills({ pluginRoot, agyDir, platform, env }),
+  };
+  for (const [host, skills] of Object.entries(result.managedSkills)) {
+    const label = host === "codex" ? "Codex" : host;
+    for (const skill of skills) {
+      if (skill.action === "synced" || skill.action === "removed")
+        result.changed++;
+      if (!skill.ok) {
+        result.ok = false;
+        result.warnings.push(`${label} ${skill.name}: ${skill.reason}`);
+      } else if (skill.action === "skipped")
+        result.warnings.push(`${label} ${skill.name}: 사용자 스킬 보존`);
+    }
   }
   const harnessDirs = [join(destination, "tfx-harness")];
   const codexHarness = join(codexDir, "skills", "tfx-harness");
@@ -1652,7 +1684,14 @@ function createCommandIo(stdinData) {
 
 export function setupTargets(
   report,
-  { skills = 0, files = 0, codex, gemini, hooks = "skipped" } = {},
+  {
+    skills = 0,
+    files = 0,
+    codex,
+    gemini,
+    managedSkills,
+    hooks = "skipped",
+  } = {},
 ) {
   const agyInstalled = commandAvailableOnPath("agy");
   const codexInstalled = commandAvailableOnPath("codex");
@@ -1684,7 +1723,7 @@ export function setupTargets(
       status:
         gemini?.ok === false
           ? "failed"
-          : agyInstalled && gemini
+          : agyInstalled && (gemini || managedSkills?.agy.length)
             ? "ok"
             : "skipped",
       detail:
@@ -1693,10 +1732,28 @@ export function setupTargets(
           : agyInstalled
             ? gemini
               ? `프로필 ${gemini.count}개`
-              : "설정 건너뜀"
+              : managedSkills?.agy.length
+                ? ""
+                : "설정 건너뜀"
             : "설치 안 됨, 건너뜀",
     },
   ];
+  for (const target of report.targets) {
+    const results = managedSkills?.[target.name];
+    if (!results?.length) continue;
+    const count = results.filter(
+      ({ action }) => action === "synced" || action === "noop",
+    ).length;
+    const failed = results.some(({ ok }) => !ok);
+    if (failed) target.status = "failed";
+    target.detail = [
+      target.detail,
+      failed ? "스킬 동기화 실패" : "",
+      `스킬 ${count}개`,
+    ]
+      .filter(Boolean)
+      .join(", ");
+  }
   if (report.targets.some(({ status }) => status === "failed"))
     report.alreadyInGoalState = false;
 }
@@ -2197,7 +2254,13 @@ async function runDeferredWithIo(stdinData, io) {
   for (const warning of skillSync.warnings) io.warn("skills", warning);
   if (skillSync.changed) io.report.alreadyInGoalState = false;
   if (skillSync.removed) io.step(`구형 스킬 ${skillSync.removed}개 정리`);
-  if (!skillSync.ok) return io.result(1);
+  if (!skillSync.ok) {
+    setupTargets(io.report, {
+      skills: skillSync.total,
+      managedSkills: skillSync.managedSkills,
+    });
+    return io.result(1);
+  }
   // --mods 는 동의 단계에서 처리하므로 이미 동기화된 버전이어도 건너뛰지 않는다.
   const modsInstall = argv.includes("--mods");
   if (
@@ -2208,6 +2271,7 @@ async function runDeferredWithIo(stdinData, io) {
   ) {
     setupTargets(io.report, {
       skills: skillSync.total,
+      managedSkills: skillSync.managedSkills,
       files: SYNC_MAP.filter(({ dst }) => existsSync(dst)).length,
       codex: { reason: "version-cache" },
     });
@@ -2489,6 +2553,7 @@ async function runDeferredWithIo(stdinData, io) {
   if (synced || consent.changed) io.report.alreadyInGoalState = false;
   setupTargets(io.report, {
     skills: skillSync.total,
+    managedSkills: skillSync.managedSkills,
     files: SYNC_MAP.length,
     codex: codexProfilesResult,
     gemini: geminiProfilesResult,

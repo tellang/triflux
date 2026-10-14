@@ -1472,7 +1472,13 @@ async function cmdSetup(options = {}) {
       );
     const skills = syncSkills();
     skills.warnings.forEach(warning("skills"));
-    if (!skills.ok) throw new Error("스킬 동기화 실패");
+    if (!skills.ok) {
+      setupTargets(report, {
+        skills: skills.total,
+        managedSkills: skills.managedSkills,
+      });
+      throw new Error("스킬 동기화 실패");
+    }
     if (skills.changed) report.alreadyInGoalState = false;
     if (skills.removed) addStep(report, `구형 스킬 ${skills.removed}개 정리`);
 
@@ -1516,6 +1522,7 @@ async function cmdSetup(options = {}) {
     if (consent.changed) report.alreadyInGoalState = false;
     setupTargets(report, {
       skills: skills.total,
+      managedSkills: skills.managedSkills,
       files: SYNC_MAP.length,
       codex,
       gemini,
