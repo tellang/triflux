@@ -408,7 +408,8 @@ Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}", prompt="{prompt
 | build-fixer | Codex (build-fixer 프로필) | implement |
 | spark | Codex (spark 프로필) | implement |
 | architect / planner / critic / analyst | Codex (deep-executor 프로필) | analyze |
-| scientist / document-specialist | Codex | analyze |
+| scientist | Codex | analyze |
+| document-specialist | Antigravity | analyze |
 | code-reviewer / security-reviewer / quality-reviewer | Codex (review) | review |
 | antigravity / designer / writer | Antigravity | docs |
 | explore / claude | Claude native | 없음 |

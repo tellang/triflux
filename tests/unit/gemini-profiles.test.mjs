@@ -75,7 +75,7 @@ describe("ensureGeminiProfiles()", () => {
       JSON.stringify(
         {
           profiles: {
-            flash_high: DEFAULT_GEMINI_PROFILES.profiles.flash_high,
+            argon_high: DEFAULT_GEMINI_PROFILES.profiles.argon_high,
           },
         },
         null,
@@ -145,8 +145,8 @@ describe("ensureGeminiProfiles() 기존 설정", () => {
     assert.equal(saved.model, DEFAULT_GEMINI_PROFILES.model);
     assert.deepEqual(saved.profiles.flash35, oldProfile);
     assert.deepEqual(
-      saved.profiles.flash,
-      DEFAULT_GEMINI_PROFILES.profiles.flash,
+      saved.profiles.argon,
+      DEFAULT_GEMINI_PROFILES.profiles.argon,
     );
     assert.equal(
       readdirSync(geminiDir).filter((name) => name.includes(".bak.")).length,
@@ -156,37 +156,55 @@ describe("ensureGeminiProfiles() 기존 설정", () => {
 });
 
 describe("용도별 effort 분리 (SSOT)", () => {
-  it("역할을 Flash effort 프로필로 매핑한다", () => {
-    assert.equal(resolveGeminiProfileForPurpose("designer"), "flash_high");
-    assert.equal(resolveGeminiProfileForPurpose("reviewer"), "flash_high");
-    assert.equal(resolveGeminiProfileForPurpose("Code-Reviewer"), "flash_high");
-    assert.equal(resolveGeminiProfileForPurpose("writer"), "flash");
-    assert.equal(resolveGeminiProfileForPurpose("antigravity"), "flash");
-    assert.equal(resolveGeminiProfileForPurpose("summarizer"), "flash_low");
-    assert.equal(resolveGeminiProfileForPurpose("no-such-role"), "flash");
-    assert.equal(resolveGeminiProfileForPurpose(""), "flash");
+  it("역할을 Argon effort 프로필로 매핑한다", () => {
+    assert.equal(resolveGeminiProfileForPurpose("designer"), "argon_high");
+    assert.equal(resolveGeminiProfileForPurpose("reviewer"), "argon_high");
+    assert.equal(resolveGeminiProfileForPurpose("Code-Reviewer"), "argon_high");
+    assert.equal(resolveGeminiProfileForPurpose("writer"), "argon");
+    assert.equal(resolveGeminiProfileForPurpose("antigravity"), "argon");
+    assert.equal(resolveGeminiProfileForPurpose("summarizer"), "argon_low");
+    assert.equal(resolveGeminiProfileForPurpose("no-such-role"), "argon");
+    assert.equal(resolveGeminiProfileForPurpose(""), "argon");
+  });
+
+  it("옛 파일에 Flash 항목만 남아 있어도 옛 이름은 Argon Low 로 푼다", () => {
+    const { profilesPath } = makeTempPaths();
+    writeFileSync(
+      profilesPath,
+      JSON.stringify({
+        profiles: { flash38_high: { model: "Gemini 3.8 Flash (High)" } },
+      }),
+    );
+    assert.equal(
+      resolveGeminiModel("flash38_high", { profilesPath }),
+      "Gemini 4 Argon (Low)",
+    );
   });
 
   it("프로필 이름을 display name 으로 푼다 (사용자 파일 우선, 없으면 기본값)", () => {
     const { profilesPath } = makeTempPaths();
     assert.equal(
+      resolveGeminiModel("", { profilesPath }),
+      "Gemini 4 Argon (Medium)",
+    );
+    assert.equal(
       resolveGeminiModel("flash_high", { profilesPath }),
-      "Gemini 3.8 Flash (High)",
+      "Gemini 4 Argon (Low)",
     );
     writeFileSync(
       profilesPath,
       JSON.stringify({
-        model: "Gemini 3.8 Flash (Low)",
-        profiles: { flash: { model: "Gemini 3.7 Flash (Medium)" } },
+        model: "Gemini 4 Argon (Low)",
+        profiles: { argon: { model: "Gemini 4.1 Argon (Medium)" } },
       }),
     );
     assert.equal(
-      resolveGeminiModel("flash", { profilesPath }),
-      "Gemini 3.7 Flash (Medium)",
+      resolveGeminiModel("argon", { profilesPath }),
+      "Gemini 4.1 Argon (Medium)",
     );
     assert.equal(
       resolveGeminiModel("unknown_profile", { profilesPath }),
-      "Gemini 3.8 Flash (Low)",
+      "Gemini 4 Argon (Low)",
     );
     assert.equal(
       resolveGeminiModel("Gemini 3.1 Pro (High)", { profilesPath }),

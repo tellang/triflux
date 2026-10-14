@@ -102,9 +102,9 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 
 ### 모델 배치
 
-> 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
+> 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0038](../../docs/adr/0038-agy-default-argon-family.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
 
-Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고, `scripts/lib/model-family-resolver.mjs`가 관리 파일 `~/.codex/<프로필>.config.toml`의 모델 ID를 갱신한다. `designer`, `writer` 항목은 직접 Codex를 지정한 경우에만 적용하며 일반 실행의 provider는 `hub/team/agent-map.json`이 정한다.
+Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고, `scripts/lib/model-family-resolver.mjs`가 관리 파일 `~/.codex/<프로필>.config.toml`의 모델 ID를 갱신한다. `designer`, `writer`, `document-specialist` 항목은 직접 Codex를 지정한 경우에만 적용하며 일반 실행의 provider는 `hub/team/agent-map.json`이 정한다. 입력이 큰 코드베이스 읽기는 antigravity 로 보낸다(Argon 은 입출력 공유 1M 문맥).
 
 | 프로필 | triflux lane |
 |---------|--------------|
@@ -114,15 +114,15 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 | `sol_med` | cleanup, deslop |
 | `luna_high` | build-fixer, writer(직접 지정) |
 | `luna_low` | spark, explore 재매핑, ChatGPT tier 폴백 |
-| `flash_low` / `flash` / `flash_high` | Antigravity 분류·요약 / 생성·작성 / 검토·설계 |
+| `argon_low` / `argon` / `argon_high` | Antigravity 분류·요약 / 생성·작성 / 검토·설계 |
 | `fable` | `--retry auto-escalate` 최종 단계 |
 | `opus` | 메타 라우팅, planning gate, 스킬의 `model="opus"` lane |
 | `sonnet` | Claude native test-engineer, qa-tester, verifier |
 | `haiku` | Claude native explore, claude |
 
-Codex는 `models_cache.json`의 공개 모델 중 effort를 지원하는 후보를 숫자 버전순으로 고른다. 캐시가 없으면 `codex debug models`를 읽는다. agy는 `agy models`의 Flash 목록을 하루 동안 캐시한다. setup과 update도 같은 해석기를 쓴다. 옛 버전 프로필 이름은 가족 별칭으로 정규화한다.
+Codex는 `models_cache.json`의 공개 모델 중 effort를 지원하는 후보를 숫자 버전순으로 고른다. 캐시가 없으면 `codex debug models`를 읽는다. agy는 `agy models`의 Argon 목록을 하루 동안 캐시한다. setup과 update도 같은 해석기를 쓴다. Flash와 Pro는 자동 선택하지 않고, 옛 `flash*` 프로필 이름은 `argon_low`로 보낸다.
 
-`~/.config/triflux/models.json`에 `{"sol":"gpt-6-sol","flash":"gemini-3.7-flash"}`처럼 적으면 해당 가족을 고정한다. Windows는 `%APPDATA%\triflux`를 쓴다. 해석 기록과 agy 목록도 이 상태 디렉터리에 보관한다. 목록 조회 실패 시 마지막 성공 결과, 그다음 내장 기본값을 사용한다. Claude 별칭 라우팅은 유지한다.
+`~/.config/triflux/models.json`에 `{"sol":"gpt-6-sol","argon":"gemini-4-argon"}`처럼 적으면 해당 가족을 고정한다. Windows는 `%APPDATA%\triflux`를 쓴다. 해석 기록과 agy 목록도 이 상태 디렉터리에 보관한다. 목록 조회 실패 시 마지막 성공 결과, 그다음 내장 기본값을 사용한다. Claude 별칭 라우팅은 유지한다.
 
 ## CLI 라우팅
 

@@ -912,7 +912,7 @@ resolve_gemini_profile() {
     ensureGeminiProfiles(opts);
     process.stdout.write(resolveGeminiModel(process.argv[2], opts));
   ' "${CODEX_PROFILE_MODULE%/*}/gemini-profiles.mjs" "$1" "$GEMINI_PROFILES_PATH" "$CLI_CMD" 2>/dev/null)
-  echo "${result:-Gemini 3.8 Flash (Medium)}"
+  echo "${result:-Gemini 4 Argon (Medium)}"
 }
 
 refresh_codex_profiles() {
@@ -1869,12 +1869,12 @@ run_antigravity_exec() {
   done
 
   # ── 프로필 기반 모델 주입 ──
-  # display name 에 공백/괄호가 있으므로(예: "Gemini 3.8 Flash (Medium)") CLI_ARGS
+  # display name 에 공백/괄호가 있으므로(예: "Gemini 4 Argon (Medium)") CLI_ARGS
   # 문자열이 아니라 agy_args 배열에 두 원소(--model, <display name>)로 append 해야
   # "${agy_args[@]}" expand 시 단일 인자로 보존된다. 모델 SSOT 는 프로필 설정이다.
   if [[ -z "${TFX_GEMINI_NO_MODEL:-}" ]]; then
     local _agy_model
-    _agy_model="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-flash}}")"
+    _agy_model="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-argon}}")"
     if [[ -n "$_agy_model" ]]; then
       agy_args+=("--model" "$_agy_model")
     fi

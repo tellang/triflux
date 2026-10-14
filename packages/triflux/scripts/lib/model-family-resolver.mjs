@@ -19,26 +19,26 @@ export const CODEX_FAMILY_PROFILES = Object.freeze({
   luna_high: { family: "luna", effort: "high", model: "gpt-6-luna" },
   luna_low: { family: "luna", effort: "low", model: "gpt-6-luna" },
 });
-export const FLASH_FAMILY_PROFILES = Object.freeze({
-  flash_low: {
-    family: "flash",
+export const AGY_FAMILY_PROFILES = Object.freeze({
+  argon_low: {
+    family: "argon",
     effort: "low",
-    model: "Gemini 3.8 Flash (Low)",
+    model: "Gemini 4 Argon (Low)",
   },
-  flash: {
-    family: "flash",
+  argon: {
+    family: "argon",
     effort: "medium",
-    model: "Gemini 3.8 Flash (Medium)",
+    model: "Gemini 4 Argon (Medium)",
   },
-  flash_high: {
-    family: "flash",
+  argon_high: {
+    family: "argon",
     effort: "high",
-    model: "Gemini 3.8 Flash (High)",
+    model: "Gemini 4 Argon (High)",
   },
 });
 const DAY_MS = 86_400_000;
 const CODEX_SLUG = /^gpt-(\d+(?:\.\d+)*)-(sol|astra|luna)$/;
-const FLASH_SLUG = /^gemini-(\d+(?:\.\d+)*)-flash-(low|medium|high)$/;
+const AGY_SLUG = /^gemini-(\d+(?:\.\d+)*)-(argon)-(low|medium|high)$/;
 
 function compareVersions(a, b) {
   const left = a.split(".").map(Number);
@@ -75,22 +75,25 @@ export function parseAgyModels(output) {
     .split(/\r?\n/)
     .flatMap((line) => {
       const [slug, model] = line.trim().split("\t");
-      return FLASH_SLUG.test(slug) && model?.trim()
+      return AGY_SLUG.test(slug) && model?.trim()
         ? [{ slug, model: model.trim() }]
         : [];
     });
 }
 
-export function selectFlashModel(models, effort) {
+export function selectAgyModel(models, family, effort) {
   return (
     (models || [])
-      .filter(
-        (item) =>
-          FLASH_SLUG.exec(item?.slug)?.[2] === effort &&
-          typeof item.model === "string",
-      )
+      .filter((item) => {
+        const match = AGY_SLUG.exec(item?.slug);
+        return (
+          match?.[2] === family &&
+          match?.[3] === effort &&
+          typeof item.model === "string"
+        );
+      })
       .sort((a, b) =>
-        compareVersions(FLASH_SLUG.exec(b.slug)[1], FLASH_SLUG.exec(a.slug)[1]),
+        compareVersions(AGY_SLUG.exec(b.slug)[1], AGY_SLUG.exec(a.slug)[1]),
       )[0] || null
   );
 }
@@ -174,7 +177,7 @@ export function readCodexModelCatalog(opts = {}) {
 export function resolveModelFamilies(provider, opts = {}) {
   const paths = modelFamilyPaths(opts);
   const definitions =
-    provider === "codex" ? CODEX_FAMILY_PROFILES : FLASH_FAMILY_PROFILES;
+    provider === "codex" ? CODEX_FAMILY_PROFILES : AGY_FAMILY_PROFILES;
   const recordPath = join(paths.stateDir, `${provider}-model-resolution.json`);
   const previous = readJson(recordPath) || {};
   const now = (opts.now || Date.now)();
@@ -276,7 +279,7 @@ export function resolveModelFamilies(provider, opts = {}) {
             definition.family,
             definition.effort,
           )
-        : selectFlashModel(catalog?.models, definition.effort);
+        : selectAgyModel(catalog?.models, definition.family, definition.effort);
     profiles[name] =
       candidate &&
       (!last?.fetched_at ||
@@ -294,6 +297,10 @@ export function resolveModelFamilies(provider, opts = {}) {
           };
     selectedProfiles[name] = { ...profiles[name] };
     const pin = pins[definition.family];
+    const agyPin =
+      provider === "agy" && typeof pin === "string"
+        ? AGY_SLUG.exec(`${pin}-${definition.effort}`)
+        : null;
     if (
       typeof pin === "string" &&
       provider === "codex" &&
@@ -305,19 +312,17 @@ export function resolveModelFamilies(provider, opts = {}) {
         source: paths.pinsPath,
         fetched_at: null,
       };
-    } else if (
-      typeof pin === "string" &&
-      provider === "agy" &&
-      /^gemini-\d+(?:\.\d+)*-flash$/.test(pin)
-    ) {
+    } else if (agyPin?.[2] === definition.family) {
       const slug = `${pin}-${definition.effort}`;
-      const version = pin.slice(7, -6);
+      const version = agyPin[1];
+      const family =
+        definition.family[0].toUpperCase() + definition.family.slice(1);
       const effort =
         definition.effort[0].toUpperCase() + definition.effort.slice(1);
       selectedProfiles[name] = {
         model:
           catalog?.models?.find((item) => item.slug === slug)?.model ||
-          `Gemini ${version} Flash (${effort})`,
+          `Gemini ${version} ${family} (${effort})`,
         effort: definition.effort,
         source: paths.pinsPath,
         fetched_at: null,

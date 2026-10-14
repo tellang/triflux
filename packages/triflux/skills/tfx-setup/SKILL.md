@@ -18,7 +18,7 @@ HUD의 `statusLine`이 비어 있으면 triflux HUD를 등록한다. 이미 trif
 
 Codex 프로필은 `~/.codex/<이름>.config.toml`로 관리한다. 기본 설정 키는 `approval_policy`, `sandbox_mode`이며 CLI에는 `--profile`만 전달한다. 프로젝트 지침은 [CLAUDE.md](../../CLAUDE.md)의 `<codex-config>`를 따른다.
 
-Antigravity 프로필은 `~/.gemini/triflux-profiles.json`에서 `flash_low`, `flash`, `flash_high` 가족 프로필을 자동 갱신한다. `agy`와 `codex`가 설치되지 않았으면 선택적 CLI 누락으로 보고한다.
+Antigravity 프로필은 `~/.gemini/triflux-profiles.json`에서 `argon_low`, `argon`, `argon_high` 가족 프로필을 자동 갱신한다. `agy`와 `codex`가 설치되지 않았으면 선택적 CLI 누락으로 보고한다.
 
 mods(사용량 band, 서브에이전트 effort 강제)는 `tfx setup --mods`로 설치한다. Claude Code 2.1.287 이상이 필요하다. 기본 setup은 marketplace 등록과 안내 한 줄만 한다.
 

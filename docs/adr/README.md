@@ -44,6 +44,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0035](0035-remove-cto.md) | CTO 삭제 | Proposed | 0022, 0024 |
 | [0036](0036-code-verdict-owner-tfx-review.md) | 3-layer 공존에서 코드 판정은 triflux tfx-review | Accepted | 0002, 0009 |
 | [0037](0037-model-family-aliases.md) | Codex와 Antigravity 가족 별칭을 실행 때 최신 모델로 해석한다 | Accepted | 0016, 0017, 0019 |
+| [0038](0038-agy-default-argon-family.md) | Antigravity를 Argon으로 바꾸고 역할 배정을 다시 정한다 | Accepted | 0037 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 

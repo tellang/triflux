@@ -21,8 +21,8 @@ import {
 import {
   parseAgyModels,
   resolveModelFamilies,
+  selectAgyModel,
   selectCodexModel,
-  selectFlashModel,
 } from "../../scripts/lib/model-family-resolver.mjs";
 
 const model = (slug, efforts = ["high"], visibility = "list") => ({
@@ -72,15 +72,48 @@ test("숫자 버전 순으로 같은 가족의 공개 모델 중 effort를 지�
   );
 });
 
-test("agy 목록은 Flash 버전과 effort를 골라 display name을 쓴다", () => {
+test("agy 목록은 같은 가족의 숫자 버전과 effort를 골라 display name을 쓴다", () => {
   const models = parseAgyModels(
-    "gemini-3.9-flash-high\tGemini 3.9 Flash (High)\ngemini-3.10-flash-high\tGemini 3.10 Flash (High)\ngemini-4-pro-high\tGemini 4 Pro (High)\nnoise\n",
+    "gemini-3.9-flash-high\tGemini 3.9 Flash (High)\ngemini-3.10-flash-high\tGemini 3.10 Flash (High)\ngemini-4.9-argon-high\tGemini 4.9 Argon (High)\ngemini-4.10-argon-high\tGemini 4.10 Argon (High)\ngemini-4-pro-high\tGemini 4 Pro (High)\nnoise\n",
   );
+  assert.equal(models.length, 2);
   assert.equal(
-    selectFlashModel(models, "high")?.model,
-    "Gemini 3.10 Flash (High)",
+    selectAgyModel(models, "argon", "high")?.model,
+    "Gemini 4.10 Argon (High)",
   );
-  assert.equal(selectFlashModel(models, "low"), null);
+  assert.equal(selectAgyModel(models, "argon", "medium"), null);
+});
+
+test("agy 목록에서 Argon만 고르고 Flash와 Pro는 자동 선택하지 않는다", (t) => {
+  const opts = fixture(t);
+  opts.runCommand = () =>
+    "gemini-4-argon-high\tGemini 4 Argon (High)\n" +
+    "gemini-4-argon-medium\tGemini 4 Argon (Medium)\n" +
+    "gemini-4-argon-low\tGemini 4 Argon (Low)\n" +
+    "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n" +
+    "gemini-3.1-pro-high\tGemini 3.1 Pro (High)\n";
+  const { profiles } = resolveModelFamilies("agy", opts);
+  assert.deepEqual(Object.keys(profiles), ["argon_low", "argon", "argon_high"]);
+  assert.equal(profiles.argon_high.model, "Gemini 4 Argon (High)");
+});
+
+test("models.json의 Argon 고정은 최신 목록보다 우선한다", (t) => {
+  const opts = fixture(t);
+  opts.runCommand = () =>
+    "gemini-4.1-argon-high\tGemini 4.1 Argon (High)\n" +
+    "gemini-4-argon-medium\tGemini 4 Argon (Medium)\n" +
+    "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n";
+  const pins = join(opts.stateDir, "models.json");
+  writeFileSync(pins, JSON.stringify({ argon: "gemini-4-argon" }));
+  const { profiles } = resolveModelFamilies("agy", opts);
+  assert.equal(profiles.argon_low?.model, "Gemini 4 Argon (Low)");
+  assert.equal(profiles.argon?.model, "Gemini 4 Argon (Medium)");
+  assert.equal(profiles.argon_high?.model, "Gemini 4 Argon (High)");
+  rmSync(pins);
+  assert.equal(
+    resolveModelFamilies("agy", opts).profiles.argon_high.model,
+    "Gemini 4.1 Argon (High)",
+  );
 });
 
 test("고정 파일이 목록보다 우선하고 제거하면 자동 선택으로 돌아간다", (t) => {
@@ -98,7 +131,7 @@ test("고정 파일이 목록보다 우선하고 제거하면 자동 선택으�
     pins,
     JSON.stringify({
       sol: "gpt-6-sol",
-      flash: "gemini-3.7-flash",
+      argon: "gemini-4-argon",
       luna: "gpt-99-sol",
     }),
   );
@@ -111,8 +144,8 @@ test("고정 파일이 목록보다 우선하고 제거하면 자동 선택으�
     "gpt-6-luna",
   );
   assert.equal(
-    resolveModelFamilies("agy", opts).profiles.flash_high.model,
-    "Gemini 3.7 Flash (High)",
+    resolveModelFamilies("agy", opts).profiles.argon_high.model,
+    "Gemini 4 Argon (High)",
   );
   rmSync(pins);
   assert.equal(
@@ -179,7 +212,7 @@ test("Codex 캐시가 없으면 debug models를 쓰고 agy는 하루에 한 번�
       return JSON.stringify({ models: [model("gpt-7-sol")] });
     }
     assert.deepEqual(args, ["models"]);
-    return "gemini-4-flash-high\tGemini 4 Flash (High)\n";
+    return "gemini-4.1-argon-high\tGemini 4.1 Argon (High)\n";
   };
   opts.now = () => Date.parse("2026-10-12T00:00:00Z");
   assert.equal(
@@ -187,8 +220,8 @@ test("Codex 캐시가 없으면 debug models를 쓰고 agy는 하루에 한 번�
     "gpt-7-sol",
   );
   assert.equal(
-    resolveModelFamilies("agy", opts).profiles.flash_high.model,
-    "Gemini 4 Flash (High)",
+    resolveModelFamilies("agy", opts).profiles.argon_high.model,
+    "Gemini 4.1 Argon (High)",
   );
   resolveModelFamilies("agy", opts);
   resolveModelFamilies("codex", opts);
@@ -199,8 +232,8 @@ test("Codex 캐시가 없으면 debug models를 쓰고 agy는 하루에 한 번�
     throw new Error("offline");
   };
   assert.equal(
-    resolveModelFamilies("agy", opts).profiles.flash_high.model,
-    "Gemini 4 Flash (High)",
+    resolveModelFamilies("agy", opts).profiles.argon_high.model,
+    "Gemini 4.1 Argon (High)",
   );
   resolveModelFamilies("agy", opts);
   assert.equal(calls, 3);
@@ -227,11 +260,8 @@ test("옛 프로필 이름은 effort를 유지한 가족 별칭으로 정규화�
   ])
     assert.equal(normalizeCodexProfileName(old), current);
   assert.equal(normalizeCodexProfileName("personal"), "personal");
-  for (const suffix of ["", "_low", "_high"])
-    assert.equal(
-      normalizeGeminiProfileName(`flash38${suffix}`),
-      `flash${suffix}`,
-    );
+  for (const old of ["flash", "flash_high", "flash38", "flash38_low"])
+    assert.equal(normalizeGeminiProfileName(old), "argon_low");
 });
 
 test("관리 프로필 갱신은 최신 해석을 쓰고 옛 파일과 커스텀 프로필을 보존한다", (t) => {
@@ -264,11 +294,11 @@ test("관리 프로필 갱신은 최신 해석을 쓰고 옛 파일과 커스텀
       },
     }),
   );
-  opts.runCommand = () => "gemini-4-flash-high\tGemini 4 Flash (High)\n";
+  opts.runCommand = () => "gemini-4-argon-low\tGemini 4 Argon (Low)\n";
   assert.equal(ensureGeminiProfiles(opts).ok, true);
   assert.equal(
     resolveGeminiModel("flash38_high", opts),
-    "Gemini 4 Flash (High)",
+    "Gemini 4 Argon (Low)",
   );
   assert.equal(resolveGeminiModel("personal", opts), "custom");
 });
