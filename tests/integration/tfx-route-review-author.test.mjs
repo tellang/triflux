@@ -31,7 +31,7 @@ function runRoute({
   author,
   weekly,
   weeklyResetsAt,
-  cli = "auto",
+  cli,
   env = {},
   launch = "route",
   workerCli,
@@ -65,66 +65,82 @@ else { require('node:fs').writeFileSync(process.env.ROUTE_ARGV, JSON.stringify(a
   );
   try {
     let args = [route, role, prompt, "review"];
-    if (launch === "headless") {
-      const saved = process.env.TFX_CLI_MODE;
-      process.env.TFX_CLI_MODE = cli;
+    if (launch !== "route") {
+      const callerEnv = {
+        TFX_CLI_MODE: cli,
+        TFX_REVIEW_AUTHOR: author,
+        TFX_ROUTE_SCRIPT: route,
+      };
+      const saved = Object.fromEntries(
+        Object.keys(callerEnv).map((key) => [key, process.env[key]]),
+      );
+      for (const [key, value] of Object.entries(callerEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       try {
-        const command = buildHeadlessCommand(
-          workerCli || role,
-          prompt,
-          join(home, "result.txt"),
-          {
-            handoff: false,
-            routeScript: route,
-            ...(workerCli ? { role } : {}),
-          },
-        );
+        const command =
+          launch === "headless"
+            ? buildHeadlessCommand(
+                workerCli || role,
+                prompt,
+                join(home, "result.txt"),
+                {
+                  handoff: false,
+                  routeScript: route,
+                  ...(workerCli ? { role } : {}),
+                },
+              )
+            : buildCliCommand(role, prompt);
         assert.match(command, /tfx-route\.sh/, "실제 CLI 직접 실행을 차단한다");
         args = ["-lc", command];
       } finally {
-        if (saved === undefined) delete process.env.TFX_CLI_MODE;
-        else process.env.TFX_CLI_MODE = saved;
+        for (const [key, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
       }
-    } else if (launch === "pane") {
-      const command = buildCliCommand(role, prompt);
-      assert.match(command, /tfx-route\.sh/, "실제 CLI 직접 실행을 차단한다");
-      args = ["-lc", command];
+    }
+    const executionEnv = {
+      ...baseEnv,
+      HOME: home,
+      USERPROFILE: home,
+      CODEX_HOME: join(home, ".codex"),
+      XDG_CONFIG_HOME: join(home, ".config"),
+      TMPDIR: join(home, "tmp"),
+      NODE_BIN: process.execPath,
+      CODEX_BIN: toBashPath(fakeCli),
+      AGY_BIN: toBashPath(fakeCli),
+      CLAUDE_BIN: process.execPath,
+      CLAUDE_BIN_ARGS_JSON: JSON.stringify([
+        join(root, "tests/fixtures/fake-claude-cli.mjs"),
+      ]),
+      FAKE_CLAUDE_ARGV_OUT: argvPath,
+      ROUTE_ARGV: argvPath,
+      TFX_ROUTE_SCRIPT: route,
+      GH_TOKEN: "fixture-token",
+      TFX_PREFLIGHT_LOADED: "1",
+      TFX_CODEX_OK: "1",
+      TFX_ANTIGRAVITY_OK: "1",
+      TFX_DISABLE_CODEX: "0",
+      TFX_DISABLE_ANTIGRAVITY: "0",
+      ...(cli === undefined ? {} : { TFX_CLI_MODE: cli }),
+      TFX_HEARTBEAT: "0",
+      TFX_HARD_CEILING_SEC: "0",
+      TFX_MCP_HEALTH_CHECK: "0",
+      TFX_QUOTA_REROUTE: "0",
+      ...(author === undefined ? {} : { TFX_REVIEW_AUTHOR: author }),
+      ...env,
+    };
+    if (launch !== "route") {
+      delete executionEnv.TFX_REVIEW_AUTHOR;
+      delete executionEnv.TFX_CLI_MODE;
     }
     const result = spawnSync(BASH_EXE, args, {
       cwd: home,
       encoding: "utf8",
       timeout: 20_000,
-      env: {
-        ...baseEnv,
-        HOME: home,
-        USERPROFILE: home,
-        CODEX_HOME: join(home, ".codex"),
-        XDG_CONFIG_HOME: join(home, ".config"),
-        TMPDIR: join(home, "tmp"),
-        NODE_BIN: process.execPath,
-        CODEX_BIN: toBashPath(fakeCli),
-        AGY_BIN: toBashPath(fakeCli),
-        CLAUDE_BIN: process.execPath,
-        CLAUDE_BIN_ARGS_JSON: JSON.stringify([
-          join(root, "tests/fixtures/fake-claude-cli.mjs"),
-        ]),
-        FAKE_CLAUDE_ARGV_OUT: argvPath,
-        ROUTE_ARGV: argvPath,
-        TFX_ROUTE_SCRIPT: route,
-        GH_TOKEN: "fixture-token",
-        TFX_PREFLIGHT_LOADED: "1",
-        TFX_CODEX_OK: "1",
-        TFX_ANTIGRAVITY_OK: "1",
-        TFX_DISABLE_CODEX: "0",
-        TFX_DISABLE_ANTIGRAVITY: "0",
-        TFX_CLI_MODE: cli,
-        TFX_HEARTBEAT: "0",
-        TFX_HARD_CEILING_SEC: "0",
-        TFX_MCP_HEALTH_CHECK: "0",
-        TFX_QUOTA_REROUTE: "0",
-        ...(author === undefined ? {} : { TFX_REVIEW_AUTHOR: author }),
-        ...env,
-      },
+      env: executionEnv,
     });
     if (launch === "headless") {
       for (const [key, suffix] of [
@@ -217,30 +233,57 @@ test("security-reviewer uses Argon High", () => {
 
 for (const launch of ["headless", "pane"]) {
   for (const role of ["code-reviewer", "quality-reviewer"]) {
-    test(`${launch} ${role} dispatches through author policy`, () => {
-      const r = runRoute({ launch, role, author: "codex" });
+    for (const [author, reviewer] of [
+      ["codex", "claude"],
+      ["claude", "codex"],
+      ["antigravity", "claude"],
+    ]) {
+      test(`${launch} ${role} passes ${author} author through the command alone`, () => {
+        const r = runRoute({ launch, role, author });
+        assert.equal(r.status, 0, r.output);
+        assert.match(
+          r.output,
+          new RegExp(`reviewer=${reviewer} review_author=${author}`),
+        );
+        if (reviewer === "claude") {
+          assert.equal(r.argv[r.argv.indexOf("--model") + 1], "opus");
+          assert.equal(r.argv[r.argv.indexOf("--effort") + 1], "high");
+          assert.ok(r.argv.includes("--verbose"), r.output);
+        } else {
+          assert.equal(r.argv[r.argv.indexOf("--profile") + 1], "sol_high");
+          assert.ok(r.argv.includes("review"), r.output);
+        }
+      });
+    }
+  }
+  for (const cli of ["codex", "antigravity"]) {
+    test(`${launch} preserves explicit CLI ${cli} through the command alone`, () => {
+      const r = runRoute({ launch, cli, author: "codex" });
       assert.equal(r.status, 0, r.output);
-      assert.match(
-        r.output,
-        /\[tfx-route\] reviewer=claude review_author=codex/,
-      );
-      assert.equal(r.argv[r.argv.indexOf("--model") + 1], "opus");
-      assert.equal(r.argv[r.argv.indexOf("--effort") + 1], "high");
-      assert.ok(r.argv.includes("--verbose"), r.output);
+      assert.match(r.output, new RegExp(`reviewer=${cli} review_author=codex`));
     });
   }
-  test(`${launch} preserves explicit CLI choice`, () => {
-    const r = runRoute({ launch, cli: "antigravity" });
-    assert.equal(r.status, 0, r.output);
-    assert.match(r.output, /\[tfx-route\] reviewer=antigravity/);
-  });
+  for (const key of ["author", "cli"]) {
+    test(`${launch} quotes ${key} shell metacharacters without executing them`, () => {
+      const value = "literal 'quote' $(exit 19) `exit 20`";
+      const r = runRoute({ launch, [key]: value });
+      assert.ok(r.output.includes(value), r.output);
+      if (key === "author") {
+        assert.notEqual(r.status, 0, r.output);
+        assert.deepEqual(r.argv, []);
+      } else {
+        assert.equal(r.status, 0, r.output);
+        assert.ok(r.argv.length > 0, r.output);
+      }
+    });
+  }
 }
 
 for (const workerCli of ["codex", "claude"]) {
   test(`headless ${workerCli} assignment preserves reviewer role policy`, () => {
-    const r = runRoute({ launch: "headless", workerCli });
+    const r = runRoute({ launch: "headless", workerCli, author: "claude" });
     assert.equal(r.status, 0, r.output);
-    assert.match(r.output, /reviewer=claude review_author=codex/);
+    assert.match(r.output, /reviewer=codex review_author=claude/);
   });
 }
 

@@ -72,7 +72,11 @@ export function buildCliCommand(cli, prompt) {
     ].find((path) => path && existsSync(path));
     if (!routeScript) throw new Error("tfx-route.sh 를 찾지 못했다.");
     const quote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
-    const script = `bash ${quote(routeScript.replace(/\\/g, "/"))} ${quote(cli)} ${quote(prompt)} review < /dev/null`;
+    const reviewEnv = ["TFX_REVIEW_AUTHOR", "TFX_CLI_MODE"]
+      .filter((key) => process.env[key] !== undefined)
+      .map((key) => `${key}=${quote(process.env[key])} `)
+      .join("");
+    const script = `${reviewEnv}bash ${quote(routeScript.replace(/\\/g, "/"))} ${quote(cli)} ${quote(prompt)} review < /dev/null`;
     const quotedScript =
       process.platform === "win32"
         ? `'${script.replace(/'/g, "''")}'`

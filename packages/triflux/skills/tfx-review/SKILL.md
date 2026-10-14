@@ -216,7 +216,7 @@ Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분�
 ctx=$(mktemp "${TMPDIR:-/tmp}/tfx-review.XXXXXX")
 git diff HEAD > "$ctx"                    # Step 1 의 2번
 [ -s "$ctx" ] || git diff HEAD~1 > "$ctx" # Step 1 의 3번
-TFX_REVIEW_AUTHOR="${TFX_REVIEW_AUTHOR:-codex}" bash ~/.claude/scripts/tfx-route.sh code-reviewer \
+TFX_REVIEW_AUTHOR="<작성 벤더>" bash ~/.claude/scripts/tfx-route.sh code-reviewer \
   "리뷰 대상은 $ctx 파일이다. 파일 전체를 끝까지 읽고 리뷰하라. 경로 목록이면 그 파일들을 읽는다.
    심각도별 분류(critical/high/medium/low).
    체크: 로직 결함, 보안 취약점, 성능 문제, 에러 핸들링, 과잉 설계(요청 범위를 넘은 변경, 한 번만 쓰는 추상화)."

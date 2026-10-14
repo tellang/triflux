@@ -186,6 +186,12 @@ function buildRouteBackedHeadlessCommand(
   const cliModeEnv = reviewByAuthor
     ? ""
     : `TFX_CLI_MODE=${shellQuote(resolvedCli)} `;
+  const reviewEnv = reviewByAuthor
+    ? ["TFX_REVIEW_AUTHOR", "TFX_CLI_MODE"]
+        .filter((key) => process.env[key] !== undefined)
+        .map((key) => `${key}=${shellQuote(process.env[key])} `)
+        .join("")
+    : "";
   const codexProfileEnv =
     resolvedCli === "codex" && opts.codexProfile
       ? `TFX_CODEX_PROFILE=${shellQuote(opts.codexProfile)} `
@@ -200,7 +206,7 @@ function buildRouteBackedHeadlessCommand(
     .join("");
   const script =
     `__tfx_prompt=$(cat ${shellQuote(promptFile)}); ` +
-    `${lifecycleEnv}${codexProfileEnv}${cliModeEnv}` +
+    `${lifecycleEnv}${codexProfileEnv}${cliModeEnv}${reviewEnv}` +
     `bash ${shellQuote(routeScript)} ${shellQuote(routeAgent)} "$__tfx_prompt" ${shellQuote(mcp)}${timeoutArg} ` +
     `> ${shellQuote(resultFile)} 2>${shellQuote(`${resultFile}.err`)} < /dev/null`;
   return `bash -lc ${shellQuote(script)}`;
