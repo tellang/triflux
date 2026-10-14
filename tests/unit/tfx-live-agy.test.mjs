@@ -162,6 +162,51 @@ test("agy does not complete an idle request until a model step exists", () => {
   );
 });
 
+test("agy treats cancelled and failed tool steps as finished", () => {
+  for (const status of [6, 7])
+    assert.equal(
+      agyWaitVerdict(
+        [request, { step_type: 132, status }, answer],
+        "first",
+        ready,
+      ).status,
+      "completed",
+    );
+  assert.equal(
+    agyWaitVerdict(
+      [request, { step_type: 132, status: 2 }, answer],
+      "first",
+      ready,
+    ).status,
+    "working",
+  );
+});
+
+test("agy reports a turn that ends in an error step as failed instead of waiting", () => {
+  const message =
+    "There was a network issue connecting to the server, please try again.";
+  const error = {
+    step_type: 17,
+    status: 3,
+    step_payload: field(24, field(3, field(1, Buffer.from(message)))),
+  };
+  const system = { step_type: 101, status: 3 };
+  assert.deepEqual(agyWaitVerdict([request, system, error], "first", ready), {
+    status: "failed",
+    done: false,
+    response: "",
+    error: message,
+  });
+  assert.equal(
+    agyWaitVerdict([request, system, error], "first", busy).status,
+    "working",
+  );
+  assert.equal(
+    agyWaitVerdict([request, error, answer], "first", ready).status,
+    "completed",
+  );
+});
+
 test("unset-env verification requires readable environment and matches exact names or prefixes", () => {
   const patterns = ["PRIVATE_*", "EXACT"];
   assert.deepEqual(
