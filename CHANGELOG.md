@@ -2,6 +2,19 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.70.0] - 2026-10-14
+
+### Added
+- live: `tfx-live send --to <이름|cli:이름> --message <본문>` 으로 Claude, Codex, Antigravity 세션에 CLI 종류와 상관없이 이름으로 보낸다. 이름이나 별칭이 정확히 맞는 세션 하나에만 보내고, 기존 `ask` 경로(Codex 는 queue, Claude 와 agy 는 tmux)로 전달하며, 보낸 쪽과 회신 명령을 머리말로 붙인다. Claude 안에서 로컬 Claude 로 보내면 SendMessage 를 쓰라고 거부한다 (#774)
+
+### Changed
+- routing: `code-reviewer`, `quality-reviewer` 를 작성 벤더와 다른 벤더에 배정한다(`TFX_REVIEW_AUTHOR`, 기본 codex). Codex 와 Argon 이 쓴 코드는 Claude Opus 가, Claude 가 쓴 코드는 Codex Sol 이 리뷰하고, Claude 주간 사용량 80% 이상이면 작성 벤더가 아닌 다른 쪽으로 넘긴다. `security-reviewer` 는 Argon High 로 옮긴다. 설계 역할은 Astra 그대로다(ADR-0039) (#772)
+
+### Fixed
+- route: Claude 워커가 `--verbose` 없이 stream-json 을 요청해 Claude Code 2.1.296 에서 매번 실패하고, 그 실패를 성공으로 보고하던 문제를 고친다 (#772)
+- live: agy 오류 step 에 화면 문구가 없을 때 `wait` 가 빈 `error` 를 돌려줘 peer 가 메시지 없는 오류를 던지던 문제를 고친다 (#771)
+- live: `stop` 에서 tmux 와 함께 iTerm 창이 먼저 닫히면 닫기 스크립트가 경고를 남기던 문제를 고친다 (#773)
+
 ## [10.69.0] - 2026-10-14
 
 ### Added
