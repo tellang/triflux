@@ -25,6 +25,8 @@ const isolatedCodex = makeIsolatedCodexConfig();
 after(() => isolatedCodex.cleanup());
 const isolatedHome = fs.mkdtempSync(resolve(os.tmpdir(), "tfx-quota-home-"));
 after(() => fs.rmSync(isolatedHome, { recursive: true, force: true }));
+const isolatedTmp = resolve(isolatedHome, "tmp");
+fs.mkdirSync(isolatedTmp);
 
 // 헬퍼: bash 스크립트에서 특정 함수 내용만 추출
 function extractFunction(scriptPath, funcName) {
@@ -43,7 +45,7 @@ function runBash(command, extraEnv = {}) {
     encoding: "utf8",
     env: {
       ...routeCliPolicyEnv(),
-      TFX_TMP: os.tmpdir(),
+      TFX_TMP: isolatedTmp,
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
       // #148: 테스트 환경 MCP probe 결과는 모두 dead → preflight early-fail.
       // 라우팅/quota 검증이 목적이므로 preflight 스킵.
@@ -73,12 +75,24 @@ describe("tfx-route.sh — Quota Functions", () => {
     "is_cli_disabled",
   );
   const rerouteFunc = extractFunction(ROUTE_SCRIPT_WIN, "auto_reroute");
+  const availableFunc = extractFunction(ROUTE_SCRIPT_WIN, "is_cli_available");
+  const cooldownFunc = extractFunction(
+    ROUTE_SCRIPT_WIN,
+    "agy_quota_cooldown_active",
+  );
+  const quotaLogFunc = extractFunction(
+    ROUTE_SCRIPT_WIN,
+    "log_agy_quota_fallback",
+  );
   const rerouteFixture = `
 TFX_DISABLE_CODEX="\${TFX_DISABLE_CODEX:-0}"
 TFX_DISABLE_ANTIGRAVITY="\${TFX_DISABLE_ANTIGRAVITY:-0}"
 ${agyHeadlessFunc}
 ${codexAvailableFunc}
 ${isCliDisabledFunc}
+${cooldownFunc}
+${quotaLogFunc}
+${availableFunc}
 ${rerouteFunc}`;
 
   before(() => {
@@ -115,6 +129,10 @@ ${rerouteFunc}`;
         HOME: isolatedHome,
         USERPROFILE: isolatedHome,
         XDG_CONFIG_HOME: resolve(isolatedHome, ".config"),
+        CODEX_HOME: resolve(isolatedHome, ".codex"),
+        TFX_MACHINE_PROFILE_PATH: resolve(isolatedHome, "machine-profile.env"),
+        TMPDIR: isolatedTmp,
+        TEMP: isolatedTmp,
         TRIFLUX_TEST_HOME: isolatedHome,
         TFX_CODEX_CONFIG: isolatedCodex.path,
         TFX_HEARTBEAT: "0",
@@ -124,7 +142,7 @@ ${rerouteFunc}`;
         TFX_CODEX_OK: "1",
         TFX_ANTIGRAVITY_OK: "0",
         CODEX_BIN: fakeCodex,
-        TFX_TMP: os.tmpdir(),
+        TFX_TMP: isolatedTmp,
         ...extraEnv,
       },
     });
@@ -208,7 +226,7 @@ PROMPT="test"
 MCP_PROFILE="auto"
 CLI_TYPE="codex"
 TFX_ANTIGRAVITY_OK="1"
-TFX_TMP="${os.tmpdir()}"
+TFX_TMP="${isolatedTmp}"
 ${rerouteFixture}
 auto_reroute codex
 `,
@@ -252,7 +270,7 @@ PROMPT="test"
 MCP_PROFILE="auto"
 CLI_TYPE="codex"
 unset TFX_ANTIGRAVITY_OK
-TFX_TMP="${os.tmpdir()}"
+TFX_TMP="${isolatedTmp}"
 ${rerouteFixture}
 auto_reroute codex
 `,
@@ -292,7 +310,7 @@ AGENT_TYPE="__rerouted_probe"
 PROMPT="test"
 MCP_PROFILE="auto"
 CLI_TYPE="antigravity"
-TFX_TMP="${os.tmpdir()}"
+TFX_TMP="${isolatedTmp}"
 ${rerouteFixture}
 auto_reroute antigravity
 `,

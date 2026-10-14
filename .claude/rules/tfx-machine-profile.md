@@ -96,6 +96,14 @@ Claude 워커로 전환하고 stderr에 이유와 대상을 남긴다. Claude CL
 Codex로 다시 돌리지 않고 exit 78로 실패한다. Claude 워커 실패도 실패로 남긴다.
 이 설정은 `code-reviewer`와 `quality-reviewer`의 작성 벤더별 폴백에 적용하지 않는다.
 
+agy 쿼터 오류는 `TFX_TMP/tfx-agy-quota-reset`에 리셋 시각을 epoch 초로 원자 기록한다.
+`Resets in <h>h<m>m<s>s`를 읽지 못하면 1시간 뒤로 잡는다. 오류와 Error ID만
+출력한 exit 0도 실패로 처리한다. 리셋 전에는 Antigravity를 미가용으로 판정하고
+`TFX_ANTIGRAVITY_FALLBACK`에 따라 전환하며, stderr에 리셋 시각과 대상을 남긴다.
+쿼터 오류가 난 실행도 같은 정책으로 한 번 재실행한다. 작성 벤더별 리뷰는 작성자를
+후보에서 제외한다. 리셋 뒤에는 상태 파일을 무시하고 agy를 다시 허용하되,
+명시적으로 저장한 `TFX_DISABLE_ANTIGRAVITY=1`은 그대로 존중한다.
+
 Claude-native로 설계된 역할과 transport 내부의 `Codex MCP → Codex exec` 전환은
 다른 CLI로의 availability fallback이 아니므로 이 정책과 독립적이다.
 

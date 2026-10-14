@@ -780,7 +780,7 @@ detect_quota_exceeded() {
   local -a patterns=(
     "usage limit exceeded" "rate limit exceeded" "rate limit reached"
     "try again at" "purchase more credits"
-    "quota exceeded" "RESOURCE_EXHAUSTED" "rateLimitExceeded" "Too Many Requests"
+    "quota exceeded" "Quota pool exhausted" "RESOURCE_EXHAUSTED" "rateLimitExceeded" "Too Many Requests"
     "rate_limit_error" "overloaded_error" "insufficient_quota"
   )
   local pattern
@@ -791,6 +791,51 @@ detect_quota_exceeded() {
     fi
   done
   return 1
+}
+
+agy_output_is_quota_error() {
+  awk '
+    {
+      line = tolower($0)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+      if (line ~ /^(error: )?quota pool exhausted([.[:space:]]|$)/) quota = 1
+      else if (line != "" && line !~ /^error id([:[:space:]]|$)/) content = 1
+    }
+    END { exit !(quota && !content) }
+  ' "$1" "$2"
+}
+
+record_agy_quota_reset() {
+  local output delay=3600 reset_epoch temp_file
+  local reset_pattern='Resets in ([0-9]{1,9})h([0-9]{1,2})m([0-9]{1,2})s'
+  output="$(cat "$1" "$2" 2>/dev/null || true)"
+  if [[ "$output" =~ $reset_pattern ]]; then
+    delay=$((10#${BASH_REMATCH[1]} * 3600 + 10#${BASH_REMATCH[2]} * 60 + 10#${BASH_REMATCH[3]}))
+  fi
+  reset_epoch=$(( $(date +%s) + delay ))
+  temp_file="$(mktemp "${TFX_TMP}/tfx-agy-quota-reset.XXXXXX")" || return 1
+  if printf '%s\n' "$reset_epoch" > "$temp_file" \
+    && mv -f "$temp_file" "${TFX_TMP}/tfx-agy-quota-reset"; then
+    return 0
+  fi
+  rm -f "$temp_file"
+  return 1
+}
+
+agy_quota_cooldown_active() {
+  AGY_QUOTA_RESET_EPOCH=""
+  local state_file="${TFX_TMP}/tfx-agy-quota-reset"
+  [[ -r "$state_file" ]] || return 1
+  IFS= read -r AGY_QUOTA_RESET_EPOCH < "$state_file" || return 1
+  [[ "$AGY_QUOTA_RESET_EPOCH" =~ ^[0-9]{1,12}$ ]] || return 1
+  [[ "$((10#$AGY_QUOTA_RESET_EPOCH))" -gt "$(date +%s)" ]]
+}
+
+log_agy_quota_fallback() {
+  agy_quota_cooldown_active || return 0
+  local reset_time
+  reset_time="$("$NODE_BIN" -e 'process.stdout.write(new Date(Number(process.argv[1]) * 1000).toISOString())' "$AGY_QUOTA_RESET_EPOCH")"
+  echo "[tfx-route] agy 쿼터 소진, ${reset_time}까지 $1으로" >&2
 }
 
 agy_supports_headless() {
@@ -853,29 +898,25 @@ auto_reroute() {
   local failed_cli="$1"
   local target_cli=""
   local -a candidates=()
-  case "$failed_cli" in
-    codex) candidates=("antigravity") ;;
-    antigravity) candidates=("codex") ;;
-    *) echo "[tfx-quota] $failed_cli 대체 CLI 없음" >&2; return 1 ;;
-  esac
+  if [[ -n "${REVIEW_AUTHOR:-}" ]]; then
+    candidates=("claude" "codex" "antigravity")
+  else
+    case "$failed_cli" in
+      codex) candidates=("antigravity") ;;
+      antigravity) candidates=("${TFX_ANTIGRAVITY_FALLBACK:-codex}") ;;
+      *) echo "[tfx-quota] $failed_cli 대체 CLI 없음" >&2; return 1 ;;
+    esac
+  fi
 
   # 대상 CLI 존재 확인 (P2: command not found 방지)
-  local candidate target_bin
+  local candidate
   for candidate in "${candidates[@]}"; do
+    [[ "$candidate" != "$failed_cli" && "$candidate" != "${REVIEW_AUTHOR:-}" ]] || continue
     if is_cli_disabled "$candidate"; then
       echo "[tfx-quota] ${candidate} disabled — 자동 전환 후보에서 제외" >&2
       continue
     fi
-    case "$candidate" in
-      codex) target_bin="${CODEX_BIN:-codex}" ;;
-      antigravity) target_bin="${AGY_BIN:-agy}" ;;
-    esac
-    if [[ "$candidate" == "antigravity" ]]; then
-      [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] || continue
-      agy_supports_headless "$target_bin" || continue
-      target_cli="$candidate"
-      break
-    elif [[ "$candidate" == "codex" ]] && codex_is_available; then
+    if is_cli_available "$candidate"; then
       target_cli="$candidate"
       break
     fi
@@ -889,7 +930,9 @@ auto_reroute() {
   case "$failed_cli:$target_cli" in
     codex:antigravity) echo "[tfx-quota] Codex → Antigravity 자동 전환" >&2 ;;
     antigravity:codex) echo "[tfx-quota] Antigravity → Codex 자동 전환" >&2 ;;
+    antigravity:claude) echo "[tfx-quota] Antigravity → Claude 자동 전환" >&2 ;;
   esac
+  [[ "$failed_cli" != "antigravity" ]] || log_agy_quota_fallback "$target_cli"
 
   local quota_marker="$TFX_TMP/tfx-quota-${failed_cli}-$(date +%Y%m%d)"
   echo "$(date +%s)" >> "$quota_marker"
@@ -1113,6 +1156,13 @@ apply_cli_mode() {
       if [[ -n "$REVIEW_AUTHOR" ]]; then
         CLI_TYPE="claude"; CLI_CMD="claude"; CLI_ARGS=""
         CLI_EFFORT="high"; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
+      elif [[ "${TFX_REROUTED_FROM:-}" == "antigravity" && "$TFX_ANTIGRAVITY_FALLBACK" == "claude" ]]; then
+        CLI_TYPE="claude"; CLI_CMD="claude"; CLI_ARGS=""
+        CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900
+        case "$AGENT_TYPE" in
+          security-reviewer|designer) CLI_EFFORT="high" ;;
+        esac
+        _AGY_CLAUDE_FALLBACK=1
       fi ;;
     auto)
       # 리뷰의 가용성 폴백은 작성 벤더를 제외하는 최종 정책에서 처리한다.
@@ -1120,7 +1170,7 @@ apply_cli_mode() {
       # Issue #281: JS layer is the single source of truth for auto router
       # Shell auto mode normalizes CLI availability; JS selects single/multi.
       if [[ "$CLI_TYPE" == "codex" ]] && ! codex_is_available; then
-        if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && agy_supports_headless "${AGY_BIN:-agy}"; then
+        if is_cli_available antigravity; then
           TFX_CLI_MODE="antigravity"; apply_cli_mode; return
         else
           echo "[tfx-route] codex/antigravity 모두 불가: hard routing 검증으로 전달" >&2
@@ -1151,7 +1201,8 @@ is_cli_available() {
       codex_is_available
       ;;
     antigravity)
-      [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] \
+      ! agy_quota_cooldown_active \
+        && [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] \
         && agy_supports_headless "${AGY_BIN:-agy}"
       ;;
     claude)
@@ -1173,6 +1224,7 @@ apply_cli_disable_policy() {
     for candidate in claude codex antigravity; do
       [[ "$candidate" != "$REVIEW_AUTHOR" && "$candidate" != "$selected" ]] || continue
       if ! is_cli_disabled "$candidate" && is_cli_available "$candidate"; then
+        [[ "$selected" != "antigravity" ]] || log_agy_quota_fallback "$candidate"
         echo "[tfx-route] ${selected} -> ${candidate} 리뷰 fallback (작성 벤더 ${REVIEW_AUTHOR} 제외)" >&2
         TFX_CLI_MODE="$candidate"
         apply_cli_mode
@@ -1201,6 +1253,7 @@ apply_cli_disable_policy() {
       echo "ERROR: TFX_ANTIGRAVITY_FALLBACK=claude 이지만 Claude CLI가 없습니다." >&2
       return 78
     fi
+    log_agy_quota_fallback claude
     CLI_TYPE="claude"; CLI_CMD="claude"; CLI_ARGS=""
     case "$AGENT_TYPE" in
       security-reviewer|designer) CLI_EFFORT="high" ;;
@@ -1216,6 +1269,7 @@ apply_cli_disable_policy() {
     antigravity) candidate="codex" ;;
   esac
   if ! is_cli_disabled "$candidate" && is_cli_available "$candidate"; then
+    [[ "$selected" != "antigravity" ]] || log_agy_quota_fallback "$candidate"
     echo "[tfx-route] ${selected} → ${candidate} 명시적 fallback (금지 CLI 제외)" >&2
     TFX_CLI_MODE="$candidate"
     apply_cli_mode
@@ -2496,9 +2550,21 @@ EOF
     fi
   fi
 
+  local quota_exceeded=0
+  if [[ "$exit_code" -ne 124 ]] \
+    && { [[ "$exit_code" -ne 0 ]] || { [[ "$CLI_TYPE" == "antigravity" ]] && agy_output_is_quota_error "$STDOUT_LOG" "$STDERR_LOG"; }; } \
+    && detect_quota_exceeded "$STDOUT_LOG" "$STDERR_LOG"; then
+    quota_exceeded=1
+    [[ "$exit_code" -ne 0 ]] || exit_code=1
+    if [[ "$CLI_TYPE" == "antigravity" ]]; then
+      record_agy_quota_reset "$STDOUT_LOG" "$STDERR_LOG" \
+        || echo "[tfx-quota] agy 쿼터 리셋 시각 저장 실패" >&2
+    fi
+  fi
+
   # 쿼타 감지 + 자동 re-route
-  if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
-    if [[ "${TFX_QUOTA_REROUTE:-1}" -ne 0 ]] && [[ -z "${TFX_REROUTED_FROM:-}" ]] && detect_quota_exceeded "$STDOUT_LOG" "$STDERR_LOG"; then
+  if [[ "$quota_exceeded" == "1" ]]; then
+    if [[ "${TFX_QUOTA_REROUTE:-1}" -ne 0 ]] && [[ -z "${TFX_REROUTED_FROM:-}" ]]; then
       export TFX_REROUTED_FROM="$CLI_TYPE"
       auto_reroute "$CLI_TYPE"
     fi
