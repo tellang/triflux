@@ -97,7 +97,8 @@ function resolveGeminiModel(profileOrModel, opts = {}) {
     cfg?.modelProfiles,
     cfg?.models,
   ]) {
-    const entry = bucket?.[name] || bucket?.[raw];
+    // 옛 Flash 이름은 정규화한 이름으로만 찾는다. 원래 이름으로 찾으면 남은 Flash 항목이 돌아온다.
+    const entry = bucket?.[name];
     const value = modelValue(entry);
     if (typeof value === "string" && value.trim()) return value.trim();
   }

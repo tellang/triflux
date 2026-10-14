@@ -167,6 +167,20 @@ describe("용도별 effort 분리 (SSOT)", () => {
     assert.equal(resolveGeminiProfileForPurpose(""), "argon");
   });
 
+  it("옛 파일에 Flash 항목만 남아 있어도 옛 이름은 Argon Low 로 푼다", () => {
+    const { profilesPath } = makeTempPaths();
+    writeFileSync(
+      profilesPath,
+      JSON.stringify({
+        profiles: { flash38_high: { model: "Gemini 3.8 Flash (High)" } },
+      }),
+    );
+    assert.equal(
+      resolveGeminiModel("flash38_high", { profilesPath }),
+      "Gemini 4 Argon (Low)",
+    );
+  });
+
   it("프로필 이름을 display name 으로 푼다 (사용자 파일 우선, 없으면 기본값)", () => {
     const { profilesPath } = makeTempPaths();
     assert.equal(
