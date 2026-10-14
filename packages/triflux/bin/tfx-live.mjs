@@ -118,6 +118,7 @@ function usage(command) {
     "  tfx-live ask --cli codex --transport uds --thread ID|auto --prompt TEXT [--codex-socket PATH|default] [--cwd DIR] [--if-busy wait|fail|steer] [--busy-timeout 60] [--timeout 60] [--max-turn SECONDS]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
     "    ask options: --no-wait --no-relay-tag --via-tmux (a Claude caller sending to a local Claude session is refused and told to use SendMessage unless set) --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 60/85 of rollout window or 15/22 of 1.05M).",
+    "  tfx-live send --to NAME|CLI:NAME --message TEXT [--from NAME] [--no-wait] [--timeout 600]",
     "  tfx-live compact --session NAME [--cli claude|codex] [--instructions TEXT] [--then PROMPT] [--no-wait] [--if-busy fail|wait] [--timeout 60]",
     "  tfx-live goal set --session NAME [--cli claude|codex] --condition TEXT [--budget N]",
     "  tfx-live goal status --session NAME [--cli claude|codex]",
@@ -415,6 +416,7 @@ async function discoverAgyTmuxSessions({ cwd = null } = {}) {
     const conversation = await agyConversation(agyProcess.pid);
     result.sessions.push({
       session,
+      name: session,
       target,
       paneId,
       cwd: normalizeCwd(paneCwd),
@@ -4625,6 +4627,472 @@ async function sameMachineClaudeRedirect(adapter, opts, flags, deps = {}) {
   };
 }
 
+const PEER_SEND_CLIS = ["claude", "codex", "agy"];
+
+// --to 인자에서 선택적 CLI 접두사(claude:, codex:, agy:)와 검색어를 분리한다.
+function parsePeerToSpec(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return { cli: null, query: "" };
+  const match = text.match(/^(claude|codex|agy|antigravity):(.*)$/i);
+  if (!match) return { cli: null, query: text };
+  const rawCli = match[1].toLowerCase();
+  const cli = rawCli === "antigravity" ? "agy" : rawCli;
+  return { cli, query: match[2].trim() };
+}
+
+function summarizePeerCandidate(candidate) {
+  return {
+    cli: candidate.cli,
+    name: candidate.name,
+    target: candidate.target,
+    ...(candidate.session ? { session: candidate.session } : {}),
+    ...(candidate.paneId ? { paneId: candidate.paneId } : {}),
+    ...(candidate.sessionId ? { sessionId: candidate.sessionId } : {}),
+    ...(candidate.threadId ? { threadId: candidate.threadId } : {}),
+    ...(candidate.conversationId
+      ? { conversationId: candidate.conversationId }
+      : {}),
+  };
+}
+
+// claude, codex, agy 세션을 탐색해 --to 매칭 후보 목록을 만든다.
+async function discoverPeerTargets({
+  cliFilter = null,
+  cwd = null,
+  deps = {},
+} = {}) {
+  const clis = cliFilter ? [cliFilter] : PEER_SEND_CLIS;
+  const discoverClaude =
+    deps.discoverClaudeTmuxSessions || discoverClaudeTmuxSessions;
+  const discoverCodex =
+    deps.discoverCodexTmuxSessions || discoverCodexTmuxSessions;
+  const discoverAgy = deps.discoverAgyTmuxSessions || discoverAgyTmuxSessions;
+  const resolveCodexThread =
+    deps.resolveCodexTmuxThread ||
+    (deps.discoverCodexTmuxSessions ? null : resolveCodexTmuxThread);
+  const loadCodexThreadNames =
+    deps.codexThreadNames ||
+    (deps.discoverCodexTmuxSessions ? null : codexThreadNames);
+
+  const candidates = [];
+
+  if (clis.includes("claude")) {
+    const claudeResult = await discoverClaude({ cwd });
+    for (const s of claudeResult?.sessions || []) {
+      const name = s.name || s.session || s.target;
+      const aliases = [
+        s.name,
+        s.session,
+        s.target,
+        s.paneId,
+        s.sessionId,
+      ].filter(Boolean);
+      candidates.push({
+        cli: "claude",
+        name,
+        target: s.target || s.session,
+        session: s.session || null,
+        paneId: s.paneId || null,
+        sessionId: s.sessionId || null,
+        aliases,
+        raw: s,
+      });
+    }
+  }
+
+  if (clis.includes("codex")) {
+    const codexResult = await discoverCodex({ cwd });
+    const rawSessions = Array.isArray(codexResult?.sessions)
+      ? codexResult.sessions.map((s) => ({ ...s }))
+      : [];
+    if (resolveCodexThread) {
+      const missingThreadIds = [];
+      for (const s of rawSessions) {
+        if (!s.threadId && (s.target || s.paneId)) {
+          const resolved = await resolveCodexThread(s.target || s.paneId);
+          if (resolved?.threadId) {
+            s.threadId = resolved.threadId;
+            if (!s.name) missingThreadIds.push(resolved.threadId);
+          }
+        } else if (s.threadId && !s.name) {
+          missingThreadIds.push(s.threadId);
+        }
+      }
+      if (missingThreadIds.length && loadCodexThreadNames) {
+        const names = await loadCodexThreadNames(missingThreadIds);
+        for (const s of rawSessions) {
+          if (!s.name && s.threadId && names.get(s.threadId)) {
+            s.name = names.get(s.threadId);
+          }
+        }
+      }
+    }
+    for (const s of rawSessions) {
+      const name = s.name || s.session || s.threadId || s.target;
+      const aliases = [
+        s.name,
+        s.session,
+        s.threadId,
+        s.target,
+        s.paneId,
+      ].filter(Boolean);
+      candidates.push({
+        cli: "codex",
+        name,
+        target: s.target || s.session,
+        session: s.session || null,
+        paneId: s.paneId || null,
+        threadId: s.threadId || null,
+        aliases,
+        raw: s,
+      });
+    }
+  }
+
+  if (clis.includes("agy")) {
+    const agyResult = await discoverAgy({ cwd });
+    for (const s of agyResult?.sessions || []) {
+      const name = s.name || s.session || s.conversationId || s.target;
+      const aliases = [
+        s.name,
+        s.session,
+        s.conversationId,
+        s.target,
+        s.paneId,
+      ].filter(Boolean);
+      candidates.push({
+        cli: "agy",
+        name,
+        target: s.target || s.session,
+        session: s.session || null,
+        paneId: s.paneId || null,
+        conversationId: s.conversationId || null,
+        aliases,
+        raw: s,
+      });
+    }
+  }
+
+  return candidates;
+}
+
+// 후보 목록에서 query에 해당하는 단일 수신 세션을 찾는다.
+function matchPeerCandidates(candidates, query) {
+  const needle = String(query || "")
+    .trim()
+    .toLowerCase();
+  if (!needle) return [];
+
+  // 1순위: 표시 이름(name) 정확 일치
+  const exactName = candidates.filter(
+    (c) =>
+      String(c.name || "")
+        .trim()
+        .toLowerCase() === needle,
+  );
+  if (exactName.length > 0) return exactName;
+
+  // 2순위: 별칭(session, threadId, conversationId, target, paneId) 정확 일치
+  const exactAlias = candidates.filter((c) =>
+    (c.aliases || []).some(
+      (alias) =>
+        String(alias || "")
+          .trim()
+          .toLowerCase() === needle,
+    ),
+  );
+  if (exactAlias.length > 0) return exactAlias;
+
+  // 3순위: 부분 일치 (이름 또는 별칭 포함)
+  return candidates.filter((c) =>
+    (c.aliases || []).some((alias) =>
+      String(alias || "")
+        .trim()
+        .toLowerCase()
+        .includes(needle),
+    ),
+  );
+}
+
+// 발신 세션을 판별한다: --from -> TFX_LIVE_FROM -> 환경변수/tmux 자동 탐지.
+async function resolvePeerSender({
+  from = null,
+  env = process.env,
+  allCandidates = null,
+  deps = {},
+} = {}) {
+  const detectCliFromEnv = () => {
+    if (
+      env.ANTIGRAVITY_CONVERSATION_ID ||
+      env.ANTIGRAVITY_AGENT === "1" ||
+      env.ANTIGRAVITY_CLI === "1"
+    ) {
+      return "agy";
+    }
+    if (env.CODEX_THREAD_ID || env.CODEX_CI) {
+      return "codex";
+    }
+    if (
+      env.CLAUDE_PID ||
+      env.CLAUDECODE === "1" ||
+      deps.isLocalClaudeCaller?.(env)
+    ) {
+      return "claude";
+    }
+    return null;
+  };
+
+  const explicit = String(from || env.TFX_LIVE_FROM || "").trim();
+  if (explicit) {
+    const parsed = parsePeerToSpec(explicit);
+    if (parsed.cli && parsed.query) {
+      return { cli: parsed.cli, name: parsed.query };
+    }
+    const inferredCli = detectCliFromEnv() || "claude";
+    return { cli: inferredCli, name: explicit };
+  }
+
+  const candidates = allCandidates || (await discoverPeerTargets({ deps }));
+
+  if (env.TMUX_PANE) {
+    const byPane = candidates.find((c) => c.paneId === env.TMUX_PANE);
+    if (byPane) {
+      return { cli: byPane.cli, name: byPane.name };
+    }
+  }
+
+  if (env.ANTIGRAVITY_CONVERSATION_ID) {
+    const byConv = candidates.find(
+      (c) =>
+        c.cli === "agy" && c.conversationId === env.ANTIGRAVITY_CONVERSATION_ID,
+    );
+    return {
+      cli: "agy",
+      name: byConv?.name || env.ANTIGRAVITY_CONVERSATION_ID,
+    };
+  }
+
+  if (env.CODEX_THREAD_ID) {
+    const byThread = candidates.find(
+      (c) => c.cli === "codex" && c.threadId === env.CODEX_THREAD_ID,
+    );
+    if (byThread) {
+      return { cli: "codex", name: byThread.name };
+    }
+  }
+
+  const resolveSender = deps.resolveSenderName || resolveSenderName;
+  const senderName = await resolveSender(env);
+  const envCli = detectCliFromEnv();
+  if (senderName) {
+    return { cli: envCli || "claude", name: senderName };
+  }
+  if (envCli) {
+    return { cli: envCli, name: envCli };
+  }
+  return { cli: "claude", name: "unknown" };
+}
+
+function formatPeerSendMessage({
+  senderCli,
+  senderName,
+  msgId,
+  requestId,
+  message,
+}) {
+  const fromSpec = `${senderCli || "unknown"}:${senderName || "unknown"}`;
+  const body = String(message ?? "").trim();
+  return [
+    `[tfx-peer from=${fromSpec} msg=${msgId}] [tfx-live req=${requestId}]`,
+    body,
+    `회신: tfx-live send --to ${fromSpec} --message "..."`,
+  ].join("\n");
+}
+
+async function doSend(opts = {}, deps = {}) {
+  const rawTo = String(opts.to || "").trim();
+  const rawMessage = String(opts.message ?? "").trim();
+  if (!rawTo) {
+    throw new Error("send requires --to NAME|CLI:NAME");
+  }
+  if (!rawMessage) {
+    throw new Error("send requires --message TEXT");
+  }
+
+  const parsedTo = parsePeerToSpec(rawTo);
+  if (!parsedTo.query) {
+    throw new Error("send requires a non-empty target name in --to");
+  }
+
+  const env = opts.env || process.env;
+  const msgId = opts.msgId || randomBytes(6).toString("hex");
+  const requestId = opts.requestId || randomBytes(6).toString("hex");
+  const noWait = Boolean(opts.noWait);
+  const timeoutSec = Number(opts.timeoutSec || 600);
+
+  const allCandidates = await discoverPeerTargets({
+    cliFilter: null,
+    cwd: opts.cwd || null,
+    deps,
+  });
+  const scopedCandidates = parsedTo.cli
+    ? allCandidates.filter((c) => c.cli === parsedTo.cli)
+    : allCandidates;
+  const matched = matchPeerCandidates(scopedCandidates, parsedTo.query);
+
+  if (matched.length === 0) {
+    return {
+      ok: false,
+      to: { cli: parsedTo.cli, name: parsedTo.query, target: null },
+      transport: null,
+      msgId,
+      requestId,
+      status: "failed",
+      reason: "target-not-found",
+      candidates: scopedCandidates.map(summarizePeerCandidate),
+      error: `일치하는 세션을 찾지 못했다: ${rawTo}`,
+    };
+  }
+
+  if (matched.length > 1) {
+    return {
+      ok: false,
+      to: { cli: parsedTo.cli, name: parsedTo.query, target: null },
+      transport: null,
+      msgId,
+      requestId,
+      status: "failed",
+      reason: "ambiguous-target",
+      candidates: matched.map(summarizePeerCandidate),
+      error: `일치하는 세션이 ${matched.length}개다. cli:이름 또는 정확한 이름으로 지정하라: ${rawTo}`,
+    };
+  }
+
+  const target = matched[0];
+  const sender = await resolvePeerSender({
+    from: opts.from,
+    env,
+    allCandidates,
+    deps,
+  });
+
+  const callerIsClaude =
+    sender.cli === "claude" &&
+    (Boolean(opts.from) ||
+      Boolean(env.TFX_LIVE_FROM) ||
+      Boolean(env.CLAUDE_PID) ||
+      env.CLAUDECODE === "1" ||
+      Boolean(deps.isLocalClaudeCaller?.(env)));
+
+  if (target.cli === "claude" && callerIsClaude && !opts.viaTmux) {
+    return {
+      ok: false,
+      to: summarizePeerCandidate(target),
+      from: sender,
+      transport: "send-message",
+      msgId,
+      requestId,
+      status: "failed",
+      done: false,
+      inputSent: false,
+      reason: "use-send-message",
+      sendMessageTo: target.name,
+      error: `같은 기기의 Claude 세션에는 SendMessage(to: "${target.name}")로 보낸다.`,
+    };
+  }
+
+  const formattedPrompt = formatPeerSendMessage({
+    senderCli: sender.cli,
+    senderName: sender.name,
+    msgId,
+    requestId,
+    message: rawMessage,
+  });
+
+  const runAsk = deps.doAsk || doAsk;
+  const adapter = ADAPTERS[target.cli];
+  const sessionTarget =
+    target.cli === "codex"
+      ? target.session || target.target
+      : target.target || target.session;
+  const syntheticFlags = {
+    cli: target.cli,
+    session: sessionTarget,
+    ...(target.cli === "codex" &&
+    target.threadId &&
+    isCodexThreadId(target.threadId)
+      ? { thread: target.threadId }
+      : {}),
+    prompt: formattedPrompt,
+    "request-id": requestId,
+    ...(noWait ? { "no-wait": true } : {}),
+    ...(opts.viaTmux ? { "via-tmux": true, transport: "tmux" } : {}),
+    timeout: String(timeoutSec),
+    ...(opts.warnContextPct !== undefined
+      ? { "warn-context-pct": String(opts.warnContextPct) }
+      : {}),
+    ...(opts.maxContextPct !== undefined
+      ? { "max-context-pct": String(opts.maxContextPct) }
+      : {}),
+  };
+  const resolvedAskOpts = {
+    ...askOpts(syntheticFlags, adapter),
+    target: target.target,
+    threadId: target.threadId || null,
+    conversationId: target.conversationId || null,
+  };
+
+  const askResult = await runAsk(adapter, resolvedAskOpts);
+  const defaultTransport =
+    target.cli === "codex"
+      ? "codex-queue"
+      : target.cli === "agy"
+        ? "agy-tmux"
+        : "claude-tmux";
+  const transport = askResult?.transport || defaultTransport;
+  const status =
+    askResult?.status ||
+    (askResult?.ok ? (noWait ? "sent" : "completed") : "failed");
+
+  return {
+    ok: Boolean(askResult?.ok),
+    to: summarizePeerCandidate(target),
+    from: sender,
+    transport,
+    msgId,
+    requestId,
+    status,
+    ...(noWait ? {} : { response: askResult?.response ?? "" }),
+    ...(askResult?.reason ? { reason: askResult.reason } : {}),
+    ...(askResult?.error ? { error: askResult.error } : {}),
+    ...(askResult?.sendMessageTo
+      ? { sendMessageTo: askResult.sendMessageTo }
+      : {}),
+    ...(typeof askResult?.inputSent === "boolean"
+      ? { inputSent: askResult.inputSent }
+      : {}),
+  };
+}
+
+async function send(flags) {
+  const to = flags.to || flags.target || flags.session || "";
+  const message =
+    flags.message || flags.prompt || (flags._ || []).slice(1).join(" ");
+  const result = await doSend({
+    to,
+    message,
+    from: flags.from || null,
+    noWait: Boolean(flags["no-wait"]),
+    timeoutSec: Number(flags.timeout || 600),
+    viaTmux: Boolean(flags["via-tmux"]),
+    cwd: flags.cwd ? normalizeCwd(flags.cwd) : null,
+    warnContextPct: flags["warn-context-pct"],
+    maxContextPct: flags["max-context-pct"],
+  });
+  printJson(result);
+  if (result.ok === false) process.exitCode = 1;
+}
+
 async function codexThreadFromFlags(flags) {
   if (flags.thread) {
     if (!isCodexThreadId(flags.thread))
@@ -6536,6 +7004,8 @@ async function main() {
     await goalDriven(flags);
   } else if (command === "peer") {
     await peer(flags);
+  } else if (command === "send") {
+    await send(flags);
   } else {
     throw new Error(`Unknown subcommand: ${command}\n${usage()}`);
   }
@@ -6557,30 +7027,38 @@ export {
   composerShowsPrompt,
   createPeerSignalController,
   derivePeerStatus,
+  discoverAgyTmuxSessions,
   discoverClaudeTmuxSessions,
   discoverCodexTmuxSessions,
+  discoverPeerTargets,
   doAskViaTmux,
   doCompact,
+  doSend,
   doStop,
   extractAssistantResponse,
   extractClaudeCompletedTaskListResponse,
   extractResponseSinceMarker,
+  formatPeerSendMessage,
   hasClaudeCompletedTaskListResponse,
   inspectCodexTmuxPane,
   inspectUnsetEnv,
   isCodexLoadingCapture,
   isSlashCommand,
   itermProject,
+  matchPeerCandidates,
   openItermSession,
   parseCodexTmuxSessions,
   parsePeerClosure,
+  parsePeerToSpec,
   parseRemoteLiveJson,
   peer,
   peerSideBaseOpts,
   resolveAskTransport,
   resolveCodexDaemonSocket,
+  resolvePeerSender,
   resumedCodexThread,
   sameMachineClaudeRedirect,
+  send,
   shouldUseIterm,
   splitTmuxTarget,
   stopOpts,

@@ -3,7 +3,7 @@ name: tfx-live
 description: >
   Claude·Codex·agy 세션을 실시간으로 생성·질의·대기·압축·종료하거나,
   tmux/daemon UDS 연결과 peer 중계를 운영할 때 사용한다.
-argument-hint: "<start|ask|wait|queue|goal|compact|stop|rename|interrupt|probe|list-sessions|peer|converse|goal-driven> [--cli codex|claude|agy] ..."
+argument-hint: "<start|ask|send|wait|queue|goal|compact|stop|rename|interrupt|probe|list-sessions|peer|converse|goal-driven> [--cli codex|claude|agy] ..."
 ---
 
 # tfx-live
@@ -21,12 +21,15 @@ Codex에서는 `$tfx-live`로 호출한다. CLI의 `--cli`는 현재 호스트�
 - Codex `ask`는 Codex 큐(app-server `thread/queue/add`)가 기본이다. 아래 "Codex 메시지 전송" 순서를 따른다. 기존 Codex thread의 UDS 연결은 `--transport uds --thread <id|auto>`를 명시한다.
 - daemon 참조가 없는 Claude는 tmux가 기본이다.
 - 보내는 쪽이 Claude이고 대상이 같은 기기의 Claude 세션이면 `ask` 대신 SendMessage 도구로 보낸다. `tfx-live`는 CLI라 SendMessage를 대신 보낼 수 없다. 대상의 SendMessage 이름은 `tfx-live list-sessions --cli claude` 결과의 `name`이고, 세션 ID 앞 8자리는 `short`로 맞춘다. 이름을 못 찾거나 원격 세션이면 `ask`를 쓴다. `start` 직후의 첫 지시도 SendMessage로 보낸다. 로컬 Claude `start` 결과의 `sendMessageTo`가 그 이름이다. Claude 안에서 로컬 Claude tmux 세션에 `ask`를 하면 보내지 않고 `reason: "use-send-message"`와 `sendMessageTo`를 돌려준다. 슬래시 명령은 SendMessage로 실행되지 않으므로 그대로 보내고, tmux 입력이 꼭 필요하면 `--via-tmux`를 붙인다.
+- 같은 기기의 agy 끼리는 `~/.local/bin/agy.patch.json`의 `sha256`이 실제 `agy` 바이너리 해시와 같고 `patches`에 `peer-wake`가 있을 때만 `send_message`(대화 ID)를 쓰고, 아니면 `tfx-live ask`를 쓴다(쉬는 세션이 깨지 않는 공개 이슈 #1022 때문). `tfx-live send`의 agy 대상 전송은 tmux 경로를 유지한다.
+- 세션 이름으로 다른 세션에 바로 보낼 때는 `tfx-live send --to <이름|cli:이름> --message <본문> [--from <보낸 세션 이름>] [--no-wait]`를 쓴다. `send`는 `list-sessions`의 `name`, `sessionName`, `sessionId`, `shortId`를 조회해 대상 CLI의 `ask` 경로로 전달하며 본문 앞에 `[from <발신 세션>]` 머리말을 붙인다.
 - UDS 결과는 `matchedCompletion === true`일 때만 `done: true`다. timeout이나 연결 종료는 완료가 아니다.
 - bridge 선택 순서는 `--bridge`, `$TFX_BRIDGE`, `$TFX_REPO_ROOT/hub/bridge.mjs`, 번들된 `hub/bridge.mjs`다.
 
 ```bash
 tfx-live start --cli codex --session cx1 --cwd ~/Projects --name "10.8 구현 검토"
 tfx-live ask --cli codex --session cx1 --prompt "현재 변경사항을 요약해줘" --timeout 120
+tfx-live send --to "codex:10.8 구현 검토" --message "추가 검토 사항을 반영해줘" --no-wait
 tfx-live stop --cli codex --session cx1
 ```
 
