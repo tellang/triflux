@@ -425,8 +425,11 @@ async function discoverAgyTmuxSessions({ cwd = null } = {}) {
   return result;
 }
 
+// 사용자 입력(14), 모델 응답(15), 오류(17) step 에서 화면에 보이는 문구가 든 필드 경로.
+const AGY_STEP_TEXT_FIELDS = { 14: [19, 2], 15: [20, 1], 17: [24, 3, 1] };
+
 function agyStepText(payload, stepType) {
-  const fieldPath = stepType === 14 ? [19, 2] : [20, 1];
+  const fieldPath = AGY_STEP_TEXT_FIELDS[stepType];
   let bytes = Buffer.from(payload);
   for (const wanted of fieldPath) {
     let offset = 0;
@@ -498,10 +501,22 @@ function agyWaitVerdict(steps, requestId, visible) {
     const text = agyStepText(step.step_payload, 15);
     if (text) response = text;
   }
-  const done =
-    turn.some((step) => step.step_type === 15) &&
+  const settled =
     turn.every((step) => step.status === 3) &&
     (nextRequest >= 0 || !ADAPTERS.agy.isBusy(visible));
+  // 네트워크 오류 같은 턴 실패는 오류 step(17)으로 끝나고 모델 응답이 뒤따르지 않는다.
+  const lastError = turn.findLastIndex((step) => step.step_type === 17);
+  if (
+    settled &&
+    lastError > turn.findLastIndex((step) => step.step_type === 15)
+  )
+    return {
+      status: "failed",
+      done: false,
+      response,
+      error: agyStepText(turn[lastError].step_payload, 17),
+    };
+  const done = settled && turn.some((step) => step.step_type === 15);
   return { status: done ? "completed" : "working", done, response };
 }
 
@@ -543,7 +558,8 @@ async function waitAgy({
         conversationId: conversation.conversationId,
         session,
       };
-      if (verdict.done || timedOut) return result;
+      if (verdict.done || verdict.status === "failed" || timedOut)
+        return result;
       await sleep(Math.min(pollIntervalMs, deadline - Date.now()));
     }
   } finally {
