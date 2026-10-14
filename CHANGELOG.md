@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.72.0] - 2026-10-14
+
+### Added
+- route: `TFX_ANTIGRAVITY_FALLBACK=codex|claude`(기본 codex). Antigravity 를 끄거나 못 쓸 때 `claude` 면 Antigravity 역할을 Claude 워커로 실행한다. security-reviewer 는 Fable(high), document-specialist, designer, writer 는 Opus. runtime env 와 machine profile 에서 읽는다. agy 쿼터 풀 소진 동안 쓰려고 더했다 (#778)
+
 ## [10.71.0] - 2026-10-14
 
 ### Added
