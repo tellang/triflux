@@ -2896,7 +2896,9 @@ tell application "iTerm2"
   set idTab to missing value
   set fallbackSession to missing value
   set fallbackTab to missing value
+  -- tmux 가 끝나며 패인과 창이 먼저 닫히면 순회 중 창 번호가 사라진다. 사라진 창은 건너뛴다.
   repeat with candidateWindow in windows
+    try
     repeat with candidateTab in tabs of candidateWindow
       repeat with candidateSession in sessions of candidateTab
         if ${appleScriptString(sessionId ?? "")} is not "" and id of candidateSession is ${appleScriptString(sessionId ?? "")} then
@@ -2912,6 +2914,7 @@ tell application "iTerm2"
         end try
       end repeat
     end repeat
+    end try
   end repeat
   if idSession is not missing value then
     set targetSession to idSession
