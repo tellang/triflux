@@ -22,6 +22,7 @@ set -euo pipefail
 
 _AGY_HEADLESS_BIN=""
 _AGY_HEADLESS_SUPPORTED=1
+_AGY_CLAUDE_FALLBACK=0
 
 # ── 영속 machine profile (env > profile > runtime observation) ──
 # 신뢰 경계: 파일을 source/eval 하지 않고 allowlist literal만 읽는다.
@@ -60,6 +61,14 @@ load_machine_profile() {
     fi
     key="${line%%=*}"
     value="${line#*=}"
+    if [[ "$key" == "TFX_ANTIGRAVITY_FALLBACK" && -z "${TFX_ANTIGRAVITY_FALLBACK+x}" ]]; then
+      case "$value" in
+        codex|claude) ;;
+        *)
+          echo "ERROR: TFX_ANTIGRAVITY_FALLBACK 값은 codex 또는 claude여야 합니다. (machine profile)" >&2
+          return 1 ;;
+      esac
+    fi
     if [[ -z "$value" || "$value" == *[!A-Za-z0-9_.-]* ]]; then
       echo "[tfx-route] machine profile ${key} 값 무시: 안전한 literal 아님" >&2
       continue
@@ -75,6 +84,8 @@ load_machine_profile() {
         [[ -n "${TFX_DISABLE_CODEX+x}" ]] || TFX_DISABLE_CODEX="$value" ;;
       TFX_DISABLE_ANTIGRAVITY)
         [[ -n "${TFX_DISABLE_ANTIGRAVITY+x}" ]] || TFX_DISABLE_ANTIGRAVITY="$value" ;;
+      TFX_ANTIGRAVITY_FALLBACK)
+        [[ -n "${TFX_ANTIGRAVITY_FALLBACK+x}" ]] || TFX_ANTIGRAVITY_FALLBACK="$value" ;;
       TFX_TIMEOUT_POLICY)
         [[ -n "${TFX_TIMEOUT_POLICY+x}" ]] || TFX_TIMEOUT_POLICY="$value" ;;
       TFX_HARD_CEILING_SEC)
@@ -988,6 +999,7 @@ TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
 TFX_DISABLE_CODEX="${TFX_DISABLE_CODEX:-0}"
 TFX_DISABLE_ANTIGRAVITY="${TFX_DISABLE_ANTIGRAVITY:-0}"
+TFX_ANTIGRAVITY_FALLBACK="${TFX_ANTIGRAVITY_FALLBACK-codex}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_PROFILE="${TFX_CODEX_PROFILE:-auto}"
 
@@ -1060,6 +1072,12 @@ case "$TFX_VERIFIER_OVERRIDE" in
     exit 1
     ;;
 esac
+case "$TFX_ANTIGRAVITY_FALLBACK" in
+  codex|claude) ;;
+  *)
+    echo "ERROR: TFX_ANTIGRAVITY_FALLBACK 값은 codex 또는 claude여야 합니다. (현재: $TFX_ANTIGRAVITY_FALLBACK)" >&2
+    exit 1 ;;
+esac
 case "$TFX_WORKER_INDEX" in
   "") ;;
   *[!0-9]*|0)
@@ -1107,7 +1125,7 @@ apply_cli_mode() {
         else
           echo "[tfx-route] codex/antigravity 모두 불가: hard routing 검증으로 전달" >&2
         fi
-      elif [[ "$CLI_TYPE" == "antigravity" ]] && ! agy_supports_headless "${AGY_BIN:-agy}"; then
+      elif [[ "$CLI_TYPE" == "antigravity" && "$TFX_ANTIGRAVITY_FALLBACK" == "codex" ]] && ! agy_supports_headless "${AGY_BIN:-agy}"; then
         if codex_is_available; then
           TFX_CLI_MODE="codex"; apply_cli_mode; return
         fi
@@ -1175,6 +1193,19 @@ apply_cli_disable_policy() {
   elif ! is_cli_available "$selected"; then
     blocked_reason="${selected} 미가용: 선택 차단"
   else
+    return 0
+  fi
+  if [[ "$selected" == "antigravity" && "$TFX_ANTIGRAVITY_FALLBACK" == "claude" ]]; then
+    echo "[tfx-route] ${blocked_reason}; antigravity -> claude 명시적 fallback" >&2
+    if ! is_cli_available claude; then
+      echo "ERROR: TFX_ANTIGRAVITY_FALLBACK=claude 이지만 Claude CLI가 없습니다." >&2
+      return 78
+    fi
+    CLI_TYPE="claude"; CLI_CMD="claude"; CLI_ARGS=""
+    case "$AGENT_TYPE" in
+      security-reviewer|designer) CLI_EFFORT="high" ;;
+    esac
+    _AGY_CLAUDE_FALLBACK=1
     return 0
   fi
   echo "[tfx-route] $blocked_reason" >&2
@@ -1508,6 +1539,8 @@ resolve_mcp_policy() {
 get_claude_model() {
   case "$AGENT_TYPE" in
     explore) echo "haiku" ;;
+    security-reviewer) echo "fable" ;;
+    document-specialist|designer|writer|antigravity|agy) echo "opus" ;;
     code-reviewer|quality-reviewer) echo "opus" ;;
     *) echo "sonnet" ;;
   esac
@@ -2386,7 +2419,10 @@ FALLBACK_EOF
     [ -n "$claude_effort" ] && claude_worker_args+=("--effort" "$claude_effort")
 
     run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?
-    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 && -n "$REVIEW_AUTHOR" ]]; then
+    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 && "$_AGY_CLAUDE_FALLBACK" == "1" ]]; then
+      echo "[tfx-route] Claude fallback 워커 실패(exit=${exit_code})." >&2
+      [[ -f "$STDERR_LOG" ]] && tail -c 2048 "$STDERR_LOG" >&2
+    elif [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 && -n "$REVIEW_AUTHOR" ]]; then
       # 리뷰는 판정이 결과라 native 안내로 바꾸면 리뷰 없이 성공으로 보인다. 실패로 남긴다.
       echo "[tfx-route] Claude 리뷰 워커 실패(exit=${exit_code}). 리뷰가 실행되지 않았다." >&2
       [[ -f "$STDERR_LOG" ]] && tail -c 2048 "$STDERR_LOG" >&2
