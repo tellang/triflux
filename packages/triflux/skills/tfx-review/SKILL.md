@@ -192,7 +192,7 @@ Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분�
 ## Quick 모드 (`--quick` opt-out)
 
 > **명시적 호출만**. "빨리 한 번만 봐줘" 같은 맥락.
-> **HARD RULE**: 리뷰 결과 생성 시 Claude가 직접 git log/diff 실행 금지. Codex code-reviewer 에게 위임.
+> **HARD RULE**: 리뷰 결과 생성 시 Claude가 직접 git log/diff 실행 금지. 작성 벤더를 `TFX_REVIEW_AUTHOR`로 넘기고 `tfx-route.sh code-reviewer`에 위임한다.
 
 ### Step 1: 리뷰 대상 식별
 ```
@@ -202,7 +202,11 @@ Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분�
   3. 최근 커밋 → git diff HEAD~1
 ```
 
-### Step 2: Codex 리뷰 실행
+### Step 2: 작성 벤더와 다른 벤더의 리뷰 실행
+
+리뷰 대상 코드를 쓴 벤더를 확인하고 `TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 넘긴다.
+리뷰를 요청한 리드의 벤더가 아니라 실제 작성 벤더를 쓴다. 미지정이면 Codex로 본다.
+라우터가 작성 벤더와 Claude 사용량에 따라 리뷰어를 고른다.
 
 변경사항 원문이나 경로를 셸 인자에 끼우지 않는다. diff 안의 `$(...)` 와 백틱이 실행된다.
 리뷰 대상을 파일로 쓰고 리뷰어가 그 파일 전체를 직접 읽게 한다. context_file(다섯 번째 인자)은
@@ -212,7 +216,7 @@ Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분�
 ctx=$(mktemp "${TMPDIR:-/tmp}/tfx-review.XXXXXX")
 git diff HEAD > "$ctx"                    # Step 1 의 2번
 [ -s "$ctx" ] || git diff HEAD~1 > "$ctx" # Step 1 의 3번
-bash ~/.claude/scripts/tfx-route.sh code-reviewer \
+TFX_REVIEW_AUTHOR="${TFX_REVIEW_AUTHOR:-codex}" bash ~/.claude/scripts/tfx-route.sh code-reviewer \
   "리뷰 대상은 $ctx 파일이다. 파일 전체를 끝까지 읽고 리뷰하라. 경로 목록이면 그 파일들을 읽는다.
    심각도별 분류(critical/high/medium/low).
    체크: 로직 결함, 보안 취약점, 성능 문제, 에러 핸들링, 과잉 설계(요청 범위를 넘은 변경, 한 번만 쓰는 추상화)."

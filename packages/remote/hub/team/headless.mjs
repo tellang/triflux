@@ -180,7 +180,12 @@ function buildRouteBackedHeadlessCommand(
       ? String(Math.trunc(Number(opts.timeoutSec)))
       : "";
   const timeoutArg = timeout ? ` ${shellQuote(timeout)}` : "";
-  const routeMode = resolvedCli === "antigravity" ? "antigravity" : resolvedCli;
+  const reviewByAuthor = ["code-reviewer", "quality-reviewer"].includes(
+    routeAgent,
+  );
+  const cliModeEnv = reviewByAuthor
+    ? ""
+    : `TFX_CLI_MODE=${shellQuote(resolvedCli)} `;
   const codexProfileEnv =
     resolvedCli === "codex" && opts.codexProfile
       ? `TFX_CODEX_PROFILE=${shellQuote(opts.codexProfile)} `
@@ -195,7 +200,7 @@ function buildRouteBackedHeadlessCommand(
     .join("");
   const script =
     `__tfx_prompt=$(cat ${shellQuote(promptFile)}); ` +
-    `${lifecycleEnv}${codexProfileEnv}TFX_CLI_MODE=${shellQuote(routeMode)} ` +
+    `${lifecycleEnv}${codexProfileEnv}${cliModeEnv}` +
     `bash ${shellQuote(routeScript)} ${shellQuote(routeAgent)} "$__tfx_prompt" ${shellQuote(mcp)}${timeoutArg} ` +
     `> ${shellQuote(resultFile)} 2>${shellQuote(`${resultFile}.err`)} < /dev/null`;
   return `bash -lc ${shellQuote(script)}`;
@@ -218,6 +223,10 @@ const MCP_PROFILE_HINTS = {
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const { handoff = true, mcp, contextFile, model, cwd } = opts;
   const resolvedCli = resolveCliType(cli);
+  const routeAgent = opts.role || cli;
+  const reviewByAuthor = ["code-reviewer", "quality-reviewer"].includes(
+    routeAgent,
+  );
 
   // contextFile 처리: 32KB(32768 bytes) 초과 시 UTF-8 안전 절단
   let contextPrefix = "";
@@ -271,9 +280,10 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
         })
       : undefined;
   const backendCommand =
-    resolvedCli === "codex" || resolvedCli === "antigravity"
+    reviewByAuthor || resolvedCli === "codex" || resolvedCli === "antigravity"
       ? buildRouteBackedHeadlessCommand(resolvedCli, promptFile, resultFile, {
           ...opts,
+          role: reviewByAuthor ? routeAgent : opts.role,
           codexProfile,
           mcp,
         })

@@ -1091,7 +1091,14 @@ apply_cli_mode() {
         DEFAULT_TIMEOUT=900
         echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE → antigravity($CLI_EFFORT)로 리매핑" >&2
       fi ;;
+    claude)
+      if [[ -n "$REVIEW_AUTHOR" ]]; then
+        CLI_TYPE="claude"; CLI_CMD="claude"; CLI_ARGS=""
+        CLI_EFFORT="high"; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
+      fi ;;
     auto)
+      # 리뷰의 가용성 폴백은 작성 벤더를 제외하는 최종 정책에서 처리한다.
+      [[ -z "$REVIEW_AUTHOR" ]] || return 0
       # Issue #281: JS layer is the single source of truth for auto router
       # Shell auto mode normalizes CLI availability; JS selects single/multi.
       if [[ "$CLI_TYPE" == "codex" ]] && ! codex_is_available; then
@@ -1129,6 +1136,9 @@ is_cli_available() {
       [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] \
         && agy_supports_headless "${AGY_BIN:-agy}"
       ;;
+    claude)
+      command -v "$CLAUDE_BIN" >/dev/null 2>&1
+      ;;
     *)
       return 1
       ;;
@@ -1137,6 +1147,23 @@ is_cli_available() {
 
 apply_cli_disable_policy() {
   local selected="$CLI_TYPE"
+  if [[ -n "$REVIEW_AUTHOR" ]]; then
+    if ! is_cli_disabled "$selected" && is_cli_available "$selected"; then
+      return 0
+    fi
+    local candidate
+    for candidate in claude codex antigravity; do
+      [[ "$candidate" != "$REVIEW_AUTHOR" && "$candidate" != "$selected" ]] || continue
+      if ! is_cli_disabled "$candidate" && is_cli_available "$candidate"; then
+        echo "[tfx-route] ${selected} -> ${candidate} 리뷰 fallback (작성 벤더 ${REVIEW_AUTHOR} 제외)" >&2
+        TFX_CLI_MODE="$candidate"
+        apply_cli_mode
+        return 0
+      fi
+    done
+    echo "ERROR: 작성 벤더 ${REVIEW_AUTHOR}를 제외하면 허용되고 사용 가능한 리뷰 CLI가 없습니다." >&2
+    return 78
+  fi
   [[ "$selected" == "codex" || "$selected" == "antigravity" ]] || return 0
 
   local blocked_reason=""

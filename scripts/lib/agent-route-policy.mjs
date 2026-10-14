@@ -428,12 +428,16 @@ async function runCli() {
     let weeklyPercent = 0;
     if (agent === "code-reviewer" || agent === "quality-reviewer") {
       try {
-        weeklyPercent = JSON.parse(
+        const data = JSON.parse(
           readFileSync(
             join(homedir(), ".claude/cache/claude-usage-cache.json"),
             "utf8",
           ),
-        ).data?.weeklyPercent;
+        ).data;
+        weeklyPercent =
+          Date.parse(data?.weeklyResetsAt) <= Date.now()
+            ? 0
+            : data?.weeklyPercent;
       } catch {
         // 사용량을 읽지 못하면 한도 미만으로 취급한다.
       }

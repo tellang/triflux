@@ -22,7 +22,7 @@ Claude, Codex, Argon High 의 리드별 3자 토론 4라운드 합의와 사용�
 | Claude | Codex Sol | Codex Sol |
 | Antigravity | Claude Opus | Codex Sol |
 
-Claude는 기존 워커 경로의 `--model opus`, Argon은 `argon_high`, Codex는 `sol_high`와 `review` 서브커맨드를 쓴다. Claude 주간 사용량은 `~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`로 판단하고, 읽을 수 없으면 한도 미만으로 본다. 명시 CLI 선택의 우선순위를 유지하고, 선택한 리뷰어와 작성 벤더, 사용량 전환 여부를 결과 머리말에 남긴다.
+Claude는 기존 워커 경로의 `--model opus`, Argon은 `argon_high`, Codex는 `sol_high`와 `review` 서브커맨드를 쓴다. Claude 주간 사용량은 `~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`로 판단하고, 읽을 수 없으면 한도 미만으로 본다. 명시 CLI 선택의 우선순위를 유지하고, 선택한 리뷰어와 작성 벤더, 사용량 전환 여부를 stderr의 `[tfx-route] reviewer=...` 줄에 남긴다.
 
 `security-reviewer`는 Argon High로 옮긴다. 세 리드 조건의 3자 토론이 모두 합의했다. 합의에서 채택한 근거는 CWE-bench v1의 Astra와 Argon 동률(68)과 Argon의 간접 프롬프트 주입 성공률 0.7%다.
 
