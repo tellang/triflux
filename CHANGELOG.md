@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.74.0] - 2026-10-14
+
+### Added
+- mods: Claude 의 SendMessage `to` 에 `codex:이름`, `agy:이름` 을 쓰면 `tfx-live send` 로 전달하고 결과를 도구 결과로 돌려준다. 접두사가 없는 이름이 Claude 세션에 없으면 `tfx-live send` 로 한 번 더 시도한다. ListAgents 결과 뒤에 로컬 Codex, agy 세션을 덧붙인다 (#782)
+
 ## [10.73.0] - 2026-10-14
 
 ### Added
