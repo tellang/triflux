@@ -15,6 +15,54 @@ const LIB = "scripts/lib/codex-recovery.sh";
 const ROUTE = "scripts/tfx-route.sh";
 const POST = "scripts/tfx-route-post.mjs";
 
+describe("tfx-route-post.mjs — Codex JSON 출력", () => {
+  function runPost(content) {
+    const home = mkdtempSync(join(tmpdir(), "tfx-rv-json-"));
+    const stdoutLog = join(home, "stdout.log");
+    const stderrLog = join(home, "stderr.log");
+    try {
+      writeFileSync(stdoutLog, content);
+      writeFileSync(stderrLog, "");
+      const res = spawnSync(
+        process.execPath,
+        [
+          POST,
+          "--cli",
+          "codex",
+          "--exit-code",
+          "0",
+          "--stderr-log",
+          stderrLog,
+          "--stdout-log",
+          stdoutLog,
+          "--last-message-log",
+          stdoutLog,
+          "--clean-tui",
+          "true",
+        ],
+        { encoding: "utf-8", env: { ...process.env, HOME: home } },
+      );
+      assert.equal(res.status, 0, `post 실행 실패: ${res.stderr}`);
+      return res.stdout.split("=== OUTPUT ===\n")[1];
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  }
+
+  it("한 줄 JSON 배열과 객체 답을 OUTPUT에 그대로 출력한다", () => {
+    assert.deepEqual(
+      ['[{"q":1,"file":"a.mjs"}]', '{"q":1,"file":"a.mjs"}'].map(runPost),
+      ['[{"q":1,"file":"a.mjs"}]\n', '{"q":1,"file":"a.mjs"}\n'],
+    );
+  });
+
+  it("reasoning 이벤트는 걸러내고 output_text 이벤트의 텍스트는 출력한다", () => {
+    const content =
+      '{"type":"reasoning","text":"hidden"}\n{"type":"output_text","text":"visible"}';
+    assert.equal(runPost(content), "visible\n");
+  });
+});
+
 // recover_codex_stdout 실행 후 CODEX_STDOUT_WAS_RECOVERED 플래그를 회수한다.
 function runRecoveryFlag(stdoutContent, stderrContent) {
   const tmp = mkdtempSync(join(tmpdir(), "tfx-rv-flag-"));

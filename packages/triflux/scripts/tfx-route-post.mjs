@@ -70,9 +70,18 @@ function filterCodexOutput(rawOutput) {
 
     try {
       const obj = JSON.parse(trimmed);
-      if (["message", "completed", "output_text"].includes(obj.type)) {
-        const text = obj.text || obj.content || obj.output || "";
-        if (text) result.push(text);
+      if (
+        obj !== null &&
+        typeof obj === "object" &&
+        !Array.isArray(obj) &&
+        typeof obj.type === "string"
+      ) {
+        if (["message", "completed", "output_text"].includes(obj.type)) {
+          const text = obj.text || obj.content || obj.output || "";
+          if (text) result.push(text);
+        }
+      } else {
+        result.push(line);
       }
     } catch {
       // JSON 아님 → 그대로 통과
