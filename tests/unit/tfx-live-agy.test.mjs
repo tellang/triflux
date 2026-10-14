@@ -202,6 +202,14 @@ test("agy reports a turn that ends in an error step as failed instead of waiting
     "working",
   );
   assert.equal(
+    agyWaitVerdict(
+      [request, { step_type: 17, status: 3, step_payload: Buffer.alloc(0) }],
+      "first",
+      ready,
+    ).error,
+    "agy turn ended with an error step",
+  );
+  assert.equal(
     agyWaitVerdict([request, error, answer], "first", ready).status,
     "completed",
   );

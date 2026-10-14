@@ -518,7 +518,9 @@ function agyWaitVerdict(steps, requestId, visible) {
       status: "failed",
       done: false,
       response,
-      error: agyStepText(turn[lastError].step_payload, 17),
+      error:
+        agyStepText(turn[lastError].step_payload, 17) ||
+        "agy turn ended with an error step",
     };
   const done = settled && turn.some((step) => step.step_type === 15);
   return { status: done ? "completed" : "working", done, response };
