@@ -658,6 +658,42 @@ async function readTmuxLog(logPath) {
     .map((line) => JSON.parse(line));
 }
 
+test("long tmux prompts go through a private file and load-buffer", async () => {
+  const prompt = "가".repeat(10_000);
+  const calls = [];
+  let loaded = null;
+  const result = await tfxLive.doAskViaTmux(
+    ADAPTERS.codex,
+    {
+      session: "long:0.1",
+      prompt,
+      noWait: true,
+      noRelayTag: true,
+      settleMs: 1,
+      pollIntervalMs: 1,
+    },
+    {
+      runTmux: async (_remote, args) => {
+        calls.push(args);
+        if (args[0] === "load-buffer")
+          loaded = await fs.readFile(args.at(-1), "utf8");
+        return { stdout: "" };
+      },
+      captureVisible: async () => "›",
+      capturePane: async () => "›",
+      sleep: async () => {},
+    },
+  );
+  assert.equal(result.inputSent, true);
+  assert.equal(
+    calls.some((args) => args[0] === "set-buffer"),
+    false,
+  );
+  const load = calls.find((args) => args[0] === "load-buffer");
+  assert.equal(loaded, prompt);
+  await assert.rejects(fs.access(load.at(-1)));
+});
+
 test("tmux busy wait, fail, and interrupt gate prompt submission", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-busy-"));
   try {

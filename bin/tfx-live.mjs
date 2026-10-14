@@ -93,6 +93,7 @@ const BOOLEAN_FLAGS = new Set([
   "no-auto-trust",
 ]);
 const PEER_HOP_DONE_MARKER = "<<<TFX_PEER_HOP_DONE>>>";
+const TMUX_SET_BUFFER_MAX_BYTES = 8 * 1024;
 const PEER_DEFAULT_SEED =
   "Introduce yourself in one sentence, then ask the other party one short question.";
 // uds-fallback diagnostics land here, written async so a failed daemon attach
@@ -3169,7 +3170,21 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
     };
 
   const bufferName = tmuxBufferName(session);
-  await tmux(remote, ["set-buffer", "-b", bufferName, "--", prompt]);
+  // tmux 는 명령 하나를 16KiB 안팎에서 "command too long" 으로 거부한다. 긴 프롬프트는 파일로 넣는다.
+  if (!remote && Buffer.byteLength(prompt) > TMUX_SET_BUFFER_MAX_BYTES) {
+    const promptFile = pathJoin(
+      privateTmpDir("tfx-live"),
+      `${bufferName}.prompt`,
+    );
+    await writeFile(promptFile, prompt, { mode: 0o600 });
+    try {
+      await tmux(remote, ["load-buffer", "-b", bufferName, promptFile]);
+    } finally {
+      await rm(promptFile, { force: true });
+    }
+  } else {
+    await tmux(remote, ["set-buffer", "-b", bufferName, "--", prompt]);
+  }
   await tmux(remote, [
     "paste-buffer",
     "-b",
