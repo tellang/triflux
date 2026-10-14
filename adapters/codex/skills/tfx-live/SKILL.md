@@ -23,6 +23,7 @@ Codex에서는 `$tfx-live`로 호출한다. CLI의 `--cli`는 현재 호스트�
 - 보내는 쪽이 Claude이고 대상이 같은 기기의 Claude 세션이면 `ask` 대신 SendMessage 도구로 보낸다. `tfx-live`는 CLI라 SendMessage를 대신 보낼 수 없다. 대상의 SendMessage 이름은 `tfx-live list-sessions --cli claude` 결과의 `name`이고, 세션 ID 앞 8자리는 `short`로 맞춘다. 이름을 못 찾거나 원격 세션이면 `ask`를 쓴다. `start` 직후의 첫 지시도 SendMessage로 보낸다. 로컬 Claude `start` 결과의 `sendMessageTo`가 그 이름이다. Claude 안에서 로컬 Claude tmux 세션에 `ask`를 하면 보내지 않고 `reason: "use-send-message"`와 `sendMessageTo`를 돌려준다. 슬래시 명령은 SendMessage로 실행되지 않으므로 그대로 보내고, tmux 입력이 꼭 필요하면 `--via-tmux`를 붙인다.
 - 같은 기기의 agy 끼리는 `~/.local/bin/agy.patch.json`의 `sha256`이 실제 `agy` 바이너리 해시와 같고 `patches`에 `peer-wake`가 있을 때만 `send_message`(대화 ID)를 쓰고, 아니면 `tfx-live ask`를 쓴다(쉬는 세션이 깨지 않는 공개 이슈 #1022 때문). `tfx-live send`의 agy 대상 전송은 tmux 경로를 유지한다.
 - CLI가 다른 세션에 이름으로 보낼 때는 `tfx-live send --to <이름|cli:이름> --message <본문> [--from <cli:보낸 이름>] [--no-wait]`를 쓴다. 로컬 Claude, Codex, agy 세션에서 이름이나 별칭(tmux 세션, thread ID, 대화 ID, pane ID)이 정확히 맞는 세션 하나를 찾고, 없거나 여럿이면 후보 목록과 함께 실패한다. 전달은 대상 CLI의 `ask` 경로(Codex는 queue, Claude와 agy는 tmux)를 쓰고, 본문 첫 줄에 `[tfx-peer from=<cli>:<보낸 이름> msg=<id>]`, 끝에 회신용 `send` 명령을 붙인다. Claude 안에서 로컬 Claude 세션으로 보내면 `ask`와 같이 `use-send-message`로 거부한다. 원격은 지원하지 않는다.
+- Claude 는 SendMessage 의 `to` 에 `codex:이름`, `agy:이름` 을 쓰면 mods 가 `tfx-live send` 로 전달한다.
 - UDS 결과는 `matchedCompletion === true`일 때만 `done: true`다. timeout이나 연결 종료는 완료가 아니다.
 - bridge 선택 순서는 `--bridge`, `$TFX_BRIDGE`, `$TFX_REPO_ROOT/hub/bridge.mjs`, 번들된 `hub/bridge.mjs`다.
 
