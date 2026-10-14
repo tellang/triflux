@@ -472,6 +472,10 @@ function agyStepText(payload, stepType) {
   return bytes.toString("utf8");
 }
 
+// 3 은 완료, 6 과 7 은 도구 호출이 취소되거나 실패한 채 끝난 step 이다. 7 이어도 턴은 이어지므로
+// 끝난 것으로 본다. 8(진행 중)과 2 는 아직 끝나지 않았다.
+const AGY_SETTLED_STEP_STATUSES = new Set([3, 6, 7]);
+
 function agyWaitVerdict(steps, requestId, visible) {
   const request = steps.findLastIndex(
     (step) =>
@@ -502,7 +506,7 @@ function agyWaitVerdict(steps, requestId, visible) {
     if (text) response = text;
   }
   const settled =
-    turn.every((step) => step.status === 3) &&
+    turn.every((step) => AGY_SETTLED_STEP_STATUSES.has(step.status)) &&
     (nextRequest >= 0 || !ADAPTERS.agy.isBusy(visible));
   // 네트워크 오류 같은 턴 실패는 오류 step(17)으로 끝나고 모델 응답이 뒤따르지 않는다.
   const lastError = turn.findLastIndex((step) => step.step_type === 17);

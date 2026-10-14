@@ -162,6 +162,26 @@ test("agy does not complete an idle request until a model step exists", () => {
   );
 });
 
+test("agy treats cancelled and failed tool steps as finished", () => {
+  for (const status of [6, 7])
+    assert.equal(
+      agyWaitVerdict(
+        [request, { step_type: 132, status }, answer],
+        "first",
+        ready,
+      ).status,
+      "completed",
+    );
+  assert.equal(
+    agyWaitVerdict(
+      [request, { step_type: 132, status: 2 }, answer],
+      "first",
+      ready,
+    ).status,
+    "working",
+  );
+});
+
 test("agy reports a turn that ends in an error step as failed instead of waiting", () => {
   const message =
     "There was a network issue connecting to the server, please try again.";
