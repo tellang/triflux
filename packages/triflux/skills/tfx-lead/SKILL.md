@@ -19,7 +19,7 @@ description: >
 | --- | --- | --- |
 | 세션 띄우기, 보내기, 기다리기, compact, 닫기 | `tfx-live` 명령 (공통) | `tfx-live` 명령 (공통) |
 | 같은 세션 안 서브에이전트 | Agent 도구 (`model`, `effort`, `run_in_background`) | `spawn_agent`, 추가 지시는 `followup_task`. `close_agent`가 있으면 끝나면 반드시 닫는다 |
-| Claude 세션에 보내기 | 같은 기기 Claude 세션(팀원 포함)은 `SendMessage`, 이름은 `tfx-live list-sessions --cli claude`의 `name`. 이름을 못 찾거나 원격이면 `tfx-live ask --cli claude` | `tfx-live ask --cli claude --transport uds --short <8hex> --no-wait`(백그라운드 세션), tmux 세션은 `--session <이름> --no-wait` |
+| Claude 세션에 보내기 | 같은 기기 Claude 세션(팀원 포함)은 `SendMessage`, 이름은 `tfx-live list-sessions --cli claude`의 `name`. 이름을 못 찾거나 원격이면 `tfx-live ask --cli claude`. `tfx-live start` 직후의 첫 지시도 결과의 `sendMessageTo`로 `SendMessage` | `tfx-live ask --cli claude --transport uds --short <8hex> --no-wait`(백그라운드 세션), tmux 세션은 `--session <이름> --no-wait` |
 | Codex 세션에 보내기 | `tfx-live ask --cli codex` (기본 codex queue) | `tfx-live ask --cli codex` (기본 codex queue) |
 | 사용자에게 묻기 | `AskUserQuestion` | 답변에서 짧은 선택지로 묻는다 |
 | 배경 대기 | `run_in_background`와 완료 알림 | 백그라운드 셸 또는 `tfx-live wait`(아래 5절의 지원 범위 안에서) |

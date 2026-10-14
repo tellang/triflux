@@ -83,6 +83,7 @@ const BRIDGE_TIMEOUT_BUFFER_MS = 15_000;
 const PAYLOAD_FILE_THRESHOLD = 96 * 1024;
 const VALID_TRANSPORTS = ["tmux", "uds", "auto", "queue"];
 const BOOLEAN_FLAGS = new Set([
+  "via-tmux",
   "json",
   "attach-a",
   "attach-b",
@@ -111,7 +112,7 @@ function usage(command) {
     "    Codex ask defaults to the app-server queue (thread/queue/add, `codex queue --message` only when add is unavailable; delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands.",
     "  tfx-live ask --cli codex --transport uds --thread ID|auto --prompt TEXT [--codex-socket PATH|default] [--cwd DIR] [--if-busy wait|fail|steer] [--busy-timeout 60] [--timeout 60] [--max-turn SECONDS]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
-    "    ask options: --no-wait --no-relay-tag --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 60/85 of rollout window or 15/22 of 1.05M).",
+    "    ask options: --no-wait --no-relay-tag --via-tmux (a Claude caller sending to a local Claude session is refused and told to use SendMessage unless set) --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 60/85 of rollout window or 15/22 of 1.05M).",
     "  tfx-live compact --session NAME [--cli claude|codex] [--instructions TEXT] [--then PROMPT] [--no-wait] [--if-busy fail|wait] [--timeout 60]",
     "  tfx-live goal set --session NAME [--cli claude|codex] --condition TEXT [--budget N]",
     "  tfx-live goal status --session NAME [--cli claude|codex]",
@@ -1218,7 +1219,10 @@ async function discoverClaudeTmuxSessions({ cwd = null } = {}, deps = {}) {
   const env = deps.env ?? process.env;
   const dir =
     env.TFX_CLAUDE_SESSIONS_DIR ||
-    pathJoin(env.HOME || homedir(), ".claude", "sessions");
+    pathJoin(
+      env.CLAUDE_CONFIG_DIR || pathJoin(env.HOME || homedir(), ".claude"),
+      "sessions",
+    );
   let files;
   try {
     files = await readdir(dir);
@@ -2932,6 +2936,17 @@ async function doStart(launchAdapter, opts) {
       nameApplied = false;
     }
   }
+  // SendMessage 주소는 pane 에 등록된 이름이라 등록까지 확인한다. 이름이 겹치면 SendMessage 가
+  // 보내지 않고 [ref] 를 고르라고 거부한다(Claude Code 2026-10-14 실측).
+  let registeredName = null;
+  if (adapter.cli === "claude" && !remote && nameApplied) {
+    const deadline = Date.now() + Math.min(readyTimeoutMs, 5000);
+    while (!registeredName && Date.now() < deadline) {
+      registeredName = (await claudeTmuxTarget(session))?.name ?? null;
+      if (!registeredName) await sleep(Math.min(pollIntervalMs, 200));
+    }
+    nameApplied = registeredName === name;
+  }
   const namePending = adapter.cli === "agy" && Boolean(name) && !nameApplied;
   if (namePending)
     await runTmux(null, ["set-option", "-t", session, "@tfx_agy_name", name]);
@@ -3022,6 +3037,7 @@ end tell`;
     nameGenerated: !resumed && opts.name === undefined,
     nameApplied,
     ...(adapter.cli === "codex" ? { threadId } : {}),
+    ...(registeredName ? { sendMessageTo: registeredName } : {}),
     ...(adapter.cli === "agy"
       ? { conversationId: conversation?.conversationId ?? null, namePending }
       : {}),
@@ -4330,9 +4346,47 @@ async function start(flags) {
   printJson(await doStart(adapter, startOpts(flags)));
 }
 
-async function ask(flags) {
+async function ask(flags, deps = {}) {
   const adapter = selectAdapter(flags);
-  printJson(await doAsk(adapter, askOpts(flags, adapter)));
+  const opts = askOpts(flags, adapter);
+  const redirect = await sameMachineClaudeRedirect(adapter, opts, flags, deps);
+  if (redirect) {
+    printJson(redirect);
+    process.exitCode = 1;
+    return;
+  }
+  printJson(await doAsk(adapter, opts));
+}
+
+// 같은 기기의 Claude 가 다른 Claude 세션에 tmux 로 입력하면 사람 입력처럼 보이고 보낸 쪽도 남지 않는다.
+// 그래서 대상 이름을 알려 주고 SendMessage 를 쓰게 한다. 슬래시 명령은 SendMessage 로 실행되지 않아 그대로 보낸다.
+async function sameMachineClaudeRedirect(adapter, opts, flags, deps = {}) {
+  const env = deps.env ?? process.env;
+  if (
+    adapter.cli !== "claude" ||
+    env.CLAUDECODE !== "1" ||
+    flags.remote ||
+    Object.hasOwn(flags, "via-tmux") ||
+    opts.short ||
+    opts.sessionId ||
+    !opts.session ||
+    isSlashCommand(opts.prompt)
+  )
+    return null;
+  const target = await (deps.claudeTmuxTarget ?? claudeTmuxTarget)(
+    splitTmuxTarget(opts.session).target,
+  ).catch(() => null);
+  if (!target?.name) return null;
+  return {
+    ok: false,
+    cli: "claude",
+    status: "failed",
+    done: false,
+    inputSent: false,
+    reason: "use-send-message",
+    sendMessageTo: target.name,
+    error: `같은 기기의 Claude 세션에는 SendMessage(to: "${target.name}")로 보낸다. tmux 입력이 꼭 필요하면 --via-tmux 를 붙인다.`,
+  };
 }
 
 async function codexThreadFromFlags(flags) {
@@ -6274,6 +6328,7 @@ export {
   resolveAskTransport,
   resolveCodexDaemonSocket,
   resumedCodexThread,
+  sameMachineClaudeRedirect,
   shouldUseIterm,
   splitTmuxTarget,
   stopOpts,

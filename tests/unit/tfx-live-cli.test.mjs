@@ -3666,3 +3666,74 @@ test("resume --last thread 는 띄운 뒤 resume 기록이 하나일 때만 인�
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("a Claude caller is sent to SendMessage for a named local Claude session", async () => {
+  const flags = { cli: "claude", session: "cl1", prompt: "인계 파일을 읽어라" };
+  const opts = { session: "cl1", prompt: flags.prompt };
+  const deps = {
+    env: { CLAUDECODE: "1" },
+    claudeTmuxTarget: async () => ({ name: "10.14 승계 리드" }),
+  };
+  const redirect = await tfxLive.sameMachineClaudeRedirect(
+    ADAPTERS.claude,
+    opts,
+    flags,
+    deps,
+  );
+  assert.equal(redirect.reason, "use-send-message");
+  assert.equal(redirect.sendMessageTo, "10.14 승계 리드");
+  assert.equal(redirect.inputSent, false);
+  for (const [why, args] of [
+    ["not a Claude caller", [opts, flags, { ...deps, env: {} }]],
+    ["--via-tmux", [opts, { ...flags, "via-tmux": true }, deps]],
+    ["remote", [opts, { ...flags, remote: "m2" }, deps]],
+    ["slash command", [{ ...opts, prompt: "/compact" }, flags, deps]],
+    [
+      "unnamed session",
+      [opts, flags, { ...deps, claudeTmuxTarget: async () => ({ name: "" }) }],
+    ],
+  ])
+    assert.equal(
+      await tfxLive.sameMachineClaudeRedirect(ADAPTERS.claude, ...args),
+      null,
+      why,
+    );
+  assert.equal(
+    await tfxLive.sameMachineClaudeRedirect(ADAPTERS.codex, opts, flags, deps),
+    null,
+  );
+});
+
+test("Claude tmux discovery reads sessions under CLAUDE_CONFIG_DIR", async () => {
+  const dir = await fs.mkdtemp(path.resolve(".test-claude-config-"));
+  try {
+    await fs.mkdir(path.join(dir, "sessions"));
+    await fs.writeFile(
+      path.join(dir, "sessions", "1.json"),
+      JSON.stringify({
+        pid: 100,
+        sessionId: "session-config",
+        tmux: "team:@2.%7",
+        name: "Config",
+      }),
+    );
+    const cwd = await fs.realpath(dir);
+    const { sessions } = await tfxLive.discoverClaudeTmuxSessions(
+      {},
+      {
+        env: { HOME: "/nonexistent", CLAUDE_CONFIG_DIR: dir },
+        runTmux: async () => ({
+          stdout: `team\t1735689600\t0\t2\t1\t${cwd}\tclaude\tclaude\t/dev/ttys1\t100\t%7`,
+        }),
+        psExec: async () => ({ stdout: "100 1" }),
+        isAlive: () => true,
+      },
+    );
+    assert.deepEqual(
+      sessions.map((entry) => entry.name),
+      ["Config"],
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

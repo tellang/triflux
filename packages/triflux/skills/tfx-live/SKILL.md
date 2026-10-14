@@ -16,7 +16,7 @@ argument-hint: "<start|ask|wait|queue|goal|compact|stop|rename|interrupt|probe|l
 - Claude `--short` 또는 `--session-id`는 기본 `auto`로 UDS를 먼저 시도한다. `--session`이 있고 입력 미전송이 확인된 UDS 실패라면 tmux로 전환하고 `~/.claude/cache/triflux/tfx-live/bug-reports/uds-fallback-*.json`을 남긴다. 컨텍스트 가드 거부 시에는 전환하지 않는다.
 - Codex `ask`는 Codex 큐(app-server `thread/queue/add`)가 기본이다. 아래 "Codex 메시지 전송" 순서를 따른다. 기존 Codex thread의 UDS 연결은 `--transport uds --thread <id|auto>`를 명시한다.
 - daemon 참조가 없는 Claude는 tmux가 기본이다.
-- 보내는 쪽이 Claude이고 대상이 같은 기기의 Claude 세션이면 `ask` 대신 SendMessage 도구로 보낸다. `tfx-live`는 CLI라 SendMessage를 대신 보낼 수 없다. 대상의 SendMessage 이름은 `tfx-live list-sessions --cli claude` 결과의 `name`이고, 세션 ID 앞 8자리는 `short`로 맞춘다. 이름을 못 찾거나 원격 세션이면 `ask`를 쓴다.
+- 보내는 쪽이 Claude이고 대상이 같은 기기의 Claude 세션이면 `ask` 대신 SendMessage 도구로 보낸다. `tfx-live`는 CLI라 SendMessage를 대신 보낼 수 없다. 대상의 SendMessage 이름은 `tfx-live list-sessions --cli claude` 결과의 `name`이고, 세션 ID 앞 8자리는 `short`로 맞춘다. 이름을 못 찾거나 원격 세션이면 `ask`를 쓴다. `start` 직후의 첫 지시도 SendMessage로 보낸다. 로컬 Claude `start` 결과의 `sendMessageTo`가 그 이름이다. Claude 안에서 로컬 Claude tmux 세션에 `ask`를 하면 보내지 않고 `reason: "use-send-message"`와 `sendMessageTo`를 돌려준다. 슬래시 명령은 SendMessage로 실행되지 않으므로 그대로 보내고, tmux 입력이 꼭 필요하면 `--via-tmux`를 붙인다.
 - UDS 결과는 `matchedCompletion === true`일 때만 `done: true`다. timeout이나 연결 종료는 완료가 아니다.
 - bridge 선택 순서는 `--bridge`, `$TFX_BRIDGE`, `$TFX_REPO_ROOT/hub/bridge.mjs`, 번들된 `hub/bridge.mjs`다.
 
