@@ -668,6 +668,7 @@ test("long tmux prompts go through a private file and load-buffer", async () => 
       session: "long:0.1",
       prompt,
       noWait: true,
+      skipContextGuard: true,
       noRelayTag: true,
       settleMs: 1,
       pollIntervalMs: 1,

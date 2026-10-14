@@ -3174,10 +3174,10 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
   if (!remote && Buffer.byteLength(prompt) > TMUX_SET_BUFFER_MAX_BYTES) {
     const promptFile = pathJoin(
       privateTmpDir("tfx-live"),
-      `${bufferName}.prompt`,
+      `${bufferName}-${process.pid}-${randomBytes(6).toString("hex")}.prompt`,
     );
-    await writeFile(promptFile, prompt, { mode: 0o600 });
     try {
+      await writeFile(promptFile, prompt, { mode: 0o600 });
       await tmux(remote, ["load-buffer", "-b", bufferName, promptFile]);
     } finally {
       await rm(promptFile, { force: true });
