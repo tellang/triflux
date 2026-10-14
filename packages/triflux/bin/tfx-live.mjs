@@ -2754,57 +2754,38 @@ async function openItermSession(session, group, project, deps = {}) {
         set variable named "user.tfx_project" to ${projectLiteral}
         set variable named "user.tfx_group" to ${groupLiteral}
         set variable named "user.tfx_session" to ${sessionLiteral}
-        set variable named "user.tfx_split_side" to "left"
       end tell
       return (id of newSession) & linefeed & "false"
     end if
     set targetWindow to leaderWindow
   end if
-  set groupTab to missing value
-  set groupCount to 0
+  -- 패인을 닫은 뒤에도 실제 배치에 맞도록, 그룹 탭에서 가장 큰 패인을 긴 쪽으로 나눈다. 1개에서 4개까지 나누면 2x2 가 된다.
   set splitSession to missing value
   repeat with candidateTab in tabs of targetWindow
-    set candidateCount to count of sessions of candidateTab
-    if candidateCount < 4 then
+    if (count of sessions of candidateTab) < 4 then
+      set inGroup to false
       repeat with candidateSession in sessions of candidateTab
         try
           tell candidateSession to set candidateGroup to variable named "user.tfx_group"
-          if candidateGroup is ${groupLiteral} then
-            if candidateCount is 1 then
-              set splitSession to candidateSession
-            else
-              if candidateCount is 2 then
-                set wantedSide to "right"
-              else
-                set wantedSide to "left"
-              end if
-              repeat with anchorSession in sessions of candidateTab
-                try
-                  tell anchorSession to set anchorGroup to variable named "user.tfx_group"
-                  tell anchorSession to set anchorSide to variable named "user.tfx_split_side"
-                  if anchorGroup is ${groupLiteral} and anchorSide is wantedSide then set splitSession to anchorSession
-                end try
-              end repeat
-            end if
-            if splitSession is not missing value then
-              set groupTab to candidateTab
-              set groupCount to candidateCount
-              exit repeat
-            end if
-          end if
+          if candidateGroup is ${groupLiteral} then set inGroup to true
         end try
       end repeat
+      if inGroup then
+        set bestArea to -1
+        repeat with candidateSession in sessions of candidateTab
+          set candidateArea to (columns of candidateSession) * (rows of candidateSession)
+          if candidateArea > bestArea then
+            set bestArea to candidateArea
+            set splitSession to candidateSession
+          end if
+        end repeat
+        exit repeat
+      end if
     end if
-    if groupTab is not missing value then exit repeat
   end repeat
-  set splitSide to ""
-  if groupCount is 1 then
-    tell splitSession to set variable named "user.tfx_split_side" to "left"
-    set splitSide to "right"
-  end if
   set didSplit to splitSession is not missing value
   if didSplit then
-    if groupCount is 1 then
+    if (columns of splitSession) > (rows of splitSession) * 2 then
       tell splitSession to set newSession to split vertically with default profile command ${command}
     else
       tell splitSession to set newSession to split horizontally with default profile command ${command}
@@ -2812,13 +2793,11 @@ async function openItermSession(session, group, project, deps = {}) {
   else
     tell targetWindow to set newTab to create tab with default profile command ${command}
     set newSession to current session of newTab
-    set splitSide to "left"
   end if
   tell newSession
     set variable named "user.tfx_project" to ${projectLiteral}
     set variable named "user.tfx_group" to ${groupLiteral}
     set variable named "user.tfx_session" to ${sessionLiteral}
-    set variable named "user.tfx_split_side" to splitSide
   end tell
   return (id of newSession) & linefeed & (didSplit as text)
 end tell`;
@@ -2833,7 +2812,12 @@ end tell`;
   return { sessionId, group, split: split === "true" };
 }
 
-async function closeItermSession(sessionId, session, deps = {}) {
+async function closeItermSession(
+  sessionId,
+  session,
+  allowNameFallback = true,
+  deps = {},
+) {
   const exec = deps.execFile ?? execFileAsync;
   const tmux = deps.runTmux ?? runTmux;
   const clients = await tmux(null, [
@@ -2860,7 +2844,7 @@ tell application "iTerm2"
         end if
         try
           tell candidateSession to set candidateName to variable named "user.tfx_session"
-          if candidateName is ${appleScriptString(session)} then
+          if ${allowNameFallback ? "true" : "false"} and candidateName is ${appleScriptString(session)} then
             set fallbackSession to candidateSession
             set fallbackTab to candidateTab
           end if
@@ -2883,6 +2867,12 @@ tell application "iTerm2"
   set attachedTtys to {${attachedTtys.map(appleScriptString).join(", ")}}
   try
     repeat with remainingSession in sessions of targetTab
+      -- 사용자가 직접 연 패인은 tfx 표시가 없으므로 남은 패인이 모두 tfx-live 가 연 것일 때만 탭을 닫는다.
+      set remainingName to ""
+      try
+        tell remainingSession to set remainingName to variable named "user.tfx_session"
+      end try
+      if remainingName is missing value or remainingName is "" then set shellsOnly to false
       if not (is at shell prompt of remainingSession) then set shellsOnly to false
       if attachedTtys contains (tty of remainingSession) then set shellsOnly to false
     end repeat
@@ -3940,6 +3930,7 @@ async function ensureTmuxSession(adapter, opts) {
       session: opts.session,
       remote: opts.remote,
       cwd: opts.cwd,
+      group: opts.group,
       readyTimeoutMs: opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
       pollIntervalMs: opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     });
@@ -4182,7 +4173,11 @@ async function doStop(adapter, opts, deps = {}) {
       shouldUseIterm(remote, deps.platform ?? process.platform, deps.env))
   ) {
     try {
-      await closeIterm(itermSessionId ?? "", session);
+      await closeIterm(
+        itermSessionId ?? "",
+        session,
+        shouldUseIterm(remote, deps.platform ?? process.platform, deps.env),
+      );
     } catch (error) {
       itermWarning = error.message;
     }
@@ -5929,6 +5924,7 @@ function peerSideBaseOpts(flags, side, adapter, session) {
   }
   return {
     session,
+    group: flags.group,
     noRelayTag: Object.hasOwn(flags, "no-relay-tag"),
     ...contextOpts(flags, adapter.cli),
     short,

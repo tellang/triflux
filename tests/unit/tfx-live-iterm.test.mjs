@@ -146,26 +146,20 @@ test("iTerm opening script chooses project window and limits group splits", asyn
     script,
     /return \(id of newSession\)[\s\S]*?end if\s+set targetWindow to leaderWindow/,
   );
+  assert.match(script, /if \(count of sessions of candidateTab\) < 4 then/);
   assert.match(
     script,
-    /set candidateCount to count of sessions of candidateTab\s+if candidateCount < 4 then/,
+    /if candidateGroup is "discussion" then set inGroup to true/,
   );
   assert.match(
     script,
-    /if splitSession is not missing value then\s+set groupTab to candidateTab\s+set groupCount to candidateCount\s+exit repeat/,
+    /set candidateArea to \(columns of candidateSession\) \* \(rows of candidateSession\)/,
   );
   assert.match(
     script,
-    /if candidateCount is 2 then\s+set wantedSide to "right"\s+else\s+set wantedSide to "left"/,
+    /if \(columns of splitSession\) > \(rows of splitSession\) \* 2 then\s+tell splitSession .*split vertically[^\n]*\s+else\s+tell splitSession .*split horizontally/,
   );
-  assert.match(
-    script,
-    /if anchorGroup is "discussion" and anchorSide is wantedSide then set splitSession to anchorSession/,
-  );
-  assert.match(
-    script,
-    /set didSplit to splitSession is not missing value\s+if didSplit then\s+if groupCount is 1 then\s+tell splitSession .*split vertically[^\n]*\s+else\s+tell splitSession .*split horizontally/,
-  );
+  assert.doesNotMatch(script, /tfx_split_side/);
   assert.match(
     script,
     /end if\s+else\s+tell targetWindow .*create tab with default profile command/,
@@ -175,10 +169,10 @@ test("iTerm opening script chooses project window and limits group splits", asyn
 });
 
 test("stop closes a recorded iTerm pane anywhere and searches by name only inside iTerm", async () => {
-  for (const [id, env, closes] of [
-    ["stale-id", {}, true],
-    ["", { LC_TERMINAL: "iTerm2" }, true],
-    ["", {}, false],
+  for (const [id, env, closes, fallback] of [
+    ["stale-id", {}, true, false],
+    ["", { LC_TERMINAL: "iTerm2" }, true, true],
+    ["", {}, false, false],
   ]) {
     const calls = [];
     await tfxLive.doStop(
@@ -192,7 +186,7 @@ test("stop closes a recorded iTerm pane anywhere and searches by name only insid
           return { stdout: id };
         },
         closeItermSession: async (...args) => {
-          assert.deepEqual(args, [id, "session-a"]);
+          assert.deepEqual(args, [id, "session-a", fallback]);
           calls.push("close");
         },
       },
@@ -207,7 +201,7 @@ test("stop closes a recorded iTerm pane anywhere and searches by name only insid
 
 test("iTerm close script prefers stored ID then session variable and preserves ambiguous tabs", async () => {
   let script;
-  await tfxLive.closeItermSession("stale-id", "session-a", {
+  await tfxLive.closeItermSession("stale-id", "session-a", true, {
     runTmux: async () => ({ stdout: "/dev/ttys003\n" }),
     execFile: async (command, args) => {
       assert.equal(command, "/usr/bin/osascript");
@@ -283,4 +277,30 @@ test("project lookup reports git failures instead of splitting repository identi
       (actual) => actual === error,
     );
   }
+});
+
+test("iTerm close skips the name search outside iTerm and keeps tabs with user panes", async () => {
+  let script;
+  await tfxLive.closeItermSession("stale-id", "session-a", false, {
+    runTmux: async () => ({ stdout: "" }),
+    execFile: async (_command, args) => {
+      script = args[1];
+      return { stdout: "" };
+    },
+  });
+  assert.match(script, /if false and candidateName is "session-a"/);
+  assert.match(
+    script,
+    /remainingName is missing value or remainingName is "" then set shellsOnly to false/,
+  );
+});
+
+test("peer side options carry the run group to lazily started sessions", () => {
+  const base = tfxLive.peerSideBaseOpts(
+    { group: "peer:a:b:c:1234", "transport-a": "tmux" },
+    "a",
+    tfxLive.ADAPTERS.claude,
+    "peerA",
+  );
+  assert.equal(base.group, "peer:a:b:c:1234");
 });
