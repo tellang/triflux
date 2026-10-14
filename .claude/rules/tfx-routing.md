@@ -104,7 +104,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 
 > 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0038](../../docs/adr/0038-agy-default-argon-family.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
 
-Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고, `scripts/lib/model-family-resolver.mjs`가 관리 파일 `~/.codex/<프로필>.config.toml`의 모델 ID를 갱신한다. `designer`, `writer` 항목은 직접 Codex를 지정한 경우에만 적용하며 일반 실행의 provider는 `hub/team/agent-map.json`이 정한다.
+Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고, `scripts/lib/model-family-resolver.mjs`가 관리 파일 `~/.codex/<프로필>.config.toml`의 모델 ID를 갱신한다. `designer`, `writer`, `document-specialist` 항목은 직접 Codex를 지정한 경우에만 적용하며 일반 실행의 provider는 `hub/team/agent-map.json`이 정한다. 입력이 큰 코드베이스 읽기는 antigravity 로 보낸다(Argon 은 입출력 공유 1M 문맥).
 
 | 프로필 | triflux lane |
 |---------|--------------|
