@@ -2359,7 +2359,11 @@ FALLBACK_EOF
     [ -n "$claude_effort" ] && claude_worker_args+=("--effort" "$claude_effort")
 
     run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?
-    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
+    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 && -n "$REVIEW_AUTHOR" ]]; then
+      # 리뷰는 판정이 결과라 native 안내로 바꾸면 리뷰 없이 성공으로 보인다. 실패로 남긴다.
+      echo "[tfx-route] Claude 리뷰 워커 실패(exit=${exit_code}). 리뷰가 실행되지 않았다." >&2
+      [[ -f "$STDERR_LOG" ]] && tail -c 2048 "$STDERR_LOG" >&2
+    elif [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
       local claude_stderr_bytes=0
       [[ -f "$STDERR_LOG" ]] && claude_stderr_bytes=$(wc -c < "$STDERR_LOG" 2>/dev/null | tr -d ' ')
       echo "[tfx-route] Claude stream wrapper 실패(exit=${exit_code}, stderr=${claude_stderr_bytes}B). native metadata로 fallback합니다." >&2

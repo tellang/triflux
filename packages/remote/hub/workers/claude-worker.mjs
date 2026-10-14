@@ -109,6 +109,8 @@ function buildClaudeArgs(worker, options) {
   args.push("--print");
   args.push("--input-format", "stream-json");
   args.push("--output-format", "stream-json");
+  // Claude Code 2.1.296 은 --print 와 stream-json 출력을 함께 쓰면 --verbose 를 요구한다.
+  args.push("--verbose");
 
   if (options.includePartialMessages) args.push("--include-partial-messages");
   if (options.replayUserMessages) args.push("--replay-user-messages");
