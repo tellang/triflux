@@ -73,7 +73,7 @@ node scripts/setup.mjs --machine-profile-only --non-interactive
 
 | 우선순위 | 층 | 의미 |
 | ---: | --- | --- |
-| 1 | 명시 runtime env (`TFX_DISABLE_*`, `TFX_HARD_CEILING_SEC`, `TFX_STALL_*`) | 이번 실행의 최종 사용자 override |
+| 1 | 명시 runtime env (`TFX_DISABLE_*`, `TFX_ANTIGRAVITY_FALLBACK`, `TFX_HARD_CEILING_SEC`, `TFX_STALL_*`) | 이번 실행의 최종 사용자 override |
 | 2 | 영속 machine profile | 설치 시 확인한 머신 정책 |
 | 3 | preflight (`TFX_CODEX_OK`, `TFX_ANTIGRAVITY_OK`) | 현재 가용성 관측; `OK=0`인 CLI는 binary가 있어도 선택 불가, 금지 권한도 되살릴 수 없음 |
 | 4 | built-in default | 프로파일 미설정 시 기존 호환값 |
@@ -82,12 +82,19 @@ node scripts/setup.mjs --machine-profile-only --non-interactive
 유지한다. 최종 선택은 다음 순서다.
 
 1. 선택 CLI가 금지되지 않았고 가용하면 그대로 실행한다.
-2. 금지됐거나 미가용이면, 다른 **허용되고 가용한** 외부 CLI 하나로만 전환하고
+2. 기본 정책에서 금지됐거나 미가용이면, 다른 **허용되고 가용한** 외부 CLI 하나로만 전환하고
    stderr에 이유와 대상을 출력한다.
 3. 후보가 없으면 exit 78로 실패한다. availability 실패를 Claude native로
    조용히 강등하지 않는다.
 4. quota reroute도 같은 disable/가용성 검사를 통과한 후보만 선택하고, 후보가
    없으면 exit 78로 실패한다.
+
+`TFX_ANTIGRAVITY_FALLBACK=codex|claude`로 Antigravity의 대체 CLI를 정하라.
+runtime env가 machine profile보다 우선하며, 기본값은 기존 정책과 같은 `codex`다.
+잘못된 값은 오류로 끝낸다. `claude`를 명시하면 금지됐거나 미가용인 Antigravity를
+Claude 워커로 전환하고 stderr에 이유와 대상을 남긴다. Claude CLI가 없으면
+Codex로 다시 돌리지 않고 exit 78로 실패한다. Claude 워커 실패도 실패로 남긴다.
+이 설정은 `code-reviewer`와 `quality-reviewer`의 작성 벤더별 폴백에 적용하지 않는다.
 
 Claude-native로 설계된 역할과 transport 내부의 `Codex MCP → Codex exec` 전환은
 다른 CLI로의 availability fallback이 아니므로 이 정책과 독립적이다.

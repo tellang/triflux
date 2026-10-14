@@ -36,6 +36,7 @@ function runRoute({
   launch = "route",
   workerCli,
   prompt = "review fixture",
+  profile,
 } = {}) {
   const home = mkdtempSync(join(tmpdir(), "tfx-review-author-"));
   const cache = join(home, ".claude/cache");
@@ -44,6 +45,9 @@ function runRoute({
   mkdirSync(join(home, ".codex"));
   mkdirSync(join(home, "tmp"));
   writeFileSync(join(home, ".codex/config.toml"), 'model = "gpt-6-sol"\n');
+  if (profile !== undefined) {
+    writeFileSync(join(home, "machine-profile.env"), profile);
+  }
   if (weekly !== undefined) {
     writeFileSync(
       join(cache, "claude-usage-cache.json"),
@@ -107,6 +111,7 @@ else { require('node:fs').writeFileSync(process.env.ROUTE_ARGV, JSON.stringify(a
       USERPROFILE: home,
       CODEX_HOME: join(home, ".codex"),
       XDG_CONFIG_HOME: join(home, ".config"),
+      TFX_MACHINE_PROFILE_PATH: join(home, "machine-profile.env"),
       TMPDIR: join(home, "tmp"),
       NODE_BIN: process.execPath,
       CODEX_BIN: toBashPath(fakeCli),
@@ -360,3 +365,120 @@ for (const [weeklyResetsAt, expected] of [
     assert.match(r.output, new RegExp(`reviewer=${expected}`));
   });
 }
+
+test("Antigravity fallback defaults to Codex", () => {
+  const r = runRoute({ role: "writer", env: { TFX_DISABLE_ANTIGRAVITY: "1" } });
+  assert.equal(r.status, 0, r.output);
+  assert.match(r.output, /type=codex agent=writer/);
+  assert.equal(r.argv[0], "exec");
+});
+
+for (const [role, model, effort] of [
+  ["security-reviewer", "fable", "high"],
+  ["designer", "opus", "high"],
+  ["document-specialist", "opus", undefined],
+  ["writer", "opus", undefined],
+  ["antigravity", "opus", undefined],
+  ["agy", "opus", undefined],
+]) {
+  for (const unavailable of [
+    { TFX_DISABLE_ANTIGRAVITY: "1" },
+    { TFX_ANTIGRAVITY_OK: "0", AGY_BIN: "/missing/tfx-agy" },
+  ]) {
+    test(`${role}: explicit Claude fallback executes ${model} (${JSON.stringify(unavailable)})`, () => {
+      const r = runRoute({
+        role,
+        env: { TFX_ANTIGRAVITY_FALLBACK: "claude", ...unavailable },
+      });
+      assert.equal(r.status, 0, r.output);
+      assert.match(r.output, new RegExp(`type=claude agent=${role}`));
+      assert.match(r.output, /antigravity.*claude.*fallback/);
+      assert.match(r.output, /claude:review fixture/);
+      assert.doesNotMatch(
+        r.output,
+        /ROUTE_TYPE=claude-native|TFX_NEEDS_FALLBACK/,
+      );
+      assert.equal(r.argv[r.argv.indexOf("--model") + 1], model);
+      if (effort) assert.equal(r.argv[r.argv.indexOf("--effort") + 1], effort);
+      else assert.ok(!r.argv.includes("--effort"));
+    });
+  }
+}
+
+test("Claude fallback requires an available Claude binary", () => {
+  const r = runRoute({
+    role: "writer",
+    env: {
+      TFX_DISABLE_ANTIGRAVITY: "1",
+      TFX_ANTIGRAVITY_FALLBACK: "claude",
+      CLAUDE_BIN: "/missing/tfx-claude",
+    },
+  });
+  assert.equal(r.status, 78, r.output);
+  assert.deepEqual(r.argv, []);
+});
+
+test("Antigravity Claude fallback worker failure remains a failure", () => {
+  const r = runRoute({
+    role: "writer",
+    env: {
+      TFX_DISABLE_ANTIGRAVITY: "1",
+      TFX_ANTIGRAVITY_FALLBACK: "claude",
+      CLAUDE_BIN_ARGS_JSON: JSON.stringify([
+        "-e",
+        "process.stderr.write('fixture failure'); process.exit(9)",
+      ]),
+    },
+  });
+  assert.notEqual(r.status, 0, r.output);
+  assert.doesNotMatch(r.output, /status: success|ROUTE_TYPE=claude-native/);
+});
+
+for (const value of ["gemini", "", "$(exit 19)"]) {
+  for (const source of ["env", "profile"]) {
+    test(`rejects invalid Antigravity fallback ${JSON.stringify(value)} from ${source}`, () => {
+      const r = runRoute({
+        role: "writer",
+        env: source === "env" ? { TFX_ANTIGRAVITY_FALLBACK: value } : {},
+        profile:
+          source === "profile"
+            ? `TFX_ANTIGRAVITY_FALLBACK=${value}\n`
+            : undefined,
+      });
+      assert.notEqual(r.status, 0, r.output);
+      assert.match(r.output, /TFX_ANTIGRAVITY_FALLBACK/);
+      assert.deepEqual(r.argv, []);
+    });
+  }
+}
+
+for (const override of [undefined, "codex"]) {
+  test(`profile Claude fallback respects runtime override ${override}`, () => {
+    const r = runRoute({
+      role: "writer",
+      profile: "TFX_ANTIGRAVITY_FALLBACK=claude\n",
+      env: {
+        TFX_DISABLE_ANTIGRAVITY: "1",
+        ...(override === undefined
+          ? {}
+          : { TFX_ANTIGRAVITY_FALLBACK: override }),
+      },
+    });
+    assert.equal(r.status, 0, r.output);
+    assert.match(
+      r.output,
+      new RegExp(`type=${override ?? "claude"} agent=writer`),
+    );
+    assert.ok(r.argv.length > 0);
+  });
+}
+
+test("Antigravity fallback setting does not permit author self-review", () => {
+  const r = runRoute({
+    author: "claude",
+    weekly: 85,
+    env: { TFX_CODEX_OK: "0", TFX_ANTIGRAVITY_FALLBACK: "claude" },
+  });
+  assert.equal(r.status, 0, r.output);
+  assert.match(r.output, /reviewer=antigravity review_author=claude/);
+});

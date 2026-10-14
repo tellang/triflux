@@ -120,6 +120,8 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 | `sonnet` | Claude native test-engineer, qa-tester |
 | `haiku` | Claude 리드 native explore, claude |
 
+Antigravity가 금지됐거나 미가용일 때 `TFX_ANTIGRAVITY_FALLBACK=claude`를 명시하면 `security-reviewer`는 `fable`과 high effort로, `designer`는 `opus`와 high effort로, `document-specialist`, `writer`, `antigravity`, `agy`는 `opus`와 기존 effort 정책으로 실행하라. 기본값은 `codex`다.
+
 `code-reviewer`와 `quality-reviewer`는 `TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 작성 벤더를 받아 다른 벤더로 리뷰한다. 미지정이면 기본 구현자인 Codex로 보고, 잘못된 값은 오류로 끝낸다. Codex 작성 코드는 Claude Opus로, Claude 작성 코드는 Codex `sol_high`의 `review`로, Argon 작성 코드는 Claude Opus로 보낸다. `~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`가 80 이상이면 Codex 작성 코드의 리뷰를 Argon High로, Argon 작성 코드의 리뷰를 Codex Sol로 전환한다. 캐시를 읽지 못하면 한도 미만으로 본다. `security-reviewer`는 `argon_high`를 쓴다. 명시 CLI 선택의 우선순위는 유지한다. 리드별 verifier와 explore 배치는 `skills/tfx-lead/SKILL.md`를 따른다.
 
 Codex는 `models_cache.json`의 공개 모델 중 effort를 지원하는 후보를 숫자 버전순으로 고른다. 캐시가 없으면 `codex debug models`를 읽는다. agy는 `agy models`의 Argon 목록을 하루 동안 캐시한다. setup과 update도 같은 해석기를 쓴다. Flash와 Pro는 자동 선택하지 않고, 옛 `flash*` 프로필 이름은 `argon_low`로 보낸다.
