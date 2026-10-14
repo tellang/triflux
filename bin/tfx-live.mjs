@@ -1219,7 +1219,10 @@ async function discoverClaudeTmuxSessions({ cwd = null } = {}, deps = {}) {
   const env = deps.env ?? process.env;
   const dir =
     env.TFX_CLAUDE_SESSIONS_DIR ||
-    pathJoin(env.HOME || homedir(), ".claude", "sessions");
+    pathJoin(
+      env.CLAUDE_CONFIG_DIR || pathJoin(env.HOME || homedir(), ".claude"),
+      "sessions",
+    );
   let files;
   try {
     files = await readdir(dir);

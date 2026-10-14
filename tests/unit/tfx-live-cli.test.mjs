@@ -3703,3 +3703,37 @@ test("a Claude caller is sent to SendMessage for a named local Claude session", 
     null,
   );
 });
+
+test("Claude tmux discovery reads sessions under CLAUDE_CONFIG_DIR", async () => {
+  const dir = await fs.mkdtemp(path.resolve(".test-claude-config-"));
+  try {
+    await fs.mkdir(path.join(dir, "sessions"));
+    await fs.writeFile(
+      path.join(dir, "sessions", "1.json"),
+      JSON.stringify({
+        pid: 100,
+        sessionId: "session-config",
+        tmux: "team:@2.%7",
+        name: "Config",
+      }),
+    );
+    const cwd = await fs.realpath(dir);
+    const { sessions } = await tfxLive.discoverClaudeTmuxSessions(
+      {},
+      {
+        env: { HOME: "/nonexistent", CLAUDE_CONFIG_DIR: dir },
+        runTmux: async () => ({
+          stdout: `team\t1735689600\t0\t2\t1\t${cwd}\tclaude\tclaude\t/dev/ttys1\t100\t%7`,
+        }),
+        psExec: async () => ({ stdout: "100 1" }),
+        isAlive: () => true,
+      },
+    );
+    assert.deepEqual(
+      sessions.map((entry) => entry.name),
+      ["Config"],
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
