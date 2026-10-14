@@ -52,7 +52,7 @@ tfx-live stop --cli agy --session ag1
 
 agy `ask`의 기본 `--if-busy queue`는 바쁜 턴에도 바로 전송한다. agy 자체 대기열에 쌓이며 앞 입력을 덮어쓰지 않는다. `wait|fail|interrupt`도 선택할 수 있다. `ask --no-wait`는 `inputSent: true`, `requestId`와 함께 유휴 시 `status: "submitted"`, 바쁠 때 `status: "queued"`를 반환한다. `queue` 정책은 agy 전용이다. 슬래시 명령은 중계 표식 없이 보내고 바빠도 즉시 실행한다. DB step을 만들지 않아 `wait`로 추적하지 않으며, `--no-wait` 여부와 무관하게 제출 확인 뒤 `status: "submitted"`, `slashCommand: true`로 반환한다. `/clear`는 대화 ID를 바꾼다.
 
-`wait`는 `node:sqlite`(Node 22.13+)로 대화 DB의 사용자 입력 표식과 뒤따르는 step 상태를 읽는다. 요청 뒤부터 다음 사용자 입력 전까지 모델 응답 step이 하나 이상 있고 그 구간의 모든 step이 끝났으며, pane이 유휴 상태이거나 다음 요청이 시작됐으면 완료다. 같은 구간의 마지막 비어 있지 않은 모델 텍스트를 응답으로 쓴다. Escape로 취소된 step도 완료 상태로 기록된다. `--timeout 0`은 한 번만 확인한다. `/clear`는 대화 ID를 바꾸며 진행 중 `wait`는 처음 연 DB를 계속 본다. agy 설정의 `toolPermission`에 따라 도구 승인 화면이 뜰 수 있다. 승인을 기다리는 동안 턴이 멈추고 `wait`는 `working`으로 남는다. `tfx-live`는 agy에 `--dangerously-skip-permissions`를 쓰지 않는다. agy에는 compact가 없으므로 `/clear` 또는 handoff를 쓴다. `--remote`, `peer`, `converse`, `goal-driven`은 지원하지 않는다.
+`wait`는 `node:sqlite`(Node 22.13+)로 대화 DB의 사용자 입력 표식과 뒤따르는 step 상태를 읽는다. 요청 뒤부터 다음 사용자 입력 전까지 모델 응답 step이 하나 이상 있고 그 구간의 모든 step이 끝났으며, pane이 유휴 상태이거나 다음 요청이 시작됐으면 완료다. 같은 구간의 마지막 비어 있지 않은 모델 텍스트를 응답으로 쓴다. Escape로 취소된 step도 완료 상태로 기록된다. `--timeout 0`은 한 번만 확인한다. `/clear`는 대화 ID를 바꾸며 진행 중 `wait`는 처음 연 DB를 계속 본다. agy 설정의 `toolPermission`에 따라 도구 승인 화면이 뜰 수 있다. 승인을 기다리는 동안 턴이 멈추고 `wait`는 `working`으로 남는다. `tfx-live`는 agy에 `--dangerously-skip-permissions`를 쓰지 않는다. agy에는 compact가 없으므로 `/clear` 또는 handoff를 쓴다. `peer` relay는 로컬에서만 지원한다. `--remote`, `converse`, `goal-driven`은 지원하지 않는다.
 
 `start --unset-env 'PREFIX_*,EXACT_NAME'`은 모든 CLI에 쓸 수 있다. 쉼표로 구분한 환경변수 이름과 끝의 `*`로 지정한 접두만 허용한다. tmux pane 셸의 환경에서 변수를 지우고 CLI를 실행하며 resume에도 적용한다. 로컬에서는 준비 후 CLI 프로세스 환경을 확인한다. macOS는 `ps -E` 출력에 `PATH=`가 있고 Linux는 `/proc/PID/environ`이 비어 있지 않을 때만 환경을 읽은 것으로 판정한다. 일치하는 변수가 실제로 남은 경우에만 생성한 세션을 종료하고 오류를 낸다. 환경을 읽지 못하면 세션을 유지하고 `unsetEnvVerified: false`, `unsetEnvWarning: "CLI environment unreadable; removal not verified"`를 반환한다. 결과의 `unsetEnv`는 요청 목록이고 `unsetEnvVerified`는 확인 여부다. 원격에서는 확인하지 않아 `false`이고 Windows에서는 이 옵션을 지원하지 않는다.
 
@@ -200,9 +200,15 @@ tfx-live ask --cli codex --transport uds --thread auto --cwd ~/Projects/my-workt
 tfx-live peer --cli-a codex --cli-b claude --session-a cx-peer --session-b cl-peer --cwd ~/Projects --mode freeform --seed "변경을 함께 검토해줘" --rounds 2 --timeout 180
 tfx-live peer --cli-a codex --transport-a uds --thread-a <id|auto> --cli-b claude --transport-b uds --short-b <8hex> --cwd ~/Projects/my-worktree --mode freeform --seed "변경을 검토해줘"
 tfx-live peer --via message --cli-a claude --cli-b claude --session-a cl-a --session-b cl-b --attach-a --attach-b --seed "변경을 함께 검토해줘" --rounds 3
+tfx-live peer --cli-a codex --cli-b claude --cli-c agy --session-c peerC --mode freeform --seed "변경을 함께 검토해줘" --rounds 2
+tfx-live peer --cli-a codex --cli-b claude --mode debate --seed "변경을 검토하고 수정한 입장을 제시해줘" --rounds 2
 ```
 
 `peer`는 이전 응답을 반대쪽의 다음 프롬프트로 전달한다. 기존 tmux pane은 `--attach-a`·`--attach-b`로 연결하며 종료하지 않는다. UDS 쪽도 기존 세션으로 취급한다. Codex 쪽은 `ask`와 같이 queue가 기본이고 응답은 rollout에서 읽는다. thread를 못 찾으면 tmux 직접 입력으로 바꾸고 hop에 `fallbackReason`을 남긴다. `--remote`이거나 `--if-busy fail|interrupt`이면 처음부터 tmux로 보낸다. `--if-busy-a`·`--if-busy-b`로 각 쪽의 정책을 정한다. 소유한 세션을 실제 종료한 경우에만 `stoppedA`·`stoppedB`가 참이다.
+
+`--cli-c`를 지정하면 A, B, C 순서로 진행하며 한 라운드는 세 hop이다. C의 기본 세션은 `peerC`이며 `--session-c`, `--model-c`, `--effort-c`, `--attach-c`, `--transport-c`, `--if-busy-c`, `--short-c`, `--session-id-c`, `--thread-c`, `--codex-socket-c`, `--bridge-c`를 받는다. 각 hop과 마지막 closure에는 다른 두 참여자의 최근 답을 `Participant A`, `Participant B`, `Participant C`로 표시한다. C의 연결과 종료 여부는 `attachedC`, `stoppedC`로 보고한다. C는 relay에서만 쓴다.
+
+`--mode debate`는 첫 hop에 seed를 보내고 이후에는 다른 참여자의 최근 답을 검토하여 동의와 이견의 이유 및 수정한 입장을 요구한다. 2자와 3자 모두에서 쓰며 답의 길이는 제한하지 않는다. 마지막 hop은 기존과 같은 closure 차례다.
 
 Claude끼리는 `--via message`를 쓴다. tfx-live는 양쪽에 상대 세션 이름과 끝낼 조건을 한 번씩 보내고 `status: "started"`로 바로 끝난다. 그 뒤 두 세션은 `SendMessage`로 직접 주고받는다. 왕복 횟수는 `--rounds`를 지시문으로만 전하므로 tfx-live가 강제하지 않는다. transcript도 남기지 않는다. A는 끝나면 합의 JSON을 `--report-to` 세션에 `SendMessage`로 보낸다. `--report-to`가 없으면 tfx-live를 호출한 Claude 세션에 보내고, 그 세션도 찾지 못하면 A 세션 화면에 남긴다. 띄운 세션은 대화가 이어지도록 종료하지 않으므로 끝나면 `stop`으로 닫는다. 로컬 tmux 대화형 Claude만 지원하고 세션 이름을 찾지 못하면 실패한다.
 
