@@ -97,7 +97,7 @@ echo "fake codex ok"
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 if (args[0] === "--help") console.log("--print --dangerously-skip-permissions");
-else if (args[0] === "models") console.log("gemini-4.2-flash-high\\tGemini 4.2 Flash (High)");
+else if (args[0] === "models") console.log("gemini-4-argon-high\\tGemini 4 Argon (High)\\ngemini-4-argon-medium\\tGemini 4 Argon (Medium)\\ngemini-4-argon-low\\tGemini 4 Argon (Low)\\ngemini-4.2-flash-high\\tGemini 4.2 Flash (High)");
 else {
   fs.writeFileSync(process.env.TFX_CAPTURE_ARGS, JSON.stringify(args));
   console.log("fake agy ok");
@@ -192,12 +192,23 @@ function profileValues(args) {
 }
 
 describe("tfx-route retry snapshot profile plumbing", () => {
-  it("agy 실행 전에 모델 목록을 해석하고 옛 flash 별칭을 display name으로 전달한다", () => {
-    const args = runRoute({
-      agent: "designer",
-      env: { TFX_ANTIGRAVITY_OK: "1", TFX_GEMINI_PROFILE: "flash38_high" },
-    });
-    assert.equal(args[args.indexOf("--model") + 1], "Gemini 4.2 Flash (High)");
+  it("agy 실행 전에 기본 Argon을 고르고 옛 Flash 별칭은 Argon Low로 보낸다", () => {
+    for (const [profile, expected] of [
+      ["", "Gemini 4 Argon (High)"],
+      ["argon", "Gemini 4 Argon (Medium)"],
+      ["flash_high", "Gemini 4 Argon (Low)"],
+      ["flash38_high", "Gemini 4 Argon (Low)"],
+    ]) {
+      const args = runRoute({
+        agent: "designer",
+        env: {
+          TFX_ANTIGRAVITY_OK: "1",
+          TFX_GEMINI_PROFILE: profile,
+          GEMINI_PROFILE: "",
+        },
+      });
+      assert.equal(args[args.indexOf("--model") + 1], expected);
+    }
   });
 
   it("실행 직전에 옛 별칭을 정규화하고 최신 가족 모델의 프로필을 만든다", () => {

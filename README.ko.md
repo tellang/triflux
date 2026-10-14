@@ -109,9 +109,9 @@ Codex 프로필은 `~/.codex/<프로필>.config.toml`에서 직접 관리한다.
 ## 모델과 프로필
 
 Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로필>.config.toml`이, 역할별 프로필
-배정은 [`scripts/lib/agent-route-policy.mjs`](scripts/lib/agent-route-policy.mjs)가 정한다. 실행·setup·update 때 Codex와 Antigravity 가족 프로필을 사용 가능한 최신 버전으로 갱신한다. Codex는 로컬 모델 캐시에서 effort 지원 여부를 확인하고, Antigravity는 `agy models` 결과를 하루 동안 캐시한다. 옛 프로필 이름도 계속 동작한다. Claude는 기존 별칭을 유지한다.
+배정은 [`scripts/lib/agent-route-policy.mjs`](scripts/lib/agent-route-policy.mjs)가 정한다. 실행·setup·update 때 Codex와 Antigravity 가족 프로필을 사용 가능한 최신 버전으로 갱신한다. Codex는 로컬 모델 캐시에서 effort 지원 여부를 확인하고, Antigravity는 `agy models`의 Argon 결과를 하루 동안 캐시한다. Flash와 Pro는 자동 선택하지 않고, 옛 `flash*` 프로필 이름은 `argon_low`로 보낸다. Claude는 기존 별칭을 유지한다.
 
-`~/.config/triflux/models.json`에 `{"sol":"gpt-6-sol","flash":"gemini-3.7-flash"}`처럼 적으면 가족별로 고정한다(Windows: `%APPDATA%\triflux`). 목록을 읽지 못하면 마지막 해석 결과, 그다음 내장 기본값을 쓴다.
+`~/.config/triflux/models.json`에 `{"sol":"gpt-6-sol","argon":"gemini-4-argon"}`처럼 적으면 가족별로 고정한다(Windows: `%APPDATA%\triflux`). 목록을 읽지 못하면 마지막 해석 결과, 그다음 내장 기본값을 쓴다.
 
 | 프로필 / 별칭 | 레인 |
 | --- | --- |
@@ -119,7 +119,7 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 | `astra_max`, `astra_ultra` | 가장 어려운 단일 작업(`TFX_CODEX_PROFILE=max\|ultra`). `max`는 `auto-escalate` 첫 단계 |
 | `sol_high` / `sol_med` | 기본 구현, 리뷰, 검증, 테스트, 문서 / 정리 작업 |
 | `luna_high` / `luna_low` | 빌드 수정, 글쓰기 / 지연 우선 조회 |
-| `flash_low` / `flash` / `flash_high` | Antigravity 분류 / 생성 / 검토 |
+| `argon_low` / `argon` / `argon_high` | Antigravity 분류 / 생성 / 검토 |
 | Claude `fable` | `--retry auto-escalate` 마지막 단계 |
 | Claude `opus` / `sonnet` / `haiku` | 메타 라우팅과 계획 게이트 / Claude 네이티브 QA·검증 / 빠른 탐색 |
 

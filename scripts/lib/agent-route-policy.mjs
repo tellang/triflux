@@ -408,13 +408,13 @@ async function runCli() {
         const module = await import(pathToFileURL(geminiProfilesModule).href);
         resolver = (agent) => {
           try {
-            return module.resolveGeminiProfileForPurpose(agent) || "flash";
+            return module.resolveGeminiProfileForPurpose(agent) || "argon";
           } catch {
-            return "flash";
+            return "argon";
           }
         };
       } catch {
-        resolver = () => "flash";
+        resolver = () => "argon";
       }
     }
     process.stdout.write(

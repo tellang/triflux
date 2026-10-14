@@ -112,9 +112,9 @@ The full contract, including `--lead`, `--options`, `--experts`, and conflict ru
 
 Codex runs through named profiles; model IDs live in `~/.codex/<profile>.config.toml`, and the
 role → profile map lives in [`scripts/lib/agent-route-policy.mjs`](scripts/lib/agent-route-policy.mjs).
-Codex and Antigravity family profiles select the newest available model at dispatch, setup, and update. Codex reads its local model cache and checks supported effort; Antigravity caches `agy models` for one day. Old profile names remain compatible. Claude keeps its existing aliases.
+Codex and Antigravity family profiles select the newest available model at dispatch, setup, and update. Codex reads its local model cache and checks supported effort; Antigravity caches Argon models from `agy models` for one day. Flash and Pro are not selected automatically, and old `flash*` profile names resolve to `argon_low`. Claude keeps its existing aliases.
 
-Pin a family in `~/.config/triflux/models.json`, for example `{"sol":"gpt-6-sol","flash":"gemini-3.7-flash"}` (Windows: `%APPDATA%\triflux`). Without a usable catalog, resolution keeps the last result or the built-in default.
+Pin a family in `~/.config/triflux/models.json`, for example `{"sol":"gpt-6-sol","argon":"gemini-4-argon"}` (Windows: `%APPDATA%\triflux`). Without a usable catalog, resolution keeps the last result or the built-in default.
 
 | Profile / alias | Lanes |
 | --- | --- |
@@ -122,7 +122,7 @@ Pin a family in `~/.config/triflux/models.json`, for example `{"sol":"gpt-6-sol"
 | `astra_max`, `astra_ultra` | Hardest single tasks (`TFX_CODEX_PROFILE=max\|ultra`); `max` is the first `auto-escalate` step |
 | `sol_high` / `sol_med` | Default implementation, review, verification, tests, docs / cleanup |
 | `luna_high` / `luna_low` | Build fixes, writing / latency-first lookups |
-| `flash_low` / `flash` / `flash_high` | Antigravity classification / generation / review |
+| `argon_low` / `argon` / `argon_high` | Antigravity classification / generation / review |
 | Claude `fable` | Final `--retry auto-escalate` step |
 | Claude `opus` / `sonnet` / `haiku` | Meta routing and planning gates / Claude-native QA and verification / fast exploration |
 
