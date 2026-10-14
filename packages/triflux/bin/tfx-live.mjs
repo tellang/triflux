@@ -4793,23 +4793,12 @@ function matchPeerCandidates(candidates, query) {
   if (exactName.length > 0) return exactName;
 
   // 2순위: 별칭(session, threadId, conversationId, target, paneId) 정확 일치
-  const exactAlias = candidates.filter((c) =>
+  return candidates.filter((c) =>
     (c.aliases || []).some(
       (alias) =>
         String(alias || "")
           .trim()
           .toLowerCase() === needle,
-    ),
-  );
-  if (exactAlias.length > 0) return exactAlias;
-
-  // 3순위: 부분 일치 (이름 또는 별칭 포함)
-  return candidates.filter((c) =>
-    (c.aliases || []).some((alias) =>
-      String(alias || "")
-        .trim()
-        .toLowerCase()
-        .includes(needle),
     ),
   );
 }
@@ -4822,21 +4811,13 @@ async function resolvePeerSender({
   deps = {},
 } = {}) {
   const detectCliFromEnv = () => {
-    if (
-      env.ANTIGRAVITY_CONVERSATION_ID ||
-      env.ANTIGRAVITY_AGENT === "1" ||
-      env.ANTIGRAVITY_CLI === "1"
-    ) {
+    if (env.ANTIGRAVITY_CONVERSATION_ID) {
       return "agy";
     }
-    if (env.CODEX_THREAD_ID || env.CODEX_CI) {
+    if (env.CODEX_THREAD_ID) {
       return "codex";
     }
-    if (
-      env.CLAUDE_PID ||
-      env.CLAUDECODE === "1" ||
-      deps.isLocalClaudeCaller?.(env)
-    ) {
+    if (env.CLAUDECODE === "1" || deps.isLocalClaudeCaller?.(env)) {
       return "claude";
     }
     return null;
@@ -4848,8 +4829,13 @@ async function resolvePeerSender({
     if (parsed.cli && parsed.query) {
       return { cli: parsed.cli, name: parsed.query };
     }
-    const inferredCli = detectCliFromEnv() || "claude";
-    return { cli: inferredCli, name: explicit };
+    let inferredCli = detectCliFromEnv();
+    if (!inferredCli && env.TMUX_PANE) {
+      const candidates = allCandidates || (await discoverPeerTargets({ deps }));
+      inferredCli =
+        candidates.find((c) => c.paneId === env.TMUX_PANE)?.cli || null;
+    }
+    return { cli: inferredCli || "unknown", name: explicit };
   }
 
   const candidates = allCandidates || (await discoverPeerTargets({ deps }));
@@ -4885,12 +4871,12 @@ async function resolvePeerSender({
   const senderName = await resolveSender(env);
   const envCli = detectCliFromEnv();
   if (senderName) {
-    return { cli: envCli || "claude", name: senderName };
+    return { cli: envCli || "unknown", name: senderName };
   }
   if (envCli) {
     return { cli: envCli, name: envCli };
   }
-  return { cli: "claude", name: "unknown" };
+  return { cli: "unknown", name: "unknown" };
 }
 
 function formatPeerSendMessage({
@@ -4977,12 +4963,7 @@ async function doSend(opts = {}, deps = {}) {
   });
 
   const callerIsClaude =
-    sender.cli === "claude" &&
-    (Boolean(opts.from) ||
-      Boolean(env.TFX_LIVE_FROM) ||
-      Boolean(env.CLAUDE_PID) ||
-      env.CLAUDECODE === "1" ||
-      Boolean(deps.isLocalClaudeCaller?.(env)));
+    env.CLAUDECODE === "1" || Boolean(deps.isLocalClaudeCaller?.(env));
 
   if (target.cli === "claude" && callerIsClaude && !opts.viaTmux) {
     return {
@@ -5075,9 +5056,8 @@ async function doSend(opts = {}, deps = {}) {
 }
 
 async function send(flags) {
-  const to = flags.to || flags.target || flags.session || "";
-  const message =
-    flags.message || flags.prompt || (flags._ || []).slice(1).join(" ");
+  const to = flags.to || "";
+  const message = flags.message || "";
   const result = await doSend({
     to,
     message,

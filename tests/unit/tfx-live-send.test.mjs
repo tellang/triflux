@@ -241,6 +241,31 @@ describe("tfx-live send", () => {
     assert.equal(askCalls.length, 0);
   });
 
+  it("rejects partial substring matches when neither name nor alias matches exactly", async () => {
+    const { askCalls, deps } = makeFakeDeps({
+      claudeSessions: [
+        {
+          name: "triflux-d9",
+          session: "triflux-sess",
+          target: "triflux-sess:0.1",
+        },
+      ],
+    });
+
+    const res = await doSend(
+      {
+        to: "triflux-d",
+        message: "ping",
+        from: "agy:caller",
+      },
+      deps,
+    );
+
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, "target-not-found");
+    assert.equal(askCalls.length, 0);
+  });
+
   it("blocks Claude-to-Claude on same machine with use-send-message", async () => {
     const { askCalls, deps } = makeFakeDeps({
       claudeSessions: [
@@ -254,7 +279,7 @@ describe("tfx-live send", () => {
       {
         to: "triflux-d9",
         message: "보고한다",
-        env: { CLAUDE_PID: "12345" },
+        env: { CLAUDECODE: "1" },
       },
       deps,
     );
@@ -287,7 +312,10 @@ describe("tfx-live send", () => {
         to: "claude:triflux-d9",
         message: "작업 완료",
         noWait: true,
-        env: { TMUX_PANE: "%140", ANTIGRAVITY_AGENT: "1" },
+        env: {
+          TMUX_PANE: "%140",
+          ANTIGRAVITY_CONVERSATION_ID: "conv-sender",
+        },
       },
       deps,
     );
@@ -300,6 +328,32 @@ describe("tfx-live send", () => {
     assert.equal(askCalls.length, 1);
     assert.equal(askCalls[0].adapter, ADAPTERS.claude);
     assert.equal(askCalls[0].opts.session, "triflux:0.1");
+  });
+
+  it("routes agy caller with prefix-less --from to Claude via tmux", async () => {
+    const { askCalls, deps } = makeFakeDeps({
+      claudeSessions: [
+        { name: "triflux-d9", session: "triflux", target: "triflux:0.1" },
+      ],
+    });
+
+    const res = await doSend(
+      {
+        to: "claude:triflux-d9",
+        message: "접두사 없는 발신",
+        from: "peer-worker",
+        noWait: true,
+        env: { ANTIGRAVITY_CONVERSATION_ID: "conv-sender" },
+      },
+      deps,
+    );
+
+    assert.equal(res.ok, true);
+    assert.equal(res.to.cli, "claude");
+    assert.deepEqual(res.from, { cli: "agy", name: "peer-worker" });
+    assert.equal(res.transport, "claude-tmux");
+    assert.equal(askCalls.length, 1);
+    assert.equal(askCalls[0].adapter, ADAPTERS.claude);
   });
 
   it("routes to agy by conversationId or session name", async () => {
