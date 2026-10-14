@@ -2933,6 +2933,17 @@ async function doStart(launchAdapter, opts) {
       nameApplied = false;
     }
   }
+  // SendMessage 주소는 pane 에 등록된 이름이라 등록까지 확인한다. 이름이 겹치면 SendMessage 가
+  // 보내지 않고 [ref] 를 고르라고 거부한다(Claude Code 2026-10-14 실측).
+  let registeredName = null;
+  if (adapter.cli === "claude" && !remote && nameApplied) {
+    const deadline = Date.now() + Math.min(readyTimeoutMs, 5000);
+    while (!registeredName && Date.now() < deadline) {
+      registeredName = (await claudeTmuxTarget(session))?.name ?? null;
+      if (!registeredName) await sleep(Math.min(pollIntervalMs, 200));
+    }
+    nameApplied = registeredName === name;
+  }
   const namePending = adapter.cli === "agy" && Boolean(name) && !nameApplied;
   if (namePending)
     await runTmux(null, ["set-option", "-t", session, "@tfx_agy_name", name]);
@@ -3023,9 +3034,7 @@ end tell`;
     nameGenerated: !resumed && opts.name === undefined,
     nameApplied,
     ...(adapter.cli === "codex" ? { threadId } : {}),
-    ...(adapter.cli === "claude" && !remote && name && nameApplied
-      ? { sendMessageTo: name }
-      : {}),
+    ...(registeredName ? { sendMessageTo: registeredName } : {}),
     ...(adapter.cli === "agy"
       ? { conversationId: conversation?.conversationId ?? null, namePending }
       : {}),
