@@ -161,6 +161,10 @@ test("iTerm opening script chooses project window and limits group splits", asyn
     /if splitDirection is "vertical" then\s+tell splitSession .*split vertically[^\n]*\s+else\s+tell splitSession .*split horizontally/,
   );
   assert.match(script, /set variable named "user.tfx_column" to newColumn/);
+  assert.match(
+    script,
+    /if unmarkedCount > 0 and leftCount \+ rightCount > 1 then\s+set leftCount to 0\s+set rightCount to 0/,
+  );
   assert.doesNotMatch(script, /columns of|tfx_split_side/);
   assert.match(
     script,

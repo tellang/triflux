@@ -2761,7 +2761,8 @@ async function openItermSession(session, group, project, deps = {}) {
     set targetWindow to leaderWindow
   end if
   -- 패인마다 열(L, R)을 표시하고 열별 개수로 나눌 곳을 정한다. 창 비율과 무관하게 1개에서 4개까지 2x2 가 되고,
-  -- 2x2 에서 하나를 닫은 뒤 다시 늘려도 빈 칸을 채운다. 표시가 없는 옛 패인은 L 로 본다.
+  -- 2x2 에서 하나를 닫은 뒤 다시 늘려도 빈 칸을 채운다. 표시가 없는 옛 패인은 혼자일 때만 L 로 보고,
+  -- 여럿이면 실제 열을 알 수 없어 그 탭을 나누지 않는다.
   set splitSession to missing value
   set splitDirection to ""
   set newColumn to "L"
@@ -2771,11 +2772,12 @@ async function openItermSession(session, group, project, deps = {}) {
       set rightSession to missing value
       set leftCount to 0
       set rightCount to 0
+      set unmarkedCount to 0
       repeat with candidateSession in sessions of candidateTab
         try
           tell candidateSession to set candidateGroup to variable named "user.tfx_group"
           if candidateGroup is ${groupLiteral} then
-            set candidateColumn to "L"
+            set candidateColumn to ""
             try
               tell candidateSession to set candidateColumn to variable named "user.tfx_column"
             end try
@@ -2783,13 +2785,19 @@ async function openItermSession(session, group, project, deps = {}) {
               set rightCount to rightCount + 1
               set rightSession to candidateSession
             else
+              if candidateColumn is not "L" then set unmarkedCount to unmarkedCount + 1
               set leftCount to leftCount + 1
               set leftSession to candidateSession
-              tell candidateSession to set variable named "user.tfx_column" to "L"
             end if
           end if
         end try
       end repeat
+      if unmarkedCount > 0 and leftCount + rightCount > 1 then
+        set leftCount to 0
+        set rightCount to 0
+      else if unmarkedCount > 0 then
+        tell leftSession to set variable named "user.tfx_column" to "L"
+      end if
       if leftCount + rightCount > 0 then
         if rightCount is 0 then
           set splitSession to leftSession
