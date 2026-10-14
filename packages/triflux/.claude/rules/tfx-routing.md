@@ -92,9 +92,9 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 
 | 우선순위 | CLI / 모델 | default 적용 lane |
 |---------|-----------|-------------------|
-| 1차 (default) | **Codex** (프로필 설정 기준) | 구현, 수정, 디버그, 리뷰, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
+| 1차 (default) | **Codex** (프로필 설정 기준) | 구현, 수정, 디버그, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
 | 2차 | **Antigravity** | Codex quota exhaust, 가독성 cross-check, 별도 시각 검토 |
-| 한정 (Claude 만) | **Claude** (`opus` 최신 tier 별칭) | 메타 라우팅 (`/tfx-harness`), planning gate (`/gstack-office-hours`, `/gstack-autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack-qa`), 또는 Codex/Antigravity 미가용 |
+| 한정 (Claude 만) | **Claude** (`opus` 최신 tier 별칭) | 메타 라우팅 (`/tfx-harness`), planning gate (`/gstack-office-hours`, `/gstack-autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack-qa`), 작성 벤더별 교차 리뷰, 또는 Codex/Antigravity 미가용 |
 
 `tfx-auto`, `tfx-review`, `tfx-research` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli codex`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
 
@@ -102,23 +102,25 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 
 ### 모델 배치
 
-> 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0038](../../docs/adr/0038-agy-default-argon-family.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
+> 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0038](../../docs/_archive/adr/0038-agy-default-argon-family.md), [ADR-0039](../../docs/adr/0039-review-by-author-vendor.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
 
 Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고, `scripts/lib/model-family-resolver.mjs`가 관리 파일 `~/.codex/<프로필>.config.toml`의 모델 ID를 갱신한다. `designer`, `writer`, `document-specialist` 항목은 직접 Codex를 지정한 경우에만 적용하며 일반 실행의 provider는 `hub/team/agent-map.json`이 정한다. 입력이 큰 코드베이스 읽기는 antigravity 로 보낸다(Argon 은 입출력 공유 1M 문맥).
 
 | 프로필 | triflux lane |
 |---------|--------------|
-| `astra_xhigh` | architect, planner, critic, analyst, debugger, deep-executor, security-reviewer, scientist-deep, designer(직접 지정) |
+| `astra_xhigh` | architect, planner, critic, analyst, debugger, deep-executor, security-reviewer(직접 Codex 지정), scientist-deep, designer(직접 지정) |
 | `astra_max` / `astra_ultra` | `TFX_CODEX_PROFILE=max/ultra`, 재시도 1단계 |
-| `sol_high` | executor, codex, code-reviewer, quality-reviewer, verifier, test-engineer, qa-tester, scientist, document-specialist |
+| `sol_high` | executor, codex, code-reviewer·quality-reviewer(Claude 작성 코드 또는 사용량 전환), verifier, test-engineer, qa-tester, scientist, document-specialist |
 | `sol_med` | cleanup, deslop |
 | `luna_high` | build-fixer, writer(직접 지정) |
 | `luna_low` | spark, explore 재매핑, ChatGPT tier 폴백 |
-| `argon_low` / `argon` / `argon_high` | Antigravity 분류·요약 / 생성·작성 / 검토·설계 |
+| `argon_low` / `argon` / `argon_high` | Antigravity 분류·요약 / 생성·작성 / security-reviewer·검토·설계 |
 | `fable` | `--retry auto-escalate` 최종 단계 |
-| `opus` | 메타 라우팅, planning gate, 스킬의 `model="opus"` lane |
-| `sonnet` | Claude native test-engineer, qa-tester, verifier |
-| `haiku` | Claude native explore, claude |
+| `opus` | 메타 라우팅, planning gate, Codex·Argon 작성 코드의 code-reviewer·quality-reviewer |
+| `sonnet` | Claude native test-engineer, qa-tester |
+| `haiku` | Claude 리드 native explore, claude |
+
+`code-reviewer`와 `quality-reviewer`는 `TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 작성 벤더를 받아 다른 벤더로 리뷰한다. 미지정이면 기본 구현자인 Codex로 보고, 잘못된 값은 오류로 끝낸다. Codex 작성 코드는 Claude Opus로, Claude 작성 코드는 Codex `sol_high`의 `review`로, Argon 작성 코드는 Claude Opus로 보낸다. `~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`가 80 이상이면 Codex 작성 코드의 리뷰를 Argon High로, Argon 작성 코드의 리뷰를 Codex Sol로 전환한다. 캐시를 읽지 못하면 한도 미만으로 본다. `security-reviewer`는 `argon_high`를 쓴다. 명시 CLI 선택의 우선순위는 유지한다. 리드별 verifier와 explore 배치는 `skills/tfx-lead/SKILL.md`를 따른다.
 
 Codex는 `models_cache.json`의 공개 모델 중 effort를 지원하는 후보를 숫자 버전순으로 고른다. 캐시가 없으면 `codex debug models`를 읽는다. agy는 `agy models`의 Argon 목록을 하루 동안 캐시한다. setup과 update도 같은 해석기를 쓴다. Flash와 Pro는 자동 선택하지 않고, 옛 `flash*` 프로필 이름은 `argon_low`로 보낸다.
 

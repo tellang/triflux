@@ -1,8 +1,9 @@
 // hub/team/pane.mjs — pane별 CLI 실행 + stdin 주입
 // 의존성: child_process, fs, os, path (Node.js 내장)만 사용
-import { unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { privateTmpDir } from "@triflux/core/hub/lib/private-tmp.mjs";
 import { psmuxExec } from "./psmux.mjs";
 import { detectMultiplexer, tmuxExec } from "./session.mjs";
@@ -56,7 +57,32 @@ export function resolveCli(cli) {
  * @param {string} cli: CLI 이름, 별칭(agy) 또는 역할명
  * @returns {string} 실행할 셸 커맨드
  */
-export function buildCliCommand(cli) {
+export function buildCliCommand(cli, prompt) {
+  if (["code-reviewer", "quality-reviewer"].includes(cli)) {
+    // 작성 벤더 선택은 라우터에 맡기고 프롬프트가 준비된 뒤 실행한다.
+    if (prompt === undefined) return "";
+    const routeScript = [
+      process.env.TFX_ROUTE_SCRIPT,
+      process.env.TFX_DELEGATOR_ROUTE_SCRIPT,
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        "../../scripts/tfx-route.sh",
+      ),
+      join(process.env.HOME || "", ".claude/scripts/tfx-route.sh"),
+    ].find((path) => path && existsSync(path));
+    if (!routeScript) throw new Error("tfx-route.sh 를 찾지 못했다.");
+    const quote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
+    const reviewEnv = ["TFX_REVIEW_AUTHOR", "TFX_CLI_MODE"]
+      .filter((key) => process.env[key] !== undefined)
+      .map((key) => `${key}=${quote(process.env[key])} `)
+      .join("");
+    const script = `${reviewEnv}bash ${quote(routeScript.replace(/\\/g, "/"))} ${quote(cli)} ${quote(prompt)} review < /dev/null`;
+    const quotedScript =
+      process.platform === "win32"
+        ? `'${script.replace(/'/g, "''")}'`
+        : quote(script);
+    return `bash -lc ${quotedScript}`;
+  }
   switch (resolveCli(cli)) {
     case "codex":
       return "codex --dangerously-bypass-approvals-and-sandbox";
@@ -78,7 +104,7 @@ export function buildCliCommand(cli) {
  */
 export function startCliInPane(target, command) {
   // CLI 시작도 buffer paste를 재사용해 셸/플랫폼별 quoting 차이를 제거한다.
-  injectPrompt(target, command);
+  if (command) injectPrompt(target, command);
 }
 
 /**
@@ -247,6 +273,11 @@ export function injectPrompt(
   prompt,
   { useFileRef = false, cli = null } = {},
 ) {
+  if (["code-reviewer", "quality-reviewer"].includes(cli)) {
+    prompt = buildCliCommand(cli, prompt);
+    cli = null;
+    useFileRef = false;
+  }
   const tmpDir = privateTmpDir("tfx-multi");
 
   const safeTarget = target.replace(/[:.]/g, "-");

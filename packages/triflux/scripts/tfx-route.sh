@@ -955,7 +955,7 @@ route_agent() {
   local normalized_profile _policy_mcp
   IFS=$'\x1e' read -r CLI_TYPE CODEX_POLICY_PROFILE CODEX_POLICY_TIMEOUT \
     _policy_mcp CODEX_POLICY_SUBCOMMAND normalized_profile CODEX_OVERRIDE_PROFILE GEMINI_PROFILE \
-    ROLE_EXPECTED_DURATION NATIVE_CODEX_ALLOWED <<< "$policy_row"
+    ROLE_EXPECTED_DURATION NATIVE_CODEX_ALLOWED REVIEW_AUTHOR REVIEW_USAGE_SWITCH <<< "$policy_row"
   if [[ "$normalized_profile" != "$TFX_CODEX_PROFILE" ]]; then
     echo "[tfx-route] legacy Codex profile remapped: ${TFX_CODEX_PROFILE} -> ${normalized_profile}" >&2
   fi
@@ -966,8 +966,13 @@ route_agent() {
       CLI_CMD="agy"; CLI_ARGS="--print --dangerously-skip-permissions"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900 ;;
     claude)
-      CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600 ;;
+      if [[ -n "$REVIEW_AUTHOR" ]]; then
+        CLI_CMD="claude"; CLI_ARGS=""
+        CLI_EFFORT="high"; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
+      else
+        CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
+        CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600
+      fi ;;
   esac
 }
 
@@ -1073,12 +1078,12 @@ esac
 apply_cli_mode() {
   case "$TFX_CLI_MODE" in
     codex)
-      if [[ "$CLI_TYPE" == "antigravity" ]]; then
+      if [[ "$CLI_TYPE" == "antigravity" || ( "$CLI_TYPE" == "claude" && -n "$REVIEW_AUTHOR" ) ]]; then
         apply_codex_agent_policy
         echo "[tfx-route] TFX_CLI_MODE=codex: $AGENT_TYPE → codex($CLI_EFFORT)로 리매핑" >&2
       fi ;;
     antigravity)
-      if [[ "$CLI_TYPE" != "claude-native" && "$CLI_TYPE" != "claude" ]]; then
+      if [[ "$CLI_TYPE" != "claude-native" && ( "$CLI_TYPE" != "claude" || -n "$REVIEW_AUTHOR" ) ]]; then
         CLI_TYPE="antigravity"
         CLI_CMD="agy"
         CLI_ARGS="--print --dangerously-skip-permissions"
@@ -1086,7 +1091,14 @@ apply_cli_mode() {
         DEFAULT_TIMEOUT=900
         echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE → antigravity($CLI_EFFORT)로 리매핑" >&2
       fi ;;
+    claude)
+      if [[ -n "$REVIEW_AUTHOR" ]]; then
+        CLI_TYPE="claude"; CLI_CMD="claude"; CLI_ARGS=""
+        CLI_EFFORT="high"; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
+      fi ;;
     auto)
+      # 리뷰의 가용성 폴백은 작성 벤더를 제외하는 최종 정책에서 처리한다.
+      [[ -z "$REVIEW_AUTHOR" ]] || return 0
       # Issue #281: JS layer is the single source of truth for auto router
       # Shell auto mode normalizes CLI availability; JS selects single/multi.
       if [[ "$CLI_TYPE" == "codex" ]] && ! codex_is_available; then
@@ -1124,6 +1136,9 @@ is_cli_available() {
       [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] \
         && agy_supports_headless "${AGY_BIN:-agy}"
       ;;
+    claude)
+      command -v "$CLAUDE_BIN" >/dev/null 2>&1
+      ;;
     *)
       return 1
       ;;
@@ -1132,6 +1147,23 @@ is_cli_available() {
 
 apply_cli_disable_policy() {
   local selected="$CLI_TYPE"
+  if [[ -n "$REVIEW_AUTHOR" ]]; then
+    if ! is_cli_disabled "$selected" && is_cli_available "$selected"; then
+      return 0
+    fi
+    local candidate
+    for candidate in claude codex antigravity; do
+      [[ "$candidate" != "$REVIEW_AUTHOR" && "$candidate" != "$selected" ]] || continue
+      if ! is_cli_disabled "$candidate" && is_cli_available "$candidate"; then
+        echo "[tfx-route] ${selected} -> ${candidate} 리뷰 fallback (작성 벤더 ${REVIEW_AUTHOR} 제외)" >&2
+        TFX_CLI_MODE="$candidate"
+        apply_cli_mode
+        return 0
+      fi
+    done
+    echo "ERROR: 작성 벤더 ${REVIEW_AUTHOR}를 제외하면 허용되고 사용 가능한 리뷰 CLI가 없습니다." >&2
+    return 78
+  fi
   [[ "$selected" == "codex" || "$selected" == "antigravity" ]] || return 0
 
   local blocked_reason=""
@@ -1476,6 +1508,7 @@ resolve_mcp_policy() {
 get_claude_model() {
   case "$AGENT_TYPE" in
     explore) echo "haiku" ;;
+    code-reviewer|quality-reviewer) echo "opus" ;;
     *) echo "sonnet" ;;
   esac
 }
@@ -2240,6 +2273,9 @@ FALLBACK_EOF
 
   # 메타정보 (stderr)
   echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT expected=${TIMEOUT_SEC}s stall=${STALL_THRESHOLD_SEC}s ceiling=${HARD_CEILING_SEC}s" >&2
+  if [[ -n "$REVIEW_AUTHOR" ]]; then
+    echo "[tfx-route] reviewer=$CLI_TYPE review_author=$REVIEW_AUTHOR usage_switch=$REVIEW_USAGE_SWITCH cli_mode=$TFX_CLI_MODE" >&2
+  fi
   echo "[tfx-route] mcp_profile=$MCP_PROFILE resolved_profile=$MCP_RESOLVED_PROFILE verifier_override=$TFX_VERIFIER_OVERRIDE" >&2
   if [[ ${#ALLOWED_MCP_SERVERS[@]} -gt 0 ]]; then
     echo "[tfx-route] allowed_mcp_servers=$(IFS=,; echo "${ALLOWED_MCP_SERVERS[*]}")" >&2
@@ -2350,7 +2386,11 @@ FALLBACK_EOF
     [ -n "$claude_effort" ] && claude_worker_args+=("--effort" "$claude_effort")
 
     run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?
-    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
+    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 && -n "$REVIEW_AUTHOR" ]]; then
+      # 리뷰는 판정이 결과라 native 안내로 바꾸면 리뷰 없이 성공으로 보인다. 실패로 남긴다.
+      echo "[tfx-route] Claude 리뷰 워커 실패(exit=${exit_code}). 리뷰가 실행되지 않았다." >&2
+      [[ -f "$STDERR_LOG" ]] && tail -c 2048 "$STDERR_LOG" >&2
+    elif [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
       local claude_stderr_bytes=0
       [[ -f "$STDERR_LOG" ]] && claude_stderr_bytes=$(wc -c < "$STDERR_LOG" 2>/dev/null | tr -d ' ')
       echo "[tfx-route] Claude stream wrapper 실패(exit=${exit_code}, stderr=${claude_stderr_bytes}B). native metadata로 fallback합니다." >&2

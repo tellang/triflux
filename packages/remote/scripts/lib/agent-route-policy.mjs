@@ -1,6 +1,8 @@
 // Canonical Codex role policy. Concrete model IDs stay in profile config files.
 
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   normalizeCodexProfileName,
@@ -298,6 +300,7 @@ const NATIVE_CODEX_AGENTS = new Set([
   "test-engineer",
   "qa-tester",
 ]);
+const CLAUDE_REVIEW_USAGE_THRESHOLD = 80;
 
 function resolveDirectCodexRoutePolicy(agent) {
   if (agent === "explore") {
@@ -315,6 +318,7 @@ export function resolveAgentRoute(
   profileOverride = "auto",
   nested = false,
   geminiProfileResolver = resolveGeminiProfileForPurpose,
+  { reviewAuthor = "codex", weeklyPercent = 0 } = {},
 ) {
   if (!/^[A-Za-z0-9_.-]+$/.test(agent)) {
     throw new Error(`invalid agent: ${agent}`);
@@ -324,9 +328,26 @@ export function resolveAgentRoute(
       `알 수 없는 에이전트 타입: ${agent}; available: ${Object.keys(map).join(", ")}`,
     );
   }
-  const provider = map[agent];
+  let provider = map[agent];
   if (!["codex", "antigravity", "claude"].includes(provider)) {
     throw new Error(`invalid provider for ${agent}: ${provider}`);
+  }
+  const byAuthor = agent === "code-reviewer" || agent === "quality-reviewer";
+  let usageSwitch = false;
+  if (byAuthor) {
+    if (!["codex", "claude", "antigravity"].includes(reviewAuthor)) {
+      throw new Error(
+        `TFX_REVIEW_AUTHOR 값이 유효하지 않습니다: ${reviewAuthor}`,
+      );
+    }
+    usageSwitch =
+      reviewAuthor !== "claude" &&
+      Number.isFinite(weeklyPercent) &&
+      weeklyPercent >= CLAUDE_REVIEW_USAGE_THRESHOLD;
+    if (reviewAuthor === "claude") provider = "codex";
+    else if (usageSwitch)
+      provider = reviewAuthor === "codex" ? "antigravity" : "codex";
+    else provider = "claude";
   }
   const policy = resolveDirectCodexRoutePolicy(agent);
   const normalizedOverride = normalizeCodexProfileName(profileOverride);
@@ -354,6 +375,8 @@ export function resolveAgentRoute(
     geminiProfileResolver(agent),
     EXPECTED_DURATION_BY_AGENT[agent] ?? 30,
     NATIVE_CODEX_AGENTS.has(agent),
+    byAuthor ? reviewAuthor : "",
+    usageSwitch,
   ];
 }
 
@@ -402,6 +425,23 @@ async function runCli() {
   if (format === "route") {
     if (!mapFile) throw new Error("--map-file is required for route format");
     const map = JSON.parse(readFileSync(mapFile, "utf8"));
+    let weeklyPercent = 0;
+    if (agent === "code-reviewer" || agent === "quality-reviewer") {
+      try {
+        const data = JSON.parse(
+          readFileSync(
+            join(homedir(), ".claude/cache/claude-usage-cache.json"),
+            "utf8",
+          ),
+        ).data;
+        weeklyPercent =
+          Date.parse(data?.weeklyResetsAt) <= Date.now()
+            ? 0
+            : data?.weeklyPercent;
+      } catch {
+        // 사용량을 읽지 못하면 한도 미만으로 취급한다.
+      }
+    }
     let resolver = resolveGeminiProfileForPurpose;
     if (geminiProfilesModule) {
       try {
@@ -418,9 +458,10 @@ async function runCli() {
       }
     }
     process.stdout.write(
-      resolveAgentRoute(agent, map, profileOverride, nested, resolver).join(
-        "\x1e",
-      ),
+      resolveAgentRoute(agent, map, profileOverride, nested, resolver, {
+        reviewAuthor: process.env.TFX_REVIEW_AUTHOR ?? "codex",
+        weeklyPercent,
+      }).join("\x1e"),
     );
     return;
   }

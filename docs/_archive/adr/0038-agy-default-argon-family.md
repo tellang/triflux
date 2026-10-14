@@ -1,11 +1,11 @@
 ---
 id: 0038
 title: Antigravity를 Argon으로 바꾸고 역할 배정을 다시 정한다
-status: accepted
+status: superseded
 date: 2026-10-14
 deciders: [tellang]
 supersedes: []
-superseded_by: null
+superseded_by: 0039
 relates: [0037]
 pr: null
 ---

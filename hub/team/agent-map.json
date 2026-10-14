@@ -10,7 +10,7 @@
   "critic": "codex",
   "analyst": "codex",
   "code-reviewer": "codex",
-  "security-reviewer": "codex",
+  "security-reviewer": "antigravity",
   "quality-reviewer": "codex",
   "scientist": "codex",
   "scientist-deep": "codex",

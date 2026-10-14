@@ -24,6 +24,11 @@ describe("pane.mjs", () => {
     assert.equal(fileRef("executor"), false);
     assert.equal(fileRef("designer"), true);
   });
+
+  it("리뷰 역할은 프롬프트 준비 전 CLI를 시작하지 않는다", () => {
+    assert.equal(buildCliCommand("code-reviewer"), "");
+    assert.equal(buildCliCommand("quality-reviewer"), "");
+  });
 });
 
 describe("Antigravity prompt submission", () => {
