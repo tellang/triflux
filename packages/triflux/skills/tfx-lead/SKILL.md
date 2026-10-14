@@ -137,7 +137,7 @@ tfx-live wait --cli claude --short <8hex> --request-id <requestId> --timeout 600
 
 ## 6. 교차 리뷰와 머지
 
-작성 벤더와 다른 벤더가 `code-reviewer`, `quality-reviewer`로 리뷰한다. 작성 벤더를 `TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 지정하라. 미지정이면 Codex로 보고 잘못된 값은 오류로 끝낸다.
+작성 벤더와 다른 벤더가 `code-reviewer`, `quality-reviewer`로 리뷰한다. 작성 벤더를 `TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 지정한다. 미지정이면 Codex로 보고 잘못된 값은 오류로 끝낸다.
 
 | 작성 벤더 | 기본 리뷰 | Claude 주간 사용량 80% 이상 |
 | --- | --- | --- |
@@ -145,7 +145,7 @@ tfx-live wait --cli claude --short <8hex> --request-id <requestId> --timeout 600
 | Claude | Codex Sol `sol_high` review | Codex Sol `sol_high` review |
 | Antigravity | Claude Opus | Codex Sol `sol_high` review |
 
-사용량은 `~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`를 읽는다. 없거나 읽을 수 없으면 한도 미만으로 본다. Claude 리뷰는 `tfx-route.sh`의 Claude 워커 경로와 `--model opus`를 쓴다. 명시 CLI 선택의 기존 우선순위는 유지한다. verifier의 증거 확인과 코드 리뷰의 승인을 구분하라.
+사용량은 `~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`를 읽는다. 없거나 읽을 수 없으면 한도 미만으로 본다. Claude 리뷰는 `tfx-route.sh`의 Claude 워커 경로와 `--model opus`를 쓴다. 명시 CLI 선택의 기존 우선순위는 유지한다. verifier의 증거 확인과 코드 리뷰의 승인은 구분한다.
 
 - 머지 조건은 CI 통과와 교차 리뷰 통과, 둘 다다.
 - 리뷰에서 사실 오류가 나오면 처음 작성자에게 되돌려 고친다. 같은 리뷰어가 재확인한다.
