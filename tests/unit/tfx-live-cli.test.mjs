@@ -3666,3 +3666,40 @@ test("resume --last thread 는 띄운 뒤 resume 기록이 하나일 때만 인�
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("a Claude caller is sent to SendMessage for a named local Claude session", async () => {
+  const flags = { cli: "claude", session: "cl1", prompt: "인계 파일을 읽어라" };
+  const opts = { session: "cl1", prompt: flags.prompt };
+  const deps = {
+    env: { CLAUDECODE: "1" },
+    claudeTmuxTarget: async () => ({ name: "10.14 승계 리드" }),
+  };
+  const redirect = await tfxLive.sameMachineClaudeRedirect(
+    ADAPTERS.claude,
+    opts,
+    flags,
+    deps,
+  );
+  assert.equal(redirect.reason, "use-send-message");
+  assert.equal(redirect.sendMessageTo, "10.14 승계 리드");
+  assert.equal(redirect.inputSent, false);
+  for (const [why, args] of [
+    ["not a Claude caller", [opts, flags, { ...deps, env: {} }]],
+    ["--via-tmux", [opts, { ...flags, "via-tmux": true }, deps]],
+    ["remote", [opts, { ...flags, remote: "m2" }, deps]],
+    ["slash command", [{ ...opts, prompt: "/compact" }, flags, deps]],
+    [
+      "unnamed session",
+      [opts, flags, { ...deps, claudeTmuxTarget: async () => ({ name: "" }) }],
+    ],
+  ])
+    assert.equal(
+      await tfxLive.sameMachineClaudeRedirect(ADAPTERS.claude, ...args),
+      null,
+      why,
+    );
+  assert.equal(
+    await tfxLive.sameMachineClaudeRedirect(ADAPTERS.codex, opts, flags, deps),
+    null,
+  );
+});
