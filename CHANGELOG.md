@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.73.0] - 2026-10-14
+
+### Added
+- route: agy 가 `Quota pool exhausted ... Resets in N` 으로 거부하면 리셋 시각을 기록하고 그 실행을 `TFX_ANTIGRAVITY_FALLBACK` 대상(기본 Codex, 설정 시 Claude)으로 바로 다시 돌린다. 리셋 전에는 agy 를 건너뛰고, 리셋 시각이 지나면 저절로 agy 로 돌아온다. 기기 프로필에 `TFX_DISABLE_ANTIGRAVITY=1` 을 손으로 넣을 필요가 없다 (#780)
+
 ## [10.72.0] - 2026-10-14
 
 ### Added
