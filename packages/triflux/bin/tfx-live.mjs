@@ -548,7 +548,8 @@ async function waitAgy({
     for (;;) {
       const visible = await captureVisible(null, session);
       const verdict = agyWaitVerdict(query.all(), requestId, visible);
-      const timedOut = !verdict.done && Date.now() >= deadline;
+      const settled = verdict.done || verdict.status === "failed";
+      const timedOut = !settled && Date.now() >= deadline;
       const result = {
         ok: true,
         cli: "agy",
@@ -558,8 +559,7 @@ async function waitAgy({
         conversationId: conversation.conversationId,
         session,
       };
-      if (verdict.done || verdict.status === "failed" || timedOut)
-        return result;
+      if (settled || timedOut) return result;
       await sleep(Math.min(pollIntervalMs, deadline - Date.now()));
     }
   } finally {
