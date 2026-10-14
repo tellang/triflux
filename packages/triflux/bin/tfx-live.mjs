@@ -19,7 +19,12 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join as pathJoin, resolve as pathResolve } from "node:path";
+import {
+  basename,
+  dirname,
+  join as pathJoin,
+  resolve as pathResolve,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
@@ -132,7 +137,7 @@ function usage(command) {
     "    Claude and agy list-sessions support local tmux only; --transport uds requires --cli codex.",
     "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
     "  tfx-live goal-driven --session NAME --goal TEXT [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500] [--max-rounds 8] [--done-token DONE]",
-    "  tfx-live peer [--cli-a codex] [--cli-b claude] [--cli-c CLI] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--model-c ID] [--effort-c TIER] [--session-a NAME[:WINDOW.PANE]] [--session-b NAME[:WINDOW.PANE]] [--session-c NAME[:WINDOW.PANE]] [--attach-a] [--attach-b] [--attach-c] [--transport-a tmux|queue|uds|auto] [--transport-b tmux|queue|uds|auto] [--transport-c tmux|queue|uds|auto] [--short-a SHORT] [--short-b SHORT] [--short-c SHORT] [--session-id-a ID] [--session-id-b ID] [--session-id-c ID] [--thread-a ID|auto] [--thread-b ID|auto] [--thread-c ID|auto] [--codex-socket-a PATH|default] [--codex-socket-b PATH|default] [--codex-socket-c PATH|default] [--bridge ABS] [--bridge-c ABS] [--remote HOST] [--cwd DIR] [--if-busy wait|fail] [--if-busy-a POLICY] [--if-busy-b POLICY] [--if-busy-c POLICY] [--busy-timeout 60] [--max-turn SECONDS] [--rounds 4] [--mode counting|freeform|debate] [--seed TEXT] [--timeout 60] [--via relay|message] [--report-to NAME]",
+    "  tfx-live peer [--group NAME] [--cli-a codex] [--cli-b claude] [--cli-c CLI] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--model-c ID] [--effort-c TIER] [--session-a NAME[:WINDOW.PANE]] [--session-b NAME[:WINDOW.PANE]] [--session-c NAME[:WINDOW.PANE]] [--attach-a] [--attach-b] [--attach-c] [--transport-a tmux|queue|uds|auto] [--transport-b tmux|queue|uds|auto] [--transport-c tmux|queue|uds|auto] [--short-a SHORT] [--short-b SHORT] [--short-c SHORT] [--session-id-a ID] [--session-id-b ID] [--session-id-c ID] [--thread-a ID|auto] [--thread-b ID|auto] [--thread-c ID|auto] [--codex-socket-a PATH|default] [--codex-socket-b PATH|default] [--codex-socket-c PATH|default] [--bridge ABS] [--bridge-c ABS] [--remote HOST] [--cwd DIR] [--if-busy wait|fail] [--if-busy-a POLICY] [--if-busy-b POLICY] [--if-busy-c POLICY] [--busy-timeout 60] [--max-turn SECONDS] [--rounds 4] [--mode counting|freeform|debate] [--seed TEXT] [--timeout 60] [--via relay|message] [--report-to NAME]",
     "    --via message (Claude x Claude): sends each side the other's session name once, then they talk with SendMessage; reports to --report-to or the calling Claude session.",
     "    Codex TUI may use a shared app-server daemon. UDS ask resumes the thread to receive answer events; sending to an active thread with --if-busy steer merges input into that turn.",
   ];
@@ -2642,18 +2647,52 @@ function shouldUseIterm(
   );
 }
 
-async function openItermSession(session, group) {
+async function itermProject(cwd = process.cwd(), deps = {}) {
+  const exec = deps.execFile ?? execFileAsync;
+  const directory = realpathSync(cwd);
+  let commonPath;
+  try {
+    const { stdout } = await exec(
+      "git",
+      ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+      { cwd: directory, timeout: 2000, env: { ...process.env, LC_ALL: "C" } },
+    );
+    commonPath = stdout.trim();
+  } catch (error) {
+    if (error.code !== 128 || !error.stderr?.includes("not a git repository"))
+      throw error;
+    return { key: directory, name: basename(directory) };
+  }
+  const commonDir = realpathSync(commonPath);
+  const { stdout } = await exec(
+    "git",
+    ["rev-parse", "--path-format=absolute", "--git-dir", "--show-toplevel"],
+    { cwd: directory, timeout: 2000 },
+  );
+  const [gitDir, top] = stdout
+    .trim()
+    .split("\n")
+    .map((path) => realpathSync(path));
+  return {
+    key: commonDir,
+    name: basename(commonDir === gitDir ? top : dirname(commonDir)),
+  };
+}
+
+async function openItermSession(session, group, project, deps = {}) {
+  const exec = deps.execFile ?? execFileAsync;
+  const tmux = deps.runTmux ?? runTmux;
+  const env = deps.env ?? process.env;
+  const projectLiteral = appleScriptString(project.key);
   const groupLiteral = appleScriptString(group);
   const sessionLiteral = appleScriptString(session);
-  const leaderId = appleScriptString(
-    process.env.ITERM_SESSION_ID?.split(":")[1] ?? "",
-  );
+  const leaderId = appleScriptString(env.ITERM_SESSION_ID?.split(":")[1] ?? "");
   // tmux 안의 리드는 ITERM_SESSION_ID 가 tmux 를 처음 띄운 터미널 값이라, 지금 붙어 있는 클라이언트 tty 로 창을 찾는다.
-  const clients = process.env.TMUX_PANE
-    ? await runTmux(null, [
+  const clients = env.TMUX_PANE
+    ? await tmux(null, [
         "list-clients",
         "-t",
-        process.env.TMUX_PANE,
+        env.TMUX_PANE,
         "-F",
         "#{client_activity} #{client_tty}",
       ]).catch(() => ({ stdout: "" }))
@@ -2666,7 +2705,7 @@ async function openItermSession(session, group) {
       .map((line) => line.split(" "))
       .sort((a, b) => Number(b[0]) - Number(a[0]))[0]?.[1] ?? "",
   );
-  const { stdout: tmuxPath } = await execFileAsync("which", ["tmux"], {
+  const { stdout: tmuxPath } = await exec("which", ["tmux"], {
     timeout: 2000,
   });
   const command = appleScriptString(
@@ -2675,9 +2714,14 @@ async function openItermSession(session, group) {
   const script = `tell application "iTerm2"
   set ttyWindow to missing value
   set idWindow to missing value
+  set projectWindow to missing value
   repeat with candidateWindow in windows
     repeat with candidateTab in tabs of candidateWindow
       repeat with candidateSession in sessions of candidateTab
+        try
+          tell candidateSession to set candidateProject to variable named "user.tfx_project"
+          if candidateProject is ${projectLiteral} and projectWindow is missing value then set projectWindow to candidateWindow
+        end try
         if ${leaderTty} is not "" and tty of candidateSession is ${leaderTty} then set ttyWindow to candidateWindow
         if ${leaderId} is not "" and id of candidateSession is ${leaderId} then set idWindow to candidateWindow
       end repeat
@@ -2691,33 +2735,112 @@ async function openItermSession(session, group) {
   else
     return ""
   end if
-  set groupSession to missing value
-  repeat with candidateTab in tabs of leaderWindow
-    repeat with candidateSession in sessions of candidateTab
-      try
-        tell candidateSession to set candidateGroup to variable named "user.tfx_group"
-        if candidateGroup is ${groupLiteral} then
-          set groupSession to candidateSession
-          exit repeat
-        end if
-      end try
-    end repeat
-    if groupSession is not missing value then exit repeat
-  end repeat
-  set didSplit to groupSession is not missing value
-  if didSplit then
-    tell groupSession to set newSession to split vertically with default profile command ${command}
+  if projectWindow is not missing value then
+    set targetWindow to projectWindow
   else
-    tell leaderWindow to set newTab to create tab with default profile command ${command}
+    set leaderHasOtherProject to false
+    repeat with candidateTab in tabs of leaderWindow
+      repeat with candidateSession in sessions of candidateTab
+        try
+          tell candidateSession to set candidateProject to variable named "user.tfx_project"
+          if candidateProject is not "" and candidateProject is not missing value and candidateProject is not ${projectLiteral} then set leaderHasOtherProject to true
+        end try
+      end repeat
+    end repeat
+    if leaderHasOtherProject then
+      set targetWindow to create window with default profile command ${command}
+      set newSession to current session of current tab of targetWindow
+      tell newSession
+        set variable named "user.tfx_project" to ${projectLiteral}
+        set variable named "user.tfx_group" to ${groupLiteral}
+        set variable named "user.tfx_session" to ${sessionLiteral}
+        set variable named "user.tfx_column" to "L"
+      end tell
+      return (id of newSession) & linefeed & "false"
+    end if
+    set targetWindow to leaderWindow
+  end if
+  -- 패인마다 열(L, R)을 표시하고 열별 개수로 나눌 곳을 정한다. 창 비율과 무관하게 1개에서 4개까지 2x2 가 되고,
+  -- 2x2 에서 하나를 닫은 뒤 다시 늘려도 빈 칸을 채운다. 표시가 없는 옛 패인은 혼자일 때만 L 로 보고,
+  -- 여럿이면 실제 열을 알 수 없어 그 탭을 나누지 않는다.
+  set splitSession to missing value
+  set splitDirection to ""
+  set newColumn to "L"
+  repeat with candidateTab in tabs of targetWindow
+    if (count of sessions of candidateTab) < 4 then
+      set leftSession to missing value
+      set rightSession to missing value
+      set leftCount to 0
+      set rightCount to 0
+      set unmarkedCount to 0
+      repeat with candidateSession in sessions of candidateTab
+        try
+          tell candidateSession to set candidateGroup to variable named "user.tfx_group"
+          if candidateGroup is ${groupLiteral} then
+            set candidateColumn to ""
+            try
+              tell candidateSession to set candidateColumn to variable named "user.tfx_column"
+            end try
+            if candidateColumn is "R" then
+              set rightCount to rightCount + 1
+              set rightSession to candidateSession
+            else
+              if candidateColumn is not "L" then set unmarkedCount to unmarkedCount + 1
+              set leftCount to leftCount + 1
+              set leftSession to candidateSession
+            end if
+          end if
+        end try
+      end repeat
+      if unmarkedCount > 0 and leftCount + rightCount > 1 then
+        set leftCount to 0
+        set rightCount to 0
+      else if unmarkedCount > 0 then
+        tell leftSession to set variable named "user.tfx_column" to "L"
+      end if
+      if leftCount + rightCount > 0 then
+        if rightCount is 0 then
+          set splitSession to leftSession
+          set splitDirection to "vertical"
+          set newColumn to "R"
+        else if leftCount is 0 then
+          set splitSession to rightSession
+          set splitDirection to "vertical"
+          set newColumn to "L"
+        else if rightCount < leftCount then
+          set splitSession to rightSession
+          set splitDirection to "horizontal"
+          set newColumn to "R"
+        else
+          set splitSession to leftSession
+          set splitDirection to "horizontal"
+          set newColumn to "L"
+        end if
+        exit repeat
+      end if
+    end if
+  end repeat
+  set didSplit to splitSession is not missing value
+  if didSplit then
+    if splitDirection is "vertical" then
+      tell splitSession to set newSession to split vertically with default profile command ${command}
+    else
+      tell splitSession to set newSession to split horizontally with default profile command ${command}
+    end if
+  else
+    tell targetWindow to set newTab to create tab with default profile command ${command}
     set newSession to current session of newTab
+    set newColumn to "L"
   end if
   tell newSession
+    set variable named "user.tfx_project" to ${projectLiteral}
     set variable named "user.tfx_group" to ${groupLiteral}
     set variable named "user.tfx_session" to ${sessionLiteral}
+    set variable named "user.tfx_column" to newColumn
   end tell
   return (id of newSession) & linefeed & (didSplit as text)
 end tell`;
-  const { stdout } = await execFileAsync("/usr/bin/osascript", ["-e", script], {
+  const { stdout } = await exec("/usr/bin/osascript", ["-e", script], {
     timeout: 5000,
     maxBuffer: 64 * 1024,
   });
@@ -2728,20 +2851,74 @@ end tell`;
   return { sessionId, group, split: split === "true" };
 }
 
-async function closeItermSession(sessionId) {
-  const script = `tell application "iTerm2"
+async function closeItermSession(
+  sessionId,
+  session,
+  allowNameFallback = true,
+  deps = {},
+) {
+  const exec = deps.execFile ?? execFileAsync;
+  const tmux = deps.runTmux ?? runTmux;
+  const clients = await tmux(null, [
+    "list-clients",
+    "-F",
+    "#{client_tty}",
+  ]).catch(() => null);
+  const attachedTtys = (clients?.stdout ?? "")
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+  const script = `if application "iTerm2" is not running then return
+tell application "iTerm2"
+  set idSession to missing value
+  set idTab to missing value
+  set fallbackSession to missing value
+  set fallbackTab to missing value
   repeat with candidateWindow in windows
     repeat with candidateTab in tabs of candidateWindow
       repeat with candidateSession in sessions of candidateTab
-        if id of candidateSession is ${appleScriptString(sessionId)} then
-          tell candidateSession to close
-          return
+        if ${appleScriptString(sessionId ?? "")} is not "" and id of candidateSession is ${appleScriptString(sessionId ?? "")} then
+          set idSession to candidateSession
+          set idTab to candidateTab
         end if
+        try
+          tell candidateSession to set candidateName to variable named "user.tfx_session"
+          if ${allowNameFallback ? "true" : "false"} and candidateName is ${appleScriptString(session)} then
+            set fallbackSession to candidateSession
+            set fallbackTab to candidateTab
+          end if
+        end try
       end repeat
     end repeat
   end repeat
+  if idSession is not missing value then
+    set targetSession to idSession
+    set targetTab to idTab
+  else if fallbackSession is not missing value then
+    set targetSession to fallbackSession
+    set targetTab to fallbackTab
+  else
+    return
+  end if
+  tell targetSession to close
+  -- 셸 통합이나 tmux 클라이언트 조회가 불확실하면 남은 탭을 보존한다.
+  set shellsOnly to ${clients ? "true" : "false"}
+  set attachedTtys to {${attachedTtys.map(appleScriptString).join(", ")}}
+  try
+    repeat with remainingSession in sessions of targetTab
+      -- 사용자가 직접 연 패인은 tfx 표시가 없으므로 남은 패인이 모두 tfx-live 가 연 것일 때만 탭을 닫는다.
+      set remainingName to ""
+      try
+        tell remainingSession to set remainingName to variable named "user.tfx_session"
+      end try
+      if remainingName is missing value or remainingName is "" then set shellsOnly to false
+      if not (is at shell prompt of remainingSession) then set shellsOnly to false
+      if attachedTtys contains (tty of remainingSession) then set shellsOnly to false
+    end repeat
+    if shellsOnly then tell targetTab to close
+  end try
 end tell`;
-  await execFileAsync("/usr/bin/osascript", ["-e", script], {
+  await exec("/usr/bin/osascript", ["-e", script], {
     timeout: 5000,
     maxBuffer: 64 * 1024,
   });
@@ -2828,6 +3005,17 @@ async function doStart(launchAdapter, opts) {
     "60",
     ...(cwd ? ["-c", cwd] : []),
   ]);
+  if (!remote) {
+    await runTmux(null, ["set-option", "-t", session, "set-titles", "on"]);
+    // # 는 tmux 형식 시작 문자이므로 이름 그대로 표시되게 이스케이프한다.
+    await runTmux(null, [
+      "set-option",
+      "-t",
+      session,
+      "set-titles-string",
+      (name ?? session).replace(/#/g, "##"),
+    ]);
+  }
   // Default tmux history-limit (2000) is far too small for long tool-heavy
   // CLI sessions (file reads, test runs) — the actual response can scroll
   // out of scrollback before capturePane() runs, producing an empty extract.
@@ -2967,7 +3155,12 @@ async function doStart(launchAdapter, opts) {
   let itermWarning;
   if (ready && shouldUseIterm(remote)) {
     try {
-      iterm = await openItermSession(session, opts.group || adapter.cli);
+      const project = await itermProject(cwd ?? process.cwd());
+      iterm = await openItermSession(
+        session,
+        opts.group || project.key,
+        project,
+      );
       if (iterm) {
         await runTmux(null, [
           "set-option",
@@ -2992,7 +3185,11 @@ async function doStart(launchAdapter, opts) {
         if (installed !== ITERM_TITLE_SCRIPT)
           await writeFile(scriptPath, ITERM_TITLE_SCRIPT, { mode: 0o700 });
         await chmod(scriptPath, 0o700);
-        const titleArgs = [iterm.sessionId, iterm.group, opts.name ?? session]
+        const titleArgs = [
+          iterm.sessionId,
+          opts.group || project.name,
+          name ?? session,
+        ]
           .map(appleScriptString)
           .join(", ");
         // 절대 경로는 최초 설치 직후의 메뉴 캐시 지연을 피하고, 적용 표식은 비동기 실패를 잡는다.
@@ -3772,6 +3969,7 @@ async function ensureTmuxSession(adapter, opts) {
       session: opts.session,
       remote: opts.remote,
       cwd: opts.cwd,
+      group: opts.group,
       readyTimeoutMs: opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
       pollIntervalMs: opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     });
@@ -3952,7 +4150,11 @@ async function doAskAuto(adapter, opts) {
   return fallback;
 }
 
-async function doStop(adapter, opts) {
+async function doStop(adapter, opts, deps = {}) {
+  const tmux = deps.runTmux ?? runTmux;
+  const useIterm =
+    !opts.remote && (deps.platform ?? process.platform) === "darwin";
+  const closeIterm = deps.closeItermSession ?? closeItermSession;
   if (opts.short || opts.sessionId) {
     let sessionId = opts.sessionId;
     let configDir = opts.configDir;
@@ -3988,9 +4190,9 @@ async function doStop(adapter, opts) {
     );
   let itermSessionId;
   let itermWarning;
-  if (shouldUseIterm(remote)) {
+  if (useIterm) {
     try {
-      const { stdout } = await runTmux(null, [
+      const { stdout } = await tmux(null, [
         "show-options",
         "-qv",
         "-t",
@@ -4002,10 +4204,19 @@ async function doStop(adapter, opts) {
       itermWarning = error.message;
     }
   }
-  await runTmux(remote, ["kill-session", "-t", session]);
-  if (itermSessionId) {
+  await tmux(remote, ["kill-session", "-t", session]);
+  // tfx-live 가 연 패인 기록이 있으면 어디서 stop 하든 닫고, 기록이 없을 때의 이름 검색은 iTerm 안에서만 한다.
+  if (
+    useIterm &&
+    (itermSessionId ||
+      shouldUseIterm(remote, deps.platform ?? process.platform, deps.env))
+  ) {
     try {
-      await closeItermSession(itermSessionId);
+      await closeIterm(
+        itermSessionId ?? "",
+        session,
+        shouldUseIterm(remote, deps.platform ?? process.platform, deps.env),
+      );
     } catch (error) {
       itermWarning = error.message;
     }
@@ -5186,6 +5397,7 @@ async function listSessions(flags) {
 function startOptsForSession(flags, session, side) {
   return {
     session,
+    group: flags.group,
     ...(!side ? { name: flags.name } : {}),
     remote: flags.remote,
     cwd: flags.cwd,
@@ -5751,6 +5963,7 @@ function peerSideBaseOpts(flags, side, adapter, session) {
   }
   return {
     session,
+    group: flags.group,
     noRelayTag: Object.hasOwn(flags, "no-relay-tag"),
     ...contextOpts(flags, adapter.cli),
     short,
@@ -5973,6 +6186,16 @@ async function peer(flags, deps = {}) {
     throw new Error("agy peer relay is local only; --remote is not supported");
   if (adapterC && flags.via === "message")
     throw new Error("--cli-c is only supported with --via relay");
+  flags = {
+    ...flags,
+    group:
+      flags.group ??
+      `peer:${[
+        flags["session-a"] ?? "peerA",
+        flags["session-b"] ?? "peerB",
+        ...(adapterC ? [flags["session-c"] ?? "peerC"] : []),
+      ].join(":")}:${randomBytes(6).toString("hex")}`,
+  };
   if (flags.via === "message") return peerViaMessage(flags, adapterA, adapterB);
   if (flags.via !== undefined && flags.via !== "relay")
     throw new Error("--via must be one of: relay, message");
@@ -6304,6 +6527,7 @@ export {
   buildTmuxCommand,
   callRemoteLive,
   classifyPeerExitReason,
+  closeItermSession,
   codexGoal,
   composerShowsPrompt,
   createPeerSignalController,
@@ -6312,6 +6536,7 @@ export {
   discoverCodexTmuxSessions,
   doAskViaTmux,
   doCompact,
+  doStop,
   extractAssistantResponse,
   extractClaudeCompletedTaskListResponse,
   extractResponseSinceMarker,
@@ -6320,6 +6545,8 @@ export {
   inspectUnsetEnv,
   isCodexLoadingCapture,
   isSlashCommand,
+  itermProject,
+  openItermSession,
   parseCodexTmuxSessions,
   parsePeerClosure,
   parseRemoteLiveJson,
