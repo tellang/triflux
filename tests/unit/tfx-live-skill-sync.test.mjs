@@ -21,6 +21,22 @@ test("Codex tfx-live adapter keeps the canonical skill body", () => {
   );
 });
 
+test("agy tfx-live adapter keeps the canonical skill body", () => {
+  const canonical = readFileSync("skills/tfx-live/SKILL.md", "utf8");
+  const adapter = readFileSync("adapters/agy/skills/tfx-live/SKILL.md", "utf8");
+  const frontmatterEnd = canonical.indexOf("\n---\n", 4) + 5;
+  assert.ok(frontmatterEnd > 4);
+  assert.ok(adapter.startsWith(canonical.slice(0, frontmatterEnd)));
+  const body = canonical.slice(frontmatterEnd);
+  const hostContract =
+    "\n## agy 호스트 계약\n\nagy 에서는 이 스킬을 읽고 셸에서 `tfx-live` 명령을 실행한다. CLI 의 `--cli` 는 현재 호스트가 아니라 대상 세션을 고른다. 다른 CLI 세션에 보낼 때는 `tfx-live send` 를 쓴다.\n";
+  assert.ok(body.startsWith("\n# tfx-live\n"));
+  assert.equal(
+    adapter.slice(frontmatterEnd),
+    body.replace("\n# tfx-live\n", `\n# tfx-live\n${hostContract}`),
+  );
+});
+
 test("tfx-lead and tfx-live agree on how Claude sends to a local Claude session", () => {
   const lead = readFileSync("skills/tfx-lead/SKILL.md", "utf8");
   const live = readFileSync("skills/tfx-live/SKILL.md", "utf8");
