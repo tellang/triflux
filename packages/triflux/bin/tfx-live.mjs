@@ -86,6 +86,7 @@ const BOOLEAN_FLAGS = new Set([
   "json",
   "attach-a",
   "attach-b",
+  "attach-c",
   "no-wait",
   "no-relay-tag",
   "sandbox",
@@ -129,7 +130,7 @@ function usage(command) {
     "    Claude and agy list-sessions support local tmux only; --transport uds requires --cli codex.",
     "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
     "  tfx-live goal-driven --session NAME --goal TEXT [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500] [--max-rounds 8] [--done-token DONE]",
-    "  tfx-live peer [--cli-a codex] [--cli-b claude] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--session-a NAME[:WINDOW.PANE]] [--session-b NAME[:WINDOW.PANE]] [--attach-a] [--attach-b] [--transport-a tmux|queue|uds|auto] [--transport-b tmux|queue|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--thread-a ID|auto] [--thread-b ID|auto] [--codex-socket-a PATH|default] [--codex-socket-b PATH|default] [--bridge ABS] [--remote HOST] [--cwd DIR] [--if-busy wait|fail] [--if-busy-a POLICY] [--if-busy-b POLICY] [--busy-timeout 60] [--max-turn SECONDS] [--rounds 4] [--mode counting|freeform] [--seed TEXT] [--timeout 60] [--via relay|message] [--report-to NAME]",
+    "  tfx-live peer [--cli-a codex] [--cli-b claude] [--cli-c CLI] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--model-c ID] [--effort-c TIER] [--session-a NAME[:WINDOW.PANE]] [--session-b NAME[:WINDOW.PANE]] [--session-c NAME[:WINDOW.PANE]] [--attach-a] [--attach-b] [--attach-c] [--transport-a tmux|queue|uds|auto] [--transport-b tmux|queue|uds|auto] [--transport-c tmux|queue|uds|auto] [--short-a SHORT] [--short-b SHORT] [--short-c SHORT] [--session-id-a ID] [--session-id-b ID] [--session-id-c ID] [--thread-a ID|auto] [--thread-b ID|auto] [--thread-c ID|auto] [--codex-socket-a PATH|default] [--codex-socket-b PATH|default] [--codex-socket-c PATH|default] [--bridge ABS] [--bridge-c ABS] [--remote HOST] [--cwd DIR] [--if-busy wait|fail] [--if-busy-a POLICY] [--if-busy-b POLICY] [--if-busy-c POLICY] [--busy-timeout 60] [--max-turn SECONDS] [--rounds 4] [--mode counting|freeform|debate] [--seed TEXT] [--timeout 60] [--via relay|message] [--report-to NAME]",
     "    --via message (Claude x Claude): sends each side the other's session name once, then they talk with SendMessage; reports to --report-to or the calling Claude session.",
     "    Codex TUI may use a shared app-server daemon. UDS ask resumes the thread to receive answer events; sending to an active thread with --if-busy steer merges input into that turn.",
   ];
@@ -5295,24 +5296,43 @@ async function goalDriven(flags) {
 
 function peerMode(flags) {
   const mode = flags.mode ?? "counting";
-  if (!["counting", "freeform"].includes(mode)) {
-    throw new Error("--mode must be one of: counting, freeform");
+  if (!["counting", "freeform", "debate"].includes(mode)) {
+    throw new Error("--mode must be one of: counting, freeform, debate");
   }
   return mode;
 }
 
-function peerPrompt(mode, hopIndex, previous) {
+function peerPrompt(
+  mode,
+  hopIndex,
+  previous,
+  otherResponses = null,
+  { self, seed, firstTurn } = {},
+) {
   let prompt;
-  if (mode === "counting") {
+  if (mode === "debate") {
+    // 안건은 첫 차례 참여자에게만 가므로 각자의 첫 차례에 원문을 다시 넣는다.
+    prompt = [
+      `너는 Participant ${String(self).toUpperCase()}다.`,
+      ...(firstTurn ? [`원래 과제:\n${seed}`] : []),
+      ...(otherResponses
+        ? [
+            otherResponses,
+            "다른 참여자의 답을 검토하라. 동의하는 점, 동의하지 않는 점과 그 이유를 밝히고, 원래 과제가 요구한 형식으로 수정한 입장을 다시 내라.",
+          ]
+        : []),
+    ].join("\n");
+  } else if (mode === "counting") {
     if (hopIndex === 0) {
       prompt = "Reply with only the integer 1.";
     } else {
       prompt = `The current integer is ${previous}. Add 1 to it and reply with ONLY the resulting integer, nothing else.`;
+      if (otherResponses) prompt = `${otherResponses}\n${prompt}`;
     }
   } else if (hopIndex === 0) {
     prompt = previous;
   } else {
-    prompt = `The other party said: ${previous}\nReply briefly in 1-2 sentences and ask one short follow-up question.`;
+    prompt = `${otherResponses ?? `The other party said: ${previous}`}\nReply briefly in 1-2 sentences and ask one short follow-up question.`;
   }
 
   return [
@@ -5321,13 +5341,14 @@ function peerPrompt(mode, hopIndex, previous) {
   ].join("\n");
 }
 
-function buildPeerClosurePrompt(previous) {
+function buildPeerClosurePrompt(previous, otherResponses = null) {
   return [
     "This is the final closure turn. Based on the discussion so far, declare whether a final agreement was reached.",
     "First reply with exactly one JSON object and no markdown fences:",
     '{"agreement_status":"complete|partial","unresolved_questions":[],"needs_more_rounds":false,"summary":"short final agreement"}',
     "Use agreement_status=complete only when no unresolved question remains and no more rounds are needed.",
-    `The other party's latest response was: ${previous ?? "(none)"}`,
+    otherResponses ??
+      `The other party's latest response was: ${previous ?? "(none)"}`,
     `After the JSON is complete, print a new line containing only this token: \`${PEER_HOP_DONE_MARKER}\`. Do not put any other characters on that line.`,
   ].join("\n");
 }
@@ -5526,7 +5547,7 @@ function createPeerSignalController({
   };
 }
 
-function peerArtifactPaths(sessionA, sessionB) {
+function peerArtifactPaths(sessionA, sessionB, sessionC = null) {
   const preferredDir =
     process.env.TFX_LIVE_ARTIFACT_DIR ??
     pathJoin(homedir(), ".claude", "cache", "triflux", "tfx-live", "peer-runs");
@@ -5540,7 +5561,7 @@ function peerArtifactPaths(sessionA, sessionB) {
     String(value)
       .replace(/[^A-Za-z0-9._-]+/g, "-")
       .slice(0, 48);
-  const runId = `peer-${safe(sessionA)}-${safe(sessionB)}-${Date.now()}-${process.pid}`;
+  const runId = `peer-${safe(sessionA)}-${safe(sessionB)}${sessionC === null ? "" : `-${safe(sessionC)}`}-${Date.now()}-${process.pid}`;
   return {
     transcriptPath: pathJoin(artifactDir, `${runId}.transcript.json`),
     statusPath: pathJoin(artifactDir, `${runId}.status.json`),
@@ -5556,6 +5577,7 @@ function persistPeerTranscript(paths, output) {
         rounds: output.rounds,
         cliA: output.cliA,
         cliB: output.cliB,
+        ...(output.cliC === undefined ? {} : { cliC: output.cliC }),
         hops_completed: output.hops.length,
         hops: output.hops,
       },
@@ -5864,40 +5886,68 @@ async function peerViaMessage(flags, adapterA, adapterB) {
   });
 }
 
-async function peer(flags) {
+async function peer(flags, deps = {}) {
+  const startSession = deps.doStart ?? doStart;
+  const askSession = deps.doAsk ?? doAsk;
+  const verifyAttached = deps.verifyAttachedPeerSide ?? verifyAttachedPeerSide;
+  const stopSessions = deps.stopAfterLifecycle ?? stopAfterLifecycle;
   const adapterA = selectAdapterName(flags["cli-a"] ?? "codex", "cli-a");
   const adapterB = selectAdapterName(flags["cli-b"] ?? "claude", "cli-b");
-  if (adapterA.cli === "agy" || adapterB.cli === "agy")
-    throw new Error("agy is unavailable for peer");
+  const adapterC =
+    flags["cli-c"] === undefined
+      ? null
+      : selectAdapterName(flags["cli-c"], "cli-c");
+  if (
+    flags.remote &&
+    [adapterA, adapterB, adapterC].some((adapter) => adapter?.cli === "agy")
+  )
+    throw new Error("agy peer relay is local only; --remote is not supported");
+  if (adapterC && flags.via === "message")
+    throw new Error("--cli-c is only supported with --via relay");
   if (flags.via === "message") return peerViaMessage(flags, adapterA, adapterB);
   if (flags.via !== undefined && flags.via !== "relay")
     throw new Error("--via must be one of: relay, message");
-  peerSideBusyPolicy(
-    flags,
-    "a",
-    adapterA,
-    peerSideTransport(flags, "a", adapterA),
-  );
-  peerSideBusyPolicy(
-    flags,
-    "b",
-    adapterB,
-    peerSideTransport(flags, "b", adapterB),
-  );
+  for (const [side, adapter] of [
+    ["a", adapterA],
+    ["b", adapterB],
+    ...(adapterC ? [["c", adapterC]] : []),
+  ]) {
+    peerSideBusyPolicy(
+      flags,
+      side,
+      adapter,
+      peerSideTransport(flags, side, adapter),
+    );
+  }
   const sessionA = flags["session-a"] ?? "peerA";
   const sessionB = flags["session-b"] ?? "peerB";
   const baseA = peerSideBaseOpts(flags, "a", adapterA, sessionA);
   const baseB = peerSideBaseOpts(flags, "b", adapterB, sessionB);
+  const sessionC = adapterC ? (flags["session-c"] ?? "peerC") : null;
+  const baseC = adapterC
+    ? peerSideBaseOpts(flags, "c", adapterC, sessionC)
+    : null;
   const attachedA =
     Object.hasOwn(flags, "attach-a") || baseA.transport === "uds";
   const attachedB =
     Object.hasOwn(flags, "attach-b") || baseB.transport === "uds";
+  const attachedC =
+    adapterC && (Object.hasOwn(flags, "attach-c") || baseC.transport === "uds");
+  const participants = [
+    ["a", adapterA, baseA, attachedA],
+    ["b", adapterB, baseB, attachedB],
+    ...(adapterC ? [["c", adapterC, baseC, attachedC]] : []),
+  ];
   const rounds = integerFlag(flags, "rounds", 4);
   const mode = peerMode(flags);
   const hops = [];
   const numbers = [];
   const stopSpecs = [];
-  const artifactPaths = peerArtifactPaths(sessionA, sessionB);
+  const artifactPaths = (deps.peerArtifactPaths ?? peerArtifactPaths)(
+    sessionA,
+    sessionB,
+    sessionC,
+  );
   const output = {
     mode,
     rounds,
@@ -5909,6 +5959,14 @@ async function peer(flags) {
     attachedB,
     stoppedA: false,
     stoppedB: false,
+    ...(adapterC
+      ? {
+          cliC: adapterC.cli,
+          transportC: baseC.transport,
+          attachedC,
+          stoppedC: false,
+        }
+      : {}),
     hops,
     transcript_path: artifactPaths.transcriptPath,
     status_path: artifactPaths.statusPath,
@@ -5916,24 +5974,22 @@ async function peer(flags) {
   if (mode === "counting") {
     output.numbers = numbers;
   }
-  let previous = mode === "freeform" ? (flags.seed ?? PEER_DEFAULT_SEED) : null;
+  let previous = mode !== "counting" ? (flags.seed ?? PEER_DEFAULT_SEED) : null;
+  const latestResponses = new Map();
   let primaryError = null;
   let stopError = null;
   let closure = null;
   const stopPeerSessions = async () => {
     try {
-      await stopAfterLifecycle(stopSpecs);
+      await stopSessions(stopSpecs);
     } finally {
-      output.stoppedA =
-        !attachedA &&
-        stopSpecs.some(
-          (spec) => spec.opts.session === sessionA && spec.stopped,
-        );
-      output.stoppedB =
-        !attachedB &&
-        stopSpecs.some(
-          (spec) => spec.opts.session === sessionB && spec.stopped,
-        );
+      for (const [side, , base, attached] of participants) {
+        output[`stopped${side.toUpperCase()}`] =
+          !attached &&
+          stopSpecs.some(
+            (spec) => spec.opts.session === base.session && spec.stopped,
+          );
+      }
     }
   };
   const signalController = createPeerSignalController({
@@ -5941,6 +5997,7 @@ async function peer(flags) {
     persistTranscript: (value) => persistPeerTranscript(artifactPaths, value),
     persistStatus: (value) => persistPeerStatus(artifactPaths, value),
     stopSessions: stopPeerSessions,
+    printOutput: deps.printJson ?? printJson,
   });
   const onSigint = () => {
     void signalController.handle("SIGINT");
@@ -5952,12 +6009,9 @@ async function peer(flags) {
   process.on("SIGTERM", onSigterm);
 
   try {
-    for (const [side, adapter, base, attached] of [
-      ["a", adapterA, baseA, attachedA],
-      ["b", adapterB, baseB, attachedB],
-    ]) {
+    for (const [side, adapter, base, attached] of participants) {
       if (!attached) continue;
-      const result = await verifyAttachedPeerSide(adapter, base);
+      const result = await verifyAttached(adapter, base);
       if (result?.preflightWarning) {
         output.preflightWarning ??= [];
         output.preflightWarning.push({
@@ -5966,32 +6020,46 @@ async function peer(flags) {
         });
       }
     }
-    if (!attachedA && peerSideUsesTmuxPane(baseA)) {
-      await doStart(adapterA, startOptsForSession(flags, sessionA, "a"));
-      addStopSpecOnce(stopSpecs, adapterA, baseA);
-    }
-    if (!attachedB && peerSideUsesTmuxPane(baseB)) {
-      await doStart(adapterB, startOptsForSession(flags, sessionB, "b"));
-      addStopSpecOnce(stopSpecs, adapterB, baseB);
+    for (const [side, adapter, base, attached] of participants) {
+      if (attached || !peerSideUsesTmuxPane(base)) continue;
+      await startSession(
+        adapter,
+        startOptsForSession(flags, base.session, side),
+      );
+      addStopSpecOnce(stopSpecs, adapter, base);
     }
 
-    // A round is one full A+B cycle, so total hops are rounds * 2.
-    // Each hop sends the previous hop's response as a real prompt into the
-    // opposite agent via that side's selected transport. The final response is
-    // returned in JSON, but all intermediate collaboration happens as prompts.
-    for (let hopIndex = 0; hopIndex < rounds * 2; hopIndex += 1) {
-      const isA = hopIndex % 2 === 0;
-      const adapter = isA ? adapterA : adapterB;
-      const base = isA ? baseA : baseB;
-      const isClosure = hopIndex === rounds * 2 - 1;
+    for (
+      let hopIndex = 0;
+      hopIndex < rounds * participants.length;
+      hopIndex += 1
+    ) {
+      const [side, adapter, base, attached] =
+        participants[hopIndex % participants.length];
+      const otherResponses =
+        adapterC || mode === "debate"
+          ? participants
+              .filter(([other]) => other !== side && latestResponses.has(other))
+              .map(
+                ([other]) =>
+                  `Participant ${other.toUpperCase()}: ${latestResponses.get(other)}`,
+              )
+              .join("\n")
+          : null;
+      const isClosure = hopIndex === rounds * participants.length - 1;
       const sent = isClosure
-        ? buildPeerClosurePrompt(previous)
-        : peerPrompt(mode, hopIndex, previous);
-      const result = await doAsk(adapter, askOptsFromPeerBase(base, sent));
-      // tmux 는 화면에서 표식 앞까지만 읽는다. 기록에서 읽는 uds 와 queue 는 표식 줄을 뺀다.
+        ? buildPeerClosurePrompt(previous, otherResponses)
+        : peerPrompt(mode, hopIndex, previous, otherResponses, {
+            self: side,
+            seed: flags.seed ?? PEER_DEFAULT_SEED,
+            firstTurn: hopIndex < participants.length,
+          });
+      const result = await askSession(adapter, askOptsFromPeerBase(base, sent));
+      // agy 는 tmux 전송이어도 DB 에서 답을 읽으므로 표식 줄을 뺀다.
       if (
+        adapter.cli === "agy" ||
         (result.transportSelected ?? result.transport ?? base.transport) !==
-        "tmux"
+          "tmux"
       ) {
         result.response = String(result.response ?? "")
           .split(/\r?\n/)
@@ -5999,7 +6067,7 @@ async function peer(flags) {
           .join("\n")
           .trim();
       }
-      if (result.tmuxStartedOnDemand && !(isA ? attachedA : attachedB)) {
+      if (result.tmuxStartedOnDemand && !attached) {
         addStopSpecOnce(stopSpecs, adapter, base);
       }
       if (
@@ -6018,7 +6086,7 @@ async function peer(flags) {
       hops.push({
         hop: hopIndex + 1,
         requestId: result.requestId,
-        from: isA ? "a" : "b",
+        from: side,
         cli: adapter.cli,
         transport: result.transport ?? base.transport,
         transportSelected: result.transportSelected,
@@ -6030,6 +6098,7 @@ async function peer(flags) {
         aborted: result.aborted === true ? true : undefined,
         reason: result.reason,
       });
+      latestResponses.set(side, result.response);
       if (isClosure) {
         closure = parsePeerClosure(result.response);
       }
@@ -6092,7 +6161,7 @@ async function peer(flags) {
     output.artifact_errors ??= [];
     output.artifact_errors.push(`status: ${error.message}`);
   }
-  printJson(output);
+  (deps.printJson ?? printJson)(output);
 }
 
 function printJson(value) {
@@ -6172,6 +6241,7 @@ export {
   parseCodexTmuxSessions,
   parsePeerClosure,
   parseRemoteLiveJson,
+  peer,
   peerSideBaseOpts,
   resolveAskTransport,
   resolveCodexDaemonSocket,
