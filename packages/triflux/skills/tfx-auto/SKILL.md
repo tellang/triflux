@@ -53,7 +53,7 @@ argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [
 > **MANDATORY RULES**
 >
 > 1. **실행**: CLI 에이전트는 반드시 `Bash("bash ~/.claude/scripts/tfx-route.sh ...")`. Claude 네이티브 역할과 명시적 verifier override만 `Agent()`.
-> 2. **비용/편향 분리**: 실행 워커 비용은 Codex/Antigravity 우선으로 낮추되, consensus/debate/panel에서는 Claude를 최후수단이 아니라 counter-bias outvoice로 둔다. Claude가 실행을 맡는 경우는 명시적 `--cli claude`, Claude-native host role, 또는 fallback뿐이다.
+> 2. **비용/편향 분리**: 실행 워커 비용은 Codex/Antigravity 우선으로 낮추되, consensus/debate/panel에서는 Claude를 최후수단이 아니라 counter-bias outvoice로 둔다. Claude가 실행을 맡는 경우는 명시적 `--cli claude`, Claude-native host role, 작성 벤더별 교차 리뷰, 또는 fallback이다.
 > 2-a. **Anti-bias triad**: `triad`는 Claude(counter-bias outvoice) + Codex(implementation/reality check) + Antigravity(product/UX auxiliary)를 보존하고, disputed/minority view를 삭제하지 않는다.
 > 2-b. **Claude effort**: Claude lane은 Claude Code CLI의 `--model`과 `--effort`를 사용한다. Triflux의 `CLI_EFFORT`/profile 값은 `low|medium|high|xhigh|max` Claude effort로 매핑한다. `ultracode`도 공식 `--effort` 값(v2.1.203+)이지만 프로필 매핑에서는 쓰지 않는다. skill 문서가 모델 ID를 하드코딩하지 않는다.
 > 3. **DAG**: SEQUENTIAL/DAG이면 레벨 기반 순차 실행. `.omc/context/{sid}/` 생성, context_output 저장, 실패 시 후속 SKIP.
@@ -410,12 +410,15 @@ Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}", prompt="{prompt
 | architect / planner / critic / analyst | Codex (deep-executor 프로필) | analyze |
 | scientist | Codex | analyze |
 | document-specialist | Antigravity | analyze |
-| code-reviewer / security-reviewer / quality-reviewer | Codex (review) | review |
+| code-reviewer / quality-reviewer | 작성 벤더별 Claude Opus / Codex `sol_high` review / Argon High | review |
+| security-reviewer | Antigravity `argon_high` | review |
 | antigravity / designer / writer | Antigravity | docs |
 | explore / claude | Claude native | 없음 |
 | test-engineer | Codex | implement |
 | qa-tester | Codex review | review |
 | verifier | Codex review (기본) / Claude native (TFX_VERIFIER_OVERRIDE=claude 시) | review / 없음 |
+
+`TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 작성 벤더를 지정한다. 미지정이면 Codex로 보고, 잘못된 값은 거부한다. Codex·Argon 작성 코드는 Claude Opus가, Claude 작성 코드는 Codex Sol이 리뷰한다. Claude 주간 사용량(`~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`)이 80 이상이면 Codex 작성 코드는 Argon High가, Argon 작성 코드는 Codex Sol이 리뷰한다. 캐시가 없거나 읽을 수 없으면 한도 미만으로 본다. 명시 CLI 선택이 이 기본 배정보다 우선한다. 리드별 verifier·explore는 `tfx-lead`의 표를 따른다.
 
 ### MCP 프로필 자동 결정
 

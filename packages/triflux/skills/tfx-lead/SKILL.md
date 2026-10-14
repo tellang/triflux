@@ -57,10 +57,23 @@ tmux ls         # 없으면
 | 반복 검증, 정형 문서 | Claude `sonnet` | 테스트 재실행, 표 갱신 |
 | `opus`로 안 풀리는 난제 | Claude `fable` | 최종 수단 |
 | Codex 설계, 비평, 디버그 | `astra_xhigh` | |
-| Codex 일반 구현, 리뷰 | `sol_high` | |
+| Codex 일반 구현, Claude 작성 코드 리뷰 | `sol_high` | 리뷰는 `review` 서브커맨드를 쓴다 |
+| 보안 리뷰 | Argon High `argon_high` | `security-reviewer` |
 | Codex 정리 | `sol_med` | |
 | Codex 반복 작업 | `luna_high` | |
 | Codex 시험용 | 역할 프로필에 effort low | 연결 확인용 |
+
+설계 역할 `architect`, `planner`, `analyst`, `critic`은 `astra_xhigh`를 유지한다. 나머지 역할도 별도 결정이 없으면 현재 배정을 유지한다.
+
+| 리드 | 코드 작성 벤더 | verifier | explore |
+| --- | --- | --- | --- |
+| Claude | Codex 또는 Antigravity | Opus 네이티브 서브에이전트 | Haiku 네이티브 |
+| Claude | Claude | Codex Sol `sol_high` | Haiku 네이티브 |
+| Codex | 모두 | Codex Sol 네이티브 | Luna low 네이티브 |
+| Antigravity | Codex 또는 Claude | Argon High 네이티브 | Luna low 네이티브 |
+| Antigravity | Antigravity | Codex Sol `sol_high` | Luna low 네이티브 |
+
+이 표는 리드의 호출 절차를 정한다. 코드의 verifier 기본값은 Codex Sol로, explore 기본값은 Claude로 유지한다. Codex 리드의 verifier는 빌드, 테스트, 요구사항 충족 증거를 확인하고 코드 승인은 하지 않는다.
 
 - Codex 주간 한도가 낮으면 새 Codex 워커 대신 Claude 로 돌린다.
 - 세션을 띄울 때마다 사용자에게 한 줄로 알린다: "이 역할에 이 모델, tmux 세션명 `<이름>`(tmr 이나 tmux 로 여는 대상)".
@@ -124,15 +137,15 @@ tfx-live wait --cli claude --short <8hex> --request-id <requestId> --timeout 600
 
 ## 6. 교차 리뷰와 머지
 
-작성 모델과 다른 모델이 리뷰한다. 기본은 CLAUDE.md 의 교차 검증 규칙이다.
+작성 벤더와 다른 벤더가 `code-reviewer`, `quality-reviewer`로 리뷰한다. 작성 벤더를 `TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 지정하라. 미지정이면 Codex로 보고 잘못된 값은 오류로 끝낸다.
 
-| 작성 | 리뷰 |
-| --- | --- |
-| Claude | Codex |
-| Codex | Claude |
+| 작성 벤더 | 기본 리뷰 | Claude 주간 사용량 80% 이상 |
+| --- | --- | --- |
+| Codex | Claude Opus | Argon High `argon_high` |
+| Claude | Codex Sol `sol_high` review | Codex Sol `sol_high` review |
+| Antigravity | Claude Opus | Codex Sol `sol_high` review |
 
-- Codex 를 못 쓸 때(주간 한도, 미설치)만 폴백한다. 작성과 다른 Claude 모델(`opus`로 쓴 글은 `fable` 또는 `sonnet`, `sonnet`으로 쓴 글은 `opus`)이나 Antigravity 로 리뷰한다.
-- 한도가 낮을 때의 대체 순서는 `.claude/rules/tfx-routing.md`의 CLI 우선순위(1차 Codex, 2차 Antigravity)를 따른다.
+사용량은 `~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`를 읽는다. 없거나 읽을 수 없으면 한도 미만으로 본다. Claude 리뷰는 `tfx-route.sh`의 Claude 워커 경로와 `--model opus`를 쓴다. 명시 CLI 선택의 기존 우선순위는 유지한다. verifier의 증거 확인과 코드 리뷰의 승인을 구분하라.
 
 - 머지 조건은 CI 통과와 교차 리뷰 통과, 둘 다다.
 - 리뷰에서 사실 오류가 나오면 처음 작성자에게 되돌려 고친다. 같은 리뷰어가 재확인한다.

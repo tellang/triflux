@@ -955,7 +955,7 @@ route_agent() {
   local normalized_profile _policy_mcp
   IFS=$'\x1e' read -r CLI_TYPE CODEX_POLICY_PROFILE CODEX_POLICY_TIMEOUT \
     _policy_mcp CODEX_POLICY_SUBCOMMAND normalized_profile CODEX_OVERRIDE_PROFILE GEMINI_PROFILE \
-    ROLE_EXPECTED_DURATION NATIVE_CODEX_ALLOWED <<< "$policy_row"
+    ROLE_EXPECTED_DURATION NATIVE_CODEX_ALLOWED REVIEW_AUTHOR REVIEW_USAGE_SWITCH <<< "$policy_row"
   if [[ "$normalized_profile" != "$TFX_CODEX_PROFILE" ]]; then
     echo "[tfx-route] legacy Codex profile remapped: ${TFX_CODEX_PROFILE} -> ${normalized_profile}" >&2
   fi
@@ -966,8 +966,13 @@ route_agent() {
       CLI_CMD="agy"; CLI_ARGS="--print --dangerously-skip-permissions"
       CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900 ;;
     claude)
-      CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600 ;;
+      if [[ -n "$REVIEW_AUTHOR" ]]; then
+        CLI_CMD="claude"; CLI_ARGS=""
+        CLI_EFFORT="high"; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
+      else
+        CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
+        CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600
+      fi ;;
   esac
 }
 
@@ -1073,12 +1078,12 @@ esac
 apply_cli_mode() {
   case "$TFX_CLI_MODE" in
     codex)
-      if [[ "$CLI_TYPE" == "antigravity" ]]; then
+      if [[ "$CLI_TYPE" == "antigravity" || ( "$CLI_TYPE" == "claude" && -n "$REVIEW_AUTHOR" ) ]]; then
         apply_codex_agent_policy
         echo "[tfx-route] TFX_CLI_MODE=codex: $AGENT_TYPE → codex($CLI_EFFORT)로 리매핑" >&2
       fi ;;
     antigravity)
-      if [[ "$CLI_TYPE" != "claude-native" && "$CLI_TYPE" != "claude" ]]; then
+      if [[ "$CLI_TYPE" != "claude-native" && ( "$CLI_TYPE" != "claude" || -n "$REVIEW_AUTHOR" ) ]]; then
         CLI_TYPE="antigravity"
         CLI_CMD="agy"
         CLI_ARGS="--print --dangerously-skip-permissions"
@@ -1476,6 +1481,7 @@ resolve_mcp_policy() {
 get_claude_model() {
   case "$AGENT_TYPE" in
     explore) echo "haiku" ;;
+    code-reviewer|quality-reviewer) echo "opus" ;;
     *) echo "sonnet" ;;
   esac
 }
@@ -2240,6 +2246,9 @@ FALLBACK_EOF
 
   # 메타정보 (stderr)
   echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT expected=${TIMEOUT_SEC}s stall=${STALL_THRESHOLD_SEC}s ceiling=${HARD_CEILING_SEC}s" >&2
+  if [[ -n "$REVIEW_AUTHOR" ]]; then
+    echo "[tfx-route] reviewer=$CLI_TYPE review_author=$REVIEW_AUTHOR usage_switch=$REVIEW_USAGE_SWITCH cli_mode=$TFX_CLI_MODE" >&2
+  fi
   echo "[tfx-route] mcp_profile=$MCP_PROFILE resolved_profile=$MCP_RESOLVED_PROFILE verifier_override=$TFX_VERIFIER_OVERRIDE" >&2
   if [[ ${#ALLOWED_MCP_SERVERS[@]} -gt 0 ]]; then
     echo "[tfx-route] allowed_mcp_servers=$(IFS=,; echo "${ALLOWED_MCP_SERVERS[*]}")" >&2

@@ -780,10 +780,14 @@ describe("tfx-route.sh — 역할별 MCP profile 필터", () => {
     ]);
   });
 
-  it("code-reviewer + auto 는 reviewer profile로 수렴하고 context7+brave-search를 포함해야 한다", () => {
+  it("Claude 작성 코드의 code-reviewer + auto 는 reviewer profile로 수렴하고 context7+brave-search를 포함해야 한다", () => {
     const result = runBash(
       `bash "${ROUTE_SCRIPT}" code-reviewer 'profile-check' auto`,
-      fixtureEnv({ FAKE_CODEX_MODE: "exec", FAKE_CODEX_ECHO_CONFIG: "1" }),
+      fixtureEnv({
+        TFX_REVIEW_AUTHOR: "claude",
+        FAKE_CODEX_MODE: "exec",
+        FAKE_CODEX_ECHO_CONFIG: "1",
+      }),
     );
 
     assert.equal(result.status, 0, out(result));
