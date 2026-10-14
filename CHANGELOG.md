@@ -2,6 +2,18 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.69.0] - 2026-10-14
+
+### Added
+- live: `peer` 에 agy 와 세 번째 참여자(`--cli-c`)를 더하고, 참여자를 `Participant A/B/C` 로 익명화하는 `--mode debate` 를 더한다. 로컬 8KiB 를 넘는 프롬프트는 0600 임시 파일과 `tmux load-buffer` 로 넣는다 (#766)
+- live: macOS iTerm2 에서 프로젝트(git 저장소, 워크트리 포함)마다 창 하나에 세션을 모으고, 같은 그룹은 한 탭에 2x2 까지 나눈다. peer 는 실행마다 참여자를 한 그룹으로 묶고, stop 은 기록된 패인과 셸만 남은 탭을 닫는다. 탭 제목은 tmux set-titles 로 고정한다 (#767)
+
+### Changed
+- live: Claude 안에서 이름 있는 로컬 Claude tmux 세션에 `ask` 하면 보내지 않고 `reason: "use-send-message"` 와 `sendMessageTo` 를 돌려준다. 슬래시 명령, `--remote`, `--via-tmux` 는 예외다. 로컬 Claude `start` 결과에 등록된 이름 `sendMessageTo` 를 넣고, Claude 세션 탐색이 `CLAUDE_CONFIG_DIR` 의 sessions 를 읽는다 (#768)
+
+### Fixed
+- live: agy 턴이 네트워크 오류 step 으로 끝나면 `wait` 가 타임아웃까지 기다리지 않고 `status: "failed"` 와 화면 문구 `error` 를 돌려준다. 도구 호출이 취소되거나 실패한 step(status 6, 7)이 있는 턴도 응답이 끝나면 완료로 본다. 전에는 도구 오류가 한 번이라도 난 턴을 끝까지 `working` 으로 보고했다 (#769)
+
 ## [10.68.0] - 2026-10-14
 
 ### Changed
