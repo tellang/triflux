@@ -39,3 +39,25 @@ test("tfx-lead and tfx-live agree on how Claude sends to a local Claude session"
   }
   assert.match(claudeLeadCell, /팀원 포함/);
 });
+
+test("tfx-lead and tfx-live agree on how agy sends to a local agy session", () => {
+  const lead = readFileSync("skills/tfx-lead/SKILL.md", "utf8");
+  const live = readFileSync("skills/tfx-live/SKILL.md", "utf8");
+  const leadRow = lead
+    .split("\n")
+    .find((line) => line.startsWith("| agy 세션에 보내기 |"));
+  assert.ok(leadRow, "expected agy row in tfx-lead");
+  const agyLeadCell = leadRow.split("|")[2];
+  const liveRule = live
+    .split("\n")
+    .find((line) => line.includes("같은 기기의 agy 끼리는"));
+  assert.ok(liveRule, "expected agy rule in tfx-live");
+  for (const rule of [agyLeadCell, liveRule]) {
+    assert.match(rule, /agy\.patch\.json/);
+    assert.match(rule, /sha256/);
+    assert.match(rule, /peer-wake/);
+    assert.match(rule, /send_message/);
+    assert.match(rule, /#1022/);
+    assert.match(rule, /tfx-live send.*tmux 경로/);
+  }
+});
