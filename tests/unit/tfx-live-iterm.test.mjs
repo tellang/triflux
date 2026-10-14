@@ -147,19 +147,21 @@ test("iTerm opening script chooses project window and limits group splits", asyn
     /return \(id of newSession\)[\s\S]*?end if\s+set targetWindow to leaderWindow/,
   );
   assert.match(script, /if \(count of sessions of candidateTab\) < 4 then/);
+  assert.match(script, /if candidateGroup is "discussion" then/);
   assert.match(
     script,
-    /if candidateGroup is "discussion" then set inGroup to true/,
+    /if rightCount is 0 then\s+set splitSession to leftSession\s+set splitDirection to "vertical"\s+set newColumn to "R"/,
   );
   assert.match(
     script,
-    /set candidateArea to \(columns of candidateSession\) \* \(rows of candidateSession\)/,
+    /else if rightCount < leftCount then\s+set splitSession to rightSession\s+set splitDirection to "horizontal"/,
   );
   assert.match(
     script,
-    /if \(columns of splitSession\) > \(rows of splitSession\) \* 2 then\s+tell splitSession .*split vertically[^\n]*\s+else\s+tell splitSession .*split horizontally/,
+    /if splitDirection is "vertical" then\s+tell splitSession .*split vertically[^\n]*\s+else\s+tell splitSession .*split horizontally/,
   );
-  assert.doesNotMatch(script, /tfx_split_side/);
+  assert.match(script, /set variable named "user.tfx_column" to newColumn/);
+  assert.doesNotMatch(script, /columns of|tfx_split_side/);
   assert.match(
     script,
     /end if\s+else\s+tell targetWindow .*create tab with default profile command/,

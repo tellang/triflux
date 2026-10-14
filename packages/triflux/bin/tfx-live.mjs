@@ -2754,38 +2754,67 @@ async function openItermSession(session, group, project, deps = {}) {
         set variable named "user.tfx_project" to ${projectLiteral}
         set variable named "user.tfx_group" to ${groupLiteral}
         set variable named "user.tfx_session" to ${sessionLiteral}
+        set variable named "user.tfx_column" to "L"
       end tell
       return (id of newSession) & linefeed & "false"
     end if
     set targetWindow to leaderWindow
   end if
-  -- 패인을 닫은 뒤에도 실제 배치에 맞도록, 그룹 탭에서 가장 큰 패인을 긴 쪽으로 나눈다. 1개에서 4개까지 나누면 2x2 가 된다.
+  -- 패인마다 열(L, R)을 표시하고 열별 개수로 나눌 곳을 정한다. 창 비율과 무관하게 1개에서 4개까지 2x2 가 되고,
+  -- 2x2 에서 하나를 닫은 뒤 다시 늘려도 빈 칸을 채운다. 표시가 없는 옛 패인은 L 로 본다.
   set splitSession to missing value
+  set splitDirection to ""
+  set newColumn to "L"
   repeat with candidateTab in tabs of targetWindow
     if (count of sessions of candidateTab) < 4 then
-      set inGroup to false
+      set leftSession to missing value
+      set rightSession to missing value
+      set leftCount to 0
+      set rightCount to 0
       repeat with candidateSession in sessions of candidateTab
         try
           tell candidateSession to set candidateGroup to variable named "user.tfx_group"
-          if candidateGroup is ${groupLiteral} then set inGroup to true
+          if candidateGroup is ${groupLiteral} then
+            set candidateColumn to "L"
+            try
+              tell candidateSession to set candidateColumn to variable named "user.tfx_column"
+            end try
+            if candidateColumn is "R" then
+              set rightCount to rightCount + 1
+              set rightSession to candidateSession
+            else
+              set leftCount to leftCount + 1
+              set leftSession to candidateSession
+              tell candidateSession to set variable named "user.tfx_column" to "L"
+            end if
+          end if
         end try
       end repeat
-      if inGroup then
-        set bestArea to -1
-        repeat with candidateSession in sessions of candidateTab
-          set candidateArea to (columns of candidateSession) * (rows of candidateSession)
-          if candidateArea > bestArea then
-            set bestArea to candidateArea
-            set splitSession to candidateSession
-          end if
-        end repeat
+      if leftCount + rightCount > 0 then
+        if rightCount is 0 then
+          set splitSession to leftSession
+          set splitDirection to "vertical"
+          set newColumn to "R"
+        else if leftCount is 0 then
+          set splitSession to rightSession
+          set splitDirection to "vertical"
+          set newColumn to "L"
+        else if rightCount < leftCount then
+          set splitSession to rightSession
+          set splitDirection to "horizontal"
+          set newColumn to "R"
+        else
+          set splitSession to leftSession
+          set splitDirection to "horizontal"
+          set newColumn to "L"
+        end if
         exit repeat
       end if
     end if
   end repeat
   set didSplit to splitSession is not missing value
   if didSplit then
-    if (columns of splitSession) > (rows of splitSession) * 2 then
+    if splitDirection is "vertical" then
       tell splitSession to set newSession to split vertically with default profile command ${command}
     else
       tell splitSession to set newSession to split horizontally with default profile command ${command}
@@ -2793,11 +2822,13 @@ async function openItermSession(session, group, project, deps = {}) {
   else
     tell targetWindow to set newTab to create tab with default profile command ${command}
     set newSession to current session of newTab
+    set newColumn to "L"
   end if
   tell newSession
     set variable named "user.tfx_project" to ${projectLiteral}
     set variable named "user.tfx_group" to ${groupLiteral}
     set variable named "user.tfx_session" to ${sessionLiteral}
+    set variable named "user.tfx_column" to newColumn
   end tell
   return (id of newSession) & linefeed & (didSplit as text)
 end tell`;
