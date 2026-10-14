@@ -442,15 +442,32 @@ async function runTfxLive(args, options = {}) {
     path.join(os.tmpdir(), "tfx-live-test-artifacts-"),
   );
   try {
+    const noIterm = `data:text/javascript,${encodeURIComponent(`
+      import childProcess from "node:child_process";
+      import { syncBuiltinESMExports } from "node:module";
+      import { promisify } from "node:util";
+      const original = childProcess.execFile;
+      const run = promisify(original);
+      function fakeExecFile(file, ...args) {
+        if (file === "/usr/bin/osascript") throw new Error("osascript disabled in tests");
+        return original(file, ...args);
+      }
+      fakeExecFile[promisify.custom] = (file, ...args) => file === "/usr/bin/osascript"
+        ? Promise.resolve({ stdout: "", stderr: "" }) : run(file, ...args);
+      childProcess.execFile = fakeExecFile;
+      syncBuiltinESMExports();
+    `)}`;
     const result = await execFileAsync(
       process.execPath,
-      [cli || CLI, ...args],
+      ["--import", noIterm, cli || CLI, ...args],
       {
         timeout: 20_000,
         maxBuffer: 5 * 1024 * 1024,
         ...execOptions,
         env: {
           ...process.env,
+          LC_TERMINAL: "",
+          TERM_PROGRAM: "",
           TFX_LIVE_ARTIFACT_DIR: artifactDir,
           TFX_CODEX_SESSION_REGISTRY_DIR: path.join(
             artifactDir,
@@ -1750,6 +1767,8 @@ test("peer cycles A B C and relays labeled latest responses including closure", 
       assert.equal(output.stoppedC, true);
       assert.match(output.transcript_path, /peerA-peerB-third/);
       assert.equal(started.length, 3);
+      assert.ok(started[0].group);
+      assert.ok(started.every((entry) => entry.group === started[0].group));
       assert.equal(started[2].model, "agy-model");
       assert.equal(started[2].effort, "high");
       assert.match(calls[1].prompt, /Participant A: 1/);
@@ -2087,6 +2106,32 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
     assert.equal(result.nameGenerated, true);
     assert.match(result.name, /^\d{1,2}\.\d{1,2} start-codex$/);
     assert.equal(result.nameApplied, false);
+    assert.ok(
+      log.some(
+        (args) =>
+          JSON.stringify(args) ===
+          JSON.stringify([
+            "set-option",
+            "-t",
+            "start-codex",
+            "set-titles",
+            "on",
+          ]),
+      ),
+    );
+    assert.ok(
+      log.some(
+        (args) =>
+          JSON.stringify(args) ===
+          JSON.stringify([
+            "set-option",
+            "-t",
+            "start-codex",
+            "set-titles-string",
+            result.name,
+          ]),
+      ),
+    );
     assert.ok(log.some((args) => args.includes(`/rename ${result.name}`)));
     assert.deepEqual(launch, [
       "send-keys",
@@ -2095,6 +2140,62 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
       "codex --dangerously-bypass-approvals-and-sandbox -c 'model=\"custom model\"' -c 'model_reasoning_effort=\"xhigh\"'",
       "Enter",
     ]);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("local start fixes tmux title to the explicit name outside iTerm", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-title-"));
+  try {
+    await writeReadyFakeTmux(dir);
+    const logPath = path.join(dir, "tmux-log.jsonl");
+    const result = JSON.parse(
+      await runTfxLive(
+        [
+          "start",
+          "--cli",
+          "claude",
+          "--session",
+          "titleB",
+          "--name",
+          "10.14 제목 #1",
+          "--ready-timeout",
+          "0.2",
+          "--poll-interval",
+          "1",
+        ],
+        {
+          env: {
+            PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+            TMUX_LOG: logPath,
+            TMUX_STATE: path.join(dir, "tmux-state.json"),
+          },
+        },
+      ),
+    );
+    const log = await readTmuxLog(logPath);
+    assert.equal(result.ready, true);
+    assert.ok(
+      log.some(
+        (args) =>
+          JSON.stringify(args) ===
+          JSON.stringify(["set-option", "-t", "titleB", "set-titles", "on"]),
+      ),
+    );
+    assert.ok(
+      log.some(
+        (args) =>
+          JSON.stringify(args) ===
+          JSON.stringify([
+            "set-option",
+            "-t",
+            "titleB",
+            "set-titles-string",
+            "10.14 제목 ##1",
+          ]),
+      ),
+    );
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
@@ -2371,6 +2472,32 @@ test("tfx-live start keeps resume launch keys ahead of model overrides", async (
       log.some((args) => args.some((arg) => arg.startsWith("/rename "))),
       false,
     );
+    assert.ok(
+      log.some(
+        (args) =>
+          JSON.stringify(args) ===
+          JSON.stringify([
+            "set-option",
+            "-t",
+            "resume-codex",
+            "set-titles",
+            "on",
+          ]),
+      ),
+    );
+    assert.ok(
+      log.some(
+        (args) =>
+          JSON.stringify(args) ===
+          JSON.stringify([
+            "set-option",
+            "-t",
+            "resume-codex",
+            "set-titles-string",
+            "resume-codex",
+          ]),
+      ),
+    );
     assert.deepEqual(launch, [
       "send-keys",
       "-t",
@@ -2463,6 +2590,7 @@ test("tfx-live help documents UDS-first auto default", async () => {
   const stdout = await runTfxLive(["--help"]);
 
   assert.match(stdout, /tfx-live start .*\[--model ID\] \[--effort TIER\]/);
+  assert.match(stdout, /tfx-live peer .*\[--group NAME\]/);
   assert.match(stdout, /tfx-live ask/);
   assert.match(stdout, /tfx-live interrupt/);
   assert.match(stdout, /tfx-live probe/);
