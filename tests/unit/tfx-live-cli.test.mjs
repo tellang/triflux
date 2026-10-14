@@ -658,6 +658,43 @@ async function readTmuxLog(logPath) {
     .map((line) => JSON.parse(line));
 }
 
+test("long tmux prompts go through a private file and load-buffer", async () => {
+  const prompt = "가".repeat(10_000);
+  const calls = [];
+  let loaded = null;
+  const result = await tfxLive.doAskViaTmux(
+    ADAPTERS.codex,
+    {
+      session: "long:0.1",
+      prompt,
+      noWait: true,
+      skipContextGuard: true,
+      noRelayTag: true,
+      settleMs: 1,
+      pollIntervalMs: 1,
+    },
+    {
+      runTmux: async (_remote, args) => {
+        calls.push(args);
+        if (args[0] === "load-buffer")
+          loaded = await fs.readFile(args.at(-1), "utf8");
+        return { stdout: "" };
+      },
+      captureVisible: async () => "›",
+      capturePane: async () => "›",
+      sleep: async () => {},
+    },
+  );
+  assert.equal(result.inputSent, true);
+  assert.equal(
+    calls.some((args) => args[0] === "set-buffer"),
+    false,
+  );
+  const load = calls.find((args) => args[0] === "load-buffer");
+  assert.equal(loaded, prompt);
+  await assert.rejects(fs.access(load.at(-1)));
+});
+
 test("tmux busy wait, fail, and interrupt gate prompt submission", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-busy-"));
   try {
@@ -1558,6 +1595,242 @@ test("tfx-live peer replaces the final B hop with closure and persists complete 
     assert.equal(result.stoppedB, false);
     assert.equal(transcript.hops_completed, 2);
     assert.equal(status.status, "complete");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("peer relays agy DB responses without completion marker lines", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-peer-agy-"));
+  try {
+    const calls = [];
+    let output;
+    await tfxLive.peer(
+      {
+        "cli-a": "agy",
+        "cli-b": "claude",
+        "attach-a": true,
+        "attach-b": true,
+        mode: "freeform",
+        seed: "설계를 검토해줘",
+        rounds: "1",
+      },
+      {
+        peerArtifactPaths: () => ({
+          transcriptPath: path.join(dir, "transcript.json"),
+          statusPath: path.join(dir, "status.json"),
+        }),
+        verifyAttachedPeerSide: async () => {},
+        doAsk: async (adapter, opts) => {
+          calls.push({ cli: adapter.cli, ...opts });
+          return {
+            transport: "tmux",
+            done: true,
+            response: `제안\n${PEER_HOP_DONE_MARKER}\n`,
+          };
+        },
+        printJson: (value) => {
+          output = value;
+        },
+      },
+    );
+    assert.equal(output.hops_completed, 2);
+    assert.equal(calls[0].cli, "agy");
+    assert.equal(calls[0].transport, "tmux");
+    assert.equal(output.hops[0].response, "제안");
+    assert.match(calls[1].prompt, /latest response was: 제안\nAfter/);
+    for (const field of ["cliC", "transportC", "attachedC", "stoppedC"])
+      assert.equal(Object.hasOwn(output, field), false);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("debate rounds 1 closure still carries the seed and the participant label", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-peer-r1-"));
+  try {
+    for (const third of [false, true]) {
+      const calls = [];
+      await tfxLive.peer(
+        {
+          "cli-a": "claude",
+          "cli-b": "claude",
+          ...(third ? { "cli-c": "claude" } : {}),
+          mode: "debate",
+          seed: "안건 원문",
+          rounds: "1",
+        },
+        {
+          peerArtifactPaths: () => ({
+            transcriptPath: path.join(dir, "t.json"),
+            statusPath: path.join(dir, "s.json"),
+          }),
+          doStart: async () => {},
+          doAsk: async (adapter, opts) => {
+            calls.push(opts);
+            return { transport: "tmux", done: true, response: "답" };
+          },
+          stopAfterLifecycle: async () => {},
+          printJson: () => {},
+        },
+      );
+      const closure = calls.at(-1).prompt;
+      assert.match(closure, /final closure turn/);
+      assert.match(
+        closure,
+        new RegExp(`너는 Participant ${third ? "C" : "B"}다`),
+      );
+      assert.match(closure, /원래 과제:\n안건 원문/);
+    }
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("peer rejects remote agy on every side before session operations", async () => {
+  for (const side of ["a", "b", "c"]) {
+    await assert.rejects(
+      tfxLive.peer({ [`cli-${side}`]: "agy", remote: "host" }),
+      /agy peer relay.*local.*--remote/i,
+    );
+  }
+});
+
+test("peer cycles A B C and relays labeled latest responses including closure", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-peer-three-"));
+  try {
+    for (const mode of ["counting", "freeform", "debate"]) {
+      const calls = [];
+      const started = [];
+      let output;
+      await tfxLive.peer(
+        {
+          "cli-a": "claude",
+          "cli-b": "claude",
+          "cli-c": "agy",
+          "session-c": "third",
+          "model-c": "agy-model",
+          "effort-c": "high",
+          mode,
+          seed: "원래 과제의 형식으로 답하라",
+          rounds: "2",
+        },
+        {
+          peerArtifactPaths: (a, b, c) => ({
+            transcriptPath: path.join(dir, `${a}-${b}-${c}.json`),
+            statusPath: path.join(dir, "status.json"),
+          }),
+          doStart: async (adapter, opts) => {
+            started.push({ cli: adapter.cli, ...opts });
+          },
+          doAsk: async (adapter, opts) => {
+            calls.push({ cli: adapter.cli, ...opts });
+            return {
+              transport: "tmux",
+              done: true,
+              response: String(calls.length),
+            };
+          },
+          stopAfterLifecycle: async (specs) => {
+            for (const spec of specs) spec.stopped = true;
+          },
+          printJson: (value) => {
+            output = value;
+          },
+        },
+      );
+      assert.equal(output.hops_completed, 6);
+      assert.deepEqual(
+        output.hops.map((hop) => hop.from),
+        ["a", "b", "c", "a", "b", "c"],
+      );
+      assert.equal(output.cliC, "agy");
+      assert.equal(output.transportC, "tmux");
+      assert.equal(output.attachedC, false);
+      assert.equal(output.stoppedC, true);
+      assert.match(output.transcript_path, /peerA-peerB-third/);
+      assert.equal(started.length, 3);
+      assert.equal(started[2].model, "agy-model");
+      assert.equal(started[2].effort, "high");
+      assert.match(calls[1].prompt, /Participant A: 1/);
+      assert.doesNotMatch(calls[1].prompt, /Participant C/);
+      for (let i = 2; i < calls.length; i += 1) {
+        const side = output.hops[i].from;
+        for (const other of ["a", "b", "c"].filter((s) => s !== side)) {
+          const latest = output.hops
+            .slice(0, i)
+            .findLast((h) => h.from === other);
+          assert.ok(
+            calls[i].prompt.includes(
+              `Participant ${other.toUpperCase()}: ${latest.response}`,
+            ),
+          );
+        }
+        assert.doesNotMatch(calls[i].prompt, /Participant (?:claude|agy)/);
+      }
+      assert.match(calls[5].prompt, /final closure turn/);
+      if (mode === "debate") {
+        assert.ok(
+          calls[0].prompt.startsWith(
+            "너는 Participant A다.\n원래 과제:\n원래 과제의 형식으로 답하라",
+          ),
+        );
+        // 안건은 A 에게만 먼저 가므로 B 와 C 의 첫 차례에도 원문이 있어야 한다.
+        for (const i of [1, 2])
+          assert.match(
+            calls[i].prompt,
+            /원래 과제:\n원래 과제의 형식으로 답하라/,
+          );
+        assert.doesNotMatch(calls[3].prompt, /원래 과제:/);
+        assert.match(calls[1].prompt, /너는 Participant B다/);
+        assert.match(calls[1].prompt, /다른 참여자의 답을 검토하라/);
+        assert.doesNotMatch(calls[1].prompt, /1-2 sentences/);
+      }
+    }
+    const bridgePath = await writeFakeBridge(
+      dir,
+      "console.log(JSON.stringify({ok:true,text:'응답',matchedCompletion:true,inputSent:true}));",
+    );
+    const attached = JSON.parse(
+      await runTfxLive(
+        [
+          "peer",
+          "--cli-a",
+          "claude",
+          "--transport-a",
+          "uds",
+          "--short-a",
+          "aaaaaaaa",
+          "--cli-b",
+          "claude",
+          "--transport-b",
+          "uds",
+          "--short-b",
+          "bbbbbbbb",
+          "--cli-c",
+          "claude",
+          "--transport-c",
+          "uds",
+          "--short-c",
+          "cccccccc",
+          "--bridge",
+          bridgePath,
+          "--bridge-c",
+          bridgePath,
+          "--mode",
+          "debate",
+          "--rounds",
+          "2",
+          "--attach-c",
+        ],
+        { env: { TFX_LIVE_ARTIFACT_DIR: dir } },
+      ),
+    );
+    assert.equal(attached.hops_completed, 6);
+    assert.equal(attached.attachedC, true);
+    assert.equal(attached.stoppedC, false);
+    assert.match(attached.transcript_path, /peer-peerA-peerB-peerC-/);
+    assert.equal(attached.hops[2].transport, "uds");
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
