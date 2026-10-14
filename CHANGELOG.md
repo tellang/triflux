@@ -2,6 +2,15 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.68.0] - 2026-10-14
+
+### Changed
+- models: Antigravity 프로필을 Gemini 4 Argon 가족(`argon_low`, `argon`, `argon_high`)으로 바꾸고 Flash 가족을 뺀다. 옛 `flash*` 이름은 `argon_low` 로 해석하고, `models.json` 의 `argon` 고정을 지원한다. 같은 과제 세 개에서 Argon Low 가 3.8 Flash High 와 같은 정답을 훨씬 빨리 냈다(ADR-0038) (#763)
+- routing: `document-specialist` 를 Codex 에서 Antigravity 로 옮기고, 입력이 큰 코드베이스 읽기는 Antigravity 로 보내는 규칙을 더한다. Claude, Codex, Argon 3자 토론에서 셋 다 동의한 배정만 바꿨다. explore 는 측정에서 Argon Low 가 가장 느려 Claude 에 둔다 (#763)
+
+### Fixed
+- route: Codex 의 최종 답이 한 줄 JSON(배열, 객체 등)이면 `=== OUTPUT ===` 이 비던 문제를 고친다. 후처리기가 파싱되는 줄을 모두 Codex 이벤트로 보고 버렸다. JSON 결과를 요청하는 `tfx-review` 같은 경로에서 결과가 사라질 수 있었다 (#764)
+
 ## [10.67.1] - 2026-10-14
 
 ### Changed
