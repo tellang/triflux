@@ -6047,13 +6047,26 @@ async function peer(flags, deps = {}) {
               .join("\n")
           : null;
       const isClosure = hopIndex === rounds * participants.length - 1;
+      const debateTurn = {
+        self: side,
+        seed: flags.seed ?? PEER_DEFAULT_SEED,
+        firstTurn: hopIndex < participants.length,
+      };
+      // rounds 1 이면 마지막 참여자의 첫 차례가 closure 이므로 여기서도 안건과 라벨을 넣는다.
+      const debateHeader =
+        mode === "debate"
+          ? [
+              `너는 Participant ${side.toUpperCase()}다.`,
+              ...(debateTurn.firstTurn
+                ? [`원래 과제:\n${debateTurn.seed}`]
+                : []),
+            ].join("\n")
+          : null;
       const sent = isClosure
-        ? buildPeerClosurePrompt(previous, otherResponses)
-        : peerPrompt(mode, hopIndex, previous, otherResponses, {
-            self: side,
-            seed: flags.seed ?? PEER_DEFAULT_SEED,
-            firstTurn: hopIndex < participants.length,
-          });
+        ? [debateHeader, buildPeerClosurePrompt(previous, otherResponses)]
+            .filter(Boolean)
+            .join("\n")
+        : peerPrompt(mode, hopIndex, previous, otherResponses, debateTurn);
       const result = await askSession(adapter, askOptsFromPeerBase(base, sent));
       // agy 는 tmux 전송이어도 DB 에서 답을 읽으므로 표식 줄을 뺀다.
       if (

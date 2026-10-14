@@ -1609,6 +1609,47 @@ test("peer relays agy DB responses without completion marker lines", async () =>
   }
 });
 
+test("debate rounds 1 closure still carries the seed and the participant label", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-peer-r1-"));
+  try {
+    for (const third of [false, true]) {
+      const calls = [];
+      await tfxLive.peer(
+        {
+          "cli-a": "claude",
+          "cli-b": "claude",
+          ...(third ? { "cli-c": "claude" } : {}),
+          mode: "debate",
+          seed: "안건 원문",
+          rounds: "1",
+        },
+        {
+          peerArtifactPaths: () => ({
+            transcriptPath: path.join(dir, "t.json"),
+            statusPath: path.join(dir, "s.json"),
+          }),
+          doStart: async () => {},
+          doAsk: async (adapter, opts) => {
+            calls.push(opts);
+            return { transport: "tmux", done: true, response: "답" };
+          },
+          stopAfterLifecycle: async () => {},
+          printJson: () => {},
+        },
+      );
+      const closure = calls.at(-1).prompt;
+      assert.match(closure, /final closure turn/);
+      assert.match(
+        closure,
+        new RegExp(`너는 Participant ${third ? "C" : "B"}다`),
+      );
+      assert.match(closure, /원래 과제:\n안건 원문/);
+    }
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("peer rejects remote agy on every side before session operations", async () => {
   for (const side of ["a", "b", "c"]) {
     await assert.rejects(
