@@ -21,8 +21,9 @@ function structuredMessage(message: string) {
 }
 
 function missingRecipient(result: ToolCallResult<'SendMessage'>) {
-  if (!result.isError) return false
-  const text = result.text ?? (typeof result.result === 'string' ? result.result : '')
+  const body = result.result
+  if (!result.isError && !(body && typeof body === 'object' && 'success' in body && body.success === false)) return false
+  const text = result.text ?? (typeof body === 'string' ? body : body && typeof body === 'object' && 'message' in body && typeof body.message === 'string' ? body.message : '')
   return /no (?:agent|session|recipient) (?:named|found|with\b)|(?:agent|session|recipient)\b[^\n]*\b(?:not found|does not exist|doesn't exist)|unknown (?:agent|session|recipient)/i.test(text)
 }
 
@@ -58,7 +59,7 @@ export function registerNativeMessage(on: On) {
     if (!missingRecipient(original)) return original
     try {
       const sent = await send($, e.to, e.message)
-      return sent.reason === 'use-send-message' ? original : sent.answer
+      return sent.reason === 'use-send-message' || 'deny' in sent.answer ? original : sent.answer
     } catch {
       return original
     }

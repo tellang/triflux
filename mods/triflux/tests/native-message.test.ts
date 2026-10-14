@@ -2,7 +2,8 @@ import type { On, ProcessRunResult } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
 const sent = { ok: true, to: { cli: 'codex', name: '10.14 검토', target: 'cx:0.0' }, transport: 'queue', status: 'sent' }
-const missing = { isError: true, result: "No agent named '@10.14 검토' is currently addressable.", text: "No agent named '@10.14 검토' is currently addressable.", ref: 7 } as const
+const missingResponse = { success: false, message: "No agent named 'zz-nonexistent-probe-1014' is reachable.\nUse ListAgents to see everyone you can message." }
+const missing = { result: missingResponse, text: JSON.stringify(missingResponse), ref: 7 } as const
 const listing = { result: { listing: 'Claude agents: reviewer', sections: [], notes: [] }, text: 'Claude agents: reviewer', ref: 8, context: ['keep'] }
 
 function processStub(on: On, respond: (argv: readonly string[]) => unknown, exitCode = 0) {
@@ -32,7 +33,7 @@ for (const to of ['codex:10.14 검토', 'agy:10.14 검토', 'antigravity:10.14 �
 }
 
 test('접두사 없는 성공은 원래 결과를 보존하고 프로세스를 실행하지 않는다', async ($, on) => {
-  const native = { result: 'Message sent to reviewer', ref: 5, text: 'native text' }
+  const native = { result: { success: true, message: 'Message sent to reviewer' }, ref: 5, text: 'native text' }
   on('tool.call', { tool: 'SendMessage' }, () => native)
   const calls = processStub(on, () => sent)
   expect(await $.tool.call({ tool: 'SendMessage', to: 'reviewer', message: '검토' })).toEqual(native)
@@ -49,6 +50,19 @@ test('없는 이름 오류 뒤에는 한 번만 send 를 시도한다', async ($
   expect(result.result).toContain('queue')
   expect(result.isError).toBeUndefined()
 })
+
+for (const [kind, native] of [
+  ['일반 결과', { result: missingResponse, ref: 7 }],
+  ['오류 결과', { isError: true, result: "No agent named 'zz-nonexistent-probe-1014' is reachable.", ref: 7 }],
+] as const) {
+  test(`text 없는 ${kind}의 이름 오류도 send 를 시도한다`, async ($, on) => {
+    on('tool.call', { tool: 'SendMessage' }, () => native)
+    const calls = processStub(on, () => sent)
+    const result = await $.tool.call({ tool: 'SendMessage', to: '10.14 검토', message: '검토' })
+    expect(calls.length).toBe(1)
+    expect(result.result).toContain('queue')
+  })
+}
 
 test('Claude 대상의 use-send-message 거부는 원래 오류를 보존한다', async ($, on) => {
   on('tool.call', { tool: 'SendMessage' }, () => missing)
@@ -112,6 +126,13 @@ test('재시도 프로세스 실패도 원래 SendMessage 를 다시 실행하�
   expect(await $.tool.call({ tool: 'SendMessage', to: '10.14 검토', message: '검토' })).toEqual(missing)
   expect(nativeCalls).toBe(1)
   expect(processCalls).toBe(1)
+})
+
+test('재시도 send 실패는 원래 결과를 보존한다', async ($, on) => {
+  on('tool.call', { tool: 'SendMessage' }, () => missing)
+  const calls = processStub(on, () => ({ ok: false, reason: 'ambiguous-target', error: '세션이 둘이다' }), 1)
+  expect(await $.tool.call({ tool: 'SendMessage', to: '10.14 검토', message: '검토' })).toEqual(missing)
+  expect(calls.length).toBe(1)
 })
 
 test('ListAgents 는 기존 목록 뒤에 로컬 Codex 와 agy 이름을 덧붙인다', async ($, on) => {
