@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.71.0] - 2026-10-14
+
+### Added
+- setup: agy 가 설치된 기기에서 `~/.gemini/antigravity-cli/skills` 에 tfx-live(agy 호스트 안내를 붙인 사본)와 tfx-lead 스킬을 설치한다. agy 세션도 지시서 없이 `tfx-live send` 같은 사용법을 안다. 사용자 사본은 보존한다 (#776)
+
 ## [10.70.0] - 2026-10-14
 
 ### Added
