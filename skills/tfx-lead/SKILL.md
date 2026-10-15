@@ -103,6 +103,47 @@ tfx-live ask --cli codex --session cx-impl --prompt "<지시서 경로>를 읽�
 - 같은 cwd 에 Codex TUI 가 여럿이면 `--thread UUID`를 명시한다.
 - 잘못 보낸 queue 요청은 TUI 가 가져가기 전에만 `tfx-live queue --cli codex --session <이름> --request-id <id> --delete all`로 지운다. 결과의 `missing`은 이미 배달된 것이다.
 
+### 실행 위치 결정
+
+워커를 어디서 돌릴지(m5 로컬, m2, ryzen)는 리드가 디스패치 직전에 정해 지시서에 적는다. 워커는 받은 위치에서 실행만 하고, 압박을 느끼면 리드에게 보고한다. 피어 세션이 워커에 오프로드 지침을 따로 뿌리지 않는다.
+
+```bash
+sysctl -n kern.memorystatus_vm_pressure_level   # 1 normal, 2 warn, 4 critical
+node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 준비 상태
+```
+
+- 기준값은 `.claude/rules/tfx-routing.md`의 "원격 오프로드 기본 정책"이 정본이다. 4 는 무조건 원격, 2 는 무거운 shard 와 워커 3개 이상 신규 생성만 원격, 1 은 로컬
+- 호스트는 작업 성격으로 고른다. 무거운 계산과 Claude 워커는 ryzen 우선. git push, PR, Codex 스킬이 필요한 작업은 m2 이고, m2 는 probe 압박이 1 일 때만 보낸다. 둘 다 안 되면 전체 테스트 스위트는 미루고(10절 안전) 나머지만 로컬 순차. 세부 조건은 위 정본의 호스트 선택 항목
+- 지시서에는 실행 위치와 호스트별 주의를 적는다. ryzen 은 Windows(PowerShell 7, 기본 디렉터리 `%USERPROFILE%\Desktop\Projects`) 라 리드가 psmux 세션을 만들어 그 안에서 돌린다. remote-spawn 의 Windows 감싸기가 들어오기 전까지 이 수작업이 필요하다
+- 원격에 띄운 세션도 띄운 리드가 종료까지 책임진다
+
+#### Windows 원격 psmux 절차
+
+`remote-spawn` 이 Windows 원격을 감싸기 전까지 리드가 직접 한다. 원격 셸은 PowerShell 이므로
+인라인 `ssh host "..."` 로 보내지 않고(첫 단어만 전달된다) 스크립트를 `scp` 로 올려 `pwsh -File` 로 실행한다.
+
+```powershell
+# start-worker.ps1 (ryzen 에서 실행). 세션 이름은 tfx- 접두사, 경로는 Windows 형식
+psmux new-session -d -s tfx-1015-fulltest -c "$env:USERPROFILE\Desktop\Projects\triflux"
+psmux send-keys -t tfx-1015-fulltest "claude -n '10.15 전체 테스트' --model sonnet" Enter
+```
+
+```bash
+scp start-worker.ps1 ryzen:start-worker.ps1 && ssh ryzen pwsh -File start-worker.ps1
+ssh ryzen psmux capture-pane -p -t tfx-1015-fulltest          # 확인
+```
+
+```powershell
+# stop-worker.ps1. 연결을 먼저 끊고 2초 뒤 세션을 지운다(WT ConPTY 종료 경쟁 회피)
+# detach-client 의 -t 는 클라이언트 이름이라 세션을 분리하지 못한다. 세션은 -s 로 지정한다
+psmux detach-client -s tfx-1015-fulltest
+if ($LASTEXITCODE -ne 0) { Write-Error "detach 실패. psmux list-clients 로 확인한 뒤 다시 실행"; exit 1 }
+Start-Sleep -Seconds 2
+psmux kill-session -t tfx-1015-fulltest
+```
+
+`send-keys` 로 보내는 명령은 PowerShell 문법이다. `&&`, `export`, `$(...)`, Unix 경로를 쓰지 않는다.
+
 ## 4. 지시 전달
 
 긴 지시는 지시서 파일에 쓰고 프롬프트에는 경로만 보낸다.
@@ -205,6 +246,7 @@ tfx-live wait --cli claude --short <8hex> --request-id <requestId> --timeout 600
 
 - [ ] 이름이 `<월>.<일> <주제>` 형식이다
 - [ ] 역할에 맞는 모델과 effort 를 골랐다
+- [ ] 압박을 재고 실행 위치(m5/m2/ryzen)를 지시서에 적었다
 - [ ] 사용자에게 모델과 tmux 세션명을 알렸다
 - [ ] 지시서 경로를 보냈고 작업 시작을 확인했다
 - [ ] 세션 CLI 에 맞는 컨텍스트 보고 기준이 지시서에 있다
