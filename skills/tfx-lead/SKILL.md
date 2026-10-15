@@ -117,6 +117,24 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 - 지시서에는 실행 위치와 호스트별 주의를 적는다. ryzen 은 Windows(PowerShell 7)를 쓰며 기본 디렉터리는 `%USERPROFILE%\Desktop\Projects`다. 로컬 멀티플렉서와 원격 psmux 3.4.0 이상이 있으면 `remote-spawn`이 원격 psmux 세션 안에서 Claude를 실행한다
 - 원격에 띄운 세션도 띄운 리드가 종료까지 책임진다
 
+#### 압박 변화 대응
+
+리드를 맡으면 세션 안에서 `/tfx-lead on` 을 실행한다. 그러면 triflux mod 가 2초마다
+`kern.memorystatus_vm_pressure_level` 을 읽어 두 표본 연속으로 확정한 단계 전이를 턴으로 넣어 준다. 상주 프로세스와
+설치는 없다([ADR-0041](../../docs/adr/0041-memory-pressure-watcher.md)). 리드를 넘기거나 끝낼 때 `/tfx-lead off`.
+실행 중인 세션은 다른 기기로 옮길 수 없다는 전제로, 전이별 행동은 다음과 같다.
+
+| 전이 | 행동 |
+| --- | --- |
+| 1 → 2 (warn) | 새 로컬 워커는 한 번에 1개까지. 무거운 shard 와 전체 테스트는 원격으로. 실행 중인 것은 그대로 둔다 |
+| 2 → 4 (critical) | 순서대로. 1) 새 스폰 전부 중단 2) 유휴 headless 워커와 끝난 세션을 `tfx multi stop`, `tfx-live stop` 으로 닫는다 3) 재개 가능한 Codex 워커는 중단하고 thread ID 와 남은 지시를 기록해 원격에서 다시 띄운다 4) 사용자가 쓰는 대화형 세션은 건드리지 않고 상황과 한 일을 사용자에게 알린다 5) 리드 자신은 컨텍스트가 60% 를 넘었으면 compact 한다 |
+| 4 → 2 | 보류한 디스패치를 원격 우선으로 재개한다. 로컬 신규 스폰은 아직 1개까지 |
+| 2 → 1 (normal) | 로컬 정책으로 돌아간다. 중단했던 작업이 남아 있으면 먼저 재개한다 |
+
+`/tfx-lead status` 는 등록 여부와 마지막 표본의 단계·시각을 보여 준다. `/clear` 뒤에도 등록이 이어지지만 resume 한
+세션은 다시 `/tfx-lead on` 한다. 긴 턴 중의 전이는 턴이 끝난 뒤 마지막 상태로 합쳐져 오므로 받은 즉시 `/tfx-lead status` 로
+현재 단계를 확인한다. 등록이 꺼져 있거나 mod 가 없는 세션은 디스패치 직전 `sysctl` 측정(ADR-0040)만 한다.
+
 #### Windows 원격 수동 실행 대안
 
 기본 경로는 `remote-spawn --host <host>`다. 지원 버전의 psmux가 있으면 원격 세션을 감싸고,
@@ -252,6 +270,7 @@ tfx-live wait --cli claude --short <8hex> --request-id <requestId> --timeout 600
 - [ ] 이름이 `<월>.<일> <주제>` 형식이다
 - [ ] 역할에 맞는 모델과 effort 를 골랐다
 - [ ] 압박을 재고 실행 위치(m5/m2/ryzen)를 지시서에 적었다
+- [ ] 리드 세션에서 `/tfx-lead on` 을 했다(끝낼 때 `/tfx-lead off`)
 - [ ] 사용자에게 모델과 tmux 세션명을 알렸다
 - [ ] 지시서 경로를 보냈고 작업 시작을 확인했다
 - [ ] 세션 CLI 에 맞는 컨텍스트 보고 기준이 지시서에 있다
