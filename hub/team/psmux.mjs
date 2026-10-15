@@ -997,11 +997,18 @@ function killOrphanMcpProcesses(sessionName) {
 function detachAttachedClients(sessionName, waitMs = 750) {
   const attachedCount = getPsmuxSessionAttachedCount(sessionName);
   if (!Number.isFinite(attachedCount) || attachedCount <= 0) return false;
+  // -t 는 클라이언트 이름이다. 세션에 붙은 클라이언트 전부를 떼려면 -s 로 세션을 주고,
+  // tmux 의 접두사 매칭이 같은 접두사의 다른 세션을 떼지 않게 정확한 타깃을 쓴다.
   try {
-    psmuxExec(["detach-client", "-t", sessionName], { stdio: "ignore" });
+    psmuxExec(["detach-client", "-s", exactSessionTarget(sessionName)], {
+      stdio: "ignore",
+    });
     sleepMs(waitMs);
     return true;
-  } catch {
+  } catch (error) {
+    process.stderr.write(
+      `[psmux] detach-client 실패 (${sessionName}): ${error?.message || error}\n`,
+    );
     return false;
   }
 }

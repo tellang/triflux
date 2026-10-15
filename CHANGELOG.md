@@ -4,6 +4,9 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- psmux: 세션 종료 전 분리가 `detach-client -t <세션>` 이라 세션을 분리하지 못하고 실패도 숨겼다. `-s <세션>` 으로 붙은 클라이언트 전부를 떼고 실패는 stderr 에 남긴다. 규칙 5 예시도 같이 고친다
+
 ### Changed
 - team: `tfx multi` 의 `auto` 모드가 호출자 stdout 이 TTY 가 아니면 `TMUX` 안이라도 headless 를 고른다. Claude Code Bash 도구 같은 비TTY 호출에서 원하지 않은 Claude 리드 팀이 떠서 토큰을 쓰고 `--timeout` 과 `results.json` 이 없던 문제를 없앤다. 대화형 팀이 필요하면 `--teammate-mode tmux` 를 명시한다 (ADR-0040)
 - team: headless 의 `--auto-attach` 기본값을 Windows 에서만 켠다. macOS/Linux 는 `claude agents` 행이 관전 창이라 호출자 tmux 창을 30% 나누던 attach pane 을 만들지 않는다. 나눌 때는 그 사실과 `--no-auto-attach` 를 출력에 남긴다. `--auto-attach` 는 무시 플래그에서 빠져 opt-in 이 된다 (ADR-0040)

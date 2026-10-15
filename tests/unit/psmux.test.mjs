@@ -597,6 +597,11 @@ describe("killPsmuxSession cleanup", () => {
       detachClientIdx >= 0,
       "attached session이면 detach-client가 호출되어야 함",
     );
+    assert.deepEqual(
+      calls[detachClientIdx].args.slice(1, 3),
+      ["-s", process.platform === "win32" ? "tfx-kill" : "=tfx-kill"],
+      "detach-client 는 -s 와 정확한 세션 타깃을 써야 한다 (-t 는 클라이언트 이름, 접두사 매칭 금지)",
+    );
 
     // 순서 검증: detach-client가 pipe-pane / taskkill보다 먼저
     const firstPipePaneIdx = calls.findIndex(
