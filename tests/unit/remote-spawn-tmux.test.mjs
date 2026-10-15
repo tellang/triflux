@@ -441,7 +441,15 @@ describe("원격 tmux 기록 수명", () => {
           },
           multiplexerExec: (args) => calls.push(["tmux", args]),
           createSession: (name) => calls.push(["psmux", name]),
-          sendKeys: (pane, command) => calls.push(["send", pane, command]),
+          sendKeys: (pane, command) => {
+            const path = command.match(/-File '([^']+)'/)?.[1];
+            assert.ok(path);
+            try {
+              calls.push(["send", pane, readFileSync(path, "utf8")]);
+            } finally {
+              rmSync(path, { force: true });
+            }
+          },
           startWatcher: () => {},
           openAttachTab: (name) => calls.push(["attach", name]),
         });

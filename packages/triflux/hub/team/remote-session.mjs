@@ -122,11 +122,21 @@ function parseProbeLines(text) {
 function normalizePwshProbeEnv(parsed) {
   if (parsed.shell !== "pwsh" || parsed.os !== "win32") return null;
   if (!parsed.home) return null;
+  const psmuxVersion = parsed.psmuxVersion || null;
+  const version = psmuxVersion && parseVersion(psmuxVersion);
   return Object.freeze({
     claudePath:
       !parsed.claude || parsed.claude === "notfound" ? null : parsed.claude,
     psmuxPath:
       !parsed.psmux || parsed.psmux === "notfound" ? null : parsed.psmux,
+    psmuxVersion,
+    // tfx-psmux.md 규칙 5의 3.3.x detach 미지원 범위를 제외한다. 3.4.0은 일반 이름도 정확 매칭한다.
+    psmuxSupported: Boolean(
+      parsed.psmux &&
+        parsed.psmux !== "notfound" &&
+        version &&
+        compareVersions(version, [3, 4, 0]) >= 0,
+    ),
     home: parsed.home,
     os: "win32",
     shell: "pwsh",
@@ -243,7 +253,7 @@ function probeRemoteEnvViaPwsh(host, execSsh) {
     "Write-Output 'shell=pwsh'",
     'Write-Output "home=$env:USERPROFILE"',
     'if (Test-Path "$env:USERPROFILE\\.local\\bin\\claude.exe") { Write-Output "claude=$env:USERPROFILE\\.local\\bin\\claude.exe" } elseif (Get-Command claude -ErrorAction SilentlyContinue) { Write-Output "claude=$((Get-Command claude).Source)" } else { Write-Output \'claude=notfound\' }',
-    "if (Get-Command psmux -ErrorAction SilentlyContinue) { Write-Output \"psmux=$((Get-Command psmux).Source)\" } else { Write-Output 'psmux=notfound' }",
+    'if (Get-Command psmux -ErrorAction SilentlyContinue) { Write-Output "psmux=$((Get-Command psmux).Source)"; $psmuxVersion = psmux -V 2>$null; if ($LASTEXITCODE -eq 0) { Write-Output "psmuxVersion=$psmuxVersion" } } else { Write-Output \'psmux=notfound\' }',
     "Write-Output \"os=$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows) ? 'win32' : 'other')\"",
   ].join("; ");
 
@@ -387,7 +397,7 @@ export function probeRemoteEnv(host, opts = {}) {
         cached.env.os === opts.osHint ||
         (opts.osHint === "windows" && cached.env.os === "win32")) &&
       (cached.env.os === "win32"
-        ? "psmuxPath" in cached.env
+        ? "psmuxVersion" in cached.env && "psmuxSupported" in cached.env
         : "tmuxPath" in cached.env && "versions" in cached.env)
     )
       return cached.env;

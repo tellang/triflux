@@ -170,7 +170,7 @@ Codex는 `models_cache.json`의 공개 모델 중 effort를 지원하는 후보�
 - sysctl 실패 시 대체 신호: `vm_stat` 5초 간격 2회 측정에서 swapouts 증가
 - 원격으로 넘기기 전에 `node scripts/remote-spawn.mjs --probe <host>`로 호스트 상태를 먼저 확인한다
 - 호스트 선택은 작업 성격으로 나눈다. 무거운 계산(전체 테스트 스위트, 빌드, 대규모 리팩터)과 Claude 워커는 ryzen(31.6GB, 여유 약 20GB) 우선. git push 나 PR, Codex 스킬이 필요한 작업은 m2 로 보내되 m2 는 16GB 라 probe 압박이 1 일 때만 보낸다. 둘 다 안 되면 전체 테스트 스위트는 원격 격리 호스트가 준비될 때까지 미루고(tfx-lead 안전 절), 그 밖의 작업만 로컬에서 순차로 돌린다
-- ryzen 은 Windows(PowerShell 7) 라 원격 세션을 psmux 로 감싼다. `remote-spawn` 은 지금 posix 원격만 원격 tmux 로 감싸고 Windows 원격은 그대로 두므로(후속 레인), 그동안은 리드가 psmux 세션을 직접 만들어 그 안에서 띄운다. 절차는 설치본에 함께 배포되는 `skills/tfx-lead/SKILL.md`의 "Windows 원격 psmux 절차", 셸 규약 전문은 clone 의 `.claude/rules/tfx-psmux.md`. ryzen 은 Codex 스킬과 필요한 GitHub 계정의 gh 인증이 아직 준비되지 않아 그 작업은 보내지 않는다. agy 는 ryzen 에도 m5 와 같은 버전이 있다
+- ryzen 은 Windows(PowerShell 7) 라 원격 세션을 psmux 로 감싼다. `remote-spawn` 은 로컬 멀티플렉서와 원격 psmux 3.4.0 이상이 있으면 Windows 원격 Claude를 원격 psmux로 감싼다. 원격 psmux가 없거나 지원 버전 미만이면 연결 종료 시 Claude도 종료되는 기존 경로로 실행한다. `remote-spawn`을 쓸 수 없을 때의 수동 대안은 설치본에 함께 배포되는 `skills/tfx-lead/SKILL.md`의 "Windows 원격 수동 실행 대안", 셸 규약 전문은 clone 의 `.claude/rules/tfx-psmux.md`. ryzen 은 Codex 스킬과 필요한 GitHub 계정의 gh 인증이 아직 준비되지 않아 그 작업은 보내지 않는다. agy 는 ryzen 에도 m5 와 같은 버전이 있다
 - 행동: 원격 코드 변경은 별도 worktree와 세션에서 실행한다. 탐색·대화형은 tfx-remote로 원격 세션을 띄운다
 - 로컬 여유가 충분하면 로컬 유지. 사용자가 로컬/원격을 명시하면 그에 따른다
 - 원격 호스트 부재 시(ssh 불응) 조용히 로컬로 강등하지 말고 한 줄 알린 뒤 로컬 진행

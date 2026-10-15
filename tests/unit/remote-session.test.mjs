@@ -44,7 +44,7 @@ describe("remote-session 공용 프로브", () => {
         join(cacheDir, "unit-host.json"),
         JSON.stringify({
           cachedAt: Date.now(),
-          env: WIN_ENV,
+          env: { ...WIN_ENV, psmuxPath: "C:/tools/psmux.exe" },
         }),
       );
       let calls = 0;
@@ -61,11 +61,14 @@ describe("remote-session 공용 프로브", () => {
             "base64",
           ).toString("utf16le");
           assert.match(script, /Get-Command psmux/);
-          return "os=win32\nshell=pwsh\nhome=C:\\Users\\example\nclaude=C:\\tools with spaces\\claude.ps1\npsmux=C:\\tools\\psmux.exe\n";
+          assert.match(script, /psmux -V/);
+          return "os=win32\nshell=pwsh\nhome=C:\\Users\\example\nclaude=C:\\tools with spaces\\claude.ps1\npsmux=C:\\tools\\psmux.exe\npsmuxVersion=psmux 3.4.0\n";
         },
       });
       assert.equal(calls, 1);
       assert.equal(env.psmuxPath, "C:\\tools\\psmux.exe");
+      assert.equal(env.psmuxVersion, "psmux 3.4.0");
+      assert.equal(env.psmuxSupported, true);
       assert.equal(env.claudePath, "C:\\tools with spaces\\claude.ps1");
       assert.deepEqual(
         probeRemoteEnv("unit-host", {
@@ -81,6 +84,15 @@ describe("remote-session 공용 프로브", () => {
           "os=win32\nshell=pwsh\nhome=C:\\Users\\example\nclaude=C:\\bin\\claude.ps1\npsmux=notfound\n",
       });
       assert.equal(missing.psmuxPath, null);
+      for (const version of ["psmux 3.3.8", "psmux 3.3.9", "unknown", ""]) {
+        const unsupported = probeRemoteEnv("unit-host", {
+          cacheDir,
+          force: true,
+          execSsh: () =>
+            `os=win32\nshell=pwsh\nhome=C:/Users/example\nclaude=C:/bin/claude.ps1\npsmux=C:/tools/psmux.exe\npsmuxVersion=${version}\n`,
+        });
+        assert.equal(unsupported.psmuxSupported, false, version);
+      }
     } finally {
       rmSync(cacheDir, { recursive: true, force: true });
     }
