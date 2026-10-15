@@ -2,14 +2,17 @@
 
 All notable changes to triflux will be documented in this file.
 
-## [Unreleased]
+## [10.75.0] - 2026-10-15
 
 ### Fixed
-- psmux: 세션 종료 전 분리가 `detach-client -t <세션>` 이라 세션을 분리하지 못하고 실패도 숨겼다. `-s <세션>` 으로 붙은 클라이언트 전부를 떼고 실패는 stderr 에 남긴다. 규칙 5 예시도 같이 고친다
+- remote: posix 원격(darwin, linux)의 claude 를 원격 detached tmux 세션에서 실행하고 로컬은 `ssh -t tmux attach` 로 붙기만 한다. ssh 가 끊기거나 노트북이 잠들어도 원격 claude 가 살아 있고 `--attach` 로 다시 붙는다. `--kill` 은 원격 `has-session` 으로 종료를 확인한다. 원격 프로브를 `hub/team/remote-session.mjs` 하나로 합치고, 점이 든 호스트 이름의 tmux 매칭 실패를 고친다. Windows 원격은 다음 릴리스에서 psmux 로 감싼다 (#787)
+- psmux: 세션 종료 전 분리가 `detach-client -t <세션>` 이라 세션을 분리하지 못하고 실패도 숨겼다. `-s <세션>` 으로 붙은 클라이언트 전부를 떼고 실패는 stderr 에 남긴다. 규칙 5 예시도 같이 고친다 (#788)
 
 ### Changed
-- team: `tfx multi` 의 `auto` 모드가 호출자 stdout 이 TTY 가 아니면 `TMUX` 안이라도 headless 를 고른다. Claude Code Bash 도구 같은 비TTY 호출에서 원하지 않은 Claude 리드 팀이 떠서 토큰을 쓰고 `--timeout` 과 `results.json` 이 없던 문제를 없앤다. 대화형 팀이 필요하면 `--teammate-mode tmux` 를 명시한다 (ADR-0040)
-- team: headless 의 `--auto-attach` 기본값을 Windows 에서만 켠다. macOS/Linux 는 `claude agents` 행이 관전 창이라 호출자 tmux 창을 30% 나누던 attach pane 을 만들지 않는다. 나눌 때는 그 사실과 `--no-auto-attach` 를 출력에 남긴다. `--auto-attach` 는 무시 플래그에서 빠져 opt-in 이 된다 (ADR-0040)
+- team: `tfx multi` 의 `auto` 모드가 호출자 stdout 이 TTY 가 아니면 `TMUX` 안이라도 headless 를 고른다. Claude Code Bash 도구 같은 비TTY 호출에서 원하지 않은 Claude 리드 팀이 떠서 토큰을 쓰고 `--timeout` 과 `results.json` 이 없던 문제를 없앤다. 대화형 팀이 필요하면 `--teammate-mode tmux` 를 명시한다 (ADR-0040, #785)
+- team: headless 의 `--auto-attach` 기본값을 Windows 에서만 켠다. macOS/Linux 는 `claude agents` 행이 관전 창이라 호출자 tmux 창을 30% 나누던 attach pane 을 만들지 않는다. 나눌 때는 그 사실과 `--no-auto-attach` 를 출력에 남긴다. `--auto-attach` 는 무시 플래그에서 빠져 opt-in 이 된다 (ADR-0040, #785)
+- lead: RAM 압박에 따른 워커 실행 위치(m5, m2, ryzen)는 리드가 디스패치 직전에 정해 지시서에 적는다. 무거운 계산은 ryzen, git push 와 Codex 스킬이 필요한 작업은 m2. tfx-lead 스킬에 Windows 원격 psmux 절차를 넣는다 (#786)
+
 ## [10.74.0] - 2026-10-14
 
 ### Added
