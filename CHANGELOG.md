@@ -2,10 +2,13 @@
 
 All notable changes to triflux will be documented in this file.
 
-## [Unreleased]
+## [10.76.0] - 2026-10-15
 
 ### Added
-- mods: `/tfx-lead on|off|status`로 리드 세션의 메모리 압박 감시를 제어한다. 리드 mod가 확정한 압박 전이마다 대응 턴을 연다.
+- mods: `/tfx-lead on|off|status` 로 리드 세션의 메모리 압박 감시를 켠다. 등록한 대화형 macOS 세션의 mod 가 2초마다 `kern.memorystatus_vm_pressure_level` 을 읽어 두 표본 연속으로 확정한 단계 전이마다 대응 턴을 연다. 상주 프로세스와 설치는 없다. `/clear` 뒤에도 등록이 이어지고 긴 턴 중의 전이는 마지막 상태로 합쳐 보낸다. 전이별 행동 표는 tfx-lead 스킬 "압박 변화 대응" 절 (ADR-0041, #791)
+
+### Fixed
+- remote: Windows 원격(ryzen)의 claude 를 원격 psmux 3.4.0 이상의 detached 세션에서 실행하고 로컬은 `ssh -t psmux attach` 로 붙기만 한다. ssh 가 끊겨도 원격 claude 가 살아 있고 `--attach` 로 다시 붙으며 `--kill` 은 분리 성공 확인 뒤 종료한다. 원격 명령은 `pwsh -EncodedCommand` 로 보내 따옴표와 `$` 가 깨지지 않고, 프롬프트는 argv 로 넘긴다 (#790)
 
 ## [10.75.0] - 2026-10-15
 
