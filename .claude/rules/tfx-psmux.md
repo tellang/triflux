@@ -114,7 +114,8 @@ WT 1.24의 ConPTY 종료 경쟁 상태 버그 때문에 먼저 연결을 끊는 
 
 ```bash
 for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep "$PREFIX"); do
-  psmux detach-client -t "$s" 2>/dev/null || true
+  # -t 는 클라이언트 이름이라 세션을 분리하지 못한다. 세션은 -s 로 준다
+  psmux detach-client -s "$s" || echo "[psmux] detach-client 실패: $s" >&2
 done
 
 sleep 2
@@ -124,7 +125,7 @@ for s in $(psmux list-sessions -F '#{session_name}' 2>/dev/null | grep "$PREFIX"
 done
 ```
 
-> 참고: `detach-client`는 `|| true`로 감싸므로 **지원하지 않는 구버전 psmux(≤3.3.x)에서는 아무 작업도 하지 않고** 종료로 진행한다. 먼저 연결을 끊는 순서는 버전과 관계없이 안전하다. `scripts/lib/psmux-info.mjs`가 `detach-client`를 `OPTIONAL`로 두는 것과 맞다.
+> 참고: 실패를 숨기지 않고 stderr 에 남긴 뒤 종료로 진행한다. **지원하지 않는 구버전 psmux(≤3.3.x)에서는 분리 없이** 종료로 가며, 그때는 이 경고가 보인다. 먼저 연결을 끊는 순서는 버전과 관계없이 안전하다. `scripts/lib/psmux-info.mjs`가 `detach-client`를 `OPTIONAL`로 두는 것과 맞다.
 
 ### 금지
 
