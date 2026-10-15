@@ -113,7 +113,7 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 ```
 
 - 기준값은 `.claude/rules/tfx-routing.md`의 "원격 오프로드 기본 정책"이 정본이다. 4 는 무조건 원격, 2 는 무거운 shard 와 워커 3개 이상 신규 생성만 원격, 1 은 로컬
-- 호스트는 작업 성격으로 고른다. 무거운 계산과 Claude 워커는 ryzen 우선. git push, PR, Codex 스킬, gemini CLI 가 필요한 작업은 m2 이고, m2 는 probe 압박이 1 일 때만 보낸다. 세부 조건은 위 정본의 호스트 선택 항목
+- 호스트는 작업 성격으로 고른다. 무거운 계산과 Claude 워커는 ryzen 우선. git push, PR, Codex 스킬이 필요한 작업은 m2 이고, m2 는 probe 압박이 1 일 때만 보낸다. 세부 조건은 위 정본의 호스트 선택 항목
 - 지시서에는 실행 위치와 호스트별 주의를 적는다. ryzen 은 Windows(PowerShell 7, 기본 디렉터리 `C:\Users\tellang\Desktop\Projects`) 라 리드가 psmux 세션을 만들어 그 안에서 돌린다. remote-spawn 의 Windows 감싸기가 들어오기 전까지 이 수작업이 필요하다
 - 원격에 띄운 세션도 띄운 리드가 종료까지 책임진다
 
