@@ -119,10 +119,10 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 
 #### 압박 변화 대응
 
-리드를 맡으면 세션 안에서 `/tfx-lead on` 을 실행한다. 그러면 `tfx pressure install` 로 설치한 상주 감시기가
-`~/.local/state/triflux/memory-pressure.json` 에 확정한 단계 전이를 triflux mod 가 턴으로 넣어 준다
-([ADR-0041](../../docs/adr/0041-memory-pressure-watcher.md)). 리드를 넘기거나 끝낼 때 `/tfx-lead off`. 실행 중인
-세션은 다른 기기로 옮길 수 없다는 전제로, 전이별 행동은 다음과 같다.
+리드를 맡으면 세션 안에서 `/tfx-lead on` 을 실행한다. 그러면 triflux mod 가 2초마다
+`kern.memorystatus_vm_pressure_level` 을 읽어 두 표본 연속으로 확정한 단계 전이를 턴으로 넣어 준다. 상주 프로세스와
+설치는 없다([ADR-0041](../../docs/adr/0041-memory-pressure-watcher.md)). 리드를 넘기거나 끝낼 때 `/tfx-lead off`.
+실행 중인 세션은 다른 기기로 옮길 수 없다는 전제로, 전이별 행동은 다음과 같다.
 
 | 전이 | 행동 |
 | --- | --- |
@@ -131,8 +131,9 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 | 4 → 2 | 보류한 디스패치를 원격 우선으로 재개한다. 로컬 신규 스폰은 아직 1개까지 |
 | 2 → 1 (normal) | 로컬 정책으로 돌아간다. 중단했던 작업이 남아 있으면 먼저 재개한다 |
 
-감시기가 멈췄다는 알림(표본 60초 공백)이 오면 `tfx pressure status` 로 확인하고 필요하면 `tfx pressure install` 을 다시 한다.
-그동안은 디스패치 직전 `sysctl` 측정으로 돌아간다.
+`/tfx-lead status` 는 등록 여부와 마지막 표본의 단계·시각을 보여 준다. `/clear` 뒤에도 등록이 이어지지만 resume 한
+세션은 다시 `/tfx-lead on` 한다. 긴 턴 중의 전이는 턴이 끝난 뒤 마지막 상태로 합쳐져 오므로 받은 즉시 `/tfx-lead status` 로
+현재 단계를 확인한다. 등록이 꺼져 있거나 mod 가 없는 세션은 디스패치 직전 `sysctl` 측정(ADR-0040)만 한다.
 
 #### Windows 원격 수동 실행 대안
 

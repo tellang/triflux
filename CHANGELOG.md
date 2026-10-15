@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- mods: `/tfx-lead on|off|status`로 리드 세션의 메모리 압박 감시를 제어한다. 리드 mod가 확정한 압박 전이마다 대응 턴을 연다.
+
 ## [10.75.0] - 2026-10-15
 
 ### Fixed
