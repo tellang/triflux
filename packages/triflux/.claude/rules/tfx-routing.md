@@ -162,6 +162,7 @@ Codex는 `models_cache.json`의 공개 모델 중 effort를 지원하는 후보�
 
 **원격 오프로드 기본 정책** : 로컬 기기의 램이 빠듯해지면 무거운 작업을 `hosts.json` 에 등록한 원격 호스트로 넘긴다. 판단 시점은 병렬 dispatch 직전이다.
 
+- 실시간 전이는 `tfx pressure install` 로 설치한 상주 감시기가 상태 파일 `~/.local/state/triflux/memory-pressure.json` 에 쓰고, `/tfx-lead on` 한 세션의 triflux mod 가 턴으로 넣는다. 전이별 행동은 `skills/tfx-lead/SKILL.md` "압박 변화 대응" 절([ADR-0041](../../docs/adr/0041-memory-pressure-watcher.md))
 - 판단 주체는 리드다. 워커와 피어 세션은 압박을 보고만 하고 실행 위치를 스스로 바꾸지 않는다. 리드가 있으면 압박 지침을 워커에 직접 뿌리지 않고 리드에게 넘긴다. 리드가 없는 단독 세션만 아래 기준으로 스스로 정한다. 절차는 `skills/tfx-lead/SKILL.md`의 "실행 위치 결정" 절
 - 판정 명령: `sysctl -n kern.memorystatus_vm_pressure_level` (1=normal, 2=warn, 4=critical; Stats 앱·활성 상태 보기의 메모리 색과 같은 커널 신호, 노랑=2 빨강=4)
 - 4(critical): 무조건 오프로드
