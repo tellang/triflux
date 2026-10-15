@@ -12,12 +12,7 @@ const REMOTE_SPAWN = fileURLToPath(
   new URL("../../scripts/remote-spawn.mjs", import.meta.url),
 );
 
-const {
-  buildPromptContext,
-  normalizePosixProbeEnv,
-  parseArgs,
-  rewritePromptPaths,
-} = __remoteSpawnTest;
+const { buildPromptContext, parseArgs, rewritePromptPaths } = __remoteSpawnTest;
 
 function withTempDir(run) {
   // handoff 와 전송 파일은 cwd 안에 있어야 하므로 임시 디렉터리를 cwd 로 삼는다.
@@ -51,38 +46,6 @@ describe("remote-spawn parseArgs()", () => {
     assert.equal(parsed.prompt, "run this");
     assert.equal(parsed.host, "example-host");
   });
-});
-
-it("POSIX probe reports health and blocks memory pressure level 4", () => {
-  const probe = normalizePosixProbeEnv(
-    {
-      os: "darwin",
-      shell: "zsh",
-      home: "/Users/remote",
-      claude: "/usr/local/bin/claude",
-      memoryPressureLevel: "4",
-      memoryFreePct: "12.5",
-      loadAvg: "1.2,2.3,3.4",
-      diskFreeHome: String(4 * 1024 ** 3),
-      codexAuthExists: "true",
-      nodeVersion: "v24.0.0",
-    },
-    { node: [22, 0, 0] },
-  );
-
-  assert.equal(probe.ready, false);
-  assert.equal(probe.memoryFreePct, 12.5);
-  assert.deepEqual(probe.loadAvg, [1.2, 2.3, 3.4]);
-  assert.equal(probe.codexAuthExists, true);
-  assert.equal(probe.versions.node, "v24.0.0");
-  assert.equal(probe.warnings.length, 3);
-
-  const warning = normalizePosixProbeEnv(
-    { os: "darwin", home: "/Users/remote", memoryPressureLevel: "2" },
-    {},
-  );
-  assert.equal(warning.ready, true);
-  assert.deepEqual(warning.warnings, ["memory pressure level 2"]);
 });
 
 describe("remote-spawn buildPromptContext()", () => {

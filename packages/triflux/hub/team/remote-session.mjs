@@ -1,8 +1,15 @@
 // Remote session primitives.
 // Pure functions + SSH operations. No psmux, no WT, no CLI arg parsing.
 
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync, execSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import {
   basename,
@@ -16,6 +23,45 @@ import { execSshWithRetry } from "../lib/ssh-retry.mjs";
 const REMOTE_ENV_TTL_MS = 86_400_000; // 24h
 const REMOTE_STAGE_ROOT = "tfx-remote";
 const SAFE_HOST_RE = /^[a-zA-Z0-9._-]+$/;
+
+let sshControlDir = null;
+if (process.platform !== "win32" && typeof process.getuid === "function") {
+  // macOS Unix 소켓 경로의 104바이트 제한 때문에 $TMPDIR 대신 /tmp를 쓴다.
+  const dir = `/tmp/tfx-cm-${process.getuid()}`;
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const stat = lstatSync(dir);
+    if (stat.isDirectory() && stat.uid === process.getuid()) {
+      chmodSync(dir, 0o700);
+      sshControlDir = dir;
+    }
+  } catch {}
+}
+
+export function buildSshOptions({
+  interactive = false,
+  platform = process.platform,
+} = {}) {
+  const options = [
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=4",
+  ];
+  if (!interactive)
+    options.push("-o", "BatchMode=yes", "-o", "ConnectTimeout=10");
+  if (platform !== "win32" && sshControlDir) {
+    options.push(
+      "-o",
+      "ControlMaster=auto",
+      "-o",
+      `ControlPath=${sshControlDir}/%C`,
+      "-o",
+      "ControlPersist=60",
+    );
+  }
+  return options;
+}
 
 // ── Shell quoting utilities ─────────────────────────────────────
 
@@ -85,10 +131,86 @@ function normalizePwshProbeEnv(parsed) {
   });
 }
 
-function normalizePosixProbeEnv(parsed) {
+function parseVersion(versionStr) {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(versionStr);
+  if (!match) return null;
+  return [
+    parseInt(match[1], 10),
+    parseInt(match[2], 10),
+    parseInt(match[3], 10),
+  ];
+}
+
+export function compareVersions(a, b) {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return a[i] - b[i];
+  }
+  return 0;
+}
+
+export function probeVersion(binPath) {
+  try {
+    if (/\.(cmd|bat)$/iu.test(binPath)) {
+      // .cmd/.bat → execSync로 shell 경유 (execFileSync EINVAL 회피)
+      const out = execSync(`"${binPath}" --version`, {
+        encoding: "utf8",
+        timeout: 3000,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      return parseVersion(out);
+    }
+    const out = execFileSync(binPath, ["--version"], {
+      encoding: "utf8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return parseVersion(out);
+  } catch {
+    return null;
+  }
+}
+
+export function normalizePosixProbeEnv(parsed, localVersions = null) {
   const os =
     parsed.os === "darwin" ? "darwin" : parsed.os === "linux" ? "linux" : null;
-  if (!os || !parsed.home) return null;
+  if (!os || !parsed.home) {
+    return null;
+  }
+
+  const versions = Object.fromEntries(
+    ["node", "codex", "agy", "claude", "triflux"].map((name) => [
+      name,
+      parsed[`${name}Version`] || null,
+    ]),
+  );
+  const warnings = [];
+  const memoryPressureLevel =
+    os === "darwin" ? Number(parsed.memoryPressureLevel) || null : null;
+  const memoryFreePct =
+    parsed.memoryFreePct && Number.isFinite(Number(parsed.memoryFreePct))
+      ? Number(parsed.memoryFreePct)
+      : null;
+  const loadAvgValues = parsed.loadAvg?.split(",").map(Number);
+  const loadAvg =
+    loadAvgValues?.length === 3 && loadAvgValues.every(Number.isFinite)
+      ? loadAvgValues
+      : null;
+  const diskFreeHome = parsed.diskFreeHome ? Number(parsed.diskFreeHome) : null;
+
+  if (memoryPressureLevel >= 2) {
+    warnings.push(`memory pressure level ${memoryPressureLevel}`);
+  }
+  if (diskFreeHome !== null && diskFreeHome < 5 * 1024 ** 3) {
+    warnings.push("home disk free below 5 GiB");
+  }
+  for (const [name, remote] of Object.entries(versions)) {
+    const local = localVersions?.[name];
+    const remoteVersion = remote && parseVersion(remote);
+    if (local && remoteVersion && compareVersions(local, remoteVersion) !== 0) {
+      warnings.push(`${name} version differs`);
+    }
+  }
+
   return Object.freeze({
     claudePath:
       !parsed.claude || parsed.claude === "notfound" ? null : parsed.claude,
@@ -96,16 +218,25 @@ function normalizePosixProbeEnv(parsed) {
       !parsed.codex || parsed.codex === "notfound" ? null : parsed.codex,
     geminiPath:
       !parsed.gemini || parsed.gemini === "notfound" ? null : parsed.gemini,
-    home: parsed.home,
-    os,
-    shell: parsed.shell === "zsh" ? "zsh" : "bash",
-    node: parsed.node || null,
+    tmuxPath: !parsed.tmux || parsed.tmux === "notfound" ? null : parsed.tmux,
+    node: parsed.node || parsed.nodeVersion || null,
     cores: parsed.cores ? Number(parsed.cores) : null,
     ramGb: parsed.ram_gb ? Number(parsed.ram_gb) : null,
+    home: parsed.home,
+    codexAuthExists: parsed.codexAuthExists === "true",
+    diskFreeHome,
+    loadAvg,
+    memoryFreePct,
+    memoryPressureLevel,
+    os,
+    ready: memoryPressureLevel !== 4,
+    shell: parsed.shell === "zsh" ? "zsh" : "bash",
+    versions,
+    warnings,
   });
 }
 
-function probeRemoteEnvViaPwsh(host) {
+function probeRemoteEnvViaPwsh(host, execSsh) {
   const command = [
     "Write-Output 'shell=pwsh'",
     'Write-Output "home=$env:USERPROFILE"',
@@ -114,8 +245,8 @@ function probeRemoteEnvViaPwsh(host) {
   ].join("; ");
 
   try {
-    const output = execSshWithRetry(
-      [host, "pwsh", "-NoProfile", "-Command", command],
+    const output = execSsh(
+      [...buildSshOptions(), host, "pwsh", "-NoProfile", "-Command", command],
       {
         encoding: "utf8",
         timeout: 15000,
@@ -130,7 +261,7 @@ function probeRemoteEnvViaPwsh(host) {
   }
 }
 
-function probeRemoteEnvViaPosix(host) {
+function probeRemoteEnvViaPosix(host, execSsh, localVersions) {
   const script = [
     '[ -f "$HOME/.zshenv" ] && . "$HOME/.zshenv" 2>/dev/null || true',
     "export PATH=/opt/homebrew/bin:/opt/homebrew/sbin:$HOME/.local/bin:$HOME/.nvm/versions/node/$(ls $HOME/.nvm/versions/node 2>/dev/null | sort -V | tail -1)/bin:$PATH 2>/dev/null",
@@ -140,22 +271,40 @@ function probeRemoteEnvViaPosix(host) {
     "command -v codex >/dev/null 2>&1 && echo codex=$(command -v codex) || echo codex=notfound",
     "command -v gemini >/dev/null 2>&1 && echo gemini=$(command -v gemini) || echo gemini=notfound",
     "echo os=$(uname -s | tr A-Z a-z)",
-    "node --version 2>/dev/null && echo node=$(node --version) || echo node=notfound",
     // darwin: sysctl, linux: nproc + /proc/meminfo
     "if [ $(uname -s) = Darwin ]; then echo cores=$(sysctl -n hw.ncpu); echo ram_gb=$(($(sysctl -n hw.memsize) / 1073741824)); else echo cores=$(nproc 2>/dev/null || echo 0); echo ram_gb=$(($(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}') / 1048576)); fi",
+    "command -v tmux >/dev/null 2>&1 && echo tmux=$(command -v tmux) || echo tmux=notfound",
+    'if [ "$(uname -s)" = Darwin ]; then',
+    "  printf 'memoryPressureLevel=%s\\n' \"$(sysctl -n kern.memorystatus_vm_pressure_level 2>/dev/null)\"",
+    '  vm_stat | awk -v total="$(sysctl -n hw.memsize 2>/dev/null)" -v pageSize="$(sysctl -n hw.pagesize 2>/dev/null)" \'/Pages free:|Pages inactive:|Pages speculative:/ {gsub(/[^0-9]/, "", $3); pages += $3} END {if (total > 0 && pageSize > 0) printf "memoryFreePct=%.1f\\n", pages * pageSize / total * 100}\'',
+    '  sysctl -n vm.loadavg 2>/dev/null | tr -d \'{}\' | awk \'{print "loadAvg=" $1 "," $2 "," $3}\'',
+    "else",
+    "  awk '/MemTotal:/ {total=$2} /MemAvailable:/ {available=$2} END {if (total > 0) printf \"memoryFreePct=%.1f\\n\", available / total * 100}' /proc/meminfo 2>/dev/null",
+    '  awk \'{print "loadAvg=" $1 "," $2 "," $3}\' /proc/loadavg 2>/dev/null',
+    "fi",
+    'df -Pk "$HOME" 2>/dev/null | awk \'NR==2 {printf "diskFreeHome=%.0f\\n", $4 * 1024}\'',
+    'if [ -f "${CODEX_HOME:-$HOME/.codex}/auth.json" ]; then echo codexAuthExists=true; else echo codexAuthExists=false; fi',
+    ...(localVersions
+      ? [
+          'probe_version() { command -v "$1" >/dev/null 2>&1 && "$1" --version </dev/null 2>/dev/null | head -n 1; }',
+          'for cli in node codex agy claude triflux; do printf \'%sVersion=%s\\n\' "$cli" "$(probe_version "$cli")"; done',
+        ]
+      : []),
   ].join("\n");
 
   try {
-    const output = execSshWithRetry([host, "sh"], {
+    const output = execSsh([...buildSshOptions(), host, "sh"], {
       encoding: "utf8",
       timeout: 15000,
       input: script,
       maxRetries: 2,
       baseDelayMs: 1000,
     });
-    return normalizePosixProbeEnv(parseProbeLines(output));
-  } catch {
-    return null;
+    return normalizePosixProbeEnv(parseProbeLines(output), localVersions);
+  } catch (error) {
+    throw new Error(`remote probe failed for ${host}: ${error.message}`, {
+      cause: error,
+    });
   }
 }
 
@@ -223,22 +372,34 @@ function writeEnvCache(host, env, cacheDir) {
 export function probeRemoteEnv(host, opts = {}) {
   validateHost(host);
   const force = opts.force === true;
+  const execSsh = opts.execSsh || execSshWithRetry;
   const cacheDir = opts.cacheDir || remoteEnvCacheDir();
 
   if (!force) {
     const cached = readEnvCache(host, cacheDir);
-    if (isEnvCacheFresh(cached)) return cached.env;
+    if (
+      isEnvCacheFresh(cached) &&
+      cached.env.claudePath &&
+      (!opts.osHint ||
+        cached.env.os === opts.osHint ||
+        (opts.osHint === "windows" && cached.env.os === "win32")) &&
+      (cached.env.os === "win32" ||
+        ("tmuxPath" in cached.env && "versions" in cached.env))
+    )
+      return cached.env;
   }
 
-  const pwshEnv = probeRemoteEnvViaPwsh(host);
+  const pwshEnv = ["darwin", "linux"].includes(opts.osHint)
+    ? null
+    : probeRemoteEnvViaPwsh(host, execSsh);
   if (pwshEnv) {
-    writeEnvCache(host, pwshEnv, cacheDir);
+    if (pwshEnv.claudePath) writeEnvCache(host, pwshEnv, cacheDir);
     return pwshEnv;
   }
 
-  const posixEnv = probeRemoteEnvViaPosix(host);
+  const posixEnv = probeRemoteEnvViaPosix(host, execSsh, opts.localVersions);
   if (posixEnv) {
-    writeEnvCache(host, posixEnv, cacheDir);
+    if (posixEnv.claudePath) writeEnvCache(host, posixEnv, cacheDir);
     return posixEnv;
   }
 
@@ -303,7 +464,10 @@ export function ensureRemoteStageDir(host, env, remoteStageDir) {
           `New-Item -ItemType Directory -Path '${escapePwshSingleQuoted(remoteStageDir)}' -Force | Out-Null`,
         )
       : posixRemoteCommand(`mkdir -p ${shellQuote(remoteStageDir)}`);
-  execFileSync("ssh", [host, command], { timeout: 10000, stdio: "pipe" });
+  execFileSync("ssh", [...buildSshOptions(), host, command], {
+    timeout: 10000,
+    stdio: "pipe",
+  });
 }
 
 /**
@@ -313,10 +477,14 @@ export function ensureRemoteStageDir(host, env, remoteStageDir) {
  * @param {string} remotePath
  */
 export function uploadFileToRemote(host, localPath, remotePath) {
-  execFileSync("scp", [localPath, `${host}:${remotePath}`], {
-    timeout: 15000,
-    stdio: "pipe",
-  });
+  execFileSync(
+    "scp",
+    [...buildSshOptions(), localPath, `${host}:${remotePath}`],
+    {
+      timeout: 15000,
+      stdio: "pipe",
+    },
+  );
 }
 
 /**
@@ -372,7 +540,7 @@ export function remoteGit(host, env, gitArgs, cwd) {
       : posixRemoteCommand(
           `cd ${shellQuote(cwd)} && ${["git", ...gitArgs].map(shellQuote).join(" ")}`,
         );
-  return execFileSync("ssh", [host, command], {
+  return execFileSync("ssh", [...buildSshOptions(), host, command], {
     encoding: "utf8",
     timeout: 30_000,
     stdio: ["pipe", "pipe", "pipe"],

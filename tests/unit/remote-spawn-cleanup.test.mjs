@@ -23,7 +23,7 @@ describe("remote-spawn normal-exit cleanup command builders", () => {
 
   it("buildRemoteBootstrapCommand chains ssh and local shell exit", () => {
     const command = buildRemoteBootstrapCommand("devbox-01");
-    assert.match(command, /^ssh -t devbox-01;/);
+    assert.match(command, /^ssh -t .* devbox-01;/);
     assert.match(command, /exit\s+\$trifluxExit/);
   });
 
