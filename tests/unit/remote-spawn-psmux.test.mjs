@@ -1,0 +1,483 @@
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { it } from "node:test";
+import { fileURLToPath } from "node:url";
+import * as remote from "../../scripts/remote-spawn.mjs";
+
+const session = "tfx-spawn-win-unit";
+const record = {
+  host: "win-unit",
+  runId: "unit-run",
+  remoteTmux: true,
+  remoteMux: "psmux",
+  remoteSessionName: session,
+  psmuxPath: "C:/tools' folder/psmux.exe",
+  claudePath: "C:/npm's bin/claude.ps1",
+  remoteRunDir: "C:/Users/example/tfx-remote/unit/run-unit-run",
+};
+
+it("경로의 줄바꿈은 pane 명령으로 보내기 전에 거부한다", () => {
+  const moduleUrl = new URL("../../scripts/remote-spawn.mjs", import.meta.url);
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    const { __remoteSpawnTest } = await import(${JSON.stringify(moduleUrl.href)});
+    __remoteSpawnTest.parseArgs(['node', 'remote-spawn', '--dir', 'C:/work\\n']);
+  `,
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /invalid directory path/);
+});
+
+async function withRecord(run) {
+  const root = mkdtempSync(join(tmpdir(), "tfx-remote-psmux-"));
+  const previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = root;
+  const recordPath = join(root, "triflux", "remote-spawn", `${session}.json`);
+  mkdirSync(join(root, "triflux", "remote-spawn"), { recursive: true });
+  writeFileSync(recordPath, JSON.stringify(record));
+  try {
+    await run(recordPath);
+  } finally {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+it("Windows 원격 psmux가 있을 때 mac/Linux 로컬 tmux 레인을 선택한다", () => {
+  for (const platform of ["darwin", "linux"]) {
+    assert.equal(
+      remote.resolveSpawnLane({
+        platform,
+        multiplexerAvailable: true,
+        remoteOs: "win32",
+        remotePsmuxAvailable: true,
+      }),
+      "tmux",
+    );
+    assert.equal(
+      remote.resolveSpawnLane({
+        platform,
+        multiplexerAvailable: true,
+        remoteOs: "win32",
+        remotePsmuxAvailable: false,
+      }),
+      "fallback",
+    );
+  }
+});
+
+it("psmux 시작은 경로를 PowerShell로 인용하고 프롬프트를 파일에서 읽어 단일 argv로 넘긴다", () => {
+  assert.equal(typeof remote.buildRemotePsmuxStartScript, "function");
+  const script = remote.buildRemotePsmuxStartScript({
+    ...record,
+    sessionName: session,
+    dir: "C:/work's dir/$literal",
+    claudePath: record.claudePath,
+    promptFile: "C:/stage's dir/prompt.md",
+    permissionFlags: "--dangerously-skip-permissions",
+  });
+  assert.match(script, /& 'C:\/tools'' folder\/psmux.exe' new-session -d/);
+  assert.match(script, /-c 'C:\/work''s dir\/\$literal'/);
+  assert.match(script, /'@tfx_run_id' 'unit-run'/);
+  const encoded = script.match(
+    /pwsh -NoProfile -EncodedCommand ([A-Za-z0-9+/=]+)/,
+  )?.[1];
+  assert.ok(encoded);
+  const launch = Buffer.from(encoded, "base64").toString("utf16le");
+  assert.match(
+    launch,
+    /Get-Content -Raw -Encoding utf8 -LiteralPath 'C:\/stage''s dir\/prompt.md'/,
+  );
+  assert.ok(!launch.includes(" -p "));
+  assert.match(
+    launch,
+    /& 'C:\/npm''s bin\/claude.ps1' --dangerously-skip-permissions \$prompt/,
+  );
+  assert.ok(!launch.includes(" | & "));
+});
+
+it("Windows 런처는 PID 조회와 소유 기록 실패에도 finally로 파일을 회수한다", () => {
+  const script = remote.buildRemoteWindowsLaunchScript({
+    ...record,
+    remoteWindows: true,
+    dir: "C:/work",
+  });
+  assert.ok(script.indexOf("try {") < script.indexOf("Get-CimInstance"));
+  assert.ok(script.indexOf("try {") < script.indexOf("Set-Content"));
+  assert.match(script, /finally \{[\s\S]*Remove-Item -LiteralPath/);
+});
+
+it("하이픈으로 시작하는 짧은 본문도 파일을 남겨 파일 지시 argv로 보낸다", () => {
+  const script = remote.buildRemoteWindowsLaunchScript({
+    ...record,
+    dir: "C:/work",
+    promptFile: "C:/stage/prompt.md",
+  });
+  assert.match(
+    script,
+    /if \(-not \$prompt\.StartsWith\('-'\) -and \([^)]+\) -le 24000\) \{\s+Remove-Item[\s\S]*\} else \{\s+\$prompt = 'Read the UTF-8 file at "C:\/stage\/prompt.md"/,
+  );
+});
+
+it("attach 명령은 양쪽 로컬 셸에서 원격 PowerShell EncodedCommand를 전달한다", () => {
+  for (const platform of ["darwin", "win32"]) {
+    const command = remote.buildRemoteTmuxAttachCommand(
+      record.host,
+      record,
+      platform,
+    );
+    assert.ok(!command.includes("BatchMode"));
+    assert.equal(command.includes("ControlMaster"), platform !== "win32");
+    execFileSync("sh", ["-n"], { input: command });
+    const encoded = command.match(
+      /pwsh -NoProfile -EncodedCommand ([A-Za-z0-9+/=]+)/,
+    )?.[1];
+    assert.ok(encoded);
+    const script = Buffer.from(encoded, "base64").toString("utf16le");
+    assert.match(script, /has-session -t 'tfx-spawn-win-unit'/);
+    assert.match(
+      script,
+      /show-options -qv -t 'tfx-spawn-win-unit:' '@tfx_run_id'/,
+    );
+    assert.match(script, /attach-session -t 'tfx-spawn-win-unit'/);
+  }
+});
+
+for (const detachStatus of [0, 1, 2, 3, 255, null]) {
+  it(`detach status ${detachStatus}: 성공 확인과 대기 뒤에만 kill한다`, async () => {
+    await withRecord(async (path) => {
+      const steps = [];
+      let killed = false;
+      const result = await remote.killSpawnSession(session, {
+        killLocal: () => {},
+        sleep: async () => steps.push("wait"),
+        runRemote: (_host, command, os) => {
+          assert.equal(os, "win32");
+          if (command.includes("detach-client")) {
+            steps.push("detach");
+            assert.match(command, /detach-client -s 'tfx-spawn-win-unit'/);
+            return { ok: detachStatus === 0, status: detachStatus };
+          }
+          if (command.includes("kill-session")) {
+            steps.push("kill");
+            killed = true;
+            return { ok: true };
+          }
+          if (command.includes("has-session")) {
+            steps.push("has");
+            return killed
+              ? {
+                  ok: false,
+                  status: 1,
+                  stdout: "TFX_REMOTE_SESSION_ABSENT\r\n",
+                }
+              : { ok: true };
+          }
+          steps.push("cleanup");
+          return { ok: true };
+        },
+      });
+      assert.equal(result.ok, detachStatus === 0);
+      assert.equal(existsSync(path), detachStatus !== 0);
+      if (detachStatus === 0)
+        assert.deepEqual(steps, ["detach", "wait", "kill", "has", "cleanup"]);
+      else assert.ok(!steps.includes("kill"));
+    });
+  });
+}
+
+for (const [status, stdout] of [
+  [1, "TFX_REMOTE_SESSION_ABSENT\r\n"],
+  [1, "profile banner\r\nTFX_REMOTE_SESSION_ABSENT\r\n\r\n"],
+  [1, "TFX_REMOTE_SESSION_ABSENT\r\nerror after marker\r\n"],
+  [1, ""],
+  [2, ""],
+  [3, ""],
+  [127, ""],
+  [255, ""],
+  [null, ""],
+]) {
+  it(`Windows 원격 status ${status}, 부재 표식 ${Boolean(stdout)}: attach와 감시자는 세션 부재만 기록 삭제 근거로 쓴다`, async () => {
+    for (const action of ["attach", "watch"]) {
+      await withRecord(async (path) => {
+        const options = {
+          sessionExists: () => false,
+          runRemote: (_host, command, os) => {
+            assert.equal(os, "win32");
+            if (command.includes("has-session"))
+              throw Object.assign(new Error("remote fixture"), {
+                status,
+                stdout,
+              });
+            assert.match(
+              command,
+              /Remove-Item -LiteralPath 'C:\/Users\/example\/tfx-remote\/unit\/run-unit-run'/,
+            );
+            return { ok: true };
+          },
+          multiplexerExec: () => assert.fail("unexpected local create"),
+          openAttachTab: () => assert.fail("unexpected attach"),
+        };
+        if (action === "attach")
+          await assert.rejects(remote.attachSession(session, options));
+        else
+          await remote.__remoteSpawnTest.runSpawnCleanupWatcher(
+            session,
+            `${session}:0.0`,
+            options,
+          );
+        assert.equal(
+          existsSync(path),
+          !stdout.trim().endsWith("TFX_REMOTE_SESSION_ABSENT"),
+        );
+      });
+    }
+  });
+}
+
+for (const mode of [
+  "psmux",
+  "fallback",
+  "old-psmux",
+  "start-error",
+  "owner-mismatch",
+  "upload-error",
+  "fallback-upload-error",
+]) {
+  it(`${mode}: CLI는 프로브 경로와 실행별 파일을 쓰고 복구할 기록을 보존한다`, () => {
+    const root = mkdtempSync(join(tmpdir(), "tfx-win-cli-"));
+    const moduleUrl = new URL(
+      "../../scripts/remote-spawn.mjs",
+      import.meta.url,
+    );
+    const script = `
+      import cp from 'node:child_process';
+      import fs from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
+      const events = [];
+      const mode = ${JSON.stringify(mode)};
+      const prompt = 'LONG_PROMPT '.repeat(4000);
+      cp.execFileSync = (file, args, options = {}) => {
+        if (file === 'scp') {
+          events.push(['upload', args.at(-1), fs.readFileSync(args.at(-2), 'utf8'), args.at(-2)]);
+          if (mode.endsWith('upload-error')) throw new Error('scp fixture');
+          return '';
+        }
+        if (file === 'ssh') {
+          const cmd = args.at(-1);
+          const decoded = cmd.startsWith('pwsh -NoProfile -EncodedCommand ')
+            ? Buffer.from(cmd.split(' ').at(-1), 'base64').toString('utf16le') : cmd;
+          if (decoded.includes("shell=pwsh")) return "os=win32\\nshell=pwsh\\nhome=C:/Users/example's home\\nclaude=C:/npm's bin/claude.ps1\\npsmux=" + (mode.startsWith('fallback') ? 'notfound' : 'C:/mux bin/psmux.exe') + '\\npsmuxVersion=psmux ' + (mode === 'old-psmux' ? '3.3.9' : '3.4.0') + '\\n';
+          events.push(['ssh', decoded]);
+          if (decoded.includes('new-session') && mode !== 'psmux') throw Object.assign(new Error('start fixture'), { status: 1 });
+          if (decoded.includes('has-session') && mode === 'owner-mismatch') throw Object.assign(new Error('owner fixture'), { status: 1, stdout: '' });
+          return '';
+        }
+        if (file === 'git') return 'unit';
+        if (args[0] === 'capture-pane') return '? for shortcuts';
+        events.push(['mux', args]);
+        return '';
+      };
+      cp.execSync = () => '';
+      cp.spawn = (file, args) => { events.push(['spawn', file, args]); return { unref() {}, on() {}, once() {} }; };
+      syncBuiltinESMExports();
+      process.on('exit', () => fs.writeFileSync(${JSON.stringify(join(root, "events.json"))}, JSON.stringify(events)));
+      process.argv = ['node', ${JSON.stringify(fileURLToPath(moduleUrl))}, '--host', 'win-unit', '--name', 'cli', '--dir', "C:/work's dir", '--prompt', prompt, '--no-attach'];
+      await import(${JSON.stringify(moduleUrl.href)});
+    `;
+    try {
+      const result = spawnSync(
+        process.execPath,
+        ["--input-type=module", "-e", script],
+        {
+          cwd: root,
+          encoding: "utf8",
+          timeout: 10000,
+          env: {
+            ...process.env,
+            XDG_STATE_HOME: root,
+            PSMUX_BIN: "fake-mux",
+            TFX_SPAWN_TRACE: "0",
+          },
+        },
+      );
+      assert.equal(
+        result.status,
+        ["start-error", "owner-mismatch"].includes(mode) ||
+          mode.endsWith("upload-error")
+          ? 1
+          : 0,
+        result.stderr,
+      );
+      const events = JSON.parse(
+        readFileSync(join(root, "events.json"), "utf8"),
+      );
+      const uploads = events.filter(([kind]) => kind === "upload");
+      assert.ok(
+        uploads.some(
+          ([, target, content]) =>
+            target.endsWith("/prompt.md") &&
+            content === "LONG_PROMPT ".repeat(4000),
+        ),
+      );
+      if (mode.endsWith("upload-error")) {
+        assert.ok(
+          events.some(
+            ([kind, command]) =>
+              kind === "ssh" && command.includes("Remove-Item"),
+          ),
+        );
+        assert.ok(uploads.every(([, , , localPath]) => !existsSync(localPath)));
+      } else if (["fallback", "old-psmux"].includes(mode)) {
+        const launcher = uploads.find(([, target]) =>
+          /\/launch-[a-f0-9]{8}\.ps1$/.test(target),
+        );
+        assert.ok(launcher);
+        assert.ok(launcher[2].includes("& 'C:/npm''s bin/claude.ps1'"));
+        assert.ok(!launcher[2].includes("LONG_PROMPT"));
+        const ssh = events.find(
+          ([kind, file]) => kind === "spawn" && file === "ssh",
+        );
+        const encoded = ssh[2]
+          .at(-1)
+          .match(/^pwsh -NoProfile -EncodedCommand ([A-Za-z0-9+/=]+)$/)?.[1];
+        assert.ok(encoded);
+        assert.match(
+          Buffer.from(encoded, "base64").toString("utf16le"),
+          /& 'C:\/Users\/example''s home\/tfx-remote\/spawn-[a-f0-9]{8}\/launch-[a-f0-9]{8}\.ps1'/,
+        );
+        assert.equal(result.stderr.split("ssh가 끊기면").length - 1, 1);
+      } else {
+        const saved = JSON.parse(
+          readFileSync(
+            join(
+              root,
+              "triflux",
+              "remote-spawn",
+              "tfx-spawn-win-unit-cli.json",
+            ),
+            "utf8",
+          ),
+        );
+        assert.equal(saved.remoteMux, "psmux");
+        assert.equal(saved.psmuxPath, "C:/mux bin/psmux.exe");
+        assert.ok(saved.remoteRunDir.endsWith(`/run-${saved.runId}`));
+        if (mode === "psmux") {
+          const localStart = events.find(
+            ([kind, args]) => kind === "mux" && args[0] === "new-session",
+          );
+          assert.match(
+            localStart[1].at(-1),
+            /^ssh -t .*pwsh -NoProfile -EncodedCommand/,
+          );
+        }
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+it("Windows 로컬 재접속은 긴 SSH를 파일에 두고 짧은 File 명령만 보낸다", async () => {
+  await withRecord(async () => {
+    let launchPath;
+    try {
+      await remote.attachSession(session, {
+        platform: "win32",
+        sessionExists: () => false,
+        runRemote: () => ({ ok: true }),
+        createSession: () => {},
+        sendKeys: (_pane, command) => {
+          assert.ok(command.length < 600, command);
+          launchPath = command.match(/-File '([^']+)'/)?.[1];
+          assert.ok(launchPath);
+          const script = readFileSync(launchPath, "utf8");
+          assert.match(script, /ssh -t .*EncodedCommand/);
+          assert.match(script, /Remove-Item.*\$PSCommandPath/);
+        },
+        startWatcher: () => {},
+        openAttachTab: () => {},
+      });
+    } finally {
+      if (launchPath) rmSync(launchPath, { force: true });
+    }
+  });
+});
+
+it("Windows 직접 실행도 종료를 확인한 뒤에만 긴 프롬프트 디렉터리를 회수한다", async () => {
+  for (const absent of [true, false]) {
+    await withRecord(async (path) => {
+      writeFileSync(
+        path,
+        JSON.stringify({
+          host: record.host,
+          runId: record.runId,
+          remoteWindows: true,
+          claudePath: record.claudePath,
+          remoteRunDir: record.remoteRunDir,
+        }),
+      );
+      let cleaned = false;
+      const result = await remote.killSpawnSession(session, {
+        killLocal: () => {},
+        sleep: async () => {},
+        runRemote: (_host, command, os) => {
+          assert.equal(os, "win32");
+          if (command.includes("Get-CimInstance")) {
+            assert.match(
+              command,
+              /if \(-not \(Test-Path -LiteralPath '[^']*(?:''[^']*)*\/launcher.json'\)\) \{[\s\S]*CreationTimeUtc\)\.TotalSeconds -ge 120\) \{ Write-Output 'TFX_REMOTE_SESSION_ABSENT'; exit 1 \}[\s\S]*exit 2\s*\}/,
+            );
+            if (command.includes("taskkill.exe")) return { ok: true };
+            return absent
+              ? {
+                  ok: false,
+                  status: 1,
+                  stdout: "banner\nTFX_REMOTE_SESSION_ABSENT\n",
+                }
+              : { ok: false, status: 255 };
+          }
+          assert.match(command, /Remove-Item/);
+          cleaned = true;
+          return { ok: true };
+        },
+      });
+      assert.equal(result.ok, absent);
+      assert.equal(cleaned, absent);
+      assert.equal(existsSync(path), !absent);
+    });
+  }
+});
+
+it("세션 부재라도 원격 파일 정리가 실패하면 kill 결과와 재시도 기록을 남긴다", async () => {
+  await withRecord(async (path) => {
+    const result = await remote.killSpawnSession(session, {
+      killLocal: () => {},
+      sleep: async () => {},
+      runRemote: (_host, command) =>
+        command.includes("has-session")
+          ? { ok: false, status: 1, stdout: "TFX_REMOTE_SESSION_ABSENT" }
+          : { ok: false, status: 255 },
+    });
+    assert.equal(result.remote.remaining, 0);
+    assert.equal(result.ok, false);
+    assert.equal(existsSync(path), true);
+  });
+});

@@ -5,7 +5,6 @@ import {
   buildPosixExitTail,
   buildPwshExitTail,
   buildRemoteBootstrapCommand,
-  buildRemoteClaudeCommand,
   buildSpawnCleanupWatcherArgs,
   resolveCleanupWatcherTimingOptions,
 } from "../../scripts/remote-spawn.mjs";
@@ -36,28 +35,6 @@ describe("remote-spawn normal-exit cleanup command builders", () => {
     assert.match(command, /& 'C:\/Users\/O''Neil\/claude\.exe'/);
     assert.match(command, /--dangerously-skip-permissions/);
     assert.match(command, /finally\s*\{\s*exit\s*\}/);
-  });
-
-  it("buildRemoteClaudeCommand for pwsh wraps in try/finally", () => {
-    const command = buildRemoteClaudeCommand(
-      { shell: "pwsh", claudePath: "C:\\Users\\dev\\bin\\claude.exe" },
-      "--dangerously-skip-permissions",
-    );
-    assert.match(command, /try\s*\{/);
-    assert.match(command, /& "C:\\Users\\dev\\bin\\claude\.exe"/);
-    assert.match(command, /--dangerously-skip-permissions/);
-    assert.match(command, /finally\s*\{\s*exit\s*\}/);
-  });
-
-  it("buildRemoteClaudeCommand for posix appends posix exit tail", () => {
-    const command = buildRemoteClaudeCommand(
-      { shell: "bash", claudePath: "/home/dev/.local/bin/claude" },
-      "--dangerously-skip-permissions",
-    );
-    assert.equal(
-      command,
-      "'/home/dev/.local/bin/claude' --dangerously-skip-permissions; exit $?",
-    );
   });
 
   it("resolveCleanupWatcherTimingOptions merges explicit values and defaults", () => {
