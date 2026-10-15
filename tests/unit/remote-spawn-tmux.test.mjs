@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -15,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import {
   __remoteSpawnTest,
   attachSession,
+  buildRemotePosixSpawnCommands,
   buildRemoteSessionName,
   buildRemoteTmuxAttachCommand,
   buildRemoteTmuxCommand,
@@ -32,8 +34,8 @@ const record = {
   remoteTmux: true,
   remoteSessionName: session,
   tmuxPath: "/opt/homebrew/bin/tmux",
-  binDirs: ["/opt/homebrew/bin"],
 };
+const hasTmux = spawnSync("tmux", ["-V"]).status === 0;
 
 async function withRecord(run) {
   const root = mkdtempSync(join(tmpdir(), "tfx-remote-tmux-"));
@@ -61,7 +63,7 @@ describe("원격 tmux 실행과 attach 명령", () => {
     await withRecord(() => {
       assert.equal(
         inferRemoteHostFromSessionName(session, ["m2-ts-net"]),
-        "m2.ts.net",
+        "m2-ts-net",
       );
     });
     assert.equal(
@@ -87,6 +89,7 @@ describe("원격 tmux 실행과 attach 명령", () => {
         sessionName: session,
         dir,
         claudePath: "/home/unit/claude's bin",
+        binDirs: ["/opt/homebrew/bin"],
         promptFile,
         permissionFlags: "--dangerously-skip-permissions",
       };
@@ -100,7 +103,8 @@ describe("원격 tmux 실행과 attach 명령", () => {
         .trim()
         .split("\n")
         .map(JSON.parse);
-      assert.deepEqual(calls[0].slice(0, -1), [
+      assert.equal(calls.length, 1);
+      assert.deepEqual(calls[0].slice(0, 10), [
         "new-session",
         "-d",
         "-s",
@@ -113,22 +117,22 @@ describe("원격 tmux 실행과 attach 명령", () => {
         "60",
       ]);
       assert.match(
-        calls[0].at(-1),
+        calls[0][10],
         /export PATH=.*claude.*--dangerously-skip-permissions.* < .* && rm -f /,
       );
-      assert.ok(!calls[0].at(-1).includes("exit $?"));
-      execFileSync("sh", ["-n"], { input: calls[0].at(-1) });
-      assert.deepEqual(calls[1], [
+      assert.ok(!calls[0][10].includes("exit $?"));
+      execFileSync("sh", ["-n"], { input: calls[0][10] });
+      assert.deepEqual(calls[0].slice(11), [
+        ";",
         "set-option",
         "-t",
-        `=${session}`,
+        `=${session}:`,
         "@tfx_run_id",
         record.runId,
-      ]);
-      assert.deepEqual(calls[2], [
+        ";",
         "set-option",
         "-t",
-        `=${session}`,
+        `=${session}:`,
         "status",
         "off",
       ]);
@@ -152,8 +156,10 @@ describe("원격 tmux 실행과 attach 명령", () => {
     assert.ok(!command.includes("BatchMode"));
     assert.ok(command.includes("m2.ts.net"));
     const script = buildRemoteTmuxCommand(record, "attach-session");
-    assert.ok(script.startsWith(`export PATH='/opt/homebrew/bin':"$PATH"; `));
-    assert.ok(script.includes(`show-options -qv -t '=${session}' @tfx_run_id`));
+    assert.ok(!script.includes("export PATH="));
+    assert.ok(
+      script.includes(`show-options -qv -t '=${session}:' @tfx_run_id`),
+    );
     assert.ok(
       script.endsWith(
         `exec '/opt/homebrew/bin/tmux' attach-session -t '=${session}'`,
@@ -162,7 +168,83 @@ describe("원격 tmux 실행과 attach 명령", () => {
     const win = buildRemoteTmuxAttachCommand(record.host, record, "win32");
     assert.ok(!win.includes("ControlMaster"));
     assert.ok(win.includes(`-t ''=${session}''`));
-    assert.ok(win.includes('"$PATH"'));
+    assert.ok(!win.includes('"$PATH"'));
+  });
+});
+
+it("실제 tmux에서 생성, 소유 확인, 정확 매칭, 종료 상태를 확인한다", {
+  skip: !hasTmux,
+}, async () => {
+  await withRecord((_recordPath, root) => {
+    const socket = `tfx-test-${randomUUID()}`;
+    const tmuxPath = join(root, "tmux-wrapper");
+    writeFileSync(
+      tmuxPath,
+      `#!/bin/sh\nexec tmux -L '${socket}' -f /dev/null "$@"\n`,
+      { mode: 0o700 },
+    );
+    const liveRecord = { ...record, tmuxPath };
+    const run = (action, override = {}) =>
+      spawnSync(
+        "sh",
+        ["-c", buildRemoteTmuxCommand({ ...liveRecord, ...override }, action)],
+        { encoding: "utf8" },
+      );
+    try {
+      const start = spawnSync("sh", [], {
+        input: buildRemoteTmuxStartScript({
+          ...liveRecord,
+          sessionName: session,
+          dir: root,
+          claudePath: "/bin/sleep",
+          permissionFlags: "60",
+        }),
+        encoding: "utf8",
+        env: { ...process.env, HOME: root },
+      });
+      assert.equal(start.status, 0, start.stderr);
+      assert.equal(run("has-session").status, 0);
+      assert.equal(run("kill-session", { runId: "another-run" }).status, 3);
+      assert.equal(run("has-session").status, 0);
+      execFileSync(tmuxPath, [
+        "new-session",
+        "-d",
+        "-s",
+        `${session}-extra`,
+        "sleep 60",
+      ]);
+      assert.equal(run("kill-session").status, 0);
+      assert.equal(run("has-session").status, 1);
+      execFileSync(tmuxPath, ["kill-server"]);
+      assert.equal(run("has-session").status, 1);
+    } finally {
+      spawnSync(tmuxPath, ["kill-server"]);
+    }
+  });
+});
+
+it("capabilities가 없어도 Claude 디렉터리의 node로 npm 셔뱅을 실행한다", async () => {
+  await withRecord((_recordPath, root) => {
+    const bin = join(root, "bin's $(not-a-command)");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "node"),
+      "#!/bin/sh\nprintf 'node from claude bin'\n",
+      { mode: 0o700 },
+    );
+    writeFileSync(join(bin, "claude"), "#!/usr/bin/env node\n", {
+      mode: 0o700,
+    });
+    const script = buildRemotePosixSpawnCommands({
+      claudePath: join(bin, "claude"),
+    }).join("\n");
+    const result = spawnSync("sh", [], {
+      input: script,
+      encoding: "utf8",
+      env: { ...process.env, PATH: "/usr/bin:/bin" },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "node from claude bin");
   });
 });
 
@@ -176,6 +258,22 @@ it("명시된 OS만 프로브 힌트로 사용한다", () => {
       readHost: () => ({ os: "darwin", raw: { os: "macos" } }),
     }),
     "darwin",
+  );
+  for (const os of ["Windows 11", "linxu", "not-darwin"]) {
+    assert.equal(
+      resolveRemoteOsHint("unit", {
+        readHost: () => ({ os: "linux", raw: { os } }),
+      }),
+      undefined,
+    );
+  }
+  assert.equal(
+    resolveRemoteOsHint("unit", {
+      readHost: () => {
+        throw new Error("invalid hosts.json");
+      },
+    }),
+    undefined,
   );
 });
 
@@ -199,8 +297,10 @@ it("동명 원격 세션의 runId가 다르면 attach와 kill을 실행하지 �
       assert.match(result.stderr, /runId mismatch/);
     }
     const calls = readFileSync(log, "utf8").trim().split("\n").map(JSON.parse);
-    assert.equal(calls.length, 3);
-    assert.ok(calls.every((args) => args[0] === "show-options"));
+    assert.equal(calls.length, 6);
+    assert.ok(
+      calls.every((args) => ["has-session", "show-options"].includes(args[0])),
+    );
     execFileSync(
       "sh",
       ["-c", buildRemoteTmuxCommand({ ...record, tmuxPath }, "kill-session")],
@@ -214,6 +314,69 @@ it("동명 원격 세션의 runId가 다르면 attach와 kill을 실행하지 �
 });
 
 describe("원격 tmux 기록 수명", () => {
+  for (const status of [1, 3, 255, null]) {
+    it(`attach의 실제 throw status ${status}: 세션 부재일 때만 기록을 정리한다`, async () => {
+      await withRecord(async (recordPath) => {
+        const commands = [];
+        await assert.rejects(
+          attachSession(session, {
+            sessionExists: () => false,
+            runRemote: (_host, command) => {
+              commands.push(command);
+              if (command.includes("has-session"))
+                throw Object.assign(new Error("probe fixture"), { status });
+              return { ok: true };
+            },
+            multiplexerExec: () => assert.fail("unexpected creation"),
+            openAttachTab: () => assert.fail("unexpected attach"),
+          }),
+          status === 1
+            ? /remote tmux session ended/
+            : /remote tmux session check failed.*probe fixture/,
+        );
+        assert.equal(existsSync(recordPath), status !== 1);
+        assert.equal(
+          commands.some((command) => command.includes("rmdir")),
+          status === 1,
+        );
+      });
+    });
+
+    for (const localState of ["session-missing", "pane-dead"]) {
+      it(`감시자 ${localState}, 원격 status ${status}: 세션 부재일 때만 기록을 정리한다`, async () => {
+        await withRecord(async (recordPath) => {
+          const commands = [];
+          await __remoteSpawnTest.runSpawnCleanupWatcher(
+            session,
+            `${session}:0.0`,
+            {
+              sessionExists: () => localState === "pane-dead",
+              getPaneStatus: () => ({ isDead: true }),
+              killSession: () => {},
+              sleep: async () => {},
+              runRemote: (_host, command) => {
+                commands.push(command);
+                if (command.includes("has-session"))
+                  throw Object.assign(new Error("probe fixture"), { status });
+                return { ok: true };
+              },
+            },
+          );
+          assert.equal(existsSync(recordPath), status !== 1);
+          assert.equal(
+            commands.filter((command) => command.includes("has-session"))
+              .length,
+            1,
+          );
+          assert.equal(
+            commands.some((command) => command.includes("rmdir")),
+            status === 1,
+          );
+        });
+      });
+    }
+  }
+
   it("로컬 pane 정리와 monitor 종료가 재접속 기록을 보존한다", async () => {
     await withRecord(async (recordPath) => {
       let now = 0;
@@ -275,7 +438,7 @@ describe("원격 tmux 기록 수명", () => {
           multiplexerExec: () => assert.fail("unexpected creation"),
           openAttachTab: () => assert.fail("unexpected attach"),
         }),
-        /remote tmux session not found/,
+        /remote tmux session ended/,
       );
     });
   });
@@ -285,10 +448,11 @@ describe("원격 tmux 기록 수명", () => {
       await withRecord(async (recordPath) => {
         const calls = [];
         const result = await killSpawnSession(session, {
+          runId: "ignored-run",
           killLocal: () => {},
           runRemote: (host, command) => {
             calls.push([host, command]);
-            return command.includes("has-session")
+            return command.endsWith(`has-session -t '=${session}'`)
               ? { ok: false, status }
               : { ok: true };
           },
@@ -310,7 +474,13 @@ describe("원격 tmux 기록 수명", () => {
 });
 
 describe("spawn CLI 실패 보고", () => {
-  for (const failure of ["probe", "bootstrap", "lost-response", "pane-gone"]) {
+  for (const failure of [
+    "probe",
+    "bootstrap",
+    "lost-response",
+    "pane-gone",
+    "pane-gone-at-timeout",
+  ]) {
     it(`${failure}: 원래 오류와 exit 1을 반환한다`, async () => {
       await withRecord((_recordPath, root) => {
         const scriptPath = fileURLToPath(
@@ -321,6 +491,7 @@ describe("spawn CLI 실패 보고", () => {
           import { syncBuiltinESMExports } from 'node:module';
           const fail = ${JSON.stringify(failure)};
           let captures = 0;
+          let waitedOnce = false;
           cp.execFileSync = (file, args, options = {}) => {
             if (file === 'ssh') {
               if (fail === 'probe') throw new Error('probe fixture: access denied');
@@ -331,7 +502,10 @@ describe("spawn CLI 실패 보고", () => {
               return '';
             }
             if (args[0] === 'capture-pane') return captures++ === 0 ? 'ssh fixture: connection lost' : '';
-            if (args[0] === 'has-session') throw Object.assign(new Error('no session'), { status: 1 });
+            if (args[0] === 'has-session') {
+              if (fail === 'pane-gone-at-timeout' && !waitedOnce) return '';
+              throw Object.assign(new Error('no session'), { status: 1 });
+            }
             return '';
           };
           cp.execSync = () => '';
@@ -339,7 +513,13 @@ describe("spawn CLI 실패 보고", () => {
           syncBuiltinESMExports();
           let clock = 1000000;
           Date.now = () => (clock += 20000);
-          globalThis.setTimeout = (fn) => { fn(); return 0; };
+          globalThis.setTimeout = (fn) => {
+            if (fail !== 'pane-gone-at-timeout') throw new Error('unexpected readiness wait');
+            waitedOnce = true;
+            clock += 60000;
+            fn();
+            return 0;
+          };
           process.argv = ['node', ${JSON.stringify(scriptPath)}, '--host', 'cli-unit.ts.net', '--name', 'failure', '--no-attach'];
           await import(${JSON.stringify(new URL("../../scripts/remote-spawn.mjs", import.meta.url).href)});
         `;

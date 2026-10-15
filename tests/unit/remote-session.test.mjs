@@ -1,7 +1,7 @@
 // tests/unit/remote-session.test.mjs — remote-session 모듈 단위 테스트 (Lake 3)
 
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdtempSync,
@@ -37,6 +37,44 @@ const WIN_ENV = Object.freeze({
 });
 
 describe("remote-session 공용 프로브", () => {
+  it("기본 프로브는 로컬과 원격 CLI 버전을 실행하지 않고 명시 프로브만 조회한다", () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), "tfx-probe-versions-"));
+    try {
+      const script = `
+        import assert from 'node:assert/strict';
+        import cp from 'node:child_process';
+        import { syncBuiltinESMExports } from 'node:module';
+        cp.execFileSync = () => { throw new Error('unexpected local version command'); };
+        cp.execSync = cp.execFileSync;
+        syncBuiltinESMExports();
+        const { probeRemoteEnv } = await import(${JSON.stringify(new URL("../../hub/team/remote-session.mjs", import.meta.url).href)});
+        let versionCommands = 0;
+        cp.execFileSync = () => { versionCommands++; return '1.0.0'; };
+        cp.execSync = cp.execFileSync;
+        syncBuiltinESMExports();
+        for (const withVersions of [false, true]) {
+          const env = probeRemoteEnv('unit-host', {
+            force: true, osHint: 'linux', cacheDir: ${JSON.stringify(cacheDir)},
+            ...(withVersions ? { localVersions: { claude: [1, 0, 0] } } : {}),
+            execSsh: (_args, opts) => {
+              assert.equal(opts.input.includes('--version'), withVersions);
+              return 'os=linux\\nhome=/home/unit\\nshell=bash\\nclaude=/bin/claude\\n' + (withVersions ? 'claudeVersion=2.0.0\\n' : '');
+            },
+          });
+          assert.equal(env.warnings.includes('claude version differs'), withVersions);
+        }
+        assert.equal(versionCommands, 0);
+      `;
+      const result = spawnSync(
+        process.execPath,
+        ["--input-type=module", "-e", script],
+        { encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, result.stderr);
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
   for (const osHint of ["darwin", "linux"]) {
     it(`${osHint} 힌트는 pwsh를 건너뛰고 tfx-live 필드와 상태 필드를 함께 반환한다`, () => {
       const cacheDir = mkdtempSync(join(tmpdir(), "tfx-probe-"));
@@ -139,6 +177,34 @@ describe("remote-session 공용 프로브", () => {
 });
 
 describe("공용 SSH/scp 옵션", () => {
+  for (const owner of ["self", "other", "symlink", "no-getuid"]) {
+    it(`${owner}: ControlPath를 한 번 준비하고 안전하지 않으면 multiplexing을 생략한다`, () => {
+      const script = `
+        import assert from 'node:assert/strict';
+        import fs from 'node:fs';
+        import { syncBuiltinESMExports } from 'node:module';
+        const owner = ${JSON.stringify(owner)};
+        process.getuid = owner === 'no-getuid' ? undefined : () => 501;
+        let writes = 0;
+        fs.mkdirSync = () => { writes++; };
+        fs.chmodSync = () => { assert.equal(owner, 'self'); writes++; };
+        fs.lstatSync = () => ({ uid: owner === 'other' ? 502 : 501, isDirectory: () => owner !== 'symlink' });
+        syncBuiltinESMExports();
+        const { buildSshOptions } = await import(${JSON.stringify(new URL("../../hub/team/remote-session.mjs", import.meta.url).href)});
+        const prepared = writes;
+        for (let i = 0; i < 2; i++) {
+          assert.equal(buildSshOptions({ platform: 'darwin' }).includes('ControlMaster=auto'), owner === 'self' && process.platform !== 'win32');
+        }
+        assert.equal(writes, prepared);
+      `;
+      const result = spawnSync(
+        process.execPath,
+        ["--input-type=module", "-e", script],
+        { encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, result.stderr);
+    });
+  }
   for (const platform of ["darwin", "linux", "win32"]) {
     it(`${platform}: keepalive와 비대화식 제한 및 플랫폼별 multiplexing`, () => {
       const options = buildSshOptions({ platform });

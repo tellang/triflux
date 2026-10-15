@@ -5,6 +5,7 @@ import { execFileSync, execSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   writeFileSync,
@@ -23,6 +24,20 @@ const REMOTE_ENV_TTL_MS = 86_400_000; // 24h
 const REMOTE_STAGE_ROOT = "tfx-remote";
 const SAFE_HOST_RE = /^[a-zA-Z0-9._-]+$/;
 
+let sshControlDir = null;
+if (process.platform !== "win32" && typeof process.getuid === "function") {
+  // macOS Unix 소켓 경로의 104바이트 제한 때문에 $TMPDIR 대신 /tmp를 쓴다.
+  const dir = `/tmp/tfx-cm-${process.getuid()}`;
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const stat = lstatSync(dir);
+    if (stat.isDirectory() && stat.uid === process.getuid()) {
+      chmodSync(dir, 0o700);
+      sshControlDir = dir;
+    }
+  } catch {}
+}
+
 export function buildSshOptions({
   interactive = false,
   platform = process.platform,
@@ -35,16 +50,12 @@ export function buildSshOptions({
   ];
   if (!interactive)
     options.push("-o", "BatchMode=yes", "-o", "ConnectTimeout=10");
-  if (platform !== "win32") {
-    // macOS Unix 소켓 경로의 104바이트 제한 때문에 $TMPDIR 대신 /tmp를 쓴다.
-    const controlDir = `/tmp/tfx-cm-${process.getuid()}`;
-    mkdirSync(controlDir, { recursive: true, mode: 0o700 });
-    chmodSync(controlDir, 0o700);
+  if (platform !== "win32" && sshControlDir) {
     options.push(
       "-o",
       "ControlMaster=auto",
       "-o",
-      `ControlPath=${controlDir}/%C`,
+      `ControlPath=${sshControlDir}/%C`,
       "-o",
       "ControlPersist=60",
     );
@@ -193,7 +204,7 @@ export function normalizePosixProbeEnv(parsed, localVersions = null) {
     warnings.push("home disk free below 5 GiB");
   }
   for (const [name, remote] of Object.entries(versions)) {
-    const local = localVersions ? localVersions[name] : probeVersion(name);
+    const local = localVersions?.[name];
     const remoteVersion = remote && parseVersion(remote);
     if (local && remoteVersion && compareVersions(local, remoteVersion) !== 0) {
       warnings.push(`${name} version differs`);
@@ -208,7 +219,7 @@ export function normalizePosixProbeEnv(parsed, localVersions = null) {
     geminiPath:
       !parsed.gemini || parsed.gemini === "notfound" ? null : parsed.gemini,
     tmuxPath: !parsed.tmux || parsed.tmux === "notfound" ? null : parsed.tmux,
-    node: parsed.node || null,
+    node: parsed.node || parsed.nodeVersion || null,
     cores: parsed.cores ? Number(parsed.cores) : null,
     ramGb: parsed.ram_gb ? Number(parsed.ram_gb) : null,
     home: parsed.home,
@@ -260,7 +271,6 @@ function probeRemoteEnvViaPosix(host, execSsh, localVersions) {
     "command -v codex >/dev/null 2>&1 && echo codex=$(command -v codex) || echo codex=notfound",
     "command -v gemini >/dev/null 2>&1 && echo gemini=$(command -v gemini) || echo gemini=notfound",
     "echo os=$(uname -s | tr A-Z a-z)",
-    "node --version 2>/dev/null && echo node=$(node --version) || echo node=notfound",
     // darwin: sysctl, linux: nproc + /proc/meminfo
     "if [ $(uname -s) = Darwin ]; then echo cores=$(sysctl -n hw.ncpu); echo ram_gb=$(($(sysctl -n hw.memsize) / 1073741824)); else echo cores=$(nproc 2>/dev/null || echo 0); echo ram_gb=$(($(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}') / 1048576)); fi",
     "command -v tmux >/dev/null 2>&1 && echo tmux=$(command -v tmux) || echo tmux=notfound",
@@ -274,8 +284,12 @@ function probeRemoteEnvViaPosix(host, execSsh, localVersions) {
     "fi",
     'df -Pk "$HOME" 2>/dev/null | awk \'NR==2 {printf "diskFreeHome=%.0f\\n", $4 * 1024}\'',
     'if [ -f "${CODEX_HOME:-$HOME/.codex}/auth.json" ]; then echo codexAuthExists=true; else echo codexAuthExists=false; fi',
-    'probe_version() { command -v "$1" >/dev/null 2>&1 && "$1" --version </dev/null 2>/dev/null | head -n 1; }',
-    'for cli in node codex agy claude triflux; do printf \'%sVersion=%s\\n\' "$cli" "$(probe_version "$cli")"; done',
+    ...(localVersions
+      ? [
+          'probe_version() { command -v "$1" >/dev/null 2>&1 && "$1" --version </dev/null 2>/dev/null | head -n 1; }',
+          'for cli in node codex agy claude triflux; do printf \'%sVersion=%s\\n\' "$cli" "$(probe_version "$cli")"; done',
+        ]
+      : []),
   ].join("\n");
 
   try {

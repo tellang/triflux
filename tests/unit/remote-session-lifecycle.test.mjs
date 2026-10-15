@@ -174,7 +174,7 @@ describe("collectRemoteBinDirs() / spawn 명령 조립", () => {
     );
   });
 
-  it("capabilities_v2가 없으면 PATH를 주입하지 않는다", () => {
+  it("capabilities_v2가 없어도 프로브의 Claude 디렉터리를 PATH 앞에 넣는다", () => {
     const host = { os: "darwin", raw: { capabilities: ["claude"] } };
     assert.deepEqual(collectRemoteBinDirs(host), []);
     assert.equal(buildRemotePathExportCommand([]), "");
@@ -185,9 +185,9 @@ describe("collectRemoteBinDirs() / spawn 명령 조립", () => {
       dir: "/Users/example/projects/triflux",
       permissionFlags: "--dangerously-skip-permissions",
     });
-    assert.equal(commands.length, 2);
-    assert.equal(commands[0], "cd '/Users/example/projects/triflux'");
-    assert.ok(!commands.some((command) => command.includes("export PATH")));
+    assert.equal(commands.length, 3);
+    assert.equal(commands[0], "export PATH='/usr/local/bin':\"$PATH\"");
+    assert.equal(commands[1], "cd '/Users/example/projects/triflux'");
   });
 
   it("posix spawn 명령은 PATH prefix → cd → claude 순서다", () => {
