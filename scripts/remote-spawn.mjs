@@ -128,11 +128,6 @@ function escapePwshSingleQuoted(value) {
   return String(value).replace(/['\u2018\u2019\u201A\u201B]/g, "$&$&");
 }
 
-// 큰따옴표 안에서는 $ 가 확장되고 “ ” „ 도 따옴표로 읽힌다. 모두 백틱으로 막는다.
-function escapePwshDoubleQuoted(value) {
-  return String(value).replace(/[`$"\u201C\u201D\u201E]/g, "`$&");
-}
-
 function normalizeCommandPath(value) {
   return String(value).replace(/\\/g, "/");
 }
@@ -167,13 +162,6 @@ export function buildRemoteBootstrapCommand(host) {
 export function buildLocalClaudeCommand(claudePathNorm, permissionFlags = "") {
   // try/finally: Ctrl+C로 Claude 종료해도 shell이 자동 exit
   return `try { & '${escapePwshSingleQuoted(claudePathNorm)}'${permissionFlags ? ` ${permissionFlags}` : ""} } finally { exit }`;
-}
-
-export function buildRemoteClaudeCommand(env, permissionFlags = "") {
-  if (env.shell === "pwsh") {
-    return `try { & "${escapePwshDoubleQuoted(env.claudePath)}"${permissionFlags ? ` ${permissionFlags}` : ""} } finally { exit }`;
-  }
-  return `${shellQuote(env.claudePath)}${permissionFlags ? ` ${permissionFlags}` : ""}; ${buildPosixExitTail()}`;
 }
 
 export function resolveCleanupWatcherTimingOptions(
@@ -1040,18 +1028,18 @@ export function buildRemoteWindowsLaunchScript(spec) {
   } = spec;
   return [
     "$ErrorActionPreference = 'Stop'",
+    "try {",
     ...(spec.remoteWindows
       ? [
           `@{ pid = $PID; started = (Get-CimInstance Win32_Process -Filter "ProcessId = $PID").CreationDate.ToFileTimeUtc().ToString(); runId = '${escapePwshSingleQuoted(runId)}' } | ConvertTo-Json -Compress | Set-Content -Encoding utf8 -LiteralPath '${escapePwshSingleQuoted(`${runDir}/launcher.json`)}'`,
         ]
       : []),
-    "try {",
     `Set-Location -LiteralPath '${escapePwshSingleQuoted(dir)}'`,
     ...(promptFile
       ? [
           `$prompt = Get-Content -Raw -Encoding utf8 -LiteralPath '${escapePwshSingleQuoted(promptFile)}'`,
           // 인용으로 두 배가 되는 최악 길이를 잡고 32K에서 실행 경로와 shim용 여유를 남긴다.
-          `if (($prompt.Length * 2 + ${claudePath.length * 2 + permissionFlags.length}) -le 24000) {`,
+          `if (-not $prompt.StartsWith('-') -and ($prompt.Length * 2 + ${claudePath.length * 2 + permissionFlags.length}) -le 24000) {`,
           `  Remove-Item -LiteralPath '${escapePwshSingleQuoted(promptFile)}' -Force`,
           "  if ($PSCommandPath) { Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue }",
           "} else {",
@@ -1096,6 +1084,11 @@ function buildRemoteWindowsProcessCommand(record, stop = false) {
     "$ErrorActionPreference = 'Stop'",
     "try {",
     `if (-not (Test-Path -LiteralPath '${runDir}')) { Write-Output '${REMOTE_SESSION_ABSENT_MARKER}'; exit 1 }`,
+    `if (-not (Test-Path -LiteralPath '${runDir}/launcher.json')) {`,
+    // 시작 SSH의 30초 타임아웃보다 오래 기다려 아직 시작 중인 실행을 보존한다.
+    `  if (([DateTime]::UtcNow - (Get-Item -LiteralPath '${runDir}').CreationTimeUtc).TotalSeconds -ge 120) { Write-Output '${REMOTE_SESSION_ABSENT_MARKER}'; exit 1 }`,
+    "  exit 2",
+    "}",
     `$owner = Get-Content -Raw -LiteralPath '${runDir}/launcher.json' | ConvertFrom-Json`,
     `if ($owner.runId -cne '${escapePwshSingleQuoted(record.runId)}') { throw 'remote Windows runId mismatch' }`,
     "$process = Get-CimInstance Win32_Process -Filter ('ProcessId = ' + [int]$owner.pid)",

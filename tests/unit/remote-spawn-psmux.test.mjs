@@ -113,6 +113,29 @@ it("psmux 시작은 경로를 PowerShell로 인용하고 프롬프트를 파일�
   assert.ok(!launch.includes(" | & "));
 });
 
+it("Windows 런처는 PID 조회와 소유 기록 실패에도 finally로 파일을 회수한다", () => {
+  const script = remote.buildRemoteWindowsLaunchScript({
+    ...record,
+    remoteWindows: true,
+    dir: "C:/work",
+  });
+  assert.ok(script.indexOf("try {") < script.indexOf("Get-CimInstance"));
+  assert.ok(script.indexOf("try {") < script.indexOf("Set-Content"));
+  assert.match(script, /finally \{[\s\S]*Remove-Item -LiteralPath/);
+});
+
+it("하이픈으로 시작하는 짧은 본문도 파일을 남겨 파일 지시 argv로 보낸다", () => {
+  const script = remote.buildRemoteWindowsLaunchScript({
+    ...record,
+    dir: "C:/work",
+    promptFile: "C:/stage/prompt.md",
+  });
+  assert.match(
+    script,
+    /if \(-not \$prompt\.StartsWith\('-'\) -and \([^)]+\) -le 24000\) \{\s+Remove-Item[\s\S]*\} else \{\s+\$prompt = 'Read the UTF-8 file at "C:\/stage\/prompt.md"/,
+  );
+});
+
 it("attach 명령은 양쪽 로컬 셸에서 원격 PowerShell EncodedCommand를 전달한다", () => {
   for (const platform of ["darwin", "win32"]) {
     const command = remote.buildRemoteTmuxAttachCommand(
@@ -417,8 +440,12 @@ it("Windows 직접 실행도 종료를 확인한 뒤에만 긴 프롬프트 디�
         sleep: async () => {},
         runRemote: (_host, command, os) => {
           assert.equal(os, "win32");
-          if (command.includes("taskkill.exe")) return { ok: true };
           if (command.includes("Get-CimInstance")) {
+            assert.match(
+              command,
+              /if \(-not \(Test-Path -LiteralPath '[^']*(?:''[^']*)*\/launcher.json'\)\) \{[\s\S]*CreationTimeUtc\)\.TotalSeconds -ge 120\) \{ Write-Output 'TFX_REMOTE_SESSION_ABSENT'; exit 1 \}[\s\S]*exit 2\s*\}/,
+            );
+            if (command.includes("taskkill.exe")) return { ok: true };
             return absent
               ? {
                   ok: false,
