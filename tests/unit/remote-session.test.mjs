@@ -37,6 +37,55 @@ const WIN_ENV = Object.freeze({
 });
 
 describe("remote-session 공용 프로브", () => {
+  it("Windows 프로브는 기본 셸 재해석을 피하고 psmux 없는 옛 캐시를 갱신한다", () => {
+    const cacheDir = mkdtempSync(join(tmpdir(), "tfx-win-probe-"));
+    try {
+      writeFileSync(
+        join(cacheDir, "unit-host.json"),
+        JSON.stringify({
+          cachedAt: Date.now(),
+          env: WIN_ENV,
+        }),
+      );
+      let calls = 0;
+      const env = probeRemoteEnv("unit-host", {
+        cacheDir,
+        execSsh: (args) => {
+          calls++;
+          assert.match(
+            args.at(-1),
+            /^pwsh -NoProfile -EncodedCommand [A-Za-z0-9+/=]+$/,
+          );
+          const script = Buffer.from(
+            args.at(-1).split(" ").at(-1),
+            "base64",
+          ).toString("utf16le");
+          assert.match(script, /Get-Command psmux/);
+          return "os=win32\nshell=pwsh\nhome=C:\\Users\\example\nclaude=C:\\tools with spaces\\claude.ps1\npsmux=C:\\tools\\psmux.exe\n";
+        },
+      });
+      assert.equal(calls, 1);
+      assert.equal(env.psmuxPath, "C:\\tools\\psmux.exe");
+      assert.equal(env.claudePath, "C:\\tools with spaces\\claude.ps1");
+      assert.deepEqual(
+        probeRemoteEnv("unit-host", {
+          cacheDir,
+          execSsh: () => assert.fail("cache miss"),
+        }),
+        env,
+      );
+      const missing = probeRemoteEnv("unit-host", {
+        cacheDir,
+        force: true,
+        execSsh: () =>
+          "os=win32\nshell=pwsh\nhome=C:\\Users\\example\nclaude=C:\\bin\\claude.ps1\npsmux=notfound\n",
+      });
+      assert.equal(missing.psmuxPath, null);
+    } finally {
+      rmSync(cacheDir, { recursive: true, force: true });
+    }
+  });
+
   it("기본 프로브는 로컬과 원격 CLI 버전을 실행하지 않고 명시 프로브만 조회한다", () => {
     const cacheDir = mkdtempSync(join(tmpdir(), "tfx-probe-versions-"));
     try {

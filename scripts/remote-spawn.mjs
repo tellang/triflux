@@ -68,7 +68,7 @@ const DEFAULT_CLEANUP_WATCH_GRACE_MS = 1500;
 const DEFAULT_CLEANUP_WATCH_MAX_MS = 60 * 60 * 1000;
 
 const SAFE_HOST_RE = /^[a-zA-Z0-9._-]+$/;
-const SAFE_DIR_RE = /^[a-zA-Z0-9_.~/:-]+$/;
+const UNSAFE_DIR_RE = /[\0\r\n]/;
 
 // --- 화면 상태 판별 / 수명주기 (PRD: remote-session-lifecycle) ---
 const CLAUDE_SCREEN_HOME = "home";
@@ -101,6 +101,7 @@ const REMOTE_ACTIONABLE_STATES = new Set([
 ]);
 const SAFE_REMOTE_BIN_DIR_RE = /^\/[A-Za-z0-9._@+-]+(?:\/[A-Za-z0-9._@+-]+)*$/;
 const SPAWN_SESSION_PREFIX = "tfx-spawn-";
+const REMOTE_SESSION_ABSENT_MARKER = "TFX_REMOTE_SESSION_ABSENT";
 
 function validateHost(host) {
   if (!SAFE_HOST_RE.test(host)) {
@@ -111,7 +112,7 @@ function validateHost(host) {
 }
 
 function validateDir(dir) {
-  if (!SAFE_DIR_RE.test(dir)) {
+  if (!dir || UNSAFE_DIR_RE.test(dir)) {
     console.error(`invalid directory path: ${dir}`);
     process.exit(1);
   }
@@ -676,48 +677,34 @@ async function spawnLocalFallback(args, claudePath, prompt) {
   }
 }
 
-function detectWindowsRemoteHome(host) {
-  try {
-    const home = execFileSync(
-      "ssh",
-      [
-        ...buildSshOptions(),
-        host,
-        pwshRemoteCommand("Write-Output $env:USERPROFILE"),
-      ],
-      { encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"] },
-    ).trim();
-    return isWindowsAbsolutePath(home) ? home : null;
-  } catch {
-    return null;
-  }
-}
-
-async function spawnRemoteFallback(args, promptContext) {
+async function spawnRemoteFallback(args, promptContext, remoteEnv = null) {
   const { host } = args;
   if (!host) {
     console.error("--host required for remote spawn");
     process.exit(1);
   }
 
-  const dir = args.dir || "~";
-  const permFlags = getPermissionFlag();
+  const env =
+    remoteEnv || probeRemoteEnv(host, { osHint: resolveRemoteOsHint(host) });
+  const dir = resolveRemoteDir(args.dir, env);
   let prompt = promptContext.prompt;
 
-  // 이 폴백은 .ps1 을 pwsh 로 실행하므로 Windows 원격만 받는다. POSIX 셸은 $env:USERPROFILE 을 엉뚱한 문자열로 펼친다.
-  const remoteHome = detectWindowsRemoteHome(host);
-  if (!remoteHome) {
+  if (env.os !== "win32") {
     failFast(
       `${host}: 폴백 레인은 pwsh 가 있는 Windows 원격만 지원한다. mac, Linux 원격은 로컬 tmux 가 있어야 한다.`,
     );
   }
+  if (!env.claudePath) throw new Error(`claude not found on ${host}`);
+  console.error(
+    `${host}: 원격 psmux 보호 없이 실행하므로 ssh가 끊기면 claude도 종료된다.`,
+  );
 
+  const runId = randomUUID().slice(0, 8);
+  const stageId = `spawn-${runId}`;
   try {
-    const fallbackEnv = { home: remoteHome, os: "win32", shell: "pwsh" };
-    const stageId = `spawn-${randomUUID().slice(0, 8)}`;
     const { stagedFiles } = stageRemotePromptFiles(
       host,
-      fallbackEnv,
+      env,
       promptContext.transferCandidates,
       stageId,
     );
@@ -728,29 +715,21 @@ async function spawnRemoteFallback(args, promptContext) {
     );
   }
 
-  const scriptLines = [`cd '${escapePwshSingleQuoted(dir)}'`];
-
-  if (prompt) {
-    scriptLines.push(
-      `& "$env:USERPROFILE\\.local\\bin\\claude.exe" ${permFlags.join(" ")} '${escapePwshSingleQuoted(prompt)}'`,
-    );
-  } else {
-    scriptLines.push(
-      `& "$env:USERPROFILE\\.local\\bin\\claude.exe" ${permFlags.join(" ")}`,
-    );
-  }
-
-  const scriptContent = scriptLines.join("\n");
-  const localScript = join(
-    privateTmpDir("remote-spawn"),
-    "tfx-remote-spawn.ps1",
-  );
+  const promptFile = uploadRemotePromptFile(host, env, stageId, prompt);
+  const scriptContent = buildRemoteWindowsLaunchScript({
+    claudePath: env.claudePath,
+    dir,
+    promptFile,
+    permissionFlags: getPermissionFlag().join(" "),
+  });
+  const scriptName = `tfx-remote-spawn-${runId}.ps1`;
+  const localScript = join(privateTmpDir("remote-spawn"), scriptName);
   writeFileSync(localScript, scriptContent, "utf8");
 
   try {
     execFileSync(
       "scp",
-      [...buildSshOptions(), localScript, `${host}:tfx-remote-spawn.ps1`],
+      [...buildSshOptions(), localScript, `${host}:${scriptName}`],
       {
         timeout: 10000,
         stdio: "pipe",
@@ -761,15 +740,16 @@ async function spawnRemoteFallback(args, promptContext) {
     process.exit(1);
   }
 
-  const remoteScript = `${remoteHome.replace(/\\/g, "/")}/tfx-remote-spawn.ps1`;
-  const remoteCmd = `pwsh -NoExit -File ${remoteScript}`;
+  unlinkSync(localScript);
+  const remoteScript = `${normalizeCommandPath(env.home)}/${scriptName}`;
+  const remoteCmd = `pwsh -NoProfile -File '${escapePwshSingleQuoted(remoteScript)}'`;
 
   if (IS_WINDOWS_LOCAL) {
     try {
       const wt = (await import("../hub/team/wt-manager.mjs")).createWtManager();
       await wt.createTab({
         title: `Claude@${host}`,
-        command: `ssh -t ${buildSshOptions({ interactive: true }).join(" ")} -- ${host} ${remoteCmd}`,
+        command: `ssh -t ${buildSshOptions({ interactive: true }).join(" ")} -- ${host} '${escapePwshSingleQuoted(remoteCmd)}'`,
       });
       console.log(`spawned remote Claude → ${host}:${dir}`);
     } catch (error) {
@@ -948,8 +928,7 @@ export function buildRemotePosixSpawnCommands(spec = {}) {
 
 /**
  * spawn 진입점의 레인 선택.
- * Windows 는 기존 psmux 레인을 그대로 유지하고, darwin/linux 는 tmux 가 있고
- * 원격이 posix 일 때만 tmux 레인을 탄다. 그 외는 모두 기존 fallback 이다.
+ * Windows 로컬은 psmux, darwin/linux 로컬은 tmux에서 원격 세션에 붙는다.
  * @returns {"psmux"|"tmux"|"fallback"}
  */
 export function resolveSpawnLane(options = {}) {
@@ -961,7 +940,11 @@ export function resolveSpawnLane(options = {}) {
   }
   if (platform !== "darwin" && platform !== "linux") return "fallback";
   if (!multiplexerAvailable) return "fallback";
-  if (options.remoteOs !== "darwin" && options.remoteOs !== "linux") {
+  if (
+    options.remoteOs !== "darwin" &&
+    options.remoteOs !== "linux" &&
+    !(options.remoteOs === "win32" && options.remotePsmuxAvailable)
+  ) {
     return "fallback";
   }
   return "tmux";
@@ -1017,7 +1000,51 @@ export function buildRemoteTmuxStartScript(spec) {
     .join("\n");
 }
 
+export function buildRemoteWindowsLaunchScript(spec) {
+  const { claudePath, dir, permissionFlags = "", promptFile } = spec;
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `Set-Location -LiteralPath '${escapePwshSingleQuoted(dir)}'`,
+    // 본문을 native argv로 펼치면 Windows의 32K 제한에 걸리므로 stdin으로 넘긴다.
+    `${promptFile ? `Get-Content -Raw -Encoding utf8 -LiteralPath '${escapePwshSingleQuoted(promptFile)}' | ` : ""}& '${escapePwshSingleQuoted(claudePath)}'${permissionFlags ? ` ${permissionFlags}` : ""}`,
+    buildPwshExitTail(),
+  ].join("\n");
+}
+
+export function buildRemotePsmuxStartScript(spec) {
+  const { psmuxPath, sessionName, runId, dir, remoteRunDir: runDir } = spec;
+  const launch = pwshRemoteCommand(buildRemoteWindowsLaunchScript(spec));
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `New-Item -ItemType Directory -Path '${escapePwshSingleQuoted(runDir)}' -Force | Out-Null`,
+    `& '${escapePwshSingleQuoted(psmuxPath)}' new-session -d -s '${escapePwshSingleQuoted(sessionName)}' -c '${escapePwshSingleQuoted(dir)}' -x 240 -y 60 '${launch}' ';' set-option -t '=${escapePwshSingleQuoted(sessionName)}:' '@tfx_run_id' '${escapePwshSingleQuoted(runId)}' ';' set-option -t '=${escapePwshSingleQuoted(sessionName)}:' status off`,
+    "exit $LASTEXITCODE",
+  ].join("\n");
+}
+
 export function buildRemoteTmuxCommand(record, action) {
+  if (record.remoteMux === "psmux") {
+    const mux = `& '${escapePwshSingleQuoted(record.psmuxPath)}'`;
+    const name = escapePwshSingleQuoted(record.remoteSessionName);
+    return [
+      "$ErrorActionPreference = 'Stop'",
+      "try {",
+      `$probe = @(${mux} has-session -t '=${name}' 2>&1)`,
+      "$code = $LASTEXITCODE",
+      // psmux는 없는 세션에 빈 출력+1을 낸다. 실행 실패를 부재로 바꾸지 않는다.
+      "if ($code -ne 0) {",
+      `  if ($code -eq 1 -and ($probe.Count -eq 0 -or ($probe -join "\n") -match '^psmux: (no server running on |can.t find session: )')) { Write-Output '${REMOTE_SESSION_ABSENT_MARKER}'; exit 1 }`,
+      "  if ($code -eq 1) { $code = 2 }; $probe | Write-Output; exit $code",
+      "}",
+      `$runId = ${mux} show-options -qv -t '=${name}:' '@tfx_run_id'`,
+      "if ($LASTEXITCODE -ne 0) { exit 2 }",
+      `if ($runId -cne '${escapePwshSingleQuoted(record.runId)}') { Write-Error 'remote psmux runId mismatch' -ErrorAction Continue; exit 3 }`,
+      // 3.4.0의 detach-client -s는 = 접두사를 받지 않는다. 위에서 정확 매칭과 소유를 확인한다.
+      `${mux} ${action} ${action === "detach-client" ? `-s '${name}'` : `-t '=${name}'`}`,
+      "exit $LASTEXITCODE",
+      "} catch { Write-Error $_ -ErrorAction Continue; exit 2 }",
+    ].join("\n");
+  }
   const tmux = shellQuote(record.tmuxPath);
   const target = shellQuote(`=${record.remoteSessionName}`);
   return [
@@ -1033,7 +1060,9 @@ export function buildRemoteTmuxAttachCommand(
   record,
   platform = getPlatform(),
 ) {
-  const command = buildRemoteTmuxCommand(record, "attach-session");
+  const script = buildRemoteTmuxCommand(record, "attach-session");
+  const command =
+    record.remoteMux === "psmux" ? pwshRemoteCommand(script) : script;
   const quoted =
     platform === "win32"
       ? `'${escapePwshSingleQuoted(command)}'`
@@ -1501,7 +1530,7 @@ function spawnLocal(args, claudePath, prompt) {
   }
 }
 
-async function spawnRemotePosix(args, promptContext, env) {
+async function spawnRemoteMultiplexed(args, promptContext, env) {
   const { host } = args;
   if (!env?.claudePath) {
     console.error(
@@ -1517,6 +1546,8 @@ async function spawnRemotePosix(args, promptContext, env) {
   );
   const paneId = `${sessionName}:0.0`;
   const runId = randomUUID().slice(0, 8);
+  const windowsRemote = env.os === "win32";
+  const stageId = windowsRemote ? `${sessionName}/run-${runId}` : sessionName;
   const permissionFlags = getPermissionFlag().join(" ");
   let prompt = promptContext.prompt;
 
@@ -1525,7 +1556,7 @@ async function spawnRemotePosix(args, promptContext, env) {
       host,
       env,
       promptContext.transferCandidates,
-      sessionName,
+      stageId,
     );
     prompt = rewritePromptPaths(prompt, stagedFiles);
   } catch (error) {
@@ -1536,7 +1567,7 @@ async function spawnRemotePosix(args, promptContext, env) {
 
   let remotePromptFile = null;
   try {
-    remotePromptFile = uploadRemotePromptFile(host, env, sessionName, prompt);
+    remotePromptFile = uploadRemotePromptFile(host, env, stageId, prompt);
   } catch (error) {
     failFast(
       `failed to stage remote prompt: ${error?.message || String(error)}`,
@@ -1549,21 +1580,30 @@ async function spawnRemotePosix(args, promptContext, env) {
     runId,
     sessionName,
     tmuxPath: env.tmuxPath,
+    psmuxPath: env.psmuxPath,
+    remoteRunDir: windowsRemote ? resolveRemoteStageDir(env, stageId) : null,
     claudePath: env.claudePath,
     dir: resolvedDir,
     permissionFlags,
     promptFile: remotePromptFile,
   };
-  const record = env.tmuxPath
+  const record = (windowsRemote ? env.psmuxPath : env.tmuxPath)
     ? {
         host,
         runId,
         remoteTmux: true,
+        remoteMux: windowsRemote ? "psmux" : "tmux",
         remoteSessionName: sessionName,
-        tmuxPath: env.tmuxPath,
+        ...(windowsRemote
+          ? {
+              psmuxPath: env.psmuxPath,
+              claudePath: env.claudePath,
+              remoteRunDir: spec.remoteRunDir,
+            }
+          : { tmuxPath: env.tmuxPath }),
       }
     : { host, runId };
-  if (!env.tmuxPath)
+  if (!record.remoteTmux)
     console.error(
       `${host}: 원격에 tmux가 없어 ssh가 끊기면 claude도 종료된다.`,
     );
@@ -1574,15 +1614,30 @@ async function spawnRemotePosix(args, promptContext, env) {
       // 응답을 잃어도 재접속할 수 있게 기록하되, 원격 runId가 다르면 조작을 거부한다.
       writeSpawnRecord(sessionName, record);
       try {
-        execFileSync("ssh", [...buildSshOptions(), host, "sh"], {
-          input: buildRemoteTmuxStartScript(spec),
-          encoding: "utf8",
-          timeout: 30_000,
-          stdio: ["pipe", "pipe", "pipe"],
-        });
+        execFileSync(
+          "ssh",
+          [
+            ...buildSshOptions(),
+            host,
+            windowsRemote
+              ? pwshRemoteCommand(buildRemotePsmuxStartScript(spec))
+              : "sh",
+          ],
+          {
+            ...(windowsRemote
+              ? {}
+              : { input: buildRemoteTmuxStartScript(spec) }),
+            encoding: "utf8",
+            timeout: 30_000,
+            stdio: ["pipe", "pipe", "pipe"],
+          },
+        );
       } catch (error) {
-        if (typeof error.status === "number" && error.status !== 255)
-          removeSpawnRecord(sessionName, runId);
+        if (
+          probeRemoteTmuxSession(record, defaultRunRemoteCommand).exists ===
+          false
+        )
+          cleanupSpawnRecord(sessionName, record, defaultRunRemoteCommand);
         throw error;
       }
       paneCommand = buildRemoteTmuxAttachCommand(host, record);
@@ -1664,17 +1719,18 @@ async function spawnRemote(args, promptContext) {
     const lane = resolveSpawnLane({
       multiplexerAvailable,
       remoteOs: remoteEnv?.os ?? null,
+      remotePsmuxAvailable: Boolean(remoteEnv?.psmuxPath),
     });
     if (lane === "tmux") {
-      await spawnRemotePosix(args, promptContext, remoteEnv);
+      await spawnRemoteMultiplexed(args, promptContext, remoteEnv);
       return;
     }
-    spawnRemoteFallback(args, promptContext);
+    await spawnRemoteFallback(args, promptContext, remoteEnv);
     return;
   }
 
   if (!shouldUsePsmux()) {
-    spawnRemoteFallback(args, promptContext);
+    await spawnRemoteFallback(args, promptContext);
     return;
   }
 
@@ -1685,9 +1741,18 @@ async function spawnRemote(args, promptContext) {
     );
     process.exit(1);
   }
+  if (env.os === "win32") {
+    if (env.psmuxPath) {
+      await spawnRemoteMultiplexed(args, promptContext, env);
+      return;
+    }
+    console.error(
+      `${host}: 원격에 psmux가 없어 ssh가 끊기면 claude도 종료된다.`,
+    );
+  }
   if (env.os === "darwin" || env.os === "linux") {
     if (env.tmuxPath) {
-      await spawnRemotePosix(args, promptContext, env);
+      await spawnRemoteMultiplexed(args, promptContext, env);
       return;
     }
     console.error(
@@ -1750,24 +1815,18 @@ async function spawnRemote(args, promptContext) {
       }
 
       if (env.shell === "pwsh") {
-        const remotePromptWin = remotePromptFile.replace(/\//g, "\\");
-        const scriptContent = [
-          `$ErrorActionPreference = 'SilentlyContinue'`,
-          `$t = '${escapePwshSingleQuoted(remotePromptWin)}'`,
-          `$c = '${escapePwshSingleQuoted(env.claudePath)}'`,
-          `$raw = Get-Content -Raw $t`,
-          `Remove-Item -ErrorAction SilentlyContinue $t`,
-          `Remove-Item -ErrorAction SilentlyContinue $MyInvocation.MyCommand.Definition`,
-          `& $c ${permissionFlags} $raw`,
-          `$trifluxExit = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }`,
-          `exit $trifluxExit`,
-        ].join("\n");
+        const scriptContent = buildRemoteWindowsLaunchScript({
+          claudePath: env.claudePath,
+          dir: resolvedDir,
+          promptFile: remotePromptFile,
+          permissionFlags,
+        });
         const localScript = join(
           privateTmpDir("remote-spawn"),
           `tfx-spawn-${randomUUID().slice(0, 8)}.ps1`,
         );
         writeFileSync(localScript, scriptContent, { encoding: "utf8" });
-        const remoteScript = `${stageDir}/launch.ps1`;
+        const remoteScript = `${stageDir}/launch-${runId}.ps1`;
         uploadFileToRemote(host, localScript, remoteScript);
         try {
           unlinkSync(localScript);
@@ -1840,11 +1899,13 @@ export async function attachSession(sessionName, options = {}) {
     const probe = probeRemoteTmuxSession(record, runRemote);
     if (probe.exists === false) {
       cleanupSpawnRecord(sessionName, record, runRemote);
-      throw new Error(`remote tmux session ended: ${record.remoteSessionName}`);
+      throw new Error(
+        `remote ${record.remoteMux || "tmux"} session ended: ${record.remoteSessionName}`,
+      );
     }
     if (probe.exists === null) {
       throw new Error(
-        `remote tmux session check failed (status ${probe.status ?? "unknown"}): ${probe.error || record.host}`,
+        `remote ${record.remoteMux || "tmux"} session check failed (status ${probe.status ?? "unknown"}): ${probe.error || record.host}`,
       );
     }
     const platform = options.platform || getPlatform();
@@ -2174,7 +2235,13 @@ export function buildRemoteClaudeProcessCountCommand(sessionName, runId) {
 }
 
 /** 요청 전체가 성공한 뒤에만 지운다. 실패 뒤 다시 --kill 할 때 기록이 남아 있어야 한다. */
-export function buildRemoteRunCleanupCommand(sessionName, runId) {
+export function buildRemoteRunCleanupCommand(
+  sessionName,
+  runId,
+  record = null,
+) {
+  if (record?.remoteMux === "psmux")
+    return `Remove-Item -LiteralPath '${escapePwshSingleQuoted(record.remoteRunDir)}' -Recurse -Force -ErrorAction Stop`;
   return `d=${remoteRunDir(sessionName, runId)}; rm -f "$d/shell.pid" "$d/procs"; rmdir "$d" 2>/dev/null; true`;
 }
 
@@ -2239,10 +2306,14 @@ export function parseRemoteProcessCount(stdout) {
   return match ? Number.parseInt(match[0], 10) : null;
 }
 
-function defaultRunRemoteCommand(host, command) {
+function defaultRunRemoteCommand(host, command, os = null) {
   const stdout = execFileSync(
     "ssh",
-    [...buildSshOptions(), host, posixRemoteCommand(command)],
+    [
+      ...buildSshOptions(),
+      host,
+      os === "win32" ? pwshRemoteCommand(command) : posixRemoteCommand(command),
+    ],
     {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -2258,13 +2329,24 @@ function probeRemoteTmuxSession(record, runRemote) {
     result = runRemote(
       record.host,
       buildRemoteTmuxCommand(record, "has-session"),
+      record.remoteMux === "psmux" ? "win32" : undefined,
     );
   } catch (error) {
-    result = { ok: false, status: error.status, error: error.message };
+    result = {
+      ok: false,
+      status: error.status,
+      error: error.message,
+      stdout: String(error.stdout ?? ""),
+    };
   }
+  // OpenSSH의 기본 pwsh는 안쪽 exit 2/3도 1로 바꾼다. 명시한 부재 표식까지 있어야 기록을 지운다.
+  const absent =
+    result?.status === 1 &&
+    (record.remoteMux !== "psmux" ||
+      String(result.stdout ?? "").trim() === REMOTE_SESSION_ABSENT_MARKER);
   return {
     ...result,
-    exists: result?.ok !== false ? true : result.status === 1 ? false : null,
+    exists: result?.ok !== false ? true : absent ? false : null,
   };
 }
 
@@ -2272,7 +2354,8 @@ function cleanupSpawnRecord(sessionName, record, runRemote) {
   try {
     runRemote(
       record.host,
-      buildRemoteRunCleanupCommand(sessionName, record.runId),
+      buildRemoteRunCleanupCommand(sessionName, record.runId, record),
+      record.remoteMux === "psmux" ? "win32" : undefined,
     );
   } catch {}
   removeSpawnRecord(sessionName, record.runId);
@@ -2337,7 +2420,11 @@ export async function killSpawnSession(sessionName, options = {}) {
 
   const runStep = (command) => {
     try {
-      const out = runRemote(host, command);
+      const out = runRemote(
+        host,
+        command,
+        record?.remoteMux === "psmux" ? "win32" : undefined,
+      );
       return {
         ok: out?.ok !== false,
         output: String(out?.stdout ?? "").trim(),
@@ -2352,17 +2439,35 @@ export async function killSpawnSession(sessionName, options = {}) {
     }
   };
 
-  remote.sessionStop = record?.remoteTmux
-    ? runStep(buildRemoteTmuxCommand(record, "kill-session"))
-    : runId
-      ? runStep(buildRemoteSessionStopCommand(sessionName, runId))
-      : { error: "spawn 기록이 없어 원격 세션을 특정할 수 없다", ok: false };
+  if (record?.remoteMux === "psmux") {
+    remote.detach = runStep(buildRemoteTmuxCommand(record, "detach-client"));
+    if (remote.detach.ok) {
+      await sleep(2000);
+      remote.sessionStop = runStep(
+        buildRemoteTmuxCommand(record, "kill-session"),
+      );
+    } else {
+      remote.sessionStop = {
+        ok: false,
+        error: "remote psmux detach failed",
+        status: remote.detach.status,
+      };
+    }
+  } else {
+    remote.sessionStop = record?.remoteTmux
+      ? runStep(buildRemoteTmuxCommand(record, "kill-session"))
+      : runId
+        ? runStep(buildRemoteSessionStopCommand(sessionName, runId))
+        : { error: "spawn 기록이 없어 원격 세션을 특정할 수 없다", ok: false };
+  }
   if (options.stopDaemon) {
     const binDirs = options.binDirs || resolveRemoteBinDirs(host, options);
     const claudePath =
       options.claudePath || resolveRemoteClaudePath(host, options);
     remote.daemonStop = runStep(
-      buildRemoteDaemonStopCommand(binDirs, claudePath),
+      record?.remoteMux === "psmux"
+        ? `$ErrorActionPreference = 'Stop'; & '${escapePwshSingleQuoted(record.claudePath)}' daemon stop --any; ${buildPwshExitTail()}`
+        : buildRemoteDaemonStopCommand(binDirs, claudePath),
     );
   }
 
@@ -2409,7 +2514,7 @@ export async function killSpawnSession(sessionName, options = {}) {
   remote.ok =
     remote.remaining === 0 && (!options.stopDaemon || remote.daemonStop.ok);
   if (remote.ok) {
-    runStep(buildRemoteRunCleanupCommand(sessionName, runId));
+    runStep(buildRemoteRunCleanupCommand(sessionName, runId, record));
     removeSpawnRecord(sessionName, runId);
   }
   result.remote = remote;

@@ -125,6 +125,8 @@ function normalizePwshProbeEnv(parsed) {
   return Object.freeze({
     claudePath:
       !parsed.claude || parsed.claude === "notfound" ? null : parsed.claude,
+    psmuxPath:
+      !parsed.psmux || parsed.psmux === "notfound" ? null : parsed.psmux,
     home: parsed.home,
     os: "win32",
     shell: "pwsh",
@@ -241,12 +243,13 @@ function probeRemoteEnvViaPwsh(host, execSsh) {
     "Write-Output 'shell=pwsh'",
     'Write-Output "home=$env:USERPROFILE"',
     'if (Test-Path "$env:USERPROFILE\\.local\\bin\\claude.exe") { Write-Output "claude=$env:USERPROFILE\\.local\\bin\\claude.exe" } elseif (Get-Command claude -ErrorAction SilentlyContinue) { Write-Output "claude=$((Get-Command claude).Source)" } else { Write-Output \'claude=notfound\' }',
+    "if (Get-Command psmux -ErrorAction SilentlyContinue) { Write-Output \"psmux=$((Get-Command psmux).Source)\" } else { Write-Output 'psmux=notfound' }",
     "Write-Output \"os=$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows) ? 'win32' : 'other')\"",
   ].join("; ");
 
   try {
     const output = execSsh(
-      [...buildSshOptions(), host, "pwsh", "-NoProfile", "-Command", command],
+      [...buildSshOptions(), host, pwshRemoteCommand(command)],
       {
         encoding: "utf8",
         timeout: 15000,
@@ -383,8 +386,9 @@ export function probeRemoteEnv(host, opts = {}) {
       (!opts.osHint ||
         cached.env.os === opts.osHint ||
         (opts.osHint === "windows" && cached.env.os === "win32")) &&
-      (cached.env.os === "win32" ||
-        ("tmuxPath" in cached.env && "versions" in cached.env))
+      (cached.env.os === "win32"
+        ? "psmuxPath" in cached.env
+        : "tmuxPath" in cached.env && "versions" in cached.env)
     )
       return cached.env;
   }
