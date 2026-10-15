@@ -103,6 +103,19 @@ tfx-live ask --cli codex --session cx-impl --prompt "<지시서 경로>를 읽�
 - 같은 cwd 에 Codex TUI 가 여럿이면 `--thread UUID`를 명시한다.
 - 잘못 보낸 queue 요청은 TUI 가 가져가기 전에만 `tfx-live queue --cli codex --session <이름> --request-id <id> --delete all`로 지운다. 결과의 `missing`은 이미 배달된 것이다.
 
+### 실행 위치 결정
+
+워커를 어디서 돌릴지(m5 로컬, m2, ryzen)는 리드가 디스패치 직전에 정해 지시서에 적는다. 워커는 받은 위치에서 실행만 하고, 압박을 느끼면 리드에게 보고한다. 피어 세션이 워커에 오프로드 지침을 따로 뿌리지 않는다.
+
+```bash
+sysctl -n kern.memorystatus_vm_pressure_level   # 1 normal, 2 warn, 4 critical
+node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 준비 상태
+```
+
+- 기준값은 `.claude/rules/tfx-routing.md`의 "원격 오프로드 기본 정책"이 정본이다. 4 는 무조건 원격, 2 는 무거운 shard 와 워커 3개 이상 신규 생성만 원격, 1 은 로컬
+- 지시서에는 실행 위치와 호스트별 주의를 적는다. ryzen 은 Windows 라 psmux 세션 안에서 돌리고 셸 문법은 PowerShell 이다. m2 는 16GB 라 probe 압박이 2 이상이면 보내지 않는다
+- 원격에 띄운 세션도 띄운 리드가 종료까지 책임진다
+
 ## 4. 지시 전달
 
 긴 지시는 지시서 파일에 쓰고 프롬프트에는 경로만 보낸다.
@@ -205,6 +218,7 @@ tfx-live wait --cli claude --short <8hex> --request-id <requestId> --timeout 600
 
 - [ ] 이름이 `<월>.<일> <주제>` 형식이다
 - [ ] 역할에 맞는 모델과 effort 를 골랐다
+- [ ] 압박을 재고 실행 위치(m5/m2/ryzen)를 지시서에 적었다
 - [ ] 사용자에게 모델과 tmux 세션명을 알렸다
 - [ ] 지시서 경로를 보냈고 작업 시작을 확인했다
 - [ ] 세션 CLI 에 맞는 컨텍스트 보고 기준이 지시서에 있다

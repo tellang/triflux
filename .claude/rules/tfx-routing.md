@@ -162,12 +162,14 @@ Codex는 `models_cache.json`의 공개 모델 중 effort를 지원하는 후보�
 
 **원격 오프로드 기본 정책** : 로컬 기기의 램이 빠듯해지면 무거운 작업을 `hosts.json` 에 등록한 원격 호스트로 넘긴다. 판단 시점은 병렬 dispatch 직전이다.
 
+- 판단 주체는 리드다. 워커와 피어 세션은 압박을 보고만 하고 실행 위치를 스스로 바꾸지 않는다. 리드가 있으면 압박 지침을 워커에 직접 뿌리지 않고 리드에게 넘긴다. 리드가 없는 단독 세션만 아래 기준으로 스스로 정한다. 절차는 `skills/tfx-lead/SKILL.md`의 "실행 위치 결정" 절
 - 판정 명령: `sysctl -n kern.memorystatus_vm_pressure_level` (1=normal, 2=warn, 4=critical; Stats 앱·활성 상태 보기의 메모리 색과 같은 커널 신호, 노랑=2 빨강=4)
 - 4(critical): 무조건 오프로드
 - 2(warn): 무거운 shard(빌드·전체 테스트 스위트·대규모 리팩터)를 띄우거나 워커 3+개를 새로 만들 때만 오프로드
 - 1(normal): 로컬 유지
 - sysctl 실패 시 대체 신호: `vm_stat` 5초 간격 2회 측정에서 swapouts 증가
-- 원격으로 넘기기 전에 `node scripts/remote-spawn.mjs --probe <host>`로 호스트 상태를 먼저 확인한다.
+- 원격으로 넘기기 전에 `node scripts/remote-spawn.mjs --probe <host>`로 호스트 상태를 먼저 확인한다. m2 도 16GB 라 probe 의 압박 수치를 보고 보낸다
+- ryzen 은 Windows 라 원격 세션을 psmux 로 감싼다. `remote-spawn` 은 지금 posix 원격만 원격 tmux 로 감싸고 Windows 원격은 그대로 두므로, ryzen 에 세션을 띄울 때는 psmux 세션을 리드가 직접 만들거나 후속 레인이 끝날 때까지 m2 를 우선한다
 - 행동: 원격 코드 변경은 별도 worktree와 세션에서 실행한다. 탐색·대화형은 tfx-remote로 원격 세션을 띄운다
 - 로컬 여유가 충분하면 로컬 유지. 사용자가 로컬/원격을 명시하면 그에 따른다
 - 원격 호스트 부재 시(ssh 불응) 조용히 로컬로 강등하지 말고 한 줄 알린 뒤 로컬 진행
