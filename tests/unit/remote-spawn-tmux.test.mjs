@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -176,11 +175,11 @@ it("실제 tmux에서 생성, 소유 확인, 정확 매칭, 종료 상태를 확
   skip: !hasTmux,
 }, async () => {
   await withRecord((_recordPath, root) => {
-    const socket = `tfx-test-${randomUUID()}`;
+    const socket = join(root, "sock");
     const tmuxPath = join(root, "tmux-wrapper");
     writeFileSync(
       tmuxPath,
-      `#!/bin/sh\nexec tmux -L '${socket}' -f /dev/null "$@"\n`,
+      `#!/bin/sh\nexec tmux -S '${socket}' -f /dev/null "$@"\n`,
       { mode: 0o700 },
     );
     const liveRecord = { ...record, tmuxPath };
@@ -191,6 +190,10 @@ it("실제 tmux에서 생성, 소유 확인, 정확 매칭, 종료 상태를 확
         { encoding: "utf8" },
       );
     try {
+      assert.equal(
+        run("has-session", { tmuxPath: join(root, "missing-tmux") }).status,
+        127,
+      );
       const start = spawnSync("sh", [], {
         input: buildRemoteTmuxStartScript({
           ...liveRecord,
@@ -314,7 +317,33 @@ it("동명 원격 세션의 runId가 다르면 attach와 kill을 실행하지 �
 });
 
 describe("원격 tmux 기록 수명", () => {
-  for (const status of [1, 3, 255, null]) {
+  for (const remoteTmux of [true, false]) {
+    it(`remoteTmux=${remoteTmux}: 1시간 뒤 종료 시 원격 tmux 감시자만 기록을 정리한다`, async () => {
+      await withRecord(async (recordPath) => {
+        writeFileSync(recordPath, JSON.stringify({ ...record, remoteTmux }));
+        let now = 0;
+        await __remoteSpawnTest.runSpawnCleanupWatcher(
+          session,
+          `${session}:0.0`,
+          {
+            now: () => now,
+            sleep: async () => {
+              now += 2 * 60 * 60 * 1000;
+            },
+            sessionExists: () => {
+              if (!remoteTmux) assert.equal(now, 0);
+              return now === 0;
+            },
+            getPaneStatus: () => ({ isDead: false }),
+            runRemote: () => ({ ok: false, status: 1 }),
+          },
+        );
+        assert.equal(existsSync(recordPath), !remoteTmux);
+      });
+    });
+  }
+
+  for (const status of [1, 3, 127, 255, null]) {
     it(`attach의 실제 throw status ${status}: 세션 부재일 때만 기록을 정리한다`, async () => {
       await withRecord(async (recordPath) => {
         const commands = [];
@@ -443,7 +472,7 @@ describe("원격 tmux 기록 수명", () => {
     });
   });
 
-  for (const status of [1, 3, 255]) {
+  for (const status of [1, 3, 127, 255]) {
     it(`kill-session 뒤 has-session exit ${status}를 확인하고 기록 삭제 여부를 결정한다`, async () => {
       await withRecord(async (recordPath) => {
         const calls = [];

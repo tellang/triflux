@@ -1021,7 +1021,7 @@ export function buildRemoteTmuxCommand(record, action) {
   const tmux = shellQuote(record.tmuxPath);
   const target = shellQuote(`=${record.remoteSessionName}`);
   return [
-    `${tmux} has-session -t ${target} || exit 1`,
+    `${tmux} has-session -t ${target} || exit $?`,
     `run_id=$(${tmux} show-options -qv -t ${shellQuote(`=${record.remoteSessionName}:`)} @tfx_run_id) || exit $?`,
     `[ "$run_id" = ${shellQuote(record.runId)} ] || { echo 'remote tmux runId mismatch' >&2; exit 3; }`,
     `${action === "attach-session" ? "exec " : ""}${tmux} ${action} -t ${target}`,
@@ -1326,7 +1326,7 @@ async function watchSpawnSessionExit(sessionName, options = {}) {
   const startedAt = now();
   let consecutiveErrors = 0;
 
-  while (now() - startedAt <= maxWaitMs) {
+  while (options.remoteTmux || now() - startedAt <= maxWaitMs) {
     if (!sessionExists(sessionName)) {
       return { cleaned: false, reason: "session-missing" };
     }
@@ -1371,6 +1371,7 @@ async function runSpawnCleanupWatcher(sessionName, paneId, options = {}) {
     ...options,
     paneId,
     maxWaitMs: options.maxMs,
+    remoteTmux: record?.remoteTmux,
   });
   if (
     record?.remoteTmux &&
