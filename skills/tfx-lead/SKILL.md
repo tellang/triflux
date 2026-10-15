@@ -113,9 +113,34 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 ```
 
 - 기준값은 `.claude/rules/tfx-routing.md`의 "원격 오프로드 기본 정책"이 정본이다. 4 는 무조건 원격, 2 는 무거운 shard 와 워커 3개 이상 신규 생성만 원격, 1 은 로컬
-- 호스트는 작업 성격으로 고른다. 무거운 계산과 Claude 워커는 ryzen 우선. git push, PR, Codex 스킬이 필요한 작업은 m2 이고, m2 는 probe 압박이 1 일 때만 보낸다. 세부 조건은 위 정본의 호스트 선택 항목
+- 호스트는 작업 성격으로 고른다. 무거운 계산과 Claude 워커는 ryzen 우선. git push, PR, Codex 스킬이 필요한 작업은 m2 이고, m2 는 probe 압박이 1 일 때만 보낸다. 둘 다 안 되면 전체 테스트 스위트는 미루고(10절 안전) 나머지만 로컬 순차. 세부 조건은 위 정본의 호스트 선택 항목
 - 지시서에는 실행 위치와 호스트별 주의를 적는다. ryzen 은 Windows(PowerShell 7, 기본 디렉터리 `%USERPROFILE%\Desktop\Projects`) 라 리드가 psmux 세션을 만들어 그 안에서 돌린다. remote-spawn 의 Windows 감싸기가 들어오기 전까지 이 수작업이 필요하다
 - 원격에 띄운 세션도 띄운 리드가 종료까지 책임진다
+
+#### Windows 원격 psmux 절차
+
+`remote-spawn` 이 Windows 원격을 감싸기 전까지 리드가 직접 한다. 원격 셸은 PowerShell 이므로
+인라인 `ssh host "..."` 로 보내지 않고(첫 단어만 전달된다) 스크립트를 `scp` 로 올려 `pwsh -File` 로 실행한다.
+
+```powershell
+# start-worker.ps1 (ryzen 에서 실행). 세션 이름은 tfx- 접두사, 경로는 Windows 형식
+psmux new-session -d -s tfx-1015-fulltest -c "$env:USERPROFILE\Desktop\Projects\triflux"
+psmux send-keys -t tfx-1015-fulltest "claude -n '10.15 전체 테스트' --model sonnet" Enter
+```
+
+```bash
+scp start-worker.ps1 ryzen:start-worker.ps1 && ssh ryzen pwsh -File start-worker.ps1
+ssh ryzen psmux capture-pane -p -t tfx-1015-fulltest          # 확인
+```
+
+```powershell
+# stop-worker.ps1. 연결을 먼저 끊고 2초 뒤 세션을 지운다(WT ConPTY 종료 경쟁 회피)
+psmux detach-client -t tfx-1015-fulltest 2>$null
+Start-Sleep -Seconds 2
+psmux kill-session -t tfx-1015-fulltest
+```
+
+`send-keys` 로 보내는 명령은 PowerShell 문법이다. `&&`, `export`, `$(...)`, Unix 경로를 쓰지 않는다.
 
 ## 4. 지시 전달
 
