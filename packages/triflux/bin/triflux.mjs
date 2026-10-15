@@ -308,7 +308,14 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       {
         name: "--teammate-mode",
         type: "string",
-        description: "실행 모드: auto|headless|tmux|psmux (Windows)",
+        description:
+          "실행 모드: auto|headless|tmux|psmux (Windows). auto 는 비TTY 호출이면 headless",
+      },
+      {
+        name: "--auto-attach",
+        type: "boolean",
+        description:
+          "headless 워커 방에 호출자 창을 나눠 attach (Windows 기본 켬, 그 외 기본 끔)",
       },
       {
         name: "--no-dashboard",

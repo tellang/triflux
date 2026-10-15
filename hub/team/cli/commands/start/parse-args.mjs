@@ -46,7 +46,8 @@ export function parseTeamArgs(args = []) {
   let teammateMode = "auto";
   const taskParts = [];
   const assigns = [];
-  let autoAttach = true;
+  // null 이면 start-headless 가 플랫폼으로 정한다: Windows 만 켬 (ADR-0040)
+  let autoAttach = null;
   let progressive = true;
   let timeoutSec = 0;
   let verbose = false;
@@ -82,6 +83,8 @@ export function parseTeamArgs(args = []) {
     } else if (current === "--assign" && args[index + 1]) {
       const parsed = parseAssignValue(args[++index]);
       if (parsed) assigns.push(parsed);
+    } else if (current === "--auto-attach") {
+      autoAttach = true;
     } else if (current === "--no-auto-attach") {
       autoAttach = false;
     } else if (current === "--verbose") {
@@ -143,7 +146,7 @@ export function parseTeamArgs(args = []) {
         p = p[1].toUpperCase() + ":" + p.slice(2);
       }
       cwd = resolve(p);
-    } else if (current === "--auto-attach" || current === "--dashboard") {
+    } else if (current === "--dashboard") {
       // 이전 설치 스킬이 넘기는 기본값 플래그는 무시한다.
     } else if (current.startsWith("-")) {
       console.warn(`  ⚠ 미인식 플래그 무시: ${current}`);

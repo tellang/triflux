@@ -281,7 +281,7 @@ describe("headless pane/native bridge opt-outs", () => {
     assert.equal(parsed.nativeBridge, true);
   });
 
-  it("--no-native-bridge-ui는 bridge만 끄고 pane auto-attach를 유지한다", () => {
+  it("--no-native-bridge-ui는 bridge만 끄고 pane auto-attach는 건드리지 않는다", () => {
     const parsed = parseTeamArgs([
       "--teammate-mode",
       "headless",
@@ -289,7 +289,7 @@ describe("headless pane/native bridge opt-outs", () => {
       "task",
     ]);
 
-    assert.equal(parsed.autoAttach, true);
+    assert.equal(parsed.autoAttach, null);
     assert.equal(parsed.nativeBridge, false);
   });
 });

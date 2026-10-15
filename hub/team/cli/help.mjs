@@ -9,6 +9,7 @@ export function renderTeamHelp() {
     ${WHITE}tfx multi --agents codex,antigravity --lead claude "작업"${RESET}
     ${WHITE}tfx multi --teammate-mode tmux "작업"${RESET}
     ${WHITE}tfx multi --teammate-mode headless "작업"${RESET}
+    ${WHITE}tfx multi --auto-attach "작업"${RESET}               ${DIM}(headless: 호출자 tmux 창을 나눠 attach. Windows 는 기본 켬)${RESET}
     ${WHITE}tfx multi --layout 1xN "작업"${RESET}               ${DIM}(세로 분할 컬럼)${RESET}
     ${WHITE}tfx multi --layout Nx1 "작업"${RESET}               ${DIM}(가로 분할 스택)${RESET}
     ${WHITE}tfx multi --dashboard-layout lite "작업"${RESET}    ${DIM}(dashboard-lite 기본 뷰)${RESET}

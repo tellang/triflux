@@ -22,7 +22,7 @@ test("an empty interactive invocation shows usage without a multiplexer", () => 
   assert.match(output, /사용법:/);
 });
 
-test("legacy default flags are ignored without warnings or changing options", (t) => {
+test("legacy --dashboard is ignored without warnings or changing options", (t) => {
   const warnings = t.mock.method(console, "warn", () => {});
   const args = [
     "--teammate-mode",
@@ -32,10 +32,17 @@ test("legacy default flags are ignored without warnings or changing options", (t
     "test",
   ];
   assert.deepEqual(
-    parseTeamArgs([...args, "--auto-attach", "--dashboard"]),
+    parseTeamArgs([...args, "--dashboard"]),
     parseTeamArgs(args),
   );
   assert.equal(warnings.mock.callCount(), 0);
+});
+
+test("auto-attach is unset by default and set only by its flags", () => {
+  const base = ["--teammate-mode", "headless", "test"];
+  assert.equal(parseTeamArgs(base).autoAttach, null);
+  assert.equal(parseTeamArgs([...base, "--auto-attach"]).autoAttach, true);
+  assert.equal(parseTeamArgs([...base, "--no-auto-attach"]).autoAttach, false);
 });
 
 test("assign parses a mapped role after prompt-internal colons", () => {

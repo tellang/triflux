@@ -18,7 +18,7 @@ argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [
 판단 기준 (우선순위 순):
 
 0. **명시 플래그** (최우선, 추론 스킵): ARGUMENTS 에 `--cli`/`--mode`/`--shape`/`--cli-set`/`--parallel`/`--retry` 플래그가 있으면 분류/추론을 건너뛰고 플래그 값대로 즉시 dispatch. 자세한 플래그 동작은 아래 "플래그 오버라이드" 섹션 참조.
-   - `--parallel N` → `tfx multi` 위임 (`auto`: mux가 있으면 interactive pane, 비TTY에서 mux가 없으면 headless)
+   - `--parallel N` → `tfx multi` 위임 (`auto`: TTY 호출자는 interactive pane, 비TTY 호출자는 headless)
    - `--cli codex|antigravity` → `TFX_CLI_MODE` 설정 + 단일 실행
    - `--mode deep` → `-t/--thorough` 동일 동작 (Plan → PRD → Exec → Verify)
    - `--mode consensus --shape debate|panel` → prompt ensemble fold 경로
@@ -100,7 +100,7 @@ ARGUMENTS 에 아래 플래그가 있으면 라우팅 판단의 내부 추론을
 | `--experts` | `"claude:...;codex:...;antigravity:..."` | panel roster override | panel normalizer |
 | `--analysis-prompt-file` | `<path>` | consensus family 공통 분석 프롬프트 주입 | consensus normalizer |
 | `--parallel` | `1` (기본) | 단일 워커 | tfx-route.sh |
-| `--parallel` | `N` | 로컬 병렬 (mode 생략=`auto`; mux가 있으면 interactive pane, 비TTY에서 mux가 없으면 headless) | `tfx multi` |
+| `--parallel` | `N` | 로컬 병렬 (mode 생략=`auto`; TTY 호출자는 interactive pane, 비TTY 호출자는 headless) | `tfx multi` |
 | `--no-native-bridge-ui` | true | 명시적 headless worker의 Claude agents UI 노출을 비활성화 | `tfx multi` |
 | `--retry` | `0` | 자동 재시도 없음 | 없음 |
 | `--retry` | `1` (기본) | bounded verify → fix loop 3회 | 없음 |
@@ -322,7 +322,7 @@ deep/fullcycle 추가 규칙:
 |------|----------|------|
 | 1개 + quick | tfx-auto 직접 실행 | tfx-route.sh |
 | 1개 + thorough | tfx-auto 직접 실행 + verify/fix loop | tfx-route.sh |
-| 2개+ + 코드 변경 없음 | `tfx multi` auto 실행 (리드 tmux/psmux면 interactive pane) | team runtime |
+| 2개+ + 코드 변경 없음 | `tfx multi` auto 실행 (Bash 도구 호출은 비TTY라 headless) | team runtime |
 | 2개+ + 코드 변경 있음 | 태스크별 worktree에서 세션 하나씩 실행 | 개별 세션 또는 `Agent(isolation: worktree)` |
 | 대화형 + primary multiplexer 없음 | tmux(macOS/Linux) 또는 psmux(Windows) 설치 안내 오류 | team runtime |
 | 비TTY + primary multiplexer 없음 | headless | headless.mjs |
@@ -341,7 +341,7 @@ if subtasks.length >= 2 and code_change:
   → 세션마다 태스크 하나씩 실행
 else if subtasks.length >= 2:
   → Bash("tfx multi --assign 'cli:prompt:role' ...")
-  → mux가 있으면 interactive pane, 비TTY에서 mux가 없으면 headless, 대화형에서 mux가 없으면 설치 오류
+  → Bash 도구 호출은 비TTY라 headless. 사람이 터미널에서 직접 치면 interactive pane, mux가 없으면 설치 오류
   → if thorough: verify → fix loop
 else:
   if thorough:
@@ -352,9 +352,14 @@ else:
 
 ### teammate mode 정책
 
-기본 명령에서는 `--teammate-mode`를 **생략**한다. 이때 엔진의 `auto`가 리드 환경을 따라
-결정한다. tmux/psmux가 있으면 interactive pane을 사용한다. 대화형 환경에서 mux가 없으면
-설치 안내 오류로 끝낸다. headless도 tmux/psmux 방에서 돌기 때문에 mux가 없으면 같은 오류로 끝난다.
+기본 명령에서는 `--teammate-mode`를 **생략**한다. 이때 엔진의 `auto`가 호출자를 보고 결정한다.
+Claude의 Bash 도구처럼 비TTY 호출자는 tmux 안이라도 headless다. 대화형 팀은 입력할 수 없고
+결과 색인도 headless에서만 나오기 때문이다([ADR-0040](../../docs/adr/0040-nontty-multi-defaults-headless.md)).
+사람이 터미널에서 직접 치면 tmux/psmux interactive pane을 사용하고, mux가 없으면 설치 안내 오류로
+끝낸다. headless도 tmux/psmux 방에서 돌기 때문에 mux가 없으면 같은 오류로 끝난다.
+
+headless의 관전 창은 `claude agents` 행이다. macOS/Linux에서는 호출자 tmux 창을 나누지 않는다.
+나누려면 `--auto-attach`를 명시한다(Windows는 agents 행이 없어 기본 켬).
 
 `headless`는 다음처럼 명시적으로 선택할 수 있다.
 

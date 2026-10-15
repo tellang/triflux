@@ -13,12 +13,14 @@ export function normalizeTeammateMode(mode = "auto", deps = {}) {
       `지원하지 않는 teammate mode: ${mode}; auto, headless, tmux${platform === "win32" ? ", psmux" : ""}를 사용하세요.`,
     );
   }
+  // 비TTY 호출자(파이프, Claude Code Bash 도구, CI)는 대화형 팀에 입력할 수 없고
+  // 결과 색인도 headless 에서만 나온다. tmux 안이라도 headless 로 간다 (ADR-0040).
+  if (!(deps.isTTY ?? Boolean(process.stdout.isTTY))) return "headless";
   if (env.TMUX) return "tmux";
   const mux = detectMux();
   if (mux === "tmux") return "tmux";
   if (platform === "win32" && mux === "psmux") return "psmux";
   if (platform === "win32" && mux === "git-bash-tmux") return "tmux";
-  if (!(deps.isTTY ?? Boolean(process.stdout.isTTY))) return "headless";
   return ensureTmuxOrExit(deps);
 }
 

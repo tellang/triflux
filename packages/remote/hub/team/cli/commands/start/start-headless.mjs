@@ -107,13 +107,23 @@ export async function startHeadlessTeam({
     );
   }
 
+  // macOS/Linux 는 claude agents 행이 관전 창이라 호출자 tmux 창을 나누지 않는다.
+  // Windows 는 그 행이 없어 WT 탭 attach 를 켠다 (ADR-0040).
+  const platform = _deps.platform || process.platform;
+  const effectiveAutoAttach = autoAttach ?? platform === "win32";
+  if (effectiveAutoAttach && platform !== "win32" && process.env.TMUX_PANE) {
+    ok(
+      "--auto-attach: 호출자 tmux 창을 아래로 30% 나눠 워커 방에 attach 함 (끄기: --no-auto-attach)",
+    );
+  }
+
   let handle;
   try {
     const run = _deps.runHeadlessInteractive || runHeadlessInteractive;
     handle = await run(sessionId, assignments, {
       timeoutSec: timeoutSec || 900,
       layout,
-      autoAttach: !!autoAttach,
+      autoAttach: effectiveAutoAttach,
       leadPane: process.env.TMUX_PANE,
       leadTmux: process.env.TMUX,
       dashboard: !!dashboard,
