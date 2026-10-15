@@ -58,7 +58,7 @@ describe("remote-session 공용 프로브", () => {
             ...(withVersions ? { localVersions: { claude: [1, 0, 0] } } : {}),
             execSsh: (_args, opts) => {
               assert.equal(opts.input.includes('--version'), withVersions);
-              return 'os=linux\\nhome=/home/unit\\nshell=bash\\nclaude=/bin/claude\\n' + (withVersions ? 'claudeVersion=2.0.0\\n' : '');
+              return 'os=linux\\nhome=/home/example\\nshell=bash\\nclaude=/bin/claude\\n' + (withVersions ? 'claudeVersion=2.0.0\\n' : '');
             },
           });
           assert.equal(env.warnings.includes('claude version differs'), withVersions);
@@ -90,7 +90,7 @@ describe("remote-session 공용 프로브", () => {
             execFileSync("sh", ["-n"], { input: options.input });
             assert.match(options.input, /export PATH=.*homebrew/);
             assert.match(options.input, /command -v tmux/);
-            return `os=${osHint}\nhome=/home/unit\nshell=zsh\nclaude=/bin/claude\ntmux=/bin/tmux\ncodex=/bin/codex\ngemini=/bin/gemini\nnode=v24.0.0\ncores=8\nram_gb=16\nmemoryFreePct=25\nloadAvg=1,2,3\nclaudeVersion=2.1.234\ncodexAuthExists=true\n`;
+            return `os=${osHint}\nhome=/home/example\nshell=zsh\nclaude=/bin/claude\ntmux=/bin/tmux\ncodex=/bin/codex\ngemini=/bin/gemini\nnode=v24.0.0\ncores=8\nram_gb=16\nmemoryFreePct=25\nloadAvg=1,2,3\nclaudeVersion=2.1.234\ncodexAuthExists=true\n`;
           },
         });
         assert.equal(calls.length, 1);
@@ -134,7 +134,7 @@ describe("remote-session 공용 프로브", () => {
           osHint: os,
           localVersions: {},
           execSsh: () =>
-            `os=${os}\nshell=${os === "win32" ? "pwsh" : "bash"}\nhome=/home/unit\nclaude=notfound\n`,
+            `os=${os}\nshell=${os === "win32" ? "pwsh" : "bash"}\nhome=/home/example\nclaude=notfound\n`,
         };
         assert.equal(probeRemoteEnv("unit-host", options).claudePath, null);
         assert.equal(existsSync(cachePath), false);

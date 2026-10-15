@@ -80,14 +80,14 @@ describe("원격 tmux 실행과 attach 명령", () => {
         `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + '\\n');\n`,
         { mode: 0o700 },
       );
-      const dir = "/home/unit/a b'c;$HOME";
-      const promptFile = "/home/unit/prompt's file.md";
+      const dir = "/home/example/a b'c;$HOME";
+      const promptFile = "/home/example/prompt's file.md";
       const spec = {
         ...record,
         tmuxPath,
         sessionName: session,
         dir,
-        claudePath: "/home/unit/claude's bin",
+        claudePath: "/home/example/claude's bin",
         binDirs: ["/opt/homebrew/bin"],
         promptFile,
         permissionFlags: "--dangerously-skip-permissions",
@@ -525,7 +525,7 @@ describe("spawn CLI 실패 보고", () => {
             if (file === 'ssh') {
               if (fail === 'probe') throw new Error('probe fixture: access denied');
               if (args.includes('pwsh')) throw new Error('no pwsh');
-              if (options.input?.includes('echo shell=')) return 'os=linux\\nhome=/home/unit\\nshell=bash\\nclaude=/bin/claude\\ntmux=/bin/tmux\\n';
+              if (options.input?.includes('echo shell=')) return 'os=linux\\nhome=/home/example\\nshell=bash\\nclaude=/bin/claude\\ntmux=/bin/tmux\\n';
               if (fail === 'bootstrap') throw Object.assign(new Error('duplicate session fixture'), { status: 1 });
               if (fail === 'lost-response') throw Object.assign(new Error('ssh response lost fixture'), { status: 255 });
               return '';
