@@ -135,7 +135,9 @@ ssh ryzen psmux capture-pane -p -t tfx-1015-fulltest          # 확인
 
 ```powershell
 # stop-worker.ps1. 연결을 먼저 끊고 2초 뒤 세션을 지운다(WT ConPTY 종료 경쟁 회피)
-psmux detach-client -t tfx-1015-fulltest 2>$null
+# detach-client 의 -t 는 클라이언트 이름이라 세션을 분리하지 못한다. 세션은 -s 로 지정한다
+psmux detach-client -s tfx-1015-fulltest
+if ($LASTEXITCODE -ne 0) { Write-Error "detach 실패. psmux list-clients 로 확인한 뒤 다시 실행"; exit 1 }
 Start-Sleep -Seconds 2
 psmux kill-session -t tfx-1015-fulltest
 ```
