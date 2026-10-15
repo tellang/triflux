@@ -10,11 +10,12 @@
 //   node remote-spawn.mjs --attach <session>
 //   node remote-spawn.mjs --probe <ssh-host>
 
-import { execFileSync, execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { randomUUID } from "crypto";
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   statSync,
   unlinkSync,
@@ -47,10 +48,12 @@ import {
   waitForPattern,
 } from "../hub/team/psmux.mjs";
 import {
-  isEnvCacheFresh,
+  buildSshOptions,
+  compareVersions,
   posixRemoteCommand,
+  probeRemoteEnv,
+  probeVersion,
   pwshRemoteCommand,
-  remoteEnvCacheDir,
   tfxStateDir,
 } from "../hub/team/remote-session.mjs";
 
@@ -157,7 +160,7 @@ export function buildPosixExitTail() {
 }
 
 export function buildRemoteBootstrapCommand(host) {
-  return `ssh -t ${host}; ${buildPwshExitTail()}`;
+  return `ssh -t ${buildSshOptions({ interactive: true }).join(" ")} ${host}; ${buildPwshExitTail()}`;
 }
 
 export function buildLocalClaudeCommand(claudePathNorm, permissionFlags = "") {
@@ -249,7 +252,7 @@ function buildSessionSlug(customName) {
 /** 같은 slug의 세션이 이미 존재하면 -2, -3 ... 카운터 추가 */
 function deduplicateSessionName(baseName) {
   try {
-    const existing = listPsmuxSessions();
+    const existing = [...listPsmuxSessions(), ...listRemoteTmuxRecords()];
     if (!existing.includes(baseName)) return baseName;
     for (let i = 2; i <= 99; i++) {
       const candidate = `${baseName}-${i}`;
@@ -259,6 +262,10 @@ function deduplicateSessionName(baseName) {
     /* psmux not available */
   }
   return `${baseName}-${randomUUID().slice(0, 4)}`;
+}
+
+export function buildRemoteSessionName(host, slug) {
+  return `${SPAWN_SESSION_PREFIX}${host.replace(/[.:]/g, "-")}-${slug}`;
 }
 
 function usageText() {
@@ -457,45 +464,6 @@ function parseArgs(argv) {
     watchPane,
     watchPollMs,
   };
-}
-
-function parseVersion(versionStr) {
-  const match = /(\d+)\.(\d+)\.(\d+)/.exec(versionStr);
-  if (!match) return null;
-  return [
-    parseInt(match[1], 10),
-    parseInt(match[2], 10),
-    parseInt(match[3], 10),
-  ];
-}
-
-function compareVersions(a, b) {
-  for (let i = 0; i < 3; i++) {
-    if (a[i] !== b[i]) return a[i] - b[i];
-  }
-  return 0;
-}
-
-function probeVersion(binPath) {
-  try {
-    if (/\.(cmd|bat)$/iu.test(binPath)) {
-      // .cmd/.bat → execSync로 shell 경유 (execFileSync EINVAL 회피)
-      const out = execSync(`"${binPath}" --version`, {
-        encoding: "utf8",
-        timeout: 3000,
-        stdio: ["ignore", "pipe", "ignore"],
-      });
-      return parseVersion(out);
-    }
-    const out = execFileSync(binPath, ["--version"], {
-      encoding: "utf8",
-      timeout: 3000,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return parseVersion(out);
-  } catch {
-    return null;
-  }
 }
 
 function detectClaudePath() {
@@ -712,7 +680,11 @@ function detectWindowsRemoteHome(host) {
   try {
     const home = execFileSync(
       "ssh",
-      [host, pwshRemoteCommand("Write-Output $env:USERPROFILE")],
+      [
+        ...buildSshOptions(),
+        host,
+        pwshRemoteCommand("Write-Output $env:USERPROFILE"),
+      ],
       { encoding: "utf8", timeout: 10000, stdio: ["ignore", "pipe", "pipe"] },
     ).trim();
     return isWindowsAbsolutePath(home) ? home : null;
@@ -776,10 +748,14 @@ async function spawnRemoteFallback(args, promptContext) {
   writeFileSync(localScript, scriptContent, "utf8");
 
   try {
-    execFileSync("scp", [localScript, `${host}:tfx-remote-spawn.ps1`], {
-      timeout: 10000,
-      stdio: "pipe",
-    });
+    execFileSync(
+      "scp",
+      [...buildSshOptions(), localScript, `${host}:tfx-remote-spawn.ps1`],
+      {
+        timeout: 10000,
+        stdio: "pipe",
+      },
+    );
   } catch (error) {
     console.error("failed to copy script to remote:", error.message);
     process.exit(1);
@@ -793,7 +769,7 @@ async function spawnRemoteFallback(args, promptContext) {
       const wt = (await import("../hub/team/wt-manager.mjs")).createWtManager();
       await wt.createTab({
         title: `Claude@${host}`,
-        command: `ssh -t -- ${host} ${remoteCmd}`,
+        command: `ssh -t ${buildSshOptions({ interactive: true }).join(" ")} -- ${host} ${remoteCmd}`,
       });
       console.log(`spawned remote Claude → ${host}:${dir}`);
     } catch (error) {
@@ -801,9 +777,13 @@ async function spawnRemoteFallback(args, promptContext) {
       process.exit(1);
     }
   } else {
-    const child = spawn("ssh", ["-t", "--", host, remoteCmd], {
-      stdio: "inherit",
-    });
+    const child = spawn(
+      "ssh",
+      ["-t", ...buildSshOptions({ interactive: true }), "--", host, remoteCmd],
+      {
+        stdio: "inherit",
+      },
+    );
     child.on("exit", (code) => process.exit(code || 0));
   }
 }
@@ -816,206 +796,6 @@ function requirePsmux() {
   if (!hasPsmux()) {
     throw new Error("psmux is required for this command");
   }
-}
-
-function parseProbeLines(text) {
-  return Object.fromEntries(
-    text
-      .split(/\r?\n/u)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const separatorIndex = line.indexOf("=");
-        return separatorIndex === -1
-          ? null
-          : [line.slice(0, separatorIndex), line.slice(separatorIndex + 1)];
-      })
-      .filter(Boolean),
-  );
-}
-
-function normalizePwshProbeEnv(parsed) {
-  if (parsed.shell !== "pwsh" || parsed.os !== "win32") {
-    return null;
-  }
-
-  if (!parsed.home) {
-    return null;
-  }
-
-  return Object.freeze({
-    claudePath:
-      !parsed.claude || parsed.claude === "notfound" ? null : parsed.claude,
-    home: parsed.home,
-    os: "win32",
-    shell: "pwsh",
-  });
-}
-
-function normalizePosixProbeEnv(parsed, localVersions = null) {
-  const os =
-    parsed.os === "darwin" ? "darwin" : parsed.os === "linux" ? "linux" : null;
-  if (!os || !parsed.home) {
-    return null;
-  }
-
-  const versions = Object.fromEntries(
-    ["node", "codex", "agy", "claude", "triflux"].map((name) => [
-      name,
-      parsed[`${name}Version`] || null,
-    ]),
-  );
-  const warnings = [];
-  const memoryPressureLevel =
-    os === "darwin" ? Number(parsed.memoryPressureLevel) || null : null;
-  const memoryFreePct =
-    parsed.memoryFreePct && Number.isFinite(Number(parsed.memoryFreePct))
-      ? Number(parsed.memoryFreePct)
-      : null;
-  const loadAvgValues = parsed.loadAvg?.split(",").map(Number);
-  const loadAvg =
-    loadAvgValues?.length === 3 && loadAvgValues.every(Number.isFinite)
-      ? loadAvgValues
-      : null;
-  const diskFreeHome = parsed.diskFreeHome ? Number(parsed.diskFreeHome) : null;
-
-  if (memoryPressureLevel >= 2) {
-    warnings.push(`memory pressure level ${memoryPressureLevel}`);
-  }
-  if (diskFreeHome !== null && diskFreeHome < 5 * 1024 ** 3) {
-    warnings.push("home disk free below 5 GiB");
-  }
-  for (const [name, remote] of Object.entries(versions)) {
-    const local = localVersions ? localVersions[name] : probeVersion(name);
-    const remoteVersion = remote && parseVersion(remote);
-    if (local && remoteVersion && compareVersions(local, remoteVersion) !== 0) {
-      warnings.push(`${name} version differs`);
-    }
-  }
-
-  return Object.freeze({
-    claudePath:
-      !parsed.claude || parsed.claude === "notfound" ? null : parsed.claude,
-    home: parsed.home,
-    codexAuthExists: parsed.codexAuthExists === "true",
-    diskFreeHome,
-    loadAvg,
-    memoryFreePct,
-    memoryPressureLevel,
-    os,
-    ready: memoryPressureLevel !== 4,
-    shell: parsed.shell === "zsh" ? "zsh" : "bash",
-    versions,
-    warnings,
-  });
-}
-
-function getRemoteEnvCachePath(host) {
-  return join(remoteEnvCacheDir(), `${host}.json`);
-}
-
-function readRemoteEnvCache(host) {
-  const cachePath = getRemoteEnvCachePath(host);
-  if (!existsSync(cachePath)) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(readFileSync(cachePath, "utf8"));
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeRemoteEnvCache(host, env) {
-  mkdirSync(remoteEnvCacheDir(), { recursive: true });
-  writeFileSync(
-    getRemoteEnvCachePath(host),
-    JSON.stringify({ cachedAt: Date.now(), env }, null, 2),
-    "utf8",
-  );
-}
-
-function probeRemoteEnvViaPwsh(host) {
-  const command = [
-    "Write-Output 'shell=pwsh'",
-    'Write-Output "home=$env:USERPROFILE"',
-    'if (Test-Path "$env:USERPROFILE\\.local\\bin\\claude.exe") { Write-Output "claude=$env:USERPROFILE\\.local\\bin\\claude.exe" } elseif (Get-Command claude -ErrorAction SilentlyContinue) { Write-Output "claude=$((Get-Command claude).Source)" } else { Write-Output \'claude=notfound\' }',
-    "Write-Output \"os=$([System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([System.Runtime.InteropServices.OSPlatform]::Windows) ? 'win32' : 'other')\"",
-  ].join("; ");
-
-  let output;
-  try {
-    output = execFileSync(
-      "ssh",
-      [host, "pwsh", "-NoProfile", "-Command", command],
-      { encoding: "utf8", timeout: 15000, stdio: ["pipe", "pipe", "pipe"] },
-    );
-  } catch {
-    return null;
-  }
-
-  return normalizePwshProbeEnv(parseProbeLines(output));
-}
-
-function probeRemoteEnvViaPosix(host) {
-  const script = [
-    "echo shell=$(basename $SHELL)",
-    "echo home=$HOME",
-    "command -v claude >/dev/null 2>&1 && echo claude=$(command -v claude) || echo claude=notfound",
-    "echo os=$(uname -s | tr A-Z a-z)",
-    'if [ "$(uname -s)" = Darwin ]; then',
-    "  printf 'memoryPressureLevel=%s\\n' \"$(sysctl -n kern.memorystatus_vm_pressure_level 2>/dev/null)\"",
-    '  vm_stat | awk -v total="$(sysctl -n hw.memsize 2>/dev/null)" -v pageSize="$(sysctl -n hw.pagesize 2>/dev/null)" \'/Pages free:|Pages inactive:|Pages speculative:/ {gsub(/[^0-9]/, "", $3); pages += $3} END {if (total > 0 && pageSize > 0) printf "memoryFreePct=%.1f\\n", pages * pageSize / total * 100}\'',
-    '  sysctl -n vm.loadavg 2>/dev/null | tr -d \'{}\' | awk \'{print "loadAvg=" $1 "," $2 "," $3}\'',
-    "else",
-    "  awk '/MemTotal:/ {total=$2} /MemAvailable:/ {available=$2} END {if (total > 0) printf \"memoryFreePct=%.1f\\n\", available / total * 100}' /proc/meminfo 2>/dev/null",
-    '  awk \'{print "loadAvg=" $1 "," $2 "," $3}\' /proc/loadavg 2>/dev/null',
-    "fi",
-    'df -Pk "$HOME" 2>/dev/null | awk \'NR==2 {printf "diskFreeHome=%.0f\\n", $4 * 1024}\'',
-    'if [ -f "${CODEX_HOME:-$HOME/.codex}/auth.json" ]; then echo codexAuthExists=true; else echo codexAuthExists=false; fi',
-    'probe_version() { command -v "$1" >/dev/null 2>&1 && "$1" --version </dev/null 2>/dev/null | head -n 1; }',
-    'for cli in node codex agy claude triflux; do printf \'%sVersion=%s\\n\' "$cli" "$(probe_version "$cli")"; done',
-  ].join("\n");
-
-  let output;
-  try {
-    output = execFileSync("ssh", [host, "sh"], {
-      encoding: "utf8",
-      timeout: 15000,
-      input: script,
-    });
-  } catch {
-    return null;
-  }
-
-  return normalizePosixProbeEnv(parseProbeLines(output));
-}
-
-function probeRemoteEnv(host, opts = {}) {
-  const force = opts.force === true;
-
-  if (!force) {
-    const cached = readRemoteEnvCache(host);
-    if (isEnvCacheFresh(cached)) {
-      return cached.env;
-    }
-  }
-
-  const pwshEnv = probeRemoteEnvViaPwsh(host);
-  if (pwshEnv) {
-    writeRemoteEnvCache(host, pwshEnv);
-    return pwshEnv;
-  }
-
-  const posixEnv = probeRemoteEnvViaPosix(host);
-  if (posixEnv) {
-    writeRemoteEnvCache(host, posixEnv);
-    return posixEnv;
-  }
-
-  throw new Error(`remote probe failed for ${host}`);
 }
 
 function isWindowsAbsolutePath(value) {
@@ -1085,6 +865,11 @@ export function resolveRemoteBinDirs(hostName, options = {}) {
   } catch {
     return [];
   }
+}
+
+export function resolveRemoteOsHint(hostName, options = {}) {
+  const host = (options.readHost || readHost)(hostName);
+  return host?.raw?.os ? host.os : undefined;
 }
 
 /** hosts-compat 해석 결과에서 원격 claude 실행 경로를 얻는다. */
@@ -1188,7 +973,63 @@ export function buildTmuxRemoteLaneCommand(host, remoteCommands = []) {
   if (!script) {
     throw new Error("buildTmuxRemoteLaneCommand requires remote commands");
   }
-  return `ssh -t ${host} ${shellQuote(script)}`;
+  return `ssh -t ${buildSshOptions({ interactive: true }).join(" ")} ${host} ${shellQuote(script)}`;
+}
+
+export function buildRemoteTmuxStartScript(spec) {
+  const {
+    tmuxPath,
+    sessionName,
+    runId,
+    dir,
+    claudePath,
+    permissionFlags = "",
+    promptFile,
+    binDirs = [],
+  } = spec;
+  const pathExport = buildRemotePathExportCommand(binDirs);
+  const claudeCommand = [
+    pathExport,
+    `${shellQuote(claudePath)}${permissionFlags ? ` ${permissionFlags}` : ""}${promptFile ? ` < ${shellQuote(promptFile)} && rm -f ${shellQuote(promptFile)}` : ""}`,
+  ]
+    .filter(Boolean)
+    .join("; ");
+  return [
+    "set -e",
+    pathExport,
+    `mkdir -p ${remoteRunDir(sessionName, runId)}`,
+    `${shellQuote(tmuxPath)} new-session -d -s ${shellQuote(sessionName)} -c ${shellQuote(dir)} -x 240 -y 60 ${shellQuote(claudeCommand)}`,
+    `${shellQuote(tmuxPath)} set-option -t ${shellQuote(`=${sessionName}`)} @tfx_run_id ${shellQuote(runId)}`,
+    `${shellQuote(tmuxPath)} set-option -t ${shellQuote(`=${sessionName}`)} status off`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function buildRemoteTmuxCommand(record, action) {
+  const tmux = shellQuote(record.tmuxPath);
+  const target = shellQuote(`=${record.remoteSessionName}`);
+  return [
+    buildRemotePathExportCommand(record.binDirs),
+    `run_id=$(${tmux} show-options -qv -t ${target} @tfx_run_id) || exit $?`,
+    `[ "$run_id" = ${shellQuote(record.runId)} ] || { echo 'remote tmux runId mismatch' >&2; exit 3; }`,
+    `${action === "attach-session" ? "exec " : ""}${tmux} ${action} -t ${target}`,
+  ]
+    .filter(Boolean)
+    .join("; ");
+}
+
+export function buildRemoteTmuxAttachCommand(
+  host,
+  record,
+  platform = getPlatform(),
+) {
+  const command = buildRemoteTmuxCommand(record, "attach-session");
+  const quoted =
+    platform === "win32"
+      ? `'${escapePwshSingleQuoted(command)}'`
+      : shellQuote(command);
+  return `ssh -t ${buildSshOptions({ interactive: true, platform }).join(" ")} ${host} ${quoted}`;
 }
 
 function resolveRemoteStageDir(env, stageId) {
@@ -1203,16 +1044,23 @@ function ensureRemoteStageDir(host, env, remoteStageDir) {
           `New-Item -ItemType Directory -Path '${escapePwshSingleQuoted(remoteStageDir)}' -Force | Out-Null`,
         )
       : posixRemoteCommand(`mkdir -p ${shellQuote(remoteStageDir)}`);
-  execFileSync("ssh", [host, command], { timeout: 10000, stdio: "pipe" });
+  execFileSync("ssh", [...buildSshOptions(), host, command], {
+    timeout: 10000,
+    stdio: "pipe",
+  });
 }
 
 function uploadFileToRemote(host, localPath, remotePath) {
   // scp는 remote path를 셸 확장 없이 직접 전달 — shellQuote 불필요
   // Windows 원격에서 쿼트가 리터럴 문자로 해석되어 경로 오류 발생
-  execFileSync("scp", [localPath, `${host}:${remotePath}`], {
-    timeout: 15000,
-    stdio: "pipe",
-  });
+  execFileSync(
+    "scp",
+    [...buildSshOptions(), localPath, `${host}:${remotePath}`],
+    {
+      timeout: 15000,
+      stdio: "pipe",
+    },
+  );
 }
 
 function stageRemotePromptFiles(host, env, transferCandidates, stageId) {
@@ -1634,12 +1482,7 @@ function spawnLocal(args, claudePath, prompt) {
   }
 }
 
-/**
- * darwin/linux → posix 원격 레인. detached tmux 세션 pane 이 `ssh -t` 로
- * PATH prefix + cd + claude 스크립트를 실행한다.
- * 세션명 규약이 psmux 레인과 같으므로 --monitor/--kill 이 그대로 붙는다.
- */
-async function spawnRemoteViaTmux(args, promptContext, env) {
+async function spawnRemotePosix(args, promptContext, env) {
   const { host } = args;
   if (!env?.claudePath) {
     console.error(
@@ -1651,7 +1494,7 @@ async function spawnRemoteViaTmux(args, promptContext, env) {
   const resolvedDir = resolveRemoteDir(args.dir, env);
   const slug = buildSessionSlug(args.spawnName);
   const sessionName = deduplicateSessionName(
-    `${SPAWN_SESSION_PREFIX}${host}-${slug}`,
+    buildRemoteSessionName(host, slug),
   );
   const paneId = `${sessionName}:0.0`;
   const runId = randomUUID().slice(0, 8);
@@ -1681,31 +1524,81 @@ async function spawnRemoteViaTmux(args, promptContext, env) {
     );
   }
 
-  const paneCommand = buildTmuxRemoteLaneCommand(
-    host,
-    buildRemotePosixSpawnCommands({
-      binDirs: resolveRemoteBinDirs(host),
-      runId,
-      sessionName,
-      claudePath: env.claudePath,
-      dir: resolvedDir,
-      permissionFlags,
-      promptFile: remotePromptFile,
-    }),
-  );
+  const binDirs = resolveRemoteBinDirs(host);
+  const spec = {
+    binDirs,
+    runId,
+    sessionName,
+    tmuxPath: env.tmuxPath,
+    claudePath: env.claudePath,
+    dir: resolvedDir,
+    permissionFlags,
+    promptFile: remotePromptFile,
+  };
+  const record = env.tmuxPath
+    ? {
+        host,
+        runId,
+        remoteTmux: true,
+        remoteSessionName: sessionName,
+        tmuxPath: env.tmuxPath,
+        binDirs,
+      }
+    : { host, runId };
+  if (!env.tmuxPath)
+    console.error(
+      `${host}: 원격에 tmux가 없어 ssh가 끊기면 claude도 종료된다.`,
+    );
 
-  psmuxExec(buildTmuxSpawnSessionArgs(sessionName, paneCommand));
   try {
-    // 세션 생성에 성공한 실행만 기록한다. 쓰기가 실패하면 아래 catch 가 세션을 정리한다.
-    writeSpawnRecord(sessionName, { host, runId });
+    let paneCommand;
+    if (record.remoteTmux) {
+      // 응답을 잃어도 재접속할 수 있게 기록하되, 원격 runId가 다르면 조작을 거부한다.
+      writeSpawnRecord(sessionName, record);
+      try {
+        execFileSync("ssh", [...buildSshOptions(), host, "sh"], {
+          input: buildRemoteTmuxStartScript(spec),
+          encoding: "utf8",
+          timeout: 30_000,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+      } catch (error) {
+        if (typeof error.status === "number" && error.status !== 255)
+          removeSpawnRecord(sessionName, runId);
+        throw error;
+      }
+      paneCommand = buildRemoteTmuxAttachCommand(host, record);
+    } else {
+      paneCommand = buildTmuxRemoteLaneCommand(
+        host,
+        buildRemotePosixSpawnCommands(spec),
+      );
+    }
+    if (IS_WINDOWS_LOCAL) {
+      createPsmuxSession(sessionName, { layout: "1xN", paneCount: 1 });
+      sendKeysToPane(paneId, `${paneCommand}; ${buildPwshExitTail()}`);
+    } else {
+      psmuxExec(buildTmuxSpawnSessionArgs(sessionName, paneCommand));
+    }
+    if (!record.remoteTmux) writeSpawnRecord(sessionName, record);
     startSpawnSessionCleanupWatcher(sessionName, paneId);
 
+    let lastPaneContent = "";
     const waited = await waitForClaudeScreenState({
-      capture: () => capturePsmuxPane(paneId, 40),
+      capture: () => {
+        const content = capturePsmuxPane(paneId, 40);
+        if (content) lastPaneContent = content;
+        return content;
+      },
       targetStates: [CLAUDE_SCREEN_HOME, CLAUDE_SCREEN_REPL],
       timeoutMs: 60_000,
     });
     if (!waited.ready) {
+      if (!psmuxSessionExists(sessionName)) {
+        throw new Error(
+          `spawn failed: local session disappeared: ${sessionName}\n${lastPaneContent}${record.remoteTmux ? `\n${missingSessionMessage(sessionName)}` : ""}`,
+        );
+      }
       console.error(
         formatMonitorEvent({
           event: "spawn-wait-timeout",
@@ -1739,9 +1632,9 @@ async function spawnRemote(args, promptContext) {
     let remoteEnv = null;
     if (multiplexerAvailable) {
       try {
-        remoteEnv = probeRemoteEnv(host);
-      } catch {
-        remoteEnv = null;
+        remoteEnv = probeRemoteEnv(host, { osHint: resolveRemoteOsHint(host) });
+      } catch (error) {
+        failFast(error?.message || String(error));
       }
     }
 
@@ -1750,7 +1643,7 @@ async function spawnRemote(args, promptContext) {
       remoteOs: remoteEnv?.os ?? null,
     });
     if (lane === "tmux") {
-      await spawnRemoteViaTmux(args, promptContext, remoteEnv);
+      await spawnRemotePosix(args, promptContext, remoteEnv);
       return;
     }
     spawnRemoteFallback(args, promptContext);
@@ -1762,16 +1655,27 @@ async function spawnRemote(args, promptContext) {
     return;
   }
 
-  const env = probeRemoteEnv(host);
+  const env = probeRemoteEnv(host, { osHint: resolveRemoteOsHint(host) });
   if (!env.claudePath) {
     console.error(
       `claude not found on ${host}. Install Claude Code on the remote host first.`,
     );
     process.exit(1);
   }
+  if (env.os === "darwin" || env.os === "linux") {
+    if (env.tmuxPath) {
+      await spawnRemotePosix(args, promptContext, env);
+      return;
+    }
+    console.error(
+      `${host}: 원격에 tmux가 없어 ssh가 끊기면 claude도 종료된다.`,
+    );
+  }
   const resolvedDir = resolveRemoteDir(args.dir, env);
   const slug = buildSessionSlug(args.spawnName);
-  const sessionName = deduplicateSessionName(`tfx-spawn-${host}-${slug}`);
+  const sessionName = deduplicateSessionName(
+    buildRemoteSessionName(host, slug),
+  );
   const paneId = `${sessionName}:0.0`;
   const runId = randomUUID().slice(0, 8);
   const permissionFlags = getPermissionFlag().join(" ");
@@ -1897,23 +1801,55 @@ async function spawnRemote(args, promptContext) {
 function sendPromptToSession(sessionName, prompt) {
   requirePsmux();
   if (!psmuxSessionExists(sessionName)) {
-    throw new Error(`psmux session not found: ${sessionName}`);
+    throw new Error(missingSessionMessage(sessionName));
   }
   sendKeysToPane(`${sessionName}:0.0`, prompt);
 }
 
-function attachSession(sessionName) {
-  requirePsmux();
-  if (!psmuxSessionExists(sessionName)) {
-    throw new Error(`psmux session not found: ${sessionName}`);
+export async function attachSession(sessionName, options = {}) {
+  if (!options.sessionExists) requirePsmux();
+  const sessionExists = options.sessionExists || psmuxSessionExists;
+  if (!sessionExists(sessionName)) {
+    const record = readSpawnRecord(sessionName);
+    if (!record?.remoteTmux)
+      throw new Error(missingSessionMessage(sessionName));
+    const runRemote = options.runRemote || defaultRunRemoteCommand;
+    const probe = runRemote(
+      record.host,
+      buildRemoteTmuxCommand(record, "has-session"),
+    );
+    if (probe?.ok === false)
+      throw new Error(
+        `remote tmux session not found: ${record.remoteSessionName}`,
+      );
+    const platform = options.platform || getPlatform();
+    const command = buildRemoteTmuxAttachCommand(record.host, record, platform);
+    if (platform === "win32") {
+      (options.createSession || createPsmuxSession)(sessionName, {
+        layout: "1xN",
+        paneCount: 1,
+      });
+      (options.sendKeys || sendKeysToPane)(
+        `${sessionName}:0.0`,
+        `${command}; ${buildPwshExitTail()}`,
+      );
+    } else {
+      (options.multiplexerExec || psmuxExec)(
+        buildTmuxSpawnSessionArgs(sessionName, command),
+      );
+    }
+    (options.startWatcher || startSpawnSessionCleanupWatcher)(
+      sessionName,
+      `${sessionName}:0.0`,
+    );
   }
-  openAttachTab(sessionName);
+  await (options.openAttachTab || openAttachTab)(sessionName);
 }
 
 function captureSession(sessionName, lines = 30) {
   requirePsmux();
   if (!psmuxSessionExists(sessionName)) {
-    throw new Error(`psmux session not found: ${sessionName}`);
+    throw new Error(missingSessionMessage(sessionName));
   }
   return capturePsmuxPane(`${sessionName}:0.0`, lines);
 }
@@ -2006,7 +1942,7 @@ async function waitForClaudeReady(sessionName, timeoutSec = 60, options = {}) {
       : (() => {
           requirePsmux();
           if (!psmuxSessionExists(sessionName)) {
-            throw new Error(`psmux session not found: ${sessionName}`);
+            throw new Error(missingSessionMessage(sessionName));
           }
           const paneId = `${sessionName}:0.0`;
           return () => capturePsmuxPane(paneId, 40);
@@ -2088,7 +2024,12 @@ export async function monitorClaudeSession(sessionName, options = {}) {
 
   while (now() - startedAt <= maxMs) {
     if (!sessionExists(sessionName)) {
-      record({ at: now(), event: "session-gone", session: sessionName });
+      record({
+        at: now(),
+        event: "session-gone",
+        session: sessionName,
+        message: missingSessionMessage(sessionName),
+      });
       return {
         events,
         reason: "session-gone",
@@ -2144,6 +2085,8 @@ export async function monitorClaudeSession(sessionName, options = {}) {
 
 /** `tfx-spawn-<host>-<slug>` 세션명에서 원격 호스트를 역추론한다. */
 export function inferRemoteHostFromSessionName(sessionName, hostNames = []) {
+  const record = readSpawnRecord(sessionName);
+  if (record?.host) return record.host;
   const name = String(sessionName || "");
   if (!name.startsWith(SPAWN_SESSION_PREFIX)) return null;
   const rest = name.slice(SPAWN_SESSION_PREFIX.length);
@@ -2152,7 +2095,12 @@ export function inferRemoteHostFromSessionName(sessionName, hostNames = []) {
   for (const candidate of hostNames) {
     const host = String(candidate || "");
     if (!host) continue;
-    if (rest !== host && !rest.startsWith(`${host}-`)) continue;
+    if (
+      ![host, host.replace(/[.:]/g, "-")].some(
+        (prefix) => rest === prefix || rest.startsWith(`${prefix}-`),
+      )
+    )
+      continue;
     if (!best || host.length > best.length) best = host;
   }
   return best;
@@ -2226,6 +2174,27 @@ function readSpawnRecord(sessionName) {
   }
 }
 
+function listRemoteTmuxRecords() {
+  try {
+    return readdirSync(join(tfxStateDir(), "remote-spawn"))
+      .filter(
+        (name) =>
+          name.startsWith(SPAWN_SESSION_PREFIX) && name.endsWith(".json"),
+      )
+      .map((name) => name.slice(0, -5))
+      .filter((name) => readSpawnRecord(name)?.remoteTmux);
+  } catch {
+    return [];
+  }
+}
+
+function missingSessionMessage(sessionName) {
+  const message = `psmux session not found: ${sessionName}`;
+  return readSpawnRecord(sessionName)?.remoteTmux
+    ? `${message}; --attach ${sessionName} 으로 다시 붙으세요.`
+    : message;
+}
+
 // 기다리는 사이 같은 이름으로 새로 spawn 했을 수 있어 runId 가 같을 때만 지운다.
 function removeSpawnRecord(sessionName, runId) {
   if (readSpawnRecord(sessionName)?.runId !== runId) return;
@@ -2248,11 +2217,15 @@ export function parseRemoteProcessCount(stdout) {
 }
 
 function defaultRunRemoteCommand(host, command) {
-  const stdout = execFileSync("ssh", [host, posixRemoteCommand(command)], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    timeout: 30_000,
-  });
+  const stdout = execFileSync(
+    "ssh",
+    [...buildSshOptions(), host, posixRemoteCommand(command)],
+    {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30_000,
+    },
+  );
   return { ok: true, stdout: String(stdout ?? "") };
 }
 
@@ -2291,7 +2264,7 @@ export async function killSpawnSession(sessionName, options = {}) {
     result.local = { error: error?.message || String(error), ok: false };
   }
 
-  const record = options.runId ? null : readSpawnRecord(sessionName);
+  const record = readSpawnRecord(sessionName);
   const runId = options.runId || record?.runId || null;
   const hostNames = options.hostNames || listKnownHostNames();
   const host =
@@ -2317,15 +2290,22 @@ export async function killSpawnSession(sessionName, options = {}) {
       return {
         ok: out?.ok !== false,
         output: String(out?.stdout ?? "").trim(),
+        status: out?.status,
       };
     } catch (error) {
-      return { error: error?.message || String(error), ok: false };
+      return {
+        error: error?.message || String(error),
+        ok: false,
+        status: error.status,
+      };
     }
   };
 
-  remote.sessionStop = runId
-    ? runStep(buildRemoteSessionStopCommand(sessionName, runId))
-    : { error: "spawn 기록이 없어 원격 세션을 특정할 수 없다", ok: false };
+  remote.sessionStop = record?.remoteTmux
+    ? runStep(buildRemoteTmuxCommand(record, "kill-session"))
+    : runId
+      ? runStep(buildRemoteSessionStopCommand(sessionName, runId))
+      : { error: "spawn 기록이 없어 원격 세션을 특정할 수 없다", ok: false };
   if (options.stopDaemon) {
     const binDirs = options.binDirs || resolveRemoteBinDirs(host, options);
     const claudePath =
@@ -2337,6 +2317,13 @@ export async function killSpawnSession(sessionName, options = {}) {
 
   const readRemaining = () => {
     try {
+      if (record?.remoteTmux) {
+        const probe = runStep(buildRemoteTmuxCommand(record, "has-session"));
+        if (probe.ok) return 1;
+        if (probe.status === 1) return 0;
+        remote.readbackError = probe.error || "remote tmux readback failed";
+        return null;
+      }
       if (!runId) {
         remote.readbackError = remote.sessionStop.error;
         return null;
@@ -2398,7 +2385,11 @@ async function main() {
   }
 
   if (args.command === "list") {
-    console.log(listSpawnSessions().join("\n"));
+    const sessions = listSpawnSessions();
+    console.log(sessions.join("\n"));
+    for (const name of listRemoteTmuxRecords()) {
+      if (!sessions.includes(name)) console.error(missingSessionMessage(name));
+    }
     return;
   }
 
@@ -2407,7 +2398,7 @@ async function main() {
       console.error("--attach requires a session name");
       process.exit(1);
     }
-    attachSession(args.sessionName);
+    await attachSession(args.sessionName);
     return;
   }
 
@@ -2417,7 +2408,14 @@ async function main() {
       process.exit(1);
     }
     console.log(
-      JSON.stringify(probeRemoteEnv(args.probeHost, { force: true }), null, 2),
+      JSON.stringify(
+        probeRemoteEnv(args.probeHost, {
+          force: true,
+          osHint: resolveRemoteOsHint(args.probeHost),
+        }),
+        null,
+        2,
+      ),
     );
     return;
   }
@@ -2516,7 +2514,6 @@ if (selfRun) {
 
 export const __remoteSpawnTest = {
   buildPromptContext,
-  normalizePosixProbeEnv,
   parseArgs,
   rewritePromptPaths,
   startSpawnExitWatcher,

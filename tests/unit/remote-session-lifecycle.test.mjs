@@ -739,7 +739,7 @@ describe("tmux 원격 레인 명령 조립", () => {
 
   it("pane 명령은 ssh -t 안에 PATH prefix 스크립트를 담는다", () => {
     const command = buildTmuxRemoteLaneCommand("m2", posixCommands);
-    assert.match(command, /^ssh -t m2 '/);
+    assert.match(command, /^ssh -t .* m2 '/);
     assert.ok(command.includes("export PATH="));
     assert.ok(command.includes("cd "));
     assert.ok(command.includes("--dangerously-skip-permissions"));
