@@ -67,6 +67,28 @@ test("headless state remains readable while running and is cleared after complet
   assert.equal(loadTeamState("state-running"), null);
 });
 
+test("unset auto-attach splits the caller window only on Windows", async () => {
+  const seen = [];
+  const run = async (sessionName, _assignments, opts) => {
+    seen.push(opts.autoAttach);
+    return { sessionName, results: [], kill() {} };
+  };
+  for (const [platform, autoAttach, expected] of [
+    ["darwin", null, false],
+    ["linux", undefined, false],
+    ["win32", null, true],
+    ["darwin", true, true],
+    ["win32", false, false],
+  ]) {
+    await startHeadlessTeam({
+      ...options(`attach-${platform}-${autoAttach}`),
+      autoAttach,
+      _deps: { platform, runHeadlessInteractive: run },
+    });
+    assert.equal(seen.pop(), expected, `${platform} autoAttach=${autoAttach}`);
+  }
+});
+
 test("failed headless startup clears its state and preserves the error", async () => {
   await assert.rejects(
     startHeadlessTeam({

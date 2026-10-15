@@ -55,6 +55,22 @@ test("non-TTY without a multiplexer remains headless", () => {
   }
 });
 
+test("non-TTY inside tmux is headless, not an interactive team", () => {
+  for (const [platform, mux] of [
+    ["darwin", "tmux"],
+    ["linux", "tmux"],
+    ["win32", "psmux"],
+  ]) {
+    assert.equal(
+      normalizeTeammateMode(
+        "auto",
+        deps(platform, mux, false, { TMUX: "/tmp/tmux-501/default,1,0" }),
+      ),
+      "headless",
+    );
+  }
+});
+
 test("explicit supported modes do not require detection during parsing", () => {
   for (const [mode, platform, expected] of [
     ["headless", "linux", "headless"],

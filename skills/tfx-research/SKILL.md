@@ -71,12 +71,12 @@ Agent(
 **Bash (Codex + Brave):** 사용자 입력은 Write 도구로 임시 파일에 쓰고 `"$(cat "$f")"` 로 넘긴다. 따옴표 인자에 직접 끼우면 입력의 `'` 하나로 인용이 끝나고, heredoc 은 입력에 종료자 줄이 있으면 끝난다. 큰따옴표 안의 명령 치환 결과는 다시 해석되지 않는다. `{queries_file}` 은 서브쿼리를 쓴 파일이다.
 ```bash
 # Bash(run_in_background=true)
-tfx multi \
+tfx multi --teammate-mode headless \
   --assign "codex:서브쿼리를 Brave Search 로 검색. 서브쿼리: $(cat {queries_file}). 관점: 실용/산업. brave_web_search + brave_news_search, freshness=pw. 각 쿼리 상위 5개 구조화.:scientist" \
   --timeout 1800
 ```
 
-> 배리어: 위 dispatch는 background로 실행한다. task-notification 완료 후 team runtime 결과에서 검색 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
+> 배리어: 위 dispatch는 background로 실행한다. Bash 도구는 비TTY라 모드를 생략해도 headless지만, 결과 색인(`results.json`)이 headless에서만 나오므로 명시한다. task-notification 완료 후 team runtime 결과에서 검색 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
 
 #### Step 3: 결과 수집 및 교차검증
 

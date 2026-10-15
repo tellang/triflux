@@ -46,6 +46,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0037](0037-model-family-aliases.md) | Codex와 Antigravity 가족 별칭을 실행 때 최신 모델로 해석한다 | Accepted | 0016, 0017, 0019 |
 | [0038](../_archive/adr/0038-agy-default-argon-family.md) | Antigravity를 Argon으로 바꾸고 역할 배정을 다시 정한다 | Superseded | 0037, 0039 |
 | [0039](0039-review-by-author-vendor.md) | 작성 벤더와 다른 벤더에 코드 리뷰를 배정한다 | Accepted | 0004, 0036, 0037, 0038 |
+| [0040](0040-nontty-multi-defaults-headless.md) | 비TTY 호출의 tfx multi 는 headless 로 가고 호출자 창을 나누지 않는다 | Accepted | 0008, 0026 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 
