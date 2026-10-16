@@ -37,7 +37,7 @@ for (const prompt of ["/rename 10.16 새 이름", "/status", "/compact", "/new"]
           settleMs: 0,
         },
         {
-          paneCliProcess: async () => ({ pid: 101, foreground: true }),
+          paneCliProcess: async () => ({ pid: 101, running: true }),
           capturePane: async () => "›",
           captureVisible: async () => {
             if (!busy) return "›";
