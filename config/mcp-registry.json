@@ -17,9 +17,12 @@
       "policy": "hosted",
       "transport": "http",
       "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "Authorization": { "env": "CONTEXT7_API_KEY", "prefix": "Bearer " }
+      },
       "safe": true,
       "targets": ["claude", "codex", "antigravity"],
-      "description": "Upstash Context7 — 라이브러리 문서/코드 컨텍스트 (HTTP MCP, API key 불필요)"
+      "description": "Upstash Context7 — 라이브러리 문서/코드 컨텍스트 (HTTP MCP). 키 없이도 되지만 익명은 월 쿼터가 작다. Key 발급: https://context7.com/dashboard → secrets.env의 CONTEXT7_API_KEY"
     },
     "exa": {
       "policy": "hosted",
