@@ -125,6 +125,7 @@ function trustedPackageTree(packageRoot, nodePath, tmuxPath) {
     const meta = existing(current);
     if (
       !meta ||
+      path.basename(current).toLowerCase() === ".git" ||
       meta.isSymbolicLink() ||
       ![0, process.getuid()].includes(meta.uid) ||
       (meta.mode & 0o002) !== 0
@@ -232,8 +233,8 @@ export function inspectPeerPermission({
   tmuxPath,
   platform = process.platform,
 } = {}) {
+  if (platform === "win32") return { status: "unsupported" };
   const plan = peerPermissionPlan({ home, packageRoot, nodePath, tmuxPath });
-  if (platform === "win32") return { status: "unsupported", plan };
   const effectiveNodePath = nodePath || resolveStableNodeBin();
   if (
     !trustedPackageTree(
@@ -334,12 +335,9 @@ export function installPeerPermission({
     platform,
   });
   const { plan, status } = inspected;
+  if (status === "unsupported") return { status, changed: false };
   if (status === "approved") return { status: "approved", changed: false };
-  if (
-    status === "conflict" ||
-    status === "unavailable" ||
-    status === "unsupported"
-  )
+  if (status === "conflict" || status === "unavailable")
     return {
       status,
       changed: false,
@@ -502,8 +500,10 @@ export async function offerPeerPermission({
     tmuxPath,
     platform,
   });
-  if (state.status === "unsupported")
+  if (state.status === "unsupported") {
+    notice("Windows 는 자동 승인 없이 tfx-peer 를 직접 실행한다");
     return { status: "unsupported", changed: false };
+  }
   if (state.status === "approved")
     return { status: "approved", changed: false };
   if (fromUpdate) {

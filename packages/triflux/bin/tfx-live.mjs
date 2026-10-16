@@ -5046,7 +5046,11 @@ async function resolvePeerSender({
   return { cli: "unknown", name: "unknown" };
 }
 
-function formatPeerReply({ cli, name, sessionId }, targetCli) {
+function formatPeerReply(
+  { cli, name, sessionId },
+  targetCli,
+  { platform = process.platform } = {},
+) {
   if (cli === "unknown" || (cli === "claude" && !name && !sessionId))
     return "회신: 경로 불명(보낸 세션을 판별하지 못함)";
   const oneLineName = String(name || sessionId).replace(
@@ -5056,13 +5060,17 @@ function formatPeerReply({ cli, name, sessionId }, targetCli) {
   if (cli === "claude" && targetCli === "claude") {
     return `회신: SendMessage(to: ${JSON.stringify(oneLineName)})`;
   }
+  if (platform === "win32" && cli === "codex")
+    return "회신: Windows 에서는 Codex 대상을 아직 지원하지 않는다";
   const command =
-    cli === "claude" || cli === "codex"
-      ? shellQuote([pathJoin(homedir(), ".claude", "scripts", "tfx-peer")])
-      : "tfx-live";
+    platform === "win32" && cli === "claude"
+      ? String.raw`node "$env:APPDATA\npm\node_modules\triflux\bin\tfx-peer.mjs"`
+      : cli === "claude" || cli === "codex"
+        ? shellQuote([pathJoin(homedir(), ".claude", "scripts", "tfx-peer")])
+        : "tfx-live";
   const to = `${cli}:${cli === "claude" && sessionId ? sessionId : oneLineName}`
     .replace(/[\r\n\u2028\u2029]+/g, " ")
-    .replace(/'/g, `'"'"'`);
+    .replace(/'/g, platform === "win32" ? "''" : `'"'"'`);
   return `회신: ${command} send --to '${to}' --message '...'`;
 }
 

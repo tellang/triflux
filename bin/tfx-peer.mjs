@@ -17,12 +17,17 @@ import {
 } from "./tfx-live.mjs";
 
 export async function main(args = process.argv.slice(2), deps = {}) {
-  if (process.platform === "win32")
-    throw new Error("Native peer adapter is unsupported on Windows");
+  const platform = deps.platform || process.platform;
   const { to, message } = parsePeerArgs(args);
   const [cli, name] = to.split(":");
+  if (platform === "win32" && cli === "codex")
+    throw new Error("Windows 에서는 Codex 대상을 아직 지원하지 않는다");
   const env = deps.env || process.env;
-  const candidates = await (deps.discover || discoverPeerTargets)({ deps });
+  // Windows 에는 tmux/ps 기반 탐색이 없다.
+  const candidates =
+    platform === "win32"
+      ? []
+      : await (deps.discover || discoverPeerTargets)({ deps });
   const sender = await resolvePeerSender({
     env,
     allCandidates: candidates,
@@ -33,15 +38,17 @@ export async function main(args = process.argv.slice(2), deps = {}) {
   const formattedMessage = [
     `[tfx-peer from=${sender.cli}:${String(sender.name || sender.sessionId || "unknown").replace(/[\r\n\u2028\u2029]+/g, " ")} msg=${randomUUID()}]`,
     message,
-    formatPeerReply(sender, cli),
+    formatPeerReply(sender, cli, { platform }),
   ].join("\n");
   if (cli === "claude") {
     const target = (
       deps.resolveClaudeRegistryTarget || resolveClaudeRegistryTarget
-    )(name);
+    )(name, { platform });
     return (deps.deliverClaude || deliverClaude)({
       sessionId: target.sessionId,
+      receiver: target.receiver,
       message: formattedMessage,
+      platform,
     });
   }
   const matched = matchPeerCandidates(
