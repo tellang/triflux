@@ -36,18 +36,78 @@ const cleanup = (x) => {
   fs.rmSync(x.home, { recursive: true, force: true });
   fs.rmSync(x.prefix, { recursive: true, force: true });
 };
-it("decline, noninteractive and dry-run write nothing", async () => {
-  for (const mode of ["decline", "noninteractive", "dry-run"]) {
+it("decline and noninteractive write nothing", async () => {
+  for (const mode of ["decline", "noninteractive"]) {
     const x = fixture();
     try {
       const result = await offerPeerPermission({
         ...x,
         interactive: mode !== "noninteractive",
-        dryRun: mode === "dry-run",
         ask: async () => false,
       });
       assert.notEqual(result.status, "approved");
       assert.deepEqual(fs.readdirSync(x.home), []);
+    } finally {
+      cleanup(x);
+    }
+  }
+});
+it("busy offer identifies its exact lock without removing it", async () => {
+  const x = fixture();
+  try {
+    const plan = peerPermissionPlan(x);
+    const lock = `${plan.manifest}.lock`;
+    fs.mkdirSync(path.dirname(lock), { recursive: true });
+    fs.writeFileSync(lock, "other install", { mode: 0o600 });
+    const warnings = [];
+    const result = await offerPeerPermission({
+      ...x,
+      interactive: true,
+      ask: async () => true,
+      warn: (message) => warnings.push(message),
+    });
+    assert.equal(result.status, "busy");
+    assert.ok(warnings.some((message) => message.includes(lock)));
+    assert.equal(fs.readFileSync(lock, "utf8"), "other install");
+  } finally {
+    cleanup(x);
+  }
+});
+it("post-consent conflict and partial warnings identify only the peer allow entry", async () => {
+  for (const variant of ["conflict", "partial"]) {
+    const x = fixture();
+    try {
+      const plan = peerPermissionPlan(x);
+      const warnings = [];
+      const originalRename = fs.renameSync;
+      if (variant === "partial") {
+        fs.renameSync = (from, to) => {
+          originalRename(from, to);
+          if (to === plan.wrapper) throw new Error("fixture write failure");
+        };
+      }
+      let result;
+      try {
+        result = await offerPeerPermission({
+          ...x,
+          interactive: true,
+          ask: async () => {
+            if (variant === "conflict") {
+              fs.mkdirSync(path.dirname(plan.rule), { recursive: true });
+              fs.writeFileSync(plan.rule, "unmanaged rule");
+            }
+            return true;
+          },
+          warn: (message) => warnings.push(message),
+        });
+      } finally {
+        fs.renameSync = originalRename;
+      }
+      assert.equal(result.status, variant);
+      assert.ok(warnings.some((message) => message.includes(plan.settings)));
+      assert.ok(warnings.some((message) => message.includes(plan.allow)));
+      if (variant === "conflict")
+        assert.equal(fs.readFileSync(plan.rule, "utf8"), "unmanaged rule");
     } finally {
       cleanup(x);
     }

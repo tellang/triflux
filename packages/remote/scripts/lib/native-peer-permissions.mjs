@@ -324,7 +324,6 @@ export function installPeerPermission({
   nodePath,
   tmuxPath,
   consent = false,
-  dryRun = false,
   platform = process.platform,
 } = {}) {
   const inspected = inspectPeerPermission({
@@ -349,9 +348,9 @@ export function installPeerPermission({
           ? "Trusted peer adapter entry is absent or unsafe"
           : "Existing peer approval files are not owned by this exact consent contract",
     };
-  if (!consent || dryRun)
+  if (!consent)
     return {
-      status: dryRun ? "dry-run" : status,
+      status,
       changed: false,
       preview: {
         wrapper: plan.wrapper,
@@ -487,7 +486,6 @@ export async function offerPeerPermission({
   home,
   packageRoot,
   interactive = false,
-  dryRun = false,
   fromUpdate = false,
   verbose = false,
   ask = async () => false,
@@ -515,10 +513,11 @@ export async function offerPeerPermission({
       );
     return { status: state.status, changed: false };
   }
+  const cleanup = `확인 대상: ${state.plan.wrapper}, ${state.plan.rule}, ${state.plan.manifest}, ${state.plan.manifest}.lock. Claude ${state.plan.settings}의 permissions.allow에서는 ${state.plan.allow} 항목만 확인한다. settings 전체나 다른 allow/deny는 삭제하지 않는다.`;
   if (state.status === "conflict" || state.status === "unavailable") {
     if (state.status === "conflict")
       warn(
-        `Peer 승인 파일이 충돌한다. ${state.plan.wrapper}, ${state.plan.rule}, ${state.plan.manifest}, ${state.plan.manifest}.lock을 확인하고 해당 어댑터 파일만 직접 정리한 뒤 재동의한다. 자동 삭제하지 않는다.`,
+        `Peer 승인 파일이 충돌한다. ${cleanup} 해당 어댑터 항목만 직접 정리한 뒤 재동의한다. 자동 삭제하지 않는다.`,
       );
     else {
       notice(
@@ -534,7 +533,7 @@ export async function offerPeerPermission({
     }
     return { status: state.status, changed: false };
   }
-  if (!interactive || dryRun) {
+  if (!interactive) {
     notice(
       "Native peer adapter 전역 승인은 선택 사항이다. tfx setup 에서 설정할 수 있다.",
     );
@@ -567,7 +566,13 @@ export async function offerPeerPermission({
     platform,
     consent: true,
   });
-  if (result.status === "partial" || result.status === "failed")
-    warn(`Peer adapter 승인 일부 실패: ${result.error}`);
+  if (result.status === "busy")
+    warn(
+      `Peer adapter 승인 설치 잠금: ${state.plan.manifest}.lock. 실행 중인 설치가 없는지 확인한 뒤 직접 정리한다. 자동 삭제하지 않는다.`,
+    );
+  if (result.status === "conflict" || result.status === "partial")
+    warn(`Peer adapter 승인 ${result.status}: ${result.error}. ${cleanup}`);
+  else if (result.status === "failed")
+    warn(`Peer adapter 승인 실패: ${result.error}`);
   return result;
 }

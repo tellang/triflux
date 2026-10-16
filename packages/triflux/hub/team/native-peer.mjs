@@ -277,6 +277,7 @@ export async function deliverClaude({
   home = os.homedir(),
   receiver = resolveClaudeReceiver({ sessionId, home }),
   socketDir = path.dirname(receiver.socketPath),
+  // 150ms 유지 후 리드의 peer 수신·응답을 확인해 8초 고정 대기를 줄였다.
   holdMs = 150,
 }) {
   const own = path.join(socketDir, `${process.pid}.sock`);
