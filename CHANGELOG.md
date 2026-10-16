@@ -4,6 +4,9 @@ All notable changes to triflux will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- peer: Claude와 Codex의 로컬 세션에 비사용자 메시지를 보내는 `tfx-peer send` 어댑터와, `triflux setup`에서 명시 동의할 때만 적용하는 전용 전역 승인 옵션.
+
 ### Fixed
 - live: omx 처럼 CLI 를 분리 세션으로 띄우는 래퍼 아래의 Codex 에 `ask` 와 `start` 가 "not in foreground" 로 입력을 거부하던 문제. 입력 가능 판정을 전면 그룹(`+`)이 아니라 pane 하위에 살아 있고 정지·좀비가 아닌지로 바꾼다. `+` 는 같은 깊이에서 본체를 고를 때만 쓴다
 

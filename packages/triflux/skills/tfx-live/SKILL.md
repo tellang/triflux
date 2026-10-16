@@ -221,3 +221,13 @@ tfx-live list-sessions --cli codex
 ```
 
 `auto`가 tmux로 전환되면 `~/.claude/cache/triflux/tfx-live/bug-reports/uds-fallback-*.json`을 확인한다. 테스트에서는 `$TFX_LIVE_BUG_REPORT_DIR`로 위치를 바꿀 수 있다.
+
+## 선택적 전역 native peer 어댑터
+
+`triflux setup`에서 별도 동의하면 `~/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'` 또는 `--to 'claude:<정확한 이름>'`을 쓴다. `~`는 셸 예시이고 승인 prefix는 setup이 출력한 실제 절대경로의 래퍼 `send`뿐이다. `node`, `bash`, `tfx-live send`를 이 승인으로 실행하지 않는다. Claude→Claude는 기존 native `SendMessage`를 우선 사용한다. 기존 `tfx-live send`는 ask/queue/tmux 사용자 릴레이이며 native peer와 다르고 사용자 입력으로 fallback하지 않는다.
+
+설치는 현재 사용자 또는 root 소유이고 other-write가 없는 안정적인 package, Node, tmux 경로만 허용한다. group-write는 허용하지만 개발 checkout, symlink packageRoot, 바뀐 런타임 계약은 거부한다. Claude key/socket/auth의 0600 검사는 별도로 유지한다. setup이 확인한 tmux 디렉터리만 래퍼의 고정 PATH에 넣고 호출자 PATH나 PSMUX override를 받지 않는다. 거절·비대화형·CI·postinstall에서는 승인 파일을 쓰지 않으며 update는 미설정·거절·철회를 조용히 보존한다. 재승인은 `triflux setup`에서 명시적으로 선택한다.
+
+Claude 수신은 collapsed native peer UI지만 UDS 쓰기 후 결과 `written`에는 같은 연결의 인증·거절 ACK가 없다. 수신이나 모델 완료로 읽지 않는다. Codex는 same-daemon `agent_message` raw injection과 non-user wake이고 `sent`도 모델 완료가 아니다. Codex TUI는 공유 app-server에 `--remote unix://<socket>`으로 연결해야 한다. 송신 socket은 일회성이므로 native `SendMessage` 회신은 지원하지 않는다(ENOENT 가능). 별도로 확인한 이름의 `tfx-peer` 대상으로 회신한다. `partial`/`unknown` 또는 timeout은 중복 가능성 때문에 자동 재시도하지 않는다.
+
+철회할 때 Claude `settings.json`의 해당 `Bash(<실제 절대경로>/tfx-peer send:*)` allow, `~/.codex/rules/triflux-native-peer.rules`, `~/.claude/scripts/tfx-peer`, **`~/.claude/scripts/tfx-peer-consent.json`**을 확인해 이 어댑터 항목만 제거한다. partial 설치 충돌이면 같은 경로의 `tfx-peer-consent.json.lock`도 확인한다. 다른 설정이나 deny는 건드리지 않는다. 전역 승인 대신 기존 수동 `~/.codex/rules/tfx-live.rules`를 쓰더라도 이는 native peer 전송과 다르다. Windows와 원격 자동 권한 변경은 지원하지 않는다.

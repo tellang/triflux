@@ -218,6 +218,10 @@ graph TD
 | MCP 레지스트리 | 낡았거나 지원하지 않는 MCP 항목을 관리형 항목으로 바꾼다. |
 | 합의 결과 | deep·consensus 실행은 일부 레인이 빠졌거나 의견이 갈린 결과를 숨기지 않고 표시한다. |
 
+### 선택적 native peer 어댑터
+
+`triflux setup`에서 명시적으로 동의하면 로컬 Claude·Codex 피어용 `~/.claude/scripts/tfx-peer send` 래퍼만 승인하고 Bash 전체 권한이나 sandbox를 완화하지 않는다. `~`는 셸 예시이며 Codex 규칙은 setup이 출력한 실제 절대경로에 맞고, Claude의 `written`은 UDS 쓰기만 뜻하며 Codex의 `agent_message`도 모델 완료를 보증하지 않는다. 설치 신뢰 조건, 재시도와 allow·rule·래퍼·동의 manifest 철회 절차는 [tfx-live 스킬](skills/tfx-live/SKILL.md#선택적-전역-native-peer-어댑터)에 둔다.
+
 ## 기여
 
 Node 22 이상이 필요하다. 테스트, 린트, 패키지 경계, 미러·릴리즈 점검, 상태 스냅샷은

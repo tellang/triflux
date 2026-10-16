@@ -7,6 +7,7 @@
     "triflux": "bin/triflux.mjs",
     "tfx": "bin/triflux.mjs",
     "tfx-live": "bin/tfx-live.mjs",
+    "tfx-peer": "bin/tfx-peer.mjs",
     "tfx-setup": "bin/tfx-setup.mjs",
     "tfx-doctor": "bin/tfx-doctor.mjs"
   },

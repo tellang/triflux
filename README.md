@@ -220,6 +220,10 @@ Windows) and `hub/team/wt-manager.mjs`. Agent rules:
 | MCP registry | Replaces stale or unsupported MCP entries with managed ones. |
 | Consensus | Deep and consensus runs report degraded or disputed results instead of hiding them. |
 
+### Optional native peer adapter
+
+`triflux setup` optionally approves only the dedicated `~/.claude/scripts/tfx-peer send` wrapper for local Claude and Codex peers, without broad Bash or sandbox approval; `~` is a shell example, while Codex rules match the exact absolute path printed by setup. Claude reports `written` after its UDS write without a receiver ACK, while Codex sends a typed `agent_message` only to an eligible same-daemon thread; neither result proves model completion. See the [tfx-live skill](skills/tfx-live/SKILL.md#선택적-전역-native-peer-어댑터) for setup trust limits, retry behavior, and revocation of the allow entry, rule, wrapper, and consent manifest.
+
 ## Contributing
 
 Node 22 or newer. See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, lint, package boundaries,

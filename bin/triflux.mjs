@@ -1307,6 +1307,7 @@ export async function runUpdatedSetup({
           "setup",
           "--from-update",
           "--consent-only",
+          ...(options.verbose ? ["--verbose"] : []),
           ...(interactive ? [] : ["--json"]),
         ],
         {
@@ -1358,6 +1359,8 @@ async function cmdConsentOnly(options, report) {
   try {
     const consent = await runConsentSteps({
       interactive: !options.nonInteractive,
+      fromUpdate: options.fromUpdate,
+      verbose: options.verbose,
       report,
     });
     if (consent.changed) report.alreadyInGoalState = false;

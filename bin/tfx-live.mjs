@@ -1142,7 +1142,12 @@ async function discoverCodexTmuxSessions(
           "session_index.jsonl",
         ),
       });
-      for (const record of records) {
+      const recordTime = (record) =>
+        Number(record.updatedAt ?? record.startedAt) || 0;
+      const ambiguousPanes = new Set();
+      for (const record of [...records].sort(
+        (a, b) => recordTime(b) - recordTime(a),
+      )) {
         const panePid = panePids.get(record.tmuxPane);
         if (!Number.isSafeInteger(panePid) || panePid <= 0) continue;
         let ancestor = record.pid;
@@ -1150,11 +1155,23 @@ async function discoverCodexTmuxSessions(
           ancestor = parents.get(ancestor);
         }
         if (ancestor !== panePid) continue;
+        if (paneThreads.has(record.tmuxPane)) {
+          const prior = paneThreads.get(record.tmuxPane);
+          if (
+            prior.updatedAt === recordTime(record) &&
+            prior.threadId !== record.sessionId
+          )
+            ambiguousPanes.add(record.tmuxPane);
+          continue;
+        }
         paneThreads.set(record.tmuxPane, {
           threadId: record.sessionId,
           name: names.get(record.sessionId) ?? null,
+          threadSource: "registry",
+          updatedAt: recordTime(record),
         });
       }
+      for (const pane of ambiguousPanes) paneThreads.delete(pane);
     }
     return {
       ok: true,
@@ -3896,11 +3913,29 @@ async function resolveCodexTmuxThread(session, deps = {}) {
     return { threadId: null, reason: `tmux-unavailable: ${error.message}` };
   }
   const [stored, paneId, cwd, created, panePid] = fields;
-  if (isCodexThreadId(stored))
-    return { threadId: stored, threadSource: "tmux-option" };
-  const record = (deps.readCodexSessionRecords ?? readCodexSessionRecords)({
+  const records = (deps.readCodexSessionRecords ?? readCodexSessionRecords)({
     dir: registryDir(),
-  }).find((entry) => entry.tmuxPane === paneId);
+  })
+    .filter((entry) => entry.tmuxPane === paneId)
+    .sort(
+      (a, b) =>
+        (Number(b.updatedAt ?? b.startedAt) || 0) -
+        (Number(a.updatedAt ?? a.startedAt) || 0),
+    );
+  if (
+    (deps.requireRegistryAgreement || !isCodexThreadId(stored)) &&
+    records.length > 1 &&
+    records[0].sessionId !== records[1].sessionId &&
+    (Number(records[0].updatedAt ?? records[0].startedAt) || 0) ===
+      (Number(records[1].updatedAt ?? records[1].startedAt) || 0)
+  )
+    return { threadId: null, reason: "registry-ambiguous" };
+  const record = records[0];
+  if (isCodexThreadId(stored)) {
+    if (deps.requireRegistryAgreement && record && record.sessionId !== stored)
+      return { threadId: null, reason: "pane-thread-conflict" };
+    return { threadId: stored, threadSource: "tmux-option" };
+  }
   if (isCodexThreadId(record?.sessionId))
     return { threadId: record.sessionId, threadSource: "registry" };
   // resume 한 thread 는 rollout 이 세션보다 오래돼 cwd 대응에서 빠지므로 프로세스 인자로 찾는다.
@@ -4821,6 +4856,7 @@ async function discoverPeerTargets({
           const resolved = await resolveCodexThread(s.target || s.paneId);
           if (resolved?.threadId) {
             s.threadId = resolved.threadId;
+            s.threadSource = resolved.threadSource;
             if (!s.name) missingThreadIds.push(resolved.threadId);
           }
         } else if (s.threadId && !s.name) {
@@ -7145,6 +7181,7 @@ export {
   peerSideBaseOpts,
   resolveAskTransport,
   resolveCodexDaemonSocket,
+  resolveCodexTmuxThread,
   resolvePeerSender,
   resumedCodexThread,
   sameMachineClaudeRedirect,
