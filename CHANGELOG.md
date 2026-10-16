@@ -2,6 +2,15 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.79.0] - 2026-10-17
+
+### Added
+- peer: Windows 에서 `tfx-peer` 로 로컬 Claude 세션에 메시지를 보낸다. Claude 의 named pipe(`\\.\pipe\LOCAL\cc-msg-<hex>`)로 전달하고, 세션 기록과 키 파일의 ACL, FILETIME 시작 시각, 호스트 이름으로 대상을 확인한다. Codex 대상은 Windows 에서 아직 거절한다 (#801)
+
+### Changed
+- peer: Windows 는 자동 승인(래퍼와 Codex 규칙)을 설치하지 않는다. `.cmd` 를 거치면 cmd.exe 가 본문을 다시 해석해 승인된 명령으로 임의 실행이 가능하기 때문이다. PowerShell 에서 `node "$env:APPDATA\npm\node_modules\triflux\bin\tfx-peer.mjs" send ...` 로 직접 실행한다 (#801)
+- peer: 승인 설치본 판정이 패키지 트리 안의 `.git` 을 대소문자 없이 찾는다 (#801)
+
 ## [10.78.0] - 2026-10-17
 
 ### Changed
