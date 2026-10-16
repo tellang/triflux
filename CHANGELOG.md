@@ -2,6 +2,17 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.78.0] - 2026-10-17
+
+### Changed
+- peer: 로컬 Claude·Codex 세션 사이 메시지는 native 피어로만 보낸다. Claude 끼리는 `SendMessage`, 그 밖의 Claude·Codex 대상은 `tfx-peer` 래퍼를 쓰고, `tfx-live send` 는 agy 대상만 받는다. Claude·Codex 대상은 `use-send-message` 또는 `use-tfx-peer` 로 거절하며 `--via-tmux` 만 명시적 탈출구로 남긴다. 메시지 끝의 회신 안내도 받는 쪽에 맞춘다 (#799)
+- live: `tfx-live start --cli codex` 와 resume 은 공유 app-server 데몬에 `--remote unix://<소켓> -C <cwd>` 로 붙어 tfx-peer 메시지를 받는다. 소켓이 없으면 `codex app-server daemon start` 를 안내하고 실패한다. ask 자동 생성, peer, converse 는 그대로다 (#799)
+
+### Fixed
+- peer: Claude 세션 사이 메시지가 상대 입력 칸에 tmux 로 붙여 넣어지던 문제. mod 가 띄운 프로세스에 `CLAUDECODE` 가 없어도 발신자가 Claude 면 거절한다. 발신자 판정은 데몬이 물려준 `TMUX_PANE` 이나 tmux 전역 환경의 `CODEX_THREAD_ID` 에 속지 않는다 (#799)
+- peer: Apple Silicon Homebrew 처럼 node prefix 가 git 저장소인 기기에서 어댑터 승인이 항상 `unavailable` 로 막히던 문제. `.git` 확인을 설치본에서 `<prefix>/lib/node_modules` 까지로 좁힌다 (#799)
+- peer: 결과를 알 수 없는 전송(`partial`, `unknown`, 실행 뒤 예외)을 실패가 아니라 결과 불명으로 알려 중복 재전송을 막는다 (#799)
+
 ## [10.77.0] - 2026-10-16
 
 ### Added
