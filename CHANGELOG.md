@@ -2,13 +2,13 @@
 
 All notable changes to triflux will be documented in this file.
 
-## [Unreleased]
+## [10.77.0] - 2026-10-16
 
 ### Added
-- peer: Claude와 Codex의 로컬 세션에 비사용자 메시지를 보내는 `tfx-peer send` 어댑터와, `triflux setup`에서 명시 동의할 때만 적용하는 전용 전역 승인 옵션.
+- peer: Claude와 Codex의 로컬 세션에 비사용자 메시지를 보내는 `tfx-peer send` 어댑터와, `triflux setup`에서 명시 동의할 때만 적용하는 전용 전역 승인 옵션. 승인 범위는 래퍼 절대 경로의 `send` 하나이며 bridge·경로·exec 인자는 거부한다. 설치 조건을 만족하지 않는 기기(`unavailable`)에서는 수동 규칙 `~/.codex/rules/tfx-live.rules` 안내로 대신한다 (#796)
 
 ### Fixed
-- live: omx 처럼 CLI 를 분리 세션으로 띄우는 래퍼 아래의 Codex 에 `ask` 와 `start` 가 "not in foreground" 로 입력을 거부하던 문제. 입력 가능 판정을 전면 그룹(`+`)이 아니라 pane 하위에 살아 있고 정지·좀비가 아닌지로 바꾼다. `+` 는 같은 깊이에서 본체를 고를 때만 쓴다
+- live: omx 처럼 CLI 를 분리 세션으로 띄우는 래퍼 아래의 Codex 에 `ask` 와 `start` 가 "not in foreground" 로 입력을 거부하던 문제. 입력 가능 판정을 전면 그룹(`+`)이 아니라 pane 하위에 살아 있고 정지·좀비가 아닌지로 바꾼다. `+` 는 같은 깊이에서 본체를 고를 때만 쓴다 (#797)
 
 ## [10.76.1] - 2026-10-16
 
