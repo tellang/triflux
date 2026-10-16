@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- live: iTerm2 `--group` 패인의 프로필에 attach 명령이 남아, 사람이 Cmd+D 로 나눈 패인이 같은 tmux 세션에 다시 붙어 복사본이 뜨던 문제. 제목 스크립트가 패인 프로필의 custom command 를 끈다. 이미 뜬 attach 는 그대로이고 이후 분할은 보통 셸을 연다
+
 ## [10.76.0] - 2026-10-15
 
 ### Added

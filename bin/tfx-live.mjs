@@ -2644,6 +2644,10 @@ async def main(connection):
     update = iterm2.LocalWriteOnlyProfile()
     update.set_allow_title_setting(False)
     update.set_name(name)
+    # AppleScript 의 "with default profile command" 는 attach 명령을 세션 프로필에 남긴다.
+    # 그대로 두면 사람이 Cmd+D 로 나눈 pane 이 같은 tmux 세션에 다시 붙어 복사본이 뜬다.
+    # 이미 뜬 attach 프로세스는 영향받지 않고, 이후 분할만 보통 셸을 연다.
+    update.set_use_custom_command("No")
     await session.async_set_profile_properties(update)
     await session.tab.async_set_variable("user.tfxLiveGroup", group)
     await session.tab.async_set_title(r"\(user.tfxLiveGroup)")
