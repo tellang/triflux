@@ -36,11 +36,100 @@ it("peer CLI accepts only fixed send contract; shell text is data", () => {
     assert.throws(() => parsePeerArgs(args));
 });
 
+for (const cli of ["claude", "codex"]) {
+  it(`peer CLI delivers sender header and reply route to ${cli} without truncating 8000 chars`, async () => {
+    const body = ` ${"가".repeat(7998)} `;
+    let delivered;
+    const deliver = (payload) => {
+      delivered = payload;
+      return { status: "sent" };
+    };
+    const deps = {
+      env: { TFX_LIVE_FROM: "codex:10.16 구현" },
+      resolveClaudeRegistryTarget: () => ({ sessionId: "claude-target" }),
+      discover: async () => [
+        {
+          cli: "codex",
+          name: "target",
+          threadId: "wanted",
+          raw: { threadSource: "registry" },
+        },
+      ],
+      resolveCodexTmuxThread: async () => ({
+        threadId: "wanted",
+        threadSource: "registry",
+      }),
+      deliverClaude: deliver,
+      deliverCodex: deliver,
+    };
+    await peerMain(["send", "--to", `${cli}:target`, "--message", body], deps);
+    assert.match(
+      delivered.message,
+      /^\[tfx-peer from=codex:10\.16 구현 msg=[^\]\n]+\]\n/,
+    );
+    assert.equal(delivered.message.split("\n")[1], body);
+    if (cli === "codex") assert.equal(delivered.env, deps.env);
+    assert.equal(
+      delivered.message.split("\n")[2],
+      `회신: ${path.join(os.homedir(), ".claude", "scripts", "tfx-peer")} send --to 'codex:10.16 구현' --message '...'`,
+    );
+    await assert.rejects(
+      peerMain(
+        ["send", "--to", `${cli}:target`, "--message", `${body}x`],
+        deps,
+      ),
+      /max 8000/,
+    );
+  });
+}
+
+it("Claude-to-Claude peer CLI remains refused before delivery", async () => {
+  await assert.rejects(
+    peerMain(["send", "--to", "claude:target", "--message", "hello"], {
+      env: { CLAUDECODE: "1" },
+      discover: async () => [],
+    }),
+    /native SendMessage/,
+  );
+});
+
+for (const sessionId of [undefined, "exact-session"]) {
+  it(`unnamed Claude header falls back to ${sessionId || "unknown"}`, async () => {
+    let message;
+    await peerMain(["send", "--to", "codex:target", "--message", "hello"], {
+      env: { CLAUDECODE: "1", TMUX_PANE: "%7" },
+      discover: async () => [
+        { cli: "claude", name: null, paneId: "%7", sessionId },
+        {
+          cli: "codex",
+          name: "target",
+          threadId: "wanted",
+          raw: { threadSource: "registry" },
+        },
+      ],
+      resolveCodexTmuxThread: async () => ({
+        threadId: "wanted",
+        threadSource: "registry",
+      }),
+      deliverCodex: (payload) => {
+        message = payload.message;
+        return { status: "sent" };
+      },
+    });
+    assert.ok(
+      message.startsWith(
+        `[tfx-peer from=claude:${sessionId || "unknown"} msg=`,
+      ),
+    );
+  });
+}
+
 it("Codex adapter rejects inferred thread identities before delivery", async () => {
   let delivered = false;
   for (const threadSource of [undefined, "rollout-cwd", "process-args"]) {
     await assert.rejects(
       peerMain(["send", "--to", "codex:target", "--message", "hello"], {
+        env: { TFX_LIVE_FROM: "codex:fixture" },
         discover: async () => [
           {
             cli: "codex",
@@ -61,6 +150,7 @@ it("Codex adapter rejects inferred thread identities before delivery", async () 
   const result = await peerMain(
     ["send", "--to", "codex:target", "--message", "hello"],
     {
+      env: { TFX_LIVE_FROM: "codex:fixture" },
       discover: async () => [
         {
           cli: "codex",
@@ -84,6 +174,7 @@ it("current pane option changing to an unloaded thread blocks old loaded registr
   let deliveries = 0;
   await assert.rejects(
     peerMain(["send", "--to", "codex:target", "--message", "hello"], {
+      env: { TFX_LIVE_FROM: "codex:fixture" },
       discover: async () => [
         {
           cli: "codex",
@@ -115,7 +206,7 @@ it("registry resolver selects newest same-pane record and refuses timestamp ties
     { tmuxPane: "%7", sessionId: recent, updatedAt: 20 },
   ];
   const deps = {
-    runTmux: async () => ({ stdout: "none\t%7\t/tmp\t1\t123" }),
+    runTmux: async () => ({ stdout: "\t%7\t/tmp\t1\t123" }),
     readCodexSessionRecords: () => records,
   };
   assert.equal((await resolveCodexTmuxThread("pane", deps)).threadId, recent);
@@ -157,6 +248,7 @@ it("Codex unloaded or subagent target is rejected before injection", async () =>
     };
     await assert.rejects(
       sendCodexPeer({ client, threadId: "wanted", message: "hello" }),
+      /공유 데몬에 붙어 있지 않다.*tfx-live start --cli codex/,
     );
     assert.ok(!calls.includes("thread/inject_items"));
     assert.ok(!calls.includes("thread/resume"));
@@ -240,6 +332,13 @@ it("Claude receiver links exact session, process start, private key and socket",
         getProcStart: () => record.procStart,
       });
     assert.equal(lookup().peerToken, "secret");
+    assert.equal(
+      resolveClaudeRegistryTarget("exact", {
+        home,
+        getProcStart: () => record.procStart,
+      }).sessionId,
+      "exact",
+    );
     fs.chmodSync(path.join(dir, "123.json"), 0o666);
     assert.throws(lookup);
     fs.chmodSync(path.join(dir, "123.json"), 0o644);
@@ -433,4 +532,39 @@ it("one-shot Claude sender closes inbound native reply sockets instead of hangin
     receiver.close();
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+it("tmux-identified Claude sender cannot send to Claude and discovery runs once", async () => {
+  let discoveries = 0;
+  await assert.rejects(
+    peerMain(["send", "--to", "claude:target", "--message", "hello"], {
+      env: { TMUX_PANE: "%7" },
+      discover: async () => {
+        discoveries++;
+        return [
+          { cli: "claude", name: "sender", paneId: "%7", sessionId: "exact" },
+        ];
+      },
+    }),
+    /native SendMessage/,
+  );
+  assert.equal(discoveries, 1);
+});
+
+it("unknown sender gets no guessed reply command", async () => {
+  let delivered;
+  await peerMain(["send", "--to", "claude:target", "--message", "hello"], {
+    env: {},
+    discover: async () => [],
+    resolveSenderName: async () => null,
+    resolveClaudeRegistryTarget: () => ({ sessionId: "target" }),
+    deliverClaude: (payload) => {
+      delivered = payload.message;
+      return { status: "written" };
+    },
+  });
+  assert.equal(
+    delivered.split("\n").at(-1),
+    "회신: 경로 불명(보낸 세션을 판별하지 못함)",
+  );
 });

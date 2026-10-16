@@ -144,6 +144,19 @@ it("preserves existing allow/deny and installs exact wrapper/rule", () => {
     cleanup(x);
   }
 });
+it("a git repository at the prefix does not block peer approval", () => {
+  const x = fixture();
+  try {
+    fs.mkdirSync(path.join(x.prefix, ".git"));
+    assert.equal(
+      installPeerPermission({ ...x, consent: true }).status,
+      "approved",
+    );
+    assert.equal(inspectPeerPermission(x).status, "approved");
+  } finally {
+    cleanup(x);
+  }
+});
 it("trusted owner-group-writable package, Node and tmux paths are eligible", () => {
   const x = fixture();
   try {
@@ -449,6 +462,7 @@ it("approved wrapper or parent becoming writable is no longer approved", () => {
 it("dev checkout and writable package/runtime tree cannot be globally approved", () => {
   for (const variant of [
     "git",
+    "node-modules-git",
     "bin-mode",
     "import-mode",
     "prefix-mode",
@@ -459,6 +473,8 @@ it("dev checkout and writable package/runtime tree cannot be globally approved",
     const x = fixture();
     try {
       if (variant === "git") fs.mkdirSync(path.join(x.packageRoot, ".git"));
+      if (variant === "node-modules-git")
+        fs.mkdirSync(path.join(x.prefix, "lib", "node_modules", ".git"));
       if (variant === "bin-mode")
         fs.chmodSync(path.join(x.packageRoot, "bin"), 0o777);
       if (variant === "import-mode") {

@@ -19,17 +19,21 @@ description: >
 | --- | --- | --- |
 | 세션 띄우기, 보내기, 기다리기, compact, 닫기 | `tfx-live` 명령 (공통) | `tfx-live` 명령 (공통) |
 | 같은 세션 안 서브에이전트 | Agent 도구 (`model`, `effort`, `run_in_background`) | `spawn_agent`, 추가 지시는 `followup_task`. `close_agent`가 있으면 끝나면 반드시 닫는다 |
-| Claude 세션에 보내기 | 같은 기기 Claude 세션(팀원 포함)은 `SendMessage`, 이름은 `tfx-live list-sessions --cli claude`의 `name`. 이름을 못 찾거나 원격이면 `tfx-live ask --cli claude` 또는 `tfx-live send --to claude:<이름> --message <본문>`. `tfx-live start` 직후의 첫 지시도 결과의 `sendMessageTo`로 `SendMessage` | `tfx-live send --to claude:<이름> --message <본문> --no-wait` 또는 `tfx-live ask --cli claude --transport uds --short <8hex> --no-wait`(백그라운드 세션), tmux 세션은 `--session <이름> --no-wait` |
-| Codex 세션에 보내기 | `tfx-live send --to codex:<이름> --message <본문> --no-wait` 또는 `tfx-live ask --cli codex` (기본 codex queue) | `tfx-live send --to codex:<이름> --message <본문> --no-wait` 또는 `tfx-live ask --cli codex` (기본 codex queue) |
+| Claude 세션에 보내기 | 로컬 Claude끼리는(팀원 포함) `SendMessage(to: "<이름>")`. 이름은 `tfx-live list-sessions --cli claude`의 `name`, 첫 지시는 `start` 결과의 `sendMessageTo`. 이름을 못 찾으면 전송 실패로 두고 다시 찾는다. 원격은 `tfx-live ask --cli claude` | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'claude:<정확한 이름>' --message '<본문>'`. 원격은 `tfx-live ask --cli claude` |
+| Codex 세션에 보내기 | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'`. 원격은 `tfx-live ask --cli codex` | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'`. 원격은 `tfx-live ask --cli codex` |
 | agy 세션에 보내기 | `tfx-live send --to agy:<이름> --message <본문> --no-wait` 또는 `tfx-live ask --cli agy`. 같은 기기의 agy 끼리는 `~/.local/bin/agy.patch.json`의 `sha256`이 실제 `agy` 바이너리 해시와 같고 `patches`에 `peer-wake`가 있을 때만 `send_message`(대화 ID)를 쓰고, 아니면 `tfx-live ask`를 쓴다(쉬는 세션이 깨지 않는 공개 이슈 #1022 때문). `tfx-live send`의 agy 대상 전송은 tmux 경로를 유지한다 | `tfx-live send --to agy:<이름> --message <본문> --no-wait` 또는 `tfx-live ask --cli agy` |
 | 사용자에게 묻기 | `AskUserQuestion` | 답변에서 짧은 선택지로 묻는다 |
 | 배경 대기 | `run_in_background`와 완료 알림 | 백그라운드 셸 또는 `tfx-live wait`(아래 5절의 지원 범위 안에서) |
 
-- Claude 는 SendMessage 의 `to` 에 `codex:이름`, `agy:이름` 을 쓰면 mods 가 `tfx-live send` 로 전달한다.
+- 로컬 Claude·Codex 대상은 어댑터가 설치되어 있다고 전제하고 native 피어를 먼저 쓴다. native 실패는 그대로 반환하며 tmux 입력이나 미설치 폴백으로 넘기지 않는다. `tfx-live send`는 agy 대상에만 쓴다.
+- `<홈 절대경로>/.claude/scripts/tfx-peer`는 setup이 승인한 실제 절대경로로 바꿔 실행한다. 본문은 8000자까지이며 긴 본문은 파일 경로로 보낸다.
+- 로컬 `tfx-live start --cli codex`와 resume은 공유 app-server 데몬에 붙고, 소켓이 없으면 `codex app-server daemon start`를 안내하며 실패한다. 손으로 띄운 Codex는 thread 출처를 증명할 수 없으므로 `tfx-live start --cli codex`(또는 `--resume`)로 다시 띄운다.
+- unknown 발신은 `회신: 경로 불명(보낸 세션을 판별하지 못함)`을 안내한다.
+- Claude의 `SendMessage`에서 `codex:` 대상은 mods가 native 피어 경로로, `agy:`·`antigravity:` 대상은 `tfx-live send`로 전달한다.
 - Codex 리드는 `spawn_agent`를 29회 부르고 `close_agent`를 한 번도 부르지 않은 사고가 있었다. 서브에이전트는 결과를 받은 즉시 닫는다.
 - Codex 0.162.1 에서 모델에 노출된 협업 도구는 `spawn_agent`, `wait_agent`, `send_message`, `followup_task`, `list_agents`, `interrupt_agent`이고 `close_agent`와 `send_input`은 없었다. `send_message`는 하위 에이전트의 턴을 시작하지 않고 다음 `followup_task` 턴에 함께 전달된다. 대상은 자기가 띄운 하위 에이전트(`/root/...`)다.
-- Codex 리드가 다른 Codex 세션에 보낼 때도 셸에서 `tfx-live ask --cli codex`를 실행한다. workspace-write 샌드박스에서 보내고 받는 것을 확인했다.
-- Codex 리드는 보내기 전용으로 `--timeout 5`를 남발하고 `tmux capture-pane`으로 완료를 확인한 사고가 있었다. 보낼 때는 `--no-wait`, 완료는 5절의 확인 수단으로만 확인한다.
+- Codex 리드가 다른 로컬 Codex 세션에 보낼 때도 셸에서 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'`을 실행한다.
+- native 피어의 `written`·`sent`는 모델 완료가 아니다. 피어의 결과 보고를 확인한다. `ask`를 보낼 때는 `--no-wait`, 완료는 5절의 확인 수단을 쓴다.
 
 ## 1. 역할과 수명
 
@@ -89,18 +93,18 @@ tmux ls         # 없으면
 | 일회성 판단, 리뷰 | 서브에이전트. 리드 CLI 별 도구는 위 표, model과 effort 를 지정하고 백그라운드로 |
 | 일회성 Codex 작업 | `tfx-route.sh` 역할 호출 |
 | 기존 Claude 세션에 요청 | 위 표의 "Claude 세션에 보내기" |
-| 기존 Codex 세션에 요청 | `tfx-live ask --cli codex`(기본 codex queue) |
+| 기존 Codex 세션에 요청 | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'`, 원격은 `tfx-live ask --cli codex` |
 | 무거운 전체 테스트 | 원격 격리 호스트. `tfx-remote probe`를 먼저 돌린다 |
 
 ```bash
 tfx-live start --cli claude --session cl-doc --name "10.8 문서 정리" --model opus --effort high
 tfx-live start --cli codex --session cx-impl --name "10.8 구현"
-tfx-live ask --cli codex --session cx-impl --prompt "<지시서 경로>를 읽고 시작해줘" --no-wait
+"$HOME/.claude/scripts/tfx-peer" send --to 'codex:10.8 구현' --message '<지시서 경로>를 읽고 시작해줘'
 ```
 
 - Codex 에 슬래시 명령(`/compact`, `/rename`, `/new`)을 보낼 때만 tmux 직접 입력을 쓴다. queue 로 보내면 일반 텍스트가 된다.
-- 원격 호스트나 thread 를 못 찾는 경우의 tmux 폴백은 결과의 `fallbackReason`으로 확인한다.
-- 같은 cwd 에 Codex TUI 가 여럿이면 `--thread UUID`를 명시한다.
+- 원격 `ask`의 tmux 폴백은 결과의 `fallbackReason`으로 확인한다. 로컬 native 피어는 thread를 못 찾으면 실패한다.
+- 같은 cwd에 Codex TUI가 여럿이면 피어의 정확한 이름을 지정한다. `ask`에는 `--thread UUID`를 명시한다.
 - 잘못 보낸 queue 요청은 TUI 가 가져가기 전에만 `tfx-live queue --cli codex --session <이름> --request-id <id> --delete all`로 지운다. 결과의 `missing`은 이미 배달된 것이다.
 
 ### 실행 위치 결정
@@ -179,7 +183,7 @@ psmux kill-session -t tfx-1015-fulltest
 
 ## 5. 결과 회수
 
-결과는 파일(`.result.md`)과 짧은 보고로 받는다.
+결과는 파일(`.result.md`)과 짧은 보고로 받는다. 로컬 피어 보고도 전송 경로 표를 따른다. 아래 `wait`와 `requestId`는 `tfx-live ask`로 보낸 요청에만 적용한다.
 
 - 화면 폴링(`tmux capture-pane` 반복)은 하지 않는다.
 - 대기하는 동안 리드는 다른 레인을 진행한다.

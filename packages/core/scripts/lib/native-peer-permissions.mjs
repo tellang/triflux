@@ -112,12 +112,12 @@ function trustedPackageTree(packageRoot, nodePath, tmuxPath) {
     !existing(resolvedNode)?.isFile()
   )
     return false;
+  // Homebrew prefix는 git 저장소일 수 있으므로 node_modules까지만 검사한다.
   let ancestor = packageRoot;
   while (true) {
     if (existing(path.join(ancestor, ".git"))) return false;
-    const parent = path.dirname(ancestor);
-    if (parent === ancestor) break;
-    ancestor = parent;
+    if (ancestor === path.dirname(packageRoot)) break;
+    ancestor = path.dirname(ancestor);
   }
   const stack = [packageRoot];
   while (stack.length) {

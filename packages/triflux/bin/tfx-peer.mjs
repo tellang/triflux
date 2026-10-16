@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
@@ -9,8 +10,10 @@ import {
 } from "../hub/team/native-peer.mjs";
 import {
   discoverPeerTargets,
+  formatPeerReply,
   matchPeerCandidates,
   resolveCodexTmuxThread,
+  resolvePeerSender,
 } from "./tfx-live.mjs";
 
 export async function main(args = process.argv.slice(2), deps = {}) {
@@ -18,20 +21,29 @@ export async function main(args = process.argv.slice(2), deps = {}) {
     throw new Error("Native peer adapter is unsupported on Windows");
   const { to, message } = parsePeerArgs(args);
   const [cli, name] = to.split(":");
-  if (cli === "claude" && (deps.env || process.env).CLAUDECODE === "1")
+  const env = deps.env || process.env;
+  const candidates = await (deps.discover || discoverPeerTargets)({ deps });
+  const sender = await resolvePeerSender({
+    env,
+    allCandidates: candidates,
+    deps,
+  });
+  if (cli === "claude" && (env.CLAUDECODE === "1" || sender.cli === "claude"))
     throw new Error("Claude-to-Claude uses native SendMessage, not tfx-peer");
+  const formattedMessage = [
+    `[tfx-peer from=${sender.cli}:${String(sender.name || sender.sessionId || "unknown").replace(/[\r\n\u2028\u2029]+/g, " ")} msg=${randomUUID()}]`,
+    message,
+    formatPeerReply(sender, cli),
+  ].join("\n");
   if (cli === "claude") {
     const target = (
       deps.resolveClaudeRegistryTarget || resolveClaudeRegistryTarget
     )(name);
     return (deps.deliverClaude || deliverClaude)({
       sessionId: target.sessionId,
-      message,
+      message: formattedMessage,
     });
   }
-  const candidates = await (deps.discover || discoverPeerTargets)({
-    cliFilter: cli,
-  });
   const matched = matchPeerCandidates(
     candidates.filter((x) => x.cli === cli),
     name,
@@ -43,7 +55,9 @@ export async function main(args = process.argv.slice(2), deps = {}) {
   const target = matched[0];
   if (!target.threadId) throw new Error("Codex thread UUID unavailable");
   if (!["tmux-option", "registry"].includes(target.raw?.threadSource))
-    throw new Error("Codex target lacks exact thread provenance");
+    throw new Error(
+      "Codex target lacks exact thread provenance. tfx-live start --cli codex (또는 --resume)로 다시 띄워라",
+    );
   const current = await (
     deps.resolveCodexTmuxThread ||
     ((pane) => resolveCodexTmuxThread(pane, { requireRegistryAgreement: true }))
@@ -55,7 +69,8 @@ export async function main(args = process.argv.slice(2), deps = {}) {
     throw new Error("Codex pane thread changed; refusing stale target");
   return (deps.deliverCodex || deliverCodex)({
     threadId: target.threadId,
-    message,
+    message: formattedMessage,
+    env,
   });
 }
 if (
