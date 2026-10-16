@@ -1,9 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
+import {
+  assertWindowsAcl,
+  readWindowsAcls,
+  readWindowsPeerState,
+} from "../../scripts/lib/native-peer-windows.mjs";
 import { JsonRpcWsUdsClient } from "../workers/lib/jsonrpc-ws-uds.mjs";
 
 const WAKE =
@@ -103,9 +108,23 @@ export async function sendCodexPeer({ client, threadId, message }) {
 export function assertPrivateFile(
   file,
   kind,
-  { socket = false, privateMode = true } = {},
+  {
+    socket = false,
+    privateMode = true,
+    platform = process.platform,
+    fs: io = fs,
+    acls,
+  } = {},
 ) {
-  const meta = fs.lstatSync(file);
+  const meta = io.lstatSync(file);
+  if (platform === "win32") {
+    if (meta.isSymbolicLink() || !meta.isFile())
+      throw new Error(`Unsafe ${kind}`);
+    assertWindowsAcl((acls || readWindowsAcls([file])).get(file), kind, {
+      privateMode,
+    });
+    return meta;
+  }
   if (
     meta.isSymbolicLink() ||
     meta.uid !== process.getuid() ||
@@ -133,8 +152,11 @@ export async function deliverCodex({
   message,
   home = os.homedir(),
   env = process.env,
+  platform = process.platform,
   clientFactory = (socketPath) => new JsonRpcWsUdsClient({ socketPath }),
 }) {
+  if (platform === "win32")
+    throw new Error("Windows 에서는 Codex 대상을 아직 지원하지 않는다");
   const client = clientFactory(resolveCodexSocket(home, env));
   try {
     await client.connect();
@@ -150,6 +172,8 @@ export async function deliverCodex({
 }
 
 function actualProcStart(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0)
+    throw new Error("Invalid process id");
   return execFileSync("/bin/ps", ["-p", String(pid), "-o", "lstart="], {
     encoding: "utf8",
     timeout: 2000,
@@ -159,26 +183,79 @@ function actualProcStart(pid) {
     .replace(/\s+/g, " ");
 }
 
+function readClaudeRegistry({ home, platform, fs: io, readWindowsState }) {
+  const paths = platform === "win32" ? path.win32 : path;
+  const dir = paths.join(home, ".claude", "sessions");
+  const names = io.readdirSync(dir);
+  let acls, procStarts;
+  if (platform === "win32") {
+    const parents = [home, paths.join(home, ".claude"), dir];
+    ({ acls, procStarts } = readWindowsState(
+      [
+        ...parents,
+        ...names
+          .filter(
+            (name) => /^\d+\.json$/.test(name) || /^\d+\..*\.key$/.test(name),
+          )
+          .map((name) => paths.join(dir, name)),
+      ],
+      {
+        pids: names
+          .filter((name) => /^\d+\.json$/.test(name))
+          .map((name) => Number(name.slice(0, -5)))
+          .filter((pid) => Number.isSafeInteger(pid) && pid > 0),
+      },
+    ));
+    for (const parent of parents) {
+      const meta = io.lstatSync(parent);
+      if (!meta.isDirectory() || meta.isSymbolicLink())
+        throw new Error("Unsafe Claude sessions directory");
+      assertWindowsAcl(acls.get(parent), "Claude sessions directory", {
+        privateMode: false,
+      });
+    }
+  }
+  const records = [];
+  for (const name of names.filter((name) => /^\d+\.json$/.test(name))) {
+    const file = paths.join(dir, name);
+    try {
+      assertPrivateFile(file, "Claude session", {
+        privateMode: false,
+        platform,
+        fs: io,
+        acls,
+      });
+      const record = JSON.parse(io.readFileSync(file, "utf8"));
+      if (
+        `${record.pid}.json` === name &&
+        typeof record.sessionId === "string" &&
+        record.sessionId
+      )
+        records.push(record);
+    } catch {}
+  }
+  return { dir, names, records, acls, procStarts };
+}
+
 export function resolveClaudeReceiver({
   sessionId,
   home = os.homedir(),
-  getProcStart = actualProcStart,
+  platform = process.platform,
+  hostname = os.hostname(),
+  getProcStart,
+  fs: io = fs,
+  readWindowsState = readWindowsPeerState,
+  registry = readClaudeRegistry({
+    home,
+    platform,
+    fs: io,
+    readWindowsState,
+  }),
 }) {
-  const dir = path.join(home, ".claude", "sessions");
-  const records = fs.readdirSync(dir).filter((x) => /^\d+\.json$/.test(x));
-  const matches = [];
-  for (const name of records) {
-    const file = path.join(dir, name);
-    let record;
-    try {
-      assertPrivateFile(file, "Claude session", { privateMode: false });
-      record = JSON.parse(fs.readFileSync(file, "utf8"));
-    } catch {
-      continue;
-    }
-    if (record.sessionId === sessionId && `${record.pid}.json` === name)
-      matches.push(record);
-  }
+  const { dir, names, records, acls, procStarts } = registry;
+  getProcStart ??= (pid) =>
+    platform === "win32" ? procStarts.get(pid) : actualProcStart(pid);
+  const matches = records.filter((record) => record.sessionId === sessionId);
   if (matches.length !== 1)
     throw new Error("Claude session identity missing or ambiguous");
   const record = matches[0];
@@ -187,30 +264,53 @@ export function resolveClaudeReceiver({
       "Claude session is a parked parent; use its live continuation name",
     );
   const pid = Number(record.pid);
+  const windows = platform === "win32";
+  const normalizeStart = (start) =>
+    typeof start === "string"
+      ? windows
+        ? start
+        : start.replace(/\s+/g, " ")
+      : null;
+  const domainMatches = (domain) =>
+    windows
+      ? typeof domain === "string" &&
+        domain.toLowerCase() === `win32:${hostname}`.toLowerCase()
+      : domain === platform;
   if (
     !Number.isSafeInteger(pid) ||
     pid <= 0 ||
-    record.pidDomain !== process.platform ||
-    record.procStart?.replace(/\s+/g, " ") !== getProcStart(pid)
+    !domainMatches(record.pidDomain) ||
+    (windows && !/^\d+$/.test(record.procStart)) ||
+    normalizeStart(record.procStart) !== getProcStart(pid)
   )
     throw new Error("Claude process identity stale");
-  const keyFiles = fs
-    .readdirSync(dir)
-    .filter((x) => x.startsWith(`${pid}.`) && x.endsWith(".key"));
+  const keyFiles = names.filter((name) =>
+    windows
+      ? new RegExp(`^${pid}\\.[0-9a-f]{64}\\.key$`).test(name)
+      : name.startsWith(`${pid}.`) && name.endsWith(".key"),
+  );
   if (keyFiles.length !== 1)
     throw new Error("Claude peer key missing or ambiguous");
-  const keyFile = path.join(dir, keyFiles[0]);
-  assertPrivateFile(keyFile, "Claude peer key");
-  const key = JSON.parse(fs.readFileSync(keyFile, "utf8"));
+  const keyFile = (windows ? path.win32 : path).join(dir, keyFiles[0]);
+  assertPrivateFile(keyFile, "Claude peer key", { platform, fs: io, acls });
+  const key = JSON.parse(io.readFileSync(keyFile, "utf8"));
   if (
-    key.procStart?.replace(/\s+/g, " ") !==
-      record.procStart?.replace(/\s+/g, " ") ||
-    key.pidDomain !== record.pidDomain ||
+    normalizeStart(windows ? key.procStartFt : key.procStart) !==
+      normalizeStart(record.procStart) ||
+    !domainMatches(key.pidDomain) ||
     typeof key.peerToken !== "string" ||
     !key.peerToken
   )
     throw new Error("Claude peer key identity mismatch");
   const socketPath = record.messagingSocketPath;
+  if (windows) {
+    if (
+      typeof socketPath !== "string" ||
+      !/^\\\\\.\\pipe\\LOCAL\\cc-msg-[0-9a-f]{32}$/.test(socketPath)
+    )
+      throw new Error("Invalid Claude peer socket");
+    return { socketPath, peerToken: key.peerToken };
+  }
   if (
     typeof socketPath !== "string" ||
     !path.isAbsolute(socketPath) ||
@@ -223,19 +323,22 @@ export function resolveClaudeReceiver({
 
 export function resolveClaudeRegistryTarget(
   query,
-  { home = os.homedir(), getProcStart = actualProcStart } = {},
+  {
+    home = os.homedir(),
+    platform = process.platform,
+    hostname = os.hostname(),
+    getProcStart,
+    fs: io = fs,
+    readWindowsState = readWindowsPeerState,
+  } = {},
 ) {
-  const dir = path.join(home, ".claude", "sessions");
-  const records = [];
-  for (const name of fs.readdirSync(dir).filter((x) => /^\d+\.json$/.test(x))) {
-    const file = path.join(dir, name);
-    try {
-      assertPrivateFile(file, "Claude session", { privateMode: false });
-      const record = JSON.parse(fs.readFileSync(file, "utf8"));
-      if (`${record.pid}.json` === name && record.sessionId)
-        records.push(record);
-    } catch {}
-  }
+  const registry = readClaudeRegistry({
+    home,
+    platform,
+    fs: io,
+    readWindowsState,
+  });
+  const { records } = registry;
   const exactId = records.filter(
     (x) => x.sessionId.toLowerCase() === query.toLowerCase(),
   );
@@ -254,35 +357,51 @@ export function resolveClaudeRegistryTarget(
     (x) =>
       !x.parkedJobId && (!parked.length || x.jobId === parked[0].parkedJobId),
   );
-  const live = eligible.filter((x) => {
+  const live = [];
+  for (const x of eligible) {
     try {
-      resolveClaudeReceiver({ sessionId: x.sessionId, home, getProcStart });
-      return true;
-    } catch {
-      return false;
-    }
-  });
+      const receiver = resolveClaudeReceiver({
+        sessionId: x.sessionId,
+        home,
+        platform,
+        hostname,
+        getProcStart,
+        fs: io,
+        registry,
+      });
+      live.push({ ...x, receiver });
+    } catch {}
+  }
   if (live.length !== 1)
     throw new Error(
       live.length
         ? "Ambiguous live Claude targets"
         : "No live Claude continuation; parked parent is not a delivery target",
     );
-  return { sessionId: live[0].sessionId, name: live[0].name };
+  return {
+    sessionId: live[0].sessionId,
+    name: live[0].name,
+    receiver: live[0].receiver,
+  };
 }
 
 export async function deliverClaude({
   sessionId,
   message,
   home = os.homedir(),
-  receiver = resolveClaudeReceiver({ sessionId, home }),
+  platform = process.platform,
+  receiver = resolveClaudeReceiver({ sessionId, home, platform }),
+  net: transport = net,
   socketDir = path.dirname(receiver.socketPath),
   // 150ms 유지 후 리드의 peer 수신·응답을 확인해 8초 고정 대기를 줄였다.
   holdMs = 150,
 }) {
-  const own = path.join(socketDir, `${process.pid}.sock`);
+  const own =
+    platform === "win32"
+      ? `\\\\.\\pipe\\LOCAL\\cc-msg-${randomBytes(16).toString("hex")}`
+      : path.join(socketDir, `${process.pid}.sock`);
   // 이 일회성 송신자는 회신을 라우팅하지 않는다. 열린 reply 소켓을 즉시 닫는다.
-  const server = net.createServer((connection) => connection.destroy());
+  const server = transport.createServer((connection) => connection.destroy());
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(own, () => {
@@ -290,8 +409,8 @@ export async function deliverClaude({
       resolve();
     });
   });
-  const inode = fs.lstatSync(own).ino;
-  fs.chmodSync(own, 0o600);
+  const inode = platform === "win32" ? null : fs.lstatSync(own).ino;
+  if (platform !== "win32") fs.chmodSync(own, 0o600);
   const from = `uds:${own}`;
   const safe = message.replaceAll("&", "&amp;").replaceAll("<", "&lt;");
   const frame = {
@@ -307,7 +426,7 @@ export async function deliverClaude({
   try {
     try {
       await new Promise((resolve, reject) => {
-        const conn = net.connect(receiver.socketPath);
+        const conn = transport.connect(receiver.socketPath);
         conn.setTimeout(5000, () =>
           conn.destroy(new Error("Claude peer connect timed out")),
         );
@@ -338,7 +457,8 @@ export async function deliverClaude({
   } finally {
     server.close();
     try {
-      if (fs.lstatSync(own).ino === inode) fs.unlinkSync(own);
+      if (platform !== "win32" && fs.lstatSync(own).ino === inode)
+        fs.unlinkSync(own);
     } catch {}
   }
 }

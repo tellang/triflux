@@ -355,23 +355,6 @@ it("unmanaged rule and modified wrapper fail closed even with fresh consent", ()
     }
   }
 });
-it("Windows setup skips peer approval without writing", async () => {
-  const x = fixture();
-  try {
-    const r = await offerPeerPermission({
-      ...x,
-      platform: "win32",
-      interactive: true,
-      ask: async () => {
-        throw Error("must not ask");
-      },
-    });
-    assert.equal(r.status, "unsupported");
-    assert.deepEqual(fs.readdirSync(x.home), []);
-  } finally {
-    cleanup(x);
-  }
-});
 it("concurrent Claude settings deny edit is not overwritten", () => {
   const x = fixture();
   try {
@@ -462,6 +445,7 @@ it("approved wrapper or parent becoming writable is no longer approved", () => {
 it("dev checkout and writable package/runtime tree cannot be globally approved", () => {
   for (const variant of [
     "git",
+    "nested-git-case",
     "node-modules-git",
     "bin-mode",
     "import-mode",
@@ -473,6 +457,8 @@ it("dev checkout and writable package/runtime tree cannot be globally approved",
     const x = fixture();
     try {
       if (variant === "git") fs.mkdirSync(path.join(x.packageRoot, ".git"));
+      if (variant === "nested-git-case")
+        fs.mkdirSync(path.join(x.packageRoot, "bin", ".GIT"));
       if (variant === "node-modules-git")
         fs.mkdirSync(path.join(x.prefix, "lib", "node_modules", ".git"));
       if (variant === "bin-mode")
@@ -515,5 +501,39 @@ it("dev checkout and writable package/runtime tree cannot be globally approved",
     } finally {
       cleanup(x);
     }
+  }
+});
+
+it("Windows approval is unsupported without prompts or filesystem changes", async () => {
+  const x = fixture();
+  try {
+    const options = { ...x, platform: "win32" };
+    assert.deepEqual(inspectPeerPermission(options), { status: "unsupported" });
+    assert.deepEqual(inspectPeerPermission({ platform: "win32" }), {
+      status: "unsupported",
+    });
+    assert.equal(
+      installPeerPermission({ ...options, consent: true }).status,
+      "unsupported",
+    );
+    for (const fromUpdate of [false, true]) {
+      const notices = [];
+      assert.deepEqual(
+        await offerPeerPermission({
+          ...options,
+          fromUpdate,
+          interactive: true,
+          ask: () => assert.fail("Windows must not request approval"),
+          notice: (message) => notices.push(message),
+        }),
+        { status: "unsupported", changed: false },
+      );
+      assert.deepEqual(notices, [
+        "Windows 는 자동 승인 없이 tfx-peer 를 직접 실행한다",
+      ]);
+    }
+    assert.deepEqual(fs.readdirSync(x.home), []);
+  } finally {
+    cleanup(x);
   }
 });

@@ -626,3 +626,18 @@ it("a Claude pane without name or sessionId cannot advertise its tmux name as a 
     "회신: 경로 불명(보낸 세션을 판별하지 못함)",
   );
 });
+
+it("Windows Claude reply uses node in PowerShell and quotes the exact target", () => {
+  assert.equal(
+    formatPeerReply({ cli: "claude", name: "O'Brien & 10%" }, "agy", {
+      platform: "win32",
+    }),
+    String.raw`회신: node "$env:APPDATA\npm\node_modules\triflux\bin\tfx-peer.mjs" send --to 'claude:O''Brien & 10%' --message '...'`,
+  );
+  assert.equal(
+    formatPeerReply({ cli: "codex", name: "lead" }, "claude", {
+      platform: "win32",
+    }),
+    "회신: Windows 에서는 Codex 대상을 아직 지원하지 않는다",
+  );
+});

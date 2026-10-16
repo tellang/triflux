@@ -26,7 +26,8 @@ description: >
 | 배경 대기 | `run_in_background`와 완료 알림 | 백그라운드 셸 또는 `tfx-live wait`(아래 5절의 지원 범위 안에서) |
 
 - 로컬 Claude·Codex 대상은 어댑터가 설치되어 있다고 전제하고 native 피어를 먼저 쓴다. native 실패는 그대로 반환하며 tmux 입력이나 미설치 폴백으로 넘기지 않는다. `tfx-live send`는 agy 대상에만 쓴다.
-- `<홈 절대경로>/.claude/scripts/tfx-peer`는 setup이 승인한 실제 절대경로로 바꿔 실행한다. 본문은 8000자까지이며 긴 본문은 파일 경로로 보낸다.
+- `<홈 절대경로>/.claude/scripts/tfx-peer`는 setup이 승인한 실제 절대경로로 바꿔 실행한다. 본문은 8000자까지이며 긴 본문은 파일 경로로 보낸다. Windows는 Claude 대상 전달만 지원하고 자동 승인용 래퍼나 Codex 규칙을 설치하지 않는다. PowerShell에서 `node "$env:APPDATA\npm\node_modules\triflux\bin\tfx-peer.mjs" send --to 'claude:<이름>' --message '<본문>'`을 직접 실행한다. Codex 대상은 미지원이다.
+- npm의 `tfx-peer.cmd` shim은 cmd.exe가 본문을 다시 해석해 `%`, `&`, 줄바꿈을 깨뜨리므로 쓰지 않는다.
 - 로컬 `tfx-live start --cli codex`와 resume은 공유 app-server 데몬에 붙고, 소켓이 없으면 `codex app-server daemon start`를 안내하며 실패한다. 손으로 띄운 Codex는 thread 출처를 증명할 수 없으므로 `tfx-live start --cli codex`(또는 `--resume`)로 다시 띄운다.
 - unknown 발신은 `회신: 경로 불명(보낸 세션을 판별하지 못함)`을 안내한다.
 - Claude의 `SendMessage`에서 `codex:` 대상은 mods가 native 피어 경로로, `agy:`·`antigravity:` 대상은 `tfx-live send`로 전달한다.
