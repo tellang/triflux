@@ -47,6 +47,7 @@ async function fixture(cli, options = {}) {
       await appendFile(file, `${JSON.stringify(tokenCount(100))}\n`);
   };
   const deps = {
+    paneCliProcess: async () => ({ pid: 101, foreground: true }),
     claudeTmuxTranscript: async () => file,
     resolveCodexTmuxThread: async () => ({ threadId }),
     findCodexRollout: async () => file,

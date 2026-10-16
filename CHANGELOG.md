@@ -5,6 +5,8 @@ All notable changes to triflux will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- live: Codex 가 시작하면서 자기 갱신 뒤 종료한 pane 을 준비됐다고 판정해 `/rename` 과 지시서 프롬프트를 남은 셸에 타이핑하던 문제. `start` 의 이름 적용과 `ask`(tmux) 의 붙여넣기 직전에 pane 안의 CLI 프로세스가 전면에 있는지 확인하고, 없으면 입력하지 않고 실패를 돌려준다. "Please restart Codex" 뒤에는 한 번 다시 띄운다(`restartedAfterUpdate`). 준비 판정은 줄 머리의 `›` 글리프만 입력창으로 본다
+- live: Codex 의 `/rename`, `/status` 는 바쁠 때도 즉시 실행되므로 idle 을 기다리지 않고 보낸다. `/compact`, `/new` 는 Codex 가 바쁠 때 거부하므로 그대로 기다린다
 - live: iTerm2 `--group` 패인의 프로필에 attach 명령이 남아, 사람이 Cmd+D 로 나눈 패인이 같은 tmux 세션에 다시 붙어 복사본이 뜨던 문제. 제목 스크립트가 패인 프로필의 custom command 를 끈다. 이미 뜬 attach 는 그대로이고 이후 분할은 보통 셸을 연다
 
 ## [10.76.0] - 2026-10-15
