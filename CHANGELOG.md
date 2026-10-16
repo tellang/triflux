@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- live: omx 처럼 CLI 를 분리 세션으로 띄우는 래퍼 아래의 Codex 에 `ask` 와 `start` 가 "not in foreground" 로 입력을 거부하던 문제. 입력 가능 판정을 전면 그룹(`+`)이 아니라 pane 하위에 살아 있고 정지·좀비가 아닌지로 바꾼다. `+` 는 같은 깊이에서 본체를 고를 때만 쓴다
+
 ## [10.76.1] - 2026-10-16
 
 ### Fixed

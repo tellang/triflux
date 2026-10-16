@@ -349,7 +349,7 @@ async function paneCliProcess(session, cli, panePid) {
   }
   const { stdout } = await execFileAsync(
     "ps",
-    ["-eo", "pid=,ppid=,stat=,args="],
+    ["-eo", "pid=,ppid=,stat=,tty=,args="],
     {
       timeout: 5000,
       maxBuffer: MAX_BUFFER,
@@ -357,7 +357,7 @@ async function paneCliProcess(session, cli, panePid) {
   );
   const rows = stdout
     .split(/\r?\n/)
-    .map((line) => line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/))
+    .map((line) => line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.*)$/))
     .filter(Boolean);
   const tree = new Map([[String(panePid), 0]]);
   let size;
@@ -366,9 +366,30 @@ async function paneCliProcess(session, cli, panePid) {
     for (const [, pid, ppid] of rows)
       if (!tree.has(pid) && tree.has(ppid)) tree.set(pid, tree.get(ppid) + 1);
   } while (tree.size !== size);
+  const byPid = new Map(rows.map((row) => [row[1], row]));
+  const paneTty = byPid.get(String(panePid))?.[4];
+  // omx 처럼 CLI 를 분리 세션으로 띄우는 래퍼는 CLI 에 전면 그룹(+)이 없다. 그 CLI 의 조상 중
+  // pane 의 TTY 에서 전면(+)인 첫 프로세스가 셸이 아닐 때만 그 래퍼가 입력을 중계한다고 본다.
+  // 전면이 셸이면 입력이 셸로 가고, 다른 PTY 의 전면은 pane 입력과 무관하므로 거부한다.
+  const isShell = (command) =>
+    /^(?:\S*\/)?-?(?:zsh|bash|sh|fish|dash|ksh|csh|tcsh|login|nu|xonsh)(?:\s|$)/.test(
+      command,
+    );
+  const relayedByWrapper = (pid) => {
+    for (
+      let cur = byPid.get(pid)?.[2];
+      cur && tree.has(cur);
+      cur = byPid.get(cur)?.[2]
+    ) {
+      const [, , , stat, tty, command] = byPid.get(cur) ?? [];
+      if (!stat?.includes("+")) continue;
+      return tty === paneTty && !isShell(command);
+    }
+    return false;
+  };
   let selected = null;
   let selectedDepth = Infinity;
-  for (const [, pid, , stat, command] of rows) {
+  for (const [, pid, , stat, tty, command] of rows) {
     const depth = tree.get(pid);
     if (depth === undefined) continue;
     if (
@@ -376,12 +397,14 @@ async function paneCliProcess(session, cli, panePid) {
         ? isCodexProcessCommand(command)
         : new RegExp(`^(?:\\S*/)?${cli}(?:\\s|$)`).test(command)
     ) {
-      const foreground = stat.includes("+") && !/[TtZ]/.test(stat);
+      const attached = stat.includes("+") && tty === paneTty;
+      const running =
+        !/[TtZ]/.test(stat) && (attached || relayedByWrapper(pid));
       if (
         depth < selectedDepth ||
-        (depth === selectedDepth && foreground && !selected.foreground)
+        (depth === selectedDepth && attached && !selected.attached)
       ) {
-        selected = { pid: Number(pid), command, foreground };
+        selected = { pid: Number(pid), command, running, attached };
         selectedDepth = depth;
       }
     }
@@ -3189,10 +3212,10 @@ async function doStart(launchAdapter, opts) {
   if (name && adapter.cli === "codex" && ready) {
     // paneCliProcess는 로컬 전용이므로 원격 입력 동작은 유지한다.
     const target = !remote && (await paneCliProcess(session, adapter.cli));
-    if (!remote && !target?.foreground) {
+    if (!remote && !target?.running) {
       ready = false;
       warning = target
-        ? "codex is not in foreground before input"
+        ? "codex is not attached to the pane before input"
         : "codex exited before input";
     } else {
       try {
@@ -3505,10 +3528,10 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
   const target =
     !remote &&
     (await (deps.paneCliProcess ?? paneCliProcess)(session, adapter.cli));
-  if (!remote && !target?.foreground) {
+  if (!remote && !target?.running) {
     throw new Error(
       target
-        ? `${adapter.cli} is not in foreground before input`
+        ? `${adapter.cli} is not attached to the pane before input`
         : `${adapter.cli} exited before input`,
     );
   }

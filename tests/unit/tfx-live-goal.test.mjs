@@ -215,7 +215,7 @@ test("Codex tmux goals normalize whitespace and confirm fresh matching sqlite st
   try {
     await writeFile(
       join(dir, "ps"),
-      "#!/usr/bin/env node\nconsole.log('100 1 Ss /bin/zsh\\n101 100 S+ codex');\n",
+      "#!/usr/bin/env node\nconsole.log('100 1 Ss ttys001 /bin/zsh\\n101 100 S+ ttys001 codex');\n",
       { mode: 0o755 },
     );
     const { DatabaseSync } = await import("node:sqlite");

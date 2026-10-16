@@ -597,11 +597,11 @@ async function writeFakePaneProcesses(dir) {
       "import fs from 'node:fs';",
       "const file = process.env.TMUX_STATE;",
       "const state = file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};",
-      "const withStat = process.argv.includes('pid=,ppid=,stat=,args=');",
-      "console.log(`100 1 ${withStat ? 'Ss ' : ''}/bin/zsh`);",
+      "const withStat = process.argv.includes('pid=,ppid=,stat=,tty=,args=');",
+      "console.log(`100 1 ${withStat ? 'Ss ttys001 ' : ''}/bin/zsh`);",
       "const updating = process.env.TMUX_UPDATE_SCREEN && (state.launches < 2 || process.env.TMUX_UPDATE_REPEAT === '1');",
-      "if (process.env.TMUX_CODEX_EXITED !== '1' && !updating) console.log(`101 100 ${withStat ? (process.env.TMUX_CODEX_STAT || 'S+') + ' ' : ''}codex`);",
-      "console.log(`200 1 ${withStat ? 'Ss ' : ''}/bin/zsh\\n201 200 ${withStat ? 'S+ ' : ''}claude`);",
+      "if (process.env.TMUX_CODEX_EXITED !== '1' && !updating) console.log(`101 100 ${withStat ? (process.env.TMUX_CODEX_STAT || 'S+') + ' ttys001 ' : ''}codex`);",
+      "console.log(`200 1 ${withStat ? 'Ss ttys002 ' : ''}/bin/zsh\\n201 200 ${withStat ? 'S+ ttys002 ' : ''}claude`);",
     ].join("\n"),
     { mode: 0o755 },
   );
@@ -723,7 +723,7 @@ test("long tmux prompts go through a private file and load-buffer", async () => 
       pollIntervalMs: 1,
     },
     {
-      paneCliProcess: async () => ({ pid: 101, foreground: true }),
+      paneCliProcess: async () => ({ pid: 101, running: true }),
       runTmux: async (_remote, args) => {
         calls.push(args);
         if (args[0] === "load-buffer")
@@ -2098,19 +2098,42 @@ for (const cli of ["claude", "codex", "agy"]) {
   test(`paneCliProcess는 ${cli} 자손보다 본체를 고르고 같은 깊이에서는 전면을 우선한다`, async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-process-"));
     try {
-      for (const [rows, expectedPid, foreground] of [
+      for (const [rows, expectedPid, running] of [
         [
-          `14354 37902 SN ${cli} ${cli === "codex" ? "exec" : "--print"} task\n37902 100 SNs+ ${cli} bg-spare\n100 1 Ss /bin/zsh`,
+          `14354 37902 SN ?? ${cli} ${cli === "codex" ? "exec" : "--print"} task\n37902 100 SNs+ ttys011 ${cli} bg-spare\n100 1 Ss ttys011 /bin/zsh`,
           37902,
           true,
         ],
         [
-          `14354 100 SN ${cli} background\n37902 100 SNs+ ${cli} bg-spare\n100 1 Ss /bin/zsh`,
+          `14354 100 SN ?? ${cli} background\n37902 100 SNs+ ttys011 ${cli} bg-spare\n100 1 Ss ttys011 /bin/zsh`,
           37902,
           true,
         ],
+        // omx 처럼 래퍼가 전면이고 CLI 는 분리 세션(+ 없음)인 배치도 입력 가능해야 한다.
         [
-          `14354 37902 SN+ ${cli} child\n37902 100 SN ${cli} bg-spare\n100 1 Ss /bin/zsh`,
+          `100 1 Ss+ ttys011 node omx.js\n37902 100 Ss ?? ${cli} bg-spare`,
+          37902,
+          true,
+        ],
+        // 전면이 셸(csh 포함)이고 CLI 가 백그라운드 자손이면 입력이 셸로 가므로 거부한다.
+        [
+          `100 1 Ss+ ttys011 /bin/zsh\n37902 100 S ?? ${cli} bg-spare`,
+          37902,
+          false,
+        ],
+        [
+          `100 1 Ss+ ttys011 -csh\n37902 100 S ?? ${cli} bg-spare`,
+          37902,
+          false,
+        ],
+        // 백그라운드 자손이 다른 PTY 에서 전면 래퍼를 띄워도 pane 입력은 셸로 가므로 거부한다.
+        [
+          `100 1 Ss+ ttys011 /bin/zsh\n500 100 S ?? python3 spawn.py\n600 500 Ss+ ttys020 node wrapper.js\n37902 600 Ss ?? ${cli} bg-spare`,
+          37902,
+          false,
+        ],
+        [
+          `37902 100 T ttys011 ${cli} bg-spare\n100 1 Ss ttys011 /bin/zsh`,
           37902,
           false,
         ],
@@ -2134,11 +2157,10 @@ for (const cli of ["claude", "codex", "agy"]) {
             },
           },
         );
-        assert.deepEqual(JSON.parse(stdout), {
-          pid: expectedPid,
-          command: `${cli} bg-spare`,
-          foreground,
-        });
+        const selected = JSON.parse(stdout);
+        assert.equal(selected.pid, expectedPid);
+        assert.equal(selected.command, `${cli} bg-spare`);
+        assert.equal(selected.running, running);
       }
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
@@ -2152,7 +2174,7 @@ test("pane 셸의 손자 Codex가 전면에 있으면 입력을 보낸다", asyn
     await writeReadyFakeTmux(dir);
     await fs.writeFile(
       path.join(dir, "ps"),
-      "#!/usr/bin/env node\nconsole.log('202 200 S+ codex\\n102 101 S+ codex\\n101 100 S node launcher\\n100 1 Ss /bin/zsh');\n",
+      "#!/usr/bin/env node\nconsole.log('202 200 S+ ttys002 codex\\n102 101 S+ ttys001 codex\\n101 100 S ttys001 node launcher\\n100 1 Ss ttys001 /bin/zsh');\n",
       { mode: 0o755 },
     );
     const logPath = path.join(dir, "tmux.jsonl");
@@ -2269,7 +2291,7 @@ for (const command of ["start", "ask"]) {
             result.warning,
             state === "exited"
               ? /codex exited before input/
-              : /codex is not in foreground before input/,
+              : /codex is not attached to the pane before input/,
           );
         } else {
           assert.equal(result.ok, false);
@@ -2277,7 +2299,7 @@ for (const command of ["start", "ask"]) {
             result.error,
             state === "exited"
               ? /codex exited before input/
-              : /codex is not in foreground before input/,
+              : /codex is not attached to the pane before input/,
           );
         }
         const log = await readTmuxLog(logPath);
