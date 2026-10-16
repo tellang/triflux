@@ -225,3 +225,9 @@ tfx-live list-sessions --cli codex
 ```
 
 `auto`가 tmux로 전환되면 `~/.claude/cache/triflux/tfx-live/bug-reports/uds-fallback-*.json`을 확인한다. 테스트에서는 `$TFX_LIVE_BUG_REPORT_DIR`로 위치를 바꿀 수 있다.
+
+## 선택적 전역 native peer 어댑터
+
+`triflux setup`에서 별도 동의한 사용자만 `~/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'` 또는 `--to 'claude:<정확한 이름>'`을 사용한다. `~`는 셸 사용 예시이고 Codex 승인 prefix는 setup에 출력된 실제 절대경로다. 승인 표면은 이 절대경로 래퍼의 `send`뿐이다. 신뢰할 수 없는 설치 트리나 그룹 쓰기 가능한 런타임 경로에서는 전역 승인을 설치하지 않는다. `node`, `bash`, `tfx-live send`를 이 승인으로 대신 실행하지 않는다. Claude→Claude는 기존 native `SendMessage`를 우선 사용하며 어댑터는 Claude 내부에서 이를 거부한다. 이 명령은 기존 `tfx-live send`의 ask/queue/tmux 경로와 다르며 사용자 입력으로 fallback하지 않는다.
+
+Claude 수신은 collapsed native peer UI지만 Codex는 same-daemon `agent_message` raw injection + non-user wake다. Codex TUI를 공유 app-server에 `--remote unix://<socket>`으로 연결해야 하며 `-c model=...` implicit TUI는 embedded가 될 수 있다. 송신 socket은 일회성이라 native `SendMessage` 회신은 지원하지 않는다(ENOENT 가능). 별도로 확인한 이름의 `tfx-peer` 대상으로 회신해야 하며 송신자 표시 이름은 인증된 Codex 신원이 아니다. `sent`는 모델 완료가 아니고 `partial`/timeout은 중복 가능성 때문에 자동 재시도하지 않는다. 설치 동의를 거부하거나 update에서 승인 취소/변경을 감지하면 권한을 다시 열지 않는다. 전역 승인이 불가하면 이미 수동 설정한 `~/.codex/rules/tfx-live.rules`로 기존 `tfx-live` ask/queue/tmux 릴레이를 운용할 수 있으나 이는 native peer 전송이나 같은 승인이 아니다. Windows와 원격 자동 권한 변경은 지원하지 않는다.
