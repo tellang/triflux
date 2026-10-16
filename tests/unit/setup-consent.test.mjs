@@ -144,6 +144,18 @@ describe("setup 동의 단계", () => {
     });
     assert.equal(calls.asked.length, 0);
   });
+
+  it("peer 동의 확인 예외가 나도 Codex 훅 단계는 계속한다", async () => {
+    const { calls, options } = fakeSteps({ interactive: true, answer: true });
+    options.hasCommand = () => true;
+    options.offerPeer = async () => {
+      throw new Error("peer unavailable");
+    };
+    const result = await runConsentSteps(options);
+    assert.equal(result.codexHooks, "approved");
+    assert.deepEqual(calls.hooks, [{ trust: false }, { trust: true }]);
+    assert.ok(calls.logs.some((line) => line.includes("peer unavailable")));
+  });
 });
 
 describe("setup 이 만드는 Codex 설정 파일 권한", () => {

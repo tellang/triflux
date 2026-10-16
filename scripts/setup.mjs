@@ -468,7 +468,7 @@ export async function runConsentSteps({
   home = _TFX_HOME,
   packageRoot = PLUGIN_ROOT,
   fromUpdate = false,
-  dryRun = false,
+  verbose = false,
   offerPeer = offerPeerPermission,
   report,
   log = report ? (message) => addStep(report, message) : console.log,
@@ -532,18 +532,22 @@ export async function runConsentSteps({
     notice,
   });
 
-  const peer = await offerPeer({
-    home,
-    packageRoot,
-    platform,
-    interactive: interactive && canAskUser({ env, input, output }),
-    dryRun,
-    fromUpdate,
-    ask,
-    notice,
-    warn,
-  });
-  result.changed ||= Boolean(peer.changed);
+  try {
+    const peer = await offerPeer({
+      home,
+      packageRoot,
+      platform,
+      interactive: interactive && canAskUser({ env, input, output }),
+      fromUpdate,
+      verbose,
+      ask,
+      notice,
+      warn,
+    });
+    result.changed ||= Boolean(peer.changed);
+  } catch (error) {
+    warn(`Peer adapter 동의 확인 실패: ${error.message}`);
+  }
 
   try {
     result.changed ||= [result.psmux, result.tmr, result.mods].some(

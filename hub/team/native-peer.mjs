@@ -277,7 +277,7 @@ export async function deliverClaude({
   home = os.homedir(),
   receiver = resolveClaudeReceiver({ sessionId, home }),
   socketDir = path.dirname(receiver.socketPath),
-  holdMs = 8000,
+  holdMs = 150,
 }) {
   const own = path.join(socketDir, `${process.pid}.sock`);
   // 이 일회성 송신자는 회신을 라우팅하지 않는다. 열린 reply 소켓을 즉시 닫는다.
@@ -329,7 +329,7 @@ export async function deliverClaude({
     }
     await new Promise((resolve) => setTimeout(resolve, holdMs));
     return {
-      status: "sent",
+      status: "written",
       retrySafe: false,
       modelReceipt: false,
       msgId: frame.msg_id,

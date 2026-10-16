@@ -218,6 +218,10 @@ graph TD
 | MCP 레지스트리 | 낡았거나 지원하지 않는 MCP 항목을 관리형 항목으로 바꾼다. |
 | 합의 결과 | deep·consensus 실행은 일부 레인이 빠졌거나 의견이 갈린 결과를 숨기지 않고 표시한다. |
 
+### 선택적 native peer 어댑터
+
+`triflux setup`에서 명시적으로 동의하면 로컬 Claude·Codex 피어용 `~/.claude/scripts/tfx-peer send` 래퍼만 승인하고 Bash 전체 권한이나 sandbox를 완화하지 않는다. `~`는 셸 예시이며 Codex 규칙은 setup이 출력한 실제 절대경로에 맞고, Claude의 `written`은 UDS 쓰기만 뜻하며 Codex의 `agent_message`도 모델 완료를 보증하지 않는다. 설치 신뢰 조건, 재시도와 allow·rule·래퍼·동의 manifest 철회 절차는 [tfx-live 스킬](skills/tfx-live/SKILL.md#선택적-전역-native-peer-어댑터)에 둔다.
+
 ## 기여
 
 Node 22 이상이 필요하다. 테스트, 린트, 패키지 경계, 미러·릴리즈 점검, 상태 스냅샷은
@@ -228,16 +232,3 @@ Node 22 이상이 필요하다. 테스트, 린트, 패키지 경계, 미러·릴
 <p align="center">
   <sub>MIT License &middot; Made by <a href="https://github.com/tellang">tellang</a></sub>
 </p>
-
-### 선택적 native peer 어댑터
-
-`triflux setup`에서 **명시적으로 동의한 경우에만** Claude·Codex의 `tfx-peer send` 명령을 사용자 전역 자동 승인한다. `~/.claude/scripts/tfx-peer`(전용 0700 래퍼)와 Claude `settings.json`의 해당 래퍼 `send` 규칙, Codex의 별도 `~/.codex/rules/triflux-native-peer.rules`만 추가한다. 전체 Bash/node 허용, auto mode 해제, sandbox 완화는 하지 않는다. 거절·비대화형·CI·postinstall·dry-run에서는 승인 파일을 쓰지 않는다. 업데이트는 기존 승인을 보존하며 사용자가 규칙/래퍼를 지우거나 바꾸면 자동 복구하지 않는다. 다시 승인하려면 `triflux setup`에서 재동의한다. 래퍼나 Codex 전용 rule 파일 내용이 바뀐 충돌 상태라면 내용을 확인하고 해당 파일을 직접 제거한 뒤 재동의한다. 기존 deny 규칙은 덮어쓰지 않는다. 각 SSH 호스트는 그 호스트에서 따로 설정해야 한다.
-
-```sh
-~/.claude/scripts/tfx-peer send --to 'codex:10.16 검토' --message '검토 결과를 알려주세요'
-~/.claude/scripts/tfx-peer send --to 'claude:10.16 검토' --message '추가 확인 부탁합니다'
-```
-
-`~` 명령은 셸 사용 예시다. Codex 승인 규칙은 `~` 글자가 아니라 setup이 출력한 실제 래퍼 절대경로에만 맞는다. 개발 checkout이 아닌 신뢰 가능한 설치 트리와 Node 런타임 경로가 필요하다. Homebrew의 흔한 구성처럼 부모 디렉터리가 그룹 쓰기 가능하면 전역 승인은 불가하며 권한을 완화하거나 런타임을 복사하지 않는다. 승인 래퍼는 시스템 디렉터리에서만 `tmux`를 찾으므로 Homebrew에만 설치된 `tmux`는 이 래퍼에서 찾지 못한다. 승인이 불가하면 이미 수동 설정한 `~/.codex/rules/tfx-live.rules`로 기존 `tfx-live` 명령을 운용할 수 있다. 이는 ask/queue/tmux 사용자 릴레이이며 native `tfx-peer` 통로나 그 승인과 다르다. 정확히 일치하는 **현재 로컬 세션 하나**만 수신한다. Claude는 세션 registry에서 tmux 밖 background continuation도 찾으며, `parkedJobId`가 있는 주차된 부모에는 전송하지 않는다. 같은 이름의 활성 continuation이 여러 개면 모호성 오류로 중단한다. Claude 수신은 인증된 cross-session peer 메시지로 접힌 `Message from @…` UI에 표시된다. Codex 수신은 같은 app-server의 `agent_message` raw item이며 내부 agent mailbox나 Claude식 접힌 수신 UI는 아니다. 유휴 Codex는 비-user `toolOutput`으로 깨운다. 따라서 Codex TUI는 같은 daemon에 `--remote unix://<socket>`으로 연결해야 한다. `-c model=...`을 붙인 implicit TUI는 embedded server가 될 수 있다. 어댑터 송신 socket은 일회성이라 여기에 native `SendMessage`로 회신하면 ENOENT가 날 수 있다. 회신에는 별도로 확인한 이름의 `tfx-peer` 대상을 사용한다. 송신자 표시 이름은 어댑터가 정한 값이지 인증된 Codex 신원이 아니다. 결과 `sent`는 전송/깨우기 요청 수락이지 모델 완료·자동 회신 보장이 아니다. `partial` 또는 timeout은 이미 주입됐을 수 있으므로 자동 재시도하지 않는다. 기존 `tfx-live send`는 별도의 ask/queue/tmux 경로이며 이 명령의 대체물이 아니다. macOS에서 검증했으며 Linux는 로컬 경로의 호환성만 설계했고 Windows는 지원하지 않는다.
-
-승인을 철회하려면 Claude `settings.json`의 해당 `Bash(<절대경로>/tfx-peer send:*)` 항목과 Codex `triflux-native-peer.rules`를 제거한다. 래퍼도 삭제할 수 있다. 다른 권한 규칙은 그대로 둔다.

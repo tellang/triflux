@@ -20,15 +20,17 @@ const fixture = () => {
   );
   const packageRoot = path.join(prefix, "lib", "node_modules", "triflux");
   const nodePath = path.join(prefix, "bin", "node");
+  const tmuxPath = path.join(prefix, "bin", "tmux");
   fs.mkdirSync(path.join(packageRoot, "bin"), { recursive: true });
   fs.mkdirSync(path.dirname(nodePath));
   fs.writeFileSync(nodePath, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+  fs.writeFileSync(tmuxPath, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
   fs.writeFileSync(
     path.join(packageRoot, "bin", "tfx-peer.mjs"),
     "// fixture\n",
     { mode: 0o644 },
   );
-  return { home, packageRoot, nodePath, prefix };
+  return { home, packageRoot, nodePath, tmuxPath, prefix };
 };
 const cleanup = (x) => {
   fs.rmSync(x.home, { recursive: true, force: true });
@@ -49,29 +51,6 @@ it("decline, noninteractive and dry-run write nothing", async () => {
     } finally {
       cleanup(x);
     }
-  }
-});
-it("unavailable approval points to existing manual relay without equating it to native peer", async () => {
-  const x = fixture();
-  try {
-    fs.mkdirSync(path.join(x.packageRoot, ".git"));
-    const notices = [];
-    const result = await offerPeerPermission({
-      ...x,
-      interactive: true,
-      ask: async () => {
-        throw Error("must not ask");
-      },
-      notice: (message) => notices.push(message),
-    });
-    assert.equal(result.status, "unavailable");
-    assert.match(
-      notices.join(" "),
-      /tfx-live\.rules.*ask\/queue\/tmux.*동일 승인으로 취급하지 않는다/,
-    );
-    assert.deepEqual(fs.readdirSync(x.home), []);
-  } finally {
-    cleanup(x);
   }
 });
 it("preserves existing allow/deny and installs exact wrapper/rule", () => {
@@ -101,6 +80,39 @@ it("preserves existing allow/deny and installs exact wrapper/rule", () => {
     assert.ok(!p.codexRule.includes('"node"'));
     assert.ok(!p.codexRule.includes('"bash"'));
     assert.equal(inspectPeerPermission(x).status, "approved");
+  } finally {
+    cleanup(x);
+  }
+});
+it("trusted owner-group-writable package, Node and tmux paths are eligible", () => {
+  const x = fixture();
+  try {
+    for (const dir of [
+      x.prefix,
+      path.join(x.prefix, "lib"),
+      path.join(x.prefix, "bin"),
+      x.packageRoot,
+    ])
+      fs.chmodSync(dir, 0o775);
+    assert.equal(
+      installPeerPermission({ ...x, consent: true }).status,
+      "approved",
+    );
+    const script = fs.readFileSync(peerPermissionPlan(x).wrapper, "utf8");
+    assert.ok(script.includes(path.dirname(x.tmuxPath)));
+  } finally {
+    cleanup(x);
+  }
+});
+it("other-writable pinned tmux is never approved", () => {
+  const x = fixture();
+  try {
+    fs.chmodSync(x.tmuxPath, 0o777);
+    assert.equal(
+      installPeerPermission({ ...x, consent: true }).status,
+      "unavailable",
+    );
+    assert.deepEqual(fs.readdirSync(x.home), []);
   } finally {
     cleanup(x);
   }
@@ -210,7 +222,7 @@ it("approved wrapper refuses packageRoot replaced by a dev symlink before loadin
       notice: (message) => notices.push(message),
     });
     assert.equal(offered.status, "unavailable");
-    assert.match(notices.join(" "), /기존 승인.*철회/);
+    assert.deepEqual(notices, []);
     assert.equal(fs.existsSync(wrapper), true);
   } finally {
     cleanup(x);
@@ -296,22 +308,65 @@ it("concurrent Claude settings deny edit is not overwritten", () => {
       p.settings,
       JSON.stringify({ permissions: { deny: ["Read"] } }),
     );
-    const result = installPeerPermission({
-      ...x,
-      consent: true,
-      beforeSettingsWrite: () =>
-        fs.writeFileSync(
-          p.settings,
-          JSON.stringify({
-            permissions: { deny: ["Read", "Bash(tfx-peer:*)"] },
-          }),
-        ),
-    });
+    const originalRename = fs.renameSync;
+    let result;
+    try {
+      fs.renameSync = (from, to) => {
+        originalRename(from, to);
+        if (to === p.wrapper)
+          fs.writeFileSync(
+            p.settings,
+            JSON.stringify({
+              permissions: {
+                deny: ["Read", "Bash(tfx-peer:*)"],
+              },
+            }),
+          );
+      };
+      result = installPeerPermission({ ...x, consent: true });
+    } finally {
+      fs.renameSync = originalRename;
+    }
     assert.equal(result.status, "partial");
     assert.equal(result.retrySafe, false);
     assert.deepEqual(JSON.parse(fs.readFileSync(p.settings)).permissions.deny, [
       "Read",
       "Bash(tfx-peer:*)",
+    ]);
+  } finally {
+    cleanup(x);
+  }
+});
+it("reconsent keeps only the newest dedicated Claude settings backup", () => {
+  const x = fixture();
+  try {
+    const p = peerPermissionPlan(x);
+    fs.mkdirSync(path.dirname(p.settings), { recursive: true });
+    fs.writeFileSync(
+      p.settings,
+      JSON.stringify({ permissions: { deny: ["Read"] } }),
+    );
+    assert.equal(
+      installPeerPermission({ ...x, consent: true }).status,
+      "approved",
+    );
+    const oldBackup = fs
+      .readdirSync(path.dirname(p.settings))
+      .find((name) => name.startsWith("settings.json.tfx-peer-backup-"));
+    const settings = JSON.parse(fs.readFileSync(p.settings));
+    settings.permissions.allow = [];
+    fs.writeFileSync(p.settings, JSON.stringify(settings));
+    assert.equal(
+      installPeerPermission({ ...x, consent: true }).status,
+      "approved",
+    );
+    const backups = fs
+      .readdirSync(path.dirname(p.settings))
+      .filter((name) => name.startsWith("settings.json.tfx-peer-backup-"));
+    assert.equal(backups.length, 1);
+    assert.notEqual(backups[0], oldBackup);
+    assert.deepEqual(JSON.parse(fs.readFileSync(p.settings)).permissions.deny, [
+      "Read",
     ]);
   } finally {
     cleanup(x);

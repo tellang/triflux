@@ -5,6 +5,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { it } from "node:test";
+import { resolveCodexTmuxThread } from "../../bin/tfx-live.mjs";
 import { main as peerMain } from "../../bin/tfx-peer.mjs";
 import {
   deliverClaude,
@@ -69,10 +70,72 @@ it("Codex adapter rejects inferred thread identities before delivery", async () 
           raw: { threadSource: "tmux-option" },
         },
       ],
+      resolveCodexTmuxThread: async () => ({
+        threadId: "wanted",
+        threadSource: "tmux-option",
+      }),
       deliverCodex: () => ({ status: "sent" }),
     },
   );
   assert.equal(result.status, "sent");
+});
+
+it("current pane option changing to an unloaded thread blocks old loaded registry target", async () => {
+  let deliveries = 0;
+  await assert.rejects(
+    peerMain(["send", "--to", "codex:target", "--message", "hello"], {
+      discover: async () => [
+        {
+          cli: "codex",
+          name: "target",
+          aliases: ["target"],
+          target: "pane",
+          threadId: "old-loaded",
+          raw: { threadSource: "registry" },
+        },
+      ],
+      resolveCodexTmuxThread: async () => ({
+        threadId: "new-unloaded",
+        threadSource: "tmux-option",
+      }),
+      deliverCodex: () => {
+        deliveries++;
+      },
+    }),
+    /pane thread changed/,
+  );
+  assert.equal(deliveries, 0);
+});
+
+it("registry resolver selects newest same-pane record and refuses timestamp ties", async () => {
+  const old = "11111111-1111-4111-8111-111111111111";
+  const recent = "22222222-2222-4222-8222-222222222222";
+  const records = [
+    { tmuxPane: "%7", sessionId: old, updatedAt: 10 },
+    { tmuxPane: "%7", sessionId: recent, updatedAt: 20 },
+  ];
+  const deps = {
+    runTmux: async () => ({ stdout: "none\t%7\t/tmp\t1\t123" }),
+    readCodexSessionRecords: () => records,
+  };
+  assert.equal((await resolveCodexTmuxThread("pane", deps)).threadId, recent);
+  const withOption = {
+    ...deps,
+    runTmux: async () => ({ stdout: `${old}\t%7\t/tmp\t1\t123` }),
+    requireRegistryAgreement: true,
+  };
+  assert.equal(
+    (await resolveCodexTmuxThread("pane", withOption)).reason,
+    "pane-thread-conflict",
+  );
+  records[0].updatedAt = 20;
+  assert.equal((await resolveCodexTmuxThread("pane", deps)).threadId, null);
+  delete records[0].updatedAt;
+  delete records[1].updatedAt;
+  assert.equal(
+    (await resolveCodexTmuxThread("pane", deps)).reason,
+    "registry-ambiguous",
+  );
 });
 
 it("Codex unloaded or subagent target is rejected before injection", async () => {
@@ -357,7 +420,7 @@ it("one-shot Claude sender closes inbound native reply sockets instead of hangin
       socketDir: dir,
       holdMs: 100,
     });
-    assert.equal(result.status, "sent");
+    assert.equal(result.status, "written");
     assert.ok(replyClosed);
     await Promise.race([
       replyClosed,

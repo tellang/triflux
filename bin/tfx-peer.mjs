@@ -7,7 +7,11 @@ import {
   parsePeerArgs,
   resolveClaudeRegistryTarget,
 } from "../hub/team/native-peer.mjs";
-import { discoverPeerTargets, matchPeerCandidates } from "./tfx-live.mjs";
+import {
+  discoverPeerTargets,
+  matchPeerCandidates,
+  resolveCodexTmuxThread,
+} from "./tfx-live.mjs";
 
 export async function main(args = process.argv.slice(2), deps = {}) {
   if (process.platform === "win32")
@@ -40,6 +44,15 @@ export async function main(args = process.argv.slice(2), deps = {}) {
   if (!target.threadId) throw new Error("Codex thread UUID unavailable");
   if (!["tmux-option", "registry"].includes(target.raw?.threadSource))
     throw new Error("Codex target lacks exact thread provenance");
+  const current = await (
+    deps.resolveCodexTmuxThread ||
+    ((pane) => resolveCodexTmuxThread(pane, { requireRegistryAgreement: true }))
+  )(target.target || target.raw?.target || target.paneId);
+  if (
+    current.threadId !== target.threadId ||
+    !["tmux-option", "registry"].includes(current.threadSource)
+  )
+    throw new Error("Codex pane thread changed; refusing stale target");
   return (deps.deliverCodex || deliverCodex)({
     threadId: target.threadId,
     message,

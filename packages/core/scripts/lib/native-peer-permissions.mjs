@@ -7,7 +7,57 @@ const hash = (text) => createHash("sha256").update(text).digest("hex");
 const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 const read = (file) =>
   fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null;
-function trustedPackageTree(packageRoot, nodePath) {
+const trustedTmuxPath = () =>
+  [
+    "/opt/homebrew/bin/tmux",
+    "/usr/local/bin/tmux",
+    "/usr/bin/tmux",
+    "/bin/tmux",
+    "/home/linuxbrew/.linuxbrew/bin/tmux",
+  ].find((file) => existing(file));
+function trustedHelperPath(file) {
+  if (!file || !path.isAbsolute(file)) return false;
+  const base = path.dirname(path.dirname(file));
+  let resolved;
+  try {
+    resolved = fs.realpathSync(file);
+  } catch {
+    return false;
+  }
+  const safe = (target, alias = false) => {
+    const rel = path.relative(base, target);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) return false;
+    let current = base;
+    const parts = rel.split(path.sep);
+    const baseMeta = existing(base);
+    if (
+      !baseMeta?.isDirectory() ||
+      ![0, process.getuid()].includes(baseMeta.uid) ||
+      (baseMeta.mode & 0o002) !== 0
+    )
+      return false;
+    for (let i = 0; i < parts.length; i++) {
+      current = path.join(current, parts[i]);
+      const meta = existing(current);
+      if (!meta || ![0, process.getuid()].includes(meta.uid)) return false;
+      if (meta.isSymbolicLink()) {
+        if (!alias || i !== parts.length - 1) return false;
+        continue;
+      }
+      if ((meta.mode & 0o002) !== 0) return false;
+      if (i < parts.length - 1 ? !meta.isDirectory() : !meta.isFile())
+        return false;
+    }
+    return true;
+  };
+  return (
+    safe(file, true) &&
+    safe(resolved) &&
+    (existing(resolved).mode & 0o111) !== 0
+  );
+}
+function trustedPackageTree(packageRoot, nodePath, tmuxPath) {
+  if (!trustedHelperPath(tmuxPath)) return false;
   for (const dir of ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]) {
     let meta;
     try {
@@ -15,7 +65,7 @@ function trustedPackageTree(packageRoot, nodePath) {
     } catch {
       return false;
     }
-    if (!meta.isDirectory() || meta.uid !== 0 || (meta.mode & 0o022) !== 0)
+    if (!meta.isDirectory() || meta.uid !== 0 || (meta.mode & 0o002) !== 0)
       return false;
   }
   const prefix = path.dirname(path.dirname(nodePath));
@@ -42,7 +92,7 @@ function trustedPackageTree(packageRoot, nodePath) {
         if (!finalLink || index !== parts.length - 1) return false;
         continue;
       }
-      if ((meta.mode & 0o022) !== 0) return false;
+      if ((meta.mode & 0o002) !== 0) return false;
       if (index < parts.length - 1 && !meta.isDirectory()) return false;
     }
     return true;
@@ -77,7 +127,7 @@ function trustedPackageTree(packageRoot, nodePath) {
       !meta ||
       meta.isSymbolicLink() ||
       ![0, process.getuid()].includes(meta.uid) ||
-      (meta.mode & 0o022) !== 0
+      (meta.mode & 0o002) !== 0
     )
       return false;
     if (meta.isDirectory())
@@ -115,20 +165,42 @@ function backup(file) {
   fs.chmodSync(dest, 0o600);
   return dest;
 }
+function keepOnlyLatestSettingsBackup(file, latest) {
+  if (!latest) return;
+  const prefix = `${path.basename(file)}.tfx-peer-backup-`;
+  for (const name of fs.readdirSync(path.dirname(file))) {
+    if (
+      !name.startsWith(prefix) ||
+      !/^\d{13}-[0-9a-f]{8}$/.test(name.slice(prefix.length))
+    )
+      continue;
+    const candidate = path.join(path.dirname(file), name);
+    const meta = existing(candidate);
+    if (
+      candidate !== latest &&
+      meta?.isFile() &&
+      meta.uid === process.getuid() &&
+      (meta.mode & 0o777) === 0o600
+    )
+      fs.unlinkSync(candidate);
+  }
+}
 export function peerPermissionPlan({
   home,
   packageRoot,
   nodePath = resolveStableNodeBin(),
+  tmuxPath = trustedTmuxPath(),
 }) {
   if (
     !path.isAbsolute(home) ||
     !path.isAbsolute(packageRoot) ||
-    !path.isAbsolute(nodePath)
+    !path.isAbsolute(nodePath) ||
+    (tmuxPath && !path.isAbsolute(tmuxPath))
   )
     throw new Error("Absolute paths required");
   const wrapper = path.join(home, ".claude", "scripts", "tfx-peer");
   const entry = path.join(packageRoot, "bin", "tfx-peer.mjs");
-  const script = `#!/bin/sh\nunset NODE_OPTIONS NODE_PATH PSMUX_BIN PSMUX_SHELL DYLD_INSERT_LIBRARIES LD_PRELOAD LD_LIBRARY_PATH\nPATH=/usr/bin:/bin:/usr/sbin:/sbin\nexport PATH\nr=${quote(packageRoot)}\n[ "$(cd -P "$r" 2>/dev/null && pwd -P)" = "$r" ] && [ ! -e "$r/.git" ] || { echo 'tfx-peer: untrusted package tree' >&2; exit 126; }\nexec ${quote(nodePath)} ${quote(entry)} "$@"\n`;
+  const script = `#!/bin/sh\nunset NODE_OPTIONS NODE_PATH PSMUX_BIN PSMUX_SHELL DYLD_INSERT_LIBRARIES LD_PRELOAD LD_LIBRARY_PATH\nPATH=${quote(`${tmuxPath ? `${path.dirname(tmuxPath)}:` : ""}/usr/bin:/bin:/usr/sbin:/sbin`)}\nexport PATH\nr=${quote(packageRoot)}\n[ "$(cd -P "$r" 2>/dev/null && pwd -P)" = "$r" ] && [ ! -e "$r/.git" ] || { echo 'tfx-peer: untrusted package tree' >&2; exit 126; }\nexec ${quote(nodePath)} ${quote(entry)} "$@"\n`;
   const allow = `Bash(${wrapper} send:*)`;
   const codexRule = `prefix_rule(pattern=[${JSON.stringify(wrapper)}, "send"], decision="allow")\n`;
   return {
@@ -141,7 +213,15 @@ export function peerPermissionPlan({
     rule: path.join(home, ".codex", "rules", "triflux-native-peer.rules"),
     manifest: path.join(home, ".claude", "scripts", "tfx-peer-consent.json"),
     contract: hash(
-      JSON.stringify({ wrapper, entry, nodePath, script, allow, codexRule }),
+      JSON.stringify({
+        wrapper,
+        entry,
+        nodePath,
+        tmuxPath,
+        script,
+        allow,
+        codexRule,
+      }),
     ),
   };
 }
@@ -149,12 +229,19 @@ export function inspectPeerPermission({
   home,
   packageRoot,
   nodePath,
+  tmuxPath,
   platform = process.platform,
 } = {}) {
-  const plan = peerPermissionPlan({ home, packageRoot, nodePath });
+  const plan = peerPermissionPlan({ home, packageRoot, nodePath, tmuxPath });
   if (platform === "win32") return { status: "unsupported", plan };
   const effectiveNodePath = nodePath || resolveStableNodeBin();
-  if (!trustedPackageTree(packageRoot, effectiveNodePath))
+  if (
+    !trustedPackageTree(
+      packageRoot,
+      effectiveNodePath,
+      tmuxPath || trustedTmuxPath(),
+    )
+  )
     return { status: "unavailable", plan };
   const boundaries = [
     home,
@@ -181,7 +268,7 @@ export function inspectPeerPermission({
     !entry?.isFile() ||
     entry.isSymbolicLink() ||
     ![0, process.getuid()].includes(entry.uid) ||
-    entry.mode & 0o022
+    entry.mode & 0o002
   )
     return { status: "unavailable", plan };
   if (
@@ -235,15 +322,16 @@ export function installPeerPermission({
   home,
   packageRoot,
   nodePath,
+  tmuxPath,
   consent = false,
   dryRun = false,
   platform = process.platform,
-  beforeSettingsWrite = () => {},
 } = {}) {
   const inspected = inspectPeerPermission({
     home,
     packageRoot,
     nodePath,
+    tmuxPath,
     platform,
   });
   const { plan, status } = inspected;
@@ -290,6 +378,7 @@ export function installPeerPermission({
       home,
       packageRoot,
       nodePath,
+      tmuxPath,
       platform,
     });
     if (fresh.status !== status)
@@ -347,16 +436,17 @@ export function installPeerPermission({
           changed: false,
           error: "Claude settings changed before install",
         };
+      let settingsBackup = null;
       for (const file of [
         plan.wrapper,
         plan.settings,
         plan.rule,
         plan.manifest,
       ])
-        backup(file);
+        if (file === plan.settings) settingsBackup = backup(file);
+        else backup(file);
       atomic(plan.wrapper, plan.script, 0o700);
       steps.push("wrapper");
-      beforeSettingsWrite();
       if (
         read(plan.settings) !== settingsBefore ||
         existing(plan.settings)?.ino !== settingsMeta?.ino
@@ -373,6 +463,9 @@ export function installPeerPermission({
         `${JSON.stringify({ contract: plan.contract, packageRoot, wrapper: plan.wrapper, allow: plan.allow, rule: plan.rule }, null, 2)}\n`,
       );
       steps.push("manifest");
+      try {
+        keepOnlyLatestSettingsBackup(plan.settings, settingsBackup);
+      } catch {}
       return { status: "approved", changed: true, steps };
     } catch (error) {
       return {
@@ -396,26 +489,36 @@ export async function offerPeerPermission({
   interactive = false,
   dryRun = false,
   fromUpdate = false,
+  verbose = false,
   ask = async () => false,
   notice = () => {},
   warn = () => {},
   nodePath,
+  tmuxPath,
   platform = process.platform,
 } = {}) {
   const state = inspectPeerPermission({
     home,
     packageRoot,
     nodePath,
+    tmuxPath,
     platform,
   });
   if (state.status === "unsupported")
     return { status: "unsupported", changed: false };
   if (state.status === "approved")
     return { status: "approved", changed: false };
+  if (fromUpdate) {
+    if (verbose)
+      notice(
+        `Native peer adapter: ${state.status}; update는 승인 설정을 바꾸지 않는다. 재승인은 tfx setup에서 명시적으로 선택한다.`,
+      );
+    return { status: state.status, changed: false };
+  }
   if (state.status === "conflict" || state.status === "unavailable") {
     if (state.status === "conflict")
       warn(
-        "기존 peer 승인 파일이 다르다. 자동 덮어쓰지 않는다. 파일을 직접 확인/제거한 뒤 재설정한다.",
+        `Peer 승인 파일이 충돌한다. ${state.plan.wrapper}, ${state.plan.rule}, ${state.plan.manifest}, ${state.plan.manifest}.lock을 확인하고 해당 어댑터 파일만 직접 정리한 뒤 재동의한다. 자동 삭제하지 않는다.`,
       );
     else {
       notice(
@@ -429,15 +532,6 @@ export async function offerPeerPermission({
           `기존 승인은 설정에 남아 있을 수 있다. Claude ${state.plan.allow}와 Codex ${state.plan.rule}을 확인해 수동 철회한다. 자동 삭제하지 않는다.`,
         );
     }
-    return { status: state.status, changed: false };
-  }
-  if (
-    (state.status === "modified" || state.status === "different-contract") &&
-    fromUpdate
-  ) {
-    notice(
-      "Peer adapter 승인 설정이 변경/철회되었거나 패키지 계약이 달라졌다. 자동 복구하지 않는다. 재승인은 tfx setup에서 명시적으로 선택한다.",
-    );
     return { status: state.status, changed: false };
   }
   if (!interactive || dryRun) {
@@ -469,6 +563,7 @@ export async function offerPeerPermission({
     home,
     packageRoot,
     nodePath,
+    tmuxPath,
     platform,
     consent: true,
   });

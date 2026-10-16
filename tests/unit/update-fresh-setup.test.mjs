@@ -21,13 +21,30 @@ test("최신 update는 한 줄이며 JSON은 마지막 줄 하나다", (t) => {
   assert.match(
     success(cli.run(["update"])),
     new RegExp(
-      `^✓ triflux ${version} 최신 \\(파일 \\d+개 일치, \\d+\\.\\ds\\)\\n안내: .*native peer 전역 승인은 불가하다.*\\n안내: .*tfx-live\\.rules.*ask/queue/tmux.*\\n$`,
+      `^✓ triflux ${version} 최신 \\(파일 \\d+개 일치, \\d+\\.\\ds\\)\\n$`,
     ),
   );
   const json = success(cli.run(["update", "--json"]));
   assert.equal(json.trim().split("\n").length, 1);
   assert.equal(JSON.parse(json).alreadyInGoalState, true);
   assert.deepEqual(JSON.parse(json).changed, []);
+});
+
+test("update --verbose만 peer 보류 상태를 설명하고 consent 자식에 verbose를 전달한다", (t) => {
+  const cli = cliFixture(t);
+  const output = success(
+    cli.run(["update", "--verbose"], { FIXTURE_TTY: "1" }),
+  );
+  assert.match(output, /Native peer adapter: unavailable/);
+  assert.ok(
+    cli
+      .trace()
+      .some(
+        (entry) =>
+          entry.argv?.includes("--consent-only") &&
+          entry.argv.includes("--verbose"),
+      ),
+  );
 });
 
 test("버전 변경은 최신 자식 setup의 파일, 경고 1건과 안내 1건을 합친다", (t) => {

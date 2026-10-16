@@ -220,6 +220,10 @@ Windows) and `hub/team/wt-manager.mjs`. Agent rules:
 | MCP registry | Replaces stale or unsupported MCP entries with managed ones. |
 | Consensus | Deep and consensus runs report degraded or disputed results instead of hiding them. |
 
+### Optional native peer adapter
+
+`triflux setup` optionally approves only the dedicated `~/.claude/scripts/tfx-peer send` wrapper for local Claude and Codex peers, without broad Bash or sandbox approval; `~` is a shell example, while Codex rules match the exact absolute path printed by setup. Claude reports `written` after its UDS write without a receiver ACK, while Codex sends a typed `agent_message` only to an eligible same-daemon thread; neither result proves model completion. See the [tfx-live skill](skills/tfx-live/SKILL.md#선택적-전역-native-peer-어댑터) for setup trust limits, retry behavior, and revocation of the allow entry, rule, wrapper, and consent manifest.
+
 ## Contributing
 
 Node 22 or newer. See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, lint, package boundaries,
@@ -230,16 +234,3 @@ through OIDC Trusted Publishing. Decisions are recorded in [docs/adr/](docs/adr/
 <p align="center">
   <sub>MIT License &middot; Made by <a href="https://github.com/tellang">tellang</a></sub>
 </p>
-
-### Optional native peer adapter
-
-`triflux setup` offers an **opt-in**, user-wide approval for only `tfx-peer send`: a private `~/.claude/scripts/tfx-peer` wrapper, its exact Claude Bash allow entry, and a separate Codex `~/.codex/rules/triflux-native-peer.rules`. It does not grant generic Bash/node access, disable Claude auto mode, or relax Codex sandboxing. Noninteractive setup, CI, postinstall, dry-run, and declined consent do not write this approval. Updates preserve a user-revoked or modified approval rather than silently restoring it; run `triflux setup` and explicitly consent again to regrant. If the wrapper or dedicated Codex rule was modified, inspect and remove that conflicting file first; the installer does not overwrite existing deny rules. Configure each SSH host independently.
-
-```sh
-~/.claude/scripts/tfx-peer send --to 'codex:10.16 review' --message 'Please review'
-~/.claude/scripts/tfx-peer send --to 'claude:10.16 review' --message 'Please check'
-```
-
-The `~` commands are shell examples; Codex approval matches the exact absolute wrapper path printed by setup, not a literal `~` prefix. Approval requires a trusted, non-developer installation tree and Node runtime chain. Group-writable parents (including common Homebrew layouts) make global approval unavailable; setup does not loosen them or copy the runtime. The approved wrapper searches only system directories for `tmux`, so a Homebrew-only `tmux` is not reachable from that wrapper. If approval is unavailable, manually configured `~/.codex/rules/tfx-live.rules` can continue to govern `tfx-live` where already present; that ask/queue/tmux user relay is not the native `tfx-peer` transport or its approval. An exact, single live local target is required. Claude discovery includes background continuations outside tmux, but never dispatches to a parked parent; multiple live continuations with the same name fail as ambiguous. Claude receives an authenticated cross-session peer message with the collapsed `Message from @…` UI. Codex receives a typed raw `agent_message` through the same app-server, **not** its internal agent mailbox or Claude's incoming peer UI. An idle Codex thread is woken using non-user `toolOutput`; its TUI must share the daemon via `--remote unix://<socket>`. An implicit TUI with `-c model=...` may instead use an embedded server. The adapter sender socket is ephemeral: native `SendMessage` replies to it are unsupported and may fail with ENOENT. Reply via a separately known, named `tfx-peer` target instead; the sender display name is adapter-supplied, not an authenticated Codex identity. `sent` means transport acceptance, not model completion or automatic reply. After `partial` or timeout, do not blindly retry because injection may already have occurred. Existing `tfx-live send` remains a distinct ask/queue/tmux path. Verified on macOS; Linux is designed as a local path but not yet runtime-proven; Windows is unsupported.
-
-To revoke, remove the adapter-specific Claude `Bash(<absolute-path>/tfx-peer send:*)` allow entry and the `triflux-native-peer.rules` file; optionally remove the wrapper. Leave unrelated permissions intact.
