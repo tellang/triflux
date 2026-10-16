@@ -19,7 +19,7 @@ description: >
 | --- | --- | --- |
 | 세션 띄우기, 보내기, 기다리기, compact, 닫기 | `tfx-live` 명령 (공통) | `tfx-live` 명령 (공통) |
 | 같은 세션 안 서브에이전트 | Agent 도구 (`model`, `effort`, `run_in_background`) | `spawn_agent`, 추가 지시는 `followup_task`. `close_agent`가 있으면 끝나면 반드시 닫는다 |
-| Claude 세션에 보내기 | 로컬 Claude끼리는 `SendMessage(to: "<이름>")`. 이름은 `tfx-live list-sessions --cli claude`의 `name`, 첫 지시는 `start` 결과의 `sendMessageTo`. 이름을 못 찾으면 전송 실패로 두고 다시 찾는다. 원격은 `tfx-live ask --cli claude` | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'claude:<정확한 이름>' --message '<본문>'`. 원격은 `tfx-live ask --cli claude` |
+| Claude 세션에 보내기 | 로컬 Claude끼리는(팀원 포함) `SendMessage(to: "<이름>")`. 이름은 `tfx-live list-sessions --cli claude`의 `name`, 첫 지시는 `start` 결과의 `sendMessageTo`. 이름을 못 찾으면 전송 실패로 두고 다시 찾는다. 원격은 `tfx-live ask --cli claude` | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'claude:<정확한 이름>' --message '<본문>'`. 원격은 `tfx-live ask --cli claude` |
 | Codex 세션에 보내기 | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'`. 원격은 `tfx-live ask --cli codex` | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'`. 원격은 `tfx-live ask --cli codex` |
 | agy 세션에 보내기 | `tfx-live send --to agy:<이름> --message <본문> --no-wait` 또는 `tfx-live ask --cli agy`. 같은 기기의 agy 끼리는 `~/.local/bin/agy.patch.json`의 `sha256`이 실제 `agy` 바이너리 해시와 같고 `patches`에 `peer-wake`가 있을 때만 `send_message`(대화 ID)를 쓰고, 아니면 `tfx-live ask`를 쓴다(쉬는 세션이 깨지 않는 공개 이슈 #1022 때문). `tfx-live send`의 agy 대상 전송은 tmux 경로를 유지한다 | `tfx-live send --to agy:<이름> --message <본문> --no-wait` 또는 `tfx-live ask --cli agy` |
 | 사용자에게 묻기 | `AskUserQuestion` | 답변에서 짧은 선택지로 묻는다 |

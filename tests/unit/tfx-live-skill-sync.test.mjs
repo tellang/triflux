@@ -29,7 +29,7 @@ test("agy tfx-live adapter keeps the canonical skill body", () => {
   assert.ok(adapter.startsWith(canonical.slice(0, frontmatterEnd)));
   const body = canonical.slice(frontmatterEnd);
   const hostContract =
-    "\n## agy 호스트 계약\n\nagy 에서는 이 스킬을 읽고 셸에서 `tfx-live` 명령을 실행한다. CLI 의 `--cli` 는 현재 호스트가 아니라 대상 세션을 고른다. 다른 CLI 세션에 보낼 때는 `tfx-live send` 를 쓴다.\n";
+    "\n## agy 호스트 계약\n\nagy 에서는 이 스킬을 읽고 셸에서 `tfx-live` 명령을 실행한다. CLI 의 `--cli` 는 현재 호스트가 아니라 대상 세션을 고른다. 로컬 Claude·Codex 대상은 `<홈 절대경로>/.claude/scripts/tfx-peer send`, agy 대상은 `tfx-live send`를 쓴다.\n";
   assert.ok(body.startsWith("\n# tfx-live\n"));
   assert.equal(
     adapter.slice(frontmatterEnd),
@@ -46,12 +46,11 @@ test("tfx-lead and tfx-live agree on how Claude sends to a local Claude session"
   const claudeLeadCell = leadRow.split("|")[2];
   const liveRule = live
     .split("\n")
-    .find((line) => line.includes("SendMessage 도구로 보낸다"));
+    .find((line) => line.includes("Claude 대상의 SendMessage 이름은"));
   for (const rule of [claudeLeadCell, liveRule]) {
-    assert.match(rule, /같은 기기/);
     assert.match(rule, /SendMessage/);
     assert.match(rule, /tfx-live list-sessions --cli claude/);
-    assert.match(rule, /이름을 못 찾거나 원격[^.]*`(tfx-live )?ask/);
+    assert.match(rule, /원격[^.]*`tfx-live ask/);
   }
   assert.match(claudeLeadCell, /팀원 포함/);
 });
