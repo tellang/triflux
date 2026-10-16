@@ -10,7 +10,7 @@ argument-hint: "<start|ask|send|wait|queue|goal|compact|stop|rename|interrupt|pr
 
 ## agy 호스트 계약
 
-agy 에서는 이 스킬을 읽고 셸에서 `tfx-live` 명령을 실행한다. CLI 의 `--cli` 는 현재 호스트가 아니라 대상 세션을 고른다. 다른 CLI 세션에 보낼 때는 `tfx-live send` 를 쓴다.
+agy 에서는 이 스킬을 읽고 셸에서 `tfx-live` 명령을 실행한다. CLI 의 `--cli` 는 현재 호스트가 아니라 대상 세션을 고른다. 로컬 Claude·Codex 대상은 `<홈 절대경로>/.claude/scripts/tfx-peer send`, agy 대상은 `tfx-live send`를 쓴다.
 
 `tfx-live`는 Claude Code와 Codex 세션을 tmux 또는 daemon UDS로, agy 세션을 로컬 tmux로 제어한다.
 `tfx-live --help`와 `tfx-live <동사> --help`로 사용법을 확인한다.
@@ -18,19 +18,20 @@ agy 에서는 이 스킬을 읽고 셸에서 `tfx-live` 명령을 실행한다. 
 ## 전송 경로
 
 - Claude `--short` 또는 `--session-id`는 기본 `auto`로 UDS를 먼저 시도한다. `--session`이 있고 입력 미전송이 확인된 UDS 실패라면 tmux로 전환하고 `~/.claude/cache/triflux/tfx-live/bug-reports/uds-fallback-*.json`을 남긴다. 컨텍스트 가드 거부 시에는 전환하지 않는다.
-- Codex `ask`는 Codex 큐(app-server `thread/queue/add`)가 기본이다. 아래 "Codex 메시지 전송" 순서를 따른다. 기존 Codex thread의 UDS 연결은 `--transport uds --thread <id|auto>`를 명시한다.
+- Codex `ask`는 Codex 큐(app-server `thread/queue/add`)가 기본이다. 아래 "Codex ask 메시지 전송" 순서를 따른다. 기존 Codex thread의 UDS 연결은 `--transport uds --thread <id|auto>`를 명시한다.
 - daemon 참조가 없는 Claude는 tmux가 기본이다.
-- 보내는 쪽이 Claude이고 대상이 같은 기기의 Claude 세션이면 `ask` 대신 SendMessage 도구로 보낸다. `tfx-live`는 CLI라 SendMessage를 대신 보낼 수 없다. 대상의 SendMessage 이름은 `tfx-live list-sessions --cli claude` 결과의 `name`이고, 세션 ID 앞 8자리는 `short`로 맞춘다. 이름을 못 찾거나 원격 세션이면 `ask`를 쓴다. `start` 직후의 첫 지시도 SendMessage로 보낸다. 로컬 Claude `start` 결과의 `sendMessageTo`가 그 이름이다. Claude 안에서 로컬 Claude tmux 세션에 `ask`를 하면 보내지 않고 `reason: "use-send-message"`와 `sendMessageTo`를 돌려준다. 슬래시 명령은 SendMessage로 실행되지 않으므로 그대로 보내고, tmux 입력이 꼭 필요하면 `--via-tmux`를 붙인다.
+- 어댑터가 설치된 로컬 Claude·Codex 대상은 native 피어를 먼저 쓴다. Claude끼리는 `SendMessage(to: "<이름>")`, 그 밖의 Claude·Codex 대상은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to '<cli>:<정확한 이름>' --message '<본문>'`을 쓴다. native 전송 실패는 그대로 반환하며 tmux 입력으로 전환하지 않는다. 어댑터 미설치 폴백은 없다.
+- Claude 대상의 SendMessage 이름은 `tfx-live list-sessions --cli claude` 결과의 `name`이다. `start` 직후의 첫 지시도 결과의 `sendMessageTo`로 보낸다. 이름을 못 찾으면 실패를 확인하고 이름을 다시 찾는다. 로컬 Claude끼리 `ask`하면 `reason: "use-send-message"`와 `sendMessageTo`를 반환한다. 원격 세션은 `tfx-live ask`로 보낸다.
 - 같은 기기의 agy 끼리는 `~/.local/bin/agy.patch.json`의 `sha256`이 실제 `agy` 바이너리 해시와 같고 `patches`에 `peer-wake`가 있을 때만 `send_message`(대화 ID)를 쓰고, 아니면 `tfx-live ask`를 쓴다(쉬는 세션이 깨지 않는 공개 이슈 #1022 때문). `tfx-live send`의 agy 대상 전송은 tmux 경로를 유지한다.
-- CLI가 다른 세션에 이름으로 보낼 때는 `tfx-live send --to <이름|cli:이름> --message <본문> [--from <cli:보낸 이름>] [--no-wait]`를 쓴다. 로컬 Claude, Codex, agy 세션에서 이름이나 별칭(tmux 세션, thread ID, 대화 ID, pane ID)이 정확히 맞는 세션 하나를 찾고, 없거나 여럿이면 후보 목록과 함께 실패한다. 전달은 대상 CLI의 `ask` 경로(Codex는 queue, Claude와 agy는 tmux)를 쓰고, 본문 첫 줄에 `[tfx-peer from=<cli>:<보낸 이름> msg=<id>]`, 끝에 회신용 `send` 명령을 붙인다. Claude 안에서 로컬 Claude 세션으로 보내면 `ask`와 같이 `use-send-message`로 거부한다. 원격은 지원하지 않는다.
-- Claude 는 SendMessage 의 `to` 에 `codex:이름`, `agy:이름` 을 쓰면 mods 가 `tfx-live send` 로 전달한다.
+- `tfx-live send --to 'agy:<정확한 이름>' --message '<본문>' [--from <cli:보낸 이름>] [--no-wait]`는 agy 대상에만 쓴다. 이름이나 별칭이 정확히 맞는 세션 하나를 찾고, 없거나 여럿이면 후보 목록과 함께 실패한다. 본문 첫 줄에 `[tfx-peer from=<cli>:<보낸 이름> msg=<id>]`, 끝에 발신 CLI에 맞는 회신 안내를 붙인다. 원격은 지원하지 않는다.
+- Claude의 `SendMessage`에서 `to: "codex:<이름>"`은 mods가 native 피어 경로로, `agy:`·`antigravity:` 대상은 `tfx-live send`로 전달한다.
 - UDS 결과는 `matchedCompletion === true`일 때만 `done: true`다. timeout이나 연결 종료는 완료가 아니다.
 - bridge 선택 순서는 `--bridge`, `$TFX_BRIDGE`, `$TFX_REPO_ROOT/hub/bridge.mjs`, 번들된 `hub/bridge.mjs`다.
 
 ```bash
 tfx-live start --cli codex --session cx1 --cwd ~/Projects --name "10.8 구현 검토"
-tfx-live ask --cli codex --session cx1 --prompt "현재 변경사항을 요약해줘" --timeout 120
-tfx-live send --to "codex:10.8 구현 검토" --message "추가 검토 사항을 반영해줘" --no-wait
+"$HOME/.claude/scripts/tfx-peer" send --to 'codex:10.8 구현 검토' --message '현재 변경사항을 요약해줘'
+tfx-live send --to 'agy:10.8 구현' --message '추가 검토 사항을 반영해줘' --no-wait
 tfx-live stop --cli codex --session cx1
 ```
 
@@ -38,9 +39,9 @@ macOS의 iTerm2에서 로컬 tmux `start`는 프로젝트별 창에 attach 탭�
 
 새 세션 이름은 `<월>.<일> <주제>`로 짓는다. `start --name`을 생략하면 자동으로 만들고 `nameGenerated: true`를 보고한다. `--resume` 또는 `--resume-last`는 `--name`을 명시한 경우에만 이름을 적용한다. 승계 세션에는 기존 이름 뒤에 ` 2`, 이후 ` 3`을 붙인다. 이름 적용을 요청한 경우 결과의 `nameApplied: false`는 미적용을 뜻한다. agy의 `namePending: true`는 첫 일반 ask에서 적용할 이름이 보류됐다는 뜻이다. Codex `start`는 `/rename` 제출을 입력창이 빌 때까지 확인하고, 이름으로 찾은 thread UUID를 `threadId`로 돌려주며 tmux 세션 옵션 `@tfx_codex_thread`에 남긴다. 로컬 Codex `--resume-last`는 Codex가 고른 thread를 사후에 찾는다. 띄운 뒤 공유 app-server daemon에 로드된 같은 cwd의 thread 중 rollout에 그 시각 이후의 resume 기록(`thread_settings_applied`)이 생긴 것이 정확히 하나이고 1.5초 뒤에도 같을 때만 `threadId`로 쓴다. 이 확인은 5초 안에 끝난다. TUI가 daemon을 쓰지 않거나 같은 cwd에서 동시에 resume이 일어나면 `null`이다. 기존 Codex UDS thread는 `tfx-live rename --cli codex --transport uds --thread ID --name "<이름>"`으로 이름을 바꾼다.
 
-Codex 폴더 신뢰 화면이나 Claude 프로젝트 MCP 승인 화면이 뜨면 `start`는 화면에 답하지 않고 `ready: false`, `blockedBy`(`codex-trust-folder` 또는 `claude-mcp-approval`), 할 일을 적은 `warning`을 반환한다. 세션은 남아 있으므로 tmux 세션에 붙어 직접 고른 뒤 지시를 보낸다.
+Claude 프로젝트 MCP 승인 화면이 뜨면 `start`는 화면에 답하지 않고 `ready: false`, `blockedBy: "claude-mcp-approval"`, 할 일을 적은 `warning`을 반환한다. 세션은 남아 있으므로 tmux 세션에 붙어 직접 고른 뒤 지시를 보낸다.
 
-Claude, agy, 예전 Codex 문구(`Do you trust the contents of this directory`)의 폴더 신뢰 화면은 기본으로 자동 승인한다. `start --no-auto-trust`를 주면 이 화면에도 키를 보내지 않고 같은 형식으로 `blockedBy`(`claude-trust-folder`, `agy-trust-folder`, `codex-trust-folder`)를 반환한다. `--resume`, `--resume-last`, `--remote`에도 똑같이 적용된다.
+Claude, agy, Codex(`Trust this folder?`와 `Do you trust the contents of this directory`)의 폴더 신뢰 화면은 기본으로 자동 승인한다. `start --no-auto-trust`를 주면 이 화면에도 키를 보내지 않고 같은 형식으로 `blockedBy`(`claude-trust-folder`, `agy-trust-folder`, `codex-trust-folder`)를 반환한다. `--resume`, `--resume-last`, `--remote`에도 똑같이 적용된다.
 
 ## agy 세션
 
@@ -77,7 +78,9 @@ Claude TUI는 바쁠 때 들어온 입력을 대기열에 넣고 현재 턴(압�
 
 리드 역할 절차(역할별 모델, 지시서, 교차 리뷰, 릴리스 조율)는 `tfx-lead` 스킬을 따른다.
 
-### Codex 메시지 전송
+### Codex ask 메시지 전송
+
+로컬 세션끼리 주고받는 메시지는 `<홈 절대경로>/.claude/scripts/tfx-peer send`를 쓴다. 다음은 원격 세션이나 명시적으로 사용자 입력을 전달하는 `tfx-live ask`의 동작이다.
 
 1. 기본은 app-server 실험 API `thread/queue/add`로 쌓는 것이다. 프롬프트가 프로세스 인자에 보이지 않는다. 입력창을 건드리지 않고, 바쁘면 쌓였다가 앞 턴이 끝난 직후 순서대로 들어간다. 유휴 TUI는 약 20초 주기로 큐를 가져간다. add가 없는 Codex에서만 `codex queue --thread <UUID> --message`로 보내며, 이때 프롬프트가 argv에 보이고 결과에 `queueVia: "codex-queue-argv"`와 `queueFallbackReason`이 남는다. 평소 값은 `queueVia: "app-server"`다.
 2. 첫 줄 머리말은 `[from <보낸 세션 이름>] [tfx-live req=<id>]`다. 이름은 `--from`, `$TFX_LIVE_FROM`, Claude 세션 기록, Codex `session_index` 순으로 찾고 없으면 머리말 없이 표식만 붙인다. Codex TUI는 Claude처럼 접어 보여 주지 않고 사용자 입력으로 그대로 표시한다.
@@ -85,7 +88,7 @@ Claude TUI는 바쁠 때 들어온 입력을 대기열에 넣고 현재 턴(압�
 4. tmux 직접 입력은 queue를 못 쓸 때만 쓴다: 원격 호스트, thread를 못 찾음(`start` 밖에서 `resume --last`로 띄운 세션, `start --resume-last`의 `threadId: null`, 같은 cwd의 TUI 여럿 포함), `codex queue` 오류(0.160 미만 포함). 결과에 `transport: "tmux"`, `transportRequested: "queue"`, `fallbackReason`이 남는다. 시간 초과처럼 queue가 이미 쌓았을 수도 있는 오류는 `status: "unknown"`으로 끝내고 재전송하지 않는다.
 5. 슬래시 명령(`/rename`, `/compact`, `/new`)과 interrupt(Escape)는 tmux 직접 입력 전용이다. queue로 보낸 슬래시 명령은 실행되지 않고 일반 텍스트로 모델에 들어간다. `/명령`으로 시작하는 프롬프트(절대 경로는 제외)와 `--if-busy fail|interrupt`는 tmux로 보내고 `transportReason`을 남긴다. 슬래시 명령에는 표식을 붙이지 않으므로 `wait`로 추적할 수 없다.
 
-보내는 쪽이 Codex여도 같은 경로다. Codex가 셸에서 `tfx-live ask --cli codex`를 실행하면 되고, Codex 0.162.1 의 workspace-write 샌드박스에서 queue 전송과 상대 응답을 확인했다. Codex 협업 도구(`spawn_agent`, `send_message`, `followup_task`)는 자기가 띄운 하위 에이전트(`/root/...`)를 대상으로 한다. 다른 최상위 Codex 세션에 닿는지는 확인하지 않았다.
+보내는 쪽이 Codex여도 로컬 피어 전송은 `<홈 절대경로>/.claude/scripts/tfx-peer send`를 쓴다. Codex 협업 도구(`spawn_agent`, `send_message`, `followup_task`)는 자기가 띄운 하위 에이전트(`/root/...`)를 대상으로 한다. 다른 최상위 Codex 세션에 닿는지는 확인하지 않았다.
 
 결과의 `status`는 `queued`(쌓임), `working`(TUI가 가져가 턴 시작), `completed`, `failed`로 나뉘고 `delivered`, `deliveredAt`, `turnId`가 배달을 구분한다. queue는 바쁜 세션에도 쌓으므로 `--if-busy wait`는 의미가 없다.
 
@@ -228,10 +231,10 @@ tfx-live list-sessions --cli codex
 
 ## 선택적 전역 native peer 어댑터
 
-`triflux setup`에서 별도 동의하면 `~/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'` 또는 `--to 'claude:<정확한 이름>'`을 쓴다. `~`는 셸 예시이고 승인 prefix는 setup이 출력한 실제 절대경로의 래퍼 `send`뿐이다. `node`, `bash`, `tfx-live send`를 이 승인으로 실행하지 않는다. Claude→Claude는 기존 native `SendMessage`를 우선 사용한다. 기존 `tfx-live send`는 ask/queue/tmux 사용자 릴레이이며 native peer와 다르고 사용자 입력으로 fallback하지 않는다.
+`triflux setup`에서 별도 동의하면 `~/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'` 또는 `--to 'claude:<정확한 이름>'`을 쓴다. `~`는 셸 예시이고 실제 호출과 회신 안내는 setup이 출력한 홈의 절대경로 래퍼 `send`를 쓴다. 위 `<홈 절대경로>`도 실제 값으로 바꾼다. `node`, `bash`, `tfx-live send`를 이 승인으로 실행하지 않는다. Claude→Claude는 기존 native `SendMessage`를 우선 사용한다. `tfx-live send`는 agy 대상에만 쓴다. native peer 실패는 사용자 입력으로 fallback하지 않는다.
 
 설치는 현재 사용자 또는 root 소유이고 other-write가 없는 안정적인 package, Node, tmux 경로만 허용한다. group-write는 허용하지만 개발 checkout, symlink packageRoot, 바뀐 런타임 계약은 거부한다. Claude key/socket/auth의 0600 검사는 별도로 유지한다. setup이 확인한 tmux 디렉터리만 래퍼의 고정 PATH에 넣고 호출자 PATH나 PSMUX override를 받지 않는다. 거절·비대화형·CI·postinstall에서는 승인 파일을 쓰지 않으며 update는 미설정·거절·철회를 조용히 보존한다. 재승인은 `triflux setup`에서 명시적으로 선택한다.
 
-Claude 수신은 collapsed native peer UI지만 UDS 쓰기 후 결과 `written`에는 같은 연결의 인증·거절 ACK가 없다. 수신이나 모델 완료로 읽지 않는다. Codex는 same-daemon `agent_message` raw injection과 non-user wake이고 `sent`도 모델 완료가 아니다. Codex TUI는 공유 app-server에 `--remote unix://<socket>`으로 연결해야 한다. 송신 socket은 일회성이므로 native `SendMessage` 회신은 지원하지 않는다(ENOENT 가능). 별도로 확인한 이름의 `tfx-peer` 대상으로 회신한다. `partial`/`unknown` 또는 timeout은 중복 가능성 때문에 자동 재시도하지 않는다.
+Claude 수신은 collapsed native peer UI지만 UDS 쓰기 후 결과 `written`에는 같은 연결의 인증·거절 ACK가 없다. 수신이나 모델 완료로 읽지 않는다. Codex는 same-daemon `agent_message` raw injection과 non-user wake이고 `sent`도 모델 완료가 아니다. 로컬 `tfx-live start --cli codex`와 resume은 검사한 소켓의 realpath로 공유 app-server 데몬에 붙는다. `--remote` 세션의 셸은 데몬에서 돌아서 `-C`로 작업 디렉터리를 지정한다. 소켓이 없으면 `codex app-server daemon start` 안내와 함께 실패한다. 손으로 띄운 Codex는 thread 출처를 증명할 수 없으므로 `tfx-live start --cli codex`(또는 `--resume`)로 다시 띄운다. 송신 socket은 일회성이므로 native `SendMessage` 회신은 지원하지 않는다(ENOENT 가능). 본문의 발신 머리말과 회신 안내를 따른다. Claude·Codex 발신은 홈의 실제 절대경로 래퍼 `tfx-peer`, agy 발신은 `tfx-live send`, unknown 발신은 `회신: 경로 불명(보낸 세션을 판별하지 못함)`을 안내한다. `tfx-peer` 본문은 8000자까지 받으며 긴 본문은 파일 경로로 보낸다. 머리말과 회신 줄은 그 제한에 포함하지 않는다. `partial`/`unknown` 또는 timeout은 중복 가능성 때문에 자동 재시도하지 않는다.
 
 철회할 때 Claude `settings.json`의 해당 `Bash(<실제 절대경로>/tfx-peer send:*)` allow, `~/.codex/rules/triflux-native-peer.rules`, `~/.claude/scripts/tfx-peer`, **`~/.claude/scripts/tfx-peer-consent.json`**을 확인해 이 어댑터 항목만 제거한다. partial 설치 충돌이면 같은 경로의 `tfx-peer-consent.json.lock`도 확인한다. 다른 설정이나 deny는 건드리지 않는다. 전역 승인 대신 기존 수동 `~/.codex/rules/tfx-live.rules`를 쓰더라도 이는 native peer 전송과 다르다. Windows와 원격 자동 권한 변경은 지원하지 않는다.

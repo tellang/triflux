@@ -7,6 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import * as tfxLive from "../../bin/tfx-live.mjs";
+import { resolveCodexSocket } from "../../hub/team/native-peer.mjs";
 
 const { ADAPTERS, buildLaunchKeys } = tfxLive;
 
@@ -426,7 +427,16 @@ test("Codex daemon default socket follows CODEX_HOME symlink and rejects missing
       actualSocket,
       path.join(controlDir, "app-server-control.sock"),
     );
+    await fs.chmod(actualSocket, 0o600);
+    assert.equal(
+      resolveCodexSocket(dir, { CODEX_HOME: path.join(dir, "codex-home") }),
+      await fs.realpath(actualSocket),
+    );
     process.env.CODEX_HOME = path.join(dir, "codex-home");
+    assert.equal(resolveCodexSocket(), await fs.realpath(actualSocket));
+    assert.throws(() => resolveCodexSocket(dir, {}), {
+      code: "ENOENT",
+    });
     assert.equal(
       tfxLive.resolveCodexDaemonSocket("default"),
       path.join(controlDir, "app-server-control.sock"),
@@ -444,11 +454,36 @@ test("Codex daemon default socket follows CODEX_HOME symlink and rejects missing
 });
 
 async function runTfxLive(args, options = {}) {
-  const { env: extraEnv, cli, ...execOptions } = options;
+  const {
+    env: extraEnv,
+    cli,
+    missingCodexSocket = false,
+    ...execOptions
+  } = options;
   const artifactDir = await fs.mkdtemp(
     path.join(os.tmpdir(), "tfx-live-test-artifacts-"),
   );
+  let socket;
   try {
+    if (!missingCodexSocket) {
+      const socketPath = path.join(artifactDir, "s");
+      socket = net.createServer();
+      await new Promise((resolve, reject) => {
+        socket.once("error", reject);
+        socket.listen(socketPath, resolve);
+      });
+      await fs.chmod(socketPath, 0o600);
+      const controlDir = path.join(
+        artifactDir,
+        "codex-home",
+        "app-server-control",
+      );
+      await fs.mkdir(controlDir, { recursive: true });
+      await fs.symlink(
+        socketPath,
+        path.join(controlDir, "app-server-control.sock"),
+      );
+    }
     const noIterm = `data:text/javascript,${encodeURIComponent(`
       import childProcess from "node:child_process";
       import { syncBuiltinESMExports } from "node:module";
@@ -473,6 +508,12 @@ async function runTfxLive(args, options = {}) {
         ...execOptions,
         env: {
           ...process.env,
+          HOME: artifactDir,
+          CLAUDE_PID: "",
+          CLAUDE_CONFIG_DIR: path.join(artifactDir, "claude-config"),
+          TFX_LIVE_FROM: "",
+          CODEX_THREAD_ID: "",
+          TFX_AGENTS_ROW: "0",
           LC_TERMINAL: "",
           TERM_PROGRAM: "",
           TFX_LIVE_ARTIFACT_DIR: artifactDir,
@@ -488,6 +529,7 @@ async function runTfxLive(args, options = {}) {
     );
     return result.stdout;
   } finally {
+    if (socket) await new Promise((resolve) => socket.close(resolve));
     await fs.rm(artifactDir, { recursive: true, force: true });
   }
 }
@@ -2403,6 +2445,8 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
           "codex",
           "--session",
           "start-codex",
+          "--cwd",
+          path.relative(process.cwd(), path.join(dir, "worker's cwd")),
           "--model",
           "custom model",
           "--effort",
@@ -2460,11 +2504,13 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
       ),
     );
     assert.ok(log.some((args) => args.includes(`/rename ${result.name}`)));
+    assert.match(launch[3], / --remote unix:\/\/\S+ -C /);
+    launch[3] = launch[3].replace(/ --remote unix:\/\/\S+/, "");
     assert.deepEqual(launch, [
       "send-keys",
       "-t",
       "start-codex",
-      "codex --dangerously-bypass-approvals-and-sandbox -c 'model=\"custom model\"' -c 'model_reasoning_effort=\"xhigh\"'",
+      `codex --dangerously-bypass-approvals-and-sandbox -c 'model="custom model"' -c 'model_reasoning_effort="xhigh"' -C '${dir}/worker'"'"'s cwd'`,
       "Enter",
     ]);
   } finally {
@@ -2548,12 +2594,6 @@ test("tfx-live start reports approval screens as blocked without answering them"
     // 문구와 체크박스 글리프는 Codex 0.162.1, Claude Code 2.1.296 바이너리 문자열 기준.
     // 줄바꿈이 문구를 끊는 경우와, 문구를 인용한 재개 대화 아래 입력창이 있는 정상 화면을 넣었다.
     const cases = [
-      {
-        cli: "codex",
-        screen:
-          "  TRUST THIS\n  folder? Codex can read, edit, and run files here.\n› 1. Trust and continue\n  2. Open restricted",
-        blockedBy: "codex-trust-folder",
-      },
       {
         cli: "claude",
         screen:
@@ -2664,6 +2704,12 @@ test("tfx-live start answers trust screens by default and blocks on them with --
         cli: "codex",
         screen:
           "> Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit",
+        blockedBy: "codex-trust-folder",
+      },
+      {
+        cli: "codex",
+        screen:
+          "  TRUST THIS\n  folder? Codex can read, edit, and run files here.\n› 1. Trust and continue\n  2. Open restricted",
         blockedBy: "codex-trust-folder",
       },
       {
@@ -2827,11 +2873,13 @@ test("tfx-live start keeps resume launch keys ahead of model overrides", async (
           ]),
       ),
     );
+    assert.match(launch[3], / --remote unix:\/\/\S+ -C /);
+    launch[3] = launch[3].replace(/ --remote unix:\/\/\S+/, "");
     assert.deepEqual(launch, [
       "send-keys",
       "-t",
       "resume-codex",
-      "codex resume 'resume id' --dangerously-bypass-approvals-and-sandbox",
+      `codex resume 'resume id' --dangerously-bypass-approvals-and-sandbox -C ${process.cwd()}`,
       "Enter",
     ]);
   } finally {
@@ -2874,6 +2922,7 @@ test("tfx-live peer maps side-specific model and effort flags", async () => {
           "1",
         ],
         {
+          missingCodexSocket: true,
           env: {
             PATH: `${dir}${path.delimiter}${process.env.PATH}`,
             TMUX_LOG: logPath,
@@ -4190,6 +4239,31 @@ test("Claude tmux discovery reads sessions under CLAUDE_CONFIG_DIR", async () =>
       sessions.map((entry) => entry.name),
       ["Config"],
     );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Codex start fails before tmux when the shared socket is absent", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-start-no-socket-"));
+  try {
+    await writeReadyFakeTmux(dir);
+    const logPath = path.join(dir, "log");
+    await assert.rejects(
+      runTfxLive(["start", "--cli", "codex", "--session", "missing"], {
+        missingCodexSocket: true,
+        env: {
+          PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+          TMUX_LOG: logPath,
+          TMUX_STATE: path.join(dir, "state"),
+        },
+      }),
+      (error) => {
+        assert.match(error.stdout, /codex app-server daemon start/);
+        return true;
+      },
+    );
+    assert.equal(await fs.readFile(logPath, "utf8").catch(() => ""), "");
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

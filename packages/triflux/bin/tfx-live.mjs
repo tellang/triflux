@@ -51,6 +51,7 @@ import {
   resolveSenderName,
   waitCodexRequest,
 } from "../hub/team/codex-queue.mjs";
+import { resolveCodexSocket } from "../hub/team/native-peer.mjs";
 import {
   escapePwshSingleQuoted as escapeRemotePwshSingleQuoted,
   probeRemoteEnv as probeRemoteHostEnv,
@@ -118,7 +119,7 @@ function usage(command) {
     "  tfx-live ask --cli codex --transport uds --thread ID|auto --prompt TEXT [--codex-socket PATH|default] [--cwd DIR] [--if-busy wait|fail|steer] [--busy-timeout 60] [--timeout 60] [--max-turn SECONDS]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
     "    ask options: --no-wait --no-relay-tag --via-tmux (a Claude caller sending to a local Claude session is refused and told to use SendMessage unless set) --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 60/85 of rollout window or 15/22 of 1.05M).",
-    "  tfx-live send --to NAME|CLI:NAME --message TEXT [--from NAME] [--no-wait] [--timeout 600]",
+    "  tfx-live send --to NAME|CLI:NAME --message TEXT [--from NAME] [--no-wait] [--timeout 600] [--via-tmux (명시적 tmux 입력)]",
     "  tfx-live compact --session NAME [--cli claude|codex] [--instructions TEXT] [--then PROMPT] [--no-wait] [--if-busy fail|wait] [--timeout 60]",
     "  tfx-live goal set --session NAME [--cli claude|codex] --condition TEXT [--budget N]",
     "  tfx-live goal status --session NAME [--cli claude|codex]",
@@ -1910,12 +1911,13 @@ function isClaudeTrustMenu(text) {
   );
 }
 
-function isLegacyCodexTrustMenu(text) {
+function isCodexTrustMenu(text) {
   const menu = splitAtLastSelector(text, "›");
   return (
-    Boolean(menu) &&
-    isCodexTrustPrompt(menu.above) &&
-    /^›\s*(?:\d+\.\s*)?(?:yes, continue|no, quit)/i.test(menu.selected)
+    isCodexTrustFolderPrompt(text) ||
+    (Boolean(menu) &&
+      isCodexTrustPrompt(menu.above) &&
+      /^›\s*(?:\d+\.\s*)?(?:yes, continue|no, quit)/i.test(menu.selected))
   );
 }
 
@@ -1967,13 +1969,16 @@ function isSafeSkipLine(line) {
 
 async function dismissCodexTrustPrompt(remote, session) {
   let raw = await captureVisible(remote, session);
-  if (!isLegacyCodexTrustMenu(raw)) {
+  if (!isCodexTrustMenu(raw)) {
     return { dismissed: false, raw };
   }
 
   for (let iteration = 0; iteration < 4; iteration += 1) {
     const selected = selectedLine(raw);
-    if (/Yes, continue/.test(selected) && !/No, quit/.test(selected)) {
+    if (
+      /Yes, continue|Trust and continue/.test(selected) &&
+      !/No, quit/.test(selected)
+    ) {
       await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
       return { dismissed: true, raw };
     }
@@ -2183,7 +2188,7 @@ const ADAPTERS = {
       {
         name: "trust",
         blockedBy: "codex-trust-folder",
-        isPresent: isLegacyCodexTrustMenu,
+        isPresent: isCodexTrustMenu,
         dismiss: dismissCodexTrustPrompt,
         warning:
           "Codex is asking whether to trust this folder; attach to the tmux session and answer it yourself",
@@ -2197,15 +2202,6 @@ const ADAPTERS = {
         name: "daemon-settings",
         isPresent: isCodexDaemonSettingsPrompt,
         dismiss: dismissCodexDaemonSettingsPrompt,
-      },
-    ],
-    // 사람의 보안 판단이 필요한 화면이라 고르지 않고 start 를 ready:false 로 끝낸다.
-    blockingScreens: [
-      {
-        name: "codex-trust-folder",
-        isPresent: isCodexTrustFolderPrompt,
-        warning:
-          "Codex is asking whether to trust this folder; attach to the tmux session and answer it yourself",
       },
     ],
   },
@@ -3119,6 +3115,19 @@ async function doStart(launchAdapter, opts) {
     });
     launchKeys[0] += overrides[0].slice("agy".length);
   }
+  if (adapter.cli === "codex" && !remote && opts.nativePeer) {
+    let socket;
+    const env = opts.env || process.env;
+    try {
+      socket = resolveCodexSocket(env.HOME || homedir(), env);
+    } catch (error) {
+      throw new Error(
+        `공유 Codex 데몬 소켓을 사용할 수 없다: ${error.message}. codex app-server daemon start 로 데몬을 띄워라.`,
+      );
+    }
+    // --remote 세션의 셸은 데몬에서 돌아서 -C 로 작업 디렉터리를 지정한다.
+    launchKeys[0] += ` ${shellQuote(["--remote", `unix://${socket}`, "-C", pathResolve(cwd || process.cwd())])}`;
+  }
   launchKeys[0] = withUnsetEnv(launchKeys[0], opts.unsetEnv ?? []);
   if (resumed && name && adapter.cli === "claude")
     launchKeys[0] += ` ${shellQuote(["-n", name])}`;
@@ -3293,7 +3302,7 @@ async function doStart(launchAdapter, opts) {
     adapter.cli === "agy" && ready
       ? await agyConversation((await paneCliProcess(session, "agy"))?.pid)
       : null;
-  // ask 의 queue 전송이 레지스트리 없이도 thread 를 찾도록 세션에 남긴다.
+  // native 피어가 정확한 thread 출처를 확인하도록 세션에 남긴다.
   if (threadId && !remote)
     await runTmux(null, [
       "set-option",
@@ -3908,7 +3917,7 @@ async function resolveCodexTmuxThread(session, deps = {}) {
       session,
       "#{@tfx_codex_thread}\t#{pane_id}\t#{pane_current_path}\t#{session_created}\t#{pane_pid}",
     ]);
-    fields = String(stdout).trim().split("\t");
+    fields = String(stdout).trimEnd().split("\t");
   } catch (error) {
     return { threadId: null, reason: `tmux-unavailable: ${error.message}` };
   }
@@ -4725,7 +4734,7 @@ function interruptOpts(flags, adapter) {
 
 async function start(flags) {
   const adapter = selectAdapter(flags);
-  printJson(await doStart(adapter, startOpts(flags)));
+  printJson(await doStart(adapter, { ...startOpts(flags), nativePeer: true }));
 }
 
 async function ask(flags, deps = {}) {
@@ -4767,7 +4776,7 @@ async function sameMachineClaudeRedirect(adapter, opts, flags, deps = {}) {
     inputSent: false,
     reason: "use-send-message",
     sendMessageTo: target.name,
-    error: `같은 기기의 Claude 세션에는 SendMessage(to: "${target.name}")로 보낸다. tmux 입력이 꼭 필요하면 --via-tmux 를 붙인다.`,
+    error: `같은 기기의 Claude 세션에는 SendMessage(to: "${target.name}")로 보낸다.`,
   };
 }
 
@@ -4956,13 +4965,16 @@ async function resolvePeerSender({
   deps = {},
 } = {}) {
   const detectCliFromEnv = () => {
+    if (env.CLAUDECODE === "1") {
+      return "claude";
+    }
     if (env.ANTIGRAVITY_CONVERSATION_ID) {
       return "agy";
     }
     if (env.CODEX_THREAD_ID) {
       return "codex";
     }
-    if (env.CLAUDECODE === "1" || deps.isLocalClaudeCaller?.(env)) {
+    if (deps.isLocalClaudeCaller?.(env)) {
       return "claude";
     }
     return null;
@@ -4984,15 +4996,35 @@ async function resolvePeerSender({
   }
 
   const candidates = allCandidates || (await discoverPeerTargets({ deps }));
+  const envCli = detectCliFromEnv();
 
-  if (env.TMUX_PANE) {
-    const byPane = candidates.find((c) => c.paneId === env.TMUX_PANE);
+  if (envCli === "codex") {
+    const byThread = candidates.find(
+      (c) => c.cli === "codex" && c.threadId === env.CODEX_THREAD_ID,
+    );
+    if (byThread) return { cli: "codex", name: byThread.name };
+  }
+
+  if (env.TMUX_PANE && envCli !== "codex") {
+    const byPane = candidates.find(
+      (c) =>
+        c.paneId === env.TMUX_PANE &&
+        c.cli !== "codex" &&
+        (!envCli || c.cli === envCli),
+    );
     if (byPane) {
-      return { cli: byPane.cli, name: byPane.name };
+      return {
+        cli: byPane.cli,
+        name:
+          byPane.cli === "claude" && byPane.raw
+            ? byPane.raw.name || null
+            : byPane.name,
+        ...(byPane.sessionId ? { sessionId: byPane.sessionId } : {}),
+      };
     }
   }
 
-  if (env.ANTIGRAVITY_CONVERSATION_ID) {
+  if (envCli === "agy") {
     const byConv = candidates.find(
       (c) =>
         c.cli === "agy" && c.conversationId === env.ANTIGRAVITY_CONVERSATION_ID,
@@ -5003,40 +5035,63 @@ async function resolvePeerSender({
     };
   }
 
-  if (env.CODEX_THREAD_ID) {
-    const byThread = candidates.find(
-      (c) => c.cli === "codex" && c.threadId === env.CODEX_THREAD_ID,
-    );
-    if (byThread) {
-      return { cli: "codex", name: byThread.name };
-    }
-  }
-
   const resolveSender = deps.resolveSenderName || resolveSenderName;
-  const senderName = await resolveSender(env);
-  const envCli = detectCliFromEnv();
+  const senderName = await resolveSender({ env });
   if (senderName) {
     return { cli: envCli || "unknown", name: senderName };
   }
   if (envCli) {
-    return { cli: envCli, name: envCli };
+    return { cli: envCli, name: envCli === "claude" ? null : envCli };
   }
   return { cli: "unknown", name: "unknown" };
+}
+
+function formatPeerReply({ cli, name, sessionId }, targetCli) {
+  if (cli === "unknown" || (cli === "claude" && !name && !sessionId))
+    return "회신: 경로 불명(보낸 세션을 판별하지 못함)";
+  const oneLineName = String(name || sessionId).replace(
+    /[\r\n\u2028\u2029]+/g,
+    " ",
+  );
+  if (cli === "claude" && targetCli === "claude") {
+    return `회신: SendMessage(to: ${JSON.stringify(oneLineName)})`;
+  }
+  const command =
+    cli === "claude" || cli === "codex"
+      ? shellQuote([pathJoin(homedir(), ".claude", "scripts", "tfx-peer")])
+      : "tfx-live";
+  const to = `${cli}:${cli === "claude" && sessionId ? sessionId : oneLineName}`
+    .replace(/[\r\n\u2028\u2029]+/g, " ")
+    .replace(/'/g, `'"'"'`);
+  return `회신: ${command} send --to '${to}' --message '...'`;
 }
 
 function formatPeerSendMessage({
   senderCli,
   senderName,
+  senderSessionId,
+  targetCli,
   msgId,
   requestId,
   message,
 }) {
-  const fromSpec = `${senderCli || "unknown"}:${senderName || "unknown"}`;
+  const fromSpec =
+    `${senderCli || "unknown"}:${senderName || "unknown"}`.replace(
+      /[\r\n\u2028\u2029]+/g,
+      " ",
+    );
   const body = String(message ?? "").trim();
   return [
     `[tfx-peer from=${fromSpec} msg=${msgId}] [tfx-live req=${requestId}]`,
     body,
-    `회신: tfx-live send --to ${fromSpec} --message "..."`,
+    formatPeerReply(
+      {
+        cli: senderCli || "unknown",
+        name: senderName,
+        sessionId: senderSessionId,
+      },
+      targetCli,
+    ),
   ].join("\n");
 }
 
@@ -5108,7 +5163,9 @@ async function doSend(opts = {}, deps = {}) {
   });
 
   const callerIsClaude =
-    env.CLAUDECODE === "1" || Boolean(deps.isLocalClaudeCaller?.(env));
+    sender.cli === "claude" ||
+    env.CLAUDECODE === "1" ||
+    Boolean(deps.isLocalClaudeCaller?.(env));
 
   if (target.cli === "claude" && callerIsClaude && !opts.viaTmux) {
     return {
@@ -5127,9 +5184,27 @@ async function doSend(opts = {}, deps = {}) {
     };
   }
 
+  if (["claude", "codex"].includes(target.cli) && !opts.viaTmux) {
+    return {
+      ok: false,
+      to: summarizePeerCandidate(target),
+      from: sender,
+      transport: "native-peer",
+      msgId,
+      requestId,
+      status: "failed",
+      done: false,
+      inputSent: false,
+      reason: "use-tfx-peer",
+      error: `로컬 Claude·Codex 대상에는 ${shellQuote([pathJoin(homedir(), ".claude", "scripts", "tfx-peer"), "send", "--to", `${target.cli}:${target.cli === "claude" ? target.sessionId || target.name : target.name}`, "--message", "..."])} 로 보내라.`,
+    };
+  }
+
   const formattedPrompt = formatPeerSendMessage({
     senderCli: sender.cli,
     senderName: sender.name,
+    senderSessionId: sender.sessionId,
+    targetCli: target.cli,
     msgId,
     requestId,
     message: rawMessage,
@@ -7163,6 +7238,7 @@ export {
   extractAssistantResponse,
   extractClaudeCompletedTaskListResponse,
   extractResponseSinceMarker,
+  formatPeerReply,
   formatPeerSendMessage,
   hasClaudeCompletedTaskListResponse,
   inspectCodexTmuxPane,

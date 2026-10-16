@@ -56,7 +56,7 @@ export async function sendCodexPeer({ client, threadId, message }) {
   } while (!loaded && cursor);
   if (!loaded)
     throw new Error(
-      "Codex target is not loaded in this app-server; start TUI with --remote unix://...",
+      "Codex target is not loaded in this app-server. 이 Codex 는 공유 데몬에 붙어 있지 않다. tfx-live start --cli codex (또는 --resume)로 다시 띄워라",
     );
   const read = await client.request("thread/read", {
     threadId,
@@ -117,10 +117,9 @@ export function assertPrivateFile(
   return meta;
 }
 
-export function resolveCodexSocket(home = os.homedir()) {
+export function resolveCodexSocket(home = os.homedir(), env = process.env) {
   const link = path.join(
-    home,
-    ".codex",
+    env.CODEX_HOME ?? path.join(home, ".codex"),
     "app-server-control",
     "app-server-control.sock",
   );
@@ -133,9 +132,10 @@ export async function deliverCodex({
   threadId,
   message,
   home = os.homedir(),
+  env = process.env,
   clientFactory = (socketPath) => new JsonRpcWsUdsClient({ socketPath }),
 }) {
-  const client = clientFactory(resolveCodexSocket(home));
+  const client = clientFactory(resolveCodexSocket(home, env));
   try {
     await client.connect();
     await client.request("initialize", {
@@ -232,7 +232,7 @@ export function resolveClaudeRegistryTarget(
     try {
       assertPrivateFile(file, "Claude session", { privateMode: false });
       const record = JSON.parse(fs.readFileSync(file, "utf8"));
-      if (`${record.pid}.json` === name && record.sessionId && record.name)
+      if (`${record.pid}.json` === name && record.sessionId)
         records.push(record);
     } catch {}
   }
@@ -241,7 +241,7 @@ export function resolveClaudeRegistryTarget(
   );
   const named = exactId.length
     ? exactId
-    : records.filter((x) => x.name.toLowerCase() === query.toLowerCase());
+    : records.filter((x) => x.name?.toLowerCase() === query.toLowerCase());
   if (!named.length)
     throw new Error("Claude target not found in local session registry");
   if (exactId.length && exactId[0].parkedJobId)

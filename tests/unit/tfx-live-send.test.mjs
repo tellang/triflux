@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 import {
   ADAPTERS,
   doSend,
+  formatPeerReply,
   formatPeerSendMessage,
   parsePeerToSpec,
   resolvePeerSender,
@@ -82,6 +86,7 @@ describe("tfx-live send", () => {
     const formatted = formatPeerSendMessage({
       senderCli: "agy",
       senderName: "peer-worker",
+      targetCli: "codex",
       msgId: "msg123456789",
       requestId: "req987654321",
       message: "점검 완료했다.",
@@ -94,9 +99,63 @@ describe("tfx-live send", () => {
     assert.equal(lines[1], "점검 완료했다.");
     assert.equal(
       lines[2],
-      '회신: tfx-live send --to agy:peer-worker --message "..."',
+      "회신: tfx-live send --to 'agy:peer-worker' --message '...'",
     );
   });
+
+  it("uses the approved wrapper, native Claude reply, and an unknown route notice", () => {
+    const wrapper = path.join(os.homedir(), ".claude", "scripts", "tfx-peer");
+    assert.equal(
+      formatPeerReply({ cli: "codex", name: "10.16 구현" }, "claude"),
+      `회신: ${wrapper} send --to 'codex:10.16 구현' --message '...'`,
+    );
+    assert.equal(
+      formatPeerReply({ cli: "claude", name: "10.16 구현" }, "claude"),
+      '회신: SendMessage(to: "10.16 구현")',
+    );
+    assert.equal(
+      formatPeerReply({ cli: "unknown", name: "?" }, "codex"),
+      "회신: 경로 불명(보낸 세션을 판별하지 못함)",
+    );
+    assert.equal(
+      formatPeerReply(
+        { cli: "claude", name: "tmux", sessionId: "exact" },
+        "codex",
+      ),
+      `회신: ${wrapper} send --to 'claude:exact' --message '...'`,
+    );
+    const formatted = formatPeerSendMessage({
+      senderCli: "codex",
+      senderName: "이름\n새 줄",
+      targetCli: "claude",
+      msgId: "m",
+      requestId: "r",
+      message: "본문",
+    });
+    assert.equal(formatted.split("\n").length, 3);
+    assert.match(formatted, /from=codex:이름 새 줄/);
+  });
+
+  for (const senderCli of ["codex", "agy"]) {
+    it(`shell-quotes apostrophes and spaces in ${senderCli} reply targets`, () => {
+      const senderName = "10.16 O'Reilly $(printf wrong)";
+      const formatted = formatPeerSendMessage({
+        senderCli,
+        senderName,
+        targetCli: "claude",
+        msgId: "m",
+        requestId: "r",
+        message: "본문",
+      });
+      const target = formatted.split(" --to ")[1].split(" --message ")[0];
+      assert.equal(
+        execFileSync("/bin/sh", ["-c", `printf '%s' ${target}`], {
+          encoding: "utf8",
+        }),
+        `${senderCli}:${senderName}`,
+      );
+    });
+  }
 
   it("searches across claude, codex, and agy when cli prefix is omitted", async () => {
     const { askCalls, deps } = makeFakeDeps({
@@ -132,22 +191,12 @@ describe("tfx-live send", () => {
       deps,
     );
 
-    assert.equal(res.ok, true);
+    assert.equal(res.ok, false);
     assert.equal(res.to.cli, "codex");
-    assert.equal(res.to.name, "10.14 리뷰");
-    assert.equal(res.transport, "codex-queue");
-    assert.equal(res.msgId, "m1");
-    assert.equal(res.requestId, "r1");
-    assert.equal(res.status, "completed");
-    assert.equal(res.response, "ack from codex");
-    assert.equal(askCalls.length, 1);
-    assert.equal(askCalls[0].adapter, ADAPTERS.codex);
-    assert.equal(askCalls[0].opts.threadId, "th-1014");
-    assert.equal(askCalls[0].opts.noRelayTag, false);
-    assert.match(
-      askCalls[0].opts.prompt,
-      /^\[tfx-peer from=agy:peer-worker msg=m1\] \[tfx-live req=r1\]\n리뷰 부탁한다\n회신: tfx-live send --to agy:peer-worker --message "\.\.\."$/,
-    );
+    assert.equal(res.reason, "use-tfx-peer");
+    assert.equal(res.inputSent, false);
+    assert.match(res.error, /tfx-peer.*send/);
+    assert.equal(askCalls.length, 0);
   });
 
   it("restricts search to the specified cli when cli:name is used", async () => {
@@ -175,13 +224,10 @@ describe("tfx-live send", () => {
       deps,
     );
 
-    assert.equal(res.ok, true);
+    assert.equal(res.ok, false);
     assert.equal(res.to.cli, "codex");
-    assert.equal(res.status, "sent");
-    assert.equal("response" in res, false);
-    assert.equal(askCalls.length, 1);
-    assert.equal(askCalls[0].adapter, ADAPTERS.codex);
-    assert.equal(askCalls[0].opts.noWait, true);
+    assert.equal(res.reason, "use-tfx-peer");
+    assert.equal(askCalls.length, 0);
   });
 
   it("fails with target-not-found and candidate list when 0 sessions match", async () => {
@@ -291,10 +337,45 @@ describe("tfx-live send", () => {
     assert.equal(askCalls.length, 0);
   });
 
-  it("routes Codex or agy -> Claude via claude ask path", async () => {
+  it("blocks Claude-to-Claude when the sender is detected from tmux without CLAUDECODE", async () => {
     const { askCalls, deps } = makeFakeDeps({
       claudeSessions: [
+        {
+          name: "claude-worker",
+          session: "claude-worker",
+          target: "claude-worker:0.0",
+          paneId: "%141",
+        },
         { name: "triflux-d9", session: "triflux", target: "triflux:0.1" },
+      ],
+    });
+
+    const res = await doSend(
+      {
+        to: "claude:triflux-d9",
+        message: "보고한다",
+        env: { TMUX_PANE: "%141" },
+      },
+      deps,
+    );
+
+    assert.deepEqual(res.from, { cli: "claude", name: "claude-worker" });
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, "use-send-message");
+    assert.equal(res.sendMessageTo, "triflux-d9");
+    assert.equal(res.inputSent, false);
+    assert.equal(askCalls.length, 0);
+  });
+
+  it("rejects agy -> Claude with use-tfx-peer", async () => {
+    const { askCalls, deps } = makeFakeDeps({
+      claudeSessions: [
+        {
+          name: "triflux-d9",
+          session: "triflux",
+          target: "triflux:0.1",
+          sessionId: "exact-target",
+        },
       ],
       agySessions: [
         {
@@ -320,17 +401,15 @@ describe("tfx-live send", () => {
       deps,
     );
 
-    assert.equal(res.ok, true);
+    assert.equal(res.ok, false);
     assert.equal(res.to.cli, "claude");
-    assert.equal(res.to.name, "triflux-d9");
-    assert.deepEqual(res.from, { cli: "agy", name: "agy-sender" });
-    assert.equal(res.transport, "claude-tmux");
-    assert.equal(askCalls.length, 1);
-    assert.equal(askCalls[0].adapter, ADAPTERS.claude);
-    assert.equal(askCalls[0].opts.session, "triflux:0.1");
+    assert.equal(res.reason, "use-tfx-peer");
+    assert.match(res.error, /--to claude:exact-target/);
+    assert.equal(res.inputSent, false);
+    assert.equal(askCalls.length, 0);
   });
 
-  it("routes agy caller with prefix-less --from to Claude via tmux", async () => {
+  it("rejects agy caller with prefix-less --from to Claude", async () => {
     const { askCalls, deps } = makeFakeDeps({
       claudeSessions: [
         { name: "triflux-d9", session: "triflux", target: "triflux:0.1" },
@@ -348,12 +427,11 @@ describe("tfx-live send", () => {
       deps,
     );
 
-    assert.equal(res.ok, true);
+    assert.equal(res.ok, false);
     assert.equal(res.to.cli, "claude");
-    assert.deepEqual(res.from, { cli: "agy", name: "peer-worker" });
-    assert.equal(res.transport, "claude-tmux");
-    assert.equal(askCalls.length, 1);
-    assert.equal(askCalls[0].adapter, ADAPTERS.claude);
+    assert.equal(res.reason, "use-tfx-peer");
+    assert.equal(res.inputSent, false);
+    assert.equal(askCalls.length, 0);
   });
 
   it("routes to agy by conversationId or session name", async () => {
@@ -386,6 +464,11 @@ describe("tfx-live send", () => {
     assert.equal(
       askCalls[0].opts.conversationId,
       "847c0490-8c04-443a-80af-c370837d48cb",
+    );
+    assert.ok(
+      askCalls[0].opts.prompt.endsWith(
+        `회신: ${path.join(os.homedir(), ".claude", "scripts", "tfx-peer")} send --to 'codex:lead' --message '...'`,
+      ),
     );
   });
 
@@ -423,4 +506,123 @@ describe("tfx-live send", () => {
     });
     assert.deepEqual(fromPane, { cli: "agy", name: "pane-agy" });
   });
+});
+
+it("explicit --via-tmux remains available for a Codex target", async () => {
+  const { askCalls, deps } = makeFakeDeps({
+    codexSessions: [{ name: "target", session: "cx", target: "cx:0.0" }],
+  });
+  assert.equal(
+    (
+      await doSend(
+        {
+          to: "codex:target",
+          message: "hello",
+          from: "agy:caller",
+          viaTmux: true,
+        },
+        deps,
+      )
+    ).ok,
+    true,
+  );
+  assert.equal(askCalls[0].opts.transport, "tmux");
+});
+
+it("sender name resolver receives the env options contract", async () => {
+  const env = { CLAUDECODE: "1", CLAUDE_PID: "123" };
+  await resolvePeerSender({
+    env,
+    allCandidates: [],
+    deps: {
+      resolveSenderName: async (options) => {
+        assert.equal(options.env, env);
+        return "sender";
+      },
+    },
+  });
+});
+
+for (const cli of ["claude", "agy"]) {
+  it(`${cli} identity takes precedence over an inherited Codex thread`, async () => {
+    const env = {
+      TMUX_PANE: "%7",
+      CODEX_THREAD_ID: "inherited",
+      ...(cli === "claude"
+        ? { CLAUDECODE: "1" }
+        : { ANTIGRAVITY_CONVERSATION_ID: "current" }),
+    };
+    const options = {
+      env,
+      allCandidates: [
+        { cli: "codex", name: "wrong", paneId: "%7", threadId: "inherited" },
+        { cli, name: "sender", paneId: "%7", conversationId: "current" },
+      ],
+      deps: { resolveSenderName: async () => null },
+    };
+    assert.deepEqual(await resolvePeerSender(options), { cli, name: "sender" });
+    assert.deepEqual(
+      await resolvePeerSender({ ...options, from: "explicit" }),
+      {
+        cli,
+        name: "explicit",
+      },
+    );
+  });
+}
+
+it("unnamed Claude sender preserves its sessionId when the display name falls back to tmux", async () => {
+  const { deps } = makeFakeDeps({
+    claudeSessions: [
+      { session: "tmux-name", paneId: "%7", sessionId: "exact-session" },
+    ],
+  });
+  const sender = await resolvePeerSender({ env: { TMUX_PANE: "%7" }, deps });
+  assert.equal(sender.sessionId, "exact-session");
+  assert.match(formatPeerReply(sender, "codex"), /--to 'claude:exact-session'/);
+});
+
+for (const paneCli of ["claude", "codex"]) {
+  it(`Codex thread identity overrides an inherited ${paneCli} pane`, async () => {
+    const sender = await resolvePeerSender({
+      env: { TMUX_PANE: "%91", CODEX_THREAD_ID: "wanted" },
+      allCandidates: [
+        { cli: paneCli, name: "wrong", paneId: "%91", threadId: "other" },
+        { cli: "codex", name: "worker", paneId: "%92", threadId: "wanted" },
+      ],
+    });
+    assert.deepEqual(sender, { cli: "codex", name: "worker" });
+  });
+}
+
+it("an unmatched Codex thread never falls back to the daemon pane", async () => {
+  const sender = await resolvePeerSender({
+    env: { TMUX_PANE: "%91", CODEX_THREAD_ID: "wanted" },
+    allCandidates: [{ cli: "claude", name: "wrong", paneId: "%91" }],
+    deps: { resolveSenderName: async () => null },
+  });
+  assert.equal(sender.cli, "codex");
+  assert.notEqual(sender.name, "wrong");
+});
+
+it("Claude without a real name or sessionId gets an unknown reply route", async () => {
+  const { deps } = makeFakeDeps();
+  const sender = await resolvePeerSender({ env: { CLAUDECODE: "1" }, deps });
+  assert.equal(sender.cli, "claude");
+  for (const targetCli of ["claude", "codex", "agy"])
+    assert.equal(
+      formatPeerReply(sender, targetCli),
+      "회신: 경로 불명(보낸 세션을 판별하지 못함)",
+    );
+});
+
+it("a Claude pane without name or sessionId cannot advertise its tmux name as a reply target", async () => {
+  const { deps } = makeFakeDeps({
+    claudeSessions: [{ session: "shell", paneId: "%7" }],
+  });
+  const sender = await resolvePeerSender({ env: { TMUX_PANE: "%7" }, deps });
+  assert.equal(
+    formatPeerReply(sender, "codex"),
+    "회신: 경로 불명(보낸 세션을 판별하지 못함)",
+  );
 });
