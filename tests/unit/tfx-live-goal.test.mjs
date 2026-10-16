@@ -213,6 +213,11 @@ test("goal set rejects reserved first words regardless of CLI and case", async (
 test("Codex tmux goals normalize whitespace and confirm fresh matching sqlite state", async () => {
   const dir = await mkdtemp(join(tmpdir(), "tfx-goal-tmux-"));
   try {
+    await writeFile(
+      join(dir, "ps"),
+      "#!/usr/bin/env node\nconsole.log('100 1 Ss /bin/zsh\\n101 100 S+ codex');\n",
+      { mode: 0o755 },
+    );
     const { DatabaseSync } = await import("node:sqlite");
     const db = new DatabaseSync(join(dir, "goals_1.sqlite"));
     db.exec(
@@ -227,6 +232,7 @@ import { DatabaseSync } from 'node:sqlite';
 const root = process.env.CODEX_HOME;
 const args = process.argv.slice(2);
 appendFileSync(root + '/calls', JSON.stringify(args) + '\\n');
+if (args[0] === 'display-message' && args.at(-1) === '#{pane_pid}') console.log('100');
 if (args[0] === 'capture-pane') console.log(existsSync(root + '/busy') ? 'esc to interrupt' : '›');
 if (args[0] === 'set-buffer') writeFileSync(root + '/prompt', args.at(-1));
 if (args[0] === 'send-keys' && args.at(-1) === 'Escape') {

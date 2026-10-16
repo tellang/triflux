@@ -114,7 +114,7 @@ function usage(command) {
     "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--sandbox] [--no-auto-trust] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude|agy] [--if-busy wait|fail|interrupt|queue] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --cli codex [--transport queue|tmux] (--session NAME[:WINDOW.PANE] | --thread UUID) --prompt TEXT [--from NAME] [--timeout 60] [--no-wait]",
-    "    Codex ask defaults to the app-server queue (thread/queue/add, `codex queue --message` only when add is unavailable; delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands.",
+    "    Codex ask defaults to the app-server queue (thread/queue/add, `codex queue --message` only when add is unavailable; delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands. /rename and /status skip idle waiting only with --if-busy wait (default) or queue; explicit fail or interrupt policies are honored. /compact and /new wait for idle by default.",
     "  tfx-live ask --cli codex --transport uds --thread ID|auto --prompt TEXT [--codex-socket PATH|default] [--cwd DIR] [--if-busy wait|fail|steer] [--busy-timeout 60] [--timeout 60] [--max-turn SECONDS]",
     "  tfx-live ask --transport uds|auto (--short SHORT | --session-id ID) --prompt TEXT [--config-dir DIR] [--bridge ABS] [--session NAME (auto fallback)] [--timeout 60]",
     "    ask options: --no-wait --no-relay-tag --via-tmux (a Claude caller sending to a local Claude session is refused and told to use SendMessage unless set) --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 60/85 of rollout window or 15/22 of 1.05M).",
@@ -347,23 +347,46 @@ async function paneCliProcess(session, cli, panePid) {
     ]);
     panePid = Number(stdout.trim());
   }
-  const { stdout } = await execFileAsync("ps", ["-eo", "pid=,ppid=,args="], {
-    timeout: 5000,
-    maxBuffer: MAX_BUFFER,
-  });
-  for (const line of stdout.split(/\r?\n/)) {
-    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/);
-    if (!match) continue;
-    const pid = Number(match[1]);
-    if (pid !== panePid && Number(match[2]) !== panePid) continue;
+  const { stdout } = await execFileAsync(
+    "ps",
+    ["-eo", "pid=,ppid=,stat=,args="],
+    {
+      timeout: 5000,
+      maxBuffer: MAX_BUFFER,
+    },
+  );
+  const rows = stdout
+    .split(/\r?\n/)
+    .map((line) => line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/))
+    .filter(Boolean);
+  const tree = new Map([[String(panePid), 0]]);
+  let size;
+  do {
+    size = tree.size;
+    for (const [, pid, ppid] of rows)
+      if (!tree.has(pid) && tree.has(ppid)) tree.set(pid, tree.get(ppid) + 1);
+  } while (tree.size !== size);
+  let selected = null;
+  let selectedDepth = Infinity;
+  for (const [, pid, , stat, command] of rows) {
+    const depth = tree.get(pid);
+    if (depth === undefined) continue;
     if (
       cli === "codex"
-        ? isCodexProcessCommand(match[3])
-        : new RegExp(`^(?:\\S*/)?${cli}(?:\\s|$)`).test(match[3])
-    )
-      return { pid, command: match[3] };
+        ? isCodexProcessCommand(command)
+        : new RegExp(`^(?:\\S*/)?${cli}(?:\\s|$)`).test(command)
+    ) {
+      const foreground = stat.includes("+") && !/[TtZ]/.test(stat);
+      if (
+        depth < selectedDepth ||
+        (depth === selectedDepth && foreground && !selected.foreground)
+      ) {
+        selected = { pid: Number(pid), command, foreground };
+        selectedDepth = depth;
+      }
+    }
   }
-  return null;
+  return selected;
 }
 
 async function agyConversation(pid) {
@@ -1402,7 +1425,8 @@ function isCodexReadyCapture(text) {
   return (
     !isBusyByEsc(text) &&
     !isCodexLoadingCapture(text) &&
-    hasCodexComposerPrompt(text)
+    // 응답 추출용 글리프 허용 범위에는 셸 프롬프트도 있어 준비 판정에는 쓰지 않는다.
+    /^\s*›(?:\s|$)/m.test(text)
   );
 }
 
@@ -2334,11 +2358,35 @@ async function waitForReady(
   timeoutMs,
   pollIntervalMs,
 ) {
-  const startedAt = Date.now();
+  let startedAt = Date.now();
   let raw = "";
+  let restartedAfterUpdate = false;
 
   while (Date.now() - startedAt < timeoutMs) {
     raw = await captureVisible(remote, session);
+    // paneCliProcess는 로컬 전용이므로 원격 시작 동작은 유지한다.
+    if (
+      adapter.cli === "codex" &&
+      !remote &&
+      /Update ran successfully! Please restart Codex|Updating Codex via/.test(
+        raw,
+      ) &&
+      // 조회가 실패하면(pane 소멸, ps 시간 초과) 재시작 키를 보내지 않도록 프로세스가 있는 것으로 본다.
+      !(await paneCliProcess(session, adapter.cli).catch(() => ({})))
+    ) {
+      if (!restartedAfterUpdate) {
+        await runTmux(remote, [
+          "send-keys",
+          "-t",
+          session,
+          ...adapter.launchKeys,
+        ]);
+        restartedAfterUpdate = true;
+        startedAt = Date.now();
+      }
+      await sleep(pollIntervalMs);
+      continue;
+    }
     const blocking = adapter.blockingScreens?.find((screen) =>
       screen.isPresent(raw),
     );
@@ -2346,6 +2394,7 @@ async function waitForReady(
       return {
         ready: false,
         raw,
+        restartedAfterUpdate,
         blockedBy: blocking.name,
         warning: blocking.warning,
       };
@@ -2356,15 +2405,28 @@ async function waitForReady(
       continue;
     }
     if (adapter.hasLoginGuard(raw)) {
-      return { ready: false, raw };
+      return { ready: false, raw, restartedAfterUpdate };
     }
     if (adapter.isReady(raw)) {
-      return { ready: true, raw };
+      return { ready: true, raw, restartedAfterUpdate };
     }
     await sleep(pollIntervalMs);
   }
 
-  return { ready: false, raw };
+  return {
+    ready: false,
+    raw,
+    restartedAfterUpdate,
+    ...(restartedAfterUpdate
+      ? {
+          warning: (await paneCliProcess(session, adapter.cli).catch(
+            () => ({}),
+          ))
+            ? "codex not ready after update restart"
+            : "codex exited after update restart",
+        }
+      : {}),
+  };
 }
 
 function bundledBridgePath() {
@@ -3060,13 +3122,15 @@ async function doStart(launchAdapter, opts) {
   await runTmux(remote, ["send-keys", "-t", session, ...launchKeys]);
   await dismissStartupScreens(adapter, remote, session);
 
-  const { ready, raw, blockedBy, warning } = await waitForReady(
-    adapter,
+  const readiness = await waitForReady(
+    { ...adapter, launchKeys },
     remote,
     session,
     readyTimeoutMs,
     pollIntervalMs,
   );
+  const { raw, blockedBy, restartedAfterUpdate } = readiness;
+  let { ready, warning } = readiness;
   let unsetEnvVerified = false;
   let unsetEnvWarning;
   if (ready && !remote && opts.unsetEnv?.length) {
@@ -3123,24 +3187,40 @@ async function doStart(launchAdapter, opts) {
       await sleep(Math.min(found ? 1500 : 500, threadDeadline - Date.now()));
   }
   if (name && adapter.cli === "codex" && ready) {
-    try {
-      const command = `/rename ${name}`;
-      await runTmux(remote, ["send-keys", "-t", session, "-l", "--", command]);
-      await submitComposerLine(remote, session, command);
-      const deadline = Date.now() + Math.min(readyTimeoutMs, 5000);
-      while (!remote && Date.now() < deadline) {
-        const named = await codexThreadIdByName(name, {
-          sinceMs: now.getTime() - 1000,
-        });
-        if (named) {
-          threadId = named;
-          nameApplied = true;
-          break;
+    // paneCliProcess는 로컬 전용이므로 원격 입력 동작은 유지한다.
+    const target = !remote && (await paneCliProcess(session, adapter.cli));
+    if (!remote && !target?.foreground) {
+      ready = false;
+      warning = target
+        ? "codex is not in foreground before input"
+        : "codex exited before input";
+    } else {
+      try {
+        const command = `/rename ${name}`;
+        await runTmux(remote, [
+          "send-keys",
+          "-t",
+          session,
+          "-l",
+          "--",
+          command,
+        ]);
+        await submitComposerLine(remote, session, command);
+        const deadline = Date.now() + Math.min(readyTimeoutMs, 5000);
+        while (!remote && Date.now() < deadline) {
+          const named = await codexThreadIdByName(name, {
+            sinceMs: now.getTime() - 1000,
+          });
+          if (named) {
+            threadId = named;
+            nameApplied = true;
+            break;
+          }
+          await sleep(Math.min(pollIntervalMs, 200));
         }
-        await sleep(Math.min(pollIntervalMs, 200));
+      } catch {
+        nameApplied = false;
       }
-    } catch {
-      nameApplied = false;
     }
   }
   if (name && adapter.cli === "agy" && ready) {
@@ -3260,7 +3340,9 @@ end tell`;
     resumed,
     resumeTarget,
     ready,
-    ...(blockedBy ? { blockedBy, warning } : {}),
+    ...(blockedBy ? { blockedBy } : {}),
+    ...(warning ? { warning } : {}),
+    ...(restartedAfterUpdate ? { restartedAfterUpdate } : {}),
     name,
     nameGenerated: !resumed && opts.name === undefined,
     nameApplied,
@@ -3375,20 +3457,26 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
     ifBusy = adapter.cli === "agy" ? "queue" : "wait",
     busyTimeoutMs = timeoutMs,
   } = opts;
-  const slashCommand = adapter.cli === "agy" && isSlashCommand(prompt);
-  const busyWaitedMs = opts.skipBusyCheck
-    ? 0
-    : await waitForTmuxIdle(
-        adapter,
-        {
-          session,
-          remote,
-          pollIntervalMs,
-          busyTimeoutMs,
-          ifBusy: slashCommand ? "queue" : ifBusy,
-        },
-        deps,
-      );
+  const slashCommand =
+    (adapter.cli === "agy" && isSlashCommand(prompt)) ||
+    (adapter.cli === "codex" && /^\/(?:rename|status)(?:\s|$)/.test(prompt));
+  const busyWaitedMs =
+    opts.skipBusyCheck ||
+    (adapter.cli === "codex" &&
+      slashCommand &&
+      ["wait", "queue"].includes(ifBusy))
+      ? 0
+      : await waitForTmuxIdle(
+          adapter,
+          {
+            session,
+            remote,
+            pollIntervalMs,
+            busyTimeoutMs,
+            ifBusy: adapter.cli === "agy" && slashCommand ? "queue" : ifBusy,
+          },
+          deps,
+        );
   const queued =
     adapter.cli === "agy" && adapter.isBusy(await capture(remote, session));
   const beforeRaw = await captureHistory(remote, session);
@@ -3413,6 +3501,17 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
       transport: "tmux",
     };
 
+  // paneCliProcess는 로컬 전용이므로 원격 입력 동작은 유지한다.
+  const target =
+    !remote &&
+    (await (deps.paneCliProcess ?? paneCliProcess)(session, adapter.cli));
+  if (!remote && !target?.foreground) {
+    throw new Error(
+      target
+        ? `${adapter.cli} is not in foreground before input`
+        : `${adapter.cli} exited before input`,
+    );
+  }
   const bufferName = tmuxBufferName(session);
   // tmux 는 명령 하나를 16KiB 안팎에서 "command too long" 으로 거부한다. 긴 프롬프트는 파일로 넣는다.
   if (!remote && Buffer.byteLength(prompt) > TMUX_SET_BUFFER_MAX_BYTES) {
@@ -3749,25 +3848,8 @@ async function dispatchAsk(adapter, opts) {
 async function codexPaneArgs(panePid) {
   if (!/^\d+$/.test(String(panePid ?? ""))) return null;
   try {
-    const { stdout } = await execFileAsync(
-      "ps",
-      ["-ax", "-o", "pid=,ppid=,args="],
-      {
-        timeout: 5000,
-        maxBuffer: MAX_BUFFER,
-      },
-    );
-    const rows = String(stdout)
-      .split("\n")
-      .map((line) => line.match(/^\s*(\d+)\s+(\d+)\s+(.*)$/))
-      .filter(Boolean);
-    const tree = new Set([String(panePid)]);
-    for (let depth = 0; depth < 8; depth += 1)
-      for (const [, pid, ppid] of rows) if (tree.has(ppid)) tree.add(pid);
     return (
-      rows.find(
-        ([, pid, , args]) => tree.has(pid) && isCodexProcessCommand(args),
-      )?.[3] ?? null
+      (await paneCliProcess(null, "codex", Number(panePid)))?.command ?? null
     );
   } catch {
     return null;
@@ -7031,6 +7113,7 @@ export {
   itermProject,
   matchPeerCandidates,
   openItermSession,
+  paneCliProcess,
   parseCodexTmuxSessions,
   parsePeerClosure,
   parsePeerToSpec,

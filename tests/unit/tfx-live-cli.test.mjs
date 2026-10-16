@@ -81,6 +81,13 @@ test("Codex loading screen blocks readiness and timestamp lines leave responses"
   );
 });
 
+test("Codex 준비 판정은 셸 프롬프트를 입력창으로 보지 않는다", () => {
+  for (const prompt of ["❯ ", "> ", "▶ ", "▸ "]) {
+    assert.equal(ADAPTERS.codex.isReady(prompt), false, prompt);
+  }
+  assert.equal(ADAPTERS.codex.isReady("› "), true);
+});
+
 test("empty tmux session target fails before ask or interrupt", async () => {
   const dir = await fs.mkdtemp(
     path.join(os.tmpdir(), "tfx-live-empty-target-"),
@@ -511,6 +518,7 @@ async function writeFakeBridge(dir, handlersSource) {
 }
 
 async function writeReadyFakeTmux(dir) {
+  await writeFakePaneProcesses(dir);
   const tmuxPath = path.join(dir, "tmux");
   await fs.writeFile(
     tmuxPath,
@@ -523,7 +531,8 @@ async function writeReadyFakeTmux(dir) {
       "const state = JSON.parse(fs.existsSync(statePath) ? fs.readFileSync(statePath, 'utf8') : '{}');",
       "state.buffers ||= {};",
       "state.sessions ||= {};",
-      "if (args[0] === 'display-message') console.log('codex\\tcodex');",
+      "if (args[0] === 'display-message') console.log(args.at(-1) === '#{pane_pid}' ? (args[args.indexOf('-t') + 1].endsWith('B') ? '200' : '100') : 'codex\\tcodex');",
+      "if (args[0] === 'send-keys' && args[3]?.startsWith('codex ') && args.at(-1) === 'Enter') { state.launches = (state.launches || 0) + 1; fs.writeFileSync(statePath, JSON.stringify(state)); }",
       "if (args[0] === 'set-buffer') {",
       "  const bufferName = args[args.indexOf('-b') + 1];",
       "  state.buffers[bufferName] = args[args.indexOf('--') + 1];",
@@ -541,7 +550,7 @@ async function writeReadyFakeTmux(dir) {
       "  state.sessions[args[2]] = { prompt: args[4], enterCount: 0, submitted: false };",
       "  fs.writeFileSync(statePath, JSON.stringify(state));",
       "}",
-      "if (args[0] === 'send-keys' && args.length === 4 && args[3] === 'Enter') {",
+      "if (args[0] === 'send-keys' && args[3] === 'Enter') {",
       "  const session = state.sessions[args[2]];",
       "  if (session?.prompt) {",
       "    session.enterCount += 1;",
@@ -551,6 +560,8 @@ async function writeReadyFakeTmux(dir) {
       "  fs.writeFileSync(statePath, JSON.stringify(state));",
       "}",
       "if (args[0] === 'capture-pane') {",
+      "  if (process.env.TMUX_UPDATE_SCREEN && (state.launches < 2 || process.env.TMUX_UPDATE_REPEAT === '1')) { console.log(process.env.TMUX_UPDATE_SCREEN); process.exit(0); }",
+      "  if (process.env.TMUX_UPDATE_LOADING === '1' && state.launches >= 2) { console.log('model: loading\\n›'); process.exit(0); }",
       "  const target = args[args.indexOf('-t') + 1];",
       "  const session = state.sessions[target];",
       "  if (session?.submitted) {",
@@ -578,7 +589,26 @@ async function writeReadyFakeTmux(dir) {
   return tmuxPath;
 }
 
+async function writeFakePaneProcesses(dir) {
+  await fs.writeFile(
+    path.join(dir, "ps"),
+    [
+      "#!/usr/bin/env node",
+      "import fs from 'node:fs';",
+      "const file = process.env.TMUX_STATE;",
+      "const state = file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};",
+      "const withStat = process.argv.includes('pid=,ppid=,stat=,args=');",
+      "console.log(`100 1 ${withStat ? 'Ss ' : ''}/bin/zsh`);",
+      "const updating = process.env.TMUX_UPDATE_SCREEN && (state.launches < 2 || process.env.TMUX_UPDATE_REPEAT === '1');",
+      "if (process.env.TMUX_CODEX_EXITED !== '1' && !updating) console.log(`101 100 ${withStat ? (process.env.TMUX_CODEX_STAT || 'S+') + ' ' : ''}codex`);",
+      "console.log(`200 1 ${withStat ? 'Ss ' : ''}/bin/zsh\\n201 200 ${withStat ? 'S+ ' : ''}claude`);",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+}
+
 async function writeBusyFakeTmux(dir) {
+  await writeFakePaneProcesses(dir);
   const tmuxPath = path.join(dir, "tmux");
   await fs.writeFile(
     tmuxPath,
@@ -589,7 +619,7 @@ async function writeBusyFakeTmux(dir) {
       "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
       "const file = process.env.TMUX_STATE;",
       "const state = JSON.parse(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '{}');",
-      "if (args[0] === 'display-message') console.log('codex\\tcodex');",
+      "if (args[0] === 'display-message') console.log(args.at(-1) === '#{pane_pid}' ? '100' : 'codex\\tcodex');",
       "if (args[0] === 'set-buffer') state.buffer = args[args.indexOf('--') + 1];",
       "if (args[0] === 'show-buffer') process.stdout.write(state.buffer);",
       "if (args[0] === 'capture-pane') {",
@@ -623,6 +653,7 @@ async function writeLoggingFakeTmux(dir) {
 }
 
 async function writeStaleMarkerFakeTmux(dir) {
+  await writeFakePaneProcesses(dir);
   const tmuxPath = path.join(dir, "tmux");
   await fs.writeFile(
     tmuxPath,
@@ -630,6 +661,7 @@ async function writeStaleMarkerFakeTmux(dir) {
       "#!/usr/bin/env node",
       "import fs from 'node:fs';",
       "const args = process.argv.slice(2);",
+      "if (args[0] === 'display-message' && args.at(-1) === '#{pane_pid}') console.log('100');",
       "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
       "const statePath = process.env.TMUX_STATE;",
       "const state = JSON.parse(fs.existsSync(statePath) ? fs.readFileSync(statePath, 'utf8') : '{}');",
@@ -640,7 +672,7 @@ async function writeStaleMarkerFakeTmux(dir) {
       "if (args[0] === 'paste-buffer') {",
       "  state.prompt = state.buffer;",
       "}",
-      "if (args[0] === 'send-keys' && args.length === 4 && args[3] === 'Enter') {",
+      "if (args[0] === 'send-keys' && args[3] === 'Enter') {",
       "  state.submitted = true;",
       "}",
       "if (args[0] === 'capture-pane') {",
@@ -691,6 +723,7 @@ test("long tmux prompts go through a private file and load-buffer", async () => 
       pollIntervalMs: 1,
     },
     {
+      paneCliProcess: async () => ({ pid: 101, foreground: true }),
       runTmux: async (_remote, args) => {
         calls.push(args);
         if (args[0] === "load-buffer")
@@ -2061,6 +2094,278 @@ test("buildLaunchKeys shell-quotes a Claude override containing spaces", () => {
   );
 });
 
+for (const cli of ["claude", "codex", "agy"]) {
+  test(`paneCliProcess는 ${cli} 자손보다 본체를 고르고 같은 깊이에서는 전면을 우선한다`, async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-process-"));
+    try {
+      for (const [rows, expectedPid, foreground] of [
+        [
+          `14354 37902 SN ${cli} ${cli === "codex" ? "exec" : "--print"} task\n37902 100 SNs+ ${cli} bg-spare\n100 1 Ss /bin/zsh`,
+          37902,
+          true,
+        ],
+        [
+          `14354 100 SN ${cli} background\n37902 100 SNs+ ${cli} bg-spare\n100 1 Ss /bin/zsh`,
+          37902,
+          true,
+        ],
+        [
+          `14354 37902 SN+ ${cli} child\n37902 100 SN ${cli} bg-spare\n100 1 Ss /bin/zsh`,
+          37902,
+          false,
+        ],
+      ]) {
+        await fs.writeFile(
+          path.join(dir, "ps"),
+          `#!/usr/bin/env node\nconsole.log(${JSON.stringify(rows)});\n`,
+          { mode: 0o755 },
+        );
+        const { stdout } = await execFileAsync(
+          process.execPath,
+          [
+            "--input-type=module",
+            "-e",
+            `import { paneCliProcess } from ${JSON.stringify(CLI)}; console.log(JSON.stringify(await paneCliProcess(null, ${JSON.stringify(cli)}, 100)));`,
+          ],
+          {
+            env: {
+              ...process.env,
+              PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+            },
+          },
+        );
+        assert.deepEqual(JSON.parse(stdout), {
+          pid: expectedPid,
+          command: `${cli} bg-spare`,
+          foreground,
+        });
+      }
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("pane 셸의 손자 Codex가 전면에 있으면 입력을 보낸다", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-descendant-"));
+  try {
+    await writeReadyFakeTmux(dir);
+    await fs.writeFile(
+      path.join(dir, "ps"),
+      "#!/usr/bin/env node\nconsole.log('202 200 S+ codex\\n102 101 S+ codex\\n101 100 S node launcher\\n100 1 Ss /bin/zsh');\n",
+      { mode: 0o755 },
+    );
+    const logPath = path.join(dir, "tmux.jsonl");
+    const result = JSON.parse(
+      await runTfxLive(
+        [
+          "ask",
+          "--cli",
+          "codex",
+          "--session",
+          "wrappedA",
+          "--transport",
+          "tmux",
+          "--prompt",
+          "hello",
+          "--no-wait",
+          "--settle",
+          "1",
+        ],
+        {
+          env: {
+            PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+            TMUX_LOG: logPath,
+            TMUX_STATE: path.join(dir, "state.json"),
+          },
+        },
+      ),
+    );
+    assert.equal(result.inputSent, true);
+    assert.equal(result.status, "submitted");
+    const log = await readTmuxLog(logPath);
+    assert.ok(log.some((args) => args[0] === "paste-buffer"));
+    assert.ok(
+      log.some((args) => args[0] === "send-keys" && args.at(-1) === "Enter"),
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+for (const cli of ["codex", "claude", "agy"]) {
+  test(`${cli}가 종료됐으면 짧거나 긴 입력 모두 버퍼 생성 전에 거부한다`, async () => {
+    for (const prompt of ["hello", "가".repeat(10_000)]) {
+      const calls = [];
+      await assert.rejects(
+        tfxLive.doAskViaTmux(
+          ADAPTERS[cli],
+          {
+            session: "exited",
+            prompt,
+            skipBusyCheck: true,
+            skipContextGuard: true,
+          },
+          {
+            paneCliProcess: async () => null,
+            captureVisible: async () => "",
+            capturePane: async () => "",
+            runTmux: async (_remote, args) => {
+              calls.push(args);
+              return { stdout: "" };
+            },
+          },
+        ),
+        new RegExp(`${cli} exited before input`),
+      );
+      assert.deepEqual(calls, []);
+    }
+  });
+}
+
+for (const command of ["start", "ask"]) {
+  for (const state of ["exited", "T+"]) {
+    test(`Codex가 ${state}인 pane에는 ${command} 입력을 보내지 않는다`, async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-exited-"));
+      try {
+        await writeReadyFakeTmux(dir);
+        const logPath = path.join(dir, `${command}.jsonl`);
+        const args = [command, "--cli", "codex", "--session", "exited"];
+        args.push(
+          ...(command === "start"
+            ? ["--ready-timeout", "0.2", "--poll-interval", "1"]
+            : [
+                "--transport",
+                "tmux",
+                "--prompt",
+                "hello",
+                "--no-wait",
+                "--settle",
+                "1",
+              ]),
+        );
+        let result;
+        try {
+          result = JSON.parse(
+            await runTfxLive(args, {
+              env: {
+                PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+                TMUX_LOG: logPath,
+                TMUX_STATE: path.join(dir, `${command}.json`),
+                TMUX_CODEX_EXITED: state === "exited" ? "1" : "0",
+                TMUX_CODEX_STAT: state,
+                TFX_AGENTS_ROW: "0",
+              },
+            }),
+          );
+        } catch (error) {
+          assert.equal(command, "ask");
+          result = JSON.parse(error.stdout);
+        }
+        if (command === "start") {
+          assert.equal(result.ready, false);
+          assert.equal(result.nameApplied, false);
+          assert.match(
+            result.warning,
+            state === "exited"
+              ? /codex exited before input/
+              : /codex is not in foreground before input/,
+          );
+        } else {
+          assert.equal(result.ok, false);
+          assert.match(
+            result.error,
+            state === "exited"
+              ? /codex exited before input/
+              : /codex is not in foreground before input/,
+          );
+        }
+        const log = await readTmuxLog(logPath);
+        assert.equal(
+          log.some((args) => args[0] === "paste-buffer"),
+          false,
+        );
+        assert.equal(
+          log.some((args) => args.some((arg) => arg.startsWith("/rename "))),
+          false,
+        );
+        assert.equal(
+          log.some(
+            ([command, , , key]) =>
+              command === "send-keys" && ["Enter", "C-m"].includes(key),
+          ),
+          false,
+        );
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
+for (const state of ["ready", "exited", "loading"]) {
+  test(`업데이트 종료 후 Codex를 한 번만 다시 실행한다 (${state})`, async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-restart-"));
+    try {
+      await writeReadyFakeTmux(dir);
+      const logPath = path.join(dir, "tmux.jsonl");
+      const result = JSON.parse(
+        await runTfxLive(
+          [
+            "start",
+            "--cli",
+            "codex",
+            "--session",
+            "updated",
+            "--model",
+            "custom-model",
+            "--effort",
+            "high",
+            "--ready-timeout",
+            "1",
+            "--poll-interval",
+            "1",
+          ],
+          {
+            env: {
+              PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+              TMUX_LOG: logPath,
+              TMUX_STATE: path.join(dir, "state.json"),
+              TMUX_UPDATE_SCREEN:
+                "🎉 Update ran successfully! Please restart Codex.\n❯ ",
+              TMUX_UPDATE_REPEAT: state === "exited" ? "1" : "0",
+              TMUX_UPDATE_LOADING: state === "loading" ? "1" : "0",
+              TFX_AGENTS_ROW: "0",
+            },
+          },
+        ),
+      );
+      assert.equal(result.ready, state === "ready");
+      assert.equal(result.restartedAfterUpdate, true);
+      assert.equal(
+        result.warning,
+        state === "exited"
+          ? "codex exited after update restart"
+          : state === "loading"
+            ? "codex not ready after update restart"
+            : undefined,
+      );
+      const log = await readTmuxLog(logPath);
+      const launches = log.filter(
+        (args) => args[0] === "send-keys" && args[3]?.startsWith("codex "),
+      );
+      assert.equal(launches.length, 2);
+      assert.deepEqual(launches[1], launches[0]);
+      assert.equal(
+        log.some((args) => args.some((arg) => arg.startsWith("/rename "))),
+        state === "ready",
+      );
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+}
+
 test("tfx-live start maps generic model and effort flags into launch keys", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-start-flags-"));
   try {
@@ -2204,6 +2509,7 @@ test("local start fixes tmux title to the explicit name outside iTerm", async ()
 test("tfx-live start reports approval screens as blocked without answering them", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-start-gate-"));
   try {
+    await writeFakePaneProcesses(dir);
     const tmuxPath = path.join(dir, "tmux");
     await fs.writeFile(
       tmuxPath,
@@ -2211,6 +2517,7 @@ test("tfx-live start reports approval screens as blocked without answering them"
         "#!/usr/bin/env node",
         "import fs from 'node:fs';",
         "const args = process.argv.slice(2);",
+        "if (args[0] === 'display-message' && args.at(-1) === '#{pane_pid}') console.log('100');",
         "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
         "if (args[0] === 'capture-pane') console.log(process.env.TMUX_SCREEN);",
       ].join("\n"),
