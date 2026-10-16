@@ -1358,6 +1358,7 @@ async function cmdConsentOnly(options, report) {
   try {
     const consent = await runConsentSteps({
       interactive: !options.nonInteractive,
+      fromUpdate: options.fromUpdate,
       report,
     });
     if (consent.changed) report.alreadyInGoalState = false;

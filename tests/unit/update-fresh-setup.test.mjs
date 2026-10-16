@@ -21,7 +21,7 @@ test("최신 update는 한 줄이며 JSON은 마지막 줄 하나다", (t) => {
   assert.match(
     success(cli.run(["update"])),
     new RegExp(
-      `^✓ triflux ${version} 최신 \\(파일 \\d+개 일치, \\d+\\.\\ds\\)\\n$`,
+      `^✓ triflux ${version} 최신 \\(파일 \\d+개 일치, \\d+\\.\\ds\\)\\n안내: .*native peer 전역 승인은 불가하다.*\\n안내: .*tfx-live\\.rules.*ask/queue/tmux.*\\n$`,
     ),
   );
   const json = success(cli.run(["update", "--json"]));

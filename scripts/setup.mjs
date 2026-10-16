@@ -61,6 +61,7 @@ import {
   resolveTrifluxHome,
 } from "./lib/machine-profile.mjs";
 import { CODEX_FAMILY_PROFILES } from "./lib/model-family-resolver.mjs";
+import { offerPeerPermission } from "./lib/native-peer-permissions.mjs";
 import { parseFrontmatter } from "./lib/skill-template.mjs";
 import { resolveStableNodeBin } from "./lib/stable-node.mjs";
 import { isTestRun, writesRealHomeInTest } from "./lib/test-env.mjs";
@@ -465,6 +466,10 @@ export async function runConsentSteps({
   modsInstall = false,
   offerMods = ensureTrifluxMods,
   home = _TFX_HOME,
+  packageRoot = PLUGIN_ROOT,
+  fromUpdate = false,
+  dryRun = false,
+  offerPeer = offerPeerPermission,
   report,
   log = report ? (message) => addStep(report, message) : console.log,
   warn = report
@@ -527,8 +532,21 @@ export async function runConsentSteps({
     notice,
   });
 
+  const peer = await offerPeer({
+    home,
+    packageRoot,
+    platform,
+    interactive: interactive && canAskUser({ env, input, output }),
+    dryRun,
+    fromUpdate,
+    ask,
+    notice,
+    warn,
+  });
+  result.changed ||= Boolean(peer.changed);
+
   try {
-    result.changed = [result.psmux, result.tmr, result.mods].some(
+    result.changed ||= [result.psmux, result.tmr, result.mods].some(
       (status) => status === "installed" || status === "updated",
     );
     const hooks = ensureHooks({ trust: false });

@@ -32,6 +32,7 @@ function fakeSteps({ interactive, answer, trusted = false }) {
       calls.mods = opts;
       return opts.install || opts.interactive ? "installed" : "deferred";
     },
+    offerPeer: async () => ({ status: "deferred", changed: false }),
     home: "/fake-home",
     log: (message) => calls.logs.push(message),
     warn: (message) => calls.logs.push(message),

@@ -4821,6 +4821,7 @@ async function discoverPeerTargets({
           const resolved = await resolveCodexThread(s.target || s.paneId);
           if (resolved?.threadId) {
             s.threadId = resolved.threadId;
+            s.threadSource = resolved.threadSource;
             if (!s.name) missingThreadIds.push(resolved.threadId);
           }
         } else if (s.threadId && !s.name) {
