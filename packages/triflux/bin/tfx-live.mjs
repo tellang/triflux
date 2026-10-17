@@ -3974,9 +3974,23 @@ async function resolveCodexTmuxThread(session, deps = {}) {
     : byCwd;
 }
 
-// 확인 메시지가 그 thread 의 사용자 입력으로 들어왔는지 본다. 다른 Codex 가 pane 을 읽어
-// 도구 출력으로 받은 nonce 는 입력 증거가 아니다.
-async function rolloutHasUserInput(threadId, prefix) {
+// Codex 입력창은 마지막 › 줄부터 빈 줄 앞까지이고 줄바꿈된 줄은 들여쓰기로 이어진다.
+// 빈 입력창의 플레이스홀더는 흐린 글씨(SGR 2)라 빼고, 공백을 뺀 입력 내용을 돌려준다.
+function codexComposerText(escaped) {
+  const lines = String(escaped).split("\n");
+  let index = lines.findLastIndex((line) => /^\s*›/.test(stripAnsi(line)));
+  if (index < 0) return null;
+  let text = "";
+  for (; index < lines.length && stripAnsi(lines[index]).trim(); index += 1)
+    text += stripAnsi(
+      lines[index].replace(/\x1b\[2m.*?(?:\x1b\[(?:0|22)?m|$)/g, ""),
+    );
+  return text.replace(/^\s*›/, "").replace(/\s+/g, "");
+}
+
+// 확인 메시지 그대로가 그 thread 의 사용자 입력으로 들어왔는지 본다. 다른 Codex 가 pane 을 읽어
+// 도구 출력으로 받은 nonce 나, 다른 내용과 함께 제출된 입력은 증거가 아니다.
+async function rolloutHasUserInput(threadId, prefix, message) {
   const rollout = await findCodexRollout(threadId);
   const info = rollout && (await stat(rollout).catch(() => null));
   if (!info) return false;
@@ -4008,8 +4022,7 @@ async function rolloutHasUserInput(threadId, prefix) {
       payload?.type === "message" &&
       payload.role === "user" &&
       payload.content?.some(
-        (part) =>
-          part?.type === "input_text" && String(part.text).startsWith(prefix),
+        (part) => part?.type === "input_text" && part.text === message,
       )
     )
       return true;
@@ -4024,7 +4037,10 @@ async function rolloutHasUserInput(threadId, prefix) {
 async function doAdopt(opts, deps = {}) {
   const tmux = deps.runTmux ?? runTmux;
   const pause = deps.sleep ?? sleep;
-  const capture = deps.captureVisible ?? captureVisible;
+  const captureComposer =
+    deps.captureEscaped ??
+    (async (target) =>
+      (await tmux(null, ["capture-pane", "-p", "-e", "-t", target])).stdout);
   const hasInput = deps.rolloutHasUserInput ?? rolloutHasUserInput;
   const { session, timeoutMs, pollIntervalMs } = opts;
   const deadline = Date.now() + timeoutMs;
@@ -4067,20 +4083,26 @@ async function doAdopt(opts, deps = {}) {
         ? "codex is not attached to the pane"
         : "no codex process in the pane",
     );
-  const visible = await capture(null, paneId);
-  if (!isCodexReadyCapture(visible) || isStartupScreen(ADAPTERS.codex, visible))
+  // 플레이스홀더만 있는 빈 입력창이어야 입력한다. 초안이나 메뉴 선택 줄이 있으면 아무 키도 보내지 않는다.
+  const before = await captureComposer(paneId);
+  const visible = stripAnsi(before);
+  if (
+    !isCodexReadyCapture(visible) ||
+    isStartupScreen(ADAPTERS.codex, visible) ||
+    codexComposerText(before) !== ""
+  )
     throw new Error(
-      "codex is not at its input prompt; attach to the pane and close the open screen first",
+      "codex is not at an empty input prompt; attach to the pane, clear the draft or close the open screen first",
     );
   const prefix = `[tfx-live adopt tfx-adopt-${randomBytes(6).toString("hex")}]`;
   const message = `${prefix} 리드가 이 Codex 세션을 피어 대화에 연결하려고 보낸 확인 메시지다. "확인"이라고만 답하고 새 작업은 시작하지 마라. 이후 리드의 메시지는 tfx-peer 로 온다.`;
   await tmux(null, ["send-keys", "-t", paneId, "-l", "--", message]);
-  // 쓰던 초안이 있으면 확인 메시지가 그 뒤에 붙는다. 초안까지 제출하지 않도록 입력한 만큼만 지우고 멈춘다.
+  // 확인과 입력 사이에 누가 입력했으면 입력창이 메시지와 달라진다. 입력한 만큼만 지우고 멈춘다.
   await pause(300);
-  const typed = (await capture(null, paneId))
-    .split("\n")
-    .some((line) => line.replace(/^\s*›\s*/, "").startsWith(prefix));
-  if (!typed) {
+  if (
+    codexComposerText(await captureComposer(paneId)) !==
+    message.replace(/\s+/g, "")
+  ) {
     await tmux(null, [
       "send-keys",
       "-t",
@@ -4090,7 +4112,7 @@ async function doAdopt(opts, deps = {}) {
       "BSpace",
     ]);
     throw new Error(
-      "codex composer was not empty; adopt removed its own text and left the draft",
+      "codex composer changed while typing; adopt removed its own text",
     );
   }
   await (deps.submitComposerLine ?? submitComposerLine)(
@@ -4106,7 +4128,7 @@ async function doAdopt(opts, deps = {}) {
     for (const thread of await listThreads())
       if (
         typeof thread.source === "string" &&
-        (await hasInput(thread.threadId, prefix))
+        (await hasInput(thread.threadId, prefix, message))
       )
         matches.push(thread);
     if (matches.length > 1)
