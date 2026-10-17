@@ -130,6 +130,8 @@ function usage(command) {
     "  tfx-live queue --cli codex (--session NAME[:WINDOW.PANE] | --thread UUID) [--request-id ID] [--delete QUEUED_ID|all]",
     "    queue lists or deletes items the TUI has not picked up yet (official app-server thread/queue API); missing means already delivered or gone.",
     "  tfx-live rename --cli codex --transport uds --thread ID --name NAME [--codex-socket PATH|default]",
+    "  tfx-live adopt --session NAME[:WINDOW.PANE] [--cli codex] [--timeout 120] [--poll-interval 1500]",
+    "    adopt types one nonce message into a hand-launched local Codex pane, finds the shared-daemon thread that received it, and records it so tfx-peer can reach the pane.",
     "    transport: auto is the default for Claude when --short/--session-id is present; otherwise tmux. bridge path: --bridge > $TFX_BRIDGE > $TFX_REPO_ROOT/hub/bridge.mjs > bundled Triflux hub/bridge.mjs.",
     "  tfx-live interrupt --session NAME [--cli codex|claude|agy] [--transport tmux|uds|auto] [--short SHORT | --session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 5]",
     "  tfx-live stop --session NAME [--cli codex|claude|agy] [--remote HOST]",
@@ -3972,6 +3974,204 @@ async function resolveCodexTmuxThread(session, deps = {}) {
     : byCwd;
 }
 
+// Codex 입력창은 들여쓰기 없는 › 줄부터 화면 맨 아래 상태 줄 묶음 위의 빈 줄 앞까지다.
+// 입력 내용의 빈 줄과 › 는 들여쓴 이어지는 줄로 그려지므로 경계가 아니다. 빈 입력창의
+// 플레이스홀더는 흐린 글씨(SGR 2)라 빼고, 공백을 뺀 입력 내용을 돌려준다. 경계를 못 찾으면 null 이다.
+function codexComposerText(escaped) {
+  const lines = String(escaped).split("\n");
+  const plain = lines.map((line) => stripAnsi(line));
+  let end = plain.length;
+  while (end > 0 && !plain[end - 1].trim()) end -= 1;
+  let separator = end - 1;
+  while (separator >= 0 && plain[separator].trim()) separator -= 1;
+  const start = plain.findLastIndex(
+    (line, index) => index < separator && /^›/.test(line),
+  );
+  if (start < 0) return null;
+  return lines
+    .slice(start, separator)
+    .map((line) =>
+      stripAnsi(line.replace(/\x1b\[2m.*?(?:\x1b\[(?:0|22)?m|$)/g, "")),
+    )
+    .join("")
+    .replace(/^›/, "")
+    .replace(/\s+/g, "");
+}
+
+// 확인 메시지 그대로가 그 thread 의 사용자 입력으로 들어왔는지 본다. 다른 Codex 가 pane 을 읽어
+// 도구 출력으로 받은 nonce 나, 다른 내용과 함께 제출된 입력은 증거가 아니다.
+async function rolloutHasUserInput(threadId, prefix, message) {
+  const rollout = await findCodexRollout(threadId);
+  const info = rollout && (await stat(rollout).catch(() => null));
+  if (!info) return false;
+  const handle = await open(rollout, "r");
+  let text;
+  try {
+    const length = Math.min(info.size, ROLLOUT_TAIL_BYTES);
+    const { buffer } = await handle.read(
+      Buffer.alloc(length),
+      0,
+      length,
+      info.size - length,
+    );
+    text = buffer.toString("utf8");
+  } finally {
+    await handle.close();
+  }
+  for (const line of text.split("\n")) {
+    if (!line.includes(prefix)) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const payload = entry.payload;
+    if (
+      entry.type === "response_item" &&
+      payload?.type === "message" &&
+      payload.role === "user" &&
+      payload.content?.some(
+        (part) => part?.type === "input_text" && part.text === message,
+      )
+    )
+      return true;
+  }
+  return false;
+}
+
+// 손으로 띄운 Codex 도 기본으로 공유 daemon 에 붙지만 pane 과 thread 를 잇는 기록이 없다.
+// daemon 안에서 도는 셸의 TMUX_PANE 은 daemon 값이라 Codex 의 자기 보고로는 pane 을 알 수 없다.
+// 리드가 그 pane 에 nonce 를 tmux 로 한 번 입력하고, 그 nonce 를 사용자 입력으로 받은 daemon thread 를
+// pane 에 기록한다. daemon 에 로드됐다는 사실은 pane 소속의 증거가 아니라 매번 다시 확인한다.
+async function doAdopt(opts, deps = {}) {
+  const tmux = deps.runTmux ?? runTmux;
+  const pause = deps.sleep ?? sleep;
+  const captureComposer =
+    deps.captureEscaped ??
+    (async (target) =>
+      (await tmux(null, ["capture-pane", "-p", "-e", "-t", target])).stdout);
+  const hasInput = deps.rolloutHasUserInput ?? rolloutHasUserInput;
+  const { session, timeoutMs, pollIntervalMs } = opts;
+  const deadline = Date.now() + timeoutMs;
+  const listThreads =
+    deps.listThreads ??
+    (async () =>
+      (
+        await import("../hub/team/uds-orchestrator.mjs")
+      ).listCodexAppServerThreads({
+        socketPath: resolveCodexDaemonSocket("default"),
+        timeoutMs,
+      }));
+  // 활성 pane 이 바뀌어도 같은 pane 에 입력하고 기록하도록 pane ID 를 먼저 고정한다.
+  const { stdout } = await tmux(null, [
+    "display-message",
+    "-p",
+    "-t",
+    session,
+    "#{pane_id}",
+  ]);
+  const paneId = String(stdout).trim();
+  if (!/^%\d+$/.test(paneId))
+    throw new Error(`tmux pane not found: ${session}`);
+  await waitForTmuxIdle(
+    ADAPTERS.codex,
+    {
+      session: paneId,
+      remote: null,
+      pollIntervalMs,
+      busyTimeoutMs: timeoutMs,
+      ifBusy: "wait",
+    },
+    deps,
+  );
+  // 기다리는 동안 Codex 가 끝났거나 메뉴 화면이면 입력이 셸이나 메뉴 선택으로 간다.
+  const target = await (deps.paneCliProcess ?? paneCliProcess)(paneId, "codex");
+  if (!target?.running)
+    throw new Error(
+      target
+        ? "codex is not attached to the pane"
+        : "no codex process in the pane",
+    );
+  // 플레이스홀더만 있는 빈 입력창이어야 입력한다. 초안이나 메뉴 선택 줄이 있으면 아무 키도 보내지 않는다.
+  const before = await captureComposer(paneId);
+  const visible = stripAnsi(before);
+  if (
+    !isCodexReadyCapture(visible) ||
+    isStartupScreen(ADAPTERS.codex, visible) ||
+    codexComposerText(before) !== ""
+  )
+    throw new Error(
+      "codex is not at an empty input prompt; attach to the pane, clear the draft or close the open screen first",
+    );
+  const prefix = `[tfx-live adopt tfx-adopt-${randomBytes(6).toString("hex")}]`;
+  const message = `${prefix} 리드가 이 Codex 세션을 피어 대화에 연결하려고 보낸 확인 메시지다. "확인"이라고만 답하고 새 작업은 시작하지 마라. 이후 리드의 메시지는 tfx-peer 로 온다.`;
+  await tmux(null, ["send-keys", "-t", paneId, "-l", "--", message]);
+  // 확인과 입력 사이에 누가 입력했으면 입력창이 메시지와 달라진다. 입력한 만큼만 지우고 멈춘다.
+  await pause(300);
+  if (
+    codexComposerText(await captureComposer(paneId)) !==
+    message.replace(/\s+/g, "")
+  ) {
+    await tmux(null, [
+      "send-keys",
+      "-t",
+      paneId,
+      "-N",
+      String([...message].length),
+      "BSpace",
+    ]);
+    throw new Error(
+      "codex composer changed while typing; adopt removed its own text",
+    );
+  }
+  await (deps.submitComposerLine ?? submitComposerLine)(
+    null,
+    paneId,
+    message,
+    "codex",
+  );
+  // 갓 띄운 Codex 는 첫 입력을 받아야 thread 가 생기므로 목록을 매번 다시 읽는다.
+  // 하위 에이전트 thread 의 source 는 객체다. 피어는 최상위 사용자 thread 만 받는다.
+  while (true) {
+    const matches = [];
+    for (const thread of await listThreads())
+      if (
+        typeof thread.source === "string" &&
+        (await hasInput(thread.threadId, prefix, message))
+      )
+        matches.push(thread);
+    if (matches.length > 1)
+      throw new Error(
+        `adopt nonce appeared in several threads: ${matches.map((thread) => thread.threadId).join(", ")}`,
+      );
+    if (matches.length === 1) {
+      await tmux(null, [
+        "set-option",
+        "-p",
+        "-t",
+        paneId,
+        "@tfx_codex_thread",
+        matches[0].threadId,
+      ]);
+      return {
+        ok: true,
+        cli: "codex",
+        session,
+        paneId,
+        threadId: matches[0].threadId,
+        name: matches[0].name ?? null,
+      };
+    }
+    const left = deadline - Date.now();
+    if (left <= 0)
+      throw new Error(
+        "adopt nonce did not reach any shared-daemon thread; a Codex launched with -c overrides, --no-daemon, or another CODEX_HOME runs outside the shared daemon. Restart it with tfx-live start --cli codex --resume <thread>",
+      );
+    await pause(Math.min(pollIntervalMs, left));
+  }
+}
+
 async function doAskViaQueue(adapter, opts, deps = {}) {
   // queue 를 못 쓰면 tmux 붙여넣기로 보내고 그 이유를 결과에 남긴다.
   const fallback = async (reason) => {
@@ -5458,6 +5658,19 @@ async function rename(flags) {
       socketPath: resolveCodexDaemonSocket(flags["codex-socket"] ?? "default"),
       threadId,
       name,
+    }),
+  );
+}
+
+async function adopt(flags) {
+  if (selectAdapter(flags).cli !== "codex")
+    throw new Error("adopt supports --cli codex only");
+  if (flags.remote) throw new Error("adopt supports local tmux only");
+  printJson(
+    await doAdopt({
+      session: requireFlag(flags, "session"),
+      timeoutMs: secondsFlag(flags, "timeout", 120_000),
+      pollIntervalMs: msFlag(flags, "poll-interval", DEFAULT_POLL_INTERVAL_MS),
     }),
   );
 }
@@ -7198,6 +7411,8 @@ async function main() {
     printJson(await goal(action, flags));
   } else if (command === "rename") {
     await rename(flags);
+  } else if (command === "adopt") {
+    await adopt(flags);
   } else if (command === "stop") {
     await stop(flags);
   } else if (command === "interrupt") {
@@ -7239,6 +7454,7 @@ export {
   discoverClaudeTmuxSessions,
   discoverCodexTmuxSessions,
   discoverPeerTargets,
+  doAdopt,
   doAskViaTmux,
   doCompact,
   doSend,

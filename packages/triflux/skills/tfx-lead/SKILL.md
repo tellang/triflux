@@ -28,7 +28,7 @@ description: >
 - 로컬 Claude·Codex 대상은 어댑터가 설치되어 있다고 전제하고 native 피어를 먼저 쓴다. native 실패는 그대로 반환하며 tmux 입력이나 미설치 폴백으로 넘기지 않는다. `tfx-live send`는 agy 대상에만 쓴다.
 - `<홈 절대경로>/.claude/scripts/tfx-peer`는 setup이 승인한 실제 절대경로로 바꿔 실행한다. 본문은 8000자까지이며 긴 본문은 파일 경로로 보낸다. Windows는 Claude 대상 전달만 지원하고 자동 승인용 래퍼나 Codex 규칙을 설치하지 않는다. PowerShell에서 `node "$env:APPDATA\npm\node_modules\triflux\bin\tfx-peer.mjs" send --to 'claude:<이름>' --message '<본문>'`을 직접 실행한다. Codex 대상은 미지원이다.
 - npm의 `tfx-peer.cmd` shim은 cmd.exe가 본문을 다시 해석해 `%`, `&`, 줄바꿈을 깨뜨리므로 쓰지 않는다.
-- 로컬 `tfx-live start --cli codex`와 resume은 공유 app-server 데몬에 붙고, 소켓이 없으면 `codex app-server daemon start`를 안내하며 실패한다. 손으로 띄운 Codex는 thread 출처를 증명할 수 없으므로 `tfx-live start --cli codex`(또는 `--resume`)로 다시 띄운다.
+- 로컬 `tfx-live start --cli codex`와 resume은 공유 app-server 데몬에 붙고, 소켓이 없으면 `codex app-server daemon start`를 안내하며 실패한다. 손으로 띄운 Codex는 `tfx-live adopt --session <tmux 대상>`으로 연결한다. 리드가 그 pane에 nonce 메시지를 tmux로 한 번 입력하고, 그 메시지를 받은 공유 데몬 thread를 pane에 기록한다. 이 한 번은 상대 기록에 사용자 발화로 남는다. `-c` 설정 덮어쓰기나 `--no-daemon`으로 띄운 Codex는 공유 데몬 밖에서 돌아 adopt가 실패하므로 `tfx-live start --cli codex --resume <thread>`로 다시 띄운다.
 - unknown 발신은 `회신: 경로 불명(보낸 세션을 판별하지 못함)`을 안내한다.
 - Claude의 `SendMessage`에서 `codex:` 대상은 mods가 native 피어 경로로, `agy:`·`antigravity:` 대상은 `tfx-live send`로 전달한다.
 - Codex 리드는 `spawn_agent`를 29회 부르고 `close_agent`를 한 번도 부르지 않은 사고가 있었다. 서브에이전트는 결과를 받은 즉시 닫는다.

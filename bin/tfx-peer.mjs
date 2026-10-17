@@ -63,7 +63,7 @@ export async function main(args = process.argv.slice(2), deps = {}) {
   if (!target.threadId) throw new Error("Codex thread UUID unavailable");
   if (!["tmux-option", "registry"].includes(target.raw?.threadSource))
     throw new Error(
-      "Codex target lacks exact thread provenance. tfx-live start --cli codex (또는 --resume)로 다시 띄워라",
+      "Codex target lacks exact thread provenance. tfx-live adopt --session <tmux 대상>으로 연결하거나 tfx-live start --cli codex --resume <thread>로 다시 띄워라",
     );
   const current = await (
     deps.resolveCodexTmuxThread ||

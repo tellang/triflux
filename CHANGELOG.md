@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.80.0] - 2026-10-17
+
+### Added
+- live: 손으로 띄운 Codex 를 피어 대화로 데려오는 `tfx-live adopt --session <tmux 대상>`. Codex 0.16x TUI 는 `--remote` 없이도 공유 app-server 데몬에 붙지만 pane 과 thread 를 잇는 기록이 없어 `tfx-peer` 가 거부했다. adopt 는 빈 입력창에 nonce 가 든 확인 메시지를 tmux 로 한 번 입력하고, 그 메시지 그대로를 사용자 입력으로 받은 데몬 최상위 thread 를 pane 옵션 `@tfx_codex_thread` 에 기록한다. 초안이 있거나 메뉴 화면이면 키를 보내지 않고, 두 thread 이상이 받으면 기록하지 않는다. `-c` 설정 덮어쓰기나 `--no-daemon` 으로 띄운 Codex 는 데몬 밖에서 돌아 실패하며 `tfx-live start --resume` 을 안내한다 (#803)
+
+### Changed
+- peer: 출처를 증명하지 못한 Codex 대상 거절 안내와 tfx-live, tfx-lead 스킬 문서가 재시작 대신 `tfx-live adopt` 를 먼저 안내한다 (#803)
+
 ## [10.79.0] - 2026-10-17
 
 ### Added
