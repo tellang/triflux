@@ -92,6 +92,8 @@ test("adopt fails without recording when no daemon thread received the nonce", a
 
 for (const [label, screen] of [
   ["a draft, even with the cursor at its start", `› 고치던 초안${FOOTER}`],
+  ["a draft that opens with blank lines", `› \n\n  고치던 초안${FOOTER}`],
+  ["a draft whose own line starts with ›", `› \n  › 인용한 줄${FOOTER}`],
   [
     "the model menu",
     "› 1. GPT-6.1-Sol (current)  Latest workhorse model\n  2. GPT-6-Astra            Frontier intelligence\n  enter select · esc back",

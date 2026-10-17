@@ -3974,18 +3974,28 @@ async function resolveCodexTmuxThread(session, deps = {}) {
     : byCwd;
 }
 
-// Codex 입력창은 마지막 › 줄부터 빈 줄 앞까지이고 줄바꿈된 줄은 들여쓰기로 이어진다.
-// 빈 입력창의 플레이스홀더는 흐린 글씨(SGR 2)라 빼고, 공백을 뺀 입력 내용을 돌려준다.
+// Codex 입력창은 들여쓰기 없는 › 줄부터 화면 맨 아래 상태 줄 묶음 위의 빈 줄 앞까지다.
+// 입력 내용의 빈 줄과 › 는 들여쓴 이어지는 줄로 그려지므로 경계가 아니다. 빈 입력창의
+// 플레이스홀더는 흐린 글씨(SGR 2)라 빼고, 공백을 뺀 입력 내용을 돌려준다. 경계를 못 찾으면 null 이다.
 function codexComposerText(escaped) {
   const lines = String(escaped).split("\n");
-  let index = lines.findLastIndex((line) => /^\s*›/.test(stripAnsi(line)));
-  if (index < 0) return null;
-  let text = "";
-  for (; index < lines.length && stripAnsi(lines[index]).trim(); index += 1)
-    text += stripAnsi(
-      lines[index].replace(/\x1b\[2m.*?(?:\x1b\[(?:0|22)?m|$)/g, ""),
-    );
-  return text.replace(/^\s*›/, "").replace(/\s+/g, "");
+  const plain = lines.map((line) => stripAnsi(line));
+  let end = plain.length;
+  while (end > 0 && !plain[end - 1].trim()) end -= 1;
+  let separator = end - 1;
+  while (separator >= 0 && plain[separator].trim()) separator -= 1;
+  const start = plain.findLastIndex(
+    (line, index) => index < separator && /^›/.test(line),
+  );
+  if (start < 0) return null;
+  return lines
+    .slice(start, separator)
+    .map((line) =>
+      stripAnsi(line.replace(/\x1b\[2m.*?(?:\x1b\[(?:0|22)?m|$)/g, "")),
+    )
+    .join("")
+    .replace(/^›/, "")
+    .replace(/\s+/g, "");
 }
 
 // 확인 메시지 그대로가 그 thread 의 사용자 입력으로 들어왔는지 본다. 다른 Codex 가 pane 을 읽어
