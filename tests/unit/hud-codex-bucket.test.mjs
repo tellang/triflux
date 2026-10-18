@@ -18,6 +18,10 @@ import {
   normalizeBuckets,
   refreshCodexRateLimitsCache,
 } from "../../hud/providers/codex.mjs";
+import {
+  listProbeTargets,
+  recordProbe,
+} from "../../hud/providers/codex-probe.mjs";
 
 function sessionDirFor(sessionsRoot, date) {
   return join(
@@ -198,6 +202,125 @@ describe("Codex bucket normalization", () => {
 });
 
 describe("Codex multi-window selection", () => {
+  for (const [name, previousOwner, recheck] of [
+    ["owner 변경", "home|old", false],
+    ["recheck", "home|current", true],
+  ]) {
+    it(`${name}이면 TTL 안에서도 새 프로브 값을 받는다`, async () => {
+      const root = mkdtempSync(join(tmpdir(), "triflux-codex-force-"));
+      try {
+        const cachePath = join(root, "cache.json");
+        const stateFilePath = join(root, "state.json");
+        const codexAuthPath = join(root, "auth.json");
+        const nowSec = Math.floor(Date.now() / 1000);
+        const token = `x.${Buffer.from(JSON.stringify({ exp: nowSec + 7200 })).toString("base64url")}.x`;
+        writeFileSync(
+          codexAuthPath,
+          JSON.stringify({ tokens: { access_token: token } }),
+        );
+        writeFileSync(
+          cachePath,
+          JSON.stringify({ owner: previousOwner, recheck }),
+        );
+        recordProbe(stateFilePath, "current", Date.now());
+        const buckets = await refreshCodexRateLimitsCache({
+          cachePath,
+          sessionsRoot: root,
+          owner: "home|current",
+          collect: async (now, force) =>
+            listProbeTargets({
+              codexAuthPath,
+              stateFilePath,
+              ttlMs: 300000,
+              nowMs: now.getTime(),
+              force,
+            }).map(() => ({
+              limitId: "codex",
+              primary: {
+                used_percent: 12,
+                window_minutes: 300,
+                resets_at: nowSec + 7200,
+              },
+              timestamp: now.toISOString(),
+              probe: true,
+            })),
+        });
+        assert.equal(buckets?.codex.primary.used_percent, 12);
+        const cache = JSON.parse(readFileSync(cachePath, "utf8"));
+        assert.equal(cache.owner, "home|current");
+        assert.equal(cache.recheck, previousOwner !== "home|current");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+
+  for (const [window, usedPercent, resetDelta, expected] of [
+    ["primary", 0, 0, true],
+    ["secondary", 0, 0, true],
+    ["primary", 50, 3601, true],
+    ["secondary", 50, -3601, true],
+    ["secondary", 50, 300, false],
+    ["primary", 50, 3600, false],
+  ]) {
+    it(`${window} 사용률 ${usedPercent}, 리셋 차이 ${resetDelta}초로 재조회를 판정하고 한 번 뒤 끈다`, async () => {
+      const root = mkdtempSync(join(tmpdir(), "triflux-codex-reset-"));
+      try {
+        const cachePath = join(root, "cache.json");
+        const nowSec = Math.floor(Date.now() / 1000);
+        const previous = {
+          limitId: "codex",
+          primary: {
+            used_percent: 50,
+            window_minutes: 300,
+            resets_at: nowSec + 7200,
+          },
+          secondary: {
+            used_percent: 50,
+            window_minutes: 10080,
+            resets_at: nowSec + 604800,
+          },
+        };
+        writeFileSync(
+          cachePath,
+          JSON.stringify({
+            owner: "home|current",
+            buckets: { codex: previous },
+          }),
+        );
+        const current = {
+          ...previous,
+          [window]: {
+            ...previous[window],
+            used_percent: usedPercent,
+            resets_at: previous[window].resets_at + resetDelta,
+          },
+        };
+        const refresh = () =>
+          refreshCodexRateLimitsCache({
+            cachePath,
+            sessionsRoot: root,
+            owner: "home|current",
+            collect: async (now) => [
+              { ...current, timestamp: now.toISOString(), probe: true },
+            ],
+          });
+        await refresh();
+        assert.equal(
+          JSON.parse(readFileSync(cachePath, "utf8")).recheck,
+          expected,
+        );
+        await refresh();
+        assert.equal(
+          JSON.parse(readFileSync(cachePath, "utf8")).recheck,
+          false,
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+  }
+
   it("가장 최근 수정된 세션의 마지막 응답 기록으로 30분 캐시 만료를 정한다", async (t) => {
     const sessionsRoot = mkdtempSync(join(tmpdir(), "triflux-codex-cache-"));
     const now = new Date("2026-07-11T09:00:00.000Z");

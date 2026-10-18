@@ -49,6 +49,7 @@ export function listProbeTargets({
   stateFilePath,
   ttlMs,
   nowMs,
+  force = false,
 }) {
   const state = readJsonFile(stateFilePath) || {};
   const due = (key) =>
@@ -56,7 +57,11 @@ export function listProbeTargets({
   const targets = [];
 
   const currentAuth = readJsonFile(codexAuthPath);
-  if (currentAuth && accessTokenUsable(currentAuth, nowMs) && due("current")) {
+  if (
+    currentAuth &&
+    accessTokenUsable(currentAuth, nowMs) &&
+    (force || due("current"))
+  ) {
     targets.push({ key: "current", codexHome: dirname(codexAuthPath) });
   }
   return targets;

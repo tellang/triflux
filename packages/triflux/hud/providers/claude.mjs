@@ -43,6 +43,18 @@ export function getClaudeEmail() {
   return config?.oauthAccount?.emailAddress || null;
 }
 
+export function getClaudeAccount() {
+  const config = readJson(
+    join(process.env.CLAUDE_CONFIG_DIR || homedir(), ".claude.json"),
+    null,
+  );
+  return (
+    config?.oauthAccount?.accountUuid ||
+    config?.oauthAccount?.emailAddress ||
+    null
+  );
+}
+
 export const CLAUDE_USAGE_POLL_BASE_MS = 5_000;
 export const CLAUDE_USAGE_POLL_JITTER_RATIO = 0.2;
 const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
@@ -542,6 +554,19 @@ export function readClaudeUsageSnapshot() {
     cache?.errorType === "rate_limit" &&
     Number.isFinite(schedule.nextRefreshAt) &&
     Date.now() < schedule.nextRefreshAt;
+  // account 가 없는 옛 버전 캐시는 같은 계정으로 본다.
+  const accountChanged =
+    cache != null && "account" in cache && cache.account !== getClaudeAccount();
+  if ((accountChanged || cache?.recheck === true) && !staleBackoffActive) {
+    schedule.shouldRefresh = true;
+  }
+  if (accountChanged || (cache?.recheck === true && !cache.data)) {
+    return {
+      data: null,
+      shouldRefresh: schedule.shouldRefresh,
+      isStale: staleBackoffActive,
+    };
+  }
 
   // 1차: 자체 캐시에 유효 데이터가 있는 경우
   if (cache?.data) {
@@ -621,6 +646,7 @@ export function writeClaudeUsageCache(
   data,
   errorInfo = null,
   pollState = null,
+  { account = getClaudeAccount(), recheck = false } = {},
 ) {
   const state =
     pollState ||
@@ -639,6 +665,8 @@ export function writeClaudeUsageCache(
       : computeClaudeUsagePollState({ outcome: "success" }));
   const entry = {
     timestamp: Date.now(),
+    account,
+    recheck,
     data,
     error: !!errorInfo,
     errorType: errorInfo?.type || null, // "rate_limit" | "auth" | "network" | "unknown"
@@ -648,9 +676,13 @@ export function writeClaudeUsageCache(
     nextRefreshAt: Date.now() + state.delayMs,
   };
   // 에러 시 기존 유효 데이터 보존 (--% n/a 방지)
-  if (errorInfo && data == null) {
+  if (errorInfo) {
     const prev = readJson(CLAUDE_USAGE_CACHE_PATH, null);
-    if (prev?.data) {
+    if (prev) {
+      entry.account = prev.account;
+      entry.recheck = prev.recheck === true;
+    }
+    if (data == null && prev?.data) {
       entry.data = prev.data;
       entry.stale = true;
     }
@@ -664,6 +696,7 @@ export async function fetchClaudeUsage(forceRefresh = false) {
     return existingSnapshot.data || null;
   }
   const cache = readJson(CLAUDE_USAGE_CACHE_PATH, null);
+  const account = getClaudeAccount();
   const consecutive429s = Number.isFinite(cache?.consecutive429s)
     ? cache.consecutive429s
     : 0;
@@ -725,10 +758,26 @@ export async function fetchClaudeUsage(forceRefresh = false) {
   const pollState = usage
     ? computeClaudeUsagePollState({ outcome: "success" })
     : null;
+  const accountChanged = cache?.account !== account;
+  const reset =
+    !accountChanged &&
+    ["fiveHour", "weekly"].some((window) => {
+      const beforePercent = cache?.data?.[`${window}Percent`];
+      const afterPercent = usage?.[`${window}Percent`];
+      const beforeReset = Date.parse(cache?.data?.[`${window}ResetsAt`]);
+      const afterReset = Date.parse(usage?.[`${window}ResetsAt`]);
+      return (
+        (beforePercent != null &&
+          afterPercent != null &&
+          afterPercent < beforePercent) ||
+        Math.abs(afterReset - beforeReset) > 60 * 60 * 1000
+      );
+    });
   writeClaudeUsageCache(
     usage,
     usage ? null : { type: "unknown", status: 0 },
     pollState,
+    { account, recheck: accountChanged || reset },
   );
   return usage;
 }
@@ -736,11 +785,22 @@ export async function fetchClaudeUsage(forceRefresh = false) {
 export function scheduleClaudeUsageRefresh() {
   const scriptPath = process.argv[1];
   if (!scriptPath) return;
+  const cache = readJson(CLAUDE_USAGE_CACHE_PATH, null);
+  if (
+    cache?.errorType === "rate_limit" &&
+    !getSnapshotSchedule(cache).shouldRefresh
+  )
+    return;
+  const directRefresh =
+    (cache != null &&
+      "account" in cache &&
+      cache.account !== getClaudeAccount()) ||
+    cache?.recheck === true;
 
   // OMC 플러그인이 이미 fresh 데이터를 가지고 있으면 HUD 리프레시 불필요 (429 방지)
   try {
     const omcCache = readJson(OMC_PLUGIN_USAGE_CACHE_PATH, null);
-    if (omcCache?.data?.fiveHourPercent != null) {
+    if (!directRefresh && omcCache?.data?.fiveHourPercent != null) {
       const omcAge = Number.isFinite(omcCache.timestamp)
         ? Date.now() - omcCache.timestamp
         : Infinity;
