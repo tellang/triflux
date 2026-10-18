@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.80.1] - 2026-10-18
+
+### Fixed
+- hud: 계정 전환이나 리셋을 감지하면 Claude·Codex 사용량(5h, 1w)을 한 번 더 조회한다. Codex 는 초기화 뒤 첫 요청 전까지 `resets_at` 을 조회 시각 + 7일로 돌려주므로, 사용률이 내려갔거나 리셋 시각이 1시간 넘게 바뀐 것을 보면 5분 프로브 주기를 건너뛰고 바로 다시 묻는다. 계정(`CODEX_HOME|account_id`)이 바뀌어도 같다. Claude 는 캐시에 계정을 함께 저장해 다른 계정 값을 숨기고, 계정 전환이나 리셋 직후에는 OMC 캐시 복사 없이 직접 조회한다
+
 ## [10.80.0] - 2026-10-17
 
 ### Added
