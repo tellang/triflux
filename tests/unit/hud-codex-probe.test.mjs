@@ -201,4 +201,14 @@ test("listProbeTargets: 현재 계정 열거, 만료 임박 제외, TTL 스로�
 
   recordProbe(stateFile, "current", nowMs);
   assert.deepEqual(list(codexDir, nowMs + 1000), []);
+  assert.deepEqual(
+    listProbeTargets({
+      codexAuthPath: join(codexDir, "auth.json"),
+      stateFilePath: stateFile,
+      ttlMs: 300000,
+      nowMs: nowMs + 1000,
+      force: true,
+    }),
+    [{ key: "current", codexHome: codexDir }],
+  );
 });

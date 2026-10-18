@@ -600,11 +600,14 @@ export function readCodexRateLimitSnapshot() {
   return {
     buckets,
     promptCache: cache.promptCache ?? null,
-    shouldRefresh: !isFresh,
+    shouldRefresh:
+      !isFresh ||
+      cache.owner !== getCodexProbeOwner() ||
+      cache.recheck === true,
   };
 }
 
-export async function collectProbeSnapshots(now = new Date()) {
+export async function collectProbeSnapshots(now = new Date(), force = false) {
   if (process.env.TFX_CODEX_PROBE === "0") return [];
   let targets = [];
   try {
@@ -613,6 +616,7 @@ export async function collectProbeSnapshots(now = new Date()) {
       stateFilePath: CODEX_PROBE_STATE_PATH,
       ttlMs: Number(process.env.TFX_CODEX_PROBE_TTL_MS) || CODEX_PROBE_TTL_MS,
       nowMs: now.getTime(),
+      force,
     });
   } catch {
     return [];
@@ -658,11 +662,13 @@ export async function refreshCodexRateLimitsCache({
   owner = getCodexProbeOwner(),
 } = {}) {
   const now = new Date();
-  const probed = await collect(now);
+  const previous = readJson(cachePath, null);
+  const ownerChanged = previous?.owner !== owner;
+  const probed = await collect(now, ownerChanged || previous?.recheck === true);
   const probe =
     probed.length > 0
       ? { owner, at: now.getTime(), snapshots: probed }
-      : carryProbe(readJson(cachePath, null)?.probe, owner, now.getTime());
+      : carryProbe(previous?.probe, owner, now.getTime());
   const buckets = getCodexRateLimits({
     sessionsRoot,
     now,
@@ -671,9 +677,25 @@ export async function refreshCodexRateLimitsCache({
   const promptCache = readCodexPromptCache(
     sessionsRoot || join(getCodexHome(), "sessions"),
   );
+  const reset = ["primary", "secondary"].some((window) => {
+    const before = previous?.buckets?.codex?.[window];
+    const after = buckets?.codex?.[window];
+    return (
+      before &&
+      after &&
+      ((before.used_percent != null &&
+        after.used_percent != null &&
+        after.used_percent < before.used_percent) ||
+        (before.resets_at != null &&
+          after.resets_at != null &&
+          Math.abs(after.resets_at - before.resets_at) > 3600))
+    );
+  });
   // buckets가 null이어도 캐시 갱신 (stale 데이터 제거)
   writeJsonSafe(cachePath, {
     timestamp: Date.now(),
+    owner,
+    recheck: ownerChanged || reset,
     buckets,
     promptCache,
     probe,
