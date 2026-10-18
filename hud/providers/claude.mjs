@@ -554,7 +554,9 @@ export function readClaudeUsageSnapshot() {
     cache?.errorType === "rate_limit" &&
     Number.isFinite(schedule.nextRefreshAt) &&
     Date.now() < schedule.nextRefreshAt;
-  const accountChanged = cache != null && cache.account !== getClaudeAccount();
+  // account 가 없는 옛 버전 캐시는 같은 계정으로 본다.
+  const accountChanged =
+    cache != null && "account" in cache && cache.account !== getClaudeAccount();
   if ((accountChanged || cache?.recheck === true) && !staleBackoffActive) {
     schedule.shouldRefresh = true;
   }
@@ -790,7 +792,9 @@ export function scheduleClaudeUsageRefresh() {
   )
     return;
   const directRefresh =
-    (cache != null && cache.account !== getClaudeAccount()) ||
+    (cache != null &&
+      "account" in cache &&
+      cache.account !== getClaudeAccount()) ||
     cache?.recheck === true;
 
   // OMC 플러그인이 이미 fresh 데이터를 가지고 있으면 HUD 리프레시 불필요 (429 방지)
