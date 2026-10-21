@@ -99,8 +99,8 @@ it("Claude-to-Claude peer CLI remains refused before delivery", async () => {
   );
 });
 
-for (const pid of ["123", "999", undefined]) {
-  it(`self 는 호출한 Claude PID 가 ${pid ?? "없음"}이면 ${pid === "123" ? "본문 그대로 자기 세션에 넣는다" : "거부한다"}`, async () => {
+for (const ppid of [123, 999]) {
+  it(`self 는 부모 PID 가 ${ppid}이면 ${ppid === 123 ? "본문 그대로 자기 세션에 넣는다" : "CLAUDE_PID 를 맞춰도 거부한다"}`, async () => {
     let delivered;
     const run = peerMain(
       [
@@ -111,7 +111,8 @@ for (const pid of ["123", "999", undefined]) {
         "[memory-pressure] 1 에서 2",
       ],
       {
-        env: { CLAUDECODE: "1", ...(pid ? { CLAUDE_PID: pid } : {}) },
+        env: { CLAUDECODE: "1", CLAUDE_PID: "123" },
+        ppid,
         resolveClaudeReceiver: ({ sessionId }) => {
           assert.equal(sessionId, "own-session");
           return { socketPath: "/tmp/sessions/123.sock", peerToken: "t" };
@@ -122,7 +123,7 @@ for (const pid of ["123", "999", undefined]) {
         },
       },
     );
-    if (pid !== "123") {
+    if (ppid !== 123) {
       await assert.rejects(run, /not the calling Claude session/);
       assert.equal(delivered, undefined);
       return;
