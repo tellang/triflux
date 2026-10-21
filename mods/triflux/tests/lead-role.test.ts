@@ -3,17 +3,18 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { leadSessionName } from '../hooks/lead-role.ts'
 
-const noon = Date.UTC(2026, 9, 21, 12)
+// leadSessionName 은 로컬 날짜를 쓰므로 픽스처도 로컬 시각으로 잡는다.
+const noon = new Date(2026, 9, 21, 12).getTime()
 
 test('역할 앞에 앞자리 0 없는 날짜를 붙이고 이미 붙어 있으면 그대로 둔다', () => {
-  expect(leadSessionName('개발리드', Date.UTC(2026, 2, 5, 12))).toBe('3.5 개발리드')
+  expect(leadSessionName('개발리드', new Date(2026, 2, 5, 12).getTime())).toBe('3.5 개발리드')
   expect(leadSessionName('9.3 프로젝트리드', noon)).toBe('9.3 프로젝트리드')
 })
 
 const start = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 const lead = { command: 'tfx-lead', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 
-function fixture(on: On, rename: 'ok' | 'reject') {
+function fixture(on: On, rename: 'ok' | 'reject', uname?: Promise<void>) {
   const clock = mock.clock(on, { now: noon })
   mock.store(on)
   mock.env(on, { HOME: '/home/test' })
@@ -22,8 +23,11 @@ function fixture(on: On, rename: 'ok' | 'reject') {
   on('session.id', () => ({ value: 'session-a' }))
   on('session.start', () => ({ cwd: '/work' }))
   on('session.usage', () => ({ value: { context: { window: 1000, tokens: 0, percent: 0 }, rateLimits: [] } }) as never)
-  on('process.run', (_, e) => ({ value: { exitCode: 0, stdout: e.argv[0] === 'uname' ? 'Darwin\n' : '1\n',
-    stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('process.run', async (_, e) => {
+    if (e.argv[0] === 'uname') await uname
+    return { value: { exitCode: 0, stdout: e.argv[0] === 'uname' ? 'Darwin\n' : '1\n',
+      stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
   on('fs.write', () => ({ value: undefined }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('command.run', { command: 'rename' }, (_, e) => {
@@ -66,4 +70,18 @@ test('rename 이 거부되면 직접 실행하라는 토스트를 띄우고 나�
   expect(f.toasts).toEqual(['이름 변경 실패: /rename 10.21 개발리드 을 직접 실행'])
   expect(result.context?.length).toBe(1)
   expect(result.text).toContain('메모리 압박 감시: on')
+})
+
+test('압박 감시를 켜는 동안 시계가 흘러도 rename 은 명령이 끝난 뒤에만 호출한다', async ($, on) => {
+  let release!: () => void
+  const f = fixture(on, 'ok', new Promise<void>(done => { release = done }))
+  await $.session.start(start)
+  const pending = $.command.run({ ...lead, args: '개발리드' })
+  await f.clock.advance(1000)
+  expect(f.renames).toEqual([])
+  release()
+  await pending
+  await f.clock.settle()
+  expect(f.renames).toEqual(['10.21 개발리드'])
+  expect(f.toasts).toEqual([])
 })
