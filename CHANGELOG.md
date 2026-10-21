@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.82.0] - 2026-10-21
+
+### Changed
+- pressure: 확정한 메모리 압박 전이를 리드 자기 세션에 피어 메시지로 보내 긴 턴 도중에도 도착하게 한다. 새 하위 명령 `tfx-peer self --session <id> --message <text>` 는 수신 소켓 PID 가 호출 프로세스의 부모 PID 와 같을 때만 보내며 `send` 의 Claude-to-Claude 거부는 그대로다. 피어 전송이 `written` 이 아니면 이유를 한 줄 붙여 기존 `$.prompt.submit` 으로 폴백하고, 감시가 꺼졌으면 폴백하지 않는다. ADR-0043 이 ADR-0042 를 대체한다 (#807)
+
+### Fixed
+- mcp: context7 레지스트리 항목에 `CONTEXT7_API_KEY` Authorization 헤더를 넣는다. 키가 없으면 헤더 없이 익명으로 동작한다 (#784)
+
 ## [10.81.0] - 2026-10-21
 
 ### Added
