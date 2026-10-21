@@ -71,7 +71,7 @@ Skills you invoke directly:
 | --- | --- |
 | `/tfx-auto` | Front door for implementing, fixing, reviewing, and parallel work. Behavior is set by flags (below). |
 | `/tfx-live` | Live Claude↔Codex sessions: `start`/`ask`/`wait`/`stop`, `peer` relay, `list-sessions`. |
-| `/tfx-lead` | Lead role for running several Claude/Codex sessions: roles and models, briefs, cross review, merge and release coordination. |
+| `/tfx-lead` | `/tfx-lead <role>` makes the session a role lead (dev lead, project lead) and renames it. The lead names and registers workers, then manages their context, briefs, cross review, merge and release. Memory pressure alerts are `/tfx-pressure on\|off\|status`. |
 | `/tfx-remote` | Remote Claude Code sessions over SSH: start, list, reattach, send, readiness probe, monitor, stop. |
 | `/tfx-setup` | Setup: file sync, HUD, Codex and Antigravity profiles, MCP. `tfx setup --mods` installs mods. |
 | `/tfx-doctor` | Diagnose and repair. |

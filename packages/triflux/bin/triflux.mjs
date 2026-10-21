@@ -3908,7 +3908,7 @@ function cmdHelp() {
 
     ${AMBER}/tfx-auto${RESET}       ${GRAY}자동 분류 + 병렬 실행 (--cli codex|antigravity|claude, --parallel N)${RESET}
     ${AMBER}/tfx-live${RESET}       ${GRAY}Claude·Codex 라이브 세션 생성, 질의, 대기, 종료${RESET}
-    ${AMBER}/tfx-lead${RESET}       ${GRAY}여러 세션을 지휘하는 리드 역할${RESET}
+    ${AMBER}/tfx-lead${RESET}       ${GRAY}역할 리드 맡기기, 워커 등록과 진행 관리 (/tfx-lead <역할>)${RESET}
     ${AMBER}/tfx-remote${RESET}     ${GRAY}SSH 원격 Claude Code 세션${RESET}
     ${AMBER}/tfx-setup${RESET}      ${GRAY}HUD 설정 + 진단${RESET}
     ${YELLOW}/tfx-doctor${RESET}     ${GRAY}진단 + 수리 + 캐시 초기화${RESET}

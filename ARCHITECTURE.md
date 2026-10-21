@@ -79,9 +79,9 @@ CLI 호출은 `tfx-route.sh` / headless 워커 / `tfx` CLI를 경유해야 한�
 - **Codex 세션 메시지**: `tfx-live ask --cli codex`는 Codex 큐(app-server `thread/queue/add`)에 메시지를 쌓는다.
   queue를 못 쓰거나 슬래시 명령이면 tmux 입력으로 폴백하고 이유를 남긴다
   ([ADR-0027](docs/adr/0027-codex-message-queue-default.md)).
-- **리드 흐름**: `/tfx-lead`를 맡은 세션이 `tfx-live`로 Claude, Codex 세션을 띄우고
-  지시서, 교차 리뷰, 머지, 종료까지 소유한다
-  ([ADR-0029](docs/adr/0029-lead-session-operating-model.md), [ADR-0032](docs/adr/0032-lead-role-skill-tfx-lead.md)).
+- **리드 흐름**: `/tfx-lead <역할>`로 리드를 맡은 세션이 이름을 역할에 맞게 바꾸고, `tfx-live`로 띄운 워커에
+  이름을 붙여 등록한 뒤 지시서, 교차 리뷰, 머지, 종료까지 소유한다. 메모리 압박 감시는 `/tfx-pressure`가 따로 맡는다
+  ([ADR-0029](docs/adr/0029-lead-session-operating-model.md), [ADR-0032](docs/adr/0032-lead-role-skill-tfx-lead.md), [ADR-0042](docs/adr/0042-lead-role-entry-and-pressure-command.md)).
 - **headless 결과 색인**: 실행마다 `$TMPDIR/triflux-<uid>/tfx-headless/<세션>.results.json` 하나에 워커별 상태,
   exit 코드, 출력 경로를 기록한다. 결과를 읽는 쪽은 화면 문자열 대신 이 파일을 읽는다
   ([ADR-0034](docs/adr/0034-headless-session-results-index.md)).

@@ -39,6 +39,17 @@ Claude 프로젝트 MCP 승인 화면이 뜨면 `start`는 화면에 답하지 �
 
 Claude, agy, Codex(`Trust this folder?`와 `Do you trust the contents of this directory`)의 폴더 신뢰 화면은 기본으로 자동 승인한다. `start --no-auto-trust`를 주면 이 화면에도 키를 보내지 않고 같은 형식으로 `blockedBy`(`claude-trust-folder`, `agy-trust-folder`, `codex-trust-folder`)를 반환한다. `--resume`, `--resume-last`, `--remote`에도 똑같이 적용된다.
 
+## 창 배치(macOS)
+
+위 iTerm2 연동으로 탭과 패인을 나눌 때의 기준이다.
+
+- 화면 해상도, 폰트, 창 수로 탭당 열과 행을 먼저 계산한다. 예: 1440x900, MesloLGS 12pt 에서 좌우 2분할은 약 98~99열 x 50행으로 Claude Code 에 맞고, 2x2 는 25행이라 낮다.
+- 목적이 짝을 이루는 세션끼리 `--group`으로 한 탭에 묶는다(요구 정리와 프로브, 앱과 프롬프트 등).
+- iTerm `create tab`/`split`의 command 에는 PATH 가 없다. tmux 를 `/opt/homebrew/bin/tmux` 전체 경로로 쓴다. 안 그러면 탭이 바로 닫힌다.
+- 탭 제목은 tmux 와 agy 가 덮어쓴다. AppleScript 로 정한 이름은 유지되지 않으므로 위의 Python 제목 스크립트로 고정한다.
+- 끝난 세션의 tmr 반복 패인은 "no matching tmux room"을 계속 찍는다. 닫는다.
+- 탭이나 패인을 닫기 직전에 그 tty 의 프로세스(`ps -t <tty>`)를 다시 본다. tmux attach 나 omc 가 있으면 닫지 않는다.
+
 ## agy 세션
 
 ```bash
@@ -84,7 +95,7 @@ Claude TUI는 바쁠 때 들어온 입력을 대기열에 넣고 현재 턴(압�
 4. tmux 직접 입력은 queue를 못 쓸 때만 쓴다: 원격 호스트, thread를 못 찾음(`start` 밖에서 `resume --last`로 띄운 세션, `start --resume-last`의 `threadId: null`, 같은 cwd의 TUI 여럿 포함), `codex queue` 오류(0.160 미만 포함). 결과에 `transport: "tmux"`, `transportRequested: "queue"`, `fallbackReason`이 남는다. 시간 초과처럼 queue가 이미 쌓았을 수도 있는 오류는 `status: "unknown"`으로 끝내고 재전송하지 않는다.
 5. 슬래시 명령(`/rename`, `/compact`, `/new`)과 interrupt(Escape)는 tmux 직접 입력 전용이다. queue로 보낸 슬래시 명령은 실행되지 않고 일반 텍스트로 모델에 들어간다. `/명령`으로 시작하는 프롬프트(절대 경로는 제외)와 `--if-busy fail|interrupt`는 tmux로 보내고 `transportReason`을 남긴다. 슬래시 명령에는 표식을 붙이지 않으므로 `wait`로 추적할 수 없다.
 
-보내는 쪽이 Codex여도 로컬 피어 전송은 `<홈 절대경로>/.claude/scripts/tfx-peer send`를 쓴다. Codex 협업 도구(`spawn_agent`, `send_message`, `followup_task`)는 자기가 띄운 하위 에이전트(`/root/...`)를 대상으로 한다. 다른 최상위 Codex 세션에 닿는지는 확인하지 않았다.
+보내는 쪽이 Codex여도 로컬 피어 전송은 `<홈 절대경로>/.claude/scripts/tfx-peer send`를 쓴다. Codex 협업 도구(`spawn_agent`, `send_message`, `followup_task`)는 자기가 띄운 하위 에이전트(`/root/...`)를 대상으로 한다. 다른 최상위 Codex 세션에 닿는지는 확인하지 않았다. Codex 0.162.1 에서 모델에 노출된 협업 도구는 `spawn_agent`, `wait_agent`, `send_message`, `followup_task`, `list_agents`, `interrupt_agent`이고 `close_agent`와 `send_input`은 없었다. `send_message`는 하위 에이전트의 턴을 시작하지 않고 다음 `followup_task` 턴에 함께 전달된다.
 
 결과의 `status`는 `queued`(쌓임), `working`(TUI가 가져가 턴 시작), `completed`, `failed`로 나뉘고 `delivered`, `deliveredAt`, `turnId`가 배달을 구분한다. queue는 바쁜 세션에도 쌓으므로 `--if-busy wait`는 의미가 없다.
 
