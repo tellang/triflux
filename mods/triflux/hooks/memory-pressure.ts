@@ -37,6 +37,22 @@ function isMacOS($: EngineInterface, monitor: Monitor) {
   return monitor.platform
 }
 
+// $.prompt.submit 은 세션이 쉴 때만 턴을 연다. 피어 메시지는 도는 턴 안에도 닿으므로 먼저 자기 세션에 보낸다.
+async function notifyLead($: EngineInterface, text: string) {
+  let reason: string
+  try {
+    const sessionId = await $.session.id()
+    const pid = await $.env.get('CLAUDE_PID')
+    const result = await $.process.run(['tfx-peer', 'self', '--session', sessionId, '--message', text],
+      { stdin: '', timeoutMs: 10_000, env: pid ? { CLAUDE_PID: pid } : {} })
+    if (result.exitCode === 0 && JSON.parse(result.stdout).status === 'written') return
+    reason = result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`
+  } catch (error) {
+    reason = error instanceof Error ? error.message : String(error)
+  }
+  await $.prompt.submit({ text: `${text}\n피어 메시지 전송이 실패해 턴이 끝난 뒤 도착하는 prompt.submit 으로 보냈다 (${reason}).` })
+}
+
 function stopMemoryPressure(monitor: Monitor) {
   monitor.active?.timer?.cancel()
   monitor.active = undefined
@@ -86,7 +102,7 @@ function startMemoryPressure($: EngineInterface, monitor: Monitor, sessionId: st
             do {
               const now = await $.clock.now()
               const text = `[memory-pressure] 압박 단계가 ${prev} 에서 ${level} 로 바뀌었다 (${new Date(now).toISOString()}). tfx-lead 스킬 "압박 변화 대응" 절의 그 전이 행에 따라, 실행 중인 세션은 옮길 수 없다는 전제로 지금 할 일을 정해 실행하라. 그 사이 또 바뀌었을 수 있으니 /tfx-pressure status 로 현재 단계를 확인한다.`
-              await $.prompt.submit({ text }).catch(() => {})
+              await notifyLead($, text).catch(() => {})
               if (monitor.active !== current) return
               prev = level
               level = monitor.state.confirmed!

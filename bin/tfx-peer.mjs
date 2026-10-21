@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   deliverClaude,
   deliverCodex,
   parsePeerArgs,
+  resolveClaudeReceiver,
   resolveClaudeRegistryTarget,
 } from "../hub/team/native-peer.mjs";
 import {
@@ -18,11 +20,28 @@ import {
 
 export async function main(args = process.argv.slice(2), deps = {}) {
   const platform = deps.platform || process.platform;
+  const env = deps.env || process.env;
+  if (args[0] === "self") {
+    const { sessionId, message } = parsePeerArgs(args);
+    const receiver = (deps.resolveClaudeReceiver || resolveClaudeReceiver)({
+      sessionId,
+      platform,
+    });
+    // Claude 끼리는 SendMessage 로 보낸다. 예외는 mod 가 자기 세션에 넣는 알림뿐이다.
+    // 수신 소켓 이름이 <pid>.sock 이라 호출한 Claude 의 PID 와 맞춰 본다.
+    if (path.basename(receiver.socketPath) !== `${env.CLAUDE_PID}.sock`)
+      throw new Error("self target is not the calling Claude session");
+    return (deps.deliverClaude || deliverClaude)({
+      sessionId,
+      receiver,
+      message,
+      platform,
+    });
+  }
   const { to, message } = parsePeerArgs(args);
   const [cli, name] = to.split(":");
   if (platform === "win32" && cli === "codex")
     throw new Error("Windows 에서는 Codex 대상을 아직 지원하지 않는다");
-  const env = deps.env || process.env;
   // Windows 에는 tmux/ps 기반 탐색이 없다.
   const candidates =
     platform === "win32"

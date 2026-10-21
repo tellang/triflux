@@ -1,11 +1,11 @@
 ---
 id: 0042
 title: 리드 진입은 /tfx-lead <역할>, 압박 감시는 /tfx-pressure 로 나눈다
-status: accepted
+status: superseded
 date: 2026-10-21
 deciders: [tellang]
 supersedes: [0041]
-superseded_by: null
+superseded_by: 0043
 relates: [0032, 0040]
 pr: null
 ---
