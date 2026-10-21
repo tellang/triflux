@@ -2,6 +2,16 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.81.0] - 2026-10-21
+
+### Added
+- lead: mod 명령 `/tfx-lead <역할>` 로 세션에 역할 리드를 맡긴다. 세션 이름을 `<월>.<일> <역할>` 로 바꾸고, macOS 대화형 세션이면 메모리 압박 감시를 켜고, tfx-lead 스킬을 따르라는 숨은 지시를 넣는다. 호스트가 명령 훅 안의 `$.command.run` 을 거부하므로 `/rename` 은 훅이 끝난 뒤 실행하고, 거부되면 직접 실행하라는 토스트를 띄운다 (#805)
+- live: tfx-live 스킬에 macOS 창 배치 절(탭당 열과 행 계산, 짝을 이루는 세션 묶기, iTerm command 의 tmux 전체 경로, 닫기 전 `ps -t` 확인)을 더한다 (#805)
+
+### Changed
+- lead: 메모리 압박 감시 명령을 `/tfx-pressure on|off|status` 로 옮기고 저장 키를 `tfx.pressure.<sessionId>` 로 바꾼다. 이전 버전에서 `/tfx-lead on` 으로 켠 세션은 감시가 꺼지므로 `/tfx-lead <역할>` 을 다시 실행한다 (#805)
+- lead: tfx-lead 스킬을 리드 진입, 워커 등록, 진행 관리 중심으로 다시 쓴다. tfx-live 와 겹치던 전송 세부는 지우고 Windows 원격 수동 실행 대안은 tfx-remote 스킬로 옮긴다. ADR-0042 가 ADR-0041 을 대체한다 (#805)
+
 ## [10.80.1] - 2026-10-18
 
 ### Fixed
