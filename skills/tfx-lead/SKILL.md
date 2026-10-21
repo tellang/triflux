@@ -12,7 +12,7 @@ description: >
 
 한 세션에 역할 리드를 맡기고, 리드가 워커를 등록하고, 등록한 워커의 컨텍스트와 진행을 관리하는 절차다. Claude 리드와 Codex 리드가 같은 절차를 따른다.
 세션을 띄우고 보내고 기다리고 compact 하고 닫는 명령의 상세, 전송 세부, 컨텍스트 비율 표는 `tfx-live` 스킬이 정본이다. 여기서는 복제하지 않는다.
-근거는 ADR-0027(Codex queue), ADR-0029(리드 운영), ADR-0030(테스트 격리), ADR-0041(압박 감시)과 `.claude/rules/tfx-routing.md`의 "모델 배치" 표다.
+근거는 ADR-0027(Codex queue), ADR-0029(리드 운영), ADR-0030(테스트 격리), ADR-0042(리드 진입과 압박 감시)와 `.claude/rules/tfx-routing.md`의 "모델 배치" 표다.
 
 ## 리드 진입
 
@@ -125,7 +125,7 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 
 #### 압박 변화 대응
 
-`/tfx-lead <역할>`이 macOS 대화형 세션에서 압박 감시를 켠다. 수동으로 켜고 끄고 볼 때는 `/tfx-pressure on|off|status`를 쓴다. 켜지면 triflux mod 가 2초마다 `kern.memorystatus_vm_pressure_level`을 읽어 두 표본 연속으로 확정한 단계 전이를 턴으로 넣는다. 상주 프로세스와 설치는 없다([ADR-0041](../../docs/adr/0041-memory-pressure-watcher.md)). 리드를 넘기거나 끝낼 때 `/tfx-pressure off`.
+`/tfx-lead <역할>`이 macOS 대화형 세션에서 압박 감시를 켠다. 수동으로 켜고 끄고 볼 때는 `/tfx-pressure on|off|status`를 쓴다. 켜지면 triflux mod 가 2초마다 `kern.memorystatus_vm_pressure_level`을 읽어 두 표본 연속으로 확정한 단계 전이를 턴으로 넣는다. 상주 프로세스와 설치는 없다([ADR-0042](../../docs/adr/0042-lead-role-entry-and-pressure-command.md)). 리드를 넘기거나 끝낼 때 `/tfx-pressure off`.
 실행 중인 세션은 다른 기기로 옮길 수 없다는 전제로, 전이별 행동은 다음과 같다.
 
 | 전이 | 행동 |

@@ -1,11 +1,11 @@
 ---
 id: 0041
 title: 메모리 압박 감시는 상주 프로세스 없이 리드 세션의 triflux mod 가 직접 한다
-status: accepted
+status: superseded
 date: 2026-10-15
 deciders: [tellang]
 supersedes: []
-superseded_by: null
+superseded_by: 0042
 relates: [0040]
 pr: null
 ---
