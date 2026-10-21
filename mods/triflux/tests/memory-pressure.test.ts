@@ -1,4 +1,4 @@
-import type { On } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 import { advancePressure, type PressureState } from '../hooks/memory-pressure.ts'
@@ -44,7 +44,11 @@ function fixture(on: On) {
   const prompts: string[] = []
   const calls: string[][] = []
   const commands: string[] = []
-  const data = { stdout: '1\n', exitCode: 0, platform: 'Darwin\n', sessionId: 'session-a', submission: undefined as Promise<void> | undefined }
+  const peers: string[][] = []
+  // 기본은 피어 전송 실패라 아래 흐름 테스트는 prompt.submit 폴백으로 전이를 받는다.
+  const data = { stdout: '1\n', exitCode: 0, platform: 'Darwin\n', sessionId: 'session-a', submission: undefined as Promise<void> | undefined,
+    peerResult: undefined as Promise<void> | undefined,
+    peer: { exitCode: 1, stdout: '', stderr: 'Claude peer socket missing\n' } as { exitCode: number; stdout: string; stderr: string } | { deny: string } }
   on('store.get', (_, e) => ({ value: saved.get(e.key) }))
   on('store.set', (_, e) => { saved.set(e.key, e.value); return { value: undefined } })
   on('store.delete', (_, e) => { saved.delete(e.key); return { value: undefined } })
@@ -52,7 +56,13 @@ function fixture(on: On) {
   on('session.start', () => ({ cwd: '/work' }))
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   on('session.usage', () => ({ value: { context: { window: 1000, tokens: 0, percent: 0 }, rateLimits: [] } }) as never)
-  on('process.run', (_, e) => {
+  on('process.run', async (_, e) => {
+    if (e.argv[0] === 'tfx-peer') {
+      peers.push([...e.argv])
+      await data.peerResult
+      if ('deny' in data.peer) return data.peer
+      return { value: { ...data.peer, isStdoutTruncated: false, isStderrTruncated: false } }
+    }
     if (e.argv[0] === 'sysctl' || e.argv[0] === 'uname') calls.push([...e.argv])
     return { value: { exitCode: e.argv[0] === 'sysctl' ? data.exitCode : 0,
       stdout: e.argv[0] === 'uname' ? data.platform : e.argv[0] === 'sysctl' ? data.stdout : '',
@@ -61,8 +71,60 @@ function fixture(on: On) {
   on('fs.write', () => ({ value: undefined }))
   on('command.register', (_, e) => { commands.push(e.name); return { value: { command: e.name } } })
   on('prompt.submit', async (_, e) => { prompts.push(e.text); await data.submission; return { text: e.text } })
-  return { clock, saved, prompts, calls, commands, data }
+  return { clock, saved, prompts, calls, commands, peers, data }
 }
+
+async function confirmTransition($: EngineInterface, f: ReturnType<typeof fixture>) {
+  await $.session.start(start)
+  await $.command.run({ ...pressure, args: 'on' })
+  await f.clock.advance(2000)
+  f.data.stdout = '2'
+  await f.clock.advance(4000)
+}
+
+test('피어 전송이 되면 자기 세션 ID 로 보내고 prompt.submit 을 부르지 않는다', async ($, on) => {
+  const f = fixture(on)
+  f.data.peer = { exitCode: 0, stdout: '{"status":"written","msgId":"m"}\n', stderr: '' }
+  await confirmTransition($, f)
+  expect(f.prompts).toEqual([])
+  expect(f.peers.length).toBe(1)
+  const [command, sub, flag, sessionId, , message] = f.peers[0]
+  expect([command, sub, flag, sessionId]).toEqual(['tfx-peer', 'self', '--session', 'session-a'])
+  expect(message).toContain('[memory-pressure] 압박 단계가 1 에서 2 로 바뀌었다')
+})
+
+for (const [label, peer] of [
+  ['exit 1', { exitCode: 1, stdout: '', stderr: 'Claude peer socket missing\n' }],
+  ['결과 불명', { exitCode: 2, stdout: '{"status":"unknown","retrySafe":false,"error":"peer write outcome unknown"}\n', stderr: '' }],
+  ['여러 줄 오류', { exitCode: 1, stdout: '', stderr: `Error: Claude peer socket missing\n    at main (tfx-peer.mjs:1)\n${'x'.repeat(500)}\n` }],
+  ['시간 초과', { deny: 'process timeoutMs exceeded' }],
+] as const) {
+  test(`피어 전송이 ${label}이면 실패 이유를 한 줄 붙여 prompt.submit 으로 보낸다`, async ($, on) => {
+    const f = fixture(on)
+    f.data.peer = peer
+    await confirmTransition($, f)
+    expect(f.peers.length).toBe(1)
+    expect(f.prompts.length).toBe(1)
+    expect(f.prompts[0]).toContain('[memory-pressure] 압박 단계가 1 에서 2 로 바뀌었다')
+    expect(f.prompts[0]).toContain('피어 메시지 전송이 실패해')
+    const [, reason] = f.prompts[0].split('\n')
+    expect(reason).toContain('deny' in peer ? 'timeoutMs exceeded' : peer.exitCode === 1 ? 'Claude peer socket missing' : '(unknown, peer write outcome unknown)')
+    expect(reason.length).toBeLessThan(300)
+    expect(f.prompts[0].split('\n').length).toBe(2)
+  })
+}
+
+test('피어 전송 중 감시를 끄면 실패해도 prompt.submit 으로 폴백하지 않는다', async ($, on) => {
+  const f = fixture(on)
+  let finish!: () => void
+  f.data.peerResult = new Promise<void>(done => { finish = done })
+  await confirmTransition($, f)
+  expect(f.peers.length).toBe(1)
+  await $.command.run({ ...pressure, args: 'off' })
+  finish()
+  await f.clock.settle()
+  expect(f.prompts).toEqual([])
+})
 
 test('등록 안 된 세션은 sysctl을 부르지 않는다', async ($, on) => {
   const f = fixture(on)

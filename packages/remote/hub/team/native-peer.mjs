@@ -15,21 +15,27 @@ const WAKE =
   "A peer agent_message was delivered immediately before this tool output. Read it and respond within this session.";
 
 export function parsePeerArgs(args) {
-  if (args[0] !== "send") throw new Error("Only send is supported");
+  if (args[0] !== "send" && args[0] !== "self")
+    throw new Error("Only send and self are supported");
+  const target = args[0] === "self" ? "--session" : "--to";
   const parsed = {};
   for (let i = 1; i < args.length; i += 2) {
     const flag = args[i],
       value = args[i + 1];
-    if (!["--to", "--message"].includes(flag) || !value || parsed[flag])
+    if (![target, "--message"].includes(flag) || !value || parsed[flag])
       throw new Error(`Invalid peer argument: ${flag}`);
     parsed[flag] = value;
   }
   if (
-    !parsed["--to"] ||
+    !parsed[target] ||
     !parsed["--message"] ||
     parsed["--message"].length > 8000
   )
-    throw new Error("send requires --to and --message (max 8000 chars)");
+    throw new Error(
+      `${args[0]} requires ${target} and --message (max 8000 chars)`,
+    );
+  if (target === "--session")
+    return { sessionId: parsed["--session"], message: parsed["--message"] };
   if (!/^(claude|codex):[^:]+$/.test(parsed["--to"]))
     throw new Error("Use exact claude:NAME or codex:NAME target");
   return { to: parsed["--to"], message: parsed["--message"] };

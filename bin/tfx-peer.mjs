@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   deliverClaude,
   deliverCodex,
   parsePeerArgs,
+  resolveClaudeReceiver,
   resolveClaudeRegistryTarget,
 } from "../hub/team/native-peer.mjs";
 import {
@@ -18,6 +20,26 @@ import {
 
 export async function main(args = process.argv.slice(2), deps = {}) {
   const platform = deps.platform || process.platform;
+  if (args[0] === "self") {
+    const { sessionId, message } = parsePeerArgs(args);
+    const receiver = (deps.resolveClaudeReceiver || resolveClaudeReceiver)({
+      sessionId,
+      platform,
+    });
+    // Claude 끼리는 SendMessage 로 보낸다. 예외는 mod 가 자기 세션에 넣는 알림뿐이다.
+    // mod 의 $.process.run 자식은 Claude 프로세스 바로 밑에 뜬다. 위조할 수 있는 환경 변수 대신
+    // 부모 PID 를 수신 소켓 이름 <pid>.sock 과 맞춘다.
+    if (
+      path.basename(receiver.socketPath) !== `${deps.ppid ?? process.ppid}.sock`
+    )
+      throw new Error("self target is not the calling Claude session");
+    return (deps.deliverClaude || deliverClaude)({
+      sessionId,
+      receiver,
+      message,
+      platform,
+    });
+  }
   const { to, message } = parsePeerArgs(args);
   const [cli, name] = to.split(":");
   if (platform === "win32" && cli === "codex")

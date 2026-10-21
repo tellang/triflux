@@ -37,6 +37,30 @@ function isMacOS($: EngineInterface, monitor: Monitor) {
   return monitor.platform
 }
 
+// $.prompt.submit 은 세션이 쉴 때만 턴을 연다. 피어 메시지는 도는 턴 안에도 닿으므로 먼저 자기 세션에 보낸다.
+async function notifyLead($: EngineInterface, text: string, isActive: () => boolean) {
+  let reason: string
+  try {
+    const sessionId = await $.session.id()
+    const result = await $.process.run(['tfx-peer', 'self', '--session', sessionId, '--message', text], { stdin: '', timeoutMs: 10_000 })
+    let data: { status?: string; error?: string } = {}
+    try {
+      data = JSON.parse(result.stdout)
+    } catch {
+      // 실패하면 stdout 이 비어 있고 이유는 stderr 에 있다.
+    }
+    if (result.exitCode === 0 && data.status === 'written') return
+    reason = data.status ? `${data.status}${data.error ? `, ${data.error}` : ''}` : result.stderr || `exit ${result.exitCode}`
+  } catch (error) {
+    reason = error instanceof Error ? error.message : String(error)
+  }
+  // 보내는 사이 /tfx-pressure off 나 세션 종료로 감시가 꺼졌으면 폴백하지 않는다.
+  if (!isActive()) return
+  // 스택이나 긴 출력이 프롬프트에 그대로 들어가지 않게 한 줄로 자른다.
+  reason = reason.replace(/\s+/g, ' ').trim().slice(0, 200)
+  await $.prompt.submit({ text: `${text}\n피어 메시지 전송이 실패해 턴이 끝난 뒤 도착하는 prompt.submit 으로 보냈다 (${reason}).` })
+}
+
 function stopMemoryPressure(monitor: Monitor) {
   monitor.active?.timer?.cancel()
   monitor.active = undefined
@@ -86,7 +110,7 @@ function startMemoryPressure($: EngineInterface, monitor: Monitor, sessionId: st
             do {
               const now = await $.clock.now()
               const text = `[memory-pressure] 압박 단계가 ${prev} 에서 ${level} 로 바뀌었다 (${new Date(now).toISOString()}). tfx-lead 스킬 "압박 변화 대응" 절의 그 전이 행에 따라, 실행 중인 세션은 옮길 수 없다는 전제로 지금 할 일을 정해 실행하라. 그 사이 또 바뀌었을 수 있으니 /tfx-pressure status 로 현재 단계를 확인한다.`
-              await $.prompt.submit({ text }).catch(() => {})
+              await notifyLead($, text, () => monitor.active === current).catch(() => {})
               if (monitor.active !== current) return
               prev = level
               level = monitor.state.confirmed!

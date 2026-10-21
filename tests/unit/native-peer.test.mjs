@@ -99,6 +99,41 @@ it("Claude-to-Claude peer CLI remains refused before delivery", async () => {
   );
 });
 
+for (const ppid of [123, 999]) {
+  it(`self 는 부모 PID 가 ${ppid}이면 ${ppid === 123 ? "본문 그대로 자기 세션에 넣는다" : "CLAUDE_PID 를 맞춰도 거부한다"}`, async () => {
+    let delivered;
+    const run = peerMain(
+      [
+        "self",
+        "--session",
+        "own-session",
+        "--message",
+        "[memory-pressure] 1 에서 2",
+      ],
+      {
+        env: { CLAUDECODE: "1", CLAUDE_PID: "123" },
+        ppid,
+        resolveClaudeReceiver: ({ sessionId }) => {
+          assert.equal(sessionId, "own-session");
+          return { socketPath: "/tmp/sessions/123.sock", peerToken: "t" };
+        },
+        deliverClaude: (payload) => {
+          delivered = payload;
+          return { status: "written" };
+        },
+      },
+    );
+    if (ppid !== 123) {
+      await assert.rejects(run, /not the calling Claude session/);
+      assert.equal(delivered, undefined);
+      return;
+    }
+    assert.deepEqual(await run, { status: "written" });
+    assert.equal(delivered.sessionId, "own-session");
+    assert.equal(delivered.message, "[memory-pressure] 1 에서 2");
+  });
+}
+
 for (const sessionId of [undefined, "exact-session"]) {
   it(`unnamed Claude header falls back to ${sessionId || "unknown"}`, async () => {
     let message;
@@ -410,7 +445,7 @@ it("npm-style symlink CLI entrypoint executes and rejects unknown subcommand", (
     fs.symlinkSync(path.resolve("bin/tfx-peer.mjs"), link);
     const p = spawnSync(process.execPath, [link, "ask"], { encoding: "utf8" });
     assert.equal(p.status, 1);
-    assert.match(p.stderr, /Only send is supported/);
+    assert.match(p.stderr, /Only send and self are supported/);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }
