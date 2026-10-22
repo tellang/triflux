@@ -2983,6 +2983,7 @@ async function closeItermSession(
   sessionId,
   session,
   allowNameFallback = true,
+  killedTtys = [],
   deps = {},
 ) {
   const exec = deps.execFile ?? execFileAsync;
@@ -3002,6 +3003,8 @@ tell application "iTerm2"
   set idTab to missing value
   set fallbackSession to missing value
   set fallbackTab to missing value
+  set killedTtys to {${killedTtys.map(appleScriptString).join(", ")}}
+  set killedSessions to {}
   -- tmux 가 끝나며 패인과 창이 먼저 닫히면 순회 중 창 번호가 사라진다. 사라진 창은 건너뛴다.
   repeat with candidateWindow in windows
     try
@@ -3011,6 +3014,7 @@ tell application "iTerm2"
           set idSession to candidateSession
           set idTab to candidateTab
         end if
+        if killedTtys contains (tty of candidateSession) then set end of killedSessions to candidateSession
         try
           tell candidateSession to set candidateName to variable named "user.tfx_session"
           if ${allowNameFallback ? "true" : "false"} and candidateName is ${appleScriptString(session)} then
@@ -3029,25 +3033,33 @@ tell application "iTerm2"
     set targetSession to fallbackSession
     set targetTab to fallbackTab
   else
-    return
+    set targetSession to missing value
   end if
-  tell targetSession to close
-  -- 셸 통합이나 tmux 클라이언트 조회가 불확실하면 남은 탭을 보존한다.
-  set shellsOnly to ${clients ? "true" : "false"}
-  set attachedTtys to {${attachedTtys.map(appleScriptString).join(", ")}}
-  try
-    repeat with remainingSession in sessions of targetTab
-      -- 사용자가 직접 연 패인은 tfx 표시가 없으므로 남은 패인이 모두 tfx-live 가 연 것일 때만 탭을 닫는다.
-      set remainingName to ""
-      try
-        tell remainingSession to set remainingName to variable named "user.tfx_session"
-      end try
-      if remainingName is missing value or remainingName is "" then set shellsOnly to false
-      if not (is at shell prompt of remainingSession) then set shellsOnly to false
-      if attachedTtys contains (tty of remainingSession) then set shellsOnly to false
-    end repeat
-    if shellsOnly then tell targetTab to close
-  end try
+  if targetSession is not missing value then
+    tell targetSession to close
+    -- 셸 통합이나 tmux 클라이언트 조회가 불확실하면 남은 탭을 보존한다.
+    set shellsOnly to ${clients ? "true" : "false"}
+    set attachedTtys to {${attachedTtys.map(appleScriptString).join(", ")}}
+    try
+      repeat with remainingSession in sessions of targetTab
+        -- 사용자가 직접 연 패인은 tfx 표시가 없으므로 남은 패인이 모두 tfx-live 가 연 것일 때만 탭을 닫는다.
+        set remainingName to ""
+        try
+          tell remainingSession to set remainingName to variable named "user.tfx_session"
+        end try
+        if remainingName is missing value or remainingName is "" then set shellsOnly to false
+        if not (is at shell prompt of remainingSession) then set shellsOnly to false
+        if attachedTtys contains (tty of remainingSession) then set shellsOnly to false
+      end repeat
+      if shellsOnly then tell targetTab to close
+    end try
+  end if
+  -- 죽인 세션에 붙어 있던 패인은 표시가 없어도 닫는다. 위에서 탭째 닫혔으면 오류를 무시한다.
+  repeat with killedSession in killedSessions
+    try
+      tell (contents of killedSession) to close
+    end try
+  end repeat
 end tell`;
   await exec("/usr/bin/osascript", ["-e", script], {
     timeout: 5000,
@@ -4570,6 +4582,7 @@ async function doStop(adapter, opts, deps = {}) {
     );
   let itermSessionId;
   let itermWarning;
+  let killedTtys = [];
   if (useIterm) {
     try {
       const { stdout } = await tmux(null, [
@@ -4583,12 +4596,22 @@ async function doStop(adapter, opts, deps = {}) {
     } catch (error) {
       itermWarning = error.message;
     }
+    // kill 뒤에는 이 세션의 클라이언트가 목록에서 사라지므로 먼저 받아 둔다.
+    const clients = await tmux(null, [
+      "list-clients",
+      "-t",
+      session,
+      "-F",
+      "#{client_tty}",
+    ]).catch(() => ({ stdout: "" }));
+    killedTtys = clients.stdout.trim().split("\n").filter(Boolean);
   }
   await tmux(remote, ["kill-session", "-t", session]);
-  // tfx-live 가 연 패인 기록이 있으면 어디서 stop 하든 닫고, 기록이 없을 때의 이름 검색은 iTerm 안에서만 한다.
+  // tfx-live 가 연 패인 기록이나 붙어 있던 클라이언트가 있으면 어디서 stop 하든 닫고, 기록이 없을 때의 이름 검색은 iTerm 안에서만 한다.
   if (
     useIterm &&
     (itermSessionId ||
+      killedTtys.length ||
       shouldUseIterm(remote, deps.platform ?? process.platform, deps.env))
   ) {
     try {
@@ -4596,6 +4619,7 @@ async function doStop(adapter, opts, deps = {}) {
         itermSessionId ?? "",
         session,
         shouldUseIterm(remote, deps.platform ?? process.platform, deps.env),
+        killedTtys,
       );
     } catch (error) {
       itermWarning = error.message;

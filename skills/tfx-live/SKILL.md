@@ -31,7 +31,7 @@ tfx-live send --to 'agy:10.8 구현' --message '추가 검토 사항을 반영�
 tfx-live stop --cli codex --session cx1
 ```
 
-macOS의 iTerm2에서 로컬 tmux `start`는 프로젝트별 창에 attach 탭이나 패인을 연다. `LC_TERMINAL=iTerm2` 또는 `TERM_PROGRAM=iTerm.app`일 때만 적용하며 원격·daemon 경로와 리드 창을 찾지 못한 경우는 제외한다. 프로젝트 키는 git 공통 디렉터리의 실제 경로이므로 같은 저장소의 워크트리는 함께 묶이고, git 밖에서는 cwd의 실제 경로를 쓴다. 기존 프로젝트 창을 우선 쓰고, 없으면 다른 프로젝트 세션이 없는 리드 창을 쓰거나 새 창을 만든다. 기본 그룹은 프로젝트 키이며 `--group NAME`으로 바꾼다. 한 탭은 최대 4분할이며 2개는 세로, 3·4개는 2x2 배치로 나누고 그다음은 같은 창의 새 탭을 쓴다. `peer`는 실행마다 참여자들을 한 그룹에 모으며 `--group`을 주면 그 값을 쓴다. 로컬 tmux 제목은 `--name`, 자동 이름, 세션 이름 순으로 고정하고 기존 Python 제목 스크립트도 유지한다. 그 스크립트는 패인 프로필의 custom command 도 끈다. iTerm2 는 `command` 로 만든 패인의 명령을 프로필에 남겨 사람이 Cmd+D 로 나눈 패인이 같은 tmux 세션에 다시 붙었기 때문이다. `stop`은 저장된 iTerm ID가 없거나 유효하지 않으면 `user.tfx_session`으로 찾아 닫으며, 남은 패인이 tmux에 연결되지 않은 셸 프롬프트임을 확인할 때만 탭을 닫는다. 연동 실패는 시작·종료를 막지 않고 `itermWarning`에 남긴다.
+macOS의 iTerm2에서 로컬 tmux `start`는 프로젝트별 창에 attach 탭이나 패인을 연다. `LC_TERMINAL=iTerm2` 또는 `TERM_PROGRAM=iTerm.app`일 때만 적용하며 원격·daemon 경로와 리드 창을 찾지 못한 경우는 제외한다. 프로젝트 키는 git 공통 디렉터리의 실제 경로이므로 같은 저장소의 워크트리는 함께 묶이고, git 밖에서는 cwd의 실제 경로를 쓴다. 기존 프로젝트 창을 우선 쓰고, 없으면 다른 프로젝트 세션이 없는 리드 창을 쓰거나 새 창을 만든다. 기본 그룹은 프로젝트 키이며 `--group NAME`으로 바꾼다. 한 탭은 최대 4분할이며 2개는 세로, 3·4개는 2x2 배치로 나누고 그다음은 같은 창의 새 탭을 쓴다. `peer`는 실행마다 참여자들을 한 그룹에 모으며 `--group`을 주면 그 값을 쓴다. 로컬 tmux 제목은 `--name`, 자동 이름, 세션 이름 순으로 고정하고 기존 Python 제목 스크립트도 유지한다. 그 스크립트는 패인 프로필의 custom command 도 끈다. iTerm2 는 `command` 로 만든 패인의 명령을 프로필에 남겨 사람이 Cmd+D 로 나눈 패인이 같은 tmux 세션에 다시 붙었기 때문이다. `stop`은 저장된 iTerm ID가 없거나 유효하지 않으면 `user.tfx_session`으로 찾아 닫으며, 남은 패인이 tmux에 연결되지 않은 셸 프롬프트임을 확인할 때만 탭을 닫는다. 세션을 죽이기 전에 그 세션의 클라이언트 tty를 받아 두고, 그 tty의 iTerm 패인은 표시가 없어도 모두 닫는다. 사람이 셸에서 `tmr`이나 `tmux attach`로 붙어 보던 패인도 닫힌다. 연동 실패는 시작·종료를 막지 않고 `itermWarning`에 남긴다.
 
 새 세션 이름은 `<월>.<일> <주제>`로 짓는다. `start --name`을 생략하면 자동으로 만들고 `nameGenerated: true`를 보고한다. `--resume` 또는 `--resume-last`는 `--name`을 명시한 경우에만 이름을 적용한다. 승계 세션에는 기존 이름 뒤에 ` 2`, 이후 ` 3`을 붙인다. 이름 적용을 요청한 경우 결과의 `nameApplied: false`는 미적용을 뜻한다. agy의 `namePending: true`는 첫 일반 ask에서 적용할 이름이 보류됐다는 뜻이다. Codex `start`는 `/rename` 제출을 입력창이 빌 때까지 확인하고, 이름으로 찾은 thread UUID를 `threadId`로 돌려주며 tmux 세션 옵션 `@tfx_codex_thread`에 남긴다. 로컬 Codex `--resume-last`는 Codex가 고른 thread를 사후에 찾는다. 띄운 뒤 공유 app-server daemon에 로드된 같은 cwd의 thread 중 rollout에 그 시각 이후의 resume 기록(`thread_settings_applied`)이 생긴 것이 정확히 하나이고 1.5초 뒤에도 같을 때만 `threadId`로 쓴다. 이 확인은 5초 안에 끝난다. TUI가 daemon을 쓰지 않거나 같은 cwd에서 동시에 resume이 일어나면 `null`이다. 기존 Codex UDS thread는 `tfx-live rename --cli codex --transport uds --thread ID --name "<이름>"`으로 이름을 바꾼다.
 
@@ -47,7 +47,7 @@ Claude, agy, Codex(`Trust this folder?`와 `Do you trust the contents of this di
 - 목적이 짝을 이루는 세션끼리 `--group`으로 한 탭에 묶는다(요구 정리와 프로브, 앱과 프롬프트 등).
 - iTerm `create tab`/`split`의 command 에는 PATH 가 없다. tmux 를 `/opt/homebrew/bin/tmux` 전체 경로로 쓴다. 안 그러면 탭이 바로 닫힌다.
 - 탭 제목은 tmux 와 agy 가 덮어쓴다. AppleScript 로 정한 이름은 유지되지 않으므로 위의 Python 제목 스크립트로 고정한다.
-- 끝난 세션의 tmr 반복 패인은 "no matching tmux room"을 계속 찍는다. 닫는다.
+- `stop`으로 끝낸 세션의 tmr 반복 패인은 `stop`이 닫는다. 세션이 스스로 끝났거나 `tmux kill-session`으로 직접 죽였으면 그 패인이 "no matching tmux room"을 계속 찍으니 손으로 닫는다.
 - 탭이나 패인을 닫기 직전에 그 tty 의 프로세스(`ps -t <tty>`)를 다시 본다. tmux attach 나 omc 가 있으면 닫지 않는다.
 
 ## agy 세션

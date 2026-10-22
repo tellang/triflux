@@ -175,10 +175,11 @@ test("iTerm opening script chooses project window and limits group splits", asyn
 });
 
 test("stop closes a recorded iTerm pane anywhere and searches by name only inside iTerm", async () => {
-  for (const [id, env, closes, fallback] of [
-    ["stale-id", {}, true, false],
-    ["", { LC_TERMINAL: "iTerm2" }, true, true],
-    ["", {}, false, false],
+  for (const [id, ttys, env, closes, fallback] of [
+    ["stale-id", [], {}, true, false],
+    ["", [], { LC_TERMINAL: "iTerm2" }, true, true],
+    ["", [], {}, false, false],
+    ["", ["/dev/ttys004", "/dev/ttys007"], {}, true, false],
   ]) {
     const calls = [];
     await tfxLive.doStop(
@@ -189,16 +190,20 @@ test("stop closes a recorded iTerm pane anywhere and searches by name only insid
         env,
         runTmux: async (_remote, args) => {
           calls.push(args[0]);
-          return { stdout: id };
+          if (args[0] !== "list-clients") return { stdout: id };
+          assert.deepEqual(args.slice(1, 3), ["-t", "session-a"]);
+          return { stdout: ttys.map((tty) => `${tty}\n`).join("") };
         },
         closeItermSession: async (...args) => {
-          assert.deepEqual(args, [id, "session-a", fallback]);
+          assert.deepEqual(args, [id, "session-a", fallback, ttys]);
           calls.push("close");
         },
       },
     );
+    // 죽인 세션의 클라이언트는 kill 뒤에 조회되지 않으므로 순서가 동작의 일부다.
     assert.deepEqual(calls, [
       "show-options",
+      "list-clients",
       "kill-session",
       ...(closes ? ["close"] : []),
     ]);
@@ -207,7 +212,7 @@ test("stop closes a recorded iTerm pane anywhere and searches by name only insid
 
 test("iTerm close script prefers stored ID then session variable and preserves ambiguous tabs", async () => {
   let script;
-  await tfxLive.closeItermSession("stale-id", "session-a", true, {
+  await tfxLive.closeItermSession("stale-id", "session-a", true, [], {
     runTmux: async () => ({ stdout: "/dev/ttys003\n" }),
     execFile: async (command, args) => {
       assert.equal(command, "/usr/bin/osascript");
@@ -287,7 +292,7 @@ test("project lookup reports git failures instead of splitting repository identi
 
 test("iTerm close skips the name search outside iTerm and keeps tabs with user panes", async () => {
   let script;
-  await tfxLive.closeItermSession("stale-id", "session-a", false, {
+  await tfxLive.closeItermSession("stale-id", "session-a", false, [], {
     runTmux: async () => ({ stdout: "" }),
     execFile: async (_command, args) => {
       script = args[1];
@@ -298,6 +303,23 @@ test("iTerm close skips the name search outside iTerm and keeps tabs with user p
   assert.match(
     script,
     /remainingName is missing value or remainingName is "" then set shellsOnly to false/,
+  );
+});
+
+test("iTerm close also closes unmarked panes attached to the killed session", async () => {
+  let script;
+  await tfxLive.closeItermSession("", "session-a", false, ["/dev/ttys004"], {
+    runTmux: async () => ({ stdout: "" }),
+    execFile: async (_command, args) => {
+      script = args[1];
+      return { stdout: "" };
+    },
+  });
+  assert.match(script, /set killedTtys to \{"\/dev\/ttys004"\}/);
+  assert.doesNotMatch(script, /^\s*return$/m);
+  assert.ok(
+    script.indexOf("tell (contents of killedSession) to close") >
+      script.indexOf("if shellsOnly then tell targetTab to close"),
   );
 });
 
