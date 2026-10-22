@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -157,6 +157,33 @@ test("start and stop reject pane targets before invoking tmux", async () => {
   }
 });
 
+test("stop leaves a session whose name only starts with the requested one", {
+  skip: process.platform === "win32" || spawnSync("tmux", ["-V"]).status !== 0,
+}, async () => {
+  // 사용자 tmux 서버를 건드리지 않게 소켓 디렉터리를 따로 쓴다.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-exact-"));
+  const env = { TMUX: "", TMUX_TMPDIR: dir };
+  const tmuxEnv = { env: { ...process.env, ...env } };
+  try {
+    await execFileAsync(
+      "tmux",
+      ["new-session", "-d", "-s", "tfx-exact-ab"],
+      tmuxEnv,
+    );
+    await assert.rejects(
+      runTfxLive(["stop", "--session", "tfx-exact-a"], { env }),
+    );
+    await execFileAsync(
+      "tmux",
+      ["has-session", "-t", "=tfx-exact-ab"],
+      tmuxEnv,
+    );
+  } finally {
+    await execFileAsync("tmux", ["kill-server"], tmuxEnv).catch(() => {});
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("peer attach fails preflight without starting or stopping tmux sessions", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-attach-"));
   try {
@@ -202,7 +229,7 @@ test("peer attach fails preflight without starting or stopping tmux sessions", a
     const log = await readTmuxLog(logPath);
     assert.equal(output.attachedA, true);
     assert.match(output.error, /attached codex session not found/);
-    assert.deepEqual(log, [["has-session", "-t", "missing"]]);
+    assert.deepEqual(log, [["has-session", "-t", "=missing:"]]);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
@@ -569,6 +596,8 @@ async function writeReadyFakeTmux(dir) {
       "import fs from 'node:fs';",
       "const args = process.argv.slice(2);",
       "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
+      // 실제 tmux 처럼 정확 일치 대상(=이름:)을 세션 이름으로 읽는다.
+      "if (args.includes('-t')) args[args.indexOf('-t') + 1] = args[args.indexOf('-t') + 1].replace(/^=/, '').replace(/:$/, '');",
       "const statePath = process.env.TMUX_STATE;",
       "const state = JSON.parse(fs.existsSync(statePath) ? fs.readFileSync(statePath, 'utf8') : '{}');",
       "state.buffers ||= {};",
@@ -856,7 +885,7 @@ test("tmux busy wait, fail, and interrupt gate prompt submission", async () => {
       for (const args of log.filter((entry) =>
         ["capture-pane", "paste-buffer", "send-keys"].includes(entry[0]),
       )) {
-        assert.equal(args[args.indexOf("-t") + 1], "busy:0.1");
+        assert.equal(args[args.indexOf("-t") + 1], "=busy:0.1");
       }
     }
   } finally {
@@ -1243,7 +1272,7 @@ test("doAskViaTmux preserves a multiline prompt through a named tmux buffer", as
       "-d",
       "-p",
       "-t",
-      "multilineA",
+      "=multilineA:",
     ]);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -1323,7 +1352,9 @@ test("doAskViaTmux rejects a peer marker that remains in an unsubmitted composer
     const log = await readTmuxLog(logPath);
     const enterAttempts = log.filter(
       (args) =>
-        args[0] === "send-keys" && args[2] === "stuckA" && args[3] === "Enter",
+        args[0] === "send-keys" &&
+        args[2] === "=stuckA:" &&
+        args[3] === "Enter",
     );
     assert.equal(enterAttempts.length, 3);
   } finally {
@@ -2469,7 +2500,7 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
     const launch = log.find(
       (args) =>
         args[0] === "send-keys" &&
-        args[2] === "start-codex" &&
+        args[2] === "=start-codex:" &&
         args.length === 5,
     );
 
@@ -2484,7 +2515,7 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
           JSON.stringify([
             "set-option",
             "-t",
-            "start-codex",
+            "=start-codex:",
             "set-titles",
             "on",
           ]),
@@ -2497,7 +2528,7 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
           JSON.stringify([
             "set-option",
             "-t",
-            "start-codex",
+            "=start-codex:",
             "set-titles-string",
             result.name,
           ]),
@@ -2509,7 +2540,7 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
     assert.deepEqual(launch, [
       "send-keys",
       "-t",
-      "start-codex",
+      "=start-codex:",
       `codex --dangerously-bypass-approvals-and-sandbox -c 'model="custom model"' -c 'model_reasoning_effort="xhigh"' -C '${dir}/worker'"'"'s cwd'`,
       "Enter",
     ]);
@@ -2553,7 +2584,7 @@ test("local start fixes tmux title to the explicit name outside iTerm", async ()
       log.some(
         (args) =>
           JSON.stringify(args) ===
-          JSON.stringify(["set-option", "-t", "titleB", "set-titles", "on"]),
+          JSON.stringify(["set-option", "-t", "=titleB:", "set-titles", "on"]),
       ),
     );
     assert.ok(
@@ -2563,7 +2594,7 @@ test("local start fixes tmux title to the explicit name outside iTerm", async ()
           JSON.stringify([
             "set-option",
             "-t",
-            "titleB",
+            "=titleB:",
             "set-titles-string",
             "10.14 제목 ##1",
           ]),
@@ -2839,7 +2870,7 @@ test("tfx-live start keeps resume launch keys ahead of model overrides", async (
     const launch = log.find(
       (args) =>
         args[0] === "send-keys" &&
-        args[2] === "resume-codex" &&
+        args[2] === "=resume-codex:" &&
         args.length === 5,
     );
 
@@ -2854,7 +2885,7 @@ test("tfx-live start keeps resume launch keys ahead of model overrides", async (
           JSON.stringify([
             "set-option",
             "-t",
-            "resume-codex",
+            "=resume-codex:",
             "set-titles",
             "on",
           ]),
@@ -2867,7 +2898,7 @@ test("tfx-live start keeps resume launch keys ahead of model overrides", async (
           JSON.stringify([
             "set-option",
             "-t",
-            "resume-codex",
+            "=resume-codex:",
             "set-titles-string",
             "resume-codex",
           ]),
@@ -2878,7 +2909,7 @@ test("tfx-live start keeps resume launch keys ahead of model overrides", async (
     assert.deepEqual(launch, [
       "send-keys",
       "-t",
-      "resume-codex",
+      "=resume-codex:",
       `codex resume 'resume id' --dangerously-bypass-approvals-and-sandbox -C ${process.cwd()}`,
       "Enter",
     ]);
@@ -2944,14 +2975,14 @@ test("tfx-live peer maps side-specific model and effort flags", async () => {
       [
         "send-keys",
         "-t",
-        "peerA",
+        "=peerA:",
         "codex --dangerously-bypass-approvals-and-sandbox -c 'model=\"codex model\"' -c 'model_reasoning_effort=\"xhigh\"'",
         "Enter",
       ],
       [
         "send-keys",
         "-t",
-        "peerB",
+        "=peerB:",
         `DISABLE_OMC=1 OMC_SKIP_HOOKS=all TFX_SKIP_HOOKS=1 claude -n '${new Date().getMonth() + 1}.${new Date().getDate()} peerB' --model 'claude model' --effort high`,
         "Enter",
       ],
@@ -3481,7 +3512,7 @@ test("tfx-live interrupt returns the common abort contract through tmux Escape",
     assert.equal(result.done, false);
     assert.equal(result.aborted, true);
     assert.equal(result.reason, "user_interrupt");
-    assert.deepEqual(tmuxArgs, ["send-keys", "-t", "live-peer", "Escape"]);
+    assert.deepEqual(tmuxArgs, ["send-keys", "-t", "=live-peer:", "Escape"]);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

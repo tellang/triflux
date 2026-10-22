@@ -283,7 +283,8 @@ function shellQuote(args) {
   return args
     .map((arg) => {
       const text = String(arg);
-      if (/^[A-Za-z0-9_/:.,@%+=-]+$/.test(text)) {
+      // zsh 는 맨 앞 '=' 를 명령 경로로 바꾸므로 따옴표로 감싼다.
+      if (/^[A-Za-z0-9_/:.,@%+-][A-Za-z0-9_/:.,@%+=-]*$/.test(text)) {
         return text;
       }
       return `'${text.replace(/'/g, `'"'"'`)}'`;
@@ -345,7 +346,7 @@ async function paneCliProcess(session, cli, panePid) {
       "display-message",
       "-p",
       "-t",
-      session,
+      exactTmuxTarget(session),
       "#{pane_pid}",
     ]);
     panePid = Number(stdout.trim());
@@ -852,6 +853,15 @@ function splitTmuxTarget(value) {
   if (!session)
     throw new Error("tmux target requires a session name before ':'");
   return { session, target };
+}
+
+// tmux 는 -t 세션 이름이 없으면 접두어로 다른 세션을 잡는다. '=' 는 정확 일치만 허용하고,
+// ':' 가 없으면 pane 대상 명령이 '=이름' 을 창 이름으로 읽어 실패하므로 붙인다.
+// psmux 는 원래 정확히만 찾고 3.3.8 전에는 '=' 를 모른다.
+function exactTmuxTarget(target) {
+  const text = String(target);
+  if (process.platform === "win32" || /^[=%@$]/.test(text)) return text;
+  return text.includes(":") ? `=${text}` : `=${text}:`;
 }
 
 function tmuxBufferName(target) {
@@ -1831,7 +1841,7 @@ async function capturePane(remote, session) {
   const { stdout } = await runTmux(remote, [
     "capture-pane",
     "-t",
-    session,
+    exactTmuxTarget(session),
     "-p",
     "-S",
     CAPTURE_START,
@@ -1845,7 +1855,7 @@ async function captureVisible(remote, session) {
   const { stdout } = await runTmux(remote, [
     "capture-pane",
     "-t",
-    session,
+    exactTmuxTarget(session),
     "-p",
   ]);
   return stripAnsi(stdout);
@@ -1981,18 +1991,33 @@ async function dismissCodexTrustPrompt(remote, session) {
       /Yes, continue|Trust and continue/.test(selected) &&
       !/No, quit/.test(selected)
     ) {
-      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+      await runTmux(remote, [
+        "send-keys",
+        "-t",
+        exactTmuxTarget(session),
+        "Enter",
+      ]);
       return { dismissed: true, raw };
     }
 
-    await runTmux(remote, ["send-keys", "-t", session, "Down"]);
+    await runTmux(remote, [
+      "send-keys",
+      "-t",
+      exactTmuxTarget(session),
+      "Down",
+    ]);
     await sleep(200);
     raw = await captureVisible(remote, session);
   }
 
   const selected = selectedLine(raw);
   if (/\bYes\b/.test(selected) && !/\bNo\b/.test(selected)) {
-    await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+    await runTmux(remote, [
+      "send-keys",
+      "-t",
+      exactTmuxTarget(session),
+      "Enter",
+    ]);
     return { dismissed: true, raw };
   }
 
@@ -2006,20 +2031,35 @@ async function dismissCodexUpdatePrompt(remote, session) {
   }
 
   for (let iteration = 0; iteration < 4; iteration += 1) {
-    await runTmux(remote, ["send-keys", "-t", session, "Down"]);
+    await runTmux(remote, [
+      "send-keys",
+      "-t",
+      exactTmuxTarget(session),
+      "Down",
+    ]);
     await sleep(200);
     raw = await captureVisible(remote, session);
 
     const selected = selectedLine(raw);
     if (isSkipUntilNextVersionLine(selected)) {
-      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+      await runTmux(remote, [
+        "send-keys",
+        "-t",
+        exactTmuxTarget(session),
+        "Enter",
+      ]);
       return { dismissed: true, raw };
     }
   }
 
   const selected = selectedLine(raw);
   if (isSafeSkipLine(selected)) {
-    await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+    await runTmux(remote, [
+      "send-keys",
+      "-t",
+      exactTmuxTarget(session),
+      "Enter",
+    ]);
     return { dismissed: true, raw };
   }
 
@@ -2038,10 +2078,15 @@ async function dismissCodexDaemonSettingsPrompt(remote, session) {
   if (!isCodexDaemonSettingsPrompt(raw)) return { dismissed: false, raw };
   for (let iteration = 0; iteration < 4; iteration += 1) {
     if (/Run without daemon/.test(selectedLine(raw))) {
-      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+      await runTmux(remote, [
+        "send-keys",
+        "-t",
+        exactTmuxTarget(session),
+        "Enter",
+      ]);
       return { dismissed: true, raw };
     }
-    await runTmux(remote, ["send-keys", "-t", session, "Up"]);
+    await runTmux(remote, ["send-keys", "-t", exactTmuxTarget(session), "Up"]);
     await sleep(200);
     raw = await captureVisible(remote, session);
   }
@@ -2060,11 +2105,21 @@ async function dismissClaudeTrustPrompt(remote, session) {
       /(Yes, I trust this folder|\bYes\b)/.test(selected) &&
       !/(No, exit|\bNo\b)/.test(selected)
     ) {
-      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+      await runTmux(remote, [
+        "send-keys",
+        "-t",
+        exactTmuxTarget(session),
+        "Enter",
+      ]);
       return { dismissed: true, raw };
     }
 
-    await runTmux(remote, ["send-keys", "-t", session, "Down"]);
+    await runTmux(remote, [
+      "send-keys",
+      "-t",
+      exactTmuxTarget(session),
+      "Down",
+    ]);
     await sleep(200);
     raw = await captureVisible(remote, session);
   }
@@ -2074,7 +2129,12 @@ async function dismissClaudeTrustPrompt(remote, session) {
     /(Yes, I trust this folder|\bYes\b)/.test(selected) &&
     !/(No, exit|\bNo\b)/.test(selected)
   ) {
-    await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+    await runTmux(remote, [
+      "send-keys",
+      "-t",
+      exactTmuxTarget(session),
+      "Enter",
+    ]);
     return { dismissed: true, raw };
   }
 
@@ -2089,16 +2149,21 @@ async function dismissClaudeExternalImportsPrompt(remote, session) {
 
   for (let iteration = 0; iteration < 4; iteration += 1) {
     if (/Yes, allow external imports/.test(selectedLine(raw))) {
-      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+      await runTmux(remote, [
+        "send-keys",
+        "-t",
+        exactTmuxTarget(session),
+        "Enter",
+      ]);
       return { dismissed: true, raw };
     }
 
-    await runTmux(remote, ["send-keys", "-t", session, "Up"]);
+    await runTmux(remote, ["send-keys", "-t", exactTmuxTarget(session), "Up"]);
     await sleep(200);
     raw = await captureVisible(remote, session);
   }
 
-  await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+  await runTmux(remote, ["send-keys", "-t", exactTmuxTarget(session), "Enter"]);
   return { dismissed: true, raw };
 }
 
@@ -2110,11 +2175,21 @@ async function dismissClaudeTourPrompt(remote, session) {
 
   for (let iteration = 0; iteration < 4; iteration += 1) {
     if (/Skip for now/.test(selectedLine(raw))) {
-      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+      await runTmux(remote, [
+        "send-keys",
+        "-t",
+        exactTmuxTarget(session),
+        "Enter",
+      ]);
       return { dismissed: true, raw };
     }
 
-    await runTmux(remote, ["send-keys", "-t", session, "Down"]);
+    await runTmux(remote, [
+      "send-keys",
+      "-t",
+      exactTmuxTarget(session),
+      "Down",
+    ]);
     await sleep(200);
     raw = await captureVisible(remote, session);
   }
@@ -2122,7 +2197,12 @@ async function dismissClaudeTourPrompt(remote, session) {
   // Fallback: Escape cancels the welcome/tour dialog (equivalent to "Skip for
   // now"). Never blind-Enter here — the default selection may be "Take the
   // tour", and Enter would launch the tour instead of skipping it.
-  await runTmux(remote, ["send-keys", "-t", session, "Escape"]);
+  await runTmux(remote, [
+    "send-keys",
+    "-t",
+    exactTmuxTarget(session),
+    "Escape",
+  ]);
   return { dismissed: true, raw };
 }
 
@@ -2148,10 +2228,15 @@ async function dismissAgyTrustPrompt(remote, session) {
   let raw = await captureVisible(remote, session);
   for (let attempt = 0; attempt < 4 && isAgyTrustPrompt(raw); attempt++) {
     if (/^\s*>\s+Yes, I trust this folder\s*$/m.test(stripAnsi(raw))) {
-      await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+      await runTmux(remote, [
+        "send-keys",
+        "-t",
+        exactTmuxTarget(session),
+        "Enter",
+      ]);
       return { dismissed: true, raw };
     }
-    await runTmux(remote, ["send-keys", "-t", session, "Up"]);
+    await runTmux(remote, ["send-keys", "-t", exactTmuxTarget(session), "Up"]);
     await sleep(200);
     raw = await captureVisible(remote, session);
   }
@@ -2416,7 +2501,7 @@ async function waitForReady(
         await runTmux(remote, [
           "send-keys",
           "-t",
-          session,
+          exactTmuxTarget(session),
           ...adapter.launchKeys,
         ]);
         restartedAfterUpdate = true;
@@ -2590,7 +2675,7 @@ async function hasTmuxSession(adapter, opts) {
     await runTmux(opts.remote, [
       "has-session",
       "-t",
-      splitTmuxTarget(opts.session).session,
+      exactTmuxTarget(splitTmuxTarget(opts.session).session),
     ]);
     return true;
   } catch {
@@ -3172,12 +3257,18 @@ async function doStart(launchAdapter, opts) {
     ...(cwd ? ["-c", cwd] : []),
   ]);
   if (!remote) {
-    await runTmux(null, ["set-option", "-t", session, "set-titles", "on"]);
+    await runTmux(null, [
+      "set-option",
+      "-t",
+      exactTmuxTarget(session),
+      "set-titles",
+      "on",
+    ]);
     // # 는 tmux 형식 시작 문자이므로 이름 그대로 표시되게 이스케이프한다.
     await runTmux(null, [
       "set-option",
       "-t",
-      session,
+      exactTmuxTarget(session),
       "set-titles-string",
       (name ?? session).replace(/#/g, "##"),
     ]);
@@ -3188,11 +3279,16 @@ async function doStart(launchAdapter, opts) {
   await runTmux(remote, [
     "set-option",
     "-t",
-    session,
+    exactTmuxTarget(session),
     "history-limit",
     "100000",
   ]);
-  await runTmux(remote, ["send-keys", "-t", session, ...launchKeys]);
+  await runTmux(remote, [
+    "send-keys",
+    "-t",
+    exactTmuxTarget(session),
+    ...launchKeys,
+  ]);
   await dismissStartupScreens(adapter, remote, session);
 
   const readiness = await waitForReady(
@@ -3230,7 +3326,7 @@ async function doStart(launchAdapter, opts) {
       process.platform,
     );
     if (remaining.length) {
-      await runTmux(null, ["kill-session", "-t", session]);
+      await runTmux(null, ["kill-session", "-t", exactTmuxTarget(session)]);
       throw new Error(
         "--unset-env verification failed: matching variables remain in CLI environment",
       );
@@ -3273,7 +3369,7 @@ async function doStart(launchAdapter, opts) {
         await runTmux(remote, [
           "send-keys",
           "-t",
-          session,
+          exactTmuxTarget(session),
           "-l",
           "--",
           command,
@@ -3321,7 +3417,13 @@ async function doStart(launchAdapter, opts) {
   }
   const namePending = adapter.cli === "agy" && Boolean(name) && !nameApplied;
   if (namePending)
-    await runTmux(null, ["set-option", "-t", session, "@tfx_agy_name", name]);
+    await runTmux(null, [
+      "set-option",
+      "-t",
+      exactTmuxTarget(session),
+      "@tfx_agy_name",
+      name,
+    ]);
   const conversation =
     adapter.cli === "agy" && ready
       ? await agyConversation((await paneCliProcess(session, "agy"))?.pid)
@@ -3331,7 +3433,7 @@ async function doStart(launchAdapter, opts) {
     await runTmux(null, [
       "set-option",
       "-t",
-      session,
+      exactTmuxTarget(session),
       "@tfx_codex_thread",
       threadId,
     ]).catch(() => {});
@@ -3349,7 +3451,7 @@ async function doStart(launchAdapter, opts) {
         await runTmux(null, [
           "set-option",
           "-t",
-          session,
+          exactTmuxTarget(session),
           "@tfx_iterm_session",
           iterm.sessionId,
         ]);
@@ -3451,7 +3553,12 @@ end tell`;
 async function submitComposerLine(remote, session, line, cli) {
   await sleep(300);
   for (let attempt = 1; attempt <= PROMPT_SUBMIT_MAX_ATTEMPTS; attempt += 1) {
-    await runTmux(remote, ["send-keys", "-t", session, "Enter"]);
+    await runTmux(remote, [
+      "send-keys",
+      "-t",
+      exactTmuxTarget(session),
+      "Enter",
+    ]);
     await sleep(300);
     if (!composerShowsPrompt(await captureVisible(remote, session), line, cli))
       return true;
@@ -3461,7 +3568,14 @@ async function submitComposerLine(remote, session, line, cli) {
 
 async function renameAgyConversation(session, name, timeoutMs, pollIntervalMs) {
   const command = `/rename ${name}`;
-  await runTmux(null, ["send-keys", "-t", session, "-l", "--", command]);
+  await runTmux(null, [
+    "send-keys",
+    "-t",
+    exactTmuxTarget(session),
+    "-l",
+    "--",
+    command,
+  ]);
   if (!(await submitComposerLine(null, session, command, "agy"))) return false;
   const deadline = Date.now() + timeoutMs;
   do {
@@ -3505,7 +3619,12 @@ async function waitForTmuxIdle(adapter, opts, deps = {}) {
       );
     }
     if (ifBusy === "interrupt" && !interrupted) {
-      await tmux(remote, ["send-keys", "-t", session, "Escape"]);
+      await tmux(remote, [
+        "send-keys",
+        "-t",
+        exactTmuxTarget(session),
+        "Escape",
+      ]);
       interrupted = true;
     }
     await pause(
@@ -3608,7 +3727,7 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
     "-d",
     "-p",
     "-t",
-    session,
+    exactTmuxTarget(session),
   ]);
   await pause(settleMs);
 
@@ -3620,7 +3739,12 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
       attempt <= (opts.submitAttempts ?? PROMPT_SUBMIT_MAX_ATTEMPTS);
       attempt += 1
     ) {
-      await tmux(remote, ["send-keys", "-t", session, "Enter"]);
+      await tmux(remote, [
+        "send-keys",
+        "-t",
+        exactTmuxTarget(session),
+        "Enter",
+      ]);
       await pause(PROMPT_SUBMIT_RETRY_DELAY_MS);
       const submissionVisible = await capture(remote, session);
       if (
@@ -3640,7 +3764,7 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
       );
     }
   } else {
-    await tmux(remote, ["send-keys", "-t", session, "Enter"]);
+    await tmux(remote, ["send-keys", "-t", exactTmuxTarget(session), "Enter"]);
   }
 
   let nameApplied;
@@ -3649,7 +3773,7 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
       "show-options",
       "-qv",
       "-t",
-      splitTmuxTarget(session).session,
+      exactTmuxTarget(splitTmuxTarget(session).session),
       "@tfx_agy_name",
     ]);
     const pendingName = stdout.trim();
@@ -3682,7 +3806,7 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
                 "set-option",
                 "-u",
                 "-t",
-                splitTmuxTarget(session).session,
+                exactTmuxTarget(splitTmuxTarget(session).session),
                 "@tfx_agy_name",
               ]);
             break;
@@ -3938,7 +4062,7 @@ async function resolveCodexTmuxThread(session, deps = {}) {
       "display-message",
       "-p",
       "-t",
-      session,
+      exactTmuxTarget(session),
       "#{@tfx_codex_thread}\t#{pane_id}\t#{pane_current_path}\t#{session_created}\t#{pane_pid}",
     ]);
     fields = String(stdout).trimEnd().split("\t");
@@ -4090,7 +4214,7 @@ async function doAdopt(opts, deps = {}) {
     "display-message",
     "-p",
     "-t",
-    session,
+    exactTmuxTarget(session),
     "#{pane_id}",
   ]);
   const paneId = String(stdout).trim();
@@ -4363,7 +4487,7 @@ async function ensureTmuxSession(adapter, opts) {
     await runTmux(opts.remote, [
       "has-session",
       "-t",
-      splitTmuxTarget(opts.session).session,
+      exactTmuxTarget(splitTmuxTarget(opts.session).session),
     ]);
     return false;
   } catch {
@@ -4599,7 +4723,7 @@ async function doStop(adapter, opts, deps = {}) {
         "show-options",
         "-qv",
         "-t",
-        session,
+        exactTmuxTarget(session),
         "@tfx_iterm_session",
       ]);
       itermSessionId = stdout.trim();
@@ -4610,13 +4734,13 @@ async function doStop(adapter, opts, deps = {}) {
     const clients = await tmux(null, [
       "list-clients",
       "-t",
-      session,
+      exactTmuxTarget(session),
       "-F",
       "#{client_tty}",
     ]).catch(() => ({ stdout: "" }));
     killedTtys = clients.stdout.trim().split("\n").filter(Boolean);
   }
-  await tmux(remote, ["kill-session", "-t", session]);
+  await tmux(remote, ["kill-session", "-t", exactTmuxTarget(session)]);
   // tfx-live 가 연 패인 기록이나 붙어 있던 클라이언트가 있으면 어디서 stop 하든 닫고, 기록이 없을 때의 이름 검색은 iTerm 안에서만 한다.
   if (
     useIterm &&
@@ -4645,7 +4769,12 @@ async function doStop(adapter, opts, deps = {}) {
 }
 
 async function doInterruptViaTmux(adapter, opts) {
-  await runTmux(opts.remote, ["send-keys", "-t", opts.session, "Escape"]);
+  await runTmux(opts.remote, [
+    "send-keys",
+    "-t",
+    exactTmuxTarget(opts.session),
+    "Escape",
+  ]);
   if (adapter.cli === "agy")
     await waitForTmuxIdle(adapter, {
       ...opts,
@@ -5722,7 +5851,7 @@ async function claudeTmuxTarget(session) {
     "display-message",
     "-p",
     "-t",
-    session,
+    exactTmuxTarget(session),
     "#{pane_id}",
   ]);
   const discovery = await discoverClaudeTmuxSessions();
@@ -6216,7 +6345,8 @@ async function goal(action, flags) {
   }
   await waitForTmuxIdle(adapter, opts);
   // Esc 가 직전 입력을 복원해도 clear 명령 앞에 붙지 않게 비운다.
-  if (interrupted) await runTmux(null, ["send-keys", "-t", session, "C-u"]);
+  if (interrupted)
+    await runTmux(null, ["send-keys", "-t", exactTmuxTarget(session), "C-u"]);
   snapshot =
     cli === "claude" ? await readClaudeTranscript(transcriptPath) : null;
   const beforeCount = snapshot?.goalSentinel?.count ?? 0;
@@ -6970,7 +7100,7 @@ async function verifyAttachedPeerSide(adapter, base, deps = {}) {
   const tmux = deps.runTmux ?? runTmux;
   const { session, target } = splitTmuxTarget(base.session);
   try {
-    await tmux(base.remote, ["has-session", "-t", session]);
+    await tmux(base.remote, ["has-session", "-t", exactTmuxTarget(session)]);
   } catch {
     throw new Error(`attached ${adapter.cli} session not found: ${session}`);
   }
@@ -6979,7 +7109,7 @@ async function verifyAttachedPeerSide(adapter, base, deps = {}) {
       "display-message",
       "-p",
       "-t",
-      target,
+      exactTmuxTarget(target),
       "#{pane_current_command}\t#{pane_start_command}\t#{pane_tty}\t#{pane_pid}",
     ]);
     const [currentCommand, startCommand, paneTty, panePid] = stdout
