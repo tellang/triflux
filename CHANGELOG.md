@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.82.1] - 2026-10-22
+
+### Fixed
+- live: `tfx-live stop` 이 세션을 죽이기 전에 그 세션의 tmux 클라이언트 tty 를 받아 두고, kill 뒤 그 tty 의 iTerm 패인을 패인 ID 로 다시 찾아 모두 닫는다. tfx-live 표시가 없는 손으로 만든 패인(예: tmr 반복 루프)도 닫히고, 셸에서 tmr 로 붙어 보던 패인도 같이 닫힌다. 원격 stop 은 바뀌지 않는다 (#809)
+
+### Changed
+- lead: Agent 도구로 tmux 모드에서 띄운 팀원은 리드의 현재 폴더에서 새 Claude 로 떠서 그 폴더의 신뢰가 필요하다고 3절과 운영 점검표에 적는다. 신뢰 화면 자동 승인은 `tfx-live start` 와 `remote-spawn --auto-trust` 에만 있다 (#810)
+
 ## [10.82.0] - 2026-10-21
 
 ### Changed
