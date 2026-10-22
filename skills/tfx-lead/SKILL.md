@@ -111,7 +111,7 @@ tfx-live start --cli claude --session cl-doc --name "10.8 문서 정리" --model
 tfx-live start --cli codex --session cx-impl --name "10.8 구현"
 ```
 
-Agent 도구로 띄운 팀원(agent teams 의 tmux 모드)은 리드의 현재 폴더에서 새 Claude 프로세스로 뜬다. 처음 보는 폴더면 "Quick safety check" 신뢰 화면에서 멈추며, 이 화면의 자동 승인은 `tfx-live start` 경로에만 있다. 이미 신뢰한 폴더에서 띄우고 절대 경로로 일을 시키거나, 새 폴더면 사용자가 한 번 신뢰한 뒤 띄운다.
+Agent 도구로 띄운 팀원(agent teams 의 tmux 모드)은 리드의 현재 폴더에서 새 Claude 프로세스로 뜬다. 처음 보는 폴더면 "Quick safety check" 신뢰 화면에서 멈추며, 이 화면의 자동 승인은 `tfx-live start` 와 `remote-spawn --auto-trust` 에만 있고 Agent 도구 경로에는 없다. 이미 신뢰한 폴더에서 띄우고 절대 경로로 일을 시키거나, 새 폴더면 사용자가 한 번 신뢰한 뒤 띄운다.
 
 ### 실행 위치 결정
 
