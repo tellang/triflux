@@ -1,14 +1,9 @@
-export const SEARCH_SERVER_ORDER = Object.freeze([
-  "brave-search",
-  "tavily",
-  "exa",
-]);
+export const SEARCH_SERVER_ORDER = Object.freeze(["brave-search", "exa"]);
 
 export const MCP_SERVER_TOOL_CATALOG = Object.freeze({
   context7: Object.freeze(["resolve-library-id", "query-docs"]),
   "brave-search": Object.freeze(["brave_web_search", "brave_news_search"]),
   exa: Object.freeze(["web_search_exa", "get_code_context_exa"]),
-  tavily: Object.freeze(["tavily_search", "tavily_extract"]),
   playwright: Object.freeze([
     "browser_navigate",
     "browser_navigate_back",
@@ -23,13 +18,6 @@ export const MCP_SERVER_DOMAIN_TAGS = Object.freeze({
   context7: Object.freeze(["docs", "reference", "api", "sdk", "library"]),
   "brave-search": Object.freeze(["web", "search", "news", "current"]),
   exa: Object.freeze(["code", "repository", "examples", "search"]),
-  tavily: Object.freeze([
-    "research",
-    "search",
-    "news",
-    "verification",
-    "current",
-  ]),
   playwright: Object.freeze(["browser", "ui", "visual", "e2e"]),
   "sequential-thinking": Object.freeze([
     "analysis",
@@ -278,7 +266,6 @@ export const SERVER_EXPLICIT_KEYWORDS = Object.freeze({
   context7: Object.freeze(["context7"]),
   "brave-search": Object.freeze(["brave", "brave-search"]),
   exa: Object.freeze(["exa"]),
-  tavily: Object.freeze(["tavily"]),
   playwright: Object.freeze(["playwright"]),
   "sequential-thinking": Object.freeze([
     "sequential-thinking",

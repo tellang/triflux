@@ -9,7 +9,7 @@ argument-hint: "<주제> [--quick | --auto] [--depth quick|standard|deep]"
 
 > **ARGUMENTS 처리**: `--quick` → Quick. `--auto` → Auto. 그 외 → Deep (기본).
 
-> 기본은 Claude(Exa/학술) + Codex(Brave/실용) 2-CLI 멀티소스 교차검증 합의다. Antigravity/Tavily는 Quick 단일 검색에 사용한다.
+> 기본은 Claude(Exa/학술) + Codex(Brave/실용) 2-CLI 멀티소스 교차검증 합의다. Antigravity는 Quick 단일 검색에 사용한다.
 > 빠른 단일 Google Search 는 `--quick`. 자율 쿼리생성+구조화 보고서 는 `--auto`.
 
 ---
@@ -80,7 +80,7 @@ tfx multi --teammate-mode headless \
 
 #### Step 3: 결과 수집 및 교차검증
 
-수치와 인용은 검색 스니펫이 아니라 원문으로 확인한다. 원문은 WebFetch, Tavily extract, Exa fetch 순서로 가져온다.
+수치와 인용은 검색 스니펫이 아니라 원문으로 확인한다. 원문은 WebFetch, Exa fetch 순서로 가져온다.
 
 교차검증 기준:
 1. 사실 일치
@@ -124,7 +124,7 @@ AskUserQuestion:
   1. 코드/라이브러리 (context7)
   2. 학술/논문 (Exa semantic)
   3. 뉴스/트렌드 (Brave)
-  4. 일반 웹 (Tavily)
+  4. 일반 웹 (Brave)
   5. URL 콘텐츠 추출
 ```
 
@@ -136,7 +136,7 @@ AskUserQuestion:
 bash ~/.claude/scripts/tfx-route.sh antigravity "Research: use Google Search, return structured markdown with sources. Query: $(cat {query_file})" auto 120
 ```
 
-**Fallback**: Antigravity 실패 시 MCP 순서: context7 → WebSearch → Brave → Exa → Tavily.
+**Fallback**: Antigravity 실패 시 MCP 순서: context7 → WebSearch → Brave → Exa.
 
 ### Step 3: 결과 포맷팅 (Claude ~300 토큰)
 
@@ -177,7 +177,7 @@ bash ~/.claude/scripts/tfx-route.sh antigravity "Research: use Google Search, re
 brave-search MCP 우선, 없으면 WebSearch. 쿼리당 상위 5-10개, URL 중복 제거, 실패 시 쿼리 변형 재시도.
 
 ### Step 4: 핵심 정보 추출
-- 상위 결과는 WebFetch, Tavily extract, Exa fetch 순서로 원문을 가져와 스니펫 대신 쓴다
+- 상위 결과는 WebFetch, Exa fetch 순서로 원문을 가져와 스니펫 대신 쓴다
 - 제목/URL/스니펫 정규화
 - 관련성 높은 것 우선
 - 사실 vs 의견 구분

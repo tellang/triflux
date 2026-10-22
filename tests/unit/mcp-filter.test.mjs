@@ -117,7 +117,6 @@ describe("mcp-filter", () => {
         "context7",
         "brave-search",
         "exa",
-        "tavily",
         "playwright",
         "sequential-thinking",
       ],
@@ -127,10 +126,9 @@ describe("mcp-filter", () => {
     assert.deepEqual(policy.allowedServers, [
       "context7",
       "brave-search",
-      "tavily",
       "exa",
     ]);
-    assert.match(policy.hint, /웹 검색 우선순위: tavily, exa, brave-search\./);
+    assert.match(policy.hint, /웹 검색 우선순위: exa, brave-search\./);
     assert.match(
       policy.hint,
       /검색 깊이를 제한하고 읽기 전용 조사에 집중하세요/,
