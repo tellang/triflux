@@ -342,6 +342,22 @@ describe("mcp-filter", () => {
     }
   });
 
+  it("리서치 프롬프트의 explore 워커는 문서 신호가 있어도 웹 검색 서버를 받는다", () => {
+    const policy = buildMcpPolicy({
+      agentType: "explore",
+      requestedProfile: "auto",
+      availableServers: ["context7", "brave-search", "exa"],
+      taskText: "이 API 스펙 리서치해줘",
+    });
+
+    assert.ok(
+      policy.allowedServers.some((name) =>
+        ["brave-search", "exa"].includes(name),
+      ),
+      policy.allowedServers.join(","),
+    );
+  });
+
   it("hint와 allowed server는 동일한 keyword top-k 결과를 재사용한다", () => {
     const policy = buildMcpPolicy({
       agentType: "executor",

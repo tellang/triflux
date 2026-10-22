@@ -483,7 +483,7 @@ estimate_expected_duration_sec() {
   if [[ "$text" =~ (test|lint|build|npm|pnpm|pytest|검증|테스트) ]]; then
     [[ "$expected" -lt 180 ]] && expected=180
   fi
-  if [[ "$text" =~ (mcp|browser|playwright|context7|exa|tavily|brave) ]]; then
+  if [[ "$text" =~ (mcp|browser|playwright|context7|exa|brave) ]]; then
     [[ "$expected" -lt 120 ]] && expected=120
   fi
 

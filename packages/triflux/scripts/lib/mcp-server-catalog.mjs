@@ -16,8 +16,14 @@ export const MCP_SERVER_TOOL_CATALOG = Object.freeze({
 
 export const MCP_SERVER_DOMAIN_TAGS = Object.freeze({
   context7: Object.freeze(["docs", "reference", "api", "sdk", "library"]),
-  "brave-search": Object.freeze(["web", "search", "news", "current"]),
-  exa: Object.freeze(["code", "repository", "examples", "search"]),
+  "brave-search": Object.freeze([
+    "web",
+    "search",
+    "news",
+    "current",
+    "verification",
+  ]),
+  exa: Object.freeze(["code", "repository", "examples", "search", "research"]),
   playwright: Object.freeze(["browser", "ui", "visual", "e2e"]),
   "sequential-thinking": Object.freeze([
     "analysis",

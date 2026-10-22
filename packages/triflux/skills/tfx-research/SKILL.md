@@ -123,9 +123,8 @@ tfx multi --teammate-mode headless \
 AskUserQuestion:
   1. 코드/라이브러리 (context7)
   2. 학술/논문 (Exa semantic)
-  3. 뉴스/트렌드 (Brave)
-  4. 일반 웹 (Brave)
-  5. URL 콘텐츠 추출
+  3. 뉴스/일반 웹 (Brave)
+  4. URL 콘텐츠 추출
 ```
 
 ### Step 2: Antigravity Google Search 위임
