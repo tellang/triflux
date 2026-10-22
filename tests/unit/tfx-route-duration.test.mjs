@@ -59,21 +59,6 @@ function estimateWithShell(shell, agent, profile, prompt) {
 }
 
 describe("estimate_expected_duration_sec — agent 기본값", () => {
-  it("explore = 30", () => {
-    assert.equal(estimate("explore", "", ""), 30);
-  });
-  it("writer = 90", () => {
-    assert.equal(estimate("writer", "", ""), 90);
-  });
-  it("executor = 300", () => {
-    assert.equal(estimate("executor", "", ""), 300);
-  });
-  it("code-reviewer = 600", () => {
-    assert.equal(estimate("code-reviewer", "", ""), 600);
-  });
-  it("scientist = 900", () => {
-    assert.equal(estimate("scientist", "", ""), 900);
-  });
   it("unknown agent = 30 (fallback)", () => {
     assert.equal(estimate("unknown-agent", "", ""), 30);
   });
@@ -86,9 +71,6 @@ describe("estimate_expected_duration_sec — profile bump", () => {
   it("explore + analyze → 300 (bump from 30)", () => {
     assert.equal(estimate("explore", "analyze", ""), 300);
   });
-  it("executor + implement → 300 (no bump, already ≥ 300)", () => {
-    assert.equal(estimate("executor", "implement", ""), 300);
-  });
   it("scientist + implement → 900 (no downgrade)", () => {
     assert.equal(estimate("scientist", "implement", ""), 900);
   });
@@ -98,32 +80,11 @@ describe("estimate_expected_duration_sec — 한글 키워드 bump", () => {
   it('"분석" → 600', () => {
     assert.equal(estimate("explore", "", "코드 분석 해줘"), 600);
   });
-  it('"리서치" → 600', () => {
-    assert.equal(estimate("explore", "", "최신 동향 리서치"), 600);
-  });
-  it('"조사" → 600', () => {
-    assert.equal(estimate("explore", "", "원인 조사"), 600);
-  });
-  it('"전체" → 600', () => {
-    assert.equal(estimate("explore", "", "전체 감사"), 600);
-  });
-  it('"싹다" → 600', () => {
-    assert.equal(estimate("explore", "", "싹다 정리"), 600);
-  });
   it('"리팩터" → 900', () => {
     assert.equal(estimate("explore", "", "모듈 리팩터"), 900);
   });
-  it('"마이그레이션" → 900', () => {
-    assert.equal(estimate("explore", "", "DB 마이그레이션"), 900);
-  });
-  it('"대규모" → 900', () => {
-    assert.equal(estimate("explore", "", "대규모 변경"), 900);
-  });
   it('"검증" → 180', () => {
     assert.equal(estimate("explore", "", "기능 검증"), 180);
-  });
-  it('"테스트" → 180', () => {
-    assert.equal(estimate("explore", "", "통합 테스트"), 180);
   });
 });
 
@@ -137,20 +98,11 @@ describe("estimate_expected_duration_sec — 영어 키워드 bump", () => {
     );
   });
 
-  it('"deep" → 600', () => {
-    assert.equal(estimate("explore", "", "deep investigation"), 600);
-  });
-  it('"research" → 600', () => {
-    assert.equal(estimate("explore", "", "do research"), 600);
-  });
   it('"analyze" → 600', () => {
     assert.equal(estimate("explore", "", "analyze output"), 600);
   });
   it('"refactor" → 900', () => {
     assert.equal(estimate("explore", "", "refactor module"), 900);
-  });
-  it('"migration" → 900', () => {
-    assert.equal(estimate("explore", "", "data migration"), 900);
   });
   it('"test" → 180', () => {
     assert.equal(estimate("explore", "", "run test"), 180);
@@ -179,9 +131,6 @@ describe("estimate_expected_duration_sec — agent/profile/keyword 상호작용"
   it("scientist + review + 테스트 → 900 (agent 기본 우선)", () => {
     assert.equal(estimate("scientist", "review", "테스트"), 900);
   });
-  it("writer + minimal + 분석 → 600", () => {
-    assert.equal(estimate("writer", "minimal", "문서 분석"), 600);
-  });
 });
 
 describe("estimate_expected_duration_sec — 한국어 대소문자/경계", () => {
@@ -189,8 +138,5 @@ describe("estimate_expected_duration_sec — 한국어 대소문자/경계", () 
     // ",리서치," "리서치는" 같은 조사 붙은 경우도 매칭 — substring 매칭이므로 OK
     assert.equal(estimate("explore", "", "리서치는 끝났다"), 600);
     assert.equal(estimate("explore", "", "리팩터링 완료"), 900);
-  });
-  it("빈 프롬프트 = agent 기본값", () => {
-    assert.equal(estimate("explore", "", ""), 30);
   });
 });

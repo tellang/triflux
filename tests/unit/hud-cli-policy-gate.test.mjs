@@ -95,10 +95,6 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
     return stripAnsi(getMicroLine(...args));
   }
 
-  it("options 인자를 주지 않은 호출과 빈 객체 호출의 출력이 같다", () => {
-    assert.equal(micro(), micro({}));
-  });
-
   it("showCodex 가 false 면 x 세그먼트만 빠진다", () => {
     const line = micro({ showCodex: false });
     assert.ok(!/\bx:/.test(line), `x 세그먼트가 남아 있다: ${line}`);

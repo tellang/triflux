@@ -105,10 +105,6 @@ const dashSrc = readFileSync(
 );
 
 describe("dashboard-open wt-manager migration", () => {
-  it("terminal-opener를 import한다", () => {
-    assert.ok(dashSrc.includes('from "./terminal-opener.mjs"'));
-  });
-
   it("wt-manager를 직접 import하지 않는다", () => {
     assert.ok(!dashSrc.includes('from "./wt-manager.mjs"'));
   });

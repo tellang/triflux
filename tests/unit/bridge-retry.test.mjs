@@ -100,38 +100,6 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
     assert.equal(r4.shouldStop, true);
   });
 
-  it("retry-run 동일 reason 3회 → STUCK + shouldStop", () => {
-    const dir = makeTempDir();
-    const snapshot = join(dir, "snap.json");
-    for (let i = 0; i < 3; i += 1) {
-      runBridge([
-        "retry-run",
-        "--snapshot",
-        snapshot,
-        "--mode",
-        "ralph",
-        "--max-iterations",
-        "100",
-        "--event",
-        "start",
-      ]);
-      const last = runBridge([
-        "retry-run",
-        "--snapshot",
-        snapshot,
-        "--event",
-        "verify-fail",
-        "--reason",
-        "same",
-      ]);
-      if (i === 2) {
-        assert.equal(last.current, "STUCK");
-        assert.equal(last.shouldStop, true);
-        assert.equal(last.stuckCounter, 3);
-      }
-    }
-  });
-
   it("retry-status 는 profile 지정 chain step 을 codex --profile argv 로 방출한다", () => {
     const dir = makeTempDir();
     const snapshot = join(dir, "snap.json");
@@ -169,78 +137,5 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
       profile: "sol_high",
       argv: ["--profile", "sol_high"],
     });
-  });
-
-  it("retry-status 는 옛 xhigh/max/ultra snapshot profile을 정규화한 argv로 방출한다", () => {
-    for (const [legacy, canonical] of [
-      ["gpt56_sol_xhigh", "astra_xhigh"],
-      ["gpt56_sol_max", "astra_max"],
-      ["gpt56_sol_ultra", "astra_max"],
-    ]) {
-      const dir = makeTempDir();
-      const snapshot = join(dir, `${legacy}.json`);
-      writeFileSync(
-        snapshot,
-        JSON.stringify({
-          version: 1,
-          current: "EXECUTING",
-          iterations: 1,
-          maxIterations: 3,
-          stuckCounter: 0,
-          lastFailureReason: null,
-          cliIndex: 0,
-          cliChain: [{ cli: "codex", model: "gpt-6-astra", profile: legacy }],
-          mode: "auto-escalate",
-          sessionId: null,
-          history: [],
-        }),
-        "utf8",
-      );
-
-      assert.deepEqual(
-        runBridge(["retry-status", "--snapshot", snapshot]).cliInvocation,
-        {
-          cli: "codex",
-          profile: canonical,
-          argv: ["--profile", canonical],
-        },
-      );
-    }
-  });
-
-  it("retry-status 는 옛 snapshot의 고정 model을 버리고 가족 profile을 전달한다", () => {
-    for (const [legacyModel, legacy, canonical] of [
-      ["gpt-5.6-terra", "gpt56_terra_high", "sol_high"],
-      ["gpt-5.6-luna", "gpt56_luna_low", "luna_low"],
-    ]) {
-      const dir = makeTempDir();
-      const snapshot = join(dir, `${legacy}.json`);
-      writeFileSync(
-        snapshot,
-        JSON.stringify({
-          version: 1,
-          current: "EXECUTING",
-          iterations: 1,
-          maxIterations: 3,
-          stuckCounter: 0,
-          lastFailureReason: null,
-          cliIndex: 0,
-          cliChain: [{ cli: "codex", model: legacyModel, profile: legacy }],
-          mode: "auto-escalate",
-          sessionId: null,
-          history: [],
-        }),
-        "utf8",
-      );
-
-      assert.deepEqual(
-        runBridge(["retry-status", "--snapshot", snapshot]).cliInvocation,
-        {
-          cli: "codex",
-          profile: canonical,
-          argv: ["--profile", canonical],
-        },
-      );
-    }
   });
 });

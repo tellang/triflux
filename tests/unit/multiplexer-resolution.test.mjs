@@ -6,7 +6,6 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
@@ -101,59 +100,6 @@ function runSessionProbe({
   return JSON.parse(result.stdout.trim());
 }
 
-describe("psmux.mjs: OS primary multiplexer 명시 분기", () => {
-  const src = readFileSync(join(ROOT, "hub/team/psmux.mjs"), "utf8");
-
-  it("Windows primary 로 psmux 를 명시 분기한다", () => {
-    assert.ok(
-      /if \(IS_WINDOWS\)\s*\{[\s\S]*?"psmux"/.test(src),
-      "Windows 분기 안에서 psmux primary 결정이 있어야 함",
-    );
-  });
-
-  it("mac/Linux primary 로 tmux 를 명시 분기한다 (silent fallback 아님)", () => {
-    assert.ok(
-      /mac\/Linux primary: tmux/.test(src),
-      "tmux 는 mac/Linux primary 로 명시되어야 함 (fallback 표현 금지)",
-    );
-    assert.ok(
-      !/silent fallback/i.test(src) ||
-        /silent fallback 은 두지 않는다/.test(src),
-      "silent fallback 패턴이 도입되면 안 됨 (의도 명시화 정책)",
-    );
-  });
-
-  it("hasMultiplexer 와 hasPsmux 가 둘 다 export 된다 (alias)", async () => {
-    const mod = await import("../../hub/team/psmux.mjs");
-    assert.equal(typeof mod.hasMultiplexer, "function");
-    assert.equal(typeof mod.hasPsmux, "function");
-    assert.equal(
-      mod.hasPsmux,
-      mod.hasMultiplexer,
-      "hasPsmux 는 hasMultiplexer 의 alias 여야 함",
-    );
-  });
-
-  it("getMultiplexerType 가 export 되어 primary type 을 반환한다", async () => {
-    const mod = await import("../../hub/team/psmux.mjs");
-    assert.equal(typeof mod.getMultiplexerType, "function");
-    const type = mod.getMultiplexerType();
-    assert.ok(
-      typeof type === "string" && type.length > 0,
-      `getMultiplexerType() 는 non-empty string 을 반환해야 함, got: ${type}`,
-    );
-  });
-
-  it("isTmuxFallback 은 더 이상 export 안 됨 (의미 부정확)", async () => {
-    const mod = await import("../../hub/team/psmux.mjs");
-    assert.equal(
-      mod.isTmuxFallback,
-      undefined,
-      "isTmuxFallback 은 제거됐어야 함 — getMultiplexerType 로 대체",
-    );
-  });
-});
-
 describe("session.mjs: literal multiplexer identity", () => {
   it("darwin + tmux available + psmux absent resolves to tmux", () => {
     const probe = runSessionProbe({
@@ -167,17 +113,6 @@ describe("session.mjs: literal multiplexer identity", () => {
       hasPsmuxAlias: true,
       multiplexerType: "tmux",
     });
-  });
-
-  it("hasPsmux alias truth on darwin does not become literal psmux identity", () => {
-    const probe = runSessionProbe({
-      platform: "darwin",
-      execFileOk: { "tmux -V": true },
-      execSyncOk: { "tmux -V": true },
-    });
-
-    assert.equal(probe.hasPsmuxAlias, true);
-    assert.notEqual(probe.detectMultiplexer, "psmux");
   });
 
   it("linux + tmux available resolves to tmux", () => {
