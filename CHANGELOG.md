@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.82.3] - 2026-10-22
+
+### Changed
+- lead: 워커와 리뷰어에게 실제 tmux 실측을 시킬 때 `tmux -L tfx-<이름>` 전용 소켓만 쓰고 `kill-server` 는 같은 `-L` 로만 하라고 안전 절에 적는다. 리드가 tmux 안에 있으면 `$TMUX` 가 `TMUX_TMPDIR` 보다 우선해 격리가 사용자 기본 서버를 가리킬 수 있다
+
 ## [10.82.2] - 2026-10-22
 
 ### Removed
