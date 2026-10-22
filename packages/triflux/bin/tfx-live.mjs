@@ -3004,7 +3004,7 @@ tell application "iTerm2"
   set fallbackSession to missing value
   set fallbackTab to missing value
   set killedTtys to {${killedTtys.map(appleScriptString).join(", ")}}
-  set killedSessions to {}
+  set killedIds to {}
   -- tmux 가 끝나며 패인과 창이 먼저 닫히면 순회 중 창 번호가 사라진다. 사라진 창은 건너뛴다.
   repeat with candidateWindow in windows
     try
@@ -3014,7 +3014,7 @@ tell application "iTerm2"
           set idSession to candidateSession
           set idTab to candidateTab
         end if
-        if killedTtys contains (tty of candidateSession) then set end of killedSessions to candidateSession
+        if killedTtys contains (tty of candidateSession) then set end of killedIds to (id of candidateSession)
         try
           tell candidateSession to set candidateName to variable named "user.tfx_session"
           if ${allowNameFallback ? "true" : "false"} and candidateName is ${appleScriptString(session)} then
@@ -3036,7 +3036,10 @@ tell application "iTerm2"
     set targetSession to missing value
   end if
   if targetSession is not missing value then
-    tell targetSession to close
+    -- tmux 가 끝나며 대상 패인이 먼저 닫혔어도 아래 tty 정리는 이어 간다.
+    try
+      tell targetSession to close
+    end try
     -- 셸 통합이나 tmux 클라이언트 조회가 불확실하면 남은 탭을 보존한다.
     set shellsOnly to ${clients ? "true" : "false"}
     set attachedTtys to {${attachedTtys.map(appleScriptString).join(", ")}}
@@ -3054,11 +3057,18 @@ tell application "iTerm2"
       if shellsOnly then tell targetTab to close
     end try
   end if
-  -- 죽인 세션에 붙어 있던 패인은 표시가 없어도 닫는다. 위에서 탭째 닫혔으면 오류를 무시한다.
-  repeat with killedSession in killedSessions
-    try
-      tell (contents of killedSession) to close
-    end try
+  -- 죽인 세션에 붙어 있던 패인은 표시가 없어도 닫는다. 순회 참조는 순번이라 앞선 닫기 뒤 옆 패인을 가리키므로 ID 로 매번 다시 찾는다.
+  repeat with killedIndex from 1 to count of killedIds
+    set killedId to item killedIndex of killedIds
+    repeat with candidateWindow in windows
+      try
+      repeat with candidateTab in tabs of candidateWindow
+        repeat with candidateSession in sessions of candidateTab
+          if id of candidateSession is killedId then tell candidateSession to close
+        end repeat
+      end repeat
+      end try
+    end repeat
   end repeat
 end tell`;
   await exec("/usr/bin/osascript", ["-e", script], {

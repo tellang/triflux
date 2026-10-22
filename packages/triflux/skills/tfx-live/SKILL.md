@@ -48,7 +48,7 @@ Claude, agy, Codex(`Trust this folder?`와 `Do you trust the contents of this di
 - iTerm `create tab`/`split`의 command 에는 PATH 가 없다. tmux 를 `/opt/homebrew/bin/tmux` 전체 경로로 쓴다. 안 그러면 탭이 바로 닫힌다.
 - 탭 제목은 tmux 와 agy 가 덮어쓴다. AppleScript 로 정한 이름은 유지되지 않으므로 위의 Python 제목 스크립트로 고정한다.
 - `stop`으로 끝낸 세션의 tmr 반복 패인은 `stop`이 닫는다. 세션이 스스로 끝났거나 `tmux kill-session`으로 직접 죽였으면 그 패인이 "no matching tmux room"을 계속 찍으니 손으로 닫는다.
-- 탭이나 패인을 닫기 직전에 그 tty 의 프로세스(`ps -t <tty>`)를 다시 본다. tmux attach 나 omc 가 있으면 닫지 않는다.
+- 손으로 탭이나 패인을 닫을 때는 닫기 직전에 그 tty 의 프로세스(`ps -t <tty>`)를 다시 본다. tmux attach 나 omc 가 있으면 닫지 않는다.
 
 ## agy 세션
 

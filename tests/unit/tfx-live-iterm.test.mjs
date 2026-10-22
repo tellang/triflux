@@ -317,9 +317,11 @@ test("iTerm close also closes unmarked panes attached to the killed session", as
   });
   assert.match(script, /set killedTtys to \{"\/dev\/ttys004"\}/);
   assert.doesNotMatch(script, /^\s*return$/m);
-  assert.ok(
-    script.indexOf("tell (contents of killedSession) to close") >
-      script.indexOf("if shellsOnly then tell targetTab to close"),
+  // 순번 참조를 들고 있다 닫으면 옆 패인이 닫히므로 ID 로 다시 찾은 세션만 닫아야 한다.
+  assert.match(script, /set end of killedIds to \(id of candidateSession\)/);
+  assert.match(
+    script,
+    /if id of candidateSession is killedId then tell candidateSession to close/,
   );
 });
 
