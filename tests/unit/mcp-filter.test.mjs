@@ -117,7 +117,6 @@ describe("mcp-filter", () => {
         "context7",
         "brave-search",
         "exa",
-        "tavily",
         "playwright",
         "sequential-thinking",
       ],
@@ -127,10 +126,9 @@ describe("mcp-filter", () => {
     assert.deepEqual(policy.allowedServers, [
       "context7",
       "brave-search",
-      "tavily",
       "exa",
     ]);
-    assert.match(policy.hint, /웹 검색 우선순위: tavily, exa, brave-search\./);
+    assert.match(policy.hint, /웹 검색 우선순위: exa, brave-search\./);
     assert.match(
       policy.hint,
       /검색 깊이를 제한하고 읽기 전용 조사에 집중하세요/,
@@ -342,6 +340,22 @@ describe("mcp-filter", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("리서치 프롬프트의 explore 워커는 문서 신호가 있어도 웹 검색 서버를 받는다", () => {
+    const policy = buildMcpPolicy({
+      agentType: "explore",
+      requestedProfile: "auto",
+      availableServers: ["context7", "brave-search", "exa"],
+      taskText: "이 API 스펙 리서치해줘",
+    });
+
+    assert.ok(
+      policy.allowedServers.some((name) =>
+        ["brave-search", "exa"].includes(name),
+      ),
+      policy.allowedServers.join(","),
+    );
   });
 
   it("hint와 allowed server는 동일한 keyword top-k 결과를 재사용한다", () => {

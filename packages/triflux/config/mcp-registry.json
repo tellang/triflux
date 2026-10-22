@@ -46,17 +46,6 @@
       "safe": true,
       "targets": ["claude", "codex", "antigravity"],
       "description": "Brave Search MCP — 직접 stdio 연결. secrets.env 의 BRAVE_API_KEY 참조."
-    },
-    "tavily": {
-      "policy": "hosted",
-      "transport": "http",
-      "url": "https://mcp.tavily.com/mcp",
-      "headers": {
-        "Authorization": { "env": "TAVILY_API_KEY", "prefix": "Bearer " }
-      },
-      "safe": true,
-      "targets": ["claude", "codex", "antigravity"],
-      "description": "Tavily research — 비용/운영/DX/일반 웹. Key 발급: https://app.tavily.com/home → secrets.env의 TAVILY_API_KEY"
     }
   },
   "policies": {

@@ -483,7 +483,7 @@ estimate_expected_duration_sec() {
   if [[ "$text" =~ (test|lint|build|npm|pnpm|pytest|검증|테스트) ]]; then
     [[ "$expected" -lt 180 ]] && expected=180
   fi
-  if [[ "$text" =~ (mcp|browser|playwright|context7|exa|tavily|brave) ]]; then
+  if [[ "$text" =~ (mcp|browser|playwright|context7|exa|brave) ]]; then
     [[ "$expected" -lt 120 ]] && expected=120
   fi
 
@@ -1129,9 +1129,9 @@ case "$TFX_WORKER_INDEX" in
     ;;
 esac
 case "$TFX_SEARCH_TOOL" in
-  ""|brave-search|tavily|exa) ;;
+  ""|brave-search|exa) ;;
   *)
-    echo "ERROR: TFX_SEARCH_TOOL 값은 brave-search, tavily, exa 중 하나여야 합니다. (현재: $TFX_SEARCH_TOOL)" >&2
+    echo "ERROR: TFX_SEARCH_TOOL 값은 brave-search, exa 중 하나여야 합니다. (현재: $TFX_SEARCH_TOOL)" >&2
     exit 1
     ;;
 esac

@@ -46,7 +46,6 @@ const PROFILE_DEFINITIONS = Object.freeze({
     allowedServers: Object.freeze([
       "context7",
       "playwright",
-      "tavily",
       "exa",
       "brave-search",
     ]),
@@ -56,7 +55,6 @@ const PROFILE_DEFINITIONS = Object.freeze({
       context7: Object.freeze(["resolve-library-id", "query-docs"]),
       "brave-search": Object.freeze(["brave_web_search", "brave_news_search"]),
       exa: Object.freeze(["web_search_exa", "get_code_context_exa"]),
-      tavily: Object.freeze(["tavily_search", "tavily_extract"]),
       playwright: Object.freeze([
         "browser_navigate",
         "browser_navigate_back",
@@ -71,7 +69,6 @@ const PROFILE_DEFINITIONS = Object.freeze({
     allowedServers: Object.freeze([
       "context7",
       "brave-search",
-      "tavily",
       "exa",
       "sequential-thinking",
     ]),
@@ -81,25 +78,18 @@ const PROFILE_DEFINITIONS = Object.freeze({
       context7: Object.freeze(["resolve-library-id", "query-docs"]),
       "brave-search": Object.freeze(["brave_web_search", "brave_news_search"]),
       exa: Object.freeze(["web_search_exa", "get_code_context_exa"]),
-      tavily: Object.freeze(["tavily_search", "tavily_extract"]),
       "sequential-thinking": Object.freeze(["sequentialthinking"]),
     }),
   }),
   explore: Object.freeze({
     description: "탐색/리서치 워커용. 읽기/검색 중심 MCP만 허용",
-    allowedServers: Object.freeze([
-      "context7",
-      "brave-search",
-      "tavily",
-      "exa",
-    ]),
+    allowedServers: Object.freeze(["context7", "brave-search", "exa"]),
     alwaysOnServers: Object.freeze(["context7"]),
     maxSearchServers: 2,
     allowedToolsByServer: Object.freeze({
       context7: Object.freeze(["resolve-library-id", "query-docs"]),
       "brave-search": Object.freeze(["brave_web_search", "brave_news_search"]),
       exa: Object.freeze(["web_search_exa", "get_code_context_exa"]),
-      tavily: Object.freeze(["tavily_search", "tavily_extract"]),
     }),
   }),
   reviewer: Object.freeze({

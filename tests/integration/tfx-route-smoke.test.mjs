@@ -68,9 +68,6 @@ function createRouteHome({ includeRoutePost = false } = {}) {
       "[mcp_servers.exa]",
       'command = "node"',
       "",
-      "[mcp_servers.tavily]",
-      'command = "node"',
-      "",
       "[mcp_servers.playwright]",
       'command = "node"',
       "",
@@ -775,7 +772,6 @@ describe("tfx-route.sh — 역할별 MCP profile 필터", () => {
     assert.deepEqual(allowedMcpServers(result), [
       "context7",
       "brave-search",
-      "tavily",
       "exa",
     ]);
   });
@@ -838,7 +834,7 @@ describe("tfx-route.sh — 역할별 MCP profile 필터", () => {
     assert.match(out(result), /resolved_profile=designer/);
     const servers = allowedMcpServers(result);
     assert.ok(servers.includes("context7"), "context7 must be included");
-    // MCP 서버 목록은 설치 환경에 따라 다를 수 있음 (playwright, tavily, exa 등)
+    // MCP 서버 목록은 설치 환경에 따라 다를 수 있음 (playwright, exa 등)
   });
 });
 
@@ -852,7 +848,7 @@ describe("tfx-route.sh — 검색 도구 힌트 분배", () => {
     assert.equal(result.status, 0, out(result));
     assert.match(out(result), /worker_index=2 search_tool=auto/);
     // v2.3: 키워드 매칭 기반 동적 필터링 — 검색 도구 선택 확인
-    assert.match(out(result), /(tavily|exa|brave-search)/);
+    assert.match(out(result), /(exa|brave-search)/);
   });
 
   it("TFX_SEARCH_TOOL=exa 일 때 exa가 analyze 우선순위 맨 앞에 와야 한다", () => {
@@ -884,10 +880,7 @@ describe("tfx-route.sh — 검색 도구 힌트 분배", () => {
     );
 
     assert.notEqual(result.status, 0, out(result));
-    assert.match(
-      out(result),
-      /TFX_SEARCH_TOOL 값은 brave-search, tavily, exa 중 하나/,
-    );
+    assert.match(out(result), /TFX_SEARCH_TOOL 값은 brave-search, exa 중 하나/);
   });
 });
 
