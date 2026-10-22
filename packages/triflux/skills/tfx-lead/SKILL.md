@@ -111,6 +111,8 @@ tfx-live start --cli claude --session cl-doc --name "10.8 문서 정리" --model
 tfx-live start --cli codex --session cx-impl --name "10.8 구현"
 ```
 
+Agent 도구로 띄운 팀원(agent teams 의 tmux 모드)은 리드의 현재 폴더에서 새 Claude 프로세스로 뜬다. 처음 보는 폴더면 "Quick safety check" 신뢰 화면에서 멈추며, 이 화면의 자동 승인은 `tfx-live start` 와 `remote-spawn --auto-trust` 에만 있고 Agent 도구 경로에는 없다. 이미 신뢰한 폴더에서 띄우고 절대 경로로 일을 시키거나, 새 폴더면 사용자가 한 번 신뢰한 뒤 띄운다.
+
 ### 실행 위치 결정
 
 워커를 어디서 돌릴지(m5 로컬, m2, ryzen)는 리드가 디스패치 직전에 정해 지시서에 적는다. 워커는 받은 위치에서 실행만 하고, 압박을 느끼면 리드에게 보고한다. 피어 세션이 워커에 오프로드 지침을 따로 뿌리지 않는다.
@@ -231,6 +233,7 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 
 - [ ] 이름이 `<월>.<일> <주제>` 형식이고 등록 기록에 적었다
 - [ ] 역할에 맞는 모델과 effort 를 골랐다
+- [ ] Agent 도구 팀원을 tmux 모드로 띄운다면 리드의 현재 폴더가 신뢰된 폴더다
 - [ ] 압박을 재고 실행 위치(m5/m2/ryzen)를 지시서에 적었다
 - [ ] 사용자에게 모델과 tmux 세션명을 알렸다
 - [ ] 지시서 경로를 보냈고 작업 시작을 확인했다
