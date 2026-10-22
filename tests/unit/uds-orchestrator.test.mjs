@@ -474,6 +474,38 @@ test("Codex UDS busy wait uses an idle final read at the deadline", async () => 
   assert.equal(turnStarts, 1);
 });
 
+// setTimeout 은 Date.now() 와 다른 시계로 돌아서, 남은 대기 시간으로 줄인 조회가 Date.now() 마감보다 먼저 끝날 수 있다.
+test("Codex UDS busy wait reports busy when the capped read times out before Date.now() reaches the deadline", async () => {
+  const client = {
+    async connect() {},
+    notify() {},
+    close() {},
+    onNotification() {
+      return () => {};
+    },
+    async request(method, _params, timeoutMs) {
+      if (method !== "thread/read") return {};
+      if (timeoutMs >= 12_000)
+        return { thread: { status: { type: "active" } } };
+      throw new Error(
+        `JSON-RPC request timed out after ${timeoutMs}ms: thread/read`,
+      );
+    },
+  };
+  await assert.rejects(
+    () =>
+      askCodexAppServerThread({
+        socketPath: "/fake.sock",
+        threadId: "one",
+        prompt: "ping",
+        busyTimeoutMs: 5_000,
+        pollIntervalMs: 1,
+        clientFactory: () => client,
+      }),
+    /target busy after/,
+  );
+});
+
 test("Codex UDS timeout leaves the daemon untouched", async () => {
   await withFakeCodexServer({ FAKE_MODE: "timeout" }, async (socketPath) => {
     const result = await askCodexAppServerThread({
