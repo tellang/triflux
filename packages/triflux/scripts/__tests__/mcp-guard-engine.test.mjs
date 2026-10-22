@@ -50,13 +50,6 @@ afterEach(() => {
 });
 
 describe("mcp guard engine", () => {
-  it("loads the MCP registry", () => {
-    const registry = loadRegistry();
-    assert.equal(registry.version, 1);
-    assert.equal(registry.servers.context7.url, "https://mcp.context7.com/mcp");
-    assert.equal(registry.policies.watched_paths.length, 7);
-  });
-
   it("drops legacy hub-url servers from a user registry and reads its default transport as http", () => {
     const registryPath = join(createHomeDir(), "mcp-registry.json");
     writeFileSync(

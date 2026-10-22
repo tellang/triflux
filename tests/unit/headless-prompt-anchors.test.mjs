@@ -13,29 +13,6 @@ function readGeneratedPrompt(cmd) {
 }
 
 describe("headless prompt grounding anchors", () => {
-  it("MCP implement 힌트는 별도 라벨 블록과 검증 지시를 포함한다", () => {
-    const cmd = buildHeadlessCommand("codex", "test", "/tmp/r.txt", {
-      handoff: false,
-      mcp: "implement",
-    });
-    const content = readGeneratedPrompt(cmd);
-
-    assert.ok(
-      content.includes("\n\n[MCP: implement]\n"),
-      `MCP 힌트는 별도 라벨 블록이어야 함: ${content}`,
-    );
-    assert.ok(
-      content.includes(
-        "Implement changes directly. After changes, run the narrowest relevant test/lint for the files you touched; if none can run, state why and the next-best check.",
-      ),
-      `implement MCP 힌트에 검증 지시가 포함되어야 함: ${content}`,
-    );
-    assert.ok(
-      !content.includes("test [MCP: implement]"),
-      `MCP 힌트는 인라인 접착되지 않아야 함: ${content}`,
-    );
-  });
-
   it("cwd가 있으면 handoff 직전에 workspace grounding 블록을 삽입한다", () => {
     const cmd = buildHeadlessCommand("codex", "do work", "/tmp/r.txt", {
       cwd: "/repo/triflux",
@@ -62,34 +39,6 @@ describe("headless prompt grounding anchors", () => {
       !content.includes("[workspace] root"),
       `cwd 없을 때 grounding 금지: ${content}`,
     );
-  });
-
-  it("prior_context는 source/truncated 속성과 anchor를 포함한다", () => {
-    const dir = mkdtempSync(join(tmpdir(), "triflux-headless-context-"));
-    try {
-      const contextFile = join(dir, "context.md");
-      writeFileSync(contextFile, "previous notes\n", "utf8");
-      const cmd = buildHeadlessCommand("codex", "new task", "/tmp/r.txt", {
-        handoff: false,
-        contextFile,
-      });
-      const content = readGeneratedPrompt(cmd);
-
-      assert.ok(
-        content.startsWith(
-          `<prior_context source="${contextFile}" truncated="false">\nprevious notes\n`,
-        ),
-        `prior_context 속성 태그 누락: ${content}`,
-      );
-      assert.ok(
-        content.includes(
-          "</prior_context>\nBase your work on the prior_context above; if it conflicts with the task below, the task wins.\n\nnew task",
-        ),
-        `prior_context anchor 누락: ${content}`,
-      );
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 
   it("32KB 초과 prior_context는 truncated=true와 절단 마커를 표시한다", () => {

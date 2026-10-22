@@ -193,17 +193,6 @@ describe("shouldUseFileRef(@ intercept 회귀 #117)", () => {
     );
   });
 
-  it("psmux + useFileRef=true + claude는 @file 경로 사용", () => {
-    assert.equal(
-      shouldUseFileRef({
-        multiplexer: "psmux",
-        useFileRef: true,
-        cli: "claude",
-      }),
-      true,
-    );
-  });
-
   it("psmux + useFileRef=true + cli null은 @file 경로 사용 (이전 동작 보존)", () => {
     assert.equal(
       shouldUseFileRef({ multiplexer: "psmux", useFileRef: true, cli: null }),

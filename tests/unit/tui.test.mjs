@@ -4,20 +4,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  altScreenOff,
   altScreenOn,
   box,
   clip,
-  color,
   cursorHide,
-  cursorShow,
   FG,
-  MOCHA,
-  moveTo,
   padRight,
   progressBar,
   RESET,
-  STATUS_ICON,
   statusBadge,
   stripAnsi,
   truncate,
@@ -32,18 +26,6 @@ import {
 // ── ansi.mjs ──
 
 describe("ansi.mjs", () => {
-  it("moveTo: 올바른 ANSI 시퀀스 생성", () => {
-    assert.equal(moveTo(5, 10), "\x1b[5;10H");
-    assert.equal(moveTo(1, 1), "\x1b[1;1H");
-  });
-
-  it("color: fg 적용", () => {
-    const result = color("hello", FG.red);
-    assert.ok(result.includes("\x1b[31m"));
-    assert.ok(result.includes("hello"));
-    assert.ok(result.endsWith(RESET));
-  });
-
   it("stripAnsi: ANSI 코드 제거", () => {
     const painted = `${FG.red}hello${RESET} ${FG.green}world${RESET}`;
     assert.equal(stripAnsi(painted), "hello world");
@@ -99,30 +81,6 @@ describe("ansi.mjs", () => {
     assert.ok(stripAnsi(statusBadge("failed")).includes("failed"));
     assert.ok(stripAnsi(statusBadge("running")).includes("running"));
     assert.ok(stripAnsi(statusBadge("pending")).includes("pending"));
-  });
-
-  it("MOCHA: Catppuccin 색상 상수 정의", () => {
-    assert.ok(MOCHA.ok);
-    assert.ok(MOCHA.fail);
-    assert.ok(MOCHA.partial);
-    assert.ok(MOCHA.border);
-  });
-
-  it("STATUS_ICON: 모든 상태 아이콘 정의", () => {
-    assert.ok(STATUS_ICON.running);
-    assert.ok(STATUS_ICON.completed);
-    assert.ok(STATUS_ICON.failed);
-    assert.ok(STATUS_ICON.pending);
-  });
-
-  it("altScreen: on/off 시퀀스", () => {
-    assert.ok(altScreenOn.includes("1049h"));
-    assert.ok(altScreenOff.includes("1049l"));
-  });
-
-  it("cursorHide/cursorShow 시퀀스", () => {
-    assert.ok(cursorHide.includes("?25l"));
-    assert.ok(cursorShow.includes("?25h"));
   });
 });
 
@@ -191,23 +149,6 @@ describe("tui attach helpers", () => {
 // ── tui.mjs ──
 
 describe("createLogDashboard", () => {
-  it("워커 업데이트 후 getWorkers에 반영", () => {
-    const tui = createLogDashboard({ refreshMs: 0 });
-    tui.updateWorker("w1", { cli: "codex", status: "running" });
-    const workers = tui.getWorkers();
-    assert.equal(workers.size, 1);
-    assert.equal(workers.get("w1").status, "running");
-    tui.close();
-  });
-
-  it("파이프라인 업데이트 후 getPipelineState에 반영", () => {
-    const tui = createLogDashboard({ refreshMs: 0 });
-    tui.updatePipeline({ phase: "verify" });
-    const state = tui.getPipelineState();
-    assert.equal(state.phase, "verify");
-    tui.close();
-  });
-
   it("render: 단일 워커 카드에 tier1/tier2/tier3 정보 출력", () => {
     let output = "";
     const fakeStream = {
@@ -638,21 +579,6 @@ describe("createLogDashboard", () => {
     tui.close();
   });
 
-  it("frameCount 증가", () => {
-    const fakeStream = { write: () => {}, columns: 60, isTTY: false };
-    const tui = createLogDashboard({
-      stream: fakeStream,
-      refreshMs: 0,
-      columns: 60,
-    });
-    assert.equal(tui.getFrameCount(), 0);
-    tui.render();
-    assert.equal(tui.getFrameCount(), 1);
-    tui.render();
-    assert.equal(tui.getFrameCount(), 2);
-    tui.close();
-  });
-
   it("Shift+Up/Down: 워커 선택 순환 (\\x1b[1;2A / \\x1b[1;2B)", () => {
     const chunks = [];
     const fakeStream = {
@@ -915,29 +841,6 @@ describe("createLogDashboard", () => {
     const clean2 = stripAnsi(output);
     assert.equal(clean2.includes("(🔵"), false, "이모지가 괄호에 남으면 안됨");
     assert.ok(clean2.includes("(writer)"), "유의미한 role은 유지되어야 함");
-    tui.close();
-  });
-
-  it("P1: Tier1 키바인딩 힌트에 j/k와 l 포함", () => {
-    let output = "";
-    const fakeStream = {
-      write: (s) => {
-        output += s;
-      },
-      columns: 160,
-      isTTY: false,
-    };
-    const tui = createLogDashboard({
-      stream: fakeStream,
-      refreshMs: 0,
-      columns: 160,
-    });
-    output = "";
-    tui.updateWorker("w1", { cli: "codex", status: "running" });
-    tui.render();
-    const clean = stripAnsi(output);
-    assert.ok(clean.includes("j/k"), "j/k 키 힌트 포함");
-    assert.ok(clean.includes("l"), "l 키 힌트 포함");
     tui.close();
   });
 

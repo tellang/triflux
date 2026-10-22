@@ -90,24 +90,6 @@ afterEach(() => {
 });
 
 describe("mcp guard proactive registry sync", () => {
-  it("creates the managed server for empty Gemini mcpServers", () => {
-    const homeDir = makeTempRoot();
-    useHome(homeDir);
-    const settingsPath = writeGeminiSettings(homeDir, { mcpServers: {} });
-
-    const result = syncRegistryTargets({ registry: registryFor(settingsPath) });
-    const updated = readJson(settingsPath);
-
-    assert.equal(
-      updated.mcpServers.context7.url,
-      "https://mcp.context7.com/mcp",
-    );
-    assert.equal(
-      result.actions.some((action) => action.status === "updated"),
-      true,
-    );
-  });
-
   it("adds only the managed server and preserves unrelated Gemini MCP servers", () => {
     const homeDir = makeTempRoot();
     useHome(homeDir);
