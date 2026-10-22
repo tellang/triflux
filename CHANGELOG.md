@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.82.2] - 2026-10-22
+
+### Removed
+- mcp: Tavily MCP 를 레지스트리, 검색 서버 순서, 역할별 허용 목록, `TFX_SEARCH_TOOL` 허용값, tfx-research 스킬에서 뺀다. `tfx mcp sync`, `tfx doctor --fix`, `tfx mcp add` 가 더는 tavily 를 설정 파일에 다시 쓰지 않는다. 이미 설정 파일에 있는 tavily 항목은 sync 가 지우지 않으므로 손으로 지운다. 리서치와 검증 성격 프롬프트는 각각 exa 와 brave-search 를 받는다 (#812)
+
 ## [10.82.1] - 2026-10-22
 
 ### Fixed
