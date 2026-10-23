@@ -2,6 +2,15 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.82.4] - 2026-10-23
+
+### Fixed
+- live: Codex UDS busy 대기에서 상한을 남은 시간으로 줄인 마지막 조회가 timeout 으로 끝나면 대기 만료로 판정한다. libuv 타이머가 `Date.now()` 마감보다 먼저 터져 원래 timeout 오류가 올라오던 간헐 실패를 막는다. 줄이지 않은 조회의 timeout 과 연결 끊김 오류는 그대로 올라간다 (#814)
+- live: `tfx-live` 가 tmux 세션 대상을 `=이름:` 정확 일치로만 찾는다. 이름이 접두어로 겹치는 다른 세션에 붙어 잘못된 세션을 보거나 죽이던 문제를 막는다. 테스트는 `tmux -L` 전용 소켓으로 격리한다 (#815)
+
+### Tests
+- 구현을 되풀이하거나 다른 테스트와 중복인 단위 테스트 256개를 네 묶음으로 지운다. 리뷰에서 회귀 가드로 판정한 10개(stall-kill 기본값과 SIGKILL 경로, hooks.state dedupe, test-engineer 라우팅, HUD 설치 목록, WT 프로필, remote-spawn detached watcher)는 되살렸다. `tfx-live*` 와 `uds-orchestrator` 테스트는 이번 범위에서 뺐다 (#817 #820 #819 #816)
+
 ## [10.82.3] - 2026-10-22
 
 ### Changed
