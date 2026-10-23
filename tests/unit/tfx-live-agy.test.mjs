@@ -7,6 +7,7 @@ import {
   agyWaitVerdict,
   composerShowsPrompt,
   inspectUnsetEnv,
+  withLeadSession,
   withUnsetEnv,
 } from "../../bin/tfx-live.mjs";
 
@@ -370,4 +371,11 @@ test("unset-env rejects malformed patterns before launching a shell", () => {
   ])
     assert.throws(() => withUnsetEnv("agy", [pattern]), /--unset-env/);
   assert.equal(withUnsetEnv("agy", []), "agy");
+});
+
+test("lead-session 은 PowerShell 대상에 $env 대입으로 붙는다", () => {
+  assert.equal(
+    withLeadSession("claude --model opus", "a'b", "win32"),
+    "$env:TFX_LEAD_SESSION_ID='a''b'; claude --model opus",
+  );
 });

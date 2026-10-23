@@ -26,7 +26,7 @@ mod API 에서 `$.tool.register` 는 모델이 호출하는 도구를 만들고,
 - compact 는 `instructions` 를 `/compact` 인자로 넘긴다. compact 와 clear 가 끝나면 `$.prompt.submit` 으로 다음 프롬프트를 넣는다. clear 에 `handoff` 가 있으면 "인계 파일 <경로> 를 읽고 이어간다." 를 `then` 보다 먼저 넣는다.
 - exit 는 `handoff` 가 없으면 거부한다. 사용자 승인 없는 자동 exit 규칙은 만들지 않는다. 도구는 리드가 명시적으로 호출할 때만 돈다.
 - 실행 전 거부(인자 오류, 없는 인계 파일, exit 의 `handoff` 누락, 서브에이전트 안의 호출)는 도구 결과의 `deny` 로, 실행 뒤 실패(호스트의 슬래시 거부)는 다음 턴 prompt 로 알린다. 조용히 실패하지 않는다.
-- 대상 확장: 같은 도구의 `target` 으로 `subagent:<이름>`, `claude:<이름>`, `codex:<이름>`, `agy:<이름>` 을 받는다. 대상마다 되는 동작은 구현하고, 안 되는 조합은 도구가 이유와 대안을 담은 오류로 돌려주며 `tfx-live` 스킬의 지원 표에 적는다. 이 확장은 후속 변경에서 구현한다. 이 결정의 첫 변경은 `self` 만 구현하고 나머지 대상은 오류로 돌려준다.
+- 대상 확장: 같은 도구의 `target` 으로 `subagent:<이름>`, `claude:<이름>`, `codex:<이름>`, `agy:<이름>` 을 받는다. 대상마다 되는 동작은 구현하고, 안 되는 조합은 도구가 이유와 대안을 담은 오류로 돌려주며 `tfx-live` 스킬의 지원 표에 적는다.
 - 도구는 리드 메인 대화 전용이다. 서브에이전트(`agentId` 가 있는 호출)는 어떤 대상도 제어할 수 없다.
 - 이 기기 tmux 에서 찾은 Claude 와 Codex, agy 는 기존 `tfx-live compact`, `ask --via-tmux`, `stop` 으로 보낸다. 받는 쪽 검증은 없고 보호는 같은 사용자의 tmux 접근 권한뿐이다. Codex 의 `/new` 뒤 문장도 tmux 로 보낸다. 기본 queue 는 `/new` 뒤에도 옛 thread 로 가기 때문이다.
 - tmux 에서 찾지 못한 Claude 는 `$.session.send` 로 `[tfx-control] {...}` 표식 피어 메시지를 보낸다. 받는 쪽 mod 의 `session.receive` 훅이 세 겹을 모두 통과한 메시지만 실행한다.
