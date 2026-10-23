@@ -354,18 +354,19 @@ export async function askCodexAppServerThread({
       );
       if (waitMs > 0)
         await new Promise((resolve) => setTimeout(resolve, waitMs));
-      const remainingMs = busyDeadline - Date.now();
+      const readTimeoutMs = Math.min(
+        DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS,
+        Math.max(1, busyDeadline - Date.now()),
+      );
       try {
-        thread = await readCodexThread(
-          client,
-          selectedId,
-          Math.min(
-            DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS,
-            Math.max(1, remainingMs),
-          ),
-        );
+        thread = await readCodexThread(client, selectedId, readTimeoutMs);
       } catch (error) {
-        if (Date.now() >= busyDeadline) throw busyError();
+        // 남은 대기 시간으로 줄인 조회의 timeout 은 대기 만료다.
+        // setTimeout 은 Date.now() 와 다른 시계라 Date.now() 마감보다 먼저 터질 수 있다.
+        const busyBudgetTimedOut =
+          readTimeoutMs < DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS &&
+          error?.message?.startsWith("JSON-RPC request timed out");
+        if (busyBudgetTimedOut || Date.now() >= busyDeadline) throw busyError();
         throw error;
       }
       if (Date.now() >= busyDeadline && thread.status?.type === "active")
