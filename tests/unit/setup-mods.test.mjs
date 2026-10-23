@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -9,9 +17,12 @@ const previousEnv = { ...process.env };
 process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.TRIFLUX_TEST_HOME = home;
-const { applyStatusLine, ensureTrifluxMods, inspectTrifluxMods } = await import(
-  "../../scripts/setup.mjs"
-);
+const {
+  applyAgyStatusLine,
+  applyStatusLine,
+  ensureTrifluxMods,
+  inspectTrifluxMods,
+} = await import("../../scripts/setup.mjs");
 process.env = previousEnv;
 after(() => rmSync(home, { recursive: true, force: true }));
 
@@ -240,4 +251,95 @@ test("statusLine 을 sh 래퍼로 등록하고 예전 node 명령도 triflux 것
   assert.equal(applyStatusLine(legacy, opts), false);
   const custom = { statusLine: { type: "command", command: "my-status" } };
   assert.equal(applyStatusLine(custom, opts), false);
+});
+
+test("agy statusLine 에 HUD 를 붙이고 사용자 명령은 남기며 다시 돌려도 같다", () => {
+  const hudDir = join(home, "hud");
+  mkdirSync(hudDir, { recursive: true });
+  const hudPath = join(hudDir, "hud-qos-status.mjs");
+  writeFileSync(hudPath, "");
+  writeFileSync(join(hudDir, "hud-statusline.sh"), "");
+  const binDir = join(home, "bin");
+  mkdirSync(binDir, { recursive: true });
+  for (const name of ["agy", "agy.cmd"]) writeFileSync(join(binDir, name), "");
+  const agyDir = join(home, ".gemini", "antigravity-cli");
+  const settingsPath = join(agyDir, "settings.json");
+  const opts = { hudPath, warn() {} };
+  const savedPath = process.env.PATH;
+  process.env.PATH = binDir;
+  try {
+    assert.equal(applyAgyStatusLine(opts), false);
+    assert.equal(existsSync(settingsPath), false);
+
+    mkdirSync(agyDir, { recursive: true });
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        model: "Gemini 4 Argon",
+        statusLine: { type: "", command: "", enabled: true },
+      }),
+    );
+    assert.equal(applyAgyStatusLine(opts), true);
+    const first = readFileSync(settingsPath, "utf8");
+    const written = JSON.parse(first);
+    assert.equal(written.model, "Gemini 4 Argon");
+    const claude = {};
+    applyStatusLine(claude, opts);
+    assert.deepEqual(written.statusLine, {
+      type: "command",
+      command: claude.statusLine.command,
+      enabled: true,
+      stack_with_default: true,
+    });
+    assert.equal(applyAgyStatusLine(opts), false);
+    assert.equal(readFileSync(settingsPath, "utf8"), first);
+
+    const custom = JSON.stringify({
+      statusLine: { type: "command", command: "my-status" },
+    });
+    writeFileSync(settingsPath, custom);
+    assert.equal(applyAgyStatusLine(opts), false);
+    assert.equal(readFileSync(settingsPath, "utf8"), custom);
+  } finally {
+    process.env.PATH = savedPath;
+  }
+});
+
+test("agy 설정 JSON 이 깨져도 setup --dry-run 은 skip 항목을 내고 성공한다", () => {
+  const fakeHome = mkdtempSync(join(tmpdir(), "tfx-dry-"));
+  try {
+    const binDir = join(fakeHome, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(join(binDir, "agy"), "");
+    const agyDir = join(fakeHome, ".gemini", "antigravity-cli");
+    mkdirSync(agyDir, { recursive: true });
+    writeFileSync(join(agyDir, "settings.json"), '{"statusLine":{');
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(import.meta.dirname, "../../bin/triflux.mjs"),
+        "setup",
+        "--dry-run",
+        "--json",
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+          TRIFLUX_TEST_HOME: fakeHome,
+          PATH: `${binDir}:${process.env.PATH}`,
+        },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const action = JSON.parse(result.stdout).actions.find(
+      (a) => a.type === "agyStatusLine",
+    );
+    assert.equal(action.change, "skip");
+    assert.ok(action.error);
+  } finally {
+    rmSync(fakeHome, { recursive: true, force: true });
+  }
 });
