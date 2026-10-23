@@ -6,11 +6,13 @@ date: 2026-10-21
 deciders: [tellang]
 supersedes: [0042]
 superseded_by: null
-relates: [0040, 0041]
+relates: [0040, 0041, 0042, 0047]
 pr: null
 ---
 
 # ADR-0043: 확정한 압박 전이는 리드 자기 세션에 피어 메시지로 보낸다
+
+> [ADR-0047](0047-pressure-notice-without-turn.md) 이 일부 대체한다. 피어 메시지는 4 로 오르는 전이만 보내고, 나머지 전이는 턴 없이 다음 요청에 한 줄로 붙인다.
 
 ## 컨텍스트와 문제 (Context)
 

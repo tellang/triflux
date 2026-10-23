@@ -27,7 +27,7 @@ export type Monitor = {
   interactive: boolean
   platform?: Promise<boolean>
   state: PressureState
-  active?: { sessionId: string; reading: boolean; submitting: boolean; timer?: Timer }
+  active?: { sessionId: string; reading: boolean; submitting: boolean; timer?: Timer; notice?: { level: PressureLevel; at: number } }
 }
 
 function isMacOS($: EngineInterface, monitor: Monitor) {
@@ -102,23 +102,20 @@ function startMemoryPressure($: EngineInterface, monitor: Monitor, sessionId: st
       if (monitor.active !== current) return
       const result = advancePressure(monitor.state, level, now)
       monitor.state = result.state
-      if (result.transition && !current.submitting) {
-        let { prev, level } = result.transition
-        current.submitting = true
-        ;(async () => {
-          try {
-            do {
-              const now = await $.clock.now()
-              const text = `[memory-pressure] 압박 단계가 ${prev} 에서 ${level} 로 바뀌었다 (${new Date(now).toISOString()}). tfx-lead 스킬 "압박 변화 대응" 절의 그 전이 행에 따라, 실행 중인 세션은 옮길 수 없다는 전제로 지금 할 일을 정해 실행하라. 그 사이 또 바뀌었을 수 있으니 /tfx-pressure status 로 현재 단계를 확인한다.`
-              await notifyLead($, text, () => monitor.active === current).catch(() => {})
-              if (monitor.active !== current) return
-              prev = level
-              level = monitor.state.confirmed!
-            } while (prev !== level)
-          } finally {
-            current.submitting = false
-          }
-        })().catch(() => {})
+      if (result.transition) {
+        const { prev, level } = result.transition
+        // critical 로 오를 때만 턴을 연다. 나머지 전이는 다음 요청에 한 줄로 붙이고, 그 사이 또 바뀌면 마지막 상태로 덮는다.
+        if (level !== 4) current.notice = { level, at: now }
+        else {
+          current.notice = undefined
+          // 앞서 보낸 critical 알림이 아직 도착하지 않았으면 그것이 리드를 깨운다.
+          if (current.submitting) return
+          current.submitting = true
+          const text = `[memory-pressure] 압박 단계가 ${prev} 에서 4 로 올랐다. 현재 4 critical (${new Date(now).toISOString()}). tfx-lead 스킬 "압박 변화 대응" 절의 critical 행을 지금 실행하라.`
+          notifyLead($, text, () => monitor.active === current)
+            .catch(() => {})
+            .finally(() => { current.submitting = false })
+        }
       }
     } finally {
       current.reading = false
@@ -134,6 +131,14 @@ export async function enablePressure($: EngineInterface, monitor: Monitor) {
   await $.store.set('tfx.pressure.' + sessionId, { since: new Date(await $.clock.now()).toISOString() })
   startMemoryPressure($, monitor, sessionId)
   return '메모리 압박 감시: on'
+}
+
+function takeNotice(monitor: Monitor) {
+  const active = monitor.active
+  const notice = active?.notice
+  if (!active || !notice) return
+  active.notice = undefined
+  return `메모리 압박: 현재 ${notice.level}(${new Date(notice.at).toISOString()}, 1 normal 2 warn 4 critical)`
 }
 
 export function registerMemoryPressure(on: On, monitor: Monitor) {
@@ -154,6 +159,18 @@ export function registerMemoryPressure(on: On, monitor: Monitor) {
   on('session.end', { reason: ['prompt_input_exit', 'resume', 'logout', 'other'] }, async ($, e, next) => {
     await $.store.delete('tfx.pressure.' + e.sessionId)
     return next(e)
+  })
+  // prompt.attachment 는 엔진이 만든 주입만 고칠 수 있어 새 줄을 더하지 못한다. 리드의 다음 요청은 새 입력이나 도구 결과로 나가므로 그 둘의 context 에 붙인다.
+  on('prompt.submit', async ($, e, next) => {
+    const notice = takeNotice(monitor)
+    return next(notice ? { ...e, context: [...(e.context ?? []), notice] } : e)
+  })
+  on('tool.call', async ($, e, next) => {
+    const result = await next(e)
+    // 서브에이전트의 도구 결과와 플러그인이 직접 호출한 결과의 context 는 리드 모델이 읽지 않으니 다음 기회로 남긴다.
+    if (next.origin.plugin !== 'engine' || e.agentId !== undefined || result.deny !== undefined) return result
+    const notice = takeNotice(monitor)
+    return notice ? { ...result, context: [...(result.context ?? []), notice] } : result
   })
   on('command.run', { command: 'tfx-pressure' }, async ($, e) => {
     const sessionId = await $.session.id()
