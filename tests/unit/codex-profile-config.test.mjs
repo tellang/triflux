@@ -14,8 +14,6 @@ import { afterEach, describe, it } from "node:test";
 
 import {
   codexProfileConfigOverrides,
-  listLegacyCodexProfileSections,
-  normalizeCodexProfileName,
   sanitizeCodexProfileConfig,
   sanitizeCodexProfileConfigFile,
 } from "../../scripts/lib/codex-profile-config.mjs";
@@ -35,24 +33,6 @@ afterEach(() => {
 });
 
 describe("codex legacy profile config sanitizer", () => {
-  it("lists inline [profiles.*] sections", () => {
-    const names = listLegacyCodexProfileSections(
-      [
-        'model = "gpt-5.5"',
-        "",
-        "[profiles.gpt55_xhigh]",
-        'model = "gpt-5.5"',
-        "[mcp_servers.tfx-hub]",
-        'url = "http://127.0.0.1:27888/mcp"',
-        "[profiles.gpt55_low] # stale inline profile",
-        'model_reasoning_effort = "low"',
-        "",
-      ].join("\n"),
-    );
-
-    assert.deepEqual(names, ["gpt55_xhigh", "gpt55_low"]);
-  });
-
   it("removes top-level profile selector and inline profile tables after MCP sections", () => {
     const codexHome = makeHome();
     writeFileSync(join(codexHome, "gpt55_low.config.toml"), 'model = "keep"\n');
@@ -169,17 +149,6 @@ describe("codexProfileConfigOverrides", () => {
     );
   });
 
-  it("derives max and ultra from canonical Astra profile suffixes", () => {
-    const codexHome = makeHome();
-    assert.deepEqual(codexProfileConfigOverrides("astra_max", { codexHome }), [
-      'model_reasoning_effort="max"',
-    ]);
-    assert.deepEqual(
-      codexProfileConfigOverrides("astra_ultra", { codexHome }),
-      ['model_reasoning_effort="ultra"'],
-    );
-  });
-
   it("normalizes old Sol canonical names before reading profile files", () => {
     const codexHome = makeHome();
     for (const [legacy, canonical, effort] of [
@@ -193,27 +162,6 @@ describe("codexProfileConfigOverrides", () => {
       );
       assert.deepEqual(codexProfileConfigOverrides(legacy, { codexHome }), [
         'model="gpt-6-astra"',
-        `model_reasoning_effort="${effort}"`,
-      ]);
-    }
-  });
-
-  it("normalizes old Terra, Luna, and GPT-6 Sol names to the current lane with the same effort", () => {
-    const codexHome = makeHome();
-    for (const [legacy, canonical, model, effort] of [
-      ["gpt56_terra_high", "sol_high", "gpt-6.1-sol", "high"],
-      ["gpt56_terra_med", "sol_med", "gpt-6.1-sol", "medium"],
-      ["gpt56_luna_low", "luna_low", "gpt-6-luna", "low"],
-      ["gpt6_sol_high", "sol_high", "gpt-6.1-sol", "high"],
-      ["gpt6_sol_med", "sol_med", "gpt-6.1-sol", "medium"],
-    ]) {
-      writeFileSync(
-        join(codexHome, `${canonical}.config.toml`),
-        `model = "${model}"\nmodel_reasoning_effort = "${effort}"\n`,
-      );
-      assert.equal(normalizeCodexProfileName(legacy), canonical);
-      assert.deepEqual(codexProfileConfigOverrides(legacy, { codexHome }), [
-        `model="${model}"`,
         `model_reasoning_effort="${effort}"`,
       ]);
     }

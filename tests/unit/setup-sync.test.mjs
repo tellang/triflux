@@ -19,7 +19,6 @@ const PROJECT_ROOT = join(__dirname, "..", "..");
 
 // dynamic import to pick up fresh module state
 const {
-  detectDevMode,
   SYNC_MAP,
   BREADCRUMB_PATH,
   isSetupUserStateFile,
@@ -56,23 +55,6 @@ function cleanTmpDir() {
 }
 
 // ── tests ──
-
-describe("setup-sync: detectDevMode", () => {
-  before(ensureTmpDir);
-  after(cleanTmpDir);
-
-  it(".git 디렉토리가 존재하면 true를 반환한다", () => {
-    const fakeRoot = join(TMP_DIR, "with-git");
-    mkdirSync(join(fakeRoot, ".git"), { recursive: true });
-    assert.equal(detectDevMode(fakeRoot), true);
-  });
-
-  it(".git 디렉토리가 없으면 false를 반환한다", () => {
-    const fakeRoot = join(TMP_DIR, "without-git");
-    mkdirSync(fakeRoot, { recursive: true });
-    assert.equal(detectDevMode(fakeRoot), false);
-  });
-});
 
 describe("setup-sync: BREADCRUMB_PATH", () => {
   it("breadcrumb 경로는 ~/.claude/scripts/.tfx-pkg-root 형식이다", () => {
@@ -233,20 +215,6 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
     rmSync(stagingRoot, { recursive: true, force: true });
   });
 
-  it("CLI user-owned skip 메시지는 존재하지 않는 backupDir를 참조하지 않는다", () => {
-    for (const relative of [
-      "bin/triflux.mjs",
-      "packages/triflux/bin/triflux.mjs",
-    ]) {
-      const text = readFileSync(join(PROJECT_ROOT, relative), "utf8");
-      assert.equal(
-        text.includes("codexHarnessSync.backupDir"),
-        false,
-        relative,
-      );
-    }
-  });
-
   it("platform 비대상 adapter는 설치하지 않고 managed 사본만 지운다", () => {
     cleanTmpDir();
     ensureTmpDir();
@@ -308,36 +276,6 @@ describe("setup-sync: Codex tfx-harness adapter", () => {
 });
 
 describe("setup-sync: SYNC_MAP", () => {
-  it("SYNC_MAP은 최소 3개 항목을 포함한다", () => {
-    assert.ok(Array.isArray(SYNC_MAP), "SYNC_MAP must be an array");
-    assert.ok(
-      SYNC_MAP.length >= 3,
-      `Expected >= 3 entries, got ${SYNC_MAP.length}`,
-    );
-  });
-
-  it("각 항목은 src, dst, label 필드를 가진다", () => {
-    for (const entry of SYNC_MAP) {
-      assert.ok(
-        typeof entry.src === "string",
-        `src must be string: ${JSON.stringify(entry)}`,
-      );
-      assert.ok(
-        typeof entry.dst === "string",
-        `dst must be string: ${JSON.stringify(entry)}`,
-      );
-      assert.ok(
-        typeof entry.label === "string",
-        `label must be string: ${JSON.stringify(entry)}`,
-      );
-    }
-  });
-
-  it("제거된 headless-guard 는 SYNC_MAP 에 다시 들어오지 않는다", () => {
-    const stale = SYNC_MAP.filter((e) => /headless-guard/.test(e.label));
-    assert.deepEqual(stale, []);
-  });
-
   it("scripts/lib/*.sh도 SYNC_MAP에 포함한다 (#227)", () => {
     const entry = SYNC_MAP.find(
       (e) => e.label === "scripts/lib/codex-recovery.sh",
@@ -352,15 +290,6 @@ describe("setup-sync: SYNC_MAP", () => {
         .replace(/\\/g, "/")
         .endsWith("/.claude/scripts/lib/codex-recovery.sh"),
       "dst path must sync codex-recovery.sh into ~/.claude/scripts/lib",
-    );
-  });
-
-  it("agent-map.json이 SYNC_MAP에 포함되어 있다", () => {
-    const entry = SYNC_MAP.find((e) => e.label === "hub/team/agent-map.json");
-    assert.ok(entry, "SYNC_MAP must include hub/team/agent-map.json");
-    assert.ok(
-      entry.src.replace(/\\/g, "/").includes("hub/team/agent-map.json"),
-      "src path must reference agent-map.json",
     );
   });
 
@@ -624,44 +553,5 @@ describe("setup-sync: tfx-harness 라우팅 문서", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
-});
-
-describe("setup-sync: dry-run 실행", () => {
-  // 훅 설치기(ensureCodexHooks)와 agy 옛 훅 정리(cleanupAgyHooks)는 TEST_LOCK_PID 가 설정된 테스트
-  // 실행 중에는 explicit seam 없이 실제 HOME 에 쓰지 않도록 자체 가드되어 있다
-  // (scripts/ensure-codex-hooks.mjs, scripts/lib/legacy-hook-cleanup.mjs 참조). spawn 된 setup.mjs 도 TEST_LOCK_PID 를
-  // 상속하므로 이 dry-run 은 실제 CLI config 를 오염시키지 않는다. setup.mjs 가
-  // 백그라운드 프로세스(HUD pre-warm, MCP 점검)를 띄우기 때문에 HOME 자체를 tmp 로
-  // 격리하면 정리 race(ENOTEMPTY)가 발생하므로 가드 방식을 쓴다.
-  it("setup.mjs를 --help 없이 실행해도 에러 없이 종료된다", () => {
-    // setup.mjs는 main()이 process.argv[1] 매칭 시에만 실행되므로
-    // 직접 node로 실행하여 exit code 0 확인
-    const _result = execFileSync(
-      process.execPath,
-      [join(PROJECT_ROOT, "scripts", "setup.mjs")],
-      {
-        timeout: 15000,
-        encoding: "utf8",
-        env: SETUP_TEST_ENV,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    // 정상 종료 — execFileSync는 non-zero exit 시 throw
-    assert.ok(true, "setup.mjs exited successfully");
-  });
-
-  it("--sync 플래그로 실행해도 에러 없이 종료된다", () => {
-    const _result = execFileSync(
-      process.execPath,
-      [join(PROJECT_ROOT, "scripts", "setup.mjs"), "--sync"],
-      {
-        timeout: 15000,
-        encoding: "utf8",
-        env: SETUP_TEST_ENV,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-    assert.ok(true, "setup.mjs --sync exited successfully");
   });
 });

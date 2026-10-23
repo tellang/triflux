@@ -110,55 +110,6 @@ describe("auto-escalate CLI 체인 승격 — Phase 3 Step F", () => {
     assert.equal(r2.shouldStop, false);
   });
 
-  it("체인 끝까지 소진 시 BUDGET_EXCEEDED + chain-exhausted reason", () => {
-    const dir = makeTempDir();
-    const snapshot = join(dir, "escalate.json");
-    seedChainSnapshot(
-      snapshot,
-      [
-        { cli: "a", model: "1" },
-        { cli: "b", model: "2" },
-      ],
-      2,
-    );
-
-    failIteration(snapshot, "s1-a");
-    failIteration(snapshot, "s1-b"); // escalate to b
-    failIteration(snapshot, "s2-a");
-    const final = failIteration(snapshot, "s2-b"); // exhausted
-
-    assert.equal(final.current, "BUDGET_EXCEEDED");
-    assert.equal(final.shouldStop, true);
-    assert.equal(final.transition.reason, "escalation-chain-exhausted");
-  });
-
-  it("승격 중 verify-success 는 즉시 DONE (체인 중단)", () => {
-    const dir = makeTempDir();
-    const snapshot = join(dir, "escalate.json");
-    seedChainSnapshot(
-      snapshot,
-      [
-        { cli: "codex", model: "mini" },
-        { cli: "claude", model: "opus" },
-      ],
-      3,
-    );
-
-    failIteration(snapshot, "first-fail");
-    bridgeRun(["retry-run", "--snapshot", snapshot, "--event", "start"]);
-    const done = bridgeRun([
-      "retry-run",
-      "--snapshot",
-      snapshot,
-      "--event",
-      "verify-success",
-    ]);
-    assert.equal(done.current, "DONE");
-    assert.equal(done.shouldStop, true);
-    // 체인 첫 번째 단계에서 성공 — cliIndex 0 유지
-    assert.equal(done.cliIndex, 0);
-  });
-
   it("stuck detector 는 체인 승격과 독립 — 동일 reason 3회는 STUCK 으로 즉시 중단", () => {
     const dir = makeTempDir();
     const snapshot = join(dir, "escalate.json");

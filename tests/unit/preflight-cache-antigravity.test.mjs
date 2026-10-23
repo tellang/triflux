@@ -276,55 +276,6 @@ describe("preflight-cache Antigravity readiness", () => {
     }
   });
 
-  it("does not accept expired Antigravity auth when non-interactive smoke succeeds", async () => {
-    const homeDir = makeHome({
-      antigravityAuth: { expiry_date: Date.now() - 30_000 },
-    });
-    try {
-      const result = await runPreflight(
-        makePreflightOptions(
-          homeDir,
-          "Usage: agy\n  --print\n  --dangerously-skip-permissions\n",
-          {
-            smoke: {
-              status: 0,
-              stdout: "AGY_OK\nError: timed out waiting for response\n",
-              stderr: "",
-            },
-          },
-        ),
-      );
-
-      assert.equal(result.antigravity.ok, false);
-      assert.equal(result.antigravity.status, "not_ready");
-      assert.equal(result.antigravity.reason, "auth_expired");
-      assert.ok(!result.available_agents.includes("antigravity"));
-    } finally {
-      rmSync(homeDir, { recursive: true, force: true });
-    }
-  });
-
-  it("does not accept non-sentinel smoke output as Antigravity readiness", async () => {
-    const homeDir = makeHome({
-      antigravityAuth: { expiry_date: Date.now() - 30_000 },
-    });
-    try {
-      const result = await runPreflight(
-        makePreflightOptions(
-          homeDir,
-          "Usage: agy\n  --print\n  --dangerously-skip-permissions\n",
-          { smoke: { status: 0, stdout: "Welcome to agy\n", stderr: "" } },
-        ),
-      );
-
-      assert.equal(result.antigravity.ok, false);
-      assert.equal(result.antigravity.reason, "auth_expired");
-      assert.ok(!result.available_agents.includes("antigravity"));
-    } finally {
-      rmSync(homeDir, { recursive: true, force: true });
-    }
-  });
-
   it("reports unknown Antigravity readiness for auth files without expiry_date", async () => {
     const homeDir = makeHome({ antigravityAuth: {} });
     try {

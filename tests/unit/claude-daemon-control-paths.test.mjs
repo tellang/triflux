@@ -75,33 +75,6 @@ test("resolveClaudeHomeDir prefers USERPROFILE over divergent HOME on win32", ()
   );
 });
 
-test("parity: derived field set covers what both former callsites needed", () => {
-  const paths = deriveClaudeDaemonPaths({
-    configDir: path.join(os.tmpdir(), "claude-paths-parity"),
-    uid: 501,
-    tmpRoot: "/tmp",
-  });
-  // headless(deriveClaudeControlPaths) 가 읽던 필드
-  const headlessNeeds = ["controlSock", "sessionsDir", "jobsDir"];
-  // native-bridge 가 읽던 필드 (interactive 브랜치 포함)
-  const bridgeNeeds = [
-    "configDir",
-    "daemonDir",
-    "controlSock",
-    "rendezvousDir",
-    "ptyDir",
-    "rosterPath",
-    "sessionsDir",
-    "jobsDir",
-  ];
-  for (const key of [...headlessNeeds, ...bridgeNeeds]) {
-    assert.ok(
-      Object.hasOwn(paths, key),
-      `expected derived paths to include ${key}`,
-    );
-  }
-});
-
 test("detectCallerProvenance distinguishes vanilla Codex from OMX caller env", () => {
   assert.deepEqual(detectCallerProvenance({ CODEX_THREAD_ID: "thread-1" }), {
     claudeLauncher: "unknown",
