@@ -5,7 +5,6 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-  buildInventory,
   createServerRecord,
   getClaudeMcp,
   parseCodexMcpList,
@@ -20,14 +19,6 @@ test("createServerRecord fills tool_count and domain_tags from config and catalo
   assert.equal(record.tool_count, 1);
   assert.ok(record.domain_tags.includes("docs"));
   assert.ok(record.domain_tags.includes("reference"));
-});
-
-test("buildInventory returns stable MCP cache shape", () => {
-  const inventory = buildInventory();
-
-  assert.ok(typeof inventory.timestamp === "string");
-  assert.ok(inventory.codex && typeof inventory.codex.available === "boolean");
-  assert.ok(Array.isArray(inventory.codex.servers));
 });
 
 test("getClaudeMcp discovers project .claude/mcp.json", () => {

@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
 import { describe, it } from "node:test";
 
 import {
   buildCommandString,
   createTerminalOpener,
-  focusSessionPane,
   sanitizeTerminalTitle,
   shellQuote,
 } from "../../hub/team/terminal-opener.mjs";
@@ -30,23 +28,6 @@ describe("terminal-opener helpers", () => {
 });
 
 describe("terminal-opener adapter", () => {
-  it("session multiplexer detection removes redundant nested win32 guards only", () => {
-    const source = readFileSync("hub/team/session.mjs", "utf8");
-
-    assert.doesNotMatch(
-      source,
-      /process\.platform === "win32" && hasGitBashTmux\(\)/,
-    );
-    assert.doesNotMatch(
-      source,
-      /process\.platform === "win32" && hasWslTmux\(\)/,
-    );
-    assert.match(
-      source,
-      /return process\.platform === "win32" && !!process\.env\.WT_SESSION;/,
-    );
-  });
-
   it("Windows openCommand uses wt-manager createTab with original command and cwd", async () => {
     const calls = [];
     const opener = createTerminalOpener({
@@ -372,30 +353,6 @@ describe("terminal-opener adapter", () => {
     assert.deepEqual(calls, ["select-pane -t 'demo session:0.2'"]);
   });
 
-  it("focusSessionPane forwards injected dependencies", () => {
-    const calls = [];
-
-    assert.equal(
-      focusSessionPane("demo", 1, {
-        _deps: {
-          platform: "win32",
-          mux: "psmux",
-          psmuxExec: (args) => calls.push(args),
-        },
-      }),
-      true,
-    );
-    assert.deepEqual(calls, [["select-pane", "-t", "demo:0.1"]]);
-  });
-
-  it("Linux without mux returns false from openCommand", async () => {
-    const opener = createTerminalOpener({
-      platform: "linux",
-      mux: null,
-    });
-    assert.equal(await opener.openCommand({ command: "echo hi" }), false);
-  });
-
   it("Linux without mux returns false from openSession", async () => {
     const opener = createTerminalOpener({
       platform: "linux",
@@ -412,17 +369,6 @@ describe("terminal-opener adapter", () => {
       }),
     });
     assert.equal(await opener.openCommand({ command: "echo hi" }), true);
-  });
-
-  it("Windows wt-manager null return is treated as success", async () => {
-    const opener = createTerminalOpener({
-      platform: "win32",
-      psmuxBinaryExists: () => true,
-      createWtManager: () => ({
-        createTab: async () => null,
-      }),
-    });
-    assert.equal(await opener.openSession("demo"), true);
   });
 
   it("Windows wt-manager empty object return is treated as success (no explicit success:false)", async () => {

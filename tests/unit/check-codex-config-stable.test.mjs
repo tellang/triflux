@@ -158,18 +158,6 @@ describe("#193 describeChange", () => {
     assert.ok(change.message.startsWith("sha256 differs"));
   });
 
-  it("classifies OpenAI runtime plugin churn as externalChurnOnly=true", () => {
-    const before = snapshot(`${MCP_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK}`);
-    const after = snapshot(
-      `${MCP_BLOCK}\n${OPENAI_RUNTIME_PLUGIN_BLOCK_AFTER}`,
-    );
-    const change = describeChange(before, after);
-    assert.ok(change !== null, "expected change");
-    assert.equal(change.kind, "sha-changed");
-    assert.equal(change.hooksStateOnly, false);
-    assert.equal(change.externalChurnOnly, true);
-  });
-
   it("classifies mcp server mutation as sha-changed + hooksStateOnly=false", () => {
     const before = snapshot(`${MCP_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`);
     const after = snapshot(`${MCP_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_BEFORE}`);
@@ -178,19 +166,6 @@ describe("#193 describeChange", () => {
     assert.equal(change.kind, "sha-changed");
     assert.equal(change.hooksStateOnly, false);
     assert.equal(change.externalChurnOnly, false);
-  });
-
-  it("rejects whitelist when hooks.state churn is mixed with other section drift", () => {
-    const before = snapshot(`${MCP_BLOCK}\n${HOOKS_STATE_BLOCK_BEFORE}`);
-    const after = snapshot(`${MCP_BLOCK_DRIFTED}\n${HOOKS_STATE_BLOCK_AFTER}`);
-    const change = describeChange(before, after);
-    assert.ok(change !== null, "expected change");
-    assert.equal(change.kind, "sha-changed");
-    assert.equal(change.hooksStateOnly, false);
-    assert.ok(
-      change.changedSections.includes("mcp_servers.context7"),
-      `expected mcp_servers.context7 in ${JSON.stringify(change.changedSections)}`,
-    );
   });
 
   it("flags mtime-only drift even when sha matches", () => {

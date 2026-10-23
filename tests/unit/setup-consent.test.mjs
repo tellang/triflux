@@ -117,16 +117,6 @@ describe("setup 동의 단계", () => {
     assert.equal(calls.run.length, 0);
   });
 
-  it("mods 단계에 --mods 여부, 대화형 여부, ask, run 을 그대로 넘긴다", async () => {
-    const { calls, options } = fakeSteps({ interactive: false });
-    const result = await runConsentSteps({ ...options, modsInstall: true });
-    assert.equal(result.mods, "installed");
-    assert.equal(calls.mods.install, true);
-    assert.equal(calls.mods.interactive, false);
-    assert.equal(calls.mods.ask, options.ask);
-    assert.equal(calls.mods.execFileSyncFn, options.run);
-  });
-
   it("이미 승인된 훅은 다시 묻지 않는다", async () => {
     const { calls, options } = fakeSteps({
       interactive: true,

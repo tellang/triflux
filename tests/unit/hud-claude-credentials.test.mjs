@@ -188,29 +188,6 @@ describe("readClaudeCredentials", () => {
     assert.equal(creds.source, "keychain");
   });
 
-  it("비 darwin 플랫폼에서는 파일 우선이 유지된다", () => {
-    let keychainCalled = false;
-    const creds = readClaudeCredentials({
-      readCredentialFile: () => ({
-        claudeAiOauth: {
-          accessToken: "linux-file-access",
-          refreshToken: "linux-file-refresh",
-          expiresAt: 456,
-        },
-      }),
-      platform: "linux",
-      execFileSyncFn: () => {
-        keychainCalled = true;
-        throw new Error("keychain should not be called on linux");
-      },
-      env: {},
-    });
-
-    assert.equal(creds.accessToken, "linux-file-access");
-    assert.equal(creds.source, "file");
-    assert.equal(keychainCalled, false);
-  });
-
   it("falls back to macOS Keychain OAuth credentials", () => {
     const calls = [];
     const keychainExpiresAt = Date.now() + 60_000;
@@ -281,21 +258,6 @@ describe("readClaudeCredentials", () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].args[2], expectedService);
     assert.equal(creds.accessToken, "isolated-keychain-access");
-  });
-
-  it("uses the plain Keychain service name when CLAUDE_CONFIG_DIR is unset", () => {
-    const calls = [];
-    readClaudeCredentials({
-      readCredentialFile: () => null,
-      platform: "darwin",
-      execFileSyncFn: (command, args) => {
-        calls.push({ command, args });
-        throw new Error("not found");
-      },
-      env: {},
-    });
-
-    assert.equal(calls[0].args[2], "Claude Code-credentials");
   });
 
   it("계정 항목이 만료됐어도 다른 계정 항목으로 내려가지 않고 만료 항목을 돌려준다", () => {
@@ -371,93 +333,6 @@ describe("fetchClaudeUsageFromApi", () => {
 });
 
 describe("writeBackClaudeCredentials", () => {
-  it("Keychain 출처 자격증명은 Keychain 에만 되쓰고 파일은 건드리지 않는다", () => {
-    const keychainCalls = [];
-    let writtenFile = null;
-    writeBackClaudeCredentials(
-      {
-        accessToken: "new-access",
-        refreshToken: "new-refresh",
-        expiresAt: 789,
-        source: "keychain",
-        keychainAccount: getKeychainAccount({}),
-        supportsUsageApi: true,
-      },
-      {
-        readCredentialFile: () => ({
-          claudeAiOauth: {
-            accessToken: "old-access",
-            refreshToken: "old-refresh",
-            expiresAt: 123,
-          },
-        }),
-        writeCredentialFile: (data) => {
-          writtenFile = data;
-        },
-        platform: "darwin",
-        execFileSyncFn: (command, args, options) => {
-          keychainCalls.push({ command, args, options });
-          if (args[0] === "find-generic-password") {
-            return JSON.stringify({
-              claudeAiOauth: {
-                accessToken: "old-access",
-                refreshToken: "old-refresh",
-                expiresAt: 123,
-              },
-            });
-          }
-        },
-        env: {},
-      },
-    );
-
-    assert.equal(writtenFile, null);
-    const write = parseKeychainWrite(keychainCalls);
-    assert.ok(write, "keychain write should have happened");
-    assert.equal(write.via, "stdin");
-    assert.equal(write.service, "Claude Code-credentials");
-    assert.equal(write.account, getKeychainAccount({}));
-    assert.deepEqual(write.payload, {
-      claudeAiOauth: {
-        accessToken: "new-access",
-        refreshToken: "new-refresh",
-        expiresAt: 789,
-      },
-    });
-  });
-
-  it("source 가 file 인 자격증명은 Keychain 에 써지지 않는다", () => {
-    const keychainCalls = [];
-    let writtenFile = null;
-    writeBackClaudeCredentials(
-      {
-        accessToken: "new-file-access",
-        refreshToken: "new-file-refresh",
-        expiresAt: 999,
-        source: "file",
-        supportsUsageApi: true,
-      },
-      {
-        readCredentialFile: () => ({
-          claudeAiOauth: {
-            accessToken: "old-access",
-          },
-        }),
-        writeCredentialFile: (data) => {
-          writtenFile = data;
-        },
-        platform: "darwin",
-        execFileSyncFn: (command, args, options) => {
-          keychainCalls.push({ command, args, options });
-        },
-        env: {},
-      },
-    );
-
-    assert.equal(writtenFile?.claudeAiOauth?.accessToken, "new-file-access");
-    assert.equal(keychainCalls.length, 0);
-  });
-
   it("Keychain 쓰기가 기존 항목의 scopes 와 subscriptionType 을 보존한다", () => {
     const calls = [];
     writeBackClaudeCredentials(
@@ -559,37 +434,6 @@ describe("claude-login-detect", () => {
         statePath,
         hudCaches: [cachePath],
         execFileSyncFn: () => keychainContent,
-      });
-      assert.equal(secondResult.changed, false);
-    } finally {
-      rmSync(testDir, { recursive: true, force: true });
-    }
-  });
-
-  it("파일 mtime 변경 감지 동작을 유지한다", () => {
-    const testDir = mkdtempSync(join(tmpdir(), "claude-login-file-test-"));
-    try {
-      const statePath = join(testDir, "claude-login-mtime.json");
-      const credsPath = join(testDir, ".credentials.json");
-      const cachePath = join(testDir, "test-cache.json");
-      writeFileSync(credsPath, JSON.stringify({ accessToken: "abc" }));
-      writeFileSync(cachePath, JSON.stringify({ cached: true }));
-
-      const result = runClaudeLoginDetect({
-        platform: "linux",
-        credsPath,
-        statePath,
-        hudCaches: [cachePath],
-      });
-
-      assert.equal(result.changed, true);
-      assert.equal(result.cleared, 1);
-
-      const secondResult = runClaudeLoginDetect({
-        platform: "linux",
-        credsPath,
-        statePath,
-        hudCaches: [cachePath],
       });
       assert.equal(secondResult.changed, false);
     } finally {

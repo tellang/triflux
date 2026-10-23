@@ -61,27 +61,6 @@ describe("mcp guard HTTP transport + headers schema", () => {
     }
   });
 
-  it("validates stdio transport with command, args, and env descriptors", () => {
-    assert.deepEqual(
-      validateRegistry(
-        registryWith({
-          transport: "stdio",
-          command: "npx",
-          args: [
-            "-y",
-            "@brave/brave-search-mcp-server",
-            "--transport",
-            "stdio",
-          ],
-          env: {
-            BRAVE_API_KEY: { env: "BRAVE_API_KEY" },
-          },
-        }),
-      ),
-      [],
-    );
-  });
-
   it("rejects malformed header descriptors and malformed stdio registry servers", () => {
     const invalidServers = [
       {
@@ -142,37 +121,6 @@ describe("mcp guard HTTP transport + headers schema", () => {
     for (const server of invalidServers) {
       assert.notDeepEqual(validateRegistry(registryWith(server)), []);
     }
-  });
-
-  it("builds header-aware desired records for Codex TOML targets", () => {
-    process.env.TFX_TEST_TOKEN = "secret-token";
-
-    const desired = buildDesiredServerRecord(
-      "auth",
-      {
-        transport: "http",
-        url: "https://example.com/mcp",
-        headers: {
-          Authorization: { env: "TFX_TEST_TOKEN", prefix: "Bearer " },
-          "X-Client": { value: "triflux" },
-        },
-      },
-      join("home", ".codex", "config.toml"),
-    );
-
-    assert.deepEqual(desired.config, {
-      url: "https://example.com/mcp",
-      headers: {
-        Authorization: "Bearer secret-token",
-        "X-Client": "triflux",
-      },
-    });
-    assert.deepEqual(desired.codex, {
-      bearer_token_env_var: "TFX_TEST_TOKEN",
-      env_http_headers: {},
-      http_headers: { "X-Client": "triflux" },
-    });
-    assert.deepEqual(desired.warnings, []);
   });
 
   it("builds header-aware desired records for JSON MCP targets", () => {

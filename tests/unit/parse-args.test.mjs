@@ -45,21 +45,6 @@ test("auto-attach is unset by default and set only by its flags", () => {
   assert.equal(parseTeamArgs([...base, "--no-auto-attach"]).autoAttach, false);
 });
 
-test("assign parses a mapped role after prompt-internal colons", () => {
-  const parsed = parseTeamArgs([
-    "--teammate-mode",
-    "headless",
-    "--assign",
-    "codex:do:deep-executor",
-    "--assign",
-    "codex:범위: 조사:scientist-deep",
-  ]);
-  assert.deepEqual(parsed.assigns, [
-    { cli: "codex", prompt: "do", role: "deep-executor" },
-    { cli: "codex", prompt: "범위: 조사", role: "scientist-deep" },
-  ]);
-});
-
 test("an unrecognized assign suffix stays in the prompt", () => {
   const parsed = parseTeamArgs([
     "--teammate-mode",

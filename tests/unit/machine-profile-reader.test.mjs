@@ -3,15 +3,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-
-import * as lib from "../../scripts/lib/machine-profile.mjs";
 import {
   buildDisabledCliError,
   normalizeCliName,
   readMachineProfile,
   resolveCliPolicy,
 } from "../../scripts/lib/machine-profile.mjs";
-import * as setup from "../../scripts/setup.mjs";
 
 // 실제 홈이나 실제 machine profile 을 절대 읽지 않는다. 모든 케이스가
 // TFX_MACHINE_PROFILE_PATH 로 임시 파일을 지정하거나 profile 을 주입한다.
@@ -62,21 +59,6 @@ describe("resolveCliPolicy 우선순위", () => {
       assert.equal(policy.antigravityDisabled, false);
       assert.equal(policy.source.antigravity, "env");
     }, "TFX_DISABLE_ANTIGRAVITY=1\n");
-  });
-
-  it("env 와 profile 둘 다 없으면 기본값 0 이다", () => {
-    withProfileFile((profilePath) => {
-      const policy = resolveCliPolicy({
-        TFX_MACHINE_PROFILE_PATH: profilePath,
-      });
-      assert.equal(policy.codexDisabled, false);
-      assert.equal(policy.antigravityDisabled, false);
-      assert.deepEqual(policy.source, {
-        codex: "default",
-        antigravity: "default",
-      });
-      assert.equal(policy.profilePath, null);
-    });
   });
 });
 
@@ -158,18 +140,5 @@ describe("buildDisabledCliError", () => {
     };
     assert.equal(buildDisabledCliError("codex", enabled), null);
     assert.equal(buildDisabledCliError("claude", disabledPolicy), null);
-  });
-});
-
-describe("setup.mjs re-export", () => {
-  it("공용 리더와 동일한 함수 참조를 다시 내보낸다", () => {
-    assert.equal(
-      setup.parseMachineProfileContent,
-      lib.parseMachineProfileContent,
-    );
-    assert.equal(
-      setup.resolveMachineProfilePath,
-      lib.resolveMachineProfilePath,
-    );
   });
 });

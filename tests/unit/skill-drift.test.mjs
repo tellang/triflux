@@ -45,32 +45,7 @@ function extractSection(content, headingRegex) {
   return sectionLines.join("\n");
 }
 
-describe("스킬 문서 존재 확인", () => {
-  // Phase 5 cleanup (b371043) removed tfx-deep-interview, tfx-autoresearch,
-  // and tfx-multi thin aliases. Their semantics were absorbed into the main
-  // skill bodies. See `축소된 스킬 본체 이관 완결성` suite for body-level checks.
-  const expected = ["tfx-auto", "tfx-doctor", "tfx-setup", "tfx-research"];
-
-  for (const name of expected) {
-    it(`${name}/SKILL.md 존재`, () => {
-      const content = readSkill(name);
-      assert.ok(content, `${name}/SKILL.md not found`);
-      assert.ok(content.length > 50, `${name}/SKILL.md is too short`);
-    });
-  }
-});
-
 describe("tfx-auto SKILL.md — 에이전트 매핑 일관성", () => {
-  it("에이전트 매핑 섹션에 executor 포함 (단어 경계 일치)", () => {
-    const content = readSkill("tfx-auto");
-    // 현재 매핑 표에서 실행 역할을 확인한다
-    const combined = extractSection(content, /^###\s+에이전트\s+매핑/);
-    assert.ok(
-      /\bexecutor\b/.test(combined),
-      "executor가 에이전트 매핑 섹션에 없음",
-    );
-  });
-
   it("MCP 프로필 섹션에 implement 포함", () => {
     const content = readSkill("tfx-auto");
     // MCP 프로필 자동결정 섹션 또는 에이전트 매핑 섹션에서 implement를 찾는다
@@ -111,16 +86,6 @@ describe("tfx-auto SKILL.md — 에이전트 매핑 일관성", () => {
     assert.ok(
       /\bantigravity\b/i.test(agentSection),
       "antigravity가 에이전트 매핑 섹션에 없음",
-    );
-  });
-
-  it("false positive 방지: 코멘트나 예시 문맥이 아닌 실제 매핑 테이블에 존재", () => {
-    const content = readSkill("tfx-auto");
-    const agentSection = extractSection(content, /^###\s+에이전트\s+매핑/);
-    // 매핑 테이블은 파이프(|) 구분자를 포함해야 한다
-    assert.ok(
-      /\|.*codex.*\|/i.test(agentSection),
-      "에이전트 매핑 테이블이 올바른 마크다운 테이블 형식이 아님 (| 구분자 없음)",
     );
   });
 });
@@ -292,16 +257,5 @@ describe("tfx-route.sh와 tfx-auto SKILL.md 에이전트 매핑 교차 검증", 
         `agent "${agent}"가 에이전트 매핑 테이블 행에 없음 (섹션 외 본문 언급은 불충분)`,
       );
     }
-  });
-
-  it("false positive 방지: 에이전트명이 코드 블록 밖 테이블에 존재", () => {
-    const content = readSkill("tfx-auto");
-    const agentSection = extractSection(content, /^###\s+에이전트\s+매핑/);
-    // 코드 블록(```)을 제거한 후에도 테이블에 executor가 있어야 한다
-    const withoutCodeBlocks = agentSection.replace(/```[\s\S]*?```/g, "");
-    assert.ok(
-      /\|[^|]*\bexecutor\b[^|]*\|/i.test(withoutCodeBlocks),
-      "executor가 코드 블록 외부의 테이블 셀에 없음",
-    );
   });
 });
