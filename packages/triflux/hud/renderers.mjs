@@ -167,6 +167,16 @@ function contextPercentText(ctxView) {
   return colorByPercent(ctxView.percent, `${ctxView.percent}%`);
 }
 
+function contextCell(ctxView) {
+  return `${dim("ctx:")}${contextPercentText(ctxView)}`;
+}
+
+function contextWarning(ctxView) {
+  return ctxView?.warningTag
+    ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
+    : "";
+}
+
 // gateway 세션은 5h, 1w 대신 spend_limit 창 하나만 받는다.
 function spendOnlyPercent(claudeUsage) {
   if (claudeUsage?.spendLimitPercent == null) return null;
@@ -184,14 +194,15 @@ export function getClaudeRows(
   claudeUsage,
   { accountName, promptCache } = {},
 ) {
-  const ctxView = contextView || buildContextUsageView({});
   const markerColor = claudeOrange;
   const prefix = `${bold(markerColor("c"))}:`;
   // 계정을 ctx 앞에 둬서 x, a 행의 계정 라벨과 같은 열에서 시작하게 한다.
   const accountText = accountName
     ? `${markerColor(fitText(getAccountLabel("claude", accountName), ACCOUNT_LABEL_WIDTH))} `
     : "";
-  const contextSection = `${dim("ctx:")}${contextPercentText(ctxView)}`;
+  // contextView 가 null 이면 이 세션은 Claude 가 아니라서 ctx 칸을 다른 행이 맡는다.
+  const contextSection = contextView ? contextCell(contextView) : "";
+  const warning = contextWarning(contextView);
   const spend = spendOnlyPercent(claudeUsage);
   if (spend != null) {
     if (currentTier === "nano" || currentTier === "micro") {
@@ -266,9 +277,6 @@ export function getClaudeRows(
   if (currentTier === "compact") {
     const staleTag = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
     const quotaSection = `${dim("5h:")}${fStr} ${dim(fTime)} ${dim("1w:")}${wStr} ${dim(wTime)}${staleTag}`;
-    const warning = ctxView.warningTag
-      ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
-      : "";
     return [
       {
         prefix,
@@ -281,9 +289,6 @@ export function getClaudeRows(
   // full tier (>= 120 cols)
   const staleTag = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
   const quotaSection = `${dim("5h:")}${fBar}${fStr} ${dim(fTime)} ${dim("1w:")}${wBar}${wStr} ${dim(wTime)}${staleTag}`;
-  const warning = ctxView.warningTag
-    ? ` ${dim("|")} ${yellow(ctxView.warningTag)}`
-    : "";
   return [
     {
       prefix,
@@ -308,7 +313,7 @@ export function getProviderRow(
   markerColor,
   realQuota,
   accountName,
-  { promptCache, loggedOut = false } = {},
+  { promptCache, loggedOut = false, contextView = null } = {},
 ) {
   const accountLabel = fitText(
     getAccountLabel(provider, accountName),
@@ -325,6 +330,7 @@ export function getProviderRow(
       markerColor,
       accountLabel,
       realQuota,
+      contextView,
     );
   }
   const provAnsi = CODEX_WHITE;
@@ -500,6 +506,7 @@ function getAntigravityRow(
   markerColor,
   accountLabel,
   quota,
+  contextView,
 ) {
   const usedPercent = quota?.usedPercent;
   const hasValue = usedPercent != null;
@@ -515,6 +522,10 @@ function getAntigravityRow(
   }
   const isFull = currentTier === "full";
   const showTime = isFull || currentTier === "compact";
+  // agy statusLine 세션이면 c 행 대신 이 행에 ctx 칸을 붙인다. 경고 표시는 Claude 행처럼 compact 이상에서만.
+  const contextRight = contextView
+    ? ` ${contextCell(contextView)}${showTime ? contextWarning(contextView) : ""}`
+    : "";
   const reset =
     Date.parse(quota?.resetTime) - Date.now() >= ONE_DAY_MS
       ? formatResetRemainingDayHour(quota.resetTime)
@@ -539,5 +550,9 @@ function getAntigravityRow(
       : tierDimBar(currentTier);
     slot = `${dim("--:")}${bar}${percent}${timeCell}`;
   }
-  return { prefix, left: padAnsiRight(slot, windowWidth * 2 + 1), right };
+  return {
+    prefix,
+    left: padAnsiRight(slot, windowWidth * 2 + 1),
+    right: `${right}${contextRight}`,
+  };
 }

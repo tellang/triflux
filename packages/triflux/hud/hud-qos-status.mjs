@@ -71,11 +71,18 @@ async function main() {
 
   // --band: triflux mods 가 입력창 위에 그릴 줄을 만든다. statusLine 은 band 가 다 그리는 세션에서 비운다.
   const bandMode = process.argv.includes(BAND_FLAG);
-  // statusLine 은 엔진이 양옆에 2칸씩 여백을 두고, 첫 행 오른쪽에 알림을 띄운다(공식 문서). 그만큼 좁게 그린다.
-  // 알림 자리를 빼고 40칸이 안 남는 좁은 화면은 그대로 두어 원래 축소 단계를 따른다.
-  const reserved = Number(process.env.COLUMNS) - STATUSLINE_RESERVE_COLS;
-  if (!bandMode && reserved >= 40) process.env.COLUMNS = String(reserved);
   const stdin = await readStdinJson();
+  // agy statusLine 은 같은 HUD 를 호출하되 product 로 자신을 밝히고 터미널 폭을 직접 넘긴다.
+  const agySession = stdin?.product === "antigravity";
+  if (agySession) {
+    if (stdin.terminal_width > 0)
+      process.env.COLUMNS = String(stdin.terminal_width);
+  } else {
+    // Claude statusLine 은 엔진이 양옆에 2칸씩 여백을 두고, 첫 행 오른쪽에 알림을 띄운다(공식 문서). 그만큼 좁게 그린다.
+    // 알림 자리를 빼고 40칸이 안 남는 좁은 화면은 그대로 두어 원래 축소 단계를 따른다.
+    const reserved = Number(process.env.COLUMNS) - STATUSLINE_RESERVE_COLS;
+    if (!bandMode && reserved >= 40) process.env.COLUMNS = String(reserved);
+  }
   const bandState = bandMode ? "none" : readBandState(stdin?.session_id);
   if (bandState === "all") return;
   // Claude Code 가 넘긴 세션 사용량이 있으면 Claude API 를 따로 조회하지 않는다.
@@ -129,10 +136,15 @@ async function main() {
   const rows =
     bandState === "claude"
       ? []
-      : getClaudeRows(currentTier, contextView, claudeUsage, {
-          accountName: getClaudeEmail(),
-          promptCache: stdin?.prompt_cache,
-        });
+      : getClaudeRows(
+          currentTier,
+          agySession ? null : contextView,
+          claudeUsage,
+          {
+            accountName: getClaudeEmail(),
+            promptCache: stdin?.prompt_cache,
+          },
+        );
   let codexRowIndex = -1;
   if (showCodex) {
     codexRowIndex = rows.length;
@@ -157,6 +169,7 @@ async function main() {
         geminiBlue,
         antigravityQuota,
         getAntigravityAccountLabel(),
+        { contextView: agySession ? contextView : null },
       ),
     );
   }

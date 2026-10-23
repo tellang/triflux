@@ -1794,9 +1794,9 @@ function buildNodeScriptCommand(scriptPath) {
   return `${quoteShellCommandArg(resolveStableNodeBin(process.execPath, { fallback: "node" }))} ${quoteShellCommandArg(scriptPath)}`;
 }
 
-function loadSettings() {
-  if (!existsSync(SETTINGS_PATH)) return {};
-  const settings = JSON.parse(readFileSync(SETTINGS_PATH, "utf8"));
+function loadSettings(settingsPath = SETTINGS_PATH) {
+  if (!existsSync(settingsPath)) return {};
+  const settings = JSON.parse(readFileSync(settingsPath, "utf8"));
   if (!settings || typeof settings !== "object" || Array.isArray(settings))
     throw new Error("settings.json은 객체여야 합니다.");
   return settings;
@@ -1859,7 +1859,8 @@ export function planStatusLine(
   { hudPath = HUD_PATH, willSyncWrapper = false } = {},
 ) {
   const current = settings.statusLine;
-  if (current == null) return "create";
+  // agy 는 명령이 빈 statusLine 객체를 기본으로 둔다. 명령이 없으면 사용자 설정도 없다.
+  if (!current?.command) return "create";
   if (current.command === buildStatusLineCommand(hudPath, { willSyncWrapper }))
     return "noop";
   return current.type === "command" &&
@@ -1886,6 +1887,54 @@ export function applyStatusLine(
     type: "command",
     command: buildStatusLineCommand(hudPath),
   };
+  return true;
+}
+
+const AGY_SETTINGS_PATH = join(
+  _TFX_HOME,
+  ".gemini",
+  "antigravity-cli",
+  "settings.json",
+);
+
+// agy 가 없거나 설정 파일이 없으면 null 이고, 이때 statusLine 은 건너뛴다.
+function loadAgySettings() {
+  if (!commandAvailableOnPath("agy") || !existsSync(AGY_SETTINGS_PATH))
+    return null;
+  return loadSettings(AGY_SETTINGS_PATH);
+}
+
+export function planAgyStatusLine({ willSyncWrapper = false } = {}) {
+  const settings = loadAgySettings();
+  if (!settings) return null;
+  return {
+    path: AGY_SETTINGS_PATH,
+    change: planStatusLine(settings, { willSyncWrapper }),
+    current: settings.statusLine?.command || null,
+  };
+}
+
+// agy 도 Claude 와 같은 HUD 명령과 판정을 쓴다. stack_with_default 는 agy 내장 줄(모델, 상태)을 지우지 않고 그 아래에 HUD 를 붙인다.
+export function applyAgyStatusLine({
+  hudPath = HUD_PATH,
+  warn = console.warn,
+} = {}) {
+  const settings = loadAgySettings();
+  if (!settings) return false;
+  const changed = applyStatusLine(settings, {
+    hudPath,
+    warn: () =>
+      warn(
+        "기존 agy statusLine 유지: Triflux HUD를 쓰려면 agy settings.json에서 직접 선택하세요.",
+      ),
+  });
+  if (!changed) return false;
+  settings.statusLine = {
+    enabled: true,
+    stack_with_default: true,
+    ...settings.statusLine,
+  };
+  persistSettings(settings, AGY_SETTINGS_PATH);
   return true;
 }
 
@@ -2381,6 +2430,16 @@ async function runDeferredWithIo(stdinData, io) {
     }
   }
   if (settingsChanged) persistSettings(settings);
+  try {
+    if (
+      applyAgyStatusLine({
+        warn: (message) => io.warn("statusline", message),
+      })
+    )
+      synced++;
+  } catch (error) {
+    io.warn("statusline", `agy settings.json: ${error.message}`);
+  }
 
   // ── HUD 캐시 pre-warm (백그라운드) ──
 

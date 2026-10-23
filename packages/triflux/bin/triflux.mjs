@@ -76,6 +76,7 @@ import {
 } from "../scripts/lib/psmux-info.mjs";
 import { writesRealHomeInTest } from "../scripts/lib/test-env.mjs";
 import {
+  applyAgyStatusLine,
   applyStatusLine,
   cleanupStaleSkills,
   ensureCodexProfiles,
@@ -86,6 +87,7 @@ import {
   listInlineProfileNames,
   MODS_UPDATE_COMMAND,
   persistSettings,
+  planAgyStatusLine,
   planStatusLine,
   REQUIRED_CODEX_PROFILES,
   retireOldInstallFiles,
@@ -1234,6 +1236,10 @@ function buildSetupDryRunPlan() {
   });
 
   actions.push(previewStatusLineAction());
+  const agyStatusLine = planAgyStatusLine({
+    willSyncWrapper: existsSync(join(PKG_ROOT, "hud", "hud-statusline.sh")),
+  });
+  if (agyStatusLine) actions.push({ type: "agyStatusLine", ...agyStatusLine });
 
   return {
     dry_run: true,
@@ -1518,6 +1524,16 @@ async function cmdSetup(options = {}) {
       if (applyStatusLine(settings, { hudPath, warn: warning("statusline") })) {
         persistSettings(settings, settingsPath);
         report.alreadyInGoalState = false;
+      }
+      try {
+        if (applyAgyStatusLine({ hudPath, warn: warning("statusline") }))
+          report.alreadyInGoalState = false;
+      } catch (error) {
+        addWarning(
+          report,
+          "statusline",
+          `agy settings.json: ${renderErrorMessage(error.message)}`,
+        );
       }
     } else
       addWarning(report, "statusline", "HUD 파일 없음: 먼저 파일 동기화 필요");
