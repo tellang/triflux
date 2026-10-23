@@ -282,6 +282,7 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 | clear | `handoff` 인계 파일 경로, `then` | 인계 파일을 먼저 쓴다. 턴이 끝나면 `/clear`, 그 뒤 "인계 파일 <경로> 를 읽고 이어간다." 와 `then` 을 차례로 넣는다 |
 | exit | `handoff` 필수 | 사용자가 끝내라고 했거나 승계 세션이 인계 파일을 받기로 했을 때만 쓴다. 턴이 끝나면 `/exit` |
 
+- `/tfx-lead <역할>` 을 실행한 세션에서만 받는다. 아니면 "이 세션은 리드가 아니다" 로 거부된다. `/clear` 뒤에는 권한이 이어지고, resume 한 세션은 `/tfx-lead` 를 다시 실행한다.
 - 호출은 예약만 한다. 호출한 뒤 응답을 짧게 마쳐야 턴이 끝나고 실행된다.
 - 인자 오류, 없는 인계 파일, exit 의 `handoff` 누락, 서브에이전트 안의 호출은 도구 결과로 거부된다. 실행 뒤 호스트가 슬래시를 거부하면 다음 턴에 `[tfx_control] /<action> 실패: ...` prompt 가 온다. 그때는 사용자에게 직접 입력을 부탁한다.
 - 도구가 목록에 없으면 triflux mod 가 설치되지 않은 세션이다. tmux 안이면 `tfx-live compact --session "$TMUX_PANE" --if-busy wait ...` 를 쓰고, 밖이면 사용자에게 부탁한다.

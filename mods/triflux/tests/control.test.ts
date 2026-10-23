@@ -3,8 +3,13 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { controlTool } from '../hooks/control.ts'
 
-function fixture(on: On, options: { reject?: boolean; files?: string[] } = {}) {
+type Options = { reject?: boolean; files?: string[]; isLead?: boolean }
+
+function fixture(on: On, options: Options = {}) {
   const clock = mock.clock(on)
+  mock.store(on, options.isLead === false ? {} : { 'tfx.lead.lead-1': { role: '개발리드', since: '2026-10-23T00:00:00.000Z' } })
+  const session = { id: 'lead-1' }
+  on('session.id', () => ({ value: session.id }))
   const commands: string[] = []
   const prompts: string[] = []
   on('fs.exists', (_, e) => ({ value: (options.files ?? []).includes(e.path) }))
@@ -16,7 +21,7 @@ function fixture(on: On, options: { reject?: boolean; files?: string[] } = {}) {
     })
   }
   on('prompt.submit', (_, e) => { prompts.push(e.text); return { text: e.text } })
-  return { clock, commands, prompts }
+  return { clock, commands, prompts, session }
 }
 
 test('exit 는 handoff 가 없으면 거부하고 아무것도 실행하지 않는다', async ($, on) => {
@@ -68,4 +73,23 @@ test('서브에이전트가 부르면 리드 세션을 건드리지 않고 거�
   await f.clock.settle()
   expect(result.deny).toContain('서브에이전트')
   expect(f.commands).toEqual([])
+})
+
+test('리드가 아닌 세션은 /tfx-lead 를 먼저 실행하라며 거부한다', async ($, on) => {
+  const f = fixture(on, { isLead: false })
+  const result = await $.tool.call({ tool: controlTool, action: 'compact' })
+  await f.clock.settle()
+  expect(result.deny).toContain('/tfx-lead')
+  expect(f.commands).toEqual([])
+})
+
+test('/clear 로 세션 ID 가 바뀌어도 리드 권한이 이어진다', async ($, on) => {
+  const f = fixture(on, { isLead: false })
+  on('command.run', { command: 'rename' }, (_, e) => ({ text: e.args }))
+  await $.command.run({ command: 'tfx-lead', args: '개발리드', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+  f.session.id = 'lead-2'
+  const result = await $.tool.call({ tool: controlTool, action: 'compact' })
+  await f.clock.settle()
+  expect(result.deny).toBeUndefined()
+  expect(f.commands).toContain('/compact')
 })

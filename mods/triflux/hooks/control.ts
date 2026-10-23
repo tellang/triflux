@@ -1,5 +1,7 @@
 import type { EngineInterface, On } from 'claude-code'
 
+import { type Lead, leadOf } from './lead-role.ts'
+
 export const controlTool = 'mcp__triflux-mods__tfx_control'
 
 const actions = ['compact', 'clear', 'exit'] as const
@@ -8,6 +10,7 @@ type Request = { target?: string; action?: string; instructions?: string; then?:
 
 const description = [
   '리드 세션 자신에게 /compact, /clear, /exit 를 건다. 모델은 내장 슬래시 명령을 직접 실행하지 못하므로 이 도구가 대신 실행한다.',
+  '/tfx-lead <역할> 을 실행한 리드 세션에서만 받는다.',
   '호출하면 예약만 하고, 실제 실행은 이 턴이 끝난 뒤다. 그러니 호출한 다음 응답을 짧게 마친다.',
   'compact: instructions 는 요약 지시문, then 은 압축 뒤 넣을 다음 프롬프트.',
   'clear: 전에 handoff 파일을 써 두고 경로를 넘기면 clear 뒤 그 파일을 읽으라는 줄과 then 을 차례로 넣는다.',
@@ -51,18 +54,20 @@ async function run($: EngineInterface, action: Action, e: Request) {
   if (action !== 'exit' && text) await $.prompt.submit({ text })
 }
 
-export function registerControl(on: On) {
+export function registerControl(on: On, lead: Lead) {
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     await $.tool.register({ name: 'tfx_control', description, inputSchema, isDeferred: false })
     return next(e)
   })
   on('tool.call', { tool: controlTool }, async ($, e) => {
+    if (!(await leadOf($, lead))) return { deny: '이 세션은 리드가 아니다. /tfx-lead <역할> 을 먼저 실행한다.' }
     const request = e as Request
     const reason = await refuse($, request, e.agentId)
     if (reason) return { deny: reason }
     const action = request.action as Action
     // 이 훅이 도는 동안의 $.command.run 은 거부되므로 마지막 await 뒤에 타이머를 건다.
-    $.clock.after(0, () => run($, action, request))
+    $.clock.after(0, () => run($, action, request)
+      .catch(error => $.ui.toast(`[tfx_control] /${action} 결과 알림 실패: ${errorText(error)}`)))
     return { result: `/${action} 예약: 이 턴이 끝나면 실행한다. 응답을 짧게 마친다.` }
   })
 }

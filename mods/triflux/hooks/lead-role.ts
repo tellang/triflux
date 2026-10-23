@@ -1,4 +1,4 @@
-import type { On } from 'claude-code'
+import type { EngineInterface, On } from 'claude-code'
 
 import { enablePressure, type Monitor } from './memory-pressure.ts'
 
@@ -10,17 +10,47 @@ export function leadSessionName(role: string, now: number) {
   return `${date.getMonth() + 1}.${date.getDate()} ${role}`
 }
 
-export function registerLeadRole(on: On, monitor: Monitor) {
+// 이 프로세스에서 /tfx-lead 를 실행한 세션 ID. /clear 뒤 리드 표지를 새 ID 로 옮길 때 쓴다.
+export type Lead = { sessionId?: string }
+export type LeadMark = { role: string; since: string }
+
+const leadKey = (sessionId: string) => 'tfx.lead.' + sessionId
+
+// 리드 표지가 없으면 undefined. /clear 는 같은 프로세스에서 세션 ID 만 바꾸므로 옛 ID 의 표지를 새 ID 로 옮긴다.
+export async function leadOf($: EngineInterface, lead: Lead) {
+  const sessionId = await $.session.id()
+  const mark = await $.store.get(leadKey(sessionId))
+  if (mark || !lead.sessionId || lead.sessionId === sessionId) return mark as LeadMark | undefined
+  const moved = await $.store.get(leadKey(lead.sessionId))
+  if (!moved) return
+  await $.store.set(leadKey(sessionId), moved)
+  await $.store.delete(leadKey(lead.sessionId))
+  lead.sessionId = sessionId
+  return moved as LeadMark
+}
+
+export function registerLeadRole(on: On, monitor: Monitor, lead: Lead) {
   for (const isInteractive of [true, false]) {
     on('session.start', { isInteractive }, async ($, e, next) => {
       await $.command.register({ name: 'tfx-lead', description: '이 세션에 역할 리드를 맡긴다: <역할>', argumentHint: '<역할>' })
       return next(e)
     })
   }
+  // resume 한 세션은 /tfx-lead 를 다시 실행해야 리드가 된다. /clear 는 표지를 옮기므로 지우지 않는다.
+  on('session.end', { reason: ['prompt_input_exit', 'resume', 'logout', 'other'] }, async ($, e, next) => {
+    await $.store.delete(leadKey(e.sessionId))
+    if (lead.sessionId && lead.sessionId !== e.sessionId) await $.store.delete(leadKey(lead.sessionId))
+    lead.sessionId = undefined
+    return next(e)
+  })
   on('command.run', { command: 'tfx-lead' }, async ($, e) => {
     const role = e.args.trim()
     if (!role) return { text: '사용법: /tfx-lead <역할>' }
-    const name = leadSessionName(role, await $.clock.now())
+    const now = await $.clock.now()
+    const name = leadSessionName(role, now)
+    const sessionId = await $.session.id()
+    await $.store.set(leadKey(sessionId), { role, since: new Date(now).toISOString() } satisfies LeadMark)
+    lead.sessionId = sessionId
     const pressure = await enablePressure($, monitor)
     // 호스트는 이 훅이 도는 동안의 $.command.run 을 타이머에서 부른 것까지 거부한다.
     // 그래서 마지막 await 뒤에 타이머를 걸어 훅이 끝난 다음에 rename 이 돌게 한다.

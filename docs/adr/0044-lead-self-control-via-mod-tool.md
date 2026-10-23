@@ -21,6 +21,7 @@ mod API 에서 `$.tool.register` 는 모델이 호출하는 도구를 만들고,
 ## 결정 (Decision)
 
 - triflux mod 가 대화형 세션에서 도구 `tfx_control`(`mcp__triflux-mods__tfx_control`)을 등록한다. 인자는 `target`, `action`(`compact`, `clear`, `exit`), `instructions`, `then`, `handoff` 다. 리드가 쓰는 진입점은 이 도구 하나다.
+- 이 도구는 `/tfx-lead <역할>` 을 실행한 세션에만 생기는 권한이다. 등록은 대화형 세션 시작 때 하고, 호출을 받을 때 리드 표지를 검사해 없으면 "이 세션은 리드가 아니다. /tfx-lead <역할> 을 먼저 실행한다." 로 거부한다. 리드 표지는 `/tfx-lead` 가 `$.store` 의 `tfx.lead.<세션 ID>` 에 남기는 역할과 시작 시각이다. `session.end`(resume 포함)에서 지우므로 resume 한 세션은 `/tfx-lead` 를 다시 실행해야 한다. `/clear` 는 같은 프로세스에서 세션 ID 만 바꾸므로 다음 호출 때 표지를 새 ID 로 옮긴다. 압박 감시의 `tfx.pressure.<세션 ID>` 와 같은 규칙이다.
 - `target: self` 는 리드 자기 세션이다. 도구 훅은 요청을 검사한 뒤 마지막 await 뒤에 `$.clock.after(0, ...)` 로 `$.command.run` 을 예약하고 바로 결과를 돌려준다. 슬래시는 턴이 끝나 세션이 쉴 때 실행된다. tmux 안팎 구분이 없다.
 - compact 는 `instructions` 를 `/compact` 인자로 넘긴다. compact 와 clear 가 끝나면 `$.prompt.submit` 으로 다음 프롬프트를 넣는다. clear 에 `handoff` 가 있으면 "인계 파일 <경로> 를 읽고 이어간다." 를 `then` 보다 먼저 넣는다.
 - exit 는 `handoff` 가 없으면 거부한다. 사용자 승인 없는 자동 exit 규칙은 만들지 않는다. 도구는 리드가 명시적으로 호출할 때만 돈다.
@@ -33,6 +34,7 @@ mod API 에서 `$.tool.register` 는 모델이 호출하는 도구를 만들고,
 - **`tfx-live` 하위 명령만 두기**: 기존 tmux 경로를 넓히는 방식이다. tmux 밖에서 도는 리드 세션에는 슬래시를 넣을 입력 경로가 없다. 피어 메시지는 슬래시를 일반 텍스트로 넣는다. 기각.
 - **사용자에게 입력을 요청하기**: 지금까지의 방식이다. 리드가 사용자 입력 없이 자기 세션을 관리하라는 요구와 반대다. 실행 뒤 실패했을 때의 마지막 수단으로만 남긴다. 기각.
 - **`$.session.compact` 를 쓰기**: `/compact` 와 같은 호출이고 거부 사유를 `skip` 으로 받는다. 그러나 턴이 도는 동안 호출하면 거부되고, 도구 훅 뒤의 타이머는 아직 턴 안에서 돈다. clear 와 exit 에 대응하는 함수도 없다. `$.command.run` 은 세션이 쉴 때까지 기다려 세 동작을 같은 방식으로 다룬다. 기각.
+- **`/tfx-lead` 를 실행할 때 도구를 등록하기**: 리드가 아닌 세션에는 도구가 아예 보이지 않는다. 그러나 `$.tool.register` 로 등록한 도구는 다음 프롬프트부터 모델에 보여 진입 직후 한 턴 동안 쓸 수 없고, resume 과 `/clear` 뒤에 등록을 다시 맞춰야 한다. 거부 검사 하나가 더 단순하다. 기각.
 - **대상마다 도구를 따로 두기**: 리드가 대상별로 이름을 외워야 한다. 요구가 진입점 하나를 원한다. 기각.
 
 ## 결과 (Consequences)
