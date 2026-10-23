@@ -112,7 +112,7 @@ const BUG_REPORT_DIR =
 function usage(command) {
   const lines = [
     "Usage:",
-    "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--sandbox] [--no-auto-trust] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
+    "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--lead-session ID] [--sandbox] [--no-auto-trust] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude|agy] [--if-busy wait|fail|interrupt|queue] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --cli codex [--transport queue|tmux] (--session NAME[:WINDOW.PANE] | --thread UUID) --prompt TEXT [--from NAME] [--timeout 60] [--no-wait]",
     "    Codex ask defaults to the app-server queue (thread/queue/add, `codex queue --message` only when add is unavailable; delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands. /rename and /status skip idle waiting only with --if-busy wait (default) or queue; explicit fail or interrupt policies are honored. /compact and /new wait for idle by default.",
@@ -3238,6 +3238,9 @@ async function doStart(launchAdapter, opts) {
     launchKeys[0] += ` ${shellQuote(["--remote", `unix://${socket}`, "-C", pathResolve(cwd || process.cwd())])}`;
   }
   launchKeys[0] = withUnsetEnv(launchKeys[0], opts.unsetEnv ?? []);
+  // 받는 쪽 triflux mod 가 이 값을 저장해 자기를 띄운 리드의 tfx_control 요청만 실행한다.
+  if (opts.leadSession)
+    launchKeys[0] = `TFX_LEAD_SESSION_ID=${shellQuote([opts.leadSession])} ${launchKeys[0]}`;
   if (resumed && name && adapter.cli === "claude")
     launchKeys[0] += ` ${shellQuote(["-n", name])}`;
   const resumeTarget = resume ?? (resumeLast ? "last" : null);
@@ -4906,6 +4909,7 @@ function startOpts(flags) {
     sandbox: Object.hasOwn(flags, "sandbox"),
     noAutoTrust: Object.hasOwn(flags, "no-auto-trust"),
     unsetEnv,
+    leadSession: flags["lead-session"],
     readyTimeoutMs: secondsFlag(
       flags,
       "ready-timeout",

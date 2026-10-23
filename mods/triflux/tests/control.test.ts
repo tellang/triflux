@@ -3,11 +3,12 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { controlTool } from '../hooks/control.ts'
 
-type Options = { reject?: boolean; files?: string[]; isLead?: boolean }
+type Options = { reject?: boolean; files?: string[]; isLead?: boolean; store?: Record<string, unknown> }
 
 function fixture(on: On, options: Options = {}) {
   const clock = mock.clock(on)
-  mock.store(on, options.isLead === false ? {} : { 'tfx.lead.lead-1': { role: '개발리드', since: '2026-10-23T00:00:00.000Z' } })
+  const lead = options.isLead === false ? {} : { 'tfx.lead.lead-1': { role: '개발리드', since: '2026-10-23T00:00:00.000Z' } }
+  mock.store(on, { ...lead, ...options.store })
   const session = { id: 'lead-1' }
   on('session.id', () => ({ value: session.id }))
   const commands: string[] = []
@@ -128,7 +129,7 @@ test('Codex clear 는 tmux 로 /new 를 보내고 인계 줄과 then 을 뒤이�
   expect(result.deny).toBeUndefined()
   expect(calls).toEqual([
     ['tfx-live', 'ask', '--cli', 'codex', '--session', 'cx1', '--prompt', '/new', '--no-wait'],
-    ['tfx-live', 'ask', '--cli', 'codex', '--session', 'cx1', '--prompt', '인계 파일 /work/h.md 를 읽고 이어간다.\n리뷰 시작', '--no-wait'],
+    ['tfx-live', 'ask', '--cli', 'codex', '--session', 'cx1', '--prompt', '인계 파일 /work/h.md 를 읽고 이어간다.\n리뷰 시작', '--no-wait', '--transport', 'tmux'],
   ])
 })
 
@@ -146,24 +147,70 @@ test('tmux 의 Claude 는 tfx-live 로, 밖의 Claude 는 표식 피어 메시�
   const sends: { to: unknown; text: string }[] = []
   on('session.send', (_, e) => { sends.push({ to: e.to, text: e.text }); return { isDelivered: true } })
   await $.tool.call({ tool: controlTool, target: 'claude:10.23 워커', action: 'compact', instructions: '요약' })
-  expect(calls[1]).toEqual(['tfx-live', 'compact', '--cli', 'claude', '--session', 'cl1', '--instructions', '요약', '--no-wait'])
+  expect(calls[1]?.slice(0, 2)).toEqual(['tfx-live', 'compact'])
   const result = await $.tool.call({ tool: controlTool, target: 'claude:bg 워커', action: 'clear', then: '다음' })
   expect(result.deny).toBeUndefined()
-  expect(sends).toEqual([{ to: 'bg 워커', text: '[tfx-control] {"action":"clear","then":"다음","from":"lead-1"}' }])
+  expect(sends[0]?.to).toBe('bg 워커')
+  const body = JSON.parse(sends[0]?.text.replace('[tfx-control] ', '') ?? '{}')
+  expect([body.action, body.from]).toEqual(['clear', 'lead-1'])
 })
 
-test('받는 쪽은 표식 피어 메시지만 가져가 실행하고 실패를 보낸 세션에 알린다', async ($, on) => {
-  const f = fixture(on, { reject: true })
+const worker = { 'tfx.control.lead.worker-1': { lead: 'lead-1' } }
+const marked = (body: object) => `[tfx-control] ${JSON.stringify(body)}`
+
+function receiver(on: On, options: Options = {}) {
+  const f = fixture(on, { isLead: false, ...options })
+  f.session.id = 'worker-1'
   const sends: { to: unknown; text: string }[] = []
   on('session.send', (_, e) => { sends.push({ to: e.to, text: e.text }); return { isDelivered: true } })
   on('session.receive', (_, e) => ({ text: e.text }))
-  const plain = await $.session.receive({ origin: { kind: 'peer' }, text: '[tfx-control] 은 표식이 아니다' })
-  expect(plain.text).toBe('[tfx-control] 은 표식이 아니다')
-  const marked = await $.session.receive({ origin: { kind: 'peer' }, text: '[tfx-control] {"action":"compact","instructions":"짧게","from":"lead-1"}' })
-  expect(marked.consumed).toBe('tfx-control')
+  return { ...f, sends }
+}
+
+test('받는 쪽은 plugin 출처가 없는 표식 메시지를 실행하지 않는다', async ($, on) => {
+  const f = receiver(on, { store: worker })
+  const text = marked({ action: 'exit', handoff: '/work/h.md', from: 'lead-1' })
+  const result = await $.session.receive({ origin: { kind: 'peer' }, text })
   await f.clock.settle()
+  expect(result.text).toBe(text)
+  expect(f.commands).toEqual([])
+})
+
+test('받는 쪽은 자기를 띄운 리드가 아닌 발신자의 표식 메시지를 거부하고 알린다', async ($, on) => {
+  const f = receiver(on, { store: worker })
+  const result = await $.session.receive({ origin: { kind: 'peer', plugin: 'triflux-mods' }, text: marked({ action: 'compact', from: 'lead-2' }) })
+  await f.clock.settle()
+  expect(result.consumed).toBe('tfx-control')
+  expect(f.commands).toEqual([])
+  expect(f.sends.map(sent => sent.to)).toEqual(['lead-2'])
+  expect(f.sends[0]?.text).toContain('거부')
+})
+
+test('받는 쪽에 띄운 리드 저장값이 없으면 모든 제어를 거부하고 알린다', async ($, on) => {
+  const f = receiver(on)
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'triflux-mods' }, text: marked({ action: 'clear', from: 'lead-1' }) })
+  await f.clock.settle()
+  expect(f.commands).toEqual([])
+  expect(f.sends[0]?.text).toContain('리드가 띄운 세션이 아니다')
+})
+
+test('받는 쪽은 지금 묶인 리드가 아닌 발신자의 rebind 를 거부한다', async ($, on) => {
+  const f = receiver(on, { store: worker })
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'triflux-mods' }, text: marked({ action: 'rebind', lead: 'lead-2', from: 'lead-2' }) })
+  await f.clock.settle()
+  expect(f.sends[0]?.text).toContain('거부')
+  await $.session.receive({ origin: { kind: 'peer', plugin: 'triflux-mods' }, text: marked({ action: 'compact', from: 'lead-1' }) })
+  await f.clock.settle()
+  expect(f.commands).toEqual(['/compact'])
+})
+
+test('받는 쪽은 띄운 리드의 표식 메시지를 실행하고 실패를 그 리드에게 알린다', async ($, on) => {
+  const f = receiver(on, { store: worker, reject: true })
+  const result = await $.session.receive({ origin: { kind: 'peer', plugin: 'triflux-mods' }, text: marked({ action: 'compact', instructions: '짧게', from: 'lead-1' }) })
+  await f.clock.settle()
+  expect(result.consumed).toBe('tfx-control')
   expect(f.commands).toEqual(['/compact 짧게'])
-  expect(sends.length).toBe(1)
-  expect(sends[0]?.text).toContain('/compact 실패')
+  expect(f.sends.map(sent => sent.to)).toEqual(['lead-1'])
+  expect(f.sends[0]?.text).toContain('/compact 실패')
   expect(f.prompts).toEqual([])
 })

@@ -10,26 +10,30 @@ export function leadSessionName(role: string, now: number) {
   return `${date.getMonth() + 1}.${date.getDate()} ${role}`
 }
 
-// 이 프로세스에서 /tfx-lead 를 실행한 세션 ID. /clear 뒤 리드 표지를 새 ID 로 옮길 때 쓴다.
-export type Lead = { sessionId?: string }
+// 이 프로세스에서 표지를 남긴 세션 ID. /clear 뒤 표지를 새 ID 로 옮길 때 쓴다.
+export type Holder = { sessionId?: string }
 export type LeadMark = { role: string; since: string }
 
 const leadKey = (sessionId: string) => 'tfx.lead.' + sessionId
 
-// 리드 표지가 없으면 undefined. /clear 는 같은 프로세스에서 세션 ID 만 바꾸므로 옛 ID 의 표지를 새 ID 로 옮긴다.
-export async function leadOf($: EngineInterface, lead: Lead) {
+// 세션 ID 로 묶인 표지를 읽는다. /clear 는 같은 프로세스에서 세션 ID 만 바꾸므로 옛 ID 의 표지를 새 ID 로 옮긴다.
+export async function sessionMark($: EngineInterface, prefix: string, holder: Holder) {
   const sessionId = await $.session.id()
-  const mark = await $.store.get(leadKey(sessionId))
-  if (mark || !lead.sessionId || lead.sessionId === sessionId) return mark as LeadMark | undefined
-  const moved = await $.store.get(leadKey(lead.sessionId))
+  const mark = await $.store.get(prefix + sessionId)
+  if (mark || !holder.sessionId || holder.sessionId === sessionId) return mark
+  const moved = await $.store.get(prefix + holder.sessionId)
   if (!moved) return
-  await $.store.set(leadKey(sessionId), moved)
-  await $.store.delete(leadKey(lead.sessionId))
-  lead.sessionId = sessionId
-  return moved as LeadMark
+  await $.store.set(prefix + sessionId, moved)
+  await $.store.delete(prefix + holder.sessionId)
+  holder.sessionId = sessionId
+  return moved
 }
 
-export function registerLeadRole(on: On, monitor: Monitor, lead: Lead) {
+export async function leadOf($: EngineInterface, lead: Holder) {
+  return (await sessionMark($, 'tfx.lead.', lead)) as LeadMark | undefined
+}
+
+export function registerLeadRole(on: On, monitor: Monitor, lead: Holder) {
   for (const isInteractive of [true, false]) {
     on('session.start', { isInteractive }, async ($, e, next) => {
       await $.command.register({ name: 'tfx-lead', description: '이 세션에 역할 리드를 맡긴다: <역할>', argumentHint: '<역할>' })
