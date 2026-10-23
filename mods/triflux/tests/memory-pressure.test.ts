@@ -42,11 +42,12 @@ function fixture(on: On) {
   mock.env(on, { HOME: '/home/test' })
   const saved = new Map<string, unknown>()
   const prompts: string[] = []
+  const contexts: (readonly string[] | undefined)[] = []
   const calls: string[][] = []
   const commands: string[] = []
   const peers: string[][] = []
   // 기본은 피어 전송 실패라 아래 흐름 테스트는 prompt.submit 폴백으로 전이를 받는다.
-  const data = { stdout: '1\n', exitCode: 0, platform: 'Darwin\n', sessionId: 'session-a', submission: undefined as Promise<void> | undefined,
+  const data = { stdout: '1\n', exitCode: 0, platform: 'Darwin\n', sessionId: 'session-a',
     peerResult: undefined as Promise<void> | undefined,
     peer: { exitCode: 1, stdout: '', stderr: 'Claude peer socket missing\n' } as { exitCode: number; stdout: string; stderr: string } | { deny: string } }
   on('store.get', (_, e) => ({ value: saved.get(e.key) }))
@@ -70,27 +71,29 @@ function fixture(on: On) {
   })
   on('fs.write', () => ({ value: undefined }))
   on('command.register', (_, e) => { commands.push(e.name); return { value: { command: e.name } } })
-  on('prompt.submit', async (_, e) => { prompts.push(e.text); await data.submission; return { text: e.text } })
-  return { clock, saved, prompts, calls, commands, peers, data }
+  on('prompt.submit', (_, e) => { prompts.push(e.text); contexts.push(e.context); return { text: e.text } })
+  on('tool.call', { tool: 'Bash' }, () => ({ result: 'ok' }) as never)
+  return { clock, saved, prompts, contexts, calls, commands, peers, data }
 }
 
-async function confirmTransition($: EngineInterface, f: ReturnType<typeof fixture>) {
+async function confirmTransition($: EngineInterface, f: ReturnType<typeof fixture>, level: string) {
   await $.session.start(start)
   await $.command.run({ ...pressure, args: 'on' })
   await f.clock.advance(2000)
-  f.data.stdout = '2'
+  f.data.stdout = level
   await f.clock.advance(4000)
 }
 
 test('피어 전송이 되면 자기 세션 ID 로 보내고 prompt.submit 을 부르지 않는다', async ($, on) => {
   const f = fixture(on)
   f.data.peer = { exitCode: 0, stdout: '{"status":"written","msgId":"m"}\n', stderr: '' }
-  await confirmTransition($, f)
+  await confirmTransition($, f, '4')
   expect(f.prompts).toEqual([])
   expect(f.peers.length).toBe(1)
   const [command, sub, flag, sessionId, , message] = f.peers[0]
   expect([command, sub, flag, sessionId]).toEqual(['tfx-peer', 'self', '--session', 'session-a'])
-  expect(message).toContain('[memory-pressure] 압박 단계가 1 에서 2 로 바뀌었다')
+  expect(message).toContain('[memory-pressure] 압박 단계가 1 에서 4 로 올랐다. 현재 4 critical (1970-01-01T00:00:06.000Z)')
+  expect(message).not.toContain('/tfx-pressure')
 })
 
 for (const [label, peer] of [
@@ -102,10 +105,10 @@ for (const [label, peer] of [
   test(`피어 전송이 ${label}이면 실패 이유를 한 줄 붙여 prompt.submit 으로 보낸다`, async ($, on) => {
     const f = fixture(on)
     f.data.peer = peer
-    await confirmTransition($, f)
+    await confirmTransition($, f, '4')
     expect(f.peers.length).toBe(1)
     expect(f.prompts.length).toBe(1)
-    expect(f.prompts[0]).toContain('[memory-pressure] 압박 단계가 1 에서 2 로 바뀌었다')
+    expect(f.prompts[0]).toContain('[memory-pressure] 압박 단계가 1 에서 4 로 올랐다')
     expect(f.prompts[0]).toContain('피어 메시지 전송이 실패해')
     const [, reason] = f.prompts[0].split('\n')
     expect(reason).toContain('deny' in peer ? 'timeoutMs exceeded' : peer.exitCode === 1 ? 'Claude peer socket missing' : '(unknown, peer write outcome unknown)')
@@ -118,7 +121,7 @@ test('피어 전송 중 감시를 끄면 실패해도 prompt.submit 으로 폴�
   const f = fixture(on)
   let finish!: () => void
   f.data.peerResult = new Promise<void>(done => { finish = done })
-  await confirmTransition($, f)
+  await confirmTransition($, f, '4')
   expect(f.peers.length).toBe(1)
   await $.command.run({ ...pressure, args: 'off' })
   finish()
@@ -146,27 +149,27 @@ for (const registered of [false, true]) {
     expect(f.saved.has('tfx.pressure.session-a')).toBe(true)
     await f.clock.advance(2000)
     expect(f.calls).toContainEqual(['sysctl', '-n', 'kern.memorystatus_vm_pressure_level'])
-    f.data.stdout = ' 2\n'
+    f.data.stdout = ' 4\n'
     await f.clock.advance(2000)
     expect(f.prompts).toEqual([])
     const pending = await $.command.run({ ...pressure, args: 'status' })
-    expect(pending.text).toContain('마지막 유효 표본: 2')
+    expect(pending.text).toContain('마지막 유효 표본: 4')
     expect(pending.text).toContain('마지막 확정 단계: 1')
     await f.clock.advance(2000)
     expect(f.prompts.length).toBe(1)
-    expect(f.prompts[0]).toContain('1 에서 2')
+    expect(f.prompts[0]).toContain('1 에서 4')
     expect(f.prompts[0]).toContain('1970-01-01T00:00:06.000Z')
     await f.clock.advance(2000)
     expect(f.prompts.length).toBe(1)
     const status = await $.command.run({ ...pressure, args: 'status' })
     expect(status.text).toContain('압박 감시: on')
     expect(status.text).toContain('1970-01-01T00:00:08.000Z')
-    expect(status.text).toContain('마지막 확정 단계: 2')
+    expect(status.text).toContain('마지막 확정 단계: 4')
     await $.command.run({ ...pressure, args: 'off' })
     expect(f.saved.has('tfx.pressure.session-a')).toBe(false)
     expect(f.saved.get('tfx.pressure.other')).toEqual({ since: 'keep' })
     const count = f.calls.length
-    f.data.stdout = '4'
+    f.data.stdout = '2'
     await f.clock.advance(6000)
     expect(f.calls.length).toBe(count)
     expect(f.prompts.length).toBe(1)
@@ -193,40 +196,46 @@ for (const registered of [false, true]) {
     expect(f.saved.get('tfx.pressure.session-a')).toEqual(registration)
     if (!registered) f.saved.delete('tfx.pressure.session-a')
     f.data.sessionId = 'session-b'
-    f.data.stdout = '2'
+    f.data.stdout = '4'
     await f.clock.advance(4000)
     expect(f.saved.has('tfx.pressure.session-a')).toBe(false)
     expect(f.saved.get('tfx.pressure.session-b')).toEqual(registered ? registration : undefined)
     expect(f.calls.filter(argv => argv[0] === 'sysctl').length).toBe(registered ? 3 : 1)
     expect(f.prompts.length).toBe(registered ? 1 : 0)
-    if (registered) expect(f.prompts[0]).toContain('1 에서 2')
+    if (registered) expect(f.prompts[0]).toContain('1 에서 4')
   })
 }
 
-test('제출 대기 중 전이는 합치고 resolve 뒤 최신 확정 단계로 한 번 더 제출한다', async ($, on) => {
+test('1 에서 2 전이는 턴을 열지 않고 다음 요청에 한 줄로 한 번만 붙는다', async ($, on) => {
   const f = fixture(on)
-  let resolve!: () => void
-  f.data.submission = new Promise<void>(done => { resolve = done })
-  await $.session.start(start)
-  await $.command.run({ ...pressure, args: 'on' })
+  await confirmTransition($, f, '2')
   await f.clock.advance(2000)
+  expect(f.peers).toEqual([])
+  expect(f.prompts).toEqual([])
+  await $.prompt.submit({ text: '다음 요청' })
+  await $.prompt.submit({ text: '그다음 요청' })
+  expect(f.contexts).toEqual([['메모리 압박: 현재 2(1970-01-01T00:00:06.000Z, 1 normal 2 warn 4 critical)'], undefined])
+})
+
+test('2 에서 4 전이는 피어 메시지로 깨운다', async ($, on) => {
+  const f = fixture(on)
   f.data.stdout = '2'
-  await f.clock.advance(4000)
-  expect(f.prompts.length).toBe(1)
-  expect(f.prompts[0]).toContain('1 에서 2')
-  f.data.stdout = '4'
-  await f.clock.advance(4000)
-  expect(f.prompts.length).toBe(1)
+  f.data.peer = { exitCode: 0, stdout: '{"status":"written","msgId":"m"}\n', stderr: '' }
+  await confirmTransition($, f, '4')
+  expect(f.peers.length).toBe(1)
+  expect(f.peers[0][5]).toContain('2 에서 4 로 올랐다')
+  expect(f.prompts).toEqual([])
+})
+
+test('1, 2, 1 로 오가면 리드 도구 결과에 마지막 상태 하나만 붙는다', async ($, on) => {
+  const f = fixture(on)
+  await confirmTransition($, f, '2')
   f.data.stdout = '1'
   await f.clock.advance(4000)
-  expect(f.prompts.length).toBe(1)
-  resolve()
-  await f.clock.settle()
-  expect(f.prompts.length).toBe(2)
-  expect(f.prompts[1]).toContain('2 에서 1')
-  expect(f.prompts[1]).toContain('1970-01-01T00:00:14.000Z')
-  await f.clock.advance(2000)
-  expect(f.prompts.length).toBe(2)
+  expect(f.peers).toEqual([])
+  expect((await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'sub' } as never)).context).toBeUndefined()
+  expect((await $.tool.call({ tool: 'Bash', command: 'ls' } as never)).context).toEqual(['메모리 압박: 현재 1(1970-01-01T00:00:10.000Z, 1 normal 2 warn 4 critical)'])
+  expect((await $.tool.call({ tool: 'Bash', command: 'ls' } as never)).context).toBeUndefined()
 })
 
 for (const registered of [false, true]) {
