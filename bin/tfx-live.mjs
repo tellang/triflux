@@ -292,6 +292,13 @@ function shellQuote(args) {
     .join(" ");
 }
 
+// psmux 의 PowerShell(로컬 Windows, Windows 원격)은 POSIX 의 VAR=값 접두어를 모른다.
+function withLeadSession(command, leadSession, os) {
+  if (os === "win32")
+    return `$env:TFX_LEAD_SESSION_ID='${escapeRemotePwshSingleQuoted(leadSession)}'; ${command}`;
+  return `TFX_LEAD_SESSION_ID=${shellQuote([leadSession])} ${command}`;
+}
+
 function withUnsetEnv(command, patterns) {
   if (!patterns.length) return command;
   if (patterns.some((pattern) => !/^[A-Za-z_][A-Za-z0-9_]*\*?$/.test(pattern)))
@@ -3240,7 +3247,11 @@ async function doStart(launchAdapter, opts) {
   launchKeys[0] = withUnsetEnv(launchKeys[0], opts.unsetEnv ?? []);
   // 받는 쪽 triflux mod 가 이 값을 저장해 자기를 띄운 리드의 tfx_control 요청만 실행한다.
   if (opts.leadSession)
-    launchKeys[0] = `TFX_LEAD_SESSION_ID=${shellQuote([opts.leadSession])} ${launchKeys[0]}`;
+    launchKeys[0] = withLeadSession(
+      launchKeys[0],
+      opts.leadSession,
+      remote ? (await probeRemoteHostEnv(remote)).os : process.platform,
+    );
   if (resumed && name && adapter.cli === "claude")
     launchKeys[0] += ` ${shellQuote(["-n", name])}`;
   const resumeTarget = resume ?? (resumeLast ? "last" : null);
@@ -7659,6 +7670,7 @@ export {
   stopOpts,
   tmuxBufferName,
   verifyAttachedPeerSide,
+  withLeadSession,
   withUnsetEnv,
 };
 
