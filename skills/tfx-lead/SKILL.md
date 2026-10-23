@@ -103,7 +103,7 @@ Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 �
 | --- | --- |
 | 오래 가는 작업 세션 | `tfx-live start`로 tmux 에 띄우고 위 "워커 등록"을 한다. 사람은 tmr 목록 화면으로 본다 |
 | 전담 워커: 같은 일이 다시 올 것 같거나(재사용성), 주제가 정해졌거나(주제 고정), 역할이 정해진(역할 고정) 워커 | 작업 길이와 관계없이 `tfx-live start`로 이름 붙인 세션을 띄우고, 등록 기록에 역할과 주제를 함께 적는다. 아래 "전담 워커 재사용"을 따른다 |
-| 일회성 판단, 리뷰 | 서브에이전트. model 과 effort 를 지정하고 백그라운드로 |
+| 일회성 판단, 리뷰 | 서브에이전트. model 과 effort 를 지정하고 백그라운드로. 재리뷰가 이어질 것 같으면 아래 리뷰어 예시 |
 | 일회성 Codex 작업 | `tfx-route.sh` 역할 호출 |
 | 무거운 전체 테스트 | 원격 격리 호스트. `tfx-remote probe`를 먼저 돌린다 |
 
@@ -119,8 +119,8 @@ Agent 도구로 띄운 팀원(agent teams 의 tmux 모드)은 리드의 현재 �
 근거는 공식 문서 [agent teams](https://code.claude.com/docs/en/agent-teams)다.
 
 - Agent 도구를 `name` 과 함께 호출하면 팀원으로 뜬다. agent teams 가 켜져 있고 fork 나 `isolation` 호출이 아닐 때다. `name` 을 빼면 pane 없이 같은 프로세스 안에서 도는 보통 서브에이전트가 된다.
-- 팀원 표시는 `teammateMode` 설정(`in-process`, `auto`, `tmux`, `iterm2`)이 정한다. 공식 기본값은 `in-process` 고, `auto` 는 tmux 안이거나 iTerm2 에 `it2` 가 있으면 pane 을 나눈다. 세션 하나만 바꾸려면 `claude --teammate-mode <값>` 으로 띄운다. 이 기기의 사용자 설정은 `auto` 라서 tmux 안의 리드는 팀원마다 리드 창을 나눈다.
-- 실행 중인 세션에서 `teammateMode` 를 바꾸면 바로 적용되는지는 공식 문서에서 확인 못 했다. 화면 폭에 따라 모드를 자동으로 바꾸는 기능도 없다.
+- 팀원 표시는 `teammateMode` 설정(`in-process`, `auto`, `tmux`, `iterm2`)이 정한다. 공식 기본값은 `in-process` 고, `auto` 는 tmux 안이거나 iTerm2 에 `it2` 가 있으면 pane 을 나눈다. 세션 하나만 바꾸려면 `claude --teammate-mode <값>` 으로 띄운다. 사용자 설정이 `auto` 나 `tmux` 면 tmux 안의 리드는 팀원마다 리드 창을 나눈다. `~/.claude/settings.json` 의 `teammateMode` 로 확인한다.
+- 실행 중인 세션에서 `teammateMode` 를 바꾸면 바로 적용되는지는 공식 문서에서 확인 못 했다. 화면 폭에 따라 모드를 바꾸는 기능은 공식 문서에 없다.
 
 리드 pane 폭을 `tmux display -p -t "$TMUX_PANE" '#{pane_width}'` 로 재고 다음처럼 띄운다.
 
@@ -138,8 +138,8 @@ Agent 도구로 띄운 팀원(agent teams 의 tmux 모드)은 리드의 현재 �
 팀원은 끝나도 pane 과 Claude 프로세스가 남고, 프로세스마다 MCP 서버를 따로 띄운다. 2026-10-23 끝난 팀원 10개가 MCP 서버를 각 5개씩 쥐고 메모리 압박 2 를 만들었고, 그 pane 들을 닫자 바로 1 로 내려갔다. 결과를 받은 팀원은 바로 닫는다.
 
 1. 그 팀원의 완료 알림(최종 답이 들어 있는 idle 알림)이나 결과 파일을 받았는지 확인한다. 아직 일하는 팀원은 닫지 않는다.
-2. 공식 수단으로 종료를 요청한다: `SendMessage(to: "<팀원 이름>", message: {type: "shutdown_request"})`. 팀원이 승인하면 스스로 끝난다. 공식 문서는 진행 중인 요청을 마친 뒤 끝나므로 느릴 수 있다고 적는다.
-3. 종료 뒤에도 pane 이 남았으면 pane 을 이름으로 대조한다. 팀원 pane 의 시작 명령에는 `--agent-id <팀원 이름>@<팀 이름>` 이 들어 있다.
+2. 팀원에게 종료를 요청한다(SendMessage 의 shutdown_request). 팀원이 승인하면 스스로 끝난다. 공식 문서는 진행 중인 요청을 마친 뒤 끝나므로 느릴 수 있다고 적는다. 팀원이 거절하면 이유를 읽고 닫지 않는다. 3단계는 승인한 뒤에도 pane 이 남은 경우에만 한다.
+3. 승인한 뒤에도 pane 이 남았으면 pane 을 이름으로 대조한다. 팀원 pane 의 시작 명령에는 `--agent-id <팀원 이름>@<팀 이름>` 이 들어 있다.
 
 ```bash
 tmux list-panes -s -t "$TMUX_PANE" -F '#{pane_id} #{pane_current_command} #{pane_start_command}' | grep -- '--agent-id <팀원 이름>@'
@@ -160,7 +160,7 @@ tmux list-panes -s -t "$TMUX_PANE" -F '#{pane_id} #{pane_current_command} #{pane
 | 예 | 고를 것 | 이유 |
 | --- | --- | --- |
 | 같은 묶음의 반복 수정 | 전담 세션 하나 | 2026-10-23 `fix-trim-1`~`fix-trim-4`를 번호만 바꿔 서브에이전트로 새로 띄웠다. 같은 주제라 앞 묶음의 맥락이 다음 묶음에 그대로 쓰이고, 끝난 팀원 넷이 pane 과 프로세스를 따로 쥐었다 |
-| 리뷰어 | 작성 세션과 다른 인스턴스 | 같은 워커가 자기 작업을 리뷰하지 않는다(6절). 작성 세션은 리뷰에 재사용하지 않는다. 같은 PR 의 재리뷰가 이어질 것 같으면 리뷰 전담 세션을 따로 두고, 재리뷰도 그 세션에 보낸다 |
+| 리뷰어 | 작성 벤더와 다른 벤더의 세션(6절 표). 쓸 수 있는 벤더가 하나뿐이면 같은 벤더의 다른 인스턴스 | 같은 워커가 자기 작업을 리뷰하지 않는다(6절). 작성 세션은 리뷰에 재사용하지 않는다. 리뷰 전담 세션은 벤더별로 두고, 보내기 전에 이번 PR 의 작성 벤더와 다른지 확인한다. 리뷰 전담 세션에는 수정 작업을 보내지 않는다 |
 
 ### 실행 위치 결정
 
