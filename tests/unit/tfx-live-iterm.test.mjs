@@ -191,7 +191,7 @@ test("stop closes a recorded iTerm pane anywhere and searches by name only insid
         runTmux: async (_remote, args) => {
           calls.push(args[0]);
           if (args[0] !== "list-clients") return { stdout: id };
-          assert.deepEqual(args.slice(1, 3), ["-t", "session-a"]);
+          assert.deepEqual(args.slice(1, 3), ["-t", "=session-a:"]);
           return { stdout: ttys.map((tty) => `${tty}\n`).join("") };
         },
         closeItermSession: async (...args) => {

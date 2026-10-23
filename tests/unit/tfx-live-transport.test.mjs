@@ -314,7 +314,7 @@ const fs = require('node:fs');
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.TMUX_LOG, JSON.stringify(args) + '\\n');
 if (args[0] === 'list-panes') console.log(${JSON.stringify(panes.join("\n"))});
-if (args[0] === 'display-message' && args.includes('shared:0')) console.log('%1');
+if (args[0] === 'display-message' && args.includes('=shared:0')) console.log('%1');
 `,
       { mode: 0o755 },
     );
