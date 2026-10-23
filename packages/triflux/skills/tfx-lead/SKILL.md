@@ -39,7 +39,13 @@ Codex 리드는 mod 가 없으므로 `/rename <월>.<일> <역할>`을 직접 �
 | Codex | `tfx-live rename --cli codex --transport uds --thread <ID> --name "<이름>"`, thread 가 없으면 tmux 로 `/rename <이름>` |
 | agy | tmux 로 `/rename <이름>`. 새 대화는 첫 메시지 전에 실패하므로 `tfx-live` 의 `namePending` 처리를 따른다 |
 
-- 등록 기록: 리드가 상태 파일 하나(예: `.omc/lead/workers.md`)에 워커마다 이름, CLI, 위치(m5, m2, ryzen 과 tmux 대상), 역할, 지시서 경로를 적는다. 저장소가 무시하는 `.omc/` 아래에 둔다. 닫은 워커는 그 줄을 지운다.
+- 등록 기록: 리드가 `.omc/lead/workers.md` 에 마크다운 표 하나로 적는다. 열은 이름, CLI, 위치(m5, m2, ryzen 과 tmux 대상), 역할, 지시서 다섯이고 워커마다 한 줄이다. compact 때 triflux mod 가 이 표를 요약 지시에 그대로 넣으므로 경로와 열을 바꾸지 않는다. 저장소가 무시하는 `.omc/` 아래라 커밋되지 않는다. 닫은 워커는 그 줄을 지운다.
+
+  ```markdown
+  | 이름 | CLI | 위치 | 역할 | 지시서 |
+  |---|---|---|---|---|
+  | reviewer-828 | Claude sonnet | m5 로컬 | PR #828 리뷰 | .omc/briefs/x/review.md |
+  ```
 - 같은 이름의 세션이 로컬과 Remote Control 에 하나씩 있으면 `SendMessage`가 ref 를 요구한다. `ListAgents`에서 "on this machine" 쪽 ref 를 붙인다.
 - 워커를 다시 띄울 때는 원래 tmux 세션 안에서 `--resume <ID>`로 띄운다. 세션 이름과 tmr 재접속 루프가 그대로 맞는다.
 - `tfx-live list-sessions`의 `status: shell`은 CLI 가 죽었다는 뜻이 아닐 수 있다. 그 세션이 띄운 백그라운드 셸일 수 있으니 재실행 전에 pane 내용을 확인한다.
@@ -272,6 +278,8 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 - 지시서에 보고 기준을 넣는다. 비율은 받는 세션의 CLI 에 맞춰 `tfx-live` 표의 준비·경고 열을 쓴다. 예: Claude 60%, Codex 15%, agy 12%. "컨텍스트가 <비율>을 넘으면 작업을 멈추고 리드에게 보고하라."
 - 재개한 세션(`--resume`)은 이전 사용량을 이어받으므로 재개 직후 한 번 잰다.
 - 85%에 닿은 Claude 세션에는 새 작업을 주지 않고 바로 승계한다.
+- compact 때 triflux mod 가 요약 지시에 남길 항목(리드 역할, 인계 파일, 등록 워커, 열린 PR, 남은 일)을 붙인다([ADR-0045](../../docs/adr/0045-compact-snapshot-instructions.md)).
+- 지시문을 주면 그 뒤에 합쳐진다. 그래서 지시문에는 이 항목 밖에서 남길 것만 적는다.
 
 ### 자기 세션 제어
 
