@@ -2,6 +2,16 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.83.0] - 2026-10-23
+
+### Added
+- hud: agy(Antigravity CLI)의 `statusLine.command` 에 HUD 를 연결한다. `tfx setup` 이 `~/.gemini/antigravity-cli/settings.json` 에 statusLine 을 등록하되 사용자가 넣은 명령은 보존하고 `stack_with_default` 로 내장 줄 아래에 붙인다. stdin 의 `product` 가 `antigravity` 면 컨텍스트 칸이 agy 행에 붙고 폭은 `terminal_width` 를 쓴다. agy 설정 JSON 이 깨져 있어도 `--dry-run` 과 실제 적용이 같이 skip 으로 끝난다. Codex 는 `[tui] status_line` 이 내장 항목만 받아 연결하지 않는다(업스트림 openai/codex#17827) (#822)
+- mods: `tfx_control` 도구로 리드가 사용자 입력 없이 자기 세션에 compact(지시문과 뒤따름 포함), clear(인계 파일 경로), exit(인계 파일 없으면 거부)를 건다. `/tfx-lead <역할>` 을 실행한 세션에서만 동작하고 resume 한 세션은 다시 실행해야 한다. 실행 전 거부는 도구 결과로, 실행 뒤 실패는 다음 턴 prompt 와 토스트로 보인다. ADR-0044 (#823)
+- mods: `tfx_control` 의 `target` 으로 리드가 띄운 세션도 제어한다. tmux 안 Claude, Codex, agy 는 tfx-live 경로, tmux 밖 Claude 는 표식 피어 메시지. 받는 쪽은 발신 세션의 리드 검사, plugin 출처, `tfx-live start --lead-session` 으로 묶인 리드 세션 ID 세 겹을 통과한 요청만 실행하고, 남의 문장을 prompt 로 올리지 않는다. `whoami`, 승계용 `rebind`, 완료와 거부 알림, tfx-live 지원 표의 "받는 쪽 검증" 열. PowerShell 대상은 `$env:` 대입으로 환경을 넘긴다 (#826)
+
+### Changed
+- lead: 리드 pane 이 200 cols 미만이면 Agent 도구 팀원을 이름 없는 백그라운드 서브에이전트나 `tfx-live start` 세션으로 띄운다(`teammateMode` 가 `auto` 나 `tmux` 면 이름 붙인 팀원마다 리드 창이 나뉜다). 끝난 팀원은 shutdown 요청 뒤 `--agent-id` 로 pane 을 대조해 닫는다. 재사용성, 주제 고정, 역할 고정 워커는 서브에이전트 대신 이름 붙인 전담 세션으로 두고 등록 기록에서 먼저 찾는다 (#824)
+
 ## [10.82.4] - 2026-10-23
 
 ### Fixed
