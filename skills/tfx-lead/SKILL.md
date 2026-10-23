@@ -63,6 +63,7 @@ Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 �
 - 승계 순서:
   - 인계 파일을 쓴다. 목표, 완료 조건, 체크아웃 상태, 확정 결정, 증거 경로, 미완료, 다음 행동, `predecessorSessionId`를 담는다.
   - 승계 세션이 경로를 읽고 ACK 한다.
+  - 원 리드는 닫기 전에 자기가 띄운 Claude 워커마다 `tfx_control` 의 `rebind`(`target: claude:<이름>`, `lead: <새 리드 세션 ID>`)를 보내고 "rebind 완료" 알림을 확인한다. 새 리드 ID 는 새 리드가 `whoami` 로 얻어 인계 ACK 에 적는다. 원 리드가 이미 죽어 못 보냈으면 그 워커는 tmux 안이면 `tfx-live` 경로로 제어하고, tmux 밖이면 다시 띄운다.
   - ACK 를 받은 뒤에만 원 세션을 닫고 등록 기록을 고친다.
 - 서브에이전트는 결과를 받은 즉시 닫는다. Codex 리드가 `spawn_agent`를 29회 부르고 한 번도 닫지 않은 사고가 있었다. Claude 리드의 Agent 도구 팀원은 3절 "끝난 팀원 닫기" 절차로 닫는다.
 - 닫은 뒤에는 남은 세션이 없는지 `tmr ls --json`(없으면 `tmux ls`)으로 확인한다. tmr 은 macOS(arm64) 에서 `tfx setup` 이 설치를 묻는다.
@@ -108,7 +109,7 @@ Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 �
 | 무거운 전체 테스트 | 원격 격리 호스트. `tfx-remote probe`를 먼저 돌린다 |
 
 ```bash
-tfx-live start --cli claude --session cl-doc --name "10.8 문서 정리" --model opus --effort high
+tfx-live start --cli claude --session cl-doc --name "10.8 문서 정리" --model opus --effort high --lead-session <리드 세션 ID>
 tfx-live start --cli codex --session cx-impl --name "10.8 구현"
 ```
 
@@ -274,7 +275,7 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 
 ### 자기 세션 제어
 
-리드는 내장 슬래시 명령을 직접 실행하지 못한다. 자기 세션의 compact, clear, exit 는 triflux mod 도구 `tfx_control`(`mcp__triflux-mods__tfx_control`)로 건다. tmux 안팎 모두 같다. 다른 세션을 압축하거나 끝낼 때는 `tfx-live` 스킬의 "리드 운영" 절을 따른다.
+리드는 내장 슬래시 명령을 직접 실행하지 못한다. 자기 세션의 compact, clear, exit 는 triflux mod 도구 `tfx_control`(`mcp__triflux-mods__tfx_control`)로 건다. tmux 안팎 모두 같다. 리드가 띄운 Claude, Codex, agy 세션과 서브에이전트에도 같은 도구의 `target` 으로 보낸다. 대상별로 되는 동작은 `tfx-live` 스킬의 "대상별 제어 지원" 표다.
 
 | action | 인자 | 동작 |
 | --- | --- | --- |
@@ -282,6 +283,7 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 | clear | `handoff` 인계 파일 경로, `then` | 인계 파일을 먼저 쓴다. 턴이 끝나면 `/clear`, 그 뒤 "인계 파일 <경로> 를 읽고 이어간다." 와 `then` 을 차례로 넣는다 |
 | exit | `handoff` 필수 | 사용자가 끝내라고 했거나 승계 세션이 인계 파일을 받기로 했을 때만 쓴다. 턴이 끝나면 `/exit` |
 
+- 리드 세션 ID 는 `tfx_control` 의 `action: "whoami"` 로 얻는다. Claude 워커를 띄울 때 `tfx-live start --lead-session <ID>` 로 넘겨야 그 워커가 tmux 밖 피어 경로의 요청을 이 리드에게서만 받는다.
 - `/tfx-lead <역할>` 을 실행한 세션에서만 받는다. 아니면 "이 세션은 리드가 아니다" 로 거부된다. `/clear` 뒤에는 권한이 이어지고, resume 한 세션은 `/tfx-lead` 를 다시 실행한다.
 - 호출은 예약만 한다. 호출한 뒤 응답을 짧게 마쳐야 턴이 끝나고 실행된다.
 - 인자 오류, 없는 인계 파일, exit 의 `handoff` 누락, 서브에이전트 안의 호출은 도구 결과로 거부된다. 실행 뒤 호스트가 슬래시를 거부하면 다음 턴에 `[tfx_control] /<action> 실패: ...` prompt 가 온다. 그때는 사용자에게 직접 입력을 부탁한다.
