@@ -83,6 +83,22 @@ Claude TUI는 바쁠 때 들어온 입력을 대기열에 넣고 현재 턴(압�
 
 두 번째 compact 전에는 handoff가 맞는지 점검한다. compact 횟수는 고정하지 않는다.
 
+### 대상별 제어 지원
+
+리드(Claude)는 compact, clear, exit 를 triflux mod 도구 `tfx_control` 하나로 보낸다. `target` 으로 대상을 고르고, 안 되는 조합은 도구가 이유와 대안을 오류로 돌려준다. 자기 세션의 인자와 절차는 `tfx-lead` 스킬의 "자기 세션 제어" 절이다.
+
+| target | compact | clear | exit | 조건과 이유 |
+| --- | --- | --- | --- | --- |
+| `self` | 됨 | 됨 | 됨(`handoff` 필수) | 턴이 끝난 뒤 mod 가 `$.command.run` 으로 실행한다. tmux 안팎 같다 |
+| `claude:<이름>`, tmux 안 | 됨 | 됨 | 됨 | `tfx-live list-sessions --cli claude` 의 `name` 이나 tmux 세션 이름과 맞으면 `tfx-live compact`, `ask --via-tmux`, `stop` 으로 보낸다 |
+| `claude:<이름>`, tmux 밖(`claude --bg`, 피어) | 됨 | 됨 | 됨 | `[tfx-control] {...}` 표식 피어 메시지를 보내고, 받는 쪽 triflux mod 가 자기 턴이 끝난 뒤 실행한다. 받는 쪽도 triflux mod 가 설치된 Claude 여야 한다. 없으면 일반 텍스트로 읽힌다. 받는 쪽 실패는 보낸 세션에 피어 메시지로 온다 |
+| `codex:<tmux 세션>` | 됨(`instructions` 안 됨) | 됨(`/new`) | 됨(`tfx-live stop`) | tmux 직접 입력만 된다. queue 는 슬래시를 실행하지 않아 tmux 밖 Codex 는 안 됨 |
+| `agy:<tmux 세션>` | 안 됨 | 됨 | 됨(`tfx-live stop`) | agy 에는 compact 가 없다. `/clear` 나 handoff 를 쓴다 |
+| `subagent:<이름>` | 안 됨 | 안 됨 | 안 됨 | 슬래시 입력창이 없고 mod API 에 서브에이전트를 압축하거나 멈추는 함수가 없다. 끝내기는 결과를 받고 닫는다(백그라운드는 TaskStop, 팀원은 SendMessage 의 `shutdown_request`). 문맥 줄이기는 요약을 넘겨 새 서브에이전트를 띄운다 |
+
+- clear 에 `handoff` 를 주면 "인계 파일 <경로> 를 읽고 이어간다." 와 `then` 을 차례로 넣는다. exit 의 `handoff` 필수는 `self` 만이다.
+- 표식 피어 메시지는 같은 사용자의 어느 세션이든 보낼 수 있다. 받는 쪽은 표식으로 시작하는 줄이 있는 피어 메시지만 가져가고 나머지는 그대로 둔다.
+
 리드 역할 절차(역할별 모델, 지시서, 교차 리뷰, 릴리스 조율)는 `tfx-lead` 스킬을 따른다.
 
 ### Codex ask 메시지 전송

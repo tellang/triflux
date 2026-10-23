@@ -93,3 +93,77 @@ test('/clear 로 세션 ID 가 바뀌어도 리드 권한이 이어진다', asyn
   expect(result.deny).toBeUndefined()
   expect(f.commands).toContain('/compact')
 })
+
+function processStub(on: On, fail = false, sessions: unknown[] = []) {
+  const calls: string[][] = []
+  on('process.run', (_, e) => {
+    calls.push([...e.argv])
+    const stdout = e.argv[1] === 'list-sessions' ? JSON.stringify({ ok: true, sessions }) : '{}'
+    const exitCode = fail && e.argv[1] !== 'list-sessions' ? 1 : 0
+    return { value: { exitCode, stdout, stderr: exitCode ? 'no tmux session' : '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  return calls
+}
+
+test('서브에이전트 대상은 대안을 담은 오류로 돌려주고 아무것도 실행하지 않는다', async ($, on) => {
+  fixture(on)
+  const calls = processStub(on)
+  const result = await $.tool.call({ tool: controlTool, target: 'subagent:reviewer', action: 'exit' })
+  expect(result.deny).toContain('TaskStop')
+  expect(calls).toEqual([])
+})
+
+test('agy compact 는 지원하지 않는다고 돌려준다', async ($, on) => {
+  fixture(on)
+  const calls = processStub(on)
+  const result = await $.tool.call({ tool: controlTool, target: 'agy:ag1', action: 'compact' })
+  expect(result.deny).toContain('agy 는 compact 가 없다')
+  expect(calls).toEqual([])
+})
+
+test('Codex clear 는 tmux 로 /new 를 보내고 인계 줄과 then 을 뒤이어 보낸다', async ($, on) => {
+  fixture(on, { files: ['/work/h.md'] })
+  const calls = processStub(on)
+  const result = await $.tool.call({ tool: controlTool, target: 'codex:cx1', action: 'clear', handoff: '/work/h.md', then: '리뷰 시작' })
+  expect(result.deny).toBeUndefined()
+  expect(calls).toEqual([
+    ['tfx-live', 'ask', '--cli', 'codex', '--session', 'cx1', '--prompt', '/new', '--no-wait'],
+    ['tfx-live', 'ask', '--cli', 'codex', '--session', 'cx1', '--prompt', '인계 파일 /work/h.md 를 읽고 이어간다.\n리뷰 시작', '--no-wait'],
+  ])
+})
+
+test('tmux 경로가 실패하면 이유를 도구 오류로 돌려준다', async ($, on) => {
+  fixture(on)
+  processStub(on, true)
+  const result = await $.tool.call({ tool: controlTool, target: 'codex:gone', action: 'exit' })
+  expect(result.deny).toContain('no tmux session')
+  expect(result.deny).toContain('tmux 로 띄운 세션만')
+})
+
+test('tmux 의 Claude 는 tfx-live 로, 밖의 Claude 는 표식 피어 메시지로 보낸다', async ($, on) => {
+  fixture(on)
+  const calls = processStub(on, false, [{ session: 'cl1', name: '10.23 워커' }])
+  const sends: { to: unknown; text: string }[] = []
+  on('session.send', (_, e) => { sends.push({ to: e.to, text: e.text }); return { isDelivered: true } })
+  await $.tool.call({ tool: controlTool, target: 'claude:10.23 워커', action: 'compact', instructions: '요약' })
+  expect(calls[1]).toEqual(['tfx-live', 'compact', '--cli', 'claude', '--session', 'cl1', '--instructions', '요약', '--no-wait'])
+  const result = await $.tool.call({ tool: controlTool, target: 'claude:bg 워커', action: 'clear', then: '다음' })
+  expect(result.deny).toBeUndefined()
+  expect(sends).toEqual([{ to: 'bg 워커', text: '[tfx-control] {"action":"clear","then":"다음","from":"lead-1"}' }])
+})
+
+test('받는 쪽은 표식 피어 메시지만 가져가 실행하고 실패를 보낸 세션에 알린다', async ($, on) => {
+  const f = fixture(on, { reject: true })
+  const sends: { to: unknown; text: string }[] = []
+  on('session.send', (_, e) => { sends.push({ to: e.to, text: e.text }); return { isDelivered: true } })
+  on('session.receive', (_, e) => ({ text: e.text }))
+  const plain = await $.session.receive({ origin: { kind: 'peer' }, text: '[tfx-control] 은 표식이 아니다' })
+  expect(plain.text).toBe('[tfx-control] 은 표식이 아니다')
+  const marked = await $.session.receive({ origin: { kind: 'peer' }, text: '[tfx-control] {"action":"compact","instructions":"짧게","from":"lead-1"}' })
+  expect(marked.consumed).toBe('tfx-control')
+  await f.clock.settle()
+  expect(f.commands).toEqual(['/compact 짧게'])
+  expect(sends.length).toBe(1)
+  expect(sends[0]?.text).toContain('/compact 실패')
+  expect(f.prompts).toEqual([])
+})

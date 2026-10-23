@@ -274,7 +274,7 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 
 ### 자기 세션 제어
 
-리드는 내장 슬래시 명령을 직접 실행하지 못한다. 자기 세션의 compact, clear, exit 는 triflux mod 도구 `tfx_control`(`mcp__triflux-mods__tfx_control`)로 건다. tmux 안팎 모두 같다. 다른 세션을 압축하거나 끝낼 때는 `tfx-live` 스킬의 "리드 운영" 절을 따른다.
+리드는 내장 슬래시 명령을 직접 실행하지 못한다. 자기 세션의 compact, clear, exit 는 triflux mod 도구 `tfx_control`(`mcp__triflux-mods__tfx_control`)로 건다. tmux 안팎 모두 같다. 리드가 띄운 Claude, Codex, agy 세션과 서브에이전트에도 같은 도구의 `target` 으로 보낸다. 대상별로 되는 동작은 `tfx-live` 스킬의 "대상별 제어 지원" 표다.
 
 | action | 인자 | 동작 |
 | --- | --- | --- |
