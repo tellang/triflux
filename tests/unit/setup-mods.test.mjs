@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -301,5 +302,44 @@ test("agy statusLine 에 HUD 를 붙이고 사용자 명령은 남기며 다시 
     assert.equal(readFileSync(settingsPath, "utf8"), custom);
   } finally {
     process.env.PATH = savedPath;
+  }
+});
+
+test("agy 설정 JSON 이 깨져도 setup --dry-run 은 skip 항목을 내고 성공한다", () => {
+  const fakeHome = mkdtempSync(join(tmpdir(), "tfx-dry-"));
+  try {
+    const binDir = join(fakeHome, "bin");
+    mkdirSync(binDir, { recursive: true });
+    writeFileSync(join(binDir, "agy"), "");
+    const agyDir = join(fakeHome, ".gemini", "antigravity-cli");
+    mkdirSync(agyDir, { recursive: true });
+    writeFileSync(join(agyDir, "settings.json"), '{"statusLine":{');
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(import.meta.dirname, "../../bin/triflux.mjs"),
+        "setup",
+        "--dry-run",
+        "--json",
+      ],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+          TRIFLUX_TEST_HOME: fakeHome,
+          PATH: `${binDir}:${process.env.PATH}`,
+        },
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const action = JSON.parse(result.stdout).actions.find(
+      (a) => a.type === "agyStatusLine",
+    );
+    assert.equal(action.change, "skip");
+    assert.ok(action.error);
+  } finally {
+    rmSync(fakeHome, { recursive: true, force: true });
   }
 });

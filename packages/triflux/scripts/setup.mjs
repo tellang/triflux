@@ -1890,7 +1890,7 @@ export function applyStatusLine(
   return true;
 }
 
-const AGY_SETTINGS_PATH = join(
+export const AGY_SETTINGS_PATH = join(
   _TFX_HOME,
   ".gemini",
   "antigravity-cli",

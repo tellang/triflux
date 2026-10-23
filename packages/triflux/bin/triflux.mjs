@@ -76,6 +76,7 @@ import {
 } from "../scripts/lib/psmux-info.mjs";
 import { writesRealHomeInTest } from "../scripts/lib/test-env.mjs";
 import {
+  AGY_SETTINGS_PATH,
   applyAgyStatusLine,
   applyStatusLine,
   cleanupStaleSkills,
@@ -1236,10 +1237,21 @@ function buildSetupDryRunPlan() {
   });
 
   actions.push(previewStatusLineAction());
-  const agyStatusLine = planAgyStatusLine({
-    willSyncWrapper: existsSync(join(PKG_ROOT, "hud", "hud-statusline.sh")),
-  });
-  if (agyStatusLine) actions.push({ type: "agyStatusLine", ...agyStatusLine });
+  try {
+    const agyStatusLine = planAgyStatusLine({
+      willSyncWrapper: existsSync(join(PKG_ROOT, "hud", "hud-statusline.sh")),
+    });
+    if (agyStatusLine)
+      actions.push({ type: "agyStatusLine", ...agyStatusLine });
+  } catch (error) {
+    // 적용 쪽도 agy 설정 오류는 경고만 남기고 넘어가므로 미리보기도 skip 으로 맞춘다.
+    actions.push({
+      type: "agyStatusLine",
+      path: AGY_SETTINGS_PATH,
+      change: "skip",
+      error: error.message,
+    });
+  }
 
   return {
     dry_run: true,

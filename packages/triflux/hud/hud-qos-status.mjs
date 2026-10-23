@@ -179,11 +179,9 @@ async function main() {
     outputLines[codexRowIndex] = `${DIM}${outputLines[codexRowIndex]}${RESET}`;
   }
   // 알림 배너와 TUI 스타일이 HUD 내용에 겹치지 않도록 한다. band 는 자기 자리에 그리니 띄우지 않는다.
-  const leadingBreaks = bandMode
-    ? ""
-    : contextView.percent >= 85
-      ? "\n\n"
-      : "\n";
+  // agy 는 statusLine.padding 이 같은 역할을 한다.
+  const leadingBreaks =
+    bandMode || agySession ? "" : contextView.percent >= 85 ? "\n\n" : "\n";
   const resetLines = outputLines.map((line) => `\x1b[0m${line}`);
   // band 는 첫 줄 표지로 이 HUD 가 --band 를 아는지 확인한다.
   const header = bandMode ? `${BAND_HEADER}\n` : "";
