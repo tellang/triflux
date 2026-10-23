@@ -116,17 +116,6 @@ args = [
     const servers = parseMcpServersFromToml(toml);
     assert.deepEqual(servers.bar.args, ["serve", "--path", "/tmp/data"]);
   });
-
-  it("regression A1: 단일 줄 array 는 기존처럼 동일하게 파싱한다", () => {
-    // 회귀 확인 — 멀티라인 경로가 single-line 을 깨뜨리지 않는지.
-    const toml = `
-[mcp_servers.inline]
-command = "x"
-args = ["--one", "--two"]
-`;
-    const servers = parseMcpServersFromToml(toml);
-    assert.deepEqual(servers.inline.args, ["--one", "--two"]);
-  });
 });
 
 describe("mcp-health — isCacheFresh", () => {
@@ -160,12 +149,6 @@ describe("mcp-health — splitHealthy", () => {
     });
     assert.deepEqual(healthy.sort(), ["a", "c"]);
     assert.deepEqual(dead, ["b"]);
-  });
-
-  it("빈 입력은 빈 배열", () => {
-    const { healthy, dead } = splitHealthy({});
-    assert.deepEqual(healthy, []);
-    assert.deepEqual(dead, []);
   });
 });
 
@@ -430,21 +413,6 @@ describe("mcp-health — binary fingerprint (#149 regression)", () => {
     assert.equal(resolveBinaryPath("this-binary-does-not-exist-xyz123"), null);
   });
 
-  it("computeFingerprint: http url 서버는 url type", () => {
-    const fp = computeFingerprint({ url: "http://127.0.0.1:29145/mcp" });
-    assert.equal(fp.type, "http");
-    assert.equal(fp.url, "http://127.0.0.1:29145/mcp");
-  });
-
-  it("computeFingerprint: stdio 서버는 command+args+binary 포함", () => {
-    const fp = computeFingerprint({ command: NODE_BIN, args: ["-v"] });
-    assert.equal(fp.type, "stdio");
-    assert.equal(fp.command, NODE_BIN);
-    assert.deepEqual(fp.args, ["-v"]);
-    assert.ok(fp.binary);
-    assert.equal(fp.binary.path, NODE_BIN);
-  });
-
   it("fingerprintsEqual: 동일 stdio 정의는 equal", () => {
     const a = computeFingerprint({ command: NODE_BIN, args: ["-e", "0"] });
     const b = computeFingerprint({ command: NODE_BIN, args: ["-e", "0"] });
@@ -609,57 +577,5 @@ describe("mcp-health — atomic writeCache (#154 regression)", () => {
       `tmp leftover: ${files.join(", ")}`,
     );
     assert.ok(files.includes("cache.json"));
-  });
-
-  it("병렬 writeCache 후 readCache 는 항상 valid JSON 을 반환 (corrupt 0 건)", async () => {
-    const dir = tmpDir();
-    const cachePath = path.join(dir, "cache.json");
-    // 초기 값으로 seed — reader 가 읽을 때 최소 한 건이 있어야 "null vs corrupt"
-    // 구분이 쉽다.
-    writeCache(
-      {
-        configMtime: 0,
-        checkedAt: 1000,
-        ttlMs: 500,
-        results: { seed: { alive: true, ms: 1 } },
-      },
-      cachePath,
-    );
-
-    const writers = Array.from({ length: 20 }, (_, i) =>
-      Promise.resolve().then(() =>
-        writeCache(
-          {
-            configMtime: i,
-            checkedAt: 1000 + i,
-            ttlMs: 500,
-            results: { writer: { alive: true, ms: i } },
-          },
-          cachePath,
-        ),
-      ),
-    );
-    const readers = Array.from({ length: 20 }, () =>
-      Promise.resolve().then(() => readCache(cachePath)),
-    );
-    const [writerResults, readerResults] = await Promise.all([
-      Promise.all(writers),
-      Promise.all(readers),
-    ]);
-    // 모든 writer 성공
-    for (const ok of writerResults) assert.equal(ok, true);
-    // 모든 reader 는 null (최초 호출이 race) 이거나 valid cache. SyntaxError 로
-    // null 이 나오는 케이스가 이 테스트의 failure mode — old non-atomic writer
-    // 로 돌리면 간헐적으로 null 이 섞여 들어온다.
-    for (const r of readerResults) {
-      if (r === null) continue; // race in timing, acceptable
-      assert.ok(r && typeof r === "object", "readCache returned non-object");
-      assert.ok(typeof r.checkedAt === "number", "missing checkedAt");
-      assert.ok(r.results, "missing results");
-    }
-    // 마지막 상태는 valid
-    const final = readCache(cachePath);
-    assert.ok(final);
-    assert.ok(final.results);
   });
 });

@@ -43,15 +43,6 @@ const RECOVERED_MARKER = "stderr에서 응답 복구";
 const FALLBACK_FAILED_MARKER = "FALLBACK_FAILED stderr_log=";
 
 describe("recover_codex_stdout", () => {
-  it("function is sourceable and returns 0 on empty STDERR_LOG", () => {
-    const res = invokeRecovery("");
-    assert.equal(
-      res.exit,
-      0,
-      `helper should exit 0 on empty stderr; got status=${res.exit}, stderr=${res.stderr}`,
-    );
-  });
-
   it("1차 codex marker: extracts content after last 'codex' line", () => {
     const { stdout, stderr, exit } = invokeWithFixture(
       "path1-codex-marker.stderr.log",

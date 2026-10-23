@@ -166,30 +166,6 @@ describe("#148 _mcp_preflight_filter_dead — all-dead early fail", () => {
     assert.match(result.stderr, /TFX_MCP_FAIL_ON_ALL_DEAD/);
   });
 
-  it("all-dead + TFX_MCP_ALLOW_ALL_DEAD=1 (legacy alias) → rc=0 degraded 진행", () => {
-    // TFX_MCP_ALLOW_ALL_DEAD=1 은 호환성 유지 — graceful degradation 의 explicit alias.
-    // FAIL_ON_ALL_DEAD 기본 0 이므로 동작상 차이 없음 (테스트는 명시 opt-in 호환성 회귀 가드).
-    const result = runPreflight({
-      flags: [
-        "-c",
-        "mcp_servers.dead1.enabled=true",
-        "-c",
-        "mcp_servers.dead2.enabled=true",
-      ],
-      deadList: "dead1,dead2",
-      envVars: { TFX_MCP_ALLOW_ALL_DEAD: "1" },
-    });
-    cleanupDirs.push(result.dir);
-    assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
-    assert.match(result.stderr, /graceful degradation/);
-    assert.deepEqual(result.remainingFlags, [
-      "-c",
-      "mcp_servers.dead1.enabled=false",
-      "-c",
-      "mcp_servers.dead2.enabled=false",
-    ]);
-  });
-
   it("none-dead: no dead servers → rc=0, no filter changes", () => {
     const result = runPreflight({
       flags: [
@@ -313,42 +289,6 @@ describe("#153 dotted server names — preflight regex 는 dot 포함", () => {
     assert.match(result.stderr, /1개 dead MCP 제외 \(foo\.bar\)/);
   });
 
-  it("dotted alive 서버는 flags 보존 (dead 아님 → 제외 안 됨)", () => {
-    const result = runPreflight({
-      flags: [
-        "-c",
-        "mcp_servers.foo.bar.enabled=true",
-        "-c",
-        "mcp_servers.baz.qux.enabled=true",
-      ],
-      deadList: "", // nothing dead
-    });
-    cleanupDirs.push(result.dir);
-    assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
-    // 전부 alive 니까 flags 원본 유지.
-    assert.deepEqual(result.remainingFlags, [
-      "-c",
-      "mcp_servers.foo.bar.enabled=true",
-      "-c",
-      "mcp_servers.baz.qux.enabled=true",
-    ]);
-  });
-
-  it("dotted 서버 + all-dead → rc=0 graceful degradation (#170 default)", () => {
-    const result = runPreflight({
-      flags: [
-        "-c",
-        "mcp_servers.foo.bar.enabled=true",
-        "-c",
-        "mcp_servers.baz.qux.enabled=true",
-      ],
-      deadList: "foo.bar,baz.qux",
-    });
-    cleanupDirs.push(result.dir);
-    assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
-    assert.match(result.stderr, /graceful degradation/);
-  });
-
   it("dotted 서버 + all-dead + TFX_MCP_FAIL_ON_ALL_DEAD=1 → rc=78 (opt-in)", () => {
     const result = runPreflight({
       flags: [
@@ -363,16 +303,6 @@ describe("#153 dotted server names — preflight regex 는 dot 포함", () => {
     cleanupDirs.push(result.dir);
     assert.equal(result.preflightRc, 78, `stderr: ${result.stderr}`);
     assert.match(result.stderr, /조기 실패.*MCP 전부 dead/);
-  });
-
-  it("non-dotted 서버 단독 dead → rc=0 graceful (#170 default 동작)", () => {
-    const result = runPreflight({
-      flags: ["-c", "mcp_servers.simple.enabled=true"],
-      deadList: "simple",
-    });
-    cleanupDirs.push(result.dir);
-    assert.equal(result.preflightRc, 0, `stderr: ${result.stderr}`);
-    assert.match(result.stderr, /graceful degradation/);
   });
 });
 

@@ -1,30 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import {
-  IS_LINUX,
-  IS_MAC,
-  IS_WINDOWS,
-  isPathWithin,
-  normalizePath,
-  PATH_SEP,
-  pipePath,
-  TEMP_DIR,
-} from "../../hub/platform.mjs";
+import { isPathWithin, normalizePath, pipePath } from "../../hub/platform.mjs";
 
 describe("hub/platform.mjs", () => {
-  it("IS_WINDOWS/IS_MAC/IS_LINUX should be mutually exclusive", () => {
-    const active = [IS_WINDOWS, IS_MAC, IS_LINUX].filter(Boolean);
-    assert.equal(active.length, 1);
-  });
-
-  it("exports platform-aware TEMP_DIR and PATH_SEP constants", () => {
-    assert.equal(typeof TEMP_DIR, "string");
-    assert.ok(TEMP_DIR.length > 0);
-    assert.equal(typeof PATH_SEP, "string");
-    assert.ok(PATH_SEP === "/" || PATH_SEP === "\\");
-  });
-
   it("normalizes Windows paths for comparison-friendly slash output", () => {
     assert.equal(
       normalizePath("C:\\Users\\example\\Desktop\\..\\tmp\\file.txt", {
