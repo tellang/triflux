@@ -1,6 +1,7 @@
 import type { Register } from 'claude-code'
 
 import { registerAgentEffort } from './agent-effort.ts'
+import { registerCompactSnapshot } from './compact-snapshot.ts'
 import { registerControl } from './control.ts'
 import { registerHudBand } from './hud-band.tsx'
 import { type Holder, registerLeadRole } from './lead-role.ts'
@@ -18,4 +19,5 @@ export const register: Register = (on, options) => {
   const lead: Holder = {}
   registerLeadRole(on, monitor, lead)
   registerControl(on, lead)
+  registerCompactSnapshot(on, lead)
 }
