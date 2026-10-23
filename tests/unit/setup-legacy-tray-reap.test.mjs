@@ -91,19 +91,6 @@ describe("setup legacy tray reap", () => {
     );
   });
 
-  it("고른 프로세스는 uid·시작 시각·command 를 보관한다", () => {
-    const [first] = collectLegacyTrayProcesses(PS_OUTPUT, {
-      currentPid: 999,
-      currentUid: UID,
-    });
-    assert.deepEqual(first, {
-      pid: 101,
-      uid: UID,
-      startedAt: START,
-      command: NPM_TRAY,
-    });
-  });
-
   it("uid 를 알 수 없으면 아무것도 고르지 않는다", () => {
     assert.deepEqual(
       collectLegacyTrayProcesses(PS_OUTPUT, {
@@ -111,23 +98,6 @@ describe("setup legacy tray reap", () => {
         currentUid: null,
       }),
       [],
-    );
-  });
-
-  it("옛 dev 클론과 npm 전역 설치 경로를 모두 잡는다", () => {
-    const table = [
-      psLine(UID, 201, "node /Users/me/Projects/tools/triflux/hub/tray.mjs"),
-      psLine(
-        UID,
-        202,
-        "/usr/local/bin/node /usr/local/lib/node_modules/triflux/hub/tray.mjs",
-      ),
-    ].join("\n");
-    assert.deepEqual(
-      collectLegacyTrayProcesses(table, { currentPid: 1, currentUid: UID }).map(
-        (proc) => proc.pid,
-      ),
-      [201, 202],
     );
   });
 

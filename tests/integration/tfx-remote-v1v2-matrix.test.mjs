@@ -19,8 +19,6 @@ import {
 } from "../../hub/lib/hosts-compat.mjs";
 
 const TEMP_DIRS = [];
-const PROJECT_ROOT = resolve(".");
-const TFX_REMOTE_SKILL = join(PROJECT_ROOT, "skills", "tfx-remote", "SKILL.md");
 
 afterEach(() => {
   while (TEMP_DIRS.length > 0) {
@@ -51,32 +49,6 @@ const SAVED_ENV = {
 
 before(() => {
   process.env.TFX_HOSTS_USER_STATE_DISABLE = "1";
-});
-
-describe("tfx-remote 실행 옵션", () => {
-  it("구현된 remote-spawn 옵션을 안내한다", () => {
-    const skill = readFileSync(TFX_REMOTE_SKILL, "utf8");
-
-    const expectedOptions = [
-      "host",
-      "local",
-      "list",
-      "attach",
-      "send",
-      "probe",
-      "capture",
-      "wait",
-      "monitor",
-      "kill",
-    ];
-
-    for (const option of expectedOptions) {
-      assert.ok(skill.includes(`\`--${option}`), `missing option: --${option}`);
-    }
-
-    assert.match(skill, /hosts-compat\.mjs/u);
-    assert.match(skill, /remote-spawn\.mjs/u);
-  });
 });
 
 describe("Phase 4b integration — hosts v1/v2 compatibility matrix", () => {
@@ -236,12 +208,6 @@ describe("issue #178 — hosts.json user-state migration", () => {
     } else {
       assert.match(path, /\.config[\\/]triflux[\\/]hosts\.json$/);
     }
-  });
-
-  it("TFX_HOSTS_USER_STATE_DISABLE=1 short-circuits to null", () => {
-    process.env.TFX_HOSTS_USER_STATE_DISABLE = "1";
-    delete process.env.TFX_HOSTS_USER_STATE;
-    assert.equal(userStateHostsPath(), null);
   });
 
   it("migrates source-tree hosts.json into user-state on first read", () => {

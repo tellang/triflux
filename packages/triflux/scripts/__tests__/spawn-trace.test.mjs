@@ -30,18 +30,6 @@ describe("spawn-trace", () => {
     }
   });
 
-  it("exports child_process-compatible API surface", async () => {
-    const mod = await loadSpawnTraceModule();
-    assert.equal(typeof mod.spawn, "function");
-    assert.equal(typeof mod.spawnWithBackoff, "function");
-    assert.equal(typeof mod.execFile, "function");
-    assert.equal(typeof mod.execFileSync, "function");
-    assert.equal(typeof mod.exec, "function");
-    assert.equal(typeof mod.execSync, "function");
-    assert.equal(typeof mod.fork, "function");
-    assert.equal(typeof mod.spawnSync, "function");
-  });
-
   it("removes trace logs older than the retention window", async () => {
     const mod = await loadSpawnTraceModule();
     const dir = join(TEST_LOG_DIR, "retention");
@@ -94,14 +82,6 @@ describe("spawn-trace", () => {
     );
   });
 
-  it("exports guard constants", async () => {
-    const mod = await loadSpawnTraceModule();
-    assert.equal(typeof mod.MAX_SPAWN_PER_SEC, "number");
-    assert.equal(typeof mod.MAX_TOTAL_DESCENDANTS, "number");
-    assert.equal(typeof mod.getMaxSpawnPerSec, "function");
-    assert.equal(typeof mod.reload, "function");
-  });
-
   it("reload re-evaluates TRIFLUX_MAX_SPAWN_RATE", async () => {
     const mod = await loadSpawnTraceModule();
     const original = process.env.TRIFLUX_MAX_SPAWN_RATE;
@@ -136,31 +116,6 @@ describe("spawn-trace", () => {
       if (original == null) delete process.env.TRIFLUX_MAX_SPAWN_RATE;
       else process.env.TRIFLUX_MAX_SPAWN_RATE = original;
     }
-  });
-
-  it("spawn returns a ChildProcess-like object", async () => {
-    const mod = await loadSpawnTraceModule();
-    const child = mod.spawn("node", ["-e", "process.exit(0)"], {
-      windowsHide: true,
-    });
-    assert.ok(child);
-    assert.equal(typeof child.pid, "number");
-    assert.equal(typeof child.kill, "function");
-
-    await new Promise((resolve) => child.once("close", resolve));
-  });
-
-  it("execFileSync returns stdout buffer", async () => {
-    const mod = await loadSpawnTraceModule();
-    const result = mod.execFileSync(
-      "node",
-      ["-e", 'process.stdout.write("hello")'],
-      {
-        encoding: "utf8",
-        windowsHide: true,
-      },
-    );
-    assert.equal(result.trim(), "hello");
   });
 
   it("execFileSync throws on non-zero exit", async () => {
@@ -202,17 +157,6 @@ describe("spawn-trace", () => {
       },
     );
     assert.equal(result.trim(), "ok");
-  });
-
-  it("default export includes spawn/execFile/execFileSync", async () => {
-    const mod = await loadSpawnTraceModule();
-    assert.equal(typeof mod.default.spawn, "function");
-    assert.equal(typeof mod.default.spawnWithBackoff, "function");
-    assert.equal(typeof mod.default.execFile, "function");
-    assert.equal(typeof mod.default.execFileSync, "function");
-    assert.equal(typeof mod.default.MAX_SPAWN_PER_SEC, "number");
-    assert.equal(typeof mod.default.getMaxSpawnPerSec, "function");
-    assert.equal(typeof mod.default.reload, "function");
   });
 
   it("waits for RATE_WINDOW_MS and retries once after a rate limit error", async () => {

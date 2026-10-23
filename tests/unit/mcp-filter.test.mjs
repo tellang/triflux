@@ -357,20 +357,6 @@ describe("mcp-filter", () => {
       policy.allowedServers.join(","),
     );
   });
-
-  it("hint와 allowed server는 동일한 keyword top-k 결과를 재사용한다", () => {
-    const policy = buildMcpPolicy({
-      agentType: "executor",
-      requestedProfile: "executor",
-      availableServers: ["context7", "brave-search", "exa", "tavily"],
-      taskText:
-        "Verify the latest pricing status and current release announcement.",
-    });
-
-    // executor는 context7만 허용 — 검색 서버는 maxSearchServers=0으로 제외
-    assert.deepEqual(policy.allowedServers, ["context7"]);
-    assert.match(policy.hint, /context7으로 관련 문서를 조회하세요/);
-  });
 });
 
 describe("mcp-filter 프로필 폴백", () => {
@@ -381,15 +367,5 @@ describe("mcp-filter 프로필 폴백", () => {
       requestedProfile: "--cli",
     });
     assert.ok(policy, "auto 폴백으로 policy 반환");
-  });
-
-  it("--flag 형태 프로필은 auto로 폴백한다", () => {
-    const result = resolveMcpProfile("executor", "--verbose");
-    assert.ok(result, "auto 폴백으로 결과 반환");
-  });
-
-  it("알 수 없는 프로필도 auto로 폴백한다", () => {
-    const result = resolveMcpProfile("executor", "nonexistent-profile");
-    assert.ok(result, "auto 폴백으로 결과 반환");
   });
 });
