@@ -230,6 +230,16 @@ describe("tfx-route.sh — claude-native 에이전트 메타데이터 출력", {
     assert.match(out(result), /ROUTE_TYPE=claude-native/);
     assert.match(out(result), /AGENT=verifier/);
   });
+
+  it("test-engineer 에이전트는 codex 경로를 사용해야 한다", () => {
+    const result = runBash(
+      `bash "${ROUTE_SCRIPT}" test-engineer 'test-prompt'`,
+      fixtureEnv({ FAKE_CODEX_MODE: "exec" }),
+    );
+    assert.equal(result.status, 0, out(result));
+    assert.match(out(result), /type=codex/);
+    assert.match(out(result), /agent=test-engineer/);
+  });
 });
 
 // ── TFX_CLI_MODE 오버라이드 ──
