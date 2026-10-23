@@ -183,7 +183,7 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 | 전이 | 행동 |
 | --- | --- |
 | 1 에서 2 (warn) | 새 로컬 워커는 한 번에 1개까지. 무거운 shard 와 전체 테스트는 원격으로. 실행 중인 것은 그대로 둔다 |
-| 2 에서 4 (critical) | 순서대로. 1) 새 스폰 전부 중단 2) 유휴 headless 워커와 끝난 세션을 `tfx multi stop`, `tfx-live stop` 으로 닫는다 3) 재개 가능한 Codex 워커는 중단하고 thread ID 와 남은 지시를 기록해 원격에서 다시 띄운다 4) 사용자가 쓰는 대화형 세션은 건드리지 않고 상황과 한 일을 사용자에게 알린다 5) 리드 자신은 컨텍스트가 60% 를 넘었으면 compact 한다 |
+| 2 에서 4 (critical) | 순서대로. 1) 새 스폰 전부 중단 2) 유휴 headless 워커와 끝난 세션을 `tfx multi stop`, `tfx-live stop` 으로 닫는다 3) 재개 가능한 Codex 워커는 중단하고 thread ID 와 남은 지시를 기록해 원격에서 다시 띄운다 4) 사용자가 쓰는 대화형 세션은 건드리지 않고 상황과 한 일을 사용자에게 알린다 5) 리드 자신은 컨텍스트가 60% 를 넘었으면 compact 한다(11절 "자기 세션 제어") |
 | 4 에서 2 | 보류한 디스패치를 원격 우선으로 재개한다. 로컬 신규 스폰은 아직 1개까지 |
 | 2 에서 1 (normal) | 로컬 정책으로 돌아간다. 중단했던 작업이 남아 있으면 먼저 재개한다 |
 
@@ -271,6 +271,20 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 - 지시서에 보고 기준을 넣는다. 비율은 받는 세션의 CLI 에 맞춰 `tfx-live` 표의 준비·경고 열을 쓴다. 예: Claude 60%, Codex 15%, agy 12%. "컨텍스트가 <비율>을 넘으면 작업을 멈추고 리드에게 보고하라."
 - 재개한 세션(`--resume`)은 이전 사용량을 이어받으므로 재개 직후 한 번 잰다.
 - 85%에 닿은 Claude 세션에는 새 작업을 주지 않고 바로 승계한다.
+
+### 자기 세션 제어
+
+리드는 내장 슬래시 명령을 직접 실행하지 못한다. 자기 세션의 compact, clear, exit 는 triflux mod 도구 `tfx_control`(`mcp__triflux-mods__tfx_control`)로 건다. tmux 안팎 모두 같다. 다른 세션을 압축하거나 끝낼 때는 `tfx-live` 스킬의 "리드 운영" 절을 따른다.
+
+| action | 인자 | 동작 |
+| --- | --- | --- |
+| compact | `instructions` 요약 지시문, `then` 압축 뒤 다음 프롬프트 | 이 턴이 끝나면 `/compact <instructions>`, 끝난 뒤 `then` 을 prompt 로 넣는다 |
+| clear | `handoff` 인계 파일 경로, `then` | 인계 파일을 먼저 쓴다. 턴이 끝나면 `/clear`, 그 뒤 "인계 파일 <경로> 를 읽고 이어간다." 와 `then` 을 차례로 넣는다 |
+| exit | `handoff` 필수 | 사용자가 끝내라고 했거나 승계 세션이 인계 파일을 받기로 했을 때만 쓴다. 턴이 끝나면 `/exit` |
+
+- 호출은 예약만 한다. 호출한 뒤 응답을 짧게 마쳐야 턴이 끝나고 실행된다.
+- 인자 오류, 없는 인계 파일, exit 의 `handoff` 누락, 서브에이전트 안의 호출은 도구 결과로 거부된다. 실행 뒤 호스트가 슬래시를 거부하면 다음 턴에 `[tfx_control] /<action> 실패: ...` prompt 가 온다. 그때는 사용자에게 직접 입력을 부탁한다.
+- 도구가 목록에 없으면 triflux mod 가 설치되지 않은 세션이다. tmux 안이면 `tfx-live compact --session "$TMUX_PANE" --if-busy wait ...` 를 쓰고, 밖이면 사용자에게 부탁한다.
 
 ## 12. 운영 점검표
 

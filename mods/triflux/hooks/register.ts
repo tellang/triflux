@@ -1,6 +1,7 @@
 import type { Register } from 'claude-code'
 
 import { registerAgentEffort } from './agent-effort.ts'
+import { registerControl } from './control.ts'
 import { registerHudBand } from './hud-band.tsx'
 import { registerLeadRole } from './lead-role.ts'
 import { type Monitor, registerMemoryPressure } from './memory-pressure.ts'
@@ -14,4 +15,5 @@ export const register: Register = (on, options) => {
   const monitor: Monitor = { interactive: false, state: {} }
   registerMemoryPressure(on, monitor)
   registerLeadRole(on, monitor)
+  registerControl(on)
 }

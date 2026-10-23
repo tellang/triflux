@@ -50,6 +50,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0041](../_archive/adr/0041-memory-pressure-watcher.md) | 메모리 압박 감시는 상주 프로세스 없이 리드 세션의 triflux mod 가 직접 한다 | Superseded | 0040, 0042 |
 | [0042](../_archive/adr/0042-lead-role-entry-and-pressure-command.md) | 리드 진입은 `/tfx-lead <역할>`, 압박 감시는 `/tfx-pressure` 로 나눈다 | Superseded | 0032, 0040, 0041, 0043 |
 | [0043](0043-pressure-transition-as-self-peer-message.md) | 확정한 압박 전이는 리드 자기 세션에 피어 메시지로 보낸다 | Accepted | 0040, 0041, 0042 |
+| [0044](0044-lead-self-control-via-mod-tool.md) | 리드의 compact, clear, exit 는 triflux mod 도구 하나로 건다 | Proposed | 0042, 0043 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 
