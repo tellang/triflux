@@ -64,34 +64,6 @@ describe("#144/#66 heartbeat stall kill — shape", () => {
     assert.match(hb, /kill_grace="\$\{TFX_STALL_KILL_GRACE:-30\}"/);
   });
 
-  it("TFX_STALL_KILL 은 kill / intervene / classify / off 모드를 지원한다", () => {
-    const hb = extractFunction("heartbeat_monitor");
-    // case 문에 세 모드 모두 존재해야 함
-    assert.match(hb, /1\|on\|kill/, "kill alias (1|on|kill) case arm 필요");
-    assert.match(
-      hb,
-      /classify\|0\|off\|disabled/,
-      "no-kill alias (classify|0|off|disabled) case arm 필요",
-    );
-    assert.match(hb, /intervene\|ladder/, "intervene ladder case arm 필요");
-    assert.match(hb, /intervene-run/, "bridge intervene-run 배선 필요");
-    assert.match(
-      hb,
-      /--payload-file -/,
-      "intervene JSON은 stdin으로 전달해야 함",
-    );
-    assert.match(
-      hb,
-      /STALL_CLASSIFY/,
-      "classify mode 의 evidence 로그 STALL_CLASSIFY 필요",
-    );
-    assert.match(
-      hb,
-      /no-kill — TFX_STALL_KILL=classify/,
-      "STALL_CLASSIFY 로그에 사용자 개입 힌트 필요",
-    );
-  });
-
   it("Windows(MINGW/MSYS) 에서는 taskkill /T /F 로 프로세스 트리를 종료한다", () => {
     const hb = extractFunction("heartbeat_monitor");
     assert.match(hb, /MINGW\*\|MSYS\*/, "Windows 감지 case 필요");

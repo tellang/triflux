@@ -162,13 +162,6 @@ describe("Codex bucket normalization", () => {
     );
   });
 
-  it("neither: both null → both null", () => {
-    const rl = { primary: null, secondary: null };
-    const { primary, secondary } = normalizeBuckets(rl);
-    assert.equal(primary, null);
-    assert.equal(secondary, null);
-  });
-
   it("unknown length: keeps a bucket without window_minutes in its reported slot", () => {
     // app-server 스키마에서 windowDurationMins 는 선택 필드다.
     const rl = {

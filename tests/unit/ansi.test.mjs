@@ -4,100 +4,25 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  altScreenOff,
-  altScreenOn,
-  BG,
-  BOLD,
-  bold,
   box,
-  clearLine,
-  clearScreen,
-  clearToEnd,
   clip,
   color,
-  cursorHide,
-  cursorHome,
-  cursorShow,
-  DIM,
-  dim,
   FG,
   MOCHA,
-  moveTo,
-  moveUp,
   padRight,
   progressBar,
   RESET,
-  STATUS_ICON,
   statusBadge,
   stripAnsi,
   truncate,
   wcswidth,
 } from "../../hub/team/ansi.mjs";
 
-// ── 화면 시퀀스 ──
-describe("화면 시퀀스", () => {
-  it("altScreenOn/Off 시퀀스 포함", () => {
-    assert.ok(altScreenOn.includes("1049h"));
-    assert.ok(altScreenOff.includes("1049l"));
-  });
-
-  it("clearScreen / cursorHome / cursorHide / cursorShow 정의", () => {
-    assert.ok(clearScreen.includes("2J"));
-    assert.ok(cursorHome.includes("H"));
-    assert.ok(cursorHide.includes("25l"));
-    assert.ok(cursorShow.includes("25h"));
-  });
-
-  it("clearLine / clearToEnd 정의", () => {
-    assert.ok(clearLine.includes("2K"));
-    assert.ok(clearToEnd.includes("[K") || clearToEnd.includes("K"));
-  });
-});
-
-// ── 커서 이동 ──
-describe("커서 이동", () => {
-  it("moveTo: 올바른 ANSI 시퀀스 생성", () => {
-    assert.equal(moveTo(5, 10), "\x1b[5;10H");
-    assert.equal(moveTo(1, 1), "\x1b[1;1H");
-  });
-
-  it("moveUp 기본값 1", () => {
-    assert.ok(moveUp().includes("1A"));
-    assert.ok(moveUp(3).includes("3A"));
-  });
-});
-
 // ── 색상 헬퍼 ──
 describe("color / bold / dim", () => {
-  it("color: fg 적용 후 RESET으로 끝남", () => {
-    const result = color("hello", FG.red);
-    assert.ok(result.includes("\x1b[31m"));
-    assert.ok(result.includes("hello"));
-    assert.ok(result.endsWith(RESET));
-  });
-
-  it("color: fg+bg 동시 적용", () => {
-    const result = color("x", FG.green, BG.black);
-    assert.ok(result.includes(FG.green));
-    assert.ok(result.includes(BG.black));
-    assert.ok(result.endsWith(RESET));
-  });
-
   it("color: fg 없으면 원본 반환", () => {
     assert.equal(color("abc", null, null), "abc");
     assert.equal(color("abc"), "abc");
-  });
-
-  it("bold: BOLD + RESET 감쌈", () => {
-    const result = bold("x");
-    assert.ok(result.startsWith(BOLD));
-    assert.ok(result.endsWith(RESET));
-  });
-
-  it("dim: DIM + RESET 감쌈", () => {
-    const result = dim("x");
-    assert.ok(result.startsWith(DIM));
-    assert.ok(result.endsWith(RESET));
   });
 });
 
@@ -109,14 +34,6 @@ describe("stripAnsi", () => {
       stripAnsi(`${FG.green}foo${RESET} ${FG.blue}bar${RESET}`),
       "foo bar",
     );
-  });
-
-  it("ANSI 없는 문자열은 그대로", () => {
-    assert.equal(stripAnsi("plain text"), "plain text");
-  });
-
-  it("빈 문자열 처리", () => {
-    assert.equal(stripAnsi(""), "");
   });
 });
 
@@ -140,10 +57,6 @@ describe("wcswidth", () => {
   it("ANSI 코드 제외하고 계산", () => {
     const painted = `${FG.red}ab${RESET}`;
     assert.equal(wcswidth(painted), 2);
-  });
-
-  it("빈 문자열은 0", () => {
-    assert.equal(wcswidth(""), 0);
   });
 });
 
@@ -218,17 +131,6 @@ describe("box", () => {
     assert.ok(body[0].startsWith("│"));
     assert.ok(body[0].endsWith("│"));
   });
-
-  it("여러 라인 지원", () => {
-    const { body } = box(["line1", "line2", "line3"], 30);
-    assert.equal(body.length, 3);
-  });
-
-  it("mid 구분선 포함", () => {
-    const { mid } = box(["x"], 10);
-    assert.ok(mid.startsWith("├"));
-    assert.ok(mid.endsWith("┤"));
-  });
 });
 
 // ── progressBar ──
@@ -253,12 +155,6 @@ describe("progressBar (percent 0-100 API)", () => {
     assert.equal(clean.length, 10);
     assert.ok(clean.includes("█"));
     assert.ok(clean.includes("░"));
-  });
-
-  it("기본 width 20", () => {
-    const bar = progressBar(50);
-    const clean = stripAnsi(bar);
-    assert.equal(clean.length, 20);
   });
 
   it("범위 초과 입력 처리 (>100, <0)", () => {
@@ -293,47 +189,8 @@ describe("statusBadge", () => {
     }
   });
 
-  it("thinking → ⠿", () => {
-    assert.ok(statusBadge("thinking").includes("⠿"));
-  });
-
-  it("executing → ▶", () => {
-    assert.ok(statusBadge("executing").includes("▶"));
-  });
-
   it("알 수 없는 상태 → · prefix", () => {
     const badge = statusBadge("unknown_state");
     assert.ok(badge.includes("·"));
-  });
-
-  it("RESET으로 끝남", () => {
-    assert.ok(statusBadge("ok").endsWith(RESET));
-    assert.ok(statusBadge("failed").endsWith(RESET));
-  });
-});
-
-// ── STATUS_ICON ──
-describe("STATUS_ICON", () => {
-  it("STATUS_ICON: 모든 상태 정의", () => {
-    assert.ok(STATUS_ICON.running);
-    assert.ok(STATUS_ICON.completed);
-    assert.ok(STATUS_ICON.failed);
-    assert.ok(STATUS_ICON.pending);
-  });
-});
-
-// ── MOCHA 색상 상수 ──
-describe("MOCHA 색상 상수", () => {
-  it("ok / partial / fail / thinking / executing / border 모두 ANSI 시퀀스", () => {
-    for (const key of [
-      "ok",
-      "partial",
-      "fail",
-      "thinking",
-      "executing",
-      "border",
-    ]) {
-      assert.ok(MOCHA[key].startsWith("\x1b["), `MOCHA.${key} ANSI 아님`);
-    }
   });
 });

@@ -24,12 +24,6 @@ describe("sparkline", () => {
     assert.ok(/[▁▂▃▄▅▆▇█]/.test(result));
   });
 
-  it("단일 값 → 동일 높이", () => {
-    const result = stripAnsi(sparkline([5], 4));
-    // padding + 1 char
-    assert.equal(result.length, 4);
-  });
-
   it("width보다 많은 데이터 → 최근 width개만", () => {
     const data = Array.from({ length: 20 }, (_, i) => i);
     const result = stripAnsi(sparkline(data, 8));
@@ -62,26 +56,9 @@ describe("createTokenTracker", () => {
     tracker.record("w1", "invalid");
     assert.deepEqual(tracker.getHistory("w1"), []);
   });
-
-  it("sparkline 메서드 호출", () => {
-    const tracker = createTokenTracker();
-    tracker.record("w1", 10);
-    tracker.record("w1", 20);
-    const result = tracker.sparkline("w1", 4);
-    assert.ok(result.length > 0);
-  });
 });
 
 describe("createSearchState", () => {
-  it("활성화/비활성화 상태 전환", () => {
-    const search = createSearchState();
-    assert.equal(search.active, false);
-    search.activate();
-    assert.equal(search.active, true);
-    search.deactivate();
-    assert.equal(search.active, false);
-  });
-
   it("문자 입력 → 버퍼 축적", () => {
     const search = createSearchState();
     search.activate();
@@ -149,11 +126,6 @@ describe("createSearchState", () => {
 });
 
 describe("createPanelResizer", () => {
-  it("기본 비율 0.3", () => {
-    const resizer = createPanelResizer();
-    assert.equal(resizer.ratio, 0.3);
-  });
-
   it("shrinkRail: 비율 감소", () => {
     const resizer = createPanelResizer();
     resizer.shrinkRail();

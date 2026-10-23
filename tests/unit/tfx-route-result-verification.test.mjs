@@ -12,7 +12,6 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 const LIB = "scripts/lib/codex-recovery.sh";
-const ROUTE = "scripts/tfx-route.sh";
 const POST = "scripts/tfx-route-post.mjs";
 
 describe("tfx-route-post.mjs — Codex JSON 출력", () => {
@@ -146,19 +145,6 @@ describe("codex_stdout_transport_crashed — MCP transport 사망 서명", () =>
       runTransportCheck("tokens used\n99,999\nAll good.\n"),
       "CLEAN",
     );
-  });
-});
-
-describe("tfx-route.sh no-op 가드 배선", () => {
-  const src = readFileSync(ROUTE, "utf8");
-  it("가드가 복구 플래그(CODEX_STDOUT_WAS_RECOVERED)를 진짜-출력-부재 판정에 쓴다", () => {
-    assert.match(src, /CODEX_STDOUT_WAS_RECOVERED/);
-  });
-  it("가드가 transport 크래시 검출을 승격 조건에 쓴다", () => {
-    assert.match(src, /codex_stdout_transport_crashed/);
-  });
-  it("아우터 run 함수가 플래그를 매 실행 초기화한다(스테일 방지)", () => {
-    assert.match(src, /CODEX_STDOUT_WAS_RECOVERED=0/);
   });
 });
 

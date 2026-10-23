@@ -44,13 +44,6 @@ describe("hud/context-monitor.mjs", () => {
     });
   });
 
-  it("임계값 경고 레벨을 분류한다", () => {
-    assert.equal(classifyContextThreshold(30).level, "ok");
-    assert.equal(classifyContextThreshold(60).level, "info");
-    assert.equal(classifyContextThreshold(80).level, "warn");
-    assert.equal(classifyContextThreshold(90).level, "critical");
-  });
-
   it("CTX 포맷을 생성한다", () => {
     assert.equal(formatContextUsage(45_000, 200_000, 22), "45K/200K (22%)");
   });

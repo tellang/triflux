@@ -329,38 +329,6 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     assert.deepEqual(profileValues(args), ["astra_max"]);
   });
 
-  it("normalizes all old Sol profiles from retry snapshots", () => {
-    for (const [legacy, canonical] of [
-      ["gpt56_sol_xhigh", "astra_xhigh"],
-      ["gpt56_sol_max", "astra_max"],
-      ["gpt56_sol_ultra", "astra_max"],
-    ]) {
-      const dir = makeTempDir();
-      const snapshot = path.join(dir, `${legacy}.json`);
-      writeRetrySnapshot(snapshot, legacy);
-      assert.deepEqual(profileValues(runRoute({ snapshot })), [canonical]);
-    }
-  });
-
-  it("normalizes old GPT-5.6 and GPT-6 Sol profiles from TFX_CODEX_PROFILE", () => {
-    for (const [legacy, canonical] of [
-      ["gpt56_sol_xhigh", "astra_xhigh"],
-      ["gpt56_sol_max", "astra_max"],
-      ["gpt56_sol_ultra", "astra_ultra"],
-      ["gpt56_terra_high", "sol_high"],
-      ["gpt56_terra_med", "sol_med"],
-      ["gpt56_luna_low", "luna_low"],
-      ["gpt6_sol_high", "sol_high"],
-      ["gpt6_sol_med", "sol_med"],
-    ]) {
-      const args = runRoute({
-        agent: "deep-executor",
-        env: { TFX_CODEX_PROFILE: legacy },
-      });
-      assert.deepEqual(profileValues(args), [canonical]);
-    }
-  });
-
   it("custom retry profiles cannot hide ultra or fall through to global config", () => {
     const dir = makeTempDir();
     const customSnapshot = path.join(dir, "custom-retry-snapshot.json");

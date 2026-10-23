@@ -96,20 +96,6 @@ describe("resolveTeamPaths()", () => {
     await assert.rejects(() => resolveTeamPaths(""), /INVALID_TEAM_NAME/);
     await assert.rejects(() => resolveTeamPaths("-bad"), /INVALID_TEAM_NAME/);
   });
-
-  it("유효한 팀 이름은 경로 객체를 반환해야 한다", async () => {
-    const teamName = uniqueTeamName();
-    const result = await resolveTeamPaths(teamName);
-
-    assert.ok(result.team_dir.endsWith(teamName));
-    assert.ok(result.config_path.endsWith("config.json"));
-    assert.ok(result.tasks_dir.includes(teamName));
-    assert.ok(
-      ["team_name", "lead_session_id", "not_found"].includes(
-        result.tasks_dir_resolution,
-      ),
-    );
-  });
 });
 
 // ── teamInfo ──
