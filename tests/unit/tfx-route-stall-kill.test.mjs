@@ -47,6 +47,23 @@ function extractFunction(name) {
 }
 
 describe("#144/#66 heartbeat stall kill — shape", () => {
+  it("heartbeat_monitor 는 STALL_KILL 분기와 TFX_STALL_KILL env, SIGTERM/SIGKILL 호출을 포함한다", () => {
+    const hb = extractFunction("heartbeat_monitor");
+    assert.match(hb, /TFX_STALL_KILL/, "TFX_STALL_KILL env opt-out 이 필요");
+    assert.match(hb, /TFX_STALL_KILL_GRACE/, "grace 시간 env override 가 필요");
+    assert.match(hb, /STALL_KILL/, "STALL_KILL 상태 로그가 필요");
+    assert.match(hb, /kill -TERM "\$pid"/, "SIGTERM 호출 필수");
+    assert.match(hb, /kill -KILL "\$pid"/, "SIGKILL 강제 경로 필수");
+  });
+
+  it("kill_on_stall 기본값은 kill 이고, stall 기본값은 1200초다", () => {
+    // T1: 외부 timeout이 hard ceiling으로 이동했으므로 heartbeat가 기본 방어선이다.
+    const hb = extractFunction("heartbeat_monitor");
+    assert.match(hb, /TFX_STALL_THRESHOLD:-1200/);
+    assert.match(hb, /kill_on_stall="\$\{TFX_STALL_KILL:-kill\}"/);
+    assert.match(hb, /kill_grace="\$\{TFX_STALL_KILL_GRACE:-30\}"/);
+  });
+
   it("Windows(MINGW/MSYS) 에서는 taskkill /T /F 로 프로세스 트리를 종료한다", () => {
     const hb = extractFunction("heartbeat_monitor");
     assert.match(hb, /MINGW\*\|MSYS\*/, "Windows 감지 case 필요");
