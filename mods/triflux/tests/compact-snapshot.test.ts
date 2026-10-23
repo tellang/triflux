@@ -37,15 +37,13 @@ test('사용자 instructions 는 앞에 그대로 남고 블록은 뒤에 붙는
   expect(seen[0]?.startsWith('마이그레이션 계획을 남겨라\n\n[tfx 압축 스냅샷]')).toBe(true)
 })
 
-test('상한을 넘으면 낮은 순위부터 빠진다', async ($, on) => {
-  // 표까지 넣으면 상한 바로 밑이고 PR 항목을 더하면 넘는 크기다.
-  const big = `| 이름 | CLI |\n${'| worker | Claude opus 긴 설명 |\n'.repeat(61)}`
-  const seen = fixture(on, big)
+test('상한을 넘으면 낮은 순위부터 빠지고 넘치는 표는 다시 읽으라는 문장으로 바뀐다', async ($, on) => {
+  const seen = fixture(on, `| 이름 | CLI |\n${'| worker | Claude opus 긴 설명 |\n'.repeat(200)}`)
   await compact($)
   const block = seen[0] ?? ''
   expect(block.length).toBeLessThanOrEqual(snapshotLimit)
   expect(block).toContain('리드 역할: 개발리드')
-  expect(block).toContain('| worker | Claude opus 긴 설명 |')
-  expect(block).not.toContain('열린 PR')
+  expect(block).toContain(`등록 워커는 ${workersPath} 를 다시 읽는다`)
+  expect(block).not.toContain('| worker |')
   expect(block).not.toContain('사용자 결정')
 })
