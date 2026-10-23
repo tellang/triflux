@@ -157,29 +157,32 @@ test("start and stop reject pane targets before invoking tmux", async () => {
   }
 });
 
+const realTmux = spawnSync("sh", ["-c", "command -v tmux"], {
+  encoding: "utf8",
+}).stdout?.trim();
+
 test("stop leaves a session whose name only starts with the requested one", {
-  skip: process.platform === "win32" || spawnSync("tmux", ["-V"]).status !== 0,
+  skip: process.platform === "win32" || !realTmux,
 }, async () => {
-  // 사용자 tmux 서버를 건드리지 않게 소켓 디렉터리를 따로 쓴다.
+  // $TMUX 가 TMUX_TMPDIR 보다 우선해 kill-server 가 사용자 기본 서버를 죽일 수 있다.
+  // 그래서 전용 소켓(-L)을 붙이는 래퍼를 PATH 앞에 두고 자식 tfx-live 도 그것을 쓰게 한다.
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-exact-"));
-  const env = { TMUX: "", TMUX_TMPDIR: dir };
-  const tmuxEnv = { env: { ...process.env, ...env } };
+  const socket = `tfx-exact-${process.pid}-${Date.now()}`;
+  const tmux = path.join(dir, "tmux");
+  await fs.writeFile(
+    tmux,
+    `#!/bin/sh\nexec '${realTmux}' -L '${socket}' "$@"\n`,
+  );
+  await fs.chmod(tmux, 0o755);
+  const env = { PATH: `${dir}${path.delimiter}${process.env.PATH}` };
   try {
-    await execFileAsync(
-      "tmux",
-      ["new-session", "-d", "-s", "tfx-exact-ab"],
-      tmuxEnv,
-    );
+    await execFileAsync(tmux, ["new-session", "-d", "-s", "tfx-exact-ab"]);
     await assert.rejects(
       runTfxLive(["stop", "--session", "tfx-exact-a"], { env }),
     );
-    await execFileAsync(
-      "tmux",
-      ["has-session", "-t", "=tfx-exact-ab"],
-      tmuxEnv,
-    );
+    await execFileAsync(tmux, ["has-session", "-t", "=tfx-exact-ab"]);
   } finally {
-    await execFileAsync("tmux", ["kill-server"], tmuxEnv).catch(() => {});
+    await execFileAsync(tmux, ["kill-server"]).catch(() => {});
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
