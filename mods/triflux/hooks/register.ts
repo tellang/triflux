@@ -4,9 +4,11 @@ import { registerAgentEffort } from './agent-effort.ts'
 import { registerCompactSnapshot } from './compact-snapshot.ts'
 import { registerControl } from './control.ts'
 import { registerHudBand } from './hud-band.tsx'
+import { registerIdleTeammates } from './idle-teammates.ts'
 import { type Holder, registerLeadRole } from './lead-role.ts'
 import { type Monitor, registerMemoryPressure } from './memory-pressure.ts'
 import { registerNativeMessage } from './native-message.ts'
+import { registerReportLimit } from './report-limit.ts'
 
 export const register: Register = (on, options) => {
   registerHudBand(on, options)
@@ -20,4 +22,6 @@ export const register: Register = (on, options) => {
   registerLeadRole(on, monitor, lead)
   registerControl(on, lead)
   registerCompactSnapshot(on, lead)
+  registerReportLimit(on, lead)
+  registerIdleTeammates(on, lead)
 }

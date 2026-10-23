@@ -52,6 +52,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0043](0043-pressure-transition-as-self-peer-message.md) | 확정한 압박 전이는 리드 자기 세션에 피어 메시지로 보낸다 | Accepted | 0040, 0041, 0042, 0047 |
 | [0044](0044-lead-self-control-via-mod-tool.md) | 리드의 compact, clear, exit 는 triflux mod 도구 하나로 건다 | Proposed | 0042, 0043 |
 | [0045](0045-compact-snapshot-instructions.md) | compact 때 triflux mod 가 요약 지시에 남길 항목을 붙인다 | Proposed | 0042, 0044 |
+| [0046](0046-lead-rule-enforcement-by-mod.md) | 지켜지지 않는 리드 규칙은 triflux mod 훅으로 강제한다 | Proposed | 0023, 0043, 0044 |
 | [0047](0047-pressure-notice-without-turn.md) | critical 이 아닌 압박 전이는 턴 없이 리드의 다음 요청에 한 줄로 붙인다 | Proposed | 0043 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
