@@ -167,8 +167,8 @@ export function registerMemoryPressure(on: On, monitor: Monitor) {
   })
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
-    // 서브에이전트의 도구 결과는 리드 모델이 읽지 않는다.
-    if (e.agentId !== undefined || result.deny !== undefined) return result
+    // 서브에이전트의 도구 결과와 플러그인이 직접 호출한 결과의 context 는 리드 모델이 읽지 않으니 다음 기회로 남긴다.
+    if (next.origin.plugin !== 'engine' || e.agentId !== undefined || result.deny !== undefined) return result
     const notice = takeNotice(monitor)
     return notice ? { ...result, context: [...(result.context ?? []), notice] } : result
   })

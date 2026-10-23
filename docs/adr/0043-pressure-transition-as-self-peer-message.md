@@ -6,7 +6,7 @@ date: 2026-10-21
 deciders: [tellang]
 supersedes: [0042]
 superseded_by: null
-relates: [0040, 0041]
+relates: [0040, 0041, 0042, 0047]
 pr: null
 ---
 
