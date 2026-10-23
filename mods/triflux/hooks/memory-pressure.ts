@@ -38,7 +38,7 @@ function isMacOS($: EngineInterface, monitor: Monitor) {
 }
 
 // $.prompt.submit 은 세션이 쉴 때만 턴을 연다. 피어 메시지는 도는 턴 안에도 닿으므로 먼저 자기 세션에 보낸다.
-async function notifyLead($: EngineInterface, text: string, isActive: () => boolean) {
+export async function notifyLead($: EngineInterface, text: string, isActive: () => boolean) {
   let reason: string
   try {
     const sessionId = await $.session.id()
