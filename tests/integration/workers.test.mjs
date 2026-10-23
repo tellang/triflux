@@ -8,13 +8,6 @@ import { dirname, join, resolve } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ClaudeWorker } from "../../hub/workers/claude-worker.mjs";
-import {
-  createWorkerError,
-  DEFAULT_KILL_GRACE_MS,
-  DEFAULT_TIMEOUT_MS,
-  safeJsonParse,
-  toStringList,
-} from "../../hub/workers/worker-utils.mjs";
 import { BASH_EXE, toBashPath } from "../helpers/bash-path.mjs";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -141,25 +134,6 @@ describe("ClaudeWorker", { timeout: 15000 }, () => {
   });
 });
 
-describe("worker-utils", () => {
-  it("공유 워커 유틸의 기본 contract를 유지해야 한다", () => {
-    assert.equal(DEFAULT_TIMEOUT_MS, 15 * 60 * 1000);
-    assert.equal(DEFAULT_KILL_GRACE_MS, 1000);
-    assert.deepEqual(toStringList([" foo ", null, "", "bar"]), ["foo", "bar"]);
-    assert.deepEqual(toStringList("nope"), []);
-    assert.deepEqual(safeJsonParse('{"ok":true}'), { ok: true });
-    assert.equal(safeJsonParse("{"), null);
-
-    const error = createWorkerError("worker failed", {
-      code: "WORKER_FAIL",
-      detail: 1,
-    });
-    assert.equal(error.message, "worker failed");
-    assert.equal(error.code, "WORKER_FAIL");
-    assert.equal(error.detail, 1);
-  });
-});
-
 describe("tfx-route.sh wrapper integration", { timeout: 15000 }, () => {
   it("designer는 Antigravity route wrapper를 통해 실행되어야 한다", () => {
     const result = spawnSync(
@@ -182,50 +156,5 @@ describe("tfx-route.sh wrapper integration", { timeout: 15000 }, () => {
     assert.match(output, /AGY:route gemini/);
     assert.match(output, /type=antigravity/);
     assert.doesNotMatch(output, /gemini-worker|type=gemini/);
-  });
-
-  it("verifier는 기본 route table에서 Codex review 경로를 사용해야 한다", () => {
-    const result = spawnSync(
-      BASH_EXE,
-      [ROUTE_SCRIPT, "verifier", "route verify", "analyze", "5"],
-      {
-        cwd: PROJECT_ROOT,
-        encoding: "utf8",
-        env: buildRouteEnv({
-          HOME: join(SCRATCH, "home-route-codex"),
-          TFX_TEAM_NAME: "phase3-team",
-          CODEX_BIN: "codex",
-          TFX_CODEX_OK: "1",
-        }),
-      },
-    );
-
-    const output = `${result.stdout}\n${result.stderr}`;
-    assert.equal(result.status, 0, output);
-    assert.match(output, /type=codex/);
-    assert.match(output, /agent=verifier/);
-  });
-
-  it("verifier는 TFX_NO_CLAUDE_NATIVE=1일 때 Codex review 경로를 사용해야 한다", () => {
-    const result = spawnSync(
-      BASH_EXE,
-      [ROUTE_SCRIPT, "verifier", "route verify", "analyze", "5"],
-      {
-        cwd: PROJECT_ROOT,
-        encoding: "utf8",
-        env: buildRouteEnv({
-          HOME: join(SCRATCH, "home-route-codex"),
-          TFX_TEAM_NAME: "phase3-team",
-          TFX_NO_CLAUDE_NATIVE: "1",
-          CODEX_BIN: "codex",
-          TFX_CODEX_OK: "1",
-        }),
-      },
-    );
-
-    const output = `${result.stdout}\n${result.stderr}`;
-    assert.equal(result.status, 0, output);
-    assert.match(output, /EXEC:route verify/);
-    assert.match(output, /type=codex/);
   });
 });

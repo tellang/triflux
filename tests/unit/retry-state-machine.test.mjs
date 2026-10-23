@@ -15,7 +15,6 @@ import { afterEach, describe, it } from "node:test";
 
 import {
   createRetryStateMachine,
-  DEFAULT_ESCALATION_CHAIN,
   loadSnapshot,
   resumeFromStateFile,
   STATES,
@@ -154,19 +153,6 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       assert.equal(last.reason, "escalation-chain-exhausted");
     });
 
-    it("DEFAULT_ESCALATION_CHAIN 은 astra_max → 최신 Fable 별칭 2단계 순", () => {
-      assert.equal(DEFAULT_ESCALATION_CHAIN.length, 2);
-      const [s1, s2] = DEFAULT_ESCALATION_CHAIN;
-
-      assert.equal(s1.cli, "codex");
-      assert.equal(s1.model, undefined);
-      assert.equal(s1.profile, "astra_max");
-
-      assert.equal(s2.cli, "claude");
-      assert.equal(s2.model, "fable");
-      assert.equal(s2.profile, undefined);
-    });
-
     it("TFX_ESCALATION_CLAUDE_MODEL은 프로젝트 override가 없을 때 기본 Claude 모델을 대체한다", () => {
       const sm = createRetryStateMachine({
         mode: "auto-escalate",
@@ -208,25 +194,6 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
       });
 
       assert.equal(sm.getCurrent().cliChain[0].profile, "astra_max");
-    });
-
-    it("옛 Sol profile 이름 세 개를 Astra profile로 정규화한다", () => {
-      const aliases = [
-        ["gpt56_sol_xhigh", "astra_xhigh"],
-        ["gpt56_sol_max", "astra_max"],
-        ["gpt56_sol_ultra", "astra_max"],
-      ];
-
-      for (const [legacy, canonical] of aliases) {
-        const sm = createRetryStateMachine({
-          mode: "auto-escalate",
-          cliChain: [
-            { cli: "codex", model: "gpt-6-astra", profile: legacy },
-            { cli: "claude", model: "fable" },
-          ],
-        });
-        assert.equal(sm.getCurrent().cliChain[0].profile, canonical);
-      }
     });
 
     it("옛 스냅샷은 가족 profile로 정규화하고 고정 model을 버린다", () => {

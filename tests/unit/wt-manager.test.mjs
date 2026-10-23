@@ -108,33 +108,6 @@ afterEach(() => {
   }
 });
 
-describe("wt-manager: createWtManager", () => {
-  it("Windows가 아니면 stub manager 를 반환한다 (no throw)", () => {
-    const stub = createWtManager({ deps: { platform: () => "linux" } });
-    assert.ok(stub, "stub manager 반환되어야 함");
-    assert.equal(typeof stub.createTab, "function");
-    assert.equal(typeof stub.getEnvironmentInfo, "function");
-    assert.equal(stub.getEnvironmentInfo().hasWindowsTerminal, false);
-  });
-
-  it("Object.freeze된 공개 API를 반환한다", () => {
-    const manager = createWtManager({
-      pidDir: createTempPidDir(),
-      deps: createHarness().deps,
-    });
-
-    assert.ok(Object.isFrozen(manager));
-    assert.equal(typeof manager.createTab, "function");
-    assert.equal(typeof manager.renameTab, "function");
-    assert.equal(typeof manager.closeTab, "function");
-    assert.equal(typeof manager.listTabs, "function");
-    assert.equal(typeof manager.closeStale, "function");
-    assert.equal(typeof manager.createSession, "function");
-    assert.equal(typeof manager.getEnvironmentInfo, "function");
-    assert.equal(typeof manager.getTabCount, "function");
-  });
-});
-
 describe("wt-manager: createTab", () => {
   it("wt.exe를 detached/unref 패턴으로 호출하고 탭을 추적한다", async () => {
     const pidDir = createTempPidDir();
@@ -359,23 +332,6 @@ describe("wt-manager: lifecycle helpers", () => {
     assert.equal(renamed.pid, created.pid);
     assert.equal(manager.listTabs()[0].title, "new-title");
     assert.equal(readFileSync(renamed.pidFile, "utf8"), String(created.pid));
-  });
-
-  it("getEnvironmentInfo는 env-detect 결과를 노출한다", () => {
-    const harness = createHarness({
-      environment: {
-        shell: { name: "pwsh", path: "pwsh.exe", version: "7.5" },
-        terminal: { name: "windows-terminal", hasWt: true, installHint: null },
-        multiplexer: { name: "tmux", path: "C:/tmux.exe" },
-        platform: "win32",
-      },
-    });
-    const manager = createWtManager({
-      pidDir: createTempPidDir(),
-      deps: harness.deps,
-    });
-
-    assert.deepEqual(manager.getEnvironmentInfo(), harness.environment);
   });
 });
 

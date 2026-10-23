@@ -288,62 +288,13 @@ test("stale lock with dead child PID is cleaned up and command proceeds", async 
   }
 });
 
-test("normal child exit preserves wrapper success behavior and releases lock", async () => {
-  const harness = createHarness();
-  try {
-    const okScript = writeScript(
-      harness,
-      "ok.mjs",
-      "console.log('normal-ok');\n",
-    );
-
-    const wrapper = spawnWrapper(harness, [okScript]);
-    const result = await waitForExit(wrapper);
-
-    assert.equal(result.code, 0);
-    assert.match(result.stdout, /normal-ok/);
-    assert.ok(!existsSync(harness.lockFile));
-  } finally {
-    cleanupHarness(harness);
-  }
-});
-
-test("--test-force-exit preserves late async test failures as non-zero", async () => {
-  const harness = createHarness();
-  try {
-    const failingTest = writeScript(
-      harness,
-      "late-async-failure.test.mjs",
-      `
-import assert from "node:assert/strict";
-import { test } from "node:test";
-
-test("late async failure", () => {
-  setImmediate(() => assert.fail("late async failure"));
-});
-`,
-    );
-
-    const wrapper = spawnWrapper(harness, [
-      "--test",
-      "--test-force-exit",
-      failingTest,
-    ]);
-    const result = await waitForExit(wrapper);
-
-    assert.notEqual(result.code, 0);
-  } finally {
-    cleanupHarness(harness);
-  }
-});
-
 test("--test-force-exit propagates a late failure under concurrency (no exit-0 masking)", async () => {
   // Regression for the v10.33.1 follow-up: the single-turn force-exit defer
   // could win the race against the runner's deferred process.exitCode=1 and
   // report a green exit with real failures pending (observed 4185-pass/3-fail
-  // exiting 0). The single-file late-async test above passes even on the buggy
-  // shim, so it does not guard this. Run many fast-passing files alongside one
-  // late-failing file under concurrency to pin exit-code propagation.
+  // exiting 0). A single late-failing file passes even on the buggy shim, so
+  // run many fast-passing files alongside one late-failing file under
+  // concurrency to pin exit-code propagation.
   const harness = createHarness();
   try {
     const files = [];

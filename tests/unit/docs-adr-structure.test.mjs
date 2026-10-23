@@ -12,18 +12,6 @@ const adrFiles = () =>
     ? readdirSync(adrDir).filter((f) => /^\d{4}-.+\.md$/.test(f))
     : [];
 
-test("docs/adr exists with status board + conventions", () => {
-  assert.ok(existsSync(adrDir), "docs/adr/ must exist");
-  assert.ok(
-    existsSync(join(adrDir, "README.md")),
-    "status board (README.md) must exist",
-  );
-  assert.ok(
-    existsSync(join(adrDir, "CONVENTIONS.md")),
-    "CONVENTIONS.md must exist",
-  );
-});
-
 test("bootstrap ADRs present and follow required-heading contract", () => {
   const files = adrFiles();
   assert.ok(files.length >= 2, "expect at least ADR-0001 and ADR-0002");

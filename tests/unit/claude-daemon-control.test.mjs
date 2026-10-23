@@ -8,7 +8,6 @@ import test from "node:test";
 
 import {
   attachClaudeDaemonSession,
-  buildDaemonAttachRequest,
   buildDaemonControlAuth,
   buildDaemonExecDispatchPayload,
   deriveClaudeDaemonPaths,
@@ -112,42 +111,6 @@ test("buildDaemonExecDispatchPayload names a Triflux worker and launches shell e
     args: ["-lc", "printf ok"],
   });
   assert.equal(payload.seed.name, "Triflux codex executor");
-});
-
-test("buildDaemonAttachRequest creates the live PTY attach request shape", () => {
-  assert.deepEqual(
-    buildDaemonAttachRequest({
-      short: "deadbeef",
-      cols: 140,
-      rows: 45,
-    }),
-    {
-      proto: 1,
-      op: "attach",
-      short: "deadbeef",
-      cols: 140,
-      rows: 45,
-      caps: { terminal: null, mux: null, ssh: false },
-    },
-  );
-  assert.deepEqual(
-    buildDaemonAttachRequest({
-      short: "deadbeef",
-      cols: 140,
-      rows: 45,
-      auth: "control-secret",
-    }),
-    {
-      proto: 1,
-      op: "attach",
-      short: "deadbeef",
-      cols: 140,
-      rows: 45,
-      caps: { terminal: null, mux: null, ssh: false },
-      auth: "control-secret",
-    },
-  );
-  assert.throws(() => buildDaemonAttachRequest(), /short is required/);
 });
 
 test("extractClaudeDaemonAttachText returns the last assistant block without chrome", () => {

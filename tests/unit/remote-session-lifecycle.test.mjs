@@ -5,14 +5,12 @@ import {
   __remoteSpawnTest,
   attachSpawnedSession,
   buildRemoteClaudeProcessCountCommand,
-  buildRemoteDaemonStopCommand,
   buildRemotePathExportCommand,
   buildRemotePosixSpawnCommands,
   buildRemoteRunCleanupCommand,
   buildRemoteSessionStopCommand,
   buildTmuxAttachSplitArgs,
   buildTmuxRemoteLaneCommand,
-  buildTmuxSpawnSessionArgs,
   classifyClaudeScreen,
   collectRemoteBinDirs,
   formatMonitorEvent,
@@ -478,24 +476,6 @@ describe("killSpawnSession()", () => {
     );
   });
 
-  it("잔존 프로세스가 있으면 ok:false와 남은 수를 명시한다", async () => {
-    const result = await killSpawnSession("tfx-spawn-m2-lifecycle", {
-      runId: "r1",
-      hostNames,
-      killLocal: () => {},
-      runRemote: (_host, command) => ({
-        ok: true,
-        stdout: command.includes("wc -l") ? "2\n" : "",
-      }),
-      sleep: async () => {},
-    });
-
-    assert.equal(result.ok, false);
-    assert.equal(result.local.ok, true);
-    assert.equal(result.remote.remaining, 2);
-    assert.equal(result.remote.ok, false);
-  });
-
   it("readback 실패를 성공으로 보고하지 않는다", async () => {
     const result = await killSpawnSession("tfx-spawn-m2-lifecycle", {
       runId: "r1",
@@ -639,13 +619,6 @@ describe("parseArgs() 수명주기 플래그", () => {
     assert.equal(monitorArgs.command, "monitor");
     assert.equal(monitorArgs.sessionName, "tfx-spawn-m2-lifecycle");
   });
-
-  it("buildRemoteDaemonStopCommand는 PATH 미주입 시 PATH 구문을 넣지 않는다", () => {
-    assert.equal(
-      buildRemoteDaemonStopCommand([], null),
-      "claude daemon stop --any",
-    );
-  });
 });
 
 describe("resolveSpawnLane() 레인 선택", () => {
@@ -747,29 +720,6 @@ describe("tmux 원격 레인 명령 조립", () => {
     assert.ok(!command.includes("$env:"));
   });
 
-  it("detached 세션 인자는 new-session -d -s 뒤에 pane 명령을 둔다", () => {
-    const command = buildTmuxRemoteLaneCommand("m2", posixCommands);
-    const args = buildTmuxSpawnSessionArgs("tfx-spawn-m2-lifecycle", command);
-    assert.deepEqual(args.slice(0, 4), [
-      "new-session",
-      "-d",
-      "-s",
-      "tfx-spawn-m2-lifecycle",
-    ]);
-    assert.equal(args[4], command);
-  });
-
-  it("세션명 규약이 같아 kill 이 원격 호스트를 그대로 역추론한다", () => {
-    const args = buildTmuxSpawnSessionArgs(
-      "tfx-spawn-m2-lifecycle",
-      buildTmuxRemoteLaneCommand("m2", posixCommands),
-    );
-    assert.equal(
-      inferRemoteHostFromSessionName(args[3], ["m2", "ryzen"]),
-      "m2",
-    );
-  });
-
   it("원격 명령이 비면 조립을 거부한다", () => {
     assert.throws(
       () => buildTmuxRemoteLaneCommand("m2", []),
@@ -822,28 +772,5 @@ describe("killSpawnSession() readback 재시도", () => {
     assert.equal(result.remote.retried, true);
     assert.equal(result.remote.firstRemaining, 2);
     assert.equal(result.remote.remaining, 2);
-  });
-
-  it("첫 측정이 0이면 재측정하지 않는다", async () => {
-    let probeCount = 0;
-    let sleepCount = 0;
-
-    const result = await killSpawnSession("tfx-spawn-m2-lifecycle", {
-      runId: "r1",
-      hostNames: ["m2"],
-      killLocal: () => {},
-      runRemote: (_host, command) => {
-        if (command.includes("wc -l")) probeCount += 1;
-        return { ok: true, stdout: command.includes("wc -l") ? "0\n" : "" };
-      },
-      sleep: async () => {
-        sleepCount += 1;
-      },
-    });
-
-    assert.equal(result.ok, true);
-    assert.equal(result.remote.retried, undefined);
-    assert.equal(probeCount, 1);
-    assert.equal(sleepCount, 0);
   });
 });

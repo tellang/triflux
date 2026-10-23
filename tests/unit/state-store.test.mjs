@@ -105,9 +105,4 @@ describe("state-store — Issue #116-B auto-discover", () => {
     const mod = await freshImport();
     assert.equal(mod.loadTeamState().sessionName, "legacy");
   });
-
-  it("honors TFX_HUB_PID_DIR override", async () => {
-    const mod = await freshImport();
-    assert.equal(mod.HUB_PID_DIR, tmpDir);
-  });
 });

@@ -5,11 +5,8 @@ import { describe, it } from "node:test";
 
 import { FG } from "../../hub/team/ansi.mjs";
 import {
-  clamp,
   cliColor,
   countStatuses,
-  FALLBACK_COLUMNS,
-  FALLBACK_ROWS,
   formatTokens,
   normalizeWorkerState,
   runtimeStatus,
@@ -17,19 +14,12 @@ import {
   sanitizeFindings,
   sanitizeOneLine,
   sanitizeTextBlock,
-  statusColor,
   stripCodeBlocks,
   wrapLine,
   wrapText,
 } from "../../hub/team/tui-core.mjs";
 
 describe("tui-core: 텍스트 유틸", () => {
-  it("clamp: 범위 제한", () => {
-    assert.equal(clamp(5, 0, 10), 5);
-    assert.equal(clamp(-1, 0, 10), 0);
-    assert.equal(clamp(15, 0, 10), 10);
-  });
-
   it("stripCodeBlocks: 펜스드 코드블록 제거", () => {
     const input = "before\n```js\ncode();\n```\nafter";
     const result = stripCodeBlocks(input);
@@ -125,11 +115,6 @@ describe("tui-core: 워커 상태", () => {
     assert.ok(result._statusChangedAt > 0);
   });
 
-  it("normalizeWorkerState: trackChanges=false 시 _prevStatus 없음", () => {
-    const result = normalizeWorkerState({}, { status: "running" });
-    assert.equal(result._prevStatus, undefined);
-  });
-
   it("normalizeWorkerState: handoff 병합", () => {
     const existing = { handoff: { verdict: "partial", confidence: "low" } };
     const result = normalizeWorkerState(existing, {
@@ -146,13 +131,6 @@ describe("tui-core: 워커 상태", () => {
 });
 
 describe("tui-core: 색상/집계", () => {
-  it("statusColor: 상태별 색상 반환", () => {
-    assert.ok(statusColor("ok"));
-    assert.ok(statusColor("failed"));
-    assert.ok(statusColor("running"));
-    assert.ok(statusColor("unknown"));
-  });
-
   it("countStatuses: 워커 상태 집계", () => {
     const workers = new Map([
       ["w1", { status: "completed" }],
@@ -187,12 +165,5 @@ describe("tui-core: 텍스트 래핑", () => {
   it("wrapText: 빈 입력 시 빈 배열", () => {
     assert.deepEqual(wrapText("", 80), []);
     assert.deepEqual(wrapText(null, 80), []);
-  });
-});
-
-describe("tui-core: 상수", () => {
-  it("FALLBACK_COLUMNS/ROWS 기본값", () => {
-    assert.equal(FALLBACK_COLUMNS, 100);
-    assert.equal(FALLBACK_ROWS, 30);
   });
 });

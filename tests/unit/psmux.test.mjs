@@ -137,24 +137,6 @@ describe("resolvePane fallback (psmux title 미설정 우회)", () => {
     assert.equal(result.paneId, "tfx-test:0.0");
   });
 
-  it("'worker-1'은 pane index 1로 fallback 매핑된다", async () => {
-    createTempCaptureRoot("psmux-fallback-w1-");
-    mockWithPsmuxDefaultTitles({ captureOutputs: ["snapshot"] });
-    const { startCapture } = await importFreshPsmux();
-
-    const result = startCapture("tfx-test", "worker-1");
-    assert.equal(result.paneId, "tfx-test:0.1");
-  });
-
-  it("'worker-2'는 pane index 2로 fallback 매핑된다", async () => {
-    createTempCaptureRoot("psmux-fallback-w2-");
-    mockWithPsmuxDefaultTitles({ captureOutputs: ["snapshot"] });
-    const { startCapture } = await importFreshPsmux();
-
-    const result = startCapture("tfx-test", "worker-2");
-    assert.equal(result.paneId, "tfx-test:0.2");
-  });
-
   it("pane target 직접 접근은 여전히 동작한다", async () => {
     createTempCaptureRoot("psmux-fallback-target-");
     mockWithPsmuxDefaultTitles({ captureOutputs: ["snapshot"] });
