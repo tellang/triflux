@@ -1,14 +1,21 @@
 import type { AgentInfo, EngineInterface, On, Timer } from 'claude-code'
 
-import { type Holder, leadOf } from './lead-role.ts'
+import { type Holder, leadOf, sessionMark } from './lead-role.ts'
 import { notifyLead } from './memory-pressure.ts'
 
 // 팀원이 쉬기 시작한 때를 알리는 이벤트가 터미널 pane 팀원에는 없어 명단을 2분마다 잰다.
 export const sweepMs = 120_000
 export const noticeMs = 600_000
 
-type Idle = { since: number; noticedAt?: number; isShutdownSent?: boolean }
-export type Sweeper = { timer?: Timer; isSweeping?: boolean; idle: Map<string, Idle> }
+type Idle = { since: number; names: string[]; noticedAt?: number; isShutdownSent?: boolean }
+export type Sweeper = { timer?: Timer; isSweeping?: boolean; idle: Map<string, Idle>; keep: Holder }
+
+const keepPrefix = 'tfx.keep.'
+
+// 리드가 일부러 남겨 둔 팀원 이름. /clear 뒤에는 리드 표지처럼 새 세션 ID 로 옮긴다.
+async function keptNames($: EngineInterface, keep: Holder) {
+  return ((await sessionMark($, keepPrefix, keep)) as string[] | undefined) ?? []
+}
 
 // 터미널 pane 팀원은 id 가 팀 주소(--agent-id 값)이고, pane 이 닫혀도 명단에 idle 로 남는다. 그래서 살아 있는 pane 의 주소를 모은다.
 async function paneAgentIds($: EngineInterface) {
@@ -53,18 +60,20 @@ export async function sweep($: EngineInterface, lead: Holder, sweeper: Sweeper) 
   const panes = await paneAgentIds($)
   const open = (await $.agent.list()).filter(agent => isOpen(agent, panes))
   for (const id of idle.keys()) if (!open.some(agent => agent.id === id)) idle.delete(id)
-  for (const agent of open) if (!idle.has(agent.id)) idle.set(agent.id, { since: now })
+  for (const agent of open) if (!idle.has(agent.id)) idle.set(agent.id, { since: now, names: [agent.name!, agent.teammateId ?? agent.id] })
   const overdue = open.filter(agent => now - idle.get(agent.id)!.since >= noticeMs)
+  const kept = overdue.length ? await keptNames($, sweeper.keep) : []
+  const isKept = (agent: AgentInfo) => kept.includes(agent.name!)
   if (overdue.some(agent => idle.get(agent.id)!.noticedAt === undefined)) {
-    const names = overdue.map(agent => `${agent.name} ${Math.floor((now - idle.get(agent.id)!.since) / 60_000)}분`)
+    const names = overdue.map(agent => `${agent.name} ${Math.floor((now - idle.get(agent.id)!.since) / 60_000)}분${isKept(agent) ? '(유지)' : ''}`)
     for (const agent of overdue) idle.get(agent.id)!.noticedAt ??= now
-    await notifyLead($, `[tfx-lead] 결과를 보내고 쉬는 팀원 ${overdue.length}개가 열려 있다: ${names.join(', ')}. 결과를 받았으면 tfx-lead 3절 "끝난 팀원 닫기"대로 닫는다. 10분 더 열려 있으면 mod 가 팀원에게 종료를 요청한다.`, () => true)
+    await notifyLead($, `[tfx-lead] 결과를 보내고 쉬는 팀원 ${overdue.length}개가 열려 있다: ${names.join(', ')}. 결과를 받았으면 tfx-lead 3절 "끝난 팀원 닫기"대로 닫는다. 10분 더 열려 있으면 mod 가 팀원에게 종료를 요청한다. 남길 팀원은 /tfx-keep <이름>.`, () => true)
   }
   // 알린 뒤 10분이 더 지난 팀원에게만 종료를 요청한다. 거절할 수 있게 강제 종료는 하지 않는다.
   const failures: string[] = []
   for (const agent of overdue) {
     const state = idle.get(agent.id)!
-    if (!agent.teammateId || state.isShutdownSent || now - state.noticedAt! < noticeMs) continue
+    if (!agent.teammateId || isKept(agent) || state.isShutdownSent || now - state.noticedAt! < noticeMs) continue
     state.isShutdownSent = true
     const failure = await shutdown($, agent)
     if (failure) failures.push(failure)
@@ -73,10 +82,11 @@ export async function sweep($: EngineInterface, lead: Holder, sweeper: Sweeper) 
 }
 
 export function registerIdleTeammates(on: On, lead: Holder) {
-  const sweeper: Sweeper = { idle: new Map() }
+  const sweeper: Sweeper = { idle: new Map(), keep: {} }
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     sweeper.timer?.cancel()
     sweeper.idle.clear()
+    await $.command.register({ name: 'tfx-keep', description: '끝난 팀원 종료 요청에서 뺄 팀원: <이름> [off]', argumentHint: '<이름> [off]' })
     sweeper.timer = $.clock.every(sweepMs, async () => {
       if (sweeper.isSweeping) return
       sweeper.isSweeping = true
@@ -88,6 +98,30 @@ export function registerIdleTeammates(on: On, lead: Holder) {
         sweeper.isSweeping = false
       }
     })
+    return next(e)
+  })
+  on('session.end', { reason: ['prompt_input_exit', 'resume', 'logout', 'other'] }, async ($, e, next) => {
+    await $.store.delete(keepPrefix + e.sessionId)
+    if (sweeper.keep.sessionId && sweeper.keep.sessionId !== e.sessionId) await $.store.delete(keepPrefix + sweeper.keep.sessionId)
+    sweeper.keep.sessionId = undefined
+    return next(e)
+  })
+  on('command.run', { command: 'tfx-keep' }, async ($, e) => {
+    const [name, off] = e.args.trim().split(/\s+/)
+    const kept = await keptNames($, sweeper.keep)
+    if (!name) return { text: `유지 팀원: ${kept.length ? kept.join(', ') : '없음'}. 사용법: /tfx-keep <이름> [off]` }
+    const next = off === 'off' ? kept.filter(entry => entry !== name) : [...new Set([...kept, name])]
+    const sessionId = await $.session.id()
+    await $.store.set(keepPrefix + sessionId, next)
+    sweeper.keep.sessionId = sessionId
+    return { text: `유지 팀원: ${next.length ? next.join(', ') : '없음'}` }
+  })
+  // 리드가 직접 다시 일을 시키면 2분 주기를 기다리지 않고 그 팀원의 유휴 시계를 지운다.
+  // mod 자신의 shutdown_request 는 plugin 출처라 여기서 빠진다.
+  on('tool.call', { tool: 'SendMessage' }, async ($, e, next) => {
+    if (!e.agentId && next.origin.plugin === 'engine' && typeof e.to === 'string') {
+      for (const [id, state] of sweeper.idle) if (state.names.includes(e.to)) sweeper.idle.delete(id)
+    }
     return next(e)
   })
 }

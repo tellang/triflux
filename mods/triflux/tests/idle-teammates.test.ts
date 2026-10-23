@@ -1,6 +1,7 @@
 import type { AgentInfo, On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
+const keep = { command: 'tfx-keep', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 const start = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 const teammate: AgentInfo = { id: 'w1@team', teammateId: 'w1@team', name: 'w1', description: '리뷰', type: 'teammate', status: 'idle' }
 
@@ -21,7 +22,7 @@ function fixture(on: On, isLead: boolean) {
     return { value: { exitCode: 0, stdout: e.argv[0] === 'tfx-peer' ? '{"status":"written"}' : 'Darwin\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   const sends: unknown[] = []
-  on('tool.call', { tool: 'SendMessage' }, (_, e) => { sends.push({ to: e.to, message: e.message }); return { result: 'ok' } })
+  on('tool.call', { tool: 'SendMessage' }, (_, e) => { if (typeof e.message !== 'string') sends.push({ to: e.to, message: e.message }); return { result: 'ok' } })
   return { clock, peers, sends }
 }
 
@@ -48,4 +49,25 @@ test('리드가 아닌 세션은 팀원을 알리거나 종료하지 않는다',
   await f.clock.advance(3_600_000)
   expect(f.peers).toEqual([])
   expect(f.sends).toEqual([])
+})
+
+test('리드가 팀원에게 다시 보내면 유휴 시계를 처음부터 잰다', async ($, on) => {
+  const f = fixture(on, true)
+  await $.session.start(start)
+  await f.clock.advance(600_000)
+  await $.tool.call({ tool: 'SendMessage', to: 'w1', message: '리뷰 지적 반영' })
+  await f.clock.advance(120_000)
+  expect(f.peers).toEqual([])
+  await f.clock.advance(600_000)
+  expect(f.peers).toHaveLength(1)
+})
+
+test('/tfx-keep 으로 남긴 팀원은 알림에 유지로 표시하고 종료를 요청하지 않는다', async ($, on) => {
+  const f = fixture(on, true)
+  await $.session.start(start)
+  await $.command.run({ ...keep, args: 'w1' })
+  await f.clock.advance(1_800_000)
+  expect(f.peers[0]).toContain('w1 10분(유지)')
+  expect(f.sends).toEqual([])
+  expect((await $.command.run({ ...keep, args: 'w1 off' })).text).toBe('유지 팀원: 없음')
 })

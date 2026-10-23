@@ -6,11 +6,21 @@ export const reportLimit = 4000
 const headLength = 800
 const pathLimit = 20
 
-// 절대 경로, ~/ 경로, 확장자가 있는 상대 경로. 앞 글자 검사로 URL 안의 경로는 뺀다.
-const pathPattern = /(?<![\p{L}\p{N}_.:/~-])(?:~?\/[\p{L}\p{N}_.@+-]+(?:\/[\p{L}\p{N}_.@+-]+)+|[\p{L}\p{N}_.-]+(?:\/[\p{L}\p{N}_.@+-]+)+\.[\p{L}\p{N}]+)/gu
+// /, ./, ~/ 로 시작하는 낱말만 후보로 본다. 버전 문자열(10.82.1/10.82.3)이나 낱말 사이 빗금(Codex/agy)은 여기서 빠진다.
+const candidatePattern = /(?<![^\s'"`(\[<])(?:~\/|\.\/|\/)[^\s'"`<>()\[\]{},]+/gu
+// 경로 끝에 붙은 문장부호와 한글 조사는 떼고 판정한다.
+const trailing = /(?:[.,;:!?)]|을|를|은|는|이|가|에|에서|의|로|으로|와|과|도)+$/u
+const knownDir = /(?:^|\/)(?:\.omc|docs|scripts|tests|hud|mods|bin|packages)(?:\/|$)/
+const extension = /\/[^/]*[^/.]\.[A-Za-z0-9]{1,8}$/
 
 export function filePaths(text: string) {
-  return [...new Set(Array.from(text.matchAll(pathPattern), match => match[0].replace(/\.+$/, '')))]
+  const paths = new Set<string>()
+  for (const [candidate] of text.matchAll(candidatePattern)) {
+    const path = candidate.replace(trailing, '')
+    if (/^[~./\d]+$/.test(path)) continue
+    if (extension.test(path) || knownDir.test(path)) paths.add(path)
+  }
+  return [...paths]
 }
 
 type Shortened = { kind: 'keep' } | { kind: 'warn'; total: number } | { kind: 'cut'; text: string }

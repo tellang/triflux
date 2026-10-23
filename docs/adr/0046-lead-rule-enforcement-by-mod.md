@@ -7,7 +7,7 @@ deciders: [tellang]
 supersedes: []
 superseded_by: null
 relates: [0023, 0043, 0044]
-pr: null
+pr: "#830"
 ---
 
 # ADR-0046: 지켜지지 않는 리드 규칙은 triflux mod 훅으로 강제한다
@@ -24,6 +24,9 @@ tfx-lead 스킬에는 "결과를 받은 팀원은 바로 닫는다" 규칙이 �
 - 이번에 구현하는 것은 두 가지다.
   - 보고 크기 상한 4000자. `session.receive`(origin `peer`, `peer-send-message`)로 들어오는 피어 메시지와, `session.append` 로 리드 메인 대화에 쌓이는 서브에이전트 결과(origin 이 Agent 도구 결과이거나 `task-notification`)를 본다. 넘으면 앞 800자와 본문의 파일 경로 목록(최대 20개)만 남기고 "원문 <N>자, 결과 파일 참조" 줄을 붙인다. 경로가 하나도 없으면 원문을 잃으므로 자르지 않고 경고 토스트만 띄운다. Agent 결과의 800자 이하 블록(하네스가 붙이는 agentId, usage)은 그대로 둔다. 요약 모델 호출은 하지 않는다.
   - 끝난 팀원 정리. 쉬기 시작한 팀원을 알리는 이벤트는 터미널 pane 팀원에게 없다(`turn.complete` 가 pane 팀원에는 오지 않는다). 그래서 2분마다 `$.agent.list()` 를 재 이름 있는 `idle` 에이전트(리드 메인 대화가 띄운 것)의 유휴 시작 시각을 기록한다. pane 팀원은 pane 이 닫혀도 명단에 `idle` 로 남으므로, 리드가 tmux 안이면 `tmux list-panes -a` 의 `--agent-id` 값으로 살아 있는 pane 만 센다. 10분 넘게 쉰 팀원이 생기면 리드 자기 세션에 피어 메시지(`tfx-peer self`, 실패하면 `prompt.submit`, ADR-0043 경로)로 "열린 팀원 N개: 이름 유휴 분" 을 보낸다. 알린 뒤 10분이 더 지나도 열려 있으면 팀 주소가 있는 팀원에게 `$.tool.call` 로 SendMessage `shutdown_request` 를 한 번 보낸다. 팀원이 거절할 수 있고, mod 는 pane 을 직접 닫지 않는다. 요청이 실패하면 리드에게 알린다.
+  - 리드 메인 대화의 모델이 SendMessage 를 그 팀원 이름이나 팀 주소로 보내면(`tool.call`, `next.origin.plugin === 'engine'`) 유휴 시계를 바로 지운다. 2분 주기 사이에 다시 일하고 끝난 팀원이 처음 시각으로 종료 요청을 받지 않게 한다. mod 자신의 shutdown_request 는 plugin 출처라 리셋하지 않는다.
+  - 리드는 `/tfx-keep <이름>` 으로 일부러 남길 팀원을 표시한다. `$.store` 의 `tfx.keep.<세션 ID>` 에 두고 `/clear` 뒤에는 리드 표지처럼 새 ID 로 옮긴다. 표시한 팀원은 알림에 "(유지)" 로 나오고 종료 요청에서 빠진다.
+  - 파일 경로는 `/`, `./`, `~/` 로 시작하고 확장자나 알려진 디렉터리(.omc, docs, scripts, tests, hud, mods, bin, packages)를 담은 것만 센다. 숫자와 점뿐인 것(버전 문자열)은 빼고, 끝에 붙은 한글 조사와 문장부호는 떼고 판정한다.
 - 나머지 강제 후보는 아래 표로 남기고 구현하지 않는다.
 
 | 규칙(tfx-lead 절) | 훅 | 판정 신호 | 강제 방식 | 상태 |

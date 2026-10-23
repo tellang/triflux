@@ -156,6 +156,7 @@ tmux list-panes -s -t "$TMUX_PANE" -F '#{pane_id} #{pane_current_command} #{pane
 5. 닫은 뒤 같은 명령으로 그 pane 이 사라졌는지 본다.
 
 리드 세션의 triflux mod 가 2분마다 팀원 명단을 잰다. 이름 있는 팀원이 10분 넘게 쉬면 "열린 팀원 N개" 피어 메시지를 리드에게 보내고, 그 뒤 10분이 더 지나도 열려 있으면 그 팀원에게 shutdown_request 를 보낸다. pane 을 직접 닫지는 않으므로 승인한 뒤에도 남은 pane 은 위 3, 4단계로 닫는다.
+리드가 다시 SendMessage 를 보낸 팀원은 유휴 시계가 처음부터 다시 간다. 리뷰를 기다리는 작성자처럼 일부러 남길 팀원은 `/tfx-keep <이름>` 으로 표시한다. 알림에는 "(유지)" 로 나오고 종료 요청에서 빠진다. 풀 때는 `/tfx-keep <이름> off`.
 
 ### 전담 워커 재사용
 
