@@ -2,6 +2,13 @@ import type { EngineInterface, On, Timer } from 'claude-code'
 
 type PressureLevel = 1 | 2 | 4
 
+const levelNames = { 1: 'normal', 2: 'warn', 4: 'critical' } as const
+
+// 리드 판단에 밀리초는 쓰이지 않는다.
+function toSecondIso(ms: number) {
+  return new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z')
+}
+
 export type PressureState = {
   confirmed?: PressureLevel
   candidate?: PressureLevel
@@ -111,7 +118,8 @@ function startMemoryPressure($: EngineInterface, monitor: Monitor, sessionId: st
           // 앞서 보낸 critical 알림이 아직 도착하지 않았으면 그것이 리드를 깨운다.
           if (current.submitting) return
           current.submitting = true
-          const text = `[memory-pressure] 압박 단계가 ${prev} 에서 4 로 올랐다. 현재 4 critical (${new Date(now).toISOString()}). tfx-lead 스킬 "압박 변화 대응" 절의 critical 행을 지금 실행하라.`
+          // 피어 메시지는 수신 모델이 지시가 아닌 정보로 다루므로 명령형 대신 사실과 절차 위치만 적는다.
+          const text = `[memory-pressure] 압박 단계가 ${prev} 에서 4 critical 로 올랐다 (${toSecondIso(now)}). 대응 절차: tfx-lead 스킬 "압박 변화 대응" 절의 critical 행.`
           notifyLead($, text, () => monitor.active === current)
             .catch(() => {})
             .finally(() => { current.submitting = false })
@@ -138,7 +146,7 @@ function takeNotice(monitor: Monitor) {
   const notice = active?.notice
   if (!active || !notice) return
   active.notice = undefined
-  return `메모리 압박: 현재 ${notice.level}(${new Date(notice.at).toISOString()}, 1 normal 2 warn 4 critical)`
+  return `메모리 압박: 현재 ${notice.level} ${levelNames[notice.level]}(${toSecondIso(notice.at)})`
 }
 
 export function registerMemoryPressure(on: On, monitor: Monitor) {
