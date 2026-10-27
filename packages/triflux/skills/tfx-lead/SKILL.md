@@ -190,7 +190,7 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 `/tfx-lead <역할>`이 macOS 대화형 세션에서 압박 감시를 켠다. 수동으로 켜고 끄고 볼 때는 `/tfx-pressure on|off|status`를 쓴다. 켜지면 triflux mod 가 2초마다 `kern.memorystatus_vm_pressure_level`을 읽어 두 표본 연속으로 단계 전이를 확정한다. 상주 프로세스와 설치는 없다. 리드를 넘기거나 끝낼 때 `/tfx-pressure off`.
 
 - 4 로 오르는 전이만 리드 자기 세션에 피어 메시지로 넣어 깨운다. 긴 턴 도중에도 바로 온다. 피어 전송이 실패하면 본문 끝에 그 사실이 한 줄 붙고, 턴이 끝난 뒤 온다([ADR-0043](../../docs/adr/0043-pressure-transition-as-self-peer-message.md)).
-- 나머지 전이는 턴을 열지 않는다. 리드의 다음 요청(새 입력이나 도구 결과)에 `메모리 압박: 현재 <단계>(<시각>, 1 normal 2 warn 4 critical)` 한 줄로 보인다. 그 사이 여러 번 바뀌었으면 마지막 단계 하나다. 이 줄에는 답하지 않는다([ADR-0047](../../docs/adr/0047-pressure-notice-without-turn.md)).
+- 나머지 전이는 턴을 열지 않는다. 리드의 다음 요청(새 입력이나 도구 결과)에 `메모리 압박: 현재 <단계> <이름>(<시각>)` 한 줄로 보인다. 그 사이 여러 번 바뀌었으면 마지막 단계 하나다. 이 줄에는 답하지 않는다([ADR-0047](../../docs/adr/0047-pressure-notice-without-turn.md)).
 
 받은 즉시 할 일은 다음과 같다. 실행 중인 세션은 다른 기기로 옮길 수 없다는 전제다. 한 줄로 본 단계는 다음 디스패치부터 그 행을 따르고, 하던 일은 이어 간다.
 

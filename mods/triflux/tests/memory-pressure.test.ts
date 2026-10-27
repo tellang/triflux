@@ -92,7 +92,7 @@ test('피어 전송이 되면 자기 세션 ID 로 보내고 prompt.submit 을 �
   expect(f.peers.length).toBe(1)
   const [command, sub, flag, sessionId, , message] = f.peers[0]
   expect([command, sub, flag, sessionId]).toEqual(['tfx-peer', 'self', '--session', 'session-a'])
-  expect(message).toContain('[memory-pressure] 압박 단계가 1 에서 4 로 올랐다. 현재 4 critical (1970-01-01T00:00:06.000Z)')
+  expect(message).toContain('[memory-pressure] 압박 단계가 1 에서 4 critical 로 올랐다 (1970-01-01T00:00:06Z). 대응 절차: tfx-lead 스킬 "압박 변화 대응" 절의 critical 행.')
   expect(message).not.toContain('/tfx-pressure')
 })
 
@@ -108,7 +108,7 @@ for (const [label, peer] of [
     await confirmTransition($, f, '4')
     expect(f.peers.length).toBe(1)
     expect(f.prompts.length).toBe(1)
-    expect(f.prompts[0]).toContain('[memory-pressure] 압박 단계가 1 에서 4 로 올랐다')
+    expect(f.prompts[0]).toContain('[memory-pressure] 압박 단계가 1 에서 4 critical 로 올랐다')
     expect(f.prompts[0]).toContain('피어 메시지 전송이 실패해')
     const [, reason] = f.prompts[0].split('\n')
     expect(reason).toContain('deny' in peer ? 'timeoutMs exceeded' : peer.exitCode === 1 ? 'Claude peer socket missing' : '(unknown, peer write outcome unknown)')
@@ -158,7 +158,7 @@ for (const registered of [false, true]) {
     await f.clock.advance(2000)
     expect(f.prompts.length).toBe(1)
     expect(f.prompts[0]).toContain('1 에서 4')
-    expect(f.prompts[0]).toContain('1970-01-01T00:00:06.000Z')
+    expect(f.prompts[0]).toContain('1970-01-01T00:00:06Z')
     await f.clock.advance(2000)
     expect(f.prompts.length).toBe(1)
     const status = await $.command.run({ ...pressure, args: 'status' })
@@ -214,7 +214,7 @@ test('1 에서 2 전이는 턴을 열지 않고 다음 요청에 한 줄로 한 
   expect(f.prompts).toEqual([])
   await $.prompt.submit({ text: '다음 요청' })
   await $.prompt.submit({ text: '그다음 요청' })
-  expect(f.contexts).toEqual([['메모리 압박: 현재 2(1970-01-01T00:00:06.000Z, 1 normal 2 warn 4 critical)'], undefined])
+  expect(f.contexts).toEqual([['메모리 압박: 현재 2 warn(1970-01-01T00:00:06Z)'], undefined])
 })
 
 test('2 에서 4 전이는 피어 메시지로 깨운다', async ($, on) => {
@@ -223,7 +223,7 @@ test('2 에서 4 전이는 피어 메시지로 깨운다', async ($, on) => {
   f.data.peer = { exitCode: 0, stdout: '{"status":"written","msgId":"m"}\n', stderr: '' }
   await confirmTransition($, f, '4')
   expect(f.peers.length).toBe(1)
-  expect(f.peers[0][5]).toContain('2 에서 4 로 올랐다')
+  expect(f.peers[0][5]).toContain('2 에서 4 critical 로 올랐다')
   expect(f.prompts).toEqual([])
 })
 
@@ -234,7 +234,7 @@ test('1, 2, 1 로 오가면 리드 도구 결과에 마지막 상태 하나만 �
   await f.clock.advance(4000)
   expect(f.peers).toEqual([])
   expect((await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'sub' } as never)).context).toBeUndefined()
-  expect((await $.tool.call({ tool: 'Bash', command: 'ls' } as never)).context).toEqual(['메모리 압박: 현재 1(1970-01-01T00:00:10.000Z, 1 normal 2 warn 4 critical)'])
+  expect((await $.tool.call({ tool: 'Bash', command: 'ls' } as never)).context).toEqual(['메모리 압박: 현재 1 normal(1970-01-01T00:00:10Z)'])
   expect((await $.tool.call({ tool: 'Bash', command: 'ls' } as never)).context).toBeUndefined()
 })
 
