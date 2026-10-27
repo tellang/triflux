@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.84.2] - 2026-10-27
+
+### Fixed
+- live: `tfx-live start --cli agy` 가 새 세션에 시작 직후 `/rename` 을 보내 agy 화면에 매번 `no active conversation` 오류가 남던 문제를 고친다. 즉시 rename 은 재개한 대화(`--resume`, `--resume-last`)에만 보내고, 새 세션은 `@tfx_agy_name` 에 남겨 첫 입력 뒤에 붙인다 (#834)
+
 ## [10.84.1] - 2026-10-27
 
 ### Changed
