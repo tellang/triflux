@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.84.1] - 2026-10-27
+
+### Changed
+- pressure: critical 압박 피어 메시지를 명령형("지금 실행하라") 대신 전이, 시각, 대응 절차 위치(tfx-lead "압박 변화 대응" 절)만 적는 사실형으로 바꾼다. 다음 요청에 붙는 한 줄은 `1 normal 2 warn 4 critical` 범례 대신 `현재 2 warn` 처럼 현재 단계 이름만 쓴다. 두 문구의 시각은 밀리초를 뺀 초 단위 ISO 다 (#832)
+
 ## [10.84.0] - 2026-10-23
 
 ### Added
