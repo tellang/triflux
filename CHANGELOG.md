@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.84.3] - 2026-10-27
+
+### Fixed
+- agy: 관리자 정책으로 터미널 샌드박스가 강제된 agy 에서 `tfx-peer` 실행과 tmux, Claude 소켓 연결이 막혀 워커 보고가 리드에게 가지 않던 문제. agy 어댑터 `tfx-live` 스킬의 호스트 계약에 `tfx-peer` 와 `tfx-live` 는 run_command 의 `BypassSandbox: true` 로 실행한다고 적는다. settings.json 의 `unsandboxed(...)` 허용 규칙은 강제 샌드박스를 풀지 못했다 (#836)
+
 ## [10.84.2] - 2026-10-27
 
 ### Fixed
