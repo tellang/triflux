@@ -3406,7 +3406,9 @@ async function doStart(launchAdapter, opts) {
       }
     }
   }
-  if (name && adapter.cli === "agy" && ready) {
+  // 새 agy 는 첫 입력 전에 대화가 없어 /rename 이 "no active conversation" 으로 실패한다.
+  // 재개한 대화에만 바로 보내고, 나머지는 @tfx_agy_name 으로 첫 입력 뒤에 붙인다.
+  if (name && adapter.cli === "agy" && ready && resumed) {
     try {
       nameApplied = await renameAgyConversation(
         session,

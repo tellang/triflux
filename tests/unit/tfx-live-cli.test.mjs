@@ -2552,6 +2552,55 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
   }
 });
 
+test("새 agy start 는 /rename 을 보내지 않고 이름을 첫 입력 뒤로 미룬다", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-agy-name-"));
+  try {
+    await writeReadyFakeTmux(dir);
+    const logPath = path.join(dir, "tmux-log.jsonl");
+    const result = JSON.parse(
+      await runTfxLive(
+        [
+          "start",
+          "--cli",
+          "agy",
+          "--session",
+          "start-agy",
+          "--ready-timeout",
+          "0.2",
+          "--poll-interval",
+          "1",
+        ],
+        {
+          env: {
+            PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+            TMUX_LOG: logPath,
+            TMUX_STATE: path.join(dir, "tmux-state.json"),
+            TMUX_UPDATE_SCREEN: ">",
+            TMUX_UPDATE_REPEAT: "1",
+          },
+        },
+      ),
+    );
+    const log = await readTmuxLog(logPath);
+
+    assert.equal(result.ready, true);
+    assert.equal(result.nameApplied, false);
+    assert.ok(
+      !log.some((args) => args.some((arg) => arg.startsWith("/rename "))),
+    );
+    assert.ok(
+      log.some(
+        (args) =>
+          args[0] === "set-option" &&
+          args.at(-2) === "@tfx_agy_name" &&
+          args.at(-1) === result.name,
+      ),
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("local start fixes tmux title to the explicit name outside iTerm", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-title-"));
   try {
