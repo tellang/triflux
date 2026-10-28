@@ -104,8 +104,12 @@ test("사람 TTY update는 새 packageRoot의 CLI 자식이 consent를 실행한
   const child = trace.find((entry) => entry.argv?.includes("--from-update"));
   const consent = trace.find((entry) => entry.argv?.includes("--consent-only"));
   const questions = trace.filter((entry) => entry.question);
+  // 리드 실행 명령 질문은 설치된 CLI 수만큼 늘어나므로 동의 질문만 센다.
+  const consentQuestions = questions.filter(
+    (entry) => !/를 켤 때 쓰는 명령/u.test(entry.question),
+  );
   assert.notEqual(parent.pid, child.pid);
-  assert.equal(questions.length, 2);
+  assert.equal(consentQuestions.length, 2);
   assert.notEqual(consent.pid, parent.pid);
   assert.notEqual(consent.pid, child.pid);
   assert.equal(consent.cli, join(cli.pkg, "bin/triflux.mjs"));
