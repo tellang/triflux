@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.85.0] - 2026-10-28
+
+### Added
+- lead: `tfx lead <역할>` 로 tmux 세션(기본 `<폴더>-lead`)에 Claude 리드를 띄우고 `/tfx-lead <역할>` 까지 보낸다. 실행 명령은 `--launcher`, `~/.config/triflux/lead.json` 의 `launcher`, `claude` 순으로 고른다. 예: `{"launcher": "omc launch"}`. 워커는 지금처럼 일반 `claude` 로 뜬다. `tfx-live start` 에 Claude 전용 `--launcher` 를 더했다. `omc launch` 처럼 pane 을 다시 띄우는 실행 명령은 셸을 없애 같은 pane 에서 resume 할 수 없다 (#843)
+
 ## [10.84.5] - 2026-10-28
 
 ### Changed
