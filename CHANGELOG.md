@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.84.4] - 2026-10-28
+
+### Fixed
+- live: `tfx-live start` 로 띄운 agy 같은 Claude 외 세션에서 `claude agents` 행 중계 client 가 백킹 PTY 크기(200x50)로 붙어, `window-size latest` 에서 tmux 창이 그 크기로 바뀌던 문제. 사람이 보는 iTerm 패널에는 창 밖이 점 무늬로 채워졌다. 대화형 중계 attach 에 `-f ignore-size` 를 붙인다 (#838)
+
 ## [10.84.3] - 2026-10-27
 
 ### Fixed
