@@ -204,6 +204,33 @@ function profileValues(args) {
 }
 
 describe("tfx-route retry snapshot profile plumbing", () => {
+  it("가족 파일을 만들 수 없으면 존재하는 결합 프로필을 유지한다", () => {
+    const nodeWrapper = path.join(makeTempDir(), "profile-writer-node");
+    writeExecutable(
+      nodeWrapper,
+      `#!/usr/bin/env node
+const { spawnSync } = require("node:child_process");
+const args = process.argv.slice(2);
+if (args.some(arg => arg.includes("ensureManagedCodexProfiles"))) process.exit(42);
+const result = spawnSync(process.execPath, args, { stdio: "inherit" });
+process.exit(result.status ?? 1);
+`,
+    );
+    const args = runRoute({
+      env: { NODE_BIN: nodeWrapper },
+      profileFiles: {
+        sol_high: 'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "high"\n',
+      },
+    });
+    assert.deepEqual(profileValues(args), ["sol_high"]);
+    assert.ok(args.includes('model_reasoning_effort="high"'));
+    assert.match(fixture.stderr, /가족.*파일.*없.*sol_high/);
+    const missing = runRoute({
+      env: { NODE_BIN: nodeWrapper },
+      expectedStatus: 78,
+    });
+    assert.match(missing.stderr, /프로필.*없/);
+  });
   it("최신 가족 모델의 지원 effort로 낮춘 사실을 stderr에 남긴다", () => {
     const args = runRoute({
       agent: "architect",
@@ -225,7 +252,7 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     });
     assert.deepEqual(profileValues(args), ["astra"]);
     assert.ok(args.includes('model_reasoning_effort="high"'));
-    assert.match(fixture.stderr, /effort.*max.*high.*gpt-7-astra/);
+    assert.match(fixture.stderr, /requested=max.*applied=high.*gpt-7-astra/);
   });
 
   it("최신 모델의 지원 목록에 더 낮은 effort가 없으면 실행 전에 실패한다", () => {
@@ -243,6 +270,7 @@ describe("tfx-route retry snapshot profile plumbing", () => {
       expectedStatus: 78,
     });
     assert.match(result.stderr, /지원.*effort/);
+    assert.doesNotMatch(result.stderr, /\bat .*\.mjs|기존 프로필 유지/);
   });
 
   it("effort 해석기 실패는 경고를 남기고 기존 프로필 실행을 유지한다", () => {
@@ -349,6 +377,7 @@ process.exit(result.status ?? 1);
 
     assert.deepEqual(profileValues(args), ["astra"]);
     assert.ok(!args.some((arg) => arg.startsWith("model=")));
+    assert.ok(args.includes('model_reasoning_effort="max"'));
   });
 
   it("allows ultra only for a top-level deep-executor", () => {
@@ -362,6 +391,7 @@ process.exit(result.status ?? 1);
 
     assert.deepEqual(profileValues(args), ["astra"]);
     assert.ok(!args.some((arg) => arg.startsWith("model=")));
+    assert.ok(args.includes('model_reasoning_effort="ultra"'));
   });
 
   it("downgrades nested ultra to max", () => {
@@ -371,6 +401,7 @@ process.exit(result.status ?? 1);
     });
 
     assert.deepEqual(profileValues(args), ["astra"]);
+    assert.ok(args.includes('model_reasoning_effort="max"'));
   });
 
   it("retry snapshot remains authoritative over the explicit profile override", () => {
@@ -385,6 +416,7 @@ process.exit(result.status ?? 1);
     });
 
     assert.deepEqual(profileValues(args), ["astra"]);
+    assert.ok(args.includes('model_reasoning_effort="max"'));
   });
 
   it("retry snapshot cannot reintroduce ultra inside a nested runtime", () => {
@@ -399,6 +431,7 @@ process.exit(result.status ?? 1);
     });
 
     assert.deepEqual(profileValues(args), ["astra"]);
+    assert.ok(args.includes('model_reasoning_effort="max"'));
   });
 
   it("custom retry 프로필은 ultra를 제한하고 없는 파일도 이름을 보존한다", () => {

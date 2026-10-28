@@ -1312,7 +1312,7 @@ resolve_safe_retry_codex_profile() {
       ;;
   esac
   local effort
-  effort="$(read_codex_profile_effort "$profile")"
+  if ! effort="$(read_codex_profile_effort "$profile")"; then return 78; fi
   case "$effort" in
     ultra) echo "astra_max" ;;
     *) echo "$profile" ;;
@@ -1324,11 +1324,18 @@ read_codex_profile_effort() {
   "$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
     const { resolveCodexProfileConfigValues } = await import(pathToFileURL(process.argv[1]).href);
-    const { effort } = resolveCodexProfileConfigValues(process.argv[2], {
-      codexHome: process.env.CODEX_HOME || process.env.TFX_CODEX_HOME,
-    });
-    process.stdout.write(effort?.toLowerCase() || "");
+    try {
+      const { effort } = resolveCodexProfileConfigValues(process.argv[2], {
+        codexHome: process.env.CODEX_HOME || process.env.TFX_CODEX_HOME,
+      });
+      process.stdout.write(effort?.toLowerCase() || "");
+    } catch (error) {
+      console.error(`[tfx-route] ${error.message}`);
+      process.exit(error.code === "unsupported-effort" ? 78 : 1);
+    }
   ' "$CODEX_PROFILE_MODULE" "$profile" || {
+    local resolver_status=$?
+    [[ "$resolver_status" -ne 78 ]] || return 78
     echo "[tfx-route] 경고: Codex effort 해석 실패, 기존 프로필 유지: $profile" >&2
     return 0
   }
@@ -1336,6 +1343,7 @@ read_codex_profile_effort() {
 
 apply_codex_concrete_effort_guard() {
   [[ "${CLI_TYPE:-}" == "codex" ]] || return 0
+  CODEX_COMPAT_PROFILE=""
 
   local -a args=()
   read -r -a args <<< "$CLI_ARGS"
@@ -1353,7 +1361,7 @@ apply_codex_concrete_effort_guard() {
     allow_ultra=1
   fi
   local effort target_profile=""
-  effort="$(read_codex_profile_effort "$profile")"
+  if ! effort="$(read_codex_profile_effort "$profile")"; then return 78; fi
   case "$profile" in
     astra_max) target_profile="astra_max" ;;
     astra_ultra) target_profile="astra_max" ;;
@@ -1367,7 +1375,9 @@ apply_codex_concrete_effort_guard() {
         --profile=*) args[$i]="--profile=$target_profile" ;;
       esac
     done
-    echo "[tfx-route] final Codex effort guard: ${profile}/${effort:-unknown} -> ${target_profile}" >&2
+    if [[ "$profile" != "$target_profile" ]]; then
+      echo "[tfx-route] Codex ultra policy: ${profile} -> ${target_profile}" >&2
+    fi
     profile="$target_profile"
   fi
   local managed_spec managed_family managed_effort
@@ -1382,7 +1392,7 @@ apply_codex_concrete_effort_guard() {
         codexHome: process.env.CODEX_HOME || process.env.TFX_CODEX_HOME,
       });
       if (resolved.effort !== requested.effort) {
-        console.error(`[tfx-route] Codex effort: ${requested.effort} -> ${resolved.effort}, model=${resolved.model}`);
+        console.error(`[tfx-route] Codex effort: requested=${requested.effort} applied=${resolved.effort} model=${resolved.model}`);
       }
       process.stdout.write([resolved.family, resolved.effort].join("\x1e"));
     } catch (error) {
@@ -1413,6 +1423,7 @@ apply_codex_concrete_effort_guard() {
     done
     args=("${guarded_args[@]}" -c "model_reasoning_effort=\"${managed_effort}\"")
     CLI_FAMILY="$managed_family"; CLI_EFFORT="$managed_effort"
+    CODEX_COMPAT_PROFILE="$profile"
   fi
   CLI_ARGS="${args[*]}"
 }
@@ -2193,6 +2204,22 @@ run_codex_exec() {
   local -a codex_args=()
   read -r -a codex_args <<< "$CLI_ARGS"
   codex_args=("${codex_args[0]}" ${CODEX_CONFIG_FLAGS[@]+"${CODEX_CONFIG_FLAGS[@]}"} "${codex_args[@]:1}")
+  local codex_home
+  codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
+  if [[ -n "${CLI_FAMILY:-}" && ! -f "$codex_home/$CLI_FAMILY.config.toml" && -n "${CODEX_COMPAT_PROFILE:-}" ]]; then
+    if [[ ! -f "$codex_home/$CODEX_COMPAT_PROFILE.config.toml" ]]; then
+      echo "[tfx-route] 오류: 가족과 결합 프로필 파일이 모두 없습니다: $CLI_FAMILY, $CODEX_COMPAT_PROFILE" >&2
+      return 78
+    fi
+    echo "[tfx-route] 경고: 가족 프로필 파일이 없어 결합 프로필 유지: $CLI_FAMILY -> $CODEX_COMPAT_PROFILE" >&2
+    local i
+    for ((i = 0; i < ${#codex_args[@]}; i++)); do
+      case "${codex_args[$i]}" in
+        --profile) codex_args[$((i + 1))]="$CODEX_COMPAT_PROFILE" ;;
+        --profile=*) codex_args[$i]="--profile=$CODEX_COMPAT_PROFILE" ;;
+      esac
+    done
+  fi
 
   _attempt_codex_run() {
     exit_code_local=0
