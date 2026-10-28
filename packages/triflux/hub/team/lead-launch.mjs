@@ -1,44 +1,94 @@
 // hub/team/lead-launch.mjs: `tfx lead <역할>` 로 리드 세션을 띄운다.
-// 리드는 사람이 직접 쓰는 세션이라 실행 명령을 사용자가 정한다(기본 claude).
-// 워커는 tfx-live 가 일반 claude 로 띄우므로 이 설정과 무관하다.
+// 리드는 사람이 직접 쓰는 세션이라 CLI 별 실행 명령을 사용자가 정한다(기본은 CLI 이름).
+// 워커는 tfx-live 가 기본 명령으로 띄우므로 이 설정과 무관하다.
 
 import { execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { modelFamilyPaths } from "../../scripts/lib/model-family-resolver.mjs";
 
 const execFileAsync = promisify(execFile);
-const TFX_LIVE = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "bin",
-  "tfx-live.mjs",
-);
-export const DEFAULT_LAUNCHER = "claude";
+const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const TFX_LIVE = join(PKG_ROOT, "bin", "tfx-live.mjs");
+const LEAD_SKILL = join(PKG_ROOT, "skills", "tfx-lead", "SKILL.md");
+export const LEAD_CLIS = ["claude", "codex", "agy"];
 
-/** 실행 명령은 --launcher, lead.json 의 launcher, 기본 claude 순으로 고른다. */
-export function resolveLauncher({ flag, configPath } = {}) {
-  if (flag) return flag;
-  const path = configPath ?? join(modelFamilyPaths().stateDir, "lead.json");
+export function leadConfigPath() {
+  return join(modelFamilyPaths().stateDir, "lead.json");
+}
+
+/** lead.json 을 읽는다. 없으면 null. 10.85.0 의 `launcher` 한 칸은 Claude 실행 명령으로 읽는다. */
+export function readLeadConfig(path = leadConfigPath()) {
   let text;
   try {
     text = readFileSync(path, "utf8");
   } catch (error) {
-    if (error.code === "ENOENT") return DEFAULT_LAUNCHER;
+    if (error.code === "ENOENT") return null;
     throw error;
   }
-  const launcher = JSON.parse(text).launcher;
-  if (launcher === undefined) return DEFAULT_LAUNCHER;
-  if (
-    typeof launcher !== "string" ||
-    !launcher.trim() ||
-    /[\r\n]/u.test(launcher)
-  )
-    throw new Error(`${path} 의 launcher 는 한 줄 문자열이어야 한다`);
-  return launcher.trim();
+  const config = JSON.parse(text);
+  const launchers = { ...config.launchers };
+  if (config.launcher !== undefined && launchers.claude === undefined)
+    launchers.claude = config.launcher;
+  for (const [cli, launcher] of Object.entries(launchers)) {
+    if (
+      typeof launcher !== "string" ||
+      !launcher.trim() ||
+      /[\r\n]/u.test(launcher)
+    )
+      throw new Error(`${path} 의 launchers.${cli} 는 한 줄 문자열이어야 한다`);
+    launchers[cli] = launcher.trim();
+  }
+  return { launchers };
+}
+
+export function writeLeadConfig(launchers, path = leadConfigPath()) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify({ launchers }, null, 2)}\n`);
+}
+
+const CLI_LABELS = {
+  claude: "Claude",
+  codex: "Codex",
+  agy: "Antigravity(agy)",
+};
+
+/**
+ * setup 과 update 때 아직 정하지 않은 CLI 의 리드 실행 명령을 한 번 묻는다.
+ * 설치되지 않은 CLI 는 묻지 않고, 물을 수 없으면(비대화형) 다음 대화형 실행으로 미룬다.
+ */
+export async function offerLeadLaunchers({
+  interactive,
+  askText,
+  hasCommand,
+  notice = () => {},
+  configPath = leadConfigPath(),
+}) {
+  const launchers = { ...readLeadConfig(configPath)?.launchers };
+  const missing = LEAD_CLIS.filter(
+    (cli) => launchers[cli] === undefined && hasCommand(cli),
+  );
+  if (missing.length === 0) return "present";
+  if (!interactive) return "deferred";
+  notice(
+    "tfx lead 로 리드 세션을 띄울 때 쓸 실행 명령을 정한다. 래퍼, 별칭, 셸 함수로 켜면 그 명령을 적고, 그대로 쓰면 Enter. 워커에는 쓰지 않는다.",
+  );
+  for (const cli of missing) {
+    const answer = await askText(
+      `${CLI_LABELS[cli]} 를 켤 때 쓰는 명령 [${cli}]`,
+    );
+    launchers[cli] = answer.trim().split(/\r?\n/u)[0] || cli;
+  }
+  writeLeadConfig(launchers, configPath);
+  return "saved";
+}
+
+/** 실행 명령은 --launcher, lead.json 의 launchers.<cli>, CLI 이름 순으로 고른다. */
+export function resolveLauncher({ cli = "claude", flag, configPath } = {}) {
+  if (flag) return flag;
+  return readLeadConfig(configPath)?.launchers[cli] ?? cli;
 }
 
 /** tmux 대상 문법과 겹치는 문자(. :)와 공백만 바꿔 `<폴더>-lead` 로 만든다. */
@@ -50,6 +100,12 @@ export function leadSessionName(cwd) {
 export function leadDisplayName(role, now = new Date()) {
   if (/^\d{1,2}\.\d{1,2} \S/u.test(role)) return role;
   return `${now.getMonth() + 1}.${now.getDate()} ${role}`;
+}
+
+/** Claude 는 mod 가 /tfx-lead 를 처리한다. Codex 와 agy 는 mod 가 없어 스킬 파일을 읽게 한다. */
+export function leadEntryPrompt(cli, role) {
+  if (cli === "claude") return `/tfx-lead ${role}`;
+  return `${LEAD_SKILL} 를 읽고 이 세션이 ${role} 리드를 맡는다. 그 스킬의 절차를 따른다.`;
 }
 
 async function runLive(args, run) {
@@ -68,17 +124,28 @@ async function runLive(args, run) {
 }
 
 export async function launchLead(
-  { role, cwd = process.cwd(), session, model, effort, launcher },
+  {
+    cli = "claude",
+    role,
+    cwd = process.cwd(),
+    session,
+    model,
+    effort,
+    launcher,
+  },
   { run = execFileAsync } = {},
 ) {
+  if (!LEAD_CLIS.includes(cli))
+    throw new Error(`--cli 는 ${LEAD_CLIS.join(", ")} 중 하나여야 한다`);
   if (!role?.trim()) throw new Error("역할이 필요하다: tfx lead <역할>");
   const target = session || leadSessionName(cwd);
   const name = leadDisplayName(role.trim());
+  const summary = { cli, session: target, name, launcher };
   const start = await runLive(
     [
       "start",
       "--cli",
-      "claude",
+      cli,
       "--session",
       target,
       "--name",
@@ -92,22 +159,21 @@ export async function launchLead(
     ],
     run,
   );
-  if (!start.ready)
-    return { ok: false, session: target, name, launcher, start };
-  // 슬래시 명령은 tmux 입력으로만 실행되고, Claude 안에서 호출해도 SendMessage 로 바뀌지 않게 한다.
+  if (!start.ready) return { ok: false, ...summary, start };
+  // Claude 슬래시 명령은 tmux 입력으로만 실행되고, Claude 안에서 호출해도 SendMessage 로 바뀌지 않게 한다.
   const ask = await runLive(
     [
       "ask",
       "--cli",
-      "claude",
+      cli,
       "--session",
       target,
       "--prompt",
-      `/tfx-lead ${role.trim()}`,
+      leadEntryPrompt(cli, role.trim()),
       "--no-wait",
-      "--via-tmux",
+      ...(cli === "claude" ? ["--via-tmux"] : []),
     ],
     run,
   );
-  return { ok: Boolean(ask.ok), session: target, name, launcher, start, ask };
+  return { ok: Boolean(ask.ok), ...summary, start, ask };
 }

@@ -25,6 +25,7 @@ import {
 import { homedir } from "os";
 import { basename, delimiter, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
+import { offerLeadLaunchers } from "../hub/team/lead-launch.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
 import {
   addNotice,
@@ -427,6 +428,16 @@ export function canAskUser({
   return !outputOptions([], { env, input, output }).nonInteractive;
 }
 
+async function askLine(question, { input, output }) {
+  const { createInterface } = await import("node:readline/promises");
+  const rl = createInterface({ input, output });
+  try {
+    return await rl.question(`  ${question} `);
+  } finally {
+    rl.close();
+  }
+}
+
 async function askYesNo(question, { input, output }) {
   const { createInterface } = await import("node:readline/promises");
   const rl = createInterface({ input, output });
@@ -470,6 +481,8 @@ export async function runConsentSteps({
   fromUpdate = false,
   verbose = false,
   offerPeer = offerPeerPermission,
+  offerLead = offerLeadLaunchers,
+  askText = (question) => askLine(question, { input, output }),
   report,
   log = report ? (message) => addStep(report, message) : console.log,
   warn = report
@@ -531,6 +544,18 @@ export async function runConsentSteps({
     warn,
     notice,
   });
+
+  try {
+    await offerLead({
+      interactive,
+      askText,
+      hasCommand,
+      // 질문보다 먼저 보여야 해서 보고서를 거치지 않고 바로 쓴다.
+      notice: (message) => output.write(`  ${message}\n`),
+    });
+  } catch (error) {
+    warn(`리드 실행 명령 설정 실패: ${error.message}`);
+  }
 
   try {
     const peer = await offerPeer({
