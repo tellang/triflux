@@ -665,7 +665,16 @@ function buildRetryCliInvocation(cli) {
     argv: [],
   };
   if (cli.profile) invocation.profile = cli.profile;
-  if (cli.cli === "codex" && cli.profile) {
+  if (cli.family) invocation.family = cli.family;
+  if (cli.effort) invocation.effort = cli.effort;
+  if (cli.cli === "codex" && cli.family && cli.effort) {
+    invocation.argv.push(
+      "--profile",
+      cli.family,
+      "-c",
+      `model_reasoning_effort="${cli.effort}"`,
+    );
+  } else if (cli.cli === "codex" && cli.profile) {
     invocation.argv.push("--profile", cli.profile);
   }
   return invocation;

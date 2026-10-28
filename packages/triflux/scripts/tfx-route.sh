@@ -1306,6 +1306,10 @@ resolve_safe_retry_codex_profile() {
   local profile
   profile="$1"
   case "$profile" in
+    sol|astra|terra|luna)
+      echo "$profile"
+      return
+      ;;
     ultra|astra_ultra)
       echo "astra_max"
       return
@@ -1361,7 +1365,11 @@ apply_codex_concrete_effort_guard() {
     allow_ultra=1
   fi
   local effort target_profile=""
-  if ! effort="$(read_codex_profile_effort "$profile")"; then return 78; fi
+  effort=""
+  case "$profile" in
+    sol|astra|terra|luna) ;;
+    *) if ! effort="$(read_codex_profile_effort "$profile")"; then return 78; fi ;;
+  esac
   case "$profile" in
     astra_max) target_profile="astra_max" ;;
     astra_ultra) target_profile="astra_max" ;;
@@ -1380,13 +1388,21 @@ apply_codex_concrete_effort_guard() {
     fi
     profile="$target_profile"
   fi
-  local managed_spec managed_family managed_effort
+  local managed_spec managed_family managed_effort managed_profile
   CLI_EFFORT=""; CLI_FAMILY=""
   if managed_spec=$("$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
-    const { modelEffortFromProfile, resolveCodexModelEffort } = await import(pathToFileURL(process.argv[1]).href);
-    const requested = modelEffortFromProfile("codex", process.argv[2]);
+    const { modelEffortFromProfile, profileFromModelEffort, resolveCodexModelEffort } = await import(pathToFileURL(process.argv[1]).href);
+    const argv = process.argv.slice(4);
+    let explicitEffort;
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] === "-c" && argv[i + 1]?.startsWith("model_reasoning_effort=")) {
+        explicitEffort = argv[i + 1].slice("model_reasoning_effort=".length).replace(/^"|"$/g, "");
+      }
+    }
+    let requested = modelEffortFromProfile("codex", process.argv[2], explicitEffort) || modelEffortFromProfile("codex", process.argv[2]);
     if (!requested) process.exit(0);
+    if (requested.effort === "ultra" && process.argv[3] !== "1") requested = { family: "astra", effort: "max" };
     try {
       const resolved = resolveCodexModelEffort(requested, {
         codexHome: process.env.CODEX_HOME || process.env.TFX_CODEX_HOME,
@@ -1394,18 +1410,20 @@ apply_codex_concrete_effort_guard() {
       if (resolved.effort !== requested.effort) {
         console.error(`[tfx-route] Codex effort: requested=${requested.effort} applied=${resolved.effort} model=${resolved.model}`);
       }
-      process.stdout.write([resolved.family, resolved.effort].join("\x1e"));
+      const legacy = profileFromModelEffort("codex", requested) || "";
+      process.stdout.write([resolved.family, resolved.effort, legacy].join("\x1e"));
     } catch (error) {
       console.error(`[tfx-route] ${error.message}`);
       process.exit(error.code === "unsupported-effort" ? 78 : 1);
     }
-  ' "${CODEX_PROFILE_MODULE%/*}/model-effort.mjs" "$profile"); then
-    IFS=$'\x1e' read -r managed_family managed_effort <<< "$managed_spec"
+  ' "${CODEX_PROFILE_MODULE%/*}/model-effort.mjs" "$profile" "$allow_ultra" "${args[@]}"); then
+    IFS=$'\x1e' read -r managed_family managed_effort managed_profile <<< "$managed_spec"
   else
     local resolver_status=$?
     [[ "$resolver_status" -ne 78 ]] || return 78
     echo "[tfx-route] 경고: 관리 Codex effort 해석 실패, 기존 프로필 유지: $profile" >&2
     managed_effort=""
+    case "$profile" in sol|astra|terra|luna) CLI_FAMILY="$profile" ;; esac
   fi
   if [[ -n "$managed_effort" ]]; then
     local -a guarded_args=()
@@ -1423,7 +1441,7 @@ apply_codex_concrete_effort_guard() {
     done
     args=("${guarded_args[@]}" -c "model_reasoning_effort=\"${managed_effort}\"")
     CLI_FAMILY="$managed_family"; CLI_EFFORT="$managed_effort"
-    CODEX_COMPAT_PROFILE="$profile"
+    CODEX_COMPAT_PROFILE="$managed_profile"
   fi
   CLI_ARGS="${args[*]}"
 }
@@ -2206,8 +2224,8 @@ run_codex_exec() {
   codex_args=("${codex_args[0]}" ${CODEX_CONFIG_FLAGS[@]+"${CODEX_CONFIG_FLAGS[@]}"} "${codex_args[@]:1}")
   local codex_home
   codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
-  if [[ -n "${CLI_FAMILY:-}" && ! -f "$codex_home/$CLI_FAMILY.config.toml" && -n "${CODEX_COMPAT_PROFILE:-}" ]]; then
-    if [[ ! -f "$codex_home/$CODEX_COMPAT_PROFILE.config.toml" ]]; then
+  if [[ -n "${CLI_FAMILY:-}" && ! -f "$codex_home/$CLI_FAMILY.config.toml" ]]; then
+    if [[ -z "${CODEX_COMPAT_PROFILE:-}" || ! -f "$codex_home/$CODEX_COMPAT_PROFILE.config.toml" ]]; then
       echo "[tfx-route] 오류: 가족과 결합 프로필 파일이 모두 없습니다: $CLI_FAMILY, $CODEX_COMPAT_PROFILE" >&2
       return 78
     fi

@@ -36,6 +36,95 @@ afterEach(() => {
 });
 
 describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
+  it("canonical 이름 없는 새 조합은 허용하고 옛 profile과 model을 만들지 않는다", () => {
+    const sm = createRetryStateMachine({
+      cliChain: [{ cli: "codex", family: "astra", effort: "high" }],
+    });
+    assert.deepEqual(sm.serialize().cliChain, [
+      { cli: "codex", family: "astra", effort: "high" },
+    ]);
+    const restored = createRetryStateMachine();
+    restored.applySnapshot(sm.serialize());
+    assert.deepEqual(restored.serialize().cliChain, sm.serialize().cliChain);
+  });
+  it("새 family/effort 체인은 옛 profile도 함께 직렬화한다", () => {
+    const sm = createRetryStateMachine({
+      cliChain: [{ cli: "codex", family: "astra", effort: "max" }],
+    });
+    assert.deepEqual(sm.serialize().cliChain, [
+      { cli: "codex", family: "astra", effort: "max", profile: "astra_max" },
+    ]);
+    const restored = createRetryStateMachine();
+    restored.applySnapshot(sm.serialize());
+    assert.deepEqual(restored.serialize().cliChain, sm.serialize().cliChain);
+    assert.throws(
+      () =>
+        createRetryStateMachine({
+          cliChain: [{ cli: "antigravity", family: "argon" }],
+        }),
+      /invalid family\/effort/,
+    );
+    assert.deepEqual(
+      createRetryStateMachine({
+        cliChain: [
+          {
+            cli: "antigravity",
+            profile: "argon_high",
+            model: "Gemini 4 Argon (High)",
+          },
+        ],
+      }).serialize().cliChain,
+      [
+        {
+          cli: "antigravity",
+          family: "argon",
+          effort: "high",
+          profile: "argon_high",
+          model: "Gemini 4 Argon (High)",
+        },
+      ],
+    );
+  });
+
+  it("지원 제한으로 기본 레인과 같아진 승격을 실패로 보고한다", () => {
+    const home = makeTempDir();
+    const codexHome = join(home, ".codex");
+    mkdirSync(codexHome);
+    writeFileSync(
+      join(codexHome, "models_cache.json"),
+      JSON.stringify({
+        models: [
+          {
+            slug: "gpt-7-astra",
+            visibility: "list",
+            supported_reasoning_levels: ["high"],
+          },
+        ],
+      }),
+    );
+    const options = {
+      home,
+      codexHome,
+      mode: "auto-escalate",
+      maxIterations: 1,
+      cliChain: [
+        { cli: "codex", family: "astra", effort: "xhigh" },
+        { cli: "codex", family: "astra", effort: "max" },
+      ],
+    };
+    const sm = createRetryStateMachine(options);
+    sm.startIteration();
+    const result = sm.reportVerifyFail("not-passed");
+    assert.equal(result.to, STATES.BUDGET_EXCEEDED);
+    assert.equal(result.reason, "escalation-not-promoted");
+    assert.equal(result.escalated, false);
+    assert.equal(sm.getCurrent().cliIndex, 0);
+    rmSync(join(codexHome, "models_cache.json"));
+    const uncached = createRetryStateMachine(options);
+    uncached.startIteration();
+    assert.equal(uncached.reportVerifyFail("not-passed").escalated, true);
+  });
+
   describe("ralph — bounded by max_iterations", () => {
     it("maxIterations=5 일 때 정확히 5회 EXECUTING 후 BUDGET_EXCEEDED", () => {
       const sm = createRetryStateMachine({ mode: "ralph", maxIterations: 5 });
@@ -267,14 +356,20 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
         {
           cli: "codex",
           profile: "astra_xhigh",
+          family: "astra",
+          effort: "xhigh",
         },
         {
           cli: "codex",
           profile: "astra_max",
+          family: "astra",
+          effort: "max",
         },
         {
           cli: "codex",
           profile: "astra_max",
+          family: "astra",
+          effort: "max",
         },
         { cli: "claude", model: "opus" },
       ]);

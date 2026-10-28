@@ -24,7 +24,13 @@ import {
 import { dirname, join } from "node:path";
 
 import { normalizeCodexProfileName } from "../../scripts/lib/codex-profile-config.mjs";
-import { CODEX_FAMILY_PROFILES } from "../../scripts/lib/model-family-resolver.mjs";
+import {
+  EFFORT_ORDER,
+  modelEffortFromProfile,
+  profileFromModelEffort,
+  resolveCodexModelEffort,
+} from "../../scripts/lib/model-effort.mjs";
+import { AGY_FAMILY_PROFILES } from "../../scripts/lib/model-family-resolver.mjs";
 
 export const STATES = Object.freeze({
   PLANNING: "PLANNING",
@@ -50,7 +56,8 @@ const DEFAULT_CLAUDE_MODEL = "fable";
 const DEFAULT_ESCALATION_CHAIN = Object.freeze([
   Object.freeze({
     cli: "codex",
-    profile: "astra_max",
+    family: "astra",
+    effort: "max",
   }),
   Object.freeze({ cli: "claude", model: DEFAULT_CLAUDE_MODEL }),
 ]);
@@ -154,6 +161,39 @@ export function createRetryStateMachine(options = {}) {
         reason: "escalation-chain-exhausted",
         chain: state.cliChain,
       });
+    }
+    const current = state.cliChain[state.cliIndex];
+    const next = state.cliChain[state.cliIndex + 1];
+    if (
+      current.cli === "codex" &&
+      next.cli === "codex" &&
+      current.family &&
+      next.family
+    ) {
+      try {
+        const base = resolveCodexModelEffort(current, options);
+        const promoted = resolveCodexModelEffort(next, options);
+        if (
+          promoted.effort !== next.effort &&
+          base.model === promoted.model &&
+          base.effort === promoted.effort
+        ) {
+          return transition(STATES.BUDGET_EXCEEDED, {
+            reason: "escalation-not-promoted",
+            escalated: false,
+            model: promoted.model,
+            requestedEffort: next.effort,
+            effort: promoted.effort,
+          });
+        }
+      } catch (error) {
+        if (error.code !== "unsupported-effort") throw error;
+        return transition(STATES.BUDGET_EXCEEDED, {
+          reason: "unsupported-escalation-effort",
+          escalated: false,
+          error: error.message,
+        });
+      }
     }
     state.cliIndex += 1;
     state.iterations = 0;
@@ -306,11 +346,34 @@ function normalizeEscalationChainEntry(entry, index, source) {
   }
   const profile = typeof entry.profile === "string" ? entry.profile.trim() : "";
   const normalizedProfile = normalizeEscalationProfile(profile);
-  if (
-    entry.cli === "codex" &&
-    Object.hasOwn(CODEX_FAMILY_PROFILES, normalizedProfile)
-  ) {
-    return { cli: entry.cli, profile: normalizedProfile };
+  const provider = entry.cli === "agy" ? "antigravity" : entry.cli;
+  if (provider === "codex" || provider === "antigravity") {
+    const explicit = entry.family !== undefined || entry.effort !== undefined;
+    let spec = explicit
+      ? typeof entry.family === "string" && typeof entry.effort === "string"
+        ? modelEffortFromProfile(provider, entry.family, entry.effort)
+        : null
+      : modelEffortFromProfile(
+          provider,
+          provider === "codex" ? normalizedProfile : profile,
+        );
+    if (explicit && !spec)
+      throw new Error(`${source}: chain[${index}] has invalid family/effort`);
+    if (spec) {
+      if (provider === "codex" && spec.effort === "ultra")
+        spec = { family: "astra", effort: "max" };
+      const legacy = profileFromModelEffort(provider, spec);
+      const normalized = { cli: entry.cli, ...spec };
+      if (legacy) normalized.profile = legacy;
+      if (provider === "antigravity" && legacy) {
+        normalized.model = entry.model || AGY_FAMILY_PROFILES[legacy]?.model;
+        if (typeof normalized.model !== "string" || !normalized.model.trim())
+          throw new Error(
+            `${source}: chain[${index}].model must be a non-empty string`,
+          );
+      }
+      return normalized;
+    }
   }
   if (typeof entry.model !== "string" || entry.model.trim() === "") {
     throw new Error(
@@ -319,6 +382,11 @@ function normalizeEscalationChainEntry(entry, index, source) {
   }
   const normalized = { cli: entry.cli, model: entry.model };
   if (profile) normalized.profile = profile;
+  if (entry.effort !== undefined) {
+    if (!EFFORT_ORDER.includes(entry.effort))
+      throw new Error(`${source}: chain[${index}] has invalid effort`);
+    normalized.effort = entry.effort;
+  }
   return normalized;
 }
 
