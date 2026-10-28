@@ -55,6 +55,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0046](0046-lead-rule-enforcement-by-mod.md) | 지켜지지 않는 리드 규칙은 triflux mod 훅으로 강제한다 | Proposed | 0023, 0043, 0044 |
 | [0047](0047-pressure-notice-without-turn.md) | critical 이 아닌 압박 전이는 턴 없이 리드의 다음 요청에 한 줄로 붙인다 | Proposed | 0043 |
 | [0048](0048-codex-terra-family-for-writing-lanes.md) | Codex Terra 가족을 더하고 글쓰기 레인을 Terra 로 옮긴다 | Accepted | 0037, 0039 |
+| [0049](0049-model-family-and-effort-split.md) | 모든 CLI 에서 모델 가족과 effort 를 나눠 다룬다 | Accepted | 0037, 0038, 0048 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 
