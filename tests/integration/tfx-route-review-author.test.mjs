@@ -172,6 +172,24 @@ else { require('node:fs').writeFileSync(process.env.ROUTE_ARGV, JSON.stringify(a
   }
 }
 
+for (const [profile, effort] of [
+  ["sol_med", "medium"],
+  ["astra_xhigh", "xhigh"],
+  ["ultra", "max"],
+]) {
+  test(`Claude reviewer honors explicit ${profile} effort`, () => {
+    const r = runRoute({ env: { TFX_CODEX_PROFILE: profile } });
+    assert.equal(r.status, 0, r.output);
+    assert.equal(r.argv[r.argv.indexOf("--effort") + 1], effort);
+  });
+}
+
+test("Claude native explore keeps an empty effort", () => {
+  const r = runRoute({ role: "explore" });
+  assert.equal(r.status, 0, r.output);
+  assert.match(r.stdout, /^EFFORT=$/m);
+});
+
 for (const role of ["code-reviewer", "quality-reviewer"]) {
   for (const [author, weekly, expected] of [
     [undefined, undefined, "claude"],
