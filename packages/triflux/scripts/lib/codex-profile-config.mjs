@@ -9,6 +9,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { writeRotatedBackup } from "./backup-rotation.mjs";
+import { normalizeCodexProfileName } from "./model-effort.mjs";
 import {
   CODEX_FAMILY_PROFILES,
   modelFamilyPaths,
@@ -26,23 +27,7 @@ const EFFORT_BY_SUFFIX = {
   low: "low",
 };
 
-const LEGACY_CANONICAL_PROFILE_ALIASES = Object.freeze({
-  gpt56_sol_xhigh: "astra_xhigh",
-  gpt56_sol_max: "astra_max",
-  gpt56_sol_ultra: "astra_ultra",
-  gpt56_terra_high: "sol_high",
-  gpt56_terra_med: "sol_med",
-});
-
-export function normalizeCodexProfileName(profileName) {
-  const normalized = String(profileName ?? "").trim();
-  const legacy = LEGACY_CANONICAL_PROFILE_ALIASES[normalized];
-  if (legacy) return legacy;
-  const familyName = normalized.replace(/^gpt\d+_(sol|astra|luna)_/, "$1_");
-  return Object.hasOwn(CODEX_FAMILY_PROFILES, familyName)
-    ? familyName
-    : normalized;
-}
+export { normalizeCodexProfileName };
 
 export function ensureManagedCodexProfiles(opts = {}) {
   const { codexHome } = modelFamilyPaths(opts);
