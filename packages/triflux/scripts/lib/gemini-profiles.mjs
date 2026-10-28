@@ -1,5 +1,6 @@
 import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { normalizeGeminiProfileName } from "./model-effort.mjs";
 import {
   AGY_FAMILY_PROFILES,
   modelFamilyPaths,
@@ -17,11 +18,7 @@ const DEFAULT_GEMINI_PROFILES = {
   ),
 };
 
-export function normalizeGeminiProfileName(name) {
-  const raw = String(name ?? "").trim();
-  // Flash 가족은 뺐다. 옛 Flash 이름은 effort 와 상관없이 더 빠른 Argon Low 로 보낸다.
-  return raw.replace(/^flash\d*(?:_(?:low|high))?$/, "argon_low");
-}
+export { normalizeGeminiProfileName };
 
 // ── 용도별 effort (SSOT) ──
 // Argon 가족 안에서 역할에 따라 effort 를 나눈다. 키는 tfx 에이전트/역할 이름
