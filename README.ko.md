@@ -118,7 +118,8 @@ Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로
 | `astra_xhigh` | 아키텍처, 계획, 비평, 디버깅, 보안 리뷰, 깊은 실행 |
 | `astra_max`, `astra_ultra` | 가장 어려운 단일 작업(`TFX_CODEX_PROFILE=max\|ultra`). `max`는 `auto-escalate` 첫 단계 |
 | `sol_high` / `sol_med` | 기본 구현, 리뷰, 검증, 테스트, 문서 / 정리 작업 |
-| `luna_high` / `luna_low` | 빌드 수정, 글쓰기 / 지연 우선 조회 |
+| `terra_high` | 글쓰기, 문서 조사 |
+| `luna_high` / `luna_low` | 빌드 수정 / 지연 우선 조회 |
 | `argon_low` / `argon` / `argon_high` | Antigravity 분류 / 생성 / 검토 |
 | Claude `fable` | `--retry auto-escalate` 마지막 단계 |
 | Claude `opus` / `sonnet` / `haiku` | 메타 라우팅과 계획 게이트 / Claude 네이티브 QA·검증 / 빠른 탐색 |

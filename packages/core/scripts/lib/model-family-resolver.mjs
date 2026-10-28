@@ -16,6 +16,7 @@ export const CODEX_FAMILY_PROFILES = Object.freeze({
   astra_xhigh: { family: "astra", effort: "xhigh", model: "gpt-6-astra" },
   astra_max: { family: "astra", effort: "max", model: "gpt-6-astra" },
   astra_ultra: { family: "astra", effort: "ultra", model: "gpt-6-astra" },
+  terra_high: { family: "terra", effort: "high", model: "gpt-6.1-terra" },
   luna_high: { family: "luna", effort: "high", model: "gpt-6-luna" },
   luna_low: { family: "luna", effort: "low", model: "gpt-6-luna" },
 });
@@ -37,7 +38,7 @@ export const AGY_FAMILY_PROFILES = Object.freeze({
   },
 });
 const DAY_MS = 86_400_000;
-const CODEX_SLUG = /^gpt-(\d+(?:\.\d+)*)-(sol|astra|luna)$/;
+const CODEX_SLUG = /^gpt-(\d+(?:\.\d+)*)-(sol|astra|terra|luna)$/;
 const AGY_SLUG = /^gemini-(\d+(?:\.\d+)*)-(argon)-(low|medium|high)$/;
 
 function compareVersions(a, b) {

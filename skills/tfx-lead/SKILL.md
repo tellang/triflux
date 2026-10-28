@@ -98,6 +98,7 @@ Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 �
 | Codex 설계, 비평, 디버그 | `astra_xhigh` | `architect`, `planner`, `analyst`, `critic` 포함 |
 | Codex 일반 구현, Claude 작성 코드 리뷰 | `sol_high` | 리뷰는 `review` 서브커맨드 |
 | 보안 리뷰 | Argon High `argon_high` | `security-reviewer` |
+| Codex 글쓰기, 문서 조사 | `terra_high` | |
 | Codex 정리, 반복 작업 | `sol_med`, `luna_high` | |
 | Codex 시험용 | 역할 프로필에 effort low | 연결 확인용 |
 

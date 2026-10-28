@@ -1309,7 +1309,7 @@ resolve_safe_retry_codex_profile() {
       echo "astra_max"
       return
       ;;
-    luna_low|luna_high|sol_med|sol_high|astra_xhigh|astra_max)
+    luna_low|luna_high|terra_high|sol_med|sol_high|astra_xhigh|astra_max)
       echo "$profile"
       return
       ;;
@@ -2203,7 +2203,7 @@ run_codex_exec() {
   if [[ "$exit_code_local" -ne 0 ]] && grep -qE "is not supported when using Codex with a ChatGPT account" "$STDERR_LOG" 2>/dev/null; then
     local fallback_profile=""
     case "$CLI_EFFORT" in
-      astra_ultra|astra_max|astra_xhigh|sol_high|sol_med|luna_high) fallback_profile="luna_low" ;;
+      astra_ultra|astra_max|astra_xhigh|sol_high|sol_med|terra_high|luna_high) fallback_profile="luna_low" ;;
     esac
     if [[ -n "$fallback_profile" ]]; then
       echo "[tfx-route] tier fallback: $CLI_EFFORT not supported on ChatGPT account → retry with $fallback_profile" >&2

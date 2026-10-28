@@ -102,7 +102,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 
 ### 모델 배치
 
-> 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0038](../../docs/_archive/adr/0038-agy-default-argon-family.md), [ADR-0039](../../docs/adr/0039-review-by-author-vendor.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
+> 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0038](../../docs/_archive/adr/0038-agy-default-argon-family.md), [ADR-0039](../../docs/adr/0039-review-by-author-vendor.md), [ADR-0048](../../docs/adr/0048-codex-terra-family-for-writing-lanes.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
 
 Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고, `scripts/lib/model-family-resolver.mjs`가 관리 파일 `~/.codex/<프로필>.config.toml`의 모델 ID를 갱신한다. `designer`, `writer`, `document-specialist` 항목은 직접 Codex를 지정한 경우에만 적용하며 일반 실행의 provider는 `hub/team/agent-map.json`이 정한다. 입력이 큰 코드베이스 읽기는 antigravity 로 보낸다(Argon 은 입출력 공유 1M 문맥).
 
@@ -110,9 +110,10 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 |---------|--------------|
 | `astra_xhigh` | architect, planner, critic, analyst, debugger, deep-executor, security-reviewer(직접 Codex 지정), scientist-deep, designer(직접 지정) |
 | `astra_max` / `astra_ultra` | `TFX_CODEX_PROFILE=max/ultra`, 재시도 1단계 |
-| `sol_high` | executor, codex, code-reviewer·quality-reviewer(Claude 작성 코드 또는 사용량 전환), verifier, test-engineer, qa-tester, scientist, document-specialist |
+| `sol_high` | executor, codex, code-reviewer·quality-reviewer(Claude 작성 코드 또는 사용량 전환), verifier, test-engineer, qa-tester, scientist |
 | `sol_med` | cleanup, deslop |
-| `luna_high` | build-fixer, writer(직접 지정) |
+| `terra_high` | writer(직접 지정), document-specialist. 공식 문서가 Terra 를 글쓰기, 시각 이해, 컴퓨터 사용용으로 둔다 |
+| `luna_high` | build-fixer |
 | `luna_low` | spark, explore 재매핑, ChatGPT tier 폴백 |
 | `argon_low` / `argon` / `argon_high` | Antigravity 분류·요약 / 생성·작성 / security-reviewer·검토·설계 |
 | `fable` | `--retry auto-escalate` 최종 단계 |

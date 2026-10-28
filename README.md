@@ -121,7 +121,8 @@ Pin a family in `~/.config/triflux/models.json`, for example `{"sol":"gpt-6-sol"
 | `astra_xhigh` | Architecture, planning, critique, debugging, security review, deep execution |
 | `astra_max`, `astra_ultra` | Hardest single tasks (`TFX_CODEX_PROFILE=max\|ultra`); `max` is the first `auto-escalate` step |
 | `sol_high` / `sol_med` | Default implementation, review, verification, tests, docs / cleanup |
-| `luna_high` / `luna_low` | Build fixes, writing / latency-first lookups |
+| `terra_high` | Writing, documentation research |
+| `luna_high` / `luna_low` | Build fixes / latency-first lookups |
 | `argon_low` / `argon` / `argon_high` | Antigravity classification / generation / review |
 | Claude `fable` | Final `--retry auto-escalate` step |
 | Claude `opus` / `sonnet` / `haiku` | Meta routing and planning gates / Claude-native QA and verification / fast exploration |
