@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   launchLead,
   leadDisplayName,
+  leadEntryPrompt,
   leadSessionName,
+  offerLeadLaunchers,
   resolveLauncher,
 } from "../../hub/team/lead-launch.mjs";
 
@@ -31,6 +33,16 @@ describe("tfx lead", () => {
     assert.equal(resolveLauncher({ flag: "x", configPath: path }), "x");
     assert.equal(resolveLauncher({ configPath: path }), "omc launch");
     assert.equal(resolveLauncher({ configPath: config() }), "claude");
+    const both = config(
+      JSON.stringify({ launchers: { claude: "c-wrap", codex: "x-wrap" } }),
+    );
+    assert.equal(resolveLauncher({ cli: "codex", configPath: both }), "x-wrap");
+    assert.equal(resolveLauncher({ cli: "agy", configPath: both }), "agy");
+    for (const bad of ["null", '{"launchers":"ab"}'])
+      assert.throws(
+        () => resolveLauncher({ configPath: config(bad) }),
+        /lead\.json 는 \{"launchers"/u,
+      );
     assert.throws(
       () => resolveLauncher({ configPath: config('{"launcher":"a\\nb"}') }),
       /한 줄/u,
@@ -77,6 +89,55 @@ describe("tfx lead", () => {
     );
     assert.equal(result.ok, false);
     assert.equal(result.start.error, "duplicate session");
+  });
+
+  it("Codex, agy 리드는 mod 가 없어 스킬 파일을 읽게 한다", () => {
+    assert.equal(leadEntryPrompt("claude", "개발리드"), "/tfx-lead 개발리드");
+    assert.match(
+      leadEntryPrompt("codex", "개발리드"),
+      /skills\/tfx-lead\/SKILL\.md 를 읽고 이 세션이 개발리드 리드/u,
+    );
+  });
+
+  it("setup 은 설치된 CLI 중 아직 안 정한 것만 묻고 저장한다", async () => {
+    const path = config(JSON.stringify({ launcher: "c-wrap" }));
+    const asked = [];
+    const status = await offerLeadLaunchers({
+      interactive: true,
+      hasCommand: (cli) => cli !== "agy",
+      askText: async (question) => {
+        asked.push(question);
+        return "  x-wrap --flag \n";
+      },
+      configPath: path,
+    });
+    assert.equal(status, "saved");
+    assert.equal(asked.length, 1);
+    assert.match(asked[0], /^Codex /u);
+    assert.deepEqual(JSON.parse(readFileSync(path, "utf8")).launchers, {
+      claude: "c-wrap",
+      codex: "x-wrap --flag",
+    });
+    // 다 정했으면 다시 묻지 않는다.
+    const again = await offerLeadLaunchers({
+      interactive: true,
+      hasCommand: (cli) => cli !== "agy",
+      askText: async () => assert.fail("다시 물었다"),
+      configPath: path,
+    });
+    assert.equal(again, "present");
+  });
+
+  it("물을 수 없으면 저장하지 않고 미룬다", async () => {
+    const path = config();
+    const status = await offerLeadLaunchers({
+      interactive: false,
+      hasCommand: () => true,
+      askText: async () => assert.fail("비대화형에서 물었다"),
+      configPath: path,
+    });
+    assert.equal(status, "deferred");
+    assert.equal(resolveLauncher({ configPath: path }), "claude");
   });
 
   it("세션이 준비되지 않으면 /tfx-lead 를 보내지 않는다", async () => {

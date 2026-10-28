@@ -16,11 +16,12 @@ description: >
 
 ## 리드 진입
 
-셸에서 새 리드를 띄울 때는 `tfx lead <역할>`을 쓴다. tmux 세션(기본 `<폴더>-lead`)에 Claude 를 띄우고 `/tfx-lead <역할>`까지 보낸다.
+셸에서 새 리드를 띄울 때는 `tfx lead <역할> [--cli claude|codex|agy]`를 쓴다. tmux 세션(기본 `<폴더>-lead`)에 리드를 띄우고 리드 진입까지 보낸다. Claude 는 `/tfx-lead <역할>`을, mod 가 없는 Codex 와 agy 는 이 스킬 파일을 읽고 리드를 맡으라는 프롬프트를 보낸다.
 
-- 실행 명령은 `--launcher`, `~/.config/triflux/lead.json`(Windows 는 `%APPDATA%\triflux\lead.json`)의 `launcher`, `claude` 순으로 고른다. 예: `{"launcher": "omc launch"}`. triflux 는 이 값을 그대로 실행할 뿐 특정 도구에 의존하지 않는다.
-- 이 설정은 리드에만 쓴다. 워커는 `tfx-live start`가 일반 `claude`로 띄운다.
-- `omc launch`처럼 tmux 안에서 pane 을 다시 띄우는(`respawn-pane`) 실행 명령은 pane 의 셸을 없앤다. 그러면 Claude 가 끝날 때 pane 도 닫히고, 같은 pane 에서 `--resume`으로 이어 쓸 수 없다.
+- 실행 명령은 `--launcher`, `~/.config/triflux/lead.json`(Windows 는 `%APPDATA%\triflux\lead.json`)의 `launchers.<cli>`, CLI 이름 순으로 고른다. 예: `{"launchers": {"claude": "<래퍼> launch", "codex": "codex"}}`. triflux 는 CLI 이름 자리만 이 값으로 바꿔 실행할 뿐 특정 도구에 의존하지 않는다.
+- `tfx setup`과 `tfx update`가 대화형으로 돌 때, 설치된 CLI 중 아직 정하지 않은 것의 실행 명령을 한 번 묻는다. 물을 수 없으면 다음 대화형 실행으로 미룬다.
+- 이 설정은 리드에만 쓴다. 워커는 `tfx-live start`가 기본 명령으로 띄운다.
+- tmux 안에서 pane 을 다시 띄우는(`respawn-pane`) 래퍼는 pane 의 셸을 없앤다. 그러면 리드가 끝날 때 pane 도 닫히고, 같은 pane 에서 `--resume`으로 이어 쓸 수 없다.
 
 이미 띄운 Claude 세션을 리드로 만들 때는 세션 안에서 `/tfx-lead <역할>`을 실행한다(예: `/tfx-lead 개발리드`). triflux mod 가 세 가지를 한다.
 

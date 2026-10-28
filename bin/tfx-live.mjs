@@ -3189,13 +3189,21 @@ async function doStart(launchAdapter, opts) {
     ],
   };
   if (opts.launcher) {
-    if (adapter.cli !== "claude")
-      throw new Error("start --launcher is only supported with --cli claude");
-    // 사람이 쓰는 리드 세션은 워커용 OMC·훅 끄기 변수 없이 지정한 실행 명령으로 띄운다.
-    adapter.launchKeys = [opts.launcher, "Enter"];
-    adapter.resumeById = (id) =>
-      `${opts.launcher} ${shellQuote(["--resume", id])}`;
-    adapter.resumeLast = () => `${opts.launcher} --continue`;
+    // 사람이 쓰는 리드 세션은 워커용 환경 변수 접두를 떼고 CLI 이름만 지정한 실행 명령으로 바꾼다.
+    // 뒤따르는 인자(Codex 승인 플래그, resume 형식)는 그대로 둔다.
+    const launch = (command) => {
+      const words = command.split(" ");
+      return [opts.launcher, ...words.slice(words.indexOf(adapter.cli) + 1)]
+        .join(" ")
+        .trimEnd();
+    };
+    const { resumeById, resumeLast } = adapter;
+    adapter.launchKeys = [
+      launch(adapter.launchKeys[0]),
+      ...adapter.launchKeys.slice(1),
+    ];
+    adapter.resumeById = (id) => launch(resumeById(id));
+    adapter.resumeLast = () => launch(resumeLast());
   }
   const {
     session,
@@ -3238,7 +3246,7 @@ async function doStart(launchAdapter, opts) {
       effort,
       sandbox: opts.sandbox,
     });
-    launchKeys[0] += overrides[0].slice("agy".length);
+    launchKeys[0] += overrides[0].slice(adapter.launchKeys[0].length);
   }
   if (adapter.cli === "codex" && !remote && opts.nativePeer) {
     let socket;

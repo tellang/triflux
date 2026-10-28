@@ -305,10 +305,15 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
   },
   lead: {
     usage:
-      "tfx lead <역할> [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD]",
+      "tfx lead <역할> [--cli claude|codex|agy] [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD]",
     description:
-      "리드 세션을 tmux 에 띄우고 /tfx-lead <역할> 까지 보낸다. 실행 명령은 --launcher, ~/.config/triflux/lead.json 의 launcher, claude 순",
+      "리드 세션을 tmux 에 띄우고 리드 진입까지 보낸다. 실행 명령은 --launcher, ~/.config/triflux/lead.json 의 launchers.<cli>, CLI 이름 순. setup 과 update 가 처음 한 번 묻는다",
     options: [
+      {
+        name: "--cli",
+        type: "string",
+        description: "리드 CLI: claude(기본), codex, agy",
+      },
       {
         name: "--session",
         type: "string",
@@ -324,7 +329,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       {
         name: "--launcher",
         type: "string",
-        description: "이번만 쓸 실행 명령 (예: 'omc launch')",
+        description: "이번만 쓸 실행 명령",
       },
     ],
   },
@@ -4133,6 +4138,7 @@ async function main() {
         "--model",
         "--effort",
         "--launcher",
+        "--cli",
       ];
       cmdArgs.forEach((arg, i) => {
         const known =
@@ -4155,13 +4161,16 @@ async function main() {
             !arg.startsWith("--") && !valueFlags.includes(cmdArgs[i - 1]),
         )
         .join(" ");
+      const cli = readCliOptionValue(cmdArgs, "--cli") || "claude";
       const result = await launchLead({
+        cli,
         role,
         cwd: readCliOptionValue(cmdArgs, "--cwd") || process.cwd(),
         session: readCliOptionValue(cmdArgs, "--session"),
         model: readCliOptionValue(cmdArgs, "--model"),
         effort: readCliOptionValue(cmdArgs, "--effort"),
         launcher: resolveLauncher({
+          cli,
           flag: readCliOptionValue(cmdArgs, "--launcher"),
         }),
       });
@@ -4172,7 +4181,7 @@ async function main() {
         );
       else if (result.start?.ready)
         console.log(
-          `\n  ${RED}✗${RESET} /tfx-lead 전송 실패: ${result.ask?.error ?? JSON.stringify(result.ask)}\n  세션 ${result.session} 은 떠 있다. 붙어서 /tfx-lead 를 직접 입력하거나 tfx-live stop --session ${result.session} 으로 닫는다.\n`,
+          `\n  ${RED}✗${RESET} 리드 진입 전송 실패: ${result.ask?.error ?? JSON.stringify(result.ask)}\n  세션 ${result.session} 은 떠 있다. 붙어서 리드 진입을 직접 입력하거나 tfx-live stop --session ${result.session} 으로 닫는다.\n`,
         );
       else
         console.log(
