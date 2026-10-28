@@ -33,6 +33,7 @@ import {
   tmuxExec,
 } from "../hub/team/session.mjs";
 import {
+  addNotice,
   addStep,
   addWarning,
   commandErrorMessage,
@@ -41,6 +42,7 @@ import {
   recordFile,
   renderCliResult,
 } from "../scripts/lib/cli-output.mjs";
+import { managedCodexProfileContents } from "../scripts/lib/codex-profile-config.mjs";
 import {
   commandExists,
   inspectMacTimeoutDependency,
@@ -68,7 +70,6 @@ import {
   saveRegistry,
   syncRegistryTargets,
 } from "../scripts/lib/mcp-guard-engine.mjs";
-import { resolveModelFamilies } from "../scripts/lib/model-family-resolver.mjs";
 import {
   formatPsmuxInstallGuidance,
   formatPsmuxUpdateGuidance,
@@ -1030,22 +1031,20 @@ function previewCodexProfiles() {
     ? readFileSync(CODEX_CONFIG_PATH, "utf8")
     : "";
   const profiles = [];
-  const resolved = resolveModelFamilies("codex", {
+  const { contents } = managedCodexProfileContents({
     codexHome: CODEX_DIR,
     allowCommand: false,
     persist: false,
-  }).profiles;
+  });
 
   // Codex 0.134+: 프로필은 별도 파일 ~/.codex/<name>.config.toml 로 관리한다.
-  for (const profile of REQUIRED_CODEX_PROFILES) {
-    const profilePath = join(CODEX_DIR, `${profile.name}.config.toml`);
-    const { model, effort } = resolved[profile.name];
-    const desiredContent = `model = "${model}"\nmodel_reasoning_effort = "${effort}"\n`;
+  for (const [name, desiredContent] of Object.entries(contents)) {
+    const profilePath = join(CODEX_DIR, `${name}.config.toml`);
     const existingContent = existsSync(profilePath)
       ? readFileSync(profilePath, "utf8")
       : null;
     if (existingContent !== desiredContent) {
-      profiles.push(profile.name);
+      profiles.push(name);
     }
   }
 
@@ -1540,7 +1539,9 @@ async function cmdSetup(options = {}) {
     if (skills.changed) report.alreadyInGoalState = false;
     if (skills.removed) addStep(report, `구형 스킬 ${skills.removed}개 정리`);
 
-    const codex = ensureCodexProfiles();
+    const codex = ensureCodexProfiles({
+      notice: (message) => addNotice(report, message),
+    });
     if (!codex.ok)
       addWarning(
         report,
@@ -2033,7 +2034,7 @@ async function cmdDoctor(options = {}) {
       if (!skillFix.ok) warn("스킬 동기화 실패");
       else if (skillFix.changed) ok(`스킬 ${skillFix.changed}개 반영됨`);
       else info("스킬: 이미 최신 상태");
-      const profileFix = ensureCodexProfiles();
+      const profileFix = ensureCodexProfiles({ notice: info });
       if (!profileFix.ok) {
         warn(
           `Codex Profiles 자동 복구 실패: ${renderErrorMessage(profileFix.message)}`,

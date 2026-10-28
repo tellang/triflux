@@ -22,18 +22,40 @@ import {
 
 export { normalizeCodexProfileName };
 
+export function managedCodexProfileContents(opts = {}) {
+  const { profiles, families } = resolveModelFamilies("codex", opts);
+  const contents = {};
+  for (const [name, { model, effort }] of Object.entries(profiles)) {
+    contents[name] =
+      `model = "${model}"\nmodel_reasoning_effort = "${effort}"\n`;
+  }
+  for (const [family, { model }] of Object.entries(families)) {
+    contents[family] = `model = "${model}"\n`;
+  }
+  return { profiles, contents };
+}
+
 export function ensureManagedCodexProfiles(opts = {}) {
   const { codexHome } = modelFamilyPaths(opts);
-  const { profiles } = resolveModelFamilies("codex", opts);
+  const { profiles, contents } = managedCodexProfileContents(opts);
   let changed = 0;
-  for (const [name, { model, effort }] of Object.entries(profiles)) {
-    if (
-      writeModelFile(
-        join(codexHome, `${name}.config.toml`),
-        `model = "${model}"\nmodel_reasoning_effort = "${effort}"\n`,
-      )
-    )
-      changed++;
+  const families = new Set(
+    Object.values(CODEX_FAMILY_PROFILES).map(({ family }) => family),
+  );
+  for (const [name, content] of Object.entries(contents)) {
+    const path = join(codexHome, `${name}.config.toml`);
+    if (families.has(name) && existsSync(path)) {
+      const existing = readFileSync(path, "utf8");
+      if (existing !== content) {
+        const backup = writeRotatedBackup(path, existing, {
+          label: "bak-model-family",
+          suffix: stamp(),
+          mode: privateFileMode(path),
+        });
+        opts.notice?.(`Codex 가족 프로필 백업: ${backup}`);
+      }
+    }
+    if (writeModelFile(path, content)) changed++;
   }
   return { changed, profiles };
 }
