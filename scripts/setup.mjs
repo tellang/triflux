@@ -27,6 +27,7 @@ import { basename, delimiter, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { offerLeadLaunchers } from "../hub/team/lead-launch.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
+import { writeRotatedBackup } from "./lib/backup-rotation.mjs";
 import {
   addNotice,
   addStep,
@@ -1590,7 +1591,7 @@ const REQUIRED_TOP_LEVEL_SETTINGS = [
   { key: "service_tier", value: '"fast"' },
 ];
 
-function ensureCodexProfiles() {
+function ensureCodexProfiles({ notice = () => {} } = {}) {
   try {
     if (
       process.env.TFX_CODEX_CONFIG_SYNC !== "1" &&
@@ -1652,6 +1653,7 @@ function ensureCodexProfiles() {
     changed += ensureManagedCodexProfiles({
       home: _TFX_HOME,
       codexHome: CODEX_DIR,
+      notice,
     }).changed;
     // config.toml 의 모든 inline [profiles.*] 마이그레이션 (Codex 0.134 는 inline 거부).
     //   - 관리 가족 별칭과 옛 이름: 위에서 별도 파일을 썼으므로 inline 만 제거.
@@ -1662,7 +1664,19 @@ function ensureCodexProfiles() {
       REQUIRED_CODEX_PROFILES.map((p) => p.name),
     );
     const retiredProfileNames = new Set(LEGACY_CODEX_PROFILE_NAMES);
-    for (const name of listInlineProfileNames(updated)) {
+    const inlineProfileNames = listInlineProfileNames(updated);
+    const families = new Set(
+      Object.values(CODEX_FAMILY_PROFILES).map(({ family }) => family),
+    );
+    if (inlineProfileNames.some((name) => families.has(name))) {
+      const backup = writeRotatedBackup(CODEX_CONFIG_PATH, original, {
+        label: "bak-model-family-inline",
+        suffix: String(Date.now()),
+        mode: 0o600,
+      });
+      notice(`Codex inline 가족 프로필 백업: ${backup}`);
+    }
+    for (const name of inlineProfileNames) {
       if (
         !managedProfileNames.has(normalizeCodexProfileName(name)) &&
         !retiredProfileNames.has(name)
@@ -2184,7 +2198,9 @@ function ensureCriticalSetup(io) {
   } catch (error) {
     io.warn("breadcrumb", error.message);
   }
-  const codex = ensureCodexProfiles();
+  const codex = ensureCodexProfiles({
+    notice: (message) => addNotice(io.report, message),
+  });
   if (!codex.ok)
     io.warn("codex-profiles", `Codex profiles 설정 실패: ${codex.message}`);
   if (codex.changed) io.report.alreadyInGoalState = false;
@@ -2571,7 +2587,9 @@ async function runDeferredWithIo(stdinData, io) {
 
   // ── Codex 프로필 자동 보정 ──
 
-  const codexProfilesResult = ensureCodexProfiles();
+  const codexProfilesResult = ensureCodexProfiles({
+    notice: (message) => addNotice(io.report, message),
+  });
   if (codexProfilesResult.ok && codexProfilesResult.changed > 0) {
     synced++;
   }

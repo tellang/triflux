@@ -33,6 +33,7 @@ import {
   tmuxExec,
 } from "../hub/team/session.mjs";
 import {
+  addNotice,
   addStep,
   addWarning,
   commandErrorMessage,
@@ -1538,7 +1539,9 @@ async function cmdSetup(options = {}) {
     if (skills.changed) report.alreadyInGoalState = false;
     if (skills.removed) addStep(report, `구형 스킬 ${skills.removed}개 정리`);
 
-    const codex = ensureCodexProfiles();
+    const codex = ensureCodexProfiles({
+      notice: (message) => addNotice(report, message),
+    });
     if (!codex.ok)
       addWarning(
         report,
@@ -2031,7 +2034,7 @@ async function cmdDoctor(options = {}) {
       if (!skillFix.ok) warn("스킬 동기화 실패");
       else if (skillFix.changed) ok(`스킬 ${skillFix.changed}개 반영됨`);
       else info("스킬: 이미 최신 상태");
-      const profileFix = ensureCodexProfiles();
+      const profileFix = ensureCodexProfiles({ notice: info });
       if (!profileFix.ok) {
         warn(
           `Codex Profiles 자동 복구 실패: ${renderErrorMessage(profileFix.message)}`,

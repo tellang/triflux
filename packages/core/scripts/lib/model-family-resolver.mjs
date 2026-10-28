@@ -204,7 +204,7 @@ export function resolveModelFamilies(provider, opts = {}) {
   if (provider === "codex") {
     const cachePath = join(paths.codexHome, "models_cache.json");
     sourceSignature = signature(cachePath);
-    if (sourceSignature !== previous.sourceSignature)
+    if (sourceSignature !== previous.sourceSignature || !previous.families)
       catalog = readCodexModelCatalog(opts);
     if (
       sourceSignature.endsWith(":missing") &&

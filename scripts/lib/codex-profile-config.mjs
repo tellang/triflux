@@ -39,9 +39,23 @@ export function ensureManagedCodexProfiles(opts = {}) {
   const { codexHome } = modelFamilyPaths(opts);
   const { profiles, contents } = managedCodexProfileContents(opts);
   let changed = 0;
+  const families = new Set(
+    Object.values(CODEX_FAMILY_PROFILES).map(({ family }) => family),
+  );
   for (const [name, content] of Object.entries(contents)) {
-    if (writeModelFile(join(codexHome, `${name}.config.toml`), content))
-      changed++;
+    const path = join(codexHome, `${name}.config.toml`);
+    if (families.has(name) && existsSync(path)) {
+      const existing = readFileSync(path, "utf8");
+      if (existing !== content) {
+        const backup = writeRotatedBackup(path, existing, {
+          label: "bak-model-family",
+          suffix: stamp(),
+          mode: privateFileMode(path),
+        });
+        opts.notice?.(`Codex 가족 프로필 백업: ${backup}`);
+      }
+    }
+    if (writeModelFile(path, content)) changed++;
   }
   return { changed, profiles };
 }

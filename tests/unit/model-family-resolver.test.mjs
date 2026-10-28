@@ -340,3 +340,23 @@ test("가족 파일은 effort와 무관한 최신 모델만 쓰고 결합 파일
     'model = "gpt-7-sol"\n',
   );
 });
+
+test("families 없는 옛 기록으로 업그레이드해도 최신 가족 모델을 다시 고른다", (t) => {
+  const opts = fixture(t);
+  writeFileSync(
+    join(opts.codexHome, "models_cache.json"),
+    JSON.stringify({
+      models: [model("gpt-6.1-sol"), model("gpt-6.2-sol", ["low"])],
+    }),
+  );
+  resolveModelFamilies("codex", opts);
+  const recordPath = join(opts.stateDir, "codex-model-resolution.json");
+  const record = JSON.parse(readFileSync(recordPath, "utf8"));
+  delete record.families;
+  writeFileSync(recordPath, JSON.stringify(record));
+  ensureManagedCodexProfiles(opts);
+  assert.equal(
+    readFileSync(join(opts.codexHome, "sol.config.toml"), "utf8"),
+    'model = "gpt-6.2-sol"\n',
+  );
+});

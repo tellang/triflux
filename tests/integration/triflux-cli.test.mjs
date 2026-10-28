@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   utimesSync,
@@ -410,6 +411,37 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
     assert.equal(result.status, 0, result.stderr || result.stdout);
     assert.doesNotMatch(result.stdout, /Codex profiles 설정 실패:\s*undefined/);
     assert.match(result.stdout, /Codex profiles 설정 실패:\s*unknown error/);
+  });
+
+  it("setup은 기존 가족 파일과 inline 설정을 백업하고 경로를 알린다", () => {
+    const homeDir = createHomeDir();
+    const codexDir = join(homeDir, ".codex");
+    const custom = 'model = "custom-model"\nsandbox_mode = "read-only"\n';
+    writeFileSync(join(codexDir, "sol.config.toml"), custom);
+    const original = `${"# 사용자 설정 보존\n".repeat(10)}[profiles.sol]\n${custom}`;
+    writeFileSync(join(codexDir, "config.toml"), original);
+    const payload = parseStdoutJson(
+      runCli(["setup", "--json"], {
+        homeDir,
+        env: { TFX_CODEX_CONFIG_SYNC: "1" },
+      }),
+    );
+    const backups = readdirSync(codexDir).filter((name) =>
+      name.includes("bak-model-family"),
+    );
+    assert.equal(backups.length, 2);
+    for (const name of backups) {
+      const content = readFileSync(join(codexDir, name), "utf8");
+      assert.equal(
+        content,
+        name.startsWith("config.toml.") ? original : custom,
+      );
+      assert.ok(payload.notices.some((notice) => notice.includes(name)));
+    }
+    assert.equal(
+      readFileSync(join(codexDir, "sol.config.toml"), "utf8"),
+      'model = "gpt-6.1-sol"\n',
+    );
   });
 });
 
