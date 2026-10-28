@@ -21,6 +21,18 @@ describe("lane2-d routing contract: Codex agent policy SSOT", () => {
     );
   });
 
+  it("역할 정책과 route 출력은 가족과 effort를 분리한다", () => {
+    assert.deepEqual(resolveCodexAgentPolicy("architect").codex, {
+      family: "astra",
+      effort: "xhigh",
+    });
+    const route = resolveAgentRoute("architect", { architect: "codex" });
+    assert.equal(route[1], "astra_xhigh");
+    assert.equal(route[8], 600);
+    assert.equal(route.at(-2), "xhigh");
+    assert.equal(route.at(-1), "astra");
+  });
+
   it("headless roles ignore ordinary global profiles but retain max/ultra lanes", () => {
     assert.equal(
       resolveNestedCodexAgentProfile("architect", {

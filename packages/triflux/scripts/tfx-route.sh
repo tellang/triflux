@@ -1009,7 +1009,8 @@ route_agent() {
   local normalized_profile _policy_mcp
   IFS=$'\x1e' read -r CLI_TYPE CODEX_POLICY_PROFILE CODEX_POLICY_TIMEOUT \
     _policy_mcp CODEX_POLICY_SUBCOMMAND normalized_profile CODEX_OVERRIDE_PROFILE GEMINI_PROFILE \
-    ROLE_EXPECTED_DURATION NATIVE_CODEX_ALLOWED REVIEW_AUTHOR REVIEW_USAGE_SWITCH <<< "$policy_row"
+    ROLE_EXPECTED_DURATION NATIVE_CODEX_ALLOWED REVIEW_AUTHOR REVIEW_USAGE_SWITCH \
+    CODEX_POLICY_EFFORT CLI_FAMILY <<< "$policy_row"
   if [[ "$normalized_profile" != "$TFX_CODEX_PROFILE" ]]; then
     echo "[tfx-route] legacy Codex profile remapped: ${TFX_CODEX_PROFILE} -> ${normalized_profile}" >&2
   fi
@@ -1018,14 +1019,14 @@ route_agent() {
     codex) apply_codex_agent_policy ;;
     antigravity)
       CLI_CMD="agy"; CLI_ARGS="--print --dangerously-skip-permissions"
-      CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900 ;;
+      CLI_EFFORT=""; CLI_FAMILY=""; DEFAULT_TIMEOUT=900 ;;
     claude)
       if [[ -n "$REVIEW_AUTHOR" ]]; then
         CLI_CMD="claude"; CLI_ARGS=""
-        CLI_EFFORT="high"; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
+        CLI_EFFORT="high"; CLI_FAMILY=""; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
       else
         CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-        CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=600
+        CLI_EFFORT=""; CLI_FAMILY=""; DEFAULT_TIMEOUT=600
       fi ;;
   esac
 }
@@ -1034,7 +1035,7 @@ apply_codex_agent_policy() {
   CLI_TYPE="codex"; CLI_CMD="codex"
   CLI_ARGS="exec --profile ${CODEX_POLICY_PROFILE} $(build_codex_base)"
   [[ "$CODEX_POLICY_SUBCOMMAND" != "review" ]] || CLI_ARGS+=" review"
-  CLI_EFFORT="$CODEX_POLICY_PROFILE"; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
+  CLI_EFFORT="$CODEX_POLICY_EFFORT"; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
 }
 
 # ── CLI 모드 오버라이드 ──
@@ -1148,17 +1149,17 @@ apply_cli_mode() {
         CLI_TYPE="antigravity"
         CLI_CMD="agy"
         CLI_ARGS="--print --dangerously-skip-permissions"
-        CLI_EFFORT="agy_v1"
+        CLI_EFFORT=""; CLI_FAMILY=""
         DEFAULT_TIMEOUT=900
         echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE → antigravity($CLI_EFFORT)로 리매핑" >&2
       fi ;;
     claude)
       if [[ -n "$REVIEW_AUTHOR" ]]; then
         CLI_TYPE="claude"; CLI_CMD="claude"; CLI_ARGS=""
-        CLI_EFFORT="high"; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
+        CLI_EFFORT="high"; CLI_FAMILY=""; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
       elif [[ "${TFX_REROUTED_FROM:-}" == "antigravity" && "$TFX_ANTIGRAVITY_FALLBACK" == "claude" ]]; then
         CLI_TYPE="claude"; CLI_CMD="claude"; CLI_ARGS=""
-        CLI_EFFORT="agy_v1"; DEFAULT_TIMEOUT=900
+        CLI_EFFORT=""; CLI_FAMILY=""; DEFAULT_TIMEOUT=900
         case "$AGENT_TYPE" in
           security-reviewer|designer) CLI_EFFORT="high" ;;
         esac
@@ -1311,7 +1312,7 @@ resolve_safe_retry_codex_profile() {
       ;;
   esac
   local effort
-  effort="$(read_codex_profile_effort "$profile")"
+  if ! effort="$(read_codex_profile_effort "$profile")"; then return 78; fi
   case "$effort" in
     ultra) echo "astra_max" ;;
     *) echo "$profile" ;;
@@ -1323,11 +1324,18 @@ read_codex_profile_effort() {
   "$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
     const { resolveCodexProfileConfigValues } = await import(pathToFileURL(process.argv[1]).href);
-    const { effort } = resolveCodexProfileConfigValues(process.argv[2], {
-      codexHome: process.env.CODEX_HOME || process.env.TFX_CODEX_HOME,
-    });
-    process.stdout.write(effort?.toLowerCase() || "");
+    try {
+      const { effort } = resolveCodexProfileConfigValues(process.argv[2], {
+        codexHome: process.env.CODEX_HOME || process.env.TFX_CODEX_HOME,
+      });
+      process.stdout.write(effort?.toLowerCase() || "");
+    } catch (error) {
+      console.error(`[tfx-route] ${error.message}`);
+      process.exit(error.code === "unsupported-effort" ? 78 : 1);
+    }
   ' "$CODEX_PROFILE_MODULE" "$profile" || {
+    local resolver_status=$?
+    [[ "$resolver_status" -ne 78 ]] || return 78
     echo "[tfx-route] 경고: Codex effort 해석 실패, 기존 프로필 유지: $profile" >&2
     return 0
   }
@@ -1335,6 +1343,7 @@ read_codex_profile_effort() {
 
 apply_codex_concrete_effort_guard() {
   [[ "${CLI_TYPE:-}" == "codex" ]] || return 0
+  CODEX_COMPAT_PROFILE=""
 
   local -a args=()
   read -r -a args <<< "$CLI_ARGS"
@@ -1352,7 +1361,7 @@ apply_codex_concrete_effort_guard() {
     allow_ultra=1
   fi
   local effort target_profile=""
-  effort="$(read_codex_profile_effort "$profile")"
+  if ! effort="$(read_codex_profile_effort "$profile")"; then return 78; fi
   case "$profile" in
     astra_max) target_profile="astra_max" ;;
     astra_ultra) target_profile="astra_max" ;;
@@ -1366,16 +1375,35 @@ apply_codex_concrete_effort_guard() {
         --profile=*) args[$i]="--profile=$target_profile" ;;
       esac
     done
-    CLI_EFFORT="$target_profile"
-    echo "[tfx-route] final Codex effort guard: ${profile}/${effort:-unknown} -> ${target_profile}" >&2
+    if [[ "$profile" != "$target_profile" ]]; then
+      echo "[tfx-route] Codex ultra policy: ${profile} -> ${target_profile}" >&2
+    fi
     profile="$target_profile"
   fi
-  local managed_effort
-  if ! managed_effort=$("$NODE_BIN" --input-type=module -e '
+  local managed_spec managed_family managed_effort
+  CLI_EFFORT=""; CLI_FAMILY=""
+  if managed_spec=$("$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
-    const { modelEffortFromProfile } = await import(pathToFileURL(process.argv[1]).href);
-    process.stdout.write(modelEffortFromProfile("codex", process.argv[2])?.effort || "");
+    const { modelEffortFromProfile, resolveCodexModelEffort } = await import(pathToFileURL(process.argv[1]).href);
+    const requested = modelEffortFromProfile("codex", process.argv[2]);
+    if (!requested) process.exit(0);
+    try {
+      const resolved = resolveCodexModelEffort(requested, {
+        codexHome: process.env.CODEX_HOME || process.env.TFX_CODEX_HOME,
+      });
+      if (resolved.effort !== requested.effort) {
+        console.error(`[tfx-route] Codex effort: requested=${requested.effort} applied=${resolved.effort} model=${resolved.model}`);
+      }
+      process.stdout.write([resolved.family, resolved.effort].join("\x1e"));
+    } catch (error) {
+      console.error(`[tfx-route] ${error.message}`);
+      process.exit(error.code === "unsupported-effort" ? 78 : 1);
+    }
   ' "${CODEX_PROFILE_MODULE%/*}/model-effort.mjs" "$profile"); then
+    IFS=$'\x1e' read -r managed_family managed_effort <<< "$managed_spec"
+  else
+    local resolver_status=$?
+    [[ "$resolver_status" -ne 78 ]] || return 78
     echo "[tfx-route] 경고: 관리 Codex effort 해석 실패, 기존 프로필 유지: $profile" >&2
     managed_effort=""
   fi
@@ -1384,11 +1412,18 @@ apply_codex_concrete_effort_guard() {
     for ((i = 0; i < ${#args[@]}; i++)); do
       if [[ "${args[$i]}" == "-c" && "${args[$((i + 1))]:-}" == model_reasoning_effort=* ]]; then
         i=$((i + 1))
+      elif [[ "${args[$i]}" == "--profile" ]]; then
+        guarded_args+=(--profile "$managed_family")
+        i=$((i + 1))
+      elif [[ "${args[$i]}" == --profile=* ]]; then
+        guarded_args+=("--profile=$managed_family")
       else
         guarded_args+=("${args[$i]}")
       fi
     done
     args=("${guarded_args[@]}" -c "model_reasoning_effort=\"${managed_effort}\"")
+    CLI_FAMILY="$managed_family"; CLI_EFFORT="$managed_effort"
+    CODEX_COMPAT_PROFILE="$profile"
   fi
   CLI_ARGS="${args[*]}"
 }
@@ -1490,7 +1525,6 @@ apply_retry_snapshot_cli_invocation() {
 
   merged_args+=("${retry_args[@]}")
   CLI_ARGS="${merged_args[*]}"
-  [[ -n "$retry_profile" ]] && CLI_EFFORT="$retry_profile"
   echo "[tfx-route] retry snapshot cliInvocation.argv applied" >&2
 }
 
@@ -1503,7 +1537,6 @@ apply_codex_profile_override() {
   local review_suffix=""
   [[ "$CLI_ARGS" != *" review" ]] || review_suffix=" review"
   CLI_ARGS="exec --profile ${CODEX_OVERRIDE_PROFILE} $(build_codex_base)${review_suffix}"
-  CLI_EFFORT="$CODEX_OVERRIDE_PROFILE"
   echo "[tfx-route] Codex profile override: ${TFX_CODEX_PROFILE} -> ${CODEX_OVERRIDE_PROFILE}" >&2
 }
 
@@ -1519,7 +1552,7 @@ apply_verifier_override() {
       CLI_TYPE="claude-native"
       CLI_CMD=""
       CLI_ARGS=""
-      CLI_EFFORT="n/a"; DEFAULT_TIMEOUT=1200
+      CLI_EFFORT=""; CLI_FAMILY=""; DEFAULT_TIMEOUT=1200
       echo "[tfx-route] TFX_VERIFIER_OVERRIDE=claude: verifier -> claude-native" >&2
       ;;
   esac
@@ -2171,6 +2204,22 @@ run_codex_exec() {
   local -a codex_args=()
   read -r -a codex_args <<< "$CLI_ARGS"
   codex_args=("${codex_args[0]}" ${CODEX_CONFIG_FLAGS[@]+"${CODEX_CONFIG_FLAGS[@]}"} "${codex_args[@]:1}")
+  local codex_home
+  codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
+  if [[ -n "${CLI_FAMILY:-}" && ! -f "$codex_home/$CLI_FAMILY.config.toml" && -n "${CODEX_COMPAT_PROFILE:-}" ]]; then
+    if [[ ! -f "$codex_home/$CODEX_COMPAT_PROFILE.config.toml" ]]; then
+      echo "[tfx-route] 오류: 가족과 결합 프로필 파일이 모두 없습니다: $CLI_FAMILY, $CODEX_COMPAT_PROFILE" >&2
+      return 78
+    fi
+    echo "[tfx-route] 경고: 가족 프로필 파일이 없어 결합 프로필 유지: $CLI_FAMILY -> $CODEX_COMPAT_PROFILE" >&2
+    local i
+    for ((i = 0; i < ${#codex_args[@]}; i++)); do
+      case "${codex_args[$i]}" in
+        --profile) codex_args[$((i + 1))]="$CODEX_COMPAT_PROFILE" ;;
+        --profile=*) codex_args[$i]="--profile=$CODEX_COMPAT_PROFILE" ;;
+      esac
+    done
+  fi
 
   _attempt_codex_run() {
     exit_code_local=0
@@ -2198,7 +2247,7 @@ run_codex_exec() {
   if [[ "$exit_code_local" -ne 0 ]] && grep -qE "is not supported when using Codex with a ChatGPT account" "$STDERR_LOG" 2>/dev/null; then
     local fallback_profile=""
     case "$CLI_EFFORT" in
-      astra_ultra|astra_max|astra_xhigh|sol_high|sol_med|terra_high|luna_high) fallback_profile="luna_low" ;;
+      ultra|max|xhigh|high|medium) fallback_profile="luna" ;;
     esac
     if [[ -n "$fallback_profile" ]]; then
       echo "[tfx-route] tier fallback: $CLI_EFFORT not supported on ChatGPT account → retry with $fallback_profile" >&2
@@ -2219,7 +2268,7 @@ run_codex_exec() {
         fi
       done
       codex_args=("${new_args[@]}" -c 'model_reasoning_effort="low"')
-      CLI_EFFORT="$fallback_profile"
+      CLI_FAMILY="$fallback_profile"; CLI_EFFORT="low"
       _attempt_codex_run
     fi
   fi
@@ -2244,8 +2293,8 @@ main() {
   apply_verifier_override
   apply_codex_profile_override
   apply_retry_snapshot_cli_invocation
-  apply_codex_concrete_effort_guard
   apply_cli_disable_policy
+  apply_codex_concrete_effort_guard
 
   # CLI 경로 해석
   case "$CLI_CMD" in
@@ -2354,7 +2403,7 @@ FALLBACK_EOF
   fi
 
   # 메타정보 (stderr)
-  echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT expected=${TIMEOUT_SEC}s stall=${STALL_THRESHOLD_SEC}s ceiling=${HARD_CEILING_SEC}s" >&2
+  echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT family=$CLI_FAMILY expected=${TIMEOUT_SEC}s stall=${STALL_THRESHOLD_SEC}s ceiling=${HARD_CEILING_SEC}s" >&2
   if [[ -n "$REVIEW_AUTHOR" ]]; then
     echo "[tfx-route] reviewer=$CLI_TYPE review_author=$REVIEW_AUTHOR usage_switch=$REVIEW_USAGE_SWITCH cli_mode=$TFX_CLI_MODE" >&2
   fi

@@ -15,6 +15,36 @@ const LIB = "scripts/lib/codex-recovery.sh";
 const POST = "scripts/tfx-route-post.mjs";
 
 describe("tfx-route-post.mjs — Codex JSON 출력", () => {
+  it("빈 effort를 통계에 high로 바꾸지 않는다", () => {
+    const home = mkdtempSync(join(tmpdir(), "tfx-empty-effort-"));
+    try {
+      for (const cli of ["antigravity", "claude-native", "codex"]) {
+        const result = spawnSync(
+          process.execPath,
+          [POST, "--cli", cli, "--effort", ""],
+          {
+            encoding: "utf8",
+            env: { ...process.env, HOME: home },
+          },
+        );
+        assert.equal(result.status, 0, result.stderr);
+      }
+      const entries = readFileSync(
+        join(home, ".claude", "logs", "tfx-route-stats.jsonl"),
+        "utf8",
+      )
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      assert.deepEqual(
+        entries.map(({ effort }) => effort),
+        ["n/a", "n/a", "n/a"],
+      );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   function runPost(content) {
     const home = mkdtempSync(join(tmpdir(), "tfx-rv-json-"));
     const stdoutLog = join(home, "stdout.log");

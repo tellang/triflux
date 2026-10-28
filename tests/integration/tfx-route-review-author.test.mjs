@@ -196,7 +196,7 @@ for (const role of ["code-reviewer", "quality-reviewer"]) {
         assert.equal(r.argv[r.argv.indexOf("--effort") + 1], "high");
         assert.ok(r.argv.includes("--verbose"), r.output);
       } else if (expected === "codex") {
-        assert.equal(r.argv[r.argv.indexOf("--profile") + 1], "sol_high");
+        assert.equal(r.argv[r.argv.indexOf("--profile") + 1], "sol");
         assert.ok(r.argv.includes("review"), r.output);
       } else
         assert.match(r.argv[r.argv.indexOf("--model") + 1], /Argon \(High\)/);
@@ -255,7 +255,7 @@ for (const launch of ["headless", "pane"]) {
           assert.equal(r.argv[r.argv.indexOf("--effort") + 1], "high");
           assert.ok(r.argv.includes("--verbose"), r.output);
         } else {
-          assert.equal(r.argv[r.argv.indexOf("--profile") + 1], "sol_high");
+          assert.equal(r.argv[r.argv.indexOf("--profile") + 1], "sol");
           assert.ok(r.argv.includes("review"), r.output);
         }
       });

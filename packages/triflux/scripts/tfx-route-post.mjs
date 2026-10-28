@@ -464,7 +464,7 @@ function main() {
 
   const agent = a.agent || "unknown";
   const cliType = a.cli || "codex";
-  const effort = a.effort || "high";
+  const effort = a.effort || "n/a";
   const exitCode = parseInt(a.exit_code || "0", 10);
   const elapsed = parseInt(a.elapsed || "0", 10);
   const timeout = parseInt(a.timeout || "300", 10);
