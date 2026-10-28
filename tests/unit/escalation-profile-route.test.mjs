@@ -85,6 +85,14 @@ fi
 node - "$@" <<'NODE'
 const fs = require("node:fs");
 fs.writeFileSync(process.env.TFX_CAPTURE_ARGS, JSON.stringify(process.argv.slice(2)));
+if (process.env.TFX_FAKE_TIER_FAILURE === "1") {
+  const marker = process.env.TFX_CAPTURE_ARGS + ".tier-failed";
+  if (!fs.existsSync(marker)) {
+    fs.writeFileSync(marker, "");
+    console.error("is not supported when using Codex with a ChatGPT account");
+    process.exit(1);
+  }
+}
 NODE
 cat >/dev/null || true
 echo "fake codex ok"
@@ -120,6 +128,7 @@ function runRoute({
   rmSync(path.join(home, ".codex"), { recursive: true, force: true });
   mkdirSync(path.join(home, ".codex"));
   rmSync(capture, { force: true });
+  rmSync(`${capture}.tier-failed`, { force: true });
   for (const [name, content] of Object.entries(profileFiles)) {
     writeFileSync(path.join(home, ".codex", `${name}.config.toml`), content);
   }
@@ -329,7 +338,7 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     assert.deepEqual(profileValues(args), ["astra_max"]);
   });
 
-  it("custom retry profiles cannot hide ultra or fall through to global config", () => {
+  it("custom retry 프로필은 ultra를 제한하고 없는 파일도 이름을 보존한다", () => {
     const dir = makeTempDir();
     const customSnapshot = path.join(dir, "custom-retry-snapshot.json");
     const missingSnapshot = path.join(dir, "missing-retry-snapshot.json");
@@ -349,10 +358,10 @@ describe("tfx-route retry snapshot profile plumbing", () => {
     });
 
     assert.deepEqual(profileValues(customUltra), ["astra_max"]);
-    assert.deepEqual(profileValues(missingCustom), ["sol_high"]);
+    assert.deepEqual(profileValues(missingCustom), ["missing-private"]);
   });
 
-  it("nested default uses the max profile for a mutated ultra profile", () => {
+  it("관리 프로필의 바뀐 ultra를 이름의 high로 덮어쓴다", () => {
     const args = runRoute({
       env: { TFX_TEAM_NAME: "nested-team" },
       profileFiles: {
@@ -360,6 +369,44 @@ describe("tfx-route retry snapshot profile plumbing", () => {
       },
     });
 
-    assert.deepEqual(profileValues(args), ["astra_max"]);
+    assert.deepEqual(profileValues(args), ["sol_high"]);
+    assert.ok(args.includes('model_reasoning_effort="high"'));
+  });
+
+  it("tier 폴백은 기존 effort를 제거하고 low를 명시한다", () => {
+    const args = runRoute({ env: { TFX_FAKE_TIER_FAILURE: "1" } });
+    assert.deepEqual(profileValues(args), ["luna_low"]);
+    assert.deepEqual(
+      args.filter((arg) => arg.startsWith("model_reasoning_effort=")),
+      ['model_reasoning_effort="low"'],
+    );
+  });
+
+  it("custom retry 프로필은 suffix와 달라도 파일을 그대로 선택한다", () => {
+    const snapshot = path.join(makeTempDir(), "custom-retry-snapshot.json");
+    writeRetrySnapshot(snapshot, "private_high");
+    const args = runRoute({
+      snapshot,
+      profileFiles: {
+        private_high:
+          'model = "custom-model"\nmodel_reasoning_effort = "low"\n',
+      },
+    });
+    assert.deepEqual(profileValues(args), ["private_high"]);
+    assert.ok(!args.some((arg) => arg.startsWith("model_reasoning_effort=")));
+  });
+
+  it("custom ultra suffix도 파일의 low를 바꾸지 않는다", () => {
+    const snapshot = path.join(makeTempDir(), "custom-ultra-snapshot.json");
+    writeRetrySnapshot(snapshot, "private_ultra");
+    const args = runRoute({
+      snapshot,
+      profileFiles: {
+        private_ultra:
+          'model = "custom-model"\nmodel_reasoning_effort = "low"\n',
+      },
+    });
+    assert.deepEqual(profileValues(args), ["private_ultra"]);
+    assert.ok(!args.some((arg) => arg.startsWith("model_reasoning_effort=")));
   });
 });

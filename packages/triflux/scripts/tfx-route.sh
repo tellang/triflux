@@ -1305,59 +1305,29 @@ resolve_safe_retry_codex_profile() {
   local profile
   profile="$1"
   case "$profile" in
-    ultra|astra_ultra|*_ultra)
+    ultra|astra_ultra)
       echo "astra_max"
       return
       ;;
-    luna_low|luna_high|terra_high|sol_med|sol_high|astra_xhigh|astra_max)
-      echo "$profile"
-      return
-      ;;
   esac
-
-  local codex_home profile_file
-  codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
-  profile_file="${codex_home}/${profile}.config.toml"
-  if [[ ! -f "$profile_file" ]]; then
-    echo "sol_high"
-    return 0
-  fi
   local effort
   effort="$(read_codex_profile_effort "$profile")"
   case "$effort" in
     ultra) echo "astra_max" ;;
-    "") echo "sol_high" ;;
     *) echo "$profile" ;;
   esac
 }
 
 read_codex_profile_effort() {
   local profile="$1"
-  local codex_home profile_file effort
-  codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
-  profile_file="${codex_home}/${profile}.config.toml"
-  if [[ -f "$profile_file" ]]; then
-    effort=$(awk -F= '
-      /^[[:space:]]*model_reasoning_effort[[:space:]]*=/ {
-        value=$2
-        sub(/[[:space:]]*#.*/, "", value)
-        gsub(/^[[:space:]"'"'']+|[[:space:]"'"'']+$/, "", value)
-        print tolower(value)
-        exit
-      }
-    ' "$profile_file" 2>/dev/null || true)
-    echo "$effort"
-    return
-  fi
-  case "$profile" in
-    *_ultra) echo "ultra" ;;
-    *_max) echo "max" ;;
-    *_xhigh) echo "xhigh" ;;
-    *_high) echo "high" ;;
-    *_med|*_medium) echo "medium" ;;
-    *_low) echo "low" ;;
-    *) echo "" ;;
-  esac
+  "$NODE_BIN" --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const { resolveCodexProfileConfigValues } = await import(pathToFileURL(process.argv[1]).href);
+    const { effort } = resolveCodexProfileConfigValues(process.argv[2], {
+      codexHome: process.env.CODEX_HOME || process.env.TFX_CODEX_HOME,
+    });
+    process.stdout.write(effort?.toLowerCase() || "");
+  ' "$CODEX_PROFILE_MODULE" "$profile"
 }
 
 apply_codex_concrete_effort_guard() {
@@ -1385,17 +1355,36 @@ apply_codex_concrete_effort_guard() {
     astra_ultra) target_profile="astra_max" ;;
     *) [[ "$effort" != "ultra" ]] || target_profile="astra_max" ;;
   esac
-  [[ -n "$target_profile" ]] || return 0
-  [[ "$allow_ultra" -ne 1 ]] || target_profile="astra_ultra"
-  for ((i = 0; i < ${#args[@]}; i++)); do
-    case "${args[$i]}" in
-      --profile) args[$((i + 1))]="$target_profile" ;;
-      --profile=*) args[$i]="--profile=$target_profile" ;;
-    esac
-  done
+  if [[ -n "$target_profile" ]]; then
+    [[ "$allow_ultra" -ne 1 ]] || target_profile="astra_ultra"
+    for ((i = 0; i < ${#args[@]}; i++)); do
+      case "${args[$i]}" in
+        --profile) args[$((i + 1))]="$target_profile" ;;
+        --profile=*) args[$i]="--profile=$target_profile" ;;
+      esac
+    done
+    CLI_EFFORT="$target_profile"
+    echo "[tfx-route] final Codex effort guard: ${profile}/${effort:-unknown} -> ${target_profile}" >&2
+    profile="$target_profile"
+  fi
+  local managed_effort
+  managed_effort=$("$NODE_BIN" --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const { modelEffortFromProfile } = await import(pathToFileURL(process.argv[1]).href);
+    process.stdout.write(modelEffortFromProfile("codex", process.argv[2])?.effort || "");
+  ' "${CODEX_PROFILE_MODULE%/*}/model-effort.mjs" "$profile")
+  if [[ -n "$managed_effort" ]]; then
+    local -a guarded_args=()
+    for ((i = 0; i < ${#args[@]}; i++)); do
+      if [[ "${args[$i]}" == "-c" && "${args[$((i + 1))]:-}" == model_reasoning_effort=* ]]; then
+        i=$((i + 1))
+      else
+        guarded_args+=("${args[$i]}")
+      fi
+    done
+    args=("${guarded_args[@]}" -c "model_reasoning_effort=\"${managed_effort}\"")
+  fi
   CLI_ARGS="${args[*]}"
-  CLI_EFFORT="$target_profile"
-  echo "[tfx-route] final Codex effort guard: ${profile}/${effort:-unknown} -> ${target_profile}" >&2
 }
 
 apply_retry_snapshot_cli_invocation() {
@@ -2223,7 +2212,7 @@ run_codex_exec() {
           new_args+=("$arg")
         fi
       done
-      codex_args=("${new_args[@]}")
+      codex_args=("${new_args[@]}" -c 'model_reasoning_effort="low"')
       CLI_EFFORT="$fallback_profile"
       _attempt_codex_run
     fi

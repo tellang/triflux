@@ -74,24 +74,20 @@ test("객체 상속 키를 프로필로 해석하지 않는다", () => {
   }
 });
 
-test("effort 순서로 가장 가까운 아래 단계를 고를 수 있다", () => {
-  const supported = ["low", "medium", "high"];
-  assert.equal(
-    modelEffort.EFFORT_ORDER.slice(
-      0,
-      modelEffort.EFFORT_ORDER.indexOf("max") + 1,
-    )
-      .filter((effort) => supported.includes(effort))
-      .at(-1),
+test("정규화는 객체 상속 키도 문자열로 보존한다", () => {
+  for (const name of ["__proto__", "constructor", "toString"]) {
+    assert.equal(modelEffort.normalizeCodexProfileName(name), name);
+  }
+});
+
+test("effort 순서는 CLI 공통 비교 순서를 유지한다", () => {
+  assert.deepEqual(modelEffort.EFFORT_ORDER, [
+    "none",
+    "low",
+    "medium",
     "high",
-  );
-  assert.equal(
-    modelEffort.EFFORT_ORDER.slice(
-      0,
-      modelEffort.EFFORT_ORDER.indexOf("none") + 1,
-    )
-      .filter((effort) => supported.includes(effort))
-      .at(-1),
-    undefined,
-  );
+    "xhigh",
+    "max",
+    "ultra",
+  ]);
 });

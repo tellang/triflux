@@ -9,6 +9,7 @@ import {
   resolveCodexProfileConfigValues,
 } from "./codex-profile-config.mjs";
 import { resolveGeminiProfileForPurpose } from "./gemini-profiles.mjs";
+import { modelEffortFromProfile } from "./model-effort.mjs";
 
 const policy = {
   executor: {
@@ -264,16 +265,16 @@ export function resolveNestedCodexAgentProfile(
       : NESTED_GLOBAL_PROFILE_OVERRIDES.has(globalOverride)
         ? globalOverride
         : "auto";
-  const fallback = resolveCodexAgentProfile(agent);
   const candidate = resolveCodexAgentProfile(agent, {
     profileOverride: effectiveOverride,
     retryProfile,
     nested: true,
     allowCustom: true,
   });
-  const { effort } = resolveCodexProfileConfigValues(candidate, { codexHome });
-  if (!effort) return fallback;
-  return effort.toLowerCase() === "ultra" ? "astra_max" : candidate;
+  const { effort } =
+    modelEffortFromProfile("codex", candidate) ||
+    resolveCodexProfileConfigValues(candidate, { codexHome });
+  return effort?.toLowerCase() === "ultra" ? "astra_max" : candidate;
 }
 
 const EXPECTED_DURATION_BY_AGENT = Object.freeze({

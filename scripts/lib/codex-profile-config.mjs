@@ -9,23 +9,16 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { writeRotatedBackup } from "./backup-rotation.mjs";
-import { normalizeCodexProfileName } from "./model-effort.mjs";
+import {
+  modelEffortFromProfile,
+  normalizeCodexProfileName,
+} from "./model-effort.mjs";
 import {
   CODEX_FAMILY_PROFILES,
   modelFamilyPaths,
   resolveModelFamilies,
   writeModelFile,
 } from "./model-family-resolver.mjs";
-
-const EFFORT_BY_SUFFIX = {
-  ultra: "ultra",
-  max: "max",
-  xhigh: "xhigh",
-  high: "high",
-  med: "medium",
-  medium: "medium",
-  low: "low",
-};
 
 export { normalizeCodexProfileName };
 
@@ -57,45 +50,25 @@ function readProfileScalar(raw, key) {
   return value || null;
 }
 
-/**
- * Resolve a Codex effort profile name (e.g. "sol_high") to the `-c key=value`
- * config overrides that `codex exec` accepts, so the headless CLI lanes can
- * select a profile WITHOUT `codex exec --profile <name>`. codex 0.134+ rejects
- * `--profile X` whenever config.toml still contains an inline `[profiles.X]`
- * table (which codex itself re-injects when it rewrites config.toml), so the
- * `-c` form is immune and needs no config mutation / sanitize race.
- *
- * SSOT = the per-profile file `~/.codex/<name>.config.toml` written by
- * `tfx setup`; falls back to deriving the effort from the `<...>_<effort>`
- * naming convention when the file is absent. Returns the keys that resolve, in
- * `key="value"` TOML-scalar form ready to be shell-quoted by the caller.
- *
- * @param {string} profileName
- * @param {{ codexHome?: string }} [opts]
- * @returns {string[]} e.g. ['model="gpt-6.1-sol"', 'model_reasoning_effort="high"']
- */
+// 관리 이름의 effort는 변환 표가 정한다. custom 파일은 ultra 제한 판정에 사용한다.
 export function resolveCodexProfileConfigValues(profileName, opts = {}) {
   if (typeof profileName !== "string" || !profileName) {
     return { model: null, effort: null };
   }
   const normalizedProfileName = normalizeCodexProfileName(profileName);
+  const managed = modelEffortFromProfile("codex", normalizedProfileName);
   const codexHome =
     opts.codexHome || process.env.CODEX_HOME || join(homedir(), ".codex");
   let model = null;
-  let effort = null;
+  let effort = managed?.effort || null;
   try {
     const raw = readFileSync(
       join(codexHome, `${normalizedProfileName}.config.toml`),
       "utf8",
     );
     model = readProfileScalar(raw, "model");
-    effort = readProfileScalar(raw, "model_reasoning_effort");
-  } catch {
-    const suffix = /_(ultra|max|xhigh|high|med|medium|low)$/.exec(
-      normalizedProfileName,
-    );
-    if (suffix) effort = EFFORT_BY_SUFFIX[suffix[1]] || null;
-  }
+    if (!managed) effort = readProfileScalar(raw, "model_reasoning_effort");
+  } catch {}
   return { model, effort };
 }
 
