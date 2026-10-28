@@ -2,6 +2,12 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.84.5] - 2026-10-28
+
+### Changed
+- lead: 지시서에 사용자 질문 위치를 적는다. 기본은 워커가 `AskUserQuestion`을 띄우지 않고 리드로 올리며, 지시서에 "직접 물어도 됨"이 있을 때만 워커 pane 에서 묻는다. agy 워커 지시서에는 리드 이름이 든 `tfx-peer` 보고 명령 전문과 `BypassSandbox: true` 문장을 넣는다. agy 워커가 보고 절 없이 결과 파일만 쓰고 멈추던 사례가 있었다 (#840)
+- lead: 등록 기록에 재개 ID 열을 두고 닫은 워커는 `.omc/lead/workers-closed.md` 로 옮긴다. 같은 역할과 주제의 일은 닫은 워커를 새로 띄우지 않고 resume 한다. 컨텍스트가 차서 하는 승계는 같은 pane 에서 `tfx_control` clear 와 인계 파일로 이어가는 것을 기본으로 한다 (#841)
+
 ## [10.84.4] - 2026-10-28
 
 ### Fixed
