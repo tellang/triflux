@@ -104,6 +104,8 @@ describe("Codex bucket normalization", () => {
       [{ window_minutes: 7000 }, "weekly"],
       [{ window_minutes: 1440 }, null],
       [{ window_minutes: 6999 }, null],
+      // 30일 창이 1w 칸을 덮으면 주간 사용률이 30일 값으로 보인다.
+      [{ window_minutes: 43200 }, null],
       [null, null],
       [{ used_percent: 50 }, null],
     ]) {
