@@ -1,6 +1,6 @@
 {
   "name": "triflux-mods",
-  "version": "10.86.0",
+  "version": "10.86.1",
   "description": "triflux 의 Claude Code mods: HUD band 와 서브에이전트 effort 정책, 리드 세션의 메모리 압박 감시",
   "author": {
     "name": "tellang"

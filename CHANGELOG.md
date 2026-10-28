@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.86.1] - 2026-10-28
+
+### Fixed
+- hud: Codex 가 보고한 30일(43200분) 창이 1w 칸에 들어가 실제 주간 사용률을 가리던 문제. 주간 창은 7000~14400분만 받는다 (#851)
+
 ## [10.86.0] - 2026-10-28
 
 ### Added
