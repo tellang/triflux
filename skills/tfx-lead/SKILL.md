@@ -39,15 +39,17 @@ Codex 리드는 mod 가 없으므로 `/rename <월>.<일> <역할>`을 직접 �
 | Codex | `tfx-live rename --cli codex --transport uds --thread <ID> --name "<이름>"`, thread 가 없으면 tmux 로 `/rename <이름>` |
 | agy | tmux 로 `/rename <이름>`. 새 대화는 첫 메시지 전에 실패하므로 `tfx-live` 의 `namePending` 처리를 따른다 |
 
-- 등록 기록: 리드가 `.omc/lead/workers.md` 에 마크다운 표 하나로 적는다. 열은 이름, CLI, 위치(m5, m2, ryzen 과 tmux 대상), 역할, 지시서 다섯이고 워커마다 한 줄이다. compact 때 triflux mod 가 이 표를 요약 지시에 그대로 넣으므로 경로와 열을 바꾸지 않는다. 저장소가 무시하는 `.omc/` 아래라 커밋되지 않는다. 닫은 워커는 그 줄을 지운다.
+- 등록 기록: 리드가 `.omc/lead/workers.md` 에 마크다운 표로 적는다. 열은 이름, CLI, 위치(m5, m2, ryzen 과 tmux 대상), 역할, 지시서, 재개 ID 여섯이고 워커마다 한 줄이다. compact 때 triflux mod 가 이 파일의 표 줄을 요약 지시에 그대로 넣으므로 경로를 바꾸지 않는다. 저장소가 무시하는 `.omc/` 아래라 커밋되지 않는다.
+- 재개 ID: Claude 는 `tfx-live list-sessions --cli claude`의 `sessionId`, Codex 는 `start` 결과의 `threadId`, agy 는 `list-sessions --cli agy`의 `conversationId`다. agy 새 대화는 첫 메시지 전에 `null`일 수 있으니 첫 지시 뒤에 다시 읽어 채운다.
+- 닫은 워커는 줄을 지우지 않고 같은 열의 `.omc/lead/workers-closed.md` 로 옮긴다. 다시 필요해지면 재개한다(3절 "전담 워커 재사용"). 다시 쓸 일이 없다고 정한 줄만 지운다. 같은 파일에 두지 않는 이유는 compact 때 mod 가 `workers.md` 의 표 줄을 제목 없이 모두 넣어 닫은 워커가 살아 있는 워커와 섞이기 때문이다.
 
   ```markdown
-  | 이름 | CLI | 위치 | 역할 | 지시서 |
-  |---|---|---|---|---|
-  | reviewer-828 | Claude sonnet | m5 로컬 | PR #828 리뷰 | .omc/briefs/x/review.md |
+  | 이름 | CLI | 위치 | 역할 | 지시서 | 재개 ID |
+  |---|---|---|---|---|---|
+  | reviewer-828 | Claude sonnet | m5 로컬 `rv-828` | PR #828 리뷰 | .omc/briefs/x/review.md | 25b8dccf-56ed-4722-a70c-6317aedb1c4f |
   ```
 - 같은 이름의 세션이 로컬과 Remote Control 에 하나씩 있으면 `SendMessage`가 ref 를 요구한다. `ListAgents`에서 "on this machine" 쪽 ref 를 붙인다.
-- 워커를 다시 띄울 때는 원래 tmux 세션 안에서 `--resume <ID>`로 띄운다. 세션 이름과 tmr 재접속 루프가 그대로 맞는다.
+- 워커를 다시 띄울 때는 새로 띄우지 않고 원래 tmux 세션 이름으로 `tfx-live start --cli <CLI> --session <원래 이름> --resume <재개 ID> --name "<이름>"`을 쓴다. 세션 이름과 tmr 재접속 루프가 그대로 맞고, 워커가 파일을 다시 탐색하거나 지시서를 다시 읽지 않아도 된다. 재개한 세션은 이전 사용량을 이어받으므로 재개 직후 컨텍스트를 잰다(11절).
 - `tfx-live list-sessions`의 `status: shell`은 CLI 가 죽었다는 뜻이 아닐 수 있다. 그 세션이 띄운 백그라운드 셸일 수 있으니 재실행 전에 pane 내용을 확인한다.
 
 ## 전송 수단
@@ -66,7 +68,8 @@ Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 �
 
 띄운 쪽이 그 세션의 생성, 이름, 컨텍스트, 승계, 종료를 소유한다. 서브에이전트를 부른 세션도 같다.
 
-- 승계 순서:
+- 승계 방식: 컨텍스트가 차서 하는 승계는 resume 으로 대신하지 않는다. 재개한 세션은 이전 사용량을 그대로 이어받는다. 기본으로 같은 pane 에서 인계 파일을 쓴 뒤 `tfx_control` 의 `clear`(`handoff` 인계 파일 경로)로 비우고 이어간다. 세션, pane, 이름, 등록 줄이 그대로라 rebind 와 등록 기록 수정이 필요 없다. 모델이나 실행 기기를 바꿀 때, 또는 `tfx_control` 이 없는 세션일 때만 아래 순서로 새 세션에 넘긴다.
+- 승계 순서(새 세션):
   - 인계 파일을 쓴다. 목표, 완료 조건, 체크아웃 상태, 확정 결정, 증거 경로, 미완료, 다음 행동, `predecessorSessionId`를 담는다.
   - 승계 세션이 경로를 읽고 ACK 한다.
   - 원 리드는 닫기 전에 자기가 띄운 Claude 워커마다 `tfx_control` 의 `rebind`(`target: claude:<이름>`, `lead: <새 리드 세션 ID>`)를 보내고 "rebind 완료" 알림을 확인한다. 새 리드 ID 는 새 리드가 `whoami` 로 얻어 인계 ACK 에 적는다. 원 리드가 이미 죽어 못 보냈으면 그 워커는 tmux 안이면 `tfx-live` 경로로 제어하고, tmux 밖이면 다시 띄운다.
@@ -162,8 +165,8 @@ tmux list-panes -s -t "$TMUX_PANE" -F '#{pane_id} #{pane_current_command} #{pane
 
 새 일을 나눌 때 서브에이전트를 띄우기 전에 등록 기록을 먼저 본다.
 
-1. 등록 기록에서 같은 역할, 같은 주제의 워커를 찾는다.
-2. 찾았으면 살아 있는지 `tmr ls --json`(없으면 `tfx-live list-sessions`)으로 확인한다. 죽었으면 위 "워커 등록"대로 `--resume <ID>`로 되살리거나 그 줄을 지운다.
+1. 등록 기록에서 같은 역할, 같은 주제의 워커를 찾는다. 없으면 `.omc/lead/workers-closed.md` 도 본다.
+2. 찾았으면 살아 있는지 `tmr ls --json`(없으면 `tfx-live list-sessions`)으로 확인한다. 닫혔거나 죽었으면 새로 띄우지 않고 위 "워커 등록"대로 재개 ID 로 재개해 줄을 `workers.md` 로 되돌린다. 재개 ID 가 없거나 재개가 실패할 때만 새로 띄운다.
 3. 컨텍스트를 잰다(11절). `tfx-live` 의 준비 기준을 넘었으면 compact 하거나 승계한 뒤 보낸다. 85% 에 닿았으면 승계만 한다.
 4. 그 세션에 지시서 경로를 보낸다. 없으면 이번 일이 위 표의 전담 워커 기준에 맞는지 보고, 맞으면 새 전담 세션을 띄워 등록한다.
 
@@ -344,6 +347,7 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 - [ ] 세션 CLI 에 맞는 컨텍스트 보고 기준이 지시서에 있다
 - [ ] 지시서의 보고 형식이 결과 파일 경로와 세 줄 요약, 4000자 상한이다
 - [ ] 지시서에 사용자 질문 위치를 적었다(기본 리드로 올림)
+- [ ] 등록 줄에 재개 ID 를 적었다(agy 는 첫 지시 뒤 다시 확인)
 - [ ] agy 워커면 지시서에 보고 절(리드 이름이 들어간 보고 명령 전문, `BypassSandbox: true`)이 있다
 
 워커를 닫을 때:
@@ -351,7 +355,7 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 - [ ] 결과 파일을 읽었다
 - [ ] 결과를 받은 팀원 pane 을 닫았다(3절 "끝난 팀원 닫기")
 - [ ] 필요하면 인계 파일과 승계 ACK 를 확인했다
-- [ ] 닫은 뒤 `tmr ls --json`(없으면 `tmux ls`)으로 확인하고 등록 기록에서 지웠다
+- [ ] 닫은 뒤 `tmr ls --json`(없으면 `tmux ls`)으로 확인하고 등록 줄을 재개 ID 와 함께 `workers-closed.md` 로 옮겼다
 
 ## 13. 정리, 삭제, 결함 수정 레인
 
