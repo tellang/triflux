@@ -312,7 +312,7 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 
 - 가장 쉬운 방법은 `tfx-live probe`다. 결과의 `contextPct`를 본다.
 - 직접 재야 하면 transcript 의 마지막 assistant 항목 `usage`에서 입력 계열 토큰(`input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`)을 더해 공식 모델 창과 실행 한도 중 작은 값으로 나눈다. Codex 는 rollout 의 마지막 토큰 사용량 이벤트로 같은 계산을 한다.
-- 지시서에 보고 기준을 넣는다. 비율은 받는 세션의 CLI 에 맞춰 `tfx-live` 표의 준비·경고 열을 쓴다. 예: Claude 60%, Codex 15%, agy 12%. "컨텍스트가 <비율>을 넘으면 작업을 멈추고 리드에게 보고하라."
+- 지시서에 보고 기준을 넣는다. 비율은 받는 세션의 CLI 에 맞춰 `tfx-live` 표의 준비·경고 열을 쓴다. 예: Claude 60%, agy 12%. Codex 는 화면에 실행 창(예: 475,000)이 보이면 그 대비 60%, 실행 창 없이 1.05M 분모만 보이면 15% 다. 10-28 에 실행 창 Codex 에 15% 를 적어 20.9% 에서 워커가 멈춘 일이 있었다. "컨텍스트가 <비율>을 넘으면 작업을 멈추고 리드에게 보고하라."
 - 재개한 세션(`--resume`)은 이전 사용량을 이어받으므로 재개 직후 한 번 잰다.
 - 85%에 닿은 Claude 세션에는 새 작업을 주지 않고 바로 승계한다.
 - compact 때 triflux mod 가 요약 지시에 남길 항목(리드 역할, 인계 파일, 등록 워커, 열린 PR, 남은 일)을 붙인다([ADR-0045](../../docs/adr/0045-compact-snapshot-instructions.md)).
