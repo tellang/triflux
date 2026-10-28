@@ -10,7 +10,7 @@ All notable changes to triflux will be documented in this file.
 - codex: GPT-6.1 Terra 가족과 `terra_high` 프로필. 직접 Codex 를 지정한 `writer` 와 `document-specialist` 를 Terra 로 옮긴다. 공식 문서가 Terra 를 글쓰기, 시각 이해, 컴퓨터 사용용으로 둔다 (ADR-0048, #847)
 
 ### Changed
-- live: `tfx-live start --launcher` 를 세 CLI 에서 쓸 수 있다. CLI 이름 자리만 바꿔 Codex 승인 플래그와 resume 형식을 지킨다 (#845)
+- live: `tfx-live start --launcher` 를 세 CLI 에서 쓸 수 있다. 실행 명령에서 CLI 이름만 바꾸고 Codex 승인 플래그와 resume 형식은 그대로 둔다 (#845)
 
 ## [10.85.0] - 2026-10-28
 
