@@ -1629,22 +1629,12 @@ get_claude_model() {
 }
 
 get_claude_effort() {
-  # Claude Code exposes a separate --effort flag. Preserve high-end effort
-  # levels instead of collapsing them into "high". `claude --effort` accepts
-  # exactly low/medium/high/xhigh/max (an unknown value warns and falls back to
-  # the default).
-  case "$CLI_EFFORT" in
-    low) echo "low" ;;
-    medium) echo "medium" ;;
-    high) echo "high" ;;
-    xhigh) echo "xhigh" ;;
-    max) echo "max" ;;
-    *max*) echo "max" ;;
-    *xhigh*) echo "xhigh" ;;
-    *high*) echo "high" ;;
-    *med*) echo "medium" ;;
-    n/a|agy_v1|"") echo "" ;;
-    *low*) echo "low" ;;
+  local effort="$CLI_EFFORT"
+  # 명시한 프로필은 해석된 정책 effort를 쓰고, 기본 native/폴백의 빈 값은 보존한다.
+  [[ "$TFX_CODEX_PROFILE" == "auto" ]] || effort="$CODEX_POLICY_EFFORT"
+  case "$effort" in
+    low|medium|high|xhigh|max) echo "$effort" ;;
+    ultra) echo "max" ;;
     *) echo "" ;;
   esac
 }
