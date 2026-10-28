@@ -104,18 +104,18 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 
 > 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0038](../../docs/_archive/adr/0038-agy-default-argon-family.md), [ADR-0039](../../docs/adr/0039-review-by-author-vendor.md), [ADR-0048](../../docs/adr/0048-codex-terra-family-for-writing-lanes.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
 
-Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고, `scripts/lib/model-family-resolver.mjs`가 관리 파일 `~/.codex/<프로필>.config.toml`의 모델 ID를 갱신한다. `designer`, `writer`, `document-specialist` 항목은 직접 Codex를 지정한 경우에만 적용하며 일반 실행의 provider는 `hub/team/agent-map.json`이 정한다. 입력이 큰 코드베이스 읽기는 antigravity 로 보낸다(Argon 은 입출력 공유 1M 문맥).
+Codex 역할별 가족과 effort의 SSOT는 `scripts/lib/agent-route-policy.mjs`이다. `scripts/lib/model-family-resolver.mjs`가 가족 파일 `~/.codex/<가족>.config.toml`의 `model`을 갱신하고, effort는 `-c model_reasoning_effort`로 전달한다. `designer`, `writer`, `document-specialist` 항목은 직접 Codex를 지정한 경우에만 적용하며 일반 실행의 provider는 `hub/team/agent-map.json`이 정한다. 입력이 큰 코드베이스 읽기는 antigravity 로 보낸다(Argon 은 입출력 공유 1M 문맥).
 
-| 프로필 | triflux lane |
+| 가족 + effort / Claude 별칭 | triflux lane |
 |---------|--------------|
-| `astra_xhigh` | architect, planner, critic, analyst, debugger, deep-executor, security-reviewer(직접 Codex 지정), scientist-deep, designer(직접 지정) |
-| `astra_max` / `astra_ultra` | `TFX_CODEX_PROFILE=max/ultra`, 재시도 1단계 |
-| `sol_high` | executor, codex, code-reviewer·quality-reviewer(Claude 작성 코드 또는 사용량 전환), verifier, test-engineer, qa-tester, scientist |
-| `sol_med` | cleanup, deslop |
-| `terra_high` | writer(직접 지정), document-specialist. 공식 문서가 Terra 를 글쓰기, 시각 이해, 컴퓨터 사용용으로 둔다 |
-| `luna_high` | build-fixer |
-| `luna_low` | spark, explore 재매핑, ChatGPT tier 폴백 |
-| `argon_low` / `argon` / `argon_high` | Antigravity 분류·요약 / 생성·작성 / security-reviewer·검토·설계 |
+| `astra` + `xhigh` | architect, planner, critic, analyst, debugger, deep-executor, security-reviewer(직접 Codex 지정), scientist-deep, designer(직접 지정) |
+| `astra` + `max` / `astra` + `ultra` | `TFX_CODEX_PROFILE=max/ultra`, 재시도 1단계 |
+| `sol` + `high` | executor, codex, code-reviewer, quality-reviewer(Claude 작성 코드 또는 사용량 전환), verifier, test-engineer, qa-tester, scientist |
+| `sol` + `medium` | cleanup, deslop |
+| `terra` + `high` | writer(직접 지정), document-specialist. 공식 문서가 Terra 를 글쓰기, 시각 이해, 컴퓨터 사용용으로 둔다 |
+| `luna` + `high` | build-fixer |
+| `luna` + `low` | spark, explore 재매핑, ChatGPT tier 폴백 |
+| `argon` + `low` / `medium` / `high` | Antigravity 분류, 요약 / 생성, 작성 / security-reviewer, 검토, 설계 |
 | `fable` | `--retry auto-escalate` 최종 단계 |
 | `opus` | 메타 라우팅, planning gate, Codex·Argon 작성 코드의 code-reviewer·quality-reviewer |
 | `sonnet` | Claude native test-engineer, qa-tester |
@@ -123,9 +123,9 @@ Codex 역할별 프로필의 SSOT는 `scripts/lib/agent-route-policy.mjs`이고,
 
 Antigravity가 금지됐거나 미가용일 때 `TFX_ANTIGRAVITY_FALLBACK=claude`를 명시하면 `security-reviewer`는 `fable`과 high effort로, `designer`는 `opus`와 high effort로, `document-specialist`, `writer`, `antigravity`, `agy`는 `opus`와 기존 effort 정책으로 실행하라. 기본값은 `codex`다.
 
-`code-reviewer`와 `quality-reviewer`는 `TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 작성 벤더를 받아 다른 벤더로 리뷰한다. 미지정이면 기본 구현자인 Codex로 보고, 잘못된 값은 오류로 끝낸다. Codex 작성 코드는 Claude Opus로, Claude 작성 코드는 Codex `sol_high`의 `review`로, Argon 작성 코드는 Claude Opus로 보낸다. `~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`가 80 이상이면 Codex 작성 코드의 리뷰를 Argon High로, Argon 작성 코드의 리뷰를 Codex Sol로 전환한다. 캐시를 읽지 못하면 한도 미만으로 본다. `security-reviewer`는 `argon_high`를 쓴다. 명시 CLI 선택의 우선순위는 유지한다. 리드별 verifier와 explore 배치는 `skills/tfx-lead/SKILL.md`를 따른다.
+`code-reviewer`와 `quality-reviewer`는 `TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 작성 벤더를 받아 다른 벤더로 리뷰한다. 미지정이면 기본 구현자인 Codex로 보고, 잘못된 값은 오류로 끝낸다. Codex 작성 코드는 Claude Opus로, Claude 작성 코드는 Codex `sol` + `high`의 `review`로, Argon 작성 코드는 Claude Opus로 보낸다. `~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`가 80 이상이면 Codex 작성 코드의 리뷰를 Argon High로, Argon 작성 코드의 리뷰를 Codex Sol로 전환한다. 캐시를 읽지 못하면 한도 미만으로 본다. `security-reviewer`는 `argon` + `high`를 쓴다. 명시 CLI 선택의 우선순위는 유지한다. 리드별 verifier와 explore 배치는 `skills/tfx-lead/SKILL.md`를 따른다.
 
-Codex는 `models_cache.json`의 공개 모델 중 effort를 지원하는 후보를 숫자 버전순으로 고른다. 캐시가 없으면 `codex debug models`를 읽는다. agy는 `agy models`의 Argon 목록을 하루 동안 캐시한다. setup과 update도 같은 해석기를 쓴다. Flash와 Pro는 자동 선택하지 않고, 옛 `flash*` 프로필 이름은 `argon_low`로 보낸다.
+Codex는 `models_cache.json`의 공개 모델에서 같은 가족의 최신 버전을 선택한다. 캐시가 없으면 `codex debug models`를 읽는다. agy는 `agy models`의 Argon 목록을 하루 동안 캐시한다. 최신 모델이 요청 effort를 지원하지 않으면 지원하는 가장 가까운 아래 단계로 제한한다. 지원 목록이 없으면 요청값을 유지한다. setup과 update도 같은 해석기를 사용한다. Flash와 Pro는 자동 선택하지 않고, 옛 `flash*` 프로필 이름은 `argon` + `low`로 해석한다.
 
 `~/.config/triflux/models.json`에 `{"sol":"gpt-6-sol","argon":"gemini-4-argon"}`처럼 적으면 해당 가족을 고정한다. Windows는 `%APPDATA%\triflux`를 쓴다. 해석 기록과 agy 목록도 이 상태 디렉터리에 보관한다. 목록 조회 실패 시 마지막 성공 결과, 그다음 내장 기본값을 사용한다. Claude 별칭 라우팅은 유지한다.
 

@@ -108,18 +108,20 @@ Codex 프로필은 `~/.codex/<프로필>.config.toml`에서 직접 관리한다.
 
 ## 모델과 프로필
 
-Codex는 이름 붙은 프로필로 실행한다. 모델 ID는 `~/.codex/<프로필>.config.toml`이, 역할별 프로필
-배정은 [`scripts/lib/agent-route-policy.mjs`](scripts/lib/agent-route-policy.mjs)가 정한다. 실행·setup·update 때 Codex와 Antigravity 가족 프로필을 사용 가능한 최신 버전으로 갱신한다. Codex는 로컬 모델 캐시에서 effort 지원 여부를 확인하고, Antigravity는 `agy models`의 Argon 결과를 하루 동안 캐시한다. Flash와 Pro는 자동 선택하지 않고, 옛 `flash*` 프로필 이름은 `argon_low`로 보낸다. Claude는 기존 별칭을 유지한다.
+Codex 가족 프로필은 `~/.codex/<가족>.config.toml`에 `model`만 기록한다. effort는 `-c model_reasoning_effort`로 별도 전달한다. 수동 CLI 예는 `codex -p sol -c 'model_reasoning_effort="high"'`이다. 역할별 가족과 effort는 [`scripts/lib/agent-route-policy.mjs`](scripts/lib/agent-route-policy.mjs)에서 정한다.
+
+실행, setup, update 시 Codex와 Antigravity 가족 프로필을 사용 가능한 최신 버전으로 갱신한다. Codex는 로컬 모델 캐시를 읽고, Antigravity는 `agy models`의 Argon 결과를 하루 동안 캐시한다. 최신 모델이 요청 effort를 지원하지 않으면 지원하는 가장 가까운 아래 단계로 제한한다. 지원 목록이 없으면 요청값을 유지한다. Flash와 Pro는 자동 선택하지 않고, 옛 `flash*` 프로필 이름은 `argon` + `low`로 해석한다. Claude는 기존 별칭을 유지한다.
 
 `~/.config/triflux/models.json`에 `{"sol":"gpt-6-sol","argon":"gemini-4-argon"}`처럼 적으면 가족별로 고정한다(Windows: `%APPDATA%\triflux`). 목록을 읽지 못하면 마지막 해석 결과, 그다음 내장 기본값을 쓴다.
 
-| 프로필 / 별칭 | 레인 |
+| 가족 + effort / Claude 별칭 | 레인 |
 | --- | --- |
-| `astra_xhigh` | 아키텍처, 계획, 비평, 디버깅, 보안 리뷰, 깊은 실행 |
-| `astra_max`, `astra_ultra` | 가장 어려운 단일 작업(`TFX_CODEX_PROFILE=max\|ultra`). `max`는 `auto-escalate` 첫 단계 |
-| `sol_high` / `sol_med` | 기본 구현, 리뷰, 검증, 테스트, 문서 / 정리 작업 |
-| `luna_high` / `luna_low` | 빌드 수정, 글쓰기 / 지연 우선 조회 |
-| `argon_low` / `argon` / `argon_high` | Antigravity 분류 / 생성 / 검토 |
+| `astra` + `xhigh` | 아키텍처, 계획, 비평, 디버깅, 보안 리뷰, 깊은 실행 |
+| `astra` + `max`, `astra` + `ultra` | 가장 어려운 단일 작업(`TFX_CODEX_PROFILE=max\|ultra`). `max`는 `auto-escalate` 첫 단계 |
+| `sol` + `high` / `sol` + `medium` | 기본 구현, 리뷰, 검증, 테스트, 문서 / 정리 작업 |
+| `terra` + `high` | 글쓰기, 문서 조사 |
+| `luna` + `high` / `luna` + `low` | 빌드 수정 / 지연 우선 조회 |
+| `argon` + `low` / `medium` / `high` | Antigravity 분류 / 생성 / 검토 |
 | Claude `fable` | `--retry auto-escalate` 마지막 단계 |
 | Claude `opus` / `sonnet` / `haiku` | 메타 라우팅과 계획 게이트 / Claude 네이티브 QA·검증 / 빠른 탐색 |
 
@@ -157,7 +159,7 @@ Claude Code Bash 도구의 600초 제한에 걸리지 않는다. 이후 `--job-s
 행에서 Enter를 누르면 그 워커가 도는 tmux pane이 열린다. 끄려면 `--no-native-bridge-ui`를 준다.
 
 **재시도와 승격.** `--retry ralph`는 끝나거나 막힐 때(같은 실패 3회 연속)까지 반복한다.
-`--retry auto-escalate`는 Codex `astra_max`에서 Claude `fable`로 올라간다. 체인은
+`--retry auto-escalate`는 Codex `astra` + `max`에서 Claude `fable`로 전환한다. 체인은
 `.triflux/config/escalation-chain.json`으로 바꿀 수 있다.
 
 **머신 프로파일.** setup은 이 머신에서 쓸 CLI와 timeout 정책을

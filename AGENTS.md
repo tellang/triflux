@@ -5,7 +5,7 @@
 ## 핵심 규칙 (triflux 환경 특화)
 - Codex 직접 호출 금지. `tfx-auto --cli codex`를 거친다. 코드 변경 병렬 작업은 작업별 worktree와 세션을 분리하고 각 세션에서 `tfx-auto`를 사용한다.
 - 프롬프트는 `--` 뒤의 인자로 넘기고 표준 입력은 닫는다(`… -- "$prompt" < /dev/null`). `codex < prompt.md`는 비대화식 실행이라 실패한다.
-- `config.toml`에 `approval_policy`, `sandbox_mode` 기본값을 두고 CLI는 `--profile`만 지정한다. 중복 플래그를 쓰지 않는다.
+- `config.toml`에 `approval_policy`, `sandbox_mode` 기본값을 설정한다. 가족 프로필 파일에는 `model`만 기록하고, CLI에서는 `--profile <가족>`과 `-c 'model_reasoning_effort="<effort>"'`를 지정한다. effort는 `-c model_reasoning_effort`로만 전달한다.
 - Claude가 작성한 코드는 Codex로 교차 검증한다. 스스로 승인하지 않는다.
 - 비대화식 결과는 작업 알림이 완료된 뒤에만 읽는다.
 
@@ -13,11 +13,11 @@
 - `codex exec` / `agy --dangerously-skip-permissions --print=` 를 직접 호출하지 않는다. 자동 차단 훅(headless-guard)은 2026-09-07 에 제거되었으므로 호출자가 지킨다.
 
 ## 추론 수준 예외 경로
-- 기본 역할 라우팅은 `low`/`medium`/`high`/`xhigh` 프로필을 유지한다.
-- 최난도 단일 작업만 `TFX_CODEX_PROFILE=max` (`astra_max`).
+- 기본 역할 라우팅은 가족과 별도로 `low`/`medium`/`high`/`xhigh` effort를 선택한다.
+- 최난도 단일 작업만 `TFX_CODEX_PROFILE=max` (`astra` + `max`).
 - `ultra`는 최상위 단독 `deep-executor`/`scientist-deep`에서만 허용하고, 팀·비대화식·워커
-  내부의 `ultra` 요청은 중첩 분산 실행을 막기 위해 `astra_max`로 낮춘다.
-- `--retry auto-escalate`의 Codex 단계도 `astra_max`다.
+  내부의 `ultra` 요청은 중첩 분산 실행을 막기 위해 `astra` + `max`로 낮춘다.
+- `--retry auto-escalate`의 Codex 단계도 `astra` + `max`다.
 
 ## 비대화식 결과 회수
 - 완료 마커: `=== HEADLESS_COMPLETE succeeded=N failed=N total=N ===`

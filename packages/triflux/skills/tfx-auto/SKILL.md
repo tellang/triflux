@@ -55,7 +55,7 @@ argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [
 > 1. **실행**: CLI 에이전트는 반드시 `Bash("bash ~/.claude/scripts/tfx-route.sh ...")`. Claude 네이티브 역할과 명시적 verifier override만 `Agent()`.
 > 2. **비용/편향 분리**: 실행 워커 비용은 Codex/Antigravity 우선으로 낮추되, consensus/debate/panel에서는 Claude를 최후수단이 아니라 counter-bias outvoice로 둔다. Claude가 실행을 맡는 경우는 명시적 `--cli claude`, Claude-native host role, 작성 벤더별 교차 리뷰, 또는 fallback이다.
 > 2-a. **Anti-bias triad**: `triad`는 Claude(counter-bias outvoice) + Codex(implementation/reality check) + Antigravity(product/UX auxiliary)를 보존하고, disputed/minority view를 삭제하지 않는다.
-> 2-b. **Claude effort**: Claude lane은 Claude Code CLI의 `--model`과 `--effort`를 사용한다. Triflux의 `CLI_EFFORT`/profile 값은 `low|medium|high|xhigh|max` Claude effort로 매핑한다. `ultracode`도 공식 `--effort` 값(v2.1.203+)이지만 프로필 매핑에서는 쓰지 않는다. skill 문서가 모델 ID를 하드코딩하지 않는다.
+> 2-b. **Claude effort**: Claude lane은 Claude Code CLI의 `--model`과 `--effort`를 사용한다. Triflux는 분리된 `CLI_EFFORT` 값을 사용하고 `ultra`는 `max`로 제한한다. 명시한 `TFX_CODEX_PROFILE`은 해석된 정책 effort를 적용하며 기본 native와 agy 폴백의 빈 effort는 유지한다. `ultracode`도 공식 `--effort` 값(v2.1.203+)이지만 프로필 매핑에서는 쓰지 않는다. skill 문서가 모델 ID를 하드코딩하지 않는다.
 > 3. **DAG**: SEQUENTIAL/DAG이면 레벨 기반 순차 실행. `.omc/context/{sid}/` 생성, context_output 저장, 실패 시 후속 SKIP.
 > 4. **트리아지**: 입력을 분류하고 의존 관계에 따라 작업을 나눈다.
 > 5. **thorough**: `-t`/`--thorough` 시 Plan → PRD → Exec → Verify 순서를 따른다.
@@ -166,7 +166,7 @@ agy 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율
 
 `DEFAULT_ESCALATION_CHAIN`의 프로필 설정은 `.claude/rules/tfx-escalation-chain.md`와 CLI 프로필 설정을 따른다.
 
-1. Codex: `astra_max` 프로필
+1. Codex: `astra` 가족 + `max` effort
 2. Claude: 최종 수단 프로필
 
 체인 규칙:
@@ -415,8 +415,8 @@ Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}", prompt="{prompt
 | architect / planner / critic / analyst | Codex (deep-executor 프로필) | analyze |
 | scientist | Codex | analyze |
 | document-specialist | Antigravity | analyze |
-| code-reviewer / quality-reviewer | 작성 벤더별 Claude Opus / Codex `sol_high` review / Argon High | review |
-| security-reviewer | Antigravity `argon_high` | review |
+| code-reviewer / quality-reviewer | 작성 벤더별 Claude Opus / Codex `sol` + `high` review / Argon High | review |
+| security-reviewer | Antigravity `argon` + `high` | review |
 | antigravity / designer / writer | Antigravity | docs |
 | explore / claude | Claude native | 없음 |
 | test-engineer | Codex | implement |

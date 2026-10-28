@@ -72,8 +72,9 @@ Windows 전용 경로는 플랫폼과 `WT_SESSION` 조건을 확인한다.
 | `approval_policy` (`on-request` / `never` / granular) | `--dangerously-bypass-approvals-and-sandbox` |
 | `sandbox_mode` (`read-only` / `workspace-write` / `danger-full-access`) | `-s`, `--sandbox` |
 
-`--full-auto` 는 Codex 0.147 에서 제거되었다. 안전한 방식: `config.toml`에 기본값을 두고 CLI에서는 `--profile`만 선택한다.
-프로필은 `$CODEX_HOME/<이름>.config.toml` 파일이다(인라인 `[profiles.*]` 아님).
+`--full-auto`는 Codex 0.147에서 제거되었다. `config.toml`에 권한과 sandbox 기본값을 설정하고, CLI에서는 `--profile <가족>`과 `-c 'model_reasoning_effort="<effort>"'`를 지정한다.
+가족 프로필은 `$CODEX_HOME/<가족>.config.toml` 파일이며 `model`만 기록한다. 인라인 `[profiles.*]`는 사용하지 않는다. effort는 `-c model_reasoning_effort`로만 전달하여 전역 effort를 덮어쓴다.
+수동 CLI 예: `codex -p sol -c 'model_reasoning_effort="high"'`. 옛 결합 이름 파일의 병행 갱신은 이번 릴리스에 유지하고 다음 릴리스에 중단한다.
 </codex-config>
 
 <remote>

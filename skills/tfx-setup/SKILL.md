@@ -16,7 +16,7 @@ argument-hint: "[doctor]"
 
 HUD의 `statusLine`이 비어 있으면 triflux HUD를 등록한다. 이미 triflux HUD이면 유지하고, 다른 명령이면 보존한 뒤 안내한다. `settings.json`이 깨졌으면 수정을 시도하지 않고 오류를 보고한다.
 
-Codex 프로필은 `~/.codex/<이름>.config.toml`로 관리한다. 기본 설정 키는 `approval_policy`, `sandbox_mode`이며 CLI에는 `--profile`만 전달한다. 프로젝트 지침은 [CLAUDE.md](../../CLAUDE.md)의 `<codex-config>`를 따른다.
+Codex 가족 프로필은 `~/.codex/<가족>.config.toml`에 `model`만 기록한다. `config.toml`의 기본 설정 키는 `approval_policy`, `sandbox_mode`이며 CLI에는 `--profile <가족>`과 `-c 'model_reasoning_effort="<effort>"'`를 전달한다. 옛 결합 이름 파일은 이번 릴리스에 함께 갱신하며 갱신 중단은 다음 릴리스에 적용한다. 프로젝트 지침은 [CLAUDE.md](../../CLAUDE.md)의 `<codex-config>`를 따른다.
 
 Antigravity 프로필은 `~/.gemini/triflux-profiles.json`에서 `argon_low`, `argon`, `argon_high` 가족 프로필을 자동 갱신한다. `agy`와 `codex`가 설치되지 않았으면 선택적 CLI 누락으로 보고한다.
 
