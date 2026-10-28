@@ -2,6 +2,16 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.86.0] - 2026-10-28
+
+### Added
+- lead: `tfx lead --cli claude|codex|agy`. Codex 와 agy 리드는 tfx-lead 스킬 파일을 읽고 리드를 맡으라는 프롬프트로 진입한다. `lead.json` 은 `{"launchers": {"<cli>": "<명령>"}}` 로 CLI 별 실행 명령을 둔다. 10.85.0 의 `launcher` 한 칸은 Claude 명령으로 읽는다 (#845)
+- setup: `tfx setup` 과 `tfx update` 가 대화형일 때, 설치된 CLI 중 아직 정하지 않은 것의 리드 실행 명령을 한 번 묻는다. Enter 면 CLI 이름을 그대로 쓴다 (#845)
+- codex: GPT-6.1 Terra 가족과 `terra_high` 프로필. 직접 Codex 를 지정한 `writer` 와 `document-specialist` 를 Terra 로 옮긴다. 공식 문서가 Terra 를 글쓰기, 시각 이해, 컴퓨터 사용용으로 둔다 (ADR-0048, #847)
+
+### Changed
+- live: `tfx-live start --launcher` 를 세 CLI 에서 쓸 수 있다. CLI 이름 자리만 바꿔 Codex 승인 플래그와 resume 형식을 지킨다 (#845)
+
 ## [10.85.0] - 2026-10-28
 
 ### Added
