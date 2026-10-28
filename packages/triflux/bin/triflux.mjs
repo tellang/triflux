@@ -303,6 +303,31 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       },
     },
   },
+  lead: {
+    usage:
+      "tfx lead <역할> [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD]",
+    description:
+      "리드 세션을 tmux 에 띄우고 /tfx-lead <역할> 까지 보낸다. 실행 명령은 --launcher, ~/.config/triflux/lead.json 의 launcher, claude 순",
+    options: [
+      {
+        name: "--session",
+        type: "string",
+        description: "tmux 세션 이름 (기본 <폴더>-lead)",
+      },
+      {
+        name: "--cwd",
+        type: "string",
+        description: "작업 폴더 (기본 현재 폴더)",
+      },
+      { name: "--model", type: "string", description: "Claude 모델" },
+      { name: "--effort", type: "string", description: "Claude effort" },
+      {
+        name: "--launcher",
+        type: "string",
+        description: "이번만 쓸 실행 명령 (예: 'omc launch')",
+      },
+    ],
+  },
   multi: {
     usage:
       "tfx multi [--dashboard-layout lite|single|split-2col|split-3col|auto] <subcommand|task>",
@@ -3928,6 +3953,7 @@ function cmdHelp() {
     ${WHITE_BRIGHT}tfx mcp${RESET}        ${GRAY}MCP registry 관리 (list/sync/add/remove)${RESET}
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
+    ${WHITE_BRIGHT}tfx lead${RESET}       ${GRAY}리드 세션 띄우기 (tfx lead <역할>)${RESET}
     ${WHITE_BRIGHT}tfx multi${RESET}      ${GRAY}멀티-CLI 팀 모드 (tmux)${RESET}
     ${WHITE_BRIGHT}tfx version${RESET}    ${GRAY}버전 표시${RESET}
     ${WHITE_BRIGHT}tfx-live${RESET}       ${GRAY}Claude·Codex 라이브 세션 (tfx-live --help)${RESET}
@@ -4093,6 +4119,68 @@ async function main() {
       }
       cmdList({ json: JSON_OUTPUT });
       return;
+    case "lead": {
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("lead");
+        return;
+      }
+      const { launchLead, resolveLauncher } = await import(
+        "../hub/team/lead-launch.mjs"
+      );
+      const valueFlags = [
+        "--session",
+        "--cwd",
+        "--model",
+        "--effort",
+        "--launcher",
+      ];
+      cmdArgs.forEach((arg, i) => {
+        const known =
+          valueFlags.includes(arg) &&
+          cmdArgs[i + 1] &&
+          !cmdArgs[i + 1].startsWith("--");
+        if (arg.startsWith("--") && !known)
+          throw createCliError(
+            `tfx lead 가 모르는 옵션이거나 값이 없다: ${arg}`,
+            {
+              exitCode: EXIT_ARG_ERROR,
+              reason: "argError",
+              fix: "tfx lead --help",
+            },
+          );
+      });
+      const role = cmdArgs
+        .filter(
+          (arg, i) =>
+            !arg.startsWith("--") && !valueFlags.includes(cmdArgs[i - 1]),
+        )
+        .join(" ");
+      const result = await launchLead({
+        role,
+        cwd: readCliOptionValue(cmdArgs, "--cwd") || process.cwd(),
+        session: readCliOptionValue(cmdArgs, "--session"),
+        model: readCliOptionValue(cmdArgs, "--model"),
+        effort: readCliOptionValue(cmdArgs, "--effort"),
+        launcher: resolveLauncher({
+          flag: readCliOptionValue(cmdArgs, "--launcher"),
+        }),
+      });
+      if (JSON_OUTPUT) console.log(JSON.stringify(result, null, 2));
+      else if (result.ok)
+        console.log(
+          `\n  ${GREEN_BRIGHT}✓${RESET} 리드 "${result.name}" (${result.launcher}) tmux ${result.session}\n  붙기: tmux attach -t ${result.session}\n`,
+        );
+      else if (result.start?.ready)
+        console.log(
+          `\n  ${RED}✗${RESET} /tfx-lead 전송 실패: ${result.ask?.error ?? JSON.stringify(result.ask)}\n  세션 ${result.session} 은 떠 있다. 붙어서 /tfx-lead 를 직접 입력하거나 tfx-live stop --session ${result.session} 으로 닫는다.\n`,
+        );
+      else
+        console.log(
+          `\n  ${RED}✗${RESET} 리드 시작 실패: ${result.start?.error ?? result.start?.blockedBy ?? JSON.stringify(result.start)}\n`,
+        );
+      if (!result.ok) process.exitCode = EXIT_ERROR;
+      return;
+    }
     case "multi": {
       if (cmdArgs.some(isHelpArg)) {
         const { pathToFileURL } = await import("node:url");
