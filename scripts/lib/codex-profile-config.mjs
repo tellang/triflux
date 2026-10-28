@@ -12,6 +12,7 @@ import { writeRotatedBackup } from "./backup-rotation.mjs";
 import {
   modelEffortFromProfile,
   normalizeCodexProfileName,
+  resolveCodexModelEffort,
 } from "./model-effort.mjs";
 import {
   CODEX_FAMILY_PROFILES,
@@ -82,7 +83,7 @@ export function resolveCodexProfileConfigValues(profileName, opts = {}) {
   const codexHome =
     opts.codexHome || process.env.CODEX_HOME || join(homedir(), ".codex");
   let model = null;
-  let effort = managed?.effort || null;
+  let effort = managed ? resolveCodexModelEffort(managed, opts).effort : null;
   try {
     const raw = readFileSync(
       join(codexHome, `${normalizedProfileName}.config.toml`),

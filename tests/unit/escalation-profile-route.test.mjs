@@ -122,6 +122,7 @@ function runRoute({
   env: envOverrides = {},
   profileFiles = {},
   modelsCache,
+  expectedStatus = 0,
 } = {}) {
   const { binDir, home, tfxTmp, capture, fakeCodex } = fixture;
   // 공유 준비가 이전 실행의 프로파일과 argv를 남기지 않게 한다.
@@ -187,9 +188,10 @@ function runRoute({
 
   assert.equal(
     result.status,
-    0,
-    `route should exit 0\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    expectedStatus,
+    `route should exit ${expectedStatus}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
   );
+  if (expectedStatus !== 0) return result;
   return JSON.parse(readFileSync(capture, "utf8"));
 }
 
@@ -202,6 +204,47 @@ function profileValues(args) {
 }
 
 describe("tfx-route retry snapshot profile plumbing", () => {
+  it("최신 가족 모델의 지원 effort로 낮춘 사실을 stderr에 남긴다", () => {
+    const args = runRoute({
+      agent: "architect",
+      env: { TFX_CODEX_PROFILE: "max" },
+      modelsCache: {
+        models: [
+          {
+            slug: "gpt-6-astra",
+            visibility: "list",
+            supported_reasoning_levels: ["max"],
+          },
+          {
+            slug: "gpt-7-astra",
+            visibility: "list",
+            supported_reasoning_levels: ["low", "high"],
+          },
+        ],
+      },
+    });
+    assert.deepEqual(profileValues(args), ["astra"]);
+    assert.ok(args.includes('model_reasoning_effort="high"'));
+    assert.match(fixture.stderr, /effort.*max.*high.*gpt-7-astra/);
+  });
+
+  it("최신 모델의 지원 목록에 더 낮은 effort가 없으면 실행 전에 실패한다", () => {
+    const result = runRoute({
+      agent: "spark",
+      modelsCache: {
+        models: [
+          {
+            slug: "gpt-7-luna",
+            visibility: "list",
+            supported_reasoning_levels: ["high"],
+          },
+        ],
+      },
+      expectedStatus: 78,
+    });
+    assert.match(result.stderr, /지원.*effort/);
+  });
+
   it("effort 해석기 실패는 경고를 남기고 기존 프로필 실행을 유지한다", () => {
     const nodeWrapper = path.join(makeTempDir(), "resolver-node");
     writeExecutable(
@@ -254,7 +297,7 @@ process.exit(result.status ?? 1);
         ],
       },
     });
-    assert.deepEqual(profileValues(args), ["sol_high"]);
+    assert.deepEqual(profileValues(args), ["sol"]);
     assert.match(
       readFileSync(
         path.join(fixture.home, ".codex", "sol_high.config.toml"),
@@ -279,7 +322,7 @@ process.exit(result.status ?? 1);
     try {
       process.env.XDG_CONFIG_HOME = configRoot;
       const args = runRoute();
-      assert.deepEqual(profileValues(args), ["sol_high"]);
+      assert.deepEqual(profileValues(args), ["sol"]);
     } finally {
       if (previousConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
       else process.env.XDG_CONFIG_HOME = previousConfigHome;
@@ -293,7 +336,7 @@ process.exit(result.status ?? 1);
 
     const args = runRoute({ snapshot });
 
-    assert.deepEqual(profileValues(args), ["astra_xhigh"]);
+    assert.deepEqual(profileValues(args), ["astra"]);
   });
 
   it("explicit max selects the max profile in final argv", () => {
@@ -304,7 +347,7 @@ process.exit(result.status ?? 1);
       },
     });
 
-    assert.deepEqual(profileValues(args), ["astra_max"]);
+    assert.deepEqual(profileValues(args), ["astra"]);
     assert.ok(!args.some((arg) => arg.startsWith("model=")));
   });
 
@@ -317,7 +360,7 @@ process.exit(result.status ?? 1);
       },
     });
 
-    assert.deepEqual(profileValues(args), ["astra_ultra"]);
+    assert.deepEqual(profileValues(args), ["astra"]);
     assert.ok(!args.some((arg) => arg.startsWith("model=")));
   });
 
@@ -327,7 +370,7 @@ process.exit(result.status ?? 1);
       env: { TFX_CODEX_PROFILE: "ultra", TFX_TEAM_NAME: "nested-team" },
     });
 
-    assert.deepEqual(profileValues(args), ["astra_max"]);
+    assert.deepEqual(profileValues(args), ["astra"]);
   });
 
   it("retry snapshot remains authoritative over the explicit profile override", () => {
@@ -341,7 +384,7 @@ process.exit(result.status ?? 1);
       env: { TFX_CODEX_PROFILE: "ultra" },
     });
 
-    assert.deepEqual(profileValues(args), ["astra_max"]);
+    assert.deepEqual(profileValues(args), ["astra"]);
   });
 
   it("retry snapshot cannot reintroduce ultra inside a nested runtime", () => {
@@ -355,7 +398,7 @@ process.exit(result.status ?? 1);
       env: { TFX_TEAM_NAME: "nested-team" },
     });
 
-    assert.deepEqual(profileValues(args), ["astra_max"]);
+    assert.deepEqual(profileValues(args), ["astra"]);
   });
 
   it("custom retry 프로필은 ultra를 제한하고 없는 파일도 이름을 보존한다", () => {
@@ -377,7 +420,7 @@ process.exit(result.status ?? 1);
       agent: "deep-executor",
     });
 
-    assert.deepEqual(profileValues(customUltra), ["astra_max"]);
+    assert.deepEqual(profileValues(customUltra), ["astra"]);
     assert.deepEqual(profileValues(missingCustom), ["missing-private"]);
   });
 
@@ -389,13 +432,13 @@ process.exit(result.status ?? 1);
       },
     });
 
-    assert.deepEqual(profileValues(args), ["sol_high"]);
+    assert.deepEqual(profileValues(args), ["sol"]);
     assert.ok(args.includes('model_reasoning_effort="high"'));
   });
 
   it("tier 폴백은 기존 effort를 제거하고 low를 명시한다", () => {
     const args = runRoute({ env: { TFX_FAKE_TIER_FAILURE: "1" } });
-    assert.deepEqual(profileValues(args), ["luna_low"]);
+    assert.deepEqual(profileValues(args), ["luna"]);
     assert.deepEqual(
       args.filter((arg) => arg.startsWith("model_reasoning_effort=")),
       ['model_reasoning_effort="low"'],

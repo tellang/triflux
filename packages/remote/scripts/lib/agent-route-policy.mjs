@@ -9,131 +9,134 @@ import {
   resolveCodexProfileConfigValues,
 } from "./codex-profile-config.mjs";
 import { resolveGeminiProfileForPurpose } from "./gemini-profiles.mjs";
-import { modelEffortFromProfile } from "@triflux/core/scripts/lib/model-effort.mjs";
+import {
+  modelEffortFromProfile,
+  profileFromModelEffort,
+} from "@triflux/core/scripts/lib/model-effort.mjs";
 
 const policy = {
   executor: {
-    profile: "sol_high",
+    codex: { family: "sol", effort: "high" },
     timeoutSec: 1080,
     mcpHint: "implement",
     subcommand: "exec",
   },
   codex: {
-    profile: "sol_high",
+    codex: { family: "sol", effort: "high" },
     timeoutSec: 1080,
     mcpHint: "implement",
     subcommand: "exec",
   },
   "build-fixer": {
-    profile: "luna_high",
+    codex: { family: "luna", effort: "high" },
     timeoutSec: 540,
     mcpHint: "implement",
     subcommand: "exec",
   },
   cleanup: {
-    profile: "sol_med",
+    codex: { family: "sol", effort: "medium" },
     timeoutSec: 540,
     mcpHint: "implement",
     subcommand: "exec",
   },
   deslop: {
-    profile: "sol_med",
+    codex: { family: "sol", effort: "medium" },
     timeoutSec: 540,
     mcpHint: "implement",
     subcommand: "exec",
   },
   debugger: {
-    profile: "astra_xhigh",
+    codex: { family: "astra", effort: "xhigh" },
     timeoutSec: 900,
     mcpHint: "implement",
     subcommand: "exec",
   },
   "deep-executor": {
-    profile: "astra_xhigh",
+    codex: { family: "astra", effort: "xhigh" },
     timeoutSec: 3600,
     mcpHint: "implement",
     subcommand: "exec",
   },
   architect: {
-    profile: "astra_xhigh",
+    codex: { family: "astra", effort: "xhigh" },
     timeoutSec: 3600,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   critic: {
-    profile: "astra_xhigh",
+    codex: { family: "astra", effort: "xhigh" },
     timeoutSec: 3600,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   planner: {
-    profile: "astra_xhigh",
+    codex: { family: "astra", effort: "xhigh" },
     timeoutSec: 3600,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   analyst: {
-    profile: "astra_xhigh",
+    codex: { family: "astra", effort: "xhigh" },
     timeoutSec: 3600,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   "code-reviewer": {
-    profile: "sol_high",
+    codex: { family: "sol", effort: "high" },
     timeoutSec: 1800,
     mcpHint: "review",
     subcommand: "review",
   },
   "quality-reviewer": {
-    profile: "sol_high",
+    codex: { family: "sol", effort: "high" },
     timeoutSec: 1800,
     mcpHint: "review",
     subcommand: "review",
   },
   "security-reviewer": {
-    profile: "astra_xhigh",
+    codex: { family: "astra", effort: "xhigh" },
     timeoutSec: 1800,
     mcpHint: "review",
     subcommand: "review",
   },
   scientist: {
-    profile: "sol_high",
+    codex: { family: "sol", effort: "high" },
     timeoutSec: 1440,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   "document-specialist": {
-    profile: "terra_high",
+    codex: { family: "terra", effort: "high" },
     timeoutSec: 1440,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   "scientist-deep": {
-    profile: "astra_xhigh",
+    codex: { family: "astra", effort: "xhigh" },
     timeoutSec: 3600,
     mcpHint: "analyze",
     subcommand: "exec",
   },
   verifier: {
-    profile: "sol_high",
+    codex: { family: "sol", effort: "high" },
     timeoutSec: 1200,
     mcpHint: "review",
     subcommand: "review",
   },
   "test-engineer": {
-    profile: "sol_high",
+    codex: { family: "sol", effort: "high" },
     timeoutSec: 1200,
     mcpHint: "implement",
     subcommand: "exec",
   },
   "qa-tester": {
-    profile: "sol_high",
+    codex: { family: "sol", effort: "high" },
     timeoutSec: 1200,
     mcpHint: "review",
     subcommand: "review",
   },
   spark: {
-    profile: "luna_low",
+    codex: { family: "luna", effort: "low" },
     timeoutSec: 180,
     mcpHint: "implement",
     subcommand: "exec",
@@ -141,13 +144,13 @@ const policy = {
   // These entries are only for explicit direct-Codex overrides. agent-map.json
   // remains the provider-selection authority for their normal execution.
   designer: {
-    profile: "astra_xhigh",
+    codex: { family: "astra", effort: "xhigh" },
     timeoutSec: 900,
     mcpHint: "implement",
     subcommand: "exec",
   },
   writer: {
-    profile: "terra_high",
+    codex: { family: "terra", effort: "high" },
     timeoutSec: 900,
     mcpHint: "implement",
     subcommand: "exec",
@@ -155,7 +158,11 @@ const policy = {
 };
 
 function freezePolicy(entry) {
-  return Object.freeze({ ...entry });
+  return Object.freeze({
+    ...entry,
+    codex: Object.freeze({ ...entry.codex }),
+    profile: profileFromModelEffort("codex", entry.codex),
+  });
 }
 
 const CODEX_AGENT_POLICY = Object.freeze(
@@ -366,6 +373,7 @@ export function resolveAgentRoute(
       );
     }
   }
+  const { family, effort } = modelEffortFromProfile("codex", resolvedOverride);
   return [
     provider,
     policy.profile,
@@ -379,6 +387,8 @@ export function resolveAgentRoute(
     NATIVE_CODEX_AGENTS.has(agent),
     byAuthor ? reviewAuthor : "",
     usageSwitch,
+    effort,
+    family,
   ];
 }
 

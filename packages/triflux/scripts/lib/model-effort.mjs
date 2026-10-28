@@ -1,6 +1,8 @@
 import {
   AGY_FAMILY_PROFILES,
   CODEX_FAMILY_PROFILES,
+  readCodexModelCatalog,
+  resolveModelFamilies,
 } from "./model-family-resolver.mjs";
 
 export const EFFORT_ORDER = Object.freeze([
@@ -69,4 +71,32 @@ export function profileFromModelEffort(cli, { family, effort }) {
       ([, value]) => value.family === family && value.effort === effort,
     )?.[0] || null
   );
+}
+
+export function resolveCodexModelEffort({ family, effort }, opts = {}) {
+  const { families } = resolveModelFamilies("codex", {
+    ...opts,
+    allowCommand: false,
+    persist: false,
+  });
+  if (!Object.hasOwn(families, family) || !EFFORT_ORDER.includes(effort)) {
+    throw new Error(`알 수 없는 Codex 가족 또는 effort: ${family}/${effort}`);
+  }
+  const model = families[family].model;
+  const supported = readCodexModelCatalog(opts)?.models?.find(
+    (entry) => entry?.slug === model,
+  )?.supported_reasoning_levels;
+  if (!Array.isArray(supported)) return { family, model, effort };
+  const levels = supported.map((level) => level?.effort ?? level);
+  const selected = EFFORT_ORDER.slice(0, EFFORT_ORDER.indexOf(effort) + 1)
+    .filter((level) => levels.includes(level))
+    .at(-1);
+  if (!selected) {
+    const error = new Error(
+      `${model}: ${effort} 이하의 지원 effort가 없습니다`,
+    );
+    error.code = "unsupported-effort";
+    throw error;
+  }
+  return { family, model, effort: selected };
 }

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import * as modelEffort from "../../scripts/lib/model-effort.mjs";
 
@@ -78,4 +81,61 @@ test("정규화는 객체 상속 키도 문자열로 보존한다", () => {
   for (const name of ["__proto__", "constructor", "toString"]) {
     assert.equal(modelEffort.normalizeCodexProfileName(name), name);
   }
+});
+
+test("최신 가족 모델에서 지원하는 가장 가까운 아래 effort를 고른다", (t) => {
+  const home = mkdtempSync(join(tmpdir(), "tfx-effort-capability-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const codexHome = join(home, ".codex");
+  mkdirSync(codexHome);
+  const cachePath = join(codexHome, "models_cache.json");
+  writeFileSync(
+    cachePath,
+    JSON.stringify({
+      models: [
+        {
+          slug: "gpt-6-astra",
+          visibility: "list",
+          supported_reasoning_levels: ["max"],
+        },
+        {
+          slug: "gpt-7-astra",
+          visibility: "list",
+          supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }],
+        },
+      ],
+    }),
+  );
+  const opts = { home, codexHome, allowCommand: false, persist: false };
+  assert.deepEqual(
+    modelEffort.resolveCodexModelEffort(
+      { family: "astra", effort: "max" },
+      opts,
+    ),
+    { family: "astra", model: "gpt-7-astra", effort: "high" },
+  );
+  assert.throws(
+    () =>
+      modelEffort.resolveCodexModelEffort(
+        { family: "astra", effort: "none" },
+        opts,
+      ),
+    /지원.*effort/,
+  );
+  writeFileSync(cachePath, JSON.stringify({ models: [] }));
+  assert.equal(
+    modelEffort.resolveCodexModelEffort(
+      { family: "astra", effort: "max" },
+      opts,
+    ).effort,
+    "max",
+  );
+  rmSync(cachePath);
+  assert.equal(
+    modelEffort.resolveCodexModelEffort(
+      { family: "astra", effort: "max" },
+      opts,
+    ).effort,
+    "max",
+  );
 });
