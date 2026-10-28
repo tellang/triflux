@@ -39,7 +39,19 @@ export function normalizeGeminiProfileName(name) {
   return raw.replace(/^flash\d*(?:_(?:low|high))?$/, "argon_low");
 }
 
-export function modelEffortFromProfile(cli, profile) {
+export function modelEffortFromProfile(cli, profile, effort) {
+  if (effort !== undefined) {
+    const definitions =
+      cli === "codex"
+        ? CODEX_FAMILY_PROFILES
+        : cli === "antigravity" || cli === "agy"
+          ? AGY_FAMILY_PROFILES
+          : {};
+    return EFFORT_ORDER.includes(effort) &&
+      Object.values(definitions).some(({ family }) => family === profile)
+      ? { family: profile, effort }
+      : null;
+  }
   let definition;
   if (cli === "codex") {
     const normalized = normalizeCodexProfileName(profile);

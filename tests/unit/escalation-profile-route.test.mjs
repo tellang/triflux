@@ -204,6 +204,16 @@ function profileValues(args) {
 }
 
 describe("tfx-route retry snapshot profile plumbing", () => {
+  it("새 스냅숏의 canonical 없는 family/effort 조합으로 실행한다", () => {
+    const snapshot = path.join(makeTempDir(), "new-family-snapshot.json");
+    writeRetrySnapshot(snapshot, "astra_xhigh");
+    const value = JSON.parse(readFileSync(snapshot, "utf8"));
+    value.cliChain = [{ cli: "codex", family: "astra", effort: "high" }];
+    writeFileSync(snapshot, JSON.stringify(value));
+    const args = runRoute({ snapshot });
+    assert.deepEqual(profileValues(args), ["astra"]);
+    assert.ok(args.includes('model_reasoning_effort="high"'));
+  });
   it("가족 파일을 만들 수 없으면 존재하는 결합 프로필을 유지한다", () => {
     const nodeWrapper = path.join(makeTempDir(), "profile-writer-node");
     writeExecutable(

@@ -131,11 +131,15 @@ describe("bridge retry-run / retry-status — Phase 3 Step C2", () => {
     assert.deepEqual(status.cli, {
       cli: "codex",
       profile: "sol_high",
+      family: "sol",
+      effort: "high",
     });
     assert.deepEqual(status.cliInvocation, {
       cli: "codex",
       profile: "sol_high",
-      argv: ["--profile", "sol_high"],
+      family: "sol",
+      effort: "high",
+      argv: ["--profile", "sol", "-c", 'model_reasoning_effort="high"'],
     });
   });
 });
