@@ -23,8 +23,8 @@ const LEGACY_CANONICAL_PROFILE_ALIASES = Object.freeze({
 
 export function normalizeCodexProfileName(profileName) {
   const normalized = String(profileName ?? "").trim();
-  const legacy = LEGACY_CANONICAL_PROFILE_ALIASES[normalized];
-  if (legacy) return legacy;
+  if (Object.hasOwn(LEGACY_CANONICAL_PROFILE_ALIASES, normalized))
+    return LEGACY_CANONICAL_PROFILE_ALIASES[normalized];
   const familyName = normalized.replace(/^gpt\d+_(sol|astra|luna)_/, "$1_");
   return Object.hasOwn(CODEX_FAMILY_PROFILES, familyName)
     ? familyName

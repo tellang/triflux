@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
+import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
 import {
   codexProfileConfigOverrides,
   sanitizeCodexProfileConfig,
@@ -140,12 +141,57 @@ describe("codexProfileConfigOverrides", () => {
     ]);
   });
 
-  it("falls back to the _<effort> naming convention when the file is absent", () => {
+  it("관리 프로필은 파일 없이도 이름의 effort를 사용한다", () => {
     const codexHome = makeHome();
-    // no gpt55_xhigh.config.toml written → derive effort only, leave model unset
     assert.deepEqual(
-      codexProfileConfigOverrides("gpt55_xhigh", { codexHome }),
+      codexProfileConfigOverrides("astra_xhigh", { codexHome }),
       ['model_reasoning_effort="xhigh"'],
+    );
+  });
+
+  it("관리 프로필 파일의 누락되거나 바뀐 effort보다 이름을 우선한다", () => {
+    const codexHome = makeHome();
+    for (const content of [
+      'model = "gpt-6.1-sol"\n',
+      'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "ultra"\n',
+    ]) {
+      writeFileSync(join(codexHome, "sol_high.config.toml"), content);
+      assert.deepEqual(codexProfileConfigOverrides("sol_high", { codexHome }), [
+        'model="gpt-6.1-sol"',
+        'model_reasoning_effort="high"',
+      ]);
+    }
+  });
+
+  it("custom 프로필 파일이 없으면 이름의 suffix로 effort를 추측하지 않는다", () => {
+    assert.deepEqual(
+      codexProfileConfigOverrides("private_high", { codexHome: makeHome() }),
+      [],
+    );
+  });
+
+  it("중첩 역할의 관리 프로필은 effort 없는 파일에서도 선택을 유지한다", () => {
+    const codexHome = makeHome();
+    writeFileSync(
+      join(codexHome, "sol_high.config.toml"),
+      'model = "gpt-6.1-sol"\n',
+    );
+    assert.equal(
+      resolveNestedCodexAgentProfile("architect", {
+        profileOverride: "sol_high",
+        codexHome,
+      }),
+      "sol_high",
+    );
+  });
+
+  it("중첩 역할의 custom 프로필은 effort를 알 수 없어도 선택을 유지한다", () => {
+    assert.equal(
+      resolveNestedCodexAgentProfile("architect", {
+        profileOverride: "private_high",
+        codexHome: makeHome(),
+      }),
+      "private_high",
     );
   });
 
