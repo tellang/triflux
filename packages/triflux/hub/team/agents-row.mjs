@@ -75,7 +75,8 @@ export function buildAgentsRowCommand({
     tmux,
     `attach-session -t ${q(pane.paneId)}`,
     // -r 은 read-only,ignore-size 와 같고 tmux 3.2 이전에도 있다.
-    ...(readOnly ? ["-r"] : []),
+    // 중계 client 크기는 아무도 행을 안 볼 때 백킹 PTY 기본값이라 창 크기에서 뺀다.
+    ...(readOnly ? ["-r"] : ["-f ignore-size"]),
   ].join(" ");
   // 같은 번호의 다른 방에 붙지 않도록 pane 의 세션 ID 를 매번 대조한다.
   const alive = `[ "$(${tmux} display-message -p -t ${q(pane.paneId)} '#{session_id}' 2>/dev/null)" = ${q(pane.sessionId)} ]`;

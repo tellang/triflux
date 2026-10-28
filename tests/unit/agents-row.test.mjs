@@ -58,6 +58,8 @@ describe("agents row", () => {
     assert.equal(relay.readOnly, false);
     assert.match(relay.command, /agents-row-attach\.py' -- env -u TMUX/u);
     assert.doesNotMatch(relay.command, / -r;/u);
+    // 중계 client 가 사람이 보는 패널의 창 크기를 덮어쓰지 않는다.
+    assert.match(relay.command, /attach-session -t '%12' -f ignore-size; if /u);
   });
 
   it("python3 가 실행되지 않으면(macOS 스텁 등) 읽기 전용으로 열고 행 이름에 표시한다", async () => {
