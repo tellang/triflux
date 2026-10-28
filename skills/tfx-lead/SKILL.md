@@ -16,7 +16,13 @@ description: >
 
 ## 리드 진입
 
-Claude 리드는 세션 안에서 `/tfx-lead <역할>`을 실행한다(예: `/tfx-lead 개발리드`). triflux mod 가 세 가지를 한다.
+셸에서 새 리드를 띄울 때는 `tfx lead <역할>`을 쓴다. tmux 세션(기본 `<폴더>-lead`)에 Claude 를 띄우고 `/tfx-lead <역할>`까지 보낸다.
+
+- 실행 명령은 `--launcher`, `~/.config/triflux/lead.json`(Windows 는 `%APPDATA%\triflux\lead.json`)의 `launcher`, `claude` 순으로 고른다. 예: `{"launcher": "omc launch"}`. triflux 는 이 값을 그대로 실행할 뿐 특정 도구에 의존하지 않는다.
+- 이 설정은 리드에만 쓴다. 워커는 `tfx-live start`가 일반 `claude`로 띄운다.
+- `omc launch`처럼 tmux 안에서 pane 을 다시 띄우는(`respawn-pane`) 실행 명령은 pane 의 셸을 없앤다. 그러면 Claude 가 끝날 때 pane 도 닫히고, 같은 pane 에서 `--resume`으로 이어 쓸 수 없다.
+
+이미 띄운 Claude 세션을 리드로 만들 때는 세션 안에서 `/tfx-lead <역할>`을 실행한다(예: `/tfx-lead 개발리드`). triflux mod 가 세 가지를 한다.
 
 - 세션 이름을 `<월>.<일> <역할>`로 바꾼다. 인자가 이미 날짜로 시작하면 그대로 쓴다.
 - macOS 대화형 세션이면 아래 "압박 변화 대응"의 감시를 켠다.
