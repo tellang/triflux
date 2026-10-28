@@ -110,19 +110,19 @@ The full contract, including `--lead`, `--options`, `--experts`, and conflict ru
 
 ## Models and profiles
 
-Codex runs through named profiles; model IDs live in `~/.codex/<profile>.config.toml`, and the
-role → profile map lives in [`scripts/lib/agent-route-policy.mjs`](scripts/lib/agent-route-policy.mjs).
-Codex and Antigravity family profiles select the newest available model at dispatch, setup, and update. Codex reads its local model cache and checks supported effort; Antigravity caches Argon models from `agy models` for one day. Flash and Pro are not selected automatically, and old `flash*` profile names resolve to `argon_low`. Claude keeps its existing aliases.
+Codex uses a family profile containing only `model` in `~/.codex/<family>.config.toml`. Effort is passed separately with `-c model_reasoning_effort`, for example `codex -p sol -c 'model_reasoning_effort="high"'`. The role policy in [`scripts/lib/agent-route-policy.mjs`](scripts/lib/agent-route-policy.mjs) selects the family and effort.
+Codex and Antigravity family profiles select the newest available model at dispatch, setup, and update. Codex reads its local model cache; Antigravity caches Argon models from `agy models` for one day. The newest family model is retained when the requested effort is unsupported, and effort is lowered to the closest supported level below it. Without a support list, the requested effort is passed unchanged. Flash and Pro are not selected automatically, and old `flash*` profile names resolve to `argon` + `low`. Claude keeps its existing aliases.
 
 Pin a family in `~/.config/triflux/models.json`, for example `{"sol":"gpt-6-sol","argon":"gemini-4-argon"}` (Windows: `%APPDATA%\triflux`). Without a usable catalog, resolution keeps the last result or the built-in default.
 
-| Profile / alias | Lanes |
+| Family + effort / Claude alias | Lanes |
 | --- | --- |
-| `astra_xhigh` | Architecture, planning, critique, debugging, security review, deep execution |
-| `astra_max`, `astra_ultra` | Hardest single tasks (`TFX_CODEX_PROFILE=max\|ultra`); `max` is the first `auto-escalate` step |
-| `sol_high` / `sol_med` | Default implementation, review, verification, tests, docs / cleanup |
-| `luna_high` / `luna_low` | Build fixes, writing / latency-first lookups |
-| `argon_low` / `argon` / `argon_high` | Antigravity classification / generation / review |
+| `astra` + `xhigh` | Architecture, planning, critique, debugging, security review, deep execution |
+| `astra` + `max`, `astra` + `ultra` | Hardest single tasks (`TFX_CODEX_PROFILE=max\|ultra`); `max` is the first `auto-escalate` step |
+| `sol` + `high` / `sol` + `medium` | Default implementation, review, verification, tests, docs / cleanup |
+| `terra` + `high` | Writing, documentation research |
+| `luna` + `high` / `luna` + `low` | Build fixes / latency-first lookups |
+| `argon` + `low` / `medium` / `high` | Antigravity classification / generation / review |
 | Claude `fable` | Final `--retry auto-escalate` step |
 | Claude `opus` / `sonnet` / `haiku` | Meta routing and planning gates / Claude-native QA and verification / fast exploration |
 
@@ -161,7 +161,7 @@ the `claude agents` panel unless you pass `--no-native-bridge-ui`. Press Enter o
 tmux pane the worker runs in.
 
 **Retry and escalation.** `--retry ralph` loops until done or stuck (three identical failures).
-`--retry auto-escalate` steps from Codex `astra_max` to Claude `fable`; override the chain in
+`--retry auto-escalate` steps from Codex `astra` + `max` to Claude `fable`; override the chain in
 `.triflux/config/escalation-chain.json`.
 
 **Machine profile.** Setup records which CLIs this machine may use and its timeout policy in

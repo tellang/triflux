@@ -86,29 +86,29 @@ Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 �
 
 ## 2. 역할별 모델
 
-모델 ID 는 적지 않는다. Codex 는 프로필명, Claude 는 별칭을 쓴다. 현재 대응은 `.claude/rules/tfx-routing.md`의 "모델 배치" 표가 정본이다.
+모델 ID는 기록하지 않는다. Codex는 가족 프로필과 별도 effort, Claude는 별칭을 사용한다. 현재 대응은 `.claude/rules/tfx-routing.md`의 "모델 배치" 표가 정본이다. 가족 프로필에는 `model`만 기록하고 effort는 `-c model_reasoning_effort`로 전달한다. 수동 CLI 예: `codex -p sol -c 'model_reasoning_effort="high"'`.
 
-| 역할 | 모델 | 비고 |
+| 역할 | 가족 + effort / Claude 별칭 | 비고 |
 | --- | --- | --- |
 | 리드 (Claude) | Claude 최상위 tier, effort high | 지휘와 판정만 맡는다 |
-| 리드 (Codex) | `astra_xhigh` | 지휘와 판정만 맡는다 |
+| 리드 (Codex) | `astra` + `xhigh` | 지휘와 판정만 맡는다 |
 | 판단 중심 긴 작업 | Claude `opus` | 설계 검토, 긴 구현 |
 | 반복 검증, 정형 문서 | Claude `sonnet` | 테스트 재실행, 표 갱신 |
 | `opus`로 안 풀리는 난제 | Claude `fable` | 최종 수단 |
-| Codex 설계, 비평, 디버그 | `astra_xhigh` | `architect`, `planner`, `analyst`, `critic` 포함 |
-| Codex 일반 구현, Claude 작성 코드 리뷰 | `sol_high` | 리뷰는 `review` 서브커맨드 |
-| 보안 리뷰 | Argon High `argon_high` | `security-reviewer` |
-| Codex 글쓰기, 문서 조사 | `terra_high` | |
-| Codex 정리, 반복 작업 | `sol_med`, `luna_high` | |
-| Codex 시험용 | 역할 프로필에 effort low | 연결 확인용 |
+| Codex 설계, 비평, 디버그 | `astra` + `xhigh` | `architect`, `planner`, `analyst`, `critic` 포함 |
+| Codex 일반 구현, Claude 작성 코드 리뷰 | `sol` + `high` | 리뷰는 `review` 서브커맨드 |
+| 보안 리뷰 | Argon High `argon` + `high` | `security-reviewer` |
+| Codex 글쓰기, 문서 조사 | `terra` + `high` | |
+| Codex 정리, 반복 작업 | `sol` + `medium`, `luna` + `high` | |
+| Codex 테스트용 | 역할별 가족 + `low` | 연결 확인용 |
 
 | 리드 | 코드 작성 벤더 | verifier | explore |
 | --- | --- | --- | --- |
 | Claude | Codex 또는 Antigravity | Opus 네이티브 서브에이전트 | Haiku 네이티브 |
-| Claude | Claude | Codex Sol `sol_high` | Haiku 네이티브 |
+| Claude | Claude | Codex Sol `sol` + `high` | Haiku 네이티브 |
 | Codex | 모두 | Codex Sol 네이티브 | Luna low 네이티브 |
 | Antigravity | Codex 또는 Claude | Argon High 네이티브 | Luna low 네이티브 |
-| Antigravity | Antigravity | Codex Sol `sol_high` | Luna low 네이티브 |
+| Antigravity | Antigravity | Codex Sol `sol` + `high` | Luna low 네이티브 |
 
 이 표는 리드의 호출 절차를 정한다. 코드의 verifier 기본값은 Codex Sol, explore 기본값은 Claude 로 유지한다. Codex 리드의 verifier 는 빌드, 테스트, 요구사항 충족 증거만 확인하고 코드 승인은 하지 않는다.
 
@@ -264,9 +264,9 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 
 | 작성 벤더 | 기본 리뷰 | Claude 주간 사용량 80% 이상 |
 | --- | --- | --- |
-| Codex | Claude Opus | Argon High `argon_high` |
-| Claude | Codex Sol `sol_high` review | Codex Sol `sol_high` review |
-| Antigravity | Claude Opus | Codex Sol `sol_high` review |
+| Codex | Claude Opus | Argon High `argon` + `high` |
+| Claude | Codex Sol `sol` + `high` review | Codex Sol `sol` + `high` review |
+| Antigravity | Claude Opus | Codex Sol `sol` + `high` review |
 
 사용량은 `~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`를 읽고, 읽을 수 없으면 한도 미만으로 본다. Claude 리뷰는 `tfx-route.sh`의 Claude 워커 경로와 `--model opus`를 쓴다.
 
