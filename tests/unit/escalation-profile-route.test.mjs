@@ -303,11 +303,11 @@ process.exit(result.status ?? 1);
   });
 
   it("agy 실행 전에 기본 Argon을 고르고 옛 Flash 별칭은 Argon Low로 보낸다", () => {
-    for (const [profile, expected] of [
-      ["", "Gemini 4 Argon (High)"],
-      ["argon", "Gemini 4 Argon (Medium)"],
-      ["flash_high", "Gemini 4 Argon (Low)"],
-      ["flash38_high", "Gemini 4 Argon (Low)"],
+    for (const [profile, effort] of [
+      ["", "high"],
+      ["argon", "medium"],
+      ["flash_high", "low"],
+      ["flash38_high", "low"],
     ]) {
       const args = runRoute({
         agent: "designer",
@@ -317,7 +317,8 @@ process.exit(result.status ?? 1);
           GEMINI_PROFILE: "",
         },
       });
-      assert.equal(args[args.indexOf("--model") + 1], expected);
+      assert.equal(args[args.indexOf("--model") + 1], "gemini-4-argon");
+      assert.equal(args[args.indexOf("--effort") + 1], effort);
     }
   });
 

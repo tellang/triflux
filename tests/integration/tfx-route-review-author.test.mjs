@@ -37,6 +37,7 @@ function runRoute({
   workerCli,
   prompt = "review fixture",
   profile,
+  agyModels = "",
 } = {}) {
   const home = mkdtempSync(join(tmpdir(), "tfx-review-author-"));
   const cache = join(home, ".claude/cache");
@@ -62,7 +63,7 @@ function runRoute({
     `#!/usr/bin/env node
 const args = process.argv.slice(2);
 if (args.includes('--help')) { console.log('--print --dangerously-skip-permissions'); }
-else if (args.includes('models')) { console.log(''); }
+else if (args.includes('models')) { console.log(process.env.ROUTE_AGY_MODELS); }
 else { require('node:fs').writeFileSync(process.env.ROUTE_ARGV, JSON.stringify(args)); console.log('review fixture result'); }
 `,
     { mode: 0o755 },
@@ -122,6 +123,7 @@ else { require('node:fs').writeFileSync(process.env.ROUTE_ARGV, JSON.stringify(a
       ]),
       FAKE_CLAUDE_ARGV_OUT: argvPath,
       ROUTE_ARGV: argvPath,
+      ROUTE_AGY_MODELS: agyModels,
       TFX_ROUTE_SCRIPT: route,
       GH_TOKEN: "fixture-token",
       TFX_PREFLIGHT_LOADED: "1",
@@ -190,6 +192,64 @@ test("Claude native explore keeps an empty effort", () => {
   assert.match(r.stdout, /^EFFORT=$/m);
 });
 
+for (const [profile, effort] of [
+  ["argon_low", "low"],
+  ["argon", "medium"],
+  ["argon_high", "high"],
+  ["flash38_high", "low"],
+  ["gemini-4-argon-xhigh", "high"],
+  ["gemini-4-argon-max", "high"],
+]) {
+  test(`agy ${profile} passes a family ID and separate effort`, () => {
+    const r = runRoute({
+      role: "antigravity",
+      env: { TFX_GEMINI_PROFILE: profile },
+      agyModels: ["low", "medium", "high"]
+        .map(
+          (level) => `gemini-4.10-argon-${level}\tGemini 4.10 Argon (${level})`,
+        )
+        .join("\n"),
+    });
+    assert.equal(r.status, 0, r.output);
+    assert.equal(r.argv[r.argv.indexOf("--model") + 1], "gemini-4.10-argon");
+    assert.equal(r.argv[r.argv.indexOf("--effort") + 1], effort);
+    assert.equal(r.argv.at(-2), "--print");
+    assert.match(r.argv.at(-1), /review fixture/);
+  });
+}
+
+test("agy lowers effort on the newest family instead of choosing an older model", () => {
+  const r = runRoute({
+    role: "designer",
+    agyModels:
+      "gemini-4.9-argon-high\tGemini 4.9 Argon (High)\n" +
+      "gemini-4.10-argon-medium\tGemini 4.10 Argon (Medium)\n",
+  });
+  assert.equal(r.status, 0, r.output);
+  assert.equal(r.argv[r.argv.indexOf("--model") + 1], "gemini-4.10-argon");
+  assert.equal(r.argv[r.argv.indexOf("--effort") + 1], "medium");
+  assert.match(r.stderr, /requested=high applied=medium/);
+});
+
+test("agy keeps requested effort when the model list is unavailable", () => {
+  const r = runRoute({ role: "designer" });
+  assert.equal(r.status, 0, r.output);
+  assert.equal(r.argv[r.argv.indexOf("--model") + 1], "gemini-4-argon");
+  assert.equal(r.argv[r.argv.indexOf("--effort") + 1], "high");
+  assert.doesNotMatch(r.stderr, /requested=.*applied=/);
+});
+
+test("agy rejects a request with no supported lower effort before invocation", () => {
+  const r = runRoute({
+    role: "antigravity",
+    env: { TFX_GEMINI_PROFILE: "argon_low" },
+    agyModels: "gemini-4.10-argon-high\tGemini 4.10 Argon (High)\n",
+  });
+  assert.equal(r.status, 78, r.output);
+  assert.deepEqual(r.argv, []);
+  assert.match(r.output, /지원.*effort/);
+});
+
 for (const role of ["code-reviewer", "quality-reviewer"]) {
   for (const [author, weekly, expected] of [
     [undefined, undefined, "claude"],
@@ -216,8 +276,10 @@ for (const role of ["code-reviewer", "quality-reviewer"]) {
       } else if (expected === "codex") {
         assert.equal(r.argv[r.argv.indexOf("--profile") + 1], "sol");
         assert.ok(r.argv.includes("review"), r.output);
-      } else
-        assert.match(r.argv[r.argv.indexOf("--model") + 1], /Argon \(High\)/);
+      } else {
+        assert.equal(r.argv[r.argv.indexOf("--model") + 1], "gemini-4-argon");
+        assert.equal(r.argv[r.argv.indexOf("--effort") + 1], "high");
+      }
     });
   }
 }
@@ -251,7 +313,8 @@ test("security-reviewer uses Argon High", () => {
   const r = runRoute({ role: "security-reviewer" });
   assert.equal(r.status, 0, r.output);
   assert.match(r.output, /type=antigravity agent=security-reviewer/);
-  assert.match(r.argv[r.argv.indexOf("--model") + 1], /Argon \(High\)/);
+  assert.equal(r.argv[r.argv.indexOf("--model") + 1], "gemini-4-argon");
+  assert.equal(r.argv[r.argv.indexOf("--effort") + 1], "high");
 });
 
 for (const launch of ["headless", "pane"]) {
