@@ -112,3 +112,23 @@ export function resolveCodexModelEffort({ family, effort }, opts = {}) {
   }
   return { family, model, effort: selected };
 }
+
+export function resolveAgyModelEffort({ family, effort }, opts = {}) {
+  const { families } = resolveModelFamilies("agy", opts);
+  if (!Object.hasOwn(families, family) || !EFFORT_ORDER.includes(effort)) {
+    throw new Error(`알 수 없는 agy 가족 또는 effort: ${family}/${effort}`);
+  }
+  const { model, supportedEfforts } = families[family];
+  if (!supportedEfforts) return { family, model, effort };
+  const selected = EFFORT_ORDER.slice(0, EFFORT_ORDER.indexOf(effort) + 1)
+    .filter((level) => supportedEfforts.includes(level))
+    .at(-1);
+  if (!selected) {
+    const error = new Error(
+      `${model}: ${effort} 이하의 지원 effort가 없습니다`,
+    );
+    error.code = "unsupported-effort";
+    throw error;
+  }
+  return { family, model, effort: selected };
+}

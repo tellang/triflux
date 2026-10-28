@@ -139,3 +139,48 @@ test("최신 가족 모델에서 지원하는 가장 가까운 아래 effort를 
     "max",
   );
 });
+
+test("agy는 최신 가족의 지원 effort를 쓰고 목록이 없으면 낮추지 않는다", (t) => {
+  const home = mkdtempSync(join(tmpdir(), "tfx-agy-effort-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const stateDir = join(home, "state");
+  const opts = {
+    home,
+    stateDir,
+    env: { HOME: home },
+    runCommand: () =>
+      "gemini-4.9-argon-high\tGemini 4.9 Argon (High)\n" +
+      "gemini-4.10-argon-medium\tGemini 4.10 Argon (Medium)\n",
+  };
+  for (const effort of ["high", "xhigh", "max"]) {
+    assert.deepEqual(
+      modelEffort.resolveAgyModelEffort({ family: "argon", effort }, opts),
+      { family: "argon", model: "gemini-4.10-argon", effort: "medium" },
+    );
+  }
+  assert.throws(
+    () =>
+      modelEffort.resolveAgyModelEffort(
+        { family: "argon", effort: "low" },
+        opts,
+      ),
+    { code: "unsupported-effort" },
+  );
+  rmSync(join(stateDir, "agy-models.json"));
+  const offline = { ...opts, allowCommand: false };
+  assert.deepEqual(
+    modelEffort.resolveAgyModelEffort(
+      { family: "argon", effort: "max" },
+      offline,
+    ),
+    { family: "argon", model: "gemini-4.10-argon", effort: "max" },
+  );
+  writeFileSync(join(stateDir, "models.json"), '{"argon":"gemini-4-argon"}');
+  assert.deepEqual(
+    modelEffort.resolveAgyModelEffort(
+      { family: "argon", effort: "high" },
+      opts,
+    ),
+    { family: "argon", model: "gemini-4-argon", effort: "high" },
+  );
+});

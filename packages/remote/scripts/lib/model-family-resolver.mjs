@@ -39,7 +39,8 @@ export const AGY_FAMILY_PROFILES = Object.freeze({
 });
 const DAY_MS = 86_400_000;
 const CODEX_SLUG = /^gpt-(\d+(?:\.\d+)*)-(sol|astra|terra|luna)$/;
-const AGY_SLUG = /^gemini-(\d+(?:\.\d+)*)-(argon)-(low|medium|high)$/;
+const AGY_SLUG =
+  /^gemini-(\d+(?:\.\d+)*)-(argon)-(none|low|medium|high|xhigh|max|ultra)$/;
 
 function compareVersions(a, b) {
   const left = a.split(".").map(Number);
@@ -90,7 +91,7 @@ export function selectAgyModel(models, family, effort) {
         const match = AGY_SLUG.exec(item?.slug);
         return (
           match?.[2] === family &&
-          match?.[3] === effort &&
+          (effort === undefined || match?.[3] === effort) &&
           typeof item.model === "string"
         );
       })
@@ -350,16 +351,56 @@ export function resolveModelFamilies(provider, opts = {}) {
           : { ...families[definition.family] };
     }
   }
+  if (provider === "agy") {
+    const latest = selectAgyModel(catalog?.models, "argon");
+    // 옛 기록에는 가족 ID가 없으므로 마지막 성공 프로필의 표시 이름에서 복원한다.
+    const savedModels = [
+      ...Object.values(AGY_FAMILY_PROFILES),
+      ...Object.values(profiles),
+    ].flatMap((profile) => {
+      const match = /^Gemini (\d+(?:\.\d+)*) Argon \(/i.exec(profile.model);
+      return match
+        ? [{ ...profile, slug: `gemini-${match[1]}-argon-${profile.effort}` }]
+        : [];
+    });
+    const saved = selectAgyModel(savedModels, "argon");
+    const last = previous.families?.argon || {
+      model: saved.slug.replace(/-[^-]+$/, ""),
+      fetched_at: saved.fetched_at,
+    };
+    families.argon =
+      latest &&
+      (!last.fetched_at ||
+        !catalog.fetched_at ||
+        Date.parse(catalog.fetched_at) >= Date.parse(last.fetched_at))
+        ? {
+            model: latest.slug.replace(/-[^-]+$/, ""),
+            fetched_at: catalog.fetched_at || fetchedAt,
+          }
+        : last;
+    const pin = pins.argon;
+    selectedFamilies.argon =
+      typeof pin === "string" && AGY_SLUG.test(`${pin}-low`)
+        ? { model: pin, source: paths.pinsPath, fetched_at: null }
+        : { ...families.argon };
+    const supported = catalog?.models
+      ?.filter((item) =>
+        item.slug.startsWith(`${selectedFamilies.argon.model}-`),
+      )
+      .map((item) => AGY_SLUG.exec(item.slug)?.[3])
+      .filter(Boolean);
+    if (supported?.length) selectedFamilies.argon.supportedEfforts = supported;
+  }
   const record = {
     sourceSignature,
     checked_at: checkedAt || null,
     profiles,
     selectedProfiles,
-    ...(provider === "codex" ? { families } : {}),
+    families,
   };
   if (opts.persist !== false) saveJson(recordPath, record);
   return {
     profiles: selectedProfiles,
-    ...(provider === "codex" ? { families: selectedFamilies } : {}),
+    families: selectedFamilies,
   };
 }

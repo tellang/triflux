@@ -958,15 +958,31 @@ capture_workspace_signature() {
 
 # ── Gemini 모델 프로필 해석 ──
 resolve_gemini_profile() {
-  local result
-  result=$("$NODE_BIN" --input-type=module -e '
+  "$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
     const { ensureGeminiProfiles, resolveGeminiModel } = await import(pathToFileURL(process.argv[1]).href);
+    const { modelEffortFromProfile, resolveAgyModelEffort } = await import(new URL("./model-effort.mjs", pathToFileURL(process.argv[1])).href);
     const opts = { profilesPath: process.argv[3], command: process.argv[4] };
     ensureGeminiProfiles(opts);
-    process.stdout.write(resolveGeminiModel(process.argv[2], opts));
-  ' "${CODEX_PROFILE_MODULE%/*}/gemini-profiles.mjs" "$1" "$GEMINI_PROFILES_PATH" "$CLI_CMD" 2>/dev/null)
-  echo "${result:-Gemini 4 Argon (Medium)}"
+    const model = resolveGeminiModel(process.argv[2], opts);
+    const match = /^gemini-\d+(?:\.\d+)*-argon(?:-([a-z]+))?$/i.exec(model)
+      || /^Gemini \d+(?:\.\d+)* Argon \(([a-z]+)\)$/i.exec(model);
+    const requested = modelEffortFromProfile("agy", process.argv[2])
+      || (match ? { family: "argon", effort: (match[1] || "medium").toLowerCase() } : null);
+    if (!requested) {
+      process.stdout.write(`${model}\x1e`);
+    } else {
+      try {
+        const resolved = resolveAgyModelEffort(requested, opts);
+        if (resolved.effort !== requested.effort)
+          console.error(`[tfx-route] agy effort: requested=${requested.effort} applied=${resolved.effort} model=${resolved.model}`);
+        process.stdout.write([resolved.model, resolved.effort].join("\x1e"));
+      } catch (error) {
+        console.error(`[tfx-route] ${error.message}`);
+        process.exitCode = error.code === "unsupported-effort" ? 78 : 1;
+      }
+    }
+  ' "${CODEX_PROFILE_MODULE%/*}/gemini-profiles.mjs" "$1" "$GEMINI_PROFILES_PATH" "$CLI_CMD"
 }
 
 refresh_codex_profiles() {
@@ -2024,15 +2040,14 @@ run_antigravity_exec() {
     esac
   done
 
-  # ── 프로필 기반 모델 주입 ──
-  # display name 에 공백/괄호가 있으므로(예: "Gemini 4 Argon (Medium)") CLI_ARGS
-  # 문자열이 아니라 agy_args 배열에 두 원소(--model, <display name>)로 append 해야
-  # "${agy_args[@]}" expand 시 단일 인자로 보존된다. 모델 SSOT 는 프로필 설정이다.
+  # 모델 ID에 effort를 남기면 별도 --effort와 충돌하므로 해석 결과를 나눠 전달한다.
   if [[ -z "${TFX_GEMINI_NO_MODEL:-}" ]]; then
-    local _agy_model
-    _agy_model="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-argon}}")"
+    local _agy_model _agy_effort _agy_selection
+    _agy_selection="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-argon}}")" || return $?
+    IFS=$'\x1e' read -r _agy_model _agy_effort <<< "$_agy_selection"
     if [[ -n "$_agy_model" ]]; then
       agy_args+=("--model" "$_agy_model")
+      [[ -z "$_agy_effort" ]] || agy_args+=("--effort" "$_agy_effort")
     fi
   fi
   if [[ -n "$_print_flag" ]]; then
