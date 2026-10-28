@@ -2,6 +2,15 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.87.0] - 2026-10-28
+
+### Changed
+- routing: 모델 가족과 effort 를 나눠 다룬다(ADR-0049). 역할 정책은 CLI 별 `{family, effort}` 로 적고, 결합 프로필 이름(`sol_high`, `argon_high`)은 받기만 하고 풀어서 쓴다 (#854~#861)
+  - Codex: 가족 프로필 `~/.codex/<가족>.config.toml` 에 `model` 만 적고 effort 는 `-c model_reasoning_effort` 로 넘긴다. 가족 파일이 없으면 결합 프로필로 폴백한다. 결합 이름 파일은 이번 릴리스까지 함께 갱신하고 다음 릴리스에 멈춘다. 이미 있는 가족 이름 파일과 inline 설정은 덮어쓰기 전에 백업한다
+  - Antigravity: `--model <최신 Argon 가족 ID> --effort <effort>` 로 띄운다
+  - Claude: effort 를 Codex 프로필 이름 글자에서 뽑지 않고 역할 정책 effort 를 쓴다(ultra 는 max). 값은 이전과 같다
+  - 가족이 지원하지 않는 effort 는 최신 모델에서 가장 가까운 아래 단계로 낮추고 stderr 에 requested/applied 를 남긴다. 낮출 단계가 없으면 78 로 끝낸다. 재시도 스냅숏과 승격 체인도 같은 형식이고, 낮춘 승격이 기본 레인과 같아지면 실패로 본다
+
 ## [10.86.1] - 2026-10-28
 
 ### Fixed
