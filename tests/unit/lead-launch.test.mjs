@@ -38,6 +38,11 @@ describe("tfx lead", () => {
     );
     assert.equal(resolveLauncher({ cli: "codex", configPath: both }), "x-wrap");
     assert.equal(resolveLauncher({ cli: "agy", configPath: both }), "agy");
+    for (const bad of ["null", '{"launchers":"ab"}'])
+      assert.throws(
+        () => resolveLauncher({ configPath: config(bad) }),
+        /lead\.json 는 \{"launchers"/u,
+      );
     assert.throws(
       () => resolveLauncher({ configPath: config('{"launcher":"a\\nb"}') }),
       /한 줄/u,

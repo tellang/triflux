@@ -29,6 +29,13 @@ export function readLeadConfig(path = leadConfigPath()) {
     throw error;
   }
   const config = JSON.parse(text);
+  const isObject = (value) =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+  if (
+    !isObject(config) ||
+    (config.launchers !== undefined && !isObject(config.launchers))
+  )
+    throw new Error(`${path} 는 {"launchers": {...}} 형식이어야 한다`);
   const launchers = { ...config.launchers };
   if (config.launcher !== undefined && launchers.claude === undefined)
     launchers.claude = config.launcher;
