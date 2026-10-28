@@ -165,6 +165,7 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
       "astra_xhigh",
       "astra_max",
       "astra_ultra",
+      "terra_high",
       "luna_high",
       "luna_low",
     ]);

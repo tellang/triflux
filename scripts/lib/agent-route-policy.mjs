@@ -102,7 +102,7 @@ const policy = {
     subcommand: "exec",
   },
   "document-specialist": {
-    profile: "sol_high",
+    profile: "terra_high",
     timeoutSec: 1440,
     mcpHint: "analyze",
     subcommand: "exec",
@@ -146,7 +146,7 @@ const policy = {
     subcommand: "exec",
   },
   writer: {
-    profile: "luna_high",
+    profile: "terra_high",
     timeoutSec: 900,
     mcpHint: "implement",
     subcommand: "exec",
@@ -171,6 +171,7 @@ const CANONICAL_CODEX_PROFILE_OVERRIDES = Object.freeze(
   new Set([
     "luna_low",
     "luna_high",
+    "terra_high",
     "sol_med",
     "sol_high",
     "astra_xhigh",
