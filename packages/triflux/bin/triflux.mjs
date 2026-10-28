@@ -4134,6 +4134,21 @@ async function main() {
         "--effort",
         "--launcher",
       ];
+      cmdArgs.forEach((arg, i) => {
+        const known =
+          valueFlags.includes(arg) &&
+          cmdArgs[i + 1] &&
+          !cmdArgs[i + 1].startsWith("--");
+        if (arg.startsWith("--") && !known)
+          throw createCliError(
+            `tfx lead 가 모르는 옵션이거나 값이 없다: ${arg}`,
+            {
+              exitCode: EXIT_ARG_ERROR,
+              reason: "argError",
+              fix: "tfx lead --help",
+            },
+          );
+      });
       const role = cmdArgs
         .filter(
           (arg, i) =>
@@ -4155,9 +4170,13 @@ async function main() {
         console.log(
           `\n  ${GREEN_BRIGHT}✓${RESET} 리드 "${result.name}" (${result.launcher}) tmux ${result.session}\n  붙기: tmux attach -t ${result.session}\n`,
         );
+      else if (result.start?.ready)
+        console.log(
+          `\n  ${RED}✗${RESET} /tfx-lead 전송 실패: ${result.ask?.error ?? JSON.stringify(result.ask)}\n  세션 ${result.session} 은 떠 있다. 붙어서 /tfx-lead 를 직접 입력하거나 tfx-live stop --session ${result.session} 으로 닫는다.\n`,
+        );
       else
         console.log(
-          `\n  ${RED}✗${RESET} 리드 시작 실패: ${JSON.stringify(result.start?.blockedBy ?? result.ask ?? result.start)}\n`,
+          `\n  ${RED}✗${RESET} 리드 시작 실패: ${result.start?.error ?? result.start?.blockedBy ?? JSON.stringify(result.start)}\n`,
         );
       if (!result.ok) process.exitCode = EXIT_ERROR;
       return;

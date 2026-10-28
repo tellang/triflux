@@ -41,9 +41,9 @@ export function resolveLauncher({ flag, configPath } = {}) {
   return launcher.trim();
 }
 
-/** tmux 세션 이름에 못 쓰는 문자(. :)를 바꿔 `<폴더>-lead` 로 만든다. */
+/** tmux 대상 문법과 겹치는 문자(. :)와 공백만 바꿔 `<폴더>-lead` 로 만든다. */
 export function leadSessionName(cwd) {
-  return `${basename(resolve(cwd)).replace(/[^\w-]/gu, "-")}-lead`;
+  return `${basename(resolve(cwd)).replace(/[.:\s]/gu, "-")}-lead`;
 }
 
 /** /tfx-lead 와 같은 규칙으로 이름을 정한다. 날짜로 시작하면 그대로 쓴다. */
@@ -53,10 +53,17 @@ export function leadDisplayName(role, now = new Date()) {
 }
 
 async function runLive(args, run) {
-  const { stdout } = await run(process.execPath, [TFX_LIVE, ...args], {
-    encoding: "utf8",
-    maxBuffer: 1024 * 1024,
-  });
+  let stdout;
+  try {
+    ({ stdout } = await run(process.execPath, [TFX_LIVE, ...args], {
+      encoding: "utf8",
+      maxBuffer: 1024 * 1024,
+    }));
+  } catch (error) {
+    // tfx-live 는 실패해도 원인을 담은 JSON 을 stdout 에 쓰고 exit 1 로 끝난다.
+    if (!error.stdout) throw error;
+    stdout = error.stdout;
+  }
   return JSON.parse(stdout);
 }
 
