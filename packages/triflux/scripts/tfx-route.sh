@@ -1327,7 +1327,10 @@ read_codex_profile_effort() {
       codexHome: process.env.CODEX_HOME || process.env.TFX_CODEX_HOME,
     });
     process.stdout.write(effort?.toLowerCase() || "");
-  ' "$CODEX_PROFILE_MODULE" "$profile"
+  ' "$CODEX_PROFILE_MODULE" "$profile" || {
+    echo "[tfx-route] 경고: Codex effort 해석 실패, 기존 프로필 유지: $profile" >&2
+    return 0
+  }
 }
 
 apply_codex_concrete_effort_guard() {
@@ -1368,11 +1371,14 @@ apply_codex_concrete_effort_guard() {
     profile="$target_profile"
   fi
   local managed_effort
-  managed_effort=$("$NODE_BIN" --input-type=module -e '
+  if ! managed_effort=$("$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
     const { modelEffortFromProfile } = await import(pathToFileURL(process.argv[1]).href);
     process.stdout.write(modelEffortFromProfile("codex", process.argv[2])?.effort || "");
-  ' "${CODEX_PROFILE_MODULE%/*}/model-effort.mjs" "$profile")
+  ' "${CODEX_PROFILE_MODULE%/*}/model-effort.mjs" "$profile"); then
+    echo "[tfx-route] 경고: 관리 Codex effort 해석 실패, 기존 프로필 유지: $profile" >&2
+    managed_effort=""
+  fi
   if [[ -n "$managed_effort" ]]; then
     local -a guarded_args=()
     for ((i = 0; i < ${#args[@]}; i++)); do

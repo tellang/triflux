@@ -59,10 +59,11 @@ export function selectCodexModel(models, family, effort) {
         return (
           match?.[2] === family &&
           item.visibility === "list" &&
-          Array.isArray(item.supported_reasoning_levels) &&
-          item.supported_reasoning_levels.some(
-            (level) => (level?.effort ?? level) === effort,
-          )
+          (effort === undefined ||
+            (Array.isArray(item.supported_reasoning_levels) &&
+              item.supported_reasoning_levels.some(
+                (level) => (level?.effort ?? level) === effort,
+              )))
         );
       })
       .sort((a, b) =>
@@ -266,6 +267,8 @@ export function resolveModelFamilies(provider, opts = {}) {
   }
   const profiles = {};
   const selectedProfiles = {};
+  const families = {};
+  const selectedFamilies = {};
   const pins = readJson(paths.pinsPath) || {};
   for (const [name, definition] of Object.entries(definitions)) {
     const saved = previous.profiles?.[name];
@@ -329,13 +332,34 @@ export function resolveModelFamilies(provider, opts = {}) {
         fetched_at: null,
       };
     }
+    if (provider === "codex" && !Object.hasOwn(families, definition.family)) {
+      const latest = selectCodexModel(catalog?.models, definition.family);
+      const lastFamily =
+        previous.families?.[definition.family] || profiles[name];
+      families[definition.family] =
+        latest &&
+        (!lastFamily.fetched_at ||
+          !catalog.fetched_at ||
+          Date.parse(catalog.fetched_at) >= Date.parse(lastFamily.fetched_at))
+          ? { model: latest.slug, fetched_at: catalog.fetched_at || fetchedAt }
+          : { model: lastFamily.model, fetched_at: lastFamily.fetched_at };
+      selectedFamilies[definition.family] =
+        typeof pin === "string" &&
+        CODEX_SLUG.exec(pin)?.[2] === definition.family
+          ? { model: pin, source: paths.pinsPath, fetched_at: null }
+          : { ...families[definition.family] };
+    }
   }
   const record = {
     sourceSignature,
     checked_at: checkedAt || null,
     profiles,
     selectedProfiles,
+    ...(provider === "codex" ? { families } : {}),
   };
   if (opts.persist !== false) saveJson(recordPath, record);
-  return { profiles: selectedProfiles };
+  return {
+    profiles: selectedProfiles,
+    ...(provider === "codex" ? { families: selectedFamilies } : {}),
+  };
 }

@@ -183,6 +183,7 @@ function runRoute({
     env,
     encoding: "utf8",
   });
+  fixture.stderr = result.stderr;
 
   assert.equal(
     result.status,
@@ -201,6 +202,25 @@ function profileValues(args) {
 }
 
 describe("tfx-route retry snapshot profile plumbing", () => {
+  it("effort 해석기 실패는 경고를 남기고 기존 프로필 실행을 유지한다", () => {
+    const nodeWrapper = path.join(makeTempDir(), "resolver-node");
+    writeExecutable(
+      nodeWrapper,
+      `#!/usr/bin/env node
+const { spawnSync } = require("node:child_process");
+const args = process.argv.slice(2);
+if (args.some(arg => arg.includes("resolveCodexProfileConfigValues") || arg.includes("modelEffortFromProfile"))) {
+  process.exit(42);
+}
+const result = spawnSync(process.execPath, args, { stdio: "inherit" });
+process.exit(result.status ?? 1);
+`,
+    );
+    const args = runRoute({ env: { NODE_BIN: nodeWrapper } });
+    assert.deepEqual(profileValues(args), ["sol_high"]);
+    assert.match(fixture.stderr, /effort.*해석.*실패/);
+  });
+
   it("agy 실행 전에 기본 Argon을 고르고 옛 Flash 별칭은 Argon Low로 보낸다", () => {
     for (const [profile, expected] of [
       ["", "Gemini 4 Argon (High)"],

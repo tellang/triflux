@@ -41,6 +41,7 @@ import {
   recordFile,
   renderCliResult,
 } from "../scripts/lib/cli-output.mjs";
+import { managedCodexProfileContents } from "../scripts/lib/codex-profile-config.mjs";
 import {
   commandExists,
   inspectMacTimeoutDependency,
@@ -68,7 +69,6 @@ import {
   saveRegistry,
   syncRegistryTargets,
 } from "../scripts/lib/mcp-guard-engine.mjs";
-import { resolveModelFamilies } from "../scripts/lib/model-family-resolver.mjs";
 import {
   formatPsmuxInstallGuidance,
   formatPsmuxUpdateGuidance,
@@ -1030,22 +1030,20 @@ function previewCodexProfiles() {
     ? readFileSync(CODEX_CONFIG_PATH, "utf8")
     : "";
   const profiles = [];
-  const resolved = resolveModelFamilies("codex", {
+  const { contents } = managedCodexProfileContents({
     codexHome: CODEX_DIR,
     allowCommand: false,
     persist: false,
-  }).profiles;
+  });
 
   // Codex 0.134+: 프로필은 별도 파일 ~/.codex/<name>.config.toml 로 관리한다.
-  for (const profile of REQUIRED_CODEX_PROFILES) {
-    const profilePath = join(CODEX_DIR, `${profile.name}.config.toml`);
-    const { model, effort } = resolved[profile.name];
-    const desiredContent = `model = "${model}"\nmodel_reasoning_effort = "${effort}"\n`;
+  for (const [name, desiredContent] of Object.entries(contents)) {
+    const profilePath = join(CODEX_DIR, `${name}.config.toml`);
     const existingContent = existsSync(profilePath)
       ? readFileSync(profilePath, "utf8")
       : null;
     if (existingContent !== desiredContent) {
-      profiles.push(profile.name);
+      profiles.push(name);
     }
   }
 

@@ -168,6 +168,10 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
       "terra_high",
       "luna_high",
       "luna_low",
+      "sol",
+      "astra",
+      "terra",
+      "luna",
     ]);
     if (process.platform === "win32") {
       assert.equal(codexProfiles.windowsSandbox, true);
@@ -341,6 +345,17 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
       "inline [profiles.*] 는 config.toml 에서 제거되어야 한다 (codex 0.134+)",
     );
     const codexDir = join(homeDir, ".codex");
+    for (const [family, model] of [
+      ["sol", "gpt-6.1-sol"],
+      ["astra", "gpt-6-astra"],
+      ["terra", "gpt-6.1-terra"],
+      ["luna", "gpt-6-luna"],
+    ]) {
+      assert.equal(
+        readFileSync(join(codexDir, `${family}.config.toml`), "utf8"),
+        `model = "${model}"\n`,
+      );
+    }
     assert.equal(
       readFileSync(join(codexDir, "sol_high.config.toml"), "utf8"),
       'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "high"\n',

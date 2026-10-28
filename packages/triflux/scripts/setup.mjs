@@ -620,12 +620,18 @@ const BREADCRUMB_PATH = join(CLAUDE_DIR, "scripts", ".tfx-pkg-root");
 const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 const HUD_PATH = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
 
-const REQUIRED_CODEX_PROFILES = Object.entries(CODEX_FAMILY_PROFILES).map(
-  ([name, { model, effort }]) => ({
+const REQUIRED_CODEX_PROFILES = [
+  ...Object.entries(CODEX_FAMILY_PROFILES).map(([name, { model, effort }]) => ({
     name,
     lines: [`model = "${model}"`, `model_reasoning_effort = "${effort}"`],
-  }),
-);
+  })),
+  ...new Map(
+    Object.values(CODEX_FAMILY_PROFILES).map(({ family, model }) => [
+      family,
+      { name: family, lines: [`model = "${model}"`] },
+    ]),
+  ).values(),
+];
 
 // Codex 0.134 마이그레이션: triflux 가 과거에 inline [profiles.*] 로 썼던 구형 프로필.
 // config.toml 에서 제거 대상 (retired 모델 — 별도 파일로 만들지 않는다).

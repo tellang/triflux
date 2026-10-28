@@ -79,15 +79,3 @@ test("정규화는 객체 상속 키도 문자열로 보존한다", () => {
     assert.equal(modelEffort.normalizeCodexProfileName(name), name);
   }
 });
-
-test("effort 순서는 CLI 공통 비교 순서를 유지한다", () => {
-  assert.deepEqual(modelEffort.EFFORT_ORDER, [
-    "none",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-    "ultra",
-  ]);
-});

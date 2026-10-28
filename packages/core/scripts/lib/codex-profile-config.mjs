@@ -22,17 +22,25 @@ import {
 
 export { normalizeCodexProfileName };
 
+export function managedCodexProfileContents(opts = {}) {
+  const { profiles, families } = resolveModelFamilies("codex", opts);
+  const contents = {};
+  for (const [name, { model, effort }] of Object.entries(profiles)) {
+    contents[name] =
+      `model = "${model}"\nmodel_reasoning_effort = "${effort}"\n`;
+  }
+  for (const [family, { model }] of Object.entries(families)) {
+    contents[family] = `model = "${model}"\n`;
+  }
+  return { profiles, contents };
+}
+
 export function ensureManagedCodexProfiles(opts = {}) {
   const { codexHome } = modelFamilyPaths(opts);
-  const { profiles } = resolveModelFamilies("codex", opts);
+  const { profiles, contents } = managedCodexProfileContents(opts);
   let changed = 0;
-  for (const [name, { model, effort }] of Object.entries(profiles)) {
-    if (
-      writeModelFile(
-        join(codexHome, `${name}.config.toml`),
-        `model = "${model}"\nmodel_reasoning_effort = "${effort}"\n`,
-      )
-    )
+  for (const [name, content] of Object.entries(contents)) {
+    if (writeModelFile(join(codexHome, `${name}.config.toml`), content))
       changed++;
   }
   return { changed, profiles };
