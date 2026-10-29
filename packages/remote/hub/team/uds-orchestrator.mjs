@@ -1,5 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { resolve as pathResolve } from "node:path";
+import { judgeBusyAction } from "@triflux/core/hub/lib/jev-addon.mjs";
 import {
   createActivityLifecycle,
   isActivityLifecycleEnabled,
@@ -299,12 +300,13 @@ export async function askCodexAppServerThread({
   noWait = false,
   warnContextPct,
   maxContextPct,
+  jevOptions,
   clientFactory = (opts) => new JsonRpcWsUdsClient(opts),
 } = {}) {
   if (typeof prompt !== "string" || !prompt.trim())
     throw new Error("codex UDS ask requires a non-empty prompt");
   if (!threadId) throw new Error("codex UDS ask requires --thread <id|auto>");
-  if (!["wait", "fail", "steer"].includes(ifBusy))
+  if (!["wait", "fail", "steer", "auto"].includes(ifBusy))
     throw new Error(`invalid --if-busy: ${ifBusy}`);
   const client = codexClient(
     socketPath,
@@ -340,14 +342,30 @@ export async function askCodexAppServerThread({
       DEFAULT_CODEX_APP_SERVER_UDS_BOOTSTRAP_MS,
     );
     const initiallyBusy = thread.status?.type === "active";
-    if (thread.status?.type === "active" && ifBusy === "fail")
+    let effectiveIfBusy = ifBusy;
+    if (initiallyBusy && ifBusy === "auto") {
+      const latestTurnSummary =
+        thread.turns
+          ?.slice(-2)
+          .map((t) => JSON.stringify(t))
+          .join("\n")
+          .slice(0, 800) || "";
+      const verdict = await judgeBusyAction(
+        { prompt, threadSummary: latestTurnSummary },
+        jevOptions,
+      );
+      effectiveIfBusy = verdict?.action ?? "wait";
+    } else if (ifBusy === "auto") {
+      effectiveIfBusy = "wait";
+    }
+    if (thread.status?.type === "active" && effectiveIfBusy === "fail")
       throw new Error(`target busy (--if-busy fail): ${selectedId}`);
     const busyDeadline = busyStarted + busyTimeoutMs;
     const busyError = () =>
       new Error(
         `target busy after ${Math.ceil(busyTimeoutMs / 1000)}s (--if-busy wait)`,
       );
-    while (thread.status?.type === "active" && ifBusy === "wait") {
+    while (thread.status?.type === "active" && effectiveIfBusy === "wait") {
       const waitMs = Math.min(
         pollIntervalMs,
         Math.max(0, busyDeadline - Date.now()),
@@ -373,7 +391,9 @@ export async function askCodexAppServerThread({
         throw busyError();
     }
     const busyWaitedMs =
-      ifBusy === "wait" && initiallyBusy ? Date.now() - busyStarted : 0;
+      effectiveIfBusy === "wait" && initiallyBusy
+        ? Date.now() - busyStarted
+        : 0;
     const resumed = await client.request(
       "thread/resume",
       { threadId: selectedId, excludeTurns: true },
@@ -405,7 +425,7 @@ export async function askCodexAppServerThread({
     else if (!resumed?.thread && thread.status?.type === "active")
       activeTurns = thread.turns;
     const expectedTurnId =
-      ifBusy === "steer"
+      effectiveIfBusy === "steer"
         ? activeTurns?.findLast((turn) => turn.status === "inProgress")?.id
         : undefined;
     const turn = await runCodexAppServerTurn({
@@ -434,7 +454,7 @@ export async function askCodexAppServerThread({
       status: turn.status,
       commentary: turn.commentary,
       meta: { retries: turn.retries },
-      ifBusy,
+      ifBusy: effectiveIfBusy,
       busyWaitedMs,
       steered: turn.steered,
       socketPath,

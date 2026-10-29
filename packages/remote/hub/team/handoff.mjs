@@ -2,6 +2,8 @@
 // HANDOFF 블록 파싱, 검증, fallback 생성, Lead 포맷팅
 // 설계: docs/design/handoff-schema-v7.md (PR #70 에서 삭제, c0722ecd 에 남아 있다)
 
+import { judgeHandoffQuality } from "@triflux/core/hub/lib/jev-addon.mjs";
+
 // ── enum 허용 값 ──
 const STATUS_VALUES = ["ok", "partial", "failed"];
 const LEAD_ACTION_VALUES = ["accept", "needs_read", "retry", "reassign"];
@@ -303,5 +305,52 @@ export function processHandoff(rawText, context = {}) {
     valid,
     warnings,
     fallback: false,
+  };
+}
+
+/**
+ * Jev 애드온이 활성화된 경우 인계 파일의 lead_action과 가짜 성공 여부를 보정한다.
+ * 비활성 상태이거나 신뢰도 임계값 미만이면 processHandoff 결과를 그대로 반환한다.
+ */
+export async function processHandoffWithJev(
+  rawText,
+  context = {},
+  jevOptions = {},
+) {
+  const base = processHandoff(rawText, context);
+  const verdict = await judgeHandoffQuality(
+    {
+      rawText,
+      handoff: base.handoff,
+      exitCode: context.exitCode ?? 0,
+      gitDiffFiles: context.gitDiffFiles,
+      role: context.role,
+    },
+    jevOptions,
+  );
+  if (!verdict) return base;
+
+  const updatedHandoff = {
+    ...base.handoff,
+    lead_action: verdict.leadAction,
+    ...(verdict.leadAction === "retry" && base.handoff.status === "ok"
+      ? { status: "partial" }
+      : {}),
+    _jev: {
+      lead_action: verdict.leadAction,
+      confidence: verdict.confidence,
+    },
+  };
+  const warnings = [...base.warnings];
+  if (verdict.leadAction !== base.handoff.lead_action) {
+    warnings.push(
+      `jev overridden lead_action: ${base.handoff.lead_action} -> ${verdict.leadAction}`,
+    );
+  }
+  return {
+    ...base,
+    handoff: updatedHandoff,
+    formatted: formatHandoffForLead(updatedHandoff),
+    warnings,
   };
 }

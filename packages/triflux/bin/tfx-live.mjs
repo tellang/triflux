@@ -32,6 +32,7 @@ import {
   readCodexSessionRecords,
   registryDir,
 } from "../hub/lib/codex-session-registry.mjs";
+import { judgePeerConvergence } from "../hub/lib/jev-addon.mjs";
 import { privateTmpDir } from "../hub/lib/private-tmp.mjs";
 import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
 import { exposeLiveSession } from "../hub/team/agents-row.mjs";
@@ -7434,6 +7435,7 @@ async function peer(flags, deps = {}) {
       addStopSpecOnce(stopSpecs, adapter, base);
     }
 
+    let forceClosureNext = false;
     for (
       let hopIndex = 0;
       hopIndex < rounds * participants.length;
@@ -7451,7 +7453,8 @@ async function peer(flags, deps = {}) {
               )
               .join("\n")
           : null;
-      const isClosure = hopIndex === rounds * participants.length - 1;
+      const isClosure =
+        hopIndex === rounds * participants.length - 1 || forceClosureNext;
       const debateTurn = {
         self: side,
         seed: flags.seed ?? PEER_DEFAULT_SEED,
@@ -7519,6 +7522,28 @@ async function peer(flags, deps = {}) {
       latestResponses.set(side, result.response);
       if (isClosure) {
         closure = parsePeerClosure(result.response);
+        break;
+      }
+
+      if (
+        mode !== "counting" &&
+        hopIndex >= participants.length &&
+        hopIndex + 1 < rounds * participants.length - 1
+      ) {
+        const convergence = await (
+          deps.judgePeerConvergence ?? judgePeerConvergence
+        )({
+          seed: flags.seed ?? PEER_DEFAULT_SEED,
+          mode,
+          previousResponse: previous,
+          currentResponse: result.response,
+          hopIndex,
+          participantsCount: participants.length,
+        });
+        if (convergence?.converged === true) {
+          forceClosureNext = true;
+          output.early_converged_at_hop = hopIndex + 1;
+        }
       }
 
       if (mode === "counting") {

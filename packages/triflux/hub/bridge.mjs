@@ -706,7 +706,7 @@ async function cmdRetryRun(args) {
       result = sm.reportVerifySuccess();
       break;
     case "verify-fail":
-      result = sm.reportVerifyFail(reason || "unspecified");
+      result = await sm.reportVerifyFailAsync(reason || "unspecified");
       break;
     default:
       console.error(`unknown --event: ${event}`);
@@ -830,6 +830,47 @@ async function cmdInterveneRun(args) {
   }
 }
 
+function readTailSafe(filePath, maxBytes = 2000) {
+  if (!filePath) return "";
+  try {
+    const text = readFileSync(String(filePath), "utf8");
+    return text.slice(-maxBytes);
+  } catch {
+    return "";
+  }
+}
+
+async function cmdJudgeStall(args) {
+  try {
+    const payload = readBridgePayload(args);
+    const { isJevEnabled, judgeWorkerHealth } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    if (!isJevEnabled()) {
+      return emitJson({ ok: true, enabled: false, status: null });
+    }
+    const verdict = await judgeWorkerHealth({
+      stdoutTail: readTailSafe(payload.stdoutLog),
+      stderrTail: readTailSafe(payload.stderrLog),
+      rolloutTail: readTailSafe(payload.rolloutFile),
+      elapsedSec: Number(payload.elapsedSec) || 0,
+    });
+    return emitJson({
+      ok: true,
+      enabled: true,
+      status: verdict?.status ?? null,
+      confidence: verdict?.confidence ?? null,
+    });
+  } catch (error) {
+    return emitJson({
+      ok: false,
+      enabled: false,
+      status: null,
+      error: error?.message || String(error),
+    });
+  }
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const cmd = argv[0];
   const args = parseArgs(argv.slice(1));
@@ -857,9 +898,11 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdRetryStatus(args);
     case "intervene-run":
       return await cmdInterveneRun(args);
+    case "judge-stall":
+      return await cmdJudgeStall(args);
     default:
       console.error(
-        "사용법: bridge.mjs <team-info|team-task-list|team-task-update|team-send-message|daemon-probe|daemon-attach|daemon-wait|daemon-interrupt|retry-run|retry-status|intervene-run> [--옵션]",
+        "사용법: bridge.mjs <team-info|team-task-list|team-task-update|team-send-message|daemon-probe|daemon-attach|daemon-wait|daemon-interrupt|retry-run|retry-status|intervene-run|judge-stall> [--옵션]",
       );
       process.exit(1);
   }

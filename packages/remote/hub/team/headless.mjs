@@ -29,7 +29,7 @@ import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import {
   formatHandoffForLead,
   HANDOFF_INSTRUCTION_SHORT,
-  processHandoff,
+  processHandoffWithJev,
 } from "./handoff.mjs";
 import { createInterventionLadder } from "./intervention.mjs";
 import {
@@ -823,13 +823,15 @@ async function collectResults(results) {
   return await Promise.all(
     results.map(async ({ d, completion, output }) => {
       const workerGitDiffFiles = collectGitDiffFiles(d.cwd);
-      const handoffResult = processHandoff(output, {
+      const handoffResult = await processHandoffWithJev(output, {
         exitCode: completion.exitCode,
         resultFile: d.resultFile,
         cli: d.cli,
         gitDiffFiles: workerGitDiffFiles,
+        role: d.role,
       });
       if (
+        !handoffResult.handoff?._jev &&
         completion.exitCode === 0 &&
         workerGitDiffFiles.length === 0 &&
         handoffResult.handoff?.lead_action === "accept"
@@ -1745,7 +1747,7 @@ export async function runHeadlessInteractive(
   process.on("exit", exitHandler);
   // kill() 후 리스너 제거를 위해 참조 보관
   const originalKill = handle.kill.bind(handle);
-  handle.kill = function () {
+  handle.kill = () => {
     originalKill();
     process.removeListener("exit", exitHandler);
   };
