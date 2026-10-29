@@ -205,7 +205,7 @@ async function callJevCli(request, options = {}) {
   const { stdout } = await execImpl(cliBin, args, {
     timeout: timeoutMs > 0 ? timeoutMs : 1500,
     maxBuffer: 256 * 1024,
-    env,
+    env: env === process.env ? process.env : { ...process.env, ...env },
   });
   const parsed = JSON.parse(String(stdout ?? "").trim());
   return normalizeResponse(parsed, request.kind);
