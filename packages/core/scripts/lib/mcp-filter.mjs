@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { isJevEnabled, judgeMcpSelection } from "../../hub/lib/jev-addon.mjs";
 import { CORE_SERVERS, readManifest } from "./mcp-manifest.mjs";
 import {
   DOMAIN_TAG_KEYWORDS,
@@ -749,6 +750,67 @@ export function buildMcpPolicy(options = {}) {
   };
 }
 
+export async function buildMcpPolicyWithJev(options = {}, jevOptions = {}) {
+  const basePolicy = buildMcpPolicy(options);
+  if (!isJevEnabled(jevOptions)) return basePolicy;
+  const taskText = String(options.taskText || "").trim();
+  if (!taskText) return basePolicy;
+
+  const isAutoProfile =
+    !options.requestedProfile || options.requestedProfile === "auto";
+  if (!isAutoProfile && options.requestedProfile === "none") {
+    return basePolicy;
+  }
+
+  const candidateServers =
+    basePolicy.allowedServers.length > 0
+      ? basePolicy.allowedServers
+      : Array.isArray(options.availableServers)
+        ? options.availableServers
+        : [];
+
+  const selection = await judgeMcpSelection(
+    {
+      taskText,
+      agentType: options.agentType || basePolicy.resolvedProfile,
+      availableServers: candidateServers,
+    },
+    jevOptions,
+  );
+  if (!selection) return basePolicy;
+
+  if (isAutoProfile && selection.mcpProfile === "none") {
+    return {
+      ...buildMcpPolicy({ ...options, requestedProfile: "none" }),
+      requestedProfile: options.requestedProfile || "auto",
+    };
+  }
+
+  const nextProfile =
+    isAutoProfile &&
+    selection.mcpProfile &&
+    selection.mcpProfile in PROFILE_DEFINITIONS
+      ? selection.mcpProfile
+      : options.requestedProfile;
+
+  const narrowedAvailable =
+    Array.isArray(selection.neededMcpServers) &&
+    selection.neededMcpServers.length > 0
+      ? selection.neededMcpServers
+      : options.availableServers;
+
+  const resolved = buildMcpPolicy({
+    ...options,
+    requestedProfile: nextProfile,
+    availableServers: narrowedAvailable,
+  });
+  return {
+    ...resolved,
+    enabledServers: resolved.allowedServers,
+    requestedProfile: options.requestedProfile || "auto",
+  };
+}
+
 function shellEscape(value) {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
 }
@@ -863,7 +925,9 @@ async function runCli(argv = process.argv.slice(2)) {
 
   let policy;
   try {
-    policy = buildMcpPolicy(args);
+    policy = isJevEnabled()
+      ? await buildMcpPolicyWithJev(args)
+      : buildMcpPolicy(args);
   } catch (error) {
     console.error(
       `[mcp-filter] ${error instanceof Error ? error.message : String(error)}`,

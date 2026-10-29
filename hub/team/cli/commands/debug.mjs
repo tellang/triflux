@@ -1,3 +1,4 @@
+import { isJevEnabled, judgeWorkerHealth } from "../../../lib/jev-addon.mjs";
 import {
   capturePaneOutput,
   detectMultiplexer,
@@ -47,10 +48,16 @@ export async function teamDebug(args = []) {
   if (!(state.members || []).length)
     console.log(`    ${DIM}(members 없음)${RESET}`);
   for (const member of state.members || []) {
-    console.log(`\n    [${member.name}] ${member.pane}`);
-    for (const line of (capturePaneOutput(member.pane, lines) || "(empty)")
-      .split("\n")
-      .slice(-lines)) {
+    const rawTail = capturePaneOutput(member.pane, lines) || "(empty)";
+    let jevLabel = "";
+    if (isJevEnabled() && rawTail !== "(empty)") {
+      const verdict = await judgeWorkerHealth({ recentOutput: rawTail });
+      if (verdict) {
+        jevLabel = ` ${DIM}[jev:${verdict.healthState}]${RESET}`;
+      }
+    }
+    console.log(`\n    [${member.name}] ${member.pane}${jevLabel}`);
+    for (const line of rawTail.split("\n").slice(-lines)) {
       console.log(`      ${line}`);
     }
   }

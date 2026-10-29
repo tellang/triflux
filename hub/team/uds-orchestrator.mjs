@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { resolve as pathResolve } from "node:path";
-import { judgeBusyAction } from "../lib/jev-addon.mjs";
+import { judgeBusyAction, judgeTargetSession } from "../lib/jev-addon.mjs";
 import {
   createActivityLifecycle,
   isActivityLifecycleEnabled,
@@ -329,11 +329,20 @@ export async function askCodexAppServerThread({
         throw new Error(
           "no loaded Codex threads; open the TUI and send its first message before using --thread auto",
         );
-      if (candidates.length !== 1)
-        throw new Error(
-          `multiple loaded Codex threads; pass --thread ID: ${JSON.stringify(candidates)}`,
+      if (candidates.length === 1) {
+        selectedId = candidates[0].threadId;
+      } else {
+        const resolved = await judgeTargetSession(
+          { prompt, candidates },
+          jevOptions,
         );
-      selectedId = candidates[0].threadId;
+        if (!resolved?.sessionId) {
+          throw new Error(
+            `multiple loaded Codex threads; pass --thread ID: ${JSON.stringify(candidates)}`,
+          );
+        }
+        selectedId = resolved.sessionId;
+      }
     }
     const busyStarted = Date.now();
     let thread = await readCodexThread(

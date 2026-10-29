@@ -97,7 +97,8 @@ export function isJevEnabled(options = {}) {
     options &&
     typeof options === "object" &&
     !isDirectEnvObject(options) &&
-    typeof options.client === "function"
+    (typeof options.client === "function" ||
+      typeof options.batchClient === "function")
   ) {
     return true;
   }
@@ -295,17 +296,32 @@ async function callJevCli(request, options = {}) {
   return normalizeResponse(parsed, request.kind);
 }
 
-export async function queryJevBatch(
-  { state = "", questions = {} } = {},
-  options = {},
-) {
+export async function queryJevBatch(input = {}, options = {}) {
   if (!isJevEnabled(options)) return null;
+  if (Array.isArray(input)) {
+    const questions = {};
+    const contexts = [];
+    input.forEach((item, idx) => {
+      const key = `q_${idx}`;
+      questions[key] = item;
+      if (item.context) contexts.push(item.context);
+    });
+    const objRes = await queryJevBatch(
+      { state: contexts[0] || "", questions },
+      options,
+    );
+    if (!objRes) return null;
+    return input.map((_, idx) => objRes[`q_${idx}`] || null);
+  }
+
+  const { state = "", questions = {} } = input;
   const entries = Object.entries(questions || {});
   if (entries.length === 0) return null;
 
   try {
-    if (typeof options.client === "function") {
-      const custom = await options.client({ state, questions }, options);
+    const clientFn = options.batchClient || options.client;
+    if (typeof clientFn === "function") {
+      const custom = await clientFn({ state, questions }, options);
       const answers = custom?.answers || custom || {};
       const out = {};
       for (const [key, req] of entries) {
@@ -705,4 +721,786 @@ export async function judgeWorkerHealth(
   if (!res || res.confidence < minConfidence(options)) return null;
   if (!allowed.includes(res.choice)) return null;
   return { status: res.choice, confidence: res.confidence };
+}
+
+/**
+ * 실행 모드별 CLI 권한 플래그 매핑 헬퍼.
+ * @param {"codex"|"antigravity"|"agy"|"claude"} cliType
+ * @param {"read_only"|"workspace_auto"|"bypass"} executionMode
+ */
+export function executionFlagsForCli(
+  cliType = "codex",
+  executionMode = "bypass",
+) {
+  const normalizedCli = String(cliType || "codex")
+    .trim()
+    .toLowerCase();
+  const mode = ["read_only", "workspace_auto", "bypass"].includes(executionMode)
+    ? executionMode
+    : "bypass";
+
+  if (normalizedCli === "antigravity" || normalizedCli === "agy") {
+    if (mode === "read_only" || mode === "workspace_auto") {
+      return {
+        cliType: "antigravity",
+        executionMode: mode,
+        args: ["--print", "--sandbox"],
+        flagsString: "--print --sandbox",
+      };
+    }
+    return {
+      cliType: "antigravity",
+      executionMode: "bypass",
+      args: ["--print", "--dangerously-skip-permissions"],
+      flagsString: "--print --dangerously-skip-permissions",
+    };
+  }
+
+  if (normalizedCli === "claude") {
+    if (mode === "read_only") {
+      return {
+        cliType: "claude",
+        executionMode: "read_only",
+        args: ["--permission-mode", "plan"],
+        flagsString: "--permission-mode plan",
+      };
+    }
+    if (mode === "workspace_auto") {
+      return {
+        cliType: "claude",
+        executionMode: "workspace_auto",
+        args: ["--permission-mode", "acceptEdits"],
+        flagsString: "--permission-mode acceptEdits",
+      };
+    }
+    return {
+      cliType: "claude",
+      executionMode: "bypass",
+      args: [
+        "--permission-mode",
+        "bypassPermissions",
+        "--allow-dangerously-skip-permissions",
+      ],
+      flagsString:
+        "--permission-mode bypassPermissions --allow-dangerously-skip-permissions",
+    };
+  }
+
+  if (mode === "read_only") {
+    return {
+      cliType: "codex",
+      executionMode: "read_only",
+      args: ["--sandbox", "read-only", "--skip-git-repo-check"],
+      flagsString: "--sandbox read-only --skip-git-repo-check",
+    };
+  }
+  if (mode === "workspace_auto") {
+    return {
+      cliType: "codex",
+      executionMode: "workspace_auto",
+      args: ["--full-auto", "--skip-git-repo-check"],
+      flagsString: "--full-auto --skip-git-repo-check",
+    };
+  }
+  return {
+    cliType: "codex",
+    executionMode: "bypass",
+    args: ["--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"],
+    flagsString:
+      "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
+  };
+}
+
+const COMPLEXITY_ROUTE_MAP = Object.freeze({
+  trivial: Object.freeze({
+    codexProfile: "luna_low",
+    agyProfile: "argon_low",
+    claudeModel: "haiku",
+    claudeEffort: "low",
+    expectedDurationSec: 60,
+  }),
+  standard: Object.freeze({
+    codexProfile: "sol_high",
+    agyProfile: "argon",
+    claudeModel: "sonnet",
+    claudeEffort: "medium",
+    expectedDurationSec: 300,
+  }),
+  deep: Object.freeze({
+    codexProfile: "astra_xhigh",
+    agyProfile: "argon_high",
+    claudeModel: "opus",
+    claudeEffort: "high",
+    expectedDurationSec: 600,
+  }),
+  high_risk: Object.freeze({
+    codexProfile: "astra_xhigh",
+    agyProfile: "argon_high",
+    claudeModel: "opus",
+    claudeEffort: "high",
+    expectedDurationSec: 900,
+  }),
+});
+
+/**
+ * 6. Pre-route 통합 판단: 프롬프트 복잡도(모델 및 effort), 실행 권한 모드(read_only / workspace_auto / bypass),
+ * 필요한 MCP 프로필 및 서버 목록을 단일 queryJevBatch 호출로 판정한다.
+ */
+export async function judgeTaskRouting(
+  {
+    prompt = "",
+    agentType = "executor",
+    cliType = "codex",
+    availableServers = [],
+  } = {},
+  options = {},
+) {
+  if (!isJevEnabled(options)) return null;
+  const trimmedPrompt = clampText(prompt, 1400);
+  if (!trimmedPrompt) return null;
+
+  const complexityOptions = ["trivial", "standard", "deep", "high_risk"];
+  const executionModes = ["read_only", "workspace_auto", "bypass"];
+  const mcpProfiles = [
+    "none",
+    "executor",
+    "implementer",
+    "designer",
+    "analyze",
+    "explore",
+    "reviewer",
+    "writer",
+    "default",
+  ];
+  const candidateServers = Array.isArray(availableServers)
+    ? availableServers
+        .map((s) => String(s ?? "").trim())
+        .filter(Boolean)
+        .slice(0, 12)
+    : [];
+
+  const contextBlock = [
+    `agent_role: ${agentType || "executor"}`,
+    `cli_type: ${cliType || "codex"}`,
+    candidateServers.length > 0
+      ? `available_mcp_servers: ${candidateServers.join(", ")}`
+      : "",
+    `task_prompt:\n${trimmedPrompt}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const questions = {
+    complexity: {
+      hook: "task_routing_complexity",
+      kind: "choice",
+      options: complexityOptions,
+      criteria: {
+        trivial:
+          "Single-line lookup, formatting, typo fix, simple status check, or short question.",
+        standard:
+          "Routine feature implementation, unit test writing, bug fix, or single-module refactoring.",
+        deep: "Multi-file architecture redesign, root-cause debugging across modules, or complex consensus synthesis.",
+        high_risk:
+          "Security-critical change, release/deployment automation, database migration, or destructive system operation.",
+      },
+      query:
+        "Classify the complexity and reasoning depth required for this task.",
+    },
+    execution_mode: {
+      hook: "task_routing_execution_mode",
+      kind: "choice",
+      options: executionModes,
+      criteria: {
+        read_only:
+          "Only reading, searching, reviewing, or explaining code and docs without modifying files or running mutating commands.",
+        workspace_auto:
+          "Modifying files inside the repository and running local unit tests or build scripts without external network, git push, ssh, or system-wide state changes.",
+        bypass:
+          "Requires git push/gh CLI, ssh, external network requests, package installation, daemon/socket management, or writing outside the workspace.",
+      },
+      query:
+        "Choose the minimum execution permission mode needed to complete this task safely.",
+    },
+    mcp_profile: {
+      hook: "task_routing_mcp_profile",
+      kind: "choice",
+      options: mcpProfiles,
+      criteria: {
+        none: "Pure local code editing, local shell execution, or local unit test run that needs no external MCP servers.",
+        executor:
+          "Implementation task needing library docs lookup (context7) or browser verification.",
+        analyze:
+          "Deep analysis or research task needing web search, docs lookup, and structured reasoning.",
+        explore:
+          "Read-only codebase and documentation exploration needing fast docs/web lookup.",
+        reviewer:
+          "Code review task needing minimal reference documentation lookup.",
+        designer: "UI/frontend design task needing browser/Playwright and docs.",
+        writer: "Documentation writing task needing docs and reference search.",
+        default: "General task with standard MCP tool access.",
+      },
+      query:
+        "Choose the best MCP server profile for this task, or 'none' if external MCP tools are unnecessary.",
+    },
+  };
+
+  for (const server of candidateServers) {
+    const safeKey = `mcp_${server.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+    questions[safeKey] = {
+      hook: `task_routing_mcp_server_${server}`,
+      kind: "noul",
+      query: `Does this task specifically benefit from enabling the '${server}' MCP server?`,
+    };
+  }
+
+  const results = await queryJevBatch(
+    { state: contextBlock, questions },
+    options,
+  );
+  if (!results || typeof results !== "object") return null;
+
+  const threshold = minConfidence(options);
+  const compRes = results.complexity;
+  const modeRes = results.execution_mode;
+  const mcpProfRes = results.mcp_profile;
+
+  const complexity =
+    compRes &&
+    compRes.confidence >= threshold &&
+    complexityOptions.includes(compRes.choice)
+      ? compRes.choice
+      : null;
+
+  const executionMode =
+    modeRes &&
+    modeRes.confidence >= threshold &&
+    executionModes.includes(modeRes.choice)
+      ? modeRes.choice
+      : null;
+
+  const mcpProfile =
+    mcpProfRes &&
+    mcpProfRes.confidence >= threshold &&
+    mcpProfiles.includes(mcpProfRes.choice)
+      ? mcpProfRes.choice
+      : null;
+
+  if (!complexity && !executionMode && !mcpProfile) return null;
+
+  const resolvedComplexity = complexity || "standard";
+  const resolvedExecutionMode = executionMode || "bypass";
+  const resolvedMcpProfile = mcpProfile || "default";
+  const routeSpec =
+    COMPLEXITY_ROUTE_MAP[resolvedComplexity] || COMPLEXITY_ROUTE_MAP.standard;
+
+  let codexProfile = routeSpec.codexProfile;
+  if (
+    resolvedComplexity === "standard" &&
+    /deslop|cleanup|format|lint|rename|typo/i.test(trimmedPrompt)
+  ) {
+    codexProfile = "sol_med";
+  }
+
+  const neededMcpServers = [];
+  if (resolvedMcpProfile !== "none" && candidateServers.length > 0) {
+    for (const server of candidateServers) {
+      const safeKey = `mcp_${server.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+      const srvRes = results[safeKey];
+      if (srvRes && srvRes.confidence >= threshold && srvRes.value === true) {
+        neededMcpServers.push(server);
+      }
+    }
+  }
+
+  const execFlags = executionFlagsForCli(cliType, resolvedExecutionMode);
+  const confidences = [compRes, modeRes, mcpProfRes]
+    .filter((r) => r && Number.isFinite(r.confidence))
+    .map((r) => r.confidence);
+  const avgConfidence =
+    confidences.length > 0
+      ? Number(
+          (
+            confidences.reduce((sum, val) => sum + val, 0) / confidences.length
+          ).toFixed(4),
+        )
+      : threshold;
+
+  return {
+    complexity: resolvedComplexity,
+    codexProfile,
+    agyProfile: routeSpec.agyProfile,
+    claudeModel: routeSpec.claudeModel,
+    claudeEffort: routeSpec.claudeEffort,
+    expectedDurationSec: routeSpec.expectedDurationSec,
+    executionMode: resolvedExecutionMode,
+    executionFlags: execFlags.flagsString,
+    executionArgs: execFlags.args,
+    mcpProfile: resolvedMcpProfile,
+    neededMcpServers,
+    confidence: avgConfidence,
+  };
+}
+
+/**
+ * 7. MCP 프로필 및 서버 동적 선별 (mcp-filter 연동용).
+ */
+export async function judgeMcpSelection(
+  { taskText = "", agentType = "default", availableServers = [] } = {},
+  options = {},
+) {
+  if (!isJevEnabled(options)) return null;
+  const trimmedTask = clampText(taskText, 1200);
+  if (!trimmedTask) return null;
+
+  const routing = await judgeTaskRouting(
+    {
+      prompt: trimmedTask,
+      agentType,
+      cliType: "codex",
+      availableServers,
+    },
+    options,
+  );
+  if (!routing) return null;
+
+  return {
+    mcpProfile: routing.mcpProfile,
+    neededMcpServers: routing.neededMcpServers,
+    neededServers: routing.neededMcpServers,
+    confidence: routing.confidence,
+  };
+}
+
+/**
+ * 8. 다중 세션 중 프롬프트에 맞는 대상 세션 자동 선택 (--thread auto 모호성 해소).
+ */
+export async function judgeTargetSession(
+  { prompt = "", candidates = [] } = {},
+  options = {},
+) {
+  if (!isJevEnabled(options)) return null;
+  const trimmedPrompt = clampText(prompt, 1000);
+  if (!trimmedPrompt) return null;
+  if (!Array.isArray(candidates) || candidates.length < 2) return null;
+
+  const normalized = candidates
+    .map((c, idx) => {
+      if (typeof c === "string") {
+        return { id: c, summary: `Session ${idx + 1}: ${c}` };
+      }
+      const id = String(c?.id || c?.threadId || c?.name || "").trim();
+      if (!id) return null;
+      const summary = [
+        c.name ? `name=${c.name}` : "",
+        c.cwd ? `cwd=${c.cwd}` : "",
+        c.preview ? `preview=${clampText(c.preview, 220)}` : "",
+        c.status ? `status=${c.status}` : "",
+      ]
+        .filter(Boolean)
+        .join(", ");
+      return { id, summary: summary || id };
+    })
+    .filter(Boolean);
+
+  if (normalized.length < 2) return null;
+
+  const allowedIds = normalized.map((c) => c.id);
+  const candidateKeys = normalized.map((_, idx) => `candidate_${idx}`);
+  const criteria = Object.fromEntries(
+    normalized.map((c, idx) => [`candidate_${idx}`, `${c.id}: ${c.summary}`]),
+  );
+
+  const res = await queryJev(
+    {
+      hook: "target_session",
+      kind: "choice",
+      options: [...allowedIds, ...candidateKeys],
+      criteria,
+      query:
+        "Multiple active worker sessions exist. Select the session ID whose working directory, topic, or recent preview best matches the incoming prompt.",
+      context: [
+        "Candidates:",
+        ...normalized.map((c, idx) => `- candidate_${idx} (${c.id}): ${c.summary}`),
+        "",
+        `Prompt:\n${trimmedPrompt}`,
+      ].join("\n"),
+    },
+    options,
+  );
+  if (!res || res.confidence < minConfidence(options)) return null;
+  let selectedIdx = allowedIds.indexOf(res.choice);
+  if (selectedIdx === -1) {
+    selectedIdx = candidateKeys.indexOf(res.choice);
+  }
+  if (selectedIdx === -1) return null;
+  return {
+    sessionId: normalized[selectedIdx].id,
+    selectedIndex: selectedIdx,
+    selected: candidates[selectedIdx],
+    confidence: res.confidence,
+  };
+}
+
+/**
+ * 9. 서브태스크별 최적 워커 CLI 및 역할 배정 (orchestrator 연동용).
+ */
+export async function judgeTaskAssignment(
+  { subtasks = [], workers = ["codex", "claude", "antigravity"] } = {},
+  options = {},
+) {
+  if (!isJevEnabled(options)) return null;
+  if (!Array.isArray(subtasks) || subtasks.length === 0) return null;
+  if (!Array.isArray(workers) || workers.length === 0) return null;
+
+  const normalizedWorkers = workers.map((w, idx) => {
+    if (typeof w === "string") {
+      return {
+        index: idx,
+        key: `worker_${idx}`,
+        cli: w.trim() || "codex",
+        label: w.trim() || `worker_${idx}`,
+      };
+    }
+    const cli = String(w?.cli || w?.role || "codex").trim();
+    return {
+      index: idx,
+      key: `worker_${idx}`,
+      cli,
+      label: w?.target ? `${cli} (${w.target})` : cli,
+    };
+  });
+
+  const workerKeys = normalizedWorkers.map((w) => w.key);
+  const cliNames = normalizedWorkers.map((w) => w.cli);
+  const allowedChoices = [...new Set([...workerKeys, ...cliNames])];
+
+  const defaultCriteria = {
+    codex:
+      "Backend implementation, refactoring, unit tests, CLI scripts, and multi-file code changes.",
+    claude:
+      "Deep architectural design, nuanced Korean documentation, complex reasoning, and interactive review.",
+    antigravity:
+      "Fast codebase exploration, frontend/UI prototyping, and lightweight verification.",
+  };
+  const criteria = Object.fromEntries(
+    normalizedWorkers.map((w) => [
+      w.key,
+      `${w.label}: ${defaultCriteria[w.cli] || `Worker CLI option: ${w.cli}`}`,
+    ]),
+  );
+
+  const questions = {};
+  const stateParts = [];
+  subtasks.forEach((task, idx) => {
+    const text =
+      typeof task === "string"
+        ? task
+        : String(task?.description || task?.title || task?.prompt || "");
+    const clamped = clampText(text, 800);
+    stateParts.push(`Subtask #${idx}: ${clamped}`);
+    questions[`subtask_${idx}_worker`] = {
+      hook: "task_assignment",
+      kind: "choice",
+      options: allowedChoices,
+      criteria,
+      query: `Select the best worker for subtask #${idx}.`,
+    };
+  });
+
+  const results = await queryJevBatch(
+    { state: stateParts.join("\n"), questions },
+    options,
+  );
+  if (!results || typeof results !== "object") return null;
+
+  const threshold = minConfidence(options);
+  const assignments = subtasks.map((_, subtaskIdx) => {
+    const res =
+      results[`subtask_${subtaskIdx}_worker`] || results[`q_${subtaskIdx}`];
+    let matchedWorkerIdx = subtaskIdx % normalizedWorkers.length;
+    let valid = false;
+    if (res && res.confidence >= threshold && res.choice) {
+      const byKey = workerKeys.indexOf(res.choice);
+      const byCli = cliNames.indexOf(res.choice);
+      if (byKey !== -1) {
+        matchedWorkerIdx = byKey;
+        valid = true;
+      } else if (byCli !== -1) {
+        matchedWorkerIdx = byCli;
+        valid = true;
+      }
+    }
+    const targetWorker = normalizedWorkers[matchedWorkerIdx];
+    const cliRes = results[`subtask_${subtaskIdx}_cli`];
+    const recommendedCli =
+      cliRes && cliRes.confidence >= threshold && cliRes.choice
+        ? cliRes.choice
+        : targetWorker.cli;
+    return {
+      index: subtaskIdx,
+      subtaskIndex: subtaskIdx,
+      workerIndex: matchedWorkerIdx,
+      worker: targetWorker.cli,
+      recommendedCli,
+      confidence: res?.confidence ?? 0,
+      fromJev: valid,
+    };
+  });
+
+  if (!assignments.some((a) => a.fromJev)) return null;
+  return {
+    assignments,
+    confidence: assignments[0]?.confidence ?? threshold,
+  };
+}
+
+/**
+ * 10. TUI 패인 프롬프트 제출 상태 판정 (pane.mjs 연동용).
+ */
+export async function judgeComposerState(
+  { capturedText = "", promptPrefix = "" } = {},
+  options = {},
+) {
+  if (!isJevEnabled(options)) return null;
+  const tail = tailLines(capturedText, 25, 1200);
+  if (!tail) return null;
+
+  const allowed = ["submitted_running", "stuck_in_composer", "modal_blocking"];
+  const res = await queryJev(
+    {
+      hook: "composer_state",
+      kind: "choice",
+      options: allowed,
+      criteria: {
+        submitted_running:
+          "The prompt has been submitted and the agent is now thinking, running tools, or streaming output.",
+        stuck_in_composer:
+          "The prompt text is still sitting unsubmitted inside the input composer box waiting for Enter.",
+        modal_blocking:
+          "A modal dialog, trust prompt, or confirmation popup is blocking input submission.",
+      },
+      query:
+        "Inspect the terminal pane capture after sending a prompt. Determine whether the prompt was submitted and is running, is still stuck unsubmitted in the input composer, or is blocked by a modal dialog.",
+      context: [
+        promptPrefix
+          ? `Expected prompt prefix: ${clampText(promptPrefix, 200)}`
+          : "",
+        `Terminal pane tail:\n${tail}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    },
+    options,
+  );
+  if (!res || res.confidence < minConfidence(options)) return null;
+  if (!allowed.includes(res.choice)) return null;
+  return { state: res.choice, confidence: res.confidence };
+}
+
+/**
+ * 11. 워커 개입/지시 주입 후 실제 반영 여부(Closed-loop Ack) 판정.
+ */
+export async function judgeInstructionAck(
+  { instruction = "", recentOutput = "" } = {},
+  options = {},
+) {
+  if (!isJevEnabled(options)) return null;
+  const inst = clampText(instruction, 600);
+  const out = tailLines(recentOutput, 30, 1400);
+  if (!inst || !out) return null;
+
+  const contextText = `Injected instruction:\n${inst}\n\nRecent worker output:\n${out}`;
+  if (typeof options.batchClient === "function") {
+    const batchRes = await queryJevBatch(
+      {
+        state: contextText,
+        questions: {
+          ack: {
+            hook: "instruction_ack",
+            kind: "noul",
+            query:
+              "Did the worker acknowledge, adopt, or act upon the injected instruction in its recent output?",
+          },
+          status: {
+            hook: "instruction_ack_status",
+            kind: "choice",
+            options: [
+              "acknowledged_executing",
+              "acknowledged",
+              "ignored",
+              "blocked",
+            ],
+            query: "Classify the worker's response to the instruction.",
+          },
+        },
+      },
+      options,
+    );
+    if (!batchRes || !batchRes.ack) return null;
+    if (batchRes.ack.confidence < minConfidence(options)) return null;
+    return {
+      acknowledged: Boolean(batchRes.ack.value),
+      ackStatus:
+        batchRes.status?.choice ||
+        (batchRes.ack.value ? "acknowledged" : "ignored"),
+      confidence: batchRes.ack.confidence,
+    };
+  }
+
+  const res = await queryJev(
+    {
+      hook: "instruction_ack",
+      kind: "noul",
+      query:
+        "Did the worker acknowledge, adopt, or act upon the injected instruction in its recent output?",
+      context: contextText,
+    },
+    options,
+  );
+  if (!res || res.confidence < minConfidence(options)) return null;
+  return {
+    acknowledged: res.value,
+    ackStatus: res.value ? "acknowledged" : "ignored",
+    confidence: res.confidence,
+  };
+}
+
+/**
+ * 12. 팀 인박스 메시지 긴급도 분류 (nativeProxy / bridge team-send-message 연동용).
+ */
+export async function judgeInboxPriority(
+  { text = "", summary = "", from = "" } = {},
+  options = {},
+) {
+  if (!isJevEnabled(options)) return null;
+  const body = clampText(text || summary, 1000);
+  if (!body) return null;
+
+  const allowed = [
+    "urgent_blocker",
+    "needs_decision",
+    "progress_fyi",
+    "done",
+  ];
+  const res = await queryJev(
+    {
+      hook: "inbox_priority",
+      kind: "choice",
+      options: allowed,
+      includeScore: true,
+      criteria: {
+        urgent_blocker:
+          "Worker is completely blocked by a fatal error, missing permission, or broken environment and needs immediate lead intervention.",
+        needs_decision:
+          "Worker encountered an architectural or product ambiguity and needs a decision from the lead.",
+        progress_fyi:
+          "Routine progress update or intermediate status report that requires no immediate action.",
+        done: "Worker completed its assigned task and is reporting final deliverables.",
+      },
+      query:
+        "Classify the urgency of this worker-to-lead inbox message so the lead can prioritize responses.",
+      context: [
+        from ? `from: ${from}` : "",
+        summary ? `summary: ${clampText(summary, 200)}` : "",
+        `message:\n${body}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    },
+    options,
+  );
+  if (!res || res.confidence < minConfidence(options)) return null;
+  if (!allowed.includes(res.choice)) return null;
+  const priorityWeight = {
+    urgent_blocker: 100,
+    needs_decision: 75,
+    done: 40,
+    progress_fyi: 10,
+  };
+  return {
+    priority: res.choice,
+    urgencyScore:
+      res.score ?? priorityWeight[res.choice] ?? Math.round(res.confidence * 100),
+    confidence: res.confidence,
+  };
+}
+
+/**
+ * 13. 교차 리뷰 게이트 판정 (skip_review | cross_review | escalate_to_lead + 리뷰 루프 수렴 여부).
+ */
+export async function judgeReviewGate(
+  {
+    diffStat = "",
+    handoffSummary = "",
+    previousReviews = "",
+    currentReview = "",
+  } = {},
+  options = {},
+) {
+  if (!isJevEnabled(options)) return null;
+  const summary = clampText(handoffSummary || diffStat, 1200);
+  if (!summary && !currentReview) return null;
+
+  const allowedGates = ["skip_review", "cross_review", "escalate_to_lead"];
+  const stateText = [
+    diffStat ? `diff_stat:\n${clampText(diffStat, 600)}` : "",
+    summary ? `handoff_summary:\n${summary}` : "",
+    previousReviews
+      ? `previous_reviews:\n${clampText(previousReviews, 800)}`
+      : "",
+    currentReview ? `current_review:\n${clampText(currentReview, 800)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const questions = {
+    gate: {
+      hook: "review_gate",
+      kind: "choice",
+      options: allowedGates,
+      criteria: {
+        skip_review:
+          "Trivial formatting, comment, or small isolated test change with passing tests that needs no separate cross-review.",
+        cross_review:
+          "Standard logic, feature, or refactoring change that benefits from automated peer cross-review.",
+        escalate_to_lead:
+          "High-risk architectural, security, or breaking API change that requires direct lead review.",
+      },
+      query:
+        "Choose the appropriate review gate for this worker handoff and diff.",
+    },
+  };
+
+  const hasReviewPair = Boolean(
+    String(previousReviews || "").trim() && String(currentReview || "").trim(),
+  );
+  if (hasReviewPair) {
+    questions.converged = {
+      hook: "review_loop_converged",
+      kind: "noul",
+      query:
+        "Has the review loop converged (either approved with no remaining blockers or repeating minor stylistic nitpicks)?",
+    };
+  }
+
+  const results = await queryJevBatch({ state: stateText, questions }, options);
+  if (!results || !results.gate) return null;
+
+  const threshold = minConfidence(options);
+  const gateRes = results.gate;
+  if (gateRes.confidence < threshold || !allowedGates.includes(gateRes.choice)) {
+    return null;
+  }
+
+  const loopRes = hasReviewPair ? results.converged : null;
+  const converged =
+    loopRes && loopRes.confidence >= threshold ? Boolean(loopRes.value) : false;
+
+  return {
+    gate: gateRes.choice,
+    reviewGate: gateRes.choice,
+    converged,
+    confidence: gateRes.confidence,
+  };
 }

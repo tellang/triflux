@@ -1,5 +1,6 @@
 // hub/team/orchestrator.mjs — 작업 분배 + 프롬프트 구성
 // 의존성: pane.mjs만 사용
+import { judgeTaskAssignment } from "@triflux/core/hub/lib/jev-addon.mjs";
 import { injectPrompt as defaultInjectPrompt } from "./pane.mjs";
 
 /**
@@ -37,6 +38,57 @@ export function decomposeTask(taskDescription, agentCount) {
   }
 
   return parts;
+}
+
+/**
+ * Jev가 활성화된 경우 서브태스크별 최적 워커/CLI 매칭을 적용한다.
+ * 비활성 상태이거나 판정이 실패하면 결정론적 decomposeTask 순서대로 반환한다.
+ */
+export async function assignTasksWithJev(
+  taskDescription,
+  workers,
+  jevOptions = {},
+) {
+  if (!Array.isArray(workers) || workers.length === 0) return [];
+  const subtasks = decomposeTask(taskDescription, workers.length);
+  const base = workers.map((w, i) => ({
+    ...w,
+    subtask: subtasks[i] || subtasks[subtasks.length - 1],
+  }));
+  if (workers.length <= 1) return base;
+
+  const verdict = await judgeTaskAssignment({ subtasks, workers }, jevOptions);
+  if (
+    !verdict ||
+    !Array.isArray(verdict.assignments) ||
+    verdict.assignments.length !== workers.length
+  ) {
+    return base;
+  }
+  const usedSubtasks = new Set();
+  const mapped = [];
+  for (let i = 0; i < workers.length; i += 1) {
+    const match = verdict.assignments.find((item) => item.workerIndex === i);
+    const subtaskIdx =
+      match &&
+      Number.isInteger(match.subtaskIndex) &&
+      match.subtaskIndex >= 0 &&
+      match.subtaskIndex < subtasks.length &&
+      !usedSubtasks.has(match.subtaskIndex)
+        ? match.subtaskIndex
+        : i;
+    usedSubtasks.add(subtaskIdx);
+    mapped.push({
+      ...workers[i],
+      subtask: subtasks[subtaskIdx] || subtasks[subtasks.length - 1],
+      _jev: {
+        subtaskIndex: subtaskIdx,
+        recommendedCli: match?.recommendedCli || workers[i].cli,
+        confidence: verdict.confidence,
+      },
+    });
+  }
+  return mapped;
 }
 
 /**

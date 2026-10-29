@@ -4,6 +4,7 @@ import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { judgeComposerState } from "../lib/jev-addon.mjs";
 import { privateTmpDir } from "../lib/private-tmp.mjs";
 import { psmuxExec } from "./psmux.mjs";
 import { detectMultiplexer, tmuxExec } from "./session.mjs";
@@ -249,6 +250,70 @@ export function submitPromptWithVerification({
       `Antigravity prompt submission failed after ${retryLimit} attempts: prompt remains in composer or submission could not be verified`,
     );
   }
+}
+
+/**
+ * 결정론적 컴포저 상태 판정이 모호할 때 Jev로 컴포저 상태를 판별해 Enter 재전송 여부를 결정한다.
+ */
+export async function submitPromptWithJevVerification({
+  cli = "claude",
+  prompt = "",
+  capture,
+  sendEnter,
+  sleep = sleepMs,
+  settleMs = PASTE_SETTLE_MS,
+  retryLimit = SUBMIT_RETRY_LIMIT,
+  jevOptions = {},
+} = {}) {
+  try {
+    submitPromptWithVerification({
+      cli,
+      prompt,
+      capture,
+      sendEnter,
+      sleep,
+      settleMs,
+      retryLimit,
+    });
+  } catch (err) {
+    const capturedText =
+      typeof capture === "function" ? String(capture() ?? "") : "";
+    const promptPrefix = promptComposerNeedle(prompt);
+    const verdict = await judgeComposerState(
+      { capturedText, promptPrefix },
+      jevOptions,
+    );
+    if (verdict?.state === "submitted_running") {
+      return { submitted: true, jevState: verdict.state };
+    }
+    if (
+      verdict?.state === "stuck_in_composer" &&
+      typeof sendEnter === "function"
+    ) {
+      sendEnter();
+      sleep(400);
+      return { submitted: true, jevState: verdict.state };
+    }
+    throw err;
+  }
+  const capturedText =
+    typeof capture === "function" ? String(capture() ?? "") : "";
+  const promptPrefix = promptComposerNeedle(prompt);
+  const verdict = await judgeComposerState(
+    { capturedText, promptPrefix },
+    jevOptions,
+  );
+  if (
+    verdict?.state === "stuck_in_composer" &&
+    typeof sendEnter === "function"
+  ) {
+    sendEnter();
+    sleep(400);
+  }
+  return {
+    submitted: verdict?.state !== "modal_blocking",
+    jevState: verdict?.state || null,
+  };
 }
 
 function confirmSubmit(target, prompt, cli, sendEnter) {

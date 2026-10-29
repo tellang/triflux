@@ -1,4 +1,6 @@
+import { isJevEnabled, judgeBusyAction } from "../../../lib/jev-addon.mjs";
 import { injectPrompt } from "../../pane.mjs";
+import { capturePaneOutput } from "../../session.mjs";
 import { DIM, RESET, WHITE } from "../../shared.mjs";
 import { ok } from "../render.mjs";
 import { resolveMember } from "../services/member-selector.mjs";
@@ -22,6 +24,21 @@ export async function teamSend(args = []) {
       `\n  사용법: ${WHITE}tfx multi send <lead|이름|번호> "메시지"${RESET}\n`,
     );
     return;
+  }
+
+  if (isJevEnabled()) {
+    const currentOutput = capturePaneOutput(member.pane, 20) || "";
+    if (currentOutput.trim()) {
+      const verdict = await judgeBusyAction({
+        currentOutput,
+        incomingMessage: message,
+      });
+      if (verdict?.action === "drop") {
+        ok(`${member.name} 중복 메시지 생략 (jev drop)`);
+        console.log("");
+        return;
+      }
+    }
   }
 
   injectPrompt(member.pane, message);

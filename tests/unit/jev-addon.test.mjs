@@ -6,19 +6,35 @@ import { describe, it } from "node:test";
 import { ADAPTERS, waitForTmuxIdle } from "../../bin/tfx-live.mjs";
 import { main as runBridgeMain, readTailSafe } from "../../hub/bridge.mjs";
 import {
+  executionFlagsForCli,
   isJevEnabled,
   judgeBusyAction,
+  judgeComposerState,
   judgeHandoffQuality,
+  judgeInboxPriority,
+  judgeInstructionAck,
+  judgeMcpSelection,
   judgePeerConvergence,
+  judgeReviewGate,
   judgeSameFailureCause,
+  judgeTargetSession,
+  judgeTaskAssignment,
+  judgeTaskRouting,
   judgeWorkerHealth,
   queryJev,
   queryJevBatch,
   summarizeJevStats,
 } from "../../hub/lib/jev-addon.mjs";
-import { processHandoffWithJev } from "../../hub/team/handoff.mjs";
+import {
+  evaluateReviewGateWithJev,
+  processHandoffWithJev,
+} from "../../hub/team/handoff.mjs";
 import { createHeadlessIntervention } from "../../hub/team/headless.mjs";
+import { assignTasksWithJev } from "../../hub/team/orchestrator.mjs";
+import { submitPromptWithJevVerification } from "../../hub/team/pane.mjs";
+import { createResultsIndex } from "../../hub/team/results-index.mjs";
 import { createRetryStateMachine } from "../../hub/team/retry-state-machine.mjs";
+import { buildMcpPolicyWithJev } from "../../scripts/lib/mcp-filter.mjs";
 
 describe("jev-addon: opt-in 및 fail-open 검증", () => {
   it("API 키와 CLI가 모두 없으면 isJevEnabled가 false이고 모든 판단 함수가 즉시 null을 반환한다", async () => {
@@ -540,5 +556,263 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
       }),
     ]);
     assert.equal(handoffOk, true);
+  });
+
+  it("Pre-route: executionFlagsForCli가 CLI별 실행 권한 플래그(read_only / workspace_auto / bypass)를 반환한다", () => {
+    assert.equal(
+      executionFlagsForCli("codex", "read_only").flagsString,
+      "--sandbox read-only --skip-git-repo-check",
+    );
+    assert.equal(
+      executionFlagsForCli("codex", "workspace_auto").flagsString,
+      "--full-auto --skip-git-repo-check",
+    );
+    assert.equal(
+      executionFlagsForCli("codex", "bypass").flagsString,
+      "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
+    );
+    assert.equal(
+      executionFlagsForCli("antigravity", "read_only").flagsString,
+      "--print --sandbox",
+    );
+    assert.equal(
+      executionFlagsForCli("antigravity", "bypass").flagsString,
+      "--print --dangerously-skip-permissions",
+    );
+    assert.equal(
+      executionFlagsForCli("claude", "read_only").flagsString,
+      "--permission-mode plan",
+    );
+    assert.equal(
+      executionFlagsForCli("claude", "workspace_auto").flagsString,
+      "--permission-mode acceptEdits",
+    );
+    assert.equal(
+      executionFlagsForCli("claude", "bypass").flagsString,
+      "--permission-mode bypassPermissions --allow-dangerously-skip-permissions",
+    );
+  });
+
+  it("Pre-route: judgeTaskRouting이 복잡도, 프로파일, 실행 권한(read_only/workspace_auto/bypass), 필요한 MCP 서버를 단일 배치로 판정한다", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "jev-route-"));
+    const statsFile = join(dir, "jev-stats.jsonl");
+    try {
+      const res = await judgeTaskRouting(
+        {
+          prompt:
+            "React 공식 문서를 찾아보고 AuthContext 아키텍처를 재설계한 뒤 외부 staging 서버에 배포해라",
+          agentType: "architect",
+          cliType: "codex",
+          availableServers: ["context7", "brave-search", "playwright", "exa"],
+        },
+        {
+          statsFile,
+          batchClient: async () => ({
+            complexity: { choice: "high_risk", confidence: 0.92 },
+            execution_mode: { choice: "bypass", confidence: 0.91 },
+            mcp_profile: { choice: "reviewer", confidence: 0.88 },
+            mcp_context7: { value: true, confidence: 0.94 },
+            mcp_brave_search: { value: true, confidence: 0.86 },
+            mcp_playwright: { value: false, confidence: 0.95 },
+            mcp_exa: { value: false, confidence: 0.9 },
+          }),
+        },
+      );
+      assert.equal(res.complexity, "high_risk");
+      assert.equal(res.codexProfile, "astra_xhigh");
+      assert.equal(res.agyProfile, "argon_high");
+      assert.equal(res.claudeModel, "opus");
+      assert.equal(res.claudeEffort, "high");
+      assert.equal(res.executionMode, "bypass");
+      assert.equal(
+        res.executionFlags,
+        "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
+      );
+      assert.equal(res.mcpProfile, "reviewer");
+      assert.deepEqual(res.neededMcpServers, ["context7", "brave-search"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("MCP 동적 선택: judgeMcpSelection 및 buildMcpPolicyWithJev가 태스크에 필요한 MCP 서버만 남긴다", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "jev-mcp-"));
+    const statsFile = join(dir, "jev-stats.jsonl");
+    try {
+      const sel = await judgeMcpSelection(
+        {
+          taskText: "Next.js 15 App Router 공식 문서 확인",
+          agentType: "executor",
+          availableServers: ["context7", "playwright"],
+        },
+        {
+          statsFile,
+          batchClient: async () => ({
+            mcp_profile: { choice: "implementer", confidence: 0.9 },
+            mcp_context7: { value: true, confidence: 0.93 },
+            mcp_playwright: { value: false, confidence: 0.92 },
+          }),
+        },
+      );
+      assert.equal(sel.mcpProfile, "implementer");
+      assert.deepEqual(sel.neededServers, ["context7"]);
+
+      const policy = await buildMcpPolicyWithJev(
+        {
+          agentType: "executor",
+          requestedProfile: "auto",
+          taskText: "Next.js 15 App Router 공식 문서 확인",
+          availableServers: ["context7", "playwright", "brave-search"],
+        },
+        {
+          statsFile,
+          batchClient: async () => ({
+            mcp_profile: { choice: "implementer", confidence: 0.91 },
+            mcp_context7: { value: true, confidence: 0.95 },
+            mcp_playwright: { value: false, confidence: 0.94 },
+            mcp_brave_search: { value: false, confidence: 0.91 },
+          }),
+        },
+      );
+      assert.deepEqual(policy.enabledServers, ["context7"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("추가 병목 훅: judgeTargetSession, assignTasksWithJev, submitPromptWithJevVerification, verifyInstructionAckWithJev, judgeInboxPriority, evaluateReviewGateWithJev 동작 검증", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "jev-extra-"));
+    const statsFile = join(dir, "jev-stats.jsonl");
+    try {
+      const targetPick = await judgeTargetSession(
+        {
+          prompt: "DB 스키마 마이그레이션 에러 확인해줘",
+          candidates: [
+            { id: "sess-ui", name: "frontend-ui", role: "designer" },
+            { id: "sess-db", name: "backend-db", role: "executor" },
+          ],
+        },
+        {
+          statsFile,
+          client: async () => ({ choice: "candidate_1", confidence: 0.92 }),
+        },
+      );
+      assert.equal(targetPick.selectedIndex, 1);
+      assert.equal(targetPick.selected.id, "sess-db");
+
+      const assigned = await assignTasksWithJev(
+        "UI 레이아웃 개편 + 백엔드 쿼리 최적화",
+        [
+          { target: "s:0.1", cli: "codex" },
+          { target: "s:0.2", cli: "antigravity" },
+        ],
+        {
+          statsFile,
+          batchClient: async () => ({
+            subtask_0_worker: { choice: "worker_1", confidence: 0.91 },
+            subtask_0_cli: { choice: "antigravity", confidence: 0.9 },
+            subtask_1_worker: { choice: "worker_0", confidence: 0.93 },
+            subtask_1_cli: { choice: "codex", confidence: 0.92 },
+          }),
+        },
+      );
+      assert.equal(assigned.length, 2);
+      assert.equal(assigned[0].subtask, "백엔드 쿼리 최적화");
+      assert.equal(assigned[1].subtask, "UI 레이아웃 개편");
+
+      let enterCalls = 0;
+      const submitRes = await submitPromptWithJevVerification({
+        cli: "claude",
+        prompt: "리팩터링 시작해",
+        capture: () => "> 리팩터링 시작해",
+        sendEnter: () => {
+          enterCalls += 1;
+        },
+        sleep: () => {},
+        settleMs: 0,
+        retryLimit: 1,
+        jevOptions: {
+          statsFile,
+          client: async () => ({
+            choice: "stuck_in_composer",
+            confidence: 0.93,
+          }),
+        },
+      });
+      assert.equal(submitRes.submitted, true);
+      assert.equal(submitRes.jevState, "stuck_in_composer");
+      assert.equal(enterCalls, 2);
+
+      const indexPath = join(dir, "results.json");
+      const resultsIdx = createResultsIndex(
+        indexPath,
+        "sess-test",
+        [{ paneName: "w1", cli: "codex", resultFile: "w1.out" }],
+        () => true,
+      );
+      const ackVerdict = await resultsIdx.verifyInstructionAckWithJev(
+        "w1",
+        {
+          instruction: "auth.mjs의 토큰 만료 시간을 1시간으로 수정해",
+          recentOutput: "Editing auth.mjs to set token expiry to 3600s...",
+        },
+        {
+          statsFile,
+          batchClient: async () => ({
+            ack: { value: true, confidence: 0.94 },
+            status: { choice: "acknowledged_executing", confidence: 0.91 },
+          }),
+        },
+      );
+      assert.equal(ackVerdict.acknowledged, true);
+      assert.equal(ackVerdict.ackStatus, "acknowledged_executing");
+
+      const prio = await judgeInboxPriority(
+        {
+          text: "권한 에러로 배포가 멈췄습니다. 승인 여부 결정이 필요합니다.",
+          summary: "배포 중단",
+          from: "worker-1",
+        },
+        {
+          statsFile,
+          client: async () => ({ choice: "urgent_blocker", confidence: 0.95 }),
+        },
+      );
+      assert.equal(prio.priority, "urgent_blocker");
+      assert.equal(prio.urgencyScore, 100);
+
+      const gate = await evaluateReviewGateWithJev(
+        {
+          diffStat: "1 file changed, 2 insertions(+)",
+          handoffSummary: "오타 수정",
+          previousReviews: "LGTM",
+          currentReview: "LGTM, no issues found",
+        },
+        {
+          statsFile,
+          batchClient: async () => ({
+            gate: { choice: "skip_review", confidence: 0.92 },
+            converged: { value: true, confidence: 0.95 },
+          }),
+        },
+      );
+      assert.equal(gate.gate, "skip_review");
+      assert.equal(gate.converged, true);
+      assert.equal(gate.fallback, false);
+
+      const routeCliOk = await runBridgeMain([
+        "judge-route",
+        "--delimited",
+        "--payload",
+        JSON.stringify({
+          prompt: "단순 버전 확인",
+          agentType: "explore",
+          cliType: "codex",
+        }),
+      ]);
+      assert.equal(routeCliOk, true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

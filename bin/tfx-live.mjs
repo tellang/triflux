@@ -35,6 +35,7 @@ import {
 import {
   judgeBusyAction,
   judgePeerConvergence,
+  judgeTargetSession,
 } from "../hub/lib/jev-addon.mjs";
 import { privateTmpDir } from "../hub/lib/private-tmp.mjs";
 import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
@@ -5567,21 +5568,38 @@ async function doSend(opts = {}, deps = {}) {
     };
   }
 
+  let target = matched[0];
   if (matched.length > 1) {
-    return {
-      ok: false,
-      to: { cli: parsedTo.cli, name: parsedTo.query, target: null },
-      transport: null,
-      msgId,
-      requestId,
-      status: "failed",
-      reason: "ambiguous-target",
-      candidates: matched.map(summarizePeerCandidate),
-      error: `일치하는 세션이 ${matched.length}개다. cli:이름 또는 정확한 이름으로 지정하라: ${rawTo}`,
-    };
+    const resolved = await judgeTargetSession(
+      {
+        prompt: rawMessage,
+        candidates: matched.map((c) => ({
+          id: String(c.target || c.name),
+          name: c.name,
+          cwd: c.raw?.cwd,
+          preview: c.aliases?.join(" "),
+        })),
+      },
+      { env },
+    );
+    const chosen = resolved?.sessionId
+      ? matched.find((c) => String(c.target || c.name) === resolved.sessionId)
+      : null;
+    if (!chosen) {
+      return {
+        ok: false,
+        to: { cli: parsedTo.cli, name: parsedTo.query, target: null },
+        transport: null,
+        msgId,
+        requestId,
+        status: "failed",
+        reason: "ambiguous-target",
+        candidates: matched.map(summarizePeerCandidate),
+        error: `일치하는 세션이 ${matched.length}개다. cli:이름 또는 정확한 이름으로 지정하라: ${rawTo}`,
+      };
+    }
+    target = chosen;
   }
-
-  const target = matched[0];
   const sender = await resolvePeerSender({
     from: opts.from,
     env,
@@ -7027,7 +7045,7 @@ function peerSideTransport(flags, side, adapter) {
   const codexDefault =
     flags.remote ||
     Object.hasOwn(flags, "no-relay-tag") ||
-    ["fail", "interrupt"].includes(sideFlag(flags, side, "if-busy"))
+    ["fail", "interrupt", "auto"].includes(sideFlag(flags, side, "if-busy"))
       ? "tmux"
       : "queue";
   const transport =
@@ -7062,10 +7080,10 @@ function peerSideTransport(flags, side, adapter) {
 function peerSideBusyPolicy(flags, side, adapter, transport) {
   const allowed =
     adapter.cli === "codex" && transport === "uds"
-      ? ["wait", "fail", "steer"]
+      ? ["wait", "fail", "steer", "auto"]
       : transport === "queue"
         ? ["wait"]
-        : ["wait", "fail", "interrupt"];
+        : ["wait", "fail", "interrupt", "auto"];
   for (const name of ["if-busy", `if-busy-${side}`]) {
     if (flags[name] !== undefined && !allowed.includes(flags[name]))
       throw new Error(

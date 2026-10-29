@@ -2,7 +2,7 @@
 // HANDOFF 블록 파싱, 검증, fallback 생성, Lead 포맷팅
 // 설계: docs/design/handoff-schema-v7.md (PR #70 에서 삭제, c0722ecd 에 남아 있다)
 
-import { judgeHandoffQuality } from "../lib/jev-addon.mjs";
+import { judgeHandoffQuality, judgeReviewGate } from "../lib/jev-addon.mjs";
 
 // ── enum 허용 값 ──
 const STATUS_VALUES = ["ok", "partial", "failed"];
@@ -372,5 +372,36 @@ export async function processHandoffWithJev(
     handoff: updatedHandoff,
     formatted: formatHandoffForLead(updatedHandoff),
     warnings,
+  };
+}
+
+/**
+ * 교차 리뷰 게이트 판정: Jev로 리뷰 생략, 교차 리뷰, 리드 에스컬레이션 및 리뷰 수렴 여부를 판단한다.
+ */
+export async function evaluateReviewGateWithJev(
+  {
+    diffStat = "",
+    handoffSummary = "",
+    previousReviews = "",
+    currentReview = "",
+  } = {},
+  jevOptions = {},
+) {
+  const verdict = await judgeReviewGate(
+    { diffStat, handoffSummary, previousReviews, currentReview },
+    jevOptions,
+  );
+  if (!verdict) {
+    return {
+      gate: "cross_review",
+      converged: false,
+      fallback: true,
+    };
+  }
+  return {
+    gate: verdict.gate,
+    converged: verdict.converged,
+    confidence: verdict.confidence,
+    fallback: false,
   };
 }

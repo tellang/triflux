@@ -299,7 +299,30 @@ _sanitize_codex_legacy_profiles() {
 _sanitize_codex_legacy_profiles "$_CODEX_CONFIG"
 
 build_codex_base() {
-  echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+  local mode="${1:-${TFX_EXECUTION_MODE:-bypass}}"
+  case "$mode" in
+    read_only)
+      echo "--sandbox read-only --skip-git-repo-check"
+      ;;
+    workspace_auto)
+      echo "--full-auto --skip-git-repo-check"
+      ;;
+    *)
+      echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+      ;;
+  esac
+}
+
+build_antigravity_base() {
+  local mode="${1:-${TFX_EXECUTION_MODE:-bypass}}"
+  case "$mode" in
+    read_only|workspace_auto)
+      echo "--print --sandbox"
+      ;;
+    *)
+      echo "--print --dangerously-skip-permissions"
+      ;;
+  esac
 }
 
 # ── Async Job 디렉토리 ──
@@ -1034,7 +1057,7 @@ route_agent() {
   case "$CLI_TYPE" in
     codex) apply_codex_agent_policy ;;
     antigravity)
-      CLI_CMD="agy"; CLI_ARGS="--print --dangerously-skip-permissions"
+      CLI_CMD="agy"; CLI_ARGS="$(build_antigravity_base)"
       CLI_EFFORT=""; CLI_FAMILY=""; DEFAULT_TIMEOUT=900 ;;
     claude)
       if [[ -n "$REVIEW_AUTHOR" ]]; then
@@ -1062,6 +1085,10 @@ TFX_DISABLE_ANTIGRAVITY="${TFX_DISABLE_ANTIGRAVITY:-0}"
 TFX_ANTIGRAVITY_FALLBACK="${TFX_ANTIGRAVITY_FALLBACK-codex}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_PROFILE="${TFX_CODEX_PROFILE:-auto}"
+TFX_EXECUTION_MODE="${TFX_EXECUTION_MODE:-auto}"
+JEV_NEEDED_MCP_SERVERS=""
+JEV_CLAUDE_MODEL=""
+JEV_CLAUDE_EFFORT=""
 
 # Preflight 캐시의 CLI 가용성과 Codex 요금제를 환경변수로 내보냄
 # 하위 프로세스(스킬 포함)가 CLI 가용성을 즉시 참조 가능
@@ -1164,10 +1191,10 @@ apply_cli_mode() {
       if [[ "$CLI_TYPE" != "claude-native" && ( "$CLI_TYPE" != "claude" || -n "$REVIEW_AUTHOR" ) ]]; then
         CLI_TYPE="antigravity"
         CLI_CMD="agy"
-        CLI_ARGS="--print --dangerously-skip-permissions"
+        CLI_ARGS="$(build_antigravity_base)"
         CLI_EFFORT=""; CLI_FAMILY=""
         DEFAULT_TIMEOUT=900
-        echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE → antigravity($CLI_EFFORT)로 리매핑" >&2
+        echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE -> antigravity($CLI_EFFORT)로 리매핑" >&2
       fi ;;
     claude)
       if [[ -n "$REVIEW_AUTHOR" ]]; then
@@ -1635,6 +1662,7 @@ resolve_mcp_policy() {
   )
   [[ -n "$TFX_SEARCH_TOOL" ]] && cmd+=("--search-tool" "$TFX_SEARCH_TOOL")
   [[ -n "$TFX_WORKER_INDEX" ]] && cmd+=("--worker-index" "$TFX_WORKER_INDEX")
+  [[ -n "${JEV_NEEDED_MCP_SERVERS:-}" ]] && cmd+=("--available" "$JEV_NEEDED_MCP_SERVERS")
 
   local _raw
   if ! _raw="$("${cmd[@]}" < /dev/null)"; then
@@ -1653,6 +1681,10 @@ resolve_mcp_policy() {
 }
 
 get_claude_model() {
+  if [[ -n "${JEV_CLAUDE_MODEL:-}" ]]; then
+    echo "$JEV_CLAUDE_MODEL"
+    return
+  fi
   case "$AGENT_TYPE" in
     explore) echo "haiku" ;;
     security-reviewer) echo "fable" ;;
@@ -1663,7 +1695,7 @@ get_claude_model() {
 }
 
 get_claude_effort() {
-  local effort="$CLI_EFFORT"
+  local effort="${CLI_EFFORT:-${JEV_CLAUDE_EFFORT:-}}"
   # 명시한 프로필은 해석된 정책 effort를 쓰고, 기본 native/폴백의 빈 값은 보존한다.
   [[ "$TFX_CODEX_PROFILE" == "auto" ]] || effort="$CODEX_POLICY_EFFORT"
   case "$effort" in
@@ -2344,11 +2376,61 @@ run_codex_exec() {
   return "$exit_code_local"
 }
 
+apply_jev_pre_route() {
+  local jev_flag="${TFX_JEV:-}"
+  case "$jev_flag" in
+    0|false|off|FALSE|OFF) return 0 ;;
+  esac
+  if [[ -z "${JEV_API_KEY:-${TYPESAFE_API_KEY:-}}" && "$jev_flag" != "1" && "$jev_flag" != "true" && "$jev_flag" != "on" ]]; then
+    return 0
+  fi
+  [[ -n "${PROMPT:-}" ]] || return 0
+
+  local jev_row=""
+  if ! jev_row=$(bridge_cli judge-route \
+    --agent "$AGENT_TYPE" \
+    --cli-type "${TFX_CLI_MODE:-codex}" \
+    --prompt "$PROMPT" \
+    --delimited 2>/dev/null); then
+    return 0
+  fi
+  [[ -n "$jev_row" ]] || return 0
+
+  local _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff
+  local _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf
+  IFS=$'\x1e' read -r _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff \
+    _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf <<< "$jev_row"
+
+  if [[ "${TFX_CODEX_PROFILE:-auto}" == "auto" && -n "$_jev_codex_prof" ]]; then
+    TFX_CODEX_PROFILE="$_jev_codex_prof"
+  fi
+  if [[ -z "${TFX_GEMINI_PROFILE:-}" && -n "$_jev_agy_prof" ]]; then
+    TFX_GEMINI_PROFILE="$_jev_agy_prof"
+    export TFX_GEMINI_PROFILE
+  fi
+  if [[ "${TFX_EXECUTION_MODE:-auto}" == "auto" && -n "$_jev_exec_mode" ]]; then
+    TFX_EXECUTION_MODE="$_jev_exec_mode"
+  fi
+  if [[ "${MCP_PROFILE:-auto}" == "auto" && -n "$_jev_mcp_prof" ]]; then
+    MCP_PROFILE="$_jev_mcp_prof"
+  fi
+  if [[ -n "$_jev_mcp_srvs" ]]; then
+    JEV_NEEDED_MCP_SERVERS="$_jev_mcp_srvs"
+  fi
+  if [[ -z "${TFX_EXPECTED_DURATION_SEC:-}" && -n "$_jev_dur" ]]; then
+    TFX_EXPECTED_DURATION_SEC="$_jev_dur"
+  fi
+  JEV_CLAUDE_MODEL="$_jev_claude_mod"
+  JEV_CLAUDE_EFFORT="$_jev_claude_eff"
+  echo "[tfx-route] Jev pre-route: complexity=${_jev_comp} codex=${TFX_CODEX_PROFILE} agy=${TFX_GEMINI_PROFILE:-auto} mode=${TFX_EXECUTION_MODE} mcp=${MCP_PROFILE} conf=${_jev_conf}" >&2
+}
+
 # ── 메인 실행 ──
 main() {
   # 종료 시 per-process 에이전트 파일 + 워커 프로세스 정리
   trap 'cleanup_workers' EXIT
 
+  apply_jev_pre_route
   route_agent "$AGENT_TYPE"
   apply_cli_mode
   apply_no_claude_native_mode
@@ -2573,9 +2655,21 @@ FALLBACK_EOF
       "--command" "$CLI_CMD"
       "--command-args-json" "$CLAUDE_BIN_ARGS_JSON"
       "--model" "$claude_model"
-      "--permission-mode" "bypassPermissions"
-      "--allow-dangerously-skip-permissions"
     )
+    case "${TFX_EXECUTION_MODE:-bypass}" in
+      read_only)
+        claude_worker_args+=("--permission-mode" "plan")
+        ;;
+      workspace_auto)
+        claude_worker_args+=("--permission-mode" "acceptEdits")
+        ;;
+      *)
+        claude_worker_args+=(
+          "--permission-mode" "bypassPermissions"
+          "--allow-dangerously-skip-permissions"
+        )
+        ;;
+    esac
     [ -n "$claude_effort" ] && claude_worker_args+=("--effort" "$claude_effort")
 
     run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?

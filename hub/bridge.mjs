@@ -5,6 +5,7 @@
 
 import {
   closeSync,
+  existsSync,
   fstatSync,
   openSync,
   readFileSync,
@@ -56,6 +57,13 @@ export function parseArgs(argv) {
       "stderr-log": { type: "string" },
       "rollout-file": { type: "string" },
       "elapsed-sec": { type: "string" },
+      "result-file": { type: "string" },
+      agent: { type: "string" },
+      "cli-type": { type: "string" },
+      "available-servers": { type: "string" },
+      prompt: { type: "string" },
+      instruction: { type: "string" },
+      delimited: { type: "boolean" },
     },
     allowPositionals: true,
     strict: false,
@@ -161,14 +169,35 @@ async function cmdTeamTaskUpdate(args) {
 
 async function cmdTeamSendMessage(args) {
   const { teamSendMessage } = await import("./team/nativeProxy.mjs");
+  const { isJevEnabled, judgeInboxPriority } = await import(
+    "./lib/jev-addon.mjs"
+  );
+  let summary = args.summary;
+  let priority = null;
+  let urgencyScore = null;
+  if (isJevEnabled()) {
+    const verdict = await judgeInboxPriority({
+      text: args.text,
+      summary: args.summary,
+      from: args.from,
+    });
+    if (verdict) {
+      priority = verdict.priority;
+      urgencyScore = verdict.urgencyScore;
+      if (summary && !String(summary).startsWith("[JEV:")) {
+        summary = `[JEV:${verdict.priority}] ${summary}`;
+      }
+    }
+  }
   return emitJson(
     await teamSendMessage({
       team_name: args.team,
       from: args.from,
       to: args.to || "team-lead",
       text: args.text,
-      summary: args.summary,
+      summary,
       color: args.color || "blue",
+      ...(priority ? { priority, urgencyScore } : {}),
     }),
   );
 }
@@ -791,6 +820,34 @@ async function cmdInterveneRun(args) {
         codexHome: payload.codexHome,
       });
     }
+    let reinstructPrompt = payload.reinstructPrompt || undefined;
+    const { isJevEnabled, judgeWorkerHealth } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    if (isJevEnabled() && payload.skipJevHealthCheck !== true) {
+      const verdict = await judgeWorkerHealth({
+        stdoutTail: readTailSafe(payload.stdoutLog),
+        stderrTail: readTailSafe(payload.stderrLog),
+        rolloutTail: readTailSafe(rolloutFile),
+        elapsedSec: numericOption(payload.elapsedSec, 0),
+      });
+      if (verdict?.status === "progressing") {
+        return emitJson({
+          ok: true,
+          outcome: "recovered",
+          step: "jev-health-check",
+          status: "progressing",
+          confidence: verdict.confidence,
+        });
+      }
+      if (!reinstructPrompt && verdict?.status === "waiting_input") {
+        reinstructPrompt =
+          "Continue non-interactively using safe defaults without waiting for interactive user input.";
+      } else if (!reinstructPrompt && verdict?.status === "looping_error") {
+        reinstructPrompt =
+          "Stop repeating the failing command. Summarize the root cause and switch to an alternative approach.";
+      }
+    }
     const seconds = (value) => {
       const parsed = numericOption(value, undefined);
       return parsed > 0 ? parsed * 1_000 : undefined;
@@ -813,7 +870,7 @@ async function cmdInterveneRun(args) {
         rolloutFile,
         daemon: payload.daemon,
       },
-      reinstructPrompt: payload.reinstructPrompt || undefined,
+      reinstructPrompt,
       readActivitySignature,
       config: {
         ...(seconds(payload.reinstructWaitSec)
@@ -985,6 +1042,119 @@ async function cmdHandoffCheck(args) {
   }
 }
 
+async function cmdJudgeRoute(args) {
+  try {
+    const payload =
+      args["payload-file"] || args.payload ? readBridgePayload(args) : {};
+    const prompt = String(args.prompt ?? args.text ?? payload.prompt ?? "");
+    const agentType = String(args.agent ?? payload.agentType ?? "executor");
+    const cliType = String(args["cli-type"] ?? payload.cliType ?? "codex");
+    const availableRaw =
+      args["available-servers"] ?? payload.availableServers ?? "";
+    const availableServers = Array.isArray(availableRaw)
+      ? availableRaw
+      : String(availableRaw)
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+    const { isJevEnabled, judgeTaskRouting } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    if (!isJevEnabled()) {
+      if (args.delimited) return true;
+      return emitJson({ ok: true, enabled: false, routing: null });
+    }
+    const routing = await judgeTaskRouting({
+      prompt,
+      agentType,
+      cliType,
+      availableServers,
+    });
+    if (args.delimited) {
+      if (!routing) return true;
+      const RS = "\x1e";
+      const fields = [
+        routing.complexity || "",
+        routing.codexProfile || "",
+        routing.agyProfile || "",
+        routing.claudeModel || "",
+        routing.claudeEffort || "",
+        String(routing.expectedDurationSec || ""),
+        routing.executionMode || "",
+        routing.mcpProfile || "",
+        Array.isArray(routing.neededMcpServers)
+          ? routing.neededMcpServers.join(",")
+          : "",
+        String(routing.confidence ?? ""),
+      ];
+      process.stdout.write(fields.join(RS));
+      return true;
+    }
+    return emitJson({ ok: true, enabled: true, routing });
+  } catch (error) {
+    if (args.delimited) return false;
+    return emitJson({
+      ok: false,
+      enabled: false,
+      routing: null,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+async function cmdJudgeAck(args) {
+  try {
+    const payload =
+      args["payload-file"] || args.payload ? readBridgePayload(args) : {};
+    const instruction = String(
+      args.instruction ?? payload.instruction ?? "",
+    );
+    const stdoutLog = args["stdout-log"] ?? payload.stdoutLog;
+    const recentOutput = String(
+      args.text ?? payload.recentOutput ?? readTailSafe(stdoutLog),
+    );
+    const { isJevEnabled, judgeInstructionAck } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    if (!isJevEnabled()) {
+      return emitJson({ ok: true, enabled: false, verdict: null });
+    }
+    const verdict = await judgeInstructionAck({ instruction, recentOutput });
+    return emitJson({ ok: true, enabled: true, verdict });
+  } catch (error) {
+    return emitJson({
+      ok: false,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+async function cmdJudgeReview(args) {
+  try {
+    const payload =
+      args["payload-file"] || args.payload ? readBridgePayload(args) : {};
+    const { isJevEnabled, judgeReviewGate } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    if (!isJevEnabled()) {
+      return emitJson({ ok: true, enabled: false, verdict: null });
+    }
+    const verdict = await judgeReviewGate({
+      diffStat: String(payload.diffStat ?? ""),
+      handoffSummary: String(args.summary ?? payload.handoffSummary ?? ""),
+      previousReviews: String(payload.previousReviews ?? ""),
+      currentReview: String(args.text ?? payload.currentReview ?? ""),
+    });
+    return emitJson({ ok: true, enabled: true, verdict });
+  } catch (error) {
+    return emitJson({
+      ok: false,
+      error: error?.message || String(error),
+    });
+  }
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const cmd = argv[0];
   const args = parseArgs(argv.slice(1));
@@ -1020,9 +1190,15 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdJevStats(args);
     case "handoff-check":
       return await cmdHandoffCheck(args);
+    case "judge-route":
+      return await cmdJudgeRoute(args);
+    case "judge-ack":
+      return await cmdJudgeAck(args);
+    case "judge-review":
+      return await cmdJudgeReview(args);
     default:
       console.error(
-        "사용법: bridge.mjs <team-info|team-task-list|team-task-update|team-send-message|daemon-probe|daemon-attach|daemon-wait|daemon-interrupt|retry-run|retry-status|intervene-run|judge-stall|jev-batch|jev-stats|handoff-check> [--옵션]",
+        "사용법: bridge.mjs <team-info|team-task-list|team-task-update|team-send-message|daemon-probe|daemon-attach|daemon-wait|daemon-interrupt|retry-run|retry-status|intervene-run|judge-stall|jev-batch|jev-stats|handoff-check|judge-route|judge-ack|judge-review> [--옵션]",
       );
       process.exit(1);
   }
