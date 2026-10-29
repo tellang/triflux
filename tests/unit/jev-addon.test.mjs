@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { readTailSafe } from "../../hub/bridge.mjs";
+import { ADAPTERS, waitForTmuxIdle } from "../../bin/tfx-live.mjs";
+import { main as runBridgeMain, readTailSafe } from "../../hub/bridge.mjs";
 import {
   isJevEnabled,
   judgeBusyAction,
@@ -16,6 +17,7 @@ import {
   summarizeJevStats,
 } from "../../hub/lib/jev-addon.mjs";
 import { processHandoffWithJev } from "../../hub/team/handoff.mjs";
+import { createHeadlessIntervention } from "../../hub/team/headless.mjs";
 import { createRetryStateMachine } from "../../hub/team/retry-state-machine.mjs";
 
 describe("jev-addon: opt-in 및 fail-open 검증", () => {
@@ -418,5 +420,125 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("Hook 4 런타임 연동: waitForTmuxIdle이 --if-busy auto에서 steer를 interrupt로, agy의 wait를 queue로 전환한다", async () => {
+    const tmuxCalls = [];
+    let pollCount = 0;
+    await waitForTmuxIdle(
+      { cli: "claude", isBusy: (text) => text.includes("Working") },
+      {
+        session: "claude-test:0.0",
+        pollIntervalMs: 5,
+        busyTimeoutMs: 1000,
+        ifBusy: "auto",
+        prompt: "지금 작업 취소하고 롤백부터 해",
+      },
+      {
+        captureVisible: async () => {
+          pollCount += 1;
+          return pollCount === 1 ? "Working..." : "Idle>";
+        },
+        runTmux: async (_remote, args) => {
+          tmuxCalls.push(args);
+        },
+        sleep: async () => {},
+        judgeBusyAction: async () => ({ action: "steer", confidence: 0.94 }),
+      },
+    );
+    assert.equal(tmuxCalls.length, 1);
+    assert.deepEqual(tmuxCalls[0], [
+      "send-keys",
+      "-t",
+      "=claude-test:0.0",
+      "Escape",
+    ]);
+
+    const agyElapsed = await waitForTmuxIdle(
+      { cli: "agy", isBusy: () => true },
+      {
+        session: "agy-test:0.0",
+        pollIntervalMs: 5,
+        busyTimeoutMs: 1000,
+        ifBusy: "auto",
+        prompt: "다 끝나면 요약도 해줘",
+      },
+      {
+        captureVisible: async () => "Thinking...",
+        runTmux: async () => {},
+        sleep: async () => {},
+        judgeBusyAction: async () => ({ action: "wait", confidence: 0.91 }),
+      },
+    );
+    assert.equal(typeof agyElapsed, "number");
+  });
+
+  it("Hook 5 런타임 연동: createHeadlessIntervention이 healthy_thinking이면 단계별 개입 없이 유예하고 waiting_input이면 맞춤 프롬프트를 주입한다", async () => {
+    let ladderCalled = 0;
+    const healthyHandler = createHeadlessIntervention(
+      { paneId: "tfx:0.1", cli: "codex", resultFile: "/tmp/nonexistent.txt" },
+      null,
+      {
+        capturePsmuxPane: () => "Running cargo test --workspace...",
+        judgeWorkerHealth: async () => ({
+          status: "healthy_thinking",
+          confidence: 0.95,
+        }),
+        createInterventionLadder: () => {
+          ladderCalled += 1;
+          return { intervene: async () => ({ outcome: "terminated" }) };
+        },
+      },
+    );
+    const healthyResult = await healthyHandler({ inactiveMs: 180_000 });
+    assert.equal(healthyResult, true);
+    assert.equal(ladderCalled, 0);
+
+    let capturedPrompt = "";
+    const waitingHandler = createHeadlessIntervention(
+      { paneId: "tfx:0.1", cli: "claude", resultFile: "/tmp/nonexistent.txt" },
+      null,
+      {
+        capturePsmuxPane: () => "? Proceed with migration? (y/N)",
+        judgeWorkerHealth: async () => ({
+          status: "waiting_input",
+          confidence: 0.93,
+        }),
+        createInterventionLadder: (opts) => {
+          capturedPrompt = opts.reinstructPrompt || "";
+          return { intervene: async () => ({ outcome: "reactivated" }) };
+        },
+      },
+    );
+    const waitingResult = await waitingHandler({ inactiveMs: 180_000 });
+    assert.equal(waitingResult, true);
+    assert.equal(capturedPrompt.includes("대화형 입력 대기"), true);
+  });
+
+  it("bridge.mjs: jev-stats, jev-batch, handoff-check 서브커맨드가 정상 동작한다", async () => {
+    const statsOk = await runBridgeMain(["jev-stats"]);
+    assert.equal(statsOk, true);
+
+    const batchOk = await runBridgeMain([
+      "jev-batch",
+      "--payload",
+      JSON.stringify({
+        state: "worker output",
+        questions: { q1: { kind: "noul", query: "is it ok?" } },
+      }),
+    ]);
+    assert.equal(batchOk, true);
+
+    const handoffOk = await runBridgeMain([
+      "handoff-check",
+      "--payload",
+      JSON.stringify({
+        rawText:
+          "--- HANDOFF ---\nstatus: ok\nlead_action: accept\nfiles_changed: a.mjs\nverdict: done\n---",
+        exitCode: 0,
+        gitDiffFiles: ["a.mjs"],
+      }),
+    ]);
+    assert.equal(handoffOk, true);
   });
 });

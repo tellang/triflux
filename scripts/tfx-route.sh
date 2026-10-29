@@ -1760,7 +1760,7 @@ heartbeat_monitor() {
   local interval="${2:-${TFX_HEARTBEAT_INTERVAL:-10}}"
   local stall_threshold="${3:-${TFX_STALL_THRESHOLD:-1200}}"
   local expected_duration="${TFX_EXPECTED_DURATION_SEC:-}"
-  local last_size=0 stall_count=0 jev_stall_hits=0
+  local last_size=0 stall_count=0 jev_stall_hits=0 jev_grace_granted=0
   local pid_gone=false
   local post_exit_checks=0
   local max_post_exit_checks=6  # fallback drain: 6 intervals (fork PID 미발견 시)
@@ -1804,6 +1804,7 @@ heartbeat_monitor() {
     if [[ "$current_size" -gt "$last_size" ]]; then
       stall_count=0
       jev_stall_hits=0
+      jev_grace_granted=0
       if [[ "$pid_gone" == "true" ]]; then
         local _fi="forked"; [[ -n "$last_known_forks" ]] && _fi="forks:${last_known_forks// /,}"
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=active(${_fi})" >&2
@@ -1841,7 +1842,7 @@ heartbeat_monitor() {
         jev_stall_hits=0
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=${probe_state}(probe-grace)" >&2
       else
-        if [[ "$stall_count" -ge 60 && "$stall_count" -lt "$stall_threshold" ]] && [[ -n "${TFX_JEV:-}${JEV_API_KEY:-}${TYPESAFE_API_KEY:-}" && "${TFX_JEV:-1}" != "0" ]]; then
+        if [[ "$stall_count" -ge 60 && "$stall_count" -lt "$stall_threshold" ]] && [[ -n "${TFX_JEV:-}${JEV_API_KEY:-}${TYPESAFE_API_KEY:-}${JEV_CLI_BIN:-}" && "${TFX_JEV:-1}" != "0" ]]; then
           local _jev_bridge="" _jev_out="" _jev_status=""
           if declare -f resolve_bridge_script >/dev/null 2>&1; then
             _jev_bridge="$(resolve_bridge_script 2>/dev/null || true)"
@@ -1860,6 +1861,22 @@ heartbeat_monitor() {
           fi
         fi
         if [[ "$stall_count" -ge "$stall_threshold" ]]; then
+          if [[ "$jev_stall_hits" -lt 2 && "$jev_grace_granted" -eq 0 ]] && [[ -n "${TFX_JEV:-}${JEV_API_KEY:-}${TYPESAFE_API_KEY:-}${JEV_CLI_BIN:-}" && "${TFX_JEV:-1}" != "0" ]]; then
+            local _jev_grace_bridge="" _jev_grace_out=""
+            if declare -f resolve_bridge_script >/dev/null 2>&1; then
+              _jev_grace_bridge="$(resolve_bridge_script 2>/dev/null || true)"
+            fi
+            if [[ -n "$_jev_grace_bridge" && -f "$_jev_grace_bridge" ]] && command -v "${NODE_BIN:-node}" >/dev/null 2>&1; then
+              _jev_grace_out="$("${NODE_BIN:-node}" "$_jev_grace_bridge" judge-stall --stdout-log "$STDOUT_LOG" --stderr-log "$STDERR_LOG" --rollout-file "${TFX_CODEX_ROLLOUT_FILE:-}" --elapsed-sec "$elapsed" 2>/dev/null || true)"
+              if [[ "$_jev_grace_out" == *'"status":"healthy_thinking"'* ]]; then
+                jev_grace_granted=1
+                stall_count=0
+                last_size=$current_size
+                echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s Jev healthy_thinking 판정으로 stall 유예 1회 부여" >&2
+                continue
+              fi
+            fi
+          fi
         # 외곽 timeout이 hard ceiling으로 이동했으므로 기본 stall 방어는 kill이다.
         # intervene는 bridge의 4단 개입 사다리를 실행하고, 실패하면 아래 kill 블록으로 간다.
         local kill_on_stall="${TFX_STALL_KILL:-kill}"

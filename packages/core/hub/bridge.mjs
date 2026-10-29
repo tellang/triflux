@@ -902,6 +902,89 @@ async function cmdJudgeStall(args) {
   }
 }
 
+async function cmdJevBatch(args) {
+  try {
+    const payload = readBridgePayload(args);
+    const state = String(payload.state ?? payload.context ?? "");
+    const questions =
+      payload.questions && typeof payload.questions === "object"
+        ? payload.questions
+        : {};
+    const { isJevEnabled, queryJevBatch } = await import("./lib/jev-addon.mjs");
+    if (!isJevEnabled()) {
+      return emitJson({
+        ok: true,
+        enabled: false,
+        answers: null,
+      });
+    }
+    const answers = await queryJevBatch({ state, questions });
+    return emitJson({ ok: true, enabled: true, answers });
+  } catch (error) {
+    return emitJson({
+      ok: false,
+      enabled: false,
+      answers: null,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+async function cmdJevStats() {
+  try {
+    const { isJevEnabled, summarizeJevStats } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    const stats = summarizeJevStats();
+    return emitJson({ ok: true, enabled: isJevEnabled(), stats });
+  } catch (error) {
+    return emitJson({
+      ok: false,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+async function cmdHandoffCheck(args) {
+  try {
+    const payload =
+      args["payload-file"] || args.payload ? readBridgePayload(args) : {};
+    const resultFile = args["result-file"] ?? payload.resultFile;
+    const rawText =
+      args.text ??
+      payload.rawText ??
+      (resultFile && existsSync(resultFile)
+        ? readFileSync(resultFile, "utf8")
+        : "");
+    const { isJevEnabled, judgeHandoffQuality } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    if (!isJevEnabled()) {
+      return emitJson({ ok: true, enabled: false, verdict: null });
+    }
+    const verdict = await judgeHandoffQuality({
+      rawText,
+      handoff: payload.handoff ?? {
+        status: payload.status ?? "ok",
+        lead_action: payload.leadAction ?? "accept",
+        files_changed: Array.isArray(payload.gitDiffFiles)
+          ? payload.gitDiffFiles
+          : [],
+        verdict: payload.verdict ?? "",
+      },
+      gitDiffFiles: Array.isArray(payload.gitDiffFiles)
+        ? payload.gitDiffFiles
+        : [],
+    });
+    return emitJson({ ok: true, enabled: true, verdict });
+  } catch (error) {
+    return emitJson({
+      ok: false,
+      error: error?.message || String(error),
+    });
+  }
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const cmd = argv[0];
   const args = parseArgs(argv.slice(1));
@@ -931,9 +1014,15 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdInterveneRun(args);
     case "judge-stall":
       return await cmdJudgeStall(args);
+    case "jev-batch":
+      return await cmdJevBatch(args);
+    case "jev-stats":
+      return await cmdJevStats(args);
+    case "handoff-check":
+      return await cmdHandoffCheck(args);
     default:
       console.error(
-        "사용법: bridge.mjs <team-info|team-task-list|team-task-update|team-send-message|daemon-probe|daemon-attach|daemon-wait|daemon-interrupt|retry-run|retry-status|intervene-run|judge-stall> [--옵션]",
+        "사용법: bridge.mjs <team-info|team-task-list|team-task-update|team-send-message|daemon-probe|daemon-attach|daemon-wait|daemon-interrupt|retry-run|retry-status|intervene-run|judge-stall|jev-batch|jev-stats|handoff-check> [--옵션]",
       );
       process.exit(1);
   }

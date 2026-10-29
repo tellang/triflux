@@ -32,7 +32,10 @@ import {
   readCodexSessionRecords,
   registryDir,
 } from "../hub/lib/codex-session-registry.mjs";
-import { judgePeerConvergence } from "../hub/lib/jev-addon.mjs";
+import {
+  judgeBusyAction,
+  judgePeerConvergence,
+} from "../hub/lib/jev-addon.mjs";
 import { privateTmpDir } from "../hub/lib/private-tmp.mjs";
 import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
 import { exposeLiveSession } from "../hub/team/agents-row.mjs";
@@ -3624,35 +3627,51 @@ async function waitForTmuxIdle(adapter, opts, deps = {}) {
   const capture = deps.captureVisible ?? captureVisible;
   const tmux = deps.runTmux ?? runTmux;
   const pause = deps.sleep ?? sleep;
-  const { session, remote, pollIntervalMs, busyTimeoutMs, ifBusy } = opts;
+  const { session, remote, pollIntervalMs, busyTimeoutMs, ifBusy, prompt } =
+    opts;
   if (
     ![
       "wait",
       "fail",
       "interrupt",
+      "auto",
       ...(adapter.cli === "agy" ? ["queue"] : []),
     ].includes(ifBusy)
   ) {
     throw new Error(
-      "--if-busy must be wait, fail, or interrupt for tmux (agy also supports queue)",
+      "--if-busy must be wait, fail, interrupt, or auto for tmux (agy also supports queue)",
     );
   }
   const startedAt = Date.now();
   let interrupted = false;
+  let effectiveIfBusy = ifBusy;
   while (true) {
     const visible = await capture(remote, session);
     const elapsedMs = Date.now() - startedAt;
     const busy =
       adapter.isBusy(visible) ||
       (adapter.cli === "codex" && isCodexLoadingCapture(visible));
-    if (!busy || ifBusy === "queue") return elapsedMs;
-    if (ifBusy === "fail") throw new Error("target busy (--if-busy fail)");
+    if (busy && effectiveIfBusy === "auto") {
+      const verdict = await (deps.judgeBusyAction ?? judgeBusyAction)({
+        prompt: prompt ?? "",
+        threadSummary: String(visible ?? "").slice(-800),
+      });
+      effectiveIfBusy =
+        verdict?.action === "steer"
+          ? "interrupt"
+          : adapter.cli === "agy"
+            ? "queue"
+            : "wait";
+    }
+    if (!busy || effectiveIfBusy === "queue") return elapsedMs;
+    if (effectiveIfBusy === "fail")
+      throw new Error("target busy (--if-busy fail)");
     if (elapsedMs >= busyTimeoutMs) {
       throw new Error(
-        `target busy after ${Math.ceil(busyTimeoutMs / 1000)}s (--if-busy ${ifBusy})`,
+        `target busy after ${Math.ceil(busyTimeoutMs / 1000)}s (--if-busy ${effectiveIfBusy})`,
       );
     }
-    if (ifBusy === "interrupt" && !interrupted) {
+    if (effectiveIfBusy === "interrupt" && !interrupted) {
       await tmux(remote, [
         "send-keys",
         "-t",
@@ -3700,6 +3719,7 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
             pollIntervalMs,
             busyTimeoutMs,
             ifBusy: adapter.cli === "agy" && slashCommand ? "queue" : ifBusy,
+            prompt,
           },
           deps,
         );
@@ -4991,7 +5011,7 @@ function askOpts(flags, adapter) {
   const sessionId = flags["session-id"];
   // Codex 메시지는 queue 가 기본이다. 슬래시 명령과 바쁠 때 거부·중단은 tmux 만 할 수 있다.
   const slash = isSlashCommand(flags.prompt);
-  const busyPolicy = ["fail", "interrupt"].includes(flags["if-busy"]);
+  const busyPolicy = ["fail", "interrupt", "auto"].includes(flags["if-busy"]);
   const transportReason =
     adapter.cli === "codex" && !flags.transport && (slash || busyPolicy)
       ? slash
@@ -7713,6 +7733,7 @@ export {
   stopOpts,
   tmuxBufferName,
   verifyAttachedPeerSide,
+  waitForTmuxIdle,
   withLeadSession,
   withUnsetEnv,
 };
