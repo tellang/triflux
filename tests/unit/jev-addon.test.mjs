@@ -166,6 +166,48 @@ describe("jev-addon: opt-in 및 fail-open 검증", () => {
       value: true,
       confidence: 0.88,
     });
+
+    const systemOneNoul = await queryJev(
+      { kind: "noul", query: "동일 원인 여부", context: "err1 vs err2" },
+      {
+        env: { TYPESAFE_API_KEY: "sk-typesafe" },
+        fetchImpl: async () => ({
+          ok: true,
+          json: async () => ({
+            model: "typesafe/jev-1.13",
+            answers: { q: { type: "noul", noul: 0.96 } },
+          }),
+        }),
+      },
+    );
+    assert.deepEqual(systemOneNoul, { value: true, confidence: 0.96 });
+
+    const systemOneChoice = await queryJev(
+      {
+        kind: "choice",
+        query: "끼어들기 판단",
+        options: ["steer", "wait"],
+        context: "busy thread",
+      },
+      {
+        env: { TYPESAFE_API_KEY: "sk-typesafe" },
+        fetchImpl: async () => ({
+          ok: true,
+          json: async () => ({
+            model: "jev-latest",
+            answers: {
+              q: {
+                type: "choice",
+                choice: "steer",
+                probabilities: { steer: 0.92, wait: 0.08 },
+                confidence: 0.89,
+              },
+            },
+          }),
+        }),
+      },
+    );
+    assert.deepEqual(systemOneChoice, { choice: "steer", confidence: 0.89 });
   });
 });
 

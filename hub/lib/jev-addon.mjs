@@ -9,7 +9,8 @@ import { whichCommand } from "../platform.mjs";
 
 const execFileAsync = promisify(execFile);
 
-export const DEFAULT_JEV_API_URL = "https://api.typesafe.ai/v1/jev";
+export const DEFAULT_JEV_API_URL = "https://api.typesafe.ai/v1/systemone";
+export const DEFAULT_JEV_MODEL = "jev-latest";
 export const DEFAULT_JEV_TIMEOUT_MS = 1500;
 export const DEFAULT_JEV_CONFIDENCE_THRESHOLD = 0.7;
 
@@ -108,15 +109,47 @@ function tailLines(text, maxLines = 35, maxChars = 1800) {
   return clampText(lines, maxChars);
 }
 
-function normalizeResponse(raw, kind) {
+function isValidUnitNumber(val) {
+  return (
+    typeof val === "number" && Number.isFinite(val) && val >= 0 && val <= 1
+  );
+}
+
+function normalizeResponse(rawInput, kind) {
+  if (!rawInput || typeof rawInput !== "object") return null;
+
+  const raw =
+    rawInput.answers && typeof rawInput.answers === "object"
+      ? (rawInput.answers.q ?? Object.values(rawInput.answers)[0] ?? rawInput)
+      : rawInput;
   if (!raw || typeof raw !== "object") return null;
-  const rawConf = raw.confidence ?? raw.probability ?? raw.prob;
+
+  // 공식 TypeSafe System One noul 응답: { noul: 0.98 } (0~1 사이 확률값 자체가 판정과 신뢰도를 겸함)
   if (
-    typeof rawConf !== "number" ||
-    !Number.isFinite(rawConf) ||
-    rawConf < 0 ||
-    rawConf > 1
+    kind === "noul" &&
+    isValidUnitNumber(raw.noul) &&
+    raw.answer === undefined &&
+    raw.value === undefined
   ) {
+    const p = raw.noul;
+    return {
+      value: p >= 0.5,
+      confidence: p >= 0.5 ? p : 1 - p,
+    };
+  }
+
+  let rawConf = raw.confidence ?? raw.probability ?? raw.prob;
+  if (
+    rawConf === undefined &&
+    kind === "choice" &&
+    typeof raw.choice === "string" &&
+    raw.probabilities &&
+    typeof raw.probabilities === "object"
+  ) {
+    rawConf = raw.probabilities[raw.choice];
+  }
+
+  if (!isValidUnitNumber(rawConf)) {
     return null;
   }
   const safeConfidence = rawConf;
@@ -160,17 +193,49 @@ function normalizeResponse(raw, kind) {
   return null;
 }
 
+function buildSystemOneQuestion(request) {
+  if (request.kind === "choice") {
+    return {
+      type: "choice",
+      question: request.query,
+      instructions: request.query,
+      options: request.options || [],
+    };
+  }
+  if (request.kind === "score") {
+    return {
+      type: "score",
+      question: request.query,
+      instructions: request.query,
+    };
+  }
+  return {
+    type: "noul",
+    instructions: request.query,
+  };
+}
+
 async function callJevHttp(request, options = {}) {
   const env = resolveEnv(options);
   const apiKey = resolveJevApiKey(env);
   if (!apiKey) return null;
 
   const url = options.apiUrl || env.JEV_API_URL || DEFAULT_JEV_API_URL;
+  const model = options.model || env.JEV_MODEL || DEFAULT_JEV_MODEL;
   const timeoutMs = Number(
     options.timeoutMs ?? env.TFX_JEV_TIMEOUT_MS ?? DEFAULT_JEV_TIMEOUT_MS,
   );
   const fetchImpl = options.fetchImpl || globalThis.fetch;
   if (typeof fetchImpl !== "function") return null;
+
+  const payload = {
+    model,
+    state: request.context || request.query || "",
+    questions: {
+      q: buildSystemOneQuestion(request),
+    },
+    ...request,
+  };
 
   const response = await fetchImpl(url, {
     method: "POST",
@@ -178,7 +243,7 @@ async function callJevHttp(request, options = {}) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify(request),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(timeoutMs > 0 ? timeoutMs : 1500),
   });
   if (!response.ok) return null;
