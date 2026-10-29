@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { normalizeGeminiProfileName } from "@triflux/core/scripts/lib/model-effort.mjs";
+import { normalizeGeminiProfileName } from "./model-effort.mjs";
 import {
   AGY_FAMILY_PROFILES,
   modelFamilyPaths,

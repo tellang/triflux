@@ -4,6 +4,9 @@
 // 설정이 없거나 호출이 실패하면 항상 null을 반환해 기존 결정론적 로직을 그대로 유지한다.
 
 import { execFile } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { whichCommand } from "../platform.mjs";
 
@@ -13,6 +16,12 @@ export const DEFAULT_JEV_API_URL = "https://api.typesafe.ai/v1/systemone";
 export const DEFAULT_JEV_MODEL = "jev-latest";
 export const DEFAULT_JEV_TIMEOUT_MS = 1500;
 export const DEFAULT_JEV_CONFIDENCE_THRESHOLD = 0.7;
+export const DEFAULT_JEV_STATS_PATH = join(
+  homedir(),
+  ".triflux",
+  "logs",
+  "jev-stats.jsonl",
+);
 
 let cachedCliBin;
 
@@ -59,7 +68,9 @@ function isDirectEnvObject(obj) {
     "timeoutMs" in obj ||
     "minConfidence" in obj ||
     "fetchImpl" in obj ||
-    "execFileImpl" in obj
+    "execFileImpl" in obj ||
+    "statsFile" in obj ||
+    "includeScore" in obj
   ) {
     return false;
   }
@@ -68,6 +79,7 @@ function isDirectEnvObject(obj) {
     "JEV_API_KEY" in obj ||
     "TYPESAFE_API_KEY" in obj ||
     "TFX_JEV_CLI" in obj ||
+    "TFX_JEV_STATS_FILE" in obj ||
     "PATH" in obj
   );
 }
@@ -283,22 +295,199 @@ async function callJevCli(request, options = {}) {
   return normalizeResponse(parsed, request.kind);
 }
 
-export async function queryJev(request, options = {}) {
+export async function queryJevBatch(
+  { state = "", questions = {} } = {},
+  options = {},
+) {
   if (!isJevEnabled(options)) return null;
+  const entries = Object.entries(questions || {});
+  if (entries.length === 0) return null;
+
   try {
     if (typeof options.client === "function") {
-      const custom = await options.client(request, options);
-      return normalizeResponse(custom, request.kind);
+      const custom = await options.client({ state, questions }, options);
+      const answers = custom?.answers || custom || {};
+      const out = {};
+      for (const [key, req] of entries) {
+        out[key] = normalizeResponse(answers[key], req.kind);
+      }
+      return out;
     }
+
     const env = resolveEnv(options);
-    if (resolveJevApiKey(env)) {
-      return await callJevHttp(request, options);
+    const apiKey = resolveJevApiKey(env);
+    if (!apiKey) return null;
+
+    const url = options.apiUrl || env.JEV_API_URL || DEFAULT_JEV_API_URL;
+    const model = options.model || env.JEV_MODEL || DEFAULT_JEV_MODEL;
+    const timeoutMs = Number(
+      options.timeoutMs ?? env.TFX_JEV_TIMEOUT_MS ?? DEFAULT_JEV_TIMEOUT_MS,
+    );
+    const fetchImpl = options.fetchImpl || globalThis.fetch;
+    if (typeof fetchImpl !== "function") return null;
+
+    const payloadQuestions = {};
+    for (const [key, req] of entries) {
+      payloadQuestions[key] = buildSystemOneQuestion(req);
     }
-    if (resolveJevCliBin(env)) {
-      return await callJevCli(request, options);
+
+    const response = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        state: String(state || ""),
+        questions: payloadQuestions,
+      }),
+      signal: AbortSignal.timeout(timeoutMs > 0 ? timeoutMs : 1500),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const answers = data?.answers || {};
+    const out = {};
+    for (const [key, req] of entries) {
+      out[key] = normalizeResponse(answers[key], req.kind);
     }
-    return null;
+    return out;
   } catch {
+    return null;
+  }
+}
+
+export function recordJevStat(entry = {}, options = {}) {
+  try {
+    const env = resolveEnv(options);
+    const flag = String(env.TFX_JEV_STATS ?? "")
+      .trim()
+      .toLowerCase();
+    if (flag === "0" || flag === "false" || flag === "off") return;
+
+    const explicitFile = options.statsFile || env.TFX_JEV_STATS_FILE || "";
+    if (!explicitFile && typeof options.client === "function") return;
+
+    const filePath = explicitFile || DEFAULT_JEV_STATS_PATH;
+    mkdirSync(dirname(filePath), { recursive: true });
+    appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        ts: new Date().toISOString(),
+        ...entry,
+      })}\n`,
+      "utf8",
+    );
+  } catch {
+    // 통계 기록 실패는 무시한다.
+  }
+}
+
+export function summarizeJevStats(options = {}) {
+  const env = resolveEnv(options);
+  const filePath =
+    options.statsFile || env.TFX_JEV_STATS_FILE || DEFAULT_JEV_STATS_PATH;
+  const summary = {
+    path: filePath,
+    exists: false,
+    total: 0,
+    interventions: 0,
+    fallbacks: 0,
+    avgMs: 0,
+    byHook: {},
+  };
+  if (!existsSync(filePath)) return summary;
+
+  try {
+    const lines = readFileSync(filePath, "utf8").split(/\r?\n/).filter(Boolean);
+    summary.exists = true;
+    let totalMs = 0;
+    let msCount = 0;
+    for (const line of lines) {
+      let row;
+      try {
+        row = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      summary.total += 1;
+      const hook = String(row.hook || "unknown");
+      if (!summary.byHook[hook]) {
+        summary.byHook[hook] = { total: 0, interventions: 0, fallbacks: 0 };
+      }
+      summary.byHook[hook].total += 1;
+      if (row.intervened) {
+        summary.interventions += 1;
+        summary.byHook[hook].interventions += 1;
+      } else {
+        summary.fallbacks += 1;
+        summary.byHook[hook].fallbacks += 1;
+      }
+      if (
+        typeof row.durationMs === "number" &&
+        Number.isFinite(row.durationMs)
+      ) {
+        totalMs += row.durationMs;
+        msCount += 1;
+      }
+    }
+    summary.avgMs = msCount > 0 ? Math.round(totalMs / msCount) : 0;
+  } catch {
+    // 읽기 실패 시 빈 요약 반환
+  }
+  return summary;
+}
+
+export async function queryJev(request, options = {}) {
+  if (!isJevEnabled(options)) return null;
+  const startedAt = Date.now();
+  try {
+    let result = null;
+    if (typeof options.client === "function") {
+      const custom = await options.client(request, options);
+      result = normalizeResponse(custom, request.kind);
+    } else {
+      const env = resolveEnv(options);
+      if (resolveJevApiKey(env)) {
+        result = await callJevHttp(request, options);
+      } else if (resolveJevCliBin(env)) {
+        result = await callJevCli(request, options);
+      }
+    }
+    if (request.hook) {
+      const threshold = minConfidence(options);
+      const intervened = Boolean(result && result.confidence >= threshold);
+      recordJevStat(
+        {
+          hook: request.hook,
+          kind: request.kind,
+          intervened,
+          confidence: result?.confidence ?? null,
+          outcome:
+            result?.choice ??
+            (typeof result?.value === "boolean" ? result.value : null) ??
+            result?.score ??
+            null,
+          durationMs: Date.now() - startedAt,
+        },
+        options,
+      );
+    }
+    return result;
+  } catch {
+    if (request.hook) {
+      recordJevStat(
+        {
+          hook: request.hook,
+          kind: request.kind,
+          intervened: false,
+          confidence: null,
+          outcome: null,
+          durationMs: Date.now() - startedAt,
+        },
+        options,
+      );
+    }
     return null;
   }
 }
@@ -331,6 +520,7 @@ export async function judgeSameFailureCause(
 
   const res = await queryJev(
     {
+      hook: "same_failure_cause",
       kind: "noul",
       query:
         "Are both failure messages caused by the exact same underlying blocker or root error (ignoring timestamps, PIDs, ports, or line number shifts)?",
@@ -365,6 +555,7 @@ export async function judgeHandoffQuality(
     : 0;
   const res = await queryJev(
     {
+      hook: "handoff_quality",
       kind: "choice",
       options: allowed,
       criteria: {
@@ -418,6 +609,7 @@ export async function judgePeerConvergence(
 
   const res = await queryJev(
     {
+      hook: "peer_convergence",
       kind: "noul",
       query:
         "Have the participants reached substantive agreement on the core task or entered a repetitive nitpick loop where further rounds will not add new conclusions?",
@@ -449,6 +641,7 @@ export async function judgeBusyAction(
   const allowed = ["steer", "wait"];
   const res = await queryJev(
     {
+      hook: "busy_action",
       kind: "choice",
       options: allowed,
       criteria: {
@@ -492,6 +685,7 @@ export async function judgeWorkerHealth(
   const allowed = ["progressing", "waiting_input", "looping_error"];
   const res = await queryJev(
     {
+      hook: "worker_health",
       kind: "choice",
       options: allowed,
       criteria: {

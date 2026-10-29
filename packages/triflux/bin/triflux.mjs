@@ -26,6 +26,12 @@ import {
   validateRuntimeCachePaths,
 } from "../hub/lib/cache-guard.mjs";
 import {
+  isJevEnabled,
+  resolveJevApiKey,
+  resolveJevCliBin,
+  summarizeJevStats,
+} from "../hub/lib/jev-addon.mjs";
+import {
   detectMultiplexer,
   getSessionAttachedCount,
   killSession,
@@ -3360,6 +3366,41 @@ async function cmdDoctor(options = {}) {
         );
         issues += agyLeftover.length;
       }
+    }
+
+    section("Jev Addon (Opt-in)");
+    const jevEnabled = isJevEnabled();
+    const jevKeySet = Boolean(resolveJevApiKey());
+    const jevCliBin = resolveJevCliBin();
+    const jevStats = summarizeJevStats();
+    const jevTransport = jevKeySet
+      ? "http(/v1/systemone)"
+      : jevCliBin
+        ? `cli(${jevCliBin})`
+        : "disabled";
+    addDoctorCheck(report, {
+      name: "jev-addon",
+      status: "ok",
+      enabled: jevEnabled,
+      transport: jevTransport,
+      stats: {
+        total: jevStats.total,
+        interventions: jevStats.interventions,
+        fallbacks: jevStats.fallbacks,
+        avgMs: jevStats.avgMs,
+      },
+    });
+    if (jevEnabled) {
+      ok(`Jev 5대 훅 활성 (${jevTransport})`);
+    } else {
+      info(
+        "비활성 (선택 기능: JEV_API_KEY 또는 TYPESAFE_API_KEY 설정 시 5대 훅 자동 활성화)",
+      );
+    }
+    if (jevStats.exists && jevStats.total > 0) {
+      info(
+        `개입 통계: 호출 ${jevStats.total}회, 개입 ${jevStats.interventions}회, 폴백 ${jevStats.fallbacks}회, 평균 ${jevStats.avgMs}ms`,
+      );
     }
     if (fix) {
       try {

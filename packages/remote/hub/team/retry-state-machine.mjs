@@ -31,7 +31,7 @@ import {
   resolveCodexModelEffort,
 } from "../../scripts/lib/model-effort.mjs";
 import { AGY_FAMILY_PROFILES } from "../../scripts/lib/model-family-resolver.mjs";
-import { judgeSameFailureCause } from "../lib/jev-addon.mjs";
+import { judgeSameFailureCause } from "@triflux/core/hub/lib/jev-addon.mjs";
 
 export const STATES = Object.freeze({
   PLANNING: "PLANNING",

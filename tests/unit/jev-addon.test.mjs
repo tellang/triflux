@@ -12,6 +12,8 @@ import {
   judgeSameFailureCause,
   judgeWorkerHealth,
   queryJev,
+  queryJevBatch,
+  summarizeJevStats,
 } from "../../hub/lib/jev-addon.mjs";
 import { processHandoffWithJev } from "../../hub/team/handoff.mjs";
 import { createRetryStateMachine } from "../../hub/team/retry-state-machine.mjs";
@@ -345,6 +347,74 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
       const tail = readTailSafe(logFile, 64);
       assert.equal(tail.length, 64);
       assert.equal(tail.endsWith("TAIL_MARKER_END"), true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("queryJevBatch가 다중 질의를 단일 /v1/systemone 요청으로 묶고 summarizeJevStats가 5대 훅 통계를 집계한다", async () => {
+    const batchRes = await queryJevBatch(
+      {
+        state: "worker finished with exit 0",
+        questions: {
+          action: {
+            kind: "choice",
+            query: "Choose action",
+            criteria: { accept: "ok", needs_read: "read" },
+          },
+          converged: {
+            kind: "noul",
+            query: "Did peers converge?",
+          },
+        },
+      },
+      {
+        env: { JEV_API_KEY: "sk-batch" },
+        fetchImpl: async () => ({
+          ok: true,
+          json: async () => ({
+            model: "jev-1.14.0",
+            answers: {
+              action: {
+                type: "choice",
+                choice: "needs_read",
+                confidence: 0.95,
+              },
+              converged: {
+                type: "noul",
+                noul: 0.91,
+              },
+            },
+          }),
+        }),
+      },
+    );
+    assert.deepEqual(batchRes, {
+      action: { choice: "needs_read", confidence: 0.95 },
+      converged: { value: true, confidence: 0.91 },
+    });
+
+    const dir = mkdtempSync(join(tmpdir(), "jev-stats-"));
+    const statsFile = join(dir, "jev-stats.jsonl");
+    try {
+      await judgeSameFailureCause("err 1", "err 2", {
+        statsFile,
+        client: async () => ({ answer: true, confidence: 0.9 }),
+      });
+      await judgeBusyAction(
+        { prompt: "잠깐 멈춰" },
+        {
+          statsFile,
+          client: async () => ({ choice: "steer", confidence: 0.4 }),
+        },
+      );
+      const summary = summarizeJevStats({ statsFile });
+      assert.equal(summary.exists, true);
+      assert.equal(summary.total, 2);
+      assert.equal(summary.interventions, 1);
+      assert.equal(summary.fallbacks, 1);
+      assert.equal(summary.byHook.same_failure_cause.interventions, 1);
+      assert.equal(summary.byHook.busy_action.fallbacks, 1);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
