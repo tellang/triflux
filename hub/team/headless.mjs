@@ -831,7 +831,6 @@ async function collectResults(results) {
         role: d.role,
       });
       if (
-        !handoffResult.handoff?._jev &&
         completion.exitCode === 0 &&
         workerGitDiffFiles.length === 0 &&
         handoffResult.handoff?.lead_action === "accept"

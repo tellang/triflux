@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
+import { readTailSafe } from "../../hub/bridge.mjs";
 import {
   isJevEnabled,
   judgeBusyAction,
@@ -65,12 +69,35 @@ describe("jev-addon: opt-in 및 fail-open 검증", () => {
     assert.equal(isJevEnabled({ TFX_JEV: "1", JEV_API_KEY: "test-key" }), true);
   });
 
-  it("신뢰도가 임계값보다 낮거나 오류가 나면 null로 폴백한다 (fail-open)", async () => {
+  it("인자 없는 기본 호출에서 process.env의 JEV_API_KEY를 정상 감지한다", () => {
+    const prevKey = process.env.JEV_API_KEY;
+    const prevFlag = process.env.TFX_JEV;
+    try {
+      process.env.JEV_API_KEY = "sk-env-default-test";
+      delete process.env.TFX_JEV;
+      assert.equal(isJevEnabled(), true);
+      assert.equal(isJevEnabled({ minConfidence: 0.8 }), true);
+    } finally {
+      if (prevKey === undefined) delete process.env.JEV_API_KEY;
+      else process.env.JEV_API_KEY = prevKey;
+      if (prevFlag === undefined) delete process.env.TFX_JEV;
+      else process.env.TFX_JEV = prevFlag;
+    }
+  });
+
+  it("신뢰도가 누락, 비수치, 범위 밖이거나 임계값보다 낮거나 오류가 나면 null로 폴백한다 (fail-open)", async () => {
     const resLow = await judgeSameFailureCause("err A", "err B", {
       minConfidence: 0.7,
       client: async () => ({ answer: true, confidence: 0.4 }),
     });
     assert.equal(resLow, null);
+
+    for (const badConf of [undefined, null, "invalid", -0.1, 1.2, NaN]) {
+      const resBad = await judgeSameFailureCause("err A", "err B", {
+        client: async () => ({ answer: true, confidence: badConf }),
+      });
+      assert.equal(resBad, null);
+    }
 
     const resErr = await judgeSameFailureCause("err A", "err B", {
       client: async () => {
@@ -167,6 +194,32 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
     );
     assert.equal(retryVerdict.handoff.status, "partial");
     assert.equal(retryVerdict.handoff.lead_action, "retry");
+
+    const emptyFilesText = [
+      "조사만 마쳤습니다.",
+      "--- HANDOFF ---",
+      "status: ok",
+      "lead_action: accept",
+      "verdict: 조사 완료",
+      "files_changed: none",
+    ].join("\n");
+    const blockedAccept = await processHandoffWithJev(
+      emptyFilesText,
+      { exitCode: 0, gitDiffFiles: [] },
+      {
+        client: async () => ({ choice: "accept", confidence: 0.98 }),
+      },
+    );
+    assert.equal(blockedAccept.handoff.lead_action, "needs_read");
+
+    const blockedEmptyDiff = await processHandoffWithJev(
+      rawText,
+      { exitCode: 0, gitDiffFiles: [] },
+      {
+        client: async () => ({ choice: "accept", confidence: 0.98 }),
+      },
+    );
+    assert.equal(blockedEmptyDiff.handoff.lead_action, "needs_read");
   });
 
   it("Hook 3: judgePeerConvergence가 합의 수렴 여부를 판정한다", async () => {
@@ -203,7 +256,7 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
     assert.equal(res?.action, "steer");
   });
 
-  it("Hook 5: judgeWorkerHealth가 대화형 프롬프트 대기를 waiting_input으로 판정한다", async () => {
+  it("Hook 5: judgeWorkerHealth가 대화형 프롬프트 대기를 waiting_input으로 판정하고 readTailSafe가 파일 끝 바이트만 읽는다", async () => {
     const res = await judgeWorkerHealth(
       {
         stdoutTail: "? Overwrite existing configuration file? (y/N)",
@@ -211,9 +264,20 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
         elapsedSec: 120,
       },
       {
-        client: async () => ({ output: "waiting_input", confidence: 0.96 }),
+        client: async () => ({ choice: "waiting_input", confidence: 0.96 }),
       },
     );
     assert.equal(res?.status, "waiting_input");
+
+    const dir = mkdtempSync(join(tmpdir(), "jev-tail-"));
+    try {
+      const logFile = join(dir, 'strange"name.log');
+      writeFileSync(logFile, `${"A".repeat(5000)}TAIL_MARKER_END`, "utf8");
+      const tail = readTailSafe(logFile, 64);
+      assert.equal(tail.length, 64);
+      assert.equal(tail.endsWith("TAIL_MARKER_END"), true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

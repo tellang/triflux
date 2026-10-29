@@ -3,7 +3,13 @@
 // hub/bridge.mjs: tfx-route.sh 와 tfx-live 가 부르는 로컬 제어 CLI.
 // 팀 하위 명령은 nativeProxy 를 직접 호출하고 Claude daemon, retry, intervene 은 로컬 모듈만 쓴다.
 
-import { readFileSync } from "node:fs";
+import {
+  closeSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+} from "node:fs";
 import { parseArgs as nodeParseArgs } from "node:util";
 
 import {
@@ -46,6 +52,10 @@ export function parseArgs(argv) {
       "snapshot-file": { type: "string" },
       event: { type: "string" },
       "max-iterations": { type: "string" },
+      "stdout-log": { type: "string" },
+      "stderr-log": { type: "string" },
+      "rollout-file": { type: "string" },
+      "elapsed-sec": { type: "string" },
     },
     allowPositionals: true,
     strict: false,
@@ -830,19 +840,40 @@ async function cmdInterveneRun(args) {
   }
 }
 
-function readTailSafe(filePath, maxBytes = 2000) {
+export function readTailSafe(filePath, maxBytes = 2000) {
   if (!filePath) return "";
+  let fd;
   try {
-    const text = readFileSync(String(filePath), "utf8");
-    return text.slice(-maxBytes);
+    fd = openSync(String(filePath), "r");
+    const { size } = fstatSync(fd);
+    if (size <= 0) return "";
+    const readLen = Math.min(size, maxBytes);
+    const offset = Math.max(0, size - readLen);
+    const buf = Buffer.allocUnsafe(readLen);
+    const bytesRead = readSync(fd, buf, 0, readLen, offset);
+    return buf
+      .subarray(0, bytesRead)
+      .toString("utf8")
+      .replace(/^\uFFFD+/, "");
   } catch {
     return "";
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {}
+    }
   }
 }
 
 async function cmdJudgeStall(args) {
   try {
-    const payload = readBridgePayload(args);
+    const payload =
+      args["payload-file"] || args.payload ? readBridgePayload(args) : {};
+    const stdoutLog = args["stdout-log"] ?? payload.stdoutLog;
+    const stderrLog = args["stderr-log"] ?? payload.stderrLog;
+    const rolloutFile = args["rollout-file"] ?? payload.rolloutFile;
+    const elapsedSec = Number(args["elapsed-sec"] ?? payload.elapsedSec) || 0;
     const { isJevEnabled, judgeWorkerHealth } = await import(
       "./lib/jev-addon.mjs"
     );
@@ -850,10 +881,10 @@ async function cmdJudgeStall(args) {
       return emitJson({ ok: true, enabled: false, status: null });
     }
     const verdict = await judgeWorkerHealth({
-      stdoutTail: readTailSafe(payload.stdoutLog),
-      stderrTail: readTailSafe(payload.stderrLog),
-      rolloutTail: readTailSafe(payload.rolloutFile),
-      elapsedSec: Number(payload.elapsedSec) || 0,
+      stdoutTail: readTailSafe(stdoutLog),
+      stderrTail: readTailSafe(stderrLog),
+      rolloutTail: readTailSafe(rolloutFile),
+      elapsedSec,
     });
     return emitJson({
       ok: true,

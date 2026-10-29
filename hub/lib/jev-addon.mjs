@@ -49,14 +49,45 @@ export function resetJevAddonCache() {
   cachedCliBin = undefined;
 }
 
+function isDirectEnvObject(obj) {
+  if (!obj || typeof obj !== "object") return false;
+  if (
+    "env" in obj ||
+    "client" in obj ||
+    "apiUrl" in obj ||
+    "timeoutMs" in obj ||
+    "minConfidence" in obj ||
+    "fetchImpl" in obj ||
+    "execFileImpl" in obj
+  ) {
+    return false;
+  }
+  return (
+    "TFX_JEV" in obj ||
+    "JEV_API_KEY" in obj ||
+    "TYPESAFE_API_KEY" in obj ||
+    "TFX_JEV_CLI" in obj ||
+    "PATH" in obj
+  );
+}
+
+function resolveEnv(options = {}) {
+  if (!options || typeof options !== "object") return process.env;
+  if (isDirectEnvObject(options)) return options;
+  return options.env || process.env;
+}
+
 export function isJevEnabled(options = {}) {
-  const isOptionsWrapper =
+  const env = resolveEnv(options);
+  if (isExplicitlyDisabled(env)) return false;
+  if (
     options &&
     typeof options === "object" &&
-    ("env" in options || "client" in options || "apiUrl" in options);
-  const env = isOptionsWrapper ? options.env || process.env : options;
-  if (isExplicitlyDisabled(env)) return false;
-  if (isOptionsWrapper && typeof options.client === "function") return true;
+    !isDirectEnvObject(options) &&
+    typeof options.client === "function"
+  ) {
+    return true;
+  }
   if (resolveJevApiKey(env)) return true;
   if (resolveJevCliBin(env)) return true;
   return false;
@@ -79,10 +110,15 @@ function tailLines(text, maxLines = 35, maxChars = 1800) {
 
 function normalizeResponse(raw, kind) {
   if (!raw || typeof raw !== "object") return null;
-  const confidence = Number(
-    raw.confidence ?? raw.probability ?? raw.prob ?? raw.score ?? 1,
-  );
-  const safeConfidence = Number.isFinite(confidence) ? confidence : 1;
+  const rawConf = raw.confidence ?? raw.probability ?? raw.prob;
+  if (rawConf === undefined || rawConf === null || rawConf === "") {
+    return null;
+  }
+  const confidence = Number(rawConf);
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+    return null;
+  }
+  const safeConfidence = confidence;
 
   if (kind === "noul") {
     const val = raw.answer ?? raw.value ?? raw.result ?? raw.output ?? raw.yes;
@@ -124,7 +160,7 @@ function normalizeResponse(raw, kind) {
 }
 
 async function callJevHttp(request, options = {}) {
-  const env = options.env || process.env;
+  const env = resolveEnv(options);
   const apiKey = resolveJevApiKey(env);
   if (!apiKey) return null;
 
@@ -150,7 +186,7 @@ async function callJevHttp(request, options = {}) {
 }
 
 async function callJevCli(request, options = {}) {
-  const env = options.env || process.env;
+  const env = resolveEnv(options);
   const cliBin = resolveJevCliBin(env);
   if (!cliBin) return null;
 
@@ -181,7 +217,7 @@ export async function queryJev(request, options = {}) {
       const custom = await options.client(request, options);
       return normalizeResponse(custom, request.kind);
     }
-    const env = options.env || process.env;
+    const env = resolveEnv(options);
     if (resolveJevApiKey(env)) {
       return await callJevHttp(request, options);
     }
@@ -195,7 +231,7 @@ export async function queryJev(request, options = {}) {
 }
 
 function minConfidence(options = {}) {
-  const env = options.env || process.env;
+  const env = resolveEnv(options);
   const threshold = Number(
     options.minConfidence ??
       env.TFX_JEV_MIN_CONFIDENCE ??

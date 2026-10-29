@@ -330,21 +330,41 @@ export async function processHandoffWithJev(
   );
   if (!verdict) return base;
 
+  const declaredFilesCount = Array.isArray(base.handoff.files_changed)
+    ? base.handoff.files_changed.filter(Boolean).length
+    : 0;
+  const hasEmptyGitDiff =
+    Array.isArray(context.gitDiffFiles) &&
+    context.gitDiffFiles.filter(Boolean).length === 0;
+  const canAccept =
+    base.handoff.status === "ok" &&
+    (context.exitCode ?? 0) === 0 &&
+    declaredFilesCount > 0 &&
+    !hasEmptyGitDiff &&
+    base.handoff.lead_action === "accept";
+
+  let effectiveAction = verdict.leadAction;
+  if (effectiveAction === "accept" && !canAccept) {
+    effectiveAction =
+      base.handoff.lead_action === "retry" ? "retry" : "needs_read";
+  }
+
   const updatedHandoff = {
     ...base.handoff,
-    lead_action: verdict.leadAction,
-    ...(verdict.leadAction === "retry" && base.handoff.status === "ok"
+    lead_action: effectiveAction,
+    ...(effectiveAction === "retry" && base.handoff.status === "ok"
       ? { status: "partial" }
       : {}),
     _jev: {
       lead_action: verdict.leadAction,
+      effective_lead_action: effectiveAction,
       confidence: verdict.confidence,
     },
   };
   const warnings = [...base.warnings];
-  if (verdict.leadAction !== base.handoff.lead_action) {
+  if (effectiveAction !== base.handoff.lead_action) {
     warnings.push(
-      `jev overridden lead_action: ${base.handoff.lead_action} -> ${verdict.leadAction}`,
+      `jev overridden lead_action: ${base.handoff.lead_action} -> ${effectiveAction}`,
     );
   }
   return {

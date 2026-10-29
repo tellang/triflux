@@ -1847,7 +1847,7 @@ heartbeat_monitor() {
             _jev_bridge="$(resolve_bridge_script 2>/dev/null || true)"
           fi
           if [[ -n "$_jev_bridge" && -f "$_jev_bridge" ]] && command -v "${NODE_BIN:-node}" >/dev/null 2>&1; then
-            _jev_out="$("${NODE_BIN:-node}" "$_jev_bridge" judge-stall --payload "$(printf '{"stdoutLog":"%s","stderrLog":"%s","rolloutFile":"%s","elapsedSec":%d}' "$STDOUT_LOG" "$STDERR_LOG" "${TFX_CODEX_ROLLOUT_FILE:-}" "$elapsed")" 2>/dev/null || true)"
+            _jev_out="$("${NODE_BIN:-node}" "$_jev_bridge" judge-stall --stdout-log "$STDOUT_LOG" --stderr-log "$STDERR_LOG" --rollout-file "${TFX_CODEX_ROLLOUT_FILE:-}" --elapsed-sec "$elapsed" 2>/dev/null || true)"
             if [[ "$_jev_out" == *'"status":"waiting_input"'* || "$_jev_out" == *'"status":"looping_error"'* ]]; then
               jev_stall_hits=$((jev_stall_hits + 1))
               if [[ "$jev_stall_hits" -ge 2 ]]; then

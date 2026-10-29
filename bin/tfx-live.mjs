@@ -7522,10 +7522,7 @@ async function peer(flags, deps = {}) {
       latestResponses.set(side, result.response);
       if (isClosure) {
         closure = parsePeerClosure(result.response);
-        break;
-      }
-
-      if (
+      } else if (
         mode !== "counting" &&
         hopIndex >= participants.length &&
         hopIndex + 1 < rounds * participants.length - 1
@@ -7562,6 +7559,7 @@ async function peer(flags, deps = {}) {
       } else {
         previous = result.response;
       }
+      if (isClosure) break;
     }
   } catch (error) {
     primaryError = error;
