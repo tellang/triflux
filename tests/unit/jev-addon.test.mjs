@@ -92,12 +92,39 @@ describe("jev-addon: opt-in 및 fail-open 검증", () => {
     });
     assert.equal(resLow, null);
 
-    for (const badConf of [undefined, null, "invalid", -0.1, 1.2, NaN]) {
+    for (const badConf of [
+      undefined,
+      null,
+      "",
+      "1",
+      "invalid",
+      true,
+      false,
+      [1],
+      [],
+      {},
+      -0.1,
+      1.2,
+      NaN,
+      Infinity,
+    ]) {
       const resBad = await judgeSameFailureCause("err A", "err B", {
         client: async () => ({ answer: true, confidence: badConf }),
       });
       assert.equal(resBad, null);
     }
+
+    const resBadHttp = await judgeWorkerHealth(
+      { stdoutTail: "worker output" },
+      {
+        env: { JEV_API_KEY: "dummy" },
+        fetchImpl: async () => ({
+          ok: true,
+          json: async () => ({ choice: "looping_error", confidence: [1] }),
+        }),
+      },
+    );
+    assert.equal(resBadHttp, null);
 
     const resErr = await judgeSameFailureCause("err A", "err B", {
       client: async () => {

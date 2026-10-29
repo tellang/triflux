@@ -111,14 +111,15 @@ function tailLines(text, maxLines = 35, maxChars = 1800) {
 function normalizeResponse(raw, kind) {
   if (!raw || typeof raw !== "object") return null;
   const rawConf = raw.confidence ?? raw.probability ?? raw.prob;
-  if (rawConf === undefined || rawConf === null || rawConf === "") {
+  if (
+    typeof rawConf !== "number" ||
+    !Number.isFinite(rawConf) ||
+    rawConf < 0 ||
+    rawConf > 1
+  ) {
     return null;
   }
-  const confidence = Number(rawConf);
-  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
-    return null;
-  }
-  const safeConfidence = confidence;
+  const safeConfidence = rawConf;
 
   if (kind === "noul") {
     const val = raw.answer ?? raw.value ?? raw.result ?? raw.output ?? raw.yes;
