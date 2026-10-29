@@ -195,23 +195,29 @@ function normalizeResponse(rawInput, kind) {
 
 function buildSystemOneQuestion(request) {
   if (request.kind === "choice") {
+    const criteria =
+      request.criteria && typeof request.criteria === "object"
+        ? request.criteria
+        : Object.fromEntries(
+            (request.options || []).map((opt) => [String(opt), String(opt)]),
+          );
     return {
       type: "choice",
-      question: request.query,
       instructions: request.query,
-      options: request.options || [],
+      criteria,
     };
   }
   if (request.kind === "score") {
     return {
       type: "score",
-      question: request.query,
       instructions: request.query,
+      ...(request.criteria ? { criteria: request.criteria } : {}),
     };
   }
   return {
     type: "noul",
     instructions: request.query,
+    ...(request.criteria ? { criteria: request.criteria } : {}),
   };
 }
 
@@ -230,11 +236,12 @@ async function callJevHttp(request, options = {}) {
 
   const payload = {
     model,
-    state: request.context || request.query || "",
+    state: request.context
+      ? `${request.context}\n\nQuestion: ${request.query}`
+      : String(request.query || ""),
     questions: {
       q: buildSystemOneQuestion(request),
     },
-    ...request,
   };
 
   const response = await fetchImpl(url, {
@@ -360,6 +367,14 @@ export async function judgeHandoffQuality(
     {
       kind: "choice",
       options: allowed,
+      criteria: {
+        accept:
+          "The assigned code implementation and verification were completed cleanly with no skipped checks.",
+        needs_read:
+          "The output is an analysis report, or tests/verification were skipped or left ambiguous so the lead must read the details.",
+        retry:
+          "The worker exited without completing the implementation or hit an unresolved error that requires a retry.",
+      },
       query:
         "Classify the required lead action for this worker output: 'accept' if the assigned task was completed cleanly, 'needs_read' if it is an analysis/report or ambiguous partial result that the lead must read, or 'retry' if the worker exited without completing the task or hit an unresolved error.",
       context: [
@@ -436,6 +451,11 @@ export async function judgeBusyAction(
     {
       kind: "choice",
       options: allowed,
+      criteria: {
+        steer:
+          "Urgent course correction, constraint change, or abort instruction that must interrupt the active turn immediately.",
+        wait: "Sequential follow-up task or next step that should wait in queue until the active turn finishes.",
+      },
       query:
         "The worker is currently busy executing a turn. Choose 'steer' if this message corrects course, changes constraints, or aborts current work immediately; choose 'wait' if this message is a sequential follow-up task to run after the current turn finishes.",
       context: [
@@ -474,6 +494,14 @@ export async function judgeWorkerHealth(
     {
       kind: "choice",
       options: allowed,
+      criteria: {
+        progressing:
+          "Normal work, compilation, testing, or file editing is actively progressing.",
+        waiting_input:
+          "Blocked waiting for an interactive user input, y/n confirmation, or terminal prompt.",
+        looping_error:
+          "Stuck repeating the same fatal error or retry loop without progress.",
+      },
       query:
         "Inspect the worker's recent logs. Choose 'progressing' if normal work is happening, 'waiting_input' if blocked on an interactive y/n or confirmation prompt, or 'looping_error' if repeating the same fatal error in a loop.",
       context: `elapsed_sec: ${elapsedSec}\n\n${combined}`,
