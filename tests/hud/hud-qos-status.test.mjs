@@ -76,7 +76,7 @@ describe("HUD provider visibility", () => {
   it("정책이 Codex 를 차단하면 x 행을 숨긴다", () => {
     const output = runHud({ TFX_DISABLE_CODEX: "0" });
     assert.match(output, /^x:/m);
-    assert.match(output, /ctx:75%/);
+    assert.match(output, /ctx:25%/);
     assert.doesNotMatch(output, /50K\/200K/);
     assert.doesNotMatch(runHud({ TFX_DISABLE_CODEX: "1" }), /^x:/m);
     const bandDir = join(cacheDir, "triflux", "claude-band");
@@ -305,7 +305,7 @@ describe("HUD provider visibility", () => {
     };
     const env = { CLAUDE_CONFIG_DIR: configDir, COLUMNS: "200" };
     const output = runHud(env, { input });
-    assert.match(output, /^c:.*claude-dev +ctx:75%$/m);
+    assert.match(output, /^c:.*claude-dev +ctx:25%$/m);
     assert.doesNotMatch(output, /\$12\.09|Other Name/);
     assert.match(
       runHud(env, {
@@ -314,7 +314,7 @@ describe("HUD provider visibility", () => {
           rate_limits: { spend_limit: { used_percentage: 83 } },
         },
       }),
-      /^c: \$:.*83%.*claude-dev +ctx:75%$/m,
+      /^c: \$:.*83%.*claude-dev +ctx:25%$/m,
     );
     rmSync(join(configDir, ".claude.json"));
     writeFileSync(join(configDir, ".claude.json"), "{}");
@@ -329,7 +329,7 @@ describe("HUD provider visibility", () => {
     try {
       assert.match(
         runHud({ ...env, CLAUDE_CONFIG_DIR: "" }, { input }),
-        /^c:.*home-dev +ctx:75%/m,
+        /^c:.*home-dev +ctx:25%/m,
       );
     } finally {
       rmSync(homeConfig);

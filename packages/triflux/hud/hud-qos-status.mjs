@@ -84,6 +84,7 @@ async function main() {
   const cacheOnly = process.argv.includes("--cache-only");
   const status = await sessionStatus(stdin);
   const currentMarker = agySession ? "a" : codexSession ? "x" : "c";
+  const jevMarker = codexSession ? "c" : "x";
   if (agySession || codexSession) {
     if (stdin.terminal_width > 0)
       process.env.COLUMNS = String(stdin.terminal_width);
@@ -146,6 +147,7 @@ async function main() {
       antigravityQuota,
       sessionStatus: status,
       currentMarker,
+      jevMarker,
     });
     const header = bandMode ? `${BAND_HEADER}\n` : "";
     process.stdout.write(`${header}\x1b[0m${microLine}\n`);
@@ -188,8 +190,14 @@ async function main() {
   }
 
   for (const row of rows) {
-    if (stripAnsi(row.prefix) === `${currentMarker}:`)
-      row.right = [row.right, status].filter(Boolean).join(" ");
+    const marker = stripAnsi(row.prefix);
+    const extra =
+      marker === `${currentMarker}:`
+        ? status.context
+        : marker === `${jevMarker}:`
+          ? status.jev
+          : "";
+    if (extra) row.right = [row.right, extra].filter(Boolean).join(" ");
   }
   const outputLines = renderAlignedRows(rows);
   if (outputLines[codexRowIndex] != null && codexLoggedOut) {

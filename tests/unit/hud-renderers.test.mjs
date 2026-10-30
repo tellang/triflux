@@ -104,10 +104,11 @@ describe("HUD 표시", () => {
     const line = stripAnsi(
       getMicroLine(context, usage, null, {
         currentMarker: "x",
-        sessionStatus: "ctx:73% j",
+        jevMarker: "c",
+        sessionStatus: { context: "ctx:27%", jev: "j" },
       }),
     );
-    assert.match(line, /x:.*ctx:73% j a:/);
+    assert.match(line, /c:.* j x:.*ctx:27% a:/);
     assert.equal(line.match(/ctx:/g).length, 1);
   });
 

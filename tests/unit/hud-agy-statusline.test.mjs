@@ -47,22 +47,22 @@ const contextWindow = {
   current_usage: { input_tokens: 370_000 },
 };
 
-it("agy statusLine 입력이면 남은 context 비율이 c 행이 아니라 a 행에 붙는다", () => {
+it("agy statusLine 입력이면 context 사용률이 c 행이 아니라 a 행에 붙는다", () => {
   const rows = renderRows({
     product: "antigravity",
     session_id: "agy-session",
     terminal_width: 200,
     context_window: contextWindow,
   });
-  assert.match(rows.a, /ctx:63%/);
-  assert.doesNotMatch(rows.c, /ctx:63%/);
+  assert.match(rows.a, /ctx:37%/);
+  assert.doesNotMatch(rows.c, /ctx:37%/);
 });
 
-it("Claude statusLine 입력이면 남은 context 비율이 c 행에 붙는다", () => {
+it("Claude statusLine 입력이면 context 사용률이 c 행에 붙는다", () => {
   const rows = renderRows({
     session_id: "claude-session",
     context_window: contextWindow,
   });
-  assert.match(rows.c, /ctx:63%/);
-  assert.doesNotMatch(rows.a, /ctx:63%/);
+  assert.match(rows.c, /ctx:37%/);
+  assert.doesNotMatch(rows.a, /ctx:37%/);
 });

@@ -36,7 +36,7 @@ function render(input, extraEnv = {}, args = []) {
   }
 }
 
-test("현재 CLI 행에만 남은 context 비율과 Jev를 통합한다", () => {
+test("현재 CLI 행에 사용률과 지정된 다른 행에 Jev를 표시한다", () => {
   for (const columns of [80, 120, 160]) {
     for (const [product, marker] of [
       [undefined, "c"],
@@ -63,15 +63,24 @@ test("현재 CLI 행에만 남은 context 비율과 Jev를 통합한다", () => 
         assert.equal(lines.length, 3, output);
         assert.match(
           lines.find((line) => line.startsWith(`${marker}:`)),
-          enabled ? /ctx:73% j$/ : /ctx:73%$/,
+          /ctx:27%$/,
         );
         assert.equal(
-          lines.filter((line) => line.includes("ctx:73%")).length,
+          lines.filter((line) => line.includes("ctx:27%")).length,
           1,
         );
         assert.equal(
           lines.filter((line) => /\bj\b/.test(line)).length,
           enabled ? 1 : 0,
+        );
+        const jevMarker = marker === "x" ? "c" : "x";
+        const jevRow = lines.find((line) => line.startsWith(`${jevMarker}:`));
+        if (enabled) assert.match(jevRow, /\bj$/);
+        else assert.doesNotMatch(output, /\bj\b/);
+        assert.doesNotMatch(jevRow, /ctx:/);
+        assert.deepEqual(
+          lines.map((line) => line.slice(0, 2)),
+          ["c:", "x:", "a:"],
         );
         assert.doesNotMatch(output, /\d+k\/|Jev|문맥|ON|OFF/);
         assert.ok(
@@ -90,27 +99,27 @@ test("현재 CLI 행에만 남은 context 비율과 Jev를 통합한다", () => 
   }
 });
 
-test("실제 토큰으로 남은 비율을 계산하고 비율 폴백과 0과 unknown을 구분한다", async () => {
+test("실제 토큰으로 사용률을 계산하고 비율 폴백과 0과 unknown을 구분한다", async () => {
   for (const [context_window, expected] of [
-    [{ used_percentage: 42 }, "ctx:58%"],
-    [{ context_window_size: 200000, used_percentage: 42 }, "ctx:58%"],
-    [{ remaining_percentage: 58 }, "ctx:58%"],
-    [{ remaining_percentage: 73, used_percentage: 99 }, "ctx:73%"],
+    [{ used_percentage: 42 }, "ctx:42%"],
+    [{ context_window_size: 200000, used_percentage: 42 }, "ctx:42%"],
+    [{ remaining_percentage: 58 }, "ctx:42%"],
+    [{ remaining_percentage: 73, used_percentage: 99 }, "ctx:99%"],
     [
       {
         context_window_size: 200000,
         current_usage: { total_tokens: 54000 },
         remaining_percentage: 1,
       },
-      "ctx:73%",
+      "ctx:27%",
     ],
     [
       { context_window_size: 200000, current_usage: { total_tokens: 0 } },
-      "ctx:100%",
+      "ctx:0%",
     ],
     [
       { context_window_size: 200000, current_usage: { total_tokens: 200000 } },
-      "ctx:0%",
+      "ctx:100%",
     ],
     [
       {
@@ -121,7 +130,7 @@ test("실제 토큰으로 남은 비율을 계산하고 비율 폴백과 0과 un
           cache_read_input_tokens: 21000,
         },
       },
-      "ctx:79%",
+      "ctx:21%",
     ],
     [{ current_usage: { total_tokens: 42000 } }, "ctx:--"],
     [{ context_window_size: 200000 }, "ctx:--"],
@@ -132,11 +141,11 @@ test("실제 토큰으로 남은 비율을 계산하고 비율 폴백과 0과 un
     [{ used_percentage: null }, "ctx:--"],
     [{}, "ctx:--"],
   ])
-    assert.equal(
+    assert.deepEqual(
       await sessionStatus({ context_window }, { TFX_JEV: "off" }),
-      expected,
+      { context: expected, jev: "" },
     );
-  assert.equal(
+  assert.deepEqual(
     await sessionStatus(
       {},
       new Proxy(
@@ -148,9 +157,9 @@ test("실제 토큰으로 남은 비율을 계산하고 비율 폴백과 0과 un
         },
       ),
     ),
-    "ctx:--",
+    { context: "ctx:--", jev: "" },
   );
-  assert.equal(
+  assert.deepEqual(
     await sessionStatus(
       {
         product: "antigravity",
@@ -163,7 +172,7 @@ test("실제 토큰으로 남은 비율을 계산하고 비율 폴백과 0과 un
       },
       { TFX_JEV: "off" },
     ),
-    "ctx:--",
+    { context: "ctx:--", jev: "" },
   );
 });
 
@@ -171,9 +180,8 @@ test("nano와 band는 기존 provider 축소 정책을 유지한다", () => {
   const input = { context_window: { used_percentage: 100 } };
   const nano = render(input, { COLUMNS: "35", TFX_JEV: "off" });
   assert.equal(nano.trim().split("\n").length, 1);
-  assert.match(nano, /c:.*ctx:0%.*x:.*a:/);
-  assert.match(
-    render(input, { TFX_JEV_CLI: "/missing-test-jev" }, ["--band"]),
-    /^tfx-band 1\nc:.*ctx:0% j/,
-  );
+  assert.match(nano, /c:.*ctx:100%.*x:.*a:/);
+  const band = render(input, { TFX_JEV_CLI: "/missing-test-jev" }, ["--band"]);
+  assert.match(band, /^tfx-band 1\nc:.*ctx:100%/);
+  assert.match(band, /^x:.*\bj$/m);
 });

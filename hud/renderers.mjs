@@ -144,10 +144,16 @@ export function getMicroLine(
     segments.push(`${marker}${dim(":")}${agyValue}`);
   }
   if (options.sessionStatus) {
-    const index = segments.findIndex((segment) =>
-      stripAnsi(segment).startsWith(`${options.currentMarker}:`),
-    );
-    if (index >= 0) segments[index] += ` ${options.sessionStatus}`;
+    for (let index = 0; index < segments.length; index += 1) {
+      const marker = stripAnsi(segments[index]).split(":")[0];
+      const extra =
+        marker === options.currentMarker
+          ? options.sessionStatus.context
+          : marker === options.jevMarker
+            ? options.sessionStatus.jev
+            : "";
+      if (extra) segments[index] += ` ${extra}`;
+    }
   }
   return truncateAnsi(segments.join(" "), cols);
 }
