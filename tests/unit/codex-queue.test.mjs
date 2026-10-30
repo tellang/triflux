@@ -7,6 +7,7 @@ import test from "node:test";
 import { promisify } from "node:util";
 import {
   codexThreadIdByName,
+  countCodexTuiInCwd,
   deleteCodexQueueItems,
   findCodexThreadByCwd,
   listCodexQueue,
@@ -20,6 +21,72 @@ const THREAD = "01a11894-ec17-7313-8bf2-d379b4fcff01";
 
 const line = (type, payload) =>
   JSON.stringify({ timestamp: "2026-10-08T00:00:00Z", type, payload });
+
+for (const [label, commands, expected] of [
+  [
+    "TUI 하나와 helper",
+    ["/opt/codex/bin/codex", "/opt/codex/bin/codex-code-mode-host"],
+    1,
+  ],
+  [
+    "TUI 둘과 helper",
+    ["/opt/codex/bin/codex", "codex resume thread", "codex-code-mode-host"],
+    2,
+  ],
+  ["helper만 실행", ["codex-code-mode-host"], 0],
+  [
+    "app-server와 helper",
+    ["codex app-server --listen unix://", "codex-code-mode-host"],
+    0,
+  ],
+  [
+    "실제 TUI 프롬프트에 helper 이름 포함",
+    [
+      'codex "codex-code-mode-host를 확인해줘"',
+      '/opt/codex/bin/codex "inspect /opt/codex/bin/codex-code-mode-host"',
+    ],
+    2,
+  ],
+]) {
+  test(`countCodexTuiInCwd는 ${label}에서 TUI ${expected}개를 센다`, async (t) => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), "codex-tui-count-"));
+    t.after(() => fs.rm(cwd, { recursive: true, force: true }));
+    const count = await countCodexTuiInCwd(cwd, {
+      execFn: async (file) => {
+        if (file === "lsof")
+          return {
+            stdout: commands.map((_, i) => `p${100 + i}\nn${cwd}\n`).join(""),
+          };
+        assert.equal(file, "ps");
+        return { stdout: `${commands.join("\n")}\n` };
+      },
+    });
+    assert.equal(count, expected);
+  });
+}
+
+test("countCodexTuiInCwd는 lsof와 ps 실패 시 null을 유지한다", async () => {
+  for (const failedCommand of ["lsof", "ps"]) {
+    assert.equal(
+      await countCodexTuiInCwd("/fixture", {
+        execFn: async (file) => {
+          if (file === failedCommand)
+            throw Object.assign(new Error("probe failed"), { code: 2 });
+          return { stdout: "p100\nn/fixture\n" };
+        },
+      }),
+      null,
+    );
+  }
+  assert.equal(
+    await countCodexTuiInCwd("/fixture", {
+      execFn: async () => {
+        throw Object.assign(new Error("no matches"), { code: 1, stdout: "" });
+      },
+    }),
+    0,
+  );
+});
 
 test("waitCodexRequest는 표식이 든 턴의 완료 응답만 돌려준다", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-queue-"));

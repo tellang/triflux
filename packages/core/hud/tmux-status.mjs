@@ -54,6 +54,7 @@ export async function configureCodexHud(runTmux, target, env = process.env) {
   ]
     .map(quote)
     .join(" ")
+    .replace(/%/g, "%%")
     .replace(/#/g, "##");
   for (const [key, value] of [
     ["status", "3"],

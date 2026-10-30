@@ -170,7 +170,12 @@ export async function countCodexTuiInCwd(cwd, { execFn = execFileAsync } = {}) {
     );
     return String(stdout)
       .split("\n")
-      .filter((line) => line.trim() && !/\bapp-server\b/.test(line)).length;
+      .filter(
+        (line) =>
+          line.trim() &&
+          !/\bapp-server\b/.test(line) &&
+          !/^\s*(?:\S*\/)?codex-code-mode-host(?:\s|$)/.test(line),
+      ).length;
   } catch {
     return null;
   }
