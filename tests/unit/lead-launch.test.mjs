@@ -99,6 +99,36 @@ describe("tfx lead", () => {
     );
   });
 
+  for (const cli of ["codex", "agy"]) {
+    it(`${cli} 실행 진입에 공통 스킬과 자산 선택 안내를 전달한다`, async () => {
+      const { calls, run } = fakeRun({
+        start: { ready: true },
+        ask: { ok: true },
+      });
+      const result = await launchLead(
+        { cli, role: "자산 연결", cwd: "/p/app", launcher: cli },
+        { run },
+      );
+      assert.equal(result.ok, true);
+      assert.deepEqual(
+        calls.map((args) => args[0]),
+        ["start", "ask"],
+      );
+      const ask = calls[1];
+      assert.equal(ask[ask.indexOf("--cli") + 1], cli);
+      const prompt = ask[ask.indexOf("--prompt") + 1];
+      const skillPath = prompt.slice(0, prompt.indexOf(" 를 읽고"));
+      assert.ok(
+        readFileSync(skillPath, "utf8").startsWith("---\nname: tfx-lead\n"),
+      );
+      for (const asset of ["tfx-harness", "tfx-auto", "tfx-live"])
+        assert.ok(prompt.includes(asset), `${asset} 선택 안내 누락`);
+      assert.ok(prompt.length < 1000, "진입에 긴 스킬 전문을 넣지 않는다");
+      assert.ok(ask.includes("--no-wait"));
+      assert.ok(!ask.includes("--via-tmux"));
+    });
+  }
+
   it("setup 은 설치된 CLI 중 아직 안 정한 것만 묻고 저장한다", async () => {
     const path = config(JSON.stringify({ launcher: "c-wrap" }));
     const asked = [];
