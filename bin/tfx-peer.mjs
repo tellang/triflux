@@ -8,9 +8,18 @@ import {
   deliverClaude,
   deliverCodex,
   parsePeerArgs,
+  parsePeerSpec,
   resolveClaudeReceiver,
   resolveClaudeRegistryTarget,
 } from "../hub/team/native-peer.mjs";
+import {
+  formatRemotePeerMessage,
+  readPeerInput,
+  resolveRemoteHost,
+  sendRemotePeer,
+  validatePeerEnvelope,
+  validatePeerResponse,
+} from "../hub/team/ssh-peer.mjs";
 import {
   agyConversation,
   discoverPeerTargets,
@@ -20,8 +29,57 @@ import {
   resolvePeerSender,
 } from "./tfx-live.mjs";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function receiveRemote(args, deps) {
+  if (args.length !== 1) throw new Error("_receive accepts JSON stdin only");
+  const envelope = await readPeerInput(deps.input || process.stdin);
+  let started = false;
+  const response = (stage, result) => ({
+    version: 1,
+    correlationId: envelope.correlationId,
+    stage,
+    result,
+  });
+  try {
+    if (!["darwin", "linux"].includes(deps.platform || process.platform))
+      throw new Error(
+        "Remote peer supports only Darwin and POSIX Linux receivers",
+      );
+    (deps.resolveRemoteHost || resolveRemoteHost)(envelope.originHost, deps);
+    const deliveryDeps = {
+      ...deps,
+      onWriteStart: () => {
+        started = true;
+      },
+    };
+    const result = await deliverLocal(
+      envelope.to,
+      formatRemotePeerMessage(envelope),
+      envelope.sender,
+      deliveryDeps,
+      true,
+    );
+    const wire = response("delivery", {
+      ...result,
+      retrySafe: false,
+      modelReceipt: false,
+    });
+    validatePeerResponse(wire, envelope.correlationId);
+    return wire;
+  } catch (error) {
+    return response(started ? "delivery" : "preflight", {
+      status: started ? "unknown" : "rejected",
+      retrySafe: false,
+      modelReceipt: false,
+      error: error.message.slice(0, 4096),
+    });
+  }
+}
+
 export async function main(args = process.argv.slice(2), deps = {}) {
   const platform = deps.platform || process.platform;
+  if (args[0] === "_receive") return receiveRemote(args, deps);
   if (args[0] === "self") {
     const { sessionId, message } = parsePeerArgs(args);
     const receiver = (deps.resolveClaudeReceiver || resolveClaudeReceiver)({
@@ -42,23 +100,101 @@ export async function main(args = process.argv.slice(2), deps = {}) {
       platform,
     });
   }
-  const { to, message } = parsePeerArgs(args);
-  const [cli, name] = to.split(":");
-  if (platform === "win32" && cli === "codex")
-    throw new Error("Windows 에서는 Codex 대상을 아직 지원하지 않는다");
-  if (platform === "win32" && cli === "agy")
-    throw new Error("Windows 에서는 agy 대상을 아직 지원하지 않는다");
+  const { to, message, from, host, replyHost } = parsePeerArgs(args);
+  const [cli] = to.split(":");
+  if (platform === "win32" && (cli === "codex" || cli === "agy"))
+    throw new Error(
+      `Windows 에서는 ${cli === "codex" ? "Codex" : "agy"} 대상을 아직 지원하지 않는다`,
+    );
   const env = deps.env || process.env;
-  // Windows 에는 tmux/ps 기반 탐색이 없다.
+  if (host && !["darwin", "linux"].includes(platform))
+    throw new Error("Remote peer supports only Darwin and POSIX Linux senders");
   const candidates =
     platform === "win32"
       ? []
       : await (deps.discover || discoverPeerTargets)({ deps });
   const sender = await resolvePeerSender({
+    from,
     env,
     allCandidates: candidates,
     deps,
   });
+  if (host) {
+    if (
+      sender.cli === "unknown" ||
+      (!from && !env.TFX_LIVE_FROM && sender.name === sender.cli)
+    )
+      throw new Error("Unknown sender; use --from CLI:NAME");
+    // UUID와 표시 이름은 분리한다. 이 값은 회신 경로일 뿐 수신 권한이 아니다.
+    const explicit = from || env.TFX_LIVE_FROM;
+    const matched = explicit
+      ? UUID.test(sender.name || "")
+        ? candidates.filter(
+            (c) =>
+              c.cli === sender.cli &&
+              [c.threadId, c.conversationId, c.sessionId].some(
+                (id) =>
+                  typeof id === "string" &&
+                  id.toLowerCase() === sender.name.toLowerCase(),
+              ),
+          )
+        : matchPeerCandidates(
+            candidates.filter((c) => c.cli === sender.cli),
+            sender.name,
+          )
+      : [];
+    const own = explicit
+      ? matched.length === 1
+        ? matched[0]
+        : null
+      : candidates.find(
+          (c) =>
+            c.cli === sender.cli &&
+            ((sender.cli === "codex" && c.threadId === env.CODEX_THREAD_ID) ||
+              (sender.cli === "agy" &&
+                c.conversationId === env.ANTIGRAVITY_CONVERSATION_ID) ||
+              (sender.cli !== "codex" &&
+                c.paneId &&
+                c.paneId === env.TMUX_PANE)),
+        );
+    const id =
+      own?.threadId ||
+      own?.conversationId ||
+      own?.sessionId ||
+      sender.sessionId;
+    const envId = !explicit
+      ? sender.cli === "codex"
+        ? env.CODEX_THREAD_ID
+        : sender.cli === "agy"
+          ? env.ANTIGRAVITY_CONVERSATION_ID
+          : null
+      : null;
+    const exactId = UUID.test(id || "")
+      ? id
+      : UUID.test(envId || "")
+        ? envId
+        : UUID.test(sender.name || "")
+          ? sender.name
+          : null;
+    const envelope = validatePeerEnvelope({
+      version: 1,
+      correlationId: randomUUID(),
+      to,
+      message,
+      originHost: replyHost,
+      replyHost: host,
+      sender: {
+        cli: sender.cli,
+        name:
+          (UUID.test(sender.name || "") ? own?.name : null) ||
+          sender.name ||
+          sender.sessionId ||
+          "unknown",
+        ...(exactId ? { id: exactId } : {}),
+      },
+    });
+    return sendRemotePeer(envelope, deps);
+  }
   if (cli === "claude" && (env.CLAUDECODE === "1" || sender.cli === "claude"))
     throw new Error("Claude-to-Claude uses native SendMessage, not tfx-peer");
   const formattedMessage = [
@@ -66,6 +202,23 @@ export async function main(args = process.argv.slice(2), deps = {}) {
     message,
     formatPeerReply(sender, cli, { platform }),
   ].join("\n");
+  return deliverLocal(to, formattedMessage, sender, { ...deps, candidates });
+}
+
+async function deliverLocal(
+  to,
+  formattedMessage,
+  sender,
+  deps,
+  remote = false,
+) {
+  const platform = deps.platform || process.platform;
+  const env = deps.env || process.env;
+  const [cli, name] = parsePeerSpec(to).split(":");
+  if (platform === "win32" && (cli === "codex" || cli === "agy"))
+    throw new Error(
+      `Windows 에서는 ${cli === "codex" ? "Codex" : "agy"} 대상을 아직 지원하지 않는다`,
+    );
   if (cli === "claude") {
     const target = (
       deps.resolveClaudeRegistryTarget || resolveClaudeRegistryTarget
@@ -74,13 +227,24 @@ export async function main(args = process.argv.slice(2), deps = {}) {
       sessionId: target.sessionId,
       receiver: target.receiver,
       message: formattedMessage,
+      ...(remote ? { onWriteStart: deps.onWriteStart } : {}),
       platform,
     });
   }
-  const matched = matchPeerCandidates(
-    candidates.filter((x) => x.cli === cli),
-    name,
-  );
+  const candidates =
+    deps.candidates || (await (deps.discover || discoverPeerTargets)({ deps }));
+  const matched =
+    remote && UUID.test(name)
+      ? candidates.filter(
+          (x) =>
+            x.cli === cli &&
+            (cli === "codex" ? x.threadId : x.conversationId)?.toLowerCase() ===
+              name.toLowerCase(),
+        )
+      : matchPeerCandidates(
+          candidates.filter((x) => x.cli === cli),
+          name,
+        );
   if (matched.length !== 1)
     throw new Error(
       matched.length ? "Ambiguous target" : "Live local target not found",
@@ -117,6 +281,7 @@ export async function main(args = process.argv.slice(2), deps = {}) {
       appDataDir,
       requireExisting: true,
       message: formattedMessage,
+      ...(remote ? { onWriteStart: deps.onWriteStart } : {}),
       sender: `${sender.cli}:${String(sender.name || sender.sessionId || "unknown").replace(/[\r\n\u2028\u2029]+/g, " ")}`,
       home: deps.home,
       env,
@@ -139,6 +304,7 @@ export async function main(args = process.argv.slice(2), deps = {}) {
   return (deps.deliverCodex || deliverCodex)({
     threadId: target.threadId,
     message: formattedMessage,
+    ...(remote ? { onWriteStart: deps.onWriteStart } : {}),
     env,
   });
 }
@@ -149,8 +315,9 @@ if (
   main().then(
     (result) => {
       process.stdout.write(`${JSON.stringify(result)}\n`);
-      if (result.status === "partial" || result.status === "unknown")
-        process.exitCode = 2;
+      const status = result.result?.status || result.status;
+      if (status === "partial" || status === "unknown") process.exitCode = 2;
+      if (status === "rejected") process.exitCode = 1;
     },
     (error) => {
       process.stderr.write(`${error.message}\n`);
