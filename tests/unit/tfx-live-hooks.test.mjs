@@ -19,6 +19,8 @@ function fakeClient() {
       request: async (method, params) => {
         calls.push([method, params]);
         if (method === "thread/list") return { data: [{ id }] };
+        if (method === "thread/loaded/list")
+          return { data: [], nextCursor: null };
         return { thread: { id } };
       },
     },
@@ -61,7 +63,7 @@ test("공유 daemon 신규 thread는 훅을 끈 뒤 TUI 연결 대상으로 반�
   assert.equal(calls.at(-1)[0], "close");
 });
 
-test("remote resume은 hooks 설정만 전달하고 기존 thread 권한을 보존한다", async () => {
+test("unloaded remote resume은 hooks 설정만 전달하고 기존 thread 권한을 보존한다", async () => {
   for (const opts of [
     { resume: id },
     { resumeLast: true, cwd: "/test/project" },
@@ -86,6 +88,67 @@ test("remote resume은 hooks 설정만 전달하고 기존 thread 권한을 보�
       false,
     );
     result.close();
+  }
+});
+
+test("loaded thread는 explicit resume과 resume-last 모두 설정 요청 전에 중단한다", async () => {
+  for (const opts of [{ resume: id }, { resumeLast: true }]) {
+    const { calls, client } = fakeClient();
+    const request = client.request;
+    client.request = async (method, params) => {
+      if (method !== "thread/loaded/list") return request(method, params);
+      calls.push([method, params]);
+      return params.cursor
+        ? { data: [id], nextCursor: null }
+        : { data: [], nextCursor: "page-2" };
+    };
+    await assert.rejects(
+      live.prepareCodexThread("/test/socket", opts, {
+        clientFactory: () => client,
+      }),
+      /loaded Codex thread.*hooks override.*unsupported/i,
+    );
+    assert.equal(
+      calls.some(([method]) => method === "thread/resume"),
+      false,
+    );
+    assert.equal(
+      calls.some(([method]) => method === "thread/start"),
+      false,
+    );
+    assert.equal(calls.at(-1)[0], "close");
+  }
+});
+
+test("재개 상태를 확인할 수 없으면 unsupported로 중단하고 연결을 닫는다", async () => {
+  for (const reply of [
+    {},
+    { data: [null] },
+    { data: [], nextCursor: 12 },
+    { data: [], nextCursor: "repeat" },
+    new Error("Method not found"),
+  ]) {
+    const { calls, client } = fakeClient();
+    const request = client.request;
+    client.request = async (method, params) => {
+      if (method !== "thread/loaded/list") return request(method, params);
+      calls.push([method, params]);
+      if (reply instanceof Error) throw reply;
+      return reply;
+    };
+    await assert.rejects(
+      live.prepareCodexThread(
+        "/test/socket",
+        { resume: id },
+        { clientFactory: () => client },
+      ),
+      /cannot verify.*unloaded.*unsupported/i,
+    );
+    assert.equal(
+      calls.some(([method]) => method === "thread/resume"),
+      false,
+    );
+    assert.equal(calls.at(-1)[0], "close");
   }
 });
 

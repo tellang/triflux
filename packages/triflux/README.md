@@ -148,7 +148,8 @@ Context uses the current thread's rollout window and token usage. Percentage-onl
 `Jev ?` means configuration could not be determined. ON indicates enabled configuration.
 The Codex HUD reads local caches and rollout every five seconds without starting external queries; quota values reflect the existing cache refresh time.
 It works without hooks and leaves existing sessions, global tmux options, and Codex's built-in status_line unchanged.
-Codex start and resume use per-run `features.hooks=false`. Shared daemon connections also configure the target thread; remote resume preserves that thread's permissions.
+Fresh Codex threads on the shared daemon use thread-scoped `features.hooks=false` to disable ordinary user and plugin hooks. Builtin hooks and legacy `notify` are outside this guarantee. Startup hook review selects `Continue without trusting` without changing trust records.
+Explicit resume and resume-last stop if the target is already loaded or its loaded state cannot be verified, preserving the existing session's settings and permissions. The preflight is a snapshot; a concurrent attach between that check and resume cannot be ruled out, so the fresh-thread hook guarantee does not extend to resumed threads.
 Codex trust screens are never accepted automatically.
 
 ## Runtime features

@@ -3287,6 +3287,36 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
       threadId = page.data?.[0]?.id;
       if (!threadId) throw new Error("No Codex thread to resume in this cwd");
     }
+    if (threadId) {
+      const unsupported =
+        "Cannot verify Codex resume target is unloaded; per-thread hooks override is unsupported";
+      const seen = new Set();
+      let cursor = null;
+      do {
+        if (cursor !== null) {
+          if (typeof cursor !== "string" || !cursor || seen.has(cursor))
+            throw new Error(unsupported);
+          seen.add(cursor);
+        }
+        let page;
+        try {
+          page = await client.request(
+            "thread/loaded/list",
+            cursor === null ? {} : { cursor },
+            5000,
+          );
+        } catch {
+          throw new Error(unsupported);
+        }
+        if (!Array.isArray(page?.data) || !page.data.every(isCodexThreadId))
+          throw new Error(unsupported);
+        if (page.data.includes(threadId))
+          throw new Error(
+            "Cannot resume loaded Codex thread: per-thread hooks override is unsupported; existing session settings were preserved",
+          );
+        cursor = page.nextCursor ?? null;
+      } while (cursor !== null);
+    }
     const config = { "features.hooks": false };
     if (opts.effort !== undefined) config.model_reasoning_effort = opts.effort;
     const result = await client.request(
