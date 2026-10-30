@@ -7,7 +7,15 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { modelFamilyPaths } from "../../scripts/lib/model-family-resolver.mjs";
+import {
+  modelFamilyPaths,
+  resolveModelFamilies,
+} from "../../scripts/lib/model-family-resolver.mjs";
+import {
+  isJevEnabled,
+  judgeTaskRouting,
+  recordJevStat,
+} from "@triflux/core/hub/lib/jev-addon.mjs";
 
 const execFileAsync = promisify(execFile);
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -138,34 +146,150 @@ export async function launchLead(
     session,
     model,
     effort,
-    launcher,
+    launcher = cli,
+    task,
   },
-  { run = execFileAsync } = {},
+  {
+    run = execFileAsync,
+    jevOptions = {},
+    modelOptions = {},
+    judgeRouting = judgeTaskRouting,
+  } = {},
 ) {
   if (!LEAD_CLIS.includes(cli))
     throw new Error(`--cli 는 ${LEAD_CLIS.join(", ")} 중 하나여야 한다`);
   if (!role?.trim()) throw new Error("역할이 필요하다: tfx lead <역할>");
+  const routing = {
+    enabled: isJevEnabled(jevOptions),
+    attempted: false,
+    complexity: null,
+    recommendedProfile: null,
+    recommendedModel: null,
+    recommendedEffort: null,
+    effectiveModel: model ?? null,
+    effectiveEffort: effort ?? null,
+    confidence: null,
+    source: "default",
+    reason: "jev_disabled",
+    appliedTo: null,
+  };
+  if (routing.enabled) {
+    routing.attempted = true;
+    routing.reason = "no_accepted_recommendation";
+    try {
+      const recommendation = await judgeRouting(
+        {
+          prompt: [
+            `Role: ${role.trim().slice(0, 200)}. This lead continuously coordinates multiple workers and evaluates their results.`,
+            task?.trim() ? `Task: ${task.trim().slice(0, 1000)}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          agentType: "lead",
+          cliType: cli,
+        },
+        jevOptions,
+      );
+      routing.complexity = recommendation?.complexity ?? null;
+      routing.confidence = recommendation?.confidence ?? null;
+      if (recommendation?.complexity) {
+        routing.recommendedProfile =
+          cli === "codex"
+            ? recommendation.codexProfile
+            : cli === "agy"
+              ? recommendation.agyProfile
+              : recommendation.claudeModel;
+        const selected =
+          cli === "claude"
+            ? {
+                model: recommendation.claudeModel,
+                effort: recommendation.claudeEffort,
+              }
+            : resolveModelFamilies(cli, {
+                ...modelOptions,
+                allowCommand: false,
+                persist: false,
+              }).profiles[routing.recommendedProfile];
+        if (selected?.model && selected?.effort) {
+          routing.recommendedModel = selected.model;
+          routing.recommendedEffort = selected.effort;
+          model = selected.model;
+          effort = selected.effort;
+          routing.source = "jev";
+          routing.reason = "jev_applied";
+          routing.appliedTo = "start_args";
+        } else routing.reason = "unsupported_profile";
+      }
+    } catch {
+      routing.reason = "jev_or_resolver_failed";
+    }
+  }
+  // 한쪽만 명시해도 쌍을 보존한다. 임의의 래퍼와 셸 명령은 안전하게 해석할 수 없다.
+  if (
+    routing.effectiveModel !== null ||
+    routing.effectiveEffort !== null ||
+    launcher !== cli
+  ) {
+    model = routing.effectiveModel ?? undefined;
+    effort = routing.effectiveEffort ?? undefined;
+    routing.source = "explicit";
+    routing.reason =
+      routing.effectiveModel !== null || routing.effectiveEffort !== null
+        ? "explicit_model_effort_preserved"
+        : "launcher_preserved";
+    routing.appliedTo = null;
+  }
+  routing.effectiveModel = model ?? null;
+  routing.effectiveEffort = effort ?? null;
   const target = session || leadSessionName(cwd);
   const name = leadDisplayName(role.trim());
-  const summary = { cli, session: target, name, launcher };
-  const start = await runLive(
-    [
-      "start",
-      "--cli",
-      cli,
-      "--session",
-      target,
-      "--name",
-      name,
-      "--launcher",
-      launcher,
-      "--cwd",
-      resolve(cwd),
-      ...(model ? ["--model", model] : []),
-      ...(effort ? ["--effort", effort] : []),
-    ],
-    run,
-  );
+  const summary = { cli, session: target, name, launcher, routing };
+  let start;
+  let startReturned = false;
+  try {
+    start = await runLive(
+      [
+        "start",
+        "--cli",
+        cli,
+        "--session",
+        target,
+        "--name",
+        name,
+        "--launcher",
+        launcher,
+        "--cwd",
+        resolve(cwd),
+        ...(model ? ["--model", model] : []),
+        ...(effort ? ["--effort", effort] : []),
+      ],
+      run,
+    );
+    startReturned = true;
+  } finally {
+    if (routing.enabled) {
+      recordJevStat(
+        {
+          hook: "lead_model_selection",
+          kind: "model_selection",
+          source: routing.source,
+          reason: startReturned ? routing.reason : "start_failed",
+          selectionReason: routing.reason,
+          recommendedProfile: routing.recommendedProfile,
+          recommendedModel: routing.recommendedModel,
+          recommendedEffort: routing.recommendedEffort,
+          effectiveModel: routing.effectiveModel,
+          effectiveEffort: routing.effectiveEffort,
+          confidence: routing.confidence,
+          appliedTo: startReturned ? routing.appliedTo : null,
+          intervened: startReturned && routing.appliedTo === "start_args",
+          startReady: Boolean(start?.ready),
+          startStatus: startReturned ? "returned" : "threw",
+        },
+        jevOptions,
+      );
+    }
+  }
   if (!start.ready) return { ok: false, ...summary, start };
   // Claude 슬래시 명령은 tmux 입력으로만 실행되고, Claude 안에서 호출해도 SendMessage 로 바뀌지 않게 한다.
   const ask = await runLive(

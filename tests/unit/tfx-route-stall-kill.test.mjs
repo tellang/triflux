@@ -529,8 +529,10 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     });
   }
 
-  for (const disabled of [false, true]) {
-    it(`공식 CLI-only pre-route는 실제 judge-route를 ${disabled ? "TFX_JEV=0에서 호출하지 않는다" : "호출하고 판정을 적용한다"}`, (t) => {
+  for (const mode of ["auto", "disabled", "explicit"]) {
+    const disabled = mode === "disabled";
+    const explicit = mode === "explicit";
+    it(`공식 CLI-only pre-route: ${mode}`, (t) => {
       const dir = mkdtempSync(path.join(tmpdir(), "tfx-pre-route-jev-"));
       cleanupDirs.push(dir);
       const { bridgeScript, callsLog } = writeJevBridge(dir);
@@ -545,7 +547,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
           extractFunction("apply_jev_pre_route"),
           "AGENT_TYPE=executor",
           "PROMPT='test route boundary'",
-          "TFX_CODEX_PROFILE=auto",
+          `TFX_CODEX_PROFILE=${explicit ? "sol_high" : "auto"}`,
           "TFX_GEMINI_PROFILE=",
           "TFX_EXECUTION_MODE=auto",
           "MCP_PROFILE=auto",
@@ -590,8 +592,21 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
         result.stdout.trim(),
         disabled
           ? "PROFILE=auto MODE=auto MCP=auto"
-          : "PROFILE=astra MODE=headless MCP=none",
+          : `PROFILE=${explicit ? "sol_high" : "astra"} MODE=headless MCP=none`,
       );
+      if (!disabled) {
+        assert.match(result.stderr, /recommended_codex=astra/);
+        assert.match(
+          result.stderr,
+          new RegExp(`effective_codex=${explicit ? "sol_high" : "astra"}`),
+        );
+        assert.match(
+          result.stderr,
+          new RegExp(
+            `codex_reason=${explicit ? "explicit_override_preserved" : "jev_applied"}`,
+          ),
+        );
+      }
     });
   }
 
