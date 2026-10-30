@@ -142,6 +142,15 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 
 `tfx <command> --help` prints the exact arguments.
 
+Local tmux sessions created by `tfx-live start --cli codex` show the complete Triflux HUD in four status rows.
+The HUD displays cached provider limits, Jev configuration, and remaining context, for example `Jev ON | 문맥 116k 남음`.
+Context uses the current thread's rollout window and token usage. Percentage-only shared HUD input shows the remaining percentage; missing context shows `문맥 미확인`.
+`Jev ?` means configuration could not be determined. ON indicates enabled configuration.
+The Codex HUD reads local caches and rollout every five seconds without starting external queries; quota values reflect the existing cache refresh time.
+It works without hooks and leaves existing sessions, global tmux options, and Codex's built-in status_line unchanged.
+Codex start and resume use per-run `features.hooks=false`. Shared daemon connections also configure the target thread; remote resume preserves that thread's permissions.
+Codex trust screens are never accepted automatically.
+
 ## Runtime features
 
 **Live sessions.** `tfx-live` drives Claude Code and Codex TUI sessions. Claude daemon targets
