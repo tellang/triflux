@@ -209,6 +209,69 @@ for (const transport of ["http", "cli"]) {
   });
 }
 
+it("세션 credential 헤더는 HTTP와 CLI 호출 없이 null로 폴백한다", async () => {
+  const httpCalls = [];
+  const cliCalls = [];
+  const answer = { value: true, confidence: 1 };
+  const mocks = {
+    fetchImpl: async (...args) => {
+      httpCalls.push(args);
+      return { ok: true, json: async () => answer };
+    },
+    execFileImpl: async (...args) => {
+      cliCalls.push(args);
+      return { stdout: JSON.stringify(answer) };
+    },
+  };
+  const headers = [
+    "HTTP Cookie: SID=FAKE_COOKIE_VALUE",
+    "cOoKiE : other_name=another_value",
+    'HTTP "Cookie" : SID=FAKE_COOKIE_VALUE',
+    "Cookie:",
+    "Set-Cookie: visitor=FAKE_VISITOR_VALUE; HttpOnly",
+    "HTTP sEt-CoOkIe : preference=different_value; Secure",
+    "'Set-Cookie' : visitor=FAKE_VISITOR_VALUE",
+    "Set-Cookie:",
+    "Authorization: opaque-value",
+    'HTTP "aUtHoRiZaTiOn" : different-value',
+    "Authorization:",
+    "Proxy-Authorization: opaque-proxy-value",
+    "HTTP 'pRoXy-AuThOrIzAtIoN' : other-proxy-value",
+    "Proxy-Authorization:",
+  ];
+  for (const env of [
+    { JEV_API_KEY: "mock-key", TFX_JEV_STATS: "0" },
+    { TFX_JEV: "1", TFX_JEV_CLI: "/mock/jev", TFX_JEV_STATS: "0" },
+  ]) {
+    const options = { env, ...mocks };
+    for (const header of headers) {
+      for (const [previous, current] of [
+        [header, "HTTP status 403"],
+        ["HTTP status 403", header],
+      ]) {
+        assert.equal(
+          await judgeSameFailureCause(previous, current, options),
+          null,
+          header,
+        );
+      }
+      for (const input of [
+        { previousResponse: header, currentResponse: "YES" },
+        { previousResponse: "YES", currentResponse: header },
+        { seed: header, previousResponse: "YES", currentResponse: "YES" },
+      ]) {
+        assert.equal(
+          await judgePeerConvergence({ ...input, hopIndex: 2 }, options),
+          null,
+          header,
+        );
+      }
+      assert.equal(httpCalls.length, 0, header);
+      assert.equal(cliCalls.length, 0, header);
+    }
+  }
+});
+
 it("불안전한 의미 입력은 custom client도 호출하지 않는다", async () => {
   let calls = 0;
   const options = {

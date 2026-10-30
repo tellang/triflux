@@ -173,6 +173,7 @@ function semanticExcerpt(value, maxChars = 600) {
     !text.trim() ||
     text.length > maxChars ||
     /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(text) ||
+    /\b(?:set-cookie|cookie|(?:proxy-)?authorization)\b[\s"']*[:=]/i.test(text) ||
     /^\s*(?:[[{]|\d{4}-\d{2}-\d{2}[T ])/.test(text)
   ) {
     return null;
