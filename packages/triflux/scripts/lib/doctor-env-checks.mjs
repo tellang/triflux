@@ -266,7 +266,14 @@ export function applyAgyPeerWakePatch({
       if (existingBackupSha !== state.sha256) {
         backupKey = `${resolvedVersion}-orig-${state.sha256.slice(0, 8)}`;
         backupPath = `${state.path}.bak-${backupKey}`;
-        if (!fs.existsSync(backupPath)) {
+        if (fs.existsSync(backupPath)) {
+          const suffixBackupSha = createHash("sha256")
+            .update(fs.readFileSync(backupPath))
+            .digest("hex");
+          if (suffixBackupSha !== state.sha256) {
+            throw new Error(`agy backup conflict: ${backupPath}`);
+          }
+        } else {
           fs.copyFileSync(state.path, backupPath);
         }
       }

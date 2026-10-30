@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -96,6 +104,106 @@ describe("doctor environment checks", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("rejects conflicting backups before changing the binary or metadata (#1022)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tfx-agy-backup-conflict-"));
+    try {
+      const agyPath = join(dir, "agy");
+      const original = makeSyntheticAgyBinary();
+      const sha256 = createHash("sha256").update(original).digest("hex");
+      const backupPath = `${agyPath}.bak-1.4.10-orig`;
+      const suffixPath = `${backupPath}-${sha256.slice(0, 8)}`;
+      const patchJsonPath = `${agyPath}.patch.json`;
+      const originalFiles = new Map([
+        [agyPath, original],
+        [backupPath, Buffer.from("older-build")],
+        [suffixPath, Buffer.from("conflicting-build")],
+        [patchJsonPath, Buffer.from('{"patches":["existing-patch"]}\n')],
+      ]);
+      for (const [path, contents] of originalFiles) {
+        writeFileSync(path, contents);
+      }
+
+      const codesignCalls = [];
+      let patchError;
+      try {
+        applyAgyPeerWakePatch({
+          agyPath,
+          version: "1.4.10",
+          platform: "darwin",
+          arch: "arm64",
+          execFileSyncFn: (cmd) => {
+            codesignCalls.push(cmd);
+            return "";
+          },
+        });
+      } catch (error) {
+        patchError = error;
+      }
+
+      assert.ok(patchError instanceof Error, "backup conflict must throw");
+      assert.match(patchError.message, /backup.*(?:conflict|mismatch)/i);
+      for (const [path, contents] of originalFiles) {
+        assert.deepEqual(
+          readFileSync(path),
+          contents,
+          `${path} must be preserved`,
+        );
+      }
+      assert.deepEqual(codesignCalls, []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  for (const backupKind of ["default", "suffix"]) {
+    it(`reuses a matching ${backupKind} backup without overwriting it (#1022)`, () => {
+      const dir = mkdtempSync(join(tmpdir(), "tfx-agy-backup-reuse-"));
+      try {
+        const agyPath = join(dir, "agy");
+        const original = makeSyntheticAgyBinary();
+        const sha256 = createHash("sha256").update(original).digest("hex");
+        const defaultPath = `${agyPath}.bak-1.4.10-orig`;
+        const backupKey =
+          backupKind === "default"
+            ? "1.4.10-orig"
+            : `1.4.10-orig-${sha256.slice(0, 8)}`;
+        const backupPath = `${agyPath}.bak-${backupKey}`;
+        writeFileSync(agyPath, original);
+        if (backupKind === "suffix") {
+          writeFileSync(defaultPath, "older-build");
+        }
+        writeFileSync(backupPath, original);
+        const before = statSync(backupPath, { bigint: true });
+
+        const applied = applyAgyPeerWakePatch({
+          agyPath,
+          version: "1.4.10",
+          platform: "darwin",
+          arch: "arm64",
+          execFileSyncFn: () => "",
+        });
+
+        assert.equal(applied.status, "patched");
+        assert.equal(applied.changed, true);
+        assert.notDeepEqual(readFileSync(agyPath), original);
+        assert.deepEqual(readFileSync(backupPath), original);
+        const after = statSync(backupPath, { bigint: true });
+        assert.equal(after.ino, before.ino);
+        assert.equal(after.mtimeNs, before.mtimeNs);
+        if (backupKind === "suffix") {
+          assert.equal(readFileSync(defaultPath, "utf8"), "older-build");
+        }
+        const meta = JSON.parse(readFileSync(`${agyPath}.patch.json`, "utf8"));
+        assert.deepEqual(meta.backups[backupKey], {
+          path: realpathSync(backupPath),
+          sha256,
+        });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
 
   it("refreshes outdated patch.json when binary is already patched (#1022)", () => {
     const dir = mkdtempSync(join(tmpdir(), "tfx-agy-meta-"));
