@@ -142,10 +142,11 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 
 `tfx <command> --help` prints the exact arguments.
 
-Local tmux sessions created by `tfx-live start --cli codex` show the complete Triflux HUD in four status rows.
-The HUD displays cached provider limits, Jev configuration, and remaining context, for example `Jev ON | 문맥 116k 남음`.
-Context uses the current thread's rollout window and token usage. Percentage-only shared HUD input shows the remaining percentage; missing context shows `문맥 미확인`.
-`Jev ?` means configuration could not be determined. ON indicates enabled configuration.
+Local tmux sessions created by `tfx-live start --cli codex` show the complete Triflux HUD in three provider status rows.
+The active CLI row displays context usage, for example `ctx:27%`; missing context shows `ctx:--`.
+Context uses the current thread's rollout window and token usage, with reported used/remaining percentages as a fallback.
+When Jev configuration is enabled, a lowercase `j` appears separately on the Codex row for active Claude or Antigravity sessions, or on the Claude row for active Codex sessions. Disabled or unknown configuration has no badge. No Jev numeric value is displayed.
+Provider quota information, account labels, and the c/x/a row order remain unchanged.
 The Codex HUD reads local caches and rollout every five seconds without starting external queries; quota values reflect the existing cache refresh time.
 It works without hooks and leaves existing sessions, global tmux options, and Codex's built-in status_line unchanged.
 Fresh Codex threads on the shared daemon use thread-scoped `features.hooks=false` to disable ordinary user and plugin hooks. Builtin hooks and legacy `notify` are outside this guarantee. Startup hook review selects `Continue without trusting` without changing trust records.

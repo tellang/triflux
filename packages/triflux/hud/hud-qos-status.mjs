@@ -54,7 +54,12 @@ import {
 } from "./renderers.mjs";
 import { sessionStatus } from "./session-status.mjs";
 import { selectTier } from "./terminal.mjs";
-import { formatTimeCell, formatTimeCellDH, readStdinJson } from "./utils.mjs";
+import {
+  formatTimeCell,
+  formatTimeCellDH,
+  readStdinJson,
+  stripAnsi,
+} from "./utils.mjs";
 
 async function main() {
   if (process.argv.includes(CLAUDE_REFRESH_FLAG)) {
@@ -78,6 +83,8 @@ async function main() {
   const codexSession = stdin?.product === "codex";
   const cacheOnly = process.argv.includes("--cache-only");
   const status = await sessionStatus(stdin);
+  const currentMarker = agySession ? "a" : codexSession ? "x" : "c";
+  const jevMarker = codexSession ? "c" : "x";
   if (agySession || codexSession) {
     if (stdin.terminal_width > 0)
       process.env.COLUMNS = String(stdin.terminal_width);
@@ -138,24 +145,22 @@ async function main() {
       codexLoggedOut,
       showAntigravity: antigravityAllowed,
       antigravityQuota,
+      sessionStatus: status,
+      currentMarker,
+      jevMarker,
     });
     const header = bandMode ? `${BAND_HEADER}\n` : "";
-    process.stdout.write(`${header}\x1b[0m${microLine}\n${status}\n`);
+    process.stdout.write(`${header}\x1b[0m${microLine}\n`);
     return;
   }
 
   const rows =
     bandState === "claude"
       ? []
-      : getClaudeRows(
-          currentTier,
-          agySession || codexSession ? null : contextView,
-          claudeUsage,
-          {
-            accountName: getClaudeEmail(),
-            promptCache: stdin?.prompt_cache,
-          },
-        );
+      : getClaudeRows(currentTier, null, claudeUsage, {
+          accountName: getClaudeEmail(),
+          promptCache: stdin?.prompt_cache,
+        });
   let codexRowIndex = -1;
   if (showCodex) {
     codexRowIndex = rows.length;
@@ -180,11 +185,20 @@ async function main() {
         geminiBlue,
         antigravityQuota,
         getAntigravityAccountLabel(),
-        { contextView: agySession ? contextView : null },
       ),
     );
   }
 
+  for (const row of rows) {
+    const marker = stripAnsi(row.prefix);
+    const extra =
+      marker === `${currentMarker}:`
+        ? status.context
+        : marker === `${jevMarker}:`
+          ? status.jev
+          : "";
+    if (extra) row.right = [row.right, extra].filter(Boolean).join(" ");
+  }
   const outputLines = renderAlignedRows(rows);
   if (outputLines[codexRowIndex] != null && codexLoggedOut) {
     outputLines[codexRowIndex] = `${DIM}${outputLines[codexRowIndex]}${RESET}`;
@@ -200,14 +214,12 @@ async function main() {
   const resetLines = outputLines.map((line) => `\x1b[0m${line}`);
   // band 는 첫 줄 표지로 이 HUD 가 --band 를 아는지 확인한다.
   const header = bandMode ? `${BAND_HEADER}\n` : "";
-  process.stdout.write(
-    `${header}${leadingBreaks}${resetLines.join("\n")}\n${status}\n`,
-  );
+  process.stdout.write(`${header}${leadingBreaks}${resetLines.join("\n")}\n`);
 }
 
 main().catch(() => {
   process.stdout.write(
-    `\x1b[0m${bold(claudeOrange("c"))}: ${dim(`5h:--% ${formatTimeCell("")} 1w:--% ${formatTimeCellDH("")} | ctx:--%`)}\n`,
+    `\x1b[0m${bold(claudeOrange("c"))}: ${dim(`5h:--% ${formatTimeCell("")} 1w:--% ${formatTimeCellDH("")} | ctx:--`)}\n`,
   );
 });
 

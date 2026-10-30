@@ -97,11 +97,19 @@ describe("HUD 표시", () => {
     }
   });
 
-  it("ctx 라벨은 모든 표시 단계와 한 줄 요약에서 흐린 소문자다", () => {
+  it("레거시 행의 ctx 칸과 한 줄 요약의 현재 CLI 상태를 구분한다", () => {
     for (const tier of ["full", "compact", "minimal"]) {
       assert.ok(claude(tier).right.includes(dim("ctx:")));
     }
-    assert.ok(getMicroLine(context, usage, null).includes(dim("ctx:")));
+    const line = stripAnsi(
+      getMicroLine(context, usage, null, {
+        currentMarker: "x",
+        jevMarker: "c",
+        sessionStatus: { context: "ctx:27%", jev: "j" },
+      }),
+    );
+    assert.match(line, /c:.* j x:.*ctx:27% a:/);
+    assert.equal(line.match(/ctx:/g).length, 1);
   });
 
   it("GCP 표시는 배경색 없이 파란 글자이고 기존 칸 폭을 유지한다", () => {
@@ -121,7 +129,7 @@ describe("HUD 표시", () => {
     });
     assert.ok(micro.includes(geminiBlue(" GCP")));
     assert.equal(
-      stripAnsi(micro).match(/a:(.*?) ctx:/)[1].length,
+      stripAnsi(micro).match(/a:(.*)$/)[1].length,
       PERCENT_CELL_WIDTH,
     );
     const x = getProviderRow(

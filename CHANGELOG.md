@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.88.1] - 2026-10-30
+
+### Fixed
+- HUD를 기존 3행으로 유지하고 현재 CLI 행의 `ctx` 사용률을 보존한다.
+- Jev 활성 배지는 Claude와 Antigravity에서 2행, Codex에서 1행의 오른쪽에 표시한다. 비활성이나 미확인 상태에서는 생략한다.
+- Codex tmux HUD의 네 번째 행과 이전 세션 상태 캐시를 정리하고 전역 설정과 다른 세션은 보존한다.
+
+
 ## [10.88.0] - 2026-10-30
 
 ### Added

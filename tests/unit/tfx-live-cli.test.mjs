@@ -2554,7 +2554,7 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
       (args) => args[0] === "set-option" && args[3].startsWith("status"),
     );
     assert.ok(
-      hudOptions.some((args) => args[3] === "status" && args[4] === "4"),
+      hudOptions.some((args) => args[3] === "status" && args[4] === "3"),
     );
     assert.ok(
       hudOptions.some(

@@ -52,6 +52,8 @@ function runHud(
       USERPROFILE: mockHomeDir,
       // 로그인 판정이 바깥 CODEX_HOME 의 auth.json 을 읽지 않게 목 HOME 에 고정한다.
       CODEX_HOME: join(mockHomeDir, ".codex"),
+      XDG_CONFIG_HOME: join(mockHomeDir, "config"),
+      TFX_JEV: "off",
       CLAUDE_CONFIG_DIR: mockHomeDir,
       COLUMNS: "120",
       LINES: "40",
@@ -253,7 +255,7 @@ describe("HUD provider visibility", () => {
         );
         const lines = runHud({ TFX_DISABLE_CODEX: "0" }).trim().split("\n");
         const [claude, codex, agy] = lines;
-        assert.equal(lines.length, 4);
+        assert.equal(lines.length, 3);
         assert.equal(
           agy.indexOf("|"),
           codex.indexOf("|"),
@@ -303,7 +305,7 @@ describe("HUD provider visibility", () => {
     };
     const env = { CLAUDE_CONFIG_DIR: configDir, COLUMNS: "200" };
     const output = runHud(env, { input });
-    assert.match(output, /^c:.*claude-dev ctx:25%$/m);
+    assert.match(output, /^c:.*claude-dev +ctx:25%$/m);
     assert.doesNotMatch(output, /\$12\.09|Other Name/);
     assert.match(
       runHud(env, {
@@ -312,7 +314,7 @@ describe("HUD provider visibility", () => {
           rate_limits: { spend_limit: { used_percentage: 83 } },
         },
       }),
-      /^c: \$:.*83%.*claude-dev ctx:25%$/m,
+      /^c: \$:.*83%.*claude-dev +ctx:25%$/m,
     );
     rmSync(join(configDir, ".claude.json"));
     writeFileSync(join(configDir, ".claude.json"), "{}");
@@ -327,7 +329,7 @@ describe("HUD provider visibility", () => {
     try {
       assert.match(
         runHud({ ...env, CLAUDE_CONFIG_DIR: "" }, { input }),
-        /^c:.*home-dev ctx:/m,
+        /^c:.*home-dev +ctx:25%/m,
       );
     } finally {
       rmSync(homeConfig);

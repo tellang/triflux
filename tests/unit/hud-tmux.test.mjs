@@ -41,11 +41,13 @@ test("Codex HUD는 대상 세션만 바꾸고 늦게 준비된 rollout을 읽는
     );
     tmux("-f", "/dev/null", "new-session", "-d", "-s", "owned", "-x", "200");
     tmux("new-session", "-d", "-s", "other");
+    tmux("set-option", "-t", "=owned:", "status-format[3]", "stale fourth row");
+    tmux("set-option", "-t", "=owned:", "@tfx_hud_3", "stale third cache");
     const globalBefore = tmux("show-options", "-g");
     const otherBefore = tmux("show-options", "-t", "=other:");
     const run = async (_remote, args) => ({ stdout: tmux(...args) });
     await configureCodexHud(run, "=owned:", env);
-    assert.equal(tmux("show-options", "-t", "=owned:", "-v", "status"), "4");
+    assert.equal(tmux("show-options", "-t", "=owned:", "-v", "status"), "3");
     assert.match(
       tmux("show-options", "-t", "=owned:", "-v", "status-format[0]"),
       /tmux-status\.mjs/,
@@ -66,7 +68,11 @@ test("Codex HUD는 대상 세션만 바꾸고 늦게 준비된 rollout을 읽는
           encoding: "utf8",
         },
       ).trim();
-    assert.match(render(), /Jev OFF.*문맥 미확인/);
+    assert.match(render(), /^c:/);
+    assert.match(
+      tmux("show-options", "-t", "=owned:", "-v", "@tfx_hud_1"),
+      /ctx:--$/,
+    );
     const thread = "019a0000-0000-7000-8000-000000000001";
     const sessions = join(env.CODEX_HOME, "sessions", "2026", "10", "30");
     mkdirSync(sessions, { recursive: true });
@@ -95,20 +101,26 @@ test("Codex HUD는 대상 세션만 바꾸고 늦게 준비된 rollout을 읽는
       complete.replace(',"model_context_window":200000', ""),
     );
     tmux("set-option", "-t", "=owned:", "@tfx_codex_thread", thread);
-    assert.match(render(), /문맥 미확인/);
+    assert.match(render(), /^c:/);
+    assert.match(
+      tmux("show-options", "-t", "=owned:", "-v", "@tfx_hud_1"),
+      /ctx:--$/,
+    );
     writeFileSync(rollout, complete);
-    assert.match(render(), /Jev OFF.*문맥 116k 남음/);
-    const rows = [1, 2, 3].map((n) =>
+    assert.match(render(), /^c:/);
+    const rows = [0, 1, 2].map((n) =>
       tmux("show-options", "-t", "=owned:", "-v", `@tfx_hud_${n}`),
     );
     assert.match(rows.join("\n"), /^c:.*5h:.*1w:/m);
     assert.match(rows.join("\n"), /^x:.*5h:.*1w:/m);
     assert.match(rows.join("\n"), /^a:/m);
     assert.doesNotMatch(rows.join("\n"), /\x1b/);
+    assert.match(rows[1], /ctx:42%$/);
+    assert.ok(!tmux("show-options", "-t", "=owned:").includes("stale"));
     assert.equal(tmux("show-options", "-g"), globalBefore);
     assert.equal(tmux("show-options", "-t", "=other:"), otherBefore);
     assert.equal(typeof updateTmuxHud, "function");
-    for (const n of [1, 2, 3])
+    for (const n of [0, 1, 2])
       tmux("set-option", "-u", "-t", "=owned:", `@tfx_hud_${n}`);
     const client = spawn(
       "python3",
@@ -130,12 +142,12 @@ test("Codex HUD는 대상 세션만 바꾸고 늦게 준비된 rollout을 읽는
     });
     try {
       const deadline = Date.now() + 8000;
-      while (Date.now() < deadline && !screen.includes("116k"))
+      while (Date.now() < deadline && !screen.includes("ctx:42%"))
         await new Promise((resolve) => setTimeout(resolve, 100));
-      assert.match(screen, /116k/);
-      assert.match(screen, /Jev OFF/);
+      assert.match(screen, /ctx:42%/);
+      assert.doesNotMatch(screen, /84k|116k|Jev/);
       assert.match(
-        tmux("show-options", "-t", "=owned:", "-v", "@tfx_hud_1"),
+        tmux("show-options", "-t", "=owned:", "-v", "@tfx_hud_0"),
         /^c:/,
       );
       assert.equal(tmux("show-options", "-g"), globalBefore);
