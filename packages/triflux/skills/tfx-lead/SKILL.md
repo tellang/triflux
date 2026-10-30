@@ -65,7 +65,7 @@ Codex 리드는 mod 가 없으므로 `/rename <월>.<일> <역할>`을 직접 �
 | --- | --- | --- |
 | Claude 세션에 보내기 | 로컬 Claude끼리는(팀원 포함) `SendMessage(to: "<이름>")`. 이름은 `tfx-live list-sessions --cli claude`의 `name`, 첫 지시는 `start` 결과의 `sendMessageTo`. 원격은 `tfx-live ask --cli claude` | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'claude:<정확한 이름>' --message '<본문>'`. 원격은 `tfx-live ask --cli claude` |
 | Codex 세션에 보내기 | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'`. 원격은 `tfx-live ask --cli codex` | Claude 리드와 같다 |
-| agy 세션에 보내기 | `tfx-live send --to agy:<이름> --message <본문> --no-wait` 또는 `tfx-live ask --cli agy`. 같은 기기의 agy 끼리는 `~/.local/bin/agy.patch.json`의 `sha256`이 실제 바이너리 해시와 같고 `patches`에 `peer-wake`가 있을 때만 `send_message`(대화 ID)를 쓴다(공개 이슈 #1022). `tfx-live send`의 agy 대상 전송은 tmux 경로를 유지한다 | `tfx-live send --to agy:<이름> --message <본문> --no-wait` 또는 `tfx-live ask --cli agy` |
+| agy 세션에 보내기 | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'agy:<정확한 이름>' --message '<본문>'` 또는 `SendMessage(to: "agy:<이름>")`. 단 첫 입력 전 새 agy 세션은 `conversationId`가 없으므로 첫 지시는 `tfx-live ask --cli agy --session <세션> --prompt '<본문>' --no-wait`로 보내고 대화 ID가 생긴 뒤부터 native 피어를 쓴다. 같은 기기의 agy 끼리는 `~/.local/bin/agy.patch.json`의 `sha256`이 실제 바이너리 해시와 같고 `patches`에 `peer-wake`가 있을 때만 `tfx-peer send --to 'agy:<이름>'` 또는 `send_message`(대화 ID)를 쓰고, 아니면 `tfx-live ask --cli agy`를 쓴다(공개 이슈 #1022). `tfx-live send --via-tmux`의 agy 대상 전송은 tmux 경로를 유지한다 | Claude 리드와 같다(`tfx-peer send --to 'agy:<정확한 이름>'`, 첫 입력 전 새 세션은 `tfx-live ask --cli agy`) |
 | 같은 세션 안 서브에이전트 | Agent 도구(`model`, `effort`, `run_in_background`) | `spawn_agent`, 추가 지시는 `followup_task` |
 | 사용자 | `AskUserQuestion` | 답변에서 짧은 선택지로 묻는다 |
 
@@ -233,7 +233,7 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 - 보고 명령 전문. 리드 이름은 정확한 문자열로 넣는다.
   - Claude 리드: `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'claude:<리드 이름>' --message '<결과 파일 경로와 세 줄 요약>'`
   - Codex 리드: 같은 명령에 `--to 'codex:<리드 이름>'`
-  - agy 리드: `tfx-live send --to agy:<리드 이름> --message '<본문>' --no-wait`
+  - agy 리드: 같은 명령에 `--to 'agy:<리드 이름>'`
 - `tfx-peer`와 `tfx-live`는 run_command 의 `BypassSandbox: true`로 실행한다는 문장. 관리자 정책으로 샌드박스가 강제된 agy 는 이 문장이 없으면 보고 명령이 막힌다(`tfx-live`의 agy 호스트 계약).
 - 컨텍스트 보고 기준은 agy 열의 비율(12%)을 쓴다.
 - 사용자 질문 위치. 지정이 없으면 리드로 올린다.
@@ -254,7 +254,7 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 | Codex 세션 | `tfx-live wait --cli codex --session <tmux 이름> --request-id <id>` 또는 `--thread <UUID>` |
 | tmux 로 띄운 대화형 Claude 세션, Claude 리드 | 그 세션이 지시서의 보고 규칙에 따라 `SendMessage`로 보고한다 |
 | tmux 로 띄운 대화형 Claude 세션, Codex 리드 | `tfx-live wait --cli claude --session <tmux 이름> --request-id <id>` (로컬만) |
-| agy 세션 | 그 세션이 지시서의 보고 규칙에 따라 리드가 Claude·Codex 면 `tfx-peer send`, agy 면 `tfx-live send`로 보고한다(`tfx-live`의 agy 호스트 계약) |
+| agy 세션 | 그 세션이 지시서의 보고 규칙에 따라 `tfx-peer send`로 보고한다(`tfx-live`의 agy 호스트 계약) |
 
 - `timedOut: true`와 `status: "unknown"`은 완료가 아니다. 재전송하지 않고 상태를 먼저 확인한다.
 

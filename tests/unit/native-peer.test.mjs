@@ -9,6 +9,7 @@ import { it } from "node:test";
 import { resolveCodexTmuxThread } from "../../bin/tfx-live.mjs";
 import { main as peerMain } from "../../bin/tfx-peer.mjs";
 import {
+  deliverAgy,
   deliverClaude,
   parsePeerArgs,
   resolveClaudeReceiver,
@@ -33,6 +34,14 @@ it("peer CLI accepts only fixed send contract; shell text is data", () => {
     ]),
     { to: "codex:target", message: "hi; rm -rf /" },
   );
+  assert.deepEqual(
+    parsePeerArgs(["send", "--to", "agy:target", "--message", "hi"]),
+    { to: "agy:target", message: "hi" },
+  );
+  assert.deepEqual(
+    parsePeerArgs(["send", "--to", "antigravity:target", "--message", "hi"]),
+    { to: "agy:target", message: "hi" },
+  );
   for (const args of [
     ["ask", "--to", "x"],
     ["send", "--remote", "x"],
@@ -42,7 +51,7 @@ it("peer CLI accepts only fixed send contract; shell text is data", () => {
     assert.throws(() => parsePeerArgs(args));
 });
 
-for (const cli of ["claude", "codex"]) {
+for (const cli of ["claude", "codex", "agy"]) {
   it(`peer CLI delivers sender header and reply route to ${cli} without truncating 8000 chars`, async () => {
     const body = ` ${"가".repeat(7998)} `;
     let delivered;
@@ -60,6 +69,16 @@ for (const cli of ["claude", "codex"]) {
           threadId: "wanted",
           raw: { threadSource: "registry" },
         },
+        {
+          cli: "agy",
+          name: "target",
+          appDataDir: "/tmp/agy-app-data",
+          conversationId: "11111111-2222-3333-4444-555555555555",
+          raw: {
+            appDataDir: "/tmp/agy-app-data",
+            conversationId: "11111111-2222-3333-4444-555555555555",
+          },
+        },
       ],
       resolveCodexTmuxThread: async () => ({
         threadId: "wanted",
@@ -67,6 +86,7 @@ for (const cli of ["claude", "codex"]) {
       }),
       deliverClaude: deliver,
       deliverCodex: deliver,
+      deliverAgy: deliver,
     };
     await peerMain(["send", "--to", `${cli}:target`, "--message", body], deps);
     assert.match(
@@ -74,7 +94,15 @@ for (const cli of ["claude", "codex"]) {
       /^\[tfx-peer from=codex:10\.16 구현 msg=[^\]\n]+\]\n/,
     );
     assert.equal(delivered.message.split("\n")[1], body);
-    if (cli === "codex") assert.equal(delivered.env, deps.env);
+    if (cli === "codex" || cli === "agy") assert.equal(delivered.env, deps.env);
+    if (cli === "agy") {
+      assert.equal(
+        delivered.conversationId,
+        "11111111-2222-3333-4444-555555555555",
+      );
+      assert.equal(delivered.appDataDir, "/tmp/agy-app-data");
+      assert.equal(delivered.sender, "codex:10.16 구현");
+    }
     assert.equal(
       delivered.message.split("\n")[2],
       `회신: ${path.join(os.homedir(), ".claude", "scripts", "tfx-peer")} send --to 'codex:10.16 구현' --message '...'`,
@@ -1042,4 +1070,199 @@ it("Windows one-shot sender uses a random local pipe, uds from and auth before m
   assert.ok(written[1].message.content.includes(`from="uds:${own}"`));
   assert.ok(written[1].message.content.includes("hello &lt;&amp;"));
   assert.equal(closed, true);
+});
+
+it("deliverAgy writes message JSON and undelivered marker into brain messages FileStore", (t) => {
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "tfx-agy-peer-"));
+  t.after(() => fs.rmSync(tmpHome, { recursive: true, force: true }));
+  const conversationId = "11111111-2222-3333-4444-555555555555";
+  const result = deliverAgy({
+    conversationId,
+    message: "네이티브 피어 메시지 점검",
+    sender: "claude:10.14 검토",
+    home: tmpHome,
+    env: {},
+  });
+  assert.equal(result.status, "written");
+  assert.equal(result.retrySafe, false);
+  assert.equal(result.modelReceipt, false);
+
+  const messagesDir = path.join(
+    tmpHome,
+    ".gemini",
+    "antigravity-cli",
+    "brain",
+    conversationId,
+    ".system_generated",
+    "messages",
+  );
+  const undeliveredDir = path.join(messagesDir, "undelivered");
+  const undeliveredFiles = fs.readdirSync(undeliveredDir);
+  assert.equal(undeliveredFiles.length, 1);
+  const msgId = undeliveredFiles[0];
+  const payload = JSON.parse(
+    fs.readFileSync(path.join(messagesDir, `${msgId}.json`), "utf8"),
+  );
+  assert.equal(payload.id, msgId);
+  assert.equal(payload.recipient, conversationId);
+  assert.equal(payload.sender, "claude:10.14 검토");
+  assert.equal(payload.content, "네이티브 피어 메시지 점검");
+  assert.equal(payload.priority, "MESSAGE_PRIORITY_HIGH");
+  assert.equal(
+    payload.renderDetails?.messageTitle,
+    "Message from claude:10.14 검토",
+  );
+
+  assert.throws(
+    () =>
+      deliverAgy({
+        conversationId: "../escape",
+        message: "x",
+        home: tmpHome,
+      }),
+    /Invalid agy conversationId/,
+  );
+
+  assert.throws(
+    () =>
+      deliverAgy({
+        conversationId,
+        message: "x",
+        home: tmpHome,
+        fs: {
+          ...fs,
+          writeFileSync() {
+            throw new Error("EIO json");
+          },
+        },
+      }),
+    /EIO json/,
+  );
+
+  const partialRes = deliverAgy({
+    conversationId,
+    message: "x",
+    home: tmpHome,
+    fs: {
+      ...fs,
+      writeFileSync(filePath, data, opts) {
+        if (!String(filePath).endsWith(".json"))
+          throw new Error("EIO before marker");
+        return fs.writeFileSync(filePath, data, opts);
+      },
+    },
+  });
+  assert.equal(partialRes.status, "partial");
+  assert.equal(partialRes.retrySafe, false);
+
+  const unknownRes = deliverAgy({
+    conversationId,
+    message: "x",
+    home: tmpHome,
+    fs: {
+      ...fs,
+      writeFileSync(filePath, data, opts) {
+        fs.writeFileSync(filePath, data, opts);
+        if (!String(filePath).endsWith(".json"))
+          throw new Error("EIO after marker");
+      },
+    },
+  });
+  assert.equal(unknownRes.status, "unknown");
+  assert.equal(unknownRes.retrySafe, false);
+});
+
+it("peer CLI rejects Windows agy target, missing/stale agy target, and writes to receiver appDataDir", async (t) => {
+  await assert.rejects(
+    peerMain(["send", "--to", "agy:target", "--message", "hi"], {
+      platform: "win32",
+    }),
+    /Windows 에서는 agy 대상을 아직 지원하지 않는다/,
+  );
+  await assert.rejects(
+    peerMain(["send", "--to", "agy:target", "--message", "hi"], {
+      discover: async () => [
+        { cli: "agy", name: "target", conversationId: null },
+      ],
+    }),
+    /agy conversation ID unavailable.*tfx-live ask --cli agy/,
+  );
+  await assert.rejects(
+    peerMain(["send", "--to", "agy:target", "--message", "hi"], {
+      discover: async () => [
+        {
+          cli: "agy",
+          name: "target",
+          conversationId: "11111111-2222-3333-4444-555555555555",
+          raw: { running: false },
+        },
+      ],
+    }),
+    /agy target is not running/,
+  );
+  await assert.rejects(
+    peerMain(["send", "--to", "agy:target", "--message", "hi"], {
+      discover: async () => [
+        {
+          cli: "agy",
+          name: "target",
+          appDataDir: "/tmp/rx",
+          conversationId: "11111111-2222-3333-4444-555555555555",
+          raw: { pid: 4321, running: true },
+        },
+      ],
+      resolveAgyConversation: async () => ({
+        appDataDir: "/tmp/rx",
+        conversationId: "00000000-0000-0000-0000-000000000000",
+      }),
+    }),
+    /agy target conversation changed; refusing stale target/,
+  );
+
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tfx-agy-split-"));
+  t.after(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
+  const senderAppDataDir = path.join(tmpRoot, "sender", "antigravity-cli");
+  const receiverAppDataDir = path.join(tmpRoot, "receiver", "antigravity-cli");
+  const conversationId = "11111111-2222-3333-4444-555555555555";
+  fs.mkdirSync(path.join(receiverAppDataDir, "presence"), { recursive: true });
+  fs.writeFileSync(
+    path.join(receiverAppDataDir, "presence", `${conversationId}.lock`),
+    "",
+  );
+
+  const res = await peerMain(
+    ["send", "--to", "agy:target", "--message", "hi"],
+    {
+      env: { ANTIGRAVITY_APP_DATA_DIR: senderAppDataDir },
+      discover: async () => [
+        {
+          cli: "agy",
+          name: "target",
+          appDataDir: receiverAppDataDir,
+          conversationId,
+          raw: { pid: 4321, running: true },
+        },
+      ],
+      resolveAgyConversation: async () => ({
+        appDataDir: receiverAppDataDir,
+        conversationId,
+      }),
+    },
+  );
+  assert.equal(res.status, "written");
+  assert.equal(fs.existsSync(senderAppDataDir), false);
+  assert.equal(
+    fs.existsSync(
+      path.join(
+        receiverAppDataDir,
+        "brain",
+        conversationId,
+        ".system_generated",
+        "messages",
+        "undelivered",
+        res.msgId,
+      ),
+    ),
+    true,
+  );
 });

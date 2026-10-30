@@ -1,16 +1,5 @@
 import type { EngineInterface, On, ProcessRunInit, ToolCallResult } from 'claude-code'
 
-type PeerTarget = { cli: string; name: string; target?: string | null }
-type SendResult = {
-  ok: boolean
-  to?: PeerTarget
-  transport?: string
-  status?: string
-  reason?: string
-  error?: string
-  candidates?: PeerTarget[]
-}
-
 function structuredMessage(message: string) {
   try {
     const parsed = JSON.parse(message)
@@ -45,31 +34,6 @@ function sendFailure(error: unknown, attempted: boolean, returned: boolean) {
   }
 }
 
-async function send($: EngineInterface, to: string, message: string) {
-  let attempted = false
-  let returned = false
-  try {
-    const options = await processOptions($)
-    attempted = true
-    const process = await $.process.run(['tfx-live', 'send', '--to', to, '--message', message, '--no-wait'], options)
-    returned = true
-    if (process.isStdoutTruncated) throw new Error('tfx-live output truncated')
-    const data: SendResult = JSON.parse(process.stdout)
-    if (!data || typeof data.ok !== 'boolean') throw new Error('Invalid tfx-live send result')
-    if (data.ok && process.exitCode === 0) {
-      if (!data.to || typeof data.to.cli !== 'string' || typeof data.to.name !== 'string' || typeof data.transport !== 'string')
-        throw new Error('Invalid tfx-live send target')
-      return { answer: { result: `${data.to.cli}:${data.to.name} 세션에 ${data.transport} 경로로 넣었다 (${data.status ?? 'sent'}).` } }
-    }
-    const candidates = (data.candidates ?? []).map(candidate => `${candidate.cli}:${candidate.name}${candidate.target ? ` (${candidate.target})` : ''}`)
-    return {
-      answer: { deny: `전송 실패: ${data.reason ?? `exit ${process.exitCode}`}${data.error ? `, ${data.error}` : ''}. 후보: ${candidates.length ? candidates.join(', ') : '없음'}.` },
-    }
-  } catch (error) {
-    return sendFailure(error, attempted, returned)
-  }
-}
-
 async function sendPeer($: EngineInterface, to: string, message: string) {
   let attempted = false
   let returned = false
@@ -80,7 +44,7 @@ async function sendPeer($: EngineInterface, to: string, message: string) {
     returned = true
     if (process.isStdoutTruncated) throw new Error('tfx-peer output truncated')
     if (process.exitCode === 1 && !process.stdout.trim())
-      return { deny: `전송 실패: ${process.stderr.trim() || 'exit 1'}.` }
+      return { uncertain: false, answer: { deny: `전송 실패: ${process.stderr.trim() || 'exit 1'}.` } }
     let data: { status: string; error?: string }
     try {
       data = JSON.parse(process.stdout)
@@ -89,24 +53,24 @@ async function sendPeer($: EngineInterface, to: string, message: string) {
     }
     if (!data || !['written', 'sent', 'partial', 'unknown'].includes(data.status)) throw new Error('Invalid tfx-peer send result')
     if (process.exitCode === 0 && (data.status === 'written' || data.status === 'sent'))
-      return { result: `${to} 세션에 native peer 경로로 넣었다 (${data.status}).` }
+      return { uncertain: false, answer: { result: `${to} 세션에 native peer 경로로 넣었다 (${data.status}).` } }
     if (data.status === 'partial' || data.status === 'unknown')
-      return { deny: `결과 불명. 이미 들어갔을 수 있으니 재전송하지 말고 상대 회신을 확인하라 (${data.status}${data.error ? `, ${data.error}` : ''}).` }
-    return { deny: `전송 실패: exit ${process.exitCode}${data.error ? `, ${data.error}` : ''}.` }
+      return { uncertain: true, answer: { deny: `결과 불명. 이미 들어갔을 수 있으니 재전송하지 말고 상대 회신을 확인하라 (${data.status}${data.error ? `, ${data.error}` : ''}).` } }
+    return { uncertain: false, answer: { deny: `전송 실패: exit ${process.exitCode}${data.error ? `, ${data.error}` : ''}.` } }
   } catch (error) {
-    return sendFailure(error, attempted, returned).answer
+    return sendFailure(error, attempted, returned)
   }
 }
 
 export function registerNativeMessage(on: On) {
   on('tool.call', { tool: 'SendMessage' }, async ($, e, next) => {
     if (typeof e.to !== 'string' || typeof e.message !== 'string' || structuredMessage(e.message)) return next(e)
-    if (/^codex:/i.test(e.to)) return sendPeer($, `codex:${e.to.slice(6)}`, e.message)
-    if (/^(?:agy|antigravity):/i.test(e.to)) return (await send($, e.to, e.message)).answer
+    if (/^codex:/i.test(e.to)) return (await sendPeer($, `codex:${e.to.slice(6)}`, e.message)).answer
+    if (/^(?:agy|antigravity):/i.test(e.to)) return (await sendPeer($, `agy:${e.to.replace(/^(?:agy|antigravity):/i, '')}`, e.message)).answer
     const original = await next(e)
-    if (!missingRecipient(original) || /^(?:claude|codex):/i.test(e.to)) return original
-    const sent = await send($, `agy:${e.to}`, e.message)
-    return ('uncertain' in sent && sent.uncertain) || !('deny' in sent.answer) ? sent.answer : original
+    if (!missingRecipient(original) || /^(?:claude|codex|agy|antigravity):/i.test(e.to)) return original
+    const sent = await sendPeer($, `agy:${e.to}`, e.message)
+    return sent.uncertain || !('deny' in sent.answer) ? sent.answer : original
   })
 
   on('tool.call', { tool: 'ListAgents' }, async ($, e, next) => {

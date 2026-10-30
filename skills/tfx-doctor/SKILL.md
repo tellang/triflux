@@ -13,14 +13,14 @@ argument-hint: "[--fix|--reset]"
 | 요청 | 명령 | 범위 |
 |------|------|------|
 | 진단 | `tfx doctor --json` | 읽기 전용 점검 |
-| 복구 | `tfx doctor --fix` | 관리 파일과 스킬 동기화, 오류 캐시 복구, 기존 직접 연결 이주 |
+| 복구 | `tfx doctor --fix` | 관리 파일과 스킬 동기화, 오류 캐시 복구, 기존 직접 연결 이주, agy peer-wake 바이너리 패치 |
 | 캐시 초기화 | `tfx doctor --reset` | 지정된 캐시 삭제 후 재생성 |
 
 `--fix`는 triflux가 소유하지 않은 OMC 팀과 Claude 네이티브 팀을 삭제하지 않는다. `--reset`은 캐시를 삭제하므로 요청이 분명할 때만 실행한다. 결과의 실패와 건너뜀을 성공으로 바꾸어 보고하지 않는다.
 
 ## 주요 점검
 
-설치된 `tfx-route.sh`, HUD, Claude·Codex·Antigravity CLI, Codex 프로필, 스킬, psmux/tmux, MCP 설정과 인벤토리, route script 동기화 상태를 확인한다. 발견한 문제마다 출력된 복구 명령을 따른다. 사용자 소유 설정이나 깨진 파일은 원인을 먼저 보고한다.
+설치된 `tfx-route.sh`, HUD, Claude, Codex, Antigravity CLI(macOS ARM64 `peer-wake` 패치 포함), Codex 프로필, 스킬, psmux/tmux, MCP 설정과 인벤토리, route script 동기화 상태를 확인한다. 발견한 문제마다 출력된 복구 명령을 따른다. 사용자 소유 설정이나 깨진 파일은 원인을 먼저 보고한다.
 
 ## 제거된 허브 흔적
 

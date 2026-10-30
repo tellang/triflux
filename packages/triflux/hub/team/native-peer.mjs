@@ -36,9 +36,15 @@ export function parsePeerArgs(args) {
     );
   if (target === "--session")
     return { sessionId: parsed["--session"], message: parsed["--message"] };
-  if (!/^(claude|codex):[^:]+$/.test(parsed["--to"]))
-    throw new Error("Use exact claude:NAME or codex:NAME target");
-  return { to: parsed["--to"], message: parsed["--message"] };
+  if (!/^(claude|codex|agy|antigravity):[^:]+$/i.test(parsed["--to"]))
+    throw new Error("Use exact claude:NAME, codex:NAME, or agy:NAME target");
+  const sep = parsed["--to"].indexOf(":");
+  const rawCli = parsed["--to"].slice(0, sep).toLowerCase();
+  const cli = rawCli === "antigravity" ? "agy" : rawCli;
+  return {
+    to: `${cli}:${parsed["--to"].slice(sep + 1)}`,
+    message: parsed["--message"],
+  };
 }
 
 export function validateCodexTarget(thread, id) {
@@ -467,4 +473,92 @@ export async function deliverClaude({
         fs.unlinkSync(own);
     } catch {}
   }
+}
+
+export function deliverAgy({
+  conversationId,
+  appDataDir: targetAppDataDir = null,
+  requireExisting = false,
+  message,
+  sender = "unknown",
+  env = process.env,
+  home = null,
+  fs: io = fs,
+} = {}) {
+  if (
+    typeof conversationId !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      conversationId,
+    )
+  )
+    throw new Error("Invalid agy conversationId");
+  const normalizedId = conversationId.toLowerCase();
+  const resolvedHome = home || env.HOME || os.homedir();
+  const appDataDir =
+    targetAppDataDir ||
+    (home
+      ? path.join(home, ".gemini", "antigravity-cli")
+      : env.ANTIGRAVITY_APP_DATA_DIR ||
+        path.join(resolvedHome, ".gemini", "antigravity-cli"));
+  if (requireExisting) {
+    const hasConversation = [
+      path.join(appDataDir, "presence", `${normalizedId}.lock`),
+      path.join(appDataDir, "conversations", `${normalizedId}.db`),
+      path.join(appDataDir, "brain", normalizedId),
+    ].some((p) => io.existsSync(p));
+    if (!hasConversation) {
+      throw new Error("agy target conversation not found in appDataDir");
+    }
+  }
+  const messagesDir = path.join(
+    appDataDir,
+    "brain",
+    normalizedId,
+    ".system_generated",
+    "messages",
+  );
+  const undeliveredDir = path.join(messagesDir, "undelivered");
+  io.mkdirSync(undeliveredDir, { recursive: true, mode: 0o700 });
+  const msgId = randomUUID();
+  const payload = {
+    id: msgId,
+    recipient: normalizedId,
+    sender,
+    priority: "MESSAGE_PRIORITY_HIGH",
+    timestamp: new Date().toISOString(),
+    renderDetails: {
+      messageTitle: `Message from ${sender}`,
+    },
+    content: message,
+  };
+  const jsonPath = path.join(messagesDir, `${msgId}.json`);
+  const markerPath = path.join(undeliveredDir, msgId);
+  try {
+    io.writeFileSync(jsonPath, JSON.stringify(payload, null, 2), {
+      mode: 0o600,
+    });
+  } catch (error) {
+    try {
+      io.unlinkSync?.(jsonPath);
+    } catch {}
+    throw error;
+  }
+  try {
+    io.writeFileSync(markerPath, "", { mode: 0o600 });
+  } catch (error) {
+    const markerExists = Boolean(io.existsSync?.(markerPath));
+    return {
+      status: markerExists ? "unknown" : "partial",
+      retrySafe: false,
+      modelReceipt: false,
+      msgId,
+      error: error.message,
+    };
+  }
+  return {
+    status: "written",
+    retrySafe: false,
+    modelReceipt: false,
+    msgId,
+  };
 }
