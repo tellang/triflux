@@ -3,22 +3,18 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { ADAPTERS, waitForTmuxIdle } from "../../bin/tfx-live.mjs";
-import { main as runBridgeMain, readTailSafe } from "../../hub/bridge.mjs";
+import { waitForTmuxIdle } from "../../bin/tfx-live.mjs";
+import { readTailSafe, main as runBridgeMain } from "../../hub/bridge.mjs";
 import {
   executionFlagsForCli,
   isJevEnabled,
   judgeBusyAction,
-  judgeComposerState,
   judgeHandoffQuality,
   judgeInboxPriority,
-  judgeInstructionAck,
   judgeMcpSelection,
   judgePeerConvergence,
-  judgeReviewGate,
   judgeSameFailureCause,
   judgeTargetSession,
-  judgeTaskAssignment,
   judgeTaskRouting,
   judgeWorkerHealth,
   queryJev,
@@ -505,17 +501,17 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
     assert.equal(typeof agyElapsed, "number");
   });
 
-  it("Hook 5 런타임 연동: createHeadlessIntervention이 healthy_thinking이면 단계별 개입 없이 유예하고 waiting_input이면 맞춤 프롬프트를 주입한다", async () => {
+  it("Hook 5 런타임 연동: 실제 progressing 판정은 개입을 유예하고 waiting_input이면 맞춤 프롬프트를 주입한다", async () => {
     let ladderCalled = 0;
     const healthyHandler = createHeadlessIntervention(
       { paneId: "tfx:0.1", cli: "codex", resultFile: "/tmp/nonexistent.txt" },
       null,
       {
         capturePsmuxPane: () => "Running cargo test --workspace...",
-        judgeWorkerHealth: async () => ({
-          status: "healthy_thinking",
-          confidence: 0.95,
-        }),
+        judgeWorkerHealth: (input) =>
+          judgeWorkerHealth(input, {
+            client: async () => ({ choice: "progressing", confidence: 0.95 }),
+          }),
         createInterventionLadder: () => {
           ladderCalled += 1;
           return { intervene: async () => ({ outcome: "terminated" }) };
@@ -526,25 +522,38 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
     assert.equal(healthyResult, true);
     assert.equal(ladderCalled, 0);
 
-    let capturedPrompt = "";
-    const waitingHandler = createHeadlessIntervention(
-      { paneId: "tfx:0.1", cli: "claude", resultFile: "/tmp/nonexistent.txt" },
-      null,
-      {
-        capturePsmuxPane: () => "? Proceed with migration? (y/N)",
-        judgeWorkerHealth: async () => ({
-          status: "waiting_input",
-          confidence: 0.93,
-        }),
-        createInterventionLadder: (opts) => {
-          capturedPrompt = opts.reinstructPrompt || "";
-          return { intervene: async () => ({ outcome: "reactivated" }) };
+    for (const status of ["waiting_input", "looping_error"]) {
+      let capturedPrompt = "";
+      const waitingHandler = createHeadlessIntervention(
+        {
+          paneId: "tfx:0.1",
+          cli: "claude",
+          resultFile: "/tmp/nonexistent.txt",
         },
-      },
-    );
-    const waitingResult = await waitingHandler({ inactiveMs: 180_000 });
-    assert.equal(waitingResult, true);
-    assert.equal(capturedPrompt.includes("대화형 입력 대기"), true);
+        null,
+        {
+          capturePsmuxPane: () => "? Proceed with migration? (y/N)",
+          judgeWorkerHealth: (input) =>
+            judgeWorkerHealth(input, {
+              client: async () => ({ choice: status, confidence: 0.93 }),
+            }),
+          createInterventionLadder: (opts) => {
+            capturedPrompt = opts.reinstructPrompt || "";
+            return { intervene: async () => ({ outcome: "reactivated" }) };
+          },
+        },
+      );
+      const waitingResult = await waitingHandler({ inactiveMs: 180_000 });
+      assert.equal(waitingResult, true);
+      assert.equal(
+        capturedPrompt.includes(
+          status === "waiting_input"
+            ? "대화형 입력 대기"
+            : "동일 오류 반복 루프",
+        ),
+        true,
+      );
+    }
   });
 
   it("bridge.mjs: jev-stats, jev-batch, handoff-check 서브커맨드가 정상 동작한다", async () => {

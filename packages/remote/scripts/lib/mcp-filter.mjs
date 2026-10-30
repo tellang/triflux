@@ -774,12 +774,8 @@ export async function buildMcpPolicyWithJev(options = {}, jevOptions = {}) {
     return basePolicy;
   }
 
-  const candidateServers =
-    basePolicy.allowedServers.length > 0
-      ? basePolicy.allowedServers
-      : Array.isArray(options.availableServers)
-        ? options.availableServers
-        : [];
+  const candidateServers = basePolicy.allowedServers;
+  if (candidateServers.length === 0) return basePolicy;
 
   const selection = await judgeMcpSelection(
     {
@@ -789,9 +785,13 @@ export async function buildMcpPolicyWithJev(options = {}, jevOptions = {}) {
     },
     jevOptions,
   );
-  if (!selection) return basePolicy;
+  if (!selection || !Array.isArray(selection.neededMcpServers))
+    return basePolicy;
 
-  if (isAutoProfile && selection.mcpProfile === "none") {
+  const narrowedAvailable = selection.neededMcpServers.filter((server) =>
+    basePolicy.allowedServers.includes(server),
+  );
+  if (narrowedAvailable.length === 0) {
     return {
       ...buildMcpPolicy({
         ...options,
@@ -812,12 +812,6 @@ export async function buildMcpPolicyWithJev(options = {}, jevOptions = {}) {
     selection.mcpProfile in PROFILE_DEFINITIONS
       ? selection.mcpProfile
       : options.requestedProfile;
-
-  const narrowedAvailable =
-    Array.isArray(selection.neededMcpServers) &&
-    selection.neededMcpServers.length > 0
-      ? selection.neededMcpServers
-      : options.availableServers;
 
   const resolved = buildMcpPolicy({
     ...options,

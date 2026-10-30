@@ -404,7 +404,7 @@ export function createHeadlessIntervention(dispatch, fallback, deps = {}) {
       stderrTail: errTail,
       elapsedSec: Math.round((Number(context.inactiveMs) || 0) / 1000),
     });
-    if (health?.status === "healthy_thinking") return true;
+    if (health?.status === "progressing") return true;
 
     const reinstructPrompt =
       health?.status === "waiting_input"

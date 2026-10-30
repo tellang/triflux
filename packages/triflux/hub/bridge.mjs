@@ -1176,9 +1176,7 @@ async function cmdJudgeAck(args) {
   try {
     const payload =
       args["payload-file"] || args.payload ? readBridgePayload(args) : {};
-    const instruction = String(
-      args.instruction ?? payload.instruction ?? "",
-    );
+    const instruction = String(args.instruction ?? payload.instruction ?? "");
     const stdoutLog = args["stdout-log"] ?? payload.stdoutLog;
     const recentOutput = String(
       args.text ?? payload.recentOutput ?? readTailSafe(stdoutLog),

@@ -107,19 +107,63 @@ export function isJevEnabled(options = {}) {
   return false;
 }
 
-function clampText(text, maxChars = 1600) {
-  const str = String(text ?? "").trim();
-  if (str.length <= maxChars) return str;
-  return str.slice(-maxChars);
+// 프롬프트와 질문은 클램프 전에 정리하고 HTTP/CLI 공통 경계에서도 재검사한다.
+function sanitizeJevInput(value) {
+  if (typeof value === "string") {
+    return value
+      .replace(
+        /-----BEGIN [^\r\n-]*PRIVATE KEY-----[\s\S]*?(?:-----END [^\r\n-]*PRIVATE KEY-----|$)/gi,
+        "[REDACTED]",
+      )
+      .replace(
+        /\b(?:proxy-)?authorization["']?\s*[:=]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\r\n,;}]+)/gi,
+        "Authorization: [REDACTED]",
+      )
+      .replace(/\bBearer\s+[^\s"',;]+/gi, "Bearer [REDACTED]")
+      .replace(
+        /\b([\w.-]*(?:api[_-]?key|token|password|passwd|secret|credential)[\w.-]*["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)/gi,
+        "$1[REDACTED]",
+      )
+      .replace(
+        /\b(?:sk-(?:proj-|ant-)?[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{16,}|github_pat_[A-Za-z0-9_]{16,}|AIza[A-Za-z0-9_-]{20,})\b/g,
+        "[REDACTED]",
+      );
+  }
+  if (Array.isArray(value)) return value.map(sanitizeJevInput);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        sanitizeJevInput(key),
+        /authorization|api[_-]?key|token|password|passwd|secret|credential|private[_-]?key/i.test(
+          key,
+        )
+          ? "[REDACTED]"
+          : sanitizeJevInput(item),
+      ]),
+    );
+  }
+  return value;
 }
 
-function tailLines(text, maxLines = 35, maxChars = 1800) {
-  const lines = String(text ?? "")
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .slice(-maxLines)
-    .join("\n");
-  return clampText(lines, maxChars);
+// 워커/TUI 출력은 내용이나 해시 없이 로컬에서 계산한 상태 신호만 전송한다.
+function outputMetadata(text) {
+  const value = String(text ?? "");
+  return JSON.stringify({
+    chars: value.length,
+    lines: value ? value.split(/\r?\n/).length : 0,
+    hasProgress:
+      /\b(?:running|working|thinking|compiling|testing|editing)\b|진행|작업 중/iu.test(
+        value,
+      ),
+    waitingInput: /\[y\/n\]|\(y\/n\)|proceed\?|confirm|입력 대기/iu.test(value),
+    hasError: /\b(?:error|failed|fatal|exception)\b|오류|실패/iu.test(value),
+  });
+}
+
+function clampText(text, maxChars = 1600) {
+  const str = sanitizeJevInput(String(text ?? "")).trim();
+  if (str.length <= maxChars) return str;
+  return str.slice(-maxChars);
 }
 
 function isValidUnitNumber(val) {
@@ -263,7 +307,7 @@ async function callJevHttp(request, options = {}) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(sanitizeJevInput(payload)),
     signal: AbortSignal.timeout(timeoutMs > 0 ? timeoutMs : 1500),
   });
   if (!response.ok) return null;
@@ -272,6 +316,7 @@ async function callJevHttp(request, options = {}) {
 }
 
 async function callJevCli(request, options = {}) {
+  request = sanitizeJevInput(request);
   const env = resolveEnv(options);
   const cliBin = resolveJevCliBin(env);
   if (!cliBin) return null;
@@ -314,9 +359,23 @@ export async function queryJevBatch(input = {}, options = {}) {
     return input.map((_, idx) => objRes[`q_${idx}`] || null);
   }
 
-  const { state = "", questions = {} } = input;
+  const { state = "", questions = {} } = sanitizeJevInput(input);
   const entries = Object.entries(questions || {});
-  if (entries.length === 0) return null;
+  const startedAt = Date.now();
+  const fallback = (reason) => {
+    recordJevStat(
+      {
+        hook: "jev_batch",
+        kind: "batch",
+        intervened: false,
+        reason,
+        durationMs: Date.now() - startedAt,
+      },
+      options,
+    );
+    return null;
+  };
+  if (entries.length === 0) return fallback("batch_empty_questions");
 
   try {
     const clientFn = options.batchClient || options.client;
@@ -327,12 +386,29 @@ export async function queryJevBatch(input = {}, options = {}) {
       for (const [key, req] of entries) {
         out[key] = normalizeResponse(answers[key], req.kind);
       }
+      if (Object.values(out).some((answer) => !answer))
+        fallback("batch_invalid_response");
       return out;
     }
 
     const env = resolveEnv(options);
     const apiKey = resolveJevApiKey(env);
-    if (!apiKey) return null;
+    if (!apiKey) {
+      if (!resolveJevCliBin(env))
+        return fallback("batch_transport_unavailable");
+      const out = {};
+      for (const [key, req] of entries) {
+        out[key] = await callJevCli(
+          {
+            ...req,
+            context: [state, req.context].filter(Boolean).join("\n\n"),
+          },
+          options,
+        );
+        if (!out[key]) return fallback("batch_invalid_response");
+      }
+      return out;
+    }
 
     const url = options.apiUrl || env.JEV_API_URL || DEFAULT_JEV_API_URL;
     const model = options.model || env.JEV_MODEL || DEFAULT_JEV_MODEL;
@@ -340,7 +416,8 @@ export async function queryJevBatch(input = {}, options = {}) {
       options.timeoutMs ?? env.TFX_JEV_TIMEOUT_MS ?? DEFAULT_JEV_TIMEOUT_MS,
     );
     const fetchImpl = options.fetchImpl || globalThis.fetch;
-    if (typeof fetchImpl !== "function") return null;
+    if (typeof fetchImpl !== "function")
+      return fallback("batch_transport_unavailable");
 
     const payloadQuestions = {};
     for (const [key, req] of entries) {
@@ -360,16 +437,18 @@ export async function queryJevBatch(input = {}, options = {}) {
       }),
       signal: AbortSignal.timeout(timeoutMs > 0 ? timeoutMs : 1500),
     });
-    if (!response.ok) return null;
+    if (!response.ok) return fallback("batch_http_failed");
     const data = await response.json();
     const answers = data?.answers || {};
     const out = {};
     for (const [key, req] of entries) {
       out[key] = normalizeResponse(answers[key], req.kind);
     }
+    if (Object.values(out).some((answer) => !answer))
+      fallback("batch_invalid_response");
     return out;
   } catch {
-    return null;
+    return fallback("batch_call_failed");
   }
 }
 
@@ -456,6 +535,7 @@ export function summarizeJevStats(options = {}) {
 
 export async function queryJev(request, options = {}) {
   if (!isJevEnabled(options)) return null;
+  request = sanitizeJevInput(request);
   const startedAt = Date.now();
   try {
     let result = null;
@@ -529,8 +609,8 @@ export async function judgeSameFailureCause(
   options = {},
 ) {
   if (!isJevEnabled(options)) return null;
-  const prev = clampText(previousReason, 800);
-  const curr = clampText(currentReason, 800);
+  const prev = String(previousReason ?? "").trim();
+  const curr = String(currentReason ?? "").trim();
   if (!prev || !curr) return null;
   if (prev === curr) return { sameCause: true, confidence: 1 };
 
@@ -540,7 +620,7 @@ export async function judgeSameFailureCause(
       kind: "noul",
       query:
         "Are both failure messages caused by the exact same underlying blocker or root error (ignoring timestamps, PIDs, ports, or line number shifts)?",
-      context: `Previous failure:\n${prev}\n\nCurrent failure:\n${curr}`,
+      context: `Previous failure metadata:\n${outputMetadata(prev)}\n\nCurrent failure metadata:\n${outputMetadata(curr)}`,
     },
     options,
   );
@@ -562,8 +642,7 @@ export async function judgeHandoffQuality(
   options = {},
 ) {
   if (!isJevEnabled(options)) return null;
-  const tail = tailLines(rawText, 40, 2000);
-  if (!tail && !handoff?.verdict) return null;
+  if (!String(rawText).trim() && !handoff?.verdict) return null;
 
   const allowed = ["accept", "needs_read", "retry"];
   const filesCount = Array.isArray(gitDiffFiles)
@@ -586,12 +665,13 @@ export async function judgeHandoffQuality(
         "Classify the required lead action for this worker output: 'accept' if the assigned task was completed cleanly, 'needs_read' if it is an analysis/report or ambiguous partial result that the lead must read, or 'retry' if the worker exited without completing the task or hit an unresolved error.",
       context: [
         `exit_code: ${exitCode}`,
-        `role: ${role || handoff?.task || "worker"}`,
+        `role: ${role || "worker"}`,
+        `declared_task_metadata: ${outputMetadata(handoff?.task)}`,
         `files_changed_count: ${filesCount}`,
-        `declared_status: ${handoff?.status || "unknown"}`,
-        `declared_action: ${handoff?.lead_action || "unknown"}`,
-        `declared_verdict: ${handoff?.verdict || "none"}`,
-        `output_tail:\n${tail}`,
+        `declared_status: ${outputMetadata(handoff?.status)}`,
+        `declared_action: ${outputMetadata(handoff?.lead_action)}`,
+        `declared_verdict: ${outputMetadata(handoff?.verdict)}`,
+        `output_metadata: ${outputMetadata(rawText)}`,
       ].join("\n"),
     },
     options,
@@ -619,8 +699,8 @@ export async function judgePeerConvergence(
   if (mode === "counting") return null;
   if (hopIndex < Math.max(2, participantsCount)) return null;
 
-  const prev = clampText(previousResponse, 1200);
-  const curr = clampText(currentResponse, 1200);
+  const prev = String(previousResponse ?? "").trim();
+  const curr = String(currentResponse ?? "").trim();
   if (!prev || !curr) return null;
 
   const res = await queryJev(
@@ -631,8 +711,8 @@ export async function judgePeerConvergence(
         "Have the participants reached substantive agreement on the core task or entered a repetitive nitpick loop where further rounds will not add new conclusions?",
       context: [
         seed ? `Task:\n${clampText(seed, 500)}` : "",
-        `Previous turn:\n${prev}`,
-        `Current turn:\n${curr}`,
+        `Previous turn metadata: ${outputMetadata(prev)}`,
+        `Current turn metadata: ${outputMetadata(curr)}`,
       ]
         .filter(Boolean)
         .join("\n\n"),
@@ -686,7 +766,7 @@ export async function judgeBusyAction(
         : "The worker is currently busy executing a turn. Choose 'steer' if this message corrects course, changes constraints, or aborts current work immediately; choose 'wait' if this message is a sequential follow-up task to run after the current turn finishes.",
       context: [
         resolvedSummary
-          ? `Active thread:\n${clampText(resolvedSummary, 400)}`
+          ? `Active thread metadata: ${outputMetadata(resolvedSummary)}`
           : "",
         `Incoming message:\n${trimmed}`,
       ]
@@ -716,9 +796,11 @@ export async function judgeWorkerHealth(
   if (!isJevEnabled(options)) return null;
   const resolvedStdoutTail = stdoutTail || recentOutput;
   const combined = [
-    resolvedStdoutTail ? `stdout:\n${tailLines(resolvedStdoutTail, 20, 800)}` : "",
-    stderrTail ? `stderr:\n${tailLines(stderrTail, 20, 800)}` : "",
-    rolloutTail ? `rollout:\n${tailLines(rolloutTail, 20, 800)}` : "",
+    resolvedStdoutTail
+      ? `stdout_metadata: ${outputMetadata(resolvedStdoutTail)}`
+      : "",
+    stderrTail ? `stderr_metadata: ${outputMetadata(stderrTail)}` : "",
+    rolloutTail ? `rollout_metadata: ${outputMetadata(rolloutTail)}` : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -835,7 +917,10 @@ export function executionFlagsForCli(
   return {
     cliType: "codex",
     executionMode: "bypass",
-    args: ["--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check"],
+    args: [
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--skip-git-repo-check",
+    ],
     flagsString:
       "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check",
   };
@@ -966,7 +1051,8 @@ export async function judgeTaskRouting(
           "Read-only codebase and documentation exploration needing fast docs/web lookup.",
         reviewer:
           "Code review task needing minimal reference documentation lookup.",
-        designer: "UI/frontend design task needing browser/Playwright and docs.",
+        designer:
+          "UI/frontend design task needing browser/Playwright and docs.",
         writer: "Documentation writing task needing docs and reference search.",
         default: "General task with standard MCP tool access.",
       },
@@ -1016,14 +1102,22 @@ export async function judgeTaskRouting(
       ? mcpProfRes.choice
       : null;
 
-  const neededMcpServers = [];
+  let neededMcpServers = mcpProfile === "none" ? [] : null;
   if (mcpProfile !== "none" && candidateServers.length > 0) {
-    for (const server of candidateServers) {
+    const serverResults = candidateServers.map((server) => {
       const safeKey = `mcp_${server.replace(/[^a-zA-Z0-9_]/g, "_")}`;
-      const srvRes = results[safeKey];
-      if (srvRes && srvRes.confidence >= threshold && srvRes.value === true) {
-        neededMcpServers.push(server);
-      }
+      return results[safeKey];
+    });
+    // 전체에 대한 고신뢰 응답만 빈 선택과 판정 실패를 구분할 수 있다.
+    if (
+      serverResults.every(
+        (res) =>
+          res && res.confidence >= threshold && typeof res.value === "boolean",
+      )
+    ) {
+      neededMcpServers = candidateServers.filter(
+        (_, idx) => serverResults[idx].value,
+      );
     }
   }
 
@@ -1031,12 +1125,14 @@ export async function judgeTaskRouting(
     !complexity &&
     !executionMode &&
     !mcpProfile &&
-    neededMcpServers.length === 0
+    neededMcpServers === null
   ) {
     return null;
   }
 
-  const routeSpec = complexity ? COMPLEXITY_ROUTE_MAP[complexity] || null : null;
+  const routeSpec = complexity
+    ? COMPLEXITY_ROUTE_MAP[complexity] || null
+    : null;
 
   let codexProfile = routeSpec ? routeSpec.codexProfile : null;
   if (
@@ -1101,7 +1197,7 @@ export async function judgeMcpSelection(
     },
     options,
   );
-  if (!routing) return null;
+  if (!routing || !Array.isArray(routing.neededMcpServers)) return null;
 
   return {
     mcpProfile: routing.mcpProfile,
@@ -1133,7 +1229,7 @@ export async function judgeTargetSession(
       const summary = [
         c.name ? `name=${c.name}` : "",
         c.cwd ? `cwd=${c.cwd}` : "",
-        c.preview ? `preview=${clampText(c.preview, 220)}` : "",
+        c.preview ? `preview_metadata=${outputMetadata(c.preview)}` : "",
         c.status ? `status=${c.status}` : "",
       ]
         .filter(Boolean)
@@ -1160,7 +1256,9 @@ export async function judgeTargetSession(
         "Multiple active worker sessions exist. Select the session ID whose working directory, topic, or recent preview best matches the incoming prompt.",
       context: [
         "Candidates:",
-        ...normalized.map((c, idx) => `- candidate_${idx} (${c.id}): ${c.summary}`),
+        ...normalized.map(
+          (c, idx) => `- candidate_${idx} (${c.id}): ${c.summary}`,
+        ),
         "",
         `Prompt:\n${trimmedPrompt}`,
       ].join("\n"),
@@ -1302,8 +1400,7 @@ export async function judgeComposerState(
   options = {},
 ) {
   if (!isJevEnabled(options)) return null;
-  const tail = tailLines(capturedText, 25, 1200);
-  if (!tail) return null;
+  if (!String(capturedText).trim()) return null;
 
   const allowed = ["submitted_running", "stuck_in_composer", "modal_blocking"];
   const res = await queryJev(
@@ -1325,7 +1422,8 @@ export async function judgeComposerState(
         promptPrefix
           ? `Expected prompt prefix: ${clampText(promptPrefix, 200)}`
           : "",
-        `Terminal pane tail:\n${tail}`,
+        `Terminal pane metadata: ${outputMetadata(capturedText)}`,
+        `prompt_prefix_visible: ${Boolean(promptPrefix && capturedText.includes(promptPrefix))}`,
       ]
         .filter(Boolean)
         .join("\n\n"),
@@ -1346,10 +1444,9 @@ export async function judgeInstructionAck(
 ) {
   if (!isJevEnabled(options)) return null;
   const inst = clampText(instruction, 600);
-  const out = tailLines(recentOutput, 30, 1400);
-  if (!inst || !out) return null;
+  if (!inst || !String(recentOutput).trim()) return null;
 
-  const contextText = `Injected instruction:\n${inst}\n\nRecent worker output:\n${out}`;
+  const contextText = `Injected instruction:\n${inst}\n\nRecent worker output metadata: ${outputMetadata(recentOutput)}`;
   if (typeof options.batchClient === "function") {
     const batchRes = await queryJevBatch(
       {
@@ -1376,7 +1473,7 @@ export async function judgeInstructionAck(
       },
       options,
     );
-    if (!batchRes || !batchRes.ack) return null;
+    if (!batchRes?.ack) return null;
     if (batchRes.ack.confidence < minConfidence(options)) return null;
     return {
       acknowledged: Boolean(batchRes.ack.value),
@@ -1413,15 +1510,9 @@ export async function judgeInboxPriority(
   options = {},
 ) {
   if (!isJevEnabled(options)) return null;
-  const body = clampText(text || summary, 1000);
-  if (!body) return null;
+  if (!String(text || summary).trim()) return null;
 
-  const allowed = [
-    "urgent_blocker",
-    "needs_decision",
-    "progress_fyi",
-    "done",
-  ];
+  const allowed = ["urgent_blocker", "needs_decision", "progress_fyi", "done"];
   const res = await queryJev(
     {
       hook: "inbox_priority",
@@ -1441,8 +1532,8 @@ export async function judgeInboxPriority(
         "Classify the urgency of this worker-to-lead inbox message so the lead can prioritize responses.",
       context: [
         from ? `from: ${from}` : "",
-        summary ? `summary: ${clampText(summary, 200)}` : "",
-        `message:\n${body}`,
+        summary ? `summary_metadata: ${outputMetadata(summary)}` : "",
+        `message_metadata: ${outputMetadata(text || summary)}`,
       ]
         .filter(Boolean)
         .join("\n"),
@@ -1460,7 +1551,9 @@ export async function judgeInboxPriority(
   return {
     priority: res.choice,
     urgencyScore:
-      res.score ?? priorityWeight[res.choice] ?? Math.round(res.confidence * 100),
+      res.score ??
+      priorityWeight[res.choice] ??
+      Math.round(res.confidence * 100),
     confidence: res.confidence,
   };
 }
@@ -1478,17 +1571,19 @@ export async function judgeReviewGate(
   options = {},
 ) {
   if (!isJevEnabled(options)) return null;
-  const summary = clampText(handoffSummary || diffStat, 1200);
+  const summary = handoffSummary || diffStat;
   if (!summary && !currentReview) return null;
 
   const allowedGates = ["skip_review", "cross_review", "escalate_to_lead"];
   const stateText = [
-    diffStat ? `diff_stat:\n${clampText(diffStat, 600)}` : "",
-    summary ? `handoff_summary:\n${summary}` : "",
+    diffStat ? `diff_stat_metadata: ${outputMetadata(diffStat)}` : "",
+    summary ? `handoff_summary_metadata: ${outputMetadata(summary)}` : "",
     previousReviews
-      ? `previous_reviews:\n${clampText(previousReviews, 800)}`
+      ? `previous_reviews_metadata: ${outputMetadata(previousReviews)}`
       : "",
-    currentReview ? `current_review:\n${clampText(currentReview, 800)}` : "",
+    currentReview
+      ? `current_review_metadata: ${outputMetadata(currentReview)}`
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -1524,11 +1619,14 @@ export async function judgeReviewGate(
   }
 
   const results = await queryJevBatch({ state: stateText, questions }, options);
-  if (!results || !results.gate) return null;
+  if (!results?.gate) return null;
 
   const threshold = minConfidence(options);
   const gateRes = results.gate;
-  if (gateRes.confidence < threshold || !allowedGates.includes(gateRes.choice)) {
+  if (
+    gateRes.confidence < threshold ||
+    !allowedGates.includes(gateRes.choice)
+  ) {
     return null;
   }
 
