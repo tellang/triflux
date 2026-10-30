@@ -14,6 +14,7 @@ All notable changes to triflux will be documented in this file.
 - jev: 명시적으로 보낸 메시지를 모델 판단만으로 버리거나 모호한 피어 수신자를 자동 선택하지 않는다. 정상 진행 상태 계약, 빈 MCP 선택, CLI 배치 폴백을 수정한다.
 - jev: 원본 실행 로그의 외부 전송을 제한하고, 의미 판단에 필요한 발췌에는 민감정보 제거와 길이 제한을 적용한다.
 - live: 공유 Codex daemon의 워커 thread에 훅 비활성 설정을 전달하고, remote task 재개에 중복 권한 override를 붙이지 않는다. 전역 설정과 훅 신뢰 기록은 변경하지 않는다.
+- hooks: Codex 세션 등록과 활동 갱신 훅에 용도가 드러나는 실행 표시문구를 추가한다. 변경된 훅 정의는 자동 승인하지 않는다.
 
 ## [10.87.0] - 2026-10-28
 
