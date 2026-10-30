@@ -228,6 +228,51 @@ describe("jev-addon: opt-in 및 fail-open 검증", () => {
 });
 
 describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
+  it("의미 발췌는 600자 응답과 500자 과제의 경계를 자르거나 정규화하지 않는다", async () => {
+    const requests = [];
+    const options = {
+      env: { TFX_JEV_STATS: "0" },
+      client: async (request) => {
+        requests.push(request);
+        return { value: false, confidence: 0.95 };
+      },
+    };
+    const previous = ` ${"가".repeat(597)}! `;
+    const current = "B".repeat(600);
+    const seed = "T".repeat(500);
+    assert.deepEqual(await judgeSameFailureCause(previous, current, options), {
+      sameCause: false,
+      confidence: 0.95,
+    });
+    assert.deepEqual(
+      await judgePeerConvergence(
+        {
+          seed,
+          previousResponse: previous,
+          currentResponse: current,
+          hopIndex: 2,
+        },
+        options,
+      ),
+      { converged: false, confidence: 0.95 },
+    );
+    assert.equal(requests.length, 2);
+    for (const request of requests) {
+      assert.ok(request.context.includes(previous));
+      assert.ok(request.context.includes(current));
+    }
+    assert.ok(requests[1].context.includes(seed));
+    assert.equal(
+      (await judgeSameFailureCause(
+        "ENOENT /tmp/a",
+        "ENOENT /tmp/a",
+        options,
+      )) !== null,
+      true,
+    );
+    assert.equal(requests.length, 2);
+  });
+
   it("Hook 1: retry-state-machine reportVerifyFailAsync가 다른 문구의 같은 원인을 stuckCounter에 누적한다", async () => {
     const sm = createRetryStateMachine({ maxIterations: 5 });
     sm.startIteration();

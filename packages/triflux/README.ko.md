@@ -220,6 +220,33 @@ graph TD
 | MCP 레지스트리 | 낡았거나 지원하지 않는 MCP 항목을 관리형 항목으로 바꾼다. |
 | 합의 결과 | deep·consensus 실행은 일부 레인이 빠졌거나 의견이 갈린 결과를 숨기지 않고 표시한다. |
 
+### Jev 데이터 전송 정책
+
+Jev는 `JEV_API_KEY` 또는 `TYPESAFE_API_KEY`를 설정하거나, `TFX_JEV_CLI` 경로를
+명시하거나, Jev CLI를 찾을 수 있는 환경에서 `TFX_JEV=1`을 설정할 때 활성화된다.
+내장 판정 함수는 API 키가 있으면 외부 Jev HTTP 서비스로 입력을 보내고, 그렇지 않으면
+설정된 CLI의 인자로 전달한다.
+
+작업 프롬프트와 지시는 길이를 제한하기 전에 sanitizer로 보호하고 HTTP 또는 CLI 전송
+경계에서 다시 검사한다. 내장 함수의 상한은 작업 라우팅 1,400자, MCP 작업 선택 1,200자,
+작업 중 개입과 세션 선택 1,000자, 하위 작업 배정 800자, 주입한 지시 600자, 입력창의
+예상 프롬프트 접두사 200자다. 일반 stdout, stderr, rollout, worker 출력과 TUI 캡처는
+문자 수, 줄 수, 진행 여부, 입력 대기 여부, 오류 여부 같은 메타데이터만 보낸다.
+
+실패 원인이나 peer 응답의 의미 발췌는 `judgeSameFailureCause`와
+`judgePeerConvergence`에만 허용한다. 원인과 응답은 각각 한 줄 전체가 600자 이하여야
+하고, 선택적으로 전달하는 peer 과제는 500자 이하여야 한다. 길이는 JavaScript 문자열
+길이인 UTF-16 코드 단위로 센다. 긴 로그에서 일부 줄을 고르지 않으며 발췌를 자르거나
+공백을 정규화하지 않는다. 빈 입력, 길이 초과, 여러 줄, 제어 문자, 구조가 로그처럼 보이는
+입력은 거절한다. sanitizer가 발췌, peer 과제, 결합한 전송 문맥을 조금이라도 변경하면 client, HTTP,
+CLI를 호출하기 전에 `null`을 반환한다. 변경된 입력을 모두 거절하므로 서로 다른 원문이
+보호 후 같은 발췌로 합쳐지는 경우도 확정 판정에 쓰지 않는다. 거절된 비교는 STUCK이나
+peer 조기 종료에 Jev의 확정 근거를 더하지 않고 기존 결정적 제어를 유지한다.
+
+sanitizer는 자격 증명 대입, Bearer 토큰, private key 같은 패턴을 처리한다. 정규식으로
+모든 형태의 비밀을 제거한다고 보장할 수는 없다. `TFX_JEV=0`을 설정하면 키나 CLI가
+있어도 Jev를 끌 수 있으며, 민감한 작업에서는 비활성 상태를 유지한다.
+
 ### 선택적 native peer 어댑터
 
 `triflux setup`에서 명시적으로 동의하면 로컬 Claude·Codex 피어용 `~/.claude/scripts/tfx-peer send` 래퍼만 승인하고 Bash 전체 권한이나 sandbox를 완화하지 않는다. `~`는 셸 예시이며 Codex 규칙은 setup이 출력한 실제 절대경로에 맞고, Claude의 `written`은 UDS 쓰기만 뜻하며 Codex의 `agent_message`도 모델 완료를 보증하지 않는다. 설치 신뢰 조건, 재시도와 allow·rule·래퍼·동의 manifest 철회 절차는 [tfx-live 스킬](skills/tfx-live/SKILL.md#선택적-전역-native-peer-어댑터)에 둔다.

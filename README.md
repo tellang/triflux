@@ -220,6 +220,37 @@ Windows) and `hub/team/wt-manager.mjs`. Agent rules:
 | MCP registry | Replaces stale or unsupported MCP entries with managed ones. |
 | Consensus | Deep and consensus runs report degraded or disputed results instead of hiding them. |
 
+### Jev data transfer policy
+
+Jev is opt-in. It is enabled by `JEV_API_KEY` or `TYPESAFE_API_KEY`, by an explicit
+`TFX_JEV_CLI` path, or by `TFX_JEV=1` with a discoverable Jev CLI. Built-in judgments
+send inputs to the external Jev HTTP service when an API key is present, otherwise
+to the configured CLI through its arguments.
+
+Task prompts and instructions are sanitized before length limiting and again at
+the HTTP or CLI boundary. Built-in task routing keeps up to 1,400 characters, MCP
+task selection 1,200, busy actions and session selection 1,000, subtask assignment
+800, injected instructions 600, and expected composer prefixes 200. General
+stdout, stderr, rollout, worker output, and TUI captures contribute only metadata
+such as character and line counts and progress, input-waiting, or error flags.
+
+Only `judgeSameFailureCause` and `judgePeerConvergence` may send semantic excerpts
+from failure reasons or peer replies. Each reason or reply must fit within 600
+characters as one complete line; an optional peer task must fit within 500. These
+limits use JavaScript string length (UTF-16 code units). No lines are selected
+from a larger log, and these excerpts are never truncated or whitespace-normalized.
+Empty, oversized, multiline, control-character, and structured log-like inputs
+are rejected. If sanitization changes any excerpt, peer task, or assembled context, the judgment
+returns `null` before calling a client, HTTP, or CLI. Rejecting every changed
+candidate also prevents different originals from collapsing into the same
+redacted excerpt. A rejected comparison adds no Jev evidence for STUCK or early
+peer closure; existing deterministic control continues.
+
+The sanitizer recognizes patterns such as credential assignments, Bearer tokens,
+and private keys. Regular expressions cannot guarantee removal of every secret.
+Set `TFX_JEV=0` to disable Jev, including when a key or CLI is configured, and keep
+it disabled for sensitive tasks.
+
 ### Optional native peer adapter
 
 `triflux setup` optionally approves only the dedicated `~/.claude/scripts/tfx-peer send` wrapper for local Claude and Codex peers, without broad Bash or sandbox approval; `~` is a shell example, while Codex rules match the exact absolute path printed by setup. Claude reports `written` after its UDS write without a receiver ACK, while Codex sends a typed `agent_message` only to an eligible same-daemon thread; neither result proves model completion. See the [tfx-live skill](skills/tfx-live/SKILL.md#선택적-전역-native-peer-어댑터) for setup trust limits, retry behavior, and revocation of the allow entry, rule, wrapper, and consent manifest.

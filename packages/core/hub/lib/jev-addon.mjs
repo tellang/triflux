@@ -121,7 +121,7 @@ function sanitizeJevInput(value) {
       )
       .replace(/\bBearer\s+[^\s"',;]+/gi, "Bearer [REDACTED]")
       .replace(
-        /\b([\w.-]*(?:api[_-]?key|token|password|passwd|secret|credential)[\w.-]*["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)/gi,
+        /\b([\w.-]*(?:api[_-]?key|private[_-]?key|token|password|passwd|secret|credential)[\w.-]*["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)/gi,
         "$1[REDACTED]",
       )
       .replace(
@@ -164,6 +164,29 @@ function clampText(text, maxChars = 1600) {
   const str = sanitizeJevInput(String(text ?? "")).trim();
   if (str.length <= maxChars) return str;
   return str.slice(-maxChars);
+}
+
+// 두 의미 판정만 짧은 단일 문장을 허용한다. 로그에서 줄을 골라내지 않는다.
+function semanticExcerpt(value, maxChars = 600) {
+  const text = String(value ?? "");
+  if (
+    !text.trim() ||
+    text.length > maxChars ||
+    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u.test(text) ||
+    /^\s*(?:[[{]|\d{4}-\d{2}-\d{2}[T ])/.test(text)
+  ) {
+    return null;
+  }
+  const protectedText = sanitizeJevInput(text);
+  // 보호나 자르기로 반대 의미가 없어질 수 있으므로 변경된 입력은 판정하지 않는다.
+  // 공백도 보존해 서로 다른 원문이 같은 발췌로 합쳐지지 않게 한다.
+  return protectedText === text ? protectedText : null;
+}
+
+// 경계 라벨과 값이 결합된 뒤 보호 결과가 바뀌는 경우도 호출 전에 거절한다.
+function semanticContext(excerpts) {
+  const context = JSON.stringify(excerpts);
+  return sanitizeJevInput(context) === context ? context : null;
 }
 
 function isValidUnitNumber(val) {
@@ -609,9 +632,14 @@ export async function judgeSameFailureCause(
   options = {},
 ) {
   if (!isJevEnabled(options)) return null;
-  const prev = String(previousReason ?? "").trim();
-  const curr = String(currentReason ?? "").trim();
-  if (!prev || !curr) return null;
+  const prev = semanticExcerpt(previousReason);
+  const curr = semanticExcerpt(currentReason);
+  if (prev === null || curr === null) return null;
+  const context = semanticContext({
+    previousFailureExcerpt: prev,
+    currentFailureExcerpt: curr,
+  });
+  if (context === null) return null;
   if (prev === curr) return { sameCause: true, confidence: 1 };
 
   const res = await queryJev(
@@ -620,7 +648,7 @@ export async function judgeSameFailureCause(
       kind: "noul",
       query:
         "Are both failure messages caused by the exact same underlying blocker or root error (ignoring timestamps, PIDs, ports, or line number shifts)?",
-      context: `Previous failure metadata:\n${outputMetadata(prev)}\n\nCurrent failure metadata:\n${outputMetadata(curr)}`,
+      context,
     },
     options,
   );
@@ -699,9 +727,16 @@ export async function judgePeerConvergence(
   if (mode === "counting") return null;
   if (hopIndex < Math.max(2, participantsCount)) return null;
 
-  const prev = String(previousResponse ?? "").trim();
-  const curr = String(currentResponse ?? "").trim();
-  if (!prev || !curr) return null;
+  const prev = semanticExcerpt(previousResponse);
+  const curr = semanticExcerpt(currentResponse);
+  const task = seed ? semanticExcerpt(seed, 500) : "";
+  if (prev === null || curr === null || task === null) return null;
+  const context = semanticContext({
+    ...(task ? { task } : {}),
+    previousTurnExcerpt: prev,
+    currentTurnExcerpt: curr,
+  });
+  if (context === null) return null;
 
   const res = await queryJev(
     {
@@ -709,13 +744,7 @@ export async function judgePeerConvergence(
       kind: "noul",
       query:
         "Have the participants reached substantive agreement on the core task or entered a repetitive nitpick loop where further rounds will not add new conclusions?",
-      context: [
-        seed ? `Task:\n${clampText(seed, 500)}` : "",
-        `Previous turn metadata: ${outputMetadata(prev)}`,
-        `Current turn metadata: ${outputMetadata(curr)}`,
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
+      context,
     },
     options,
   );
