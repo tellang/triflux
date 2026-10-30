@@ -91,7 +91,7 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
 
   function micro(options) {
     const args = [CONTEXT_VIEW, CLAUDE_USAGE, CODEX_BUCKETS];
-    if (options !== undefined) args.push(options);
+    args.push({ currentMarker: "c", sessionStatus: "12%/88%", ...options });
     return stripAnsi(getMicroLine(...args));
   }
 
@@ -101,7 +101,7 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
     assert.ok(line.includes("c:"), "claude 세그먼트는 남아야 한다");
     assert.ok(line.includes("a:"), "agy 세그먼트는 남아야 한다");
     assert.ok(!line.includes("sv:"), "sv 세그먼트는 제거됐다");
-    assert.ok(line.includes("ctx:"), "ctx 세그먼트는 남아야 한다");
+    assert.ok(line.includes("12%/88%"), "현재 CLI 상태는 남아야 한다");
   });
 
   it("showAntigravity 가 false 면 a 세그먼트만 빠진다", () => {
@@ -119,7 +119,7 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
     );
     assert.ok(!/\bx:/.test(line), "codex 세그먼트가 남아 있다");
     assert.ok(!line.includes("a:"), "agy 세그먼트가 남아 있다");
-    assert.ok(line.includes("c:") && line.includes("ctx:"));
+    assert.ok(line.includes("c:") && line.includes("12%/88%"));
   });
 
   it("세그먼트를 빼도 나머지 순서는 유지된다", () => {
@@ -128,6 +128,6 @@ describe("hud/renderers: getMicroLine 정책 게이트", () => {
       line.indexOf("c:") < line.indexOf("a:"),
       `순서가 바뀌었다: ${line}`,
     );
-    assert.ok(line.indexOf("a:") < line.indexOf("ctx:"));
+    assert.ok(line.indexOf("12%/88%") < line.indexOf("a:"));
   });
 });

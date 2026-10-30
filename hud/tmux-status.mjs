@@ -56,12 +56,14 @@ export async function configureCodexHud(runTmux, target, env = process.env) {
     .join(" ")
     .replace(/#/g, "##");
   for (const [key, value] of [
-    ["status", "4"],
+    ["status", "3"],
     ["status-interval", "5"],
     ["status-format[0]", `#(${command} #{client_width})`],
-    ...[1, 2, 3].map((n) => [`status-format[${n}]`, `#{@tfx_hud_${n}}`]),
+    ...[1, 2].map((n) => [`status-format[${n}]`, `#{@tfx_hud_${n}}`]),
   ])
     await runTmux(null, ["set-option", "-t", target, key, value]);
+  for (const key of ["status-format[3]", "@tfx_hud_3"])
+    await runTmux(null, ["set-option", "-u", "-t", target, key]);
 }
 
 export async function updateTmuxHud(session, pane, columns) {
@@ -111,8 +113,7 @@ export async function updateTmuxHud(session, pane, columns) {
   rendering.child.stdin.end(JSON.stringify(input));
   const { stdout } = await rendering;
   const lines = stripAnsi(stdout).trim().split("\n");
-  const status = lines.pop();
-  for (let n = 1; n <= 3; n += 1) {
+  for (let n = 0; n < 3; n += 1) {
     await exec(
       "tmux",
       [
@@ -120,12 +121,12 @@ export async function updateTmuxHud(session, pane, columns) {
         "-t",
         session,
         `@tfx_hud_${n}`,
-        (lines[n - 1] || "").replace(/#/g, "##"),
+        (lines[n] || "").replace(/#/g, "##"),
       ],
       { timeout: 2000 },
     );
   }
-  return status;
+  return lines[0] || "";
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -134,6 +135,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.stdout.write(`${status}\n`);
     })
     .catch(() => {
-      process.stdout.write("Jev ? | 문맥 미확인\n");
+      process.stdout.write("c: ?/?\n");
     });
 }

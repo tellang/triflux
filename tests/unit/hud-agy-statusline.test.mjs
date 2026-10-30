@@ -23,6 +23,7 @@ function renderRows(input) {
         HOME: home,
         USERPROFILE: home,
         CODEX_HOME: join(home, ".codex"),
+        XDG_CONFIG_HOME: join(home, "config"),
         COLUMNS: "200",
         TFX_DISABLE_CODEX: "0",
         TFX_DISABLE_ANTIGRAVITY: "0",
@@ -46,22 +47,22 @@ const contextWindow = {
   current_usage: { input_tokens: 370_000 },
 };
 
-it("agy statusLine 입력이면 ctx 칸이 c 행이 아니라 a 행에 붙는다", () => {
+it("agy statusLine 입력이면 사용량/잔량이 c 행이 아니라 a 행에 붙는다", () => {
   const rows = renderRows({
     product: "antigravity",
     session_id: "agy-session",
     terminal_width: 200,
     context_window: contextWindow,
   });
-  assert.match(rows.a, /ctx:37%/);
-  assert.doesNotMatch(rows.c, /ctx:/);
+  assert.match(rows.a, /370k\/630k/);
+  assert.doesNotMatch(rows.c, /370k\/630k/);
 });
 
-it("Claude statusLine 입력이면 ctx 칸이 c 행에 붙는다", () => {
+it("Claude statusLine 입력이면 사용량/잔량이 c 행에 붙는다", () => {
   const rows = renderRows({
     session_id: "claude-session",
     context_window: contextWindow,
   });
-  assert.match(rows.c, /ctx:37%/);
-  assert.doesNotMatch(rows.a, /ctx:/);
+  assert.match(rows.c, /370k\/630k/);
+  assert.doesNotMatch(rows.a, /370k\/630k/);
 });

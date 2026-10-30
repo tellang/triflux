@@ -2,16 +2,15 @@ import { buildContextUsageView } from "./context-monitor.mjs";
 import { clampPercent, formatTokenCount } from "./utils.mjs";
 
 export async function sessionStatus(stdin, env = process.env) {
-  let jev = "Jev ?";
+  let jev = "";
   try {
     const { isJevEnabled } = await import("../hub/lib/jev-addon.mjs");
-    jev = isJevEnabled({ env }) ? "Jev ON" : "Jev OFF";
+    jev = isJevEnabled({ env }) ? "j " : "";
   } catch {
     // 설정을 판정하지 못한 것은 런타임 호출 실패의 증거가 아니다.
   }
   const window = stdin?.context_window;
   const view = buildContextUsageView(stdin);
-  let remaining = "미확인";
   const usageValues = Object.entries(window?.current_usage || {})
     .filter(([key]) =>
       [
@@ -22,21 +21,27 @@ export async function sessionStatus(stdin, env = process.env) {
       ].includes(key),
     )
     .map(([, value]) => value);
-  const knownZero =
+  const hasUsage =
     usageValues.length > 0 &&
-    usageValues.every((value) => value === 0) &&
+    usageValues.every((value) => Number.isFinite(value) && value >= 0);
+  const hasWindow =
     Number.isFinite(window?.context_window_size) &&
     window.context_window_size > 0;
-  if (knownZero) {
-    remaining = `${formatTokenCount(window.context_window_size).replace("K", "k")} 남음`;
-  } else if (view.source === "stdin.tokens") {
-    remaining = `${formatTokenCount(Math.max(0, view.limitTokens - view.usedTokens)).replace("K", "k")} 남음`;
-  } else {
-    const value =
-      window?.remaining_percentage ??
-      (window?.used_percentage == null ? null : 100 - window.used_percentage);
-    if (typeof value === "number" && Number.isFinite(value))
-      remaining = `${clampPercent(value)}% 남음`;
+  const knownZero = hasUsage && usageValues.every((value) => value === 0);
+  let context = "?/?";
+  if (hasWindow && hasUsage && (knownZero || view.source === "stdin.tokens")) {
+    const used = knownZero ? 0 : view.usedTokens;
+    const remaining = Math.max(0, window.context_window_size - used);
+    context = `${formatTokenCount(used).replace("K", "k")}/${formatTokenCount(remaining).replace("K", "k")}`;
+  } else if (
+    !(stdin?.product === "antigravity" && window?.context_window_size === 0)
+  ) {
+    const used = Number.isFinite(window?.used_percentage)
+      ? clampPercent(window.used_percentage)
+      : Number.isFinite(window?.remaining_percentage)
+        ? 100 - clampPercent(window.remaining_percentage)
+        : null;
+    if (used != null) context = `${used}%/${100 - used}%`;
   }
-  return `${jev} | 문맥 ${remaining}`;
+  return `${jev}${context}`;
 }

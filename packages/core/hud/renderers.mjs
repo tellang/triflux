@@ -24,7 +24,6 @@ import {
   SEVEN_DAY_MS,
   TIME_CELL_INNER_WIDTH,
 } from "./constants.mjs";
-import { buildContextUsageView } from "./context-monitor.mjs";
 import { cacheGap, claudePromptCache } from "./prompt-cache.mjs";
 import { getTerminalColumns, tierBar, tierDimBar } from "./terminal.mjs";
 import {
@@ -91,7 +90,7 @@ export function getMicroLine(
     showAntigravity = true,
     codexLoggedOut = false,
   } = options;
-  const ctxView = contextView || buildContextUsageView({});
+
   // Claude 5h/1w
   const cF =
     claudeUsage?.fiveHourPercent != null
@@ -144,7 +143,12 @@ export function getMicroLine(
       : agyText;
     segments.push(`${marker}${dim(":")}${agyValue}`);
   }
-  segments.push(`${dim("ctx:")}${contextPercentText(ctxView)}`);
+  if (options.sessionStatus) {
+    const index = segments.findIndex((segment) =>
+      stripAnsi(segment).startsWith(`${options.currentMarker}:`),
+    );
+    if (index >= 0) segments[index] += ` ${options.sessionStatus}`;
+  }
   return truncateAnsi(segments.join(" "), cols);
 }
 
