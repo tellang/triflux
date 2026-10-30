@@ -697,6 +697,8 @@ function listFiles(pluginRoot, dir, extensions) {
 function installEntries(pluginRoot) {
   return [
     "scripts/tfx-route.sh",
+    // 셸이 경로로 실행하므로 정적 import 탐색만으로는 포함되지 않는다.
+    "hub/bridge.mjs",
     "scripts/tfx-route-post.mjs",
     "scripts/tfx-route-worker.mjs",
     // tfx-route-worker.mjs 가 경로로 찾아 import 한다.

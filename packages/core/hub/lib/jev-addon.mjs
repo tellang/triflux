@@ -1,6 +1,6 @@
 // hub/lib/jev-addon.mjs
 // Opt-in Jev (System One) 판단 애드온.
-// JEV_API_KEY / TYPESAFE_API_KEY 환경변수 또는 jev CLI(TFX_JEV=1)가 있을 때만 동작하고,
+// 환경변수, 명시 CLI 또는 host 설정으로 활성화하며,
 // 설정이 없거나 호출이 실패하면 항상 null을 반환해 기존 결정론적 로직을 그대로 유지한다.
 
 import { execFile } from "node:child_process";
@@ -9,6 +9,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { whichCommand } from "../platform.mjs";
+import { readJevHostApiKey, readJevHostConfig } from "./jev-host-config.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -41,7 +42,12 @@ function isExplicitlyEnabled(env = process.env) {
 
 export function resolveJevApiKey(env = process.env) {
   const key = env.JEV_API_KEY || env.TYPESAFE_API_KEY || "";
-  return String(key).trim() || null;
+  return (
+    String(key).trim() ||
+    (isExplicitlyDisabled(env) || resolveJevCliBin(env)
+      ? null
+      : readJevHostApiKey(env))
+  );
 }
 
 export function resolveJevCliBin(env = process.env) {
@@ -75,6 +81,8 @@ function isDirectEnvObject(obj) {
     return false;
   }
   return (
+    "HOME" in obj ||
+    "XDG_CONFIG_HOME" in obj ||
     "TFX_JEV" in obj ||
     "JEV_API_KEY" in obj ||
     "TYPESAFE_API_KEY" in obj ||
@@ -102,8 +110,9 @@ export function isJevEnabled(options = {}) {
   ) {
     return true;
   }
-  if (resolveJevApiKey(env)) return true;
+  if (String(env.JEV_API_KEY || env.TYPESAFE_API_KEY || "").trim()) return true;
   if (resolveJevCliBin(env)) return true;
+  if (readJevHostConfig(env)) return true;
   return false;
 }
 

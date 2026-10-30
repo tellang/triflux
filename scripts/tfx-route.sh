@@ -704,6 +704,28 @@ bridge_cli() {
   "$NODE_BIN" "$bridge_script" "$@" 2>/dev/null
 }
 
+# 키는 JS에서만 읽는다. 셸에는 활성 여부만 전달한다.
+jev_enabled() {
+  local bridge_script module_path enabled flag="${TFX_JEV:-}"
+  flag="${flag#"${flag%%[![:space:]]*}"}"
+  flag="${flag%"${flag##*[![:space:]]}"}"
+  case "$flag" in
+    0|[Ff][Aa][Ll][Ss][Ee]|[Oo][Ff][Ff]) return 1 ;;
+  esac
+  [[ -n "${JEV_API_KEY:-}${TYPESAFE_API_KEY:-}${TFX_JEV_CLI:-}${JEV_CLI_BIN:-}" ]] && return 0
+  case "$flag" in
+    1|[Tt][Rr][Uu][Ee]|[Oo][Nn]) return 0 ;;
+  esac
+  bridge_script="$(resolve_bridge_script 2>/dev/null)" || return 1
+  module_path="$(dirname "$bridge_script")/lib/jev-addon.mjs"
+  enabled="$("${NODE_BIN:-node}" --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const { isJevEnabled } = await import(pathToFileURL(process.argv[1]));
+    process.stdout.write(isJevEnabled() ? "true" : "false");
+  ' "$module_path" 2>/dev/null)" || return 1
+  [[ "$enabled" == "true" ]]
+}
+
 bridge_json_get() {
   local json="${1:-}"
   local path="${2:-}"
@@ -1874,7 +1896,7 @@ heartbeat_monitor() {
         jev_stall_hits=0
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=${probe_state}(probe-grace)" >&2
       else
-        if [[ "$stall_count" -ge 60 && "$stall_count" -lt "$stall_threshold" ]] && [[ -n "${TFX_JEV:-}${JEV_API_KEY:-}${TYPESAFE_API_KEY:-}${TFX_JEV_CLI:-}${JEV_CLI_BIN:-}" && "${TFX_JEV:-1}" != "0" ]]; then
+        if [[ "$stall_count" -ge 60 && "$stall_count" -lt "$stall_threshold" ]] && jev_enabled; then
           local _jev_bridge="" _jev_out="" _jev_status=""
           if declare -f resolve_bridge_script >/dev/null 2>&1; then
             _jev_bridge="$(resolve_bridge_script 2>/dev/null || true)"
@@ -1893,7 +1915,7 @@ heartbeat_monitor() {
           fi
         fi
         if [[ "$stall_count" -ge "$stall_threshold" ]]; then
-          if [[ "$jev_stall_hits" -lt 2 && "$jev_grace_granted" -eq 0 ]] && [[ -n "${TFX_JEV:-}${JEV_API_KEY:-}${TYPESAFE_API_KEY:-}${TFX_JEV_CLI:-}${JEV_CLI_BIN:-}" && "${TFX_JEV:-1}" != "0" ]]; then
+          if [[ "$jev_stall_hits" -lt 2 && "$jev_grace_granted" -eq 0 ]] && jev_enabled; then
             local _jev_grace_bridge="" _jev_grace_out=""
             if declare -f resolve_bridge_script >/dev/null 2>&1; then
               _jev_grace_bridge="$(resolve_bridge_script 2>/dev/null || true)"
@@ -2379,13 +2401,7 @@ run_codex_exec() {
 }
 
 apply_jev_pre_route() {
-  local jev_flag="${TFX_JEV:-}"
-  case "$jev_flag" in
-    0|false|off|FALSE|OFF) return 0 ;;
-  esac
-  if [[ -z "${JEV_API_KEY:-${TYPESAFE_API_KEY:-}}" && -z "${TFX_JEV_CLI:-}" && "$jev_flag" != "1" && "$jev_flag" != "true" && "$jev_flag" != "on" ]]; then
-    return 0
-  fi
+  jev_enabled || return 0
   [[ -n "${PROMPT:-}" ]] || return 0
 
   local jev_row=""

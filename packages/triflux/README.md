@@ -238,6 +238,16 @@ Jev is opt-in. It is enabled by `JEV_API_KEY` or `TYPESAFE_API_KEY`, by an expli
 send inputs to the external Jev HTTP service when an API key is present, otherwise
 to the configured CLI through its arguments.
 
+A host can enable Jev for existing Claude, Codex, Antigravity, and HUD processes with
+`~/.config/triflux/jev.json` (`$XDG_CONFIG_HOME/triflux/jev.json` when set):
+`{"enabled":true,"apiKeyFile":"/absolute/path/private.env"}`.
+The key file must be owned by the current user with mode `0600`; only literal
+`JEV_API_KEY` or `TYPESAFE_API_KEY` assignments are read as data, never sourced.
+Environment keys and CLI settings retain precedence. `TFX_JEV=0`, `false`, or `off`
+disables Jev even with host configuration. The HUD badge indicates enabled
+configuration, not successful authentication. Invalid credentials and failed calls
+fall back to the existing deterministic behavior. No restart is needed for host-config reads.
+
 Task prompts and instructions are sanitized before length limiting and again at
 the HTTP or CLI boundary. Built-in task routing keeps up to 1,400 characters, MCP
 task selection 1,200, busy actions and session selection 1,000, subtask assignment
