@@ -29,7 +29,7 @@ test("agy tfx-live adapter keeps the canonical skill body", () => {
   assert.ok(adapter.startsWith(canonical.slice(0, frontmatterEnd)));
   const body = canonical.slice(frontmatterEnd);
   const hostContract =
-    "\n## agy 호스트 계약\n\nagy 에서는 이 스킬을 읽고 셸에서 `tfx-live` 명령을 실행한다. CLI 의 `--cli` 는 현재 호스트가 아니라 대상 세션을 고른다. 로컬 Claude·Codex 대상은 `<홈 절대경로>/.claude/scripts/tfx-peer send`, agy 대상은 `tfx-live send`를 쓴다. `tfx-peer`와 `tfx-live`는 run_command 의 `BypassSandbox: true`로 실행한다. 터미널 샌드박스가 `~/.claude/scripts` 실행과 tmux, Claude 소켓 연결을 막는다.\n";
+    "\n## agy 호스트 계약\n\nagy 에서는 이 스킬을 읽고 셸에서 `tfx-live` 명령을 실행한다. CLI 의 `--cli` 는 현재 호스트가 아니라 대상 세션을 고른다. 로컬 Claude, Codex, agy 대상은 `<홈 절대경로>/.claude/scripts/tfx-peer send`를 쓴다. `tfx-peer`와 `tfx-live`는 run_command 의 `BypassSandbox: true`로 실행한다. 터미널 샌드박스가 `~/.claude/scripts` 실행과 tmux, Claude 소켓 연결을 막는다.\n";
   assert.ok(body.startsWith("\n# tfx-live\n"));
   assert.equal(
     adapter.slice(frontmatterEnd),

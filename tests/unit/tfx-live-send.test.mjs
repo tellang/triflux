@@ -99,7 +99,7 @@ describe("tfx-live send", () => {
     assert.equal(lines[1], "점검 완료했다.");
     assert.equal(
       lines[2],
-      "회신: tfx-live send --to 'agy:peer-worker' --message '...'",
+      `회신: ${path.join(os.homedir(), ".claude", "scripts", "tfx-peer")} send --to 'agy:peer-worker' --message '...'`,
     );
   });
 
@@ -443,14 +443,47 @@ describe("tfx-live send", () => {
           target: "agy-peer:0.0",
           conversationId: "847c0490-8c04-443a-80af-c370837d48cb",
         },
+        {
+          name: "agy-fresh",
+          session: "agy-fresh",
+          target: "agy-fresh:0.0",
+          conversationId: null,
+        },
       ],
     });
+
+    const freshRes = await doSend(
+      {
+        to: "agy:agy-fresh",
+        message: "첫 지시",
+        from: "codex:lead",
+      },
+      deps,
+    );
+    assert.equal(freshRes.ok, false);
+    assert.equal(freshRes.reason, "use-tfx-peer");
+    assert.match(freshRes.error, /tfx-live ask --cli agy --session agy-fresh/);
+
+    const directRes = await doSend(
+      {
+        to: "847c0490-8c04-443a-80af-c370837d48cb",
+        message: "agy 깨우기",
+        from: "codex:lead",
+      },
+      deps,
+    );
+    assert.equal(directRes.ok, false);
+    assert.equal(directRes.to.cli, "agy");
+    assert.equal(directRes.reason, "use-tfx-peer");
+    assert.equal(directRes.transport, "native-peer");
+    assert.equal(askCalls.length, 0);
 
     const res = await doSend(
       {
         to: "847c0490-8c04-443a-80af-c370837d48cb",
         message: "agy 깨우기",
         from: "codex:lead",
+        viaTmux: true,
       },
       deps,
     );
@@ -639,5 +672,11 @@ it("Windows Claude reply uses node in PowerShell and quotes the exact target", (
       platform: "win32",
     }),
     "회신: Windows 에서는 Codex 대상을 아직 지원하지 않는다",
+  );
+  assert.equal(
+    formatPeerReply({ cli: "agy", name: "lead" }, "claude", {
+      platform: "win32",
+    }),
+    "회신: Windows 에서는 agy 대상을 아직 지원하지 않는다",
   );
 });

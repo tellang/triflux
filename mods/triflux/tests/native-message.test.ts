@@ -18,16 +18,16 @@ function processStub(on: On, respond: (argv: readonly string[]) => unknown, exit
 }
 
 for (const to of ['agy:10.14 검토', 'antigravity:10.14 검토']) {
-  test(`${to} 는 원래 도구 없이 tfx-live send 로 전달한다`, async ($, on) => {
+  test(`${to} 는 원래 도구 없이 tfx-peer send 로 전달한다`, async ($, on) => {
     let nativeCalls = 0
     on('tool.call', { tool: 'SendMessage' }, () => { nativeCalls++; return { result: 'native' } })
-    const calls = processStub(on, () => ({ ...sent, to: { ...sent.to, cli: 'agy' }, transport: 'tmux' }))
+    const calls = processStub(on, () => ({ status: 'written', retrySafe: false, modelReceipt: false }))
     const message = '검토해줘\n$(touch /tmp/never) "따옴표"'
     const result = await $.tool.call({ tool: 'SendMessage', to, message })
     expect(nativeCalls).toBe(0)
-    expect(calls).toEqual([['tfx-live', 'send', '--to', to, '--message', message, '--no-wait']])
+    expect(calls).toEqual([['tfx-peer', 'send', '--to', 'agy:10.14 검토', '--message', message]])
     expect(result.result).toContain('agy:10.14 검토')
-    expect(result.result).toContain('tmux')
+    expect(result.result).toContain('native peer')
     expect(result.deny).toBeUndefined()
   })
 }
@@ -43,11 +43,11 @@ test('접두사 없는 성공은 원래 결과를 보존하고 프로세스를 �
 test('없는 이름 오류 뒤에는 한 번만 send 를 시도한다', async ($, on) => {
   let nativeCalls = 0
   on('tool.call', { tool: 'SendMessage' }, () => { nativeCalls++; return missing })
-  const calls = processStub(on, () => sent)
+  const calls = processStub(on, () => ({ status: 'written', retrySafe: false, modelReceipt: false }))
   const result = await $.tool.call({ tool: 'SendMessage', to: '10.14 검토', message: '검토' })
   expect(nativeCalls).toBe(1)
-  expect(calls).toEqual([['tfx-live', 'send', '--to', 'agy:10.14 검토', '--message', '검토', '--no-wait']])
-  expect(result.result).toContain('tmux')
+  expect(calls).toEqual([['tfx-peer', 'send', '--to', 'agy:10.14 검토', '--message', '검토']])
+  expect(result.result).toContain('native peer')
   expect(result.isError).toBeUndefined()
 })
 
@@ -57,10 +57,10 @@ for (const [kind, native] of [
 ] as const) {
   test(`text 없는 ${kind}의 이름 오류도 send 를 시도한다`, async ($, on) => {
     on('tool.call', { tool: 'SendMessage' }, () => native)
-    const calls = processStub(on, () => sent)
+    const calls = processStub(on, () => ({ status: 'written', retrySafe: false, modelReceipt: false }))
     const result = await $.tool.call({ tool: 'SendMessage', to: '10.14 검토', message: '검토' })
     expect(calls.length).toBe(1)
-    expect(result.result).toContain('tmux')
+    expect(result.result).toContain('native peer')
   })
 }
 
@@ -156,7 +156,7 @@ test('재시도 프로세스 실패도 원래 SendMessage 를 다시 실행하�
 
 test('재시도 send 실패는 원래 결과를 보존한다', async ($, on) => {
   on('tool.call', { tool: 'SendMessage' }, () => missing)
-  const calls = processStub(on, () => ({ ok: false, reason: 'ambiguous-target', error: '세션이 둘이다' }), 1)
+  const calls = processStub(on, () => '', 1, 'Live local target not found\n')
   expect(await $.tool.call({ tool: 'SendMessage', to: '10.14 검토', message: '검토' })).toEqual(missing)
   expect(calls.length).toBe(1)
 })
@@ -208,12 +208,10 @@ for (const to of ['claude:missing', 'Claude:missing']) {
   })
 }
 
-test('agy 전송 실패는 후보 목록을 알린다', async ($, on) => {
-  const calls = processStub(on, () => ({ ok: false, reason: 'ambiguous-target', candidates: [
-    { cli: 'agy', name: '검토', target: 'ag:0.0' }, { cli: 'agy', name: '검토', target: 'ag:0.1' },
-  ] }), 1)
+test('agy 전송 실패는 stderr 오류를 알린다', async ($, on) => {
+  const calls = processStub(on, () => '', 1, 'Ambiguous live target\n')
   const result = await $.tool.call({ tool: 'SendMessage', to: 'agy:검토', message: '검토' })
-  expect(result.deny).toContain('agy:검토 (ag:0.0), agy:검토 (ag:0.1)')
+  expect(result.deny).toContain('Ambiguous live target')
   expect(calls.length).toBe(1)
 })
 

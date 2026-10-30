@@ -4,6 +4,7 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  deliverAgy,
   deliverClaude,
   deliverCodex,
   parsePeerArgs,
@@ -11,6 +12,7 @@ import {
   resolveClaudeRegistryTarget,
 } from "../hub/team/native-peer.mjs";
 import {
+  agyConversation,
   discoverPeerTargets,
   formatPeerReply,
   matchPeerCandidates,
@@ -44,6 +46,8 @@ export async function main(args = process.argv.slice(2), deps = {}) {
   const [cli, name] = to.split(":");
   if (platform === "win32" && cli === "codex")
     throw new Error("Windows 에서는 Codex 대상을 아직 지원하지 않는다");
+  if (platform === "win32" && cli === "agy")
+    throw new Error("Windows 에서는 agy 대상을 아직 지원하지 않는다");
   const env = deps.env || process.env;
   // Windows 에는 tmux/ps 기반 탐색이 없다.
   const candidates =
@@ -82,6 +86,42 @@ export async function main(args = process.argv.slice(2), deps = {}) {
       matched.length ? "Ambiguous target" : "Live local target not found",
     );
   const target = matched[0];
+  if (cli === "agy") {
+    if (target.raw?.running === false)
+      throw new Error("agy target is not running");
+    const conversationId = target.conversationId || target.raw?.conversationId;
+    if (!conversationId)
+      throw new Error(
+        "agy conversation ID unavailable; 첫 입력 전 새 세션은 tfx-live ask --cli agy --session <세션> --prompt <본문> --no-wait 로 깨워라",
+      );
+    let appDataDir = target.appDataDir || target.raw?.appDataDir || null;
+    const pid = target.pid || target.raw?.pid;
+    if (pid || deps.resolveAgyConversation) {
+      const current = await (deps.resolveAgyConversation || agyConversation)(
+        pid,
+      );
+      if (
+        !current ||
+        current.conversationId !== conversationId ||
+        (appDataDir && current.appDataDir && current.appDataDir !== appDataDir)
+      ) {
+        throw new Error(
+          "agy target conversation changed; refusing stale target",
+        );
+      }
+      appDataDir = current.appDataDir || appDataDir;
+    }
+    if (!appDataDir) throw new Error("agy target appDataDir unavailable");
+    return (deps.deliverAgy || deliverAgy)({
+      conversationId,
+      appDataDir,
+      requireExisting: true,
+      message: formattedMessage,
+      sender: `${sender.cli}:${String(sender.name || sender.sessionId || "unknown").replace(/[\r\n\u2028\u2029]+/g, " ")}`,
+      home: deps.home,
+      env,
+    });
+  }
   if (!target.threadId) throw new Error("Codex thread UUID unavailable");
   if (!["tmux-option", "registry"].includes(target.raw?.threadSource))
     throw new Error(

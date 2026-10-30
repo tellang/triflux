@@ -435,6 +435,7 @@ async function agyConversation(pid) {
     );
     return match
       ? {
+          appDataDir: match[1],
           conversationId: match[2],
           dbPath: pathJoin(match[1], "conversations", `${match[2]}.db`),
         }
@@ -452,7 +453,12 @@ async function discoverAgyTmuxSessions({ cwd = null } = {}) {
       "list-panes",
       "-a",
       "-F",
-      TMUX_DISCOVERY_FORMAT,
+      [
+        TMUX_DISCOVERY_FORMAT,
+        "#{set-titles}",
+        "#{set-titles-string}",
+        "#{@tfx_agy_name}",
+      ].join("\t"),
     ]));
   } catch (error) {
     return {
@@ -463,21 +469,41 @@ async function discoverAgyTmuxSessions({ cwd = null } = {}) {
     };
   }
   for (const line of stdout.split(/\r?\n/)) {
-    const [session, , , window, pane, paneCwd, , , , pid, paneId] =
-      line.split("\t");
+    const [
+      session,
+      ,
+      ,
+      window,
+      pane,
+      paneCwd,
+      ,
+      ,
+      ,
+      pid,
+      paneId,
+      setTitles,
+      setTitlesString,
+      agyName,
+    ] = line.split("\t");
     if (!paneId || (result.cwd && normalizeCwd(paneCwd) !== result.cwd))
       continue;
     const target = `${session}:${window}.${pane}`;
     const agyProcess = await paneCliProcess(target, "agy", Number(pid));
     if (!agyProcess) continue;
     const conversation = await agyConversation(agyProcess.pid);
+    const title =
+      agyName ||
+      (setTitles === "1" && setTitlesString
+        ? setTitlesString.replace(/##/g, "#")
+        : null);
     result.sessions.push({
       session,
-      name: session,
+      name: title || session,
       target,
       paneId,
       cwd: normalizeCwd(paneCwd),
       ...agyProcess,
+      appDataDir: conversation?.appDataDir ?? null,
       conversationId: conversation?.conversationId ?? null,
     });
   }
@@ -5318,6 +5344,7 @@ async function discoverPeerTargets({
         target: s.target || s.session,
         session: s.session || null,
         paneId: s.paneId || null,
+        appDataDir: s.appDataDir || null,
         conversationId: s.conversationId || null,
         aliases,
         raw: s,
@@ -5460,10 +5487,12 @@ function formatPeerReply(
   }
   if (platform === "win32" && cli === "codex")
     return "회신: Windows 에서는 Codex 대상을 아직 지원하지 않는다";
+  if (platform === "win32" && cli === "agy")
+    return "회신: Windows 에서는 agy 대상을 아직 지원하지 않는다";
   const command =
     platform === "win32" && cli === "claude"
       ? String.raw`node "$env:APPDATA\npm\node_modules\triflux\bin\tfx-peer.mjs"`
-      : cli === "claude" || cli === "codex"
+      : cli === "claude" || cli === "codex" || cli === "agy"
         ? shellQuote([pathJoin(homedir(), ".claude", "scripts", "tfx-peer")])
         : "tfx-live";
   const to = `${cli}:${cli === "claude" && sessionId ? sessionId : oneLineName}`
@@ -5590,7 +5619,8 @@ async function doSend(opts = {}, deps = {}) {
     };
   }
 
-  if (["claude", "codex"].includes(target.cli) && !opts.viaTmux) {
+  if (["claude", "codex", "agy"].includes(target.cli) && !opts.viaTmux) {
+    const needsInitialAsk = target.cli === "agy" && !target.conversationId;
     return {
       ok: false,
       to: summarizePeerCandidate(target),
@@ -5602,7 +5632,9 @@ async function doSend(opts = {}, deps = {}) {
       done: false,
       inputSent: false,
       reason: "use-tfx-peer",
-      error: `로컬 Claude·Codex 대상에는 ${shellQuote([pathJoin(homedir(), ".claude", "scripts", "tfx-peer"), "send", "--to", `${target.cli}:${target.cli === "claude" ? target.sessionId || target.name : target.name}`, "--message", "..."])} 로 보내라.`,
+      error: needsInitialAsk
+        ? `첫 입력 전 새 agy 세션에는 대화 ID가 없다. ${shellQuote(["tfx-live", "ask", "--cli", "agy", "--session", target.session || target.name, "--prompt", "...", "--no-wait"])} 로 첫 지시를 보내거나 --via-tmux 를 명시하라.`
+        : `로컬 Claude, Codex, agy 대상에는 ${shellQuote([pathJoin(homedir(), ".claude", "scripts", "tfx-peer"), "send", "--to", `${target.cli}:${target.cli === "claude" ? target.sessionId || target.name : target.name}`, "--message", "..."])} 로 보내라.`,
     };
   }
 
@@ -7635,6 +7667,7 @@ async function main() {
 
 export {
   ADAPTERS,
+  agyConversation,
   agyStepText,
   agyWaitVerdict,
   appleScriptString,
