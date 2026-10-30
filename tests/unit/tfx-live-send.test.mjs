@@ -85,6 +85,7 @@ describe("tfx-live send", () => {
     });
     const opts = {
       to: "agy:shared",
+      viaTmux: true,
       message: "전달",
       from: "codex:sender",
       env: { JEV_API_KEY: "mock-key", TFX_JEV_STATS: "0" },
