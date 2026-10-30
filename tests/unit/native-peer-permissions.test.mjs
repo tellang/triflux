@@ -537,3 +537,80 @@ it("Windows approval is unsupported without prompts or filesystem changes", asyn
     cleanup(x);
   }
 });
+
+it("설치된 로컬 send 승인 규칙은 remote-send와 receiver에 매치하지 않는다", async () => {
+  const x = fixture();
+  try {
+    const p = peerPermissionPlan(x);
+    assert.equal(
+      installPeerPermission({ ...x, consent: true }).status,
+      "approved",
+    );
+    const rule = fs.readFileSync(p.rule, "utf8");
+    const pattern = JSON.parse(
+      rule.match(/^prefix_rule\(pattern=(\[.*\]), decision="allow"\)\n$/)[1],
+    );
+    const settings = JSON.parse(fs.readFileSync(p.settings, "utf8"));
+    const bashPrefixes = settings.permissions.allow.map((allow) =>
+      allow.slice("Bash(".length, -":*)".length),
+    );
+    const local = [
+      p.wrapper,
+      "send",
+      "--to",
+      "codex:수신",
+      "--message",
+      "본문",
+    ];
+    const remote = [
+      p.wrapper,
+      "remote-send",
+      "--host",
+      "m5",
+      "--reply-host",
+      "m2",
+      "--to",
+      "codex:수신",
+      "--message",
+      "본문",
+    ];
+    for (const [argv, expected] of [
+      [local, true],
+      [remote, false],
+      [[p.wrapper, "_receive"], false],
+    ]) {
+      assert.equal(
+        pattern.every((part, i) => argv[i] === part),
+        expected,
+      );
+      const command = argv.join(" ");
+      assert.equal(
+        bashPrefixes.some(
+          (prefix) => command === prefix || command.startsWith(`${prefix} `),
+        ),
+        expected,
+      );
+    }
+    const { main } = await import("../../bin/tfx-peer.mjs");
+    let effects = 0;
+    await assert.rejects(
+      main([...local.slice(1), "--remote", "m5", "--reply-host", "m2"], {
+        env: { TFX_LIVE_FROM: "codex:발신" },
+        discover: async () => {
+          effects++;
+          return [];
+        },
+        resolveRemoteHost: () => ({ name: "m5", os: "linux" }),
+        spawn: () => {
+          effects++;
+          throw new Error("unexpected SSH");
+        },
+      }),
+      /Invalid peer argument/,
+    );
+    assert.equal(effects, 0);
+    assert.equal(inspectPeerPermission(x).status, "approved");
+  } finally {
+    cleanup(x);
+  }
+});

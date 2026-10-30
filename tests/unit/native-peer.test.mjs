@@ -473,7 +473,7 @@ it("npm-style symlink CLI entrypoint executes and rejects unknown subcommand", (
     fs.symlinkSync(path.resolve("bin/tfx-peer.mjs"), link);
     const p = spawnSync(process.execPath, [link, "ask"], { encoding: "utf8" });
     assert.equal(p.status, 1);
-    assert.match(p.stderr, /Only send and self are supported/);
+    assert.match(p.stderr, /Only send, remote-send and self are supported/);
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

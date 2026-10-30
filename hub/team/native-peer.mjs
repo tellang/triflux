@@ -14,15 +14,47 @@ import { JsonRpcWsUdsClient } from "../workers/lib/jsonrpc-ws-uds.mjs";
 const WAKE =
   "A peer agent_message was delivered immediately before this tool output. Read it and respond within this session.";
 
+export function parsePeerSpec(value) {
+  if (
+    typeof value !== "string" ||
+    /[\x00-\x1f\x7f-\x9f\u2028\u2029]/u.test(value) ||
+    !/^(claude|codex|agy|antigravity):[^:]+$/i.test(value)
+  )
+    throw new Error("Use exact claude:NAME, codex:NAME, or agy:NAME target");
+  const [rawCli, name] = value.split(":");
+  if (
+    !name.trim() ||
+    name !== name.trim() ||
+    name.startsWith("-") ||
+    name.length > 512
+  )
+    throw new Error("Invalid peer name");
+  const cli =
+    rawCli.toLowerCase() === "antigravity" ? "agy" : rawCli.toLowerCase();
+  return `${cli}:${name}`;
+}
+
 export function parsePeerArgs(args) {
-  if (args[0] !== "send" && args[0] !== "self")
-    throw new Error("Only send and self are supported");
+  if (!["send", "self", "remote-send"].includes(args[0]))
+    throw new Error("Only send, remote-send and self are supported");
+  const remote = args[0] === "remote-send";
   const target = args[0] === "self" ? "--session" : "--to";
+  const allowed =
+    target === "--session"
+      ? [target, "--message"]
+      : remote
+        ? [target, "--message", "--from", "--host", "--reply-host"]
+        : [target, "--message", "--from"];
   const parsed = {};
   for (let i = 1; i < args.length; i += 2) {
     const flag = args[i],
       value = args[i + 1];
-    if (![target, "--message"].includes(flag) || !value || parsed[flag])
+    if (
+      !allowed.includes(flag) ||
+      typeof value !== "string" ||
+      !value ||
+      Object.hasOwn(parsed, flag)
+    )
       throw new Error(`Invalid peer argument: ${flag}`);
     parsed[flag] = value;
   }
@@ -36,14 +68,19 @@ export function parsePeerArgs(args) {
     );
   if (target === "--session")
     return { sessionId: parsed["--session"], message: parsed["--message"] };
-  if (!/^(claude|codex|agy|antigravity):[^:]+$/i.test(parsed["--to"]))
-    throw new Error("Use exact claude:NAME, codex:NAME, or agy:NAME target");
-  const sep = parsed["--to"].indexOf(":");
-  const rawCli = parsed["--to"].slice(0, sep).toLowerCase();
-  const cli = rawCli === "antigravity" ? "agy" : rawCli;
+  if (remote && (!parsed["--host"] || !parsed["--reply-host"]))
+    throw new Error("remote-send requires --host and --reply-host");
+  for (const flag of ["--host", "--reply-host"]) {
+    if (parsed[flag] && !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(parsed[flag]))
+      throw new Error(`Invalid host alias: ${flag}`);
+  }
   return {
-    to: `${cli}:${parsed["--to"].slice(sep + 1)}`,
+    to: parsePeerSpec(parsed["--to"]),
     message: parsed["--message"],
+    ...(parsed["--from"] ? { from: parsePeerSpec(parsed["--from"]) } : {}),
+    ...(remote
+      ? { host: parsed["--host"], replyHost: parsed["--reply-host"] }
+      : {}),
   };
 }
 
@@ -58,7 +95,12 @@ export function validateCodexTarget(thread, id) {
     throw new Error("Codex thread is not an eligible loaded root user thread");
 }
 
-export async function sendCodexPeer({ client, threadId, message }) {
+export async function sendCodexPeer({
+  client,
+  threadId,
+  message,
+  onWriteStart,
+}) {
   let cursor;
   let loaded = false;
   do {
@@ -81,6 +123,7 @@ export async function sendCodexPeer({ client, threadId, message }) {
   });
   validateCodexTarget(read.thread, threadId);
   try {
+    onWriteStart?.();
     await client.request("thread/inject_items", {
       threadId,
       items: [
@@ -162,6 +205,7 @@ export function resolveCodexSocket(home = os.homedir(), env = process.env) {
 export async function deliverCodex({
   threadId,
   message,
+  onWriteStart,
   home = os.homedir(),
   env = process.env,
   platform = process.platform,
@@ -177,7 +221,7 @@ export async function deliverCodex({
       capabilities: { experimentalApi: true },
     });
     client.notify("initialized", {});
-    return await sendCodexPeer({ client, threadId, message });
+    return await sendCodexPeer({ client, threadId, message, onWriteStart });
   } finally {
     client.close();
   }
@@ -400,6 +444,7 @@ export function resolveClaudeRegistryTarget(
 export async function deliverClaude({
   sessionId,
   message,
+  onWriteStart,
   home = os.homedir(),
   platform = process.platform,
   receiver = resolveClaudeReceiver({ sessionId, home, platform }),
@@ -444,6 +489,7 @@ export async function deliverClaude({
         );
         conn.once("error", reject);
         conn.once("connect", () => {
+          onWriteStart?.();
           conn.write(
             `${JSON.stringify({ type: "auth", token: receiver.peerToken })}\n${JSON.stringify(frame)}\n`,
           );
@@ -480,6 +526,7 @@ export function deliverAgy({
   appDataDir: targetAppDataDir = null,
   requireExisting = false,
   message,
+  onWriteStart,
   sender = "unknown",
   env = process.env,
   home = null,
@@ -534,6 +581,7 @@ export function deliverAgy({
   const jsonPath = path.join(messagesDir, `${msgId}.json`);
   const markerPath = path.join(undeliveredDir, msgId);
   try {
+    onWriteStart?.();
     io.writeFileSync(jsonPath, JSON.stringify(payload, null, 2), {
       mode: 0o600,
     });

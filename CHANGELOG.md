@@ -2,6 +2,15 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.89.0] - 2026-10-30
+
+### Added
+- peer: `remote-send --host HOST --reply-host SELF`로 SSH 원격 발신자, 원래 호스트와 대화 UUID를 보존하고 역방향 회신 명령을 표시한다. `--from`으로 발신자를 명시할 수 있다.
+- peer: 본문을 고정 수신 명령의 JSON stdin으로 전달하며 등록된 Darwin/Linux 호스트만 사용한다. 응답 유실과 부분 기록은 상관 ID를 유지한 불명 상태로 반환하고 자동 재전송하지 않는다.
+
+### Changed
+- peer: 원격 전송은 별도 명령으로 분리해 기존 로컬 `send` 자동 승인 범위를 유지한다. 로컬 대상 이름의 앞뒤 공백, 선행 하이픈, 제어 문자와 512자 초과 입력을 거부한다.
+
 ## [10.88.3] - 2026-10-30
 
 ### Fixed
