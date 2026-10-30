@@ -70,6 +70,7 @@ import {
   readCodexContext,
 } from "../hub/team/session-context.mjs";
 import { JsonRpcWsUdsClient } from "../hub/workers/lib/jsonrpc-ws-uds.mjs";
+import { configureCodexHud } from "../hud/tmux-status.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -2259,13 +2260,18 @@ const ADAPTERS = {
   codex: {
     cli: "codex",
     launchArgv: ["codex"],
-    launchKeys: ["codex --dangerously-bypass-approvals-and-sandbox", "Enter"],
+    launchKeys: [
+      "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false",
+      "Enter",
+    ],
     resumeById: (id) =>
       shellQuote([
         "codex",
         "resume",
         id,
         "--dangerously-bypass-approvals-and-sandbox",
+        "-c",
+        "features.hooks=false",
       ]),
     resumeLast: () =>
       shellQuote([
@@ -2273,6 +2279,8 @@ const ADAPTERS = {
         "resume",
         "--last",
         "--dangerously-bypass-approvals-and-sandbox",
+        "-c",
+        "features.hooks=false",
       ]),
     composerGlyph: "›",
     isReady: isCodexReadyCapture,
@@ -3174,11 +3182,69 @@ end tell`;
   });
 }
 
+// 신규 thread도 먼저 daemon에서 설정해 SessionStart 훅이 TUI 연결보다 앞서 실행되지 않게 한다.
+async function prepareCodexThread(socketPath, opts, deps = {}) {
+  const client = (
+    deps.clientFactory ?? ((options) => new JsonRpcWsUdsClient(options))
+  )({
+    socketPath,
+    connectTimeoutMs: 5000,
+  });
+  try {
+    await client.connect();
+    await client.request(
+      "initialize",
+      {
+        clientInfo: { name: "triflux-tfx-live", version: "1.0.0" },
+        capabilities: { experimentalApi: true },
+      },
+      5000,
+    );
+    client.notify("initialized", {});
+    let threadId = opts.resume;
+    const cwd = pathResolve(opts.cwd || process.cwd());
+    if (opts.resumeLast) {
+      const page = await client.request(
+        "thread/list",
+        {
+          cwd,
+          limit: 1,
+          sortKey: "updated_at",
+          sortDirection: "desc",
+        },
+        5000,
+      );
+      threadId = page.data?.[0]?.id;
+      if (!threadId) throw new Error("No Codex thread to resume in this cwd");
+    }
+    const config = { "features.hooks": false };
+    if (opts.effort !== undefined) config.model_reasoning_effort = opts.effort;
+    const result = await client.request(
+      threadId ? "thread/resume" : "thread/start",
+      {
+        ...(threadId ? { threadId, excludeTurns: true } : { cwd }),
+        ...(opts.model !== undefined ? { model: opts.model } : {}),
+        config,
+      },
+      10000,
+    );
+    if (
+      !isCodexThreadId(result.thread?.id) ||
+      (threadId && result.thread.id !== threadId)
+    )
+      throw new Error("Codex daemon returned a different or invalid thread");
+    return result.thread.id;
+  } finally {
+    client.close();
+  }
+}
+
 async function doStart(launchAdapter, opts) {
   // --no-auto-trust 면 신뢰 화면을 고르지 않고 승인 화면과 같이 ready:false 로 끝낸다.
-  const trustScreens = opts.noAutoTrust
-    ? launchAdapter.startupScreens.filter((screen) => screen.blockedBy)
-    : [];
+  const trustScreens =
+    opts.noAutoTrust || launchAdapter.cli === "codex"
+      ? launchAdapter.startupScreens.filter((screen) => screen.blockedBy)
+      : [];
   const adapter = {
     ...launchAdapter,
     startupScreens: launchAdapter.startupScreens.filter(
@@ -3253,6 +3319,7 @@ async function doStart(launchAdapter, opts) {
     });
     launchKeys[0] += overrides[0].slice(adapter.launchKeys[0].length);
   }
+  let daemonThreadId = null;
   if (adapter.cli === "codex" && !remote && opts.nativePeer) {
     let socket;
     const env = opts.env || process.env;
@@ -3263,6 +3330,14 @@ async function doStart(launchAdapter, opts) {
         `공유 Codex 데몬 소켓을 사용할 수 없다: ${error.message}. codex app-server daemon start 로 데몬을 띄워라.`,
       );
     }
+    // CLI의 -c는 공유 daemon에 전달되지 않으므로 연결 전에 해당 thread만 설정한다.
+    daemonThreadId = await prepareCodexThread(socket, opts);
+    launchKeys[0] = adapter
+      .resumeById(daemonThreadId)
+      .replace(
+        /(?:^|\s)--dangerously-bypass-approvals-and-sandbox(?=\s|$)/g,
+        "",
+      );
     // --remote 세션의 셸은 데몬에서 돌아서 -C 로 작업 디렉터리를 지정한다.
     launchKeys[0] += ` ${shellQuote(["--remote", `unix://${socket}`, "-C", pathResolve(cwd || process.cwd())])}`;
   }
@@ -3277,7 +3352,8 @@ async function doStart(launchAdapter, opts) {
   if (resumed && name && adapter.cli === "claude")
     launchKeys[0] += ` ${shellQuote(["-n", name])}`;
   const resumeTarget = resume ?? (resumeLast ? "last" : null);
-  const trackResumeLast = resumeLast && adapter.cli === "codex" && !remote;
+  const trackResumeLast =
+    resumeLast && adapter.cli === "codex" && !remote && !daemonThreadId;
   const launchedAtMs = Date.now();
 
   // 분리 세션 기본 80x24 에서는 긴 입력이 화면 높이를 넘으므로 넓게 만든다. 붙으면 클라이언트 크기를 따른다.
@@ -3309,6 +3385,12 @@ async function doStart(launchAdapter, opts) {
       (name ?? session).replace(/#/g, "##"),
     ]);
   }
+  if (adapter.cli === "codex" && !remote && process.platform !== "win32")
+    await configureCodexHud(
+      runTmux,
+      exactTmuxTarget(session),
+      opts.env || process.env,
+    );
   // Default tmux history-limit (2000) is far too small for long tool-heavy
   // CLI sessions (file reads, test runs) — the actual response can scroll
   // out of scrollback before capturePane() runs, producing an empty extract.
@@ -3373,7 +3455,8 @@ async function doStart(launchAdapter, opts) {
   }
   let nameApplied = Boolean(name) && adapter.cli === "claude" && ready;
   let threadId =
-    adapter.cli === "codex" && isCodexThreadId(resume) ? resume : null;
+    daemonThreadId ??
+    (adapter.cli === "codex" && isCodexThreadId(resume) ? resume : null);
   // 우리 TUI 의 resume 기록이 늦게 반영되면 남의 기록만 보일 수 있어, 1.5초 뒤에도 같은 후보가
   // 유일할 때만 확정한다. 5초 안에 확인하지 못하면 null 로 둔다.
   const threadDeadline = Date.now() + 5000;
@@ -7739,6 +7822,7 @@ export {
   parseRemoteLiveJson,
   peer,
   peerSideBaseOpts,
+  prepareCodexThread,
   resolveAskTransport,
   resolveCodexDaemonSocket,
   resolveCodexTmuxThread,

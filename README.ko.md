@@ -141,6 +141,15 @@ Codex 가족 프로필은 `~/.codex/<가족>.config.toml`에 `model`만 기록�
 
 정확한 인자는 `tfx <명령> --help`로 확인한다.
 
+`tfx-live start --cli codex`로 만든 로컬 tmux 세션에는 Triflux HUD 전체가 4줄 상태줄로 표시된다.
+provider별 사용 한도 캐시와 `Jev ON`, `Jev OFF`, 남은 문맥을 표시한다. 예: `Jev ON | 문맥 116k 남음`.
+문맥은 현재 thread의 rollout 실행 창과 토큰 사용량으로 계산한다. 비율만 있는 공유 HUD 입력은 남은 비율을 쓰고, 정보가 없으면 `문맥 미확인`을 표시한다.
+Jev 설정을 판정하지 못하면 `Jev ?`를 표시하며, ON은 설정 활성 상태를 뜻한다.
+Codex HUD는 5초마다 로컬 캐시와 rollout을 읽으며 외부 조회를 새로 실행하지 않는다. 사용 한도는 기존 캐시 갱신 시점의 값이다.
+훅 없이 동작하며, 기존 세션과 전역 tmux 옵션, Codex 내장 status_line은 바꾸지 않는다.
+Codex 시작과 재개는 실행별 `features.hooks=false`를 사용한다. 공유 daemon에서는 연결할 thread의 config에도 같은 값을 전달하며, remote resume은 기존 thread 권한을 따른다.
+Codex 신뢰 화면은 자동 승인하지 않는다.
+
 ## 런타임 기능
 
 **라이브 세션.** `tfx-live`는 Claude Code와 Codex TUI 세션을 조종한다. Claude 데몬 대상

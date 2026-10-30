@@ -253,7 +253,7 @@ describe("HUD provider visibility", () => {
         );
         const lines = runHud({ TFX_DISABLE_CODEX: "0" }).trim().split("\n");
         const [claude, codex, agy] = lines;
-        assert.equal(lines.length, 3);
+        assert.equal(lines.length, 4);
         assert.equal(
           agy.indexOf("|"),
           codex.indexOf("|"),

@@ -52,6 +52,7 @@ import {
   getProviderRow,
   renderAlignedRows,
 } from "./renderers.mjs";
+import { sessionStatus } from "./session-status.mjs";
 import { selectTier } from "./terminal.mjs";
 import { formatTimeCell, formatTimeCellDH, readStdinJson } from "./utils.mjs";
 
@@ -74,7 +75,10 @@ async function main() {
   const stdin = await readStdinJson();
   // agy statusLine 은 같은 HUD 를 호출하되 product 로 자신을 밝히고 터미널 폭을 직접 넘긴다.
   const agySession = stdin?.product === "antigravity";
-  if (agySession) {
+  const codexSession = stdin?.product === "codex";
+  const cacheOnly = process.argv.includes("--cache-only");
+  const status = await sessionStatus(stdin);
+  if (agySession || codexSession) {
     if (stdin.terminal_width > 0)
       process.env.COLUMNS = String(stdin.terminal_width);
   } else {
@@ -94,16 +98,23 @@ async function main() {
   const antigravitySnapshot = antigravityAllowed
     ? readAntigravityQuotaSnapshot()
     : null;
-  if (antigravitySnapshot?.shouldRefresh) scheduleAntigravityQuotaRefresh();
+  if (!cacheOnly && antigravitySnapshot?.shouldRefresh)
+    scheduleAntigravityQuotaRefresh();
   // 설정이 없는 홈에서는 갱신 프로세스를 시작하지 않는다.
   if (
+    !cacheOnly &&
     !stdinClaudeUsage &&
     claudeUsageSnapshot.shouldRefresh &&
     existsSync(join(homedir(), ".claude"))
   ) {
     scheduleClaudeUsageRefresh();
   }
-  if (showCodex && codexSnapshot.shouldRefresh && existsSync(getCodexHome())) {
+  if (
+    !cacheOnly &&
+    showCodex &&
+    codexSnapshot.shouldRefresh &&
+    existsSync(getCodexHome())
+  ) {
     scheduleCodexRateLimitRefresh();
   }
 
@@ -129,7 +140,7 @@ async function main() {
       antigravityQuota,
     });
     const header = bandMode ? `${BAND_HEADER}\n` : "";
-    process.stdout.write(`${header}\x1b[0m${microLine}\n`);
+    process.stdout.write(`${header}\x1b[0m${microLine}\n${status}\n`);
     return;
   }
 
@@ -138,7 +149,7 @@ async function main() {
       ? []
       : getClaudeRows(
           currentTier,
-          agySession ? null : contextView,
+          agySession || codexSession ? null : contextView,
           claudeUsage,
           {
             accountName: getClaudeEmail(),
@@ -181,11 +192,17 @@ async function main() {
   // 알림 배너와 TUI 스타일이 HUD 내용에 겹치지 않도록 한다. band 는 자기 자리에 그리니 띄우지 않는다.
   // agy 는 statusLine.padding 이 같은 역할을 한다.
   const leadingBreaks =
-    bandMode || agySession ? "" : contextView.percent >= 85 ? "\n\n" : "\n";
+    bandMode || agySession || codexSession
+      ? ""
+      : contextView.percent >= 85
+        ? "\n\n"
+        : "\n";
   const resetLines = outputLines.map((line) => `\x1b[0m${line}`);
   // band 는 첫 줄 표지로 이 HUD 가 --band 를 아는지 확인한다.
   const header = bandMode ? `${BAND_HEADER}\n` : "";
-  process.stdout.write(`${header}${leadingBreaks}${resetLines.join("\n")}\n`);
+  process.stdout.write(
+    `${header}${leadingBreaks}${resetLines.join("\n")}\n${status}\n`,
+  );
 }
 
 main().catch(() => {
