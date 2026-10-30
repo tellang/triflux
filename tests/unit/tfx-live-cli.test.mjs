@@ -522,6 +522,8 @@ async function runTfxLive(args, options = {}) {
       JsonRpcWsUdsClient.prototype.close = () => {};
       JsonRpcWsUdsClient.prototype.request = async (method, params) => method === "thread/list"
         ? { data: [{ id: "019a0000-0000-7000-8000-000000000001" }] }
+        : method === "thread/loaded/list"
+        ? { data: [], nextCursor: null }
         : { thread: { id: params.threadId || "019a0000-0000-7000-8000-000000000001" } };
       import { syncBuiltinESMExports } from "node:module";
       import { promisify } from "node:util";
