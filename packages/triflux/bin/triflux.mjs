@@ -44,7 +44,9 @@ import {
 } from "../scripts/lib/cli-output.mjs";
 import { managedCodexProfileContents } from "../scripts/lib/codex-profile-config.mjs";
 import {
+  applyAgyPeerWakePatch,
   commandExists,
+  inspectAgyPeerWakePatch,
   inspectMacTimeoutDependency,
 } from "../scripts/lib/doctor-env-checks.mjs";
 import { ensureGeminiProfiles } from "../scripts/lib/gemini-profiles.mjs";
@@ -2044,6 +2046,41 @@ async function cmdDoctor(options = {}) {
       } else {
         info("Codex Profiles: 이미 최신 상태");
       }
+      const agyCandidateForFix =
+        whichInShell("agy", "bash") ||
+        whichInShell("agy", "zsh") ||
+        which("agy") ||
+        join(homedir(), ".local", "bin", "agy");
+      const agyWakeState = inspectAgyPeerWakePatch({
+        agyPath: agyCandidateForFix,
+      });
+      if (agyWakeState.patchable) {
+        try {
+          const patchRes = applyAgyPeerWakePatch({
+            agyPath: agyWakeState.path,
+          });
+          report.actions.push({
+            type: "agy-peer-wake-patch",
+            path: patchRes.path,
+            status: patchRes.ok ? "ok" : "failed",
+          });
+          if (patchRes.ok) {
+            ok(
+              patchRes.previousStatus === "metadata-outdated"
+                ? `agy peer-wake 메타데이터 갱신됨 (${formatPathForDisplay(patchRes.patchJsonPath)})`
+                : `agy peer-wake 패치 적용됨 (${formatPathForDisplay(patchRes.path)})`,
+            );
+          }
+        } catch (error) {
+          report.actions.push({
+            type: "agy-peer-wake-patch",
+            path: agyWakeState.path,
+            status: "failed",
+            message: error.message,
+          });
+          warn(`agy peer-wake 패치 실패: ${renderErrorMessage(error.message)}`);
+        }
+      }
       // 에러/스테일 캐시 정리
       const fCacheDir = join(CLAUDE_DIR, "cache");
       const staleNames = [
@@ -2302,6 +2339,41 @@ async function cmdDoctor(options = {}) {
       shells: antigravityCli.shells,
       ...(antigravityCli.fix ? { fix: antigravityCli.fix } : {}),
     });
+    const agyResolvedPath =
+      antigravityCli.shells?.find((s) => s.path)?.path ||
+      which("agy") ||
+      join(homedir(), ".local", "bin", "agy");
+    const agyPeerWake = inspectAgyPeerWakePatch({ agyPath: agyResolvedPath });
+    if (agyPeerWake.status !== "skipped") {
+      addDoctorCheck(report, {
+        name: "agy-peer-wake",
+        status: agyPeerWake.ok ? "ok" : "issues",
+        patch_status: agyPeerWake.status,
+        path: agyPeerWake.path,
+        ...(agyPeerWake.fix ? { fix: agyPeerWake.fix } : {}),
+        ...(agyPeerWake.reason ? { reason: agyPeerWake.reason } : {}),
+        ...(agyPeerWake.message ? { message: agyPeerWake.message } : {}),
+      });
+      if (agyPeerWake.status === "patched") {
+        ok("peer-wake 패치: 적용됨");
+      } else if (agyPeerWake.status === "metadata-outdated") {
+        warn("peer-wake 패치: 메타데이터 갱신 필요 (tfx doctor --fix)");
+        issues++;
+      } else if (agyPeerWake.status === "unpatched") {
+        warn(
+          "peer-wake 패치: 미적용, 유휴 세션 자동 깨어남 비활성 (tfx doctor --fix)",
+        );
+        issues++;
+      } else if (agyPeerWake.status === "error") {
+        warn(
+          `peer-wake 패치 확인 실패: ${renderErrorMessage(agyPeerWake.message || agyPeerWake.reason)}`,
+        );
+        issues++;
+      } else {
+        warn(`peer-wake 패치: 시그니처 불일치 (${agyPeerWake.reason})`);
+        issues++;
+      }
+    }
     // API 키 검사 제거 — agy OAuth 기반이므로 API 키 불필요
 
     // Claude Code
