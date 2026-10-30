@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.88.2] - 2026-10-30
+
+### Fixed
+- Jev 공통 호스트 설정을 HUD와 라우팅에서 읽어 기존 CLI 부모 환경을 바꾸지 않고 활성 설정을 반영한다.
+- private 인증 파일을 데이터로 읽고 소유자, 0600 권한, 파일 종류와 크기를 검사하며 명시적 환경변수 비활성화를 우선한다.
+- 셸에서 실행하는 hub/bridge.mjs를 사용자 공유 설치 목록에 추가한다.
+
+
 ## [10.88.1] - 2026-10-30
 
 ### Fixed

@@ -232,6 +232,15 @@ graph TD
 
 ### Jev 데이터 전송 정책
 
+`~/.config/triflux/jev.json`으로 기존 Claude, Codex, agy와 HUD에 공통 설정을 적용한다.
+`XDG_CONFIG_HOME`이 있으면 그 경로의 `triflux/jev.json`을 사용한다.
+형식은 `{"enabled":true,"apiKeyFile":"/absolute/path/private.env"}`다.
+키 파일은 현재 사용자 소유, 권한 `0600`이어야 한다. `JEV_API_KEY` 또는
+`TYPESAFE_API_KEY`의 literal assignment만 데이터로 읽으며 shell source나 eval은 하지 않는다.
+환경변수 키와 CLI 설정의 기존 우선순위는 유지한다. `TFX_JEV=0`, `false`, `off`는
+host 설정보다 우선해 비활성화한다. HUD의 `j`는 설정 활성 상태이며 인증 성공을 뜻하지 않는다.
+인증과 호출 실패는 기존 결정적 동작으로 폴백한다. 설정은 호출마다 읽으므로 재시작은 필요 없다.
+
 Jev는 `JEV_API_KEY` 또는 `TYPESAFE_API_KEY`를 설정하거나, `TFX_JEV_CLI` 경로를
 명시하거나, Jev CLI를 찾을 수 있는 환경에서 `TFX_JEV=1`을 설정할 때 활성화된다.
 내장 판정 함수는 API 키가 있으면 외부 Jev HTTP 서비스로 입력을 보내고, 그렇지 않으면
