@@ -2,6 +2,12 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.89.2] - 2026-10-30
+
+### Fixed
+- hud: tmux 시간 포맷이 pane ID의 `%`를 제거하지 않도록 escape하여 자동 갱신 후 `ctx:--`로 돌아가는 문제를 수정한다.
+- hud: Codex의 `codex-code-mode-host` 보조 프로세스를 별도 TUI로 세지 않아 기존 tmux 세션의 ctx 표시가 모호성 오류로 사라지는 문제를 수정한다. 실제 TUI가 둘이면 기존 모호성 검사를 유지한다.
+
 ## [10.89.1] - 2026-10-30
 
 ### Fixed

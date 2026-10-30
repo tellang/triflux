@@ -16,10 +16,76 @@ const hasTmux =
   process.platform !== "win32" &&
   spawnSync("tmux", ["-V"]).status === 0 &&
   spawnSync("python3", ["--version"]).status === 0;
+test("Codex HUD는 pane %9와 %36을 tmux 시간 포맷 후에도 argv에 보존한다", {
+  skip: !hasTmux,
+}, async () => {
+  const home = mkdtempSync(join(tmpdir(), "tfx-hud-percent-"));
+  const socket = join(home, "tmux.sock");
+  const env = { PATH: process.env.PATH, HOME: home };
+  const tmux = (...args) =>
+    execFileSync("tmux", ["-S", socket, ...args], {
+      env,
+      encoding: "utf8",
+    }).trimEnd();
+  try {
+    tmux("-f", "/dev/null", "new-session", "-d", "-s", "owned");
+    const { configureCodexHud } = await import("../../hud/tmux-status.mjs");
+    for (const pane of ["%9", "%36"]) {
+      let format;
+      await configureCodexHud(
+        async (_remote, args) => {
+          if (args[0] === "display-message") return { stdout: `$34|${pane}` };
+          if (args[0] === "set-option" && args[3] === "status-format[0]")
+            format = args[4];
+          return { stdout: "" };
+        },
+        "=owned:",
+        env,
+      );
+      assert.ok(format.startsWith("#(") && format.endsWith(")"));
+      assert.ok(format.endsWith(" #{client_width})"));
+      // #() 실행 대신 고정 명령에 같은 시간 포맷을 적용한 뒤 셸 argv를 검사한다.
+      tmux("set-option", "-t", "=owned:", "@test-command", format.slice(2, -1));
+      const expanded = tmux(
+        "display-message",
+        "-p",
+        "-t",
+        "=owned:",
+        "#{T:@test-command}",
+      );
+      const argv = execFileSync(
+        "/bin/sh",
+        ["-c", `set -- ${expanded}; printf '%s\\n' "$@"`],
+        {
+          env,
+          encoding: "utf8",
+        },
+      )
+        .trimEnd()
+        .split("\n");
+      assert.deepEqual(argv.slice(2, 4), ["$34", pane]);
+      const width = tmux(
+        "display-message",
+        "-p",
+        "-t",
+        "=owned:",
+        "#{client_width}",
+      );
+      assert.deepEqual(argv.slice(4), width ? [width] : []);
+    }
+  } finally {
+    try {
+      tmux("kill-server");
+    } catch {}
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("Codex HUD는 대상 세션만 바꾸고 늦게 준비된 rollout을 읽는다", {
   skip: !hasTmux,
 }, async () => {
   const home = mkdtempSync(join(tmpdir(), "tfx-hud-tmux-"));
+  const socket = join(home, "tmux.sock");
   const env = {
     PATH: process.env.PATH,
     HOME: home,
@@ -31,7 +97,7 @@ test("Codex HUD는 대상 세션만 바꾸고 늦게 준비된 rollout을 읽는
     TFX_DISABLE_ANTIGRAVITY: "0",
   };
   const tmux = (...args) =>
-    execFileSync("tmux", ["-L", "tfx-hud-jev-1030", ...args], {
+    execFileSync("tmux", ["-S", socket, ...args], {
       env,
       encoding: "utf8",
     }).trimEnd();
@@ -126,7 +192,7 @@ test("Codex HUD는 대상 세션만 바꾸고 늦게 준비된 rollout을 읽는
       "python3",
       [
         "-c",
-        'import pty; pty.spawn(["tmux", "-L", "tfx-hud-jev-1030", "attach-session", "-t", "owned"])',
+        `import pty; pty.spawn(["tmux", "-S", ${JSON.stringify(socket)}, "attach-session", "-t", "owned"])`,
       ],
       {
         env: { ...env, TERM: "xterm-256color" },
