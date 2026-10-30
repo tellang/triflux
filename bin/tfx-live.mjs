@@ -1512,8 +1512,15 @@ function isClaudeResponseLine(line) {
   return /^\s*⏺\s*/.test(line);
 }
 
+const CODEX_HOOKS_REVIEW_RE = /Hooks need review|hooks are new or changed/i;
+const CODEX_BOOTSTRAP_ERROR_RE =
+  /thread\/resume failed during TUI bootstrap|no rollout found for thread id/i;
+
 function isCodexReadyCapture(text) {
   return (
+    !CODEX_BOOTSTRAP_ERROR_RE.test(text) &&
+    !CODEX_HOOKS_REVIEW_RE.test(text) &&
+    !/Resuming session(?:…|\.\.\.)/i.test(text) &&
     !isBusyByEsc(text) &&
     !isCodexLoadingCapture(text) &&
     // 응답 추출용 글리프 허용 범위에는 셸 프롬프트도 있어 준비 판정에는 쓰지 않는다.
@@ -1971,6 +1978,50 @@ function isCodexTrustMenu(text) {
   );
 }
 
+function isCodexHooksDeclineMenu(text) {
+  const menu = splitAtLastSelector(text, "›");
+  const rows = stripAnsi(text)
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n");
+  return (
+    Boolean(menu) &&
+    CODEX_HOOKS_REVIEW_RE.test(menu.above) &&
+    /^›\s*[123]\. (?:Review hooks|Trust all and continue|Continue without trusting \(hooks won't run\))$/.test(
+      menu.selected,
+    ) &&
+    /^(?:›\s*)?1\. Review hooks\n(?:›\s*)?2\. Trust all and continue\n(?:›\s*)?3\. Continue without trusting \(hooks won't run\)$/m.test(
+      rows,
+    )
+  );
+}
+
+async function dismissCodexHooksReview(remote, session) {
+  let raw = await captureVisible(remote, session);
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    if (!isCodexHooksDeclineMenu(raw)) break;
+    const menu = splitAtLastSelector(raw, "›");
+    if (menu.selected === "› 3. Continue without trusting (hooks won't run)") {
+      await runTmux(remote, [
+        "send-keys",
+        "-t",
+        exactTmuxTarget(session),
+        "Enter",
+      ]);
+      return { dismissed: true, raw };
+    }
+    await runTmux(remote, [
+      "send-keys",
+      "-t",
+      exactTmuxTarget(session),
+      "Down",
+    ]);
+    await sleep(200);
+    raw = await captureVisible(remote, session);
+  }
+  return { dismissed: false, raw };
+}
+
 // 다중 선택 항목은 한 글자 체크박스로 그린다. 바이너리 상수: [ ] [×] [✔] [√] ☐ ☒, 라디오 ( ) (*) ◯ ◉.
 function isClaudeMcpApprovalPrompt(text) {
   const menu = splitAtLastSelector(text, "❯");
@@ -2316,7 +2367,26 @@ const ADAPTERS = {
     isChromeLine: isCodexChromeLine,
     stripResponseMarker: (line) => line.replace(/^\s*[•●]\s+/, ""),
     hasLoginGuard: () => false,
+    blockingScreens: [
+      {
+        name: "codex-hooks-review",
+        isPresent: (raw) =>
+          CODEX_HOOKS_REVIEW_RE.test(raw) && !isCodexHooksDeclineMenu(raw),
+        warning: "Codex hooks need review; no approval was sent",
+      },
+      {
+        name: "codex-bootstrap-error",
+        isPresent: (raw) => CODEX_BOOTSTRAP_ERROR_RE.test(raw),
+        warning:
+          "Codex daemon thread bootstrap failed; inspect the pane before retrying",
+      },
+    ],
     startupScreens: [
+      {
+        name: "codex-hooks-decline",
+        isPresent: isCodexHooksDeclineMenu,
+        dismiss: dismissCodexHooksReview,
+      },
       {
         name: "trust",
         blockedBy: "codex-trust-folder",
@@ -3258,13 +3328,51 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
       (threadId && result.thread.id !== threadId)
     )
       throw new Error("Codex daemon returned a different or invalid thread");
-    return result.thread.id;
-  } finally {
+    if (!threadId) {
+      const now = new Date();
+      const name =
+        opts.name ??
+        `${now.getMonth() + 1}.${now.getDate()} ${opts.session || "Codex"}`;
+      // 실제 세션 이름을 저장하면 첫 turn 전에도 공식 rollout이 생성되어 TUI가 재개할 수 있다.
+      await client.request(
+        "thread/name/set",
+        { threadId: result.thread.id, name },
+        5000,
+      );
+    }
+    return { threadId: result.thread.id, close: () => client.close() };
+  } catch (error) {
     client.close();
+    throw error;
   }
 }
 
 async function doStart(launchAdapter, opts) {
+  if (launchAdapter.cli !== "codex" || opts.remote || !opts.nativePeer)
+    return doStartTmux(launchAdapter, opts);
+  const env = opts.env || process.env;
+  let socket;
+  try {
+    socket = resolveCodexSocket(env.HOME || homedir(), env);
+  } catch (error) {
+    throw new Error(
+      `공유 Codex 데몬 소켓을 사용할 수 없다: ${error.message}. codex app-server daemon start 로 데몬을 띄워라.`,
+    );
+  }
+  const prepared = await prepareCodexThread(socket, opts);
+  try {
+    return await doStartTmux(launchAdapter, {
+      ...opts,
+      preparedThreadId: prepared.threadId,
+      preparedSocket: socket,
+    });
+  } finally {
+    // 첫 turn 전 thread에는 rollout이 없을 수 있어 TUI 연결이 끝난 뒤 소유 연결을 놓는다.
+    prepared.close();
+  }
+}
+
+async function doStartTmux(launchAdapter, opts) {
   // --no-auto-trust 면 신뢰 화면을 고르지 않고 승인 화면과 같이 ready:false 로 끝낸다.
   const trustScreens =
     opts.noAutoTrust || launchAdapter.cli === "codex"
@@ -3345,18 +3453,8 @@ async function doStart(launchAdapter, opts) {
     launchKeys[0] += overrides[0].slice(adapter.launchKeys[0].length);
   }
   let daemonThreadId = null;
-  if (adapter.cli === "codex" && !remote && opts.nativePeer) {
-    let socket;
-    const env = opts.env || process.env;
-    try {
-      socket = resolveCodexSocket(env.HOME || homedir(), env);
-    } catch (error) {
-      throw new Error(
-        `공유 Codex 데몬 소켓을 사용할 수 없다: ${error.message}. codex app-server daemon start 로 데몬을 띄워라.`,
-      );
-    }
-    // CLI의 -c는 공유 daemon에 전달되지 않으므로 연결 전에 해당 thread만 설정한다.
-    daemonThreadId = await prepareCodexThread(socket, opts);
+  if (opts.preparedThreadId) {
+    daemonThreadId = opts.preparedThreadId;
     launchKeys[0] = adapter
       .resumeById(daemonThreadId)
       .replace(
@@ -3364,7 +3462,7 @@ async function doStart(launchAdapter, opts) {
         "",
       );
     // --remote 세션의 셸은 데몬에서 돌아서 -C 로 작업 디렉터리를 지정한다.
-    launchKeys[0] += ` ${shellQuote(["--remote", `unix://${socket}`, "-C", pathResolve(cwd || process.cwd())])}`;
+    launchKeys[0] += ` ${shellQuote(["--remote", `unix://${opts.preparedSocket}`, "-C", pathResolve(cwd || process.cwd())])}`;
   }
   launchKeys[0] = withUnsetEnv(launchKeys[0], opts.unsetEnv ?? []);
   // 받는 쪽 triflux mod 가 이 값을 저장해 자기를 띄운 리드의 tfx_control 요청만 실행한다.
