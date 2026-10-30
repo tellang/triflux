@@ -66,29 +66,57 @@ export async function assignTasksWithJev(
     return base;
   }
   const usedSubtasks = new Set();
-  const mapped = [];
+  const workerAssignments = new Array(workers.length).fill(null);
+
   for (let i = 0; i < workers.length; i += 1) {
-    const match = verdict.assignments.find((item) => item.workerIndex === i);
-    const subtaskIdx =
-      match &&
-      Number.isInteger(match.subtaskIndex) &&
-      match.subtaskIndex >= 0 &&
-      match.subtaskIndex < subtasks.length &&
-      !usedSubtasks.has(match.subtaskIndex)
-        ? match.subtaskIndex
-        : i;
-    usedSubtasks.add(subtaskIdx);
-    mapped.push({
-      ...workers[i],
+    const match = verdict.assignments.find(
+      (item) =>
+        item.workerIndex === i &&
+        Number.isInteger(item.subtaskIndex) &&
+        item.subtaskIndex >= 0 &&
+        item.subtaskIndex < subtasks.length &&
+        !usedSubtasks.has(item.subtaskIndex),
+    );
+    if (match) {
+      usedSubtasks.add(match.subtaskIndex);
+      workerAssignments[i] = {
+        subtaskIdx: match.subtaskIndex,
+        recommendedCli: match.recommendedCli || workers[i].cli,
+      };
+    }
+  }
+
+  for (let i = 0; i < workers.length; i += 1) {
+    if (workerAssignments[i]) continue;
+    let fallbackIdx = !usedSubtasks.has(i) && i < subtasks.length ? i : -1;
+    if (fallbackIdx === -1) {
+      for (let s = 0; s < subtasks.length; s += 1) {
+        if (!usedSubtasks.has(s)) {
+          fallbackIdx = s;
+          break;
+        }
+      }
+    }
+    if (fallbackIdx === -1) fallbackIdx = Math.min(i, subtasks.length - 1);
+    usedSubtasks.add(fallbackIdx);
+    workerAssignments[i] = {
+      subtaskIdx: fallbackIdx,
+      recommendedCli: workers[i].cli,
+    };
+  }
+
+  return workers.map((w, i) => {
+    const { subtaskIdx, recommendedCli } = workerAssignments[i];
+    return {
+      ...w,
       subtask: subtasks[subtaskIdx] || subtasks[subtasks.length - 1],
       _jev: {
         subtaskIndex: subtaskIdx,
-        recommendedCli: match?.recommendedCli || workers[i].cli,
+        recommendedCli,
         confidence: verdict.confidence,
       },
-    });
-  }
-  return mapped;
+    };
+  });
 }
 
 /**

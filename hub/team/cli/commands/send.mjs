@@ -30,8 +30,9 @@ export async function teamSend(args = []) {
     const currentOutput = capturePaneOutput(member.pane, 20) || "";
     if (currentOutput.trim()) {
       const verdict = await judgeBusyAction({
-        currentOutput,
-        incomingMessage: message,
+        prompt: message,
+        threadSummary: currentOutput,
+        allowDrop: true,
       });
       if (verdict?.action === "drop") {
         ok(`${member.name} 중복 메시지 생략 (jev drop)`);

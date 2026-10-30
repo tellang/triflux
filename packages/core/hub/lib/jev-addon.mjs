@@ -647,28 +647,47 @@ export async function judgePeerConvergence(
  * 4. 작업 중인 워커에 대한 --if-busy auto (steer vs wait) 판단.
  */
 export async function judgeBusyAction(
-  { prompt = "", threadSummary = "" } = {},
+  {
+    prompt = "",
+    incomingMessage = "",
+    threadSummary = "",
+    currentOutput = "",
+    allowDrop = false,
+  } = {},
   options = {},
 ) {
   if (!isJevEnabled(options)) return null;
-  const trimmed = clampText(prompt, 1000);
+  const resolvedPrompt = prompt || incomingMessage;
+  const resolvedSummary = threadSummary || currentOutput;
+  const trimmed = clampText(resolvedPrompt, 1000);
   if (!trimmed) return null;
 
-  const allowed = ["steer", "wait"];
+  const includeDrop =
+    allowDrop === true || Boolean(incomingMessage || currentOutput);
+  const allowed = includeDrop ? ["steer", "wait", "drop"] : ["steer", "wait"];
+  const criteria = {
+    steer:
+      "Urgent course correction, constraint change, or abort instruction that must interrupt the active turn immediately.",
+    wait: "Sequential follow-up task or next step that should wait in queue until the active turn finishes.",
+    ...(includeDrop
+      ? {
+          drop: "Duplicate or redundant instruction already present in the active output that should be skipped.",
+        }
+      : {}),
+  };
   const res = await queryJev(
     {
       hook: "busy_action",
       kind: "choice",
       options: allowed,
-      criteria: {
-        steer:
-          "Urgent course correction, constraint change, or abort instruction that must interrupt the active turn immediately.",
-        wait: "Sequential follow-up task or next step that should wait in queue until the active turn finishes.",
-      },
-      query:
-        "The worker is currently busy executing a turn. Choose 'steer' if this message corrects course, changes constraints, or aborts current work immediately; choose 'wait' if this message is a sequential follow-up task to run after the current turn finishes.",
+      criteria,
+      query: includeDrop
+        ? "The worker is currently busy executing a turn. Choose 'steer' if this message corrects course or aborts current work immediately, 'wait' if it is a sequential follow-up task, or 'drop' if it duplicates work already running."
+        : "The worker is currently busy executing a turn. Choose 'steer' if this message corrects course, changes constraints, or aborts current work immediately; choose 'wait' if this message is a sequential follow-up task to run after the current turn finishes.",
       context: [
-        threadSummary ? `Active thread:\n${clampText(threadSummary, 400)}` : "",
+        resolvedSummary
+          ? `Active thread:\n${clampText(resolvedSummary, 400)}`
+          : "",
         `Incoming message:\n${trimmed}`,
       ]
         .filter(Boolean)
@@ -685,12 +704,19 @@ export async function judgeBusyAction(
  * 5. 하트비트 모니터: 로그 꼬리 기반 의미상 먹통(프롬프트 대기, 에러 무한 루프) 판정.
  */
 export async function judgeWorkerHealth(
-  { stdoutTail = "", stderrTail = "", rolloutTail = "", elapsedSec = 0 } = {},
+  {
+    stdoutTail = "",
+    stderrTail = "",
+    rolloutTail = "",
+    recentOutput = "",
+    elapsedSec = 0,
+  } = {},
   options = {},
 ) {
   if (!isJevEnabled(options)) return null;
+  const resolvedStdoutTail = stdoutTail || recentOutput;
   const combined = [
-    stdoutTail ? `stdout:\n${tailLines(stdoutTail, 20, 800)}` : "",
+    resolvedStdoutTail ? `stdout:\n${tailLines(resolvedStdoutTail, 20, 800)}` : "",
     stderrTail ? `stderr:\n${tailLines(stderrTail, 20, 800)}` : "",
     rolloutTail ? `rollout:\n${tailLines(rolloutTail, 20, 800)}` : "",
   ]
@@ -720,7 +746,11 @@ export async function judgeWorkerHealth(
   );
   if (!res || res.confidence < minConfidence(options)) return null;
   if (!allowed.includes(res.choice)) return null;
-  return { status: res.choice, confidence: res.confidence };
+  return {
+    status: res.choice,
+    healthState: res.choice,
+    confidence: res.confidence,
+  };
 }
 
 /**
@@ -798,8 +828,8 @@ export function executionFlagsForCli(
     return {
       cliType: "codex",
       executionMode: "workspace_auto",
-      args: ["--full-auto", "--skip-git-repo-check"],
-      flagsString: "--full-auto --skip-git-repo-check",
+      args: ["--sandbox", "workspace-write", "--skip-git-repo-check"],
+      flagsString: "--sandbox workspace-write --skip-git-repo-check",
     };
   }
   return {
@@ -986,24 +1016,8 @@ export async function judgeTaskRouting(
       ? mcpProfRes.choice
       : null;
 
-  if (!complexity && !executionMode && !mcpProfile) return null;
-
-  const resolvedComplexity = complexity || "standard";
-  const resolvedExecutionMode = executionMode || "bypass";
-  const resolvedMcpProfile = mcpProfile || "default";
-  const routeSpec =
-    COMPLEXITY_ROUTE_MAP[resolvedComplexity] || COMPLEXITY_ROUTE_MAP.standard;
-
-  let codexProfile = routeSpec.codexProfile;
-  if (
-    resolvedComplexity === "standard" &&
-    /deslop|cleanup|format|lint|rename|typo/i.test(trimmedPrompt)
-  ) {
-    codexProfile = "sol_med";
-  }
-
   const neededMcpServers = [];
-  if (resolvedMcpProfile !== "none" && candidateServers.length > 0) {
+  if (mcpProfile !== "none" && candidateServers.length > 0) {
     for (const server of candidateServers) {
       const safeKey = `mcp_${server.replace(/[^a-zA-Z0-9_]/g, "_")}`;
       const srvRes = results[safeKey];
@@ -1013,8 +1027,33 @@ export async function judgeTaskRouting(
     }
   }
 
-  const execFlags = executionFlagsForCli(cliType, resolvedExecutionMode);
-  const confidences = [compRes, modeRes, mcpProfRes]
+  if (
+    !complexity &&
+    !executionMode &&
+    !mcpProfile &&
+    neededMcpServers.length === 0
+  ) {
+    return null;
+  }
+
+  const routeSpec = complexity ? COMPLEXITY_ROUTE_MAP[complexity] || null : null;
+
+  let codexProfile = routeSpec ? routeSpec.codexProfile : null;
+  if (
+    complexity === "standard" &&
+    /deslop|cleanup|format|lint|rename|typo/i.test(trimmedPrompt)
+  ) {
+    codexProfile = "sol_med";
+  }
+
+  const execFlags = executionMode
+    ? executionFlagsForCli(cliType, executionMode)
+    : null;
+  const confidences = [
+    complexity ? compRes : null,
+    executionMode ? modeRes : null,
+    mcpProfile ? mcpProfRes : null,
+  ]
     .filter((r) => r && Number.isFinite(r.confidence))
     .map((r) => r.confidence);
   const avgConfidence =
@@ -1027,16 +1066,16 @@ export async function judgeTaskRouting(
       : threshold;
 
   return {
-    complexity: resolvedComplexity,
+    complexity,
     codexProfile,
-    agyProfile: routeSpec.agyProfile,
-    claudeModel: routeSpec.claudeModel,
-    claudeEffort: routeSpec.claudeEffort,
-    expectedDurationSec: routeSpec.expectedDurationSec,
-    executionMode: resolvedExecutionMode,
-    executionFlags: execFlags.flagsString,
-    executionArgs: execFlags.args,
-    mcpProfile: resolvedMcpProfile,
+    agyProfile: routeSpec ? routeSpec.agyProfile : null,
+    claudeModel: routeSpec ? routeSpec.claudeModel : null,
+    claudeEffort: routeSpec ? routeSpec.claudeEffort : null,
+    expectedDurationSec: routeSpec ? routeSpec.expectedDurationSec : null,
+    executionMode,
+    executionFlags: execFlags ? execFlags.flagsString : null,
+    executionArgs: execFlags ? execFlags.args : null,
+    mcpProfile,
     neededMcpServers,
     confidence: avgConfidence,
   };

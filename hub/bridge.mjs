@@ -10,7 +10,10 @@ import {
   openSync,
   readFileSync,
   readSync,
+  writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseArgs as nodeParseArgs } from "node:util";
 
 import {
@@ -821,17 +824,48 @@ async function cmdInterveneRun(args) {
       });
     }
     let reinstructPrompt = payload.reinstructPrompt || undefined;
+    const seconds = (value) => {
+      const parsed = numericOption(value, undefined);
+      return parsed > 0 ? parsed * 1_000 : undefined;
+    };
+    const readActivitySignature = intervention.createFileActivitySource({
+      files: [payload.stdoutLog, payload.stderrLog, payload.resultFile].filter(
+        Boolean,
+      ),
+      rolloutFile,
+    });
     const { isJevEnabled, judgeWorkerHealth } = await import(
       "./lib/jev-addon.mjs"
     );
     if (isJevEnabled() && payload.skipJevHealthCheck !== true) {
+      const stdoutTail = readTailSafe(payload.stdoutLog);
+      const stderrTail = readTailSafe(payload.stderrLog);
+      const rolloutTail = readTailSafe(rolloutFile);
+      const activitySig = await Promise.resolve(readActivitySignature()).catch(
+        () => "",
+      );
+      const graceTargetKey = String(
+        payload.pid ||
+          payload.paneId ||
+          payload.sessionId ||
+          payload.stdoutLog ||
+          payload.stderrLog ||
+          rolloutFile ||
+          "default",
+      );
+      const logSignature = `${activitySig}|${stdoutTail.length}:${stderrTail.length}:${rolloutTail.length}|${stdoutTail.slice(-160)}|${stderrTail.slice(-160)}|${rolloutTail.slice(-160)}`;
+      const alreadyGranted = hasGrantedProgressingGrace(
+        graceTargetKey,
+        logSignature,
+      );
       const verdict = await judgeWorkerHealth({
-        stdoutTail: readTailSafe(payload.stdoutLog),
-        stderrTail: readTailSafe(payload.stderrLog),
-        rolloutTail: readTailSafe(rolloutFile),
+        stdoutTail,
+        stderrTail,
+        rolloutTail,
         elapsedSec: numericOption(payload.elapsedSec, 0),
       });
-      if (verdict?.status === "progressing") {
+      if (verdict?.status === "progressing" && !alreadyGranted) {
+        recordProgressingGrace(graceTargetKey, logSignature);
         return emitJson({
           ok: true,
           outcome: "recovered",
@@ -848,16 +882,6 @@ async function cmdInterveneRun(args) {
           "Stop repeating the failing command. Summarize the root cause and switch to an alternative approach.";
       }
     }
-    const seconds = (value) => {
-      const parsed = numericOption(value, undefined);
-      return parsed > 0 ? parsed * 1_000 : undefined;
-    };
-    const readActivitySignature = intervention.createFileActivitySource({
-      files: [payload.stdoutLog, payload.stderrLog, payload.resultFile].filter(
-        Boolean,
-      ),
-      rolloutFile,
-    });
     const ladder = intervention.createInterventionLadder({
       target: {
         channel: payload.channel,
@@ -894,6 +918,51 @@ async function cmdInterveneRun(args) {
       step: null,
       error: error?.message || String(error),
     });
+  }
+}
+
+const PROGRESSING_GRACE_MEM = new Map();
+
+function progressingGraceFilePath() {
+  return (
+    process.env.TFX_JEV_GRACE_FILE ||
+    join(tmpdir(), "tfx-jev-progressing-grace.json")
+  );
+}
+
+function loadProgressingGraceStore() {
+  try {
+    const file = progressingGraceFilePath();
+    if (!existsSync(file)) return {};
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function hasGrantedProgressingGrace(targetKey, logSignature) {
+  if (!targetKey || !logSignature) return false;
+  if (PROGRESSING_GRACE_MEM.get(targetKey) === logSignature) return true;
+  const store = loadProgressingGraceStore();
+  return store[targetKey] === logSignature;
+}
+
+function recordProgressingGrace(targetKey, logSignature) {
+  if (!targetKey || !logSignature) return;
+  PROGRESSING_GRACE_MEM.set(targetKey, logSignature);
+  try {
+    const store = loadProgressingGraceStore();
+    store[targetKey] = logSignature;
+    const keys = Object.keys(store);
+    if (keys.length > 64) {
+      for (const oldKey of keys.slice(0, keys.length - 64)) {
+        delete store[oldKey];
+      }
+    }
+    writeFileSync(progressingGraceFilePath(), JSON.stringify(store), "utf8");
+  } catch {
+    // 상태 기록 실패는 무시
   }
 }
 

@@ -265,6 +265,18 @@ export async function submitPromptWithJevVerification({
   retryLimit = SUBMIT_RETRY_LIMIT,
   jevOptions = {},
 } = {}) {
+  const strictVerification = isAntigravityCli(cli);
+  const promptPrefix = promptComposerNeedle(prompt);
+  const isConfirmedSubmitted = (text) => {
+    if (!promptPrefix) return true;
+    if (!text) return !strictVerification;
+    if (hasBusyMarkerOutsideComposer(text)) return true;
+    const state = composerPromptState(text, promptPrefix);
+    if (state === "absent") return true;
+    if (state === "unknown" && !strictVerification) return true;
+    return false;
+  };
+
   try {
     submitPromptWithVerification({
       cli,
@@ -278,7 +290,6 @@ export async function submitPromptWithJevVerification({
   } catch (err) {
     const capturedText =
       typeof capture === "function" ? String(capture() ?? "") : "";
-    const promptPrefix = promptComposerNeedle(prompt);
     const verdict = await judgeComposerState(
       { capturedText, promptPrefix },
       jevOptions,
@@ -292,13 +303,23 @@ export async function submitPromptWithJevVerification({
     ) {
       sendEnter();
       sleep(400);
-      return { submitted: true, jevState: verdict.state };
+      const afterText =
+        typeof capture === "function" ? String(capture() ?? "") : "";
+      if (isConfirmedSubmitted(afterText)) {
+        return { submitted: true, jevState: "submitted_running" };
+      }
+      const postVerdict = await judgeComposerState(
+        { capturedText: afterText, promptPrefix },
+        jevOptions,
+      );
+      if (postVerdict?.state === "submitted_running") {
+        return { submitted: true, jevState: postVerdict.state };
+      }
     }
     throw err;
   }
   const capturedText =
     typeof capture === "function" ? String(capture() ?? "") : "";
-  const promptPrefix = promptComposerNeedle(prompt);
   const verdict = await judgeComposerState(
     { capturedText, promptPrefix },
     jevOptions,
@@ -309,6 +330,19 @@ export async function submitPromptWithJevVerification({
   ) {
     sendEnter();
     sleep(400);
+    const afterText =
+      typeof capture === "function" ? String(capture() ?? "") : "";
+    if (isConfirmedSubmitted(afterText)) {
+      return { submitted: true, jevState: "submitted_running" };
+    }
+    const postVerdict = await judgeComposerState(
+      { capturedText: afterText, promptPrefix },
+      jevOptions,
+    );
+    return {
+      submitted: postVerdict?.state === "submitted_running",
+      jevState: postVerdict?.state || verdict.state,
+    };
   }
   return {
     submitted: verdict?.state !== "modal_blocking",

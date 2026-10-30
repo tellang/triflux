@@ -343,12 +343,27 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
       },
     );
     assert.equal(res?.action, "steer");
+
+    const dropRes = await judgeBusyAction(
+      {
+        incomingMessage: "이미 처리한 중복 요청",
+        currentOutput: "같은 파일 수정 중",
+        allowDrop: true,
+      },
+      {
+        client: async (q) => {
+          assert.deepEqual(q.options, ["steer", "wait", "drop"]);
+          return { output: "drop", confidence: 0.93 };
+        },
+      },
+    );
+    assert.equal(dropRes?.action, "drop");
   });
 
   it("Hook 5: judgeWorkerHealth가 대화형 프롬프트 대기를 waiting_input으로 판정하고 readTailSafe가 파일 끝 바이트만 읽는다", async () => {
     const res = await judgeWorkerHealth(
       {
-        stdoutTail: "? Overwrite existing configuration file? (y/N)",
+        recentOutput: "? Overwrite existing configuration file? (y/N)",
         stderrTail: "",
         elapsedSec: 120,
       },
@@ -357,6 +372,7 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
       },
     );
     assert.equal(res?.status, "waiting_input");
+    assert.equal(res?.healthState, "waiting_input");
 
     const dir = mkdtempSync(join(tmpdir(), "jev-tail-"));
     try {
@@ -565,7 +581,7 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
     );
     assert.equal(
       executionFlagsForCli("codex", "workspace_auto").flagsString,
-      "--full-auto --skip-git-repo-check",
+      "--sandbox workspace-write --skip-git-repo-check",
     );
     assert.equal(
       executionFlagsForCli("codex", "bypass").flagsString,
@@ -630,6 +646,30 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
       );
       assert.equal(res.mcpProfile, "reviewer");
       assert.deepEqual(res.neededMcpServers, ["context7", "brave-search"]);
+
+      const partialRes = await judgeTaskRouting(
+        {
+          prompt: "문서만 참조해서 구조 확인",
+          agentType: "architect",
+          cliType: "codex",
+          availableServers: ["context7"],
+        },
+        {
+          statsFile,
+          batchClient: async () => ({
+            complexity: { choice: "standard", confidence: 0.4 },
+            execution_mode: { choice: "bypass", confidence: 0.3 },
+            mcp_profile: { choice: "reviewer", confidence: 0.92 },
+            mcp_context7: { value: true, confidence: 0.91 },
+          }),
+        },
+      );
+      assert.equal(partialRes.complexity, null);
+      assert.equal(partialRes.codexProfile, null);
+      assert.equal(partialRes.executionMode, null);
+      assert.equal(partialRes.executionFlags, null);
+      assert.equal(partialRes.mcpProfile, "reviewer");
+      assert.deepEqual(partialRes.neededMcpServers, ["context7"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -675,6 +715,13 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
         },
       );
       assert.deepEqual(policy.enabledServers, ["context7"]);
+      assert.equal(policy.codexConfig.mcp_servers.context7.enabled, true);
+      assert.deepEqual(policy.codexConfig.mcp_servers.playwright, {
+        enabled: false,
+      });
+      assert.deepEqual(policy.codexConfig.mcp_servers["brave-search"], {
+        enabled: false,
+      });
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -720,11 +767,33 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
       assert.equal(assigned[0].subtask, "백엔드 쿼리 최적화");
       assert.equal(assigned[1].subtask, "UI 레이아웃 개편");
 
+      const conflictAssigned = await assignTasksWithJev(
+        "태스크A + 태스크B + 태스크C",
+        [
+          { target: "s:0.1", cli: "codex" },
+          { target: "s:0.2", cli: "claude" },
+          { target: "s:0.3", cli: "antigravity" },
+        ],
+        {
+          statsFile,
+          batchClient: async () => ({
+            subtask_0_worker: { choice: "worker_2", confidence: 0.91 },
+            subtask_1_worker: { choice: "worker_0", confidence: 0.92 },
+            subtask_2_worker: { choice: "worker_0", confidence: 0.9 },
+          }),
+        },
+      );
+      assert.deepEqual(
+        conflictAssigned.map((w) => w.subtask),
+        ["태스크B", "태스크C", "태스크A"],
+      );
+
       let enterCalls = 0;
       const submitRes = await submitPromptWithJevVerification({
         cli: "claude",
         prompt: "리팩터링 시작해",
-        capture: () => "> 리팩터링 시작해",
+        capture: () =>
+          enterCalls < 2 ? "> 리팩터링 시작해" : "Working on refactoring...",
         sendEnter: () => {
           enterCalls += 1;
         },
@@ -740,8 +809,29 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
         },
       });
       assert.equal(submitRes.submitted, true);
-      assert.equal(submitRes.jevState, "stuck_in_composer");
+      assert.equal(submitRes.jevState, "submitted_running");
       assert.equal(enterCalls, 2);
+
+      await assert.rejects(
+        () =>
+          submitPromptWithJevVerification({
+            cli: "antigravity",
+            prompt: "실패 유지 확인",
+            capture: () => "> 실패 유지 확인",
+            sendEnter: () => {},
+            sleep: () => {},
+            settleMs: 0,
+            retryLimit: 1,
+            jevOptions: {
+              statsFile,
+              client: async () => ({
+                choice: "stuck_in_composer",
+                confidence: 0.93,
+              }),
+            },
+          }),
+        /Antigravity prompt submission failed/,
+      );
 
       const indexPath = join(dir, "results.json");
       const resultsIdx = createResultsIndex(

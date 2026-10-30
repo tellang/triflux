@@ -640,7 +640,11 @@ export function getCodexMcpConfig(options = {}) {
   if (registeredServers.length === 0) {
     return { mcp_servers: {} };
   }
-  const allowedServers = new Set(resolveAllowedServers(options));
+  const allowedServers = new Set(
+    Array.isArray(options.allowedServers)
+      ? parseAvailableServers(options.allowedServers)
+      : resolveAllowedServers(options),
+  );
   const resolvedProfile = resolveMcpProfile(
     options.agentType,
     options.requestedProfile,
@@ -732,9 +736,17 @@ export function buildMcpPolicy(options = {}) {
   const hint = buildPromptHint(resolvedOptions);
 
   // 플러그인 서버는 transport 설정이 없어 CLI override를 받으면 부팅이 실패한다.
+  const configServers = codexServersFromConfig(options.codexConfig);
+  const registeredServers =
+    configServers.length > 0
+      ? configServers
+      : options.registeredServers !== undefined
+        ? parseAvailableServers(options.registeredServers)
+        : [];
   const codexOptions = {
     ...resolvedOptions,
-    availableServers: codexServersFromConfig(options.codexConfig),
+    availableServers: registeredServers,
+    allowedServers,
   };
 
   return {
@@ -781,7 +793,15 @@ export async function buildMcpPolicyWithJev(options = {}, jevOptions = {}) {
 
   if (isAutoProfile && selection.mcpProfile === "none") {
     return {
-      ...buildMcpPolicy({ ...options, requestedProfile: "none" }),
+      ...buildMcpPolicy({
+        ...options,
+        requestedProfile: "none",
+        registeredServers:
+          options.registeredServers ??
+          (options.codexConfig === undefined
+            ? options.availableServers
+            : undefined),
+      }),
       requestedProfile: options.requestedProfile || "auto",
     };
   }
@@ -803,6 +823,11 @@ export async function buildMcpPolicyWithJev(options = {}, jevOptions = {}) {
     ...options,
     requestedProfile: nextProfile,
     availableServers: narrowedAvailable,
+    registeredServers:
+      options.registeredServers ??
+      (options.codexConfig === undefined
+        ? options.availableServers
+        : undefined),
   });
   return {
     ...resolved,

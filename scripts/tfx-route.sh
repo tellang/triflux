@@ -305,7 +305,7 @@ build_codex_base() {
       echo "--sandbox read-only --skip-git-repo-check"
       ;;
     workspace_auto)
-      echo "--full-auto --skip-git-repo-check"
+      echo "--sandbox workspace-write --skip-git-repo-check"
       ;;
     *)
       echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
@@ -1931,14 +1931,16 @@ heartbeat_monitor() {
           fi
           if [[ -n "$_bridge_script" && -f "$_bridge_script" ]] && command -v "${NODE_BIN:-node}" >/dev/null 2>&1; then
             _intervene_payload="$("${NODE_BIN:-node}" -e '
-const [pid, stdoutLog, stderrLog, rolloutFile, cli, codexHome] = process.argv.slice(1);
+const [pid, stdoutLog, stderrLog, rolloutFile, cli, codexHome, graceGranted] = process.argv.slice(1);
 process.stdout.write(JSON.stringify({
   channel: "process", pid: Number(pid), stdoutLog, stderrLog,
   rolloutFile: rolloutFile || null, cli: cli || undefined, codexHome: codexHome || undefined,
+  skipJevHealthCheck: graceGranted === "1",
 }));
-' "$pid" "$STDOUT_LOG" "$STDERR_LOG" "$_rollout_file" "${CLI_TYPE:-}" "${CODEX_HOME:-${TFX_CODEX_HOME:-}}")" || _intervene_payload=""
+' "$pid" "$STDOUT_LOG" "$STDERR_LOG" "$_rollout_file" "${CLI_TYPE:-}" "${CODEX_HOME:-${TFX_CODEX_HOME:-}}" "$jev_grace_granted")" || _intervene_payload=""
             echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=STALL_INTERVENE stall=${stall_count}s" >&2
             if [[ -n "$_intervene_payload" ]] && printf '%s\n' "$_intervene_payload" | "${NODE_BIN:-node}" "$_bridge_script" intervene-run --payload-file -; then
+              jev_grace_granted=1
               stall_count=0
               last_size=$current_size
               continue

@@ -51,9 +51,9 @@ export async function teamDebug(args = []) {
     const rawTail = capturePaneOutput(member.pane, lines) || "(empty)";
     let jevLabel = "";
     if (isJevEnabled() && rawTail !== "(empty)") {
-      const verdict = await judgeWorkerHealth({ recentOutput: rawTail });
-      if (verdict) {
-        jevLabel = ` ${DIM}[jev:${verdict.healthState}]${RESET}`;
+      const verdict = await judgeWorkerHealth({ stdoutTail: rawTail });
+      if (verdict?.status) {
+        jevLabel = ` ${DIM}[jev:${verdict.status}]${RESET}`;
       }
     }
     console.log(`\n    [${member.name}] ${member.pane}${jevLabel}`);
