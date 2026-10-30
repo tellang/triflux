@@ -336,6 +336,80 @@ it("Codex unloaded or subagent target is rejected before injection", async () =>
   );
 });
 
+for (const [label, overrides] of [
+  ["explicit subagent", { threadSource: "subagent" }],
+  ["explicit worker", { threadSource: "worker" }],
+  ["explicit unknown classification", { threadSource: "unknown" }],
+  ["unknown source", { source: "unknown" }],
+  ["exec source", { source: "exec" }],
+  ["subagent source", { source: { subAgent: "other" } }],
+  ["null source", { source: null }],
+  ["missing source", { source: undefined }],
+  ["missing threadSource", { threadSource: undefined }],
+  ["missing parentThreadId", { parentThreadId: undefined }],
+  ["missing agentRole", { agentRole: undefined }],
+  ["parent thread", { parentThreadId: "parent" }],
+  ["empty parent thread", { parentThreadId: "" }],
+  ["worker role", { agentRole: "executor" }],
+  ["empty role", { agentRole: "" }],
+  ["ID mismatch", { id: "other" }],
+  ["direct input denied", { canAcceptDirectInput: false }],
+  ["direct input unavailable", { canAcceptDirectInput: null }],
+  ["missing direct input", { canAcceptDirectInput: undefined }],
+]) {
+  it(`Codex nullable root rejects ${label} before injection or wake`, async () => {
+    const thread = {
+      id: "wanted",
+      canAcceptDirectInput: true,
+      threadSource: null,
+      parentThreadId: null,
+      agentRole: null,
+      source: "vscode",
+      ...overrides,
+    };
+    for (const key of Object.keys(overrides)) {
+      if (overrides[key] === undefined) delete thread[key];
+    }
+    const calls = [];
+    const client = {
+      request: async (method) => {
+        calls.push(method);
+        if (method === "thread/loaded/list") return { data: ["wanted"] };
+        if (method === "thread/read") return { thread };
+        throw new Error(`Unexpected write: ${method}`);
+      },
+    };
+    assert.throws(() => validateCodexTarget(thread, "wanted"), /eligible/);
+    await assert.rejects(
+      sendCodexPeer({
+        client,
+        threadId: "wanted",
+        message: "hello",
+        onWriteStart: () =>
+          assert.fail("Rejected target must not start writes"),
+      }),
+      /eligible/,
+    );
+    assert.deepEqual(calls, ["thread/loaded/list", "thread/read"]);
+  });
+}
+
+it("Codex nullable root rejects explicitly undefined threadSource", () => {
+  assert.throws(() =>
+    validateCodexTarget(
+      {
+        id: "wanted",
+        canAcceptDirectInput: true,
+        threadSource: undefined,
+        parentThreadId: null,
+        agentRole: null,
+        source: "vscode",
+      },
+      "wanted",
+    ),
+  );
+});
+
 it("wake failure is partial, never reinjects", async () => {
   const calls = [];
   const client = {
@@ -426,46 +500,73 @@ it("Claude receiver links exact session, process start, private key and socket",
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
-it("Codex success paginates loaded list, never resumes, injects once and wakes once", async () => {
-  const calls = [];
-  const client = {
-    request: async (method, params) => {
-      calls.push([method, params]);
-      if (method === "thread/loaded/list")
-        return params.cursor
-          ? { data: ["wanted"], nextCursor: null }
-          : { data: ["other"], nextCursor: "next" };
-      if (method === "thread/read")
-        return {
-          thread: {
-            id: "wanted",
-            canAcceptDirectInput: true,
-            threadSource: "user",
-          },
-        };
-      return {};
+for (const [label, metadata] of [
+  ["legacy user", { threadSource: "user" }],
+  [
+    "nullable vscode root",
+    {
+      threadSource: null,
+      parentThreadId: null,
+      agentRole: null,
+      source: "vscode",
     },
-  };
-  const r = await sendCodexPeer({
-    client,
-    threadId: "wanted",
-    message: "hello",
+  ],
+  [
+    "nullable cli root",
+    {
+      threadSource: null,
+      parentThreadId: null,
+      agentRole: null,
+      source: "cli",
+    },
+  ],
+]) {
+  it(`Codex ${label} paginates loaded list, never resumes, injects once and wakes once`, async () => {
+    const calls = [];
+    const client = {
+      request: async (method, params) => {
+        calls.push([method, params]);
+        if (method === "thread/loaded/list")
+          return params.cursor
+            ? { data: ["wanted"], nextCursor: null }
+            : { data: ["other"], nextCursor: "next" };
+        if (method === "thread/read")
+          return {
+            thread: {
+              id: "wanted",
+              canAcceptDirectInput: true,
+              ...metadata,
+            },
+          };
+        return {};
+      },
+    };
+    const r = await sendCodexPeer({
+      client,
+      threadId: "wanted",
+      message: "hello",
+    });
+    assert.equal(r.status, "sent");
+    assert.equal(r.modelReceipt, false);
+    assert.deepEqual(
+      calls.map((x) => x[0]),
+      [
+        "thread/loaded/list",
+        "thread/loaded/list",
+        "thread/read",
+        "thread/inject_items",
+        "turn/start",
+      ],
+    );
+    assert.equal(calls[3][1].items[0].type, "agent_message");
+    assert.deepEqual(calls[3][1].items[0].content, [
+      { type: "input_text", text: "hello" },
+    ]);
+    assert.deepEqual(calls[4][1].input, []);
+    assert.equal(calls[4][1].toolOutput.name, "tfx_peer_wake");
+    assert.equal(calls[4][1].toolOutput.retain, true);
   });
-  assert.equal(r.status, "sent");
-  assert.equal(r.modelReceipt, false);
-  assert.deepEqual(
-    calls.map((x) => x[0]),
-    [
-      "thread/loaded/list",
-      "thread/loaded/list",
-      "thread/read",
-      "thread/inject_items",
-      "turn/start",
-    ],
-  );
-  assert.equal(calls[3][1].items[0].type, "agent_message");
-  assert.deepEqual(calls[4][1].input, []);
-});
+}
 it("npm-style symlink CLI entrypoint executes and rejects unknown subcommand", () => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), "tfx-peer-bin-"));
   try {

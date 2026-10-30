@@ -88,7 +88,13 @@ export function validateCodexTarget(thread, id) {
   if (
     thread?.id !== id ||
     thread.canAcceptDirectInput !== true ||
-    thread.threadSource !== "user" ||
+    !(
+      thread.threadSource === "user" ||
+      (thread.threadSource === null &&
+        thread.parentThreadId === null &&
+        thread.agentRole === null &&
+        (thread.source === "cli" || thread.source === "vscode"))
+    ) ||
     thread.parentThreadId ||
     thread.agentRole
   )

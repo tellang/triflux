@@ -2,6 +2,12 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.89.1] - 2026-10-30
+
+### Fixed
+- peer: Codex가 `threadSource:null`로 반환하는 정상 루트 세션의 native 피어 수신 거부를 수정한다. 정확한 ID, 직접 입력 허용, 명시적인 null parent와 role, cli 또는 vscode 출처가 모두 맞을 때만 호환한다.
+- peer: legacy user와 기존 loaded, private socket, pane 바인딩 검사를 유지하고 하위 에이전트, 누락 필드와 미상 출처는 계속 거부한다.
+
 ## [10.89.0] - 2026-10-30
 
 ### Added
