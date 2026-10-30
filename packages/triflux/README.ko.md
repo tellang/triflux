@@ -147,7 +147,8 @@ provider별 사용 한도 캐시와 `Jev ON`, `Jev OFF`, 남은 문맥을 표시
 Jev 설정을 판정하지 못하면 `Jev ?`를 표시하며, ON은 설정 활성 상태를 뜻한다.
 Codex HUD는 5초마다 로컬 캐시와 rollout을 읽으며 외부 조회를 새로 실행하지 않는다. 사용 한도는 기존 캐시 갱신 시점의 값이다.
 훅 없이 동작하며, 기존 세션과 전역 tmux 옵션, Codex 내장 status_line은 바꾸지 않는다.
-Codex 시작과 재개는 실행별 `features.hooks=false`를 사용한다. 공유 daemon에서는 연결할 thread의 config에도 같은 값을 전달하며, remote resume은 기존 thread 권한을 따른다.
+공유 daemon의 신규 Codex thread는 thread별 `features.hooks=false`로 일반 사용자와 플러그인 훅을 비활성화한다. builtin 훅과 legacy `notify`는 이 보장에서 제외한다. 시작 훅 검토는 승인 기록을 변경하지 않는 `Continue without trusting`을 선택한다.
+명시적 resume과 resume-last는 대상이 이미 loaded이거나 loaded 상태를 확인할 수 없으면 기존 세션 설정과 권한을 유지하고 중단한다. 사전 조회는 해당 시점의 상태이므로 조회와 resume 사이의 다른 client 연결까지 배제할 수 없다. 신규 thread의 훅 비활성화 보장은 재개 thread로 확대하지 않는다.
 Codex 신뢰 화면은 자동 승인하지 않는다.
 
 ## 런타임 기능
