@@ -147,6 +147,7 @@ describe("ensureCodexHooks", () => {
       type: "command",
       command: '"/opt/node" "/repo/hooks/codex-session-hook.mjs" register',
       timeout: 15,
+      statusMessage: "Triflux 세션 등록",
     });
     assert.deepEqual(promptSubmit, {
       hooks: [
@@ -154,6 +155,7 @@ describe("ensureCodexHooks", () => {
           type: "command",
           command: '"/opt/node" "/repo/hooks/codex-session-hook.mjs" heartbeat',
           timeout: 10,
+          statusMessage: "Triflux 세션 활동 갱신",
         },
       ],
     });
