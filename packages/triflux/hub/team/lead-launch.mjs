@@ -112,7 +112,7 @@ export function leadDisplayName(role, now = new Date()) {
 /** Claude 는 mod 가 /tfx-lead 를 처리한다. Codex 와 agy 는 mod 가 없어 스킬 파일을 읽게 한다. */
 export function leadEntryPrompt(cli, role) {
   if (cli === "claude") return `/tfx-lead ${role}`;
-  return `${LEAD_SKILL} 를 읽고 이 세션이 ${role} 리드를 맡는다. 그 스킬의 절차를 따른다.`;
+  return `${LEAD_SKILL} 를 읽고 이 세션이 ${role} 리드를 맡는다. 처음 활성화할 때 "보유 자산과 선택" 절로 tfx-harness, tfx-auto, tfx-live 등 설치 자산을 인지하고 요청에 맞는 경로를 선택한다. 그 스킬의 절차를 따른다.`;
 }
 
 async function runLive(args, run) {

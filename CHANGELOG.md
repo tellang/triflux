@@ -2,6 +2,12 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.88.3] - 2026-10-30
+
+### Fixed
+- 리드 시작 시 설치된 TFX 자산과 요청별 선택 기준을 안내하고, Codex와 Antigravity 진입 메시지에 공통 리드 스킬을 연결한다.
+- 소유 경로가 분명하면 긴 라우팅 정본을 다시 읽지 않고 필요한 자산을 선택하도록 기준을 명확히 한다. Jev 활성 배지와 실제 판단 호출도 구분한다.
+
 ## [10.88.2] - 2026-10-30
 
 ### Fixed
