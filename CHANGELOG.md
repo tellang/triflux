@@ -2,6 +2,15 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.90.0] - 2026-10-30
+
+### Added
+- jev: `tfx lead --task`의 짧은 역할 설명으로 리드 모델과 effort를 선택하고, 권고와 실제 시작 인자 반영을 구분해 표시한다. 명시 모델, effort와 커스텀 런처는 보존하며 권한과 워커 생명주기는 바꾸지 않는다.
+- jev: 질문별 판단 수락과 배치 전체 상태를 따로 기록하고 리드 모델 선택의 반영 범위, 시작 준비 여부와 폴백 이유를 남긴다. 원문과 인증값은 기록하지 않는다.
+
+### Changed
+- routing: 실행 래퍼가 Jev 권고와 실제 프로필, 명시 override 보존 이유를 구분하고 리드와 워커의 선택 경로를 안내한다.
+
 ## [10.89.2] - 2026-10-30
 
 ### Fixed

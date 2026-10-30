@@ -10,6 +10,8 @@ argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [
 
 # tfx-auto: 통합 CLI 오케스트레이터
 
+새 리드와 새 세션 승계의 모델 선택은 `tfx lead <역할> --cli codex --task '<짧은 작업 요약>'`을 사용하고, 선택 근거는 `--json`의 `routing`을 참조한다. 실제 워커 실행은 이 스킬과 route를 사용한다. route에는 파일 경로만 넘기지 말고 작업 요약을 함께 적는다. 부모 세션에서 같은 작업을 Jev에 중복 조회하지 않고 실행 래퍼의 pre-route를 사용한다. 명시한 CLI, 권한, 모델 지시는 자동 권고보다 우선이다.
+
 > **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급하여
 > 워크플로우의 첫 단계 입력으로 사용한다. ARGUMENTS가 비어있거나 없으면 기존 절차대로 사용자에게 입력을 요청한다.
 

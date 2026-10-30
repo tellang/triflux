@@ -30,6 +30,10 @@ description: >
 
 셸에서 새 리드를 띄울 때는 `tfx lead <역할> [--cli claude|codex|agy]`를 쓴다. tmux 세션(기본 `<폴더>-lead`)에 리드를 띄우고 리드 진입까지 보낸다. Claude 는 `/tfx-lead <역할>`을, mod 가 없는 Codex 와 agy 는 이 스킬 파일을 읽고 리드를 맡으라는 프롬프트를 보낸다.
 
+- 새 리드나 새 세션 승계의 모델 선택은 `tfx lead <역할> --cli codex --task '<짧은 작업 요약>'`의 자동 선택을 쓴다. Jev는 작업을 분류하고 기존 프로필 매핑과 resolver가 모델과 effort를 선택한다. 인계 파일은 자동으로 읽지 않는다.
+- `--json`의 `routing`에서 권고, effective 모델과 effort, 보존/폴백 이유를 확인한다. `appliedTo: start_args`는 시작 인자 선택이며 세션 ready나 실제 모델 수신 증거는 아니다. 프로필을 찾으려고 config를 추측 검색하지 않는다.
+- 명시한 CLI, 권한, 모델 지시가 우선이다. `--model`이나 `--effort`가 하나라도 있으면 그 쌍을 보존하고, 커스텀 런처도 권고만 기록한다. 워커 실행은 기존 `tfx-auto`와 route를 사용하고 승계 ACK와 rebind 절차는 그대로 따른다.
+
 - 실행 명령은 `--launcher`, `~/.config/triflux/lead.json`(Windows 는 `%APPDATA%\triflux\lead.json`)의 `launchers.<cli>`, CLI 이름 순으로 고른다. 예: `{"launchers": {"claude": "<래퍼> launch", "codex": "codex"}}`. triflux 는 CLI 이름 자리만 이 값으로 바꿔 실행할 뿐 특정 도구에 의존하지 않는다.
 - `tfx setup`과 `tfx update`가 대화형으로 돌 때, 설치된 CLI 중 아직 정하지 않은 것의 실행 명령을 한 번 묻는다. 물을 수 없으면 다음 대화형 실행으로 미룬다.
 - 이 설정은 리드에만 쓴다. 워커는 `tfx-live start`가 기본 명령으로 띄운다.

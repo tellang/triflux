@@ -397,12 +397,19 @@ export async function queryJevBatch(input = {}, options = {}) {
   const { state = "", questions = {} } = sanitizeJevInput(input);
   const entries = Object.entries(questions || {});
   const startedAt = Date.now();
+  let transport = null;
   const fallback = (reason) => {
     recordJevStat(
       {
         hook: "jev_batch",
         kind: "batch",
+        accepted: false,
         intervened: false,
+        batchAccepted: false,
+        batchReason: reason,
+        transport,
+        transportFallback: transport === "cli",
+        appliedTo: null,
         reason,
         durationMs: Date.now() - startedAt,
       },
@@ -411,19 +418,68 @@ export async function queryJevBatch(input = {}, options = {}) {
     return null;
   };
   if (entries.length === 0) return fallback("batch_empty_questions");
+  const finish = (out, transport) => {
+    for (const [key, req] of entries) {
+      if (
+        req.kind === "choice" &&
+        Array.isArray(req.options) &&
+        !req.options.includes(out[key]?.choice)
+      )
+        out[key] = null;
+    }
+    const valid = entries.every(([key]) => out[key]);
+    const confident =
+      valid &&
+      entries.every(([key]) => out[key].confidence >= minConfidence(options));
+    const batchReason = !valid
+      ? entries.some(([key]) => out[key])
+        ? "batch_partial_response"
+        : "batch_invalid_response"
+      : !confident
+        ? "batch_low_confidence"
+        : "batch_accepted";
+    for (const [key, req] of entries) {
+      const result = out[key];
+      const accepted = Boolean(
+        result && result.confidence >= minConfidence(options),
+      );
+      recordJevStat(
+        {
+          hook: req.hook || "jev_batch",
+          kind: req.kind,
+          transport,
+          transportFallback: transport === "cli",
+          accepted,
+          intervened: accepted,
+          reason: !result
+            ? "invalid_response"
+            : accepted
+              ? "accepted"
+              : "low_confidence",
+          batchAccepted: confident,
+          batchReason,
+          confidence: result?.confidence ?? null,
+          outcome: result?.choice ?? result?.value ?? result?.score ?? null,
+          appliedTo: null,
+          durationMs: Date.now() - startedAt,
+        },
+        options,
+      );
+    }
+    return out;
+  };
 
   try {
     const clientFn = options.batchClient || options.client;
     if (typeof clientFn === "function") {
+      transport = "custom";
       const custom = await clientFn({ state, questions }, options);
       const answers = custom?.answers || custom || {};
       const out = {};
       for (const [key, req] of entries) {
         out[key] = normalizeResponse(answers[key], req.kind);
       }
-      if (Object.values(out).some((answer) => !answer))
-        fallback("batch_invalid_response");
-      return out;
+      return finish(out, "custom");
     }
 
     const env = resolveEnv(options);
@@ -431,6 +487,7 @@ export async function queryJevBatch(input = {}, options = {}) {
     if (!apiKey) {
       if (!resolveJevCliBin(env))
         return fallback("batch_transport_unavailable");
+      transport = "cli";
       const out = {};
       for (const [key, req] of entries) {
         out[key] = await callJevCli(
@@ -440,11 +497,15 @@ export async function queryJevBatch(input = {}, options = {}) {
           },
           options,
         );
-        if (!out[key]) return fallback("batch_invalid_response");
+        if (!out[key]) {
+          finish(out, "cli");
+          return null;
+        }
       }
-      return out;
+      return finish(out, "cli");
     }
 
+    transport = "http";
     const url = options.apiUrl || env.JEV_API_URL || DEFAULT_JEV_API_URL;
     const model = options.model || env.JEV_MODEL || DEFAULT_JEV_MODEL;
     const timeoutMs = Number(
@@ -479,9 +540,7 @@ export async function queryJevBatch(input = {}, options = {}) {
     for (const [key, req] of entries) {
       out[key] = normalizeResponse(answers[key], req.kind);
     }
-    if (Object.values(out).some((answer) => !answer))
-      fallback("batch_invalid_response");
-    return out;
+    return finish(out, "http");
   } catch {
     return fallback("batch_call_failed");
   }
@@ -496,7 +555,12 @@ export function recordJevStat(entry = {}, options = {}) {
     if (flag === "0" || flag === "false" || flag === "off") return;
 
     const explicitFile = options.statsFile || env.TFX_JEV_STATS_FILE || "";
-    if (!explicitFile && typeof options.client === "function") return;
+    if (
+      !explicitFile &&
+      (typeof options.client === "function" ||
+        typeof options.batchClient === "function")
+    )
+      return;
 
     const filePath = explicitFile || DEFAULT_JEV_STATS_PATH;
     mkdirSync(dirname(filePath), { recursive: true });

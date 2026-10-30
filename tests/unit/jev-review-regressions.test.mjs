@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +25,243 @@ import {
   buildMcpPolicy,
   buildMcpPolicyWithJev,
 } from "../../scripts/lib/mcp-filter.mjs";
+
+it("배치 성공, partial, 저신뢰, invalid와 CLI 폴백 통계를 원문 없이 구분한다", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-batch-stats-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const questions = {
+    complexity: {
+      hook: "task_routing_complexity",
+      kind: "choice",
+      options: ["deep"],
+      query: "private query",
+    },
+    ready: { hook: "ready", kind: "noul", query: "private query" },
+  };
+  for (const mode of [
+    "success",
+    "partial",
+    "low",
+    "invalid",
+    "cli",
+    "http",
+    "timeout",
+  ]) {
+    const statsFile = join(dir, `${mode}.jsonl`);
+    let count = 0;
+    const answers = {
+      complexity: {
+        choice: mode === "invalid" ? "private response" : "deep",
+        confidence: mode === "low" ? 0.2 : 0.9,
+      },
+      ...(mode !== "partial"
+        ? { ready: { value: true, confidence: 0.95 } }
+        : {}),
+    };
+    const options =
+      mode === "cli"
+        ? {
+            env: { TFX_JEV_CLI: "/fake/jev" },
+            execFileImpl: async () => {
+              count++;
+              return {
+                stdout: JSON.stringify({
+                  value: true,
+                  choice: "deep",
+                  confidence: 0.9,
+                }),
+              };
+            },
+          }
+        : {
+            env: { JEV_API_KEY: "private-key" },
+            fetchImpl: async () => {
+              count++;
+              if (mode === "timeout") throw new Error("private query");
+              return { ok: mode !== "http", json: async () => ({ answers }) };
+            },
+          };
+    await queryJevBatch(
+      { state: "private state", questions },
+      { ...options, statsFile },
+    );
+    assert.equal(count, mode === "cli" ? 2 : 1);
+    const text = readFileSync(statsFile, "utf8");
+    assert.doesNotMatch(text, /private (query|state|response)|private-key/);
+    const rows = text.trim().split("\n").map(JSON.parse);
+    assert.equal(
+      rows.some((row) => row.accepted),
+      !["http", "timeout"].includes(mode),
+      mode,
+    );
+    assert.equal(
+      rows.some((row) => row.intervened),
+      !["http", "timeout"].includes(mode),
+      mode,
+    );
+    assert.equal(
+      rows.every((row) => row.batchAccepted),
+      ["success", "cli"].includes(mode),
+    );
+    if (mode === "cli") {
+      assert.ok(
+        rows.every((row) => row.transport === "cli" && row.transportFallback),
+      );
+      assert.ok(
+        rows.every(
+          (row) =>
+            row.reason === "accepted" && row.batchReason === "batch_accepted",
+        ),
+      );
+    }
+    if (mode === "success") {
+      assert.equal(rows.length, 2);
+      assert.equal(rows[0].hook, "task_routing_complexity");
+      assert.equal(rows[0].outcome, "deep");
+      assert.equal(rows[0].confidence, 0.9);
+      assert.equal(rows[0].appliedTo, null);
+    }
+    assert.ok(rows.every((row) => row.durationMs >= 0));
+  }
+  const statsFile = join(dir, "off.jsonl");
+  for (const answers of [
+    {},
+    {
+      complexity: { choice: "deep", confidence: 0.9 },
+      ready: { value: true, confidence: 0.95 },
+    },
+  ]) {
+    await queryJevBatch(
+      { questions },
+      {
+        statsFile,
+        env: { TFX_JEV_STATS: "off" },
+        batchClient: async () => answers,
+      },
+    );
+  }
+  assert.equal(existsSync(statsFile), false);
+});
+
+it("질문별 수락은 deep .95/mode .86/MCP .28과 부분 무효 배치에서 독립적이다", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-question-stats-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  for (const mode of ["low", "partial", "invalid"]) {
+    const statsFile = join(dir, `${mode}.jsonl`);
+    const result = await judgeTaskRouting(
+      { prompt: "Coordinate workers", cliType: "codex" },
+      {
+        statsFile,
+        env: {},
+        batchClient: async () => ({
+          complexity: { choice: "deep", confidence: 0.95 },
+          execution_mode: { choice: "workspace_auto", confidence: 0.86 },
+          ...(mode === "partial"
+            ? {}
+            : {
+                mcp_profile: {
+                  choice: mode === "invalid" ? "unexpected" : "none",
+                  confidence: mode === "low" ? 0.28 : 0.9,
+                },
+              }),
+        }),
+      },
+    );
+    assert.equal(result.codexProfile, "astra_xhigh");
+    const rows = readFileSync(statsFile, "utf8")
+      .trim()
+      .split("\n")
+      .map(JSON.parse);
+    assert.deepEqual(
+      rows.map((row) => row.accepted),
+      [true, true, false],
+    );
+    assert.deepEqual(
+      rows.map((row) => row.intervened),
+      [true, true, false],
+    );
+    assert.deepEqual(
+      rows.map((row) => row.reason),
+      [
+        "accepted",
+        "accepted",
+        mode === "low" ? "low_confidence" : "invalid_response",
+      ],
+    );
+    assert.ok(rows.every((row) => row.batchAccepted === false));
+    assert.ok(
+      rows.every(
+        (row) =>
+          row.batchReason ===
+          (mode === "low" ? "batch_low_confidence" : "batch_partial_response"),
+      ),
+    );
+  }
+});
+
+it("CLI 부분 무효는 앞의 수락을 기록하고 기존 null 반환과 조기 중단을 유지한다", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-cli-partial-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const statsFile = join(dir, "stats.jsonl");
+  let calls = 0;
+  const result = await queryJevBatch(
+    {
+      questions: {
+        a: { hook: "first", kind: "noul", query: "ok?" },
+        b: { hook: "second", kind: "noul", query: "ok?" },
+        c: { hook: "third", kind: "noul", query: "ok?" },
+      },
+    },
+    {
+      statsFile,
+      env: { TFX_JEV_CLI: "/fake/jev" },
+      execFileImpl: async () => ({
+        stdout: JSON.stringify(
+          ++calls === 1 ? { value: true, confidence: 0.9 } : {},
+        ),
+      }),
+    },
+  );
+  assert.equal(result, null);
+  assert.equal(calls, 2);
+  const rows = readFileSync(statsFile, "utf8")
+    .trim()
+    .split("\n")
+    .map(JSON.parse);
+  assert.deepEqual(
+    rows.map((row) => row.accepted),
+    [true, false, false],
+  );
+  assert.ok(
+    rows.every(
+      (row) =>
+        row.batchAccepted === false &&
+        row.transport === "cli" &&
+        row.transportFallback,
+    ),
+  );
+});
+
+it("custom batchClient는 명시 통계 파일 없이 기본 HOME에 쓰지 않는다", async () => {
+  const { DEFAULT_JEV_STATS_PATH } = await import(
+    "../../hub/lib/jev-addon.mjs"
+  );
+  const before = existsSync(DEFAULT_JEV_STATS_PATH)
+    ? readFileSync(DEFAULT_JEV_STATS_PATH, "utf8")
+    : null;
+  for (const answers of [{}, { q: { value: true, confidence: 0.9 } }]) {
+    await queryJevBatch(
+      { questions: { q: { kind: "noul", query: "ok?" } } },
+      { env: {}, batchClient: async () => answers },
+    );
+  }
+  assert.equal(
+    existsSync(DEFAULT_JEV_STATS_PATH)
+      ? readFileSync(DEFAULT_JEV_STATS_PATH, "utf8")
+      : null,
+    before,
+  );
+});
 
 it("teamSend는 Jev drop 판단에도 명시적 메시지를 실제 주입한다", async (t) => {
   const injected = [];

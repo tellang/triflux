@@ -314,7 +314,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
   },
   lead: {
     usage:
-      "tfx lead <역할> [--cli claude|codex|agy] [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD]",
+      "tfx lead <역할> [--cli claude|codex|agy] [--task SUMMARY] [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD]",
     description:
       "리드 세션을 tmux 에 띄우고 리드 진입까지 보낸다. 실행 명령은 --launcher, ~/.config/triflux/lead.json 의 launchers.<cli>, CLI 이름 순. setup 과 update 가 처음 한 번 묻는다",
     options: [
@@ -333,8 +333,21 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         type: "string",
         description: "작업 폴더 (기본 현재 폴더)",
       },
-      { name: "--model", type: "string", description: "Claude 모델" },
-      { name: "--effort", type: "string", description: "Claude effort" },
+      {
+        name: "--task",
+        type: "string",
+        description: "Jev 모델 선택용 짧은 작업 요약 (파일을 읽지 않는다)",
+      },
+      {
+        name: "--model",
+        type: "string",
+        description: "리드 모델, 명시하면 모델과 effort 쌍을 보존",
+      },
+      {
+        name: "--effort",
+        type: "string",
+        description: "리드 effort, 명시하면 모델과 effort 쌍을 보존",
+      },
       {
         name: "--launcher",
         type: "string",
@@ -4247,6 +4260,7 @@ async function main() {
         "../hub/team/lead-launch.mjs"
       );
       const valueFlags = [
+        "--task",
         "--session",
         "--cwd",
         "--model",
@@ -4279,6 +4293,7 @@ async function main() {
       const result = await launchLead({
         cli,
         role,
+        task: readCliOptionValue(cmdArgs, "--task"),
         cwd: readCliOptionValue(cmdArgs, "--cwd") || process.cwd(),
         session: readCliOptionValue(cmdArgs, "--session"),
         model: readCliOptionValue(cmdArgs, "--model"),
@@ -4301,6 +4316,12 @@ async function main() {
         console.log(
           `\n  ${RED}✗${RESET} 리드 시작 실패: ${result.start?.error ?? result.start?.blockedBy ?? JSON.stringify(result.start)}\n`,
         );
+      if (!JSON_OUTPUT) {
+        const r = result.routing;
+        console.log(
+          `  Jev enabled=${r.enabled} attempted=${r.attempted} complexity=${r.complexity ?? "unknown"} recommended=${r.recommendedProfile ?? "none"} model=${r.effectiveModel ?? "default"} effort=${r.effectiveEffort ?? "default"} conf=${r.confidence ?? "unknown"} source=${r.source} reason=${r.reason} appliedTo=${r.appliedTo ?? "none"}\n`,
+        );
+      }
       if (!result.ok) process.exitCode = EXIT_ERROR;
       return;
     }

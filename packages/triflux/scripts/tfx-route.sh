@@ -2419,11 +2419,16 @@ apply_jev_pre_route() {
   IFS=$'\x1e' read -r _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff \
     _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf <<< "$jev_row"
 
+  local _jev_codex_reason=explicit_override_preserved _jev_agy_reason=explicit_override_preserved
+  [[ "${TFX_CODEX_PROFILE:-auto}" != "auto" ]] || _jev_codex_reason=no_recommendation
+  [[ -n "${TFX_GEMINI_PROFILE:-}" ]] || _jev_agy_reason=no_recommendation
   if [[ "${TFX_CODEX_PROFILE:-auto}" == "auto" && -n "$_jev_codex_prof" ]]; then
     TFX_CODEX_PROFILE="$_jev_codex_prof"
+    _jev_codex_reason=jev_applied
   fi
   if [[ -z "${TFX_GEMINI_PROFILE:-}" && -n "$_jev_agy_prof" ]]; then
     TFX_GEMINI_PROFILE="$_jev_agy_prof"
+    _jev_agy_reason=jev_applied
     export TFX_GEMINI_PROFILE
   fi
   if [[ "${TFX_EXECUTION_MODE:-auto}" == "auto" && -n "$_jev_exec_mode" ]]; then
@@ -2440,7 +2445,7 @@ apply_jev_pre_route() {
   fi
   JEV_CLAUDE_MODEL="$_jev_claude_mod"
   JEV_CLAUDE_EFFORT="$_jev_claude_eff"
-  echo "[tfx-route] Jev pre-route: complexity=${_jev_comp} codex=${TFX_CODEX_PROFILE} agy=${TFX_GEMINI_PROFILE:-auto} mode=${TFX_EXECUTION_MODE} mcp=${MCP_PROFILE} conf=${_jev_conf}" >&2
+  echo "[tfx-route] Jev pre-route: complexity=${_jev_comp} recommended_codex=${_jev_codex_prof:-none} effective_codex=${TFX_CODEX_PROFILE:-auto} codex_reason=${_jev_codex_reason} recommended_agy=${_jev_agy_prof:-none} effective_agy=${TFX_GEMINI_PROFILE:-auto} agy_reason=${_jev_agy_reason} mode=${TFX_EXECUTION_MODE} mcp=${MCP_PROFILE} conf=${_jev_conf}" >&2
 }
 
 # ── 메인 실행 ──
