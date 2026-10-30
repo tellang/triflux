@@ -1874,7 +1874,7 @@ heartbeat_monitor() {
         jev_stall_hits=0
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=${probe_state}(probe-grace)" >&2
       else
-        if [[ "$stall_count" -ge 60 && "$stall_count" -lt "$stall_threshold" ]] && [[ -n "${TFX_JEV:-}${JEV_API_KEY:-}${TYPESAFE_API_KEY:-}${JEV_CLI_BIN:-}" && "${TFX_JEV:-1}" != "0" ]]; then
+        if [[ "$stall_count" -ge 60 && "$stall_count" -lt "$stall_threshold" ]] && [[ -n "${TFX_JEV:-}${JEV_API_KEY:-}${TYPESAFE_API_KEY:-}${TFX_JEV_CLI:-}${JEV_CLI_BIN:-}" && "${TFX_JEV:-1}" != "0" ]]; then
           local _jev_bridge="" _jev_out="" _jev_status=""
           if declare -f resolve_bridge_script >/dev/null 2>&1; then
             _jev_bridge="$(resolve_bridge_script 2>/dev/null || true)"
@@ -1893,18 +1893,18 @@ heartbeat_monitor() {
           fi
         fi
         if [[ "$stall_count" -ge "$stall_threshold" ]]; then
-          if [[ "$jev_stall_hits" -lt 2 && "$jev_grace_granted" -eq 0 ]] && [[ -n "${TFX_JEV:-}${JEV_API_KEY:-}${TYPESAFE_API_KEY:-}${JEV_CLI_BIN:-}" && "${TFX_JEV:-1}" != "0" ]]; then
+          if [[ "$jev_stall_hits" -lt 2 && "$jev_grace_granted" -eq 0 ]] && [[ -n "${TFX_JEV:-}${JEV_API_KEY:-}${TYPESAFE_API_KEY:-}${TFX_JEV_CLI:-}${JEV_CLI_BIN:-}" && "${TFX_JEV:-1}" != "0" ]]; then
             local _jev_grace_bridge="" _jev_grace_out=""
             if declare -f resolve_bridge_script >/dev/null 2>&1; then
               _jev_grace_bridge="$(resolve_bridge_script 2>/dev/null || true)"
             fi
             if [[ -n "$_jev_grace_bridge" && -f "$_jev_grace_bridge" ]] && command -v "${NODE_BIN:-node}" >/dev/null 2>&1; then
               _jev_grace_out="$("${NODE_BIN:-node}" "$_jev_grace_bridge" judge-stall --stdout-log "$STDOUT_LOG" --stderr-log "$STDERR_LOG" --rollout-file "${TFX_CODEX_ROLLOUT_FILE:-}" --elapsed-sec "$elapsed" 2>/dev/null || true)"
-              if [[ "$_jev_grace_out" == *'"status":"healthy_thinking"'* ]]; then
+              if [[ "$_jev_grace_out" == *'"status":"progressing"'* ]]; then
                 jev_grace_granted=1
                 stall_count=0
                 last_size=$current_size
-                echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s Jev healthy_thinking 판정으로 stall 유예 1회 부여" >&2
+                echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s Jev progressing 판정으로 stall 유예 1회 부여" >&2
                 continue
               fi
             fi
@@ -2383,7 +2383,7 @@ apply_jev_pre_route() {
   case "$jev_flag" in
     0|false|off|FALSE|OFF) return 0 ;;
   esac
-  if [[ -z "${JEV_API_KEY:-${TYPESAFE_API_KEY:-}}" && "$jev_flag" != "1" && "$jev_flag" != "true" && "$jev_flag" != "on" ]]; then
+  if [[ -z "${JEV_API_KEY:-${TYPESAFE_API_KEY:-}}" && -z "${TFX_JEV_CLI:-}" && "$jev_flag" != "1" && "$jev_flag" != "true" && "$jev_flag" != "on" ]]; then
     return 0
   fi
   [[ -n "${PROMPT:-}" ]] || return 0
