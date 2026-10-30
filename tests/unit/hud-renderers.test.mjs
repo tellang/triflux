@@ -104,11 +104,11 @@ describe("HUD 표시", () => {
     const line = stripAnsi(
       getMicroLine(context, usage, null, {
         currentMarker: "x",
-        sessionStatus: "j 42k/116k",
+        sessionStatus: "ctx:73% j",
       }),
     );
-    assert.match(line, /x:.*j 42k\/116k a:/);
-    assert.doesNotMatch(line, /ctx:/);
+    assert.match(line, /x:.*ctx:73% j a:/);
+    assert.equal(line.match(/ctx:/g).length, 1);
   });
 
   it("GCP 표시는 배경색 없이 파란 글자이고 기존 칸 폭을 유지한다", () => {

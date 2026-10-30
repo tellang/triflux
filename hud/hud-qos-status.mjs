@@ -211,7 +211,7 @@ async function main() {
 
 main().catch(() => {
   process.stdout.write(
-    `\x1b[0m${bold(claudeOrange("c"))}: ${dim(`5h:--% ${formatTimeCell("")} 1w:--% ${formatTimeCellDH("")} | ?/?`)}\n`,
+    `\x1b[0m${bold(claudeOrange("c"))}: ${dim(`5h:--% ${formatTimeCell("")} 1w:--% ${formatTimeCellDH("")} | ctx:--`)}\n`,
   );
 });
 

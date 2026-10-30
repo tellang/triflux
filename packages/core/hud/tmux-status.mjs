@@ -135,6 +135,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.stdout.write(`${status}\n`);
     })
     .catch(() => {
-      process.stdout.write("c: ?/?\n");
+      process.stdout.write("c: ctx:--\n");
     });
 }

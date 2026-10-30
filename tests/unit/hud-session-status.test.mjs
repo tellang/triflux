@@ -36,7 +36,7 @@ function render(input, extraEnv = {}, args = []) {
   }
 }
 
-test("현재 CLI 행에만 Jev와 사용량/잔량을 통합한다", () => {
+test("현재 CLI 행에만 남은 context 비율과 Jev를 통합한다", () => {
   for (const columns of [80, 120, 160]) {
     for (const [product, marker] of [
       [undefined, "c"],
@@ -63,17 +63,17 @@ test("현재 CLI 행에만 Jev와 사용량/잔량을 통합한다", () => {
         assert.equal(lines.length, 3, output);
         assert.match(
           lines.find((line) => line.startsWith(`${marker}:`)),
-          enabled ? /j 42k\/116k$/ : /42k\/116k$/,
+          enabled ? /ctx:73% j$/ : /ctx:73%$/,
         );
         assert.equal(
-          lines.filter((line) => line.includes("42k/116k")).length,
+          lines.filter((line) => line.includes("ctx:73%")).length,
           1,
         );
         assert.equal(
           lines.filter((line) => /\bj\b/.test(line)).length,
           enabled ? 1 : 0,
         );
-        assert.doesNotMatch(output, /ctx:|Jev|문맥|ON|OFF/);
+        assert.doesNotMatch(output, /\d+k\/|Jev|문맥|ON|OFF/);
         assert.ok(
           lines.every((line) => line.length <= columns),
           output,
@@ -90,18 +90,27 @@ test("현재 CLI 행에만 Jev와 사용량/잔량을 통합한다", () => {
   }
 });
 
-test("실행창과 usage가 함께 있어야 토큰을 표시하고 0과 unknown을 구분한다", async () => {
+test("실제 토큰으로 남은 비율을 계산하고 비율 폴백과 0과 unknown을 구분한다", async () => {
   for (const [context_window, expected] of [
-    [{ used_percentage: 42 }, "42%/58%"],
-    [{ context_window_size: 200000, used_percentage: 42 }, "42%/58%"],
-    [{ remaining_percentage: 58 }, "42%/58%"],
+    [{ used_percentage: 42 }, "ctx:58%"],
+    [{ context_window_size: 200000, used_percentage: 42 }, "ctx:58%"],
+    [{ remaining_percentage: 58 }, "ctx:58%"],
+    [{ remaining_percentage: 73, used_percentage: 99 }, "ctx:73%"],
+    [
+      {
+        context_window_size: 200000,
+        current_usage: { total_tokens: 54000 },
+        remaining_percentage: 1,
+      },
+      "ctx:73%",
+    ],
     [
       { context_window_size: 200000, current_usage: { total_tokens: 0 } },
-      "0/200k",
+      "ctx:100%",
     ],
     [
       { context_window_size: 200000, current_usage: { total_tokens: 200000 } },
-      "200k/0",
+      "ctx:0%",
     ],
     [
       {
@@ -112,16 +121,16 @@ test("실행창과 usage가 함께 있어야 토큰을 표시하고 0과 unknown
           cache_read_input_tokens: 21000,
         },
       },
-      "42k/158k",
+      "ctx:79%",
     ],
-    [{ current_usage: { total_tokens: 42000 } }, "?/?"],
-    [{ context_window_size: 200000 }, "?/?"],
+    [{ current_usage: { total_tokens: 42000 } }, "ctx:--"],
+    [{ context_window_size: 200000 }, "ctx:--"],
     [
       { context_window_size: 200000, current_usage: { total_tokens: null } },
-      "?/?",
+      "ctx:--",
     ],
-    [{ used_percentage: null }, "?/?"],
-    [{}, "?/?"],
+    [{ used_percentage: null }, "ctx:--"],
+    [{}, "ctx:--"],
   ])
     assert.equal(
       await sessionStatus({ context_window }, { TFX_JEV: "off" }),
@@ -139,7 +148,7 @@ test("실행창과 usage가 함께 있어야 토큰을 표시하고 0과 unknown
         },
       ),
     ),
-    "?/?",
+    "ctx:--",
   );
   assert.equal(
     await sessionStatus(
@@ -154,7 +163,7 @@ test("실행창과 usage가 함께 있어야 토큰을 표시하고 0과 unknown
       },
       { TFX_JEV: "off" },
     ),
-    "?/?",
+    "ctx:--",
   );
 });
 
@@ -162,9 +171,9 @@ test("nano와 band는 기존 provider 축소 정책을 유지한다", () => {
   const input = { context_window: { used_percentage: 100 } };
   const nano = render(input, { COLUMNS: "35", TFX_JEV: "off" });
   assert.equal(nano.trim().split("\n").length, 1);
-  assert.match(nano, /c:.*100%\/0%.*x:.*a:/);
+  assert.match(nano, /c:.*ctx:0%.*x:.*a:/);
   assert.match(
     render(input, { TFX_JEV_CLI: "/missing-test-jev" }, ["--band"]),
-    /^tfx-band 1\nc:.*j 100%\/0%/,
+    /^tfx-band 1\nc:.*ctx:0% j/,
   );
 });

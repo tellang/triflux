@@ -71,7 +71,7 @@ test("Codex HUD는 대상 세션만 바꾸고 늦게 준비된 rollout을 읽는
     assert.match(render(), /^c:/);
     assert.match(
       tmux("show-options", "-t", "=owned:", "-v", "@tfx_hud_1"),
-      /\?\/\?$/,
+      /ctx:--$/,
     );
     const thread = "019a0000-0000-7000-8000-000000000001";
     const sessions = join(env.CODEX_HOME, "sessions", "2026", "10", "30");
@@ -104,7 +104,7 @@ test("Codex HUD는 대상 세션만 바꾸고 늦게 준비된 rollout을 읽는
     assert.match(render(), /^c:/);
     assert.match(
       tmux("show-options", "-t", "=owned:", "-v", "@tfx_hud_1"),
-      /\?\/\?$/,
+      /ctx:--$/,
     );
     writeFileSync(rollout, complete);
     assert.match(render(), /^c:/);
@@ -115,7 +115,7 @@ test("Codex HUD는 대상 세션만 바꾸고 늦게 준비된 rollout을 읽는
     assert.match(rows.join("\n"), /^x:.*5h:.*1w:/m);
     assert.match(rows.join("\n"), /^a:/m);
     assert.doesNotMatch(rows.join("\n"), /\x1b/);
-    assert.match(rows[1], /84k\/116k$/);
+    assert.match(rows[1], /ctx:58%$/);
     assert.ok(!tmux("show-options", "-t", "=owned:").includes("stale"));
     assert.equal(tmux("show-options", "-g"), globalBefore);
     assert.equal(tmux("show-options", "-t", "=other:"), otherBefore);
@@ -142,10 +142,10 @@ test("Codex HUD는 대상 세션만 바꾸고 늦게 준비된 rollout을 읽는
     });
     try {
       const deadline = Date.now() + 8000;
-      while (Date.now() < deadline && !screen.includes("116k"))
+      while (Date.now() < deadline && !screen.includes("ctx:58%"))
         await new Promise((resolve) => setTimeout(resolve, 100));
-      assert.match(screen, /116k/);
-      assert.match(screen, /84k\/116k/);
+      assert.match(screen, /ctx:58%/);
+      assert.doesNotMatch(screen, /84k|116k|Jev/);
       assert.match(
         tmux("show-options", "-t", "=owned:", "-v", "@tfx_hud_0"),
         /^c:/,
