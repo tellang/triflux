@@ -14,7 +14,10 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
-import { ensureCodexHooks } from "../ensure-codex-hooks.mjs";
+import {
+  computeTrustedHookHash,
+  ensureCodexHooks,
+} from "../ensure-codex-hooks.mjs";
 
 const TEMP_DIRS = [];
 
@@ -219,5 +222,116 @@ describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
     );
     const m = after.match(/trusted_hash = "(sha256:[0-9a-f]{64})"/);
     assert.ok(m, "유효한 sha256 해시로 재기록");
+  });
+});
+
+describe("관리 Codex 훅 표시 문구", () => {
+  it("두 handler의 표시 문구만 추가하고 타사 훅과 설정을 보존하며 멱등이다", () => {
+    const codexHome = makeCodexHome();
+    const configPath = join(codexHome, "config.toml");
+    const config =
+      'model = "gpt-6.1-sol"\n[hooks.state."foreign:stop:0:0"]\ntrusted_hash = "sha256:foreign"\n';
+    writeFileSync(configPath, config);
+    const foreign = {
+      matcher: "startup",
+      hooks: [
+        {
+          type: "command",
+          command: "foreign-hook",
+          timeout: 7,
+          statusMessage: "기존 표시",
+        },
+      ],
+    };
+    const metadata = {
+      description: "사용자 훅 설명",
+      custom: { enabled: true },
+    };
+    writeFileSync(
+      join(codexHome, "hooks.json"),
+      JSON.stringify({
+        ...metadata,
+        hooks: {
+          SessionStart: [foreign],
+          UserPromptSubmit: [foreign],
+          Stop: [foreign],
+        },
+      }),
+    );
+    const opts = {
+      codexHome,
+      nodeBin: "/test/node",
+      hookScriptPath: "/test/hooks/codex-session-hook.mjs",
+      platform: "darwin",
+      trust: false,
+    };
+    const first = ensureCodexHooks(opts);
+    const hooksText = readFileSync(first.hooksPath, "utf8");
+    const result = JSON.parse(hooksText);
+    assert.equal(result.description, metadata.description);
+    assert.deepEqual(result.custom, metadata.custom);
+    assert.deepEqual(result.hooks.SessionStart[0], foreign);
+    assert.deepEqual(result.hooks.UserPromptSubmit[0], foreign);
+    assert.deepEqual(result.hooks.Stop, [foreign]);
+    assert.deepEqual(result.hooks.SessionStart[1], {
+      matcher: "startup|resume|clear",
+      hooks: [
+        {
+          type: "command",
+          command: '"/test/node" "/test/hooks/codex-session-hook.mjs" register',
+          timeout: 15,
+          statusMessage: "Triflux 세션 등록",
+        },
+      ],
+    });
+    assert.deepEqual(result.hooks.UserPromptSubmit[1], {
+      hooks: [
+        {
+          type: "command",
+          command:
+            '"/test/node" "/test/hooks/codex-session-hook.mjs" heartbeat',
+          timeout: 10,
+          statusMessage: "Triflux 세션 활동 갱신",
+        },
+      ],
+    });
+    assert.equal(first.changedConfig, false);
+    assert.equal(readFileSync(configPath, "utf8"), config);
+    const second = ensureCodexHooks(opts);
+    assert.equal(second.changedHooks, false);
+    assert.equal(second.changedConfig, false);
+    assert.equal(readFileSync(first.hooksPath, "utf8"), hooksText);
+    assert.equal(readFileSync(configPath, "utf8"), config);
+  });
+  it("표시 문구 추가는 기존 승인 기록을 바꾸거나 새 정의를 승인한 것으로 보지 않는다", () => {
+    const codexHome = makeCodexHome();
+    const opts = {
+      codexHome,
+      nodeBin: "/test/node",
+      hookScriptPath: "/test/hooks/codex-session-hook.mjs",
+      trust: false,
+    };
+    const first = ensureCodexHooks(opts);
+    const hooks = JSON.parse(readFileSync(first.hooksPath, "utf8")).hooks;
+    const config = [
+      ["SessionStart", "session_start"],
+      ["UserPromptSubmit", "user_prompt_submit"],
+    ]
+      .map(([event, label]) => {
+        const group = hooks[event][0];
+        const hash = computeTrustedHookHash({
+          eventName: label,
+          matcher: group.matcher,
+          command: group.hooks[0].command,
+          timeout: group.hooks[0].timeout,
+        });
+        return `[hooks.state."${first.hooksPath}:${label}:0:0"]\ntrusted_hash = "${hash}"\n`;
+      })
+      .join("\n");
+    writeFileSync(first.configPath, config);
+    const result = ensureCodexHooks(opts);
+    assert.equal(result.changedConfig, false);
+    assert.equal(result.trusted, false);
+    assert.equal(readFileSync(first.configPath, "utf8"), config);
   });
 });

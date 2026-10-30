@@ -3,7 +3,17 @@
 // hub/bridge.mjs: tfx-route.sh 와 tfx-live 가 부르는 로컬 제어 CLI.
 // 팀 하위 명령은 nativeProxy 를 직접 호출하고 Claude daemon, retry, intervene 은 로컬 모듈만 쓴다.
 
-import { readFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { parseArgs as nodeParseArgs } from "node:util";
 
 import {
@@ -46,6 +56,17 @@ export function parseArgs(argv) {
       "snapshot-file": { type: "string" },
       event: { type: "string" },
       "max-iterations": { type: "string" },
+      "stdout-log": { type: "string" },
+      "stderr-log": { type: "string" },
+      "rollout-file": { type: "string" },
+      "elapsed-sec": { type: "string" },
+      "result-file": { type: "string" },
+      agent: { type: "string" },
+      "cli-type": { type: "string" },
+      "available-servers": { type: "string" },
+      prompt: { type: "string" },
+      instruction: { type: "string" },
+      delimited: { type: "boolean" },
     },
     allowPositionals: true,
     strict: false,
@@ -151,14 +172,35 @@ async function cmdTeamTaskUpdate(args) {
 
 async function cmdTeamSendMessage(args) {
   const { teamSendMessage } = await import("./team/nativeProxy.mjs");
+  const { isJevEnabled, judgeInboxPriority } = await import(
+    "./lib/jev-addon.mjs"
+  );
+  let summary = args.summary;
+  let priority = null;
+  let urgencyScore = null;
+  if (isJevEnabled()) {
+    const verdict = await judgeInboxPriority({
+      text: args.text,
+      summary: args.summary,
+      from: args.from,
+    });
+    if (verdict) {
+      priority = verdict.priority;
+      urgencyScore = verdict.urgencyScore;
+      if (summary && !String(summary).startsWith("[JEV:")) {
+        summary = `[JEV:${verdict.priority}] ${summary}`;
+      }
+    }
+  }
   return emitJson(
     await teamSendMessage({
       team_name: args.team,
       from: args.from,
       to: args.to || "team-lead",
       text: args.text,
-      summary: args.summary,
+      summary,
       color: args.color || "blue",
+      ...(priority ? { priority, urgencyScore } : {}),
     }),
   );
 }
@@ -706,7 +748,7 @@ async function cmdRetryRun(args) {
       result = sm.reportVerifySuccess();
       break;
     case "verify-fail":
-      result = sm.reportVerifyFail(reason || "unspecified");
+      result = await sm.reportVerifyFailAsync(reason || "unspecified");
       break;
     default:
       console.error(`unknown --event: ${event}`);
@@ -781,6 +823,7 @@ async function cmdInterveneRun(args) {
         codexHome: payload.codexHome,
       });
     }
+    let reinstructPrompt = payload.reinstructPrompt || undefined;
     const seconds = (value) => {
       const parsed = numericOption(value, undefined);
       return parsed > 0 ? parsed * 1_000 : undefined;
@@ -791,6 +834,54 @@ async function cmdInterveneRun(args) {
       ),
       rolloutFile,
     });
+    const { isJevEnabled, judgeWorkerHealth } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    if (isJevEnabled() && payload.skipJevHealthCheck !== true) {
+      const stdoutTail = readTailSafe(payload.stdoutLog);
+      const stderrTail = readTailSafe(payload.stderrLog);
+      const rolloutTail = readTailSafe(rolloutFile);
+      const activitySig = await Promise.resolve(readActivitySignature()).catch(
+        () => "",
+      );
+      const graceTargetKey = String(
+        payload.pid ||
+          payload.paneId ||
+          payload.sessionId ||
+          payload.stdoutLog ||
+          payload.stderrLog ||
+          rolloutFile ||
+          "default",
+      );
+      const logSignature = `${activitySig}|${stdoutTail.length}:${stderrTail.length}:${rolloutTail.length}|${stdoutTail.slice(-160)}|${stderrTail.slice(-160)}|${rolloutTail.slice(-160)}`;
+      const alreadyGranted = hasGrantedProgressingGrace(
+        graceTargetKey,
+        logSignature,
+      );
+      const verdict = await judgeWorkerHealth({
+        stdoutTail,
+        stderrTail,
+        rolloutTail,
+        elapsedSec: numericOption(payload.elapsedSec, 0),
+      });
+      if (verdict?.status === "progressing" && !alreadyGranted) {
+        recordProgressingGrace(graceTargetKey, logSignature);
+        return emitJson({
+          ok: true,
+          outcome: "recovered",
+          step: "jev-health-check",
+          status: "progressing",
+          confidence: verdict.confidence,
+        });
+      }
+      if (!reinstructPrompt && verdict?.status === "waiting_input") {
+        reinstructPrompt =
+          "Continue non-interactively using safe defaults without waiting for interactive user input.";
+      } else if (!reinstructPrompt && verdict?.status === "looping_error") {
+        reinstructPrompt =
+          "Stop repeating the failing command. Summarize the root cause and switch to an alternative approach.";
+      }
+    }
     const ladder = intervention.createInterventionLadder({
       target: {
         channel: payload.channel,
@@ -803,7 +894,7 @@ async function cmdInterveneRun(args) {
         rolloutFile,
         daemon: payload.daemon,
       },
-      reinstructPrompt: payload.reinstructPrompt || undefined,
+      reinstructPrompt,
       readActivitySignature,
       config: {
         ...(seconds(payload.reinstructWaitSec)
@@ -825,6 +916,307 @@ async function cmdInterveneRun(args) {
       ok: false,
       outcome: "failed",
       step: null,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+const PROGRESSING_GRACE_MEM = new Map();
+
+function progressingGraceFilePath() {
+  return (
+    process.env.TFX_JEV_GRACE_FILE ||
+    join(tmpdir(), "tfx-jev-progressing-grace.json")
+  );
+}
+
+function loadProgressingGraceStore() {
+  try {
+    const file = progressingGraceFilePath();
+    if (!existsSync(file)) return {};
+    const parsed = JSON.parse(readFileSync(file, "utf8"));
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function hasGrantedProgressingGrace(targetKey, logSignature) {
+  if (!targetKey || !logSignature) return false;
+  if (PROGRESSING_GRACE_MEM.get(targetKey) === logSignature) return true;
+  const store = loadProgressingGraceStore();
+  return store[targetKey] === logSignature;
+}
+
+function recordProgressingGrace(targetKey, logSignature) {
+  if (!targetKey || !logSignature) return;
+  PROGRESSING_GRACE_MEM.set(targetKey, logSignature);
+  try {
+    const store = loadProgressingGraceStore();
+    store[targetKey] = logSignature;
+    const keys = Object.keys(store);
+    if (keys.length > 64) {
+      for (const oldKey of keys.slice(0, keys.length - 64)) {
+        delete store[oldKey];
+      }
+    }
+    writeFileSync(progressingGraceFilePath(), JSON.stringify(store), "utf8");
+  } catch {
+    // 상태 기록 실패는 무시
+  }
+}
+
+export function readTailSafe(filePath, maxBytes = 2000) {
+  if (!filePath) return "";
+  let fd;
+  try {
+    fd = openSync(String(filePath), "r");
+    const { size } = fstatSync(fd);
+    if (size <= 0) return "";
+    const readLen = Math.min(size, maxBytes);
+    const offset = Math.max(0, size - readLen);
+    const buf = Buffer.allocUnsafe(readLen);
+    const bytesRead = readSync(fd, buf, 0, readLen, offset);
+    return buf
+      .subarray(0, bytesRead)
+      .toString("utf8")
+      .replace(/^\uFFFD+/, "");
+  } catch {
+    return "";
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {}
+    }
+  }
+}
+
+async function cmdJudgeStall(args) {
+  try {
+    const payload =
+      args["payload-file"] || args.payload ? readBridgePayload(args) : {};
+    const stdoutLog = args["stdout-log"] ?? payload.stdoutLog;
+    const stderrLog = args["stderr-log"] ?? payload.stderrLog;
+    const rolloutFile = args["rollout-file"] ?? payload.rolloutFile;
+    const elapsedSec = Number(args["elapsed-sec"] ?? payload.elapsedSec) || 0;
+    const { isJevEnabled, judgeWorkerHealth } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    if (!isJevEnabled()) {
+      return emitJson({ ok: true, enabled: false, status: null });
+    }
+    const verdict = await judgeWorkerHealth({
+      stdoutTail: readTailSafe(stdoutLog),
+      stderrTail: readTailSafe(stderrLog),
+      rolloutTail: readTailSafe(rolloutFile),
+      elapsedSec,
+    });
+    return emitJson({
+      ok: true,
+      enabled: true,
+      status: verdict?.status ?? null,
+      confidence: verdict?.confidence ?? null,
+    });
+  } catch (error) {
+    return emitJson({
+      ok: false,
+      enabled: false,
+      status: null,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+async function cmdJevBatch(args) {
+  try {
+    const payload = readBridgePayload(args);
+    const state = String(payload.state ?? payload.context ?? "");
+    const questions =
+      payload.questions && typeof payload.questions === "object"
+        ? payload.questions
+        : {};
+    const { isJevEnabled, queryJevBatch } = await import("./lib/jev-addon.mjs");
+    if (!isJevEnabled()) {
+      return emitJson({
+        ok: true,
+        enabled: false,
+        answers: null,
+      });
+    }
+    const answers = await queryJevBatch({ state, questions });
+    return emitJson({ ok: true, enabled: true, answers });
+  } catch (error) {
+    return emitJson({
+      ok: false,
+      enabled: false,
+      answers: null,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+async function cmdJevStats() {
+  try {
+    const { isJevEnabled, summarizeJevStats } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    const stats = summarizeJevStats();
+    return emitJson({ ok: true, enabled: isJevEnabled(), stats });
+  } catch (error) {
+    return emitJson({
+      ok: false,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+async function cmdHandoffCheck(args) {
+  try {
+    const payload =
+      args["payload-file"] || args.payload ? readBridgePayload(args) : {};
+    const resultFile = args["result-file"] ?? payload.resultFile;
+    const rawText =
+      args.text ??
+      payload.rawText ??
+      (resultFile && existsSync(resultFile)
+        ? readFileSync(resultFile, "utf8")
+        : "");
+    const { isJevEnabled, judgeHandoffQuality } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    if (!isJevEnabled()) {
+      return emitJson({ ok: true, enabled: false, verdict: null });
+    }
+    const verdict = await judgeHandoffQuality({
+      rawText,
+      handoff: payload.handoff ?? {
+        status: payload.status ?? "ok",
+        lead_action: payload.leadAction ?? "accept",
+        files_changed: Array.isArray(payload.gitDiffFiles)
+          ? payload.gitDiffFiles
+          : [],
+        verdict: payload.verdict ?? "",
+      },
+      gitDiffFiles: Array.isArray(payload.gitDiffFiles)
+        ? payload.gitDiffFiles
+        : [],
+    });
+    return emitJson({ ok: true, enabled: true, verdict });
+  } catch (error) {
+    return emitJson({
+      ok: false,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+async function cmdJudgeRoute(args) {
+  try {
+    const payload =
+      args["payload-file"] || args.payload ? readBridgePayload(args) : {};
+    const prompt = String(args.prompt ?? args.text ?? payload.prompt ?? "");
+    const agentType = String(args.agent ?? payload.agentType ?? "executor");
+    const cliType = String(args["cli-type"] ?? payload.cliType ?? "codex");
+    const availableRaw =
+      args["available-servers"] ?? payload.availableServers ?? "";
+    const availableServers = Array.isArray(availableRaw)
+      ? availableRaw
+      : String(availableRaw)
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+    const { isJevEnabled, judgeTaskRouting } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    if (!isJevEnabled()) {
+      if (args.delimited) return true;
+      return emitJson({ ok: true, enabled: false, routing: null });
+    }
+    const routing = await judgeTaskRouting({
+      prompt,
+      agentType,
+      cliType,
+      availableServers,
+    });
+    if (args.delimited) {
+      if (!routing) return true;
+      const RS = "\x1e";
+      const fields = [
+        routing.complexity || "",
+        routing.codexProfile || "",
+        routing.agyProfile || "",
+        routing.claudeModel || "",
+        routing.claudeEffort || "",
+        String(routing.expectedDurationSec || ""),
+        routing.executionMode || "",
+        routing.mcpProfile || "",
+        Array.isArray(routing.neededMcpServers)
+          ? routing.neededMcpServers.join(",")
+          : "",
+        String(routing.confidence ?? ""),
+      ];
+      process.stdout.write(fields.join(RS));
+      return true;
+    }
+    return emitJson({ ok: true, enabled: true, routing });
+  } catch (error) {
+    if (args.delimited) return false;
+    return emitJson({
+      ok: false,
+      enabled: false,
+      routing: null,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+async function cmdJudgeAck(args) {
+  try {
+    const payload =
+      args["payload-file"] || args.payload ? readBridgePayload(args) : {};
+    const instruction = String(args.instruction ?? payload.instruction ?? "");
+    const stdoutLog = args["stdout-log"] ?? payload.stdoutLog;
+    const recentOutput = String(
+      args.text ?? payload.recentOutput ?? readTailSafe(stdoutLog),
+    );
+    const { isJevEnabled, judgeInstructionAck } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    if (!isJevEnabled()) {
+      return emitJson({ ok: true, enabled: false, verdict: null });
+    }
+    const verdict = await judgeInstructionAck({ instruction, recentOutput });
+    return emitJson({ ok: true, enabled: true, verdict });
+  } catch (error) {
+    return emitJson({
+      ok: false,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+async function cmdJudgeReview(args) {
+  try {
+    const payload =
+      args["payload-file"] || args.payload ? readBridgePayload(args) : {};
+    const { isJevEnabled, judgeReviewGate } = await import(
+      "./lib/jev-addon.mjs"
+    );
+    if (!isJevEnabled()) {
+      return emitJson({ ok: true, enabled: false, verdict: null });
+    }
+    const verdict = await judgeReviewGate({
+      diffStat: String(payload.diffStat ?? ""),
+      handoffSummary: String(args.summary ?? payload.handoffSummary ?? ""),
+      previousReviews: String(payload.previousReviews ?? ""),
+      currentReview: String(args.text ?? payload.currentReview ?? ""),
+    });
+    return emitJson({ ok: true, enabled: true, verdict });
+  } catch (error) {
+    return emitJson({
+      ok: false,
       error: error?.message || String(error),
     });
   }
@@ -857,9 +1249,23 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdRetryStatus(args);
     case "intervene-run":
       return await cmdInterveneRun(args);
+    case "judge-stall":
+      return await cmdJudgeStall(args);
+    case "jev-batch":
+      return await cmdJevBatch(args);
+    case "jev-stats":
+      return await cmdJevStats(args);
+    case "handoff-check":
+      return await cmdHandoffCheck(args);
+    case "judge-route":
+      return await cmdJudgeRoute(args);
+    case "judge-ack":
+      return await cmdJudgeAck(args);
+    case "judge-review":
+      return await cmdJudgeReview(args);
     default:
       console.error(
-        "사용법: bridge.mjs <team-info|team-task-list|team-task-update|team-send-message|daemon-probe|daemon-attach|daemon-wait|daemon-interrupt|retry-run|retry-status|intervene-run> [--옵션]",
+        "사용법: bridge.mjs <team-info|team-task-list|team-task-update|team-send-message|daemon-probe|daemon-attach|daemon-wait|daemon-interrupt|retry-run|retry-status|intervene-run|judge-stall|jev-batch|jev-stats|handoff-check|judge-route|judge-ack|judge-review> [--옵션]",
       );
       process.exit(1);
   }

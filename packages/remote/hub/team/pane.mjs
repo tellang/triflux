@@ -4,6 +4,7 @@ import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { judgeComposerState } from "@triflux/core/hub/lib/jev-addon.mjs";
 import { privateTmpDir } from "@triflux/core/hub/lib/private-tmp.mjs";
 import { psmuxExec } from "./psmux.mjs";
 import { detectMultiplexer, tmuxExec } from "./session.mjs";
@@ -249,6 +250,104 @@ export function submitPromptWithVerification({
       `Antigravity prompt submission failed after ${retryLimit} attempts: prompt remains in composer or submission could not be verified`,
     );
   }
+}
+
+/**
+ * 결정론적 컴포저 상태 판정이 모호할 때 Jev로 컴포저 상태를 판별해 Enter 재전송 여부를 결정한다.
+ */
+export async function submitPromptWithJevVerification({
+  cli = "claude",
+  prompt = "",
+  capture,
+  sendEnter,
+  sleep = sleepMs,
+  settleMs = PASTE_SETTLE_MS,
+  retryLimit = SUBMIT_RETRY_LIMIT,
+  jevOptions = {},
+} = {}) {
+  const strictVerification = isAntigravityCli(cli);
+  const promptPrefix = promptComposerNeedle(prompt);
+  const isConfirmedSubmitted = (text) => {
+    if (!promptPrefix) return true;
+    if (!text) return !strictVerification;
+    if (hasBusyMarkerOutsideComposer(text)) return true;
+    const state = composerPromptState(text, promptPrefix);
+    if (state === "absent") return true;
+    if (state === "unknown" && !strictVerification) return true;
+    return false;
+  };
+
+  try {
+    submitPromptWithVerification({
+      cli,
+      prompt,
+      capture,
+      sendEnter,
+      sleep,
+      settleMs,
+      retryLimit,
+    });
+  } catch (err) {
+    const capturedText =
+      typeof capture === "function" ? String(capture() ?? "") : "";
+    const verdict = await judgeComposerState(
+      { capturedText, promptPrefix },
+      jevOptions,
+    );
+    if (verdict?.state === "submitted_running") {
+      return { submitted: true, jevState: verdict.state };
+    }
+    if (
+      verdict?.state === "stuck_in_composer" &&
+      typeof sendEnter === "function"
+    ) {
+      sendEnter();
+      sleep(400);
+      const afterText =
+        typeof capture === "function" ? String(capture() ?? "") : "";
+      if (isConfirmedSubmitted(afterText)) {
+        return { submitted: true, jevState: "submitted_running" };
+      }
+      const postVerdict = await judgeComposerState(
+        { capturedText: afterText, promptPrefix },
+        jevOptions,
+      );
+      if (postVerdict?.state === "submitted_running") {
+        return { submitted: true, jevState: postVerdict.state };
+      }
+    }
+    throw err;
+  }
+  const capturedText =
+    typeof capture === "function" ? String(capture() ?? "") : "";
+  const verdict = await judgeComposerState(
+    { capturedText, promptPrefix },
+    jevOptions,
+  );
+  if (
+    verdict?.state === "stuck_in_composer" &&
+    typeof sendEnter === "function"
+  ) {
+    sendEnter();
+    sleep(400);
+    const afterText =
+      typeof capture === "function" ? String(capture() ?? "") : "";
+    if (isConfirmedSubmitted(afterText)) {
+      return { submitted: true, jevState: "submitted_running" };
+    }
+    const postVerdict = await judgeComposerState(
+      { capturedText: afterText, promptPrefix },
+      jevOptions,
+    );
+    return {
+      submitted: postVerdict?.state === "submitted_running",
+      jevState: postVerdict?.state || verdict.state,
+    };
+  }
+  return {
+    submitted: verdict?.state !== "modal_blocking",
+    jevState: verdict?.state || null,
+  };
 }
 
 function confirmSubmit(target, prompt, cli, sendEnter) {

@@ -299,7 +299,30 @@ _sanitize_codex_legacy_profiles() {
 _sanitize_codex_legacy_profiles "$_CODEX_CONFIG"
 
 build_codex_base() {
-  echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+  local mode="${1:-${TFX_EXECUTION_MODE:-bypass}}"
+  case "$mode" in
+    read_only)
+      echo "--sandbox read-only --skip-git-repo-check"
+      ;;
+    workspace_auto)
+      echo "--sandbox workspace-write --skip-git-repo-check"
+      ;;
+    *)
+      echo "--dangerously-bypass-approvals-and-sandbox --skip-git-repo-check"
+      ;;
+  esac
+}
+
+build_antigravity_base() {
+  local mode="${1:-${TFX_EXECUTION_MODE:-bypass}}"
+  case "$mode" in
+    read_only|workspace_auto)
+      echo "--print --sandbox"
+      ;;
+    *)
+      echo "--print --dangerously-skip-permissions"
+      ;;
+  esac
 }
 
 # ── Async Job 디렉토리 ──
@@ -1034,7 +1057,7 @@ route_agent() {
   case "$CLI_TYPE" in
     codex) apply_codex_agent_policy ;;
     antigravity)
-      CLI_CMD="agy"; CLI_ARGS="--print --dangerously-skip-permissions"
+      CLI_CMD="agy"; CLI_ARGS="$(build_antigravity_base)"
       CLI_EFFORT=""; CLI_FAMILY=""; DEFAULT_TIMEOUT=900 ;;
     claude)
       if [[ -n "$REVIEW_AUTHOR" ]]; then
@@ -1062,6 +1085,10 @@ TFX_DISABLE_ANTIGRAVITY="${TFX_DISABLE_ANTIGRAVITY:-0}"
 TFX_ANTIGRAVITY_FALLBACK="${TFX_ANTIGRAVITY_FALLBACK-codex}"
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_PROFILE="${TFX_CODEX_PROFILE:-auto}"
+TFX_EXECUTION_MODE="${TFX_EXECUTION_MODE:-auto}"
+JEV_NEEDED_MCP_SERVERS=""
+JEV_CLAUDE_MODEL=""
+JEV_CLAUDE_EFFORT=""
 
 # Preflight 캐시의 CLI 가용성과 Codex 요금제를 환경변수로 내보냄
 # 하위 프로세스(스킬 포함)가 CLI 가용성을 즉시 참조 가능
@@ -1164,10 +1191,10 @@ apply_cli_mode() {
       if [[ "$CLI_TYPE" != "claude-native" && ( "$CLI_TYPE" != "claude" || -n "$REVIEW_AUTHOR" ) ]]; then
         CLI_TYPE="antigravity"
         CLI_CMD="agy"
-        CLI_ARGS="--print --dangerously-skip-permissions"
+        CLI_ARGS="$(build_antigravity_base)"
         CLI_EFFORT=""; CLI_FAMILY=""
         DEFAULT_TIMEOUT=900
-        echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE → antigravity($CLI_EFFORT)로 리매핑" >&2
+        echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE -> antigravity($CLI_EFFORT)로 리매핑" >&2
       fi ;;
     claude)
       if [[ -n "$REVIEW_AUTHOR" ]]; then
@@ -1635,6 +1662,7 @@ resolve_mcp_policy() {
   )
   [[ -n "$TFX_SEARCH_TOOL" ]] && cmd+=("--search-tool" "$TFX_SEARCH_TOOL")
   [[ -n "$TFX_WORKER_INDEX" ]] && cmd+=("--worker-index" "$TFX_WORKER_INDEX")
+  [[ -n "${JEV_NEEDED_MCP_SERVERS:-}" ]] && cmd+=("--available" "$JEV_NEEDED_MCP_SERVERS")
 
   local _raw
   if ! _raw="$("${cmd[@]}" < /dev/null)"; then
@@ -1653,6 +1681,10 @@ resolve_mcp_policy() {
 }
 
 get_claude_model() {
+  if [[ -n "${JEV_CLAUDE_MODEL:-}" ]]; then
+    echo "$JEV_CLAUDE_MODEL"
+    return
+  fi
   case "$AGENT_TYPE" in
     explore) echo "haiku" ;;
     security-reviewer) echo "fable" ;;
@@ -1663,7 +1695,7 @@ get_claude_model() {
 }
 
 get_claude_effort() {
-  local effort="$CLI_EFFORT"
+  local effort="${CLI_EFFORT:-${JEV_CLAUDE_EFFORT:-}}"
   # 명시한 프로필은 해석된 정책 effort를 쓰고, 기본 native/폴백의 빈 값은 보존한다.
   [[ "$TFX_CODEX_PROFILE" == "auto" ]] || effort="$CODEX_POLICY_EFFORT"
   case "$effort" in
@@ -1760,7 +1792,7 @@ heartbeat_monitor() {
   local interval="${2:-${TFX_HEARTBEAT_INTERVAL:-10}}"
   local stall_threshold="${3:-${TFX_STALL_THRESHOLD:-1200}}"
   local expected_duration="${TFX_EXPECTED_DURATION_SEC:-}"
-  local last_size=0 stall_count=0
+  local last_size=0 stall_count=0 jev_stall_hits=0 jev_grace_granted=0
   local pid_gone=false
   local post_exit_checks=0
   local max_post_exit_checks=6  # fallback drain: 6 intervals (fork PID 미발견 시)
@@ -1803,6 +1835,8 @@ heartbeat_monitor() {
 
     if [[ "$current_size" -gt "$last_size" ]]; then
       stall_count=0
+      jev_stall_hits=0
+      jev_grace_granted=0
       if [[ "$pid_gone" == "true" ]]; then
         local _fi="forked"; [[ -n "$last_known_forks" ]] && _fi="forks:${last_known_forks// /,}"
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=active(${_fi})" >&2
@@ -1837,8 +1871,44 @@ heartbeat_monitor() {
         fi
       elif [[ "$probe_state" =~ ^(mcp_initializing|input_wait)$ ]]; then
         stall_count=0
+        jev_stall_hits=0
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=${probe_state}(probe-grace)" >&2
-      elif [[ "$stall_count" -ge "$stall_threshold" ]]; then
+      else
+        if [[ "$stall_count" -ge 60 && "$stall_count" -lt "$stall_threshold" ]] && [[ -n "${TFX_JEV:-}${JEV_API_KEY:-}${TYPESAFE_API_KEY:-}${TFX_JEV_CLI:-}${JEV_CLI_BIN:-}" && "${TFX_JEV:-1}" != "0" ]]; then
+          local _jev_bridge="" _jev_out="" _jev_status=""
+          if declare -f resolve_bridge_script >/dev/null 2>&1; then
+            _jev_bridge="$(resolve_bridge_script 2>/dev/null || true)"
+          fi
+          if [[ -n "$_jev_bridge" && -f "$_jev_bridge" ]] && command -v "${NODE_BIN:-node}" >/dev/null 2>&1; then
+            _jev_out="$("${NODE_BIN:-node}" "$_jev_bridge" judge-stall --stdout-log "$STDOUT_LOG" --stderr-log "$STDERR_LOG" --rollout-file "${TFX_CODEX_ROLLOUT_FILE:-}" --elapsed-sec "$elapsed" 2>/dev/null || true)"
+            if [[ "$_jev_out" == *'"status":"waiting_input"'* || "$_jev_out" == *'"status":"looping_error"'* ]]; then
+              jev_stall_hits=$((jev_stall_hits + 1))
+              if [[ "$jev_stall_hits" -ge 2 ]]; then
+                echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s Jev semantic stall 판정으로 즉시 개입 전환" >&2
+                stall_count=$stall_threshold
+              fi
+            else
+              jev_stall_hits=0
+            fi
+          fi
+        fi
+        if [[ "$stall_count" -ge "$stall_threshold" ]]; then
+          if [[ "$jev_stall_hits" -lt 2 && "$jev_grace_granted" -eq 0 ]] && [[ -n "${TFX_JEV:-}${JEV_API_KEY:-}${TYPESAFE_API_KEY:-}${TFX_JEV_CLI:-}${JEV_CLI_BIN:-}" && "${TFX_JEV:-1}" != "0" ]]; then
+            local _jev_grace_bridge="" _jev_grace_out=""
+            if declare -f resolve_bridge_script >/dev/null 2>&1; then
+              _jev_grace_bridge="$(resolve_bridge_script 2>/dev/null || true)"
+            fi
+            if [[ -n "$_jev_grace_bridge" && -f "$_jev_grace_bridge" ]] && command -v "${NODE_BIN:-node}" >/dev/null 2>&1; then
+              _jev_grace_out="$("${NODE_BIN:-node}" "$_jev_grace_bridge" judge-stall --stdout-log "$STDOUT_LOG" --stderr-log "$STDERR_LOG" --rollout-file "${TFX_CODEX_ROLLOUT_FILE:-}" --elapsed-sec "$elapsed" 2>/dev/null || true)"
+              if [[ "$_jev_grace_out" == *'"status":"progressing"'* ]]; then
+                jev_grace_granted=1
+                stall_count=0
+                last_size=$current_size
+                echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s Jev progressing 판정으로 stall 유예 1회 부여" >&2
+                continue
+              fi
+            fi
+          fi
         # 외곽 timeout이 hard ceiling으로 이동했으므로 기본 stall 방어는 kill이다.
         # intervene는 bridge의 4단 개입 사다리를 실행하고, 실패하면 아래 kill 블록으로 간다.
         local kill_on_stall="${TFX_STALL_KILL:-kill}"
@@ -1861,14 +1931,16 @@ heartbeat_monitor() {
           fi
           if [[ -n "$_bridge_script" && -f "$_bridge_script" ]] && command -v "${NODE_BIN:-node}" >/dev/null 2>&1; then
             _intervene_payload="$("${NODE_BIN:-node}" -e '
-const [pid, stdoutLog, stderrLog, rolloutFile, cli, codexHome] = process.argv.slice(1);
+const [pid, stdoutLog, stderrLog, rolloutFile, cli, codexHome, graceGranted] = process.argv.slice(1);
 process.stdout.write(JSON.stringify({
   channel: "process", pid: Number(pid), stdoutLog, stderrLog,
   rolloutFile: rolloutFile || null, cli: cli || undefined, codexHome: codexHome || undefined,
+  skipJevHealthCheck: graceGranted === "1",
 }));
-' "$pid" "$STDOUT_LOG" "$STDERR_LOG" "$_rollout_file" "${CLI_TYPE:-}" "${CODEX_HOME:-${TFX_CODEX_HOME:-}}")" || _intervene_payload=""
+' "$pid" "$STDOUT_LOG" "$STDERR_LOG" "$_rollout_file" "${CLI_TYPE:-}" "${CODEX_HOME:-${TFX_CODEX_HOME:-}}" "$jev_grace_granted")" || _intervene_payload=""
             echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=STALL_INTERVENE stall=${stall_count}s" >&2
             if [[ -n "$_intervene_payload" ]] && printf '%s\n' "$_intervene_payload" | "${NODE_BIN:-node}" "$_bridge_script" intervene-run --payload-file -; then
+              jev_grace_granted=1
               stall_count=0
               last_size=$current_size
               continue
@@ -1934,6 +2006,7 @@ process.stdout.write(JSON.stringify({
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=STALL stall=${stall_count}s" >&2
       else
         echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=quiet stall=${stall_count}s" >&2
+      fi
       fi
     fi
     last_size=$current_size
@@ -2305,11 +2378,61 @@ run_codex_exec() {
   return "$exit_code_local"
 }
 
+apply_jev_pre_route() {
+  local jev_flag="${TFX_JEV:-}"
+  case "$jev_flag" in
+    0|false|off|FALSE|OFF) return 0 ;;
+  esac
+  if [[ -z "${JEV_API_KEY:-${TYPESAFE_API_KEY:-}}" && -z "${TFX_JEV_CLI:-}" && "$jev_flag" != "1" && "$jev_flag" != "true" && "$jev_flag" != "on" ]]; then
+    return 0
+  fi
+  [[ -n "${PROMPT:-}" ]] || return 0
+
+  local jev_row=""
+  if ! jev_row=$(bridge_cli judge-route \
+    --agent "$AGENT_TYPE" \
+    --cli-type "${TFX_CLI_MODE:-codex}" \
+    --prompt "$PROMPT" \
+    --delimited 2>/dev/null); then
+    return 0
+  fi
+  [[ -n "$jev_row" ]] || return 0
+
+  local _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff
+  local _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf
+  IFS=$'\x1e' read -r _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff \
+    _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf <<< "$jev_row"
+
+  if [[ "${TFX_CODEX_PROFILE:-auto}" == "auto" && -n "$_jev_codex_prof" ]]; then
+    TFX_CODEX_PROFILE="$_jev_codex_prof"
+  fi
+  if [[ -z "${TFX_GEMINI_PROFILE:-}" && -n "$_jev_agy_prof" ]]; then
+    TFX_GEMINI_PROFILE="$_jev_agy_prof"
+    export TFX_GEMINI_PROFILE
+  fi
+  if [[ "${TFX_EXECUTION_MODE:-auto}" == "auto" && -n "$_jev_exec_mode" ]]; then
+    TFX_EXECUTION_MODE="$_jev_exec_mode"
+  fi
+  if [[ "${MCP_PROFILE:-auto}" == "auto" && -n "$_jev_mcp_prof" ]]; then
+    MCP_PROFILE="$_jev_mcp_prof"
+  fi
+  if [[ -n "$_jev_mcp_srvs" ]]; then
+    JEV_NEEDED_MCP_SERVERS="$_jev_mcp_srvs"
+  fi
+  if [[ -z "${TFX_EXPECTED_DURATION_SEC:-}" && -n "$_jev_dur" ]]; then
+    TFX_EXPECTED_DURATION_SEC="$_jev_dur"
+  fi
+  JEV_CLAUDE_MODEL="$_jev_claude_mod"
+  JEV_CLAUDE_EFFORT="$_jev_claude_eff"
+  echo "[tfx-route] Jev pre-route: complexity=${_jev_comp} codex=${TFX_CODEX_PROFILE} agy=${TFX_GEMINI_PROFILE:-auto} mode=${TFX_EXECUTION_MODE} mcp=${MCP_PROFILE} conf=${_jev_conf}" >&2
+}
+
 # ── 메인 실행 ──
 main() {
   # 종료 시 per-process 에이전트 파일 + 워커 프로세스 정리
   trap 'cleanup_workers' EXIT
 
+  apply_jev_pre_route
   route_agent "$AGENT_TYPE"
   apply_cli_mode
   apply_no_claude_native_mode
@@ -2534,9 +2657,21 @@ FALLBACK_EOF
       "--command" "$CLI_CMD"
       "--command-args-json" "$CLAUDE_BIN_ARGS_JSON"
       "--model" "$claude_model"
-      "--permission-mode" "bypassPermissions"
-      "--allow-dangerously-skip-permissions"
     )
+    case "${TFX_EXECUTION_MODE:-bypass}" in
+      read_only)
+        claude_worker_args+=("--permission-mode" "plan")
+        ;;
+      workspace_auto)
+        claude_worker_args+=("--permission-mode" "acceptEdits")
+        ;;
+      *)
+        claude_worker_args+=(
+          "--permission-mode" "bypassPermissions"
+          "--allow-dangerously-skip-permissions"
+        )
+        ;;
+    esac
     [ -n "$claude_effort" ] && claude_worker_args+=("--effort" "$claude_effort")
 
     run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?

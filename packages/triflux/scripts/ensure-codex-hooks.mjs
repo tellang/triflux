@@ -124,6 +124,7 @@ function buildDesiredGroups({ nodeBin, hookScriptPath, platform }) {
           type: "command",
           command: buildCommand(nodeBin, hookScriptPath, "register", platform),
           timeout: 15,
+          statusMessage: "Triflux 세션 등록",
         },
       ],
     },
@@ -133,6 +134,7 @@ function buildDesiredGroups({ nodeBin, hookScriptPath, platform }) {
           type: "command",
           command: buildCommand(nodeBin, hookScriptPath, "heartbeat", platform),
           timeout: 10,
+          statusMessage: "Triflux 세션 활동 갱신",
         },
       ],
     },
@@ -338,6 +340,7 @@ export function ensureCodexHooks(opts = {}) {
         matcher: desired.SessionStart.matcher,
         command: desired.SessionStart.hooks[0].command,
         timeout: desired.SessionStart.hooks[0].timeout,
+        statusMessage: desired.SessionStart.hooks[0].statusMessage,
       }),
     },
     {
@@ -346,6 +349,7 @@ export function ensureCodexHooks(opts = {}) {
         eventName: "user_prompt_submit",
         command: desired.UserPromptSubmit.hooks[0].command,
         timeout: desired.UserPromptSubmit.hooks[0].timeout,
+        statusMessage: desired.UserPromptSubmit.hooks[0].statusMessage,
       }),
     },
   ];

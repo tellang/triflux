@@ -516,6 +516,15 @@ async function runTfxLive(args, options = {}) {
     }
     const noIterm = `data:text/javascript,${encodeURIComponent(`
       import childProcess from "node:child_process";
+      const { JsonRpcWsUdsClient } = await import(${JSON.stringify(new URL("../../hub/workers/lib/jsonrpc-ws-uds.mjs", import.meta.url).href)});
+      JsonRpcWsUdsClient.prototype.connect = async () => {};
+      JsonRpcWsUdsClient.prototype.notify = () => {};
+      JsonRpcWsUdsClient.prototype.close = () => {};
+      JsonRpcWsUdsClient.prototype.request = async (method, params) => method === "thread/list"
+        ? { data: [{ id: "019a0000-0000-7000-8000-000000000001" }] }
+        : method === "thread/loaded/list"
+        ? { data: [], nextCursor: null }
+        : { thread: { id: params.threadId || "019a0000-0000-7000-8000-000000000001" } };
       import { syncBuiltinESMExports } from "node:module";
       import { promisify } from "node:util";
       const original = childProcess.execFile;
@@ -598,6 +607,7 @@ async function writeReadyFakeTmux(dir) {
       "#!/usr/bin/env node",
       "import fs from 'node:fs';",
       "const args = process.argv.slice(2);",
+      "if (args[0] === 'display-message' && args.at(-1) === '#{session_id}|#{pane_id}') { console.log('$1|%1'); process.exit(0); }",
       "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
       // 실제 tmux 처럼 정확 일치 대상(=이름:)을 세션 이름으로 읽는다.
       "if (args.includes('-t')) args[args.indexOf('-t') + 1] = args[args.indexOf('-t') + 1].replace(/^=/, '').replace(/:$/, '');",
@@ -605,7 +615,7 @@ async function writeReadyFakeTmux(dir) {
       "const state = JSON.parse(fs.existsSync(statePath) ? fs.readFileSync(statePath, 'utf8') : '{}');",
       "state.buffers ||= {};",
       "state.sessions ||= {};",
-      "if (args[0] === 'display-message') console.log(args.at(-1) === '#{pane_pid}' ? (args[args.indexOf('-t') + 1].endsWith('B') ? '200' : '100') : 'codex\\tcodex');",
+      "if (args[0] === 'display-message') console.log(args.at(-1) === '#{session_id}|#{pane_id}' ? '$1|%1' : args.at(-1) === '#{pane_pid}' ? (args[args.indexOf('-t') + 1].endsWith('B') ? '200' : '100') : 'codex\\tcodex');",
       "if (args[0] === 'send-keys' && args[3]?.startsWith('codex ') && args.at(-1) === 'Enter') { state.launches = (state.launches || 0) + 1; fs.writeFileSync(statePath, JSON.stringify(state)); }",
       "if (args[0] === 'set-buffer') {",
       "  const bufferName = args[args.indexOf('-b') + 1];",
@@ -690,10 +700,11 @@ async function writeBusyFakeTmux(dir) {
       "#!/usr/bin/env node",
       "import fs from 'node:fs';",
       "const args = process.argv.slice(2);",
+      "if (args[0] === 'display-message' && args.at(-1) === '#{session_id}|#{pane_id}') { console.log('$1|%1'); process.exit(0); }",
       "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
       "const file = process.env.TMUX_STATE;",
       "const state = JSON.parse(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '{}');",
-      "if (args[0] === 'display-message') console.log(args.at(-1) === '#{pane_pid}' ? '100' : 'codex\\tcodex');",
+      "if (args[0] === 'display-message') console.log(args.at(-1) === '#{session_id}|#{pane_id}' ? '$1|%1' : args.at(-1) === '#{pane_pid}' ? '100' : 'codex\\tcodex');",
       "if (args[0] === 'set-buffer') state.buffer = args[args.indexOf('--') + 1];",
       "if (args[0] === 'show-buffer') process.stdout.write(state.buffer);",
       "if (args[0] === 'capture-pane') {",
@@ -735,6 +746,7 @@ async function writeStaleMarkerFakeTmux(dir) {
       "#!/usr/bin/env node",
       "import fs from 'node:fs';",
       "const args = process.argv.slice(2);",
+      "if (args[0] === 'display-message' && args.at(-1) === '#{session_id}|#{pane_id}') { console.log('$1|%1'); process.exit(0); }",
       "if (args[0] === 'display-message' && args.at(-1) === '#{pane_pid}') console.log('100');",
       "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
       "const statePath = process.env.TMUX_STATE;",
@@ -2077,14 +2089,14 @@ test("tfx-live peer SIGINT emits aborted output and leaves transcript/status fil
 
 test("buildLaunchKeys adds only a Codex model override", () => {
   assert.deepEqual(buildLaunchKeys(ADAPTERS.codex, { model: "gpt-5.6-sol" }), [
-    "codex --dangerously-bypass-approvals-and-sandbox -c 'model=\"gpt-5.6-sol\"'",
+    "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false -c 'model=\"gpt-5.6-sol\"'",
     "Enter",
   ]);
 });
 
 test("buildLaunchKeys adds only a Codex effort override", () => {
   assert.deepEqual(buildLaunchKeys(ADAPTERS.codex, { effort: "xhigh" }), [
-    "codex --dangerously-bypass-approvals-and-sandbox -c 'model_reasoning_effort=\"xhigh\"'",
+    "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false -c 'model_reasoning_effort=\"xhigh\"'",
     "Enter",
   ]);
 });
@@ -2096,7 +2108,7 @@ test("buildLaunchKeys adds Codex model and effort overrides", () => {
       effort: "xhigh",
     }),
     [
-      "codex --dangerously-bypass-approvals-and-sandbox -c 'model=\"gpt-5.6-sol\"' -c 'model_reasoning_effort=\"xhigh\"'",
+      "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false -c 'model=\"gpt-5.6-sol\"' -c 'model_reasoning_effort=\"xhigh\"'",
       "Enter",
     ],
   );
@@ -2115,7 +2127,7 @@ test("buildLaunchKeys shell-quotes a Codex override containing spaces", () => {
       model: "custom model; echo injected",
     }),
     [
-      "codex --dangerously-bypass-approvals-and-sandbox -c 'model=\"custom model; echo injected\"'",
+      "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false -c 'model=\"custom model; echo injected\"'",
       "Enter",
     ],
   );
@@ -2538,13 +2550,31 @@ test("tfx-live start maps generic model and effort flags into launch keys", asyn
       ),
     );
     assert.ok(log.some((args) => args.includes(`/rename ${result.name}`)));
+    const hudOptions = log.filter(
+      (args) => args[0] === "set-option" && args[3].startsWith("status"),
+    );
+    assert.ok(
+      hudOptions.some((args) => args[3] === "status" && args[4] === "4"),
+    );
+    assert.ok(
+      hudOptions.some(
+        (args) =>
+          args[3] === "status-format[0]" &&
+          args[4].includes("hud/tmux-status.mjs"),
+      ),
+    );
+    assert.ok(
+      hudOptions.every(
+        (args) => args[2] === "=start-codex:" && !args.includes("-g"),
+      ),
+    );
     assert.match(launch[3], / --remote unix:\/\/\S+ -C /);
     launch[3] = launch[3].replace(/ --remote unix:\/\/\S+/, "");
     assert.deepEqual(launch, [
       "send-keys",
       "-t",
       "=start-codex:",
-      `codex --dangerously-bypass-approvals-and-sandbox -c 'model="custom model"' -c 'model_reasoning_effort="xhigh"' -C '${dir}/worker'"'"'s cwd'`,
+      `codex resume 019a0000-0000-7000-8000-000000000001 -c features.hooks=false -C '${dir}/worker'"'"'s cwd'`,
       "Enter",
     ]);
   } finally {
@@ -2668,6 +2698,7 @@ test("tfx-live start reports approval screens as blocked without answering them"
         "#!/usr/bin/env node",
         "import fs from 'node:fs';",
         "const args = process.argv.slice(2);",
+        "if (args[0] === 'display-message' && args.at(-1) === '#{session_id}|#{pane_id}') { console.log('$1|%1'); process.exit(0); }",
         "if (args[0] === 'display-message' && args.at(-1) === '#{pane_pid}') console.log('100');",
         "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
         "if (args[0] === 'capture-pane') console.log(process.env.TMUX_SCREEN);",
@@ -2761,7 +2792,7 @@ test("tfx-live start reports approval screens as blocked without answering them"
   }
 });
 
-test("tfx-live start answers trust screens by default and blocks on them with --no-auto-trust", async () => {
+test("Codex trust screens are never answered and other CLIs honor --no-auto-trust", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-start-trust-"));
   try {
     const tmuxPath = path.join(dir, "tmux");
@@ -2771,6 +2802,7 @@ test("tfx-live start answers trust screens by default and blocks on them with --
         "#!/usr/bin/env node",
         "import fs from 'node:fs';",
         "const args = process.argv.slice(2);",
+        "if (args[0] === 'display-message' && args.at(-1) === '#{session_id}|#{pane_id}') { console.log('$1|%1'); process.exit(0); }",
         "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
         "if (args[0] === 'capture-pane') console.log(process.env.TMUX_SCREEN);",
       ].join("\n"),
@@ -2839,7 +2871,7 @@ test("tfx-live start answers trust screens by default and blocks on them with --
               "--session",
               `trust-${index}`,
               "--resume",
-              "r1",
+              "019a0000-0000-7000-8000-000000000001",
               ...(noAutoTrust ? ["--no-auto-trust"] : []),
               "--ready-timeout",
               "0.2",
@@ -2865,7 +2897,7 @@ test("tfx-live start answers trust screens by default and blocks on them with --
         if (!blockedBy) {
           assert.equal(result.blockedBy, undefined, cli);
           assert.deepEqual(answered, [], `${cli} resumed session got keys`);
-        } else if (noAutoTrust) {
+        } else if (noAutoTrust || cli === "codex") {
           assert.equal(result.blockedBy, blockedBy, cli);
           assert.match(result.warning, /attach to the tmux session/);
           assert.deepEqual(answered, [], `${cli} trust screen was answered`);
@@ -2883,7 +2915,7 @@ test("tfx-live start answers trust screens by default and blocks on them with --
   }
 });
 
-test("tfx-live start keeps resume launch keys ahead of model overrides", async () => {
+test("remote Codex resume preserves task permissions and disables hooks", async () => {
   const dir = await fs.mkdtemp(
     path.join(os.tmpdir(), "tfx-live-resume-flags-"),
   );
@@ -2900,7 +2932,7 @@ test("tfx-live start keeps resume launch keys ahead of model overrides", async (
         "--session",
         "resume-codex",
         "--resume",
-        "resume id",
+        "019a0000-0000-7000-8000-000000000001",
         "--model",
         "ignored model",
         "--effort",
@@ -2962,7 +2994,7 @@ test("tfx-live start keeps resume launch keys ahead of model overrides", async (
       "send-keys",
       "-t",
       "=resume-codex:",
-      `codex resume 'resume id' --dangerously-bypass-approvals-and-sandbox -C ${process.cwd()}`,
+      `codex resume 019a0000-0000-7000-8000-000000000001 -c features.hooks=false -C ${process.cwd()}`,
       "Enter",
     ]);
   } finally {
@@ -3028,7 +3060,7 @@ test("tfx-live peer maps side-specific model and effort flags", async () => {
         "send-keys",
         "-t",
         "=peerA:",
-        "codex --dangerously-bypass-approvals-and-sandbox -c 'model=\"codex model\"' -c 'model_reasoning_effort=\"xhigh\"'",
+        "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false -c 'model=\"codex model\"' -c 'model_reasoning_effort=\"xhigh\"'",
         "Enter",
       ],
       [

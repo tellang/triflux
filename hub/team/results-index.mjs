@@ -1,6 +1,7 @@
 // headless 세션 결과 색인. 화면의 HEADLESS_COMPLETE 문자열 대신 읽도록 세션당 JSON 하나를 둔다 (ADR-0034).
 import { renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { judgeInstructionAck } from "../lib/jev-addon.mjs";
 
 export const RESULTS_INDEX_VERSION = 1;
 
@@ -34,6 +35,9 @@ export function createResultsIndex(path, sessionName, workers, canWrite) {
       startedAt: null,
       finishedAt: null,
       resultFile: w.resultFile,
+      ackStatus: null,
+      semanticState: null,
+      ackConfidence: null,
     })),
   };
   const byPane = new Map(index.workers.map((w) => [w.paneName, w]));
@@ -87,6 +91,37 @@ export function createResultsIndex(path, sessionName, workers, canWrite) {
       index.finishedAt = now();
       index.completed = Boolean(completed);
       flush();
+    },
+    recordInstructionAck(
+      paneName,
+      { ackStatus = null, semanticState = null, confidence = null } = {},
+    ) {
+      const w = byPane.get(paneName);
+      if (!w) return null;
+      w.ackStatus = ackStatus;
+      w.semanticState = semanticState;
+      w.ackConfidence = confidence;
+      flush();
+      return w;
+    },
+    async verifyInstructionAckWithJev(
+      paneName,
+      { instruction = "", recentOutput = "" } = {},
+      jevOptions = {},
+    ) {
+      const verdict = await judgeInstructionAck(
+        { instruction, recentOutput },
+        jevOptions,
+      );
+      if (!verdict) return null;
+      this.recordInstructionAck(paneName, {
+        ackStatus: verdict.ackStatus,
+        semanticState: verdict.acknowledged
+          ? "following_instruction"
+          : "unverified_instruction",
+        confidence: verdict.confidence,
+      });
+      return verdict;
     },
   };
 }

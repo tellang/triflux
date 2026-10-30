@@ -19,6 +19,50 @@ const FAKE_CODEX_SERVER = path.resolve(
   "../fixtures/fake-codex-app-server-ws-uds.mjs",
 );
 
+test("UDS auto는 고신뢰 Jev에도 다중 loaded thread를 거부하고 전송하지 않는다", async () => {
+  const calls = [];
+  let closed = false;
+  let judgeCalls = 0;
+  await assert.rejects(
+    () =>
+      askCodexAppServerThread({
+        socketPath: "/mock.sock",
+        threadId: "auto",
+        prompt: "전달",
+        jevOptions: {
+          client: async () => {
+            judgeCalls += 1;
+            return { choice: "candidate_0", confidence: 1 };
+          },
+        },
+        clientFactory: () => ({
+          async connect() {},
+          notify() {},
+          close() {
+            closed = true;
+          },
+          async request(method, params) {
+            calls.push(method);
+            if (method === "initialize") return {};
+            if (method === "thread/loaded/list")
+              return { data: ["one", "two"] };
+            if (method === "thread/read")
+              return {
+                thread: { id: params.threadId, status: { type: "idle" } },
+              };
+            throw new Error(`unexpected send: ${method}`);
+          },
+        }),
+      }),
+    /multiple loaded Codex threads/,
+  );
+  assert.equal(calls.includes("thread/resume"), false);
+  assert.equal(calls.includes("turn/start"), false);
+  assert.equal(calls.includes("turn/steer"), false);
+  assert.equal(judgeCalls, 0);
+  assert.equal(closed, true);
+});
+
 async function withFakeCodexServer(env, fn) {
   const dir = await fs.mkdtemp(path.join(tmpdir(), "cx-"));
   const socketPath = path.join(dir, "fake.sock");

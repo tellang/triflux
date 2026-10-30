@@ -11,6 +11,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -21,6 +22,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { routeTestEnv } from "../fixtures/route-test-env.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
@@ -102,8 +104,68 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     }
   });
 
+  function isolatedRouteEnv(dir, overrides = {}) {
+    const env = routeTestEnv();
+    for (const key of Object.keys(env)) {
+      if (/^(TFX_JEV|JEV_|TYPESAFE_API_KEY$)/.test(key)) delete env[key];
+    }
+    const homes = {
+      HOME: path.join(dir, "home"),
+      CODEX_HOME: path.join(dir, "codex-home"),
+      XDG_CONFIG_HOME: path.join(dir, "config"),
+    };
+    for (const home of Object.values(homes))
+      mkdirSync(home, { recursive: true });
+    return {
+      ...env,
+      ...homes,
+      CLI_TYPE: "test",
+      TFX_CODEX_ROLLOUT_FILE: "",
+      TFX_EXPECTED_DURATION_SEC: "",
+      TFX_PROBE_DIR: path.join(dir, "probe"),
+      TFX_PROBE_STATE_FILE: path.join(dir, "probe.json"),
+      NODE_BIN: process.execPath,
+      ...overrides,
+    };
+  }
+
+  function writeJevBridge(dir) {
+    const bridgeScript = path.join(dir, "bridge.mjs");
+    const callsLog = path.join(dir, "bridge-calls.jsonl");
+    writeFileSync(callsLog, "");
+    writeFileSync(
+      bridgeScript,
+      [
+        'import { appendFileSync } from "node:fs";',
+        `appendFileSync(${JSON.stringify(callsLog)}, JSON.stringify(process.argv.slice(2)) + "\\n");`,
+        'if (process.argv[2] === "judge-stall") {',
+        '  console.log(JSON.stringify({ ok: true, enabled: true, status: "progressing", confidence: 0.99 }));',
+        '} else if (process.argv[2] === "judge-route") {',
+        '  console.log(["high", "astra", "", "", "", "120", "headless", "none", "", "0.99"].join("\\x1e"));',
+        "} else { process.exit(1); }",
+      ].join("\n"),
+    );
+    return { bridgeScript, callsLog };
+  }
+
+  function readBridgeCalls(callsLog) {
+    return readFileSync(callsLog, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  }
+
   // 정수 heartbeat tick은 유지하고 테스트의 실제 대기만 줄인다.
-  function buildStallScript({ killMode, stdoutLog, stderrLog, bridgeScript }) {
+  // Bash 3.2의 비동기 함수에서 command가 호출자를 exec하지 않도록 sleep만 subshell로 감싼다.
+  function buildStallScript({
+    killMode,
+    stdoutLog,
+    stderrLog,
+    bridgeScript,
+    interval = 1,
+    stallThreshold = 2,
+    logicalClock = false,
+  }) {
     const hb = extractFunction("heartbeat_monitor");
     const findForks = extractFunction("_find_fork_pids");
     const rolloutActivity = extractFunction("_codex_rollout_activity_bytes");
@@ -113,7 +175,13 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     return [
       "#!/usr/bin/env bash",
       "set -u",
-      "sleep() { command sleep 0.2; }",
+      ...(logicalClock
+        ? [
+            "LOGICAL_TICK=0",
+            "sleep() { LOGICAL_TICK=$((LOGICAL_TICK + $1)); (command sleep 0.05); }",
+            'date() { if [[ "$1" == "+%s" ]]; then printf "%s\\n" "$((1000000 + LOGICAL_TICK))"; else command date "$@"; fi; }',
+          ]
+        : ["sleep() { (command sleep 0.2); }"]),
       "export TFX_HEARTBEAT=1",
       "export TFX_HEARTBEAT_INTERVAL=1",
       "export TFX_STALL_THRESHOLD=2",
@@ -131,18 +199,22 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
       "",
       findForks,
       rolloutActivity,
+      extractFunction("read_probe_state"),
       hb,
       "",
       "command sleep 30 &",
       "CHILD_PID=$!",
+      'trap \'for test_pid in "${HB_PID:-}" "$CHILD_PID"; do [[ -n "$test_pid" ]] || continue; kill "$test_pid" 2>/dev/null || true; wait "$test_pid" 2>/dev/null || true; done\' EXIT',
+      "trap 'exit 143' TERM",
+      "trap 'exit 130' INT",
       'echo "CHILD_PID=$CHILD_PID" >&2',
       "",
-      'heartbeat_monitor "$CHILD_PID" 1 2 &',
+      `heartbeat_monitor "$CHILD_PID" ${interval} ${stallThreshold} &`,
       "HB_PID=$!",
       "CHILD_KILLED=0",
       "",
       "for i in 1 2 3 4 5 6 7 8 9 10; do",
-      "  sleep 1",
+      "  command sleep 0.2",
       '  if ! kill -0 "$CHILD_PID" 2>/dev/null; then',
       '    echo "CHILD_KILLED_AFTER_TICK=$i" >&2',
       "    CHILD_KILLED=1",
@@ -196,7 +268,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     return [
       "#!/usr/bin/env bash",
       "set -u",
-      "sleep() { command sleep 0.2; }",
+      "sleep() { (command sleep 0.2); }",
       "export TFX_HEARTBEAT=1",
       "export TFX_HEARTBEAT_INTERVAL=1",
       "export TFX_STALL_THRESHOLD=2",
@@ -264,7 +336,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     return [
       "#!/usr/bin/env bash",
       "set -u",
-      "sleep() { command sleep 0.2; }",
+      "sleep() { (command sleep 0.2); }",
       "export TFX_HEARTBEAT=1",
       "export TFX_HEARTBEAT_INTERVAL=1",
       "export TFX_STALL_THRESHOLD=2",
@@ -331,6 +403,194 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     ].join("\n");
   }
 
+  for (const { name, env, interval, threshold, calls, killElapsed, grace } of [
+    {
+      name: "progressing은 한 번만 유예하고 stall 지속 시 기존 kill로 복귀한다",
+      env: { TFX_JEV: "1" },
+      interval: 1,
+      threshold: 2,
+      calls: [2],
+      killElapsed: 5,
+      grace: true,
+    },
+    {
+      name: "공식 TFX_JEV_CLI만으로 grace-stall bridge에 도달한다",
+      env: { TFX_JEV_CLI: "/unused/jev" },
+      interval: 1,
+      threshold: 2,
+      calls: [2],
+      killElapsed: 5,
+      grace: true,
+    },
+    {
+      name: "공식 TFX_JEV_CLI만으로 early-stall과 grace-stall bridge에 도달한다",
+      env: { TFX_JEV_CLI: "/unused/jev" },
+      interval: 30,
+      threshold: 90,
+      calls: [60, 90, 150],
+      killElapsed: 210,
+      grace: true,
+    },
+    {
+      name: "legacy JEV_CLI_BIN의 early-stall과 grace-stall 활성화를 보존한다",
+      env: { JEV_CLI_BIN: "/unused/legacy-jev" },
+      interval: 30,
+      threshold: 90,
+      calls: [60, 90, 150],
+      killElapsed: 210,
+      grace: true,
+    },
+    {
+      name: "TFX_JEV=0이면 공식 및 legacy CLI가 있어도 두 stall guard가 비활성이다",
+      env: {
+        TFX_JEV: "0",
+        TFX_JEV_CLI: "/unused/jev",
+        JEV_CLI_BIN: "/unused/legacy-jev",
+      },
+      interval: 30,
+      threshold: 90,
+      calls: [],
+      killElapsed: 120,
+      grace: false,
+    },
+  ]) {
+    it(name, (t) => {
+      const dir = mkdtempSync(path.join(tmpdir(), "tfx-stall-jev-"));
+      cleanupDirs.push(dir);
+      const stdoutLog = path.join(dir, "stdout.log");
+      const stderrLog = path.join(dir, "stderr.log");
+      const scriptFile = path.join(dir, "run.sh");
+      const { bridgeScript, callsLog } = writeJevBridge(dir);
+      writeFileSync(stdoutLog, "");
+      writeFileSync(stderrLog, "");
+      writeFileSync(
+        scriptFile,
+        buildStallScript({
+          killMode: "kill",
+          stdoutLog,
+          stderrLog,
+          bridgeScript,
+          interval,
+          stallThreshold: threshold,
+          logicalClock: true,
+        }),
+      );
+      const result = spawnSync("bash", [scriptFile], {
+        encoding: "utf8",
+        cwd: REPO_ROOT,
+        env: isolatedRouteEnv(dir, env),
+        timeout: 20_000,
+      });
+      const actualCalls = readBridgeCalls(callsLog);
+      t.diagnostic(
+        JSON.stringify({ calls: actualCalls, stderr: result.stderr }),
+      );
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(
+        actualCalls,
+        calls.map((elapsed) => [
+          "judge-stall",
+          "--stdout-log",
+          stdoutLog,
+          "--stderr-log",
+          stderrLog,
+          "--rollout-file",
+          "",
+          "--elapsed-sec",
+          String(elapsed),
+        ]),
+      );
+      assert.equal(
+        (
+          result.stderr.match(
+            /Jev progressing 판정으로 stall 유예 1회 부여/g,
+          ) || []
+        ).length,
+        grace ? 1 : 0,
+        result.stderr,
+      );
+      assert.match(
+        result.stderr,
+        new RegExp(
+          `elapsed=${killElapsed}s .*status=STALL_KILL stall=${threshold + interval}s`,
+        ),
+      );
+      if (grace) {
+        assert.ok(
+          result.stderr.indexOf("stall 유예 1회 부여") <
+            result.stderr.indexOf("status=STALL_KILL"),
+          result.stderr,
+        );
+      }
+      assert.match(result.stderr, /RESULT=child_terminated/);
+    });
+  }
+
+  for (const disabled of [false, true]) {
+    it(`공식 CLI-only pre-route는 실제 judge-route를 ${disabled ? "TFX_JEV=0에서 호출하지 않는다" : "호출하고 판정을 적용한다"}`, (t) => {
+      const dir = mkdtempSync(path.join(tmpdir(), "tfx-pre-route-jev-"));
+      cleanupDirs.push(dir);
+      const { bridgeScript, callsLog } = writeJevBridge(dir);
+      const scriptFile = path.join(dir, "run.sh");
+      writeFileSync(
+        scriptFile,
+        [
+          "set -eu",
+          'resolve_bridge_script() { printf "%s\\n" "$TFX_BRIDGE_SCRIPT"; }',
+          extractFunction("bridge_cli"),
+          extractFunction("apply_jev_pre_route"),
+          "AGENT_TYPE=executor",
+          "PROMPT='test route boundary'",
+          "TFX_CODEX_PROFILE=auto",
+          "TFX_GEMINI_PROFILE=",
+          "TFX_EXECUTION_MODE=auto",
+          "MCP_PROFILE=auto",
+          "apply_jev_pre_route",
+          'printf "PROFILE=%s MODE=%s MCP=%s\\n" "$TFX_CODEX_PROFILE" "$TFX_EXECUTION_MODE" "$MCP_PROFILE"',
+        ].join("\n"),
+      );
+      const result = spawnSync("bash", [scriptFile], {
+        encoding: "utf8",
+        cwd: REPO_ROOT,
+        env: isolatedRouteEnv(dir, {
+          TFX_JEV_CLI: "/unused/jev",
+          ...(disabled ? { TFX_JEV: "0" } : {}),
+          TFX_BRIDGE_SCRIPT: bridgeScript,
+          TFX_CLI_MODE: "codex",
+        }),
+        timeout: 20_000,
+      });
+      const calls = readBridgeCalls(callsLog);
+      t.diagnostic(
+        JSON.stringify({ calls, stdout: result.stdout, stderr: result.stderr }),
+      );
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(
+        calls,
+        disabled
+          ? []
+          : [
+              [
+                "judge-route",
+                "--agent",
+                "executor",
+                "--cli-type",
+                "codex",
+                "--prompt",
+                "test route boundary",
+                "--delimited",
+              ],
+            ],
+      );
+      assert.equal(
+        result.stdout.trim(),
+        disabled
+          ? "PROFILE=auto MODE=auto MCP=auto"
+          : "PROFILE=astra MODE=headless MCP=none",
+      );
+    });
+  }
+
   it("TFX_STALL_KILL=kill 이면 stall 지속 시 worker 에게 SIGTERM 을 보내고 loop 을 break 한다", () => {
     const dir = mkdtempSync(path.join(tmpdir(), "tfx-stall-kill-"));
     cleanupDirs.push(dir);
@@ -346,6 +606,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     const result = spawnSync("bash", [scriptFile], {
       encoding: "utf8",
       cwd: REPO_ROOT,
+      env: isolatedRouteEnv(dir),
       timeout: 20_000,
     });
     assert.equal(
@@ -373,6 +634,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     const result = spawnSync("bash", [scriptFile], {
       encoding: "utf8",
       cwd: REPO_ROOT,
+      env: isolatedRouteEnv(dir),
       timeout: 20_000,
     });
     assert.equal(result.status, 0, result.stderr);
@@ -421,6 +683,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     const result = spawnSync("bash", [scriptFile], {
       encoding: "utf8",
       cwd: REPO_ROOT,
+      env: isolatedRouteEnv(dir),
       timeout: 20_000,
     });
     assert.equal(result.status, 0, result.stderr);
@@ -462,6 +725,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     const result = spawnSync("bash", [scriptFile], {
       encoding: "utf8",
       cwd: REPO_ROOT,
+      env: isolatedRouteEnv(dir),
       timeout: 20_000,
     });
     assert.equal(
@@ -493,6 +757,7 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
     const result = spawnSync("bash", [scriptFile], {
       encoding: "utf8",
       cwd: REPO_ROOT,
+      env: isolatedRouteEnv(dir),
       timeout: 20_000,
     });
     assert.equal(

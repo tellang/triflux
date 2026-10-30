@@ -12,7 +12,7 @@ import { resolveGeminiProfileForPurpose } from "./gemini-profiles.mjs";
 import {
   modelEffortFromProfile,
   profileFromModelEffort,
-} from "@triflux/core/scripts/lib/model-effort.mjs";
+} from "./model-effort.mjs";
 
 const policy = {
   executor: {

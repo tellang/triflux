@@ -25,6 +25,8 @@ describe("setup-hud-sync: SYNC_MAP", () => {
       labels.includes("hud/hud-qos-status.mjs"),
       "hud-qos-status.mjs must remain synced",
     );
+    assert.ok(labels.includes("hud/session-status.mjs"));
+    assert.ok(SYNC_MAP.some(({ label }) => label === "hub/lib/jev-addon.mjs"));
     assert.ok(
       !labels.includes("hud/omc-hud.mjs"),
       "legacy omc-hud.mjs must be excluded",

@@ -141,6 +141,16 @@ Codex 가족 프로필은 `~/.codex/<가족>.config.toml`에 `model`만 기록�
 
 정확한 인자는 `tfx <명령> --help`로 확인한다.
 
+`tfx-live start --cli codex`로 만든 로컬 tmux 세션에는 Triflux HUD 전체가 4줄 상태줄로 표시된다.
+provider별 사용 한도 캐시와 `Jev ON`, `Jev OFF`, 남은 문맥을 표시한다. 예: `Jev ON | 문맥 116k 남음`.
+문맥은 현재 thread의 rollout 실행 창과 토큰 사용량으로 계산한다. 비율만 있는 공유 HUD 입력은 남은 비율을 쓰고, 정보가 없으면 `문맥 미확인`을 표시한다.
+Jev 설정을 판정하지 못하면 `Jev ?`를 표시하며, ON은 설정 활성 상태를 뜻한다.
+Codex HUD는 5초마다 로컬 캐시와 rollout을 읽으며 외부 조회를 새로 실행하지 않는다. 사용 한도는 기존 캐시 갱신 시점의 값이다.
+훅 없이 동작하며, 기존 세션과 전역 tmux 옵션, Codex 내장 status_line은 바꾸지 않는다.
+공유 daemon의 신규 Codex thread는 thread별 `features.hooks=false`로 일반 사용자와 플러그인 훅을 비활성화한다. builtin 훅과 legacy `notify`는 이 보장에서 제외한다. 시작 훅 검토는 승인 기록을 변경하지 않는 `Continue without trusting`을 선택한다.
+명시적 resume과 resume-last는 대상이 이미 loaded이거나 loaded 상태를 확인할 수 없으면 기존 세션 설정과 권한을 유지하고 중단한다. 사전 조회는 해당 시점의 상태이므로 조회와 resume 사이의 다른 client 연결까지 배제할 수 없다. 신규 thread의 훅 비활성화 보장은 재개 thread로 확대하지 않는다.
+Codex 신뢰 화면은 자동 승인하지 않는다.
+
 ## 런타임 기능
 
 **라이브 세션.** `tfx-live`는 Claude Code와 Codex TUI 세션을 조종한다. Claude 데몬 대상
@@ -219,6 +229,33 @@ graph TD
 | 관리된 경로 | Codex와 Antigravity는 `tfx-route.sh`, headless 워커, `tfx`로만 부르고 맨 `codex exec`나 `agy`로 부르지 않는다. 호출자가 지키는 규칙이며 이를 막는 훅은 없다. |
 | MCP 레지스트리 | 낡았거나 지원하지 않는 MCP 항목을 관리형 항목으로 바꾼다. |
 | 합의 결과 | deep·consensus 실행은 일부 레인이 빠졌거나 의견이 갈린 결과를 숨기지 않고 표시한다. |
+
+### Jev 데이터 전송 정책
+
+Jev는 `JEV_API_KEY` 또는 `TYPESAFE_API_KEY`를 설정하거나, `TFX_JEV_CLI` 경로를
+명시하거나, Jev CLI를 찾을 수 있는 환경에서 `TFX_JEV=1`을 설정할 때 활성화된다.
+내장 판정 함수는 API 키가 있으면 외부 Jev HTTP 서비스로 입력을 보내고, 그렇지 않으면
+설정된 CLI의 인자로 전달한다.
+
+작업 프롬프트와 지시는 길이를 제한하기 전에 sanitizer로 보호하고 HTTP 또는 CLI 전송
+경계에서 다시 검사한다. 내장 함수의 상한은 작업 라우팅 1,400자, MCP 작업 선택 1,200자,
+작업 중 개입과 세션 선택 1,000자, 하위 작업 배정 800자, 주입한 지시 600자, 입력창의
+예상 프롬프트 접두사 200자다. 일반 stdout, stderr, rollout, worker 출력과 TUI 캡처는
+문자 수, 줄 수, 진행 여부, 입력 대기 여부, 오류 여부 같은 메타데이터만 보낸다.
+
+실패 원인이나 peer 응답의 의미 발췌는 `judgeSameFailureCause`와
+`judgePeerConvergence`에만 허용한다. 원인과 응답은 각각 한 줄 전체가 600자 이하여야
+하고, 선택적으로 전달하는 peer 과제는 500자 이하여야 한다. 길이는 JavaScript 문자열
+길이인 UTF-16 코드 단위로 센다. 긴 로그에서 일부 줄을 고르지 않으며 발췌를 자르거나
+공백을 정규화하지 않는다. 빈 입력, 길이 초과, 여러 줄, 제어 문자, 구조가 로그처럼 보이는
+입력은 거절한다. sanitizer가 발췌, peer 과제, 결합한 전송 문맥을 조금이라도 변경하면 client, HTTP,
+CLI를 호출하기 전에 `null`을 반환한다. 변경된 입력을 모두 거절하므로 서로 다른 원문이
+보호 후 같은 발췌로 합쳐지는 경우도 확정 판정에 쓰지 않는다. 거절된 비교는 STUCK이나
+peer 조기 종료에 Jev의 확정 근거를 더하지 않고 기존 결정적 제어를 유지한다.
+
+sanitizer는 자격 증명 대입, Bearer 토큰, private key 같은 패턴을 처리한다. 정규식으로
+모든 형태의 비밀을 제거한다고 보장할 수는 없다. `TFX_JEV=0`을 설정하면 키나 CLI가
+있어도 Jev를 끌 수 있으며, 민감한 작업에서는 비활성 상태를 유지한다.
 
 ### 선택적 native peer 어댑터
 

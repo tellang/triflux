@@ -13,7 +13,7 @@ import {
   modelEffortFromProfile,
   normalizeCodexProfileName,
   resolveCodexModelEffort,
-} from "@triflux/core/scripts/lib/model-effort.mjs";
+} from "./model-effort.mjs";
 import {
   CODEX_FAMILY_PROFILES,
   modelFamilyPaths,

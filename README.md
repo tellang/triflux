@@ -142,6 +142,16 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 
 `tfx <command> --help` prints the exact arguments.
 
+Local tmux sessions created by `tfx-live start --cli codex` show the complete Triflux HUD in four status rows.
+The HUD displays cached provider limits, Jev configuration, and remaining context, for example `Jev ON | 문맥 116k 남음`.
+Context uses the current thread's rollout window and token usage. Percentage-only shared HUD input shows the remaining percentage; missing context shows `문맥 미확인`.
+`Jev ?` means configuration could not be determined. ON indicates enabled configuration.
+The Codex HUD reads local caches and rollout every five seconds without starting external queries; quota values reflect the existing cache refresh time.
+It works without hooks and leaves existing sessions, global tmux options, and Codex's built-in status_line unchanged.
+Fresh Codex threads on the shared daemon use thread-scoped `features.hooks=false` to disable ordinary user and plugin hooks. Builtin hooks and legacy `notify` are outside this guarantee. Startup hook review selects `Continue without trusting` without changing trust records.
+Explicit resume and resume-last stop if the target is already loaded or its loaded state cannot be verified, preserving the existing session's settings and permissions. The preflight is a snapshot; a concurrent attach between that check and resume cannot be ruled out, so the fresh-thread hook guarantee does not extend to resumed threads.
+Codex trust screens are never accepted automatically.
+
 ## Runtime features
 
 **Live sessions.** `tfx-live` drives Claude Code and Codex TUI sessions. Claude daemon targets
@@ -219,6 +229,37 @@ Windows) and `hub/team/wt-manager.mjs`. Agent rules:
 | Managed routes | Codex and Antigravity are called through `tfx-route.sh`, headless workers, or `tfx`, never through a bare `codex exec` or `agy`. This is a rule for callers; no hook enforces it. |
 | MCP registry | Replaces stale or unsupported MCP entries with managed ones. |
 | Consensus | Deep and consensus runs report degraded or disputed results instead of hiding them. |
+
+### Jev data transfer policy
+
+Jev is opt-in. It is enabled by `JEV_API_KEY` or `TYPESAFE_API_KEY`, by an explicit
+`TFX_JEV_CLI` path, or by `TFX_JEV=1` with a discoverable Jev CLI. Built-in judgments
+send inputs to the external Jev HTTP service when an API key is present, otherwise
+to the configured CLI through its arguments.
+
+Task prompts and instructions are sanitized before length limiting and again at
+the HTTP or CLI boundary. Built-in task routing keeps up to 1,400 characters, MCP
+task selection 1,200, busy actions and session selection 1,000, subtask assignment
+800, injected instructions 600, and expected composer prefixes 200. General
+stdout, stderr, rollout, worker output, and TUI captures contribute only metadata
+such as character and line counts and progress, input-waiting, or error flags.
+
+Only `judgeSameFailureCause` and `judgePeerConvergence` may send semantic excerpts
+from failure reasons or peer replies. Each reason or reply must fit within 600
+characters as one complete line; an optional peer task must fit within 500. These
+limits use JavaScript string length (UTF-16 code units). No lines are selected
+from a larger log, and these excerpts are never truncated or whitespace-normalized.
+Empty, oversized, multiline, control-character, and structured log-like inputs
+are rejected. If sanitization changes any excerpt, peer task, or assembled context, the judgment
+returns `null` before calling a client, HTTP, or CLI. Rejecting every changed
+candidate also prevents different originals from collapsing into the same
+redacted excerpt. A rejected comparison adds no Jev evidence for STUCK or early
+peer closure; existing deterministic control continues.
+
+The sanitizer recognizes patterns such as credential assignments, Bearer tokens,
+and private keys. Regular expressions cannot guarantee removal of every secret.
+Set `TFX_JEV=0` to disable Jev, including when a key or CLI is configured, and keep
+it disabled for sensitive tasks.
 
 ### Optional native peer adapter
 

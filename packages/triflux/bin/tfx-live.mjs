@@ -32,6 +32,10 @@ import {
   readCodexSessionRecords,
   registryDir,
 } from "../hub/lib/codex-session-registry.mjs";
+import {
+  judgeBusyAction,
+  judgePeerConvergence,
+} from "../hub/lib/jev-addon.mjs";
 import { privateTmpDir } from "../hub/lib/private-tmp.mjs";
 import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
 import { exposeLiveSession } from "../hub/team/agents-row.mjs";
@@ -65,6 +69,7 @@ import {
   readCodexContext,
 } from "../hub/team/session-context.mjs";
 import { JsonRpcWsUdsClient } from "../hub/workers/lib/jsonrpc-ws-uds.mjs";
+import { configureCodexHud } from "../hud/tmux-status.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -1507,8 +1512,15 @@ function isClaudeResponseLine(line) {
   return /^\s*⏺\s*/.test(line);
 }
 
+const CODEX_HOOKS_REVIEW_RE = /Hooks need review|hooks are new or changed/i;
+const CODEX_BOOTSTRAP_ERROR_RE =
+  /thread\/resume failed during TUI bootstrap|no rollout found for thread id/i;
+
 function isCodexReadyCapture(text) {
   return (
+    !CODEX_BOOTSTRAP_ERROR_RE.test(text) &&
+    !CODEX_HOOKS_REVIEW_RE.test(text) &&
+    !/Resuming session(?:…|\.\.\.)/i.test(text) &&
     !isBusyByEsc(text) &&
     !isCodexLoadingCapture(text) &&
     // 응답 추출용 글리프 허용 범위에는 셸 프롬프트도 있어 준비 판정에는 쓰지 않는다.
@@ -1966,6 +1978,50 @@ function isCodexTrustMenu(text) {
   );
 }
 
+function isCodexHooksDeclineMenu(text) {
+  const menu = splitAtLastSelector(text, "›");
+  const rows = stripAnsi(text)
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n");
+  return (
+    Boolean(menu) &&
+    CODEX_HOOKS_REVIEW_RE.test(menu.above) &&
+    /^›\s*[123]\. (?:Review hooks|Trust all and continue|Continue without trusting \(hooks won't run\))$/.test(
+      menu.selected,
+    ) &&
+    /^(?:›\s*)?1\. Review hooks\n(?:›\s*)?2\. Trust all and continue\n(?:›\s*)?3\. Continue without trusting \(hooks won't run\)$/m.test(
+      rows,
+    )
+  );
+}
+
+async function dismissCodexHooksReview(remote, session) {
+  let raw = await captureVisible(remote, session);
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    if (!isCodexHooksDeclineMenu(raw)) break;
+    const menu = splitAtLastSelector(raw, "›");
+    if (menu.selected === "› 3. Continue without trusting (hooks won't run)") {
+      await runTmux(remote, [
+        "send-keys",
+        "-t",
+        exactTmuxTarget(session),
+        "Enter",
+      ]);
+      return { dismissed: true, raw };
+    }
+    await runTmux(remote, [
+      "send-keys",
+      "-t",
+      exactTmuxTarget(session),
+      "Down",
+    ]);
+    await sleep(200);
+    raw = await captureVisible(remote, session);
+  }
+  return { dismissed: false, raw };
+}
+
 // 다중 선택 항목은 한 글자 체크박스로 그린다. 바이너리 상수: [ ] [×] [✔] [√] ☐ ☒, 라디오 ( ) (*) ◯ ◉.
 function isClaudeMcpApprovalPrompt(text) {
   const menu = splitAtLastSelector(text, "❯");
@@ -2280,13 +2336,18 @@ const ADAPTERS = {
   codex: {
     cli: "codex",
     launchArgv: ["codex"],
-    launchKeys: ["codex --dangerously-bypass-approvals-and-sandbox", "Enter"],
+    launchKeys: [
+      "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false",
+      "Enter",
+    ],
     resumeById: (id) =>
       shellQuote([
         "codex",
         "resume",
         id,
         "--dangerously-bypass-approvals-and-sandbox",
+        "-c",
+        "features.hooks=false",
       ]),
     resumeLast: () =>
       shellQuote([
@@ -2294,6 +2355,8 @@ const ADAPTERS = {
         "resume",
         "--last",
         "--dangerously-bypass-approvals-and-sandbox",
+        "-c",
+        "features.hooks=false",
       ]),
     composerGlyph: "›",
     isReady: isCodexReadyCapture,
@@ -2304,7 +2367,26 @@ const ADAPTERS = {
     isChromeLine: isCodexChromeLine,
     stripResponseMarker: (line) => line.replace(/^\s*[•●]\s+/, ""),
     hasLoginGuard: () => false,
+    blockingScreens: [
+      {
+        name: "codex-hooks-review",
+        isPresent: (raw) =>
+          CODEX_HOOKS_REVIEW_RE.test(raw) && !isCodexHooksDeclineMenu(raw),
+        warning: "Codex hooks need review; no approval was sent",
+      },
+      {
+        name: "codex-bootstrap-error",
+        isPresent: (raw) => CODEX_BOOTSTRAP_ERROR_RE.test(raw),
+        warning:
+          "Codex daemon thread bootstrap failed; inspect the pane before retrying",
+      },
+    ],
     startupScreens: [
+      {
+        name: "codex-hooks-decline",
+        isPresent: isCodexHooksDeclineMenu,
+        dismiss: dismissCodexHooksReview,
+      },
       {
         name: "trust",
         blockedBy: "codex-trust-folder",
@@ -3195,11 +3277,137 @@ end tell`;
   });
 }
 
+// 신규 thread도 먼저 daemon에서 설정해 SessionStart 훅이 TUI 연결보다 앞서 실행되지 않게 한다.
+async function prepareCodexThread(socketPath, opts, deps = {}) {
+  const client = (
+    deps.clientFactory ?? ((options) => new JsonRpcWsUdsClient(options))
+  )({
+    socketPath,
+    connectTimeoutMs: 5000,
+  });
+  try {
+    await client.connect();
+    await client.request(
+      "initialize",
+      {
+        clientInfo: { name: "triflux-tfx-live", version: "1.0.0" },
+        capabilities: { experimentalApi: true },
+      },
+      5000,
+    );
+    client.notify("initialized", {});
+    let threadId = opts.resume;
+    const cwd = pathResolve(opts.cwd || process.cwd());
+    if (opts.resumeLast) {
+      const page = await client.request(
+        "thread/list",
+        {
+          cwd,
+          limit: 1,
+          sortKey: "updated_at",
+          sortDirection: "desc",
+        },
+        5000,
+      );
+      threadId = page.data?.[0]?.id;
+      if (!threadId) throw new Error("No Codex thread to resume in this cwd");
+    }
+    if (threadId) {
+      const unsupported =
+        "Cannot verify Codex resume target is unloaded; per-thread hooks override is unsupported";
+      const seen = new Set();
+      let cursor = null;
+      do {
+        if (cursor !== null) {
+          if (typeof cursor !== "string" || !cursor || seen.has(cursor))
+            throw new Error(unsupported);
+          seen.add(cursor);
+        }
+        let page;
+        try {
+          page = await client.request(
+            "thread/loaded/list",
+            cursor === null ? {} : { cursor },
+            5000,
+          );
+        } catch {
+          throw new Error(unsupported);
+        }
+        if (!Array.isArray(page?.data) || !page.data.every(isCodexThreadId))
+          throw new Error(unsupported);
+        if (page.data.includes(threadId))
+          throw new Error(
+            "Cannot resume loaded Codex thread: per-thread hooks override is unsupported; existing session settings were preserved",
+          );
+        cursor = page.nextCursor ?? null;
+      } while (cursor !== null);
+    }
+    const config = { "features.hooks": false };
+    if (opts.effort !== undefined) config.model_reasoning_effort = opts.effort;
+    const result = await client.request(
+      threadId ? "thread/resume" : "thread/start",
+      {
+        ...(threadId ? { threadId, excludeTurns: true } : { cwd }),
+        ...(opts.model !== undefined ? { model: opts.model } : {}),
+        config,
+      },
+      10000,
+    );
+    if (
+      !isCodexThreadId(result.thread?.id) ||
+      (threadId && result.thread.id !== threadId)
+    )
+      throw new Error("Codex daemon returned a different or invalid thread");
+    if (!threadId) {
+      const now = new Date();
+      const name =
+        opts.name ??
+        `${now.getMonth() + 1}.${now.getDate()} ${opts.session || "Codex"}`;
+      // 실제 세션 이름을 저장하면 첫 turn 전에도 공식 rollout이 생성되어 TUI가 재개할 수 있다.
+      await client.request(
+        "thread/name/set",
+        { threadId: result.thread.id, name },
+        5000,
+      );
+    }
+    return { threadId: result.thread.id, close: () => client.close() };
+  } catch (error) {
+    client.close();
+    throw error;
+  }
+}
+
 async function doStart(launchAdapter, opts) {
+  if (launchAdapter.cli !== "codex" || opts.remote || !opts.nativePeer)
+    return doStartTmux(launchAdapter, opts);
+  const env = opts.env || process.env;
+  let socket;
+  try {
+    socket = resolveCodexSocket(env.HOME || homedir(), env);
+  } catch (error) {
+    throw new Error(
+      `공유 Codex 데몬 소켓을 사용할 수 없다: ${error.message}. codex app-server daemon start 로 데몬을 띄워라.`,
+    );
+  }
+  const prepared = await prepareCodexThread(socket, opts);
+  try {
+    return await doStartTmux(launchAdapter, {
+      ...opts,
+      preparedThreadId: prepared.threadId,
+      preparedSocket: socket,
+    });
+  } finally {
+    // 첫 turn 전 thread에는 rollout이 없을 수 있어 TUI 연결이 끝난 뒤 소유 연결을 놓는다.
+    prepared.close();
+  }
+}
+
+async function doStartTmux(launchAdapter, opts) {
   // --no-auto-trust 면 신뢰 화면을 고르지 않고 승인 화면과 같이 ready:false 로 끝낸다.
-  const trustScreens = opts.noAutoTrust
-    ? launchAdapter.startupScreens.filter((screen) => screen.blockedBy)
-    : [];
+  const trustScreens =
+    opts.noAutoTrust || launchAdapter.cli === "codex"
+      ? launchAdapter.startupScreens.filter((screen) => screen.blockedBy)
+      : [];
   const adapter = {
     ...launchAdapter,
     startupScreens: launchAdapter.startupScreens.filter(
@@ -3274,18 +3482,17 @@ async function doStart(launchAdapter, opts) {
     });
     launchKeys[0] += overrides[0].slice(adapter.launchKeys[0].length);
   }
-  if (adapter.cli === "codex" && !remote && opts.nativePeer) {
-    let socket;
-    const env = opts.env || process.env;
-    try {
-      socket = resolveCodexSocket(env.HOME || homedir(), env);
-    } catch (error) {
-      throw new Error(
-        `공유 Codex 데몬 소켓을 사용할 수 없다: ${error.message}. codex app-server daemon start 로 데몬을 띄워라.`,
+  let daemonThreadId = null;
+  if (opts.preparedThreadId) {
+    daemonThreadId = opts.preparedThreadId;
+    launchKeys[0] = adapter
+      .resumeById(daemonThreadId)
+      .replace(
+        /(?:^|\s)--dangerously-bypass-approvals-and-sandbox(?=\s|$)/g,
+        "",
       );
-    }
     // --remote 세션의 셸은 데몬에서 돌아서 -C 로 작업 디렉터리를 지정한다.
-    launchKeys[0] += ` ${shellQuote(["--remote", `unix://${socket}`, "-C", pathResolve(cwd || process.cwd())])}`;
+    launchKeys[0] += ` ${shellQuote(["--remote", `unix://${opts.preparedSocket}`, "-C", pathResolve(cwd || process.cwd())])}`;
   }
   launchKeys[0] = withUnsetEnv(launchKeys[0], opts.unsetEnv ?? []);
   // 받는 쪽 triflux mod 가 이 값을 저장해 자기를 띄운 리드의 tfx_control 요청만 실행한다.
@@ -3298,7 +3505,8 @@ async function doStart(launchAdapter, opts) {
   if (resumed && name && adapter.cli === "claude")
     launchKeys[0] += ` ${shellQuote(["-n", name])}`;
   const resumeTarget = resume ?? (resumeLast ? "last" : null);
-  const trackResumeLast = resumeLast && adapter.cli === "codex" && !remote;
+  const trackResumeLast =
+    resumeLast && adapter.cli === "codex" && !remote && !daemonThreadId;
   const launchedAtMs = Date.now();
 
   // 분리 세션 기본 80x24 에서는 긴 입력이 화면 높이를 넘으므로 넓게 만든다. 붙으면 클라이언트 크기를 따른다.
@@ -3330,6 +3538,12 @@ async function doStart(launchAdapter, opts) {
       (name ?? session).replace(/#/g, "##"),
     ]);
   }
+  if (adapter.cli === "codex" && !remote && process.platform !== "win32")
+    await configureCodexHud(
+      runTmux,
+      exactTmuxTarget(session),
+      opts.env || process.env,
+    );
   // Default tmux history-limit (2000) is far too small for long tool-heavy
   // CLI sessions (file reads, test runs) — the actual response can scroll
   // out of scrollback before capturePane() runs, producing an empty extract.
@@ -3394,7 +3608,8 @@ async function doStart(launchAdapter, opts) {
   }
   let nameApplied = Boolean(name) && adapter.cli === "claude" && ready;
   let threadId =
-    adapter.cli === "codex" && isCodexThreadId(resume) ? resume : null;
+    daemonThreadId ??
+    (adapter.cli === "codex" && isCodexThreadId(resume) ? resume : null);
   // 우리 TUI 의 resume 기록이 늦게 반영되면 남의 기록만 보일 수 있어, 1.5초 뒤에도 같은 후보가
   // 유일할 때만 확정한다. 5초 안에 확인하지 못하면 null 로 둔다.
   const threadDeadline = Date.now() + 5000;
@@ -3649,35 +3864,51 @@ async function waitForTmuxIdle(adapter, opts, deps = {}) {
   const capture = deps.captureVisible ?? captureVisible;
   const tmux = deps.runTmux ?? runTmux;
   const pause = deps.sleep ?? sleep;
-  const { session, remote, pollIntervalMs, busyTimeoutMs, ifBusy } = opts;
+  const { session, remote, pollIntervalMs, busyTimeoutMs, ifBusy, prompt } =
+    opts;
   if (
     ![
       "wait",
       "fail",
       "interrupt",
+      "auto",
       ...(adapter.cli === "agy" ? ["queue"] : []),
     ].includes(ifBusy)
   ) {
     throw new Error(
-      "--if-busy must be wait, fail, or interrupt for tmux (agy also supports queue)",
+      "--if-busy must be wait, fail, interrupt, or auto for tmux (agy also supports queue)",
     );
   }
   const startedAt = Date.now();
   let interrupted = false;
+  let effectiveIfBusy = ifBusy;
   while (true) {
     const visible = await capture(remote, session);
     const elapsedMs = Date.now() - startedAt;
     const busy =
       adapter.isBusy(visible) ||
       (adapter.cli === "codex" && isCodexLoadingCapture(visible));
-    if (!busy || ifBusy === "queue") return elapsedMs;
-    if (ifBusy === "fail") throw new Error("target busy (--if-busy fail)");
+    if (busy && effectiveIfBusy === "auto") {
+      const verdict = await (deps.judgeBusyAction ?? judgeBusyAction)({
+        prompt: prompt ?? "",
+        threadSummary: String(visible ?? "").slice(-800),
+      });
+      effectiveIfBusy =
+        verdict?.action === "steer"
+          ? "interrupt"
+          : adapter.cli === "agy"
+            ? "queue"
+            : "wait";
+    }
+    if (!busy || effectiveIfBusy === "queue") return elapsedMs;
+    if (effectiveIfBusy === "fail")
+      throw new Error("target busy (--if-busy fail)");
     if (elapsedMs >= busyTimeoutMs) {
       throw new Error(
-        `target busy after ${Math.ceil(busyTimeoutMs / 1000)}s (--if-busy ${ifBusy})`,
+        `target busy after ${Math.ceil(busyTimeoutMs / 1000)}s (--if-busy ${effectiveIfBusy})`,
       );
     }
-    if (ifBusy === "interrupt" && !interrupted) {
+    if (effectiveIfBusy === "interrupt" && !interrupted) {
       await tmux(remote, [
         "send-keys",
         "-t",
@@ -3725,6 +3956,7 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
             pollIntervalMs,
             busyTimeoutMs,
             ifBusy: adapter.cli === "agy" && slashCommand ? "queue" : ifBusy,
+            prompt,
           },
           deps,
         );
@@ -5016,7 +5248,7 @@ function askOpts(flags, adapter) {
   const sessionId = flags["session-id"];
   // Codex 메시지는 queue 가 기본이다. 슬래시 명령과 바쁠 때 거부·중단은 tmux 만 할 수 있다.
   const slash = isSlashCommand(flags.prompt);
-  const busyPolicy = ["fail", "interrupt"].includes(flags["if-busy"]);
+  const busyPolicy = ["fail", "interrupt", "auto"].includes(flags["if-busy"]);
   const transportReason =
     adapter.cli === "codex" && !flags.transport && (slash || busyPolicy)
       ? slash
@@ -5588,7 +5820,6 @@ async function doSend(opts = {}, deps = {}) {
       error: `일치하는 세션이 ${matched.length}개다. cli:이름 또는 정확한 이름으로 지정하라: ${rawTo}`,
     };
   }
-
   const target = matched[0];
   const sender = await resolvePeerSender({
     from: opts.from,
@@ -7038,7 +7269,7 @@ function peerSideTransport(flags, side, adapter) {
   const codexDefault =
     flags.remote ||
     Object.hasOwn(flags, "no-relay-tag") ||
-    ["fail", "interrupt"].includes(sideFlag(flags, side, "if-busy"))
+    ["fail", "interrupt", "auto"].includes(sideFlag(flags, side, "if-busy"))
       ? "tmux"
       : "queue";
   const transport =
@@ -7073,10 +7304,10 @@ function peerSideTransport(flags, side, adapter) {
 function peerSideBusyPolicy(flags, side, adapter, transport) {
   const allowed =
     adapter.cli === "codex" && transport === "uds"
-      ? ["wait", "fail", "steer"]
+      ? ["wait", "fail", "steer", "auto"]
       : transport === "queue"
         ? ["wait"]
-        : ["wait", "fail", "interrupt"];
+        : ["wait", "fail", "interrupt", "auto"];
   for (const name of ["if-busy", `if-busy-${side}`]) {
     if (flags[name] !== undefined && !allowed.includes(flags[name]))
       throw new Error(
@@ -7466,6 +7697,7 @@ async function peer(flags, deps = {}) {
       addStopSpecOnce(stopSpecs, adapter, base);
     }
 
+    let forceClosureNext = false;
     for (
       let hopIndex = 0;
       hopIndex < rounds * participants.length;
@@ -7483,7 +7715,8 @@ async function peer(flags, deps = {}) {
               )
               .join("\n")
           : null;
-      const isClosure = hopIndex === rounds * participants.length - 1;
+      const isClosure =
+        hopIndex === rounds * participants.length - 1 || forceClosureNext;
       const debateTurn = {
         self: side,
         seed: flags.seed ?? PEER_DEFAULT_SEED,
@@ -7551,6 +7784,25 @@ async function peer(flags, deps = {}) {
       latestResponses.set(side, result.response);
       if (isClosure) {
         closure = parsePeerClosure(result.response);
+      } else if (
+        mode !== "counting" &&
+        hopIndex >= participants.length &&
+        hopIndex + 1 < rounds * participants.length - 1
+      ) {
+        const convergence = await (
+          deps.judgePeerConvergence ?? judgePeerConvergence
+        )({
+          seed: flags.seed ?? PEER_DEFAULT_SEED,
+          mode,
+          previousResponse: previous,
+          currentResponse: result.response,
+          hopIndex,
+          participantsCount: participants.length,
+        });
+        if (convergence?.converged === true) {
+          forceClosureNext = true;
+          output.early_converged_at_hop = hopIndex + 1;
+        }
       }
 
       if (mode === "counting") {
@@ -7569,6 +7821,7 @@ async function peer(flags, deps = {}) {
       } else {
         previous = result.response;
       }
+      if (isClosure) break;
     }
   } catch (error) {
     primaryError = error;
@@ -7711,6 +7964,7 @@ export {
   parseRemoteLiveJson,
   peer,
   peerSideBaseOpts,
+  prepareCodexThread,
   resolveAskTransport,
   resolveCodexDaemonSocket,
   resolveCodexTmuxThread,
@@ -7723,6 +7977,7 @@ export {
   stopOpts,
   tmuxBufferName,
   verifyAttachedPeerSide,
+  waitForTmuxIdle,
   withLeadSession,
   withUnsetEnv,
 };

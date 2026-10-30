@@ -63,6 +63,43 @@ function makeFakeDeps({
 }
 
 describe("tfx-live send", () => {
+  it("Jev가 활성화되어도 다중 후보를 전송하지 않고 유일한 이름/ID 전송을 보존한다", async (t) => {
+    let jevCalls = 0;
+    t.mock.method(globalThis, "fetch", async () => {
+      jevCalls += 1;
+      return {
+        ok: true,
+        json: async () => ({ choice: "candidate_0", confidence: 1 }),
+      };
+    });
+    const { askCalls, deps } = makeFakeDeps({
+      agySessions: [
+        { name: "shared", target: "mock:0.1", conversationId: "unique-one" },
+        { name: "shared", target: "mock:0.2", conversationId: "unique-two" },
+        {
+          name: "unique-name",
+          target: "mock:0.3",
+          conversationId: "unique-three",
+        },
+      ],
+    });
+    const opts = {
+      to: "agy:shared",
+      viaTmux: true,
+      message: "전달",
+      from: "codex:sender",
+      env: { JEV_API_KEY: "mock-key", TFX_JEV_STATS: "0" },
+    };
+    const ambiguous = await doSend(opts, deps);
+    assert.equal(ambiguous.reason, "ambiguous-target");
+    assert.equal(askCalls.length, 0);
+    assert.equal(jevCalls, 0);
+    for (const to of ["agy:unique-name", "agy:unique-one"]) {
+      assert.equal((await doSend({ ...opts, to }, deps)).ok, true);
+    }
+    assert.equal(askCalls.length, 2);
+  });
+
   it("parsePeerToSpec separates optional cli prefix and query", () => {
     assert.deepEqual(parsePeerToSpec("codex:10.14 리뷰"), {
       cli: "codex",
