@@ -2,6 +2,8 @@
 // HANDOFF 블록 파싱, 검증, fallback 생성, Lead 포맷팅
 // 설계: docs/design/handoff-schema-v7.md (PR #70 에서 삭제, c0722ecd 에 남아 있다)
 
+import { judgeHandoffQuality, judgeReviewGate } from "@triflux/core/hub/lib/jev-addon.mjs";
+
 // ── enum 허용 값 ──
 const STATUS_VALUES = ["ok", "partial", "failed"];
 const LEAD_ACTION_VALUES = ["accept", "needs_read", "retry", "reassign"];
@@ -302,6 +304,104 @@ export function processHandoff(rawText, context = {}) {
     formatted: formatHandoffForLead(handoff),
     valid,
     warnings,
+    fallback: false,
+  };
+}
+
+/**
+ * Jev 애드온이 활성화된 경우 인계 파일의 lead_action과 가짜 성공 여부를 보정한다.
+ * 비활성 상태이거나 신뢰도 임계값 미만이면 processHandoff 결과를 그대로 반환한다.
+ */
+export async function processHandoffWithJev(
+  rawText,
+  context = {},
+  jevOptions = {},
+) {
+  const base = processHandoff(rawText, context);
+  const verdict = await judgeHandoffQuality(
+    {
+      rawText,
+      handoff: base.handoff,
+      exitCode: context.exitCode ?? 0,
+      gitDiffFiles: context.gitDiffFiles,
+      role: context.role,
+    },
+    jevOptions,
+  );
+  if (!verdict) return base;
+
+  const declaredFilesCount = Array.isArray(base.handoff.files_changed)
+    ? base.handoff.files_changed.filter(Boolean).length
+    : 0;
+  const hasEmptyGitDiff =
+    Array.isArray(context.gitDiffFiles) &&
+    context.gitDiffFiles.filter(Boolean).length === 0;
+  const canAccept =
+    base.handoff.status === "ok" &&
+    (context.exitCode ?? 0) === 0 &&
+    declaredFilesCount > 0 &&
+    !hasEmptyGitDiff &&
+    base.handoff.lead_action === "accept";
+
+  let effectiveAction = verdict.leadAction;
+  if (effectiveAction === "accept" && !canAccept) {
+    effectiveAction =
+      base.handoff.lead_action === "retry" ? "retry" : "needs_read";
+  }
+
+  const updatedHandoff = {
+    ...base.handoff,
+    lead_action: effectiveAction,
+    ...(effectiveAction === "retry" && base.handoff.status === "ok"
+      ? { status: "partial" }
+      : {}),
+    _jev: {
+      lead_action: verdict.leadAction,
+      effective_lead_action: effectiveAction,
+      confidence: verdict.confidence,
+    },
+  };
+  const warnings = [...base.warnings];
+  if (effectiveAction !== base.handoff.lead_action) {
+    warnings.push(
+      `jev overridden lead_action: ${base.handoff.lead_action} -> ${effectiveAction}`,
+    );
+  }
+  return {
+    ...base,
+    handoff: updatedHandoff,
+    formatted: formatHandoffForLead(updatedHandoff),
+    warnings,
+  };
+}
+
+/**
+ * 교차 리뷰 게이트 판정: Jev로 리뷰 생략, 교차 리뷰, 리드 에스컬레이션 및 리뷰 수렴 여부를 판단한다.
+ */
+export async function evaluateReviewGateWithJev(
+  {
+    diffStat = "",
+    handoffSummary = "",
+    previousReviews = "",
+    currentReview = "",
+  } = {},
+  jevOptions = {},
+) {
+  const verdict = await judgeReviewGate(
+    { diffStat, handoffSummary, previousReviews, currentReview },
+    jevOptions,
+  );
+  if (!verdict) {
+    return {
+      gate: "cross_review",
+      converged: false,
+      fallback: true,
+    };
+  }
+  return {
+    gate: verdict.gate,
+    converged: verdict.converged,
+    confidence: verdict.confidence,
     fallback: false,
   };
 }

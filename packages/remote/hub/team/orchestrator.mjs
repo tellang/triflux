@@ -1,5 +1,6 @@
 // hub/team/orchestrator.mjs — 작업 분배 + 프롬프트 구성
 // 의존성: pane.mjs만 사용
+import { judgeTaskAssignment } from "@triflux/core/hub/lib/jev-addon.mjs";
 import { injectPrompt as defaultInjectPrompt } from "./pane.mjs";
 
 /**
@@ -37,6 +38,85 @@ export function decomposeTask(taskDescription, agentCount) {
   }
 
   return parts;
+}
+
+/**
+ * Jev가 활성화된 경우 서브태스크별 최적 워커/CLI 매칭을 적용한다.
+ * 비활성 상태이거나 판정이 실패하면 결정론적 decomposeTask 순서대로 반환한다.
+ */
+export async function assignTasksWithJev(
+  taskDescription,
+  workers,
+  jevOptions = {},
+) {
+  if (!Array.isArray(workers) || workers.length === 0) return [];
+  const subtasks = decomposeTask(taskDescription, workers.length);
+  const base = workers.map((w, i) => ({
+    ...w,
+    subtask: subtasks[i] || subtasks[subtasks.length - 1],
+  }));
+  if (workers.length <= 1) return base;
+
+  const verdict = await judgeTaskAssignment({ subtasks, workers }, jevOptions);
+  if (
+    !verdict ||
+    !Array.isArray(verdict.assignments) ||
+    verdict.assignments.length !== workers.length
+  ) {
+    return base;
+  }
+  const usedSubtasks = new Set();
+  const workerAssignments = new Array(workers.length).fill(null);
+
+  for (let i = 0; i < workers.length; i += 1) {
+    const match = verdict.assignments.find(
+      (item) =>
+        item.workerIndex === i &&
+        Number.isInteger(item.subtaskIndex) &&
+        item.subtaskIndex >= 0 &&
+        item.subtaskIndex < subtasks.length &&
+        !usedSubtasks.has(item.subtaskIndex),
+    );
+    if (match) {
+      usedSubtasks.add(match.subtaskIndex);
+      workerAssignments[i] = {
+        subtaskIdx: match.subtaskIndex,
+        recommendedCli: match.recommendedCli || workers[i].cli,
+      };
+    }
+  }
+
+  for (let i = 0; i < workers.length; i += 1) {
+    if (workerAssignments[i]) continue;
+    let fallbackIdx = !usedSubtasks.has(i) && i < subtasks.length ? i : -1;
+    if (fallbackIdx === -1) {
+      for (let s = 0; s < subtasks.length; s += 1) {
+        if (!usedSubtasks.has(s)) {
+          fallbackIdx = s;
+          break;
+        }
+      }
+    }
+    if (fallbackIdx === -1) fallbackIdx = Math.min(i, subtasks.length - 1);
+    usedSubtasks.add(fallbackIdx);
+    workerAssignments[i] = {
+      subtaskIdx: fallbackIdx,
+      recommendedCli: workers[i].cli,
+    };
+  }
+
+  return workers.map((w, i) => {
+    const { subtaskIdx, recommendedCli } = workerAssignments[i];
+    return {
+      ...w,
+      subtask: subtasks[subtaskIdx] || subtasks[subtasks.length - 1],
+      _jev: {
+        subtaskIndex: subtaskIdx,
+        recommendedCli,
+        confidence: verdict.confidence,
+      },
+    };
+  });
 }
 
 /**

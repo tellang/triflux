@@ -15,6 +15,7 @@ import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
 import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
+import { judgeWorkerHealth } from "../lib/jev-addon.mjs";
 import { privateTmpDir } from "../lib/private-tmp.mjs";
 import {
   createActivityLifecycle,
@@ -29,7 +30,7 @@ import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import {
   formatHandoffForLead,
   HANDOFF_INSTRUCTION_SHORT,
-  processHandoff,
+  processHandoffWithJev,
 } from "./handoff.mjs";
 import { createInterventionLadder } from "./intervention.mjs";
 import {
@@ -371,10 +372,46 @@ export function readResult(resultFile, paneId) {
   return capturePsmuxPane(paneId, 30);
 }
 
-function createHeadlessIntervention(dispatch, fallback) {
-  return async (context) => {
+export function createHeadlessIntervention(dispatch, fallback, deps = {}) {
+  return async (context = {}) => {
     if (typeof fallback === "function")
       return (await fallback(context)) === true;
+
+    const capturePane = deps.capturePsmuxPane || capturePsmuxPane;
+    const judgeHealth = deps.judgeWorkerHealth || judgeWorkerHealth;
+    const buildLadder =
+      deps.createInterventionLadder || createInterventionLadder;
+    const paneTarget = context.paneId || dispatch.paneId;
+    const paneSnap = (() => {
+      try {
+        return capturePane(paneTarget, 50) || "";
+      } catch {
+        return "";
+      }
+    })();
+    const errTail = (() => {
+      try {
+        const errPath = `${dispatch.resultFile}.err`;
+        return existsSync(errPath)
+          ? readFileSync(errPath, "utf8").slice(-2000)
+          : "";
+      } catch {
+        return "";
+      }
+    })();
+    const health = await judgeHealth({
+      stdoutTail: paneSnap.slice(-2000),
+      stderrTail: errTail,
+      elapsedSec: Math.round((Number(context.inactiveMs) || 0) / 1000),
+    });
+    if (health?.status === "progressing") return true;
+
+    const reinstructPrompt =
+      health?.status === "waiting_input"
+        ? "[triflux intervention] 대화형 입력 대기가 감지되었다. 사용자 확인을 기다리지 말고 기본값이나 자율 판단으로 남은 작업을 마쳐라."
+        : health?.status === "looping_error"
+          ? "[triflux intervention] 동일 오류 반복 루프가 감지되었다. 직전 실패 명령을 반복하지 말고 우회 경로를 택하거나 실패 원인을 HANDOFF 블록에 기록하고 종료하라."
+          : undefined;
 
     const readActivitySignature = () => {
       let mtime = 0;
@@ -383,24 +420,25 @@ function createHeadlessIntervention(dispatch, fallback) {
       } catch {
         /* result file has not been written yet */
       }
-      return `${capturePsmuxPane(context.paneId || dispatch.paneId, 50)}\0${mtime}`;
+      return `${capturePane(paneTarget, 50)}\0${mtime}`;
     };
-    const ladder = createInterventionLadder({
+    const ladder = buildLadder({
       target: {
         channel: "tmux-pane",
-        paneId: context.paneId || dispatch.paneId,
+        paneId: paneTarget,
         cli: dispatch.cli,
         sessionId: dispatch.sessionId,
       },
+      ...(reinstructPrompt ? { reinstructPrompt } : {}),
       readActivitySignature,
       deps: {
         // 이 트랙이 재실행 소유자다. pane 채널은 기존 completion wrapper를 다시
         // dispatch하여 token/result 계약을 보존한다.
         resumeHandler: async () => {
           if (!dispatch.command) return { ok: false };
-          const restarted = dispatchCommand(
+          const restarted = (deps.dispatchCommand || dispatchCommand)(
             context.sessionName,
-            context.paneId || dispatch.paneId,
+            paneTarget,
             dispatch.command,
           );
           return { ok: Boolean(restarted) };
@@ -823,11 +861,12 @@ async function collectResults(results) {
   return await Promise.all(
     results.map(async ({ d, completion, output }) => {
       const workerGitDiffFiles = collectGitDiffFiles(d.cwd);
-      const handoffResult = processHandoff(output, {
+      const handoffResult = await processHandoffWithJev(output, {
         exitCode: completion.exitCode,
         resultFile: d.resultFile,
         cli: d.cli,
         gitDiffFiles: workerGitDiffFiles,
+        role: d.role,
       });
       if (
         completion.exitCode === 0 &&
@@ -1745,7 +1784,7 @@ export async function runHeadlessInteractive(
   process.on("exit", exitHandler);
   // kill() 후 리스너 제거를 위해 참조 보관
   const originalKill = handle.kill.bind(handle);
-  handle.kill = function () {
+  handle.kill = () => {
     originalKill();
     process.removeListener("exit", exitHandler);
   };

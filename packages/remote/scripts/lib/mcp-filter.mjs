@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { isJevEnabled, judgeMcpSelection } from "@triflux/core/hub/lib/jev-addon.mjs";
 import { CORE_SERVERS, readManifest } from "./mcp-manifest.mjs";
 import {
   DOMAIN_TAG_KEYWORDS,
@@ -639,7 +640,11 @@ export function getCodexMcpConfig(options = {}) {
   if (registeredServers.length === 0) {
     return { mcp_servers: {} };
   }
-  const allowedServers = new Set(resolveAllowedServers(options));
+  const allowedServers = new Set(
+    Array.isArray(options.allowedServers)
+      ? parseAvailableServers(options.allowedServers)
+      : resolveAllowedServers(options),
+  );
   const resolvedProfile = resolveMcpProfile(
     options.agentType,
     options.requestedProfile,
@@ -731,9 +736,17 @@ export function buildMcpPolicy(options = {}) {
   const hint = buildPromptHint(resolvedOptions);
 
   // 플러그인 서버는 transport 설정이 없어 CLI override를 받으면 부팅이 실패한다.
+  const configServers = codexServersFromConfig(options.codexConfig);
+  const registeredServers =
+    configServers.length > 0
+      ? configServers
+      : options.registeredServers !== undefined
+        ? parseAvailableServers(options.registeredServers)
+        : [];
   const codexOptions = {
     ...resolvedOptions,
-    availableServers: codexServersFromConfig(options.codexConfig),
+    availableServers: registeredServers,
+    allowedServers,
   };
 
   return {
@@ -746,6 +759,74 @@ export function buildMcpPolicy(options = {}) {
     hint,
     codexConfig: getCodexMcpConfig(codexOptions),
     codexConfigOverrides: getCodexConfigOverrides(codexOptions),
+  };
+}
+
+export async function buildMcpPolicyWithJev(options = {}, jevOptions = {}) {
+  const basePolicy = buildMcpPolicy(options);
+  if (!isJevEnabled(jevOptions)) return basePolicy;
+  const taskText = String(options.taskText || "").trim();
+  if (!taskText) return basePolicy;
+
+  const isAutoProfile =
+    !options.requestedProfile || options.requestedProfile === "auto";
+  if (!isAutoProfile && options.requestedProfile === "none") {
+    return basePolicy;
+  }
+
+  const candidateServers = basePolicy.allowedServers;
+  if (candidateServers.length === 0) return basePolicy;
+
+  const selection = await judgeMcpSelection(
+    {
+      taskText,
+      agentType: options.agentType || basePolicy.resolvedProfile,
+      availableServers: candidateServers,
+    },
+    jevOptions,
+  );
+  if (!selection || !Array.isArray(selection.neededMcpServers))
+    return basePolicy;
+
+  const narrowedAvailable = selection.neededMcpServers.filter((server) =>
+    basePolicy.allowedServers.includes(server),
+  );
+  if (narrowedAvailable.length === 0) {
+    return {
+      ...buildMcpPolicy({
+        ...options,
+        requestedProfile: "none",
+        registeredServers:
+          options.registeredServers ??
+          (options.codexConfig === undefined
+            ? options.availableServers
+            : undefined),
+      }),
+      requestedProfile: options.requestedProfile || "auto",
+    };
+  }
+
+  const nextProfile =
+    isAutoProfile &&
+    selection.mcpProfile &&
+    selection.mcpProfile in PROFILE_DEFINITIONS
+      ? selection.mcpProfile
+      : options.requestedProfile;
+
+  const resolved = buildMcpPolicy({
+    ...options,
+    requestedProfile: nextProfile,
+    availableServers: narrowedAvailable,
+    registeredServers:
+      options.registeredServers ??
+      (options.codexConfig === undefined
+        ? options.availableServers
+        : undefined),
+  });
+  return {
+    ...resolved,
+    enabledServers: resolved.allowedServers,
+    requestedProfile: options.requestedProfile || "auto",
   };
 }
 
@@ -863,7 +944,9 @@ async function runCli(argv = process.argv.slice(2)) {
 
   let policy;
   try {
-    policy = buildMcpPolicy(args);
+    policy = isJevEnabled()
+      ? await buildMcpPolicyWithJev(args)
+      : buildMcpPolicy(args);
   } catch (error) {
     console.error(
       `[mcp-filter] ${error instanceof Error ? error.message : String(error)}`,

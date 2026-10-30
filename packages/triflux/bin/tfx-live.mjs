@@ -32,6 +32,10 @@ import {
   readCodexSessionRecords,
   registryDir,
 } from "../hub/lib/codex-session-registry.mjs";
+import {
+  judgeBusyAction,
+  judgePeerConvergence,
+} from "../hub/lib/jev-addon.mjs";
 import { privateTmpDir } from "../hub/lib/private-tmp.mjs";
 import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
 import { exposeLiveSession } from "../hub/team/agents-row.mjs";
@@ -3649,35 +3653,51 @@ async function waitForTmuxIdle(adapter, opts, deps = {}) {
   const capture = deps.captureVisible ?? captureVisible;
   const tmux = deps.runTmux ?? runTmux;
   const pause = deps.sleep ?? sleep;
-  const { session, remote, pollIntervalMs, busyTimeoutMs, ifBusy } = opts;
+  const { session, remote, pollIntervalMs, busyTimeoutMs, ifBusy, prompt } =
+    opts;
   if (
     ![
       "wait",
       "fail",
       "interrupt",
+      "auto",
       ...(adapter.cli === "agy" ? ["queue"] : []),
     ].includes(ifBusy)
   ) {
     throw new Error(
-      "--if-busy must be wait, fail, or interrupt for tmux (agy also supports queue)",
+      "--if-busy must be wait, fail, interrupt, or auto for tmux (agy also supports queue)",
     );
   }
   const startedAt = Date.now();
   let interrupted = false;
+  let effectiveIfBusy = ifBusy;
   while (true) {
     const visible = await capture(remote, session);
     const elapsedMs = Date.now() - startedAt;
     const busy =
       adapter.isBusy(visible) ||
       (adapter.cli === "codex" && isCodexLoadingCapture(visible));
-    if (!busy || ifBusy === "queue") return elapsedMs;
-    if (ifBusy === "fail") throw new Error("target busy (--if-busy fail)");
+    if (busy && effectiveIfBusy === "auto") {
+      const verdict = await (deps.judgeBusyAction ?? judgeBusyAction)({
+        prompt: prompt ?? "",
+        threadSummary: String(visible ?? "").slice(-800),
+      });
+      effectiveIfBusy =
+        verdict?.action === "steer"
+          ? "interrupt"
+          : adapter.cli === "agy"
+            ? "queue"
+            : "wait";
+    }
+    if (!busy || effectiveIfBusy === "queue") return elapsedMs;
+    if (effectiveIfBusy === "fail")
+      throw new Error("target busy (--if-busy fail)");
     if (elapsedMs >= busyTimeoutMs) {
       throw new Error(
-        `target busy after ${Math.ceil(busyTimeoutMs / 1000)}s (--if-busy ${ifBusy})`,
+        `target busy after ${Math.ceil(busyTimeoutMs / 1000)}s (--if-busy ${effectiveIfBusy})`,
       );
     }
-    if (ifBusy === "interrupt" && !interrupted) {
+    if (effectiveIfBusy === "interrupt" && !interrupted) {
       await tmux(remote, [
         "send-keys",
         "-t",
@@ -3725,6 +3745,7 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
             pollIntervalMs,
             busyTimeoutMs,
             ifBusy: adapter.cli === "agy" && slashCommand ? "queue" : ifBusy,
+            prompt,
           },
           deps,
         );
@@ -5016,7 +5037,7 @@ function askOpts(flags, adapter) {
   const sessionId = flags["session-id"];
   // Codex 메시지는 queue 가 기본이다. 슬래시 명령과 바쁠 때 거부·중단은 tmux 만 할 수 있다.
   const slash = isSlashCommand(flags.prompt);
-  const busyPolicy = ["fail", "interrupt"].includes(flags["if-busy"]);
+  const busyPolicy = ["fail", "interrupt", "auto"].includes(flags["if-busy"]);
   const transportReason =
     adapter.cli === "codex" && !flags.transport && (slash || busyPolicy)
       ? slash
@@ -5588,7 +5609,6 @@ async function doSend(opts = {}, deps = {}) {
       error: `일치하는 세션이 ${matched.length}개다. cli:이름 또는 정확한 이름으로 지정하라: ${rawTo}`,
     };
   }
-
   const target = matched[0];
   const sender = await resolvePeerSender({
     from: opts.from,
@@ -7038,7 +7058,7 @@ function peerSideTransport(flags, side, adapter) {
   const codexDefault =
     flags.remote ||
     Object.hasOwn(flags, "no-relay-tag") ||
-    ["fail", "interrupt"].includes(sideFlag(flags, side, "if-busy"))
+    ["fail", "interrupt", "auto"].includes(sideFlag(flags, side, "if-busy"))
       ? "tmux"
       : "queue";
   const transport =
@@ -7073,10 +7093,10 @@ function peerSideTransport(flags, side, adapter) {
 function peerSideBusyPolicy(flags, side, adapter, transport) {
   const allowed =
     adapter.cli === "codex" && transport === "uds"
-      ? ["wait", "fail", "steer"]
+      ? ["wait", "fail", "steer", "auto"]
       : transport === "queue"
         ? ["wait"]
-        : ["wait", "fail", "interrupt"];
+        : ["wait", "fail", "interrupt", "auto"];
   for (const name of ["if-busy", `if-busy-${side}`]) {
     if (flags[name] !== undefined && !allowed.includes(flags[name]))
       throw new Error(
@@ -7466,6 +7486,7 @@ async function peer(flags, deps = {}) {
       addStopSpecOnce(stopSpecs, adapter, base);
     }
 
+    let forceClosureNext = false;
     for (
       let hopIndex = 0;
       hopIndex < rounds * participants.length;
@@ -7483,7 +7504,8 @@ async function peer(flags, deps = {}) {
               )
               .join("\n")
           : null;
-      const isClosure = hopIndex === rounds * participants.length - 1;
+      const isClosure =
+        hopIndex === rounds * participants.length - 1 || forceClosureNext;
       const debateTurn = {
         self: side,
         seed: flags.seed ?? PEER_DEFAULT_SEED,
@@ -7551,6 +7573,25 @@ async function peer(flags, deps = {}) {
       latestResponses.set(side, result.response);
       if (isClosure) {
         closure = parsePeerClosure(result.response);
+      } else if (
+        mode !== "counting" &&
+        hopIndex >= participants.length &&
+        hopIndex + 1 < rounds * participants.length - 1
+      ) {
+        const convergence = await (
+          deps.judgePeerConvergence ?? judgePeerConvergence
+        )({
+          seed: flags.seed ?? PEER_DEFAULT_SEED,
+          mode,
+          previousResponse: previous,
+          currentResponse: result.response,
+          hopIndex,
+          participantsCount: participants.length,
+        });
+        if (convergence?.converged === true) {
+          forceClosureNext = true;
+          output.early_converged_at_hop = hopIndex + 1;
+        }
       }
 
       if (mode === "counting") {
@@ -7569,6 +7610,7 @@ async function peer(flags, deps = {}) {
       } else {
         previous = result.response;
       }
+      if (isClosure) break;
     }
   } catch (error) {
     primaryError = error;
@@ -7723,6 +7765,7 @@ export {
   stopOpts,
   tmuxBufferName,
   verifyAttachedPeerSide,
+  waitForTmuxIdle,
   withLeadSession,
   withUnsetEnv,
 };

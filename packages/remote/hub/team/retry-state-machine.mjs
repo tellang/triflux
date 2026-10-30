@@ -29,8 +29,9 @@ import {
   modelEffortFromProfile,
   profileFromModelEffort,
   resolveCodexModelEffort,
-} from "@triflux/core/scripts/lib/model-effort.mjs";
+} from "../../scripts/lib/model-effort.mjs";
 import { AGY_FAMILY_PROFILES } from "../../scripts/lib/model-family-resolver.mjs";
+import { judgeSameFailureCause } from "@triflux/core/hub/lib/jev-addon.mjs";
 
 export const STATES = Object.freeze({
   PLANNING: "PLANNING",
@@ -126,10 +127,14 @@ export function createRetryStateMachine(options = {}) {
     return transition(STATES.DONE);
   }
 
-  function reportVerifyFail(failureReason) {
+  function reportVerifyFail(failureReason, failOptions = {}) {
     const reason = String(failureReason || "unknown");
-    if (reason === state.lastFailureReason) {
+    const isSameCause =
+      reason === state.lastFailureReason ||
+      (Boolean(state.lastFailureReason) && failOptions.sameCause === true);
+    if (isSameCause) {
       state.stuckCounter += 1;
+      state.lastFailureReason = reason;
     } else {
       state.stuckCounter = 1;
       state.lastFailureReason = reason;
@@ -153,6 +158,20 @@ export function createRetryStateMachine(options = {}) {
     }
 
     return transition(STATES.DIAGNOSING, { reason });
+  }
+
+  async function reportVerifyFailAsync(failureReason, jevOptions = {}) {
+    const reason = String(failureReason || "unknown");
+    let sameCause = false;
+    if (state.lastFailureReason && reason !== state.lastFailureReason) {
+      const verdict = await judgeSameFailureCause(
+        state.lastFailureReason,
+        reason,
+        jevOptions,
+      );
+      sameCause = verdict?.sameCause === true;
+    }
+    return reportVerifyFail(reason, { sameCause });
   }
 
   function escalate() {
@@ -271,6 +290,7 @@ export function createRetryStateMachine(options = {}) {
     startIteration,
     reportVerifySuccess,
     reportVerifyFail,
+    reportVerifyFailAsync,
     escalate,
     on,
     serialize,
