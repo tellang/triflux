@@ -16,7 +16,7 @@ argument-hint: "[doctor]"
 
 HUD의 `statusLine`이 비어 있으면 triflux HUD를 등록한다. 이미 triflux HUD이면 유지하고, 다른 명령이면 보존한 뒤 안내한다. `settings.json`이 깨졌으면 수정을 시도하지 않고 오류를 보고한다.
 
-Codex 가족 프로필은 `~/.codex/<가족>.config.toml`에 `model`만 기록한다. `config.toml`의 기본 설정 키는 `approval_policy`, `sandbox_mode`이며 CLI에는 `--profile <가족>`과 `-c 'model_reasoning_effort="<effort>"'`를 전달한다. 옛 결합 이름 파일은 이번 릴리스에 함께 갱신하며 갱신 중단은 다음 릴리스에 적용한다. 프로젝트 지침은 [CLAUDE.md](../../CLAUDE.md)의 `<codex-config>`를 따른다.
+Codex 가족 프로필은 `~/.codex/<가족>.config.toml`에 `model`만 기록한다. `config.toml`의 기본 설정 키는 `approval_policy`, `sandbox_mode`이며 CLI에는 `--profile <가족>`과 `-c 'model_reasoning_effort="<effort>"'`를 전달한다. 옛 결합 이름 파일은 이번 릴리스에 함께 갱신하며 갱신 중단은 다음 릴리스에 적용한다. `config.toml`에 이미 설정된 값은 CLI 플래그로 중복 지정하지 않는다.
 
 Antigravity 프로필은 `~/.gemini/triflux-profiles.json`에서 `argon_low`, `argon`, `argon_high` 가족 프로필을 자동 갱신한다. `agy`와 `codex`가 설치되지 않았으면 선택적 CLI 누락으로 보고한다.
 
@@ -24,7 +24,7 @@ mods(사용량 band, 서브에이전트 effort 강제)는 `tfx setup --mods`로 
 
 기존 MCP 직접 연결 이주는 설치 과정에서 실행된다. 이주할 수 없는 항목과 누락된 API 키는 경고로 남긴다. 검색 MCP 키를 프로젝트 `.mcp.json`에 직접 쓰지 않는다.
 
-제거된 허브의 `tfx-hub` MCP 항목, 실행 중이던 프로세스, Windows 예약 작업, 설치본 스냅샷은 setup이 한 번 정리한다. 프로젝트 `.mcp.json`에 남은 항목은 지우지 않고 `tfx doctor`가 알린다. Windows의 로컬 세션은 psmux와 Windows Terminal을 사용한다. macOS/Linux는 tmux가 기본이며 macOS에서 tmux가 없으면 Terminal.app 대체 경로를 사용한다.
+제거된 허브의 `tfx-hub` MCP 항목, 실행 중이던 프로세스, Windows 예약 작업, 설치본 스냅샷은 setup이 한 번 정리한다. 프로젝트 `.mcp.json`에 남은 항목은 setup이 지우지 않는다. `tfx doctor`가 알리고 `tfx doctor --fix`가 정리한다. Windows의 로컬 세션은 psmux와 Windows Terminal을 사용한다. macOS/Linux는 tmux가 기본이며 macOS에서 tmux가 없으면 Terminal.app 대체 경로를 사용한다.
 
 ## 확인
 

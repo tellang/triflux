@@ -19,7 +19,7 @@ argument-hint: "[patch|minor|major|<version>] [--skip-tests] [--no-publish] [--d
 > 2. `🤖 Generated with Claude Code` / `AI-assisted` 등 AI 공저자 언급 금지
 > 3. `--no-verify`, `--no-gpg-sign`, `--amend` 금지 (사용자 명시 요청 전까지)
 > 4. `git reset --hard`, `git push --force`, `git clean -f` 는 사용자 명시 승인 후에만
-> 5. 버전 동기화: `package.json` + `.claude-plugin/marketplace.json` 둘 다 갱신 (`release:check-sync` 가 강제)
+> 5. 버전 동기화: `scripts/release/version-manifest.json` 이 정한 8개 파일 전부 같은 버전 (`release:check-sync` 가 강제). `release:bump --write` 가 한 번에 갱신하므로 손으로 일부만 고치지 않는다
 
 ## 배포 채널
 
@@ -33,7 +33,7 @@ triflux 는 아래 3채널로 동시 배포. 각 채널의 버전은 반드시 �
 
 - **npm publish 는 로컬에서 하지 않는다** - 버전을 올린 PR 머지 후 ci 성공, `release.yml` dispatch 또는 `v*` 태그 push 시 `npm-publish.yml` 이 OIDC 로 발행한다. 로컬 `publish.mjs --execute` 는 CI 불가 시 폴백 전용.
 - marketplace 는 자체 publish 명령이 없음. marketplace.json 의 version 만 갱신하면 git push 로 반영됨 (GitHub 호스팅).
-- `release:check-sync` 가 package.json + marketplace.json + package-lock.json 3곳 version 일치를 강제한다.
+- `release:check-sync` 가 `version-manifest.json` 의 8개 파일(`package.json`, `packages/{core,remote,triflux}/package.json`, `.claude-plugin/plugin.json`, `mods/triflux/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `package-lock.json`) version 일치를 강제한다.
 
 ## 전제 조건
 
@@ -74,11 +74,11 @@ gh run watch "$(gh run list --workflow release.yml -L1 --json databaseId -q '.[0
 이미 검증된 hotfix 등 prepare/verify 없이 npm publish 만 트리거하려면:
 
 ```bash
-# main 에서 bump 커밋(버전 3곳 동기화) 후
+# main 에서 bump 커밋(버전 8개 파일 동기화) 후
 git tag v<X.Y.Z> && git push origin v<X.Y.Z>   # → npm-publish.yml 자동 발동
 ```
 
-> ⚠️ 이 경로는 GitHub release / verify 를 건너뛴다. 버전 동기화(package.json + marketplace.json + lock)는 직접 보장.
+> ⚠️ 이 경로는 GitHub release / verify 를 건너뛴다. 버전 동기화(`npm run release:check-sync` 통과)는 직접 보장.
 
 ---
 
@@ -86,6 +86,34 @@ git tag v<X.Y.Z> && git push origin v<X.Y.Z>   # → npm-publish.yml 자동 발�
 
 > CI 가 정석이다. 아래는 Actions 가 막혔거나 로컬 디버깅 시의 수동 절차다.
 > **Step 10 의 로컬 `npm publish` 는 CI 와 중복이므로 평상시 실행 금지.**
+
+### 진행 체크리스트 (복사해서 진행 표시)
+
+```
+- [ ] 0 환경 확인 (main, clean, gh 인증, Node 22+)
+- [ ] 1 버전 선택
+- [ ] 2 release:check-sync 통과
+- [ ] 3 release:bump --write
+- [ ] 4 CHANGELOG 게이트 (사용자 승인)
+- [ ] 5 pack.mjs 미러 + release:check-mirror 통과
+- [ ] 6 release:prepare (테스트, lint, pack dry-run)
+- [ ] 7 커밋 + 태그 (AI trailer 없음 확인)
+- [ ] 8 push (사용자 확인)
+- [ ] 9 GitHub release
+- [ ] 10 CI npm-publish 성공 확인
+- [ ] 11 release:verify -- --execute
+- [ ] 12 사용자 알림
+```
+
+실패하면 아래 단계로 돌아간다. 이미 push 한 뒤(Step 8 이후)에는 되돌리지 말고 사용자에게 보고한다.
+
+| 실패 지점 | 돌아갈 단계 |
+|-----------|-------------|
+| Step 2, 3 동기화 불일치 | Step 2 다시 |
+| Step 5 미러 불일치 | `npm run release:check-mirror:fix` 후 Step 5 다시 |
+| Step 6 테스트/lint 실패 | 코드 수정 후 Step 6 다시. 미러 대상 파일을 고쳤다면 Step 5 부터 |
+| Step 7 trailer 검출 | 커밋 재작성 후 Step 7 다시 |
+| Step 8 push 거부 | `git pull --rebase origin main` 후 Step 2 부터 |
 
 ### Step 0 - 환경 확인
 
@@ -95,7 +123,7 @@ git rev-parse --abbrev-ref HEAD     # main 이어야 함
 git status --porcelain              # uncommitted 있으면 경고
 git log --oneline origin/main..HEAD # unpushed 커밋 목록
 gh auth status                      # gh 인증
-node --version                      # Node 18+ 확인
+node --version                      # Node 22+ 확인 (package.json engines >=22)
 ```
 
 조건:
@@ -169,7 +197,22 @@ B) 편집하고 계속 (사용자가 에디터에서 수정 후 진행)
 C) 취소
 ```
 
-### Step 5 - 테스트 + 빌드 검증
+### Step 5 - pack.mjs 미러
+
+`release:prepare` 의 `npm pack --dry-run` 이 `packages/triflux` 를 검사하므로 미러를 먼저 만든다.
+
+```bash
+node scripts/pack.mjs all
+npm run release:check-mirror
+```
+
+주의:
+- CRLF→LF 변환 경고 대량 발생 가능
+- `git status` 로 실제 변경 파일만 선별 스테이징
+- 예: `git add packages/triflux/` (구체 경로 지정)
+- `check-mirror` 가 실패하면 `npm run release:check-mirror:fix`
+
+### Step 6 - 테스트 + 빌드 검증
 
 ```bash
 npm run release:prepare -- --execute --version "$TARGET_VERSION" --allow-dirty
@@ -180,25 +223,14 @@ npm run release:prepare -- --execute --version "$TARGET_VERSION" --allow-dirty
 이 스크립트가 수행:
 1. `assertVersionSync`
 2. `ensureGitClean`
-3. `npm test` (10분 timeout)
+3. 테스트: `scripts/test-lock.mjs` 로 `tests/**` 와 `scripts/__tests__/**` 를 실행 (10분 timeout)
 4. `npm run lint`
-5. `npm pack --dry-run`
+5. `npm pack --dry-run` (`packages/triflux` 에서)
 6. 릴리즈 노트 생성 → `.omx/plans/release-notes-v{VERSION}.md`
 
-`--skip-tests` 플래그 있으면 npm test 건너뜀 (위험, stderr 경고 출력).
+`--skip-tests` 플래그 있으면 테스트 건너뜀 (위험, stderr 에 `npm-test:skipped` 단계만 남는다).
 
-실패 시 → **STOP**. 사용자에게 에러 보여주고 재시도 옵션 제공.
-
-### Step 6 - pack.mjs 미러
-
-```bash
-node scripts/pack.mjs all
-```
-
-주의:
-- CRLF→LF 변환 경고 대량 발생 가능
-- `git status` 로 실제 변경 파일만 선별 스테이징
-- 예: `git add packages/triflux/` (구체 경로 지정)
+실패 시 → **STOP**. 사용자에게 에러 보여주고 위 체크리스트의 돌아갈 단계를 안내한다.
 
 ### Step 7 - Commit + Tag
 
@@ -212,7 +244,7 @@ git tag "v${TARGET_VERSION}"
 
 **MANDATORY**: HEREDOC 으로 커밋 메시지 전달. Co-Authored-By 트레일러 **절대 금지**. AI 공저자 언급 금지.
 
-`.gitmessage` 템플릿이 AI trailer 를 자동 주입하는 경우 제거. `--no-edit` 으로 추가 편집 차단.
+`.gitmessage` 템플릿이 AI trailer 를 자동 주입하는 경우 제거. `Claude-Session:` 같은 세션 꼬리표도 넣지 않는다.
 
 ### Step 8 - Push
 
@@ -250,23 +282,23 @@ gh release create "v${TARGET_VERSION}" \
 > **평상시 로컬에서 `npm publish` 하지 않는다.** Step 8 에서 `git push origin v<X.Y.Z>` 로 태그가 올라가면 `npm-publish.yml` 이 OIDC 로 자동 발행한다.
 > CI run 관찰: `gh run list --workflow npm-publish.yml -L1` → `gh run watch <id>`
 
-CI 가 완전히 불가능한 비상시에만, npm 인증을 갖춘 환경에서 수동 폴백:
+CI 가 완전히 불가능한 비상시에만, npm 인증을 갖춘 환경에서 수동 폴백. 이 명령은 세 패키지 npm publish, 태그 생성과 push, `git push origin HEAD`, GitHub release 생성까지 한 번에 수행하므로 Step 7 의 태그, Step 8, Step 9 를 이미 했다면 쓰지 않는다 (`--skip-npm`, `--skip-gh-release`, `--tag-only`, `--allow-existing` 으로 일부 생략 가능). 플래그는 임의로 더하지 않는다:
 
 ```bash
-node scripts/release/publish.mjs --execute   # 비상 폴백 전용 - 중복 publish 주의
+node scripts/release/publish.mjs --execute   # 비상 폴백 전용
 ```
 
 ### Step 11 - 사후 검증 (3채널 전부)
 
 ```bash
-npm run release:verify
+npm run release:verify -- --version "$TARGET_VERSION" --execute --npm-wait-seconds 900 --npm-pending-ok
 ```
 
-확인 항목:
+`--execute` 가 없으면 verify 는 실행할 명령만 출력하고 아무것도 확인하지 않는다.
+
+verify 가 확인하는 것: 버전 동기화, `npm view` 로 `@triflux/core`, `@triflux/remote`, `triflux` 세 패키지의 새 버전, `gh release view v${TARGET_VERSION}`. 아래는 직접 확인한다:
 - GitHub tag 존재 (`git ls-remote --tags origin | grep "v${TARGET_VERSION}"`)
-- npm registry 에 새 버전 게시됨 (`npm view triflux@${TARGET_VERSION} version`)
-- marketplace.json version 일치 (`release:check-sync`)
-- 릴리즈 노트 공개됨 (`gh release view v${TARGET_VERSION}`)
+- marketplace.json version 일치 (`npm run release:check-sync`)
 
 ### Step 12 - 사용자 알림
 
@@ -290,9 +322,10 @@ github:  https://github.com/tellang/triflux/releases/tag/v${TARGET_VERSION}
 | Step 0 | 브랜치가 main 아님 | `git checkout main` 또는 PR 플로우 |
 | Step 0 | unpushed 커밋 있음 (ship 전 확인) | 정상 - 릴리즈 대상 |
 | Step 0 | uncommitted 변경 | 먼저 커밋 / ship 에 흡수 / 취소 선택 |
-| Step 2 | 버전 동기화 실패 | `release:check-sync --fix` 실행 |
-| Step 5 | 테스트 실패 | 수정 후 재시도. `--skip-tests` 는 위험 |
-| Step 5 | lint 실패 | `npm run lint:fix` 후 재시도 |
+| Step 2 | 버전 동기화 실패 | `npm run release:check-sync:fix` 실행 |
+| Step 5 | 미러 불일치 | `npm run release:check-mirror:fix` |
+| Step 6 | 테스트 실패 | 수정 후 재시도. `--skip-tests` 는 위험 |
+| Step 6 | lint 실패 | `npm run lint:fix` 후 재시도 |
 | Step 7 | commit 메시지에 AI trailer 감지 | 하드 차단 + 재작성 요청 |
 | Step 8 | push 거부 (remote 변경됨) | `git pull --rebase origin main` 후 재시도 |
 | Step 9 | gh release create 실패 | `gh auth status` 확인, 수동 재시도 |
@@ -302,7 +335,7 @@ github:  https://github.com/tellang/triflux/releases/tag/v${TARGET_VERSION}
 
 | 플래그 | 동작 |
 |--------|------|
-| `--skip-tests` | Step 5 의 `npm test` 건너뜀. stderr 경고 출력. 긴급 hotfix 전용 |
+| `--skip-tests` | Step 6 의 테스트 건너뜀. 긴급 hotfix 전용 |
 | `--no-publish` | 태그를 push 하지 않아 `npm-publish.yml` 미발동. main 커밋 + (수동) GitHub release 만 |
 | `--dry-run` | 모든 git push / publish 호출을 출력만 하고 skip. 검증 전용 |
 
@@ -323,13 +356,13 @@ github:  https://github.com/tellang/triflux/releases/tag/v${TARGET_VERSION}
 
 ## 참고
 
-- 기존 릴리즈 스크립트: `scripts/release/{bump-version,check-sync,prepare,publish,verify,lib}.mjs`
+- 기존 릴리즈 스크립트: `scripts/release/{bump-version,check-sync,check-packages-mirror,prepare,publish,resolve-auto-release,verify,lib}.mjs`
 - version 동기화 manifest: `scripts/release/version-manifest.json`
 - 이전 릴리즈 커밋 패턴: `git log --oneline | grep "chore(release): bump version"`
 
 ## Troubleshooting
 
-- 버전 불일치: `npm run release:check-sync --fix`
+- 버전 불일치: `npm run release:check-sync:fix`
 - pack CRLF 경고: 실제 변경 파일만 선별 `git add packages/triflux/...`
 - gh CLI 미인증: `gh auth login` (또는 gh 정상인 머신/웹 UI 로 release.yml dispatch)
 - npm publish 는 CI(`npm-publish.yml`, OIDC)가 수행 - 로컬 `npm login` 불필요. CI 실패 시 `gh run view <id> --log-failed`
