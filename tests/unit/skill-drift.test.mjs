@@ -128,7 +128,7 @@ describe("tfx-auto SKILL.md — thin alias 이관 규칙", () => {
     const content = readSkill("tfx-auto");
     assert.ok(
       /DEFAULT_ESCALATION_CHAIN/.test(content) &&
-        /\.claude\/rules\/tfx-escalation-chain\.md/.test(content),
+        /--retry auto-escalate/.test(content),
       "autoroute 이관용 escalation chain 규칙이 없음",
     );
   });

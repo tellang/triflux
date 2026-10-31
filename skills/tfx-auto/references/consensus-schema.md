@@ -1,5 +1,17 @@
 # 합의 출력 계약
 
+## 목차
+
+- 호출 형식과 shape 의미
+- `--cli-set` 규약
+- shape 입력 정규화와 `shape_input`
+- 공통 실행 순서
+- 공통 메타 및 출력 계약 (`meta_judgment`, root 메타, 필수 markdown 섹션)
+- artifact 경로
+- [shape=consensus 정책](#shapeconsensus)
+- [shape=debate 정책](#shapedebate)
+- [shape=panel 정책](#shapepanel)
+
 합의 모드의 실행 주체는 참여자 결과를 수집하고 아래 스키마에 맞춰 보고서와 산출물을 직접 작성한다. `--mode consensus`는 합의 작업, `--shape`는 출력 형식을 고른다.
 
 - `--mode consensus --shape consensus`: 세 CLI findings 합의/충돌 판정

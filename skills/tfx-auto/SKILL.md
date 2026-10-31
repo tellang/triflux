@@ -129,33 +129,7 @@ ARGUMENTS 에 아래 플래그가 있으면 라우팅 판단의 내부 추론을
 
 ### 스킬 주입 (`--skill <name>`)
 
-codex/agy 워커 프롬프트 앞에 등록된 스킬의 방법론을 주입하는 **opt-in** 프레임워크. 동작:
-
-- **메커니즘**: `--skill <name>` → tfx-route.sh `TFX_INJECT_SKILL=<name>`. `skills/<name>/SKILL.md` 본문을 `--- SKILL: <name> (apply this methodology...) ---` delimited block 으로 프롬프트 앞에 prepend. codex·agy 레인 공통 (CLI-agnostic, `prepend_skill`).
-- **기본 off**: 미지정이면 no-op → 현행 동작 그대로. 회귀 위험 없음.
-- **파싱 안전**: prepend 는 `printf`/`cat` → temp file 만 사용. codex 는 argv `--` 뒤, agy 는 `--print <프롬프트>` 인자로 전달되므로 `$`(codex)·`₩`/백슬래시(agy) 같은 특수문자를 셸 재확장 없이 **리터럴 보존**. 스킬 본문을 그대로 넘겨도 깨지지 않음.
-- **네이티브 스킬을 안 쓰는 이유**: codex `$skill-name`/`/name` 슬래시와 agy `/name` 은 둘 다 **인터랙티브 TUI 전용** → headless one-shot 에서 named-skill 강제 호출 불가 (미문서). 그래서 prose 주입을 채택 (레퍼런스 omc 도 role .md 를 raw prepend, 네이티브 회피).
-
-#### 커맨드→스킬 매핑 (tfx-auto convention, opt-in)
-
-tfx-auto 가 커맨드/agent 별로 주입할 스킬을 고를 때 쓰는 **권고 테이블**. 기본은 매핑 없음 (명시 `--skill` 만 작동): 부적절한 스킬이 모든 프롬프트에 새는 것을 막는다. 프로젝트가 명시적으로 활성화할 때만 아래를 적용해 `--skill` 을 자동 부여한다.
-
-| 커맨드/agent | 권고 스킬 | 비고 |
-|--------------|-----------|------|
-| (기본) | 없음 | explicit `--skill` 우선 |
-| 프로젝트 정의 | 프로젝트가 지정 | 활성화 시 tfx-auto 가 해당 `--skill` set |
-
-> 매핑된 스킬 파일이 없으면 `prepend_skill` 이 warning 후 주입을 생략한다 (fail-open). 존재하지 않는 매핑을 "주입됨"으로 가정하지 않는다.
-
-#### agy anti-overclaim (자동, agy 레인 전용)
-
-agy 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율 블록을 프롬프트 **END** 에 자동 append (`append_agy_anti_overclaim`). 근거 없는 완료 주장을 줄이기 위한 설정이다:
-
-- fresh 증거 없이 done/fixed/passing 주장 금지.
-- 검증 불가 시 `No Info / 확인 불가` 후 중단 (날조 금지).
-- 추론은 주어진 context 로, confident guessing 보다 accurate abstention 우선.
-
-해당 지시 블록은 프롬프트 끝에 배치한다. opt-out: `TFX_AGY_ANTI_OVERCLAIM=0`.
+`--skill <name>`은 `TFX_INJECT_SKILL=<name>`로 tfx-route.sh에 전달되어 `skills/<name>/SKILL.md` 본문을 codex/agy 워커 프롬프트 앞에 붙인다. 미지정이면 no-op이고 스킬 파일이 없으면 경고 후 생략한다. 메커니즘, 커맨드별 매핑 권고, agy 완료 주장 방지 블록(`TFX_AGY_ANTI_OVERCLAIM`)은 [references/skill-injection.md](references/skill-injection.md)를 읽는다.
 
 ### Retry state machine 계약
 
@@ -166,12 +140,13 @@ agy 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율
 - 동일 `failureReason` 이 3회 연속 반복되면 `stuckCounter` 가 올라가고 `STUCK` 으로 중단한다.
 - `--retry auto-escalate` 는 `DEFAULT_ESCALATION_CHAIN` 을 기본으로 사용한다. 커스텀 체인이 필요하면 `.triflux/config/escalation-chain.json` 으로 override 한다.
 
-`DEFAULT_ESCALATION_CHAIN`의 프로필 설정은 `.claude/rules/tfx-escalation-chain.md`와 CLI 프로필 설정을 따른다.
+`DEFAULT_ESCALATION_CHAIN`(`hub/team/retry-state-machine.mjs`)은 두 단계다. 모델 ID는 프로필과 라우팅 설정이 정한다.
 
 1. Codex: `astra` 가족 + `max` effort
-2. Claude: 최종 수단 프로필
+2. Claude: 최종 수단 프로필. 기본값만 바꾸려면 `TFX_ESCALATION_CLAUDE_MODEL`을 설정한다
 
 체인 규칙:
+- 단계 전이 때 iterations, stuckCounter, lastFailureReason을 리셋한다.
 - `auto-escalate`는 양수 `--max-iterations N`을 소진하면 다음 CLI 프로필로 전이한다. 기본값 `0`에서는 횟수에 따른 승격이 없으며 동일 실패 3회 중단 규칙이 적용된다.
 - 체인 끝까지 소진하면 `BUDGET_EXCEEDED` 와 `reason: "escalation-chain-exhausted"` 를 기록한다.
 - 체인 항목은 optional `profile` 필드를 지원한다. 값이 있으면 파싱/전달만 하고, 없으면 기존 CLI/config 기본 동작을 따른다.
@@ -205,31 +180,8 @@ agy 레인은 `TFX_AGY_ANTI_OVERCLAIM`(기본 on) 으로 완료/grounding 규율
 
 ### Live 위임 계약 (`--mode live`)
 
-`--mode live`는 Codex 분류/Claude 분해 트리아지를 건너뛰고 `tfx-live peer`(Claude↔Codex 실시간 세션 릴레이)로 직접 위임한다. **독립 엔진 위임**이며 `tfx-live`를 병합·재구현하지 않는다. `--parallel N`은 `tfx multi`를 위임한다.
+`--mode live`는 트리아지를 건너뛰고 `tfx-live peer`로 직접 위임한다. 서브태스크로 쪼갤 수 없는 왕복 대화형 작업에만 쓰고, 가벼운 반박 1라운드면 `--mode consensus --shape debate`가 더 저렴하다. 디스패치 명령, closure 규칙, 상태 판정, 중단 처리, 보고 방식은 [references/live-delegation.md](references/live-delegation.md)를 읽는다.
 
-v1은 `peer` 단일 경로만 지원한다. `--live-shape`, `--live-mode`, `tfx-auto`의 `orchestrate` 위임은 v2 예정이며 현재 파서·실행 계약에는 없다.
-
-**적용 대상**: 서브태스크로 쪼갤 수 없는 왕복 대화형 작업(설계 논쟁, 경쟁 가설 조율, 두 모델이 서로 반박하며 수렴해야 하는 케이스). 독립적으로 병렬 처리 가능한 작업, 또는 가벼운 반박 1라운드면 `--mode consensus --shape debate`(배치형, 리드 중개, ≤2라운드, per-round 재시작 오버헤드 있음)가 더 저렴하다. `live`는 리드 중개 없이 세션이 직접 이어받으며 세션 상태를 유지해야 하는 경우에만 쓴다.
-
-**tfx-auto의 배치 모델과 근본적으로 다른 지점**: 나머지 모든 모드(quick/deep/consensus)는 "분해 → dispatch → 결과 수집"의 stateless 배치 잡이다. `live`는 `tfx-live`가 관리하는 장수명 세션(daemon UDS attach 또는 지속 tmux 세션)에 얹혀가므로, verify/fix loop 같은 배치형 계약이 적용되지 않는다.
-
-디스패치:
-
-```bash
-# Bash(run_in_background=true). {task_file} 은 Write 도구로 쓴 입력 파일이다(아래 "실행" 절 참조).
-tfx-live peer --cli-a codex --cli-b claude \
-  --session-a {sid}-a --session-b {sid}-b \
-  --cwd {cwd} --mode freeform --seed "$(cat {task_file})" \
-  --rounds {rounds} --timeout {timeout}
-```
-
-**Closure**: `rounds * 2` hop 예산을 늘리지 않고 마지막 B(`--cli-b`) hop을 closure turn으로 대체한다. B는 `agreement_status`, `unresolved_questions`, `needs_more_rounds`를 포함한 구조화 선언을 반환해야 한다.
-
-**상태 판정**: harness가 B의 자기선언과 독립적으로 판정한다. closure가 구조화되어 있고 `unresolved_questions=[]`, `needs_more_rounds=false`, `agreement_status=complete`일 때만 `status=complete`다. 검증·저장된 성공 hop이 1개 이상이면 그 외에는 `partial`, 0개면 `failed`다. timeout/transport 오류도 성공 hop이 있으면 `partial`이며 원인은 `exit_reason=timeout|transport_error`로 따로 남긴다.
-
-**중단과 세션 정리**: SIGINT/SIGTERM은 transcript 수와 무관하게 `status=aborted`로 분리하고 `hops_completed`, `exit_reason=user_interrupt|terminated`를 남긴다. 첫 신호 뒤 3초 안에 transcript flush → status 기록 → session stop을 시도한다. stop이 3초를 넘기면 orphan tmux 세션은 허용하지만 transcript/status 파일은 보존한다. 두 번째 신호는 graceful 경로를 포기하고 즉시 종료한다.
-
-**보고**: 배치 모드의 `=== OUTPUT ===` 대신 `tfx-live peer` JSON의 `status`, `exit_reason`, `hops_completed`, `transcript_path`, `status_path`를 위 규칙대로 해석하고 transcript를 요약한다.
 
 ### 파싱 규칙
 
@@ -269,7 +221,7 @@ TRIAGE
 
 ### 단일 태스크 thorough
 
-1. Plan: Codex architect → 결과를 `pipeline.writePlanFile()` 저장
+1. Plan: Codex architect → 결과를 계획 파일로 저장
 2. PRD: Codex analyst → acceptance criteria 확정
 3. Exec: tfx-auto 직접 실행 (아래 "실행" 섹션)
 4. Verify: Codex verifier → 검증
