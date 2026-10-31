@@ -526,6 +526,9 @@ describe("setup-sync: tfx-harness 라우팅 문서", () => {
     }
     mkdirSync(join(source, ".claude/rules"), { recursive: true });
     writeFileSync(join(source, ".claude/rules/tfx-routing.md"), "D0-D11");
+    writeFileSync(join(source, ".claude/rules/tfx-psmux.md"), "psmux");
+    mkdirSync(join(source, "skills/tfx-wt"), { recursive: true });
+    writeFileSync(join(source, "skills/tfx-wt/SKILL.md"), "skill");
     try {
       syncSkills({
         pluginRoot: source,
@@ -541,6 +544,13 @@ describe("setup-sync: tfx-harness 라우팅 문서", () => {
           ),
           "D0-D11",
         );
+      assert.equal(
+        readFileSync(
+          join(claudeDir, "skills/tfx-wt/references/tfx-psmux.md"),
+          "utf8",
+        ),
+        "psmux",
+      );
       assert.equal(
         syncSkills({
           pluginRoot: source,
