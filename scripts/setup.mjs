@@ -1298,12 +1298,12 @@ function syncAgyManagedSkills({
   }));
 }
 
-// tfx-harness 는 triflux clone 밖에서도 호출된다. clone 이 없는 기기에서도 라우팅 문서를
-// 읽도록 패키지에 든 사본을 설치된 스킬 옆에 둔다. ~/.claude/rules 는 모든 세션이 자동
-// 로드하므로 쓰지 않는다.
-function installRoutingSsot(pluginRoot, skillDir) {
-  const src = join(pluginRoot, ".claude", "rules", "tfx-routing.md");
-  const dst = join(skillDir, "references", "tfx-routing.md");
+// 스킬은 triflux clone 밖에서도 호출된다. clone 이 없는 기기에서도 rules 문서를 읽도록
+// 패키지에 든 사본을 설치된 스킬 옆에 둔다. ~/.claude/rules 는 모든 세션이 자동 로드하므로
+// 쓰지 않는다. 배포 대상은 scripts/lint-skills.mjs 의 DISTRIBUTED_RULES 와 맞춘다.
+function installRuleDoc(pluginRoot, skillDir, ruleFile) {
+  const src = join(pluginRoot, ".claude", "rules", ruleFile);
+  const dst = join(skillDir, "references", ruleFile);
   if (!existsSync(src) || !existsSync(join(skillDir, "SKILL.md"))) return false;
   if (!shouldSyncTextFile(src, dst)) return false;
   mkdirSync(dirname(dst), { recursive: true });
@@ -1379,7 +1379,9 @@ export function syncSkills({
   if (existsSync(join(codexHarness, MANAGED_CODEX_SKILL_MARKER)))
     harnessDirs.push(codexHarness);
   for (const dir of harnessDirs)
-    if (installRoutingSsot(pluginRoot, dir)) result.changed++;
+    if (installRuleDoc(pluginRoot, dir, "tfx-routing.md")) result.changed++;
+  if (installRuleDoc(pluginRoot, join(destination, "tfx-wt"), "tfx-psmux.md"))
+    result.changed++;
   return result;
 }
 

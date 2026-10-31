@@ -10,6 +10,13 @@ paths:
 ---
 # tfx-psmux: Windows psmux와 Codex CLI 정책
 
+## 목차
+
+- 적용 시점
+- 규칙 1~4: 셸, 경로, 인자 인용, 프로파일
+- 규칙 5, 5-1~5-3: WT 패인 정리, psmux 경로 탐색, 설치·업데이트 점검, WT 명령 형태
+- 규칙 6~8: wt-manager 경유, 현재 모델 프로파일, WT 배치 선택
+
 <!-- TFX_PSMUX_RULES:START -->
 > **적용 범위: Windows 환경 한정.** macOS/Linux는 플랫폼 보호기(`hub/team/wt-manager.mjs`의 `createWtManager`, `hub/team/headless.mjs`의 `autoAttachTerminal`, `tfx-route.sh`의 `uname -s` 분기)가 코드 수준에서 아무 작업도 하지 않게 처리한다. mac 사용자는 이 규칙의 1~3, 5~6, 8번(WT·PowerShell 관련)을 모두 건너뛸 수 있다. 4번(Codex CLI)과 7번(모델 프로파일 정책)만 모든 플랫폼에 적용된다.
 > mac 인프라는 `hub/team/terminal-opener.mjs`의 분기(win32 는 wt-manager, tmux 가 있으면 tmux·psmux, 그 밖에는 false 반환)와 `hub/team/psmux.mjs`의 플랫폼 분기(`IS_WINDOWS`)로 처리한다. 별도 iTerm2·tmux 관리자는 필요하지 않다.

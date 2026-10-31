@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { parseFrontmatter } from "./lib/skill-template.mjs";
@@ -9,6 +9,14 @@ const FRONTMATTER_RE = /^---\r?\n(?:([\s\S]*?)\r?\n)?---\r?\n?/;
 const SKILL_NAME_RE = /^[a-z][a-z0-9-]*$/;
 const MODEL_NAME_RE =
   /\b(?:gpt-\d+(?:\.\d+)?(?:-[a-z0-9.]+)*|gemini-\d+(?:\.\d+)?-[a-z0-9][a-z0-9.-]*|(?:opus|sonnet|haiku)-\d+(?:\.\d+)?(?:-[a-z0-9.]+)*|claude-(?:opus|sonnet|haiku)-\d+(?:\.\d+)?(?:-[a-z0-9.]+)*|o\d(?:-[a-z0-9.]+)?)\b/gi;
+
+const MAX_BODY_LINES = 500;
+const TOC_THRESHOLD_LINES = 100;
+const TOC_SEARCH_LINES = 30;
+const TOC_RE = /^##\s+(?:목차|Contents)\s*$/m;
+const RULES_REF_RE = /\.claude\/rules\/([\w-]+\.md)/g;
+// setup.mjs 가 스킬 옆에 복사해 설치본에서도 보이는 rules 문서. 배포를 늘릴 때 여기만 고친다.
+const DISTRIBUTED_RULES = new Set(["tfx-routing.md", "tfx-psmux.md"]);
 
 function normalizePath(path) {
   return path.replace(/\\/g, "/");
@@ -181,6 +189,117 @@ function lintAgentModels({ file, body, startLine }) {
   return problems;
 }
 
+function walkReferences(dir, current = dir) {
+  const files = [];
+  for (const entry of readdirSync(current, { withFileTypes: true })) {
+    const full = join(current, entry.name);
+    if (entry.isDirectory()) {
+      if (!entry.name.startsWith(".")) files.push(...walkReferences(dir, full));
+    } else if (
+      entry.isFile() &&
+      entry.name.endsWith(".md") &&
+      !(current === dir && entry.name === "SKILL.md")
+    ) {
+      files.push(full);
+    }
+  }
+  return files;
+}
+
+function lintBodyLength({ file, body, startLine }) {
+  const count = body.split(/\r?\n/).length;
+  if (count <= MAX_BODY_LINES) return [];
+  return [
+    createProblem({
+      file,
+      line: startLine,
+      code: "skill-body-too-long",
+      problem: `SKILL.md body is ${count} lines (limit ${MAX_BODY_LINES})`,
+      cause:
+        "본문이 길면 활성화될 때마다 컨텍스트를 많이 먹고, 필요한 부분을 찾기 어렵습니다.",
+      fix: "상세 내용을 references/*.md 로 옮기고 SKILL.md 에서 한 단계로 연결하세요.",
+    }),
+  ];
+}
+
+function lintRulesReferences({ file, body, startLine }) {
+  const problems = [];
+  for (const [index, line] of body.split(/\r?\n/).entries()) {
+    for (const match of line.matchAll(RULES_REF_RE)) {
+      if (DISTRIBUTED_RULES.has(match[1])) continue;
+      problems.push(
+        createProblem({
+          file,
+          line: startLine + index,
+          code: "undistributed-rules-reference",
+          problem: `SKILL.md points to .claude/rules/${match[1]}, which the install does not ship`,
+          cause:
+            "설치본에는 배포 허용 목록의 rules 문서만 복사되므로 triflux 밖에서는 없는 파일입니다.",
+          fix: "필요한 내용을 스킬의 references/ 로 옮기거나, 배포 허용 목록과 setup 복사에 문서를 추가하세요.",
+        }),
+      );
+    }
+  }
+  return problems;
+}
+
+function lintReferences({ skillFile, skillContent, rootDir }) {
+  const problems = [];
+  const refs = walkReferences(dirname(skillFile)).map((path) => ({
+    path,
+    name: basename(path),
+    content: readFileSync(path, "utf8"),
+  }));
+
+  for (const ref of refs) {
+    const file = normalizePath(relative(rootDir, ref.path));
+    const lineCount = ref.content.split(/\r?\n/).length;
+    const head = ref.content.split(/\r?\n/).slice(0, TOC_SEARCH_LINES);
+    if (lineCount > TOC_THRESHOLD_LINES && !TOC_RE.test(head.join("\n"))) {
+      problems.push(
+        createProblem({
+          file,
+          line: 1,
+          code: "reference-missing-toc",
+          problem: `reference is ${lineCount} lines without a table of contents in the first ${TOC_SEARCH_LINES} lines`,
+          cause:
+            "긴 reference 는 일부만 읽히는 경우가 많아 목차가 없으면 전체 구조를 알 수 없습니다.",
+          fix: "맨 위에 `## 목차` 또는 `## Contents` 절을 추가하세요.",
+        }),
+      );
+    }
+    if (!skillContent.includes(ref.name)) {
+      problems.push(
+        createProblem({
+          file,
+          line: 1,
+          code: "reference-not-linked",
+          problem: `reference ${ref.name} is not mentioned in SKILL.md`,
+          cause: "SKILL.md 가 가리키지 않는 reference 는 읽힐 경로가 없습니다.",
+          fix: "SKILL.md 에서 이 파일을 직접 가리키거나 파일을 지우세요.",
+        }),
+      );
+    }
+    const nested = refs.find(
+      (other) => other !== ref && ref.content.includes(other.name),
+    );
+    if (nested) {
+      problems.push(
+        createProblem({
+          file,
+          line: 1,
+          code: "reference-nested-link",
+          problem: `reference points to another reference: ${nested.name}`,
+          cause:
+            "reference 가 다른 reference 를 거치면 일부만 읽혀 내용이 빠지기 쉽습니다.",
+          fix: "SKILL.md 에서 두 파일을 각각 직접 가리키고 reference 간 연결은 지우세요.",
+        }),
+      );
+    }
+  }
+  return problems;
+}
+
 function lintSkillFile({ file, rootDir }) {
   const content = readFileSync(file, "utf8");
   const { data, body } = parseFrontmatter(content);
@@ -198,6 +317,17 @@ function lintSkillFile({ file, rootDir }) {
       body,
       startLine: bodyStartLine(content),
     }),
+    ...lintBodyLength({
+      file: relativeFile,
+      body,
+      startLine: bodyStartLine(content),
+    }),
+    ...lintRulesReferences({
+      file: relativeFile,
+      body,
+      startLine: bodyStartLine(content),
+    }),
+    ...lintReferences({ skillFile: file, skillContent: content, rootDir }),
   ];
 }
 
