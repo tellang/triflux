@@ -76,11 +76,13 @@ tfx multi --teammate-mode headless \
   --timeout 1800
 ```
 
+> Exa나 Brave MCP가 없으면 그 소스는 건너뛰고 사용 가능한 검색 도구(WebSearch 등)로 대체한 뒤 보고서에 적는다.
+
 > 배리어: 위 dispatch는 background로 실행한다. Bash 도구는 비TTY라 모드를 생략해도 headless지만, 결과 색인(`results.json`)이 headless에서만 나오므로 명시한다. task-notification 완료 후 team runtime 결과에서 검색 결과를 회수하고, Agent 결과도 수집한 다음에만 Step 3을 진행한다.
 
 #### Step 3: 결과 수집 및 교차검증
 
-수치와 인용은 검색 스니펫이 아니라 원문으로 확인한다. 원문은 WebFetch, Exa fetch 순서로 가져온다.
+수치와 인용은 검색 스니펫이 아니라 원문으로 확인한다. 원문은 WebFetch, Exa fetch 순서로 가져오고, 둘 다 실패하면 해당 항목을 "원문 미확인"으로 표시한다. 원문과 어긋난 수치나 인용이 나오면 Step 2로 돌아가 해당 서브쿼리만 다시 검색한다.
 
 교차검증 기준:
 1. 사실 일치
@@ -197,7 +199,7 @@ Date: {date}
 
 ### Step 6: 저장
 
-`.tfx/reports/research-{timestamp}.md`
+`.tfx/reports/research-{timestamp}.md` (디렉터리가 없으면 만든다)
 
 ### Token (Auto): ~10-15K
 

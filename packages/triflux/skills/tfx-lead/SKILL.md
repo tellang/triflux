@@ -12,13 +12,19 @@ description: >
 
 한 세션에 역할 리드를 맡기고, 리드가 워커를 등록하고, 등록한 워커의 컨텍스트와 진행을 관리하는 절차다. Claude 리드와 Codex 리드가 같은 절차를 따른다.
 세션을 띄우고 보내고 기다리고 compact 하고 닫는 명령의 상세, 전송 세부, 컨텍스트 비율 표는 `tfx-live` 스킬이 정본이다. 여기서는 복제하지 않는다.
-근거는 ADR-0027(Codex queue), ADR-0029(리드 운영), ADR-0030(테스트 격리), ADR-0043(리드 진입과 압박 감시)와 `.claude/rules/tfx-routing.md`의 "모델 배치" 표다.
+근거는 ADR-0027(Codex queue), ADR-0029(리드 운영), ADR-0030(테스트 격리), ADR-0043과 ADR-0047(압박 알림), ADR-0044(자기 세션 제어)이고, 모델 배치는 `tfx-routing.md`의 "모델 배치" 표다.
+
+`tfx-routing.md`는 다음 순서로 찾고 먼저 있는 파일을 쓴다. 없으면 추측하지 말고 누락을 알린다. 같은 순서를 실행하는 블록은 `tfx-harness` 스킬의 "SSOT 탐색" 절에 있다.
+
+1. `$TFX_ROUTING_SSOT`
+2. clone 의 `.claude/rules/tfx-routing.md`(git 메인 워크트리, 없으면 cwd 에서 위로 탐색)
+3. `~/.claude/skills/tfx-harness/references/tfx-routing.md`(설치본 사본, clone 보다 늦을 수 있다)
 
 ## 보유 자산과 선택
 
 처음 리드를 맡을 때 현재 호스트의 스킬, 도구 인벤토리에서 TFX 자산과 호출 이름을 인지한다. 호스트가 노출하는 capability 목록은 탐색 단서로 쓰고, 실제 가용성과 호스트별 표기는 설치 인벤토리를 따른다. Claude의 `/tfx-*`, Codex의 `$tfx-*`, agy의 표기를 서로 있다고 가정하지 않는다.
 
-- 소유자가 분명하면 아래 짧은 안내로 바로 선택한다. 소유자가 불분명하거나 정책이 충돌할 때만 canonical routing SSOT `tfx-routing.md`의 필요한 절을 1회 읽는다. 탐색은 현재 호스트 인벤토리에서 얻은 `tfx-harness` 경로의 SSOT 탐색 절을 따른다. 그때 정본이 없으면 추측하지 않고 누락을 알린다.
+- 소유자가 분명하면 아래 짧은 안내로 바로 선택한다. 소유자가 불분명하거나 정책이 충돌할 때만 `tfx-routing.md`의 필요한 절을 1회 읽는다(찾는 순서는 위 목적 절).
 - 사용자가 자산 이름을 다시 말하지 않아도 요청에 맞는 경로를 기본 선택한다. 소유 스킬이나 경로를 묻거나 그 선택이 모호한 경우는 `tfx-harness`, 명확한 구현 실행은 `tfx-auto`와 그 실행 경로 `tfx-route.sh`, 세션 관리와 소통은 `tfx-live`와 `tfx-peer`다. 작업 목표 자체가 모호하면 기존 SSOT의 요구사항 분류를 따른다. 모든 요청 앞에 harness나 auto를 실행하지 않는다.
 - 원격은 `tfx-remote`, 코드 판정은 `tfx-review`, 외부 조사는 `tfx-research`, 진단은 `tfx-doctor`, triflux 릴리스는 `tfx-ship`의 소유 범위를 따른다. 명시 지시와 gstack, superpowers, 호스트 소유 정책을 유지하며 TFX 선택을 이유로 우회하지 않는다. 가용성을 모르면 임의 폴백하지 않는다.
 - 첫 활성화에는 이 짧은 안내를 읽고, 선택한 자산의 상세 스킬은 사용할 때 읽는다. 정본 전체를 매 초기화나 매 요청에 읽지 않는다. 이미 읽은 긴 스킬과 전체 capability 목록을 매 턴이나 포크마다 다시 싣지 않는다. 포크에는 선택한 경로와 필요한 맥락만 넘긴다.
@@ -53,7 +59,7 @@ Codex 리드는 mod 가 없으므로 `/rename <월>.<일> <역할>`을 직접 �
 리드가 워커마다 연락해 이름을 붙이면 등록이 끝난다.
 
 - 이름 형식: `<월>.<일> <주제>`. 승계 세션은 기존 이름 뒤에 ` 2`, ` 3`.
-- 대상 찾기: `tmr ls --json`으로 pane 별 에이전트와 상태를 본다. CLI 별로는 `tfx-live list-sessions --cli <claude|codex|agy>`.
+- 대상 찾기: `tmr ls --json`으로 pane 별 에이전트와 상태를 본다(tmr 이 없으면 `tmux ls`). CLI 별로는 `tfx-live list-sessions --cli <claude|codex|agy>`.
 - 이름 붙이기:
 
 | 워커 CLI | 이름 붙이는 수단 |
@@ -96,13 +102,13 @@ Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 �
   - 인계 파일을 쓴다. 목표, 완료 조건, 체크아웃 상태, 확정 결정, 증거 경로, 미완료, 다음 행동, `predecessorSessionId`를 담는다.
   - 승계 세션이 경로를 읽고 ACK 한다.
   - 원 리드는 닫기 전에 자기가 띄운 Claude 워커마다 `tfx_control` 의 `rebind`(`target: claude:<이름>`, `lead: <새 리드 세션 ID>`)를 보내고 "rebind 완료" 알림을 확인한다. 새 리드 ID 는 새 리드가 `whoami` 로 얻어 인계 ACK 에 적는다. 원 리드가 이미 죽어 못 보냈으면 그 워커는 tmux 안이면 `tfx-live` 경로로 제어하고, tmux 밖이면 다시 띄운다.
-  - ACK 를 받은 뒤에만 원 세션을 닫고 등록 기록을 고친다.
+  - ACK 를 받은 뒤에만 원 세션을 닫고 등록 기록을 고친다. ACK 가 없으면 원 세션을 유지한 채 인계 파일 경로를 다시 보낸다.
 - 서브에이전트는 결과를 받은 즉시 닫는다. Codex 리드가 `spawn_agent`를 29회 부르고 한 번도 닫지 않은 사고가 있었다. Claude 리드의 Agent 도구 팀원은 3절 "끝난 팀원 닫기" 절차로 닫는다.
 - 닫은 뒤에는 남은 세션이 없는지 `tmr ls --json`(없으면 `tmux ls`)으로 확인한다. tmr 은 macOS(arm64) 에서 `tfx setup` 이 설치를 묻는다.
 
 ## 2. 역할별 모델
 
-모델 ID는 기록하지 않는다. Codex는 가족 프로필과 별도 effort, Claude는 별칭을 사용한다. 현재 대응은 `.claude/rules/tfx-routing.md`의 "모델 배치" 표가 정본이다. 가족 프로필에는 `model`만 기록하고 effort는 `-c model_reasoning_effort`로 전달한다. 수동 CLI 예: `codex -p sol -c 'model_reasoning_effort="high"'`.
+모델 ID는 기록하지 않는다. Codex는 가족 프로필과 별도 effort, Claude는 별칭을 사용한다. 현재 대응은 `tfx-routing.md`의 "모델 배치" 표가 정본이다. 가족 프로필에는 `model`만 기록하고 effort는 `-c model_reasoning_effort`로 전달한다. 수동 CLI 예: `codex -p sol -c 'model_reasoning_effort="high"'`.
 
 | 역할 | 가족 + effort / Claude 별칭 | 비고 |
 | --- | --- | --- |
@@ -164,7 +170,7 @@ Agent 도구로 띄운 팀원(agent teams 의 tmux 모드)은 리드의 현재 �
 | 200 cols 미만 | `name` 없이 `run_in_background: true` 서브에이전트. 완료는 알림으로 받는다. 오래 가거나 다시 쓸 워커는 위 표대로 `tfx-live start` 별도 세션으로 띄우고 tmr 로 본다 |
 | 처음부터 좁은 화면에서 리드를 띄울 때 | `claude --teammate-mode in-process` 로 시작한다. 팀원은 리드 창 아래 에이전트 패널에 뜨고 화살표와 Enter 로 본다 |
 
-- 200 cols 는 `skills/tfx-auto/references/tmux-observation.md` 의 워커당 최소 100 cols 기준을 그대로 쓴 값이다. 팀원 pane 이 리드 창을 좌우로 나누므로 나뉜 뒤에도 리드 쪽이 100 cols 를 지키려면 나누기 전 폭이 그 두 배는 돼야 한다. 호스트가 나누는 비율은 실측하지 못했고, 2026-10-23 팀원 12개가 쌓였을 때 리드 pane 이 26 cols 까지 줄었으므로 팀원이 늘면 리드 쪽은 절반보다 더 좁아진다. 그래서 띄우기 전마다 다시 재고, 넓은 화면에서도 끝난 팀원은 아래대로 바로 닫는다.
+- 200 cols 는 워커 pane 한 개에 최소 100 cols 가 있어야 시작 배너가 접히지 않고 읽힌다는 기준(`tfx-auto` 의 tmux 관전 배치와 같다)을 두 배 한 값이다. 팀원 pane 이 리드 창을 좌우로 나누므로 나뉜 뒤에도 리드 쪽이 100 cols 를 지키려면 나누기 전 폭이 그 두 배는 돼야 한다. 호스트가 나누는 비율은 실측하지 못했고, 2026-10-23 팀원 12개가 쌓였을 때 리드 pane 이 26 cols 까지 줄었으므로 팀원이 늘면 리드 쪽은 절반보다 더 좁아진다. 그래서 띄우기 전마다 다시 재고, 넓은 화면에서도 끝난 팀원은 아래대로 바로 닫는다.
 - 버린 대안: 사용자 설정 `env` 에 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0` 을 넣으면 실행 중인 세션에도 바로 적용돼 이름 붙인 서브에이전트가 팀원이 되지 않는다. 하지만 같은 설정을 읽는 다른 세션까지 모두 바뀌므로 쓰지 않는다. `name` 을 빼는 것으로 이 리드만 바꿀 수 있다.
 
 ### 끝난 팀원 닫기
@@ -208,7 +214,7 @@ sysctl -n kern.memorystatus_vm_pressure_level   # 1 normal, 2 warn, 4 critical
 node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 준비 상태
 ```
 
-- 기준값과 호스트 선택은 `.claude/rules/tfx-routing.md`의 "원격 오프로드 기본 정책"이 정본이다.
+- 기준값과 호스트 선택은 `tfx-routing.md`의 "원격 오프로드 기본 정책"이 정본이다.
 - 지시서에는 실행 위치와 호스트별 주의를 적는다. ryzen 은 Windows(PowerShell 7)이고 기본 디렉터리는 `%USERPROFILE%\Desktop\Projects`다. `remote-spawn`을 쓸 수 없을 때의 절차는 `tfx-remote` 스킬의 "Windows 원격 수동 실행 대안" 절이다.
 - 원격에 띄운 세션도 띄운 리드가 종료까지 책임진다.
 
@@ -216,8 +222,8 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 
 `/tfx-lead <역할>`이 macOS 대화형 세션에서 압박 감시를 켠다. 수동으로 켜고 끄고 볼 때는 `/tfx-pressure on|off|status`를 쓴다. 켜지면 triflux mod 가 2초마다 `kern.memorystatus_vm_pressure_level`을 읽어 두 표본 연속으로 단계 전이를 확정한다. 상주 프로세스와 설치는 없다. 리드를 넘기거나 끝낼 때 `/tfx-pressure off`.
 
-- 4 로 오르는 전이만 리드 자기 세션에 피어 메시지로 넣어 깨운다. 긴 턴 도중에도 바로 온다. 피어 전송이 실패하면 본문 끝에 그 사실이 한 줄 붙고, 턴이 끝난 뒤 온다([ADR-0043](../../docs/adr/0043-pressure-transition-as-self-peer-message.md)).
-- 나머지 전이는 턴을 열지 않는다. 리드의 다음 요청(새 입력이나 도구 결과)에 `메모리 압박: 현재 <단계> <이름>(<시각>)` 한 줄로 보인다. 그 사이 여러 번 바뀌었으면 마지막 단계 하나다. 이 줄에는 답하지 않는다([ADR-0047](../../docs/adr/0047-pressure-notice-without-turn.md)).
+- 4 로 오르는 전이만 리드 자기 세션에 피어 메시지로 넣어 깨운다. 긴 턴 도중에도 바로 온다. 피어 전송이 실패하면 본문 끝에 그 사실이 한 줄 붙고, 턴이 끝난 뒤 온다(ADR-0043).
+- 나머지 전이는 턴을 열지 않는다. 리드의 다음 요청(새 입력이나 도구 결과)에 `메모리 압박: 현재 <단계> <이름>(<시각>)` 한 줄로 보인다. 그 사이 여러 번 바뀌었으면 마지막 단계 하나다. 이 줄에는 답하지 않는다(ADR-0047).
 
 받은 즉시 할 일은 다음과 같다. 실행 중인 세션은 다른 기기로 옮길 수 없다는 전제다. 한 줄로 본 단계는 다음 디스패치부터 그 행을 따르고, 하던 일은 이어 간다.
 
@@ -331,7 +337,7 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 - 지시서에 보고 기준을 넣는다. 비율은 받는 세션의 CLI 에 맞춰 `tfx-live` 표의 준비·경고 열을 쓴다. 예: Claude 60%, agy 12%. Codex 는 화면에 실행 창(예: 475,000)이 보이면 그 대비 60%, 실행 창 없이 1.05M 분모만 보이면 15% 다. 10-28 에 실행 창 Codex 에 15% 를 적어 20.9% 에서 워커가 멈춘 일이 있었다. "컨텍스트가 <비율>을 넘으면 작업을 멈추고 리드에게 보고하라."
 - 재개한 세션(`--resume`)은 이전 사용량을 이어받으므로 재개 직후 한 번 잰다.
 - 85%에 닿은 Claude 세션에는 새 작업을 주지 않고 바로 승계한다.
-- compact 때 triflux mod 가 요약 지시에 남길 항목(리드 역할, 인계 파일, 등록 워커, 열린 PR, 남은 일)을 붙인다([ADR-0045](../../docs/adr/0045-compact-snapshot-instructions.md)).
+- compact 때 triflux mod 가 요약 지시에 남길 항목(리드 역할, 인계 파일, 등록 워커, 열린 PR, 남은 일)을 붙인다(ADR-0045).
 - 지시문을 주면 그 뒤에 합쳐진다. 그래서 지시문에는 이 항목 밖에서 남길 것만 적는다.
 
 ### 자기 세션 제어

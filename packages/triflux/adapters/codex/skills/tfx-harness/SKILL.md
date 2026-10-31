@@ -52,9 +52,8 @@ step 4 copy. To follow a clone's latest policy instead, set
 
 ## Return contract
 
-Translate only host syntax. Hook-injected routing context is authoritative for
-the current turn. Resolve the SSOT owner against the current Codex Available
-Skills inventory, preserving the exact `$skill` name when it exists.
+Translate only host syntax. Resolve the SSOT owner against the current Codex
+Available Skills inventory, preserving the exact `$skill` name when it exists.
 
 ```text
 [tfx-harness]

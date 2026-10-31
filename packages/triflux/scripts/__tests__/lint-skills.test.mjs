@@ -1,13 +1,56 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { formatProblems, lintSkills } from "../lint-skills.mjs";
+import {
+  DISTRIBUTED_RULES,
+  formatProblems,
+  lintSkills,
+} from "../lint-skills.mjs";
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+// 실제 tarball 은 packages/triflux 에서 만든다. 루트 목록만 고치면 설치본에 안 들어간다.
+describe("배포 규칙 문서 목록", () => {
+  for (const manifest of ["package.json", "packages/triflux/package.json"]) {
+    it(`${manifest} files 에 DISTRIBUTED_RULES 가 모두 있다`, () => {
+      const { files } = JSON.parse(
+        readFileSync(join(REPO_ROOT, manifest), "utf8"),
+      );
+      for (const rule of DISTRIBUTED_RULES) {
+        assert.ok(files.includes(`.claude/rules/${rule}`), rule);
+      }
+    });
+  }
+});
 
 function makeTempDir() {
   return mkdtempSync(join(tmpdir(), "tfx-lint-skills-"));
+}
+
+const FRONT = "---\nname: tfx-x\ndescription: 한국어 설명\n---\n";
+const lines = (n, prefix = "줄") =>
+  Array.from({ length: n }, (_, i) => `${prefix} ${i}`).join("\n");
+
+function writeRef(root, skill, file, content) {
+  const path = join(root, "skills", skill, file);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, content, "utf8");
+}
+
+function codesOf(root) {
+  return lintSkills({ skillsDir: join(root, "skills") }).problems.map(
+    (problem) => problem.code,
+  );
 }
 
 function writeSkill(root, name, content) {
@@ -165,5 +208,84 @@ describe("lint-skills", () => {
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  describe("스킬 품질 규칙", () => {
+    it("본문이 500줄을 넘으면 실패하고 frontmatter는 세지 않는다", () => {
+      const root = makeTempDir();
+      try {
+        writeSkill(root, "tfx-long", FRONT + lines(501));
+        writeSkill(root, "tfx-ok", FRONT + lines(500));
+        const problems = lintSkills({
+          skillsDir: join(root, "skills"),
+        }).problems;
+        assert.deepEqual(
+          problems.map((p) => [p.file, p.code]),
+          [["skills/tfx-long/SKILL.md", "skill-body-too-long"]],
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("100줄 넘는 reference는 앞부분에 목차가 있어야 한다", () => {
+      const root = makeTempDir();
+      try {
+        writeSkill(root, "tfx-x", `${FRONT}references/a.md references/b.md`);
+        writeRef(root, "tfx-x", "references/a.md", lines(101));
+        writeRef(root, "tfx-x", "references/b.md", `## 목차\n${lines(101)}`);
+        assert.deepEqual(codesOf(root), ["reference-missing-toc"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("SKILL.md가 언급하지 않는 reference를 실패 처리한다", () => {
+      const root = makeTempDir();
+      try {
+        writeSkill(root, "tfx-x", FRONT + "본문");
+        writeRef(root, "tfx-x", "references/orphan.md", "내용");
+        assert.deepEqual(codesOf(root), ["reference-not-linked"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("reference가 같은 스킬의 다른 reference를 가리키면 실패한다", () => {
+      const root = makeTempDir();
+      try {
+        writeSkill(root, "tfx-x", `${FRONT}a.md b.md`);
+        writeRef(root, "tfx-x", "a.md", "b.md 를 보라");
+        writeRef(root, "tfx-x", "b.md", "끝");
+        assert.deepEqual(codesOf(root), ["reference-nested-link"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("배포되지 않는 .claude/rules 문서를 가리키면 실패하고 허용 목록은 통과한다", () => {
+      const root = makeTempDir();
+      try {
+        writeSkill(
+          root,
+          "tfx-bad",
+          `${FRONT}.claude/rules/tfx-escalation-chain.md`,
+        );
+        writeSkill(
+          root,
+          "tfx-good",
+          `${FRONT}.claude/rules/tfx-routing.md .claude/rules/tfx-psmux.md`,
+        );
+        const problems = lintSkills({
+          skillsDir: join(root, "skills"),
+        }).problems;
+        assert.deepEqual(
+          problems.map((p) => [p.file, p.code]),
+          [["skills/tfx-bad/SKILL.md", "undistributed-rules-reference"]],
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 });

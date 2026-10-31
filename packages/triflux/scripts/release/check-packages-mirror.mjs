@@ -34,7 +34,10 @@ const MIRROR_TOPS = [
   "skills",
 ];
 // 디렉터리 전체가 아니라 한 파일만 게시하는 경로. tfx-harness 가 clone 없는 기기에서 읽는다.
-const MIRROR_FILES = [".claude/rules/tfx-routing.md"];
+const MIRROR_FILES = [
+  ".claude/rules/tfx-routing.md",
+  ".claude/rules/tfx-psmux.md",
+];
 // core 미러 대상은 pack.mjs 의 CORE_ENTRIES 하나로 정한다. 검사기가 따로 손 목록을 두면
 // 하위 디렉터리나 새 파일이 빠져도 OK 가 나왔다(#674).
 const CORE_NON_MIRROR = new Set([

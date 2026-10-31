@@ -1,10 +1,37 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { formatProblems, lintSkills } from "../lint-skills.mjs";
+import {
+  DISTRIBUTED_RULES,
+  formatProblems,
+  lintSkills,
+} from "../lint-skills.mjs";
+
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+// 실제 tarball 은 packages/triflux 에서 만든다. 루트 목록만 고치면 설치본에 안 들어간다.
+describe("배포 규칙 문서 목록", () => {
+  for (const manifest of ["package.json", "packages/triflux/package.json"]) {
+    it(`${manifest} files 에 DISTRIBUTED_RULES 가 모두 있다`, () => {
+      const { files } = JSON.parse(
+        readFileSync(join(REPO_ROOT, manifest), "utf8"),
+      );
+      for (const rule of DISTRIBUTED_RULES) {
+        assert.ok(files.includes(`.claude/rules/${rule}`), rule);
+      }
+    });
+  }
+});
 
 function makeTempDir() {
   return mkdtempSync(join(tmpdir(), "tfx-lint-skills-"));

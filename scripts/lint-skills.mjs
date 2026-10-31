@@ -16,7 +16,7 @@ const TOC_SEARCH_LINES = 30;
 const TOC_RE = /^##\s+(?:목차|Contents)\s*$/m;
 const RULES_REF_RE = /\.claude\/rules\/([\w-]+\.md)/g;
 // setup.mjs 가 스킬 옆에 복사해 설치본에서도 보이는 rules 문서. 배포를 늘릴 때 여기만 고친다.
-const DISTRIBUTED_RULES = new Set(["tfx-routing.md", "tfx-psmux.md"]);
+export const DISTRIBUTED_RULES = new Set(["tfx-routing.md", "tfx-psmux.md"]);
 
 function normalizePath(path) {
   return path.replace(/\\/g, "/");

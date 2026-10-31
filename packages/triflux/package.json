@@ -25,6 +25,7 @@
     "bin",
     "config",
     ".claude/rules/tfx-routing.md",
+    ".claude/rules/tfx-psmux.md",
     "skills",
     "!skills/tfx-workspace",
     "hooks",
