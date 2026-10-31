@@ -2,6 +2,22 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.91.0] - 2026-11-01
+
+### Added
+- skills: `lint:skills`가 본문 500줄 상한, 100줄 넘는 reference의 목차, reference 직접 연결, 2단계 참조 금지, 설치본에 없는 규칙 문서 참조 금지를 검사한다.
+- setup: `tfx-psmux.md`를 패키지에 넣고 Windows의 `tfx-wt/references/`로 복사한다.
+- tfx-ship: 진행 체크리스트와 실패 지점별 돌아갈 단계를 넣는다.
+
+### Changed
+- tfx-auto: 본문을 446줄로 줄이고 Live 위임 계약과 스킬 주입을 references로 옮긴다.
+- tfx-lead, tfx-wt: 규칙 문서를 찾는 순서를 명시해 clone이 없는 기기에서도 참조가 끊어지지 않게 한다.
+
+### Fixed
+- tfx-ship: 버전 동기화 대상, `release:verify`의 `--execute`, `release:check-sync:fix`, prepare 단계와 pack 순서를 실제 동작에 맞춘다.
+- tfx-wt: `wt-cli`의 탭 조회, 닫기, 이름 변경이 CLI에서 동작하지 않는다는 사실과 설치본 실행 경로, 분할 방향을 바로잡는다.
+- skills: `tfx-review`, `tfx-research`, `tfx-doctor`, `tfx-setup`, `tfx-lead`, `tfx-remote`, Codex `tfx-harness`의 틀린 사실과 끊어진 참조를 고친다.
+
 ## [10.90.0] - 2026-10-30
 
 ### Added
