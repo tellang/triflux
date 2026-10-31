@@ -18,7 +18,7 @@ argument-hint: "[파일 경로 또는 변경 설명] [--quick]"
 |------|------|
 | 변경분의 정확성·엣지 케이스·보안·성능 판정 | 이 스킬 Deep 모드. 테스트를 돌렸다면 그 결과를 리뷰 입력에 넣는다 |
 | 테스트 실행 → 실패 수정 반복 | `tfx-auto` (기본 `--retry 1`의 bounded verify→fix 3회) |
-| 브라우저·사용자 흐름 검증 | gstack `/qa` |
+| 브라우저·사용자 흐름 검증 | gstack `/gstack-qa` |
 
 ---
 
@@ -61,7 +61,7 @@ fi
 
 | Tier | 조건 | 실행 방식 |
 |------|------|----------|
-| **Tier 1** | Codex + Antigravity 전부 정상 | auto multi 3-CLI (tmux/psmux 리드면 interactive) |
+| **Tier 1** | Codex + Antigravity 전부 정상 | `tfx multi` 3-CLI (Bash 도구는 비TTY라 headless로 실행) |
 | **Tier 2** | Codex 또는 Antigravity 중 하나만 가용 | 가용 CLI + Claude Agent 조합 |
 | **Tier 3** | Codex와 Antigravity 모두 불가 | Claude Agent only (consensus 미적용) |
 
@@ -105,7 +105,7 @@ ELSE:
 ### 실행 단계
 
 #### Step 1: 리뷰 대상 수집
-`git diff` (staged + unstaged) 또는 사용자 지정 파일.
+`git diff` (staged + unstaged) 또는 사용자 지정 파일. 대상은 Quick Step 2처럼 임시 파일에 쓰고, 아래 세 프롬프트 앞에 "리뷰 대상은 {파일} 이다. 끝까지 읽고 리뷰하라"를 붙인다. diff 원문을 셸 인자에 넣지 않는다.
 
 #### Step 2: 3-CLI 독립 리뷰: Bash + Agent 동시 호출
 
@@ -171,7 +171,7 @@ Bash("tfx multi --assign 'codex:보안/성능 전문가로서 이 코드를 분�
 
 | 오류 | 조치 |
 |------|------|
-| multi dispatch 타임아웃 | 부분 출력(PARTIAL OUTPUT/.partial) 먼저 회수, 미완료분만 `--timeout 3600` + run_in_background 로 재시도 |
+| multi dispatch 타임아웃 | 부분 출력(`=== PARTIAL OUTPUT ===` 구간) 먼저 회수, 미완료분만 `--timeout 3600` + run_in_background 로 재시도 |
 | Agent 결과 미수신 | Step 2를 Agent만 단독 재실행 |
 | consensus 0% | 대상 범위가 너무 넓음: 파일 단위 분할 후 재실행 |
 | `tfx multi` 명령 실패 | 명령의 stderr와 CLI 가용성을 확인 |
