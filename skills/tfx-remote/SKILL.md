@@ -28,7 +28,7 @@ argument-hint: "<host|list|attach|send|probe|monitor|kill> ..."
 
 예를 들어 원격 세션을 시작하기 전에는 `node ~/.claude/scripts/remote-spawn.mjs --probe <host>`로 준비 상태를 확인한다. 세션 시작 시 `--dir`, `--name`, `--handoff`, `--transfer`, `--no-attach` 옵션을 추가할 수 있다. 스크립트의 실제 옵션과 실패 처리는 `scripts/remote-spawn.mjs`의 `parseArgs`와 `main`을 따른다.
 
-`setup`과 `resume`은 구현된 명령이 아니다. 호스트 설정은 macOS/Linux의 `~/.config/triflux/hosts.json`, Windows의 `%APPDATA%\triflux\hosts.json`을 사용한다. `hub/lib/hosts-compat.mjs`가 호스트 이름과 alias를 해석한다. 호스트가 없거나 SSH가 실패하면 설정과 `--probe` 결과를 확인한다.
+`setup`과 `resume`은 구현된 명령이 아니다. 호스트 설정은 macOS/Linux의 `~/.config/triflux/hosts.json`, Windows의 `%APPDATA%\triflux\hosts.json`을 사용한다. `hub/lib/hosts-compat.mjs`가 호스트 이름과 alias를 해석한다. 호스트가 없거나 SSH가 실패하면 설정과 `--probe` 결과를 확인하고, 그래도 안 되면 로컬로 조용히 바꾸지 말고 실패를 알린다. `ssh`가 없는 기기에서는 시작하지 않는다. `--monitor`는 로컬 psmux가 필요하며 없으면 스크립트가 오류로 끝난다.
 
 원격에서 Codex가 필요하면 원격 Claude Code 세션 안에서 Triflux 라우팅을 사용한다. SSH 너머로 Codex를 직접 실행하지 않는다.
 
@@ -45,7 +45,7 @@ psmux도 없으면 Windows Terminal/PowerShell에서 Claude를 직접 실행한�
 ```powershell
 # start-worker.ps1 (ryzen 에서 실행). 세션 이름은 tfx- 접두사, 경로는 Windows 형식
 psmux new-session -d -s tfx-1015-fulltest -c "$env:USERPROFILE\Desktop\Projects\triflux"
-psmux send-keys -t tfx-1015-fulltest "claude -n '10.15 전체 테스트' --model sonnet" Enter
+psmux send-keys -t tfx-1015-fulltest "claude -n '10.15 전체 테스트'" Enter
 ```
 
 ```bash
@@ -62,8 +62,4 @@ Start-Sleep -Seconds 2
 psmux kill-session -t tfx-1015-fulltest
 ```
 
-`send-keys` 로 보내는 명령은 PowerShell 문법이다. `&&`, `export`, `$(...)`, Unix 경로를 쓰지 않는다.
-
-## 확인
-
-규칙 파일 해시는 Windows PowerShell에서 `Get-FileHash .claude/rules/tfx-psmux.md`, macOS에서 `shasum -a 256 .claude/rules/tfx-psmux.md`, Linux에서 `sha256sum .claude/rules/tfx-psmux.md`로 확인한다.
+`send-keys` 로 보내는 명령은 PowerShell 문법이다. `&&`, `export`, `$(...)`, Unix 경로를 쓰지 않는다. 셸 규약 전문은 triflux clone 의 `.claude/rules/tfx-psmux.md`(clone 전제)이고, clone 이 없으면 위 내용만 따른다.
