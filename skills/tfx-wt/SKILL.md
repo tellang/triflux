@@ -15,160 +15,96 @@ platform:
 > **ARGUMENTS 처리**: 이 스킬이 `ARGUMENTS: <값>`과 함께 호출되면, 해당 값을 사용자 입력으로 취급한다.
 > ARGUMENTS가 비어있거나 없으면 사용자에게 의도 확인 후 적절한 action 으로 라우팅한다.
 
-> 사용자가 이 스킬을 호출하면 요청의 의도를 먼저 action에 매핑한다.
-
 ## OS 정책
 
-이 스킬은 **Windows 전용**. macOS/Linux 의 탭/패인 자연어 라우팅은 본 스킬 범위 외다.
-frontmatter `platform: [win32]` 때문에 `tfx setup` 은 macOS/Linux 에 이 스킬을 설치하지 않고,
-이미 깔린 사본은 지운다.
+Windows 전용이다. frontmatter `platform: [win32]` 때문에 `tfx setup` 은 macOS/Linux 에 이 스킬을 설치하지 않고, 이미 깔린 사본은 지운다.
 
-| OS | 동작 | 라우팅 |
-|----|------|--------|
-| Windows | `wt.exe` 실제 호출 (wt-manager 경유) | **tfx-wt 가 담당** |
-| macOS / Linux | `createWtManager()` 가 stub 반환. 모든 action no-op | **`terminal-opener.mjs` 가 tmux 경로로 담당**. tfx-wt 는 사용자에게 안내만 |
+| OS | 동작 | 담당 |
+|----|------|------|
+| Windows | `wt.exe` 실제 호출(`hub/team/wt-manager.mjs`) | tfx-wt |
+| macOS / Linux | `createWtManager()` 가 stub 을 반환해 모든 action 이 no-op | `hub/team/terminal-opener.mjs` 의 tmux 경로 |
 
-### 구성 요소
+macOS/Linux 에서 "탭 열어" 요청으로 들어오면 실행하지 말고 "Windows Terminal 은 macOS/Linux 에 없다. 새 탭/패인 자동 생성은 `terminal-opener.mjs` 의 tmux 경로가 맡는다"고 안내한 뒤 끝낸다.
 
-| 레이어 | 역할 |
-|--------|------|
-| `hub/team/wt-manager.mjs` | Windows-only (non-Windows 에서 stub). tfx-wt 가 사용 |
-| `hub/team/terminal-opener.mjs` | Cross-platform abstraction. Windows→wt-manager, macOS/Linux→tmux |
+## 시작 전 확인
 
-macOS 사용자가 "탭 열어"라고 했는데 본 스킬로 들어오면 잘못된 라우팅. 사용자에게 다음을 안내한 뒤 종료:
-- "Windows Terminal 은 macOS 에 없습니다."
-- "macOS 에서 새 탭/패인 자동 생성이 필요하면 `terminal-opener.mjs` 의 tmux 경로를 사용하세요."
-- "대시보드 배치는 자동으로 OS 분기됩니다."
-
-`wt-manager.mjs` 자체가 OS-aware 이므로 스킬 코드에서 platform 분기 불필요.
-
-## 의도 → action 매핑
-
-| 자연어 입력 | action | 예시 |
-|------------|--------|------|
-| 패인 분할, pane split, 화면 나눠 | `split-pane` | "패인 가로로 분할" |
-| 탭 + 여러 개 동시 배치, layout, dashboard | `layout` | "워커 3개 가로로 배치" |
-| 탭 목록, 탭 리스트, 열린 탭, 현재 탭 | `list` | "지금 탭 뭐있어" |
-| 탭 닫아, 탭 종료, tab close, 탭 정리 | `close` | "worker 탭 닫아" |
-| 오래된 탭 정리, stale 탭, idle 탭 정리 | `close-stale` | "1시간 넘은 탭 정리해" |
-| 탭 이름 변경, 탭 제목 바꿔, rename | `rename` | "이 탭 이름 backend 로 바꿔" |
-
-## wt + psmux 통합 패턴 (Windows 기본 사용 흐름)
-
-triflux 의 WT `triflux` 프로파일은 `ensureWtProfile`에서 psmux를 commandline으로 설정한다. WT 패인은 컨테이너이고, 그 안에서 psmux가 세션을 유지한다.
-
-| 레이어 | 역할 |
-|--------|------|
-| wt | 윈도우 / 탭 / 패인 컨테이너 |
-| psmux (탭 내부 default 셸) | 세션 호스팅. detach → wt 닫혀도 살아있음 → 재첨부 가능 |
-
-패인 분할 명령의 형태는 `.claude/rules/tfx-psmux.md` 규칙 5-3을 따른다.
-
-```bash
-wt.exe -w 0 sp -H -p triflux --title "worker" psmux attach-session -t SESSION
-```
-
-이걸 본 스킬에서 호출하려면 `split-pane`의 `command` 에 `psmux attach-session -t <session>` 을 넣는다. 다중 worker 동시 배치는 `layout`.
-
-### 세션 다중 배치 (전형)
-
-```bash
-node scripts/wt-cli.mjs layout '[
-  {"title":"w1","command":"psmux attach-session -t s1","direction":"H"},
-  {"title":"w2","command":"psmux attach-session -t s2","direction":"V"},
-  {"title":"w3","command":"psmux attach-session -t s3","direction":"V"}
-]'
-```
-
-각 패인이 미리 띄워둔 psmux session (s1/s2/s3) 에 attach. wt 패인 닫혀도 psmux session 은 살아있어 재시작 후 reattach 가능.
+1. `Get-Command wt.exe, node` 로 둘 다 있는지 본다. 없으면 실행하지 말고 무엇이 없는지 알린다.
+2. `psmux` 는 패인 안에서 세션을 유지할 때만 필요하다. `Get-Command psmux` 로 확인하고, 없으면 `command` 에 직접 실행할 명령을 넣거나 사용자에게 설치를 알린다.
+3. 패인을 배치하기 전에 사용자에게 레이아웃을 확인한다(새 창에서 분할 / 현재 창에서 분할 / 대시보드 / 연결하지 않음). 새 탭(`nt`)은 쓰지 않는다.
 
 ## 실행
 
-`scripts/wt-cli.mjs` 가 `wt-manager` 의 thin wrapper. json-opts 는 단일 인자로 전달.
+`scripts/wt-cli.mjs` 는 `wt-manager` 의 얇은 래퍼다. 인자는 `<action> '<json-opts>'` 하나다. `~/.claude/scripts` 에는 설치되지 않으므로 아래 순서로 찾는다.
 
-```bash
-node scripts/wt-cli.mjs <action> '<json-opts>'
+1. 현재 디렉터리가 triflux clone 이면 `node scripts/wt-cli.mjs`.
+2. 아니면 패키지 루트에서 실행한다. 루트 경로는 `~/.claude/scripts/.tfx-pkg-root` 에 적혀 있다.
+
+```powershell
+$root = (Get-Content "$env:USERPROFILE\.claude\scripts\.tfx-pkg-root" -Raw).Trim()
+node "$root\scripts\wt-cli.mjs" <action> '<json-opts>'
 ```
+
+둘 다 없으면 `tfx setup` 을 다시 실행하도록 알린다. 아래 예시는 `node scripts/wt-cli.mjs` 로 줄여 쓴다.
 
 ### split-pane: 패인 분할
 
 ```bash
-node scripts/wt-cli.mjs split-pane '{"direction":"H","title":"logs","command":"tail -f log"}'
+node scripts/wt-cli.mjs split-pane '{"direction":"H","title":"logs","command":"Get-Content app.log -Wait"}'
 ```
 
 | 옵션 | 값 | 의미 |
 |------|-----|------|
-| `direction` | `"H"` / `"V"` | 가로 / 세로 |
+| `direction` | `"H"` / `"V"` | 상하 / 좌우. 기본 `V` |
 | `title` | string | 패인 제목 |
-| `command` | string | 실행할 명령 |
+| `command` | string | 패인에서 실행할 **PowerShell 스크립트**(`-EncodedCommand` 로 전달) |
+| `profile`, `size`, `cwd` | string, 백분율 숫자, 경로 | 프로파일, 분할 크기, 시작 디렉터리 |
 
-### layout: 다중 패인 배치
+### layout: 여러 패인 한 번에 배치
 
 ```bash
-node scripts/wt-cli.mjs layout '[{"title":"w1","command":"...","direction":"H"},{"title":"w2","command":"...","direction":"V"}]'
+node scripts/wt-cli.mjs layout '[
+  {"title":"w1","command":"psmux attach-session -t s1","direction":"H"},
+  {"title":"w2","command":"psmux attach-session -t s2","direction":"V"}
+]'
 ```
 
-또는 객체 형태: `'{"panes":[...]}'`. 대시보드와 여러 세션 배치에 사용.
+`'{"panes":[...]}'` 형태도 받는다. 첫 패인은 새 탭으로 만들고 나머지는 그 탭을 분할한다. 각 패인은 미리 띄운 psmux 세션에 attach 한다. WT 패인이 닫혀도 세션이 살아 있어 다시 attach 할 수 있다. triflux WT 프로파일(`ensureWtProfile`)은 commandline 이 `psmux` 다.
 
-### list: 탭 목록
+### list, close, close-stale, rename
 
 ```bash
 node scripts/wt-cli.mjs list
-```
-
-반환: `[{ title, id, ... }]`. macOS/Linux 에서는 `[]`.
-
-### close: 탭 닫기
-
-```bash
 node scripts/wt-cli.mjs close '{"title":"worker-1"}'
-```
-
-`title`은 정확히 일치하는 탭 하나를 닫는다.
-
-### close-stale: 오래된 탭 정리
-
-```bash
 node scripts/wt-cli.mjs close-stale '{"olderThanMs":3600000,"titlePattern":"worker-"}'
-```
-
-| 옵션 | 의미 |
-|------|------|
-| `olderThanMs` | 생성 시각에서 이 시간이 지난 탭 |
-| `titlePattern` | 문자열이 포함된 제목만 선택 |
-
-반환: `{ success: true, closed: <닫은 탭 수> }`
-
-### rename: 탭 이름 변경
-
-```bash
 node scripts/wt-cli.mjs rename '{"oldTitle":"old","newTitle":"backend"}'
 ```
 
-## CLAUDE.md 규칙
+탭 목록(`tabs`)은 `createWtManager()` 를 만든 프로세스의 메모리에만 있다. `wt-cli` 는 호출마다 새 프로세스라서 이전 호출이 만든 탭이 보이지 않는다. 그래서 CLI 로 부르면 `list` 는 `[]`, `close` 는 아무것도 닫지 않고 `{"success":true}`, `close-stale` 은 `{"success":true,"closed":0}`, `rename` 은 `false` 를 낸다. 결과가 이렇게 나와도 성공으로 보고하지 않고 "CLI 에서는 효과 없음"이라고 알린다.
 
-실행 규칙은 `.claude/rules/tfx-psmux.md`의 규칙 6과 8을 따른다.
+WT 에 붙은 세션을 정리하려면 psmux 에서 한다. 먼저 연결을 끊고 2초 뒤 세션을 지운다(WT 1.24 의 ConPTY 종료 경쟁 회피). `detach-client` 의 `-t` 는 클라이언트 이름이라 세션을 분리하지 못하므로 `-s` 로 세션을 준다.
 
-| 차단되는 직접 호출 | 이 스킬 경유 |
-|-------------------|-------------|
-| `wt.exe new-tab ...` | 새 탭 생성 대신 `split-pane` 또는 `layout` |
-| `wt.exe split-pane ...` | `split-pane` |
-| `wt.exe -w 0 sp -H ...` | `layout` (다중) 또는 `split-pane` (단일) |
-| `Start-Process wt.exe ...` (PowerShell) | `split-pane` 또는 `layout` |
+```powershell
+psmux detach-client -s <session>
+if ($LASTEXITCODE -ne 0) { Write-Error "detach 실패. psmux list-clients 로 확인한 뒤 다시 실행"; exit 1 }
+Start-Sleep -Seconds 2
+psmux kill-session -t <session>
+```
 
-Windows Terminal 요청은 `tfx-wt`에서 `wt-cli.mjs`를 경유해 실행한다.
+## 직접 호출 금지
+
+에이전트는 `wt.exe` 를 직접 호출하지 않는다. `wt.exe new-tab`, `wt.exe split-pane`, `wt.exe -w 0 sp ...`, `Start-Process wt.exe` 대신 `split-pane` 또는 `layout` 을 쓴다. 실제 `wt.exe` 인자 조립은 `wt-manager.mjs` 가 정본이다.
 
 ## 안티패턴
 
 | 패턴 | 문제 | 대체 |
 |------|------|------|
-| `Bash("wt.exe new-tab ...")` | 규칙 8의 새 탭 금지 | `node scripts/wt-cli.mjs split-pane '{...}'` |
-| macOS 에서 "탭 열어" 받고 강제 실행 시도 | wt-manager stub 반환 → 효과 없음 + 혼란 | "Windows Terminal 미설치 환경: no-op" 명시 후 종료 |
-| 다중 패인을 개별 생성 | 여러 번 배치해야 함 | `layout` 한 번 호출 |
+| `Bash("wt.exe new-tab ...")` | 새 탭 금지 | `split-pane` 또는 `layout` |
+| macOS/Linux 에서 강제 실행 | stub 이라 효과 없음 | 안내 후 종료 |
+| 패인을 하나씩 따로 생성 | 호출 반복 | `layout` 한 번 |
+| `split-pane` 의 `command` 에 `tail -f` 같은 Unix 명령 | 패인 셸이 PowerShell | PowerShell 문법 사용 |
 
 ## 관련
 
-- `scripts/wt-cli.mjs`: CLI wrapper (이 스킬이 호출)
-- `hub/team/wt-manager.mjs`: 실제 구현체 (`splitPane`, `applySplitLayout`, `closeTab`, `closeStale`, `renameTab`, `listTabs`)
-- CLAUDE.md `psmux-wt` 섹션: wt-manager API 가이드
-- `.claude/rules/tfx-psmux.md`: psmux/WT 정책 규칙 5, 6, 8
+- `scripts/wt-cli.mjs`: 이 스킬이 호출하는 CLI
+- `hub/team/wt-manager.mjs`: 구현체(`splitPane`, `applySplitLayout`, `closeTab`, `closeStale`, `renameTab`, `listTabs`)
+- 셸 규약 전문: triflux clone 의 `.claude/rules/tfx-psmux.md`. clone 이 없으면 이 스킬의 `references/tfx-psmux.md`(다른 작업에서 설치본에 복사 중). 둘 다 없어도 위 내용만으로 실행할 수 있다.

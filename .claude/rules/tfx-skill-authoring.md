@@ -42,7 +42,17 @@ paths:
 - `SKILL.md.tmpl` 생성 파이프라인과 별도 manifest는 쓰지 않는다. `skill.json`이
   있어도 `SKILL.md` frontmatter를 대체하지 않는다.
 
-## 5. 변경 검증
+## 5. 분량과 reference 구조
+
+`scripts/lint-skills.mjs` 가 아래를 기계 검사한다.
+
+- `SKILL.md` 본문(frontmatter 제외)은 500줄을 넘기지 않는다. 넘는 내용은 `references/*.md` 로 옮긴다.
+- 100줄을 넘는 reference 는 처음 30줄 안에 `## 목차` 또는 `## Contents` 를 둔다.
+- 모든 reference 는 같은 스킬의 `SKILL.md` 가 직접 가리킨다. 가리키지 않는 파일은 지운다.
+- reference 가 같은 스킬의 다른 reference 를 가리키지 않는다(1단계 연결만 허용).
+- `SKILL.md` 는 설치본에 배포되는 `.claude/rules/` 문서만 가리킨다. 허용 목록은 lint 의 `DISTRIBUTED_RULES`(`tfx-routing.md`, `tfx-psmux.md`)이고, `package.json` `files` 와 `scripts/setup.mjs` 복사 대상과 같아야 한다. 다른 rules 내용이 필요하면 스킬의 `references/` 에 둔다.
+
+## 6. 변경 검증
 
 - 스킬 문서를 바꾼 뒤 `npm run lint:skills`를 실행한다.
 - `npm test`는 `lint:skills`를 포함하므로, 테스트 파이프라인에서도 동일한

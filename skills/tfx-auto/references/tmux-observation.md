@@ -8,7 +8,7 @@
 
 1. `createPsmuxSession` + `sendKeysToPane`(`hub/team/psmux.mjs`)으로 독립 세션을 만들고
    tfx-route.sh 커맨드를 흘려보낸다.
-2. `tmux capture-pane`으로 폴링해 `[tfx-route] Codex 버전:` 같은 시작 배너를 확인한다.
+2. `tmux capture-pane`으로 폴링해 CLI 시작 출력을 확인한다.
 3. 사용자가 attach해 있는 현재 tmux 창에 `tmux split-window` + `env -u TMUX`(nested-attach
    보호 해제)로 대상 세션에 attach한다.
 

@@ -1,6 +1,6 @@
 {
   "name": "triflux",
-  "version": "10.90.0",
+  "version": "10.91.0",
   "description": "CLI-first multi-model orchestrator for Claude Code — route tasks to Codex, Antigravity, and Claude",
   "type": "module",
   "bin": {
@@ -25,6 +25,7 @@
     "bin",
     "config",
     ".claude/rules/tfx-routing.md",
+    ".claude/rules/tfx-psmux.md",
     "skills",
     "!skills/tfx-workspace",
     "hooks",

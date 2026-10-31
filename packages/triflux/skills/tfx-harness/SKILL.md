@@ -48,7 +48,7 @@ clone의 최신 정책을 쓰려면 `export TFX_ROUTING_SSOT=<triflux clone>/.cl
 
 `~/.claude/rules/`에 사본이나 symlink를 두지 않는다. 그 디렉터리는 Claude가 모든 세션에
 자동 로드하므로 tfx와 무관한 세션까지 SSOT 전문을 매번 컨텍스트에 싣게 된다.
-npm 패키지에는 `.claude/` 중 `rules/tfx-routing.md` 한 파일만 들어 있다.
+npm 패키지에는 `.claude/` 중 `rules/tfx-routing.md`와 `rules/tfx-psmux.md`만 들어 있다.
 
 반환 형식:
 

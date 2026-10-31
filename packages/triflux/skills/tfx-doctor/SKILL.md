@@ -13,7 +13,7 @@ argument-hint: "[--fix|--reset]"
 | 요청 | 명령 | 범위 |
 |------|------|------|
 | 진단 | `tfx doctor --json` | 읽기 전용 점검 |
-| 복구 | `tfx doctor --fix` | 관리 파일과 스킬 동기화, 오류 캐시 복구, 기존 직접 연결 이주, agy peer-wake 바이너리 패치 |
+| 복구 | `tfx doctor --fix` | 관리 파일과 스킬 동기화, 오류 캐시 복구, 기존 직접 연결 이주, 프로젝트 MCP 파일의 허브 흔적 정리, agy peer-wake 바이너리 패치 |
 | 캐시 초기화 | `tfx doctor --reset` | 지정된 캐시 삭제 후 재생성 |
 
 `--fix`는 triflux가 소유하지 않은 OMC 팀과 Claude 네이티브 팀을 삭제하지 않는다. `--reset`은 캐시를 삭제하므로 요청이 분명할 때만 실행한다. 결과의 실패와 건너뜀을 성공으로 바꾸어 보고하지 않는다.
@@ -24,4 +24,4 @@ argument-hint: "[--fix|--reset]"
 
 ## 제거된 허브 흔적
 
-허브는 제거됐다. 현재 디렉터리의 `.mcp.json`과 `.claude/mcp.json`에 허브가 만든 `tfx-hub` 항목이 남아 있으면 `tfx doctor`가 경로를 알린다. 사용자 파일과 구분할 수 없어 자동으로 지우지 않으므로 직접 지운다. 전역 설정의 항목, 실행 중이던 프로세스, 예약 작업은 `tfx setup`이 한 번 정리한다.
+허브는 제거됐다. 현재 디렉터리와 HOME 아래 상위 폴더의 `.mcp.json`, `.claude/mcp.json`에 허브와 gateway가 남긴 항목이 있으면 `tfx doctor`가 경로를 알린다. `tfx doctor --fix`가 `tfx-hub` 항목은 지우고 gateway 항목은 직접 연결로 바꾸며, 원본은 `~/.config/triflux/backups/project-mcp`에 남긴다. 심볼릭 링크 파일은 건너뛴다. 전역 설정의 항목, 실행 중이던 프로세스, 예약 작업은 `tfx setup`이 한 번 정리한다.
