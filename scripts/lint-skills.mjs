@@ -206,8 +206,18 @@ function walkReferences(dir, current = dir) {
   return files;
 }
 
+function countLines(text) {
+  return text.replace(/\r?\n$/, "").split(/\r?\n/).length;
+}
+
+// 앞뒤 경계를 봐서 long-guide.md 가 guide.md 로, b/guide.md 가 a/guide.md 로 잡히지 않게 한다.
+function mentionsPath(text, path) {
+  const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\w./-])(?:\\./)?${escaped}(?![\\w/-])`).test(text);
+}
+
 function lintBodyLength({ file, body, startLine }) {
-  const count = body.split(/\r?\n/).length;
+  const count = countLines(body);
   if (count <= MAX_BODY_LINES) return [];
   return [
     createProblem({
@@ -245,15 +255,17 @@ function lintRulesReferences({ file, body, startLine }) {
 
 function lintReferences({ skillFile, skillContent, rootDir }) {
   const problems = [];
-  const refs = walkReferences(dirname(skillFile)).map((path) => ({
+  const skillDir = dirname(skillFile);
+  const refs = walkReferences(skillDir).map((path) => ({
     path,
     name: basename(path),
+    skillPath: normalizePath(relative(skillDir, path)),
     content: readFileSync(path, "utf8"),
   }));
 
   for (const ref of refs) {
     const file = normalizePath(relative(rootDir, ref.path));
-    const lineCount = ref.content.split(/\r?\n/).length;
+    const lineCount = countLines(ref.content);
     const head = ref.content.split(/\r?\n/).slice(0, TOC_SEARCH_LINES);
     if (lineCount > TOC_THRESHOLD_LINES && !TOC_RE.test(head.join("\n"))) {
       problems.push(
@@ -268,7 +280,7 @@ function lintReferences({ skillFile, skillContent, rootDir }) {
         }),
       );
     }
-    if (!skillContent.includes(ref.name)) {
+    if (!mentionsPath(skillContent, ref.skillPath)) {
       problems.push(
         createProblem({
           file,
@@ -281,7 +293,12 @@ function lintReferences({ skillFile, skillContent, rootDir }) {
       );
     }
     const nested = refs.find(
-      (other) => other !== ref && ref.content.includes(other.name),
+      (other) =>
+        other !== ref &&
+        [
+          other.skillPath,
+          normalizePath(relative(dirname(ref.path), other.path)),
+        ].some((path) => mentionsPath(ref.content, path)),
     );
     if (nested) {
       problems.push(

@@ -54,7 +54,7 @@ node scripts/wt-cli.mjs split-pane '{"direction":"H","title":"logs","command":"G
 
 | 옵션 | 값 | 의미 |
 |------|-----|------|
-| `direction` | `"H"` / `"V"` | 좌우 / 상하. 기본 `V` |
+| `direction` | `"H"` / `"V"` | 상하 / 좌우. 기본 `V` |
 | `title` | string | 패인 제목 |
 | `command` | string | 패인에서 실행할 **PowerShell 스크립트**(`-EncodedCommand` 로 전달) |
 | `profile`, `size`, `cwd` | string, 백분율 숫자, 경로 | 프로파일, 분할 크기, 시작 디렉터리 |

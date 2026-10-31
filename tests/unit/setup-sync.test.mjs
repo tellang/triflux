@@ -564,4 +564,37 @@ describe("setup-sync: tfx-harness 라우팅 문서", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  it("지원하지 않는 플랫폼에서 보존한 tfx-wt 사본에는 규칙 문서를 복사하지 않는다", () => {
+    const root = join(TMP_DIR, "preserved-wt");
+    const source = join(root, "package");
+    const claudeDir = join(root, "claude");
+    const installed = join(claudeDir, "skills/tfx-wt");
+    mkdirSync(join(source, "skills/tfx-wt"), { recursive: true });
+    writeFileSync(
+      join(source, "skills/tfx-wt/SKILL.md"),
+      "---\nname: tfx-wt\ndescription: 설명\nplatform:\n  - win32\n---\n본문\n",
+    );
+    mkdirSync(join(source, ".claude/rules"), { recursive: true });
+    writeFileSync(join(source, ".claude/rules/tfx-psmux.md"), "패키지 사본");
+    mkdirSync(join(installed, "references"), { recursive: true });
+    writeFileSync(join(installed, "SKILL.md"), "사용자 수정본");
+    writeFileSync(join(installed, ".triflux-local-skill"), "");
+    writeFileSync(join(installed, "references/tfx-psmux.md"), "사용자 사본");
+    try {
+      syncSkills({
+        pluginRoot: source,
+        claudeDir,
+        codexDir: join(root, "codex"),
+        env: { PATH: "" },
+        platform: "darwin",
+      });
+      assert.equal(
+        readFileSync(join(installed, "references/tfx-psmux.md"), "utf8"),
+        "사용자 사본",
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

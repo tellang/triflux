@@ -1380,7 +1380,11 @@ export function syncSkills({
     harnessDirs.push(codexHarness);
   for (const dir of harnessDirs)
     if (installRuleDoc(pluginRoot, dir, "tfx-routing.md")) result.changed++;
-  if (installRuleDoc(pluginRoot, join(destination, "tfx-wt"), "tfx-psmux.md"))
+  // 플랫폼 제외로 보존된 사용자 사본은 건드리지 않는다.
+  if (
+    isSkillSupportedOnPlatform(join(source, "tfx-wt"), platform) &&
+    installRuleDoc(pluginRoot, join(destination, "tfx-wt"), "tfx-psmux.md")
+  )
     result.changed++;
   return result;
 }

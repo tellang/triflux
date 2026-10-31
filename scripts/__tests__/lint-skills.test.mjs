@@ -263,6 +263,53 @@ describe("lint-skills", () => {
       }
     });
 
+    it("마지막 개행은 줄 수에 더하지 않는다", () => {
+      const root = makeTempDir();
+      try {
+        writeSkill(root, "tfx-x", `${FRONT}${lines(499)}\nreferences/a.md\n`);
+        writeRef(root, "tfx-x", "references/a.md", `${lines(100)}\n`);
+        assert.deepEqual(codesOf(root), []);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("파일명이 다른 이름의 일부일 뿐이면 연결로 보지 않는다", () => {
+      const root = makeTempDir();
+      try {
+        writeSkill(root, "tfx-x", `${FRONT}references/long-guide.md`);
+        writeRef(root, "tfx-x", "references/long-guide.md", "내용");
+        writeRef(root, "tfx-x", "references/guide.md", "내용");
+        assert.deepEqual(codesOf(root), ["reference-not-linked"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("이름이 같은 reference는 경로로 구분한다", () => {
+      const root = makeTempDir();
+      try {
+        writeSkill(root, "tfx-x", `${FRONT}references/a/guide.md`);
+        writeRef(root, "tfx-x", "references/a/guide.md", "내용");
+        writeRef(root, "tfx-x", "references/b/guide.md", "내용");
+        assert.deepEqual(codesOf(root), ["reference-not-linked"]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it("reference 안의 비슷한 파일명은 2단계 참조로 보지 않는다", () => {
+      const root = makeTempDir();
+      try {
+        writeSkill(root, "tfx-x", `${FRONT}a.md guide.md`);
+        writeRef(root, "tfx-x", "a.md", "long-guide.md 는 다른 스킬 문서다");
+        writeRef(root, "tfx-x", "guide.md", "끝");
+        assert.deepEqual(codesOf(root), []);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it("배포되지 않는 .claude/rules 문서를 가리키면 실패하고 허용 목록은 통과한다", () => {
       const root = makeTempDir();
       try {
