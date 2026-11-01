@@ -187,6 +187,15 @@ const CANONICAL_CODEX_PROFILE_OVERRIDES = Object.freeze(
     "astra_ultra",
   ]),
 );
+// 비용 순서다. Jev 는 방향만 답하고 등급은 여기서 한 단계만 옮긴다.
+const CODEX_TIER_LADDER = Object.freeze([
+  "luna_low",
+  "luna_high",
+  "sol_med",
+  "sol_high",
+  "astra_xhigh",
+]);
+const NO_LOWER_CODEX_AGENTS = Object.freeze(new Set(["security-reviewer"]));
 const ULTRA_ELIGIBLE_CODEX_AGENTS = Object.freeze(
   new Set(["deep-executor", "scientist-deep"]),
 );
@@ -212,6 +221,16 @@ export function resolveCodexAgentPolicy(agent) {
  * later process-level `TFX_CODEX_PROFILE`. Ultra is reserved for an eligible
  * top-level role; every nested/sandboxed or ineligible request is max.
  */
+export function shiftCodexAgentProfile(agent, tierShift) {
+  const { profile } = resolveDirectCodexRoutePolicy(agent);
+  const index = CODEX_TIER_LADDER.indexOf(profile);
+  if (index === -1) return profile;
+  if (tierShift === "raise") return CODEX_TIER_LADDER[index + 1] ?? profile;
+  if (tierShift === "lower" && !NO_LOWER_CODEX_AGENTS.has(agent))
+    return CODEX_TIER_LADDER[index - 1] ?? profile;
+  return profile;
+}
+
 export function resolveCodexAgentProfile(
   agent,
   {
@@ -400,6 +419,7 @@ function parseCliArgs(argv) {
   let profileOverride = "auto";
   let geminiProfilesModule = "";
   let nested = false;
+  let tierShift = "";
   while (args.length > 0) {
     const flag = args.shift();
     if (flag === "--format") format = args.shift() || "";
@@ -410,6 +430,7 @@ function parseCliArgs(argv) {
     else if (flag === "--gemini-profiles-module")
       geminiProfilesModule = args.shift() || "";
     else if (flag === "--nested") nested = true;
+    else if (flag === "--tier-shift") tierShift = args.shift() || "";
     else throw new Error(`unknown argument: ${flag}`);
   }
   if (!new Set(["json", "tsv", "route"]).has(format)) {
@@ -422,6 +443,7 @@ function parseCliArgs(argv) {
     profileOverride,
     geminiProfilesModule,
     nested,
+    tierShift,
   };
 }
 
@@ -433,9 +455,14 @@ async function runCli() {
     profileOverride,
     geminiProfilesModule,
     nested,
+    tierShift,
   } = parseCliArgs(process.argv.slice(2));
   if (format === "route") {
     if (!mapFile) throw new Error("--map-file is required for route format");
+    const routedProfile =
+      tierShift && normalizeCodexProfileName(profileOverride) === "auto"
+        ? shiftCodexAgentProfile(agent, tierShift)
+        : profileOverride;
     const map = JSON.parse(readFileSync(mapFile, "utf8"));
     let weeklyPercent = 0;
     if (agent === "code-reviewer" || agent === "quality-reviewer") {
@@ -470,7 +497,7 @@ async function runCli() {
       }
     }
     process.stdout.write(
-      resolveAgentRoute(agent, map, profileOverride, nested, resolver, {
+      resolveAgentRoute(agent, map, routedProfile, nested, resolver, {
         reviewAuthor: process.env.TFX_REVIEW_AUTHOR ?? "codex",
         weeklyPercent,
       }).join("\x1e"),

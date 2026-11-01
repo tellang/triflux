@@ -2,6 +2,19 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.92.0] - 2026-11-01
+
+### Added
+- jev: `tfx judge route --task`가 라우팅 결정트리에서 분기 하나와 규칙 한 줄을 JSON으로 낸다. tfx-harness와 tfx-lead는 이 결과가 있으면 라우팅 문서 전문을 읽지 않는다. 비활성, 낮은 신뢰도, `none`, D4는 기존처럼 전문을 읽는다.
+- jev: Claude headless 워커의 MCP 선택을 적용하지 않고 `mcp_selection_shadow`로 기록한다.
+
+### Changed
+- jev: 역할 정책이 있는 역할은 복잡도로 프로필을 덮어쓰지 않는다. 기본 등급 대비 lower, keep, raise 판정이 신뢰도 0.85 이상일 때만 사다리를 한 단계 옮기며, 명시 프로필이 우선하고 `security-reviewer`는 내리지 않는다. Jev를 쓰지 않으면 등급은 그대로다.
+- jev: 범용 역할도 기본 등급을 벗어나는 판정은 신뢰도 0.85 이상일 때만 적용한다.
+
+### Fixed
+- jev: CLI 전송에서 선택지 기준이 빠지던 문제를 수정한다.
+
 ## [10.91.0] - 2026-11-01
 
 ### Added

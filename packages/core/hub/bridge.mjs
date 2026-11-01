@@ -1156,6 +1156,7 @@ async function cmdJudgeRoute(args) {
           ? routing.neededMcpServers.join(",")
           : "",
         String(routing.confidence ?? ""),
+        routing.tierShift || "",
       ];
       process.stdout.write(fields.join(RS));
       return true;

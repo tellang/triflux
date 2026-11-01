@@ -11,11 +11,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
 import { escapePwshSingleQuoted } from "@triflux/core/hub/cli-adapter-base.mjs";
-import { judgeWorkerHealth } from "@triflux/core/hub/lib/jev-addon.mjs";
+import {
+  judgeWorkerHealth,
+  recordMcpSelectionShadow,
+} from "@triflux/core/hub/lib/jev-addon.mjs";
 import { privateTmpDir } from "@triflux/core/hub/lib/private-tmp.mjs";
 import {
   createActivityLifecycle,
@@ -226,6 +230,34 @@ const MCP_PROFILE_HINTS = {
   review: "Review the code for quality, security, and correctness.",
   docs: "Focus on documentation and explanation tasks.",
 };
+
+function claudeMcpServerNames(cwd = process.cwd()) {
+  const names = new Set();
+  for (const file of [
+    join(process.env.HOME || homedir(), ".claude.json"),
+    join(cwd, ".mcp.json"),
+  ]) {
+    try {
+      const servers = JSON.parse(readFileSync(file, "utf8")).mcpServers;
+      for (const name of Object.keys(servers ?? {})) names.add(name);
+    } catch {
+      // 없는 설정 파일은 후보에서 뺀다.
+    }
+  }
+  return [...names];
+}
+
+// 워커 실행과 무관한 기록이라 기다리지 않고, 실패해도 워커에 영향을 주지 않는다.
+function shadowClaudeMcpSelection(assignment) {
+  if (assignment.cli !== "claude") return;
+  recordMcpSelectionShadow({
+    taskText: assignment.prompt,
+    agentType: assignment.role || "default",
+    availableServers: claudeMcpServerNames(
+      assignment.cwd || assignment.workdir,
+    ),
+  }).catch(() => {});
+}
 
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const { handoff = true, mcp, contextFile, model, cwd } = opts;
@@ -599,6 +631,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     const resultFile = headlessResultFile(sessionName, paneName);
     // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
     cleanStaleResultArtifacts(resultFile);
+    shadowClaudeMcpSelection(assignment);
     const cmd = buildHeadlessCommand(
       assignment.cli,
       assignment.prompt,
@@ -687,6 +720,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
       const resultFile = headlessResultFile(sessionName, paneName);
       // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
       cleanStaleResultArtifacts(resultFile);
+      shadowClaudeMcpSelection(assignment);
       const cmd = buildHeadlessCommand(
         assignment.cli,
         assignment.prompt,
