@@ -27,6 +27,7 @@ import {
 } from "../hub/lib/cache-guard.mjs";
 import {
   isJevEnabled,
+  judgeRoutingBranch,
   resolveJevApiKey,
   resolveJevCliBin,
   summarizeJevStats,
@@ -352,6 +353,18 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         name: "--launcher",
         type: "string",
         description: "이번만 쓸 실행 명령",
+      },
+    ],
+  },
+  judge: {
+    usage: "tfx judge route --task SUMMARY",
+    description:
+      "Jev 로 라우팅 결정트리의 분기 하나와 그 규칙을 JSON 으로 낸다. 비활성, 낮은 신뢰도, 호출 실패는 choice null",
+    options: [
+      {
+        name: "--task",
+        type: "string",
+        description: "외부 Jev 로 보낼 짧은 요청 요약 (1,000자 제한)",
       },
     ],
   },
@@ -4106,6 +4119,28 @@ function cmdHelp() {
 
 // ── 메인 ──
 
+// tfx-harness 의 SSOT 탐색과 같은 순서다. linked worktree 의 브랜치 사본보다 메인 clone 을 먼저 본다.
+function resolveRoutingSsot(cwd = process.cwd()) {
+  const relative = join(".claude", "rules", "tfx-routing.md");
+  const candidates = [process.env.TFX_ROUTING_SSOT];
+  try {
+    const commonDir = execFileSync("git", ["rev-parse", "--git-common-dir"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    candidates.push(join(dirname(resolve(cwd, commonDir)), relative));
+  } catch {
+    // git 저장소 밖이면 아래 순서로 넘어간다.
+  }
+  for (let dir = cwd; ; dir = dirname(dir)) {
+    candidates.push(join(dir, relative));
+    if (dir === dirname(dir)) break;
+  }
+  candidates.push(join(PKG_ROOT, relative));
+  return candidates.find((path) => path && existsSync(path)) ?? null;
+}
+
 function readCliOptionValue(args, name) {
   const index = args.indexOf(name);
   if (index === -1) return null;
@@ -4323,6 +4358,33 @@ async function main() {
         );
       }
       if (!result.ok) process.exitCode = EXIT_ERROR;
+      return;
+    }
+    case "judge": {
+      if (cmdArgs.some(isHelpArg)) {
+        printCommandHelp("judge");
+        return;
+      }
+      const task = readCliOptionValue(cmdArgs, "--task");
+      if (cmdArgs[0] !== "route" || !task)
+        throw createCliError("사용법: tfx judge route --task <요약>", {
+          exitCode: EXIT_ARG_ERROR,
+          reason: "argError",
+          fix: "tfx judge --help",
+        });
+      const routingPath = resolveRoutingSsot();
+      const verdict = await judgeRoutingBranch({
+        task,
+        routingText: routingPath ? readFileSync(routingPath, "utf8") : "",
+      });
+      console.log(
+        JSON.stringify({
+          enabled: isJevEnabled(),
+          choice: verdict?.branch ?? null,
+          rule: verdict?.rule ?? null,
+          confidence: verdict?.confidence ?? null,
+        }),
+      );
       return;
     }
     case "multi": {

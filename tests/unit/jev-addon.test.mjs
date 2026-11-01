@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -13,12 +14,15 @@ import {
   judgeInboxPriority,
   judgeMcpSelection,
   judgePeerConvergence,
+  judgeRoutingBranch,
   judgeSameFailureCause,
   judgeTargetSession,
   judgeTaskRouting,
   judgeWorkerHealth,
+  parseRoutingBranches,
   queryJev,
   queryJevBatch,
+  recordMcpSelectionShadow,
   summarizeJevStats,
 } from "../../hub/lib/jev-addon.mjs";
 import {
@@ -30,6 +34,7 @@ import { assignTasksWithJev } from "../../hub/team/orchestrator.mjs";
 import { submitPromptWithJevVerification } from "../../hub/team/pane.mjs";
 import { createResultsIndex } from "../../hub/team/results-index.mjs";
 import { createRetryStateMachine } from "../../hub/team/retry-state-machine.mjs";
+import { shiftCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
 import { buildMcpPolicyWithJev } from "../../scripts/lib/mcp-filter.mjs";
 
 describe("jev-addon: opt-in 및 fail-open 검증", () => {
@@ -671,7 +676,7 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
         {
           prompt:
             "React 공식 문서를 찾아보고 AuthContext 아키텍처를 재설계한 뒤 외부 staging 서버에 배포해라",
-          agentType: "architect",
+          agentType: "executor",
           cliType: "codex",
           availableServers: ["context7", "brave-search", "playwright", "exa"],
         },
@@ -958,5 +963,209 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("judgeRoutingBranch", () => {
+  const routingText = [
+    "- D0: 명시 스킬은 유지한다.",
+    "- D3: 제품 수요는 `office-hours`; D4 해법 발산은 `brainstorming`.",
+    "- D7: 로컬 파일은 Explore; 외부 문서는 `tfx-research`.",
+  ].join("\n");
+
+  it("한 줄에 묶인 분기까지 나누고 기준을 정본에서 그대로 보낸다", async () => {
+    let sent;
+    const verdict = await judgeRoutingBranch(
+      { task: "공식 문서를 찾아줘", routingText },
+      {
+        client: (request) => {
+          sent = request;
+          return { choice: "D7", confidence: 0.9 };
+        },
+      },
+    );
+    assert.deepEqual(
+      parseRoutingBranches(routingText).D4,
+      "해법 발산은 `brainstorming`.",
+    );
+    assert.deepEqual(sent.options, ["D3", "D4", "D7", "none"]);
+    assert.equal(
+      verdict.rule,
+      "로컬 파일은 Explore; 외부 문서는 `tfx-research`.",
+    );
+  });
+
+  it("실제 라우팅 정본의 D1~D11 을 모두 읽는다", () => {
+    const branches = parseRoutingBranches(
+      readFileSync(".claude/rules/tfx-routing.md", "utf8"),
+    );
+    assert.deepEqual(
+      Object.keys(branches),
+      Array.from({ length: 12 }, (_, n) => `D${n}`),
+    );
+  });
+
+  it("tfx judge route 는 스킬이 읽는 JSON 을 내고 비활성에서도 성공한다", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tfx-judge-"));
+    const fakeCli = join(dir, "jev");
+    writeFileSync(
+      fakeCli,
+      `#!${process.execPath}\nconst seen = process.argv.join(" ").includes("tfx-research");\nconsole.log(JSON.stringify({ choice: seen ? "D7" : "none", confidence: 0.9 }));\n`,
+      { mode: 0o755 },
+    );
+    const run = (env) =>
+      JSON.parse(
+        execFileSync(
+          process.execPath,
+          ["bin/triflux.mjs", "judge", "route", "--task", "공식 문서 찾아줘"],
+          {
+            encoding: "utf8",
+            env: {
+              ...process.env,
+              JEV_API_KEY: "",
+              TYPESAFE_API_KEY: "",
+              TFX_JEV_STATS: "0",
+              ...env,
+            },
+          },
+        ),
+      );
+    try {
+      assert.equal(run({ TFX_JEV_CLI: fakeCli, TFX_JEV: "" }).choice, "D7");
+      assert.deepEqual(run({ TFX_JEV: "0" }), {
+        enabled: false,
+        choice: null,
+        rule: null,
+        confidence: null,
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("D0, D4, none, 낮은 신뢰도는 판정하지 않아 전문 읽기로 돌아간다", async () => {
+    for (const reply of [
+      { choice: "D0", confidence: 0.99 },
+      { choice: "none", confidence: 0.99 },
+      { choice: "D4", confidence: 0.99 },
+      { choice: "D7", confidence: 0.4 },
+    ]) {
+      assert.equal(
+        await judgeRoutingBranch(
+          { task: "요청", routingText },
+          { client: () => reply },
+        ),
+        null,
+      );
+    }
+  });
+});
+
+describe("judgeTaskRouting 역할 등급", () => {
+  const route = (agentType, choice, confidence) =>
+    judgeTaskRouting(
+      { prompt: "여러 파일에 걸친 변경을 처리한다", agentType },
+      {
+        batchClient: () => ({
+          answers: {
+            complexity: { choice, confidence },
+            execution_mode: { choice: "read_only", confidence: 0.9 },
+            mcp_profile: { choice: "none", confidence: 0.9 },
+          },
+        }),
+      },
+    );
+
+  it("역할 정책이 있는 역할은 높은 신뢰도의 방향 판정만 낸다", async () => {
+    const shift = (choice, confidence) =>
+      judgeTaskRouting(
+        { prompt: "인증 우회 가능성을 검토한다", agentType: "code-reviewer" },
+        {
+          batchClient: () => ({
+            answers: {
+              complexity: { choice: "deep", confidence: 0.99 },
+              tier_shift: { choice, confidence },
+            },
+          }),
+        },
+      );
+    assert.equal((await shift("raise", 0.9)).tierShift, "raise");
+    assert.equal((await shift("raise", 0.8)).tierShift, null);
+    assert.equal((await shift("keep", 0.99)).tierShift, null);
+  });
+
+  it("사다리는 한 단계만 옮기고 끝과 보안 리뷰어의 하한을 지킨다", () => {
+    assert.equal(
+      shiftCodexAgentProfile("code-reviewer", "raise"),
+      "astra_xhigh",
+    );
+    assert.equal(shiftCodexAgentProfile("code-reviewer", "lower"), "sol_med");
+    assert.equal(shiftCodexAgentProfile("architect", "raise"), "astra_xhigh");
+    assert.equal(shiftCodexAgentProfile("architect", "lower"), "sol_high");
+    assert.equal(shiftCodexAgentProfile("writer", "raise"), "terra_high");
+    assert.equal(
+      shiftCodexAgentProfile("security-reviewer", "lower"),
+      "astra_xhigh",
+    );
+  });
+
+  it("MCP shadow 는 판정을 기록만 하고 Jev 가 꺼져 있으면 호출하지 않는다", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "jev-shadow-"));
+    const statsFile = join(dir, "stats.jsonl");
+    const input = {
+      taskText: "로그인 흐름을 브라우저에서 확인한다",
+      agentType: "qa-tester",
+      availableServers: ["playwright", "exa"],
+    };
+    try {
+      await recordMcpSelectionShadow(input, {
+        statsFile,
+        batchClient: () => ({
+          answers: {
+            mcp_profile: { choice: "executor", confidence: 0.9 },
+            mcp_playwright: { noul: 0.9 },
+            mcp_exa: { noul: 0.1 },
+          },
+        }),
+      });
+      const shadow = readFileSync(statsFile, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line))
+        .find((row) => row.hook === "mcp_selection_shadow");
+      assert.deepEqual(shadow.selected, ["playwright"]);
+      assert.equal(shadow.intervened, false);
+      assert.equal(
+        await recordMcpSelectionShadow(input, { env: { TFX_JEV: "0" } }),
+        null,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("역할 정책이 있는 역할은 복잡도로 프로필을 바꾸지 않는다", async () => {
+    for (const [role, choice] of [
+      ["code-reviewer", "deep"],
+      ["architect", "trivial"],
+    ]) {
+      const routing = await route(role, choice, 0.99);
+      assert.equal(routing.complexity, choice);
+      assert.equal(routing.codexProfile, null);
+      assert.equal(routing.claudeModel, null);
+    }
+  });
+
+  it("범용 역할도 불확실하면 기본 등급을 유지한다", async () => {
+    assert.equal((await route("executor", "deep", 0.8)).codexProfile, null);
+    assert.equal(
+      (await route("executor", "deep", 0.9)).codexProfile,
+      "astra_xhigh",
+    );
+    assert.equal((await route("executor", "trivial", 0.75)).codexProfile, null);
+    assert.equal(
+      (await route("executor", "trivial", 0.9)).codexProfile,
+      "luna_low",
+    );
   });
 });

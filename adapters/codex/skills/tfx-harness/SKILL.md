@@ -12,6 +12,20 @@ canonical routing SSOT, classify the user intent against available host
 capability evidence, and return one immediate owner. Do not copy the routing
 tree, keyword rules, or owner matrix into this file.
 
+## Jev branch selection
+
+Unless the request names a skill or mode explicitly (D0), run this once before
+reading the SSOT. Summarize the request and leave out secrets and pasted text.
+
+```sh
+tfx judge route --task '<request summary>'
+```
+
+When `choice` is set, it is the branch and the one-line `rule` decides the
+owner, so do not read the full SSOT. Read the full SSOT only if `rule` does not
+settle on one owner. When `choice` is null or the command fails, locate the SSOT
+below and decide directly.
+
 ## Locate the routing SSOT
 
 This skill is installed globally but the SSOT belongs to the Triflux project.

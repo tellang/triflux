@@ -250,7 +250,7 @@ fall back to the existing deterministic behavior. No restart is needed for host-
 
 Task prompts and instructions are sanitized before length limiting and again at
 the HTTP or CLI boundary. Built-in task routing keeps up to 1,400 characters, MCP
-task selection 1,200, busy actions and session selection 1,000, subtask assignment
+task selection 1,200, busy actions, session selection, and skill branch selection 1,000, subtask assignment
 800, injected instructions 600, and expected composer prefixes 200. General
 stdout, stderr, rollout, worker output, and TUI captures contribute only metadata
 such as character and line counts and progress, input-waiting, or error flags.

@@ -12,6 +12,16 @@ description: >
 host capability evidence를 판정한다. 정책 표, keyword 표, owner 매트릭스를 이 파일에
 복제하지 않는다.
 
+## Jev 분기 선택
+
+명시 지정(D0)이 없으면 SSOT를 읽기 전에 요청을 요약해 한 번 실행한다. 비밀값과 붙여넣은 원문은 요약에 넣지 않는다.
+
+```sh
+tfx judge route --task '<요청 요약>'
+```
+
+`choice`가 있으면 그 값이 branch이고 `rule` 한 줄로 owner를 정한다. SSOT 전문은 읽지 않는다. `rule`만으로 owner가 하나로 정해지지 않으면 전문을 읽는다. `choice`가 null이거나 명령이 실패하면 아래 순서로 SSOT를 찾아 직접 판정한다.
+
 ## SSOT 탐색
 
 이 스킬은 글로벌 설치이고 triflux 밖에서도 호출되지만 SSOT는 프로젝트 로컬 파일이다.

@@ -360,8 +360,23 @@ async function callJevCli(request, options = {}) {
     options.timeoutMs ?? env.TFX_JEV_TIMEOUT_MS ?? DEFAULT_JEV_TIMEOUT_MS,
   );
   const args = [request.kind, request.query, "--json"];
-  if (request.context) {
-    args.push("--context", request.context);
+  // CLI 에는 criteria 인자가 없어 선택지의 뜻을 문맥으로 함께 보낸다.
+  const criteria =
+    request.criteria &&
+    typeof request.criteria === "object" &&
+    !Array.isArray(request.criteria)
+      ? Object.entries(request.criteria).map(
+          ([key, text]) => `- ${key}: ${text}`,
+        )
+      : [];
+  const context = [
+    request.context,
+    criteria.length > 0 ? `Options:\n${criteria.join("\n")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  if (context) {
+    args.push("--context", context);
   }
   if (Array.isArray(request.options) && request.options.length > 0) {
     args.push("--options", request.options.join(","));
@@ -1062,6 +1077,19 @@ const COMPLEXITY_ROUTE_MAP = Object.freeze({
   }),
 });
 
+// 복잡도로 등급을 고르는 범용 역할이다. 그 밖의 역할은 기본 등급 대비 방향만 답하고
+// 실제 등급은 agent-route-policy.mjs 의 사다리가 정한다.
+const TIER_ROUTABLE_ROLES = new Set([
+  "executor",
+  "codex",
+  "antigravity",
+  "agy",
+  "claude",
+  "lead",
+]);
+// 승격은 비용을, 강등은 실패와 재시도를 키우므로 불확실하면 역할 기본 등급을 유지한다.
+const TIER_CHANGE_MIN_CONFIDENCE = 0.85;
+
 /**
  * 6. Pre-route 통합 판단: 프롬프트 복잡도(모델 및 effort), 실행 권한 모드(read_only / workspace_auto / bypass),
  * 필요한 MCP 프로필 및 서버 목록을 단일 queryJevBatch 호출로 판정한다.
@@ -1166,6 +1194,23 @@ export async function judgeTaskRouting(
     },
   };
 
+  if (!TIER_ROUTABLE_ROLES.has(agentType)) {
+    questions.tier_shift = {
+      hook: "task_routing_tier_shift",
+      kind: "choice",
+      options: ["lower", "keep", "raise"],
+      criteria: {
+        lower:
+          "Mechanical or tiny work needing far less judgment than this role normally applies.",
+        keep: "Normal work for this role, even when it spans several files or sounds important.",
+        raise:
+          "Unusually hard for this role: security-critical, irreversible, or cross-system reasoning a normal run of this role would likely get wrong.",
+      },
+      query:
+        "This worker role already has a default model tier chosen for its usual work. Compared with that default, what does this specific task need?",
+    };
+  }
+
   for (const server of candidateServers) {
     const safeKey = `mcp_${server.replace(/[^a-zA-Z0-9_]/g, "_")}`;
     questions[safeKey] = {
@@ -1185,6 +1230,13 @@ export async function judgeTaskRouting(
   const compRes = results.complexity;
   const modeRes = results.execution_mode;
   const mcpProfRes = results.mcp_profile;
+  const shiftRes = results.tier_shift;
+  const tierShift =
+    shiftRes &&
+    shiftRes.confidence >= TIER_CHANGE_MIN_CONFIDENCE &&
+    (shiftRes.choice === "lower" || shiftRes.choice === "raise")
+      ? shiftRes.choice
+      : null;
 
   const complexity =
     compRes &&
@@ -1230,17 +1282,23 @@ export async function judgeTaskRouting(
     !complexity &&
     !executionMode &&
     !mcpProfile &&
+    !tierShift &&
     neededMcpServers === null
   ) {
     return null;
   }
 
-  const routeSpec = complexity
-    ? COMPLEXITY_ROUTE_MAP[complexity] || null
-    : null;
+  const routeSpec =
+    complexity &&
+    TIER_ROUTABLE_ROLES.has(agentType) &&
+    (complexity === "standard" ||
+      compRes.confidence >= TIER_CHANGE_MIN_CONFIDENCE)
+      ? COMPLEXITY_ROUTE_MAP[complexity] || null
+      : null;
 
   let codexProfile = routeSpec ? routeSpec.codexProfile : null;
   if (
+    routeSpec &&
     complexity === "standard" &&
     /deslop|cleanup|format|lint|rename|typo/i.test(trimmedPrompt)
   ) {
@@ -1278,6 +1336,7 @@ export async function judgeTaskRouting(
     executionArgs: execFlags ? execFlags.args : null,
     mcpProfile,
     neededMcpServers,
+    tierShift,
     confidence: avgConfidence,
   };
 }
@@ -1310,6 +1369,33 @@ export async function judgeMcpSelection(
     neededServers: routing.neededMcpServers,
     confidence: routing.confidence,
   };
+}
+
+/**
+ * 7-1. Claude 워커 MCP 선택 shadow: 적용하지 않고 판정만 기록해 절감량과 도구 손실을 재는 근거를 쌓는다.
+ */
+export async function recordMcpSelectionShadow(
+  { taskText = "", agentType = "default", availableServers = [] } = {},
+  options = {},
+) {
+  if (!isJevEnabled(options) || availableServers.length === 0) return null;
+  const selection = await judgeMcpSelection(
+    { taskText, agentType, availableServers },
+    options,
+  );
+  recordJevStat(
+    {
+      hook: "mcp_selection_shadow",
+      kind: "shadow",
+      intervened: false,
+      agentType,
+      candidates: availableServers,
+      selected: selection?.neededServers ?? null,
+      confidence: selection?.confidence ?? null,
+    },
+    options,
+  );
+  return selection;
 }
 
 /**
@@ -1744,5 +1830,62 @@ export async function judgeReviewGate(
     reviewGate: gateRes.choice,
     converged,
     confidence: gateRes.confidence,
+  };
+}
+
+// 라우팅 정본의 결정트리 줄(`- D3: ...; D4 ...`)을 분기별 규칙으로 나눈다.
+export function parseRoutingBranches(markdown = "") {
+  const branches = {};
+  for (const line of String(markdown).split(/\r?\n/)) {
+    if (!/^- D\d+:/.test(line)) continue;
+    for (const part of line.slice(2).split(/;\s+(?=D\d+\s)/)) {
+      const match = part.match(/^D(\d+):?\s+(.+)$/);
+      if (match) branches[`D${match[1]}`] = match[2].trim();
+    }
+  }
+  return branches;
+}
+
+/**
+ * 14. tfx-harness 스킬 선택: 라우팅 정본 전문을 읽지 않도록 맞는 분기 하나를 고른다.
+ * D0(명시 지정)은 호출자가 먼저 처리하고, 기준은 정본에서 읽어 사본을 두지 않는다.
+ */
+export async function judgeRoutingBranch(
+  { task = "", routingText = "" } = {},
+  options = {},
+) {
+  if (!isJevEnabled(options)) return null;
+  const trimmedTask = clampText(task, 1000);
+  if (!trimmedTask) return null;
+
+  const { D0: _explicit, ...branches } = parseRoutingBranches(routingText);
+  const allowed = Object.keys(branches);
+  if (allowed.length < 2) return null;
+  // 맞는 분기가 없을 때 억지로 고르지 않도록 none 을 같은 분포에서 경쟁시킨다.
+  const none = "none";
+
+  const res = await queryJev(
+    {
+      hook: "routing_branch",
+      kind: "choice",
+      options: [...allowed, none],
+      criteria: {
+        ...branches,
+        [none]: "No branch condition clearly matches this request.",
+      },
+      query:
+        "This is an ordered routing decision tree. Choose the lowest-numbered branch whose condition matches the request, or none.",
+      context: `Request:\n${trimmedTask}`,
+    },
+    options,
+  );
+  if (!res || res.confidence < minConfidence(options)) return null;
+  if (!allowed.includes(res.choice)) return null;
+  // D4 소유자는 규칙 한 줄이 아니라 스택 공존 매트릭스가 정하므로 전문 읽기로 돌린다.
+  if (res.choice === "D4") return null;
+  return {
+    branch: res.choice,
+    rule: branches[res.choice],
+    confidence: res.confidence,
   };
 }

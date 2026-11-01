@@ -114,7 +114,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 
 > 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0038](../../docs/_archive/adr/0038-agy-default-argon-family.md), [ADR-0039](../../docs/adr/0039-review-by-author-vendor.md), [ADR-0048](../../docs/adr/0048-codex-terra-family-for-writing-lanes.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
 
-Codex 역할별 가족과 effort의 SSOT는 `scripts/lib/agent-route-policy.mjs`이다. `scripts/lib/model-family-resolver.mjs`가 가족 파일 `~/.codex/<가족>.config.toml`의 `model`을 갱신하고, effort는 `-c model_reasoning_effort`로 전달한다. `designer`, `writer`, `document-specialist` 항목은 직접 Codex를 지정한 경우에만 적용하며 일반 실행의 provider는 `hub/team/agent-map.json`이 정한다. 입력이 큰 코드베이스 읽기는 antigravity 로 보낸다(Argon 은 입출력 공유 1M 문맥).
+Codex 역할별 가족과 effort의 SSOT는 `scripts/lib/agent-route-policy.mjs`이다. Jev를 켠 사용자만 사전 라우팅이 등급을 조정한다. `executor`, `codex`, `lead`와 CLI 이름 역할은 복잡도로 고르고, 다른 역할은 기본 등급 대비 lower, keep, raise 판정으로 사다리를 한 단계만 옮긴다. 모두 신뢰도 0.85 미만이면 기본 등급을 유지하고, 명시 프로필이 항상 우선한다. `security-reviewer`는 내리지 않는다. `scripts/lib/model-family-resolver.mjs`가 가족 파일 `~/.codex/<가족>.config.toml`의 `model`을 갱신하고, effort는 `-c model_reasoning_effort`로 전달한다. `designer`, `writer`, `document-specialist` 항목은 직접 Codex를 지정한 경우에만 적용하며 일반 실행의 provider는 `hub/team/agent-map.json`이 정한다. 입력이 큰 코드베이스 읽기는 antigravity 로 보낸다(Argon 은 입출력 공유 1M 문맥).
 
 | 가족 + effort / Claude 별칭 | triflux lane |
 |---------|--------------|

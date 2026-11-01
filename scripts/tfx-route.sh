@@ -1062,6 +1062,7 @@ route_agent() {
     "$sd/lib/gemini-profiles.mjs" \
     ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/lib/gemini-profiles.mjs"} || true)"
   [[ -z "$gemini_module" ]] || query+=(--gemini-profiles-module "$gemini_module")
+  [[ -z "${JEV_TIER_SHIFT:-}" ]] || query+=(--tier-shift "$JEV_TIER_SHIFT")
   is_nested_codex_runtime && query+=(--nested)
   if ! policy_row=$("${query[@]}"); then
     echo "ERROR: agent route policy 조회 실패: $agent (TFX_CODEX_PROFILE=$TFX_CODEX_PROFILE)" >&2
@@ -1109,6 +1110,7 @@ TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
 TFX_CODEX_PROFILE="${TFX_CODEX_PROFILE:-auto}"
 TFX_EXECUTION_MODE="${TFX_EXECUTION_MODE:-auto}"
 JEV_NEEDED_MCP_SERVERS=""
+JEV_TIER_SHIFT=""
 JEV_CLAUDE_MODEL=""
 JEV_CLAUDE_EFFORT=""
 
@@ -2415,9 +2417,9 @@ apply_jev_pre_route() {
   [[ -n "$jev_row" ]] || return 0
 
   local _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff
-  local _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf
+  local _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf _jev_tier_shift
   IFS=$'\x1e' read -r _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff \
-    _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf <<< "$jev_row"
+    _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf _jev_tier_shift <<< "$jev_row"
 
   local _jev_codex_reason=explicit_override_preserved _jev_agy_reason=explicit_override_preserved
   [[ "${TFX_CODEX_PROFILE:-auto}" != "auto" ]] || _jev_codex_reason=no_recommendation
@@ -2425,6 +2427,10 @@ apply_jev_pre_route() {
   if [[ "${TFX_CODEX_PROFILE:-auto}" == "auto" && -n "$_jev_codex_prof" ]]; then
     TFX_CODEX_PROFILE="$_jev_codex_prof"
     _jev_codex_reason=jev_applied
+  fi
+  if [[ "${TFX_CODEX_PROFILE:-auto}" == "auto" && -n "$_jev_tier_shift" ]]; then
+    JEV_TIER_SHIFT="$_jev_tier_shift"
+    _jev_codex_reason="jev_tier_${_jev_tier_shift}"
   fi
   if [[ -z "${TFX_GEMINI_PROFILE:-}" && -n "$_jev_agy_prof" ]]; then
     TFX_GEMINI_PROFILE="$_jev_agy_prof"
