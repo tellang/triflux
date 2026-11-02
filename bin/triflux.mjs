@@ -28,6 +28,7 @@ import {
 import {
   isJevEnabled,
   judgeRoutingBranch,
+  judgeWorkerMode,
   resolveJevApiKey,
   resolveJevCliBin,
   summarizeJevStats,
@@ -357,14 +358,15 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     ],
   },
   judge: {
-    usage: "tfx judge route --task SUMMARY",
+    usage: "tfx judge <route|worker-mode> --task SUMMARY",
     description:
-      "Jev 로 라우팅 결정트리의 분기 하나와 그 규칙을 JSON 으로 낸다. 비활성, 낮은 신뢰도, 호출 실패는 choice null",
+      "route는 라우팅 분기와 규칙을, worker-mode는 워커 권한 권고를 JSON으로 낸다. Jev를 쓰지 못하면 route는 choice null, worker-mode는 규칙 판정",
     options: [
       {
         name: "--task",
         type: "string",
-        description: "외부 Jev 로 보낼 짧은 요청 요약 (1,000자 제한)",
+        description:
+          "짧은 작업 요약, route는 끝 1,000자만 전송하고 worker-mode는 1,000자 초과 시 외부로 보내지 않음",
       },
     ],
   },
@@ -4366,12 +4368,20 @@ async function main() {
         return;
       }
       const task = readCliOptionValue(cmdArgs, "--task");
-      if (cmdArgs[0] !== "route" || !task)
-        throw createCliError("사용법: tfx judge route --task <요약>", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx judge --help",
-        });
+      if (!["route", "worker-mode"].includes(cmdArgs[0]) || !task)
+        throw createCliError(
+          "사용법: tfx judge <route|worker-mode> --task <요약>",
+          {
+            exitCode: EXIT_ARG_ERROR,
+            reason: "argError",
+            fix: "tfx judge --help",
+          },
+        );
+      if (cmdArgs[0] === "worker-mode") {
+        const verdict = await judgeWorkerMode({ task });
+        console.log(JSON.stringify({ enabled: isJevEnabled(), ...verdict }));
+        return;
+      }
       const routingPath = resolveRoutingSsot();
       const verdict = await judgeRoutingBranch({
         task,

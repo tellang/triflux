@@ -1,7 +1,7 @@
 // hub/lib/jev-addon.mjs
 // Opt-in Jev (System One) 판단 애드온.
 // 환경변수, 명시 CLI 또는 host 설정으로 활성화하며,
-// 설정이 없거나 호출이 실패하면 항상 null을 반환해 기존 결정론적 로직을 그대로 유지한다.
+// 설정이 없거나 호출이 실패하면 기존 결정론적 로직을 유지한다.
 
 import { execFile } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -1887,5 +1887,198 @@ export async function judgeRoutingBranch(
     branch: res.choice,
     rule: branches[res.choice],
     confidence: res.confidence,
+  };
+}
+
+const WORKER_MODE_PRIVATE_PATTERNS = [
+  /[^\s@]+@[^\s@]+/u,
+  /\b01[016789][ .)\p{Pd}]{0,2}\d{3,4}[ .)\p{Pd}]{0,2}\d{4}\b/u,
+  /\+\d{1,3}(?:[ .()\p{Pd}]*\d){7,14}\b/u,
+  /\b\d{6}(?:\s*[)\p{Pd}]\s*| )?[1-8]\d{6}\b/u,
+  /\b(?=(?:\d[ .-]?){15}\d\b)(?=\d*[ .-])(?:\d[ .-]?){15}\d\b/u,
+  /(?<![\w.-])\/(?:Users|home)\/[^/\s]+/u,
+  /(?:\/(?:(?:mnt|cygdrive)[\\/]+)?[a-z]|\b[a-z]:)[\\/]+Users[\\/]+[^\\/\s]+/iu,
+  /\b[a-z][a-z\d+.-]*:\/\/[^\s/@]+:[^\s/@]*@/i,
+  /(?=[A-Za-z0-9_-]*[A-Za-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{20,}/u,
+  /(?:비밀번호|패스워드|암호|토큰|시크릿|비번|키|(?<![A-Za-z])(?:password|passwd|token|secret|pw|pwd|key|api[\s_-]*(?:key|키))(?![A-Za-z]))\s*(?:값\s*)?(?:으로|로|[은는이가을를])?\s*(?:is\b\s*)?(?:[:=]\s*\S+|[^\s:=]*\d[^\s]*)/iu,
+];
+const WORKER_MODE_EXCLUDED_SENTENCE =
+  /금지|않|하지\s*마|말고|말\s*것|말아|마라|안\s*(?:함|합|한다|해|됨|됩|돼|된|되)|불가(?!피)|제외|없이|없음|없다|(?<!잘)못|(?:은|는)\s*(?:리드|사용자)가|리드에게|리드\s*몫|아니다|범위\s*밖|CI가|\b(?:not|never|without|avoid|don't|don’t|cannot)\b|n['’]t\b|(?<!-)\bno\b(?!-)/iu;
+const WORKER_MODE_WRITE_SIGNALS = [
+  ["git push", /\b(?:git\s+)?push(?:es|ed|ing)?\b/iu],
+  ["푸시", /푸시/u],
+  [
+    "PR 생성",
+    /\bPR\s*(?:을|를)?\s*(?:생성|만[들든드듭]|열기|올[린리려])|\b(?:open|create)\s+(?:a\s+)?(?:PR\b|pull\s+request\b)/iu,
+  ],
+  ["머지", /머지/u],
+  ["merge", /\bmerg(?:e[sd]?|ing)\b/iu],
+  ["릴리스", /릴리스/u],
+  ["release", /\breleas(?:e[sd]?|ing)\b/iu],
+  ["배포", /배포/u],
+  ["deploy", /\bdeploy(?:s|ed|ing)?\b/iu],
+  ["publish", /\bpublish(?:es|ed|ing)?\b/iu],
+  ["발행", /발행/u],
+  ["삭제", /삭제/u],
+  ["delete", /\bdelet(?:e[sd]?|ing)\b/iu],
+  ["DROP", /\bDROP\s+(?:TABLE|DATABASE)\b/u],
+  ["PATCH", /\bPATCH\b/u],
+  ["PUT", /\bPUT\b/u],
+  ["POST", /\bPOST\b/u],
+  ["DELETE", /\bDELETE\b/u],
+  ["메일 발송", /메일\s*(?:발송|보내)|\bsend\s+(?:mail|email)\b/iu],
+  ["전송", /전송/u],
+  ["kubectl apply", /\bkubectl\s+apply\b/iu],
+  ["terraform apply", /\bterraform\s+apply\b/iu],
+  ["npm publish", /\bnpm\s+(?:publish\b|게시)/iu],
+  ["gh pr", /\bgh\s+pr\b/iu],
+  ["gh release", /\bgh\s+release\b/iu],
+  ["원격 쓰기", /원격.*?(?:쓰기|수정|변경|갱신|올[린리려]|반영|생성)/u],
+  [
+    "외부 문서 쓰기",
+    /(?:\bNotion\b|노션|\bGoogle\s+Docs\b|구글\s*독스|\bConfluence\b|\bJira\b|\bSlack\b|슬랙).*?(?:쓰기|작성|수정|업데이트|생성|갱신|게시|공지|만들기|올[린리려])/iu,
+  ],
+];
+const WORKER_MODE_READ_SIGNALS = [
+  ["조사", /조사/u],
+  ["읽기", /읽(?:기|어|고)/u],
+  ["분석", /분석/u],
+  ["리뷰", /리뷰/u],
+  ["검토", /검토/u],
+  ["확인", /확인/u],
+  ["조회", /조회/u],
+  ["검색", /검색/u],
+  ["탐색", /탐색/u],
+  ["read-only", /\bread-only\b/iu],
+  ["inspect", /\binspect(?:s|ed|ing|ion)?\b/iu],
+  ["investigate", /\binvestigat(?:e[sd]?|ing|ion)\b/iu],
+  ["review", /\breview(?:s|ed|ing)?\b/iu],
+  ["analyze", /\banalyz(?:e[sd]?|ing)\b/iu],
+  ["search", /\bsearch(?:es|ed|ing)?\b/iu],
+  ["audit", /\baudit(?:s|ed|ing)?\b/iu],
+];
+
+const WORKER_MODE_ARTIFACT_SIGNALS = [
+  ..."코드 함수 테스트 스크립트 로직 파일 버그 핸들러 버튼 UI 구현 리팩터 초안 노트 로컬 워크트리 브랜치 스킬 알고리즘 충돌 문서 어댑터 클라이언트 파서"
+    .split(" ")
+    .map((signal) => [signal, new RegExp(`(?<![가-힣])${signal}`, "u")]),
+  ..."code function test script logic file bug handler implement refactor draft notes local worktree branch conflict README CHANGELOG"
+    .split(" ")
+    .map((signal) => [
+      signal,
+      new RegExp(`\\b${signal}(?:s|ed|ing)?\\b`, "iu"),
+    ]),
+  ["파일 확장자", /\.[a-z][a-z0-9]{0,9}\b/iu],
+];
+
+/**
+ * 15. 워커 권한 모드를 권고하고, Jev를 쓰지 못할 때도 규칙 판정을 반환한다.
+ */
+export async function judgeWorkerMode(input = {}, options = {}) {
+  const task =
+    typeof input?.task === "string" ? input.task.normalize("NFKC") : "";
+  const rule = classifyWorkerMode(task);
+  const fallback = {
+    ...rule,
+    source: "rule",
+    fallbackReason: "jev_disabled",
+    ruleMode: rule.mode,
+    confidence: null,
+  };
+  if (!isJevEnabled(options)) return fallback;
+
+  const summary = task.replace(/\s+/gu, " ").trim();
+  // 마스킹하면 판정 단어가 사라질 수 있으므로 개인정보가 있으면 통째로 보내지 않는다.
+  const excerpt =
+    summary.length > 1000 ||
+    WORKER_MODE_PRIVATE_PATTERNS.some((pattern) => pattern.test(summary))
+      ? null
+      : semanticExcerpt(summary, 1000);
+  const context = excerpt === null ? null : semanticContext({ task: excerpt });
+  if (context === null) return { ...fallback, fallbackReason: "unsafe_input" };
+
+  const res = await queryJev(
+    {
+      hook: "worker_mode",
+      kind: "choice",
+      options: ["bypass", "auto", "unclear"],
+      criteria: {
+        bypass:
+          "The worker changes resources outside its own worktree: git push, PR creation or merge, releases, deployment, remote API writes (PATCH, PUT, POST, DELETE), remote or shared resource deletion, Docs or Notion publishing, or sending mail.",
+        auto: "The worker only reads, researches, reviews, edits files inside its own worktree, or runs local tests.",
+        unclear:
+          "The summary does not establish whether the worker changes external resources.",
+      },
+      query:
+        "Recommend the worker permission mode from the task summary. Actions described as prohibited or forbidden are not actions the worker will perform. Choose unclear rather than forcing a decision when external changes are uncertain.",
+      context,
+    },
+    options,
+  );
+  if (!res) return { ...fallback, fallbackReason: "jev_failed" };
+  if (res.confidence < minConfidence(options))
+    return { ...fallback, fallbackReason: "low_confidence" };
+  if (!["bypass", "auto", "unclear"].includes(res.choice))
+    return { ...fallback, fallbackReason: "jev_failed" };
+  if (res.choice === "unclear")
+    return { ...fallback, fallbackReason: "jev_unclear" };
+  return {
+    mode: res.choice,
+    reason:
+      res.choice === "bypass"
+        ? "외부 자원을 변경하는 작업으로 판단해 bypass를 권고합니다."
+        : "읽기, 워크트리 파일 수정과 로컬 테스트 범위로 판단해 auto를 권고합니다.",
+    source: "jev",
+    fallbackReason: null,
+    ruleMode: rule.mode,
+    confidence: res.confidence,
+  };
+}
+
+export function classifyWorkerMode(task = "") {
+  const summary = (typeof task === "string" ? task : "")
+    .slice(0, 2000)
+    .replace(/[^\S\r\n]+/gu, " ")
+    .trim();
+  const sentences = summary.split(/[.;!?](?=\s|$)|[\r\n]+/u);
+  // 실제 할 일과 금지가 섞인 문장도 제외해 불필요한 bypass보다 auto를 우선한다.
+  const activeSentences = sentences.filter(
+    (sentence) => !WORKER_MODE_EXCLUDED_SENTENCE.test(sentence),
+  );
+  const writes = WORKER_MODE_WRITE_SIGNALS.filter(([, pattern]) =>
+    activeSentences.some((sentence) => pattern.test(sentence)),
+  ).map(([signal]) => signal);
+  const excludedWrites = WORKER_MODE_WRITE_SIGNALS.filter(([, pattern]) =>
+    sentences.some(
+      (sentence) =>
+        WORKER_MODE_EXCLUDED_SENTENCE.test(sentence) && pattern.test(sentence),
+    ),
+  ).map(([signal]) => signal);
+  const excludedReason = excludedWrites.length
+    ? `제외된 외부 변경 신호(${excludedWrites.join(", ")})가 ${writes.length ? "있습니다." : "있어 모호합니다."}`
+    : "";
+  const localSignals = [
+    ...WORKER_MODE_READ_SIGNALS,
+    ...WORKER_MODE_ARTIFACT_SIGNALS,
+  ]
+    .filter(([, pattern]) => pattern.test(summary))
+    .map(([signal]) => signal);
+  if (writes.length && localSignals.length)
+    return {
+      mode: "auto",
+      reason: `외부 변경 신호(${writes.join(", ")})와 읽기 또는 코드 산출물 신호(${localSignals.join(", ")})가 섞여 모호하므로 auto를 권고합니다.${excludedReason ? ` ${excludedReason}` : ""}`,
+    };
+  if (writes.length)
+    return {
+      mode: "bypass",
+      reason: `외부 변경 신호(${writes.join(", ")})가 있어 bypass를 권고합니다.${excludedReason ? ` ${excludedReason}` : ""}`,
+    };
+  return {
+    mode: "auto",
+    reason:
+      (excludedReason && `${excludedReason} auto를 권고합니다.`) ||
+      (localSignals.length
+        ? `읽기 또는 코드 산출물 신호(${localSignals.join(", ")})가 있어 auto를 권고합니다.`
+        : "외부 변경 신호가 없어 auto를 권고합니다."),
   };
 }

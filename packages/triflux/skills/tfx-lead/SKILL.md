@@ -28,7 +28,7 @@ description: >
 - 사용자가 자산 이름을 다시 말하지 않아도 요청에 맞는 경로를 기본 선택한다. 소유 스킬이나 경로를 묻거나 그 선택이 모호한 경우는 `tfx-harness`, 명확한 구현 실행은 `tfx-auto`와 그 실행 경로 `tfx-route.sh`, 세션 관리와 소통은 `tfx-live`와 `tfx-peer`다. 작업 목표 자체가 모호하면 기존 SSOT의 요구사항 분류를 따른다. 모든 요청 앞에 harness나 auto를 실행하지 않는다.
 - 원격은 `tfx-remote`, 코드 판정은 `tfx-review`, 외부 조사는 `tfx-research`, 진단은 `tfx-doctor`, triflux 릴리스는 `tfx-ship`의 소유 범위를 따른다. 명시 지시와 gstack, superpowers, 호스트 소유 정책을 유지하며 TFX 선택을 이유로 우회하지 않는다. 가용성을 모르면 임의 폴백하지 않는다.
 - 첫 활성화에는 이 짧은 안내를 읽고, 선택한 자산의 상세 스킬은 사용할 때 읽는다. 정본 전체를 매 초기화나 매 요청에 읽지 않는다. 이미 읽은 긴 스킬과 전체 capability 목록을 매 턴이나 포크마다 다시 싣지 않는다. 포크에는 선택한 경로와 필요한 맥락만 넘긴다.
-- Jev는 enabled 상태이고 실제 연동 판단 지점(사전 라우팅, 스킬 분기 선택, 워커 상태, 수신함 우선순위 등)이 실행될 때만 호출되며, 실패하거나 신뢰도가 낮으면 기존 결정론적 로직으로 돌아간다. HUD의 `j`는 활성 배지이며 호출 성공을 뜻하지 않는다. 리드 지정으로 새로 호출되거나 일반 대화 전체를 자동 판단하지 않는다. 인증 값은 읽거나 출력하지 않는다.
+- Jev는 enabled 상태이고 실제 연동 판단 지점(사전 라우팅, 스킬 분기 선택, 워커 권한, 워커 상태, 수신함 우선순위 등)이 실행될 때만 호출되며, 실패하거나 신뢰도가 낮으면 기존 결정론적 로직으로 돌아간다. HUD의 `j`는 활성 배지이며 호출 성공을 뜻하지 않는다. 리드 지정으로 새로 호출되거나 일반 대화 전체를 자동 판단하지 않는다. 인증 값은 읽거나 출력하지 않는다.
 
 이 절은 리드의 선택 계약이다. 진입 프롬프트와 공통 스킬로 안내하며 실제 LLM의 선택을 강제하는 훅이나 실행 보장은 아니다.
 
@@ -68,17 +68,17 @@ Codex 리드는 mod 가 없으므로 `/rename <월>.<일> <역할>`을 직접 �
 | Codex | `tfx-live rename --cli codex --transport uds --thread <ID> --name "<이름>"`, thread 가 없으면 tmux 로 `/rename <이름>` |
 | agy | tmux 로 `/rename <이름>`. 새 대화는 첫 메시지 전에 실패하므로 `tfx-live` 의 `namePending` 처리를 따른다 |
 
-- 등록 기록: 리드가 `.omc/lead/workers.md` 에 마크다운 표로 적는다. 열은 이름, CLI, 위치(m5, m2, ryzen 과 tmux 대상), 역할, 지시서, 재개 ID 여섯이고 워커마다 한 줄이다. compact 때 triflux mod 가 이 파일의 표 줄을 요약 지시에 그대로 넣으므로 경로를 바꾸지 않는다. 저장소가 무시하는 `.omc/` 아래라 커밋되지 않는다.
+- 등록 기록: 리드가 `.omc/lead/workers.md` 에 마크다운 표로 적는다. 열은 이름, CLI, 위치(m5, m2, ryzen 과 tmux 대상), 역할, 권한, 지시서, 재개 ID 일곱이고 워커마다 한 줄이다. 권한에는 `bypass (jev)`, `auto (rule: low_confidence)`처럼 권고 출처도 적는다. 권고와 다르게 정했으면 실제 값과 이유를 짧게 적는다. compact 때 triflux mod 가 이 파일의 표 줄을 요약 지시에 그대로 넣으므로 경로를 바꾸지 않는다. 저장소가 무시하는 `.omc/` 아래라 커밋되지 않는다.
 - 재개 ID: Claude 는 `tfx-live list-sessions --cli claude`의 `sessionId`, Codex 는 `start` 결과의 `threadId`, agy 는 `list-sessions --cli agy`의 `conversationId`다. agy 새 대화는 첫 메시지 전에 `null`일 수 있으니 첫 지시 뒤에 다시 읽어 채운다.
 - 닫은 워커는 줄을 지우지 않고 같은 열의 `.omc/lead/workers-closed.md` 로 옮긴다. 다시 필요해지면 재개한다(3절 "전담 워커 재사용"). 다시 쓸 일이 없다고 정한 줄만 지운다. 같은 파일에 두지 않는 이유는 compact 때 mod 가 `workers.md` 의 표 줄을 제목 없이 모두 넣어 닫은 워커가 살아 있는 워커와 섞이기 때문이다.
 
   ```markdown
-  | 이름 | CLI | 위치 | 역할 | 지시서 | 재개 ID |
-  |---|---|---|---|---|---|
-  | reviewer-828 | Claude sonnet | m5 로컬 `rv-828` | PR #828 리뷰 | .omc/briefs/x/review.md | 25b8dccf-56ed-4722-a70c-6317aedb1c4f |
+  | 이름 | CLI | 위치 | 역할 | 권한 | 지시서 | 재개 ID |
+  |---|---|---|---|---|---|---|
+  | reviewer-828 | Claude sonnet | m5 로컬 `rv-828` | PR #828 리뷰 | auto (rule: low_confidence) | .omc/briefs/x/review.md | 25b8dccf-56ed-4722-a70c-6317aedb1c4f |
   ```
 - 같은 이름의 세션이 로컬과 Remote Control 에 하나씩 있으면 `SendMessage`가 ref 를 요구한다. `ListAgents`에서 "on this machine" 쪽 ref 를 붙인다.
-- 워커를 다시 띄울 때는 새로 띄우지 않고 원래 tmux 세션 이름으로 `tfx-live start --cli <CLI> --session <원래 이름> --resume <재개 ID> --name "<이름>"`을 쓴다. 세션 이름과 tmr 재접속 루프가 그대로 맞고, 워커가 파일을 다시 탐색하거나 지시서를 다시 읽지 않아도 된다. 재개한 세션은 이전 사용량을 이어받으므로 재개 직후 컨텍스트를 잰다(11절).
+- 워커를 다시 띄울 때는 새로 띄우지 않고 원래 tmux 세션 이름으로 `tfx-live start --cli <CLI> --session <원래 이름> --resume <재개 ID> --name "<이름>"`을 쓴다. 세션 이름과 tmr 재접속 루프가 그대로 맞고, 워커가 파일을 다시 탐색하거나 지시서를 다시 읽지 않아도 된다. `--resume`으로 다시 띄울 때 launcher가 없으면 권한이 풀리므로 `workers.md`의 권한 열을 읽고 해당 CLI의 권한 값을 다시 적용한다. 재개한 세션은 이전 사용량을 이어받으므로 재개 직후 컨텍스트를 잰다(11절).
 - `tfx-live list-sessions`의 `status: shell`은 CLI 가 죽었다는 뜻이 아닐 수 있다. 그 세션이 띄운 백그라운드 셸일 수 있으니 재실행 전에 pane 내용을 확인한다.
 
 ## 전송 수단
@@ -105,6 +105,20 @@ Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 �
   - ACK 를 받은 뒤에만 원 세션을 닫고 등록 기록을 고친다. ACK 가 없으면 원 세션을 유지한 채 인계 파일 경로를 다시 보낸다.
 - 서브에이전트는 결과를 받은 즉시 닫는다. Codex 리드가 `spawn_agent`를 29회 부르고 한 번도 닫지 않은 사고가 있었다. Claude 리드의 Agent 도구 팀원은 3절 "끝난 팀원 닫기" 절차로 닫는다.
 - 닫은 뒤에는 남은 세션이 없는지 `tmr ls --json`(없으면 `tmux ls`)으로 확인한다. tmr 은 macOS(arm64) 에서 `tfx setup` 이 설치를 묻는다.
+
+### 워커 권한 모드
+
+워커를 띄우기 전에 `tfx judge worker-mode --task '<요약>'`을 실행한다. 외부 자원을 바꾸는 워커는 bypass, 읽기 전용 조사 워커는 auto로 띄운다. 자기 워크트리 안 파일 수정과 로컬 테스트만 하는 워커도 auto가 기본이다.
+
+- 요약에는 할 일의 종류만 쓴다. 비밀 값, 고객 이름, 이메일, 사용자 경로를 넣지 않는 것이 1차 방어다. 패턴 차단은 보조 수단이며 모든 표기를 잡지 못한다. 패턴에 맞으면 Jev로 보내지 않고 규칙으로 판정한다. 고객 이름은 패턴으로 식별하지 못하므로 요약에서 뺀다.
+- 판정은 권고이고 실행을 바꾸지 않는다. 최종 결정은 리드와 사용자다. `source: rule`이면 단어 목록 기반 폴백이라 신호를 놓칠 수 있으므로 `fallbackReason`과 근거를 읽고 리드가 정한다. `mode`와 `ruleMode`가 다르면 작업 내용을 직접 보고 정한다.
+- 근거에 모호하다고 나오면 부정이나 위임으로 외부 변경 신호를 제외한 경우도 포함한다. 작업을 나눠 외부 변경 부분만 bypass로 띄우는 쪽을 먼저 본다.
+
+| 워커 CLI | 적용 방법 |
+| --- | --- |
+| Claude | bypass는 `tfx-live start --cli claude --launcher "DISABLE_OMC=1 OMC_SKIP_HOOKS=all TFX_SKIP_HOOKS=1 claude --dangerously-skip-permissions"`로 띄운다. `--launcher` 처리에서 워커용 환경 변수 접두를 제거하므로 launcher에 직접 넣는다 |
+| Codex | 공유 daemon 경로는 시작 명령의 bypass 플래그를 제거한다. 시작 뒤 `experimentalApi`를 활성화한 app-server RPC `thread/settings/update`에 `permissions: ":danger-full-access"`, `approvalPolicy: "never"`를 적용하고 `thread/resume` 응답으로 확인한다. 이를 실행하는 tfx 명령은 없어 RPC를 직접 보낸다. `":danger-full-access"`는 2026-11-02 mnk 세션 실측 값이다. `tfx-live start --remote` 경로는 공유 daemon을 거치지 않아 bypass 플래그가 남으므로 auto 권고를 받아도 bypass로 뜬다 |
+| agy | bypass는 `tfx-live start --cli agy --launcher "agy --dangerously-skip-permissions"`로 지정한다. 플래그는 `agy --help`에 있고 `tfx-live` 기본 시작은 쓰지 않는다. 대화형 실측은 아직 안 됐다. 관리자 샌드박스 강제는 이 플래그와 별개이고 `BypassSandbox: true`를 쓴다 |
 
 ## 2. 역할별 모델
 
@@ -367,6 +381,7 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 
 - [ ] 이름이 `<월>.<일> <주제>` 형식이고 등록 기록에 적었다
 - [ ] 역할에 맞는 모델과 effort 를 골랐다
+- [ ] `tfx judge worker-mode --task '<요약>'`의 권고를 보고 권한을 정했고 등록 기록에 실제 값과 출처를 적었다
 - [ ] 같은 역할, 주제의 살아 있는 전담 워커가 등록 기록에 있는지 먼저 찾았고, 있으면 컨텍스트를 재고 그 세션에 보냈다
 - [ ] 재사용하거나 다시 올 일이면 서브에이전트 대신 전담 세션으로 띄워 등록 기록에 역할과 주제를 적었다
 - [ ] Agent 도구 팀원을 띄우기 전에 리드 pane 폭을 쟀고, 200 cols 미만이면 `name` 없는 백그라운드 서브에이전트로 띄웠다

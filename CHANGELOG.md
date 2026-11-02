@@ -2,6 +2,12 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.93.0] - 2026-11-02
+
+### Added
+- jev: `tfx judge worker-mode --task`가 워커를 auto로 열지 bypass로 열지 판정해 JSON으로 낸다. Jev를 쓸 수 없거나 신뢰도가 낮으면 규칙 판정으로 폴백한다.
+- tfx-lead: 워커 권한 모드 판정 절과 적용 표를 더하고, `workers.md`에 권한 열을 추가한다.
+
 ## [10.92.0] - 2026-11-01
 
 ### Added
