@@ -190,6 +190,7 @@ test("stop closes a recorded iTerm pane anywhere and searches by name only insid
         env,
         runTmux: async (_remote, args) => {
           calls.push(args[0]);
+          if (args.at(-1) === "@tfx_ghostty_terminal") return { stdout: "" };
           if (args[0] !== "list-clients") return { stdout: id };
           assert.deepEqual(args.slice(1, 3), ["-t", "=session-a:"]);
           return { stdout: ttys.map((tty) => `${tty}\n`).join("") };
@@ -202,6 +203,7 @@ test("stop closes a recorded iTerm pane anywhere and searches by name only insid
     );
     // 죽인 세션의 클라이언트는 kill 뒤에 조회되지 않으므로 순서가 동작의 일부다.
     assert.deepEqual(calls, [
+      "show-options",
       "show-options",
       "list-clients",
       "kill-session",

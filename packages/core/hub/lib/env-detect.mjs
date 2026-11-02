@@ -87,7 +87,9 @@ export function detectTerminal() {
     return _terminalCache;
   }
 
-  if (process.env.TERM_PROGRAM === "WarpTerminal") {
+  if (process.env.TERM_PROGRAM === "ghostty") {
+    _terminalCache = { name: "ghostty", hasWt: false };
+  } else if (process.env.TERM_PROGRAM === "WarpTerminal") {
     _terminalCache = { name: "warp", hasWt: false };
   } else if (process.env.TERM_PROGRAM === "Alacritty") {
     _terminalCache = { name: "alacritty", hasWt: false };
@@ -97,6 +99,8 @@ export function detectTerminal() {
     _terminalCache = { name: "iterm2", hasWt: false };
   } else if (process.env.TERM_PROGRAM === "Apple_Terminal") {
     _terminalCache = { name: "terminal-app", hasWt: false };
+  } else if (process.env.GHOSTTY_RESOURCES_DIR) {
+    _terminalCache = { name: "ghostty", hasWt: false };
   } else {
     _terminalCache = { name: "unknown", hasWt: false };
   }
