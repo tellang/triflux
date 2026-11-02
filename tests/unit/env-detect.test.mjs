@@ -74,6 +74,39 @@ afterEach(() => {
 });
 
 describe("hub/lib/env-detect.mjs", () => {
+  it("Ghostty를 TERM_PROGRAM 또는 리소스 경로로 감지한다", async () => {
+    setPlatform("darwin");
+    setEnv("KITTY_WINDOW_ID", null);
+    for (const [termProgram, resources] of [
+      ["ghostty", null],
+      ["tmux", "/Applications/Ghostty.app/Contents/Resources/ghostty"],
+    ]) {
+      setEnv("TERM_PROGRAM", termProgram);
+      setEnv("GHOSTTY_RESOURCES_DIR", resources);
+      const mod = await importFresh();
+      assert.deepEqual(mod.detectTerminal(), { name: "ghostty", hasWt: false });
+    }
+  });
+
+  it("명시한 TERM_PROGRAM을 남아 있는 Ghostty 리소스 경로보다 우선한다", async () => {
+    setPlatform("darwin");
+    setEnv("KITTY_WINDOW_ID", null);
+    setEnv(
+      "GHOSTTY_RESOURCES_DIR",
+      "/Applications/Ghostty.app/Contents/Resources/ghostty",
+    );
+    for (const [termProgram, name] of [
+      ["iTerm.app", "iterm2"],
+      ["Apple_Terminal", "terminal-app"],
+      ["WarpTerminal", "warp"],
+      ["Alacritty", "alacritty"],
+    ]) {
+      setEnv("TERM_PROGRAM", termProgram);
+      const mod = await importFresh();
+      assert.deepEqual(mod.detectTerminal(), { name, hasWt: false });
+    }
+  });
+
   it("Windows에서 pwsh를 우선 감지하고 lazy singleton 캐시를 재사용한다", async () => {
     setPlatform("win32");
 
@@ -174,6 +207,7 @@ describe("hub/lib/env-detect.mjs", () => {
     setPlatform("darwin");
     setEnv("SHELL", "/bin/zsh");
     setEnv("TERM_PROGRAM", "iTerm.app");
+    setEnv("GHOSTTY_RESOURCES_DIR", null);
 
     mockExecFileSync((file, args) => {
       const argv = [file, ...args].join(" ");

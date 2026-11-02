@@ -33,6 +33,16 @@ tfx-live stop --cli codex --session cx1
 
 macOS의 iTerm2에서 로컬 tmux `start`는 프로젝트별 창에 attach 탭이나 패인을 연다. `LC_TERMINAL=iTerm2` 또는 `TERM_PROGRAM=iTerm.app`일 때만 적용하며 원격·daemon 경로와 리드 창을 찾지 못한 경우는 제외한다. 프로젝트 키는 git 공통 디렉터리의 실제 경로이므로 같은 저장소의 워크트리는 함께 묶이고, git 밖에서는 cwd의 실제 경로를 쓴다. 기존 프로젝트 창을 우선 쓰고, 없으면 다른 프로젝트 세션이 없는 리드 창을 쓰거나 새 창을 만든다. 기본 그룹은 프로젝트 키이며 `--group NAME`으로 바꾼다. 한 탭은 최대 4분할이며 2개는 세로, 3·4개는 2x2 배치로 나누고 그다음은 같은 창의 새 탭을 쓴다. `peer`는 실행마다 참여자들을 한 그룹에 모으며 `--group`을 주면 그 값을 쓴다. 로컬 tmux 제목은 `--name`, 자동 이름, 세션 이름 순으로 고정하고 기존 Python 제목 스크립트도 유지한다. 그 스크립트는 패인 프로필의 custom command 도 끈다. iTerm2 는 `command` 로 만든 패인의 명령을 프로필에 남겨 사람이 Cmd+D 로 나눈 패인이 같은 tmux 세션에 다시 붙었기 때문이다. `stop`은 저장된 iTerm ID가 없거나 유효하지 않으면 `user.tfx_session`으로 찾아 닫으며, 남은 패인이 tmux에 연결되지 않은 셸 프롬프트임을 확인할 때만 탭을 닫는다. 세션을 죽이기 전에 그 세션의 클라이언트 tty를 받아 두고, 그 tty의 iTerm 패인은 표시가 없어도 모두 닫는다. 사람이 셸에서 `tmr`이나 `tmux attach`로 붙어 보던 패인도 닫힌다. 연동 실패는 시작·종료를 막지 않고 `itermWarning`에 남긴다.
 
+### Ghostty 연동
+
+- macOS 로컬 tmux `start`에서 `TERM_PROGRAM=ghostty`이거나 현재 tmux 세션의 최근 활동 client가 `xterm-ghostty` 또는 `ghostty` termtype이면 적용한다. tmux client 감지는 남아 있는 `LC_TERMINAL=iTerm2`보다 우선한다. tmux 밖에서는 현재 프로세스부터 부모를 최대 8단계 조회하여 tty를 찾는다. 리드 tty나 그 창을 찾지 못하면 창을 열지 않고 `ghosttyWarning`을 남긴다.
+- 프로젝트별 창과 그룹별 최대 4분할 배치를 사용한다. terminal 제목은 `--name`, 자동 이름, 세션 이름 순으로, tab 제목은 `--group` 또는 프로젝트 이름으로 고정한다.
+- terminal ID와 배치 상태는 tmux 세션 옵션 `@tfx_ghostty_terminal`, `@tfx_project`, `@tfx_group`, `@tfx_column`에 저장한다. `stop`은 저장한 ID의 terminal만 닫는다. client tty로는 닫지 않으므로 워커를 보던 리드 terminal과 tty가 재사용된 패인을 유지한다.
+- `command`로 연 패인은 명령 종료 후에도 남으므로 `initial input`에 `exec tmux attach-session`과 줄바꿈을 넣어 세션 종료 시 패인이 닫히게 한다. 사용자 셸의 자동 tmux 설정이나 Ghostty `command` 설정이 있으면 attach 입력이 그 프로그램으로 들어갈 수 있다.
+- macOS AppleScript Automation 권한이 필요하다. Ghostty AppleScript API는 프리뷰이므로 버전 변경 시 호환성이 달라질 수 있다. 연동 실패는 시작과 종료를 막지 않고 `ghosttyWarning`에 남긴다. 성공한 `start`는 `ghostty: { terminalId, group, split }`을 반환한다.
+
+### 세션 이름과 준비 상태
+
 새 세션 이름은 `<월>.<일> <주제>`로 짓는다. `start --name`을 생략하면 자동으로 만들고 `nameGenerated: true`를 보고한다. `--resume` 또는 `--resume-last`는 `--name`을 명시한 경우에만 이름을 적용한다. 승계 세션에는 기존 이름 뒤에 ` 2`, 이후 ` 3`을 붙인다. 이름 적용을 요청한 경우 결과의 `nameApplied: false`는 미적용을 뜻한다. agy의 `namePending: true`는 첫 일반 ask에서 적용할 이름이 보류됐다는 뜻이다. Codex `start`는 `/rename` 제출을 입력창이 빌 때까지 확인하고, 이름으로 찾은 thread UUID를 `threadId`로 돌려주며 tmux 세션 옵션 `@tfx_codex_thread`에 남긴다. 로컬 Codex `--resume-last`는 Codex가 고른 thread를 사후에 찾는다. 띄운 뒤 공유 app-server daemon에 로드된 같은 cwd의 thread 중 rollout에 그 시각 이후의 resume 기록(`thread_settings_applied`)이 생긴 것이 정확히 하나이고 1.5초 뒤에도 같을 때만 `threadId`로 쓴다. 이 확인은 5초 안에 끝난다. TUI가 daemon을 쓰지 않거나 같은 cwd에서 동시에 resume이 일어나면 `null`이다. 기존 Codex UDS thread는 `tfx-live rename --cli codex --transport uds --thread ID --name "<이름>"`으로 이름을 바꾼다.
 
 Claude 프로젝트 MCP 승인 화면이 뜨면 `start`는 화면에 답하지 않고 `ready: false`, `blockedBy: "claude-mcp-approval"`, 할 일을 적은 `warning`을 반환한다. 세션은 남아 있으므로 tmux 세션에 붙어 직접 고른 뒤 지시를 보낸다.

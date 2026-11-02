@@ -55,6 +55,11 @@ import {
   resolveSenderName,
   waitCodexRequest,
 } from "../hub/team/codex-queue.mjs";
+import {
+  appleScriptString,
+  closeGhosttySession,
+  openGhosttySession,
+} from "../hub/team/ghostty-terminal.mjs";
 import { resolveCodexSocket } from "../hub/team/native-peer.mjs";
 import {
   escapePwshSingleQuoted as escapeRemotePwshSingleQuoted,
@@ -2957,12 +2962,6 @@ async def main(connection):
 iterm2.run_until_complete(main)
 `;
 
-function appleScriptString(value) {
-  if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value))
-    throw new Error("iTerm values must not contain control characters");
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-}
-
 function shouldUseIterm(
   remote,
   platform = process.platform,
@@ -2973,6 +2972,37 @@ function shouldUseIterm(
     platform === "darwin" &&
     (env.LC_TERMINAL === "iTerm2" || env.TERM_PROGRAM === "iTerm.app")
   );
+}
+
+async function detectLocalTerminal({
+  remote,
+  platform = process.platform,
+  env = process.env,
+  runTmux: tmux = runTmux,
+} = {}) {
+  if (remote || platform !== "darwin") return null;
+  if (env.TERM_PROGRAM === "ghostty") return "ghostty";
+  if (env.TMUX_PANE) {
+    const { stdout } = await tmux(null, [
+      "list-clients",
+      "-t",
+      env.TMUX_PANE,
+      "-F",
+      "#{client_activity}\t#{client_termname}\t#{client_termtype}",
+    ]).catch(() => ({ stdout: "" }));
+    const client = stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.split("\t"))
+      .sort((a, b) => Number(b[0]) - Number(a[0]))[0];
+    if (
+      client?.[1] === "xterm-ghostty" ||
+      /^ghostty(?:\s|$)/.test(client?.[2] ?? "")
+    )
+      return "ghostty";
+  }
+  return shouldUseIterm(remote, platform, env) ? "iterm" : null;
 }
 
 async function itermProject(cwd = process.cwd(), deps = {}) {
@@ -3713,7 +3743,28 @@ async function doStartTmux(launchAdapter, opts) {
     ]).catch(() => {});
   let iterm;
   let itermWarning;
-  if (ready && shouldUseIterm(remote)) {
+  let ghostty;
+  let ghosttyWarning;
+  const terminal = ready ? await detectLocalTerminal({ remote }) : null;
+  if (terminal === "ghostty") {
+    try {
+      const project = await itermProject(cwd ?? process.cwd());
+      ({ ghostty, ghosttyWarning } = await openGhosttySession(
+        session,
+        opts.group || project.key,
+        project,
+        {
+          runTmux,
+          name,
+          tabTitle: opts.group || project.name,
+          cwd: cwd ?? process.cwd(),
+        },
+      ));
+    } catch (error) {
+      ghosttyWarning = error.message;
+    }
+  }
+  if (terminal === "iterm") {
     try {
       const project = await itermProject(cwd ?? process.cwd());
       iterm = await openItermSession(
@@ -3804,6 +3855,8 @@ end tell`;
     unsetEnvVerified,
     ...(iterm ? { iterm } : {}),
     ...(itermWarning ? { itermWarning } : {}),
+    ...(ghostty ? { ghostty } : {}),
+    ...(ghosttyWarning ? { ghosttyWarning } : {}),
     ...(unsetEnvWarning ? { unsetEnvWarning } : {}),
     ...(name && adapter.cli === "codex" && !nameApplied
       ? {
@@ -5007,6 +5060,8 @@ async function doStop(adapter, opts, deps = {}) {
     );
   let itermSessionId;
   let itermWarning;
+  let ghosttyTerminalId;
+  let ghosttyWarning;
   let killedTtys = [];
   if (useIterm) {
     try {
@@ -5020,6 +5075,18 @@ async function doStop(adapter, opts, deps = {}) {
       itermSessionId = stdout.trim();
     } catch (error) {
       itermWarning = error.message;
+    }
+    try {
+      const { stdout } = await tmux(null, [
+        "show-options",
+        "-qv",
+        "-t",
+        exactTmuxTarget(session),
+        "@tfx_ghostty_terminal",
+      ]);
+      ghosttyTerminalId = stdout.trim();
+    } catch (error) {
+      ghosttyWarning = error.message;
     }
     // kill 뒤에는 이 세션의 클라이언트가 목록에서 사라지므로 먼저 받아 둔다.
     const clients = await tmux(null, [
@@ -5050,12 +5117,23 @@ async function doStop(adapter, opts, deps = {}) {
       itermWarning = error.message;
     }
   }
+  if (useIterm && ghosttyTerminalId) {
+    try {
+      await (deps.closeGhosttySession ?? closeGhosttySession)(
+        ghosttyTerminalId,
+        deps,
+      );
+    } catch (error) {
+      ghosttyWarning = error.message;
+    }
+  }
   return {
     cli: adapter.cli,
     session,
     remote: remote ?? null,
     stopped: true,
     ...(itermWarning ? { itermWarning } : {}),
+    ...(ghosttyWarning ? { ghosttyWarning } : {}),
   };
 }
 
@@ -7935,6 +8013,7 @@ export {
   composerShowsPrompt,
   createPeerSignalController,
   derivePeerStatus,
+  detectLocalTerminal,
   discoverAgyTmuxSessions,
   discoverClaudeTmuxSessions,
   discoverCodexTmuxSessions,
