@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import { waitForTmuxIdle } from "../../bin/tfx-live.mjs";
 import { readTailSafe, main as runBridgeMain } from "../../hub/bridge.mjs";
 import {
+  classifyWorkerMode,
   executionFlagsForCli,
   isJevEnabled,
   judgeBusyAction,
@@ -19,6 +20,7 @@ import {
   judgeTargetSession,
   judgeTaskRouting,
   judgeWorkerHealth,
+  judgeWorkerMode,
   parseRoutingBranches,
   queryJev,
   queryJevBatch,
@@ -1057,6 +1059,502 @@ describe("judgeRoutingBranch", () => {
         ),
         null,
       );
+    }
+  });
+});
+
+describe("judgeWorkerMode", () => {
+  const options = { env: { TFX_JEV: "", TFX_JEV_STATS: "0" } };
+
+  for (const [task, choice, ruleMode] of [
+    ["git push 실행", "bypass", "bypass"],
+    ["로컬 파일 수정과 테스트", "auto", "auto"],
+    ["코드 리뷰", "bypass", "auto"],
+    ["릴리스 실행", "auto", "bypass"],
+  ]) {
+    it(`Jev ${choice}를 채택하고 규칙 ${ruleMode}와 출처를 보존한다: ${task}`, async () => {
+      const verdict = await judgeWorkerMode(
+        { task },
+        { ...options, client: () => ({ choice, confidence: 0.91 }) },
+      );
+      assert.equal(verdict.mode, choice);
+      assert.equal(verdict.source, "jev");
+      assert.equal(verdict.ruleMode, ruleMode);
+      assert.equal(verdict.confidence, 0.91);
+      assert.equal(verdict.fallbackReason, null);
+      assert.ok(verdict.reason);
+      assert.ok(!verdict.reason.includes(task));
+    });
+  }
+
+  for (const [fallbackReason, overrides] of [
+    ["jev_disabled", { env: { TFX_JEV: "0" } }],
+    ["low_confidence", { client: () => ({ choice: "auto", confidence: 0.6 }) }],
+    [
+      "low_confidence",
+      {
+        minConfidence: 0.95,
+        client: () => ({ choice: "auto", confidence: 0.9 }),
+      },
+    ],
+    [
+      "jev_failed",
+      {
+        client: () => {
+          throw new Error("주입 client 실패");
+        },
+      },
+    ],
+    ["jev_failed", { client: () => null }],
+    ["jev_failed", { client: () => ({ choice: "other", confidence: 0.99 }) }],
+    [
+      "jev_unclear",
+      { client: () => ({ choice: "unclear", confidence: 0.99 }) },
+    ],
+  ]) {
+    it(`${fallbackReason}이면 규칙 판정을 반환한다`, async () => {
+      const verdict = await judgeWorkerMode(
+        { task: "배포 실행" },
+        { ...options, ...overrides },
+      );
+      assert.equal(verdict.mode, "bypass");
+      assert.equal(verdict.ruleMode, "bypass");
+      assert.equal(verdict.source, "rule");
+      assert.equal(verdict.fallbackReason, fallbackReason);
+      assert.equal(verdict.confidence, null);
+    });
+  }
+
+  it("비활성 상태에서는 client를 호출하지 않고 빈 입력에도 판정한다", async () => {
+    const verdict = await judgeWorkerMode(undefined, {
+      env: { TFX_JEV: "0" },
+      client: () => assert.fail("비활성 client 호출"),
+    });
+    assert.equal(verdict.mode, "auto");
+    assert.equal(verdict.fallbackReason, "jev_disabled");
+  });
+
+  for (const [mode, tasks] of [
+    [
+      "auto",
+      [
+        "commit, push, PR, 릴리스, 설치본 교체는 하지 않는다",
+        "git push origin main 금지",
+        "gh pr merge 하지 않는다",
+        "push/머지 금지",
+        "릴리스는 절대 하지 않는다",
+        "머지 는 금지",
+        "배포 안 함",
+        "푸시, 머지, 릴리스는 리드가 한다",
+        "Do not run git push",
+        "should not deploy",
+        "avoid deploying",
+        "without any push",
+        "don’t push",
+        "remote-spawn.mjs 의 원격 psmux 감싸기 로직 수정과 테스트",
+        "노션 기획서를 보고 함수 작성",
+        "Jira 티켓 보고 버그 수정",
+        "원격 접속해서 로컬 파일 수정",
+        "delete unused code",
+        "로컬 브랜치 삭제",
+        "배포하고 push는 금지",
+        "release는 리드 몫",
+        "publish docs 말고 조사",
+        "메일 보내지 마라",
+        "push 말아 주세요",
+        "삭제 말 것",
+        "배포 안 한다",
+        "배포 안 해",
+        "배포 안 됨",
+        "배포 안 됩니다",
+        "배포 안 돼",
+        "배포 불가",
+        "릴리스 제외",
+        "삭제 없이",
+        "메일 전송 못 한다",
+        "no deployment",
+        "never publish",
+        "don't send email",
+        "push 금지, 배포한다",
+        "push 금지!배포한다",
+        "push 금지?배포한다",
+        "push 금지;배포한다",
+        "push 금지.배포한다",
+        "git push 하지 않는다. 로컬 파일 수정",
+        "리뷰",
+        "조회",
+        "read-only",
+        "inspect",
+        "investigate",
+        "audit",
+        "미사용 import drop 하고 로컬 patch 작성",
+        "post-processing 함수 구현",
+        "put the helper into utils",
+        "동작 개선",
+        "머지 충돌 해결",
+        "README 배포 절 수정",
+        "Slack 어댑터 수정",
+      ],
+    ],
+    [
+      "bypass",
+      [
+        "push 금지. 스테이징에 배포한다",
+        "push 금지; 스테이징에 배포한다",
+        "push 금지! 스테이징에 배포한다",
+        "push 금지? 스테이징에 배포한다",
+        "push 금지\n스테이징에 배포한다",
+        "스테이징에 배포한다",
+        "프로덕션 DB 레코드를 삭제한다",
+        "버킷 삭제",
+        "PR 을 만든다",
+        "open a PR",
+        "Notion 페이지 업데이트",
+        "슬랙에 결과 게시",
+        "git push origin main",
+        "PR 열기",
+        "create a pull request",
+        "PR 를 생성한다",
+        "메일 보내기",
+        "send mail",
+        "send email",
+        "PATCH API",
+        "PUT API",
+        "POST API",
+        "DELETE API",
+        "DROP TABLE records",
+        "DROP DATABASE staging",
+        "terraform apply",
+        "kubectl apply",
+        "npm publish",
+        "gh release create",
+        "git commit 하고 원격 저장소에 올린다",
+        "원격 설정 갱신",
+        "원격 설정 반영",
+        "원격 리소스 생성",
+        "Jira 티켓 작성",
+        "Slack 메시지 업데이트",
+        "Notion 페이지를 열고, 결과 업데이트",
+        "CES 에이전트 instruction 을 원격에 PATCH",
+        "git push --no-verify origin main",
+        "git push -no-color origin main",
+        "잘못된 레코드를 프로덕션 DB 에서 삭제한다",
+        "불가피하게 프로덕션 배포",
+        "사용자가 승인한 PR 머지",
+        "배포는 사용자 몫이라 사용자가 한다",
+        "PR 올리기",
+        "Slack 에 공지",
+        "노션에 페이지 만들기",
+        "npm 게시",
+      ],
+    ],
+  ]) {
+    for (const task of tasks) {
+      it(`규칙 판정은 ${mode}다: ${task}`, () => {
+        assert.equal(classifyWorkerMode(task).mode, mode);
+      });
+    }
+  }
+
+  for (const [task, write, artifact] of [
+    ["Google Docs 문서 수정", "외부 문서 쓰기", "문서"],
+    ["구글 독스 문서 생성", "외부 문서 쓰기", "문서"],
+    ["Confluence 문서 갱신", "외부 문서 쓰기", "문서"],
+    ["merge conflict 해결", "merge", "conflict"],
+    ["CHANGELOG 릴리스 항목 작성", "릴리스", "CHANGELOG"],
+    ["POST 클라이언트 수정", "POST", "클라이언트"],
+    ["DELETE 파서 수정", "DELETE", "파서"],
+    ["배포 스크립트 버그 수정", "배포", "스크립트"],
+    ["릴리스 노트 초안 작성", "릴리스", "초안"],
+    ["merge sort 구현", "merge", "구현"],
+    ["POST 핸들러 구현", "POST", "핸들러"],
+    ["배포 버튼 UI 수정", "배포", "버튼"],
+    ["DELETE handler refactor", "DELETE", "handler"],
+    ["release notes draft", "release", "notes"],
+    ["deploy.mjs 수정", "deploy", "파일 확장자"],
+    ["원격 파일 삭제", "삭제", "파일"],
+    ["리뷰하고 배포한다", "배포", "리뷰"],
+    ["PR 생성 금지. 함수 작성 후 배포", "배포", "함수"],
+  ]) {
+    it(`읽기나 코드 산출물과 섞인 외부 변경은 모호한 auto다: ${task}`, () => {
+      const verdict = classifyWorkerMode(task);
+      assert.equal(verdict.mode, "auto");
+      assert.match(verdict.reason, /모호/);
+      assert.ok(verdict.reason.includes(write));
+      assert.ok(verdict.reason.includes(artifact));
+    });
+  }
+
+  it("외부 변경이 없으면 읽기나 코드 산출물 신호를 근거에 적는다", () => {
+    assert.match(classifyWorkerMode("로컬 파일 수정").reason, /로컬/);
+    assert.match(classifyWorkerMode("로컬 파일 수정").reason, /파일/);
+    assert.match(classifyWorkerMode("코드 리뷰").reason, /리뷰/);
+    assert.match(classifyWorkerMode().reason, /외부 변경 신호가 없/);
+  });
+
+  for (const [task, signal] of [
+    ["푸시하지 마세요", "푸시"],
+    ["shouldn't deploy", "deploy"],
+    ["머지는 리드에게 맡긴다", "머지"],
+    ["배포는 이번 범위가 아니다", "배포"],
+    ["다운타임 없이 프로덕션에 배포한다", "배포"],
+    ["cannot publish", "publish"],
+    ["릴리스 범위 밖", "릴리스"],
+    ["배포는 CI가 한다", "배포"],
+    ["푸시는 리드가 맡는다", "푸시"],
+    ["배포는 사용자가 진행한다", "배포"],
+    ["머지는 리드가 합니다", "머지"],
+    ["머지와 릴리스는 리드가 진행", "릴리스"],
+    ["릴리스는 사용자가 직접 한다", "릴리스"],
+    ["푸시 안 합니다", "푸시"],
+    ["푸시 안합니다", "푸시"],
+    ["배포 없음", "배포"],
+    ["배포는 없다", "배포"],
+    ["push 금지. 로컬 파일 수정", "git push"],
+  ]) {
+    it(`제외한 외부 변경 신호와 모호함을 근거에 남긴다: ${task}`, () => {
+      const verdict = classifyWorkerMode(task);
+      assert.equal(verdict.mode, "auto");
+      assert.match(verdict.reason, /제외/);
+      assert.match(verdict.reason, /모호/);
+      assert.ok(verdict.reason.includes(signal));
+      assert.doesNotMatch(verdict.reason, /외부 변경 신호가 없/);
+    });
+  }
+
+  it("다른 문장에 외부 변경이 남아도 제외한 신호를 근거에 남긴다", () => {
+    const verdict = classifyWorkerMode("push 금지. 스테이징에 배포한다");
+    assert.equal(verdict.mode, "bypass");
+    assert.match(verdict.reason, /배포/);
+    assert.match(verdict.reason, /제외.*git push/);
+    assert.doesNotMatch(verdict.reason, /모호/);
+  });
+
+  it("로컬 규칙 입력은 앞 2,000자만 사용한다", () => {
+    assert.equal(classifyWorkerMode(`${"가".repeat(2000)} 배포`).mode, "auto");
+    assert.equal(
+      classifyWorkerMode(`배포 ${"가".repeat(2000)} 금지`).mode,
+      "bypass",
+    );
+  });
+
+  for (const input of [null, { task: Object.create(null) }, { task: 123 }]) {
+    it("문자열이 아닌 입력에도 throw 없이 빈 입력으로 판정한다", async () => {
+      const verdict = await judgeWorkerMode(input, {
+        ...options,
+        client: () => assert.fail("빈 입력 전송"),
+      });
+      assert.equal(verdict.mode, "auto");
+      assert.equal(verdict.fallbackReason, "unsafe_input");
+    });
+  }
+
+  for (const [kind, task] of [
+    ["비밀 값", "배포 API_KEY=unit-test-secret-value"],
+    ["이메일", "메일 전송 unit.user@example.test"],
+    ["내부 이메일", "메일 전송 unit-user@localhost"],
+    ["한국어 이메일", "메일 전송 테스트@예시.한국"],
+    ["한국 전화", "전송 010-1234-5678"],
+    ["구분자 없는 전화", "전송 01012345678"],
+    ["국제 전화", "전송 +1 (202) 555-0123"],
+    ["주민번호", "삭제 900101-1234567"],
+    ["카드", "삭제 1234-5678-9012-3456"],
+    ["공백 구분 카드", "삭제 1234 5678 9012 3456"],
+    ["macOS 홈", "수정 /Users/example/project"],
+    ["Linux 홈", "수정 /home/example/project"],
+    ["Windows 홈", String.raw`수정 C:\Users\example\project`],
+    ["URL 인증", "POST https://unit-user:unit-pass@example.test/api"],
+    ["AWS 키", `AWS 키 ${["AKIA", "IOSFODNN7EXAMPLE"].join("")} 로 배포`],
+    [
+      "Slack 토큰",
+      `배포 토큰 ${["xoxb", "1234567890", "abcdefghijEXAMPLE"].join("-")}`,
+    ],
+    [
+      "JWT",
+      [
+        "eyJhbGciOiJIUzI1NiJ9",
+        "eyJzdWIiOiJleGFtcGxlMTIzIn0",
+        "exampleSignature1234567890",
+      ].join("."),
+    ],
+    [
+      "Slack webhook",
+      `https://hooks.slack.com/services/${["T123EXAMPLE", "B456EXAMPLE", "exampleWebhookToken1234567890"].join("/")}`,
+    ],
+    ["한국어 비밀 라벨", "비밀번호: hunter2example 로 로그인"],
+    ["영어 비밀 라벨", "password hunter2example 로 배포"],
+    ["비밀 라벨 값", "시크릿=examplevalue 로 배포"],
+    ["점 구분 전화", "전화 010.1234.5678 고객에게 전송"],
+    ["점 구분 카드", "카드 1234.5678.9012.3456"],
+    ["공백 주민번호", "주민번호 900101 - 1234567"],
+    ["전각 전화", "전화 ０１０.１２３４.５６７８ 고객에게 전송"],
+    ["file URL 홈", "file:///Users/example/x 수정"],
+    ["cwd 홈", "--cwd=/Users/example/x 수정"],
+    ["백틱 홈", "`/home/example/x` 수정"],
+    ["WSL 홈", "/mnt/c/Users/example/x 수정"],
+    ["Windows 슬래시 홈", "c:/users/example/x 수정"],
+    ["Windows 소문자 홈", String.raw`c:\users\example\x 수정`],
+    ["한국어 라벨 조사", "비밀번호는 hunter2example 로 로그인"],
+    ["토큰 라벨 조사", "토큰은 abc123defexample 사용"],
+    ["API 키 라벨", "API 키 abcd1234efghexample"],
+    ["키 라벨", "키: abcd1234example"],
+    ["apikey 라벨", "apikey abcd1234example"],
+    ["접두사 토큰 라벨", "access_token abc123xyzexample"],
+    ["괄호 구분 전화", "전화 010)1234)5678"],
+    [
+      "대시 구분 전화",
+      `전화 010${String.fromCodePoint(0x2013)}1234${String.fromCodePoint(0x2013)}5678`,
+    ],
+    ["괄호 구분 주민번호", "주민번호 900101 ) 1234567"],
+    [
+      "대시 구분 주민번호",
+      `주민번호 900101 ${String.fromCodePoint(0x2013)} 1234567`,
+    ],
+    [
+      "국제 전화 대시",
+      `전화 +44 20${String.fromCodePoint(0x2013)}1234${String.fromCodePoint(0x2013)}5678`,
+    ],
+    ["혼합 토큰", `배포 ${"example".repeat(3)}123`],
+    ["pw 라벨", "pw: hunter2"],
+    ["pwd 라벨", "pwd=hunter2"],
+    ["비번 라벨", "비번은 hunter2"],
+    ["밑줄 API 키", "API_KEY abcd1234"],
+    ["하이픈 API 키", "api-key abcd1234"],
+    ["영문 key 라벨", "key: abcd1234"],
+    ["복합 key 라벨", "secret key abc123def"],
+    ["비밀번호 수단 조사", "비밀번호로 hunter2 사용"],
+    ["비밀번호 값 조사", "비밀번호 값은 hunter2"],
+    ["토큰값 조사", "토큰값은 abc123def"],
+    ["토큰 수단 조사", "토큰으로 abc123def 호출"],
+    ["영문 라벨 연결어", "password is hunter2"],
+    ["MSYS 홈", ["", "c", "Users", "kim", "x"].join("/")],
+    ["Cygwin 홈", ["", "cygdrive", "c", "Users", "kim"].join("/")],
+    ["WSL 소문자 홈", ["", "mnt", "c", "users", "kim", "x"].join("/")],
+    [
+      "Windows 이중 구분자 홈",
+      ["C:", "Users", "kim", "x"].join(String.raw`\\`),
+    ],
+    ["괄호 공백 전화", "(010) 1234-5678"],
+    ["빈 요약", "  "],
+    ["길이 초과", "a".repeat(1001)],
+    ["제어 문자", `리뷰${String.fromCodePoint(0x200b)}한다`],
+    ["구조화 입력", '{"operation":"deploy"}'],
+  ]) {
+    it(`${kind}는 외부로 보내지 않고 원문 없는 unsafe_input을 반환한다`, async () => {
+      let calls = 0;
+      const verdict = await judgeWorkerMode(
+        { task },
+        {
+          ...options,
+          client: () => {
+            calls++;
+            return { choice: "auto", confidence: 0.9 };
+          },
+        },
+      );
+      assert.equal(calls, 0);
+      assert.equal(verdict.source, "rule");
+      assert.equal(verdict.fallbackReason, "unsafe_input");
+      assert.equal(verdict.confidence, null);
+      assert.ok(!JSON.stringify(verdict).includes(task));
+    });
+  }
+
+  it("정상 요약은 공백만 정리해 query에 보내고 선택지는 강제하지 않는다", async () => {
+    let sent;
+    await judgeWorkerMode(
+      { task: "  로컬  파일\n수정과 테스트  " },
+      {
+        ...options,
+        client: (request) => {
+          sent = request;
+          return { choice: "auto", confidence: 0.9 };
+        },
+      },
+    );
+    assert.equal(sent.hook, "worker_mode");
+    assert.equal(sent.kind, "choice");
+    assert.deepEqual(sent.options, ["bypass", "auto", "unclear"]);
+    assert.deepEqual(JSON.parse(sent.context), {
+      task: "로컬 파일 수정과 테스트",
+    });
+    assert.match(sent.query, /prohibited|forbidden/);
+  });
+
+  for (const [task, normalized] of [
+    ["토큰 갱신 로직 수정", "토큰 갱신 로직 수정"],
+    ["API 키 교체", "API 키 교체"],
+    ["비밀번호 변경 화면 구현", "비밀번호 변경 화면 구현"],
+    ["패키지 2개 업데이트", "패키지 2개 업데이트"],
+    ["src/" + "home/index.tsx 수정", "src/" + "home/index.tsx 수정"],
+    ["ＰＯＳＴ 핸들러 구현", "POST 핸들러 구현"],
+  ]) {
+    it(`정상 요약을 NFKC 정규화해 전송한다: ${task}`, async () => {
+      let sent;
+      const verdict = await judgeWorkerMode(
+        { task },
+        {
+          ...options,
+          client: (request) => {
+            sent = JSON.parse(request.context).task;
+            return { choice: "auto", confidence: 0.9 };
+          },
+        },
+      );
+      assert.equal(sent, normalized);
+      assert.equal(verdict.source, "jev");
+    });
+  }
+
+  it("1,000자 요약까지 자르지 않고 전송한다", async () => {
+    const task = "a".repeat(1000);
+    const verdict = await judgeWorkerMode(
+      { task },
+      {
+        ...options,
+        client: (request) => {
+          assert.equal(JSON.parse(request.context).task, task);
+          return { choice: "auto", confidence: 0.9 };
+        },
+      },
+    );
+    assert.equal(verdict.source, "jev");
+  });
+
+  it("CLI는 비활성 상태에서도 한 줄 JSON을 내고 --task 누락은 실패한다", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tfx-worker-mode-"));
+    const cliOptions = {
+      encoding: "utf8",
+      stdio: "pipe",
+      env: { ...process.env, HOME: dir, TFX_JEV: "0" },
+    };
+    try {
+      const stdout = execFileSync(
+        process.execPath,
+        ["bin/triflux.mjs", "judge", "worker-mode", "--task", "git push"],
+        cliOptions,
+      );
+      assert.equal(stdout.trim().split("\n").length, 1);
+      assert.deepEqual(JSON.parse(stdout), {
+        enabled: false,
+        mode: "bypass",
+        reason: "외부 변경 신호(git push)가 있어 bypass를 권고합니다.",
+        source: "rule",
+        fallbackReason: "jev_disabled",
+        ruleMode: "bypass",
+        confidence: null,
+      });
+      assert.throws(
+        () =>
+          execFileSync(
+            process.execPath,
+            ["bin/triflux.mjs", "judge", "worker-mode"],
+            cliOptions,
+          ),
+        (error) => Number.isInteger(error.status) && error.status !== 0,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
