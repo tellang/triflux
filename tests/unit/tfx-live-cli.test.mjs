@@ -2792,7 +2792,7 @@ test("tfx-live start reports approval screens as blocked without answering them"
   }
 });
 
-test("Codex trust screens are never answered and other CLIs honor --no-auto-trust", async () => {
+test("Codex and other CLIs automatically trust folders unless --no-auto-trust is set", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-start-trust-"));
   try {
     const tmuxPath = path.join(dir, "tmux");
@@ -2804,7 +2804,7 @@ test("Codex trust screens are never answered and other CLIs honor --no-auto-trus
         "const args = process.argv.slice(2);",
         "if (args[0] === 'display-message' && args.at(-1) === '#{session_id}|#{pane_id}') { console.log('$1|%1'); process.exit(0); }",
         "fs.appendFileSync(process.env.TMUX_LOG, `${JSON.stringify(args)}\\n`);",
-        "if (args[0] === 'capture-pane') console.log(process.env.TMUX_SCREEN);",
+        "if (args[0] === 'capture-pane') { const accepted = fs.readFileSync(process.env.TMUX_LOG, 'utf8').trim().split('\\n').map(JSON.parse).some(a => a[0] === 'send-keys' && a.length === 4 && a[3] === 'Enter'); console.log(accepted ? process.env.TMUX_READY : process.env.TMUX_SCREEN); }",
       ].join("\n"),
     );
     await fs.chmod(tmuxPath, 0o755);
@@ -2883,6 +2883,8 @@ test("Codex trust screens are never answered and other CLIs honor --no-auto-trus
                 PATH: `${dir}${path.delimiter}${process.env.PATH}`,
                 TMUX_LOG: logPath,
                 TMUX_SCREEN: screen,
+                TMUX_READY:
+                  cli === "codex" ? "› " : cli === "claude" ? "❯ " : "> ",
                 TFX_AGENTS_ROW: "0",
                 LC_TERMINAL: "",
                 TERM_PROGRAM: "",
@@ -2893,11 +2895,11 @@ test("Codex trust screens are never answered and other CLIs honor --no-auto-trus
         const answered = (await readTmuxLog(logPath)).filter(
           (args) => args[0] === "send-keys" && args.length === 4,
         );
-        assert.equal(result.ready, !blockedBy, cli);
+        assert.equal(result.ready, !blockedBy || !noAutoTrust, cli);
         if (!blockedBy) {
           assert.equal(result.blockedBy, undefined, cli);
           assert.deepEqual(answered, [], `${cli} resumed session got keys`);
-        } else if (noAutoTrust || cli === "codex") {
+        } else if (noAutoTrust) {
           assert.equal(result.blockedBy, blockedBy, cli);
           assert.match(result.warning, /attach to the tmux session/);
           assert.deepEqual(answered, [], `${cli} trust screen was answered`);

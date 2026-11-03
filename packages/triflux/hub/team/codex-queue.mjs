@@ -8,6 +8,8 @@ import { createInterface } from "node:readline";
 import { StringDecoder } from "node:string_decoder";
 import { promisify } from "node:util";
 import { codexThreadNames } from "../lib/codex-session-registry.mjs";
+import { JsonRpcWsUdsClient } from "../workers/lib/jsonrpc-ws-uds.mjs";
+import { resolveCodexSocket } from "./native-peer.mjs";
 import { findCodexRollout } from "./session-context.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -188,7 +190,65 @@ export async function queueCodexMessage({
   env = process.env,
   execFn = execFileAsync,
   spawnFn = spawn,
+  resolveSocket = resolveCodexSocket,
+  clientFactory = (options) => new JsonRpcWsUdsClient(options),
 }) {
+  let socketPath;
+  try {
+    socketPath = resolveSocket(env.HOME || homedir(), env);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  if (socketPath) {
+    const client = clientFactory({ socketPath, connectTimeoutMs: 5000 });
+    let connected = false;
+    let addSent = false;
+    try {
+      await client.connect();
+      connected = true;
+      await client.request("initialize", {
+        clientInfo: { name: "triflux-tfx-live", version: "1.0.0" },
+        capabilities: { experimentalApi: true },
+      });
+      client.notify("initialized", {});
+      let cursor;
+      const seen = new Set();
+      do {
+        const page = await client.request(
+          "thread/loaded/list",
+          cursor ? { cursor } : {},
+        );
+        if (!Array.isArray(page?.data))
+          throw new Error("Cannot verify loaded Codex queue target");
+        if (page.data.some((item) => (item?.id ?? item) === threadId)) {
+          // TUI를 소유한 공유 daemon에 직접 큐를 추가한다.
+          addSent = true;
+          const result = await client.request("thread/queue/add", {
+            threadId,
+            input: [{ type: "text", text: message, text_elements: [] }],
+            clientUserMessageId: randomUUID(),
+          });
+          const id = result?.queuedSubmission?.id;
+          if (!id)
+            throw new Error("Missing queuedSubmission id after queue add");
+          return { queuedMessageId: id, via: "shared-daemon" };
+        }
+        cursor = page.nextCursor;
+        if (cursor && (typeof cursor !== "string" || seen.has(cursor)))
+          throw new Error("Cannot verify loaded Codex queue pagination");
+        seen.add(cursor);
+      } while (cursor);
+      // 별도 TUI는 공유 daemon에 없으므로 기존 디스크 큐 경로를 유지한다.
+    } catch (error) {
+      if (connected) {
+        if (addSent && typeof error.code !== "number") error.maybeQueued = true;
+        throw error;
+      }
+      // daemon 연결 실패 때만 기존 stdio 큐 경로로 넘긴다.
+    } finally {
+      client.close();
+    }
+  }
   let addSent = false;
   try {
     const result = await withCodexAppServer(

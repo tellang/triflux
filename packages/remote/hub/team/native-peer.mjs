@@ -150,12 +150,30 @@ export async function sendCodexPeer({
     };
   }
   try {
-    await client.request("turn/start", {
+    const result = await client.request("turn/start", {
       threadId,
       input: [],
       toolOutput: { name: "tfx_peer_wake", output: WAKE, retain: true },
     });
-    return { status: "sent", retrySafe: false, modelReceipt: false };
+    const turn = result?.turn;
+    if (
+      typeof turn?.id !== "string" ||
+      !turn.id ||
+      !["inProgress", "completed"].includes(turn.status)
+    )
+      return {
+        status: "partial",
+        retrySafe: false,
+        modelReceipt: false,
+        error: `wake was not accepted after injection: ${turn?.error?.message || turn?.status || "missing turn"}. Do not resend automatically; inspect the target session`,
+      };
+    return {
+      status: "sent",
+      retrySafe: false,
+      modelReceipt: false,
+      turnId: turn.id,
+      turnStatus: turn.status,
+    };
   } catch (error) {
     return {
       status: "partial",
