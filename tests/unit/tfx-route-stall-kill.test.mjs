@@ -141,7 +141,11 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
         'if (process.argv[2] === "judge-stall") {',
         '  console.log(JSON.stringify({ ok: true, enabled: true, status: "progressing", confidence: 0.99 }));',
         '} else if (process.argv[2] === "judge-route") {',
-        '  console.log(["high", "astra", "", "", "", "120", "headless", "none", "", "0.99"].join("\\x1e"));',
+        '  const disabled = process.env.TFX_JEV === "0";',
+        '  const explicit = process.env.TFX_CODEX_PROFILE !== "auto";',
+        '  const selected = { cli: "codex", agent: "executor", profile: explicit || disabled ? "sol_high" : "astra", model: "fixture-model", effort: "high", source: explicit ? "explicit" : disabled ? "rule" : "jev", reason: explicit ? "explicit_profile_preserved" : disabled ? "jev_disabled" : "jev_applied" };',
+        '  const routing = disabled ? Array(11).fill("") : ["high", "astra", "", "", "", "120", "headless", "none", "", "0.99", ""];',
+        '  console.log([...routing, selected.profile, selected.model, selected.effort, JSON.stringify(selected)].join("\\x1e"));',
         "} else { process.exit(1); }",
       ].join("\n"),
     );
@@ -546,8 +550,10 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
           extractFunction("jev_enabled"),
           extractFunction("apply_jev_pre_route"),
           "AGENT_TYPE=executor",
-          "PROMPT='test route boundary'",
-          `TFX_CODEX_PROFILE=${explicit ? "sol_high" : "auto"}`,
+          "CLI_TYPE=codex",
+          "PROMPT='wrapped invocation'",
+          "recommendation_task='test route boundary'",
+          `export TFX_CODEX_PROFILE=${explicit ? "sol_high" : "auto"}`,
           "TFX_GEMINI_PROFILE=",
           "TFX_EXECUTION_MODE=auto",
           "MCP_PROFILE=auto",
@@ -571,42 +577,44 @@ describe("#144/#66 heartbeat stall kill — integration", () => {
         JSON.stringify({ calls, stdout: result.stdout, stderr: result.stderr }),
       );
       assert.equal(result.status, 0, result.stderr);
-      assert.deepEqual(
-        calls,
-        disabled
-          ? []
-          : [
-              [
-                "judge-route",
-                "--agent",
-                "executor",
-                "--cli-type",
-                "codex",
-                "--prompt",
-                "test route boundary",
-                "--delimited",
-              ],
-            ],
-      );
+      assert.deepEqual(calls, [
+        [
+          "judge-route",
+          "--agent",
+          "executor",
+          "--cli-type",
+          "codex",
+          "--prompt",
+          "test route boundary",
+          "--worker-model",
+          "--delimited",
+        ],
+      ]);
       assert.equal(
         result.stdout.trim(),
         disabled
-          ? "PROFILE=auto MODE=auto MCP=auto"
+          ? "PROFILE=sol_high MODE=auto MCP=auto"
           : `PROFILE=${explicit ? "sol_high" : "astra"} MODE=headless MCP=none`,
       );
-      if (!disabled) {
-        assert.match(result.stderr, /recommended_codex=astra/);
-        assert.match(
-          result.stderr,
-          new RegExp(`effective_codex=${explicit ? "sol_high" : "astra"}`),
-        );
-        assert.match(
-          result.stderr,
-          new RegExp(
-            `codex_reason=${explicit ? "explicit_override_preserved" : "jev_applied"}`,
-          ),
-        );
-      }
+      const selected = JSON.parse(
+        result.stderr.trim().replace(/^\[tfx-route\] worker-model: /, ""),
+      );
+      assert.equal(
+        selected.profile,
+        explicit || disabled ? "sol_high" : "astra",
+      );
+      assert.equal(
+        selected.source,
+        explicit ? "explicit" : disabled ? "rule" : "jev",
+      );
+      assert.equal(
+        selected.reason,
+        explicit
+          ? "explicit_profile_preserved"
+          : disabled
+            ? "jev_disabled"
+            : "jev_applied",
+      );
     });
   }
 

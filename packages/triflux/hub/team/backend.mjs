@@ -26,16 +26,43 @@ class ClaudeBackend {
     const file = promptFile || writePromptToTmpFile(prompt);
     const quote = isWindows ? powershellSingleQuote : shellQuote;
     const selectedModel = workerModel ? workerModel.model : model;
-    const selectedEffort = workerModel ? workerModel.effort : effort;
+    const requestedEffort = workerModel ? workerModel.effort : effort;
+    const selectedEffort =
+      requestedEffort === "ultra" ? "max" : requestedEffort;
     const modelArgs = selectedModel ? ` --model ${quote(selectedModel)}` : "";
     const effortArgs = selectedEffort
-      ? ` --effort ${quote(selectedEffort === "ultra" ? "max" : selectedEffort)}`
+      ? ` --effort ${quote(selectedEffort)}`
       : "";
     const explicitArgs = [
       ...(mcpConfig ? ["--mcp-config", mcpConfig] : []),
       ...(strictMcpConfig ? ["--strict-mcp-config"] : []),
       ...extraArgs,
     ];
+    if (workerModel) {
+      writeFileSync(
+        `${resultFile}.model.json`,
+        JSON.stringify({
+          ...workerModel,
+          appliedTo: "launch_arguments",
+          runtimeConfirmed: false,
+          launch: {
+            cli: "claude",
+            profile: null,
+            model: selectedModel || null,
+            effort: selectedEffort || null,
+            argv: [
+              "--print",
+              "--output-format",
+              "text",
+              ...(selectedModel ? ["--model", selectedModel] : []),
+              ...(selectedEffort ? ["--effort", selectedEffort] : []),
+              ...explicitArgs,
+            ],
+          },
+        }),
+        { mode: 0o600 },
+      );
+    }
     let launcher = "claude";
     if (mcpRecommendation) {
       const requestFile = `${file}.mcp-request.json`;

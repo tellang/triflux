@@ -35,6 +35,8 @@ export function createResultsIndex(path, sessionName, workers, canWrite) {
       startedAt: null,
       finishedAt: null,
       resultFile: w.resultFile,
+      workerModelFile: null,
+      workerMcpFile: null,
       ackStatus: null,
       semanticState: null,
       ackConfidence: null,
@@ -80,7 +82,13 @@ export function createResultsIndex(path, sessionName, workers, canWrite) {
       w.finishedAt = now();
       flush();
     },
-    finish(completed) {
+    finish(completed, results = []) {
+      for (const result of results) {
+        const w = byPane.get(result.paneName);
+        if (!w) continue;
+        w.workerModelFile = result.workerModelFile ?? null;
+        w.workerMcpFile = result.workerMcpFile ?? null;
+      }
       // 예외로 끝나면 끝나지 못한 워커를 failed 로 확정해 "아직 도는 중"과 구분한다.
       for (const w of index.workers) {
         if (w.status === "pending" || w.status === "running") {

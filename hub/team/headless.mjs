@@ -391,17 +391,6 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
           codexHome: process.env.CODEX_HOME,
         })
       : undefined;
-  if (resolvedCli === "claude" && !reviewByAuthor && opts.workerModel) {
-    writeFileSync(
-      `${resultFile}.model.json`,
-      JSON.stringify({
-        ...opts.workerModel,
-        appliedTo: "launch_arguments",
-        runtimeConfirmed: false,
-      }),
-      { mode: 0o600 },
-    );
-  }
   const backendCommand =
     reviewByAuthor || resolvedCli === "codex" || resolvedCli === "antigravity"
       ? buildRouteBackedHeadlessCommand(
@@ -1060,7 +1049,10 @@ async function collectResults(results) {
           d.workerModelFile && existsSync(d.workerModelFile)
             ? d.workerModelFile
             : null,
-        workerMcpFile: d.workerMcpFile,
+        workerMcpFile:
+          d.workerMcpFile && existsSync(d.workerMcpFile)
+            ? d.workerMcpFile
+            : null,
         workerGitDiffFiles,
         sessionDead: completion.sessionDead || false,
         handoff: handoffResult.handoff,
@@ -1322,7 +1314,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     runFailed = true;
     runError = error;
   }
-  resultsIndex.finish(runCompleted);
+  resultsIndex.finish(runCompleted, completedResults);
 
   if (!runCompleted) {
     sessionOwnership.release();
