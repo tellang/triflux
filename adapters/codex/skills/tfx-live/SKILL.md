@@ -41,9 +41,9 @@ macOS의 iTerm2에서 로컬 tmux `start`는 프로젝트별 창에 attach 탭�
 
 Claude 프로젝트 MCP 승인 화면이 뜨면 `start`는 화면에 답하지 않고 `ready: false`, `blockedBy: "claude-mcp-approval"`, 할 일을 적은 `warning`을 반환한다. 세션은 남아 있으므로 tmux 세션에 붙어 직접 고른 뒤 지시를 보낸다.
 
-Claude, agy, Codex(`Trust this folder?`와 `Do you trust the contents of this directory`)의 폴더 신뢰 화면은 기본으로 자동 승인한다. `start --no-auto-trust`를 주면 이 화면에도 키를 보내지 않고 같은 형식으로 `blockedBy`(`claude-trust-folder`, `agy-trust-folder`, `codex-trust-folder`)를 반환한다. `--resume`, `--resume-last`, `--remote`에도 똑같이 적용된다.
+Claude, agy, Codex(`Trust this folder?`와 `Do you trust the contents of this directory`)의 폴더 신뢰 화면은 기본으로 자동 승인한다. Codex는 신뢰 결정을 설정에 기록하므로 이후 같은 폴더의 실행에도 적용된다. `start --no-auto-trust`를 주면 이 화면에도 키를 보내지 않고 같은 형식으로 `blockedBy`(`claude-trust-folder`, `agy-trust-folder`, `codex-trust-folder`)를 반환한다. `--resume`, `--resume-last`, `--remote`에도 똑같이 적용된다.
 
-Codex `start --model`은 `astra`, `sol`, `terra`, `luna` 가족 별칭을 기존 model-family-resolver로 실제 모델 ID로 바꾼다. `~/.config/triflux/models.json`의 가족 고정값을 우선하고, Codex 모델 캐시, 마지막 해석 결과, 내장 기본값 순으로 고른다. 실제 모델 ID를 명시하면 그대로 전달한다. 전역 프로필이나 설정 파일은 바꾸지 않고 `--effort`는 별도로 전달한다.
+Codex `start --model`은 `astra`, `sol`, `terra`, `luna` 가족 별칭을 호출 호스트의 기존 model-family-resolver로 실제 모델 ID로 바꾼다. 호출 호스트의 `~/.config/triflux/models.json` 가족 고정값을 우선하고, Codex 모델 캐시, 마지막 해석 결과, 내장 기본값 순으로 고른다. `--remote`도 호출 호스트에서 해석한 ID를 보내며 원격 호스트의 고정값은 사용하지 않는다. 실제 모델 ID를 명시하면 그대로 전달한다. 모델 해석은 전역 프로필이나 설정 파일을 바꾸지 않고 `--effort`는 별도로 전달한다.
 
 공유 daemon에 이미 로드된 Codex thread는 per-thread hooks override를 지원하지 않아 `start --resume`을 거부한다. 기존 TUI의 승인 모드는 `/permissions`에서 Full Access를 고르고 확인하는 방식으로 바꾼다. `thread/settings/update`의 readback과 다음 TUI 턴에 적용되는 권한은 다를 수 있다. pane을 이미 닫았다면 오류에 나온 `codex resume <threadId>`로 같은 대화를 열고 `/permissions`를 사용한다. 이 오류 때문에 새 대화를 만들거나 공유 daemon을 재시작하지 않는다.
 
@@ -87,7 +87,7 @@ agy `ask`의 기본 `--if-busy queue`는 바쁜 턴에도 바로 전송한다. a
 | handoff | 담당·CLI·모델·소유자가 바뀌거나 긴 작업이 창을 넘길 때. 인계 파일에 목표, 완료 조건, 체크아웃과 변경 상태, 확정 결정, 증거 경로, PASS/FAIL/SKIP, 미완료 작업과 프로세스, 다음 행동과 소유자, `predecessorSessionId`를 적는다. 승계 세션이 경로를 확인하면 이전 세션을 닫는다. |
 | close | 결과와 인계를 확인한 즉시 닫는다. Claude 백그라운드는 `claude stop <id>`, tmux는 `tfx-live stop --session`, Claude 팀원은 shutdown, Codex 서브에이전트는 `close_agent`(Codex 0.162.1 의 도구 목록에는 없다), agy 서브에이전트는 `/agents` 패널의 K를 쓴다. |
 
-Claude TUI는 바쁠 때 들어온 입력을 대기열에 넣고 현재 턴(압축 포함)이 끝나면 순서대로 처리한다. transcript에는 `queue-operation`의 `enqueue`와 `dequeue`로 남는다. Codex app-server 큐도 바쁜 턴 뒤에 순서대로 처리한다. 리드는 compact를 보내고 `--then`으로 다음 지시를 넣는 것을 기본 절차로 쓴다.
+Claude TUI는 바쁠 때 들어온 입력을 대기열에 넣고 현재 턴(압축 포함)이 끝나면 순서대로 처리한다. transcript에는 `queue-operation`의 `enqueue`와 `dequeue`로 남는다. Codex 큐의 기록 성공과 실제 처리 완료는 별개다. 리드는 compact를 보내고 `--then`으로 다음 지시를 넣는 것을 기본 절차로 쓴다.
 
 두 번째 compact 전에는 handoff가 맞는지 점검한다. compact 횟수는 고정하지 않는다.
 
@@ -116,7 +116,7 @@ Claude TUI는 바쁠 때 들어온 입력을 대기열에 넣고 현재 턴(압�
 
 로컬 세션끼리 주고받는 메시지는 `<홈 절대경로>/.claude/scripts/tfx-peer send`를 쓴다. 다음은 원격 세션이나 명시적으로 사용자 입력을 전달하는 `tfx-live ask`의 동작이다.
 
-1. 기본은 app-server 실험 API `thread/queue/add`로 쌓는 것이다. 공유 daemon에 로드된 thread는 그 daemon에 직접 보내며 `queueVia: "shared-daemon"`을 반환한다. 유휴 thread는 daemon이 바로 처리하고 바쁜 thread는 앞 턴 뒤에 처리한다. 공유 daemon에 없는 별도 TUI는 기존 stdio app-server 경로를 쓰며 `queueVia: "app-server"`다. 프롬프트는 두 경로 모두 프로세스 인자에 보이지 않는다. stdio add가 없는 Codex에서는 `codex queue --thread <UUID> --message`로 보내며, 이때 프롬프트가 argv에 보이고 `queueVia: "codex-queue-argv"`와 `queueFallbackReason`이 남는다. `queued`는 큐 기록만 뜻하며 모델 응답 완료가 아니다.
+1. 기본은 app-server 실험 API `thread/queue/add`로 쌓는 것이다. 공유 daemon에 로드된 thread는 그 daemon에 직접 보내며 `queueVia: "shared-daemon"`을 반환한다. 공유 daemon에 없는 별도 TUI와 stale daemon socket의 연결 실패는 기존 stdio app-server 경로를 쓰며 `queueVia: "app-server"`다. 연결 뒤 initialize나 loaded 목록 검증 실패는 이 경로로 전환하지 않는다. 프롬프트는 두 경로 모두 프로세스 인자에 보이지 않는다. stdio add가 없는 Codex에서는 `codex queue --thread <UUID> --message`로 보내며, 이때 프롬프트가 argv에 보이고 `queueVia: "codex-queue-argv"`와 `queueFallbackReason`이 남는다. `queued`는 큐 기록만 뜻하며 모델 응답 완료가 아니다. 실제 처리는 아래 `wait` 결과로 구분한다.
 2. 첫 줄 머리말은 `[from <보낸 세션 이름>] [tfx-live req=<id>]`다. 이름은 `--from`, `$TFX_LIVE_FROM`, Claude 세션 기록, Codex `session_index` 순으로 찾고 없으면 머리말 없이 표식만 붙인다. Codex TUI는 Claude처럼 접어 보여 주지 않고 사용자 입력으로 그대로 표시한다.
 3. thread는 `--thread UUID`, `start`가 남긴 `@tfx_codex_thread`, Codex 세션 레지스트리, pane 프로세스의 `resume <UUID>` 인자, pane cwd와 같은 rollout 하나 순으로 찾는다. cwd 대응은 그 cwd의 Codex TUI가 하나일 때만 쓰고 exec 워커와 서브에이전트 thread는 뺀다. 이름으로는 보내지 않는다(`codex queue`의 이름 조회가 실패한다).
 4. tmux 직접 입력은 queue를 못 쓸 때만 쓴다: 원격 호스트, thread를 못 찾음(`start` 밖에서 `resume --last`로 띄운 세션, `start --resume-last`의 `threadId: null`, 같은 cwd의 TUI 여럿 포함), `codex queue` 오류(0.160 미만 포함). 결과에 `transport: "tmux"`, `transportRequested: "queue"`, `fallbackReason`이 남는다. 시간 초과처럼 queue가 이미 쌓았을 수도 있는 오류는 `status: "unknown"`으로 끝내고 재전송하지 않는다.

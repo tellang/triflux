@@ -119,6 +119,31 @@ test("shared queue timeout never requeues a possibly accepted message", async ()
   assert.equal(closed, true);
 });
 
+test("shared queue initialization failure does not fall back to another app-server", async () => {
+  let closed = false;
+  await assert.rejects(
+    queueCodexMessage({
+      threadId,
+      message: "one message",
+      resolveSocket: () => "/isolated/daemon.sock",
+      clientFactory: () => ({
+        connect: async () => {},
+        request: async (method) => {
+          assert.equal(method, "initialize");
+          throw new Error("initialization failed");
+        },
+        close: () => {
+          closed = true;
+        },
+      }),
+      spawnFn: () => assert.fail("must not fall back after connecting"),
+      execFn: () => assert.fail("must not resend through argv"),
+    }),
+    /initialization failed/,
+  );
+  assert.equal(closed, true);
+});
+
 test("shared queue verifies paginated loaded targets before writing", async () => {
   for (const data of [{}, { data: [], nextCursor: "repeat" }]) {
     let closed = false;

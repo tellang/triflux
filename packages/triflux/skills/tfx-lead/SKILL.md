@@ -124,7 +124,7 @@ Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 �
 
 모델 ID는 기록하지 않는다. Codex는 가족 프로필과 별도 effort, Claude는 별칭을 사용한다. 현재 대응은 `tfx-routing.md`의 "모델 배치" 표가 정본이다. 가족 프로필에는 `model`만 기록하고 effort는 `-c model_reasoning_effort`로 전달한다. 수동 CLI 예: `codex -p sol -c 'model_reasoning_effort="high"'`.
 
-Codex `tfx-live start --model`은 `astra`, `sol`, `terra`, `luna`를 model-family-resolver와 `models.json`의 고정값으로 실제 ID로 바꾼다. `--effort`는 별도로 지정하며 전역 프로필을 바꾸지 않는다. 새 폴더와 worktree의 신뢰 화면은 자동 승인하고 `--no-auto-trust`일 때만 `ready: false`, `blockedBy: "codex-trust-folder"`로 반환한다.
+Codex `tfx-live start --model`은 `astra`, `sol`, `terra`, `luna`를 호출 호스트의 model-family-resolver와 `models.json` 고정값으로 실제 ID로 바꾼다. `--remote`도 호출 호스트에서 해석하며 원격 호스트의 고정값은 사용하지 않는다. `--effort`는 별도로 지정하며 모델 해석으로 전역 프로필을 바꾸지 않는다. 새 폴더와 worktree의 신뢰 화면은 자동 승인하고 Codex가 그 결정을 설정에 기록하므로 이후 같은 폴더의 실행에도 적용된다. `--no-auto-trust`일 때만 `ready: false`, `blockedBy: "codex-trust-folder"`로 반환한다.
 
 | 역할 | 가족 + effort / Claude 별칭 | 비고 |
 | --- | --- | --- |

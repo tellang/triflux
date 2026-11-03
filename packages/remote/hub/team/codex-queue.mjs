@@ -201,9 +201,11 @@ export async function queueCodexMessage({
   }
   if (socketPath) {
     const client = clientFactory({ socketPath, connectTimeoutMs: 5000 });
+    let connected = false;
     let addSent = false;
     try {
       await client.connect();
+      connected = true;
       await client.request("initialize", {
         clientInfo: { name: "triflux-tfx-live", version: "1.0.0" },
         capabilities: { experimentalApi: true },
@@ -238,8 +240,11 @@ export async function queueCodexMessage({
       } while (cursor);
       // 별도 TUI는 공유 daemon에 없으므로 기존 디스크 큐 경로를 유지한다.
     } catch (error) {
-      if (addSent && typeof error.code !== "number") error.maybeQueued = true;
-      throw error;
+      if (connected) {
+        if (addSent && typeof error.code !== "number") error.maybeQueued = true;
+        throw error;
+      }
+      // daemon 연결 실패 때만 기존 stdio 큐 경로로 넘긴다.
     } finally {
       client.close();
     }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -208,6 +208,51 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (l
         .filter((msg) => msg.id !== undefined && msg.method !== "initialize"),
   };
 }
+
+test("stale daemon connect failure falls back to stdio queue exactly once", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-stale-queue-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const server = await fakeAppServer(dir, {
+    initialize: [{ result: {} }],
+    "thread/queue/add": [{ result: { queuedSubmission: { id: "q-stale" } } }],
+  });
+  let spawned = 0;
+  let closed = false;
+  const result = await queueCodexMessage({
+    threadId: THREAD,
+    message: "thread-only work",
+    env: server.env,
+    resolveSocket: () => "/stale/daemon.sock",
+    clientFactory: () => ({
+      connect: async () => {
+        throw Object.assign(
+          new Error("connect ECONNREFUSED /stale/daemon.sock"),
+          { code: "ECONNREFUSED" },
+        );
+      },
+      request: () =>
+        assert.fail("unconnected daemon must not receive a request"),
+      close: () => {
+        closed = true;
+      },
+    }),
+    spawnFn: (...args) => {
+      spawned += 1;
+      return spawn(...args);
+    },
+    execFn: () => assert.fail("stdio queue must not resend through argv"),
+  });
+  assert.equal(result.via, "app-server");
+  assert.equal(result.queuedMessageId, "q-stale");
+  assert.equal(spawned, 1);
+  assert.equal(closed, true);
+  const requests = await server.requests();
+  assert.deepEqual(
+    requests.map((request) => request.method),
+    ["thread/queue/add"],
+  );
+  assert.equal(requests[0].params.threadId, THREAD);
+});
 
 test("queue 조회는 요청 표식을 뽑고 삭제는 이미 가져간 항목을 missing 으로 나눈다", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-app-server-"));
