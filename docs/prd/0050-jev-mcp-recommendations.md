@@ -11,7 +11,7 @@
 1. 기존 tfx-auto, multi, lead 흐름으로 작업을 요청한다.
 2. triflux가 프로젝트 정보, 작업, 대상 CLI와 기존 MCP 인벤토리를 모은다.
 3. 원 작업의 어휘로 로컬 카탈로그에서 후보를 가져와 Jev가 각 후보의 유용성을 독립 평가한다.
-4. 리드와 워커는 추천된 MCP의 설명, 출처, 설치 상태와 승인 필요 여부를 받는다.
+4. 추천 결과 데이터에는 MCP의 설명, 출처, 설치 상태와 승인 필요 여부를 담는다. 리드와 워커의 프롬프트에는 안전하게 인코딩한 식별값, 출처, confidence와 상태만 전달한다.
 5. 미설치 항목은 설치 제안으로 표시한다. 첫 단계에서 설치하거나 새 MCP 서버를 시작하지 않는다.
 
 ## 첫 구현 범위
@@ -33,6 +33,7 @@
 - 인벤토리: 대상 CLI, 로컬 서버 이름, 확인된 식별 정보, present 또는 missing 또는 unknown 상태. 인증 상태는 인벤토리만으로 정상이라고 확정하지 않는다.
 - 추천 결과: cli, status, recommendations, diagnostics, applied=false.
 - 개별 추천: ID와 이름, 출처, 설명, confidence, 설치 상태, requiresApproval. 미설치 또는 설치 여부가 불명확하면 승인 없이 설치 가능한 항목으로 표시하지 않는다.
+- 프롬프트: ID, 출처 ID와 URL, confidence, 설치 상태, 인증과 활성화 상태, requiresApproval, applied=false와 고정 정책만 전달한다. 이름, 설명과 버전은 결과 데이터에만 남긴다.
 - requiresApproval은 새 설치 제안의 승인 필요 여부다. present는 false, missing과 unknown은 true다. false도 설치나 활성화 권한의 근거가 아니며 applied=false를 유지한다.
 - 상태: recommended, no_recommendation, unavailable, deferred. 실패나 보류 이유를 diagnostics에 남긴다.
 - 카탈로그의 env 요구사항 이름은 보관할 수 있지만 실제 인증값, 헤더, 사용자 설정 전문은 저장하거나 출력하지 않는다.

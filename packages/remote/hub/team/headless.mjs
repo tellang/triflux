@@ -177,6 +177,7 @@ export function normalizeHeadlessAssignment(assignment = {}, index = 0) {
 
 function buildRouteBackedHeadlessCommand(
   resolvedCli,
+  task,
   promptFile,
   resultFile,
   opts = {},
@@ -188,7 +189,9 @@ function buildRouteBackedHeadlessCommand(
     Number.isFinite(Number(opts.timeoutSec)) && Number(opts.timeoutSec) > 0
       ? String(Math.trunc(Number(opts.timeoutSec)))
       : "";
-  const timeoutArg = timeout ? ` ${shellQuote(timeout)}` : "";
+  // 실행용 프롬프트와 같은 private 경로와 수명으로 원 작업만 별도 보관한다.
+  const taskFile = `${promptFile}.task`;
+  writeFileSync(taskFile, task, { encoding: "utf8", mode: 0o600, flag: "wx" });
   const reviewByAuthor = ["code-reviewer", "quality-reviewer"].includes(
     routeAgent,
   );
@@ -216,7 +219,7 @@ function buildRouteBackedHeadlessCommand(
   const script =
     `__tfx_prompt=$(cat ${shellQuote(promptFile)}); ` +
     `${lifecycleEnv}${codexProfileEnv}${cliModeEnv}${reviewEnv}` +
-    `bash ${shellQuote(routeScript)} ${shellQuote(routeAgent)} "$__tfx_prompt" ${shellQuote(mcp)}${timeoutArg} ` +
+    `bash ${shellQuote(routeScript)} ${shellQuote(routeAgent)} "$__tfx_prompt" ${shellQuote(mcp)} ${shellQuote(timeout)} '' ${shellQuote(taskFile)} ` +
     `> ${shellQuote(resultFile)} 2>${shellQuote(`${resultFile}.err`)} < /dev/null`;
   return `bash -lc ${shellQuote(script)}`;
 }
@@ -333,7 +336,11 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
     resultDir(),
     "prompt-" + randomUUID().slice(0, 8) + ".txt",
   ).replace(/\\/g, "/");
-  writeFileSync(promptFile, fullPrompt, "utf8");
+  writeFileSync(promptFile, fullPrompt, {
+    encoding: "utf8",
+    mode: 0o600,
+    flag: "wx",
+  });
 
   // Codex와 Antigravity는 tfx-route.sh를 통해서만 headless 실행한다. 이 경로가
   // disable/fallback/fail-loud 정책의 유일한 판정원이다. 여기서 같은 정책을
@@ -348,12 +355,18 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
       : undefined;
   const backendCommand =
     reviewByAuthor || resolvedCli === "codex" || resolvedCli === "antigravity"
-      ? buildRouteBackedHeadlessCommand(resolvedCli, promptFile, resultFile, {
-          ...opts,
-          role: reviewByAuthor ? routeAgent : opts.role,
-          codexProfile,
-          mcp,
-        })
+      ? buildRouteBackedHeadlessCommand(
+          resolvedCli,
+          prompt,
+          promptFile,
+          resultFile,
+          {
+            ...opts,
+            role: reviewByAuthor ? routeAgent : opts.role,
+            codexProfile,
+            mcp,
+          },
+        )
       : getBackend(resolvedCli).buildArgs(fullPrompt, resultFile, {
           ...opts,
           model,

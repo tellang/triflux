@@ -6,7 +6,7 @@ All notable changes to triflux will be documented in this file.
 
 ### Added
 - mcp: 기존 route, multi headless와 task가 있는 lead에서 Claude, Codex, Antigravity의 작업별 MCP 추천을 Jev로 생성한다. 출처, confidence, 설치 상태와 승인 필요 여부를 함께 전달한다.
-- mcp: 공식 MCP Registry의 운영 API를 캐시하고 구조화된 프로젝트 정보와 검색어로 후보를 조회한다. `tfx mcp catalog-refresh`는 카탈로그만 갱신한다.
+- mcp: 공식 MCP Registry의 운영 API를 캐시하고 원 작업의 어휘, 구조화된 프로젝트 정보와 명시 검색어로 후보를 조회한다. `tfx mcp catalog-refresh`는 카탈로그만 갱신한다.
 
 ### Changed
 - mcp: 추천은 설치와 새 활성화를 수행하지 않으며 `applied=false`로 표시한다. 카탈로그와 Jev의 실패는 기존 작업 실행을 막지 않는다.

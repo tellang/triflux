@@ -3,8 +3,8 @@
 VERSION="2.7"
 
 # 사용법:
-#   tfx-route.sh <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file]
-#   tfx-route.sh --async <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file]
+#   tfx-route.sh <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file] [mcp_task_file]
+#   tfx-route.sh --async <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file] [mcp_task_file]
 #   tfx-route.sh --job-status <job_id>
 #   tfx-route.sh --job-result <job_id>
 #
@@ -435,6 +435,8 @@ PROMPT="${2:?프롬프트 필수}"
 MCP_PROFILE="${3:-auto}"
 USER_TIMEOUT="${4:-}"
 CONTEXT_FILE="${5:-}"
+# 추천 입력용 데이터이며 실행 권한과 CLI 정책에는 사용하지 않는다.
+MCP_TASK_FILE="${6:-}"
 
 case "$AGENT_TYPE" in
   multi|team)
@@ -990,7 +992,7 @@ auto_reroute() {
   # EXIT trap 정리 — exec는 현재 프로세스를 교체하므로 trap이 실행되지 않음
   declare -F cleanup_workers >/dev/null && cleanup_workers
   TFX_CLI_MODE="$target_cli" exec bash "${BASH_SOURCE[0]}" \
-    "$AGENT_TYPE" "$PROMPT" "$MCP_PROFILE" "${USER_TIMEOUT:-}" "${CONTEXT_FILE:-}"
+    "$AGENT_TYPE" "$PROMPT" "$MCP_PROFILE" "${USER_TIMEOUT:-}" "${CONTEXT_FILE:-}" "${MCP_TASK_FILE:-}"
 }
 
 capture_workspace_signature() {
@@ -2461,6 +2463,15 @@ apply_jev_pre_route() {
 # ── 메인 실행 ──
 main() {
   local recommendation_task="$PROMPT"
+  if [[ -n "$MCP_TASK_FILE" ]]; then
+    # 명령 치환이 원 작업 끝의 개행을 지우지 않도록 끝 문자를 붙였다가 뺀다.
+    if recommendation_task=$(cat -- "$MCP_TASK_FILE" 2>/dev/null && printf '.'); then
+      recommendation_task="${recommendation_task%.}"
+    else
+      recommendation_task=""
+      echo '[tfx-route] MCP recommendation: unavailable applied=false diagnostic=mcp_task_file_unreadable' >&2
+    fi
+  fi
   # 종료 시 per-process 에이전트 파일 + 워커 프로세스 정리
   trap 'cleanup_workers' EXIT
 
