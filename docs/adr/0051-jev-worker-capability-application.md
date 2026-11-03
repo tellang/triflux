@@ -21,6 +21,9 @@ pr: null
 
 - `tfx judge worker-model`은 기존 역할 정책과 Jev 판단을 재사용하고 모델, 가족, effort, 출처와 폴백 이유를 JSON으로 반환한다. 조회만으로 세션을 생성하거나 모델 설정을 저장하지 않는다.
 - 실제 워커 배정에서도 같은 정책을 사용한다. 명시 모델과 effort, 재시도 정책, 작성 벤더별 리뷰 정책을 보존한다.
+- 모델 선택은 `agent-route-policy.mjs`에서 역할 기본값, `judgeTaskRouting` 결과, read-only 모델 resolver를 조합한다. Codex와 agy는 route가 최종 provider를 정한 뒤 한 번 선택하고, Claude 직접 워커는 부모가 같은 정책을 적용한다. 원 작업은 조립된 실행 prompt와 분리한다.
+- headless의 명시 모델과 effort는 한쪽만 있어도 자동 추천으로 나머지를 채우지 않는다. 명시 모델이 없는 Codex는 역할 기본 프로필을 명시 오버라이드로 보내지 않아 Jev 조정이 가능하다.
+- 워커의 `.model.json`에 선택값, 출처, 폴백 이유와 실행 인자를 기록하고 결과의 `workerModelFile`로 연결한다. `appliedTo: launch_arguments`, `runtimeConfirmed: false`는 인자 전달 단계이며 실제 모델 수신 완료를 뜻하지 않는다.
 - MCP는 추천과 실행 설정을 구분한다. 정확한 로컬 등록 정보와 연결되는 추천만 실행별 적용 대상으로 삼고 명시 필터를 우선한다.
 - Claude의 실행별 MCP 설정과 Codex의 실행별 설정 인자를 사용한다. 적용 범위를 확인하지 못한 경로는 보류하고 이유를 반환한다.
 - 새 MCP나 플러그인은 사용자 확인 전에 설치하지 않는다. 전역 설정 교체, 공유 데몬 재시작, 다른 세션 설정 변경으로 폴백하지 않는다.

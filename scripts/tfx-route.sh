@@ -1711,21 +1711,27 @@ resolve_mcp_policy() {
 }
 
 get_claude_model() {
+  if [[ "${TFX_WORKER_CLI:-}" == "claude" && -n "${TFX_WORKER_MODEL:-}${TFX_WORKER_EFFORT:-}" ]]; then
+    echo "${TFX_WORKER_MODEL:-}"
+    return
+  fi
   if [[ -n "${JEV_CLAUDE_MODEL:-}" ]]; then
     echo "$JEV_CLAUDE_MODEL"
     return
   fi
-  case "$AGENT_TYPE" in
-    explore) echo "haiku" ;;
-    security-reviewer) echo "fable" ;;
-    document-specialist|designer|writer|antigravity|agy) echo "opus" ;;
-    code-reviewer|quality-reviewer) echo "opus" ;;
-    *) echo "sonnet" ;;
-  esac
+  "$NODE_BIN" --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const { resolveClaudeWorkerDefaults } = await import(pathToFileURL(process.argv[1]).href);
+    console.log(resolveClaudeWorkerDefaults(process.argv[2]).model);
+  ' "${CODEX_PROFILE_MODULE%/*}/agent-route-policy.mjs" "$AGENT_TYPE"
 }
 
 get_claude_effort() {
-  local effort="${CLI_EFFORT:-${JEV_CLAUDE_EFFORT:-}}"
+  if [[ "${TFX_WORKER_CLI:-}" == "claude" && -n "${TFX_WORKER_MODEL:-}${TFX_WORKER_EFFORT:-}" ]]; then
+    echo "${WORKER_SELECTED_EFFORT:-}"
+    return
+  fi
+  local effort="${JEV_CLAUDE_EFFORT:-${CLI_EFFORT:-}}"
   # 명시한 프로필은 해석된 정책 effort를 쓰고, 기본 native/폴백의 빈 값은 보존한다.
   [[ "$TFX_CODEX_PROFILE" == "auto" ]] || effort="$CODEX_POLICY_EFFORT"
   case "$effort" in
@@ -2148,11 +2154,16 @@ run_antigravity_exec() {
     local _agy_model _agy_effort _agy_selection
     _agy_selection="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-argon}}")" || return $?
     IFS=$'\x1e' read -r _agy_model _agy_effort <<< "$_agy_selection"
+    if [[ "${TFX_WORKER_CLI:-antigravity}" == "antigravity" && -n "${TFX_WORKER_MODEL:-}${TFX_WORKER_EFFORT:-}" ]]; then
+      _agy_model="${TFX_WORKER_MODEL:-}"
+      _agy_effort="${WORKER_SELECTED_EFFORT:-}"
+    fi
     if [[ -n "$_agy_model" ]]; then
       agy_args+=("--model" "$_agy_model")
-      [[ -z "$_agy_effort" ]] || agy_args+=("--effort" "$_agy_effort")
     fi
+    [[ -z "$_agy_effort" ]] || agy_args+=("--effort" "$_agy_effort")
   fi
+  record_worker_model_launch "${agy_args[@]}"
   if [[ -n "$_print_flag" ]]; then
     # argv 상한(macOS ARG_MAX 1MiB) 안에서만 인자로 넘긴다. 초과는 조용히 자르지 않는다.
     if (( ${#prompt} > 900000 )); then
@@ -2321,6 +2332,37 @@ _codex_stdout_has_meaningful_output() {
   ' "$output_file" 2>/dev/null
 }
 
+record_worker_model_launch() {
+  [[ -n "${TFX_WORKER_MODEL_FILE:-}" && -n "${WORKER_MODEL_JSON:-}" ]] || return 0
+  "$NODE_BIN" --input-type=module -e '
+    import { writeFileSync } from "node:fs";
+    import { pathToFileURL } from "node:url";
+    const selection = JSON.parse(process.argv[1]);
+    const [file, cli, module, ...argv] = process.argv.slice(2);
+    let profile = null, model = null, effort = null;
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] === "--profile") profile = argv[++i];
+      else if (argv[i].startsWith("--profile=")) profile = argv[i].slice(10);
+      else if (argv[i] === "--model") model = argv[++i];
+      else if (argv[i] === "--effort") effort = argv[++i];
+      else if (argv[i] === "-c") {
+        const value = argv[++i] || "";
+        if (value.startsWith("model_reasoning_effort=")) effort = value.slice(23).replace(/^"|"$/g, "");
+      }
+    }
+    if (cli === "codex" && profile) {
+      const { resolveCodexProfileConfigValues } = await import(pathToFileURL(module).href);
+      const defaults = resolveCodexProfileConfigValues(profile, { allowCommand: false, persist: false });
+      model ||= defaults.model;
+      effort ||= defaults.effort;
+    }
+    writeFileSync(file, JSON.stringify({ ...selection,
+      appliedTo: "launch_arguments", runtimeConfirmed: false,
+      launch: { cli, profile, model, effort, argv },
+    }), { mode: 0o600 });
+  ' "$WORKER_MODEL_JSON" "$TFX_WORKER_MODEL_FILE" "$CLI_TYPE" "$CODEX_PROFILE_MODULE" "$@"
+}
+
 run_codex_exec() {
   refresh_codex_profiles
   local prompt="$1"
@@ -2329,6 +2371,10 @@ run_codex_exec() {
   local worker_pid
   local -a codex_args=()
   read -r -a codex_args <<< "$CLI_ARGS"
+  if [[ -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" && "${TFX_WORKER_CLI:-codex}" == "codex" ]]; then
+    [[ -z "${TFX_WORKER_MODEL:-}" ]] || codex_args+=(--model "$TFX_WORKER_MODEL")
+    [[ -z "${TFX_WORKER_EFFORT:-}" ]] || codex_args+=(-c "model_reasoning_effort=\"${WORKER_SELECTED_EFFORT}\"")
+  fi
   codex_args=("${codex_args[0]}" ${CODEX_CONFIG_FLAGS[@]+"${CODEX_CONFIG_FLAGS[@]}"} "${codex_args[@]:1}")
   local codex_home
   codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
@@ -2349,6 +2395,7 @@ run_codex_exec() {
 
   _attempt_codex_run() {
     exit_code_local=0
+    record_worker_model_launch "${codex_args[@]}"
     : > "$CODEX_LAST_MESSAGE_LOG"
     # `--` end-of-options: prompt가 '--'/'---' (front-matter 등)로 시작하면
     # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
@@ -2409,38 +2456,31 @@ run_codex_exec() {
 }
 
 apply_jev_pre_route() {
-  jev_enabled || return 0
-  [[ -n "${PROMPT:-}" ]] || return 0
+  [[ -n "${recommendation_task:-}" ]] || return 0
 
   local jev_row=""
   if ! jev_row=$(bridge_cli judge-route \
     --agent "$AGENT_TYPE" \
-    --cli-type "${TFX_CLI_MODE:-codex}" \
-    --prompt "$PROMPT" \
-    --delimited 2>/dev/null); then
+    --cli-type "${CLI_TYPE/claude-native/claude}" \
+    --prompt "$recommendation_task" \
+    --worker-model --delimited); then
     return 0
   fi
   [[ -n "$jev_row" ]] || return 0
 
   local _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff
   local _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf _jev_tier_shift
+  local _worker_profile _worker_model _worker_effort
   IFS=$'\x1e' read -r _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff \
-    _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf _jev_tier_shift <<< "$jev_row"
+    _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf _jev_tier_shift \
+    _worker_profile _worker_model _worker_effort WORKER_MODEL_JSON <<< "$jev_row"
 
-  local _jev_codex_reason=explicit_override_preserved _jev_agy_reason=explicit_override_preserved
-  [[ "${TFX_CODEX_PROFILE:-auto}" != "auto" ]] || _jev_codex_reason=no_recommendation
-  [[ -n "${TFX_GEMINI_PROFILE:-}" ]] || _jev_agy_reason=no_recommendation
-  if [[ "${TFX_CODEX_PROFILE:-auto}" == "auto" && -n "$_jev_codex_prof" ]]; then
-    TFX_CODEX_PROFILE="$_jev_codex_prof"
-    _jev_codex_reason=jev_applied
-  fi
-  if [[ "${TFX_CODEX_PROFILE:-auto}" == "auto" && -n "$_jev_tier_shift" ]]; then
-    JEV_TIER_SHIFT="$_jev_tier_shift"
-    _jev_codex_reason="jev_tier_${_jev_tier_shift}"
-  fi
-  if [[ -z "${TFX_GEMINI_PROFILE:-}" && -n "$_jev_agy_prof" ]]; then
-    TFX_GEMINI_PROFILE="$_jev_agy_prof"
-    _jev_agy_reason=jev_applied
+  WORKER_SELECTED_EFFORT="$_worker_effort"
+  if [[ "$CLI_TYPE" == "codex" && -n "$_worker_profile" ]]; then
+    TFX_CODEX_PROFILE="$_worker_profile"
+    CODEX_OVERRIDE_PROFILE="$_worker_profile"
+  elif [[ "$CLI_TYPE" == "antigravity" && -n "$_worker_profile" ]]; then
+    TFX_GEMINI_PROFILE="$_worker_profile"
     export TFX_GEMINI_PROFILE
   fi
   if [[ "${TFX_EXECUTION_MODE:-auto}" == "auto" && -n "$_jev_exec_mode" ]]; then
@@ -2455,9 +2495,9 @@ apply_jev_pre_route() {
   if [[ -z "${TFX_EXPECTED_DURATION_SEC:-}" && -n "$_jev_dur" ]]; then
     TFX_EXPECTED_DURATION_SEC="$_jev_dur"
   fi
-  JEV_CLAUDE_MODEL="$_jev_claude_mod"
-  JEV_CLAUDE_EFFORT="$_jev_claude_eff"
-  echo "[tfx-route] Jev pre-route: complexity=${_jev_comp} recommended_codex=${_jev_codex_prof:-none} effective_codex=${TFX_CODEX_PROFILE:-auto} codex_reason=${_jev_codex_reason} recommended_agy=${_jev_agy_prof:-none} effective_agy=${TFX_GEMINI_PROFILE:-auto} agy_reason=${_jev_agy_reason} mode=${TFX_EXECUTION_MODE} mcp=${MCP_PROFILE} conf=${_jev_conf}" >&2
+  JEV_CLAUDE_MODEL="$_worker_model"
+  JEV_CLAUDE_EFFORT="$_worker_effort"
+  echo "[tfx-route] worker-model: $WORKER_MODEL_JSON" >&2
 }
 
 # ── 메인 실행 ──
@@ -2475,14 +2515,15 @@ main() {
   # 종료 시 per-process 에이전트 파일 + 워커 프로세스 정리
   trap 'cleanup_workers' EXIT
 
-  apply_jev_pre_route
   route_agent "$AGENT_TYPE"
   apply_cli_mode
   apply_no_claude_native_mode
   apply_verifier_override
+  apply_cli_disable_policy
+  apply_jev_pre_route
+  [[ "$CLI_TYPE" != "antigravity" ]] || CLI_ARGS="$(build_antigravity_base)"
   apply_codex_profile_override
   apply_retry_snapshot_cli_invocation
-  apply_cli_disable_policy
   apply_codex_concrete_effort_guard
 
   # CLI 경로 해석
@@ -2710,8 +2751,8 @@ FALLBACK_EOF
     local -a claude_worker_args=(
       "--command" "$CLI_CMD"
       "--command-args-json" "$CLAUDE_BIN_ARGS_JSON"
-      "--model" "$claude_model"
     )
+    [[ -z "$claude_model" ]] || claude_worker_args+=("--model" "$claude_model")
     case "${TFX_EXECUTION_MODE:-bypass}" in
       read_only)
         claude_worker_args+=("--permission-mode" "plan")
@@ -2728,6 +2769,7 @@ FALLBACK_EOF
     esac
     [ -n "$claude_effort" ] && claude_worker_args+=("--effort" "$claude_effort")
 
+    record_worker_model_launch "${claude_worker_args[@]}"
     run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 && "$_AGY_CLAUDE_FALLBACK" == "1" ]]; then
       echo "[tfx-route] Claude fallback 워커 실패(exit=${exit_code})." >&2

@@ -27,6 +27,7 @@ export function parseArgs(argv) {
     args: argv,
     options: {
       team: { type: "string" },
+      "worker-model": { type: "boolean" },
       "task-id": { type: "string" },
       owner: { type: "string" },
       status: { type: "string" },
@@ -1148,34 +1149,85 @@ async function cmdJudgeRoute(args) {
     const { isJevEnabled, judgeTaskRouting } = await import(
       "./lib/jev-addon.mjs"
     );
-    if (!isJevEnabled()) {
+    if (!isJevEnabled() && !args["worker-model"]) {
       if (args.delimited) return true;
       return emitJson({ ok: true, enabled: false, routing: null });
     }
-    const routing = await judgeTaskRouting({
-      prompt,
-      agentType,
-      cliType,
-      availableServers,
-    });
+    let routingFailure;
+    const routing = await judgeTaskRouting(
+      {
+        prompt,
+        agentType,
+        cliType,
+        availableServers,
+      },
+      {
+        includeDiagnostics: Boolean(args["worker-model"]),
+        onDiagnostic: (reason) => {
+          routingFailure = reason;
+        },
+      },
+    );
+    let workerModel;
+    if (args["worker-model"]) {
+      const { resolveWorkerModel } = await import(
+        "../scripts/lib/agent-route-policy.mjs"
+      );
+      const env = process.env;
+      const sameProvider =
+        !env.TFX_WORKER_CLI || env.TFX_WORKER_CLI === cliType;
+      workerModel = await resolveWorkerModel(
+        {
+          task: prompt,
+          agent: agentType,
+          cli: cliType,
+          model: sameProvider ? env.TFX_WORKER_MODEL : undefined,
+          effort: sameProvider ? env.TFX_WORKER_EFFORT : undefined,
+          profile:
+            cliType === "codex"
+              ? env.TFX_CODEX_PROFILE
+              : cliType === "antigravity" || cliType === "agy"
+                ? env.TFX_GEMINI_PROFILE
+                : "auto",
+          nested: Boolean(
+            env.TFX_WORKER_INDEX ||
+              env.TFX_TEAM_NAME ||
+              env.TFX_WORKER_SANDBOX_SCOPE,
+          ),
+          protectedPolicy:
+            env.TFX_RETRY_SNAPSHOT || env.TFX_RETRY_SNAPSHOT_FILE
+              ? "retry"
+              : null,
+        },
+        { routing, fallbackReason: routingFailure },
+      );
+    }
     if (args.delimited) {
-      if (!routing) return true;
+      if (!routing && !workerModel) return true;
+      const selected = routing || {};
       const RS = "\x1e";
       const fields = [
-        routing.complexity || "",
-        routing.codexProfile || "",
-        routing.agyProfile || "",
-        routing.claudeModel || "",
-        routing.claudeEffort || "",
-        String(routing.expectedDurationSec || ""),
-        routing.executionMode || "",
-        routing.mcpProfile || "",
-        Array.isArray(routing.neededMcpServers)
-          ? routing.neededMcpServers.join(",")
+        selected.complexity || "",
+        selected.codexProfile || "",
+        selected.agyProfile || "",
+        selected.claudeModel || "",
+        selected.claudeEffort || "",
+        String(selected.expectedDurationSec || ""),
+        selected.executionMode || "",
+        selected.mcpProfile || "",
+        Array.isArray(selected.neededMcpServers)
+          ? selected.neededMcpServers.join(",")
           : "",
-        String(routing.confidence ?? ""),
-        routing.tierShift || "",
+        String(selected.confidence ?? ""),
+        selected.tierShift || "",
       ];
+      if (workerModel)
+        fields.push(
+          workerModel.profile || "",
+          workerModel.model || "",
+          workerModel.effort || "",
+          JSON.stringify(workerModel),
+        );
       process.stdout.write(fields.join(RS));
       return true;
     }

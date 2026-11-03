@@ -358,15 +358,26 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     ],
   },
   judge: {
-    usage: "tfx judge <route|worker-mode> --task SUMMARY",
+    usage:
+      "tfx judge <route|worker-mode|worker-model> --task SUMMARY [--agent ROLE] [--cli codex|claude|agy]",
     description:
-      "route는 스킬 선택 결정트리의 분기와 규칙을, worker-mode는 워커 권한 권고를 JSON으로 낸다. route의 보류 원인은 diagnostics에 표시하고, Jev를 쓰지 못하면 worker-mode는 규칙 판정",
+      "route는 스킬 분기, worker-mode는 권한, worker-model은 세션 생성 없이 모델 가족, 모델, effort와 출처를 JSON으로 낸다. Jev 실패 시 역할 규칙으로 폴백한다",
     options: [
       {
         name: "--task",
         type: "string",
         description:
           "짧은 작업 요약, route는 끝 1,000자만 전송하고 worker-mode는 1,000자 초과 시 외부로 보내지 않음",
+      },
+      {
+        name: "--agent",
+        type: "string",
+        description: "worker-model 역할, 기본 executor",
+      },
+      {
+        name: "--cli",
+        type: "string",
+        description: "worker-model CLI: codex|claude|agy, 기본 codex",
       },
     ],
   },
@@ -4392,6 +4403,47 @@ async function main() {
     case "judge": {
       if (cmdArgs.some(isHelpArg)) {
         printCommandHelp("judge");
+        return;
+      }
+      if (cmdArgs[0] === "worker-model") {
+        const values = {};
+        for (let i = 1; i < cmdArgs.length; i += 2) {
+          const flag = cmdArgs[i];
+          const value = cmdArgs[i + 1];
+          if (
+            !["--task", "--agent", "--cli"].includes(flag) ||
+            !value?.trim() ||
+            value.startsWith("--") ||
+            Object.hasOwn(values, flag)
+          )
+            throw createCliError(`잘못된 worker-model 옵션: ${flag}`, {
+              exitCode: EXIT_ARG_ERROR,
+              reason: "argError",
+            });
+          values[flag] = value;
+        }
+        const agent = values["--agent"] || "executor";
+        const cli = values["--cli"] || "codex";
+        const map = JSON.parse(
+          readFileSync(join(PKG_ROOT, "hub/team/agent-map.json"), "utf8"),
+        );
+        if (
+          !values["--task"] ||
+          !Object.hasOwn(map, agent) ||
+          !["codex", "claude", "agy"].includes(cli)
+        )
+          throw createCliError(
+            "worker-model에는 --task와 유효한 --agent, --cli가 필요합니다",
+            { exitCode: EXIT_ARG_ERROR, reason: "argError" },
+          );
+        const { resolveWorkerModel } = await import(
+          "../scripts/lib/agent-route-policy.mjs"
+        );
+        console.log(
+          JSON.stringify(
+            await resolveWorkerModel({ task: values["--task"], agent, cli }),
+          ),
+        );
         return;
       }
       const task = readCliOptionValue(cmdArgs, "--task");

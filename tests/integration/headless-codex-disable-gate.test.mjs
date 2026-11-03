@@ -97,13 +97,14 @@ function createHeadlessFixture() {
   return { root, home, codexBin, agyBin, codexLog, agyLog };
 }
 
-function runCodexHeadless(fixture, overrides = {}) {
+function runCodexHeadless(fixture, overrides = {}, buildOptions = {}) {
   const resultFile = join(fixture.root, "result.txt");
   const command = buildHeadlessCommand("codex", "gate test", resultFile, {
     handoff: false,
     mcp: "minimal",
     role: "executor",
     routeScript: ROUTE_SCRIPT,
+    ...buildOptions,
   });
   const result = spawnSync(BASH_EXE, ["-lc", command], {
     cwd: ROOT,
@@ -272,5 +273,145 @@ describe("headless Codex disable gate", { timeout: 90_000 }, () => {
     assert.equal(readIfPresent(fixture.codexLog), "");
     assert.equal(readIfPresent(fixture.agyLog), "");
     assert.doesNotMatch(outcome.stderr, /claude-native/i);
+  });
+
+  function jevEnv() {
+    const jev = join(fixture.root, "jev");
+    writeFileSync(
+      jev,
+      `#!${process.execPath}
+const fs = require('node:fs');
+fs.appendFileSync(process.env.TFX_TEST_JEV_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
+const query = process.argv[3];
+const choice = query.includes('complexity') ? 'trivial' : query.includes('permission') ? 'workspace_auto' : query.includes('profile') ? 'none' : 'keep';
+console.log(JSON.stringify({ choice, value: false, confidence: 0.95 }));
+`,
+    );
+    chmodSync(jev, 0o755);
+    const log = join(fixture.root, "jev.log");
+    writeFileSync(log, "");
+    return {
+      TFX_JEV: "1",
+      TFX_JEV_CLI: jev,
+      JEV_API_KEY: "",
+      TYPESAFE_API_KEY: "",
+      TFX_JEV_STATS: "0",
+      TFX_TEST_JEV_LOG: log,
+    };
+  }
+
+  it("Jev 조회와 headless argv가 일치하고 원 task를 한 번만 판정한다", () => {
+    const env = jevEnv();
+    const contextFile = join(fixture.root, "context.txt");
+    writeFileSync(contextFile, "조립 문맥은 모델 판정에 섞이지 않아야 함");
+    const outcome = runCodexHeadless(fixture, env, {
+      contextFile,
+      mcp: "none",
+    });
+    assert.equal(outcome.result.status, 0, outcome.stderr);
+    assert.match(readIfPresent(fixture.codexLog), /--profile luna/);
+    assert.match(
+      readIfPresent(fixture.codexLog),
+      /model_reasoning_effort="low"/,
+    );
+    const metadata = JSON.parse(
+      readIfPresent(join(fixture.root, "result.txt.model.json")),
+    );
+    assert.equal(metadata.family, "luna");
+    assert.equal(metadata.effort, "low");
+    assert.equal(metadata.source, "jev");
+    assert.equal(metadata.runtimeConfirmed, false);
+    const queries = readIfPresent(env.TFX_TEST_JEV_LOG)
+      .split("\n")
+      .filter(Boolean)
+      .map(JSON.parse);
+    const complexity = queries.filter((args) =>
+      args[1].includes("Classify the complexity"),
+    );
+    assert.equal(complexity.length, 1);
+    assert.ok(
+      complexity[0].some((arg) =>
+        arg.startsWith(
+          "agent_role: executor\ncli_type: codex\ntask_prompt:\ngate test",
+        ),
+      ),
+    );
+    assert.ok(
+      !complexity[0].some(
+        (arg) => arg.includes("prior_context") || arg.includes("HANDOFF"),
+      ),
+    );
+    const query = spawnSync(
+      process.execPath,
+      [
+        join(ROOT, "bin/triflux.mjs"),
+        "judge",
+        "worker-model",
+        "--task",
+        "gate test",
+      ],
+      {
+        env: {
+          ...process.env,
+          HOME: fixture.home,
+          CODEX_HOME: join(fixture.home, ".codex"),
+          ...env,
+        },
+        encoding: "utf8",
+      },
+    );
+    assert.equal(query.status, 0, query.stderr);
+    const selected = JSON.parse(query.stdout);
+    assert.equal(selected.model, metadata.model);
+    assert.equal(selected.effort, metadata.effort);
+  });
+
+  it("명시 model만 전달하면 Jev가 effort를 채우지 않는다", () => {
+    const outcome = runCodexHeadless(fixture, jevEnv(), {
+      model: "explicit-model",
+    });
+    assert.equal(outcome.result.status, 0, outcome.stderr);
+    assert.match(readIfPresent(fixture.codexLog), /--model explicit-model/);
+    assert.doesNotMatch(
+      readIfPresent(fixture.codexLog),
+      /model_reasoning_effort="low"/,
+    );
+    const metadata = JSON.parse(
+      readIfPresent(join(fixture.root, "result.txt.model.json")),
+    );
+    assert.equal(metadata.source, "explicit");
+    assert.equal(metadata.effort, null);
+    assert.equal(metadata.launch.model, "explicit-model");
+  });
+
+  it("Codex 차단 뒤에는 최종 agy provider의 모델과 effort를 전달한다", () => {
+    const outcome = runCodexHeadless(fixture, {
+      ...jevEnv(),
+      TFX_DISABLE_CODEX: "1",
+    });
+    assert.equal(outcome.result.status, 0, outcome.stderr);
+    assert.equal(readIfPresent(fixture.codexLog), "");
+    assert.match(
+      readIfPresent(fixture.agyLog),
+      /--model gemini-4-argon --effort low/,
+    );
+    const metadata = JSON.parse(
+      readIfPresent(join(fixture.root, "result.txt.model.json")),
+    );
+    assert.equal(metadata.cli, "agy");
+    assert.equal(metadata.family, "argon");
+    assert.equal(metadata.effort, "low");
+  });
+
+  it("Jev를 끄면 규칙 폴백 출처와 실제 실행 인자를 기록한다", () => {
+    const outcome = runCodexHeadless(fixture, { TFX_JEV: "0" });
+    assert.equal(outcome.result.status, 0, outcome.stderr);
+    const metadata = JSON.parse(
+      readIfPresent(join(fixture.root, "result.txt.model.json")),
+    );
+    assert.equal(metadata.source, "rule");
+    assert.equal(metadata.fallbackReason, "jev_disabled");
+    assert.equal(metadata.launch.profile, "sol");
+    assert.equal(metadata.launch.effort, "high");
   });
 });

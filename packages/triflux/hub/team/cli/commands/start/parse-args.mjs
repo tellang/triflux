@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
+import { EFFORT_ORDER } from "../../../../../scripts/lib/model-effort.mjs";
 import { parseDashboardAnchor } from "../../../dashboard-anchor.mjs";
 import { parseDashboardLayout } from "../../../dashboard-layout.mjs";
 import {
@@ -57,6 +58,7 @@ export function parseTeamArgs(args = []) {
   let dashboardAnchor = "window";
   let mcpProfile = "";
   let model = "";
+  let effort = "";
   let cwd = "";
   let nativeBridge = false;
   let nativeBridgeMode = "agents";
@@ -108,6 +110,10 @@ export function parseTeamArgs(args = []) {
       mcpProfile = args[++index].trim();
     } else if ((current === "--model" || current === "-m") && args[index + 1]) {
       model = args[++index].trim();
+    } else if (current === "--effort" && args[index + 1]) {
+      effort = args[++index].trim();
+      if (!EFFORT_ORDER.includes(effort))
+        throw new Error(`알 수 없는 effort: ${effort}`);
     } else if (current === "--native-bridge" || current === "-nb") {
       nativeBridge = true;
       nativeBridgeExplicit = true;
@@ -185,6 +191,7 @@ export function parseTeamArgs(args = []) {
     dashboardAnchor,
     mcpProfile,
     model,
+    effort,
     cwd,
     nativeBridge,
     nativeBridgeMode,

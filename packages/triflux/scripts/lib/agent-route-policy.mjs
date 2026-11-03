@@ -8,10 +8,15 @@ import {
   normalizeCodexProfileName,
   resolveCodexProfileConfigValues,
 } from "./codex-profile-config.mjs";
-import { resolveGeminiProfileForPurpose } from "./gemini-profiles.mjs";
+import {
+  resolveGeminiModel,
+  resolveGeminiProfileForPurpose,
+} from "./gemini-profiles.mjs";
 import {
   modelEffortFromProfile,
   profileFromModelEffort,
+  resolveAgyModelEffort,
+  resolveCodexModelEffort,
 } from "./model-effort.mjs";
 
 const policy = {
@@ -338,6 +343,189 @@ function resolveDirectCodexRoutePolicy(agent) {
     return CODEX_AGENT_POLICY.designer;
   }
   return resolveCodexAgentPolicy(agent);
+}
+
+export function resolveClaudeWorkerDefaults(agent) {
+  const model =
+    agent === "explore"
+      ? "haiku"
+      : agent === "security-reviewer"
+        ? "fable"
+        : [
+              "document-specialist",
+              "designer",
+              "writer",
+              "antigravity",
+              "agy",
+              "code-reviewer",
+              "quality-reviewer",
+            ].includes(agent)
+          ? "opus"
+          : "sonnet";
+  return {
+    model,
+    effort: ["code-reviewer", "quality-reviewer"].includes(agent)
+      ? "high"
+      : null,
+  };
+}
+
+// 조회와 실행은 같은 역할 정책과 read-only resolver를 사용한다.
+// routing을 전달하면 이미 끝난 pre-route 판단을 재사용한다.
+export async function resolveWorkerModel(
+  {
+    task = "",
+    agent = "executor",
+    cli = "codex",
+    model,
+    effort,
+    profile = "auto",
+    nested = true,
+    protectedPolicy = null,
+  } = {},
+  options = {},
+) {
+  cli = cli === "antigravity" ? "agy" : cli;
+  if (!["codex", "claude", "agy"].includes(cli))
+    throw new Error(`알 수 없는 CLI: ${cli}`);
+  const env = options.env || process.env;
+  const readOnly = { ...options, env, allowCommand: false, persist: false };
+  const { isJevEnabled, judgeTaskRouting } = await import(
+    "../../hub/lib/jev-addon.mjs"
+  );
+  const enabled = isJevEnabled({ ...options, env });
+  let routing = options.routing;
+  let failure =
+    options.fallbackReason || (enabled ? "jev_unavailable" : "jev_disabled");
+  const explicitPair = Boolean(model || effort);
+  const explicitProfile = profile && profile !== "auto";
+  if (!protectedPolicy && ["code-reviewer", "quality-reviewer"].includes(agent))
+    protectedPolicy = "review";
+  if (
+    routing === undefined &&
+    enabled &&
+    !explicitPair &&
+    !explicitProfile &&
+    !protectedPolicy
+  ) {
+    try {
+      routing = await judgeTaskRouting(
+        { prompt: task, agentType: agent, cliType: cli },
+        {
+          ...options,
+          includeDiagnostics: true,
+          onDiagnostic: (reason) => {
+            failure = reason;
+          },
+        },
+      );
+    } catch {
+      failure = "jev_error";
+    }
+  }
+  const confidence = routing?.modelDecision?.confidence ?? null;
+  let source = "rule";
+  let reason = routing?.modelDecision?.reason || failure;
+  let selectedProfile =
+    cli === "codex"
+      ? resolveDirectCodexRoutePolicy(agent).profile
+      : cli === "agy"
+        ? resolveGeminiProfileForPurpose(agent)
+        : null;
+  if (explicitPair && protectedPolicy !== "retry") {
+    return {
+      cli,
+      agent,
+      family: null,
+      model: model || null,
+      effort: effort === "ultra" && nested ? "max" : effort || null,
+      profile: null,
+      confidence: null,
+      enabled,
+      source: "explicit",
+      reason: "explicit_model_effort_preserved",
+      fallbackReason: null,
+    };
+  }
+  if (explicitProfile || protectedPolicy) {
+    source = protectedPolicy || "explicit";
+    reason = protectedPolicy
+      ? `${protectedPolicy}_policy_preserved`
+      : "explicit_profile_preserved";
+    if (explicitProfile) selectedProfile = profile;
+  } else if (routing) {
+    const recommended =
+      cli === "codex"
+        ? routing.codexProfile
+        : cli === "agy"
+          ? routing.agyProfile
+          : routing.claudeModel;
+    if (recommended) {
+      if (cli !== "claude") selectedProfile = recommended;
+      source = "jev";
+      reason = "jev_applied";
+    } else if (cli === "codex" && routing.tierShift) {
+      const shifted = shiftCodexAgentProfile(agent, routing.tierShift);
+      if (routing.tierShift === "lower" && NO_LOWER_CODEX_AGENTS.has(agent))
+        reason = "role_floor_preserved";
+      else {
+        selectedProfile = shifted;
+        source = "jev";
+        reason = `jev_tier_${routing.tierShift}`;
+      }
+    } else if (routing.modelDecision?.reason === "accepted") {
+      reason = "role_default_preserved";
+    }
+  }
+  let selected;
+  if (cli === "codex") {
+    selectedProfile = nested
+      ? resolveNestedCodexAgentProfile(agent, {
+          profileOverride: selectedProfile,
+          codexHome: options.codexHome || env.CODEX_HOME,
+        })
+      : resolveCodexAgentProfile(agent, {
+          profileOverride: selectedProfile,
+          allowCustom: true,
+        });
+    const spec =
+      modelEffortFromProfile("codex", selectedProfile) ||
+      resolveCodexProfileConfigValues(selectedProfile, readOnly);
+    selected = spec.family
+      ? resolveCodexModelEffort(spec, readOnly)
+      : { family: null, ...spec };
+  } else if (cli === "agy") {
+    const spec = modelEffortFromProfile("agy", selectedProfile);
+    selected = spec
+      ? resolveAgyModelEffort(spec, readOnly)
+      : {
+          family: null,
+          model: resolveGeminiModel(selectedProfile, readOnly),
+          effort: null,
+        };
+  } else {
+    selected = { family: null, ...resolveClaudeWorkerDefaults(agent) };
+    if (source === "jev")
+      selected = {
+        family: null,
+        model: routing.claudeModel,
+        effort: routing.claudeEffort,
+      };
+    // 작성 벤더별 리뷰 effort는 자동 추천보다 우선한다.
+    if (["code-reviewer", "quality-reviewer"].includes(agent))
+      selected.effort = "high";
+  }
+  return {
+    cli,
+    agent,
+    ...selected,
+    profile: selectedProfile,
+    confidence,
+    enabled,
+    source,
+    reason,
+    fallbackReason: source === "rule" ? reason : null,
+  };
 }
 
 export function resolveAgentRoute(
