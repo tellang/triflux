@@ -29,7 +29,13 @@ function fixture(t) {
   t.after(() => rmSync(home, { recursive: true, force: true }));
   return {
     home,
-    env: { HOME: home, XDG_CACHE_HOME: join(home, "cache"), TFX_JEV: "0" },
+    env: {
+      HOME: home,
+      CODEX_HOME: join(home, ".codex"),
+      XDG_CONFIG_HOME: join(home, ".config"),
+      XDG_CACHE_HOME: join(home, "cache"),
+      TFX_JEV: "0",
+    },
   };
 }
 function save(file, value) {
@@ -233,7 +239,6 @@ test("Malformed page and cursor loops cannot replace a good cache", async (t) =>
   const before = readFileSync(good.cacheFile, "utf8");
   for (const payload of [
     { servers: [{}] },
-    { servers: [] },
     { servers: [server()], metadata: { nextCursor: "loop" } },
   ]) {
     const result = await refreshMcpCatalog({
@@ -524,5 +529,415 @@ test("Structured search bounds large catalogs and rejects incompatible transport
     !state.candidates.some(
       (candidate) => candidate.id === "official:io.example/unsupported",
     ),
+  );
+});
+
+for (const failure of ["timeout", "http", "malformed"]) {
+  test(`Initial Registry ${failure} resumes the last valid page without publishing partial entries`, async (t) => {
+    const f = fixture(t);
+    const first = await refreshMcpCatalog({
+      ...f,
+      timeoutMs: 10,
+      fetchImpl: async (url, { signal }) => {
+        if (!new URL(url).searchParams.has("cursor"))
+          return {
+            ok: true,
+            json: async () => ({
+              servers: [server("io.example/first")],
+              metadata: { nextCursor: "resume here" },
+            }),
+          };
+        if (failure === "timeout") {
+          await new Promise((done) => setTimeout(done, 20));
+          signal.throwIfAborted();
+        }
+        return failure === "http"
+          ? { ok: false }
+          : {
+              ok: true,
+              json: async () => ({
+                servers: [server("io.example/partial"), {}],
+              }),
+            };
+      },
+    });
+    const firstEnded = Date.now();
+    assert.equal(first.status, "missing");
+    assert.equal(first.collectedAt, null);
+    assert.doesNotMatch(
+      readFileSync(`${first.cacheFile}.progress`, "utf8"),
+      /PRIVATE_HEADER|Authorization|headers|io.example\/partial/,
+    );
+    assert.ok(
+      !readMcpCatalog(f).entries.some((e) => e.sourceId === "official"),
+    );
+    const urls = [];
+    const completed = await refreshMcpCatalog({
+      ...f,
+      fetchImpl: async (url) => {
+        urls.push(new URL(url));
+        return {
+          ok: true,
+          json: async () => ({
+            servers: [server("io.example/last")],
+            metadata: {},
+          }),
+        };
+      },
+    });
+    assert.equal(urls.length, 1);
+    assert.equal(urls[0].searchParams.get("cursor"), "resume here");
+    assert.equal(completed.status, "fresh");
+    assert.ok(Date.parse(completed.watermark) <= firstEnded);
+    assert.deepEqual(
+      completed.entries
+        .filter((e) => e.sourceId === "official")
+        .map((e) => e.serverId)
+        .sort(),
+      ["io.example/first", "io.example/last"],
+    );
+    assert.ok(!completed.diagnostics.includes("catalog_refresh_failed"));
+  });
+}
+
+test("Incremental sync keeps the committed catalog and watermark until completion, then removes tombstones", async (t) => {
+  const f = fixture(t);
+  const startedBefore = Date.now();
+  const initial = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        servers: [
+          server(),
+          server("io.example/inactive"),
+          server("io.example/keep"),
+        ],
+        metadata: {},
+      }),
+    }),
+  });
+  const original = readFileSync(initial.cacheFile, "utf8");
+  const watermark = JSON.parse(original).watermark;
+  assert.ok(Date.parse(watermark) >= startedBefore);
+  // watermark는 완료 시간이 아니라 동기화 시작 시각이다.
+  await new Promise((done) => setTimeout(done, 5));
+  const urls = [];
+  const failed = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async (url) => {
+      const parsed = new URL(url);
+      urls.push(parsed);
+      if (parsed.searchParams.has("cursor"))
+        throw new Error("temporary failure");
+      return {
+        ok: true,
+        json: async () => ({
+          servers: [
+            {
+              server: { name: "io.example/docs" },
+              _meta: {
+                "io.modelcontextprotocol.registry/official": {
+                  status: "deleted",
+                },
+              },
+            },
+            {
+              ...server("io.example/inactive"),
+              _meta: {
+                "io.modelcontextprotocol.registry/official": {
+                  status: "deprecated",
+                },
+              },
+            },
+            server("io.example/new"),
+          ],
+          metadata: { nextCursor: "delta next" },
+        }),
+      };
+    },
+  });
+  assert.equal(urls[0].searchParams.get("updated_since"), watermark);
+  assert.equal(urls[0].searchParams.get("version"), "latest");
+  assert.equal(urls[0].searchParams.get("limit"), "100");
+  assert.equal(failed.status, "stale");
+  assert.equal(readFileSync(initial.cacheFile, "utf8"), original);
+  assert.ok(
+    readMcpCatalog(f).entries.some((e) => e.serverId === "io.example/docs"),
+  );
+  const resumed = [];
+  const completed = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async (url) => {
+      resumed.push(new URL(url));
+      return { ok: true, json: async () => ({ servers: [], metadata: {} }) };
+    },
+  });
+  assert.equal(resumed.length, 1);
+  assert.equal(resumed[0].searchParams.get("cursor"), "delta next");
+  assert.equal(resumed[0].searchParams.get("updated_since"), watermark);
+  assert.equal(completed.status, "fresh");
+  assert.deepEqual(
+    completed.entries
+      .filter((e) => e.sourceId === "official")
+      .map((e) => e.serverId)
+      .sort(),
+    ["io.example/keep", "io.example/new"],
+  );
+  assert.ok(
+    Date.parse(JSON.parse(readFileSync(initial.cacheFile, "utf8")).watermark) >
+      Date.parse(watermark),
+  );
+  await refreshMcpCatalog({
+    ...f,
+    ifStale: true,
+    fetchImpl: () => assert.fail("fresh download"),
+  });
+});
+
+for (const cliType of ["claude", "codex", "antigravity"]) {
+  test(`${cliType}: structured matches survive twelve installed candidates`, async (t) => {
+    const f = fixture(t);
+    const installed = Array.from({ length: 15 }, (_, i) =>
+      server(`io.example/installed-${i}`, {
+        description: "Installed documentation service",
+        remotes: [
+          {
+            type: "streamable-http",
+            url: `https://installed-${i}.example/mcp`,
+          },
+        ],
+      }),
+    );
+    await refreshMcpCatalog({
+      ...f,
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ servers: [...installed, server()], metadata: {} }),
+      }),
+    });
+    const config = Object.fromEntries(
+      installed.map((r, i) => [
+        `alias-${i}`,
+        { serverUrl: r.server.remotes[0].url, url: r.server.remotes[0].url },
+      ]),
+    );
+    const configFile =
+      cliType === "codex"
+        ? join(f.home, ".codex", "config.toml")
+        : cliType === "claude"
+          ? join(f.home, ".mcp.json")
+          : join(f.home, ".gemini", "config", "mcp_config.json");
+    save(
+      configFile,
+      cliType === "codex"
+        ? Object.entries(config)
+            .map(
+              ([name, entry]) =>
+                `[mcp_servers."${name}"]\nurl=${JSON.stringify(entry.url)}\n`,
+            )
+            .join("\n")
+        : { mcpServers: config },
+    );
+    const before = readFileSync(configFile, "utf8");
+    for (const task of [
+      "무관한 원 작업",
+      "documentation이라는 단어도 원문에만 남긴다",
+    ]) {
+      const capture = [];
+      const result = await recommendMcp(
+        {
+          cliType,
+          cwd: f.home,
+          task,
+          searchTerms: ["documentation", "installed"],
+        },
+        { ...f, jevOptions: chooser(capture) },
+      );
+      assert.equal(result.status, "recommended");
+      assert.equal(result.recommendations[0].installationStatus, "missing");
+      const state = JSON.parse(capture[0].state);
+      assert.ok(state.candidates.length <= 12);
+      assert.equal(state.candidates[0].id, "official:io.example/docs");
+      assert.equal(state.task, task);
+      assert.equal(result.applied, false);
+    }
+    assert.equal(readFileSync(configFile, "utf8"), before);
+  });
+}
+
+for (const cliType of ["agy", "antigravity"]) {
+  test(`${cliType}: workspace and user inventory report registration without claiming authentication or activation`, async (t) => {
+    const f = fixture(t);
+    const globalFile = join(f.home, ".gemini", "config", "mcp_config.json");
+    const workspaceFile = join(f.home, ".agents", "mcp_config.json");
+    save(globalFile, {
+      mcpServers: { globalAlias: { serverUrl: "https://global.example/mcp" } },
+    });
+    save(workspaceFile, {
+      mcpServers: {
+        workspaceAlias: {
+          serverUrl: "https://docs.example/mcp?token=PRIVATE",
+          headers: { Authorization: "PRIVATE" },
+        },
+      },
+    });
+    const before = readFileSync(workspaceFile, "utf8");
+    const inventory = readMcpInventory({ cliType, cwd: f.home }, f);
+    assert.deepEqual(inventory.servers.map((s) => s.name).sort(), [
+      "globalAlias",
+      "workspaceAlias",
+    ]);
+    assert.ok(
+      inventory.servers.every(
+        (s) => s.authentication === "unknown" && s.activation === "unknown",
+      ),
+    );
+    assert.doesNotMatch(JSON.stringify(inventory), /PRIVATE|Authorization/);
+    await refreshMcpCatalog({
+      ...f,
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ servers: [server()], metadata: {} }),
+      }),
+    });
+    const result = await recommendMcp(
+      { cliType, cwd: f.home, task: "원 작업", searchTerms: ["documentation"] },
+      { ...f, jevOptions: chooser([]) },
+    );
+    assert.equal(result.recommendations[0].installationStatus, "present");
+    assert.equal(result.recommendations[0].authentication, "unknown");
+    assert.equal(result.recommendations[0].activation, "unknown");
+    assert.equal(readFileSync(workspaceFile, "utf8"), before);
+  });
+}
+
+test("Registry page budget resumes beyond 500 pages instead of restarting", async (t) => {
+  const f = fixture(t);
+  let count = 0;
+  const first = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async () => {
+      count++;
+      return {
+        ok: true,
+        json: async () => ({
+          servers: [server()],
+          metadata: { nextCursor: `page-${count}` },
+        }),
+      };
+    },
+  });
+  assert.equal(count, 500);
+  assert.equal(first.status, "missing");
+  const completed = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async (url) => {
+      assert.equal(new URL(url).searchParams.get("cursor"), "page-500");
+      return {
+        ok: true,
+        json: async () => ({
+          servers: [server("io.example/last")],
+          metadata: {},
+        }),
+      };
+    },
+  });
+  assert.equal(completed.status, "fresh");
+  assert.equal(
+    completed.entries.filter((e) => e.sourceId === "official").length,
+    2,
+  );
+});
+
+test("Empty incremental results preserve entries and deleting the final server leaves a valid empty cache", async (t) => {
+  const f = fixture(t);
+  const initial = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ servers: [server()], metadata: {} }),
+    }),
+  });
+  const noChange = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async (url) => {
+      assert.equal(
+        new URL(url).searchParams.get("updated_since"),
+        initial.watermark,
+      );
+      return { ok: true, json: async () => ({ servers: [], metadata: {} }) };
+    },
+  });
+  assert.equal(noChange.status, "fresh");
+  assert.equal(
+    noChange.entries.filter((e) => e.sourceId === "official").length,
+    1,
+  );
+  const deleted = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        servers: [
+          {
+            server: { name: "io.example/docs" },
+            _meta: {
+              "io.modelcontextprotocol.registry/official": {
+                status: "deleted",
+              },
+            },
+          },
+        ],
+        metadata: {},
+      }),
+    }),
+  });
+  assert.equal(deleted.status, "fresh");
+  assert.equal(
+    readMcpCatalog(f).entries.filter((e) => e.sourceId === "official").length,
+    0,
+  );
+  await refreshMcpCatalog({
+    ...f,
+    ifStale: true,
+    fetchImpl: () => assert.fail("empty but complete cache"),
+  });
+});
+
+test("Legacy cache without a watermark is replaced only after a complete full sync", async (t) => {
+  const f = fixture(t);
+  const initial = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ servers: [server()], metadata: {} }),
+    }),
+  });
+  const cache = JSON.parse(readFileSync(initial.cacheFile, "utf8"));
+  delete cache.watermark;
+  cache.collectedAt = "2020-01-01T00:00:00Z";
+  save(initial.cacheFile, cache);
+  const migrated = await refreshMcpCatalog({
+    ...f,
+    ifStale: true,
+    fetchImpl: async (url) => {
+      assert.equal(new URL(url).searchParams.has("updated_since"), false);
+      return {
+        ok: true,
+        json: async () => ({
+          servers: [server("io.example/new")],
+          metadata: {},
+        }),
+      };
+    },
+  });
+  assert.equal(migrated.status, "fresh");
+  assert.ok(migrated.watermark);
+  assert.deepEqual(
+    migrated.entries
+      .filter((e) => e.sourceId === "official")
+      .map((e) => e.serverId),
+    ["io.example/new"],
   );
 });

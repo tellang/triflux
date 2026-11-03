@@ -40,7 +40,10 @@ export function readMcpInventory(
             join(cwd, ".claude", "mcp.json"),
             join(cwd, ".mcp.json"),
           ]
-        : [join(home, ".gemini", "config", "mcp_config.json")];
+        : [
+            join(home, ".gemini", "config", "mcp_config.json"),
+            join(cwd, ".agents", "mcp_config.json"),
+          ];
   const servers = [];
   const diagnostics = [
     "inventory_config_only",
@@ -230,18 +233,25 @@ export async function recommendMcp(input = {}, options = {}) {
         return {
           ...entry,
           installationStatus: status,
-          score:
-            (status === "present" ? 100 : 0) +
-            terms.filter((term) => text.includes(term)).length,
+          score: terms.filter((term) => text.includes(term)).length,
         };
       })
       .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-    // 로컬 기본 후보와 검색 일치 후보를 우선한다. 검색 신호가 없으면 제한된 공개 후보도 제시한다.
+    // 검색 신호가 있는 미등록 후보를 확보하여 설치된 서버가 새 발견을 막지 않게 한다.
+    const discovery = ranked
+      .filter(
+        (entry) => entry.score > 0 && entry.installationStatus !== "present",
+      )
+      .slice(0, 6);
     const pool = ranked.filter(
-      (entry) => entry.score > 0 || entry.sourceId === "local",
+      (entry) =>
+        entry.score > 0 ||
+        entry.sourceId === "local" ||
+        entry.installationStatus === "present",
     );
     const candidates = [
-      ...pool,
+      ...discovery,
+      ...pool.filter((entry) => !discovery.includes(entry)),
       ...ranked.filter((entry) => !pool.includes(entry)),
     ].slice(0, 12);
     if (ranked.length > candidates.length)

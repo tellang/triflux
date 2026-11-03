@@ -113,18 +113,17 @@ function localEntries(options) {
 
 function normalizeRegistryServer(record, collectedAt) {
   const server = record?.server;
+  if (!server || typeof server.name !== "string" || !server.name.trim())
+    throw new Error("malformed_registry_server");
+  const status =
+    record._meta?.["io.modelcontextprotocol.registry/official"]?.status;
+  if (status && status !== "active") return null;
   if (
-    !server ||
-    typeof server.name !== "string" ||
-    !server.name.trim() ||
     typeof server.description !== "string" ||
     typeof server.version !== "string" ||
     !server.version
   )
     throw new Error("malformed_registry_server");
-  const status =
-    record._meta?.["io.modelcontextprotocol.registry/official"]?.status;
-  if (status && status !== "active") return null;
   const packages = Array.isArray(server.packages) ? server.packages : [];
   const remotes = Array.isArray(server.remotes) ? server.remotes : [];
   return {
@@ -163,6 +162,35 @@ function normalizeRegistryServer(record, collectedAt) {
   };
 }
 
+function validEntries(entries) {
+  return (
+    Array.isArray(entries) &&
+    entries.every(
+      (e) =>
+        e?.id === `official:${e?.serverId}` &&
+        typeof e.serverId === "string" &&
+        e.sourceId === "official" &&
+        typeof e.description === "string" &&
+        e.source?.url &&
+        Array.isArray(e.targets) &&
+        Array.isArray(e.transports) &&
+        Array.isArray(e.tags) &&
+        Array.isArray(e.identity?.endpoints) &&
+        Array.isArray(e.identity?.packages),
+    )
+  );
+}
+
+function writeJsonAtomic(file, value) {
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+    renameSync(temporary, file);
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
+}
+
 export function readMcpCatalog(options = {}) {
   const cacheFile = mcpCatalogPath(options);
   const diagnostics = [];
@@ -172,20 +200,9 @@ export function readMcpCatalog(options = {}) {
     if (
       cache.schema !== 1 ||
       !Number.isFinite(Date.parse(cache.collectedAt)) ||
-      !Array.isArray(cache.entries) ||
-      !cache.entries.length ||
-      cache.entries.some(
-        (e) =>
-          !e?.id ||
-          e.sourceId !== "official" ||
-          !e.description ||
-          !e.source?.url ||
-          !Array.isArray(e.targets) ||
-          !Array.isArray(e.transports) ||
-          !Array.isArray(e.tags) ||
-          !Array.isArray(e.identity?.endpoints) ||
-          !Array.isArray(e.identity?.packages),
-      )
+      (cache.watermark !== undefined &&
+        !Number.isFinite(Date.parse(cache.watermark))) ||
+      !validEntries(cache.entries)
     )
       throw new Error("invalid_cache");
   } catch {
@@ -203,10 +220,15 @@ export function readMcpCatalog(options = {}) {
     diagnostics.push("catalog_refresh_failed");
     if (cache) status = "stale";
   }
+  if (existsSync(`${cacheFile}.progress`)) {
+    diagnostics.push("catalog_refresh_in_progress");
+    if (cache) status = "stale";
+  }
   return {
     cacheFile,
     status,
     collectedAt: cache?.collectedAt || null,
+    watermark: cache?.watermark || null,
     entries: [...localEntries(options), ...(cache?.entries || [])],
     diagnostics,
   };
@@ -217,7 +239,7 @@ export async function refreshMcpCatalog(options = {}) {
   if (options.ifStale && previous.status === "fresh") return previous;
   const { cacheFile } = previous;
   const lock = `${cacheFile}.lock`;
-  const temporary = `${cacheFile}.${randomUUID()}.tmp`;
+  const progressFile = `${cacheFile}.progress`;
   const lockToken = `${process.pid}:${randomUUID()}`;
   let ownsLock = false;
   try {
@@ -255,16 +277,48 @@ export async function refreshMcpCatalog(options = {}) {
           };
       }
     }
+    // 진행 상태는 정상 캐시와 분리한다. watermark는 첫 요청 직전 시각으로 고정한다.
+    let progress;
+    try {
+      progress = JSON.parse(readFileSync(progressFile, "utf8"));
+      if (
+        progress.schema !== 1 ||
+        progress.baseCollectedAt !== previous.collectedAt ||
+        progress.updatedSince !== previous.watermark ||
+        !Number.isFinite(Date.parse(progress.startedAt)) ||
+        typeof progress.cursor !== "string" ||
+        !Array.isArray(progress.seenCursors) ||
+        progress.seenCursors.some((c) => typeof c !== "string" || !c) ||
+        (progress.cursor && !progress.seenCursors.includes(progress.cursor)) ||
+        !validEntries(progress.entries)
+      )
+        throw new Error("invalid_progress");
+    } catch {
+      progress = {
+        schema: 1,
+        baseCollectedAt: previous.collectedAt,
+        updatedSince: previous.watermark,
+        startedAt: new Date().toISOString(),
+        cursor: "",
+        seenCursors: [],
+        entries: previous.watermark
+          ? previous.entries.filter((e) => e.sourceId === "official")
+          : [],
+      };
+    }
+    writeJsonAtomic(progressFile, progress);
     const signal = AbortSignal.timeout(options.timeoutMs || 30000);
-    const collectedAt = new Date().toISOString();
-    const entries = new Map();
-    const seenCursors = new Set();
-    let cursor = "";
+    const entries = new Map(progress.entries.map((e) => [e.id, e]));
+    const seenCursors = new Set(progress.seenCursors);
+    let cursor = progress.cursor;
     for (let page = 0; ; page++) {
       if (page >= 500) throw new Error("pagination_limit");
+      signal.throwIfAborted();
       const url = new URL(REGISTRY);
       url.searchParams.set("version", "latest");
       url.searchParams.set("limit", "100");
+      if (progress.updatedSince)
+        url.searchParams.set("updated_since", progress.updatedSince);
       if (cursor) url.searchParams.set("cursor", cursor);
       const response = await (options.fetchImpl || globalThis.fetch)(
         url.toString(),
@@ -274,26 +328,39 @@ export async function refreshMcpCatalog(options = {}) {
       const data = await response.json();
       if (!Array.isArray(data.servers))
         throw new Error("malformed_registry_page");
-      for (const record of data.servers) {
-        const entry = normalizeRegistryServer(record, collectedAt);
-        if (entry) entries.set(entry.id, entry);
-      }
       const next = data.metadata?.nextCursor;
       if (next !== undefined && next !== null && typeof next !== "string")
         throw new Error("malformed_cursor");
-      if (!next) break;
-      if (seenCursors.has(next) || data.servers.length === 0)
+      if (next && (seenCursors.has(next) || data.servers.length === 0))
         throw new Error("pagination_loop");
+      // 페이지 전체를 확인한 뒤 반영하여 잘못된 페이지의 일부가 저장되지 않게 한다.
+      const changes = data.servers.map((record) => ({
+        id: `official:${record?.server?.name}`,
+        entry: normalizeRegistryServer(record, progress.startedAt),
+      }));
+      for (const { id, entry } of changes) {
+        if (entry) entries.set(id, entry);
+        else entries.delete(id);
+      }
+      if (!next) break;
       seenCursors.add(next);
       cursor = next;
+      writeJsonAtomic(progressFile, {
+        ...progress,
+        cursor,
+        seenCursors: [...seenCursors],
+        entries: [...entries.values()],
+      });
     }
-    if (!entries.size) throw new Error("empty_registry");
-    writeFileSync(
-      temporary,
-      `${JSON.stringify({ schema: 1, collectedAt, entries: [...entries.values()] })}\n`,
-      { mode: 0o600 },
-    );
-    renameSync(temporary, cacheFile);
+    if (!entries.size && !progress.updatedSince)
+      throw new Error("empty_registry");
+    writeJsonAtomic(cacheFile, {
+      schema: 1,
+      collectedAt: new Date().toISOString(),
+      watermark: progress.startedAt,
+      entries: [...entries.values()],
+    });
+    unlinkSync(progressFile);
     if (existsSync(`${cacheFile}.failure`)) unlinkSync(`${cacheFile}.failure`);
     return readMcpCatalog(options);
   } catch {
@@ -305,18 +372,18 @@ export async function refreshMcpCatalog(options = {}) {
     } catch {
       /* 캐시 디렉터리 쓰기 실패도 작업을 막지 않는다. */
     }
+    const current = readMcpCatalog(options);
     return {
-      ...previous,
-      status: previous.collectedAt ? "stale" : "missing",
+      ...current,
+      status: current.collectedAt ? "stale" : "missing",
       diagnostics: uniqueStrings([
-        ...previous.diagnostics,
+        ...current.diagnostics,
         "catalog_refresh_failed",
       ]),
     };
   } finally {
     if (ownsLock) {
       try {
-        if (existsSync(temporary)) unlinkSync(temporary);
         if (existsSync(lock) && readFileSync(lock, "utf8") === lockToken)
           unlinkSync(lock);
       } catch {
