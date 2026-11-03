@@ -538,6 +538,8 @@ for (const [label, metadata] of [
               ...metadata,
             },
           };
+        if (method === "turn/start")
+          return { turn: { id: "accepted-turn", status: "inProgress" } };
         return {};
       },
     };
@@ -548,6 +550,8 @@ for (const [label, metadata] of [
     });
     assert.equal(r.status, "sent");
     assert.equal(r.modelReceipt, false);
+    assert.equal(r.turnId, "accepted-turn");
+    assert.equal(r.turnStatus, "inProgress");
     assert.deepEqual(
       calls.map((x) => x[0]),
       [

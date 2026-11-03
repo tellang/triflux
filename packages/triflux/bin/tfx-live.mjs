@@ -70,6 +70,7 @@ import {
 } from "../hub/team/session-context.mjs";
 import { JsonRpcWsUdsClient } from "../hub/workers/lib/jsonrpc-ws-uds.mjs";
 import { configureCodexHud } from "../hud/tmux-status.mjs";
+import { resolveModelFamilies } from "../scripts/lib/model-family-resolver.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -2500,7 +2501,16 @@ const ADAPTERS = {
   },
 };
 
-function buildLaunchKeys(adapter, { model, effort, name, sandbox } = {}) {
+function resolveCodexLaunchModel(model, env = process.env) {
+  if (!["astra", "sol", "terra", "luna"].includes(model)) return model;
+  return resolveModelFamilies("codex", {
+    env,
+    allowCommand: false,
+    persist: false,
+  }).families[model].model;
+}
+
+function buildLaunchKeys(adapter, { model, effort, name, sandbox, env } = {}) {
   const hasModel = model !== undefined;
   const hasEffort = effort !== undefined;
   if (
@@ -2515,7 +2525,10 @@ function buildLaunchKeys(adapter, { model, effort, name, sandbox } = {}) {
   const overrideArgs = [];
   if (adapter.cli === "codex") {
     if (hasModel) {
-      overrideArgs.push("-c", `model=${JSON.stringify(String(model))}`);
+      overrideArgs.push(
+        "-c",
+        `model=${JSON.stringify(String(resolveCodexLaunchModel(model, env)))}`,
+      );
     }
     if (hasEffort) {
       overrideArgs.push(
@@ -3337,7 +3350,7 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
           throw new Error(unsupported);
         if (page.data.includes(threadId))
           throw new Error(
-            "Cannot resume loaded Codex thread: per-thread hooks override is unsupported; existing session settings were preserved",
+            `Cannot resume loaded Codex thread: per-thread hooks override is unsupported; existing session settings were preserved. Keep the existing TUI and use /permissions, select Full Access and confirm to change its approval mode. A thread/settings/update readback alone does not prove the next TUI turn uses those permissions. If the pane is closed, reopen the same history with codex resume ${threadId} and change /permissions there. Do not start a new thread or restart the shared daemon`,
           );
         cursor = page.nextCursor ?? null;
       } while (cursor !== null);
@@ -3348,7 +3361,9 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
       threadId ? "thread/resume" : "thread/start",
       {
         ...(threadId ? { threadId, excludeTurns: true } : { cwd }),
-        ...(opts.model !== undefined ? { model: opts.model } : {}),
+        ...(opts.model !== undefined
+          ? { model: resolveCodexLaunchModel(opts.model, opts.env) }
+          : {}),
         config,
       },
       10000,
@@ -3404,10 +3419,9 @@ async function doStart(launchAdapter, opts) {
 
 async function doStartTmux(launchAdapter, opts) {
   // --no-auto-trust 면 신뢰 화면을 고르지 않고 승인 화면과 같이 ready:false 로 끝낸다.
-  const trustScreens =
-    opts.noAutoTrust || launchAdapter.cli === "codex"
-      ? launchAdapter.startupScreens.filter((screen) => screen.blockedBy)
-      : [];
+  const trustScreens = opts.noAutoTrust
+    ? launchAdapter.startupScreens.filter((screen) => screen.blockedBy)
+    : [];
   const adapter = {
     ...launchAdapter,
     startupScreens: launchAdapter.startupScreens.filter(

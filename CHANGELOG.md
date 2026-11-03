@@ -2,6 +2,17 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.93.1] - 2026-11-03
+
+### Fixed
+- tfx-live: Codex `--model`의 가족 별칭을 기존 resolver와 `models.json`의 고정값으로 실제 모델 ID로 바꾼다.
+- tfx-live: Codex 폴더 신뢰 화면을 기본으로 자동 승인하고 `--no-auto-trust`의 차단 동작을 유지한다.
+- peer: Codex wake 응답의 턴 ID와 상태를 확인해 실패하거나 누락된 응답을 `sent`로 보고하지 않는다. 유효 응답에는 `turnId`, `turnStatus`를 반환하며 모델 수신을 뜻하지 않는다.
+
+### Changed
+- tfx-live: 공유 daemon에 로드된 Codex thread의 큐 입력을 같은 daemon으로 보낸다. 기록 여부가 불명확하면 자동 재전송하지 않는다.
+- tfx-live, tfx-lead: loaded thread의 hooks override 제한과 `/permissions`의 Full Access 변경, 같은 대화 재개 방법을 안내한다. RPC readback만으로 다음 TUI 턴의 권한 적용을 단정하지 않는다.
+
 ## [10.93.0] - 2026-11-02
 
 ### Added

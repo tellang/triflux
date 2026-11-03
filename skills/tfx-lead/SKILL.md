@@ -78,7 +78,7 @@ Codex 리드는 mod 가 없으므로 `/rename <월>.<일> <역할>`을 직접 �
   | reviewer-828 | Claude sonnet | m5 로컬 `rv-828` | PR #828 리뷰 | auto (rule: low_confidence) | .omc/briefs/x/review.md | 25b8dccf-56ed-4722-a70c-6317aedb1c4f |
   ```
 - 같은 이름의 세션이 로컬과 Remote Control 에 하나씩 있으면 `SendMessage`가 ref 를 요구한다. `ListAgents`에서 "on this machine" 쪽 ref 를 붙인다.
-- 워커를 다시 띄울 때는 새로 띄우지 않고 원래 tmux 세션 이름으로 `tfx-live start --cli <CLI> --session <원래 이름> --resume <재개 ID> --name "<이름>"`을 쓴다. 세션 이름과 tmr 재접속 루프가 그대로 맞고, 워커가 파일을 다시 탐색하거나 지시서를 다시 읽지 않아도 된다. `--resume`으로 다시 띄울 때 launcher가 없으면 권한이 풀리므로 `workers.md`의 권한 열을 읽고 해당 CLI의 권한 값을 다시 적용한다. 재개한 세션은 이전 사용량을 이어받으므로 재개 직후 컨텍스트를 잰다(11절).
+- 워커를 다시 띄울 때는 새로 띄우지 않고 원래 tmux 세션 이름으로 `tfx-live start --cli <CLI> --session <원래 이름> --resume <재개 ID> --name "<이름>"`을 쓴다. 세션 이름과 tmr 재접속 루프가 그대로 맞고, 워커가 파일을 다시 탐색하거나 지시서를 다시 읽지 않아도 된다. 권한은 `workers.md`의 실제 값을 따른다. Codex loaded thread는 per-thread hooks override 제한으로 재개를 거부하며, launcher만 바꿔도 기존 TUI 권한은 바뀌지 않는다. 기존 TUI의 `/permissions`에서 Full Access를 고르고 확인한다. pane을 닫았으면 오류에 나온 `codex resume <재개 ID>`로 같은 대화를 연다. `thread/settings/update`의 readback은 다음 TUI 턴의 적용 근거가 아니다. 새 thread를 만들거나 공유 daemon을 재시작하지 않는다. 재개한 세션은 이전 사용량을 이어받으므로 재개 직후 컨텍스트를 잰다(11절).
 - `tfx-live list-sessions`의 `status: shell`은 CLI 가 죽었다는 뜻이 아닐 수 있다. 그 세션이 띄운 백그라운드 셸일 수 있으니 재실행 전에 pane 내용을 확인한다.
 
 ## 전송 수단
@@ -123,6 +123,8 @@ Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 �
 ## 2. 역할별 모델
 
 모델 ID는 기록하지 않는다. Codex는 가족 프로필과 별도 effort, Claude는 별칭을 사용한다. 현재 대응은 `tfx-routing.md`의 "모델 배치" 표가 정본이다. 가족 프로필에는 `model`만 기록하고 effort는 `-c model_reasoning_effort`로 전달한다. 수동 CLI 예: `codex -p sol -c 'model_reasoning_effort="high"'`.
+
+Codex `tfx-live start --model`은 `astra`, `sol`, `terra`, `luna`를 model-family-resolver와 `models.json`의 고정값으로 실제 ID로 바꾼다. `--effort`는 별도로 지정하며 전역 프로필을 바꾸지 않는다. 새 폴더와 worktree의 신뢰 화면은 자동 승인하고 `--no-auto-trust`일 때만 `ready: false`, `blockedBy: "codex-trust-folder"`로 반환한다.
 
 | 역할 | 가족 + effort / Claude 별칭 | 비고 |
 | --- | --- | --- |
