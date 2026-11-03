@@ -53,6 +53,8 @@ test("공유 daemon 신규 thread는 훅을 끈 뒤 TUI 연결 대상으로 반�
   assert.deepEqual(calls.find(([method]) => method === "thread/start")[1], {
     cwd: "/test/project",
     model: "custom-model",
+    approvalPolicy: "never",
+    sandbox: "danger-full-access",
     config: { "features.hooks": false, model_reasoning_effort: "high" },
   });
   assert.equal(
@@ -61,6 +63,25 @@ test("공유 daemon 신규 thread는 훅을 끈 뒤 TUI 연결 대상으로 반�
   );
   result.close();
   assert.equal(calls.at(-1)[0], "close");
+});
+
+test("Codex sandbox thread는 신규와 unloaded 재개 모두 제한한다", async () => {
+  for (const resume of [undefined, id]) {
+    const { calls, client } = fakeClient();
+    const prepared = await live.prepareCodexThread(
+      "/test/socket",
+      { sandbox: true, resume },
+      {
+        clientFactory: () => client,
+      },
+    );
+    prepared.close();
+    const params = calls.find(
+      ([method]) => method === (resume ? "thread/resume" : "thread/start"),
+    )[1];
+    assert.equal(params.approvalPolicy, "on-request");
+    assert.equal(params.sandbox, "workspace-write");
+  }
 });
 
 test("unloaded remote resume은 hooks 설정만 전달하고 기존 thread 권한을 보존한다", async () => {
@@ -90,6 +111,47 @@ test("unloaded remote resume은 hooks 설정만 전달하고 기존 thread 권�
     result.close();
   }
 });
+
+for (const sandbox of [
+  { type: "dangerFullAccess" },
+  { type: "readOnly", networkAccess: false },
+  {
+    type: "workspaceWrite",
+    writableRoots: ["/test/project"],
+    networkAccess: false,
+    excludeTmpdirEnvVar: false,
+    excludeSlashTmp: false,
+  },
+  { type: "externalSandbox", networkAccess: "restricted" },
+]) {
+  test(`Codex readback preserves response SandboxPolicy type: ${sandbox.type}`, async () => {
+    const { calls, client } = fakeClient();
+    const request = client.request;
+    client.request = async (method, params) => {
+      if (method !== "thread/resume") return request(method, params);
+      calls.push([method, params]);
+      return { thread: { id }, approvalPolicy: "never", sandbox };
+    };
+    const prepared = await live.prepareCodexThread(
+      "/test/socket",
+      { resume: id },
+      {
+        clientFactory: () => client,
+      },
+    );
+    try {
+      const permissions = await prepared.readPermissions();
+      assert.equal(permissions.permissionsVerified, true);
+      assert.deepEqual(permissions.sandbox, sandbox);
+      assert.deepEqual(calls.at(-1), [
+        "thread/resume",
+        { threadId: id, excludeTurns: true },
+      ]);
+    } finally {
+      prepared.close();
+    }
+  });
+}
 
 test("loaded thread는 explicit resume과 resume-last 모두 설정 요청 전에 중단한다", async () => {
   for (const opts of [{ resume: id }, { resumeLast: true }]) {

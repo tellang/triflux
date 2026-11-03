@@ -26,7 +26,7 @@ import {
   resolve as pathResolve,
 } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 import {
   codexThreadNames,
   readCodexSessionRecords,
@@ -268,8 +268,8 @@ function selectAdapter(flags) {
   }
   if (cli === "agy" && flags.remote)
     throw new Error("agy supports local tmux only; --remote is unavailable");
-  if (flags.sandbox && cli !== "agy")
-    throw new Error("--sandbox is only supported with --cli agy");
+  if (flags.sandbox && !["agy", "codex"].includes(cli))
+    throw new Error("--sandbox is only supported with --cli agy or codex");
   if (flags["if-busy"] === "queue" && cli !== "agy")
     throw new Error("--if-busy queue is only supported with --cli agy");
   return adapter;
@@ -2524,6 +2524,13 @@ function buildLaunchKeys(adapter, { model, effort, name, sandbox, env } = {}) {
 
   const overrideArgs = [];
   if (adapter.cli === "codex") {
+    if (sandbox)
+      overrideArgs.push(
+        "--sandbox",
+        "workspace-write",
+        "--ask-for-approval",
+        "on-request",
+      );
     if (hasModel) {
       overrideArgs.push(
         "-c",
@@ -2559,7 +2566,14 @@ function buildLaunchKeys(adapter, { model, effort, name, sandbox, env } = {}) {
   }
 
   const [command, ...remainingKeys] = adapter.launchKeys;
-  return [`${command} ${shellQuote(overrideArgs)}`, ...remainingKeys];
+  const launch =
+    adapter.cli === "codex" && sandbox
+      ? command.replace(
+          /(?:^|\s)--dangerously-bypass-approvals-and-sandbox(?=\s|$)/g,
+          "",
+        )
+      : command;
+  return [`${launch} ${shellQuote(overrideArgs)}`, ...remainingKeys];
 }
 
 async function dismissStartupScreens(adapter, remote, session) {
@@ -3357,6 +3371,11 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
     }
     const config = { "features.hooks": false };
     if (opts.effort !== undefined) config.model_reasoning_effort = opts.effort;
+    const permissions = opts.sandbox
+      ? { approvalPolicy: "on-request", sandbox: "workspace-write" }
+      : !threadId
+        ? { approvalPolicy: "never", sandbox: "danger-full-access" }
+        : {};
     const result = await client.request(
       threadId ? "thread/resume" : "thread/start",
       {
@@ -3364,6 +3383,7 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
         ...(opts.model !== undefined
           ? { model: resolveCodexLaunchModel(opts.model, opts.env) }
           : {}),
+        ...permissions,
         config,
       },
       10000,
@@ -3385,7 +3405,59 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
         5000,
       );
     }
-    return { threadId: result.thread.id, close: () => client.close() };
+    return {
+      threadId: result.thread.id,
+      readPermissions: async () => {
+        // 권한 덮어쓰기 없이 TUI가 붙은 정확한 thread의 daemon 설정을 읽는다.
+        const observed = await client.request(
+          "thread/resume",
+          {
+            threadId: result.thread.id,
+            excludeTurns: true,
+          },
+          5000,
+        );
+        if (observed.thread?.id !== result.thread.id)
+          throw new Error(
+            "Codex permission readback returned a different or invalid thread",
+          );
+        if (
+          !observed.approvalPolicy ||
+          ![
+            "readOnly",
+            "workspaceWrite",
+            "dangerFullAccess",
+            "externalSandbox",
+          ].includes(observed.sandbox?.type)
+        )
+          throw new Error(
+            "Codex permission readback is missing approvalPolicy or sandbox",
+          );
+        const expectedApproval =
+          permissions.approvalPolicy ?? result.approvalPolicy;
+        const expectedSandbox =
+          {
+            "read-only": "readOnly",
+            "workspace-write": "workspaceWrite",
+            "danger-full-access": "dangerFullAccess",
+          }[permissions.sandbox] ?? result.sandbox?.type;
+        const matches =
+          isDeepStrictEqual(observed.approvalPolicy, expectedApproval) &&
+          observed.sandbox.type === expectedSandbox;
+        return {
+          approvalPolicy: observed.approvalPolicy,
+          sandbox: observed.sandbox,
+          permissionsVerified: matches,
+          ...(matches
+            ? {}
+            : {
+                permissionWarning:
+                  "Codex permission readback mismatch; daemon settings do not match the prepared thread",
+              }),
+        };
+      },
+      close: () => client.close(),
+    };
   } catch (error) {
     client.close();
     throw error;
@@ -3406,11 +3478,35 @@ async function doStart(launchAdapter, opts) {
   }
   const prepared = await prepareCodexThread(socket, opts);
   try {
-    return await doStartTmux(launchAdapter, {
+    const started = await doStartTmux(launchAdapter, {
       ...opts,
       preparedThreadId: prepared.threadId,
       preparedSocket: socket,
     });
+    let permissions;
+    try {
+      permissions = await prepared.readPermissions();
+    } catch (error) {
+      permissions = {
+        approvalPolicy: null,
+        sandbox: null,
+        permissionsVerified: false,
+        permissionWarning: `Codex permission readback failed: ${error.message}`,
+      };
+    }
+    return {
+      ...started,
+      ...permissions,
+      ready: started.ready && permissions.permissionsVerified,
+      ...(permissions.permissionsVerified
+        ? {}
+        : {
+            blockedBy: started.blockedBy ?? "codex-permission-readback",
+            warning: [started.warning, permissions.permissionWarning]
+              .filter(Boolean)
+              .join("; "),
+          }),
+    };
   } finally {
     // 첫 turn 전 thread에는 rollout이 없을 수 있어 TUI 연결이 끝난 뒤 소유 연결을 놓는다.
     prepared.close();
@@ -3507,6 +3603,12 @@ async function doStartTmux(launchAdapter, opts) {
       );
     // --remote 세션의 셸은 데몬에서 돌아서 -C 로 작업 디렉터리를 지정한다.
     launchKeys[0] += ` ${shellQuote(["--remote", `unix://${opts.preparedSocket}`, "-C", pathResolve(cwd || process.cwd())])}`;
+  } else if (resumed && adapter.cli === "codex" && opts.sandbox) {
+    launchKeys[0] = launchKeys[0].replace(
+      /(?:^|\s)--dangerously-bypass-approvals-and-sandbox(?=\s|$)/g,
+      "",
+    );
+    launchKeys[0] += " --sandbox workspace-write --ask-for-approval on-request";
   }
   launchKeys[0] = withUnsetEnv(launchKeys[0], opts.unsetEnv ?? []);
   // 받는 쪽 triflux mod 가 이 값을 저장해 자기를 띄운 리드의 tfx_control 요청만 실행한다.
