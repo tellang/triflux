@@ -3843,7 +3843,7 @@ function cmdVersion(options = {}) {
   console.log("");
 }
 
-function cmdMcp(args = [], options = {}) {
+async function cmdMcp(args = [], options = {}) {
   const { json = false } = options;
   const sub = String(args[0] || "list")
     .trim()
@@ -3854,6 +3854,7 @@ function cmdMcp(args = [], options = {}) {
   ${AMBER}${BOLD}⬡ tfx mcp${RESET}
 
     ${WHITE_BRIGHT}tfx mcp list${RESET}                 ${GRAY}registry + 실제 설정 상태 테이블${RESET}
+    ${WHITE_BRIGHT}tfx mcp catalog-refresh${RESET}      ${GRAY}공식 공개 카탈로그 캐시 갱신, 설치와 활성화 없음${RESET}
     ${WHITE_BRIGHT}tfx mcp sync${RESET}                 ${GRAY}registry 기준 전체 스캔 + 치환${RESET}
     ${WHITE_BRIGHT}tfx mcp add <name> --url <url>${RESET}    ${GRAY}registry 등록 + 대상 설정 반영${RESET}
     ${WHITE_BRIGHT}tfx mcp remove <name>${RESET}        ${GRAY}registry + 실제 설정에서 제거${RESET}
@@ -3862,6 +3863,22 @@ function cmdMcp(args = [], options = {}) {
   }
 
   switch (sub) {
+    case "catalog-refresh": {
+      const { refreshMcpCatalog } = await import(
+        "../scripts/lib/mcp-recommendation-catalog.mjs"
+      );
+      const result = await refreshMcpCatalog();
+      const summary = {
+        status: result.status,
+        entries: result.entries.length,
+        collectedAt: result.collectedAt,
+        diagnostics: result.diagnostics,
+        applied: false,
+      };
+      if (json) printJson(summary);
+      else console.log(`MCP catalog ${JSON.stringify(summary)}`);
+      return;
+    }
     case "list": {
       const registryState = ensureValidRegistryState();
       const statusInfo = inspectRegistryStatus(registryState.registry);
@@ -4275,7 +4292,7 @@ async function main() {
       return;
     }
     case "mcp":
-      cmdMcp(cmdArgs, { json: JSON_OUTPUT });
+      await cmdMcp(cmdArgs, { json: JSON_OUTPUT });
       return;
     case "update":
       await cmdUpdate(cmdArgs);
@@ -4345,6 +4362,10 @@ async function main() {
         console.log(
           `\n  ${GREEN_BRIGHT}✓${RESET} 리드 "${result.name}" (${result.launcher}) tmux ${result.session}\n  붙기: tmux attach -t ${result.session}\n`,
         );
+      else if (result.recommendationAsk && !result.recommendationAsk.ok)
+        console.log(
+          `\n  ${RED}✗${RESET} MCP 추천 전송 실패: ${result.recommendationAsk.error ?? JSON.stringify(result.recommendationAsk)}\n  리드 진입은 완료되었고 세션 ${result.session} 은 떠 있다.\n`,
+        );
       else if (result.start?.ready)
         console.log(
           `\n  ${RED}✗${RESET} 리드 진입 전송 실패: ${result.ask?.error ?? JSON.stringify(result.ask)}\n  세션 ${result.session} 은 떠 있다. 붙어서 리드 진입을 직접 입력하거나 tfx-live stop --session ${result.session} 으로 닫는다.\n`,
@@ -4354,6 +4375,9 @@ async function main() {
           `\n  ${RED}✗${RESET} 리드 시작 실패: ${result.start?.error ?? result.start?.blockedBy ?? JSON.stringify(result.start)}\n`,
         );
       if (!JSON_OUTPUT) {
+        console.log(
+          `  MCP recommendation ${JSON.stringify(result.mcpRecommendation)}`,
+        );
         const r = result.routing;
         const diagnostic = r.diagnostics
           ? ` raw_choice=${r.diagnostics.rawChoice ?? "none"} raw_conf=${r.diagnostics.rawConfidence ?? "unknown"}`

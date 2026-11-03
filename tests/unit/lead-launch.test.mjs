@@ -13,13 +13,27 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_JEV_STATS_PATH } from "../../hub/lib/jev-addon.mjs";
 import {
-  launchLead,
+  launchLead as launchLeadActual,
   leadDisplayName,
   leadEntryPrompt,
   leadSessionName,
   offerLeadLaunchers,
   resolveLauncher,
 } from "../../hub/team/lead-launch.mjs";
+
+// 기존 모델 라우팅 테스트에서는 공개 Registry와 사용자 MCP 설정을 읽지 않는다.
+function launchLead(input, options = {}) {
+  return launchLeadActual(input, {
+    recommend: async ({ cliType }) => ({
+      cli: cliType,
+      status: "deferred",
+      recommendations: [],
+      diagnostics: ["test_fixture"],
+      applied: false,
+    }),
+    ...options,
+  });
+}
 
 function config(content) {
   const path = join(mkdtempSync(join(tmpdir(), "tfx-lead-")), "lead.json");
@@ -165,7 +179,9 @@ describe("tfx lead", () => {
     const home = mkdtempSync(join(tmpdir(), "lead-parser-"));
     t.after(() => rmSync(home, { recursive: true, force: true }));
     const fake = `export const resolveLauncher = ({ cli, flag }) => flag || cli;
-      export const launchLead = async (input) => ({ok:true, ...input, name:input.role, session:'fake-lead', routing:{enabled:true,attempted:true,complexity:'deep',recommendedProfile:'astra_xhigh',effectiveModel:'fake-model',effectiveEffort:'xhigh',confidence:0.9,source:'jev',reason:'jev_applied',appliedTo:'start_args'}});`;
+      export const launchLead = async (input) => input.task === 'recommendation-send-failure'
+        ? {ok:false,session:'fake-lead',start:{ready:true},ask:{ok:true},recommendationAsk:{ok:false,error:'fixture recommendation error'}}
+        : ({ok:true, ...input, name:input.role, session:'fake-lead', routing:{enabled:true,attempted:true,complexity:'deep',recommendedProfile:'astra_xhigh',effectiveModel:'fake-model',effectiveEffort:'xhigh',confidence:0.9,source:'jev',reason:'jev_applied',appliedTo:'start_args'}});`;
     const hook = `import { registerHooks } from 'node:module';
       registerHooks({resolve(specifier, context, next) { if (specifier === '../hub/team/lead-launch.mjs' && context.parentURL.endsWith('/bin/triflux.mjs')) return {url:${JSON.stringify(`data:text/javascript,${encodeURIComponent(fake)}`)},shortCircuit:true}; return next(specifier, context); }});`;
     const invoke = (...args) =>
@@ -222,6 +238,18 @@ describe("tfx lead", () => {
     assert.notEqual(missing.status, 0);
     const help = invoke("--help");
     assert.match(help.stdout, /--task/);
+    const recommendationFailure = invoke(
+      "리드",
+      "--task",
+      "recommendation-send-failure",
+    );
+    assert.equal(recommendationFailure.status, 1);
+    assert.match(
+      recommendationFailure.stdout,
+      /MCP 추천 전송 실패: fixture recommendation error/,
+    );
+    assert.match(recommendationFailure.stdout, /리드 진입은 완료/);
+    assert.doesNotMatch(recommendationFailure.stdout, /리드 진입 전송 실패/);
   });
   it("lead CLI는 보류한 원 complexity와 신뢰도를 사람 출력에 표시한다", (t) => {
     const home = mkdtempSync(join(tmpdir(), "lead-diagnostic-cli-"));

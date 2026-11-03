@@ -65,6 +65,7 @@ export function parseArgs(argv) {
       "cli-type": { type: "string" },
       "available-servers": { type: "string" },
       prompt: { type: "string" },
+      cwd: { type: "string" },
       instruction: { type: "string" },
       delimited: { type: "boolean" },
     },
@@ -1111,6 +1112,23 @@ async function cmdHandoffCheck(args) {
   }
 }
 
+async function cmdJudgeMcp(args) {
+  const { recommendMcp, formatMcpRecommendation } = await import(
+    "./lib/mcp-recommendations.mjs"
+  );
+  const result = await recommendMcp({
+    task: args.prompt,
+    cliType: args["cli-type"],
+    cwd: args.cwd,
+  });
+  if (args.delimited) {
+    console.error(`[tfx-route] MCP recommendation: ${JSON.stringify(result)}`);
+    process.stdout.write(formatMcpRecommendation(result));
+    return true;
+  }
+  return emitJson({ ok: true, mcpRecommendation: result });
+}
+
 async function cmdJudgeRoute(args) {
   try {
     const payload =
@@ -1260,6 +1278,8 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdHandoffCheck(args);
     case "judge-route":
       return await cmdJudgeRoute(args);
+    case "judge-mcp":
+      return await cmdJudgeMcp(args);
     case "judge-ack":
       return await cmdJudgeAck(args);
     case "judge-review":

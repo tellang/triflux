@@ -16,6 +16,10 @@ import {
   judgeTaskRouting,
   recordJevStat,
 } from "../lib/jev-addon.mjs";
+import {
+  formatMcpRecommendation,
+  recommendMcp,
+} from "../lib/mcp-recommendations.mjs";
 
 const execFileAsync = promisify(execFile);
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -154,6 +158,8 @@ export async function launchLead(
     jevOptions = {},
     modelOptions = {},
     judgeRouting = judgeTaskRouting,
+    recommend = recommendMcp,
+    recommendationOptions = {},
   } = {},
 ) {
   if (!LEAD_CLIS.includes(cli))
@@ -248,7 +254,29 @@ export async function launchLead(
   routing.effectiveEffort = effort ?? null;
   const target = session || leadSessionName(cwd);
   const name = leadDisplayName(role.trim());
-  const summary = { cli, session: target, name, launcher, routing };
+  let mcpRecommendation;
+  try {
+    mcpRecommendation = await recommend(
+      { cliType: cli, cwd, task },
+      { refresh: true, timeoutMs: 500, jevOptions, ...recommendationOptions },
+    );
+  } catch {
+    mcpRecommendation = {
+      cli,
+      status: "unavailable",
+      recommendations: [],
+      diagnostics: ["recommendation_failed"],
+      applied: false,
+    };
+  }
+  const summary = {
+    cli,
+    session: target,
+    name,
+    launcher,
+    routing,
+    mcpRecommendation,
+  };
   let start;
   let startReturned = false;
   try {
@@ -296,6 +324,7 @@ export async function launchLead(
     }
   }
   if (!start.ready) return { ok: false, ...summary, start };
+  const recommendationContext = formatMcpRecommendation(mcpRecommendation);
   // Claude 슬래시 명령은 tmux 입력으로만 실행되고, Claude 안에서 호출해도 SendMessage 로 바뀌지 않게 한다.
   const ask = await runLive(
     [
@@ -305,11 +334,35 @@ export async function launchLead(
       "--session",
       target,
       "--prompt",
-      leadEntryPrompt(cli, role.trim()),
+      `${leadEntryPrompt(cli, role.trim())}${cli === "claude" ? "" : recommendationContext}`,
       "--no-wait",
       ...(cli === "claude" ? ["--via-tmux"] : []),
     ],
     run,
   );
+  // slash 인자는 역할만 받는다. 추천은 기존 busy 대기 계약을 쓰는 별도 입력으로 전달한다.
+  if (cli === "claude" && ask.ok && recommendationContext) {
+    const recommendationAsk = await runLive(
+      [
+        "ask",
+        "--cli",
+        cli,
+        "--session",
+        target,
+        "--prompt",
+        recommendationContext,
+        "--no-wait",
+        "--via-tmux",
+      ],
+      run,
+    );
+    return {
+      ok: Boolean(recommendationAsk.ok),
+      ...summary,
+      start,
+      ask,
+      recommendationAsk,
+    };
+  }
   return { ok: Boolean(ask.ok), ...summary, start, ask };
 }
