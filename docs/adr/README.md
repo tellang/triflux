@@ -57,6 +57,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0048](0048-codex-terra-family-for-writing-lanes.md) | Codex Terra 가족을 더하고 글쓰기 레인을 Terra 로 옮긴다 | Accepted | 0037, 0039 |
 | [0049](0049-model-family-and-effort-split.md) | 모든 CLI 에서 모델 가족과 effort 를 나눠 다룬다 | Accepted | 0037, 0038, 0048 |
 | [0050](0050-jev-mcp-recommendations.md) | Jev MCP 추천을 기존 실행 경로에 연결하고 활성화와 구분한다 | Accepted | 0028, 0029 |
+| [0051](0051-jev-worker-capability-application.md) | Jev 모델 조회와 등록된 MCP의 워커별 적용을 연결한다 | Proposed | 0028, 0049, 0050 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 

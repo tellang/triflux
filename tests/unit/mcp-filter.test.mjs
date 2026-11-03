@@ -38,7 +38,10 @@ describe("mcp-filter", () => {
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const inventoryFile = join(dir, "inventory.json");
     const config = join(dir, "config.toml");
-    writeFileSync(config, "[mcp_servers.context7]\n[mcp_servers.playwright]\n");
+    writeFileSync(
+      config,
+      '[mcp_servers.context7]\nurl="https://c7.invalid/mcp"\n[mcp_servers.playwright]\nurl="https://pw.invalid/mcp"\n',
+    );
     writeFileSync(
       inventoryFile,
       JSON.stringify({
@@ -282,7 +285,10 @@ describe("mcp-filter", () => {
 
   it("inventory는 허용 정책에 쓰고 Codex override는 config 서버만 대상으로 한다", () => {
     const config = join(fixtureDir, "inventory-config.toml");
-    writeFileSync(config, "[mcp_servers.context7]\n[mcp_servers.exa]\n");
+    writeFileSync(
+      config,
+      '[mcp_servers.context7]\nurl="https://c7.invalid/mcp"\n[mcp_servers.exa]\nurl="https://exa.invalid/mcp"\n',
+    );
     const options = {
       codexConfig: config,
       agentType: "executor",
@@ -316,7 +322,10 @@ describe("mcp-filter", () => {
     const dir = mkdtempSync(join(tmpdir(), "tfx-mcp-filter-"));
     const config = join(dir, "config.toml");
     try {
-      writeFileSync(config, "[mcp_servers.context7]\n[mcp_servers.foo.bar]\n");
+      writeFileSync(
+        config,
+        '[mcp_servers.context7]\nurl="https://mcp.context7.com/mcp"\n[mcp_servers.foo.bar]\n',
+      );
       const policy = buildMcpPolicy({
         agentType: "executor",
         cliType: "codex",

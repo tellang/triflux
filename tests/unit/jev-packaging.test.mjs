@@ -166,7 +166,9 @@ test("Jev 배포 tarball과 공유 설치 경로에서 bridge가 개발 root 없
       bridge_cli() { "$NODE_BIN" --import "$MOCK_HTTP" "$INSTALLED_BRIDGE" "$@"; }
       ${apply}
       AGENT_TYPE=executor
+      CLI_TYPE=codex
       PROMPT=fixture
+      recommendation_task="$PROMPT"
       TFX_CODEX_PROFILE=auto
       TFX_GEMINI_PROFILE=
       TFX_EXECUTION_MODE=auto

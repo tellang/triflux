@@ -3,6 +3,7 @@
 // 역할/컨텍스트 기반 MCP 도구 노출 정책의 단일 소스.
 
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { isJevEnabled, judgeMcpSelection } from "@triflux/core/hub/lib/jev-addon.mjs";
@@ -15,6 +16,8 @@ import {
   SERVER_EXPLICIT_KEYWORDS,
   uniqueStrings,
 } from "./mcp-server-catalog.mjs";
+
+const toml = createRequire(import.meta.url)("@iarna/toml");
 
 const SEARCH_INTENT_PATTERNS = Object.freeze([
   /\b(search|web|browse|look ?up|find|latest|recent|news|current|today|release(?: note)?s?|changelog|announcement|pricing|status|verify|fact[- ]?check)\b/i,
@@ -228,18 +231,23 @@ function availableServersFromInventory(inventory, cliType) {
   );
 }
 
-function codexServersFromConfig(configFile) {
-  if (!configFile) return [];
+function codexDefinitionsFromConfig(configFile) {
+  if (!configFile) return {};
   try {
-    return uniqueStrings(
-      readFileSync(configFile, "utf8")
-        .split(/\r?\n/)
-        .map((line) => /^\[mcp_servers\.([^\].]+)\]$/.exec(line)?.[1])
-        .filter(Boolean),
-    ).sort();
+    return toml.parse(readFileSync(configFile, "utf8")).mcp_servers || {};
   } catch {
-    return [];
+    return {};
   }
+}
+
+function codexServersFromConfig(configFile) {
+  return Object.entries(codexDefinitionsFromConfig(configFile))
+    .filter(
+      ([, entry]) =>
+        typeof entry.command === "string" || typeof entry.url === "string",
+    )
+    .map(([name]) => name)
+    .sort();
 }
 
 function buildInventoryIndex(inventory = null) {
@@ -665,16 +673,24 @@ export function getCodexMcpConfig(options = {}) {
   const allowedToolsByServer =
     getProfileDefinition(resolvedProfile).allowedToolsByServer;
   for (const server of targetServers) {
-    if (!allowedServers.has(server)) {
+    const original =
+      codexDefinitionsFromConfig(options.codexConfig)[server] || {};
+    if (!allowedServers.has(server) || original.enabled === false) {
       // 비허용 서버는 명시적으로 비활성화하여 MCP 시작 자체를 방지.
       config.mcp_servers[server] = { enabled: false };
       continue;
     }
 
-    config.mcp_servers[server] = {
-      enabled: true,
-      enabled_tools: [...(allowedToolsByServer[server] || [])],
-    };
+    config.mcp_servers[server] = { enabled: true };
+    const allowedTools = allowedToolsByServer[server];
+    if (allowedTools !== undefined) {
+      config.mcp_servers[server].enabled_tools = allowedTools.filter(
+        (tool) =>
+          (!Array.isArray(original.enabled_tools) ||
+            original.enabled_tools.includes(tool)) &&
+          !original.disabled_tools?.includes(tool),
+      );
+    }
   }
   return config;
 }
@@ -692,7 +708,13 @@ function toTomlLiteral(value) {
 function flattenConfig(prefix, value, output) {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     for (const [key, nestedValue] of Object.entries(value)) {
-      flattenConfig(prefix ? `${prefix}.${key}` : key, nestedValue, output);
+      flattenConfig(
+        prefix
+          ? `${prefix}.${/^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key)}`
+          : key,
+        nestedValue,
+        output,
+      );
     }
     return;
   }

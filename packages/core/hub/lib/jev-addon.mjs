@@ -1246,6 +1246,23 @@ export async function judgeTaskRouting(
   const modeRes = results.execution_mode;
   const mcpProfRes = results.mcp_profile;
   const shiftRes = results.tier_shift;
+  const complexityRouted = TIER_ROUTABLE_ROLES.has(agentType);
+  const modelResult = complexityRouted ? compRes : shiftRes;
+  const modelThreshold = complexityRouted
+    ? modelResult?.choice === "standard"
+      ? threshold
+      : Math.max(threshold, TIER_CHANGE_MIN_CONFIDENCE)
+    : TIER_CHANGE_MIN_CONFIDENCE;
+  const modelDecision = options.includeDiagnostics
+    ? {
+        confidence: modelResult?.confidence ?? null,
+        reason: !modelResult
+          ? "invalid_response"
+          : modelResult.confidence < modelThreshold
+            ? "low_confidence"
+            : "accepted",
+      }
+    : undefined;
   const tierShift =
     shiftRes &&
     shiftRes.confidence >= TIER_CHANGE_MIN_CONFIDENCE &&
@@ -1311,7 +1328,7 @@ export async function judgeTaskRouting(
     neededMcpServers === null
   ) {
     return diagnostics
-      ? { complexity: null, confidence: null, diagnostics }
+      ? { complexity: null, confidence: null, diagnostics, modelDecision }
       : null;
   }
 
@@ -1365,6 +1382,7 @@ export async function judgeTaskRouting(
     neededMcpServers,
     tierShift,
     confidence: avgConfidence,
+    ...(modelDecision ? { modelDecision } : {}),
     ...(diagnostics ? { diagnostics } : {}),
   };
 }

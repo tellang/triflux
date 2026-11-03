@@ -42,6 +42,7 @@ process.exit(1);
           TFX_ANTIGRAVITY_OK: "0",
           TFX_PREFLIGHT_LOADED: "1",
           TFX_MCP_HEALTH_CHECK: "0",
+          TFX_JEV: "off",
           FAKE_CODEX_MODE: "exec",
           TFX_BRIDGE_SCRIPT: bridge,
           BRIDGE_LOG: log,
@@ -59,8 +60,19 @@ process.exit(1);
       .map((line) => JSON.parse(line));
     assert.deepEqual(
       calls.map((args) => args[0]),
-      ["team-task-update", "team-send-message"],
+      ["judge-route", "team-task-update", "team-send-message"],
     );
+    assert.deepEqual(calls[0], [
+      "judge-route",
+      "--agent",
+      "executor",
+      "--cli-type",
+      "codex",
+      "--prompt",
+      "unavailable-bridge",
+      "--worker-model",
+      "--delimited",
+    ]);
     const backup = JSON.parse(readFileSync(join(dir, "task-1.json"), "utf8"));
     assert.equal(backup.result, "success");
     assert.match(backup.summary, /^EXEC:unavailable-bridge/);

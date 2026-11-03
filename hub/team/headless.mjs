@@ -14,7 +14,10 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
+import {
+  resolveNestedCodexAgentProfile,
+  resolveWorkerModel,
+} from "../../scripts/lib/agent-route-policy.mjs";
 import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
 import {
   judgeWorkerHealth,
@@ -204,10 +207,7 @@ function buildRouteBackedHeadlessCommand(
         .map((key) => `${key}=${shellQuote(process.env[key])} `)
         .join("")
     : "";
-  const codexProfileEnv =
-    resolvedCli === "codex" && opts.codexProfile
-      ? `TFX_CODEX_PROFILE=${shellQuote(opts.codexProfile)} `
-      : "";
+  const codexProfileEnv = `TFX_CODEX_PROFILE=${shellQuote(opts.codexProfile || "auto")} `;
   const lifecycleEnv = [
     "TFX_HARD_CEILING_SEC",
     "TFX_STALL_THRESHOLD",
@@ -216,9 +216,22 @@ function buildRouteBackedHeadlessCommand(
     .filter((key) => process.env[key])
     .map((key) => `${key}=${shellQuote(process.env[key])} `)
     .join("");
+  const selectionEnv = Object.entries({
+    TFX_WORKER_CLI: resolvedCli,
+    TFX_WORKER_MODEL: opts.model || "",
+    TFX_WORKER_EFFORT: opts.effort || "",
+    TFX_WORKER_MODEL_FILE: `${resultFile}.model.json`,
+    TFX_WORKER_MCP_FILE: `${resultFile}.mcp.json`,
+    TFX_WORKER_SANDBOX_SCOPE: "headless",
+    ...(resolvedCli === "antigravity" && opts.profile
+      ? { TFX_GEMINI_PROFILE: opts.profile }
+      : {}),
+  })
+    .map(([key, value]) => `${key}=${shellQuote(value)} `)
+    .join("");
   const script =
     `__tfx_prompt=$(cat ${shellQuote(promptFile)}); ` +
-    `${lifecycleEnv}${codexProfileEnv}${cliModeEnv}${reviewEnv}` +
+    `${lifecycleEnv}${codexProfileEnv}${cliModeEnv}${reviewEnv}${selectionEnv}` +
     `bash ${shellQuote(routeScript)} ${shellQuote(routeAgent)} "$__tfx_prompt" ${shellQuote(mcp)} ${shellQuote(timeout)} '' ${shellQuote(taskFile)} ` +
     `> ${shellQuote(resultFile)} 2>${shellQuote(`${resultFile}.err`)} < /dev/null`;
   return `bash -lc ${shellQuote(script)}`;
@@ -287,6 +300,27 @@ export async function prepareHeadlessMcpRecommendation(
   );
 }
 
+export async function prepareHeadlessWorkerModel(assignment, options = {}) {
+  const cli = resolveCliType(assignment.cli);
+  // route가 provider와 retry/review 정책을 확정하는 작업은 부모가 중복 조회하지 않는다.
+  if (
+    cli !== "claude" ||
+    ["code-reviewer", "quality-reviewer"].includes(assignment.role)
+  )
+    return null;
+  return resolveWorkerModel(
+    {
+      task: assignment.prompt,
+      agent: assignment.role || "claude",
+      cli,
+      model: assignment.model,
+      effort: assignment.effort,
+      nested: true,
+    },
+    options,
+  );
+}
+
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const { handoff = true, mcp, contextFile, model, cwd } = opts;
   const resolvedCli = resolveCliType(cli);
@@ -345,10 +379,14 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   // Codex와 Antigravity는 tfx-route.sh를 통해서만 headless 실행한다. 이 경로가
   // disable/fallback/fail-loud 정책의 유일한 판정원이다. 여기서 같은 정책을
   // 재구현하면 shell route와 headless backend가 서로 다른 결론을 낼 수 있다.
-  const codexProfile =
-    resolvedCli === "codex"
+  // 역할 기본값은 명시 입력이 아니다. auto를 유지해야 route의 Jev 조정이 실행된다.
+  const explicitCodexProfile =
+    (resolvedCli === "codex" && opts.profile && opts.profile !== "auto") ||
+    ["max", "ultra", "astra_max", "astra_ultra"].includes(
+      process.env.TFX_CODEX_PROFILE,
+    )
       ? resolveNestedCodexAgentProfile(opts.role || cli, {
-          profileOverride: opts.profile ?? "auto",
+          profileOverride: resolvedCli === "codex" ? opts.profile : "auto",
           globalProfile: process.env.TFX_CODEX_PROFILE,
           codexHome: process.env.CODEX_HOME,
         })
@@ -363,13 +401,14 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
           {
             ...opts,
             role: reviewByAuthor ? routeAgent : opts.role,
-            codexProfile,
+            codexProfile: explicitCodexProfile,
             mcp,
           },
         )
       : getBackend(resolvedCli).buildArgs(fullPrompt, resultFile, {
           ...opts,
           model,
+          workerModel: opts.workerModel,
           promptFile,
         });
   const safeCwd =
@@ -399,7 +438,7 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
  * @param {string} resultFile
  */
 export function cleanStaleResultArtifacts(resultFile) {
-  for (const suffix of ["", ".partial", ".err"]) {
+  for (const suffix of ["", ".partial", ".err", ".model.json", ".mcp.json"]) {
     const path = `${resultFile}${suffix}`;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -630,6 +669,9 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
   const mcpRecommendations = assignments.map((assignment) =>
     prepareHeadlessMcpRecommendation(assignment),
   );
+  const workerModels = assignments.map((assignment) =>
+    prepareHeadlessWorkerModel(assignment),
+  );
   const dispatches = [];
   for (let i = 0; i < assignments.length; i++) {
     const assignment = assignments[i];
@@ -678,6 +720,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     cleanStaleResultArtifacts(resultFile);
     shadowClaudeMcpSelection(assignment);
     const mcpRecommendation = await mcpRecommendations[i];
+    const workerModel = await workerModels[i];
     if (mcpRecommendation)
       safeProgress?.({
         type: "mcp_recommendation",
@@ -693,6 +736,8 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
         mcp: assignment.mcp,
         role: assignment.role,
         model: assignment.model,
+        effort: assignment.effort,
+        workerModel,
         profile: assignment.profile,
         cwd: assignment.cwd || assignment.workdir,
         mcpRecommendation,
@@ -718,6 +763,8 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       workerId,
       cwd: assignment.cwd || assignment.workdir,
       mcpRecommendation,
+      workerModelFile: `${resultFile}.model.json`,
+      workerMcpFile: `${resultFile}.mcp.json`,
     });
   }
 
@@ -778,6 +825,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
       shadowClaudeMcpSelection(assignment);
       const mcpRecommendation =
         await prepareHeadlessMcpRecommendation(assignment);
+      const workerModel = await prepareHeadlessWorkerModel(assignment);
       if (mcpRecommendation)
         safeProgress?.({
           type: "mcp_recommendation",
@@ -793,6 +841,8 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
           mcp: assignment.mcp,
           role: assignment.role,
           model: assignment.model,
+          effort: assignment.effort,
+          workerModel,
           profile: assignment.profile,
           cwd: assignment.cwd || assignment.workdir,
           mcpRecommendation,
@@ -827,6 +877,8 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         workerId,
         cwd: assignment.cwd || assignment.workdir,
         mcpRecommendation,
+        workerModelFile: `${resultFile}.model.json`,
+        workerMcpFile: `${resultFile}.mcp.json`,
       };
     }),
   );
@@ -993,6 +1045,14 @@ async function collectResults(results) {
         ...(d.mcpRecommendation
           ? { mcpRecommendation: d.mcpRecommendation }
           : {}),
+        workerModelFile:
+          d.workerModelFile && existsSync(d.workerModelFile)
+            ? d.workerModelFile
+            : null,
+        workerMcpFile:
+          d.workerMcpFile && existsSync(d.workerMcpFile)
+            ? d.workerMcpFile
+            : null,
         workerGitDiffFiles,
         sessionDead: completion.sessionDead || false,
         handoff: handoffResult.handoff,
@@ -1254,7 +1314,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     runFailed = true;
     runError = error;
   }
-  resultsIndex.finish(runCompleted);
+  resultsIndex.finish(runCompleted, completedResults);
 
   if (!runCompleted) {
     sessionOwnership.release();
