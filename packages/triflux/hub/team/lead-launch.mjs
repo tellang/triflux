@@ -324,7 +324,9 @@ export async function launchLead(
     }
   }
   if (!start.ready) return { ok: false, ...summary, start };
-  const recommendationContext = formatMcpRecommendation(mcpRecommendation);
+  const recommendationContext = formatMcpRecommendation(mcpRecommendation, {
+    audience: "lead",
+  });
   // Claude 슬래시 명령은 tmux 입력으로만 실행되고, Claude 안에서 호출해도 SendMessage 로 바뀌지 않게 한다.
   const ask = await runLive(
     [

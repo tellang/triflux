@@ -72,6 +72,12 @@ test("Claude direct backend receives recommendation on stdin with the original t
   assert.match(content, /"status":"recommended"/);
   assert.match(content, /"applied":false/);
   assert.match(content, /mcp-registry|mcp-server-catalog/);
+  assert.match(content, /리드에게 보고한다/);
+  assert.match(
+    content,
+    /별도 승인 없는 해당 MCP 후보의 설치, 인증, 등록 설정 변경은 하지 않는다/,
+  );
+  assert.match(content, /일반 코드와 프로젝트 설정 변경에는 적용하지 않는다/);
   assert.equal(calls, 1);
 });
 
@@ -348,6 +354,11 @@ if (args.includes('stream-json')) {
         assert.match(stderr, /"applied":false/);
         assert.match(stderr, /registry.modelcontextprotocol.io/);
         assert.match(JSON.stringify(worker), /MCP recommendation/);
+        assert.match(JSON.stringify(worker), /리드에게 보고한다/);
+        assert.match(
+          JSON.stringify(worker),
+          /별도 승인 없는 해당 MCP 후보의 설치, 인증, 등록 설정 변경은 하지 않는다/,
+        );
       }
       assert.equal(
         requests.filter((request) => request.questions.candidate_0).length,
