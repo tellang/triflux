@@ -152,7 +152,7 @@ describe("tfx lead", () => {
             : mode === "launcher"
               ? "launcher_preserved"
               : mode === "low"
-                ? "no_accepted_recommendation"
+                ? "complexity_low_confidence"
                 : "jev_applied",
       );
       if (mode !== "low") assert.equal(row.confidence, 0.905);
@@ -223,6 +223,45 @@ describe("tfx lead", () => {
     const help = invoke("--help");
     assert.match(help.stdout, /--task/);
   });
+  it("lead CLI는 보류한 원 complexity와 신뢰도를 사람 출력에 표시한다", (t) => {
+    const home = mkdtempSync(join(tmpdir(), "lead-diagnostic-cli-"));
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+    const fake = `export const resolveLauncher = () => 'claude';
+      export const launchLead = async () => ({ok:false,start:{ready:false},routing:{enabled:true,attempted:true,complexity:null,recommendedProfile:null,effectiveModel:null,effectiveEffort:null,confidence:null,source:'default',reason:'complexity_low_confidence',appliedTo:null,diagnostics:{reason:'low_confidence',rawChoice:'deep',rawConfidence:0.61}}});`;
+    const hook = `import { registerHooks } from 'node:module';
+      registerHooks({resolve(specifier, context, next) { if (specifier === '../hub/team/lead-launch.mjs' && context.parentURL.endsWith('/bin/triflux.mjs')) return {url:${JSON.stringify(`data:text/javascript,${encodeURIComponent(fake)}`)},shortCircuit:true}; return next(specifier, context); }});`;
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        `data:text/javascript,${encodeURIComponent(hook)}`,
+        new URL("../../bin/triflux.mjs", import.meta.url).pathname,
+        "lead",
+        "리드",
+      ],
+      {
+        encoding: "utf8",
+        timeout: 10000,
+        env: {
+          ...process.env,
+          HOME: home,
+          CODEX_HOME: join(home, "codex"),
+          XDG_CONFIG_HOME: join(home, "config"),
+          TFX_JEV: "0",
+        },
+      },
+    );
+    assert.equal(result.status, 1, result.stderr);
+    for (const field of [
+      "complexity=unknown",
+      "recommended=none",
+      "reason=complexity_low_confidence",
+      "raw_choice=deep",
+      "raw_conf=0.61",
+    ])
+      assert.ok(result.stdout.includes(field), field);
+  });
+
   it("Jev deep 권고를 resolver의 concrete start 인자에만 반영한다", async (t) => {
     const home = mkdtempSync(join(tmpdir(), "lead-model-"));
     t.after(() => rmSync(home, { recursive: true, force: true }));
@@ -362,6 +401,62 @@ describe("tfx lead", () => {
       assert.equal(result.routing.source, "default");
       assert.equal(result.routing.attempted, mode !== "disabled");
       assert.equal(result.routing.appliedTo, null);
+    });
+  }
+
+  for (const modeConfidence of [0.16, 0.86]) {
+    it(`lead는 complexity 신뢰도 0.61을 보류하고 기본 시작을 유지한다: mode=${modeConfidence}`, async () => {
+      const { calls, run } = fakeRun({ start: { ready: false } });
+      const result = await launchLead(
+        {
+          cli: "claude",
+          role: "MnK 개발리드",
+          task: "프로젝트 개발 리드: 워커 재분배와 승인, 평가와 배포 조율",
+        },
+        {
+          run,
+          jevOptions: {
+            env: { JEV_API_KEY: "test-key", TFX_JEV_STATS: "0" },
+            fetchImpl: async () => ({
+              ok: true,
+              json: async () => ({
+                answers: {
+                  complexity: {
+                    choice: "deep",
+                    confidence: 0.61,
+                    probabilities: {
+                      trivial: 0,
+                      standard: 0,
+                      deep: 0.71,
+                      high_risk: 0.29,
+                    },
+                  },
+                  execution_mode: {
+                    choice: "bypass",
+                    confidence: modeConfidence,
+                  },
+                  mcp_profile: { choice: "none", confidence: 0.38 },
+                },
+              }),
+            }),
+          },
+        },
+      );
+      assert.equal(result.routing.reason, "complexity_low_confidence");
+      assert.deepEqual(result.routing.diagnostics, {
+        reason: "low_confidence",
+        rawChoice: "deep",
+        rawConfidence: 0.61,
+      });
+      assert.equal(result.routing.complexity, null);
+      assert.equal(result.routing.recommendedProfile, null);
+      assert.equal(result.routing.effectiveModel, null);
+      assert.equal(result.routing.effectiveEffort, null);
+      assert.equal(result.routing.source, "default");
+      assert.equal(result.routing.appliedTo, null);
+      assert.equal(calls.length, 1);
+      assert.ok(!calls[0].includes("--model"));
+      assert.ok(!calls[0].includes("--effort"));
     });
   }
 

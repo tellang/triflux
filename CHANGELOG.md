@@ -2,6 +2,12 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.93.3] - 2026-11-03
+
+### Fixed
+- jev: `tfx judge route`가 맞는 스킬 분기 없음, 낮은 신뢰도, 호출 실패를 모두 null로 표시하던 출력에 `diagnostics`를 추가하여 보류 이유와 원 판정값을 구분한다.
+- lead: Jev 복잡도 판정을 채택하지 않은 이유와 원 choice, confidence를 JSON과 사람 출력에 보존한다. 기존 신뢰도 기준과 명시한 모델, 런처의 우선순위는 유지한다.
+
 ## [10.93.2] - 2026-11-03
 
 ### Fixed

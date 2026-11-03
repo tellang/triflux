@@ -1039,6 +1039,11 @@ describe("judgeRoutingBranch", () => {
         choice: null,
         rule: null,
         confidence: null,
+        diagnostics: {
+          reason: "jev_disabled",
+          rawChoice: null,
+          rawConfidence: null,
+        },
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -1059,6 +1064,77 @@ describe("judgeRoutingBranch", () => {
         ),
         null,
       );
+    }
+  });
+
+  for (const [reply, reason] of [
+    [{ choice: "none", confidence: 0.88 }, "no_matching_branch"],
+    [{ choice: "D7", confidence: 0.61 }, "low_confidence"],
+    [{ choice: "D4", confidence: 0.99 }, "requires_full_routing"],
+  ]) {
+    it(`보류한 분기는 권고 없이 원 판정과 이유만 남긴다: ${reason}`, async () => {
+      const verdict = await judgeRoutingBranch(
+        { task: "작업 요약", routingText },
+        { includeDiagnostics: true, client: () => reply },
+      );
+      assert.deepEqual(verdict, {
+        branch: null,
+        rule: null,
+        confidence: null,
+        diagnostics: {
+          reason,
+          rawChoice: reply.choice,
+          rawConfidence: reply.confidence,
+        },
+      });
+    });
+  }
+
+  it("route CLI는 none과 낮은 신뢰도를 호출 실패와 구분한다", (t) => {
+    const dir = mkdtempSync(join(tmpdir(), "tfx-judge-diagnostic-"));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const fakeCli = join(dir, "jev");
+    writeFileSync(
+      fakeCli,
+      `#!${process.execPath}\nconsole.log(process.env.JEV_TEST_REPLY);\n`,
+      { mode: 0o755 },
+    );
+    for (const [reply, reason] of [
+      [{ choice: "none", confidence: 0.88 }, "no_matching_branch"],
+      [{ choice: "D7", confidence: 0.61 }, "low_confidence"],
+      [{ error: "private server error" }, "jev_failed"],
+    ]) {
+      const stdout = execFileSync(
+        process.execPath,
+        ["bin/triflux.mjs", "judge", "route", "--task", "작업 요약"],
+        {
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            HOME: dir,
+            CODEX_HOME: join(dir, "codex"),
+            XDG_CONFIG_HOME: join(dir, "config"),
+            TFX_JEV: "",
+            TFX_JEV_CLI: fakeCli,
+            JEV_API_KEY: "",
+            TYPESAFE_API_KEY: "",
+            TFX_JEV_STATS: "0",
+            JEV_TEST_REPLY: JSON.stringify(reply),
+          },
+        },
+      );
+      assert.deepEqual(JSON.parse(stdout), {
+        enabled: true,
+        choice: null,
+        rule: null,
+        confidence: null,
+        diagnostics: {
+          reason,
+          rawChoice: reply.choice ?? null,
+          rawConfidence: reply.confidence ?? null,
+        },
+      });
+      assert.doesNotMatch(stdout, /private server error/);
     }
   });
 });

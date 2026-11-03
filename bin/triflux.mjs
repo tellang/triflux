@@ -360,7 +360,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
   judge: {
     usage: "tfx judge <route|worker-mode> --task SUMMARY",
     description:
-      "route는 라우팅 분기와 규칙을, worker-mode는 워커 권한 권고를 JSON으로 낸다. Jev를 쓰지 못하면 route는 choice null, worker-mode는 규칙 판정",
+      "route는 스킬 선택 결정트리의 분기와 규칙을, worker-mode는 워커 권한 권고를 JSON으로 낸다. route의 보류 원인은 diagnostics에 표시하고, Jev를 쓰지 못하면 worker-mode는 규칙 판정",
     options: [
       {
         name: "--task",
@@ -4355,8 +4355,11 @@ async function main() {
         );
       if (!JSON_OUTPUT) {
         const r = result.routing;
+        const diagnostic = r.diagnostics
+          ? ` raw_choice=${r.diagnostics.rawChoice ?? "none"} raw_conf=${r.diagnostics.rawConfidence ?? "unknown"}`
+          : "";
         console.log(
-          `  Jev enabled=${r.enabled} attempted=${r.attempted} complexity=${r.complexity ?? "unknown"} recommended=${r.recommendedProfile ?? "none"} model=${r.effectiveModel ?? "default"} effort=${r.effectiveEffort ?? "default"} conf=${r.confidence ?? "unknown"} source=${r.source} reason=${r.reason} appliedTo=${r.appliedTo ?? "none"}\n`,
+          `  Jev enabled=${r.enabled} attempted=${r.attempted} complexity=${r.complexity ?? "unknown"} recommended=${r.recommendedProfile ?? "none"} model=${r.effectiveModel ?? "default"} effort=${r.effectiveEffort ?? "default"} conf=${r.confidence ?? "unknown"} source=${r.source} reason=${r.reason} appliedTo=${r.appliedTo ?? "none"}${diagnostic}\n`,
         );
       }
       if (!result.ok) process.exitCode = EXIT_ERROR;
@@ -4383,16 +4386,20 @@ async function main() {
         return;
       }
       const routingPath = resolveRoutingSsot();
-      const verdict = await judgeRoutingBranch({
-        task,
-        routingText: routingPath ? readFileSync(routingPath, "utf8") : "",
-      });
+      const verdict = await judgeRoutingBranch(
+        {
+          task,
+          routingText: routingPath ? readFileSync(routingPath, "utf8") : "",
+        },
+        { includeDiagnostics: true },
+      );
       console.log(
         JSON.stringify({
           enabled: isJevEnabled(),
           choice: verdict?.branch ?? null,
           rule: verdict?.rule ?? null,
           confidence: verdict?.confidence ?? null,
+          diagnostics: verdict.diagnostics,
         }),
       );
       return;
