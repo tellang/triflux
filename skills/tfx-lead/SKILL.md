@@ -117,7 +117,7 @@ Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 �
 | 워커 CLI | 적용 방법 |
 | --- | --- |
 | Claude | bypass는 `tfx-live start --cli claude --launcher "DISABLE_OMC=1 OMC_SKIP_HOOKS=all TFX_SKIP_HOOKS=1 claude --dangerously-skip-permissions"`로 띄운다. `--launcher` 처리에서 워커용 환경 변수 접두를 제거하므로 launcher에 직접 넣는다 |
-| Codex | 공유 daemon 경로는 시작 명령의 bypass 플래그를 제거한다. 시작 뒤 `experimentalApi`를 활성화한 app-server RPC `thread/settings/update`에 `permissions: ":danger-full-access"`, `approvalPolicy: "never"`를 적용하고 `thread/resume` 응답으로 확인한다. 이를 실행하는 tfx 명령은 없어 RPC를 직접 보낸다. `":danger-full-access"`는 2026-11-02 mnk 세션 실측 값이다. `tfx-live start --remote` 경로는 공유 daemon을 거치지 않아 bypass 플래그가 남으므로 auto 권고를 받아도 bypass로 뜬다 |
+| Codex | 로컬 신규 thread는 `tfx-live start --cli codex`가 생성 RPC에 `approvalPolicy: "never"`, `sandbox: "danger-full-access"`를 명시한다. 제한 모드는 `--sandbox`로 `on-request`, `workspace-write`를 지정한다. 시작 결과의 `approvalPolicy`, `sandbox`는 attach 뒤 같은 thread의 daemon 응답이고 `sandbox.type`은 `dangerFullAccess`, `workspaceWrite` 형식이다. `--sandbox` 없는 unloaded resume은 기존 권한을 보존한다. loaded thread는 재개를 거부하므로 기존 TUI의 `/permissions`에서 Full Access를 선택하고 확인한다. `permissionsVerified`는 daemon 설정 일치 여부이며 다음 TUI 턴의 실제 권한 적용 완료를 뜻하지 않는다. 기존 `--remote` 기본 경로는 bypass를 유지한다 |
 | agy | bypass는 `tfx-live start --cli agy --launcher "agy --dangerously-skip-permissions"`로 지정한다. 플래그는 `agy --help`에 있고 `tfx-live` 기본 시작은 쓰지 않는다. 대화형 실측은 아직 안 됐다. 관리자 샌드박스 강제는 이 플래그와 별개이고 `BypassSandbox: true`를 쓴다 |
 
 ## 2. 역할별 모델

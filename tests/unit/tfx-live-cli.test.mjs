@@ -520,11 +520,28 @@ async function runTfxLive(args, options = {}) {
       JsonRpcWsUdsClient.prototype.connect = async () => {};
       JsonRpcWsUdsClient.prototype.notify = () => {};
       JsonRpcWsUdsClient.prototype.close = () => {};
-      JsonRpcWsUdsClient.prototype.request = async (method, params) => method === "thread/list"
-        ? { data: [{ id: "019a0000-0000-7000-8000-000000000001" }] }
-        : method === "thread/loaded/list"
-        ? { data: [], nextCursor: null }
-        : { thread: { id: params.threadId || "019a0000-0000-7000-8000-000000000001" } };
+      let permissionState = { approvalPolicy: "on-request", sandbox: { type: "workspaceWrite", writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false } };
+      const sandboxPolicies = {
+        "danger-full-access": { type: "dangerFullAccess" },
+        "read-only": { type: "readOnly", networkAccess: false },
+        "workspace-write": { type: "workspaceWrite", writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false },
+      };
+      JsonRpcWsUdsClient.prototype.request = async (method, params) => {
+        if (process.env.TEST_CODEX_RPC_LOG) {
+          const { appendFileSync } = await import("node:fs");
+          appendFileSync(process.env.TEST_CODEX_RPC_LOG, JSON.stringify([method, params]) + "\\n");
+        }
+        if (method === "thread/list") return { data: [{ id: "019a0000-0000-7000-8000-000000000001" }] };
+        if (method === "thread/loaded/list") return { data: [], nextCursor: null };
+        if (method === "thread/start" || (method === "thread/resume" && params.config)) {
+          permissionState = { approvalPolicy: params.approvalPolicy ?? permissionState.approvalPolicy,
+            sandbox: sandboxPolicies[params.sandbox] ?? permissionState.sandbox };
+        } else if (method === "thread/resume") {
+          if (process.env.TEST_CODEX_READBACK_ERROR) throw new Error("readback unavailable");
+          if (process.env.TEST_CODEX_READBACK) return JSON.parse(process.env.TEST_CODEX_READBACK);
+        }
+        return { thread: { id: params.threadId || "019a0000-0000-7000-8000-000000000001" }, ...permissionState };
+      };
       import { syncBuiltinESMExports } from "node:module";
       import { promisify } from "node:util";
       const original = childProcess.execFile;
@@ -4384,4 +4401,149 @@ test("Codex start fails before tmux when the shared socket is absent", async () 
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+for (const scenario of [
+  {
+    label: "YOLO",
+    ready: true,
+    approvalPolicy: "never",
+    sandbox: "dangerFullAccess",
+  },
+  {
+    label: "sandbox",
+    restricted: true,
+    ready: true,
+    approvalPolicy: "on-request",
+    sandbox: "workspaceWrite",
+  },
+  {
+    label: "invalid kebab response",
+    ready: false,
+    readback: {
+      thread: { id: "019a0000-0000-7000-8000-000000000001" },
+      approvalPolicy: "never",
+      sandbox: { type: "danger-full-access" },
+    },
+  },
+  { label: "readback failure", ready: false, error: true },
+  {
+    label: "missing permissions",
+    ready: false,
+    readback: { thread: { id: "019a0000-0000-7000-8000-000000000001" } },
+  },
+  {
+    label: "different thread",
+    ready: false,
+    readback: {
+      thread: { id: "019a0000-0000-7000-8000-000000000002" },
+      approvalPolicy: "never",
+      sandbox: { type: "dangerFullAccess" },
+    },
+  },
+  {
+    label: "approval mismatch",
+    ready: false,
+    approvalPolicy: "on-request",
+    sandbox: "dangerFullAccess",
+    readback: {
+      thread: { id: "019a0000-0000-7000-8000-000000000001" },
+      approvalPolicy: "on-request",
+      sandbox: { type: "dangerFullAccess" },
+    },
+  },
+  {
+    label: "sandbox mismatch",
+    ready: false,
+    approvalPolicy: "never",
+    sandbox: "workspaceWrite",
+    readback: {
+      thread: { id: "019a0000-0000-7000-8000-000000000001" },
+      approvalPolicy: "never",
+      sandbox: {
+        type: "workspaceWrite",
+        writableRoots: [],
+        networkAccess: false,
+        excludeTmpdirEnvVar: false,
+        excludeSlashTmp: false,
+      },
+    },
+  },
+]) {
+  test(`Codex daemon start reports observed permissions: ${scenario.label}`, async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-yolo-readback-"));
+    try {
+      await writeReadyFakeTmux(dir);
+      const logPath = path.join(dir, "tmux.jsonl");
+      const rpcPath = path.join(dir, "rpc.jsonl");
+      const result = JSON.parse(
+        await runTfxLive(
+          [
+            "start",
+            "--cli",
+            "codex",
+            "--session",
+            "yolo-readback",
+            "--ready-timeout",
+            "0.2",
+            "--poll-interval",
+            "1",
+            ...(scenario.restricted ? ["--sandbox"] : []),
+          ],
+          {
+            env: {
+              PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+              TMUX_LOG: logPath,
+              TMUX_STATE: path.join(dir, "state.json"),
+              TEST_CODEX_RPC_LOG: rpcPath,
+              ...(scenario.error ? { TEST_CODEX_READBACK_ERROR: "1" } : {}),
+              ...(scenario.readback
+                ? { TEST_CODEX_READBACK: JSON.stringify(scenario.readback) }
+                : {}),
+            },
+          },
+        ),
+      );
+      assert.equal(result.ready, scenario.ready);
+      assert.equal(result.permissionsVerified, scenario.ready);
+      assert.equal(result.approvalPolicy, scenario.approvalPolicy ?? null);
+      assert.equal(result.sandbox?.type ?? null, scenario.sandbox ?? null);
+      if (!scenario.ready)
+        assert.match(result.permissionWarning, /readback|mismatch/i);
+      const calls = (await fs.readFile(rpcPath, "utf8"))
+        .trim()
+        .split("\n")
+        .map(JSON.parse);
+      assert.deepEqual(calls.at(-1), [
+        "thread/resume",
+        {
+          threadId: "019a0000-0000-7000-8000-000000000001",
+          excludeTurns: true,
+        },
+      ]);
+      const log = await readTmuxLog(logPath);
+      const launch = log.find(
+        (args) =>
+          args[0] === "send-keys" && args[3]?.startsWith("codex resume"),
+      )[3];
+      assert.match(launch, /--remote/);
+      assert.doesNotMatch(
+        launch,
+        /--dangerously-bypass|--sandbox|--ask-for-approval/,
+      );
+      assert.equal(
+        log.some((args) => args[0] === "kill-session"),
+        false,
+      );
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test("Codex sandbox launch removes bypass and asks for approval", () => {
+  const [command] = buildLaunchKeys(ADAPTERS.codex, { sandbox: true });
+  assert.doesNotMatch(command, /--dangerously-bypass/);
+  assert.match(command, /--sandbox workspace-write/);
+  assert.match(command, /--ask-for-approval on-request/);
 });

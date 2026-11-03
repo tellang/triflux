@@ -41,7 +41,11 @@ Claude, agy, Codex(`Trust this folder?`와 `Do you trust the contents of this di
 
 Codex `start --model`은 `astra`, `sol`, `terra`, `luna` 가족 별칭을 호출 호스트의 기존 model-family-resolver로 실제 모델 ID로 바꾼다. 호출 호스트의 `~/.config/triflux/models.json` 가족 고정값을 우선하고, Codex 모델 캐시, 마지막 해석 결과, 내장 기본값 순으로 고른다. `--remote`도 호출 호스트에서 해석한 ID를 보내며 원격 호스트의 고정값은 사용하지 않는다. 실제 모델 ID를 명시하면 그대로 전달한다. 모델 해석은 전역 프로필이나 설정 파일을 바꾸지 않고 `--effort`는 별도로 전달한다.
 
-공유 daemon에 이미 로드된 Codex thread는 per-thread hooks override를 지원하지 않아 `start --resume`을 거부한다. 기존 TUI의 승인 모드는 `/permissions`에서 Full Access를 고르고 확인하는 방식으로 바꾼다. `thread/settings/update`의 readback과 다음 TUI 턴에 적용되는 권한은 다를 수 있다. pane을 이미 닫았다면 오류에 나온 `codex resume <threadId>`로 같은 대화를 열고 `/permissions`를 사용한다. 이 오류 때문에 새 대화를 만들거나 공유 daemon을 재시작하지 않는다.
+로컬 Codex 새 thread는 생성 RPC에 `approvalPolicy: "never"`, `sandbox: "danger-full-access"`를 명시한다. `start --sandbox`를 주면 승인 정책은 `on-request`, sandbox는 `workspace-write`로 제한한다. 재개할 때 `--sandbox`를 생략하면 기존 thread 권한을 보존한다. remote TUI resume은 권한 CLI 플래그를 거부하므로 attach 명령에 bypass나 sandbox 플래그를 추가하지 않는다.
+
+로컬 daemon `start` 결과의 `approvalPolicy`, `sandbox`는 TUI attach 뒤 같은 thread에 설정 덮어쓰기 없이 보낸 `thread/resume` 응답이다. 요청의 `sandbox`는 `danger-full-access`, `workspace-write` 형식이고 응답의 `sandbox.type`은 `dangerFullAccess`, `workspaceWrite` 형식이다. `permissionsVerified`는 daemon 설정이 준비한 권한과 일치하는지 나타낸다. 응답 실패나 필드 누락, 다른 thread 응답은 권한 값을 `null`로 보고한다. 권한 불일치는 읽은 값을 그대로 보고한다. 두 경우 모두 `ready: false`, `permissionWarning`을 반환하고 세션은 남긴다. 이 readback은 다음 TUI 턴의 실제 도구 실행까지 확인한 결과는 아니다.
+
+공유 daemon에 이미 로드된 Codex thread는 per-thread hooks override를 지원하지 않아 `start --resume`을 거부하고 기존 설정을 보존한다. 기존 TUI에서 진행 중인 턴이 끝난 뒤 `/permissions`를 입력하고 Full Access를 선택해 확인한다. pane을 닫았다면 오류에 나온 `codex resume <threadId>`는 운영자가 같은 history를 다시 여는 수동 복구 명령이다. 같은 cwd에서 열고 `/permissions`를 다시 선택한다. 이 명령을 에이전트가 직접 실행하는 권한은 아니다. 아직 loaded 상태면 `tfx-live start --resume`은 다시 거부되므로 반복하지 않는다. `thread/settings/update` readback만으로 다음 TUI 턴 권한이 적용됐다고 판단하지 않는다. 새 thread를 만들거나 공유 daemon을 재시작하지 않는다.
 
 ## 창 배치(macOS)
 
