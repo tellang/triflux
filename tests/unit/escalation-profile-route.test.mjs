@@ -423,10 +423,16 @@ process.exit(result.status ?? 1);
     const args = runRoute({
       snapshot,
       agent: "deep-executor",
-      env: { TFX_CODEX_PROFILE: "ultra" },
+      env: {
+        TFX_CODEX_PROFILE: "ultra",
+        TFX_WORKER_CLI: "codex",
+        TFX_WORKER_MODEL: "ignored-model",
+        TFX_WORKER_EFFORT: "ultra",
+      },
     });
 
     assert.deepEqual(profileValues(args), ["astra"]);
+    assert.ok(!args.includes("ignored-model"));
     assert.ok(args.includes('model_reasoning_effort="max"'));
   });
 

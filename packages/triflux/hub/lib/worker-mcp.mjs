@@ -11,6 +11,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CORE_SERVERS } from "../../scripts/lib/mcp-manifest.mjs";
 import {
   mcpEndpointId,
   readMcpCatalog,
@@ -69,10 +70,25 @@ export function prepareWorkerMcp(input, options = {}) {
         entry.id === recommendations[0].id && entry.targets.includes(cli),
     );
     if (entries.length !== 1) return defer("catalog_identity_unavailable");
+    let manifestEnabled = null;
     try {
-      readFileSync(join(home, ".claude", "cache", "mcp-enabled.json"), "utf8");
-      return defer("explicit_mcp_manifest");
+      const manifest = JSON.parse(
+        readFileSync(
+          join(home, ".claude", "cache", "mcp-enabled.json"),
+          "utf8",
+        ),
+      );
+      if (
+        !object(manifest) ||
+        !Array.isArray(manifest.enabled) ||
+        !manifest.enabled.every(
+          (name) => typeof name === "string" && name.trim(),
+        )
+      )
+        return defer("invalid_mcp_manifest");
+      manifestEnabled = new Set([...manifest.enabled, ...CORE_SERVERS]);
     } catch (error) {
+      if (error instanceof SyntaxError) return defer("invalid_mcp_manifest");
       if (error.code !== "ENOENT")
         return defer("registration_config_unreadable");
     }
@@ -157,6 +173,8 @@ export function prepareWorkerMcp(input, options = {}) {
     if (!matches.length) return defer("local_registration_missing");
     if (matches.length !== 1) return defer("registration_ambiguous");
     const selected = matches[0];
+    if (manifestEnabled && !manifestEnabled.has(selected.name))
+      return defer("explicit_mcp_manifest");
     if (
       registrations.filter((entry) => entry.name === selected.name).length !== 1
     )

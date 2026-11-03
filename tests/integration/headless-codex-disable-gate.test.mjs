@@ -283,7 +283,7 @@ describe("headless Codex disable gate", { timeout: 90_000 }, () => {
 const fs = require('node:fs');
 fs.appendFileSync(process.env.TFX_TEST_JEV_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
 const query = process.argv[3];
-const choice = query.includes('complexity') ? 'trivial' : query.includes('permission') ? 'workspace_auto' : query.includes('profile') ? 'none' : 'keep';
+const choice = query.includes('complexity') ? 'trivial' : query.includes('permission') ? (process.env.TFX_TEST_EXECUTION_MODE || 'workspace_auto') : query.includes('profile') ? 'none' : 'keep';
 console.log(JSON.stringify({ choice, value: false, confidence: 0.95 }));
 `,
     );
@@ -366,6 +366,30 @@ console.log(JSON.stringify({ choice, value: false, confidence: 0.95 }));
     assert.equal(selected.effort, metadata.effort);
   });
 
+  for (const [mode, sandbox] of [
+    ["workspace_auto", "workspace-write"],
+    ["read_only", "read-only"],
+  ]) {
+    it(`명시 model/effort에도 Jev ${mode} 권한이 적용된다`, () => {
+      for (const explicit of [
+        { model: "explicit-model" },
+        { effort: "high" },
+      ]) {
+        const outcome = runCodexHeadless(
+          fixture,
+          { ...jevEnv(), TFX_TEST_EXECUTION_MODE: mode },
+          explicit,
+        );
+        assert.equal(outcome.result.status, 0, outcome.stderr);
+        const argv = JSON.parse(
+          readIfPresent(join(fixture.root, "result.txt.model.json")),
+        ).launch.argv;
+        assert.equal(argv[argv.indexOf("--sandbox") + 1], sandbox);
+        assert.ok(!argv.includes("--dangerously-bypass-approvals-and-sandbox"));
+      }
+    });
+  }
+
   it("명시 model만 전달하면 Jev가 effort를 채우지 않는다", () => {
     const outcome = runCodexHeadless(fixture, jevEnv(), {
       model: "explicit-model",
@@ -413,5 +437,124 @@ console.log(JSON.stringify({ choice, value: false, confidence: 0.95 }));
     assert.equal(metadata.fallbackReason, "jev_disabled");
     assert.equal(metadata.launch.profile, "sol");
     assert.equal(metadata.launch.effort, "high");
+  });
+});
+
+describe("직접 워커 effort와 폴백 회귀", () => {
+  function direct(
+    t,
+    overrides = {},
+    { agent = "executor", missingTask = false } = {},
+  ) {
+    const f = createHeadlessFixture();
+    t.after(() => rmSync(f.root, { recursive: true, force: true }));
+    const modelFile = join(f.root, "model.json");
+    const env = {
+      ...baseTestEnv(),
+      HOME: f.home,
+      USERPROFILE: f.home,
+      CODEX_HOME: join(f.home, ".codex"),
+      TMPDIR: f.root,
+      XDG_CACHE_HOME: join(f.root, "cache"),
+      ...isolatedMachineProfileEnv(f.home),
+      CODEX_BIN: f.codexBin,
+      AGY_BIN: f.agyBin,
+      TFX_TEST_CODEX_EXEC_LOG: f.codexLog,
+      TFX_TEST_AGY_EXEC_LOG: f.agyLog,
+      TFX_PREFLIGHT_LOADED: "1",
+      TFX_CODEX_OK: "1",
+      TFX_ANTIGRAVITY_OK: "1",
+      TFX_CLI_MODE: "codex",
+      TFX_CODEX_TRANSPORT: "exec",
+      TFX_HEARTBEAT: "0",
+      TFX_HARD_CEILING_SEC: "0",
+      TFX_MCP_HEALTH_CHECK: "0",
+      TFX_ALLOW_SMALL_CODEX_CONFIG: "1",
+      TFX_JEV: "0",
+      TFX_WORKER_MODEL_FILE: modelFile,
+      TFX_WORKER_CLI: "codex",
+      ...overrides,
+    };
+    if (env.TFX_TEST_BRIDGE_FAILURE) {
+      env.TFX_BRIDGE_SCRIPT = join(f.root, "bridge-fail.mjs");
+      writeFileSync(env.TFX_BRIDGE_SCRIPT, "process.exit(1);\n");
+    }
+    if (env.TFX_TEST_TIER_FALLBACK)
+      writeFileSync(
+        f.codexBin,
+        `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$TFX_TEST_CODEX_EXEC_LOG"
+if [[ "$*" != *'--profile luna'* ]]; then echo 'is not supported when using Codex with a ChatGPT account' >&2; exit 1; fi
+printf 'FALLBACK_OK\\n'
+`,
+      );
+    const outcome = spawnSync(
+      BASH_EXE,
+      [
+        ROUTE_SCRIPT,
+        agent,
+        "task",
+        "auto",
+        "",
+        "",
+        missingTask ? join(f.root, "missing.task") : "",
+      ],
+      { cwd: f.home, env, encoding: "utf8", timeout: 30000 },
+    );
+    assert.equal(outcome.status, 0, outcome.stderr);
+    return {
+      argv: readIfPresent(f.codexLog),
+      metadata: existsSync(modelFile)
+        ? JSON.parse(readFileSync(modelFile, "utf8"))
+        : null,
+    };
+  }
+  it("원 task가 없어도 effort 단독 입력으로 실행한다", (t) => {
+    const result = direct(
+      t,
+      { TFX_WORKER_EFFORT: "high" },
+      { missingTask: true },
+    );
+    assert.match(result.argv, /model_reasoning_effort="high"/);
+  });
+  it("bridge가 실패해도 effort 단독 입력으로 실행한다", (t) => {
+    const result = direct(t, {
+      TFX_WORKER_EFFORT: "medium",
+      TFX_TEST_BRIDGE_FAILURE: "1",
+    });
+    assert.match(result.argv, /model_reasoning_effort="medium"/);
+    assert.equal(result.metadata, null);
+  });
+  for (const [agent, nested, effort] of [
+    ["executor", false, "max"],
+    ["deep-executor", false, "ultra"],
+    ["scientist-deep", false, "ultra"],
+    ["deep-executor", true, "max"],
+  ]) {
+    it(`${agent} nested=${nested} 명시 ultra의 실제 인자는 ${effort}다`, (t) => {
+      const result = direct(
+        t,
+        { TFX_WORKER_EFFORT: "ultra", TFX_WORKER_INDEX: nested ? "1" : "" },
+        { agent },
+      );
+      assert.equal(result.metadata.launch.effort, effort);
+    });
+  }
+  it("tier 폴백은 명시 모델을 제거하고 실제 Luna low 인자를 기록한다", (t) => {
+    const result = direct(t, {
+      TFX_WORKER_MODEL: "explicit-model",
+      TFX_WORKER_EFFORT: "high",
+      TFX_TEST_TIER_FALLBACK: "1",
+      TFX_EXECUTION_MODE: "read_only",
+    });
+    assert.match(
+      result.argv.split("\n").find((line) => line.startsWith("exec ")),
+      /--model explicit-model/,
+    );
+    assert.equal(result.metadata.launch.profile, "luna");
+    assert.equal(result.metadata.launch.effort, "low");
+    assert.notEqual(result.metadata.launch.model, "explicit-model");
+    assert.ok(!result.metadata.launch.argv.includes("--model"));
+    assert.ok(result.metadata.launch.argv.includes("read-only"));
   });
 });

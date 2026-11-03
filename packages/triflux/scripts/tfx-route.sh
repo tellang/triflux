@@ -1449,8 +1449,12 @@ apply_codex_concrete_effort_guard() {
   [[ -n "$profile" ]] || return 0
 
   local allow_ultra=0
-  if [[ "$CODEX_OVERRIDE_PROFILE" == "astra_ultra" && -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]]; then
+  if [[ "$CODEX_OVERRIDE_PROFILE" == "astra_ultra" && -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]] && ! is_nested_codex_runtime; then
     allow_ultra=1
+  fi
+  local effort_policy_nested=0
+  if is_nested_codex_runtime || [[ -n "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]]; then
+    effort_policy_nested=1
   fi
   local effort target_profile=""
   effort=""
@@ -1481,16 +1485,19 @@ apply_codex_concrete_effort_guard() {
   if managed_spec=$("$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
     const { modelEffortFromProfile, profileFromModelEffort, resolveCodexModelEffort } = await import(pathToFileURL(process.argv[1]).href);
-    const argv = process.argv.slice(4);
+    const { resolveWorkerEffort } = await import(new URL("./agent-route-policy.mjs", pathToFileURL(process.argv[1])).href);
+    const argv = process.argv.slice(5);
     let explicitEffort;
     for (let i = 0; i < argv.length; i++) {
       if (argv[i] === "-c" && argv[i + 1]?.startsWith("model_reasoning_effort=")) {
         explicitEffort = argv[i + 1].slice("model_reasoning_effort=".length).replace(/^"|"$/g, "");
       }
     }
-    let requested = modelEffortFromProfile("codex", process.argv[2], explicitEffort) || modelEffortFromProfile("codex", process.argv[2]);
+    const defaults = modelEffortFromProfile("codex", process.argv[2]);
+    let requested = modelEffortFromProfile("codex", defaults?.family || process.argv[2], explicitEffort) || defaults;
     if (!requested) process.exit(0);
-    if (requested.effort === "ultra" && process.argv[3] !== "1") requested = { family: "astra", effort: "max" };
+    const guardedEffort = resolveWorkerEffort("codex", process.argv[3], requested.effort, process.argv[4] === "1");
+    if (guardedEffort !== requested.effort) requested = { family: "astra", effort: guardedEffort };
     try {
       const resolved = resolveCodexModelEffort(requested, {
         codexHome: process.env.CODEX_HOME || process.env.TFX_CODEX_HOME,
@@ -1504,7 +1511,7 @@ apply_codex_concrete_effort_guard() {
       console.error(`[tfx-route] ${error.message}`);
       process.exit(error.code === "unsupported-effort" ? 78 : 1);
     }
-  ' "${CODEX_PROFILE_MODULE%/*}/model-effort.mjs" "$profile" "$allow_ultra" "${args[@]}"); then
+  ' "${CODEX_PROFILE_MODULE%/*}/model-effort.mjs" "$profile" "$AGENT_TYPE" "$effort_policy_nested" "${args[@]}"); then
     IFS=$'\x1e' read -r managed_family managed_effort managed_profile <<< "$managed_spec"
   else
     local resolver_status=$?
@@ -1639,10 +1646,13 @@ is_nested_codex_runtime() {
 }
 
 apply_codex_profile_override() {
-  [[ "$CLI_TYPE" == "codex" && "$TFX_CODEX_PROFILE" != "auto" ]] || return 0
+  [[ "$CLI_TYPE" == "codex" ]] || return 0
   local review_suffix=""
   [[ "$CLI_ARGS" != *" review" ]] || review_suffix=" review"
-  CLI_ARGS="exec --profile ${CODEX_OVERRIDE_PROFILE} $(build_codex_base)${review_suffix}"
+  local profile="$CODEX_POLICY_PROFILE"
+  [[ "$TFX_CODEX_PROFILE" == "auto" ]] || profile="$CODEX_OVERRIDE_PROFILE"
+  CLI_ARGS="exec --profile ${profile} $(build_codex_base)${review_suffix}"
+  [[ "$TFX_CODEX_PROFILE" != "auto" ]] || return 0
   echo "[tfx-route] Codex profile override: ${TFX_CODEX_PROFILE} -> ${CODEX_OVERRIDE_PROFILE}" >&2
 }
 
@@ -1744,13 +1754,13 @@ get_claude_model() {
 }
 
 get_claude_effort() {
-  if [[ "${TFX_WORKER_CLI:-}" == "claude" && -n "${TFX_WORKER_MODEL:-}${TFX_WORKER_EFFORT:-}" ]]; then
-    echo "${WORKER_SELECTED_EFFORT:-}"
-    return
-  fi
   local effort="${JEV_CLAUDE_EFFORT:-${CLI_EFFORT:-}}"
-  # 명시한 프로필은 해석된 정책 effort를 쓰고, 기본 native/폴백의 빈 값은 보존한다.
-  [[ "$TFX_CODEX_PROFILE" == "auto" ]] || effort="$CODEX_POLICY_EFFORT"
+  if [[ "${TFX_WORKER_CLI:-}" == "claude" && -n "${TFX_WORKER_MODEL:-}${TFX_WORKER_EFFORT:-}" ]]; then
+    effort="${WORKER_SELECTED_EFFORT:-${TFX_WORKER_EFFORT:-}}"
+  else
+    # 명시한 프로필은 해석된 정책 effort를 쓰고, 기본 native/폴백의 빈 값은 보존한다.
+    [[ "$TFX_CODEX_PROFILE" == "auto" ]] || effort="$CODEX_POLICY_EFFORT"
+  fi
   case "$effort" in
     low|medium|high|xhigh|max) echo "$effort" ;;
     ultra) echo "max" ;;
@@ -2173,7 +2183,10 @@ run_antigravity_exec() {
     IFS=$'\x1e' read -r _agy_model _agy_effort <<< "$_agy_selection"
     if [[ "${TFX_WORKER_CLI:-antigravity}" == "antigravity" && -n "${TFX_WORKER_MODEL:-}${TFX_WORKER_EFFORT:-}" ]]; then
       _agy_model="${TFX_WORKER_MODEL:-}"
-      _agy_effort="${WORKER_SELECTED_EFFORT:-}"
+      _agy_effort="${WORKER_SELECTED_EFFORT:-${TFX_WORKER_EFFORT:-}}"
+      if [[ "$_agy_effort" == "ultra" ]] && is_nested_codex_runtime; then
+        _agy_effort="max"
+      fi
     fi
     if [[ -n "$_agy_model" ]]; then
       agy_args+=("--model" "$_agy_model")
@@ -2418,7 +2431,6 @@ run_codex_exec() {
   read -r -a codex_args <<< "$CLI_ARGS"
   if [[ -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" && "${TFX_WORKER_CLI:-codex}" == "codex" ]]; then
     [[ -z "${TFX_WORKER_MODEL:-}" ]] || codex_args+=(--model "$TFX_WORKER_MODEL")
-    [[ -z "${TFX_WORKER_EFFORT:-}" ]] || codex_args+=(-c "model_reasoning_effort=\"${WORKER_SELECTED_EFFORT}\"")
   fi
   codex_args=("${codex_args[0]}" ${CODEX_CONFIG_FLAGS[@]+"${CODEX_CONFIG_FLAGS[@]}"} "${codex_args[@]:1}")
   local codex_home
@@ -2479,6 +2491,10 @@ run_codex_exec() {
           i=$((i + 1))
         elif [[ "$arg" == --profile=* ]]; then
           new_args+=("--profile=$fallback_profile")
+        elif [[ "$arg" == "--model" || "$arg" == "-m" ]]; then
+          i=$((i + 1))
+        elif [[ "$arg" == --model=* || "$arg" == -m=* ]]; then
+          continue
         elif [[ "$arg" == "-c" && ( "$next_arg" == model=* || "$next_arg" == model_reasoning_effort=* ) ]]; then
           i=$((i + 1))
         else
@@ -2571,6 +2587,9 @@ main() {
   [[ "$CLI_TYPE" != "antigravity" ]] || CLI_ARGS="$(build_antigravity_base)"
   apply_codex_profile_override
   apply_retry_snapshot_cli_invocation
+  if [[ "$CLI_TYPE" == "codex" && "${TFX_WORKER_CLI:-codex}" == "codex" && -n "${TFX_WORKER_EFFORT:-}" && -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]]; then
+    CLI_ARGS+=" -c model_reasoning_effort=\"${TFX_WORKER_EFFORT}\""
+  fi
   apply_codex_concrete_effort_guard
 
   # CLI 경로 해석

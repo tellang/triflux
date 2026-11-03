@@ -680,6 +680,9 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
   const mcpRecommendations = assignments.map((assignment) =>
     prepareHeadlessMcpRecommendation(assignment),
   );
+  const workerModels = assignments.map((assignment) =>
+    prepareHeadlessWorkerModel(assignment),
+  );
   const dispatches = [];
   for (let i = 0; i < assignments.length; i++) {
     const assignment = assignments[i];
@@ -728,7 +731,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     cleanStaleResultArtifacts(resultFile);
     shadowClaudeMcpSelection(assignment);
     const mcpRecommendation = await mcpRecommendations[i];
-    const workerModel = await prepareHeadlessWorkerModel(assignment);
+    const workerModel = await workerModels[i];
     if (mcpRecommendation)
       safeProgress?.({
         type: "mcp_recommendation",
@@ -1053,7 +1056,10 @@ async function collectResults(results) {
         ...(d.mcpRecommendation
           ? { mcpRecommendation: d.mcpRecommendation }
           : {}),
-        workerModelFile: d.workerModelFile,
+        workerModelFile:
+          d.workerModelFile && existsSync(d.workerModelFile)
+            ? d.workerModelFile
+            : null,
         workerMcpFile: d.workerMcpFile,
         workerGitDiffFiles,
         sessionDead: completion.sessionDead || false,

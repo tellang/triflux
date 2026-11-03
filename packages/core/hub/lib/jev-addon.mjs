@@ -1246,17 +1246,19 @@ export async function judgeTaskRouting(
   const modeRes = results.execution_mode;
   const mcpProfRes = results.mcp_profile;
   const shiftRes = results.tier_shift;
-  const modelResult = TIER_ROUTABLE_ROLES.has(agentType) ? compRes : shiftRes;
+  const complexityRouted = TIER_ROUTABLE_ROLES.has(agentType);
+  const modelResult = complexityRouted ? compRes : shiftRes;
+  const modelThreshold = complexityRouted
+    ? modelResult?.choice === "standard"
+      ? threshold
+      : Math.max(threshold, TIER_CHANGE_MIN_CONFIDENCE)
+    : TIER_CHANGE_MIN_CONFIDENCE;
   const modelDecision = options.includeDiagnostics
     ? {
         confidence: modelResult?.confidence ?? null,
         reason: !modelResult
           ? "invalid_response"
-          : modelResult.confidence <
-              (TIER_ROUTABLE_ROLES.has(agentType) &&
-              modelResult.choice === "standard"
-                ? threshold
-                : TIER_CHANGE_MIN_CONFIDENCE)
+          : modelResult.confidence < modelThreshold
             ? "low_confidence"
             : "accepted",
       }

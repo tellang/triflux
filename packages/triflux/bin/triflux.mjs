@@ -4413,7 +4413,9 @@ async function main() {
           if (
             !["--task", "--agent", "--cli"].includes(flag) ||
             !value?.trim() ||
-            value.startsWith("--") ||
+            (value.startsWith("--") &&
+              (flag !== "--task" ||
+                ["--task", "--agent", "--cli"].includes(value))) ||
             Object.hasOwn(values, flag)
           )
             throw createCliError(`잘못된 worker-model 옵션: ${flag}`, {
@@ -4436,12 +4438,26 @@ async function main() {
             "worker-model에는 --task와 유효한 --agent, --cli가 필요합니다",
             { exitCode: EXIT_ARG_ERROR, reason: "argError" },
           );
-        const { resolveWorkerModel } = await import(
-          "../scripts/lib/agent-route-policy.mjs"
-        );
+        const { resolveWorkerModel, resolveNestedCodexAgentProfile } =
+          await import("../scripts/lib/agent-route-policy.mjs");
+        const profile =
+          cli === "codex" &&
+          ["max", "ultra", "astra_max", "astra_ultra"].includes(
+            process.env.TFX_CODEX_PROFILE,
+          )
+            ? resolveNestedCodexAgentProfile(agent, {
+                globalProfile: process.env.TFX_CODEX_PROFILE,
+                codexHome: process.env.CODEX_HOME,
+              })
+            : "auto";
         console.log(
           JSON.stringify(
-            await resolveWorkerModel({ task: values["--task"], agent, cli }),
+            await resolveWorkerModel({
+              task: values["--task"],
+              agent,
+              cli,
+              profile,
+            }),
           ),
         );
         return;

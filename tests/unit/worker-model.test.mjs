@@ -252,3 +252,72 @@ test("배정은 워커별 명시 model/effort와 공통 입력을 보존한다",
     ],
   );
 });
+
+test("명시 ultra는 CLI와 역할, 중첩 제한을 따른다", async () => {
+  const { resolveWorkerModel } = await import(
+    "../../scripts/lib/agent-route-policy.mjs"
+  );
+  for (const [cli, agent, nested, expected] of [
+    ["codex", "executor", false, "max"],
+    ["codex", "deep-executor", false, "ultra"],
+    ["codex", "scientist-deep", false, "ultra"],
+    ["codex", "deep-executor", true, "max"],
+    ["claude", "deep-executor", false, "max"],
+  ]) {
+    const result = await resolveWorkerModel(
+      { cli, agent, nested, effort: "ultra" },
+      { env },
+    );
+    assert.equal(result.effort, expected, `${cli}/${agent}/${nested}`);
+    assert.equal(result.model, null);
+  }
+});
+
+test("모델 판정 사유는 실제 threshold와 허용 선택지를 따른다", async () => {
+  const { resolveWorkerModel } = await import(
+    "../../scripts/lib/agent-route-policy.mjs"
+  );
+  for (const [choice, confidence, reason] of [
+    ["deep", 0.9, "low_confidence"],
+    ["outside-options", 0.99, "invalid_response"],
+  ]) {
+    const result = await resolveWorkerModel(
+      { task: "원 작업" },
+      {
+        env: { ...env, TFX_JEV: "1" },
+        minConfidence: 0.95,
+        batchClient: async () => ({ complexity: { choice, confidence } }),
+      },
+    );
+    assert.equal(result.profile, "sol_high");
+    assert.equal(
+      result.confidence,
+      reason === "invalid_response" ? null : confidence,
+    );
+    assert.equal(result.fallbackReason, reason);
+  }
+});
+
+test("worker-model은 --로 시작하는 task와 headless 전역 max 예외를 보존한다", () => {
+  for (const profile of ["max", "ultra"]) {
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(root, "bin/triflux.mjs"),
+        "judge",
+        "worker-model",
+        "--task",
+        "---\nfront matter",
+      ],
+      {
+        env: { ...env, TFX_CODEX_PROFILE: profile },
+        encoding: "utf8",
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const selected = JSON.parse(result.stdout);
+    assert.equal(selected.profile, "astra_max");
+    assert.equal(selected.effort, "max");
+    assert.equal(selected.source, "explicit");
+  }
+});

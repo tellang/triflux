@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { after, describe, it } from "node:test";
 
 const originalPsmuxBin = process.env.PSMUX_BIN;
@@ -28,7 +28,7 @@ function indexFor(sessionName) {
   return path;
 }
 
-function runWith(sessionName, awaitAll) {
+function runWith(sessionName, awaitAll, workerModelFile) {
   return runHeadless(sessionName, twoWorkers, {
     _deps: {
       dispatchProgressive(name, assignments, opts) {
@@ -37,7 +37,13 @@ function runWith(sessionName, awaitAll) {
         return assignments.map((_, i) => {
           const paneName = `worker-${i + 1}`;
           opts.safeProgress({ type: "dispatched", paneName, cli: "codex" });
-          return { paneName, cli: "codex", resultFile: "", cwd: process.cwd() };
+          return {
+            paneName,
+            cli: "codex",
+            resultFile: "",
+            cwd: process.cwd(),
+            workerModelFile,
+          };
         });
       },
       awaitAll,
@@ -137,4 +143,21 @@ describe("headless 결과 색인", () => {
     );
     assert.equal(existsSync(indexFor(sessionName)), false);
   });
+});
+
+it("workerModelFile은 생성된 파일만 결과에 표시한다", async () => {
+  const sessionName = `results-model-${process.pid}`;
+  const file = `${indexFor(sessionName)}.model.json`;
+  written.push(file);
+  const complete = (_name, dispatches) =>
+    dispatches.map((d) => ({
+      d,
+      completion: { matched: true, exitCode: 0 },
+      output: "",
+    }));
+  const missing = await runWith(sessionName, complete, file);
+  assert.ok(missing.results.every((result) => result.workerModelFile === null));
+  writeFileSync(file, "{}");
+  const present = await runWith(sessionName, complete, file);
+  assert.ok(present.results.every((result) => result.workerModelFile === file));
 });

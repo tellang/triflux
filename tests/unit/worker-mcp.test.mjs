@@ -322,3 +322,40 @@ test("quoted registered name and original deny-all remain valid TOML overrides",
   ]);
   assert.deepEqual(result.metadata.servers, ["my.docs"]);
 });
+
+for (const cli of ["codex", "claude"]) {
+  test(`${cli}: 매니페스트는 정확한 로컬 등록명만 허용하고 잘못된 목록은 보류한다`, (t) => {
+    const f = fixture(t);
+    for (const [manifest, allowed] of [
+      ['{"enabled":["other","docs"]}', true],
+      ['{"enabled":["context7"]}', false],
+      ['{"enabled":["doc"]}', false],
+      ['{"enabled":[]}', false],
+      ['{"enabled":"docs"}', false],
+      ['{"enabled":["docs",null]}', false],
+      ["{}", false],
+      ["null", false],
+      ["{", false],
+    ]) {
+      f.put(".claude/cache/mcp-enabled.json", manifest);
+      const result = prepareWorkerMcp({ ...f.input, cli }, { env: f.env });
+      assert.equal(
+        result.metadata.status,
+        allowed ? "prepared" : "deferred",
+        manifest,
+      );
+      if (allowed) assert.deepEqual(result.metadata.servers, ["docs"]);
+      else
+        assert.deepEqual(
+          result.codexConfigOverrides,
+          f.input.policy.codexConfigOverrides,
+        );
+      result.cleanup();
+    }
+    rmSync(join(f.home, ".claude/cache/mcp-enabled.json"));
+    mkdirSync(join(f.home, ".claude/cache/mcp-enabled.json"));
+    const unreadable = prepareWorkerMcp({ ...f.input, cli }, { env: f.env });
+    assert.equal(unreadable.metadata.status, "deferred");
+    assert.equal(unreadable.configFile, null);
+  });
+}

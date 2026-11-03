@@ -125,6 +125,10 @@ for (const cli of ["codex", "claude", "antigravity"]) {
     const f = fixture(t),
       result = join(f.home, "result.txt"),
       metadataFile = join(f.home, "mcp.json");
+    f.put(
+      ".claude/cache/mcp-enabled.json",
+      JSON.stringify({ enabled: ["other", "docs"] }),
+    );
     f.env.TFX_CLI_MODE = cli === "claude" ? "auto" : cli;
     f.env.TFX_REVIEW_AUTHOR = "codex";
     f.env.TFX_WORKER_MCP_FILE = metadataFile;
@@ -430,3 +434,34 @@ const file=args[args.indexOf('--mcp-config')+1]; fs.readFileSync(file); fs.write
   assert.equal(existsSync(file), false);
   assert.equal(existsSync(dirname(file)), false);
 });
+
+for (const cli of ["claude", "antigravity"]) {
+  test(`${cli} effort 단독 입력은 원 task 부재 시에도 중첩 ultra 제한을 보존한다`, {
+    timeout: 30000,
+  }, async (t) => {
+    const f = fixture(t);
+    Object.assign(f.env, {
+      TFX_JEV: "0",
+      TFX_WORKER_CLI: cli,
+      TFX_CLI_MODE: cli,
+      TFX_WORKER_EFFORT: "ultra",
+      TFX_WORKER_INDEX: "1",
+    });
+    await run(
+      "/bin/bash",
+      [
+        join(root, "scripts/tfx-route.sh"),
+        cli === "claude" ? "code-reviewer" : "executor",
+        "task",
+        "auto",
+        "",
+        "",
+        join(f.home, "missing.task"),
+      ],
+      { cwd: f.home, env: f.env, timeout: 25000 },
+    );
+    const args = JSON.parse(readFileSync(f.env.TFX_TEST_LOG, "utf8")).args;
+    assert.equal(args[args.indexOf("--effort") + 1], "max");
+    assert.ok(!args.includes("--model"));
+  });
+}

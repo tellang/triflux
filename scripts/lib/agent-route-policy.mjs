@@ -370,6 +370,17 @@ export function resolveClaudeWorkerDefaults(agent) {
   };
 }
 
+export function resolveWorkerEffort(cli, agent, effort, nested) {
+  if (
+    effort === "ultra" &&
+    (cli === "claude" ||
+      nested ||
+      (cli === "codex" && !ULTRA_ELIGIBLE_CODEX_AGENTS.has(agent)))
+  )
+    return "max";
+  return effort || null;
+}
+
 // 조회와 실행은 같은 역할 정책과 read-only resolver를 사용한다.
 // routing을 전달하면 이미 끝난 pre-route 판단을 재사용한다.
 export async function resolveWorkerModel(
@@ -438,7 +449,7 @@ export async function resolveWorkerModel(
       agent,
       family: null,
       model: model || null,
-      effort: effort === "ultra" && nested ? "max" : effort || null,
+      effort: resolveWorkerEffort(cli, agent, effort, nested),
       profile: null,
       confidence: null,
       enabled,
