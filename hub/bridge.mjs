@@ -1122,6 +1122,7 @@ async function cmdJudgeMcp(args) {
     cwd: args.cwd,
   });
   if (args.delimited) {
+    console.error(`[tfx-route] MCP recommendation: ${JSON.stringify(result)}`);
     process.stdout.write(formatMcpRecommendation(result));
     return true;
   }

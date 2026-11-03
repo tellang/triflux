@@ -324,6 +324,7 @@ export async function launchLead(
     }
   }
   if (!start.ready) return { ok: false, ...summary, start };
+  const recommendationContext = formatMcpRecommendation(mcpRecommendation);
   // Claude 슬래시 명령은 tmux 입력으로만 실행되고, Claude 안에서 호출해도 SendMessage 로 바뀌지 않게 한다.
   const ask = await runLive(
     [
@@ -333,11 +334,35 @@ export async function launchLead(
       "--session",
       target,
       "--prompt",
-      `${leadEntryPrompt(cli, role.trim())}${task?.trim() ? `\n\nTask:\n${task}${formatMcpRecommendation(mcpRecommendation)}` : ""}`,
+      `${leadEntryPrompt(cli, role.trim())}${cli === "claude" ? "" : recommendationContext}`,
       "--no-wait",
       ...(cli === "claude" ? ["--via-tmux"] : []),
     ],
     run,
   );
+  // slash 인자는 역할만 받는다. 추천은 기존 busy 대기 계약을 쓰는 별도 입력으로 전달한다.
+  if (cli === "claude" && ask.ok && recommendationContext) {
+    const recommendationAsk = await runLive(
+      [
+        "ask",
+        "--cli",
+        cli,
+        "--session",
+        target,
+        "--prompt",
+        recommendationContext,
+        "--no-wait",
+        "--via-tmux",
+      ],
+      run,
+    );
+    return {
+      ok: Boolean(recommendationAsk.ok),
+      ...summary,
+      start,
+      ask,
+      recommendationAsk,
+    };
+  }
   return { ok: Boolean(ask.ok), ...summary, start, ask };
 }

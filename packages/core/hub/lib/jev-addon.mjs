@@ -387,7 +387,12 @@ async function callJevCli(request, options = {}) {
     maxBuffer: 256 * 1024,
     env: env === process.env ? process.env : { ...process.env, ...env },
   });
-  const parsed = JSON.parse(String(stdout ?? "").trim());
+  let parsed;
+  try {
+    parsed = JSON.parse(String(stdout ?? "").trim());
+  } catch {
+    return null;
+  }
   return normalizeResponse(parsed, request.kind);
 }
 

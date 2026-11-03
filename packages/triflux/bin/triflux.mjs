@@ -4362,6 +4362,10 @@ async function main() {
         console.log(
           `\n  ${GREEN_BRIGHT}✓${RESET} 리드 "${result.name}" (${result.launcher}) tmux ${result.session}\n  붙기: tmux attach -t ${result.session}\n`,
         );
+      else if (result.recommendationAsk && !result.recommendationAsk.ok)
+        console.log(
+          `\n  ${RED}✗${RESET} MCP 추천 전송 실패: ${result.recommendationAsk.error ?? JSON.stringify(result.recommendationAsk)}\n  리드 진입은 완료되었고 세션 ${result.session} 은 떠 있다.\n`,
+        );
       else if (result.start?.ready)
         console.log(
           `\n  ${RED}✗${RESET} 리드 진입 전송 실패: ${result.ask?.error ?? JSON.stringify(result.ask)}\n  세션 ${result.session} 은 떠 있다. 붙어서 리드 진입을 직접 입력하거나 tfx-live stop --session ${result.session} 으로 닫는다.\n`,

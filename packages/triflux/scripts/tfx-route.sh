@@ -701,7 +701,11 @@ bridge_cli() {
     return 127
   fi
 
-  "$NODE_BIN" "$bridge_script" "$@" 2>/dev/null
+  if [[ "${1:-}" == "judge-mcp" ]]; then
+    "$NODE_BIN" "$bridge_script" "$@"
+  else
+    "$NODE_BIN" "$bridge_script" "$@" 2>/dev/null
+  fi
 }
 
 # 키는 JS에서만 읽는다. 셸에는 활성 여부만 전달한다.
@@ -2536,11 +2540,12 @@ ${ctx_content}
   # 추천은 기존 정책 계산 뒤에 붙인다. 기존 필터와 권한 선택에는 입력하지 않는다.
   local recommendation_cli="$CLI_TYPE" recommendation_context=""
   [[ "$recommendation_cli" != "claude-native" ]] || recommendation_cli="claude"
-  if recommendation_context=$(bridge_cli judge-mcp --cli-type "$recommendation_cli" --cwd "$PWD" --prompt "$recommendation_task" --delimited < /dev/null) && [[ -n "$recommendation_context" ]]; then
-    PROMPT="${PROMPT}${recommendation_context}"
-    printf '%s\n' "[tfx-route] ${recommendation_context}" >&2
-  else
-    echo '[tfx-route] MCP recommendation: unavailable applied=false diagnostic=recommendation_bridge_failed' >&2
+  if jev_enabled; then
+    if recommendation_context=$(bridge_cli judge-mcp --cli-type "$recommendation_cli" --cwd "$PWD" --prompt "$recommendation_task" --delimited < /dev/null); then
+      [[ -z "$recommendation_context" ]] || PROMPT="${PROMPT}${recommendation_context}"
+    else
+      echo '[tfx-route] MCP recommendation: unavailable applied=false diagnostic=recommendation_bridge_failed' >&2
+    fi
   fi
 
   # Claude native는 팀 비-TTY 환경에서 subprocess wrapper를 우선 시도

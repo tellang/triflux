@@ -613,6 +613,10 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
   // dashboard: 워커 pane을 먼저 생성한 후 pane 0에 대시보드를 실행
   // (listPanes로 워커 감지가 가능하려면 워커 pane이 먼저 존재해야 함)
 
+  // 추천은 독립적으로 시작하고 pane 생성과 dispatch 순서는 유지한다.
+  const mcpRecommendations = assignments.map((assignment) =>
+    prepareHeadlessMcpRecommendation(assignment),
+  );
   const dispatches = [];
   for (let i = 0; i < assignments.length; i++) {
     const assignment = assignments[i];
@@ -660,8 +664,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
     cleanStaleResultArtifacts(resultFile);
     shadowClaudeMcpSelection(assignment);
-    const mcpRecommendation =
-      await prepareHeadlessMcpRecommendation(assignment);
+    const mcpRecommendation = await mcpRecommendations[i];
     if (mcpRecommendation)
       safeProgress?.({
         type: "mcp_recommendation",

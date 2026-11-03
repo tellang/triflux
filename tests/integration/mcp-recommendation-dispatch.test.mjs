@@ -60,7 +60,7 @@ test("Claude direct backend receives recommendation on stdin with the original t
 });
 
 for (const cli of ["codex", "antigravity"]) {
-  for (const mode of ["direct", "headless"]) {
+  for (const mode of ["direct", "headless", "disabled", "no_recommendation"]) {
     test(`${cli} ${mode}: one recommendation reaches worker without changing config or explicit profile`, {
       timeout: 30000,
     }, async (t) => {
@@ -105,15 +105,22 @@ for (const cli of ["codex", "antigravity"]) {
         TFX_TEAM_NAME: "",
         TFX_JEV_STATS: "0",
         JEV_API_KEY: "fixture-key",
-        TFX_JEV: "1",
+        TFX_JEV: mode === "disabled" ? "0" : "1",
         TFX_MCP_SEARCH_TERMS: '["documentation"]',
-        NODE_BIN: process.execPath,
+        TFX_TEST_NODE_REAL: process.execPath,
+        TFX_TEST_NODE_LOG: join(home, "node.log"),
         TFX_TEST_EXEC_LOG: join(home, "exec.json"),
       };
       const config = put(
         ".codex/config.toml",
         '[mcp_servers.existing]\nurl="https://existing.example/mcp"\n',
       );
+      env.CODEX_HOME = join(home, ".codex");
+      env.NODE_BIN = put(
+        "node-wrapper",
+        '#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$TFX_TEST_NODE_LOG"\nexec "$TFX_TEST_NODE_REAL" "$@"\n',
+      );
+      chmodSync(env.NODE_BIN, 0o755);
       const before = readFileSync(config, "utf8");
       const bin = put(
         "worker.cjs",
@@ -165,7 +172,9 @@ for (const cli of ["codex", "antigravity"]) {
             {
               choice:
                 key === "selection"
-                  ? "official:io.example/docs"
+                  ? mode === "no_recommendation"
+                    ? "none"
+                    : "official:io.example/docs"
                   : key === "complexity"
                     ? "standard"
                     : key === "execution_mode"
@@ -194,7 +203,7 @@ for (const cli of ["codex", "antigravity"]) {
         mcp: "none",
       });
       const args =
-        mode === "direct"
+        mode !== "headless"
           ? [
               join(ROOT, "scripts", "tfx-route.sh"),
               cli === "codex" ? "executor" : "antigravity",
@@ -209,19 +218,30 @@ for (const cli of ["codex", "antigravity"]) {
         maxBuffer: 2 * 1024 * 1024,
       });
       const stderr =
-        mode === "direct"
+        mode !== "headless"
           ? outcome.stderr
           : readFileSync(`${resultFile}.err`, "utf8");
-      assert.match(stderr, /"status":"recommended"/);
-      assert.match(stderr, /"applied":false/);
-      assert.match(stderr, /registry.modelcontextprotocol.io/);
       const worker = JSON.parse(readFileSync(env.TFX_TEST_EXEC_LOG, "utf8"));
       assert.match(JSON.stringify(worker), /원 작업을 유지한다/);
-      assert.match(JSON.stringify(worker), /MCP recommendation/);
-      assert.match(JSON.stringify(worker), /Documentation lookup/);
+      assert.doesNotMatch(JSON.stringify(worker), /Documentation lookup/);
+      const nodeCalls = readFileSync(env.TFX_TEST_NODE_LOG, "utf8");
+      if (mode === "disabled") {
+        assert.doesNotMatch(nodeCalls, /judge-mcp/);
+        assert.doesNotMatch(stderr, /MCP recommendation/);
+        assert.doesNotMatch(JSON.stringify(worker), /MCP recommendation/);
+      } else if (mode === "no_recommendation") {
+        assert.match(stderr, /"status":"no_recommendation"/);
+        assert.doesNotMatch(stderr, /recommendation_bridge_failed/);
+        assert.doesNotMatch(JSON.stringify(worker), /MCP recommendation/);
+      } else {
+        assert.match(stderr, /"status":"recommended"/);
+        assert.match(stderr, /"applied":false/);
+        assert.match(stderr, /registry.modelcontextprotocol.io/);
+        assert.match(JSON.stringify(worker), /MCP recommendation/);
+      }
       assert.equal(
         requests.filter((request) => request.questions.selection).length,
-        1,
+        mode === "disabled" ? 0 : 1,
       );
       assert.equal(readFileSync(config, "utf8"), before);
       assert.doesNotMatch(
