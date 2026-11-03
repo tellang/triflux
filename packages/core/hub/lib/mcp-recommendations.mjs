@@ -374,7 +374,7 @@ export function formatMcpRecommendation(result, { audience = "worker" } = {}) {
         )
       )
         actions.push(
-          "missing 후보는 사용자에게 지금 설치 제안과 승인 질문을 한다.",
+          "missing 후보는 현재 작업에 필요하다고 판단한 경우에만 사용자에게 지금 설치 제안과 승인 질문을 한다. 무관하면 묻지 않고 작업 기록만 남긴다.",
         );
       if (
         data.recommendations.some(

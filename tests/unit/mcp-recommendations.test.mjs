@@ -1130,6 +1130,8 @@ for (const audience of ["lead", "worker"]) {
           assert.match(prompt, /호스트 설정과 플러그인.*먼저 확인/);
         } else {
           assert.match(prompt, /지금/);
+          assert.match(prompt, /현재 작업에 필요하다고 판단한 경우에만/);
+          assert.match(prompt, /무관하면 묻지 않고 작업 기록만 남긴다/);
         }
       } else {
         assert.match(prompt, /리드에게 보고한다/);
