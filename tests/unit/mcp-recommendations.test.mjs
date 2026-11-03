@@ -75,7 +75,15 @@ function chooser(
     env: {},
     batchClient: async (request) => {
       capture.push(request);
-      return { selection: { choice, confidence } };
+      const candidates = JSON.parse(request.state).candidates;
+      return Object.fromEntries(
+        Object.keys(request.questions).map((key, index) => [
+          key,
+          choice !== "none" && !candidates.some((entry) => entry.id === choice)
+            ? {}
+            : { value: candidates[index].id === choice, confidence },
+        ]),
+      );
     },
   };
 }
@@ -830,7 +838,10 @@ for (const cliType of ["claude", "codex", "antigravity"]) {
         { ...f, jevOptions: chooser(capture) },
       );
       assert.equal(result.status, "recommended");
-      assert.equal(result.recommendations[0].installationStatus, "missing");
+      assert.equal(
+        result.recommendations[0].installationStatus,
+        cliType === "claude" ? "unknown" : "missing",
+      );
       const state = JSON.parse(capture[0].state);
       assert.ok(state.candidates.length <= 12);
       assert.equal(state.candidates[0].id, "official:io.example/docs");
@@ -1117,12 +1128,7 @@ for (const mode of [
             mode === "invalid"
               ? {}
               : {
-                  choice:
-                    mode === "none"
-                      ? "none"
-                      : mode === "outside"
-                        ? "outside"
-                        : "local:context7",
+                  value: mode === "outside" ? "outside" : mode !== "none",
                   confidence: mode === "low" ? 0.1 : 0.96,
                 },
           ),

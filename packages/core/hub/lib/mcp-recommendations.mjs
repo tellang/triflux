@@ -16,6 +16,7 @@ import {
 
 const require = createRequire(import.meta.url);
 const toml = require("@iarna/toml");
+const wordSegmenter = new Intl.Segmenter(undefined, { granularity: "word" });
 
 export function readMcpInventory(
   { cliType, cwd = process.cwd() },
@@ -160,6 +161,14 @@ function installationStatus(entry, inventory) {
   return inventory.complete ? "missing" : "unknown";
 }
 
+function searchWords(text) {
+  return [
+    ...wordSegmenter.segment(String(text).normalize("NFKC").toLowerCase()),
+  ]
+    .filter((part) => part.isWordLike)
+    .map((part) => part.segment);
+}
+
 export async function recommendMcp(input = {}, options = {}) {
   const cli = input.cliType === "antigravity" ? "agy" : input.cliType;
   const result = {
@@ -202,14 +211,17 @@ export async function recommendMcp(input = {}, options = {}) {
         result.diagnostics.push("search_terms_invalid");
       }
     }
-    // 명시 검색어와 구조화된 프로젝트 필드만 검색에 쓴다. 자연어 task 는 Jev 에만 전달한다.
+    // 어휘 일치는 후보 검색에만 쓴다. 작업의 의미와 최종 적합성은 Jev 가 판단한다.
+    const taskTerms = uniqueStrings(
+      searchWords(String(input.task).slice(0, 12000)),
+    ).slice(0, 100);
     const terms = uniqueStrings(
-      Array.isArray(searchTerms)
-        ? searchTerms
-        : [...project.keywords, ...project.dependencies],
-    )
-      .map((term) => term.toLowerCase())
-      .slice(0, 50);
+      [
+        ...(Array.isArray(searchTerms) ? searchTerms : []),
+        ...project.keywords,
+        ...project.dependencies,
+      ].flatMap(searchWords),
+    ).slice(0, 50);
     const ranked = refreshed.entries
       .filter(
         (entry) =>
@@ -221,39 +233,56 @@ export async function recommendMcp(input = {}, options = {}) {
       )
       .map((entry) => {
         const status = installationStatus(entry, inventory);
-        const text = [
-          entry.serverId,
-          entry.name,
-          entry.description,
-          ...entry.tags,
-          ...entry.identity.packages,
-        ]
-          .join(" ")
-          .toLowerCase();
+        const words = new Set(
+          searchWords(
+            [
+              entry.serverId,
+              entry.name,
+              entry.description,
+              ...entry.tags,
+              ...entry.identity.packages,
+            ].join(" "),
+          ),
+        );
+        const taskScore = taskTerms.filter((term) => words.has(term)).length;
         return {
           ...entry,
           installationStatus: status,
-          score: terms.filter((term) => text.includes(term)).length,
+          taskScore,
+          score: taskScore + terms.filter((term) => words.has(term)).length,
         };
       })
-      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
-    // 검색 신호가 있는 미등록 후보를 확보하여 설치된 서버가 새 발견을 막지 않게 한다.
+      .sort(
+        (a, b) =>
+          b.taskScore - a.taskScore ||
+          b.score - a.score ||
+          a.id.localeCompare(b.id),
+      );
+    // 공개 검색, 로컬 기본 후보, 기설치 후보의 몫을 나누고 중복은 제거한다.
     const discovery = ranked
       .filter(
-        (entry) => entry.score > 0 && entry.installationStatus !== "present",
+        (entry) =>
+          entry.score > 0 &&
+          entry.sourceId !== "local" &&
+          entry.installationStatus !== "present",
       )
       .slice(0, 6);
-    const pool = ranked.filter(
-      (entry) =>
-        entry.score > 0 ||
-        entry.sourceId === "local" ||
-        entry.installationStatus === "present",
-    );
+    const defaults = ranked
+      .filter((entry) => entry.sourceId === "local")
+      .slice(0, 4);
+    const installed = ranked
+      .filter((entry) => entry.installationStatus === "present")
+      .slice(0, 2);
     const candidates = [
-      ...discovery,
-      ...pool.filter((entry) => !discovery.includes(entry)),
-      ...ranked.filter((entry) => !pool.includes(entry)),
+      ...new Set([
+        ...discovery,
+        ...defaults,
+        ...installed,
+        ...ranked.filter((entry) => entry.score > 0),
+      ]),
     ].slice(0, 12);
+    if (!ranked.some((entry) => entry.score > 0))
+      result.diagnostics.push("search_no_matches");
     if (ranked.length > candidates.length)
       result.diagnostics.push("candidates_bounded");
     if (!candidates.length)
@@ -295,7 +324,7 @@ export async function recommendMcp(input = {}, options = {}) {
         installationStatus: entry.installationStatus,
         authentication: "unknown",
         activation: "unknown",
-        requiresApproval: true,
+        requiresApproval: entry.installationStatus !== "present",
       },
     ];
     return result;
@@ -325,7 +354,7 @@ export function formatMcpRecommendation(result) {
       installationStatus: item.installationStatus,
       authentication: "unknown",
       activation: "unknown",
-      requiresApproval: true,
+      requiresApproval: item.installationStatus !== "present",
     })),
     applied: false,
   };

@@ -36,9 +36,18 @@ test("Claude direct backend receives recommendation on stdin with the original t
       env: { HOME: home, XDG_CACHE_HOME: join(home, "cache") },
       jevOptions: {
         env: {},
-        batchClient: async () => ({
-          selection: { choice: "local:context7", confidence: 0.96 },
-        }),
+        batchClient: async ({ state, questions }) => {
+          const candidates = JSON.parse(state).candidates;
+          return Object.fromEntries(
+            Object.keys(questions).map((key, index) => [
+              key,
+              {
+                value: candidates[index].id === "local:context7",
+                confidence: 0.96,
+              },
+            ]),
+          );
+        },
       },
     },
   );
@@ -166,23 +175,26 @@ for (const cli of ["codex", "antigravity"]) {
         for await (const chunk of request) body += chunk;
         const payload = JSON.parse(body);
         requests.push(payload);
+        const candidates = payload.questions.candidate_0
+          ? JSON.parse(payload.state).candidates
+          : [];
         const answers = Object.fromEntries(
           Object.entries(payload.questions).map(([key, question]) => [
             key,
             {
               choice:
-                key === "selection"
-                  ? mode === "no_recommendation"
-                    ? "none"
-                    : "official:io.example/docs"
-                  : key === "complexity"
-                    ? "standard"
-                    : key === "execution_mode"
-                      ? "workspace_auto"
-                      : key === "mcp_profile"
-                        ? "none"
-                        : Object.keys(question.criteria || {})[0],
-              value: false,
+                key === "complexity"
+                  ? "standard"
+                  : key === "execution_mode"
+                    ? "workspace_auto"
+                    : key === "mcp_profile"
+                      ? "none"
+                      : Object.keys(question.criteria || {})[0],
+              value:
+                key.startsWith("candidate_") && mode !== "no_recommendation"
+                  ? candidates[Number(key.slice(10))]?.id ===
+                    "official:io.example/docs"
+                  : false,
               confidence: 0.96,
             },
           ]),
@@ -240,7 +252,7 @@ for (const cli of ["codex", "antigravity"]) {
         assert.match(JSON.stringify(worker), /MCP recommendation/);
       }
       assert.equal(
-        requests.filter((request) => request.questions.selection).length,
+        requests.filter((request) => request.questions.candidate_0).length,
         mode === "disabled" ? 0 : 1,
       );
       assert.equal(readFileSync(config, "utf8"), before);
