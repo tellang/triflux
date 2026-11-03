@@ -18,6 +18,30 @@ const require = createRequire(import.meta.url);
 const toml = require("@iarna/toml");
 const wordSegmenter = new Intl.Segmenter(undefined, { granularity: "word" });
 
+export function mcpDefinitionIdentity(entry) {
+  const command = basename(String(entry.command || "")).replace(/\.exe$/i, "");
+  const args = Array.isArray(entry.args) ? [...entry.args] : [];
+  // 알려진 실행 포맷만 식별한다. 다른 옵션의 값이나 실행 뒤의 인자를 패키지로 보지 않는다.
+  if (command === "npx") {
+    while (["-y", "--yes", "--"].includes(args[0])) args.shift();
+  }
+  const packageSpec =
+    ["npx", "uvx"].includes(command) &&
+    typeof args[0] === "string" &&
+    !args[0].startsWith("-")
+      ? args[0]
+      : null;
+  const packageId = packageSpec
+    ? `${command === "npx" ? "npm" : "pypi"}:${packageSpec.replace(/@[^/@]+$/, "")}`
+    : null;
+  return {
+    endpoints: [mcpEndpointId(entry.url || entry.serverUrl)].filter(Boolean),
+    packages: packageId
+      ? [mcpEndpointId(`https://package.invalid/${packageId}`)]
+      : [],
+  };
+}
+
 export function readMcpInventory(
   { cliType, cwd = process.cwd() },
   { env = process.env, home = env.HOME || homedir() } = {},
@@ -69,37 +93,12 @@ export function readMcpInventory(
             continue;
           }
           // 실행 인자와 환경값은 내보내지 않고 공개 패키지 식별값의 해시만 비교한다.
-          const command = basename(String(entry.command || "")).replace(
-            /\.exe$/i,
-            "",
-          );
-          const args = Array.isArray(entry.args) ? [...entry.args] : [];
-          // 알려진 실행 포맷만 식별한다. 다른 옵션의 값이나 실행 뒤의 인자를 패키지로 보지 않는다.
-          if (command === "npx") {
-            while (["-y", "--yes", "--"].includes(args[0])) args.shift();
-          }
-          const packageSpec =
-            ["npx", "uvx"].includes(command) &&
-            typeof args[0] === "string" &&
-            !args[0].startsWith("-")
-              ? args[0]
-              : null;
-          const packageId = packageSpec
-            ? `${command === "npx" ? "npm" : "pypi"}:${packageSpec.replace(/@[^/@]+$/, "")}`
-            : null;
           servers.push({
             name,
             status: "present",
             authentication: "unknown",
             activation: "unknown",
-            identity: {
-              endpoints: [mcpEndpointId(entry.url || entry.serverUrl)].filter(
-                Boolean,
-              ),
-              packages: packageId
-                ? [mcpEndpointId(`https://package.invalid/${packageId}`)]
-                : [],
-            },
+            identity: mcpDefinitionIdentity(entry),
           });
         }
       }

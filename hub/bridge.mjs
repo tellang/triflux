@@ -28,6 +28,9 @@ export function parseArgs(argv) {
     options: {
       team: { type: "string" },
       "worker-model": { type: "boolean" },
+      "apply-file": { type: "string" },
+      "policy-row": { type: "string" },
+      "profile-was-auto": { type: "string" },
       "task-id": { type: "string" },
       owner: { type: "string" },
       status: { type: "string" },
@@ -1119,9 +1122,63 @@ async function cmdJudgeMcp(args) {
   );
   const result = await recommendMcp({
     task: args.prompt,
-    cliType: args["cli-type"],
+    cliType: args["cli-type"] === "claude-native" ? "claude" : args["cli-type"],
     cwd: args.cwd,
   });
+  if (args["apply-file"]) {
+    const { prepareWorkerMcp } = await import("./lib/worker-mcp.mjs");
+    const row = (args["policy-row"] || "").split("\x1e");
+    const flags = (row[4] || "")
+      .split("\x1f")
+      .filter((_, index) => index % 2 === 1);
+    let commandArgs = [];
+    try {
+      commandArgs = JSON.parse(process.env.CLAUDE_BIN_ARGS_JSON || "[]");
+      if (!Array.isArray(commandArgs)) commandArgs = ["--mcp-config"];
+    } catch {
+      commandArgs = ["--mcp-config"];
+    }
+    const plan = prepareWorkerMcp({
+      cli: args["cli-type"],
+      cwd: args.cwd,
+      recommendation: result,
+      profileWasAuto: args["profile-was-auto"] === "true",
+      explicitConfig: commandArgs.some((arg) =>
+        /^--(?:strict-mcp-config|mcp-config)(?:=|$)/.test(arg),
+      ),
+      explicitFilters: Boolean(process.env.TFX_SEARCH_TOOL),
+      transport: "exec",
+      policy: { codexConfigOverrides: flags },
+    });
+    try {
+      writeFileSync(
+        args["apply-file"],
+        JSON.stringify({
+          context: formatMcpRecommendation(result),
+          recommendation: result,
+          application: plan.metadata,
+          codexConfigOverrides: plan.codexConfigOverrides,
+          configFile: plan.configFile,
+          clearHint: plan.metadata.status === "prepared",
+        }),
+        { mode: 0o600 },
+      );
+      if (process.env.TFX_WORKER_MCP_FILE)
+        writeFileSync(
+          process.env.TFX_WORKER_MCP_FILE,
+          JSON.stringify({
+            recommendation: result,
+            application: plan.metadata,
+          }),
+          { mode: 0o600 },
+        );
+    } catch (error) {
+      plan.cleanup();
+      throw error;
+    }
+    console.error(`[tfx-route] MCP recommendation: ${JSON.stringify(result)}`);
+    return true;
+  }
   if (args.delimited) {
     console.error(`[tfx-route] MCP recommendation: ${JSON.stringify(result)}`);
     process.stdout.write(formatMcpRecommendation(result));

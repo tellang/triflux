@@ -136,17 +136,6 @@ async function readPromptFromStdin() {
   return data;
 }
 
-function resolveDefaultMcpConfig(cwd) {
-  const primary = resolve(cwd, ".claude", "mcp.json");
-  if (existsSync(primary)) return [primary];
-  const legacy = resolve(cwd, ".mcp.json");
-  if (existsSync(legacy)) return [legacy];
-  process.stderr.write(
-    "[tfx-route-worker] warning: no project MCP config in cwd — hub status unaffected\n",
-  );
-  return [];
-}
-
 const args = parseArgs(process.argv.slice(2));
 const prompt = await readPromptFromStdin();
 
@@ -160,10 +149,7 @@ const worker = await createWorker(args.type, {
   permissionMode: args.permissionMode,
   allowDangerouslySkipPermissions: args.allowDangerouslySkipPermissions,
   extraArgs: args.extraArgs,
-  mcpConfig:
-    args.type === "claude" && args.mcpConfig.length === 0
-      ? resolveDefaultMcpConfig(args.cwd || process.cwd())
-      : args.mcpConfig,
+  mcpConfig: args.mcpConfig,
   cwd: args.cwd || process.cwd(),
 });
 

@@ -221,6 +221,7 @@ function buildRouteBackedHeadlessCommand(
     TFX_WORKER_MODEL: opts.model || "",
     TFX_WORKER_EFFORT: opts.effort || "",
     TFX_WORKER_MODEL_FILE: `${resultFile}.model.json`,
+    TFX_WORKER_MCP_FILE: `${resultFile}.mcp.json`,
     TFX_WORKER_SANDBOX_SCOPE: "headless",
     ...(resolvedCli === "antigravity" && opts.profile
       ? { TFX_GEMINI_PROFILE: opts.profile }
@@ -448,7 +449,7 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
  * @param {string} resultFile
  */
 export function cleanStaleResultArtifacts(resultFile) {
-  for (const suffix of ["", ".partial", ".err", ".model.json"]) {
+  for (const suffix of ["", ".partial", ".err", ".model.json", ".mcp.json"]) {
     const path = `${resultFile}${suffix}`;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -771,6 +772,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       cwd: assignment.cwd || assignment.workdir,
       mcpRecommendation,
       workerModelFile: `${resultFile}.model.json`,
+      workerMcpFile: `${resultFile}.mcp.json`,
     });
   }
 
@@ -884,6 +886,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         cwd: assignment.cwd || assignment.workdir,
         mcpRecommendation,
         workerModelFile: `${resultFile}.model.json`,
+        workerMcpFile: `${resultFile}.mcp.json`,
       };
     }),
   );
@@ -1051,6 +1054,7 @@ async function collectResults(results) {
           ? { mcpRecommendation: d.mcpRecommendation }
           : {}),
         workerModelFile: d.workerModelFile,
+        workerMcpFile: d.workerMcpFile,
         workerGitDiffFiles,
         sessionDead: completion.sessionDead || false,
         handoff: handoffResult.handoff,

@@ -64,6 +64,15 @@
 - 미설치 MCP와 plugin의 실제 설치가 승인 없이 발생하지 않는다.
 - native plugin의 세 호스트별 데이터와 자동 활성화는 후속 범위로 유지한다. 첫 단계에서 지원하지 않는 기능을 완료로 표시하지 않는다.
 
+## 워커 실행별 적용
+
+- 후속 구현은 ADR-0051을 따른다. accepted ADR-0050의 추천 계약은 유지한다.
+- 로컬 원 정의와 유일하게 연결되는 등록 서버만 실행별 적용한다. 명시 profile, 서버 및 도구 제한, config와 프로젝트 승인을 우선한다.
+- Codex 직접 exec 경로는 등록명만 실행별 override에 포함한다. unknown 도구 목록과 명시 deny-all을 구분하고 원 도구 및 승인 제한을 보존한다. shared daemon 격리를 확인하지 못한 경로는 보류한다.
+- Claude direct와 route subprocess는 private config 파일과 strict 설정을 사용한다. 설정 파일은 자식 종료 후 정리하며 원 정의와 비밀값은 프롬프트, argv, 결과에 넣지 않는다. native metadata 경로는 적용으로 표시하지 않는다.
+- AGY 자동 서버 적용은 session 격리 미확인으로 보류한다. 전역 또는 workspace 설정 쓰기로 우회하지 않는다.
+- 실행 결과의 workerMcpFile에서 추천과 application 상태 및 보류 이유를 확인한다. 설정 인자 전달은 appliedTo=start_args이며 runtimeConfirmed와 toolVerified는 별도 증거를 확보하기 전까지 false다.
+
 ## 관련 문서
 
 - [ADR-0050](../adr/0050-jev-mcp-recommendations.md)
