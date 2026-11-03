@@ -305,15 +305,22 @@ async function launchClaude(argv) {
     args.push("--mcp-config", plan.configFile, "--strict-mcp-config");
   let child;
   let killTimer;
+  let cancelCode = 0;
+  const signalCodes = { SIGTERM: 143, SIGINT: 130, SIGHUP: 129 };
   const forward = (signal) => {
+    cancelCode ||= signalCodes[signal];
+    // 부모가 강제 종료되기 전에 소유한 비밀 config를 동기적으로 삭제한다.
+    plan.cleanup();
     child?.kill(signal);
     killTimer ||= setTimeout(() => child?.kill("SIGKILL"), 1000);
     killTimer.unref();
   };
   const onTerm = () => forward("SIGTERM");
   const onInt = () => forward("SIGINT");
+  const onHup = () => forward("SIGHUP");
   process.on("SIGTERM", onTerm);
   process.on("SIGINT", onInt);
+  process.on("SIGHUP", onHup);
   try {
     writeFileSync(
       metadataFile,
@@ -341,14 +348,15 @@ async function launchClaude(argv) {
     const code = await new Promise((done) => {
       child.once("error", () => done(127));
       child.once("exit", (status, signal) =>
-        done(status ?? (signal === "SIGINT" ? 130 : 143)),
+        done(status ?? signalCodes[signal] ?? 143),
       );
     });
-    process.exitCode = code;
+    process.exitCode = code || cancelCode;
   } finally {
     clearTimeout(killTimer);
     process.off("SIGTERM", onTerm);
     process.off("SIGINT", onInt);
+    process.off("SIGHUP", onHup);
     plan.cleanup();
     unlinkSync(requestFile);
   }

@@ -207,6 +207,8 @@ test("Claude private config copies only the original definition and cleanup owns
     { env: f.env },
   );
   t.after(result.cleanup);
+  const other = prepareWorkerMcp({ ...f.input, cli: "claude" }, { env: f.env });
+  t.after(other.cleanup);
   assert.equal(result.metadata.status, "prepared");
   assert.equal(statSync(dirname(result.configFile)).mode & 0o777, 0o700);
   assert.equal(statSync(result.configFile).mode & 0o777, 0o600);
@@ -219,7 +221,10 @@ test("Claude private config copies only the original definition and cleanup owns
     /SECRET|secret=|headers|command/,
   );
   result.cleanup();
+  result.cleanup();
   assert.equal(existsSync(result.configFile), false);
+  assert.equal(existsSync(dirname(result.configFile)), false);
+  assert.equal(existsSync(other.configFile), true);
   assert.equal(existsSync(join(f.home, ".claude.json")), true);
 });
 

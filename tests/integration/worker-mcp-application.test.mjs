@@ -12,11 +12,27 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
+import { WORKER_MCP_LAUNCHER } from "../../hub/lib/worker-mcp.mjs";
 import { buildHeadlessCommand } from "../../hub/team/headless.mjs";
 
 const run = promisify(execFile);
 const root = resolve(import.meta.dirname, "../..");
+
+async function waitForJson(file) {
+  const deadline = Date.now() + 4000;
+  while (Date.now() < deadline) {
+    try {
+      return JSON.parse(readFileSync(file, "utf8"));
+    } catch (error) {
+      if (error.code !== "ENOENT" && !(error instanceof SyntaxError))
+        throw error;
+    }
+    await delay(10);
+  }
+  throw new Error("launcher fixture did not reach the expected state");
+}
 
 function fixture(t) {
   const home = mkdtempSync(join(tmpdir(), "mcp-application-"));
@@ -295,6 +311,123 @@ setTimeout(()=>{ fs.writeFileSync(process.env.TFX_TEST_LOG,JSON.stringify({file,
     assert.equal(metadata.application.appliedTo, "start_args");
     assert.equal(metadata.application.runtimeConfirmed, false);
   });
+}
+
+for (const [signal, cancelCode] of [
+  ["SIGTERM", 143],
+  ["SIGINT", 130],
+  ["SIGHUP", 129],
+]) {
+  for (const outcome of ["zero", "late-read", "ignore", "parent-kill"]) {
+    test(`Claude direct ${signal} ${outcome}: config is removed before forwarding cancellation`, {
+      timeout: 10000,
+    }, async (t) => {
+      const f = fixture(t);
+      const before = readFileSync(join(f.home, ".claude.json"));
+      const requestFile = f.put(
+        "request.json",
+        JSON.stringify({
+          cli: "claude",
+          cwd: f.home,
+          profileWasAuto: true,
+          recommendation: f.recommendation,
+        }),
+      );
+      const metadataFile = join(f.home, "metadata.json");
+      const signalFile = join(f.home, "signal.json");
+      const bin = f.put(
+        "cancel-child.cjs",
+        `
+const fs = require('fs'), path = require('path'), args = process.argv.slice(2);
+const file = args[args.indexOf('--mcp-config') + 1];
+const outcome = ${JSON.stringify(outcome)};
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => {
+  const state = { signal, configExists: fs.existsSync(file), dirExists: fs.existsSync(path.dirname(file)) };
+  if (outcome === 'late-read') {
+    try { fs.readFileSync(file); } catch (error) { state.readError = error.code; }
+  }
+  fs.writeFileSync(${JSON.stringify(signalFile)}, JSON.stringify(state));
+  if (outcome === 'zero') process.exit(0);
+  if (outcome === 'late-read') process.exit(state.readError ? 2 : 0);
+});
+fs.writeFileSync(process.env.TFX_TEST_LOG, JSON.stringify({
+  file, pid: process.pid, args, mode: fs.statSync(file).mode & 511,
+  dirMode: fs.statSync(path.dirname(file)).mode & 511,
+}));
+setInterval(() => {}, 1000);
+`,
+      );
+      const launcher = spawn(
+        process.execPath,
+        [WORKER_MCP_LAUNCHER, requestFile, metadataFile, process.execPath, bin],
+        { cwd: f.home, env: f.env, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      let output = "";
+      launcher.stdout.on("data", (data) => {
+        output += data;
+      });
+      launcher.stderr.on("data", (data) => {
+        output += data;
+      });
+      const closed = new Promise((done) =>
+        launcher.once("exit", (code, signal) => done({ code, signal })),
+      );
+      let worker;
+      t.after(async () => {
+        launcher.kill("SIGKILL");
+        if (worker) {
+          try {
+            process.kill(worker.pid, "SIGKILL");
+          } catch (error) {
+            if (error.code !== "ESRCH") throw error;
+          }
+        }
+        await closed;
+      });
+      worker = await waitForJson(f.env.TFX_TEST_LOG);
+      assert.equal(worker.mode, 0o600);
+      assert.equal(worker.dirMode, 0o700);
+      assert.equal(existsSync(worker.file), true);
+      const start = Date.now();
+      launcher.kill(signal);
+      const state = await waitForJson(signalFile);
+      assert.deepEqual(state, {
+        signal,
+        configExists: false,
+        dirExists: false,
+        ...(outcome === "late-read" ? { readError: "ENOENT" } : {}),
+      });
+      if (outcome === "parent-kill") {
+        assert.ok(
+          Date.now() - start < 1000,
+          "cleanup must precede the parent kill deadline",
+        );
+        assert.equal(launcher.exitCode, null);
+        assert.equal(launcher.signalCode, null);
+        launcher.kill("SIGKILL");
+        assert.deepEqual(await closed, { code: null, signal: "SIGKILL" });
+      } else {
+        const exit = await closed;
+        assert.equal(exit.signal, null);
+        if (outcome === "zero") assert.equal(exit.code, cancelCode);
+        else if (outcome === "late-read") assert.equal(exit.code, 2);
+        else assert.notEqual(exit.code, 0);
+        assert.equal(existsSync(requestFile), false);
+      }
+      assert.equal(existsSync(worker.file), false);
+      assert.equal(existsSync(dirname(worker.file)), false);
+      assert.deepEqual(readFileSync(join(f.home, ".claude.json")), before);
+      const metadata = JSON.parse(readFileSync(metadataFile, "utf8"));
+      assert.equal(metadata.application.appliedTo, "start_args");
+      assert.equal(metadata.application.applied, false);
+      assert.equal(metadata.application.runtimeConfirmed, false);
+      assert.equal(metadata.application.toolVerified, false);
+      assert.doesNotMatch(
+        JSON.stringify({ args: worker.args, metadata, output }),
+        /PRIVATE|Authorization|headers/,
+      );
+    });
+  }
 }
 
 test("concurrent Claude calls use independent private configs and preserve the shared registration", {
