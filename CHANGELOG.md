@@ -2,6 +2,21 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.95.0] - 2026-11-03
+
+### Added
+- judge: `tfx judge worker-model --task SUMMARY --agent ROLE --cli codex|claude|agy`가 세션 생성 없이 모델 가족, 모델, effort, 신뢰도와 선택 출처를 반환한다.
+- mcp: 등록된 추천 MCP를 Codex exec와 Claude 워커의 실행별 설정에 연결한다. Claude는 private config와 strict 옵션을 사용하며 AGY와 native metadata 경로는 보류 이유를 기록한다.
+
+### Changed
+- workers: 워커별 모델과 effort를 전달하고 Jev 선택, 규칙 폴백, 명시 설정과 실제 실행 인자를 구분한다. 원 task로 한 번 판정하고 Claude progressive 조회는 동시에 시작한다.
+- workers: Jev가 비활성인 Claude 직접 워커도 역할 기본 모델을 실행 인자로 전달한다. 사용자 명시 모델과 effort가 우선이며 전역 설정은 변경하지 않는다.
+- mcp: 명시 profile, 서버 허용 목록, 도구 제한과 프로젝트 승인을 보존한다. 허용 목록 내부의 단일 서버 적용을 지원하며 미설치 서버와 새 플러그인은 설치하지 않는다.
+
+### Fixed
+- workers: 모델 명시 시 Jev 권한 모드가 누락되거나 effort 단독 입력과 사전 조회 실패로 실행이 종료되는 문제를 수정한다. ultra 제한과 Luna 폴백의 실제 인자도 보존한다.
+- mcp: Claude 워커 취소 시 자식 종료를 기다리기 전에 소유 config를 정리하고 SIGHUP도 처리한다. 설정 전달과 실제 연결 및 도구 호출 성공은 별도로 기록한다.
+
 ## [10.94.0] - 2026-11-03
 
 ### Added
