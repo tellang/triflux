@@ -188,10 +188,15 @@ export async function launchLead(
           agentType: "lead",
           cliType: cli,
         },
-        jevOptions,
+        { ...jevOptions, includeDiagnostics: true },
       );
       routing.complexity = recommendation?.complexity ?? null;
       routing.confidence = recommendation?.confidence ?? null;
+      if (recommendation?.diagnostics) {
+        routing.diagnostics = recommendation.diagnostics;
+        if (!recommendation.complexity)
+          routing.reason = `complexity_${recommendation.diagnostics.reason}`;
+      }
       if (recommendation?.complexity) {
         routing.recommendedProfile =
           cli === "codex"

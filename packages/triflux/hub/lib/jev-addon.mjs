@@ -714,6 +714,14 @@ function minConfidence(options = {}) {
     : DEFAULT_JEV_CONFIDENCE_THRESHOLD;
 }
 
+function decisionDiagnostics(result, reason) {
+  return {
+    reason,
+    rawChoice: result?.choice ?? null,
+    rawConfidence: result?.confidence ?? null,
+  };
+}
+
 /**
  * 1. 재시도 상태 머신: 두 실패 메시지가 동일한 근본 원인인지 판정한다.
  */
@@ -1244,6 +1252,16 @@ export async function judgeTaskRouting(
     complexityOptions.includes(compRes.choice)
       ? compRes.choice
       : null;
+  const diagnostics = options.includeDiagnostics
+    ? decisionDiagnostics(
+        compRes,
+        !compRes
+          ? "invalid_response"
+          : complexity
+            ? "accepted"
+            : "low_confidence",
+      )
+    : undefined;
 
   const executionMode =
     modeRes &&
@@ -1285,7 +1303,9 @@ export async function judgeTaskRouting(
     !tierShift &&
     neededMcpServers === null
   ) {
-    return null;
+    return diagnostics
+      ? { complexity: null, confidence: null, diagnostics }
+      : null;
   }
 
   const routeSpec =
@@ -1338,6 +1358,7 @@ export async function judgeTaskRouting(
     neededMcpServers,
     tierShift,
     confidence: avgConfidence,
+    ...(diagnostics ? { diagnostics } : {}),
   };
 }
 
@@ -1854,13 +1875,22 @@ export async function judgeRoutingBranch(
   { task = "", routingText = "" } = {},
   options = {},
 ) {
-  if (!isJevEnabled(options)) return null;
+  const fallback = (reason, result = null) =>
+    options.includeDiagnostics
+      ? {
+          branch: null,
+          rule: null,
+          confidence: null,
+          diagnostics: decisionDiagnostics(result, reason),
+        }
+      : null;
+  if (!isJevEnabled(options)) return fallback("jev_disabled");
   const trimmedTask = clampText(task, 1000);
-  if (!trimmedTask) return null;
+  if (!trimmedTask) return fallback("empty_task");
 
   const { D0: _explicit, ...branches } = parseRoutingBranches(routingText);
   const allowed = Object.keys(branches);
-  if (allowed.length < 2) return null;
+  if (allowed.length < 2) return fallback("insufficient_branches");
   // 맞는 분기가 없을 때 억지로 고르지 않도록 none 을 같은 분포에서 경쟁시킨다.
   const none = "none";
 
@@ -1879,14 +1909,20 @@ export async function judgeRoutingBranch(
     },
     options,
   );
-  if (!res || res.confidence < minConfidence(options)) return null;
-  if (!allowed.includes(res.choice)) return null;
+  if (!res) return fallback("jev_failed");
+  if (res.choice === none) return fallback("no_matching_branch", res);
+  if (!allowed.includes(res.choice)) return fallback("invalid_choice");
+  if (res.confidence < minConfidence(options))
+    return fallback("low_confidence", res);
   // D4 소유자는 규칙 한 줄이 아니라 스택 공존 매트릭스가 정하므로 전문 읽기로 돌린다.
-  if (res.choice === "D4") return null;
+  if (res.choice === "D4") return fallback("requires_full_routing", res);
   return {
     branch: res.choice,
     rule: branches[res.choice],
     confidence: res.confidence,
+    ...(options.includeDiagnostics
+      ? { diagnostics: decisionDiagnostics(res, "accepted") }
+      : {}),
   };
 }
 
