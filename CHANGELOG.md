@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.95.1] - 2026-11-03
+
+### Fixed
+- mcp: 홈에 복사된 실행 래퍼가 MCP 필터를 설치 패키지 경로에서 먼저 로드한다. 패키지 내부 의존성을 찾지 못해 워커가 종료되는 문제를 수정하고 명시 override와 기존 fallback을 보존한다.
+
 ## [10.95.0] - 2026-11-03
 
 ### Added

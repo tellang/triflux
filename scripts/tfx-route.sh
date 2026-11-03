@@ -1689,6 +1689,7 @@ resolve_mcp_filter_script() {
   [[ -n "$MCP_FILTER_SCRIPT" && -f "$MCP_FILTER_SCRIPT" ]] && { printf '%s\n' "$MCP_FILTER_SCRIPT"; return 0; }
   local sd; sd="$(_get_script_dir)"
   MCP_FILTER_SCRIPT=$(_resolve_script "" \
+    ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/lib/mcp-filter.mjs"} \
     ${sd:+"$sd/lib/mcp-filter.mjs"} \
     "$PWD/scripts/lib/mcp-filter.mjs" "$PWD/lib/mcp-filter.mjs") || return 1
   printf '%s\n' "$MCP_FILTER_SCRIPT"
