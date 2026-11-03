@@ -1,7 +1,7 @@
 ---
 id: 0050
 title: Jev MCP 추천을 기존 실행 경로에 연결한다
-status: proposed
+status: accepted
 date: 2026-11-03
 deciders: []
 supersedes: []
