@@ -13,13 +13,27 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_JEV_STATS_PATH } from "../../hub/lib/jev-addon.mjs";
 import {
-  launchLead,
+  launchLead as launchLeadActual,
   leadDisplayName,
   leadEntryPrompt,
   leadSessionName,
   offerLeadLaunchers,
   resolveLauncher,
 } from "../../hub/team/lead-launch.mjs";
+
+// 기존 모델 라우팅 테스트에서는 공개 Registry와 사용자 MCP 설정을 읽지 않는다.
+function launchLead(input, options = {}) {
+  return launchLeadActual(input, {
+    recommend: async ({ cliType }) => ({
+      cli: cliType,
+      status: "deferred",
+      recommendations: [],
+      diagnostics: ["test_fixture"],
+      applied: false,
+    }),
+    ...options,
+  });
+}
 
 function config(content) {
   const path = join(mkdtempSync(join(tmpdir(), "tfx-lead-")), "lead.json");

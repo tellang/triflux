@@ -59,8 +59,9 @@ process.exit(1);
       .map((line) => JSON.parse(line));
     assert.deepEqual(
       calls.map((args) => args[0]),
-      ["team-task-update", "team-send-message"],
+      ["judge-mcp", "team-task-update", "team-send-message"],
     );
+    assert.match(result.stderr, /recommendation_bridge_failed/);
     const backup = JSON.parse(readFileSync(join(dir, "task-1.json"), "utf8"));
     assert.equal(backup.result, "success");
     assert.match(backup.summary, /^EXEC:unavailable-bridge/);

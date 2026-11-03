@@ -20,6 +20,10 @@ import {
   judgeWorkerHealth,
   recordMcpSelectionShadow,
 } from "../lib/jev-addon.mjs";
+import {
+  formatMcpRecommendation,
+  recommendMcp,
+} from "../lib/mcp-recommendations.mjs";
 import { privateTmpDir } from "../lib/private-tmp.mjs";
 import {
   createActivityLifecycle,
@@ -259,6 +263,27 @@ function shadowClaudeMcpSelection(assignment) {
   }).catch(() => {});
 }
 
+// route 기반 워커는 최종 CLI를 정한 뒤 shell에서 추천한다. Claude direct만 부모가 맡는다.
+export async function prepareHeadlessMcpRecommendation(
+  assignment,
+  options = {},
+) {
+  if (
+    resolveCliType(assignment.cli) !== "claude" ||
+    ["code-reviewer", "quality-reviewer"].includes(assignment.role)
+  )
+    return null;
+  return recommendMcp(
+    {
+      cliType: "claude",
+      cwd: assignment.cwd || assignment.workdir,
+      task: assignment.prompt,
+      searchTerms: assignment.mcpSearchTerms,
+    },
+    options,
+  );
+}
+
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const { handoff = true, mcp, contextFile, model, cwd } = opts;
   const resolvedCli = resolveCliType(cli);
@@ -298,7 +323,10 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
     : "";
   // P2: HANDOFF 지시를 프롬프트에 삽입 (워커가 구조화된 handoff 블록을 출력하도록)
   const handoffHint = handoff ? `\n\n${HANDOFF_INSTRUCTION_SHORT}` : "";
-  const fullPrompt = `${contextPrefix}${prompt}${mcpHint}${workspaceHint}${handoffHint}`;
+  const recommendationHint = opts.mcpRecommendation
+    ? formatMcpRecommendation(opts.mcpRecommendation)
+    : "";
+  const fullPrompt = `${contextPrefix}${prompt}${mcpHint}${workspaceHint}${handoffHint}${recommendationHint}`;
 
   // 보안: 프롬프트를 임시 파일에 쓰고 파일 참조로 전달한다(셸 주입 방지).
   const promptFile = join(
@@ -632,6 +660,15 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
     cleanStaleResultArtifacts(resultFile);
     shadowClaudeMcpSelection(assignment);
+    const mcpRecommendation =
+      await prepareHeadlessMcpRecommendation(assignment);
+    if (mcpRecommendation)
+      safeProgress?.({
+        type: "mcp_recommendation",
+        paneName,
+        cli: resolvedCli,
+        mcpRecommendation,
+      });
     const cmd = buildHeadlessCommand(
       assignment.cli,
       assignment.prompt,
@@ -642,6 +679,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
         model: assignment.model,
         profile: assignment.profile,
         cwd: assignment.cwd || assignment.workdir,
+        mcpRecommendation,
       },
     );
     startCapture(sessionName, newPaneId);
@@ -663,6 +701,7 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       command: cmd,
       workerId,
       cwd: assignment.cwd || assignment.workdir,
+      mcpRecommendation,
     });
   }
 
@@ -721,6 +760,15 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
       // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
       cleanStaleResultArtifacts(resultFile);
       shadowClaudeMcpSelection(assignment);
+      const mcpRecommendation =
+        await prepareHeadlessMcpRecommendation(assignment);
+      if (mcpRecommendation)
+        safeProgress?.({
+          type: "mcp_recommendation",
+          paneName,
+          cli: resolvedCli,
+          mcpRecommendation,
+        });
       const cmd = buildHeadlessCommand(
         assignment.cli,
         assignment.prompt,
@@ -731,6 +779,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
           model: assignment.model,
           profile: assignment.profile,
           cwd: assignment.cwd || assignment.workdir,
+          mcpRecommendation,
         },
       );
       const scriptDir = join(resultDir(), sessionName);
@@ -761,6 +810,7 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         command: cmd,
         workerId,
         cwd: assignment.cwd || assignment.workdir,
+        mcpRecommendation,
       };
     }),
   );
@@ -924,6 +974,9 @@ async function collectResults(results) {
         exitCode: completion.exitCode,
         output,
         resultFile: d.resultFile,
+        ...(d.mcpRecommendation
+          ? { mcpRecommendation: d.mcpRecommendation }
+          : {}),
         workerGitDiffFiles,
         sessionDead: completion.sessionDead || false,
         handoff: handoffResult.handoff,
@@ -1095,6 +1148,10 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
+    if (event.type === "mcp_recommendation")
+      process.stderr.write(
+        `[headless] ${event.paneName} MCP recommendation ${JSON.stringify(event.mcpRecommendation)}\n`,
+      );
     if (event.type === "session_created") resultsIndex.begin();
     else if (event.type === "dispatched")
       resultsIndex.workerStarted(event.paneName);

@@ -16,6 +16,10 @@ import {
   judgeTaskRouting,
   recordJevStat,
 } from "@triflux/core/hub/lib/jev-addon.mjs";
+import {
+  formatMcpRecommendation,
+  recommendMcp,
+} from "@triflux/core/hub/lib/mcp-recommendations.mjs";
 
 const execFileAsync = promisify(execFile);
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -154,6 +158,8 @@ export async function launchLead(
     jevOptions = {},
     modelOptions = {},
     judgeRouting = judgeTaskRouting,
+    recommend = recommendMcp,
+    recommendationOptions = {},
   } = {},
 ) {
   if (!LEAD_CLIS.includes(cli))
@@ -248,7 +254,29 @@ export async function launchLead(
   routing.effectiveEffort = effort ?? null;
   const target = session || leadSessionName(cwd);
   const name = leadDisplayName(role.trim());
-  const summary = { cli, session: target, name, launcher, routing };
+  let mcpRecommendation;
+  try {
+    mcpRecommendation = await recommend(
+      { cliType: cli, cwd, task },
+      { refresh: true, jevOptions, ...recommendationOptions },
+    );
+  } catch {
+    mcpRecommendation = {
+      cli,
+      status: "unavailable",
+      recommendations: [],
+      diagnostics: ["recommendation_failed"],
+      applied: false,
+    };
+  }
+  const summary = {
+    cli,
+    session: target,
+    name,
+    launcher,
+    routing,
+    mcpRecommendation,
+  };
   let start;
   let startReturned = false;
   try {
@@ -305,7 +333,7 @@ export async function launchLead(
       "--session",
       target,
       "--prompt",
-      leadEntryPrompt(cli, role.trim()),
+      `${leadEntryPrompt(cli, role.trim())}${task?.trim() ? `\n\nTask:\n${task}${formatMcpRecommendation(mcpRecommendation)}` : ""}`,
       "--no-wait",
       ...(cli === "claude" ? ["--via-tmux"] : []),
     ],

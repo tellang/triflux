@@ -2456,6 +2456,7 @@ apply_jev_pre_route() {
 
 # ── 메인 실행 ──
 main() {
+  local recommendation_task="$PROMPT"
   # 종료 시 per-process 에이전트 파일 + 워커 프로세스 정리
   trap 'cleanup_workers' EXIT
 
@@ -2531,6 +2532,16 @@ ${ctx_content}
   fi
 
   resolve_mcp_policy
+
+  # 추천은 기존 정책 계산 뒤에 붙인다. 기존 필터와 권한 선택에는 입력하지 않는다.
+  local recommendation_cli="$CLI_TYPE" recommendation_context=""
+  [[ "$recommendation_cli" != "claude-native" ]] || recommendation_cli="claude"
+  if recommendation_context=$(bridge_cli judge-mcp --cli-type "$recommendation_cli" --cwd "$PWD" --prompt "$recommendation_task" --delimited < /dev/null) && [[ -n "$recommendation_context" ]]; then
+    PROMPT="${PROMPT}${recommendation_context}"
+    printf '%s\n' "[tfx-route] ${recommendation_context}" >&2
+  else
+    echo '[tfx-route] MCP recommendation: unavailable applied=false diagnostic=recommendation_bridge_failed' >&2
+  fi
 
   # Claude native는 팀 비-TTY 환경에서 subprocess wrapper를 우선 시도
   if [[ "$CLI_TYPE" == "claude-native" && -n "$TFX_TEAM_NAME" ]]; then

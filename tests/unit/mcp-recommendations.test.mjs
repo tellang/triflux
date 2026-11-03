@@ -1,0 +1,528 @@
+import assert from "node:assert/strict";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { test } from "node:test";
+import {
+  formatMcpRecommendation,
+  readMcpInventory,
+  recommendMcp,
+} from "../../hub/lib/mcp-recommendations.mjs";
+import {
+  buildHeadlessCommand,
+  prepareHeadlessMcpRecommendation,
+} from "../../hub/team/headless.mjs";
+import { launchLead } from "../../hub/team/lead-launch.mjs";
+import {
+  readMcpCatalog,
+  refreshMcpCatalog,
+} from "../../scripts/lib/mcp-recommendation-catalog.mjs";
+
+function fixture(t) {
+  const home = mkdtempSync(join(tmpdir(), "tfx-mcp-recommend-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  return {
+    home,
+    env: { HOME: home, XDG_CACHE_HOME: join(home, "cache"), TFX_JEV: "0" },
+  };
+}
+function save(file, value) {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(
+    file,
+    typeof value === "string" ? value : JSON.stringify(value),
+  );
+}
+function server(name = "io.example/docs", extra = {}) {
+  return {
+    server: {
+      name,
+      description: "Library reference documentation",
+      version: "1.2.3",
+      remotes: [
+        {
+          type: "streamable-http",
+          url: "https://docs.example/mcp",
+          headers: [{ name: "Authorization", value: "PRIVATE_HEADER" }],
+        },
+      ],
+      ...extra,
+    },
+    _meta: {
+      "io.modelcontextprotocol.registry/official": { status: "active" },
+    },
+  };
+}
+function chooser(
+  capture,
+  choice = "official:io.example/docs",
+  confidence = 0.96,
+) {
+  return {
+    env: {},
+    batchClient: async (request) => {
+      capture.push(request);
+      return { selection: { choice, confidence } };
+    },
+  };
+}
+
+test("Registry pagination, latest versions, safe metadata and atomic failure preservation", async (t) => {
+  const f = fixture(t);
+  const urls = [];
+  const result = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async (url) => {
+      urls.push(new URL(url));
+      return {
+        ok: true,
+        json: async () =>
+          urls.length === 1
+            ? { servers: [server()], metadata: { nextCursor: "page 2" } }
+            : { servers: [server(), server("io.example/other")], metadata: {} },
+      };
+    },
+  });
+  assert.equal(result.status, "fresh");
+  assert.equal(
+    result.entries.filter((e) => e.sourceId === "official").length,
+    2,
+  );
+  assert.equal(urls[0].origin, "https://registry.modelcontextprotocol.io");
+  assert.equal(urls[0].searchParams.get("version"), "latest");
+  assert.equal(urls[1].searchParams.get("cursor"), "page 2");
+  const before = readFileSync(result.cacheFile, "utf8");
+  assert.doesNotMatch(before, /PRIVATE_HEADER|Authorization|headers/);
+  const failed = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async () => {
+      throw new Error("PRIVATE_FAILURE");
+    },
+  });
+  assert.equal(failed.status, "stale");
+  assert.ok(failed.diagnostics.includes("catalog_refresh_failed"));
+  assert.equal(readFileSync(result.cacheFile, "utf8"), before);
+  assert.doesNotMatch(JSON.stringify(failed), /PRIVATE_FAILURE/);
+  assert.ok(readMcpCatalog(f).diagnostics.includes("catalog_refresh_failed"));
+});
+
+test("Cold cache uses local metadata without any Registry fetch", async (t) => {
+  const f = fixture(t);
+  const result = await recommendMcp(
+    { cliType: "codex", cwd: f.home, task: "작업" },
+    { ...f, jevOptions: { env: { TFX_JEV: "0" } } },
+  );
+  assert.equal(result.applied, false);
+  assert.equal(result.status, "deferred");
+  assert.ok(result.diagnostics.includes("catalog_missing"));
+  assert.ok(result.diagnostics.includes("jev_disabled"));
+  assert.ok(readMcpCatalog(f).entries.some((e) => e.name === "context7"));
+});
+
+for (const cli of ["claude", "codex", "antigravity"]) {
+  test(`${cli}: task, project, descriptions and provenance reach Jev and context`, async (t) => {
+    const f = fixture(t);
+    await refreshMcpCatalog({
+      ...f,
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ servers: [server()], metadata: {} }),
+      }),
+    });
+    save(join(f.home, "package.json"), {
+      name: "example-project",
+      description: "A docs tool",
+      keywords: ["documentation"],
+    });
+    const capture = [];
+    const result = await recommendMcp(
+      { cliType: cli, cwd: f.home, task: "프로젝트 API 문서를 확인한다" },
+      { ...f, jevOptions: chooser(capture) },
+    );
+    assert.equal(result.cli, cli === "antigravity" ? "agy" : cli);
+    assert.equal(result.status, "recommended");
+    assert.equal(result.applied, false);
+    assert.match(capture[0].state, /example-project/);
+    assert.match(capture[0].state, /프로젝트 API 문서를 확인한다/);
+    assert.match(JSON.stringify(capture[0]), /Library reference documentation/);
+    const item = result.recommendations[0];
+    assert.equal(item.confidence, 0.96);
+    assert.equal(item.requiresApproval, true);
+    assert.ok(["missing", "unknown"].includes(item.installationStatus));
+    assert.match(item.source.url, /registry.modelcontextprotocol.io/);
+    const context = formatMcpRecommendation(result);
+    assert.match(context, /applied.*false/);
+    assert.match(context, /Library reference documentation/);
+    assert.match(context, /registry.modelcontextprotocol.io/);
+  });
+}
+
+test("Inventory identity beats similar names, ignores secrets and does not claim auth or activation", (t) => {
+  const f = fixture(t);
+  save(
+    join(f.home, ".codex", "config.toml"),
+    '[mcp_servers.docs]\nurl = "https://different.example/mcp"\n[mcp_servers.alias]\nurl = "https://docs.example/mcp?token=PRIVATE_TOKEN"\n[mcp_servers.alias.http_headers]\nAuthorization = "PRIVATE_HEADER"\n',
+  );
+  const inventory = readMcpInventory({ cliType: "codex", cwd: f.home }, f);
+  assert.equal(inventory.servers.length, 2);
+  assert.doesNotMatch(
+    JSON.stringify(inventory),
+    /PRIVATE_TOKEN|PRIVATE_HEADER|Authorization/,
+  );
+  assert.ok(
+    inventory.servers.every(
+      (s) => s.authentication === "unknown" && s.activation === "unknown",
+    ),
+  );
+});
+
+for (const [choice, confidence, reason] of [
+  ["none", 0.95, "jev_no_recommendation"],
+  ["official:io.example/docs", 0.1, "low_confidence"],
+  ["outside", 0.99, "batch_invalid_response"],
+]) {
+  test(`Jev ${reason} keeps the original job and returns no recommendation`, async (t) => {
+    const f = fixture(t);
+    await refreshMcpCatalog({
+      ...f,
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({ servers: [server()], metadata: {} }),
+      }),
+    });
+    const result = await recommendMcp(
+      { cliType: "agy", cwd: f.home, task: "작업", searchTerms: ["docs"] },
+      { ...f, jevOptions: chooser([], choice, confidence) },
+    );
+    assert.equal(result.recommendations.length, 0);
+    assert.equal(result.applied, false);
+    assert.ok(result.diagnostics.includes(reason), JSON.stringify(result));
+  });
+}
+
+test("Missing task defers without Jev or Registry", async (t) => {
+  const f = fixture(t);
+  const result = await recommendMcp(
+    { cliType: "claude", cwd: f.home },
+    {
+      ...f,
+      refresh: true,
+      fetchImpl: () => assert.fail("Registry"),
+      jevOptions: chooser([]),
+    },
+  );
+  assert.equal(result.status, "deferred");
+  assert.ok(result.diagnostics.includes("task_missing"));
+});
+
+test("Malformed page and cursor loops cannot replace a good cache", async (t) => {
+  const f = fixture(t);
+  const good = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ servers: [server()], metadata: {} }),
+    }),
+  });
+  const before = readFileSync(good.cacheFile, "utf8");
+  for (const payload of [
+    { servers: [{}] },
+    { servers: [] },
+    { servers: [server()], metadata: { nextCursor: "loop" } },
+  ]) {
+    const result = await refreshMcpCatalog({
+      ...f,
+      fetchImpl: async () => ({ ok: true, json: async () => payload }),
+    });
+    assert.equal(result.status, "stale");
+    assert.equal(readFileSync(good.cacheFile, "utf8"), before);
+  }
+});
+
+test("Identity aliases are present, same name with another endpoint is unknown", async (t) => {
+  const f = fixture(t);
+  await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ servers: [server()], metadata: {} }),
+    }),
+  });
+  const config = join(f.home, ".codex", "config.toml");
+  for (const [text, expected] of [
+    [
+      '[mcp_servers."io.example/docs"]\nurl="https://other.example/mcp"',
+      "unknown",
+    ],
+    [
+      '[mcp_servers.alias]\nurl="https://docs.example/mcp?api_key=PRIVATE"\nenabled=false',
+      "present",
+    ],
+  ]) {
+    save(config, text);
+    const result = await recommendMcp(
+      { cliType: "codex", cwd: f.home, task: "작업", searchTerms: ["docs"] },
+      { ...f, jevOptions: chooser([]) },
+    );
+    assert.equal(result.recommendations[0].installationStatus, expected);
+    assert.equal(result.recommendations[0].activation, "unknown");
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE/);
+    assert.equal(readFileSync(config, "utf8"), text);
+  }
+});
+
+test("Only Claude direct prepares in parent; route-backed workers never double-query", async (t) => {
+  const f = fixture(t);
+  const capture = [];
+  const options = { ...f, jevOptions: chooser(capture, "local:context7") };
+  for (const assignment of [
+    { cli: "codex" },
+    { cli: "agy" },
+    { cli: "antigravity" },
+    { cli: "claude", role: "code-reviewer" },
+  ]) {
+    assert.equal(
+      await prepareHeadlessMcpRecommendation(
+        { ...assignment, prompt: "원 작업", cwd: f.home },
+        options,
+      ),
+      null,
+    );
+  }
+  assert.equal(capture.length, 0);
+  const result = await prepareHeadlessMcpRecommendation(
+    { cli: "claude", prompt: "원 작업", cwd: f.home },
+    options,
+  );
+  assert.equal(capture.length, 1);
+  const command = buildHeadlessCommand(
+    "claude",
+    "원 작업",
+    join(f.home, "result.txt"),
+    { cwd: f.home, mcpRecommendation: result },
+  );
+  const file = command.match(/(\/[^\s'"]*prompt-[a-f0-9-]+\.txt)/i)?.[1];
+  assert.ok(file);
+  t.after(() => rmSync(file, { force: true }));
+  const prompt = readFileSync(file, "utf8");
+  assert.match(prompt, /원 작업/);
+  assert.match(prompt, /"applied":false/);
+  assert.match(prompt, /mcp-server-catalog|mcp-registry/);
+  assert.equal(prompt.split("[MCP recommendation]").length, 2);
+  assert.doesNotMatch(command, /mcp add|mcp enable/);
+});
+
+for (const cli of ["claude", "codex", "agy"]) {
+  test(`${cli} lead sends task and recommendation while preserving explicit start args`, async (t) => {
+    const f = fixture(t);
+    const calls = [];
+    const capture = [];
+    const result = await launchLead(
+      {
+        cli,
+        role: "11.3 테스트",
+        cwd: f.home,
+        task: "원 작업",
+        model: "explicit",
+        effort: "low",
+        launcher: "custom-launcher",
+      },
+      {
+        jevOptions: { env: { TFX_JEV: "0" } },
+        recommendationOptions: {
+          ...f,
+          refresh: false,
+          jevOptions: chooser(capture, "local:context7"),
+        },
+        run: async (_node, [, ...args]) => {
+          calls.push(args);
+          return {
+            stdout: JSON.stringify(
+              args[0] === "start" ? { ready: true } : { ok: true },
+            ),
+          };
+        },
+      },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.mcpRecommendation.status, "recommended");
+    assert.equal(capture.length, 1);
+    assert.equal(calls[0][calls[0].indexOf("--model") + 1], "explicit");
+    assert.equal(calls[0][calls[0].indexOf("--effort") + 1], "low");
+    assert.equal(
+      calls[0][calls[0].indexOf("--launcher") + 1],
+      "custom-launcher",
+    );
+    const prompt = calls[1][calls[1].indexOf("--prompt") + 1];
+    assert.match(prompt, /원 작업/);
+    assert.match(prompt, /"confidence":0.96/);
+    assert.match(prompt, /"applied":false/);
+    assert.equal(prompt.split("[MCP recommendation]").length, 2);
+  });
+}
+
+test("Jev transport failure and recommendation exceptions preserve dispatch", async (t) => {
+  const f = fixture(t);
+  const failed = await recommendMcp(
+    { cliType: "codex", cwd: f.home, task: "원 작업" },
+    {
+      ...f,
+      jevOptions: {
+        env: {},
+        batchClient: async () => {
+          throw new Error("PRIVATE");
+        },
+      },
+    },
+  );
+  assert.equal(failed.status, "unavailable");
+  assert.ok(failed.diagnostics.includes("batch_call_failed"));
+  assert.doesNotMatch(JSON.stringify(failed), /PRIVATE/);
+  const result = await launchLead(
+    { cli: "claude", role: "리드", task: "원 작업", cwd: f.home },
+    {
+      jevOptions: { env: { TFX_JEV: "0" } },
+      recommend: async () => {
+        throw new Error("PRIVATE");
+      },
+      run: async (_node, [, action]) => ({
+        stdout: JSON.stringify(
+          action === "start" ? { ready: true } : { ok: true },
+        ),
+      }),
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.mcpRecommendation.status, "unavailable");
+});
+
+test("Fresh cache skips refresh and live refresh ownership keeps the previous catalog", async (t) => {
+  const f = fixture(t);
+  const good = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ servers: [server()], metadata: {} }),
+    }),
+  });
+  await refreshMcpCatalog({
+    ...f,
+    ifStale: true,
+    fetchImpl: () => assert.fail("fresh cache download"),
+  });
+  writeFileSync(`${good.cacheFile}.lock`, `${process.pid}:another-refresh`);
+  const busy = await refreshMcpCatalog({
+    ...f,
+    fetchImpl: () => assert.fail("concurrent refresh"),
+  });
+  assert.ok(busy.diagnostics.includes("catalog_refresh_in_progress"));
+  assert.equal(
+    readFileSync(`${good.cacheFile}.lock`, "utf8"),
+    `${process.pid}:another-refresh`,
+  );
+  const cache = JSON.parse(readFileSync(good.cacheFile, "utf8"));
+  cache.collectedAt = "2020-01-01T00:00:00Z";
+  writeFileSync(good.cacheFile, JSON.stringify(cache));
+  const result = await recommendMcp(
+    { cliType: "codex", cwd: f.home, task: "원 작업", searchTerms: ["docs"] },
+    { ...f, jevOptions: chooser([]) },
+  );
+  assert.equal(result.status, "recommended");
+  assert.ok(result.diagnostics.includes("catalog_stale"));
+});
+
+test("Package identity uses actual launcher and registry type, not later arguments", async (t) => {
+  const f = fixture(t);
+  await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        servers: [
+          server("io.example/docs", {
+            remotes: [],
+            packages: [
+              {
+                registryType: "npm",
+                identifier: "@example/docs",
+                transport: { type: "stdio" },
+                environmentVariables: [
+                  { name: "DOCS_API_KEY", value: "PRIVATE_ENV" },
+                ],
+              },
+            ],
+          }),
+        ],
+        metadata: {},
+      }),
+    }),
+  });
+  const config = join(f.home, ".codex", "config.toml");
+  for (const [command, args, expected] of [
+    ["npx", '["-y", "@example/docs@1.2.3"]', "present"],
+    ["npx", '["-y", "different", "@example/docs"]', "missing"],
+    ["uvx", '["@example/docs"]', "missing"],
+  ]) {
+    save(config, `[mcp_servers.alias]\ncommand="${command}"\nargs=${args}`);
+    const result = await recommendMcp(
+      { cliType: "codex", cwd: f.home, task: "원 작업", searchTerms: ["docs"] },
+      { ...f, jevOptions: chooser([]) },
+    );
+    assert.equal(result.recommendations[0].installationStatus, expected);
+    assert.doesNotMatch(JSON.stringify(result), /PRIVATE_ENV/);
+  }
+});
+
+test("Structured search bounds large catalogs and rejects incompatible transports", async (t) => {
+  const f = fixture(t);
+  const records = Array.from({ length: 40 }, (_, i) =>
+    server(`io.example/entry-${i}`),
+  );
+  records.push(
+    server("io.example/docs", {
+      description: "UniqueStructuredTerm",
+      remotes: [{ type: "streamable-http", url: "https://docs.example/mcp" }],
+    }),
+  );
+  records.push(
+    server("io.example/unsupported", {
+      description: "UniqueStructuredTerm",
+      remotes: [
+        { type: "unsupported", url: "https://unsupported.example/mcp" },
+      ],
+    }),
+  );
+  await refreshMcpCatalog({
+    ...f,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({ servers: records, metadata: {} }),
+    }),
+  });
+  const capture = [];
+  const result = await recommendMcp(
+    {
+      cliType: "codex",
+      cwd: f.home,
+      task: "어떤 자연어든 원 작업 그대로",
+      searchTerms: ["UniqueStructuredTerm"],
+    },
+    { ...f, jevOptions: chooser(capture) },
+  );
+  assert.equal(result.status, "recommended");
+  assert.ok(result.diagnostics.includes("candidates_bounded"));
+  const state = JSON.parse(capture[0].state);
+  assert.equal(state.task, "어떤 자연어든 원 작업 그대로");
+  assert.ok(state.candidates.length <= 12);
+  assert.ok(
+    !state.candidates.some(
+      (candidate) => candidate.id === "official:io.example/unsupported",
+    ),
+  );
+});
