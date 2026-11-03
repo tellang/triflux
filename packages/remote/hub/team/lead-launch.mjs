@@ -258,7 +258,7 @@ export async function launchLead(
   try {
     mcpRecommendation = await recommend(
       { cliType: cli, cwd, task },
-      { refresh: true, jevOptions, ...recommendationOptions },
+      { refresh: true, timeoutMs: 500, jevOptions, ...recommendationOptions },
     );
   } catch {
     mcpRecommendation = {

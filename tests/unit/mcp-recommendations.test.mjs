@@ -252,7 +252,7 @@ test("Malformed page and cursor loops cannot replace a good cache", async (t) =>
   });
   const before = readFileSync(good.cacheFile, "utf8");
   for (const payload of [
-    { servers: [{}] },
+    { servers: "invalid" },
     { servers: [server()], metadata: { nextCursor: "loop" } },
   ]) {
     const result = await refreshMcpCatalog({
@@ -631,6 +631,7 @@ for (const failure of ["timeout", "http", "malformed"]) {
               ok: true,
               json: async () => ({
                 servers: [server("io.example/partial"), {}],
+                metadata: { nextCursor: 42 },
               }),
             };
       },

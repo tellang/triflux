@@ -202,6 +202,9 @@ export function readMcpCatalog(options = {}) {
       !Number.isFinite(Date.parse(cache.collectedAt)) ||
       (cache.watermark !== undefined &&
         !Number.isFinite(Date.parse(cache.watermark))) ||
+      (cache.skippedRecords !== undefined &&
+        (!Number.isSafeInteger(cache.skippedRecords) ||
+          cache.skippedRecords < 0)) ||
       !validEntries(cache.entries)
     )
       throw new Error("invalid_cache");
@@ -212,6 +215,7 @@ export function readMcpCatalog(options = {}) {
     cache = null;
   }
   let status = cache ? "fresh" : "missing";
+  let skippedRecords = cache?.skippedRecords || 0;
   if (cache && Date.now() - Date.parse(cache.collectedAt) > TTL_MS) {
     status = "stale";
     diagnostics.push("catalog_stale");
@@ -219,11 +223,26 @@ export function readMcpCatalog(options = {}) {
   if (existsSync(`${cacheFile}.failure`)) {
     diagnostics.push("catalog_refresh_failed");
     if (cache) status = "stale";
+    try {
+      const failure = JSON.parse(readFileSync(`${cacheFile}.failure`, "utf8"));
+      if (
+        Number.isSafeInteger(failure?.skippedRecords) &&
+        failure.skippedRecords >= 0
+      )
+        skippedRecords = failure.skippedRecords;
+    } catch {
+      /* 기존 고정 문자열 형식의 실패 기록도 읽는다. */
+    }
   }
   if (existsSync(`${cacheFile}.progress`)) {
     diagnostics.push("catalog_refresh_in_progress");
     if (cache) status = "stale";
   }
+  if (skippedRecords > 0)
+    diagnostics.push(
+      `catalog_records_skipped:${skippedRecords}`,
+      "malformed_registry_server",
+    );
   return {
     cacheFile,
     status,
@@ -242,6 +261,7 @@ export async function refreshMcpCatalog(options = {}) {
   const progressFile = `${cacheFile}.progress`;
   const lockToken = `${process.pid}:${randomUUID()}`;
   let ownsLock = false;
+  let skippedRecords;
   try {
     mkdirSync(dirname(cacheFile), { recursive: true, mode: 0o700 });
     for (let attempt = 0; attempt < 2 && !ownsLock; attempt++) {
@@ -255,26 +275,34 @@ export async function refreshMcpCatalog(options = {}) {
         }
       } catch (error) {
         if (error.code !== "EEXIST") throw error;
-        const token = readFileSync(lock, "utf8");
-        const owner = Number(token.split(":")[0]);
-        let dead = false;
-        if (Number.isSafeInteger(owner) && owner > 0) {
-          try {
-            process.kill(owner, 0);
-          } catch (probe) {
-            dead = probe.code === "ESRCH";
+        try {
+          const token = readFileSync(lock, "utf8");
+          const owner = Number(token.split(":")[0]);
+          let dead = false;
+          if (Number.isSafeInteger(owner) && owner > 0) {
+            try {
+              process.kill(owner, 0);
+            } catch (probe) {
+              dead = probe.code === "ESRCH";
+            }
           }
+          if (attempt === 0 && dead && readFileSync(lock, "utf8") === token)
+            unlinkSync(lock);
+          else {
+            const current = readMcpCatalog(options);
+            return {
+              ...current,
+              diagnostics: uniqueStrings([
+                ...current.diagnostics,
+                "catalog_refresh_in_progress",
+              ]),
+            };
+          }
+        } catch (probe) {
+          // 다른 갱신이 lock을 지웠다면 그 결과만 읽고 소유권 없이 쓰지 않는다.
+          if (probe.code === "ENOENT") return readMcpCatalog(options);
+          throw probe;
         }
-        if (attempt === 0 && dead && readFileSync(lock, "utf8") === token)
-          unlinkSync(lock);
-        else
-          return {
-            ...previous,
-            diagnostics: [
-              ...previous.diagnostics,
-              "catalog_refresh_in_progress",
-            ],
-          };
       }
     }
     // 진행 상태는 정상 캐시와 분리한다. watermark는 첫 요청 직전 시각으로 고정한다.
@@ -290,6 +318,9 @@ export async function refreshMcpCatalog(options = {}) {
         !Array.isArray(progress.seenCursors) ||
         progress.seenCursors.some((c) => typeof c !== "string" || !c) ||
         (progress.cursor && !progress.seenCursors.includes(progress.cursor)) ||
+        (progress.skippedRecords !== undefined &&
+          (!Number.isSafeInteger(progress.skippedRecords) ||
+            progress.skippedRecords < 0)) ||
         !validEntries(progress.entries)
       )
         throw new Error("invalid_progress");
@@ -301,12 +332,14 @@ export async function refreshMcpCatalog(options = {}) {
         startedAt: new Date().toISOString(),
         cursor: "",
         seenCursors: [],
+        skippedRecords: 0,
         entries: previous.watermark
           ? previous.entries.filter((e) => e.sourceId === "official")
           : [],
       };
     }
     writeJsonAtomic(progressFile, progress);
+    skippedRecords = progress.skippedRecords || 0;
     const signal = AbortSignal.timeout(options.timeoutMs || 30000);
     const entries = new Map(progress.entries.map((e) => [e.id, e]));
     const seenCursors = new Set(progress.seenCursors);
@@ -326,6 +359,7 @@ export async function refreshMcpCatalog(options = {}) {
       );
       if (!response.ok) throw new Error("registry_http_failed");
       const data = await response.json();
+      signal.throwIfAborted();
       if (!Array.isArray(data.servers))
         throw new Error("malformed_registry_page");
       const next = data.metadata?.nextCursor;
@@ -333,12 +367,16 @@ export async function refreshMcpCatalog(options = {}) {
         throw new Error("malformed_cursor");
       if (next && (seenCursors.has(next) || data.servers.length === 0))
         throw new Error("pagination_loop");
-      // 페이지 전체를 확인한 뒤 반영하여 잘못된 페이지의 일부가 저장되지 않게 한다.
-      const changes = data.servers.map((record) => ({
-        id: `official:${record?.server?.name}`,
-        entry: normalizeRegistryServer(record, progress.startedAt),
-      }));
-      for (const { id, entry } of changes) {
+      // 페이지와 cursor를 확인한 뒤 개별 레코드 오류만 건너뛴다.
+      for (const record of data.servers) {
+        let entry;
+        try {
+          entry = normalizeRegistryServer(record, progress.startedAt);
+        } catch {
+          skippedRecords++;
+          continue;
+        }
+        const id = `official:${record.server.name}`;
         if (entry) entries.set(id, entry);
         else entries.delete(id);
       }
@@ -349,6 +387,7 @@ export async function refreshMcpCatalog(options = {}) {
         ...progress,
         cursor,
         seenCursors: [...seenCursors],
+        skippedRecords,
         entries: [...entries.values()],
       });
     }
@@ -358,16 +397,28 @@ export async function refreshMcpCatalog(options = {}) {
       schema: 1,
       collectedAt: new Date().toISOString(),
       watermark: progress.startedAt,
+      skippedRecords,
       entries: [...entries.values()],
     });
     unlinkSync(progressFile);
     if (existsSync(`${cacheFile}.failure`)) unlinkSync(`${cacheFile}.failure`);
     return readMcpCatalog(options);
   } catch {
+    if (!ownsLock) {
+      const current = readMcpCatalog(options);
+      return {
+        ...current,
+        diagnostics: uniqueStrings([
+          ...current.diagnostics,
+          "catalog_refresh_unavailable",
+        ]),
+      };
+    }
     // 실패 메시지에는 URL이나 인증값이 섞일 수 있으므로 고정 진단만 남긴다.
     try {
-      writeFileSync(`${cacheFile}.failure`, "catalog_refresh_failed\n", {
-        mode: 0o600,
+      writeJsonAtomic(`${cacheFile}.failure`, {
+        reason: "catalog_refresh_failed",
+        skippedRecords,
       });
     } catch {
       /* 캐시 디렉터리 쓰기 실패도 작업을 막지 않는다. */
