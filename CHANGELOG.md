@@ -2,6 +2,16 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.93.2] - 2026-11-03
+
+### Fixed
+- tfx-live: 로컬 Codex 신규 thread의 생성 RPC에 `never`, `danger-full-access`를 명시하여 공유 daemon 경로에서도 기본 시작 권한을 적용한다. remote TUI resume이 거부하는 권한 CLI 플래그는 계속 제거한다.
+
+### Changed
+- tfx-live: Codex `start --sandbox`는 `on-request`, `workspace-write`로 제한한다. `--sandbox` 없는 unloaded resume은 기존 권한을 보존한다.
+- tfx-live: TUI attach 뒤 같은 thread의 `approvalPolicy`, `sandbox`, `permissionsVerified`를 시작 결과에 포함한다. readback 실패와 불일치는 `ready: false`와 경고로 보고하며 기존 세션은 유지한다.
+- tfx-live, tfx-lead: loaded thread의 `/permissions` 변경과 같은 history 수동 복구 절차, readback과 실제 다음 턴 권한의 차이를 명시한다.
+
 ## [10.93.1] - 2026-11-03
 
 ### Fixed
