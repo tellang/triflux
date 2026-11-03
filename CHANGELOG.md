@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.95.2] - 2026-11-03
+
+### Fixed
+- mcp: 미설치 추천을 리드의 사용자 설치 제안과 승인 질문으로 연결한다. 워커는 리드에게 보고하고, 설치 여부가 불명확하면 먼저 확인한다. 승인 범위는 추천된 MCP에 한정하고 기존 작업과 명시 승인은 보존한다.
+
 ## [10.95.1] - 2026-11-03
 
 ### Fixed
