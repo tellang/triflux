@@ -166,22 +166,26 @@ function waitForComposerReady(target, cli) {
   let prev = null;
   while (Date.now() < deadline) {
     const text = capturePaneText(target);
-    if (resolveCli(cli) === "codex" && text.includes("Hooks need review")) {
+    if (resolveCli(cli) === "codex") {
       const options = [
         "1. Review hooks",
         "2. Trust all and continue",
         "3. Continue without trusting (hooks won't run)",
       ];
       const lines = text.split(/\r?\n/u).map((line) => line.trim());
-      const lastSelector = lines.filter(isComposerPromptLine).at(-1);
-      // 고정 메뉴와 마지막 selector가 함께 있어야 이전 대화의 인용을 차단하지 않는다.
+      const lastSelector = lines
+        .slice(lines.findLastIndex(isComposerPromptLine))
+        .join(" ")
+        .replace(/\s+/gu, " ");
+      const menuText = lines
+        .map((line) => line.replace(/^›\s*/u, ""))
+        .join(" ")
+        .replace(/\s+/gu, " ");
+      // 접힌 메뉴와 selector의 이어지는 줄을 합치되 마지막 composer로 이전 인용을 구분한다.
       if (
-        lines.includes("Hooks need review") &&
-        options.some((option) => lastSelector === `› ${option}`) &&
-        lines
-          .map((line) => line.replace(/^› /u, ""))
-          .join("\n")
-          .includes(options.join("\n"))
+        menuText.includes("Hooks need review") &&
+        options.some((option) => lastSelector.startsWith(`› ${option}`)) &&
+        menuText.includes(options.join(" "))
       ) {
         const error = new Error(
           `codex-hooks-review: ${target} pane에 attach해 훅을 직접 검토한 뒤 진행하세요.`,

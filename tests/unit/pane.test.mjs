@@ -117,13 +117,13 @@ describe("Codex hook review 주입 차단", () => {
     "2. Trust all and continue",
     "3. Continue without trusting (hooks won't run)",
   ];
-  const reviewCapture = (selected) =>
+  const reviewCapture = (selected, options = reviewOptions) =>
     [
       "  Hooks need review",
       "  1 hook is new or changed.",
       "  Hooks can run outside the sandbox after you trust them.",
       "",
-      ...reviewOptions.map(
+      ...options.map(
         (option, index) => `${index === selected ? "›" : " "} ${option}`,
       ),
       "",
@@ -131,6 +131,11 @@ describe("Codex hook review 주입 차단", () => {
       "",
     ].join("\n");
   const review = reviewCapture(0);
+  const narrowOptions = [
+    "1. Review hooks",
+    "2. Trust all and continue",
+    "3. Continue without trusting (hooks won't\n  run)",
+  ];
   for (const cli of ["codex", "executor"]) {
     for (const value of [undefined, "0"]) {
       for (const selected of [0, 1, 2]) {
@@ -159,12 +164,43 @@ describe("Codex hook review 주입 차단", () => {
         });
       }
     }
+    for (const selected of [0, 1, 2]) {
+      it(`${cli}: 좁은 pane의 선택 ${selected + 1} 검토 메뉴에는 paste와 키를 보내지 않는다`, (t) => {
+        setHookTrustEnv(t, "0");
+        const commands = mockPaneCapture(
+          t,
+          reviewCapture(selected, narrowOptions),
+        );
+        assert.throws(
+          () => pane.injectPrompt("tfx-hook-test:0.1", "작업 지시", { cli }),
+          (error) => {
+            assert.equal(error.ready, false);
+            assert.equal(error.blockedBy, "codex-hooks-review");
+            return true;
+          },
+        );
+        assert.ok(commands.some((args) => args[0] === "capture-pane"));
+        assert.ok(
+          commands.every(
+            (args) => args.includes("-V") || args[0] === "capture-pane",
+          ),
+        );
+      });
+    }
     for (const [label, capture] of [
       ["문구 인용 뒤 빈 composer", "• Hooks need review\n› "],
       ["문구 인용 뒤 작성 중 composer", "Hooks need review\n› 이어서 확인"],
       ["메뉴 인용 뒤 빈 composer", `• 이전 화면:\n${review}\n› `],
       ["메뉴 인용 뒤 작성 중 composer", `${reviewCapture(2)}\n› 이어서 확인`],
       ["메뉴 인용 뒤 숫자로 시작하는 composer", `${review}\n› 1. 다음 작업`],
+      [
+        "접힌 메뉴 인용 뒤 빈 composer",
+        `${reviewCapture(2, narrowOptions)}\n› `,
+      ],
+      [
+        "접힌 메뉴 인용 뒤 작성 중 composer",
+        `${reviewCapture(2, narrowOptions)}\n› 이어서 확인`,
+      ],
     ]) {
       it(`${cli}: ${label}에는 정상 입력을 유지한다`, (t) => {
         const commands = mockPaneCapture(t, capture);
