@@ -85,6 +85,7 @@ fi
 node - "$@" <<'NODE'
 const fs = require("node:fs");
 fs.writeFileSync(process.env.TFX_CAPTURE_ARGS, JSON.stringify(process.argv.slice(2)));
+if (process.argv[2] === "exec") fs.appendFileSync(process.env.TFX_CAPTURE_ARGS + ".attempts", JSON.stringify(process.argv.slice(2)) + "\\n");
 if (process.env.TFX_FAKE_TIER_FAILURE === "1") {
   const marker = process.env.TFX_CAPTURE_ARGS + ".tier-failed";
   if (!fs.existsSync(marker)) {
@@ -130,6 +131,7 @@ function runRoute({
   mkdirSync(path.join(home, ".codex"));
   rmSync(capture, { force: true });
   rmSync(`${capture}.tier-failed`, { force: true });
+  rmSync(`${capture}.attempts`, { force: true });
   for (const [name, content] of Object.entries(profileFiles)) {
     writeFileSync(path.join(home, ".codex", `${name}.config.toml`), content);
   }
@@ -204,6 +206,38 @@ function profileValues(args) {
 }
 
 describe("tfx-route retry snapshot profile plumbing", () => {
+  for (const bypass of ["", "1", "0"]) {
+    for (const mode of ["exec", "retry", "tier-fallback"]) {
+      it(`hook-trust bypass는 ${mode} 실제 argv에 중복 없이 적용한다: ${bypass || "default"}`, () => {
+        const snapshot = path.join(makeTempDir(), "hook-retry.json");
+        if (mode === "retry") writeRetrySnapshot(snapshot, "astra_xhigh");
+        runRoute({
+          ...(mode === "retry" ? { snapshot } : {}),
+          env: {
+            TFX_CODEX_BYPASS_HOOK_TRUST: bypass,
+            TFX_CODEX_PROFILE: "astra_xhigh",
+            TFX_FAKE_TIER_FAILURE: mode === "tier-fallback" ? "1" : "0",
+          },
+        });
+        const attempts = readFileSync(`${fixture.capture}.attempts`, "utf8")
+          .trim()
+          .split("\n")
+          .map(JSON.parse);
+        assert.equal(attempts.length, mode === "tier-fallback" ? 2 : 1);
+        for (const args of attempts) {
+          assert.equal(args[0], "exec");
+          assert.equal(
+            args.filter((arg) => arg === "--dangerously-bypass-hook-trust")
+              .length,
+            bypass === "0" ? 0 : 1,
+          );
+          assert.equal(args.at(-2), "--");
+          assert.match(args.at(-1), /hello/);
+          assert.ok(!args.some((arg) => arg.includes("bypass_hook_trust")));
+        }
+      });
+    }
+  }
   it("새 스냅숏의 canonical 없는 family/effort 조합으로 실행한다", () => {
     const snapshot = path.join(makeTempDir(), "new-family-snapshot.json");
     writeRetrySnapshot(snapshot, "astra_xhigh");

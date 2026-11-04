@@ -14,6 +14,8 @@ argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [
 
 워커 실행 전 조회만 필요하면 `tfx judge worker-model --task '<요약>' [--agent executor] [--cli codex|claude|agy]`를 쓴다. 세션과 프로필을 만들지 않고 `family`, `model`, `effort`, `confidence`, `source`, `reason`, `fallbackReason`을 반환한다. 실행 래퍼가 같은 정책으로 배정하므로 실행 직전에 같은 작업을 별도로 조회할 필요는 없다. headless는 원 `assignment.prompt`로 선택하고 워커별 model과 effort를 전달한다. `--model`이나 `--effort` 중 하나라도 명시하면 자동 추천이 다른 값을 채우지 않는다. 결과의 `workerModelFile`과 `.model.json`은 실행 인자 기록이며 `runtimeConfirmed: false`는 실제 모델 수신을 확인하지 않았다는 뜻이다.
 
+Codex route exec/review 워커는 공식 `--dangerously-bypass-hook-trust`를 invocation 한정 기본값으로 쓴다. 끄려면 실행 환경에 `TFX_CODEX_BYPASS_HOOK_TRUST=0`을 설정한다. 활성 훅은 사전 확인 없이 샌드박스 밖에서 실행될 수 있으며 전역 config와 훅 신뢰 기록은 바꾸지 않는다. live/lead opt-out과 shared daemon attach의 적용 한계, 훅 검토 차단 복구는 `tfx-live` 스킬의 Codex 권한 설명을 따른다. `remote-spawn`은 Claude 진입이고 내부 Codex는 해당 호스트 route 정책을 따른다.
+
 ### MCP 추천 전달
 
 - 기존 프로젝트와 작업 추천, 리드 진입의 `mcpRecommendation`을 재사용한다. 추천이 없는 프로젝트 시작이나 실질 작업 변경 시의 조회와 사용자 설치 제안은 `tfx-lead`의 "MCP 설치 제안" 절을 따른다. route와 headless의 기존 추천 경로를 우선하며 부모가 같은 모델과 작업을 Jev에 중복 조회하지 않는다.

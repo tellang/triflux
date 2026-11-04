@@ -35,13 +35,19 @@ macOS의 iTerm2에서 로컬 tmux `start`는 프로젝트별 창에 attach 탭�
 
 새 세션 이름은 `<월>.<일> <주제>`로 짓는다. `start --name`을 생략하면 자동으로 만들고 `nameGenerated: true`를 보고한다. `--resume` 또는 `--resume-last`는 `--name`을 명시한 경우에만 이름을 적용한다. 승계 세션에는 기존 이름 뒤에 ` 2`, 이후 ` 3`을 붙인다. 이름 적용을 요청한 경우 결과의 `nameApplied: false`는 미적용을 뜻한다. agy의 `namePending: true`는 첫 일반 ask에서 적용할 이름이 보류됐다는 뜻이다. Codex `start`는 `/rename` 제출을 입력창이 빌 때까지 확인하고, 이름으로 찾은 thread UUID를 `threadId`로 돌려주며 tmux 세션 옵션 `@tfx_codex_thread`에 남긴다. 로컬 Codex `--resume-last`는 Codex가 고른 thread를 사후에 찾는다. 띄운 뒤 공유 app-server daemon에 로드된 같은 cwd의 thread 중 rollout에 그 시각 이후의 resume 기록(`thread_settings_applied`)이 생긴 것이 정확히 하나이고 1.5초 뒤에도 같을 때만 `threadId`로 쓴다. 이 확인은 5초 안에 끝난다. TUI가 daemon을 쓰지 않거나 같은 cwd에서 동시에 resume이 일어나면 `null`이다. 기존 Codex UDS thread는 `tfx-live rename --cli codex --transport uds --thread ID --name "<이름>"`으로 이름을 바꾼다.
 
-Claude 프로젝트 MCP 승인 화면이 뜨면 `start`는 화면에 답하지 않고 `ready: false`, `blockedBy: "claude-mcp-approval"`, 할 일을 적은 `warning`을 반환한다. 세션은 남아 있으므로 tmux 세션에 붙어 직접 고른 뒤 지시를 보낸다.
+Claude 프로젝트 MCP 승인 화면이 뜨면 `start`는 화면에 답하지 않고 `ready: false`, `blockedBy: "claude-mcp-approval"`, 할 일을 적은 `warning`을 반환한다. 세션은 남아 있으므로 tmux 세션에 붙어 직접 고른 뒤 지시를 보낸다. Codex 훅 검토 화면도 선택 항목과 관계없이 키를 보내지 않고 `ready: false`, `blockedBy: "codex-hooks-review"`와 trust를 자동 승인하지 않았다는 `warning`을 반환한다. `--resume`, `--resume-last`, 명시 launcher와 `--remote`에서도 세션을 남기므로 attach 후 훅을 직접 검토한다.
 
 Claude, agy, Codex(`Trust this folder?`와 `Do you trust the contents of this directory`)의 폴더 신뢰 화면은 기본으로 자동 승인한다. Codex는 신뢰 결정을 설정에 기록하므로 이후 같은 폴더의 실행에도 적용된다. `start --no-auto-trust`를 주면 이 화면에도 키를 보내지 않고 같은 형식으로 `blockedBy`(`claude-trust-folder`, `agy-trust-folder`, `codex-trust-folder`)를 반환한다. `--resume`, `--resume-last`, `--remote`에도 똑같이 적용된다.
 
 Codex `start --model`은 `astra`, `sol`, `terra`, `luna` 가족 별칭을 호출 호스트의 기존 model-family-resolver로 실제 모델 ID로 바꾼다. 호출 호스트의 `~/.config/triflux/models.json` 가족 고정값을 우선하고, Codex 모델 캐시, 마지막 해석 결과, 내장 기본값 순으로 고른다. `--remote`도 호출 호스트에서 해석한 ID를 보내며 원격 호스트의 고정값은 사용하지 않는다. 실제 모델 ID를 명시하면 그대로 전달한다. 모델 해석은 전역 프로필이나 설정 파일을 바꾸지 않고 `--effort`는 별도로 전달한다.
 
 로컬 Codex 새 thread는 생성 RPC에 `approvalPolicy: "never"`, `sandbox: "danger-full-access"`를 명시한다. `start --sandbox`를 주면 승인 정책은 `on-request`, sandbox는 `workspace-write`로 제한한다. 재개할 때 `--sandbox`를 생략하면 기존 thread 권한을 보존한다. remote TUI resume은 권한 CLI 플래그를 거부하므로 attach 명령에 bypass나 sandbox 플래그를 추가하지 않는다.
+
+Codex 관리 plain/new/resume/resume-last TUI 명령과 `tfx-route` exec/review 워커는 공식 `--dangerously-bypass-hook-trust`가 기본이다. 해당 invocation만 대상으로 하며 일반 `codex` 명령, 전역 config, 저장된 훅 신뢰 기록은 바꾸지 않는다. 활성 훅은 사전 확인 없이 샌드박스 밖에서 실행될 수 있다. 기존 `features.hooks=false`와 sandbox/approval 정책은 유지하고, `--sandbox`만으로 hook-trust bypass를 끄지는 않는다.
+
+관리 기본값을 끄려면 `tfx-live start --cli codex --session NAME --no-bypass-hook-trust` 또는 `tfx lead ROLE --cli codex --no-bypass-hook-trust`를 쓴다. 실행 환경의 `TFX_CODEX_BYPASS_HOOK_TRUST=0`은 route 워커와 live/lead에 공통 적용된다. 미설정과 그 외 값은 켬이며 CLI opt-out은 환경 값 `1`보다 우선한다. 사용자 launcher 내부와 명시 플래그는 재작성하지 않는다. `remote-spawn`은 Claude 진입이고, 내부 Codex는 해당 호스트의 `tfx-route` 정책을 따른다. `tx` 같은 셸 래퍼가 내부에서 같은 플래그를 추가한다면 `--no-bypass-hook-trust`로 TFX 관리 추가를 끈다.
+
+공유 daemon의 prepared-thread TUI attach에는 관리 hook-trust bypass 플래그를 제외한다. CLI가 플래그를 수락해도 daemon에 실제 적용된다는 근거는 없으므로 `features.hooks=false` RPC와 `ready: false`, `blockedBy: "codex-hooks-review"` 폴백을 유지한다. `bypass_hook_trust`나 camelCase RPC/config 필드를 합성하지 않는다. 기본/opt-out과 관계없이 시작 훅 검토 화면에는 메뉴 키, rename, 업무 입력을 보내지 않고 세션을 남긴다. tmux 세션에 attach해 훅을 직접 검토한 뒤 진행한다. builtin 훅과 legacy `notify`는 일반 사용자·플러그인 훅 비활성화 보장에서 제외한다.
 
 로컬 daemon `start` 결과의 `approvalPolicy`, `sandbox`는 TUI attach 뒤 같은 thread에 설정 덮어쓰기 없이 보낸 `thread/resume` 응답이다. 요청의 `sandbox`는 `danger-full-access`, `workspace-write` 형식이고 응답의 `sandbox.type`은 `dangerFullAccess`, `workspaceWrite` 형식이다. `permissionsVerified`는 daemon 설정이 준비한 권한과 일치하는지 나타낸다. 응답 실패나 필드 누락, 다른 thread 응답은 권한 값을 `null`로 보고한다. 권한 불일치는 읽은 값을 그대로 보고한다. 두 경우 모두 `ready: false`, `permissionWarning`을 반환하고 세션은 남긴다. 이 readback은 다음 TUI 턴의 실제 도구 실행까지 확인한 결과는 아니다.
 

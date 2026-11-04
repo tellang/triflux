@@ -1,15 +1,29 @@
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import * as pane from "../../hub/team/pane.mjs";
 import { buildCliCommand, shouldUseFileRef } from "../../hub/team/pane.mjs";
 
 describe("pane.mjs", () => {
-  it("interactive Codex는 approval/sandbox bypass posture로 시작한다", () => {
-    const command = buildCliCommand("codex");
-
-    assert.equal(command, "codex --dangerously-bypass-approvals-and-sandbox");
-    assert.doesNotMatch(command, /dangerously-bypass-hook-trust/u);
-  });
+  for (const value of [undefined, "0", "1", ""]) {
+    it(`interactive Codex는 기존 권한과 hook trust 기본값을 유지한다: ${JSON.stringify(value)}`, (t) => {
+      setHookTrustEnv(t, value);
+      for (const cli of ["codex", "executor"]) {
+        const command = buildCliCommand(cli);
+        assert.equal(
+          command,
+          "codex --dangerously-bypass-approvals-and-sandbox" +
+            (value === "0" ? "" : " --dangerously-bypass-hook-trust"),
+        );
+      }
+      assert.equal(buildCliCommand("claude"), "claude");
+      assert.equal(buildCliCommand("agy"), "agy");
+    });
+  }
 
   it("buildCliCommand 은 antigravity 와 역할명을 실행 파일로 바꾸고 모르는 이름은 그대로 둔다", () => {
     assert.equal(buildCliCommand("antigravity"), "agy");
@@ -29,6 +43,198 @@ describe("pane.mjs", () => {
     assert.equal(buildCliCommand("code-reviewer"), "");
     assert.equal(buildCliCommand("quality-reviewer"), "");
   });
+});
+
+function setHookTrustEnv(t, value) {
+  const key = "TFX_CODEX_BYPASS_HOOK_TRUST";
+  const saved = process.env[key];
+  t.after(() => {
+    if (saved === undefined) delete process.env[key];
+    else process.env[key] = saved;
+  });
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
+
+describe("pane reviewer hook trust 환경 전달", () => {
+  for (const cli of ["code-reviewer", "quality-reviewer"]) {
+    for (const value of ["0", undefined, "not'zero"]) {
+      it(`${cli}: ${JSON.stringify(value)} 값을 route 셸에 전달한다`, (t) => {
+        setHookTrustEnv(t, value);
+        const dir = mkdtempSync(join(tmpdir(), "tfx-pane-hook-env-"));
+        const route = join(dir, "tfx-route.sh");
+        const saved = process.env.TFX_ROUTE_SCRIPT;
+        t.after(() => {
+          if (saved === undefined) delete process.env.TFX_ROUTE_SCRIPT;
+          else process.env.TFX_ROUTE_SCRIPT = saved;
+          rmSync(dir, { recursive: true, force: true });
+        });
+        writeFileSync(
+          route,
+          'printf "%s" "${TFX_CODEX_BYPASS_HOOK_TRUST-unset}"\n',
+        );
+        process.env.TFX_ROUTE_SCRIPT = route;
+        const command = buildCliCommand(cli, "review prompt");
+        const env = { ...process.env };
+        delete env.TFX_CODEX_BYPASS_HOOK_TRUST;
+        assert.equal(
+          childProcess.execFileSync("bash", ["-c", command], {
+            env,
+            encoding: "utf8",
+            stdio: "pipe",
+          }),
+          value ?? "unset",
+        );
+        if (value === undefined) {
+          assert.ok(!command.includes("TFX_CODEX_BYPASS_HOOK_TRUST"), command);
+        }
+      });
+    }
+  }
+});
+
+function mockPaneCapture(t, text) {
+  const commands = [];
+  const tracker = t.mock.method(childProcess, "execFileSync", (file, args) => {
+    assert.match(file, /(?:tmux|psmux)(?:\.exe)?$/u);
+    commands.push(args);
+    if (args.includes("-V")) return "tmux 3.6";
+    if (args[0] === "capture-pane") return text;
+    return "";
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    tracker.mock.restore();
+    syncBuiltinESMExports();
+  });
+  t.mock.method(Atomics, "wait", () => "timed-out");
+  return commands;
+}
+
+describe("Codex hook review 주입 차단", () => {
+  const reviewOptions = [
+    "1. Review hooks",
+    "2. Trust all and continue",
+    "3. Continue without trusting (hooks won't run)",
+  ];
+  const reviewCapture = (selected, options = reviewOptions) =>
+    [
+      "  Hooks need review",
+      "  1 hook is new or changed.",
+      "  Hooks can run outside the sandbox after you trust them.",
+      "",
+      ...options.map(
+        (option, index) => `${index === selected ? "›" : " "} ${option}`,
+      ),
+      "",
+      "  enter confirm · esc skip",
+      "",
+    ].join("\n");
+  const review = reviewCapture(0);
+  const narrowOptions = [
+    "1. Review hooks",
+    "2. Trust all and continue",
+    "3. Continue without trusting (hooks won't\n  run)",
+  ];
+  for (const cli of ["codex", "executor"]) {
+    for (const value of [undefined, "0"]) {
+      for (const selected of [0, 1, 2]) {
+        it(`${cli}: opt-out=${JSON.stringify(value)} 선택 ${selected + 1} 검토 메뉴에는 paste와 키를 보내지 않는다`, (t) => {
+          setHookTrustEnv(t, value);
+          const commands = mockPaneCapture(t, reviewCapture(selected));
+          assert.throws(
+            () =>
+              pane.injectPrompt("tfx-hook-test:0.1", "작업 지시", {
+                cli,
+                useFileRef: true,
+              }),
+            (error) => {
+              assert.match(error.message, /codex-hooks-review/u);
+              assert.equal(error.ready, false);
+              assert.equal(error.blockedBy, "codex-hooks-review");
+              return true;
+            },
+          );
+          assert.ok(commands.some((args) => args[0] === "capture-pane"));
+          assert.ok(
+            commands.every(
+              (args) => args.includes("-V") || args[0] === "capture-pane",
+            ),
+          );
+        });
+      }
+    }
+    for (const selected of [0, 1, 2]) {
+      it(`${cli}: 좁은 pane의 선택 ${selected + 1} 검토 메뉴에는 paste와 키를 보내지 않는다`, (t) => {
+        setHookTrustEnv(t, "0");
+        const commands = mockPaneCapture(
+          t,
+          reviewCapture(selected, narrowOptions),
+        );
+        assert.throws(
+          () => pane.injectPrompt("tfx-hook-test:0.1", "작업 지시", { cli }),
+          (error) => {
+            assert.equal(error.ready, false);
+            assert.equal(error.blockedBy, "codex-hooks-review");
+            return true;
+          },
+        );
+        assert.ok(commands.some((args) => args[0] === "capture-pane"));
+        assert.ok(
+          commands.every(
+            (args) => args.includes("-V") || args[0] === "capture-pane",
+          ),
+        );
+      });
+    }
+    for (const [label, capture] of [
+      ["문구 인용 뒤 빈 composer", "• Hooks need review\n› "],
+      ["문구 인용 뒤 작성 중 composer", "Hooks need review\n› 이어서 확인"],
+      ["메뉴 인용 뒤 빈 composer", `• 이전 화면:\n${review}\n› `],
+      ["메뉴 인용 뒤 작성 중 composer", `${reviewCapture(2)}\n› 이어서 확인`],
+      ["메뉴 인용 뒤 숫자로 시작하는 composer", `${review}\n› 1. 다음 작업`],
+      [
+        "접힌 메뉴 인용 뒤 빈 composer",
+        `${reviewCapture(2, narrowOptions)}\n› `,
+      ],
+      [
+        "접힌 메뉴 인용 뒤 작성 중 composer",
+        `${reviewCapture(2, narrowOptions)}\n› 이어서 확인`,
+      ],
+    ]) {
+      it(`${cli}: ${label}에는 정상 입력을 유지한다`, (t) => {
+        const commands = mockPaneCapture(t, capture);
+        assert.doesNotThrow(() =>
+          pane.injectPrompt("tfx-hook-test:0.1", "작업 지시", { cli }),
+        );
+        assert.ok(commands.some((args) => args[0] === "paste-buffer"));
+        assert.ok(
+          commands.some(
+            (args) => args[0] === "send-keys" && args.includes("Enter"),
+          ),
+        );
+      });
+    }
+  }
+  for (const [cli, capture] of [
+    ["codex", "› "],
+    ["claude", review],
+    ["agy", review],
+    [null, review],
+  ]) {
+    it(`${cli}: 정상 입력창, 다른 CLI와 셸 시작 명령은 계속 주입한다`, (t) => {
+      const commands = mockPaneCapture(t, capture);
+      assert.doesNotThrow(() =>
+        pane.injectPrompt("tfx-hook-test:0.1", "작업 지시", { cli }),
+      );
+      assert.ok(commands.some((args) => args[0] === "paste-buffer"));
+      assert.ok(
+        commands.some(
+          (args) => args[0] === "send-keys" && args.includes("Enter"),
+        ),
+      );
+    });
+  }
 });
 
 describe("Antigravity prompt submission", () => {

@@ -147,9 +147,11 @@ provider별 사용 한도 캐시와 `Jev ON`, `Jev OFF`, 남은 문맥을 표시
 Jev 설정을 판정하지 못하면 `Jev ?`를 표시하며, ON은 설정 활성 상태를 뜻한다.
 Codex HUD는 5초마다 로컬 캐시와 rollout을 읽으며 외부 조회를 새로 실행하지 않는다. 사용 한도는 기존 캐시 갱신 시점의 값이다.
 훅 없이 동작하며, 기존 세션과 전역 tmux 옵션, Codex 내장 status_line은 바꾸지 않는다.
-공유 daemon의 신규 Codex thread는 thread별 `features.hooks=false`로 일반 사용자와 플러그인 훅을 비활성화한다. builtin 훅과 legacy `notify`는 이 보장에서 제외한다. 시작 훅 검토는 승인 기록을 변경하지 않는 `Continue without trusting`을 선택한다.
+공유 daemon의 신규 Codex thread는 thread별 `features.hooks=false`로 일반 사용자와 플러그인 훅을 비활성화한다. builtin 훅과 legacy `notify`는 이 보장에서 제외한다. 시작 훅 검토는 키를 보내지 않고 `ready: false`, `blockedBy: "codex-hooks-review"`와 tmux 세션에 attach해 훅을 직접 검토하라는 warning을 반환한다.
 명시적 resume과 resume-last는 대상이 이미 loaded이거나 loaded 상태를 확인할 수 없으면 기존 세션 설정과 권한을 유지하고 중단한다. 사전 조회는 해당 시점의 상태이므로 조회와 resume 사이의 다른 client 연결까지 배제할 수 없다. 신규 thread의 훅 비활성화 보장은 재개 thread로 확대하지 않는다.
-Codex 신뢰 화면은 자동 승인하지 않는다.
+Triflux가 관리하는 `tfx-route` Codex exec/review 워커, plain/new/resume/resume-last TUI 명령과 대화형 `tfx multi` Codex는 공식 `--dangerously-bypass-hook-trust`를 기본으로 붙인다. 해당 invocation에만 적용하며 일반 `codex` 명령, 전역 config, 저장된 훅 신뢰 기록은 바꾸지 않는다. 활성 훅은 사전 확인 없이 샌드박스 밖에서 실행될 수 있다. 기존 `features.hooks=false`와 작업 sandbox/approval 정책은 유지하며, `--sandbox`만으로 hook-trust bypass가 꺼지지는 않는다.
+끄려면 `tfx-live start --cli codex --session NAME --no-bypass-hook-trust` 또는 `tfx lead ROLE --cli codex --no-bypass-hook-trust`를 쓴다. 실행 환경에 `TFX_CODEX_BYPASS_HOOK_TRUST=0`을 설정하면 route 워커, live/lead와 대화형 `tfx multi` 모두 관리 기본값을 끈다. 미설정과 그 외 값은 켬이며, 환경 값이 `1`이어도 CLI opt-out이 우선한다. 사용자 launcher 내부와 직접 넣은 플래그는 재작성하지 않는다. `tx` 같은 셸 래퍼가 내부에서 같은 플래그를 추가한다면 `--no-bypass-hook-trust`로 TFX 관리 추가를 끈다.
+공유 daemon에서 준비한 thread의 TUI attach에는 관리 bypass 플래그를 제외한다. CLI의 플래그 수락이 daemon의 실제 적용을 증명하지 않기 때문이다. 기존 `features.hooks=false` RPC와 훅 검토 차단 폴백을 유지하며 `bypass_hook_trust` RPC/config 필드를 합성하지 않는다. 기본/opt-out 어느 쪽이든 훅 검토 화면이 나타나면 메뉴 키, rename, 업무 입력을 보내지 않는다. 남겨 둔 tmux 세션에 attach해 훅을 직접 검토한 뒤 진행한다. `remote-spawn`은 Claude 진입이며, 그 안에서 호출하는 Codex는 해당 호스트의 `tfx-route` 기본값을 따른다.
 
 ## 런타임 기능
 

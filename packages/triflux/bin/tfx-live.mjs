@@ -104,6 +104,7 @@ const BOOLEAN_FLAGS = new Set([
   "no-relay-tag",
   "sandbox",
   "no-auto-trust",
+  "no-bypass-hook-trust",
 ]);
 const PEER_HOP_DONE_MARKER = "<<<TFX_PEER_HOP_DONE>>>";
 const TMUX_SET_BUFFER_MAX_BYTES = 8 * 1024;
@@ -118,7 +119,7 @@ const BUG_REPORT_DIR =
 function usage(command) {
   const lines = [
     "Usage:",
-    "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--lead-session ID] [--launcher CMD] [--sandbox] [--no-auto-trust] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
+    "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--lead-session ID] [--launcher CMD] [--sandbox] [--no-auto-trust] [--no-bypass-hook-trust] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude|agy] [--if-busy wait|fail|interrupt|queue] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --cli codex [--transport queue|tmux] (--session NAME[:WINDOW.PANE] | --thread UUID) --prompt TEXT [--from NAME] [--timeout 60] [--no-wait]",
     "    Codex ask defaults to the app-server queue (thread/queue/add, `codex queue --message` only when add is unavailable; delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands. /rename and /status skip idle waiting only with --if-busy wait (default) or queue; explicit fail or interrupt policies are honored. /compact and /new wait for idle by default.",
@@ -1979,50 +1980,6 @@ function isCodexTrustMenu(text) {
   );
 }
 
-function isCodexHooksDeclineMenu(text) {
-  const menu = splitAtLastSelector(text, "›");
-  const rows = stripAnsi(text)
-    .split("\n")
-    .map((line) => line.trim())
-    .join("\n");
-  return (
-    Boolean(menu) &&
-    CODEX_HOOKS_REVIEW_RE.test(menu.above) &&
-    /^›\s*[123]\. (?:Review hooks|Trust all and continue|Continue without trusting \(hooks won't run\))$/.test(
-      menu.selected,
-    ) &&
-    /^(?:›\s*)?1\. Review hooks\n(?:›\s*)?2\. Trust all and continue\n(?:›\s*)?3\. Continue without trusting \(hooks won't run\)$/m.test(
-      rows,
-    )
-  );
-}
-
-async function dismissCodexHooksReview(remote, session) {
-  let raw = await captureVisible(remote, session);
-  for (let iteration = 0; iteration < 3; iteration += 1) {
-    if (!isCodexHooksDeclineMenu(raw)) break;
-    const menu = splitAtLastSelector(raw, "›");
-    if (menu.selected === "› 3. Continue without trusting (hooks won't run)") {
-      await runTmux(remote, [
-        "send-keys",
-        "-t",
-        exactTmuxTarget(session),
-        "Enter",
-      ]);
-      return { dismissed: true, raw };
-    }
-    await runTmux(remote, [
-      "send-keys",
-      "-t",
-      exactTmuxTarget(session),
-      "Down",
-    ]);
-    await sleep(200);
-    raw = await captureVisible(remote, session);
-  }
-  return { dismissed: false, raw };
-}
-
 // 다중 선택 항목은 한 글자 체크박스로 그린다. 바이너리 상수: [ ] [×] [✔] [√] ☐ ☒, 라디오 ( ) (*) ◯ ◉.
 function isClaudeMcpApprovalPrompt(text) {
   const menu = splitAtLastSelector(text, "❯");
@@ -2338,7 +2295,7 @@ const ADAPTERS = {
     cli: "codex",
     launchArgv: ["codex"],
     launchKeys: [
-      "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false",
+      "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust -c features.hooks=false",
       "Enter",
     ],
     resumeById: (id) =>
@@ -2347,6 +2304,7 @@ const ADAPTERS = {
         "resume",
         id,
         "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
         "-c",
         "features.hooks=false",
       ]),
@@ -2356,6 +2314,7 @@ const ADAPTERS = {
         "resume",
         "--last",
         "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
         "-c",
         "features.hooks=false",
       ]),
@@ -2371,9 +2330,9 @@ const ADAPTERS = {
     blockingScreens: [
       {
         name: "codex-hooks-review",
-        isPresent: (raw) =>
-          CODEX_HOOKS_REVIEW_RE.test(raw) && !isCodexHooksDeclineMenu(raw),
-        warning: "Codex hooks need review; no approval was sent",
+        isPresent: (raw) => CODEX_HOOKS_REVIEW_RE.test(raw),
+        warning:
+          "Codex hooks need review; no trust approval was sent; attach to the tmux session and review the hooks yourself",
       },
       {
         name: "codex-bootstrap-error",
@@ -2383,11 +2342,6 @@ const ADAPTERS = {
       },
     ],
     startupScreens: [
-      {
-        name: "codex-hooks-decline",
-        isPresent: isCodexHooksDeclineMenu,
-        dismiss: dismissCodexHooksReview,
-      },
       {
         name: "trust",
         blockedBy: "codex-trust-folder",
@@ -3532,6 +3486,26 @@ async function doStartTmux(launchAdapter, opts) {
       ...(launchAdapter.blockingScreens ?? []),
     ],
   };
+  if (
+    adapter.cli === "codex" &&
+    (opts.preparedThreadId ||
+      opts.noBypassHookTrust ||
+      (opts.env || process.env).TFX_CODEX_BYPASS_HOOK_TRUST === "0" ||
+      /(?:^|\s)--dangerously-bypass-hook-trust(?=\s|$)/.test(
+        opts.launcher ?? "",
+      ))
+  ) {
+    // 관리 템플릿에서만 뺀다. 공유 daemon attach의 실제 적용은 확인되지 않았다.
+    const withoutHookTrust = (command) =>
+      command.replace(/(?:^|\s)--dangerously-bypass-hook-trust(?=\s|$)/g, "");
+    const { resumeById, resumeLast } = adapter;
+    adapter.launchKeys = [
+      withoutHookTrust(adapter.launchKeys[0]),
+      ...adapter.launchKeys.slice(1),
+    ];
+    adapter.resumeById = (id) => withoutHookTrust(resumeById(id));
+    adapter.resumeLast = () => withoutHookTrust(resumeLast());
+  }
   if (opts.launcher) {
     // 사람이 쓰는 리드 세션은 워커용 환경 변수 접두를 떼고 CLI 이름만 지정한 실행 명령으로 바꾼다.
     // 뒤따르는 인자(Codex 승인 플래그, resume 형식)는 그대로 둔다.
@@ -5312,6 +5286,7 @@ function startOpts(flags) {
     group: flags.group,
     sandbox: Object.hasOwn(flags, "sandbox"),
     noAutoTrust: Object.hasOwn(flags, "no-auto-trust"),
+    noBypassHookTrust: Object.hasOwn(flags, "no-bypass-hook-trust"),
     unsetEnv,
     leadSession: flags["lead-session"],
     launcher: flags.launcher,

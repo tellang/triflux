@@ -151,6 +151,7 @@ export async function launchLead(
     model,
     effort,
     launcher = cli,
+    noBypassHookTrust = false,
     task,
   },
   {
@@ -295,6 +296,9 @@ export async function launchLead(
         resolve(cwd),
         ...(model ? ["--model", model] : []),
         ...(effort ? ["--effort", effort] : []),
+        ...(cli === "codex" && noBypassHookTrust
+          ? ["--no-bypass-hook-trust"]
+          : []),
       ],
       run,
     );

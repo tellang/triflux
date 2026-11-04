@@ -2434,6 +2434,16 @@ run_codex_exec() {
     [[ -z "${TFX_WORKER_MODEL:-}" ]] || codex_args+=(--model "$TFX_WORKER_MODEL")
   fi
   codex_args=("${codex_args[0]}" ${CODEX_CONFIG_FLAGS[@]+"${CODEX_CONFIG_FLAGS[@]}"} "${codex_args[@]:1}")
+  # 재시도 인자까지 합친 뒤 invocation 한정 hook trust 정책을 한 번만 적용한다.
+  local -a hook_trust_args=()
+  local hook_trust_arg
+  for hook_trust_arg in "${codex_args[@]}"; do
+    [[ "$hook_trust_arg" == "--dangerously-bypass-hook-trust" ]] || hook_trust_args+=("$hook_trust_arg")
+  done
+  codex_args=("${hook_trust_args[@]}")
+  if [[ "${TFX_CODEX_BYPASS_HOOK_TRUST:-1}" != "0" ]]; then
+    codex_args=("${codex_args[0]}" --dangerously-bypass-hook-trust "${codex_args[@]:1}")
+  fi
   local codex_home
   codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
   if [[ -n "${CLI_FAMILY:-}" && ! -f "$codex_home/$CLI_FAMILY.config.toml" ]]; then

@@ -316,7 +316,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
   },
   lead: {
     usage:
-      "tfx lead <역할> [--cli claude|codex|agy] [--task SUMMARY] [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD]",
+      "tfx lead <역할> [--cli claude|codex|agy] [--task SUMMARY] [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD] [--no-bypass-hook-trust]",
     description:
       "리드 세션을 tmux 에 띄우고 리드 진입까지 보낸다. 실행 명령은 --launcher, ~/.config/triflux/lead.json 의 launchers.<cli>, CLI 이름 순. setup 과 update 가 처음 한 번 묻는다",
     options: [
@@ -354,6 +354,11 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         name: "--launcher",
         type: "string",
         description: "이번만 쓸 실행 명령",
+      },
+      {
+        name: "--no-bypass-hook-trust",
+        type: "boolean",
+        description: "Codex 관리 hook-trust bypass 기본값 끄기",
       },
     ],
   },
@@ -4335,9 +4340,10 @@ async function main() {
       ];
       cmdArgs.forEach((arg, i) => {
         const known =
-          valueFlags.includes(arg) &&
-          cmdArgs[i + 1] &&
-          !cmdArgs[i + 1].startsWith("--");
+          arg === "--no-bypass-hook-trust" ||
+          (valueFlags.includes(arg) &&
+            cmdArgs[i + 1] &&
+            !cmdArgs[i + 1].startsWith("--"));
         if (arg.startsWith("--") && !known)
           throw createCliError(
             `tfx lead 가 모르는 옵션이거나 값이 없다: ${arg}`,
@@ -4363,6 +4369,7 @@ async function main() {
         session: readCliOptionValue(cmdArgs, "--session"),
         model: readCliOptionValue(cmdArgs, "--model"),
         effort: readCliOptionValue(cmdArgs, "--effort"),
+        noBypassHookTrust: cmdArgs.includes("--no-bypass-hook-trust"),
         launcher: resolveLauncher({
           cli,
           flag: readCliOptionValue(cmdArgs, "--launcher"),

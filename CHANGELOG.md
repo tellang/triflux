@@ -2,6 +2,15 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.95.4] - 2026-11-04
+
+### Changed
+- workers: 관리 Codex exec/review와 일반 TUI에 공식 `--dangerously-bypass-hook-trust`를 기본 전달한다. `tfx-live start`와 `tfx lead --cli codex`의 `--no-bypass-hook-trust`, `TFX_CODEX_BYPASS_HOOK_TRUST=0`으로 끄며 multi의 headless와 대화형 경로에도 적용한다. 활성 훅은 사전 확인 없이 샌드박스 밖에서 실행될 수 있고, 우회는 해당 실행에 한정한다.
+
+### Fixed
+- tfx-live: 훅 검토 화면에서 메뉴 키를 보내지 않고 `ready: false`, `blockedBy: "codex-hooks-review"`와 직접 검토 안내를 반환한다. 공유 daemon attach는 적용되지 않는 관리 우회 플래그를 제외하고 차단 보고를 유지한다.
+- multi: headless 워커와 리뷰어에 훅 신뢰 opt-out 환경을 전달하고, 대화형 Codex의 훅 검토 메뉴에 업무 프롬프트와 Enter가 전송되지 않도록 차단한다.
+
 ## [10.95.3] - 2026-11-04
 
 ### Fixed

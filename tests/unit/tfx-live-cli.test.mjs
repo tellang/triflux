@@ -2106,14 +2106,14 @@ test("tfx-live peer SIGINT emits aborted output and leaves transcript/status fil
 
 test("buildLaunchKeys adds only a Codex model override", () => {
   assert.deepEqual(buildLaunchKeys(ADAPTERS.codex, { model: "gpt-5.6-sol" }), [
-    "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false -c 'model=\"gpt-5.6-sol\"'",
+    "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust -c features.hooks=false -c 'model=\"gpt-5.6-sol\"'",
     "Enter",
   ]);
 });
 
 test("buildLaunchKeys adds only a Codex effort override", () => {
   assert.deepEqual(buildLaunchKeys(ADAPTERS.codex, { effort: "xhigh" }), [
-    "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false -c 'model_reasoning_effort=\"xhigh\"'",
+    "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust -c features.hooks=false -c 'model_reasoning_effort=\"xhigh\"'",
     "Enter",
   ]);
 });
@@ -2125,7 +2125,7 @@ test("buildLaunchKeys adds Codex model and effort overrides", () => {
       effort: "xhigh",
     }),
     [
-      "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false -c 'model=\"gpt-5.6-sol\"' -c 'model_reasoning_effort=\"xhigh\"'",
+      "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust -c features.hooks=false -c 'model=\"gpt-5.6-sol\"' -c 'model_reasoning_effort=\"xhigh\"'",
       "Enter",
     ],
   );
@@ -2144,7 +2144,7 @@ test("buildLaunchKeys shell-quotes a Codex override containing spaces", () => {
       model: "custom model; echo injected",
     }),
     [
-      "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false -c 'model=\"custom model; echo injected\"'",
+      "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust -c features.hooks=false -c 'model=\"custom model; echo injected\"'",
       "Enter",
     ],
   );
@@ -2809,6 +2809,258 @@ test("tfx-live start reports approval screens as blocked without answering them"
   }
 });
 
+test("managed hook-trust 기본값과 opt-out은 plain/resume/resume-last 실제 명령에 적용된다", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-hook-policy-"));
+  try {
+    await writeReadyFakeTmux(dir);
+    await fs.writeFile(
+      path.join(dir, "ssh"),
+      [
+        "#!/usr/bin/env node",
+        "import { spawnSync } from 'node:child_process';",
+        "const command = process.argv.at(-1);",
+        "if (!command.startsWith('tmux ')) process.exit(1);",
+        "process.exit(spawnSync('/bin/sh', ['-c', command], { stdio: 'inherit' }).status ?? 1);",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    for (const resumeArgs of [
+      [],
+      ["--resume", "019a0000-0000-7000-8000-000000000001"],
+      ["--resume-last", "1"],
+    ]) {
+      for (const mode of [
+        "default",
+        "env-off",
+        "cli-off",
+        "sandbox",
+        "launcher",
+        "launcher-hook-trust",
+        "launcher-hook-trust-env-off",
+        "launcher-hook-trust-cli-off",
+        "launcher-hook-trust-suffix",
+      ]) {
+        await t.test(`${resumeArgs[0] || "plain"}/${mode}`, async () => {
+          const launcher = {
+            launcher: "codex --no-daemon",
+            "launcher-hook-trust": "codex --dangerously-bypass-hook-trust",
+            "launcher-hook-trust-env-off":
+              "codex --dangerously-bypass-hook-trust",
+            "launcher-hook-trust-cli-off":
+              "codex --dangerously-bypass-hook-trust",
+            "launcher-hook-trust-suffix":
+              "codex --dangerously-bypass-hook-trust-extra",
+          }[mode];
+          const logPath = path.join(dir, "tmux.jsonl");
+          await fs.writeFile(logPath, "");
+          const result = JSON.parse(
+            await runTfxLive(
+              [
+                "start",
+                "--cli",
+                "codex",
+                "--session",
+                "hook-policy",
+                "--remote",
+                "fake-host",
+                "--name",
+                "11.4 훅 정책",
+                "--ready-timeout",
+                "0.2",
+                "--poll-interval",
+                "1",
+                ...resumeArgs,
+                ...(mode.endsWith("cli-off") ? ["--no-bypass-hook-trust"] : []),
+                ...(mode === "sandbox" ? ["--sandbox"] : []),
+                ...(launcher ? ["--launcher", launcher] : []),
+              ],
+              {
+                // SSH TUI 경로는 로컬 daemon socket을 사용하지 않는다.
+                missingCodexSocket: true,
+                env: {
+                  PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+                  TFX_CODEX_BYPASS_HOOK_TRUST: mode.endsWith("env-off")
+                    ? "0"
+                    : mode.endsWith("cli-off")
+                      ? "1"
+                      : "",
+                  TMUX_LOG: logPath,
+                  TMUX_STATE: path.join(dir, "state.json"),
+                  TMUX_UPDATE_SCREEN:
+                    "Hooks need review\n8 hooks are new or changed.\n› 1. Review hooks",
+                  TMUX_UPDATE_REPEAT: "1",
+                },
+              },
+            ),
+          );
+          const inputs = (await readTmuxLog(logPath)).filter((args) =>
+            ["send-keys", "set-buffer", "load-buffer", "paste-buffer"].includes(
+              args[0],
+            ),
+          );
+          assert.equal(inputs.length, 1);
+          const command = inputs[0][3];
+          assert.equal(
+            (
+              command.match(
+                /(?:^|\s)--dangerously-bypass-hook-trust(?=\s|$)/g,
+              ) || []
+            ).length,
+            ["env-off", "cli-off"].includes(mode) ? 0 : 1,
+          );
+          if (launcher) assert.ok(command.startsWith(`${launcher} `));
+          assert.match(command, /features.hooks=false/);
+          if (mode === "sandbox") {
+            assert.match(
+              command,
+              /--sandbox workspace-write --ask-for-approval on-request/,
+            );
+            assert.doesNotMatch(
+              command,
+              /--dangerously-bypass-approvals-and-sandbox/,
+            );
+          }
+          if (mode === "launcher") assert.match(command, /--no-daemon/);
+          assert.equal(result.ready, false);
+          assert.equal(result.blockedBy, "codex-hooks-review");
+          assert.equal(result.nameApplied, false);
+        });
+      }
+    }
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("Codex 훅 검토는 start/resume/launcher/remote에서 입력 없이 차단한다", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-hook-review-"));
+  try {
+    await writeReadyFakeTmux(dir);
+    // 실제 SSH 대신 같은 fake tmux를 호출해 원격 TUI 시작 경로만 검증한다.
+    await fs.writeFile(
+      path.join(dir, "ssh"),
+      [
+        "#!/usr/bin/env node",
+        "import { spawnSync } from 'node:child_process';",
+        "const command = process.argv.at(-1);",
+        "if (!command.startsWith('tmux ')) process.exit(1);",
+        "const result = spawnSync('/bin/sh', ['-c', command], { stdio: 'inherit' });",
+        "process.exit(result.status ?? 1);",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const id = "019a0000-0000-7000-8000-000000000001";
+    const cases = [
+      { label: "start", selected: 0, args: [] },
+      { label: "resume", selected: 1, args: ["--resume", id] },
+      { label: "resume-last", selected: 2, args: ["--resume-last", "1"] },
+      { label: "opt-out", selected: 0, args: ["--no-bypass-hook-trust"] },
+      {
+        label: "launcher",
+        selected: 0,
+        args: ["--launcher", "codex --no-daemon"],
+      },
+      { label: "remote", selected: 1, args: ["--remote", "fake-host"] },
+      { label: "unexpected-menu", selected: 0, args: [], unexpected: true },
+    ];
+    for (const scenario of cases) {
+      await t.test(scenario.label, async () => {
+        const screen = [
+          "Hooks need review",
+          "8 hooks are new or changed.",
+          "Hooks can run outside the sandbox after you trust them.",
+          "",
+          ...[
+            "1. Review hooks",
+            "2. Trust all and continue",
+            scenario.unexpected
+              ? "3. Continue"
+              : "3. Continue without trusting (hooks won't run)",
+          ].map(
+            (line, index) =>
+              `${scenario.selected === index ? "› " : "  "}${line}`,
+          ),
+        ].join("\n");
+        const logPath = path.join(dir, `${scenario.label}.tmux.jsonl`);
+        const rpcPath = path.join(dir, `${scenario.label}.rpc.jsonl`);
+        const result = JSON.parse(
+          await runTfxLive(
+            [
+              "start",
+              "--cli",
+              "codex",
+              "--session",
+              "hook-review",
+              "--name",
+              "11.4 훅 검토",
+              "--ready-timeout",
+              "0.2",
+              "--poll-interval",
+              "1",
+              ...scenario.args,
+            ],
+            {
+              env: {
+                PATH: `${dir}${path.delimiter}${process.env.PATH}`,
+                TMUX_LOG: logPath,
+                TMUX_STATE: path.join(dir, `${scenario.label}.state.json`),
+                TMUX_UPDATE_SCREEN: screen,
+                TMUX_UPDATE_REPEAT: "1",
+                TEST_CODEX_RPC_LOG: rpcPath,
+              },
+            },
+          ),
+        );
+        const log = await readTmuxLog(logPath);
+        const inputs = log.filter((args) =>
+          ["send-keys", "set-buffer", "load-buffer", "paste-buffer"].includes(
+            args[0],
+          ),
+        );
+        // 셸에서 CLI를 시작하는 최초 명령 외에는 메뉴 선택·rename·프롬프트 입력이 없어야 한다.
+        assert.equal(inputs.length, 1, JSON.stringify(inputs));
+        assert.equal(inputs[0][0], "send-keys");
+        assert.match(inputs[0][3], /^codex /);
+        assert.match(inputs[0][3], /features.hooks=false/);
+        assert.equal(
+          inputs[0][3].includes("--dangerously-bypass-hook-trust"),
+          scenario.label === "remote",
+        );
+        if (scenario.label === "launcher")
+          assert.match(inputs[0][3], /--no-daemon/);
+        assert.equal(result.ready, false);
+        assert.equal(result.blockedBy, "codex-hooks-review");
+        assert.equal(result.nameApplied, false);
+        assert.equal(result.raw.trim(), screen);
+        assert.match(result.warning, /no (?:approval|trust approval) was sent/);
+        assert.match(result.warning, /attach to the tmux session/);
+        assert.equal(
+          log.some((args) => args[0] === "kill-session"),
+          false,
+        );
+        if (scenario.label !== "remote") {
+          const calls = (await fs.readFile(rpcPath, "utf8"))
+            .trim()
+            .split("\n")
+            .map(JSON.parse);
+          const prepared = calls.find(
+            ([method, params]) =>
+              ["thread/start", "thread/resume"].includes(method) &&
+              params.config,
+          );
+          assert.equal(prepared[1].config["features.hooks"], false);
+          assert.doesNotMatch(
+            JSON.stringify(calls),
+            /bypass_hook_trust|bypassHookTrust/,
+          );
+        }
+      });
+    }
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("Codex and other CLIs automatically trust folders unless --no-auto-trust is set", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-start-trust-"));
   try {
@@ -3079,7 +3331,7 @@ test("tfx-live peer maps side-specific model and effort flags", async () => {
         "send-keys",
         "-t",
         "=peerA:",
-        "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false -c 'model=\"codex model\"' -c 'model_reasoning_effort=\"xhigh\"'",
+        "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust -c features.hooks=false -c 'model=\"codex model\"' -c 'model_reasoning_effort=\"xhigh\"'",
         "Enter",
       ],
       [
@@ -4543,7 +4795,7 @@ for (const scenario of [
 
 test("Codex sandbox launch removes bypass and asks for approval", () => {
   const [command] = buildLaunchKeys(ADAPTERS.codex, { sandbox: true });
-  assert.doesNotMatch(command, /--dangerously-bypass/);
+  assert.doesNotMatch(command, /--dangerously-bypass-approvals-and-sandbox/);
   assert.match(command, /--sandbox workspace-write/);
   assert.match(command, /--ask-for-approval on-request/);
 });
