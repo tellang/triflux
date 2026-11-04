@@ -80,7 +80,7 @@ async def inventory(app, request, state):
     active_window = app.current_terminal_window
     active_tab = active_window.current_tab if active_window else None
     active = active_tab.current_session if active_tab else None
-    result = {"project": request["project"], "leaderId": request.get("leaderId", ""),
+    result = {"project": request["project"], "leaderId": "",
               "focusId": active.session_id if active else None,
               "focusWindowId": active_window.window_id if active_window else None,
               "focusTabId": active_tab.tab_id if active_tab else None, "windows": []}
@@ -110,7 +110,7 @@ async def inventory(app, request, state):
                     sr["pinned"] = bool(record.get("pinned") or moved or reordered or reshaped)
                     if sr["pinned"]:
                         record["pinned"] = True
-                if request.get("leaderTty") and await variable(session, "tty") == request["leaderTty"]:
+                if sid == request.get("leaderId") or (request.get("leaderTty") and await variable(session, "tty") == request["leaderTty"]):
                     result["leaderId"] = sid
                 tr["sessions"].append(sr)
             if tr["sessions"]:
@@ -220,7 +220,15 @@ async def require_inactive_live(app, tab_ids):
             raise ValueError("selected_tab_protected")
 
 
-async def open_view(app, connection, request, state, snapshot):
+def require_local_leader(request, snapshot):
+    remote = request.get("remoteSession") or os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY")
+    if remote and snapshot.get("leaderId") not in index_snapshot(snapshot)[1]:
+        raise ValueError("leader_not_in_local_iterm")
+
+
+async def open_view(app, connection, request, state, snapshot, mutation=None):
+    mutation = mutation if mutation is not None else {"started": False}
+    require_local_leader(request, snapshot)
     tabs, sessions = index_snapshot(snapshot)
     c, data = request["candidate"], request["input"]
     focus = data.get("focusPolicy", "preserve") == "focus"
@@ -235,7 +243,11 @@ async def open_view(app, connection, request, state, snapshot):
     if duplicate:
         existing = sessions[duplicate]
         if focus:
-            await app.get_session_by_id(duplicate).async_activate(select_tab=True, order_window_front=True)
+            live = app.get_session_by_id(duplicate)
+            if not live:
+                raise ValueError("focused_or_missing_target")
+            mutation["started"] = True
+            await live.async_activate(select_tab=True, order_window_front=True)
         after = await inventory(app, request, state)
         verified = existing["cols"] >= data["minCols"] and existing["rows"] >= data["minRows"] and (focus or input_workspace(after) == input_workspace(snapshot))
         return {"ok": True, "sessionId": duplicate, "applied": False, "verified": verified, "reason": "existing_view",
@@ -261,14 +273,20 @@ async def open_view(app, connection, request, state, snapshot):
         profile.set_command(command)
         if not focus:
             await require_inactive_live(app, {c["tabId"]})
-        created = await app.get_session_by_id(c["sessionId"]).async_split_pane(vertical=c["vertical"], profile_customizations=profile)
+        live = app.get_session_by_id(c["sessionId"])
+        if not live:
+            raise ValueError("focused_or_missing_target")
+        mutation["started"] = True
+        created = await live.async_split_pane(vertical=c["vertical"], profile_customizations=profile)
     elif c["kind"] == "tab":
         window = app.get_window_by_id(c["windowId"])
         if not window:
             raise ValueError("window_disappeared")
+        mutation["started"] = True
         created_tab = await window.async_create_tab(command=command, select=False)
         created = created_tab.current_session
     elif c["kind"] == "window":
+        mutation["started"] = True
         created_window = await iterm2.Window.async_create(connection, command=command)
         created = created_window.current_tab.current_session
     else:
@@ -294,7 +312,9 @@ async def open_view(app, connection, request, state, snapshot):
             "reason": "applied" if verified else "focus_changed_or_screen_below_readability_minimum"}
 
 
-async def reconcile(app, request, state, snapshot):
+async def reconcile(app, request, state, snapshot, mutation=None):
+    mutation = mutation if mutation is not None else {"started": False}
+    require_local_leader(request, snapshot)
     plan = request["plan"]
     tabs, sessions = index_snapshot(snapshot)
     sources = {entry["sourceTabId"] for entry in plan["overflow"]} | {entry["tab_id"] for entry in plan["tabs"]}
@@ -328,6 +348,7 @@ async def reconcile(app, request, state, snapshot):
             raise ValueError("overflow_window_mismatch")
         # 새 탭의 임시 셸 ID는 직접 만든 직후에만 닫기 목록에 넣는다.
         await require_inactive_live(app, sources)
+        mutation["started"] = True
         tab = await window.async_create_tab(command="/bin/sleep 30", select=False)
         placeholder = tab.current_session
         placeholders.append(placeholder.session_id)
@@ -357,6 +378,7 @@ async def reconcile(app, request, state, snapshot):
         actual_tab = current_tabs[entry["tab_id"]]
         validate_tree(entry["root"], actual_tab["cols"], actual_tab["rows"], current_sessions)
     await require_inactive_live(app, {entry["tab_id"] for entry in spec["tabs"]})
+    mutation["started"] = True
     await app.async_apply_layout(spec)
     after = await inventory(app, request, state)
     # 예상한 자기 적용만 흡수한다. 동시에 일어난 수동 이동 pin은 지우지 않는다.
@@ -432,6 +454,7 @@ async def execute(connection, action, request):
         # lock 대기 뒤에만 inventory를 읽어 이전 프로젝트 적용을 반영한다.
         snapshot = await inventory(app, request, state)
         if action == "inventory" and request.get("resetPins"):
+            require_local_leader(request, snapshot)
             for record in state["records"].values():
                 record.pop("pinned", None)
             remember_positions(snapshot, state)
@@ -445,20 +468,27 @@ async def execute(connection, action, request):
             raise ValueError("unsupported_action")
         if action != "close" and request.get("expected") != snapshot["fingerprint"]:
             return {"ok": False, "reason": "stale_snapshot", "applied": False, "verified": False, "snapshot": snapshot}
+        # 요청 payload로 조작할 수 없는 실행 내부 플래그다.
+        mutation = {"started": False}
         try:
             if action == "close":
                 targets = [s for s in index_snapshot(snapshot)[1].values() if s["owned"]
                            and state["records"].get(s["id"], {}).get("session") == request["session"]
                            and (not request.get("sessionId") or s["id"] == request["sessionId"])]
                 for s in targets:
-                    await app.get_session_by_id(s["id"]).async_close(force=True)
+                    live = app.get_session_by_id(s["id"])
+                    if not live:
+                        raise ValueError("missing_close_target")
+                    mutation["started"] = True
+                    await live.async_close(force=True)
                     state["records"].pop(s["id"], None)
                 save_state(path, state)
                 return {"ok": True, "applied": bool(targets), "verified": True, "closedIds": [s["id"] for s in targets]}
+            require_local_leader(request, snapshot)
             iterm2.capabilities.check_supports_apply_layout(connection)
             if action == "open":
-                return await open_view(app, connection, request, state, snapshot)
-            return await reconcile(app, request, state, snapshot)
+                return await open_view(app, connection, request, state, snapshot, mutation)
+            return await reconcile(app, request, state, snapshot, mutation)
         except Exception as error:
             # rollback이 없으므로 실제 inventory를 포함하고 중복 UI 생성을 재시도하지 않는다.
             after, inventory_error = None, None
@@ -468,7 +498,7 @@ async def execute(connection, action, request):
                 inventory_error = type(refresh_error).__name__
             save_state(path, state)
             return {"ok": False, "reason": str(error) if type(error) is ValueError else type(error).__name__,
-                    "applied": None, "verified": False, "partialPossible": True,
+                    "applied": None if mutation["started"] else False, "verified": False, "partialPossible": mutation["started"],
                     "snapshot": after, "inventoryError": inventory_error}
 
 

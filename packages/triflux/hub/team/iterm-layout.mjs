@@ -10,7 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { homedir, hostname } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -48,6 +48,7 @@ export function layoutInput(options = {}, env = process.env) {
     human === "high" || ["lead", "communication"].includes(role);
   return {
     mode,
+    remoteSession: Boolean(env.SSH_CONNECTION || env.SSH_TTY),
     focusPolicy: options.focus ? "focus" : "preserve",
     taskInformation: task ? "provided" : "insufficient",
     role,
@@ -84,10 +85,11 @@ export function layoutCandidates(snapshot, input) {
   const leader = windows.find((w) =>
     w.tabs.some((t) => t.sessions.some((s) => s.id === snapshot.leaderId)),
   );
+  if (input.remoteSession && !leader) return [];
   const projectWindow = windows.find((w) =>
     w.tabs.some((t) => t.sessions.some((s) => s.owned)),
   );
-  // 리드 ID가 사라져도 현재 입력 대상의 창은 읽기 전용 anchor로 쓴다.
+  // 비SSH 로컬 실행에서만 출처가 불명확한 현재 창을 anchor로 허용한다.
   const focusedWindow = windows.find(
     (w) =>
       w.id === snapshot.focusWindowId ||
@@ -205,14 +207,23 @@ export async function decideLayout(snapshot, input, options = {}) {
     (input.mode === "window" || input.mode.startsWith("split-"));
   if (focusOverride)
     fallback = candidates.find((c) => c.kind === "tab") || null;
+  const readableFallback =
+    explicit &&
+    !fallback &&
+    ["tab", "split-vertical", "split-horizontal"].includes(input.mode)
+      ? candidates.find((c) => c.kind === "tab")
+      : null;
+  if (readableFallback) fallback = readableFallback;
   if (explicit)
     return {
       source: "explicit",
       reason: focusOverride
         ? "focus_preserve_overrides_layout"
-        : fallback
-          ? "user_layout"
-          : "requested_layout_unavailable",
+        : readableFallback
+          ? "requested_layout_unavailable_fallback_tab"
+          : fallback
+            ? "user_layout"
+            : "requested_layout_unavailable",
       candidate: fallback,
       candidates,
     };
@@ -404,10 +415,7 @@ export function reconcilePlan(snapshot) {
 }
 
 export function layoutStatePath(project, env = process.env) {
-  const key = createHash("sha256")
-    .update(`${hostname()}\0${project}`)
-    .digest("hex")
-    .slice(0, 24);
+  const key = createHash("sha256").update(project).digest("hex").slice(0, 24);
   return join(
     privateTmpDir("iterm-layout", env.TMPDIR ? { base: env.TMPDIR } : {}),
     `${key}.json`,
@@ -568,6 +576,7 @@ export async function runItermLayout(request, deps = {}) {
     leaderId: env.ITERM_SESSION_ID?.split(":").at(-1) || "",
     leaderTty: request.leaderTty || "",
     focusPolicy: input.focusPolicy,
+    remoteSession: input.remoteSession,
   };
   if (!request.action && ["off", "background"].includes(input.mode))
     return backgroundLayout(
@@ -581,7 +590,10 @@ export async function runItermLayout(request, deps = {}) {
     inventory = await bridge("inventory", {
       ...base,
       resetPins:
-        request.action === "reconcile" && request.resetPins && !request.dryRun,
+        request.action === "reconcile" &&
+        request.resetPins &&
+        !request.dryRun &&
+        !input.remoteSession,
     });
   } catch {
     if (request.action)
@@ -598,7 +610,7 @@ export async function runItermLayout(request, deps = {}) {
       statePath: base.statePath,
     });
   }
-  const snapshot = inventory.snapshot;
+  let snapshot = inventory.snapshot;
   if (request.action === "inspect")
     return {
       ok: true,
@@ -610,6 +622,53 @@ export async function runItermLayout(request, deps = {}) {
       applied: false,
       verified: false,
     };
+  const leaderPresent = () =>
+    (snapshot.windows || []).some((w) =>
+      w.tabs.some((t) => t.sessions.some((s) => s.id === snapshot.leaderId)),
+    );
+  if (
+    input.remoteSession &&
+    leaderPresent() &&
+    request.action === "reconcile" &&
+    request.resetPins &&
+    !request.dryRun
+  ) {
+    try {
+      snapshot = (await bridge("inventory", { ...base, resetPins: true }))
+        .snapshot;
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error.layoutResult?.reason || "python_api_unavailable",
+        applied: false,
+        verified: false,
+        focus: focusReport(input, "reset_pins_refused"),
+      };
+    }
+  }
+  if (input.remoteSession && !leaderPresent()) {
+    const reason = "leader_not_in_local_iterm";
+    const warning = `iTerm layout: ${reason}. list-sessions/attach로 확인하세요`;
+    if (request.action)
+      return {
+        ok: false,
+        reason,
+        warning,
+        applied: false,
+        verified: false,
+        partialPossible: false,
+        snapshot,
+        background: backgroundRecords(base.statePath),
+        focus: focusReport(input, reason),
+      };
+    return {
+      ...backgroundLayout(request, input, reason, {
+        ...deps,
+        statePath: base.statePath,
+      }),
+      warning,
+    };
+  }
   if (request.action === "reconcile") {
     const plan = reconcilePlan(snapshot);
     if (!plan.changed || request.dryRun)
@@ -692,13 +751,21 @@ export async function runItermLayout(request, deps = {}) {
           null,
         ),
       };
-    return backgroundLayout(
-      request,
-      input,
-      "python_api_unavailable",
-      { ...deps, statePath: base.statePath },
-      decision,
-    );
+    const reason = error.layoutResult?.reason || "python_api_unavailable";
+    return {
+      ...backgroundLayout(
+        request,
+        input,
+        reason,
+        { ...deps, statePath: base.statePath },
+        decision,
+      ),
+      ...(error.layoutResult
+        ? {
+            warning: `iTerm layout: ${reason}. list-sessions/attach로 확인하세요`,
+          }
+        : {}),
+    };
   }
   let watcher;
   if (

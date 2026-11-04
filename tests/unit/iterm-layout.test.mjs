@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -558,5 +558,178 @@ test("focus와 reset-pins CLI 의도를 전달하고 dry-run에서는 pin을 변
         },
       },
     );
+  }
+});
+
+test("SSH 출처는 실제 inventory leader가 없으면 기존 project view도 후보로 쓰지 않는다", () => {
+  for (const env of [{ SSH_CONNECTION: "remote" }, { SSH_TTY: "/dev/pts/1" }]) {
+    const data = layoutInput({ task: "감시", focus: true }, env);
+    assert.equal(data.remoteSession, true);
+    for (const owned of [false, true]) {
+      const state = snapshot([pane("a", { owned })], {
+        leaderId: "missing",
+        focusId: "a",
+      });
+      assert.deepEqual(layoutCandidates(state, data), []);
+    }
+    assert.ok(layoutCandidates(snapshot(), data).some((c) => c.kind === "tab"));
+  }
+});
+
+test("SSH open은 경고와 attach background를 남기고 reconcile은 변경하지 않으며 inspect는 가능하다", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "iterm-ssh-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const state = snapshot([pane("a", { cols: 90 }), pane("b")], {
+    leaderId: "missing",
+    focusId: "a",
+  });
+  state.focusId = "user";
+  const deps = {
+    env: { SSH_TTY: "/dev/pts/1" },
+    statePath: join(dir, "state.json"),
+    bridge: async (action, payload) => {
+      assert.equal(action, "inventory");
+      assert.equal(payload.remoteSession, true);
+      assert.equal(Boolean(payload.resetPins), false);
+      return { snapshot: state };
+    },
+    spawn: () => assert.fail("SSH watcher 생성"),
+  };
+  const request = {
+    project: { key: "p" },
+    session: "new",
+    layout: "tab",
+    focus: true,
+  };
+  const opened = await runItermLayout(request, deps);
+  assert.equal(opened.reason, "leader_not_in_local_iterm");
+  assert.match(opened.warning, /leader_not_in_local_iterm/);
+  assert.equal(opened.background, true);
+  assert.equal(opened.applied, false);
+  assert.ok(opened.attach.includes("=new"));
+  const reconciled = await runItermLayout(
+    { ...request, action: "reconcile", resetPins: true },
+    deps,
+  );
+  assert.equal(reconciled.reason, "leader_not_in_local_iterm");
+  assert.equal(reconciled.applied, false);
+  const inspected = await runItermLayout(
+    { ...request, action: "inspect" },
+    deps,
+  );
+  assert.equal(inspected.ok, true);
+  assert.equal(inspected.background[0].tmuxSession, "new");
+});
+
+test("명시 focus split이 맞지 않으면 읽을 수 있는 tab으로 폴백하고 새 window로 확대하지 않는다", async () => {
+  for (const layout of ["split-vertical", "split-horizontal"]) {
+    const result = await decideLayout(
+      snapshot([pane("a", { cols: 80, rows: 20 })]),
+      input({ layout, focus: true }),
+    );
+    assert.equal(result.candidate?.kind, "tab");
+    assert.equal(result.reason, "requested_layout_unavailable_fallback_tab");
+    const empty = await decideLayout(
+      { windows: [] },
+      input({ layout, focus: true }),
+    );
+    assert.equal(empty.candidate, null);
+  }
+});
+
+test("SSH에서 실제 local leader를 확인하면 reset 뒤 snapshot을 사용해 reconcile한다", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "iterm-ssh-leader-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const calls = [];
+  const state = snapshot([pane("a", { cols: 90 }), pane("b", { cols: 159 })]);
+  const result = await runItermLayout(
+    { action: "reconcile", resetPins: true, project: { key: "p" } },
+    {
+      env: { SSH_CONNECTION: "remote" },
+      statePath: join(dir, "state.json"),
+      bridge: async (action, payload) => {
+        calls.push([action, payload.resetPins]);
+        assert.equal(payload.remoteSession, true);
+        if (action === "inventory")
+          return {
+            snapshot: {
+              ...state,
+              fingerprint: calls.length === 1 ? "before-reset" : "after-reset",
+            },
+          };
+        assert.equal(payload.expected, "after-reset");
+        return { ok: true, applied: true, verified: true };
+      },
+    },
+  );
+  assert.equal(result.applied, true);
+  assert.deepEqual(calls, [
+    ["inventory", false],
+    ["inventory", true],
+    ["reconcile", undefined],
+  ]);
+});
+
+test("bridge timeout과 응답 분실은 적용 여부 unknown을 유지한다", async () => {
+  const bridge = createLayoutBridge({
+    env: { TFX_ITERM_PYTHON: process.execPath },
+    run: async () => {
+      throw Object.assign(new Error("timeout"), { killed: true });
+    },
+  });
+  for (const action of ["open", "reconcile"])
+    await assert.rejects(
+      bridge(action, {}),
+      (error) =>
+        error.layoutResult.partialPossible === true &&
+        error.layoutResult.applied === null,
+    );
+});
+
+test("state key는 host 이름 대신 프로젝트만 사용한다", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "iterm-state-key-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  assert.ok(
+    layoutStatePath("p", { TMPDIR: dir }).endsWith(
+      "/148de9c5a7a44d19e56cd9ae.json",
+    ),
+  );
+});
+
+test("변경 전 bridge 거부는 원인과 attach background를 보존하고 부분 실패는 재생성하지 않는다", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "iterm-preflight-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  for (const partialPossible of [false, true]) {
+    const statePath = join(dir, `${partialPossible}.json`);
+    const result = await runItermLayout(
+      { project: { key: "p" }, session: "new", layout: "tab" },
+      {
+        env: {},
+        statePath,
+        bridge: async (action) => {
+          if (action === "inventory") return { snapshot: snapshot() };
+          throw Object.assign(new Error("refused"), {
+            layoutResult: {
+              ok: false,
+              reason: "selected_tab_protected",
+              applied: partialPossible ? null : false,
+              verified: false,
+              partialPossible,
+            },
+          });
+        },
+      },
+    );
+    assert.equal(result.reason, "selected_tab_protected");
+    assert.equal(result.applied, partialPossible ? null : false);
+    if (!partialPossible) {
+      assert.equal(result.background, true);
+      assert.ok(result.attach.includes("=new"));
+      assert.match(result.warning, /selected_tab_protected/);
+    } else
+      assert.equal(
+        readdirSync(dir).some((name) => name === "true.json.background"),
+        false,
+      );
   }
 });

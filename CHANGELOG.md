@@ -8,6 +8,9 @@ All notable changes to triflux will be documented in this file.
 - iTerm: 작업 종류, 관련도와 사람 입력 가능성, 실제 pane 크기를 사용해 Jev가 배치를 선택한다. 가독성 기준에 따라 좌우와 상하 분할, 비활성 탭, attach 가능한 백그라운드를 선택하고 판단과 적용 결과를 구분한다.
 - iTerm: 관리 워커 종료와 화면 변경 뒤 비활성 탭을 재배치한다. 수동 이동은 고정하고 `inspect`, `reconcile --dry-run`, `reconcile --reset-pins`로 조회와 명시 해제를 지원한다.
 
+### Changed
+- iTerm: stop은 TFX 표식이 있는 view만 닫고 수동 attach와 사용자 view를 보존한다.
+
 ### Fixed
 - iTerm: 기본 생성과 재배치에서 선택된 탭과 입력 포커스를 보존한다. 명시 `--focus`만 전환하며 API 오류에서도 생성 후 복원이나 포커스 이동 폴백을 사용하지 않는다.
 - iTerm: 일반 탭의 빈 tmux 연결 ID와 정상 종료로 줄어든 분할 트리를 처리해, 자동 분할과 종료 후 재배치가 제외되는 문제를 수정한다.

@@ -3085,12 +3085,15 @@ async function openAutomaticIterm(
     );
     return {
       iterm,
-      ...(!iterm.ok ||
+      ...(iterm.warning ||
+      !iterm.ok ||
       iterm.verified === false ||
       iterm.reason === "python_api_unavailable" ||
       iterm.reason === "no_safe_visible_candidate"
         ? {
-            warning: `iTerm layout: ${iterm.reason || "application_unverified"}`,
+            warning:
+              iterm.warning ||
+              `iTerm layout: ${iterm.reason || "application_unverified"}`,
           }
         : {}),
     };
@@ -3553,6 +3556,8 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
 }
 
 async function doStart(launchAdapter, opts) {
+  // start/lead/peer의 공통 경계에서 tmux와 native thread 준비 전에 검증한다.
+  layoutInput(opts, opts.env || process.env);
   if (launchAdapter.cli !== "codex" || opts.remote || !opts.nativePeer)
     return doStartTmux(launchAdapter, opts);
   const env = opts.env || process.env;
@@ -5018,6 +5023,11 @@ async function ensureTmuxSession(adapter, opts) {
       remote: opts.remote,
       cwd: opts.cwd,
       group: opts.group,
+      layout: opts.layout,
+      role: opts.role,
+      human: opts.human,
+      task: opts.task,
+      focus: opts.focus,
       readyTimeoutMs: opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
       pollIntervalMs: opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     });
@@ -7020,9 +7030,9 @@ function startOptsForSession(flags, session, side) {
       : flags["no-auto-layout"]
         ? "off"
         : flags.layout,
-    role: flags.role,
-    human: flags.human,
-    task: flags.task ?? flags.seed,
+    role: flags.role ?? (side ? "communication" : undefined),
+    human: flags.human ?? (side ? "high" : undefined),
+    task: flags.task,
     focus: Boolean(flags.focus),
     ...(!side ? { name: flags.name } : {}),
     remote: flags.remote,
@@ -7590,6 +7600,15 @@ function peerSideBaseOpts(flags, side, adapter, session) {
   return {
     session,
     group: flags.group,
+    layout: flags.background
+      ? "background"
+      : flags["no-auto-layout"]
+        ? "off"
+        : flags.layout,
+    role: flags.role ?? "communication",
+    human: flags.human ?? "high",
+    task: flags.task,
+    focus: Boolean(flags.focus),
     noRelayTag: Object.hasOwn(flags, "no-relay-tag"),
     ...contextOpts(flags, adapter.cli),
     short,

@@ -54,6 +54,92 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["applied"])
         self.app.async_apply_layout.assert_not_awaited()
 
+    async def test_ssh_missing_or_stale_leader_rejects_open_and_reconcile(self):
+        for leader in [None, "missing"]:
+            current = dict(snapshot(), leaderId=leader)
+            for action in ["open", "reconcile"]:
+                request = dict(self.request, remoteSession=True)
+                with patch.object(layout, "inventory", AsyncMock(return_value=current)):
+                    result = await layout.execute(None, action, request)
+                self.assertEqual(result["reason"], "leader_not_in_local_iterm")
+                self.assertFalse(result["partialPossible"])
+                self.assertIs(result["applied"], False)
+        self.app.async_apply_layout.assert_not_awaited()
+
+    async def test_ssh_environment_cannot_be_bypassed_by_payload(self):
+        with patch.dict(layout.os.environ, {"SSH_TTY": "/dev/pts/1"}), patch.object(layout, "inventory", AsyncMock(return_value=snapshot())):
+            result = await layout.execute(None, "reconcile", dict(self.request, remoteSession=False))
+        self.assertEqual(result["reason"], "leader_not_in_local_iterm")
+        self.assertFalse(result["partialPossible"])
+        self.app.async_apply_layout.assert_not_awaited()
+
+    async def test_ssh_confirmed_local_leader_allows_reconcile(self):
+        current = dict(snapshot(), leaderId="a")
+        request = dict(self.request, remoteSession=True, plan={"tabs": [{"tab_id": "t", "root": current["windows"][0]["tabs"][0]["tree"]}], "overflow": []})
+        with patch.object(layout, "inventory", AsyncMock(return_value=current)):
+            result = await layout.execute(None, "reconcile", request)
+        self.assertTrue(result["applied"])
+        self.assertTrue(result["verified"])
+        self.app.async_apply_layout.assert_awaited_once()
+
+    async def test_pre_mutation_rejections_are_safe_even_for_non_value_errors(self):
+        request = dict(self.request, session="new", tmuxPath="relative",
+                       candidate={"kind": "tab", "windowId": "w"}, input={"mode": "auto"})
+        with patch.object(layout, "inventory", AsyncMock(return_value=snapshot())):
+            result = await layout.execute(None, "open", request)
+        self.assertEqual(result["reason"], "invalid_tmux_path")
+        self.assertFalse(result["partialPossible"])
+        self.assertIs(result["applied"], False)
+        with patch.object(layout, "inventory", AsyncMock(return_value=snapshot())), patch.object(api.capabilities, "check_supports_apply_layout", side_effect=RuntimeError("unsupported")):
+            result = await layout.execute(None, "open", request)
+        self.assertFalse(result["partialPossible"])
+        self.assertIs(result["applied"], False)
+
+    async def test_value_error_from_first_mutation_is_partial(self):
+        self.app.async_apply_layout.side_effect = ValueError("api_failed")
+        request = dict(self.request, plan={"tabs": [{"tab_id": "t", "root": snapshot()["windows"][0]["tabs"][0]["tree"]}], "overflow": []})
+        with patch.object(layout, "inventory", AsyncMock(return_value=snapshot())):
+            result = await layout.execute(None, "reconcile", request)
+        self.assertTrue(result["partialPossible"])
+        self.assertIsNone(result["applied"])
+        self.app.async_apply_layout.assert_awaited_once()
+
+    async def test_missing_live_split_target_is_still_preflight(self):
+        current = snapshot()
+        current["windows"][0]["tabs"][0]["sessions"][0]["cols"] = 241
+        request = dict(self.request, session="new", tmuxPath=sys.executable,
+                       candidate={"kind": "split", "tabId": "t", "sessionId": "a", "vertical": True},
+                       input={"mode": "auto", "group": "g", "minCols": 100, "minRows": 28})
+        profile = types.SimpleNamespace(set_use_custom_command=lambda _: None, set_command=lambda _: None)
+        with patch.object(layout, "inventory", AsyncMock(return_value=current)), patch.object(api, "LocalWriteOnlyProfile", lambda: profile, create=True):
+            result = await layout.execute(None, "open", request)
+        self.assertFalse(result["partialPossible"])
+        self.assertIs(result["applied"], False)
+
+    async def test_overflow_placeholder_then_value_error_remains_partial(self):
+        created = types.SimpleNamespace(tab_id="placeholder-tab", current_session=types.SimpleNamespace(session_id="placeholder"))
+        window = types.SimpleNamespace(tabs=[types.SimpleNamespace(tab_id="t")], async_create_tab=AsyncMock(return_value=created))
+        self.app.get_window_by_id = lambda _: window
+        request = dict(self.request, plan={"tabs": [{"tab_id": "t", "root": {"session_id": "a"}}],
+                                          "overflow": [{"sessionId": "b", "windowId": "w", "sourceTabId": "t"}]})
+        profile = types.SimpleNamespace(set_use_custom_command=lambda _: None, set_command=lambda _: None)
+        with patch.object(layout, "inventory", AsyncMock(return_value=snapshot())), patch.object(api, "LocalWriteOnlyProfile", lambda: profile, create=True), patch.object(layout, "require_inactive_live", AsyncMock(side_effect=[None, ValueError("selected_tab_protected")])):
+            result = await layout.execute(None, "reconcile", request)
+        window.async_create_tab.assert_awaited_once()
+        self.assertEqual(result["reason"], "selected_tab_protected")
+        self.assertTrue(result["partialPossible"])
+        self.assertIsNone(result["applied"])
+        self.app.async_apply_layout.assert_not_awaited()
+
+    async def test_live_preflight_rejection_before_any_api_is_safe(self):
+        request = dict(self.request, plan={"tabs": [{"tab_id": "t", "root": snapshot()["windows"][0]["tabs"][0]["tree"]}], "overflow": []})
+        with patch.object(layout, "inventory", AsyncMock(return_value=snapshot())), patch.object(layout, "require_inactive_live", AsyncMock(side_effect=ValueError("selected_tab_protected"))):
+            result = await layout.execute(None, "reconcile", request)
+        self.assertEqual(result["reason"], "selected_tab_protected")
+        self.assertFalse(result["partialPossible"])
+        self.assertIs(result["applied"], False)
+        self.app.async_apply_layout.assert_not_awaited()
+
     async def test_tmux_unowned_pinned_focused_and_explicit_never_apply(self):
         for case in ["tmux", "unowned", "pinned", "focused", "explicit"]:
             state = snapshot()
@@ -158,6 +244,17 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         values["user.tfxLayoutOwner"] = "forged"
         result = await layout.inventory(app, self.request, self.state)
         self.assertFalse(result["windows"][0]["tabs"][0]["sessions"][0]["owned"])
+
+    async def test_inventory_confirms_leader_by_actual_id_or_tty(self):
+        session = types.SimpleNamespace(session_id="local", grid_size=types.SimpleNamespace(width=120, height=40),
+                                        async_get_variable=AsyncMock(side_effect=lambda key: "/dev/ttys001" if key == "tty" else None))
+        tab = types.SimpleNamespace(tab_id="t", tmux_connection_id="", root=session, sessions=[session], current_session=session)
+        frame = types.SimpleNamespace(origin=types.SimpleNamespace(x=0, y=0), size=types.SimpleNamespace(width=1400, height=1000))
+        window = types.SimpleNamespace(window_id="w", tabs=[tab], current_tab=tab, async_get_frame=AsyncMock(return_value=frame))
+        app = types.SimpleNamespace(windows=[window], current_terminal_window=window, async_refresh=AsyncMock())
+        for requested, tty, expected in [("missing", "", ""), ("local", "", "local"), ("missing", "/dev/ttys001", "local")]:
+            result = await layout.inventory(app, dict(self.request, leaderId=requested, leaderTty=tty), self.state)
+            self.assertEqual(result["leaderId"], expected)
 
     async def test_normal_close_collapses_tree_without_pinning_survivors(self):
         a = types.SimpleNamespace(session_id="a", grid_size=types.SimpleNamespace(width=120, height=40))
