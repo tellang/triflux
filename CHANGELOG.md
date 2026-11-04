@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.95.3] - 2026-11-04
+
+### Fixed
+- hud: Claude statusLine에서 알림용 30칸을 항상 빼던 처리를 제거해 화면 여백이 남아도 계정 뒤의 ctx와 Jev 표시가 잘리는 문제를 수정한다. 기본 여백 4칸과 좁은 화면 동작, band와 다른 CLI의 폭 처리는 유지한다.
+
 ## [10.95.2] - 2026-11-03
 
 ### Fixed
