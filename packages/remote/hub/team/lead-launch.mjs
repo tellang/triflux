@@ -153,6 +153,8 @@ export async function launchLead(
     launcher = cli,
     noBypassHookTrust = false,
     task,
+    layout,
+    focus = false,
   },
   {
     run = execFileAsync,
@@ -294,6 +296,13 @@ export async function launchLead(
         launcher,
         "--cwd",
         resolve(cwd),
+        "--role",
+        "lead",
+        "--human",
+        "high",
+        ...(task ? ["--task", task] : []),
+        ...(layout ? ["--layout", layout] : []),
+        ...(focus ? ["--focus"] : []),
         ...(model ? ["--model", model] : []),
         ...(effort ? ["--effort", effort] : []),
         ...(cli === "codex" && noBypassHookTrust

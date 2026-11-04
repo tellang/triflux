@@ -15,6 +15,7 @@
 | **Codex 실행 관례** | [codex-conventions.md](codex-conventions.md) |
 | **시스템 구조** | [../ARCHITECTURE.md](../ARCHITECTURE.md): 패키지·데이터 흐름·미러 관계 |
 | **Jev MCP 추천** | [요구사항](prd/0050-jev-mcp-recommendations.md), [결정 근거](adr/0050-jev-mcp-recommendations.md), [실행 계획](../.triflux/plans/0050-jev-mcp-recommendations.md) |
+| **Jev iTerm 자동 배치** | [결정 근거](adr/0052-jev-iterm-layout.md), [사용법](../skills/tfx-live/SKILL.md#창-배치macos) |
 | **개발 / 기여 프로세스** | [process/](process/): 브랜치 정책·PR 리뷰 계약 · 진입점 [../CONTRIBUTING.md](../CONTRIBUTING.md) |
 | **설계 서사 (design)** | [design/](design/): 설계 노트·office-hours·실행 모드 등 서술형 설계 자료 |
 | **조사 / 근거 자료** | [research/](research/): 리서치·감사·분석 리포트 |

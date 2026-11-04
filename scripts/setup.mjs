@@ -705,6 +705,9 @@ function installEntries(pluginRoot) {
     "hub/workers/factory.mjs",
     // tfx-route.sh 가 $sd/../hub/team 에서 읽는다.
     "hub/team/agent-map.json",
+    // iTerm bridge는 Node가 경로로 실행하므로 정적 import 탐색에 잡히지 않는다.
+    "hub/team/iterm-layout.py",
+    "hub/team/iterm-layout.mjs",
     // tfx-remote 스킬이 ~/.claude/scripts/remote-spawn.mjs 를 실행한다.
     "scripts/remote-spawn.mjs",
     // tfx-route.sh 가 자기 옆에서 찾는다.

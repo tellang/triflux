@@ -48,6 +48,7 @@ description: >
 셸에서 새 리드를 띄울 때는 `tfx lead <역할> [--cli claude|codex|agy]`를 쓴다. tmux 세션(기본 `<폴더>-lead`)에 리드를 띄우고 리드 진입까지 보낸다. Claude 는 `/tfx-lead <역할>`을, mod 가 없는 Codex 와 agy 는 이 스킬 파일을 읽고 리드를 맡으라는 프롬프트를 보낸다.
 
 - 새 리드나 새 세션 승계의 모델 선택은 `tfx lead <역할> --cli codex --task '<짧은 작업 요약>'`의 자동 선택을 쓴다. Jev는 작업을 분류하고 기존 프로필 매핑과 resolver가 모델과 effort를 선택한다. 인계 파일은 자동으로 읽지 않는다.
+- macOS iTerm2 배치는 live 실행 경로가 자동 선택한다. 리드는 높은 사람 개입과 최소 100 cols × 24 rows로 전달되며 기본 focus preserve를 따른다. 선택 탭 전체와 수동 이동 pane을 보호하고 비활성 native 탭만 조작한다. `tfx lead ... --focus`를 명시해야 포커스를 전환하며 중요 역할은 `attention`으로 표시한다. `--layout window`도 `--focus`가 없으면 비활성 탭/background로 폴백한다. `--no-auto-layout`은 UI 없는 tmux 유지이며 legacy는 `--layout legacy --focus`에서만 허용한다. API/runtime 실패는 경고와 attach 가능한 background로 남긴다. `inspect`에서 작업 메타데이터와 focus 요청·유효 정책·이유를 확인하고 `reconcile --reset-pins`로 수동 이동 pin을 해제한다. 상세는 `tfx-live`의 창 배치 절을 따른다.
 - `--json`의 `routing`에서 권고, effective 모델과 effort, 보존/폴백 이유를 확인한다. `appliedTo: start_args`는 시작 인자 선택이며 세션 ready나 실제 모델 수신 증거는 아니다. 프로필을 찾으려고 config를 추측 검색하지 않는다.
 - 명시한 CLI, 권한, 모델 지시가 우선이다. `--model`이나 `--effort`가 하나라도 있으면 그 쌍을 보존하고, 커스텀 런처도 권고만 기록한다. 워커 실행은 기존 `tfx-auto`와 route를 사용하고 승계 ACK와 rebind 절차는 그대로 따른다.
 
