@@ -316,10 +316,26 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
   },
   lead: {
     usage:
-      "tfx lead <역할> [--cli claude|codex|agy] [--task SUMMARY] [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD] [--no-bypass-hook-trust]",
+      "tfx lead <역할> [--cli claude|codex|agy] [--task SUMMARY] [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD] [--no-bypass-hook-trust] [--layout MODE] [--no-auto-layout] [--focus]",
     description:
       "리드 세션을 tmux 에 띄우고 리드 진입까지 보낸다. 실행 명령은 --launcher, ~/.config/triflux/lead.json 의 launchers.<cli>, CLI 이름 순. setup 과 update 가 처음 한 번 묻는다",
     options: [
+      {
+        name: "--focus",
+        type: "boolean",
+        description: "생성한 iTerm view로 명시 포커스 전환 (기본 preserve)",
+      },
+      {
+        name: "--layout",
+        type: "string",
+        description:
+          "iTerm 배치: auto|off|legacy|background|tab|window|split-vertical|split-horizontal",
+      },
+      {
+        name: "--no-auto-layout",
+        type: "boolean",
+        description: "iTerm 자동 배치 비활성, UI 없이 tmux 유지",
+      },
       {
         name: "--cli",
         type: "string",
@@ -4330,6 +4346,7 @@ async function main() {
         "../hub/team/lead-launch.mjs"
       );
       const valueFlags = [
+        "--layout",
         "--task",
         "--session",
         "--cwd",
@@ -4341,6 +4358,8 @@ async function main() {
       cmdArgs.forEach((arg, i) => {
         const known =
           arg === "--no-bypass-hook-trust" ||
+          arg === "--no-auto-layout" ||
+          arg === "--focus" ||
           (valueFlags.includes(arg) &&
             cmdArgs[i + 1] &&
             !cmdArgs[i + 1].startsWith("--"));
@@ -4370,6 +4389,10 @@ async function main() {
         model: readCliOptionValue(cmdArgs, "--model"),
         effort: readCliOptionValue(cmdArgs, "--effort"),
         noBypassHookTrust: cmdArgs.includes("--no-bypass-hook-trust"),
+        focus: cmdArgs.includes("--focus"),
+        layout: cmdArgs.includes("--no-auto-layout")
+          ? "off"
+          : readCliOptionValue(cmdArgs, "--layout"),
         launcher: resolveLauncher({
           cli,
           flag: readCliOptionValue(cmdArgs, "--launcher"),

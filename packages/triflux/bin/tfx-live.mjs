@@ -55,6 +55,13 @@ import {
   resolveSenderName,
   waitCodexRequest,
 } from "../hub/team/codex-queue.mjs";
+import {
+  backgroundLayout,
+  closeManagedIterm,
+  focusReport,
+  layoutInput,
+  runItermLayout,
+} from "../hub/team/iterm-layout.mjs";
 import { resolveCodexSocket } from "../hub/team/native-peer.mjs";
 import {
   escapePwshSingleQuoted as escapeRemotePwshSingleQuoted,
@@ -105,6 +112,11 @@ const BOOLEAN_FLAGS = new Set([
   "sandbox",
   "no-auto-trust",
   "no-bypass-hook-trust",
+  "no-auto-layout",
+  "background",
+  "dry-run",
+  "focus",
+  "reset-pins",
 ]);
 const PEER_HOP_DONE_MARKER = "<<<TFX_PEER_HOP_DONE>>>";
 const TMUX_SET_BUFFER_MAX_BYTES = 8 * 1024;
@@ -119,6 +131,9 @@ const BUG_REPORT_DIR =
 function usage(command) {
   const lines = [
     "Usage:",
+    "  tfx-live inspect [--cwd DIR] (local iTerm layout)",
+    "  tfx-live reconcile [--cwd DIR] [--dry-run] [--reset-pins] (local iTerm layout)",
+    "  tfx-live start --session NAME [--layout auto|off|legacy|background|tab|window|split-vertical|split-horizontal] [--no-auto-layout] [--background] [--focus] [--role ROLE] [--human high|low|unknown] [--task TEXT]",
     "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--lead-session ID] [--launcher CMD] [--sandbox] [--no-auto-trust] [--no-bypass-hook-trust] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude|agy] [--if-busy wait|fail|interrupt|queue] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --cli codex [--transport queue|tmux] (--session NAME[:WINDOW.PANE] | --thread UUID) --prompt TEXT [--from NAME] [--timeout 60] [--no-wait]",
@@ -2988,7 +3003,117 @@ async function itermProject(cwd = process.cwd(), deps = {}) {
   };
 }
 
+async function openAutomaticIterm(
+  session,
+  group,
+  project,
+  options = {},
+  deps = {},
+) {
+  const env = deps.env || process.env;
+  const input = layoutInput({ ...options, group }, env);
+  const request = { ...options, group, project, session };
+  const background = (reason) => backgroundLayout(request, input, reason, deps);
+  if (["off", "background"].includes(input.mode))
+    return {
+      iterm: background(
+        input.mode === "off" ? "layout_disabled" : "user_background",
+      ),
+    };
+  const legacy = deps.openLegacy || openItermSession;
+  const legacyPlacement = async (reason) => {
+    const view = await legacy(session, group, project, {
+      noSplits: true,
+      focus: true,
+    });
+    return {
+      ...view,
+      applied: Boolean(view),
+      verified: false,
+      decision: {
+        source: reason === "user_legacy" ? "explicit" : "rules",
+        reason,
+      },
+      reason: "legacy_explicit_focus_unverified",
+      focus: focusReport(
+        input,
+        "legacy_explicit_focus_unverified",
+        "focus",
+        null,
+      ),
+    };
+  };
+  if (input.mode === "legacy") {
+    if (input.focusPolicy !== "focus")
+      return {
+        iterm: background("legacy_requires_explicit_focus"),
+        warning: "legacy 배치는 --focus가 필요해 UI 없이 tmux를 유지합니다",
+      };
+    return { iterm: await legacyPlacement("user_legacy") };
+  }
+  try {
+    const exec = deps.execFile || execFileAsync;
+    const tmux = deps.runTmux || runTmux;
+    const { stdout } = await exec("which", ["tmux"], { timeout: 2000 });
+    const clients = env.TMUX_PANE
+      ? await tmux(null, [
+          "list-clients",
+          "-t",
+          env.TMUX_PANE,
+          "-F",
+          "#{client_activity} #{client_tty}",
+        ]).catch(() => ({ stdout: "" }))
+      : { stdout: "" };
+    const leaderTty =
+      clients.stdout
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => line.split(" "))
+        .sort((a, b) => Number(b[0]) - Number(a[0]))[0]?.[1] || "";
+    const iterm = await (deps.runLayout || runItermLayout)(
+      {
+        ...options,
+        group,
+        project,
+        session,
+        leaderTty,
+        titleGroup: options.group || project.name,
+        tmuxPath: realpathSync(stdout.trim()),
+      },
+      { env },
+    );
+    return {
+      iterm,
+      ...(!iterm.ok ||
+      iterm.verified === false ||
+      iterm.reason === "python_api_unavailable" ||
+      iterm.reason === "no_safe_visible_candidate"
+        ? {
+            warning: `iTerm layout: ${iterm.reason || "application_unverified"}`,
+          }
+        : {}),
+    };
+  } catch (error) {
+    if (error.layoutResult?.partialPossible)
+      return {
+        iterm: {
+          ...error.layoutResult,
+          focus: focusReport(input, "partial_application_unknown"),
+        },
+        warning: "iTerm 적용 결과가 불확실합니다. inspect로 확인하세요",
+      };
+    return {
+      iterm: background("python_api_unavailable"),
+      warning:
+        "iTerm Python API/runtime을 사용할 수 없어 UI 없이 tmux를 유지합니다. list-sessions/attach로 확인하세요",
+    };
+  }
+}
+
 async function openItermSession(session, group, project, deps = {}) {
+  if (!deps.focus)
+    throw new Error("legacy iTerm 생성에는 명시 --focus가 필요합니다");
   const exec = deps.execFile ?? execFileAsync;
   const tmux = deps.runTmux ?? runTmux;
   const env = deps.env ?? process.env;
@@ -3076,7 +3201,7 @@ async function openItermSession(session, group, project, deps = {}) {
   set splitDirection to ""
   set newColumn to "L"
   repeat with candidateTab in tabs of targetWindow
-    if (count of sessions of candidateTab) < 4 then
+    if ${deps.noSplits ? "false" : "(count of sessions of candidateTab) < 4"} then
       set leftSession to missing value
       set rightSession to missing value
       set leftCount to 0
@@ -3167,6 +3292,10 @@ async function closeItermSession(
   killedTtys = [],
   deps = {},
 ) {
+  if (!deps.execFile && !deps.runTmux) {
+    const managed = await closeManagedIterm(sessionId, session);
+    if (managed) return managed;
+  }
   const exec = deps.execFile ?? execFileAsync;
   const tmux = deps.runTmux ?? runTmux;
   const clients = await tmux(null, [
@@ -3191,11 +3320,15 @@ tell application "iTerm2"
     try
     repeat with candidateTab in tabs of candidateWindow
       repeat with candidateSession in sessions of candidateTab
-        if ${appleScriptString(sessionId ?? "")} is not "" and id of candidateSession is ${appleScriptString(sessionId ?? "")} then
+        set candidateName to ""
+        try
+          tell candidateSession to set candidateName to variable named "user.tfx_session"
+        end try
+        if candidateName is ${appleScriptString(session)} and ${appleScriptString(sessionId ?? "")} is not "" and id of candidateSession is ${appleScriptString(sessionId ?? "")} then
           set idSession to candidateSession
           set idTab to candidateTab
         end if
-        if killedTtys contains (tty of candidateSession) then set end of killedIds to (id of candidateSession)
+        if candidateName is ${appleScriptString(session)} and killedTtys contains (tty of candidateSession) then set end of killedIds to (id of candidateSession)
         try
           tell candidateSession to set candidateName to variable named "user.tfx_session"
           if ${allowNameFallback ? "true" : "false"} and candidateName is ${appleScriptString(session)} then
@@ -3232,13 +3365,14 @@ tell application "iTerm2"
           tell remainingSession to set remainingName to variable named "user.tfx_session"
         end try
         if remainingName is missing value or remainingName is "" then set shellsOnly to false
+        if remainingName is not ${appleScriptString(session)} then set shellsOnly to false
         if not (is at shell prompt of remainingSession) then set shellsOnly to false
         if attachedTtys contains (tty of remainingSession) then set shellsOnly to false
       end repeat
       if shellsOnly then tell targetTab to close
     end try
   end if
-  -- 죽인 세션에 붙어 있던 패인은 표시가 없어도 닫는다. 순회 참조는 순번이라 앞선 닫기 뒤 옆 패인을 가리키므로 ID 로 매번 다시 찾는다.
+  -- 같은 TFX 세션으로 확인된 attach view만 닫는다. 닫기 뒤 바뀌는 순번 대신 ID를 다시 찾는다.
   repeat with killedIndex from 1 to count of killedIds
     set killedId to item killedIndex of killedIds
     repeat with candidateWindow in windows
@@ -3806,12 +3940,15 @@ async function doStartTmux(launchAdapter, opts) {
   if (ready && shouldUseIterm(remote)) {
     try {
       const project = await itermProject(cwd ?? process.cwd());
-      iterm = await openItermSession(
+      const placement = await openAutomaticIterm(
         session,
         opts.group || project.key,
         project,
+        { ...opts, cli: adapter.cli, name, cwd },
       );
-      if (iterm) {
+      iterm = placement.iterm;
+      itermWarning = placement.warning;
+      if (iterm?.sessionId) {
         await runTmux(null, [
           "set-option",
           "-t",
@@ -3819,31 +3956,34 @@ async function doStartTmux(launchAdapter, opts) {
           "@tfx_iterm_session",
           iterm.sessionId,
         ]);
-        const scriptsDir = pathJoin(
-          homedir(),
-          "Library",
-          "Application Support",
-          "iTerm2",
-          "Scripts",
-        );
-        const scriptPath = pathJoin(scriptsDir, ITERM_TITLE_SCRIPT_NAME);
-        await mkdir(scriptsDir, { recursive: true });
-        const installed = await readFile(scriptPath, "utf8").catch((error) => {
-          if (error.code === "ENOENT") return null;
-          throw error;
-        });
-        if (installed !== ITERM_TITLE_SCRIPT)
-          await writeFile(scriptPath, ITERM_TITLE_SCRIPT, { mode: 0o700 });
-        await chmod(scriptPath, 0o700);
-        const titleArgs = [
-          iterm.sessionId,
-          opts.group || project.name,
-          name ?? session,
-        ]
-          .map(appleScriptString)
-          .join(", ");
-        // 절대 경로는 최초 설치 직후의 메뉴 캐시 지연을 피하고, 적용 표식은 비동기 실패를 잡는다.
-        const titleScript = `tell application "iTerm2"
+        if (!iterm.titleApplied) {
+          const scriptsDir = pathJoin(
+            homedir(),
+            "Library",
+            "Application Support",
+            "iTerm2",
+            "Scripts",
+          );
+          const scriptPath = pathJoin(scriptsDir, ITERM_TITLE_SCRIPT_NAME);
+          await mkdir(scriptsDir, { recursive: true });
+          const installed = await readFile(scriptPath, "utf8").catch(
+            (error) => {
+              if (error.code === "ENOENT") return null;
+              throw error;
+            },
+          );
+          if (installed !== ITERM_TITLE_SCRIPT)
+            await writeFile(scriptPath, ITERM_TITLE_SCRIPT, { mode: 0o700 });
+          await chmod(scriptPath, 0o700);
+          const titleArgs = [
+            iterm.sessionId,
+            opts.group || project.name,
+            name ?? session,
+          ]
+            .map(appleScriptString)
+            .join(", ");
+          // 절대 경로는 최초 설치 직후의 메뉴 캐시 지연을 피하고, 적용 표식은 비동기 실패를 잡는다.
+          const titleScript = `tell application "iTerm2"
   set titleSession to missing value
   repeat with candidateWindow in windows
     repeat with candidateTab in tabs of candidateWindow
@@ -3863,10 +4003,11 @@ async function doStartTmux(launchAdapter, opts) {
   end repeat
   error "iTerm title update was not confirmed; check the iTerm2 Python runtime and Script Console"
 end tell`;
-        await execFileAsync("/usr/bin/osascript", ["-e", titleScript], {
-          timeout: 5000,
-          maxBuffer: 64 * 1024,
-        });
+          await execFileAsync("/usr/bin/osascript", ["-e", titleScript], {
+            timeout: 5000,
+            maxBuffer: 64 * 1024,
+          });
+        }
       }
     } catch (error) {
       itermWarning = error.message;
@@ -5284,6 +5425,15 @@ function startOpts(flags) {
     effort: flags.effort,
     name: flags.name,
     group: flags.group,
+    layout: flags.background
+      ? "background"
+      : flags["no-auto-layout"]
+        ? "off"
+        : flags.layout,
+    role: flags.role,
+    human: flags.human,
+    task: flags.task,
+    focus: Boolean(flags.focus),
     sandbox: Object.hasOwn(flags, "sandbox"),
     noAutoTrust: Object.hasOwn(flags, "no-auto-trust"),
     noBypassHookTrust: Object.hasOwn(flags, "no-bypass-hook-trust"),
@@ -6865,6 +7015,15 @@ function startOptsForSession(flags, session, side) {
   return {
     session,
     group: flags.group,
+    layout: flags.background
+      ? "background"
+      : flags["no-auto-layout"]
+        ? "off"
+        : flags.layout,
+    role: flags.role,
+    human: flags.human,
+    task: flags.task ?? flags.seed,
+    focus: Boolean(flags.focus),
     ...(!side ? { name: flags.name } : {}),
     remote: flags.remote,
     cwd: flags.cwd,
@@ -7972,6 +8131,19 @@ async function main() {
 
   if (command === "start") {
     await start(flags);
+  } else if (command === "inspect" || command === "reconcile") {
+    if (flags.remote || !shouldUseIterm(null))
+      throw new Error("layout inspect/reconcile requires local macOS iTerm2");
+    const project = await itermProject(flags.cwd ?? process.cwd());
+    const result = await runItermLayout({
+      action: command,
+      project,
+      cwd: flags.cwd,
+      dryRun: Boolean(flags["dry-run"]),
+      resetPins: Boolean(flags["reset-pins"]),
+    });
+    printJson(result);
+    if (result.ok === false) process.exitCode = 1;
   } else if (command === "ask") {
     await ask(flags);
   } else if (command === "wait") {
@@ -8047,8 +8219,10 @@ export {
   isSlashCommand,
   itermProject,
   matchPeerCandidates,
+  openAutomaticIterm,
   openItermSession,
   paneCliProcess,
+  parseCli,
   parseCodexTmuxSessions,
   parsePeerClosure,
   parsePeerToSpec,
@@ -8065,6 +8239,7 @@ export {
   send,
   shouldUseIterm,
   splitTmuxTarget,
+  startOpts,
   stopOpts,
   tmuxBufferName,
   verifyAttachedPeerSide,

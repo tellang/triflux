@@ -51,6 +51,19 @@ function fakeRun(replies) {
 }
 
 describe("tfx lead", () => {
+  it("focus는 명시할 때만 start로 전달하고 역할과 task는 함께 보존한다", async () => {
+    for (const focus of [false, true]) {
+      const { calls, run } = fakeRun({ start: { ready: false } });
+      await launchLead(
+        { role: "리드", task: "실제 배치 작업", layout: "window", focus },
+        { run, jevOptions: { env: { TFX_JEV: "0" } } },
+      );
+      assert.equal(calls[0].includes("--focus"), focus);
+      assert.equal(calls[0][calls[0].indexOf("--task") + 1], "실제 배치 작업");
+      assert.equal(calls[0][calls[0].indexOf("--role") + 1], "lead");
+    }
+  });
+
   for (const cli of ["codex", "claude", "agy"]) {
     for (const noBypassHookTrust of [false, true]) {
       it(`hook-trust opt-out은 Codex start에만 전달한다: ${cli}/${noBypassHookTrust}`, async () => {
@@ -231,6 +244,8 @@ describe("tfx lead", () => {
       "--cli",
       "codex",
       "--no-bypass-hook-trust",
+      "--layout",
+      "window",
       "--task",
       "승계 준비와 워커 평가",
       "--json",
@@ -239,6 +254,13 @@ describe("tfx lead", () => {
     const result = JSON.parse(json.stdout);
     assert.equal(result.role, "프로젝트 리드");
     assert.equal(result.noBypassHookTrust, true);
+    assert.equal(result.layout, "window");
+    const focused = invoke("리드", "--focus", "--json");
+    assert.equal(focused.status, 0, focused.stderr);
+    assert.equal(JSON.parse(focused.stdout).focus, true);
+    const optOut = invoke("리드", "--no-auto-layout", "--json");
+    assert.equal(optOut.status, 0, optOut.stderr);
+    assert.equal(JSON.parse(optOut.stdout).layout, "off");
     assert.equal(result.task, "승계 준비와 워커 평가");
     assert.equal(result.routing.appliedTo, "start_args");
     const human = invoke("리드", "--task", "짧은 요약");
@@ -370,6 +392,12 @@ describe("tfx lead", () => {
       "codex",
       "--cwd",
       "/p/app",
+      "--role",
+      "lead",
+      "--human",
+      "high",
+      "--task",
+      "완료 구현 평가와 다중 워커 조정",
     ]);
     assert.deepEqual(
       calls.map((args) => args[0]),
@@ -414,6 +442,10 @@ describe("tfx lead", () => {
         },
       );
       assert.deepEqual(calls[0].slice(11), [
+        "--role",
+        "lead",
+        "--human",
+        "high",
         ...(override.model ? ["--model", override.model] : []),
         ...(override.effort ? ["--effort", override.effort] : []),
       ]);
@@ -447,7 +479,7 @@ describe("tfx lead", () => {
         },
       );
       assert.equal(calls.length, 1);
-      assert.equal(calls[0].length, 11);
+      assert.equal(calls[0].length, 15);
       assert.equal(result.routing.source, "default");
       assert.equal(result.routing.attempted, mode !== "disabled");
       assert.equal(result.routing.appliedTo, null);

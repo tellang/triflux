@@ -142,6 +142,10 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 
 `tfx <command> --help` prints the exact arguments.
 
+On local macOS iTerm2, `tfx-live start` and `tfx lead` select placements using Jev, task metadata, and available pane sizes. The default preserves keyboard focus and protects selected tabs. Only `--focus` permits a focus change. Related workers can share readable panes in inactive tabs; unattended workers can stay in attachable background tmux sessions. Missing task information keeps a worker visible instead of inferring background operation from its name.
+
+Use `--task` to describe the work and `--layout` to request a placement. Focus preservation takes priority over window or split requests unless `--focus` is present. `--background`, `--no-auto-layout`, `--layout off`, and `TFX_ITERM_LAYOUT=0` keep tmux running without creating a terminal view. API failures use the same safe background fallback. `tfx-live inspect` reports decisions and attach commands; `reconcile --dry-run` previews a layout. Manual moves remain pinned until `reconcile --reset-pins`. See [tfx-live](skills/tfx-live/SKILL.md) for readability limits and the `focus` and `attention` result fields.
+
 Local tmux sessions created by `tfx-live start --cli codex` show the complete Triflux HUD in three provider status rows.
 The active CLI row displays context usage, for example `ctx:27%`; missing context shows `ctx:--`.
 Context uses the current thread's rollout window and token usage, with reported used/remaining percentages as a fallback.

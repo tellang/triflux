@@ -116,6 +116,7 @@ test("iTerm opening script chooses project window and limits group splits", asyn
     { key: "/repo/.git", name: "repo" },
     {
       env: { ITERM_SESSION_ID: "w:leader-id" },
+      focus: true,
       execFile: async (command, args) => {
         if (command === "which") return { stdout: process.execPath };
         assert.equal(command, "/usr/bin/osascript");
@@ -172,6 +173,29 @@ test("iTerm opening script chooses project window and limits group splits", asyn
   );
   for (const key of ["project", "group", "session"])
     assert.match(script, new RegExp(`set variable named "user.tfx_${key}"`));
+});
+
+test("명시 legacy 새 탭은 미정의 변수 없이 생성한 view ID를 반환한다", async () => {
+  let script;
+  const result = await tfxLive.openItermSession(
+    "legacy-explicit",
+    "group",
+    { key: "/repo/.git", name: "repo" },
+    {
+      focus: true,
+      noSplits: true,
+      env: { ITERM_SESSION_ID: "w:leader-id" },
+      execFile: async (command, args) => {
+        if (command === "which") return { stdout: process.execPath };
+        script = args[1];
+        return { stdout: "created-view\nfalse\n" };
+      },
+    },
+  );
+  assert.equal(result.sessionId, "created-view");
+  assert.equal(result.split, false);
+  assert.match(script, /return \(id of newSession\) & linefeed/);
+  assert.doesNotMatch(script, /newSessionId|originalSessionId/);
 });
 
 test("stop closes a recorded iTerm pane anywhere and searches by name only inside iTerm", async () => {
@@ -306,7 +330,7 @@ test("iTerm close skips the name search outside iTerm and keeps tabs with user p
   );
 });
 
-test("iTerm close also closes unmarked panes attached to the killed session", async () => {
+test("iTerm close requires the matching TFX marker even for a killed tty", async () => {
   let script;
   await tfxLive.closeItermSession("", "session-a", false, ["/dev/ttys004"], {
     runTmux: async () => ({ stdout: "" }),
@@ -316,6 +340,10 @@ test("iTerm close also closes unmarked panes attached to the killed session", as
     },
   });
   assert.match(script, /set killedTtys to \{"\/dev\/ttys004"\}/);
+  assert.match(
+    script,
+    /if candidateName is "session-a" and killedTtys contains/,
+  );
   assert.doesNotMatch(script, /^\s*return$/m);
   // 순번 참조를 들고 있다 닫으면 옆 패인이 닫히므로 ID 로 다시 찾은 세션만 닫아야 한다.
   assert.match(script, /set end of killedIds to \(id of candidateSession\)/);
