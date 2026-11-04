@@ -223,6 +223,9 @@ function buildRouteBackedHeadlessCommand(
     TFX_WORKER_MODEL_FILE: `${resultFile}.model.json`,
     TFX_WORKER_MCP_FILE: `${resultFile}.mcp.json`,
     TFX_WORKER_SANDBOX_SCOPE: "headless",
+    ...(process.env.TFX_CODEX_BYPASS_HOOK_TRUST !== undefined
+      ? { TFX_CODEX_BYPASS_HOOK_TRUST: process.env.TFX_CODEX_BYPASS_HOOK_TRUST }
+      : {}),
     ...(resolvedCli === "antigravity" && opts.profile
       ? { TFX_GEMINI_PROFILE: opts.profile }
       : {}),

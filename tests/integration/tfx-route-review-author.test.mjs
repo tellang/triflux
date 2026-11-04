@@ -174,6 +174,24 @@ else { require('node:fs').writeFileSync(process.env.ROUTE_ARGV, JSON.stringify(a
   }
 }
 
+for (const cli of ["codex", "claude", "antigravity"]) {
+  for (const bypass of ["", "0"]) {
+    test(`hook-trust bypass review argv는 Codex에만 적용한다: ${cli}/${bypass || "default"}`, () => {
+      const r = runRoute({ cli, env: { TFX_CODEX_BYPASS_HOOK_TRUST: bypass } });
+      assert.equal(r.status, 0, r.output);
+      assert.equal(
+        r.argv.filter((arg) => arg === "--dangerously-bypass-hook-trust")
+          .length,
+        cli === "codex" && bypass !== "0" ? 1 : 0,
+      );
+      if (cli === "codex") {
+        assert.equal(r.argv[0], "exec");
+        assert.ok(r.argv.includes("review"));
+      }
+    });
+  }
+}
+
 for (const [profile, effort] of [
   ["sol_med", "medium"],
   ["astra_xhigh", "xhigh"],

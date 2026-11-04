@@ -51,6 +51,25 @@ function fakeRun(replies) {
 }
 
 describe("tfx lead", () => {
+  for (const cli of ["codex", "claude", "agy"]) {
+    for (const noBypassHookTrust of [false, true]) {
+      it(`hook-trust opt-out은 Codex start에만 전달한다: ${cli}/${noBypassHookTrust}`, async () => {
+        const { calls, run } = fakeRun({
+          start: { ready: false, blockedBy: "codex-hooks-review" },
+        });
+        const result = await launchLead(
+          { cli, role: "검토", noBypassHookTrust },
+          { run, jevOptions: { env: { TFX_JEV: "0" } } },
+        );
+        assert.equal(calls.length, 1);
+        assert.equal(
+          calls[0].includes("--no-bypass-hook-trust"),
+          cli === "codex" && noBypassHookTrust,
+        );
+        assert.equal(result.ok, false);
+      });
+    }
+  }
   for (const mode of [
     "applied",
     "explicit",
@@ -211,6 +230,7 @@ describe("tfx lead", () => {
       "리드",
       "--cli",
       "codex",
+      "--no-bypass-hook-trust",
       "--task",
       "승계 준비와 워커 평가",
       "--json",
@@ -218,6 +238,7 @@ describe("tfx lead", () => {
     assert.equal(json.status, 0, json.stderr);
     const result = JSON.parse(json.stdout);
     assert.equal(result.role, "프로젝트 리드");
+    assert.equal(result.noBypassHookTrust, true);
     assert.equal(result.task, "승계 준비와 워커 평가");
     assert.equal(result.routing.appliedTo, "start_args");
     const human = invoke("리드", "--task", "짧은 요약");
@@ -238,6 +259,7 @@ describe("tfx lead", () => {
     assert.notEqual(missing.status, 0);
     const help = invoke("--help");
     assert.match(help.stdout, /--task/);
+    assert.match(help.stdout, /--no-bypass-hook-trust/);
     const recommendationFailure = invoke(
       "리드",
       "--task",
