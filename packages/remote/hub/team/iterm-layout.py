@@ -164,40 +164,6 @@ def validate_tree(node, cols, rows, sessions, seen=None, parent=None):
     return seen
 
 
-def preferred_sizes(node, cols, rows):
-    if "session_id" in node:
-        return {node["session_id"]: (cols, rows)}
-    count = len(node["children"])
-    available = (cols if node["vertical"] else rows) - count + 1
-    result = {}
-    for index, child in enumerate(node["children"]):
-        size = available // count + (1 if index < available % count else 0)
-        result.update(preferred_sizes(child, size if node["vertical"] else cols,
-                                      rows if node["vertical"] else size))
-    return result
-
-
-async def resize_owned_tabs(app, spec, dimensions_by_tab):
-    await app.async_refresh()
-    for entry in spec["tabs"]:
-        if "children" not in entry["root"]:
-            continue
-        tab = next((t for w in app.windows for t in w.tabs if t.tab_id == entry["tab_id"]), None)
-        if not tab:
-            raise ValueError("tab_disappeared_during_resize")
-        current_window = getattr(app, "current_terminal_window", None)
-        if current_window and current_window.current_tab and current_window.current_tab.tab_id == tab.tab_id:
-            raise ValueError("focus_changed_during_resize")
-        await require_inactive_live(app, {entry["tab_id"]})
-        cols, rows = dimensions_by_tab[entry["tab_id"]]
-        sizes = preferred_sizes(entry["root"], cols, rows)
-        for session in tab.sessions:
-            if session.session_id not in sizes:
-                raise ValueError("unexpected_session_during_resize")
-            session.preferred_size = iterm2.Size(*sizes[session.session_id])
-        await tab.async_update_layout()
-
-
 def remember_positions(snapshot, state):
     for window in snapshot["windows"]:
         for tab in window["tabs"]:
@@ -237,6 +203,14 @@ def focus_identity(snapshot):
     return tuple(snapshot.get(key) for key in ["focusWindowId", "focusTabId", "focusId"])
 
 
+def input_workspace(snapshot):
+    return {window["id"]: {
+        "frame": window.get("frame"),
+        "selectedTabs": {tab["id"]: {s["id"]: [s["cols"], s["rows"]] for s in tab["sessions"]}
+                         for tab in window["tabs"] if selected_tab(snapshot, tab)},
+    } for window in snapshot["windows"]}
+
+
 async def require_inactive_live(app, tab_ids):
     # API 호출 직전 사람이 선택한 탭도 제외한다. 복원으로 사용자 전환을 덮지 않는다.
     await app.async_refresh()
@@ -263,7 +237,7 @@ async def open_view(app, connection, request, state, snapshot):
         if focus:
             await app.get_session_by_id(duplicate).async_activate(select_tab=True, order_window_front=True)
         after = await inventory(app, request, state)
-        verified = existing["cols"] >= data["minCols"] and existing["rows"] >= data["minRows"]
+        verified = existing["cols"] >= data["minCols"] and existing["rows"] >= data["minRows"] and (focus or input_workspace(after) == input_workspace(snapshot))
         return {"ok": True, "sessionId": duplicate, "applied": False, "verified": verified, "reason": "existing_view",
                 "focus": {"requested": "focus" if focus else "preserve", "effective": "focus" if focus and after["focusId"] == duplicate else "preserve",
                           "transitioned": focus_identity(after) != focus_identity(snapshot), "reason": "existing_view"}}
@@ -307,9 +281,10 @@ async def open_view(app, connection, request, state, snapshot):
     save_state(Path(request["statePath"]), state)
     actual = index_snapshot(after)[1].get(created.session_id)
     verified = bool(actual and actual["owned"] and actual["cols"] >= data["minCols"] and actual["rows"] >= data["minRows"]
-                    and (after["focusId"] == created.session_id if focus else focus_identity(after) == focus_identity(snapshot)))
+                    and (after["focusId"] == created.session_id if focus else focus_identity(after) == focus_identity(snapshot) and input_workspace(after) == input_workspace(snapshot)))
     return {"ok": True, "applied": True, "verified": verified, "sessionId": created.session_id,
             "split": c["kind"] == "split", "titleApplied": True, "actual": actual,
+            "workspacePreserved": input_workspace(after) == input_workspace(snapshot),
             "focus": {"requested": "focus" if focus else "preserve",
                       "preserved": focus_identity(after) == focus_identity(snapshot),
                       "before": focus_identity(snapshot), "after": focus_identity(after),
@@ -356,6 +331,14 @@ async def reconcile(app, request, state, snapshot):
         tab = await window.async_create_tab(command="/bin/sleep 30", select=False)
         placeholder = tab.current_session
         placeholders.append(placeholder.session_id)
+        # 비활성 새 탭은 아직 bounds가 0일 수 있어 기존 창 안에서 초기화한다.
+        # native split은 창 frame을 바꾸지 않고 현재 window bounds에 맞춘다.
+        profile = iterm2.LocalWriteOnlyProfile()
+        profile.set_use_custom_command("Yes")
+        profile.set_command("/bin/sleep 30")
+        await require_inactive_live(app, {tab.tab_id})
+        spacer = await placeholder.async_split_pane(vertical=True, profile_customizations=profile)
+        placeholders.append(spacer.session_id)
         desired_windows[tab.tab_id] = entry["windowId"]
         spec["tabs"].append({"tab_id": tab.tab_id, "root": {"session_id": entry["sessionId"]}})
     if placeholders:
@@ -365,11 +348,16 @@ async def reconcile(app, request, state, snapshot):
     current_tabs, _ = index_snapshot(current)
     for tid in sources:
         require_owned_tab(current_tabs.get(tid), current["focusId"], protect_focus=True)
-        if any(current_tabs[tid][key] != tabs[tid][key] for key in ("tree", "cols", "rows")):
+        if current_tabs[tid]["tree"] != tabs[tid]["tree"]:
             raise ValueError("source_changed_during_apply")
+    if focus_identity(current) != focus_identity(snapshot) or input_workspace(current) != input_workspace(snapshot):
+        raise ValueError("input_workspace_changed_during_apply")
+    current_sessions = index_snapshot(current)[1]
+    for entry in plan["tabs"]:
+        actual_tab = current_tabs[entry["tab_id"]]
+        validate_tree(entry["root"], actual_tab["cols"], actual_tab["rows"], current_sessions)
     await require_inactive_live(app, {entry["tab_id"] for entry in spec["tabs"]})
     await app.async_apply_layout(spec)
-    await resize_owned_tabs(app, spec, {tid: (tabs[tid]["cols"], tabs[tid]["rows"]) for tid in sources})
     after = await inventory(app, request, state)
     # 예상한 자기 적용만 흡수한다. 동시에 일어난 수동 이동 pin은 지우지 않는다.
     after_tabs, _ = index_snapshot(after)
@@ -387,8 +375,9 @@ async def reconcile(app, request, state, snapshot):
     verified = verified and all(actual_sessions.get(sid, {}).get("owned")
                                 and actual_sessions[sid]["cols"] >= (actual_sessions[sid].get("minCols") or 80)
                                 and actual_sessions[sid]["rows"] >= (actual_sessions[sid].get("minRows") or 20) for sid in planned_ids)
-    verified = verified and focus_identity(after) == focus_identity(snapshot)
+    verified = verified and focus_identity(after) == focus_identity(snapshot) and input_workspace(after) == input_workspace(snapshot)
     return {"ok": True, "applied": True, "verified": bool(verified), "plan": plan,
+            "workspacePreserved": input_workspace(after) == input_workspace(snapshot),
             "focus": {"requested": "preserve", "effective": "preserve",
                       "transitioned": focus_identity(after) != focus_identity(snapshot),
                       "preserved": focus_identity(after) == focus_identity(snapshot),

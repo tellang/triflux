@@ -92,7 +92,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["snapshot"], snapshot())
 
     async def test_verified_checks_actual_tree_size_and_focus(self):
-        for case in ["ok", "tree", "size", "focus"]:
+        for case in ["ok", "tree", "size", "focus", "window"]:
             state = snapshot()
             after = copy.deepcopy(state)
             if case == "tree":
@@ -101,8 +101,10 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
                 after["windows"][0]["tabs"][0]["sessions"][0]["cols"] = 80
             if case == "focus":
                 after["focusId"] = "a"
+            if case == "window":
+                after["windows"][0]["frame"] = [0, 0, 1600, 900]
             request = dict(self.request, plan={"tabs": [{"tab_id": "t", "root": state["windows"][0]["tabs"][0]["tree"]}], "overflow": []})
-            with patch.object(layout, "inventory", AsyncMock(side_effect=[state, after])), patch.object(layout, "resize_owned_tabs", AsyncMock()):
+            with patch.object(layout, "inventory", AsyncMock(side_effect=[state, after])):
                 result = await layout.reconcile(self.app, request, copy.deepcopy(self.state), state)
             self.assertTrue(result["applied"])
             self.assertEqual(result["verified"], case == "ok")
@@ -198,21 +200,15 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         session.async_set_profile_properties.assert_awaited_once_with(profile)
         self.assertIn("created", layout.read_state(self.path, "p")["records"])
 
-    async def test_preferred_sizes_preserve_total_grid_and_only_resize_declared_ids(self):
-        root = {"vertical": True, "children": [{"session_id": "a"}, {"session_id": "b"}]}
-        sizes = layout.preferred_sizes(root, 242, 40)
-        self.assertEqual(sizes, {"a": (121, 40), "b": (120, 40)})
-        a, b = types.SimpleNamespace(session_id="a"), types.SimpleNamespace(session_id="b")
-        tab = types.SimpleNamespace(tab_id="t", sessions=[a, b], async_update_layout=AsyncMock())
-        app = types.SimpleNamespace(async_refresh=AsyncMock(), windows=[types.SimpleNamespace(tabs=[tab], current_tab=None)])
-        with patch.object(api, "Size", lambda width, height: (width, height), create=True):
-            await layout.resize_owned_tabs(app, {"tabs": [{"tab_id": "t", "root": root}]}, {"t": (242, 40)})
-        self.assertEqual(a.preferred_size, (121, 40))
-        tab.async_update_layout.assert_awaited_once()
-        tab.sessions.append(types.SimpleNamespace(session_id="user"))
-        tab.async_update_layout.reset_mock()
-        with patch.object(api, "Size", lambda width, height: (width, height), create=True), self.assertRaises(ValueError):
-            await layout.resize_owned_tabs(app, {"tabs": [{"tab_id": "t", "root": root}]}, {"t": (242, 40)})
+    async def test_reconcile_never_calls_the_window_resizing_tab_api(self):
+        before = snapshot()
+        views = [types.SimpleNamespace(session_id=sid) for sid in ["a", "b"]]
+        tab = types.SimpleNamespace(tab_id="t", sessions=views, async_update_layout=AsyncMock(side_effect=AssertionError("would resize the shared user window")))
+        self.app.windows = [types.SimpleNamespace(tabs=[tab], current_tab=None)]
+        request = dict(self.request, plan={"tabs": [{"tab_id": "t", "root": before["windows"][0]["tabs"][0]["tree"]}], "overflow": []})
+        with patch.object(api, "Size", lambda width, height: (width, height), create=True), patch.object(layout, "inventory", AsyncMock(side_effect=[before, before])):
+            result = await layout.reconcile(self.app, request, self.state, before)
+        self.assertTrue(result["verified"])
         tab.async_update_layout.assert_not_awaited()
 
     async def test_selected_tab_other_pane_and_new_window_are_rejected_without_mutation(self):
@@ -267,7 +263,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
             state["records"]["b"]["pinned"] = True
             return after
         request = dict(self.request, plan={"tabs": [{"tab_id": "t", "root": before["windows"][0]["tabs"][0]["tree"]}], "overflow": []})
-        with patch.object(layout, "inventory", read), patch.object(layout, "resize_owned_tabs", AsyncMock()):
+        with patch.object(layout, "inventory", read):
             result = await layout.reconcile(self.app, request, state, before)
         self.assertFalse(result["verified"])
         self.assertTrue(layout.read_state(self.path, "p")["records"]["b"]["pinned"])
@@ -300,7 +296,7 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         source["tree"] = {"session_id": "a"}
         after["windows"][0]["tabs"].append({"id": "new-tab", "tmux": False, "cols": 241, "rows": 40,
                                             "sessions": [pane("b")], "tree": {"session_id": "b"}})
-        created_tab = types.SimpleNamespace(tab_id="new-tab", current_session=types.SimpleNamespace(session_id="placeholder"))
+        created_tab = types.SimpleNamespace(tab_id="new-tab", current_session=types.SimpleNamespace(session_id="placeholder", async_split_pane=AsyncMock(return_value=types.SimpleNamespace(session_id="spacer"))))
         window = types.SimpleNamespace(current_tab=types.SimpleNamespace(tab_id="human-tab"),
                                        tabs=[types.SimpleNamespace(tab_id="t"), created_tab],
                                        async_create_tab=AsyncMock(return_value=created_tab))
@@ -308,13 +304,14 @@ class BridgeTests(unittest.IsolatedAsyncioTestCase):
         self.app.get_window_by_id = lambda _: window
         plan = {"tabs": [{"tab_id": "t", "root": {"session_id": "a"}}],
                 "overflow": [{"sessionId": "b", "windowId": "w", "sourceTabId": "t"}]}
-        with patch.object(layout, "inventory", AsyncMock(side_effect=[state, after])):
+        profile = types.SimpleNamespace(set_use_custom_command=lambda _: None, set_command=lambda _: None)
+        with patch.object(api, "LocalWriteOnlyProfile", lambda: profile, create=True), patch.object(layout, "inventory", AsyncMock(side_effect=[state, after])):
             result = await layout.reconcile(self.app, dict(self.request, plan=plan), self.state, state)
         self.assertTrue(result["verified"])
         self.assertFalse(window.async_create_tab.call_args.kwargs["select"])
         spec = self.app.async_apply_layout.call_args.args[0]
         self.assertEqual({entry["tab_id"] for entry in spec["tabs"]}, {"t", "new-tab"})
-        self.assertEqual(spec["close_sessions"], ["placeholder"])
+        self.assertEqual(spec["close_sessions"], ["placeholder", "spacer"])
         self.assertNotIn("human-tab", json.dumps(spec))
 
     async def test_human_tab_switch_immediately_before_apply_aborts_without_restore(self):
