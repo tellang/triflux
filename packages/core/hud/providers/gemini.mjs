@@ -68,13 +68,11 @@ function summarizeProjectQuota(timeSeries) {
     const tier = tiers.get(tierKey) ?? { used: 0, limit: 0, top: null };
     if (kind === "limit") tier.limit = Math.max(tier.limit, value);
     if (kind === "net_usage") {
+      const start = Number(series.metric.labels?.window_start_time) * 1000;
+      // 리셋 직후 조회 구간에 끝난 창의 마지막 포인트가 섞일 수 있다.
+      if (start + WEEK_MS <= Date.now()) continue;
       tier.used += value;
-      if (!tier.top || value > tier.top.value) {
-        tier.top = {
-          value,
-          start: Number(series.metric.labels?.window_start_time) * 1000,
-        };
-      }
+      if (!tier.top || value > tier.top.value) tier.top = { value, start };
     }
     tiers.set(tierKey, tier);
   }
@@ -99,18 +97,20 @@ async function fetchProjectQuota(gcp, execFileSyncFn, fetchFn) {
   try {
     const token = execFileSyncFn("gcloud", ["auth", "print-access-token"], {
       encoding: "utf8",
-      timeout: 15_000,
+      timeout: 10_000,
       stdio: ["ignore", "pipe", "ignore"],
       windowsHide: true,
       // Windows 의 gcloud 는 .cmd 라 셸 없이는 실행되지 않는다.
       shell: process.platform === "win32",
     }).trim();
     if (!token) return null;
+    // gcloud 와 HTTP 전체가 spawn 락(30초) 안에 끝나야 갱신 프로세스가 겹치지 않는다.
+    const signal = AbortSignal.timeout(15_000);
     const base = `https://monitoring.googleapis.com/v3/projects/${encodeURIComponent(gcp.project)}`;
     const getJson = async (path, params) => {
       const response = await fetchFn(`${base}/${path}?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(15_000),
+        signal,
       });
       if (!response.ok) throw new Error(`monitoring ${response.status}`);
       return response.json();
@@ -127,18 +127,20 @@ async function fetchProjectQuota(gcp, execFileSyncFn, fetchFn) {
       .filter((type) => /\/(net_usage|limit)$/.test(type));
     const now = Date.now();
     const location = gcp.location || "global";
-    const timeSeries = [];
-    for (const type of types) {
-      const data = await getJson(
-        "timeSeries",
-        new URLSearchParams({
-          filter: `metric.type = "${type}" AND metric.label.regional_location = "${location}"`,
-          "interval.startTime": new Date(now - 10 * 60 * 1000).toISOString(),
-          "interval.endTime": new Date(now).toISOString(),
-        }),
-      );
-      timeSeries.push(...(data.timeSeries ?? []));
-    }
+    const responses = await Promise.all(
+      types.map((type) =>
+        getJson(
+          "timeSeries",
+          new URLSearchParams({
+            // metrics scope 에 다른 프로젝트가 묶여 있어도 설정된 프로젝트만 센다.
+            filter: `metric.type = "${type}" AND resource.label.project_id = "${gcp.project}" AND metric.label.regional_location = "${location}"`,
+            "interval.startTime": new Date(now - 10 * 60 * 1000).toISOString(),
+            "interval.endTime": new Date(now).toISOString(),
+          }),
+        ),
+      ),
+    );
+    const timeSeries = responses.flatMap((data) => data.timeSeries ?? []);
     return summarizeProjectQuota(timeSeries);
   } catch {
     return null;
@@ -163,11 +165,13 @@ export function readAntigravityQuotaSnapshot() {
   const stale =
     !cache?.timestamp ||
     Date.now() - cache.timestamp >= ANTIGRAVITY_QUOTA_STALE_MS;
-  if (isGcpProjectAuth()) {
-    const quota = matched ? cache.projectQuota : null;
+  const gcp = readJson(ANTIGRAVITY_SETTINGS_PATH, null)?.gcp;
+  if (gcp?.project) {
+    const sameScope = matched && cache.location === (gcp.location || "global");
+    const quota = sameScope ? cache.projectQuota : null;
     return {
       data: quota ? { ...quota, stale } : null,
-      shouldRefresh: !matched || stale,
+      shouldRefresh: !sameScope || stale,
     };
   }
   const model = readJson(ANTIGRAVITY_SETTINGS_PATH, null)?.model;
@@ -208,6 +212,7 @@ export async function refreshAntigravityQuotaCache(
     writeJsonSafe(ANTIGRAVITY_QUOTA_CACHE_PATH, {
       timestamp: Date.now(),
       accountLabel: gcp.project,
+      location: gcp.location || "global",
       projectQuota,
     });
     return projectQuota;

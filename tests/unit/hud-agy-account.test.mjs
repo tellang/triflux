@@ -189,7 +189,9 @@ it("프로젝트 과금은 gcloud 토큰으로 공용 주간 쿼터를 읽고, �
         "-e",
         `
       import assert from "node:assert/strict";
+      import { writeFileSync } from "node:fs";
       import { refreshAntigravityQuotaCache, readAntigravityQuotaSnapshot } from ${JSON.stringify(providerUrl.href)};
+      import { ANTIGRAVITY_SETTINGS_PATH } from ${JSON.stringify(new URL("../../hud/constants.mjs", import.meta.url).href)};
       const prefix = "discoveryengine.googleapis.com/quota/ratev2/agentic_wtu_tier_enterprise_plus_pp_weekly_regional";
       const start = Math.floor(Date.now() / 1000) - 86400;
       const series = (kind, value, windowStart) => ({
@@ -197,6 +199,7 @@ it("프로젝트 과금은 gcloud 토큰으로 공용 주간 쿼터를 읽고, �
         points: [{ value: { int64Value: String(value) } }],
       });
       const timeSeries = [
+        series("net_usage", 90000000, start - 7 * 86400),
         series("net_usage", 68000000, start),
         series("net_usage", 1000000, start + 3600),
         series("limit", 93750000),
@@ -223,7 +226,7 @@ it("프로젝트 과금은 gcloud 토큰으로 공용 주간 쿼터를 읽고, �
       );
       assert.equal(urls.length, 3, "usage 지표는 읽지 않는다");
       assert.equal(urls[1].pathname, "/v3/projects/quota-project/timeSeries");
-      assert.match(urls[1].searchParams.get("filter"), /regional_location = "global"/);
+      assert.match(urls[1].searchParams.get("filter"), /project_id = "quota-project" AND .*regional_location = "global"/);
       assert.deepEqual(readAntigravityQuotaSnapshot(), {
         data: {
           usedPercent: 74,
@@ -232,6 +235,8 @@ it("프로젝트 과금은 gcloud 토큰으로 공용 주간 쿼터를 읽고, �
         },
         shouldRefresh: false,
       });
+      writeFileSync(ANTIGRAVITY_SETTINGS_PATH, JSON.stringify({ gcp: { project: "quota-project", location: "us" } }));
+      assert.deepEqual(readAntigravityQuotaSnapshot(), { data: null, shouldRefresh: true }, "다른 리전의 값을 보이지 않는다");
       await refreshAntigravityQuotaCache(() => { throw new Error("reauth"); });
       assert.deepEqual(readAntigravityQuotaSnapshot(), { data: null, shouldRefresh: false });
       await refreshAntigravityQuotaCache(() => "token", async () => ({ ok: false }));
