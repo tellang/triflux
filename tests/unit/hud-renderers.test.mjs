@@ -146,4 +146,27 @@ describe("HUD 표시", () => {
     );
     assert.equal(stripAnsi(row.left).length, stripAnsi(x.left).length);
   });
+
+  it("프로젝트 쿼터를 읽으면 GCP 대신 사용률과 리셋 시간을 보인다", () => {
+    const quota = {
+      auth: "project",
+      usedPercent: 74,
+      resetTime: new Date(Date.now() + 3 * 86400000).toISOString(),
+    };
+    const row = getProviderRow(
+      "full",
+      "antigravity",
+      "a",
+      geminiBlue,
+      quota,
+      "project",
+    );
+    assert.ok(!stripAnsi(row.left).includes("GCP"));
+    assert.match(stripAnsi(row.left), /74%/);
+    assert.match(stripAnsi(row.left), /\dd/);
+    const micro = getMicroLine(context, usage, null, {
+      antigravityQuota: quota,
+    });
+    assert.match(stripAnsi(micro), /a:\s*74%/);
+  });
 });
