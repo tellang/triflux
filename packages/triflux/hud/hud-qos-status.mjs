@@ -71,7 +71,7 @@ async function main() {
     return;
   }
   if (process.argv.includes(ANTIGRAVITY_REFRESH_FLAG)) {
-    refreshAntigravityQuotaCache();
+    await refreshAntigravityQuotaCache();
     return;
   }
 

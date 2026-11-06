@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.97.0] - 2026-11-06
+
+### Added
+- hud: agy 가 GCP 프로젝트 과금이면 `gcloud` 토큰으로 Cloud Monitoring 의 Antigravity 주간 쿼터 지표를 읽어 a 행에 프로젝트 공용 사용률과 리셋 시간을 보인다. 콘솔 Gemini Enterprise > Usage & spend 의 코딩 도구 칸과 같은 값이다. `gcloud` 로그인이 없거나 만료되면 기존 `GCP` 표시로 돌아간다.
+
 ## [10.96.0] - 2026-11-04
 
 ### Added

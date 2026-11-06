@@ -159,7 +159,8 @@ export function getMicroLine(
 }
 
 function antigravityPercentText(quota) {
-  if (quota?.auth === "project") {
+  // 프로젝트 쿼터를 못 읽었을 때(gcloud 미로그인, 만료)만 과금 방식을 보인다.
+  if (quota?.auth === "project" && quota?.usedPercent == null) {
     return geminiBlue("GCP".padStart(PERCENT_CELL_WIDTH));
   }
   return quota?.usedPercent != null
@@ -521,7 +522,7 @@ function getAntigravityRow(
   const usedPercent = quota?.usedPercent;
   const hasValue = usedPercent != null;
   const loggedIn = quota?.auth != null;
-  const project = quota?.auth === "project";
+  const project = quota?.auth === "project" && !hasValue;
   const tint = loggedIn ? markerColor : dim;
   const prefix = loggedIn ? `${bold(markerColor(marker))}:` : dim(`${marker}:`);
   const stale = quota?.stale ? dim(" [stale]") : "";
