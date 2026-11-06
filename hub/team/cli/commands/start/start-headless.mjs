@@ -15,6 +15,7 @@ export function buildHeadlessAssignments({
   assigns = [],
   mcpProfile,
   model,
+  effort,
   cwd,
 } = {}) {
   // --assign이 있으면 그것을 사용, 없으면 agents+subtasks 조합
@@ -27,7 +28,9 @@ export function buildHeadlessAssignments({
           displayName: resolveHeadlessDisplayName(a, paneName),
           role: normalizeHeadlessRole(a.role),
           mcp: mcpProfile,
-          model,
+          model: a.model ?? model,
+          effort: a.effort ?? effort,
+          profile: a.profile,
           cwd,
         };
       })
@@ -40,6 +43,7 @@ export function buildHeadlessAssignments({
           role: "",
           mcp: mcpProfile,
           model,
+          effort,
           cwd,
         };
       });
@@ -63,6 +67,7 @@ export async function startHeadlessTeam({
   dashboardAnchor,
   mcpProfile,
   model,
+  effort,
   cwd,
   nativeBridge,
   nativeBridgeMode,
@@ -74,6 +79,7 @@ export async function startHeadlessTeam({
     assigns,
     mcpProfile,
     model,
+    effort,
     cwd,
   });
 

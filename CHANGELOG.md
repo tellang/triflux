@@ -2,10 +2,88 @@
 
 All notable changes to triflux will be documented in this file.
 
-## [10.94.0] - 2026-11-06
+## [10.97.0] - 2026-11-06
 
 ### Added
 - hud: agy 가 GCP 프로젝트 과금이면 `gcloud` 토큰으로 Cloud Monitoring 의 Antigravity 주간 쿼터 지표를 읽어 a 행에 프로젝트 공용 사용률과 리셋 시간을 보인다. 콘솔 Gemini Enterprise > Usage & spend 의 코딩 도구 칸과 같은 값이다. `gcloud` 로그인이 없거나 만료되면 기존 `GCP` 표시로 돌아간다.
+
+## [10.96.0] - 2026-11-04
+
+### Added
+- iTerm: 작업 종류, 관련도와 사람 입력 가능성, 실제 pane 크기를 사용해 Jev가 배치를 선택한다. 가독성 기준에 따라 좌우와 상하 분할, 비활성 탭, attach 가능한 백그라운드를 선택하고 판단과 적용 결과를 구분한다.
+- iTerm: 관리 워커 종료와 화면 변경 뒤 비활성 탭을 재배치한다. 수동 이동은 고정하고 `inspect`, `reconcile --dry-run`, `reconcile --reset-pins`로 조회와 명시 해제를 지원한다.
+
+### Changed
+- iTerm: stop은 TFX 표식이 있는 view만 닫고 수동 attach와 사용자 view를 보존한다.
+
+### Fixed
+- iTerm: 기본 생성과 재배치에서 선택된 탭과 입력 포커스를 보존한다. 명시 `--focus`만 전환하며 API 오류에서도 생성 후 복원이나 포커스 이동 폴백을 사용하지 않는다.
+- iTerm: 일반 탭의 빈 tmux 연결 ID와 정상 종료로 줄어든 분할 트리를 처리해, 자동 분할과 종료 후 재배치가 제외되는 문제를 수정한다.
+
+## [10.95.4] - 2026-11-04
+
+### Changed
+- workers: 관리 Codex exec/review와 일반 TUI에 공식 `--dangerously-bypass-hook-trust`를 기본 전달한다. `tfx-live start`와 `tfx lead --cli codex`의 `--no-bypass-hook-trust`, `TFX_CODEX_BYPASS_HOOK_TRUST=0`으로 끄며 multi의 headless와 대화형 경로에도 적용한다. 활성 훅은 사전 확인 없이 샌드박스 밖에서 실행될 수 있고, 우회는 해당 실행에 한정한다.
+
+### Fixed
+- tfx-live: 훅 검토 화면에서 메뉴 키를 보내지 않고 `ready: false`, `blockedBy: "codex-hooks-review"`와 직접 검토 안내를 반환한다. 공유 daemon attach는 적용되지 않는 관리 우회 플래그를 제외하고 차단 보고를 유지한다.
+- multi: headless 워커와 리뷰어에 훅 신뢰 opt-out 환경을 전달하고, 대화형 Codex의 훅 검토 메뉴에 업무 프롬프트와 Enter가 전송되지 않도록 차단한다.
+
+## [10.95.3] - 2026-11-04
+
+### Fixed
+- hud: Claude statusLine에서 알림용 30칸을 항상 빼던 처리를 제거해 화면 여백이 남아도 계정 뒤의 ctx와 Jev 표시가 잘리는 문제를 수정한다. 기본 여백 4칸과 좁은 화면 동작, band와 다른 CLI의 폭 처리는 유지한다.
+
+## [10.95.2] - 2026-11-03
+
+### Fixed
+- mcp: 미설치 추천을 리드의 사용자 설치 제안과 승인 질문으로 연결한다. 워커는 리드에게 보고하고, 설치 여부가 불명확하면 먼저 확인한다. 승인 범위는 추천된 MCP에 한정하고 기존 작업과 명시 승인은 보존한다.
+
+## [10.95.1] - 2026-11-03
+
+### Fixed
+- mcp: 홈에 복사된 실행 래퍼가 MCP 필터를 설치 패키지 경로에서 먼저 로드한다. 패키지 내부 의존성을 찾지 못해 워커가 종료되는 문제를 수정하고 명시 override와 기존 fallback을 보존한다.
+
+## [10.95.0] - 2026-11-03
+
+### Added
+- judge: `tfx judge worker-model --task SUMMARY --agent ROLE --cli codex|claude|agy`가 세션 생성 없이 모델 가족, 모델, effort, 신뢰도와 선택 출처를 반환한다.
+- mcp: 등록된 추천 MCP를 Codex exec와 Claude 워커의 실행별 설정에 연결한다. Claude는 private config와 strict 옵션을 사용하며 AGY와 native metadata 경로는 보류 이유를 기록한다.
+
+### Changed
+- workers: 워커별 모델과 effort를 전달하고 Jev 선택, 규칙 폴백, 명시 설정과 실제 실행 인자를 구분한다. 원 task로 한 번 판정하고 Claude progressive 조회는 동시에 시작한다.
+- workers: Jev가 비활성인 Claude 직접 워커도 역할 기본 모델을 실행 인자로 전달한다. 사용자 명시 모델과 effort가 우선이며 전역 설정은 변경하지 않는다.
+- mcp: 명시 profile, 서버 허용 목록, 도구 제한과 프로젝트 승인을 보존한다. 허용 목록 내부의 단일 서버 적용을 지원하며 미설치 서버와 새 플러그인은 설치하지 않는다.
+
+### Fixed
+- workers: 모델 명시 시 Jev 권한 모드가 누락되거나 effort 단독 입력과 사전 조회 실패로 실행이 종료되는 문제를 수정한다. ultra 제한과 Luna 폴백의 실제 인자도 보존한다.
+- mcp: Claude 워커 취소 시 자식 종료를 기다리기 전에 소유 config를 정리하고 SIGHUP도 처리한다. 설정 전달과 실제 연결 및 도구 호출 성공은 별도로 기록한다.
+
+## [10.94.0] - 2026-11-03
+
+### Added
+- mcp: 기존 route, multi headless와 task가 있는 lead에서 Claude, Codex, Antigravity의 작업별 MCP 추천을 Jev로 생성한다. 출처, confidence, 설치 상태와 승인 필요 여부를 함께 전달한다.
+- mcp: 공식 MCP Registry의 운영 API를 캐시하고 원 작업의 어휘, 구조화된 프로젝트 정보와 명시 검색어로 후보를 조회한다. `tfx mcp catalog-refresh`는 카탈로그만 갱신한다.
+
+### Changed
+- mcp: 추천은 설치와 새 활성화를 수행하지 않으며 `applied=false`로 표시한다. 카탈로그와 Jev의 실패는 기존 작업 실행을 막지 않는다.
+- lead: 작업 요약이 없는 호출은 MCP 추천을 보류한다. 기존 모델, effort, 권한과 명시 MCP 정책의 우선순위는 유지한다.
+
+## [10.93.3] - 2026-11-03
+
+### Fixed
+- jev: `tfx judge route`가 맞는 스킬 분기 없음, 낮은 신뢰도, 호출 실패를 모두 null로 표시하던 출력에 `diagnostics`를 추가하여 보류 이유와 원 판정값을 구분한다.
+- lead: Jev 복잡도 판정을 채택하지 않은 이유와 원 choice, confidence를 JSON과 사람 출력에 보존한다. 기존 신뢰도 기준과 명시한 모델, 런처의 우선순위는 유지한다.
+
+## [10.93.2] - 2026-11-03
+
+### Fixed
+- tfx-live: 로컬 Codex 신규 thread의 생성 RPC에 `never`, `danger-full-access`를 명시하여 공유 daemon 경로에서도 기본 시작 권한을 적용한다. remote TUI resume이 거부하는 권한 CLI 플래그는 계속 제거한다.
+
+### Changed
+- tfx-live: Codex `start --sandbox`는 `on-request`, `workspace-write`로 제한한다. `--sandbox` 없는 unloaded resume은 기존 권한을 보존한다.
+- tfx-live: TUI attach 뒤 같은 thread의 `approvalPolicy`, `sandbox`, `permissionsVerified`를 시작 결과에 포함한다. readback 실패와 불일치는 `ready: false`와 경고로 보고하며 기존 세션은 유지한다.
+- tfx-live, tfx-lead: loaded thread의 `/permissions` 변경과 같은 history 수동 복구 절차, readback과 실제 다음 턴 권한의 차이를 명시한다.
 
 ## [10.93.1] - 2026-11-03
 

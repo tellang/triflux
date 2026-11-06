@@ -3,8 +3,8 @@
 VERSION="2.7"
 
 # 사용법:
-#   tfx-route.sh <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file]
-#   tfx-route.sh --async <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file]
+#   tfx-route.sh <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file] [mcp_task_file]
+#   tfx-route.sh --async <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file] [mcp_task_file]
 #   tfx-route.sh --job-status <job_id>
 #   tfx-route.sh --job-result <job_id>
 #
@@ -237,9 +237,18 @@ _kill_tracked_worker_unix() {
   kill $all 2>/dev/null || true
 }
 
+cleanup_mcp_files() {
+  if [[ -n "${CLAUDE_MCP_CONFIG:-}" ]]; then
+    rm -f -- "$CLAUDE_MCP_CONFIG"
+    rmdir -- "$(dirname "$CLAUDE_MCP_CONFIG")" 2>/dev/null || true
+    CLAUDE_MCP_CONFIG=""
+  fi
+  [[ -z "${MCP_PLAN_FILE:-}" ]] || rm -f -- "$MCP_PLAN_FILE"
+}
+
 cleanup_workers() {
   deregister_agent 2>/dev/null || true
-  [[ ! -f "$_PID_TRACK" ]] && return
+  if [[ ! -f "$_PID_TRACK" ]]; then cleanup_mcp_files; return; fi
   local self_pid="${BASHPID:-}"
   [[ -n "$self_pid" ]] || self_pid="$(exec sh -c 'echo "$PPID"')"
   while IFS= read -r pid; do
@@ -254,6 +263,7 @@ cleanup_workers() {
     esac
   done < "$_PID_TRACK"
   rm -f "$_PID_TRACK"
+  cleanup_mcp_files
 }
 
 # ── Preflight env vars (P0 prompt-dodge): git/npm/gh 자동 응답 ──
@@ -273,7 +283,7 @@ _preflight_check_gh_auth() {
 _preflight_check_gh_auth
 
 # MCP override 대상은 이 파일에 정의된 서버로 한정한다.
-_CODEX_CONFIG="${TFX_CODEX_CONFIG:-${HOME}/.codex/config.toml}"
+_CODEX_CONFIG="${TFX_CODEX_CONFIG:-${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME}/.codex}}/config.toml}"
 
 _sanitize_codex_legacy_profiles() {
   local config="${1:-$_CODEX_CONFIG}"
@@ -433,8 +443,15 @@ fi
 AGENT_TYPE="${1:?에이전트 타입 필수 (executor, debugger, designer 등)}"
 PROMPT="${2:?프롬프트 필수}"
 MCP_PROFILE="${3:-auto}"
+MCP_PROFILE_WAS_AUTO=false
+[[ "$MCP_PROFILE" != "auto" ]] || MCP_PROFILE_WAS_AUTO=true
+MCP_PLAN_FILE=""
+CLAUDE_MCP_CONFIG=""
+MCP_POLICY_ROW=""
 USER_TIMEOUT="${4:-}"
 CONTEXT_FILE="${5:-}"
+# 추천 입력용 데이터이며 실행 권한과 CLI 정책에는 사용하지 않는다.
+MCP_TASK_FILE="${6:-}"
 
 case "$AGENT_TYPE" in
   multi|team)
@@ -701,7 +718,11 @@ bridge_cli() {
     return 127
   fi
 
-  "$NODE_BIN" "$bridge_script" "$@" 2>/dev/null
+  if [[ "${1:-}" == "judge-mcp" ]]; then
+    "$NODE_BIN" "$bridge_script" "$@"
+  else
+    "$NODE_BIN" "$bridge_script" "$@" 2>/dev/null
+  fi
 }
 
 # 키는 JS에서만 읽는다. 셸에는 활성 여부만 전달한다.
@@ -986,7 +1007,7 @@ auto_reroute() {
   # EXIT trap 정리 — exec는 현재 프로세스를 교체하므로 trap이 실행되지 않음
   declare -F cleanup_workers >/dev/null && cleanup_workers
   TFX_CLI_MODE="$target_cli" exec bash "${BASH_SOURCE[0]}" \
-    "$AGENT_TYPE" "$PROMPT" "$MCP_PROFILE" "${USER_TIMEOUT:-}" "${CONTEXT_FILE:-}"
+    "$AGENT_TYPE" "$PROMPT" "$MCP_PROFILE" "${USER_TIMEOUT:-}" "${CONTEXT_FILE:-}" "${MCP_TASK_FILE:-}"
 }
 
 capture_workspace_signature() {
@@ -1428,8 +1449,12 @@ apply_codex_concrete_effort_guard() {
   [[ -n "$profile" ]] || return 0
 
   local allow_ultra=0
-  if [[ "$CODEX_OVERRIDE_PROFILE" == "astra_ultra" && -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]]; then
+  if [[ "$CODEX_OVERRIDE_PROFILE" == "astra_ultra" && -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]] && ! is_nested_codex_runtime; then
     allow_ultra=1
+  fi
+  local effort_policy_nested=0
+  if is_nested_codex_runtime || [[ -n "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]]; then
+    effort_policy_nested=1
   fi
   local effort target_profile=""
   effort=""
@@ -1460,16 +1485,19 @@ apply_codex_concrete_effort_guard() {
   if managed_spec=$("$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
     const { modelEffortFromProfile, profileFromModelEffort, resolveCodexModelEffort } = await import(pathToFileURL(process.argv[1]).href);
-    const argv = process.argv.slice(4);
+    const { resolveWorkerEffort } = await import(new URL("./agent-route-policy.mjs", pathToFileURL(process.argv[1])).href);
+    const argv = process.argv.slice(5);
     let explicitEffort;
     for (let i = 0; i < argv.length; i++) {
       if (argv[i] === "-c" && argv[i + 1]?.startsWith("model_reasoning_effort=")) {
         explicitEffort = argv[i + 1].slice("model_reasoning_effort=".length).replace(/^"|"$/g, "");
       }
     }
-    let requested = modelEffortFromProfile("codex", process.argv[2], explicitEffort) || modelEffortFromProfile("codex", process.argv[2]);
+    const defaults = modelEffortFromProfile("codex", process.argv[2]);
+    let requested = modelEffortFromProfile("codex", defaults?.family || process.argv[2], explicitEffort) || defaults;
     if (!requested) process.exit(0);
-    if (requested.effort === "ultra" && process.argv[3] !== "1") requested = { family: "astra", effort: "max" };
+    const guardedEffort = resolveWorkerEffort("codex", process.argv[3], requested.effort, process.argv[4] === "1");
+    if (guardedEffort !== requested.effort) requested = { family: "astra", effort: guardedEffort };
     try {
       const resolved = resolveCodexModelEffort(requested, {
         codexHome: process.env.CODEX_HOME || process.env.TFX_CODEX_HOME,
@@ -1483,7 +1511,7 @@ apply_codex_concrete_effort_guard() {
       console.error(`[tfx-route] ${error.message}`);
       process.exit(error.code === "unsupported-effort" ? 78 : 1);
     }
-  ' "${CODEX_PROFILE_MODULE%/*}/model-effort.mjs" "$profile" "$allow_ultra" "${args[@]}"); then
+  ' "${CODEX_PROFILE_MODULE%/*}/model-effort.mjs" "$profile" "$AGENT_TYPE" "$effort_policy_nested" "${args[@]}"); then
     IFS=$'\x1e' read -r managed_family managed_effort managed_profile <<< "$managed_spec"
   else
     local resolver_status=$?
@@ -1618,10 +1646,13 @@ is_nested_codex_runtime() {
 }
 
 apply_codex_profile_override() {
-  [[ "$CLI_TYPE" == "codex" && "$TFX_CODEX_PROFILE" != "auto" ]] || return 0
+  [[ "$CLI_TYPE" == "codex" ]] || return 0
   local review_suffix=""
   [[ "$CLI_ARGS" != *" review" ]] || review_suffix=" review"
-  CLI_ARGS="exec --profile ${CODEX_OVERRIDE_PROFILE} $(build_codex_base)${review_suffix}"
+  local profile="$CODEX_POLICY_PROFILE"
+  [[ "$TFX_CODEX_PROFILE" == "auto" ]] || profile="$CODEX_OVERRIDE_PROFILE"
+  CLI_ARGS="exec --profile ${profile} $(build_codex_base)${review_suffix}"
+  [[ "$TFX_CODEX_PROFILE" != "auto" ]] || return 0
   echo "[tfx-route] Codex profile override: ${TFX_CODEX_PROFILE} -> ${CODEX_OVERRIDE_PROFILE}" >&2
 }
 
@@ -1658,6 +1689,7 @@ resolve_mcp_filter_script() {
   [[ -n "$MCP_FILTER_SCRIPT" && -f "$MCP_FILTER_SCRIPT" ]] && { printf '%s\n' "$MCP_FILTER_SCRIPT"; return 0; }
   local sd; sd="$(_get_script_dir)"
   MCP_FILTER_SCRIPT=$(_resolve_script "" \
+    ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/lib/mcp-filter.mjs"} \
     ${sd:+"$sd/lib/mcp-filter.mjs"} \
     "$PWD/scripts/lib/mcp-filter.mjs" "$PWD/lib/mcp-filter.mjs") || return 1
   printf '%s\n' "$MCP_FILTER_SCRIPT"
@@ -1694,6 +1726,8 @@ resolve_mcp_policy() {
     return 1
   fi
 
+  MCP_POLICY_ROW="$_raw"
+
   # mcp-filter delimited 출력의 6필드. 필드 수가 바뀌면 마지막 변수에 나머지가 섞인다.
   local _allowed_servers _codex_flags _codex_config_json
   IFS=$'\x1e' read -r MCP_PROFILE_REQUESTED MCP_RESOLVED_PROFILE MCP_HINT \
@@ -1705,23 +1739,29 @@ resolve_mcp_policy() {
 }
 
 get_claude_model() {
+  if [[ "${TFX_WORKER_CLI:-}" == "claude" && -n "${TFX_WORKER_MODEL:-}${TFX_WORKER_EFFORT:-}" ]]; then
+    echo "${TFX_WORKER_MODEL:-}"
+    return
+  fi
   if [[ -n "${JEV_CLAUDE_MODEL:-}" ]]; then
     echo "$JEV_CLAUDE_MODEL"
     return
   fi
-  case "$AGENT_TYPE" in
-    explore) echo "haiku" ;;
-    security-reviewer) echo "fable" ;;
-    document-specialist|designer|writer|antigravity|agy) echo "opus" ;;
-    code-reviewer|quality-reviewer) echo "opus" ;;
-    *) echo "sonnet" ;;
-  esac
+  "$NODE_BIN" --input-type=module -e '
+    import { pathToFileURL } from "node:url";
+    const { resolveClaudeWorkerDefaults } = await import(pathToFileURL(process.argv[1]).href);
+    console.log(resolveClaudeWorkerDefaults(process.argv[2]).model);
+  ' "${CODEX_PROFILE_MODULE%/*}/agent-route-policy.mjs" "$AGENT_TYPE"
 }
 
 get_claude_effort() {
-  local effort="${CLI_EFFORT:-${JEV_CLAUDE_EFFORT:-}}"
-  # 명시한 프로필은 해석된 정책 effort를 쓰고, 기본 native/폴백의 빈 값은 보존한다.
-  [[ "$TFX_CODEX_PROFILE" == "auto" ]] || effort="$CODEX_POLICY_EFFORT"
+  local effort="${JEV_CLAUDE_EFFORT:-${CLI_EFFORT:-}}"
+  if [[ "${TFX_WORKER_CLI:-}" == "claude" && -n "${TFX_WORKER_MODEL:-}${TFX_WORKER_EFFORT:-}" ]]; then
+    effort="${WORKER_SELECTED_EFFORT:-${TFX_WORKER_EFFORT:-}}"
+  else
+    # 명시한 프로필은 해석된 정책 effort를 쓰고, 기본 native/폴백의 빈 값은 보존한다.
+    [[ "$TFX_CODEX_PROFILE" == "auto" ]] || effort="$CODEX_POLICY_EFFORT"
+  fi
   case "$effort" in
     low|medium|high|xhigh|max) echo "$effort" ;;
     ultra) echo "max" ;;
@@ -2142,11 +2182,19 @@ run_antigravity_exec() {
     local _agy_model _agy_effort _agy_selection
     _agy_selection="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-argon}}")" || return $?
     IFS=$'\x1e' read -r _agy_model _agy_effort <<< "$_agy_selection"
+    if [[ "${TFX_WORKER_CLI:-antigravity}" == "antigravity" && -n "${TFX_WORKER_MODEL:-}${TFX_WORKER_EFFORT:-}" ]]; then
+      _agy_model="${TFX_WORKER_MODEL:-}"
+      _agy_effort="${WORKER_SELECTED_EFFORT:-${TFX_WORKER_EFFORT:-}}"
+      if [[ "$_agy_effort" == "ultra" ]] && is_nested_codex_runtime; then
+        _agy_effort="max"
+      fi
+    fi
     if [[ -n "$_agy_model" ]]; then
       agy_args+=("--model" "$_agy_model")
-      [[ -z "$_agy_effort" ]] || agy_args+=("--effort" "$_agy_effort")
     fi
+    [[ -z "$_agy_effort" ]] || agy_args+=("--effort" "$_agy_effort")
   fi
+  record_worker_model_launch "${agy_args[@]}"
   if [[ -n "$_print_flag" ]]; then
     # argv 상한(macOS ARG_MAX 1MiB) 안에서만 인자로 넘긴다. 초과는 조용히 자르지 않는다.
     if (( ${#prompt} > 900000 )); then
@@ -2315,6 +2363,65 @@ _codex_stdout_has_meaningful_output() {
   ' "$output_file" 2>/dev/null
 }
 
+record_worker_mcp_launch() {
+  [[ -n "$MCP_PLAN_FILE" && -s "$MCP_PLAN_FILE" ]] || return 0
+  "$NODE_BIN" -e '
+    const fs = require("fs");
+    const plan = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const application = plan.application;
+    if (process.argv[2] === "native_fallback") {
+      application.attemptedTo = application.appliedTo;
+      application.status = "deferred";
+      application.appliedTo = null;
+      application.reasons.push("native_metadata_only");
+    }
+    if (application.status === "prepared") {
+      application.status = "configured";
+      application.appliedTo = "start_args";
+    }
+    if (process.env._TFX_MCP_DEGRADED === "1" && application.cli === "codex") {
+      application.status = "deferred";
+      application.appliedTo = null;
+      application.reasons.push("mcp_preflight_unavailable");
+    }
+    fs.writeFileSync(process.argv[1], JSON.stringify(plan), { mode: 0o600 });
+    if (process.env.TFX_WORKER_MCP_FILE) fs.writeFileSync(process.env.TFX_WORKER_MCP_FILE,
+      JSON.stringify({ recommendation: plan.recommendation, application }), { mode: 0o600 });
+    console.error(`[tfx-route] MCP application: ${JSON.stringify(application)}`);
+  ' "$MCP_PLAN_FILE" "${1:-}"
+}
+
+record_worker_model_launch() {
+  [[ -n "${TFX_WORKER_MODEL_FILE:-}" && -n "${WORKER_MODEL_JSON:-}" ]] || return 0
+  "$NODE_BIN" --input-type=module -e '
+    import { writeFileSync } from "node:fs";
+    import { pathToFileURL } from "node:url";
+    const selection = JSON.parse(process.argv[1]);
+    const [file, cli, module, ...argv] = process.argv.slice(2);
+    let profile = null, model = null, effort = null;
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] === "--profile") profile = argv[++i];
+      else if (argv[i].startsWith("--profile=")) profile = argv[i].slice(10);
+      else if (argv[i] === "--model") model = argv[++i];
+      else if (argv[i] === "--effort") effort = argv[++i];
+      else if (argv[i] === "-c") {
+        const value = argv[++i] || "";
+        if (value.startsWith("model_reasoning_effort=")) effort = value.slice(23).replace(/^"|"$/g, "");
+      }
+    }
+    if (cli === "codex" && profile) {
+      const { resolveCodexProfileConfigValues } = await import(pathToFileURL(module).href);
+      const defaults = resolveCodexProfileConfigValues(profile, { allowCommand: false, persist: false });
+      model ||= defaults.model;
+      effort ||= defaults.effort;
+    }
+    writeFileSync(file, JSON.stringify({ ...selection,
+      appliedTo: "launch_arguments", runtimeConfirmed: false,
+      launch: { cli, profile, model, effort, argv },
+    }), { mode: 0o600 });
+  ' "$WORKER_MODEL_JSON" "$TFX_WORKER_MODEL_FILE" "$CLI_TYPE" "$CODEX_PROFILE_MODULE" "$@"
+}
+
 run_codex_exec() {
   refresh_codex_profiles
   local prompt="$1"
@@ -2323,7 +2430,20 @@ run_codex_exec() {
   local worker_pid
   local -a codex_args=()
   read -r -a codex_args <<< "$CLI_ARGS"
+  if [[ -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" && "${TFX_WORKER_CLI:-codex}" == "codex" ]]; then
+    [[ -z "${TFX_WORKER_MODEL:-}" ]] || codex_args+=(--model "$TFX_WORKER_MODEL")
+  fi
   codex_args=("${codex_args[0]}" ${CODEX_CONFIG_FLAGS[@]+"${CODEX_CONFIG_FLAGS[@]}"} "${codex_args[@]:1}")
+  # 재시도 인자까지 합친 뒤 invocation 한정 hook trust 정책을 한 번만 적용한다.
+  local -a hook_trust_args=()
+  local hook_trust_arg
+  for hook_trust_arg in "${codex_args[@]}"; do
+    [[ "$hook_trust_arg" == "--dangerously-bypass-hook-trust" ]] || hook_trust_args+=("$hook_trust_arg")
+  done
+  codex_args=("${hook_trust_args[@]}")
+  if [[ "${TFX_CODEX_BYPASS_HOOK_TRUST:-1}" != "0" ]]; then
+    codex_args=("${codex_args[0]}" --dangerously-bypass-hook-trust "${codex_args[@]:1}")
+  fi
   local codex_home
   codex_home="${CODEX_HOME:-${TFX_CODEX_HOME:-${HOME:-}/.codex}}"
   if [[ -n "${CLI_FAMILY:-}" && ! -f "$codex_home/$CLI_FAMILY.config.toml" ]]; then
@@ -2343,6 +2463,7 @@ run_codex_exec() {
 
   _attempt_codex_run() {
     exit_code_local=0
+    record_worker_model_launch "${codex_args[@]}"
     : > "$CODEX_LAST_MESSAGE_LOG"
     # `--` end-of-options: prompt가 '--'/'---' (front-matter 등)로 시작하면
     # clap이 flag로 파싱하는 것을 방지. fallback path에서 특히 중요.
@@ -2381,6 +2502,10 @@ run_codex_exec() {
           i=$((i + 1))
         elif [[ "$arg" == --profile=* ]]; then
           new_args+=("--profile=$fallback_profile")
+        elif [[ "$arg" == "--model" || "$arg" == "-m" ]]; then
+          i=$((i + 1))
+        elif [[ "$arg" == --model=* || "$arg" == -m=* ]]; then
+          continue
         elif [[ "$arg" == "-c" && ( "$next_arg" == model=* || "$next_arg" == model_reasoning_effort=* ) ]]; then
           i=$((i + 1))
         else
@@ -2403,38 +2528,31 @@ run_codex_exec() {
 }
 
 apply_jev_pre_route() {
-  jev_enabled || return 0
-  [[ -n "${PROMPT:-}" ]] || return 0
+  [[ -n "${recommendation_task:-}" ]] || return 0
 
   local jev_row=""
   if ! jev_row=$(bridge_cli judge-route \
     --agent "$AGENT_TYPE" \
-    --cli-type "${TFX_CLI_MODE:-codex}" \
-    --prompt "$PROMPT" \
-    --delimited 2>/dev/null); then
+    --cli-type "${CLI_TYPE/claude-native/claude}" \
+    --prompt "$recommendation_task" \
+    --worker-model --delimited); then
     return 0
   fi
   [[ -n "$jev_row" ]] || return 0
 
   local _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff
   local _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf _jev_tier_shift
+  local _worker_profile _worker_model _worker_effort
   IFS=$'\x1e' read -r _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff \
-    _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf _jev_tier_shift <<< "$jev_row"
+    _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf _jev_tier_shift \
+    _worker_profile _worker_model _worker_effort WORKER_MODEL_JSON <<< "$jev_row"
 
-  local _jev_codex_reason=explicit_override_preserved _jev_agy_reason=explicit_override_preserved
-  [[ "${TFX_CODEX_PROFILE:-auto}" != "auto" ]] || _jev_codex_reason=no_recommendation
-  [[ -n "${TFX_GEMINI_PROFILE:-}" ]] || _jev_agy_reason=no_recommendation
-  if [[ "${TFX_CODEX_PROFILE:-auto}" == "auto" && -n "$_jev_codex_prof" ]]; then
-    TFX_CODEX_PROFILE="$_jev_codex_prof"
-    _jev_codex_reason=jev_applied
-  fi
-  if [[ "${TFX_CODEX_PROFILE:-auto}" == "auto" && -n "$_jev_tier_shift" ]]; then
-    JEV_TIER_SHIFT="$_jev_tier_shift"
-    _jev_codex_reason="jev_tier_${_jev_tier_shift}"
-  fi
-  if [[ -z "${TFX_GEMINI_PROFILE:-}" && -n "$_jev_agy_prof" ]]; then
-    TFX_GEMINI_PROFILE="$_jev_agy_prof"
-    _jev_agy_reason=jev_applied
+  WORKER_SELECTED_EFFORT="$_worker_effort"
+  if [[ "$CLI_TYPE" == "codex" && -n "$_worker_profile" ]]; then
+    TFX_CODEX_PROFILE="$_worker_profile"
+    CODEX_OVERRIDE_PROFILE="$_worker_profile"
+  elif [[ "$CLI_TYPE" == "antigravity" && -n "$_worker_profile" ]]; then
+    TFX_GEMINI_PROFILE="$_worker_profile"
     export TFX_GEMINI_PROFILE
   fi
   if [[ "${TFX_EXECUTION_MODE:-auto}" == "auto" && -n "$_jev_exec_mode" ]]; then
@@ -2449,24 +2567,40 @@ apply_jev_pre_route() {
   if [[ -z "${TFX_EXPECTED_DURATION_SEC:-}" && -n "$_jev_dur" ]]; then
     TFX_EXPECTED_DURATION_SEC="$_jev_dur"
   fi
-  JEV_CLAUDE_MODEL="$_jev_claude_mod"
-  JEV_CLAUDE_EFFORT="$_jev_claude_eff"
-  echo "[tfx-route] Jev pre-route: complexity=${_jev_comp} recommended_codex=${_jev_codex_prof:-none} effective_codex=${TFX_CODEX_PROFILE:-auto} codex_reason=${_jev_codex_reason} recommended_agy=${_jev_agy_prof:-none} effective_agy=${TFX_GEMINI_PROFILE:-auto} agy_reason=${_jev_agy_reason} mode=${TFX_EXECUTION_MODE} mcp=${MCP_PROFILE} conf=${_jev_conf}" >&2
+  JEV_CLAUDE_MODEL="$_worker_model"
+  JEV_CLAUDE_EFFORT="$_worker_effort"
+  echo "[tfx-route] worker-model: $WORKER_MODEL_JSON" >&2
 }
 
 # ── 메인 실행 ──
 main() {
+  local recommendation_task="$PROMPT"
+  if [[ -n "$MCP_TASK_FILE" ]]; then
+    # 명령 치환이 원 작업 끝의 개행을 지우지 않도록 끝 문자를 붙였다가 뺀다.
+    if recommendation_task=$(cat -- "$MCP_TASK_FILE" 2>/dev/null && printf '.'); then
+      recommendation_task="${recommendation_task%.}"
+    else
+      recommendation_task=""
+      echo '[tfx-route] MCP recommendation: unavailable applied=false diagnostic=mcp_task_file_unreadable' >&2
+    fi
+  fi
   # 종료 시 per-process 에이전트 파일 + 워커 프로세스 정리
   trap 'cleanup_workers' EXIT
+  trap 'exit 143' TERM HUP
+  trap 'exit 130' INT
 
-  apply_jev_pre_route
   route_agent "$AGENT_TYPE"
   apply_cli_mode
   apply_no_claude_native_mode
   apply_verifier_override
+  apply_cli_disable_policy
+  apply_jev_pre_route
+  [[ "$CLI_TYPE" != "antigravity" ]] || CLI_ARGS="$(build_antigravity_base)"
   apply_codex_profile_override
   apply_retry_snapshot_cli_invocation
-  apply_cli_disable_policy
+  if [[ "$CLI_TYPE" == "codex" && "${TFX_WORKER_CLI:-codex}" == "codex" && -n "${TFX_WORKER_EFFORT:-}" && -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]]; then
+    CLI_ARGS+=" -c model_reasoning_effort=\"${TFX_WORKER_EFFORT}\""
+  fi
   apply_codex_concrete_effort_guard
 
   # CLI 경로 해석
@@ -2543,8 +2677,39 @@ ${ctx_content}
     fi
   fi
 
+  # 원 profile 입력과 최종 provider로 기존 추천을 한 번 얻고 실행별 설정을 준비한다.
+  local recommendation_cli="$CLI_TYPE" recommendation_context="" _mcp_row _mcp_flags _mcp_clear_hint
+  MCP_PLAN_FILE="$(mktemp "${TFX_TMP}/worker-mcp-plan.XXXXXX")"
+  if jev_enabled; then
+    if bridge_cli judge-mcp --cli-type "$recommendation_cli" --cwd "$PWD" --prompt "$recommendation_task" \
+      --profile-was-auto "$MCP_PROFILE_WAS_AUTO" --policy-row "$MCP_POLICY_ROW" --apply-file "$MCP_PLAN_FILE" < /dev/null >/dev/null; then
+      recommendation_context=$("$NODE_BIN" -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); process.stdout.write(p.context)' "$MCP_PLAN_FILE")
+      [[ -z "$recommendation_context" ]] || PROMPT="${PROMPT}${recommendation_context}"
+      _mcp_row=$("$NODE_BIN" -e 'const p=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); process.stdout.write([p.codexConfigOverrides.flatMap(v=>["-c",v]).join("\x1f"),p.configFile||"",String(p.clearHint)].join("\x1e"))' "$MCP_PLAN_FILE")
+      IFS=$'\x1e' read -r _mcp_flags CLAUDE_MCP_CONFIG _mcp_clear_hint <<< "$_mcp_row"
+      IFS=$'\x1f' read -r -a CODEX_CONFIG_FLAGS <<< "$_mcp_flags"
+      [[ "$_mcp_clear_hint" != "true" ]] || MCP_HINT=""
+    else
+      echo '[tfx-route] MCP recommendation: unavailable applied=false diagnostic=recommendation_bridge_failed' >&2
+      : > "$MCP_PLAN_FILE"
+    fi
+  fi
+  if [[ ! -s "$MCP_PLAN_FILE" ]]; then
+    "$NODE_BIN" -e '
+      const fs = require("fs");
+      const cli = process.argv[2];
+      const reason = cli === "antigravity" ? "agy_server_session_isolation_unverified"
+        : cli === "claude-native" ? "native_metadata_only"
+        : process.argv[3] === "0" ? "jev_disabled" : "recommendation_bridge_failed";
+      fs.writeFileSync(process.argv[1], JSON.stringify({ recommendation: null,
+        application: { cli: cli === "antigravity" ? "agy" : cli, status: "deferred", reasons: [reason],
+          servers: [], applied: false, appliedTo: null, runtimeConfirmed: false, toolVerified: false } }), { mode: 0o600 });
+    ' "$MCP_PLAN_FILE" "$CLI_TYPE" "${TFX_JEV:-1}"
+  fi
+
   # Claude 네이티브 에이전트는 이 스크립트로 처리 불가
   if [[ "$CLI_TYPE" == "claude-native" ]]; then
+    record_worker_mcp_launch
     if [[ -n "$TFX_TEAM_NAME" ]]; then
       local native_model native_adapter
       native_adapter="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/cli-claude.mjs"
@@ -2646,6 +2811,7 @@ FALLBACK_EOF
       _codex_skill_prompt="$(prepend_skill "$FULL_PROMPT"; printf '%s' "$_codex_skill_sentinel")"
       FULL_PROMPT="${_codex_skill_prompt%"$_codex_skill_sentinel"}"
     fi
+    record_worker_mcp_launch
     run_codex_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
 
   elif [[ "$CLI_TYPE" == "antigravity" ]]; then
@@ -2665,6 +2831,7 @@ FALLBACK_EOF
     local _agy_aoc_prompt
     _agy_aoc_prompt="$(append_agy_anti_overclaim "$FULL_PROMPT" "${WORKDIR:-$PWD}"; printf '%s' "$_agy_aoc_sentinel")"
     FULL_PROMPT="${_agy_aoc_prompt%"$_agy_aoc_sentinel"}"
+    record_worker_mcp_launch
     run_antigravity_exec "$FULL_PROMPT" "$use_tee" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
       local agy_stderr_bytes=0
@@ -2683,8 +2850,8 @@ FALLBACK_EOF
     local -a claude_worker_args=(
       "--command" "$CLI_CMD"
       "--command-args-json" "$CLAUDE_BIN_ARGS_JSON"
-      "--model" "$claude_model"
     )
+    [[ -z "$claude_model" ]] || claude_worker_args+=("--model" "$claude_model")
     case "${TFX_EXECUTION_MODE:-bypass}" in
       read_only)
         claude_worker_args+=("--permission-mode" "plan")
@@ -2701,6 +2868,11 @@ FALLBACK_EOF
     esac
     [ -n "$claude_effort" ] && claude_worker_args+=("--effort" "$claude_effort")
 
+    if [[ -n "$CLAUDE_MCP_CONFIG" ]]; then
+      claude_worker_args+=("--mcp-config" "$CLAUDE_MCP_CONFIG" "--extra-arg" "--strict-mcp-config")
+    fi
+    record_worker_mcp_launch
+    record_worker_model_launch "${claude_worker_args[@]}"
     run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?
     if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 && "$_AGY_CLAUDE_FALLBACK" == "1" ]]; then
       echo "[tfx-route] Claude fallback 워커 실패(exit=${exit_code})." >&2
@@ -2723,6 +2895,7 @@ EOF
       : > "$STDERR_LOG"
       exit_code=0
       CLI_TYPE="claude-native"
+      record_worker_mcp_launch native_fallback
     fi
   fi
 

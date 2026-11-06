@@ -73,7 +73,11 @@ export function buildCliCommand(cli, prompt) {
     ].find((path) => path && existsSync(path));
     if (!routeScript) throw new Error("tfx-route.sh 를 찾지 못했다.");
     const quote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
-    const reviewEnv = ["TFX_REVIEW_AUTHOR", "TFX_CLI_MODE"]
+    const reviewEnv = [
+      "TFX_REVIEW_AUTHOR",
+      "TFX_CLI_MODE",
+      "TFX_CODEX_BYPASS_HOOK_TRUST",
+    ]
       .filter((key) => process.env[key] !== undefined)
       .map((key) => `${key}=${quote(process.env[key])} `)
       .join("");
@@ -86,7 +90,12 @@ export function buildCliCommand(cli, prompt) {
   }
   switch (resolveCli(cli)) {
     case "codex":
-      return "codex --dangerously-bypass-approvals-and-sandbox";
+      return (
+        "codex --dangerously-bypass-approvals-and-sandbox" +
+        (process.env.TFX_CODEX_BYPASS_HOOK_TRUST === "0"
+          ? ""
+          : " --dangerously-bypass-hook-trust")
+      );
     case "antigravity":
       // 실행 파일은 agy 다. antigravity 는 셸 별칭이라 비대화형 셸에 없다.
       return "agy";
@@ -150,12 +159,42 @@ function capturePaneText(target) {
  * TUI가 그리기를 마칠 때까지 대기: pane 내용이 비어 있지 않고 연속 두 번의
  * capture가 동일(정적)해질 때까지 폴링한다. CLI 종류와 무관한 준비 신호이며
  * 시간 초과 시 그냥 진행한다 (기존 고정-대기 동작으로 degrade).
+ * Codex 훅 검토 화면은 입력 전에 명시적으로 차단한다.
  */
-function waitForComposerReady(target) {
+function waitForComposerReady(target, cli) {
   const deadline = Date.now() + COMPOSER_READY_TIMEOUT_MS;
   let prev = null;
   while (Date.now() < deadline) {
     const text = capturePaneText(target);
+    if (resolveCli(cli) === "codex") {
+      const options = [
+        "1. Review hooks",
+        "2. Trust all and continue",
+        "3. Continue without trusting (hooks won't run)",
+      ];
+      const lines = text.split(/\r?\n/u).map((line) => line.trim());
+      const lastSelector = lines
+        .slice(lines.findLastIndex(isComposerPromptLine))
+        .join(" ")
+        .replace(/\s+/gu, " ");
+      const menuText = lines
+        .map((line) => line.replace(/^›\s*/u, ""))
+        .join(" ")
+        .replace(/\s+/gu, " ");
+      // 접힌 메뉴와 selector의 이어지는 줄을 합치되 마지막 composer로 이전 인용을 구분한다.
+      if (
+        menuText.includes("Hooks need review") &&
+        options.some((option) => lastSelector.startsWith(`› ${option}`)) &&
+        menuText.includes(options.join(" "))
+      ) {
+        const error = new Error(
+          `codex-hooks-review: ${target} pane에 attach해 훅을 직접 검토한 뒤 진행하세요.`,
+        );
+        error.ready = false;
+        error.blockedBy = "codex-hooks-review";
+        throw error;
+      }
+    }
     if (text.trim() && prev !== null && text === prev) return;
     prev = text;
     sleepMs(400);
@@ -391,7 +430,7 @@ export function injectPrompt(
     const filePath = tmpFile.replace(/\\/g, "/");
     let cleanupScheduled = false;
     try {
-      waitForComposerReady(target);
+      waitForComposerReady(target, cli);
       psmuxExec(["select-pane", "-t", target]);
       psmuxExec(["send-keys", "-t", target, "-l", `@${filePath}`]);
       confirmSubmit(target, `@${filePath}`, cli, () =>
@@ -419,7 +458,7 @@ export function injectPrompt(
 
     if (detectMultiplexer() === "psmux") {
       const sessionName = getPsmuxSessionName(target);
-      waitForComposerReady(target);
+      waitForComposerReady(target, cli);
       psmuxExec(["load-buffer", "-t", sessionName, toMuxPath(tmpFile)]);
       psmuxExec(["select-pane", "-t", target]);
       psmuxExec(["paste-buffer", "-t", target]);
@@ -430,7 +469,7 @@ export function injectPrompt(
     }
 
     // tmux load-buffer → paste-buffer → (정착 지연 + 제출 확인) Enter
-    waitForComposerReady(target);
+    waitForComposerReady(target, cli);
     muxExec(["load-buffer", toMuxPath(tmpFile)]);
     // -p 가 없으면 줄바꿈이 CR(Enter)로 들어가 여러 줄 지시문이 줄마다 제출된다.
     muxExec(["paste-buffer", "-p", "-t", target]);

@@ -72,6 +72,134 @@ function runHud(
     : result.stdout.replace(/\x1b\[[0-9;]*m/g, "");
 }
 
+describe("HUD statusLine 폭", () => {
+  const input = {
+    context_window: { used_percentage: 37, context_window_size: 200000 },
+    rate_limits: {
+      five_hour: { used_percentage: 17 },
+      seven_day: { used_percentage: 83 },
+    },
+  };
+  const env = {
+    COLUMNS: "89",
+    TFX_DISABLE_CODEX: "0",
+    TFX_JEV: "1",
+    TFX_JEV_CLI: "/missing-test-jev",
+  };
+
+  before(() => {
+    mkdirSync(join(mockHomeDir, ".omc", "config"), { recursive: true });
+    writeFileSync(
+      join(mockHomeDir, ".claude.json"),
+      JSON.stringify({ oauthAccount: { emailAddress: "pte1@example.test" } }),
+    );
+    mkdirSync(join(mockHomeDir, ".codex"), { recursive: true });
+    const payload = Buffer.from(
+      JSON.stringify({ email: "pte1@example.test" }),
+    ).toString("base64url");
+    writeFileSync(
+      join(mockHomeDir, ".codex", "auth.json"),
+      JSON.stringify({ tokens: { id_token: `e30.${payload}.test` } }),
+    );
+  });
+
+  after(() => {
+    rmSync(join(mockHomeDir, ".omc"), { recursive: true, force: true });
+    rmSync(join(mockHomeDir, ".claude.json"), { force: true });
+    rmSync(join(mockHomeDir, ".codex"), { recursive: true, force: true });
+  });
+
+  it("89칸에서 계정과 ctx, j를 표시하고 기본 여백을 남긴다", () => {
+    for (const tier of ["full", "compact"]) {
+      writeFileSync(
+        join(mockHomeDir, ".omc", "config", "hud.json"),
+        JSON.stringify({ tier }),
+      );
+      const output = runHud(env, { args: ["--cache-only"], input });
+      const lines = output.trim().split("\n");
+      assert.match(lines[0], /^c:.*pte1 +ctx:37%$/);
+      assert.match(lines[1], /^x:.*pte1 +j$/);
+      assert.deepEqual(
+        lines.map((line) => line.slice(0, 2)),
+        ["c:", "x:", "a:"],
+      );
+      assert.ok(
+        lines.every((line) => line.length + 4 <= 89),
+        output,
+      );
+    }
+    const narrow = runHud(
+      { ...env, COLUMNS: "55" },
+      { args: ["--cache-only"], input },
+    );
+    assert.ok(
+      narrow
+        .trim()
+        .split("\n")
+        .every((line) => line.length + 4 <= 55),
+      narrow,
+    );
+  });
+
+  it("band와 다른 CLI는 Claude statusLine 여백을 공제하지 않는다", () => {
+    writeFileSync(
+      join(mockHomeDir, ".omc", "config", "hud.json"),
+      JSON.stringify({ tier: "full" }),
+    );
+    for (const [product, args] of [
+      [undefined, ["--band"]],
+      ["codex", []],
+      ["antigravity", []],
+    ]) {
+      const render = (columns) =>
+        runHud(
+          { ...env, COLUMNS: String(columns) },
+          {
+            args: ["--cache-only", ...args],
+            input: { ...input, product, terminal_width: 55 },
+          },
+        );
+      const output = render(55);
+      assert.ok(
+        output
+          .trim()
+          .split("\n")
+          .some((line) => line.length === 55),
+        output,
+      );
+      if (product) assert.equal(render(89), output);
+      else assert.match(output, /^tfx-band 1\n/);
+    }
+  });
+
+  it("좁은 화면과 유효하지 않은 COLUMNS에서 출력 폭을 보존한다", () => {
+    rmSync(join(mockHomeDir, ".omc", "config", "hud.json"));
+    for (const columns of [1, 4, 30, 35, 39, 40, 43, 44, 59, 60, 80]) {
+      const output = runHud(
+        { ...env, COLUMNS: String(columns) },
+        { args: ["--cache-only"], input },
+      );
+      assert.ok(
+        output
+          .trim()
+          .split("\n")
+          .every((line) => line.length <= columns),
+        output,
+      );
+      if (columns === 35) assert.equal(output.trim().split("\n").length, 1);
+      if (columns === 44) assert.equal(output.trim().split("\n").length, 3);
+    }
+    for (const columns of ["", "0", "-1", "invalid", "Infinity"]) {
+      const output = runHud(
+        { ...env, COLUMNS: columns },
+        { args: ["--cache-only"], input },
+      );
+      assert.match(output, /^c:/m);
+      assert.doesNotMatch(output, /NaN|Infinity|RangeError/);
+    }
+  });
+});
+
 describe("HUD provider visibility", () => {
   it("정책이 Codex 를 차단하면 x 행을 숨긴다", () => {
     const output = runHud({ TFX_DISABLE_CODEX: "0" });

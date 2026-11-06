@@ -89,10 +89,11 @@ async function main() {
     if (stdin.terminal_width > 0)
       process.env.COLUMNS = String(stdin.terminal_width);
   } else {
-    // Claude statusLine 은 엔진이 양옆에 2칸씩 여백을 두고, 첫 행 오른쪽에 알림을 띄운다(공식 문서). 그만큼 좁게 그린다.
-    // 알림 자리를 빼고 40칸이 안 남는 좁은 화면은 그대로 두어 원래 축소 단계를 따른다.
+    // Claude statusLine 기본 양옆 여백만 남긴다. 알림 폭은 엔진이 관리한다.
+    // 여백을 빼고 40칸이 안 남는 화면은 기존 축소 단계를 따른다.
     const reserved = Number(process.env.COLUMNS) - STATUSLINE_RESERVE_COLS;
-    if (!bandMode && reserved >= 40) process.env.COLUMNS = String(reserved);
+    if (!bandMode && Number.isFinite(reserved) && reserved >= 40)
+      process.env.COLUMNS = String(reserved);
   }
   const bandState = bandMode ? "none" : readBandState(stdin?.session_id);
   if (bandState === "all") return;

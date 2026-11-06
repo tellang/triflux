@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { test } from "node:test";
 import * as live from "../../bin/tfx-live.mjs";
 
@@ -36,6 +33,29 @@ test("Codex 시작과 재개 명령에 세션 한정 hooks=false가 있다", () 
     assert.match(command, /-c '?features.hooks=false'?/);
 });
 
+test("Codex hook-trust bypass 기본값은 시작·재개·sandbox에 한 번만 붙는다", () => {
+  for (const command of [
+    ...[{}, { model: "example", effort: "high" }, { sandbox: true }].map(
+      (opts) => live.buildLaunchKeys(live.ADAPTERS.codex, opts)[0],
+    ),
+    live.ADAPTERS.codex.resumeById(id),
+    live.ADAPTERS.codex.resumeLast(),
+  ]) {
+    assert.equal(
+      command.split("--dangerously-bypass-hook-trust").length - 1,
+      1,
+    );
+    assert.match(command, /features.hooks=false/);
+  }
+  for (const cli of ["claude", "agy"]) {
+    assert.doesNotMatch(
+      live.buildLaunchKeys(live.ADAPTERS[cli])[0],
+      /bypass-hook-trust/,
+    );
+    assert.doesNotMatch(live.ADAPTERS[cli].resumeById(id), /bypass-hook-trust/);
+  }
+});
+
 test("공유 daemon 신규 thread는 훅을 끈 뒤 TUI 연결 대상으로 반환한다", async () => {
   const { calls, client } = fakeClient();
   assert.equal(typeof live.prepareCodexThread, "function");
@@ -53,6 +73,8 @@ test("공유 daemon 신규 thread는 훅을 끈 뒤 TUI 연결 대상으로 반�
   assert.deepEqual(calls.find(([method]) => method === "thread/start")[1], {
     cwd: "/test/project",
     model: "custom-model",
+    approvalPolicy: "never",
+    sandbox: "danger-full-access",
     config: { "features.hooks": false, model_reasoning_effort: "high" },
   });
   assert.equal(
@@ -61,6 +83,25 @@ test("공유 daemon 신규 thread는 훅을 끈 뒤 TUI 연결 대상으로 반�
   );
   result.close();
   assert.equal(calls.at(-1)[0], "close");
+});
+
+test("Codex sandbox thread는 신규와 unloaded 재개 모두 제한한다", async () => {
+  for (const resume of [undefined, id]) {
+    const { calls, client } = fakeClient();
+    const prepared = await live.prepareCodexThread(
+      "/test/socket",
+      { sandbox: true, resume },
+      {
+        clientFactory: () => client,
+      },
+    );
+    prepared.close();
+    const params = calls.find(
+      ([method]) => method === (resume ? "thread/resume" : "thread/start"),
+    )[1];
+    assert.equal(params.approvalPolicy, "on-request");
+    assert.equal(params.sandbox, "workspace-write");
+  }
 });
 
 test("unloaded remote resume은 hooks 설정만 전달하고 기존 thread 권한을 보존한다", async () => {
@@ -90,6 +131,47 @@ test("unloaded remote resume은 hooks 설정만 전달하고 기존 thread 권�
     result.close();
   }
 });
+
+for (const sandbox of [
+  { type: "dangerFullAccess" },
+  { type: "readOnly", networkAccess: false },
+  {
+    type: "workspaceWrite",
+    writableRoots: ["/test/project"],
+    networkAccess: false,
+    excludeTmpdirEnvVar: false,
+    excludeSlashTmp: false,
+  },
+  { type: "externalSandbox", networkAccess: "restricted" },
+]) {
+  test(`Codex readback preserves response SandboxPolicy type: ${sandbox.type}`, async () => {
+    const { calls, client } = fakeClient();
+    const request = client.request;
+    client.request = async (method, params) => {
+      if (method !== "thread/resume") return request(method, params);
+      calls.push([method, params]);
+      return { thread: { id }, approvalPolicy: "never", sandbox };
+    };
+    const prepared = await live.prepareCodexThread(
+      "/test/socket",
+      { resume: id },
+      {
+        clientFactory: () => client,
+      },
+    );
+    try {
+      const permissions = await prepared.readPermissions();
+      assert.equal(permissions.permissionsVerified, true);
+      assert.deepEqual(permissions.sandbox, sandbox);
+      assert.deepEqual(calls.at(-1), [
+        "thread/resume",
+        { threadId: id, excludeTurns: true },
+      ]);
+    } finally {
+      prepared.close();
+    }
+  });
+}
 
 test("loaded thread는 explicit resume과 resume-last 모두 설정 요청 전에 중단한다", async () => {
   for (const opts of [{ resume: id }, { resumeLast: true }]) {
@@ -211,92 +293,27 @@ const hookReview = (selected = 0) =>
     .map((line, index) => `${selected === index ? "› " : "  "}${line}`)
     .join("\n");
 
-test("공식 훅 거부 메뉴만 시작 처리하고 다른 검토 화면은 차단한다", () => {
-  const screen = live.ADAPTERS.codex.startupScreens.find(
-    (item) => item.name === "codex-hooks-decline",
-  );
-  assert.ok(screen);
-  for (let selected = 0; selected < 3; selected += 1) {
-    const raw = hookReview(selected);
-    assert.equal(screen.isPresent(raw), true);
-    assert.equal(
-      live.ADAPTERS.codex.blockingScreens.some((item) => item.isPresent(raw)),
-      false,
-    );
-  }
+test("모든 훅 검토 메뉴는 시작 처리 없이 같은 차단 사유를 보고한다", () => {
   for (const raw of [
+    ...[0, 1, 2].map(hookReview),
     hookReview().replace(
       "Continue without trusting (hooks won't run)",
       "Continue",
     ),
     `${hookReview()}\n› Ask Codex to do anything`,
   ]) {
-    assert.equal(screen.isPresent(raw), false);
-    assert.ok(
-      live.ADAPTERS.codex.blockingScreens.some((item) => item.isPresent(raw)),
+    assert.equal(live.ADAPTERS.codex.isReady(raw), false);
+    const blocking = live.ADAPTERS.codex.blockingScreens.find((screen) =>
+      screen.isPresent(raw),
+    );
+    assert.equal(blocking?.name, "codex-hooks-review");
+    assert.match(blocking.warning, /no (?:approval|trust approval) was sent/);
+    assert.match(blocking.warning, /attach to the tmux session/);
+    assert.equal(
+      live.ADAPTERS.codex.startupScreens.some((screen) =>
+        screen.isPresent(raw),
+      ),
+      false,
     );
   }
-});
-
-test("공식 훅 거부는 선택을 확인한 뒤 Enter를 보내고 화면 변경 시 멈춘다", async (t) => {
-  const screen = live.ADAPTERS.codex.startupScreens.find(
-    (item) => item.name === "codex-hooks-decline",
-  );
-  assert.ok(screen);
-  const root = await mkdtemp(join(tmpdir(), "tfx-hook-decline-"));
-  const previousPath = process.env.PATH;
-  t.after(async () => {
-    process.env.PATH = previousPath;
-    await rm(root, { recursive: true, force: true });
-  });
-  const statePath = join(root, "state.json");
-  await writeFile(
-    join(root, "tmux"),
-    `#!${process.execPath}
-const fs = require('node:fs');
-const path = ${JSON.stringify(statePath)};
-const state = JSON.parse(fs.readFileSync(path));
-const args = process.argv.slice(2);
-if (args[0] === 'capture-pane') {
-  console.log(state.accepted ? '› Ask Codex to do anything' : state.screens[state.selected]);
-} else if (args[0] === 'send-keys') {
-  const key = args.at(-1);
-  if (key === 'Down') state.selected = (state.selected + 1) % 3;
-  else if (key === 'Enter') state.accepted = state.selected === 2 ? 'declined' : 'unsafe';
-  state.keys.push(key);
-  fs.writeFileSync(path, JSON.stringify(state));
-} else process.exit(1);
-`,
-    { mode: 0o755 },
-  );
-  process.env.PATH = `${root}:${previousPath}`;
-  for (const selected of [0, 1, 2]) {
-    await writeFile(
-      statePath,
-      JSON.stringify({
-        selected,
-        screens: [0, 1, 2].map(hookReview),
-        keys: [],
-      }),
-    );
-    assert.equal((await screen.dismiss(null, "owned-smoke")).dismissed, true);
-    const state = JSON.parse(await readFile(statePath, "utf8"));
-    assert.equal(state.accepted, "declined");
-    assert.deepEqual(state.keys, [
-      ...Array(2 - selected).fill("Down"),
-      "Enter",
-    ]);
-  }
-  await writeFile(
-    statePath,
-    JSON.stringify({
-      selected: 0,
-      screens: [hookReview(), "Hooks need review\n› Trust all and continue"],
-      keys: [],
-    }),
-  );
-  assert.equal((await screen.dismiss(null, "owned-smoke")).dismissed, false);
-  const changed = JSON.parse(await readFile(statePath, "utf8"));
-  assert.equal(changed.accepted, undefined);
-  assert.deepEqual(changed.keys, ["Down"]);
 });

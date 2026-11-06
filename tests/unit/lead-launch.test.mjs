@@ -13,13 +13,27 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_JEV_STATS_PATH } from "../../hub/lib/jev-addon.mjs";
 import {
-  launchLead,
+  launchLead as launchLeadActual,
   leadDisplayName,
   leadEntryPrompt,
   leadSessionName,
   offerLeadLaunchers,
   resolveLauncher,
 } from "../../hub/team/lead-launch.mjs";
+
+// 기존 모델 라우팅 테스트에서는 공개 Registry와 사용자 MCP 설정을 읽지 않는다.
+function launchLead(input, options = {}) {
+  return launchLeadActual(input, {
+    recommend: async ({ cliType }) => ({
+      cli: cliType,
+      status: "deferred",
+      recommendations: [],
+      diagnostics: ["test_fixture"],
+      applied: false,
+    }),
+    ...options,
+  });
+}
 
 function config(content) {
   const path = join(mkdtempSync(join(tmpdir(), "tfx-lead-")), "lead.json");
@@ -37,6 +51,38 @@ function fakeRun(replies) {
 }
 
 describe("tfx lead", () => {
+  it("focus는 명시할 때만 start로 전달하고 역할과 task는 함께 보존한다", async () => {
+    for (const focus of [false, true]) {
+      const { calls, run } = fakeRun({ start: { ready: false } });
+      await launchLead(
+        { role: "리드", task: "실제 배치 작업", layout: "window", focus },
+        { run, jevOptions: { env: { TFX_JEV: "0" } } },
+      );
+      assert.equal(calls[0].includes("--focus"), focus);
+      assert.equal(calls[0][calls[0].indexOf("--task") + 1], "실제 배치 작업");
+      assert.equal(calls[0][calls[0].indexOf("--role") + 1], "lead");
+    }
+  });
+
+  for (const cli of ["codex", "claude", "agy"]) {
+    for (const noBypassHookTrust of [false, true]) {
+      it(`hook-trust opt-out은 Codex start에만 전달한다: ${cli}/${noBypassHookTrust}`, async () => {
+        const { calls, run } = fakeRun({
+          start: { ready: false, blockedBy: "codex-hooks-review" },
+        });
+        const result = await launchLead(
+          { cli, role: "검토", noBypassHookTrust },
+          { run, jevOptions: { env: { TFX_JEV: "0" } } },
+        );
+        assert.equal(calls.length, 1);
+        assert.equal(
+          calls[0].includes("--no-bypass-hook-trust"),
+          cli === "codex" && noBypassHookTrust,
+        );
+        assert.equal(result.ok, false);
+      });
+    }
+  }
   for (const mode of [
     "applied",
     "explicit",
@@ -152,7 +198,7 @@ describe("tfx lead", () => {
             : mode === "launcher"
               ? "launcher_preserved"
               : mode === "low"
-                ? "no_accepted_recommendation"
+                ? "complexity_low_confidence"
                 : "jev_applied",
       );
       if (mode !== "low") assert.equal(row.confidence, 0.905);
@@ -165,7 +211,9 @@ describe("tfx lead", () => {
     const home = mkdtempSync(join(tmpdir(), "lead-parser-"));
     t.after(() => rmSync(home, { recursive: true, force: true }));
     const fake = `export const resolveLauncher = ({ cli, flag }) => flag || cli;
-      export const launchLead = async (input) => ({ok:true, ...input, name:input.role, session:'fake-lead', routing:{enabled:true,attempted:true,complexity:'deep',recommendedProfile:'astra_xhigh',effectiveModel:'fake-model',effectiveEffort:'xhigh',confidence:0.9,source:'jev',reason:'jev_applied',appliedTo:'start_args'}});`;
+      export const launchLead = async (input) => input.task === 'recommendation-send-failure'
+        ? {ok:false,session:'fake-lead',start:{ready:true},ask:{ok:true},recommendationAsk:{ok:false,error:'fixture recommendation error'}}
+        : ({ok:true, ...input, name:input.role, session:'fake-lead', routing:{enabled:true,attempted:true,complexity:'deep',recommendedProfile:'astra_xhigh',effectiveModel:'fake-model',effectiveEffort:'xhigh',confidence:0.9,source:'jev',reason:'jev_applied',appliedTo:'start_args'}});`;
     const hook = `import { registerHooks } from 'node:module';
       registerHooks({resolve(specifier, context, next) { if (specifier === '../hub/team/lead-launch.mjs' && context.parentURL.endsWith('/bin/triflux.mjs')) return {url:${JSON.stringify(`data:text/javascript,${encodeURIComponent(fake)}`)},shortCircuit:true}; return next(specifier, context); }});`;
     const invoke = (...args) =>
@@ -195,6 +243,9 @@ describe("tfx lead", () => {
       "리드",
       "--cli",
       "codex",
+      "--no-bypass-hook-trust",
+      "--layout",
+      "window",
       "--task",
       "승계 준비와 워커 평가",
       "--json",
@@ -202,6 +253,14 @@ describe("tfx lead", () => {
     assert.equal(json.status, 0, json.stderr);
     const result = JSON.parse(json.stdout);
     assert.equal(result.role, "프로젝트 리드");
+    assert.equal(result.noBypassHookTrust, true);
+    assert.equal(result.layout, "window");
+    const focused = invoke("리드", "--focus", "--json");
+    assert.equal(focused.status, 0, focused.stderr);
+    assert.equal(JSON.parse(focused.stdout).focus, true);
+    const optOut = invoke("리드", "--no-auto-layout", "--json");
+    assert.equal(optOut.status, 0, optOut.stderr);
+    assert.equal(JSON.parse(optOut.stdout).layout, "off");
     assert.equal(result.task, "승계 준비와 워커 평가");
     assert.equal(result.routing.appliedTo, "start_args");
     const human = invoke("리드", "--task", "짧은 요약");
@@ -222,7 +281,59 @@ describe("tfx lead", () => {
     assert.notEqual(missing.status, 0);
     const help = invoke("--help");
     assert.match(help.stdout, /--task/);
+    assert.match(help.stdout, /--no-bypass-hook-trust/);
+    const recommendationFailure = invoke(
+      "리드",
+      "--task",
+      "recommendation-send-failure",
+    );
+    assert.equal(recommendationFailure.status, 1);
+    assert.match(
+      recommendationFailure.stdout,
+      /MCP 추천 전송 실패: fixture recommendation error/,
+    );
+    assert.match(recommendationFailure.stdout, /리드 진입은 완료/);
+    assert.doesNotMatch(recommendationFailure.stdout, /리드 진입 전송 실패/);
   });
+  it("lead CLI는 보류한 원 complexity와 신뢰도를 사람 출력에 표시한다", (t) => {
+    const home = mkdtempSync(join(tmpdir(), "lead-diagnostic-cli-"));
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+    const fake = `export const resolveLauncher = () => 'claude';
+      export const launchLead = async () => ({ok:false,start:{ready:false},routing:{enabled:true,attempted:true,complexity:null,recommendedProfile:null,effectiveModel:null,effectiveEffort:null,confidence:null,source:'default',reason:'complexity_low_confidence',appliedTo:null,diagnostics:{reason:'low_confidence',rawChoice:'deep',rawConfidence:0.61}}});`;
+    const hook = `import { registerHooks } from 'node:module';
+      registerHooks({resolve(specifier, context, next) { if (specifier === '../hub/team/lead-launch.mjs' && context.parentURL.endsWith('/bin/triflux.mjs')) return {url:${JSON.stringify(`data:text/javascript,${encodeURIComponent(fake)}`)},shortCircuit:true}; return next(specifier, context); }});`;
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        `data:text/javascript,${encodeURIComponent(hook)}`,
+        new URL("../../bin/triflux.mjs", import.meta.url).pathname,
+        "lead",
+        "리드",
+      ],
+      {
+        encoding: "utf8",
+        timeout: 10000,
+        env: {
+          ...process.env,
+          HOME: home,
+          CODEX_HOME: join(home, "codex"),
+          XDG_CONFIG_HOME: join(home, "config"),
+          TFX_JEV: "0",
+        },
+      },
+    );
+    assert.equal(result.status, 1, result.stderr);
+    for (const field of [
+      "complexity=unknown",
+      "recommended=none",
+      "reason=complexity_low_confidence",
+      "raw_choice=deep",
+      "raw_conf=0.61",
+    ])
+      assert.ok(result.stdout.includes(field), field);
+  });
+
   it("Jev deep 권고를 resolver의 concrete start 인자에만 반영한다", async (t) => {
     const home = mkdtempSync(join(tmpdir(), "lead-model-"));
     t.after(() => rmSync(home, { recursive: true, force: true }));
@@ -281,6 +392,12 @@ describe("tfx lead", () => {
       "codex",
       "--cwd",
       "/p/app",
+      "--role",
+      "lead",
+      "--human",
+      "high",
+      "--task",
+      "완료 구현 평가와 다중 워커 조정",
     ]);
     assert.deepEqual(
       calls.map((args) => args[0]),
@@ -325,6 +442,10 @@ describe("tfx lead", () => {
         },
       );
       assert.deepEqual(calls[0].slice(11), [
+        "--role",
+        "lead",
+        "--human",
+        "high",
         ...(override.model ? ["--model", override.model] : []),
         ...(override.effort ? ["--effort", override.effort] : []),
       ]);
@@ -358,10 +479,66 @@ describe("tfx lead", () => {
         },
       );
       assert.equal(calls.length, 1);
-      assert.equal(calls[0].length, 11);
+      assert.equal(calls[0].length, 15);
       assert.equal(result.routing.source, "default");
       assert.equal(result.routing.attempted, mode !== "disabled");
       assert.equal(result.routing.appliedTo, null);
+    });
+  }
+
+  for (const modeConfidence of [0.16, 0.86]) {
+    it(`lead는 complexity 신뢰도 0.61을 보류하고 기본 시작을 유지한다: mode=${modeConfidence}`, async () => {
+      const { calls, run } = fakeRun({ start: { ready: false } });
+      const result = await launchLead(
+        {
+          cli: "claude",
+          role: "MnK 개발리드",
+          task: "프로젝트 개발 리드: 워커 재분배와 승인, 평가와 배포 조율",
+        },
+        {
+          run,
+          jevOptions: {
+            env: { JEV_API_KEY: "test-key", TFX_JEV_STATS: "0" },
+            fetchImpl: async () => ({
+              ok: true,
+              json: async () => ({
+                answers: {
+                  complexity: {
+                    choice: "deep",
+                    confidence: 0.61,
+                    probabilities: {
+                      trivial: 0,
+                      standard: 0,
+                      deep: 0.71,
+                      high_risk: 0.29,
+                    },
+                  },
+                  execution_mode: {
+                    choice: "bypass",
+                    confidence: modeConfidence,
+                  },
+                  mcp_profile: { choice: "none", confidence: 0.38 },
+                },
+              }),
+            }),
+          },
+        },
+      );
+      assert.equal(result.routing.reason, "complexity_low_confidence");
+      assert.deepEqual(result.routing.diagnostics, {
+        reason: "low_confidence",
+        rawChoice: "deep",
+        rawConfidence: 0.61,
+      });
+      assert.equal(result.routing.complexity, null);
+      assert.equal(result.routing.recommendedProfile, null);
+      assert.equal(result.routing.effectiveModel, null);
+      assert.equal(result.routing.effectiveEffort, null);
+      assert.equal(result.routing.source, "default");
+      assert.equal(result.routing.appliedTo, null);
+      assert.equal(calls.length, 1);
+      assert.ok(!calls[0].includes("--model"));
+      assert.ok(!calls[0].includes("--effort"));
     });
   }
 

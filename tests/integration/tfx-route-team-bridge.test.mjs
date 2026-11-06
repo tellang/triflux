@@ -33,6 +33,7 @@ function runBash(command, extraEnv = {}) {
     env: routeTestEnv({
       PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
       HOME: isolatedCodex.dir,
+      CODEX_HOME: isolatedCodex.dir,
       USERPROFILE: isolatedCodex.dir,
       XDG_CONFIG_HOME: join(isolatedCodex.dir, ".config"),
       TFX_MACHINE_PROFILE_PATH: join(isolatedCodex.dir, "machine-profile.env"),
@@ -45,6 +46,7 @@ function runBash(command, extraEnv = {}) {
       // #148: 테스트 환경 MCP probe 결과는 모두 dead → preflight 가 early-fail.
       // 라우팅/bridge 검증이 목적이므로 preflight 스킵.
       TFX_MCP_HEALTH_CHECK: "0",
+      TFX_JEV: "off",
       ...extraEnv,
     }),
   });
@@ -84,12 +86,23 @@ describe("tfx-route.sh — team bridge integration", () => {
         .filter(Boolean)
         .map((line) => JSON.parse(line).argv);
 
-      assert.equal(calls.length, 2, JSON.stringify(calls, null, 2));
-      assert.equal(calls[0][0], "team-task-update");
-      assert.ok(calls[0].includes("--claim"));
-      assert.equal(calls[1][0], "team-send-message");
+      assert.deepEqual(calls[0], [
+        "judge-route",
+        "--agent",
+        "executor",
+        "--cli-type",
+        "codex",
+        "--prompt",
+        "bridge-team-flow",
+        "--worker-model",
+        "--delimited",
+      ]);
+      assert.equal(calls.length, 3, JSON.stringify(calls, null, 2));
+      assert.equal(calls[1][0], "team-task-update");
+      assert.ok(calls[1].includes("--claim"));
+      assert.equal(calls[2][0], "team-send-message");
       assert.match(
-        calls[1][calls[1].indexOf("--text") + 1],
+        calls[2][calls[2].indexOf("--text") + 1],
         /작업 시작: executor-worker-test/,
       );
 
@@ -150,9 +163,20 @@ describe("tfx-route.sh — team bridge integration", () => {
         .filter(Boolean)
         .map((line) => JSON.parse(line).argv);
 
-      assert.equal(calls.length, 2, JSON.stringify(calls, null, 2));
-      assert.equal(calls[0][0], "team-task-update");
-      assert.equal(calls[1][0], "team-send-message");
+      assert.deepEqual(calls[0], [
+        "judge-route",
+        "--agent",
+        "executor",
+        "--cli-type",
+        "codex",
+        "--prompt",
+        "bridge-team-flow",
+        "--worker-model",
+        "--delimited",
+      ]);
+      assert.equal(calls.length, 3, JSON.stringify(calls, null, 2));
+      assert.equal(calls[1][0], "team-task-update");
+      assert.equal(calls[2][0], "team-send-message");
 
       const backup = JSON.parse(
         readFileSync(join(resultDir, "task-002.json"), "utf8"),

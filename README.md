@@ -142,6 +142,10 @@ escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-es
 
 `tfx <command> --help` prints the exact arguments.
 
+On local macOS iTerm2, `tfx-live start` and `tfx lead` select placements using Jev, task metadata, and available pane sizes. The default preserves keyboard focus and protects selected tabs. Only `--focus` permits a focus change. Related workers can share readable panes in inactive tabs; unattended workers can stay in attachable background tmux sessions. Missing task information keeps a worker visible instead of inferring background operation from its name.
+
+Use `--task` to describe the work and `--layout` to request a placement. Focus preservation takes priority over window or split requests unless `--focus` is present. `--background`, `--no-auto-layout`, `--layout off`, and `TFX_ITERM_LAYOUT=0` keep tmux running without creating a terminal view. API failures use the same safe background fallback. `tfx-live inspect` reports decisions and attach commands; `reconcile --dry-run` previews a layout. Manual moves remain pinned until `reconcile --reset-pins`. See [tfx-live](skills/tfx-live/SKILL.md) for readability limits and the `focus` and `attention` result fields.
+
 Local tmux sessions created by `tfx-live start --cli codex` show the complete Triflux HUD in three provider status rows.
 The active CLI row displays context usage, for example `ctx:27%`; missing context shows `ctx:--`.
 Context uses the current thread's rollout window and token usage, with reported used/remaining percentages as a fallback.
@@ -149,9 +153,11 @@ When Jev configuration is enabled, a lowercase `j` appears separately on the Cod
 Provider quota information, account labels, and the c/x/a row order remain unchanged.
 The Codex HUD reads local caches and rollout every five seconds without starting external queries; quota values reflect the existing cache refresh time.
 It works without hooks and leaves existing sessions, global tmux options, and Codex's built-in status_line unchanged.
-Fresh Codex threads on the shared daemon use thread-scoped `features.hooks=false` to disable ordinary user and plugin hooks. Builtin hooks and legacy `notify` are outside this guarantee. Startup hook review selects `Continue without trusting` without changing trust records.
+Fresh Codex threads on the shared daemon use thread-scoped `features.hooks=false` to disable ordinary user and plugin hooks. Builtin hooks and legacy `notify` are outside this guarantee. Startup hook review sends no keys and returns `ready: false`, `blockedBy: "codex-hooks-review"`, and a warning to attach to the tmux session and review the hooks manually.
 Explicit resume and resume-last stop if the target is already loaded or its loaded state cannot be verified, preserving the existing session's settings and permissions. The preflight is a snapshot; a concurrent attach between that check and resume cannot be ruled out, so the fresh-thread hook guarantee does not extend to resumed threads.
-Codex trust screens are never accepted automatically.
+Triflux-managed Codex `tfx-route` exec/review workers, plain/new/resume/resume-last TUI commands, and interactive `tfx multi` Codex sessions default to the official `--dangerously-bypass-hook-trust` flag. This applies only to that invocation; it does not change the ordinary `codex` command, global config, or persisted hook trust. Enabled hooks can run outside the sandbox without prior review. The existing `features.hooks=false` override and task sandbox/approval policies remain in place; `--sandbox` does not turn off hook-trust bypass.
+Disable the managed default with `tfx-live start --cli codex --session NAME --no-bypass-hook-trust` or `tfx lead ROLE --cli codex --no-bypass-hook-trust`. Set `TFX_CODEX_BYPASS_HOOK_TRUST=0` in the launching environment to disable it for route workers, live/lead sessions, and interactive `tfx multi`; any other value or an unset variable keeps it on. The CLI opt-out wins even when the environment is `1`. Custom launcher internals and their explicit flags are not rewritten. If a shell wrapper such as `tx` adds this flag internally, use `--no-bypass-hook-trust` to disable the TFX-managed addition.
+Shared-daemon prepared-thread TUI attach is excluded from this managed flag: accepting a CLI flag does not prove the daemon applies it. It retains the `features.hooks=false` RPC and the hook-review blocking fallback; no `bypass_hook_trust` RPC/config field is synthesized. If hook review still appears, both default and opt-out launches send no menu keys, rename, or task input. Attach to the preserved tmux session and review the hooks manually before continuing. `remote-spawn` enters Claude; Codex invoked from there follows that host's `tfx-route` default.
 
 ## Runtime features
 

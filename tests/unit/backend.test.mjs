@@ -54,6 +54,43 @@ test("unsupported headless backend fails explicitly", () => {
   assert.throws(() => getBackend("unknown"), /지원하지 않는 CLI/);
 });
 
+test("Claude 선택값과 명시한 한쪽 값만 실제 argv로 전달한다", {
+  skip: process.platform === "win32",
+}, () => {
+  const dir = mkdtempSync(join(tmpdir(), "tfx-backend-model-"));
+  try {
+    const cli = join(dir, "claude");
+    writeFileSync(
+      cli,
+      `#!${process.execPath}\nprocess.stdin.resume(); process.stdin.on('end', () => console.log(JSON.stringify(process.argv.slice(2))));\n`,
+    );
+    chmodSync(cli, 0o755);
+    for (const [options, expected] of [
+      [
+        { workerModel: { model: "opus", effort: "high" } },
+        ["--model", "opus", "--effort", "high"],
+      ],
+      [{ model: "sonnet" }, ["--model", "sonnet"]],
+      [{ effort: "low" }, ["--effort", "low"]],
+    ]) {
+      const file = join(dir, "result");
+      const command = getBackend("claude").buildArgs("작업", file, {
+        ...options,
+        isWindows: false,
+      });
+      execFileSync("/bin/sh", ["-c", command], {
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      });
+      assert.deepEqual(
+        JSON.parse(readFileSync(file, "utf8")).slice(3),
+        expected,
+      );
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("Windows 는 프롬프트 파일을 리터럴 경로, UTF-8 로 읽어 파이프한다", () => {
   const command = getBackend("claude").buildArgs("p", "C:/r.txt", {
     isWindows: true,

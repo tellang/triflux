@@ -27,6 +27,10 @@ export function parseArgs(argv) {
     args: argv,
     options: {
       team: { type: "string" },
+      "worker-model": { type: "boolean" },
+      "apply-file": { type: "string" },
+      "policy-row": { type: "string" },
+      "profile-was-auto": { type: "string" },
       "task-id": { type: "string" },
       owner: { type: "string" },
       status: { type: "string" },
@@ -65,6 +69,7 @@ export function parseArgs(argv) {
       "cli-type": { type: "string" },
       "available-servers": { type: "string" },
       prompt: { type: "string" },
+      cwd: { type: "string" },
       instruction: { type: "string" },
       delimited: { type: "boolean" },
     },
@@ -1111,6 +1116,77 @@ async function cmdHandoffCheck(args) {
   }
 }
 
+async function cmdJudgeMcp(args) {
+  const { recommendMcp, formatMcpRecommendation } = await import(
+    "./lib/mcp-recommendations.mjs"
+  );
+  const result = await recommendMcp({
+    task: args.prompt,
+    cliType: args["cli-type"] === "claude-native" ? "claude" : args["cli-type"],
+    cwd: args.cwd,
+  });
+  if (args["apply-file"]) {
+    const { prepareWorkerMcp } = await import("./lib/worker-mcp.mjs");
+    const row = (args["policy-row"] || "").split("\x1e");
+    const flags = (row[4] || "")
+      .split("\x1f")
+      .filter((_, index) => index % 2 === 1);
+    let commandArgs = [];
+    try {
+      commandArgs = JSON.parse(process.env.CLAUDE_BIN_ARGS_JSON || "[]");
+      if (!Array.isArray(commandArgs)) commandArgs = ["--mcp-config"];
+    } catch {
+      commandArgs = ["--mcp-config"];
+    }
+    const plan = prepareWorkerMcp({
+      cli: args["cli-type"],
+      cwd: args.cwd,
+      recommendation: result,
+      profileWasAuto: args["profile-was-auto"] === "true",
+      explicitConfig: commandArgs.some((arg) =>
+        /^--(?:strict-mcp-config|mcp-config)(?:=|$)/.test(arg),
+      ),
+      explicitFilters: Boolean(process.env.TFX_SEARCH_TOOL),
+      transport: "exec",
+      policy: { codexConfigOverrides: flags },
+    });
+    try {
+      writeFileSync(
+        args["apply-file"],
+        JSON.stringify({
+          context: formatMcpRecommendation(result),
+          recommendation: result,
+          application: plan.metadata,
+          codexConfigOverrides: plan.codexConfigOverrides,
+          configFile: plan.configFile,
+          clearHint: plan.metadata.status === "prepared",
+        }),
+        { mode: 0o600 },
+      );
+      if (process.env.TFX_WORKER_MCP_FILE)
+        writeFileSync(
+          process.env.TFX_WORKER_MCP_FILE,
+          JSON.stringify({
+            recommendation: result,
+            application: plan.metadata,
+          }),
+          { mode: 0o600 },
+        );
+    } catch (error) {
+      plan.cleanup();
+      throw error;
+    }
+    console.error(`[tfx-route] MCP recommendation: ${JSON.stringify(result)}`);
+    return true;
+  }
+  if (args.delimited) {
+    console.error(`[tfx-route] MCP recommendation: ${JSON.stringify(result)}`);
+    process.stdout.write(formatMcpRecommendation(result));
+    return true;
+  }
+  return emitJson({ ok: true, mcpRecommendation: result });
+}
+
 async function cmdJudgeRoute(args) {
   try {
     const payload =
@@ -1130,34 +1206,85 @@ async function cmdJudgeRoute(args) {
     const { isJevEnabled, judgeTaskRouting } = await import(
       "./lib/jev-addon.mjs"
     );
-    if (!isJevEnabled()) {
+    if (!isJevEnabled() && !args["worker-model"]) {
       if (args.delimited) return true;
       return emitJson({ ok: true, enabled: false, routing: null });
     }
-    const routing = await judgeTaskRouting({
-      prompt,
-      agentType,
-      cliType,
-      availableServers,
-    });
+    let routingFailure;
+    const routing = await judgeTaskRouting(
+      {
+        prompt,
+        agentType,
+        cliType,
+        availableServers,
+      },
+      {
+        includeDiagnostics: Boolean(args["worker-model"]),
+        onDiagnostic: (reason) => {
+          routingFailure = reason;
+        },
+      },
+    );
+    let workerModel;
+    if (args["worker-model"]) {
+      const { resolveWorkerModel } = await import(
+        "../scripts/lib/agent-route-policy.mjs"
+      );
+      const env = process.env;
+      const sameProvider =
+        !env.TFX_WORKER_CLI || env.TFX_WORKER_CLI === cliType;
+      workerModel = await resolveWorkerModel(
+        {
+          task: prompt,
+          agent: agentType,
+          cli: cliType,
+          model: sameProvider ? env.TFX_WORKER_MODEL : undefined,
+          effort: sameProvider ? env.TFX_WORKER_EFFORT : undefined,
+          profile:
+            cliType === "codex"
+              ? env.TFX_CODEX_PROFILE
+              : cliType === "antigravity" || cliType === "agy"
+                ? env.TFX_GEMINI_PROFILE
+                : "auto",
+          nested: Boolean(
+            env.TFX_WORKER_INDEX ||
+              env.TFX_TEAM_NAME ||
+              env.TFX_WORKER_SANDBOX_SCOPE,
+          ),
+          protectedPolicy:
+            env.TFX_RETRY_SNAPSHOT || env.TFX_RETRY_SNAPSHOT_FILE
+              ? "retry"
+              : null,
+        },
+        { routing, fallbackReason: routingFailure },
+      );
+    }
     if (args.delimited) {
-      if (!routing) return true;
+      if (!routing && !workerModel) return true;
+      const selected = routing || {};
       const RS = "\x1e";
       const fields = [
-        routing.complexity || "",
-        routing.codexProfile || "",
-        routing.agyProfile || "",
-        routing.claudeModel || "",
-        routing.claudeEffort || "",
-        String(routing.expectedDurationSec || ""),
-        routing.executionMode || "",
-        routing.mcpProfile || "",
-        Array.isArray(routing.neededMcpServers)
-          ? routing.neededMcpServers.join(",")
+        selected.complexity || "",
+        selected.codexProfile || "",
+        selected.agyProfile || "",
+        selected.claudeModel || "",
+        selected.claudeEffort || "",
+        String(selected.expectedDurationSec || ""),
+        selected.executionMode || "",
+        selected.mcpProfile || "",
+        Array.isArray(selected.neededMcpServers)
+          ? selected.neededMcpServers.join(",")
           : "",
-        String(routing.confidence ?? ""),
-        routing.tierShift || "",
+        String(selected.confidence ?? ""),
+        selected.tierShift || "",
       ];
+      if (workerModel)
+        fields.push(
+          workerModel.profile || "",
+          workerModel.model || "",
+          workerModel.effort || "",
+          JSON.stringify(workerModel),
+        );
       process.stdout.write(fields.join(RS));
       return true;
     }
@@ -1260,6 +1387,8 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdHandoffCheck(args);
     case "judge-route":
       return await cmdJudgeRoute(args);
+    case "judge-mcp":
+      return await cmdJudgeMcp(args);
     case "judge-ack":
       return await cmdJudgeAck(args);
     case "judge-review":

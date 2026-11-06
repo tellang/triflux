@@ -316,10 +316,26 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
   },
   lead: {
     usage:
-      "tfx lead <역할> [--cli claude|codex|agy] [--task SUMMARY] [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD]",
+      "tfx lead <역할> [--cli claude|codex|agy] [--task SUMMARY] [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD] [--no-bypass-hook-trust] [--layout MODE] [--no-auto-layout] [--focus]",
     description:
       "리드 세션을 tmux 에 띄우고 리드 진입까지 보낸다. 실행 명령은 --launcher, ~/.config/triflux/lead.json 의 launchers.<cli>, CLI 이름 순. setup 과 update 가 처음 한 번 묻는다",
     options: [
+      {
+        name: "--focus",
+        type: "boolean",
+        description: "생성한 iTerm view로 명시 포커스 전환 (기본 preserve)",
+      },
+      {
+        name: "--layout",
+        type: "string",
+        description:
+          "iTerm 배치: auto|off|legacy|background|tab|window|split-vertical|split-horizontal",
+      },
+      {
+        name: "--no-auto-layout",
+        type: "boolean",
+        description: "iTerm 자동 배치 비활성, UI 없이 tmux 유지",
+      },
       {
         name: "--cli",
         type: "string",
@@ -355,18 +371,34 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         type: "string",
         description: "이번만 쓸 실행 명령",
       },
+      {
+        name: "--no-bypass-hook-trust",
+        type: "boolean",
+        description: "Codex 관리 hook-trust bypass 기본값 끄기",
+      },
     ],
   },
   judge: {
-    usage: "tfx judge <route|worker-mode> --task SUMMARY",
+    usage:
+      "tfx judge <route|worker-mode|worker-model> --task SUMMARY [--agent ROLE] [--cli codex|claude|agy]",
     description:
-      "route는 라우팅 분기와 규칙을, worker-mode는 워커 권한 권고를 JSON으로 낸다. Jev를 쓰지 못하면 route는 choice null, worker-mode는 규칙 판정",
+      "route는 스킬 분기, worker-mode는 권한, worker-model은 세션 생성 없이 모델 가족, 모델, effort와 출처를 JSON으로 낸다. Jev 실패 시 역할 규칙으로 폴백한다",
     options: [
       {
         name: "--task",
         type: "string",
         description:
           "짧은 작업 요약, route는 끝 1,000자만 전송하고 worker-mode는 1,000자 초과 시 외부로 보내지 않음",
+      },
+      {
+        name: "--agent",
+        type: "string",
+        description: "worker-model 역할, 기본 executor",
+      },
+      {
+        name: "--cli",
+        type: "string",
+        description: "worker-model CLI: codex|claude|agy, 기본 codex",
       },
     ],
   },
@@ -3843,7 +3875,7 @@ function cmdVersion(options = {}) {
   console.log("");
 }
 
-function cmdMcp(args = [], options = {}) {
+async function cmdMcp(args = [], options = {}) {
   const { json = false } = options;
   const sub = String(args[0] || "list")
     .trim()
@@ -3854,6 +3886,7 @@ function cmdMcp(args = [], options = {}) {
   ${AMBER}${BOLD}⬡ tfx mcp${RESET}
 
     ${WHITE_BRIGHT}tfx mcp list${RESET}                 ${GRAY}registry + 실제 설정 상태 테이블${RESET}
+    ${WHITE_BRIGHT}tfx mcp catalog-refresh${RESET}      ${GRAY}공식 공개 카탈로그 캐시 갱신, 설치와 활성화 없음${RESET}
     ${WHITE_BRIGHT}tfx mcp sync${RESET}                 ${GRAY}registry 기준 전체 스캔 + 치환${RESET}
     ${WHITE_BRIGHT}tfx mcp add <name> --url <url>${RESET}    ${GRAY}registry 등록 + 대상 설정 반영${RESET}
     ${WHITE_BRIGHT}tfx mcp remove <name>${RESET}        ${GRAY}registry + 실제 설정에서 제거${RESET}
@@ -3862,6 +3895,22 @@ function cmdMcp(args = [], options = {}) {
   }
 
   switch (sub) {
+    case "catalog-refresh": {
+      const { refreshMcpCatalog } = await import(
+        "../scripts/lib/mcp-recommendation-catalog.mjs"
+      );
+      const result = await refreshMcpCatalog();
+      const summary = {
+        status: result.status,
+        entries: result.entries.length,
+        collectedAt: result.collectedAt,
+        diagnostics: result.diagnostics,
+        applied: false,
+      };
+      if (json) printJson(summary);
+      else console.log(`MCP catalog ${JSON.stringify(summary)}`);
+      return;
+    }
     case "list": {
       const registryState = ensureValidRegistryState();
       const statusInfo = inspectRegistryStatus(registryState.registry);
@@ -4275,7 +4324,7 @@ async function main() {
       return;
     }
     case "mcp":
-      cmdMcp(cmdArgs, { json: JSON_OUTPUT });
+      await cmdMcp(cmdArgs, { json: JSON_OUTPUT });
       return;
     case "update":
       await cmdUpdate(cmdArgs);
@@ -4297,6 +4346,7 @@ async function main() {
         "../hub/team/lead-launch.mjs"
       );
       const valueFlags = [
+        "--layout",
         "--task",
         "--session",
         "--cwd",
@@ -4307,9 +4357,12 @@ async function main() {
       ];
       cmdArgs.forEach((arg, i) => {
         const known =
-          valueFlags.includes(arg) &&
-          cmdArgs[i + 1] &&
-          !cmdArgs[i + 1].startsWith("--");
+          arg === "--no-bypass-hook-trust" ||
+          arg === "--no-auto-layout" ||
+          arg === "--focus" ||
+          (valueFlags.includes(arg) &&
+            cmdArgs[i + 1] &&
+            !cmdArgs[i + 1].startsWith("--"));
         if (arg.startsWith("--") && !known)
           throw createCliError(
             `tfx lead 가 모르는 옵션이거나 값이 없다: ${arg}`,
@@ -4335,6 +4388,11 @@ async function main() {
         session: readCliOptionValue(cmdArgs, "--session"),
         model: readCliOptionValue(cmdArgs, "--model"),
         effort: readCliOptionValue(cmdArgs, "--effort"),
+        noBypassHookTrust: cmdArgs.includes("--no-bypass-hook-trust"),
+        focus: cmdArgs.includes("--focus"),
+        layout: cmdArgs.includes("--no-auto-layout")
+          ? "off"
+          : readCliOptionValue(cmdArgs, "--layout"),
         launcher: resolveLauncher({
           cli,
           flag: readCliOptionValue(cmdArgs, "--launcher"),
@@ -4345,6 +4403,10 @@ async function main() {
         console.log(
           `\n  ${GREEN_BRIGHT}✓${RESET} 리드 "${result.name}" (${result.launcher}) tmux ${result.session}\n  붙기: tmux attach -t ${result.session}\n`,
         );
+      else if (result.recommendationAsk && !result.recommendationAsk.ok)
+        console.log(
+          `\n  ${RED}✗${RESET} MCP 추천 전송 실패: ${result.recommendationAsk.error ?? JSON.stringify(result.recommendationAsk)}\n  리드 진입은 완료되었고 세션 ${result.session} 은 떠 있다.\n`,
+        );
       else if (result.start?.ready)
         console.log(
           `\n  ${RED}✗${RESET} 리드 진입 전송 실패: ${result.ask?.error ?? JSON.stringify(result.ask)}\n  세션 ${result.session} 은 떠 있다. 붙어서 리드 진입을 직접 입력하거나 tfx-live stop --session ${result.session} 으로 닫는다.\n`,
@@ -4354,9 +4416,15 @@ async function main() {
           `\n  ${RED}✗${RESET} 리드 시작 실패: ${result.start?.error ?? result.start?.blockedBy ?? JSON.stringify(result.start)}\n`,
         );
       if (!JSON_OUTPUT) {
-        const r = result.routing;
         console.log(
-          `  Jev enabled=${r.enabled} attempted=${r.attempted} complexity=${r.complexity ?? "unknown"} recommended=${r.recommendedProfile ?? "none"} model=${r.effectiveModel ?? "default"} effort=${r.effectiveEffort ?? "default"} conf=${r.confidence ?? "unknown"} source=${r.source} reason=${r.reason} appliedTo=${r.appliedTo ?? "none"}\n`,
+          `  MCP recommendation ${JSON.stringify(result.mcpRecommendation)}`,
+        );
+        const r = result.routing;
+        const diagnostic = r.diagnostics
+          ? ` raw_choice=${r.diagnostics.rawChoice ?? "none"} raw_conf=${r.diagnostics.rawConfidence ?? "unknown"}`
+          : "";
+        console.log(
+          `  Jev enabled=${r.enabled} attempted=${r.attempted} complexity=${r.complexity ?? "unknown"} recommended=${r.recommendedProfile ?? "none"} model=${r.effectiveModel ?? "default"} effort=${r.effectiveEffort ?? "default"} conf=${r.confidence ?? "unknown"} source=${r.source} reason=${r.reason} appliedTo=${r.appliedTo ?? "none"}${diagnostic}\n`,
         );
       }
       if (!result.ok) process.exitCode = EXIT_ERROR;
@@ -4365,6 +4433,63 @@ async function main() {
     case "judge": {
       if (cmdArgs.some(isHelpArg)) {
         printCommandHelp("judge");
+        return;
+      }
+      if (cmdArgs[0] === "worker-model") {
+        const values = {};
+        for (let i = 1; i < cmdArgs.length; i += 2) {
+          const flag = cmdArgs[i];
+          const value = cmdArgs[i + 1];
+          if (
+            !["--task", "--agent", "--cli"].includes(flag) ||
+            !value?.trim() ||
+            (value.startsWith("--") &&
+              (flag !== "--task" ||
+                ["--task", "--agent", "--cli"].includes(value))) ||
+            Object.hasOwn(values, flag)
+          )
+            throw createCliError(`잘못된 worker-model 옵션: ${flag}`, {
+              exitCode: EXIT_ARG_ERROR,
+              reason: "argError",
+            });
+          values[flag] = value;
+        }
+        const agent = values["--agent"] || "executor";
+        const cli = values["--cli"] || "codex";
+        const map = JSON.parse(
+          readFileSync(join(PKG_ROOT, "hub/team/agent-map.json"), "utf8"),
+        );
+        if (
+          !values["--task"] ||
+          !Object.hasOwn(map, agent) ||
+          !["codex", "claude", "agy"].includes(cli)
+        )
+          throw createCliError(
+            "worker-model에는 --task와 유효한 --agent, --cli가 필요합니다",
+            { exitCode: EXIT_ARG_ERROR, reason: "argError" },
+          );
+        const { resolveWorkerModel, resolveNestedCodexAgentProfile } =
+          await import("../scripts/lib/agent-route-policy.mjs");
+        const profile =
+          cli === "codex" &&
+          ["max", "ultra", "astra_max", "astra_ultra"].includes(
+            process.env.TFX_CODEX_PROFILE,
+          )
+            ? resolveNestedCodexAgentProfile(agent, {
+                globalProfile: process.env.TFX_CODEX_PROFILE,
+                codexHome: process.env.CODEX_HOME,
+              })
+            : "auto";
+        console.log(
+          JSON.stringify(
+            await resolveWorkerModel({
+              task: values["--task"],
+              agent,
+              cli,
+              profile,
+            }),
+          ),
+        );
         return;
       }
       const task = readCliOptionValue(cmdArgs, "--task");
@@ -4383,16 +4508,20 @@ async function main() {
         return;
       }
       const routingPath = resolveRoutingSsot();
-      const verdict = await judgeRoutingBranch({
-        task,
-        routingText: routingPath ? readFileSync(routingPath, "utf8") : "",
-      });
+      const verdict = await judgeRoutingBranch(
+        {
+          task,
+          routingText: routingPath ? readFileSync(routingPath, "utf8") : "",
+        },
+        { includeDiagnostics: true },
+      );
       console.log(
         JSON.stringify({
           enabled: isJevEnabled(),
           choice: verdict?.branch ?? null,
           rule: verdict?.rule ?? null,
           confidence: verdict?.confidence ?? null,
+          diagnostics: verdict.diagnostics,
         }),
       );
       return;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -116,6 +116,7 @@ test("iTerm opening script chooses project window and limits group splits", asyn
     { key: "/repo/.git", name: "repo" },
     {
       env: { ITERM_SESSION_ID: "w:leader-id" },
+      focus: true,
       execFile: async (command, args) => {
         if (command === "which") return { stdout: process.execPath };
         assert.equal(command, "/usr/bin/osascript");
@@ -172,6 +173,29 @@ test("iTerm opening script chooses project window and limits group splits", asyn
   );
   for (const key of ["project", "group", "session"])
     assert.match(script, new RegExp(`set variable named "user.tfx_${key}"`));
+});
+
+test("명시 legacy 새 탭은 미정의 변수 없이 생성한 view ID를 반환한다", async () => {
+  let script;
+  const result = await tfxLive.openItermSession(
+    "legacy-explicit",
+    "group",
+    { key: "/repo/.git", name: "repo" },
+    {
+      focus: true,
+      noSplits: true,
+      env: { ITERM_SESSION_ID: "w:leader-id" },
+      execFile: async (command, args) => {
+        if (command === "which") return { stdout: process.execPath };
+        script = args[1];
+        return { stdout: "created-view\nfalse\n" };
+      },
+    },
+  );
+  assert.equal(result.sessionId, "created-view");
+  assert.equal(result.split, false);
+  assert.match(script, /return \(id of newSession\) & linefeed/);
+  assert.doesNotMatch(script, /newSessionId|originalSessionId/);
 });
 
 test("stop closes a recorded iTerm pane anywhere and searches by name only inside iTerm", async () => {
@@ -306,7 +330,7 @@ test("iTerm close skips the name search outside iTerm and keeps tabs with user p
   );
 });
 
-test("iTerm close also closes unmarked panes attached to the killed session", async () => {
+test("iTerm close requires the matching TFX marker even for a killed tty", async () => {
   let script;
   await tfxLive.closeItermSession("", "session-a", false, ["/dev/ttys004"], {
     runTmux: async () => ({ stdout: "" }),
@@ -316,6 +340,10 @@ test("iTerm close also closes unmarked panes attached to the killed session", as
     },
   });
   assert.match(script, /set killedTtys to \{"\/dev\/ttys004"\}/);
+  assert.match(
+    script,
+    /if candidateName is "session-a" and killedTtys contains/,
+  );
   assert.doesNotMatch(script, /^\s*return$/m);
   // 순번 참조를 들고 있다 닫으면 옆 패인이 닫히므로 ID 로 다시 찾은 세션만 닫아야 한다.
   assert.match(script, /set end of killedIds to \(id of candidateSession\)/);
@@ -333,4 +361,106 @@ test("peer side options carry the run group to lazily started sessions", () => {
     "peerA",
   );
   assert.equal(base.group, "peer:a:b:c:1234");
+});
+
+test("start는 tmux 생성과 Codex native 준비 전에 layout/human 입력을 거부한다", async (t) => {
+  const dir = await fs.mkdtemp(
+    path.join(os.tmpdir(), "iterm-start-validation-"),
+  );
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const marker = path.join(dir, "tmux-called");
+  await fs.writeFile(
+    path.join(dir, "tmux"),
+    `#!/bin/sh\n: > '${marker}'\nexit 1\n`,
+    { mode: 0o700 },
+  );
+  for (const cli of ["claude", "codex", "agy"]) {
+    for (const flag of ["layout", "human"]) {
+      await t.test(`${cli}/${flag}`, async () => {
+        const result = spawnSync(
+          process.execPath,
+          [
+            "bin/tfx-live.mjs",
+            "start",
+            "--cli",
+            cli,
+            "--session",
+            "validation-only",
+            `--${flag}`,
+            "invalid",
+          ],
+          {
+            env: { HOME: dir, PATH: dir, TMPDIR: dir, TFX_JEV: "0" },
+            encoding: "utf8",
+            timeout: 5000,
+          },
+        );
+        assert.equal(result.status, 1, result.stdout + result.stderr);
+        assert.match(result.stdout + result.stderr, new RegExp(`--${flag}:`));
+        await assert.rejects(fs.access(marker), { code: "ENOENT" });
+      });
+    }
+  }
+});
+
+test("peer seed는 layout task로 전달하지 않고 communication/high 기본값과 명시 override를 보존한다", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "iterm-peer-metadata-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  for (const overrides of [
+    {},
+    { task: "명시한 작업", role: "reviewer", human: "low" },
+  ]) {
+    const starts = [];
+    const asks = [];
+    await tfxLive.peer(
+      {
+        "cli-a": "claude",
+        "cli-b": "claude",
+        rounds: "1",
+        seed: "비공개 대화 본문",
+        ...overrides,
+      },
+      {
+        peerArtifactPaths: () => ({
+          transcriptPath: path.join(dir, "transcript.json"),
+          statusPath: path.join(dir, "status.json"),
+        }),
+        doStart: async (_adapter, opts) => starts.push(opts),
+        doAsk: async (_adapter, opts) => {
+          asks.push(opts);
+          return { transport: "tmux", done: true, response: "ok" };
+        },
+        stopAfterLifecycle: async () => {},
+        printJson: () => {},
+      },
+    );
+    assert.equal(starts.length, 2);
+    for (const opts of [...starts, ...asks]) {
+      assert.equal(opts.task, overrides.task);
+      assert.equal(opts.role, overrides.role || "communication");
+      assert.equal(opts.human, overrides.human || "high");
+    }
+  }
+});
+
+test("자동 배치의 안전 거부 경고를 start 결과에 전달한다", async () => {
+  const result = await tfxLive.openAutomaticIterm(
+    "s",
+    "g",
+    { key: "p" },
+    {},
+    {
+      env: {},
+      execFile: async () => ({ stdout: process.execPath }),
+      runLayout: async () => ({
+        ok: true,
+        verified: true,
+        applied: false,
+        background: true,
+        reason: "leader_not_in_local_iterm",
+        warning: "iTerm layout: leader_not_in_local_iterm",
+      }),
+    },
+  );
+  assert.match(result.warning, /leader_not_in_local_iterm/);
 });

@@ -26,7 +26,7 @@ import {
   resolve as pathResolve,
 } from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 import {
   codexThreadNames,
   readCodexSessionRecords,
@@ -55,6 +55,13 @@ import {
   resolveSenderName,
   waitCodexRequest,
 } from "../hub/team/codex-queue.mjs";
+import {
+  backgroundLayout,
+  closeManagedIterm,
+  focusReport,
+  layoutInput,
+  runItermLayout,
+} from "../hub/team/iterm-layout.mjs";
 import { resolveCodexSocket } from "../hub/team/native-peer.mjs";
 import {
   escapePwshSingleQuoted as escapeRemotePwshSingleQuoted,
@@ -104,6 +111,12 @@ const BOOLEAN_FLAGS = new Set([
   "no-relay-tag",
   "sandbox",
   "no-auto-trust",
+  "no-bypass-hook-trust",
+  "no-auto-layout",
+  "background",
+  "dry-run",
+  "focus",
+  "reset-pins",
 ]);
 const PEER_HOP_DONE_MARKER = "<<<TFX_PEER_HOP_DONE>>>";
 const TMUX_SET_BUFFER_MAX_BYTES = 8 * 1024;
@@ -118,7 +131,10 @@ const BUG_REPORT_DIR =
 function usage(command) {
   const lines = [
     "Usage:",
-    "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--lead-session ID] [--launcher CMD] [--sandbox] [--no-auto-trust] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
+    "  tfx-live inspect [--cwd DIR] (local iTerm layout)",
+    "  tfx-live reconcile [--cwd DIR] [--dry-run] [--reset-pins] (local iTerm layout)",
+    "  tfx-live start --session NAME [--layout auto|off|legacy|background|tab|window|split-vertical|split-horizontal] [--no-auto-layout] [--background] [--focus] [--role ROLE] [--human high|low|unknown] [--task TEXT]",
+    "  tfx-live start --session NAME [--name NAME] [--group NAME] [--cli codex|claude|agy] [--lead-session ID] [--launcher CMD] [--sandbox] [--no-auto-trust] [--no-bypass-hook-trust] [--unset-env PATTERNS] [--model ID] [--effort TIER] [--cwd DIR] [--remote HOST] [--resume ID] [--resume-last 1] [--ready-timeout 30] [--poll-interval 1500]",
     "  tfx-live ask --session NAME[:WINDOW.PANE] --prompt TEXT [--cli codex|claude|agy] [--if-busy wait|fail|interrupt|queue] [--busy-timeout 60] [--timeout 60] [--remote HOST] [--settle 1500] [--poll-interval 1500]",
     "  tfx-live ask --cli codex [--transport queue|tmux] (--session NAME[:WINDOW.PANE] | --thread UUID) --prompt TEXT [--from NAME] [--timeout 60] [--no-wait]",
     "    Codex ask defaults to the app-server queue (thread/queue/add, `codex queue --message` only when add is unavailable; delivered when the TUI picks it up); tmux paste is the reported fallback and the path for slash commands. /rename and /status skip idle waiting only with --if-busy wait (default) or queue; explicit fail or interrupt policies are honored. /compact and /new wait for idle by default.",
@@ -268,8 +284,8 @@ function selectAdapter(flags) {
   }
   if (cli === "agy" && flags.remote)
     throw new Error("agy supports local tmux only; --remote is unavailable");
-  if (flags.sandbox && cli !== "agy")
-    throw new Error("--sandbox is only supported with --cli agy");
+  if (flags.sandbox && !["agy", "codex"].includes(cli))
+    throw new Error("--sandbox is only supported with --cli agy or codex");
   if (flags["if-busy"] === "queue" && cli !== "agy")
     throw new Error("--if-busy queue is only supported with --cli agy");
   return adapter;
@@ -1979,50 +1995,6 @@ function isCodexTrustMenu(text) {
   );
 }
 
-function isCodexHooksDeclineMenu(text) {
-  const menu = splitAtLastSelector(text, "›");
-  const rows = stripAnsi(text)
-    .split("\n")
-    .map((line) => line.trim())
-    .join("\n");
-  return (
-    Boolean(menu) &&
-    CODEX_HOOKS_REVIEW_RE.test(menu.above) &&
-    /^›\s*[123]\. (?:Review hooks|Trust all and continue|Continue without trusting \(hooks won't run\))$/.test(
-      menu.selected,
-    ) &&
-    /^(?:›\s*)?1\. Review hooks\n(?:›\s*)?2\. Trust all and continue\n(?:›\s*)?3\. Continue without trusting \(hooks won't run\)$/m.test(
-      rows,
-    )
-  );
-}
-
-async function dismissCodexHooksReview(remote, session) {
-  let raw = await captureVisible(remote, session);
-  for (let iteration = 0; iteration < 3; iteration += 1) {
-    if (!isCodexHooksDeclineMenu(raw)) break;
-    const menu = splitAtLastSelector(raw, "›");
-    if (menu.selected === "› 3. Continue without trusting (hooks won't run)") {
-      await runTmux(remote, [
-        "send-keys",
-        "-t",
-        exactTmuxTarget(session),
-        "Enter",
-      ]);
-      return { dismissed: true, raw };
-    }
-    await runTmux(remote, [
-      "send-keys",
-      "-t",
-      exactTmuxTarget(session),
-      "Down",
-    ]);
-    await sleep(200);
-    raw = await captureVisible(remote, session);
-  }
-  return { dismissed: false, raw };
-}
-
 // 다중 선택 항목은 한 글자 체크박스로 그린다. 바이너리 상수: [ ] [×] [✔] [√] ☐ ☒, 라디오 ( ) (*) ◯ ◉.
 function isClaudeMcpApprovalPrompt(text) {
   const menu = splitAtLastSelector(text, "❯");
@@ -2338,7 +2310,7 @@ const ADAPTERS = {
     cli: "codex",
     launchArgv: ["codex"],
     launchKeys: [
-      "codex --dangerously-bypass-approvals-and-sandbox -c features.hooks=false",
+      "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust -c features.hooks=false",
       "Enter",
     ],
     resumeById: (id) =>
@@ -2347,6 +2319,7 @@ const ADAPTERS = {
         "resume",
         id,
         "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
         "-c",
         "features.hooks=false",
       ]),
@@ -2356,6 +2329,7 @@ const ADAPTERS = {
         "resume",
         "--last",
         "--dangerously-bypass-approvals-and-sandbox",
+        "--dangerously-bypass-hook-trust",
         "-c",
         "features.hooks=false",
       ]),
@@ -2371,9 +2345,9 @@ const ADAPTERS = {
     blockingScreens: [
       {
         name: "codex-hooks-review",
-        isPresent: (raw) =>
-          CODEX_HOOKS_REVIEW_RE.test(raw) && !isCodexHooksDeclineMenu(raw),
-        warning: "Codex hooks need review; no approval was sent",
+        isPresent: (raw) => CODEX_HOOKS_REVIEW_RE.test(raw),
+        warning:
+          "Codex hooks need review; no trust approval was sent; attach to the tmux session and review the hooks yourself",
       },
       {
         name: "codex-bootstrap-error",
@@ -2383,11 +2357,6 @@ const ADAPTERS = {
       },
     ],
     startupScreens: [
-      {
-        name: "codex-hooks-decline",
-        isPresent: isCodexHooksDeclineMenu,
-        dismiss: dismissCodexHooksReview,
-      },
       {
         name: "trust",
         blockedBy: "codex-trust-folder",
@@ -2524,6 +2493,13 @@ function buildLaunchKeys(adapter, { model, effort, name, sandbox, env } = {}) {
 
   const overrideArgs = [];
   if (adapter.cli === "codex") {
+    if (sandbox)
+      overrideArgs.push(
+        "--sandbox",
+        "workspace-write",
+        "--ask-for-approval",
+        "on-request",
+      );
     if (hasModel) {
       overrideArgs.push(
         "-c",
@@ -2559,7 +2535,14 @@ function buildLaunchKeys(adapter, { model, effort, name, sandbox, env } = {}) {
   }
 
   const [command, ...remainingKeys] = adapter.launchKeys;
-  return [`${command} ${shellQuote(overrideArgs)}`, ...remainingKeys];
+  const launch =
+    adapter.cli === "codex" && sandbox
+      ? command.replace(
+          /(?:^|\s)--dangerously-bypass-approvals-and-sandbox(?=\s|$)/g,
+          "",
+        )
+      : command;
+  return [`${launch} ${shellQuote(overrideArgs)}`, ...remainingKeys];
 }
 
 async function dismissStartupScreens(adapter, remote, session) {
@@ -3020,7 +3003,120 @@ async function itermProject(cwd = process.cwd(), deps = {}) {
   };
 }
 
+async function openAutomaticIterm(
+  session,
+  group,
+  project,
+  options = {},
+  deps = {},
+) {
+  const env = deps.env || process.env;
+  const input = layoutInput({ ...options, group }, env);
+  const request = { ...options, group, project, session };
+  const background = (reason) => backgroundLayout(request, input, reason, deps);
+  if (["off", "background"].includes(input.mode))
+    return {
+      iterm: background(
+        input.mode === "off" ? "layout_disabled" : "user_background",
+      ),
+    };
+  const legacy = deps.openLegacy || openItermSession;
+  const legacyPlacement = async (reason) => {
+    const view = await legacy(session, group, project, {
+      noSplits: true,
+      focus: true,
+    });
+    return {
+      ...view,
+      applied: Boolean(view),
+      verified: false,
+      decision: {
+        source: reason === "user_legacy" ? "explicit" : "rules",
+        reason,
+      },
+      reason: "legacy_explicit_focus_unverified",
+      focus: focusReport(
+        input,
+        "legacy_explicit_focus_unverified",
+        "focus",
+        null,
+      ),
+    };
+  };
+  if (input.mode === "legacy") {
+    if (input.focusPolicy !== "focus")
+      return {
+        iterm: background("legacy_requires_explicit_focus"),
+        warning: "legacy 배치는 --focus가 필요해 UI 없이 tmux를 유지합니다",
+      };
+    return { iterm: await legacyPlacement("user_legacy") };
+  }
+  try {
+    const exec = deps.execFile || execFileAsync;
+    const tmux = deps.runTmux || runTmux;
+    const { stdout } = await exec("which", ["tmux"], { timeout: 2000 });
+    const clients = env.TMUX_PANE
+      ? await tmux(null, [
+          "list-clients",
+          "-t",
+          env.TMUX_PANE,
+          "-F",
+          "#{client_activity} #{client_tty}",
+        ]).catch(() => ({ stdout: "" }))
+      : { stdout: "" };
+    const leaderTty =
+      clients.stdout
+        .trim()
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => line.split(" "))
+        .sort((a, b) => Number(b[0]) - Number(a[0]))[0]?.[1] || "";
+    const iterm = await (deps.runLayout || runItermLayout)(
+      {
+        ...options,
+        group,
+        project,
+        session,
+        leaderTty,
+        titleGroup: options.group || project.name,
+        tmuxPath: realpathSync(stdout.trim()),
+      },
+      { env },
+    );
+    return {
+      iterm,
+      ...(iterm.warning ||
+      !iterm.ok ||
+      iterm.verified === false ||
+      iterm.reason === "python_api_unavailable" ||
+      iterm.reason === "no_safe_visible_candidate"
+        ? {
+            warning:
+              iterm.warning ||
+              `iTerm layout: ${iterm.reason || "application_unverified"}`,
+          }
+        : {}),
+    };
+  } catch (error) {
+    if (error.layoutResult?.partialPossible)
+      return {
+        iterm: {
+          ...error.layoutResult,
+          focus: focusReport(input, "partial_application_unknown"),
+        },
+        warning: "iTerm 적용 결과가 불확실합니다. inspect로 확인하세요",
+      };
+    return {
+      iterm: background("python_api_unavailable"),
+      warning:
+        "iTerm Python API/runtime을 사용할 수 없어 UI 없이 tmux를 유지합니다. list-sessions/attach로 확인하세요",
+    };
+  }
+}
+
 async function openItermSession(session, group, project, deps = {}) {
+  if (!deps.focus)
+    throw new Error("legacy iTerm 생성에는 명시 --focus가 필요합니다");
   const exec = deps.execFile ?? execFileAsync;
   const tmux = deps.runTmux ?? runTmux;
   const env = deps.env ?? process.env;
@@ -3108,7 +3204,7 @@ async function openItermSession(session, group, project, deps = {}) {
   set splitDirection to ""
   set newColumn to "L"
   repeat with candidateTab in tabs of targetWindow
-    if (count of sessions of candidateTab) < 4 then
+    if ${deps.noSplits ? "false" : "(count of sessions of candidateTab) < 4"} then
       set leftSession to missing value
       set rightSession to missing value
       set leftCount to 0
@@ -3199,6 +3295,10 @@ async function closeItermSession(
   killedTtys = [],
   deps = {},
 ) {
+  if (!deps.execFile && !deps.runTmux) {
+    const managed = await closeManagedIterm(sessionId, session);
+    if (managed) return managed;
+  }
   const exec = deps.execFile ?? execFileAsync;
   const tmux = deps.runTmux ?? runTmux;
   const clients = await tmux(null, [
@@ -3223,11 +3323,15 @@ tell application "iTerm2"
     try
     repeat with candidateTab in tabs of candidateWindow
       repeat with candidateSession in sessions of candidateTab
-        if ${appleScriptString(sessionId ?? "")} is not "" and id of candidateSession is ${appleScriptString(sessionId ?? "")} then
+        set candidateName to ""
+        try
+          tell candidateSession to set candidateName to variable named "user.tfx_session"
+        end try
+        if candidateName is ${appleScriptString(session)} and ${appleScriptString(sessionId ?? "")} is not "" and id of candidateSession is ${appleScriptString(sessionId ?? "")} then
           set idSession to candidateSession
           set idTab to candidateTab
         end if
-        if killedTtys contains (tty of candidateSession) then set end of killedIds to (id of candidateSession)
+        if candidateName is ${appleScriptString(session)} and killedTtys contains (tty of candidateSession) then set end of killedIds to (id of candidateSession)
         try
           tell candidateSession to set candidateName to variable named "user.tfx_session"
           if ${allowNameFallback ? "true" : "false"} and candidateName is ${appleScriptString(session)} then
@@ -3264,13 +3368,14 @@ tell application "iTerm2"
           tell remainingSession to set remainingName to variable named "user.tfx_session"
         end try
         if remainingName is missing value or remainingName is "" then set shellsOnly to false
+        if remainingName is not ${appleScriptString(session)} then set shellsOnly to false
         if not (is at shell prompt of remainingSession) then set shellsOnly to false
         if attachedTtys contains (tty of remainingSession) then set shellsOnly to false
       end repeat
       if shellsOnly then tell targetTab to close
     end try
   end if
-  -- 죽인 세션에 붙어 있던 패인은 표시가 없어도 닫는다. 순회 참조는 순번이라 앞선 닫기 뒤 옆 패인을 가리키므로 ID 로 매번 다시 찾는다.
+  -- 같은 TFX 세션으로 확인된 attach view만 닫는다. 닫기 뒤 바뀌는 순번 대신 ID를 다시 찾는다.
   repeat with killedIndex from 1 to count of killedIds
     set killedId to item killedIndex of killedIds
     repeat with candidateWindow in windows
@@ -3357,6 +3462,11 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
     }
     const config = { "features.hooks": false };
     if (opts.effort !== undefined) config.model_reasoning_effort = opts.effort;
+    const permissions = opts.sandbox
+      ? { approvalPolicy: "on-request", sandbox: "workspace-write" }
+      : !threadId
+        ? { approvalPolicy: "never", sandbox: "danger-full-access" }
+        : {};
     const result = await client.request(
       threadId ? "thread/resume" : "thread/start",
       {
@@ -3364,6 +3474,7 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
         ...(opts.model !== undefined
           ? { model: resolveCodexLaunchModel(opts.model, opts.env) }
           : {}),
+        ...permissions,
         config,
       },
       10000,
@@ -3385,7 +3496,59 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
         5000,
       );
     }
-    return { threadId: result.thread.id, close: () => client.close() };
+    return {
+      threadId: result.thread.id,
+      readPermissions: async () => {
+        // 권한 덮어쓰기 없이 TUI가 붙은 정확한 thread의 daemon 설정을 읽는다.
+        const observed = await client.request(
+          "thread/resume",
+          {
+            threadId: result.thread.id,
+            excludeTurns: true,
+          },
+          5000,
+        );
+        if (observed.thread?.id !== result.thread.id)
+          throw new Error(
+            "Codex permission readback returned a different or invalid thread",
+          );
+        if (
+          !observed.approvalPolicy ||
+          ![
+            "readOnly",
+            "workspaceWrite",
+            "dangerFullAccess",
+            "externalSandbox",
+          ].includes(observed.sandbox?.type)
+        )
+          throw new Error(
+            "Codex permission readback is missing approvalPolicy or sandbox",
+          );
+        const expectedApproval =
+          permissions.approvalPolicy ?? result.approvalPolicy;
+        const expectedSandbox =
+          {
+            "read-only": "readOnly",
+            "workspace-write": "workspaceWrite",
+            "danger-full-access": "dangerFullAccess",
+          }[permissions.sandbox] ?? result.sandbox?.type;
+        const matches =
+          isDeepStrictEqual(observed.approvalPolicy, expectedApproval) &&
+          observed.sandbox.type === expectedSandbox;
+        return {
+          approvalPolicy: observed.approvalPolicy,
+          sandbox: observed.sandbox,
+          permissionsVerified: matches,
+          ...(matches
+            ? {}
+            : {
+                permissionWarning:
+                  "Codex permission readback mismatch; daemon settings do not match the prepared thread",
+              }),
+        };
+      },
+      close: () => client.close(),
+    };
   } catch (error) {
     client.close();
     throw error;
@@ -3393,6 +3556,8 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
 }
 
 async function doStart(launchAdapter, opts) {
+  // start/lead/peer의 공통 경계에서 tmux와 native thread 준비 전에 검증한다.
+  layoutInput(opts, opts.env || process.env);
   if (launchAdapter.cli !== "codex" || opts.remote || !opts.nativePeer)
     return doStartTmux(launchAdapter, opts);
   const env = opts.env || process.env;
@@ -3406,11 +3571,35 @@ async function doStart(launchAdapter, opts) {
   }
   const prepared = await prepareCodexThread(socket, opts);
   try {
-    return await doStartTmux(launchAdapter, {
+    const started = await doStartTmux(launchAdapter, {
       ...opts,
       preparedThreadId: prepared.threadId,
       preparedSocket: socket,
     });
+    let permissions;
+    try {
+      permissions = await prepared.readPermissions();
+    } catch (error) {
+      permissions = {
+        approvalPolicy: null,
+        sandbox: null,
+        permissionsVerified: false,
+        permissionWarning: `Codex permission readback failed: ${error.message}`,
+      };
+    }
+    return {
+      ...started,
+      ...permissions,
+      ready: started.ready && permissions.permissionsVerified,
+      ...(permissions.permissionsVerified
+        ? {}
+        : {
+            blockedBy: started.blockedBy ?? "codex-permission-readback",
+            warning: [started.warning, permissions.permissionWarning]
+              .filter(Boolean)
+              .join("; "),
+          }),
+    };
   } finally {
     // 첫 turn 전 thread에는 rollout이 없을 수 있어 TUI 연결이 끝난 뒤 소유 연결을 놓는다.
     prepared.close();
@@ -3436,6 +3625,26 @@ async function doStartTmux(launchAdapter, opts) {
       ...(launchAdapter.blockingScreens ?? []),
     ],
   };
+  if (
+    adapter.cli === "codex" &&
+    (opts.preparedThreadId ||
+      opts.noBypassHookTrust ||
+      (opts.env || process.env).TFX_CODEX_BYPASS_HOOK_TRUST === "0" ||
+      /(?:^|\s)--dangerously-bypass-hook-trust(?=\s|$)/.test(
+        opts.launcher ?? "",
+      ))
+  ) {
+    // 관리 템플릿에서만 뺀다. 공유 daemon attach의 실제 적용은 확인되지 않았다.
+    const withoutHookTrust = (command) =>
+      command.replace(/(?:^|\s)--dangerously-bypass-hook-trust(?=\s|$)/g, "");
+    const { resumeById, resumeLast } = adapter;
+    adapter.launchKeys = [
+      withoutHookTrust(adapter.launchKeys[0]),
+      ...adapter.launchKeys.slice(1),
+    ];
+    adapter.resumeById = (id) => withoutHookTrust(resumeById(id));
+    adapter.resumeLast = () => withoutHookTrust(resumeLast());
+  }
   if (opts.launcher) {
     // 사람이 쓰는 리드 세션은 워커용 환경 변수 접두를 떼고 CLI 이름만 지정한 실행 명령으로 바꾼다.
     // 뒤따르는 인자(Codex 승인 플래그, resume 형식)는 그대로 둔다.
@@ -3507,6 +3716,12 @@ async function doStartTmux(launchAdapter, opts) {
       );
     // --remote 세션의 셸은 데몬에서 돌아서 -C 로 작업 디렉터리를 지정한다.
     launchKeys[0] += ` ${shellQuote(["--remote", `unix://${opts.preparedSocket}`, "-C", pathResolve(cwd || process.cwd())])}`;
+  } else if (resumed && adapter.cli === "codex" && opts.sandbox) {
+    launchKeys[0] = launchKeys[0].replace(
+      /(?:^|\s)--dangerously-bypass-approvals-and-sandbox(?=\s|$)/g,
+      "",
+    );
+    launchKeys[0] += " --sandbox workspace-write --ask-for-approval on-request";
   }
   launchKeys[0] = withUnsetEnv(launchKeys[0], opts.unsetEnv ?? []);
   // 받는 쪽 triflux mod 가 이 값을 저장해 자기를 띄운 리드의 tfx_control 요청만 실행한다.
@@ -3730,12 +3945,15 @@ async function doStartTmux(launchAdapter, opts) {
   if (ready && shouldUseIterm(remote)) {
     try {
       const project = await itermProject(cwd ?? process.cwd());
-      iterm = await openItermSession(
+      const placement = await openAutomaticIterm(
         session,
         opts.group || project.key,
         project,
+        { ...opts, cli: adapter.cli, name, cwd },
       );
-      if (iterm) {
+      iterm = placement.iterm;
+      itermWarning = placement.warning;
+      if (iterm?.sessionId) {
         await runTmux(null, [
           "set-option",
           "-t",
@@ -3743,31 +3961,34 @@ async function doStartTmux(launchAdapter, opts) {
           "@tfx_iterm_session",
           iterm.sessionId,
         ]);
-        const scriptsDir = pathJoin(
-          homedir(),
-          "Library",
-          "Application Support",
-          "iTerm2",
-          "Scripts",
-        );
-        const scriptPath = pathJoin(scriptsDir, ITERM_TITLE_SCRIPT_NAME);
-        await mkdir(scriptsDir, { recursive: true });
-        const installed = await readFile(scriptPath, "utf8").catch((error) => {
-          if (error.code === "ENOENT") return null;
-          throw error;
-        });
-        if (installed !== ITERM_TITLE_SCRIPT)
-          await writeFile(scriptPath, ITERM_TITLE_SCRIPT, { mode: 0o700 });
-        await chmod(scriptPath, 0o700);
-        const titleArgs = [
-          iterm.sessionId,
-          opts.group || project.name,
-          name ?? session,
-        ]
-          .map(appleScriptString)
-          .join(", ");
-        // 절대 경로는 최초 설치 직후의 메뉴 캐시 지연을 피하고, 적용 표식은 비동기 실패를 잡는다.
-        const titleScript = `tell application "iTerm2"
+        if (!iterm.titleApplied) {
+          const scriptsDir = pathJoin(
+            homedir(),
+            "Library",
+            "Application Support",
+            "iTerm2",
+            "Scripts",
+          );
+          const scriptPath = pathJoin(scriptsDir, ITERM_TITLE_SCRIPT_NAME);
+          await mkdir(scriptsDir, { recursive: true });
+          const installed = await readFile(scriptPath, "utf8").catch(
+            (error) => {
+              if (error.code === "ENOENT") return null;
+              throw error;
+            },
+          );
+          if (installed !== ITERM_TITLE_SCRIPT)
+            await writeFile(scriptPath, ITERM_TITLE_SCRIPT, { mode: 0o700 });
+          await chmod(scriptPath, 0o700);
+          const titleArgs = [
+            iterm.sessionId,
+            opts.group || project.name,
+            name ?? session,
+          ]
+            .map(appleScriptString)
+            .join(", ");
+          // 절대 경로는 최초 설치 직후의 메뉴 캐시 지연을 피하고, 적용 표식은 비동기 실패를 잡는다.
+          const titleScript = `tell application "iTerm2"
   set titleSession to missing value
   repeat with candidateWindow in windows
     repeat with candidateTab in tabs of candidateWindow
@@ -3787,10 +4008,11 @@ async function doStartTmux(launchAdapter, opts) {
   end repeat
   error "iTerm title update was not confirmed; check the iTerm2 Python runtime and Script Console"
 end tell`;
-        await execFileAsync("/usr/bin/osascript", ["-e", titleScript], {
-          timeout: 5000,
-          maxBuffer: 64 * 1024,
-        });
+          await execFileAsync("/usr/bin/osascript", ["-e", titleScript], {
+            timeout: 5000,
+            maxBuffer: 64 * 1024,
+          });
+        }
       }
     } catch (error) {
       itermWarning = error.message;
@@ -4801,6 +5023,11 @@ async function ensureTmuxSession(adapter, opts) {
       remote: opts.remote,
       cwd: opts.cwd,
       group: opts.group,
+      layout: opts.layout,
+      role: opts.role,
+      human: opts.human,
+      task: opts.task,
+      focus: opts.focus,
       readyTimeoutMs: opts.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS,
       pollIntervalMs: opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
     });
@@ -5208,8 +5435,18 @@ function startOpts(flags) {
     effort: flags.effort,
     name: flags.name,
     group: flags.group,
+    layout: flags.background
+      ? "background"
+      : flags["no-auto-layout"]
+        ? "off"
+        : flags.layout,
+    role: flags.role,
+    human: flags.human,
+    task: flags.task,
+    focus: Boolean(flags.focus),
     sandbox: Object.hasOwn(flags, "sandbox"),
     noAutoTrust: Object.hasOwn(flags, "no-auto-trust"),
+    noBypassHookTrust: Object.hasOwn(flags, "no-bypass-hook-trust"),
     unsetEnv,
     leadSession: flags["lead-session"],
     launcher: flags.launcher,
@@ -6788,6 +7025,15 @@ function startOptsForSession(flags, session, side) {
   return {
     session,
     group: flags.group,
+    layout: flags.background
+      ? "background"
+      : flags["no-auto-layout"]
+        ? "off"
+        : flags.layout,
+    role: flags.role ?? (side ? "communication" : undefined),
+    human: flags.human ?? (side ? "high" : undefined),
+    task: flags.task,
+    focus: Boolean(flags.focus),
     ...(!side ? { name: flags.name } : {}),
     remote: flags.remote,
     cwd: flags.cwd,
@@ -7354,6 +7600,15 @@ function peerSideBaseOpts(flags, side, adapter, session) {
   return {
     session,
     group: flags.group,
+    layout: flags.background
+      ? "background"
+      : flags["no-auto-layout"]
+        ? "off"
+        : flags.layout,
+    role: flags.role ?? "communication",
+    human: flags.human ?? "high",
+    task: flags.task,
+    focus: Boolean(flags.focus),
     noRelayTag: Object.hasOwn(flags, "no-relay-tag"),
     ...contextOpts(flags, adapter.cli),
     short,
@@ -7895,6 +8150,19 @@ async function main() {
 
   if (command === "start") {
     await start(flags);
+  } else if (command === "inspect" || command === "reconcile") {
+    if (flags.remote || !shouldUseIterm(null))
+      throw new Error("layout inspect/reconcile requires local macOS iTerm2");
+    const project = await itermProject(flags.cwd ?? process.cwd());
+    const result = await runItermLayout({
+      action: command,
+      project,
+      cwd: flags.cwd,
+      dryRun: Boolean(flags["dry-run"]),
+      resetPins: Boolean(flags["reset-pins"]),
+    });
+    printJson(result);
+    if (result.ok === false) process.exitCode = 1;
   } else if (command === "ask") {
     await ask(flags);
   } else if (command === "wait") {
@@ -7970,8 +8238,10 @@ export {
   isSlashCommand,
   itermProject,
   matchPeerCandidates,
+  openAutomaticIterm,
   openItermSession,
   paneCliProcess,
+  parseCli,
   parseCodexTmuxSessions,
   parsePeerClosure,
   parsePeerToSpec,
@@ -7988,6 +8258,7 @@ export {
   send,
   shouldUseIterm,
   splitTmuxTarget,
+  startOpts,
   stopOpts,
   tmuxBufferName,
   verifyAttachedPeerSide,

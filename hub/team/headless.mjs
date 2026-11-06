@@ -14,12 +14,19 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
+import {
+  resolveNestedCodexAgentProfile,
+  resolveWorkerModel,
+} from "../../scripts/lib/agent-route-policy.mjs";
 import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
 import {
   judgeWorkerHealth,
   recordMcpSelectionShadow,
 } from "../lib/jev-addon.mjs";
+import {
+  formatMcpRecommendation,
+  recommendMcp,
+} from "../lib/mcp-recommendations.mjs";
 import { privateTmpDir } from "../lib/private-tmp.mjs";
 import {
   createActivityLifecycle,
@@ -173,6 +180,7 @@ export function normalizeHeadlessAssignment(assignment = {}, index = 0) {
 
 function buildRouteBackedHeadlessCommand(
   resolvedCli,
+  task,
   promptFile,
   resultFile,
   opts = {},
@@ -184,7 +192,9 @@ function buildRouteBackedHeadlessCommand(
     Number.isFinite(Number(opts.timeoutSec)) && Number(opts.timeoutSec) > 0
       ? String(Math.trunc(Number(opts.timeoutSec)))
       : "";
-  const timeoutArg = timeout ? ` ${shellQuote(timeout)}` : "";
+  // 실행용 프롬프트와 같은 private 경로와 수명으로 원 작업만 별도 보관한다.
+  const taskFile = `${promptFile}.task`;
+  writeFileSync(taskFile, task, { encoding: "utf8", mode: 0o600, flag: "wx" });
   const reviewByAuthor = ["code-reviewer", "quality-reviewer"].includes(
     routeAgent,
   );
@@ -197,10 +207,7 @@ function buildRouteBackedHeadlessCommand(
         .map((key) => `${key}=${shellQuote(process.env[key])} `)
         .join("")
     : "";
-  const codexProfileEnv =
-    resolvedCli === "codex" && opts.codexProfile
-      ? `TFX_CODEX_PROFILE=${shellQuote(opts.codexProfile)} `
-      : "";
+  const codexProfileEnv = `TFX_CODEX_PROFILE=${shellQuote(opts.codexProfile || "auto")} `;
   const lifecycleEnv = [
     "TFX_HARD_CEILING_SEC",
     "TFX_STALL_THRESHOLD",
@@ -209,10 +216,26 @@ function buildRouteBackedHeadlessCommand(
     .filter((key) => process.env[key])
     .map((key) => `${key}=${shellQuote(process.env[key])} `)
     .join("");
+  const selectionEnv = Object.entries({
+    TFX_WORKER_CLI: resolvedCli,
+    TFX_WORKER_MODEL: opts.model || "",
+    TFX_WORKER_EFFORT: opts.effort || "",
+    TFX_WORKER_MODEL_FILE: `${resultFile}.model.json`,
+    TFX_WORKER_MCP_FILE: `${resultFile}.mcp.json`,
+    TFX_WORKER_SANDBOX_SCOPE: "headless",
+    ...(process.env.TFX_CODEX_BYPASS_HOOK_TRUST !== undefined
+      ? { TFX_CODEX_BYPASS_HOOK_TRUST: process.env.TFX_CODEX_BYPASS_HOOK_TRUST }
+      : {}),
+    ...(resolvedCli === "antigravity" && opts.profile
+      ? { TFX_GEMINI_PROFILE: opts.profile }
+      : {}),
+  })
+    .map(([key, value]) => `${key}=${shellQuote(value)} `)
+    .join("");
   const script =
     `__tfx_prompt=$(cat ${shellQuote(promptFile)}); ` +
-    `${lifecycleEnv}${codexProfileEnv}${cliModeEnv}${reviewEnv}` +
-    `bash ${shellQuote(routeScript)} ${shellQuote(routeAgent)} "$__tfx_prompt" ${shellQuote(mcp)}${timeoutArg} ` +
+    `${lifecycleEnv}${codexProfileEnv}${cliModeEnv}${reviewEnv}${selectionEnv}` +
+    `bash ${shellQuote(routeScript)} ${shellQuote(routeAgent)} "$__tfx_prompt" ${shellQuote(mcp)} ${shellQuote(timeout)} '' ${shellQuote(taskFile)} ` +
     `> ${shellQuote(resultFile)} 2>${shellQuote(`${resultFile}.err`)} < /dev/null`;
   return `bash -lc ${shellQuote(script)}`;
 }
@@ -259,6 +282,48 @@ function shadowClaudeMcpSelection(assignment) {
   }).catch(() => {});
 }
 
+// route 기반 워커는 최종 CLI를 정한 뒤 shell에서 추천한다. Claude direct만 부모가 맡는다.
+export async function prepareHeadlessMcpRecommendation(
+  assignment,
+  options = {},
+) {
+  if (
+    resolveCliType(assignment.cli) !== "claude" ||
+    ["code-reviewer", "quality-reviewer"].includes(assignment.role)
+  )
+    return null;
+  return recommendMcp(
+    {
+      cliType: "claude",
+      cwd: assignment.cwd || assignment.workdir,
+      task: assignment.prompt,
+      searchTerms: assignment.mcpSearchTerms,
+    },
+    options,
+  );
+}
+
+export async function prepareHeadlessWorkerModel(assignment, options = {}) {
+  const cli = resolveCliType(assignment.cli);
+  // route가 provider와 retry/review 정책을 확정하는 작업은 부모가 중복 조회하지 않는다.
+  if (
+    cli !== "claude" ||
+    ["code-reviewer", "quality-reviewer"].includes(assignment.role)
+  )
+    return null;
+  return resolveWorkerModel(
+    {
+      task: assignment.prompt,
+      agent: assignment.role || "claude",
+      cli,
+      model: assignment.model,
+      effort: assignment.effort,
+      nested: true,
+    },
+    options,
+  );
+}
+
 export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const { handoff = true, mcp, contextFile, model, cwd } = opts;
   const resolvedCli = resolveCliType(cli);
@@ -298,37 +363,55 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
     : "";
   // P2: HANDOFF 지시를 프롬프트에 삽입 (워커가 구조화된 handoff 블록을 출력하도록)
   const handoffHint = handoff ? `\n\n${HANDOFF_INSTRUCTION_SHORT}` : "";
-  const fullPrompt = `${contextPrefix}${prompt}${mcpHint}${workspaceHint}${handoffHint}`;
+  const recommendationHint = opts.mcpRecommendation
+    ? formatMcpRecommendation(opts.mcpRecommendation)
+    : "";
+  const fullPrompt = `${contextPrefix}${prompt}${mcpHint}${workspaceHint}${handoffHint}${recommendationHint}`;
 
   // 보안: 프롬프트를 임시 파일에 쓰고 파일 참조로 전달한다(셸 주입 방지).
   const promptFile = join(
     resultDir(),
     "prompt-" + randomUUID().slice(0, 8) + ".txt",
   ).replace(/\\/g, "/");
-  writeFileSync(promptFile, fullPrompt, "utf8");
+  writeFileSync(promptFile, fullPrompt, {
+    encoding: "utf8",
+    mode: 0o600,
+    flag: "wx",
+  });
 
   // Codex와 Antigravity는 tfx-route.sh를 통해서만 headless 실행한다. 이 경로가
   // disable/fallback/fail-loud 정책의 유일한 판정원이다. 여기서 같은 정책을
   // 재구현하면 shell route와 headless backend가 서로 다른 결론을 낼 수 있다.
-  const codexProfile =
-    resolvedCli === "codex"
+  // 역할 기본값은 명시 입력이 아니다. auto를 유지해야 route의 Jev 조정이 실행된다.
+  const explicitCodexProfile =
+    (resolvedCli === "codex" && opts.profile && opts.profile !== "auto") ||
+    ["max", "ultra", "astra_max", "astra_ultra"].includes(
+      process.env.TFX_CODEX_PROFILE,
+    )
       ? resolveNestedCodexAgentProfile(opts.role || cli, {
-          profileOverride: opts.profile ?? "auto",
+          profileOverride: resolvedCli === "codex" ? opts.profile : "auto",
           globalProfile: process.env.TFX_CODEX_PROFILE,
           codexHome: process.env.CODEX_HOME,
         })
       : undefined;
   const backendCommand =
     reviewByAuthor || resolvedCli === "codex" || resolvedCli === "antigravity"
-      ? buildRouteBackedHeadlessCommand(resolvedCli, promptFile, resultFile, {
-          ...opts,
-          role: reviewByAuthor ? routeAgent : opts.role,
-          codexProfile,
-          mcp,
-        })
+      ? buildRouteBackedHeadlessCommand(
+          resolvedCli,
+          prompt,
+          promptFile,
+          resultFile,
+          {
+            ...opts,
+            role: reviewByAuthor ? routeAgent : opts.role,
+            codexProfile: explicitCodexProfile,
+            mcp,
+          },
+        )
       : getBackend(resolvedCli).buildArgs(fullPrompt, resultFile, {
           ...opts,
           model,
+          workerModel: opts.workerModel,
           promptFile,
         });
   const safeCwd =
@@ -358,7 +441,7 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
  * @param {string} resultFile
  */
 export function cleanStaleResultArtifacts(resultFile) {
-  for (const suffix of ["", ".partial", ".err"]) {
+  for (const suffix of ["", ".partial", ".err", ".model.json", ".mcp.json"]) {
     const path = `${resultFile}${suffix}`;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -585,6 +668,13 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
   // dashboard: 워커 pane을 먼저 생성한 후 pane 0에 대시보드를 실행
   // (listPanes로 워커 감지가 가능하려면 워커 pane이 먼저 존재해야 함)
 
+  // 추천은 독립적으로 시작하고 pane 생성과 dispatch 순서는 유지한다.
+  const mcpRecommendations = assignments.map((assignment) =>
+    prepareHeadlessMcpRecommendation(assignment),
+  );
+  const workerModels = assignments.map((assignment) =>
+    prepareHeadlessWorkerModel(assignment),
+  );
   const dispatches = [];
   for (let i = 0; i < assignments.length; i++) {
     const assignment = assignments[i];
@@ -632,6 +722,15 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
     cleanStaleResultArtifacts(resultFile);
     shadowClaudeMcpSelection(assignment);
+    const mcpRecommendation = await mcpRecommendations[i];
+    const workerModel = await workerModels[i];
+    if (mcpRecommendation)
+      safeProgress?.({
+        type: "mcp_recommendation",
+        paneName,
+        cli: resolvedCli,
+        mcpRecommendation,
+      });
     const cmd = buildHeadlessCommand(
       assignment.cli,
       assignment.prompt,
@@ -640,8 +739,11 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
         mcp: assignment.mcp,
         role: assignment.role,
         model: assignment.model,
+        effort: assignment.effort,
+        workerModel,
         profile: assignment.profile,
         cwd: assignment.cwd || assignment.workdir,
+        mcpRecommendation,
       },
     );
     startCapture(sessionName, newPaneId);
@@ -663,6 +765,9 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       command: cmd,
       workerId,
       cwd: assignment.cwd || assignment.workdir,
+      mcpRecommendation,
+      workerModelFile: `${resultFile}.model.json`,
+      workerMcpFile: `${resultFile}.mcp.json`,
     });
   }
 
@@ -721,6 +826,16 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
       // Issue #118 review R1 HIGH: stale artifact 제거 (이전 run / restart 잔재)
       cleanStaleResultArtifacts(resultFile);
       shadowClaudeMcpSelection(assignment);
+      const mcpRecommendation =
+        await prepareHeadlessMcpRecommendation(assignment);
+      const workerModel = await prepareHeadlessWorkerModel(assignment);
+      if (mcpRecommendation)
+        safeProgress?.({
+          type: "mcp_recommendation",
+          paneName,
+          cli: resolvedCli,
+          mcpRecommendation,
+        });
       const cmd = buildHeadlessCommand(
         assignment.cli,
         assignment.prompt,
@@ -729,8 +844,11 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
           mcp: assignment.mcp,
           role: assignment.role,
           model: assignment.model,
+          effort: assignment.effort,
+          workerModel,
           profile: assignment.profile,
           cwd: assignment.cwd || assignment.workdir,
+          mcpRecommendation,
         },
       );
       const scriptDir = join(resultDir(), sessionName);
@@ -761,6 +879,9 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
         command: cmd,
         workerId,
         cwd: assignment.cwd || assignment.workdir,
+        mcpRecommendation,
+        workerModelFile: `${resultFile}.model.json`,
+        workerMcpFile: `${resultFile}.mcp.json`,
       };
     }),
   );
@@ -924,6 +1045,17 @@ async function collectResults(results) {
         exitCode: completion.exitCode,
         output,
         resultFile: d.resultFile,
+        ...(d.mcpRecommendation
+          ? { mcpRecommendation: d.mcpRecommendation }
+          : {}),
+        workerModelFile:
+          d.workerModelFile && existsSync(d.workerModelFile)
+            ? d.workerModelFile
+            : null,
+        workerMcpFile:
+          d.workerMcpFile && existsSync(d.workerMcpFile)
+            ? d.workerMcpFile
+            : null,
         workerGitDiffFiles,
         sessionDead: completion.sessionDead || false,
         handoff: handoffResult.handoff,
@@ -1095,6 +1227,10 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
 
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
+    if (event.type === "mcp_recommendation")
+      process.stderr.write(
+        `[headless] ${event.paneName} MCP recommendation ${JSON.stringify(event.mcpRecommendation)}\n`,
+      );
     if (event.type === "session_created") resultsIndex.begin();
     else if (event.type === "dispatched")
       resultsIndex.workerStarted(event.paneName);
@@ -1181,7 +1317,7 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     runFailed = true;
     runError = error;
   }
-  resultsIndex.finish(runCompleted);
+  resultsIndex.finish(runCompleted, completedResults);
 
   if (!runCompleted) {
     sessionOwnership.release();

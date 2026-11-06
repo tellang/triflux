@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { once } from "node:events";
 import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -63,31 +62,180 @@ test("UDS auto는 고신뢰 Jev에도 다중 loaded thread를 거부하고 전�
   assert.equal(closed, true);
 });
 
-async function withFakeCodexServer(env, fn) {
+async function withFakeCodexServer(env, fn, spawnChild = spawn) {
   const dir = await fs.mkdtemp(path.join(tmpdir(), "cx-"));
   const socketPath = path.join(dir, "fake.sock");
-  const child = spawn(process.execPath, [FAKE_CODEX_SERVER, socketPath], {
+  const child = spawnChild(process.execPath, [FAKE_CODEX_SERVER, socketPath], {
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, ...env },
   });
+  const closed = new Promise((resolve) => child.once("close", resolve));
+  let stdout = "";
+  let stderr = "";
+  const onStderr = (chunk) => {
+    stderr += chunk;
+  };
+  const failure = (reason) =>
+    new Error(
+      `Codex UDS fixture ${reason}; stderr: ${stderr.trim() || "(empty)"}`,
+    );
+  let onStdout;
+  let onClose;
+  let onError;
+  let timer;
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", onStderr);
+  const ready = new Promise((resolve, reject) => {
+    onStdout = (chunk) => {
+      stdout += chunk;
+      let newline;
+      while ((newline = stdout.indexOf("\n")) !== -1) {
+        const line = stdout.slice(0, newline);
+        stdout = stdout.slice(newline + 1);
+        if (
+          line === `listening ${socketPath}` &&
+          child.exitCode === null &&
+          child.signalCode === null
+        )
+          resolve();
+      }
+    };
+    onClose = (code, signal) =>
+      reject(
+        failure(`exited before listening (code=${code}, signal=${signal})`),
+      );
+    onError = (error) =>
+      reject(failure(`spawn/process error: ${error.message}`));
+    child.stdout.on("data", onStdout);
+    child.once("close", onClose);
+    child.on("error", onError);
+    timer = setTimeout(
+      () => reject(failure("did not report listening within 1000ms")),
+      1000,
+    );
+  });
   try {
-    for (let i = 0; i < 100; i++) {
-      if ((await fs.stat(socketPath).catch(() => null))?.isSocket()) break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    assert.equal((await fs.stat(socketPath)).isSocket(), true);
+    await ready.finally(() => {
+      clearTimeout(timer);
+      child.stdout.off("data", onStdout);
+      child.off("close", onClose);
+    });
     await fn(socketPath);
   } finally {
-    const exited =
-      child.exitCode !== null || child.signalCode !== null
-        ? Promise.resolve()
-        : once(child, "exit").catch(() => {});
-    if (child.exitCode === null && child.signalCode === null)
+    if (child.pid && child.exitCode === null && child.signalCode === null)
       child.kill("SIGTERM");
-    await exited;
+    await closed;
+    child.off("error", onError);
+    child.stderr.off("data", onStderr);
     await fs.rm(dir, { recursive: true, force: true });
   }
 }
+
+test("Codex UDS fixture rejects a socket without a complete matching listening signal", async () => {
+  let child;
+  let fixtureDir;
+  await assert.rejects(
+    () =>
+      withFakeCodexServer(
+        {},
+        () => assert.fail("RPC callback ran before fixture readiness"),
+        (command, args, options) => {
+          fixtureDir = path.dirname(args[1]);
+          child = spawn(
+            command,
+            [
+              "--input-type=module",
+              "-e",
+              `import net from "node:net";
+              const socketPath = process.argv[1];
+              net.createServer().listen(socketPath, () => {
+                process.stderr.write("fixture withholding readiness\\n");
+                process.stdout.write("listening wrong.sock\\nlistening " + socketPath);
+              });`,
+              args[1],
+            ],
+            options,
+          );
+          return child;
+        },
+      ),
+    /fixture.*listening.*1000ms.*stderr: fixture withholding readiness/s,
+  );
+  assert.notEqual(child.exitCode ?? child.signalCode, null);
+  assert.equal(child.stdout.listenerCount("data"), 0);
+  assert.equal(child.stderr.listenerCount("data"), 0);
+  for (const event of ["error", "exit", "close"])
+    assert.equal(child.listenerCount(event), 0);
+  await assert.rejects(fs.stat(fixtureDir), { code: "ENOENT" });
+});
+
+test("Codex UDS fixture reports early exit code or signal with stderr", async () => {
+  for (const [terminate, expected] of [
+    ["process.exit(23)", /fixture.*exit.*code=23.*fixture startup failed/s],
+    [
+      'process.kill(process.pid, "SIGTERM")',
+      /fixture.*exit.*signal=SIGTERM.*fixture startup failed/s,
+    ],
+  ]) {
+    await assert.rejects(
+      () =>
+        withFakeCodexServer(
+          {},
+          () => assert.fail("RPC callback ran after fixture exit"),
+          (command, _args, options) =>
+            spawn(
+              command,
+              [
+                "-e",
+                `process.stderr.write("fixture startup failed\\n", () => { ${terminate}; });`,
+              ],
+              options,
+            ),
+        ),
+      expected,
+    );
+  }
+});
+
+test("Codex UDS fixture reports spawn failure and completes cleanup", async () => {
+  await assert.rejects(
+    () =>
+      withFakeCodexServer(
+        {},
+        () => assert.fail("RPC callback ran after fixture spawn failure"),
+        (command, args, options) => spawn(`${command}.missing`, args, options),
+      ),
+    /fixture.*spawn.*ENOENT/s,
+  );
+});
+
+test("Codex UDS fixture accepts a listening line split across stdout chunks", async () => {
+  await withFakeCodexServer(
+    {},
+    async (socketPath) => {
+      const threads = await listCodexAppServerThreads({ socketPath });
+      assert.equal(threads[0].threadId, "fake-thread-ws");
+    },
+    (command, args, options) =>
+      spawn(
+        command,
+        [
+          "-e",
+          `const write = process.stdout.write.bind(process.stdout);
+          process.stdout.write = (line) => {
+            write("startup log\\nlistening wrong.sock\\n" + line.slice(0, -1), () => {
+              setImmediate(() => write("\\n"));
+            });
+            return true;
+          };
+          import(process.argv[1]);`,
+          ...args,
+        ],
+        options,
+      ),
+  );
+});
 
 test("Codex rename uses thread/name/set empty success response and closes its client", async () => {
   const calls = [];

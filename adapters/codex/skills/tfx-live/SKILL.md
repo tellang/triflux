@@ -3,7 +3,7 @@ name: tfx-live
 description: >
   Claude·Codex·agy 세션을 실시간으로 생성·질의·대기·압축·종료하거나,
   tmux/daemon UDS 연결과 peer 중계를 운영할 때 사용한다.
-argument-hint: "<start|ask|send|wait|queue|goal|compact|stop|rename|interrupt|probe|list-sessions|peer|converse|goal-driven> [--cli codex|claude|agy] ..."
+argument-hint: "<start|ask|send|wait|queue|goal|compact|stop|rename|interrupt|probe|inspect|reconcile|list-sessions|peer|converse|goal-driven> [--cli codex|claude|agy] ..."
 ---
 
 # tfx-live
@@ -35,28 +35,40 @@ tfx-live start --cli codex --session cx1 --cwd ~/Projects --name "10.8 구현 �
 tfx-live stop --cli codex --session cx1
 ```
 
-macOS의 iTerm2에서 로컬 tmux `start`는 프로젝트별 창에 attach 탭이나 패인을 연다. `LC_TERMINAL=iTerm2` 또는 `TERM_PROGRAM=iTerm.app`일 때만 적용하며 원격·daemon 경로와 리드 창을 찾지 못한 경우는 제외한다. 프로젝트 키는 git 공통 디렉터리의 실제 경로이므로 같은 저장소의 워크트리는 함께 묶이고, git 밖에서는 cwd의 실제 경로를 쓴다. 기존 프로젝트 창을 우선 쓰고, 없으면 다른 프로젝트 세션이 없는 리드 창을 쓰거나 새 창을 만든다. 기본 그룹은 프로젝트 키이며 `--group NAME`으로 바꾼다. 한 탭은 최대 4분할이며 2개는 세로, 3·4개는 2x2 배치로 나누고 그다음은 같은 창의 새 탭을 쓴다. `peer`는 실행마다 참여자들을 한 그룹에 모으며 `--group`을 주면 그 값을 쓴다. 로컬 tmux 제목은 `--name`, 자동 이름, 세션 이름 순으로 고정하고 기존 Python 제목 스크립트도 유지한다. 그 스크립트는 패인 프로필의 custom command 도 끈다. iTerm2 는 `command` 로 만든 패인의 명령을 프로필에 남겨 사람이 Cmd+D 로 나눈 패인이 같은 tmux 세션에 다시 붙었기 때문이다. `stop`은 저장된 iTerm ID가 없거나 유효하지 않으면 `user.tfx_session`으로 찾아 닫으며, 남은 패인이 tmux에 연결되지 않은 셸 프롬프트임을 확인할 때만 탭을 닫는다. 세션을 죽이기 전에 그 세션의 클라이언트 tty를 받아 두고, 그 tty의 iTerm 패인은 표시가 없어도 모두 닫는다. 사람이 셸에서 `tmr`이나 `tmux attach`로 붙어 보던 패인도 닫힌다. 연동 실패는 시작·종료를 막지 않고 `itermWarning`에 남긴다.
+macOS의 iTerm2에서 로컬 tmux `start`는 프로젝트별 창에 attach 탭이나 pane을 자동 배치한다. `LC_TERMINAL=iTerm2` 또는 `TERM_PROGRAM=iTerm.app`일 때만 적용하며 원격·headless 경로는 유지한다. 프로젝트 키는 git 공통 디렉터리의 실제 경로이므로 같은 저장소의 worktree는 함께 묶이고, git 밖에서는 cwd의 실제 경로를 쓴다. 기존 소유 프로젝트 창, 로컬 리드 창 순으로 찾고 리드 ID가 없으면 현재 focus session의 창을 읽기 전용 anchor로 쓴다. 기본 preserve에서는 새 창을 만들지 않는다. 기본 그룹은 프로젝트 키이며 `--group NAME`으로 바꾼다. `peer`는 실행마다 참여자들을 한 그룹에 모으며 `--group`을 주면 그 값을 쓴다. 제목은 `--name`, 자동 이름, 세션 이름 순이며 새 pane의 custom command를 꺼 이후 Cmd+D가 같은 tmux에 중복 attach하지 않게 한다. `stop`은 registry와 소유 표식이 일치하는 ID만 닫는다. 기존 AppleScript 경로에서도 같은 TFX 세션 표식이 없는 사용자 view는 닫지 않는다. 연동 실패는 시작·종료를 막지 않고 `itermWarning`에 남긴다.
 
 새 세션 이름은 `<월>.<일> <주제>`로 짓는다. `start --name`을 생략하면 자동으로 만들고 `nameGenerated: true`를 보고한다. `--resume` 또는 `--resume-last`는 `--name`을 명시한 경우에만 이름을 적용한다. 승계 세션에는 기존 이름 뒤에 ` 2`, 이후 ` 3`을 붙인다. 이름 적용을 요청한 경우 결과의 `nameApplied: false`는 미적용을 뜻한다. agy의 `namePending: true`는 첫 일반 ask에서 적용할 이름이 보류됐다는 뜻이다. Codex `start`는 `/rename` 제출을 입력창이 빌 때까지 확인하고, 이름으로 찾은 thread UUID를 `threadId`로 돌려주며 tmux 세션 옵션 `@tfx_codex_thread`에 남긴다. 로컬 Codex `--resume-last`는 Codex가 고른 thread를 사후에 찾는다. 띄운 뒤 공유 app-server daemon에 로드된 같은 cwd의 thread 중 rollout에 그 시각 이후의 resume 기록(`thread_settings_applied`)이 생긴 것이 정확히 하나이고 1.5초 뒤에도 같을 때만 `threadId`로 쓴다. 이 확인은 5초 안에 끝난다. TUI가 daemon을 쓰지 않거나 같은 cwd에서 동시에 resume이 일어나면 `null`이다. 기존 Codex UDS thread는 `tfx-live rename --cli codex --transport uds --thread ID --name "<이름>"`으로 이름을 바꾼다.
 
-Claude 프로젝트 MCP 승인 화면이 뜨면 `start`는 화면에 답하지 않고 `ready: false`, `blockedBy: "claude-mcp-approval"`, 할 일을 적은 `warning`을 반환한다. 세션은 남아 있으므로 tmux 세션에 붙어 직접 고른 뒤 지시를 보낸다.
+Claude 프로젝트 MCP 승인 화면이 뜨면 `start`는 화면에 답하지 않고 `ready: false`, `blockedBy: "claude-mcp-approval"`, 할 일을 적은 `warning`을 반환한다. 세션은 남아 있으므로 tmux 세션에 붙어 직접 고른 뒤 지시를 보낸다. Codex 훅 검토 화면도 선택 항목과 관계없이 키를 보내지 않고 `ready: false`, `blockedBy: "codex-hooks-review"`와 trust를 자동 승인하지 않았다는 `warning`을 반환한다. `--resume`, `--resume-last`, 명시 launcher와 `--remote`에서도 세션을 남기므로 attach 후 훅을 직접 검토한다.
 
 Claude, agy, Codex(`Trust this folder?`와 `Do you trust the contents of this directory`)의 폴더 신뢰 화면은 기본으로 자동 승인한다. Codex는 신뢰 결정을 설정에 기록하므로 이후 같은 폴더의 실행에도 적용된다. `start --no-auto-trust`를 주면 이 화면에도 키를 보내지 않고 같은 형식으로 `blockedBy`(`claude-trust-folder`, `agy-trust-folder`, `codex-trust-folder`)를 반환한다. `--resume`, `--resume-last`, `--remote`에도 똑같이 적용된다.
 
 Codex `start --model`은 `astra`, `sol`, `terra`, `luna` 가족 별칭을 호출 호스트의 기존 model-family-resolver로 실제 모델 ID로 바꾼다. 호출 호스트의 `~/.config/triflux/models.json` 가족 고정값을 우선하고, Codex 모델 캐시, 마지막 해석 결과, 내장 기본값 순으로 고른다. `--remote`도 호출 호스트에서 해석한 ID를 보내며 원격 호스트의 고정값은 사용하지 않는다. 실제 모델 ID를 명시하면 그대로 전달한다. 모델 해석은 전역 프로필이나 설정 파일을 바꾸지 않고 `--effort`는 별도로 전달한다.
 
-공유 daemon에 이미 로드된 Codex thread는 per-thread hooks override를 지원하지 않아 `start --resume`을 거부한다. 기존 TUI의 승인 모드는 `/permissions`에서 Full Access를 고르고 확인하는 방식으로 바꾼다. `thread/settings/update`의 readback과 다음 TUI 턴에 적용되는 권한은 다를 수 있다. pane을 이미 닫았다면 오류에 나온 `codex resume <threadId>`로 같은 대화를 열고 `/permissions`를 사용한다. 이 오류 때문에 새 대화를 만들거나 공유 daemon을 재시작하지 않는다.
+로컬 Codex 새 thread는 생성 RPC에 `approvalPolicy: "never"`, `sandbox: "danger-full-access"`를 명시한다. `start --sandbox`를 주면 승인 정책은 `on-request`, sandbox는 `workspace-write`로 제한한다. 재개할 때 `--sandbox`를 생략하면 기존 thread 권한을 보존한다. remote TUI resume은 권한 CLI 플래그를 거부하므로 attach 명령에 bypass나 sandbox 플래그를 추가하지 않는다.
+
+Codex 관리 plain/new/resume/resume-last TUI 명령과 `tfx-route` exec/review 워커는 공식 `--dangerously-bypass-hook-trust`가 기본이다. 해당 invocation만 대상으로 하며 일반 `codex` 명령, 전역 config, 저장된 훅 신뢰 기록은 바꾸지 않는다. 활성 훅은 사전 확인 없이 샌드박스 밖에서 실행될 수 있다. 기존 `features.hooks=false`와 sandbox/approval 정책은 유지하고, `--sandbox`만으로 hook-trust bypass를 끄지는 않는다.
+
+관리 기본값을 끄려면 `tfx-live start --cli codex --session NAME --no-bypass-hook-trust` 또는 `tfx lead ROLE --cli codex --no-bypass-hook-trust`를 쓴다. 실행 환경의 `TFX_CODEX_BYPASS_HOOK_TRUST=0`은 route 워커와 live/lead에 공통 적용된다. 미설정과 그 외 값은 켬이며 CLI opt-out은 환경 값 `1`보다 우선한다. 사용자 launcher 내부와 명시 플래그는 재작성하지 않는다. `remote-spawn`은 Claude 진입이고, 내부 Codex는 해당 호스트의 `tfx-route` 정책을 따른다. `tx` 같은 셸 래퍼가 내부에서 같은 플래그를 추가한다면 `--no-bypass-hook-trust`로 TFX 관리 추가를 끈다.
+
+공유 daemon의 prepared-thread TUI attach에는 관리 hook-trust bypass 플래그를 제외한다. CLI가 플래그를 수락해도 daemon에 실제 적용된다는 근거는 없으므로 `features.hooks=false` RPC와 `ready: false`, `blockedBy: "codex-hooks-review"` 폴백을 유지한다. `bypass_hook_trust`나 camelCase RPC/config 필드를 합성하지 않는다. 기본/opt-out과 관계없이 시작 훅 검토 화면에는 메뉴 키, rename, 업무 입력을 보내지 않고 세션을 남긴다. tmux 세션에 attach해 훅을 직접 검토한 뒤 진행한다. builtin 훅과 legacy `notify`는 일반 사용자·플러그인 훅 비활성화 보장에서 제외한다.
+
+로컬 daemon `start` 결과의 `approvalPolicy`, `sandbox`는 TUI attach 뒤 같은 thread에 설정 덮어쓰기 없이 보낸 `thread/resume` 응답이다. 요청의 `sandbox`는 `danger-full-access`, `workspace-write` 형식이고 응답의 `sandbox.type`은 `dangerFullAccess`, `workspaceWrite` 형식이다. `permissionsVerified`는 daemon 설정이 준비한 권한과 일치하는지 나타낸다. 응답 실패나 필드 누락, 다른 thread 응답은 권한 값을 `null`로 보고한다. 권한 불일치는 읽은 값을 그대로 보고한다. 두 경우 모두 `ready: false`, `permissionWarning`을 반환하고 세션은 남긴다. 이 readback은 다음 TUI 턴의 실제 도구 실행까지 확인한 결과는 아니다.
+
+공유 daemon에 이미 로드된 Codex thread는 per-thread hooks override를 지원하지 않아 `start --resume`을 거부하고 기존 설정을 보존한다. 기존 TUI에서 진행 중인 턴이 끝난 뒤 `/permissions`를 입력하고 Full Access를 선택해 확인한다. pane을 닫았다면 오류에 나온 `codex resume <threadId>`는 운영자가 같은 history를 다시 여는 수동 복구 명령이다. 같은 cwd에서 열고 `/permissions`를 다시 선택한다. 이 명령을 에이전트가 직접 실행하는 권한은 아니다. 아직 loaded 상태면 `tfx-live start --resume`은 다시 거부되므로 반복하지 않는다. `thread/settings/update` readback만으로 다음 TUI 턴 권한이 적용됐다고 판단하지 않는다. 새 thread를 만들거나 공유 daemon을 재시작하지 않는다.
 
 ## 창 배치(macOS)
 
-위 iTerm2 연동으로 탭과 패인을 나눌 때의 기준이다.
+호출자가 매번 배치를 결정할 필요는 없다. Jev는 작업·역할·사람 입력 가능성과 기존 워커의 작업·worktree, window/tab/session ID·cols/rows·관리 태그로 만든 후보 ID만 고른다. 사용자 채팅 초안, 터미널 출력, 키 입력 본문은 읽거나 전송하지 않는다. 비활성·장애·낮은 신뢰도·잘못된 ID는 이유가 있는 규칙 폴백이다.
 
-- 화면 해상도, 폰트, 창 수로 탭당 열과 행을 먼저 계산한다. 예: 1440x900, MesloLGS 12pt 에서 좌우 2분할은 약 98~99열 x 50행으로 Claude Code 에 맞고, 2x2 는 25행이라 낮다.
-- 목적이 짝을 이루는 세션끼리 `--group`으로 한 탭에 묶는다(요구 정리와 프로브, 앱과 프롬프트 등).
-- iTerm `create tab`/`split`의 command 에는 PATH 가 없다. tmux 를 `/opt/homebrew/bin/tmux` 전체 경로로 쓴다. 안 그러면 탭이 바로 닫힌다.
-- 탭 제목은 tmux 와 agy 가 덮어쓴다. AppleScript 로 정한 이름은 유지되지 않으므로 위의 Python 제목 스크립트로 고정한다.
-- `stop`으로 끝낸 세션의 tmr 반복 패인은 `stop`이 닫는다. 세션이 스스로 끝났거나 `tmux kill-session`으로 직접 죽였으면 그 패인이 "no matching tmux room"을 계속 찍으니 손으로 닫는다.
-- 손으로 탭이나 패인을 닫을 때는 닫기 직전에 그 tty 의 프로세스(`ps -t <tty>`)를 다시 본다. tmux attach 나 omc 가 있으면 닫지 않는다.
+- 기본 focus preserve는 현재 window/tab/session과 다른 앱의 입력 대상을 유지한다. 각 창의 선택 탭 전체를 split/reconcile spec에서 제외하고 비활성 non-tmux 탭만 조작한다. 새 탭은 `select=False`로 만들며 생성 후 focus 복원에 의존하지 않는다. 명시 `start --focus` 또는 `tfx lead ... --focus`만 목적 있는 전환을 허용한다. 중요 역할은 `attention`으로 표시하고 자동 focus를 요청하지 않는다.
+- 최소 가독성은 human/lead/communication 100 cols × 24 rows, standard 80 × 20, low-human compact 60 × 10이다. 가용 크기가 작으면 추가 분할 대신 독립 비활성 탭을 쓰고, 창 자체도 작으면 `verified: false`로 보고한다.
+- `start --task '<요약>'`과 lead의 `--task`를 전달한다. 이름만 있으면 `taskInformation: insufficient`이고 background 자동 후보를 주지 않는다. 실제 task나 명시 `--human low`/`--background`가 있을 때만 background 후보를 허용하며 lead/high-human/communication은 자동으로 숨기지 않는다.
+- 명시 `--layout tab|window|split-vertical|split-horizontal|background|off|legacy`에서도 preserve가 우선이다. 안전한 split이 없거나 window가 요청되면 비활성 탭 또는 background로 폴백하고 이유를 반환한다. `--background`, `--no-auto-layout`, `--layout off`, `TFX_ITERM_LAYOUT=0`은 UI 없이 tmux를 유지한다. legacy 생성은 `--layout legacy --focus`일 때만 허용한다. `TFX_ITERM_WATCH=0`은 watcher만 끈다.
+- 설치된 iTerm Python runtime/API를 재사용한다. `TFX_ITERM_PYTHON`으로 경로를 지정할 수 있다. 없거나 연결이 실패하면 경고와 attach 가능한 background로 남기고 UI를 생성하지 않는다. `inspect`의 `background` 항목에 작업 정보·결정·attach 명령을 포함하며 `nativeSessionId: null`로 native view registry와 구분한다. 기존 `list-sessions --cli <종류>`와 `tmux attach-session -t '=세션'`으로 찾는다. registry의 `runtimeState: not_checked`는 실행 상태를 확인하지 않았다는 뜻이다.
+- 프로젝트·호스트별 단일 watcher는 종료·이동·resize를 debounce한다. 모든 프로젝트는 같은 host의 전역 mutation lock 다음 프로젝트 lock 순서로 잠그고 대기 뒤 inventory를 다시 읽는다. watcher의 state 읽기·pin 저장도 같은 lock을 쓴다. 수동 이동 pin은 state에 유지하며 `reconcile --reset-pins`로만 해제한다. `--dry-run`은 pin을 해제하지 않는다. 사람이 옮긴 pane을 다른 탭과 임의로 합치지 않는다.
+- 일반 셸/다른 프로젝트가 섞인 탭, tmux integration tab, 선택 탭, 명시 배치 탭은 재배치하지 않는다. 과밀한 관리 탭의 자동 분리도 비활성 탭을 사용한다. 자기 적용 결과는 fingerprint와 새 기준 위치로 흡수하며 관리 view가 없으면 watcher는 종료한다.
+- `tfx-live inspect --cwd '<경로>'`, `tfx-live reconcile --dry-run --cwd '<경로>'`은 계획을 반환한다. 실제 적용은 `tfx-live reconcile --cwd '<경로>'`이다. `decision`, `applied`, `verified`는 각각 판단·UI 적용·실측이다. `focus.requested/effective/transitioned/reason`은 요청·유효 정책·전환 여부·미적용 이유를 구분한다. 부분 실패는 실제 inventory를 포함하고 자동 UI 재생성을 하지 않는다. watcher의 마지막 JSON은 사용자별 private temp의 `iterm-layout/*.last.json`에 있다.
 
 ## agy 세션
 

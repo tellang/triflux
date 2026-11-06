@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -70,4 +72,40 @@ describe("headless route script resolution", () => {
       rmSync(cwd, { recursive: true, force: true });
     }
   });
+});
+
+describe("headless hook trust 환경 전달", () => {
+  for (const cli of ["codex", "antigravity", "code-reviewer"]) {
+    for (const value of ["0", undefined, "not'zero", ""]) {
+      it(`${cli}: ${JSON.stringify(value)} 값을 route 셸에 전달한다`, (t) => {
+        const dir = mkdtempSync(join(tmpdir(), "tfx-headless-hook-env-"));
+        const key = "TFX_CODEX_BYPASS_HOOK_TRUST";
+        const saved = process.env[key];
+        t.after(() => {
+          if (saved === undefined) delete process.env[key];
+          else process.env[key] = saved;
+          rmSync(dir, { recursive: true, force: true });
+        });
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+        const routeScript = join(dir, "tfx-route.sh");
+        const resultFile = join(dir, "result.txt");
+        writeFileSync(
+          routeScript,
+          'printf "%s" "${TFX_CODEX_BYPASS_HOOK_TRUST-unset}"\n',
+        );
+        const command = buildHeadlessCommand(cli, "test prompt", resultFile, {
+          handoff: false,
+          routeScript,
+        });
+        // tmux 서버가 caller 값을 상속하지 않은 상황을 별도 셸 환경으로 재현한다.
+        const env = { ...process.env };
+        delete env[key];
+        execFileSync("bash", ["-c", command], { env, stdio: "pipe" });
+        assert.equal(readFileSync(resultFile, "utf8"), value ?? "unset");
+        assert.doesNotMatch(command, /--dangerously-bypass-hook-trust/u);
+        if (value === undefined) assert.ok(!command.includes(key), command);
+      });
+    }
+  }
 });
