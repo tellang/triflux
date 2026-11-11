@@ -8,7 +8,7 @@
 
 | CLI·모델군 | 합의 당시 공식 창 | 준비 | compact | 신규 배정 중지·handoff | 전송 거부 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Claude Code: Fable 5.1, Opus 5.5, Sonnet 5.5 | 1,000,000 | 60% | 75% | 85% | 90% |
+| Claude Code: Fable 5.2, Opus 5.5, Sonnet 5.5 | 1,000,000 | 60% | 75% | 85% | 90% |
 | Codex: Sol 6.1, Astra 6, Terra 6, Luna 6 | 1,050,000 | 15% | 18% | 20% | 22% |
 | agy: Gemini 3.8 Flash | 1,048,576 | 12% | 없음 | 15% | 18% |
 

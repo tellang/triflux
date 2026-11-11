@@ -69,7 +69,7 @@ test("daemon-attach rejects an over-limit transcript before input", async () => 
     `${JSON.stringify({
       type: "assistant",
       message: {
-        model: "claude-fable-5-1",
+        model: "claude-fable-5-2",
         usage: { input_tokens: 899_999, cache_read_input_tokens: 1 },
         content: [{ type: "text", text: "ready" }],
       },
@@ -147,7 +147,7 @@ test("transcript skips synthetic and sidechain entries", async () => {
         {
           type: "assistant",
           message: {
-            model: "claude-fable-5-1",
+            model: "claude-fable-5-2",
             usage: { input_tokens: 30 },
             content: [],
           },
@@ -156,7 +156,7 @@ test("transcript skips synthetic and sidechain entries", async () => {
           type: "assistant",
           isSidechain: true,
           message: {
-            model: "claude-fable-5-1",
+            model: "claude-fable-5-2",
             usage: { input_tokens: 999 },
             content: [],
           },
