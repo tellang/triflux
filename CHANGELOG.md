@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.97.1] - 2026-11-11
+
+### Changed
+- docs: tfx-live 컨텍스트 정책 문서의 Claude 모델 창 표를 Fable 5.2 기준으로 바꾼다. Fable 5.2 도 공식 창이 1M 이라 임계값과 판정 코드는 그대로다.
+
+### Tests
+- tfx-live 데몬 운영 테스트의 Claude 모델 입력값을 `claude-fable-5-2` 로 바꾼다.
+
 ## [10.97.0] - 2026-11-06
 
 ### Added
