@@ -2,6 +2,14 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.98.1] - 2026-11-11
+
+### Fixed
+- agy: 가족 목록이 바뀌기 전에 저장한 `agy-models.json`에는 Carbon 줄이 빠져 있어, 10.98.0으로 올린 기기가 캐시가 만료될 때까지(최대 하루) Carbon 요청을 Argon으로 폴백했다. 캐시에 가족 목록 키를 저장해 키가 다르면 하루가 안 지나도 다시 조회한다.
+
+### Tests
+- 옛 캐시가 있어도 가족 목록 변경 뒤 한 번만 다시 조회하고 Carbon을 인식하는 테스트를 추가한다.
+
 ## [10.98.0] - 2026-11-11
 
 ### Added

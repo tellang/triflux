@@ -409,3 +409,29 @@ test("families 없는 옛 기록으로 업그레이드해도 최신 가족 모�
     'model = "gpt-6.2-sol"\n',
   );
 });
+
+test("가족 목록이 바뀌기 전에 저장한 agy 목록은 하루가 안 지나도 다시 조회한다", (t) => {
+  const opts = fixture(t);
+  const now = Date.parse("2026-11-11T09:00:00Z");
+  writeFileSync(
+    join(opts.stateDir, "agy-models.json"),
+    JSON.stringify({
+      models: [{ slug: "gemini-4-argon-high", model: "Gemini 4 Argon (High)" }],
+      fetched_at: "2026-11-11T00:55:00Z",
+      checked_at: "2026-11-11T00:55:00Z",
+    }),
+  );
+  let calls = 0;
+  opts.now = () => now;
+  opts.runCommand = () => {
+    calls++;
+    return (
+      "gemini-4-argon-high\tGemini 4 Argon (High)\n" +
+      "gemini-4-carbon-high\tGemini 4 Carbon (High)\n"
+    );
+  };
+  const first = resolveModelFamilies("agy", opts);
+  assert.equal(first.families.carbon.fallbackFrom, undefined);
+  resolveModelFamilies("agy", opts);
+  assert.equal(calls, 1);
+});

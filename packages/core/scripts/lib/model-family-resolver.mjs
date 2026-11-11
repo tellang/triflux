@@ -58,6 +58,12 @@ export const AGY_FAMILIES = Object.freeze([
   ...new Set(Object.values(AGY_FAMILY_PROFILES).map(({ family }) => family)),
 ]);
 const DAY_MS = 86_400_000;
+// 가족 목록이 바뀌기 전에 저장한 agy 목록에는 새 가족이 빠져 있으므로 이 키가 다르면 다시 조회한다.
+const AGY_CACHE_KEY = AGY_FAMILIES.join(",");
+const agyCacheStale = (cached, now) =>
+  !cached.checked_at ||
+  cached.families !== AGY_CACHE_KEY ||
+  now - Date.parse(cached.checked_at) >= DAY_MS;
 const CODEX_SLUG = /^gpt-(\d+(?:\.\d+)*)-(sol|astra|terra|luna)$/;
 const AGY_SLUG = new RegExp(
   `^gemini-(\\d+(?:\\.\\d+)*)-(${AGY_FAMILIES.join("|")})-(none|low|medium|high|xhigh|max|ultra)$`,
@@ -245,10 +251,7 @@ export function resolveModelFamilies(provider, opts = {}) {
   } else {
     const cachePath = join(paths.stateDir, "agy-models.json");
     let cached = readJson(cachePath) || {};
-    if (
-      opts.allowCommand !== false &&
-      (!cached.checked_at || now - Date.parse(cached.checked_at) >= DAY_MS)
-    ) {
+    if (opts.allowCommand !== false && agyCacheStale(cached, now)) {
       const lock = `${cachePath}.lock`;
       let acquired = false;
       try {
@@ -263,17 +266,20 @@ export function resolveModelFamilies(provider, opts = {}) {
           acquired = true;
           cached = readJson(cachePath) || cached;
         }
-        if (
-          !cached.checked_at ||
-          now - Date.parse(cached.checked_at) >= DAY_MS
-        ) {
+        if (agyCacheStale(cached, now)) {
           cached.checked_at = fetchedAt;
+          cached.families = AGY_CACHE_KEY;
           try {
             const models = parseAgyModels(
               run(opts.command || "agy", ["models"]),
             );
             if (models.length)
-              cached = { models, fetched_at: fetchedAt, checked_at: fetchedAt };
+              cached = {
+                models,
+                fetched_at: fetchedAt,
+                checked_at: fetchedAt,
+                families: AGY_CACHE_KEY,
+              };
           } catch {}
           if (opts.persist !== false) saveJson(cachePath, cached);
         }
