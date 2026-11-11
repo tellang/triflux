@@ -1,4 +1,5 @@
 import {
+  AGY_BASE_FAMILY,
   AGY_FAMILY_PROFILES,
   CODEX_FAMILY_PROFILES,
   readCodexModelCatalog,
@@ -118,8 +119,12 @@ export function resolveAgyModelEffort({ family, effort }, opts = {}) {
   if (!Object.hasOwn(families, family) || !EFFORT_ORDER.includes(effort)) {
     throw new Error(`알 수 없는 agy 가족 또는 effort: ${family}/${effort}`);
   }
-  const { model, supportedEfforts } = families[family];
-  if (!supportedEfforts) return { family, model, effort };
+  const { model, supportedEfforts, fallbackFrom } = families[family];
+  // 폴백이면 실제로 쓰는 가족을 돌려주고 원래 요청 가족을 fallbackFrom에 남긴다.
+  const result = fallbackFrom
+    ? { family: AGY_BASE_FAMILY, model, fallbackFrom }
+    : { family, model };
+  if (!supportedEfforts) return { ...result, effort };
   const selected = EFFORT_ORDER.slice(0, EFFORT_ORDER.indexOf(effort) + 1)
     .filter((level) => supportedEfforts.includes(level))
     .at(-1);
@@ -130,5 +135,5 @@ export function resolveAgyModelEffort({ family, effort }, opts = {}) {
     error.code = "unsupported-effort";
     throw error;
   }
-  return { family, model, effort: selected };
+  return { ...result, effort: selected };
 }

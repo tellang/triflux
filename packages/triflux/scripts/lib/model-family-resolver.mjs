@@ -36,11 +36,32 @@ export const AGY_FAMILY_PROFILES = Object.freeze({
     effort: "high",
     model: "Gemini 4 Argon (High)",
   },
+  carbon_low: {
+    family: "carbon",
+    effort: "low",
+    model: "Gemini 4 Carbon (Low)",
+  },
+  carbon: {
+    family: "carbon",
+    effort: "medium",
+    model: "Gemini 4 Carbon (Medium)",
+  },
+  carbon_high: {
+    family: "carbon",
+    effort: "high",
+    model: "Gemini 4 Carbon (High)",
+  },
 });
+// 목록에 없는 상위 가족(Carbon은 Ultra 구독 전용)은 이 가족으로 폴백한다.
+export const AGY_BASE_FAMILY = "argon";
+export const AGY_FAMILIES = Object.freeze([
+  ...new Set(Object.values(AGY_FAMILY_PROFILES).map(({ family }) => family)),
+]);
 const DAY_MS = 86_400_000;
 const CODEX_SLUG = /^gpt-(\d+(?:\.\d+)*)-(sol|astra|terra|luna)$/;
-const AGY_SLUG =
-  /^gemini-(\d+(?:\.\d+)*)-(argon)-(none|low|medium|high|xhigh|max|ultra)$/;
+const AGY_SLUG = new RegExp(
+  `^gemini-(\\d+(?:\\.\\d+)*)-(${AGY_FAMILIES.join("|")})-(none|low|medium|high|xhigh|max|ultra)$`,
+);
 
 function compareVersions(a, b) {
   const left = a.split(".").map(Number);
@@ -352,44 +373,84 @@ export function resolveModelFamilies(provider, opts = {}) {
     }
   }
   if (provider === "agy") {
-    const latest = selectAgyModel(catalog?.models, "argon");
-    // 옛 기록에는 가족 ID가 없으므로 마지막 성공 프로필의 표시 이름에서 복원한다.
-    const savedModels = [
-      ...Object.values(AGY_FAMILY_PROFILES),
-      ...Object.values(profiles),
-    ].flatMap((profile) => {
-      const match = /^Gemini (\d+(?:\.\d+)*) Argon \(/i.exec(profile.model);
-      return match
-        ? [{ ...profile, slug: `gemini-${match[1]}-argon-${profile.effort}` }]
-        : [];
-    });
-    const saved = selectAgyModel(savedModels, "argon");
-    const last = previous.families?.argon || {
-      model: saved.slug.replace(/-[^-]+$/, ""),
-      fetched_at: saved.fetched_at,
-    };
-    families.argon =
-      latest &&
-      (!last.fetched_at ||
-        !catalog.fetched_at ||
-        Date.parse(catalog.fetched_at) >= Date.parse(last.fetched_at))
-        ? {
-            model: latest.slug.replace(/-[^-]+$/, ""),
-            fetched_at: catalog.fetched_at || fetchedAt,
-          }
-        : last;
-    const pin = pins.argon;
-    selectedFamilies.argon =
-      typeof pin === "string" && AGY_SLUG.test(`${pin}-low`)
-        ? { model: pin, source: paths.pinsPath, fetched_at: null }
-        : { ...families.argon };
-    const supported = catalog?.models
-      ?.filter((item) =>
-        item.slug.startsWith(`${selectedFamilies.argon.model}-`),
-      )
-      .map((item) => AGY_SLUG.exec(item.slug)?.[3])
-      .filter(Boolean);
-    if (supported?.length) selectedFamilies.argon.supportedEfforts = supported;
+    for (const family of AGY_FAMILIES) {
+      const latest = selectAgyModel(catalog?.models, family);
+      const label = family[0].toUpperCase() + family.slice(1);
+      const labelPattern = new RegExp(
+        `^Gemini (\\d+(?:\\.\\d+)*) ${label} \\(`,
+        "i",
+      );
+      // 옛 기록에는 가족 ID가 없으므로 마지막 성공 프로필의 표시 이름에서 복원한다.
+      const savedModels = [
+        ...Object.values(AGY_FAMILY_PROFILES),
+        ...Object.values(profiles),
+      ].flatMap((profile) => {
+        const match = labelPattern.exec(profile.model);
+        return match
+          ? [
+              {
+                ...profile,
+                slug: `gemini-${match[1]}-${family}-${profile.effort}`,
+              },
+            ]
+          : [];
+      });
+      const saved = selectAgyModel(savedModels, family);
+      const last = previous.families?.[family] || {
+        model: saved.slug.replace(/-[^-]+$/, ""),
+        fetched_at: saved.fetched_at,
+      };
+      families[family] =
+        latest &&
+        (!last.fetched_at ||
+          !catalog.fetched_at ||
+          Date.parse(catalog.fetched_at) >= Date.parse(last.fetched_at))
+          ? {
+              model: latest.slug.replace(/-[^-]+$/, ""),
+              fetched_at: catalog.fetched_at || fetchedAt,
+            }
+          : last;
+      const pin = pins[family];
+      selectedFamilies[family] =
+        typeof pin === "string" && AGY_SLUG.exec(`${pin}-low`)?.[2] === family
+          ? { model: pin, source: paths.pinsPath, fetched_at: null }
+          : { ...families[family] };
+      const supported = catalog?.models
+        ?.filter((item) =>
+          item.slug.startsWith(`${selectedFamilies[family].model}-`),
+        )
+        .map((item) => AGY_SLUG.exec(item.slug)?.[3])
+        .filter(Boolean);
+      if (supported?.length)
+        selectedFamilies[family].supportedEfforts = supported;
+    }
+    // 목록을 읽었는데 가족이 없으면 Ultra가 없는 계정이다. 고정한 가족은 그대로 둔다.
+    const missingFamily = (family) =>
+      family !== AGY_BASE_FAMILY &&
+      catalog?.models?.length > 0 &&
+      !catalog.models.some(
+        (item) => AGY_SLUG.exec(item?.slug)?.[2] === family,
+      ) &&
+      AGY_SLUG.exec(`${pins[family]}-low`)?.[2] !== family;
+    for (const family of AGY_FAMILIES.filter(missingFamily)) {
+      selectedFamilies[family] = {
+        ...selectedFamilies[AGY_BASE_FAMILY],
+        fallbackFrom: family,
+      };
+      for (const [name, definition] of Object.entries(definitions)) {
+        if (definition.family !== family) continue;
+        const base = Object.keys(definitions).find(
+          (key) =>
+            definitions[key].family === AGY_BASE_FAMILY &&
+            definitions[key].effort === definition.effort,
+        );
+        if (base)
+          selectedProfiles[name] = {
+            ...selectedProfiles[base],
+            fallbackFrom: family,
+          };
+      }
+    }
   }
   const record = {
     sourceSignature,

@@ -93,8 +93,57 @@ test("agy 목록에서 Argon만 고르고 Flash와 Pro는 자동 선택하지 �
     "gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n" +
     "gemini-3.1-pro-high\tGemini 3.1 Pro (High)\n";
   const { profiles } = resolveModelFamilies("agy", opts);
-  assert.deepEqual(Object.keys(profiles), ["argon_low", "argon", "argon_high"]);
+  assert.deepEqual(
+    Object.keys(profiles).filter((name) => /^argon/.test(name)),
+    ["argon_low", "argon", "argon_high"],
+  );
   assert.equal(profiles.argon_high.model, "Gemini 4 Argon (High)");
+});
+
+test("agy 목록에 Carbon이 있으면 Carbon 프로필을 쓴다", (t) => {
+  const opts = fixture(t);
+  opts.runCommand = () =>
+    "gemini-4-argon-high\tGemini 4 Argon (High)\n" +
+    "gemini-4-carbon-high\tGemini 4 Carbon (High)\n" +
+    "gemini-4-carbon-medium\tGemini 4 Carbon (Medium)\n" +
+    "gemini-4-carbon-low\tGemini 4 Carbon (Low)\n";
+  const { profiles, families } = resolveModelFamilies("agy", opts);
+  assert.equal(profiles.carbon_high.model, "Gemini 4 Carbon (High)");
+  assert.equal(profiles.carbon_high.fallbackFrom, undefined);
+  assert.equal(families.carbon.model, "gemini-4-carbon");
+  assert.equal(families.carbon.fallbackFrom, undefined);
+});
+
+test("agy 목록에 Carbon이 없으면 Argon으로 폴백하고 원래 가족을 남긴다", (t) => {
+  const opts = fixture(t);
+  opts.runCommand = () =>
+    "gemini-4-argon-high\tGemini 4 Argon (High)\n" +
+    "gemini-4-argon-medium\tGemini 4 Argon (Medium)\n" +
+    "gemini-4-argon-low\tGemini 4 Argon (Low)\n";
+  const { profiles, families } = resolveModelFamilies("agy", opts);
+  assert.equal(profiles.carbon_high.model, "Gemini 4 Argon (High)");
+  assert.equal(profiles.carbon.model, "Gemini 4 Argon (Medium)");
+  assert.equal(profiles.carbon_high.fallbackFrom, "carbon");
+  assert.equal(families.carbon.model, families.argon.model);
+  assert.equal(families.carbon.fallbackFrom, "carbon");
+  assert.equal(families.argon.fallbackFrom, undefined);
+});
+
+test("목록을 읽지 못하면 Carbon 내장 기본값을 유지하고, 고정한 Carbon은 폴백하지 않는다", (t) => {
+  const opts = fixture(t);
+  const offline = resolveModelFamilies("agy", opts);
+  assert.equal(offline.profiles.carbon_high.model, "Gemini 4 Carbon (High)");
+  assert.equal(offline.families.carbon.fallbackFrom, undefined);
+
+  opts.runCommand = () => "gemini-4-argon-high\tGemini 4 Argon (High)\n";
+  writeFileSync(
+    join(opts.stateDir, "models.json"),
+    JSON.stringify({ carbon: "gemini-4-carbon" }),
+  );
+  const pinned = resolveModelFamilies("agy", { ...opts, now: () => 1 });
+  assert.equal(pinned.families.carbon.model, "gemini-4-carbon");
+  assert.equal(pinned.profiles.carbon_high.model, "Gemini 4 Carbon (High)");
+  assert.equal(pinned.families.carbon.fallbackFrom, undefined);
 });
 
 test("models.json의 Argon 고정은 최신 목록보다 우선한다", (t) => {
