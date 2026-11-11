@@ -1028,18 +1028,22 @@ resolve_gemini_profile() {
     import { pathToFileURL } from "node:url";
     const { ensureGeminiProfiles, resolveGeminiModel } = await import(pathToFileURL(process.argv[1]).href);
     const { modelEffortFromProfile, resolveAgyModelEffort } = await import(new URL("./model-effort.mjs", pathToFileURL(process.argv[1])).href);
+    const { AGY_FAMILIES } = await import(new URL("./model-family-resolver.mjs", pathToFileURL(process.argv[1])).href);
     const opts = { profilesPath: process.argv[3], command: process.argv[4] };
     ensureGeminiProfiles(opts);
     const model = resolveGeminiModel(process.argv[2], opts);
-    const match = /^gemini-\d+(?:\.\d+)*-argon(?:-([a-z]+))?$/i.exec(model)
-      || /^Gemini \d+(?:\.\d+)* Argon \(([a-z]+)\)$/i.exec(model);
+    const families = AGY_FAMILIES.join("|");
+    const match = new RegExp(`^gemini-\\d+(?:\\.\\d+)*-(${families})(?:-([a-z]+))?$`, "i").exec(model)
+      || new RegExp(`^Gemini \\d+(?:\\.\\d+)* (${families}) \\(([a-z]+)\\)$`, "i").exec(model);
     const requested = modelEffortFromProfile("agy", process.argv[2])
-      || (match ? { family: "argon", effort: (match[1] || "medium").toLowerCase() } : null);
+      || (match ? { family: match[1].toLowerCase(), effort: (match[2] || "medium").toLowerCase() } : null);
     if (!requested) {
       process.stdout.write(`${model}\x1e`);
     } else {
       try {
         const resolved = resolveAgyModelEffort(requested, opts);
+        if (resolved.fallbackFrom)
+          console.error(`[tfx-route] agy 가족 폴백: ${resolved.fallbackFrom} -> ${resolved.family} (모델 목록에 없음) model=${resolved.model}`);
         if (resolved.effort !== requested.effort)
           console.error(`[tfx-route] agy effort: requested=${requested.effort} applied=${resolved.effort} model=${resolved.model}`);
         process.stdout.write([resolved.model, resolved.effort].join("\x1e"));

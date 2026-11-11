@@ -2,6 +2,17 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.98.0] - 2026-11-11
+
+### Added
+- agy: Gemini 4 Carbon 가족(`carbon_low`, `carbon`, `carbon_high`)을 추가한다. 기본 역할 배정과 `--retry auto-escalate` 체인은 그대로이고, `TFX_GEMINI_PROFILE=carbon_high`처럼 명시할 때만 쓴다. Carbon은 Google AI Ultra 구독자 전용이라 `agy models` 목록을 읽었는데 Carbon이 없으면 같은 effort의 Argon으로 폴백하고 stderr에 `agy 가족 폴백`을 남긴다. 근거: ADR-0053.
+
+### Changed
+- agy 모델 해석기가 `AGY_FAMILY_PROFILES`의 가족 목록으로 슬러그 정규식과 가족별 선택을 만든다. 새 가족은 이 표에 프로필을 더하면 된다.
+
+### Tests
+- Carbon 목록 있음, 없음(폴백), 목록 조회 실패, 가족 고정 경우를 resolver와 effort 테스트에 추가한다.
+
 ## [10.97.1] - 2026-11-11
 
 ### Changed

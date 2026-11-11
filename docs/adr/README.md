@@ -59,6 +59,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0050](0050-jev-mcp-recommendations.md) | Jev MCP 추천을 기존 실행 경로에 연결하고 활성화와 구분한다 | Accepted | 0028, 0029 |
 | [0051](0051-jev-worker-capability-application.md) | Jev 모델 조회와 등록된 MCP의 워커별 적용을 연결한다 | Proposed | 0028, 0049, 0050 |
 | [0052](0052-jev-iterm-layout.md) | Jev 기반 iTerm 워커 배치 | Proposed | 0026, 0029, 0030, 0050 |
+| [0053](0053-agy-carbon-explicit-family.md) | agy Carbon 가족을 명시 지정 전용으로 추가하고 목록에 없으면 Argon으로 폴백한다 | Accepted | 0038, 0039, 0049 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 
