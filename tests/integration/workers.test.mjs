@@ -34,8 +34,10 @@ function buildRouteEnv(extraEnv = {}) {
     TFX_CLI_MODE: "auto",
     TFX_NO_CLAUDE_NATIVE: "0",
     // Each caller opts into its expected CLI below; no ambient observation leaks.
+    TFX_CLAUDE_OK: "0",
     TFX_CODEX_OK: "0",
     TFX_ANTIGRAVITY_OK: "0",
+    TFX_DISABLE_CLAUDE: "0",
     TFX_DISABLE_CODEX: "0",
     TFX_DISABLE_ANTIGRAVITY: "0",
     ...extraEnv,
