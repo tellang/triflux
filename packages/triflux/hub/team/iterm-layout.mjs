@@ -31,21 +31,36 @@ export const LAYOUT_MODES = [
   "split-horizontal",
 ];
 
+export const INTERACTIVE_ROLES = new Set([
+  "lead",
+  "communication",
+  "communication-report",
+]);
+
 export function layoutInput(options = {}, env = process.env) {
   const mode =
     options.layout ??
     (env.TFX_ITERM_LAYOUT === "0" ? "off" : env.TFX_ITERM_LAYOUT || "auto");
   if (!LAYOUT_MODES.includes(mode))
     throw new Error(`--layout: ${LAYOUT_MODES.join("|")}`);
-  const role = String(options.role || "worker").slice(0, 120);
-  const human = options.human ?? (role === "lead" ? "high" : "unknown");
+  const rawRole = String(options.role || "worker").slice(0, 120);
+  const human =
+    options.human ??
+    (rawRole === "lead"
+      ? "high"
+      : rawRole === "communication-relay"
+        ? "low"
+        : "unknown");
   if (!["high", "low", "unknown"].includes(human))
     throw new Error("--human: high|low|unknown");
+  const role =
+    rawRole === "communication" && human === "low"
+      ? "communication-relay"
+      : rawRole;
   const task = String(options.task || "")
     .trim()
     .slice(0, 1600);
-  const interactive =
-    human === "high" || ["lead", "communication"].includes(role);
+  const interactive = human === "high" || INTERACTIVE_ROLES.has(role);
   return {
     mode,
     remoteSession: Boolean(env.SSH_CONNECTION || env.SSH_TTY),
@@ -99,7 +114,7 @@ export function layoutCandidates(snapshot, input) {
   const candidates = [];
   if (
     input.human !== "high" &&
-    !["lead", "communication"].includes(input.role) &&
+    !INTERACTIVE_ROLES.has(input.role) &&
     (input.taskInformation === "provided" ||
       input.human === "low" ||
       input.mode === "background")
@@ -140,7 +155,8 @@ export function layoutCandidates(snapshot, input) {
     reason: otherProject
       ? "focus_preserve_project_separation_deferred"
       : "readable_inactive_tab",
-    score: input.human === "high" || input.role === "lead" ? 100 : 10,
+    score:
+      input.human === "high" || INTERACTIVE_ROLES.has(input.role) ? 100 : 10,
   });
   for (const tab of target.tabs) {
     if (
@@ -153,7 +169,7 @@ export function layoutCandidates(snapshot, input) {
       if (
         (input.focusPolicy !== "focus" && session.id === snapshot.focusId) ||
         session.human === "high" ||
-        ["lead", "communication"].includes(session.role)
+        INTERACTIVE_ROLES.has(session.role)
       )
         continue;
       for (const vertical of [true, false]) {
@@ -546,7 +562,7 @@ export function backgroundLayout(
     attention: {
       required:
         input.human === "high" ||
-        ["lead", "communication"].includes(input.role) ||
+        INTERACTIVE_ROLES.has(input.role) ||
         !["user_background", "layout_disabled", "unattended_tmux"].includes(
           reason,
         ),
@@ -809,9 +825,7 @@ export async function runItermLayout(request, deps = {}) {
     taskInformation: input.taskInformation,
     focus: applied.focus || focusReport(input, decision.reason),
     attention: {
-      required:
-        input.human === "high" ||
-        ["lead", "communication"].includes(input.role),
+      required: input.human === "high" || INTERACTIVE_ROLES.has(input.role),
       reason: "role_metadata",
     },
     ...(watcher ? { watcher } : {}),

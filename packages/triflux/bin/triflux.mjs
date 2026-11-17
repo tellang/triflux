@@ -4379,9 +4379,13 @@ async function main() {
             !arg.startsWith("--") && !valueFlags.includes(cmdArgs[i - 1]),
         )
         .join(" ");
-      const cli = readCliOptionValue(cmdArgs, "--cli") || "claude";
+      const explicitCli = readCliOptionValue(cmdArgs, "--cli");
+      const explicitLauncher = readCliOptionValue(cmdArgs, "--launcher");
+      const cli =
+        explicitCli && explicitCli !== "auto" ? explicitCli : "claude";
       const result = await launchLead({
         cli,
+        cliAuto: !explicitCli || explicitCli === "auto",
         role,
         task: readCliOptionValue(cmdArgs, "--task"),
         cwd: readCliOptionValue(cmdArgs, "--cwd") || process.cwd(),
@@ -4393,9 +4397,10 @@ async function main() {
         layout: cmdArgs.includes("--no-auto-layout")
           ? "off"
           : readCliOptionValue(cmdArgs, "--layout"),
+        launcherFlag: explicitLauncher,
         launcher: resolveLauncher({
           cli,
-          flag: readCliOptionValue(cmdArgs, "--launcher"),
+          flag: explicitLauncher,
         }),
       });
       if (JSON_OUTPUT) console.log(JSON.stringify(result, null, 2));

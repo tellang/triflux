@@ -44,7 +44,7 @@ function fixture(t) {
   writeFileSync(join(home, ".codex/config.toml"), 'model = "gpt-6-sol"\n');
   writeFileSync(
     join(home, ".claude/cache/claude-usage-cache.json"),
-    JSON.stringify({ data: { weeklyPercent: 85 } }),
+    JSON.stringify({ data: { weeklyPercent: 96 } }),
   );
   const fakeClaude = pathToFileURL(
     join(root, "tests/fixtures/fake-claude-cli.mjs"),
@@ -214,12 +214,23 @@ test("successful quota discussion is not a quota refusal", (t) => {
 test("auto mode cannot revive cooling agy when Codex is unavailable", (t) => {
   const f = fixture(t);
   writeFileSync(f.stateFile, `${Math.floor(Date.now() / 1000) + 3600}\n`);
-  const r = f.run({
+  const toClaude = f.run({
     role: "executor",
     env: { TFX_CODEX_OK: "0", TFX_ANTIGRAVITY_FALLBACK: "claude" },
   });
-  assert.equal(r.status, 78, r.output);
-  assert.deepEqual(f.calls(), []);
+  assert.equal(toClaude.status, 0, toClaude.output);
+  assert.deepEqual(f.calls(), [{ provider: "claude" }]);
+
+  const blockedAll = f.run({
+    role: "executor",
+    env: {
+      TFX_CODEX_OK: "0",
+      TFX_DISABLE_CLAUDE: "1",
+      TFX_ANTIGRAVITY_FALLBACK: "claude",
+    },
+  });
+  assert.equal(blockedAll.status, 78, blockedAll.output);
+  assert.deepEqual(f.calls(), [{ provider: "claude" }]);
 });
 
 test("Argon quota retry and subsequent cooldown exclude the Codex author", (t) => {
@@ -240,9 +251,9 @@ test("Argon quota retry and subsequent cooldown exclude the Codex author", (t) =
   assert.match(blocked.stderr, /agy 쿼터 소진, .+까지 claude으로/);
 });
 
-test("Argon quota cannot retry with the Claude author", (t) => {
+test("Argon quota falls back to same-vendor fresh session only when cross-vendor is exhausted, and exits 78 if author is disabled", (t) => {
   const f = fixture(t);
-  const r = f.run({
+  const sameVendor = f.run({
     role: "code-reviewer",
     env: {
       TFX_REVIEW_AUTHOR: "claude",
@@ -250,13 +261,34 @@ test("Argon quota cannot retry with the Claude author", (t) => {
       TFX_ANTIGRAVITY_FALLBACK: "claude",
     },
   });
-  assert.equal(r.status, 78, r.output);
-  assert.deepEqual(f.calls(), [{ provider: "agy" }]);
+  assert.equal(sameVendor.status, 0, sameVendor.output);
+  assert.deepEqual(f.calls(), [
+    { provider: "agy" },
+    { provider: "claude", from: "antigravity" },
+  ]);
+  assert.match(sameVendor.stderr, /동일 벤더 새 세션/);
+
+  rmSync(f.stateFile, { force: true });
+  const blockedAuthor = f.run({
+    role: "code-reviewer",
+    env: {
+      TFX_REVIEW_AUTHOR: "claude",
+      TFX_CODEX_OK: "0",
+      TFX_DISABLE_CLAUDE: "1",
+    },
+  });
+  assert.equal(blockedAuthor.status, 78, blockedAuthor.output);
 });
 
 test("a second quota failure cannot recursively reroute", (t) => {
   const f = fixture(t);
-  const r = f.run({ env: { FAKE_CODEX_QUOTA: "1" } });
+  const r = f.run({
+    env: {
+      TFX_ANTIGRAVITY_FALLBACK: "codex",
+      TFX_DISABLE_CLAUDE: "1",
+      FAKE_CODEX_QUOTA: "1",
+    },
+  });
   assert.notEqual(r.status, 0, r.output);
   assert.deepEqual(f.calls(), [
     { provider: "agy" },

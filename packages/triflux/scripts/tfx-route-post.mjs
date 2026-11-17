@@ -21,6 +21,10 @@ import {
 } from "fs";
 import { homedir } from "os";
 import { join } from "path";
+import {
+  DEFAULT_MAX_STDOUT_BYTES,
+  sliceUtf8ByBytes,
+} from "./lib/utf8-slice.mjs";
 
 const HOME = homedir();
 const CACHE_DIR = join(HOME, ".claude", "cache");
@@ -251,6 +255,8 @@ function logExecution(params) {
       input_tokens: params.tokens.input,
       output_tokens: params.tokens.output,
       total_tokens: params.tokens.input + params.tokens.output,
+      raw_stdout_bytes: params.raw_stdout_bytes ?? 0,
+      output_bytes: params.output_bytes ?? 0,
     });
 
     appendFileSync(logFile, entry + "\n");
@@ -446,19 +452,22 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
   } catch {}
 }
 
-// ── 출력 절삭 ──
-function truncateOutput(text, maxBytes) {
-  const buf = Buffer.from(text);
-  if (buf.length > maxBytes) {
+// 출력 폭주 방어 절삭 (기본 16MB 안전선, 0 이하면 무제한)
+function truncateOutput(text, maxBytes = DEFAULT_MAX_STDOUT_BYTES) {
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
+    return typeof text === "string" ? text : String(text ?? "");
+  }
+  const sliced = sliceUtf8ByBytes(text, maxBytes, { from: "end" });
+  if (sliced.truncated) {
     return (
-      `--- [출력 ${buf.length}B → ${maxBytes}B로 절삭됨; tail ${maxBytes}B 유지] ---\n` +
-      buf.subarray(-maxBytes).toString("utf-8")
+      `[출력 ${sliced.rawBytes}B, 상한 ${maxBytes}B 초과: tail ${sliced.outputBytes}B 유지]\n` +
+      sliced.text
     );
   }
-  return text;
+  return sliced.text;
 }
 
-// ── 메인 ──
+// 메인
 function main() {
   const a = parseArgs();
 
@@ -473,7 +482,13 @@ function main() {
   const stdoutLog = a.stdout_log || "";
   const lastMessageLog = a.last_message_log || "";
   const resultReason = a.result_reason || "";
-  const maxBytes = parseInt(a.max_bytes || "51200", 10);
+  const parsedMaxBytes =
+    a.max_bytes !== undefined && a.max_bytes !== ""
+      ? parseInt(a.max_bytes, 10)
+      : DEFAULT_MAX_STDOUT_BYTES;
+  const maxBytes = Number.isFinite(parsedMaxBytes)
+    ? parsedMaxBytes
+    : DEFAULT_MAX_STDOUT_BYTES;
   const cliCmd = a.cli_cmd || cliType;
 
   // stderr/stdout 읽기
@@ -507,6 +522,28 @@ function main() {
     status = "failed";
   }
 
+  // 출력 본문 사전 준비 (실행 통계에 절삭 전후 바이트 크기 기록)
+  const shouldEmitBody =
+    status === "partial" ||
+    exitCode === 0 ||
+    exitCode === 124 ||
+    Boolean(displayOutput);
+  const preparedBody = shouldEmitBody
+    ? prepareCliOutput(displayOutput, cliType, {
+        cleanTui: a.clean_tui !== "false",
+        stderrContent,
+        sessionRawOutput: rawOutput,
+      })
+    : "";
+  const truncatedBody = shouldEmitBody
+    ? truncateOutput(preparedBody, maxBytes)
+    : "";
+  const rawStdoutBytes = Math.max(
+    Buffer.byteLength(rawOutput || "", "utf8"),
+    Buffer.byteLength(displayOutput || "", "utf8"),
+  );
+  const outputBytes = Buffer.byteLength(truncatedBody || "", "utf8");
+
   // 3. 실행 로그
   logExecution({
     agent,
@@ -518,6 +555,8 @@ function main() {
     timeout,
     mcp_profile: mcpProfile,
     tokens,
+    raw_stdout_bytes: rawStdoutBytes,
+    output_bytes: outputBytes,
   });
 
   // 4. 성공 시 토큰 누적
@@ -555,12 +594,7 @@ function main() {
     console.log("status: partial");
     console.log(`reason: ${resultReason}`);
     console.log("=== PARTIAL OUTPUT ===");
-    const partialFiltered = prepareCliOutput(displayOutput, cliType, {
-      cleanTui: a.clean_tui !== "false",
-      stderrContent,
-      sessionRawOutput: rawOutput,
-    });
-    console.log(truncateOutput(partialFiltered, maxBytes));
+    console.log(truncatedBody);
     if (stderrContent) {
       console.log("=== STDERR ===");
       console.log(stderrContent.split("\n").slice(-20).join("\n"));
@@ -575,21 +609,11 @@ function main() {
       console.log("status: success");
     }
     console.log("=== OUTPUT ===");
-    const filtered = prepareCliOutput(displayOutput, cliType, {
-      cleanTui: a.clean_tui !== "false",
-      stderrContent,
-      sessionRawOutput: rawOutput,
-    });
-    console.log(truncateOutput(filtered, maxBytes));
+    console.log(truncatedBody);
   } else if (exitCode === 124) {
     console.log(`status: timeout (${timeout}s 초과)`);
     console.log("=== PARTIAL OUTPUT ===");
-    const partialFiltered = prepareCliOutput(displayOutput, cliType, {
-      cleanTui: a.clean_tui !== "false",
-      stderrContent,
-      sessionRawOutput: rawOutput,
-    });
-    console.log(truncateOutput(partialFiltered, maxBytes));
+    console.log(truncatedBody);
     console.log("=== STDERR ===");
     console.log(stderrContent.split("\n").slice(-10).join("\n"));
   } else {
@@ -598,12 +622,7 @@ function main() {
     console.log(stderrContent.split("\n").slice(-20).join("\n"));
     if (displayOutput) {
       console.log("=== PARTIAL OUTPUT ===");
-      const partialFiltered = prepareCliOutput(displayOutput, cliType, {
-        cleanTui: a.clean_tui !== "false",
-        stderrContent,
-        sessionRawOutput: rawOutput,
-      });
-      console.log(truncateOutput(partialFiltered, maxBytes));
+      console.log(truncatedBody);
     }
   }
 }

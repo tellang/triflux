@@ -1,11 +1,11 @@
 ---
 id: 0004
 title: Codex를 기본 구현 CLI로 사용한다
-status: accepted
+status: superseded
 date: 2026-04-30
 deciders: [tellang]
 supersedes: []
-superseded_by: null
+superseded_by: 0054
 relates: [0002]
 pr: null
 ---

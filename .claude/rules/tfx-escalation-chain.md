@@ -11,24 +11,25 @@ paths:
 `/tfx-auto --retry auto-escalate` 가 사용하는 CLI 승격 체인.
 각 단계에서 `--max-iterations` (기본 3) 소진 시 다음 단계로 전이.
 
-> 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md). 이 문서가 실행 규칙의 정본이다.
+> 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0054](../../docs/adr/0054-multi-vendor-priority-routing.md). 이 문서가 실행 규칙의 정본이다.
 
 ## DEFAULT_ESCALATION_CHAIN
 
 `hub/team/retry-state-machine.mjs` 의 `DEFAULT_ESCALATION_CHAIN` 상수.
 
-| # | CLI | 모델 | profile | 이유 |
-|---|-----|------|---------|------|
-| 1 | codex | 프로필에서 해석 | astra_max | 최난도 단일 작업용 Codex 복구 단계. |
-| 2 | claude | fable | 미지정 | Claude CLI가 최신 Fable tier로 해석하는 최종 수단, 복잡 아키텍처/합의 요구 시 |
+| # | CLI | 모델 | profile | effort | 이유 |
+|---|-----|------|---------|--------|------|
+| 1 | codex | 프로필에서 해석 | astra_max | max | 최난도 단일 작업용 Codex 1차 복구 단계 |
+| 2 | antigravity | 프로필에서 해석 | carbon_high | high | 이기종 벤더 상위 추론(Carbon high, 미보유 시 Argon high 폴백) 2차 복구 단계 |
+| 3 | claude | fable | 미지정 | high | Claude CLI가 최신 Fable tier로 해석하는 최종 수단, 복잡 아키텍처 및 합의 요구 시 |
 
-체인 길이 소진 시 `BUDGET_EXCEEDED` with `reason: "escalation-chain-exhausted"`.
+체인 생성 시 비활성(`TFX_DISABLE_*=1`), 미설치(`TFX_*_OK=0`), 쿼터 `>=100%`, 쿨다운 중인 벤더 단계는 자동으로 건너뛰며, 가용한 단계가 하나도 없으면 빈 체인으로 즉시 `BUDGET_EXCEEDED` 처리한다. 체인 길이 소진 시 `BUDGET_EXCEEDED` with `reason: "escalation-chain-exhausted"`.
 
 ## 전이 규약
 
 - 각 단계 default `max_iterations = 3` (사용자가 `--max-iterations N` 로 override)
 - 단계 전이 시 iterations / stuckCounter / lastFailureReason 리셋
-- **동일 failureReason 3회 연속** 은 체인과 무관하게 `STUCK` → 즉시 중단
+- **동일 failureReason 3회 연속** 은 체인과 무관하게 `STUCK` 처리 후 즉시 중단
 
 ## 프로젝트 override
 
@@ -38,23 +39,25 @@ PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escal
 {
   "version": 1,
   "chain": [
-    { "cli": "codex", "profile": "astra_max" },
-    { "cli": "claude", "model": "fable" }
+    { "cli": "codex", "profile": "astra_max", "effort": "max" },
+    { "cli": "antigravity", "profile": "carbon_high", "effort": "high" },
+    { "cli": "claude", "model": "fable", "effort": "high" }
   ]
 }
 ```
 
 체인 항목 필드:
 - `cli` (codex|antigravity|claude)
-- `model`: 프로필이 없는 단계에서 CLI가 해석하는 문자열. Codex 관리 프로필 단계에는 넣지 않는다.
-- `profile` (optional): `luna_low` / `luna_high` / `sol_med` / `sol_high` / `astra_xhigh` / `astra_max` 같은 CLI profile 이름. `astra_ultra`는 다른 오케스트레이터가 없는 최상위 단독 실행 전용이므로 retry chain에는 넣지 않는다.
+- `model`: 프로필이 없는 단계에서 CLI가 해석하는 문자열. Codex 및 Antigravity 관리 프로필 단계에는 넣지 않는다.
+- `profile` (optional): Codex(`luna_low` / `luna_high` / `sol_med` / `sol_high` / `astra_xhigh` / `astra_max`) 또는 Antigravity(`hydrogen_low` / `hydrogen` / `hydrogen_high` / `argon_low` / `argon` / `argon_high` / `carbon_low` / `carbon` / `carbon_high`) 프로필 이름. `astra_ultra`는 다른 오케스트레이터가 없는 최상위 단독 실행 전용이므로 retry chain에는 넣지 않는다.
+- `effort` (optional): 단계별 추론 수준(`low` / `medium` / `high` / `xhigh` / `max`).
 
 기본 Claude 모델은 `fable` 별칭이며 Claude CLI가 최신 Fable tier로 해석한다. 기본값만 바꾸려면 `TFX_ESCALATION_CLAUDE_MODEL`을 설정할 수 있고, 프로젝트의 `.triflux/config/escalation-chain.json`은 그보다 우선한다.
 
 ## 사용 예시
 
 ```
-# 기본 체인 (2단계)
+# 기본 체인 (3단계: codex astra_max -> antigravity carbon_high -> claude fable)
 /tfx-auto "복구" --retry auto-escalate
 
 # 단계당 상한 2회

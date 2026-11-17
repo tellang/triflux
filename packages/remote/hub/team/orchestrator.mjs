@@ -1,5 +1,7 @@
 // hub/team/orchestrator.mjs — 작업 분배 + 프롬프트 구성
 // 의존성: pane.mjs만 사용
+import { readQuotaSnapshot } from "../../scripts/lib/quota-snapshot.mjs";
+import { reconcileCandidatesWithJev } from "../../scripts/lib/vendor-priority-policy.mjs";
 import { judgeTaskAssignment } from "@triflux/core/hub/lib/jev-addon.mjs";
 import { injectPrompt as defaultInjectPrompt } from "./pane.mjs";
 
@@ -57,21 +59,50 @@ export async function assignTasksWithJev(
   }));
   if (workers.length <= 1) return base;
 
-  const verdict = await judgeTaskAssignment({ subtasks, workers }, jevOptions);
+  const quotaSnapshot =
+    jevOptions.quotaSnapshot ??
+    (jevOptions.env ? readQuotaSnapshot({ env: jevOptions.env }) : null);
+  const isCliExhausted = (rawCli) => {
+    if (!quotaSnapshot) return false;
+    const norm =
+      rawCli === "agy" || rawCli === "gemini" ? "antigravity" : rawCli;
+    return quotaSnapshot?.[norm]?.exhausted === true;
+  };
+
+  const eligibleWorkers = quotaSnapshot
+    ? workers.filter((w) => !isCliExhausted(w.cli))
+    : workers;
+  const effectiveWorkers =
+    eligibleWorkers.length > 0 ? eligibleWorkers : workers;
+
+  const verdict = await judgeTaskAssignment(
+    { subtasks, workers: effectiveWorkers },
+    jevOptions,
+  );
   if (
     !verdict ||
     !Array.isArray(verdict.assignments) ||
-    verdict.assignments.length !== workers.length
+    verdict.assignments.length === 0
   ) {
     return base;
   }
   const usedSubtasks = new Set();
   const workerAssignments = new Array(workers.length).fill(null);
 
+  const uniqueClis = [
+    ...new Set(
+      effectiveWorkers.map((w) =>
+        w.cli === "agy" || w.cli === "gemini" ? "antigravity" : w.cli,
+      ),
+    ),
+  ];
+
   for (let i = 0; i < workers.length; i += 1) {
+    const effIdx = effectiveWorkers.indexOf(workers[i]);
+    if (effIdx === -1) continue;
     const match = verdict.assignments.find(
       (item) =>
-        item.workerIndex === i &&
+        item.workerIndex === effIdx &&
         Number.isInteger(item.subtaskIndex) &&
         item.subtaskIndex >= 0 &&
         item.subtaskIndex < subtasks.length &&
@@ -79,9 +110,21 @@ export async function assignTasksWithJev(
     );
     if (match) {
       usedSubtasks.add(match.subtaskIndex);
+      const workerCli =
+        workers[i].cli === "agy" || workers[i].cli === "gemini"
+          ? "antigravity"
+          : workers[i].cli;
+      const candidateList = [
+        workerCli,
+        ...uniqueClis.filter((c) => c !== workerCli),
+      ].map((cli) => ({ cli }));
+      const reconciled = reconcileCandidatesWithJev(candidateList, {
+        confidence: match.confidence ?? verdict.confidence,
+        recommendedCli: match.recommendedCli || workers[i].cli,
+      });
       workerAssignments[i] = {
         subtaskIdx: match.subtaskIndex,
-        recommendedCli: match.recommendedCli || workers[i].cli,
+        recommendedCli: reconciled.candidates[0]?.cli || workers[i].cli,
       };
     }
   }
@@ -99,9 +142,13 @@ export async function assignTasksWithJev(
     }
     if (fallbackIdx === -1) fallbackIdx = Math.min(i, subtasks.length - 1);
     usedSubtasks.add(fallbackIdx);
+    const fallbackCli =
+      isCliExhausted(workers[i].cli) && effectiveWorkers[0]?.cli
+        ? effectiveWorkers[0].cli
+        : workers[i].cli;
     workerAssignments[i] = {
       subtaskIdx: fallbackIdx,
-      recommendedCli: workers[i].cli,
+      recommendedCli: fallbackCli,
     };
   }
 
@@ -133,7 +180,7 @@ export function buildLeadPrompt(taskDescription, config) {
 
   const roster =
     workers
-      .map((w, i) => `${i + 1}. ${w.agentId} (${w.cli}) — ${w.subtask}`)
+      .map((w, i) => `${i + 1}. ${w.agentId} (${w.cli}): ${w.subtask}`)
       .join("\n") || "- (워커 없음)";
 
   const workerIds = workers.map((w) => w.agentId).join(", ");
@@ -149,6 +196,7 @@ ${roster}
 규칙:
 - 가능한 짧고 핵심만 지시/요약(토큰 절약)
 - 모든 워커의 결과와 출력 파일을 확인하고 통합한다. 무응답 워커는 상태를 보고하고 중단한다.
+- 워커 완료 보고는 2KB 이하 압축 요약으로 받고, 대용량 원본 출력 파일은 목차나 필요한 줄 범위만 골라 읽는다.
 - 증거(커밋/테스트/파일) 없는 완료 주장은 통합하지 말고 해당 워커에 redo 를 지시하라.
 
 워커 ID: ${workerIds || "(없음)"}
@@ -157,10 +205,10 @@ ${roster}
 
 /**
  * 워커 초기 프롬프트 생성
- * @param {string} subtask — 이 에이전트의 서브태스크
+ * @param {string} subtask: 이 에이전트의 서브태스크
  * @param {object} config
- * @param {string} config.cli — codex/gemini/claude
- * @param {string} config.agentId — 에이전트 식별자
+ * @param {string} config.cli: codex/gemini/claude
+ * @param {string} config.agentId: 에이전트 식별자
  * @returns {string}
  */
 export function buildPrompt(subtask, config) {
@@ -171,7 +219,7 @@ export function buildPrompt(subtask, config) {
 
 필수 규칙:
 1) 간결하게 작업(불필요한 장문 설명 금지)
-2) 완료 시 변경 파일, 검증 결과와 출력 파일 경로를 보고한다
+2) 완료 시 변경 파일, 검증 결과와 출력 파일 경로를 2KB 이하 핵심 요약으로 보고한다
 
 지금 작업을 시작하라.`;
 }

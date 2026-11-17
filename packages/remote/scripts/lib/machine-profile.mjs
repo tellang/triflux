@@ -22,6 +22,7 @@ export const MACHINE_PROFILE_KEYS = Object.freeze([
   "TFX_MULTIPLEXER_POLICY",
   "TFX_DISABLE_CODEX",
   "TFX_DISABLE_ANTIGRAVITY",
+  "TFX_DISABLE_CLAUDE",
   "TFX_TIMEOUT_POLICY",
   "TFX_HARD_CEILING_SEC",
   "TFX_STALL_THRESHOLD",
@@ -32,19 +33,21 @@ const MACHINE_PROFILE_KEY_SET = new Set(MACHINE_PROFILE_KEYS);
 
 const MACHINE_PROFILE_VALUE_RE = /^[A-Za-z0-9_.-]+$/u;
 
-// CLI 이름과 disable 키의 대응. 이 두 개가 TFX_DISABLE_* SSOT 의 전부다.
+// CLI 이름과 disable 키의 대응. 이 세 개가 TFX_DISABLE_* SSOT 의 전부다.
 const CLI_DISABLE_KEYS = Object.freeze({
   codex: "TFX_DISABLE_CODEX",
   antigravity: "TFX_DISABLE_ANTIGRAVITY",
+  claude: "TFX_DISABLE_CLAUDE",
 });
 
-// 호출자가 쓰는 CLI 표기를 정책 키 두 개로 접는다. agy 와 gemini 는 antigravity
+// 호출자가 쓰는 CLI 표기를 정책 키 세 개로 접는다. agy 와 gemini 는 antigravity
 // 레인의 다른 이름이므로 같은 정책을 적용한다.
 const CLI_ALIASES = Object.freeze({
   codex: "codex",
   antigravity: "antigravity",
   agy: "antigravity",
   gemini: "antigravity",
+  claude: "claude",
 });
 
 /**
@@ -229,7 +232,12 @@ export function resolveCliPolicy(env = process.env, opts = {}) {
   return {
     codexDisabled: disabled.codex,
     antigravityDisabled: disabled.antigravity,
-    source: { codex: source.codex, antigravity: source.antigravity },
+    claudeDisabled: disabled.claude,
+    source: {
+      codex: source.codex,
+      antigravity: source.antigravity,
+      claude: source.claude,
+    },
     profilePath: profile?.exists ? profile.path : null,
     warnings,
   };
@@ -239,7 +247,7 @@ export function resolveCliPolicy(env = process.env, opts = {}) {
  * CLI 표기를 정책 키 이름으로 정규화한다. 모르는 이름은 null 이다.
  *
  * @param {string} cli
- * @returns {"codex"|"antigravity"|null}
+ * @returns {"codex"|"antigravity"|"claude"|null}
  */
 export function normalizeCliName(cli) {
   const key = String(cli ?? "")
@@ -250,7 +258,7 @@ export function normalizeCliName(cli) {
 
 /**
  * 차단된 CLI 실행 요청에 쓸 오류를 만든다. throw 는 호출자가 한다. 정책상 허용된
- * CLI 이거나 모르는 이름이면 null 을 준다.
+ * CLI 이거나 모르는 이름이면 null 을 반환한다.
  *
  * 메시지에 원인과 해제 방법을 모두 넣는다. tfx-route.sh 의 exit 78 정책과 같은
  * 정신이며, 조용한 강등을 금지한다.
@@ -263,7 +271,11 @@ export function buildDisabledCliError(cli, policy) {
   const name = normalizeCliName(cli);
   if (!name) return null;
   const isDisabled =
-    name === "codex" ? policy?.codexDisabled : policy?.antigravityDisabled;
+    name === "codex"
+      ? policy?.codexDisabled
+      : name === "claude"
+        ? policy?.claudeDisabled
+        : policy?.antigravityDisabled;
   if (!isDisabled) return null;
 
   const key = CLI_DISABLE_KEYS[name];

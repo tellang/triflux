@@ -62,12 +62,18 @@ process.exit(1);
       calls.map((args) => args[0]),
       ["judge-route", "team-task-update", "team-send-message"],
     );
-    assert.deepEqual(calls[0], [
+    assert.deepEqual(calls[0].slice(0, 8), [
       "judge-route",
       "--agent",
       "executor",
       "--cli-type",
       "codex",
+      "--cli-mode",
+      "auto",
+      "--candidates-json",
+    ]);
+    assert.ok(Array.isArray(JSON.parse(calls[0][8])));
+    assert.deepEqual(calls[0].slice(9), [
       "--prompt",
       "unavailable-bridge",
       "--worker-model",

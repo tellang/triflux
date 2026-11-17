@@ -94,7 +94,31 @@ function createHeadlessFixture() {
   );
   chmodSync(agyBin, 0o755);
 
-  return { root, home, codexBin, agyBin, codexLog, agyLog };
+  const claudeLog = join(root, "claude-exec.log");
+  const claudeBin = join(bin, "claude");
+  writeFileSync(
+    claudeBin,
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      `printf '%s\\n' "$*" >> "$TFX_TEST_CLAUDE_EXEC_LOG"`,
+      "cat >/dev/null",
+      'printf \'{"type":"result","result":"CLAUDE_EXEC"}\\n\'',
+    ].join("\n"),
+    "utf8",
+  );
+  chmodSync(claudeBin, 0o755);
+
+  return {
+    root,
+    home,
+    codexBin,
+    agyBin,
+    claudeBin,
+    codexLog,
+    agyLog,
+    claudeLog,
+  };
 }
 
 function runCodexHeadless(fixture, overrides = {}, buildOptions = {}) {
@@ -117,8 +141,10 @@ function runCodexHeadless(fixture, overrides = {}, buildOptions = {}) {
       ...isolatedMachineProfileEnv(fixture.home),
       CODEX_BIN: fixture.codexBin,
       AGY_BIN: fixture.agyBin,
+      CLAUDE_BIN: fixture.claudeBin,
       TFX_TEST_CODEX_EXEC_LOG: fixture.codexLog,
       TFX_TEST_AGY_EXEC_LOG: fixture.agyLog,
+      TFX_TEST_CLAUDE_EXEC_LOG: fixture.claudeLog,
       TFX_PREFLIGHT_LOADED: "1",
       TFX_CODEX_OK: "1",
       TFX_ANTIGRAVITY_OK: "1",
@@ -261,10 +287,11 @@ describe("headless Codex disable gate", { timeout: 90_000 }, () => {
     }
   });
 
-  it("양쪽 CLI가 차단되면 Claude native로 강등하지 않고 fail-loud 한다", () => {
+  it("외부 CLI가 모두 차단되면 Claude native로 강등하지 않고 fail-loud 한다", () => {
     const outcome = runCodexHeadless(fixture, {
       TFX_DISABLE_CODEX: "1",
       TFX_DISABLE_ANTIGRAVITY: "1",
+      TFX_DISABLE_CLAUDE: "1",
     });
 
     assert.equal(outcome.result.status, 78, outcome.stderr);
@@ -272,6 +299,7 @@ describe("headless Codex disable gate", { timeout: 90_000 }, () => {
     assert.match(outcome.stderr, /허용되고 사용 가능한 외부 CLI가 없습니다/);
     assert.equal(readIfPresent(fixture.codexLog), "");
     assert.equal(readIfPresent(fixture.agyLog), "");
+    assert.equal(readIfPresent(fixture.claudeLog), "");
     assert.doesNotMatch(outcome.stderr, /claude-native/i);
   });
 
@@ -417,13 +445,13 @@ console.log(JSON.stringify({ choice, value: false, confidence: 0.95 }));
     assert.equal(readIfPresent(fixture.codexLog), "");
     assert.match(
       readIfPresent(fixture.agyLog),
-      /--model gemini-4-argon --effort low/,
+      /--model gemini-4-hydrogen --effort low/,
     );
     const metadata = JSON.parse(
       readIfPresent(join(fixture.root, "result.txt.model.json")),
     );
     assert.equal(metadata.cli, "agy");
-    assert.equal(metadata.family, "argon");
+    assert.equal(metadata.family, "hydrogen");
     assert.equal(metadata.effort, "low");
   });
 

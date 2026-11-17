@@ -86,12 +86,18 @@ describe("tfx-route.sh — team bridge integration", () => {
         .filter(Boolean)
         .map((line) => JSON.parse(line).argv);
 
-      assert.deepEqual(calls[0], [
+      assert.deepEqual(calls[0].slice(0, 8), [
         "judge-route",
         "--agent",
         "executor",
         "--cli-type",
         "codex",
+        "--cli-mode",
+        "auto",
+        "--candidates-json",
+      ]);
+      assert.ok(Array.isArray(JSON.parse(calls[0][8])));
+      assert.deepEqual(calls[0].slice(9), [
         "--prompt",
         "bridge-team-flow",
         "--worker-model",
@@ -163,12 +169,18 @@ describe("tfx-route.sh — team bridge integration", () => {
         .filter(Boolean)
         .map((line) => JSON.parse(line).argv);
 
-      assert.deepEqual(calls[0], [
+      assert.deepEqual(calls[0].slice(0, 8), [
         "judge-route",
         "--agent",
         "executor",
         "--cli-type",
         "codex",
+        "--cli-mode",
+        "auto",
+        "--candidates-json",
+      ]);
+      assert.ok(Array.isArray(JSON.parse(calls[0][8])));
+      assert.deepEqual(calls[0].slice(9), [
         "--prompt",
         "bridge-team-flow",
         "--worker-model",

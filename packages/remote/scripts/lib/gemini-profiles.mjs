@@ -20,43 +20,50 @@ const DEFAULT_GEMINI_PROFILES = {
 
 export { normalizeGeminiProfileName };
 
-// ── 용도별 effort (SSOT) ──
-// Argon 가족 안에서 역할에 따라 effort 를 나눈다. 키는 tfx 에이전트/역할 이름
-// (agent-map.json 의 에이전트, tfx multi --assign 의 role). bash(tfx-route.sh)와
-// 실행 모드(execution-mode)가 이 표를 읽는다.
-//   High   : 판단이 결과를 좌우하는 역할 (검토, 설계, 디버깅, 분석)
-//   Medium : 생성/작성/실행 (기본값)
-//   Low    : 분류, 요약, 추출, 번역처럼 짧고 기계적인 작업
+// 용도별 agy 프로필 매핑 (SSOT, ADR-0054)
+// Carbon / Hydrogen / Argon 가족과 effort를 역할군 등급에 맞춰 배정한다.
 const GEMINI_PROFILE_BY_PURPOSE = Object.freeze({
-  designer: "argon_high",
-  reviewer: "argon_high",
-  "code-reviewer": "argon_high",
-  "security-reviewer": "argon_high",
-  "quality-reviewer": "argon_high",
-  critic: "argon_high",
-  architect: "argon_high",
-  verifier: "argon_high",
-  analyst: "argon_high",
-  debugger: "argon_high",
-  planner: "argon_high",
-  scientist: "argon_high",
-  "test-engineer": "argon_high",
+  architect: "carbon_high",
+  planner: "carbon_high",
+  critic: "carbon_high",
+  analyst: "carbon_high",
+  debugger: "carbon_high",
+  "deep-executor": "carbon_high",
+  "scientist-deep": "carbon_high",
+  "security-reviewer": "carbon_high",
+  lead: "carbon_high",
+  reviewer: "hydrogen_high",
+  "code-reviewer": "hydrogen_high",
+  "quality-reviewer": "hydrogen_high",
+  designer: "hydrogen_high",
+  verifier: "hydrogen_high",
+  "qa-tester": "hydrogen_high",
+  scientist: "hydrogen_high",
+  "test-engineer": "hydrogen_high",
+  executor: "hydrogen",
+  codex: "hydrogen",
+  worker: "hydrogen",
+  antigravity: "hydrogen",
+  agy: "hydrogen",
+  gemini: "hydrogen",
   writer: "argon",
-  executor: "argon",
-  worker: "argon",
   "document-specialist": "argon",
   researcher: "argon",
-  antigravity: "argon",
-  agy: "argon",
-  gemini: "argon",
-  summarizer: "argon_low",
-  classifier: "argon_low",
-  triage: "argon_low",
-  translator: "argon_low",
-  formatter: "argon_low",
-  explore: "argon_low",
+  communication: "argon",
+  "communication-report": "argon",
+  "build-fixer": "hydrogen_low",
+  cleanup: "hydrogen_low",
+  deslop: "hydrogen_low",
+  summarizer: "hydrogen_low",
+  classifier: "hydrogen_low",
+  triage: "hydrogen_low",
+  translator: "hydrogen_low",
+  formatter: "hydrogen_low",
+  explore: "hydrogen_low",
+  spark: "hydrogen_low",
+  "communication-relay": "hydrogen_low",
 });
-const GEMINI_DEFAULT_PURPOSE_PROFILE = "argon";
+const GEMINI_DEFAULT_PURPOSE_PROFILE = "hydrogen";
 
 function resolveGeminiProfileForPurpose(name) {
   const key = String(name ?? "")

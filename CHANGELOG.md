@@ -2,6 +2,25 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [10.99.0] - 2026-11-17
+
+### Added
+- routing: 6개 역할군(탐색, 판단, 실행, 검증, 문서와 설계, 리드와 소통)별로 Claude, Codex, Antigravity 3사 후보 순서와 등급을 정하는 정책 모듈(`scripts/lib/vendor-priority-policy.mjs`)을 추가한다. 근거: ADR-0054.
+- routing: HUD 로컬 캐시와 런타임 쿨다운 마커를 읽어 사용률 100% 이상과 쿨다운 중인 벤더를 제외하고 95% 초과 후보를 우측 역순으로 1칸 내리는 쿼터 스냅샷 모듈(`scripts/lib/quota-snapshot.mjs`)을 추가한다.
+- agy: Gemini 4 Hydrogen 가족(`hydrogen_low`, `hydrogen`, `hydrogen_high`)을 추가하고 실행, 검증, 설계 폴백 경로에 반영한다.
+- setup: 3사 CLI 설치 여부와 비대화형 플래그(`TFX_SETUP_USE_CLAUDE`)를 `machine-profile.env`의 `TFX_DISABLE_*` 설정과 `~/.claude/scripts/lib/` 보조 스크립트 복사에 반영한다.
+
+### Changed
+- route: 워커 stdout의 고정 50KB 절단을 없애고 기본 물리 상한을 16MB(`TFX_MAX_STDOUT_BYTES`)로 올린다. 멀티바이트 문자가 깨지지 않도록 UTF-8 경계 슬라이서(`scripts/lib/utf8-slice.mjs`)를 거치고, `tfx-route-post.mjs`는 구조화 추출과 코드포인트 경계 요약을 반환한다.
+- review: 일반 리뷰어는 작성 벤더를 후보에서 제외하고, 다른 두 벤더가 모두 막혔을 때만 새 세션 격리(`freshSessionRequired`) 조건으로 동일 벤더 폴백을 허용한다. `security-reviewer`는 Fable을 1순위로 두고 등급 하향을 막는다.
+- jev: 고신뢰(`>= 0.85`) 판단일 때만 가용 후보 배열 안에서 인접 1칸 교환을 허용하고, 명시 프로필과 `TFX_VERIFIER_OVERRIDE=claude` 선택은 보존한다.
+
+### Fixed
+- route: `--retry auto-escalate` 스냅샷 실행 중 쿼터 초과 재라우팅이 발생했을 때 실패한 스냅샷 CLI를 다시 강제해 루프에 빠지던 문제를 수정한다. 재라우팅 임시 환경변수가 하위 워커로 전파되지 않게 정리하고 전환 횟수를 최대 2회로 제한한다.
+
+### Tests
+- 쿼터 스냅샷, 3사 우선순위 정책과 Jev 1칸 조정, UTF-8 경계 슬라이서와 후처리 단위 테스트를 추가하고 라우팅 통합 테스트 기대값을 ADR-0054 정책에 맞춘다.
+
 ## [10.98.1] - 2026-11-11
 
 ### Fixed

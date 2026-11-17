@@ -17,6 +17,11 @@ import { join } from "node:path";
 import { parseArgs as nodeParseArgs } from "node:util";
 
 import {
+  modelEffortFromProfile,
+  profileFromModelEffort,
+  resolveAgyModelEffort,
+} from "../scripts/lib/model-effort.mjs";
+import {
   createRetryStateMachine,
   loadSnapshot,
   saveSnapshot,
@@ -67,6 +72,8 @@ export function parseArgs(argv) {
       "result-file": { type: "string" },
       agent: { type: "string" },
       "cli-type": { type: "string" },
+      "cli-mode": { type: "string" },
+      "candidates-json": { type: "string" },
       "available-servers": { type: "string" },
       prompt: { type: "string" },
       cwd: { type: "string" },
@@ -706,23 +713,69 @@ function buildRetrySmFromArgs(args, snapshot) {
 function buildRetryCliInvocation(cli) {
   if (!cli) return null;
 
+  const normalizedCli = cli.cli === "agy" ? "antigravity" : cli.cli;
   const invocation = {
-    cli: cli.cli,
+    cli: normalizedCli,
     model: cli.model,
     argv: [],
   };
   if (cli.profile) invocation.profile = cli.profile;
   if (cli.family) invocation.family = cli.family;
   if (cli.effort) invocation.effort = cli.effort;
-  if (cli.cli === "codex" && cli.family && cli.effort) {
+  if (normalizedCli === "codex" && cli.family && cli.effort) {
     invocation.argv.push(
       "--profile",
       cli.family,
       "-c",
       `model_reasoning_effort="${cli.effort}"`,
     );
-  } else if (cli.cli === "codex" && cli.profile) {
+  } else if (normalizedCli === "codex" && cli.profile) {
     invocation.argv.push("--profile", cli.profile);
+  } else if (normalizedCli === "antigravity") {
+    const resolvedProfile =
+      cli.profile ||
+      (cli.family && cli.effort
+        ? profileFromModelEffort("antigravity", cli)
+        : null) ||
+      "carbon_high";
+    invocation.profile = resolvedProfile;
+    const spec =
+      cli.family && cli.effort
+        ? { family: cli.family, effort: cli.effort }
+        : modelEffortFromProfile("antigravity", resolvedProfile);
+    if (spec) {
+      try {
+        const resolved = resolveAgyModelEffort(spec);
+        invocation.model = cli.model || resolved.model;
+        invocation.family = resolved.family;
+        invocation.effort = resolved.effort;
+        invocation.argv.push(
+          "--model",
+          invocation.model,
+          "--effort",
+          invocation.effort,
+        );
+      } catch {
+        invocation.effort = cli.effort || spec.effort || "high";
+        if (invocation.model) invocation.argv.push("--model", invocation.model);
+        if (invocation.effort)
+          invocation.argv.push("--effort", invocation.effort);
+      }
+    } else {
+      invocation.effort = cli.effort || "high";
+      if (invocation.model) invocation.argv.push("--model", invocation.model);
+      if (invocation.effort)
+        invocation.argv.push("--effort", invocation.effort);
+    }
+  } else if (normalizedCli === "claude") {
+    invocation.model = cli.model || "fable";
+    invocation.effort = cli.effort || "high";
+    invocation.argv.push(
+      "--model",
+      invocation.model,
+      "--effort",
+      invocation.effort,
+    );
   }
   return invocation;
 }
@@ -1194,6 +1247,17 @@ async function cmdJudgeRoute(args) {
     const prompt = String(args.prompt ?? args.text ?? payload.prompt ?? "");
     const agentType = String(args.agent ?? payload.agentType ?? "executor");
     const cliType = String(args["cli-type"] ?? payload.cliType ?? "codex");
+    const cliMode = String(
+      args["cli-mode"] ?? payload.cliMode ?? process.env.TFX_CLI_MODE ?? "auto",
+    )
+      .trim()
+      .toLowerCase();
+    const candidatesRaw = args["candidates-json"] ?? payload.candidatesJson;
+    const hasCandidatesArg =
+      candidatesRaw !== undefined && String(candidatesRaw).trim() !== "";
+    const parsedCandidates = hasCandidatesArg
+      ? parseJsonSafe(String(candidatesRaw), [])
+      : null;
     const availableRaw =
       args["available-servers"] ?? payload.availableServers ?? "";
     const availableServers = Array.isArray(availableRaw)
@@ -1206,25 +1270,51 @@ async function cmdJudgeRoute(args) {
     const { isJevEnabled, judgeTaskRouting } = await import(
       "./lib/jev-addon.mjs"
     );
-    if (!isJevEnabled() && !args["worker-model"]) {
+    if (!isJevEnabled() && !args["worker-model"] && !hasCandidatesArg) {
       if (args.delimited) return true;
       return emitJson({ ok: true, enabled: false, routing: null });
     }
     let routingFailure;
-    const routing = await judgeTaskRouting(
-      {
-        prompt,
-        agentType,
-        cliType,
-        availableServers,
-      },
-      {
-        includeDiagnostics: Boolean(args["worker-model"]),
-        onDiagnostic: (reason) => {
-          routingFailure = reason;
+    const routing = isJevEnabled()
+      ? await judgeTaskRouting(
+          {
+            prompt,
+            agentType,
+            cliType,
+            availableServers,
+          },
+          {
+            includeDiagnostics: Boolean(args["worker-model"]),
+            onDiagnostic: (reason) => {
+              routingFailure = reason;
+            },
+          },
+        )
+      : null;
+
+    let effectiveCli = cliType;
+    let adjustedCandidates = Array.isArray(parsedCandidates)
+      ? parsedCandidates
+      : null;
+    let vendorReconcile = null;
+
+    if (Array.isArray(parsedCandidates) && parsedCandidates.length > 0) {
+      const { reconcileCandidatesWithJev } = await import(
+        "../scripts/lib/vendor-priority-policy.mjs"
+      );
+      vendorReconcile = reconcileCandidatesWithJev(
+        parsedCandidates,
+        routing?.vendorAdjustment || null,
+        {
+          explicitCliMode: Boolean(cliMode && cliMode !== "auto"),
         },
-      },
-    );
+      );
+      adjustedCandidates = vendorReconcile.candidates;
+      if (adjustedCandidates.length > 0 && adjustedCandidates[0]?.cli) {
+        effectiveCli = adjustedCandidates[0].cli;
+      }
+    }
+
     let workerModel;
     if (args["worker-model"]) {
       const { resolveWorkerModel } = await import(
@@ -1232,18 +1322,18 @@ async function cmdJudgeRoute(args) {
       );
       const env = process.env;
       const sameProvider =
-        !env.TFX_WORKER_CLI || env.TFX_WORKER_CLI === cliType;
+        !env.TFX_WORKER_CLI || env.TFX_WORKER_CLI === effectiveCli;
       workerModel = await resolveWorkerModel(
         {
           task: prompt,
           agent: agentType,
-          cli: cliType,
+          cli: effectiveCli,
           model: sameProvider ? env.TFX_WORKER_MODEL : undefined,
           effort: sameProvider ? env.TFX_WORKER_EFFORT : undefined,
           profile:
-            cliType === "codex"
+            effectiveCli === "codex"
               ? env.TFX_CODEX_PROFILE
-              : cliType === "antigravity" || cliType === "agy"
+              : effectiveCli === "antigravity" || effectiveCli === "agy"
                 ? env.TFX_GEMINI_PROFILE
                 : "auto",
           nested: Boolean(
@@ -1260,7 +1350,7 @@ async function cmdJudgeRoute(args) {
       );
     }
     if (args.delimited) {
-      if (!routing && !workerModel) return true;
+      if (!routing && !workerModel && !hasCandidatesArg) return true;
       const selected = routing || {};
       const RS = "\x1e";
       const fields = [
@@ -1278,17 +1368,42 @@ async function cmdJudgeRoute(args) {
         String(selected.confidence ?? ""),
         selected.tierShift || "",
       ];
-      if (workerModel)
+      if (workerModel || hasCandidatesArg) {
         fields.push(
-          workerModel.profile || "",
-          workerModel.model || "",
-          workerModel.effort || "",
-          JSON.stringify(workerModel),
+          workerModel?.profile || "",
+          workerModel?.model || "",
+          workerModel?.effort || "",
+          workerModel ? JSON.stringify(workerModel) : "",
         );
+      }
+      if (hasCandidatesArg) {
+        const effectiveCandidate = adjustedCandidates?.[0] || null;
+        fields.push(
+          effectiveCandidate?.cli || effectiveCli || "",
+          effectiveCandidate?.executionMode || "cli-worker",
+          routing?.vendorAdjustment?.taskTrait || selected.taskTrait || "",
+          selected.decomposable === null || selected.decomposable === undefined
+            ? ""
+            : String(selected.decomposable),
+          JSON.stringify(adjustedCandidates || []),
+        );
+      }
       process.stdout.write(fields.join(RS));
       return true;
     }
-    return emitJson({ ok: true, enabled: true, routing });
+    return emitJson({
+      ok: true,
+      enabled: isJevEnabled(),
+      routing,
+      ...(adjustedCandidates
+        ? {
+            effectiveCli,
+            effectiveCandidate: adjustedCandidates[0] || null,
+            candidates: adjustedCandidates,
+            vendorAdjustment: vendorReconcile,
+          }
+        : {}),
+    });
   } catch (error) {
     if (args.delimited) return false;
     return emitJson({

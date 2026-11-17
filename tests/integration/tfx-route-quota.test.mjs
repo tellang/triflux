@@ -121,6 +121,8 @@ ${rerouteFunc}`;
   });
 
   function runFullRoute(extraEnv) {
+    fs.rmSync(isolatedTmp, { recursive: true, force: true });
+    fs.mkdirSync(isolatedTmp, { recursive: true });
     return spawnSync(BASH_EXE, [ROUTE_SCRIPT, "executor", "test"], {
       cwd: PROJECT_ROOT,
       encoding: "utf8",
@@ -142,6 +144,7 @@ ${rerouteFunc}`;
         TFX_CODEX_OK: "1",
         TFX_ANTIGRAVITY_OK: "0",
         CODEX_BIN: fakeCodex,
+        CLAUDE_BIN: "missing-claude",
         TFX_TMP: isolatedTmp,
         ...extraEnv,
       },
@@ -360,6 +363,85 @@ auto_reroute codex
 
       assert.notEqual(result.status, 0);
       assert.doesNotMatch(out(result), /\[tfx-quota\].*자동 전환/);
+    });
+
+    it("7. 인증 오류(401)와 컨텍스트 초과 시 auto_reroute 미발동 검증", () => {
+      const fakeAuthFail = resolve(
+        os.tmpdir(),
+        `fake-codex-auth-${Date.now()}.sh`,
+      );
+      const fakeCtxFail = resolve(
+        os.tmpdir(),
+        `fake-codex-ctx-${Date.now()}.sh`,
+      );
+      fs.writeFileSync(
+        fakeAuthFail,
+        '#!/usr/bin/env bash\necho "401 Unauthorized: quota exceeded"\nexit 1\n',
+        { mode: 0o755 },
+      );
+      fs.writeFileSync(
+        fakeCtxFail,
+        '#!/usr/bin/env bash\necho "Error: context_length_exceeded (rate limit)"\nexit 1\n',
+        { mode: 0o755 },
+      );
+      try {
+        const authRes = runFullRoute({
+          CODEX_BIN: fakeAuthFail,
+          TFX_ANTIGRAVITY_OK: "1",
+          AGY_BIN: toBashPath(resolve(PROJECT_ROOT, "tests/fixtures/bin/agy")),
+        });
+        assert.notEqual(authRes.status, 0);
+        assert.doesNotMatch(out(authRes), /\[tfx-quota\].*자동 전환/);
+
+        const ctxRes = runFullRoute({
+          CODEX_BIN: fakeCtxFail,
+          TFX_ANTIGRAVITY_OK: "1",
+          AGY_BIN: toBashPath(resolve(PROJECT_ROOT, "tests/fixtures/bin/agy")),
+        });
+        assert.notEqual(ctxRes.status, 0);
+        assert.doesNotMatch(out(ctxRes), /\[tfx-quota\].*자동 전환/);
+      } finally {
+        if (fs.existsSync(fakeAuthFail)) fs.unlinkSync(fakeAuthFail);
+        if (fs.existsSync(fakeCtxFail)) fs.unlinkSync(fakeCtxFail);
+      }
+    });
+
+    it("8. 1순위(codex)에서 2순위(antigravity), 3순위(claude)까지 순차 쿼터 재라우팅 검증", () => {
+      const fakeAgyQuota = resolve(
+        os.tmpdir(),
+        `fake-agy-quota-chain-${Date.now()}.sh`,
+      );
+      const callsLog = resolve(
+        os.tmpdir(),
+        `fake-chain-calls-${Date.now()}.log`,
+      );
+      fs.writeFileSync(
+        fakeAgyQuota,
+        `#!/usr/bin/env bash
+if [[ "\${1:-}" == "--help" ]]; then echo "--print --dangerously-skip-permissions"; exit 0; fi
+if [[ "\${1:-}" == "models" ]]; then exit 0; fi
+echo "antigravity" >> "${callsLog}"
+echo "Quota pool exhausted. Resets in 1h00m00s." >&2
+exit 1
+`,
+        { mode: 0o755 },
+      );
+      try {
+        const res = runFullRoute({
+          TFX_ANTIGRAVITY_OK: "1",
+          AGY_BIN: toBashPath(fakeAgyQuota),
+          CLAUDE_BIN: toBashPath(
+            resolve(PROJECT_ROOT, "tests/fixtures/bin/claude"),
+          ),
+        });
+        assert.equal(res.status, 0, out(res));
+        assert.match(out(res), /Codex → Antigravity 자동 전환/);
+        assert.match(out(res), /Antigravity → Claude 자동 전환/);
+        assert.match(out(res), /rerouted_from=codex,antigravity|type=claude/);
+      } finally {
+        if (fs.existsSync(fakeAgyQuota)) fs.unlinkSync(fakeAgyQuota);
+        if (fs.existsSync(callsLog)) fs.unlinkSync(callsLog);
+      }
     });
   });
 });

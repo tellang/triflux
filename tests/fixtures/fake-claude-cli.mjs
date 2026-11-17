@@ -3,6 +3,21 @@
 import { writeFileSync } from "node:fs";
 import readline from "node:readline";
 
+if (process.argv.includes("--version") || process.argv.includes("-v")) {
+  process.stdout.write("claude 2.1.203\n");
+  process.exit(0);
+}
+
+if (process.env.FAKE_CLAUDE_MODE === "quota-fail") {
+  process.stderr.write("Error: rate limit exceeded for your organization\n");
+  process.exit(1);
+}
+
+if (process.env.FAKE_CLAUDE_MODE === "auth-fail") {
+  process.stderr.write("HTTP 401 Unauthorized: invalid api key\n");
+  process.exit(1);
+}
+
 // Test seam: when FAKE_CLAUDE_ARGV_OUT is set, dump the CLI argv the worker
 // spawned us with so a test can assert flags like --model / --effort.
 if (process.env.FAKE_CLAUDE_ARGV_OUT) {

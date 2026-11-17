@@ -14,6 +14,7 @@
 
 export const ROUTE_CLI_POLICY_DEFAULTS = Object.freeze({
   TFX_DISABLE_ANTIGRAVITY: "0",
+  TFX_DISABLE_CLAUDE: "0",
   TFX_DISABLE_CODEX: "0",
 });
 

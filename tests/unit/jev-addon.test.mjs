@@ -696,8 +696,8 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
         },
       );
       assert.equal(res.complexity, "high_risk");
-      assert.equal(res.codexProfile, "astra_xhigh");
-      assert.equal(res.agyProfile, "argon_high");
+      assert.equal(res.codexProfile, "astra_max");
+      assert.equal(res.agyProfile, "carbon_high");
       assert.equal(res.claudeModel, "opus");
       assert.equal(res.claudeEffort, "high");
       assert.equal(res.executionMode, "bypass");

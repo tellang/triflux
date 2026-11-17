@@ -733,3 +733,27 @@ test("변경 전 bridge 거부는 원인과 attach background를 보존하고 �
       );
   }
 });
+
+test("communication-report는 대화형 상단 슬롯을 유지하고 communication-relay는 경량 워커 슬롯을 쓴다", async () => {
+  const reportIn = layoutInput({ role: "communication-report" });
+  const relayIn = layoutInput({ role: "communication-relay" });
+  assert.equal(reportIn.minCols, 100);
+  assert.equal(reportIn.minRows, 24);
+  assert.equal(relayIn.minCols, 60);
+  assert.equal(relayIn.minRows, 10);
+
+  const reportDec = await decideLayout(
+    snapshot(),
+    input({ role: "communication-report", task: "진행 상황 요약 보고" }),
+    { env: { TFX_JEV: "0" } },
+  );
+  const relayDec = await decideLayout(
+    snapshot(),
+    input({ role: "communication-relay", task: "주기적으로 상태 감시" }),
+    { env: { TFX_JEV: "0" } },
+  );
+  assert.ok(!reportDec.candidates.some((c) => c.kind === "background"));
+  assert.notEqual(reportDec.candidate.kind, "background");
+  assert.ok(relayDec.candidates.some((c) => c.kind === "background"));
+  assert.equal(relayDec.candidate.kind, "background");
+});

@@ -435,3 +435,49 @@ test("가족 목록이 바뀌기 전에 저장한 agy 목록은 하루가 안 �
   resolveModelFamilies("agy", opts);
   assert.equal(calls, 1);
 });
+
+test("agy Hydrogen 프로필 해석 및 목록 부재 시 Argon 폴백과 models.json 핀을 검증한다", (t) => {
+  const opts = fixture(t);
+  opts.runCommand = () =>
+    "gemini-4-argon-low\tGemini 4 Argon (Low)\n" +
+    "gemini-4-argon-medium\tGemini 4 Argon (Medium)\n" +
+    "gemini-4-argon-high\tGemini 4 Argon (High)\n";
+  const withoutHydrogen = resolveModelFamilies("agy", opts);
+  assert.equal(withoutHydrogen.families.hydrogen.fallbackFrom, "hydrogen");
+  assert.equal(withoutHydrogen.families.hydrogen.model, "gemini-4-argon");
+  assert.equal(
+    withoutHydrogen.profiles.hydrogen_high.model,
+    "Gemini 4 Argon (High)",
+  );
+
+  rmSync(join(opts.stateDir, "agy-models.json"), { force: true });
+  opts.runCommand = () =>
+    "gemini-4-hydrogen-low\tGemini 4 Hydrogen (Low)\n" +
+    "gemini-4-hydrogen-medium\tGemini 4 Hydrogen (Medium)\n" +
+    "gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)\n" +
+    "gemini-4-argon-medium\tGemini 4 Argon (Medium)\n";
+  const withHydrogen = resolveModelFamilies("agy", opts);
+  assert.equal(withHydrogen.families.hydrogen.fallbackFrom, undefined);
+  assert.equal(withHydrogen.families.hydrogen.model, "gemini-4-hydrogen");
+  assert.equal(
+    withHydrogen.profiles.hydrogen_low.model,
+    "Gemini 4 Hydrogen (Low)",
+  );
+  assert.equal(
+    withHydrogen.profiles.hydrogen.model,
+    "Gemini 4 Hydrogen (Medium)",
+  );
+  assert.equal(
+    withHydrogen.profiles.hydrogen_high.model,
+    "Gemini 4 Hydrogen (High)",
+  );
+
+  const pinsPath = join(opts.stateDir, "models.json");
+  rmSync(join(opts.stateDir, "agy-models.json"), { force: true });
+  opts.runCommand = () => "gemini-4-argon-medium\tGemini 4 Argon (Medium)\n";
+  writeFileSync(pinsPath, JSON.stringify({ hydrogen: "gemini-4.5-hydrogen" }));
+  const pinned = resolveModelFamilies("agy", opts);
+  assert.equal(pinned.families.hydrogen.model, "gemini-4.5-hydrogen");
+  assert.equal(pinned.families.hydrogen.source, pinsPath);
+  assert.equal(pinned.families.hydrogen.fallbackFrom, undefined);
+});

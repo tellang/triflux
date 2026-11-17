@@ -36,6 +36,21 @@ export const AGY_FAMILY_PROFILES = Object.freeze({
     effort: "high",
     model: "Gemini 4 Argon (High)",
   },
+  hydrogen_low: {
+    family: "hydrogen",
+    effort: "low",
+    model: "Gemini 4 Hydrogen (Low)",
+  },
+  hydrogen: {
+    family: "hydrogen",
+    effort: "medium",
+    model: "Gemini 4 Hydrogen (Medium)",
+  },
+  hydrogen_high: {
+    family: "hydrogen",
+    effort: "high",
+    model: "Gemini 4 Hydrogen (High)",
+  },
   carbon_low: {
     family: "carbon",
     effort: "low",
@@ -430,10 +445,13 @@ export function resolveModelFamilies(provider, opts = {}) {
       if (supported?.length)
         selectedFamilies[family].supportedEfforts = supported;
     }
-    // 목록을 읽었는데 가족이 없으면 Ultra가 없는 계정이다. 고정한 가족은 그대로 둔다.
+    // 목록을 읽었는데 요청 가족이 없고 기본 가족(argon)이 있으면 기본 가족으로 폴백한다. 고정한 가족은 그대로 둔다.
     const missingFamily = (family) =>
       family !== AGY_BASE_FAMILY &&
       catalog?.models?.length > 0 &&
+      catalog.models.some(
+        (item) => AGY_SLUG.exec(item?.slug)?.[2] === AGY_BASE_FAMILY,
+      ) &&
       !catalog.models.some(
         (item) => AGY_SLUG.exec(item?.slug)?.[2] === family,
       ) &&

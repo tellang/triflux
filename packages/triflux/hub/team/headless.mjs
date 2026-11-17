@@ -18,6 +18,7 @@ import {
   resolveNestedCodexAgentProfile,
   resolveWorkerModel,
 } from "../../scripts/lib/agent-route-policy.mjs";
+import { sliceUtf8ByBytes } from "../../scripts/lib/utf8-slice.mjs";
 import { escapePwshSingleQuoted } from "../cli-adapter-base.mjs";
 import {
   judgeWorkerHealth,
@@ -195,14 +196,21 @@ function buildRouteBackedHeadlessCommand(
   // 실행용 프롬프트와 같은 private 경로와 수명으로 원 작업만 별도 보관한다.
   const taskFile = `${promptFile}.task`;
   writeFileSync(taskFile, task, { encoding: "utf8", mode: 0o600, flag: "wx" });
-  const reviewByAuthor = ["code-reviewer", "quality-reviewer"].includes(
-    routeAgent,
-  );
+  const reviewByAuthor = [
+    "code-reviewer",
+    "quality-reviewer",
+    "security-reviewer",
+  ].includes(routeAgent);
   const cliModeEnv = reviewByAuthor
     ? ""
     : `TFX_CLI_MODE=${shellQuote(resolvedCli)} `;
   const reviewEnv = reviewByAuthor
-    ? ["TFX_REVIEW_AUTHOR", "TFX_CLI_MODE"]
+    ? [
+        "TFX_REVIEW_AUTHOR",
+        "TFX_REVIEW_AUTHOR_TIER",
+        "TFX_PLAN_REVIEW_GATE",
+        "TFX_CLI_MODE",
+      ]
         .filter((key) => process.env[key] !== undefined)
         .map((key) => `${key}=${shellQuote(process.env[key])} `)
         .join("")
@@ -289,7 +297,9 @@ export async function prepareHeadlessMcpRecommendation(
 ) {
   if (
     resolveCliType(assignment.cli) !== "claude" ||
-    ["code-reviewer", "quality-reviewer"].includes(assignment.role)
+    ["code-reviewer", "quality-reviewer", "security-reviewer"].includes(
+      assignment.role,
+    )
   )
     return null;
   return recommendMcp(
@@ -308,7 +318,9 @@ export async function prepareHeadlessWorkerModel(assignment, options = {}) {
   // route가 provider와 retry/review 정책을 확정하는 작업은 부모가 중복 조회하지 않는다.
   if (
     cli !== "claude" ||
-    ["code-reviewer", "quality-reviewer"].includes(assignment.role)
+    ["code-reviewer", "quality-reviewer", "security-reviewer"].includes(
+      assignment.role,
+    )
   )
     return null;
   return resolveWorkerModel(
@@ -328,24 +340,20 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   const { handoff = true, mcp, contextFile, model, cwd } = opts;
   const resolvedCli = resolveCliType(cli);
   const routeAgent = opts.role || cli;
-  const reviewByAuthor = ["code-reviewer", "quality-reviewer"].includes(
-    routeAgent,
-  );
+  const reviewByAuthor = [
+    "code-reviewer",
+    "quality-reviewer",
+    "security-reviewer",
+  ].includes(routeAgent);
 
-  // contextFile 처리: 32KB(32768 bytes) 초과 시 UTF-8 안전 절단
+  // contextFile 처리: 32KB(32768 bytes) 초과 시 UTF-8 코드포인트 경계 안전 절단
   let contextPrefix = "";
   if (contextFile && existsSync(contextFile)) {
     const contextSource = resolve(contextFile);
-    let ctx = readFileSync(contextFile, "utf8");
-    let truncated = false;
-    if (Buffer.byteLength(ctx, "utf8") > 32768) {
-      // 바이트 경계에서 잘린 다바이트 글자는 U+FFFD 로 디코딩되므로 떼어 낸다.
-      ctx = Buffer.from(ctx)
-        .subarray(0, 32768)
-        .toString("utf8")
-        .replace(/�+$/u, "");
-      truncated = true;
-    }
+    const rawCtx = readFileSync(contextFile, "utf8");
+    const slicedCtx = sliceUtf8ByBytes(rawCtx, 32768, { from: "start" });
+    let ctx = slicedCtx.text;
+    const truncated = slicedCtx.truncated;
     if (truncated) {
       ctx = `${ctx}\n[... truncated at 32KB]`;
     }

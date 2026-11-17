@@ -245,10 +245,20 @@ describe("retry-state-machine — bounded / ralph / auto-escalate", () => {
     it("TFX_ESCALATION_CLAUDE_MODEL은 프로젝트 override가 없을 때 기본 Claude 모델을 대체한다", () => {
       const sm = createRetryStateMachine({
         mode: "auto-escalate",
-        env: { TFX_ESCALATION_CLAUDE_MODEL: "claude-opus-5" },
+        env: {
+          TFX_DISABLE_CODEX: "0",
+          TFX_DISABLE_ANTIGRAVITY: "0",
+          TFX_DISABLE_CLAUDE: "0",
+          TFX_ESCALATION_CLAUDE_MODEL: "claude-opus-5",
+        },
       });
 
-      assert.equal(sm.getCurrent().cliChain[1].model, "claude-opus-5");
+      assert.equal(sm.getCurrent().cliChain.length, 3);
+      assert.equal(sm.getCurrent().cliChain[0].cli, "codex");
+      assert.equal(sm.getCurrent().cliChain[1].cli, "antigravity");
+      assert.equal(sm.getCurrent().cliChain[1].profile, "carbon_high");
+      assert.equal(sm.getCurrent().cliChain[2].cli, "claude");
+      assert.equal(sm.getCurrent().cliChain[2].model, "claude-opus-5");
     });
 
     it("custom cliChain 의 optional profile 필드를 보존한다", () => {
