@@ -51,3 +51,7 @@ Codex CLI 공식 레퍼런스는 `codex mcp-server` 명령과 `codex-mcp-server`
 ## 2026-10-08 적용 상태
 
 `scripts/tfx-route.sh`는 Codex 실행을 exec 경로로 고정한다. `TFX_CODEX_TRANSPORT` 선택과 MCP 전송 안내는 제거됐다. 위 전송 선택 설명은 당시 결정의 기록이다. 허브 delegator가 사용하는 `hub/workers/codex-mcp.mjs`는 이 라우터 정리의 대상이 아니다.
+
+## 2026-11-17 적용 상태
+
+`scripts/tfx-route.sh`와 `scripts/tfx-route-post.mjs`의 기본 `51,200B` 출력 절삭을 폐지하고 폭주 방어용 물리 안전선 `16MB`(`TFX_MAX_STDOUT_BYTES=16777216`, `0`이면 무제한)만 남긴다. 안전선 초과 시 `scripts/lib/utf8-slice.mjs`가 UTF-8 코드포인트 경계를 지켜 tail 바이트를 보존하며(`hub/team/headless.mjs`와 `scripts/tfx-route.sh`의 `contextFile` 32KB head 주입에도 같은 코드포인트 안전 슬라이싱을 적용), `tfx-route-stats.jsonl`에는 절삭 전후 크기인 `raw_stdout_bytes`와 `output_bytes`를 기록한다. headless 결과 색인(`hub/team/results-index.mjs`의 `{sessionName}.results.json`)에는 워커 결과 파일의 마크다운 헤딩(`H1`부터 `H3`, 코드 펜스 내부 제외) 줄 번호 목차(`headings`)를 함께 남긴다.

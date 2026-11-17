@@ -24,13 +24,14 @@ import {
 import { dirname, join } from "node:path";
 
 import { normalizeCodexProfileName } from "../../scripts/lib/codex-profile-config.mjs";
+import { resolveCliPolicy } from "../../scripts/lib/machine-profile.mjs";
 import {
   EFFORT_ORDER,
   modelEffortFromProfile,
   profileFromModelEffort,
   resolveCodexModelEffort,
 } from "../../scripts/lib/model-effort.mjs";
-import { AGY_FAMILY_PROFILES } from "../../scripts/lib/model-family-resolver.mjs";
+import { readQuotaSnapshot } from "../../scripts/lib/quota-snapshot.mjs";
 import { judgeSameFailureCause } from "../lib/jev-addon.mjs";
 
 export const STATES = Object.freeze({
@@ -51,16 +52,27 @@ export const MODES = Object.freeze({
 const ESCALATION_CHAIN_CONFIG_PATH = ".triflux/config/escalation-chain.json";
 const DEFAULT_CLAUDE_MODEL = "fable";
 
-// Escalation chain (2026-09-22 정책):
-//   1. codex astra_max: 최난도 단일 작업용 Codex escalation 단계
-//   2. claude fable alias: Claude CLI가 최신 Fable tier로 해석하는 최종 수단
+// Escalation chain (ADR-0054 3단계 정책):
+//   1. codex astra max: Codex 최상위 reasoning 단계
+//   2. antigravity carbon high: Gemini 4 Carbon High 전환 단계
+//   3. claude fable high: Claude Fable 최종 보루
 const DEFAULT_ESCALATION_CHAIN = Object.freeze([
   Object.freeze({
     cli: "codex",
     family: "astra",
     effort: "max",
   }),
-  Object.freeze({ cli: "claude", model: DEFAULT_CLAUDE_MODEL }),
+  Object.freeze({
+    cli: "antigravity",
+    family: "carbon",
+    effort: "high",
+    profile: "carbon_high",
+  }),
+  Object.freeze({
+    cli: "claude",
+    model: DEFAULT_CLAUDE_MODEL,
+    effort: "high",
+  }),
 ]);
 
 const STUCK_THRESHOLD = 3;
@@ -308,19 +320,66 @@ function resolveEscalationChain(options) {
   if (projectOverride) return projectOverride;
 
   return normalizeEscalationChain(
-    resolveDefaultEscalationChain(options.env || process.env),
+    resolveDefaultEscalationChain(options.env || process.env, options),
     "DEFAULT_ESCALATION_CHAIN",
   );
 }
 
-function resolveDefaultEscalationChain(env) {
-  const configuredModel = env?.TFX_ESCALATION_CLAUDE_MODEL?.trim();
-  if (!configuredModel) return DEFAULT_ESCALATION_CHAIN;
+function isStepUnavailable(cli, env, options, quotaSnapshot) {
+  const provider = cli === "agy" ? "antigravity" : cli;
+  if (options?.available && options.available[provider] === false) {
+    return true;
+  }
+  const policy = resolveCliPolicy(env);
+  if (provider === "codex") {
+    if (policy?.codexDisabled || env?.TFX_CODEX_OK === "0") {
+      return true;
+    }
+  } else if (provider === "antigravity") {
+    if (policy?.antigravityDisabled || env?.TFX_ANTIGRAVITY_OK === "0") {
+      return true;
+    }
+  } else if (provider === "claude") {
+    if (policy?.claudeDisabled || env?.TFX_CLAUDE_OK === "0") {
+      return true;
+    }
+  }
+  if (quotaSnapshot?.[provider]?.exhausted === true) {
+    return true;
+  }
+  return false;
+}
 
-  return [
-    DEFAULT_ESCALATION_CHAIN[0],
-    { cli: "claude", model: configuredModel },
-  ];
+function resolveDefaultEscalationChain(env, options = {}) {
+  const configuredModel = env?.TFX_ESCALATION_CLAUDE_MODEL?.trim();
+  const base = DEFAULT_ESCALATION_CHAIN.map((step) =>
+    step.cli === "claude" && configuredModel
+      ? { ...step, model: configuredModel }
+      : { ...step },
+  );
+
+  const shouldCheckQuota =
+    options.quotaSnapshot !== undefined ||
+    options.respectQuota === true ||
+    Boolean(
+      options.env &&
+        (env?.TRIFLUX_TEST_HOME ||
+          env?.TFX_TMP ||
+          env?.TFX_PREFLIGHT_LOADED === "1"),
+    );
+  const quotaSnapshot =
+    options.quotaSnapshot ??
+    (shouldCheckQuota ? readQuotaSnapshot({ env }) : null);
+
+  const filtered = base.filter(
+    (step) => !isStepUnavailable(step.cli, env, options, quotaSnapshot),
+  );
+  if (filtered.length === 0) {
+    throw new Error(
+      "DEFAULT_ESCALATION_CHAIN: 사용 가능한 승격 대상 벤더가 없습니다 (전부 비활성화 또는 쿼터 소진)",
+    );
+  }
+  return filtered;
 }
 
 export function loadEscalationChainOverride(projectRoot = process.cwd()) {
@@ -368,29 +427,46 @@ function normalizeEscalationChainEntry(entry, index, source) {
   const normalizedProfile = normalizeEscalationProfile(profile);
   const provider = entry.cli === "agy" ? "antigravity" : entry.cli;
   if (provider === "codex" || provider === "antigravity") {
-    const explicit = entry.family !== undefined || entry.effort !== undefined;
-    let spec = explicit
-      ? typeof entry.family === "string" && typeof entry.effort === "string"
-        ? modelEffortFromProfile(provider, entry.family, entry.effort)
-        : null
-      : modelEffortFromProfile(
-          provider,
-          provider === "codex" ? normalizedProfile : profile,
-        );
-    if (explicit && !spec)
+    const targetProfile = provider === "codex" ? normalizedProfile : profile;
+    let spec = null;
+    if (entry.family !== undefined) {
+      spec =
+        typeof entry.family === "string" && typeof entry.effort === "string"
+          ? modelEffortFromProfile(provider, entry.family, entry.effort)
+          : null;
+      if (!spec)
+        throw new Error(`${source}: chain[${index}] has invalid family/effort`);
+    } else if (targetProfile) {
+      const baseSpec = modelEffortFromProfile(provider, targetProfile);
+      if (baseSpec) {
+        if (entry.effort !== undefined) {
+          spec =
+            typeof entry.effort === "string"
+              ? modelEffortFromProfile(provider, baseSpec.family, entry.effort)
+              : null;
+          if (!spec)
+            throw new Error(
+              `${source}: chain[${index}] has invalid family/effort`,
+            );
+        } else {
+          spec = baseSpec;
+        }
+      }
+    } else if (entry.effort !== undefined && entry.model === undefined) {
       throw new Error(`${source}: chain[${index}] has invalid family/effort`);
+    }
     if (spec) {
       if (provider === "codex" && spec.effort === "ultra")
         spec = { family: "astra", effort: "max" };
       const legacy = profileFromModelEffort(provider, spec);
       const normalized = { cli: entry.cli, ...spec };
       if (legacy) normalized.profile = legacy;
-      if (provider === "antigravity" && legacy) {
-        normalized.model = entry.model || AGY_FAMILY_PROFILES[legacy]?.model;
-        if (typeof normalized.model !== "string" || !normalized.model.trim())
-          throw new Error(
-            `${source}: chain[${index}].model must be a non-empty string`,
-          );
+      if (
+        provider === "antigravity" &&
+        typeof entry.model === "string" &&
+        entry.model.trim()
+      ) {
+        normalized.model = entry.model.trim();
       }
       return normalized;
     }

@@ -28,7 +28,8 @@ describe("pane.mjs", () => {
   it("buildCliCommand 은 antigravity 와 역할명을 실행 파일로 바꾸고 모르는 이름은 그대로 둔다", () => {
     assert.equal(buildCliCommand("antigravity"), "agy");
     assert.equal(buildCliCommand("agy"), "agy");
-    assert.equal(buildCliCommand("designer"), "agy");
+    assert.equal(buildCliCommand("designer"), "claude");
+    assert.equal(buildCliCommand("writer"), "agy");
     assert.equal(buildCliCommand("my-cli"), "my-cli");
   });
 
@@ -37,6 +38,7 @@ describe("pane.mjs", () => {
       shouldUseFileRef({ multiplexer: "psmux", useFileRef: true, cli });
     assert.equal(fileRef("executor"), false);
     assert.equal(fileRef("designer"), true);
+    assert.equal(fileRef("writer"), true);
   });
 
   it("리뷰 역할은 프롬프트 준비 전 CLI를 시작하지 않는다", () => {

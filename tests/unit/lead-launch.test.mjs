@@ -576,7 +576,7 @@ describe("tfx lead", () => {
       assert.equal(result.routing.effectiveEffort, "high");
       assert.match(
         result.routing.effectiveModel,
-        cli === "agy" ? /Argon/ : /^opus$/,
+        cli === "agy" ? /Carbon|Argon/ : /^opus$/,
       );
       assert.equal(calls[0].at(-3), result.routing.effectiveModel);
       assert.equal(calls[0].at(-1), "high");

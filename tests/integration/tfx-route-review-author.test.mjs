@@ -239,6 +239,7 @@ for (const [profile, effort] of [
 test("agy lowers effort on the newest family instead of choosing an older model", () => {
   const r = runRoute({
     role: "designer",
+    env: { TFX_DISABLE_CLAUDE: "1" },
     agyModels:
       "gemini-4.9-argon-high\tGemini 4.9 Argon (High)\n" +
       "gemini-4.10-argon-medium\tGemini 4.10 Argon (Medium)\n",
@@ -250,9 +251,12 @@ test("agy lowers effort on the newest family instead of choosing an older model"
 });
 
 test("agy keeps requested effort when the model list is unavailable", () => {
-  const r = runRoute({ role: "designer" });
+  const r = runRoute({
+    role: "designer",
+    env: { TFX_DISABLE_CLAUDE: "1" },
+  });
   assert.equal(r.status, 0, r.output);
-  assert.equal(r.argv[r.argv.indexOf("--model") + 1], "gemini-4-argon");
+  assert.equal(r.argv[r.argv.indexOf("--model") + 1], "gemini-4-hydrogen");
   assert.equal(r.argv[r.argv.indexOf("--effort") + 1], "high");
   assert.doesNotMatch(r.stderr, /requested=.*applied=/);
 });
@@ -269,13 +273,13 @@ test("agy rejects a request with no supported lower effort before invocation", (
 });
 
 for (const role of ["code-reviewer", "quality-reviewer"]) {
-  for (const [author, weekly, expected] of [
-    [undefined, undefined, "claude"],
-    ["codex", 79.9, "claude"],
-    ["codex", 80, "antigravity"],
-    ["claude", 100, "codex"],
-    ["antigravity", 79.9, "claude"],
-    ["antigravity", 80, "codex"],
+  for (const [author, weekly, expected, expectedUsageSwitch] of [
+    [undefined, undefined, "claude", false],
+    ["codex", 95, "claude", false],
+    ["codex", 96, "antigravity", true],
+    ["claude", 100, "codex", false],
+    ["antigravity", 95, "codex", false],
+    ["antigravity", 96, "codex", false],
   ]) {
     test(`${role}: author=${author ?? "default"}, weekly=${weekly} selects ${expected}`, () => {
       const r = runRoute({ role, author, weekly });
@@ -284,7 +288,7 @@ for (const role of ["code-reviewer", "quality-reviewer"]) {
       assert.match(
         r.output,
         new RegExp(
-          `\\[tfx-route\\].*review_author=${author ?? "codex"}.*usage_switch=${weekly >= 80 && author !== "claude"}`,
+          `\\[tfx-route\\].*review_author=${author ?? "codex"}.*usage_switch=${expectedUsageSwitch}`,
         ),
       );
       if (expected === "claude") {
@@ -295,14 +299,17 @@ for (const role of ["code-reviewer", "quality-reviewer"]) {
         assert.equal(r.argv[r.argv.indexOf("--profile") + 1], "sol");
         assert.ok(r.argv.includes("review"), r.output);
       } else {
-        assert.equal(r.argv[r.argv.indexOf("--model") + 1], "gemini-4-argon");
+        assert.equal(
+          r.argv[r.argv.indexOf("--model") + 1],
+          "gemini-4-hydrogen",
+        );
         assert.equal(r.argv[r.argv.indexOf("--effort") + 1], "high");
       }
     });
   }
 }
 
-for (const weekly of ["invalid-json", "80", null]) {
+for (const weekly of ["invalid-json", "96", null]) {
   test(`unusable usage cache (${weekly}) keeps Opus`, () => {
     const r = runRoute({ weekly });
     assert.equal(r.status, 0, r.output);
@@ -327,12 +334,24 @@ for (const cli of ["codex", "antigravity"]) {
   });
 }
 
-test("security-reviewer uses Argon High", () => {
-  const r = runRoute({ role: "security-reviewer" });
-  assert.equal(r.status, 0, r.output);
-  assert.match(r.output, /type=antigravity agent=security-reviewer/);
-  assert.equal(r.argv[r.argv.indexOf("--model") + 1], "gemini-4-argon");
-  assert.equal(r.argv[r.argv.indexOf("--effort") + 1], "high");
+test("security-reviewer uses Claude Fable High by default and Carbon High on agy fallback", () => {
+  const primary = runRoute({ role: "security-reviewer" });
+  assert.equal(primary.status, 0, primary.output);
+  assert.match(primary.output, /type=claude agent=security-reviewer/);
+  assert.equal(primary.argv[primary.argv.indexOf("--model") + 1], "fable");
+  assert.equal(primary.argv[primary.argv.indexOf("--effort") + 1], "high");
+
+  const fallback = runRoute({
+    role: "security-reviewer",
+    env: { TFX_DISABLE_CLAUDE: "1", TFX_DISABLE_CODEX: "1" },
+  });
+  assert.equal(fallback.status, 0, fallback.output);
+  assert.match(fallback.output, /type=antigravity agent=security-reviewer/);
+  assert.equal(
+    fallback.argv[fallback.argv.indexOf("--model") + 1],
+    "gemini-4-carbon",
+  );
+  assert.equal(fallback.argv[fallback.argv.indexOf("--effort") + 1], "high");
 });
 
 for (const launch of ["headless", "pane"]) {
@@ -340,7 +359,7 @@ for (const launch of ["headless", "pane"]) {
     for (const [author, reviewer] of [
       ["codex", "claude"],
       ["claude", "codex"],
-      ["antigravity", "claude"],
+      ["antigravity", "codex"],
     ]) {
       test(`${launch} ${role} passes ${author} author through the command alone`, () => {
         const r = runRoute({ launch, role, author });
@@ -441,17 +460,30 @@ test("missing Claude reviewer falls back to another vendor", () => {
   assert.match(r.output, /reviewer=antigravity review_author=codex/);
 });
 
-test("no available cross-vendor reviewer fails before dispatch", () => {
-  const r = runRoute({
+test("when both non-author reviewers are unavailable, uses same-vendor fresh session; when all 3 are unavailable, exits 78", () => {
+  const sameVendor = runRoute({
     author: "codex",
-    weekly: 85,
+    weekly: 96,
     env: {
       TFX_DISABLE_ANTIGRAVITY: "1",
       CLAUDE_BIN: "/missing/tfx-claude",
     },
   });
-  assert.equal(r.status, 78, r.output);
-  assert.deepEqual(r.argv, []);
+  assert.equal(sameVendor.status, 0, sameVendor.output);
+  assert.match(sameVendor.output, /reviewer=codex review_author=codex/);
+  assert.match(sameVendor.stderr, /동일 벤더 새 세션/);
+
+  const allBlocked = runRoute({
+    author: "codex",
+    weekly: 96,
+    env: {
+      TFX_DISABLE_CODEX: "1",
+      TFX_DISABLE_ANTIGRAVITY: "1",
+      CLAUDE_BIN: "/missing/tfx-claude",
+    },
+  });
+  assert.equal(allBlocked.status, 78, allBlocked.output);
+  assert.deepEqual(allBlocked.argv, []);
 });
 
 for (const [weeklyResetsAt, expected] of [
@@ -459,26 +491,36 @@ for (const [weeklyResetsAt, expected] of [
   ["2999-01-01T00:00:00Z", "antigravity"],
 ]) {
   test(`weekly reset ${weeklyResetsAt} selects ${expected}`, () => {
-    const r = runRoute({ weekly: 85, weeklyResetsAt });
+    const r = runRoute({ weekly: 96, weeklyResetsAt });
     assert.equal(r.status, 0, r.output);
     assert.match(r.output, new RegExp(`reviewer=${expected}`));
   });
 }
 
-test("Antigravity fallback defaults to Codex", () => {
-  const r = runRoute({ role: "writer", env: { TFX_DISABLE_ANTIGRAVITY: "1" } });
-  assert.equal(r.status, 0, r.output);
-  assert.match(r.output, /type=codex agent=writer/);
-  assert.equal(r.argv[0], "exec");
+test("writer falls back to 2nd priority Claude Opus by default and Codex when TFX_ANTIGRAVITY_FALLBACK=codex", () => {
+  const defaultFb = runRoute({
+    role: "writer",
+    env: { TFX_DISABLE_ANTIGRAVITY: "1" },
+  });
+  assert.equal(defaultFb.status, 0, defaultFb.output);
+  assert.match(defaultFb.output, /type=claude agent=writer/);
+
+  const codexFb = runRoute({
+    role: "writer",
+    env: { TFX_DISABLE_ANTIGRAVITY: "1", TFX_ANTIGRAVITY_FALLBACK: "codex" },
+  });
+  assert.equal(codexFb.status, 0, codexFb.output);
+  assert.match(codexFb.output, /type=codex agent=writer/);
+  assert.equal(codexFb.argv[0], "exec");
 });
 
 for (const [role, model, effort] of [
   ["security-reviewer", "fable", "high"],
   ["designer", "opus", "high"],
-  ["document-specialist", "opus", undefined],
-  ["writer", "opus", undefined],
-  ["antigravity", "opus", undefined],
-  ["agy", "opus", undefined],
+  ["document-specialist", "opus", "high"],
+  ["writer", "opus", "medium"],
+  ["antigravity", "sonnet", "medium"],
+  ["agy", "sonnet", "medium"],
 ]) {
   for (const unavailable of [
     { TFX_DISABLE_ANTIGRAVITY: "1" },
@@ -491,7 +533,6 @@ for (const [role, model, effort] of [
       });
       assert.equal(r.status, 0, r.output);
       assert.match(r.output, new RegExp(`type=claude agent=${role}`));
-      assert.match(r.output, /antigravity.*claude.*fallback/);
       assert.match(r.output, /claude:review fixture/);
       assert.doesNotMatch(
         r.output,
@@ -504,8 +545,8 @@ for (const [role, model, effort] of [
   }
 }
 
-test("Claude fallback requires an available Claude binary", () => {
-  const r = runRoute({
+test("Claude fallback skips missing Claude binary to 3rd vendor and exits 78 if all 3 are unavailable", () => {
+  const thirdVendor = runRoute({
     role: "writer",
     env: {
       TFX_DISABLE_ANTIGRAVITY: "1",
@@ -513,8 +554,20 @@ test("Claude fallback requires an available Claude binary", () => {
       CLAUDE_BIN: "/missing/tfx-claude",
     },
   });
-  assert.equal(r.status, 78, r.output);
-  assert.deepEqual(r.argv, []);
+  assert.equal(thirdVendor.status, 0, thirdVendor.output);
+  assert.match(thirdVendor.output, /type=codex agent=writer/);
+
+  const noneLeft = runRoute({
+    role: "writer",
+    env: {
+      TFX_DISABLE_ANTIGRAVITY: "1",
+      TFX_DISABLE_CODEX: "1",
+      TFX_ANTIGRAVITY_FALLBACK: "claude",
+      CLAUDE_BIN: "/missing/tfx-claude",
+    },
+  });
+  assert.equal(noneLeft.status, 78, noneLeft.output);
+  assert.deepEqual(noneLeft.argv, []);
 });
 
 test("Antigravity Claude fallback worker failure remains a failure", () => {

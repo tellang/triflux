@@ -69,6 +69,14 @@ function runExec() {
     process.exit(0);
   }
 
+  if (mode === "exec-long-utf8-last-message") {
+    writeLastMessage(
+      `HEAD-KO\n${"가나다라마바사아자차".repeat(2_200)}\nTAIL-KO`,
+    );
+    process.stdout.write("RAW_TRACE:long utf8 output");
+    process.exit(0);
+  }
+
   if (mode === "exec-stdin-notice") {
     writeLastMessage("FINAL:stdin notice is benign");
     process.stderr.write("Reading additional input from stdin...\n");

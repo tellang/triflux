@@ -1,11 +1,11 @@
 ---
 id: 0053
 title: agy Carbon 가족을 명시 지정 전용으로 추가하고 목록에 없으면 Argon으로 폴백한다
-status: accepted
+status: superseded
 date: 2026-11-11
 deciders: [tellang]
 supersedes: []
-superseded_by: null
+superseded_by: 0054
 relates: [0038, 0039, 0049]
 pr: null
 ---

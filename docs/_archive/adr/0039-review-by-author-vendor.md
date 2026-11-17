@@ -1,11 +1,11 @@
 ---
 id: 0039
 title: 작성 벤더와 다른 벤더에 코드 리뷰를 배정한다
-status: accepted
+status: superseded
 date: 2026-10-14
 deciders: [tellang]
 supersedes: [0038]
-superseded_by: null
+superseded_by: 0054
 relates: [0004, 0036, 0037]
 pr: null
 ---

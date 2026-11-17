@@ -31,13 +31,14 @@ TFX_MACHINE_OS=darwin
 TFX_MULTIPLEXER_POLICY=tmux
 TFX_DISABLE_CODEX=0
 TFX_DISABLE_ANTIGRAVITY=1
+TFX_DISABLE_CLAUDE=0
 TFX_TIMEOUT_POLICY=visible
 TFX_HARD_CEILING_SEC=0
 TFX_STALL_THRESHOLD=1200
 TFX_STALL_KILL=classify
 ```
 
-OS 파생 multiplexer 정책은 `darwin|linux → tmux`, `win32 → psmux`다.
+OS 파생 multiplexer 정책은 `darwin|linux -> tmux`, `win32 -> psmux`다.
 non-Windows의 `auto` 모드는 psmux 감지를 무시하고, 명시적 `psmux`는 오류로 처리한다.
 WT 팀 모드와 in-process 모드는 지원하지 않는다. 대화형 실행에 멀티플렉서가 없으면
 설치 안내 오류로 끝낸다. headless도 tmux/psmux 방에서 돌기 때문에 멀티플렉서가 필요하다.
@@ -48,9 +49,10 @@ TTY에서 `node scripts/setup.mjs --machine-profile-only`를 실행하면 다음
 
 1. Codex 사용 여부 (binary 자동감지값을 기본으로 제시)
 2. Antigravity 사용 여부 (`agy|antigravity` 자동감지값을 기본으로 제시)
-3. hard ceiling 초 (`0`은 비활성)
-4. stall threshold 초
-5. stall 동작 (`kill|classify|intervene`)
+3. Claude 외부 워커 사용 여부 (`claude` 자동감지값을 기본으로 제시)
+4. hard ceiling 초 (`0`은 비활성)
+5. stall threshold 초
+6. stall 동작 (`kill|classify|intervene`)
 
 현재 tmux 안의 interactive setup은 visible 권장값인 `hard ceiling=0`,
 `stall=classify`를 기본으로 제시한다. 확인 없는 postinstall, CI, pipe 등
@@ -60,6 +62,7 @@ non-interactive 경로는 멈추지 않고 binary 자동감지와 unattended-saf
 ```bash
 TFX_SETUP_USE_CODEX=1 \
 TFX_SETUP_USE_ANTIGRAVITY=0 \
+TFX_SETUP_USE_CLAUDE=1 \
 TFX_SETUP_HARD_CEILING_SEC=21600 \
 TFX_SETUP_STALL_THRESHOLD=1200 \
 TFX_SETUP_STALL_KILL=kill \
@@ -73,39 +76,26 @@ node scripts/setup.mjs --machine-profile-only --non-interactive
 
 | 우선순위 | 층 | 의미 |
 | ---: | --- | --- |
-| 1 | 명시 runtime env (`TFX_DISABLE_*`, `TFX_ANTIGRAVITY_FALLBACK`, `TFX_HARD_CEILING_SEC`, `TFX_STALL_*`) | 이번 실행의 최종 사용자 override |
+| 1 | 명시 runtime env (`TFX_DISABLE_CODEX`, `TFX_DISABLE_ANTIGRAVITY`, `TFX_DISABLE_CLAUDE`, `TFX_ANTIGRAVITY_FALLBACK`, `TFX_HARD_CEILING_SEC`, `TFX_STALL_*`) | 이번 실행의 최종 사용자 override |
 | 2 | 영속 machine profile | 설치 시 확인한 머신 정책 |
-| 3 | preflight (`TFX_CODEX_OK`, `TFX_ANTIGRAVITY_OK`) | 현재 가용성 관측; `OK=0`인 CLI는 binary가 있어도 선택 불가, 금지 권한도 되살릴 수 없음 |
-| 4 | built-in default | 프로파일 미설정 시 기존 호환값 |
+| 3 | preflight 및 쿼터 스냅샷 (`TFX_CODEX_OK`, `TFX_ANTIGRAVITY_OK`, `TFX_CLAUDE_OK`, 사용량 `>=100%`, 쿨다운 마커) | 현재 가용성 확인; 비가용 CLI는 binary가 있어도 후보에서 제외되며 금지 권한도 되살릴 수 없음 |
+| 4 | built-in default | 프로파일 미설정 시 기본값 |
 
-`TFX_CLI_MODE`는 선호/강제 선택이고 `TFX_*_OK`는 관측값이라는 기존 구분을
-유지한다. 최종 선택은 다음 순서다.
+`TFX_CLI_MODE`는 명시 강제 선택이고 `TFX_*_OK`는 확인값이라는 구분을 유지한다.
+역할별 후보 선정(`scripts/lib/vendor-priority-policy.mjs`)과 실행 시 전환은 다음 순서다.
 
-1. 선택 CLI가 금지되지 않았고 가용하면 그대로 실행한다.
-2. 기본 정책에서 금지됐거나 미가용이면, 다른 **허용되고 가용한** 외부 CLI 하나로만 전환하고
-   stderr에 이유와 대상을 출력한다.
-3. 후보가 없으면 exit 78로 실패한다. availability 실패를 Claude native로
-   조용히 강등하지 않는다.
-4. quota reroute도 같은 disable/가용성 검사를 통과한 후보만 선택하고, 후보가
-   없으면 exit 78로 실패한다.
+1. 명시 `TFX_CLI_MODE`(`codex|antigravity|claude`)가 있으면 해당 벤더 후보만 남기고, 금지됐거나 미가용이면 `exit 78`로 실패한다.
+2. 자동 모드(`auto`)는 역할군별 3사 후보 배열에서 금지(`TFX_DISABLE_*=1`), 바이너리 미설치(`TFX_*_OK=0`), 쿼터 `>=100%`, 쿨다운 마커 미경과 벤더를 제외한다.
+3. 사용률이 `95%`를 초과(`>95%`)한 벤더 후보는 배열 우측부터 역순으로 1칸씩만 후순위로 내린다.
+4. 허용되고 가용한 다음 후보로 전환할 때 stderr에 이유와 대상을 출력하고, 모든 외부 CLI 후보가 소진되면 `exit 78`로 실패한다. 가용성 실패를 호스트 세션의 `claude-native`로 조용히 강등하지 않는다.
+5. 런타임 쿼터 또는 429 한도 초과 오류는 방문한 벤더를 제외하며 남은 후보 체인을 따라 다단계 `auto_reroute`를 수행한다. 인증 실패(`401`/`403`), 컨텍스트 길이 초과, 안전 정책 거부는 다른 벤더로 전환하지 않고 즉시 실패한다.
 
-`TFX_ANTIGRAVITY_FALLBACK=codex|claude`로 Antigravity의 대체 CLI를 정하라.
-runtime env가 machine profile보다 우선하며, 기본값은 기존 정책과 같은 `codex`다.
-잘못된 값은 오류로 끝낸다. `claude`를 명시하면 금지됐거나 미가용인 Antigravity를
-Claude 워커로 전환하고 stderr에 이유와 대상을 남긴다. Claude CLI가 없으면
-Codex로 다시 돌리지 않고 exit 78로 실패한다. Claude 워커 실패도 실패로 남긴다.
-이 설정은 `code-reviewer`와 `quality-reviewer`의 작성 벤더별 폴백에 적용하지 않는다.
+`TFX_ANTIGRAVITY_FALLBACK=codex|claude`를 명시하면 Antigravity가 1순위였다가 제외된 역할에서 대체 1순위 벤더 순서를 우선 정렬한다. 잘못된 값은 오류로 끝낸다. 이 설정은 `code-reviewer`와 `quality-reviewer`의 작성 벤더별 교차 리뷰 후보에는 적용하지 않는다.
 
-agy 쿼터 오류는 `TFX_TMP/tfx-agy-quota-reset`에 리셋 시각을 epoch 초로 원자 기록한다.
-`Resets in <h>h<m>m<s>s`를 읽지 못하면 1시간 뒤로 잡는다. 오류와 Error ID만
-출력한 exit 0도 실패로 처리한다. 리셋 전에는 Antigravity를 미가용으로 판정하고
-`TFX_ANTIGRAVITY_FALLBACK`에 따라 전환하며, stderr에 리셋 시각과 대상을 남긴다.
-쿼터 오류가 난 실행도 같은 정책으로 한 번 재실행한다. 작성 벤더별 리뷰는 작성자를
-후보에서 제외한다. 리셋 뒤에는 상태 파일을 무시하고 agy를 다시 허용하되,
-명시적으로 저장한 `TFX_DISABLE_ANTIGRAVITY=1`은 그대로 존중한다.
+벤더별 런타임 쿼터 및 429 오류는 `$TFX_TMP/tfx-quota-reset-<cli>`(Antigravity는 기존 `$TFX_TMP/tfx-agy-quota-reset` 병행)에 리셋 시각을 epoch 초로 원자 기록한다.
+`Resets in <h>h<m>m<s>s` 또는 초 단위를 읽지 못하면 1시간 뒤로 잡는다. 오류와 Error ID만 출력한 `exit 0`도 실패로 처리한다. 리셋 시각 전에는 해당 벤더를 후보에서 제외하고 다음 가용 후보로 전환하며, 리셋 뒤에는 마커를 무시하고 다시 허용하되 명시적으로 저장한 `TFX_DISABLE_*=1`은 그대로 존중한다.
 
-Claude-native로 설계된 역할과 transport 내부의 `Codex MCP → Codex exec` 전환은
-다른 CLI로의 availability fallback이 아니므로 이 정책과 독립적이다.
+호스트 리드가 직접 위임하는 `claude-native` 전용 경로(`explore` 등)와 transport 내부의 `Codex MCP -> Codex exec` 전환은 외부 CLI 가용성 폴백과 독립적이다.
 
 ## Timeout 정책
 

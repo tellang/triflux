@@ -84,6 +84,8 @@ load_machine_profile() {
         [[ -n "${TFX_DISABLE_CODEX+x}" ]] || TFX_DISABLE_CODEX="$value" ;;
       TFX_DISABLE_ANTIGRAVITY)
         [[ -n "${TFX_DISABLE_ANTIGRAVITY+x}" ]] || TFX_DISABLE_ANTIGRAVITY="$value" ;;
+      TFX_DISABLE_CLAUDE)
+        [[ -n "${TFX_DISABLE_CLAUDE+x}" ]] || TFX_DISABLE_CLAUDE="$value" ;;
       TFX_ANTIGRAVITY_FALLBACK)
         [[ -n "${TFX_ANTIGRAVITY_FALLBACK+x}" ]] || TFX_ANTIGRAVITY_FALLBACK="$value" ;;
       TFX_TIMEOUT_POLICY)
@@ -497,7 +499,7 @@ fi
 GEMINI_PROFILES_PATH="${GEMINI_PROFILES_PATH:-${HOME}/.gemini/triflux-profiles.json}"
 
 # ── 상수 ──
-MAX_STDOUT_BYTES=51200  # 50KB — Claude 컨텍스트 절약
+MAX_STDOUT_BYTES="${TFX_MAX_STDOUT_BYTES:-16777216}"  # 16MB 물리 폭주 방어선 (<=0 무제한)
 TIMESTAMP=$(date +%s)
 TFX_PROBE_DIR="${TFX_PROBE_DIR:-${TFX_TMP}/tfx-probe}"
 mkdir -p "$TFX_PROBE_DIR" 2>/dev/null || true
@@ -840,6 +842,35 @@ team_complete_task() {
   fi
 }
 
+detect_non_reroutable_failure() {
+  local stdout_file="$1"
+  local stderr_file="$2"
+  local -a patterns=(
+    "401 Unauthorized" "403 Forbidden" "authentication_error" "invalid_api_key"
+    "OAuth token has expired" "UNAUTHENTICATED"
+    "context_length_exceeded" "prompt is too long" "maximum context length" "input token count exceeds"
+    "content_policy_violation" "blocked by usage policy"
+  )
+  local pattern check_stdout=0 stdout_bytes=0
+  if [[ -f "$stdout_file" ]]; then
+    stdout_bytes=$(wc -c < "$stdout_file" 2>/dev/null | tr -d ' ')
+    [[ "${stdout_bytes:-0}" -le 4096 ]] && check_stdout=1
+  fi
+  for pattern in "${patterns[@]}"; do
+    if grep -qi "$pattern" "$stderr_file" 2>/dev/null \
+      || { [[ "$check_stdout" -eq 1 ]] && grep -qi "$pattern" "$stdout_file" 2>/dev/null; }; then
+      echo "[tfx-route] 비전환 오류 감지('$pattern' in $CLI_TYPE): 자동 재라우팅을 생략합니다." >&2
+      return 0
+    fi
+  done
+  if grep -Eq '(^|[^A-Za-z0-9_])SAFETY([^A-Za-z0-9_]|$)' "$stderr_file" 2>/dev/null \
+    || { [[ "$check_stdout" -eq 1 ]] && grep -Eq '(^|[^A-Za-z0-9_])SAFETY([^A-Za-z0-9_]|$)' "$stdout_file" 2>/dev/null; }; then
+    echo "[tfx-route] 비전환 정책 거부 감지('SAFETY' in $CLI_TYPE): 자동 재라우팅을 생략합니다." >&2
+    return 0
+  fi
+  return 1
+}
+
 detect_quota_exceeded() {
   local stdout_file="$1"
   local stderr_file="$2"
@@ -886,6 +917,34 @@ record_agy_quota_reset() {
   fi
   rm -f "$temp_file"
   return 1
+}
+
+record_vendor_quota_reset() {
+  local cli_name="$1" delay="${2:-900}" reset_epoch temp_file target_file
+  [[ "$cli_name" == "claude" || "$cli_name" == "codex" ]] || return 0
+  reset_epoch=$(( $(date +%s) + delay ))
+  target_file="${TFX_TMP}/tfx-quota-reset-${cli_name}"
+  temp_file="$(mktemp "${target_file}.XXXXXX")" || return 1
+  chmod 600 "$temp_file" 2>/dev/null || true
+  if printf '%s\n' "$reset_epoch" > "$temp_file" \
+    && mv -f "$temp_file" "$target_file"; then
+    return 0
+  fi
+  rm -f "$temp_file"
+  return 1
+}
+
+vendor_quota_cooldown_active() {
+  local cli_name="$1" reset_epoch="" state_file
+  if [[ "$cli_name" == "antigravity" ]]; then
+    agy_quota_cooldown_active
+    return $?
+  fi
+  state_file="${TFX_TMP}/tfx-quota-reset-${cli_name}"
+  [[ -r "$state_file" ]] || return 1
+  IFS= read -r reset_epoch < "$state_file" || return 1
+  [[ "$reset_epoch" =~ ^[0-9]{1,12}$ ]] || return 1
+  [[ "$((10#$reset_epoch))" -gt "$(date +%s)" ]]
 }
 
 agy_quota_cooldown_active() {
@@ -963,8 +1022,28 @@ auto_reroute() {
   # CLI fallback and must stay a transparent passthrough for dispatch mode.
   local failed_cli="$1"
   local target_cli=""
+  local same_vendor_fresh=0
+  local visited_csv="${TFX_REROUTED_FROM:-}"
+  if [[ "$visited_csv" == *,* ]]; then
+    echo "[tfx-quota] 최대 2회 자동 전환 한도 도달($visited_csv): 추가 전환을 중단합니다." >&2
+    return 78
+  fi
+  local next_visited="${visited_csv:+${visited_csv},}${failed_cli}"
+  local effective_candidates_json="${_SAVED_REROUTE_CANDIDATES_JSON:-${TFX_REROUTE_CANDIDATES_JSON:-${CANDIDATES_JSON:-}}}"
   local -a candidates=()
-  if [[ -n "${REVIEW_AUTHOR:-}" ]]; then
+
+  if [[ -n "$effective_candidates_json" ]]; then
+    local parsed_clis=""
+    parsed_clis="$("${NODE_BIN:-node}" -e '
+      try {
+        const arr = JSON.parse(process.argv[1] || "[]");
+        if (Array.isArray(arr)) {
+          process.stdout.write(arr.map((c) => c?.cli).filter(Boolean).join(" "));
+        }
+      } catch {}
+    ' "$effective_candidates_json" 2>/dev/null || true)"
+    [[ -z "$parsed_clis" ]] || read -r -a candidates <<< "$parsed_clis"
+  elif [[ -n "${REVIEW_AUTHOR:-}" ]]; then
     candidates=("claude" "codex" "antigravity")
   else
     case "$failed_cli" in
@@ -974,12 +1053,13 @@ auto_reroute() {
     esac
   fi
 
-  # 대상 CLI 존재 확인 (P2: command not found 방지)
   local candidate
-  for candidate in "${candidates[@]}"; do
-    [[ "$candidate" != "$failed_cli" && "$candidate" != "${REVIEW_AUTHOR:-}" ]] || continue
+  for candidate in ${candidates[@]+"${candidates[@]}"}; do
+    [[ "$candidate" != "$failed_cli" ]] || continue
+    [[ ",${next_visited}," != *",${candidate},"* ]] || continue
+    [[ -n "$effective_candidates_json" || "$candidate" != "${REVIEW_AUTHOR:-}" ]] || continue
     if is_cli_disabled "$candidate"; then
-      echo "[tfx-quota] ${candidate} disabled — 자동 전환 후보에서 제외" >&2
+      echo "[tfx-quota] ${candidate} disabled: 자동 전환 후보에서 제외" >&2
       continue
     fi
     if is_cli_available "$candidate"; then
@@ -988,6 +1068,15 @@ auto_reroute() {
     fi
   done
 
+  # 리뷰 역할에서 타 벤더 후보가 모두 실패한 경우 동일 벤더 새 세션 최후 폴백
+  if [[ -z "$target_cli" && -n "$effective_candidates_json" && -n "${REVIEW_AUTHOR:-}" ]]; then
+    if [[ "$REVIEW_AUTHOR" != "$failed_cli" && ",${next_visited}," != *",${REVIEW_AUTHOR},"* ]] \
+      && ! is_cli_disabled "$REVIEW_AUTHOR" && is_cli_available "$REVIEW_AUTHOR"; then
+      target_cli="$REVIEW_AUTHOR"
+      same_vendor_fresh=1
+    fi
+  fi
+
   if [[ -z "$target_cli" ]]; then
     echo "[tfx-quota] $failed_cli 대체 CLI 미설치 — 자동 전환 불가" >&2
     return 78
@@ -995,16 +1084,20 @@ auto_reroute() {
 
   case "$failed_cli:$target_cli" in
     codex:antigravity) echo "[tfx-quota] Codex → Antigravity 자동 전환" >&2 ;;
+    codex:claude) echo "[tfx-quota] Codex → Claude 자동 전환" >&2 ;;
     antigravity:codex) echo "[tfx-quota] Antigravity → Codex 자동 전환" >&2 ;;
     antigravity:claude) echo "[tfx-quota] Antigravity → Claude 자동 전환" >&2 ;;
+    claude:codex) echo "[tfx-quota] Claude → Codex 자동 전환" >&2 ;;
+    claude:antigravity) echo "[tfx-quota] Claude → Antigravity 자동 전환" >&2 ;;
   esac
   [[ "$failed_cli" != "antigravity" ]] || log_agy_quota_fallback "$target_cli"
 
   local quota_marker="$TFX_TMP/tfx-quota-${failed_cli}-$(date +%Y%m%d)"
   echo "$(date +%s)" >> "$quota_marker"
   ORIGINAL_AGENT="$AGENT_TYPE"
-  export TFX_REROUTED_FROM="$CLI_TYPE"
-  # EXIT trap 정리 — exec는 현재 프로세스를 교체하므로 trap이 실행되지 않음
+  export TFX_REROUTED_FROM="$next_visited"
+  [[ -z "$effective_candidates_json" ]] || export TFX_REROUTE_CANDIDATES_JSON="$effective_candidates_json"
+  [[ "$same_vendor_fresh" -ne 1 ]] || export TFX_SAME_VENDOR_FRESH_SESSION=1
   declare -F cleanup_workers >/dev/null && cleanup_workers
   TFX_CLI_MODE="$target_cli" exec bash "${BASH_SOURCE[0]}" \
     "$AGENT_TYPE" "$PROMPT" "$MCP_PROFILE" "${USER_TIMEOUT:-}" "${CONTEXT_FILE:-}" "${MCP_TASK_FILE:-}"
@@ -1082,6 +1175,23 @@ route_agent() {
     exit 1
   fi
   CODEX_PROFILE_MODULE="${policy_file%/*}/codex-profile-config.mjs"
+
+  local _rt_codex_ok=0 _rt_agy_ok=0 _rt_claude_ok=0
+  codex_is_available && _rt_codex_ok=1
+  if [[ "${TFX_ANTIGRAVITY_OK:-0}" == "1" ]] && agy_supports_headless "${AGY_BIN:-agy}"; then
+    _rt_agy_ok=1
+  fi
+  if { [[ "$agent" == "explore" || "$agent" == "claude" ]] && [[ "$TFX_NO_CLAUDE_NATIVE" != "1" ]]; } \
+    || { [[ "$agent" == "verifier" && "$TFX_VERIFIER_OVERRIDE" == "claude" && "$TFX_NO_CLAUDE_NATIVE" != "1" ]]; }; then
+    if [[ "${TFX_CLAUDE_OK:-1}" != "0" ]]; then
+      _rt_claude_ok=1
+    fi
+  else
+    if [[ "${TFX_CLAUDE_OK:-1}" != "0" ]] && command -v "${CLAUDE_BIN:-claude}" >/dev/null 2>&1; then
+      _rt_claude_ok=1
+    fi
+  fi
+
   local -a query=("$NODE_BIN" "$policy_file" --format route --map-file "$map_file" --agent "$agent" --profile-override "$TFX_CODEX_PROFILE")
   gemini_module="$(_resolve_script "${TFX_GEMINI_PROFILES_MODULE:-}" \
     "$sd/lib/gemini-profiles.mjs" \
@@ -1089,33 +1199,103 @@ route_agent() {
   [[ -z "$gemini_module" ]] || query+=(--gemini-profiles-module "$gemini_module")
   [[ -z "${JEV_TIER_SHIFT:-}" ]] || query+=(--tier-shift "$JEV_TIER_SHIFT")
   is_nested_codex_runtime && query+=(--nested)
-  if ! policy_row=$("${query[@]}"); then
+  if ! policy_row=$(
+    TFX_CODEX_OK="$_rt_codex_ok" \
+    TFX_ANTIGRAVITY_OK="$_rt_agy_ok" \
+    TFX_CLAUDE_OK="$_rt_claude_ok" \
+    TFX_DISABLE_CODEX="$TFX_DISABLE_CODEX" \
+    TFX_DISABLE_ANTIGRAVITY="$TFX_DISABLE_ANTIGRAVITY" \
+    TFX_DISABLE_CLAUDE="$TFX_DISABLE_CLAUDE" \
+    TFX_CLI_MODE="$TFX_CLI_MODE" \
+    TFX_NO_CLAUDE_NATIVE="$TFX_NO_CLAUDE_NATIVE" \
+    TFX_VERIFIER_OVERRIDE="$TFX_VERIFIER_OVERRIDE" \
+    TFX_ANTIGRAVITY_FALLBACK="$TFX_ANTIGRAVITY_FALLBACK" \
+    TFX_REVIEW_AUTHOR_TIER="$TFX_REVIEW_AUTHOR_TIER" \
+    TFX_PLAN_REVIEW_GATE="$TFX_PLAN_REVIEW_GATE" \
+    TFX_TMP="$TFX_TMP" \
+    "${query[@]}"
+  ); then
     echo "ERROR: agent route policy 조회 실패: $agent (TFX_CODEX_PROFILE=$TFX_CODEX_PROFILE)" >&2
     exit 1
   fi
   local normalized_profile _policy_mcp
+  CANDIDATES_JSON="[]"
+  EXCLUDED_JSON="[]"
   IFS=$'\x1e' read -r CLI_TYPE CODEX_POLICY_PROFILE CODEX_POLICY_TIMEOUT \
     _policy_mcp CODEX_POLICY_SUBCOMMAND normalized_profile CODEX_OVERRIDE_PROFILE GEMINI_PROFILE \
     ROLE_EXPECTED_DURATION NATIVE_CODEX_ALLOWED REVIEW_AUTHOR REVIEW_USAGE_SWITCH \
-    CODEX_POLICY_EFFORT CLI_FAMILY <<< "$policy_row"
+    CODEX_POLICY_EFFORT CLI_FAMILY CANDIDATES_JSON EXCLUDED_JSON <<< "$policy_row"
   if [[ "$normalized_profile" != "$TFX_CODEX_PROFILE" ]]; then
     echo "[tfx-route] legacy Codex profile remapped: ${TFX_CODEX_PROFILE} -> ${normalized_profile}" >&2
   fi
   TFX_CODEX_PROFILE="$normalized_profile"
+
+  local _cand_meta="" _cand_exec_mode="cli-worker" _cand_effort="" _cand_fresh="false" _agy_cooldown_excluded="false"
+  _cand_meta=$("$NODE_BIN" -e '
+    const cands = JSON.parse(process.argv[1] || "[]");
+    const excl = JSON.parse(process.argv[2] || "[]");
+    for (const item of excl) {
+      if (item.reason === "disabled") {
+        console.error(`[tfx-route] TFX_DISABLE_${item.cli.toUpperCase()}=1: ${item.cli} 선택 차단`);
+      } else if (item.reason === "unavailable" && item.skippedBeforeWinner !== false) {
+        console.error(`[tfx-route] ${item.cli} 미가용: 선택 차단`);
+      }
+    }
+    const first = cands[0] || {};
+    const agyExcluded = excl.some((e) => e.cli === "antigravity" && e.skippedBeforeWinner !== false && (e.reason === "disabled" || e.reason === "unavailable"));
+    if (agyExcluded && first.cli) {
+      console.error(`[tfx-route] antigravity -> ${first.cli} fallback`);
+    }
+    const agyCooldown = excl.some((e) => e.cli === "antigravity" && e.skippedBeforeWinner !== false && e.reason === "cooldown");
+    process.stdout.write([
+      first.executionMode || "cli-worker",
+      first.effort || "",
+      String(Boolean(first.freshSessionRequired)),
+      String(agyCooldown),
+    ].join("\x1e"));
+  ' "${CANDIDATES_JSON:-[]}" "${EXCLUDED_JSON:-[]}")
+  IFS=$'\x1e' read -r _cand_exec_mode _cand_effort _cand_fresh _agy_cooldown_excluded <<< "$_cand_meta"
+
+  if [[ "$_agy_cooldown_excluded" == "true" && -n "$CLI_TYPE" ]]; then
+    log_agy_quota_fallback "$CLI_TYPE"
+  fi
+
+  if [[ -z "$CLI_TYPE" ]]; then
+    if [[ "$TFX_ANTIGRAVITY_FALLBACK" == "claude" ]] && ! is_cli_available claude; then
+      echo "ERROR: TFX_ANTIGRAVITY_FALLBACK=claude 이지만 Claude CLI가 없습니다." >&2
+    fi
+    echo "ERROR: 허용되고 사용 가능한 외부 CLI가 없습니다. codex(disabled=${TFX_DISABLE_CODEX}, available=${_rt_codex_ok}), antigravity(disabled=${TFX_DISABLE_ANTIGRAVITY}, available=${_rt_agy_ok}), claude(disabled=${TFX_DISABLE_CLAUDE}, available=${_rt_claude_ok}). Claude native로 조용히 강등하지 않습니다." >&2
+    exit 78
+  fi
+
+  if [[ "$_cand_fresh" == "true" || "${_SAVED_SAME_VENDOR_FRESH_SESSION:-${TFX_SAME_VENDOR_FRESH_SESSION:-0}}" == "1" ]]; then
+    FRESH_SESSION_REQUIRED=1
+    echo "[tfx-route] 타 벤더 리뷰 후보 전멸: 동일 벤더 새 세션으로 실행" >&2
+  fi
+
   case "$CLI_TYPE" in
     codex) apply_codex_agent_policy ;;
     antigravity)
       CLI_CMD="agy"; CLI_ARGS="$(build_antigravity_base)"
-      CLI_EFFORT=""; CLI_FAMILY=""; DEFAULT_TIMEOUT=900 ;;
+      CLI_EFFORT=""; CLI_FAMILY=""; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT" ;;
     claude)
-      if [[ -n "$REVIEW_AUTHOR" ]]; then
-        CLI_CMD="claude"; CLI_ARGS=""
-        CLI_EFFORT="high"; CLI_FAMILY=""; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
-      else
+      if [[ "$_cand_exec_mode" == "claude-native" ]]; then
         CLI_TYPE="claude-native"; CLI_CMD=""; CLI_ARGS=""
-        CLI_EFFORT=""; CLI_FAMILY=""; DEFAULT_TIMEOUT=600
+        CLI_EFFORT=""; CLI_FAMILY=""; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
+      else
+        CLI_CMD="claude"; CLI_ARGS=""
+        CLI_EFFORT="$_cand_effort"; CLI_FAMILY=""; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
       fi ;;
   esac
+
+  if [[ "$TFX_NO_CLAUDE_NATIVE" == "1" && "$agent" == "explore" && "$CLI_TYPE" != "claude-native" ]]; then
+    ORIGINAL_AGENT="$AGENT_TYPE"
+    echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1: $AGENT_TYPE -> ${CLI_TYPE}(${CLI_EFFORT}) 리매핑" >&2
+  fi
+  if [[ "$agent" == "verifier" && "$TFX_VERIFIER_OVERRIDE" == "claude" && "$CLI_TYPE" == "claude-native" ]]; then
+    ORIGINAL_AGENT="${ORIGINAL_AGENT:-$AGENT_TYPE}"
+    echo "[tfx-route] TFX_VERIFIER_OVERRIDE=claude: verifier -> claude-native" >&2
+  fi
 }
 
 apply_codex_agent_policy() {
@@ -1130,10 +1310,24 @@ TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
 TFX_DISABLE_CODEX="${TFX_DISABLE_CODEX:-0}"
 TFX_DISABLE_ANTIGRAVITY="${TFX_DISABLE_ANTIGRAVITY:-0}"
-TFX_ANTIGRAVITY_FALLBACK="${TFX_ANTIGRAVITY_FALLBACK-codex}"
+TFX_DISABLE_CLAUDE="${TFX_DISABLE_CLAUDE:-0}"
+_TFX_ANTIGRAVITY_FALLBACK_EXPLICIT=0
+if [[ -n "${TFX_ANTIGRAVITY_FALLBACK+x}" ]]; then
+  _TFX_ANTIGRAVITY_FALLBACK_EXPLICIT=1
+else
+  TFX_ANTIGRAVITY_FALLBACK=""
+fi
 TFX_VERIFIER_OVERRIDE="${TFX_VERIFIER_OVERRIDE:-auto}"
+TFX_REVIEW_AUTHOR_TIER="${TFX_REVIEW_AUTHOR_TIER:-high}"
+TFX_PLAN_REVIEW_GATE="${TFX_PLAN_REVIEW_GATE:-0}"
 TFX_CODEX_PROFILE="${TFX_CODEX_PROFILE:-auto}"
 TFX_EXECUTION_MODE="${TFX_EXECUTION_MODE:-auto}"
+CANDIDATES_JSON="[]"
+EXCLUDED_JSON="[]"
+FRESH_SESSION_REQUIRED=0
+_SAVED_REROUTE_CANDIDATES_JSON="${TFX_REROUTE_CANDIDATES_JSON:-}"
+_SAVED_SAME_VENDOR_FRESH_SESSION="${TFX_SAME_VENDOR_FRESH_SESSION:-0}"
+unset TFX_REROUTE_CANDIDATES_JSON TFX_SAME_VENDOR_FRESH_SESSION
 JEV_NEEDED_MCP_SERVERS=""
 JEV_TIER_SHIFT=""
 JEV_CLAUDE_MODEL=""
@@ -1201,6 +1395,13 @@ case "$TFX_DISABLE_ANTIGRAVITY" in
     exit 1
     ;;
 esac
+case "$TFX_DISABLE_CLAUDE" in
+  0|1) ;;
+  *)
+    echo "ERROR: TFX_DISABLE_CLAUDE 값은 0 또는 1이어야 합니다. (현재: $TFX_DISABLE_CLAUDE)" >&2
+    exit 1
+    ;;
+esac
 case "$TFX_VERIFIER_OVERRIDE" in
   auto|claude) ;;
   *)
@@ -1208,12 +1409,14 @@ case "$TFX_VERIFIER_OVERRIDE" in
     exit 1
     ;;
 esac
-case "$TFX_ANTIGRAVITY_FALLBACK" in
-  codex|claude) ;;
-  *)
-    echo "ERROR: TFX_ANTIGRAVITY_FALLBACK 값은 codex 또는 claude여야 합니다. (현재: $TFX_ANTIGRAVITY_FALLBACK)" >&2
-    exit 1 ;;
-esac
+if [[ "$_TFX_ANTIGRAVITY_FALLBACK_EXPLICIT" -eq 1 ]]; then
+  case "$TFX_ANTIGRAVITY_FALLBACK" in
+    codex|claude) ;;
+    *)
+      echo "ERROR: TFX_ANTIGRAVITY_FALLBACK 값은 codex 또는 claude여야 합니다. (현재: $TFX_ANTIGRAVITY_FALLBACK)" >&2
+      exit 1 ;;
+  esac
+fi
 case "$TFX_WORKER_INDEX" in
   "") ;;
   *[!0-9]*|0)
@@ -1230,60 +1433,21 @@ case "$TFX_SEARCH_TOOL" in
 esac
 
 apply_cli_mode() {
+  # 후보 선택과 리매핑은 route_agent(vendor-priority-policy.mjs)가 일괄 처리한다.
   case "$TFX_CLI_MODE" in
-    codex)
-      if [[ "$CLI_TYPE" == "antigravity" || ( "$CLI_TYPE" == "claude" && -n "$REVIEW_AUTHOR" ) ]]; then
-        apply_codex_agent_policy
-        echo "[tfx-route] TFX_CLI_MODE=codex: $AGENT_TYPE → codex($CLI_EFFORT)로 리매핑" >&2
-      fi ;;
-    antigravity)
-      if [[ "$CLI_TYPE" != "claude-native" && ( "$CLI_TYPE" != "claude" || -n "$REVIEW_AUTHOR" ) ]]; then
-        CLI_TYPE="antigravity"
-        CLI_CMD="agy"
-        CLI_ARGS="$(build_antigravity_base)"
-        CLI_EFFORT=""; CLI_FAMILY=""
-        DEFAULT_TIMEOUT=900
-        echo "[tfx-route] TFX_CLI_MODE=antigravity: $AGENT_TYPE -> antigravity($CLI_EFFORT)로 리매핑" >&2
-      fi ;;
-    claude)
-      if [[ -n "$REVIEW_AUTHOR" ]]; then
-        CLI_TYPE="claude"; CLI_CMD="claude"; CLI_ARGS=""
-        CLI_EFFORT="high"; CLI_FAMILY=""; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
-      elif [[ "${TFX_REROUTED_FROM:-}" == "antigravity" && "$TFX_ANTIGRAVITY_FALLBACK" == "claude" ]]; then
-        CLI_TYPE="claude"; CLI_CMD="claude"; CLI_ARGS=""
-        CLI_EFFORT=""; CLI_FAMILY=""; DEFAULT_TIMEOUT=900
-        case "$AGENT_TYPE" in
-          security-reviewer|designer) CLI_EFFORT="high" ;;
-        esac
-        _AGY_CLAUDE_FALLBACK=1
-      fi ;;
-    auto)
-      # 리뷰의 가용성 폴백은 작성 벤더를 제외하는 최종 정책에서 처리한다.
-      [[ -z "$REVIEW_AUTHOR" ]] || return 0
-      # Issue #281: JS layer is the single source of truth for auto router
-      # Shell auto mode normalizes CLI availability; JS selects single/multi.
-      if [[ "$CLI_TYPE" == "codex" ]] && ! codex_is_available; then
-        if is_cli_available antigravity; then
-          TFX_CLI_MODE="antigravity"; apply_cli_mode; return
-        else
-          echo "[tfx-route] codex/antigravity 모두 불가: hard routing 검증으로 전달" >&2
-        fi
-      elif [[ "$CLI_TYPE" == "antigravity" && "$TFX_ANTIGRAVITY_FALLBACK" == "codex" ]] && ! agy_supports_headless "${AGY_BIN:-agy}"; then
-        if codex_is_available; then
-          TFX_CLI_MODE="codex"; apply_cli_mode; return
-        fi
-        echo "[tfx-route] antigravity headless 불가: hard routing 검증으로 전달" >&2
-      fi ;;
+    codex|antigravity|claude)
+      echo "[tfx-route] TFX_CLI_MODE=${TFX_CLI_MODE}: ${AGENT_TYPE} -> ${CLI_TYPE}(${CLI_EFFORT}) 선택" >&2
+      ;;
   esac
 }
 
 # ── CLI disable 정책 (강제 모드/동적 오버라이드보다 우선) ──
-# TFX_CLI_MODE는 선호/강제 선택이고 TFX_*_OK는 preflight 관측값이다. 이 정책은
-# 운영자가 명시한 실행 금지이므로, 최종 CLI 선택 후 한 번만 적용한다.
+# TFX_CLI_MODE는 선호/강제 선택이고 TFX_*_OK는 preflight 관측값이다.
 is_cli_disabled() {
   case "$1" in
-    codex) [[ "$TFX_DISABLE_CODEX" == "1" ]] ;;
-    antigravity) [[ "$TFX_DISABLE_ANTIGRAVITY" == "1" ]] ;;
+    codex) [[ "${TFX_DISABLE_CODEX:-0}" == "1" ]] ;;
+    antigravity) [[ "${TFX_DISABLE_ANTIGRAVITY:-0}" == "1" ]] ;;
+    claude) [[ "${TFX_DISABLE_CLAUDE:-0}" == "1" ]] ;;
     *) return 1 ;;
   esac
 }
@@ -1291,6 +1455,9 @@ is_cli_disabled() {
 is_cli_available() {
   case "$1" in
     codex)
+      if declare -F vendor_quota_cooldown_active >/dev/null 2>&1 && vendor_quota_cooldown_active codex; then
+        return 1
+      fi
       codex_is_available
       ;;
     antigravity)
@@ -1299,7 +1466,11 @@ is_cli_available() {
         && agy_supports_headless "${AGY_BIN:-agy}"
       ;;
     claude)
-      command -v "$CLAUDE_BIN" >/dev/null 2>&1
+      if declare -F vendor_quota_cooldown_active >/dev/null 2>&1 && vendor_quota_cooldown_active claude; then
+        return 1
+      fi
+      [[ "${TFX_CLAUDE_OK:-1}" != "0" ]] \
+        && command -v "${CLAUDE_BIN:-claude}" >/dev/null 2>&1
       ;;
     *)
       return 1
@@ -1308,86 +1479,14 @@ is_cli_available() {
 }
 
 apply_cli_disable_policy() {
-  local selected="$CLI_TYPE"
-  if [[ -n "$REVIEW_AUTHOR" ]]; then
-    if ! is_cli_disabled "$selected" && is_cli_available "$selected"; then
-      return 0
-    fi
-    local candidate
-    for candidate in claude codex antigravity; do
-      [[ "$candidate" != "$REVIEW_AUTHOR" && "$candidate" != "$selected" ]] || continue
-      if ! is_cli_disabled "$candidate" && is_cli_available "$candidate"; then
-        [[ "$selected" != "antigravity" ]] || log_agy_quota_fallback "$candidate"
-        echo "[tfx-route] ${selected} -> ${candidate} 리뷰 fallback (작성 벤더 ${REVIEW_AUTHOR} 제외)" >&2
-        TFX_CLI_MODE="$candidate"
-        apply_cli_mode
-        return 0
-      fi
-    done
-    echo "ERROR: 작성 벤더 ${REVIEW_AUTHOR}를 제외하면 허용되고 사용 가능한 리뷰 CLI가 없습니다." >&2
-    return 78
-  fi
-  [[ "$selected" == "codex" || "$selected" == "antigravity" ]] || return 0
-
-  local blocked_reason=""
-  if is_cli_disabled "$selected"; then
-    case "$selected" in
-      codex) blocked_reason="TFX_DISABLE_CODEX=1: codex 선택 차단" ;;
-      antigravity) blocked_reason="TFX_DISABLE_ANTIGRAVITY=1: antigravity 선택 차단" ;;
-    esac
-  elif ! is_cli_available "$selected"; then
-    blocked_reason="${selected} 미가용: 선택 차단"
-  else
-    return 0
-  fi
-  if [[ "$selected" == "antigravity" && "$TFX_ANTIGRAVITY_FALLBACK" == "claude" ]]; then
-    echo "[tfx-route] ${blocked_reason}; antigravity -> claude 명시적 fallback" >&2
-    if ! is_cli_available claude; then
-      echo "ERROR: TFX_ANTIGRAVITY_FALLBACK=claude 이지만 Claude CLI가 없습니다." >&2
-      return 78
-    fi
-    log_agy_quota_fallback claude
-    CLI_TYPE="claude"; CLI_CMD="claude"; CLI_ARGS=""
-    case "$AGENT_TYPE" in
-      security-reviewer|designer) CLI_EFFORT="high" ;;
-    esac
-    _AGY_CLAUDE_FALLBACK=1
-    return 0
-  fi
-  echo "[tfx-route] $blocked_reason" >&2
-
-  local candidate=""
-  case "$selected" in
-    codex) candidate="antigravity" ;;
-    antigravity) candidate="codex" ;;
-  esac
-  if ! is_cli_disabled "$candidate" && is_cli_available "$candidate"; then
-    [[ "$selected" != "antigravity" ]] || log_agy_quota_fallback "$candidate"
-    echo "[tfx-route] ${selected} → ${candidate} 명시적 fallback (금지 CLI 제외)" >&2
-    TFX_CLI_MODE="$candidate"
-    apply_cli_mode
-    if [[ "$CLI_TYPE" == "$candidate" ]] \
-      && ! is_cli_disabled "$CLI_TYPE" \
-      && is_cli_available "$CLI_TYPE"; then
-      return 0
-    fi
-  fi
-
-  echo "ERROR: 허용되고 사용 가능한 외부 CLI가 없습니다. codex(disabled=${TFX_DISABLE_CODEX}, available=$(is_cli_available codex && echo 1 || echo 0)), antigravity(disabled=${TFX_DISABLE_ANTIGRAVITY}, available=$(is_cli_available antigravity && echo 1 || echo 0)). Claude native로 조용히 강등하지 않습니다." >&2
-  return 78
+  # 하드 제외 필터와 차단 사유 로그는 route_agent의 resolveRoleCandidates가 일괄 수행한다.
+  return 0
 }
 
 # ── Claude 네이티브 제거 (Codex 리드 환경에서 선택적 활성화) ──
 apply_no_claude_native_mode() {
-  [[ "$TFX_NO_CLAUDE_NATIVE" == "1" && "$TFX_CLI_MODE" != "antigravity" ]] || return 0
-  [[ "$CLI_TYPE" == "claude-native" && "$NATIVE_CODEX_ALLOWED" == "true" ]] || return 0
-  if ! codex_is_available; then
-    echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1 이지만 codex가 preflight에서 가용하지 않아 claude-native 유지" >&2
-    return 0
-  fi
-  ORIGINAL_AGENT="$AGENT_TYPE"
-  apply_codex_agent_policy
-  echo "[tfx-route] TFX_NO_CLAUDE_NATIVE=1: $AGENT_TYPE -> codex($CLI_EFFORT) 리매핑" >&2
+  # TFX_NO_CLAUDE_NATIVE=1 처리는 route_agent의 resolveRoleCandidates가 일괄 수행한다.
+  return 0
 }
 
 ## Retry snapshot profile plumbing.
@@ -1546,40 +1645,80 @@ apply_codex_concrete_effort_guard() {
 }
 
 apply_retry_snapshot_cli_invocation() {
-  [[ "${CLI_TYPE:-}" == "codex" ]] || return 0
-
   local snapshot="${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}"
   [[ -n "$snapshot" ]] || return 0
+  # 쿼터 소진으로 재라우팅된 홉에서는 실패한 스냅샷 CLI를 다시 강제하지 않는다.
+  [[ -z "${TFX_REROUTED_FROM:-}" ]] || return 0
 
   local status_json
   if ! status_json=$(bridge_cli retry-status --snapshot "$snapshot" --json); then
-    echo "[tfx-route] WARNING: retry snapshot status unavailable; keeping existing codex args" >&2
+    echo "[tfx-route] WARNING: retry snapshot status unavailable; keeping existing args" >&2
     return
   fi
 
-  local retry_argv
-  if ! retry_argv=$("$NODE_BIN" --input-type=module -e '
+  local retry_info retry_cli retry_profile_spec retry_model retry_effort retry_argv
+  if ! retry_info=$("$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
     const status = JSON.parse(process.argv[1] || "{}");
-    if (status.cliInvocation?.cli !== "codex") process.exit(0);
-    const argv = status.cliInvocation.argv;
-    if (!Array.isArray(argv)) process.exit(1);
-    for (const arg of argv) {
-      if (typeof arg !== "string" || arg.length === 0 || /\s/.test(arg)) process.exit(2);
-    }
-    const { normalizeCodexProfileName } = await import(pathToFileURL(process.argv[2]).href);
-    for (let i = 0; i < argv.length; i++) {
-      if (argv[i] === "--profile" && argv[i + 1]) {
-        argv[i + 1] = normalizeCodexProfileName(argv[i + 1]);
-      } else if (argv[i].startsWith("--profile=")) {
-        argv[i] = `--profile=${normalizeCodexProfileName(argv[i].slice(10))}`;
+    const inv = status.cliInvocation;
+    if (!inv || !inv.cli) process.exit(0);
+    const cli = inv.cli === "agy" ? "antigravity" : inv.cli;
+    const argv = Array.isArray(inv.argv) ? [...inv.argv] : [];
+    if (cli === "codex") {
+      for (const arg of argv) {
+        if (typeof arg !== "string" || arg.length === 0 || /\s/.test(arg)) process.exit(2);
       }
+      const { normalizeCodexProfileName } = await import(pathToFileURL(process.argv[2]).href);
+      for (let i = 0; i < argv.length; i++) {
+        if (argv[i] === "--profile" && argv[i + 1]) {
+          argv[i + 1] = normalizeCodexProfileName(argv[i + 1]);
+        } else if (argv[i].startsWith("--profile=")) {
+          argv[i] = `--profile=${normalizeCodexProfileName(argv[i].slice(10))}`;
+        }
+      }
+      process.stdout.write([cli, inv.profile || "", inv.model || "", inv.effort || "", argv.join(" ")].join("\x1e"));
+    } else {
+      process.stdout.write([cli, inv.profile || "", inv.model || "", inv.effort || "", ""].join("\x1e"));
     }
-    process.stdout.write(argv.join(" "));
   ' -- "$status_json" "$CODEX_PROFILE_MODULE" 2>/dev/null); then
-    echo "[tfx-route] WARNING: retry snapshot argv unsupported; keeping existing codex args" >&2
+    echo "[tfx-route] WARNING: retry snapshot argv unsupported; keeping existing args" >&2
     return 0
   fi
+  [[ -n "$retry_info" ]] || return 0
+  IFS=$'\x1e' read -r retry_cli retry_profile_spec retry_model retry_effort retry_argv <<< "$retry_info"
+  if is_cli_disabled "$retry_cli"; then
+    echo "[tfx-route] retry snapshot CLI(${retry_cli}) 차단됨: 정책 라우팅 선택(${CLI_TYPE}) 유지" >&2
+    return 0
+  fi
+
+  if [[ "$retry_cli" == "antigravity" ]]; then
+    CLI_TYPE="antigravity"
+    CLI_CMD="agy"
+    TFX_GEMINI_PROFILE="${retry_profile_spec:-carbon_high}"
+    export TFX_GEMINI_PROFILE
+    CLI_ARGS="$(build_antigravity_base)"
+    CLI_EFFORT="${retry_effort:-high}"
+    CLI_FAMILY="${TFX_GEMINI_PROFILE%%_*}"
+    echo "[tfx-route] retry snapshot cliInvocation applied (antigravity:${TFX_GEMINI_PROFILE})" >&2
+    return 0
+  fi
+
+  if [[ "$retry_cli" == "claude" ]]; then
+    CLI_TYPE="claude"
+    CLI_CMD="claude"
+    CLI_ARGS=""
+    TFX_WORKER_CLI="claude"
+    TFX_WORKER_MODEL="${retry_model:-fable}"
+    TFX_WORKER_EFFORT="${retry_effort:-high}"
+    WORKER_SELECTED_EFFORT="${retry_effort:-high}"
+    CLI_EFFORT="${retry_effort:-high}"
+    CLI_FAMILY=""
+    echo "[tfx-route] retry snapshot cliInvocation applied (claude:${TFX_WORKER_MODEL}/${TFX_WORKER_EFFORT})" >&2
+    return 0
+  fi
+
+  [[ "$retry_cli" == "codex" ]] || return 0
+  [[ "${CLI_TYPE:-}" == "codex" ]] || apply_codex_agent_policy
   [[ -n "$retry_argv" ]] || return 0
 
   local -a base_args=()
@@ -1661,22 +1800,7 @@ apply_codex_profile_override() {
 }
 
 apply_verifier_override() {
-  [[ "$AGENT_TYPE" != "verifier" ]] && return
-
-  case "$TFX_VERIFIER_OVERRIDE" in
-    auto|"")
-      return 0
-      ;;
-    claude)
-      ORIGINAL_AGENT="${ORIGINAL_AGENT:-$AGENT_TYPE}"
-      CLI_TYPE="claude-native"
-      CLI_CMD=""
-      CLI_ARGS=""
-      CLI_EFFORT=""; CLI_FAMILY=""; DEFAULT_TIMEOUT=1200
-      echo "[tfx-route] TFX_VERIFIER_OVERRIDE=claude: verifier -> claude-native" >&2
-      ;;
-  esac
-
+  # verifier 오버라이드는 route_agent의 resolveRoleCandidates가 일괄 수행한다.
   return 0
 }
 
@@ -2533,11 +2657,14 @@ run_codex_exec() {
 
 apply_jev_pre_route() {
   [[ -n "${recommendation_task:-}" ]] || return 0
+  [[ -z "${TFX_RETRY_SNAPSHOT:-${TFX_RETRY_SNAPSHOT_FILE:-}}" ]] || return 0
 
   local jev_row=""
   if ! jev_row=$(bridge_cli judge-route \
     --agent "$AGENT_TYPE" \
     --cli-type "${CLI_TYPE/claude-native/claude}" \
+    --cli-mode "$TFX_CLI_MODE" \
+    --candidates-json "${CANDIDATES_JSON:-[]}" \
     --prompt "$recommendation_task" \
     --worker-model --delimited); then
     return 0
@@ -2547,9 +2674,43 @@ apply_jev_pre_route() {
   local _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff
   local _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf _jev_tier_shift
   local _worker_profile _worker_model _worker_effort
+  local _jev_effective_cli="" _jev_exec_kind="" _jev_task_trait="" _jev_decomposable="" _jev_candidates_json=""
   IFS=$'\x1e' read -r _jev_comp _jev_codex_prof _jev_agy_prof _jev_claude_mod _jev_claude_eff \
     _jev_dur _jev_exec_mode _jev_mcp_prof _jev_mcp_srvs _jev_conf _jev_tier_shift \
-    _worker_profile _worker_model _worker_effort WORKER_MODEL_JSON <<< "$jev_row"
+    _worker_profile _worker_model _worker_effort WORKER_MODEL_JSON \
+    _jev_effective_cli _jev_exec_kind _jev_task_trait _jev_decomposable _jev_candidates_json <<< "$jev_row"
+
+  if [[ -n "$_jev_candidates_json" ]]; then
+    CANDIDATES_JSON="$_jev_candidates_json"
+  fi
+  if [[ -n "$_jev_effective_cli" && "$_jev_effective_cli" != "${CLI_TYPE/claude-native/claude}" ]]; then
+    case "$_jev_effective_cli" in
+      codex)
+        apply_codex_agent_policy
+        ;;
+      antigravity)
+        CLI_TYPE="antigravity"
+        CLI_CMD="agy"
+        CLI_ARGS="$(build_antigravity_base)"
+        CLI_EFFORT=""
+        CLI_FAMILY=""
+        ;;
+      claude)
+        if [[ "$_jev_exec_kind" == "claude-native" ]]; then
+          CLI_TYPE="claude-native"
+          CLI_CMD=""
+          CLI_ARGS=""
+          CLI_EFFORT=""
+          CLI_FAMILY=""
+        else
+          CLI_TYPE="claude"
+          CLI_CMD="claude"
+          CLI_ARGS=""
+          CLI_FAMILY=""
+        fi
+        ;;
+    esac
+  fi
 
   WORKER_SELECTED_EFFORT="$_worker_effort"
   if [[ "$CLI_TYPE" == "codex" && -n "$_worker_profile" ]]; then
@@ -2558,6 +2719,8 @@ apply_jev_pre_route() {
   elif [[ "$CLI_TYPE" == "antigravity" && -n "$_worker_profile" ]]; then
     TFX_GEMINI_PROFILE="$_worker_profile"
     export TFX_GEMINI_PROFILE
+  elif [[ "$CLI_TYPE" == "claude" && -n "$_worker_effort" ]]; then
+    CLI_EFFORT="$_worker_effort"
   fi
   if [[ "${TFX_EXECUTION_MODE:-auto}" == "auto" && -n "$_jev_exec_mode" ]]; then
     TFX_EXECUTION_MODE="$_jev_exec_mode"
@@ -2571,8 +2734,10 @@ apply_jev_pre_route() {
   if [[ -z "${TFX_EXPECTED_DURATION_SEC:-}" && -n "$_jev_dur" ]]; then
     TFX_EXPECTED_DURATION_SEC="$_jev_dur"
   fi
-  JEV_CLAUDE_MODEL="$_worker_model"
-  JEV_CLAUDE_EFFORT="$_worker_effort"
+  if [[ -n "$_jev_comp" ]]; then
+    JEV_CLAUDE_MODEL="$_worker_model"
+    JEV_CLAUDE_EFFORT="$_worker_effort"
+  fi
   echo "[tfx-route] worker-model: $WORKER_MODEL_JSON" >&2
 }
 
@@ -2657,10 +2822,15 @@ main() {
 
   # 컨텍스트 파일 → 프롬프트에 주입
   if [[ -n "$CONTEXT_FILE" && -f "$CONTEXT_FILE" ]]; then
-    local ctx_content
-    # 32KB 상한. `cat | head -c` 는 큰 파일에서 cat 이 SIGPIPE 를 받아 pipefail+set -e 로
-    # 스크립트가 메시지 없이 141 로 끝나므로 head 가 파일을 직접 읽는다.
-    ctx_content=$(head -c 32768 "$CONTEXT_FILE" 2>/dev/null || true)
+    local ctx_content utf8_slice_script
+    utf8_slice_script="$(_resolve_script "" \
+      "$(_get_script_dir)/lib/utf8-slice.mjs" \
+      ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/lib/utf8-slice.mjs"} || true)"
+    if [[ -n "$utf8_slice_script" ]]; then
+      ctx_content=$("$NODE_BIN" "$utf8_slice_script" --file "$CONTEXT_FILE" --max-bytes 32768 --from start 2>/dev/null || true)
+    else
+      ctx_content=$(head -c 32768 "$CONTEXT_FILE" 2>/dev/null || true)
+    fi
     PROMPT="${PROMPT}
 
 <prior_context>
@@ -2848,12 +3018,27 @@ FALLBACK_EOF
     fi
 
   elif [[ "$CLI_TYPE" == "claude" ]]; then
-    local claude_model claude_effort
+    local claude_model claude_effort _effective_claude_args_json="$CLAUDE_BIN_ARGS_JSON"
     claude_model=$(get_claude_model)
     claude_effort=$(get_claude_effort)
+    if [[ "${FRESH_SESSION_REQUIRED:-0}" == "1" ]]; then
+      _effective_claude_args_json=$("$NODE_BIN" -e '
+        try {
+          const arr = JSON.parse(process.argv[1] || "[]");
+          const out = [];
+          for (let i = 0; i < arr.length; i++) {
+            const a = String(arr[i] ?? "");
+            if (a === "--resume" || a === "--session-id" || a === "-r") { i += 1; continue; }
+            if (a.startsWith("--resume=") || a.startsWith("--session-id=")) continue;
+            out.push(arr[i]);
+          }
+          process.stdout.write(JSON.stringify(out));
+        } catch { process.stdout.write("[]"); }
+      ' "$CLAUDE_BIN_ARGS_JSON")
+    fi
     local -a claude_worker_args=(
       "--command" "$CLI_CMD"
-      "--command-args-json" "$CLAUDE_BIN_ARGS_JSON"
+      "--command-args-json" "$_effective_claude_args_json"
     )
     [[ -z "$claude_model" ]] || claude_worker_args+=("--model" "$claude_model")
     case "${TFX_EXECUTION_MODE:-bypass}" in
@@ -2878,28 +3063,18 @@ FALLBACK_EOF
     record_worker_mcp_launch
     record_worker_model_launch "${claude_worker_args[@]}"
     run_stream_worker "claude" "$FULL_PROMPT" "$use_tee" "${claude_worker_args[@]}" || exit_code=$?
-    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 && "$_AGY_CLAUDE_FALLBACK" == "1" ]]; then
-      echo "[tfx-route] Claude fallback 워커 실패(exit=${exit_code})." >&2
-      [[ -f "$STDERR_LOG" ]] && tail -c 2048 "$STDERR_LOG" >&2
-    elif [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 && -n "$REVIEW_AUTHOR" ]]; then
-      # 리뷰는 판정이 결과라 native 안내로 바꾸면 리뷰 없이 성공으로 보인다. 실패로 남긴다.
-      echo "[tfx-route] Claude 리뷰 워커 실패(exit=${exit_code}). 리뷰가 실행되지 않았다." >&2
-      [[ -f "$STDERR_LOG" ]] && tail -c 2048 "$STDERR_LOG" >&2
-    elif [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
+    if [[ "$exit_code" -ne 0 && "$exit_code" -ne 124 ]]; then
       local claude_stderr_bytes=0
       [[ -f "$STDERR_LOG" ]] && claude_stderr_bytes=$(wc -c < "$STDERR_LOG" 2>/dev/null | tr -d ' ')
-      echo "[tfx-route] Claude stream wrapper 실패(exit=${exit_code}, stderr=${claude_stderr_bytes}B). native metadata로 fallback합니다." >&2
+      if [[ -n "${REVIEW_AUTHOR:-}" ]]; then
+        echo "[tfx-route] Claude 리뷰 워커 실패(exit=${exit_code}, stderr=${claude_stderr_bytes}B)." >&2
+      else
+        echo "[tfx-route] Claude CLI 워커 실패(exit=${exit_code}, stderr=${claude_stderr_bytes}B)." >&2
+      fi
       if [[ "$claude_stderr_bytes" -gt 0 ]]; then
         echo "[tfx-route] Claude stderr 보존:" >&2
         tail -c 2048 "$STDERR_LOG" >&2
       fi
-      cat > "$STDOUT_LOG" <<EOF
-$(emit_claude_native_metadata)
-EOF
-      : > "$STDERR_LOG"
-      exit_code=0
-      CLI_TYPE="claude-native"
-      record_worker_mcp_launch native_fallback
     fi
   fi
 
@@ -2959,20 +3134,25 @@ EOF
   local quota_exceeded=0
   if [[ "$exit_code" -ne 124 ]] \
     && { [[ "$exit_code" -ne 0 ]] || { [[ "$CLI_TYPE" == "antigravity" ]] && agy_output_is_quota_error "$STDOUT_LOG" "$STDERR_LOG"; }; } \
+    && ! detect_non_reroutable_failure "$STDOUT_LOG" "$STDERR_LOG" \
     && detect_quota_exceeded "$STDOUT_LOG" "$STDERR_LOG"; then
     quota_exceeded=1
     [[ "$exit_code" -ne 0 ]] || exit_code=1
     if [[ "$CLI_TYPE" == "antigravity" ]]; then
       record_agy_quota_reset "$STDOUT_LOG" "$STDERR_LOG" \
         || echo "[tfx-quota] agy 쿼터 리셋 시각 저장 실패" >&2
+    elif [[ "$CLI_TYPE" == "claude" || "$CLI_TYPE" == "codex" ]]; then
+      if grep -qiE "usage limit|rate limit|quota|try again at|purchase more credits|RESOURCE_EXHAUSTED|rateLimitExceeded" "$STDOUT_LOG" "$STDERR_LOG" 2>/dev/null; then
+        record_vendor_quota_reset "$CLI_TYPE" \
+          || echo "[tfx-quota] ${CLI_TYPE} 쿼터 리셋 시각 저장 실패" >&2
+      fi
     fi
   fi
 
-  # 쿼타 감지 + 자동 re-route
+  # 쿼타 감지 + 다단계 자동 re-route
   if [[ "$quota_exceeded" == "1" ]]; then
-    if [[ "${TFX_QUOTA_REROUTE:-1}" -ne 0 ]] && [[ -z "${TFX_REROUTED_FROM:-}" ]]; then
-      export TFX_REROUTED_FROM="$CLI_TYPE"
-      auto_reroute "$CLI_TYPE"
+    if [[ "${TFX_QUOTA_REROUTE:-1}" -ne 0 ]]; then
+      auto_reroute "$CLI_TYPE" || exit $?
     fi
   fi
 

@@ -1,7 +1,7 @@
 ---
 id: 0054
 title: 역할군별 3사 모델 우선순위 라우팅과 쿼터 연동 및 Jev 조정 규칙을 도입한다
-status: proposed
+status: accepted
 date: 2026-11-17
 deciders: [tellang]
 supersedes: [0004, 0039, 0053]

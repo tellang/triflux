@@ -147,6 +147,7 @@ function runRoute({
     HOME: home,
     CODEX_BIN: fakeCodex,
     AGY_BIN: fixture.fakeAgy,
+    CLAUDE_BIN: "missing-claude",
     GEMINI_PROFILES_PATH: path.join(home, ".gemini", "triflux-profiles.json"),
     TRIFLUX_TEST_HOME: home,
     TFX_BRIDGE_SCRIPT: BRIDGE,
@@ -178,6 +179,7 @@ function runRoute({
     TFX_MACHINE_PROFILE_PATH: "",
     TFX_DISABLE_CODEX: "0",
     TFX_DISABLE_ANTIGRAVITY: "0",
+    TFX_DISABLE_CLAUDE: envOverrides.TFX_DISABLE_CLAUDE ?? "0",
   };
   if (snapshot) env.TFX_RETRY_SNAPSHOT = snapshot;
 
@@ -555,5 +557,36 @@ process.exit(result.status ?? 1);
     });
     assert.deepEqual(profileValues(args), ["private_ultra"]);
     assert.ok(!args.some((arg) => arg.startsWith("model_reasoning_effort=")));
+  });
+
+  it("3단계 승격 체인 스냅숏의 antigravity 단계를 소비해 CLI를 전환한다", () => {
+    const snapshot = path.join(makeTempDir(), "agy-retry-snapshot.json");
+    writeFileSync(
+      snapshot,
+      JSON.stringify({
+        version: 1,
+        current: "EXECUTING",
+        iterations: 1,
+        maxIterations: 3,
+        stuckCounter: 0,
+        lastFailureReason: null,
+        cliIndex: 1,
+        cliChain: [
+          { cli: "codex", profile: "astra_max", effort: "max" },
+          { cli: "antigravity", profile: "carbon_high", effort: "high" },
+          { cli: "claude", model: "fable", effort: "high" },
+        ],
+        mode: "auto-escalate",
+        sessionId: null,
+        history: [],
+      }),
+      "utf8",
+    );
+    const args = runRoute({
+      snapshot,
+      env: { TFX_ANTIGRAVITY_OK: "1" },
+    });
+    assert.equal(args[args.indexOf("--model") + 1], "gemini-4-argon");
+    assert.equal(args[args.indexOf("--effort") + 1], "high");
   });
 });

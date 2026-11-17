@@ -10,7 +10,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0001](0001-record-architecture-decisions.md) | ADR로 아키텍처 결정을 기록한다 | Accepted | — |
 | [0002](0002-doc-and-devflow-architecture.md) | 문서 파운데이션 + 개발 플로우 아키텍처 | Accepted | 0001 |
 | [0003](0003-tfx-skill-passing-prose-injection.md) | headless CLI 스킬 전달 = 즉석 prose 주입 | Accepted | 0002 |
-| [0004](0004-codex-as-default-cli.md) | 기본 구현 CLI = Codex | Accepted | 0002 |
+| [0004](../_archive/adr/0004-codex-as-default-cli.md) | 기본 구현 CLI = Codex | Superseded | 0002, 0054 |
 | [0005](0005-packages-three-layer-mirror.md) | packages/ 3-layer single-source 미러 | Accepted | 0002 |
 | [0006](../_archive/adr/0006-escalation-chain-codex-to-claude-opus.md) | 재시도 승격 체인 codex→claude opus 2단계 | Superseded | 0002, 0004, 0016 |
 | [0007](../_archive/adr/0007-hub-default-port-27888.md) | hub 기본 포트 27888 고정 | Deprecated | 0002, 0023 |
@@ -45,7 +45,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0036](0036-code-verdict-owner-tfx-review.md) | 3-layer 공존에서 코드 판정은 triflux tfx-review | Accepted | 0002, 0009 |
 | [0037](0037-model-family-aliases.md) | Codex와 Antigravity 가족 별칭을 실행 때 최신 모델로 해석한다 | Accepted | 0016, 0017, 0019 |
 | [0038](../_archive/adr/0038-agy-default-argon-family.md) | Antigravity를 Argon으로 바꾸고 역할 배정을 다시 정한다 | Superseded | 0037, 0039 |
-| [0039](0039-review-by-author-vendor.md) | 작성 벤더와 다른 벤더에 코드 리뷰를 배정한다 | Accepted | 0004, 0036, 0037, 0038 |
+| [0039](../_archive/adr/0039-review-by-author-vendor.md) | 작성 벤더와 다른 벤더에 코드 리뷰를 배정한다 | Superseded | 0004, 0036, 0037, 0038, 0054 |
 | [0040](0040-nontty-multi-defaults-headless.md) | 비TTY 호출의 tfx multi 는 headless 로 가고 호출자 창을 나누지 않는다 | Accepted | 0008, 0026 |
 | [0041](../_archive/adr/0041-memory-pressure-watcher.md) | 메모리 압박 감시는 상주 프로세스 없이 리드 세션의 triflux mod 가 직접 한다 | Superseded | 0040, 0042 |
 | [0042](../_archive/adr/0042-lead-role-entry-and-pressure-command.md) | 리드 진입은 `/tfx-lead <역할>`, 압박 감시는 `/tfx-pressure` 로 나눈다 | Superseded | 0032, 0040, 0041, 0043 |
@@ -59,8 +59,8 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0050](0050-jev-mcp-recommendations.md) | Jev MCP 추천을 기존 실행 경로에 연결하고 활성화와 구분한다 | Accepted | 0028, 0029 |
 | [0051](0051-jev-worker-capability-application.md) | Jev 모델 조회와 등록된 MCP의 워커별 적용을 연결한다 | Proposed | 0028, 0049, 0050 |
 | [0052](0052-jev-iterm-layout.md) | Jev 기반 iTerm 워커 배치 | Proposed | 0026, 0029, 0030, 0050 |
-| [0053](0053-agy-carbon-explicit-family.md) | agy Carbon 가족을 명시 지정 전용으로 추가하고 목록에 없으면 Argon으로 폴백한다 | Accepted | 0038, 0039, 0049 |
-| [0054](0054-multi-vendor-priority-routing.md) | 역할군별 3사 모델 우선순위 라우팅과 쿼터 연동 및 Jev 조정 규칙을 도입한다 | Proposed | 0004, 0037, 0039, 0048, 0049, 0050, 0051, 0053 |
+| [0053](../_archive/adr/0053-agy-carbon-explicit-family.md) | agy Carbon 가족을 명시 지정 전용으로 추가하고 목록에 없으면 Argon으로 폴백한다 | Superseded | 0038, 0039, 0049, 0054 |
+| [0054](0054-multi-vendor-priority-routing.md) | 역할군별 3사 모델 우선순위 라우팅과 쿼터 연동 및 Jev 조정 규칙을 도입한다 | Accepted | 0004, 0037, 0039, 0048, 0049, 0050, 0051, 0053 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 

@@ -3,14 +3,15 @@
 // 워커는 tfx-live 가 기본 명령으로 띄우므로 이 설정과 무관하다.
 
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
   modelFamilyPaths,
   resolveModelFamilies,
 } from "../../scripts/lib/model-family-resolver.mjs";
+import { resolveRoleCandidates } from "../../scripts/lib/vendor-priority-policy.mjs";
 import {
   isJevEnabled,
   judgeTaskRouting,
@@ -142,15 +143,69 @@ async function runLive(args, run) {
   return JSON.parse(stdout);
 }
 
+function probePathAvailability(env) {
+  const rawPath = env?.PATH || env?.Path;
+  if (!rawPath) return undefined;
+  const dirs = String(rawPath).split(delimiter).filter(Boolean);
+  const exts =
+    process.platform === "win32"
+      ? (env?.PATHEXT || ".EXE;.CMD;.BAT;.PS1").split(";").filter(Boolean)
+      : [""];
+  const hasBin = (name) =>
+    dirs.some((dir) =>
+      exts.some((ext) => existsSync(join(dir, `${name}${ext}`))),
+    );
+  return {
+    claude: env?.TFX_CLAUDE_OK === "0" ? false : hasBin("claude"),
+    codex: env?.TFX_CODEX_OK === "0" ? false : hasBin("codex"),
+    antigravity: env?.TFX_ANTIGRAVITY_OK === "0" ? false : hasBin("agy"),
+  };
+}
+
+export function resolveLeadCli({
+  cli = "auto",
+  env = process.env,
+  quotaSnapshot,
+  available,
+} = {}) {
+  const normalized = String(cli || "auto")
+    .trim()
+    .toLowerCase();
+  if (normalized !== "auto") {
+    const mapped = normalized === "antigravity" ? "agy" : normalized;
+    if (!LEAD_CLIS.includes(mapped)) {
+      throw new Error(`--cli 는 ${LEAD_CLIS.join(", ")} 중 하나여야 한다`);
+    }
+    return mapped;
+  }
+  const effectiveAvailable = available ?? probePathAvailability(env);
+  const result = resolveRoleCandidates({
+    agent: "lead",
+    env,
+    quotaSnapshot,
+    available: effectiveAvailable,
+    cliMode: "auto",
+  });
+  const first = result.candidates[0]?.cli;
+  if (!first) {
+    throw new Error(
+      `사용 가능한 리드 CLI 후보가 없다 (${result.excluded.map((e) => `${e.cli}:${e.reason}`).join(", ") || "all blocked"})`,
+    );
+  }
+  return first === "antigravity" ? "agy" : first;
+}
+
 export async function launchLead(
   {
     cli = "claude",
+    cliAuto = false,
     role,
     cwd = process.cwd(),
     session,
     model,
     effort,
-    launcher = cli,
+    launcher,
+    launcherFlag,
     noBypassHookTrust = false,
     task,
     layout,
@@ -163,11 +218,42 @@ export async function launchLead(
     judgeRouting = judgeTaskRouting,
     recommend = recommendMcp,
     recommendationOptions = {},
+    quotaSnapshot,
+    available,
+    configPath,
   } = {},
 ) {
-  if (!LEAD_CLIS.includes(cli))
+  const isAutoCli = cli === "auto" || cliAuto === true;
+  if (!isAutoCli && !LEAD_CLIS.includes(cli))
     throw new Error(`--cli 는 ${LEAD_CLIS.join(", ")} 중 하나여야 한다`);
   if (!role?.trim()) throw new Error("역할이 필요하다: tfx lead <역할>");
+
+  const resolvedCli = isAutoCli
+    ? resolveLeadCli({
+        cli: "auto",
+        env: jevOptions?.env || process.env,
+        quotaSnapshot,
+        available,
+      })
+    : cli;
+  if (launcher === undefined) {
+    launcher =
+      launcherFlag !== undefined || configPath !== undefined
+        ? resolveLauncher({
+            cli: resolvedCli,
+            flag: launcherFlag,
+            configPath,
+          })
+        : resolvedCli;
+  } else if (isAutoCli && resolvedCli !== cli) {
+    launcher = resolveLauncher({
+      cli: resolvedCli,
+      flag: launcherFlag,
+      configPath,
+    });
+  }
+  cli = resolvedCli;
+
   const routing = {
     enabled: isJevEnabled(jevOptions),
     attempted: false,
@@ -207,16 +293,20 @@ export async function launchLead(
           routing.reason = `complexity_${recommendation.diagnostics.reason}`;
       }
       if (recommendation?.complexity) {
+        const cappedClaudeModel =
+          recommendation.claudeModel === "fable"
+            ? "opus"
+            : recommendation.claudeModel;
         routing.recommendedProfile =
           cli === "codex"
             ? recommendation.codexProfile
             : cli === "agy"
               ? recommendation.agyProfile
-              : recommendation.claudeModel;
+              : cappedClaudeModel;
         const selected =
           cli === "claude"
             ? {
-                model: recommendation.claudeModel,
+                model: cappedClaudeModel,
                 effort: recommendation.claudeEffort,
               }
             : resolveModelFamilies(cli, {

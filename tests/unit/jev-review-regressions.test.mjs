@@ -156,6 +156,8 @@ it("질문별 수락은 deep .95/mode .86/MCP .28과 부분 무효 배치에서 
         batchClient: async () => ({
           complexity: { choice: "deep", confidence: 0.95 },
           execution_mode: { choice: "workspace_auto", confidence: 0.86 },
+          task_trait: { choice: "none", confidence: 0.9 },
+          decomposable: { value: true, confidence: 0.9 },
           ...(mode === "partial"
             ? {}
             : {
@@ -174,11 +176,11 @@ it("질문별 수락은 deep .95/mode .86/MCP .28과 부분 무효 배치에서 
       .map(JSON.parse);
     assert.deepEqual(
       rows.map((row) => row.accepted),
-      [true, true, false],
+      [true, true, false, true, true],
     );
     assert.deepEqual(
       rows.map((row) => row.intervened),
-      [true, true, false],
+      [true, true, false, true, true],
     );
     assert.deepEqual(
       rows.map((row) => row.reason),
@@ -186,6 +188,8 @@ it("질문별 수락은 deep .95/mode .86/MCP .28과 부분 무효 배치에서 
         "accepted",
         "accepted",
         mode === "low" ? "low_confidence" : "invalid_response",
+        "accepted",
+        "accepted",
       ],
     );
     assert.ok(rows.every((row) => row.batchAccepted === false));
@@ -726,7 +730,7 @@ for (const transport of ["http", "cli"]) {
       },
       options,
     );
-    assert.equal(payloads.length, transport === "http" ? 9 : 12);
+    assert.equal(payloads.length, transport === "http" ? 9 : 14);
     for (const payload of payloads) assertProtected(payload);
     for (const payload of payloads.slice(0, outputJudgmentCount))
       assert.match(payload, /(?:chars|lines)/);

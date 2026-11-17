@@ -783,7 +783,7 @@ QwenLM/qwen-code, pingdotgg/t3code, multica-ai/multica, stablyai/orca, max-sixty
 
 ### QwenLM/qwen-code
 - 별 30672, 마지막 push 2026-11-17
-- 근거 파일(커밋 날짜): `docs/users/features/sub-agents.md`(2026-11-08), `docs/users/configuration/settings.md`(2026-11-16), `docs/design/subagent-model-grade.md`(2026-07-26), `docs/design/auto-classifier-main-model-fallback.md`(2026-11-13), `docs/design/auto-classifier-unavailable-fallback.md`(2026-10-10)
+- 근거 파일(커밋 날짜): 사용자 문서 `features/sub-agents.md`(2026-11-08), `configuration/settings.md`(2026-11-16), `docs/design/subagent-model-grade.md`(2026-07-26), `docs/design/auto-classifier-main-model-fallback.md`(2026-11-13), `docs/design/auto-classifier-unavailable-fallback.md`(2026-10-10)
 - 선택 이유: 서브에이전트 모델 해석 순서와 용량 오류 폴백이 사용자 문서에 있다.
 
 **역할과 모델**

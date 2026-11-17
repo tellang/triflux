@@ -6,7 +6,7 @@
 - 스킬 선택 결정트리 (SSOT)
 - 행동 유형 → 스킬 매핑
 - 깊이 수정자
-- CLI 우선순위 정책: default = Codex (모델 배치 포함)
+- CLI 우선순위 정책: 역할군별 3사 후보 순서 (모델 배치 포함)
 - CLI 라우팅 (원격 오프로드 기본 정책 포함)
 - 충돌 해소
 
@@ -96,49 +96,52 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | 자율 | 알아서, 자동으로, autopilot | autopilot 모드 |
 | 최대 effort | ultracode, 울트라코드 | Claude Code `--effort ultracode`(v2.1.203+). 멀티에이전트 Workflow 오케스트레이션, 토큰 비용 무관 철저성 우선. tfx CLI 플래그는 아니다 |
 
-## CLI 우선순위 정책: default = Codex
+## CLI 우선순위 정책: 역할군별 3사 후보 순서
 
-> 근거(why): [ADR-0004: 기본 구현 CLI = Codex](../../docs/adr/0004-codex-as-default-cli.md). 이 절이 SSOT(어떻게), ADR은 결정 이력(왜).
+> 근거(why): [ADR-0054: 역할군별 3사 모델 우선순위 라우팅](../../docs/adr/0054-multi-vendor-priority-routing.md) (기존 [ADR-0004](../../docs/_archive/adr/0004-codex-as-default-cli.md), [ADR-0039](../../docs/_archive/adr/0039-review-by-author-vendor.md), [ADR-0053](../../docs/_archive/adr/0053-agy-carbon-explicit-family.md) 대체). 이 절이 SSOT(어떻게), ADR은 결정 이력(왜)이다.
 
-| 우선순위 | CLI / 모델 | default 적용 lane |
-|---------|-----------|-------------------|
-| 1차 (default) | **Codex** (프로필 설정 기준) | 구현, 수정, 디버그, 분석, 테스트 작성, 회귀 가드, 릴리즈 prepare |
-| 2차 | **Antigravity** | Codex quota exhaust, 가독성 cross-check, 별도 시각 검토 |
-| 한정 (Claude 만) | **Claude** (`opus` 최신 tier 별칭) | 메타 라우팅 (`/tfx-harness`), planning gate (`/gstack-office-hours`, `/gstack-autoplan`), gstack-specific surface (`/gstack-context-*`, `/gstack-qa`), 작성 벤더별 교차 리뷰, 또는 Codex/Antigravity 미가용 |
+단일 기본 벤더 대신 6개 역할군별로 3사(`codex`, `antigravity`, `claude`) 후보 순서와 등급을 정한다. 정본 구현은 `scripts/lib/vendor-priority-policy.mjs`와 `scripts/lib/quota-snapshot.mjs`다.
 
-`tfx-auto`, `tfx-review`, `tfx-research` 등 multi-CLI wrapper 는 이 정책을 따른다. 명시 플래그 (`--cli claude`, `--cli codex`) 가 있으면 override. `--mode consensus` (3-CLI 합의) 도 default head 는 Codex.
+| 역할군 | 대표 역할 | 1순위 | 2순위 | 3순위 |
+|---|---|---|---|---|
+| 탐색 (exploration) | `explore`, `spark`, `summarizer`, `classifier`, `triage`, `translator`, `formatter` | `claude haiku low` | `codex luna low` | `antigravity hydrogen low` |
+| 판단 및 설계 (judgment) | `architect`, `planner`, `critic`, `analyst`, `debugger`, `deep-executor`, `scientist-deep` | `claude opus high` | `codex astra xhigh` (단독 `ultraEligible`은 `ultra` 허용) | `antigravity carbon high` |
+| 실행 (execution) | `executor`, `test-engineer`, `verifier`, `qa-tester`, `scientist`, `build-fixer`, `cleanup`, `deslop` | `codex` (`sol high` / `sol medium`) | `antigravity` (`hydrogen medium` / `hydrogen high` / `hydrogen low`) | `claude` (`sonnet medium` / `sonnet high` / `sonnet low`) |
+| 검증 및 교차 리뷰 (verification) | `code-reviewer`, `quality-reviewer`, `security-reviewer` | 일반 리뷰: 작성자 제외(`codex sol high` / `claude opus`), `security-reviewer`: `claude fable high` | 일반 리뷰: 타 벤더 2순위(`claude opus` / `antigravity hydrogen high`), `security-reviewer`: `codex astra xhigh` | 일반 리뷰: 타 벤더 전멸 시 동일 벤더 새 세션(`freshSessionRequired`), `security-reviewer`: `antigravity carbon high` |
+| 문서 및 시각 설계 (writing_design) | `designer`, `writer`, `researcher`, `document-specialist` | `designer`: `claude opus high`, 문서군: `antigravity argon medium` | `designer`: `antigravity hydrogen high`, 문서군: `claude opus medium/high` | `designer`: `codex sol high`, 문서군: `codex terra high` |
+| 리드 및 소통 (lead_communication) | `lead`, `communication-report`, `communication-relay` | `lead`: `claude opus high`, `report`: `claude opus medium`, `relay`: `claude haiku low` | `lead`: `codex astra xhigh`, `report`: `antigravity argon medium`, `relay`: `codex luna low` | `lead`: `antigravity carbon high`, `relay`: `antigravity hydrogen low` (`report`는 명시 `--cli codex` 시 `terra high`) |
 
-`--retry auto-escalate` 체인 (`.claude/rules/tfx-escalation-chain.md`) 의 1단계가 Codex 인 것도 이 정책과 정합한다 (2단계 Claude `fable` 최신 tier 별칭은 최종 수단).
+`tfx-auto`, `tfx-review`, `tfx-research`, `tfx lead` 등 multi-CLI 래퍼는 이 정책을 따른다. 명시 플래그(`--cli claude`, `--cli codex`, `--cli antigravity`)가 있으면 해당 벤더를 최우선으로 선택하며, `TFX_DISABLE_*` 등으로 하드 차단되었거나 소진된 경우에만 다음 가용 후보로 폴백한다. `--retry auto-escalate` 체인(`.claude/rules/tfx-escalation-chain.md`)은 `codex astra_max` -> `antigravity carbon_high` -> `claude fable` 3단계로 승격한다.
 
-### 모델 배치
+### 모델 배치와 쿼터·Jev 조정
 
-> 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0038](../../docs/_archive/adr/0038-agy-default-argon-family.md), [ADR-0039](../../docs/adr/0039-review-by-author-vendor.md), [ADR-0048](../../docs/adr/0048-codex-terra-family-for-writing-lanes.md), [ADR-0053](../../docs/adr/0053-agy-carbon-explicit-family.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
+> 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0038](../../docs/_archive/adr/0038-agy-default-argon-family.md), [ADR-0048](../../docs/adr/0048-codex-terra-family-for-writing-lanes.md), [ADR-0054](../../docs/adr/0054-multi-vendor-priority-routing.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
 
-Codex 역할별 가족과 effort의 SSOT는 `scripts/lib/agent-route-policy.mjs`이다. Jev를 켠 사용자만 사전 라우팅이 등급을 조정한다. `executor`, `codex`, `lead`와 CLI 이름 역할은 복잡도로 고르고, 다른 역할은 기본 등급 대비 lower, keep, raise 판정으로 사다리를 한 단계만 옮긴다. 모두 신뢰도 0.85 미만이면 기본 등급을 유지하고, 명시 프로필이 항상 우선한다. `security-reviewer`는 내리지 않는다. `scripts/lib/model-family-resolver.mjs`가 가족 파일 `~/.codex/<가족>.config.toml`의 `model`을 갱신하고, effort는 `-c model_reasoning_effort`로 전달한다. `designer`, `writer`, `document-specialist` 항목은 직접 Codex를 지정한 경우에만 적용하며 일반 실행의 provider는 `hub/team/agent-map.json`이 정한다. 입력이 큰 코드베이스 읽기는 antigravity 로 보낸다(Argon 은 입출력 공유 1M 문맥).
+역할별 후보 순서, 가족, effort의 SSOT는 `scripts/lib/vendor-priority-policy.mjs`와 `scripts/lib/agent-route-policy.mjs`다.
 
-| 가족 + effort / Claude 별칭 | triflux lane |
+- **쿼터 스냅샷 규칙 (`scripts/lib/quota-snapshot.mjs`):** 사용률 `>=100%`이거나 런타임 쿨다운 마커(`$TFX_TMP/tfx-quota-reset-<cli>`, `$TFX_TMP/tfx-agy-quota-reset`)가 만료되지 않은 벤더는 후보에서 제외한다. 사용률 `>95%`인 벤더 후보는 배열 우측부터 역순으로 정확히 1칸만 후순위로 내린다(95% 이하는 순서 유지, 기존 80% 전환 규칙은 폐기).
+- **Jev 최대 1칸 조정 (`reconcileCandidatesWithJev`):** Jev를 켜고 신뢰도가 `0.85` 이상일 때만 후보 배열의 인접 1칸 교환(`visual_frontend`, `long_context`, `deep_architecture`, `fast_parallel_slice`) 또는 등급 1단계 조정을 적용한다. `decomposable === false`이면 등급 하향(`lower`)을 차단하고, `security-reviewer`는 내리지 않는다. 명시 프로필이 항상 우선한다.
+- **교차 리뷰 작성자 분리:** `code-reviewer`와 `quality-reviewer`는 `TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 작성 벤더를 받아 후보에서 제외한다(미지정이면 `codex`, 잘못된 값은 오류). `TFX_REVIEW_AUTHOR_TIER=top`이면 남은 후보를 상위 등급(`opus`, `astra xhigh`, `carbon high`)으로 승격한다. 다른 두 벤더가 모두 비가용일 때만 동일 벤더 후보를 새 세션 격리(`freshSessionRequired: true`) 조건으로 허용하며, 세 벤더 모두 비가용이면 `exit 78`로 실패한다.
+
+| 가족 + effort / Claude 별칭 | triflux 배정 |
 |---------|--------------|
-| `astra` + `xhigh` | architect, planner, critic, analyst, debugger, deep-executor, security-reviewer(직접 Codex 지정), scientist-deep, designer(직접 지정) |
-| `astra` + `max` / `astra` + `ultra` | `TFX_CODEX_PROFILE=max/ultra`, 재시도 1단계 |
-| `sol` + `high` | executor, codex, code-reviewer, quality-reviewer(Claude 작성 코드 또는 사용량 전환), verifier, test-engineer, qa-tester, scientist |
+| `astra` + `xhigh` | scientist-deep(단독 실행은 ultra 허용), deep-executor, debugger, architect/planner/critic/analyst(2순위), designer(2순위), security-reviewer(2순위) |
+| `astra` + `max` / `astra` + `ultra` | `TFX_CODEX_PROFILE=max/ultra`, `--retry auto-escalate` 1단계(`astra_max`) |
+| `sol` + `high` | executor, codex, verifier, test-engineer, qa-tester, scientist, code-reviewer/quality-reviewer(Claude·agy 작성 코드) |
 | `sol` + `medium` | cleanup, deslop |
-| `terra` + `high` | writer(직접 지정), document-specialist. 공식 문서가 Terra 를 글쓰기, 시각 이해, 컴퓨터 사용용으로 둔다 |
-| `luna` + `high` | build-fixer |
-| `luna` + `low` | spark, explore 재매핑, ChatGPT tier 폴백 |
-| `argon` + `low` / `medium` / `high` | Antigravity 분류, 요약 / 생성, 작성 / security-reviewer, 검토, 설계 |
-| `carbon` + `low` / `medium` / `high` | Antigravity 상위 가족. 기본 배정 없음, `TFX_GEMINI_PROFILE=carbon_high`처럼 명시할 때만 사용. 목록에 없으면 같은 effort의 Argon으로 폴백 |
-| `fable` | `--retry auto-escalate` 최종 단계 |
-| `opus` | 메타 라우팅, planning gate, Codex·Argon 작성 코드의 code-reviewer·quality-reviewer |
-| `sonnet` | Claude native test-engineer, qa-tester |
-| `haiku` | Claude 리드 native explore, claude |
+| `terra` + `high` | writer(2순위), document-specialist(2순위), communication-report(2순위) |
+| `luna` + `high` / `luna` + `low` | build-fixer(`high`), spark(`low`), explore/communication-relay 보조(`low`) |
+| `hydrogen` + `low` / `medium` / `high` | Antigravity 기본 실무 가족: document-specialist, explore 보조(`low`), writer/executor 보조(`medium`), designer, code-reviewer/quality-reviewer, verifier/test-engineer/qa-tester 보조(`high`). 목록에 없으면 같은 effort의 Argon으로 폴백 |
+| `argon` + `low` / `medium` / `high` | Antigravity 호환 및 폴백 가족 (`TFX_GEMINI_PROFILE=argon*` 명시 또는 Hydrogen/Carbon 미보유 시 자동 폴백) |
+| `carbon` + `low` / `medium` / `high` | Antigravity 상위 추론 가족: security-reviewer 1순위(`high`), 판단군 상위 보조(`high`), `--retry auto-escalate` 2단계(`carbon_high`). 목록에 없으면 같은 effort의 Argon으로 폴백 |
+| `fable` | `--retry auto-escalate` 3단계 최종 수단 (리드 자동 선택은 `opus` 상한으로 제한) |
+| `opus` | architect, planner, critic, analyst, lead 1순위, Codex·agy 작성 코드의 code-reviewer/quality-reviewer 1순위 |
+| `sonnet` | writer, communication-report 1순위, executor/test-engineer/qa-tester/verifier 보조 |
+| `haiku` | explore, communication-relay 1순위, spark/cleanup/deslop 보조 |
 
-Antigravity가 금지됐거나 미가용일 때 `TFX_ANTIGRAVITY_FALLBACK=claude`를 명시하면 `security-reviewer`는 `fable`과 high effort로, `designer`는 `opus`와 high effort로, `document-specialist`, `writer`, `antigravity`, `agy`는 `opus`와 기존 effort 정책으로 실행하라. 기본값은 `codex`다.
+Codex는 `models_cache.json`의 공개 모델에서 같은 가족의 최신 버전을 선택하고 캐시가 없으면 `codex debug models`를 읽는다. Antigravity는 `agy models`의 Hydrogen, Argon, Carbon 목록을 하루 동안 캐시(`agy-models-v2.json`)하며, 요청한 Hydrogen이나 Carbon이 목록에 없으면 같은 effort의 Argon으로 폴백하고 stderr에 `agy 가족 폴백`을 남긴다. 최신 모델이 요청 effort를 지원하지 않으면 지원하는 가장 가까운 아래 단계로 제한한다. 옛 `flash*` 프로필 이름은 `argon` + `low`로 해석한다.
 
-`code-reviewer`와 `quality-reviewer`는 `TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 작성 벤더를 받아 다른 벤더로 리뷰한다. 미지정이면 기본 구현자인 Codex로 보고, 잘못된 값은 오류로 끝낸다. Codex 작성 코드는 Claude Opus로, Claude 작성 코드는 Codex `sol` + `high`의 `review`로, Argon 작성 코드는 Claude Opus로 보낸다. `~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`가 80 이상이면 Codex 작성 코드의 리뷰를 Argon High로, Argon 작성 코드의 리뷰를 Codex Sol로 전환한다. 캐시를 읽지 못하면 한도 미만으로 본다. `security-reviewer`는 `argon` + `high`를 쓴다. 명시 CLI 선택의 우선순위는 유지한다. 리드별 verifier와 explore 배치는 `skills/tfx-lead/SKILL.md`를 따른다.
-
-Codex는 `models_cache.json`의 공개 모델에서 같은 가족의 최신 버전을 선택한다. 캐시가 없으면 `codex debug models`를 읽는다. agy는 `agy models`의 Argon과 Carbon 목록을 하루 동안 캐시한다. Carbon은 Google AI Ultra 구독자만 쓰므로 목록을 읽었는데 Carbon이 없으면 같은 effort의 Argon으로 폴백하고 stderr에 `agy 가족 폴백`을 남긴다. 최신 모델이 요청 effort를 지원하지 않으면 지원하는 가장 가까운 아래 단계로 제한한다. 지원 목록이 없으면 요청값을 유지한다. setup과 update도 같은 해석기를 사용한다. Flash와 Pro는 자동 선택하지 않고, 옛 `flash*` 프로필 이름은 `argon` + `low`로 해석한다.
-
-`~/.config/triflux/models.json`에 `{"sol":"gpt-6-sol","argon":"gemini-4-argon"}`처럼 적으면 해당 가족을 고정한다. Windows는 `%APPDATA%\triflux`를 쓴다. 해석 기록과 agy 목록도 이 상태 디렉터리에 보관한다. 목록 조회 실패 시 마지막 성공 결과, 그다음 내장 기본값을 사용한다. Claude 별칭 라우팅은 유지한다.
+`~/.config/triflux/models.json`(Windows는 `%APPDATA%\triflux\models.json`)에 가족별 모델명을 적으면 해당 가족을 고정한다. 목록 조회 실패 시 마지막 성공 결과, 그다음 내장 기본값을 사용한다. 리드별 verifier와 explore 배치는 `skills/tfx-lead/SKILL.md`를 따른다.
 
 ## CLI 라우팅
 

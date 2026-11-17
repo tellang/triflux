@@ -156,15 +156,26 @@ describe("ensureGeminiProfiles() 기존 설정", () => {
 });
 
 describe("용도별 effort 분리 (SSOT)", () => {
-  it("역할을 Argon effort 프로필로 매핑한다", () => {
-    assert.equal(resolveGeminiProfileForPurpose("designer"), "argon_high");
-    assert.equal(resolveGeminiProfileForPurpose("reviewer"), "argon_high");
-    assert.equal(resolveGeminiProfileForPurpose("Code-Reviewer"), "argon_high");
+  it("역할을 Hydrogen/Argon/Carbon effort 프로필로 매핑한다", () => {
+    assert.equal(resolveGeminiProfileForPurpose("designer"), "hydrogen_high");
+    assert.equal(resolveGeminiProfileForPurpose("reviewer"), "hydrogen_high");
+    assert.equal(
+      resolveGeminiProfileForPurpose("Code-Reviewer"),
+      "hydrogen_high",
+    );
+    assert.equal(
+      resolveGeminiProfileForPurpose("security-reviewer"),
+      "carbon_high",
+    );
     assert.equal(resolveGeminiProfileForPurpose("writer"), "argon");
-    assert.equal(resolveGeminiProfileForPurpose("antigravity"), "argon");
-    assert.equal(resolveGeminiProfileForPurpose("summarizer"), "argon_low");
-    assert.equal(resolveGeminiProfileForPurpose("no-such-role"), "argon");
-    assert.equal(resolveGeminiProfileForPurpose(""), "argon");
+    assert.equal(
+      resolveGeminiProfileForPurpose("document-specialist"),
+      "argon",
+    );
+    assert.equal(resolveGeminiProfileForPurpose("antigravity"), "hydrogen");
+    assert.equal(resolveGeminiProfileForPurpose("summarizer"), "hydrogen_low");
+    assert.equal(resolveGeminiProfileForPurpose("no-such-role"), "hydrogen");
+    assert.equal(resolveGeminiProfileForPurpose(""), "hydrogen");
   });
 
   it("프로필 이름을 display name 으로 푼다 (사용자 파일 우선, 없으면 기본값)", () => {

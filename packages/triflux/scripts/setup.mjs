@@ -190,6 +190,7 @@ export function buildMachineProfileDefaults({
     "TFX_SETUP_USE_ANTIGRAVITY",
     detectedAntigravity,
   );
+  const useClaude = parseSetupBoolean(env, "TFX_SETUP_USE_CLAUDE", true);
   const hardCeilingSec = parseSetupNonNegativeInteger(
     env,
     "TFX_SETUP_HARD_CEILING_SEC",
@@ -211,6 +212,7 @@ export function buildMachineProfileDefaults({
     TFX_MULTIPLEXER_POLICY: platform === "win32" ? "psmux" : "tmux",
     TFX_DISABLE_CODEX: useCodex ? "0" : "1",
     TFX_DISABLE_ANTIGRAVITY: useAntigravity ? "0" : "1",
+    TFX_DISABLE_CLAUDE: useClaude ? "0" : "1",
     TFX_TIMEOUT_POLICY: deriveTimeoutPolicy(hardCeilingSec, stallKill),
     TFX_HARD_CEILING_SEC: String(hardCeilingSec),
     TFX_STALL_THRESHOLD: String(stallThreshold),

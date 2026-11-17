@@ -147,6 +147,8 @@ function runBash(command, extraEnv = {}, { cwd = PROJECT_ROOT } = {}) {
         TFX_CLI_MODE: "auto",
         TFX_DISABLE_CODEX: "0",
         TFX_DISABLE_ANTIGRAVITY: "0",
+        TFX_DISABLE_CLAUDE: "0",
+        CLAUDE_BIN: "__nonexistent_claude__",
         TFX_PREFLIGHT_LOADED: "1",
         TFX_CODEX_OK: "1",
         TFX_ANTIGRAVITY_OK: "0",
@@ -191,6 +193,7 @@ function allowedMcpServers(result) {
 function fixtureEnv(extraEnv = {}, options = {}) {
   const home = createRouteHome(options);
   return {
+    CLAUDE_BIN: "claude",
     ...extraEnv,
     PATH: `${FIXTURE_BIN}:${process.env.PATH || ""}`,
     HOME: home,
@@ -289,16 +292,26 @@ describe("tfx-route.sh — TFX_DISABLE_CODEX / TFX_DISABLE_ANTIGRAVITY", () => {
     assert.doesNotMatch(out(result), /cli: antigravity/);
   });
 
-  it("두 CLI를 모두 disable하면 claude-native로 강등하지 않고 fail-loud 한다", () => {
-    const result = runBash(
+  it("codex와 antigravity를 disable하면 외부 claude 워커로 전환하고, 세 벤더 모두 disable하면 fail-loud 한다", () => {
+    const claudeWorker = runBash(
       `TFX_DISABLE_CODEX=1 TFX_DISABLE_ANTIGRAVITY=1 bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
       fixtureEnv({ FAKE_CODEX_MODE: "exec" }),
     );
 
-    assert.equal(result.status, 78, out(result));
-    assert.match(out(result), /TFX_DISABLE_CODEX=1: codex 선택 차단/);
-    assert.match(out(result), /허용되고 사용 가능한 외부 CLI가 없습니다/);
-    assert.doesNotMatch(out(result), /ROUTE_TYPE=claude-native/);
+    assert.equal(claudeWorker.status, 0, out(claudeWorker));
+    assert.match(out(claudeWorker), /TFX_DISABLE_CODEX=1: codex 선택 차단/);
+    assert.match(out(claudeWorker), /type=claude|cli: claude/);
+    assert.doesNotMatch(out(claudeWorker), /ROUTE_TYPE=claude-native/);
+
+    const allBlocked = runBash(
+      `TFX_DISABLE_CODEX=1 TFX_DISABLE_ANTIGRAVITY=1 TFX_DISABLE_CLAUDE=1 bash "${ROUTE_SCRIPT}" executor 'test-prompt' minimal 5`,
+      fixtureEnv({ FAKE_CODEX_MODE: "exec" }),
+    );
+
+    assert.equal(allBlocked.status, 78, out(allBlocked));
+    assert.match(allBlocked.stderr, /TFX_DISABLE_CLAUDE=1: claude 선택 차단/);
+    assert.match(out(allBlocked), /허용되고 사용 가능한 외부 CLI가 없습니다/);
+    assert.doesNotMatch(out(allBlocked), /ROUTE_TYPE=claude-native/);
   });
 
   it("남은 허용 CLI가 미가용이면 claude-native가 아니라 fail-loud 한다", () => {
@@ -307,6 +320,7 @@ describe("tfx-route.sh — TFX_DISABLE_CODEX / TFX_DISABLE_ANTIGRAVITY", () => {
       fixtureEnv({
         CODEX_BIN: "missing-codex",
         AGY_BIN: "missing-agy",
+        CLAUDE_BIN: "missing-claude",
         TFX_ANTIGRAVITY_OK: "0",
       }),
     );
@@ -322,6 +336,7 @@ describe("tfx-route.sh — TFX_DISABLE_CODEX / TFX_DISABLE_ANTIGRAVITY", () => {
       fixtureEnv({
         CODEX_BIN: "missing-codex",
         AGY_BIN: "missing-agy",
+        CLAUDE_BIN: "missing-claude",
         TFX_ANTIGRAVITY_OK: "0",
       }),
     );
@@ -339,6 +354,7 @@ describe("tfx-route.sh — TFX_DISABLE_CODEX / TFX_DISABLE_ANTIGRAVITY", () => {
         TFX_PREFLIGHT_LOADED: "1",
         TFX_CODEX_OK: "0",
         TFX_ANTIGRAVITY_OK: "0",
+        CLAUDE_BIN: "missing-claude",
         FAKE_CODEX_MODE: "exec",
       }),
     );
@@ -515,14 +531,20 @@ describe("tfx-route.sh — TFX_DISABLE_CODEX / TFX_DISABLE_ANTIGRAVITY", () => {
 // ── TFX_NO_CLAUDE_NATIVE 검증 ──
 
 describe("tfx-route.sh — TFX_NO_CLAUDE_NATIVE 유효성 검증", () => {
-  it("TFX_NO_CLAUDE_NATIVE=1 은 정상 실행되어야 한다 (codex 미설치 시 claude-native 유지)", () => {
-    // 테스트 환경에서 codex가 없을 수 있으므로 종료 코드 0을 기대하되
-    // claude-native 유지 또는 codex 리매핑 모두 허용
-    const result = runBash(
+  it("TFX_NO_CLAUDE_NATIVE=1 은 ROUTE_TYPE=claude-native 를 금지하고 외부 Claude CLI 워커로 폴백하거나 미설치 시 78로 종료한다", () => {
+    const withClaudeCli = runBash(
+      `TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=__nonexistent_codex__ TFX_ANTIGRAVITY_OK=0 bash "${ROUTE_SCRIPT}" explore 'test-prompt' minimal 5`,
+      fixtureEnv(),
+    );
+    assert.equal(withClaudeCli.status, 0, out(withClaudeCli));
+    assert.doesNotMatch(out(withClaudeCli), /ROUTE_TYPE=claude-native/);
+    assert.match(out(withClaudeCli), /type=claude|cli: claude/);
+
+    const noneAvailable = runBash(
       `TFX_NO_CLAUDE_NATIVE=1 CODEX_BIN=__nonexistent_codex__ bash "${ROUTE_SCRIPT}" explore 'test-prompt'`,
     );
-    assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /ROUTE_TYPE=claude-native/);
+    assert.equal(noneAvailable.status, 78, out(noneAvailable));
+    assert.doesNotMatch(out(noneAvailable), /ROUTE_TYPE=claude-native/);
   });
 
   it("TFX_NO_CLAUDE_NATIVE=2 는 오류로 종료해야 한다", () => {
@@ -584,16 +606,31 @@ describe("tfx-route.sh — Codex exec result", () => {
     assert.match(readFileSync(stdoutLog, "utf8"), /RAW_TRACE:hook line/);
   });
 
-  it("최종 메시지가 byte cap을 넘으면 head가 아니라 tail을 유지한다", () => {
-    const result = runBash(
-      `bash "${ROUTE_SCRIPT}" executor 'hello-long-output' minimal`,
-      fixtureEnv({ FAKE_CODEX_MODE: "exec-long-last-message" }),
+  it("기본 16MB 상한 아래에서는 60KB 한글·ASCII 출력을 자르지 않고, TFX_MAX_STDOUT_BYTES 지정 시에만 tail을 유지한다", () => {
+    const uncutUtf8 = runBash(
+      `bash "${ROUTE_SCRIPT}" executor 'hello-long-utf8' minimal`,
+      fixtureEnv(
+        { FAKE_CODEX_MODE: "exec-long-utf8-last-message" },
+        { includeRoutePost: true },
+      ),
     );
+    assert.equal(uncutUtf8.status, 0, out(uncutUtf8));
+    assert.match(out(uncutUtf8), /HEAD-KO/);
+    assert.match(out(uncutUtf8), /TAIL-KO/);
+    assert.doesNotMatch(out(uncutUtf8), /tail \d+B 유지/);
+    assert.ok(!out(uncutUtf8).includes("\uFFFD"));
 
-    assert.equal(result.status, 0, out(result));
-    assert.match(out(result), /tail 51200B 유지/);
-    assert.match(out(result), /TAIL-MARKER/);
-    assert.doesNotMatch(out(result), /HEAD-MARKER/);
+    const capped = runBash(
+      `TFX_MAX_STDOUT_BYTES=51200 bash "${ROUTE_SCRIPT}" executor 'hello-long-output' minimal`,
+      fixtureEnv(
+        { FAKE_CODEX_MODE: "exec-long-last-message" },
+        { includeRoutePost: true },
+      ),
+    );
+    assert.equal(capped.status, 0, out(capped));
+    assert.match(out(capped), /tail 51200B 유지/);
+    assert.match(out(capped), /TAIL-MARKER/);
+    assert.doesNotMatch(out(capped), /HEAD-MARKER/);
   });
 
   it("exit 0이어도 최종 메시지와 stdout이 모두 없으면 partial/no_final_message로 보고한다", () => {
@@ -725,9 +762,9 @@ describe("tfx-route.sh — Codex exec result", () => {
 });
 
 describe("tfx-route.sh — 역할별 MCP profile 필터", () => {
-  it("spark + auto 는 default profile로 수렴하고 최소 서버만 남겨야 한다", () => {
+  it("spark + auto 는 codex 모드에서 default profile로 수렴하고 최소 서버만 남겨야 한다", () => {
     const result = runBash(
-      `bash "${ROUTE_SCRIPT}" spark 'profile-check' auto`,
+      `TFX_CLI_MODE=codex CODEX_BIN=codex bash "${ROUTE_SCRIPT}" spark 'profile-check' auto`,
       fixtureEnv({ FAKE_CODEX_MODE: "exec", FAKE_CODEX_ECHO_CONFIG: "1" }),
     );
 
@@ -912,13 +949,20 @@ describe("tfx-route.sh — 오류 케이스", () => {
 // ── 라우팅 테이블 검증 ──
 
 describe("tfx-route.sh — 라우팅 테이블 메타데이터", () => {
-  it("designer 에이전트는 type=antigravity 메타데이터를 출력해야 한다", () => {
-    const result = runBash(
+  it("designer 에이전트는 기본 type=claude이고 Claude 차단 시 type=antigravity 메타데이터를 출력해야 한다", () => {
+    const primary = runBash(
       `bash "${ROUTE_SCRIPT}" designer 'test' 2>&1 || true`,
       fixtureEnv({ TFX_ANTIGRAVITY_OK: "1", AGY_BIN: "agy" }),
     );
-    assert.match(out(result), /type=antigravity/);
-    assert.match(out(result), /agent=designer/);
+    assert.match(out(primary), /type=claude/);
+    assert.match(out(primary), /agent=designer/);
+
+    const fallback = runBash(
+      `TFX_DISABLE_CLAUDE=1 bash "${ROUTE_SCRIPT}" designer 'test' 2>&1 || true`,
+      fixtureEnv({ TFX_ANTIGRAVITY_OK: "1", AGY_BIN: "agy" }),
+    );
+    assert.match(out(fallback), /type=antigravity/);
+    assert.match(out(fallback), /agent=designer/);
   });
 });
 
@@ -950,7 +994,7 @@ describe("tfx-route.sh — executor 라우팅 회귀 방지", {
     assert.equal(result.status, 0, out(result));
     const combined = out(result);
     assert.match(combined, /type=antigravity|cli: antigravity/, combined);
-    assert.match(combined, /TFX_CLI_MODE=antigravity/, combined);
+    assert.doesNotMatch(combined, /ROUTE_TYPE=claude-native/, combined);
   });
 });
 

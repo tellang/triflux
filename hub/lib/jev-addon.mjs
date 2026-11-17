@@ -1063,34 +1063,50 @@ export function executionFlagsForCli(
 
 const COMPLEXITY_ROUTE_MAP = Object.freeze({
   trivial: Object.freeze({
+    tier: "low",
     codexProfile: "luna_low",
-    agyProfile: "argon_low",
+    agyProfile: "hydrogen_low",
     claudeModel: "haiku",
     claudeEffort: "low",
+    tierShift: "lower",
     expectedDurationSec: 60,
   }),
   standard: Object.freeze({
+    tier: "high",
     codexProfile: "sol_high",
-    agyProfile: "argon",
+    agyProfile: "hydrogen",
     claudeModel: "sonnet",
     claudeEffort: "medium",
+    tierShift: "keep",
     expectedDurationSec: 300,
   }),
   deep: Object.freeze({
+    tier: "top",
     codexProfile: "astra_xhigh",
-    agyProfile: "argon_high",
+    agyProfile: "carbon_high",
     claudeModel: "opus",
     claudeEffort: "high",
+    tierShift: "higher",
     expectedDurationSec: 600,
   }),
   high_risk: Object.freeze({
-    codexProfile: "astra_xhigh",
-    agyProfile: "argon_high",
+    tier: "top",
+    codexProfile: "astra_max",
+    agyProfile: "carbon_high",
     claudeModel: "opus",
     claudeEffort: "high",
+    tierShift: "higher",
     expectedDurationSec: 900,
   }),
 });
+
+const TASK_TRAIT_OPTIONS = Object.freeze([
+  "none",
+  "visual_frontend",
+  "long_context",
+  "deep_architecture",
+  "fast_parallel_slice",
+]);
 
 // 복잡도로 등급을 고르는 범용 역할이다. 그 밖의 역할은 기본 등급 대비 방향만 답하고
 // 실제 등급은 agent-route-policy.mjs 의 사다리가 정한다.
@@ -1207,6 +1223,30 @@ export async function judgeTaskRouting(
       query:
         "Choose the best MCP server profile for this task, or 'none' if external MCP tools are unnecessary.",
     },
+    task_trait: {
+      hook: "task_routing_trait",
+      kind: "choice",
+      options: TASK_TRAIT_OPTIONS,
+      criteria: {
+        none: "Standard engineering task without a dominant secondary trait.",
+        visual_frontend:
+          "Frontend layout, visual styling, responsive UI structure, or interactive design verification.",
+        long_context:
+          "Summarizing, indexing, or synthesizing very large documents, logs, or broad web research.",
+        deep_architecture:
+          "Complex system architecture, cross-module trade-offs, or security-sensitive reasoning.",
+        fast_parallel_slice:
+          "Independent implementation slice or rapid iterative execution suited to fast parallel workers.",
+      },
+      query:
+        "Classify the dominant execution trait of this task for candidate tie-breaking.",
+    },
+    decomposable: {
+      hook: "task_routing_decomposable",
+      kind: "noul",
+      query:
+        "Can this task be safely decomposed into independent sub-steps without losing global invariants?",
+    },
   };
 
   if (!TIER_ROUTABLE_ROLES.has(agentType)) {
@@ -1246,6 +1286,22 @@ export async function judgeTaskRouting(
   const modeRes = results.execution_mode;
   const mcpProfRes = results.mcp_profile;
   const shiftRes = results.tier_shift;
+  const traitRes = results.task_trait;
+  const decompRes = results.decomposable;
+
+  const taskTrait =
+    traitRes &&
+    traitRes.confidence >= TIER_CHANGE_MIN_CONFIDENCE &&
+    TASK_TRAIT_OPTIONS.includes(traitRes.choice)
+      ? traitRes.choice
+      : null;
+  const decomposable =
+    decompRes &&
+    decompRes.confidence >= TIER_CHANGE_MIN_CONFIDENCE &&
+    typeof decompRes.value === "boolean"
+      ? decompRes.value
+      : null;
+
   const complexityRouted = TIER_ROUTABLE_ROLES.has(agentType);
   const modelResult = complexityRouted ? compRes : shiftRes;
   const modelThreshold = complexityRouted
@@ -1263,12 +1319,14 @@ export async function judgeTaskRouting(
             : "accepted",
       }
     : undefined;
-  const tierShift =
+  const rawTierShift =
     shiftRes &&
     shiftRes.confidence >= TIER_CHANGE_MIN_CONFIDENCE &&
     (shiftRes.choice === "lower" || shiftRes.choice === "raise")
       ? shiftRes.choice
       : null;
+  const tierShift =
+    decomposable === false && rawTierShift === "lower" ? null : rawTierShift;
 
   const complexity =
     compRes &&
@@ -1325,25 +1383,29 @@ export async function judgeTaskRouting(
     !executionMode &&
     !mcpProfile &&
     !tierShift &&
-    neededMcpServers === null
+    neededMcpServers === null &&
+    !taskTrait &&
+    decomposable === null
   ) {
     return diagnostics
       ? { complexity: null, confidence: null, diagnostics, modelDecision }
       : null;
   }
 
-  const routeSpec =
+  const allowRouteSpec =
     complexity &&
     TIER_ROUTABLE_ROLES.has(agentType) &&
     (complexity === "standard" ||
-      compRes.confidence >= TIER_CHANGE_MIN_CONFIDENCE)
-      ? COMPLEXITY_ROUTE_MAP[complexity] || null
-      : null;
+      compRes.confidence >= TIER_CHANGE_MIN_CONFIDENCE);
+  const routeSpec = allowRouteSpec
+    ? COMPLEXITY_ROUTE_MAP[complexity] || null
+    : null;
 
   let codexProfile = routeSpec ? routeSpec.codexProfile : null;
   if (
     routeSpec &&
     complexity === "standard" &&
+    decomposable !== false &&
     /deslop|cleanup|format|lint|rename|typo/i.test(trimmedPrompt)
   ) {
     codexProfile = "sol_med";
@@ -1356,6 +1418,7 @@ export async function judgeTaskRouting(
     complexity ? compRes : null,
     executionMode ? modeRes : null,
     mcpProfile ? mcpProfRes : null,
+    taskTrait ? traitRes : null,
   ]
     .filter((r) => r && Number.isFinite(r.confidence))
     .map((r) => r.confidence);
@@ -1367,6 +1430,10 @@ export async function judgeTaskRouting(
           ).toFixed(4),
         )
       : threshold;
+  const vendorConfidence =
+    traitRes && Number.isFinite(traitRes.confidence)
+      ? traitRes.confidence
+      : avgConfidence;
 
   return {
     complexity,
@@ -1381,6 +1448,13 @@ export async function judgeTaskRouting(
     mcpProfile,
     neededMcpServers,
     tierShift,
+    taskTrait,
+    decomposable,
+    vendorAdjustment: {
+      confidence: vendorConfidence,
+      taskTrait: taskTrait || "none",
+      decomposable,
+    },
     confidence: avgConfidence,
     ...(modelDecision ? { modelDecision } : {}),
     ...(diagnostics ? { diagnostics } : {}),
@@ -1630,11 +1704,11 @@ export async function judgeTaskAssignment(
 
   const defaultCriteria = {
     codex:
-      "Backend implementation, refactoring, unit tests, CLI scripts, and multi-file code changes.",
+      "Implementation, refactoring, terminal-heavy test-fix loops, CLI scripts, and multi-file code changes.",
     claude:
-      "Deep architectural design, nuanced Korean documentation, complex reasoning, and interactive review.",
+      "Architectural planning, security review, UI layout and visual structure, nuanced Korean writing, and judgment-heavy coordination.",
     antigravity:
-      "Fast codebase exploration, frontend/UI prototyping, and lightweight verification.",
+      "Long-document synthesis, broad web research, large context exploration, and secondary visual prototyping.",
   };
   const criteria = Object.fromEntries(
     normalizedWorkers.map((w) => [

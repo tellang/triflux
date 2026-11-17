@@ -1,9 +1,83 @@
 // headless 세션 결과 색인. 화면의 HEADLESS_COMPLETE 문자열 대신 읽도록 세션당 JSON 하나를 둔다 (ADR-0034).
-import { renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { judgeInstructionAck } from "@triflux/core/hub/lib/jev-addon.mjs";
 
 export const RESULTS_INDEX_VERSION = 1;
+const MAX_HEADING_SCAN_BYTES = 16 * 1024 * 1024;
+const MAX_HEADINGS_PER_WORKER = 200;
+
+/**
+ * 마크다운 본문에서 펜스 코드블록 바깥의 H1~H3 헤딩과 1-기반 줄 번호를 추출한다.
+ *
+ * @param {string} content
+ * @returns {Array<{ level: number, line: number, text: string }>}
+ */
+export function extractMarkdownHeadings(content) {
+  if (typeof content !== "string" || content.length === 0) return [];
+  const lines = content.split(/\r?\n/u);
+  const headings = [];
+  let activeFence = null;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const fenceMatch = line.match(/^\s{0,3}(`{3,}|~{3,})(.*)$/u);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      const ch = marker[0];
+      const len = marker.length;
+      if (!activeFence) {
+        activeFence = { ch, len };
+        continue;
+      }
+      if (
+        activeFence.ch === ch &&
+        len >= activeFence.len &&
+        fenceMatch[2].trim() === ""
+      ) {
+        activeFence = null;
+        continue;
+      }
+    }
+    if (activeFence) continue;
+
+    const headingMatch = line.match(
+      /^\s{0,3}(#{1,3})[ \t]+(.+?)(?:[ \t]+#+[ \t]*)?$/u,
+    );
+    if (!headingMatch) continue;
+    const text = headingMatch[2].trim();
+    if (!text) continue;
+    headings.push({
+      level: headingMatch[1].length,
+      line: i + 1,
+      text,
+    });
+    if (headings.length >= MAX_HEADINGS_PER_WORKER) break;
+  }
+
+  return headings;
+}
+
+function readResultFileHeadings(filePath) {
+  if (typeof filePath !== "string" || !filePath) return [];
+  try {
+    if (!existsSync(filePath)) return [];
+    const st = statSync(filePath);
+    if (!st.isFile() || st.size === 0 || st.size > MAX_HEADING_SCAN_BYTES) {
+      return [];
+    }
+    return extractMarkdownHeadings(readFileSync(filePath, "utf8"));
+  } catch {
+    return [];
+  }
+}
 
 export function resultsIndexPath(dir, sessionName) {
   return join(dir, `${sessionName}.results.json`);
@@ -35,6 +109,7 @@ export function createResultsIndex(path, sessionName, workers, canWrite) {
       startedAt: null,
       finishedAt: null,
       resultFile: w.resultFile,
+      headings: [],
       workerModelFile: null,
       workerMcpFile: null,
       ackStatus: null,
@@ -80,20 +155,28 @@ export function createResultsIndex(path, sessionName, workers, canWrite) {
       w.exitCode = exitCode ?? null;
       w.sessionDead = Boolean(sessionDead);
       w.finishedAt = now();
+      w.headings = readResultFileHeadings(w.resultFile);
       flush();
     },
     finish(completed, results = []) {
       for (const result of results) {
         const w = byPane.get(result.paneName);
         if (!w) continue;
+        if (result.resultFile) {
+          w.resultFile = result.resultFile;
+        }
         w.workerModelFile = result.workerModelFile ?? null;
         w.workerMcpFile = result.workerMcpFile ?? null;
+        w.headings = readResultFileHeadings(w.resultFile);
       }
       // 예외로 끝나면 끝나지 못한 워커를 failed 로 확정해 "아직 도는 중"과 구분한다.
       for (const w of index.workers) {
         if (w.status === "pending" || w.status === "running") {
           w.status = "failed";
           w.finishedAt = now();
+        }
+        if (!Array.isArray(w.headings) || w.headings.length === 0) {
+          w.headings = readResultFileHeadings(w.resultFile);
         }
       }
       index.finishedAt = now();
