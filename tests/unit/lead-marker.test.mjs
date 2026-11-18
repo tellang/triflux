@@ -147,6 +147,16 @@ describe("lead-marker", () => {
       null,
     );
 
+    // 일시적 tmux 조회 실패(false)에서는 표지를 매칭하지 않되 파일 자체는 지우지 않는다.
+    assert.equal(
+      readLeadMarker(
+        { paneId: "%11" },
+        { env, resolvePaneSession: () => false },
+      ),
+      null,
+    );
+    assert.equal(existsSync(join(leadRoleDir(env), "app-comm.json")), true);
+
     // 재사용된 paneId에서 실제 tmux 세션 이름이 다르면 오래된 표지를 삭제하고 건너뛴다.
     assert.equal(
       readLeadMarker(

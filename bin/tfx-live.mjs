@@ -3460,7 +3460,7 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
       } while (cursor !== null);
     }
     const enableCodexHooks =
-      opts.role === "lead" || opts.role === "communication";
+      opts.sessionRole === "lead" || opts.sessionRole === "communication";
     const config = enableCodexHooks ? {} : { "features.hooks": false };
     if (opts.effort !== undefined) config.model_reasoning_effort = opts.effort;
     const permissions = opts.sandbox
@@ -3637,7 +3637,7 @@ async function doStartTmux(launchAdapter, opts) {
   };
   if (
     adapter.cli === "codex" &&
-    (opts.role === "lead" || opts.role === "communication")
+    (opts.sessionRole === "lead" || opts.sessionRole === "communication")
   ) {
     const { resumeById, resumeLast } = adapter;
     adapter.launchKeys = [
@@ -4043,7 +4043,7 @@ end tell`;
   if (
     ready &&
     !remote &&
-    (opts.role === "lead" || opts.role === "communication")
+    (opts.sessionRole === "lead" || opts.sessionRole === "communication")
   ) {
     try {
       const paneOut = await runTmux(null, [
@@ -4062,8 +4062,8 @@ end tell`;
         session,
         paneId,
         cli: adapter.cli,
-        sessionRole: opts.role,
-        role: opts.role,
+        sessionRole: opts.sessionRole,
+        role: opts.role || opts.sessionRole,
         name: name || opts.name || session,
         cwd: pathResolve(cwd || process.cwd()),
         conversationId: conversation?.conversationId ?? null,
@@ -5494,6 +5494,11 @@ function startOpts(flags) {
         ? "off"
         : flags.layout,
     role: flags.role,
+    sessionRole:
+      flags["session-role"] ??
+      (flags.role === "lead" || flags.role === "communication"
+        ? flags.role
+        : undefined),
     human: flags.human,
     task: flags.task,
     focus: Boolean(flags.focus),

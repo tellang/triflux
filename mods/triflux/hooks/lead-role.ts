@@ -11,7 +11,12 @@ export function leadSessionName(role: string, now: number) {
 }
 
 // 이 프로세스에서 표지를 남긴 세션 ID. /clear 뒤 표지를 새 ID 로 옮길 때 쓴다.
-export type Holder = { sessionId?: string; monitor?: Monitor }
+export type Holder = {
+  sessionId?: string
+  monitor?: Monitor
+  noTmuxPane?: boolean
+  lazyChecks?: number
+}
 export type LeadMark = { role: string; since: string; kind?: 'lead' | 'communication' }
 
 const leadKey = (sessionId: string) => 'tfx.lead.' + sessionId
@@ -40,7 +45,10 @@ async function liveTmuxSessionForPane($: EngineInterface, paneId: string): Promi
 async function adoptPaneLeadMarker($: EngineInterface, monitor: Monitor, lead: Holder) {
   try {
     const paneId = await $.env.get('TMUX_PANE')
-    if (!paneId) return
+    if (!paneId) {
+      lead.noTmuxPane = true
+      return
+    }
     const sessionId = await $.session.id()
     if (await $.store.get(leadKey(sessionId))) return
     const xdgState = await $.env.get('XDG_STATE_HOME')
@@ -93,7 +101,8 @@ export async function sessionMark($: EngineInterface, prefix: string, holder: Ho
 export async function leadOf($: EngineInterface, lead: Holder) {
   const existing = (await sessionMark($, 'tfx.lead.', lead)) as LeadMark | undefined
   if (existing) return existing
-  if (lead.monitor?.interactive) {
+  if (lead.monitor?.interactive && !lead.noTmuxPane && (lead.lazyChecks ?? 0) < 3) {
+    lead.lazyChecks = (lead.lazyChecks ?? 0) + 1
     await adoptPaneLeadMarker($, lead.monitor, lead)
     return (await sessionMark($, 'tfx.lead.', lead)) as LeadMark | undefined
   }
@@ -104,6 +113,8 @@ export function registerLeadRole(on: On, monitor: Monitor, lead: Holder) {
   lead.monitor = monitor
   for (const isInteractive of [true, false]) {
     on('session.start', { isInteractive }, async ($, e, next) => {
+      lead.noTmuxPane = undefined
+      lead.lazyChecks = 0
       await $.command.register({ name: 'tfx-lead', description: '이 세션에 역할 리드를 맡긴다: <역할>', argumentHint: '<역할>' })
       if (isInteractive) await adoptPaneLeadMarker($, monitor, lead)
       return next(e)
@@ -114,6 +125,8 @@ export function registerLeadRole(on: On, monitor: Monitor, lead: Holder) {
     await $.store.delete(leadKey(e.sessionId))
     if (lead.sessionId && lead.sessionId !== e.sessionId) await $.store.delete(leadKey(lead.sessionId))
     lead.sessionId = undefined
+    lead.noTmuxPane = undefined
+    lead.lazyChecks = 0
     return next(e)
   })
   on('command.run', { command: 'tfx-lead' }, async ($, e) => {

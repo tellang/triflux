@@ -90,7 +90,7 @@ function defaultResolvePaneSession(paneId, env = process.env) {
   try {
     const out = execFileSync(
       "tmux",
-      ["display-message", "-p", "-t", paneId, "#{session_name}"],
+      ["list-panes", "-a", "-F", "#{pane_id}\t#{session_name}"],
       {
         env,
         encoding: "utf8",
@@ -98,9 +98,16 @@ function defaultResolvePaneSession(paneId, env = process.env) {
         stdio: ["ignore", "pipe", "ignore"],
       },
     );
-    return String(out || "").trim() || null;
-  } catch {
+    for (const line of String(out || "").split("\n")) {
+      if (!line) continue;
+      const tab = line.indexOf("\t");
+      if (tab > 0 && line.slice(0, tab) === paneId) {
+        return line.slice(tab + 1).trim() || null;
+      }
+    }
     return null;
+  } catch {
+    return false;
   }
 }
 
@@ -132,6 +139,9 @@ function findActiveLeadMarker(payload, env = process.env, opts = {}) {
       if (!record.paneId || String(record.paneId).trim() !== tmuxPane) continue;
       if (liveSession === undefined) {
         liveSession = resolvePaneSession(tmuxPane, env);
+      }
+      if (liveSession === false) {
+        continue;
       }
       if (
         liveSession === null ||
