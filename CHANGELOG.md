@@ -2,6 +2,26 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [11.0.0] - 2026-11-18
+
+### Added
+- lead: 상주 소통 세션 역할(`communication`)과 후보 순서(Claude `opus` medium, agy `argon` medium, Codex `terra` high)를 추가하고 `tfx lead <역할> --role communication` 진입점을 연결한다. (#897)
+- tfx-live: Codex(`/new`)와 agy(`/clear`) 리드가 자기 세션을 비운 뒤 인계 문서 읽기 프롬프트를 자동으로 입력하는 `tfx-live clear` 하위 명령을 추가한다. (#898)
+- hud: agy 상태줄 입력의 컨텍스트 사용률을 `~/.local/state/triflux/agy-context/<대화 ID>.json`에 기록하고 `tfx-live` 질의와 `list-sessions --cli agy`에서 읽는다. (#896)
+
+### Changed
+- mcp: 동기화 가드 엔진(`mcp-guard-engine.mjs`)과 `tfx mcp sync|add|remove` 명령을 빼고, 본체 CLI의 `.mcp.json` 위임과 읽기 전용 `tfx mcp list`, Jev 기반 `mcp-recommendations.mjs`, `tfx doctor` 진단 중심으로 경량화한다. (#895)
+- agy: 실제 Antigravity CLI를 다루던 `hud/providers/gemini.mjs`와 `scripts/lib/gemini-profiles.mjs`를 `antigravity.mjs`와 `agy-profiles.mjs`로 옮기고 중복 `process-utils.mjs`와 `claude-worker.mjs` 유틸을 공통 모듈로 단일화한다. (#895, #899)
+- setup: 삭제된 구형 모듈 10종을 `RETIRED_INSTALL_FILES`에 등록해 기존 `~/.claude` 설치본의 고아 파일을 정리하고, `REQUIRED_TOP_LEVEL_SETTINGS`의 고정 `model` 주입을 뺀다. (#894, #899)
+- repo: 자기 설명적 코드와 비직관적 이유 위주의 1% 주석, 과잉 추상화 금지, Node 22+ 내장 API 우선 원칙을 저장소 규칙 문서에 명문화하고 코드베이스 전반의 중복 주석을 정리한다. (#893, #899)
+
+### Removed
+- tui: `hub/team/tui*.mjs` 커스텀 TUI 9종과 대시보드 보조 모듈을 폐기하고 `tmr`, iTerm2 자동 배치(`iterm-layout.mjs`), `results-index.mjs` 요약 경로로 일원화한다. (#894)
+- legacy: `nativeProxy.mjs` 및 브리지 `team-*` 경로, `tfx-live`의 실험적 서브커맨드(`converse`, `goal-driven`, 3자 `peer`, `--mode counting`, `--via message`), 호출처가 없는 `judgeInboxPriority`와 v10 이전 호환 정리 스크립트를 제거한다. (#894, #895, #899)
+
+### Tests
+- tests: 구현 세부 중복 검증을 덜어내고 `node --test` 병렬 실행에 맞춰 스위트를 경량화하며, agy 컨텍스트 기록과 `communication` 역할, `tfx-live clear` 단위 테스트를 추가한다. (#893, #896, #897, #898)
+
 ## [10.99.0] - 2026-11-17
 
 ### Added
