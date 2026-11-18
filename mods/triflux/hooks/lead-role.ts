@@ -12,9 +12,52 @@ export function leadSessionName(role: string, now: number) {
 
 // 이 프로세스에서 표지를 남긴 세션 ID. /clear 뒤 표지를 새 ID 로 옮길 때 쓴다.
 export type Holder = { sessionId?: string }
-export type LeadMark = { role: string; since: string }
+export type LeadMark = { role: string; since: string; kind?: 'lead' | 'communication' }
 
 const leadKey = (sessionId: string) => 'tfx.lead.' + sessionId
+
+function parseLeadArgs(raw: string): { role: string; kind: 'lead' | 'communication' } {
+  const trimmed = raw.trim()
+  const match = /^--role(?:\s+|=)communication(?:\s+(.+))?$/u.exec(trimmed)
+  if (match) return { role: (match[1] ?? '').trim(), kind: 'communication' }
+  return { role: trimmed, kind: 'lead' }
+}
+
+async function adoptPaneLeadMarker($: EngineInterface, monitor: Monitor, lead: Holder) {
+  try {
+    const paneId = await $.env.get('TMUX_PANE')
+    if (!paneId) return
+    const sessionId = await $.session.id()
+    if (await $.store.get(leadKey(sessionId))) return
+    const xdgState = await $.env.get('XDG_STATE_HOME')
+    const home = (await $.env.get('HOME')) || (await $.env.get('USERPROFILE'))
+    const stateBase = xdgState || (home ? `${home}/.local/state` : '')
+    if (!stateBase) return
+    const dir = `${stateBase}/triflux/lead-roles`
+    const entries = await $.fs.list(dir)
+    for (const entry of entries) {
+      if (entry.type !== 'file' || !entry.name.endsWith('.json')) continue
+      try {
+        const raw = JSON.parse(await $.fs.read(`${dir}/${entry.name}`)) as {
+          paneId?: string | null
+          cli?: string | null
+          sessionRole?: string | null
+          role?: string | null
+          since?: string | null
+        }
+        if (raw?.paneId !== paneId || raw?.cli !== 'claude') continue
+        if (raw.sessionRole !== 'lead' && raw.sessionRole !== 'communication') continue
+        const role = typeof raw.role === 'string' && raw.role.trim() ? raw.role.trim() : raw.sessionRole
+        const since = typeof raw.since === 'string' && raw.since ? raw.since : new Date(await $.clock.now()).toISOString()
+        const kind = raw.sessionRole === 'communication' ? 'communication' : 'lead'
+        await $.store.set(leadKey(sessionId), { role, since, kind } satisfies LeadMark)
+        lead.sessionId = sessionId
+        await enablePressure($, monitor)
+        return
+      } catch {}
+    }
+  } catch {}
+}
 
 // 세션 ID 로 묶인 표지를 읽는다. /clear 는 같은 프로세스에서 세션 ID 만 바꾸므로 옛 ID 의 표지를 새 ID 로 옮긴다.
 export async function sessionMark($: EngineInterface, prefix: string, holder: Holder) {
@@ -37,6 +80,7 @@ export function registerLeadRole(on: On, monitor: Monitor, lead: Holder) {
   for (const isInteractive of [true, false]) {
     on('session.start', { isInteractive }, async ($, e, next) => {
       await $.command.register({ name: 'tfx-lead', description: '이 세션에 역할 리드를 맡긴다: <역할>', argumentHint: '<역할>' })
+      if (isInteractive) await adoptPaneLeadMarker($, monitor, lead)
       return next(e)
     })
   }
@@ -48,12 +92,12 @@ export function registerLeadRole(on: On, monitor: Monitor, lead: Holder) {
     return next(e)
   })
   on('command.run', { command: 'tfx-lead' }, async ($, e) => {
-    const role = e.args.trim()
+    const { role, kind } = parseLeadArgs(e.args)
     if (!role) return { text: '사용법: /tfx-lead <역할>' }
     const now = await $.clock.now()
     const name = leadSessionName(role, now)
     const sessionId = await $.session.id()
-    await $.store.set(leadKey(sessionId), { role, since: new Date(now).toISOString() } satisfies LeadMark)
+    await $.store.set(leadKey(sessionId), { role, since: new Date(now).toISOString(), kind } satisfies LeadMark)
     lead.sessionId = sessionId
     const pressure = await enablePressure($, monitor)
     // 호스트는 이 훅이 도는 동안의 $.command.run 을 타이머에서 부른 것까지 거부한다.

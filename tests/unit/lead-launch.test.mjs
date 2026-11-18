@@ -10,8 +10,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import { DEFAULT_JEV_STATS_PATH } from "../../hub/lib/jev-addon.mjs";
+import { readLeadMarker } from "../../hub/lib/lead-marker.mjs";
 import {
   launchLead as launchLeadActual,
   leadDisplayName,
@@ -21,9 +22,15 @@ import {
   resolveLauncher,
 } from "../../hub/team/lead-launch.mjs";
 
+const defaultMarkerStateDir = mkdtempSync(
+  join(tmpdir(), "tfx-lead-marker-test-"),
+);
+after(() => rmSync(defaultMarkerStateDir, { recursive: true, force: true }));
+
 // 기존 모델 라우팅 테스트에서는 공개 Registry와 사용자 MCP 설정을 읽지 않는다.
 function launchLead(input, options = {}) {
   return launchLeadActual(input, {
+    env: { XDG_STATE_HOME: defaultMarkerStateDir },
     recommend: async ({ cliType }) => ({
       cli: cliType,
       status: "deferred",
@@ -803,5 +810,33 @@ describe("tfx lead", () => {
     );
     assert.equal(result.ok, false);
     assert.equal(calls.length, 1);
+  });
+
+  it("launchLead 성공 시 사람이 적은 role 원문과 paneId를 lead-roles 표지에 기록한다", async (t) => {
+    const stateHome = mkdtempSync(join(tmpdir(), "lead-marker-launch-"));
+    t.after(() => rmSync(stateHome, { recursive: true, force: true }));
+    const { run } = fakeRun({
+      start: { ready: true, paneId: "%42" },
+      ask: { ok: true },
+    });
+    const env = { TFX_JEV: "0", XDG_STATE_HOME: stateHome };
+    const result = await launchLead(
+      {
+        cli: "agy",
+        role: "  v11 리드  ",
+        sessionRole: "lead",
+        cwd: "/p/app",
+        launcher: "agy",
+      },
+      { run, env, jevOptions: { env } },
+    );
+    assert.equal(result.ok, true);
+    const marker = readLeadMarker({ session: "app-lead" }, { env });
+    assert.ok(marker);
+    assert.equal(marker.role, "v11 리드");
+    assert.equal(marker.name, result.name);
+    assert.equal(marker.paneId, "%42");
+    assert.equal(marker.cli, "agy");
+    assert.equal(marker.sessionRole, "lead");
   });
 });

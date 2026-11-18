@@ -14,14 +14,22 @@ test('역할 앞에 앞자리 0 없는 날짜를 붙이고 이미 붙어 있으�
 const start = { surface: 'terminal', isInteractive: true, cwd: '/work' } as const
 const lead = { command: 'tfx-lead', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 
-function fixture(on: On, rename: 'ok' | 'reject', uname?: Promise<void>) {
+function fixture(
+  on: On,
+  rename: 'ok' | 'reject',
+  uname?: Promise<void>,
+  extraEnv: Record<string, string> = {},
+) {
   const clock = mock.clock(on, { now: noon })
   mock.store(on)
-  mock.env(on, { HOME: '/home/test' })
+  mock.env(on, { HOME: '/home/test', ...extraEnv })
   const renames: string[] = []
   const toasts: string[] = []
+  const compacts: (string | undefined)[] = []
   on('session.id', () => ({ value: 'session-a' }))
+  on('session.root', () => ({ value: '/work' }))
   on('session.start', () => ({ cwd: '/work' }))
+  on('session.compact', (_, e) => { compacts.push(e.instructions); return { messages: [...e.messages] } })
   on('session.usage', () => ({ value: { context: { window: 1000, tokens: 0, percent: 0 }, rateLimits: [] } }) as never)
   on('process.run', async (_, e) => {
     if (e.argv[0] === 'uname') await uname
@@ -30,13 +38,14 @@ function fixture(on: On, rename: 'ok' | 'reject', uname?: Promise<void>) {
   })
   on('fs.write', () => ({ value: undefined }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('tool.register', (_, e) => ({ value: { tool: `mcp__triflux-mods__${e.name}` } }))
   on('command.run', { command: 'rename' }, (_, e) => {
     renames.push(e.args)
     if (rename === 'reject') throw new Error('거부')
     return { text: e.args }
   })
   on('ui.toast', (_, e) => { toasts.push(e.text); return { value: undefined } })
-  return { clock, renames, toasts }
+  return { clock, renames, toasts, compacts }
 }
 
 test('인자가 없으면 사용법만 돌려주고 이름을 바꾸지 않는다', async ($, on) => {
@@ -83,5 +92,47 @@ test('압박 감시를 켜는 동안 시계가 흘러도 rename 은 명령이 �
   await pending
   await f.clock.settle()
   expect(f.renames).toEqual(['10.21 개발리드'])
+  expect(f.toasts).toEqual([])
+})
+
+test('--role communication 인자로 실행하면 소통 표지로 저장한다', async ($, on) => {
+  const f = fixture(on, 'ok')
+  on('fs.read', () => { throw new Error('ENOENT') })
+  await $.session.start(start)
+  const result = await $.command.run({ ...lead, args: '--role communication 소통창구' })
+  await f.clock.settle()
+  expect(f.renames).toEqual(['10.21 소통창구'])
+  expect(result.text).toContain('이름 변경 요청: 10.21 소통창구')
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: '작업', toolUses: [] }] })
+  expect(f.compacts[0]).toContain('- 소통 역할: 소통창구, 세션 이름: 10.21 소통창구')
+})
+
+test('대화형 session.start 때 TMUX_PANE 과 일치하는 claude 표지를 읽어 소통 세션으로 등록하고 압박 감시를 켠다', async ($, on) => {
+  const f = fixture(on, 'ok', undefined, { TMUX_PANE: '%15' })
+  on('fs.list', (_, e) => {
+    if (e.path === '/home/test/.local/state/triflux/lead-roles') {
+      return { value: [{ name: 'app-comm.json', type: 'file' }] }
+    }
+    return { value: [] }
+  })
+  on('fs.read', (_, e) => {
+    if (e.path === '/home/test/.local/state/triflux/lead-roles/app-comm.json') {
+      return {
+        value: JSON.stringify({
+          session: 'app-comm',
+          paneId: '%15',
+          cli: 'claude',
+          sessionRole: 'communication',
+          role: '문서 소통',
+          since: '2026-10-21T03:00:00.000Z',
+        }),
+      }
+    }
+    throw new Error('ENOENT')
+  })
+  await $.session.start(start)
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: '작업', toolUses: [] }] })
+  expect(f.compacts[0]).toContain('- 소통 역할: 문서 소통, 세션 이름: 10.21 문서 소통')
+  expect((await $.command.run({ ...lead, command: 'tfx-pressure', args: 'status' })).text).toContain('압박 감시: on')
   expect(f.toasts).toEqual([])
 })

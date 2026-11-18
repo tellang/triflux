@@ -30,9 +30,15 @@ async function workersTable($: EngineInterface): Promise<Item> {
 }
 
 // 높은 순위부터 놓는다. 상한을 넘으면 뒤에서부터 뺀다.
-async function leadItems($: EngineInterface, role: string, since: string): Promise<Item[]> {
+async function leadItems(
+  $: EngineInterface,
+  role: string,
+  since: string,
+  kind: 'lead' | 'communication' = 'lead',
+): Promise<Item[]> {
+  const label = kind === 'communication' ? '소통 역할' : '리드 역할'
   return [
-    { text: `- 리드 역할: ${role}, 세션 이름: ${leadSessionName(role, Date.parse(since))}` },
+    { text: `- ${label}: ${role}, 세션 이름: ${leadSessionName(role, Date.parse(since))}` },
     { text: '- 인계 파일과 지시서 경로' },
     await workersTable($),
     { text: '- 열린 PR 번호와 리뷰 상태(리뷰어, 판정, 남은 지적)' },
@@ -55,7 +61,7 @@ export function registerCompactSnapshot(on: On, lead: Holder) {
   on('session.compact', async ($, e, next) => {
     // 블록을 못 만들어도 압축은 막지 않는다.
     const mark = e.agentId ? undefined : await leadOf($, lead).catch(() => undefined)
-    const block = snapshotBlock(mark ? await leadItems($, mark.role, mark.since) : commonItems)
+    const block = snapshotBlock(mark ? await leadItems($, mark.role, mark.since, mark.kind) : commonItems)
     // 사용자나 tfx_control 이 준 지시문을 앞에 그대로 두고 블록을 뒤에 붙인다.
     const instructions = e.instructions?.trim() ? `${e.instructions}\n\n${block}` : block
     return next({ ...e, instructions })

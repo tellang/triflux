@@ -118,3 +118,34 @@ test("Codex 실행 창이 표 값보다 커도 표 값으로 깎지 않는다", 
   assert.equal(guard.ok, undefined);
   assert.equal(guard.contextWarning.contextPct, (1_000_000 / 1_500_000) * 100);
 });
+
+test("Codex 구체 모델(gpt-6.2-astra, gpt-6.2-sol, gpt-6.1)은 실행 창이 없어도 모델별 창과 60/85 임계값을 쓴다", async () => {
+  const astraWarn = await codexRolloutContext(170_000, null, "gpt-6.2-astra");
+  assert.equal(astraWarn.contextLimitTokens, 272_000);
+  assert.equal(astraWarn.exactModelWindow, true);
+  assert.equal(astraWarn.contextPct, (170_000 / 272_000) * 100);
+  assert.equal(
+    contextGuard("codex", astraWarn).contextWarning.thresholdPct,
+    60,
+  );
+
+  const astraBlocked = contextGuard(
+    "codex",
+    await codexRolloutContext(235_000, null, "gpt-6.2-astra-2026"),
+  );
+  assert.equal(astraBlocked.errorCode, "context-limit");
+  assert.equal(astraBlocked.thresholdPct, 85);
+
+  const solWarn = await codexRolloutContext(310_000, null, "gpt-6.2-sol");
+  assert.equal(solWarn.contextLimitTokens, 500_000);
+  assert.equal(solWarn.exactModelWindow, true);
+  assert.equal(contextGuard("codex", solWarn).contextWarning.thresholdPct, 60);
+
+  const gpt61Blocked = contextGuard(
+    "codex",
+    await codexRolloutContext(350_000, null, "gpt-6.1"),
+  );
+  assert.equal(gpt61Blocked.contextLimitTokens, 400_000);
+  assert.equal(gpt61Blocked.errorCode, "context-limit");
+  assert.equal(gpt61Blocked.thresholdPct, 85);
+});

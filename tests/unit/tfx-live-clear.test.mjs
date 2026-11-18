@@ -2,9 +2,10 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { doClear } from "../../bin/tfx-live.mjs";
+import { readLeadMarker, writeLeadMarker } from "../../hub/lib/lead-marker.mjs";
 
 function fixture() {
   const sent = [];
@@ -137,4 +138,37 @@ test("전환이 확인되지 않은 채 상한을 넘기면 뒤따름 없이 실
   assert.equal(result.ok, false);
   assert.equal(result.followUp.inputSent, false);
   assert.match(result.followUp.error, /new conversation not confirmed/);
+});
+
+test("doClear는 리드 표지가 있으면 pendingHandoff와 notifiedThreshold=0으로 갱신한다", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tfx-clear-marker-"));
+  try {
+    const env = { HOME: dir, XDG_STATE_HOME: join(dir, "state") };
+    const handoff = join(dir, "handoff.md");
+    await writeFile(handoff, "인계 내용");
+    writeLeadMarker(
+      {
+        session: "fake",
+        paneId: "%7",
+        cli: "codex",
+        sessionRole: "lead",
+        role: "코드 리드",
+        notifiedThreshold: 85,
+      },
+      { env },
+    );
+    const fake = fixture();
+    fake.deps.env = env;
+    await doClear(
+      fake.flags("codex", { handoff, then: "이어서 검증" }),
+      fake.deps,
+    );
+    const updated = readLeadMarker({ session: "fake" }, { env });
+    assert.equal(updated.notifiedThreshold, 0);
+    assert.equal(updated.pendingHandoff.path, resolve(handoff));
+    assert.equal(updated.pendingHandoff.then, "이어서 검증");
+    assert.equal(typeof updated.pendingHandoff.at, "string");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

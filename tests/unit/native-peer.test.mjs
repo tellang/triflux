@@ -8,6 +8,8 @@ import path from "node:path";
 import { it } from "node:test";
 import { resolveCodexTmuxThread } from "../../bin/tfx-live.mjs";
 import { main as peerMain } from "../../bin/tfx-peer.mjs";
+import { writeLeadMarker } from "../../hub/lib/lead-marker.mjs";
+import { reportLimit } from "../../hub/lib/report-limit.mjs";
 import {
   deliverAgy,
   deliverClaude,
@@ -1370,4 +1372,102 @@ it("peer CLI rejects Windows agy target, missing/stale agy target, and writes to
     ),
     true,
   );
+});
+
+it("tfx-peer는 리드 또는 소통 표지가 있는 Codex, agy 대상에 본문 축약과 reportWarning을 적용한다", async (t) => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tfx-peer-limit-"));
+  t.after(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
+  const env = {
+    HOME: tmpRoot,
+    XDG_STATE_HOME: path.join(tmpRoot, "state"),
+    TFX_LIVE_FROM: "codex:11.18 워커",
+  };
+  const convId = "11111111-2222-3333-4444-555555555555";
+  writeLeadMarker(
+    {
+      session: "triflux-lead",
+      paneId: "%21",
+      cli: "agy",
+      sessionRole: "lead",
+      role: "v11 리드",
+      name: "11.18 v11 리드",
+      conversationId: convId,
+    },
+    { env },
+  );
+  writeLeadMarker(
+    {
+      session: "triflux-comm",
+      paneId: "%22",
+      cli: "codex",
+      sessionRole: "communication",
+      role: "소통 창구",
+      name: "11.18 소통 창구",
+      threadId: "thread-comm-1",
+    },
+    { env },
+  );
+
+  let delivered;
+  const deliver = (payload) => {
+    delivered = payload;
+    return { status: "sent" };
+  };
+  const deps = {
+    env,
+    discover: async () => [
+      {
+        cli: "agy",
+        name: "11.18 v11 리드",
+        session: "triflux-lead",
+        paneId: "%21",
+        appDataDir: "/tmp/agy-app",
+        conversationId: convId,
+        raw: { appDataDir: "/tmp/agy-app", conversationId: convId },
+      },
+      {
+        cli: "codex",
+        name: "11.18 소통 창구",
+        session: "triflux-comm",
+        paneId: "%22",
+        threadId: "thread-comm-1",
+        raw: { threadSource: "registry" },
+      },
+    ],
+    resolveCodexTmuxThread: async () => ({
+      threadId: "thread-comm-1",
+      threadSource: "registry",
+    }),
+    deliverAgy: deliver,
+    deliverCodex: deliver,
+  };
+
+  const withPath = `첫 줄 요약\n${"가".repeat(4500)}\n결과: /work/.omc/briefs/vn-lead-core.result.md 참조`;
+  const cutRes = await peerMain(
+    ["send", "--to", "agy:11.18 v11 리드", "--message", withPath],
+    deps,
+  );
+  assert.equal(cutRes.status, "sent");
+  assert.equal(cutRes.reportWarning, undefined);
+  assert.match(delivered.message, /^\[tfx-peer from=codex:11\.18 워커 msg=/);
+  assert.match(
+    delivered.message,
+    /\(중략\)\n파일 경로:\n- \/work\/\.omc\/briefs\/vn-lead-core\.result\.md/,
+  );
+  assert.match(
+    delivered.message,
+    /\n회신: .+ send --to 'codex:11\.18 워커' --message '\.\.\.'$/,
+  );
+
+  const withoutPath = "나".repeat(4500);
+  const warnRes = await peerMain(
+    ["send", "--to", "codex:11.18 소통 창구", "--message", withoutPath],
+    deps,
+  );
+  assert.equal(warnRes.status, "sent");
+  assert.deepEqual(warnRes.reportWarning, {
+    total: 4500,
+    limit: reportLimit,
+  });
+  assert.equal(delivered.message.split("\n")[1], withoutPath);
 });
