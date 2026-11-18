@@ -39,7 +39,7 @@ function countOccurrences(content, needle) {
 
 function managedKeyCounts(content, hooksPath) {
   const counts = {};
-  for (const label of ["session_start", "user_prompt_submit"]) {
+  for (const label of ["session_start", "user_prompt_submit", "stop"]) {
     const key = `${hooksPath}:${label}:0:0`;
     const inline = countOccurrences(content, `"${key}" = {`);
     const table = countOccurrences(content, `[hooks.state."${key}"]`);
@@ -63,7 +63,7 @@ describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
 
     const config = readFileSync(result.configPath, "utf8");
     const counts = managedKeyCounts(config, result.hooksPath);
-    for (const label of ["session_start", "user_prompt_submit"]) {
+    for (const label of ["session_start", "user_prompt_submit", "stop"]) {
       assert.equal(counts[label].table, 1, `${label} table 형식 1회`);
       assert.equal(counts[label].inline, 0, `${label} inline 형식 0회`);
     }
@@ -129,7 +129,7 @@ describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
     assert.equal(second.changedConfig, true, "오염 감지 시 재기록");
     const cleaned = readFileSync(first.configPath, "utf8");
     const counts = managedKeyCounts(cleaned, first.hooksPath);
-    for (const label of ["session_start", "user_prompt_submit"]) {
+    for (const label of ["session_start", "user_prompt_submit", "stop"]) {
       assert.equal(counts[label].total, 1, `${label} 총 1회 (duplicate 해소)`);
       assert.equal(counts[label].table, 1, `${label} table 형식으로 수렴`);
     }
@@ -210,7 +210,7 @@ describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
     assert.equal(second.changedConfig, true);
     const after = readFileSync(first.configPath, "utf8");
     const counts = managedKeyCounts(after, first.hooksPath);
-    for (const label of ["session_start", "user_prompt_submit"]) {
+    for (const label of ["session_start", "user_prompt_submit", "stop"]) {
       assert.equal(counts[label].total, 1);
       assert.equal(counts[label].table, 1);
     }
@@ -272,9 +272,9 @@ describe("관리 Codex 훅 표시 문구", () => {
     assert.deepEqual(result.custom, metadata.custom);
     assert.deepEqual(result.hooks.SessionStart[0], foreign);
     assert.deepEqual(result.hooks.UserPromptSubmit[0], foreign);
-    assert.deepEqual(result.hooks.Stop, [foreign]);
+    assert.deepEqual(result.hooks.Stop[0], foreign);
     assert.deepEqual(result.hooks.SessionStart[1], {
-      matcher: "startup|resume|clear",
+      matcher: "startup|resume|clear|compact",
       hooks: [
         {
           type: "command",
@@ -292,6 +292,16 @@ describe("관리 Codex 훅 표시 문구", () => {
             '"/test/node" "/test/hooks/codex-session-hook.mjs" heartbeat',
           timeout: 10,
           statusMessage: "Triflux 세션 활동 갱신",
+        },
+      ],
+    });
+    assert.deepEqual(result.hooks.Stop[1], {
+      hooks: [
+        {
+          type: "command",
+          command: '"/test/node" "/test/hooks/codex-session-hook.mjs" stop',
+          timeout: 10,
+          statusMessage: "Triflux 리드 승계 점검",
         },
       ],
     });
@@ -316,6 +326,7 @@ describe("관리 Codex 훅 표시 문구", () => {
     const config = [
       ["SessionStart", "session_start"],
       ["UserPromptSubmit", "user_prompt_submit"],
+      ["Stop", "stop"],
     ]
       .map(([event, label]) => {
         const group = hooks[event][0];
