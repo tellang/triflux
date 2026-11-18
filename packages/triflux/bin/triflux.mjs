@@ -272,9 +272,9 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
   },
   lead: {
     usage:
-      "tfx lead <역할> [--cli claude|codex|agy] [--task SUMMARY] [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD] [--no-bypass-hook-trust] [--layout MODE] [--no-auto-layout] [--focus]",
+      "tfx lead <역할> [--role lead|communication] [--cli claude|codex|agy] [--task SUMMARY] [--session NAME] [--cwd DIR] [--model ID] [--effort TIER] [--launcher CMD] [--no-bypass-hook-trust] [--layout MODE] [--no-auto-layout] [--focus]",
     description:
-      "리드 세션을 tmux 에 띄우고 리드 진입까지 보낸다. 실행 명령은 --launcher, ~/.config/triflux/lead.json 의 launchers.<cli>, CLI 이름 순. setup 과 update 가 처음 한 번 묻는다",
+      "리드 세션(--role communication 이면 상주 소통 세션)을 tmux 에 띄우고 진입까지 보낸다. 실행 명령은 --launcher, ~/.config/triflux/lead.json 의 launchers.<cli>, CLI 이름 순. setup 과 update 가 처음 한 번 묻는다",
     options: [
       {
         name: "--focus",
@@ -293,6 +293,12 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         description: "iTerm 자동 배치 비활성, UI 없이 tmux 유지",
       },
       {
+        name: "--role",
+        type: "string",
+        description:
+          "세션 역할: lead(기본), communication. 후보와 진입 프롬프트가 역할을 따른다",
+      },
+      {
         name: "--cli",
         type: "string",
         description: "리드 CLI: claude(기본), codex, agy",
@@ -300,7 +306,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
       {
         name: "--session",
         type: "string",
-        description: "tmux 세션 이름 (기본 <폴더>-lead)",
+        description: "tmux 세션 이름 (기본 <폴더>-lead, 소통은 <폴더>-comm)",
       },
       {
         name: "--cwd",
@@ -3735,6 +3741,7 @@ async function main() {
         "--effort",
         "--launcher",
         "--cli",
+        "--role",
       ];
       cmdArgs.forEach((arg, i) => {
         const known =
@@ -3760,6 +3767,16 @@ async function main() {
             !arg.startsWith("--") && !valueFlags.includes(cmdArgs[i - 1]),
         )
         .join(" ");
+      const sessionRole = readCliOptionValue(cmdArgs, "--role") ?? "lead";
+      if (!["lead", "communication"].includes(sessionRole))
+        throw createCliError(
+          `--role 은 lead, communication 중 하나여야 한다: ${sessionRole}`,
+          {
+            exitCode: EXIT_ARG_ERROR,
+            reason: "argError",
+            fix: "tfx lead --help",
+          },
+        );
       const explicitCli = readCliOptionValue(cmdArgs, "--cli");
       const explicitLauncher = readCliOptionValue(cmdArgs, "--launcher");
       const cli =
@@ -3768,6 +3785,7 @@ async function main() {
         cli,
         cliAuto: !explicitCli || explicitCli === "auto",
         role,
+        sessionRole,
         task: readCliOptionValue(cmdArgs, "--task"),
         cwd: readCliOptionValue(cmdArgs, "--cwd") || process.cwd(),
         session: readCliOptionValue(cmdArgs, "--session"),
