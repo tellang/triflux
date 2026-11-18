@@ -27,6 +27,7 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual, promisify } from "node:util";
+import { readAgyContext } from "../hub/lib/agy-context.mjs";
 import {
   codexThreadNames,
   readCodexSessionRecords,
@@ -463,11 +464,11 @@ async function agyConversation(pid) {
   }
 }
 
-async function discoverAgyTmuxSessions({ cwd = null } = {}) {
+async function discoverAgyTmuxSessions({ cwd = null } = {}, deps = {}) {
   const result = { ok: true, cli: "agy", cwd: normalizeCwd(cwd), sessions: [] };
   let stdout;
   try {
-    ({ stdout } = await runTmux(null, [
+    ({ stdout } = await (deps.runTmux ?? runTmux)(null, [
       "list-panes",
       "-a",
       "-F",
@@ -506,9 +507,16 @@ async function discoverAgyTmuxSessions({ cwd = null } = {}) {
     if (!paneId || (result.cwd && normalizeCwd(paneCwd) !== result.cwd))
       continue;
     const target = `${session}:${window}.${pane}`;
-    const agyProcess = await paneCliProcess(target, "agy", Number(pid));
+    const agyProcess = await (deps.paneCliProcess ?? paneCliProcess)(
+      target,
+      "agy",
+      Number(pid),
+    );
     if (!agyProcess) continue;
-    const conversation = await agyConversation(agyProcess.pid);
+    const conversation = await (deps.agyConversation ?? agyConversation)(
+      agyProcess.pid,
+    );
+    const context = readAgyContext(conversation?.conversationId);
     const title =
       agyName ||
       (setTitles === "1" && setTitlesString
@@ -523,6 +531,12 @@ async function discoverAgyTmuxSessions({ cwd = null } = {}) {
       ...agyProcess,
       appDataDir: conversation?.appDataDir ?? null,
       conversationId: conversation?.conversationId ?? null,
+      // 메시지를 보내지 않고 컨텍스트 사용량을 읽게 한다. 기록이 없으면 null 이다.
+      contextPct: context?.contextPct ?? null,
+      estimatedContextTokens: context?.estimatedContextTokens ?? null,
+      contextLimitTokens: context?.contextLimitTokens ?? null,
+      contextLimitSource: context?.contextLimitSource ?? null,
+      contextRecordedAt: context?.contextRecordedAt ?? null,
     });
   }
   return result;
@@ -4198,7 +4212,7 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
   const contextPctBefore = adapter.contextPct(beforeRaw);
   const context =
     adapter.cli === "agy"
-      ? modelContext("agy", null)
+      ? await agyTmuxContext(session)
       : opts.skipContextGuard
         ? {}
         : await tmuxContext(adapter, opts);
@@ -6432,6 +6446,19 @@ async function tmuxContext(adapter, opts) {
     return await readCodexContext(null, threadId);
   } catch {
     return unknown;
+  }
+}
+
+// agy 는 임계 판정 없이 HUD 가 남긴 값만 보고한다. 기록이 없으면 알 수 없음으로 둔다.
+async function agyTmuxContext(session) {
+  try {
+    const agyProcess = await paneCliProcess(session, "agy");
+    const conversation = await agyConversation(agyProcess?.pid);
+    return (
+      readAgyContext(conversation?.conversationId) ?? modelContext("agy", null)
+    );
+  } catch {
+    return modelContext("agy", null);
   }
 }
 

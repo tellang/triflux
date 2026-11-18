@@ -1,5 +1,27 @@
+import { writeAgyContext } from "../hub/lib/agy-context.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
 import { clampPercent } from "./utils.mjs";
+
+// agy 가 알려 준 창 크기가 0 이거나 값이 없으면(view.source === "none") 기록하지 않는다.
+export function recordAgyContext(stdin, env = process.env) {
+  if (stdin?.product !== "antigravity") return false;
+  const view = buildContextUsageView(stdin);
+  if (view.source === "none") return false;
+  const model = stdin.model;
+  return writeAgyContext(
+    {
+      conversationId: stdin.conversation_id,
+      usedPercentage: view.percent,
+      windowSize: view.limitTokens,
+      usedTokens: view.usedTokens,
+      model:
+        typeof model === "string"
+          ? model
+          : (model?.id ?? model?.display_name ?? null),
+    },
+    { env },
+  );
+}
 
 export async function sessionStatus(stdin, env = process.env) {
   let jev = "";
