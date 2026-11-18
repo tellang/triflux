@@ -11,24 +11,25 @@ import {
 } from "../../scripts/release/lib.mjs";
 
 describe("release version sync with prefix support", () => {
-  it("저장소 현재 버전 매니페스트가 10.99.0 및 ^10.99.0과 일치한다", () => {
+  it("저장소 현재 버전 매니페스트가 루트 버전 및 prefix 버전과 일치한다", () => {
     const result = assertVersionSync({ rootDir: ROOT });
     assert.equal(result.ok, true, JSON.stringify(result.mismatches));
+    assert.ok(result.rootVersion);
     const remotePeer = result.targets.find(
       (t) =>
         t.file === "packages/remote/package.json" &&
         t.path.join(".") === "peerDependencies.@triflux/core",
     );
     assert.ok(remotePeer);
-    assert.equal(remotePeer.expected, "^10.99.0");
-    assert.equal(remotePeer.found, "^10.99.0");
+    assert.equal(remotePeer.expected, `^${result.rootVersion}`);
+    assert.equal(remotePeer.found, `^${result.rootVersion}`);
 
     const agyPlugin = result.targets.find(
       (t) => t.file === "adapters/agy/plugins/triflux/plugin.json",
     );
     assert.ok(agyPlugin);
-    assert.equal(agyPlugin.expected, "10.99.0");
-    assert.equal(agyPlugin.found, "10.99.0");
+    assert.equal(agyPlugin.expected, result.rootVersion);
+    assert.equal(agyPlugin.found, result.rootVersion);
   });
 
   it("prefix가 지정된 타겟을 메이저 버전 변경 시 함께 갱신한다", () => {

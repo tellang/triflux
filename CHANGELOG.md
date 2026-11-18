@@ -2,6 +2,24 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [11.0.0] - 2026-11-18
+
+### Added
+- lead: Claude, Codex, Antigravity 세 CLI가 같은 마커 모듈 `hub/lib/lead-marker.mjs`를 공유하는 벤더 무관 리드와 상주 소통 역할을 추가한다. Claude는 `mods/triflux`, Codex는 생명주기 훅, Antigravity는 `adapters/agy/plugins/triflux` 플러그인으로 운영 규칙과 승계 절차를 주입한다.
+- peer: 워커가 리드나 소통 세션으로 긴 보고를 보낼 때 산출물 파일이 실제로 있으면 본문을 4,000자 선에서 줄이고 경로 안내를 붙이는 `hub/lib/report-limit.mjs`를 추가한다.
+- live: 대화 문맥을 비우고 새 세션이나 스레드로 인계 요약을 넘기는 `tfx-live clear` 하위 명령을 추가한다.
+- live: Antigravity HUD 기록 파일을 읽어 `session-context.mjs`에서 `agy` 세션의 컨텍스트 사용량을 조회한다.
+
+### Changed
+- cleanup: 커스텀 TUI 대시보드, v10 레거시 청소 모듈, 워커 팩토리, `mcp-guard-engine`, `nativeProxy`, 실험 하위 명령을 걷어낸다. Antigravity 명명과 프로세스 유틸리티도 하나로 합친다.
+- codex: 결합 이름 프로필 설정 파일 생성을 중단하고 가족 프로필 파일을 우선 조회하도록 바꾼다.
+- setup: `tfx setup --mods`와 대화형 동의 경로에서 Antigravity `triflux` 플러그인을 설치한다. `tfx doctor`는 Codex 3종 훅과 Antigravity 플러그인 상태를 함께 점검한다.
+- release: `version-manifest.json`에 Antigravity 플러그인 매니페스트와 `@triflux/remote`의 `@triflux/core` peerDependency 동기화를 추가한다.
+- docs: 자기 설명적 코드와 비직관적 이유 1% 주석 원칙을 문서화하고 `scripts/`, `hub/`, `bin/`, `hud/` 주석을 정리한다.
+
+### Tests
+- 테스트 스위트 기본 병렬 실행을 적용하고 리드 마커, 3사 리드 훅과 플러그인, 보고 본문 축약, `tfx-live clear`, 릴리스 버전 동기화 단위 테스트를 추가한다.
+
 ## [10.99.0] - 2026-11-17
 
 ### Added

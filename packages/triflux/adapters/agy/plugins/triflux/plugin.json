@@ -1,5 +1,5 @@
 {
   "name": "triflux",
-  "version": "10.99.0",
+  "version": "11.0.0",
   "description": "Triflux vendor-neutral lead and session lifecycle hooks for Antigravity CLI"
 }
