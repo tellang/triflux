@@ -224,7 +224,7 @@ describe("codexProfileConfigOverrides", () => {
         codexHome,
         enforceCanonicalProfile: true,
       }),
-      ['model="gpt-6-astra"', 'model_reasoning_effort="xhigh"'],
+      ['model="gpt-6.2-astra"', 'model_reasoning_effort="xhigh"'],
     );
   });
 
@@ -239,7 +239,7 @@ describe("codexProfileConfigOverrides", () => {
         codexHome,
         disallowUltra: true,
       }),
-      ['model="gpt-6-astra"', 'model_reasoning_effort="max"'],
+      ['model="gpt-6.2-astra"', 'model_reasoning_effort="max"'],
     );
   });
 
