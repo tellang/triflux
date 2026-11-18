@@ -143,6 +143,7 @@ function usage(command) {
     "    ask options: --no-wait --no-relay-tag --via-tmux (a Claude caller sending to a local Claude session is refused and told to use SendMessage unless set) --warn-context-pct N --max-context-pct N (0 disables; Claude 60/90, Codex 60/85 of rollout window or 15/22 of 1.05M).",
     "  tfx-live send --to NAME|CLI:NAME --message TEXT [--from NAME] [--no-wait] [--timeout 600] [--via-tmux (명시적 tmux 입력)]",
     "  tfx-live compact --session NAME [--cli claude|codex] [--instructions TEXT] [--then PROMPT] [--no-wait] [--if-busy fail|wait] [--timeout 60]",
+    "  tfx-live clear --session NAME [--cli claude|codex|agy] [--handoff PATH] [--then PROMPT] [--if-busy fail|wait] [--busy-timeout 60] [--timeout 60]",
     "  tfx-live goal set --session NAME [--cli claude|codex] --condition TEXT [--budget N]",
     "  tfx-live goal status --session NAME [--cli claude|codex]",
     "  tfx-live goal clear --session NAME [--cli claude|codex]",
@@ -4212,7 +4213,7 @@ async function doAskViaTmux(adapter, opts, deps = {}) {
   const contextPctBefore = adapter.contextPct(beforeRaw);
   const context =
     adapter.cli === "agy"
-      ? await agyTmuxContext(session)
+      ? await agyTmuxContext(session, deps)
       : opts.skipContextGuard
         ? {}
         : await tmuxContext(adapter, opts);
@@ -6450,10 +6451,15 @@ async function tmuxContext(adapter, opts) {
 }
 
 // agy 는 임계 판정 없이 HUD 가 남긴 값만 보고한다. 기록이 없으면 알 수 없음으로 둔다.
-async function agyTmuxContext(session) {
+async function agyTmuxContext(session, deps = {}) {
   try {
-    const agyProcess = await paneCliProcess(session, "agy");
-    const conversation = await agyConversation(agyProcess?.pid);
+    const agyProcess = await (deps.paneCliProcess ?? paneCliProcess)(
+      session,
+      "agy",
+    );
+    const conversation = await (deps.agyConversation ?? agyConversation)(
+      agyProcess?.pid,
+    );
     return (
       readAgyContext(conversation?.conversationId) ?? modelContext("agy", null)
     );
@@ -6662,6 +6668,119 @@ async function doCompact(flags, deps = {}) {
   if (done()) {
     Object.assign(result, snapshot.compact);
     Object.assign(result.compact, snapshot.compact);
+  }
+  return result;
+}
+
+// 슬래시 명령은 queue 로 보내면 실행되지 않으므로 compact 와 같은 tmux 입력을 쓴다.
+// 비운 뒤 인계 파일 읽기 지시와 --then 을 한 메시지로 이어 보낸다.
+async function doClear(flags, deps = {}) {
+  const cli = flags.cli ?? "claude";
+  if (
+    !["claude", "codex", "agy"].includes(cli) ||
+    flags.remote ||
+    flags.short ||
+    flags["session-id"] ||
+    (flags.transport && flags.transport !== "tmux")
+  )
+    throw new Error(
+      "clear supports local --cli claude|codex|agy --session NAME only",
+    );
+  const thenPrompt = flags.then?.trim();
+  if (flags.then !== undefined && !thenPrompt)
+    throw new Error("--then must not be blank");
+  if (isSlashCommand(thenPrompt))
+    throw new Error("--then accepts text instructions, not slash commands");
+  if (flags.handoff !== undefined && !flags.handoff)
+    throw new Error("--handoff must not be blank");
+  if (flags.handoff && !existsSync(flags.handoff))
+    throw new Error(`handoff file not found: ${flags.handoff}`);
+  const ifBusy = flags["if-busy"] ?? "fail";
+  if (!["fail", "wait"].includes(ifBusy))
+    throw new Error("clear --if-busy must be fail or wait");
+  const command = cli === "codex" ? "/new" : "/clear";
+  const adapter = ADAPTERS[cli];
+  const opts = askOpts(
+    {
+      ...flags,
+      cli,
+      transport: "tmux",
+      "if-busy": ifBusy,
+      "no-wait": true,
+      prompt: command,
+    },
+    adapter,
+  );
+  const sendOpts = { ...opts, skipBusyCheck: true, skipContextGuard: true };
+  const followUp = [
+    flags.handoff ? `인계 파일 ${flags.handoff} 를 읽고 이어간다.` : "",
+    thenPrompt ?? "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const capture = deps.captureVisible ?? captureVisible;
+  // agy 는 대화 ID 로 전환을 확인한다. Codex 의 tmux 옵션과 Claude 세션 파일 ID 는
+  // 비운 뒤 갱신되는지 확인되지 않아 믿지 않고 화면 변화로 확인한다.
+  const readAgyId = async () => {
+    try {
+      const agyProcess = await (deps.paneCliProcess ?? paneCliProcess)(
+        opts.session,
+        "agy",
+      );
+      const conversation = await (deps.agyConversation ?? agyConversation)(
+        agyProcess?.pid,
+      );
+      return conversation?.conversationId ?? null;
+    } catch {
+      return null;
+    }
+  };
+  await waitForTmuxIdle(adapter, opts, deps);
+  const idBefore = followUp && cli === "agy" ? await readAgyId() : null;
+  const screenBefore = followUp ? await capture(opts.remote, opts.session) : "";
+  await doAskViaTmux(adapter, sendOpts, deps);
+  const result = {
+    cli,
+    session: opts.session,
+    clear: { command, inputSent: true },
+  };
+  if (!followUp) return result;
+  const requestId = randomBytes(6).toString("hex");
+  try {
+    // 비운 명령이 새 대화로 바뀐 것을 확인한 뒤에 보낸다. 바뀌기 전에 보내면 유실되거나 이전 대화에 들어간다.
+    const switchDeadline = Date.now() + opts.busyTimeoutMs;
+    const pause = deps.sleep ?? sleep;
+    while (true) {
+      const visible = await capture(opts.remote, opts.session);
+      // lock 이 바뀌는 사이의 null 은 전환으로 보지 않는다. 첫 입력 전 agy 는 lock 이 없다가 비우면 생기고 화면은 그대로다.
+      const idAfter = cli === "agy" ? await readAgyId() : null;
+      const switched = idBefore
+        ? Boolean(idAfter) && idAfter !== idBefore
+        : Boolean(idAfter) || visible !== screenBefore;
+      if (switched && adapter.isReady(visible)) break;
+      if (Date.now() >= switchDeadline)
+        throw new Error(
+          `new conversation not confirmed after ${Math.ceil(opts.busyTimeoutMs / 1000)}s`,
+        );
+      await pause(
+        Math.min(opts.pollIntervalMs, Math.max(1, switchDeadline - Date.now())),
+      );
+    }
+    await waitForTmuxIdle(adapter, opts, deps);
+    await doAskViaTmux(
+      adapter,
+      {
+        ...sendOpts,
+        prompt: `[tfx-live req=${requestId}]\n${followUp}`,
+        requestId,
+      },
+      deps,
+    );
+    result.followUp = { requestId, inputSent: true };
+  } catch (error) {
+    result.followUp = { requestId, inputSent: false, error: error.message };
+    result.ok = false;
+    result.error = `${command} was sent but the follow-up failed: ${error.message}`;
   }
   return result;
 }
@@ -7905,6 +8024,10 @@ async function main() {
     const result = await doCompact(flags);
     printJson(result);
     if (result.ok === false) process.exitCode = 1;
+  } else if (command === "clear") {
+    const result = await doClear(flags);
+    printJson(result);
+    if (result.ok === false) process.exitCode = 1;
   } else if (command === "goal") {
     printJson(await goal(action, flags));
   } else if (command === "rename") {
@@ -7951,6 +8074,7 @@ export {
   discoverPeerTargets,
   doAdopt,
   doAskViaTmux,
+  doClear,
   doCompact,
   doSend,
   doStop,
