@@ -71,6 +71,7 @@ import {
   cleanupStaleSkills,
   ensureCodexProfiles,
   getVersion,
+  inspectAgyPlugin,
   inspectTrifluxMods,
   isSkillSupportedOnPlatform,
   LEGACY_CODEX_MODELS,
@@ -2137,6 +2138,46 @@ async function cmdDoctor(options = {}) {
       }
     }
 
+    section("Codex hooks");
+    {
+      const codexHooksPath = join(CODEX_DIR, "hooks.json");
+      let codexHooksStatus = "missing";
+      if (existsSync(codexHooksPath)) {
+        try {
+          const parsedHooks = JSON.parse(readFileSync(codexHooksPath, "utf8"));
+          const hookGroups = Object.values(parsedHooks?.hooks || {}).flat();
+          const hasSessionHook = hookGroups.some(
+            (group) =>
+              Array.isArray(group?.hooks) &&
+              group.hooks.some(
+                (hook) =>
+                  typeof hook?.command === "string" &&
+                  hook.command.includes("codex-session-hook.mjs"),
+              ),
+          );
+          codexHooksStatus = hasSessionHook ? "registered" : "missing";
+        } catch {
+          codexHooksStatus = "invalid";
+        }
+      }
+      addDoctorCheck(report, {
+        name: "codex-hooks",
+        status: codexHooksStatus === "registered" ? "ok" : codexHooksStatus,
+        path: codexHooksPath,
+        ...(codexHooksStatus === "registered" ? {} : { fix: "tfx setup" }),
+      });
+      if (codexHooksStatus === "registered") {
+        ok("등록됨 (codex-session-hook.mjs)");
+      } else if (codexHooksStatus === "invalid") {
+        warn(`hooks.json 파싱 실패 ${DIM}(${codexHooksPath})${RESET}`);
+        info("수정: tfx setup");
+        issues++;
+      } else {
+        warn(`미등록 ${DIM}(${codexHooksPath})${RESET}`);
+        info("수정: tfx setup");
+      }
+    }
+
     section(`Antigravity CLI ${BLUE}●${RESET}`);
     const antigravityCli = checkCliCrossShell(
       "agy",
@@ -2184,6 +2225,27 @@ async function cmdDoctor(options = {}) {
         issues++;
       }
     }
+
+    section("Antigravity plugin");
+    const agyPlugin = inspectAgyPlugin({ pkgVersion: PKG.version });
+    addDoctorCheck(report, { name: "agy-plugin", ...agyPlugin });
+    if (agyPlugin.status === "current")
+      ok(`설치됨 ${DIM}v${agyPlugin.installedVersion}${RESET}`);
+    else if (agyPlugin.status === "missing") {
+      warn("미설치");
+      info("수정: tfx setup");
+    } else if (agyPlugin.status === "disabled") {
+      warn("비활성화됨");
+      info("수정: tfx setup");
+    } else if (agyPlugin.status === "outdated") {
+      warn(
+        `버전 차이: 설치 ${agyPlugin.installedVersion}, 패키지 ${PKG.version}`,
+      );
+      info("수정: tfx setup");
+    } else if (agyPlugin.status === "failed")
+      warn(`확인 실패: ${agyPlugin.error}`);
+    else info(`건너뜀 (${agyPlugin.reason})`);
+
     // agy OAuth 기반이므로 API 키 불필요
     section(`Claude Code ${AMBER}●${RESET}`);
     const claudePath = which("claude");

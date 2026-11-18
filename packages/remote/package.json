@@ -12,7 +12,7 @@
     "node": ">=22"
   },
   "peerDependencies": {
-    "@triflux/core": "^10.0.0-alpha.1"
+    "@triflux/core": "^10.99.0"
   },
   "files": [
     "hub",

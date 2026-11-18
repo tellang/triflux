@@ -462,6 +462,7 @@ export async function runConsentSteps({
   offerTmr = offerTmrInstall,
   modsInstall = false,
   offerMods = ensureTrifluxMods,
+  ensureAgy = ensureAgyPlugin,
   home = _TFX_HOME,
   packageRoot = PLUGIN_ROOT,
   fromUpdate = false,
@@ -480,6 +481,7 @@ export async function runConsentSteps({
     psmux: "not-needed",
     tmr: "not-needed",
     mods: "not-needed",
+    agyPlugin: "not-needed",
     codexHooks: "skipped",
     changed: false,
   };
@@ -531,6 +533,13 @@ export async function runConsentSteps({
     notice,
   });
 
+  result.agyPlugin = await ensureAgy({
+    env,
+    execFileSyncFn: run,
+    log,
+    warn,
+  });
+
   try {
     await offerLead({
       interactive,
@@ -561,9 +570,12 @@ export async function runConsentSteps({
   }
 
   try {
-    result.changed ||= [result.psmux, result.tmr, result.mods].some(
-      (status) => status === "installed" || status === "updated",
-    );
+    result.changed ||= [
+      result.psmux,
+      result.tmr,
+      result.mods,
+      result.agyPlugin,
+    ].some((status) => status === "installed" || status === "updated");
     const hooks = ensureHooks({ trust: false });
     result.changed ||= Boolean(hooks?.changedHooks || hooks?.changedConfig);
     if (hooks?.skipped) return result;
@@ -600,10 +612,6 @@ const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 const HUD_PATH = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
 
 const REQUIRED_CODEX_PROFILES = [
-  ...Object.entries(CODEX_FAMILY_PROFILES).map(([name, { model, effort }]) => ({
-    name,
-    lines: [`model = "${model}"`, `model_reasoning_effort = "${effort}"`],
-  })),
   ...new Map(
     Object.values(CODEX_FAMILY_PROFILES).map(({ family, model }) => [
       family,
@@ -1497,6 +1505,111 @@ export async function ensureTrifluxMods({
   }
 }
 
+const AGY_PLUGIN_NAME = "triflux";
+export const AGY_PLUGIN_SRC_DIR = join(
+  PLUGIN_ROOT,
+  "adapters",
+  "agy",
+  "plugins",
+  AGY_PLUGIN_NAME,
+);
+
+export function agyCli(env = process.env, execFileSyncFn = execFileSync) {
+  const localAgy = env?.HOME ? join(env.HOME, ".local", "bin", "agy") : "";
+  const command = localAgy && existsSync(localAgy) ? localAgy : "agy";
+  return (args) =>
+    execFileSyncFn(command, args, {
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 60_000,
+      windowsHide: true,
+      shell: process.platform === "win32",
+    });
+}
+
+export function inspectAgyPlugin({
+  env = process.env,
+  pkgVersion = getPackageVersion(),
+  pluginSrcDir = AGY_PLUGIN_SRC_DIR,
+  run = agyCli(env, execFileSync),
+} = {}) {
+  if (isProtectedSetupEnv(env) || env.npm_lifecycle_event === "postinstall")
+    return { status: "skipped", reason: "protected-env" };
+  let raw;
+  try {
+    raw = run(["plugin", "list", "--json"]);
+  } catch {
+    return { status: "skipped", reason: "agy-unavailable" };
+  }
+  try {
+    const parsed = JSON.parse(String(raw || "[]"));
+    const list = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.plugins)
+        ? parsed.plugins
+        : [];
+    const entry = list.find((item) => item?.name === AGY_PLUGIN_NAME);
+    if (!entry) {
+      return {
+        status: "missing",
+        installedVersion: undefined,
+        pkgVersion,
+        pluginSrcDir,
+      };
+    }
+    if (!entry.enabled) {
+      return {
+        status: "disabled",
+        installedVersion: entry.version,
+        pkgVersion,
+        pluginSrcDir,
+      };
+    }
+    const outdated =
+      Boolean(entry.version && pkgVersion) && entry.version !== pkgVersion;
+    return {
+      status: outdated ? "outdated" : "current",
+      installedVersion: entry.version,
+      pkgVersion,
+      pluginSrcDir,
+    };
+  } catch (error) {
+    return { status: "failed", error: _normalizeErrorMessage(error) };
+  }
+}
+
+export function ensureAgyPlugin({
+  env = process.env,
+  pkgVersion = getPackageVersion(),
+  pluginSrcDir = AGY_PLUGIN_SRC_DIR,
+  execFileSyncFn = execFileSync,
+  run = agyCli(env, execFileSyncFn),
+  log = console.log,
+  warn = console.warn,
+} = {}) {
+  const plugin = inspectAgyPlugin({ env, pkgVersion, pluginSrcDir, run });
+  if (plugin.status === "skipped") return "not-needed";
+  if (plugin.status === "current") return "present";
+  try {
+    if (plugin.status === "failed") throw new Error(plugin.error);
+    run(["plugin", "validate", pluginSrcDir, "--json"]);
+    run(["plugin", "install", pluginSrcDir]);
+    if (plugin.status === "disabled") {
+      run(["plugin", "enable", AGY_PLUGIN_NAME]);
+    }
+    if (plugin.status === "missing") {
+      log(`agy plugin 설치 완료: ${AGY_PLUGIN_NAME}`);
+      return "installed";
+    }
+    log(`agy plugin 업데이트 완료: ${AGY_PLUGIN_NAME}`);
+    return "updated";
+  } catch (error) {
+    warn(`[setup] agy plugin 설정 실패: ${_normalizeErrorMessage(error)}`);
+    return "failed";
+  }
+}
+
 // 예전에 배포했다가 그만둔 설치 파일. 내용에 배포 표식이 있을 때만 지운다.
 const RETIRED_INSTALL_FILES = [
   [
@@ -1646,9 +1759,10 @@ function ensureCodexProfiles({ notice = () => {} } = {}) {
       notice,
     }).changed;
     // 사용자 커스텀 프로필은 별도 파일이 이미 있으면 덮어쓰지 않고 본문만 이관한다.
-    const managedProfileNames = new Set(
-      REQUIRED_CODEX_PROFILES.map((p) => p.name),
-    );
+    const managedProfileNames = new Set([
+      ...REQUIRED_CODEX_PROFILES.map((p) => p.name),
+      ...Object.keys(CODEX_FAMILY_PROFILES),
+    ]);
     const retiredProfileNames = new Set(LEGACY_CODEX_PROFILE_NAMES);
     const inlineProfileNames = listInlineProfileNames(updated);
     const families = new Set(

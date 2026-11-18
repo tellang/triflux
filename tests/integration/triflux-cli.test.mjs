@@ -186,6 +186,9 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
     assert.ok(Array.isArray(payload.checks));
     assert.ok(payload.checks.some((check) => check.name === "tfx-route.sh"));
     assert.ok(payload.checks.some((check) => check.name === "codex"));
+    assert.ok(payload.checks.some((check) => check.name === "triflux-mods"));
+    assert.ok(payload.checks.some((check) => check.name === "codex-hooks"));
+    assert.ok(payload.checks.some((check) => check.name === "agy-plugin"));
     rmSync(homeDir, { recursive: true, force: true });
   });
 
