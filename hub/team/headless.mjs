@@ -1,6 +1,3 @@
-// hub/team/headless.mjs — 헤드리스 CLI 오케스트레이션
-// psmux pane에서 CLI를 헤드리스 모드로 실행하고 결과를 수집한다.
-
 import { execSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -63,7 +60,6 @@ function resultDir() {
 }
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 
-/** CLI별 브랜드 — 이모지 + 공식 색상 (HUD와 통일) */
 const CLI_BRAND = {
   codex: { emoji: "\u{26AA}", label: "Codex", ansi: "\x1b[97m" }, // ⚪ bright white (codexWhite)
   antigravity: {
@@ -78,18 +74,11 @@ const CLI_BRAND = {
   }, // 🟠 claudeOrange
 };
 
-/** 에이전트 역할명 → CLI 타입 매핑 (단일 소스: agent-map.json) */
 const _require = createRequire(import.meta.url);
 const AGENT_TO_CLI = _require("./agent-map.json");
 // scripts/tfx-route.sh also validates route agents from agent-map.json.
 const VALID_ROUTE_AGENTS = new Set(Object.keys(AGENT_TO_CLI));
 
-/**
- * 에이전트 역할명 또는 CLI 이름을 CLI 타입("codex"|"antigravity"|"claude")으로 해석한다.
- * route_agent()가 적용되지 않는 headless 경로에서 사용.
- * @param {string} agentOrCli — "executor", "codex", "designer" 등
- * @returns {'codex'|'antigravity'|'claude'} CLI 타입
- */
 export function resolveCliType(agentOrCli) {
   return AGENT_TO_CLI[agentOrCli] || agentOrCli;
 }
@@ -436,16 +425,8 @@ export function buildHeadlessCommand(cli, prompt, resultFile, opts = {}) {
   return `cd '${safeCwd.replace(/'/g, "'\\''")}' && ${backendCommand}`;
 }
 
-/**
- * 이전 run 의 stale .txt / .partial / .err 를 제거한다.
- * Issue #118 Codex review R1 HIGH: resultFile 경로 재사용 시 (워커 restart 또는
- * 동일 세션명 재실행) 이전 run 의 HANDOFF 가 새 run 결과로 오인될 수 있다.
- *
- * Issue #118 R2 MEDIUM: Windows 에서 locked/open 파일로 인한 삭제 실패를
- * silent swallow 하면 stale artifact 가 살아남아 bug 가 non-deterministic 하게
- * 재발한다. ENOENT 외 에러는 경고 로그 + 재시도(1회) 후 계속.
- * @param {string} resultFile
- */
+// Issue #118: 같은 resultFile 재사용 시 이전 run의 HANDOFF가 오인되지 않게 지우고,
+// Windows 파일 잠금(ENOENT 외 에러)은 경고 후 1회 재시도한다.
 export function cleanStaleResultArtifacts(resultFile) {
   for (const suffix of ["", ".partial", ".err", ".model.json", ".mcp.json"]) {
     const path = `${resultFile}${suffix}`;
@@ -466,13 +447,7 @@ export function cleanStaleResultArtifacts(resultFile) {
   }
 }
 
-/**
- * 결과 파일 읽기 (없으면 capture-pane fallback)
- * Issue #118 fallback chain: .txt → .partial ([partial] prefix) → .err → capture-pane
- * @param {string} resultFile
- * @param {string} paneId
- * @returns {string}
- */
+// Issue #118 fallback 순서: .txt, .partial([partial] 접두사), .err, capture-pane
 export function readResult(resultFile, paneId) {
   if (existsSync(resultFile)) {
     return readFileSync(resultFile, "utf8").trim();
@@ -644,7 +619,6 @@ function createHeadlessSessionOwnership(killSession) {
   };
 }
 
-/** progressive 스플릿 모드: lead pane만 생성 후, 워커를 하나씩 추가하며 dispatch */
 async function dispatchProgressive(sessionName, assignments, opts = {}) {
   const { layout, safeProgress, sessionOwnership, _deps: deps = {} } = opts;
   const createSession = deps.createPsmuxSession || createPsmuxSession;
@@ -772,11 +746,10 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
   return dispatches;
 }
 
-/** 기존 batch 모드: 모든 pane을 한 번에 생성하여 dispatch */
 async function dispatchBatch(sessionName, assignments, opts = {}) {
   const { layout, safeProgress, sessionOwnership, _deps: deps = {} } = opts;
   const paneCount = assignments.length + 1;
-  // A2b fix: 2x2 레이아웃은 최대 4 pane — 초과 시 tiled로 자동 전환
+  // 2x2 레이아웃은 최대 4 pane이므로 초과 시 tiled로 전환한다.
   const effectiveLayout = layout === "2x2" && paneCount > 4 ? "tiled" : layout;
   const createSession = deps.createPsmuxSession || createPsmuxSession;
   const applyTheme = deps.applyTrifluxTheme || applyTrifluxTheme;
@@ -865,15 +838,6 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
   );
 }
 
-/**
- * 모든 dispatch를 병렬 대기하며 완료 결과를 수집한다.
- * @param {string} sessionName
- * @param {Array} dispatches
- * @param {number} timeoutSec
- * @param {Function|null} safeProgress
- * @param {number} progressIntervalSec
- * @returns {Promise<Array<{d, completion, output}>>}
- */
 async function awaitAll(
   sessionName,
   dispatches,
@@ -984,13 +948,7 @@ async function awaitAll(
   );
 }
 
-/**
- * git diff + handoff 파이프라인을 적용하여 최종 결과 배열을 반환한다.
- * @param {Array<{d, completion, output}>} results
- * @returns {Array}
- */
 async function collectResults(results) {
-  // handoff 파이프라인: parse → validate → format (각 워커 결과에 적용)
   return await Promise.all(
     results.map(async ({ d, completion, output }) => {
       const workerGitDiffFiles = collectGitDiffFiles(d.cwd);
@@ -1059,19 +1017,6 @@ function collectGitDiffFiles(cwd) {
   }
 }
 
-/**
- * 헤드리스 CLI 오케스트레이션 실행
- *
- * @param {string} sessionName — psmux 세션 이름
- * @param {Array<{cli: string, prompt: string, role?: string}>} assignments
- * @param {object} [opts]
- * @param {number} [opts.timeoutSec=900] — lane 예산; lifecycle 활성 시 kill 판정에는 쓰지 않음
- * @param {string} [opts.layout='2x2'] — pane 레이아웃
- * @param {(event: object) => void} [opts.onProgress] — 진행 콜백
- * @param {number} [opts.progressIntervalSec=0] — N초마다 progress 이벤트 발화 (0=비활성)
- * @param {boolean} [opts.progressive=true] — true면 pane을 하나씩 split-window로 추가 (실시간 스플릿)
- * @returns {{ sessionName: string, results: Array<{cli: string, paneName: string, matched: boolean, exitCode: number|null, output: string, sessionDead?: boolean}>, sessionOwnership: {owned: boolean, acquire: (sessionName: string) => boolean, release: () => boolean} }}
- */
 export async function runHeadless(sessionName, assignments, opts = {}) {
   const deps = opts._deps || {};
   const sessionOwnership =
@@ -1211,14 +1156,6 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   };
 }
 
-/**
- * 헤드리스 실행 + 자동 정리
- * 성공/실패에 관계없이 세션을 정리한다.
- *
- * @param {Array<{cli: string, prompt: string, role?: string}>} assignments
- * @param {object} [opts] — runHeadless opts + sessionPrefix
- * @returns {{ results: Array, sessionName: string }}
- */
 export async function runHeadlessWithCleanup(assignments, opts = {}) {
   const { sessionPrefix = "tfx-hl", ...runOpts } = opts;
   const sessionName = `${sessionPrefix}-${Date.now().toString(36).slice(-6)}`;
@@ -1243,14 +1180,6 @@ export async function runHeadlessWithCleanup(assignments, opts = {}) {
   }
 }
 
-// ─── v6.0.0: Theme + Visual ───
-
-/**
- * psmux 세션에 triflux 테마를 적용한다.
- * status bar + pane border 색상 + 브랜딩.
- *
- * @param {string} sessionName
- */
 export function applyTrifluxTheme(sessionName) {
   const opts = [
     // Status bar — Catppuccin Mocha 기반
@@ -1363,16 +1292,7 @@ async function openHeadlessAgentsRows(
   }
 }
 
-// ─── v6.0.0: Lead-Direct Interactive Mode ───
-
-/**
- * attached tmux의 현재 leader pane 옆에 headless session view를 연다.
- * 새 pane의 attach client는 headless session 종료와 함께 자연스럽게 종료된다.
- *
- * @param {string} sessionName
- * @param {object} [opts]
- * @returns {boolean} split 요청 성공 여부
- */
+// 새 pane의 attach client는 headless session 종료 시 함께 종료된다.
 export function attachHeadlessTmuxPane(sessionName, opts = {}) {
   const deps = opts._deps || {};
   const platform = deps.platform ?? process.platform;
@@ -1418,15 +1338,6 @@ export function attachHeadlessTmuxPane(sessionName, opts = {}) {
   }
 }
 
-/**
- * session_created auto-attach를 정확히 한 번 라우팅하는 progress handler.
- * Windows는 기존 WT helper를, macOS/Linux는 현재 tmux window split을 쓴다.
- *
- * @param {string} sessionName
- * @param {number} workerCount
- * @param {object} [opts]
- * @returns {(event: object) => void}
- */
 export function createHeadlessAutoAttachHandler(
   sessionName,
   workerCount,
@@ -1494,15 +1405,6 @@ export function createHeadlessAutoAttachHandler(
   };
 }
 
-/**
- * Windows Terminal에서 psmux 세션을 자동 attach한다.
- * 1명은 새 탭 단일 attach, 2/3/4명은 새 탭 내 split-pane, 5명 이상은 단일 탭으로 attach한다.
- *
- * @param {string} sessionName — attach할 psmux 세션 이름
- * @param {object} [opts]
- * @param {number} [workerCount=2]
- * @returns {Promise<boolean>} 성공 여부
- */
 export async function autoAttachTerminal(
   sessionName,
   _opts = {},
@@ -1562,14 +1464,6 @@ export async function autoAttachTerminal(
   }
 }
 
-/**
- * 모든 워커 pane의 현재 스냅샷을 수집한다.
- *
- * @param {string} sessionName
- * @param {Array<{paneId: string, paneName: string, cli: string}>} dispatches
- * @param {number} [lines=15] — 각 pane에서 캡처할 줄 수
- * @returns {Array<{paneName: string, cli: string, snapshot: string}>}
- */
 export function getProgressSnapshots(sessionName, dispatches, lines = 15) {
   if (!psmuxSessionExists(sessionName)) return [];
   return dispatches.map((d) => {
@@ -1582,33 +1476,7 @@ export function getProgressSnapshots(sessionName, dispatches, lines = 15) {
   });
 }
 
-/**
- * Lead-Direct Interactive 헤드리스 실행.
- * 세션을 유지하면서 결과 수집 후에도 추가 명령을 dispatch할 수 있다.
- * 반환된 handle의 kill()을 반드시 호출하여 세션을 정리해야 한다.
- *
- * @param {string} sessionName — psmux 세션 이름
- * @param {Array<{cli: string, prompt: string, role?: string}>} assignments
- * @param {object} [opts]
- * @param {number} [opts.timeoutSec=300]
- * @param {string} [opts.layout='2x2']
- * @param {(event: object) => void} [opts.onProgress]
- * @param {number} [opts.progressIntervalSec=0]
- * @param {boolean} [opts.autoAttach=false] — 현재 platform의 관찰 pane/tab 자동 attach
- * @param {AbortSignal} [opts.signal] — abort 시 자동 세션 정리
- * @param {number} [opts.maxIdleSec=0] — 유휴 시 자동 정리 (0=비활성)
- * @returns {Promise<{
- *   sessionName: string,
- *   results: Array,
- *   dispatches: Array,
- *   dispatch: (paneName: string, command: string) => {paneId: string, paneName: string, token: string},
- *   capture: (paneName: string, lines?: number) => string,
- *   snapshots: (lines?: number) => Array,
- *   waitFor: (paneName: string, token: string, timeoutSec?: number, opts?: object) => Promise,
- *   alive: () => boolean,
- *   kill: () => void,
- * }>}
- */
+// 반환된 handle의 kill()을 호출해 세션을 정리해야 한다.
 export async function runHeadlessInteractive(
   sessionName,
   assignments,

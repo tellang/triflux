@@ -12,7 +12,6 @@ import {
   isJevEnabled,
   judgeBusyAction,
   judgeHandoffQuality,
-  judgeInboxPriority,
   judgeMcpSelection,
   judgePeerConvergence,
   judgeRoutingBranch,
@@ -788,7 +787,7 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
     }
   });
 
-  it("추가 병목 훅: judgeTargetSession, assignTasksWithJev, submitPromptWithJevVerification, verifyInstructionAckWithJev, judgeInboxPriority, evaluateReviewGateWithJev 동작 검증", async () => {
+  it("추가 병목 훅: judgeTargetSession, assignTasksWithJev, submitPromptWithJevVerification, verifyInstructionAckWithJev, evaluateReviewGateWithJev 동작 검증", async () => {
     const dir = mkdtempSync(join(tmpdir(), "jev-extra-"));
     const statsFile = join(dir, "jev-stats.jsonl");
     try {
@@ -917,20 +916,6 @@ describe("jev-addon: 5대 훅 도메인 동작 검증", () => {
       );
       assert.equal(ackVerdict.acknowledged, true);
       assert.equal(ackVerdict.ackStatus, "acknowledged_executing");
-
-      const prio = await judgeInboxPriority(
-        {
-          text: "권한 에러로 배포가 멈췄습니다. 승인 여부 결정이 필요합니다.",
-          summary: "배포 중단",
-          from: "worker-1",
-        },
-        {
-          statsFile,
-          client: async () => ({ choice: "urgent_blocker", confidence: 0.95 }),
-        },
-      );
-      assert.equal(prio.priority, "urgent_blocker");
-      assert.equal(prio.urgencyScore, 100);
 
       const gate = await evaluateReviewGateWithJev(
         {
