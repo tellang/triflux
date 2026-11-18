@@ -1599,7 +1599,7 @@ function retireOldInstallFiles() {
 // Only injected when the key is completely absent — existing user values are
 // never overwritten, regardless of what value was set.
 const REQUIRED_TOP_LEVEL_SETTINGS = [
-  { key: "model", value: '"gpt-6-astra"' },
+  { key: "model", value: '"gpt-6.2-astra"' },
   { key: "model_reasoning_effort", value: '"high"' },
   { key: "service_tier", value: '"fast"' },
 ];
