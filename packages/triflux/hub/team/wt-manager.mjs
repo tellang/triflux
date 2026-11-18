@@ -106,9 +106,6 @@ function defaultIsPidAlive(pid, execFileSyncFn = childProcess.execFileSync) {
   }
 }
 
-/**
- * WT 기본 프로필의 폰트 크기를 읽는다.
- */
 function getWtDefaultFontSize() {
   const settingsPaths = [
     join(
@@ -135,16 +132,11 @@ function getWtDefaultFontSize() {
         settings.profiles?.defaults?.font?.size ||
         12
       );
-    } catch {
-      /* 다음 */
-    }
+    } catch {}
   }
   return 12;
 }
 
-/**
- * 파일을 원자적으로 쓴다.
- */
 function atomicWriteSync(filePath, data) {
   const tmpPath = `${filePath}.${process.pid}.tmp`;
   try {
@@ -153,23 +145,11 @@ function atomicWriteSync(filePath, data) {
   } catch (err) {
     try {
       rmSync(tmpPath, { force: true });
-    } catch {
-      /* 무시 */
-    }
+    } catch {}
     throw err;
   }
 }
 
-/**
- * Windows Terminal 탭/세션 라이프사이클 관리자.
- *
- * @param {object} [opts]
- * @param {string} [opts.windowName='triflux']
- * @param {number} [opts.maxTabs=8]
- * @param {string} [opts.pidDir=os.tmpdir()/wt-manager-pids]
- * @param {number} [opts.tabCreateDelayMs=500]
- * @param {object} [opts.deps] — 테스트용 의존성 주입
- */
 function createNonWindowsStubManager() {
   const asyncFalse = async () => false;
   return Object.freeze({
@@ -543,24 +523,11 @@ export function createWtManager(opts = {}) {
     return closed;
   }
 
-  /**
-   * 현재 탭을 split-pane으로 분할.
-   * @param {object} opts
-   * @param {'H'|'V'} [opts.direction='V'] — H=좌우, V=상하
-   * @param {string} [opts.title]
-   * @param {string} [opts.profile]
-   * @param {string} [opts.cwd]
-   * @param {string} [opts.command] — pane에서 실행할 명령
-   * @param {number} [opts.size] — 퍼센트 (0-100)
-   */
   async function splitPane(splitOpts = {}) {
-    // 프로필이 지정된 경우 WT settings.json에 존재하는지 보장
     if (splitOpts.profile && !_profileEnsured) {
       try {
         ensureWtProfile();
-      } catch {
-        /* 프로필 보장 실패해도 진행 */
-      }
+      } catch {}
     }
 
     const direction = splitOpts.direction === "H" ? "-H" : "-V";
@@ -601,14 +568,9 @@ export function createWtManager(opts = {}) {
     await sleepFn(tabCreateDelayMs);
   }
 
-  /**
-   * 여러 세션을 split-pane 레이아웃으로 한번에 배치.
-   * @param {Array<{title: string, command: string, direction?: 'H'|'V', size?: number}>} panes
-   */
   async function applySplitLayout(panes) {
     if (!panes || panes.length === 0) return;
 
-    // 첫 번째는 새 탭으로 생성
     const first = panes[0];
     const createResult = await createTab({
       title: first.title,
@@ -619,7 +581,6 @@ export function createWtManager(opts = {}) {
       return createResult;
     }
 
-    // 나머지는 split-pane으로 분할
     for (let i = 1; i < panes.length; i++) {
       await splitPane({
         direction: panes[i].direction || "V",

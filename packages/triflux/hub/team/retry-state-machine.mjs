@@ -1,17 +1,4 @@
-// hub/team/retry-state-machine.mjs
-// Phase 3 Step A — true ralph / auto-escalate retry state machine.
 // 설계: 구현 커밋 565a2bad 메시지, 규칙은 .claude/rules/tfx-escalation-chain.md
-//
-// Modes:
-//   bounded       — --retry 1 (기본): maxIterations 도달 시 BUDGET_EXCEEDED.
-//   ralph         — --retry ralph: maxIterations=0 이면 unlimited. stuck detector 만 종료.
-//   auto-escalate — --retry auto-escalate: BUDGET_EXCEEDED 시 다음 CLI 로 전이.
-//
-// 상태 전이:
-//   PLANNING → EXECUTING → VERIFYING.success → DONE
-//                       → VERIFYING.fail   → DIAGNOSING → EXECUTING …
-//                       → stuckCounter≥3   → STUCK
-//                       → iter≥max         → BUDGET_EXCEEDED (escalate 모드는 다음 CLI)
 
 import { EventEmitter } from "node:events";
 import {
@@ -501,7 +488,7 @@ export function resumeFromStateFile(stateFile) {
   return JSON.parse(lines[lines.length - 1]);
 }
 
-// Full-snapshot 기반 stateFile I/O — bridge retry-run 에서 multi-process state 복원용.
+// Full-snapshot 기반 stateFile I/O. bridge retry-run 에서 multi-process state 복원용.
 // transition event log (resumeFromStateFile) 와 별도 파일로 관리하는 것을 권장.
 export function loadSnapshot(snapshotFile) {
   if (!existsSync(snapshotFile)) return null;

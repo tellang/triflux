@@ -79,7 +79,7 @@ function defaultPsmuxBinaryExists(command) {
   }
 }
 
-// wt-manager.createTab은 (a) undefined/void 반환 — legacy success 의미 (b) {success:true|false, ...} 객체 반환의 두 형태가 공존.
+// wt-manager.createTab은 undefined/void 반환(legacy success 의미)과 {success:true|false, ...} 객체 반환 두 형태가 공존.
 // `result?.success !== false`는 undefined/null/{}을 모두 success로 취급하고 명시적 {success:false}만 실패로 본다.
 function wtResultSucceeded(result) {
   return result?.success !== false;

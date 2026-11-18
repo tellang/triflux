@@ -130,7 +130,7 @@ export function parseTeamArgs(args = []) {
       nativeBridgeExplicit = true;
     } else if (current === "--cwd" && args[index + 1]) {
       let p = args[++index].trim();
-      // MSYS/Git Bash 드라이브 문자 변환: /c/... → C:/...
+      // MSYS/Git Bash 드라이브 문자 변환: /c/... 을 C:/... 로 변환
       if (process.platform === "win32" && /^\/[a-zA-Z]\//.test(p)) {
         p = p[1].toUpperCase() + ":" + p.slice(2);
       }

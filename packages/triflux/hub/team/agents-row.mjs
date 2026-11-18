@@ -1,4 +1,3 @@
-// hub/team/agents-row.mjs: 워커 tmux pane 을 `claude agents` 행으로 노출한다.
 // 행의 백킹 job 은 공식 `claude --bg --exec` 로 띄운 tmux attach client 다.
 // Enter 를 누르면 그 PTY, 곧 워커가 도는 tmux 방이 열린다(ADR-0026).
 
@@ -29,9 +28,7 @@ export function resolveExecutable(name, envPath = process.env.PATH || "") {
     try {
       accessSync(candidate, constants.X_OK);
       return candidate;
-    } catch {
-      /* 다음 후보 */
-    }
+    } catch {}
   }
   return "";
 }
@@ -104,10 +101,6 @@ export function parseBackgroundShort(stdout) {
   return match ? match[1] : "";
 }
 
-/**
- * 워커 pane 하나를 `claude agents` 행으로 연다.
- * @returns {Promise<{short:string, name:string, readOnly:boolean, pane:object}>}
- */
 export async function openAgentsRow({
   name,
   target,

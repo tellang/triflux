@@ -1,4 +1,3 @@
-// hub/lib/env-detect.mjs — 쉘/터미널/멀티플렉서 환경 감지
 import { execFileSync } from "node:child_process";
 import { platform as osPlatform } from "node:os";
 
@@ -9,11 +8,6 @@ let _multiplexerCache = null;
 
 const PIPE_OPTS = { encoding: "utf8", timeout: 3000, stdio: "pipe" };
 
-/**
- * 기본 쉘 감지
- * Windows: pwsh → powershell (full path + version)
- * Unix: $SHELL → /bin/sh (+ version)
- */
 export function detectShell() {
   if (_shellCache) return _shellCache;
 
@@ -66,9 +60,6 @@ export function detectShell() {
   return _shellCache;
 }
 
-/**
- * 터미널 에뮬레이터 감지
- */
 export function detectTerminal() {
   if (_terminalCache) return _terminalCache;
 
@@ -103,9 +94,6 @@ export function detectTerminal() {
   return _terminalCache;
 }
 
-/**
- * 멀티플렉서 감지 (tmux)
- */
 export function detectMultiplexer() {
   if (_multiplexerCache) return _multiplexerCache;
 
@@ -127,10 +115,6 @@ export function detectMultiplexer() {
   return _multiplexerCache;
 }
 
-/**
- * 통합 환경 정보 조회 (레이지 싱글톤 캐시)
- * @returns {{ shell: object, terminal: object, multiplexer: object, platform: string }}
- */
 export function getEnvironment() {
   if (_cached) return _cached;
 

@@ -90,16 +90,12 @@ const FALLBACK_QUIET_POLLS = 3;
 const PROMPT_SUBMIT_MAX_ATTEMPTS = 3;
 const PROMPT_SUBMIT_RETRY_DELAY_MS = 100;
 const PROMPT_COMPOSER_NEEDLE_LENGTH = 30;
-// Capture the complete pane history so a long TUI response does not lose its
-// leading lines. runTmux's MAX_BUFFER remains the memory/output ceiling.
+// 긴 TUI 응답의 앞부분이 잘리지 않도록 전체 pane 히스토리를 읽는다. 상한은 runTmux MAX_BUFFER를 따른다.
 const CAPTURE_START = "-";
 const MAX_BUFFER = 10 * 1024 * 1024;
-// execFile timeout for a bridge verb = attach timeout + this buffer, so the
-// helper's own timeoutMs fires first and returns {timedOut:true} rather than
-// execFile killing the process with a less useful error.
+// 브리지 execFile 타임아웃은 attach 타임아웃 + 이 여유분으로 잡아 헬퍼 timeoutMs가 먼저 {timedOut:true}를 반환하게 한다.
 const BRIDGE_TIMEOUT_BUFFER_MS = 15_000;
-// Above this size an argv-passed --payload risks E2BIG on some platforms;
-// spill the JSON to a temp file and pass --payload-file instead.
+// 이 크기를 넘기면 argv --payload가 플랫폼에 따라 E2BIG을 낼 수 있어 임시 파일(--payload-file)로 넘긴다.
 const PAYLOAD_FILE_THRESHOLD = 96 * 1024;
 const VALID_TRANSPORTS = ["tmux", "uds", "auto", "queue"];
 const BOOLEAN_FLAGS = new Set([
@@ -122,8 +118,7 @@ const PEER_HOP_DONE_MARKER = "<<<TFX_PEER_HOP_DONE>>>";
 const TMUX_SET_BUFFER_MAX_BYTES = 8 * 1024;
 const PEER_DEFAULT_SEED =
   "Introduce yourself in one sentence, then ask the other party one short question.";
-// uds-fallback diagnostics land here, written async so a failed daemon attach
-// never blocks the tmux fallback path (see writeUdsBugReport / doAskAuto).
+// daemon attach 실패가 tmux 폴백을 막지 않도록 uds-fallback 진단 로그를 비동기로 남긴다.
 const BUG_REPORT_DIR =
   process.env.TFX_LIVE_BUG_REPORT_DIR ??
   pathJoin(homedir(), ".claude", "cache", "triflux", "tfx-live", "bug-reports");
@@ -762,8 +757,7 @@ function buildRemoteLiveCommand(host, verb, opts, env = {}) {
       `& '${escapeRemotePwshSingleQuoted(commandPath)}'`,
       ...args.map((arg) => `'${escapeRemotePwshSingleQuoted(arg)}'`),
     ].join(" ");
-    // Live-unverified for Windows remotes; apply the same SSH single-argument
-    // contract proven on darwin so the remote login shell does not re-split it.
+    // Windows 원격에서는 실측 전이지만 login shell이 재분리하지 않도록 darwin과 같은 SSH 단일 인자 규약을 적용한다.
     const remoteCmd = `pwsh -NoProfile -Command ${remoteShellQuote(command)}`;
     return {
       command: "ssh",
@@ -859,7 +853,7 @@ async function callRemoteLive(verb, opts, deps = {}) {
   const execOptions = {
     timeout:
       (verb === "ask" ? (opts.busyTimeoutMs ?? timeoutMs) : 0) +
-      // Codex checks its hard ceiling on a timeoutMs tick.
+      // Codex는 timeoutMs 틱마다 상한을 검사한다.
       maxTurnMs +
       timeoutMs +
       30_000,
@@ -874,7 +868,7 @@ async function callRemoteLive(verb, opts, deps = {}) {
       try {
         return parseRemoteLiveJson(error.stdout);
       } catch {
-        // stdout was not a tfx-live JSON result; fall through.
+        // stdout이 tfx-live JSON 결과가 아니면 아래로 폴백한다.
       }
     }
     const stderr = error?.stderr ? String(error.stderr).trim() : "";
@@ -945,9 +939,7 @@ function resolveCodexDaemonSocket(value = "default") {
       : pathResolve(value);
   try {
     if (statSync(socketPath).isSocket()) return socketPath;
-  } catch {
-    /* handled below */
-  }
+  } catch {}
   throw new Error(
     `Codex daemon socket unavailable: ${socketPath}. Start it with codex app-server daemon start`,
   );
@@ -1004,7 +996,7 @@ function isCodexProcessCommand(command) {
     if (valueOptions.has(arg.split("=", 1)[0])) {
       if (!arg.includes("=")) argv.shift();
     } else if (!booleanOptions.has(arg)) {
-      // Unknown Node options may consume the next token as a value.
+      // 알 수 없는 Node 옵션은 다음 토큰을 값으로 소비할 수 있다.
       return false;
     }
   }
@@ -1213,7 +1205,7 @@ async function discoverCodexTmuxSessions(
           if (match) parents.set(Number(match[1]), Number(match[2]));
         }
       } catch {
-        // Without ancestry evidence only the pane process itself can match.
+        // 계보 근거가 없으면 pane 프로세스 자체만 일치 대상으로 본다.
       }
       const names = codexThreadNames({
         indexPath: pathJoin(
@@ -1323,11 +1315,11 @@ async function claudeConversationTitle(sessionId, env) {
           const title = record.customTitle ?? record.aiTitle;
           if (typeof title === "string" && title.trim()) return title.trim();
         } catch {
-          // The tail may start mid-line or end with a concurrent partial write.
+          // tail 시작이 줄 중간이거나 동시 쓰기로 마지막 줄이 잘릴 수 있다.
         }
       }
     } catch {
-      // Missing or unreadable transcripts cannot break session discovery.
+      // 누락되거나 읽을 수 없는 transcript 때문에 세션 탐색이 깨지면 안 된다.
     } finally {
       await handle?.close().catch(() => {});
     }
@@ -1385,7 +1377,7 @@ async function discoverClaudeTmuxSessions({ cwd = null } = {}, deps = {}) {
       if (match) parents.set(Number(match[1]), Number(match[2]));
     }
   } catch {
-    // Without ancestry evidence only the pane process itself can match.
+    // 계보 근거가 없으면 pane 프로세스 자체만 일치 대상으로 본다.
   }
   const env = deps.env ?? process.env;
   const dir =
@@ -1404,7 +1396,7 @@ async function discoverClaudeTmuxSessions({ cwd = null } = {}, deps = {}) {
     if (!file.endsWith(".json")) continue;
     try {
       const record = JSON.parse(await readFile(pathJoin(dir, file), "utf8"));
-      // Match from the right: session names may themselves contain ':' and '.'.
+      // 세션 이름 자체에 ':'와 '.'이 들어갈 수 있으므로 오른쪽부터 매칭한다.
       const coordinate =
         typeof record.tmux === "string"
           ? record.tmux.match(/^(.*):@(\d+)\.(%\d+)$/)
@@ -1446,7 +1438,7 @@ async function discoverClaudeTmuxSessions({ cwd = null } = {}, deps = {}) {
         status: record.status ?? null,
       });
     } catch {
-      // A malformed or concurrently removed record cannot break discovery.
+      // 손상됐거나 동시 삭제된 레코드 때문에 탐색이 깨지면 안 된다.
     }
   }
   return result;
@@ -1923,8 +1915,7 @@ async function capturePane(remote, session) {
 }
 
 async function captureVisible(remote, session) {
-  // Visible pane only (no scrollback). Used for state detection so a stale
-  // screen that scrolled off (e.g. the update prompt) cannot cause a false match.
+  // 화면에 보이는 pane만 읽는다(스크롤백 제외). 위로 밀려난 이전 업데이트 프롬프트에 오탐하지 않기 위해서다.
   const { stdout } = await runTmux(remote, [
     "capture-pane",
     "-t",
@@ -2020,19 +2011,15 @@ function isClaudeMcpApprovalPrompt(text) {
 }
 
 function isClaudeTourPrompt(text) {
-  // Claude's post-update welcome/tour screen ("Take the tour" / "Skip for now").
-  // Claude has no codex-style "Update available / Skip until next version" menu
-  // (its update is a non-blocking background auto-updater), so the recurring
-  // startup screen that needs a "skip" is this tour prompt. Require both labels
-  // so a stray "Skip for now" elsewhere cannot false-match.
+  // Claude 업데이트 후 환영/투어 화면("Take the tour" / "Skip for now") 판정.
+  // 다른 곳의 "Skip for now" 오탐을 막기 위해 두 문구를 함께 본다.
   return (
     /Take the tour/i.test(String(text)) && /Skip for now/i.test(String(text))
   );
 }
 
 function selectedLine(text) {
-  // Menu selector glyphs only (exclude ASCII '>' which appears in codex's
-  // "> You are in ..." trust-prompt header and would mis-target navigation).
+  // 메뉴 선택 글리프만 허용한다(codex 신뢰 프롬프트 머리말의 '>'와 혼동 방지).
   return (
     String(text)
       .split("\n")
@@ -2267,9 +2254,8 @@ async function dismissClaudeTourPrompt(remote, session) {
     raw = await captureVisible(remote, session);
   }
 
-  // Fallback: Escape cancels the welcome/tour dialog (equivalent to "Skip for
-  // now"). Never blind-Enter here — the default selection may be "Take the
-  // tour", and Enter would launch the tour instead of skipping it.
+  // Escape로 투어 대화상자를 취소한다("Skip for now"와 동일).
+  // 기본 선택이 "Take the tour"일 수 있으므로 Enter를 보내지 않는다.
   await runTmux(remote, [
     "send-keys",
     "-t",
@@ -2679,10 +2665,8 @@ function bundledBridgePath() {
 }
 
 function resolveBridgePath(flags) {
-  // Resolution order: explicit flag, env override, repo root, then this
-  // Triflux package's bundled hub/bridge.mjs. The bundled fallback is what
-  // lets tfx-live be a first-class Triflux skill instead of depending on a
-  // separate installed codex-live checkout.
+  // 탐색 순서: 명시 플래그, 환경변수, repo 루트, 패키지 내장 hub/bridge.mjs.
+  // 내장 폴백 덕분에 별도 codex-live 체크아웃 없이 동작한다.
   if (flags.bridge) {
     return flags.bridge;
   }
@@ -2696,8 +2680,7 @@ function resolveBridgePath(flags) {
 }
 
 function parseBridgeJson(stdout) {
-  // Bridge verbs print one normalized JSON object. Tolerate leading log lines
-  // by scanning from the end for the last complete JSON object.
+  // 브리지 명령은 정규화 JSON 하나를 출력한다. 앞선 로그 줄을 건너뛰려고 끝에서부터 마지막 완전한 JSON 객체를 찾는다.
   const text = String(stdout).trim();
   if (!text) {
     throw new Error("bridge returned empty output");
@@ -2746,14 +2729,13 @@ async function callBridgeVerb(bridgePath, verb, payload, timeoutMs) {
     });
     return parseBridgeJson(stdout);
   } catch (error) {
-    // Bridge verbs report a failed request as a {ok:false,error} JSON on stdout
-    // with a non-zero exit code. execFile rejects on non-zero exit, so recover
-    // that structured result from error.stdout before treating it as a crash.
+    // 브리지 실패도 비영 종료와 함께 stdout에 {ok:false,error} JSON을 남긴다.
+    // execFile이 reject하기 전에 error.stdout에서 구조화된 결과를 복구한다.
     if (error?.stdout) {
       try {
         return parseBridgeJson(error.stdout);
       } catch {
-        // stdout was not JSON; fall through to the hard error below.
+        // stdout이 JSON이 아니면 아래 일반 오류로 처리한다.
       }
     }
     const stderr = error?.stderr ? String(error.stderr).trim() : "";
@@ -3784,9 +3766,8 @@ async function doStartTmux(launchAdapter, opts) {
       exactTmuxTarget(session),
       opts.env || process.env,
     );
-  // Default tmux history-limit (2000) is far too small for long tool-heavy
-  // CLI sessions (file reads, test runs) — the actual response can scroll
-  // out of scrollback before capturePane() runs, producing an empty extract.
+  // tmux 기본 history-limit(2000)은 도구 호출이 많은 세션에서 너무 작아
+  // capturePane 전에 응답이 스크롤백 밖으로 밀려 빈 추출이 난다.
   await runTmux(remote, [
     "set-option",
     "-t",
@@ -4552,7 +4533,7 @@ async function dispatchAsk(adapter, opts) {
     });
   }
 
-  // uds/auto attach a live background Claude daemon, not a tmux TUI.
+  // uds/auto는 tmux TUI가 아니라 백그라운드 Claude daemon에 붙는다.
   if (adapter.cli !== "claude") {
     throw new Error(
       `--transport ${transport} is only supported with --cli claude (daemon attach target)`,
@@ -4966,8 +4947,7 @@ async function doAskViaDaemon(opts, meta = {}) {
     payload,
     timeoutMs,
   );
-  // Contract: UDS success is matchedCompletion === true only. timedOut/closed
-  // are surfaced but never counted as done.
+  // UDS 성공 계약: matchedCompletion === true일 때만 완료로 본다. timedOut/closed는 노출하되 완료로 세지 않는다.
   const matchedCompletion = result?.matchedCompletion === true;
   return {
     ...result,
@@ -5003,10 +4983,9 @@ async function doAskViaDaemon(opts, meta = {}) {
 
 function daemonProbeTargetAttachable(probe, opts) {
   if (!probe?.ok) return false;
-  // New bridge responses carry `target`; daemon-control owns selection policy.
+  // 최신 브리지 응답은 target을 포함해 daemon-control이 선택 정책을 맡는다.
   if (probe.raw?.target) return true;
-  // Compatibility only for older bridge binaries that list sessions but do not
-  // expose `target` yet. Do not add new selection semantics here.
+  // target을 아직 안 내보내는 구형 브리지 바이너리 호환용이며, 여기선 새 선택 규칙을 추가하지 않는다.
   if (!Array.isArray(probe.sessions)) return false;
   return probe.sessions.some(
     (entry) =>
@@ -5047,9 +5026,8 @@ async function ensureTmuxSession(adapter, opts) {
 }
 
 function writeUdsBugReport(reason, context) {
-  // Fire-and-forget structured report so a uds failure is never silently
-  // swallowed. Returns a promise the caller flushes before returning, but the
-  // tmux fallback runs in parallel without awaiting report I/O.
+  // UDS 실패가 묻히지 않도록 비동기 보고를 날린다. 반환 프라미스는 종료 전에 flush하되
+  // tmux 폴백은 보고 I/O를 기다리지 않고 병렬 진행한다.
   const report = {
     ts: new Date().toISOString(),
     kind: "uds-fallback",
@@ -5071,8 +5049,7 @@ function writeUdsBugReport(reason, context) {
                 .map((entry) => entry?.short)
                 .filter(Boolean)
             : [],
-          // Diagnostic-only bridge metadata; callers should not depend on this
-          // shape as a versioned control contract.
+          // 진단 전용 브리지 메타데이터다. 버전 호환 제어 계약으로 의존하면 안 된다.
           daemon: context.probe.raw?.daemon ?? null,
           daemons: context.probe.raw?.daemons ?? [],
           matches: context.probe.raw?.matches ?? [],
@@ -5110,7 +5087,7 @@ async function runTmuxFallback(adapter, opts, reason, udsResult) {
       ...udsError,
     };
   }
-  // Lazy start so a successful UDS run never leaves a blank extra session.
+  // UDS가 성공했을 때 빈 여분 세션이 남지 않도록 필요 시에만 시작한다.
   const tmuxStartedOnDemand = await ensureTmuxSession(adapter, opts);
   const tmuxResult = await doAskViaTmux(adapter, opts);
   return {
@@ -5159,9 +5136,8 @@ async function doAskAuto(adapter, opts) {
     if (udsResult.inputSent !== false) {
       return { ...udsResult, status: "unknown", done: false };
     }
-    // Daemon was reachable but the attach round did not complete (error,
-    // timeout, or socket close). File a report async, then keep the user moving
-    // on tmux instead of returning a dead uds result.
+    // daemon 연결은 됐으나 attach 라운드가 끝나지 않으면(오류/타임아웃/소켓 닫힘)
+    // 비동기로 보고하고 죽은 uds 결과 대신 tmux로 진행시킨다.
     const attachError = udsResult.error ?? {
       timedOut: udsResult.timedOut === true,
       closed: udsResult.closed === true,
@@ -5196,7 +5172,7 @@ async function doAskAuto(adapter, opts) {
     return fallback;
   }
 
-  // uds is unavailable: daemon unreachable, or reachable but target not listed.
+  // daemon에 연결할 수 없거나 대상이 목록에 없어 uds를 쓸 수 없다.
   const reason = resolution.transportProbe?.daemonReason ?? "target-not-found";
   const reportPromise = writeUdsBugReport(reason, {
     short: opts.short,
@@ -5475,9 +5451,7 @@ function hasDaemonRef(short, sessionId) {
 }
 
 function defaultTransportFor(adapter, short, sessionId) {
-  // UDS-first by default only when a Claude daemon ref exists. Everything else
-  // keeps the historical tmux path, so Codex targets and ordinary Claude tmux
-  // sessions remain backwards compatible.
+  // Claude daemon ref가 있을 때만 UDS를 우선하고, Codex 대상과 일반 Claude tmux 세션은 기존 tmux 경로를 유지한다.
   return adapter.cli === "claude" && hasDaemonRef(short, sessionId)
     ? "auto"
     : "tmux";
@@ -5508,7 +5482,7 @@ const CLAUDE_SILENT_SLASH =
 function askOpts(flags, adapter) {
   const short = flags.short;
   const sessionId = flags["session-id"];
-  // Codex 메시지는 queue 가 기본이다. 슬래시 명령과 바쁠 때 거부·중단은 tmux 만 할 수 있다.
+  // Codex 메시지는 queue가 기본이다. 슬래시 명령과 바쁠 때 거부 및 중단은 tmux만 할 수 있다.
   const slash = isSlashCommand(flags.prompt);
   const busyPolicy = ["fail", "interrupt", "auto"].includes(flags["if-busy"]);
   const transportReason =
@@ -5553,8 +5527,7 @@ function askOpts(flags, adapter) {
     );
   }
   return {
-    // tmux needs a tmux session name; uds needs a daemon ref (short/sessionId);
-    // auto can take both (daemon ref to probe, tmux session for fallback).
+    // tmux는 세션 이름, uds는 daemon ref(short/sessionId), auto는 둘 다 받는다(프로브용 daemon ref, 폴백용 tmux 세션).
     session:
       transport === "tmux" || (codexQueue && flags.session)
         ? splitTmuxTarget(requireFlag(flags, "session")).target
@@ -5700,7 +5673,6 @@ async function sameMachineClaudeRedirect(adapter, opts, flags, deps = {}) {
 
 const PEER_SEND_CLIS = ["claude", "codex", "agy"];
 
-// --to 인자에서 선택적 CLI 접두사(claude:, codex:, agy:)와 검색어를 분리한다.
 function parsePeerToSpec(raw) {
   const text = String(raw || "").trim();
   if (!text) return { cli: null, query: "" };
@@ -5726,7 +5698,6 @@ function summarizePeerCandidate(candidate) {
   };
 }
 
-// claude, codex, agy 세션을 탐색해 --to 매칭 후보 목록을 만든다.
 async function discoverPeerTargets({
   cliFilter = null,
   cwd = null,
@@ -5849,14 +5820,12 @@ async function discoverPeerTargets({
   return candidates;
 }
 
-// 후보 목록에서 query에 해당하는 단일 수신 세션을 찾는다.
 function matchPeerCandidates(candidates, query) {
   const needle = String(query || "")
     .trim()
     .toLowerCase();
   if (!needle) return [];
 
-  // 1순위: 표시 이름(name) 정확 일치
   const exactName = candidates.filter(
     (c) =>
       String(c.name || "")
@@ -5865,7 +5834,6 @@ function matchPeerCandidates(candidates, query) {
   );
   if (exactName.length > 0) return exactName;
 
-  // 2순위: 별칭(session, threadId, conversationId, target, paneId) 정확 일치
   return candidates.filter((c) =>
     (c.aliases || []).some(
       (alias) =>
@@ -5876,7 +5844,6 @@ function matchPeerCandidates(candidates, query) {
   );
 }
 
-// 발신 세션을 판별한다: --from -> TFX_LIVE_FROM -> 환경변수/tmux 자동 탐지.
 async function resolvePeerSender({
   from = null,
   env = process.env,
@@ -7304,10 +7271,8 @@ function parsePeerClosure(response) {
 
   if (objectText) {
     try {
-      // Terminal word-wrap can inject a raw newline + indent mid-token in
-      // compact JSON (e.g. "f\n  alse" for "false") since there's often no
-      // space nearby to wrap at. Try the raw text first, then retry with
-      // wrap artifacts collapsed before giving up as unstructured.
+      // 터미널 줄바꿈이 공백 없는 compact JSON 토큰 중간에 개행과 들여쓰기를 끼워 넣을 수 있다(예: "f\n  alse").
+      // 원문 파싱을 먼저 시도하고, 실패하면 줄바꿈 아티팩트를 접어 다시 파싱한다.
       let parsed;
       try {
         parsed = JSON.parse(objectText);
@@ -7528,7 +7493,7 @@ function peerSideTransport(flags, side, adapter) {
   const globalTransport = flags.transport;
   const short = sideFlag(flags, side, "short");
   const sessionId = sideFlag(flags, side, "session-id");
-  // Codex 는 ask 와 같이 queue 가 기본이다. 원격, 바쁠 때 거부·중단, 표식 없는 응답 대기는 tmux 만 할 수 있다.
+  // Codex는 ask와 같이 queue가 기본이다. 원격, 바쁠 때 거부 및 중단, 표식 없는 응답 대기는 tmux만 할 수 있다.
   const codexDefault =
     flags.remote ||
     Object.hasOwn(flags, "no-relay-tag") ||
@@ -8125,8 +8090,7 @@ function isMainModule() {
   try {
     return realpathSync(process.argv[1]) === modulePath;
   } catch {
-    // process.argv[1] doesn't resolve on disk (e.g. `node -e`) — fall back
-    // to a non-symlink-aware comparison instead of treating it as not-main.
+    // node -e 등으로 process.argv[1]이 디스크 경로로 해석되지 않으면 심볼릭 링크 비교 없이 일반 경로 비교로 폴백한다.
     return pathResolve(process.argv[1]) === modulePath;
   }
 }

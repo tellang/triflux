@@ -1,16 +1,4 @@
-// hub/team/psmux.mjs — terminal multiplexer 세션/키바인딩/캡처/steering 관리
-//
-// 역사: psmux 는 Windows pwsh7 환경용 tmux 호환 클론 (Windows 에서 tmux 가
-// 깔리지 않거나 ConPTY 호환이 부족할 때 대안). triflux 는 원래 Windows 첫
-// 운영 환경이었고 그래서 변수 명에 `PSMUX_` prefix 가 남아있다. 실제 의미는
-// "OS 별 primary multiplexer" 다:
-//   - mac/Linux: tmux 가 primary (POSIX 표준)
-//   - Windows: psmux 가 primary (Windows pwsh7 전용)
-// 이전 코드는 mac 에서 psmux 를 시도하고 tmux 로 silent fallback 했는데,
-// 운영 fact 는 mac 표준이 tmux 라 fallback 이 아닌 정식 primary 다.
-// (PSMUX_BIN 변수 명은 backward-compat 위해 유지)
-//
-// 의존성: child_process, fs, os, path (Node.js 내장)만 사용
+// PSMUX_BIN 변수명은 하위 호환을 위해 유지하며, 실제 의미는 OS별 기본 멀티플렉서(mac/Linux=tmux, Windows=psmux)다.
 
 import {
   chmodSync,
@@ -586,7 +574,6 @@ function psmux(args, opts = {}) {
   }
 }
 
-/** primary terminal multiplexer (Windows=psmux, mac/Linux=tmux) 실행 가능 여부 */
 export function hasMultiplexer() {
   try {
     childProcess.execFileSync(PSMUX_BIN, ["-V"], {
@@ -600,40 +587,17 @@ export function hasMultiplexer() {
   }
 }
 
-/**
- * backward-compat alias — historical 이름 `hasPsmux` 는 OS 별 primary 의 의미를
- * 가린다. 외부 caller (scripts/remote-spawn.mjs,
- * tests) 호환을 위해 alias 로 보존. 신규 코드는 hasMultiplexer 사용.
- */
+// 외부 호출자(scripts/remote-spawn.mjs, 테스트) 하위 호환 별칭.
 export const hasPsmux = hasMultiplexer;
 
-/**
- * 현재 resolved multiplexer 종류 — "psmux" | "tmux" | <user override path>.
- * isTmuxFallback() 의 후속 — mac/Linux 에서 tmux 는 fallback 이 아닌 primary 라
- * "fallback" 표현이 부정확해서 type 으로 정정.
- */
 export function getMultiplexerType() {
   return PSMUX_BIN;
 }
 
-/**
- * psmux 커맨드 실행 래퍼
- * @param {string|string[]} args
- * @param {object} opts
- * @returns {string}
- */
 export function psmuxExec(args, opts = {}) {
   return psmux(args, opts);
 }
 
-/**
- * psmux 세션 생성 + 레이아웃 분할
- * @param {string} sessionName
- * @param {object} opts
- * @param {'2x2'|'1xN'|'Nx1'} opts.layout
- * @param {number} opts.paneCount
- * @returns {{ sessionName: string, panes: string[] }}
- */
 export function createPsmuxSession(sessionName, opts = {}) {
   const layout =
     opts.layout === "1xN" || opts.layout === "Nx1" ? opts.layout : "2x2";
@@ -762,11 +726,6 @@ export function createPsmuxSession(sessionName, opts = {}) {
   }
 }
 
-/**
- * psmux 세션의 모든 pane PID를 수집
- * @param {string} sessionName
- * @returns {number[]}
- */
 function collectPanePids(sessionName) {
   try {
     const output = psmuxExec([
@@ -785,14 +744,9 @@ function collectPanePids(sessionName) {
   }
 }
 
-/**
- * Windows 프로세스 트리 강제 종료 (taskkill /T /F)
- * @param {number} pid
- */
 function killProcessTree(pid) {
   if (!pid) return;
   if (!IS_WINDOWS) {
-    // macOS/Linux: BFS로 전체 자손 수집 → SIGTERM → SIGKILL 에스컬레이션
     const collectChildren = (parentPid) => {
       try {
         return childProcess
@@ -822,7 +776,6 @@ function killProcessTree(pid) {
         }
       }
     }
-    // SIGTERM 먼저
     for (const c of allDesc) {
       try {
         process.kill(c, "SIGTERM");
@@ -831,7 +784,6 @@ function killProcessTree(pid) {
     try {
       process.kill(pid, "SIGTERM");
     } catch {}
-    // 1초 대기 후 생존자 SIGKILL
     try {
       childProcess.execFileSync("sleep", ["1"], {
         timeout: 2000,
@@ -858,12 +810,7 @@ function killProcessTree(pid) {
   }
 }
 
-/**
- * 세션의 모든 pane에서 pipe-pane 캡처를 해제한다.
- * pipe-pane을 인자 없이 호출하면 psmux가 reader 프로세스에 EOF를 보내 정상 종료시킨다.
- * @param {string} sessionName
- * @param {string[]} paneIds — collectSessionPanes() 결과
- */
+// 인자 없이 호출하면 psmux가 reader 프로세스에 EOF를 보내 정상 종료시킨다.
 function disableAllPipeCaptures(sessionName, paneIds) {
   for (const paneId of paneIds) {
     try {
@@ -874,11 +821,6 @@ function disableAllPipeCaptures(sessionName, paneIds) {
   }
 }
 
-/**
- * 세션과 관련된 고아 pipe-pane 헬퍼 프로세스를 찾아 종료한다.
- * pipe-pane disable 후에도 reader가 종료되지 않는 경우의 안전망.
- * @param {string} sessionName
- */
 function killOrphanPipeHelpers(sessionName) {
   if (!IS_WINDOWS) {
     // macOS/Linux: pipe-pane helper cmdline contains
@@ -933,12 +875,7 @@ function killOrphanPipeHelpers(sessionName) {
   }
 }
 
-/**
- * 세션이 spawn한 CLI(codex/gemini)의 고아 MCP 서버 프로세스를 찾아 종료한다.
- * headless 워커가 codex/gemini를 실행하면 MCP 서버(node.exe)가 자식으로 생성되는데,
- * 부모가 죽어도 Windows에서는 자식이 자동 종료되지 않아 고아가 된다.
- * @param {string} sessionName
- */
+// Windows에서는 부모가 죽어도 자식으로 뜬 MCP 서버(node.exe)가 자동 종료되지 않아 고아로 남는다.
 function killOrphanMcpProcesses(sessionName) {
   if (!IS_WINDOWS) {
     // macOS/Linux: 세션별 스코핑
@@ -1013,54 +950,33 @@ function detachAttachedClients(sessionName, waitMs = 750) {
   }
 }
 
-/**
- * psmux 세션 종료
- * 순서: pipe-pane 해제 → pane 프로세스 트리 정리 → 세션 종료 → 고아 정리
- * @param {string} sessionName
- */
 export function killPsmuxSession(sessionName) {
-  // attach된 WT/ConPTY 클라이언트가 있으면 먼저 안전하게 분리한다.
   detachAttachedClients(sessionName);
 
-  // 1. pipe-pane 캡처 해제 — reader 프로세스에 EOF 전송하여 정상 종료 유도
   let paneIds = [];
   try {
     paneIds = collectSessionPanes(sessionName);
-  } catch {
-    // 세션이 이미 죽었으면 pane 목록 수집 불가 — 계속 진행
-  }
+  } catch {}
   disableAllPipeCaptures(sessionName, paneIds);
 
-  // pipe-pane reader가 EOF를 처리하고 정상 종료할 시간 확보
+  // pipe-pane reader가 EOF를 처리하고 종료할 시간을 준다.
   sleepMs(500);
 
-  // 2. pane 프로세스 트리 강제 종료 (MCP 서버 포함)
   const pids = collectPanePids(sessionName);
   for (const pid of pids) {
     killProcessTree(pid);
   }
 
-  // 3. psmux 세션 자체 종료
   try {
     psmuxExec(["kill-session", "-t", exactSessionTarget(sessionName)], {
       stdio: "ignore",
     });
-  } catch {
-    // 이미 종료된 세션 — 무시
-  }
+  } catch {}
 
-  // 4. 고아 프로세스 정리 (pipe-pane 헬퍼 + MCP 서버)
   killOrphanPipeHelpers(sessionName);
   killOrphanMcpProcesses(sessionName);
 }
 
-/**
- * 활성 psmux 세션 메타데이터 조회
- * @param {object} [opts]
- * @param {string|RegExp} [opts.filterTitle] - 세션명 prefix 또는 /regex/flags
- * @param {number} [opts.olderThanMs] - 생성 후 경과 시간 필터
- * @returns {Array<{sessionName: string, title: string, createdAt: number|null, lastActivityAt: number|null, attachedCount: number, isAttached: boolean, ageMs: number|null, idleMs: number|null}>}
- */
 export function listSessions(opts = {}) {
   ensurePsmuxInstalled();
   const matcher = toTitleMatcher(opts.filterTitle);
@@ -1073,11 +989,6 @@ export function listSessions(opts = {}) {
   });
 }
 
-/**
- * 세션명 prefix/regex 역조회 후 세션 종료
- * @param {string|RegExp} titlePattern
- * @returns {{ matchedCount: number, killedCount: number, sessions: string[] }}
- */
 export function killSessionByTitle(titlePattern) {
   ensurePsmuxInstalled();
   const sessions = listSessions({ filterTitle: titlePattern });
@@ -1095,13 +1006,6 @@ export function killSessionByTitle(titlePattern) {
   };
 }
 
-/**
- * 오래 idle 상태인 detached 세션 일괄 정리
- * @param {object} [opts]
- * @param {number} [opts.olderThanMs=3600000]
- * @param {boolean} [opts.dryRun=false]
- * @returns {{ dryRun: boolean, matchedCount: number, killedCount: number, sessions: string[] }}
- */
 export function pruneStale(opts = {}) {
   ensurePsmuxInstalled();
   const olderThanMs = normalizeOlderThanMs(opts.olderThanMs, 3600000);
@@ -1144,11 +1048,6 @@ export function pruneStale(opts = {}) {
   };
 }
 
-/**
- * psmux 세션 존재 확인
- * @param {string} sessionName
- * @returns {boolean}
- */
 export function psmuxSessionExists(sessionName) {
   try {
     psmuxExec(["has-session", "-t", exactSessionTarget(sessionName)], {
@@ -1160,10 +1059,6 @@ export function psmuxSessionExists(sessionName) {
   }
 }
 
-/**
- * tfx-multi- 접두사 psmux 세션 목록
- * @returns {string[]}
- */
 export function listPsmuxSessions() {
   try {
     return listSessionInventoryRaw()
@@ -1174,12 +1069,6 @@ export function listPsmuxSessions() {
   }
 }
 
-/**
- * pane 마지막 N줄 캡처
- * @param {string} target
- * @param {number} lines
- * @returns {string}
- */
 export function capturePsmuxPane(target, lines = 5) {
   try {
     const full = psmuxExec(["capture-pane", "-t", target, "-p", "-S", "-"]);
@@ -1190,10 +1079,6 @@ export function capturePsmuxPane(target, lines = 5) {
   }
 }
 
-/**
- * psmux 세션 연결
- * @param {string} sessionName
- */
 export function attachPsmuxSession(sessionName) {
   const result = childProcess.spawnSync(
     PSMUX_BIN,
@@ -1209,11 +1094,6 @@ export function attachPsmuxSession(sessionName) {
   }
 }
 
-/**
- * 세션 attach client 수 조회
- * @param {string} sessionName
- * @returns {number|null}
- */
 export function getPsmuxSessionAttachedCount(sessionName) {
   try {
     const session = listSessionInventoryRaw().find(
@@ -1225,13 +1105,6 @@ export function getPsmuxSessionAttachedCount(sessionName) {
   }
 }
 
-/**
- * 팀메이트 조작 키 바인딩 설정
- * @param {string} sessionName
- * @param {object} opts
- * @param {boolean} opts.inProcess
- * @param {string} opts.taskListCommand
- */
 export function configurePsmuxKeybindings(sessionName, opts = {}) {
   const { inProcess = false, taskListCommand = "" } = opts;
   const cond = `#{==:#{session_name},${sessionName}}`;
@@ -1341,14 +1214,6 @@ export function configurePsmuxKeybindings(sessionName, opts = {}) {
   }
 }
 
-// ─── steering 기능 ───
-
-/**
- * pane 출력 pipe-pane 캡처를 시작하고 즉시 snapshot을 기록한다.
- * @param {string} sessionName
- * @param {string} paneNameOrTarget
- * @returns {{ paneId: string, paneName: string, logPath: string }}
- */
 export function startCapture(sessionName, paneNameOrTarget) {
   ensurePsmuxInstalled();
   const pane = resolvePane(sessionName, paneNameOrTarget);
@@ -1368,25 +1233,8 @@ export function startCapture(sessionName, paneNameOrTarget) {
   return { paneId: pane.paneId, paneName, logPath };
 }
 
-/**
- * PowerShell 명령을 pane에 비동기 전송하고 완료 토큰을 반환한다.
- * @param {string} sessionName
- * @param {string} paneNameOrTarget
- * @param {string} commandText
- * @returns {{ paneId: string, paneName: string, token: string, logPath: string }}
- */
-/**
- * CLI 명령(codex/legacy Gemini)이 psmux pane의 PowerShell 환경에서 단축 플래그 충돌을
- * 일으키는 문제를 방지하기 위해 bash -c '...' 로 감싼다.
- * - codex -o flag → PS -OutVariable/OutBuffer 충돌
- * - legacy Gemini prompt flag (v8.6.0: -p → long-form prompt flag, PS 충돌 해소)
- * @param {string} cmd
- * @returns {string}
- */
-// Windows: PowerShell의 bash가 WSL을 가리킬 수 있음. Git Bash를 명시적으로 사용.
-// WSL bash에서는 /c/Users/... 경로가 유효하지 않아 exit 127 발생.
-// psmux pane 용 (PowerShell → bash 실행): & "path" 형식
-// Node.js execSync 용 (직접 실행): "path" 형식
+// codex -o 등 단축 플래그가 PowerShell 공통 파라미터와 충돌하는 것을 피하기 위해 bash -c로 감싼다.
+// Windows에서 PowerShell의 bash는 WSL을 가리켜 /c/Users 경로에서 exit 127이 나므로 Git Bash를 사용한다.
 const _gitBashPath = IS_WINDOWS ? resolveGitBashExecutable() : null;
 // PowerShell call operator(&)가 필요: & "C:\...\bash.exe" -c '...'
 const GIT_BASH_BIN_PS = _gitBashPath ? `& "${_gitBashPath}"` : "bash";
@@ -1456,17 +1304,6 @@ export function dispatchCommand(sessionName, paneNameOrTarget, commandText) {
   return { paneId: pane.paneId, paneName, token, logPath };
 }
 
-/**
- * pane 캡처 로그에서 정규식 패턴을 polling으로 대기한다.
- * @param {string} sessionName
- * @param {string} paneNameOrTarget
- * @param {string|RegExp} pattern
- * @param {number} timeoutSec
- * @param {object} [opts]
- * @param {(snapshot: {content: string, paneId: string, paneName: string, elapsed: number}) => void} [opts.onPoll] — 각 폴링 주기마다 호출
- * @param {AbortSignal} [opts.signal] — 외부에서 폴링 중단 요청 시 사용
- * @returns {{ matched: boolean, paneId: string, paneName: string, logPath: string, match: string|null, aborted?: boolean }}
- */
 export async function waitForPattern(
   sessionName,
   paneNameOrTarget,
@@ -1614,15 +1451,6 @@ export async function waitForPattern(
   };
 }
 
-/**
- * 완료 토큰이 찍힐 때까지 대기하고 exit code를 파싱한다.
- * @param {string} sessionName
- * @param {string} paneNameOrTarget
- * @param {string} token
- * @param {number} timeoutSec
- * @param {object} [opts] — waitForPattern에 전달할 옵션 (onPoll 등)
- * @returns {{ matched: boolean, paneId: string, paneName: string, logPath: string, match: string|null, token: string, exitCode: number|null }}
- */
 export async function waitForCompletion(
   sessionName,
   paneNameOrTarget,

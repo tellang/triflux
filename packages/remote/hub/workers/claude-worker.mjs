@@ -1,26 +1,18 @@
-// hub/workers/claude-worker.mjs — Claude stream-json subprocess 래퍼
 // ADR-007: --input-format/--output-format stream-json 기반 세션 워커.
 
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 
-import { extractText, terminateChild, withRetry } from "./worker-utils.mjs";
-
-const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
-const DEFAULT_KILL_GRACE_MS = 1000;
-
-function toStringList(value) {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => String(item ?? "").trim()).filter(Boolean);
-}
-
-function safeJsonParse(line) {
-  try {
-    return JSON.parse(line);
-  } catch {
-    return null;
-  }
-}
+import {
+  createWorkerError,
+  DEFAULT_KILL_GRACE_MS,
+  DEFAULT_TIMEOUT_MS,
+  extractText,
+  safeJsonParse,
+  terminateChild,
+  toStringList,
+  withRetry,
+} from "./worker-utils.mjs";
 
 function findSessionId(event) {
   return (
@@ -30,12 +22,6 @@ function findSessionId(event) {
     event?.message?.sessionId ||
     null
   );
-}
-
-function createWorkerError(message, details = {}) {
-  const error = new Error(message);
-  Object.assign(error, details);
-  return error;
 }
 
 function normalizeRetryOptions(retryOptions) {

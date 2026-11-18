@@ -1,6 +1,3 @@
-// ============================================================================
-// 라인 렌더러 (tier별 행 생성)
-// ============================================================================
 import {
   bold,
   CLAUDE_ORANGE,
@@ -40,9 +37,6 @@ import {
   truncateAnsi,
 } from "./utils.mjs";
 
-// ============================================================================
-// 행 정렬 렌더링
-// ============================================================================
 export function renderAlignedRows(rows) {
   const cols = getTerminalColumns() || 120;
   const rightRows = rows.filter(
@@ -76,9 +70,6 @@ export function renderAlignedRows(rows) {
   });
 }
 
-// ============================================================================
-// micro tier: 모든 프로바이더를 1줄로 압축
-// ============================================================================
 export function getMicroLine(
   contextView,
   claudeUsage,
@@ -91,7 +82,6 @@ export function getMicroLine(
     codexLoggedOut = false,
   } = options;
 
-  // Claude 5h/1w
   const cF =
     claudeUsage?.fiveHourPercent != null
       ? clampPercent(claudeUsage.fiveHourPercent)
@@ -108,7 +98,6 @@ export function getMicroLine(
         ? `${cF != null ? colorByProvider(cF, `${cF}%`, claudeOrange) : dim("--%")}${dim("/")}${cW != null ? colorByProvider(cW, `${cW}%`, claudeOrange) : dim("--%")}`
         : dim("--%/--%");
 
-  // Codex 5h/1w
   let xVal = dim("--%/--%");
   if (codexBuckets) {
     const mb = codexBuckets.codex || codexBuckets[Object.keys(codexBuckets)[0]];
@@ -196,9 +185,6 @@ function spendOnlyPercent(claudeUsage) {
   return clampPercent(claudeUsage.spendLimitPercent);
 }
 
-// ============================================================================
-// Claude 행 렌더러
-// ============================================================================
 export function getClaudeRows(
   currentTier,
   contextView,
@@ -225,7 +211,6 @@ export function getClaudeRows(
     const right = `${accountText}${contextSection}`;
     return [{ prefix, left, right }];
   }
-  // API 실측 데이터
   const fiveHourPercent = claudeUsage?.fiveHourPercent ?? null;
   const weeklyPercent = claudeUsage?.weeklyPercent ?? null;
   const fiveHourReset = claudeUsage?.fiveHourResetsAt
@@ -297,7 +282,6 @@ export function getClaudeRows(
     ];
   }
 
-  // full tier (>= 120 cols)
   const staleTag = claudeUsage?.stale ? ` ${dim("[stale]")}` : "";
   const quotaSection = `${dim("5h:")}${fBar}${fStr} ${dim(fTime)} ${dim("1w:")}${wBar}${wStr} ${dim(wTime)}${staleTag}`;
   return [
@@ -309,9 +293,6 @@ export function getClaudeRows(
   ];
 }
 
-// ============================================================================
-// 계정 라벨 + 범용 프로바이더 행 렌더러
-// ============================================================================
 export function getAccountLabel(provider, accountName) {
   const label = accountName || (provider === "antigravity" ? "agy" : provider);
   return label.includes("@") ? label.split("@")[0] : label;
@@ -454,7 +435,6 @@ export function getProviderRow(
     return { prefix, left: quotaSection, right: compactRight };
   }
 
-  // full tier
   const gap = cacheGap(promptCache, markerColor);
 
   if (realQuota?.type === "codex") {
@@ -497,7 +477,6 @@ export function getProviderRow(
     }
   }
 
-  // 폴백
   if (!quotaSection) {
     quotaSection = `${dim("5h:")}${tierDimBar(currentTier, gap)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCell(""))} ${dim("1w:")}${tierDimBar(currentTier)}${dim(formatPlaceholderPercentCell())} ${dim(formatTimeCellDH(""))}`;
   }
@@ -551,7 +530,7 @@ function getAntigravityRow(
     (showTime ? TIME_CELL_INNER_WIDTH + 3 : 0);
   let slot;
   if (project) {
-    // 쿼터 대신 과금 방식을 막대 자리(막대가 없는 표시에서는 퍼센트 자리)에 보인다.
+    // 쿼터 대신 과금 방식을 막대 위치(막대가 없는 표시에서는 퍼센트 위치)에 보인다.
     const mark = isFull ? `${geminiBlue(" GCP ")} ` : "";
     const cell = isFull ? dim(formatPlaceholderPercentCell()) : percent;
     slot = `${dim("--:")}${mark}${cell}${timeCell}`;

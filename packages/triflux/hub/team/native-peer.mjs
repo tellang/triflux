@@ -474,7 +474,7 @@ export async function deliverClaude({
   receiver = resolveClaudeReceiver({ sessionId, home, platform }),
   net: transport = net,
   socketDir = path.dirname(receiver.socketPath),
-  // 150ms 유지 후 리드의 peer 수신·응답을 확인해 8초 고정 대기를 줄였다.
+  // 150ms 유지 후 리드의 peer 수신과 응답을 확인해 8초 고정 대기를 줄였다.
   holdMs = 150,
 }) {
   const own =

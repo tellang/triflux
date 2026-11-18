@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-// hub/bridge.mjs: tfx-route.sh 와 tfx-live 가 부르는 로컬 제어 CLI.
 // Claude daemon, retry, intervene 은 로컬 모듈만 쓴다.
 
 import {
@@ -581,20 +580,7 @@ async function cmdDaemonInterrupt(args) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// retry-run / retry-status — Phase 3 Step C2 bridge 서브커맨드.
-// retry-state-machine.mjs 를 multi-process safe 하게 외부 호출용 wrap.
-// 사용자 워크플로우:
-//   1) 첫 호출: retry-run --snapshot X --mode ralph --event start
-//      → 새 SM 생성, PLANNING → EXECUTING transition, snapshot 저장
-//   2) verify 성공 시: retry-run --snapshot X --event verify-success
-//      → DONE, 종료 판단 반환
-//   3) verify 실패 시: retry-run --snapshot X --event verify-fail --reason R
-//      → DIAGNOSING 또는 STUCK/BUDGET_EXCEEDED, 종료 판단 반환
-//   4) 다음 iter 시작: retry-run --snapshot X --event start
-// 출력: {ok, current, iterations, done, shouldStop, reason?, cli?} JSON.
-// ---------------------------------------------------------------------------
-
+// retry-state-machine.mjs 를 multi-process safe 하게 감싼 외부 호출용 서브커맨드.
 function buildRetrySmFromArgs(args, snapshot) {
   const mode = args.mode || snapshot?.mode || "bounded";
   const maxIterations =
@@ -923,9 +909,7 @@ function recordProgressingGrace(targetKey, logSignature) {
       }
     }
     writeFileSync(progressingGraceFilePath(), JSON.stringify(store), "utf8");
-  } catch {
-    // 상태 기록 실패는 무시
-  }
+  } catch {}
 }
 
 export function readTailSafe(filePath, maxBytes = 2000) {

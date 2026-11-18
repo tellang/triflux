@@ -1,5 +1,5 @@
 // 무활동 감지는 호출자 소유다. 이 모듈은 개입 사다리만 집행한다.
-// ① interrupt+재지시 → ② graceful+resume → ③ SIGTERM → ④ SIGKILL
+// 1. interrupt+재지시, 2. graceful+resume, 3. SIGTERM, 4. SIGKILL
 import { execFile } from "node:child_process";
 import { statSync } from "node:fs";
 import { readdir, readlink } from "node:fs/promises";

@@ -1,11 +1,6 @@
 #!/usr/bin/env node
 
-// scripts/test-lock.mjs — 테스트 러너 싱글톤 lockfile 가드
-//
-// npm test 동시 실행 방지. conductor 같은 child-spawn 테스트가
-// 3중 실행되면 WT ConPTY 수백 개 → 16GB RAM 사고 발생.
-//
-// 사용: node scripts/test-lock.mjs [-- ...node --test args]
+// npm test 동시 실행 시 ConPTY 과다 생성으로 메모리 사고가 나지 않도록 잠금 파일로 막는다.
 
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -27,16 +22,7 @@ const LOCK_DIR = join(dirname(SCRIPT_PATH), "..", ".test-lock");
 const LOCK_FILE = join(LOCK_DIR, "pid.lock");
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // release prepare 와 동일
 const SHUTDOWN_GRACE_MS = 5 * 1000;
-// --test-force-exit can beat already-queued async test failures: Node sets
-// process.exitCode=1 a few microtask turns AFTER the runner calls
-// process.exit(). A single-turn defer raced that and could force-exit 0 with
-// real failures still pending (masking e.g. 4185-pass/3-fail as a green exit).
-// Drain a BOUNDED number of turns until the runner's exitCode settles, and keep
-// an independent failure signal for uncaught/rejection classes that may never
-// set process.exitCode. Rejections are tracked per-promise and cleared on
-// rejectionHandled so a late-attached .catch does not false-fail the run.
-// Fails closed: a genuinely-unhandled rejection or uncaught error resolves
-// toward non-zero.
+// --test-force-exit 가 비동기 테스트 실패의 process.exitCode=1 설정보다 먼저 종료하는 경합을 막기 위해 마이크로태스크를 드레인한다.
 const FORCE_EXIT_FAILURE_PROPAGATION_IMPORT = `data:text/javascript,${encodeURIComponent(`
 const realExit = process.exit.bind(process);
 let pendingCode = 0;
@@ -258,9 +244,7 @@ function acquireLock(timeoutMs) {
     }
     try {
       unlinkSync(LOCK_FILE);
-    } catch {
-      /* ignore */
-    }
+    } catch {}
   }
   mkdirSync(LOCK_DIR, { recursive: true });
   const lock = {
@@ -277,9 +261,7 @@ function releaseLock() {
   try {
     const lock = readLock();
     if (lock && lock.parent_pid === process.pid) unlinkSync(LOCK_FILE);
-  } catch {
-    /* ignore */
-  }
+  } catch {}
 }
 
 function updateChildPid(lock, childPid) {
@@ -393,9 +375,7 @@ export function main(argv = process.argv.slice(2)) {
     for (const dir of [testHubPidDir, testHome]) {
       try {
         if (dir) rmSync(dir, { recursive: true, force: true });
-      } catch {
-        // best-effort cleanup only
-      }
+      } catch {}
     }
     process.exit(code);
   }
@@ -432,17 +412,9 @@ export function main(argv = process.argv.slice(2)) {
     process.once(signal, () => requestShutdown(signal));
   }
 
-  // Install termination handlers before spawning/advertising child state. The
-  // child can become ready before this wrapper reaches later setup lines on
-  // fast Linux CI; without early handlers an external SIGTERM can terminate the
-  // wrapper by signal instead of the controlled 128+signal exit path.
-  // forward args after -- to node --test
+  // 빠른 CI 에서 자식이 먼저 준비될 수 있으므로 실행 전에 시그널 핸들러를 등록한다.
   const args = preserveForceExitFailures(expandTestArgs(argv));
-  // stdio split (issue #192 F1): when prepare.mjs spawns this lock with
-  // ["ignore","inherit","inherit"], full inherit cascades the parent stdin=ignore
-  // to grand-child node --test, breaking ConPTY assumptions on Windows and
-  // surfacing as EXIT=1 (false-failed). Pipe stdin only — stdout/stderr stay
-  // inherited so the grand-child still streams to whoever attached to us.
+  // Windows ConPTY 가 부모 stdin=ignore 상속으로 EXIT=1 오작동하지 않게 stdin 만 pipe 한다 (#192 F1).
   child = spawn(process.execPath, args, {
     stdio: ["pipe", "inherit", "inherit"],
     env: {
@@ -450,18 +422,7 @@ export function main(argv = process.argv.slice(2)) {
       ...(testHome ? testHomeEnv(testHome) : {}),
       TEST_LOCK_PID: String(process.pid),
       TFX_HUB_PID_DIR: process.env.TFX_HUB_PID_DIR || testHubPidDir,
-      // 테스트 러너 밀폐화: 머신 전역 CLI disable 정책을 자식 테스트가 상속하지
-      // 않게 고정한다. 개발 기기는 셸 설정이나
-      // ~/.config/triflux/machine-profile.env 로 TFX_DISABLE_CODEX=1 과
-      // TFX_DISABLE_ANTIGRAVITY=1 을 공급할 수 있다.
-      //
-      // "0" 고정이지 `||` 폴백이 아닌 이유: 리더 규칙상 env 에 키가 존재하면
-      // profile 은 그 키를 읽지 않는다. 그래서 "0" 을 명시해야 셸 export 와
-      // 프로파일 파일 두 공급원을 한 번에 덮는다. `||` 폴백은 부모의 1 을 그대로
-      // 통과시켜 conductor·swarm-hypervisor 계열 테스트가 이 머신에서만 깨진다.
-      //
-      // disable 동작 자체를 검증하는 테스트는 함수 인자나 인라인 env 로 자기
-      // 값을 넣으므로 이 기본값보다 우선한다.
+      // 머신 전역 disable 정책(셸 env 또는 machine-profile.env)을 자식 테스트가 상속하지 않게 "0" 을 명시한다.
       TFX_DISABLE_CODEX: "0",
       TFX_DISABLE_ANTIGRAVITY: "0",
     },
@@ -481,7 +442,6 @@ export function main(argv = process.argv.slice(2)) {
   });
 
   updateChildPid(lock, child.pid);
-  // Close stdin immediately so node --test never blocks waiting for input.
   child.stdin?.end();
 
   timeoutTimer = setTimeout(() => {

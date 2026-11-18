@@ -1,7 +1,3 @@
-// hub/team/shared.mjs — 팀 모듈 공유 유틸리티
-// cli.mjs, dashboard.mjs 등에서 중복되던 상수/함수를 통합
-
-// ── ANSI 색상 상수 ──
 export const AMBER = "\x1b[38;5;214m";
 export const GREEN = "\x1b[38;5;82m";
 export const RED = "\x1b[38;5;196m";

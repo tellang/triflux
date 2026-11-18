@@ -20,7 +20,7 @@ const WARNING_LEVELS = Object.freeze({
   critical: { min: 90, message: "에이전트 분할 또는 세션 교체 권장" },
 });
 
-// Unlike clampPercent (rounds), this preserves decimals for precise threshold comparison.
+// 반올림하는 clampPercent와 달리 임계치 비교를 위해 소수점을 유지한다.
 function clampThresholdPercent(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
@@ -31,9 +31,7 @@ function safeWriteJson(filePath, data) {
   try {
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, JSON.stringify(data, null, 2), { mode: 0o600 });
-  } catch {
-    // noop
-  }
+  } catch {}
 }
 
 function normalizeText(input) {
@@ -275,11 +273,9 @@ export function buildContextUsageView(stdin) {
 }
 
 export function createContextMonitor(options = {}) {
-  // Default to a 1M context window (Opus 4.x [1M] / Codex GPT-5.6 family runs on
-  // a 1M window) when no explicit limit is supplied, so the cached percent the
-  // Stop hook reads is not inflated against a 200K assumption — assuming 200K
-  // there false-positives at ~15% real usage and blocks legitimate stops.
-  // Narrower setups override via TFX_CONTEXT_DEFAULT_MAX_TOKENS.
+  // 명시된 한도가 없으면 1M 창(Opus 4.x 1M, Codex GPT-5.6 계열 기준)을 기본으로 쓴다.
+  // 200K로 가정하면 Stop 훅이 실제 사용량 ~15%에서 오탐해 정상 종료를 막는다.
+  // 더 작은 창은 TFX_CONTEXT_DEFAULT_MAX_TOKENS로 덮어쓴다.
   const explicitLimit = Number(options.limitTokens);
   const envLimit = Number(process.env.TFX_CONTEXT_DEFAULT_MAX_TOKENS);
   const limitTokens =

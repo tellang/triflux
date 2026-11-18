@@ -40,13 +40,9 @@ function findLatestTeamState() {
       try {
         const parsed = JSON.parse(readFileSync(path, "utf8"));
         if (parsed && typeof parsed === "object") return parsed;
-      } catch {
-        // corrupt entry — skip
-      }
+      } catch {}
     }
-  } catch {
-    // directory walk failure
-  }
+  } catch {}
   return null;
 }
 
@@ -60,7 +56,6 @@ export function loadTeamState(sessionId) {
   } catch {
     return null;
   }
-  // 세션별 파일 없으면 기존 team-state.json fallback
   const legacyPath = getStatePath(null);
   try {
     if (existsSync(legacyPath))

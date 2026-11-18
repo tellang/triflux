@@ -1,6 +1,4 @@
 // 역할군별 3사 모델 우선순위 라우팅 정책 (SSOT, ADR-0054)
-// 역할 기본 후보 순서, 교차 리뷰 규칙, 쿼터 하드 제외 및 95% 초과 1칸 후순위 이동,
-// Jev 신뢰도 0.85 이상 최대 1칸 인접 교환을 단일 순수 함수로 판정한다.
 
 import { resolveCliPolicy } from "./machine-profile.mjs";
 import { evaluateVendorQuota, readQuotaSnapshot } from "./quota-snapshot.mjs";
@@ -156,7 +154,6 @@ const CLAUDE_PSEUDO_CANDIDATES = Object.freeze([
 ]);
 
 export const ROLE_PRIORITY_TABLE = Object.freeze({
-  // 1. 탐색 (하 등급)
   explore: Object.freeze({
     group: "exploration",
     tierFloor: "low",
@@ -208,7 +205,6 @@ export const ROLE_PRIORITY_TABLE = Object.freeze({
     candidates: EXPLORATION_CANDIDATES,
   }),
 
-  // 2. 판단 (최상 등급)
   architect: Object.freeze({
     group: "judgment",
     tierFloor: "top",
@@ -261,7 +257,6 @@ export const ROLE_PRIORITY_TABLE = Object.freeze({
     candidates: JUDGMENT_CANDIDATES,
   }),
 
-  // 3. 실행 (상 등급)
   executor: Object.freeze({
     group: "execution",
     tierFloor: "high",
@@ -326,7 +321,6 @@ export const ROLE_PRIORITY_TABLE = Object.freeze({
     candidates: BUILD_FIXER_CANDIDATES,
   }),
 
-  // 4. 검증 (리뷰)
   "code-reviewer": Object.freeze({
     group: "verification",
     tierFloor: "high",
@@ -353,7 +347,6 @@ export const ROLE_PRIORITY_TABLE = Object.freeze({
     candidates: SECURITY_REVIEW_CANDIDATES,
   }),
 
-  // 5. 문서 및 시각 설계
   designer: Object.freeze({
     group: "writing_design",
     tierFloor: "high",
@@ -383,7 +376,6 @@ export const ROLE_PRIORITY_TABLE = Object.freeze({
     candidates: DOCUMENT_SPECIALIST_CANDIDATES,
   }),
 
-  // 6. 리드 및 소통
   lead: Object.freeze({
     group: "lead_communication",
     tierFloor: "top",
@@ -413,7 +405,6 @@ export const ROLE_PRIORITY_TABLE = Object.freeze({
     candidates: COMMUNICATION_CANDIDATES,
   }),
 
-  // CLI 이름 호환 의사 역할
   antigravity: Object.freeze({
     group: "execution",
     tierFloor: "high",
@@ -657,10 +648,7 @@ function applyRightToLeftQuotaDemotion(list) {
   return firstDemoted;
 }
 
-/**
- * Jev 고신뢰(>= 0.85) 판단 결과를 받아 가용 후보 배열 안에서 최대 1칸 인접 교환만 수행한다.
- * 하드 제외된 벤더를 되살리지 않으며, 교환 후에도 over_95 후순위 규칙을 보존한다.
- */
+// 하드 제외된 벤더를 되살리지 않으며 over_95 후순위 규칙을 보존한다.
 export function reconcileCandidatesWithJev(
   candidates,
   jevDecision,
@@ -766,9 +754,6 @@ export function reconcileCandidatesWithJev(
   };
 }
 
-/**
- * 역할, 쿼터 스냅샷, 머신 프로파일, 작성 벤더 제약을 결합해 우선순위 후보 배열을 만든다.
- */
 export function resolveRoleCandidates({
   agent = "executor",
   env = process.env,
@@ -834,7 +819,6 @@ export function resolveRoleCandidates({
     );
   }
 
-  // 2. 일반 리뷰어 및 보안 리뷰어 작성 벤더 검증
   let effectiveReviewAuthor = "";
   const hasEnvReviewAuthor =
     env != null &&
@@ -870,7 +854,6 @@ export function resolveRoleCandidates({
     }
   }
 
-  // 1. 기본 후보 로드 및 역할별 보정
   let baseList = buildRoleBaseCandidates(normalizedAgent, entry, {
     nested: resolvedNested,
     planReviewGate: resolvedPlanGate,
@@ -891,7 +874,6 @@ export function resolveRoleCandidates({
     }
   }
 
-  // 3. TFX_NO_CLAUDE_NATIVE=1 처리 (explore: codex/agy 우선, 둘 다 불가 시 외부 claude 워커 최후 예비)
   let deferredExploreClaudeWorker = null;
   if (normalizedAgent === "explore" && resolvedNoClaudeNative) {
     const exploreClaude = baseList.find((c) => c.cli === "claude");
@@ -915,7 +897,6 @@ export function resolveRoleCandidates({
     ordered = baseList.filter((c) => c.cli !== effectiveReviewAuthor);
   }
 
-  // 4. 명시 TFX_CLI_MODE 또는 명시 벤더 프로필(TFX_CODEX_PROFILE / TFX_GEMINI_PROFILE) 우선순위 결합
   const keepClaudeNative =
     Boolean(entry.nativeClaudeEligible) &&
     !resolvedNoClaudeNative &&
@@ -959,7 +940,6 @@ export function resolveRoleCandidates({
     }
   }
 
-  // 명시 TFX_ANTIGRAVITY_FALLBACK 호환: antigravity 뒤 대안 순서 지정
   if (rawFallback && !crossVendorActive && ordered[0]?.cli === "antigravity") {
     const rest = ordered.slice(1);
     const fb = rest.find((c) => c.cli === rawFallback);
@@ -972,7 +952,6 @@ export function resolveRoleCandidates({
     }
   }
 
-  // 5. 하드 제외 필터 (금지, 미설치, 재라우팅 방문 이력, 소진 >= 100%, 쿨다운)
   const disabledMap = resolveDisabledMap(env, cliPolicy, disabled);
   const availMap = resolveAvailability(env, available);
   const quota = quotaSnapshot ?? readQuotaSnapshot({ env });
@@ -1089,7 +1068,6 @@ export function resolveRoleCandidates({
 
   const preDemoteFirstCli = active[0]?.cli || null;
 
-  // 6. Jev 고신뢰(>= 0.85) 최대 1칸 인접 교환 (cliMode === "auto" 전용)
   if (resolvedCliMode === "auto" && jevAdjustment && active.length > 1) {
     const reconciled = reconcileCandidatesWithJev(active, jevAdjustment, {
       explicitCliMode: false,
@@ -1097,7 +1075,6 @@ export function resolveRoleCandidates({
     active = reconciled.candidates;
   }
 
-  // 7. 쿼터 95% 초과 1칸 후순위 이동 (cliMode === "auto" 전용, 단일 우측 역순 패스)
   let usageSwitch = false;
   if (resolvedCliMode === "auto" && active.length > 1) {
     const demotedFirst = applyRightToLeftQuotaDemotion(active);
