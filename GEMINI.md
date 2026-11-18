@@ -52,3 +52,10 @@ TFX_CLI_MODE=antigravity bash ~/.claude/scripts/tfx-route.sh executor "$prompt" 
 스킬 문서는 `npm run lint:skills`로 검사한다.
 패키지 미러와 버전은 `node scripts/release/check-packages-mirror.mjs`와
 `node scripts/release/check-sync.mjs`로 확인한다.
+
+## triflux 상시 개발 기조
+
+- **자기 설명적 코드**: 의미 있는 함수명, 변수명을 쓰고 주석은 비직관적인 이유 1%만 짧게 남긴다(기존 코드 주석 일괄 정리는 별도 PR).
+- **과잉 금지**: 불필요한 추상화, 래퍼, 테스트 코드를 늘리지 않는다.
+- **최신 스택**: Node 22+ 내장 API와 최신 라이브러리를 적극 사용한다. Node 22+ 등 환경 보장은 `tfx setup`, `tfx-doctor` 같은 설치와 업데이트 경로가 맡는다.
+- **AI 슬롭 백로그**: 개발 중 발견한 AI 슬롭은 즉석에서 고치지 말고 `.omc/slop-backlog.md`에 위치와 내용만 간단히 적어 두었다가 작업 끝난 뒤 일괄 정리한다.
