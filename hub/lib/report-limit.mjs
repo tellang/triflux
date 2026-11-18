@@ -24,12 +24,22 @@ export function filePaths(text) {
 
 // 리드 규칙상 결과 원문은 파일에 있으므로, 경로가 보일 때만 자른다. 경로가 없으면 원문을 잃으니 자르지 않는다.
 // report 는 남길 본문, whole 은 길이를 재고 경로를 찾을 전체 글이다.
-export function shorten(report, whole = report) {
+export function shorten(report, whole = report, { fileExists } = {}) {
   const safeReport = typeof report === "string" ? report : String(report ?? "");
   const safeWhole =
     typeof whole === "string" ? whole : String(whole ?? safeReport);
   if (safeWhole.length <= reportLimit) return { kind: "keep" };
-  const paths = filePaths(safeWhole);
+  const rawPaths = filePaths(safeWhole);
+  const paths =
+    typeof fileExists === "function"
+      ? rawPaths.filter((candidate) => {
+          try {
+            return Boolean(fileExists(candidate));
+          } catch {
+            return false;
+          }
+        })
+      : rawPaths;
   if (!paths.length) return { kind: "warn", total: safeWhole.length };
   const listed = paths.slice(0, pathLimit).map((path) => `- ${path}`);
   if (paths.length > pathLimit) {

@@ -80,10 +80,10 @@ export function resolveCodexProfileConfigValues(profileName, opts = {}) {
     opts.codexHome || process.env.CODEX_HOME || join(homedir(), ".codex");
   let model = null;
   let effort = managed ? resolveCodexModelEffort(managed, opts).effort : null;
-  const candidateNames = [normalizedProfileName];
-  if (managed?.family && managed.family !== normalizedProfileName) {
-    candidateNames.push(managed.family);
-  }
+  const candidateNames =
+    managed?.family && managed.family !== normalizedProfileName
+      ? [managed.family, normalizedProfileName]
+      : [normalizedProfileName];
   for (const candidateName of candidateNames) {
     try {
       const raw = readFileSync(

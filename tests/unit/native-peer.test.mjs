@@ -1442,7 +1442,16 @@ it("tfx-peer는 리드 또는 소통 표지가 있는 Codex, agy 대상에 본�
     deliverCodex: deliver,
   };
 
-  const withPath = `첫 줄 요약\n${"가".repeat(4500)}\n결과: /work/.omc/briefs/vn-lead-core.result.md 참조`;
+  const resultPath = path.join(
+    tmpRoot,
+    ".omc",
+    "briefs",
+    "vn-lead-core.result.md",
+  );
+  fs.mkdirSync(path.dirname(resultPath), { recursive: true });
+  fs.writeFileSync(resultPath, "완료 보고 원문", "utf8");
+
+  const withPath = `첫 줄 요약\n${"가".repeat(4500)}\n결과: ${resultPath} 참조`;
   const cutRes = await peerMain(
     ["send", "--to", "agy:11.18 v11 리드", "--message", withPath],
     deps,
@@ -1450,14 +1459,24 @@ it("tfx-peer는 리드 또는 소통 표지가 있는 Codex, agy 대상에 본�
   assert.equal(cutRes.status, "sent");
   assert.equal(cutRes.reportWarning, undefined);
   assert.match(delivered.message, /^\[tfx-peer from=codex:11\.18 워커 msg=/);
-  assert.match(
-    delivered.message,
-    /\(중략\)\n파일 경로:\n- \/work\/\.omc\/briefs\/vn-lead-core\.result\.md/,
-  );
+  assert.ok(delivered.message.includes(`(중략)\n파일 경로:\n- ${resultPath}`));
   assert.match(
     delivered.message,
     /\n회신: .+ send --to 'codex:11\.18 워커' --message '\.\.\.'$/,
   );
+
+  // 본문에 경로 모양 문자열이 있어도 실제 파일이 없으면 원문 손실을 막기 위해 자르지 않고 경고한다.
+  const withMissingPath = `요약\n${"다".repeat(4500)}\n참고: /nonexistent/.omc/briefs/missing.md`;
+  const missingPathRes = await peerMain(
+    ["send", "--to", "codex:11.18 소통 창구", "--message", withMissingPath],
+    deps,
+  );
+  assert.equal(missingPathRes.status, "sent");
+  assert.deepEqual(missingPathRes.reportWarning, {
+    total: withMissingPath.length,
+    limit: reportLimit,
+  });
+  assert.ok(delivered.message.includes("다".repeat(4500)));
 
   const withoutPath = "나".repeat(4500);
   const warnRes = await peerMain(

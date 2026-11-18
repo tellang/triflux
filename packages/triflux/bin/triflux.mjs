@@ -2145,17 +2145,41 @@ async function cmdDoctor(options = {}) {
       if (existsSync(codexHooksPath)) {
         try {
           const parsedHooks = JSON.parse(readFileSync(codexHooksPath, "utf8"));
-          const hookGroups = Object.values(parsedHooks?.hooks || {}).flat();
-          const hasSessionHook = hookGroups.some(
-            (group) =>
-              Array.isArray(group?.hooks) &&
-              group.hooks.some(
-                (hook) =>
-                  typeof hook?.command === "string" &&
-                  hook.command.includes("codex-session-hook.mjs"),
-              ),
-          );
-          codexHooksStatus = hasSessionHook ? "registered" : "missing";
+          const hooksObj = parsedHooks?.hooks || {};
+          const hasHookCmd = (groups) =>
+            Array.isArray(groups) &&
+            groups.some(
+              (group) =>
+                Array.isArray(group?.hooks) &&
+                group.hooks.some(
+                  (hook) =>
+                    typeof hook?.command === "string" &&
+                    hook.command.includes("codex-session-hook.mjs"),
+                ),
+            );
+          const hasCompactStart =
+            Array.isArray(hooksObj.SessionStart) &&
+            hooksObj.SessionStart.some(
+              (group) =>
+                typeof group?.matcher === "string" &&
+                group.matcher.includes("compact") &&
+                Array.isArray(group?.hooks) &&
+                group.hooks.some(
+                  (hook) =>
+                    typeof hook?.command === "string" &&
+                    hook.command.includes("codex-session-hook.mjs"),
+                ),
+            );
+          const hasPrompt = hasHookCmd(hooksObj.UserPromptSubmit);
+          const hasStop = hasHookCmd(hooksObj.Stop);
+          const anyRegistered =
+            hasHookCmd(hooksObj.SessionStart) || hasPrompt || hasStop;
+          codexHooksStatus =
+            hasCompactStart && hasPrompt && hasStop
+              ? "registered"
+              : anyRegistered
+                ? "outdated"
+                : "missing";
         } catch {
           codexHooksStatus = "invalid";
         }
@@ -2167,7 +2191,11 @@ async function cmdDoctor(options = {}) {
         ...(codexHooksStatus === "registered" ? {} : { fix: "tfx setup" }),
       });
       if (codexHooksStatus === "registered") {
-        ok("등록됨 (codex-session-hook.mjs)");
+        ok("등록됨 (SessionStart, UserPromptSubmit, Stop)");
+      } else if (codexHooksStatus === "outdated") {
+        warn(`부분 등록 또는 구버전 훅 ${DIM}(${codexHooksPath})${RESET}`);
+        info("수정: tfx setup");
+        issues++;
       } else if (codexHooksStatus === "invalid") {
         warn(`hooks.json 파싱 실패 ${DIM}(${codexHooksPath})${RESET}`);
         info("수정: tfx setup");
@@ -2242,9 +2270,10 @@ async function cmdDoctor(options = {}) {
         `버전 차이: 설치 ${agyPlugin.installedVersion}, 패키지 ${PKG.version}`,
       );
       info("수정: tfx setup");
-    } else if (agyPlugin.status === "failed")
+    } else if (agyPlugin.status === "failed") {
       warn(`확인 실패: ${agyPlugin.error}`);
-    else info(`건너뜀 (${agyPlugin.reason})`);
+      issues++;
+    } else info(`건너뜀 (${agyPlugin.reason})`);
 
     // agy OAuth 기반이므로 API 키 불필요
     section(`Claude Code ${AMBER}●${RESET}`);

@@ -19,6 +19,7 @@ function fixture(
   rename: 'ok' | 'reject',
   uname?: Promise<void>,
   extraEnv: Record<string, string> = {},
+  tmuxSession?: () => string,
 ) {
   const clock = mock.clock(on, { now: noon })
   mock.store(on)
@@ -32,6 +33,17 @@ function fixture(
   on('session.compact', (_, e) => { compacts.push(e.instructions); return { messages: [...e.messages] } })
   on('session.usage', () => ({ value: { context: { window: 1000, tokens: 0, percent: 0 }, rateLimits: [] } }) as never)
   on('process.run', async (_, e) => {
+    if (e.argv[0] === 'tmux' && tmuxSession) {
+      return {
+        value: {
+          exitCode: 0,
+          stdout: `${tmuxSession()}\n`,
+          stderr: '',
+          isStdoutTruncated: false,
+          isStderrTruncated: false,
+        },
+      }
+    }
     if (e.argv[0] === 'uname') await uname
     return { value: { exitCode: 0, stdout: e.argv[0] === 'uname' ? 'Darwin\n' : '1\n',
       stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
@@ -103,6 +115,9 @@ test('--role communication 인자로 실행하면 소통 표지로 저장한다'
   await f.clock.settle()
   expect(f.renames).toEqual(['10.21 소통창구'])
   expect(result.text).toContain('이름 변경 요청: 10.21 소통창구')
+  expect(result.context).toEqual([
+    '이 세션은 소통창구 소통 세션을 맡는다. tfx-lead 스킬을 로드해 "소통 세션" 절을 따른다.',
+  ])
   await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: '작업', toolUses: [] }] })
   expect(f.compacts[0]).toContain('- 소통 역할: 소통창구, 세션 이름: 10.21 소통창구')
 })
@@ -135,4 +150,49 @@ test('대화형 session.start 때 TMUX_PANE 과 일치하는 claude 표지를 �
   expect(f.compacts[0]).toContain('- 소통 역할: 문서 소통, 세션 이름: 10.21 문서 소통')
   expect((await $.command.run({ ...lead, command: 'tfx-pressure', args: 'status' })).text).toContain('압박 감시: on')
   expect(f.toasts).toEqual([])
+})
+
+test('session.start 이후에 생성된 claude 표지도 다음 훅 시점에 지연 채택하고 재사용된 paneId 는 걸러낸다', async ($, on) => {
+  let markerReady = false
+  let liveSession = 'other-session'
+  const f = fixture(
+    on,
+    'ok',
+    undefined,
+    { TMUX_PANE: '%21', TMUX: '/tmp/tmux-1/default,1,0' },
+    () => liveSession,
+  )
+  on('fs.list', (_, e) => {
+    if (markerReady && e.path === '/home/test/.local/state/triflux/lead-roles') {
+      return { value: [{ name: 'app-comm.json', type: 'file' }] }
+    }
+    return { value: [] }
+  })
+  on('fs.read', (_, e) => {
+    if (markerReady && e.path === '/home/test/.local/state/triflux/lead-roles/app-comm.json') {
+      return {
+        value: JSON.stringify({
+          session: 'app-comm',
+          paneId: '%21',
+          cli: 'claude',
+          sessionRole: 'communication',
+          role: '지연 소통',
+          since: '2026-10-21T03:00:00.000Z',
+        }),
+      }
+    }
+    throw new Error('ENOENT')
+  })
+
+  await $.session.start(start)
+  markerReady = true
+  // tmux 세션 이름이 다르면(재사용된 paneId) 채택하지 않는다.
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: '작업', toolUses: [] }] })
+  expect(f.compacts[0]).not.toContain('지연 소통')
+
+  // 실제 세션 이름이 일치하면 지연 생성된 표지를 채택하고 압박 감시를 켠다.
+  liveSession = 'app-comm'
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: '작업', toolUses: [] }] })
+  expect(f.compacts[1]).toContain('- 소통 역할: 지연 소통, 세션 이름: 10.21 지연 소통')
+  expect((await $.command.run({ ...lead, command: 'tfx-pressure', args: 'status' })).text).toContain('압박 감시: on')
 })

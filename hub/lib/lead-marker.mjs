@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -141,27 +142,74 @@ function normalizeMarkerRecord(record, existing = null) {
   };
 }
 
-function findMatchingEntry(query = {}, env = process.env) {
+function defaultResolvePaneSession(paneId, env = process.env) {
+  if (!env?.TMUX || env?.TRIFLUX_TEST_HOME || env?.TEST_LOCK_PID) {
+    return undefined;
+  }
+  try {
+    const out = execFileSync(
+      "tmux",
+      ["display-message", "-p", "-t", paneId, "#{session_name}"],
+      {
+        env,
+        encoding: "utf8",
+        timeout: 2000,
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    );
+    return String(out || "").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function findMatchingEntry(
+  query = {},
+  env = process.env,
+  resolvePaneSession = defaultResolvePaneSession,
+) {
   if (!query || typeof query !== "object") return null;
   const entries = listMarkerEntries(env);
   if (!entries.length) return null;
+  const pruned = new Set();
 
   if (query.paneId) {
-    const found = entries.find(
-      ({ record }) => record.paneId && record.paneId === query.paneId,
-    );
-    if (found) return found;
+    let liveSession;
+    for (const entry of entries) {
+      const { filePath, record } = entry;
+      if (!record.paneId || record.paneId !== query.paneId) continue;
+      if (liveSession === undefined) {
+        liveSession = resolvePaneSession(query.paneId, env);
+      }
+      if (
+        liveSession === null ||
+        (liveSession !== undefined &&
+          record.session &&
+          liveSession !== record.session)
+      ) {
+        pruned.add(filePath);
+        try {
+          rmSync(filePath, { force: true });
+        } catch {}
+        continue;
+      }
+      return entry;
+    }
   }
 
+  const activeEntries = pruned.size
+    ? entries.filter(({ filePath }) => !pruned.has(filePath))
+    : entries;
+
   if (query.session) {
-    const found = entries.find(
+    const found = activeEntries.find(
       ({ record }) => record.session && record.session === query.session,
     );
     if (found) return found;
   }
 
   if (query.conversationId) {
-    const found = entries.find(
+    const found = activeEntries.find(
       ({ record }) =>
         record.conversationId && record.conversationId === query.conversationId,
     );
@@ -169,19 +217,8 @@ function findMatchingEntry(query = {}, env = process.env) {
   }
 
   if (query.threadId) {
-    const found = entries.find(
+    const found = activeEntries.find(
       ({ record }) => record.threadId && record.threadId === query.threadId,
-    );
-    if (found) return found;
-  }
-
-  if (!query.paneId && !query.session && query.cli && query.cwd) {
-    const targetCwd = resolve(String(query.cwd));
-    const found = entries.find(
-      ({ record }) =>
-        record.cli === query.cli &&
-        record.cwd &&
-        resolve(String(record.cwd)) === targetCwd,
     );
     if (found) return found;
   }
@@ -205,14 +242,21 @@ export function writeLeadMarker(record, { env = process.env } = {}) {
   return normalized;
 }
 
-export function readLeadMarker(query = {}, { env = process.env } = {}) {
-  const match = findMatchingEntry(query, env);
+export function readLeadMarker(
+  query = {},
+  { env = process.env, resolvePaneSession } = {},
+) {
+  const match = findMatchingEntry(query, env, resolvePaneSession);
   return match ? match.record : null;
 }
 
-export function updateLeadMarker(query, patch, { env = process.env } = {}) {
+export function updateLeadMarker(
+  query,
+  patch,
+  { env = process.env, resolvePaneSession } = {},
+) {
   if (!patch || typeof patch !== "object") return null;
-  const match = findMatchingEntry(query, env);
+  const match = findMatchingEntry(query, env, resolvePaneSession);
   if (!match) return null;
 
   const { filePath, record: existing } = match;

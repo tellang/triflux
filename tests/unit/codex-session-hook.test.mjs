@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -400,7 +401,7 @@ it("표지 조회 우선순위(TMUX_PANE > threadId > 비어 있는 TMUX_PANE + 
     "{}\n",
   );
 
-  // TMUX_PANE 이 비어 있을 때 cli === "codex" 이고 cwd 가 같으면 매칭된다
+  // 비-tmux 세션이 같은 cwd에서 실행돼도 리드 표지를 가로채지 않는다
   writeFileSync(
     join(leadRolesDir, "cwd-lead.json"),
     JSON.stringify({
@@ -411,12 +412,11 @@ it("표지 조회 우선순위(TMUX_PANE > threadId > 비어 있는 TMUX_PANE + 
       role: "cwd 리드",
       name: "11.18 cwd 리드",
       cwd,
-      threadId: null,
+      threadId: "known-thread-50",
       notifiedThreadId: null,
     }),
     "utf8",
   );
-  // 다른 TMUX_PANE 이 설정돼 있으면 cwd 폴백을 타지 않는다
   assert.equal(
     await runCodexSessionHook(
       JSON.stringify({
@@ -433,8 +433,7 @@ it("표지 조회 우선순위(TMUX_PANE > threadId > 비어 있는 TMUX_PANE + 
     ),
     "{}\n",
   );
-  // TMUX_PANE 이 비어 있으면 cwd 폴백으로 매칭된다
-  const byCwd = JSON.parse(
+  assert.equal(
     await runCodexSessionHook(
       JSON.stringify({
         session_id: "cwd-thread-1",
@@ -448,6 +447,26 @@ it("표지 조회 우선순위(TMUX_PANE > threadId > 비어 있는 TMUX_PANE + 
         writeStdout: false,
       },
     ),
+    "{}\n",
   );
-  assert.equal(byCwd.decision, "block");
+
+  // paneId 가 재사용되어 실제 tmux 세션 이름이 다르면 오래된 표지를 정리하고 건너뛴다
+  assert.equal(
+    await runCodexSessionHook(
+      JSON.stringify({
+        session_id: "other-pane-thread",
+        cwd,
+        hook_event_name: "Stop",
+      }),
+      {
+        argvMode: "stop",
+        env: { ...env, TMUX_PANE: "%50" },
+        resolvePaneSession: () => "other-session",
+        readContext: async () => ({ contextPct: 95 }),
+        writeStdout: false,
+      },
+    ),
+    "{}\n",
+  );
+  assert.equal(existsSync(join(leadRolesDir, "cwd-lead.json")), false);
 });

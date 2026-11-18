@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -53,7 +54,7 @@ afterEach(() => {
 });
 
 describe("agy-lead-hook: 표지 매칭과 SessionStart", () => {
-  it("paneId, conversationId, workspacePaths 순서로 활성 표지를 찾고 인계 파일을 1회 주입한다", async () => {
+  it("paneId와 conversationId로 활성 표지를 찾고 비-tmux workspacePaths나 재사용된 paneId는 거부한다", async () => {
     const stateRoot = makeStateRoot();
     const workspaceDir = join(stateRoot, "workspace");
     mkdirSync(workspaceDir, { recursive: true });
@@ -77,6 +78,21 @@ describe("agy-lead-hook: 표지 매칭과 SessionStart", () => {
       pendingHandoff: { path: "/tmp/handoff-lead.md" },
     });
 
+    // 비-tmux 세션이 같은 workspacePaths로 열려도 리드 표지를 가로채지 않는다.
+    const nonTmux = await runAgyLeadHook(
+      {
+        hookEventName: "SessionStart",
+        conversationId: "conv-unrelated",
+        workspacePaths: [workspaceDir],
+      },
+      {
+        mode: "start",
+        stateRoot,
+        env: { TMUX_PANE: "" },
+      },
+    );
+    assert.deepEqual(nonTmux, {});
+
     const first = await runAgyLeadHook(
       {
         hookEventName: "SessionStart",
@@ -86,7 +102,8 @@ describe("agy-lead-hook: 표지 매칭과 SessionStart", () => {
       {
         mode: "start",
         stateRoot,
-        env: { TMUX_PANE: "" },
+        env: { TMUX_PANE: "%9" },
+        resolvePaneSession: () => "lead-main",
       },
     );
 
@@ -117,6 +134,22 @@ describe("agy-lead-hook: 표지 매칭과 SessionStart", () => {
       },
     );
     assert.deepEqual(second, {});
+
+    // 재사용된 paneId에서 실제 tmux 세션 이름이 다르면 오래된 표지를 삭제한다.
+    const staleRes = await runAgyLeadHook(
+      {
+        hookEventName: "SessionStart",
+        conversationId: "conv-other",
+      },
+      {
+        mode: "start",
+        stateRoot,
+        env: { TMUX_PANE: "%9" },
+        resolvePaneSession: () => "other-tmux-session",
+      },
+    );
+    assert.deepEqual(staleRes, {});
+    assert.equal(existsSync(markerPath), false);
   });
 });
 
@@ -275,7 +308,7 @@ describe("agy-lead-hook: Stop 승계 가드", () => {
 });
 
 describe("setup: inspectAgyPlugin 및 ensureAgyPlugin", () => {
-  it("보호 환경과 agy 미설치 환경을 구분하고 설치, 갱신, 활성화를 수행한다", () => {
+  it("보호 환경과 동의 절차를 구분하고 --mods 또는 대화형 승인 시 설치, 갱신, 활성화를 수행한다", async () => {
     const fakeHome = mkdtempSync(join(tmpdir(), "tfx-agy-plugin-setup-"));
     tempDirs.push(fakeHome);
 
@@ -294,7 +327,7 @@ describe("setup: inspectAgyPlugin 및 ensureAgyPlugin", () => {
         reason: "protected-env",
       });
       assert.equal(
-        ensureAgyPlugin({ env, pkgVersion: "10.99.0", run: () => "[]" }),
+        await ensureAgyPlugin({ env, pkgVersion: "10.99.0", run: () => "[]" }),
         "not-needed",
       );
     }
@@ -331,14 +364,49 @@ describe("setup: inspectAgyPlugin 및 ensureAgyPlugin", () => {
       return "{}";
     };
 
+    // 비대화형 무동의 기본 호출은 설치하지 않고 deferred를 반환한다.
     assert.equal(
-      ensureAgyPlugin({
+      await ensureAgyPlugin({
         env: cleanEnv,
         pkgVersion: "10.99.0",
         pluginSrcDir: "/src/triflux",
         run,
         log: () => {},
         warn: () => {},
+        notice: () => {},
+      }),
+      "deferred",
+    );
+    assert.deepEqual(calls.splice(0), ["plugin list --json"]);
+
+    // 대화형에서 사용자가 거절하면 declined를 반환한다.
+    assert.equal(
+      await ensureAgyPlugin({
+        interactive: true,
+        ask: async () => false,
+        env: cleanEnv,
+        pkgVersion: "10.99.0",
+        pluginSrcDir: "/src/triflux",
+        run,
+        log: () => {},
+        warn: () => {},
+        notice: () => {},
+      }),
+      "declined",
+    );
+    assert.deepEqual(calls.splice(0), ["plugin list --json"]);
+
+    // --mods (install: true) 전달 시 설치한다.
+    assert.equal(
+      await ensureAgyPlugin({
+        install: true,
+        env: cleanEnv,
+        pkgVersion: "10.99.0",
+        pluginSrcDir: "/src/triflux",
+        run,
+        log: () => {},
+        warn: () => {},
+        notice: () => {},
       }),
       "installed",
     );
@@ -350,13 +418,15 @@ describe("setup: inspectAgyPlugin 및 ensureAgyPlugin", () => {
 
     listPayload = [{ name: "triflux", enabled: false, version: "10.99.0" }];
     assert.equal(
-      ensureAgyPlugin({
+      await ensureAgyPlugin({
+        install: true,
         env: cleanEnv,
         pkgVersion: "10.99.0",
         pluginSrcDir: "/src/triflux",
         run,
         log: () => {},
         warn: () => {},
+        notice: () => {},
       }),
       "updated",
     );
@@ -369,13 +439,29 @@ describe("setup: inspectAgyPlugin 및 ensureAgyPlugin", () => {
 
     listPayload = [{ name: "triflux", enabled: true, version: "10.98.0" }];
     assert.equal(
-      ensureAgyPlugin({
+      await ensureAgyPlugin({
         env: cleanEnv,
         pkgVersion: "10.99.0",
         pluginSrcDir: "/src/triflux",
         run,
         log: () => {},
         warn: () => {},
+        notice: () => {},
+      }),
+      "outdated",
+    );
+    assert.deepEqual(calls.splice(0), ["plugin list --json"]);
+
+    assert.equal(
+      await ensureAgyPlugin({
+        install: true,
+        env: cleanEnv,
+        pkgVersion: "10.99.0",
+        pluginSrcDir: "/src/triflux",
+        run,
+        log: () => {},
+        warn: () => {},
+        notice: () => {},
       }),
       "updated",
     );
@@ -387,13 +473,14 @@ describe("setup: inspectAgyPlugin 및 ensureAgyPlugin", () => {
 
     listPayload = [{ name: "triflux", enabled: true, version: "10.99.0" }];
     assert.equal(
-      ensureAgyPlugin({
+      await ensureAgyPlugin({
         env: cleanEnv,
         pkgVersion: "10.99.0",
         pluginSrcDir: "/src/triflux",
         run,
         log: () => {},
         warn: () => {},
+        notice: () => {},
       }),
       "present",
     );

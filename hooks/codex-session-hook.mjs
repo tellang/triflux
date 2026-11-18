@@ -7,10 +7,11 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { argv, exit, stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
 import { writeCodexSessionRecord } from "../hub/lib/codex-session-registry.mjs";
@@ -82,7 +83,28 @@ function isActiveLeadRole(record) {
   );
 }
 
-function findActiveLeadMarker(payload, env = process.env) {
+function defaultResolvePaneSession(paneId, env = process.env) {
+  if (!env?.TMUX || env?.TRIFLUX_TEST_HOME || env?.TEST_LOCK_PID) {
+    return undefined;
+  }
+  try {
+    const out = execFileSync(
+      "tmux",
+      ["display-message", "-p", "-t", paneId, "#{session_name}"],
+      {
+        env,
+        encoding: "utf8",
+        timeout: 2000,
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    );
+    return String(out || "").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function findActiveLeadMarker(payload, env = process.env, opts = {}) {
   const dir = join(resolveStateRoot(env), "lead-roles");
   if (!existsSync(dir)) return null;
 
@@ -99,33 +121,45 @@ function findActiveLeadMarker(payload, env = process.env) {
   }
   if (entries.length === 0) return null;
 
+  const pruned = new Set();
+  const resolvePaneSession =
+    opts.resolvePaneSession || defaultResolvePaneSession;
   const tmuxPane = String(env.TMUX_PANE || "").trim();
   if (tmuxPane) {
-    const byPane = entries.find(
-      ({ record }) =>
-        record.paneId && String(record.paneId).trim() === tmuxPane,
-    );
-    if (byPane) return byPane;
+    let liveSession;
+    for (const entry of entries) {
+      const { filePath, record } = entry;
+      if (!record.paneId || String(record.paneId).trim() !== tmuxPane) continue;
+      if (liveSession === undefined) {
+        liveSession = resolvePaneSession(tmuxPane, env);
+      }
+      if (
+        liveSession === null ||
+        (liveSession !== undefined &&
+          record.session &&
+          liveSession !== record.session)
+      ) {
+        pruned.add(filePath);
+        try {
+          rmSync(filePath, { force: true });
+        } catch {}
+        continue;
+      }
+      return entry;
+    }
   }
+
+  const activeEntries = pruned.size
+    ? entries.filter(({ filePath }) => !pruned.has(filePath))
+    : entries;
 
   const sessionId = String(payload?.session_id || "").trim();
   if (sessionId) {
-    const byThread = entries.find(
+    const byThread = activeEntries.find(
       ({ record }) =>
         record.threadId && String(record.threadId).trim() === sessionId,
     );
     if (byThread) return byThread;
-  }
-
-  if (!tmuxPane && payload?.cwd) {
-    const targetCwd = resolve(payload.cwd);
-    const byCwd = entries.find(
-      ({ record }) =>
-        record.cli === "codex" &&
-        record.cwd &&
-        resolve(record.cwd) === targetCwd,
-    );
-    if (byCwd) return byCwd;
   }
 
   return null;
@@ -169,7 +203,7 @@ function handleRegister(payload, opts, env) {
     writeSessionRecord(payload);
   } catch {}
 
-  const marker = findActiveLeadMarker(payload, env);
+  const marker = findActiveLeadMarker(payload, env, opts);
   let markerDirty = false;
   if (
     marker &&
@@ -232,7 +266,7 @@ async function handleHeartbeat(payload, opts, env) {
     writeSessionRecord(payload);
   } catch {}
 
-  const marker = findActiveLeadMarker(payload, env);
+  const marker = findActiveLeadMarker(payload, env, opts);
   if (!marker) return null;
   if ((opts.platform ?? process.platform) !== "darwin") return null;
 
@@ -286,7 +320,7 @@ async function handleStop(payload, opts, env) {
   if (payload?.stop_hook_active || payload?.stopHookActive) {
     return null;
   }
-  const marker = findActiveLeadMarker(payload, env);
+  const marker = findActiveLeadMarker(payload, env, opts);
   if (!marker) return null;
 
   const readContext = opts.readContext || readCodexContext;

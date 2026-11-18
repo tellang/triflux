@@ -3459,7 +3459,9 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
         cursor = page.nextCursor ?? null;
       } while (cursor !== null);
     }
-    const config = { "features.hooks": false };
+    const enableCodexHooks =
+      opts.role === "lead" || opts.role === "communication";
+    const config = enableCodexHooks ? {} : { "features.hooks": false };
     if (opts.effort !== undefined) config.model_reasoning_effort = opts.effort;
     const permissions = opts.sandbox
       ? { approvalPolicy: "on-request", sandbox: "workspace-write" }
@@ -3605,6 +3607,15 @@ async function doStart(launchAdapter, opts) {
   }
 }
 
+export function stripCodexHooksDisableFlag(command) {
+  return String(command || "")
+    .replace(
+      /(?:^|\s)(?:'-c'|-c)\s+(?:'features\.hooks=false'|"features\.hooks=false"|features\.hooks=false)(?=\s|$)/g,
+      "",
+    )
+    .trim();
+}
+
 async function doStartTmux(launchAdapter, opts) {
   // --no-auto-trust 면 신뢰 화면을 고르지 않고 승인 화면과 같이 ready:false 로 끝낸다.
   const trustScreens = opts.noAutoTrust
@@ -3624,6 +3635,18 @@ async function doStartTmux(launchAdapter, opts) {
       ...(launchAdapter.blockingScreens ?? []),
     ],
   };
+  if (
+    adapter.cli === "codex" &&
+    (opts.role === "lead" || opts.role === "communication")
+  ) {
+    const { resumeById, resumeLast } = adapter;
+    adapter.launchKeys = [
+      stripCodexHooksDisableFlag(adapter.launchKeys[0]),
+      ...adapter.launchKeys.slice(1),
+    ];
+    adapter.resumeById = (id) => stripCodexHooksDisableFlag(resumeById(id));
+    adapter.resumeLast = () => stripCodexHooksDisableFlag(resumeLast());
+  }
   if (
     adapter.cli === "codex" &&
     (opts.preparedThreadId ||
@@ -4040,7 +4063,7 @@ end tell`;
         paneId,
         cli: adapter.cli,
         sessionRole: opts.role,
-        role: opts.name || opts.role,
+        role: opts.role,
         name: name || opts.name || session,
         cwd: pathResolve(cwd || process.cwd()),
         conversationId: conversation?.conversationId ?? null,
@@ -6749,19 +6772,17 @@ async function doClear(flags, deps = {}) {
   const idBefore = followUp && cli === "agy" ? await readAgyId() : null;
   const screenBefore = followUp ? await capture(opts.remote, opts.session) : "";
   const markerEnv = deps.env || opts.env || process.env;
-  if (readLeadMarker({ session: opts.session }, { env: markerEnv })) {
+  const hasLeadMarker = Boolean(
+    readLeadMarker({ session: opts.session }, { env: markerEnv }),
+  );
+  if (hasLeadMarker) {
     updateLeadMarker(
       { session: opts.session },
       {
-        pendingHandoff: flags.handoff
-          ? {
-              path: pathResolve(flags.handoff),
-              // biome-ignore lint/suspicious/noThenProperty: pendingHandoff 스키마의 then은 후속 지시 문자열이다.
-              then: thenPrompt || null,
-              at: new Date().toISOString(),
-            }
-          : null,
+        pendingHandoff: null,
         notifiedThreshold: 0,
+        notifiedConversationId: null,
+        notifiedThreadId: null,
       },
       { env: markerEnv },
     );
@@ -6806,6 +6827,20 @@ async function doClear(flags, deps = {}) {
     );
     result.followUp = { requestId, inputSent: true };
   } catch (error) {
+    if (hasLeadMarker && flags.handoff) {
+      updateLeadMarker(
+        { session: opts.session },
+        {
+          pendingHandoff: {
+            path: pathResolve(flags.handoff),
+            // biome-ignore lint/suspicious/noThenProperty: pendingHandoff 스키마의 then은 후속 지시 문자열이다.
+            then: thenPrompt || null,
+            at: new Date().toISOString(),
+          },
+        },
+        { env: markerEnv },
+      );
+    }
     result.followUp = { requestId, inputSent: false, error: error.message };
     result.ok = false;
     result.error = `${command} was sent but the follow-up failed: ${error.message}`;

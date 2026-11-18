@@ -7,10 +7,11 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join } from "node:path";
 import {
   argv,
   exit,
@@ -122,43 +123,68 @@ function loadActiveLeadMarkers(stateRoot) {
   return entries;
 }
 
-function findMatchingLeadMarker(stateRoot, payload, env) {
+function defaultResolvePaneSession(paneId, env) {
+  if (!env?.TMUX || env?.TRIFLUX_TEST_HOME || env?.TEST_LOCK_PID) {
+    return undefined;
+  }
+  try {
+    const out = execFileSync(
+      "tmux",
+      ["display-message", "-p", "-t", paneId, "#{session_name}"],
+      {
+        env,
+        encoding: "utf8",
+        timeout: 2000,
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    );
+    return String(out || "").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function findMatchingLeadMarker(stateRoot, payload, env, opts = {}) {
   const entries = loadActiveLeadMarkers(stateRoot);
   if (entries.length === 0) return null;
 
+  const pruned = new Set();
+  const resolvePaneSession =
+    opts.resolvePaneSession || defaultResolvePaneSession;
   const paneId = String(env.TMUX_PANE || "").trim();
   if (paneId) {
-    const byPane = entries.find((entry) => entry.record.paneId === paneId);
-    if (byPane) return byPane;
+    let liveSession;
+    for (const entry of entries) {
+      if (entry.record.paneId !== paneId) continue;
+      if (liveSession === undefined) {
+        liveSession = resolvePaneSession(paneId, env);
+      }
+      if (
+        liveSession === null ||
+        (liveSession !== undefined &&
+          entry.record.session &&
+          liveSession !== entry.record.session)
+      ) {
+        pruned.add(entry.filePath);
+        try {
+          rmSync(entry.filePath, { force: true });
+        } catch {}
+        continue;
+      }
+      return entry;
+    }
   }
+
+  const activeEntries = pruned.size
+    ? entries.filter((entry) => !pruned.has(entry.filePath))
+    : entries;
 
   const conversationId = String(payload?.conversationId || "").trim();
   if (conversationId) {
-    const byConversation = entries.find(
+    const byConversation = activeEntries.find(
       (entry) => entry.record.conversationId === conversationId,
     );
     if (byConversation) return byConversation;
-  }
-
-  if (!paneId) {
-    const workspacePaths = Array.isArray(payload?.workspacePaths)
-      ? payload.workspacePaths.filter(
-          (item) => typeof item === "string" && item.trim(),
-        )
-      : [];
-    if (workspacePaths.length > 0) {
-      const resolvedWorkspaces = new Set(
-        workspacePaths.map((item) => resolve(item)),
-      );
-      const byWorkspace = entries.find(
-        (entry) =>
-          entry.record.cli === "agy" &&
-          typeof entry.record.cwd === "string" &&
-          entry.record.cwd.trim() &&
-          resolvedWorkspaces.has(resolve(entry.record.cwd)),
-      );
-      if (byWorkspace) return byWorkspace;
-    }
   }
 
   return null;
@@ -196,7 +222,7 @@ export async function runAgyLeadHook(stdinData, opts = {}) {
       }
     }
 
-    const active = findMatchingLeadMarker(stateRoot, payload, env);
+    const active = findMatchingLeadMarker(stateRoot, payload, env, opts);
     let markerDirty = false;
     const conversationId =
       typeof payload.conversationId === "string"

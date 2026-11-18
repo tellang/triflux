@@ -148,8 +148,8 @@ async function refreshRows($: EngineInterface, position: BandPosition, columns: 
 
 async function checkLeadSuccession($: EngineInterface, lead: Holder, percent?: number) {
   try {
-    if (typeof percent !== 'number' || percent < SUCCESSION_THRESHOLD_PCT) return
     if (!(await leadOf($, lead))) return
+    if (typeof percent !== 'number' || percent < SUCCESSION_THRESHOLD_PCT) return
     const sessionId = await $.session.id()
     const key = successionKey(sessionId)
     if (await $.store.get(key)) return
@@ -157,7 +157,7 @@ async function checkLeadSuccession($: EngineInterface, lead: Holder, percent?: n
     await notifyLead(
       $,
       `[tfx-lead] 컨텍스트 사용량이 ${Math.round(percent)}%에 도달했다. 인계 파일을 저장하고 세션을 승계하라.`,
-      true,
+      () => true,
     )
   } catch {}
 }

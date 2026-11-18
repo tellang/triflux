@@ -167,6 +167,10 @@ describe("codexProfileConfigOverrides", () => {
       join(codexHome, "sol.config.toml"),
       'model = "gpt-6.2-sol"\n',
     );
+    writeFileSync(
+      join(codexHome, "sol_high.config.toml"),
+      'model = "gpt-6.0-stale"\n',
+    );
     assert.deepEqual(
       resolveCodexProfileConfigValues("sol_high", { codexHome }),
       {

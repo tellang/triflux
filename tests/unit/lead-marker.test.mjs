@@ -1,6 +1,6 @@
 /** biome-ignore-all lint/suspicious/noThenProperty: pendingHandoff 스키마의 then은 함수가 아닌 지시 문자열이다. */
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
@@ -89,7 +89,7 @@ describe("lead-marker", () => {
     }
   });
 
-  it("readLeadMarker는 paneId, session, conversationId, threadId, cli+cwd 우선순위로 조회한다", (t) => {
+  it("readLeadMarker는 paneId, session, conversationId, threadId 순으로 조회하고 비-tmux cwd는 매칭하지 않는다", (t) => {
     const { env } = withTempEnv(t);
     writeLeadMarker(
       {
@@ -134,11 +134,11 @@ describe("lead-marker", () => {
       readLeadMarker({ threadId: "thread-aaa" }, { env })?.session,
       "app-lead",
     );
+    // 비-tmux 세션이 같은 cwd에서 실행돼도 리드 표지를 가로채지 않는다.
     assert.equal(
-      readLeadMarker({ cli: "codex", cwd: "/work/app" }, { env })?.session,
-      "app-lead",
+      readLeadMarker({ cli: "codex", cwd: "/work/app" }, { env }),
+      null,
     );
-    // paneId 나 session 이 주어졌는데 불일치하면 cli+cwd 폴백으로 넘어가지 않는다.
     assert.equal(
       readLeadMarker(
         { paneId: "%99", cli: "codex", cwd: "/work/app" },
@@ -146,6 +146,16 @@ describe("lead-marker", () => {
       ),
       null,
     );
+
+    // 재사용된 paneId에서 실제 tmux 세션 이름이 다르면 오래된 표지를 삭제하고 건너뛴다.
+    assert.equal(
+      readLeadMarker(
+        { paneId: "%10" },
+        { env, resolvePaneSession: () => "reused-other-session" },
+      ),
+      null,
+    );
+    assert.equal(existsSync(join(leadRoleDir(env), "app-lead.json")), false);
   });
 
   it("updateLeadMarker와 removeLeadMarker로 상태를 갱신하고 삭제한다", (t) => {

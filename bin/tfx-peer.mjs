@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readLeadMarker } from "../hub/lib/lead-marker.mjs";
@@ -214,11 +215,9 @@ export async function main(args = process.argv.slice(2), deps = {}) {
 }
 
 function applyLeadReportLimit(target, cli, formattedMessage, deps, env) {
-  const markerEnv = {
-    ...process.env,
-    ...(deps.home ? { HOME: deps.home } : {}),
-    ...env,
-  };
+  const markerEnv = deps.env
+    ? { ...(deps.home ? { HOME: deps.home } : {}), ...deps.env }
+    : { ...process.env, ...(deps.home ? { HOME: deps.home } : {}), ...env };
   const marker = readLeadMarker(
     {
       paneId: target.paneId || target.raw?.paneId || null,
@@ -231,14 +230,24 @@ function applyLeadReportLimit(target, cli, formattedMessage, deps, env) {
       cli,
       cwd: target.cwd || target.raw?.cwd || null,
     },
-    { env: markerEnv },
+    { env: markerEnv, resolvePaneSession: deps.resolvePaneSession },
   );
   if (!marker) {
     return { message: formattedMessage, reportWarning: null };
   }
   const rawBody =
     typeof deps.rawBody === "string" ? deps.rawBody : formattedMessage;
-  const shortened = shorten(rawBody);
+  const baseDir = marker.cwd || target.cwd || target.raw?.cwd || process.cwd();
+  const checkFile = deps.fileExists || existsSync;
+  const fileExists = (candidate) => {
+    const resolved = candidate.startsWith("~/")
+      ? path.join(markerEnv.HOME || homedir(), candidate.slice(2))
+      : candidate.startsWith("./")
+        ? path.resolve(baseDir, candidate)
+        : candidate;
+    return checkFile(resolved);
+  };
+  const shortened = shorten(rawBody, rawBody, { fileExists });
   if (shortened.kind === "cut") {
     return {
       message: deps.composeMessage
