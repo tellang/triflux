@@ -44,24 +44,12 @@ import {
 } from "./lib/codex-profile-config.mjs";
 import { ensureGeminiProfiles } from "./lib/gemini-profiles.mjs";
 import {
-  retireInstallLeftovers,
-  writeInstallManifest,
-} from "./lib/install-retire.mjs";
-import {
-  cleanupAgyHooks,
-  cleanupLegacyHooks,
-} from "./lib/legacy-hook-cleanup.mjs";
-import {
-  cleanupLegacyMcp,
-  cleanupTfxHub,
-  pinRegistryMcpPackages,
-} from "./lib/legacy-mcp-cleanup.mjs";
-import {
   MACHINE_PROFILE_KEYS,
   parseMachineProfileContent,
   resolveMachineProfilePath,
   resolveTrifluxHome,
 } from "./lib/machine-profile.mjs";
+import { pinRegistryMcpPackages } from "./lib/mcp-package-pin.mjs";
 import { CODEX_FAMILY_PROFILES } from "./lib/model-family-resolver.mjs";
 import { offerPeerPermission } from "./lib/native-peer-permissions.mjs";
 import { parseFrontmatter } from "./lib/skill-template.mjs";
@@ -703,8 +691,8 @@ function installEntries(pluginRoot) {
     "hub/bridge.mjs",
     "scripts/tfx-route-post.mjs",
     "scripts/tfx-route-worker.mjs",
-    // tfx-route-worker.mjs 가 경로로 찾아 import 한다.
-    "hub/workers/factory.mjs",
+    // tfx-route-worker.mjs 가 런타임에 사용하는 Claude 워커와 공통 유틸.
+    "hub/workers/claude-worker.mjs",
     // tfx-route.sh 가 $sd/../hub/team 에서 읽는다.
     "hub/team/agent-map.json",
     // iTerm bridge는 Node가 경로로 실행하므로 정적 import 탐색에 잡히지 않는다.
@@ -1584,22 +1572,10 @@ function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
   return removed;
 }
 
-/** 패키지에서 빠진 옛 설치 파일을 보관 디렉터리로 옮기고 이번 배포 목록을 매니페스트로 남긴다. */
-function retireOldInstallFiles() {
-  const files = SYNC_MAP.map(({ label }) => label);
-  const result = retireInstallLeftovers({
-    claudeDir: CLAUDE_DIR,
-    keep: new Set(files),
-  });
-  writeInstallManifest(CLAUDE_DIR, files, result.failed);
-  return result;
-}
-
 // Top-level config.toml keys that must exist with these defaults.
 // Only injected when the key is completely absent — existing user values are
 // never overwritten, regardless of what value was set.
 const REQUIRED_TOP_LEVEL_SETTINGS = [
-  { key: "model", value: '"gpt-6.2-astra"' },
   { key: "model_reasoning_effort", value: '"high"' },
   { key: "service_tier", value: '"fast"' },
 ];
@@ -2227,10 +2203,6 @@ function ensureCriticalSetup(io) {
   } catch (error) {
     io.warn("codex-hooks", `Codex hooks 등록 실패: ${error.message}`);
   }
-  const agyCleanup = cleanupAgyHooks();
-  if (agyCleanup.changed) io.step("agy 옛 triflux-session 훅 정리");
-  if (!agyCleanup.ok)
-    io.warn("agy-cleanup", `옛 agy 훅 정리 실패: ${agyCleanup.error}`);
   setupTargets(io.report, {
     codex,
     skills: readdirSync(join(PLUGIN_ROOT, "skills")).filter((name) =>
@@ -2266,7 +2238,6 @@ export {
   readMarker,
   reapLegacyTrayProcesses,
   removeProfileSection,
-  retireOldInstallFiles,
   SETUP_MARKER_PATH,
   SETUP_USER_STATE_FILES,
   SYNC_MAP,
@@ -2283,12 +2254,6 @@ export async function runCritical(stdinData) {
     io.report.message = "테스트가 홈을 격리하지 않아 건너뜀";
     return io.result(0);
   }
-  const cleanup = cleanupLegacyHooks({ settingsPath: SETTINGS_PATH });
-  if (!cleanup.ok) {
-    io.report.message = `이전 hook 정리 실패: ${cleanup.error}`;
-    return io.result(1);
-  }
-  if (cleanup.changed) io.step(`옛 Claude 훅 ${cleanup.removed}개 정리`);
   readMarker();
   try {
     ensureCriticalSetup(io);
@@ -2320,11 +2285,6 @@ async function runDeferredWithIo(stdinData, io) {
     io.report.message = "테스트가 홈을 격리하지 않아 건너뜀";
     return io.result(0);
   }
-  const cleanup = cleanupLegacyHooks({ settingsPath: SETTINGS_PATH });
-  if (!cleanup.ok) {
-    io.report.message = `이전 hook 정리 실패: ${cleanup.error}`;
-    return io.result(1);
-  }
   const argv = getSetupArgv(stdinData);
   const isSync = argv.includes("--sync");
   const isForce = argv.includes("--force");
@@ -2333,8 +2293,6 @@ async function runDeferredWithIo(stdinData, io) {
     machineProfileOnly || argv.includes("--machine-profile");
   const nonInteractiveProfile = argv.includes("--non-interactive");
   const isDev = detectDevMode();
-
-  if (cleanup.changed) io.step(`옛 Claude 훅 ${cleanup.removed}개 정리`);
 
   let machineProfileResult;
   try {
@@ -2351,29 +2309,8 @@ async function runDeferredWithIo(stdinData, io) {
     io.warn("machine-profile", warning);
   if (machineProfileOnly) return io.result(0);
 
-  const mcpBackups = new Map();
-  const mcpCleanup = cleanupLegacyMcp({
-    home: _TFX_HOME,
-    repoRoot: process.env.INIT_CWD || process.cwd(),
-    backups: mcpBackups,
-  });
-  // 이주가 막혀도 설치는 계속한다. 남은 항목은 경고로 알린다.
-  if (!mcpCleanup.skipped)
-    for (const warning of mcpCleanup.warnings) io.warn("mcp-cleanup", warning);
-  if (mcpCleanup.changed) io.step("옛 MCP 설정 정리");
-
-  // 제거된 허브의 MCP 항목, 프로세스, 예약 작업을 정리한다. 개발 체크아웃의 스냅샷은 건드리지 않는다.
-  const hubCleanup = cleanupTfxHub({
-    home: _TFX_HOME,
-    pluginRoot: isDev ? undefined : PLUGIN_ROOT,
-    backups: mcpBackups,
-  });
-  for (const warning of hubCleanup.warnings) io.warn("hub-cleanup", warning);
-  if (hubCleanup.changed) io.step("허브 설정과 실행 흔적 정리");
-
   const mcpPins = pinRegistryMcpPackages({
     home: _TFX_HOME,
-    backups: mcpBackups,
   });
   for (const warning of mcpPins.warnings) io.warn("mcp-pins", warning);
   if (mcpPins.pinned)
@@ -2472,12 +2409,6 @@ async function runDeferredWithIo(stdinData, io) {
   const removedFiles = removeRetiredInstallFiles();
   if (removedFiles.length)
     io.step(`더 쓰지 않는 설치 파일 ${removedFiles.length}개 제거`);
-  const retired = retireOldInstallFiles();
-  for (const warning of retired.warnings) io.warn("retired-files", warning);
-  if (retired.moved.length || retired.deleted.length)
-    io.step(
-      `옛 설치 파일 ${retired.moved.length + retired.deleted.length}개 정리`,
-    );
 
   const settings = loadSettings();
   let settingsChanged = false;
@@ -2626,14 +2557,6 @@ async function runDeferredWithIo(stdinData, io) {
     modsInstall,
     report: io.report,
   });
-
-  const agyCleanup = cleanupAgyHooks();
-  if (agyCleanup.changed) {
-    io.step("agy 옛 triflux-session 훅 정리");
-    synced++;
-  } else if (!agyCleanup.ok) {
-    io.warn("agy-cleanup", `Antigravity 옛 훅 정리 실패: ${agyCleanup.error}`);
-  }
 
   // ── MCP 인벤토리 백그라운드 갱신 ──
 

@@ -61,10 +61,6 @@ export async function startHeadlessTeam({
   progressive,
   timeoutSec,
   verbose,
-  dashboard,
-  dashboardLayout,
-  dashboardSize,
-  dashboardAnchor,
   mcpProfile,
   model,
   effort,
@@ -132,10 +128,6 @@ export async function startHeadlessTeam({
       autoAttach: effectiveAutoAttach,
       leadPane: process.env.TMUX_PANE,
       leadTmux: process.env.TMUX,
-      dashboard: !!dashboard,
-      dashboardLayout,
-      dashboardSize: dashboardSize ?? 0.5,
-      dashboardAnchor,
       progressive: progressive !== false,
       nativeBridge,
       nativeBridgeMode,
@@ -230,10 +222,6 @@ export async function startHeadlessTeam({
         }
       }
     }
-
-    // dashboard 모드: tui-viewer가 최종 상태를 렌더링할 시간 확보
-    // WT pane spawn (~1s) + node 기동 (~500ms) + 첫 폴링 (~500ms) + 렌더 여유
-    if (dashboard) await new Promise((r) => setTimeout(r, 5000));
 
     const members = [
       {

@@ -181,37 +181,9 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
 
   it("doctor --json은 checks 배열을 포함해야 한다", () => {
     const homeDir = createHomeDir();
-    const settingsPath = join(homeDir, ".claude", "settings.json");
-    const original = JSON.stringify({
-      hooks: {
-        SessionStart: [
-          {
-            hooks: [
-              {
-                type: "command",
-                command:
-                  'node "/opt/node_modules/triflux/hooks/hook-orchestrator.mjs"',
-              },
-              { type: "command", command: "bash /user/hooks/custom.sh" },
-            ],
-          },
-        ],
-      },
-    });
-    writeFileSync(settingsPath, original);
     const result = runCli(["doctor", "--json"], { homeDir });
     const payload = parseStdoutJson(result);
     assert.ok(Array.isArray(payload.checks));
-    assert.equal(typeof payload.legacy_hooks?.remaining, "number");
-    assert.equal(typeof payload.legacy_hooks?.removed, "number");
-    assert.equal(payload.legacy_hooks.remaining, 1);
-    assert.equal(payload.legacy_hooks.removed, 0);
-    assert.equal(
-      payload.checks.find((check) => check.name === "legacy-claude-hooks")
-        .status,
-      "issues",
-    );
-    assert.equal(readFileSync(settingsPath, "utf8"), original);
     assert.ok(payload.checks.some((check) => check.name === "tfx-route.sh"));
     assert.ok(payload.checks.some((check) => check.name === "codex"));
     rmSync(homeDir, { recursive: true, force: true });
@@ -222,36 +194,6 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
     const payload = parseStdoutJson(result);
     assert.equal(payload.status, "offline");
     assert.equal(payload.alive, false);
-  });
-
-  it("setup은 agy hooks.json 의 옛 triflux-session 훅을 지워야 한다", () => {
-    const homeDir = createHomeDir();
-    const geminiConfig = join(homeDir, ".gemini", "config");
-    mkdirSync(geminiConfig, { recursive: true });
-    const hooksPath = join(geminiConfig, "hooks.json");
-    writeFileSync(
-      hooksPath,
-      JSON.stringify({
-        "triflux-session": {
-          enabled: true,
-          PreInvocation: [
-            {
-              type: "command",
-              command:
-                '"/opt/node" "/opt/lib/triflux/hooks/agy-session-hook.mjs"',
-              timeout: 15,
-            },
-          ],
-        },
-      }),
-    );
-    // HOME 을 격리했으므로 테스트 가드를 끄고 실제 정리 경로를 탄다.
-    const result = runCli(["setup"], {
-      homeDir,
-      env: { TEST_LOCK_PID: "", TFX_TEST_HOME_ISOLATED: "1" },
-    });
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.deepEqual(JSON.parse(readFileSync(hooksPath, "utf8")), {});
   });
 
   it("setup은 삭제된 tfx-auto legacy alias를 다시 생성하지 않아야 한다", () => {

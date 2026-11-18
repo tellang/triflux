@@ -19,7 +19,6 @@
         "hud/hud-qos-status.mjs",
         "hub/team/cli/index.mjs",
         "hub/team/cli/help.mjs",
-        "hub/team/tui-viewer.mjs",
         "scripts/config-audit.mjs",
         "scripts/wt-cli.mjs"
       ],
