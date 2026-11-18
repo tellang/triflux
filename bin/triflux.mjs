@@ -58,7 +58,6 @@ import {
   inspectMacTimeoutDependency,
 } from "../scripts/lib/doctor-env-checks.mjs";
 import { ensureGeminiProfiles } from "../scripts/lib/gemini-profiles.mjs";
-import { pinRegistryMcpPackages } from "../scripts/lib/mcp-package-pin.mjs";
 import {
   addRegistryServer,
   createDefaultRegistry,
@@ -70,6 +69,7 @@ import {
   saveRegistry,
   syncRegistryTargets,
 } from "../scripts/lib/mcp-guard-engine.mjs";
+import { pinRegistryMcpPackages } from "../scripts/lib/mcp-package-pin.mjs";
 import {
   formatPsmuxInstallGuidance,
   formatPsmuxUpdateGuidance,
@@ -392,8 +392,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     ],
   },
   multi: {
-    usage:
-      "tfx multi [--dashboard-layout lite|single|split-2col|split-3col|auto] <subcommand|task>",
+    usage: "tfx multi <subcommand|task>",
     description: "멀티-CLI 팀 모드",
     options: [
       {
@@ -407,17 +406,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         type: "boolean",
         description:
           "headless 워커 방에 호출자 창을 나눠 attach (Windows 기본 켬, 그 외 기본 끔)",
-      },
-      {
-        name: "--no-dashboard",
-        type: "boolean",
-        description: "headless dashboard viewer 비활성화",
-      },
-      {
-        name: "--dashboard-layout",
-        type: "string",
-        description:
-          "dashboard viewer 레이아웃 선택: lite|single|split-2col|split-3col|auto",
       },
     ],
     subcommands: {

@@ -1,8 +1,6 @@
 import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { EFFORT_ORDER } from "../../../../../scripts/lib/model-effort.mjs";
-import { parseDashboardAnchor } from "../../../dashboard-anchor.mjs";
-import { parseDashboardLayout } from "../../../dashboard-layout.mjs";
 import {
   normalizeLayout,
   normalizeTeammateMode,
@@ -52,10 +50,6 @@ export function parseTeamArgs(args = []) {
   let progressive = true;
   let timeoutSec = 0;
   let verbose = false;
-  let dashboard = true;
-  let dashboardLayout = "lite";
-  let dashboardSize = 0.4;
-  let dashboardAnchor = "window";
   let mcpProfile = "";
   let model = "";
   let effort = "";
@@ -91,17 +85,6 @@ export function parseTeamArgs(args = []) {
       autoAttach = false;
     } else if (current === "--verbose") {
       verbose = true;
-    } else if (current === "--no-dashboard") {
-      dashboard = false;
-    } else if (current === "--dashboard-layout" && args[index + 1]) {
-      dashboardLayout = parseDashboardLayout(args[++index]);
-    } else if (current === "--dashboard-size" && args[index + 1]) {
-      dashboardSize = Math.min(
-        0.8,
-        Math.max(0.2, parseFloat(args[++index]) || 0.5),
-      );
-    } else if (current === "--dashboard-anchor" && args[index + 1]) {
-      dashboardAnchor = parseDashboardAnchor(args[++index]);
     } else if (current === "--no-progressive") {
       progressive = false;
     } else if (current === "--timeout" && args[index + 1]) {
@@ -152,8 +135,6 @@ export function parseTeamArgs(args = []) {
         p = p[1].toUpperCase() + ":" + p.slice(2);
       }
       cwd = resolve(p);
-    } else if (current === "--dashboard") {
-      // 이전 설치 스킬이 넘기는 기본값 플래그는 무시한다.
     } else if (current.startsWith("-")) {
       console.warn(`  ⚠ 미인식 플래그 무시: ${current}`);
     } else {
@@ -185,10 +166,6 @@ export function parseTeamArgs(args = []) {
     progressive,
     timeoutSec,
     verbose,
-    dashboard,
-    dashboardLayout,
-    dashboardSize,
-    dashboardAnchor,
     mcpProfile,
     model,
     effort,

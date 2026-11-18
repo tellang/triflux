@@ -19,15 +19,6 @@ function printStartUsage() {
   console.log(
     `          ${WHITE}tfx multi --teammate-mode headless "작업"${RESET} ${DIM}(headless workers)${RESET}`,
   );
-  console.log(
-    `          ${WHITE}tfx multi --dashboard-layout lite "작업"${RESET} ${DIM}(dashboard-lite 기본 뷰)${RESET}`,
-  );
-  console.log(
-    `          ${WHITE}tfx multi --dashboard-layout auto "작업"${RESET} ${DIM}(dashboard viewer 레이아웃 자동)${RESET}`,
-  );
-  console.log(
-    `          ${WHITE}tfx multi --dashboard-anchor window "작업"${RESET} ${DIM}(dashboard anchor: window|tab, 기본 window)${RESET}`,
-  );
 }
 
 function printWorkerPreview(agents, subtasks) {
@@ -63,10 +54,6 @@ export async function teamStart(args = []) {
     progressive,
     timeoutSec,
     verbose,
-    dashboard,
-    dashboardLayout,
-    dashboardSize,
-    dashboardAnchor,
     mcpProfile,
     model,
     effort,
@@ -117,10 +104,6 @@ export async function teamStart(args = []) {
       progressive,
       timeoutSec,
       verbose,
-      dashboard,
-      dashboardLayout,
-      dashboardSize,
-      dashboardAnchor,
       mcpProfile,
       model,
       effort,

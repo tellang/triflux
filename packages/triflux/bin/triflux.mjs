@@ -59,17 +59,6 @@ import {
 } from "../scripts/lib/doctor-env-checks.mjs";
 import { ensureGeminiProfiles } from "../scripts/lib/gemini-profiles.mjs";
 import {
-  cleanupAgyHooks,
-  cleanupLegacyHooks,
-} from "../scripts/lib/legacy-hook-cleanup.mjs";
-import {
-  cleanupLegacyMcp,
-  cleanupProjectLegacyMcp,
-  cleanupTfxHub,
-  findProjectLegacyMcpEntries,
-  pinRegistryMcpPackages,
-} from "../scripts/lib/legacy-mcp-cleanup.mjs";
-import {
   addRegistryServer,
   createDefaultRegistry,
   discoverProjectMcpTargets,
@@ -80,6 +69,7 @@ import {
   saveRegistry,
   syncRegistryTargets,
 } from "../scripts/lib/mcp-guard-engine.mjs";
+import { pinRegistryMcpPackages } from "../scripts/lib/mcp-package-pin.mjs";
 import {
   formatPsmuxInstallGuidance,
   formatPsmuxUpdateGuidance,
@@ -102,7 +92,6 @@ import {
   planAgyStatusLine,
   planStatusLine,
   REQUIRED_CODEX_PROFILES,
-  retireOldInstallFiles,
   runConsentSteps,
   SYNC_MAP,
   setupTargets,
@@ -403,8 +392,7 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     ],
   },
   multi: {
-    usage:
-      "tfx multi [--dashboard-layout lite|single|split-2col|split-3col|auto] <subcommand|task>",
+    usage: "tfx multi <subcommand|task>",
     description: "멀티-CLI 팀 모드",
     options: [
       {
@@ -418,17 +406,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
         type: "boolean",
         description:
           "headless 워커 방에 호출자 창을 나눠 attach (Windows 기본 켬, 그 외 기본 끔)",
-      },
-      {
-        name: "--no-dashboard",
-        type: "boolean",
-        description: "headless dashboard viewer 비활성화",
-      },
-      {
-        name: "--dashboard-layout",
-        type: "string",
-        description:
-          "dashboard viewer 레이아웃 선택: lite|single|split-2col|split-3col|auto",
       },
     ],
     subcommands: {
@@ -1540,38 +1517,21 @@ async function cmdSetup(options = {}) {
   if (options.fromUpdate && options.consentOnly)
     return cmdConsentOnly(options, report);
   try {
-    const cleanup = cleanupLegacyHooks({
-      settingsPath: join(CLAUDE_DIR, "settings.json"),
-    });
-    if (!cleanup.ok)
-      throw createCliError(`settings.json 처리 실패: ${cleanup.error}`, {
-        exitCode: EXIT_CONFIG_ERROR,
-        reason: "configError",
-        fix: "settings.json의 JSON 문법과 쓰기 권한을 확인하세요.",
-      });
-    if (cleanup.changed)
-      addStep(report, `옛 Claude 훅 ${cleanup.removed}개 정리`);
-    const agyCleanup = cleanupAgyHooks();
-    if (agyCleanup.changed) addStep(report, "agy 옛 triflux-session 훅 정리");
-    else if (!agyCleanup.ok)
-      addWarning(
-        report,
-        "agy-cleanup",
-        `agy 옛 훅 정리 실패: ${agyCleanup.error}`,
-      );
-    const mcpBackups = new Map();
-    const mcpCleanup = cleanupLegacyMcp({ backups: mcpBackups });
-    if (!mcpCleanup.skipped)
-      mcpCleanup.warnings.forEach(warning("mcp-cleanup"));
-    if (mcpCleanup.changed) addStep(report, "옛 MCP 설정 정리");
-    const hubCleanup = cleanupTfxHub({
-      pluginRoot: existsSync(join(PKG_ROOT, ".git")) ? undefined : PKG_ROOT,
-      backups: mcpBackups,
-    });
-    hubCleanup.warnings.forEach(warning("hub-cleanup"));
-    if (hubCleanup.changed)
-      addStep(report, "제거된 허브의 설정과 실행 흔적 정리");
-    const mcpPins = pinRegistryMcpPackages({ backups: mcpBackups });
+    const settingsPath = join(CLAUDE_DIR, "settings.json");
+    if (existsSync(settingsPath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(settingsPath, "utf8"));
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+          throw new Error("settings.json must contain an object");
+      } catch (error) {
+        throw createCliError(`settings.json 처리 실패: ${error.message}`, {
+          exitCode: EXIT_CONFIG_ERROR,
+          reason: "configError",
+          fix: "settings.json의 JSON 문법과 쓰기 권한을 확인하세요.",
+        });
+      }
+    }
+    const mcpPins = pinRegistryMcpPackages();
     mcpPins.warnings.forEach(warning("mcp-pins"));
     if (mcpPins.pinned)
       addStep(report, `MCP 패키지 고정 버전 반영: ${mcpPins.pinned}개 항목`);
@@ -1588,13 +1548,6 @@ async function cmdSetup(options = {}) {
       }
       recordFile(report, label, change);
     }
-    const retired = retireOldInstallFiles();
-    retired.warnings.forEach(warning("retired-files"));
-    if (retired.moved.length || retired.deleted.length)
-      addStep(
-        report,
-        `옛 설치 파일 ${retired.moved.length + retired.deleted.length}개 정리`,
-      );
     const skills = syncSkills();
     skills.warnings.forEach(warning("skills"));
     if (!skills.ok) {
@@ -1626,7 +1579,6 @@ async function cmdSetup(options = {}) {
       );
     if (gemini.changed) report.alreadyInGoalState = false;
 
-    const settingsPath = join(CLAUDE_DIR, "settings.json");
     const hudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
     if (existsSync(hudPath)) {
       const settings = existsSync(settingsPath)
@@ -1860,7 +1812,6 @@ async function cmdDoctor(options = {}) {
     mode: reset ? "reset" : fix ? "fix" : "check",
     checks: [],
     actions: [],
-    legacy_hooks: { remaining: 0, removed: 0 },
     fsmonitorDaemons: { stale: 0, killed: 0 },
     tmuxSessions: {
       detached: 0,
@@ -2014,27 +1965,6 @@ async function cmdDoctor(options = {}) {
     // ── fix 모드: 파일 동기화 + 캐시 정리 후 진단 ──
     if (fix) {
       section("Auto Fix");
-      // cleanupLegacyMcp 는 cwd 의 .mcp.json 도 이주하며 백업을 저장소 안에 둔다.
-      // 프로젝트 파일을 먼저 정리해 원본 백업이 저장소 밖에 남게 한다.
-      const projectCleanup = cleanupProjectLegacyMcp();
-      projectCleanup.changed.forEach((file, index) => {
-        ok(
-          `정리함: ${formatPathForDisplay(file)} (원본 ${formatPathForDisplay(projectCleanup.backups[index])})`,
-        );
-      });
-      for (const warning of projectCleanup.warnings) warn(warning);
-      report.actions.push({
-        type: "project-legacy-mcp-cleanup",
-        ...projectCleanup,
-        status: projectCleanup.ok ? "ok" : "failed",
-      });
-      const mcpCleanup = cleanupLegacyMcp();
-      for (const warning of mcpCleanup.warnings) warn(warning);
-      report.actions.push({
-        type: "legacy-mcp-cleanup",
-        ...mcpCleanup,
-        status: mcpCleanup.ok ? "ok" : "failed",
-      });
       for (const target of SYNC_MAP) {
         syncFile(target.src, target.dst, target.label);
       }
@@ -3294,30 +3224,6 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // 프로젝트 파일은 커밋될 수 있어 setup 이 바꾸지 않는다. 정리는 위 Auto Fix 가 한다.
-    section("제거된 허브와 gateway 흔적");
-    {
-      const leftovers = findProjectLegacyMcpEntries();
-      addDoctorCheck(report, {
-        name: "legacy-hub-mcp-entries",
-        status: leftovers.length > 0 ? "warning" : "ok",
-        paths: leftovers.map(({ file }) => file),
-        entries: leftovers,
-        ...(leftovers.length > 0 ? { fix: "tfx doctor --fix" } : {}),
-      });
-      if (leftovers.length === 0) {
-        ok("현재 디렉터리와 상위 폴더에 tfx-hub, gateway MCP 항목 없음");
-      } else {
-        for (const { file, names } of leftovers) {
-          warn(`${formatPathForDisplay(file)}: ${names.join(", ")}`);
-        }
-        info(
-          "제거된 허브와 MCP gateway 가 남긴 항목입니다. `tfx doctor --fix` 가 tfx-hub 는 지우고 gateway 항목은 직접 연결로 바꿉니다. 원본은 ~/.config/triflux/backups/project-mcp 에 남습니다.",
-        );
-        issues += leftovers.length;
-      }
-    }
-
     // ── Codex Config Health (BUG-H #132) ──
     // 이전 버전의 swap이 남긴 백업을 감지하고 --fix로 복원한다.
     section("Codex Config Health");
@@ -3431,72 +3337,6 @@ async function cmdDoctor(options = {}) {
       } else {
         addDoctorCheck(report, { name: "route-sync", status: "ok" });
         ok("소스 없음 (npm 패키지 모드)");
-      }
-    }
-
-    section("이전 Claude command hook");
-    const legacyHooks = cleanupLegacyHooks({
-      settingsPath: join(CLAUDE_DIR, "settings.json"),
-      dryRun: !fix,
-    });
-    const remaining = legacyHooks.ok && fix ? 0 : legacyHooks.removed;
-    report.legacy_hooks = { remaining, removed: fix ? legacyHooks.removed : 0 };
-    addDoctorCheck(report, {
-      name: "legacy-claude-hooks",
-      status: !legacyHooks.ok ? "error" : remaining > 0 ? "issues" : "ok",
-      ...report.legacy_hooks,
-      ...(legacyHooks.ok ? {} : { error: legacyHooks.error }),
-      ...(remaining > 0 ? { fix: "tfx doctor --fix" } : {}),
-    });
-    if (!legacyHooks.ok) {
-      fail(`이전 hook 점검 실패: ${legacyHooks.error}`);
-      issues++;
-    } else if (remaining > 0) {
-      warn(`이전 triflux hook ${remaining}개 남음: tfx doctor --fix`);
-      issues += remaining;
-    } else {
-      ok(
-        fix && legacyHooks.changed
-          ? `이전 hook ${legacyHooks.removed}개 정리됨`
-          : "남은 triflux command hook 없음",
-      );
-    }
-
-    // 옛 setup 이 agy hooks.json 에 넣은 triflux-session 훅. 스크립트가 사라져 실행되면 실패한다.
-    // 옛 설치기 모양과 같은 것만 지우고, 다른 모양은 사용자가 정리하도록 경고만 한다.
-    const agyHooks = cleanupAgyHooks({ dryRun: !fix });
-    const agyRemaining = agyHooks.ok && fix ? 0 : agyHooks.removed;
-    const agyLeftover = agyHooks.leftover;
-    addDoctorCheck(report, {
-      name: "legacy-agy-hooks",
-      status: !agyHooks.ok
-        ? "error"
-        : agyRemaining + agyLeftover.length > 0
-          ? "issues"
-          : "ok",
-      remaining: agyRemaining,
-      leftover: agyLeftover,
-      path: agyHooks.hooksPath,
-      ...(agyHooks.ok ? {} : { error: agyHooks.error }),
-      ...(agyRemaining > 0 ? { fix: "tfx doctor --fix" } : {}),
-    });
-    if (!agyHooks.ok) {
-      fail(`agy 훅 점검 실패: ${agyHooks.error}`);
-      issues++;
-    } else {
-      if (agyRemaining > 0) {
-        warn(
-          "agy hooks.json 에 옛 triflux-session 훅이 남음: tfx doctor --fix",
-        );
-        issues += agyRemaining;
-      } else if (fix && agyHooks.changed) {
-        ok("agy 옛 triflux-session 훅 정리됨");
-      }
-      if (agyLeftover.length > 0) {
-        warn(
-          `agy 훅 ${agyLeftover.join(", ")} 이 지워진 agy-session-hook.mjs 를 가리킴. 직접 정리: ${agyHooks.hooksPath}`,
-        );
-        issues += agyLeftover.length;
       }
     }
 

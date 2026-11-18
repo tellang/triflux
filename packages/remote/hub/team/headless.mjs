@@ -38,7 +38,6 @@ import {
 import { IS_WINDOWS } from "@triflux/core/hub/platform.mjs";
 import { createAgentsRowOwnership, openAgentsRow } from "./agents-row.mjs";
 import { getBackend } from "./backend.mjs";
-import { resolveDashboardLayout } from "./dashboard-layout.mjs";
 import {
   formatHandoffForLead,
   HANDOFF_INSTRUCTION_SHORT,
@@ -56,7 +55,6 @@ import {
   waitForCompletion,
 } from "./psmux.mjs";
 import { createResultsIndex, resultsIndexPath } from "./results-index.mjs";
-import { createLogDashboard } from "./tui.mjs";
 import { createWtManager } from "./wt-manager.mjs";
 
 // 결과와 프롬프트, 실행 스크립트가 남으므로 사용자별 0700 디렉터리에 둔다.
@@ -648,17 +646,7 @@ function createHeadlessSessionOwnership(killSession) {
 
 /** progressive 스플릿 모드: lead pane만 생성 후, 워커를 하나씩 추가하며 dispatch */
 async function dispatchProgressive(sessionName, assignments, opts = {}) {
-  const {
-    layout,
-    safeProgress,
-    dashboardLayout = "single",
-    sessionOwnership,
-    _deps: deps = {},
-  } = opts;
-  const resolvedDashboardLayout = resolveDashboardLayout(
-    dashboardLayout,
-    assignments.length,
-  );
+  const { layout, safeProgress, sessionOwnership, _deps: deps = {} } = opts;
   const createSession = deps.createPsmuxSession || createPsmuxSession;
   const applyTheme = deps.applyTrifluxTheme || applyTrifluxTheme;
   const session = createSession(sessionName, { layout, paneCount: 1 });
@@ -669,12 +657,8 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
       type: "session_created",
       sessionName,
       panes: session.panes,
-      dashboardLayout: resolvedDashboardLayout,
     });
   }
-
-  // dashboard: 워커 pane을 먼저 생성한 후 pane 0에 대시보드를 실행
-  // (listPanes로 워커 감지가 가능하려면 워커 pane이 먼저 존재해야 함)
 
   // 추천은 독립적으로 시작하고 pane 생성과 dispatch 순서는 유지한다.
   const mcpRecommendations = assignments.map((assignment) =>
@@ -699,7 +683,6 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
 
     let newPaneId;
     // 모든 워커를 split-window로 생성 (lead pane index 0은 비워둠)
-    // tui-viewer가 index 0을 건너뛰므로, 워커는 항상 index >= 1에 배치
     newPaneId = psmuxExec([
       "split-window",
       "-t",
@@ -786,25 +769,13 @@ async function dispatchProgressive(sessionName, assignments, opts = {}) {
     /* 무시 */
   }
 
-  // v7.1.3: psmux 내부 대시보드 pane 제거 — WT 스플릿에서 tui-viewer 직접 실행
-
   return dispatches;
 }
 
 /** 기존 batch 모드: 모든 pane을 한 번에 생성하여 dispatch */
 async function dispatchBatch(sessionName, assignments, opts = {}) {
-  const {
-    layout,
-    safeProgress,
-    dashboardLayout = "single",
-    sessionOwnership,
-    _deps: deps = {},
-  } = opts;
+  const { layout, safeProgress, sessionOwnership, _deps: deps = {} } = opts;
   const paneCount = assignments.length + 1;
-  const resolvedDashboardLayout = resolveDashboardLayout(
-    dashboardLayout,
-    assignments.length,
-  );
   // A2b fix: 2x2 레이아웃은 최대 4 pane — 초과 시 tiled로 자동 전환
   const effectiveLayout = layout === "2x2" && paneCount > 4 ? "tiled" : layout;
   const createSession = deps.createPsmuxSession || createPsmuxSession;
@@ -820,7 +791,6 @@ async function dispatchBatch(sessionName, assignments, opts = {}) {
       type: "session_created",
       sessionName,
       panes: session.panes,
-      dashboardLayout: resolvedDashboardLayout,
     });
   }
 
@@ -1100,7 +1070,6 @@ function collectGitDiffFiles(cwd) {
  * @param {(event: object) => void} [opts.onProgress] — 진행 콜백
  * @param {number} [opts.progressIntervalSec=0] — N초마다 progress 이벤트 발화 (0=비활성)
  * @param {boolean} [opts.progressive=true] — true면 pane을 하나씩 split-window로 추가 (실시간 스플릿)
- * @param {string} [opts.dashboardLayout='single'] — dashboard viewer 레이아웃
  * @returns {{ sessionName: string, results: Array<{cli: string, paneName: string, matched: boolean, exitCode: number|null, output: string, sessionDead?: boolean}>, sessionOwnership: {owned: boolean, acquire: (sessionName: string) => boolean, release: () => boolean} }}
  */
 export async function runHeadless(sessionName, assignments, opts = {}) {
@@ -1115,8 +1084,6 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
     onProgress,
     progressIntervalSec = 0,
     progressive = true,
-    dashboard = false,
-    dashboardLayout = "single",
     nativeBridge = false,
     nativeBridgeMode = "agents",
     onIntervene,
@@ -1161,77 +1128,6 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
   let completedResults = [];
   let runFailed = false;
   let runError;
-  // in-process TUI: dashboard=true이고 stdout이 TTY일 때 직접 구동
-  let tui = null;
-  const resolvedLayout = resolveDashboardLayout(
-    dashboardLayout,
-    normalizedAssignments.length,
-  );
-  if (dashboard && process.stdout.isTTY) {
-    tui = createLogDashboard({
-      stream: process.stdout,
-      input: process.stdin,
-      refreshMs: 200,
-      layout: resolvedLayout,
-    });
-    tui.setStartTime(Date.now());
-    // 초기 워커 상태 등록
-    for (let i = 0; i < normalizedAssignments.length; i++) {
-      const a = normalizedAssignments[i];
-      const paneName = `worker-${i + 1}`;
-      tui.updateWorker(paneName, {
-        cli: resolveCliType(a.cli || "codex"),
-        displayName: resolveHeadlessDisplayName(a, paneName),
-        role: a.role || "",
-        status: "pending",
-        progress: 0,
-      });
-    }
-  } else if (dashboard) {
-    // stdout은 결과 파싱 대상이므로 안내는 stderr로 보낸다.
-    const logDir = resultDir();
-    process.stderr.write(
-      `\n⚠ stdout is not a TTY; dashboard is skipped.\n` +
-        `  Session is running in background. Worker logs:\n` +
-        `    ${logDir}${IS_WINDOWS ? "\\" : "/"}${sessionName}-worker-N.txt\n` +
-        `    ${logDir}${IS_WINDOWS ? "\\" : "/"}${sessionName}-worker-N.txt.err\n\n`,
-    );
-  }
-
-  // per-worker state feed: onProgress 이벤트 → tui.updateWorker()
-  function feedTui(event) {
-    if (!tui) return;
-    const { type, paneName, displayName, cli, snapshot, matched, exitCode } =
-      event;
-    if (!paneName) return;
-
-    if (type === "progress" && snapshot) {
-      tui.updateWorker(paneName, {
-        cli: cli || "codex",
-        displayName,
-        status: "running",
-        snapshot: snapshot.split("\n").at(-1) || "",
-        summary: snapshot.split("\n").at(-1) || "",
-        detail: snapshot,
-        progress: 0.5,
-      });
-    } else if (type === "completed") {
-      const status = matched && exitCode === 0 ? "completed" : "failed";
-      tui.updateWorker(paneName, {
-        cli: cli || "codex",
-        displayName,
-        status,
-        progress: 1,
-      });
-    } else if (type === "worker_added") {
-      tui.updateWorker(paneName, {
-        cli: cli || "codex",
-        displayName,
-        status: "running",
-        progress: 0.05,
-      });
-    }
-  }
 
   // onProgress 예외를 삼켜 실행 흐름 보호 (onPoll과 동일 패턴)
   const combinedProgress = (event) => {
@@ -1244,7 +1140,6 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       resultsIndex.workerStarted(event.paneName);
     else if (event.type === "completed")
       resultsIndex.workerFinished(event.paneName, event);
-    feedTui(event);
     if (onProgress) {
       try {
         onProgress(event);
@@ -1268,14 +1163,12 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       ? await progressiveDispatch(sessionName, normalizedAssignments, {
           layout,
           safeProgress,
-          dashboardLayout,
           sessionOwnership,
           _deps: deps,
         })
       : await batchDispatch(sessionName, normalizedAssignments, {
           layout,
           safeProgress,
-          dashboardLayout,
           sessionOwnership,
           _deps: deps,
         });
@@ -1295,29 +1188,6 @@ export async function runHeadless(sessionName, assignments, opts = {}) {
       lifecycle,
     );
     const collected = await collectResults(results);
-
-    // 완료 시 TUI에 최종 상태 반영 후 닫기
-    if (tui) {
-      for (const r of collected) {
-        tui.updateWorker(r.paneName, {
-          cli: r.cli,
-          displayName: r.displayName,
-          role: r.role || "",
-          status: r.handoff?.status === "failed" ? "failed" : "completed",
-          handoff: r.handoff,
-          summary: r.handoff?.verdict || (r.matched ? "completed" : "failed"),
-          detail: r.output,
-          progress: 1,
-          elapsed: Math.round(
-            (Date.now() - (tui._startedAt || Date.now())) / 1000,
-          ),
-        });
-      }
-      tui.render();
-      // 최종 화면을 잠깐 유지 후 닫기
-      await new Promise((r) => setTimeout(r, 1500));
-      tui.close();
-    }
 
     runCompleted = true;
     completedResults = collected;
@@ -1564,10 +1434,6 @@ export function createHeadlessAutoAttachHandler(
 ) {
   const {
     autoAttach = false,
-    dashboard = false,
-    dashboardLayout = "single",
-    dashboardSize = 0.4,
-    dashboardAnchor = "window",
     leadPane = null,
     leadTmux = null,
     onProgress,
@@ -1596,23 +1462,9 @@ export function createHeadlessAutoAttachHandler(
       try {
         const platform = deps.platform ?? process.platform;
         let attachResult;
-        if (platform === "win32" && dashboard) {
-          const attach = deps.attachDashboardTab || attachDashboardTab;
-          attachResult = attach(
-            sessionName,
-            workerCount,
-            event.dashboardLayout ||
-              resolveDashboardLayout(dashboardLayout, workerCount),
-            dashboardSize,
-            dashboardAnchor,
-          );
-        } else if (platform === "win32") {
+        if (platform === "win32") {
           const attach = deps.autoAttachTerminal || autoAttachTerminal;
-          attachResult = attach(
-            sessionName,
-            { dashboardLayout, dashboardAnchor },
-            workerCount,
-          );
+          attachResult = attach(sessionName, {}, workerCount);
         } else {
           const attach = deps.attachHeadlessTmuxPane || attachHeadlessTmuxPane;
           attachResult = attach(sessionName, {
@@ -1644,7 +1496,7 @@ export function createHeadlessAutoAttachHandler(
 
 /**
  * Windows Terminal에서 psmux 세션을 자동 attach한다.
- * 1명은 새 탭 단일 attach, 2/3/4명은 새 탭 내 split-pane, 5명 이상은 dashboard로 전환한다.
+ * 1명은 새 탭 단일 attach, 2/3/4명은 새 탭 내 split-pane, 5명 이상은 단일 탭으로 attach한다.
  *
  * @param {string} sessionName — attach할 psmux 세션 이름
  * @param {object} [opts]
@@ -1653,7 +1505,7 @@ export function createHeadlessAutoAttachHandler(
  */
 export async function autoAttachTerminal(
   sessionName,
-  opts = {},
+  _opts = {},
   workerCount = 2,
 ) {
   if (process.platform !== "win32") return false;
@@ -1665,15 +1517,10 @@ export async function autoAttachTerminal(
   try {
     const safeSession = sanitizeSessionName(sessionName);
     if (workerCount >= 5) {
-      const resolvedLayout = resolveDashboardLayout(
-        opts.dashboardLayout || "single",
-        workerCount,
-      );
-      const viewerPath = join(SCRIPT_DIR, "tui-viewer.mjs").replace(/\\/g, "/");
       await wt.createTab({
-        title: buildAttachTitle(safeSession, "dashboard"),
+        title: buildAttachTitle(safeSession),
         profile: "triflux",
-        command: `node "${viewerPath}" --session ${safeSession} --result-dir "${resultDir()}" --layout ${resolvedLayout}`,
+        command: `psmux attach-session -t ${safeSession}`,
       });
     } else {
       const panes = [];
@@ -1716,43 +1563,6 @@ export async function autoAttachTerminal(
 }
 
 /**
- * v7.0: psmux 세션을 WT 탭에 attach (대시보드 + 워커 전체 뷰)
- * @param {string} sessionName
- * @param {number} workerCount
- * @param {string} [dashboardLayout='single']
- * @param {number} [dashboardSize=0.4]
- * @param {string} [dashboardAnchor='window'] — window | tab
- * @returns {Promise<boolean>}
- */
-export async function attachDashboardTab(
-  sessionName,
-  workerCount = 2,
-  dashboardLayout = "single",
-  dashboardSize = 0.4,
-  dashboardAnchor = "window",
-) {
-  const wt = createWtManager();
-  const envInfo = wt.getEnvironmentInfo?.() || {};
-  if (!envInfo.hasWindowsTerminal) return false;
-  wt.ensureWtProfile(workerCount);
-
-  try {
-    const safeSession = sanitizeSessionName(sessionName);
-    const resolvedLayout = resolveDashboardLayout(dashboardLayout, workerCount);
-    const viewerPath = join(SCRIPT_DIR, "tui-viewer.mjs").replace(/\\/g, "/");
-
-    await wt.createTab({
-      title: buildAttachTitle(safeSession, "dashboard"),
-      profile: "triflux",
-      command: `node "${viewerPath}" --session ${safeSession} --result-dir "${resultDir()}" --layout ${resolvedLayout}`,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * 모든 워커 pane의 현재 스냅샷을 수집한다.
  *
  * @param {string} sessionName
@@ -1785,7 +1595,6 @@ export function getProgressSnapshots(sessionName, dispatches, lines = 15) {
  * @param {(event: object) => void} [opts.onProgress]
  * @param {number} [opts.progressIntervalSec=0]
  * @param {boolean} [opts.autoAttach=false] — 현재 platform의 관찰 pane/tab 자동 attach
- * @param {string} [opts.dashboardLayout='single'] — dashboard viewer 레이아웃
  * @param {AbortSignal} [opts.signal] — abort 시 자동 세션 정리
  * @param {number} [opts.maxIdleSec=0] — 유휴 시 자동 정리 (0=비활성)
  * @returns {Promise<{
@@ -1807,18 +1616,13 @@ export async function runHeadlessInteractive(
 ) {
   const {
     autoAttach = false,
-    dashboard = false,
-    dashboardSize = 0.4,
-    dashboardAnchor = "window",
     leadPane = null,
     leadTmux = null,
     signal,
     maxIdleSec = 0,
     ...runOpts
   } = opts;
-  const headlessOpts = dashboard
-    ? { ...runOpts, dashboard: true, leadPane, leadTmux }
-    : { ...runOpts, leadPane, leadTmux };
+  const headlessOpts = { ...runOpts, leadPane, leadTmux };
 
   // autoAttach를 session_created 시점에 트리거 (CLI 실행 전에 터미널 열림)
   const userOnProgress = headlessOpts.onProgress;
@@ -1827,10 +1631,6 @@ export async function runHeadlessInteractive(
     assignments.length,
     {
       autoAttach,
-      dashboard,
-      dashboardLayout: headlessOpts.dashboardLayout,
-      dashboardSize,
-      dashboardAnchor,
       leadPane,
       leadTmux,
       onProgress: userOnProgress,
@@ -1840,7 +1640,6 @@ export async function runHeadlessInteractive(
   const interactiveRunOpts = {
     ...headlessOpts,
     autoAttach,
-    dashboard,
     onProgress,
   };
   const deps = headlessOpts._deps || {};

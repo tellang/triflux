@@ -43,13 +43,13 @@ import {
   normalizeCodexProfileName,
 } from "./lib/codex-profile-config.mjs";
 import { ensureGeminiProfiles } from "./lib/gemini-profiles.mjs";
-import { pinRegistryMcpPackages } from "./lib/mcp-package-pin.mjs";
 import {
   MACHINE_PROFILE_KEYS,
   parseMachineProfileContent,
   resolveMachineProfilePath,
   resolveTrifluxHome,
 } from "./lib/machine-profile.mjs";
+import { pinRegistryMcpPackages } from "./lib/mcp-package-pin.mjs";
 import { CODEX_FAMILY_PROFILES } from "./lib/model-family-resolver.mjs";
 import { offerPeerPermission } from "./lib/native-peer-permissions.mjs";
 import { parseFrontmatter } from "./lib/skill-template.mjs";

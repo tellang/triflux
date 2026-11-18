@@ -6,20 +6,20 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
-const FACTORY_CANDIDATES = [
-  resolve(SCRIPT_DIR, "../hub/workers/factory.mjs"),
-  resolve(SCRIPT_DIR, "./hub/workers/factory.mjs"),
-  resolve(process.cwd(), "hub/workers/factory.mjs"),
+const CLAUDE_WORKER_CANDIDATES = [
+  resolve(SCRIPT_DIR, "../hub/workers/claude-worker.mjs"),
+  resolve(SCRIPT_DIR, "./hub/workers/claude-worker.mjs"),
+  resolve(process.cwd(), "hub/workers/claude-worker.mjs"),
 ];
 
 const WORKER_UNAVAILABLE_EXIT_CODE = 70;
 
-let createWorker = null;
+let ClaudeWorker = null;
 
-for (const candidate of FACTORY_CANDIDATES) {
+for (const candidate of CLAUDE_WORKER_CANDIDATES) {
   if (!existsSync(candidate)) continue;
   try {
-    ({ createWorker } = await import(pathToFileURL(candidate).href));
+    ({ ClaudeWorker } = await import(pathToFileURL(candidate).href));
   } catch (err) {
     if (err.code === "ERR_MODULE_NOT_FOUND") {
       process.stderr.write(
@@ -32,9 +32,9 @@ for (const candidate of FACTORY_CANDIDATES) {
   break;
 }
 
-if (!createWorker) {
+if (!ClaudeWorker) {
   process.stderr.write(
-    "[tfx-route-worker] worker factory를 찾지 못했습니다.\n",
+    "[tfx-route-worker] claude-worker.mjs를 찾지 못했습니다.\n",
   );
   process.exit(WORKER_UNAVAILABLE_EXIT_CODE);
 }
@@ -105,6 +105,9 @@ function parseArgs(argv) {
   if (!args.type) {
     throw new Error("--type is required");
   }
+  if (args.type !== "claude") {
+    throw new Error(`Unknown worker type: ${args.type}`);
+  }
 
   return args;
 }
@@ -139,7 +142,7 @@ async function readPromptFromStdin() {
 const args = parseArgs(process.argv.slice(2));
 const prompt = await readPromptFromStdin();
 
-const worker = await createWorker(args.type, {
+const worker = new ClaudeWorker({
   command: args.command,
   commandArgs: parseJsonArray(args.commandArgsJson, "--command-args-json"),
   model: args.model,
