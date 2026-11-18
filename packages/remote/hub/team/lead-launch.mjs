@@ -111,9 +111,10 @@ export function resolveLauncher({ cli = "claude", flag, configPath } = {}) {
   return readLeadConfig(configPath)?.launchers[cli] ?? cli;
 }
 
-/** tmux 대상 문법과 겹치는 문자(. :)와 공백만 바꿔 `<폴더>-lead` 로 만든다. */
-export function leadSessionName(cwd) {
-  return `${basename(resolve(cwd)).replace(/[.:\s]/gu, "-")}-lead`;
+/** tmux 대상 문법과 겹치는 문자(. :)와 공백만 바꿔 `<폴더>-lead`(소통은 `-comm`)로 만든다. */
+export function leadSessionName(cwd, sessionRole = "lead") {
+  const suffix = sessionRole === "communication" ? "comm" : "lead";
+  return `${basename(resolve(cwd)).replace(/[.:\s]/gu, "-")}-${suffix}`;
 }
 
 /** /tfx-lead 와 같은 규칙으로 이름을 정한다. 날짜로 시작하면 그대로 쓴다. */
@@ -122,8 +123,13 @@ export function leadDisplayName(role, now = new Date()) {
   return `${now.getMonth() + 1}.${now.getDate()} ${role}`;
 }
 
-/** Claude 는 mod 가 /tfx-lead 를 처리한다. Codex 와 agy 는 mod 가 없어 스킬 파일을 읽게 한다. */
-export function leadEntryPrompt(cli, role) {
+/**
+ * 리드: Claude 는 mod 가 /tfx-lead 를 처리하고, Codex 와 agy 는 mod 가 없어 스킬 파일을 읽게 한다.
+ * 소통: /tfx-lead 는 리드 전용이라 모든 CLI 가 스킬 파일의 "소통 세션" 절을 읽는다.
+ */
+export function leadEntryPrompt(cli, role, sessionRole = "lead") {
+  if (sessionRole === "communication")
+    return `${LEAD_SKILL} 를 읽고 이 세션이 ${role} 소통 세션을 맡는다. 그 스킬의 "소통 세션" 절을 따른다.`;
   if (cli === "claude") return `/tfx-lead ${role}`;
   return `${LEAD_SKILL} 를 읽고 이 세션이 ${role} 리드를 맡는다. 처음 활성화할 때 "보유 자산과 선택" 절로 tfx-harness, tfx-auto, tfx-live 등 설치 자산을 인지하고 요청에 맞는 경로를 선택한다. 그 스킬의 절차를 따른다.`;
 }
@@ -167,6 +173,7 @@ export function resolveLeadCli({
   env = process.env,
   quotaSnapshot,
   available,
+  sessionRole = "lead",
 } = {}) {
   const normalized = String(cli || "auto")
     .trim()
@@ -180,7 +187,7 @@ export function resolveLeadCli({
   }
   const effectiveAvailable = available ?? probePathAvailability(env);
   const result = resolveRoleCandidates({
-    agent: "lead",
+    agent: sessionRole,
     env,
     quotaSnapshot,
     available: effectiveAvailable,
@@ -200,6 +207,7 @@ export async function launchLead(
     cli = "claude",
     cliAuto = false,
     role,
+    sessionRole = "lead",
     cwd = process.cwd(),
     session,
     model,
@@ -234,6 +242,7 @@ export async function launchLead(
         env: jevOptions?.env || process.env,
         quotaSnapshot,
         available,
+        sessionRole,
       })
     : cli;
   if (launcher === undefined) {
@@ -254,8 +263,9 @@ export async function launchLead(
   }
   cli = resolvedCli;
 
+  // Jev 는 리드 등급을 고르므로 소통 세션에는 쓰지 않는다.
   const routing = {
-    enabled: isJevEnabled(jevOptions),
+    enabled: sessionRole === "lead" && isJevEnabled(jevOptions),
     attempted: false,
     complexity: null,
     recommendedProfile: null,
@@ -345,7 +355,7 @@ export async function launchLead(
   }
   routing.effectiveModel = model ?? null;
   routing.effectiveEffort = effort ?? null;
-  const target = session || leadSessionName(cwd);
+  const target = session || leadSessionName(cwd, sessionRole);
   const name = leadDisplayName(role.trim());
   let mcpRecommendation;
   try {
@@ -387,7 +397,7 @@ export async function launchLead(
         "--cwd",
         resolve(cwd),
         "--role",
-        "lead",
+        sessionRole,
         "--human",
         "high",
         ...(task ? ["--task", task] : []),
@@ -430,6 +440,7 @@ export async function launchLead(
   const recommendationContext = formatMcpRecommendation(mcpRecommendation, {
     audience: "lead",
   });
+  const isSlashEntry = cli === "claude" && sessionRole === "lead";
   // Claude 슬래시 명령은 tmux 입력으로만 실행되고, Claude 안에서 호출해도 SendMessage 로 바뀌지 않게 한다.
   const ask = await runLive(
     [
@@ -439,14 +450,14 @@ export async function launchLead(
       "--session",
       target,
       "--prompt",
-      `${leadEntryPrompt(cli, role.trim())}${cli === "claude" ? "" : recommendationContext}`,
+      `${leadEntryPrompt(cli, role.trim(), sessionRole)}${isSlashEntry ? "" : recommendationContext}`,
       "--no-wait",
       ...(cli === "claude" ? ["--via-tmux"] : []),
     ],
     run,
   );
   // slash 인자는 역할만 받는다. 추천은 기존 busy 대기 계약을 쓰는 별도 입력으로 전달한다.
-  if (cli === "claude" && ask.ok && recommendationContext) {
+  if (isSlashEntry && ask.ok && recommendationContext) {
     const recommendationAsk = await runLive(
       [
         "ask",

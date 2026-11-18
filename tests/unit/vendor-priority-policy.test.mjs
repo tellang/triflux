@@ -301,4 +301,36 @@ describe("vendor-priority-policy: 6개 역할군 후보 순서 및 규칙 검증
     });
     assert.equal(allDead.candidates.length, 0);
   });
+
+  it("상주 소통 후보는 opus medium, argon medium, terra high 순이고 단발 보고 워커 후보는 그대로다", () => {
+    const resolve = (agent, cliMode = "auto") =>
+      resolveRoleCandidates({
+        agent,
+        cliMode,
+        env: cleanEnv(),
+        available: { codex: true, antigravity: true, claude: true },
+        quotaSnapshot: makeSnapshot(),
+      }).candidates.map((c) => `${c.cli}:${c.familyOrModel}:${c.effort}`);
+
+    assert.deepEqual(resolve("communication"), [
+      "claude:opus:medium",
+      "antigravity:argon:medium",
+      "codex:terra:high",
+    ]);
+    assert.deepEqual(resolve("communication-report"), [
+      "claude:opus:medium",
+      "antigravity:argon:medium",
+    ]);
+    // --cli codex 는 두 역할 모두 terra 를 앞세우고 중복으로 넣지 않는다
+    assert.deepEqual(resolve("communication", "codex"), [
+      "codex:terra:high",
+      "claude:opus:medium",
+      "antigravity:argon:medium",
+    ]);
+    assert.deepEqual(resolve("communication-report", "codex"), [
+      "codex:terra:high",
+      "claude:opus:medium",
+      "antigravity:argon:medium",
+    ]);
+  });
 });

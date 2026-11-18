@@ -137,6 +137,12 @@ const EXPLICIT_CODEX_COMM_CANDIDATE = cand(
   "exec",
 );
 
+// 상주 소통 세션은 단발 보고 워커 후보에 Codex terra 를 정식 3순위로 둔다.
+const COMMUNICATION_CANDIDATES = Object.freeze([
+  ...COMMUNICATION_REPORT_CANDIDATES,
+  EXPLICIT_CODEX_COMM_CANDIDATE,
+]);
+
 const AGY_PSEUDO_CANDIDATES = Object.freeze([
   cand("antigravity", "hydrogen", "medium", "hydrogen", null),
   cand("codex", "sol", "high", "sol_high", "exec"),
@@ -404,7 +410,7 @@ export const ROLE_PRIORITY_TABLE = Object.freeze({
     tierFloor: "mid",
     timeoutSec: 900,
     mcpHint: "writer",
-    candidates: COMMUNICATION_REPORT_CANDIDATES,
+    candidates: COMMUNICATION_CANDIDATES,
   }),
 
   // CLI 이름 호환 의사 역할
@@ -521,7 +527,8 @@ function buildRoleBaseCandidates(
   let rawCandidates = [...entry.candidates];
   if (
     (agent === "communication" || agent === "communication-report") &&
-    cliMode === "codex"
+    cliMode === "codex" &&
+    !rawCandidates.some((item) => item.cli === "codex")
   ) {
     rawCandidates = [EXPLICIT_CODEX_COMM_CANDIDATE, ...rawCandidates];
   }

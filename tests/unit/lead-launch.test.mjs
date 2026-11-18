@@ -709,6 +709,49 @@ describe("tfx lead", () => {
     });
   }
 
+  for (const cli of ["claude", "codex", "agy"]) {
+    it(`소통 세션은 역할을 start 에 넘기고 ${cli} 도 소통 절을 읽는 프롬프트로 진입한다`, async () => {
+      const { calls, run } = fakeRun({
+        start: { ready: true },
+        ask: { ok: true },
+      });
+      const result = await launchLead(
+        { cli, role: "문서 소통", sessionRole: "communication", cwd: "/p/app" },
+        { run, jevOptions: { env: { TFX_JEV: "0" } } },
+      );
+      assert.equal(result.ok, true);
+      assert.equal(result.session, "app-comm");
+      const start = calls[0];
+      assert.equal(start[start.indexOf("--role") + 1], "communication");
+      const prompt = calls[1][calls[1].indexOf("--prompt") + 1];
+      assert.ok(!prompt.startsWith("/tfx-lead"));
+      assert.match(prompt, /skills\/tfx-lead\/SKILL\.md 를 읽고/u);
+      assert.match(prompt, /"소통 세션" 절/u);
+      assert.equal(calls.length, 2);
+    });
+  }
+
+  it("tfx lead --role 은 lead, communication 밖의 값을 인자 오류로 거부한다", (t) => {
+    const home = mkdtempSync(join(tmpdir(), "lead-role-cli-"));
+    t.after(() => rmSync(home, { recursive: true, force: true }));
+    const result = spawnSync(
+      process.execPath,
+      [
+        new URL("../../bin/triflux.mjs", import.meta.url).pathname,
+        "lead",
+        "리드",
+        "--role",
+        "worker",
+      ],
+      { encoding: "utf8", timeout: 10000, env: { ...process.env, HOME: home } },
+    );
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(
+      result.stderr + result.stdout,
+      /--role 은 lead, communication/u,
+    );
+  });
+
   it("setup 은 설치된 CLI 중 아직 안 정한 것만 묻고 저장한다", async () => {
     const path = config(JSON.stringify({ launcher: "c-wrap" }));
     const asked = [];
