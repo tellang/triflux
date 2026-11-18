@@ -52,7 +52,7 @@ import {
   getProviderRow,
   renderAlignedRows,
 } from "./renderers.mjs";
-import { sessionStatus } from "./session-status.mjs";
+import { recordAgyContext, sessionStatus } from "./session-status.mjs";
 import { selectTier } from "./terminal.mjs";
 import {
   formatTimeCell,
@@ -83,6 +83,7 @@ async function main() {
   const codexSession = stdin?.product === "codex";
   const cacheOnly = process.argv.includes("--cache-only");
   const status = await sessionStatus(stdin);
+  recordAgyContext(stdin);
   const currentMarker = agySession ? "a" : codexSession ? "x" : "c";
   const jevMarker = codexSession ? "c" : "x";
   if (agySession || codexSession) {
