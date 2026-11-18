@@ -11,10 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 
-const helperUrl = new URL(
-  "../../scripts/lib/process-utils.mjs",
-  import.meta.url,
-);
+const helperUrl = new URL("../../hub/lib/process-utils.mjs", import.meta.url);
 
 it("공백과 한글이 든 경로에서도 직접 실행을 판정한다", () => {
   const root = mkdtempSync(join(tmpdir(), "tfx-main-"));

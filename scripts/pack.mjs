@@ -36,7 +36,6 @@ const CORE_DIRS = [
   // pane 이 CLI 이름을 실행 파일로 풀 때 읽는다
   "hub/team/agent-map.json",
   "hub/team/session.mjs",
-  "hub/team/nativeProxy.mjs",
   "hub/team/retry-state-machine.mjs",
   "hub/team/claude-agent-session-normalizer.mjs",
   "hub/team/claude-daemon-control.mjs",

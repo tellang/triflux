@@ -261,7 +261,7 @@ test("peer attach reuses tmux sessions and never starts or stops them", async ()
           "--rounds",
           "1",
           "--mode",
-          "counting",
+          "freeform",
           "--timeout",
           "1",
           "--settle",
@@ -978,70 +978,6 @@ test("CLI ask applies tmux busy policy before sending the prompt", async () => {
           (entry) => entry[0] === "send-keys" && entry.at(-1) === "Escape",
         ),
         mode === "interrupt",
-      );
-    }
-  } finally {
-    await fs.rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("converse and goal-driven forward tmux busy policy to each ask", async () => {
-  const dir = await fs.mkdtemp(
-    path.join(os.tmpdir(), "tfx-live-workflow-busy-"),
-  );
-  try {
-    await writeBusyFakeTmux(dir);
-    const promptsPath = path.join(dir, "prompts.txt");
-    await fs.writeFile(promptsPath, "one prompt\n");
-    for (const verb of ["converse", "goal-driven"]) {
-      const logPath = path.join(dir, `${verb}.jsonl`);
-      const args = [
-        verb,
-        "--cli",
-        "codex",
-        "--session",
-        `${verb}A`,
-        "--if-busy",
-        "fail",
-        "--ready-timeout",
-        "1",
-        "--busy-timeout",
-        "1",
-        "--timeout",
-        "0.2",
-        "--poll-interval",
-        "1",
-        ...(verb === "converse"
-          ? ["--prompts-file", promptsPath]
-          : ["--goal", "finish", "--max-rounds", "1"]),
-      ];
-      await assert.rejects(
-        runTfxLive(args, {
-          env: {
-            PATH: `${dir}${path.delimiter}${process.env.PATH}`,
-            TMUX_LOG: logPath,
-            TMUX_STATE: path.join(dir, `${verb}.json`),
-            TMUX_READY_FIRST_CAPTURE: "1",
-            TMUX_IGNORE_FIRST_ENTER: "1",
-            TMUX_BUSY_CAPTURES: "100",
-          },
-        }),
-        (error) => {
-          assert.match(
-            JSON.parse(error.stdout).error,
-            /target busy \(--if-busy fail\)/,
-          );
-          return true;
-        },
-      );
-      const log = await readTmuxLog(logPath);
-      assert.equal(
-        log.some((entry) => entry[0] === "set-buffer"),
-        false,
-      );
-      assert.equal(
-        log.some((entry) => entry[0] === "kill-session"),
-        true,
       );
     }
   } finally {
@@ -1804,46 +1740,40 @@ test("peer relays agy DB responses without completion marker lines", async () =>
 test("debate rounds 1 closure still carries the seed and the participant label", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-peer-r1-"));
   try {
-    for (const third of [false, true]) {
-      const calls = [];
-      await tfxLive.peer(
-        {
-          "cli-a": "claude",
-          "cli-b": "claude",
-          ...(third ? { "cli-c": "claude" } : {}),
-          mode: "debate",
-          seed: "안건 원문",
-          rounds: "1",
+    const calls = [];
+    await tfxLive.peer(
+      {
+        "cli-a": "claude",
+        "cli-b": "claude",
+        mode: "debate",
+        seed: "안건 원문",
+        rounds: "1",
+      },
+      {
+        peerArtifactPaths: () => ({
+          transcriptPath: path.join(dir, "t.json"),
+          statusPath: path.join(dir, "s.json"),
+        }),
+        doStart: async () => {},
+        doAsk: async (adapter, opts) => {
+          calls.push(opts);
+          return { transport: "tmux", done: true, response: "답" };
         },
-        {
-          peerArtifactPaths: () => ({
-            transcriptPath: path.join(dir, "t.json"),
-            statusPath: path.join(dir, "s.json"),
-          }),
-          doStart: async () => {},
-          doAsk: async (adapter, opts) => {
-            calls.push(opts);
-            return { transport: "tmux", done: true, response: "답" };
-          },
-          stopAfterLifecycle: async () => {},
-          printJson: () => {},
-        },
-      );
-      const closure = calls.at(-1).prompt;
-      assert.match(closure, /final closure turn/);
-      assert.match(
-        closure,
-        new RegExp(`너는 Participant ${third ? "C" : "B"}다`),
-      );
-      assert.match(closure, /원래 과제:\n안건 원문/);
-    }
+        stopAfterLifecycle: async () => {},
+        printJson: () => {},
+      },
+    );
+    const closure = calls.at(-1).prompt;
+    assert.match(closure, /final closure turn/);
+    assert.match(closure, /너는 Participant B다/);
+    assert.match(closure, /원래 과제:\n안건 원문/);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
 
 test("peer rejects remote agy on every side before session operations", async () => {
-  for (const side of ["a", "b", "c"]) {
+  for (const side of ["a", "b"]) {
     await assert.rejects(
       tfxLive.peer({ [`cli-${side}`]: "agy", remote: "host" }),
       /agy peer relay.*local.*--remote/i,
@@ -1851,28 +1781,24 @@ test("peer rejects remote agy on every side before session operations", async ()
   }
 });
 
-test("peer cycles A B C and relays labeled latest responses including closure", async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-peer-three-"));
+test("peer cycles A B and relays labeled latest responses including closure", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tfx-live-peer-two-"));
   try {
-    for (const mode of ["counting", "freeform", "debate"]) {
+    for (const mode of ["freeform", "debate"]) {
       const calls = [];
       const started = [];
       let output;
       await tfxLive.peer(
         {
           "cli-a": "claude",
-          "cli-b": "claude",
-          "cli-c": "agy",
-          "session-c": "third",
-          "model-c": "agy-model",
-          "effort-c": "high",
+          "cli-b": "agy",
           mode,
           seed: "원래 과제의 형식으로 답하라",
           rounds: "2",
         },
         {
-          peerArtifactPaths: (a, b, c) => ({
-            transcriptPath: path.join(dir, `${a}-${b}-${c}.json`),
+          peerArtifactPaths: (a, b) => ({
+            transcriptPath: path.join(dir, `${a}-${b}.json`),
             statusPath: path.join(dir, "status.json"),
           }),
           doStart: async (adapter, opts) => {
@@ -1894,100 +1820,47 @@ test("peer cycles A B C and relays labeled latest responses including closure", 
           },
         },
       );
-      assert.equal(output.hops_completed, 6);
+      assert.equal(output.hops_completed, 4);
       assert.deepEqual(
         output.hops.map((hop) => hop.from),
-        ["a", "b", "c", "a", "b", "c"],
+        ["a", "b", "a", "b"],
       );
-      assert.equal(output.cliC, "agy");
-      assert.equal(output.transportC, "tmux");
-      assert.equal(output.attachedC, false);
-      assert.equal(output.stoppedC, true);
-      assert.match(output.transcript_path, /peerA-peerB-third/);
-      assert.equal(started.length, 3);
+      assert.equal(output.cliB, "agy");
+      assert.equal(output.transportB, "tmux");
+      assert.equal(output.attachedB, false);
+      assert.equal(output.stoppedB, true);
+      assert.equal(Object.hasOwn(output, "cliC"), false);
+      assert.match(output.transcript_path, /peerA-peerB/);
+      assert.equal(started.length, 2);
       assert.ok(started[0].group);
       assert.ok(started.every((entry) => entry.group === started[0].group));
-      assert.equal(started[2].model, "agy-model");
-      assert.equal(started[2].effort, "high");
-      assert.match(calls[1].prompt, /Participant A: 1/);
-      assert.doesNotMatch(calls[1].prompt, /Participant C/);
-      for (let i = 2; i < calls.length; i += 1) {
-        const side = output.hops[i].from;
-        for (const other of ["a", "b", "c"].filter((s) => s !== side)) {
-          const latest = output.hops
-            .slice(0, i)
-            .findLast((h) => h.from === other);
-          assert.ok(
-            calls[i].prompt.includes(
-              `Participant ${other.toUpperCase()}: ${latest.response}`,
-            ),
-          );
-        }
-        assert.doesNotMatch(calls[i].prompt, /Participant (?:claude|agy)/);
-      }
-      assert.match(calls[5].prompt, /final closure turn/);
+      assert.match(calls[3].prompt, /final closure turn/);
       if (mode === "debate") {
         assert.ok(
           calls[0].prompt.startsWith(
             "너는 Participant A다.\n원래 과제:\n원래 과제의 형식으로 답하라",
           ),
         );
-        // 안건은 A 에게만 먼저 가므로 B 와 C 의 첫 차례에도 원문이 있어야 한다.
-        for (const i of [1, 2])
-          assert.match(
-            calls[i].prompt,
-            /원래 과제:\n원래 과제의 형식으로 답하라/,
-          );
-        assert.doesNotMatch(calls[3].prompt, /원래 과제:/);
+        // 안건은 A 에게만 먼저 가므로 B 의 첫 차례에도 원문이 있어야 한다.
+        assert.match(
+          calls[1].prompt,
+          /원래 과제:\n원래 과제의 형식으로 답하라/,
+        );
+        assert.doesNotMatch(calls[2].prompt, /원래 과제:/);
         assert.match(calls[1].prompt, /너는 Participant B다/);
+        assert.match(calls[1].prompt, /Participant A: 1/);
         assert.match(calls[1].prompt, /다른 참여자의 답을 검토하라/);
         assert.doesNotMatch(calls[1].prompt, /1-2 sentences/);
       }
     }
-    const bridgePath = await writeFakeBridge(
-      dir,
-      "console.log(JSON.stringify({ok:true,text:'응답',matchedCompletion:true,inputSent:true}));",
+    await assert.rejects(
+      tfxLive.peer({ mode: "counting" }),
+      /--mode must be one of: freeform, debate/,
     );
-    const attached = JSON.parse(
-      await runTfxLive(
-        [
-          "peer",
-          "--cli-a",
-          "claude",
-          "--transport-a",
-          "uds",
-          "--short-a",
-          "aaaaaaaa",
-          "--cli-b",
-          "claude",
-          "--transport-b",
-          "uds",
-          "--short-b",
-          "bbbbbbbb",
-          "--cli-c",
-          "claude",
-          "--transport-c",
-          "uds",
-          "--short-c",
-          "cccccccc",
-          "--bridge",
-          bridgePath,
-          "--bridge-c",
-          bridgePath,
-          "--mode",
-          "debate",
-          "--rounds",
-          "2",
-          "--attach-c",
-        ],
-        { env: { TFX_LIVE_ARTIFACT_DIR: dir } },
-      ),
+    await assert.rejects(
+      tfxLive.peer({ via: "message" }),
+      /--via must be one of: relay/,
     );
-    assert.equal(attached.hops_completed, 6);
-    assert.equal(attached.attachedC, true);
-    assert.equal(attached.stoppedC, false);
-    assert.match(attached.transcript_path, /peer-peerA-peerB-peerC-/);
-    assert.equal(attached.hops[2].transport, "uds");
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
@@ -3323,7 +3196,9 @@ test("tfx-live peer maps side-specific model and effort flags", async () => {
         args[0] === "send-keys" && args[3] !== "--" && args.length === 5,
     );
 
-    assert.deepEqual(result.numbers, [1, 2]);
+    assert.equal(result.mode, "freeform");
+    assert.equal(result.hops_completed, 2);
+    assert.equal(Object.hasOwn(result, "numbers"), false);
     assert.equal(result.stoppedA, true);
     assert.equal(result.stoppedB, true);
     assert.deepEqual(launches, [

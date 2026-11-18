@@ -1893,7 +1893,7 @@ export async function judgeInstructionAck(
 }
 
 /**
- * 12. 팀 인박스 메시지 긴급도 분류 (nativeProxy / bridge team-send-message 연동용).
+ * 12. 팀 인박스 메시지 긴급도 분류.
  */
 export async function judgeInboxPriority(
   { text = "", summary = "", from = "" } = {},

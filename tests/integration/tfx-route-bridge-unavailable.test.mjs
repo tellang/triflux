@@ -60,7 +60,7 @@ process.exit(1);
       .map((line) => JSON.parse(line));
     assert.deepEqual(
       calls.map((args) => args[0]),
-      ["judge-route", "team-task-update", "team-send-message"],
+      ["judge-route"],
     );
     assert.deepEqual(calls[0].slice(0, 8), [
       "judge-route",

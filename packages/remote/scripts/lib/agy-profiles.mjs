@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { normalizeGeminiProfileName } from "./model-effort.mjs";
+import { normalizeAgyProfileName } from "./model-effort.mjs";
 import {
   AGY_FAMILY_PROFILES,
   modelFamilyPaths,
@@ -8,7 +8,7 @@ import {
   writeModelFile,
 } from "./model-family-resolver.mjs";
 
-const DEFAULT_GEMINI_PROFILES = {
+const DEFAULT_AGY_PROFILES = {
   model: AGY_FAMILY_PROFILES.argon.model,
   profiles: Object.fromEntries(
     Object.entries(AGY_FAMILY_PROFILES).map(([name, { model }]) => [
@@ -18,11 +18,11 @@ const DEFAULT_GEMINI_PROFILES = {
   ),
 };
 
-export { normalizeGeminiProfileName };
+export { normalizeAgyProfileName };
 
 // 용도별 agy 프로필 매핑 (SSOT, ADR-0054)
 // Carbon / Hydrogen / Argon 가족과 effort를 역할군 등급에 맞춰 배정한다.
-const GEMINI_PROFILE_BY_PURPOSE = Object.freeze({
+const AGY_PROFILE_BY_PURPOSE = Object.freeze({
   architect: "carbon_high",
   planner: "carbon_high",
   critic: "carbon_high",
@@ -63,20 +63,20 @@ const GEMINI_PROFILE_BY_PURPOSE = Object.freeze({
   spark: "hydrogen_low",
   "communication-relay": "hydrogen_low",
 });
-const GEMINI_DEFAULT_PURPOSE_PROFILE = "hydrogen";
+const AGY_DEFAULT_PURPOSE_PROFILE = "hydrogen";
 
-function resolveGeminiProfileForPurpose(name) {
+function resolveAgyProfileForPurpose(name) {
   const key = String(name ?? "")
     .trim()
     .toLowerCase();
-  return GEMINI_PROFILE_BY_PURPOSE[key] || GEMINI_DEFAULT_PURPOSE_PROFILE;
+  return AGY_PROFILE_BY_PURPOSE[key] || AGY_DEFAULT_PURPOSE_PROFILE;
 }
 
-// 프로필 이름 → agy display name. 사용자 파일(~/.gemini/triflux-profiles.json)이
-// 우선하고, 없으면 DEFAULT_GEMINI_PROFILES 로 떨어진다. 이미 모델명이면 그대로 돌려준다.
-function resolveGeminiModel(profileOrModel, opts = {}) {
+// 프로필 이름을 agy display name으로 푼다. 사용자 파일(~/.gemini/triflux-profiles.json)이
+// 우선하고, 없으면 DEFAULT_AGY_PROFILES 로 떨어진다. 이미 모델명이면 그대로 돌려준다.
+function resolveAgyModel(profileOrModel, opts = {}) {
   const raw = String(profileOrModel ?? "").trim();
-  if (!raw) return DEFAULT_GEMINI_PROFILES.model;
+  if (!raw) return DEFAULT_AGY_PROFILES.model;
   if (/^gemini[\s-]/i.test(raw)) return raw;
   const profilesPath =
     opts.profilesPath ||
@@ -88,7 +88,7 @@ function resolveGeminiModel(profileOrModel, opts = {}) {
   } catch {
     cfg = null;
   }
-  const name = normalizeGeminiProfileName(raw);
+  const name = normalizeAgyProfileName(raw);
   const modelValue = (entry) =>
     typeof entry === "string"
       ? entry
@@ -106,25 +106,25 @@ function resolveGeminiModel(profileOrModel, opts = {}) {
     const value = modelValue(entry);
     if (typeof value === "string" && value.trim()) return value.trim();
   }
-  if (name !== "default" && DEFAULT_GEMINI_PROFILES.profiles[name])
-    return DEFAULT_GEMINI_PROFILES.profiles[name].model;
+  if (name !== "default" && DEFAULT_AGY_PROFILES.profiles[name])
+    return DEFAULT_AGY_PROFILES.profiles[name].model;
   const fallback =
     cfg?.defaultModel ||
     cfg?.default_profile ||
     cfg?.defaultProfile ||
     (typeof cfg?.model === "string" ? cfg.model : cfg?.model?.default);
   if (typeof fallback === "string" && fallback.trim()) return fallback.trim();
-  const defaultProfile = normalizeGeminiProfileName(
+  const defaultProfile = normalizeAgyProfileName(
     (opts.env || process.env).TFX_GEMINI_DEFAULT_PROFILE,
   );
   return (
     modelValue(cfg?.profiles?.[defaultProfile]) ||
-    DEFAULT_GEMINI_PROFILES.profiles[defaultProfile]?.model ||
-    DEFAULT_GEMINI_PROFILES.model
+    DEFAULT_AGY_PROFILES.profiles[defaultProfile]?.model ||
+    DEFAULT_AGY_PROFILES.model
   );
 }
 
-function ensureGeminiProfiles(opts = {}) {
+function ensureAgyProfiles(opts = {}) {
   const geminiDir =
     opts.geminiDir || join(modelFamilyPaths(opts).home, ".gemini");
   const profilesPath =
@@ -188,8 +188,8 @@ function ensureGeminiProfiles(opts = {}) {
 }
 
 export {
-  DEFAULT_GEMINI_PROFILES,
-  ensureGeminiProfiles,
-  resolveGeminiModel,
-  resolveGeminiProfileForPurpose,
+  DEFAULT_AGY_PROFILES,
+  ensureAgyProfiles,
+  resolveAgyModel,
+  resolveAgyProfileForPurpose,
 };

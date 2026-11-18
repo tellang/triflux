@@ -10,14 +10,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+  ensureAgyProfiles,
+  normalizeAgyProfileName,
+  resolveAgyModel,
+} from "../../scripts/lib/agy-profiles.mjs";
+import {
   ensureManagedCodexProfiles,
   normalizeCodexProfileName,
 } from "../../scripts/lib/codex-profile-config.mjs";
-import {
-  ensureGeminiProfiles,
-  normalizeGeminiProfileName,
-  resolveGeminiModel,
-} from "../../scripts/lib/gemini-profiles.mjs";
 import {
   parseAgyModels,
   resolveModelFamilies,
@@ -310,7 +310,7 @@ test("옛 프로필 이름은 effort를 유지한 가족 별칭으로 정규화�
     assert.equal(normalizeCodexProfileName(old), current);
   assert.equal(normalizeCodexProfileName("personal"), "personal");
   for (const old of ["flash", "flash_high", "flash38", "flash38_low"])
-    assert.equal(normalizeGeminiProfileName(old), "argon_low");
+    assert.equal(normalizeAgyProfileName(old), "argon_low");
 });
 
 test("관리 프로필 갱신은 최신 해석을 쓰고 옛 파일과 커스텀 프로필을 보존한다", (t) => {
@@ -344,12 +344,9 @@ test("관리 프로필 갱신은 최신 해석을 쓰고 옛 파일과 커스텀
     }),
   );
   opts.runCommand = () => "gemini-4-argon-low\tGemini 4 Argon (Low)\n";
-  assert.equal(ensureGeminiProfiles(opts).ok, true);
-  assert.equal(
-    resolveGeminiModel("flash38_high", opts),
-    "Gemini 4 Argon (Low)",
-  );
-  assert.equal(resolveGeminiModel("personal", opts), "custom");
+  assert.equal(ensureAgyProfiles(opts).ok, true);
+  assert.equal(resolveAgyModel("flash38_high", opts), "Gemini 4 Argon (Low)");
+  assert.equal(resolveAgyModel("personal", opts), "custom");
 });
 
 test("가족 파일은 effort와 무관한 최신 모델만 쓰고 결합 파일도 갱신한다", (t) => {

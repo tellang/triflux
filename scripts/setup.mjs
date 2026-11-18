@@ -27,6 +27,7 @@ import { basename, delimiter, dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import { offerLeadLaunchers } from "../hub/team/lead-launch.mjs";
 import { ensureCodexHooks } from "./ensure-codex-hooks.mjs";
+import { ensureAgyProfiles } from "./lib/agy-profiles.mjs";
 import { writeRotatedBackup } from "./lib/backup-rotation.mjs";
 import {
   addNotice,
@@ -42,7 +43,6 @@ import {
   ensureManagedCodexProfiles,
   normalizeCodexProfileName,
 } from "./lib/codex-profile-config.mjs";
-import { ensureGeminiProfiles } from "./lib/gemini-profiles.mjs";
 import {
   MACHINE_PROFILE_KEYS,
   parseMachineProfileContent,
@@ -2543,11 +2543,11 @@ async function runDeferredWithIo(stdinData, io) {
   let geminiProfilesResult;
   const geminiDir = join(_TFX_HOME, ".gemini");
   if (!isProtectedSetupEnv() && existsSync(geminiDir)) {
-    geminiProfilesResult = ensureGeminiProfiles({ geminiDir });
+    geminiProfilesResult = ensureAgyProfiles({ geminiDir });
     if (geminiProfilesResult.ok && geminiProfilesResult.changed) synced++;
     else if (!geminiProfilesResult.ok)
       io.warn(
-        "gemini-profiles",
+        "agy-profiles",
         `Antigravity/Gemini profiles 설정 실패: ${geminiProfilesResult.message}`,
       );
   }

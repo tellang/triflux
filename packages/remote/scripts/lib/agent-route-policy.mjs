@@ -3,13 +3,13 @@
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import {
+  resolveAgyModel,
+  resolveAgyProfileForPurpose,
+} from "./agy-profiles.mjs";
+import {
   normalizeCodexProfileName,
   resolveCodexProfileConfigValues,
 } from "./codex-profile-config.mjs";
-import {
-  resolveGeminiModel,
-  resolveGeminiProfileForPurpose,
-} from "./gemini-profiles.mjs";
 import {
   modelEffortFromProfile,
   profileFromModelEffort,
@@ -528,7 +528,7 @@ export async function resolveWorkerModel(
     cli === "codex"
       ? resolveDirectCodexRoutePolicy(agent).profile
       : cli === "agy"
-        ? resolveGeminiProfileForPurpose(agent)
+        ? resolveAgyProfileForPurpose(agent)
         : null;
   if (explicitPair && protectedPolicy !== "retry") {
     return {
@@ -606,7 +606,7 @@ export async function resolveWorkerModel(
       ? resolveAgyModelEffort(spec, readOnly)
       : {
           family: null,
-          model: resolveGeminiModel(selectedProfile, readOnly),
+          model: resolveAgyModel(selectedProfile, readOnly),
           effort: null,
         };
   } else {
@@ -649,7 +649,7 @@ export function resolveAgentRoute(
   map,
   profileOverride = "auto",
   nested = false,
-  geminiProfileResolver = resolveGeminiProfileForPurpose,
+  agyProfileResolver = resolveAgyProfileForPurpose,
   {
     reviewAuthor = "codex",
     weeklyPercent = 0,
@@ -736,7 +736,7 @@ export function resolveAgentRoute(
     (selectedCandidate?.cli === "antigravity"
       ? selectedCandidate.profile
       : candidateResult?.candidates.find((c) => c.cli === "antigravity")
-          ?.profile) || geminiProfileResolver(agent);
+          ?.profile) || agyProfileResolver(agent);
 
   const baseRoute = [
     provider,
@@ -773,7 +773,7 @@ function parseCliArgs(argv) {
   let agent = DEFAULT_CODEX_AGENT;
   let mapFile = "";
   let profileOverride = "auto";
-  let geminiProfilesModule = "";
+  let agyProfilesModule = "";
   let nested = false;
   let tierShift = "";
   while (args.length > 0) {
@@ -783,8 +783,8 @@ function parseCliArgs(argv) {
     else if (flag === "--map-file") mapFile = args.shift() || "";
     else if (flag === "--profile-override")
       profileOverride = args.shift() || "";
-    else if (flag === "--gemini-profiles-module")
-      geminiProfilesModule = args.shift() || "";
+    else if (flag === "--agy-profiles-module")
+      agyProfilesModule = args.shift() || "";
     else if (flag === "--nested") nested = true;
     else if (flag === "--tier-shift") tierShift = args.shift() || "";
     else throw new Error(`unknown argument: ${flag}`);
@@ -797,7 +797,7 @@ function parseCliArgs(argv) {
     agent,
     mapFile,
     profileOverride,
-    geminiProfilesModule,
+    agyProfilesModule,
     nested,
     tierShift,
   };
@@ -809,7 +809,7 @@ async function runCli() {
     agent,
     mapFile,
     profileOverride,
-    geminiProfilesModule,
+    agyProfilesModule,
     nested,
     tierShift,
   } = parseCliArgs(process.argv.slice(2));
@@ -829,15 +829,13 @@ async function runCli() {
         ? shiftCodexAgentProfile(agent, tierShift)
         : profileOverride;
     const map = JSON.parse(readFileSync(mapFile, "utf8"));
-    let resolver = resolveGeminiProfileForPurpose;
-    if (geminiProfilesModule) {
+    let resolver = resolveAgyProfileForPurpose;
+    if (agyProfilesModule) {
       try {
-        const module = await import(pathToFileURL(geminiProfilesModule).href);
+        const module = await import(pathToFileURL(agyProfilesModule).href);
         resolver = (agentName) => {
           try {
-            return (
-              module.resolveGeminiProfileForPurpose(agentName) || "hydrogen"
-            );
+            return module.resolveAgyProfileForPurpose(agentName) || "hydrogen";
           } catch {
             return "hydrogen";
           }

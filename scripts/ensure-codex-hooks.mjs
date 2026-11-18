@@ -11,12 +11,12 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMainModule } from "../hub/lib/process-utils.mjs";
 import { writeRotatedBackup } from "./lib/backup-rotation.mjs";
 import {
   privateFileMode,
   sanitizeCodexProfileConfig,
 } from "./lib/codex-profile-config.mjs";
-import { isMainModule } from "./lib/process-utils.mjs";
 import { resolveStableNodeBin } from "./lib/stable-node.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));

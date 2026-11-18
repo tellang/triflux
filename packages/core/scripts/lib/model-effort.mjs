@@ -34,7 +34,7 @@ export function normalizeCodexProfileName(profileName) {
     : normalized;
 }
 
-export function normalizeGeminiProfileName(name) {
+export function normalizeAgyProfileName(name) {
   const raw = String(name ?? "").trim();
   // 옛 Flash 이름은 effort와 상관없이 Argon Low로 보낸다.
   return raw.replace(/^flash\d*(?:_(?:low|high))?$/, "argon_low");
@@ -63,7 +63,7 @@ export function modelEffortFromProfile(cli, profile, effort) {
     if (Object.hasOwn(CODEX_FAMILY_PROFILES, name))
       definition = CODEX_FAMILY_PROFILES[name];
   } else if (cli === "antigravity" || cli === "agy") {
-    const name = normalizeGeminiProfileName(profile);
+    const name = normalizeAgyProfileName(profile);
     if (Object.hasOwn(AGY_FAMILY_PROFILES, name))
       definition = AGY_FAMILY_PROFILES[name];
   }

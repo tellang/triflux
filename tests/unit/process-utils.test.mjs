@@ -8,6 +8,7 @@ import {
   findProcessesByCommandLine,
   findProcessTree,
   isPidAlive,
+  isProcessAlive,
   killProcessTree,
   killProcessTreeSnapshot,
 } from "../../hub/lib/process-utils.mjs";
@@ -20,6 +21,32 @@ it("isPidAlive treats EPERM as an existing process", (t) => {
     throw Object.assign(new Error("permission denied"), { code: "EPERM" });
   });
   assert.equal(isPidAlive(12345), true);
+});
+
+it("isProcessAlive accepts numeric and numeric-string PIDs and treats EPERM as alive", (t) => {
+  const calls = [];
+  t.mock.method(process, "kill", (pid, signal) => {
+    calls.push([pid, signal]);
+    if (pid === 22222) {
+      throw Object.assign(new Error("permission denied"), { code: "EPERM" });
+    }
+    if (pid === 33333) {
+      throw Object.assign(new Error("no such process"), { code: "ESRCH" });
+    }
+  });
+
+  assert.equal(isProcessAlive(11111), true);
+  assert.equal(isProcessAlive("22222"), true);
+  assert.equal(isProcessAlive("33333"), false);
+  assert.equal(isProcessAlive(0), false);
+  assert.equal(isProcessAlive(-1), false);
+  assert.equal(isProcessAlive("not-a-pid"), false);
+  assert.equal(isProcessAlive(""), false);
+  assert.deepEqual(calls, [
+    [11111, 0],
+    [22222, 0],
+    [33333, 0],
+  ]);
 });
 
 function psJson(records) {

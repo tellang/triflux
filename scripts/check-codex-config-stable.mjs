@@ -32,7 +32,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { isMainModule } from "./lib/process-utils.mjs";
+import { isMainModule } from "../hub/lib/process-utils.mjs";
 
 const CODEX_CONFIG = join(homedir(), ".codex", "config.toml");
 const HOOKS_STATE_PREFIX = "hooks.state.";
