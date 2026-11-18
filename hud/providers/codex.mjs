@@ -1,7 +1,3 @@
-// ============================================================================
-// Codex rate limits 추출 / 캐싱
-// ============================================================================
-
 import { spawn } from "node:child_process";
 import {
   closeSync,
@@ -39,9 +35,8 @@ import {
   recordProbe,
 } from "./codex-probe.mjs";
 
-// window_minutes 기반 5h/1w 슬롯 분류
-// 5h: ≤360min (300min 표준, ±20% 허용)
-// weekly: 7000~14400min (10080min 표준). 30일(43200min) 창이 1w 칸을 덮지 않게 위쪽도 막는다.
+// 5h: 360min 이하(300min 표준, ±20% 허용)
+// weekly: 7000~14400min(10080min 표준). 30일(43200min) 창이 1w 칸을 덮지 않게 위쪽도 막는다.
 export function classifyBucket(bucket) {
   if (!bucket?.window_minutes) return null;
   if (bucket.window_minutes <= 360) return "five_hour";
@@ -50,10 +45,8 @@ export function classifyBucket(bucket) {
   return null;
 }
 
-// primary/secondary를 window_minutes 기준으로 정규화
-// HUD 규약: primary=5h, secondary=1w
-// window_minutes 가 비어 있으면 길이를 모르므로 보고된 칸에 둔다(app-server 스키마에서
-// windowDurationMins 는 선택 필드). 길이를 알지만 5h/1w 가 아닌 버킷은 버린다.
+// window_minutes가 비어 있으면 길이를 모르므로 보고된 칸에 둔다(app-server 스키마에서
+// windowDurationMins는 선택 필드). 길이를 알지만 5h/1w가 아닌 버킷은 버린다.
 export function normalizeBuckets(rl) {
   let primary = null;
   let secondary = null;
@@ -80,7 +73,6 @@ export function getCodexEmail() {
   }
 }
 
-// resets_at이 지난 윈도우의 used_percent를 0으로 보정
 export function expireStaleCodexBuckets(
   buckets,
   nowSec = Math.floor(Date.now() / 1000),
@@ -111,8 +103,7 @@ export function expireStaleCodexBuckets(
 }
 
 const RESET_CLUSTER_TOLERANCE_SEC = 90;
-// A probe may miss the instant immediately after a reset. Keep that brief
-// polling gap, but never let a long-expired cached window win the fallback.
+// 리셋 직후 프로브의 짧은 폴링 공백만 허용하고, 오래 만료된 캐시 창이 폴백에서 이기지 않게 막는다.
 const STALE_WINDOW_FALLBACK_GRACE_SEC = CODEX_PROBE_TTL_MS / 1000;
 
 function isNewerSnapshot(candidate, current) {
@@ -331,7 +322,6 @@ export function createReverseLineReader(
 
   const reader = {
     bytesRead: 0,
-    // 줄이 더 없으면 null
     next() {
       let line = null;
       while (queue.length > 0 || pos > 0) {
@@ -362,9 +352,7 @@ export function createReverseLineReader(
     close() {
       try {
         closeSync(fd);
-      } catch {
-        /* 이미 닫힘 */
-      }
+      } catch {}
     },
   };
   return reader;
@@ -394,9 +382,7 @@ function recentRollouts(sessionsRoot, sinceMs) {
       try {
         const mtimeMs = statSync(path).mtimeMs;
         if (mtimeMs >= sinceMs) found.push({ path, mtimeMs });
-      } catch {
-        /* 순회 중 사라진 파일 */
-      }
+      } catch {}
     }
   };
   walk(sessionsRoot, 0);
@@ -454,12 +440,8 @@ export function readCodexPromptCache(sessionsRoot, now = Date.now()) {
   return null;
 }
 
-// ============================================================================
-// Codex 세션 JSONL에서 실제 rate limits 추출
-// 한계: rate_limits는 세션별 스냅샷이므로 여러 세션 간 토큰 합산은 불가.
-// 최근 7일간 세션 파일을 스캔해 가장 최신 rate_limits 버킷을 수집한다.
-// 합성 버킷(token_count 기반)은 2일 이내 데이터만 허용하여 stale 방지.
-// ============================================================================
+// rate_limits는 세션별 스냅샷이라 여러 세션 간 토큰 합산이 안 된다.
+// 최근 7일간 세션에서 최신 버킷을 찾고, token_count 합성 버킷은 2일 이내만 허용해 stale을 막는다.
 export function getCodexRateLimits({
   sessionsRoot = join(getCodexHome(), "sessions"),
   now = new Date(),
@@ -475,7 +457,6 @@ export function getCodexRateLimits({
   }));
   const nowSec = Math.floor(now.getTime() / 1000);
 
-  // 7일간 스캔: 실제 rate_limits 우선, 합성 버킷은 폴백
   for (let dayOffset = 0; dayOffset <= 6; dayOffset++) {
     const d = new Date(now.getTime() - dayOffset * 86_400_000);
     const sessDir = join(
@@ -521,7 +502,6 @@ export function getCodexRateLimits({
               const evt = JSON.parse(line);
               const rl = evt?.payload?.rate_limits;
               if (rl?.limit_id && !found[rl.limit_id]) {
-                // window_minutes 기준으로 5h/1w 슬롯 정규화
                 const { primary, secondary } = normalizeBuckets(rl);
                 found[rl.limit_id] = {
                   limitId: rl.limit_id,
@@ -551,18 +531,14 @@ export function getCodexRateLimits({
                   timestamp: evt.timestamp,
                 };
               }
-            } catch {
-              /* 라인 파싱 실패 무시 */
-            }
+            } catch {}
             if (Object.keys(found).length >= CODEX_MIN_BUCKETS) break;
           }
         } finally {
           reader.close();
         }
         daySnapshots.push(...Object.values(found));
-      } catch {
-        /* 파일 읽기 실패 무시 */
-      }
+      } catch {}
     }
 
     if (dayOffset <= 1) {
@@ -581,7 +557,7 @@ export function getCodexRateLimits({
       return expireStaleCodexBuckets(mergedBuckets, nowSec);
     }
   }
-  // 실제 rate_limits 없음 → 합성 버킷이라도 반환 (행 활성화)
+  // 실제 rate_limits가 없으면 합성 버킷이라도 반환해 행을 활성화한다.
   return syntheticBucket ? { codex: syntheticBucket } : null;
 }
 
@@ -708,11 +684,10 @@ export function scheduleCodexRateLimitRefresh() {
   const scriptPath = process.argv[1];
   if (!scriptPath) return;
 
-  // 스폰 락: 30초 내 이미 스폰했으면 중복 방지
   try {
     if (!acquireSpawnLock(CODEX_REFRESH_LOCK_PATH, SPAWN_LOCK_TTL_MS)) return;
   } catch {
-    /* 락 실패 무시 — 스폰 진행 */
+    /* 락 확인이 실패해도 갱신 스폰은 계속 진행한다. */
   }
 
   try {
@@ -723,7 +698,6 @@ export function scheduleCodexRateLimitRefresh() {
     });
     child.unref();
   } catch (spawnErr) {
-    // spawn 실패 시 캐시에 에러 힌트 기록
     writeJsonSafe(CODEX_QUOTA_CACHE_PATH, {
       timestamp: Date.now(),
       buckets: null,

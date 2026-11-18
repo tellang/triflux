@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { setTimeout as delay } from "node:timers/promises";
 import { execFileSync, execSync, spawnSync } from "child_process";
-// triflux CLI — setup, doctor, version
 import {
   chmodSync,
   copyFileSync,
@@ -94,7 +93,6 @@ const CODEX_DIR = join(homedir(), ".codex");
 const CODEX_CONFIG_PATH = join(CODEX_DIR, "config.toml");
 const PKG = JSON.parse(readFileSync(join(PKG_ROOT, "package.json"), "utf8"));
 
-// ── 색상 체계 (triflux brand: amber/orange accent) ──
 const CYAN = "\x1b[36m";
 const RED = "\x1b[31m";
 const YELLOW = "\x1b[33m";
@@ -108,7 +106,6 @@ const GRAY = "\x1b[38;5;245m";
 const GREEN_BRIGHT = "\x1b[38;5;82m";
 const RED_BRIGHT = "\x1b[38;5;196m";
 
-// ── 브랜드 요소 ──
 const VER = `${DIM}v${PKG.version}${RESET}`;
 const LINE = `${GRAY}${"─".repeat(48)}${RESET}`;
 const STALE_TEAM_MAX_AGE_SEC = 3600;
@@ -429,7 +426,6 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
   },
 });
 
-// ── 유틸리티 ──
 // ok/warn/fail/info/section 의 console.log는 디버그 로그가 아닌 의도된 CLI 출력입니다.
 
 function ok(msg) {
@@ -1152,8 +1148,6 @@ function describeSyncAction(src, dst, label) {
   };
 }
 
-// ── 크로스 셸 진단 ──
-
 function checkCliCrossShell(cmd, installHint) {
   const shells =
     process.platform === "win32" ? ["bash", "cmd", "pwsh"] : ["bash", "zsh"];
@@ -1217,8 +1211,6 @@ function checkCliCrossShell(cmd, installHint) {
     fix: null,
   };
 }
-
-// ── 명령어 ──
 
 function listSkillSyncActions() {
   const skillsSrc = join(PKG_ROOT, "skills");
@@ -1590,7 +1582,6 @@ async function cmdSetup(options = {}) {
       gemini: agy,
       hooks: consent.codexHooks,
     });
-    // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──
     if (process.platform === "win32" && which("psmux")) {
       try {
         const shellOut = execSync("psmux show-options -g default-shell 2>NUL", {
@@ -1611,9 +1602,7 @@ async function cmdSetup(options = {}) {
             addStep(report, `psmux 기본 셸: ${pwsh}`);
           }
         }
-      } catch {
-        /* psmux 서버 미실행이면 무시 */
-      }
+      } catch {}
     }
 
     report.message = "설정 완료";
@@ -1712,7 +1701,6 @@ async function cmdDoctor(options = {}) {
     );
     console.log(`  ${LINE}`);
 
-    // ── reset 모드: 캐시 전체 초기화 ──
     if (reset) {
       section("Cache Reset");
       const cacheDir = join(CLAUDE_DIR, "cache");
@@ -1840,7 +1828,6 @@ async function cmdDoctor(options = {}) {
       return report;
     }
 
-    // ── fix 모드: 파일 동기화 + 캐시 정리 후 진단 ──
     if (fix) {
       section("Auto Fix");
       for (const target of SYNC_MAP) {
@@ -1955,7 +1942,6 @@ async function cmdDoctor(options = {}) {
           warn(`agy peer-wake 패치 실패: ${renderErrorMessage(error.message)}`);
         }
       }
-      // 에러/스테일 캐시 정리
       const fCacheDir = join(CLAUDE_DIR, "cache");
       const staleNames = [
         "claude-usage-cache.json",
@@ -1992,7 +1978,6 @@ async function cmdDoctor(options = {}) {
       (action) => action.status === "failed",
     ).length;
 
-    // tfx-route.sh
     section("tfx-route.sh");
     const routeSh = join(CLAUDE_DIR, "scripts", "tfx-route.sh");
     if (existsSync(routeSh)) {
@@ -2015,7 +2000,6 @@ async function cmdDoctor(options = {}) {
       issues++;
     }
 
-    // macOS GNU timeout/coreutils
     section("macOS timeout");
     const macTimeout = inspectMacTimeoutDependency();
     if (macTimeout.status === "skipped") {
@@ -2043,7 +2027,6 @@ async function cmdDoctor(options = {}) {
       issues++;
     }
 
-    // HUD
     section("HUD");
     const hud = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
     if (existsSync(hud)) {
@@ -2079,7 +2062,6 @@ async function cmdDoctor(options = {}) {
     } else if (mods.status === "failed") warn(`확인 실패: ${mods.error}`);
     else info(`건너뜀 (${mods.reason})`);
 
-    // Codex CLI
     section(`Codex CLI ${WHITE_BRIGHT}●${RESET}`);
     const codexCli = checkCliCrossShell(
       "codex",
@@ -2092,9 +2074,7 @@ async function cmdDoctor(options = {}) {
       shells: codexCli.shells,
       ...(codexCli.fix ? { fix: codexCli.fix } : {}),
     });
-    // API 키 검사 제거 — bash exec 기반이므로 API 키 불필요
-
-    // Codex Profiles (0.134+: 별도 파일 ~/.codex/<name>.config.toml)
+    // bash exec 기반이므로 API 키 불필요
     section("Codex Profiles");
     {
       const codexConfig = existsSync(CODEX_CONFIG_PATH)
@@ -2139,7 +2119,6 @@ async function cmdDoctor(options = {}) {
       });
     }
 
-    // Codex 구형 모델 감지
     if (existsSync(CODEX_CONFIG_PATH)) {
       const codexContent = readFileSync(CODEX_CONFIG_PATH, "utf8");
       const legacyFound = LEGACY_CODEX_MODELS.filter((m) =>
@@ -2158,7 +2137,6 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // Antigravity CLI
     section(`Antigravity CLI ${BLUE}●${RESET}`);
     const antigravityCli = checkCliCrossShell(
       "agy",
@@ -2206,9 +2184,7 @@ async function cmdDoctor(options = {}) {
         issues++;
       }
     }
-    // API 키 검사 제거 — agy OAuth 기반이므로 API 키 불필요
-
-    // Claude Code
+    // agy OAuth 기반이므로 API 키 불필요
     section(`Claude Code ${AMBER}●${RESET}`);
     const claudePath = which("claude");
     if (claudePath) {
@@ -2244,7 +2220,6 @@ async function cmdDoctor(options = {}) {
     });
     if (runtimeFlags.status === "warning") warn(runtimeFlags.summary);
 
-    // psmux (Windows only)
     if (process.platform === "win32") {
       section("psmux (터미널 멀티플렉서)");
       const psmuxPath = which("psmux");
@@ -2290,7 +2265,6 @@ async function cmdDoctor(options = {}) {
           }
         }
 
-        // 기본 셸 확인: psmux 세션의 기본 셸이 PowerShell인지 cmd.exe인지
         let shellOk = false;
         try {
           const defaultShell = execSync(
@@ -2299,7 +2273,6 @@ async function cmdDoctor(options = {}) {
           ).trim();
           shellOk = /powershell|pwsh/i.test(defaultShell);
         } catch {
-          // show-options 실패 시 pwsh/powershell 존재 여부로 판단
           shellOk = !!which("pwsh") || !!which("powershell.exe");
         }
         if (supportOk && shellOk) {
@@ -2312,7 +2285,6 @@ async function cmdDoctor(options = {}) {
           });
         } else {
           if (fix) {
-            // --fix: PowerShell로 자동 변경
             const pwshBin = which("pwsh") ? "pwsh" : "powershell.exe";
             try {
               execSync(`psmux set-option -g default-shell "${pwshBin}"`, {
@@ -2366,7 +2338,6 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // 스킬 설치 상태
     section("Skills");
     const skillsSrc = join(PKG_ROOT, "skills");
     const skillsDst = join(CLAUDE_DIR, "skills");
@@ -2444,7 +2415,7 @@ async function cmdDoctor(options = {}) {
       addDoctorCheck(report, { name: "stale-skills", status: "ok" });
     }
 
-    // 8.5 Dev 의존성 (npm link 환경에서 node_modules 누락 감지 — Issue #101)
+    // npm link 환경에서 node_modules 누락 감지 (Issue #101)
     section("Dev Dependencies");
     try {
       const pkgJsonPath = join(PKG_ROOT, "package.json");
@@ -2461,7 +2432,7 @@ async function cmdDoctor(options = {}) {
       })();
       const missingDeps = [];
       if (!isLinkedDev) {
-        // node_modules 전체 누락 — 전역 install 또는 미압축 릴리즈일 가능성
+        // 전역 install 또는 미압축 릴리즈일 때 node_modules 전체가 빠질 수 있다.
         if (runtimeDeps.length > 0) {
           missingDeps.push(...runtimeDeps);
         }
@@ -2500,7 +2471,7 @@ async function cmdDoctor(options = {}) {
         });
         issues++;
         if (fix) {
-          // --fix 모드: npm install 실행 (Windows 호환 shell: true)
+          // Windows 호환을 위해 shell: true로 실행한다.
           info(`npm install 실행 중 (${PKG_ROOT})...`);
           try {
             execFileSync("npm", ["install", "--no-audit", "--no-fund"], {
@@ -2523,7 +2494,6 @@ async function cmdDoctor(options = {}) {
       });
     }
 
-    // MCP 인벤토리
     section("MCP Inventory");
     const mcpCache = join(CLAUDE_DIR, "cache", "mcp-inventory.json");
     if (existsSync(mcpCache)) {
@@ -2560,7 +2530,6 @@ async function cmdDoctor(options = {}) {
       info(`수동: node ${join(PKG_ROOT, "scripts", "mcp-check.mjs")}`);
     }
 
-    // CLI 이슈 트래커
     section("CLI Issues");
     const issuesFile = join(CLAUDE_DIR, "cache", "cli-issues.jsonl");
     if (existsSync(issuesFile)) {
@@ -2589,7 +2558,6 @@ async function cmdDoctor(options = {}) {
           });
           ok("미해결 이슈 없음");
         } else {
-          // 패턴별 그룹핑
           const groups = {};
           for (const e of unresolved) {
             const key = `${e.cli}:${e.pattern}`;
@@ -2601,8 +2569,8 @@ async function cmdDoctor(options = {}) {
             }
           }
 
-          // #144: 오래된 로그 노이즈 완화 — 7일 초과 항목은 INFO 레벨로 downgrade.
-          // --fix --purge-logs 플래그가 있으면 해당 오래된 항목은 실제 삭제.
+          // #144: 오래된 로그 노이즈를 줄이기 위해 7일 초과 항목은 INFO로 낮추고,
+          // --fix --purge-logs가 있을 때만 삭제한다.
           const STALE_AGE_MS = 7 * 24 * 3600 * 1000;
           let purged = 0;
           for (const g of Object.values(groups)) {
@@ -2683,7 +2651,6 @@ async function cmdDoctor(options = {}) {
       ok("이슈 로그 없음 (정상)");
     }
 
-    // Team Sessions
     section("Team Sessions");
     const teamSessionReport = inspectTeamSessions();
     if (!teamSessionReport.mux) {
@@ -2753,7 +2720,6 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // detached tmux session report and opt-in cleanup
     section("Detached Tmux Sessions");
     const detachedTmuxReport = inspectDetachedTmuxSessions({
       prefix: cleanupStaleTmuxPrefix,
@@ -2853,7 +2819,6 @@ async function cmdDoctor(options = {}) {
       issues += detachedTmuxReport.staleCandidates.length;
     }
 
-    // 고아 node.exe 프로세스 정리 (Windows)
     section("Orphan Processes");
     if (process.platform === "win32") {
       try {
@@ -2872,7 +2837,6 @@ async function cmdDoctor(options = {}) {
             ok(`고아 node.exe 없음 (활성: ${remaining})`);
           }
         } else {
-          // --fix 없이는 개수만 보고
           const countStr = execSync(
             `powershell -NoProfile -WindowStyle Hidden -Command "(Get-Process node -ErrorAction SilentlyContinue).Count"`,
             { encoding: "utf8", timeout: 5000 },
@@ -2943,8 +2907,7 @@ async function cmdDoctor(options = {}) {
       ok("Windows 전용 검사 — 건너뜀");
     }
 
-    // ── Codex Config Health (BUG-H #132) ──
-    // 이전 버전의 swap이 남긴 백업을 감지하고 --fix로 복원한다.
+    // 이전 버전의 swap이 남긴 백업을 감지하고 --fix로 복원한다. (BUG-H #132)
     section("Codex Config Health");
     {
       const codexConfig = join(CODEX_DIR, "config.toml");
@@ -2962,11 +2925,8 @@ async function cmdDoctor(options = {}) {
         info("이전 Codex 실행의 config swap 이 restore 에 실패했습니다.");
         if (fix) {
           // BUG-H (#132) ownership-claim + atomic rename:
-          // 1) orphan → claim (rename 으로 소유권 확보 — 동시 codex worker 가 건드릴 수 없음)
-          // 2) claim 읽어 tmp 로 write
-          // 3) tmp → codexConfig 로 atomic rename
-          // 4) claim 삭제
-          // 중간 실패 시 claim 을 orphan 경로로 되돌려 수동 복구 가능하게 한다.
+          // 동시 codex worker 간섭을 막기 위해 orphan을 claim으로 먼저 선점한 뒤 tmp에 써서 atomic rename한다.
+          // 중간 실패 시 claim을 orphan 경로로 되돌려 수동 복구할 수 있게 한다.
           const claimPath = `${orphanBackup}.doctor-claim-${process.pid}`;
           const tmpPath = `${codexConfig}.doctor-tmp-${process.pid}`;
           try {
@@ -2991,16 +2951,14 @@ async function cmdDoctor(options = {}) {
               try {
                 renameSync(claimPath, orphanBackup);
               } catch {
-                // claim 롤백 실패 — claim 그대로 남음. 경로 알려줌.
+                // claim 롤백이 실패해 경로를 그대로 남기고 사용자에게 알린다.
                 info(
                   `claim 경로 보존: ${claimPath} (수동으로 ${orphanBackup} 로 이동 가능)`,
                 );
               }
               try {
                 unlinkSync(tmpPath);
-              } catch {
-                // tmp 가 아직 안 만들어진 경우 무시
-              }
+              } catch {}
               issues++;
             }
           }
@@ -3017,7 +2975,6 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // ── Route Script 정합성 ──
     section("Route Script Sync");
     {
       const srcRoute = join(PKG_ROOT, "scripts", "tfx-route.sh");
@@ -3113,7 +3070,6 @@ async function cmdDoctor(options = {}) {
       }
     }
 
-    // 결과
     console.log(`\n  ${LINE}`);
     if (issues === 0) {
       console.log(`  ${GREEN_BRIGHT}${BOLD}✓ 모든 검사 통과${RESET}\n`);
@@ -3205,12 +3161,10 @@ async function cmdUpdate(args = []) {
       if (!report.to) throw new Error("레지스트리 버전 응답이 비어 있음");
       report.alreadyInGoalState = report.from === report.to;
     } else {
-      // 1. 설치 방식 감지
       const pluginsFile = join(CLAUDE_DIR, "plugins", "installed_plugins.json");
       let installMode = "unknown";
       let pluginPath = null;
 
-      // 플러그인 모드 감지
       if (existsSync(pluginsFile)) {
         try {
           const entry = findTrifluxPluginEntry(
@@ -3223,7 +3177,6 @@ async function cmdUpdate(args = []) {
         } catch {}
       }
 
-      // PKG_ROOT가 플러그인 캐시 내에 있으면 플러그인 모드
       if (
         installMode === "unknown" &&
         PKG_ROOT.includes(join(".claude", "plugins"))
@@ -3232,7 +3185,6 @@ async function cmdUpdate(args = []) {
         pluginPath = PKG_ROOT;
       }
 
-      // npm global 감지
       if (installMode === "unknown") {
         try {
           const npmList = execSync("npm list -g triflux --depth=0", {
@@ -3245,13 +3197,11 @@ async function cmdUpdate(args = []) {
         } catch {}
       }
 
-      // npm local 감지
       if (installMode === "unknown") {
         const localPkg = join(process.cwd(), "node_modules", "triflux");
         if (existsSync(localPkg)) installMode = "npm-local";
       }
 
-      // git 저장소 직접 사용
       if (installMode === "unknown" && existsSync(join(PKG_ROOT, ".git"))) {
         installMode = "git-local";
       }
@@ -3554,8 +3504,6 @@ function cmdHelp() {
   ${GRAY}github.com/tellang/triflux${RESET}
 `);
 }
-
-// ── 메인 ──
 
 // tfx-harness 의 SSOT 탐색과 같은 순서다. linked worktree 의 브랜치 사본보다 메인 clone 을 먼저 본다.
 function resolveRoutingSsot(cwd = process.cwd()) {

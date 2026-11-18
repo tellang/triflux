@@ -1,7 +1,3 @@
-// ============================================================================
-// 유틸리티 함수
-// ============================================================================
-
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -30,7 +26,6 @@ export async function readStdinJson() {
         return null;
       }
     };
-    // 200ms 안에 다 못 받으면 받은 만큼으로 판정한다.
     const timeout = setTimeout(() => finish(tryParse() ?? {}), 200);
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (chunk) => {
@@ -58,12 +53,9 @@ export function writeJsonSafe(filePath, data) {
   try {
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, JSON.stringify(data), { mode: 0o600 });
-  } catch {
-    /* 쓰기 실패 무시 */
-  }
+  } catch {}
 }
 
-// .omc/ → .claude/cache/ 마이그레이션: 새 경로 우선, 없으면 레거시 읽고 복사
 // 갱신 프로세스를 겹쳐 띄우지 않는 락. 만료 시각을 적고, 남은 시간이 ttl 보다 길면(시계가 뒤로 감) 깨진 락으로 본다.
 // 예전 { t } 락도 읽는다.
 export function acquireSpawnLock(lockPath, ttlMs, now = Date.now()) {
@@ -76,7 +68,6 @@ export function acquireSpawnLock(lockPath, ttlMs, now = Date.now()) {
   return true;
 }
 
-// Retry-After 헤더(초 또는 HTTP 날짜)를 ms 로 바꾼다. 없거나 지난 값이면 null.
 export function parseRetryAfterMs(value, now = Date.now()) {
   if (value == null || value === "") return null;
   const seconds = Number(value);
@@ -123,10 +114,6 @@ export function fitText(text, width) {
   return `${t.slice(0, width - 1)}…`;
 }
 
-/**
- * ANSI 이스케이프 시퀀스를 보존하면서 visible width 기준으로 truncate.
- * maxWidth 초과 시 잘라내고 RESET(\x1b[0m)을 추가한다.
- */
 export function truncateAnsi(text, maxWidth) {
   if (maxWidth <= 0) return "";
   const str = String(text);
@@ -212,7 +199,6 @@ export function formatTokenCount(n) {
   return String(n);
 }
 
-// 과거 리셋 시간 → 다음 주기로 순환하여 미래 시점 반환
 // elapsed가 cycleMs의 정수배일 때 ceil은 target=now를 반환해 diff=0이 되므로
 // floor+1로 항상 다음 사이클을 가리키도록 한다.
 export function advanceToNextCycle(epochMs, cycleMs) {
@@ -261,7 +247,6 @@ export function formatResetRemainingDayHour(isoOrUnix, cycleMs = 0) {
   return `${String(days).padStart(2, "0")}d${String(hours).padStart(2, "0")}h`;
 }
 
-// JWT base64 디코딩 공통 헬퍼
 export function decodeJwtEmail(idToken) {
   if (!idToken) return null;
   const parts = idToken.split(".");
@@ -278,7 +263,6 @@ export function decodeJwtEmail(idToken) {
   }
 }
 
-// HTTPS POST (타임아웃 포함) — https 모듈은 호출자가 주입
 export function createHttpsPost(https, timeoutMs) {
   return function httpsPost(url, body, accessToken) {
     return new Promise((resolve) => {
