@@ -1,10 +1,4 @@
 #!/usr/bin/env node
-// scripts/config-audit.mjs — 설정 정적 보안/성능 감사
-//
-// triflux doctor --audit 또는 단독 실행.
-// settings.json, CLAUDE.md, MCP, 훅 설정을 스캔하여 위험/성능 이슈 탐지.
-//
-// 출력: JSON (--json) 또는 마크다운 테이블
 
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -14,14 +8,12 @@ const HOME = homedir();
 const CLAUDE_DIR = join(HOME, ".claude");
 const JSON_OUTPUT = process.argv.includes("--json");
 
-// ── 결과 수집 ──
 const findings = [];
 
 function addFinding(category, severity, message, detail = "") {
   findings.push({ category, severity, message, detail });
 }
 
-// ── 1. settings.json 감사 ──
 function auditSettings() {
   const settingsPath = join(CLAUDE_DIR, "settings.json");
   if (!existsSync(settingsPath)) {
@@ -37,7 +29,6 @@ function auditSettings() {
     return;
   }
 
-  // 권한 모드
   const mode = settings.permissions?.defaultMode;
   if (mode === "bypassPermissions" || mode === "acceptEdits") {
     addFinding(
@@ -48,7 +39,6 @@ function auditSettings() {
     );
   }
 
-  // 환경 변수 내 시크릿 패턴
   const env = settings.env || {};
   const SECRET_PATTERNS = [
     /(?:api[_-]?key|secret|token|password|credential)s?\s*[:=]/i,
@@ -70,7 +60,6 @@ function auditSettings() {
     }
   }
 
-  // 훅 timeout 검사
   const hooks = settings.hooks || {};
   let totalHooks = 0;
   for (const [event, matchers] of Object.entries(hooks)) {
@@ -98,7 +87,6 @@ function auditSettings() {
   }
 }
 
-// ── 2. CLAUDE.md 시크릿 스캔 ──
 function auditClaudeMd() {
   const candidates = [
     join(process.cwd(), "CLAUDE.md"),
@@ -135,7 +123,6 @@ function auditClaudeMd() {
       }
     }
 
-    // 길이 경고
     const tokenEstimate = Math.ceil(Buffer.byteLength(content, "utf8") / 4);
     if (tokenEstimate > 3000) {
       addFinding(
@@ -148,7 +135,6 @@ function auditClaudeMd() {
   }
 }
 
-// ── 3. MCP 설정 감사 ──
 function auditMcp() {
   const mcpPaths = [
     join(CLAUDE_DIR, "mcp_servers.json"),
@@ -178,7 +164,6 @@ function auditMcp() {
         stdioCount++;
       }
 
-      // 위험 패턴: 쉘 실행, eval, 알 수 없는 npx 패키지
       const cmd = String(def.command || "");
       if (/\beval\b|\bexec\b.*sh\b|\bcurl\b.*\|\s*(?:bash|sh)\b/i.test(cmd)) {
         addFinding(
@@ -209,12 +194,10 @@ function auditMcp() {
   }
 }
 
-// ── 실행 ──
 auditSettings();
 auditClaudeMd();
 auditMcp();
 
-// ── 출력 ──
 const summary = {
   total: findings.length,
   critical: findings.filter((f) => f.severity === "critical").length,

@@ -99,7 +99,7 @@ export function readWindowsAcls(files, options) {
 
 export function assertWindowsAcl(acl, kind, { privateMode = true } = {}) {
   const trusted = new Set([acl?.userSid, "S-1-5-18", "S-1-5-32-544"]);
-  // 개별 쓰기·삭제·ACL 변경과 generic write/all을 함께 거른다.
+  // 개별 쓰기, 삭제, ACL 변경과 generic write/all을 함께 거른다.
   const writes =
     0x2 |
     0x4 |

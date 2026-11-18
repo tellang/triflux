@@ -1,6 +1,3 @@
-// Remote session primitives.
-// Pure functions + SSH operations. No psmux, no WT, no CLI arg parsing.
-
 import { execFileSync, execSync } from "node:child_process";
 import {
   chmodSync,
@@ -63,8 +60,6 @@ export function buildSshOptions({
   return options;
 }
 
-// ── Shell quoting utilities ─────────────────────────────────────
-
 export function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
@@ -94,16 +89,12 @@ function normalizeCommandPath(value) {
   return String(value).replace(/\\/g, "/");
 }
 
-// ── Validation ──────────────────────────────────────────────────
-
 export function validateHost(host) {
   if (!host || !SAFE_HOST_RE.test(host)) {
     throw new Error(`invalid host name: ${host}`);
   }
   return host;
 }
-
-// ── Remote environment probe ────────────────────────────────────
 
 function parseProbeLines(text) {
   return Object.fromEntries(
@@ -163,7 +154,7 @@ export function compareVersions(a, b) {
 export function probeVersion(binPath) {
   try {
     if (/\.(cmd|bat)$/iu.test(binPath)) {
-      // .cmd/.bat → execSync로 shell 경유 (execFileSync EINVAL 회피)
+      // .cmd/.bat 은 execFileSync EINVAL 회피를 위해 execSync로 셸을 경유한다.
       const out = execSync(`"${binPath}" --version`, {
         encoding: "utf8",
         timeout: 3000,
@@ -372,16 +363,6 @@ function writeEnvCache(host, env, cacheDir) {
   );
 }
 
-/**
- * Probe remote host environment (OS, shell, Claude path, home dir).
- * Results are cached for 24h.
- *
- * @param {string} host — SSH host
- * @param {object} [opts]
- * @param {boolean} [opts.force=false] — bypass cache
- * @param {string} [opts.cacheDir]: cache directory (default: remoteEnvCacheDir())
- * @returns {Readonly<RemoteEnv>}
- */
 export function probeRemoteEnv(host, opts = {}) {
   validateHost(host);
   const force = opts.force === true;
@@ -420,20 +401,10 @@ export function probeRemoteEnv(host, opts = {}) {
   throw new Error(`remote probe failed for ${host}`);
 }
 
-// ── Remote directory resolution ─────────────────────────────────
-
 function isWindowsAbsolutePath(value) {
   return /^[a-zA-Z]:[\\/]/u.test(value) || value.startsWith("\\\\");
 }
 
-/**
- * Resolve a directory path on a remote host.
- * Handles ~ expansion and OS-specific path normalization.
- *
- * @param {string} dir — requested directory (or empty for home)
- * @param {RemoteEnv} env
- * @returns {string}
- */
 export function resolveRemoteDir(dir, env) {
   const requestedDir = dir || env.home;
 
@@ -453,24 +424,10 @@ export function resolveRemoteDir(dir, env) {
   return posixPath.join(env.home, requestedDir);
 }
 
-// ── Remote file staging ─────────────────────────────────────────
-
-/**
- * Resolve the remote staging directory path.
- * @param {RemoteEnv} env
- * @param {string} stageId
- * @returns {string}
- */
 export function resolveRemoteStageDir(env, stageId) {
   return `${normalizeCommandPath(env.home)}/${REMOTE_STAGE_ROOT}/${stageId}`;
 }
 
-/**
- * Ensure the remote staging directory exists via SSH.
- * @param {string} host
- * @param {RemoteEnv} env
- * @param {string} remoteStageDir
- */
 export function ensureRemoteStageDir(host, env, remoteStageDir) {
   const command =
     env.os === "win32"
@@ -484,12 +441,6 @@ export function ensureRemoteStageDir(host, env, remoteStageDir) {
   });
 }
 
-/**
- * Upload a file to remote host via scp.
- * @param {string} host
- * @param {string} localPath
- * @param {string} remotePath
- */
 export function uploadFileToRemote(host, localPath, remotePath) {
   execFileSync(
     "scp",
@@ -501,15 +452,6 @@ export function uploadFileToRemote(host, localPath, remotePath) {
   );
 }
 
-/**
- * Stage local files on a remote host for prompt delivery.
- *
- * @param {string} host
- * @param {RemoteEnv} env
- * @param {Array<{ localPath: string }>} transferCandidates
- * @param {string} stageId
- * @returns {{ remoteStageDir: string|null, stagedFiles: Array<{ localPath: string, remotePath: string }> }}
- */
 export function stageRemotePromptFiles(host, env, transferCandidates, stageId) {
   if (!transferCandidates || transferCandidates.length === 0) {
     return { remoteStageDir: null, stagedFiles: [] };
@@ -532,15 +474,6 @@ export function stageRemotePromptFiles(host, env, transferCandidates, stageId) {
   return { remoteStageDir, stagedFiles };
 }
 
-/**
- * Execute a git command on a remote host via SSH.
- *
- * @param {string} host
- * @param {RemoteEnv} env
- * @param {string[]} gitArgs — git subcommand + args
- * @param {string} cwd — remote working directory
- * @returns {string} stdout
- */
 export function remoteGit(host, env, gitArgs, cwd) {
   const command =
     env.os === "win32"

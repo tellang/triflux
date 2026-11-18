@@ -1,22 +1,11 @@
-// hub/workers/lib/jsonrpc-core.mjs
-// Shared JSON-RPC request/notification dispatch core for transport clients.
-
-/**
- * Thrown when the peer emits a malformed JSON-RPC frame.
- */
 export class JsonRpcProtocolError extends Error {
-  /** @param {string} message @param {{ cause?: unknown }} [options] */
   constructor(message, options = {}) {
     super(message, { cause: options.cause });
     this.name = "JsonRpcProtocolError";
   }
 }
 
-/**
- * Thrown when the underlying stream closes unexpectedly.
- */
 export class JsonRpcTransportError extends Error {
-  /** @param {string} message @param {{ cause?: unknown }} [options] */
   constructor(message, options = {}) {
     super(message, { cause: options.cause });
     this.name = "JsonRpcTransportError";
@@ -24,39 +13,22 @@ export class JsonRpcTransportError extends Error {
 }
 
 export class JsonRpcDispatchBase {
-  /**
-   * @param {object} options
-   * @param {(err: Error) => void} [options.onError] Protocol error sink.
-   * @param {string} options.closedMessage Error message for closed requests.
-   */
   constructor({ onError, closedMessage }) {
     this._onError = typeof onError === "function" ? onError : null;
     this._closedMessage = closedMessage;
-    /** @type {'idle'|'running'|'closing'|'closed'} */
     this._state = "closed";
     this._nextRequestId = 1;
-    /** @type {Map<number, { resolve: Function, reject: Function, timer: any, method: string }>} */
     this._pendingRequests = new Map();
-    /** @type {Map<string, Set<Function>>} */
     this._notificationHandlers = new Map();
   }
 
-  /**
-   * Issue a JSON-RPC request and resolve with the server's `result`.
-   * Rejects on error response, timeout, malformed payload, or close().
-   * @param {string} method
-   * @param {unknown} params
-   * @param {number} [timeoutMs=60000]
-   * @returns {Promise<any>}
-   */
   request(method, params, timeoutMs = 60000) {
     if (this._state !== "running") {
       return Promise.reject(new Error(this._closedMessage));
     }
 
     const id = this._nextRequestId++;
-    // P1 #1 wire framing: omit `jsonrpc: "2.0"` on outbound. Peer decode remains
-    // lenient (OpenAI App Server JSONL variant spec).
+    // 송신 프레임은 OpenAI App Server JSONL 변형 규격에 맞춰 jsonrpc 헤더를 생략한다.
     const frame = { id, method };
     if (params !== undefined) frame.params = params;
 
@@ -87,15 +59,9 @@ export class JsonRpcDispatchBase {
     });
   }
 
-  /**
-   * Send a JSON-RPC notification (no id, no response expected).
-   * Silently drops if the client is not in `running`.
-   * @param {string} method
-   * @param {unknown} [params]
-   */
   notify(method, params) {
     if (this._state !== "running") return;
-    // P1 #1 wire framing: omit jsonrpc header (outbound).
+    // 송신 프레임은 jsonrpc 헤더를 생략한다.
     const frame = { method };
     if (params !== undefined) frame.params = params;
     try {
@@ -105,13 +71,6 @@ export class JsonRpcDispatchBase {
     }
   }
 
-  /**
-   * Subscribe to inbound notifications. Use `"*"` for a catch-all handler
-   * which receives `(params, method)`. Targeted handlers receive `(params)`.
-   * @param {string} method
-   * @param {(params: any, method?: string) => void} callback
-   * @returns {() => void} unsubscribe
-   */
   onNotification(method, callback) {
     if (typeof callback !== "function") {
       throw new TypeError("onNotification requires a callback function");
@@ -130,11 +89,7 @@ export class JsonRpcDispatchBase {
     };
   }
 
-  /**
-   * Close the client. `reason === "closing"` transitions to an intermediate
-   * graceful state where a subsequent EOF is treated as normal. Idempotent.
-   * @param {string} [reason]
-   */
+  // reason === "closing" 이면 후속 EOF를 정상 종료로 취급하는 중간 상태로 전이한다.
   close(reason) {
     if (this._state === "closed") return;
 
@@ -146,16 +101,10 @@ export class JsonRpcDispatchBase {
     this._closeWith("closed");
   }
 
-  /**
-   * @returns {boolean} True if the client accepts new requests.
-   */
   isOpen() {
     return this._state === "running";
   }
 
-  /**
-   * @returns {'idle'|'running'|'closing'|'closed'}
-   */
   getState() {
     return this._state;
   }

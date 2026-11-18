@@ -2,7 +2,7 @@
 
 > 상태: Draft (v9.x 로드맵)
 > 작성일: 2026-03-26
-> 관련 코드: `hub/team/headless.mjs`, `hub/team/psmux.mjs`, `hub/team/cli/`, `hub/team/tui-viewer.mjs`
+> 관련 코드: `hub/team/headless.mjs`, `hub/team/psmux.mjs`, `hub/team/cli/`
 > 관련 외부: OMC team skill (oh-my-claudecode Native Team 오케스트레이션)
 
 ---
@@ -36,7 +36,6 @@ headless.mjs는 **의미론(팀 오케스트레이션)과 인프라(psmux 터미
 | **인프라** | `applyTrifluxTheme()` | psmux status bar, 색상 테마 |
 | **인프라** | `ensureWtProfile()` | WT settings.json 프로필 관리 |
 | **인프라** | `autoAttachTerminal()` | WT split-pane attach |
-| **인프라** | `attachDashboardTab()` | WT + tui-viewer 실행 |
 | **혼합** | `runHeadless()` | 세션 생성 → dispatch → 대기 → 결과 수집 |
 | **혼합** | `runHeadlessInteractive()` | interactive handle (dispatch/capture/kill) |
 
@@ -87,7 +86,7 @@ OMC(oh-my-claudecode) team skill은 **의미론적 오케스트레이션** 계�
 
 1. **관심사 혼합**: headless.mjs가 "어떤 CLI를 실행할지(의미론)"와 "psmux를 어떻게 제어할지(인프라)"를 동시에 담당
 2. **모드별 코드 중복**: `start-headless.mjs`와 `start-in-process.mjs`가 assignment 빌드, 결과 수집, handoff 처리를 각각 구현
-3. **WT 로직 침투**: headless.mjs 안에 `ensureWtProfile()`, `autoAttachTerminal()`, `attachDashboardTab()` 등 WT 전용 로직이 포함
+3. **WT 로직 침투**: headless.mjs 안에 `ensureWtProfile()`, `autoAttachTerminal()` 등 WT 전용 로직이 포함
 4. **테스트 어려움**: 의미론 테스트를 위해 psmux가 설치되어야 하고, 인프라 테스트를 위해 CLI가 있어야 함
 5. **확장 제약**: 새 터미널 백엔드(예: SSH 원격, Docker exec) 추가 시 headless.mjs 전체를 수정해야 함
 6. **복구 책임 모호**: 인프라 에러(쿼타, CLI 크래시)와 의미론 에러(잘못된 결과, 불완전 작업)의 복구 주체가 불분명

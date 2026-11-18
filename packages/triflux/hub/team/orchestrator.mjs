@@ -1,21 +1,12 @@
-// hub/team/orchestrator.mjs — 작업 분배 + 프롬프트 구성
-// 의존성: pane.mjs만 사용
 import { readQuotaSnapshot } from "../../scripts/lib/quota-snapshot.mjs";
 import { reconcileCandidatesWithJev } from "../../scripts/lib/vendor-priority-policy.mjs";
 import { judgeTaskAssignment } from "../lib/jev-addon.mjs";
 import { injectPrompt as defaultInjectPrompt } from "./pane.mjs";
 
-/**
- * 작업 분해 (LLM 없이 구분자 기반)
- * @param {string} taskDescription — 전체 작업 설명
- * @param {number} agentCount — 에이전트 수
- * @returns {string[]} 각 에이전트의 서브태스크
- */
 export function decomposeTask(taskDescription, agentCount) {
   if (agentCount <= 0) return [];
   if (agentCount === 1) return [taskDescription];
 
-  // '+', ',', '\n' 기준으로 분리
   const parts = taskDescription
     .split(/[+,\n]+/)
     .map((s) => s.trim())
@@ -23,7 +14,6 @@ export function decomposeTask(taskDescription, agentCount) {
 
   if (parts.length === 0) return [taskDescription];
 
-  // 에이전트보다 서브태스크가 적으면 마지막 에이전트에 전체 태스크 부여
   if (parts.length < agentCount) {
     const result = [...parts];
     while (result.length < agentCount) {
@@ -32,7 +22,6 @@ export function decomposeTask(taskDescription, agentCount) {
     return result;
   }
 
-  // 에이전트보다 서브태스크가 많으면 앞에서부터 N개, 나머지는 마지막에 합침
   if (parts.length > agentCount) {
     const result = parts.slice(0, agentCount - 1);
     result.push(parts.slice(agentCount - 1).join(" + "));
@@ -166,15 +155,6 @@ export async function assignTasksWithJev(
   });
 }
 
-/**
- * 리드(보통 claude) 초기 프롬프트 생성
- * @param {string} taskDescription
- * @param {object} config
- * @param {string} config.agentId
- * @param {string} config.teammateMode
- * @param {Array<{agentId:string, cli:string, subtask:string}>} config.workers
- * @returns {string}
- */
 export function buildLeadPrompt(taskDescription, config) {
   const { agentId, teammateMode = "tmux", workers = [] } = config;
 
@@ -203,14 +183,6 @@ ${roster}
 지금 즉시 워커를 배정하고 병렬 진행을 관리하라.`;
 }
 
-/**
- * 워커 초기 프롬프트 생성
- * @param {string} subtask: 이 에이전트의 서브태스크
- * @param {object} config
- * @param {string} config.cli: codex/gemini/claude
- * @param {string} config.agentId: 에이전트 식별자
- * @returns {string}
- */
 export function buildPrompt(subtask, config) {
   const { cli, agentId } = config;
 
@@ -224,16 +196,6 @@ export function buildPrompt(subtask, config) {
 지금 작업을 시작하라.`;
 }
 
-/**
- * 팀 오케스트레이션 실행 — 각 pane에 프롬프트 주입
- * @param {string} sessionName — tmux 세션 이름
- * @param {Array<{target: string, cli: string, subtask: string}>} assignments
- * @param {object} opts
- * @param {{target:string, cli:string, task:string}|null} opts.lead
- * @param {string} opts.teammateMode
- * @param {(failure: {target:string, cli:string, role:string, message:string}) => void} [opts.onInjectionFailure]
- * @returns {Promise<Array<{target:string, cli:string, role:string, message:string}>>}
- */
 export async function orchestrate(sessionName, assignments, opts = {}) {
   const {
     lead = null,
@@ -254,7 +216,7 @@ export async function orchestrate(sessionName, assignments, opts = {}) {
     try {
       onInjectionFailure?.(failure);
     } catch {
-      // reporting failure must not stop the remaining pane injections
+      // 실패 보고가 나머지 pane 주입을 멈추면 안 된다.
     }
   }
 

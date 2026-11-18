@@ -1,4 +1,3 @@
-// tmux/psmux 세션 생명주기 관리
 import { execFileSync, spawnSync } from "node:child_process";
 import { resolveGitBashExecutable } from "../lib/bash-path.mjs";
 import { getEnvironment } from "../lib/env-detect.mjs";
@@ -17,17 +16,14 @@ import {
   tokenizeCommand,
 } from "./psmux.mjs";
 
-/** Windows Terminal 실행 파일 존재 여부 */
 export function hasWindowsTerminal() {
   return !!getEnvironment().terminal.hasWt;
 }
 
-/** 현재 프로세스가 Windows Terminal 내에서 실행 중인지 여부 */
 export function hasWindowsTerminalSession() {
   return process.platform === "win32" && !!process.env.WT_SESSION;
 }
 
-/** tmux 실행 가능 여부 확인 */
 function hasTmux() {
   try {
     execFileSync("tmux", ["-V"], {
@@ -41,7 +37,6 @@ function hasTmux() {
   }
 }
 
-/** Git Bash 내 tmux 사용 가능 여부 (Windows 전용) */
 function hasGitBashTmux() {
   const bash = resolveGitBashExecutable();
   if (!bash) return false;
@@ -67,10 +62,7 @@ function isPsmuxCommandName(command) {
   return name === "psmux" || name === "psmux.exe" || name === "psmux.cmd";
 }
 
-/**
- * 터미널 멀티플렉서 감지 (결과 캐싱 — 프로세스 수명 동안 불변)
- * @returns {'tmux'|'git-bash-tmux'|'psmux'|null}
- */
+// 프로세스 수명 동안 불변이므로 결과를 캐싱한다.
 let _cachedMux;
 export function detectMultiplexer() {
   if (_cachedMux !== undefined) return _cachedMux;
@@ -111,12 +103,6 @@ function bashArg(value) {
     : `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-/**
- * tmux/psmux 커맨드 실행
- * @param {string[]|string} args: tmux 서브커맨드 + 인자. 문자열은 psmux 와 같은 규칙으로 쪼갠다.
- * @param {object} opts: execFileSync 옵션
- * @returns {string} stdout
- */
 function tmux(args, opts = {}) {
   const mux = detectMultiplexer();
   if (!mux) {
@@ -165,21 +151,10 @@ function tmux(args, opts = {}) {
   return result != null ? result.trim() : "";
 }
 
-/**
- * tmux 명령 직접 실행 (고수준 모듈에서 재사용)
- * @param {string[]|string} args
- * @param {object} opts
- * @returns {string}
- */
 export function tmuxExec(args, opts = {}) {
   return tmux(args, opts);
 }
 
-/**
- * 현재 멀티플렉서 환경에 맞는 attach 실행 스펙 반환
- * @param {string} sessionName
- * @returns {{ command: string, args: string[] }}
- */
 export function resolveAttachCommand(sessionName, opts = {}) {
   const mux = opts.mux || detectMultiplexer();
   if (!mux) {
@@ -208,19 +183,10 @@ export function resolveAttachCommand(sessionName, opts = {}) {
   };
 }
 
-/**
- * tmux 세션 생성 + 레이아웃 분할
- * @param {string} sessionName — 세션 이름
- * @param {object} opts
- * @param {'2x2'|'1xN'|'Nx1'} opts.layout — 레이아웃 (기본 2x2)
- * @param {number} opts.paneCount — pane 수 (기본 4)
- * @returns {{ sessionName: string, panes: string[] }}
- */
 export function createSession(sessionName, opts = {}) {
   const { layout = "2x2", paneCount = 4 } = opts;
   const mux = detectMultiplexer();
 
-  // 기존 세션 정리
   if (sessionExists(sessionName)) {
     killSession(sessionName);
   }
@@ -229,26 +195,21 @@ export function createSession(sessionName, opts = {}) {
     return createPsmuxSession(sessionName, { layout, paneCount });
   }
 
-  // 새 세션 생성 (detached)
   tmux(["new-session", "-d", "-s", sessionName, "-x", "220", "-y", "55"]);
 
   const panes = [`${sessionName}:0.0`];
 
   if (layout === "2x2" && paneCount >= 3) {
-    // 3-pane 기본: lead 왼쪽, workers 오른쪽 상/하
-    // 4-pane: 좌/우 각각 상/하(균등 2x2)
     tmux(["split-window", "-h", "-t", `${sessionName}:0.0`]);
     tmux(["split-window", "-v", "-t", `${sessionName}:0.1`]);
     if (paneCount >= 4) {
       tmux(["split-window", "-v", "-t", `${sessionName}:0.0`]);
     }
-    // pane ID 재수집
     panes.length = 0;
     for (let i = 0; i < Math.min(paneCount, 4); i++) {
       panes.push(`${sessionName}:0.${i}`);
     }
   } else if (layout === "1xN") {
-    // 세로 분할(좌/우 컬럼 확장)
     for (let i = 1; i < paneCount; i++) {
       tmux(["split-window", "-h", "-t", `${sessionName}:0`]);
     }
@@ -258,7 +219,6 @@ export function createSession(sessionName, opts = {}) {
       panes.push(`${sessionName}:0.${i}`);
     }
   } else {
-    // Nx1 가로 분할(상/하 스택)
     for (let i = 1; i < paneCount; i++) {
       tmux(["split-window", "-v", "-t", `${sessionName}:0`]);
     }
@@ -272,12 +232,6 @@ export function createSession(sessionName, opts = {}) {
   return { sessionName, panes };
 }
 
-/**
- * pane 포커스 이동
- * @param {string} target
- * @param {object} opts
- * @param {boolean} opts.zoom
- */
 export function focusPane(target, opts = {}) {
   const { zoom = false } = opts;
   tmux(["select-pane", "-t", target]);
@@ -288,19 +242,6 @@ export function focusPane(target, opts = {}) {
   }
 }
 
-/**
- * 팀메이트 조작 키 바인딩 설정
- * - Shift+Down: 다음 팀메이트
- * - Shift+Up: 이전 팀메이트
- * - Shift+Left / Shift+Tab: 이전 팀메이트 대체 키
- * - Shift+Right: 다음 팀메이트 대체 키
- * - Escape: 현재 팀메이트 인터럽트(C-c)
- * - Ctrl+T: 태스크 목록 표시
- * @param {string} sessionName
- * @param {object} opts
- * @param {boolean} opts.inProcess
- * @param {string} opts.taskListCommand
- */
 export function configureTeammateKeybindings(sessionName, opts = {}) {
   if (detectMultiplexer() === "psmux") {
     configurePsmuxKeybindings(sessionName, opts);
@@ -358,10 +299,6 @@ export function configureTeammateKeybindings(sessionName, opts = {}) {
   }
 }
 
-/**
- * tmux 세션 연결 (포그라운드 전환)
- * @param {string} sessionName
- */
 export function attachSession(sessionName) {
   if (!process.stdout.isTTY || !process.stdin.isTTY) {
     throw new Error("현재 터미널은 tmux attach를 지원하지 않음 (non-TTY)");
@@ -382,20 +319,8 @@ export function attachSession(sessionName) {
   }
 }
 
-/**
- * non-TTY 환경용 attach fallback: 요청 프로세스가 명시적으로 넘긴 lead pane을
- * 분할해 그 pane 안에서 대상 세션에 attach한다.
- *
- * 호출 프로세스가 pipe(non-TTY)로 실행돼 attachSession()이 불가능해도,
- * tmux 서버에 보내는 split-window는 호출자 TTY가 필요 없다. 새 pane에는
- * tmux가 실제 pty를 붙여주므로 그 안의 attach는 정상 동작한다.
- * env -u TMUX는 nested-attach 보호 해제용이다.
- *
- * @param {string} sessionName attach할 대상 세션
- * @param {string} targetPane 요청 lead의 `$TMUX_PANE` (`%N`)
- * @param {string} tmuxEnv 요청 lead의 `$TMUX` (`socket,pid,index`)
- * @returns {boolean} 분할 attach 성공 여부 (false면 호출자가 기존 생략 경로 유지)
- */
+// 호출 프로세스가 non-TTY여도 tmux split-window로 새 pty를 붙여 attach할 수 있다.
+// env -u TMUX는 중첩 attach 보호 해제용이다.
 export function buildSplitAttachArgs(sessionName, targetPane, tmuxEnv) {
   const normalizedSessionName = String(sessionName || "");
   if (!normalizedSessionName.trim()) {
@@ -439,11 +364,6 @@ export function splitAttachToClient(sessionName, opts = {}) {
   return (split.status ?? 1) === 0;
 }
 
-/**
- * tmux 세션 존재 확인
- * @param {string} sessionName
- * @returns {boolean}
- */
 export function sessionExists(sessionName) {
   if (detectMultiplexer() === "psmux") {
     return psmuxSessionExists(sessionName);
@@ -458,10 +378,6 @@ export function sessionExists(sessionName) {
   }
 }
 
-/**
- * tmux 세션 종료
- * @param {string} sessionName
- */
 export function killSession(sessionName) {
   if (detectMultiplexer() === "psmux") {
     killPsmuxSession(sessionName);
@@ -470,15 +386,9 @@ export function killSession(sessionName) {
 
   try {
     tmux(["kill-session", "-t", `=${sessionName}`], { stdio: "ignore" });
-  } catch {
-    // 이미 종료된 세션 — 무시
-  }
+  } catch {}
 }
 
-/**
- * tfx-multi- 접두사 세션 목록
- * @returns {string[]}
- */
 export function listSessions() {
   if (detectMultiplexer() === "psmux") {
     return listPsmuxSessions();
@@ -492,11 +402,6 @@ export function listSessions() {
   }
 }
 
-/**
- * 세션 attach client 수 조회
- * @param {string} sessionName
- * @returns {number|null}
- */
 export function getSessionAttachedCount(sessionName) {
   if (detectMultiplexer() === "psmux") {
     return getPsmuxSessionAttachedCount(sessionName);
@@ -519,19 +424,13 @@ export function getSessionAttachedCount(sessionName) {
   }
 }
 
-/**
- * pane 마지막 N줄 캡처
- * @param {string} target — 예: tfx-multi-abc:0.1
- * @param {number} lines — 캡처할 줄 수 (기본 5)
- * @returns {string}
- */
 export function capturePaneOutput(target, lines = 5) {
   if (detectMultiplexer() === "psmux") {
     return capturePsmuxPane(target, lines);
   }
 
   try {
-    // -l 플래그는 일부 tmux 빌드(MSYS2)에서 미지원 → 전체 캡처 후 JS에서 절삭
+    // -l 플래그는 일부 tmux 빌드(MSYS2)에서 미지원이라 전체 캡처 후 JS에서 자른다.
     const full = tmux(["capture-pane", "-t", target, "-p"]);
     const nonEmpty = full.split("\n").filter((l) => l.trim() !== "");
     return nonEmpty.slice(-lines).join("\n");

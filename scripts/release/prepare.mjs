@@ -67,15 +67,8 @@ export async function prepareRelease({
   const steps = [
     {
       name: "npm-test",
-      // F3 fix (issue #192 — silent EXIT 0 회귀 우회):
-      // npm wrapper 경유 시 prepare.mjs process 가 native level 에서 hard kill
-      // 됨 (process.on("exit") 핸들러 호출 안 됨, EXIT 0 silent, 후속 lint/pack
-      // step 누락). 2026-04-30 진단 세션에서 5 시나리오 reproduce 결과:
-      //   - npm wrapper 경유 + npm test 실행: silent EXIT 0 재현 (12-24s 비결정)
-      //   - 직접 node 실행 또는 npm test 단독: 정상 진행
-      //   - --skip-tests 우회: 정상 unhandled rejection (lint fail visible)
-      // 따라서 npm wrapper 한 단계 줄여 trigger 약화 (cmd.exe shim → npm-cli.js
-      // → spawn 3 layers 제거). package.json `scripts.test` 와 sync 유지 필수.
+      // npm wrapper 경유 시 prepare.mjs 프로세스가 EXIT 0 으로 조용히 강제 종료되는 회귀 우회 (#192 F3).
+      // node 로 직접 실행해 npm wrapper 단계를 줄이며, package.json scripts.test 와 동기화를 유지한다.
       command: process.execPath,
       args: [
         "scripts/test-lock.mjs",

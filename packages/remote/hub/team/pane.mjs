@@ -1,5 +1,3 @@
-// hub/team/pane.mjs — pane별 CLI 실행 + stdin 주입
-// 의존성: child_process, fs, os, path (Node.js 내장)만 사용
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -13,13 +11,11 @@ function getPsmuxSessionName(target) {
   return String(target).split(":")[0]?.trim() || "";
 }
 
-/** Windows 경로를 멀티플렉서용 경로로 변환 */
 function toMuxPath(p) {
   if (process.platform !== "win32") return p;
 
   const mux = detectMultiplexer();
 
-  // psmux는 Windows 네이티브 경로 그대로 사용
   if (mux === "psmux") return p;
 
   const normalized = p.replace(/\\/g, "/");
@@ -33,7 +29,6 @@ function toMuxPath(p) {
   return `/${drive}/${rest}`;
 }
 
-/** 멀티플렉서 커맨드 실행 (session.mjs와 동일 패턴) */
 function muxExec(args, opts = {}) {
   const exec = detectMultiplexer() === "psmux" ? psmuxExec : tmuxExec;
   return exec(args, {
@@ -53,11 +48,6 @@ export function resolveCli(cli) {
   return AGENT_TO_CLI[name] ?? name;
 }
 
-/**
- * CLI 에이전트 시작 커맨드 생성. 역할명과 별칭은 agent-map 으로 CLI 를 고른다.
- * @param {string} cli: CLI 이름, 별칭(agy) 또는 역할명
- * @returns {string} 실행할 셸 커맨드
- */
 export function buildCliCommand(cli, prompt) {
   if (["code-reviewer", "quality-reviewer"].includes(cli)) {
     // 작성 벤더 선택은 라우터에 맡기고 프롬프트가 준비된 뒤 실행한다.
@@ -100,36 +90,23 @@ export function buildCliCommand(cli, prompt) {
       // 실행 파일은 agy 다. antigravity 는 셸 별칭이라 비대화형 셸에 없다.
       return "agy";
     case "claude":
-      // interactive 모드
       return "claude";
     default:
-      return cli; // 커스텀 CLI 허용
+      return cli;
   }
 }
 
-/**
- * pane에 CLI 시작
- * @param {string} target — 예: tfx-multi-abc:0.1
- * @param {string} command — 실행할 커맨드
- */
 export function startCliInPane(target, command) {
   // CLI 시작도 buffer paste를 재사용해 셸/플랫폼별 quoting 차이를 제거한다.
   if (command) injectPrompt(target, command);
 }
 
-/**
- * psmux `@file` 참조 주입이 가능한 CLI인지 판정한다.
- *
- * Codex TUI의 @path는 파일 검색 팝업을 열어 Enter 제출을 가로막는다.
- * Gemini CLI의 파일 내용 주입은 유지한다.
- *
- * @param {{ multiplexer: string, useFileRef: boolean, cli: string|null }} args
- */
+// Codex TUI의 @path는 파일 검색 팝업을 열어 Enter 제출을 가로막는다.
 export function shouldUseFileRef({ multiplexer, useFileRef, cli }) {
   return multiplexer === "psmux" && useFileRef && resolveCli(cli) !== "codex";
 }
 
-/** 동기 sleep — injectPrompt는 sync 경로라 setTimeout을 쓸 수 없다 */
+// injectPrompt는 sync 경로라 setTimeout 대신 동기 sleep을 사용한다.
 function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -398,14 +375,6 @@ function confirmSubmit(target, prompt, cli, sendEnter) {
   });
 }
 
-/**
- * pane에 프롬프트 주입
- * @param {string} target — 예: tfx-multi-abc:0.1
- * @param {string} prompt — 주입할 텍스트
- * @param {object} [opts]
- * @param {boolean} [opts.useFileRef] — true면 TUI용 @file 참조 방식 요청 (psmux 전용). Codex에서는 자동으로 paste-buffer 경로로 fallback.
- * @param {'codex'|'antigravity'|'claude'|null} [opts.cli]: 대상 CLI. Codex일 때 @ intercept를 회피하기 위해 paste-buffer 경로를 강제한다.
- */
 export function injectPrompt(
   target,
   prompt,
@@ -468,7 +437,6 @@ export function injectPrompt(
       return;
     }
 
-    // tmux load-buffer → paste-buffer → (정착 지연 + 제출 확인) Enter
     waitForComposerReady(target, cli);
     muxExec(["load-buffer", toMuxPath(tmpFile)]);
     // -p 가 없으면 줄바꿈이 CR(Enter)로 들어가 여러 줄 지시문이 줄마다 제출된다.
@@ -483,11 +451,6 @@ export function injectPrompt(
   }
 }
 
-/**
- * pane에 키 입력 전송
- * @param {string} target — 예: tfx-multi-abc:0.1
- * @param {string} keys — tmux 키 표현 (예: 'C-c', 'Enter')
- */
 export function sendKeys(target, keys) {
   muxExec([
     "send-keys",

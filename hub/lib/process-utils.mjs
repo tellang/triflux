@@ -1,6 +1,3 @@
-// hub/lib/process-utils.mjs
-// 프로세스 관련 공유 유틸리티
-
 import { execSync, spawnSync } from "node:child_process";
 import {
   existsSync,
@@ -19,7 +16,7 @@ const CLEANUP_SCRIPT_DIR = join(tmpdir(), "tfx-process-utils");
 const SCAN_SCRIPT_PATH = join(CLEANUP_SCRIPT_DIR, "scan-processes.ps1");
 const TREE_SCRIPT_PATH = join(CLEANUP_SCRIPT_DIR, "get-ancestor-tree.ps1");
 
-// 스크립트 버전 — 내용 변경 시 증가하여 캐시된 스크립트를 갱신
+// 스크립트 내용 변경 시 버전을 올려 캐시된 스크립트를 갱신한다.
 const SCRIPT_VERSION = 4;
 const VERSION_FILE = join(CLEANUP_SCRIPT_DIR, ".version");
 const FSMONITOR_DAEMON_MARKER = "fsmonitor--daemon run --detach";
@@ -38,11 +35,7 @@ const LIVE_CLI_SESSION_ROOT_NAMES = new Set([
   "gemini.exe",
 ]);
 
-/**
- * 주어진 PID의 프로세스가 살아있는지 확인한다.
- * EPERM: 프로세스는 존재하지만 signal 권한 없음 → alive
- * ESRCH: 프로세스가 존재하지 않음 → dead
- */
+// EPERM은 프로세스는 있으나 signal 권한이 없는 상태이므로 alive로 본다.
 export function isPidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
 
@@ -56,13 +49,6 @@ export function isPidAlive(pid) {
   }
 }
 
-/**
- * 주어진 PID의 프로세스가 살아있는지 확인한다.
- * 숫자와 숫자 문자열 PID를 모두 허용하고, EPERM이면 살아 있는 것으로 본다.
- *
- * @param {number|string} pid
- * @returns {boolean}
- */
 export function isProcessAlive(pid) {
   const n = Number(pid);
   if (!Number.isInteger(n) || n <= 0) return false;
@@ -90,14 +76,10 @@ function realPathOf(path) {
   }
 }
 
-/**
- * PowerShell 헬퍼 스크립트를 임시 디렉토리에 생성한다.
- * bash의 $_ 이스케이핑 문제를 피하기 위해 -File로 실행.
- */
+// bash의 $_ 이스케이핑 문제를 피하기 위해 -File로 실행한다.
 function ensureHelperScripts() {
   mkdirSync(CLEANUP_SCRIPT_DIR, { recursive: true });
 
-  // 버전 체크 — 스크립트 갱신 필요 여부
   let needsUpdate = true;
   try {
     if (existsSync(VERSION_FILE)) {
@@ -110,7 +92,6 @@ function ensureHelperScripts() {
   } catch {}
 
   if (needsUpdate) {
-    // 기존 스크립트 삭제 후 재생성
     try {
       unlinkSync(SCAN_SCRIPT_PATH);
     } catch {}
@@ -138,9 +119,8 @@ function ensureHelperScripts() {
   }
 
   if (!existsSync(SCAN_SCRIPT_PATH)) {
-    // CLI + 쉘 + 런타임 전체를 스캔하여 PID,ParentPID,Name 출력
-    // codex/claude/pwsh/uvx 누락 시 중간 프로세스가 alive 판정되어 고아 트리 전체가 보호됨
-    // 예: WT(dead)→pwsh(alive,미스캔)→codex→cmd→node — pwsh에서 isPidAlive=true로 끊김
+    // codex/claude/pwsh/uvx가 빠지면 중간 셸이 alive로 판정돼 고아 트리 전체가 보호된다.
+    // 예: WT(dead) 아래 pwsh(alive, 미스캔), 그 아래 codex, cmd, node 순서면 pwsh에서 끊긴다.
     writeFileSync(
       SCAN_SCRIPT_PATH,
       [
@@ -158,14 +138,6 @@ function ensureHelperScripts() {
   }
 }
 
-/**
- * PID → 루트 조상까지의 체인에서 살아있는 조상이 있는지 확인한다.
- * 프로세스 맵을 사용하여 O(depth) 탐색.
- * @param {number} pid
- * @param {Map<number, {ppid: number, name: string}>} procMap
- * @param {Set<number>} protectedPids
- * @returns {boolean} true = 보호됨 (활성 조상 체인이 있음)
- */
 function hasLiveAncestorChain(pid, procMap, protectedPids) {
   const visited = new Set();
   let current = pid;
@@ -177,7 +149,6 @@ function hasLiveAncestorChain(pid, procMap, protectedPids) {
 
     const info = procMap.get(current);
     if (!info) {
-      // 프로세스 맵에 없음 → 살아있는지 직접 확인
       return isPidAlive(current);
     }
     if (LIVE_CLI_SESSION_ROOT_NAMES.has(normalizeName(info.name))) {
@@ -186,11 +157,10 @@ function hasLiveAncestorChain(pid, procMap, protectedPids) {
 
     const ppid = info.ppid;
     if (!Number.isFinite(ppid) || ppid <= 0) {
-      // 루트 프로세스 (ppid=0) — 시스템 프로세스이므로 보호
+      // ppid=0 시스템 프로세스는 보호한다.
       return true;
     }
 
-    // 부모가 맵에 없고 죽었으면 → 고아 체인
     if (!procMap.has(ppid) && !isPidAlive(ppid)) return false;
 
     current = ppid;
@@ -222,11 +192,7 @@ function hasLiveCliDescendant(pid, procMap) {
   return false;
 }
 
-/**
- * `tfx doctor --fix` 가 쓰는 이름. cleanupOrphanRuntimeProcesses 와 같다.
- * @param {Parameters<typeof cleanupOrphanRuntimeProcesses>[0]} opts
- * @returns {ReturnType<typeof cleanupOrphanRuntimeProcesses>}
- */
+// `tfx doctor --fix` 호환 별칭
 export function cleanupOrphanNodeProcesses(opts = {}) {
   return cleanupOrphanRuntimeProcesses(opts);
 }
@@ -418,16 +384,6 @@ function matchesPattern(commandLine, pattern, { exact = false } = {}) {
   return exact ? commandLine === text : commandLine.includes(text);
 }
 
-/**
- * Return a process tree rooted at `rootPid`.
- *
- * Windows queries `Get-CimInstance Win32_Process` once and builds a
- * ParentProcessId map. POSIX uses `ps` as a best-effort fallback.
- *
- * @param {number} rootPid
- * @param {{isWindows?: boolean, spawnSyncFn?: typeof spawnSync}} opts
- * @returns {Array<{pid: number, ppid: number, name: string, commandLine: string}>}
- */
 export function findProcessTree(
   rootPid,
   { isWindows = IS_WINDOWS, spawnSyncFn = spawnSync } = {},
@@ -443,17 +399,6 @@ export function findProcessTree(
   }));
 }
 
-/**
- * Kill a process tree.
- *
- * Windows tries `taskkill /T /F /PID <pid>` first. If that fails, it falls
- * back to a CIM process snapshot and kills descendants recursively. POSIX
- * first targets the process group, then the PID itself.
- *
- * @param {number} pid
- * @param {{isWindows?: boolean, spawnSyncFn?: typeof spawnSync, killFn?: typeof process.kill, isPidAliveFn?: typeof isPidAlive, protectedPids?: Set<number>}} opts
- * @returns {{ok: boolean, killed: number, errors: Array}}
- */
 export function killProcessTree(
   pid,
   {
@@ -522,16 +467,7 @@ export function killProcessTree(
   return { ok: killed > 0, killed, errors };
 }
 
-/**
- * Kill a previously captured PID snapshot with SIGKILL.
- *
- * This is used when a parent process has already died and tree lookup can no
- * longer reconstruct the original descendants.
- *
- * @param {Array<number | {pid: number}>} snapshot
- * @param {{killFn?: typeof process.kill, isPidAliveFn?: typeof isPidAlive, protectedPids?: Set<number>}} opts
- * @returns {{killed: number, missing: number}}
- */
+// 부모가 이미 죽어 트리 조회로 자손을 찾을 수 없을 때 스냅샷으로 SIGKILL을 보낸다.
 export function killProcessTreeSnapshot(
   snapshot,
   {
@@ -558,16 +494,6 @@ export function killProcessTreeSnapshot(
   return { killed, missing };
 }
 
-/**
- * Find processes whose command line matches any string or RegExp pattern.
- *
- * String patterns use substring matching by default; pass `exact: true` for
- * exact command-line equality.
- *
- * @param {Array<RegExp | string>} patterns
- * @param {{isWindows?: boolean, spawnSyncFn?: typeof spawnSync, exact?: boolean, nowMs?: number}} opts
- * @returns {Array<{pid: number, name: string, commandLine: string, ageMs?: number}>}
- */
 export function findProcessesByCommandLine(
   patterns,
   {
@@ -598,15 +524,8 @@ export function findProcessesByCommandLine(
     });
 }
 
-/**
- * Windows 고아 node/bash/cmd/uvx 런타임을 정리한다.
- *
- * 조상 체인이 살아 있거나 Claude/Codex/Gemini 자손이 있으면 건드리지 않는다.
- * 운영 호출자가 Windows `tfx doctor --fix` 하나라 다른 OS 에서는 아무것도 하지 않는다.
- *
- * @param {{isWindows?: boolean, spawnSyncFn?: typeof spawnSync, killFn?: typeof process.kill, protectedPids?: Set<number>}} opts
- * @returns {{killed: number, remaining: number, killedProcesses: Array<{pid: number, ppid: number, name: string, commandLine: string, killReason: string}>}}
- */
+// 조상 체인이 살아 있거나 Claude/Codex/Gemini 자손이 있으면 건드리지 않는다.
+// 운영 호출자가 Windows `tfx doctor --fix` 하나라 다른 OS 에서는 아무것도 하지 않는다.
 export function cleanupOrphanRuntimeProcesses({
   isWindows = IS_WINDOWS,
   spawnSyncFn = spawnSync,
@@ -651,15 +570,7 @@ export function cleanupOrphanRuntimeProcesses({
   return { killed, remaining, killedProcesses };
 }
 
-/**
- * Find stale git fsmonitor--daemon processes.
- *
- * Windows only. The CIM query is scoped to git.exe and the command line marker
- * is intentionally narrow so foreground git commands are never targeted.
- *
- * @param {{minAgeMs?: number, execSyncFn?: typeof execSync, nowMs?: number, isWindows?: boolean}} opts
- * @returns {Array<{pid: number, parentPid: number, creationDate: string, ageMs: number, commandLine: string}>}
- */
+// Windows 전용. 포그라운드 git 명령을 건드리지 않게 marker를 좁게 제한한다.
 export function findFsmonitorDaemons({
   minAgeMs = DEFAULT_FSMONITOR_MIN_AGE_MS,
   execSyncFn = execSync,
@@ -711,11 +622,6 @@ export function findFsmonitorDaemons({
   return stale;
 }
 
-/**
- * Cleanup stale git fsmonitor--daemon processes.
- * @param {{minAgeMs?: number, execSyncFn?: typeof execSync, nowMs?: number, isWindows?: boolean, killFn?: typeof process.kill}} opts
- * @returns {{killed: number, stale: Array}}
- */
 export function cleanupStaleFsmonitorDaemons({
   killFn = process.kill,
   ...findOpts

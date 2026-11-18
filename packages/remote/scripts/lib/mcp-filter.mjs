@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// scripts/lib/mcp-filter.mjs
-// 역할/컨텍스트 기반 MCP 도구 노출 정책의 단일 소스.
 
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -156,7 +154,7 @@ function normalizeProfileName(profile) {
   if (raw === "auto") return raw;
   if (PROFILE_DEFINITIONS[raw]) return raw;
   if (LEGACY_PROFILE_ALIASES[raw]) return LEGACY_PROFILE_ALIASES[raw];
-  // graceful fallback: --flag나 잘못된 프로필 → 'auto'로 폴백 (hard crash 방지)
+  // 잘못된 프로필이나 플래그 입력은 hard crash 를 막기 위해 auto 로 폴백한다.
   if (raw.startsWith("-") || raw.startsWith("/")) return "auto";
   console.error(`[mcp-filter] 경고: 알 수 없는 프로필 '${raw}', 'auto'로 폴백`);
   return "auto";

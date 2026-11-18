@@ -683,11 +683,6 @@ export function evaluateVendorQuota(
   });
 }
 
-/**
- * 로컬 캐시와 런타임 마커에서 3사 쿼터 스냅샷을 읽는다.
- *
- * @param {{ env?: NodeJS.ProcessEnv, home?: string, tmpDir?: string, platform?: string, now?: number }} [options]
- */
 export function readQuotaSnapshot(options = {}) {
   const env = options.env || process.env;
   const platform = options.platform || process.platform;

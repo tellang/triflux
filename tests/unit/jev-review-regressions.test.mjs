@@ -9,7 +9,6 @@ import {
   judgeBusyAction,
   judgeComposerState,
   judgeHandoffQuality,
-  judgeInboxPriority,
   judgeInstructionAck,
   judgePeerConvergence,
   judgeReviewGate,
@@ -704,7 +703,6 @@ for (const transport of ["http", "cli"]) {
       { instruction: secretInput, recentOutput: rawOutput },
       options,
     );
-    await judgeInboxPriority({ text: rawOutput, summary: rawOutput }, options);
     await judgeReviewGate(
       {
         handoffSummary: rawOutput,
@@ -730,7 +728,7 @@ for (const transport of ["http", "cli"]) {
       },
       options,
     );
-    assert.equal(payloads.length, transport === "http" ? 9 : 14);
+    assert.equal(payloads.length, transport === "http" ? 8 : 13);
     for (const payload of payloads) assertProtected(payload);
     for (const payload of payloads.slice(0, outputJudgmentCount))
       assert.match(payload, /(?:chars|lines)/);

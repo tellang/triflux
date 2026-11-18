@@ -1,6 +1,3 @@
-// codex app-server account/rateLimits/read 능동 프로브 + 정규화.
-// 세션 이벤트(snake_case) 파이프라인에 합류 가능한 스냅샷을 만든다.
-
 import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -40,7 +37,7 @@ export function recordProbe(stateFilePath, key, nowMs) {
     mkdirSync(dirname(stateFilePath), { recursive: true });
     writeFileSync(stateFilePath, JSON.stringify(state));
   } catch {
-    // 상태 기록 실패는 무시 — 다음 사이클에 재시도
+    // 상태 기록이 실패해도 다음 사이클에 재시도하므로 무시한다.
   }
 }
 
@@ -132,9 +129,7 @@ export function probeRateLimitsViaAppServer({
       clearTimeout(timer);
       try {
         child.kill();
-      } catch {
-        // 이미 종료
-      }
+      } catch {}
       resolve(value);
     };
     const timer = setTimeout(() => finish(null), timeoutMs);

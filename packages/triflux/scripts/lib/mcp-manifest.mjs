@@ -1,6 +1,4 @@
-// scripts/lib/mcp-manifest.mjs
-// MCP 서버 활성화 매니페스트 — 단일 진실 소스.
-// tfx-setup 위저드가 저장하고, MCP 필터가 참조한다.
+// MCP 서버 활성화 매니페스트 (tfx-setup 저장, MCP 필터 참조)
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -37,10 +35,7 @@ export function writeManifest(enabledServers) {
   return manifest;
 }
 
-/**
- * 단일 서버 활성화 여부 확인.
- * 매니페스트 미존재 시 true (레거시 호환).
- */
+// 매니페스트 미존재 시 true (레거시 호환)
 export function isServerEnabled(serverName) {
   const manifest = readManifest();
   if (!manifest) return true;

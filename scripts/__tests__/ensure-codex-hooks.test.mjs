@@ -7,7 +7,7 @@
 // 4. 어떤 입력 조합에서도 같은 키가 2회 직렬화되지 않는다 (TOML duplicate key
 //    = codex 전 호출 즉사).
 //
-// 전부 mkdtemp 격리 — 실 ~/.codex 무접촉.
+// 전부 mkdtemp 격리해 실 ~/.codex 를 건드리지 않는다.
 
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -99,7 +99,7 @@ describe("ensureCodexHooks — table-header 직렬화 + 멱등", () => {
 
     // 과거 설치기(inline)와 codex 재직렬화(table)가 공존하는 오염 상태 재현:
     // 현재 table 기록 위에, 같은 키/해시의 inline 라인을 [hooks.state] 헤더와
-    // 함께 prepend 한다 — 2026-06-10 실측 config.toml:151-156 구조.
+    // 함께 prepend 한다 (2026-06-10 실측 config.toml:151-156 구조).
     const counts0 = managedKeyCounts(config, first.hooksPath);
     assert.equal(counts0.session_start.table, 1);
     const tableBlocks = config

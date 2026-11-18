@@ -1,9 +1,5 @@
 #!/usr/bin/env node
-// scripts/lib/mcp-health.mjs
-// Dead MCP preflight — session 18 checkpoint의 P3 root-cause fix.
-// Codex config.toml 의 각 mcp_servers.* 정의를 probe 해서 응답 안하면 dead 판정.
-// 결과는 ~/.codex/mcp-health-cache.json 에 TTL 기반으로 캐시.
-// tfx-route.sh 가 swap 전에 이 결과를 읽어 dead 서버를 enabled=false 로 override.
+// Dead MCP preflight: config.toml 의 mcp_servers.* 를 probe 해 결과를 캐시하고, tfx-route.sh 가 dead 서버를 enabled=false 로 override 한다.
 
 import { spawn } from "node:child_process";
 import {
@@ -28,8 +24,6 @@ const DEFAULT_CACHE_PATH = path.join(
 );
 const DEFAULT_TTL_MS = 300_000; // 5 min
 const DEFAULT_PROBE_TIMEOUT_MS = 3_000;
-
-// ────────── TOML (mcp_servers 한정 단순 파서) ──────────
 
 function parseTomlArrayLiteral(literal) {
   const inner = literal.trim().slice(1, -1).trim();
@@ -74,9 +68,7 @@ function parseTomlScalar(raw) {
   return v;
 }
 
-// 문자열 리터럴 밖의 `# ...` 은 라인 끝 주석. multiline buffer 에 누적하기
-// 전에 line 단위로 제거해야 parseTomlArrayLiteral 이 scalar 분기에서 주석 문자열을
-// item 으로 잘못 포함하지 않는다.
+// 멀티라인 array 값(args = [...])이 단일 행 파서에서 잘리지 않도록 문자열 리터럴 밖 `#` 는 줄 단위로 먼저 제거한다 (A1).
 function stripInlineComment(line) {
   let inString = false;
   let stringChar = null;
@@ -108,12 +100,7 @@ function stripInlineComment(line) {
   return line;
 }
 
-// 문자열 리터럴 내부를 제외한 bracket depth. 음수는 over-close.
-// Review finding A1 (commit 9298fd6 cross-review): 멀티라인 array 값
-// (예: `args = [\n  "run",\n  "server.js"\n]`) 을 single-line 파서가 `"["`
-// 문자열로 오인해 probeStdio 가 args=[] 로 실행 → 정상 서버를 dead 로 오탐.
-// Inline comment 는 newline 전까지만 무시 — 멀티라인 buffer 에서 첫 `#` 이후
-// 전체가 drop 되면 안 됨.
+// 멀티라인 buffer 에서 첫 `#` 이후가 통째로 버려지지 않도록 newline 전까지만 무시하며 bracket depth 를 센다.
 function countBracketDelta(str) {
   let depth = 0;
   let inString = false;
@@ -234,11 +221,7 @@ function readMcpServers(configPath = DEFAULT_CONFIG_PATH) {
   }
 }
 
-// ────────── Binary Fingerprint (Issue #149) ──────────
-// Cache staleness 방지: config.toml mtime 만 보면 `npm i -g <mcp-bin>` 설치/제거
-// 를 감지 못해 5분간 stale dead 판정이 유지된다. 서버별 fingerprint (command,
-// args, 해석된 binary path+mtime+size 또는 url) 을 cache 에 저장하고 일치할
-// 때만 hit 으로 판정한다.
+// config.toml mtime 만 보면 npm i -g 로 바이너리가 바뀌어도 감지하지 못하므로 서버별 fingerprint 로 캐시를 무효화한다 (#149).
 
 function statBinary(filePath) {
   try {
@@ -315,8 +298,6 @@ export function fingerprintsEqual(a, b) {
   return true; // "none"/"unknown" — 같은 type 이면 equal
 }
 
-// ────────── Probe ──────────
-
 function makeInitializeRequest() {
   return (
     JSON.stringify({
@@ -385,9 +366,7 @@ export function probeStdio(def, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
       settled = true;
       try {
         child?.kill("SIGKILL");
-      } catch {
-        /* best effort */
-      }
+      } catch {}
       resolve({ ...result, ms: Date.now() - start });
     };
 
@@ -433,9 +412,7 @@ export function probeStdio(def, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
         }
       }
     });
-    child.stderr.on("data", () => {
-      /* drain */
-    });
+    child.stderr.on("data", () => {});
 
     try {
       child.stdin.write(makeInitializeRequest(), (err) => {
@@ -451,10 +428,7 @@ export function probeStdio(def, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
   });
 }
 
-// Review finding A2 (commit 9298fd6 cross-review): 기존 구현은 status 2xx-4xx
-// 전부 alive 로 취급 — 404/401 HTML 오류 페이지를 healthy 로 오판. 실제 MCP
-// endpoint 는 200 + JSON-RPC body 를 돌려줘야 살아있는 것. 2xx + JSON-RPC
-// envelope (id 일치, result|error 존재) 둘 다 검증한다.
+// 404/401 HTML 오류 페이지를 healthy 로 오판하지 않게 2xx 응답과 JSON-RPC envelope 을 함께 검증한다 (A2).
 export async function probeHttp(url, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
   const start = Date.now();
   try {
@@ -517,8 +491,6 @@ export async function probeServer(def, timeoutMs = DEFAULT_PROBE_TIMEOUT_MS) {
   return { alive: false, reason: "no-transport", ms: 0 };
 }
 
-// ────────── Cache ──────────
-
 export function readCache(cachePath = DEFAULT_CACHE_PATH) {
   if (!existsSync(cachePath)) return null;
   try {
@@ -529,11 +501,7 @@ export function readCache(cachePath = DEFAULT_CACHE_PATH) {
 }
 
 export function writeCache(cache, cachePath = DEFAULT_CACHE_PATH) {
-  // Issue #154: writeFileSync 는 non-atomic 이라 swarm/병렬 tfx-route 가 동시
-  // write 하면 reader 가 partial JSON 을 받아 SyntaxError → null 반환. tmp 파일에
-  // 쓰고 rename 으로 교체하면 reader 는 항상 완전한 파일을 본다 (POSIX atomic,
-  // Windows MoveFileEx 도 target replace 지원). pid+timestamp 가 tmp 이름에
-  // 들어가 writer 끼리도 충돌하지 않는다.
+  // 병렬 tfx-route 동시 쓰기 시 partial JSON 읽기 방지용 atomic write (#154)
   const tmpPath = `${cachePath}.tmp.${process.pid}.${Date.now()}`;
   try {
     mkdirSync(path.dirname(cachePath), { recursive: true });
@@ -543,9 +511,7 @@ export function writeCache(cache, cachePath = DEFAULT_CACHE_PATH) {
   } catch {
     try {
       unlinkSync(tmpPath);
-    } catch {
-      /* best effort */
-    }
+    } catch {}
     return false;
   }
 }
@@ -560,8 +526,6 @@ export function isCacheFresh(
   if (configMtime && cache.configMtime !== configMtime) return false;
   return now - cache.checkedAt < cache.ttlMs;
 }
-
-// ────────── Orchestration ──────────
 
 export async function probeAll({
   configPath = DEFAULT_CONFIG_PATH,
@@ -584,9 +548,7 @@ export async function probeAll({
       ? names.filter((n) => allNames.includes(n))
       : allNames;
 
-  // Issue #149: per-server fingerprint (binary path+mtime+size) 로 cache 를
-  // invalidate 한다. configMtime 은 여전히 meta 로 저장하지만 hit 판정에는
-  // 쓰지 않는다 — binary 설치/제거가 config.toml mtime 을 바꾸지 않기 때문.
+  // binary 설치/제거는 config.toml mtime 을 바꾸지 않으므로 hit 판정에는 fingerprint 만 쓴다 (#149).
   const fingerprints = Object.fromEntries(
     targets.map((name) => [name, computeFingerprint(servers[name])]),
   );
@@ -629,7 +591,6 @@ export async function probeAll({
   const allResults = { ...hits, ...freshResults };
 
   if (writeCacheFile) {
-    // 이번에 probe 한 서버만 결과 갱신; 이전 cache 의 다른 서버 결과는 보존.
     const merged = { ...cachedResults, ...freshResults };
     writeCache(
       {
@@ -654,8 +615,6 @@ export function splitHealthy(results) {
   }
   return { healthy, dead };
 }
-
-// ────────── CLI ──────────
 
 function parseCliArgs(argv) {
   const args = {

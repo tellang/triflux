@@ -1,7 +1,3 @@
-// ============================================================================
-// Claude Usage API (api.anthropic.com/api/oauth/usage)
-// ============================================================================
-
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
@@ -66,7 +62,6 @@ export const CLAUDE_USAGE_RATE_LIMIT_BACKOFF_MS = [
   120_000,
 ];
 
-// OMC 활성 여부에 따라 캐시 TTL 동적 결정
 function getClaudeUsageStaleMs() {
   return existsSync(OMC_PLUGIN_USAGE_CACHE_PATH)
     ? CLAUDE_USAGE_STALE_MS_WITH_OMC
@@ -173,7 +168,8 @@ export function getKeychainServiceName(env = process.env) {
 const KEYCHAIN_ACCOUNT_PATTERN = /^[a-zA-Z0-9._-]+$/;
 const KEYCHAIN_ACCOUNT_FALLBACK = "claude-code-user";
 
-// Claude Code 와 같은 계정 규칙: USER 환경변수 → os.userInfo().username → 허용 문자 밖이면 고정 대체값.
+// Claude Code와 같은 계정 규칙으로 USER 환경변수, os.userInfo().username 순으로 읽고
+// 허용 문자 밖이면 고정 대체값을 쓴다.
 export function getKeychainAccount(env = process.env) {
   let name = null;
   try {
@@ -260,9 +256,7 @@ export function readClaudeCredentials({
           "file",
         );
         if (fileCreds) return { ...fileCreds, filePath };
-      } catch {
-        /* try next credential source */
-      }
+      } catch {}
     }
     return null;
   };
@@ -327,9 +321,7 @@ export function refreshClaudeAccessToken(refreshToken) {
                 });
                 return;
               }
-            } catch {
-              /* parse 실패 */
-            }
+            } catch {}
           }
           resolve(null);
         });
@@ -441,9 +433,7 @@ export function writeBackClaudeCredentials(
     if (platform !== "darwin") return;
     try {
       writeClaudeKeychainCredentials(creds, execFileSyncFn, env);
-    } catch {
-      /* Keychain 쓰기 실패 무시 */
-    }
+    } catch {}
     return;
   }
 
@@ -454,9 +444,7 @@ export function writeBackClaudeCredentials(
         readCredentialFile,
         writeCredentialFile,
       );
-    } catch {
-      /* 파일 쓰기 실패 무시 */
-    }
+    } catch {}
   }
 }
 
@@ -525,7 +513,7 @@ export function parseClaudeUsageResponse(response) {
   };
 }
 
-// stale 캐시의 과거 resetsAt → 다음 주기로 순환 추정 (null 대신 다음 reset 시간 계산)
+// stale 캐시의 과거 resetsAt을 다음 주기로 순환해 추정한다.
 export function stripStaleResets(data) {
   if (!data) return data;
   const copy = { ...data };
@@ -568,9 +556,8 @@ export function readClaudeUsageSnapshot() {
     };
   }
 
-  // 1차: 자체 캐시에 유효 데이터가 있는 경우
   if (cache?.data) {
-    // 에러 상태에서 보존된 stale 데이터 → backoff 존중하되 표시용 데이터 반환
+    // 에러 상태에서 보존된 stale 데이터는 backoff를 존중하되 표시용으로 반환한다.
     if (cache.error) {
       return {
         data: stripStaleResets(cache.data),
@@ -593,16 +580,16 @@ export function readClaudeUsageSnapshot() {
     return { data, shouldRefresh: schedule.shouldRefresh, isStale: false };
   }
 
-  // 2차: 에러 backoff, 최근 에러 시 재시도 억제 (무한 spawn 방지)
+  // 최근 에러 시 재시도를 억제해 무한 spawn을 막는다.
   if (cache?.error && Number.isFinite(ts)) {
     if (!schedule.shouldRefresh) {
       const omcCache = readJson(OMC_PLUGIN_USAGE_CACHE_PATH, null);
-      // OMC 캐시가 에러 이후 갱신되었으면 → 에러 캐시 덮어쓰고 그 데이터 사용
+      // OMC 캐시가 에러 이후 갱신되었으면 에러 캐시를 덮어쓰고 그 데이터를 사용한다.
       if (omcCache?.data?.fiveHourPercent != null && omcCache.timestamp > ts) {
         writeClaudeUsageCache(omcCache.data);
         return { data: omcCache.data, shouldRefresh: false, isStale: false };
       }
-      // stale OMC fallback 또는 null (--% 플레이스홀더 표시, 가짜 0% 방지)
+      // 가짜 0% 대신 --% 플레이스홀더가 나오도록 stale OMC fallback 또는 null을 쓴다.
       const staleData =
         omcCache?.data?.fiveHourPercent != null
           ? stripStaleResets(omcCache.data)
@@ -615,7 +602,7 @@ export function readClaudeUsageSnapshot() {
     }
   }
 
-  // 3차: OMC 플러그인 캐시 (같은 API 데이터, 중복 호출 방지)
+  // OMC 플러그인 캐시와 같은 API 데이터이므로 중복 호출을 피한다.
   const OMC_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
   const omcCache = readJson(OMC_PLUGIN_USAGE_CACHE_PATH, null);
   if (omcCache?.data?.fiveHourPercent != null) {
@@ -630,7 +617,6 @@ export function readClaudeUsageSnapshot() {
         isStale: false,
       };
     }
-    // stale이어도 data: null보다는 오래된 데이터를 fallback으로 표시
     return {
       data: stripStaleResets(omcCache.data),
       shouldRefresh: true,
@@ -638,7 +624,6 @@ export function readClaudeUsageSnapshot() {
     };
   }
 
-  // 캐시/fallback 모두 없음: null 반환 → --% 플레이스홀더 + 리프레시 시도
   return { data: null, shouldRefresh: true, isStale: false };
 }
 
@@ -669,8 +654,8 @@ export function writeClaudeUsageCache(
     recheck,
     data,
     error: !!errorInfo,
-    errorType: errorInfo?.type || null, // "rate_limit" | "auth" | "network" | "unknown"
-    errorStatus: errorInfo?.status || null, // HTTP 상태 코드
+    errorType: errorInfo?.type || null,
+    errorStatus: errorInfo?.status || null,
     consecutive429s: state.consecutive429s,
     nextRefreshBaseMs: state.baseDelayMs,
     nextRefreshAt: Date.now() + state.delayMs,
@@ -710,7 +695,6 @@ export async function fetchClaudeUsage(forceRefresh = false) {
     return existingSnapshot.data || null;
   }
 
-  // 토큰 만료 시 리프레시
   if (creds.expiresAt && creds.expiresAt <= Date.now() && creds.refreshToken) {
     // 되쓰지 못할 갱신은 회전된 refreshToken 을 잃어 Claude Code 로그인을 풀 수 있다. 갱신은 Claude Code 에 맡긴다.
     const refreshed =
@@ -728,7 +712,6 @@ export async function fetchClaudeUsage(forceRefresh = false) {
 
   const result = await fetchClaudeUsageFromApi(creds.accessToken);
   if (!result.ok) {
-    // 에러 유형별 분류하여 backoff 차등 적용
     const errorType =
       result.status === 429
         ? "rate_limit"
@@ -805,19 +788,17 @@ export function scheduleClaudeUsageRefresh() {
         ? Date.now() - omcCache.timestamp
         : Infinity;
       if (omcAge < getClaudeUsageStaleMs()) {
-        writeClaudeUsageCache(omcCache.data); // HUD 캐시에 복사만
+        writeClaudeUsageCache(omcCache.data);
         return;
       }
     }
-  } catch {
-    /* 무시 */
-  }
+  } catch {}
 
-  // 스폰 락: 30초 내 이미 스폰했으면 중복 방지 (첫 설치 시 429 방지)
+  // 첫 설치 시 429를 막기 위해 30초 내 중복 스폰을 차단한다.
   try {
     if (!acquireSpawnLock(CLAUDE_REFRESH_LOCK_PATH, SPAWN_LOCK_TTL_MS)) return;
   } catch {
-    /* 락 실패 무시, 스폰 진행 */
+    /* 락 실패 시에도 스폰 진행 */
   }
 
   try {

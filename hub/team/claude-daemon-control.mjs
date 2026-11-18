@@ -1656,18 +1656,8 @@ export async function sendKillBySessionId({
   }
 }
 
-/**
- * Claude 데몬 dispatch 한 건의 공통 시퀀스를 캡슐화한다.
- * dispatch → waitForDaemonJobPid → resolveDaemonBridgeSessionId →
- * buildClaudeSessionProjection → writeClaudeSessionProjection.
- *
- * 호출 측이 reference 로 들고 있는 record 를 헬퍼가 새로 만들지 않도록
- * plain 필드만 반환한다. caller 는 이 결과를 자기 record 에 Object.assign 한다.
- *
- * @returns {Promise<{ok:boolean, short:string, sessionId:string, job:object,
- *   pid:number, bridgeSessionId:string, sessionProjectionPath:string,
- *   controlSock:string, paths:object}>}
- */
+// 호출 측이 reference 로 들고 있는 record 를 새로 만들지 않도록 plain 필드만 반환한다.
+// caller 는 이 결과를 자기 record 에 Object.assign 한다.
 export async function dispatchClaudeDaemonJob({
   paths,
   controlSock,

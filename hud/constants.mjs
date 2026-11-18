@@ -1,6 +1,3 @@
-// ============================================================================
-// 상수 / 경로
-// ============================================================================
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -84,10 +81,10 @@ export const OMC_PLUGIN_USAGE_CACHE_PATH = join(
   "tfx-hub",
   "plugin-usage-cache.json",
 );
-export const CLAUDE_USAGE_STALE_MS_SOLO = 5 * 60 * 1000; // OMC 없을 때: 5분 캐시
-export const CLAUDE_USAGE_STALE_MS_WITH_OMC = 15 * 60 * 1000; // OMC 있을 때: 15분
-export const CLAUDE_USAGE_429_BACKOFF_MS = 10 * 60 * 1000; // 429 에러 시 10분 backoff
-export const CLAUDE_USAGE_ERROR_BACKOFF_MS = 3 * 60 * 1000; // 기타 에러 시 3분 backoff
+export const CLAUDE_USAGE_STALE_MS_SOLO = 5 * 60 * 1000;
+export const CLAUDE_USAGE_STALE_MS_WITH_OMC = 15 * 60 * 1000;
+export const CLAUDE_USAGE_429_BACKOFF_MS = 10 * 60 * 1000;
+export const CLAUDE_USAGE_ERROR_BACKOFF_MS = 3 * 60 * 1000;
 export const CLAUDE_API_TIMEOUT_MS = 10_000;
 export const FIVE_HOUR_MS = 5 * 60 * 60 * 1000;
 export const SEVEN_DAY_MS = 7 * 24 * 60 * 60 * 1000;
@@ -115,10 +112,9 @@ export const CODEX_QUOTA_CACHE_PATH = join(
   "cache",
   "codex-rate-limits-cache.json",
 );
-export const CODEX_QUOTA_STALE_MS = 30 * 1000; // 30초
+export const CODEX_QUOTA_STALE_MS = 30 * 1000;
 export const CODEX_MIN_BUCKETS = 2;
 
-// Spawn lock (중복 refresh 방지)
 export const CLAUDE_REFRESH_LOCK_PATH = join(
   homedir(),
   ".claude",
@@ -131,7 +127,7 @@ export const CODEX_REFRESH_LOCK_PATH = join(
   "cache",
   ".codex-refresh-lock",
 );
-export const SPAWN_LOCK_TTL_MS = 30 * 1000; // 30초 spawn dedup
+export const SPAWN_LOCK_TTL_MS = 30 * 1000;
 
 export const ANTIGRAVITY_OAUTH_PATHS = [
   join(homedir(), ".gemini", "antigravity-cli", "oauth_creds.json"),
@@ -169,7 +165,6 @@ export const TIME_CELL_INNER_WIDTH = 6;
 export const CLAUDE_REFRESH_FLAG = "--refresh-claude-usage";
 export const CODEX_REFRESH_FLAG = "--refresh-codex-rate-limits";
 
-// 모바일/Termux 컴팩트 모드 감지
 export const HUD_CONFIG_PATH = join(homedir(), ".omc", "config", "hud.json");
 export const COMPACT_COLS_THRESHOLD = 80;
 export const MINIMAL_COLS_THRESHOLD = 60;

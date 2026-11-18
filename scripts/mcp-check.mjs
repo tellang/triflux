@@ -95,11 +95,9 @@ export function getCodexMcp() {
   }
 }
 
-// ── Claude MCP 서버 발견 ──
-
 const CLAUDE_DIR = join(homedir(), ".claude");
 
-// Anthropic 클라우드 호스팅 MCP 서버 — Claude Code 런타임에서 항상 가용.
+// Anthropic 클라우드 호스팅 MCP 서버는 Claude Code 런타임에서 항상 가용하다.
 // mcp-server-catalog.mjs의 MCP_SERVER_TOOL_CATALOG에 정의된 서버 중
 // 로컬 설치가 불필요한 클라우드 제공 서버.
 const WELL_KNOWN_CLOUD_SERVERS = Object.freeze([
@@ -157,9 +155,7 @@ function scanPluginsMcpJson() {
           walk(full, depth + 1);
         }
       }
-    } catch {
-      /* permission errors */
-    }
+    } catch {}
   };
   walk(pluginsDir);
   return found;
@@ -168,7 +164,6 @@ function scanPluginsMcpJson() {
 export function getClaudeMcp(cwd = process.cwd()) {
   const serverMap = new Map();
 
-  // 1) .mcp.json 파일 트리 스캔 (CWD → root)
   for (const mcpJson of walkUpForMcpJson(cwd)) {
     for (const { name, config } of extractMcpServerNames(mcpJson)) {
       if (!serverMap.has(name)) {
@@ -177,7 +172,6 @@ export function getClaudeMcp(cwd = process.cwd()) {
     }
   }
 
-  // 2) ~/.claude/plugins/ 스캔
   for (const mcpJson of scanPluginsMcpJson()) {
     for (const { name, config } of extractMcpServerNames(mcpJson)) {
       if (!serverMap.has(name)) {
@@ -186,7 +180,6 @@ export function getClaudeMcp(cwd = process.cwd()) {
     }
   }
 
-  // 3) ~/.claude/settings.json + settings.local.json의 mcpServers
   for (const settingsFile of ["settings.json", "settings.local.json"]) {
     const data = readJsonSafe(join(CLAUDE_DIR, settingsFile));
     if (!data?.mcpServers) continue;
@@ -201,7 +194,6 @@ export function getClaudeMcp(cwd = process.cwd()) {
     }
   }
 
-  // 4) Well-known Anthropic 클라우드 MCP 서버 (카탈로그에 정의된 것만)
   for (const name of WELL_KNOWN_CLOUD_SERVERS) {
     if (serverMap.has(name)) continue;
     if (!MCP_SERVER_TOOL_CATALOG[name]) continue;

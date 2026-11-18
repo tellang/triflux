@@ -149,13 +149,8 @@ function escapeTomlKey(key) {
   return `"${String(key).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-// codex CLI 0.137+ 는 hooks.state 를 table-header 형식
-// ([hooks.state."<key>"] + trusted_hash = "...") 으로 직렬화한다. 과거
-// 이 설치기는 inline dotted-key 형식("<key>" = { trusted_hash = ... }) 으로
-// 기록했는데, codex 가 같은 키를 table 형식으로 재기록한 config 에 inline 을
-// 다시 append 하면 TOML duplicate key 가 되어 codex 전 호출이 즉사한다
-// (2026-06-10 실측, issue #394 배경). 기록은 codex canonical 인 table-header
-// 형식만 사용하고, strip 은 양 형식 모두 인식한다.
+// codex 0.137+ 는 table-header 형식만 사용하므로 inline dotted-key 와 섞이면 TOML duplicate key 로 즉사한다 (#394).
+// 기록은 table-header 형식만 쓰고 strip 은 양쪽을 모두 인식한다.
 function stateBlock(key, hash) {
   return `[hooks.state.${escapeTomlKey(key)}]\ntrusted_hash = "${hash}"`;
 }
@@ -284,11 +279,7 @@ function timestamp() {
 
 export function ensureCodexHooks(opts = {}) {
   const codexHome = opts.codexHome || join(homedir(), ".codex");
-  // Never install into the real user HOME while the test runner is active.
-  // scripts/test-lock.mjs sets TEST_LOCK_PID for every test process, inherited by
-  // in-process callers (runCritical/runDeferred -> ensureCriticalSetup) and any
-  // spawned setup.mjs. Installer unit tests pass an explicit codexHome seam, which
-  // bypasses this guard.
+  // test-lock.mjs 가 설정한 TEST_LOCK_PID 환경이 있으면 실제 홈에 설치하지 않는다(명시적 codexHome 단위 테스트만 예외).
   if (!opts.codexHome && process.env.TEST_LOCK_PID) {
     return { skipped: true, changedHooks: false, changedConfig: false };
   }

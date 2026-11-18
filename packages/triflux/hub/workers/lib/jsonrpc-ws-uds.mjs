@@ -1,21 +1,7 @@
-// hub/workers/lib/jsonrpc-ws-uds.mjs
-// JSON-RPC 2.0 client over WebSocket-over-Unix-Domain-Socket.
-//
-// codex `app-server --listen unix://PATH` does NOT speak newline-delimited JSON
-// on the socket — it speaks WebSocket (RFC 6455) after a standard HTTP/1.1
-// Upgrade handshake, one JSON-RPC message per text frame. Confirmed live against
-// codex-cli 0.135.0 (see experiments/native-bridge-feasibility/
-// codex-app-server-uds-smoke.mjs). Public surface: request/notify/
-// onNotification/close/isOpen.
-//
-// Wire framing notes:
-//   - client -> server frames MUST be masked (RFC 6455 §5.3).
-//   - server -> client frames are unmasked.
-//   - one JSON-RPC object per text frame; fragmented frames are reassembled.
-//   - outbound JSON-RPC omits the `"jsonrpc":"2.0"` header (OpenAI App Server
-//     JSONL variant).
-//
-// Zero new dependencies — minimal hand-rolled WS client (no `ws` package).
+// codex app-server(--listen unix://PATH)는 UDS 위에서 줄바꿈 JSON 대신
+// HTTP/1.1 Upgrade 후 RFC 6455 WebSocket 텍스트 프레임으로 JSON-RPC를 주고받는다.
+// 클라이언트 송신 프레임은 마스킹(RFC 6455 §5.3), 서버 수신 프레임은 비마스킹이며,
+// 송신 JSON-RPC는 jsonrpc 헤더를 생략한다.
 
 import { createHash, randomBytes } from "node:crypto";
 import net from "node:net";
@@ -27,15 +13,13 @@ import {
 } from "./jsonrpc-core.mjs";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-const DEFAULT_MAX_FRAME_SIZE = 16 * 1024 * 1024; // 16 MiB
+const DEFAULT_MAX_FRAME_SIZE = 16 * 1024 * 1024;
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
-// After a graceful close("closing") we wait this long for the peer's close/EOF
-// before force-destroying the socket so a silent peer cannot pin it open.
+// graceful close("closing") 이후 피어가 close/EOF를 안 보내도 소켓이 영구 대기하지 않게 강제 종료 기한을 둔다.
 const CLOSING_DEADLINE_MS = 2_000;
-const MAX_CONTROL_PAYLOAD = 125; // RFC 6455 §5.5: control frames <=125 bytes
+const MAX_CONTROL_PAYLOAD = 125; // RFC 6455 제어 프레임 페이로드 상한(125B)
 const CLOSED_MESSAGE = "JsonRpcWsUdsClient closed";
 
-// RFC 6455 opcodes
 const OP_CONTINUATION = 0x0;
 const OP_TEXT = 0x1;
 const OP_BINARY = 0x2;
@@ -43,12 +27,6 @@ const OP_CLOSE = 0x8;
 const OP_PING = 0x9;
 const OP_PONG = 0xa;
 
-/**
- * Encode a single client->server WebSocket frame (always masked).
- * @param {number} opcode
- * @param {Buffer} payload
- * @returns {Buffer}
- */
 function encodeClientFrame(opcode, payload) {
   const len = payload.length;
   const mask = randomBytes(4);
@@ -71,17 +49,7 @@ function encodeClientFrame(opcode, payload) {
   return Buffer.concat([header, mask, masked]);
 }
 
-/**
- * JSON-RPC 2.0 client over WebSocket-over-UDS.
- */
 export class JsonRpcWsUdsClient extends JsonRpcDispatchBase {
-  /**
-   * @param {object} options
-   * @param {string} options.socketPath Absolute path to the AF_UNIX socket.
-   * @param {(err: Error) => void} [options.onError]
-   * @param {number} [options.maxFrameSize] Max bytes per inbound frame payload.
-   * @param {number} [options.connectTimeoutMs]
-   */
   constructor({
     socketPath,
     onError,
@@ -101,26 +69,16 @@ export class JsonRpcWsUdsClient extends JsonRpcDispatchBase {
       ? connectTimeoutMs
       : DEFAULT_CONNECT_TIMEOUT_MS;
 
-    /** @type {'idle'|'running'|'closing'|'closed'} */
     this._state = "idle";
     this._socket = null;
 
-    // RX framing state
     this._rxBuf = Buffer.alloc(0);
-    /** @type {Buffer[]} accumulated payloads of a fragmented message */
     this._fragmentChunks = [];
-    /** @type {number|null} opcode of the in-progress fragmented message */
     this._fragmentOpcode = null;
     this._fragmentSize = 0;
-    /** @type {ReturnType<typeof setTimeout>|null} */
     this._closingTimer = null;
   }
 
-  /**
-   * Open the socket and complete the WebSocket HTTP Upgrade handshake.
-   * Resolves once the connection is in the `running` state.
-   * @returns {Promise<void>}
-   */
   connect() {
     if (this._state !== "idle") {
       return Promise.reject(
@@ -267,19 +225,15 @@ export class JsonRpcWsUdsClient extends JsonRpcDispatchBase {
     });
   }
 
-  // --- internals ---------------------------------------------------------
-
   _encodeAndSend(frame) {
     this._sendText(JSON.stringify(frame));
   }
 
   _onEnterClosing() {
-    // best-effort WS close frame
     try {
       this._socket?.write(encodeClientFrame(OP_CLOSE, Buffer.alloc(0)));
     } catch {}
-    // Arm a deadline so a peer that never replies with close/EOF cannot pin
-    // the socket + pending requests open forever.
+    // 피어가 close/EOF를 반환하지 않을 때 소켓과 대기 요청이 영구 고정되지 않게 기한을 둔다.
     this._closingTimer = setTimeout(() => {
       if (this._state === "closing") this._closeWith("closed");
     }, CLOSING_DEADLINE_MS);
@@ -315,11 +269,6 @@ export class JsonRpcWsUdsClient extends JsonRpcDispatchBase {
     this._drainFrames();
   }
 
-  /**
-   * Parse as many complete WebSocket frames as are buffered. Control frames
-   * (ping/pong/close) are handled inline; text/continuation frames are
-   * reassembled into a full JSON-RPC message before dispatch.
-   */
   _drainFrames() {
     while (this._rxBuf.length >= 2) {
       const b0 = this._rxBuf[0];

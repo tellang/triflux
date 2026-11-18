@@ -169,7 +169,6 @@ export async function startHeadlessTeam({
       },
     });
 
-    // 최소 결과 요약
     const results = handle.results;
     const succeeded = results.filter((r) => r.matched && r.exitCode === 0);
     const failed = results.filter((r) => !r.matched || r.exitCode !== 0);
@@ -191,7 +190,6 @@ export async function startHeadlessTeam({
         );
     }
 
-    // handoff 요약 (Lead 토큰 절약 포맷)
     for (const r of results) {
       const icon =
         r.matched && r.exitCode === 0
@@ -209,7 +207,6 @@ export async function startHeadlessTeam({
       }
     }
 
-    // --verbose: 기존 장황한 출력 (200자 preview)
     if (verbose) {
       for (const r of results) {
         if (r.output) {

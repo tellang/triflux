@@ -1,4 +1,3 @@
-// hub/lib/jev-addon.mjs
 // Opt-in Jev (System One) 판단 애드온.
 // 환경변수, 명시 CLI 또는 host 설정으로 활성화하며,
 // 설정이 없거나 호출이 실패하면 기존 결정론적 로직을 유지한다.
@@ -729,9 +728,6 @@ function decisionDiagnostics(result, reason) {
   };
 }
 
-/**
- * 1. 재시도 상태 머신: 두 실패 메시지가 동일한 근본 원인인지 판정한다.
- */
 export async function judgeSameFailureCause(
   previousReason,
   currentReason,
@@ -762,9 +758,6 @@ export async function judgeSameFailureCause(
   return { sameCause: res.value, confidence: res.confidence };
 }
 
-/**
- * 2. 워커 인계 파일(handoff) 보정 및 가짜 성공(exit 0) 필터링.
- */
 export async function judgeHandoffQuality(
   {
     rawText = "",
@@ -815,9 +808,6 @@ export async function judgeHandoffQuality(
   return { leadAction: res.choice, confidence: res.confidence };
 }
 
-/**
- * 3. 피어(peer) 토론 및 교차 리뷰 조기 종료 판정.
- */
 export async function judgePeerConvergence(
   {
     seed = "",
@@ -858,9 +848,6 @@ export async function judgePeerConvergence(
   return { converged: res.value, confidence: res.confidence };
 }
 
-/**
- * 4. 작업 중인 워커에 대한 --if-busy auto (steer vs wait) 판단.
- */
 export async function judgeBusyAction(
   {
     prompt = "",
@@ -915,9 +902,6 @@ export async function judgeBusyAction(
   return { action: res.choice, confidence: res.confidence };
 }
 
-/**
- * 5. 하트비트 모니터: 로그 꼬리 기반 의미상 먹통(프롬프트 대기, 에러 무한 루프) 판정.
- */
 export async function judgeWorkerHealth(
   {
     stdoutTail = "",
@@ -970,11 +954,6 @@ export async function judgeWorkerHealth(
   };
 }
 
-/**
- * 실행 모드별 CLI 권한 플래그 매핑 헬퍼.
- * @param {"codex"|"antigravity"|"agy"|"claude"} cliType
- * @param {"read_only"|"workspace_auto"|"bypass"} executionMode
- */
 export function executionFlagsForCli(
   cliType = "codex",
   executionMode = "bypass",
@@ -1121,10 +1100,6 @@ const TIER_ROUTABLE_ROLES = new Set([
 // 승격은 비용을, 강등은 실패와 재시도를 키우므로 불확실하면 역할 기본 등급을 유지한다.
 const TIER_CHANGE_MIN_CONFIDENCE = 0.85;
 
-/**
- * 6. Pre-route 통합 판단: 프롬프트 복잡도(모델 및 effort), 실행 권한 모드(read_only / workspace_auto / bypass),
- * 필요한 MCP 프로필 및 서버 목록을 단일 queryJevBatch 호출로 판정한다.
- */
 export async function judgeTaskRouting(
   {
     prompt = "",
@@ -1461,9 +1436,6 @@ export async function judgeTaskRouting(
   };
 }
 
-/**
- * 7. MCP 프로필 및 서버 동적 선별 (mcp-filter 연동용).
- */
 export async function judgeMcpSelection(
   { taskText = "", agentType = "default", availableServers = [] } = {},
   options = {},
@@ -1570,9 +1542,7 @@ export async function judgeMcpRecommendation(
   };
 }
 
-/**
- * 7-1. Claude 워커 MCP 선택 shadow: 적용하지 않고 판정만 기록해 절감량과 도구 손실을 재는 근거를 쌓는다.
- */
+// 적용하지 않고 판정만 기록해 절감량과 도구 손실을 측정한다.
 export async function recordMcpSelectionShadow(
   { taskText = "", agentType = "default", availableServers = [] } = {},
   options = {},
@@ -1597,9 +1567,6 @@ export async function recordMcpSelectionShadow(
   return selection;
 }
 
-/**
- * 8. 다중 세션 중 프롬프트에 맞는 대상 세션 자동 선택 (--thread auto 모호성 해소).
- */
 export async function judgeTargetSession(
   { prompt = "", candidates = [] } = {},
   options = {},
@@ -1669,9 +1636,6 @@ export async function judgeTargetSession(
   };
 }
 
-/**
- * 9. 서브태스크별 최적 워커 CLI 및 역할 배정 (orchestrator 연동용).
- */
 export async function judgeTaskAssignment(
   { subtasks = [], workers = ["codex", "claude", "antigravity"] } = {},
   options = {},
@@ -1782,9 +1746,6 @@ export async function judgeTaskAssignment(
   };
 }
 
-/**
- * 10. TUI 패인 프롬프트 제출 상태 판정 (pane.mjs 연동용).
- */
 export async function judgeComposerState(
   { capturedText = "", promptPrefix = "" } = {},
   options = {},
@@ -1825,9 +1786,6 @@ export async function judgeComposerState(
   return { state: res.choice, confidence: res.confidence };
 }
 
-/**
- * 11. 워커 개입/지시 주입 후 실제 반영 여부(Closed-loop Ack) 판정.
- */
 export async function judgeInstructionAck(
   { instruction = "", recentOutput = "" } = {},
   options = {},
@@ -1892,65 +1850,6 @@ export async function judgeInstructionAck(
   };
 }
 
-/**
- * 12. 팀 인박스 메시지 긴급도 분류.
- */
-export async function judgeInboxPriority(
-  { text = "", summary = "", from = "" } = {},
-  options = {},
-) {
-  if (!isJevEnabled(options)) return null;
-  if (!String(text || summary).trim()) return null;
-
-  const allowed = ["urgent_blocker", "needs_decision", "progress_fyi", "done"];
-  const res = await queryJev(
-    {
-      hook: "inbox_priority",
-      kind: "choice",
-      options: allowed,
-      includeScore: true,
-      criteria: {
-        urgent_blocker:
-          "Worker is completely blocked by a fatal error, missing permission, or broken environment and needs immediate lead intervention.",
-        needs_decision:
-          "Worker encountered an architectural or product ambiguity and needs a decision from the lead.",
-        progress_fyi:
-          "Routine progress update or intermediate status report that requires no immediate action.",
-        done: "Worker completed its assigned task and is reporting final deliverables.",
-      },
-      query:
-        "Classify the urgency of this worker-to-lead inbox message so the lead can prioritize responses.",
-      context: [
-        from ? `from: ${from}` : "",
-        summary ? `summary_metadata: ${outputMetadata(summary)}` : "",
-        `message_metadata: ${outputMetadata(text || summary)}`,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-    },
-    options,
-  );
-  if (!res || res.confidence < minConfidence(options)) return null;
-  if (!allowed.includes(res.choice)) return null;
-  const priorityWeight = {
-    urgent_blocker: 100,
-    needs_decision: 75,
-    done: 40,
-    progress_fyi: 10,
-  };
-  return {
-    priority: res.choice,
-    urgencyScore:
-      res.score ??
-      priorityWeight[res.choice] ??
-      Math.round(res.confidence * 100),
-    confidence: res.confidence,
-  };
-}
-
-/**
- * 13. 교차 리뷰 게이트 판정 (skip_review | cross_review | escalate_to_lead + 리뷰 루프 수렴 여부).
- */
 export async function judgeReviewGate(
   {
     diffStat = "",
@@ -2045,10 +1944,7 @@ export function parseRoutingBranches(markdown = "") {
   return branches;
 }
 
-/**
- * 14. tfx-harness 스킬 선택: 라우팅 정본 전문을 읽지 않도록 맞는 분기 하나를 고른다.
- * D0(명시 지정)은 호출자가 먼저 처리하고, 기준은 정본에서 읽어 사본을 두지 않는다.
- */
+// D0(명시 지정)은 호출자가 먼저 처리하고, 기준은 라우팅 정본에서 읽어 사본을 두지 않는다.
 export async function judgeRoutingBranch(
   { task = "", routingText = "" } = {},
   options = {},
@@ -2185,9 +2081,6 @@ const WORKER_MODE_ARTIFACT_SIGNALS = [
   ["파일 확장자", /\.[a-z][a-z0-9]{0,9}\b/iu],
 ];
 
-/**
- * 15. 워커 권한 모드를 권고하고, Jev를 쓰지 못할 때도 규칙 판정을 반환한다.
- */
 export async function judgeWorkerMode(input = {}, options = {}) {
   const task =
     typeof input?.task === "string" ? input.task.normalize("NFKC") : "";

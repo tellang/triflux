@@ -1,6 +1,3 @@
-// ============================================================================
-// ANSI 색상 (OMC colors.js 스키마 일치)
-// ============================================================================
 export const RESET = "\x1b[0m";
 export const DIM = "\x1b[2m";
 export const BOLD = "\x1b[1m";
@@ -8,8 +5,9 @@ export const RED = "\x1b[31m";
 export const GREEN = "\x1b[32m";
 export const YELLOW = "\x1b[33m";
 export const CYAN = "\x1b[36m";
-export const CLAUDE_ORANGE = "\x1b[38;2;232;112;64m"; // #E87040 (Claude 공식 오렌지)
-export const CODEX_WHITE = "\x1b[97m"; // bright white (SGR 37은 Windows Terminal에서 연회색 매핑)
+export const CLAUDE_ORANGE = "\x1b[38;2;232;112;64m";
+// SGR 37은 Windows Terminal에서 연회색으로 매핑되어 bright white를 쓴다.
+export const CODEX_WHITE = "\x1b[97m";
 export const GEMINI_BLUE = "\x1b[38;5;39m";
 
 export function green(t) {
@@ -53,7 +51,6 @@ export function coloredBar(percent, width = GAUGE_WIDTH, baseColor = null) {
   const safePercent = Math.min(100, Math.max(0, percent));
   const perBlock = 100 / width;
 
-  // 상태별 색상
   let barColor;
   if (safePercent >= 85) barColor = RED;
   else if (safePercent >= 70) barColor = YELLOW;
@@ -65,19 +62,17 @@ export function coloredBar(percent, width = GAUGE_WIDTH, baseColor = null) {
     const blockEnd = (i + 1) * perBlock;
 
     if (safePercent >= blockEnd) {
-      bar += "█"; // 완전 채움
+      bar += "█";
     } else if (safePercent > blockStart) {
-      // 프론티어: 구간 내 진행률
       const progress = (safePercent - blockStart) / perBlock;
       if (progress >= 0.75) bar += "▓";
       else if (progress >= 0.33) bar += "▒";
       else bar += "░";
     } else {
-      bar += "░"; // 미도달
+      bar += "░";
     }
   }
 
-  // 채워진 부분 = barColor, 빈 부분 = DIM
   const filledEnd = Math.ceil(safePercent / perBlock);
   const coloredPart = barColor + bar.slice(0, filledEnd) + RESET;
   const dimPart = filledEnd < width ? DIM + bar.slice(filledEnd) + RESET : "";
@@ -85,7 +80,6 @@ export function coloredBar(percent, width = GAUGE_WIDTH, baseColor = null) {
   return coloredPart + dimPart;
 }
 
-// 프로바이더별 색상 % (< 70%: 프로바이더 색, ≥ 70%: 경고색)
 export function colorByProvider(value, text, providerColorFn) {
   if (value >= 85) return red(text);
   if (value >= 70) return yellow(text);

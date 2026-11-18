@@ -1,12 +1,9 @@
 #!/usr/bin/env node
-// tfx-doctor — triflux doctor 바로가기
 import { fileURLToPath } from "node:url";
 
 process.argv = [
   process.argv[0],
-  // triflux.mjs's own isMainModule() guard compares this against its real
-  // path, not this shim's — point argv[1] at triflux.mjs so it recognizes
-  // itself as the entry point instead of silently no-op'ing.
+  // triflux.mjs의 isMainModule()이 이 심 대신 본체 경로를 보므로 argv[1]을 본체로 맞춘다.
   fileURLToPath(new URL("./triflux.mjs", import.meta.url)),
   "doctor",
   ...process.argv.slice(2),

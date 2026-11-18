@@ -14,12 +14,6 @@ export const RESULTS_INDEX_VERSION = 1;
 const MAX_HEADING_SCAN_BYTES = 16 * 1024 * 1024;
 const MAX_HEADINGS_PER_WORKER = 200;
 
-/**
- * 마크다운 본문에서 펜스 코드블록 바깥의 H1~H3 헤딩과 1-기반 줄 번호를 추출한다.
- *
- * @param {string} content
- * @returns {Array<{ level: number, line: number, text: string }>}
- */
 export function extractMarkdownHeadings(content) {
   if (typeof content !== "string" || content.length === 0) return [];
   const lines = content.split(/\r?\n/u);
@@ -83,12 +77,6 @@ export function resultsIndexPath(dir, sessionName) {
   return join(dir, `${sessionName}.results.json`);
 }
 
-/**
- * @param {string} path
- * @param {string} sessionName
- * @param {Array<{paneName: string, displayName?: string, cli: string, role?: string, resultFile: string}>} workers
- * @param {() => boolean} canWrite
- */
 export function createResultsIndex(path, sessionName, workers, canWrite) {
   const now = () => new Date().toISOString();
   const index = {
@@ -130,9 +118,7 @@ export function createResultsIndex(path, sessionName, workers, canWrite) {
     } catch {
       try {
         rmSync(tmp, { force: true });
-      } catch {
-        /* best-effort */
-      }
+      } catch {}
     }
   };
 
