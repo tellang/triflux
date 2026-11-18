@@ -28,6 +28,13 @@ import {
 } from "./constants.mjs";
 import { buildContextUsageView } from "./context-monitor.mjs";
 import {
+  getAntigravityAccountLabel,
+  getAntigravityAuthKind,
+  readAntigravityQuotaSnapshot,
+  refreshAntigravityQuotaCache,
+  scheduleAntigravityQuotaRefresh,
+} from "./providers/antigravity.mjs";
+import {
   fetchClaudeUsage,
   getClaudeEmail,
   readClaudeUsageSnapshot,
@@ -39,13 +46,6 @@ import {
   refreshCodexRateLimitsCache,
   scheduleCodexRateLimitRefresh,
 } from "./providers/codex.mjs";
-import {
-  getAntigravityAccountLabel,
-  getAntigravityAuthKind,
-  readAntigravityQuotaSnapshot,
-  refreshAntigravityQuotaCache,
-  scheduleAntigravityQuotaRefresh,
-} from "./providers/gemini.mjs";
 import {
   getClaudeRows,
   getMicroLine,

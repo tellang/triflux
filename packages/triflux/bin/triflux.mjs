@@ -40,6 +40,7 @@ import {
   listSessions,
   tmuxExec,
 } from "../hub/team/session.mjs";
+import { ensureAgyProfiles } from "../scripts/lib/agy-profiles.mjs";
 import {
   addNotice,
   addStep,
@@ -57,18 +58,6 @@ import {
   inspectAgyPeerWakePatch,
   inspectMacTimeoutDependency,
 } from "../scripts/lib/doctor-env-checks.mjs";
-import { ensureGeminiProfiles } from "../scripts/lib/gemini-profiles.mjs";
-import {
-  addRegistryServer,
-  createDefaultRegistry,
-  discoverProjectMcpTargets,
-  inspectRegistry,
-  inspectRegistryStatus,
-  removeRegistryServer,
-  removeServerFromTargets,
-  saveRegistry,
-  syncRegistryTargets,
-} from "../scripts/lib/mcp-guard-engine.mjs";
 import { pinRegistryMcpPackages } from "../scripts/lib/mcp-package-pin.mjs";
 import {
   formatPsmuxInstallGuidance,
@@ -256,8 +245,8 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
     ],
   },
   mcp: {
-    usage: "tfx mcp <list|sync|add|remove> [--json]",
-    description: "MCP registry 상태 확인 및 중앙 동기화",
+    usage: "tfx mcp <list|catalog-refresh> [--json]",
+    description: "MCP 인벤토리 조회 및 추천 카탈로그 갱신",
     subcommands: {
       list: {
         usage: "tfx mcp list [--json]",
@@ -265,39 +254,17 @@ const CLI_COMMAND_SCHEMAS = Object.freeze({
           {
             name: "--json",
             type: "boolean",
-            description: "registry + 실제 설정 상태를 JSON으로 출력",
+            description: "MCP 인벤토리 요약을 JSON으로 출력",
           },
         ],
       },
-      sync: {
-        usage:
-          "tfx mcp sync [--json] [--all-projects [root]] [--dry-run] [--exclude <glob>]",
+      "catalog-refresh": {
+        usage: "tfx mcp catalog-refresh [--json]",
         options: [
           {
             name: "--json",
             type: "boolean",
-            description: "동기화 결과를 JSON으로 출력",
-          },
-        ],
-      },
-      add: {
-        usage: "tfx mcp add <name> --url <url> [--json]",
-        options: [
-          { name: "--url", type: "string", description: "등록할 MCP URL" },
-          {
-            name: "--json",
-            type: "boolean",
-            description: "등록 결과를 JSON으로 출력",
-          },
-        ],
-      },
-      remove: {
-        usage: "tfx mcp remove <name> [--json]",
-        options: [
-          {
-            name: "--json",
-            type: "boolean",
-            description: "제거 결과를 JSON으로 출력",
+            description: "공식 공개 카탈로그 캐시 갱신 결과를 JSON으로 출력",
           },
         ],
       },
@@ -1570,14 +1537,14 @@ async function cmdSetup(options = {}) {
         `Codex profiles 설정 실패: ${renderErrorMessage(codex.message)}`,
       );
     if (codex.changed) report.alreadyInGoalState = false;
-    const gemini = ensureGeminiProfiles();
-    if (!gemini.ok)
+    const agy = ensureAgyProfiles();
+    if (!agy.ok)
       addWarning(
         report,
-        "gemini-profiles",
-        `Antigravity/Gemini profiles 설정 실패: ${renderErrorMessage(gemini.message)}`,
+        "agy-profiles",
+        `Antigravity profiles 설정 실패: ${renderErrorMessage(agy.message)}`,
       );
-    if (gemini.changed) report.alreadyInGoalState = false;
+    if (agy.changed) report.alreadyInGoalState = false;
 
     const hudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
     if (existsSync(hudPath)) {
@@ -1614,7 +1581,7 @@ async function cmdSetup(options = {}) {
       managedSkills: skills.managedSkills,
       files: SYNC_MAP.length,
       codex,
-      gemini,
+      gemini: agy,
       hooks: consent.codexHooks,
     });
     // ── psmux 기본 셸 자동 수정 (cmd.exe → PowerShell) ──
@@ -1698,101 +1665,6 @@ function renderTable(headers, rows) {
   for (const row of rows) {
     console.log(`    ${formatRow(row)}`);
   }
-}
-
-function getOptionValue(args, optionName) {
-  const index = args.indexOf(optionName);
-  if (index === -1) return null;
-  return args[index + 1] ?? null;
-}
-
-function statusBadge(status) {
-  switch (status) {
-    case "present":
-    case "ok":
-    case "removed":
-      return `${GREEN_BRIGHT}${status}${RESET}`;
-    case "updated":
-      return `${AMBER}${status}${RESET}`;
-    case "missing":
-    case "missing-file":
-    case "warning":
-    case "skipped":
-      return `${YELLOW}${status}${RESET}`;
-    case "mismatch":
-    case "invalid":
-    case "invalid-config":
-      return `${RED_BRIGHT}${status}${RESET}`;
-    default:
-      return status;
-  }
-}
-
-// URL 은 같고 헤더만 다르면 그렇게 보여 준다. URL 만 찍으면 같은 값끼리 불일치로 보인다.
-function isHeaderOnlyMismatch(row) {
-  return Boolean(row.expectedUrl) && row.expectedUrl === row.actualUrl;
-}
-
-// stdio 항목은 명령이 같고 인자만 다를 수 있어 인자까지 보여 준다.
-function mcpTarget(url, command, args = []) {
-  return url || [command, ...args].filter(Boolean).join(" ");
-}
-
-function buildMcpStatusRows(statusInfo) {
-  const registryRows = statusInfo.rows
-    .filter((row) => row.type === "registry")
-    .map((row) => {
-      let detail = "";
-      if (row.status === "present")
-        detail = row.actualUrl || row.actualCommand || row.expectedUrl;
-      else if (row.status === "missing") detail = "registry only";
-      else if (row.status === "missing-file") detail = "config missing";
-      else if (row.status === "mismatch")
-        detail = isHeaderOnlyMismatch(row)
-          ? `header ${row.headerStatus}: ${row.expectedHeaderNames.join(", ")}`
-          : `expected ${mcpTarget(row.expectedUrl, row.expectedCommand, row.expectedArgs)}`;
-      else if (row.status === "invalid-config") detail = "parse error";
-      else if (row.status === "skipped") detail = row.message || "skipped";
-      else if (row.status === "stdio") detail = "configured as stdio";
-      return [
-        row.name,
-        row.label,
-        statusBadge(row.status),
-        formatPathForDisplay(row.filePath),
-        detail,
-      ];
-    });
-
-  const stdioRows = statusInfo.rows
-    .filter((row) => row.type === "stdio")
-    .map((row) => [
-      row.name,
-      row.label,
-      statusBadge("warning"),
-      formatPathForDisplay(row.filePath),
-      row.command ? `stdio: ${row.command}` : "stdio MCP",
-    ]);
-
-  return [...registryRows, ...stdioRows];
-}
-
-function ensureValidRegistryState() {
-  let registryState = inspectRegistry();
-  if (!registryState.exists) {
-    saveRegistry(createDefaultRegistry());
-    registryState = inspectRegistry();
-  }
-  if (!registryState.valid) {
-    throw createCliError(
-      `MCP registry invalid: ${registryState.errors.join("; ")}`,
-      {
-        exitCode: EXIT_CONFIG_ERROR,
-        reason: "configError",
-        fix: `${registryState.path}의 JSON 구조를 수정하세요.`,
-      },
-    );
-  }
-  return registryState;
 }
 
 async function cmdDoctor(options = {}) {
@@ -2104,48 +1976,6 @@ async function cmdDoctor(options = {}) {
         }
       }
       if (cleaned === 0) info("에러 캐시 없음");
-      const registryStateForFix = inspectRegistry();
-      if (registryStateForFix.valid) {
-        try {
-          const mcpSync = syncRegistryTargets({
-            registry: registryStateForFix.registry,
-          });
-          const updatedCount = mcpSync.actions.filter(
-            (action) => action.status === "updated",
-          ).length;
-          const invalidCount = mcpSync.actions.filter(
-            (action) => action.status === "invalid-config",
-          ).length;
-          report.actions.push({
-            type: "mcp-sync",
-            status: invalidCount > 0 ? "issues" : "ok",
-            actions: mcpSync.actions,
-          });
-          for (const action of mcpSync.actions)
-            if (action.status === "warning" && action.message)
-              warn(`${action.label}: ${action.message}`);
-          if (updatedCount > 0)
-            ok(`MCP registry 동기화: ${updatedCount}개 설정 반영됨`);
-          else info("MCP registry: 이미 최신 상태");
-          if (invalidCount > 0)
-            warn(`MCP registry 동기화 건너뜀: parse error ${invalidCount}개`);
-        } catch (error) {
-          report.actions.push({
-            type: "mcp-sync",
-            status: "failed",
-            message: error.message,
-          });
-          warn(`MCP registry 자동 동기화 실패: ${error.message}`);
-        }
-      } else if (registryStateForFix.exists) {
-        saveRegistry(createDefaultRegistry());
-        report.actions.push({ type: "mcp-registry-reset", status: "ok" });
-        ok("MCP registry 손상 → 기본값으로 재생성됨");
-      } else {
-        saveRegistry(createDefaultRegistry());
-        report.actions.push({ type: "mcp-registry-create", status: "ok" });
-        ok("MCP registry 없음 → 기본값으로 자동 생성됨");
-      }
       console.log(`\n  ${LINE}`);
       info("수정 완료 — 아래 진단 결과를 확인하세요");
       console.log("");
@@ -3107,123 +2937,6 @@ async function cmdDoctor(options = {}) {
       ok("Windows 전용 검사 — 건너뜀");
     }
 
-    // ── MCP 중앙 레지스트리 ──
-    section("MCP Registry");
-    {
-      const registryState = inspectRegistry();
-      if (!registryState.valid) {
-        addDoctorCheck(report, {
-          name: "mcp-registry",
-          status: registryState.exists ? "invalid" : "missing",
-          path: registryState.path,
-          errors: registryState.errors,
-          fix: "tfx doctor --fix",
-        });
-        warn("MCP registry 없음 또는 손상: tfx doctor --fix");
-        issues++;
-      } else {
-        const statusInfo = inspectRegistryStatus(registryState.registry);
-        const invalidConfigs = statusInfo.configs.filter(
-          (config) => config.parseError,
-        );
-        const mismatchRows = statusInfo.rows.filter(
-          (row) => row.type === "registry" && row.status === "mismatch",
-        );
-        const missingRows = statusInfo.rows.filter(
-          (row) => row.type === "registry" && row.status === "missing",
-        );
-        const missingFileRows = statusInfo.rows.filter(
-          (row) => row.type === "registry" && row.status === "missing-file",
-        );
-        const stdioRows = statusInfo.rows.filter((row) => row.type === "stdio");
-        const hasHardIssues =
-          invalidConfigs.length > 0 || mismatchRows.length > 0;
-        // 레지스트리 밖 stdio MCP 는 사용자가 직접 둔 서버라 문제로 세지 않는다.
-        const status = hasHardIssues ? "issues" : "ok";
-
-        addDoctorCheck(report, {
-          name: "mcp-registry",
-          status,
-          path: registryState.path,
-          server_count: Object.keys(registryState.registry.servers || {})
-            .length,
-          rows: statusInfo.rows,
-          invalid_configs: invalidConfigs.map((config) => ({
-            file: config.filePath,
-            error: config.parseError?.message || "parse error",
-          })),
-          ...(hasHardIssues
-            ? { fix: "tfx doctor --fix 또는 tfx mcp sync" }
-            : {}),
-        });
-
-        ok(
-          `registry 정상 (${Object.keys(registryState.registry.servers || {}).length}개 server)`,
-        );
-
-        if (statusInfo.rows.length > 0) {
-          renderTable(
-            ["server", "target", "status", "config", "detail"],
-            buildMcpStatusRows(statusInfo),
-          );
-        } else {
-          info("등록된 MCP server 없음");
-        }
-
-        for (const config of invalidConfigs) {
-          fail(`${config.label}: 설정 파싱 실패`);
-          info(
-            `${formatPathForDisplay(config.filePath)} — ${config.parseError.message}`,
-          );
-        }
-
-        for (const row of mismatchRows) {
-          if (isHeaderOnlyMismatch(row)) {
-            warn(`${row.label}: ${row.name} 헤더 불일치 (${row.headerStatus})`);
-            info(`expected ${row.expectedHeaderNames.join(", ") || "없음"}`);
-            info(`actual   ${row.actualHeaderNames.join(", ") || "없음"}`);
-            continue;
-          }
-          warn(`${row.label}: ${row.name} 설정 불일치`);
-          info(
-            `expected ${mcpTarget(row.expectedUrl, row.expectedCommand, row.expectedArgs)}`,
-          );
-          const actualTarget = mcpTarget(
-            row.actualUrl,
-            row.actualCommand,
-            row.actualArgs,
-          );
-          if (actualTarget) info(`actual   ${actualTarget}`);
-        }
-
-        for (const row of missingFileRows) {
-          info(
-            `${row.label}: ${row.name} 미배치 (${formatPathForDisplay(row.filePath)})`,
-          );
-        }
-
-        for (const row of missingRows) {
-          info(`${row.label}: ${row.name} 누락`);
-        }
-
-        if (stdioRows.length === 0) {
-          ok("미등록 stdio MCP 없음");
-        } else {
-          info(
-            `레지스트리 밖 stdio MCP ${stdioRows.length}개(사용자 설정, 점검 대상 아님)`,
-          );
-          for (const row of stdioRows) {
-            info(
-              `${row.label}: ${row.name}${row.command ? ` (${row.command})` : ""}`,
-            );
-          }
-        }
-
-        issues += invalidConfigs.length;
-        issues += mismatchRows.length;
-      }
-    }
-
     // ── Codex Config Health (BUG-H #132) ──
     // 이전 버전의 swap이 남긴 백업을 감지하고 --fix로 복원한다.
     section("Codex Config Health");
@@ -3725,11 +3438,8 @@ async function cmdMcp(args = [], options = {}) {
     console.log(`
   ${AMBER}${BOLD}⬡ tfx mcp${RESET}
 
-    ${WHITE_BRIGHT}tfx mcp list${RESET}                 ${GRAY}registry + 실제 설정 상태 테이블${RESET}
+    ${WHITE_BRIGHT}tfx mcp list${RESET}                 ${GRAY}Codex/Claude MCP 인벤토리 요약${RESET}
     ${WHITE_BRIGHT}tfx mcp catalog-refresh${RESET}      ${GRAY}공식 공개 카탈로그 캐시 갱신, 설치와 활성화 없음${RESET}
-    ${WHITE_BRIGHT}tfx mcp sync${RESET}                 ${GRAY}registry 기준 전체 스캔 + 치환${RESET}
-    ${WHITE_BRIGHT}tfx mcp add <name> --url <url>${RESET}    ${GRAY}registry 등록 + 대상 설정 반영${RESET}
-    ${WHITE_BRIGHT}tfx mcp remove <name>${RESET}        ${GRAY}registry + 실제 설정에서 제거${RESET}
 `);
     return;
   }
@@ -3752,210 +3462,41 @@ async function cmdMcp(args = [], options = {}) {
       return;
     }
     case "list": {
-      const registryState = ensureValidRegistryState();
-      const statusInfo = inspectRegistryStatus(registryState.registry);
+      const { buildInventory } = await import("../scripts/mcp-check.mjs");
+      const inventory = buildInventory();
       if (json) {
-        printJson({
-          registry_path: registryState.path,
-          server_count: Object.keys(registryState.registry.servers || {})
-            .length,
-          rows: statusInfo.rows,
-          configs: statusInfo.configs.map((config) => ({
-            file: config.filePath,
-            label: config.label,
-            exists: config.exists,
-            parse_error: config.parseError?.message || null,
-          })),
-        });
+        printJson(inventory);
         return;
       }
 
       console.log(`\n  ${AMBER}${BOLD}⬡ triflux mcp${RESET} ${VER}\n`);
       console.log(`  ${LINE}`);
-      section("Registry");
-      info(formatPathForDisplay(registryState.path));
-      ok(
-        `${Object.keys(registryState.registry.servers || {}).length}개 server 등록됨`,
+      section("Inventory");
+      info(
+        `Codex: ${inventory.codex.available ? `${inventory.codex.servers.length}개 서버` : "사용 불가"}`,
       );
-      if (statusInfo.rows.length === 0) {
-        info("표시할 MCP 상태 없음");
+      info(`Claude: ${inventory.claude.servers.length}개 서버`);
+      const rows = [
+        ...inventory.codex.servers.map((server) => [
+          "codex",
+          server.name,
+          server.status || "unknown",
+          String(server.tool_count ?? 0),
+          (server.domain_tags || []).join(", ") || "-",
+        ]),
+        ...inventory.claude.servers.map((server) => [
+          "claude",
+          server.name,
+          server.status || "unknown",
+          String(server.tool_count ?? 0),
+          (server.domain_tags || []).join(", ") || "-",
+        ]),
+      ];
+      if (rows.length === 0) {
+        info("표시할 MCP 서버 없음");
       } else {
-        renderTable(
-          ["server", "target", "status", "config", "detail"],
-          buildMcpStatusRows(statusInfo),
-        );
+        renderTable(["client", "server", "status", "tools", "tags"], rows);
       }
-      console.log("");
-      return;
-    }
-
-    case "sync": {
-      const registryState = ensureValidRegistryState();
-      const allProjectsIndex = args.indexOf("--all-projects");
-      const allProjectsRoot =
-        allProjectsIndex >= 0 &&
-        args[allProjectsIndex + 1] &&
-        !String(args[allProjectsIndex + 1]).startsWith("--")
-          ? args[allProjectsIndex + 1]
-          : null;
-      const dryRun = args.includes("--dry-run");
-      const excludes = args.flatMap((arg, index) =>
-        arg === "--exclude" && args[index + 1] ? [args[index + 1]] : [],
-      );
-      const allProjects =
-        allProjectsIndex >= 0
-          ? discoverProjectMcpTargets({
-              root: allProjectsRoot || undefined,
-              exclude: excludes,
-            })
-          : null;
-      const result = dryRun
-        ? { actions: [] }
-        : syncRegistryTargets({
-            registry: registryState.registry,
-            ...(allProjects ? { targets: allProjects.targets } : {}),
-          });
-      if (json) {
-        printJson({
-          registry_path: registryState.path,
-          ...(allProjects
-            ? {
-                dry_run: dryRun,
-                all_projects: {
-                  root: allProjects.root,
-                  maxDepth: allProjects.maxDepth,
-                  exclude: allProjects.exclude,
-                  count: allProjects.targets.length,
-                },
-                targets: allProjects.targets,
-              }
-            : {}),
-          actions: result.actions,
-        });
-        return;
-      }
-
-      console.log(`\n  ${AMBER}${BOLD}⬡ triflux mcp sync${RESET} ${VER}\n`);
-      console.log(`  ${LINE}`);
-      if (allProjects) {
-        section("Project Targets");
-        info(`${allProjects.targets.length}개 파일 (${allProjects.root})`);
-        for (const target of allProjects.targets) {
-          info(formatPathForDisplay(target.filePath));
-        }
-        if (dryRun) {
-          console.log("");
-          return;
-        }
-      }
-      section("Actions");
-      for (const action of result.actions) {
-        for (const warning of action.warnings || []) {
-          process.stderr.write(`${warning}\n`);
-        }
-        const label = `${action.label} ${DIM}(${formatPathForDisplay(action.filePath)})${RESET}`;
-        if (action.status === "updated") ok(`${label} → updated`);
-        else if (action.status === "warning")
-          warn(
-            `${label} → warning${action.message ? `: ${action.message}` : ""}`,
-          );
-        else if (action.status === "invalid-config")
-          fail(`${label} → invalid-config`);
-        else info(`${stripAnsi(label)} → ${action.status}`);
-      }
-      console.log("");
-      return;
-    }
-
-    case "add": {
-      const name = String(args[1] || "").trim();
-      const url = getOptionValue(args, "--url");
-      if (!name) {
-        throw createCliError("MCP server name is required", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx mcp add <name> --url <url>",
-        });
-      }
-      if (!url) {
-        throw createCliError("MCP server url is required", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx mcp add <name> --url <url>",
-        });
-      }
-
-      const normalizedUrl = (() => {
-        try {
-          return new URL(url).toString();
-        } catch {
-          throw createCliError(`Invalid MCP URL: ${url}`, {
-            exitCode: EXIT_ARG_ERROR,
-            reason: "argError",
-            fix: "http:// 또는 https:// URL을 사용하세요.",
-          });
-        }
-      })();
-
-      const server = addRegistryServer(name, normalizedUrl);
-      const registryState = ensureValidRegistryState();
-      const syncResult = syncRegistryTargets({
-        registry: registryState.registry,
-      });
-      if (json) {
-        printJson({
-          name,
-          server,
-          actions: syncResult.actions,
-        });
-        return;
-      }
-
-      console.log(`\n  ${AMBER}${BOLD}⬡ triflux mcp add${RESET} ${VER}\n`);
-      console.log(`  ${LINE}`);
-      ok(`${name} 등록됨`);
-      info(normalizedUrl);
-      const updated = syncResult.actions.filter(
-        (action) => action.status === "updated",
-      ).length;
-      info(`동기화 반영: ${updated}개`);
-      console.log("");
-      return;
-    }
-
-    case "remove": {
-      const name = String(args[1] || "").trim();
-      if (!name) {
-        throw createCliError("MCP server name is required", {
-          exitCode: EXIT_ARG_ERROR,
-          reason: "argError",
-          fix: "tfx mcp remove <name>",
-        });
-      }
-
-      ensureValidRegistryState();
-      const removed = removeRegistryServer(name);
-      const cleanup = removeServerFromTargets(name, {
-        targets: removed?.targets,
-      });
-      if (json) {
-        printJson({
-          name,
-          removed: Boolean(removed),
-          server: removed,
-          actions: cleanup.actions,
-        });
-        return;
-      }
-
-      console.log(`\n  ${AMBER}${BOLD}⬡ triflux mcp remove${RESET} ${VER}\n`);
-      console.log(`  ${LINE}`);
-      if (removed) ok(`${name} registry에서 제거됨`);
-      else warn(`${name} registry entry 없음`);
-      const changed = cleanup.actions.filter(
-        (action) => action.status === "removed",
-      ).length;
-      info(`설정 제거 반영: ${changed}개`);
       console.log("");
       return;
     }
@@ -3986,7 +3527,7 @@ function cmdHelp() {
     ${DIM}  --reset${RESET}      ${GRAY}캐시 전체 초기화${RESET}
     ${DIM}  --json${RESET}       ${GRAY}구조화된 진단 결과 JSON 출력${RESET}
     ${DIM}  --help${RESET}       ${GRAY}--audit, --diagnose 등 전체 옵션${RESET}
-    ${WHITE_BRIGHT}tfx mcp${RESET}        ${GRAY}MCP registry 관리 (list/sync/add/remove)${RESET}
+    ${WHITE_BRIGHT}tfx mcp${RESET}        ${GRAY}MCP 서버 인벤토리 조회 (list/catalog-refresh)${RESET}
     ${WHITE_BRIGHT}tfx update${RESET}     ${GRAY}최신 안정 버전으로 업데이트${RESET}
     ${WHITE_BRIGHT}tfx list${RESET}       ${GRAY}설치된 스킬 목록${RESET}
     ${WHITE_BRIGHT}tfx lead${RESET}       ${GRAY}리드 세션 띄우기 (tfx lead <역할>)${RESET}

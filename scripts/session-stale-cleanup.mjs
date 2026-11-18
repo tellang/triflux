@@ -23,8 +23,10 @@ import {
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { privateTmpRoot } from "../hub/lib/private-tmp.mjs";
-import { findFsmonitorDaemons } from "../hub/lib/process-utils.mjs";
-import { isProcessAlive } from "./lib/process-utils.mjs";
+import {
+  findFsmonitorDaemons,
+  isProcessAlive,
+} from "../hub/lib/process-utils.mjs";
 
 const MULTI_STATE_FILE = join(tmpdir(), "tfx-multi-state.json");
 const EXPIRE_MS = 30 * 60 * 1000; // 30분

@@ -106,7 +106,6 @@ const BOOLEAN_FLAGS = new Set([
   "json",
   "attach-a",
   "attach-b",
-  "attach-c",
   "no-wait",
   "no-relay-tag",
   "sandbox",
@@ -161,10 +160,7 @@ function usage(command) {
     "  tfx-live probe [--short SHORT] [--session-id ID] [--config-dir DIR] [--bridge ABS] [--timeout 10]",
     "  tfx-live list-sessions --cli codex|claude|agy [--transport tmux|uds] [--codex-socket PATH|default] [--cwd DIR] [--remote HOST (codex tmux only)]",
     "    Claude and agy list-sessions support local tmux only; --transport uds requires --cli codex.",
-    "  tfx-live converse --session NAME --prompts-file PATH [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500]",
-    "  tfx-live goal-driven --session NAME --goal TEXT [--cli codex|claude] [--remote HOST] [--cwd DIR] [--timeout 60] [--settle 1500] [--max-rounds 8] [--done-token DONE]",
-    "  tfx-live peer [--group NAME] [--cli-a codex] [--cli-b claude] [--cli-c CLI] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--model-c ID] [--effort-c TIER] [--session-a NAME[:WINDOW.PANE]] [--session-b NAME[:WINDOW.PANE]] [--session-c NAME[:WINDOW.PANE]] [--attach-a] [--attach-b] [--attach-c] [--transport-a tmux|queue|uds|auto] [--transport-b tmux|queue|uds|auto] [--transport-c tmux|queue|uds|auto] [--short-a SHORT] [--short-b SHORT] [--short-c SHORT] [--session-id-a ID] [--session-id-b ID] [--session-id-c ID] [--thread-a ID|auto] [--thread-b ID|auto] [--thread-c ID|auto] [--codex-socket-a PATH|default] [--codex-socket-b PATH|default] [--codex-socket-c PATH|default] [--bridge ABS] [--bridge-c ABS] [--remote HOST] [--cwd DIR] [--if-busy wait|fail] [--if-busy-a POLICY] [--if-busy-b POLICY] [--if-busy-c POLICY] [--busy-timeout 60] [--max-turn SECONDS] [--rounds 4] [--mode counting|freeform|debate] [--seed TEXT] [--timeout 60] [--via relay|message] [--report-to NAME]",
-    "    --via message (Claude x Claude): sends each side the other's session name once, then they talk with SendMessage; reports to --report-to or the calling Claude session.",
+    "  tfx-live peer [--group NAME] [--cli-a codex] [--cli-b claude] [--model-a ID] [--model-b ID] [--effort-a TIER] [--effort-b TIER] [--session-a NAME[:WINDOW.PANE]] [--session-b NAME[:WINDOW.PANE]] [--attach-a] [--attach-b] [--transport-a tmux|queue|uds|auto] [--transport-b tmux|queue|uds|auto] [--short-a SHORT] [--short-b SHORT] [--session-id-a ID] [--session-id-b ID] [--thread-a ID|auto] [--thread-b ID|auto] [--codex-socket-a PATH|default] [--codex-socket-b PATH|default] [--bridge ABS] [--remote HOST] [--cwd DIR] [--if-busy wait|fail] [--if-busy-a POLICY] [--if-busy-b POLICY] [--busy-timeout 60] [--max-turn SECONDS] [--rounds 4] [--mode freeform|debate] [--seed TEXT] [--timeout 60] [--via relay]",
     "    Codex TUI may use a shared app-server daemon. UDS ask resumes the thread to receive answer events; sending to an active thread with --if-busy steer merges input into that turn.",
   ];
   if (!command) return lines.join("\n");
@@ -7052,38 +7048,11 @@ function startOptsForSession(flags, session, side) {
   };
 }
 
-function askOptsForSession(flags, session, prompt, cli) {
-  return {
-    session,
-    prompt,
-    ...contextOpts(flags, cli),
-    noRelayTag: Object.hasOwn(flags, "no-relay-tag"),
-    remote: flags.remote,
-    timeoutMs: secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
-    settleMs: msFlag(flags, "settle", DEFAULT_SETTLE_MS),
-    pollIntervalMs: msFlag(flags, "poll-interval", DEFAULT_POLL_INTERVAL_MS),
-    ifBusy: flags["if-busy"] ?? "wait",
-    busyTimeoutMs: secondsFlag(
-      flags,
-      "busy-timeout",
-      secondsFlag(flags, "timeout", DEFAULT_ANSWER_TIMEOUT_MS),
-    ),
-  };
-}
-
 function stopOptsForSession(flags, session) {
   return {
     session,
     remote: flags.remote,
   };
-}
-
-async function readPromptsFile(path) {
-  const text = await readFile(path, "utf8");
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
 }
 
 async function stopAfterLifecycle(stopSpecs, primaryError = null) {
@@ -7107,114 +7076,10 @@ async function stopAfterLifecycle(stopSpecs, primaryError = null) {
   }
 }
 
-function turnFromAsk(prompt, result) {
-  return {
-    requestId: result.requestId,
-    prompt,
-    response: result.response,
-    done: result.done,
-  };
-}
-
-function hasDoneToken(response, doneToken) {
-  return String(response)
-    .split(/\r?\n/)
-    .some((line) => line.trim() === doneToken);
-}
-
-function parseFirstInteger(response) {
-  const match = String(response).match(/-?\d+/);
-  return match ? Number(match[0]) : null;
-}
-
-async function converse(flags) {
-  const adapter = selectAdapter(flags);
-  if (adapter.cli === "agy") throw new Error("agy is unavailable for converse");
-  const session = requireFlag(flags, "session");
-  const promptsFile = requireFlag(flags, "prompts-file");
-  const prompts = await readPromptsFile(promptsFile);
-  const turns = [];
-  let primaryError = null;
-
-  try {
-    await doStart(adapter, startOptsForSession(flags, session));
-    for (const prompt of prompts) {
-      const result = await doAsk(
-        adapter,
-        askOptsForSession(flags, session, prompt, adapter.cli),
-      );
-      turns.push(turnFromAsk(prompt, result));
-    }
-  } catch (error) {
-    primaryError = error;
-  } finally {
-    await stopAfterLifecycle(
-      [{ adapter, opts: stopOptsForSession(flags, session) }],
-      primaryError,
-    );
-  }
-
-  printJson({
-    cli: adapter.cli,
-    session,
-    remote: flags.remote ?? null,
-    turns,
-    stopped: true,
-  });
-}
-
-async function goalDriven(flags) {
-  const adapter = selectAdapter(flags);
-  if (adapter.cli === "agy")
-    throw new Error("agy is unavailable for goal-driven");
-  const session = requireFlag(flags, "session");
-  const goal = requireFlag(flags, "goal");
-  const maxRounds = integerFlag(flags, "max-rounds", 8);
-  const doneToken = flags["done-token"] ?? "DONE";
-  const turns = [];
-  let doneTokenSeen = false;
-  let primaryError = null;
-
-  try {
-    await doStart(adapter, startOptsForSession(flags, session));
-    for (let round = 1; round <= maxRounds; round += 1) {
-      const prompt =
-        round === 1
-          ? `${goal}\n\nWhen you have FULLY completed this, reply with a line containing only the token ${doneToken}. Otherwise do the next step and end by asking to proceed.`
-          : `Continue. Reply with only ${doneToken} on its own line when fully complete.`;
-      const result = await doAsk(
-        adapter,
-        askOptsForSession(flags, session, prompt, adapter.cli),
-      );
-      turns.push(turnFromAsk(prompt, result));
-      if (hasDoneToken(result.response, doneToken)) {
-        doneTokenSeen = true;
-        break;
-      }
-    }
-  } catch (error) {
-    primaryError = error;
-  } finally {
-    await stopAfterLifecycle(
-      [{ adapter, opts: stopOptsForSession(flags, session) }],
-      primaryError,
-    );
-  }
-
-  printJson({
-    cli: adapter.cli,
-    session,
-    rounds: turns.length,
-    doneTokenSeen,
-    turns,
-    stopped: true,
-  });
-}
-
 function peerMode(flags) {
-  const mode = flags.mode ?? "counting";
-  if (!["counting", "freeform", "debate"].includes(mode)) {
-    throw new Error("--mode must be one of: counting, freeform, debate");
+  const mode = flags.mode ?? "freeform";
+  if (!["freeform", "debate"].includes(mode)) {
+    throw new Error("--mode must be one of: freeform, debate");
   }
   return mode;
 }
@@ -7239,13 +7104,6 @@ function peerPrompt(
           ]
         : []),
     ].join("\n");
-  } else if (mode === "counting") {
-    if (hopIndex === 0) {
-      prompt = "Reply with only the integer 1.";
-    } else {
-      prompt = `The current integer is ${previous}. Add 1 to it and reply with ONLY the resulting integer, nothing else.`;
-      if (otherResponses) prompt = `${otherResponses}\n${prompt}`;
-    }
   } else if (hopIndex === 0) {
     prompt = previous;
   } else {
@@ -7464,7 +7322,7 @@ function createPeerSignalController({
   };
 }
 
-function peerArtifactPaths(sessionA, sessionB, sessionC = null) {
+function peerArtifactPaths(sessionA, sessionB) {
   const preferredDir =
     process.env.TFX_LIVE_ARTIFACT_DIR ??
     pathJoin(homedir(), ".claude", "cache", "triflux", "tfx-live", "peer-runs");
@@ -7478,7 +7336,7 @@ function peerArtifactPaths(sessionA, sessionB, sessionC = null) {
     String(value)
       .replace(/[^A-Za-z0-9._-]+/g, "-")
       .slice(0, 48);
-  const runId = `peer-${safe(sessionA)}-${safe(sessionB)}${sessionC === null ? "" : `-${safe(sessionC)}`}-${Date.now()}-${process.pid}`;
+  const runId = `peer-${safe(sessionA)}-${safe(sessionB)}-${Date.now()}-${process.pid}`;
   return {
     transcriptPath: pathJoin(artifactDir, `${runId}.transcript.json`),
     statusPath: pathJoin(artifactDir, `${runId}.status.json`),
@@ -7494,7 +7352,6 @@ function persistPeerTranscript(paths, output) {
         rounds: output.rounds,
         cliA: output.cliA,
         cliB: output.cliB,
-        ...(output.cliC === undefined ? {} : { cliC: output.cliC }),
         hops_completed: output.hops.length,
         hops: output.hops,
       },
@@ -7709,110 +7566,6 @@ function addStopSpecOnce(stopSpecs, adapter, opts) {
   }
 }
 
-// Claude 끼리는 SendMessage 로 직접 주고받게 한다. tfx-live 는 양쪽에 상대 이름과
-// 끝낼 조건을 한 번 넣고 빠지므로 왕복 횟수와 기록은 두 세션이 맡는다.
-async function peerViaMessage(flags, adapterA, adapterB) {
-  if (adapterA.cli !== "claude" || adapterB.cli !== "claude")
-    throw new Error("--via message requires --cli-a claude --cli-b claude");
-  if (flags.remote)
-    throw new Error("--via message supports local sessions only");
-  const rounds = integerFlag(flags, "rounds", 4);
-  const sides = [
-    ["a", adapterA, "peerA"],
-    ["b", adapterB, "peerB"],
-  ].map(([side, adapter, fallback]) => {
-    const session = flags[`session-${side}`] ?? fallback;
-    const base = peerSideBaseOpts(flags, side, adapter, session);
-    if (base.transport !== "tmux")
-      throw new Error(
-        `--via message needs a tmux Claude session (side ${side})`,
-      );
-    return {
-      side,
-      adapter,
-      base,
-      session,
-      attached: Object.hasOwn(flags, `attach-${side}`),
-    };
-  });
-  const [a, b] = sides;
-  // 보고 받을 쪽은 SendMessage 가 닿는 Claude 세션이어야 한다.
-  const reportTo =
-    flags["report-to"] ??
-    (process.env.CLAUDE_PID ? await resolveSenderName() : null);
-  const finish = reportTo
-    ? `send the final agreement to "${reportTo}" with SendMessage as`
-    : "reply in this session with";
-  const stopSpecs = [];
-  const sent = [];
-  try {
-    for (const entry of sides) {
-      if (entry.attached) {
-        await verifyAttachedPeerSide(entry.adapter, entry.base);
-      } else {
-        await doStart(
-          entry.adapter,
-          startOptsForSession(flags, entry.session, entry.side),
-        );
-        addStopSpecOnce(stopSpecs, entry.adapter, entry.base);
-      }
-      // 같은 이름이 이미 있으면 Claude 가 이름 뒤에 번호를 붙이므로 pane 에 등록된 실제 이름을
-      // 읽는다. 그 사이 활성 pane 이 바뀌어도 안내가 같은 pane 에 가도록 pane ID 로 보낸다.
-      const target = await claudeTmuxTarget(entry.session);
-      entry.name = target?.name ?? null;
-      entry.paneId = target?.paneId;
-      if (!entry.name)
-        throw new Error(
-          `Claude session name unknown (side ${entry.side}): ${entry.session}`,
-        );
-    }
-    const kickoff = [
-      [
-        b,
-        `You are in a direct conversation with the Claude session "${a.name}". It will message you with the SendMessage tool. Answer each of its messages with SendMessage to "${a.name}". No reply to this note is needed.`,
-      ],
-      [
-        a,
-        [
-          flags.seed ?? PEER_DEFAULT_SEED,
-          `Discuss this directly with the Claude session "${b.name}" using the SendMessage tool. Its replies arrive here as messages. Keep it to at most ${rounds} exchanges.`,
-          `When you are done, ${finish} one JSON object: {"agreement_status":"complete|partial","unresolved_questions":[],"summary":"short final agreement"}`,
-        ].join("\n"),
-      ],
-    ];
-    for (const [entry, prompt] of kickoff) {
-      const result = await doAsk(entry.adapter, {
-        ...entry.base,
-        session: entry.paneId,
-        prompt,
-        noWait: true,
-      });
-      if (result.inputSent !== true)
-        throw new Error(
-          result.error ??
-            `kickoff not sent (side ${entry.side}): ${result.status}`,
-        );
-      sent.push({
-        side: entry.side,
-        requestId: result.requestId,
-        status: result.status,
-      });
-    }
-  } catch (error) {
-    await stopAfterLifecycle(stopSpecs, error);
-  }
-  printJson({
-    via: "message",
-    status: "started",
-    sessionA: a.session,
-    sessionB: b.session,
-    nameA: a.name,
-    nameB: b.name,
-    reportTo,
-    kickoff: sent,
-  });
-}
-
 async function peer(flags, deps = {}) {
   const startSession = deps.doStart ?? doStart;
   const askSession = deps.doAsk ?? doAsk;
@@ -7820,34 +7573,22 @@ async function peer(flags, deps = {}) {
   const stopSessions = deps.stopAfterLifecycle ?? stopAfterLifecycle;
   const adapterA = selectAdapterName(flags["cli-a"] ?? "codex", "cli-a");
   const adapterB = selectAdapterName(flags["cli-b"] ?? "claude", "cli-b");
-  const adapterC =
-    flags["cli-c"] === undefined
-      ? null
-      : selectAdapterName(flags["cli-c"], "cli-c");
   if (
     flags.remote &&
-    [adapterA, adapterB, adapterC].some((adapter) => adapter?.cli === "agy")
+    [adapterA, adapterB].some((adapter) => adapter?.cli === "agy")
   )
     throw new Error("agy peer relay is local only; --remote is not supported");
-  if (adapterC && flags.via === "message")
-    throw new Error("--cli-c is only supported with --via relay");
   flags = {
     ...flags,
     group:
       flags.group ??
-      `peer:${[
-        flags["session-a"] ?? "peerA",
-        flags["session-b"] ?? "peerB",
-        ...(adapterC ? [flags["session-c"] ?? "peerC"] : []),
-      ].join(":")}:${randomBytes(6).toString("hex")}`,
+      `peer:${[flags["session-a"] ?? "peerA", flags["session-b"] ?? "peerB"].join(":")}:${randomBytes(6).toString("hex")}`,
   };
-  if (flags.via === "message") return peerViaMessage(flags, adapterA, adapterB);
   if (flags.via !== undefined && flags.via !== "relay")
-    throw new Error("--via must be one of: relay, message");
+    throw new Error("--via must be one of: relay");
   for (const [side, adapter] of [
     ["a", adapterA],
     ["b", adapterB],
-    ...(adapterC ? [["c", adapterC]] : []),
   ]) {
     peerSideBusyPolicy(
       flags,
@@ -7860,30 +7601,21 @@ async function peer(flags, deps = {}) {
   const sessionB = flags["session-b"] ?? "peerB";
   const baseA = peerSideBaseOpts(flags, "a", adapterA, sessionA);
   const baseB = peerSideBaseOpts(flags, "b", adapterB, sessionB);
-  const sessionC = adapterC ? (flags["session-c"] ?? "peerC") : null;
-  const baseC = adapterC
-    ? peerSideBaseOpts(flags, "c", adapterC, sessionC)
-    : null;
   const attachedA =
     Object.hasOwn(flags, "attach-a") || baseA.transport === "uds";
   const attachedB =
     Object.hasOwn(flags, "attach-b") || baseB.transport === "uds";
-  const attachedC =
-    adapterC && (Object.hasOwn(flags, "attach-c") || baseC.transport === "uds");
   const participants = [
     ["a", adapterA, baseA, attachedA],
     ["b", adapterB, baseB, attachedB],
-    ...(adapterC ? [["c", adapterC, baseC, attachedC]] : []),
   ];
   const rounds = integerFlag(flags, "rounds", 4);
   const mode = peerMode(flags);
   const hops = [];
-  const numbers = [];
   const stopSpecs = [];
   const artifactPaths = (deps.peerArtifactPaths ?? peerArtifactPaths)(
     sessionA,
     sessionB,
-    sessionC,
   );
   const output = {
     mode,
@@ -7896,22 +7628,11 @@ async function peer(flags, deps = {}) {
     attachedB,
     stoppedA: false,
     stoppedB: false,
-    ...(adapterC
-      ? {
-          cliC: adapterC.cli,
-          transportC: baseC.transport,
-          attachedC,
-          stoppedC: false,
-        }
-      : {}),
     hops,
     transcript_path: artifactPaths.transcriptPath,
     status_path: artifactPaths.statusPath,
   };
-  if (mode === "counting") {
-    output.numbers = numbers;
-  }
-  let previous = mode !== "counting" ? (flags.seed ?? PEER_DEFAULT_SEED) : null;
+  let previous = flags.seed ?? PEER_DEFAULT_SEED;
   const latestResponses = new Map();
   let primaryError = null;
   let stopError = null;
@@ -7975,7 +7696,7 @@ async function peer(flags, deps = {}) {
       const [side, adapter, base, attached] =
         participants[hopIndex % participants.length];
       const otherResponses =
-        adapterC || mode === "debate"
+        mode === "debate"
           ? participants
               .filter(([other]) => other !== side && latestResponses.has(other))
               .map(
@@ -8054,7 +7775,6 @@ async function peer(flags, deps = {}) {
       if (isClosure) {
         closure = parsePeerClosure(result.response);
       } else if (
-        mode !== "counting" &&
         hopIndex >= participants.length &&
         hopIndex + 1 < rounds * participants.length - 1
       ) {
@@ -8074,22 +7794,7 @@ async function peer(flags, deps = {}) {
         }
       }
 
-      if (mode === "counting") {
-        const parsed = parseFirstInteger(result.response);
-        if (parsed === null && !isClosure) {
-          throw new Error(
-            `Could not parse integer from ${adapter.cli} response at hop ${hopIndex + 1}`,
-          );
-        }
-        if (parsed !== null) {
-          numbers.push(parsed);
-          previous = parsed;
-        } else {
-          previous = result.response;
-        }
-      } else {
-        previous = result.response;
-      }
+      previous = result.response;
       if (isClosure) break;
     }
   } catch (error) {
@@ -8187,10 +7892,6 @@ async function main() {
     await probe(flags);
   } else if (command === "list-sessions") {
     await listSessions(flags);
-  } else if (command === "converse") {
-    await converse(flags);
-  } else if (command === "goal-driven") {
-    await goalDriven(flags);
   } else if (command === "peer") {
     await peer(flags);
   } else if (command === "send") {

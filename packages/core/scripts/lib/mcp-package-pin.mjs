@@ -14,11 +14,72 @@ import {
 import { createRequire } from "node:module";
 import { homedir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
-import { loadRegistryOrDefault, pinnedArgs } from "./mcp-guard-engine.mjs";
 
 const require = createRequire(import.meta.url);
 const toml = require("@iarna/toml");
+
+const DEFAULT_REGISTRY_PATH = fileURLToPath(
+  new URL("../../config/mcp-registry.json", import.meta.url),
+);
+
+function resolveRegistryPath() {
+  return process.env.TFX_MCP_REGISTRY_PATH
+    ? resolve(process.env.TFX_MCP_REGISTRY_PATH)
+    : DEFAULT_REGISTRY_PATH;
+}
+
+/** 패키지 스펙을 이름과 버전으로 나눈다. 범위 이름(@scope/name)의 첫 @ 는 이름에 속한다. */
+export function splitPackageSpec(spec) {
+  if (typeof spec !== "string") return null;
+  const match = /^((?:@[^/@\s]+\/)?[^@\s]+)(?:@(\S+))?$/.exec(spec);
+  return match ? { name: match[1], version: match[2] ?? null } : null;
+}
+
+/** 명령과 인자 수가 같고 다른 자리는 레지스트리의 고정 패키지와 이름만 같을 때 고정 인자를 반환한다. */
+export function pinnedArgs(entry, server) {
+  if (entry?.command !== server?.command || !Array.isArray(entry.args))
+    return null;
+  if (!Array.isArray(server?.args) || entry.args.length !== server.args.length)
+    return null;
+  let changed = false;
+  for (const [index, want] of server.args.entries()) {
+    const have = entry.args[index];
+    if (have === want) continue;
+    const pin = splitPackageSpec(want);
+    if (!pin?.version || typeof have !== "string") return null;
+    if (splitPackageSpec(have)?.name !== pin.name) return null;
+    changed = true;
+  }
+  return changed ? [...server.args] : null;
+}
+
+/** TFX_MCP_REGISTRY_PATH 또는 기본 config/mcp-registry.json 을 읽고 hub-url 레거시 항목을 제외한다. */
+export function loadRegistryOrDefault() {
+  const path = resolveRegistryPath();
+  if (!existsSync(path)) return { servers: {} };
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8"));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return { servers: {} };
+    }
+    const rawServers =
+      raw.servers &&
+      typeof raw.servers === "object" &&
+      !Array.isArray(raw.servers)
+        ? raw.servers
+        : {};
+    const servers = Object.fromEntries(
+      Object.entries(rawServers).filter(
+        ([, server]) => server?.transport !== "hub-url",
+      ),
+    );
+    return { ...raw, servers };
+  } catch {
+    return { servers: {} };
+  }
+}
 
 // 프로젝트 .mcp.json 은 저장소에 커밋될 수 있어 setup 이 건드리지 않는다.
 const REGISTRY_PIN_FILES = [

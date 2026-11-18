@@ -764,59 +764,6 @@ bridge_json_get() {
   ' -- "$json" "$path" 2>/dev/null
 }
 
-team_send_message() {
-  local text="${1:-}"
-  local summary="${2:-}"
-  [[ -z "$TFX_TEAM_NAME" || -z "$text" ]] && return 0
-
-  if ! bridge_cli team-send-message \
-    --team "$TFX_TEAM_NAME" \
-    --from "$TFX_TEAM_AGENT_NAME" \
-    --to "$TFX_TEAM_LEAD_NAME" \
-    --text "$text" \
-    --summary "${summary:-status update}" >/dev/null 2>&1; then
-    echo "[tfx-route] 경고: 팀 메시지 전송 실패 (team=$TFX_TEAM_NAME, to=$TFX_TEAM_LEAD_NAME)" >&2
-    return 0
-  fi
-
-  return 0
-}
-
-team_claim_task() {
-  [[ -z "$TFX_TEAM_NAME" || -z "$TFX_TEAM_TASK_ID" ]] && return 0
-  local response ok error_code error_message owner_before status_before
-  response=$(bridge_cli team-task-update \
-    --team "$TFX_TEAM_NAME" \
-    --task-id "$TFX_TEAM_TASK_ID" \
-    --claim \
-    --owner "$TFX_TEAM_AGENT_NAME" \
-    --status in_progress || true)
-
-  ok=$(bridge_json_get "$response" "ok" || true)
-  error_code=$(bridge_json_get "$response" "error.code" || true)
-  error_message=$(bridge_json_get "$response" "error.message" || true)
-  owner_before=$(bridge_json_get "$response" "error.details.task_before.owner" || true)
-  status_before=$(bridge_json_get "$response" "error.details.task_before.status" || true)
-
-  case "$ok:$error_code" in
-    true:*) ;;
-    false:CLAIM_CONFLICT)
-      if [[ "$owner_before" == "$TFX_TEAM_AGENT_NAME" && "$status_before" == "in_progress" ]]; then
-        echo "[tfx-route] 동일 owner(${TFX_TEAM_AGENT_NAME})가 이미 claim한 task ${TFX_TEAM_TASK_ID} — 계속 실행." >&2
-        return 0
-      fi
-      echo "[tfx-route] CLAIM_CONFLICT: task ${TFX_TEAM_TASK_ID}가 이미 claim됨(owner=${owner_before:-unknown}, status=${status_before:-unknown}). 실행 중단." >&2
-      team_send_message \
-        "task ${TFX_TEAM_TASK_ID} claim conflict: owner=${owner_before:-unknown}, status=${status_before:-unknown}" \
-        "task ${TFX_TEAM_TASK_ID} claim conflict"
-      exit 0 ;;
-    :|false:)
-      echo "[tfx-route] 경고: bridge 연결 실패. claim 없이 계속 실행." >&2 ;;
-    *)
-      echo "[tfx-route] 경고: claim 실패 (${error_code:-unknown}${error_message:+: ${error_message}}). claim 없이 계속 실행." >&2 ;;
-  esac
-}
-
 team_complete_task() {
   local result="${1:-success}"            # success/failed/timeout
   local result_summary="${2:-작업 완료}"
@@ -1115,16 +1062,16 @@ capture_workspace_signature() {
   git -c core.fsmonitor=false status --short --untracked-files=all --ignore-submodules=all < /dev/null 2>/dev/null || return 1
 }
 
-# ── Gemini 모델 프로필 해석 ──
-resolve_gemini_profile() {
+# Antigravity 모델 프로필 해석
+resolve_agy_profile() {
   "$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
-    const { ensureGeminiProfiles, resolveGeminiModel } = await import(pathToFileURL(process.argv[1]).href);
+    const { ensureAgyProfiles, resolveAgyModel } = await import(pathToFileURL(process.argv[1]).href);
     const { modelEffortFromProfile, resolveAgyModelEffort } = await import(new URL("./model-effort.mjs", pathToFileURL(process.argv[1])).href);
     const { AGY_FAMILIES } = await import(new URL("./model-family-resolver.mjs", pathToFileURL(process.argv[1])).href);
     const opts = { profilesPath: process.argv[3], command: process.argv[4] };
-    ensureGeminiProfiles(opts);
-    const model = resolveGeminiModel(process.argv[2], opts);
+    ensureAgyProfiles(opts);
+    const model = resolveAgyModel(process.argv[2], opts);
     const families = AGY_FAMILIES.join("|");
     const match = new RegExp(`^gemini-\\d+(?:\\.\\d+)*-(${families})(?:-([a-z]+))?$`, "i").exec(model)
       || new RegExp(`^Gemini \\d+(?:\\.\\d+)* (${families}) \\(([a-z]+)\\)$`, "i").exec(model);
@@ -1136,7 +1083,7 @@ resolve_gemini_profile() {
       try {
         const resolved = resolveAgyModelEffort(requested, opts);
         if (resolved.fallbackFrom)
-          console.error(`[tfx-route] agy 가족 폴백: ${resolved.fallbackFrom} -> ${resolved.family} (모델 목록에 없음) model=${resolved.model}`);
+          console.error(`[tfx-route] agy 가족 폴백: ${resolved.fallbackFrom}에서 ${resolved.family}로 전환 (모델 목록에 없음) model=${resolved.model}`);
         if (resolved.effort !== requested.effort)
           console.error(`[tfx-route] agy effort: requested=${requested.effort} applied=${resolved.effort} model=${resolved.model}`);
         process.stdout.write([resolved.model, resolved.effort].join("\x1e"));
@@ -1145,7 +1092,7 @@ resolve_gemini_profile() {
         process.exitCode = error.code === "unsupported-effort" ? 78 : 1;
       }
     }
-  ' "${CODEX_PROFILE_MODULE%/*}/gemini-profiles.mjs" "$1" "$GEMINI_PROFILES_PATH" "$CLI_CMD"
+  ' "${CODEX_PROFILE_MODULE%/*}/agy-profiles.mjs" "$1" "$GEMINI_PROFILES_PATH" "$CLI_CMD"
 }
 
 refresh_codex_profiles() {
@@ -1160,7 +1107,7 @@ refresh_codex_profiles() {
 # CLI_TYPE/CLI_CMD는 agent-map, 역할별 설정은 agent-route-policy에서 조회한다.
 # 반환: CLI_TYPE, CLI_CMD, CLI_ARGS, CLI_EFFORT, DEFAULT_TIMEOUT
 route_agent() {
-  local agent="$1" sd map_file policy_file policy_row gemini_module
+  local agent="$1" sd map_file policy_file policy_row agy_module
   sd="$(_get_script_dir)"
   map_file="$sd/../hub/team/agent-map.json"
   [[ -f "$map_file" || -z "$TFX_PKG_ROOT" ]] || map_file="$TFX_PKG_ROOT/hub/team/agent-map.json"
@@ -1193,10 +1140,10 @@ route_agent() {
   fi
 
   local -a query=("$NODE_BIN" "$policy_file" --format route --map-file "$map_file" --agent "$agent" --profile-override "$TFX_CODEX_PROFILE")
-  gemini_module="$(_resolve_script "${TFX_GEMINI_PROFILES_MODULE:-}" \
-    "$sd/lib/gemini-profiles.mjs" \
-    ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/lib/gemini-profiles.mjs"} || true)"
-  [[ -z "$gemini_module" ]] || query+=(--gemini-profiles-module "$gemini_module")
+  agy_module="$(_resolve_script "${TFX_AGY_PROFILES_MODULE:-${TFX_GEMINI_PROFILES_MODULE:-}}" \
+    "$sd/lib/agy-profiles.mjs" \
+    ${TFX_PKG_ROOT:+"$TFX_PKG_ROOT/scripts/lib/agy-profiles.mjs"} || true)"
+  [[ -z "$agy_module" ]] || query+=(--agy-profiles-module "$agy_module")
   [[ -z "${JEV_TIER_SHIFT:-}" ]] || query+=(--tier-shift "$JEV_TIER_SHIFT")
   is_nested_codex_runtime && query+=(--nested)
   if ! policy_row=$(
@@ -2308,7 +2255,7 @@ run_antigravity_exec() {
   # 모델 ID에 effort를 남기면 별도 --effort와 충돌하므로 해석 결과를 나눠 전달한다.
   if [[ -z "${TFX_GEMINI_NO_MODEL:-}" ]]; then
     local _agy_model _agy_effort _agy_selection
-    _agy_selection="$(resolve_gemini_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-argon}}")" || return $?
+    _agy_selection="$(resolve_agy_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-argon}}")" || return $?
     IFS=$'\x1e' read -r _agy_model _agy_effort <<< "$_agy_selection"
     if [[ "${TFX_WORKER_CLI:-antigravity}" == "antigravity" && -n "${TFX_WORKER_MODEL:-}${TFX_WORKER_EFFORT:-}" ]]; then
       _agy_model="${TFX_WORKER_MODEL:-}"
@@ -2933,10 +2880,6 @@ FALLBACK_EOF
 
   # Per-process 에이전트 등록
   register_agent
-
-  # 팀 모드: task claim
-  team_claim_task
-  team_send_message "작업 시작: ${TFX_TEAM_AGENT_NAME}" "task ${TFX_TEAM_TASK_ID} started"
 
   # CLI 실행 (stderr 분리 + 타임아웃 + 소요시간 측정)
   local exit_code=0

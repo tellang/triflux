@@ -267,7 +267,6 @@ test("peer shares one generated or explicit group across all participants", asyn
         {
           "cli-a": "claude",
           "cli-b": "claude",
-          "cli-c": "claude",
           group,
           rounds: "1",
         },
@@ -286,7 +285,7 @@ test("peer shares one generated or explicit group across all participants", asyn
           printJson: () => {},
         },
       );
-      assert.equal(starts.length, 3);
+      assert.equal(starts.length, 2);
       assert.ok(starts[0].group);
       assert.ok(starts.every((opts) => opts.group === starts[0].group));
       if (group) assert.equal(starts[0].group, group);

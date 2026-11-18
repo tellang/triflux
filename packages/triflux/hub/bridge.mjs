@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // hub/bridge.mjs: tfx-route.sh 와 tfx-live 가 부르는 로컬 제어 CLI.
-// 팀 하위 명령은 nativeProxy 를 직접 호출하고 Claude daemon, retry, intervene 은 로컬 모듈만 쓴다.
+// Claude daemon, retry, intervene 은 로컬 모듈만 쓴다.
 
 import {
   closeSync,
@@ -119,102 +119,6 @@ function emitJson(payload) {
     console.log(JSON.stringify(payload));
   }
   return payload?.ok !== false;
-}
-
-function splitList(value) {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-async function cmdTeamInfo(args) {
-  const { teamInfo } = await import("./team/nativeProxy.mjs");
-  return emitJson(
-    await teamInfo({
-      team_name: args.team,
-      include_members: true,
-      include_paths: true,
-    }),
-  );
-}
-
-async function cmdTeamTaskList(args) {
-  const { teamTaskList } = await import("./team/nativeProxy.mjs");
-  return emitJson(
-    await teamTaskList({
-      team_name: args.team,
-      owner: args.owner,
-      statuses: args.statuses ? splitList(args.statuses) : [],
-      include_internal: !!args["include-internal"],
-      limit: parseInt(args.limit || "200", 10),
-    }),
-  );
-}
-
-async function cmdTeamTaskUpdate(args) {
-  const { teamTaskUpdate } = await import("./team/nativeProxy.mjs");
-  return emitJson(
-    await teamTaskUpdate({
-      team_name: args.team,
-      task_id: args["task-id"],
-      claim: !!args.claim,
-      owner: args.owner,
-      status: args.status,
-      subject: args.subject,
-      description: args.description,
-      activeForm: args["active-form"],
-      add_blocks: args["add-blocks"]
-        ? splitList(args["add-blocks"])
-        : undefined,
-      add_blocked_by: args["add-blocked-by"]
-        ? splitList(args["add-blocked-by"])
-        : undefined,
-      metadata_patch: args["metadata-patch"]
-        ? parseJsonSafe(args["metadata-patch"], null)
-        : undefined,
-      if_match_mtime_ms:
-        args["if-match-mtime-ms"] != null
-          ? Number(args["if-match-mtime-ms"])
-          : undefined,
-      actor: args.actor,
-    }),
-  );
-}
-
-async function cmdTeamSendMessage(args) {
-  const { teamSendMessage } = await import("./team/nativeProxy.mjs");
-  const { isJevEnabled, judgeInboxPriority } = await import(
-    "./lib/jev-addon.mjs"
-  );
-  let summary = args.summary;
-  let priority = null;
-  let urgencyScore = null;
-  if (isJevEnabled()) {
-    const verdict = await judgeInboxPriority({
-      text: args.text,
-      summary: args.summary,
-      from: args.from,
-    });
-    if (verdict) {
-      priority = verdict.priority;
-      urgencyScore = verdict.urgencyScore;
-      if (summary && !String(summary).startsWith("[JEV:")) {
-        summary = `[JEV:${verdict.priority}] ${summary}`;
-      }
-    }
-  }
-  return emitJson(
-    await teamSendMessage({
-      team_name: args.team,
-      from: args.from,
-      to: args.to || "team-lead",
-      text: args.text,
-      summary,
-      color: args.color || "blue",
-      ...(priority ? { priority, urgencyScore } : {}),
-    }),
-  );
 }
 
 async function loadDaemonControl() {
@@ -1470,14 +1374,6 @@ export async function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv.slice(1));
 
   switch (cmd) {
-    case "team-info":
-      return await cmdTeamInfo(args);
-    case "team-task-list":
-      return await cmdTeamTaskList(args);
-    case "team-task-update":
-      return await cmdTeamTaskUpdate(args);
-    case "team-send-message":
-      return await cmdTeamSendMessage(args);
     case "daemon-probe":
       return await cmdDaemonProbe(args);
     case "daemon-attach":
@@ -1510,7 +1406,7 @@ export async function main(argv = process.argv.slice(2)) {
       return await cmdJudgeReview(args);
     default:
       console.error(
-        "사용법: bridge.mjs <team-info|team-task-list|team-task-update|team-send-message|daemon-probe|daemon-attach|daemon-wait|daemon-interrupt|retry-run|retry-status|intervene-run|judge-stall|jev-batch|jev-stats|handoff-check|judge-route|judge-ack|judge-review> [--옵션]",
+        "사용법: bridge.mjs <daemon-probe|daemon-attach|daemon-wait|daemon-interrupt|retry-run|retry-status|intervene-run|judge-stall|jev-batch|jev-stats|handoff-check|judge-route|judge-ack|judge-review> [--옵션]",
       );
       process.exit(1);
   }

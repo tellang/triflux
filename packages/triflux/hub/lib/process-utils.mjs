@@ -6,11 +6,13 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { IS_WINDOWS } from "../platform.mjs";
 
 const CLEANUP_SCRIPT_DIR = join(tmpdir(), "tfx-process-utils");
@@ -51,6 +53,40 @@ export function isPidAlive(pid) {
     if (e?.code === "EPERM") return true;
     if (e?.code === "ESRCH") return false;
     return false;
+  }
+}
+
+/**
+ * 주어진 PID의 프로세스가 살아있는지 확인한다.
+ * 숫자와 숫자 문자열 PID를 모두 허용하고, EPERM이면 살아 있는 것으로 본다.
+ *
+ * @param {number|string} pid
+ * @returns {boolean}
+ */
+export function isProcessAlive(pid) {
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) return false;
+  try {
+    process.kill(n, 0);
+    return true;
+  } catch (e) {
+    if (e?.code === "EPERM") return true;
+    return false;
+  }
+}
+
+// 직접 실행 판정. 문자열로 붙인 file:// 은 공백, 한글 경로에서 어긋나므로 양쪽 실제 경로로 비교한다.
+export function isMainModule(moduleUrl) {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  return realPathOf(entry) === realPathOf(fileURLToPath(moduleUrl));
+}
+
+function realPathOf(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
   }
 }
 

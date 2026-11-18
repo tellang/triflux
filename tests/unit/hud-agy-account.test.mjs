@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "node:test";
 
-const providerUrl = new URL("../../hud/providers/gemini.mjs", import.meta.url);
+const providerUrl = new URL(
+  "../../hud/providers/antigravity.mjs",
+  import.meta.url,
+);
 
 function accountLabel(homeDir) {
   const result = spawnSync(

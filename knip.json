@@ -12,7 +12,7 @@
         "scripts/lib/agent-route-policy.mjs",
         "scripts/lib/cli-claude.mjs",
         "scripts/lib/codex-profile-config.mjs",
-        "scripts/lib/gemini-profiles.mjs",
+        "scripts/lib/agy-profiles.mjs",
         "scripts/lib/mcp-filter.mjs",
         "scripts/lib/mcp-health.mjs",
         "hooks/codex-session-hook.mjs",
