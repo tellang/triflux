@@ -208,7 +208,7 @@ test("갱신된 목록을 반영하고 손상되거나 가족이 없으면 마�
   const cache = join(opts.codexHome, "models_cache.json");
   assert.equal(
     resolveModelFamilies("codex", opts).profiles.sol_high.model,
-    "gpt-6.1-sol",
+    "gpt-6.2-sol",
   );
   writeFileSync(
     cache,
@@ -368,7 +368,7 @@ test("가족 파일은 effort와 무관한 최신 모델만 쓰고 결합 파일
   );
   assert.equal(
     readFileSync(join(opts.codexHome, "astra.config.toml"), "utf8"),
-    'model = "gpt-6-astra"\n',
+    'model = "gpt-6.2-astra"\n',
   );
   assert.match(
     readFileSync(join(opts.codexHome, "sol_high.config.toml"), "utf8"),

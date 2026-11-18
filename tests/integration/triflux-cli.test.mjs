@@ -347,8 +347,8 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
     );
     const codexDir = join(homeDir, ".codex");
     for (const [family, model] of [
-      ["sol", "gpt-6.1-sol"],
-      ["astra", "gpt-6-astra"],
+      ["sol", "gpt-6.2-sol"],
+      ["astra", "gpt-6.2-astra"],
       ["terra", "gpt-6.1-terra"],
       ["luna", "gpt-6-luna"],
     ]) {
@@ -359,19 +359,19 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
     }
     assert.equal(
       readFileSync(join(codexDir, "sol_high.config.toml"), "utf8"),
-      'model = "gpt-6.1-sol"\nmodel_reasoning_effort = "high"\n',
+      'model = "gpt-6.2-sol"\nmodel_reasoning_effort = "high"\n',
     );
     assert.equal(
       readFileSync(join(codexDir, "astra_xhigh.config.toml"), "utf8"),
-      'model = "gpt-6-astra"\nmodel_reasoning_effort = "xhigh"\n',
+      'model = "gpt-6.2-astra"\nmodel_reasoning_effort = "xhigh"\n',
     );
     assert.equal(
       readFileSync(join(codexDir, "astra_max.config.toml"), "utf8"),
-      'model = "gpt-6-astra"\nmodel_reasoning_effort = "max"\n',
+      'model = "gpt-6.2-astra"\nmodel_reasoning_effort = "max"\n',
     );
     assert.equal(
       readFileSync(join(codexDir, "astra_ultra.config.toml"), "utf8"),
-      'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n',
+      'model = "gpt-6.2-astra"\nmodel_reasoning_effort = "ultra"\n',
     );
     assert.equal(
       readFileSync(join(codexDir, "luna_high.config.toml"), "utf8"),
@@ -440,7 +440,7 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
     }
     assert.equal(
       readFileSync(join(codexDir, "sol.config.toml"), "utf8"),
-      'model = "gpt-6.1-sol"\n',
+      'model = "gpt-6.2-sol"\n',
     );
   });
 });

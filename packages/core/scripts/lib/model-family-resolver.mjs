@@ -10,15 +10,30 @@ import {
 import { dirname, join } from "node:path";
 import { resolveTrifluxHome } from "./machine-profile.mjs";
 
+export const CODEX_FAMILY_DEFAULT_MODELS = Object.freeze({
+  sol: "gpt-6.2-sol",
+  astra: "gpt-6.2-astra",
+  terra: "gpt-6.1-terra",
+  luna: "gpt-6-luna",
+});
+
+function codexProfile(family, effort) {
+  return Object.freeze({
+    family,
+    effort,
+    model: CODEX_FAMILY_DEFAULT_MODELS[family],
+  });
+}
+
 export const CODEX_FAMILY_PROFILES = Object.freeze({
-  sol_high: { family: "sol", effort: "high", model: "gpt-6.1-sol" },
-  sol_med: { family: "sol", effort: "medium", model: "gpt-6.1-sol" },
-  astra_xhigh: { family: "astra", effort: "xhigh", model: "gpt-6-astra" },
-  astra_max: { family: "astra", effort: "max", model: "gpt-6-astra" },
-  astra_ultra: { family: "astra", effort: "ultra", model: "gpt-6-astra" },
-  terra_high: { family: "terra", effort: "high", model: "gpt-6.1-terra" },
-  luna_high: { family: "luna", effort: "high", model: "gpt-6-luna" },
-  luna_low: { family: "luna", effort: "low", model: "gpt-6-luna" },
+  sol_high: codexProfile("sol", "high"),
+  sol_med: codexProfile("sol", "medium"),
+  astra_xhigh: codexProfile("astra", "xhigh"),
+  astra_max: codexProfile("astra", "max"),
+  astra_ultra: codexProfile("astra", "ultra"),
+  terra_high: codexProfile("terra", "high"),
+  luna_high: codexProfile("luna", "high"),
+  luna_low: codexProfile("luna", "low"),
 });
 export const AGY_FAMILY_PROFILES = Object.freeze({
   argon_low: {
