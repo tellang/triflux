@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readLeadMarker } from "../hub/lib/lead-marker.mjs";
+import { reportLimit, shorten } from "../hub/lib/report-limit.mjs";
 import {
   deliverAgy,
   deliverClaude,
@@ -49,6 +52,9 @@ async function receiveRemote(args, deps) {
     (deps.resolveRemoteHost || resolveRemoteHost)(envelope.originHost, deps);
     const deliveryDeps = {
       ...deps,
+      rawBody: envelope.message,
+      composeMessage: (body) =>
+        formatRemotePeerMessage({ ...envelope, message: body }),
       onWriteStart: () => {
         started = true;
       },
@@ -197,12 +203,66 @@ export async function main(args = process.argv.slice(2), deps = {}) {
   }
   if (cli === "claude" && (env.CLAUDECODE === "1" || sender.cli === "claude"))
     throw new Error("Claude-to-Claude uses native SendMessage, not tfx-peer");
-  const formattedMessage = [
-    `[tfx-peer from=${sender.cli}:${String(sender.name || sender.sessionId || "unknown").replace(/[\r\n\u2028\u2029]+/g, " ")} msg=${randomUUID()}]`,
-    message,
-    formatPeerReply(sender, cli, { platform }),
-  ].join("\n");
-  return deliverLocal(to, formattedMessage, sender, { ...deps, candidates });
+  const header = `[tfx-peer from=${sender.cli}:${String(sender.name || sender.sessionId || "unknown").replace(/[\r\n\u2028\u2029]+/g, " ")} msg=${randomUUID()}]`;
+  const footer = formatPeerReply(sender, cli, { platform });
+  const formattedMessage = [header, message, footer].join("\n");
+  return deliverLocal(to, formattedMessage, sender, {
+    ...deps,
+    candidates,
+    rawBody: message,
+    composeMessage: (body) => [header, body, footer].join("\n"),
+  });
+}
+
+function applyLeadReportLimit(target, cli, formattedMessage, deps, env) {
+  const markerEnv = deps.env
+    ? { ...(deps.home ? { HOME: deps.home } : {}), ...deps.env }
+    : { ...process.env, ...(deps.home ? { HOME: deps.home } : {}), ...env };
+  const marker = readLeadMarker(
+    {
+      paneId: target.paneId || target.raw?.paneId || null,
+      session: target.session || target.raw?.session || null,
+      conversationId:
+        cli === "agy"
+          ? target.conversationId || target.raw?.conversationId || null
+          : null,
+      threadId: cli === "codex" ? target.threadId || null : null,
+      cli,
+      cwd: target.cwd || target.raw?.cwd || null,
+    },
+    { env: markerEnv, resolvePaneSession: deps.resolvePaneSession },
+  );
+  if (!marker) {
+    return { message: formattedMessage, reportWarning: null };
+  }
+  const rawBody =
+    typeof deps.rawBody === "string" ? deps.rawBody : formattedMessage;
+  const baseDir = marker.cwd || target.cwd || target.raw?.cwd || process.cwd();
+  const checkFile = deps.fileExists || existsSync;
+  const fileExists = (candidate) => {
+    const resolved = candidate.startsWith("~/")
+      ? path.join(markerEnv.HOME || homedir(), candidate.slice(2))
+      : candidate.startsWith("./")
+        ? path.resolve(baseDir, candidate)
+        : candidate;
+    return checkFile(resolved);
+  };
+  const shortened = shorten(rawBody, rawBody, { fileExists });
+  if (shortened.kind === "cut") {
+    return {
+      message: deps.composeMessage
+        ? deps.composeMessage(shortened.text)
+        : shortened.text,
+      reportWarning: null,
+    };
+  }
+  if (shortened.kind === "warn") {
+    return {
+      message: formattedMessage,
+      reportWarning: { total: shortened.total, limit: reportLimit },
+    };
+  }
+  return { message: formattedMessage, reportWarning: null };
 }
 
 async function deliverLocal(
@@ -276,16 +336,26 @@ async function deliverLocal(
       appDataDir = current.appDataDir || appDataDir;
     }
     if (!appDataDir) throw new Error("agy target appDataDir unavailable");
-    return (deps.deliverAgy || deliverAgy)({
+    const limited = applyLeadReportLimit(
+      { ...target, conversationId },
+      cli,
+      formattedMessage,
+      deps,
+      env,
+    );
+    const delivery = await (deps.deliverAgy || deliverAgy)({
       conversationId,
       appDataDir,
       requireExisting: true,
-      message: formattedMessage,
+      message: limited.message,
       ...(remote ? { onWriteStart: deps.onWriteStart } : {}),
       sender: `${sender.cli}:${String(sender.name || sender.sessionId || "unknown").replace(/[\r\n\u2028\u2029]+/g, " ")}`,
       home: deps.home,
       env,
     });
+    return limited.reportWarning
+      ? { ...delivery, reportWarning: limited.reportWarning }
+      : delivery;
   }
   if (!target.threadId) throw new Error("Codex thread UUID unavailable");
   if (!["tmux-option", "registry"].includes(target.raw?.threadSource))
@@ -301,12 +371,22 @@ async function deliverLocal(
     !["tmux-option", "registry"].includes(current.threadSource)
   )
     throw new Error("Codex pane thread changed; refusing stale target");
-  return (deps.deliverCodex || deliverCodex)({
+  const limited = applyLeadReportLimit(
+    target,
+    cli,
+    formattedMessage,
+    deps,
+    env,
+  );
+  const delivery = await (deps.deliverCodex || deliverCodex)({
     threadId: target.threadId,
-    message: formattedMessage,
+    message: limited.message,
     ...(remote ? { onWriteStart: deps.onWriteStart } : {}),
     env,
   });
+  return limited.reportWarning
+    ? { ...delivery, reportWarning: limited.reportWarning }
+    : delivery;
 }
 if (
   process.argv[1] &&

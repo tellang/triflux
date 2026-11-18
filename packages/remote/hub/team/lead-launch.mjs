@@ -17,6 +17,7 @@ import {
   judgeTaskRouting,
   recordJevStat,
 } from "@triflux/core/hub/lib/jev-addon.mjs";
+import { writeLeadMarker } from "@triflux/core/hub/lib/lead-marker.mjs";
 import {
   formatMcpRecommendation,
   recommendMcp,
@@ -223,6 +224,7 @@ export async function launchLead(
     run = execFileAsync,
     jevOptions = {},
     modelOptions = {},
+    env,
     judgeRouting = judgeTaskRouting,
     recommend = recommendMcp,
     recommendationOptions = {},
@@ -437,6 +439,25 @@ export async function launchLead(
     }
   }
   if (!start.ready) return { ok: false, ...summary, start };
+  const markerEnv = {
+    ...process.env,
+    ...(modelOptions?.home ? { HOME: modelOptions.home } : {}),
+    ...modelOptions?.env,
+    ...jevOptions?.env,
+    ...env,
+  };
+  writeLeadMarker(
+    {
+      role: role.trim(),
+      name,
+      session: target,
+      paneId: start?.paneId ?? null,
+      cli,
+      sessionRole,
+      cwd: resolve(cwd),
+    },
+    { env: markerEnv },
+  );
   const recommendationContext = formatMcpRecommendation(mcpRecommendation, {
     audience: "lead",
   });

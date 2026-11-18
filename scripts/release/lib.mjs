@@ -114,13 +114,14 @@ function collectVersionTargets({
 } = {}) {
   return manifest.targets.flatMap((target) => {
     const absolutePath = join(rootDir, target.file);
+    const expected = `${target.prefix || ""}${expectedVersion}`;
     if (!existsSync(absolutePath)) {
       return target.paths.map((pathSegments) => ({
         file: target.file,
         absolutePath,
         path: pathSegments,
         found: undefined,
-        expected: expectedVersion,
+        expected,
         inSync: false,
         missing: true,
       }));
@@ -133,8 +134,8 @@ function collectVersionTargets({
         absolutePath,
         path: pathSegments,
         found,
-        expected: expectedVersion,
-        inSync: found === expectedVersion,
+        expected,
+        inSync: found === expected,
         missing: false,
       };
     });
@@ -152,11 +153,12 @@ export function syncVersionTargets({
     if (!existsSync(absolutePath)) {
       throw new Error(`Cannot sync missing target: ${target.file}`);
     }
+    const expected = `${target.prefix || ""}${expectedVersion}`;
     const json = readJson(absolutePath);
     let changed = false;
     for (const pathSegments of target.paths) {
-      if (getValueAtPath(json, pathSegments) !== expectedVersion) {
-        setValueAtPath(json, pathSegments, expectedVersion);
+      if (getValueAtPath(json, pathSegments) !== expected) {
+        setValueAtPath(json, pathSegments, expected);
         changed = true;
       }
     }

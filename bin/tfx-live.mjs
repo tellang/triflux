@@ -37,6 +37,12 @@ import {
   judgeBusyAction,
   judgePeerConvergence,
 } from "../hub/lib/jev-addon.mjs";
+import {
+  readLeadMarker,
+  removeLeadMarker,
+  updateLeadMarker,
+  writeLeadMarker,
+} from "../hub/lib/lead-marker.mjs";
 import { privateTmpDir } from "../hub/lib/private-tmp.mjs";
 import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
 import { exposeLiveSession } from "../hub/team/agents-row.mjs";
@@ -3453,7 +3459,9 @@ async function prepareCodexThread(socketPath, opts, deps = {}) {
         cursor = page.nextCursor ?? null;
       } while (cursor !== null);
     }
-    const config = { "features.hooks": false };
+    const enableCodexHooks =
+      opts.sessionRole === "lead" || opts.sessionRole === "communication";
+    const config = enableCodexHooks ? {} : { "features.hooks": false };
     if (opts.effort !== undefined) config.model_reasoning_effort = opts.effort;
     const permissions = opts.sandbox
       ? { approvalPolicy: "on-request", sandbox: "workspace-write" }
@@ -3599,6 +3607,15 @@ async function doStart(launchAdapter, opts) {
   }
 }
 
+export function stripCodexHooksDisableFlag(command) {
+  return String(command || "")
+    .replace(
+      /(?:^|\s)(?:'-c'|-c)\s+(?:'features\.hooks=false'|"features\.hooks=false"|features\.hooks=false)(?=\s|$)/g,
+      "",
+    )
+    .trim();
+}
+
 async function doStartTmux(launchAdapter, opts) {
   // --no-auto-trust 면 신뢰 화면을 고르지 않고 승인 화면과 같이 ready:false 로 끝낸다.
   const trustScreens = opts.noAutoTrust
@@ -3618,6 +3635,18 @@ async function doStartTmux(launchAdapter, opts) {
       ...(launchAdapter.blockingScreens ?? []),
     ],
   };
+  if (
+    adapter.cli === "codex" &&
+    (opts.sessionRole === "lead" || opts.sessionRole === "communication")
+  ) {
+    const { resumeById, resumeLast } = adapter;
+    adapter.launchKeys = [
+      stripCodexHooksDisableFlag(adapter.launchKeys[0]),
+      ...adapter.launchKeys.slice(1),
+    ];
+    adapter.resumeById = (id) => stripCodexHooksDisableFlag(resumeById(id));
+    adapter.resumeLast = () => stripCodexHooksDisableFlag(resumeLast());
+  }
   if (
     adapter.cli === "codex" &&
     (opts.preparedThreadId ||
@@ -4010,9 +4039,43 @@ end tell`;
       itermWarning = error.message;
     }
   }
+  let paneId = null;
+  if (
+    ready &&
+    !remote &&
+    (opts.sessionRole === "lead" || opts.sessionRole === "communication")
+  ) {
+    try {
+      const paneOut = await runTmux(null, [
+        "display-message",
+        "-p",
+        "-t",
+        exactTmuxTarget(session),
+        "#{pane_id}",
+      ]);
+      paneId = paneOut.stdout.trim() || null;
+    } catch {
+      paneId = null;
+    }
+    writeLeadMarker(
+      {
+        session,
+        paneId,
+        cli: adapter.cli,
+        sessionRole: opts.sessionRole,
+        role: opts.role || opts.sessionRole,
+        name: name || opts.name || session,
+        cwd: pathResolve(cwd || process.cwd()),
+        conversationId: conversation?.conversationId ?? null,
+        threadId: threadId || opts.preparedThreadId || null,
+      },
+      { env: opts.env || process.env },
+    );
+  }
   return addLoginGuard(adapter, raw, {
     cli: adapter.cli,
     session,
+    ...(paneId ? { paneId } : {}),
     remote: remote ?? null,
     resumed,
     resumeTarget,
@@ -5260,6 +5323,9 @@ async function doStop(adapter, opts, deps = {}) {
     killedTtys = clients.stdout.trim().split("\n").filter(Boolean);
   }
   await tmux(remote, ["kill-session", "-t", exactTmuxTarget(session)]);
+  if (!remote && session) {
+    removeLeadMarker({ session }, { env: deps.env || opts.env || process.env });
+  }
   // tfx-live 가 연 패인 기록이나 붙어 있던 클라이언트가 있으면 어디서 stop 하든 닫고, 기록이 없을 때의 이름 검색은 iTerm 안에서만 한다.
   if (
     useIterm &&
@@ -5428,6 +5494,11 @@ function startOpts(flags) {
         ? "off"
         : flags.layout,
     role: flags.role,
+    sessionRole:
+      flags["session-role"] ??
+      (flags.role === "lead" || flags.role === "communication"
+        ? flags.role
+        : undefined),
     human: flags.human,
     task: flags.task,
     focus: Boolean(flags.focus),
@@ -6705,6 +6776,22 @@ async function doClear(flags, deps = {}) {
   await waitForTmuxIdle(adapter, opts, deps);
   const idBefore = followUp && cli === "agy" ? await readAgyId() : null;
   const screenBefore = followUp ? await capture(opts.remote, opts.session) : "";
+  const markerEnv = deps.env || opts.env || process.env;
+  const hasLeadMarker = Boolean(
+    readLeadMarker({ session: opts.session }, { env: markerEnv }),
+  );
+  if (hasLeadMarker) {
+    updateLeadMarker(
+      { session: opts.session },
+      {
+        pendingHandoff: null,
+        notifiedThreshold: 0,
+        notifiedConversationId: null,
+        notifiedThreadId: null,
+      },
+      { env: markerEnv },
+    );
+  }
   await doAskViaTmux(adapter, sendOpts, deps);
   const result = {
     cli,
@@ -6745,6 +6832,20 @@ async function doClear(flags, deps = {}) {
     );
     result.followUp = { requestId, inputSent: true };
   } catch (error) {
+    if (hasLeadMarker && flags.handoff) {
+      updateLeadMarker(
+        { session: opts.session },
+        {
+          pendingHandoff: {
+            path: pathResolve(flags.handoff),
+            // biome-ignore lint/suspicious/noThenProperty: pendingHandoff 스키마의 then은 후속 지시 문자열이다.
+            then: thenPrompt || null,
+            at: new Date().toISOString(),
+          },
+        },
+        { env: markerEnv },
+      );
+    }
     result.followUp = { requestId, inputSent: false, error: error.message };
     result.ok = false;
     result.error = `${command} was sent but the follow-up failed: ${error.message}`;

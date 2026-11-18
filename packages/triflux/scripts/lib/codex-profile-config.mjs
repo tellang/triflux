@@ -26,10 +26,6 @@ export { normalizeCodexProfileName };
 export function managedCodexProfileContents(opts = {}) {
   const { profiles, families } = resolveModelFamilies("codex", opts);
   const contents = {};
-  for (const [name, { model, effort }] of Object.entries(profiles)) {
-    contents[name] =
-      `model = "${model}"\nmodel_reasoning_effort = "${effort}"\n`;
-  }
   for (const [family, { model }] of Object.entries(families)) {
     contents[family] = `model = "${model}"\n`;
   }
@@ -84,14 +80,21 @@ export function resolveCodexProfileConfigValues(profileName, opts = {}) {
     opts.codexHome || process.env.CODEX_HOME || join(homedir(), ".codex");
   let model = null;
   let effort = managed ? resolveCodexModelEffort(managed, opts).effort : null;
-  try {
-    const raw = readFileSync(
-      join(codexHome, `${normalizedProfileName}.config.toml`),
-      "utf8",
-    );
-    model = readProfileScalar(raw, "model");
-    if (!managed) effort = readProfileScalar(raw, "model_reasoning_effort");
-  } catch {}
+  const candidateNames =
+    managed?.family && managed.family !== normalizedProfileName
+      ? [managed.family, normalizedProfileName]
+      : [normalizedProfileName];
+  for (const candidateName of candidateNames) {
+    try {
+      const raw = readFileSync(
+        join(codexHome, `${candidateName}.config.toml`),
+        "utf8",
+      );
+      model = readProfileScalar(raw, "model");
+      if (!managed) effort = readProfileScalar(raw, "model_reasoning_effort");
+      break;
+    } catch {}
+  }
   return { model, effort };
 }
 

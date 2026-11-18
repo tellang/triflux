@@ -15,6 +15,8 @@ import { afterEach, describe, it } from "node:test";
 import { resolveNestedCodexAgentProfile } from "../../scripts/lib/agent-route-policy.mjs";
 import {
   codexProfileConfigOverrides,
+  managedCodexProfileContents,
+  resolveCodexProfileConfigValues,
   sanitizeCodexProfileConfig,
   sanitizeCodexProfileConfigFile,
 } from "../../scripts/lib/codex-profile-config.mjs";
@@ -146,6 +148,35 @@ describe("codexProfileConfigOverrides", () => {
     assert.deepEqual(
       codexProfileConfigOverrides("astra_xhigh", { codexHome }),
       ['model_reasoning_effort="xhigh"'],
+    );
+  });
+
+  it("managedCodexProfileContents는 가족 프로필 파일만 생성 대상으로 담고 결합 프로필 조회 시 가족 파일로 폴백한다", () => {
+    const codexHome = makeHome();
+    const { contents } = managedCodexProfileContents({
+      codexHome,
+      allowCommand: false,
+      persist: false,
+    });
+    assert.ok(Object.hasOwn(contents, "sol"));
+    assert.ok(Object.hasOwn(contents, "astra"));
+    assert.equal(Object.hasOwn(contents, "sol_high"), false);
+    assert.equal(Object.hasOwn(contents, "astra_max"), false);
+
+    writeFileSync(
+      join(codexHome, "sol.config.toml"),
+      'model = "gpt-6.2-sol"\n',
+    );
+    writeFileSync(
+      join(codexHome, "sol_high.config.toml"),
+      'model = "gpt-6.0-stale"\n',
+    );
+    assert.deepEqual(
+      resolveCodexProfileConfigValues("sol_high", { codexHome }),
+      {
+        model: "gpt-6.2-sol",
+        effort: "high",
+      },
     );
   });
 

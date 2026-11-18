@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -326,9 +327,10 @@ test("관리 프로필 갱신은 최신 해석을 쓰고 옛 파일과 커스텀
   );
   ensureManagedCodexProfiles(opts);
   assert.match(
-    readFileSync(join(opts.codexHome, "sol_high.config.toml"), "utf8"),
+    readFileSync(join(opts.codexHome, "sol.config.toml"), "utf8"),
     /gpt-6\.10-sol/,
   );
+  assert.equal(existsSync(join(opts.codexHome, "sol_high.config.toml")), false);
   assert.equal(readFileSync(oldPath, "utf8"), "old profile");
   assert.equal(ensureManagedCodexProfiles(opts).changed, 0);
   opts.geminiDir = join(opts.home, ".gemini");
@@ -349,7 +351,7 @@ test("관리 프로필 갱신은 최신 해석을 쓰고 옛 파일과 커스텀
   assert.equal(resolveAgyModel("personal", opts), "custom");
 });
 
-test("가족 파일은 effort와 무관한 최신 모델만 쓰고 결합 파일도 갱신한다", (t) => {
+test("가족 파일은 effort와 무관한 최신 모델만 쓰고 결합 파일은 새로 만들지 않는다", (t) => {
   const opts = fixture(t);
   writeFileSync(
     join(opts.codexHome, "models_cache.json"),
@@ -367,10 +369,7 @@ test("가족 파일은 effort와 무관한 최신 모델만 쓰고 결합 파일
     readFileSync(join(opts.codexHome, "astra.config.toml"), "utf8"),
     'model = "gpt-6.2-astra"\n',
   );
-  assert.match(
-    readFileSync(join(opts.codexHome, "sol_high.config.toml"), "utf8"),
-    /model_reasoning_effort = "high"/,
-  );
+  assert.equal(existsSync(join(opts.codexHome, "sol_high.config.toml")), false);
   assert.equal(ensureManagedCodexProfiles(opts).changed, 0);
   writeFileSync(join(opts.stateDir, "models.json"), '{"sol":"gpt-6-sol"}');
   ensureManagedCodexProfiles(opts);

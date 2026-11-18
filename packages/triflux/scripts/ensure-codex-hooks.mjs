@@ -21,7 +21,7 @@ import { resolveStableNodeBin } from "./lib/stable-node.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = dirname(__dirname);
-const SESSION_START_MATCHER = "startup|resume|clear";
+const SESSION_START_MATCHER = "startup|resume|clear|compact";
 const TRIFLUX_HOOK_BASENAME = "codex-session-hook.mjs";
 
 function atomicWriteFile(path, content) {
@@ -138,6 +138,16 @@ function buildDesiredGroups({ nodeBin, hookScriptPath, platform }) {
         },
       ],
     },
+    Stop: {
+      hooks: [
+        {
+          type: "command",
+          command: buildCommand(nodeBin, hookScriptPath, "stop", platform),
+          timeout: 10,
+          statusMessage: "Triflux 리드 승계 점검",
+        },
+      ],
+    },
   };
 }
 
@@ -170,7 +180,7 @@ function managedKeyPatterns(managedKeys, hooksPath) {
   const escapedKeys = [...managedKeys].map((key) =>
     escapeRegExp(escapeTomlKey(key)),
   );
-  for (const label of ["session_start", "user_prompt_submit"]) {
+  for (const label of ["session_start", "user_prompt_submit", "stop"]) {
     escapedKeys.push(
       escapeRegExp(escapeTomlKey(`${hooksPath}:${label}:`)).replace(
         /"$/,
@@ -310,8 +320,10 @@ export function ensureCodexHooks(opts = {}) {
     hooksJson.hooks.UserPromptSubmit,
     desired.UserPromptSubmit,
   );
+  const stop = upsertHookGroup(hooksJson.hooks.Stop, desired.Stop);
   hooksJson.hooks.SessionStart = sessionStart.groups;
   hooksJson.hooks.UserPromptSubmit = promptSubmit.groups;
+  hooksJson.hooks.Stop = stop.groups;
 
   const originalHooks = existsSync(hooksPath)
     ? readFileSync(hooksPath, "utf8")
@@ -341,6 +353,15 @@ export function ensureCodexHooks(opts = {}) {
         command: desired.UserPromptSubmit.hooks[0].command,
         timeout: desired.UserPromptSubmit.hooks[0].timeout,
         statusMessage: desired.UserPromptSubmit.hooks[0].statusMessage,
+      }),
+    },
+    {
+      key: `${hooksPath}:stop:${stop.index}:0`,
+      hash: computeTrustedHookHash({
+        eventName: "stop",
+        command: desired.Stop.hooks[0].command,
+        timeout: desired.Stop.hooks[0].timeout,
+        statusMessage: desired.Stop.hooks[0].statusMessage,
       }),
     },
   ];

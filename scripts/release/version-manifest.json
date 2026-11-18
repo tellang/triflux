@@ -19,11 +19,20 @@
       "paths": [["version"]]
     },
     {
+      "file": "packages/remote/package.json",
+      "prefix": "^",
+      "paths": [["peerDependencies", "@triflux/core"]]
+    },
+    {
       "file": ".claude-plugin/plugin.json",
       "paths": [["version"]]
     },
     {
       "file": "mods/triflux/.claude-plugin/plugin.json",
+      "paths": [["version"]]
+    },
+    {
+      "file": "adapters/agy/plugins/triflux/plugin.json",
       "paths": [["version"]]
     },
     {
@@ -42,6 +51,13 @@
         ["packages", "packages/core", "version"],
         ["packages", "packages/remote", "version"],
         ["packages", "packages/triflux", "version"]
+      ]
+    },
+    {
+      "file": "package-lock.json",
+      "prefix": "^",
+      "paths": [
+        ["packages", "packages/remote", "peerDependencies", "@triflux/core"]
       ]
     }
   ]

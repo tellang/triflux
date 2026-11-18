@@ -32,6 +32,10 @@ function fakeSteps({ interactive, answer, trusted = false }) {
       calls.mods = opts;
       return opts.install || opts.interactive ? "installed" : "deferred";
     },
+    ensureAgy: async (opts) => {
+      calls.agy = opts;
+      return "not-needed";
+    },
     offerPeer: async () => ({ status: "deferred", changed: false }),
     offerLead: async () => "present",
     home: "/fake-home",
@@ -64,6 +68,7 @@ describe("setup 동의 단계", () => {
       psmux: "deferred",
       tmr: "not-needed",
       mods: "deferred",
+      agyPlugin: "not-needed",
       codexHooks: "deferred",
       changed: true,
     });
@@ -81,6 +86,7 @@ describe("setup 동의 단계", () => {
       psmux: "installed",
       tmr: "not-needed",
       mods: "installed",
+      agyPlugin: "not-needed",
       codexHooks: "approved",
       changed: true,
     });
@@ -102,6 +108,7 @@ describe("setup 동의 단계", () => {
       psmux: "declined",
       tmr: "not-needed",
       mods: "installed",
+      agyPlugin: "not-needed",
       codexHooks: "declined",
       changed: true,
     });
@@ -130,6 +137,7 @@ describe("setup 동의 단계", () => {
       psmux: "present",
       tmr: "not-needed",
       mods: "installed",
+      agyPlugin: "not-needed",
       codexHooks: "trusted",
       changed: true,
     });

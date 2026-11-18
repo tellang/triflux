@@ -2,8 +2,12 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, PluginOptions } from 'claude-code'
 
 import type { BandRows, BandSpan } from '../types'
+import { type Holder, leadOf } from './lead-role.ts'
+import { notifyLead } from './memory-pressure.ts'
 
 const rows = atom({ plugin: 'triflux-mods', key: 'rows' } as const, null)
+const SUCCESSION_THRESHOLD_PCT = 85
+const successionKey = (sessionId: string) => 'tfx.succession.' + sessionId
 
 // 'above' 는 statusLine HUD 의 c, x, a 행을 입력창 위 band 에 그리고, 'statusline' 은 statusLine 에 맡긴다.
 export type BandPosition = 'above' | 'statusline'
@@ -142,7 +146,23 @@ async function refreshRows($: EngineInterface, position: BandPosition, columns: 
   }
 }
 
-export function registerHudBand(on: On, options: PluginOptions) {
+async function checkLeadSuccession($: EngineInterface, lead: Holder, percent?: number) {
+  try {
+    if (!(await leadOf($, lead))) return
+    if (typeof percent !== 'number' || percent < SUCCESSION_THRESHOLD_PCT) return
+    const sessionId = await $.session.id()
+    const key = successionKey(sessionId)
+    if (await $.store.get(key)) return
+    await $.store.set(key, { percent: Math.round(percent), at: await $.clock.now() })
+    await notifyLead(
+      $,
+      `[tfx-lead] 컨텍스트 사용량이 ${Math.round(percent)}%에 도달했다. 인계 파일을 저장하고 세션을 승계하라.`,
+      () => true,
+    )
+  } catch {}
+}
+
+export function registerHudBand(on: On, options: PluginOptions, lead: Holder = {}) {
   const position: BandPosition = options.position === 'statusline' ? 'statusline' : 'above'
   // 다음 갱신 때 HUD 에 넘길 터미널 폭. band 를 그릴 때마다 맞춘다.
   let columns = 120
@@ -158,6 +178,7 @@ export function registerHudBand(on: On, options: PluginOptions) {
   on('session.measure', async ($, e, next) => {
     const result = await next(e)
     await refreshRows($, position, columns)
+    await checkLeadSuccession($, lead, e.context.percent)
     return result
   })
 

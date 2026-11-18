@@ -462,6 +462,7 @@ export async function runConsentSteps({
   offerTmr = offerTmrInstall,
   modsInstall = false,
   offerMods = ensureTrifluxMods,
+  ensureAgy = ensureAgyPlugin,
   home = _TFX_HOME,
   packageRoot = PLUGIN_ROOT,
   fromUpdate = false,
@@ -480,6 +481,7 @@ export async function runConsentSteps({
     psmux: "not-needed",
     tmr: "not-needed",
     mods: "not-needed",
+    agyPlugin: "not-needed",
     codexHooks: "skipped",
     changed: false,
   };
@@ -531,6 +533,17 @@ export async function runConsentSteps({
     notice,
   });
 
+  result.agyPlugin = await ensureAgy({
+    install: modsInstall,
+    interactive,
+    ask,
+    env,
+    execFileSyncFn: run,
+    log,
+    warn,
+    notice,
+  });
+
   try {
     await offerLead({
       interactive,
@@ -561,19 +574,24 @@ export async function runConsentSteps({
   }
 
   try {
-    result.changed ||= [result.psmux, result.tmr, result.mods].some(
-      (status) => status === "installed" || status === "updated",
-    );
+    result.changed ||= [
+      result.psmux,
+      result.tmr,
+      result.mods,
+      result.agyPlugin,
+    ].some((status) => status === "installed" || status === "updated");
     const hooks = ensureHooks({ trust: false });
     result.changed ||= Boolean(hooks?.changedHooks || hooks?.changedConfig);
     if (hooks?.skipped) return result;
     if (hooks.trusted) result.codexHooks = "trusted";
     else if (!interactive) {
       result.codexHooks = "deferred";
-      notice("Codex 훅 승인 전. tfx setup 에서 승인한다");
+      notice(
+        "Codex 훅 승인 전(신규 설치 또는 훅 구문 갱신). 대화형 tfx setup 에서 승인한다",
+      );
     } else if (
       await ask(
-        "Codex 훅을 승인해 둘까요? (Codex 세션 시작과 프롬프트 입력 때 triflux 세션 동기화 훅이 돈다)",
+        "Codex 훅을 승인해 둘까요? (세션 시작, 프롬프트 입력, 턴 종료 승계 안내 때 triflux 훅이 돈다)",
       )
     ) {
       ensureHooks({ trust: true });
@@ -582,7 +600,9 @@ export async function runConsentSteps({
       log("Codex hooks: 승인 기록");
     } else {
       result.codexHooks = "declined";
-      notice("Codex 훅 승인 전. tfx setup 에서 승인한다");
+      notice(
+        "Codex 훅 승인 전(신규 설치 또는 훅 구문 갱신). 대화형 tfx setup 에서 승인한다",
+      );
     }
   } catch (error) {
     result.codexHooks = "failed";
@@ -600,10 +620,6 @@ const SETTINGS_PATH = join(CLAUDE_DIR, "settings.json");
 const HUD_PATH = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
 
 const REQUIRED_CODEX_PROFILES = [
-  ...Object.entries(CODEX_FAMILY_PROFILES).map(([name, { model, effort }]) => ({
-    name,
-    lines: [`model = "${model}"`, `model_reasoning_effort = "${effort}"`],
-  })),
   ...new Map(
     Object.values(CODEX_FAMILY_PROFILES).map(({ family, model }) => [
       family,
@@ -1497,6 +1513,158 @@ export async function ensureTrifluxMods({
   }
 }
 
+const AGY_PLUGIN_NAME = "triflux";
+export const AGY_PLUGIN_SRC_DIR = join(
+  PLUGIN_ROOT,
+  "adapters",
+  "agy",
+  "plugins",
+  AGY_PLUGIN_NAME,
+);
+
+export function agyCli(env = process.env, execFileSyncFn = execFileSync) {
+  const localAgy = env?.HOME ? join(env.HOME, ".local", "bin", "agy") : "";
+  const command = localAgy && existsSync(localAgy) ? localAgy : "agy";
+  const isWin = process.platform === "win32";
+  return (args) => {
+    const safeArgs = isWin
+      ? args.map((arg) => {
+          const text = String(arg);
+          return /\s/.test(text) && !/^".*"$/.test(text) ? `"${text}"` : text;
+        })
+      : args;
+    return execFileSyncFn(command, safeArgs, {
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 60_000,
+      windowsHide: true,
+      shell: isWin,
+    });
+  };
+}
+
+export function inspectAgyPlugin({
+  env = process.env,
+  pkgVersion = getPackageVersion(),
+  pluginSrcDir = AGY_PLUGIN_SRC_DIR,
+  run = agyCli(env, execFileSync),
+} = {}) {
+  if (isProtectedSetupEnv(env) || env.npm_lifecycle_event === "postinstall")
+    return { status: "skipped", reason: "protected-env" };
+  let raw;
+  try {
+    raw = run(["plugin", "list", "--json"]);
+  } catch {
+    return { status: "skipped", reason: "agy-unavailable" };
+  }
+  try {
+    const parsed = JSON.parse(String(raw || "[]"));
+    const list = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.plugins)
+        ? parsed.plugins
+        : [];
+    const entry = list.find((item) => item?.name === AGY_PLUGIN_NAME);
+    if (!entry) {
+      return {
+        status: "missing",
+        installedVersion: undefined,
+        pkgVersion,
+        pluginSrcDir,
+      };
+    }
+    if (!entry.enabled) {
+      return {
+        status: "disabled",
+        installedVersion: entry.version,
+        pkgVersion,
+        pluginSrcDir,
+      };
+    }
+    const outdated =
+      Boolean(entry.version && pkgVersion) && entry.version !== pkgVersion;
+    return {
+      status: outdated ? "outdated" : "current",
+      installedVersion: entry.version,
+      pkgVersion,
+      pluginSrcDir,
+    };
+  } catch (error) {
+    return { status: "failed", error: _normalizeErrorMessage(error) };
+  }
+}
+
+export async function ensureAgyPlugin({
+  install = false,
+  interactive = false,
+  ask = async () => false,
+  env = process.env,
+  pkgVersion = getPackageVersion(),
+  pluginSrcDir = AGY_PLUGIN_SRC_DIR,
+  execFileSyncFn = execFileSync,
+  run = agyCli(env, execFileSyncFn),
+  log = console.log,
+  warn = console.warn,
+  notice = console.log,
+} = {}) {
+  const plugin = inspectAgyPlugin({ env, pkgVersion, pluginSrcDir, run });
+  if (plugin.status === "skipped") return "not-needed";
+  if (plugin.status === "current") return "present";
+  try {
+    if (plugin.status === "failed") throw new Error(plugin.error);
+    if (plugin.status === "missing" || plugin.status === "disabled") {
+      if (!install && !interactive) {
+        notice("agy plugin 설치: tfx setup --mods");
+        return "deferred";
+      }
+      if (
+        !install &&
+        !(await ask(
+          "Antigravity triflux 플러그인(리드 승계와 메모리 압박 감시 훅)을 설치할까요?",
+        ))
+      ) {
+        notice("agy plugin 설치를 건너뜀. 나중에 설치: tfx setup --mods");
+        return "declined";
+      }
+    } else {
+      const gap = `${plugin.installedVersion}, 패키지 ${plugin.pkgVersion}`;
+      if (!install && !interactive) {
+        warn(
+          `agy plugin 버전이 다르다(설치 ${gap}). 업데이트: tfx setup --mods`,
+        );
+        return "outdated";
+      }
+      if (
+        !install &&
+        !(await ask(
+          `Antigravity triflux 플러그인을 업데이트할까요? (설치 ${gap})`,
+        ))
+      ) {
+        warn(
+          `agy plugin 버전이 다르다(설치 ${gap}). 업데이트: tfx setup --mods`,
+        );
+        notice("agy plugin 업데이트를 건너뜀. 나중에: tfx setup --mods");
+        return "update-declined";
+      }
+    }
+    run(["plugin", "validate", pluginSrcDir, "--json"]);
+    run(["plugin", "install", pluginSrcDir]);
+    if (plugin.status === "disabled") {
+      run(["plugin", "enable", AGY_PLUGIN_NAME]);
+    }
+    if (plugin.status === "missing") {
+      log(`agy plugin 설치 완료: ${AGY_PLUGIN_NAME}`);
+      return "installed";
+    }
+    log(`agy plugin 업데이트 완료: ${AGY_PLUGIN_NAME}`);
+    return "updated";
+  } catch (error) {
+    warn(`[setup] agy plugin 설정 실패: ${_normalizeErrorMessage(error)}`);
+    return "failed";
+  }
+}
+
 // 예전에 배포했다가 그만둔 설치 파일. 내용에 배포 표식이 있을 때만 지운다.
 const RETIRED_INSTALL_FILES = [
   [
@@ -1646,9 +1814,10 @@ function ensureCodexProfiles({ notice = () => {} } = {}) {
       notice,
     }).changed;
     // 사용자 커스텀 프로필은 별도 파일이 이미 있으면 덮어쓰지 않고 본문만 이관한다.
-    const managedProfileNames = new Set(
-      REQUIRED_CODEX_PROFILES.map((p) => p.name),
-    );
+    const managedProfileNames = new Set([
+      ...REQUIRED_CODEX_PROFILES.map((p) => p.name),
+      ...Object.keys(CODEX_FAMILY_PROFILES),
+    ]);
     const retiredProfileNames = new Set(LEGACY_CODEX_PROFILE_NAMES);
     const inlineProfileNames = listInlineProfileNames(updated);
     const families = new Set(

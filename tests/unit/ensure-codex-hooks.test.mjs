@@ -142,7 +142,8 @@ describe("ensureCodexHooks", () => {
 
     const sessionStart = hooksJson.hooks.SessionStart[1];
     const promptSubmit = hooksJson.hooks.UserPromptSubmit[1];
-    assert.equal(sessionStart.matcher, "startup|resume|clear");
+    const stop = hooksJson.hooks.Stop[0];
+    assert.equal(sessionStart.matcher, "startup|resume|clear|compact");
     assert.deepEqual(sessionStart.hooks[0], {
       type: "command",
       command: '"/opt/node" "/repo/hooks/codex-session-hook.mjs" register',
@@ -156,6 +157,16 @@ describe("ensureCodexHooks", () => {
           command: '"/opt/node" "/repo/hooks/codex-session-hook.mjs" heartbeat',
           timeout: 10,
           statusMessage: "Triflux 세션 활동 갱신",
+        },
+      ],
+    });
+    assert.deepEqual(stop, {
+      hooks: [
+        {
+          type: "command",
+          command: '"/opt/node" "/repo/hooks/codex-session-hook.mjs" stop',
+          timeout: 10,
+          statusMessage: "Triflux 리드 승계 점검",
         },
       ],
     });
@@ -178,6 +189,10 @@ describe("ensureCodexHooks", () => {
     assert.match(
       configAfterFirst,
       /\[hooks\.state\."\S+hooks\.json:user_prompt_submit:1:0"\]\ntrusted_hash = "sha256:[0-9a-f]{64}"/,
+    );
+    assert.match(
+      configAfterFirst,
+      /\[hooks\.state\."\S+hooks\.json:stop:0:0"\]\ntrusted_hash = "sha256:[0-9a-f]{64}"/,
     );
   });
 

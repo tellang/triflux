@@ -2,9 +2,10 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { test } from "node:test";
-import { doClear } from "../../bin/tfx-live.mjs";
+import { doClear, stripCodexHooksDisableFlag } from "../../bin/tfx-live.mjs";
+import { readLeadMarker, writeLeadMarker } from "../../hub/lib/lead-marker.mjs";
 
 function fixture() {
   const sent = [];
@@ -137,4 +138,71 @@ test("전환이 확인되지 않은 채 상한을 넘기면 뒤따름 없이 실
   assert.equal(result.ok, false);
   assert.equal(result.followUp.inputSent, false);
   assert.match(result.followUp.error, /new conversation not confirmed/);
+});
+
+test("doClear는 followUp 성공 시 알림 상태를 초기화하고 실패 시에만 pendingHandoff를 남긴다", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tfx-clear-marker-"));
+  try {
+    const env = { HOME: dir, XDG_STATE_HOME: join(dir, "state") };
+    const handoff = join(dir, "handoff.md");
+    await writeFile(handoff, "인계 내용");
+    writeLeadMarker(
+      {
+        session: "fake",
+        paneId: "%7",
+        cli: "codex",
+        sessionRole: "lead",
+        role: "코드 리드",
+        notifiedThreshold: 85,
+        notifiedThreadId: "old-thread",
+      },
+      { env },
+    );
+    const fake = fixture();
+    fake.deps.env = env;
+    const okRes = await doClear(
+      fake.flags("codex", { handoff, then: "이어서 검증" }),
+      fake.deps,
+    );
+    assert.equal(okRes.followUp.inputSent, true);
+    const afterSuccess = readLeadMarker({ session: "fake" }, { env });
+    assert.equal(afterSuccess.notifiedThreshold, 0);
+    assert.equal(afterSuccess.notifiedThreadId, null);
+    assert.equal(afterSuccess.pendingHandoff, null);
+
+    // 새 대화 전환이 확인되지 않아 followUp 전송에 실패하면 복구용 pendingHandoff를 남긴다.
+    const stuck = fixture();
+    stuck.deps.env = env;
+    stuck.deps.captureVisible = async () => "› old";
+    const failRes = await doClear(
+      stuck.flags("codex", {
+        handoff,
+        then: "이어서 검증",
+        timeout: "0.01",
+      }),
+      stuck.deps,
+    );
+    assert.equal(failRes.ok, false);
+    const afterFail = readLeadMarker({ session: "fake" }, { env });
+    assert.equal(afterFail.pendingHandoff.path, resolve(handoff));
+    assert.equal(afterFail.pendingHandoff.then, "이어서 검증");
+    assert.equal(typeof afterFail.pendingHandoff.at, "string");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("stripCodexHooksDisableFlag는 리드와 소통 세션용 Codex 실행 명령에서 features.hooks=false만 제거한다", () => {
+  assert.equal(
+    stripCodexHooksDisableFlag(
+      "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust -c features.hooks=false",
+    ),
+    "codex --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust",
+  );
+  assert.equal(
+    stripCodexHooksDisableFlag(
+      "codex resume 0199a000-0000-7000-8000-000000000001 --dangerously-bypass-approvals-and-sandbox -c 'features.hooks=false'",
+    ),
+    "codex resume 0199a000-0000-7000-8000-000000000001 --dangerously-bypass-approvals-and-sandbox",
+  );
 });

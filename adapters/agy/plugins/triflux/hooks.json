@@ -1,0 +1,25 @@
+{
+  "triflux": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "node ./hooks/agy-lead-hook.mjs start",
+        "timeout": 5
+      }
+    ],
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node ./hooks/agy-lead-hook.mjs pre",
+        "timeout": 5
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node ./hooks/agy-lead-hook.mjs stop",
+        "timeout": 5
+      }
+    ]
+  }
+}

@@ -47,3 +47,20 @@ test('상한을 넘으면 낮은 순위부터 빠지고 넘치는 표는 다시 
   expect(block).not.toContain('| worker |')
   expect(block).not.toContain('사용자 결정')
 })
+
+test('소통 세션이면 첫 항목을 소통 역할로 표기한다', async ($, on) => {
+  mock.store(on, {
+    'tfx.lead.comm-1': {
+      role: '문서 소통',
+      since: new Date(2026, 9, 23, 12).toISOString(),
+      kind: 'communication',
+    },
+  })
+  on('session.id', () => ({ value: 'comm-1' }))
+  on('session.root', () => ({ value: '/work' }))
+  on('fs.read', () => { throw new Error('ENOENT') })
+  const seen: (string | undefined)[] = []
+  on('session.compact', (_, e) => { seen.push(e.instructions); return { messages: [...e.messages] } })
+  await compact($)
+  expect(seen[0]).toContain('- 소통 역할: 문서 소통, 세션 이름: 10.23 문서 소통')
+})

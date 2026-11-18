@@ -375,7 +375,7 @@ process.exit(result.status ?? 1);
     assert.deepEqual(profileValues(args), ["sol"]);
     assert.match(
       readFileSync(
-        path.join(fixture.home, ".codex", "sol_high.config.toml"),
+        path.join(fixture.home, ".codex", "sol.config.toml"),
         "utf8",
       ),
       /model = "gpt-7\.2-sol"/,
