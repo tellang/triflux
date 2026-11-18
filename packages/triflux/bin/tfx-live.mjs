@@ -37,6 +37,12 @@ import {
   judgeBusyAction,
   judgePeerConvergence,
 } from "../hub/lib/jev-addon.mjs";
+import {
+  readLeadMarker,
+  removeLeadMarker,
+  updateLeadMarker,
+  writeLeadMarker,
+} from "../hub/lib/lead-marker.mjs";
 import { privateTmpDir } from "../hub/lib/private-tmp.mjs";
 import { resolveHardCeilingMs } from "../hub/lib/worker-lifecycle.mjs";
 import { exposeLiveSession } from "../hub/team/agents-row.mjs";
@@ -4010,9 +4016,43 @@ end tell`;
       itermWarning = error.message;
     }
   }
+  let paneId = null;
+  if (
+    ready &&
+    !remote &&
+    (opts.role === "lead" || opts.role === "communication")
+  ) {
+    try {
+      const paneOut = await runTmux(null, [
+        "display-message",
+        "-p",
+        "-t",
+        exactTmuxTarget(session),
+        "#{pane_id}",
+      ]);
+      paneId = paneOut.stdout.trim() || null;
+    } catch {
+      paneId = null;
+    }
+    writeLeadMarker(
+      {
+        session,
+        paneId,
+        cli: adapter.cli,
+        sessionRole: opts.role,
+        role: opts.name || opts.role,
+        name: name || opts.name || session,
+        cwd: pathResolve(cwd || process.cwd()),
+        conversationId: conversation?.conversationId ?? null,
+        threadId: threadId || opts.preparedThreadId || null,
+      },
+      { env: opts.env || process.env },
+    );
+  }
   return addLoginGuard(adapter, raw, {
     cli: adapter.cli,
     session,
+    ...(paneId ? { paneId } : {}),
     remote: remote ?? null,
     resumed,
     resumeTarget,
@@ -5260,6 +5300,9 @@ async function doStop(adapter, opts, deps = {}) {
     killedTtys = clients.stdout.trim().split("\n").filter(Boolean);
   }
   await tmux(remote, ["kill-session", "-t", exactTmuxTarget(session)]);
+  if (!remote && session) {
+    removeLeadMarker({ session }, { env: deps.env || opts.env || process.env });
+  }
   // tfx-live 가 연 패인 기록이나 붙어 있던 클라이언트가 있으면 어디서 stop 하든 닫고, 기록이 없을 때의 이름 검색은 iTerm 안에서만 한다.
   if (
     useIterm &&
@@ -6705,6 +6748,24 @@ async function doClear(flags, deps = {}) {
   await waitForTmuxIdle(adapter, opts, deps);
   const idBefore = followUp && cli === "agy" ? await readAgyId() : null;
   const screenBefore = followUp ? await capture(opts.remote, opts.session) : "";
+  const markerEnv = deps.env || opts.env || process.env;
+  if (readLeadMarker({ session: opts.session }, { env: markerEnv })) {
+    updateLeadMarker(
+      { session: opts.session },
+      {
+        pendingHandoff: flags.handoff
+          ? {
+              path: pathResolve(flags.handoff),
+              // biome-ignore lint/suspicious/noThenProperty: pendingHandoff 스키마의 then은 후속 지시 문자열이다.
+              then: thenPrompt || null,
+              at: new Date().toISOString(),
+            }
+          : null,
+        notifiedThreshold: 0,
+      },
+      { env: markerEnv },
+    );
+  }
   await doAskViaTmux(adapter, sendOpts, deps);
   const result = {
     cli,

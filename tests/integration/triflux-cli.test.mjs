@@ -160,20 +160,7 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
 
     assert.ok(codexProfiles, "codex-profiles action missing");
     assert.equal(codexProfiles.change, "update");
-    assert.deepEqual(codexProfiles.profiles, [
-      "sol_high",
-      "sol_med",
-      "astra_xhigh",
-      "astra_max",
-      "astra_ultra",
-      "terra_high",
-      "luna_high",
-      "luna_low",
-      "sol",
-      "astra",
-      "terra",
-      "luna",
-    ]);
+    assert.deepEqual(codexProfiles.profiles, ["sol", "astra", "terra", "luna"]);
     if (process.platform === "win32") {
       assert.equal(codexProfiles.windowsSandbox, true);
     }
@@ -302,30 +289,19 @@ describe("triflux CLI JSON surface", { timeout: 30000 }, () => {
         `model = "${model}"\n`,
       );
     }
-    assert.equal(
-      readFileSync(join(codexDir, "sol_high.config.toml"), "utf8"),
-      'model = "gpt-6.2-sol"\nmodel_reasoning_effort = "high"\n',
-    );
-    assert.equal(
-      readFileSync(join(codexDir, "astra_xhigh.config.toml"), "utf8"),
-      'model = "gpt-6.2-astra"\nmodel_reasoning_effort = "xhigh"\n',
-    );
-    assert.equal(
-      readFileSync(join(codexDir, "astra_max.config.toml"), "utf8"),
-      'model = "gpt-6.2-astra"\nmodel_reasoning_effort = "max"\n',
-    );
-    assert.equal(
-      readFileSync(join(codexDir, "astra_ultra.config.toml"), "utf8"),
-      'model = "gpt-6.2-astra"\nmodel_reasoning_effort = "ultra"\n',
-    );
-    assert.equal(
-      readFileSync(join(codexDir, "luna_high.config.toml"), "utf8"),
-      'model = "gpt-6-luna"\nmodel_reasoning_effort = "high"\n',
-    );
-    assert.equal(
-      readFileSync(join(codexDir, "luna_low.config.toml"), "utf8"),
-      'model = "gpt-6-luna"\nmodel_reasoning_effort = "low"\n',
-    );
+    for (const combined of [
+      "sol_high",
+      "astra_xhigh",
+      "astra_max",
+      "astra_ultra",
+      "luna_high",
+      "luna_low",
+    ]) {
+      assert.equal(
+        existsSync(join(codexDir, `${combined}.config.toml`)),
+        false,
+      );
+    }
     for (const name of retiredSolProfiles) {
       assert.equal(
         readFileSync(join(codexDir, `${name}.config.toml`), "utf8"),

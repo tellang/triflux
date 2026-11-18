@@ -400,4 +400,3 @@ describe("setup: inspectAgyPlugin 및 ensureAgyPlugin", () => {
     assert.deepEqual(calls.splice(0), ["plugin list --json"]);
   });
 });
-

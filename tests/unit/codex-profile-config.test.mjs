@@ -163,7 +163,10 @@ describe("codexProfileConfigOverrides", () => {
     assert.equal(Object.hasOwn(contents, "sol_high"), false);
     assert.equal(Object.hasOwn(contents, "astra_max"), false);
 
-    writeFileSync(join(codexHome, "sol.config.toml"), 'model = "gpt-6.2-sol"\n');
+    writeFileSync(
+      join(codexHome, "sol.config.toml"),
+      'model = "gpt-6.2-sol"\n',
+    );
     assert.deepEqual(
       resolveCodexProfileConfigValues("sol_high", { codexHome }),
       {

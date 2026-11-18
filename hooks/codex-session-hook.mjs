@@ -102,7 +102,8 @@ function findActiveLeadMarker(payload, env = process.env) {
   const tmuxPane = String(env.TMUX_PANE || "").trim();
   if (tmuxPane) {
     const byPane = entries.find(
-      ({ record }) => record.paneId && String(record.paneId).trim() === tmuxPane,
+      ({ record }) =>
+        record.paneId && String(record.paneId).trim() === tmuxPane,
     );
     if (byPane) return byPane;
   }
@@ -257,7 +258,8 @@ async function handleHeartbeat(payload, opts, env) {
   let previousLevel = null;
   if (existsSync(statePath)) {
     try {
-      previousLevel = JSON.parse(readFileSync(statePath, "utf8"))?.level ?? null;
+      previousLevel =
+        JSON.parse(readFileSync(statePath, "utf8"))?.level ?? null;
     } catch {}
   }
 

@@ -17,8 +17,30 @@ const MODEL_CONTEXT = [
   },
   {
     cli: "codex",
+    model: /^gpt-6\.2-astra(?:$|[-_])/i,
+    tokens: 272_000,
+    exactModelWindow: true,
+    source: "https://developers.openai.com/api/docs/models",
+  },
+  {
+    cli: "codex",
+    model: /^gpt-6\.2-sol(?:$|[-_])/i,
+    tokens: 500_000,
+    exactModelWindow: true,
+    source: "https://developers.openai.com/api/docs/models",
+  },
+  {
+    cli: "codex",
+    model: /^gpt-6\.1(?:$|[-_])/i,
+    tokens: 400_000,
+    exactModelWindow: true,
+    source: "https://developers.openai.com/api/docs/models",
+  },
+  {
+    cli: "codex",
     model: /^gpt-6(?:\.\d+)?(?:$|[-_])/i,
     tokens: 1_050_000,
+    exactModelWindow: false,
     source: "https://developers.openai.com/api/docs/models",
   },
 ];
@@ -56,6 +78,9 @@ export function modelContext(
     estimatedContextTokens,
     contextLimitTokens,
     contextLimitSource: entry?.source ?? null,
+    ...(entry?.exactModelWindow !== undefined
+      ? { exactModelWindow: Boolean(entry.exactModelWindow) }
+      : {}),
     ...(executionContextLimitTokens ? { executionContextLimitTokens } : {}),
     contextPct:
       effectiveLimit && Number.isFinite(estimatedContextTokens)
@@ -69,8 +94,16 @@ export function contextGuard(
   context,
   { warnContextPct, maxContextPct } = {},
 ) {
+  const exactModelWindow = Boolean(
+    context?.exactModelWindow ??
+      MODEL_CONTEXT.find(
+        (item) => item.cli === cli && item.model.test(context?.model || ""),
+      )?.exactModelWindow,
+  );
   const defaults =
-    cli === "codex" && !context?.executionContextLimitTokens
+    cli === "codex" &&
+    !context?.executionContextLimitTokens &&
+    !exactModelWindow
       ? CODEX_MODEL_WINDOW_THRESHOLDS
       : CONTEXT_THRESHOLDS[cli];
   const warn = warnContextPct ?? defaults?.warnContextPct ?? 0;

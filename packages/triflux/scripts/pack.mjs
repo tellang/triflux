@@ -75,7 +75,16 @@ function copyItem(src, dest) {
 }
 
 function cleanDist(pkgDir) {
-  const dirs = ["hub", "bin", "skills", "scripts", "hooks", "hud", "cto"];
+  const dirs = [
+    "adapters",
+    "hub",
+    "bin",
+    "skills",
+    "scripts",
+    "hooks",
+    "hud",
+    "cto",
+  ];
   for (const d of dirs) {
     const target = join(pkgDir, d);
     if (existsSync(target)) rmSync(target, { recursive: true, force: true });
