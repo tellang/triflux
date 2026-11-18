@@ -22,22 +22,6 @@ test("an empty interactive invocation shows usage without a multiplexer", () => 
   assert.match(output, /사용법:/);
 });
 
-test("legacy --dashboard is ignored without warnings or changing options", (t) => {
-  const warnings = t.mock.method(console, "warn", () => {});
-  const args = [
-    "--teammate-mode",
-    "headless",
-    "--no-auto-attach",
-    "--no-dashboard",
-    "test",
-  ];
-  assert.deepEqual(
-    parseTeamArgs([...args, "--dashboard"]),
-    parseTeamArgs(args),
-  );
-  assert.equal(warnings.mock.callCount(), 0);
-});
-
 test("auto-attach is unset by default and set only by its flags", () => {
   const base = ["--teammate-mode", "headless", "test"];
   assert.equal(parseTeamArgs(base).autoAttach, null);

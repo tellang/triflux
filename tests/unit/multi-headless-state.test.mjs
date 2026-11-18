@@ -30,7 +30,6 @@ const options = (sessionId) => ({
   agents: ["codex"],
   subtasks: ["test"],
   layout: "2x2",
-  dashboard: false,
 });
 
 test("headless state remains readable while running and is cleared after completion", async () => {

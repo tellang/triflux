@@ -19,11 +19,9 @@ function createHarness({
   leadPane = "%7",
   leadTmux = attachedTmuxEnv.TMUX,
   autoAttach = true,
-  dashboard = true,
 } = {}) {
   const calls = {
     tmux: [],
-    dashboard: [],
     terminal: [],
     progress: [],
   };
@@ -32,10 +30,6 @@ function createHarness({
     2,
     {
       autoAttach,
-      dashboard,
-      dashboardLayout: "lite",
-      dashboardSize: 0.3,
-      dashboardAnchor: "window",
       leadPane,
       leadTmux,
       onProgress: (event) => calls.progress.push(event),
@@ -43,7 +37,6 @@ function createHarness({
         platform,
         env,
         psmuxExec: (args) => calls.tmux.push(args),
-        attachDashboardTab: (...args) => calls.dashboard.push(args),
         autoAttachTerminal: (...args) => calls.terminal.push(args),
       },
     },
@@ -52,37 +45,34 @@ function createHarness({
 }
 
 describe("headless tmux auto-attach", () => {
-  for (const dashboard of [true, false]) {
-    it(`attached macOS tmux에서 dashboard=${dashboard}여도 pane을 한 번만 표시한다`, () => {
-      const { calls, handler } = createHarness({ dashboard });
-      const event = { type: "session_created", dashboardLayout: "split-2col" };
+  it("attached macOS tmux에서 pane을 한 번만 표시한다", () => {
+    const { calls, handler } = createHarness();
+    const event = { type: "session_created" };
 
-      assert.doesNotThrow(() => handler(event));
-      assert.doesNotThrow(() => handler(event));
+    assert.doesNotThrow(() => handler(event));
+    assert.doesNotThrow(() => handler(event));
 
-      assert.equal(calls.tmux.length, 1);
-      assert.deepEqual(calls.tmux[0], [
-        "split-window",
-        "-v",
-        "-l",
-        "30%",
-        "-t",
-        "%7",
-        "env",
-        "-u",
-        "TMUX",
-        "tmux",
-        "-S",
-        "/tmp/tmux-501/default",
-        "attach-session",
-        "-t",
-        "tfx-headlesstouchtmpinjected",
-      ]);
-      assert.equal(calls.dashboard.length, 0);
-      assert.equal(calls.terminal.length, 0);
-      assert.equal(calls.progress.length, 2);
-    });
-  }
+    assert.equal(calls.tmux.length, 1);
+    assert.deepEqual(calls.tmux[0], [
+      "split-window",
+      "-v",
+      "-l",
+      "30%",
+      "-t",
+      "%7",
+      "env",
+      "-u",
+      "TMUX",
+      "tmux",
+      "-S",
+      "/tmp/tmux-501/default",
+      "attach-session",
+      "-t",
+      "tfx-headlesstouchtmpinjected",
+    ]);
+    assert.equal(calls.terminal.length, 0);
+    assert.equal(calls.progress.length, 2);
+  });
 
   it("Linux attached tmux에서도 같은 pane attach 경로를 사용한다", () => {
     const { calls, handler } = createHarness({ platform: "linux" });
@@ -90,7 +80,6 @@ describe("headless tmux auto-attach", () => {
     handler({ type: "session_created" });
 
     assert.equal(calls.tmux.length, 1);
-    assert.equal(calls.dashboard.length, 0);
     assert.equal(calls.terminal.length, 0);
   });
 
@@ -112,7 +101,6 @@ describe("headless tmux auto-attach", () => {
     handler({ type: "session_created" });
 
     assert.equal(calls.tmux.length, 0);
-    assert.equal(calls.dashboard.length, 0);
     assert.equal(calls.terminal.length, 0);
     assert.equal(calls.progress.length, 1);
   });
@@ -144,7 +132,6 @@ describe("headless tmux auto-attach", () => {
     const progress = [];
     const handler = createHeadlessAutoAttachHandler("safe-session", 1, {
       autoAttach: true,
-      dashboard: true,
       leadPane: "%7",
       leadTmux: attachedTmuxEnv.TMUX,
       onProgress: (event) => progress.push(event),
@@ -190,7 +177,7 @@ describe("headless tmux auto-attach", () => {
   ]) {
     it(`${name} attach 실패를 warning으로 남기고 session_created를 보존한다`, async () => {
       const progress = [];
-      const event = { type: "session_created", dashboardLayout: "lite" };
+      const event = { type: "session_created" };
       const handler = createHeadlessAutoAttachHandler("safe-session", 1, {
         autoAttach: true,
         onProgress: (progressEvent) => progress.push(progressEvent),
@@ -252,20 +239,14 @@ describe("headless tmux auto-attach", () => {
     });
   }
 
-  for (const dashboard of [true, false]) {
-    it(`Windows dashboard=${dashboard}는 기존 WT helper를 유지한다`, () => {
-      const { calls, handler } = createHarness({
-        platform: "win32",
-        dashboard,
-      });
+  it("Windows는 기존 WT helper를 유지한다", () => {
+    const { calls, handler } = createHarness({ platform: "win32" });
 
-      handler({ type: "session_created", dashboardLayout: "split-2col" });
+    handler({ type: "session_created" });
 
-      assert.equal(calls.tmux.length, 0);
-      assert.equal(calls.dashboard.length, dashboard ? 1 : 0);
-      assert.equal(calls.terminal.length, dashboard ? 0 : 1);
-    });
-  }
+    assert.equal(calls.tmux.length, 0);
+    assert.equal(calls.terminal.length, 1);
+  });
 });
 
 describe("headless pane/native bridge opt-outs", () => {
