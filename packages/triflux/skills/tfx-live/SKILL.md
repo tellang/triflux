@@ -3,7 +3,7 @@ name: tfx-live
 description: >
   Claude·Codex·agy 세션을 실시간으로 생성·질의·대기·압축·종료하거나,
   tmux/daemon UDS 연결과 peer 중계를 운영할 때 사용한다.
-argument-hint: "<start|ask|send|wait|queue|goal|compact|stop|rename|interrupt|probe|inspect|reconcile|list-sessions|peer> [--cli codex|claude|agy] ..."
+argument-hint: "<start|ask|send|wait|queue|goal|compact|clear|stop|rename|interrupt|probe|inspect|reconcile|list-sessions|peer> [--cli codex|claude|agy] ..."
 ---
 
 # tfx-live
@@ -91,7 +91,7 @@ agy `ask`의 기본 `--if-busy queue`는 바쁜 턴에도 바로 전송한다. a
 | 동작 | 적용 조건과 실행 |
 | --- | --- |
 | compact | 같은 목표와 담당이 이어지고 파일과 git에서 상태를 복구할 수 있을 때. Claude와 Codex는 `tfx-live compact --then "다음 지시" --no-wait`로 압축 제출을 확인하고 다음 지시를 미리 넣는다. 압축 뒤에 필요한 파일 경로와 검증 명령도 `--then`에 싣는다. agy는 수동 compact가 없어 handoff한다. |
-| clear | 무관한 작업으로 전환하거나 같은 문제를 두 번 넘게 고쳐도 실패할 때, 스펙에서 구현으로 또는 작성자에서 리뷰어로 바뀔 때. 미완료 상태를 정리한 뒤 Claude는 `/rename`과 `/clear`를 리드가 `tfx-live ask --session <대상>` 으로 보낸다(relay 태그 없이). 리드 자기 세션은 `tfx-lead` 스킬의 "자기 세션 제어" 절을 따라 `tfx_control` 도구를 쓴다. Codex는 작업 종료 뒤 `/new <이름>`, agy는 `/clear`를 쓴다. |
+| clear | 무관한 작업으로 전환하거나 같은 문제를 두 번 넘게 고쳐도 실패할 때, 스펙에서 구현으로 또는 작성자에서 리뷰어로 바뀔 때. 미완료 상태를 정리한 뒤 Claude는 `/rename`과 `/clear`를 리드가 `tfx-live ask --session <대상>` 으로 보낸다(relay 태그 없이). 리드 자기 세션은 `tfx-lead` 스킬의 "자기 세션 제어" 절을 따라 `tfx_control` 도구를 쓰고, 도구가 없는 Codex 리드와 agy 리드는 `tfx-live clear`를 쓴다. 다른 세션은 `tfx-live clear --cli claude|codex|agy --session <대상>`로 Claude와 agy에 `/clear`, Codex에 `/new`를 보낸다. |
 | handoff | 담당·CLI·모델·소유자가 바뀌거나 긴 작업이 창을 넘길 때. 인계 파일에 목표, 완료 조건, 체크아웃과 변경 상태, 확정 결정, 증거 경로, PASS/FAIL/SKIP, 미완료 작업과 프로세스, 다음 행동과 소유자, `predecessorSessionId`를 적는다. 승계 세션이 경로를 확인하면 이전 세션을 닫는다. |
 | close | 결과와 인계를 확인한 즉시 닫는다. Claude 백그라운드는 `claude stop <id>`, tmux는 `tfx-live stop --session`, Claude 팀원은 shutdown, Codex 서브에이전트는 `close_agent`(Codex 0.162.1 의 도구 목록에는 없다), agy 서브에이전트는 `/agents` 패널의 K를 쓴다. |
 
@@ -187,15 +187,18 @@ tfx-live stop --cli claude --session-id <id>
 tfx-live stop --session cl1
 ```
 
-리드 자기 세션의 compact, clear, exit 는 tmux 안팎 모두 triflux mod 도구 `tfx_control` 을 먼저 쓴다(`tfx-lead` 스킬 "자기 세션 제어" 절). 아래 경로는 mod 가 없는 세션의 대안이다. tmux 안에서 도는 Claude 세션은 자기 자신도 compact 할 수 있다. 자기 턴이 도는 동안에는 세션이 바쁘므로, 백그라운드로 띄우고 `--if-busy wait`로 턴이 끝나기를 기다리게 한다. 기본 `fail`로 두면 턴이 끝나기 전에 거부된다. 결과는 파일에 남겨 다음 턴에 확인한다. 사용자에게 `/compact` 입력을 부탁하기 전에 이 방법을 쓴다.
+리드 자기 세션의 compact, clear, exit 는 tmux 안팎 모두 triflux mod 도구 `tfx_control` 을 먼저 쓴다(`tfx-lead` 스킬 "자기 세션 제어" 절). 아래 경로는 mod 가 없는 세션의 대안이다. tmux 안에서 도는 Claude, Codex, agy 세션은 자기 자신도 compact(agy 는 없음)와 clear 를 할 수 있다. 자기 턴이 도는 동안에는 세션이 바쁘므로, 백그라운드로 띄우고 `--if-busy wait`로 턴이 끝나기를 기다리게 한다. 기본 `fail`로 두면 턴이 끝나기 전에 거부된다. 결과는 파일에 남겨 다음 턴에 확인한다. 사용자에게 `/compact` 입력을 부탁하기 전에 이 방법을 쓴다.
 
 ```bash
 tfx-live compact --session "$TMUX_PANE" --if-busy wait --busy-timeout 600 --instructions "상태 파일 경로와 남은 일을 보존하라" --then "상태 파일을 다시 읽고 이어가라" --no-wait > "${TMPDIR:-/tmp}/tfx-self-compact.json" 2>&1 &
+nohup tfx-live clear --cli <CLI> --session "$TMUX_PANE" --if-busy wait --busy-timeout 600 --handoff <인계 파일 경로> > "${TMPDIR:-/tmp}/tfx-self-clear.json" 2>&1 < /dev/null &
 ```
 
 `compact --session S [--cli claude|codex] [--instructions TEXT] [--then PROMPT] [--no-wait]`는 로컬 tmux에서 `/compact`를 중계 표식 없이 보낸다. CLI 기본값은 Claude다. `--instructions`는 Claude에서만 받으며 Codex는 인자를 받지 않아 거부한다. 기본 `--if-busy fail`이며 바쁜 세션에는 compact를 전송하지 않는다. UDS compact는 지원하지 않는다.
 
 `--no-wait`는 압축 진행 표시 또는 새 완료 기록으로 제출을 확인한 뒤 반환한다. Codex에서 확인되지 않으면 Enter를 한 번 더 보내고, 그래도 확인되지 않으면 `--then`을 보내지 않고 오류로 끝낸다. `--then`은 일반 텍스트 지시만 받으며 슬래시 명령은 거부한다. 제출 확인 직후 Claude에는 표식을 붙여 tmux로 보내고 화면의 `queued messages` 또는 transcript의 `enqueue`로 확인한다. Claude 압축이 먼저 끝나 지시가 이미 처리에 들어갔으면 `then.queued: false, delivered: true`로 보고한다. Codex에는 기존 queue 경로로만 보내며 tmux로 전환하지 않는다. 결과의 `then.requestId`로 `wait --request-id`에서 압축 뒤 응답을 받는다.
+
+`clear --session S [--cli claude|codex|agy] [--handoff PATH] [--then PROMPT] [--if-busy fail|wait] [--busy-timeout SEC]`는 로컬 tmux에서 Claude와 agy에 `/clear`, Codex에 `/new`를 중계 표식 없이 보낸다. CLI 기본값은 Claude, 기본 `--if-busy`는 `fail`이며 `compact`와 같은 바쁜 세션 대기를 쓴다. `--handoff` 파일이 없으면 아무것도 보내지 않고 거부한다. 비운 명령이 새 대화로 바뀐 것을 확인하고(agy 는 대화 ID 변경, Codex 와 Claude 는 화면 변화와 입력 대기) 세션이 쉬면 `--handoff`가 있을 때 "인계 파일 <경로> 를 읽고 이어간다.", 이어서 `--then`을 한 메시지(`[tfx-live req=...]` 표식 포함)로 tmux에 보낸다. 결과는 `clear: {command, inputSent: true}`와 뒤따름 문장이 있을 때 `followUp: {requestId, inputSent}`다. `inputSent`는 입력을 보냈다는 뜻이며 모델이 받았다는 확인이 아니다. `--busy-timeout` 안에 전환을 확인하지 못하면 뒤따름 문장을 보내지 않고 같은 방식으로 실패한다. 뒤따름 문장이 실패하면 `ok: false`와 `error`로 종료 코드 1이며, 비우기는 이미 보냈으므로 다시 보내지 않는다. 자기 세션에는 위 예처럼 표준 입출력을 끊고 `nohup` 으로 백그라운드에 보낸다. 샌드박스가 강제된 agy 세션에서는 `run_command` 에 `BypassSandbox: true` 를 붙인다. 그 인자가 없는 세션에서는 붙이지 않는다.
 
 `--no-wait`가 없으면 Claude의 새 `compact_boundary`, Codex rollout의 새 `compacted`까지 기다린다. 결과에 `compact: {submitted: true, done}`과 `then: {requestId, queued, transport}`를 추가하고 기존 `compacted`, `preTokens`, `postTokens`를 유지한다. 토큰 수는 기록에 있는 값만 보고하며 Codex의 압축 후 token_count가 아직 없으면 `postTokens`는 `null`이다. 시간 안에 완료 기록이 없으면 `compacted: false, timedOut: true`다.
 
