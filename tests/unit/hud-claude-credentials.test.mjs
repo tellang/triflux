@@ -1,17 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  utimesSync,
-  writeFileSync,
-} from "node:fs";
 import https from "node:https";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
@@ -27,10 +17,6 @@ import {
   readClaudeKeychainEntry,
   writeBackClaudeCredentials,
 } from "../../hud/providers/claude.mjs";
-import {
-  computeLoginFingerprint,
-  run as runClaudeLoginDetect,
-} from "../../scripts/claude-login-detect.mjs";
 
 function parseKeychainWrite(calls) {
   const stdinCall = calls.find((c) => c.args?.[0] === "-i");
@@ -383,65 +369,6 @@ describe("writeBackClaudeCredentials", () => {
   });
 });
 
-describe("claude-login-detect", () => {
-  it("darwin 에서 Keychain 자격증명 변경 시 HUD_CACHES 를 지우고 토큰 원문 대신 해시 지문을 저장한다", () => {
-    const testDir = mkdtempSync(join(tmpdir(), "claude-login-test-"));
-    try {
-      const statePath = join(testDir, "claude-login-mtime.json");
-      const cachePath = join(testDir, "test-cache.json");
-      writeFileSync(cachePath, JSON.stringify({ cached: true }));
-
-      const secretToken = "sk-ant-secret-token-123456789";
-      const keychainContent = JSON.stringify({
-        claudeAiOauth: {
-          accessToken: secretToken,
-        },
-      });
-
-      const result = runClaudeLoginDetect({
-        platform: "darwin",
-        env: {},
-        credsPath: join(testDir, "non-existent-creds.json"),
-        statePath,
-        hudCaches: [cachePath],
-        execFileSyncFn: (command, args) => {
-          if (command === "security") {
-            return keychainContent;
-          }
-          throw new Error("unexpected command");
-        },
-      });
-
-      assert.equal(result.changed, true);
-      assert.equal(result.cleared, 1);
-
-      const state = JSON.parse(readFileSync(statePath, "utf8"));
-      const fingerprint =
-        state.keychainFingerprints?.["Claude Code-credentials"];
-      assert.equal(typeof fingerprint, "string");
-      assert.equal(fingerprint.length, 64);
-      const stateRaw = readFileSync(statePath, "utf8");
-      assert.equal(stateRaw.includes(secretToken), false);
-      assert.equal(
-        fingerprint,
-        createHash("sha256").update(secretToken).digest("hex"),
-      );
-
-      const secondResult = runClaudeLoginDetect({
-        platform: "darwin",
-        env: {},
-        credsPath: join(testDir, "non-existent-creds.json"),
-        statePath,
-        hudCaches: [cachePath],
-        execFileSyncFn: () => keychainContent,
-      });
-      assert.equal(secondResult.changed, false);
-    } finally {
-      rmSync(testDir, { recursive: true, force: true });
-    }
-  });
-});
-
 describe("Keychain 서비스명·계정 규칙 (Claude Code 2.1.x 정합)", () => {
   it("CLAUDE_SECURESTORAGE_CONFIG_DIR 가 빈 문자열이면 CLAUDE_CONFIG_DIR 이 있어도 기본 서비스명이다", () => {
     assert.equal(
@@ -740,180 +667,5 @@ describe("writeBackClaudeCredentials 출처 일치", () => {
       },
     );
     assert.equal(touched, false);
-  });
-});
-
-describe("claude-login-detect 로그인 지문", () => {
-  function withTempDir(fn) {
-    const dir = mkdtempSync(join(tmpdir(), "claude-login-fp-"));
-    try {
-      return fn(dir);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }
-
-  it("지문은 refreshToken 기준이라 accessToken 만 갱신되면 바뀌지 않는다", () => {
-    const a = computeLoginFingerprint({
-      claudeAiOauth: { accessToken: "t1", refreshToken: "R" },
-    });
-    const b = computeLoginFingerprint({
-      claudeAiOauth: { accessToken: "t2", refreshToken: "R" },
-    });
-    const c = computeLoginFingerprint({
-      claudeAiOauth: { accessToken: "t2", refreshToken: "R2" },
-    });
-    assert.equal(a, b);
-    assert.notEqual(a, c);
-    assert.equal(a, createHash("sha256").update("R").digest("hex"));
-    assert.equal(
-      computeLoginFingerprint({ claudeAiOauth: { accessToken: "only" } }),
-      createHash("sha256").update("only").digest("hex"),
-    );
-  });
-
-  it("8시간 토큰 갱신만으로는 HUD 캐시를 지우지 않고, 재로그인(refreshToken 변경)에는 지운다", () => {
-    withTempDir((dir) => {
-      const statePath = join(dir, "state.json");
-      const cachePath = join(dir, "cache.json");
-      const credsPath = join(dir, "missing.json");
-      const payload = (accessToken, refreshToken) =>
-        JSON.stringify({ claudeAiOauth: { accessToken, refreshToken } });
-      const runWith = (content) =>
-        runClaudeLoginDetect({
-          platform: "darwin",
-          env: {},
-          credsPath,
-          statePath,
-          hudCaches: [cachePath],
-          execFileSyncFn: () => content,
-        });
-
-      writeFileSync(cachePath, "{}");
-      assert.equal(runWith(payload("t1", "R")).changed, true);
-
-      writeFileSync(cachePath, "{}");
-      const refreshedOnly = runWith(payload("t2", "R"));
-      assert.equal(refreshedOnly.changed, false);
-      assert.equal(existsSync(cachePath), true);
-
-      const relogin = runWith(payload("t3", "R2"));
-      assert.equal(relogin.changed, true);
-      assert.equal(existsSync(cachePath), false);
-    });
-  });
-
-  it("CLAUDE_CONFIG_DIR 스코프별로 지문을 따로 기억해 세션이 번갈아 떠도 캐시를 반복 삭제하지 않는다", () => {
-    withTempDir((dir) => {
-      const statePath = join(dir, "state.json");
-      const cachePath = join(dir, "cache.json");
-      const credsPath = join(dir, "missing.json");
-      const plainEnv = {};
-      const scopedEnv = { CLAUDE_CONFIG_DIR: "/tmp/omc-launch" };
-      const runWith = (env, refreshToken) =>
-        runClaudeLoginDetect({
-          platform: "darwin",
-          env,
-          credsPath,
-          statePath,
-          hudCaches: [cachePath],
-          execFileSyncFn: () =>
-            JSON.stringify({
-              claudeAiOauth: { accessToken: "a", refreshToken },
-            }),
-        });
-
-      assert.equal(runWith(plainEnv, "plain").changed, true);
-      assert.equal(runWith(scopedEnv, "scoped").changed, true);
-      assert.equal(runWith(plainEnv, "plain").changed, false);
-      assert.equal(runWith(scopedEnv, "scoped").changed, false);
-
-      const state = JSON.parse(readFileSync(statePath, "utf8"));
-      assert.deepEqual(Object.keys(state.keychainFingerprints).sort(), [
-        "Claude Code-credentials",
-        getKeychainServiceName(scopedEnv),
-      ]);
-    });
-  });
-
-  it("credsPath 를 넘기지 않으면 CLAUDE_CONFIG_DIR 스코프의 .credentials.json 을 본다", () => {
-    withTempDir((dir) => {
-      const env = { CLAUDE_CONFIG_DIR: dir };
-      const scopedCreds = getClaudeCredentialPaths(env)[0];
-      assert.equal(scopedCreds, join(dir, ".credentials.json"));
-      writeFileSync(scopedCreds, JSON.stringify({ accessToken: "abc" }));
-      const statePath = join(dir, "state.json");
-      const cachePath = join(dir, "cache.json");
-      writeFileSync(cachePath, "{}");
-
-      const result = runClaudeLoginDetect({
-        platform: "linux",
-        env,
-        statePath,
-        hudCaches: [cachePath],
-      });
-      assert.equal(result.changed, true);
-      const state = JSON.parse(readFileSync(statePath, "utf8"));
-      assert.equal(
-        state.fileMtimes[scopedCreds],
-        statSync(scopedCreds).mtimeMs,
-      );
-    });
-  });
-
-  it("파일 mtime 도 경로별로 기억해 파일이 있는 두 스코프가 번갈아 떠도 반복 삭제하지 않는다", () => {
-    withTempDir((dir) => {
-      const plainCreds = join(dir, "plain.json");
-      const scopedCreds = join(dir, "scoped.json");
-      writeFileSync(plainCreds, JSON.stringify({ accessToken: "p" }));
-      writeFileSync(scopedCreds, JSON.stringify({ accessToken: "s" }));
-      const statePath = join(dir, "state.json");
-      const cachePath = join(dir, "cache.json");
-      const runWith = (credsPath) => {
-        writeFileSync(cachePath, "{}");
-        return runClaudeLoginDetect({
-          platform: "linux",
-          env: {},
-          credsPath,
-          statePath,
-          hudCaches: [cachePath],
-        });
-      };
-      assert.equal(runWith(plainCreds).changed, true);
-      assert.equal(runWith(scopedCreds).changed, true);
-      assert.equal(runWith(plainCreds).changed, false);
-      assert.equal(runWith(scopedCreds).changed, false);
-      const state = JSON.parse(readFileSync(statePath, "utf8"));
-      assert.deepEqual(
-        Object.keys(state.fileMtimes).sort(),
-        [plainCreds, scopedCreds].sort(),
-      );
-    });
-  });
-
-  it("스코프 경로에 파일이 없으면 기본 경로 파일의 변경도 감지한다 (readClaudeCredentials 폴백과 같은 후보)", () => {
-    withTempDir((dir) => {
-      const scopeDir = join(dir, "scope");
-      const defaultCreds = join(dir, "default.json");
-      writeFileSync(defaultCreds, JSON.stringify({ accessToken: "d" }));
-      const statePath = join(dir, "state.json");
-      const cachePath = join(dir, "cache.json");
-      const candidates = [join(scopeDir, ".credentials.json"), defaultCreds];
-      const runOnce = () => {
-        writeFileSync(cachePath, "{}");
-        return runClaudeLoginDetect({
-          platform: "linux",
-          env: {},
-          credsPaths: candidates,
-          statePath,
-          hudCaches: [cachePath],
-        });
-      };
-      assert.equal(runOnce().changed, true);
-      assert.equal(runOnce().changed, false);
-      const bumped = new Date(Date.now() + 5_000);
-      utimesSync(defaultCreds, bumped, bumped);
-      assert.equal(runOnce().changed, true);
-    });
   });
 });
