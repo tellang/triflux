@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// scripts/preflight-cache.mjs — tfx-route 시작 시 필요한 preflight 점검 캐싱
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

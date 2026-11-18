@@ -274,14 +274,7 @@ export function sanitizeCodexProfileConfigFile(
     suffix: stamp(now),
     mode,
   });
-  // Atomic replace. config.toml is shared global state: a codex session may be
-  // reading it while another entry point (tfx-route, the codex session hook, or
-  // a parallel swarm worker) sanitizes it. Write the sanitized content to a
-  // unique temp file in the same directory, then rename — rename is atomic on
-  // the same filesystem, so no reader ever observes a torn/half-written config.
-  // Concurrent sanitizers each rename their own complete temp; last writer wins
-  // without corruption (the content is identical anyway since the migration is
-  // deterministic). The pid keeps temp names unique across separate processes.
+  // 다른 세션이나 워커가 동시에 읽고 쓸 수 있으므로 같은 파일시스템에서 임시 파일에 쓴 뒤 atomic rename 한다.
   const tmpPath = `${configPath}.tmp-${process.pid}-${stamp(now)}`;
   writeFileSync(tmpPath, sanitized.toml, { encoding: "utf8", mode });
   renameSync(tmpPath, configPath);

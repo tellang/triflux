@@ -1,14 +1,5 @@
 #!/usr/bin/env node
-// Verify that packages/triflux/<top>/ byte-equals <top>/ for every mirrored
-// top-level directory. Release rule: `packages/triflux` is an npm-publishable
-// copy of the root project. Silent drift (session 11 BUG-I cp sync was manual,
-// session 12 npm link revealed 3 missing files + 6 drifted) defeats the point
-// of the mirror.
-//
-// Usage:
-//   node scripts/release/check-packages-mirror.mjs          # report only
-//   node scripts/release/check-packages-mirror.mjs --fix    # copy root -> mirror
-//   node scripts/release/check-packages-mirror.mjs --json   # machine output
+// packages/triflux 미러와 루트 원본의 바이트 동일성 및 packages/remote import 무결성을 검사한다.
 import {
   copyFileSync,
   existsSync,
@@ -48,10 +39,7 @@ const CORE_NON_MIRROR = new Set([
   "hub/index.mjs", // pack 이 만드는 배럴(CORE_INDEX)
 ]);
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage"]);
-// Per-top relative paths to skip. Mirror policy excludes these via
-// packages/triflux/package.json "files" negation patterns (e.g.
-// "!skills/tfx-workspace"), so source-tree drift in these subtrees does not
-// affect the npm tarball. See .claude/rules/tfx-mirror-policy.md.
+// packages/triflux/package.json files 부정 패턴(!skills/tfx-workspace)으로 제외되어 tarball 에 포함되지 않는 경로다.
 const SKIP_RELS = new Map([["skills", new Set([".omc", "tfx-workspace"])]]);
 
 function walkRelFiles(root, skipRels = new Set()) {
@@ -72,15 +60,7 @@ function walkRelFiles(root, skipRels = new Set()) {
   return out;
 }
 
-// packages/remote is NOT a byte-identical mirror: pack:remote rewrites relative
-// imports of core-owned modules to @triflux/core/* specifiers. So validate it
-// structurally instead — every .mjs import must resolve (relative -> exists
-// under packages/remote; @triflux/core/X -> exists under packages/core), and
-// every non-.mjs file mirrored from root must stay byte-identical. This catches
-// the two drift classes that shipped silently in v10.33.0: a broken remote
-// import (relative specifier to a core-only module) and a stale non-JS asset
-// (the tray UI), neither of which the triflux/core byte-mirror check can see.
-// .mjs 본문도 pack:remote 리라이트를 거친 root 와 비교한다. 해석만 보면 옛 구현이 남아도 OK 였다.
+// packages/remote 는 pack:remote 가 @triflux/core/* 로 import 를 리라이트하므로 바이트 비교 대신 구조 검증과 리라이트 기대본 비교를 수행한다.
 const REMOTE_NON_MIRROR = new Set([
   "package.json",
   "package-lock.json",
@@ -91,8 +71,7 @@ const REMOTE_NON_MIRROR = new Set([
 ]);
 
 function extractImportSpecifiers(content) {
-  // Strip comments first so JSDoc usage examples (`* import x from './y'`) and
-  // commented-out imports are not mistaken for real specifiers.
+  // JSDoc 예제나 주석 처리된 import 를 실제 의존성으로 오인하지 않도록 주석을 먼저 제거한다.
   const code = content
     .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
@@ -158,7 +137,6 @@ function checkRemoteMirror(repoRoot) {
         }
       }
     } else {
-      // Non-.mjs mirrored from root: no import rewrite -> must be byte-identical.
       const rootPath = join(repoRoot, rel);
       if (!existsSync(rootPath)) continue; // remote-only asset, nothing to mirror
       if (!readFileSync(rootPath).equals(readFileSync(remotePath))) {
@@ -232,8 +210,7 @@ function compareMirror({
     }
 
     if (!inSrc && inDst) {
-      // Orphan in mirror — source of truth is root, mirror must not have
-      // extra files. Do not auto-delete; require manual decision.
+      // 미러의 고아 파일은 수동 판단이 필요하므로 자동 삭제하지 않는다.
       issues.push({ path: displayPath, kind: "orphan-in-mirror" });
       continue;
     }
@@ -312,7 +289,6 @@ function compareMirror({
   // 개별 미러는 의존 파일이 빠져도 바이트 비교로는 안 보이므로 import 해석으로 잡는다(#648).
   for (const issue of checkCoreImports(coreRoot)) issues.push(issue);
 
-  // packages/remote structural validation (not a byte-mirror — see above).
   for (const issue of checkRemoteMirror(repoRoot)) issues.push(issue);
 
   return { ok: issues.length === 0, issues, fixed };

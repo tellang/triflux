@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// wt-manager CLI 래퍼. wt.exe 를 직접 호출하지 않고 이 스크립트를 거친다.
 import { createWtManager } from "../hub/team/wt-manager.mjs";
 
 const [action, ...rest] = process.argv.slice(2);

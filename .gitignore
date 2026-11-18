@@ -80,9 +80,6 @@ dist/
 **/references/codex-snapshots/
 **/references/gemini-snapshots/
 
-# setup 의 MCP 정리(legacy-mcp-cleanup)가 .mcp.json 을 고치기 전에 남기는 백업
-.mcp.json.tfx-bak-*
-
 .gstack/
 .superpowers/
 

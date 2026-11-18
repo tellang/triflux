@@ -1,8 +1,4 @@
 #!/usr/bin/env node
-// scripts/doctor-diagnose.mjs — 진단 번들 생성기
-//
-// spawn-trace JSONL + process report + spawn stats + system info
-// → ~/.triflux/diagnostics/diag-{timestamp}.zip (PowerShell Compress-Archive)
 
 import { execFileSync, execSync } from "node:child_process";
 import {
@@ -47,9 +43,7 @@ function collectSpawnTraces(cutoffMs = ONE_HOUR_MS) {
         const ts = new Date(entry.ts).getTime();
         // 예전 버전 로그에는 프롬프트 원문이 있다. 번들에 넣기 전에 가린다.
         if (now - ts <= cutoffMs) entries.push(redactTraceEntry(entry));
-      } catch {
-        /* skip malformed */
-      }
+      } catch {}
     }
   }
 
@@ -67,7 +61,6 @@ function computeSpawnStats(traces) {
   );
   const blockedEvents = traces.filter((t) => t.event === "blocked");
 
-  // peak rate per second
   let peakRate = 0;
   for (const evt of spawnEvents) {
     const ts = new Date(evt.ts).getTime();
@@ -79,7 +72,6 @@ function computeSpawnStats(traces) {
     if (inWindow > peakRate) peakRate = inWindow;
   }
 
-  // max concurrent (spawn without matching exit)
   const events = [
     ...spawnEvents.map((e) => ({ ts: new Date(e.ts).getTime(), delta: 1 })),
     ...exitEvents.map((e) => ({ ts: new Date(e.ts).getTime(), delta: -1 })),
@@ -100,12 +92,7 @@ function computeSpawnStats(traces) {
   };
 }
 
-/**
- * ~/.codex/config.toml에서 [mcp_servers.*.tools.*] 섹션 내부의
- * approval_mode = "approve"를 감지한다. 이 값이 있으면 codex exec가
- * non-TTY subprocess에서 승인 대기로 stall한다.
- * refs: tellang/triflux#66, Yeachan-Heo/oh-my-codex#1478
- */
+// approval_mode = "approve" 가 있으면 non-TTY codex exec 가 승인 대기로 멈추므로 감지한다 (#66).
 function checkCodexMcpApproval() {
   if (!existsSync(CODEX_CONFIG_PATH)) {
     return { found: false, reason: "config.toml not found" };
@@ -153,9 +140,7 @@ function collectSystemInfo() {
     freeMemMB: Math.round(freemem() / 1024 / 1024),
   };
 
-  // Windows Terminal version (wt.exe --version은 GUI 다이얼로그를 띄우므로 AppxPackage로 조회)
-  // macOS/Linux는 wt 자체가 없으므로 조회 skip — "not found"로 표시되면 사용자가
-  // 설치 누락으로 오해할 수 있다. 명시적으로 "N/A (non-Windows)"로 표시.
+  // wt.exe --version 은 GUI 창을 띄우므로 AppxPackage 로 조회하고, 비Windows 는 설치 누락 오해를 막기 위해 명시적으로 N/A 처리한다.
   if (platform() === "win32") {
     try {
       const wtVer = execSync(
@@ -170,15 +155,12 @@ function collectSystemInfo() {
     info.wtVersion = "N/A (non-Windows)";
   }
 
-  // triflux version
   try {
     const pkgPath = join(homedir(), ".triflux", "package.json");
     if (existsSync(pkgPath)) {
       info.trifluxVersion = JSON.parse(readFileSync(pkgPath, "utf8")).version;
     }
-  } catch {
-    /* ignore */
-  }
+  } catch {}
 
   return info;
 }
@@ -254,16 +236,13 @@ export async function diagnose({ json = false } = {}) {
   const bundleDir = join(DIAG_DIR, `diag-${timestamp}`);
   mkdirSync(bundleDir, { recursive: true, mode: 0o700 });
 
-  // 1. spawn-trace JSONL
   const traces = collectSpawnTraces();
   writeFileSync(
     join(bundleDir, "blackbox.jsonl"),
     traces.map((t) => JSON.stringify(t)).join("\n") + "\n",
   );
 
-  // 2. process report
-  // 공유용 번들이라 필요한 필드만 남긴다. 기본 보고서에는 환경변수 전체(export 한 API 키 포함),
-  // 호스트명, 네트워크 인터페이스, 명령줄, 작업 경로, 홈 경로가 든 공유 라이브러리 목록이 들어간다.
+  // 공유용 번들이라 환경변수(API 키 포함), 호스트명, 네트워크 인터페이스, 경로 노출을 피하기 위해 필요한 필드만 남긴다.
   let report;
   try {
     const full = process.report.getReport();
@@ -286,43 +265,35 @@ export async function diagnose({ json = false } = {}) {
     JSON.stringify(report, null, 2),
   );
 
-  // 3. spawn stats
   const stats = computeSpawnStats(traces);
   writeFileSync(
     join(bundleDir, "spawn-stats.json"),
     JSON.stringify(stats, null, 2),
   );
 
-  // 4. system info
   const sysInfo = collectSystemInfo();
   writeFileSync(
     join(bundleDir, "system-info.json"),
     JSON.stringify(sysInfo, null, 2),
   );
 
-  // 5. summary
   const summary = generateSummary(stats, sysInfo, traces.length);
   writeFileSync(join(bundleDir, "summary.txt"), summary);
 
-  // 6. zip via platform archive tool
   const zipPath = `${bundleDir}.zip`;
   try {
     createZipArchive(bundleDir, zipPath);
   } catch (err) {
-    // fallback: leave the directory unzipped
     if (json) {
       return { ok: false, bundleDir, error: `zip failed: ${err.message}` };
     }
     return { ok: false, bundleDir, zipPath: null, error: err.message };
   }
 
-  // cleanup temp directory
   try {
     const { rmSync } = await import("node:fs");
     rmSync(bundleDir, { recursive: true, force: true });
-  } catch {
-    /* leave it */
-  }
+  } catch {}
 
   const mcpApprovalCheck = checkCodexMcpApproval();
 
@@ -342,7 +313,6 @@ export async function diagnose({ json = false } = {}) {
   return result;
 }
 
-// CLI direct execution
 const isMain =
   import.meta.url === `file:///${process.argv[1]?.replace(/\\/g, "/")}` ||
   import.meta.url === `file://${process.argv[1]?.replace(/\\/g, "/")}`;

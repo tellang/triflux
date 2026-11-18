@@ -1,31 +1,6 @@
 #!/usr/bin/env node
-// scripts/check-codex-config-stable.mjs
-//
-// Wrapper that runs a command (default: npm test) and verifies that
-// ~/.codex/config.toml is unchanged before vs after execution.
-//
-// Issue #193 회귀 가드 — production codex config 가 test/build 도중 mutate
-// 되면 즉시 fail 하고 진단 정보를 출력한다. CI 또는 로컬 npm script 에서
-// `npm run test:guard-codex-config` 처럼 호출한다.
-//
-// Issue #193 follow-up — `[hooks.state.*]` section whitelist:
-//   oh-my-codex 는 codex CLI hooks 가 발화될 때마다 ~/.codex/config.toml 의
-//   `[hooks.state."<hook-key>"]` section 의 trusted_hash 를 자동 갱신한다.
-//   사용자가 npm test 도중 다른 터미널에서 codex 를 활성 사용 중이면 이
-//   외부 mutation 이 false positive 로 잡힌다. 따라서 hooks.state-only
-//   churn 은 informational warning 으로 분류하고 exit 0 으로 통과시킨다.
-//   Codex plugin mode also auto-materializes OpenAI primary runtime plugin
-//   registry sections (for example pdf@openai-primary-runtime); those are
-//   likewise Codex-owned external churn, not triflux-owned MCP drift.
-//   그 밖의 변경은 기존대로 exit 2.
-//
-// Exit codes:
-//   0  = config 안정. wrap 한 명령의 exit code 그대로 반환 (보통 0).
-//        hooks.state/OpenAI runtime plugin churn 도 여기 포함
-//        (informational warning 만 출력).
-//   2  = triflux 가드가 잡아야 할 mutation 감지. wrap 한 명령의 exit code
-//        와 무관하게 강제 fail.
-//   N  = wrap 한 명령이 N 으로 끝남 (mutation 없음).
+// #193 회귀 가드: 명령 실행 전후 ~/.codex/config.toml 변경을 검사해 무관한 변경은 exit 2로 실패한다.
+// hooks.state.* 및 openai-primary-runtime 섹션은 Codex 런타임이 자체 갱신하므로 허용한다.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -41,11 +16,6 @@ const OPENAI_PRIMARY_RUNTIME_MARKETPLACE =
 const OPENAI_PRIMARY_RUNTIME_PLUGIN_RE =
   /^plugins\."[^"]+@openai-primary-runtime"$/u;
 
-// Split a TOML payload into section blocks. Pre-header content (top-level
-// keys, comments) becomes a single anonymous section with header "".
-// Each returned section has `{ header, body }` — body is the raw text
-// between this header and the next section header, used for byte-level
-// equality comparison.
 export function splitTomlSections(raw) {
   if (typeof raw !== "string") return [];
   const sections = [];
@@ -57,7 +27,6 @@ export function splitTomlSections(raw) {
     const body = raw.slice(lastIndex, match.index);
     sections.push({ header: currentHeader, body });
     currentHeader = match[1].trim();
-    // skip past header line + trailing newline (if present)
     lastIndex = match.index + match[0].length;
     if (raw[lastIndex] === "\n") lastIndex += 1;
   }
@@ -65,17 +34,6 @@ export function splitTomlSections(raw) {
   return sections;
 }
 
-// Classify which sections drifted between before / after payloads.
-// Returns:
-//   { hooksStateOnly: bool, externalChurnOnly: bool, changedSections: string[] }
-//
-// hooksStateOnly = true means every changed section header starts with
-// "hooks.state." (the oh-my-codex managed area). Empty diff returns
-// hooksStateOnly=false so callers don't accidentally whitelist "no change".
-//
-// externalChurnOnly additionally permits Codex-owned OpenAI primary runtime
-// plugin registry sections. It remains false for empty diffs and for any
-// triflux-owned or unknown section drift.
 function isExternalChurnSection(header) {
   return (
     header.startsWith(HOOKS_STATE_PREFIX) ||
@@ -97,7 +55,7 @@ export function classifySectionDiff(beforeRaw, afterRaw) {
   }
   const changed = new Set();
   for (const [header, body] of afterMap) {
-    if (header === "") continue; // preamble drift is rare and noisy — ignore
+    if (header === "") continue; // preamble 변경은 노이즈가 많아 무시한다.
     const prev = beforeMap.get(header);
     if (prev === undefined || prev !== body) changed.add(header);
   }
@@ -132,9 +90,6 @@ function snapshotConfig() {
   }
 }
 
-// describeChange — kind + (sha-changed 시) hooksStateOnly 라벨 + message.
-// 호출 측에서 hooksStateOnly 면 informational 처리, 아니면 mutation 으로
-// 처리한다. 반환 null = 차이 없음.
 export function describeChange(before, after) {
   if (!before.exists && !after.exists) return null;
   if (before.exists !== after.exists) {
@@ -190,7 +145,6 @@ if (isMainModule(import.meta.url)) {
   const externalChurnOnly =
     change?.kind === "sha-changed" && change.externalChurnOnly === true;
 
-  // External Codex-owned churn 만 있으면 informational warning + pass.
   if (externalChurnOnly) {
     process.stderr.write(
       [

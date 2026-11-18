@@ -1,10 +1,5 @@
 #!/usr/bin/env node
 
-// triflux 설치 및 업데이트 설정 스크립트
-// - tfx-route.sh를 ~/.claude/scripts/에 동기화
-// - hud-qos-status.mjs를 ~/.claude/hud/에 동기화
-// - skills/를 ~/.claude/skills/에 동기화
-
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "child_process";
 import {
@@ -596,13 +591,6 @@ export async function runConsentSteps({
   return result;
 }
 
-// ── 로컬 개발 모드 감지 ──
-
-/**
- * PLUGIN_ROOT에 .git 디렉토리가 존재하면 dev mode (git clone 직접 사용)로 판정.
- * @param {string} [root] - 검사할 루트 경로 (기본: PLUGIN_ROOT)
- * @returns {boolean}
- */
 function detectDevMode(root = PLUGIN_ROOT) {
   return existsSync(join(root, ".git"));
 }
@@ -625,7 +613,7 @@ const REQUIRED_CODEX_PROFILES = [
 ];
 
 // Codex 0.134 마이그레이션: triflux 가 과거에 inline [profiles.*] 로 썼던 구형 프로필.
-// config.toml 에서 제거 대상 (retired 모델 — 별도 파일로 만들지 않는다).
+// config.toml 에서 제거 대상 (retired 모델이라 별도 파일로 만들지 않는다).
 const LEGACY_CODEX_PROFILE_NAMES = [
   "gpt55_xhigh",
   "gpt55_high",
@@ -740,8 +728,6 @@ export function collectInstallFiles(
   for (const entry of entries) visit(entry);
   return ordered;
 }
-
-// ── 파일 동기화 ──
 
 // 의존성이 먼저 복사되므로 동기화가 중간에 끊겨도 소비자만 있고 대상이 없는 설치본이 남지 않는다.
 const SYNC_MAP = collectInstallFiles().map((file) => ({
@@ -927,11 +913,7 @@ const LEGACY_ALIAS_TOMBSTONES = new Set([
   "tfx-persist",
   "tfx-fullcycle",
 ]);
-// 위 tombstone 은 설치본을 cleanup 에서 *보호*한다. 기능째 지운 스킬(스킬 표면
-// 축소로 제거한 tfx-ralph, tfx-qa 등)은 여기에 넣지 않는다 — 넣으면 낡은 설치본이
-// 영구히 남는다. 패키지에 없으면 cleanupStaleSkills 가 설치본을 지운다.
-
-// ── 폐기 예정 스킬 목록 ──
+// 위 tombstone 은 설치본을 cleanup 에서 *보호*한다. 기능째 지운 스킬(tfx-ralph, tfx-qa 등)은 여기에 넣지 않는다. 넣으면 낡은 설치본이 영구히 남는다.
 
 const DEPRECATED_SKILLS = ["tfx-codex-route", "tfx-gemini-route"];
 const LOCAL_DEV_SKILL_MARKER = ".triflux-local-skill";
@@ -1000,17 +982,9 @@ const REMOVED_SKILL_HASHES = {
   ],
 };
 
-// ── 구형 Codex 모델 (마이그레이션 안내 대상) ──
-
 const LEGACY_CODEX_MODELS = ["o4-mini", "o3", "codex-mini-latest"];
 
-/**
- * SKILL.md frontmatter 의 `platform:` 목록(process.platform 값)을 읽는다.
- * SKILL.md의 `platform` 필드가 없거나 비어 있으면
- * 모든 플랫폼에 설치한다.
- * @param {string} skillDir - SKILL.md 가 든 스킬 디렉토리
- * @returns {string[]}
- */
+// frontmatter platform 필드가 비어 있으면 모든 플랫폼에 설치한다.
 function readSkillPlatforms(skillDir) {
   const skillMd = join(skillDir, "SKILL.md");
   if (!existsSync(skillMd)) return [];
@@ -1555,6 +1529,46 @@ const RETIRED_INSTALL_FILES = [
   ],
   [join(CLAUDE_DIR, "scripts", "hub-ensure.mjs"), "[hub-ensure]"],
   [join(CLAUDE_DIR, "scripts", "hub-watchdog.mjs"), "[hub-watchdog]"],
+  [
+    join(CLAUDE_DIR, "hub", "team", "nativeProxy.mjs"),
+    "// hub/team/nativeProxy.mjs",
+  ],
+  [
+    join(CLAUDE_DIR, "hub", "workers", "factory.mjs"),
+    "// hub/workers/factory.mjs",
+  ],
+  [
+    join(CLAUDE_DIR, "hub", "workers", "interface.mjs"),
+    "// hub/workers/interface.mjs",
+  ],
+  [
+    join(CLAUDE_DIR, "scripts", "lib", "gemini-profiles.mjs"),
+    "normalizeGeminiProfileName",
+  ],
+  [
+    join(CLAUDE_DIR, "scripts", "lib", "install-retire.mjs"),
+    "retireInstallLeftovers",
+  ],
+  [
+    join(CLAUDE_DIR, "scripts", "lib", "legacy-hook-cleanup.mjs"),
+    "isLegacyTrifluxHook",
+  ],
+  [
+    join(CLAUDE_DIR, "scripts", "lib", "legacy-mcp-cleanup.mjs"),
+    "MCP_PACKAGE_PINS",
+  ],
+  [
+    join(CLAUDE_DIR, "scripts", "lib", "mcp-guard-engine.mjs"),
+    "buildDesiredServerRecord",
+  ],
+  [
+    join(CLAUDE_DIR, "scripts", "lib", "process-utils.mjs"),
+    "// scripts/lib/process-utils.mjs",
+  ],
+  [
+    join(CLAUDE_DIR, "hud", "providers", "gemini.mjs"),
+    "getAntigravityAccountLabel",
+  ],
 ];
 
 function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
@@ -1572,9 +1586,7 @@ function removeRetiredInstallFiles(files = RETIRED_INSTALL_FILES) {
   return removed;
 }
 
-// Top-level config.toml keys that must exist with these defaults.
-// Only injected when the key is completely absent — existing user values are
-// never overwritten, regardless of what value was set.
+// 키가 아예 없을 때만 기본값을 주입하며, 사용자가 이미 설정한 값은 덮어쓰지 않는다.
 const REQUIRED_TOP_LEVEL_SETTINGS = [
   { key: "model_reasoning_effort", value: '"high"' },
   { key: "service_tier", value: '"fast"' },
@@ -1595,8 +1607,7 @@ function ensureCodexProfiles({ notice = () => {} } = {}) {
       ? readFileSync(CODEX_CONFIG_PATH, "utf8")
       : "";
 
-    // Safety guard: if the file exists but is suspiciously small (< 100 bytes)
-    // skip all writes to avoid perpetuating a corrupted state.
+    // 100바이트 미만이면 손상 상태로 보고 쓰기를 건너뛴다.
     if (original.length > 0 && original.length < 100) {
       return {
         ok: false,
@@ -1608,21 +1619,15 @@ function ensureCodexProfiles({ notice = () => {} } = {}) {
     let updated = original;
     let changed = 0;
 
-    // ── 1. top-level 필수 설정 주입 (없을 때만, 기존 값 보존) ──
-    // 파일 상단 [profiles.*] / [mcp_servers.*] 이전 영역만 검사한다.
-    // 프로필 섹션 내부의 동명 키(예: model = "gpt-5.3-codex")는 무시한다.
-    // 이미 존재하는 키는 절대 덮어쓰지 않는다.
+    // 파일 상단 [profiles.*] / [mcp_servers.*] 이전 영역만 검사해 기존 값을 보존한다.
     for (const { key, value } of REQUIRED_TOP_LEVEL_SETTINGS) {
-      // top-level 영역 = 첫 번째 [profiles.*] / [mcp_servers.*] 헤더 이전
       const firstSectionIdx = updated.search(/^\[(?:profiles|mcp_servers)\./m);
       const topLevelRegion =
         firstSectionIdx === -1 ? updated : updated.slice(0, firstSectionIdx);
       const topLevelKeyRe = new RegExp(`^${key}\\s*=`, "m");
       if (!topLevelKeyRe.test(topLevelRegion)) {
-        // firstSectionIdx already computed above for this iteration
         const line = `${key} = ${value}\n`;
         if (firstSectionIdx === -1) {
-          // 섹션이 없으면 파일 맨 앞에 추가
           updated = line + updated;
         } else {
           updated =
@@ -1634,21 +1639,13 @@ function ensureCodexProfiles({ notice = () => {} } = {}) {
       }
     }
 
-    // ── 2. 필수 프로필 보장 (Codex 0.134+: 별도 파일 포맷) ──
-    // Codex 0.134.0 부터 `--profile X` 는 별도 파일 ~/.codex/X.config.toml (top-level
-    // 키)을 읽고, config.toml 의 inline [profiles.X] 테이블은 거부한다. 따라서
-    // (a) 각 프로필을 별도 파일로 쓰고 (b) config.toml 의 inline 테이블을 제거한다.
-    // ref: developers.openai.com/codex/config-advanced#profiles
+    // Codex 0.134+ 는 inline [profiles.X] 를 거부하므로 별도 파일로 두고 inline 테이블을 제거한다.
     changed += ensureManagedCodexProfiles({
       home: _TFX_HOME,
       codexHome: CODEX_DIR,
       notice,
     }).changed;
-    // config.toml 의 모든 inline [profiles.*] 마이그레이션 (Codex 0.134 는 inline 거부).
-    //   - 관리 가족 별칭과 옛 이름: 위에서 별도 파일을 썼으므로 inline 만 제거.
-    //   - 구형 retired (codex53/spark53/gpt54/mini54): inline 제거, 재생성 안 함.
-    //   - 그 외 사용자 커스텀: 본문을 보존해 별도 파일로 이관한 뒤 inline 제거.
-    //     (별도 파일이 이미 있으면 덮어쓰지 않는다 — 사용자 수정 보존.)
+    // 사용자 커스텀 프로필은 별도 파일이 이미 있으면 덮어쓰지 않고 본문만 이관한다.
     const managedProfileNames = new Set(
       REQUIRED_CODEX_PROFILES.map((p) => p.name),
     );
@@ -1994,10 +1991,7 @@ function applyRemoteControl(settings) {
   return true;
 }
 
-// ── 제거된 CTO 트레이 잔여 프로세스 (ADR-0022) ──
-// 이전 버전은 `node hub/tray.mjs` 와 그 자식 `swift hub/mac-tray.swift` 를 detached 로
-// 띄웠다. 파일을 지워도 이미 뜬 프로세스는 남으므로 업그레이드 setup 에서 한 번 거둔다.
-// 트레이는 시작 프로그램·작업 스케줄러·LaunchAgent 에 등록된 적이 없어 지울 항목은 없다.
+// 제거된 CTO 트레이 잔여 프로세스 정리 (ADR-0022). 파일을 지워도 이미 뜬 detached 프로세스는 남는다.
 const LEGACY_TRAY_PS_FIELDS = "uid=,pid=,lstart=,command=";
 const LEGACY_TRAY_PS_OPTIONS = {
   encoding: "utf8",
@@ -2009,7 +2003,7 @@ const LEGACY_TRAY_PS_OPTIONS = {
 // `uid pid <lstart: 요일 월 일 시:분:초 연도> command`
 const LEGACY_TRAY_PS_LINE_RE =
   /^\s*(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d+:\d+:\d+\s+\d+)\s+(.+)$/u;
-// node 에서 다음 인자를 값으로 받는 옵션 — 그 값은 실행 대상이 아니다.
+// node 에서 다음 인자를 값으로 받는 옵션이므로 그 값은 실행 대상이 아니다.
 const NODE_VALUE_OPTIONS = new Set([
   "-r",
   "--require",
@@ -2022,7 +2016,7 @@ const NODE_VALUE_OPTIONS = new Set([
   "-C",
   "--title",
 ]);
-// 스크립트 대신 코드를 실행하는 옵션 — 트레이 실행이 아니다.
+// 스크립트 대신 코드를 실행하는 옵션이므로 트레이 실행이 아니다.
 const NODE_EVAL_OPTIONS = new Set(["-e", "--eval", "-p", "--print"]);
 
 function parseLegacyTrayPsLine(line) {
@@ -2063,7 +2057,7 @@ function legacyTrayEntrypoint(argv) {
   return null;
 }
 
-// `.../triflux/.../hub/tray.mjs` 또는 `.../hub/mac-tray.swift` — triflux 설치 위치로 보이는 경로.
+// `.../triflux/.../hub/tray.mjs` 또는 `.../hub/mac-tray.swift` 처럼 triflux 설치 위치로 보이는 경로다.
 function isLegacyTrayScriptPath(path, runtime) {
   if (typeof path !== "string" || !path) return false;
   const segments = path.split(/[/\\]+/u);
@@ -2093,7 +2087,7 @@ function collectLegacyTrayProcesses(
     });
 }
 
-// PID 재사용 방지: 보내기 직전에 다시 조회해 uid·시작 시각·command 가 같을 때만 같은 프로세스로 본다.
+// PID 재사용 방지: 보내기 직전에 다시 조회해 uid, 시작 시각, command 가 같을 때만 같은 프로세스로 본다.
 function isSameLegacyTrayProcess(proc, execFileSyncFn) {
   try {
     const output = execFileSyncFn(
@@ -2388,10 +2382,7 @@ async function runDeferredWithIo(stdinData, io) {
     );
   }
 
-  // ── 패키지 루트 breadcrumb 기록 ──
-  // tfx-route.sh가 hub/bridge.mjs를 찾을 수 있도록
-  // 패키지 루트 경로를 ~/.claude/scripts/.tfx-pkg-root에 기록한다.
-  // dev mode에서는 항상 최신 경로를 기록 (--sync 시 강제 갱신).
+  // tfx-route.sh 가 hub/bridge.mjs 를 찾도록 패키지 루트 경로를 기록한다.
   {
     const pkgRootForward = PLUGIN_ROOT.replace(/\\/g, "/");
     const currentBreadcrumb = existsSync(BREADCRUMB_PATH)
@@ -2432,8 +2423,6 @@ async function runDeferredWithIo(stdinData, io) {
     io.warn("statusline", `agy settings.json: ${error.message}`);
   }
 
-  // ── HUD 캐시 pre-warm (백그라운드) ──
-
   const preWarmHudPath = join(CLAUDE_DIR, "hud", "hud-qos-status.mjs");
   if (!isTestRun() && existsSync(preWarmHudPath)) {
     const refreshFlags = [
@@ -2449,9 +2438,7 @@ async function runDeferredWithIo(stdinData, io) {
           windowsHide: true,
         });
         child.unref();
-      } catch {
-        /* pre-warm 실패 무시 */
-      }
+      } catch {}
     }
   }
 
@@ -2460,8 +2447,6 @@ async function runDeferredWithIo(stdinData, io) {
     io.step(`제거된 CTO 트레이 프로세스 ${reapedTrays.length}개 종료`);
     synced++;
   }
-
-  // ── HUD 에러 캐시 자동 클리어 (업데이트/재설치 시) ──
 
   const cacheDir = join(CLAUDE_DIR, "cache");
   const staleFiles = [
@@ -2477,14 +2462,12 @@ async function runDeferredWithIo(stdinData, io) {
     try {
       const content = readFileSync(fp, "utf8");
       const parsed = JSON.parse(content);
-      // 에러 상태이거나 락 파일이면 삭제 → 새 세션에서 fresh start
       if (parsed.error || name.startsWith(".")) {
         unlinkSync(fp);
         clearedCaches++;
         synced++;
       }
     } catch {
-      // 파싱 실패 파일도 삭제
       try {
         unlinkSync(fp);
         clearedCaches++;
@@ -2494,9 +2477,7 @@ async function runDeferredWithIo(stdinData, io) {
 
   if (clearedCaches) io.step(`HUD 오류 캐시 ${clearedCaches}개 정리`);
 
-  // ── Windows bash PATH 자동 설정 ──
   // Codex/Antigravity가 cmd에는 있지만 bash에서 못 찾는 문제 해결
-
   if (process.platform === "win32") {
     const npmBin = join(process.env.APPDATA || "", "npm");
     if (existsSync(npmBin)) {
@@ -2529,8 +2510,6 @@ async function runDeferredWithIo(stdinData, io) {
     }
   }
 
-  // ── Codex 프로필 자동 보정 ──
-
   const codexProfilesResult = ensureCodexProfiles({
     notice: (message) => addNotice(io.report, message),
   });
@@ -2558,8 +2537,6 @@ async function runDeferredWithIo(stdinData, io) {
     report: io.report,
   });
 
-  // ── MCP 인벤토리 백그라운드 갱신 ──
-
   const mcpCheck = join(PLUGIN_ROOT, "scripts", "mcp-check.mjs");
   if (!isTestRun() && existsSync(mcpCheck)) {
     const child = spawn(process.execPath, [mcpCheck], {
@@ -2567,15 +2544,12 @@ async function runDeferredWithIo(stdinData, io) {
       stdio: "ignore",
       windowsHide: true,
     });
-    child.unref(); // 부모 프로세스와 분리 — 비동기 실행
+    child.unref();
   }
 
-  // ── /tmp 임시 파일 자동 정리 (setup 지연 방지: fire-and-forget) ──
   cleanupTmpFiles().catch(() => {});
 
-  // ── npm 글로벌 패키지 동기화 ──
-  // dev mode가 아닌 경우(npm install로 설치), 글로벌 triflux 패키지 버전을 확인하고
-  // 로컬 버전과 다르면 업데이트를 안내한다. dev mode에서는 git 기반이므로 skip.
+  // dev mode에서는 git 기반이므로 글로벌 패키지 버전 확인을 건너뛴다.
   if (pkgVersion && !isDev) {
     try {
       const globalVer = execFileSync(
