@@ -19,14 +19,7 @@ function isContinuationByte(byte) {
   return (byte & 0xc0) === 0x80;
 }
 
-/**
- * 문자열을 최대 UTF-8 바이트 수에 맞춰 코드포인트 경계에서 안전하게 자른다.
- *
- * @param {string} input
- * @param {number} maxBytes 0 이하이거나 유한하지 않으면 자르지 않는다.
- * @param {{ from?: "start" | "end" }} [options]
- * @returns {{ text: string, truncated: boolean, rawBytes: number, outputBytes: number }}
- */
+// maxBytes 가 0 이하이거나 유한하지 않으면 자르지 않는다.
 export function sliceUtf8ByBytes(input, maxBytes, { from = "start" } = {}) {
   const str = typeof input === "string" ? input : String(input ?? "");
   const buf = Buffer.from(str, "utf8");

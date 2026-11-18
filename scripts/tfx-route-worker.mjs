@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// tfx-route-worker.mjs — tfx-route.sh용 subprocess worker 러너
 
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -163,17 +162,14 @@ try {
     if (!result.response.endsWith("\n")) process.stdout.write("\n");
   }
 } catch (error) {
-  // Always emit error.message first for quick identification
   process.stderr.write(`[tfx-route-worker] ${error.message}\n`);
 
-  // Emit captured stderr from the child process (may be empty)
   if (error.stderr) {
     process.stderr.write(String(error.stderr));
     if (!String(error.stderr).endsWith("\n")) process.stderr.write("\n");
   }
 
-  // When stderr is empty, surface diagnostic details from error.result
-  // so the caller can debug silent failures
+  // stderr 가 비어 있으면 조용한 실패 원인을 추적하도록 result 진단 정보를 출력한다.
   if (!error.stderr && error.result) {
     const r = error.result;
     const diag = [

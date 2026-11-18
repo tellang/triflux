@@ -1,16 +1,4 @@
 #!/usr/bin/env node
-// tfx-route-post.mjs v2.0 — tfx-route.sh 후처리 (단일 프로세스)
-//
-// ~100ms (node 1회 기동) vs ~1000ms (python3×2 + jq×3 + node×2)
-//
-// 처리:
-//   1. 토큰 추출 (Codex stderr)
-//   2. Codex JSON-line 출력 필터링
-//   3. 실행 로그 기록 (JSONL)
-//   4. 토큰 누적 (sv-accumulator.json)
-//   5. AIMD 배치 이벤트 기록 (append-only JSONL — 락 불필요)
-//   6. CLI 이슈 자동 수집
-//   7. 구조화된 결과 출력 (=== TFX-ROUTE RESULT ===)
 
 import {
   appendFileSync,
@@ -30,7 +18,6 @@ const HOME = homedir();
 const CACHE_DIR = join(HOME, ".claude", "cache");
 const LOG_DIR = join(HOME, ".claude", "logs");
 
-// ── 인자 파싱 ──
 function parseArgs() {
   const args = {};
   for (let i = 2; i < process.argv.length; i++) {
@@ -43,10 +30,8 @@ function parseArgs() {
   return args;
 }
 
-// ── 토큰 추출 ──
 function extractTokens(cliType, stderrFile) {
   if (cliType === "codex") {
-    // Codex CLI: stderr에 "tokens used\n76,239" 형식
     try {
       const stderr = readFileSync(stderrFile, "utf-8");
       const match = stderr.match(/tokens used\s*\n\s*([\d,]+)/i);
@@ -61,8 +46,6 @@ function extractTokens(cliType, stderrFile) {
   return { input: 0, output: 0 };
 }
 
-// ── Codex JSON-line 출력 필터링 ──
-// 단일 패스: JSON이면 파싱, 아니면 그대로 출력 (python3 이중 호출 제거)
 function filterCodexOutput(rawOutput) {
   const lines = rawOutput.split("\n");
   const result = [];
@@ -88,7 +71,6 @@ function filterCodexOutput(rawOutput) {
         result.push(line);
       }
     } catch {
-      // JSON 아님 → 그대로 통과
       result.push(line);
     }
   }
@@ -139,9 +121,7 @@ function extractCodexSessionId(rawOutput, stderrContent = "") {
       const parsed = JSON.parse(trimmed);
       const sessionId = findSessionIdInObject(parsed);
       if (sessionId) return sessionId;
-    } catch {
-      // ignore non-JSON lines
-    }
+    } catch {}
   }
 
   return null;
@@ -235,7 +215,6 @@ function cleanTuiArtifacts(output, cliType) {
   return cleaned;
 }
 
-// ── 실행 로그 기록 (JSONL, append-only) ──
 function logExecution(params) {
   const logFile = join(LOG_DIR, "tfx-route-stats.jsonl");
 
@@ -263,7 +242,6 @@ function logExecution(params) {
   } catch {}
 }
 
-// ── 토큰 누적 (sv-accumulator.json) ──
 function accumulateTokens(tokens) {
   if (tokens.input + tokens.output === 0) return;
 
@@ -286,8 +264,6 @@ function accumulateTokens(tokens) {
   } catch {}
 }
 
-// ── AIMD 배치 이벤트 (append-only JSONL — 락 불필요) ──
-// 오케스트레이터가 이 파일을 읽어 batch_size를 계산
 function recordBatchEvent(result, agent) {
   const eventsFile = join(CACHE_DIR, "batch-events.jsonl");
   try {
@@ -297,7 +273,6 @@ function recordBatchEvent(result, agent) {
       JSON.stringify({ ts: Date.now(), agent, result }) + "\n",
     );
 
-    // 자동 회전: 200줄 초과 시 최근 100줄 유지
     const content = readFileSync(eventsFile, "utf-8").trim();
     const lines = content.split("\n");
     if (lines.length > 200) {
@@ -306,7 +281,6 @@ function recordBatchEvent(result, agent) {
   } catch {}
 }
 
-// ── CLI 이슈 추적 ──
 // Codex 는 배너, 설정, 프롬프트 에코, 명령 출력을 stderr 로 낸다. 그 안의 "error:" 줄은
 // 지시문이나 읽은 파일 내용일 수 있다. 성공 실행은 Codex 자체 tracing 줄만, 실패 실행은
 // 오류 형태 줄과 transport 크래시 줄까지 검사한다.
@@ -327,16 +301,13 @@ function issueDiagnostics(stderrContent, cliType, exitCode) {
     .join("\n");
 }
 
-// stderrText 는 issueDiagnostics 를 거친 진단 줄이다.
 function trackCliIssue(cliType, agent, stderrText, exitCode) {
   const issuesFile = join(CACHE_DIR, "cli-issues.jsonl");
   if (!stderrText && exitCode === 0) return;
 
   const patterns = [
     {
-      // MCP transport 채널 런타임 사망 — codex exec 가 exit 0 으로 끝나도 워커가
-      // 빈손으로 죽은 케이스. tfx-route.sh 가드가 이를 실패(exit 68)로 승격하고,
-      // 여기서 원인을 cli-issues.jsonl 에 기록해 관측성을 확보한다(#result-verification).
+      // codex exec exit 0 빈손 종료를 가드가 실패(exit 68)로 승격하므로 원인을 남긴다 (#result-verification).
       regex: /Transport channel closed|rmcp::transport worker quit with fatal/i,
       pattern: "mcp_transport",
       msg: "MCP transport channel closed mid-run (worker likely produced no result)",
@@ -408,7 +379,6 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
   try {
     mkdirSync(CACHE_DIR, { recursive: true });
 
-    // 중복 방지: 같은 패턴+cli가 최근 5분 내 기록됐으면 건너뜀
     if (existsSync(issuesFile)) {
       const lines = readFileSync(issuesFile, "utf-8")
         .trim()
@@ -443,7 +413,6 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
 
     appendFileSync(issuesFile, JSON.stringify(issueEntry) + "\n");
 
-    // 자동 회전
     const content = readFileSync(issuesFile, "utf-8").trim();
     const allLines = content.split("\n");
     if (allLines.length > 200) {
@@ -452,7 +421,6 @@ function trackCliIssue(cliType, agent, stderrText, exitCode) {
   } catch {}
 }
 
-// 출력 폭주 방어 절삭 (기본 16MB 안전선, 0 이하면 무제한)
 function truncateOutput(text, maxBytes = DEFAULT_MAX_STDOUT_BYTES) {
   if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
     return typeof text === "string" ? text : String(text ?? "");
@@ -467,7 +435,6 @@ function truncateOutput(text, maxBytes = DEFAULT_MAX_STDOUT_BYTES) {
   return sliced.text;
 }
 
-// 메인
 function main() {
   const a = parseArgs();
 
@@ -491,7 +458,6 @@ function main() {
     : DEFAULT_MAX_STDOUT_BYTES;
   const cliCmd = a.cli_cmd || cliType;
 
-  // stderr/stdout 읽기
   let stderrContent = "";
   try {
     stderrContent = readFileSync(stderrLog, "utf-8");
@@ -507,10 +473,8 @@ function main() {
   const displayOutput = lastMessage || rawOutput;
   const warningContent = filterBenignStderr(stderrContent, cliType);
 
-  // 1. 토큰 추출
   const tokens = extractTokens(cliType, stderrLog);
 
-  // 2. 상태 판단
   let status;
   if (resultReason) {
     status = "partial";
@@ -522,7 +486,6 @@ function main() {
     status = "failed";
   }
 
-  // 출력 본문 사전 준비 (실행 통계에 절삭 전후 바이트 크기 기록)
   const shouldEmitBody =
     status === "partial" ||
     exitCode === 0 ||
@@ -544,7 +507,6 @@ function main() {
   );
   const outputBytes = Buffer.byteLength(truncatedBody || "", "utf8");
 
-  // 3. 실행 로그
   logExecution({
     agent,
     cli: cliType,
@@ -559,15 +521,12 @@ function main() {
     output_bytes: outputBytes,
   });
 
-  // 4. 성공 시 토큰 누적
   if (exitCode === 0) accumulateTokens(tokens);
 
-  // 5. AIMD 배치 이벤트
   const aimdResult =
     exitCode === 0 ? "success" : exitCode === 124 ? "timeout" : "failed";
   recordBatchEvent(aimdResult, agent);
 
-  // 6. CLI 이슈 추적
   trackCliIssue(
     cliType,
     agent,
@@ -575,7 +534,6 @@ function main() {
     exitCode,
   );
 
-  // 7. 구조화된 결과 출력
   console.log("=== TFX-ROUTE RESULT ===");
   console.log(`agent: ${agent}`);
   console.log(`cli: ${cliType} (${cliCmd})`);

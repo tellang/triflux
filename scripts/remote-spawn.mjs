@@ -1,15 +1,5 @@
 #!/usr/bin/env node
 
-// remote-spawn.mjs — 로컬/원격 Claude 세션 실행 유틸리티
-//
-// Usage:
-//   node remote-spawn.mjs --local [--dir <path>] [--prompt "..."] [--handoff <file>] [--transfer <file>]
-//   node remote-spawn.mjs --host <ssh-host> [--dir <path>] [--prompt "..."] [--handoff <file>] [--transfer <file>]
-//   node remote-spawn.mjs --send <session> "prompt"
-//   node remote-spawn.mjs --list
-//   node remote-spawn.mjs --attach <session>
-//   node remote-spawn.mjs --probe <ssh-host>
-
 import { execFileSync } from "child_process";
 import { randomUUID } from "crypto";
 import {
@@ -70,7 +60,6 @@ const DEFAULT_CLEANUP_WATCH_MAX_MS = 60 * 60 * 1000;
 const SAFE_HOST_RE = /^[a-zA-Z0-9._-]+$/;
 const UNSAFE_DIR_RE = /[\0\r\n]/;
 
-// --- 화면 상태 판별 / 수명주기 (PRD: remote-session-lifecycle) ---
 const CLAUDE_SCREEN_HOME = "home";
 const CLAUDE_SCREEN_REPL = "repl";
 const CLAUDE_SCREEN_TRUST = "trust_prompt";
@@ -205,7 +194,6 @@ export function buildSpawnCleanupWatcherArgs(
   ];
 }
 
-/** 문자열을 psmux 세션명에 안전한 slug로 변환 */
 function toSlug(raw) {
   return raw
     .replace(/[^a-zA-Z0-9-]/g, "-")
@@ -215,7 +203,6 @@ function toSlug(raw) {
     .slice(0, 24);
 }
 
-/** 세션 이름용 slug 생성: --name > git branch > random UUID */
 function buildSessionSlug(customName) {
   if (customName) return toSlug(customName);
   try {
@@ -225,20 +212,16 @@ function buildSessionSlug(customName) {
       stdio: ["ignore", "pipe", "ignore"],
     }).trim();
     if (branch) {
-      // feature/swarm-hypervisor → swarm-hypervisor
       const stripped = branch.includes("/")
         ? branch.split("/").slice(1).join("-")
         : branch;
       const slug = toSlug(stripped);
       if (slug) return slug;
     }
-  } catch {
-    /* git not available */
-  }
+  } catch {}
   return randomUUID().slice(0, 8);
 }
 
-/** 같은 slug의 세션이 이미 존재하면 -2, -3 ... 카운터 추가 */
 function deduplicateSessionName(baseName) {
   try {
     const existing = [...listPsmuxSessions(), ...listRemoteTmuxRecords()];
@@ -247,9 +230,7 @@ function deduplicateSessionName(baseName) {
       const candidate = `${baseName}-${i}`;
       if (!existing.includes(candidate)) return candidate;
     }
-  } catch {
-    /* psmux not available */
-  }
+  } catch {}
   return `${baseName}-${randomUUID().slice(0, 4)}`;
 }
 
@@ -486,9 +467,7 @@ function detectClaudePath() {
         if (p && !candidates.includes(p)) candidates.push(p);
       }
     }
-  } catch {
-    // not found
-  }
+  } catch {}
 
   if (candidates.length === 0) return "claude";
 
@@ -744,9 +723,7 @@ async function spawnRemoteFallback(args, promptContext, remoteEnv = null) {
   } finally {
     try {
       unlinkSync(localScript);
-    } catch {
-      /* 정리 실패는 무시한다. */
-    }
+    } catch {}
   }
 
   const remoteCmd = pwshRemoteCommand(
@@ -818,14 +795,7 @@ function resolveRemoteDir(dir, env) {
   return posixPath.join(env.home, requestedDir);
 }
 
-/**
- * hosts.json capabilities_v2 의 실행파일 경로에서 PATH prefix 후보 디렉터리를 뽑는다.
- * 비로그인 ssh 에는 nvm PATH 가 없어 `#!/usr/bin/env node` 셔뱅이 실패하므로,
- * claude 바이너리가 있는 디렉터리를 PATH 앞에 붙여야 한다.
- * darwin/linux 호스트만 대상이며 경로 하드코딩은 하지 않는다.
- * @param {object|null} host hosts-compat 가 정규화한 호스트 객체
- * @returns {string[]}
- */
+// 비로그인 ssh 에는 nvm PATH 가 없어 `#!/usr/bin/env node` 셔뱅이 실패하므로 darwin/linux 호스트는 바이너리 디렉터리를 PATH 앞에 붙인다.
 export function collectRemoteBinDirs(host) {
   if (!host || typeof host !== "object") return [];
   if (host.os !== "darwin" && host.os !== "linux") return [];
@@ -853,7 +823,6 @@ export function collectRemoteBinDirs(host) {
   return dirs;
 }
 
-/** hosts-compat 해석 결과에서 원격 PATH prefix 디렉터리를 얻는다. */
 export function resolveRemoteBinDirs(hostName, options = {}) {
   const readHostFn =
     typeof options.readHost === "function" ? options.readHost : readHost;
@@ -876,7 +845,6 @@ export function resolveRemoteOsHint(hostName, options = {}) {
   return undefined;
 }
 
-/** hosts-compat 해석 결과에서 원격 claude 실행 경로를 얻는다. */
 export function resolveRemoteClaudePath(hostName, options = {}) {
   const readHostFn =
     typeof options.readHost === "function" ? options.readHost : readHost;
@@ -891,7 +859,6 @@ export function resolveRemoteClaudePath(hostName, options = {}) {
   }
 }
 
-/** PATH prefix export 구문. 디렉터리가 없으면 빈 문자열. */
 export function buildRemotePathExportCommand(binDirs = []) {
   const dirs = (Array.isArray(binDirs) ? binDirs : []).filter(
     (dir) => typeof dir === "string" && posixPath.isAbsolute(dir),
@@ -900,11 +867,6 @@ export function buildRemotePathExportCommand(binDirs = []) {
   return `export PATH=${dirs.map((dir) => shellQuote(dir)).join(":")}:"$PATH"`;
 }
 
-/**
- * posix 원격 세션에 순서대로 보낼 명령 목록.
- * PATH prefix → cd → claude 실행 순서다.
- * @returns {string[]}
- */
 export function buildRemotePosixSpawnCommands(spec = {}) {
   const {
     binDirs = [],
@@ -943,11 +905,6 @@ export function buildRemotePosixSpawnCommands(spec = {}) {
   return commands;
 }
 
-/**
- * spawn 진입점의 레인 선택.
- * Windows 로컬은 psmux, darwin/linux 로컬은 tmux에서 원격 세션에 붙는다.
- * @returns {"psmux"|"tmux"|"fallback"}
- */
 export function resolveSpawnLane(options = {}) {
   const platform = options.platform ?? getPlatform();
   const multiplexerAvailable = options.multiplexerAvailable === true;
@@ -967,15 +924,11 @@ export function resolveSpawnLane(options = {}) {
   return "tmux";
 }
 
-/** detached tmux 세션 생성 인자. pane 이 곧바로 command 를 실행한다. */
 export function buildTmuxSpawnSessionArgs(sessionName, command) {
   return ["new-session", "-d", "-s", sessionName, command];
 }
 
-/**
- * tmux pane 이 실행할 명령. 원격 posix 스크립트를 통째로 `ssh -t` 에 넘긴다.
- * 비로그인 ssh 라 PATH prefix 가 스크립트 첫 줄에 있어야 셔뱅이 산다.
- */
+// 비로그인 ssh 라 PATH prefix 가 스크립트 첫 줄에 있어야 셔뱅이 산다.
 export function buildTmuxRemoteLaneCommand(host, remoteCommands = []) {
   const script = (Array.isArray(remoteCommands) ? remoteCommands : [])
     .filter(Boolean)
@@ -1184,8 +1137,7 @@ function ensureRemoteStageDir(host, env, remoteStageDir) {
 }
 
 function uploadFileToRemote(host, localPath, remotePath) {
-  // scp는 remote path를 셸 확장 없이 직접 전달 — shellQuote 불필요
-  // Windows 원격에서 쿼트가 리터럴 문자로 해석되어 경로 오류 발생
+  // scp 는 remote path 를 셸 확장 없이 직접 전달하므로 shellQuote 를 쓰면 Windows 원격에서 쿼트가 리터럴 문자로 해석된다.
   execFileSync(
     "scp",
     [...buildSshOptions(), localPath, `${host}:${remotePath}`],
@@ -1221,11 +1173,7 @@ function stageRemotePromptFiles(host, env, transferCandidates, stageId) {
   return { remoteStageDir, stagedFiles };
 }
 
-/**
- * 프롬프트를 원격 스테이지 디렉터리에 파일로 올린다.
- * send-keys 입력 길이를 줄이도록 본문을 파일로 올려 원격 런처가 읽는다.
- * @returns {string|null} 원격 프롬프트 파일 경로 (프롬프트가 없으면 null)
- */
+// send-keys 입력 길이를 줄이도록 본문을 파일로 올려 원격 런처가 읽는다.
 function uploadRemotePromptFile(host, env, stageId, prompt) {
   if (!prompt) return null;
 
@@ -1243,9 +1191,7 @@ function uploadRemotePromptFile(host, env, stageId, prompt) {
   } finally {
     try {
       unlinkSync(localPromptFile);
-    } catch {
-      /* 정리 실패는 무시한다. */
-    }
+    } catch {}
   }
   return remotePromptFile;
 }
@@ -1284,19 +1230,14 @@ async function openAttachTab(sessionName, title = null) {
         title: title || sessionName,
         command: `psmux attach -t ${sessionName}`,
       });
-    } catch {
-      /* fallback below */
-    }
+    } catch {}
     return;
   }
 
   attachPsmuxSession(sessionName);
 }
 
-/**
- * 현재 tmux 창을 분할해 세션에 붙일 때 쓰는 인자.
- * 중첩 attach 를 막으려고 `env -u TMUX` 로 TMUX 를 제거한다.
- */
+// 중첩 attach 를 막으려고 `env -u TMUX` 로 TMUX 를 제거한다.
 export function buildTmuxAttachSplitArgs(sessionName) {
   return [
     "split-window",
@@ -1304,11 +1245,6 @@ export function buildTmuxAttachSplitArgs(sessionName) {
   ];
 }
 
-/**
- * spawn 직후 자동 attach. 리드가 tmux 안이면 현재 창을 분할하고,
- * 아니면 기존 탭 attach 경로를 쓴다. `--no-attach` 는 attach:false 로 전달된다.
- * @returns {Promise<{attached: boolean, mode: string, error?: string}>}
- */
 export async function attachSpawnedSession(
   sessionName,
   title = null,
@@ -1397,7 +1333,6 @@ async function waitForRemotePrompt(sessionName, paneId) {
   );
 }
 
-/** @returns {boolean|null} true=dead, false=alive, null=probe 실패 */
 function isPrimaryPaneDead(paneId) {
   try {
     const output = psmuxExec([
@@ -1582,9 +1517,7 @@ function spawnLocal(args, claudePath, prompt) {
     sleepMs(300);
 
     if (prompt && tmpFile) {
-      // pwsh -File 패턴: 인라인 쿼팅 문제 회피 (피드백: -Command 금지)
-      // 1단계: 프롬프트를 Get-Content -Raw → claude -p (one-shot), 세션 ID 추출
-      // 2단계: --resume으로 인터랙티브 세션 이어붙이기
+      // pwsh -File 패턴으로 인라인 쿼팅 문제를 회피한다 (-Command 금지).
       const tmpFileNorm = normalizeCommandPath(tmpFile);
       const flags = getPermissionFlag()
         .map((f) => `'${escapePwshSingleQuoted(f)}'`)
@@ -2055,13 +1988,7 @@ function captureSession(sessionName, lines = 30) {
   return capturePsmuxPane(`${sessionName}:0.0`, lines);
 }
 
-/**
- * claude TUI \ucea1\ucc98 \ud14d\uc2a4\ud2b8\ub97c \ud654\uba74 \uc0c1\ud0dc\ub85c \ubd84\ub958\ud55c\ub2e4.
- * claude 2.1.x\ub294 REPL\uc774 \uc544\ub2c8\ub77c \uc138\uc158 \ub9e4\ub2c8\uc800 \ud648 \ud654\uba74\uc73c\ub85c \ubd80\ud305\ud558\ubbc0\ub85c,
- * \ud504\ub86c\ud504\ud2b8 \uae30\ud638\ub9cc \ubcf4\ub294 \ud310\uc815\uc740 \ud648 \ud654\uba74\uc744 REPL\ub85c \uc624\ud310\ud55c\ub2e4.
- * @param {string} captureText
- * @returns {"home"|"repl"|"trust_prompt"|"needs_input"|"busy"|"unknown"}
- */
+// claude 2.1.x 는 세션 매니저 홈 화면으로 부팅하므로 프롬프트 기호만으로 판정하면 홈 화면을 REPL 로 오판한다.
 export function classifyClaudeScreen(captureText) {
   const text = String(captureText ?? "");
   if (!text.trim()) return CLAUDE_SCREEN_UNKNOWN;
@@ -2091,11 +2018,7 @@ function normalizeTargetStates(targetStates) {
     : [CLAUDE_SCREEN_REPL, CLAUDE_SCREEN_HOME];
 }
 
-/**
- * \ucea1\ucc98 \ud3f4\ub9c1\uc73c\ub85c \ubaa9\ud45c \ud654\uba74 \uc0c1\ud0dc \ub3c4\ub2ec\uc744 \uae30\ub2e4\ub9b0\ub2e4.
- * capture/now/sleep \uc740 \uc8fc\uc785 \uac00\ub2a5\ud558\ubbc0\ub85c \uc2e4\uc81c tmux \uc5c6\uc774 \ub2e8\uc704 \ud14c\uc2a4\ud2b8\ud560 \uc218 \uc788\ub2e4.
- * @returns {Promise<{ready: boolean, state: string, timedOut: boolean, states: string[]}>}
- */
+// capture/now/sleep 주입이 가능해 실제 tmux 없이 단위 테스트할 수 있다.
 export async function waitForClaudeScreenState(options = {}) {
   const capture = options.capture;
   if (typeof capture !== "function") {
@@ -2130,12 +2053,6 @@ export async function waitForClaudeScreenState(options = {}) {
   return { ready: false, state: lastState, timedOut: true, states: seen };
 }
 
-/**
- * \uc138\uc158\uc758 claude\uac00 \ubaa9\ud45c \ud654\uba74 \uc0c1\ud0dc\uc5d0 \ub3c4\ub2ec\ud560 \ub54c\uae4c\uc9c0 \ub300\uae30\ud55c\ub2e4.
- * @param {string} sessionName
- * @param {number} [timeoutSec]
- * @param {{targetStates?: string[]|string, pollMs?: number, capture?: Function}} [options]
- */
 async function waitForClaudeReady(sessionName, timeoutSec = 60, options = {}) {
   const capture =
     typeof options.capture === "function"
@@ -2166,22 +2083,15 @@ async function waitForClaudeReady(sessionName, timeoutSec = 60, options = {}) {
   return result;
 }
 
-/** machine profile 의 stall 임계(초). 미설정이면 20분. */
 export function resolveStallThresholdSec(env = process.env) {
   return parsePositiveInt(env.TFX_STALL_THRESHOLD, DEFAULT_STALL_THRESHOLD_SEC);
 }
 
-/** 구조화 stdout 라인. 소비자는 prefix 로 필터링한다. */
 export function formatMonitorEvent(event) {
   return `${MONITOR_EVENT_PREFIX} ${JSON.stringify(event)}`;
 }
 
-/**
- * 로컬 capture-pane 폴링으로 화면 상태를 추적한다.
- * needs_input/trust_prompt 는 임계 대기 없이 즉시 보고하고,
- * 상태 전이 없이 임계 시간이 지나면 stall 을 보고한다.
- * @returns {Promise<{reason: string, state: string, events: object[]}>}
- */
+// needs_input/trust_prompt 는 임계 대기 없이 즉시 보고한다.
 export async function monitorClaudeSession(sessionName, options = {}) {
   const paneId = options.paneId || `${sessionName}:0.0`;
   const capture =
@@ -2284,7 +2194,6 @@ export async function monitorClaudeSession(sessionName, options = {}) {
   };
 }
 
-/** `tfx-spawn-<host>-<slug>` 세션명에서 원격 호스트를 역추론한다. */
 export function inferRemoteHostFromSessionName(sessionName, hostNames = []) {
   const name = String(sessionName || "");
   if (!name.startsWith(SPAWN_SESSION_PREFIX)) return null;
@@ -2313,10 +2222,7 @@ function listKnownHostNames() {
   }
 }
 
-/**
- * spawn 한 번마다 쓰는 원격 기록 디렉터리. 세션 이름만 쓰면 다른 기기의 같은 이름 spawn 이 덮어쓴다.
- * 원격 셸이 $HOME 을 펼친다.
- */
+// 세션 이름만 쓰면 다른 기기의 같은 이름 spawn 이 덮어쓰므로 run 단위로 디렉터리를 나눈다.
 export function remoteRunDir(sessionName, runId) {
   return `"$HOME"/${REMOTE_STAGE_ROOT}/${shellQuote(sessionName)}/${shellQuote(`run-${runId}`)}`;
 }
@@ -2325,10 +2231,7 @@ function readRunPidScript(runDir, onMissing) {
   return `d=${runDir}; pid=$(cat "$d/shell.pid" 2>/dev/null); case "$pid" in ''|*[!0-9]*) ${onMissing};; esac`;
 }
 
-/**
- * 기록한 셸의 그룹과 모든 자손을 먼저 procs 에 적고 TERM 한다.
- * 대화형 셸(psmux 레인)에서는 claude 가 새 그룹을 받고, 부모가 죽으면 손자는 PPID 가 바뀌므로 죽이기 전에 목록을 잡는다.
- */
+// 대화형 셸에서는 claude 가 새 그룹을 받고 부모 종료 시 손자 PPID 가 바뀌므로 죽이기 전에 procs 목록을 잡는다.
 export function buildRemoteSessionStopCommand(sessionName, runId) {
   return [
     readRunPidScript(remoteRunDir(sessionName, runId), "exit 0"),
@@ -2339,7 +2242,7 @@ export function buildRemoteSessionStopCommand(sessionName, runId) {
   ].join("; ");
 }
 
-/** readback 용 잔존 프로세스 카운트. 기록이 없으면 숫자 대신 missing 을 내 거짓 성공을 막는다. */
+// 기록이 없으면 숫자 대신 missing 을 내 거짓 성공을 막는다.
 export function buildRemoteClaudeProcessCountCommand(sessionName, runId) {
   return [
     readRunPidScript(remoteRunDir(sessionName, runId), "echo missing; exit 0"),
@@ -2349,7 +2252,7 @@ export function buildRemoteClaudeProcessCountCommand(sessionName, runId) {
   ].join("; ");
 }
 
-/** 요청 전체가 성공한 뒤에만 지운다. 실패 뒤 다시 --kill 할 때 기록이 남아 있어야 한다. */
+// 실패 뒤 다시 --kill 할 때 기록이 남아 있어야 하므로 요청 전체가 성공한 뒤에만 지운다.
 export function buildRemoteRunCleanupCommand(
   sessionName,
   runId,
@@ -2367,7 +2270,6 @@ export function buildRemoteRunCleanupCommand(
   return `d=${remoteRunDir(sessionName, runId)}; rm -f "$d/shell.pid" "$d/procs"; rmdir "$d" 2>/dev/null; true`;
 }
 
-/** 로컬 세션별 spawn 기록. --kill 이 원격 기록 디렉터리를 찾는 데 쓴다. */
 function spawnRecordPath(sessionName) {
   return join(tfxStateDir(), "remote-spawn", `${sessionName}.json`);
 }
@@ -2421,14 +2323,14 @@ function removeSpawnRecord(sessionName, runId) {
   } catch {}
 }
 
-/** 원격 claude 데몬 전체 정지. 다른 작업의 데몬도 멈추므로 --stop-daemon 일 때만 쓴다. */
+// 다른 작업의 데몬도 멈추므로 --stop-daemon 일 때만 쓴다.
 export function buildRemoteDaemonStopCommand(binDirs = [], claudePath = null) {
   const pathExport = buildRemotePathExportCommand(binDirs);
   const binary = claudePath ? shellQuote(claudePath) : "claude";
   return `${pathExport ? `${pathExport}; ` : ""}${binary} daemon stop --any`;
 }
 
-/** @returns {number|null} 파싱 실패 시 null (거짓 성공 금지) */
+// 파싱 실패 시 거짓 성공을 막기 위해 null 을 반환한다.
 export function parseRemoteProcessCount(stdout) {
   const match = /\d+/.exec(String(stdout ?? ""));
   return match ? Number.parseInt(match[0], 10) : null;
@@ -2499,11 +2401,7 @@ function cleanupSpawnRecord(sessionName, record, runRemote) {
     removeSpawnRecord(sessionName, record.runId);
 }
 
-/**
- * 로컬 psmux/tmux 세션과 원격 claude 잔존 프로세스를 함께 회수한다.
- * 원격 실패가 로컬 정리를 막지 않으며, readback 이 0 을 확인하지 못하면 ok:false 다.
- * @returns {Promise<{ok: boolean, session: string, local: object, remote: object|null}>}
- */
+// 원격 실패가 로컬 정리를 막지 않으며, readback 이 0 을 확인하지 못하면 ok:false 다.
 export async function killSpawnSession(sessionName, options = {}) {
   const killLocal =
     typeof options.killLocal === "function"

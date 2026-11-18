@@ -1,14 +1,4 @@
 #!/usr/bin/env node
-/**
- * session-stale-cleanup.mjs — tfx doctor --fix 정리 작업
- *
- * 이전 세션의 stale 상태를 정리한다:
- * 1. tfx-multi-state.json — 세션 간 상태 누수 방지 (#62)
- * 2. tfx-route-*-pids — 고아 워커 프로세스 정리 (#62 후속)
- * 3. git fsmonitor--daemon 누적 감시 — threshold 초과 시 증거 기록 (#214)
- *
- * @see scripts/tfx-route.sh — PID tracking 파일 생산자
- */
 
 import { execFileSync, execSync } from "node:child_process";
 import {
@@ -231,12 +221,9 @@ function treeKill(pid, proc) {
       proc.pgid === pid &&
       WORKER_CMD_RE.test(proc.commandLine);
     process.kill(safeGroupKill ? -pid : pid, "SIGTERM");
-  } catch {
-    /* already dead */
-  }
+  } catch {}
 }
 
-// ── 1. tfx-multi-state.json 정리 ──
 function cleanupMultiState() {
   if (!existsSync(MULTI_STATE_FILE)) return;
 
@@ -246,9 +233,7 @@ function cleanupMultiState() {
   } catch {
     try {
       unlinkSync(MULTI_STATE_FILE);
-    } catch {
-      /* ignore */
-    }
+    } catch {}
     return;
   }
 
@@ -266,12 +251,9 @@ function cleanupMultiState() {
 
   try {
     unlinkSync(MULTI_STATE_FILE);
-  } catch {
-    /* ignore */
-  }
+  } catch {}
 }
 
-// ── 2. orphan PID tracking 파일 정리 ──
 // tfx-route.sh 는 uid 0700 루트에 추적 파일을 쓴다. tmpdir() 는 예전 버전이 남긴 파일용이다.
 function pidFileDirs() {
   const dirs = [tmpdir()];
@@ -344,15 +326,11 @@ function cleanupPidFile(filePath, ownerPid, uid, isWindows, winProcMap) {
         treeKill(pid, procMap.get(pid));
       }
     }
-  } catch {
-    /* 읽기 실패 무시 */
-  }
+  } catch {}
 
   try {
     unlinkSync(filePath);
-  } catch {
-    /* ignore */
-  }
+  } catch {}
 }
 
 export function monitorFsmonitorDaemons({

@@ -328,7 +328,7 @@ export function runCommand(
     // execFileSync default maxBuffer is 1 MiB. With stdio=pipe the parent
     // captures all stdout/stderr; piped npm/test/build runs easily overflow
     // that and surface as opaque ENOBUFS-shaped failures. 64 MiB is the
-    // generic floor. Defense-in-depth — not a fix for any specific bug.
+    // 64 MiB 는 특정 버그 수정이 아니라 파이프 출력 오버플로(ENOBUFS) 예방용 하한선이다.
     opts.maxBuffer = maxBuffer ?? 64 * 1024 * 1024;
   }
 

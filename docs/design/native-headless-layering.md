@@ -2,7 +2,7 @@
 
 > 상태: Draft (v9.x 로드맵)
 > 작성일: 2026-03-26
-> 관련 코드: `hub/team/headless.mjs`, `hub/team/psmux.mjs`, `hub/team/cli/`, `hub/team/tui-viewer.mjs`
+> 관련 코드: `hub/team/headless.mjs`, `hub/team/psmux.mjs`, `hub/team/cli/`
 > 관련 외부: OMC team skill (oh-my-claudecode Native Team 오케스트레이션)
 
 ---
@@ -36,7 +36,6 @@ headless.mjs는 **의미론(팀 오케스트레이션)과 인프라(psmux 터미
 | **인프라** | `applyTrifluxTheme()` | psmux status bar, 색상 테마 |
 | **인프라** | `ensureWtProfile()` | WT settings.json 프로필 관리 |
 | **인프라** | `autoAttachTerminal()` | WT split-pane attach |
-| **인프라** | `attachDashboardTab()` | WT + tui-viewer 실행 |
 | **혼합** | `runHeadless()` | 세션 생성 → dispatch → 대기 → 결과 수집 |
 | **혼합** | `runHeadlessInteractive()` | interactive handle (dispatch/capture/kill) |
 

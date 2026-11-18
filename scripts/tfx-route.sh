@@ -1,30 +1,11 @@
 #!/usr/bin/env bash
-# CLI 라우팅 래퍼 (triflux)
 VERSION="2.7"
-
-# 사용법:
-#   tfx-route.sh <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file] [mcp_task_file]
-#   tfx-route.sh --async <agent_type> <prompt> [mcp_profile] [timeout_sec] [context_file] [mcp_task_file]
-#   tfx-route.sh --job-status <job_id>
-#   tfx-route.sh --job-result <job_id>
-#
-# --async: 백그라운드 실행, 즉시 job_id 반환 (Claude Code Bash 600초 제한 우회)
-# --job-status: running | done | timeout | failed
-# --job-result: 완료된 잡의 전체 출력
-#
-# 예시:
-#   tfx-route.sh executor "코드 구현" implement
-#   tfx-route.sh --async scientist "딥 리서치" auto 1440
-#   tfx-route.sh --job-status 1742400000-12345-9876
-#   tfx-route.sh --job-result 1742400000-12345-9876
-
 set -euo pipefail
 
 _AGY_HEADLESS_BIN=""
 _AGY_HEADLESS_SUPPORTED=1
 _AGY_CLAUDE_FALLBACK=0
 
-# ── 영속 machine profile (env > profile > runtime observation) ──
 # 신뢰 경계: 파일을 source/eval 하지 않고 allowlist literal만 읽는다.
 resolve_machine_profile_path() {
   if [[ -n "${TFX_MACHINE_PROFILE_PATH:-}" ]]; then
@@ -108,7 +89,6 @@ load_machine_profile
 # TFX_HARD_CEILING_SEC=0에서 사용한다.
 _no_timeout() { shift; "$@"; }
 
-# ── timeout 명령 호환성 — Windows에서 TIMEOUT.exe 대신 Git Bash coreutils timeout 사용 ──
 if command -v /usr/bin/timeout >/dev/null 2>&1; then
   TIMEOUT_BIN="/usr/bin/timeout"
 elif command -v gtimeout >/dev/null 2>&1; then
@@ -130,7 +110,6 @@ else
   TIMEOUT_CMD=("$TIMEOUT_BIN" "-k" "${TFX_HARD_CEILING_KILL_GRACE:-5}")
 fi
 
-# ── 임시 디렉토리 정규화 ──
 # 공용 /tmp 의 고정 이름은 다른 사용자가 선점하거나 읽을 수 있어 uid 0700 루트를 쓴다.
 # hub/lib/private-tmp.mjs 와 같은 규칙이고, 후보 순서도 node os.tmpdir() 와 맞춘다.
 # 루트가 남의 것이면 다른 후보로 넘어가지 않고 실패한다. 넘어가면 node 쪽 정리기가 그 경로를 모른다.
@@ -168,7 +147,6 @@ resolve_tmp_dir() {
 
 TFX_TMP="$(resolve_tmp_dir)" || exit 1
 
-# ── Worker PID 추적 (EXIT trap에서 정리) ──
 _PID_TRACK="${TFX_TMP}/tfx-route-$$-pids"
 
 track_worker_pid() {
@@ -268,7 +246,6 @@ cleanup_workers() {
   cleanup_mcp_files
 }
 
-# ── Preflight env vars (P0 prompt-dodge): git/npm/gh 자동 응답 ──
 # 워커가 dispatch 직후 git credential / npm install / gh auth prompt에서
 # stall하지 않도록 환경변수를 선주입한다. 사용자 값이 있으면 존중.
 export GIT_TERMINAL_PROMPT="${GIT_TERMINAL_PROMPT:-0}"
@@ -337,11 +314,9 @@ build_antigravity_base() {
   esac
 }
 
-# ── Async Job 디렉토리 ──
 # Honor caller-provided TFX_JOBS_DIR env (used by unit tests for isolated jobs dirs).
 TFX_JOBS_DIR="${TFX_JOBS_DIR:-${TFX_TMP}/tfx-jobs}"
 
-# ── --job-status / --job-result 핸들러 (인자 파싱 전에 처리) ──
 if [[ "${1:-}" == "--job-status" ]]; then
   job_id="${2:?job_id 필수}"
   job_dir="$TFX_JOBS_DIR/$job_id"
@@ -363,7 +338,6 @@ if [[ "${1:-}" == "--job-status" ]]; then
       exit 0
     fi
     if kill -0 "$pid" 2>/dev/null; then
-      # 진행 상황 힌트
       local_bytes=$(wc -c < "$job_dir/result.log" 2>/dev/null | tr -d ' ' || echo 0)
       elapsed=$(( $(date +%s) - $(cat "$job_dir/start_time" 2>/dev/null || date +%s) ))
       echo "running elapsed=${elapsed}s output=${local_bytes}B"
@@ -377,7 +351,6 @@ if [[ "${1:-}" == "--job-status" ]]; then
       done < "$job_dir/child_pids"
       echo "failed"
     else
-      # 프로세스 종료됐는데 done 마커 없음 → 비정상 종료
       echo "failed"
     fi
   else
@@ -403,9 +376,6 @@ if [[ "${1:-}" == "--job-result" ]]; then
   exit "$exit_code"
 fi
 
-# ── --job-wait: 내부 폴링으로 완료 대기 (Bash 도구 호출 횟수 최소화) ──
-# 사용법: tfx-route.sh --job-wait <job_id> [max_seconds=540]
-# 출력: 주기적 "waiting elapsed=Ns" + 최종 "done"|"timeout"|"failed"|"still_running"
 if [[ "${1:-}" == "--job-wait" ]]; then
   job_id="${2:?job_id 필수}"
   max_wait="${3:-540}"  # 기본 540초 (9분, Bash 도구 600초 제한 이내)
@@ -429,19 +399,16 @@ if [[ "${1:-}" == "--job-wait" ]]; then
     echo "waiting elapsed=${elapsed}s progress=${stderr_bytes}B"
   done
 
-  # max_wait 도달했지만 아직 실행 중
   echo "still_running elapsed=${elapsed}s"
   exit 0
 fi
 
-# ── --async 플래그 감지 ──
 TFX_ASYNC_MODE=0
 if [[ "${1:-}" == "--async" ]]; then
   TFX_ASYNC_MODE=1
   shift
 fi
 
-# ── 인자 파싱 ──
 AGENT_TYPE="${1:?에이전트 타입 필수 (executor, debugger, designer 등)}"
 PROMPT="${2:?프롬프트 필수}"
 MCP_PROFILE="${3:-auto}"
@@ -464,9 +431,7 @@ case "$AGENT_TYPE" in
     ;;
 esac
 
-# ── CLI 이름은 route_agent()에서 기본 역할 alias로 처리됨 (codex→executor, antigravity/agy→Antigravity, claude→explore) ──
 
-# ── 인자 검증: MCP_PROFILE이 --flag 형태인 경우 거절 ──
 if [[ "$MCP_PROFILE" == --* ]]; then
   echo "ERROR: MCP 프로필 위치(3번째 인자)에 플래그 '$MCP_PROFILE'가 들어왔습니다." >&2
   echo "사용법: tfx-route.sh <역할> \"프롬프트\" [mcp_profile] [timeout]" >&2
@@ -474,14 +439,12 @@ if [[ "$MCP_PROFILE" == --* ]]; then
   exit 64
 fi
 
-# ── CLI 경로 해석 (Windows npm global 대응) ──
 NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || command -v node.exe 2>/dev/null || echo node)}"
 CODEX_BIN="${CODEX_BIN:-$(command -v codex 2>/dev/null || echo codex)}"
 AGY_BIN="${AGY_BIN:-$(command -v agy 2>/dev/null || echo agy)}"
 CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo claude)}"
 CLAUDE_BIN_ARGS_JSON="${CLAUDE_BIN_ARGS_JSON:-[]}"
 
-# ── Codex auth/home 명시 라우팅 (Issue #78 race 차단) ──
 # TFX_CODEX_HOME 또는 TFX_CODEX_AUTH_FILE 설정 시 codex CLI에 명시적 CODEX_HOME 적용.
 # 호출자가 특정 account 를 강제 라우팅하고 싶을 때 사용. 미설정 시 codex default (~/.codex) 유지.
 if [[ -n "${TFX_CODEX_HOME:-}" ]]; then
@@ -495,10 +458,8 @@ elif [[ -n "${TFX_CODEX_AUTH_FILE:-}" && -f "${TFX_CODEX_AUTH_FILE}" ]]; then
   unset _tfx_codex_auth_dir
 fi
 
-# ── Gemini 프로필 경로 (Codex config.toml 대칭) ──
 GEMINI_PROFILES_PATH="${GEMINI_PROFILES_PATH:-${HOME}/.gemini/triflux-profiles.json}"
 
-# ── 상수 ──
 MAX_STDOUT_BYTES="${TFX_MAX_STDOUT_BYTES:-16777216}"  # 16MB 물리 폭주 방어선 (<=0 무제한)
 TIMESTAMP=$(date +%s)
 TFX_PROBE_DIR="${TFX_PROBE_DIR:-${TFX_TMP}/tfx-probe}"
@@ -592,7 +553,7 @@ prepend_skill() {
 
 # append_agy_anti_overclaim: agy(Gemini 3.x) 레인 전용 완료/grounding 규율 블록을
 # 프롬프트 *뒤*에 붙인다. Gemini 3.x 는 과신(overconfidence) outlier 라 거짓 완료
-# 주장·환각이 잦다 (AA-Omniscience 실증). 부정 제약은 Gemini 3 공식 가이드 권고대로
+# 주장 및 환각이 잦다 (AA-Omniscience 실증). 부정 제약은 Gemini 3 공식 가이드 권고대로
 # 프롬프트 END 에 배치하고, blanket "do not guess" 대신 "주어진 context 로 추론 +
 # 정확한 abstention 우선" 형태로 적는다 (open-ended negative 는 역효과). TFX_AGY_ANTI_OVERCLAIM=0 으로 opt-out.
 append_agy_anti_overclaim() {
@@ -637,13 +598,11 @@ STDERR_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-stderr.log"
 STDOUT_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-stdout.log"
 CODEX_LAST_MESSAGE_LOG="${TFX_TMP}/tfx-route-${AGENT_TYPE}-${RUN_ID}-last-message.log"
 
-# ── 팀 환경변수 ──
 TFX_TEAM_NAME="${TFX_TEAM_NAME:-}"
 TFX_TEAM_TASK_ID="${TFX_TEAM_TASK_ID:-}"
 TFX_TEAM_AGENT_NAME="${TFX_TEAM_AGENT_NAME:-${AGENT_TYPE}-worker-$$}"
 TFX_TEAM_LEAD_NAME="${TFX_TEAM_LEAD_NAME:-team-lead}"
 
-# ── 패키지 루트 해석 (setup.mjs가 기록한 breadcrumb) ──
 TFX_PKG_ROOT=""
 _tfx_breadcrumb="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.tfx-pkg-root"
 if [[ -f "$_tfx_breadcrumb" ]]; then
@@ -651,10 +610,8 @@ if [[ -f "$_tfx_breadcrumb" ]]; then
 fi
 unset _tfx_breadcrumb
 
-# fallback 시 원래 에이전트 정보 보존
 ORIGINAL_AGENT=""
 
-# ── Per-process 에이전트 등록 (원자적, 락 불필요) ──
 register_agent() {
   local agent_file="${TFX_TMP}/tfx-agent-$$.json"
   # route policy가 provider enum과 agent 토큰을 검증했다.
@@ -684,7 +641,6 @@ normalize_script_path() {
   printf '%s\n' "$path"
 }
 
-# ── 스크립트 경로 해석 공통 인프라 ──
 _tfx_script_dir=""
 _get_script_dir() {
   if [[ -z "$_tfx_script_dir" ]]; then
@@ -694,7 +650,6 @@ _get_script_dir() {
   printf '%s\n' "$_tfx_script_dir"
 }
 
-# _resolve_script ENV_VAR_VALUE CANDIDATE... → 첫 번째 존재하는 파일 경로 반환
 _resolve_script() {
   local env_val="${1:-}"; shift
   [[ -n "$env_val" && -f "$env_val" ]] && { printf '%s\n' "$env_val"; return 0; }
@@ -702,7 +657,6 @@ _resolve_script() {
   return 1
 }
 
-# ── 팀 Bridge 통신 ──
 resolve_bridge_script() {
   local sd; sd="$(_get_script_dir)"
   _resolve_script "${TFX_BRIDGE_SCRIPT:-}" \
@@ -775,11 +729,9 @@ team_complete_task() {
   # task 파일 completion 쓰기는 Worker Step 6 TaskUpdate가 authority다.
   # route 레벨에서는 로컬 backup만 유지한다.
 
-  # 로컬 결과 파일 백업 (세션 끊김 복구용)
-  # Claude 재로그인 시 Agent 래퍼가 죽어도 이 파일로 결과 수집 가능
   local result_dir="${TFX_RESULT_DIR:-${HOME}/.claude/tfx-results/${TFX_TEAM_NAME}}"
   if mkdir -p "$result_dir" 2>/dev/null; then
-    # 전체를 Node.js로 안전하게 stringify — 변수 직접 삽입 인젝션 방지
+    # 전체를 Node.js로 안전하게 stringify 해 변수 직접 삽입 인젝션을 방지한다.
     "$NODE_BIN" -e '
       const [,taskId,agent,team,result,summary,ts] = process.argv;
       process.stdout.write(JSON.stringify({taskId,agent,team,result,summary,timestamp:ts}));
@@ -1062,7 +1014,6 @@ capture_workspace_signature() {
   git -c core.fsmonitor=false status --short --untracked-files=all --ignore-submodules=all < /dev/null 2>/dev/null || return 1
 }
 
-# Antigravity 모델 프로필 해석
 resolve_agy_profile() {
   "$NODE_BIN" --input-type=module -e '
     import { pathToFileURL } from "node:url";
@@ -1103,9 +1054,6 @@ refresh_codex_profiles() {
   ' "$CODEX_PROFILE_MODULE" "$CLI_CMD" 2>/dev/null || true
 }
 
-# ── 라우팅 테이블 ──
-# CLI_TYPE/CLI_CMD는 agent-map, 역할별 설정은 agent-route-policy에서 조회한다.
-# 반환: CLI_TYPE, CLI_CMD, CLI_ARGS, CLI_EFFORT, DEFAULT_TIMEOUT
 route_agent() {
   local agent="$1" sd map_file policy_file policy_row agy_module
   sd="$(_get_script_dir)"
@@ -1252,7 +1200,6 @@ apply_codex_agent_policy() {
   CLI_EFFORT="$CODEX_POLICY_EFFORT"; DEFAULT_TIMEOUT="$CODEX_POLICY_TIMEOUT"
 }
 
-# ── CLI 모드 오버라이드 ──
 TFX_CLI_MODE="${TFX_CLI_MODE:-auto}"
 TFX_NO_CLAUDE_NATIVE="${TFX_NO_CLAUDE_NATIVE:-0}"
 TFX_DISABLE_CODEX="${TFX_DISABLE_CODEX:-0}"
@@ -1280,8 +1227,6 @@ JEV_TIER_SHIFT=""
 JEV_CLAUDE_MODEL=""
 JEV_CLAUDE_EFFORT=""
 
-# Preflight 캐시의 CLI 가용성과 Codex 요금제를 환경변수로 내보냄
-# 하위 프로세스(스킬 포함)가 CLI 가용성을 즉시 참조 가능
 if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
   # SessionStart 훅 없이도 route 진입 시 없거나 만료된 캐시를 갱신한다.
   _preflight_script="$(_resolve_script "" \
@@ -1291,8 +1236,8 @@ if [[ -z "${TFX_PREFLIGHT_LOADED:-}" ]]; then
     "$NODE_BIN" "$_preflight_script" --if-stale >/dev/null 2>&1 || true
   fi
   unset _preflight_script
-  # eval 제거 — \x1e (ASCII 30, Record Separator) delimited read로 인젝션 위험 차단
-  # F05: `|`에서 `\x1e`로 변경 — 계정 tier/agent 이름 등 값에 `|` 포함 시 필드 분리 오류 방지
+  # eval 대신 \x1e (ASCII 30) delimited read 로 인젝션 위험을 차단한다.
+  # 계정 tier/agent 이름에 `|` 가 포함될 때 필드 분리가 깨지지 않게 `\x1e` 를 쓴다.
   IFS=$'\x1e' read -r _pf_codex _pf_antigravity _pf_plan _pf_agents _pf_antigravity_status _pf_antigravity_source _pf_antigravity_reason < <(
     "$NODE_BIN" -e '
       try {
@@ -1380,7 +1325,6 @@ case "$TFX_SEARCH_TOOL" in
 esac
 
 apply_cli_mode() {
-  # 후보 선택과 리매핑은 route_agent(vendor-priority-policy.mjs)가 일괄 처리한다.
   case "$TFX_CLI_MODE" in
     codex|antigravity|claude)
       echo "[tfx-route] TFX_CLI_MODE=${TFX_CLI_MODE}: ${AGENT_TYPE} -> ${CLI_TYPE}(${CLI_EFFORT}) 선택" >&2
@@ -1388,7 +1332,6 @@ apply_cli_mode() {
   esac
 }
 
-# ── CLI disable 정책 (강제 모드/동적 오버라이드보다 우선) ──
 # TFX_CLI_MODE는 선호/강제 선택이고 TFX_*_OK는 preflight 관측값이다.
 is_cli_disabled() {
   case "$1" in
@@ -1426,13 +1369,10 @@ is_cli_available() {
 }
 
 apply_cli_disable_policy() {
-  # 하드 제외 필터와 차단 사유 로그는 route_agent의 resolveRoleCandidates가 일괄 수행한다.
   return 0
 }
 
-# ── Claude 네이티브 제거 (Codex 리드 환경에서 선택적 활성화) ──
 apply_no_claude_native_mode() {
-  # TFX_NO_CLAUDE_NATIVE=1 처리는 route_agent의 resolveRoleCandidates가 일괄 수행한다.
   return 0
 }
 
@@ -1747,11 +1687,9 @@ apply_codex_profile_override() {
 }
 
 apply_verifier_override() {
-  # verifier 오버라이드는 route_agent의 resolveRoleCandidates가 일괄 수행한다.
   return 0
 }
 
-# ── MCP 인벤토리 캐시 ──
 MCP_CACHE="${HOME}/.claude/cache/mcp-inventory.json"
 MCP_FILTER_SCRIPT=""
 MCP_PROFILE_REQUESTED="auto"
@@ -1860,15 +1798,12 @@ emit_claude_native_metadata() {
   echo "--- Claude Task($model) 에이전트로 위임하세요 ---"
 }
 
-# _find_fork_pids PID — cross-platform child PID lookup
-# pgrep -P (Linux/macOS) → Git Bash ps fallback (PPID/PGID column)
 _find_fork_pids() {
   local parent="$1"
   if command -v pgrep &>/dev/null; then
     pgrep -P "$parent" 2>/dev/null || true
     return
   fi
-  # Git Bash: PID PPID PGID WINPID ... — match by PPID or PGID
   ps 2>/dev/null | awk -v p="$parent" 'NR>1 && ($2==p || ($3==p && $1!=p)) {print $1}' | sort -un | tr '\n' ' '
 }
 
@@ -1920,11 +1855,6 @@ _codex_rollout_activity_bytes() {
   printf '%s\n' "$total"
 }
 
-# heartbeat_monitor PID [INTERVAL] [STALL_THRESHOLD]
-# - PID: 감시할 워커 프로세스 PID
-# - INTERVAL: heartbeat 출력 간격 (초, 기본 10)
-# - STALL_THRESHOLD: stall 경고 임계값 (초, 기본 1200)
-# 환경변수: TFX_HEARTBEAT (0이면 비활성화), TFX_HEARTBEAT_INTERVAL, TFX_STALL_THRESHOLD
 heartbeat_monitor() {
   [[ "${TFX_HEARTBEAT:-1}" -eq 0 ]] && return 0
   local pid="$1"
@@ -1940,7 +1870,6 @@ heartbeat_monitor() {
   while true; do
     sleep "$interval"
 
-    # Check if the tracked PID is still alive; snapshot forks while alive
     if ! kill -0 "$pid" 2>/dev/null; then
       if [[ "$pid_gone" == "false" ]]; then
         pid_gone=true
@@ -1989,7 +1918,6 @@ heartbeat_monitor() {
       probe_state="$(read_probe_state "$pid" 2>/dev/null || true)"
       if [[ "$pid_gone" == "true" ]]; then
         if [[ -n "$last_known_forks" ]]; then
-          # Direct fork tracking — terminate when all forks are dead
           local _alive=false
           for _fp in $last_known_forks; do
             kill -0 "$_fp" 2>/dev/null && _alive=true && break
@@ -2000,7 +1928,6 @@ heartbeat_monitor() {
           fi
           echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=fork-idle(${last_known_forks// /,})" >&2
         else
-          # Fallback: output-based drain (no fork PIDs found)
           post_exit_checks=$((post_exit_checks + 1))
           if [[ "$post_exit_checks" -ge "$max_post_exit_checks" ]]; then
             echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=terminated(drain-done)" >&2
@@ -2092,7 +2019,7 @@ process.stdout.write(JSON.stringify({
         fi
         if [[ "$_should_kill" -eq 1 && "$stall_count" -ge $((stall_threshold + kill_grace)) ]]; then
           echo "[tfx-heartbeat] pid=$pid elapsed=${elapsed}s output=${current_size}B${expected_suffix} status=STALL_KILL stall=${stall_count}s — SIGTERM" >&2
-          # Snapshot child PIDs before SIGTERM — wrapper 가 SIGTERM 을 수용해 죽으면
+          # SIGTERM 전에 자식 PID 를 스냅샷해 두지 않으면 wrapper 종료 후 taskkill /T 가 트리를 못 찾는다.
           # 부모 소멸 후 taskkill /T 가 자식 트리를 탐색하지 못해 codex 자식이 orphan 으로 남는다.
           # 사용자 보고(2026-04-22): "tfx-route 래퍼 exit 이후에도 Codex 자식이 살아있음".
           local _stall_children
@@ -2153,7 +2080,6 @@ process.stdout.write(JSON.stringify({
   echo "[tfx-heartbeat] pid=$pid terminated" >&2
 }
 
-# _wait_with_heartbeat PID — track + heartbeat + wait + cleanup
 _wait_with_heartbeat() {
   local wpid="$1" hb_pid ec=0
   track_worker_pid "$wpid"
@@ -2240,7 +2166,6 @@ run_antigravity_exec() {
   local _print_flag=""
   local _tok
   read -r -a _cli_tokens <<< "$CLI_ARGS"
-  # ── --print 는 값(프롬프트)을 받는 마지막 인자 ──
   # agy 의 --print 는 값을 받는 플래그라(Go flag) 바로 뒤 토큰을 프롬프트로 삼킨다.
   # agy 1.1.27 실측(2026-09-07): 값 없는 `--print` 는 "flag needs an argument",
   # 빈 값 + stdin 은 "empty prompt" 로 거부된다. 즉 stdin 프롬프트 전달은 더 이상 없다.
@@ -2325,7 +2250,7 @@ _mcp_preflight_filter_dead() {
   # #153: parseMcpServersFromToml 은 section 이름에 dot 을 허용 (`[a-zA-Z0-9_.-]+`).
   # `[mcp_servers.foo.bar]` 같은 dotted 서버가 `mcp_servers.foo.bar.enabled=true`
   # 플래그로 전달될 때 과거 `[^.]+` 정규식은 `foo` 만 captur 해 suffix 매치 실패
-  # → dotted 서버가 preflight candidate 에서 통째로 누락됐다. `\.enabled=true$`
+  # dotted 서버가 preflight candidate 에서 누락되지 않도록 `\.enabled=true$`
   # 로 끝 anchor 가 고정돼 있어 `(.+)` greedy 가 반복 보장한다.
   local names=""
   local i=0
@@ -2345,7 +2270,6 @@ _mcp_preflight_filter_dead() {
   done
   [[ -z "$names" ]] && return 0
 
-  # Probe — TTL cache 로 재호출 부하 억제
   local probe_output
   if ! probe_output=$("$NODE_BIN" "$health_script" probe \
       --names "$names" --format shell < /dev/null 2>/dev/null); then
@@ -2361,7 +2285,6 @@ _mcp_preflight_filter_dead() {
   done <<< "$probe_output"
   [[ -z "$dead_list" ]] && return 0
 
-  # dead 서버의 enabled override를 false로 바꾸고 나머지 설정은 보존한다.
   local -a dead_names=()
   IFS=',' read -ra dead_names <<< "$dead_list"
   local -a new_flags=()
@@ -2393,9 +2316,9 @@ _mcp_preflight_filter_dead() {
   local remaining_alive=0
   local rflag
   for rflag in ${CODEX_CONFIG_FLAGS[@]+"${CODEX_CONFIG_FLAGS[@]}"}; do
-    # #153 + #170 P1: candidate 추출 정규식 (line 1607) 과 일관 — dotted server 이름
+    # #153 + #170 P1: candidate 추출 정규식과 일관되게 dotted server 이름도 alive 로 센다.
     # (e.g. mcp_servers.foo.bar.enabled=true) 도 alive 로 카운트한다. `[^.]+` 는 첫 dot
-    # 에서 끊겨 dotted alive 만 남은 경우 false all-dead 판정 → 불필요 degraded.
+    # 에서 끊겨 dotted alive 만 남은 경우 all-dead 로 오판하지 않게 한다.
     if [[ "$rflag" =~ ^mcp_servers\..+\.enabled=true$ ]]; then
       remaining_alive=$((remaining_alive + 1))
     fi
@@ -2413,7 +2336,6 @@ _mcp_preflight_filter_dead() {
   fi
 }
 
-# codex-recovery.sh 의 recover_codex_stdout 헬퍼 사용. STDOUT_LOG/STDERR_LOG env.
 _TFX_ROUTE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$_TFX_ROUTE_DIR/lib/codex-recovery.sh" ]]; then
   # shellcheck source=lib/codex-recovery.sh
@@ -2559,7 +2481,7 @@ run_codex_exec() {
 
   # Tier-fallback: ChatGPT account가 높은 reasoning profile을 거부하면
   # GPT-6 Luna low로만 1회 재시도한다. 구형 gpt-5.4 계열로는 더 이상 다운그레이드하지 않는다.
-  # 출처: Issue #211 — codex CLI tier-aware fallback.
+  # 출처: Issue #211 (codex CLI tier-aware fallback).
   if [[ "$exit_code_local" -ne 0 ]] && grep -qE "is not supported when using Codex with a ChatGPT account" "$STDERR_LOG" 2>/dev/null; then
     local fallback_profile=""
     case "$CLI_EFFORT" in
@@ -2688,7 +2610,6 @@ apply_jev_pre_route() {
   echo "[tfx-route] worker-model: $WORKER_MODEL_JSON" >&2
 }
 
-# ── 메인 실행 ──
 main() {
   local recommendation_task="$PROMPT"
   if [[ -n "$MCP_TASK_FILE" ]]; then
@@ -2700,7 +2621,6 @@ main() {
       echo '[tfx-route] MCP recommendation: unavailable applied=false diagnostic=mcp_task_file_unreadable' >&2
     fi
   fi
-  # 종료 시 per-process 에이전트 파일 + 워커 프로세스 정리
   trap 'cleanup_workers' EXIT
   trap 'exit 143' TERM HUP
   trap 'exit 130' INT
@@ -2719,14 +2639,12 @@ main() {
   fi
   apply_codex_concrete_effort_guard
 
-  # CLI 경로 해석
   case "$CLI_CMD" in
     codex) CLI_CMD="$CODEX_BIN" ;;
     agy) CLI_CMD="$AGY_BIN" ;;
     claude) CLI_CMD="$CLAUDE_BIN" ;;
   esac
 
-  # 타임아웃 결정
   if [[ -n "$USER_TIMEOUT" ]]; then
     if ! [[ "$USER_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
       echo "[tfx-route] 경고: 유효하지 않은 타임아웃 값 ($USER_TIMEOUT), 기본값 사용" >&2
@@ -2767,7 +2685,6 @@ main() {
   TFX_EXPECTED_DURATION_SEC="${TFX_EXPECTED_DURATION_SEC:-$_est_dur}"
   export TFX_EXPECTED_DURATION_SEC
 
-  # 컨텍스트 파일 → 프롬프트에 주입
   if [[ -n "$CONTEXT_FILE" && -f "$CONTEXT_FILE" ]]; then
     local ctx_content utf8_slice_script
     utf8_slice_script="$(_resolve_script "" \
@@ -2787,7 +2704,6 @@ ${ctx_content}
 
   resolve_mcp_policy
 
-  # Claude native는 팀 비-TTY 환경에서 subprocess wrapper를 우선 시도
   if [[ "$CLI_TYPE" == "claude-native" && -n "$TFX_TEAM_NAME" ]]; then
     if { [[ ! -t 0 ]] || [[ ! -t 1 ]]; } && command -v "$CLAUDE_BIN" &>/dev/null && resolve_worker_runner_script >/dev/null 2>&1; then
       CLI_TYPE="claude"
@@ -2798,7 +2714,6 @@ ${ctx_content}
     fi
   fi
 
-  # 원 profile 입력과 최종 provider로 기존 추천을 한 번 얻고 실행별 설정을 준비한다.
   local recommendation_cli="$CLI_TYPE" recommendation_context="" _mcp_row _mcp_flags _mcp_clear_hint
   MCP_PLAN_FILE="$(mktemp "${TFX_TMP}/worker-mcp-plan.XXXXXX")"
   if jev_enabled; then
@@ -2828,7 +2743,6 @@ ${ctx_content}
     ' "$MCP_PLAN_FILE" "$CLI_TYPE" "${TFX_JEV:-1}"
   fi
 
-  # Claude 네이티브 에이전트는 이 스크립트로 처리 불가
   if [[ "$CLI_TYPE" == "claude-native" ]]; then
     record_worker_mcp_launch
     if [[ -n "$TFX_TEAM_NAME" ]]; then
@@ -2840,7 +2754,6 @@ ${ctx_content}
         echo "ERROR: Claude native handoff model 해석 실패: $AGENT_TYPE" >&2
         exit 1
       fi
-      # 팀 모드: Hub에 fallback 필요 시그널 전송 후 구조화된 출력
       echo "[tfx-route] claude-native 역할($AGENT_TYPE)은 tfx-route.sh로 실행 불가 — Claude Agent fallback 필요" >&2
       team_complete_task "fallback" "claude-native 역할 실행 불가: ${AGENT_TYPE}. Claude Task(sonnet) 에이전트로 위임하세요."
       cat <<FALLBACK_EOF
@@ -2861,7 +2774,6 @@ FALLBACK_EOF
     FULL_PROMPT="${PROMPT}"$'\n\n'"[도구 안내] ${MCP_HINT}"
   fi
 
-  # 메타정보 (stderr)
   echo "[tfx-route] v${VERSION} type=$CLI_TYPE agent=$AGENT_TYPE effort=$CLI_EFFORT family=$CLI_FAMILY expected=${TIMEOUT_SEC}s stall=${STALL_THRESHOLD_SEC}s ceiling=${HARD_CEILING_SEC}s" >&2
   if [[ -n "$REVIEW_AUTHOR" ]]; then
     echo "[tfx-route] reviewer=$CLI_TYPE review_author=$REVIEW_AUTHOR usage_switch=$REVIEW_USAGE_SWITCH cli_mode=$TFX_CLI_MODE" >&2
@@ -2878,10 +2790,8 @@ FALLBACK_EOF
   [[ -n "$TFX_TEAM_NAME" ]] && echo "[tfx-route] team=$TFX_TEAM_NAME task=$TFX_TEAM_TASK_ID agent=$TFX_TEAM_AGENT_NAME" >&2
   [[ -n "${TFX_REROUTED_FROM:-}" ]] && echo "[tfx-route] rerouted_from=$TFX_REROUTED_FROM" >&2
 
-  # Per-process 에이전트 등록
   register_agent
 
-  # CLI 실행 (stderr 분리 + 타임아웃 + 소요시간 측정)
   local exit_code=0
   local start_time
   start_time=$(date +%s)
@@ -2897,8 +2807,8 @@ FALLBACK_EOF
   local result_reason=""
 
   # tee 활성화 조건: 팀 모드 + 실제 터미널(TTY/tmux)
-  # Agent 래퍼 안에서는 가상 stdout 캡처로 tee 출력이 사용자에게 안 보임 → 파일 전용
-  # 실시간 모니터링은 Shift+Down으로 워커 pane 전환 권장
+  # Agent 래퍼 안에서는 가상 stdout 캡처로 tee 출력이 보이지 않으므로 파일에만 쓴다.
+  # 실시간 모니터링은 Shift+Down 으로 워커 pane 전환을 권장한다.
   local use_tee=false
   if [[ -n "$TFX_TEAM_NAME" ]]; then
     if [[ -t 1 ]] || [[ -n "${TMUX:-}" ]]; then
@@ -2916,7 +2826,6 @@ FALLBACK_EOF
     if [[ "$_preflight_rc" -eq 78 ]]; then
       exit 78
     fi
-    # 사용할 수 없는 MCP를 프롬프트가 안내하지 않게 한다.
     if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" ]]; then
       FULL_PROMPT="$PROMPT"
     fi
@@ -2936,7 +2845,7 @@ FALLBACK_EOF
     if [[ "${_TFX_MCP_DEGRADED:-0}" == "1" ]]; then
       FULL_PROMPT="$PROMPT"
     fi
-    # Opt-in 스킬 주입 (TFX_INJECT_SKILL) — codex 레인과 동일.
+    # Opt-in 스킬 주입 (TFX_INJECT_SKILL), codex 레인과 동일.
     if [[ -n "${TFX_INJECT_SKILL:-}" ]]; then
       local _agy_skill_sentinel="__TFX_AGY_SKILL_END_${$}_${RANDOM}__"
       local _agy_skill_prompt
@@ -3037,7 +2946,7 @@ FALLBACK_EOF
       fi
     fi
 
-    # 진짜 산출물 부재 판정 — 빈 stdout 이거나, recover_codex_stdout 이 stderr
+    # 진짜 산출물 부재 판정: 빈 stdout 이거나, recover_codex_stdout 이 stderr
     # 노이즈로 backfill 한 경우(복구 플래그)면 진짜 워커 출력이 아니다. 복구가
     # `! -s STDOUT_LOG` 를 무력화해 빈손 실행을 success 로 오보고하던 갭을 막는다.
     local no_genuine_output="no"
@@ -3092,14 +3001,12 @@ FALLBACK_EOF
     fi
   fi
 
-  # 쿼타 감지 + 다단계 자동 re-route
   if [[ "$quota_exceeded" == "1" ]]; then
     if [[ "${TFX_QUOTA_REROUTE:-1}" -ne 0 ]]; then
       auto_reroute "$CLI_TYPE" || exit $?
     fi
   fi
 
-  # 팀 모드: task complete + 리드 보고
   if [[ -n "$TFX_TEAM_NAME" ]]; then
     if [[ "$exit_code" -eq 0 ]]; then
       local output_preview
@@ -3120,8 +3027,6 @@ FALLBACK_EOF
     fi
   fi
 
-  # ── 후처리: 단일 node 프로세스로 위임 ──
-  # 토큰 추출, 출력 필터링, 로그, 토큰 누적, AIMD, 이슈 추적, 결과 출력 전부 처리
   # 후처리기는 이 라우터와 같은 디렉터리의 것을 먼저 쓴다. 설치본 경로를 고정하면 라우터와 후처리기의
   # 버전이 어긋나 새 인자(--last-message-log 등)를 옛 후처리기가 무시한다. 설치본은 폴백이다.
   local _route_dir post_script
@@ -3156,7 +3061,6 @@ FALLBACK_EOF
   return "$exit_code"
 }
 
-# ── Async 모드: 백그라운드 실행 + 즉시 job_id 반환 ──
 if [[ "$TFX_ASYNC_MODE" -eq 1 ]]; then
   mkdir -p "$TFX_JOBS_DIR"
   JOB_ID="$TIMESTAMP-$$-${RANDOM}"
@@ -3165,7 +3069,7 @@ if [[ "$TFX_ASYNC_MODE" -eq 1 ]]; then
   echo "$AGENT_TYPE" > "$JOB_DIR/agent_type"
   date +%s > "$JOB_DIR/start_time"
 
-  # 백그라운드 서브쉘: main 실행 → 반환 코드로 마커 기록
+  # 백그라운드 서브셸에서 main 을 실행하고 반환 코드로 마커를 기록한다.
   # H1' 수정 (Track 3 v2): POSIX 2017 wait spec 은 subshell 환경에서
   # wait 가 즉시 리턴하도록 강제하므로 기존 데몬 블록 (wait $bg_pid; touch done)
   # 은 main 시작 전에 done 마커를 찍는 dead code 였다. main() 이 자체 EXIT
@@ -3176,7 +3080,6 @@ if [[ "$TFX_ASYNC_MODE" -eq 1 ]]; then
   echo "$bg_pid" > "$JOB_DIR/pid"
   disown "$bg_pid"          # explicit PID — H1' fix (was missing arg, disowning daemon only)
 
-  # 즉시 리턴: 1초 이내에 Claude Code Bash 도구 완료
   echo "$JOB_ID"
   exit 0
 fi
