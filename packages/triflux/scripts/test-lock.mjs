@@ -422,7 +422,7 @@ export function main(argv = process.argv.slice(2)) {
       ...(testHome ? testHomeEnv(testHome) : {}),
       TEST_LOCK_PID: String(process.pid),
       TFX_HUB_PID_DIR: process.env.TFX_HUB_PID_DIR || testHubPidDir,
-      // 머신 전역 disable 정책(셸 env 또는 machine-profile.env)을 자식 테스트가 상속하지 않게 "0" 을 명시한다.
+      // env에 키가 있어야 machine-profile.env 폴백을 막고 부모의 1도 덮으므로 || 대신 "0"을 고정한다.
       TFX_DISABLE_CODEX: "0",
       TFX_DISABLE_ANTIGRAVITY: "0",
     },

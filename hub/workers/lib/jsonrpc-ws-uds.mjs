@@ -17,7 +17,7 @@ const DEFAULT_MAX_FRAME_SIZE = 16 * 1024 * 1024;
 const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 // graceful close("closing") 이후 피어가 close/EOF를 안 보내도 소켓이 영구 대기하지 않게 강제 종료 기한을 둔다.
 const CLOSING_DEADLINE_MS = 2_000;
-const MAX_CONTROL_PAYLOAD = 125;
+const MAX_CONTROL_PAYLOAD = 125; // RFC 6455 제어 프레임 페이로드 상한(125B)
 const CLOSED_MESSAGE = "JsonRpcWsUdsClient closed";
 
 const OP_CONTINUATION = 0x0;
