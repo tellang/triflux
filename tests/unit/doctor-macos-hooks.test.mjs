@@ -13,8 +13,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
-  AGY_PEER_WAKE_ORIG_CALL,
-  AGY_PEER_WAKE_ORIG_STP,
+  AGY_PEER_WAKE_VARIANTS,
   AGY_TIME_AFTER_SIG,
   applyAgyPeerWakePatch,
   inspectAgyPeerWakePatch,
@@ -25,11 +24,12 @@ function makeSyntheticAgyBinary({
   size = 0x1000,
   timeAfterOffset = 0x100,
   callOffset = 0x400,
+  variant = "1.5.7",
 } = {}) {
   const buf = Buffer.alloc(size, 0);
   AGY_TIME_AFTER_SIG.copy(buf, timeAfterOffset);
-  AGY_PEER_WAKE_ORIG_CALL.copy(buf, callOffset);
-  AGY_PEER_WAKE_ORIG_STP.copy(buf, callOffset + 0x38);
+  const { orig } = AGY_PEER_WAKE_VARIANTS.find((v) => v.name === variant);
+  for (const [at, bytes] of orig) bytes.copy(buf, callOffset + at);
   return buf;
 }
 
@@ -68,6 +68,7 @@ describe("doctor environment checks", () => {
       });
       assert.equal(before.ok, false);
       assert.equal(before.status, "unpatched");
+      assert.equal(before.variant, "1.5.7");
       assert.equal(before.patchable, true);
 
       const codesignCalls = [];
@@ -100,6 +101,34 @@ describe("doctor environment checks", () => {
       assert.equal(meta.sha256, after.sha256);
       assert.ok(meta.patches.includes("peer-wake"));
       assert.equal(meta.backups["1.4.10-orig"].sha256, before.sha256);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("patches the agy 1.5.12 select site that replaced NotifyCh (#1022)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tfx-agy-patch-1512-"));
+    try {
+      const agyPath = join(dir, "agy");
+      writeFileSync(agyPath, makeSyntheticAgyBinary({ variant: "1.5.12" }), {
+        mode: 0o755,
+      });
+      const opts = { agyPath, platform: "darwin", arch: "arm64" };
+
+      const before = inspectAgyPeerWakePatch(opts);
+      assert.equal(before.status, "unpatched");
+      assert.equal(before.variant, "1.5.12");
+
+      const applied = applyAgyPeerWakePatch({
+        ...opts,
+        version: "1.5.12",
+        execFileSyncFn: () => "",
+      });
+      assert.equal(applied.status, "patched");
+
+      const after = inspectAgyPeerWakePatch(opts);
+      assert.equal(after.status, "patched");
+      assert.equal(after.variant, "1.5.12");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
