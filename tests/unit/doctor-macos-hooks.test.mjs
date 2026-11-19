@@ -13,8 +13,6 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import {
-  AGY_PEER_WAKE_ORIG_CALL,
-  AGY_PEER_WAKE_ORIG_STP,
   AGY_PEER_WAKE_VARIANTS,
   AGY_TIME_AFTER_SIG,
   applyAgyPeerWakePatch,
@@ -30,11 +28,6 @@ function makeSyntheticAgyBinary({
 } = {}) {
   const buf = Buffer.alloc(size, 0);
   AGY_TIME_AFTER_SIG.copy(buf, timeAfterOffset);
-  if (variant === "1.5.7") {
-    AGY_PEER_WAKE_ORIG_CALL.copy(buf, callOffset);
-    AGY_PEER_WAKE_ORIG_STP.copy(buf, callOffset + 0x38);
-    return buf;
-  }
   const { orig } = AGY_PEER_WAKE_VARIANTS.find((v) => v.name === variant);
   for (const [at, bytes] of orig) bytes.copy(buf, callOffset + at);
   return buf;
@@ -75,6 +68,7 @@ describe("doctor environment checks", () => {
       });
       assert.equal(before.ok, false);
       assert.equal(before.status, "unpatched");
+      assert.equal(before.variant, "1.5.7");
       assert.equal(before.patchable, true);
 
       const codesignCalls = [];
@@ -135,12 +129,6 @@ describe("doctor environment checks", () => {
       const after = inspectAgyPeerWakePatch(opts);
       assert.equal(after.status, "patched");
       assert.equal(after.variant, "1.5.12");
-      // 0x400 + 0x0c 에서 0x100(time.After) 으로 가는 bl
-      const bl = readFileSync(agyPath).readUInt32LE(0x40c);
-      assert.equal(
-        bl,
-        (0x94000000 | (((0x100 - 0x40c) >> 2) & 0x03ffffff)) >>> 0,
-      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

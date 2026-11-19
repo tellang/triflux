@@ -57,6 +57,8 @@ export const AGY_PEER_WAKE_VARIANTS = [
   },
   {
     // 1.5.12 에서 NotifyCh 가 Subscribe 로 바뀌어 신호 채널을 루프 밖에서 한 번만 받는다.
+    // 버려진 구독 채널은 송신이 selectnbsend 라 막히지 않고, 감시 goroutine 종료는
+    // spawnBackgroundTask 의 ctx 취소(select case2)가 맡아 그대로 남는다.
     name: "1.5.12",
     blAt: 0x0c,
     orig: [
@@ -168,19 +170,12 @@ export function inspectAgyPeerWakePatch({
     };
   }
 
-  const hasTimeAfterCall = (variant, base) => {
-    const expectedBl = encodeArm64Bl(base + variant.blAt, timeAfterOffset);
-    return (
-      expectedBl &&
-      buf
-        .subarray(base + variant.blAt, base + variant.blAt + 4)
-        .equals(expectedBl)
-    );
-  };
-
   for (const variant of AGY_PEER_WAKE_VARIANTS) {
     const base = locatePeerWakeSite(buf, variant.patched);
-    if (base < 0 || !hasTimeAfterCall(variant, base)) continue;
+    if (base < 0) continue;
+    const expectedBl = encodeArm64Bl(base + variant.blAt, timeAfterOffset);
+    const actualBl = buf.subarray(base + variant.blAt, base + variant.blAt + 4);
+    if (!expectedBl || !actualBl.equals(expectedBl)) continue;
     let metadataOk = false;
     if (fs.existsSync(patchJsonPath)) {
       try {
