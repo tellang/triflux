@@ -15,6 +15,7 @@ import { describe, it } from "node:test";
 import {
   AGY_PEER_WAKE_ORIG_CALL,
   AGY_PEER_WAKE_ORIG_STP,
+  AGY_PEER_WAKE_VARIANTS,
   AGY_TIME_AFTER_SIG,
   applyAgyPeerWakePatch,
   inspectAgyPeerWakePatch,
@@ -25,11 +26,17 @@ function makeSyntheticAgyBinary({
   size = 0x1000,
   timeAfterOffset = 0x100,
   callOffset = 0x400,
+  variant = "1.5.7",
 } = {}) {
   const buf = Buffer.alloc(size, 0);
   AGY_TIME_AFTER_SIG.copy(buf, timeAfterOffset);
-  AGY_PEER_WAKE_ORIG_CALL.copy(buf, callOffset);
-  AGY_PEER_WAKE_ORIG_STP.copy(buf, callOffset + 0x38);
+  if (variant === "1.5.7") {
+    AGY_PEER_WAKE_ORIG_CALL.copy(buf, callOffset);
+    AGY_PEER_WAKE_ORIG_STP.copy(buf, callOffset + 0x38);
+    return buf;
+  }
+  const { orig } = AGY_PEER_WAKE_VARIANTS.find((v) => v.name === variant);
+  for (const [at, bytes] of orig) bytes.copy(buf, callOffset + at);
   return buf;
 }
 
@@ -100,6 +107,40 @@ describe("doctor environment checks", () => {
       assert.equal(meta.sha256, after.sha256);
       assert.ok(meta.patches.includes("peer-wake"));
       assert.equal(meta.backups["1.4.10-orig"].sha256, before.sha256);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("patches the agy 1.5.12 select site that replaced NotifyCh (#1022)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "tfx-agy-patch-1512-"));
+    try {
+      const agyPath = join(dir, "agy");
+      writeFileSync(agyPath, makeSyntheticAgyBinary({ variant: "1.5.12" }), {
+        mode: 0o755,
+      });
+      const opts = { agyPath, platform: "darwin", arch: "arm64" };
+
+      const before = inspectAgyPeerWakePatch(opts);
+      assert.equal(before.status, "unpatched");
+      assert.equal(before.variant, "1.5.12");
+
+      const applied = applyAgyPeerWakePatch({
+        ...opts,
+        version: "1.5.12",
+        execFileSyncFn: () => "",
+      });
+      assert.equal(applied.status, "patched");
+
+      const after = inspectAgyPeerWakePatch(opts);
+      assert.equal(after.status, "patched");
+      assert.equal(after.variant, "1.5.12");
+      // 0x400 + 0x0c 에서 0x100(time.After) 으로 가는 bl
+      const bl = readFileSync(agyPath).readUInt32LE(0x40c);
+      assert.equal(
+        bl,
+        (0x94000000 | (((0x100 - 0x40c) >> 2) & 0x03ffffff)) >>> 0,
+      );
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
