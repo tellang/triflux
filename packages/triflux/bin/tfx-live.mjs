@@ -6767,6 +6767,211 @@ async function doCompact(flags, deps = {}) {
   return result;
 }
 
+// Codex rollout JSONL의 마지막 turn_context에서 직전 스레드의 모델·effort·권한·cwd를 읽는다.
+async function readCodexRolloutSettings(threadId, deps = {}) {
+  if (!isCodexThreadId(threadId)) return null;
+  const rollout = await (deps.findCodexRollout ?? findCodexRollout)(threadId);
+  if (!rollout) return null;
+  let text;
+  try {
+    text = await readFile(rollout, "utf8");
+  } catch {
+    return null;
+  }
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i].trim();
+    if (!line?.includes('"turn_context"')) continue;
+    try {
+      const obj = JSON.parse(line);
+      if (obj?.type !== "turn_context" || !obj.payload) continue;
+      const p = obj.payload;
+      const sandboxType =
+        typeof p.sandbox_policy === "object"
+          ? p.sandbox_policy?.type
+          : p.sandbox_policy;
+      const sandbox =
+        sandboxType === "workspace-write" ||
+        sandboxType === "read-only" ||
+        sandboxType === "workspaceWrite" ||
+        sandboxType === "readOnly";
+      return {
+        model: typeof p.model === "string" && p.model ? p.model : undefined,
+        effort: typeof p.effort === "string" && p.effort ? p.effort : undefined,
+        approvalPolicy: p.approval_policy ?? null,
+        sandboxType: sandboxType ?? null,
+        sandbox,
+        cwd: typeof p.cwd === "string" && p.cwd ? p.cwd : undefined,
+      };
+    } catch {
+      // 손상된 줄은 건너뛰고 이전 turn_context를 찾는다.
+    }
+  }
+  return null;
+}
+
+// 공유 데몬 스레드에 붙은 Codex 세션은 /new 대신 이전 스레드의 모델·effort·권한을
+// 그대로 이어받은 새 스레드를 RPC로 만들고 tmux pane을 교체한다.
+async function clearCodexViaPreparedThread(
+  adapter,
+  opts,
+  flags,
+  sendOpts,
+  followUp,
+  leadMarker,
+  markerEnv,
+  deps = {},
+) {
+  const tmux = deps.runTmux ?? runTmux;
+  const target = exactTmuxTarget(opts.session);
+  let stored = "";
+  let paneCwd = "";
+  try {
+    const { stdout } = await tmux(null, [
+      "display-message",
+      "-p",
+      "-t",
+      target,
+      "#{@tfx_codex_thread}\t#{pane_current_path}",
+    ]);
+    [stored = "", paneCwd = ""] = String(stdout).trimEnd().split("\t");
+  } catch {
+    return null;
+  }
+  if (!isCodexThreadId(stored)) return null;
+  let socket;
+  try {
+    socket = (deps.resolveCodexSocket ?? resolveCodexSocket)(
+      markerEnv.HOME || homedir(),
+      markerEnv,
+    );
+  } catch {
+    return null;
+  }
+  const prev = await (
+    deps.readCodexRolloutSettings ?? readCodexRolloutSettings
+  )(stored, deps);
+  const cwd = prev?.cwd || paneCwd || process.cwd();
+  const sandbox = prev ? prev.sandbox : false;
+  const prepared = await (deps.prepareCodexThread ?? prepareCodexThread)(
+    socket,
+    {
+      cwd,
+      model: prev?.model,
+      effort: prev?.effort,
+      sandbox,
+      sessionRole: leadMarker?.sessionRole,
+      name: leadMarker?.role
+        ? `${new Date().getMonth() + 1}.${new Date().getDate()} ${leadMarker.role}`
+        : undefined,
+      session: opts.session,
+      env: markerEnv,
+    },
+    deps,
+  );
+  const newThreadId = prepared.threadId;
+  const launchCmd =
+    adapter
+      .resumeById(newThreadId)
+      .replace(
+        /(?:^|\s)--dangerously-bypass-approvals-and-sandbox(?=\s|$)/g,
+        "",
+      ) +
+    ` ${shellQuote(["--remote", `unix://${socket}`, "-C", pathResolve(cwd)])}`;
+  let permCheck = {
+    approvalPolicy: null,
+    sandbox: null,
+    permissionsVerified: false,
+  };
+  try {
+    await tmux(null, ["respawn-pane", "-k", "-t", target]);
+    await tmux(null, [
+      "set-option",
+      "-t",
+      target,
+      "@tfx_codex_thread",
+      newThreadId,
+    ]);
+    await tmux(null, ["send-keys", "-t", target, launchCmd, "Enter"]);
+    await (deps.dismissStartupScreens ?? dismissStartupScreens)(
+      adapter,
+      null,
+      opts.session,
+    );
+    const readyTimeoutMs = Math.max(opts.busyTimeoutMs || 30000, 15000);
+    const readiness = await (deps.waitForReady ?? waitForReady)(
+      { ...adapter, launchKeys: [launchCmd, "Enter"] },
+      null,
+      opts.session,
+      readyTimeoutMs,
+      opts.pollIntervalMs || 500,
+    );
+    if (!readiness.ready) {
+      throw new Error(
+        readiness.warning ||
+          `Codex TUI did not become ready for thread ${newThreadId}`,
+      );
+    }
+    if (typeof prepared.readPermissions === "function") {
+      permCheck = await prepared.readPermissions();
+    }
+  } finally {
+    prepared.close?.();
+  }
+  const result = {
+    cli: "codex",
+    session: opts.session,
+    threadId: newThreadId,
+    previousThreadId: stored,
+    clear: {
+      command: "thread/start+reattach",
+      inputSent: true,
+      preserved: {
+        model: prev?.model ?? null,
+        effort: prev?.effort ?? null,
+        approvalPolicy: permCheck.approvalPolicy,
+        sandbox: permCheck.sandbox,
+        permissionsVerified: permCheck.permissionsVerified,
+      },
+    },
+  };
+  if (!followUp) return result;
+  const requestId = randomBytes(6).toString("hex");
+  const thenPrompt = flags.then?.trim();
+  try {
+    await waitForTmuxIdle(adapter, opts, deps);
+    await doAskViaTmux(
+      adapter,
+      {
+        ...sendOpts,
+        prompt: `[tfx-live req=${requestId}]\n${followUp}`,
+        requestId,
+      },
+      deps,
+    );
+    result.followUp = { requestId, inputSent: true };
+  } catch (error) {
+    if (leadMarker && flags.handoff) {
+      updateLeadMarker(
+        { session: opts.session },
+        {
+          pendingHandoff: {
+            path: pathResolve(flags.handoff),
+            // biome-ignore lint/suspicious/noThenProperty: pendingHandoff 스키마의 then은 후속 지시 문자열이다.
+            then: thenPrompt || null,
+            at: new Date().toISOString(),
+          },
+        },
+        { env: markerEnv },
+      );
+    }
+    result.followUp = { requestId, inputSent: false, error: error.message };
+    result.ok = false;
+    result.error = `thread/start+reattach succeeded but the follow-up failed: ${error.message}`;
+  }
+  return result;
+}
+
 // 슬래시 명령은 queue 로 보내면 실행되지 않으므로 compact 와 같은 tmux 입력을 쓴다.
 // 비운 뒤 인계 파일 읽기 지시와 --then 을 한 메시지로 이어 보낸다.
 async function doClear(flags, deps = {}) {
@@ -6834,9 +7039,11 @@ async function doClear(flags, deps = {}) {
   const idBefore = followUp && cli === "agy" ? await readAgyId() : null;
   const screenBefore = followUp ? await capture(opts.remote, opts.session) : "";
   const markerEnv = deps.env || opts.env || process.env;
-  const hasLeadMarker = Boolean(
-    readLeadMarker({ session: opts.session }, { env: markerEnv }),
+  const leadMarker = readLeadMarker(
+    { session: opts.session },
+    { env: markerEnv },
   );
+  const hasLeadMarker = Boolean(leadMarker);
   if (hasLeadMarker) {
     updateLeadMarker(
       { session: opts.session },
@@ -6848,6 +7055,19 @@ async function doClear(flags, deps = {}) {
       },
       { env: markerEnv },
     );
+  }
+  if (cli === "codex") {
+    const reattached = await clearCodexViaPreparedThread(
+      adapter,
+      opts,
+      flags,
+      sendOpts,
+      followUp,
+      leadMarker,
+      markerEnv,
+      deps,
+    );
+    if (reattached) return reattached;
   }
   await doAskViaTmux(adapter, sendOpts, deps);
   const result = {
