@@ -206,3 +206,182 @@ test("stripCodexHooksDisableFlag는 리드와 소통 세션용 Codex 실행 명�
     "codex resume 0199a000-0000-7000-8000-000000000001 --dangerously-bypass-approvals-and-sandbox",
   );
 });
+
+test("doClear는 데몬 Codex 스레드에서 /new 대신 직전 모델·effort·Full Access를 이어받은 새 스레드로 교체한다", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tfx-clear-codex-daemon-"));
+  try {
+    const oldId = "019a0000-0000-7000-8000-000000000011";
+    const newId = "019a0000-0000-7000-8000-000000000022";
+    const handoff = join(dir, "handoff.md");
+    const rollout = join(dir, `rollout-${oldId}.jsonl`);
+    await writeFile(handoff, "인계 내용");
+    await writeFile(
+      rollout,
+      `${JSON.stringify({
+        type: "turn_context",
+        payload: {
+          model: "gpt-6.2-astra",
+          effort: "xhigh",
+          approval_policy: "never",
+          sandbox_policy: { type: "danger-full-access" },
+          cwd: "/tmp/proj",
+        },
+      })}\n`,
+    );
+    const tmuxCalls = [];
+    let buffer = "";
+    const sent = [];
+    const prepareCalls = [];
+    const deps = {
+      paneCliProcess: async () => ({ running: true }),
+      sleep: async () => {},
+      capturePane: async () => "",
+      captureVisible: async () => "›",
+      findCodexRollout: async (id) => (id === oldId ? rollout : null),
+      resolveCodexSocket: () => "/tmp/codex.sock",
+      prepareCodexThread: async (_socket, opts) => {
+        prepareCalls.push(opts);
+        return {
+          threadId: newId,
+          readPermissions: async () => ({
+            approvalPolicy: "never",
+            sandbox: { type: "dangerFullAccess" },
+            permissionsVerified: true,
+          }),
+          close: () => {},
+        };
+      },
+      dismissStartupScreens: async () => {},
+      waitForReady: async () => ({ ready: true, raw: "›" }),
+      runTmux: async (_remote, args) => {
+        tmuxCalls.push(args);
+        if (args[0] === "display-message") {
+          return { stdout: `${oldId}\t/tmp/proj\n` };
+        }
+        if (args[0] === "set-buffer") buffer = args.at(-1);
+        if (args[0] === "send-keys" && args.at(-1) === "Enter" && buffer) {
+          sent.push(buffer);
+          buffer = "";
+        }
+        return { stdout: "" };
+      },
+    };
+    const result = await doClear(
+      {
+        cli: "codex",
+        session: "fake",
+        handoff,
+        then: "이어서 작업",
+        "if-busy": "wait",
+        timeout: "1",
+        settle: "1",
+        "poll-interval": "1",
+      },
+      deps,
+    );
+    assert.equal(prepareCalls.length, 1);
+    assert.equal(prepareCalls[0].model, "gpt-6.2-astra");
+    assert.equal(prepareCalls[0].effort, "xhigh");
+    assert.equal(prepareCalls[0].sandbox, false);
+    assert.equal(prepareCalls[0].cwd, "/tmp/proj");
+    assert.equal(result.threadId, newId);
+    assert.equal(result.previousThreadId, oldId);
+    assert.equal(result.clear.command, "thread/start+reattach");
+    assert.equal(result.clear.preserved.model, "gpt-6.2-astra");
+    assert.equal(result.clear.preserved.effort, "xhigh");
+    assert.equal(result.clear.preserved.permissionsVerified, true);
+    assert.ok(
+      tmuxCalls.some((a) => a[0] === "respawn-pane" && a.includes("-k")),
+    );
+    assert.ok(
+      tmuxCalls.some(
+        (a) =>
+          a[0] === "set-option" &&
+          a.includes("@tfx_codex_thread") &&
+          a.includes(newId),
+      ),
+    );
+    assert.ok(
+      tmuxCalls.some(
+        (a) =>
+          a[0] === "send-keys" &&
+          a.some(
+            (v) =>
+              typeof v === "string" &&
+              v.includes(`codex resume ${newId}`) &&
+              v.includes("--remote unix:///tmp/codex.sock"),
+          ),
+      ),
+    );
+    assert.equal(sent.length, 1);
+    assert.match(sent[0], /인계 파일 .+ 를 읽고 이어간다\.\n이어서 작업$/);
+    assert.equal(result.followUp.inputSent, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("doClear는 직전 데몬 Codex 스레드가 workspace-write면 새 스레드도 sandbox를 유지한다", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tfx-clear-codex-sb-"));
+  try {
+    const oldId = "019a0000-0000-7000-8000-000000000033";
+    const newId = "019a0000-0000-7000-8000-000000000044";
+    const rollout = join(dir, `rollout-${oldId}.jsonl`);
+    await writeFile(
+      rollout,
+      `${JSON.stringify({
+        type: "turn_context",
+        payload: {
+          model: "gpt-6.2-sol",
+          effort: "medium",
+          approval_policy: "on-request",
+          sandbox_policy: { type: "workspace-write" },
+          cwd: "/tmp/proj",
+        },
+      })}\n`,
+    );
+    const prepareCalls = [];
+    const result = await doClear(
+      {
+        cli: "codex",
+        session: "fake",
+        "if-busy": "wait",
+        timeout: "1",
+        settle: "1",
+        "poll-interval": "1",
+      },
+      {
+        paneCliProcess: async () => ({ running: true }),
+        sleep: async () => {},
+        capturePane: async () => "",
+        captureVisible: async () => "›",
+        findCodexRollout: async (id) => (id === oldId ? rollout : null),
+        resolveCodexSocket: () => "/tmp/codex.sock",
+        prepareCodexThread: async (_socket, opts) => {
+          prepareCalls.push(opts);
+          return {
+            threadId: newId,
+            readPermissions: async () => ({
+              approvalPolicy: "on-request",
+              sandbox: { type: "workspaceWrite" },
+              permissionsVerified: true,
+            }),
+            close: () => {},
+          };
+        },
+        dismissStartupScreens: async () => {},
+        waitForReady: async () => ({ ready: true, raw: "›" }),
+        runTmux: async (_remote, args) =>
+          args[0] === "display-message"
+            ? { stdout: `${oldId}\t/tmp/proj\n` }
+            : { stdout: "" },
+      },
+    );
+    assert.equal(prepareCalls[0].sandbox, true);
+    assert.equal(prepareCalls[0].model, "gpt-6.2-sol");
+    assert.equal(prepareCalls[0].effort, "medium");
+    assert.equal(result.threadId, newId);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
