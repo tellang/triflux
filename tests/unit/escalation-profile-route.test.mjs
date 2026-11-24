@@ -106,7 +106,7 @@ echo "fake codex ok"
 const fs = require("node:fs");
 const args = process.argv.slice(2);
 if (args[0] === "--help") console.log("--print --dangerously-skip-permissions");
-else if (args[0] === "models") console.log("gemini-4-argon-high\\tGemini 4 Argon (High)\\ngemini-4-argon-medium\\tGemini 4 Argon (Medium)\\ngemini-4-argon-low\\tGemini 4 Argon (Low)\\ngemini-4.2-flash-high\\tGemini 4.2 Flash (High)");
+else if (args[0] === "models") console.log("gemini-4-hydrogen-high\\tGemini 4 Hydrogen (High)\\ngemini-4-hydrogen-medium\\tGemini 4 Hydrogen (Medium)\\ngemini-4-argon-high\\tGemini 4 Argon (High)\\ngemini-4-argon-medium\\tGemini 4 Argon (Medium)\\ngemini-4-argon-low\\tGemini 4 Argon (Low)\\ngemini-4.2-flash-high\\tGemini 4.2 Flash (High)");
 else {
   fs.writeFileSync(process.env.TFX_CAPTURE_ARGS, JSON.stringify(args));
   console.log("fake agy ok");
@@ -338,12 +338,12 @@ process.exit(result.status ?? 1);
     assert.match(fixture.stderr, /effort.*해석.*실패/);
   });
 
-  it("agy 실행 전에 기본 Argon을 고르고 옛 Flash 별칭은 Argon Low로 보낸다", () => {
-    for (const [profile, effort] of [
-      ["", "high"],
-      ["argon", "medium"],
-      ["flash_high", "low"],
-      ["flash38_high", "low"],
+  it("agy 기본은 Hydrogen이고 Argon은 명시할 때만, 옛 Flash 별칭은 Argon Low로 보낸다", () => {
+    for (const [profile, model, effort] of [
+      ["", "gemini-4-hydrogen", "high"],
+      ["argon", "gemini-4-argon", "medium"],
+      ["flash_high", "gemini-4-argon", "low"],
+      ["flash38_high", "gemini-4-argon", "low"],
     ]) {
       const args = runRoute({
         agent: "designer",
@@ -353,9 +353,29 @@ process.exit(result.status ?? 1);
           GEMINI_PROFILE: "",
         },
       });
-      assert.equal(args[args.indexOf("--model") + 1], "gemini-4-argon");
+      assert.equal(args[args.indexOf("--model") + 1], model);
       assert.equal(args[args.indexOf("--effort") + 1], effort);
     }
+  });
+
+  it("agy 가족 이름과 TFX_GEMINI_EFFORT를 따로 받고, 목록에 없는 Neon은 Hydrogen에서 effort를 낮춘다", () => {
+    for (const [effortEnv, effort] of [
+      ["", "medium"],
+      ["xhigh", "high"],
+    ]) {
+      const args = runRoute({
+        agent: "designer",
+        env: {
+          TFX_ANTIGRAVITY_OK: "1",
+          TFX_GEMINI_PROFILE: "neon",
+          TFX_GEMINI_EFFORT: effortEnv,
+          GEMINI_PROFILE: "",
+        },
+      });
+      assert.equal(args[args.indexOf("--model") + 1], "gemini-4-hydrogen");
+      assert.equal(args[args.indexOf("--effort") + 1], effort);
+    }
+    assert.match(fixture.stderr, /agy 가족 폴백: neon에서 hydrogen/);
   });
 
   it("실행 직전에 옛 별칭을 정규화하고 최신 가족 모델의 프로필을 만든다", () => {
@@ -586,7 +606,36 @@ process.exit(result.status ?? 1);
       snapshot,
       env: { TFX_ANTIGRAVITY_OK: "1" },
     });
-    assert.equal(args[args.indexOf("--model") + 1], "gemini-4-argon");
+    assert.equal(args[args.indexOf("--model") + 1], "gemini-4-hydrogen");
     assert.equal(args[args.indexOf("--effort") + 1], "high");
+  });
+
+  it("결합 이름이 없는 Neon 승격 단계는 가족과 effort를 따로 넘긴다", () => {
+    const snapshot = path.join(makeTempDir(), "agy-neon-retry-snapshot.json");
+    writeFileSync(
+      snapshot,
+      JSON.stringify({
+        version: 1,
+        current: "EXECUTING",
+        iterations: 1,
+        maxIterations: 3,
+        stuckCounter: 0,
+        lastFailureReason: null,
+        cliIndex: 0,
+        cliChain: [{ cli: "antigravity", family: "neon", effort: "xhigh" }],
+        mode: "auto-escalate",
+        sessionId: null,
+        history: [],
+      }),
+      "utf8",
+    );
+    const args = runRoute({
+      snapshot,
+      env: { TFX_ANTIGRAVITY_OK: "1" },
+    });
+    // 목록에 Neon이 없어 Hydrogen으로 폴백하고, xhigh는 Hydrogen이 지원하는 high로 낮춘다.
+    assert.equal(args[args.indexOf("--model") + 1], "gemini-4-hydrogen");
+    assert.equal(args[args.indexOf("--effort") + 1], "high");
+    assert.match(fixture.stderr, /agy 가족 폴백: neon에서 hydrogen/);
   });
 });

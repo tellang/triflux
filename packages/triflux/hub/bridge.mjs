@@ -625,7 +625,7 @@ function buildRetryCliInvocation(cli) {
     const resolvedProfile =
       cli.profile ||
       (cli.family && cli.effort
-        ? profileFromModelEffort("antigravity", cli)
+        ? profileFromModelEffort("antigravity", cli) || cli.family
         : null) ||
       "carbon_high";
     invocation.profile = resolvedProfile;

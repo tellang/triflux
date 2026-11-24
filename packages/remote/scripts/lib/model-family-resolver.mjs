@@ -82,11 +82,25 @@ export const AGY_FAMILY_PROFILES = Object.freeze({
     model: "Gemini 4 Carbon (High)",
   },
 });
-// 목록에 없는 상위 가족(Carbon은 Ultra 구독 전용)은 이 가족으로 폴백한다.
-export const AGY_BASE_FAMILY = "argon";
-export const AGY_FAMILIES = Object.freeze([
-  ...new Set(Object.values(AGY_FAMILY_PROFILES).map(({ family }) => family)),
-]);
+// 목록에 없는 가족(Carbon은 Ultra 구독 전용)은 앞에서부터 목록에 있는 첫 가족으로 폴백한다.
+// Argon은 성능이 낮아 폴백 대상에서 뺐고 명시 입력으로만 받는다.
+export const AGY_FAMILY_FALLBACKS = Object.freeze({
+  carbon: ["neon", "hydrogen"],
+  neon: ["hydrogen"],
+  hydrogen: ["neon"],
+  argon: ["hydrogen", "neon"],
+});
+// 가족 ID 기본값. 결합 이름(AGY_FAMILY_PROFILES)은 옛 가족의 호환 입력으로만 남기고
+// 새 가족은 여기에만 올려 `--model <가족 ID> --effort <effort>`로 호출한다(ADR-0049).
+export const AGY_FAMILY_DEFAULT_MODELS = Object.freeze({
+  argon: "gemini-4-argon",
+  hydrogen: "gemini-4-hydrogen",
+  carbon: "gemini-4-carbon",
+  neon: "gemini-4-neon",
+});
+export const AGY_FAMILIES = Object.freeze(
+  Object.keys(AGY_FAMILY_DEFAULT_MODELS),
+);
 const DAY_MS = 86_400_000;
 // 가족 목록이 바뀌기 전에 저장한 agy 목록에는 새 가족이 빠져 있으므로 이 키가 다르면 다시 조회한다.
 const AGY_CACHE_KEY = AGY_FAMILIES.join(",");
@@ -432,10 +446,14 @@ export function resolveModelFamilies(provider, opts = {}) {
           : [];
       });
       const saved = selectAgyModel(savedModels, family);
-      const last = previous.families?.[family] || {
-        model: saved.slug.replace(/-[^-]+$/, ""),
-        fetched_at: saved.fetched_at,
-      };
+      const last =
+        previous.families?.[family] ||
+        (saved
+          ? {
+              model: saved.slug.replace(/-[^-]+$/, ""),
+              fetched_at: saved.fetched_at,
+            }
+          : { model: AGY_FAMILY_DEFAULT_MODELS[family], fetched_at: null });
       families[family] =
         latest &&
         (!last.fetched_at ||
@@ -460,27 +478,32 @@ export function resolveModelFamilies(provider, opts = {}) {
       if (supported?.length)
         selectedFamilies[family].supportedEfforts = supported;
     }
-    // 목록을 읽었는데 요청 가족이 없고 기본 가족(argon)이 있으면 기본 가족으로 폴백한다. 고정한 가족은 그대로 둔다.
-    const missingFamily = (family) =>
-      family !== AGY_BASE_FAMILY &&
-      catalog?.models?.length > 0 &&
-      catalog.models.some(
-        (item) => AGY_SLUG.exec(item?.slug)?.[2] === AGY_BASE_FAMILY,
-      ) &&
-      !catalog.models.some(
+    // 목록을 읽었는데 요청 가족이 없으면 폴백 순서에서 목록에 있는 첫 가족을 쓴다. 고정한 가족은 그대로 둔다.
+    const listed = (family) =>
+      catalog?.models?.some(
         (item) => AGY_SLUG.exec(item?.slug)?.[2] === family,
-      ) &&
-      AGY_SLUG.exec(`${pins[family]}-low`)?.[2] !== family;
-    for (const family of AGY_FAMILIES.filter(missingFamily)) {
+      );
+    for (const family of AGY_FAMILIES) {
+      if (
+        !catalog?.models?.length ||
+        listed(family) ||
+        AGY_SLUG.exec(`${pins[family]}-low`)?.[2] === family
+      )
+        continue;
+      const target = AGY_FAMILY_FALLBACKS[family].find(listed);
+      if (!target) continue;
       selectedFamilies[family] = {
-        ...selectedFamilies[AGY_BASE_FAMILY],
+        ...selectedFamilies[target],
+        fallbackFamily: target,
         fallbackFrom: family,
       };
+      // 옛 결합 이름은 결합 이름이 있는 폴백 가족 중 같은 effort로 옮긴다.
       for (const [name, definition] of Object.entries(definitions)) {
         if (definition.family !== family) continue;
         const base = Object.keys(definitions).find(
           (key) =>
-            definitions[key].family === AGY_BASE_FAMILY &&
+            AGY_FAMILY_FALLBACKS[family].includes(definitions[key].family) &&
+            listed(definitions[key].family) &&
             definitions[key].effort === definition.effort,
         );
         if (base)

@@ -20,7 +20,7 @@ paths:
 | # | CLI | 모델 | profile | effort | 이유 |
 |---|-----|------|---------|--------|------|
 | 1 | codex | 프로필에서 해석 | astra_max | max | 최난도 단일 작업용 Codex 1차 복구 단계 |
-| 2 | antigravity | 프로필에서 해석 | carbon_high | high | 이기종 벤더 상위 추론(Carbon high, 미보유 시 Argon high 폴백) 2차 복구 단계 |
+| 2 | antigravity | 프로필에서 해석 | carbon_high | high | 이기종 벤더 상위 추론(Carbon high, 미보유 시 Neon high, 그다음 Hydrogen high 폴백) 2차 복구 단계 |
 | 3 | claude | fable | 미지정 | high | Claude CLI가 최신 Fable tier로 해석하는 최종 수단, 복잡 아키텍처 및 합의 요구 시 |
 
 체인 생성 시 비활성(`TFX_DISABLE_*=1`), 미설치(`TFX_*_OK=0`), 쿼터 `>=100%`, 쿨다운 중인 벤더 단계는 자동으로 건너뛰며, 가용한 단계가 하나도 없으면 빈 체인으로 즉시 `BUDGET_EXCEEDED` 처리한다. 체인 길이 소진 시 `BUDGET_EXCEEDED` with `reason: "escalation-chain-exhausted"`.
@@ -50,6 +50,7 @@ PRD 또는 프로젝트 별 체인 커스터마이즈 시 `.triflux/config/escal
 - `cli` (codex|antigravity|claude)
 - `model`: 프로필이 없는 단계에서 CLI가 해석하는 문자열. Codex 및 Antigravity 관리 프로필 단계에는 넣지 않는다.
 - `profile` (optional): Codex(`luna_low` / `luna_high` / `sol_med` / `sol_high` / `astra_xhigh` / `astra_max`) 또는 Antigravity(`hydrogen_low` / `hydrogen` / `hydrogen_high` / `argon_low` / `argon` / `argon_high` / `carbon_low` / `carbon` / `carbon_high`) 프로필 이름. `astra_ultra`는 다른 오케스트레이터가 없는 최상위 단독 실행 전용이므로 retry chain에는 넣지 않는다.
+- `family` (optional): 결합 이름이 없는 가족(예: Antigravity `neon`)은 `profile` 대신 `family`와 `effort`를 함께 적는다. 예: `{ "cli": "antigravity", "family": "neon", "effort": "xhigh" }`.
 - `effort` (optional): 단계별 추론 수준(`low` / `medium` / `high` / `xhigh` / `max`).
 
 기본 Claude 모델은 `fable` 별칭이며 Claude CLI가 최신 Fable tier로 해석한다. 기본값만 바꾸려면 `TFX_ESCALATION_CLAUDE_MODEL`을 설정할 수 있고, 프로젝트의 `.triflux/config/escalation-chain.json`은 그보다 우선한다.

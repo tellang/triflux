@@ -185,7 +185,7 @@ test("agy는 최신 가족의 지원 effort를 쓰고 목록이 없으면 낮추
   );
 });
 
-test("agy Carbon은 목록에 있으면 그대로 쓰고 없으면 Argon으로 폴백한다", (t) => {
+test("agy Carbon은 목록에 있으면 그대로 쓰고 없으면 Neon으로 폴백한다", (t) => {
   const home = mkdtempSync(join(tmpdir(), "tfx-agy-carbon-"));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const opts = {
@@ -204,15 +204,17 @@ test("agy Carbon은 목록에 있으면 그대로 쓰고 없으면 Argon으로 �
     { family: "carbon", model: "gemini-4-carbon", effort: "high" },
   );
   rmSync(join(home, "state", "agy-models.json"));
-  opts.runCommand = () => "gemini-4-argon-high\tGemini 4 Argon (High)\n";
+  opts.runCommand = () =>
+    "gemini-4-argon-high\tGemini 4 Argon (High)\n" +
+    "gemini-4-neon-high\tGemini 4 Neon (High)\n";
   assert.deepEqual(
     modelEffort.resolveAgyModelEffort(
       { family: "carbon", effort: "high" },
       opts,
     ),
     {
-      family: "argon",
-      model: "gemini-4-argon",
+      family: "neon",
+      model: "gemini-4-neon",
       effort: "high",
       fallbackFrom: "carbon",
     },

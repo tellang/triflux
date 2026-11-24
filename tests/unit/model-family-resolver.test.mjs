@@ -20,6 +20,10 @@ import {
   normalizeCodexProfileName,
 } from "../../scripts/lib/codex-profile-config.mjs";
 import {
+  modelEffortFromProfile,
+  resolveAgyModelEffort,
+} from "../../scripts/lib/model-effort.mjs";
+import {
   parseAgyModels,
   resolveModelFamilies,
   selectAgyModel,
@@ -115,19 +119,63 @@ test("agy 목록에 Carbon이 있으면 Carbon 프로필을 쓴다", (t) => {
   assert.equal(families.carbon.fallbackFrom, undefined);
 });
 
-test("agy 목록에 Carbon이 없으면 Argon으로 폴백하고 원래 가족을 남긴다", (t) => {
-  const opts = fixture(t);
-  opts.runCommand = () =>
+test("agy 목록에 Carbon이 없으면 Neon, 그다음 Hydrogen으로 폴백하고 Argon으로는 가지 않는다", (t) => {
+  const withNeon = fixture(t);
+  withNeon.runCommand = () =>
     "gemini-4-argon-high\tGemini 4 Argon (High)\n" +
-    "gemini-4-argon-medium\tGemini 4 Argon (Medium)\n" +
-    "gemini-4-argon-low\tGemini 4 Argon (Low)\n";
-  const { profiles, families } = resolveModelFamilies("agy", opts);
-  assert.equal(profiles.carbon_high.model, "Gemini 4 Argon (High)");
-  assert.equal(profiles.carbon.model, "Gemini 4 Argon (Medium)");
-  assert.equal(profiles.carbon_high.fallbackFrom, "carbon");
-  assert.equal(families.carbon.model, families.argon.model);
+    "gemini-4-neon-high\tGemini 4 Neon (High)\n" +
+    "gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)\n" +
+    "gemini-4-hydrogen-medium\tGemini 4 Hydrogen (Medium)\n";
+  const { profiles, families } = resolveModelFamilies("agy", withNeon);
+  assert.equal(families.carbon.model, "gemini-4-neon");
+  assert.equal(families.carbon.fallbackFamily, "neon");
   assert.equal(families.carbon.fallbackFrom, "carbon");
-  assert.equal(families.argon.fallbackFrom, undefined);
+  // 옛 결합 이름은 결합 이름이 있는 Hydrogen의 같은 effort로 옮긴다.
+  assert.equal(profiles.carbon_high.model, "Gemini 4 Hydrogen (High)");
+  assert.equal(profiles.carbon.model, "Gemini 4 Hydrogen (Medium)");
+  assert.equal(profiles.carbon_high.fallbackFrom, "carbon");
+
+  const argonOnly = fixture(t);
+  argonOnly.runCommand = () => "gemini-4-argon-high\tGemini 4 Argon (High)\n";
+  const onlyArgon = resolveModelFamilies("agy", argonOnly);
+  assert.equal(onlyArgon.families.carbon.model, "gemini-4-carbon");
+  assert.equal(onlyArgon.families.carbon.fallbackFrom, undefined);
+});
+
+test("agy Neon은 결합 이름 없이 가족과 effort로 해석하고, 목록에 없으면 Hydrogen에서 effort를 낮춘다", (t) => {
+  assert.deepEqual(modelEffortFromProfile("agy", "neon"), {
+    family: "neon",
+    effort: "medium",
+  });
+  assert.deepEqual(modelEffortFromProfile("agy", "neon", "xhigh"), {
+    family: "neon",
+    effort: "xhigh",
+  });
+
+  const withNeon = fixture(t);
+  withNeon.runCommand = () =>
+    "gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)\n" +
+    "gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)\n" +
+    "gemini-4-neon-high\tGemini 4 Neon (High)\n";
+  assert.deepEqual(
+    resolveAgyModelEffort({ family: "neon", effort: "xhigh" }, withNeon),
+    { family: "neon", model: "gemini-4-neon", effort: "xhigh" },
+  );
+
+  const withoutNeon = fixture(t);
+  withoutNeon.runCommand = () =>
+    "gemini-4-argon-high\tGemini 4 Argon (High)\n" +
+    "gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)\n" +
+    "gemini-4-hydrogen-medium\tGemini 4 Hydrogen (Medium)\n";
+  assert.deepEqual(
+    resolveAgyModelEffort({ family: "neon", effort: "xhigh" }, withoutNeon),
+    {
+      family: "hydrogen",
+      model: "gemini-4-hydrogen",
+      fallbackFrom: "neon",
+      effort: "high",
+    },
+  );
 });
 
 test("목록을 읽지 못하면 Carbon 내장 기본값을 유지하고, 고정한 Carbon은 폴백하지 않는다", (t) => {
@@ -432,19 +480,14 @@ test("가족 목록이 바뀌기 전에 저장한 agy 목록은 하루가 안 �
   assert.equal(calls, 1);
 });
 
-test("agy Hydrogen 프로필 해석 및 목록 부재 시 Argon 폴백과 models.json 핀을 검증한다", (t) => {
+test("agy Hydrogen 프로필 해석 및 목록 부재 시 Neon 폴백과 models.json 핀을 검증한다", (t) => {
   const opts = fixture(t);
   opts.runCommand = () =>
-    "gemini-4-argon-low\tGemini 4 Argon (Low)\n" +
     "gemini-4-argon-medium\tGemini 4 Argon (Medium)\n" +
-    "gemini-4-argon-high\tGemini 4 Argon (High)\n";
+    "gemini-4-neon-medium\tGemini 4 Neon (Medium)\n";
   const withoutHydrogen = resolveModelFamilies("agy", opts);
   assert.equal(withoutHydrogen.families.hydrogen.fallbackFrom, "hydrogen");
-  assert.equal(withoutHydrogen.families.hydrogen.model, "gemini-4-argon");
-  assert.equal(
-    withoutHydrogen.profiles.hydrogen_high.model,
-    "Gemini 4 Argon (High)",
-  );
+  assert.equal(withoutHydrogen.families.hydrogen.model, "gemini-4-neon");
 
   rmSync(join(opts.stateDir, "agy-models.json"), { force: true });
   opts.runCommand = () =>

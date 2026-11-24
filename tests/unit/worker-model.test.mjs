@@ -221,6 +221,19 @@ test("리뷰와 retry 정책을 자동 추천으로 덮어쓰지 않는다", asy
   assert.equal(retry.source, "retry");
 });
 
+test("agy 명시 가족은 TFX_GEMINI_EFFORT를 실행 경로와 같이 받는다", async () => {
+  const { resolveWorkerModel } = await import(
+    "../../scripts/lib/agent-route-policy.mjs"
+  );
+  const resolveNeon = (effort) =>
+    resolveWorkerModel(
+      { task: "설계", agent: "designer", cli: "agy", profile: "neon" },
+      { env: { ...env, TFX_GEMINI_EFFORT: effort }, home },
+    );
+  assert.equal((await resolveNeon("xhigh")).effort, "xhigh");
+  assert.equal((await resolveNeon("")).effort, "medium");
+});
+
 test("배정은 워커별 명시 model/effort와 공통 입력을 보존한다", async () => {
   const { buildHeadlessAssignments } = await import(
     "../../hub/team/cli/commands/start/start-headless.mjs"

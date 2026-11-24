@@ -241,11 +241,11 @@ test("agy lowers effort on the newest family instead of choosing an older model"
     role: "designer",
     env: { TFX_DISABLE_CLAUDE: "1" },
     agyModels:
-      "gemini-4.9-argon-high\tGemini 4.9 Argon (High)\n" +
-      "gemini-4.10-argon-medium\tGemini 4.10 Argon (Medium)\n",
+      "gemini-4.9-hydrogen-high\tGemini 4.9 Hydrogen (High)\n" +
+      "gemini-4.10-hydrogen-medium\tGemini 4.10 Hydrogen (Medium)\n",
   });
   assert.equal(r.status, 0, r.output);
-  assert.equal(r.argv[r.argv.indexOf("--model") + 1], "gemini-4.10-argon");
+  assert.equal(r.argv[r.argv.indexOf("--model") + 1], "gemini-4.10-hydrogen");
   assert.equal(r.argv[r.argv.indexOf("--effort") + 1], "medium");
   assert.match(r.stderr, /requested=high applied=medium/);
 });

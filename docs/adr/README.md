@@ -61,6 +61,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0052](0052-jev-iterm-layout.md) | Jev 기반 iTerm 워커 배치 | Proposed | 0026, 0029, 0030, 0050 |
 | [0053](../_archive/adr/0053-agy-carbon-explicit-family.md) | agy Carbon 가족을 명시 지정 전용으로 추가하고 목록에 없으면 Argon으로 폴백한다 | Superseded | 0038, 0039, 0049, 0054 |
 | [0054](0054-multi-vendor-priority-routing.md) | 역할군별 3사 모델 우선순위 라우팅과 쿼터 연동 및 Jev 조정 규칙을 도입한다 | Accepted | 0004, 0037, 0039, 0048, 0049, 0050, 0051, 0053 |
+| [0055](0055-agy-drop-argon-add-neon.md) | agy 기본 배정과 폴백에서 Argon을 빼고 Neon 가족을 추가한다 | Accepted | 0049, 0054 |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 

@@ -8,6 +8,10 @@ import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
+  modelEffortFromProfile,
+  resolveAgyModelEffort,
+} from "../../scripts/lib/model-effort.mjs";
+import {
   modelFamilyPaths,
   resolveModelFamilies,
 } from "../../scripts/lib/model-family-resolver.mjs";
@@ -315,17 +319,26 @@ export async function launchLead(
             : cli === "agy"
               ? recommendation.agyProfile
               : cappedClaudeModel;
+        const readOnly = {
+          ...modelOptions,
+          allowCommand: false,
+          persist: false,
+        };
+        // agy는 표시 이름 대신 가족 ID와 effort로 실행하고 가족 폴백을 적용한다(ADR-0049, ADR-0055).
+        const agySpec =
+          cli === "agy" &&
+          modelEffortFromProfile("agy", routing.recommendedProfile);
         const selected =
           cli === "claude"
             ? {
                 model: cappedClaudeModel,
                 effort: recommendation.claudeEffort,
               }
-            : resolveModelFamilies(cli, {
-                ...modelOptions,
-                allowCommand: false,
-                persist: false,
-              }).profiles[routing.recommendedProfile];
+            : agySpec
+              ? resolveAgyModelEffort(agySpec, readOnly)
+              : resolveModelFamilies(cli, readOnly).profiles[
+                  routing.recommendedProfile
+                ];
         if (selected?.model && selected?.effort) {
           routing.recommendedModel = selected.model;
           routing.recommendedEffort = selected.effort;
@@ -334,9 +347,17 @@ export async function launchLead(
           routing.source = "jev";
           routing.reason = "jev_applied";
           routing.appliedTo = "start_args";
+          if (selected.fallbackFrom) {
+            routing.fallbackFrom = selected.fallbackFrom;
+            console.error(
+              `[tfx-lead] agy 가족 폴백: ${selected.fallbackFrom}에서 ${selected.family}로 전환 (모델 목록에 없음) model=${selected.model} effort=${selected.effort}`,
+            );
+          }
         } else routing.reason = "unsupported_profile";
       }
-    } catch {
+    } catch (error) {
+      // 지원하는 effort가 없으면 기본값으로 시작하지 않고 실패한다(ADR-0049).
+      if (error?.code === "unsupported-effort") throw error;
       routing.reason = "jev_or_resolver_failed";
     }
   }

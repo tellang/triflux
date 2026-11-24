@@ -153,7 +153,7 @@ describe("ensureAgyProfiles() 기존 설정", () => {
 });
 
 describe("용도별 effort 분리 (SSOT)", () => {
-  it("역할을 Hydrogen/Argon/Carbon effort 프로필로 매핑한다", () => {
+  it("역할을 Hydrogen/Carbon effort 프로필로 매핑한다", () => {
     assert.equal(resolveAgyProfileForPurpose("designer"), "hydrogen_high");
     assert.equal(resolveAgyProfileForPurpose("reviewer"), "hydrogen_high");
     assert.equal(resolveAgyProfileForPurpose("Code-Reviewer"), "hydrogen_high");
@@ -161,8 +161,11 @@ describe("용도별 effort 분리 (SSOT)", () => {
       resolveAgyProfileForPurpose("security-reviewer"),
       "carbon_high",
     );
-    assert.equal(resolveAgyProfileForPurpose("writer"), "argon");
-    assert.equal(resolveAgyProfileForPurpose("document-specialist"), "argon");
+    assert.equal(resolveAgyProfileForPurpose("writer"), "hydrogen");
+    assert.equal(
+      resolveAgyProfileForPurpose("document-specialist"),
+      "hydrogen",
+    );
     assert.equal(resolveAgyProfileForPurpose("antigravity"), "hydrogen");
     assert.equal(resolveAgyProfileForPurpose("summarizer"), "hydrogen_low");
     assert.equal(resolveAgyProfileForPurpose("no-such-role"), "hydrogen");
@@ -173,7 +176,7 @@ describe("용도별 effort 분리 (SSOT)", () => {
     const { profilesPath } = makeTempPaths();
     assert.equal(
       resolveAgyModel("", { profilesPath }),
-      "Gemini 4 Argon (Medium)",
+      "Gemini 4 Hydrogen (Medium)",
     );
     assert.equal(
       resolveAgyModel("flash_high", { profilesPath }),

@@ -1026,9 +1026,15 @@ resolve_agy_profile() {
     const families = AGY_FAMILIES.join("|");
     const match = new RegExp(`^gemini-\\d+(?:\\.\\d+)*-(${families})(?:-([a-z]+))?$`, "i").exec(model)
       || new RegExp(`^Gemini \\d+(?:\\.\\d+)* (${families}) \\(([a-z]+)\\)$`, "i").exec(model);
-    const requested = modelEffortFromProfile("agy", process.argv[2])
+    const base = modelEffortFromProfile("agy", process.argv[2])
       || (match ? { family: match[1].toLowerCase(), effort: (match[2] || "medium").toLowerCase() } : null);
-    if (!requested) {
+    // effort는 프로필 이름과 따로 TFX_GEMINI_EFFORT로 받는다(ADR-0049).
+    const explicitEffort = process.env.TFX_GEMINI_EFFORT?.trim();
+    const requested = base && explicitEffort ? modelEffortFromProfile("agy", base.family, explicitEffort) : base;
+    if (base && explicitEffort && !requested) {
+      console.error(`[tfx-route] 알 수 없는 agy effort: TFX_GEMINI_EFFORT=${explicitEffort}`);
+      process.exitCode = 1;
+    } else if (!requested) {
       process.stdout.write(`${model}\x1e`);
     } else {
       try {
@@ -1583,6 +1589,10 @@ apply_retry_snapshot_cli_invocation() {
     CLI_CMD="agy"
     TFX_GEMINI_PROFILE="${retry_profile_spec:-carbon_high}"
     export TFX_GEMINI_PROFILE
+    if [[ -n "$retry_effort" ]]; then
+      TFX_GEMINI_EFFORT="$retry_effort"
+      export TFX_GEMINI_EFFORT
+    fi
     CLI_ARGS="$(build_antigravity_base)"
     CLI_EFFORT="${retry_effort:-high}"
     CLI_FAMILY="${TFX_GEMINI_PROFILE%%_*}"
@@ -2180,7 +2190,7 @@ run_antigravity_exec() {
   # 모델 ID에 effort를 남기면 별도 --effort와 충돌하므로 해석 결과를 나눠 전달한다.
   if [[ -z "${TFX_GEMINI_NO_MODEL:-}" ]]; then
     local _agy_model _agy_effort _agy_selection
-    _agy_selection="$(resolve_agy_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-argon}}")" || return $?
+    _agy_selection="$(resolve_agy_profile "${TFX_GEMINI_PROFILE:-${GEMINI_PROFILE:-hydrogen}}")" || return $?
     IFS=$'\x1e' read -r _agy_model _agy_effort <<< "$_agy_selection"
     if [[ "${TFX_WORKER_CLI:-antigravity}" == "antigravity" && -n "${TFX_WORKER_MODEL:-}${TFX_WORKER_EFFORT:-}" ]]; then
       _agy_model="${TFX_WORKER_MODEL:-}"
