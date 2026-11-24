@@ -1,5 +1,5 @@
 import {
-  AGY_BASE_FAMILY,
+  AGY_FAMILIES,
   AGY_FAMILY_PROFILES,
   CODEX_FAMILY_PROFILES,
   readCodexModelCatalog,
@@ -41,15 +41,15 @@ export function normalizeAgyProfileName(name) {
 }
 
 export function modelEffortFromProfile(cli, profile, effort) {
+  const isAgy = cli === "antigravity" || cli === "agy";
   if (effort !== undefined) {
-    const definitions =
-      cli === "codex"
-        ? CODEX_FAMILY_PROFILES
-        : cli === "antigravity" || cli === "agy"
-          ? AGY_FAMILY_PROFILES
-          : {};
-    return EFFORT_ORDER.includes(effort) &&
-      Object.values(definitions).some(({ family }) => family === profile)
+    const known = isAgy
+      ? AGY_FAMILIES.includes(profile)
+      : cli === "codex" &&
+        Object.values(CODEX_FAMILY_PROFILES).some(
+          ({ family }) => family === profile,
+        );
+    return EFFORT_ORDER.includes(effort) && known
       ? { family: profile, effort }
       : null;
   }
@@ -62,10 +62,13 @@ export function modelEffortFromProfile(cli, profile, effort) {
         : normalized;
     if (Object.hasOwn(CODEX_FAMILY_PROFILES, name))
       definition = CODEX_FAMILY_PROFILES[name];
-  } else if (cli === "antigravity" || cli === "agy") {
+  } else if (isAgy) {
     const name = normalizeAgyProfileName(profile);
     if (Object.hasOwn(AGY_FAMILY_PROFILES, name))
       definition = AGY_FAMILY_PROFILES[name];
+    // 결합 이름이 없는 가족 이름만 받으면 agy 기본 effort(medium)로 둔다.
+    else if (AGY_FAMILIES.includes(name))
+      definition = { family: name, effort: "medium" };
   }
   return definition
     ? { family: definition.family, effort: definition.effort }
@@ -119,10 +122,11 @@ export function resolveAgyModelEffort({ family, effort }, opts = {}) {
   if (!Object.hasOwn(families, family) || !EFFORT_ORDER.includes(effort)) {
     throw new Error(`알 수 없는 agy 가족 또는 effort: ${family}/${effort}`);
   }
-  const { model, supportedEfforts, fallbackFrom } = families[family];
+  const { model, supportedEfforts, fallbackFamily, fallbackFrom } =
+    families[family];
   // 폴백이면 실제로 쓰는 가족을 돌려주고 원래 요청 가족을 fallbackFrom에 남긴다.
   const result = fallbackFrom
-    ? { family: AGY_BASE_FAMILY, model, fallbackFrom }
+    ? { family: fallbackFamily, model, fallbackFrom }
     : { family, model };
   if (!supportedEfforts) return { ...result, effort };
   const selected = EFFORT_ORDER.slice(0, EFFORT_ORDER.indexOf(effort) + 1)

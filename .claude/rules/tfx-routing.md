@@ -108,14 +108,14 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | 판단 및 설계 (judgment) | `architect`, `planner`, `critic`, `analyst`, `debugger`, `deep-executor`, `scientist-deep` | `claude opus high` | `codex astra xhigh` (단독 `ultraEligible`은 `ultra` 허용) | `antigravity carbon high` |
 | 실행 (execution) | `executor`, `test-engineer`, `verifier`, `qa-tester`, `scientist`, `build-fixer`, `cleanup`, `deslop` | `codex` (`sol high` / `sol medium`) | `antigravity` (`hydrogen medium` / `hydrogen high` / `hydrogen low`) | `claude` (`sonnet medium` / `sonnet high` / `sonnet low`) |
 | 검증 및 교차 리뷰 (verification) | `code-reviewer`, `quality-reviewer`, `security-reviewer` | 일반 리뷰: 작성자 제외(`codex sol high` / `claude opus`), `security-reviewer`: `claude fable high` | 일반 리뷰: 타 벤더 2순위(`claude opus` / `antigravity hydrogen high`), `security-reviewer`: `codex astra xhigh` | 일반 리뷰: 타 벤더 전멸 시 동일 벤더 새 세션(`freshSessionRequired`), `security-reviewer`: `antigravity carbon high` |
-| 문서 및 시각 설계 (writing_design) | `designer`, `writer`, `researcher`, `document-specialist` | `designer`: `claude opus high`, 문서군: `antigravity argon medium` | `designer`: `antigravity hydrogen high`, 문서군: `claude opus medium/high` | `designer`: `codex sol high`, 문서군: `codex terra high` |
-| 리드 및 소통 (lead_communication) | `lead`, `communication`(상주 소통 세션, `tfx lead <역할> --role communication`), `communication-report`(단발 보고 워커), `communication-relay` | `lead`: `claude opus high`, `communication`/`report`: `claude opus medium`, `relay`: `claude haiku low` | `lead`: `codex astra xhigh`, `communication`/`report`: `antigravity argon medium`, `relay`: `codex luna low` | `lead`: `antigravity carbon high`, `communication`: `codex terra high`, `relay`: `antigravity hydrogen low` (`report`는 명시 `--cli codex` 시 `terra high`) |
+| 문서 및 시각 설계 (writing_design) | `designer`, `writer`, `researcher`, `document-specialist` | `designer`: `claude opus high`, 문서군: `antigravity hydrogen medium` | `designer`: `antigravity hydrogen high`, 문서군: `claude opus medium/high` | `designer`: `codex sol high`, 문서군: `codex terra high` |
+| 리드 및 소통 (lead_communication) | `lead`, `communication`(상주 소통 세션, `tfx lead <역할> --role communication`), `communication-report`(단발 보고 워커), `communication-relay` | `lead`: `claude opus high`, `communication`/`report`: `claude opus medium`, `relay`: `claude haiku low` | `lead`: `codex astra xhigh`, `communication`/`report`: `antigravity hydrogen medium`, `relay`: `codex luna low` | `lead`: `antigravity carbon high`, `communication`: `codex terra high`, `relay`: `antigravity hydrogen low` (`report`는 명시 `--cli codex` 시 `terra high`) |
 
 `tfx-auto`, `tfx-review`, `tfx-research`, `tfx lead` 등 multi-CLI 래퍼는 이 정책을 따른다. 명시 플래그(`--cli claude`, `--cli codex`, `--cli antigravity`)가 있으면 해당 벤더를 최우선으로 선택하며, `TFX_DISABLE_*` 등으로 하드 차단되었거나 소진된 경우에만 다음 가용 후보로 폴백한다. `--retry auto-escalate` 체인(`.claude/rules/tfx-escalation-chain.md`)은 `codex astra_max` -> `antigravity carbon_high` -> `claude fable` 3단계로 승격한다.
 
 ### 모델 배치와 쿼터·Jev 조정
 
-> 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0038](../../docs/_archive/adr/0038-agy-default-argon-family.md), [ADR-0048](../../docs/adr/0048-codex-terra-family-for-writing-lanes.md), [ADR-0054](../../docs/adr/0054-multi-vendor-priority-routing.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
+> 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0038](../../docs/_archive/adr/0038-agy-default-argon-family.md), [ADR-0048](../../docs/adr/0048-codex-terra-family-for-writing-lanes.md), [ADR-0054](../../docs/adr/0054-multi-vendor-priority-routing.md), [ADR-0055](../../docs/adr/0055-agy-drop-argon-add-neon.md). 모델 목록의 같은 가족에서 사용할 수 있는 최신 버전을 실행 때 해석한다.
 
 역할별 후보 순서, 가족, effort의 SSOT는 `scripts/lib/vendor-priority-policy.mjs`와 `scripts/lib/agent-route-policy.mjs`다.
 
@@ -131,15 +131,16 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | `sol` + `medium` | cleanup, deslop |
 | `terra` + `high` | writer(2순위), document-specialist(2순위), communication(3순위), communication-report(명시 `--cli codex` 시) |
 | `luna` + `high` / `luna` + `low` | build-fixer(`high`), spark(`low`), explore/communication-relay 보조(`low`) |
-| `hydrogen` + `low` / `medium` / `high` | Antigravity 기본 실무 가족: document-specialist, explore 보조(`low`), writer/executor 보조(`medium`), designer, code-reviewer/quality-reviewer, verifier/test-engineer/qa-tester 보조(`high`). 목록에 없으면 같은 effort의 Argon으로 폴백 |
-| `argon` + `low` / `medium` / `high` | Antigravity 호환 및 폴백 가족, communication/communication-report 2순위(`medium`) (`TFX_GEMINI_PROFILE=argon*` 명시 또는 Hydrogen/Carbon 미보유 시 자동 폴백) |
-| `carbon` + `low` / `medium` / `high` | Antigravity 상위 추론 가족: security-reviewer 1순위(`high`), 판단군 상위 보조(`high`), `--retry auto-escalate` 2단계(`carbon_high`). 목록에 없으면 같은 effort의 Argon으로 폴백 |
+| `hydrogen` + `low` / `medium` / `high` | Antigravity 기본 실무 가족: document-specialist, explore 보조(`low`), writer/executor 보조(`medium`), designer, code-reviewer/quality-reviewer, verifier/test-engineer/qa-tester 보조(`high`), writer/document-specialist/researcher 1순위와 communication/communication-report 2순위(`medium`). 목록에 없으면 Neon으로 폴백 |
+| `argon` + `low` / `medium` / `high` | 호환 입력 전용. 성능이 낮아 기본 배정과 폴백 대상에서 뺐고 `TFX_GEMINI_PROFILE=argon*`으로 명시할 때만 쓴다([ADR-0055](../../docs/adr/0055-agy-drop-argon-add-neon.md)) |
+| `carbon` + `low` / `medium` / `high` | Antigravity 상위 추론 가족: security-reviewer 1순위(`high`), 판단군 상위 보조(`high`), `--retry auto-escalate` 2단계(`carbon_high`). 목록에 없으면 Neon, 그다음 Hydrogen으로 폴백 |
+| `neon` + `low` / `medium` / `high` / `xhigh` | Antigravity 중상위 가족(Carbon과 Hydrogen 사이, `xhigh`까지 지원). 기본 라우팅 배정 없음. 결합 이름 없이 `TFX_GEMINI_PROFILE=neon`과 `TFX_GEMINI_EFFORT=<effort>`로 지정하고 effort를 빼면 `medium`. 목록에 없으면 Hydrogen으로 폴백하고 effort는 Hydrogen이 지원하는 가장 가까운 아래 단계로 낮춘다 |
 | `fable` | `--retry auto-escalate` 3단계 최종 수단 (리드 자동 선택은 `opus` 상한으로 제한) |
 | `opus` | architect, planner, critic, analyst, lead 1순위, communication/communication-report 1순위(`medium`), Codex·agy 작성 코드의 code-reviewer/quality-reviewer 1순위 |
 | `sonnet` | writer, executor/test-engineer/qa-tester/verifier 보조 |
 | `haiku` | explore, communication-relay 1순위, spark/cleanup/deslop 보조 |
 
-Codex는 `models_cache.json`의 공개 모델에서 같은 가족의 최신 버전을 선택하고 캐시가 없으면 `codex debug models`를 읽는다. Antigravity는 `agy models`의 Hydrogen, Argon, Carbon 목록을 하루 동안 캐시(`agy-models-v2.json`)하며, 요청한 Hydrogen이나 Carbon이 목록에 없으면 같은 effort의 Argon으로 폴백하고 stderr에 `agy 가족 폴백`을 남긴다. 최신 모델이 요청 effort를 지원하지 않으면 지원하는 가장 가까운 아래 단계로 제한한다. 옛 `flash*` 프로필 이름은 `argon` + `low`로 해석한다.
+Codex는 `models_cache.json`의 공개 모델에서 같은 가족의 최신 버전을 선택하고 캐시가 없으면 `codex debug models`를 읽는다. Antigravity는 `agy models`의 Hydrogen, Argon, Carbon, Neon 목록을 하루 동안 캐시(`agy-models-v2.json`)하며, 요청한 가족이 목록에 없으면 Carbon은 Neon, 그다음 Hydrogen으로, Neon은 Hydrogen으로, Hydrogen은 Neon으로 폴백하고 stderr에 `agy 가족 폴백`을 남긴다. Argon으로는 폴백하지 않으며 폴백할 가족이 목록에 없으면 요청한 가족을 그대로 쓴다. 최신 모델이 요청 effort를 지원하지 않으면 지원하는 가장 가까운 아래 단계로 제한한다. 옛 `flash*` 프로필 이름은 `argon` + `low`로 해석한다.
 
 `~/.config/triflux/models.json`(Windows는 `%APPDATA%\triflux\models.json`)에 가족별 모델명을 적으면 해당 가족을 고정한다. 목록 조회 실패 시 마지막 성공 결과, 그다음 내장 기본값을 사용한다. 리드별 verifier와 explore 배치는 `skills/tfx-lead/SKILL.md`를 따른다.
 

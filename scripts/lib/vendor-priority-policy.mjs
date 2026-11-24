@@ -25,6 +25,7 @@ export const MODEL_TIERS = Object.freeze({
   }),
   antigravity: Object.freeze({
     carbon: "top",
+    neon: "top",
     hydrogen: "high",
     argon: "mid",
   }),
@@ -105,13 +106,13 @@ const DESIGNER_CANDIDATES = Object.freeze([
 ]);
 
 const WRITER_CANDIDATES = Object.freeze([
-  cand("antigravity", "argon", "medium", "argon", null),
+  cand("antigravity", "hydrogen", "medium", "hydrogen", null),
   cand("claude", "opus", "medium", null, null),
   cand("codex", "terra", "high", "terra_high", "exec"),
 ]);
 
 const DOCUMENT_SPECIALIST_CANDIDATES = Object.freeze([
-  cand("antigravity", "argon", "medium", "argon", null),
+  cand("antigravity", "hydrogen", "medium", "hydrogen", null),
   cand("claude", "opus", "high", null, null),
   cand("codex", "terra", "high", "terra_high", "exec"),
 ]);
@@ -124,7 +125,7 @@ const LEAD_CANDIDATES = Object.freeze([
 
 const COMMUNICATION_REPORT_CANDIDATES = Object.freeze([
   cand("claude", "opus", "medium", null, null),
-  cand("antigravity", "argon", "medium", "argon", null),
+  cand("antigravity", "hydrogen", "medium", "hydrogen", null),
 ]);
 
 const EXPLICIT_CODEX_COMM_CANDIDATE = cand(

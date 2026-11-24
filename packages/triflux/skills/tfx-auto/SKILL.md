@@ -380,15 +380,15 @@ Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}", prompt="{prompt
 | architect / planner / critic / analyst | Codex (deep-executor 프로필) | analyze |
 | scientist | Codex | analyze |
 | document-specialist | Antigravity | analyze |
-| code-reviewer / quality-reviewer | 작성 벤더별 Claude Opus / Codex `sol` + `high` review / Argon High | review |
-| security-reviewer | Antigravity `argon` + `high` | review |
+| code-reviewer / quality-reviewer | 작성 벤더별 Claude Opus / Codex `sol` + `high` review / Hydrogen High | review |
+| security-reviewer | Antigravity `carbon` + `high` | review |
 | antigravity / designer / writer | Antigravity | docs |
 | explore / claude | Claude native | 없음 |
 | test-engineer | Codex | implement |
 | qa-tester | Codex review | review |
 | verifier | Codex review (기본) / Claude native (TFX_VERIFIER_OVERRIDE=claude 시) | review / 없음 |
 
-`TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 작성 벤더를 지정한다. 미지정이면 Codex로 보고, 잘못된 값은 거부한다. Codex·Argon 작성 코드는 Claude Opus가, Claude 작성 코드는 Codex Sol이 리뷰한다. Claude 주간 사용량(`~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`)이 80 이상이면 Codex 작성 코드는 Argon High가, Argon 작성 코드는 Codex Sol이 리뷰한다. 캐시가 없거나 읽을 수 없으면 한도 미만으로 본다. 명시 CLI 선택이 이 기본 배정보다 우선한다. 리드별 verifier·explore는 `tfx-lead`의 표를 따른다.
+`TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 작성 벤더를 지정한다. 미지정이면 Codex로 보고, 잘못된 값은 거부한다. Codex·Antigravity 작성 코드는 Claude Opus가, Claude 작성 코드는 Codex Sol이 리뷰한다. Claude 주간 사용량(`~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`)이 80 이상이면 Codex 작성 코드는 Hydrogen High가, Antigravity 작성 코드는 Codex Sol이 리뷰한다. 캐시가 없거나 읽을 수 없으면 한도 미만으로 본다. 명시 CLI 선택이 이 기본 배정보다 우선한다. 리드별 verifier·explore는 `tfx-lead`의 표를 따른다.
 
 ### MCP 프로필 자동 결정
 

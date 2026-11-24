@@ -601,7 +601,14 @@ export async function resolveWorkerModel(
       ? resolveCodexModelEffort(spec, readOnly)
       : { family: null, ...spec };
   } else if (cli === "agy") {
-    const spec = modelEffortFromProfile("agy", selectedProfile);
+    // 명시 프로필의 effort는 tfx-route.sh와 같이 TFX_GEMINI_EFFORT로 따로 받는다(ADR-0049).
+    const base = modelEffortFromProfile("agy", selectedProfile);
+    const explicitEffort = explicitProfile && env.TFX_GEMINI_EFFORT?.trim();
+    const spec =
+      (base &&
+        explicitEffort &&
+        modelEffortFromProfile("agy", base.family, explicitEffort)) ||
+      base;
     selected = spec
       ? resolveAgyModelEffort(spec, readOnly)
       : {

@@ -9,7 +9,7 @@ import {
 } from "./model-family-resolver.mjs";
 
 const DEFAULT_AGY_PROFILES = {
-  model: AGY_FAMILY_PROFILES.argon.model,
+  model: AGY_FAMILY_PROFILES.hydrogen.model,
   profiles: Object.fromEntries(
     Object.entries(AGY_FAMILY_PROFILES).map(([name, { model }]) => [
       name,
@@ -21,7 +21,7 @@ const DEFAULT_AGY_PROFILES = {
 export { normalizeAgyProfileName };
 
 // 용도별 agy 프로필 매핑 (SSOT, ADR-0054)
-// Carbon / Hydrogen / Argon 가족과 effort를 역할군 등급에 맞춰 배정한다.
+// Carbon / Hydrogen 가족과 effort를 역할군 등급에 맞춰 배정한다. Argon은 명시 입력으로만 쓴다.
 const AGY_PROFILE_BY_PURPOSE = Object.freeze({
   architect: "carbon_high",
   planner: "carbon_high",
@@ -46,11 +46,11 @@ const AGY_PROFILE_BY_PURPOSE = Object.freeze({
   antigravity: "hydrogen",
   agy: "hydrogen",
   gemini: "hydrogen",
-  writer: "argon",
-  "document-specialist": "argon",
-  researcher: "argon",
-  communication: "argon",
-  "communication-report": "argon",
+  writer: "hydrogen",
+  "document-specialist": "hydrogen",
+  researcher: "hydrogen",
+  communication: "hydrogen",
+  "communication-report": "hydrogen",
   "build-fixer": "hydrogen_low",
   cleanup: "hydrogen_low",
   deslop: "hydrogen_low",
@@ -162,7 +162,7 @@ function ensureAgyProfiles(opts = {}) {
       !cfg.model ||
       /^Gemini \d+(?:\.\d+)* (?:Flash|Argon) \(/.test(cfg.model)
     )
-      cfg.model = profiles.argon.model;
+      cfg.model = profiles.hydrogen.model;
     const changed = writeModelFile(
       profilesPath,
       `${JSON.stringify(cfg, null, 2)}\n`,

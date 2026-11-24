@@ -2,6 +2,19 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [11.1.0] - 2026-11-24
+
+### Added
+- agy: Gemini 4 Neon 가족(`neon`, Carbon과 Hydrogen 사이, `xhigh`까지 지원)을 추가한다. ADR-0049에 따라 결합 이름 없이 `TFX_GEMINI_PROFILE=neon`과 `TFX_GEMINI_EFFORT=<effort>`로 지정하고, effort를 빼면 `medium`으로 실행한다. retry 체인에서는 `{ "cli": "antigravity", "family": "neon", "effort": "xhigh" }`처럼 가족과 effort를 따로 적는다.
+
+### Changed
+- agy: Argon을 기본 배정과 폴백에서 뺀다(ADR-0055). writer, document-specialist, researcher, communication, communication-report와 agy 기본 프로필은 Hydrogen `medium`을 쓴다. Argon은 `TFX_GEMINI_PROFILE=argon*` 명시 입력으로만 남긴다.
+- agy: 목록에 없는 가족은 가족별 순서로 폴백한다. Carbon은 Neon, 그다음 Hydrogen으로, Neon은 Hydrogen으로, Hydrogen은 Neon으로 간다. effort는 폴백 가족이 지원하는 가장 가까운 아래 단계로 낮춘다.
+- routing: `TFX_GEMINI_EFFORT`를 `tfx-route.sh` 실행 경로와 브리지 `worker-model` 조회가 같이 읽는다. 옛 결합 이름(`carbon_high` 등)은 호환 입력으로 유지한다.
+
+### Tests
+- Neon 가족 해석, 가족별 폴백 순서, `TFX_GEMINI_EFFORT` 분리 입력 테스트를 추가하고 Argon 기본값 테스트를 Hydrogen 기준으로 바꾼다.
+
 ## [11.0.0] - 2026-11-18
 
 ### Added

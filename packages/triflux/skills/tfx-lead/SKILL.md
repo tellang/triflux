@@ -148,7 +148,7 @@ Codex `tfx-live start --model`은 `astra`, `sol`, `terra`, `luna`를 호출 호�
 | `opus`로 안 풀리는 난제 | Claude `fable` | 최종 수단 |
 | Codex 설계, 비평, 디버그 | `astra` + `xhigh` | `architect`, `planner`, `analyst`, `critic` 포함 |
 | Codex 일반 구현, Claude 작성 코드 리뷰 | `sol` + `high` | 리뷰는 `review` 서브커맨드 |
-| 보안 리뷰 | Argon High `argon` + `high` | `security-reviewer` |
+| 보안 리뷰 | Carbon High `carbon` + `high` | `security-reviewer` |
 | Codex 글쓰기, 문서 조사 | `terra` + `high` | |
 | Codex 정리, 반복 작업 | `sol` + `medium`, `luna` + `high` | |
 | Codex 테스트용 | 역할별 가족 + `low` | 연결 확인용 |
@@ -158,7 +158,7 @@ Codex `tfx-live start --model`은 `astra`, `sol`, `terra`, `luna`를 호출 호�
 | Claude | Codex 또는 Antigravity | Opus 네이티브 서브에이전트 | Haiku 네이티브 |
 | Claude | Claude | Codex Sol `sol` + `high` | Haiku 네이티브 |
 | Codex | 모두 | Codex Sol 네이티브 | Luna low 네이티브 |
-| Antigravity | Codex 또는 Claude | Argon High 네이티브 | Luna low 네이티브 |
+| Antigravity | Codex 또는 Claude | Hydrogen High 네이티브 | Luna low 네이티브 |
 | Antigravity | Antigravity | Codex Sol `sol` + `high` | Luna low 네이티브 |
 
 이 표는 리드의 호출 절차를 정한다. 코드의 verifier 기본값은 Codex Sol, explore 기본값은 Claude 로 유지한다. Codex 리드의 verifier 는 빌드, 테스트, 요구사항 충족 증거만 확인하고 코드 승인은 하지 않는다.
@@ -315,7 +315,7 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 
 | 작성 벤더 | 기본 리뷰 | Claude 주간 사용량 80% 이상 |
 | --- | --- | --- |
-| Codex | Claude Opus | Argon High `argon` + `high` |
+| Codex | Claude Opus | Hydrogen High `hydrogen` + `high` |
 | Claude | Codex Sol `sol` + `high` review | Codex Sol `sol` + `high` review |
 | Antigravity | Claude Opus | Codex Sol `sol` + `high` review |
 
@@ -435,7 +435,7 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 리드와 따로 상주하며 사람과 이야기하는 세션이다. 소통 세션이 없으면 리드가 이 일을 겸한다.
 
 - 띄우기: `tfx lead <역할> --role communication`. 기본값은 `--role lead` 다. tmux 세션 이름은 리드가 `<폴더>-lead`, 소통이 `<폴더>-comm` 이다. 소통은 Claude 를 포함한 모든 CLI 가 이 스킬의 이 절을 읽고 시작한다. `/tfx-lead` 는 리드에만 쓴다.
-- 후보: Claude `opus` medium, agy `argon` medium, Codex `terra` high 순이다. 리드 후보(Claude `opus` high, Codex `astra` xhigh, agy `carbon` high)와 서로 독립으로 고르므로 리드와 소통의 CLI 가 같을 필요가 없다. 순서와 effort 는 실측 전이라 바뀔 수 있다.
+- 후보: Claude `opus` medium, agy `hydrogen` medium, Codex `terra` high 순이다. 리드 후보(Claude `opus` high, Codex `astra` xhigh, agy `carbon` high)와 서로 독립으로 고르므로 리드와 소통의 CLI 가 같을 필요가 없다. 순서와 effort 는 실측 전이라 바뀔 수 있다.
 - 맡는 일: 사람과의 대화, 결정 받기, 사람에게 보이는 보고와 문서.
 - 하지 않는 일: 코드 워커 지휘, 머지 판정. 이 둘은 리드 몫이다.
 - 워커 소유: 문서와 회의 자료 워커는 소통에게, 코드 워커는 리드에게 보고한다. 워커의 보고 대상은 하나다.
