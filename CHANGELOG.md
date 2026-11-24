@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [11.1.1] - 2026-11-24
+
+### Fixed
+- peer: Claude 세션에서 시작한 공유 Codex 데몬이 물려받은 `CLAUDECODE=1` 때문에 Codex 워커의 `tfx-peer send --to claude:...`가 Claude 간 메시지로 오판돼 거부되던 문제를 고친다. `CLAUDE_PID`가 실제 조상 프로세스일 때만 Claude 발신으로 본다.
+
 ## [11.1.0] - 2026-11-24
 
 ### Added

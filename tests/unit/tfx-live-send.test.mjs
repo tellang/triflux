@@ -8,6 +8,7 @@ import {
   doSend,
   formatPeerReply,
   formatPeerSendMessage,
+  isClaudeCaller,
   parsePeerToSpec,
   resolvePeerSender,
 } from "../../bin/tfx-live.mjs";
@@ -575,6 +576,33 @@ describe("tfx-live send", () => {
       deps,
     });
     assert.deepEqual(fromPane, { cli: "agy", name: "pane-agy" });
+  });
+
+  it("Claude 세션에서 떨어져 나온 Codex 데몬의 CLAUDECODE는 Claude 발신으로 보지 않는다", async () => {
+    // ppid 10 -> 20 -> 1 체인. Claude(CLAUDE_PID)가 조상에 있을 때만 Claude 발신이다.
+    const parents = { 10: "20", 20: "1" };
+    const procDeps = {
+      ppid: 10,
+      execFileAsync: async (_cmd, args) => ({ stdout: parents[args.at(-1)] }),
+    };
+    const detached = {
+      CLAUDECODE: "1",
+      CLAUDE_PID: "999",
+      CODEX_THREAD_ID: "t-1",
+    };
+    assert.equal(await isClaudeCaller(detached, procDeps), false);
+    assert.equal(
+      await isClaudeCaller({ ...detached, CLAUDE_PID: "20" }, procDeps),
+      true,
+    );
+    assert.equal(await isClaudeCaller({ CLAUDECODE: "1" }, procDeps), true);
+
+    const { deps } = makeFakeDeps({});
+    const sender = await resolvePeerSender({
+      env: detached,
+      deps: { ...deps, ...procDeps },
+    });
+    assert.equal(sender.cli, "codex");
   });
 });
 

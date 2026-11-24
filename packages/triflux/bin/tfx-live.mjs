@@ -5717,7 +5717,7 @@ async function sameMachineClaudeRedirect(adapter, opts, flags, deps = {}) {
   const env = deps.env ?? process.env;
   if (
     adapter.cli !== "claude" ||
-    env.CLAUDECODE !== "1" ||
+    !(await isClaudeCaller(env, deps)) ||
     flags.remote ||
     Object.hasOwn(flags, "via-tmux") ||
     opts.short ||
@@ -5915,14 +5915,43 @@ function matchPeerCandidates(candidates, query) {
   );
 }
 
+// pid가 현재 프로세스의 조상인지 본다. ps를 못 읽으면 조상으로 본다.
+async function isAncestorPid(pid, deps = {}) {
+  let current = deps.ppid ?? process.ppid;
+  for (let depth = 0; current > 1 && depth < 32; depth++) {
+    if (current === pid) return true;
+    try {
+      const { stdout } = await (deps.execFileAsync || execFileAsync)("ps", [
+        "-o",
+        "ppid=",
+        "-p",
+        String(current),
+      ]);
+      current = Number(stdout.trim());
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
+// 데몬처럼 Claude 세션에서 떨어져 나온 프로세스는 CLAUDECODE만 물려받는다.
+// CLAUDE_PID가 있으면 그 Claude가 실제 조상일 때만 Claude 호출로 본다.
+async function isClaudeCaller(env, deps = {}) {
+  if (env.CLAUDECODE !== "1") return false;
+  const pid = Number(env.CLAUDE_PID);
+  if (!Number.isInteger(pid) || pid <= 1) return true;
+  return (deps.isAncestorPid || isAncestorPid)(pid, deps);
+}
+
 async function resolvePeerSender({
   from = null,
   env = process.env,
   allCandidates = null,
   deps = {},
 } = {}) {
-  const detectCliFromEnv = () => {
-    if (env.CLAUDECODE === "1") {
+  const detectCliFromEnv = async () => {
+    if (await isClaudeCaller(env, deps)) {
       return "claude";
     }
     if (env.ANTIGRAVITY_CONVERSATION_ID) {
@@ -5943,7 +5972,7 @@ async function resolvePeerSender({
     if (parsed.cli && parsed.query) {
       return { cli: parsed.cli, name: parsed.query };
     }
-    let inferredCli = detectCliFromEnv();
+    let inferredCli = await detectCliFromEnv();
     if (!inferredCli && env.TMUX_PANE) {
       const candidates = allCandidates || (await discoverPeerTargets({ deps }));
       inferredCli =
@@ -5953,7 +5982,7 @@ async function resolvePeerSender({
   }
 
   const candidates = allCandidates || (await discoverPeerTargets({ deps }));
-  const envCli = detectCliFromEnv();
+  const envCli = await detectCliFromEnv();
 
   if (envCli === "codex") {
     const byThread = candidates.find(
@@ -6130,7 +6159,7 @@ async function doSend(opts = {}, deps = {}) {
 
   const callerIsClaude =
     sender.cli === "claude" ||
-    env.CLAUDECODE === "1" ||
+    (await isClaudeCaller(env, deps)) ||
     Boolean(deps.isLocalClaudeCaller?.(env));
 
   if (target.cli === "claude" && callerIsClaude && !opts.viaTmux) {
@@ -8152,6 +8181,7 @@ export {
   hasClaudeCompletedTaskListResponse,
   inspectCodexTmuxPane,
   inspectUnsetEnv,
+  isClaudeCaller,
   isCodexLoadingCapture,
   isSlashCommand,
   itermProject,
