@@ -5947,12 +5947,18 @@ async function isAncestorPid(pid, deps = {}) {
 
 // Claude 세션에서 띄운 Codex 데몬과 agy 는 CLAUDECODE 를 물려받는다. 그래서 다른 CLI 의
 // 세션 ID 가 함께 있으면 CLAUDE_PID 가 실제 조상으로 확인될 때만 Claude 호출로 본다.
+// 한 전송 안에서 발신자 판정과 전송 가드가 같은 결과를 쓰도록 deps 단위로 재사용한다.
+const claudeAncestorChecks = new WeakMap();
 async function isClaudeCaller(env, deps = {}) {
   if (env.CLAUDECODE !== "1") return false;
   if (!env.CODEX_THREAD_ID && !env.ANTIGRAVITY_CONVERSATION_ID) return true;
   const pid = Number(env.CLAUDE_PID);
   if (!Number.isInteger(pid) || pid <= 1) return false;
-  return (deps.isAncestorPid || isAncestorPid)(pid, deps);
+  let checks = claudeAncestorChecks.get(deps);
+  if (!checks) claudeAncestorChecks.set(deps, (checks = new Map()));
+  if (!checks.has(pid))
+    checks.set(pid, (deps.isAncestorPid || isAncestorPid)(pid, deps));
+  return checks.get(pid);
 }
 
 // 물려받은 Claude 환경으로 다른 CLI 발신자의 이름을 찾지 않게 Claude 변수를 뺀다.
