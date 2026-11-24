@@ -8,6 +8,10 @@ import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
+  modelEffortFromProfile,
+  resolveAgyModelEffort,
+} from "../../scripts/lib/model-effort.mjs";
+import {
   modelFamilyPaths,
   resolveModelFamilies,
 } from "../../scripts/lib/model-family-resolver.mjs";
@@ -315,17 +319,26 @@ export async function launchLead(
             : cli === "agy"
               ? recommendation.agyProfile
               : cappedClaudeModel;
+        const readOnly = {
+          ...modelOptions,
+          allowCommand: false,
+          persist: false,
+        };
+        // agy는 표시 이름 대신 가족 ID와 effort로 실행하고 가족 폴백을 적용한다(ADR-0049, ADR-0055).
+        const agySpec =
+          cli === "agy" &&
+          modelEffortFromProfile("agy", routing.recommendedProfile);
         const selected =
           cli === "claude"
             ? {
                 model: cappedClaudeModel,
                 effort: recommendation.claudeEffort,
               }
-            : resolveModelFamilies(cli, {
-                ...modelOptions,
-                allowCommand: false,
-                persist: false,
-              }).profiles[routing.recommendedProfile];
+            : agySpec
+              ? resolveAgyModelEffort(agySpec, readOnly)
+              : resolveModelFamilies(cli, readOnly).profiles[
+                  routing.recommendedProfile
+                ];
         if (selected?.model && selected?.effort) {
           routing.recommendedModel = selected.model;
           routing.recommendedEffort = selected.effort;

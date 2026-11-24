@@ -609,4 +609,33 @@ process.exit(result.status ?? 1);
     assert.equal(args[args.indexOf("--model") + 1], "gemini-4-hydrogen");
     assert.equal(args[args.indexOf("--effort") + 1], "high");
   });
+
+  it("결합 이름이 없는 Neon 승격 단계는 가족과 effort를 따로 넘긴다", () => {
+    const snapshot = path.join(makeTempDir(), "agy-neon-retry-snapshot.json");
+    writeFileSync(
+      snapshot,
+      JSON.stringify({
+        version: 1,
+        current: "EXECUTING",
+        iterations: 1,
+        maxIterations: 3,
+        stuckCounter: 0,
+        lastFailureReason: null,
+        cliIndex: 0,
+        cliChain: [{ cli: "antigravity", family: "neon", effort: "xhigh" }],
+        mode: "auto-escalate",
+        sessionId: null,
+        history: [],
+      }),
+      "utf8",
+    );
+    const args = runRoute({
+      snapshot,
+      env: { TFX_ANTIGRAVITY_OK: "1" },
+    });
+    // 목록에 Neon이 없어 Hydrogen으로 폴백하고, xhigh는 Hydrogen이 지원하는 high로 낮춘다.
+    assert.equal(args[args.indexOf("--model") + 1], "gemini-4-hydrogen");
+    assert.equal(args[args.indexOf("--effort") + 1], "high");
+    assert.match(fixture.stderr, /agy 가족 폴백: neon에서 hydrogen/);
+  });
 });
