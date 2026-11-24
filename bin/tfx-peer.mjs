@@ -27,6 +27,7 @@ import {
   agyConversation,
   discoverPeerTargets,
   formatPeerReply,
+  isClaudeCaller,
   matchPeerCandidates,
   resolveCodexTmuxThread,
   resolvePeerSender,
@@ -201,7 +202,10 @@ export async function main(args = process.argv.slice(2), deps = {}) {
     });
     return sendRemotePeer(envelope, deps);
   }
-  if (cli === "claude" && (env.CLAUDECODE === "1" || sender.cli === "claude"))
+  if (
+    cli === "claude" &&
+    (sender.cli === "claude" || (await isClaudeCaller(env, deps)))
+  )
     throw new Error("Claude-to-Claude uses native SendMessage, not tfx-peer");
   const header = `[tfx-peer from=${sender.cli}:${String(sender.name || sender.sessionId || "unknown").replace(/[\r\n\u2028\u2029]+/g, " ")} msg=${randomUUID()}]`;
   const footer = formatPeerReply(sender, cli, { platform });

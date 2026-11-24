@@ -8,6 +8,7 @@ import {
   doSend,
   formatPeerReply,
   formatPeerSendMessage,
+  isClaudeCaller,
   parsePeerToSpec,
   resolvePeerSender,
 } from "../../bin/tfx-live.mjs";
@@ -576,6 +577,54 @@ describe("tfx-live send", () => {
     });
     assert.deepEqual(fromPane, { cli: "agy", name: "pane-agy" });
   });
+
+  it("Claude 세션에서 떨어져 나온 Codex 데몬의 CLAUDECODE는 Claude 발신으로 보지 않는다", async () => {
+    // ppid 10 -> 20 -> 1 체인. 다른 CLI 세션 ID 가 있으면 CLAUDE_PID 가 조상일 때만 Claude 다.
+    const procDeps = {
+      ppid: 10,
+      execFileAsync: async () => ({ stdout: "  10    20\n  20     1\n" }),
+    };
+    const detached = {
+      CLAUDECODE: "1",
+      CLAUDE_PID: "999",
+      CODEX_THREAD_ID: "t-1",
+    };
+    assert.equal(await isClaudeCaller(detached, procDeps), false);
+    assert.equal(
+      await isClaudeCaller({ ...detached, CLAUDE_PID: "20" }, procDeps),
+      true,
+    );
+    assert.equal(
+      await isClaudeCaller(
+        { CLAUDECODE: "1", CODEX_THREAD_ID: "t-1" },
+        procDeps,
+      ),
+      false,
+    );
+    assert.equal(
+      await isClaudeCaller(detached, {
+        ...procDeps,
+        execFileAsync: async () => {
+          throw Object.assign(new Error("ps"), { code: "ENOENT" });
+        },
+      }),
+      false,
+    );
+    assert.equal(await isClaudeCaller({ CLAUDECODE: "1" }, procDeps), true);
+
+    const { deps } = makeFakeDeps({});
+    const sender = await resolvePeerSender({
+      env: detached,
+      deps: {
+        ...deps,
+        ...procDeps,
+        // 물려받은 CLAUDE_PID 로 Claude 세션 이름을 가져오면 안 된다.
+        resolveSenderName: async ({ env }) =>
+          env.CLAUDE_PID ? "original-claude" : null,
+      },
+    });
+    assert.deepEqual(sender, { cli: "codex", name: "codex" });
+  });
 });
 
 it("explicit --via-tmux remains available for a Codex target", async () => {
@@ -619,7 +668,7 @@ for (const cli of ["claude", "agy"]) {
       TMUX_PANE: "%7",
       CODEX_THREAD_ID: "inherited",
       ...(cli === "claude"
-        ? { CLAUDECODE: "1" }
+        ? { CLAUDECODE: "1", CLAUDE_PID: "20" }
         : { ANTIGRAVITY_CONVERSATION_ID: "current" }),
     };
     const options = {
@@ -628,7 +677,11 @@ for (const cli of ["claude", "agy"]) {
         { cli: "codex", name: "wrong", paneId: "%7", threadId: "inherited" },
         { cli, name: "sender", paneId: "%7", conversationId: "current" },
       ],
-      deps: { resolveSenderName: async () => null },
+      // Codex 셸 안에서 띄운 Claude 는 CLAUDE_PID 가 실제 조상이다.
+      deps: {
+        resolveSenderName: async () => null,
+        isAncestorPid: async (pid) => pid === 20,
+      },
     };
     assert.deepEqual(await resolvePeerSender(options), { cli, name: "sender" });
     assert.deepEqual(
