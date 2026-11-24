@@ -5915,33 +5915,53 @@ function matchPeerCandidates(candidates, query) {
   );
 }
 
-// pid가 현재 프로세스의 조상인지 본다. ps를 못 읽으면 조상으로 본다.
+// 프로세스 목록을 한 번 읽어 pid가 현재 프로세스의 조상인지 본다. 읽지 못하면 false다.
 async function isAncestorPid(pid, deps = {}) {
-  let current = deps.ppid ?? process.ppid;
-  for (let depth = 0; current > 1 && depth < 32; depth++) {
+  let rows;
+  try {
+    const { stdout } = await (deps.execFileAsync || execFileAsync)("ps", [
+      "-A",
+      "-o",
+      "pid=,ppid=",
+    ]);
+    rows = new Map(
+      stdout
+        .trim()
+        .split("\n")
+        .map((line) => line.trim().split(/\s+/).map(Number)),
+    );
+  } catch {
+    return false;
+  }
+  const seen = new Set();
+  for (
+    let current = deps.ppid ?? process.ppid;
+    current > 1 && !seen.has(current);
+    current = rows.get(current)
+  ) {
     if (current === pid) return true;
-    try {
-      const { stdout } = await (deps.execFileAsync || execFileAsync)("ps", [
-        "-o",
-        "ppid=",
-        "-p",
-        String(current),
-      ]);
-      current = Number(stdout.trim());
-    } catch {
-      return true;
-    }
+    seen.add(current);
   }
   return false;
 }
 
-// 데몬처럼 Claude 세션에서 떨어져 나온 프로세스는 CLAUDECODE만 물려받는다.
-// CLAUDE_PID가 있으면 그 Claude가 실제 조상일 때만 Claude 호출로 본다.
+// Claude 세션에서 띄운 Codex 데몬과 agy 는 CLAUDECODE 를 물려받는다. 그래서 다른 CLI 의
+// 세션 ID 가 함께 있으면 CLAUDE_PID 가 실제 조상으로 확인될 때만 Claude 호출로 본다.
 async function isClaudeCaller(env, deps = {}) {
   if (env.CLAUDECODE !== "1") return false;
+  if (!env.CODEX_THREAD_ID && !env.ANTIGRAVITY_CONVERSATION_ID) return true;
   const pid = Number(env.CLAUDE_PID);
-  if (!Number.isInteger(pid) || pid <= 1) return true;
+  if (!Number.isInteger(pid) || pid <= 1) return false;
   return (deps.isAncestorPid || isAncestorPid)(pid, deps);
+}
+
+// 물려받은 Claude 환경으로 다른 CLI 발신자의 이름을 찾지 않게 Claude 변수를 뺀다.
+function withoutClaudeEnv(env) {
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      ([key]) => key !== "CLAUDECODE" && !key.startsWith("CLAUDE_"),
+    ),
+  );
 }
 
 async function resolvePeerSender({
@@ -6022,7 +6042,9 @@ async function resolvePeerSender({
   }
 
   const resolveSender = deps.resolveSenderName || resolveSenderName;
-  const senderName = await resolveSender({ env });
+  const senderName = await resolveSender({
+    env: envCli === "claude" ? env : withoutClaudeEnv(env),
+  });
   if (senderName) {
     return { cli: envCli || "unknown", name: senderName };
   }
