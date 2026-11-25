@@ -23,15 +23,16 @@ test("setup installs and refreshes managed agy skills, including the version cac
   assert.equal(report.targets.find(({ name }) => name === "agy").status, "ok");
   assert.match(
     report.targets.find(({ name }) => name === "agy").detail,
-    /스킬 2개/,
+    /스킬 3개/,
   );
   assert.match(
     report.targets.find(({ name }) => name === "codex").detail,
-    /스킬 3개/,
+    /스킬 4개/,
   );
   for (const [name, source] of [
     ["tfx-live", "adapters/agy/skills/tfx-live/SKILL.md"],
     ["tfx-lead", "skills/tfx-lead/SKILL.md"],
+    ["tfx-comm", "skills/tfx-comm/SKILL.md"],
   ]) {
     assert.equal(
       readFileSync(join(skills, name, "SKILL.md"), "utf8"),
@@ -48,7 +49,7 @@ test("setup installs and refreshes managed agy skills, including the version cac
   assert.match(
     JSON.parse(refreshed.stdout).targets.find(({ name }) => name === "agy")
       .detail,
-    /스킬 2개/,
+    /스킬 3개/,
   );
   assert.equal(
     readFileSync(join(skills, "tfx-live/SKILL.md"), "utf8"),

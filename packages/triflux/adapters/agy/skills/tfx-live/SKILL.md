@@ -28,7 +28,7 @@ compact 뒤에는 스킬마다 앞부분만 다시 붙고, 한 세션에서 여�
 - 공유 daemon 에 로드된 Codex thread 에 `start --resume`을 반복하거나, 새 thread 를 만들거나, daemon 을 재시작하지 않는다. 권한 readback 은 다음 턴 적용 증거가 아니다.
 - 컨텍스트는 "컨텍스트 판단" 표를 쓴다. Claude 85% 는 바로 handoff, agy 12% 는 한 번 보고하고 계속한다. `--resume`한 세션은 재개 직후 잰다.
 - 같은 목표가 이어지면 compact, 담당, CLI, 모델이 바뀌면 handoff 다. 결과와 인계를 확인하면 바로 닫는다("리드 운영").
-- 리드 자기 세션의 compact, clear, exit 는 `tfx_control`을 먼저 쓴다. 도구가 없으면 compact 와 clear 만 `tfx-live compact`, `tfx-live clear`를 `--if-busy wait`로 백그라운드에 보낸다("수동 compact와 종료").
+- 리드 자기 세션의 compact, clear, exit 는 `tfx_control`을 먼저 쓴다. 도구가 없으면 Claude 와 Codex 의 compact 는 `tfx-live compact`, 세 CLI 의 clear 는 `tfx-live clear`를 `--if-busy wait`로 백그라운드에 보낸다. agy 의 compact 는 `/compact` 직접 입력이다("수동 compact와 종료").
 - Claude pane 에 `C-c`를 보내지 않는다.
 
 ## 전송 경로

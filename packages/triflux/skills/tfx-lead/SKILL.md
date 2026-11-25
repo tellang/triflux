@@ -21,7 +21,7 @@ compact 뒤에는 스킬마다 앞부분만 다시 붙고, 한 세션에서 여�
 - 머지는 CI 통과와 작성 벤더가 아닌 리뷰어의 통과가 둘 다 있어야 한다. 수정은 작성자가, 재확인은 같은 리뷰어가 한다. 리드가 대신 고치고 스스로 승인하지 않는다. 다른 두 벤더가 모두 비가용일 때만 같은 벤더의 새 세션이 리뷰한다(6절, `tfx-routing.md`).
 - 레인마다 `.worktrees/` 아래 별도 worktree 를 쓰고, 다른 레인 범위는 지시서에 "건드리지 않는다"로 적는다(7절).
 - 실제 HOME 으로 전체 테스트를 돌리지 않고 개발 체크아웃에서 `npm ci`를 실행하지 않는다. AI trailer 를 넣지 않는다. 권한 분류기가 막은 일은 다른 세션에 대신 시키지 않는다. 워커의 tmux 실측은 `-L` 전용 소켓만 쓴다(10절).
-- 컨텍스트는 `tfx-live` "컨텍스트 판단" 표의 CLI 별 비율로 잰다. Claude 85% 는 바로 승계한다. 리드 자신의 compact, clear, exit 는 `tfx_control`로 건다. clear 와 exit 는 인계 파일을 먼저 쓰고, 호출은 예약이라 응답을 짧게 끝낸다. 도구가 없는 Codex, agy 리드는 `tfx-live clear`를 쓴다(11절).
+- 컨텍스트는 `tfx-live` "컨텍스트 판단" 표의 CLI 별 비율로 잰다. Claude 85% 는 바로 승계한다. 리드 자신의 compact, clear, exit 는 `tfx_control`로 건다. clear 와 exit 는 인계 파일을 먼저 쓰고, exit 는 사용자가 끝내라고 했거나 승계 세션이 인계 파일을 받기로 했을 때만 쓴다. 호출은 예약이라 응답을 짧게 끝낸다. 도구가 없는 Codex, agy 리드는 `tfx-live clear`를 쓴다(11절).
 - 압박 critical 피어 메시지를 받으면 새 스폰을 멈추고 "압박 변화 대응" 표의 critical 행을 실행한다. 사용자 세션은 건드리지 않는다(3절).
 - 팀원 pane 은 종료 승인을 받은 뒤 `--agent-id`로 정확히 하나가 대조되고 자기 pane 이 아닐 때만 `kill-pane` 한다(3절).
 - MCP 후보의 설치, 인증, 등록 변경은 사용자 승인 뒤에만 한다("MCP 설치 제안").
@@ -101,7 +101,7 @@ Codex 리드는 mod 가 없으므로 `/rename <월>.<일> <역할>`을 직접 �
 
 ## 전송 수단
 
-세션 간 전송 규칙(로컬 Claude 끼리 `SendMessage`, 그 밖의 로컬 대상 `tfx-peer send`, 원격 `tfx-live ask`, 첫 입력 전 agy 세션, Windows, adopt)은 `tfx-live` 스킬의 "전송 경로" 절이 정본이다. 리드 쪽 차이만 적는다.
+세션 간 전송 규칙(로컬 Claude 끼리 `SendMessage`, 그 밖의 로컬 대상 `tfx-peer send`, 원격 피어 `tfx-peer remote-send`, 원격 세션의 사용자 입력 `tfx-live ask`, 첫 입력 전 agy 세션, Windows, adopt)은 `tfx-live` 스킬의 "전송 경로" 절이 정본이다. 리드 쪽 차이만 적는다.
 
 - 같은 세션 안 서브에이전트: Claude 리드는 Agent 도구(`model`, `effort`, `run_in_background`), Codex 리드는 `spawn_agent`와 추가 지시 `followup_task`.
 - 사용자에게 묻기: Claude 리드는 `AskUserQuestion`, Codex 리드는 답변에서 짧은 선택지로 묻는다.
