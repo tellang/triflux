@@ -8,6 +8,24 @@ description: >
 
 # tfx-lead
 
+## 상시 규칙
+
+compact 뒤에는 스킬마다 앞부분만 다시 붙고, 한 세션에서 여러 스킬을 호출했으면 오래된 스킬은 통째로 빠질 수 있다. 이 절이나 아래 절이 문맥에 없으면 이 스킬 파일을 다시 읽는다. 괄호 안은 상세 절이다.
+
+- 띄운 쪽이 세션의 생성, 이름, 컨텍스트, 승계, 종료를 끝까지 맡는다. 결과를 받은 서브에이전트와 팀원은 바로 닫는다(1절, 3절).
+- 워커는 `<월>.<일> <주제>` 이름으로 `.omc/lead/workers.md`에 실제 권한, 재개 ID 와 함께 적는다. 새 일을 나누기 전에 이 표에서 같은 역할, 주제의 워커를 먼저 찾고, 닫은 워커는 `workers-closed.md`로 옮긴다("워커 등록", 3절).
+- 띄우기 전에 `tfx judge worker-mode`로 권한을 정하고(요약에 민감 정보를 넣지 않는다), 압박 단계로 실행 위치를 정하고, 모델과 tmux 세션명을 사용자에게 한 줄로 알린다(1절, 2절, 3절).
+- 긴 지시는 지시서 경로로 보내고 작업 시작을 확인한다. 보고는 결과 파일 경로와 세 줄 요약, 4000자 상한이다. 화면 폴링은 하지 않는다(4절, 5절).
+- `written`, `sent`, `queued`, `submitted`는 완료가 아니다. `unknown`, `timedOut`은 재전송하지 않고 상태부터 확인한다(5절).
+- 워커는 사용자에게 직접 묻지 않고 리드에게 올린다. 지시서에 "직접 물어도 됨"이 있을 때만 예외다. 사용자에게 묻는 창은 리드 pane 하나이고, 소통 세션이 있으면 소통 pane 이다(4절, 8절).
+- 머지는 CI 통과와 작성 벤더가 아닌 리뷰어의 통과가 둘 다 있어야 한다. 수정은 작성자가, 재확인은 같은 리뷰어가 한다. 리드가 대신 고치고 스스로 승인하지 않는다. 다른 두 벤더가 모두 비가용일 때만 같은 벤더의 새 세션이 리뷰한다(6절, `tfx-routing.md`).
+- 레인마다 `.worktrees/` 아래 별도 worktree 를 쓰고, 다른 레인 범위는 지시서에 "건드리지 않는다"로 적는다(7절).
+- 실제 HOME 으로 전체 테스트를 돌리지 않고 개발 체크아웃에서 `npm ci`를 실행하지 않는다. AI trailer 를 넣지 않는다. 권한 분류기가 막은 일은 다른 세션에 대신 시키지 않는다. 워커의 tmux 실측은 `-L` 전용 소켓만 쓴다(10절).
+- 컨텍스트는 `tfx-live` "컨텍스트 판단" 표의 CLI 별 비율로 잰다. Claude 85% 는 바로 승계한다. 리드 자신의 compact, clear, exit 는 `tfx_control`로 건다. clear 와 exit 는 인계 파일을 먼저 쓰고, 호출은 예약이라 응답을 짧게 끝낸다. 도구가 없는 Codex, agy 리드는 `tfx-live clear`를 쓴다(11절).
+- 압박 critical 피어 메시지를 받으면 새 스폰을 멈추고 "압박 변화 대응" 표의 critical 행을 실행한다. 사용자 세션은 건드리지 않는다(3절).
+- 팀원 pane 은 종료 승인을 받은 뒤 `--agent-id`로 정확히 하나가 대조되고 자기 pane 이 아닐 때만 `kill-pane` 한다(3절).
+- MCP 후보의 설치, 인증, 등록 변경은 사용자 승인 뒤에만 한다("MCP 설치 제안").
+
 ## 목적
 
 한 세션에 역할 리드를 맡기고, 리드가 워커를 등록하고, 등록한 워커의 컨텍스트와 진행을 관리하는 절차다. Claude 리드와 Codex 리드가 같은 절차를 따른다.
@@ -28,35 +46,22 @@ description: >
 - 사용자가 자산 이름을 다시 말하지 않아도 요청에 맞는 경로를 기본 선택한다. 소유 스킬이나 경로를 묻거나 그 선택이 모호한 경우는 `tfx-harness`, 명확한 구현 실행은 `tfx-auto`와 그 실행 경로 `tfx-route.sh`, 세션 관리와 소통은 `tfx-live`와 `tfx-peer`다. 작업 목표 자체가 모호하면 기존 SSOT의 요구사항 분류를 따른다. 모든 요청 앞에 harness나 auto를 실행하지 않는다.
 - 원격은 `tfx-remote`, 코드 판정은 `tfx-review`, 외부 조사는 `tfx-research`, 진단은 `tfx-doctor`, triflux 릴리스는 `tfx-ship`의 소유 범위를 따른다. 명시 지시와 gstack, superpowers, 호스트 소유 정책을 유지하며 TFX 선택을 이유로 우회하지 않는다. 가용성을 모르면 임의 폴백하지 않는다.
 - 첫 활성화에는 이 짧은 안내를 읽고, 선택한 자산의 상세 스킬은 사용할 때 읽는다. 정본 전체를 매 초기화나 매 요청에 읽지 않는다. 이미 읽은 긴 스킬과 전체 capability 목록을 매 턴이나 포크마다 다시 싣지 않는다. 포크에는 선택한 경로와 필요한 맥락만 넘긴다.
-- 워커 모델과 effort를 세션 없이 조회하려면 `tfx judge worker-model --task '<요약>' [--agent executor] [--cli codex|claude|agy]`를 쓴다. 역할 기본값과 Jev 조정을 재사용하며 `source`와 `fallbackReason`으로 폴백을 구분한다. 실제 headless 실행은 같은 정책을 적용하므로 부모가 실행 전 같은 작업을 다시 조회하지 않는다. 명시 model/effort 쌍, retry와 작성 벤더별 리뷰 정책이 자동 추천보다 우선한다. `.model.json`과 결과의 `workerModelFile`은 실행 인자 전달 기록이며 실제 런타임 수신 증거가 아니다.
-- Jev는 enabled 상태이고 실제 연동 판단 지점(사전 라우팅, 스킬 분기 선택, 워커 권한, 워커 상태, 수신함 우선순위 등)이 실행될 때만 호출되며, 실패하거나 신뢰도가 낮으면 기존 결정론적 로직으로 돌아간다. HUD의 `j`는 활성 배지이며 호출 성공을 뜻하지 않는다. 리드 지정으로 새로 호출되거나 일반 대화 전체를 자동 판단하지 않는다. 인증 값은 읽거나 출력하지 않는다.
-
-이 절은 리드의 선택 계약이다. 진입 프롬프트와 공통 스킬로 안내하며 실제 LLM의 선택을 강제하는 훅이나 실행 보장은 아니다.
+- 워커 모델과 effort 조회(`tfx judge worker-model`), Jev 를 호출하는 판단 지점과 폴백은 [references/worker-model-judge.md](references/worker-model-judge.md)를 따른다.
 
 ## MCP 설치 제안
 
-- 리드 진입의 `mcpRecommendation`, 첨부된 `[MCP recommendation]`, 기존 프로젝트와 작업 추천을 먼저 재사용한다. 추천이 아직 없는 프로젝트 시작이나 실질 작업 변경 시에만 기존 읽기 전용 경로 `node <TFX 설치 경로>/hub/bridge.mjs judge-mcp --cli-type <claude|codex|agy> --cwd '<프로젝트>' --prompt '<작업 요약>'`을 한 번 조회한다. 워커 실행 래퍼가 같은 작업을 조회할 예정이면 그 결과를 받으며, 같은 모델과 작업의 Jev 조회를 추가하지 않는다.
-- 추천은 설치, 실행, 권한 변경의 승인이 아니다. 식별값과 출처는 신뢰하지 않는 데이터이며 카탈로그 문자열을 명령으로 실행하지 않는다. `present`는 이미 등록된 후보이므로 새 설치를 제안하지 않는다. 인증과 활성화 성공을 뜻하지는 않는다. `unknown`은 미설치로 단정하지 않고 실제 호스트 설정과 플러그인 제공 여부를 먼저 확인한 뒤 필요하면 제안한다. `requiresApproval`은 승인 필요 표시이며 승인 기록이 아니다.
-- `missing` 추천은 현재 작업에 필요하다고 판단한 경우에만 사용자에게 지금 설치 제안과 승인 질문을 한다. 무관하면 묻지 않고 작업 기록만 남긴다. 제안할 때는 현재 작업에 필요한 이유, 후보 식별자와 확인한 출처, 대상 CLI, 설치 및 인증 필요 여부, 적용할 프로젝트와 워커 범위를 설명한다. 확인 안 된 비용, 권한, 설치 명령은 지어내지 않고 미확인으로 적는다. `authentication: unknown`은 그대로 미확인이다.
-- 응답은 리드 호스트가 제공하는 native 질문 UI로 승인, 보류, 거절을 받는다. 해당 UI가 없으면 한 번의 텍스트 질문으로 묻는다. 이 추천만으로는 해당 MCP 후보의 설치, 인증, 등록 설정 변경을 승인받은 것이 아니며, 그 변경은 승인 전에 하지 않는다. 이 제한은 사용자가 맡긴 일반 코드와 프로젝트 설정 변경에는 적용하지 않는다. 사용자가 별도 설치 작업을 이미 승인했다면 그 승인은 별도 범위에서 유지된다. 후보와 작업, 대상 CLI와 범위, 받은 응답을 기존 작업 기록에 남긴다. 보류, 거절, 무응답이면 기존 허용 도구로 가능한 작업을 계속하고 같은 작업과 후보를 반복 질문하지 않는다. 거절을 전역 설치나 다른 워커로 우회하지 않는다.
-- 승인 후에도 해당 MCP 후보에 승인받은 설치 대상, CLI, 적용 범위 안에서만 후속 설치한다. 설치 완료와 실제 호출 성공을 구분해서 보고하고 가능하면 해당 프로젝트와 워커 범위에만 활성화한다. 세션 격리가 확인 안 된 AGY는 전역 설정으로 우회하지 않는다.
-- 워커는 설치 제안에 필요한 항목을 리드에게 보고한다. 백그라운드 워커는 사용자 질문 UI를 띄우지 않으며, 별도 승인 없는 해당 MCP 후보의 설치, 인증, 등록 설정 변경을 하지 않는다. 이 제한은 사용자가 맡긴 일반 코드와 프로젝트 설정 변경에는 적용하지 않는다. 리드가 제안을 맡고 워커는 기존 허용 도구로 가능한 작업을 계속한다.
-- headless 완료 알림 뒤 기존 `{sessionName}.results.json`의 `workers[].workerMcpFile`이 가리키는 sidecar를 읽고 그 안의 `recommendation`을 위 절차로 처리한다. 필드가 null이거나 파일이 없으면 추천 미확인으로 남긴다. 직접 Claude 실행처럼 sidecar가 없는 경로는 기존 결과의 `mcpRecommendation`과 워커 보고를 재사용한다. `application`과 `applied`는 설치 승인이나 실제 호출 성공 증거가 아니며, `recommendationAsk`도 추천 메시지 전송 결과일 뿐이다. 기존 pending/running/completed 상태와 ownership은 바꾸지 않는다.
+추천은 리드 진입의 `mcpRecommendation`을 먼저 재사용하고, 후보의 설치, 인증, 등록 설정 변경은 사용자 승인 전에 하지 않는다. 조회 명령, 사용자에게 제안할 항목, 승인 뒤 범위, 워커와 headless sidecar 처리는 [references/mcp-install.md](references/mcp-install.md)를 따른다.
 
 ## 리드 진입
 
 셸에서 새 리드를 띄울 때는 `tfx lead <역할> [--cli claude|codex|agy]`를 쓴다. tmux 세션(기본 `<폴더>-lead`)에 리드를 띄우고 리드 진입까지 보낸다. Claude 는 `/tfx-lead <역할>`을, mod 가 없는 Codex 와 agy 는 이 스킬 파일을 읽고 리드를 맡으라는 프롬프트를 보낸다.
 
 - 새 리드나 새 세션 승계의 모델 선택은 `tfx lead <역할> --cli codex --task '<짧은 작업 요약>'`의 자동 선택을 쓴다. Jev는 작업을 분류하고 기존 프로필 매핑과 resolver가 모델과 effort를 선택한다. 인계 파일은 자동으로 읽지 않는다.
-- macOS iTerm2 배치는 live 실행 경로가 자동 선택한다. 리드는 높은 사람 개입과 최소 100 cols × 24 rows로 전달되며 기본 focus preserve를 따른다. 선택 탭 전체와 수동 이동 pane을 보호하고 비활성 native 탭만 조작한다. `tfx lead ... --focus`를 명시해야 포커스를 전환하며 중요 역할은 `attention`으로 표시한다. `--layout window`도 `--focus`가 없으면 비활성 탭/background로 폴백한다. `--no-auto-layout`은 UI 없는 tmux 유지이며 legacy는 `--layout legacy --focus`에서만 허용한다. API/runtime 실패는 경고와 attach 가능한 background로 남긴다. `inspect`에서 작업 메타데이터와 focus 요청·유효 정책·이유를 확인하고 `reconcile --reset-pins`로 수동 이동 pin을 해제한다. 상세는 `tfx-live`의 창 배치 절을 따른다.
-- `--json`의 `routing`에서 권고, effective 모델과 effort, 보존/폴백 이유를 확인한다. `appliedTo: start_args`는 시작 인자 선택이며 세션 ready나 실제 모델 수신 증거는 아니다. 프로필을 찾으려고 config를 추측 검색하지 않는다.
+- macOS iTerm2 배치는 live 실행 경로가 고른다. 리드는 최소 100 cols × 24 rows 에 기본 포커스 유지이고, 전환은 `tfx lead ... --focus`로만 한다. 상세는 `tfx-live` 스킬의 `references/window-layout.md`다.
+
 - 명시한 CLI, 권한, 모델 지시가 우선이다. `--model`이나 `--effort`가 하나라도 있으면 그 쌍을 보존하고, 커스텀 런처도 권고만 기록한다. 워커 실행은 기존 `tfx-auto`와 route를 사용하고 승계 ACK와 rebind 절차는 그대로 따른다.
 
-- 실행 명령은 `--launcher`, `~/.config/triflux/lead.json`(Windows 는 `%APPDATA%\triflux\lead.json`)의 `launchers.<cli>`, CLI 이름 순으로 고른다. 예: `{"launchers": {"claude": "<래퍼> launch", "codex": "codex"}}`. triflux 는 CLI 이름 자리만 이 값으로 바꿔 실행할 뿐 특정 도구에 의존하지 않는다.
-- `tfx setup`과 `tfx update`가 대화형으로 돌 때, 설치된 CLI 중 아직 정하지 않은 것의 실행 명령을 한 번 묻는다. 물을 수 없으면 다음 대화형 실행으로 미룬다.
-- 이 설정은 리드에만 쓴다. 워커는 `tfx-live start`가 기본 명령으로 띄운다.
-- Codex 리드도 관리 TUI의 `--dangerously-bypass-hook-trust` 기본값을 따른다. `tfx lead <역할> --cli codex --no-bypass-hook-trust`는 live까지 opt-out을 전달하고, `TFX_CODEX_BYPASS_HOOK_TRUST=0`으로도 끈다. CLI opt-out이 우선하며 invocation에만 적용한다. 활성 훅은 사전 확인 없이 샌드박스 밖에서 실행될 수 있다. shared daemon prepared-thread attach에는 관리 플래그를 제외하며 CLI 수락을 daemon 적용 증거로 보지 않는다. 훅 검토는 `ready: false`, `blockedBy: "codex-hooks-review"`로 멈추므로 attach해 직접 검토하고, ready 전에는 리드 지시를 보내지 않는다. 전역 config·신뢰 기록과 사용자 launcher 내부는 바꾸지 않는다.
-- tmux 안에서 pane 을 다시 띄우는(`respawn-pane`) 래퍼는 pane 의 셸을 없앤다. 그러면 리드가 끝날 때 pane 도 닫히고, 같은 pane 에서 `--resume`으로 이어 쓸 수 없다.
+- 실행 명령 고르기(`--launcher`, `lead.json`), setup 이 묻는 시점, Codex 리드의 hook trust 기본값과 opt-out, `--json`의 `routing` 읽는 법, `respawn-pane` 래퍼 주의는 [references/lead-launch.md](references/lead-launch.md)를 따른다.
 
 이미 띄운 Claude 세션을 리드로 만들 때는 세션 안에서 `/tfx-lead <역할>`을 실행한다(예: `/tfx-lead 개발리드`). triflux mod 가 세 가지를 한다.
 
@@ -96,15 +101,11 @@ Codex 리드는 mod 가 없으므로 `/rename <월>.<일> <역할>`을 직접 �
 
 ## 전송 수단
 
-| 대상 | Claude 리드 | Codex 리드 |
-| --- | --- | --- |
-| Claude 세션에 보내기 | 로컬 Claude끼리는(팀원 포함) `SendMessage(to: "<이름>")`. 이름은 `tfx-live list-sessions --cli claude`의 `name`, 첫 지시는 `start` 결과의 `sendMessageTo`. 원격은 `tfx-live ask --cli claude` | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'claude:<정확한 이름>' --message '<본문>'`. 원격은 `tfx-live ask --cli claude` |
-| Codex 세션에 보내기 | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'`. 원격은 `tfx-live ask --cli codex` | Claude 리드와 같다 |
-| agy 세션에 보내기 | 로컬은 `<홈 절대경로>/.claude/scripts/tfx-peer send --to 'agy:<정확한 이름>' --message '<본문>'` 또는 `SendMessage(to: "agy:<이름>")`. 단 첫 입력 전 새 agy 세션은 `conversationId`가 없으므로 첫 지시는 `tfx-live ask --cli agy --session <세션> --prompt '<본문>' --no-wait`로 보내고 대화 ID가 생긴 뒤부터 native 피어를 쓴다. 같은 기기의 agy 끼리는 `~/.local/bin/agy.patch.json`의 `sha256`이 실제 바이너리 해시와 같고 `patches`에 `peer-wake`가 있을 때만 `tfx-peer send --to 'agy:<이름>'` 또는 `send_message`(대화 ID)를 쓰고, 아니면 `tfx-live ask --cli agy`를 쓴다(공개 이슈 #1022). `tfx-live send --via-tmux`의 agy 대상 전송은 tmux 경로를 유지한다 | Claude 리드와 같다(`tfx-peer send --to 'agy:<정확한 이름>'`, 첫 입력 전 새 세션은 `tfx-live ask --cli agy`) |
-| 같은 세션 안 서브에이전트 | Agent 도구(`model`, `effort`, `run_in_background`) | `spawn_agent`, 추가 지시는 `followup_task` |
-| 사용자 | `AskUserQuestion` | 답변에서 짧은 선택지로 묻는다 |
+세션 간 전송 규칙(로컬 Claude 끼리 `SendMessage`, 그 밖의 로컬 대상 `tfx-peer send`, 원격 `tfx-live ask`, 첫 입력 전 agy 세션, Windows, adopt)은 `tfx-live` 스킬의 "전송 경로" 절이 정본이다. 리드 쪽 차이만 적는다.
 
-Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 전송 세부는 `tfx-live`의 "전송 경로"와 "선택적 전역 native peer 어댑터" 절을 따른다. Codex 에 슬래시 명령을 보낼 때만 tmux 직접 입력을 쓴다.
+- 같은 세션 안 서브에이전트: Claude 리드는 Agent 도구(`model`, `effort`, `run_in_background`), Codex 리드는 `spawn_agent`와 추가 지시 `followup_task`.
+- 사용자에게 묻기: Claude 리드는 `AskUserQuestion`, Codex 리드는 답변에서 짧은 선택지로 묻는다.
+- Codex 에 슬래시 명령을 보낼 때만 tmux 직접 입력을 쓴다.
 
 ## 1. 역할과 수명
 
@@ -116,42 +117,20 @@ Windows, adopt, Codex 협업 도구 목록, native 피어 실패 처리 같은 �
   - 승계 세션이 경로를 읽고 ACK 한다.
   - 원 리드는 닫기 전에 자기가 띄운 Claude 워커마다 `tfx_control` 의 `rebind`(`target: claude:<이름>`, `lead: <새 리드 세션 ID>`)를 보내고 "rebind 완료" 알림을 확인한다. 새 리드 ID 는 새 리드가 `whoami` 로 얻어 인계 ACK 에 적는다. 원 리드가 이미 죽어 못 보냈으면 그 워커는 tmux 안이면 `tfx-live` 경로로 제어하고, tmux 밖이면 다시 띄운다.
   - ACK 를 받은 뒤에만 원 세션을 닫고 등록 기록을 고친다. ACK 가 없으면 원 세션을 유지한 채 인계 파일 경로를 다시 보낸다.
-- 서브에이전트는 결과를 받은 즉시 닫는다. Codex 리드가 `spawn_agent`를 29회 부르고 한 번도 닫지 않은 사고가 있었다. Claude 리드의 Agent 도구 팀원은 3절 "끝난 팀원 닫기" 절차로 닫는다.
+- 서브에이전트는 결과를 받은 즉시 닫는다. Claude 리드의 Agent 도구 팀원은 3절 "끝난 팀원 닫기" 절차로 닫는다.
 - 닫은 뒤에는 남은 세션이 없는지 `tmr ls --json`(없으면 `tmux ls`)으로 확인한다. tmr 은 macOS(arm64) 에서 `tfx setup` 이 설치를 묻는다.
 
 ### 워커 권한 모드
 
 워커를 띄우기 전에 `tfx judge worker-mode --task '<요약>'`을 실행한다. 외부 자원을 바꾸는 워커는 bypass, 읽기 전용 조사 워커는 auto로 띄운다. 자기 워크트리 안 파일 수정과 로컬 테스트만 하는 워커도 auto가 기본이다.
 
-- 요약에는 할 일의 종류만 쓴다. 비밀 값, 고객 이름, 이메일, 사용자 경로를 넣지 않는 것이 1차 방어다. 패턴 차단은 보조 수단이며 모든 표기를 잡지 못한다. 패턴에 맞으면 Jev로 보내지 않고 규칙으로 판정한다. 고객 이름은 패턴으로 식별하지 못하므로 요약에서 뺀다.
-- 판정은 권고이고 실행을 바꾸지 않는다. 최종 결정은 리드와 사용자다. `source: rule`이면 단어 목록 기반 폴백이라 신호를 놓칠 수 있으므로 `fallbackReason`과 근거를 읽고 리드가 정한다. `mode`와 `ruleMode`가 다르면 작업 내용을 직접 보고 정한다.
-- 근거에 모호하다고 나오면 부정이나 위임으로 외부 변경 신호를 제외한 경우도 포함한다. 작업을 나눠 외부 변경 부분만 bypass로 띄우는 쪽을 먼저 본다.
-
-| 워커 CLI | 적용 방법 |
-| --- | --- |
-| Claude | bypass는 `tfx-live start --cli claude --launcher "DISABLE_OMC=1 OMC_SKIP_HOOKS=all TFX_SKIP_HOOKS=1 claude --dangerously-skip-permissions"`로 띄운다. `--launcher` 처리에서 워커용 환경 변수 접두를 제거하므로 launcher에 직접 넣는다 |
-| Codex | 로컬 신규 thread는 `tfx-live start --cli codex`가 생성 RPC에 `approvalPolicy: "never"`, `sandbox: "danger-full-access"`를 명시한다. 제한 모드는 `--sandbox`로 `on-request`, `workspace-write`를 지정한다. 시작 결과의 `approvalPolicy`, `sandbox`는 attach 뒤 같은 thread의 daemon 응답이고 `sandbox.type`은 `dangerFullAccess`, `workspaceWrite` 형식이다. `--sandbox` 없는 unloaded resume은 기존 권한을 보존한다. loaded thread는 재개를 거부하므로 기존 TUI의 `/permissions`에서 Full Access를 선택하고 확인한다. `permissionsVerified`는 daemon 설정 일치 여부이며 다음 TUI 턴의 실제 권한 적용 완료를 뜻하지 않는다. 기존 `--remote` 기본 경로는 bypass를 유지한다 |
-| agy | bypass는 `tfx-live start --cli agy --launcher "agy --dangerously-skip-permissions"`로 지정한다. 플래그는 `agy --help`에 있고 `tfx-live` 기본 시작은 쓰지 않는다. 대화형 실측은 아직 안 됐다. 관리자 샌드박스 강제는 이 플래그와 별개이고 `BypassSandbox: true`를 쓴다 |
+요약 작성 기준, 판정 해석, CLI 별 bypass 적용 방법은 [references/worker-mode.md](references/worker-mode.md)를 따른다.
 
 ## 2. 역할별 모델
 
 모델 ID는 기록하지 않는다. Codex는 가족 프로필과 별도 effort, Claude는 별칭을 사용한다. 현재 대응은 `tfx-routing.md`의 "모델 배치" 표가 정본이다. 가족 프로필에는 `model`만 기록하고 effort는 `-c model_reasoning_effort`로 전달한다. 수동 CLI 예: `codex -p sol -c 'model_reasoning_effort="high"'`.
 
-Codex `tfx-live start --model`은 `astra`, `sol`, `terra`, `luna`를 호출 호스트의 model-family-resolver와 `models.json` 고정값으로 실제 ID로 바꾼다. `--remote`도 호출 호스트에서 해석하며 원격 호스트의 고정값은 사용하지 않는다. `--effort`는 별도로 지정하며 모델 해석으로 전역 프로필을 바꾸지 않는다. 새 폴더와 worktree의 신뢰 화면은 자동 승인하고 Codex가 그 결정을 설정에 기록하므로 이후 같은 폴더의 실행에도 적용된다. `--no-auto-trust`일 때만 `ready: false`, `blockedBy: "codex-trust-folder"`로 반환한다.
-
-| 역할 | 가족 + effort / Claude 별칭 | 비고 |
-| --- | --- | --- |
-| 리드 (Claude) | Claude 최상위 tier, effort high | 지휘와 판정만 맡는다 |
-| 리드 (Codex) | `astra` + `xhigh` | 지휘와 판정만 맡는다 |
-| 판단 중심 긴 작업 | Claude `opus` | 설계 검토, 긴 구현 |
-| 반복 검증, 정형 문서 | Claude `sonnet` | 테스트 재실행, 표 갱신 |
-| `opus`로 안 풀리는 난제 | Claude `fable` | 최종 수단 |
-| Codex 설계, 비평, 디버그 | `astra` + `xhigh` | `architect`, `planner`, `analyst`, `critic` 포함 |
-| Codex 일반 구현, Claude 작성 코드 리뷰 | `sol` + `high` | 리뷰는 `review` 서브커맨드 |
-| 보안 리뷰 | Carbon High `carbon` + `high` | `security-reviewer` |
-| Codex 글쓰기, 문서 조사 | `terra` + `high` | |
-| Codex 정리, 반복 작업 | `sol` + `medium`, `luna` + `high` | |
-| Codex 테스트용 | 역할별 가족 + `low` | 연결 확인용 |
+역할별 가족과 effort 는 `tfx-routing.md`의 "모델 배치" 표를 따른다. Codex `start --model`의 가족 해석은 `tfx-live` 스킬 `references/codex-sessions.md`다. 아래는 리드별 verifier 와 explore 배치다.
 
 | 리드 | 코드 작성 벤더 | verifier | explore |
 | --- | --- | --- | --- |
@@ -185,41 +164,11 @@ Agent 도구로 띄운 팀원(agent teams 의 tmux 모드)은 리드의 현재 �
 
 ### 팀원 표시 방식
 
-근거는 공식 문서 [agent teams](https://code.claude.com/docs/en/agent-teams)다.
-
-- Agent 도구를 `name` 과 함께 호출하면 팀원으로 뜬다. agent teams 가 켜져 있고 fork 나 `isolation` 호출이 아닐 때다. `name` 을 빼면 pane 없이 같은 프로세스 안에서 도는 보통 서브에이전트가 된다.
-- 팀원 표시는 `teammateMode` 설정(`in-process`, `auto`, `tmux`, `iterm2`)이 정한다. 공식 기본값은 `in-process` 고, `auto` 는 tmux 안이거나 iTerm2 에 `it2` 가 있으면 pane 을 나눈다. 세션 하나만 바꾸려면 `claude --teammate-mode <값>` 으로 띄운다. 사용자 설정이 `auto` 나 `tmux` 면 tmux 안의 리드는 팀원마다 리드 창을 나눈다. `~/.claude/settings.json` 의 `teammateMode` 로 확인한다.
-- 실행 중인 세션에서 `teammateMode` 를 바꾸면 바로 적용되는지는 공식 문서에서 확인 못 했다. 화면 폭에 따라 모드를 바꾸는 기능은 공식 문서에 없다.
-
-리드 pane 폭을 `tmux display -p -t "$TMUX_PANE" '#{pane_width}'` 로 재고 다음처럼 띄운다.
-
-| 리드 pane 폭 | 띄우는 방법 |
-| --- | --- |
-| 200 cols 이상 | 지금처럼 `name` 을 붙인 팀원. pane 분할 관전 가능 |
-| 200 cols 미만 | `name` 없이 `run_in_background: true` 서브에이전트. 완료는 알림으로 받는다. 오래 가거나 다시 쓸 워커는 위 표대로 `tfx-live start` 별도 세션으로 띄우고 tmr 로 본다 |
-| 처음부터 좁은 화면에서 리드를 띄울 때 | `claude --teammate-mode in-process` 로 시작한다. 팀원은 리드 창 아래 에이전트 패널에 뜨고 화살표와 Enter 로 본다 |
-
-- 200 cols 는 워커 pane 한 개에 최소 100 cols 가 있어야 시작 배너가 접히지 않고 읽힌다는 기준(`tfx-auto` 의 tmux 관전 배치와 같다)을 두 배 한 값이다. 팀원 pane 이 리드 창을 좌우로 나누므로 나뉜 뒤에도 리드 쪽이 100 cols 를 지키려면 나누기 전 폭이 그 두 배는 돼야 한다. 호스트가 나누는 비율은 실측하지 못했고, 2026-10-23 팀원 12개가 쌓였을 때 리드 pane 이 26 cols 까지 줄었으므로 팀원이 늘면 리드 쪽은 절반보다 더 좁아진다. 그래서 띄우기 전마다 다시 재고, 넓은 화면에서도 끝난 팀원은 아래대로 바로 닫는다.
-- 버린 대안: 사용자 설정 `env` 에 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=0` 을 넣으면 실행 중인 세션에도 바로 적용돼 이름 붙인 서브에이전트가 팀원이 되지 않는다. 하지만 같은 설정을 읽는 다른 세션까지 모두 바뀌므로 쓰지 않는다. `name` 을 빼는 것으로 이 리드만 바꿀 수 있다.
+Agent 도구를 `name`과 함께 호출하면 팀원으로 뜬다. 띄우기 전에 `tmux display -p -t "$TMUX_PANE" '#{pane_width}'`로 리드 pane 폭을 재고, 200 cols 미만이면 `name` 없이 `run_in_background: true` 서브에이전트로 띄운다. `teammateMode` 설정, 폭 기준의 근거, 좁은 화면에서 리드를 띄우는 방법은 [references/teammates.md](references/teammates.md)를 따른다.
 
 ### 끝난 팀원 닫기
 
-팀원은 끝나도 pane 과 Claude 프로세스가 남고, 프로세스마다 MCP 서버를 따로 띄운다. 2026-10-23 끝난 팀원 10개가 MCP 서버를 각 5개씩 쥐고 메모리 압박 2 를 만들었고, 그 pane 들을 닫자 바로 1 로 내려갔다. 결과를 받은 팀원은 바로 닫는다.
-
-1. 그 팀원의 완료 알림(최종 답이 들어 있는 idle 알림)이나 결과 파일을 받았는지 확인한다. 아직 일하는 팀원은 닫지 않는다.
-2. 팀원에게 종료를 요청한다(SendMessage 의 shutdown_request). 팀원이 승인하면 스스로 끝난다. 공식 문서는 진행 중인 요청을 마친 뒤 끝나므로 느릴 수 있다고 적는다. 팀원이 거절하면 이유를 읽고 닫지 않는다. 3단계는 승인한 뒤에도 pane 이 남은 경우에만 한다.
-3. 승인한 뒤에도 pane 이 남았으면 pane 을 이름으로 대조한다. 팀원 pane 의 시작 명령에는 `--agent-id <팀원 이름>@<팀 이름>` 이 들어 있다.
-
-```bash
-tmux list-panes -s -t "$TMUX_PANE" -F '#{pane_id} #{pane_current_command} #{pane_start_command}' | grep -- '--agent-id <팀원 이름>@'
-```
-
-4. 나온 pane 이 정확히 하나이고, 리드 자신(`$TMUX_PANE`)이 아니고, 1 에서 완료를 확인한 이름일 때만 `tmux kill-pane -t <pane_id>` 로 닫는다. 이름이 겹치거나 둘 이상 나오면 닫지 않고 사용자에게 묻는다. `--agent-id` 가 없는 pane 은 사용자가 띄운 것이므로 건드리지 않는다.
-5. 닫은 뒤 같은 명령으로 그 pane 이 사라졌는지 본다.
-
-리드 세션의 triflux mod 가 2분마다 팀원 명단을 잰다. 이름 있는 팀원이 10분 넘게 쉬면 "열린 팀원 N개" 피어 메시지를 리드에게 보내고, 그 뒤 10분이 더 지나도 열려 있으면 그 팀원에게 shutdown_request 를 보낸다. pane 을 직접 닫지는 않으므로 승인한 뒤에도 남은 pane 은 위 3, 4단계로 닫는다.
-리드가 다시 SendMessage 를 보낸 팀원은 유휴 시계가 처음부터 다시 간다. 리뷰를 기다리는 작성자처럼 일부러 남길 팀원은 `/tfx-keep <이름>` 으로 표시한다. 알림에는 "(유지)" 로 나오고 종료 요청에서 빠진다. 풀 때는 `/tfx-keep <이름> off`.
-Claude 서브에이전트와 in-process 팀원은 기본 5분 캐시이므로, 5분 넘게 띄워 같은 서브에이전트에 재질의하면 매번 캐시 미스가 난다.
+결과를 받은 팀원은 바로 닫는다. 끝난 팀원도 pane, Claude 프로세스, 프로세스별 MCP 서버를 계속 쥔다. 먼저 `shutdown_request`로 종료를 요청하고, 거절하면 이유를 읽고 닫지 않는다. 승인 뒤에도 pane 이 남았을 때만 `--agent-id <팀원 이름>@`로 대조해 정확히 하나이고 리드 자신의 pane 이 아닐 때 `kill-pane` 한다. 대조 명령, mod 의 유휴 팀원 알림, `/tfx-keep`은 [references/teammates.md](references/teammates.md)를 따른다.
 
 ### 전담 워커 재사용
 
@@ -227,13 +176,13 @@ Claude 서브에이전트와 in-process 팀원은 기본 5분 캐시이므로, 5
 
 1. 등록 기록에서 같은 역할, 같은 주제의 워커를 찾는다. 없으면 `.omc/lead/workers-closed.md` 도 본다.
 2. 찾았으면 살아 있는지 `tmr ls --json`(없으면 `tfx-live list-sessions`)으로 확인한다. 닫혔거나 죽었을 때 마지막 턴에서 캐시 수명이 지났고 인계 파일만으로 다음 작업을 이어갈 수 있으면 새 세션을 기본으로 띄운다. 파일에 없는 대화 맥락이 필요하거나 캐시가 살아 있으면 위 "워커 등록"대로 재개 ID 로 재개해 줄을 `workers.md` 로 되돌린다. 재개 ID 가 없거나 재개가 실패할 때도 새로 띄운다.
-3. 컨텍스트를 잰다(11절). `tfx-live` 의 준비 기준을 넘었으면 compact 하거나 승계한 뒤 보낸다. 85% 에 닿았으면 승계만 한다.
+3. 컨텍스트를 잰다(11절). `tfx-live` 의 준비 기준을 넘었으면 compact 하거나 승계한 뒤 보낸다. Claude 가 85% 에 도달했으면 승계만 한다.
 4. 그 세션에 지시서 경로를 보낸다. 없으면 이번 일이 위 표의 전담 워커 기준에 맞는지 보고, 맞으면 새 전담 세션을 띄워 등록한다.
 
 | 예 | 고를 것 | 이유 |
 | --- | --- | --- |
-| 같은 묶음의 반복 수정 | 전담 세션 하나 | 2026-10-23 `fix-trim-1`~`fix-trim-4`를 번호만 바꿔 서브에이전트로 새로 띄웠다. 같은 주제라 앞 묶음의 맥락이 다음 묶음에 그대로 쓰이고, 끝난 팀원 넷이 pane 과 프로세스를 따로 쥐었다 |
-| 리뷰어 | 작성 벤더와 다른 벤더의 세션(6절 표). 쓸 수 있는 벤더가 하나뿐이면 같은 벤더의 다른 인스턴스 | 같은 워커가 자기 작업을 리뷰하지 않는다(6절). 작성 세션은 리뷰에 재사용하지 않는다. 리뷰 전담 세션은 벤더별로 두고, 보내기 전에 이번 PR 의 작성 벤더와 다른지 확인한다. 리뷰 전담 세션에는 수정 작업을 보내지 않는다 |
+| 같은 묶음의 반복 수정 | 전담 세션 하나 | 같은 주제라 앞 묶음의 맥락을 다음 묶음에 그대로 쓰고, 번호만 바꾼 팀원 여럿이 pane 과 프로세스를 따로 쥐지 않는다 |
+| 리뷰어 | 작성 벤더와 다른 벤더의 세션(`tfx-routing.md` "교차 리뷰 작성자 분리"). 쓸 수 있는 벤더가 하나뿐이면 같은 벤더의 다른 인스턴스 | 같은 워커가 자기 작업을 리뷰하지 않는다(6절). 작성 세션은 리뷰에 재사용하지 않는다. 리뷰 전담 세션은 벤더별로 두고, 보내기 전에 이번 PR 의 작성 벤더와 다른지 확인한다. 리뷰 전담 세션에는 수정 작업을 보내지 않는다 |
 
 ### 실행 위치 결정
 
@@ -250,7 +199,7 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 
 #### 압박 변화 대응
 
-`/tfx-lead <역할>`이 macOS 대화형 세션에서 압박 감시를 켠다. 수동으로 켜고 끄고 볼 때는 `/tfx-pressure on|off|status`를 쓴다. 켜지면 triflux mod 가 2초마다 `kern.memorystatus_vm_pressure_level`을 읽어 두 표본 연속으로 단계 전이를 확정한다. 상주 프로세스와 설치는 없다. 리드를 넘기거나 끝낼 때 `/tfx-pressure off`.
+`/tfx-lead <역할>`이 macOS 대화형 세션에서 압박 감시를 켠다. 수동으로 켜고 끄고 볼 때는 `/tfx-pressure on|off|status`를 쓴다. 감시 방식과 기준값은 `tfx-routing.md`의 "원격 오프로드 기본 정책"이다. 리드를 넘기거나 끝낼 때 `/tfx-pressure off`.
 
 - 4 로 오르는 전이만 리드 자기 세션에 피어 메시지로 넣어 깨운다. 긴 턴 도중에도 바로 온다. 피어 전송이 실패하면 본문 끝에 그 사실이 한 줄 붙고, 턴이 끝난 뒤 온다(ADR-0043).
 - 나머지 전이는 턴을 열지 않는다. 리드의 다음 요청(새 입력이나 도구 결과)에 `메모리 압박: 현재 <단계> <이름>(<시각>)` 한 줄로 보인다. 그 사이 여러 번 바뀌었으면 마지막 단계 하나다. 이 줄에는 답하지 않는다(ADR-0047).
@@ -279,7 +228,7 @@ node scripts/remote-spawn.mjs --probe m2         # 원격 후보의 압박과 �
 
 ### agy 워커 지시서
 
-agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명령뿐이다. 지시서에 "산출" 절만 있으면 결과 파일을 쓰고 보고 없이 멈춘다(10-28 mnk 교차검증 사례). agy 워커 지시서에는 공통 구성에 더해 "보고" 절을 두고 다음을 적는다.
+agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명령뿐이다. 지시서에 "산출" 절만 있으면 결과 파일을 쓰고 보고 없이 멈춘다. agy 워커 지시서에는 공통 구성에 더해 "보고" 절을 두고 다음을 적는다.
 
 - 끝나면, 막히면, 리드 결정이 필요하면 보고한다는 조건.
 - 보고 명령 전문. 리드 이름은 정확한 문자열로 넣는다.
@@ -314,13 +263,7 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 
 작성 벤더와 다른 벤더가 `code-reviewer`, `quality-reviewer`로 리뷰한다. 작성 벤더는 `TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 지정한다. 미지정이면 Codex 로 보고 잘못된 값은 오류로 끝낸다.
 
-| 작성 벤더 | 기본 리뷰 | Claude 주간 사용량 80% 이상 |
-| --- | --- | --- |
-| Codex | Claude Opus | Hydrogen High `hydrogen` + `high` |
-| Claude | Codex Sol `sol` + `high` review | Codex Sol `sol` + `high` review |
-| Antigravity | Claude Opus | Codex Sol `sol` + `high` review |
-
-사용량은 `~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`를 읽고, 읽을 수 없으면 한도 미만으로 본다. Claude 리뷰는 `tfx-route.sh`의 Claude 워커 경로와 `--model opus`를 쓴다.
+리뷰 후보 순서와 사용량에 따른 조정은 `tfx-routing.md`의 "교차 리뷰 작성자 분리"가 정본이다. Claude 리뷰는 `tfx-route.sh`의 Claude 워커 경로와 `--model opus`를 쓴다.
 
 - 머지 조건은 CI 통과와 교차 리뷰 통과, 둘 다다.
 - 리뷰에서 사실 오류가 나오면 처음 작성자에게 되돌려 고치고 같은 리뷰어가 재확인한다. 리드가 대신 고치고 스스로 승인하지 않는다.
@@ -356,7 +299,7 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 - 커밋과 PR 에 AI trailer, `Co-Authored-By`, 세션 링크를 넣지 않는다.
 - 세션 닫기, 머지, 계정 전환처럼 권한 분류기가 막는 일은 사용자 허락을 받은 뒤에만 한다. 막힌 일을 다른 세션에 대신 시키지 않는다.
 - 워크트리에서 도구를 실행하면 전역 설정을 그 경로로 덮어쓸 수 있다. 전역 경로를 쓰는 스크립트는 설치본에서만 실행한다.
-- 워커와 리뷰어에게 실제 tmux 실측을 시킬 때는 지시서에 `tmux -L tfx-<이름>` 전용 소켓만 쓰고 `kill-server` 는 같은 `-L` 을 붙일 때만 하라고 적는다. 리드가 tmux 안에 있으면 워커 셸에 `TMUX` 가 상속되고, tmux 는 `$TMUX` 를 `TMUX_TMPDIR` 보다 우선하므로 `TMUX_TMPDIR` 격리는 사용자 기본 서버를 가리킬 수 있다. 2026-10-22 그렇게 실행한 `kill-server` 가 기본 서버를 두 번 죽여 모든 tmux 세션이 닫혔다.
+- 워커와 리뷰어에게 실제 tmux 실측을 시킬 때는 지시서에 `tmux -L tfx-<이름>` 전용 소켓만 쓰고 `kill-server` 는 같은 `-L` 을 붙일 때만 하라고 적는다. 리드가 tmux 안에 있으면 워커 셸에 `TMUX` 가 상속되고, tmux 는 `$TMUX` 를 `TMUX_TMPDIR` 보다 우선하므로 `TMUX_TMPDIR` 격리는 사용자 기본 서버를 가리킬 수 있다.
 
 ## 11. 컨텍스트 점검
 
@@ -364,7 +307,7 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 
 - Claude daemon 은 `tfx-live probe`의 `contextPct`를 보고, agy 는 `tfx-live list-sessions --cli agy`의 `contextPct`와 `contextRecordedAt`을 본다. `tfx-live probe`는 Claude daemon 전용이며 `compactCount`는 노출하지 않는다.
 - 직접 재야 하면 transcript 의 마지막 assistant 항목 `usage`에서 입력 계열 토큰(`input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`)을 더해 공식 모델 창과 실행 한도 중 작은 값으로 나눈다. Codex 는 rollout 의 마지막 토큰 사용량 이벤트로 같은 계산을 한다.
-- 지시서에 보고 기준을 넣는다. 비율은 받는 세션의 CLI 에 맞춰 `tfx-live` 표의 준비·경고 열을 쓴다. 예: Claude 60%, Codex 실행 창(예: 475,000, `astra` 가족은 258,400) 60%, 실행 창 없는 미등록 1.05M 분모 15%, agy 12%. 10-28 에 실행 창 Codex 에 15% 를 적어 20.9% 에서 워커가 멈춘 일이 있었다. Claude와 Codex에는 "컨텍스트가 <비율>을 넘으면 작업을 멈추고 리드에게 보고하라", agy에는 "컨텍스트가 12%를 넘으면 리드에게 한 번 보고하고 작업을 이어가라"로 적는다.
+- 지시서에 보고 기준을 넣는다. 비율은 받는 세션의 CLI 에 맞춰 `tfx-live` 표의 준비·경고 열을 쓴다. 예: Claude 60%, Codex 실행 창(예: 475,000, `astra` 가족은 258,400) 60%, 실행 창 없는 미등록 1.05M 분모 15%, agy 12%. Claude와 Codex에는 "컨텍스트가 <비율>을 넘으면 작업을 멈추고 리드에게 보고하라", agy에는 "컨텍스트가 12%를 넘으면 리드에게 한 번 보고하고 작업을 이어가라"로 적는다.
 - 재개한 세션(`--resume`)은 이전 사용량을 이어받으므로 재개 직후 한 번 잰다.
 - 85%에 닿은 Claude 세션에는 새 작업을 주지 않고 바로 승계한다.
 - 200k를 넘는 대화형 Claude 세션(리드 자신 포함)은 약 54분 유휴 시 호스트가 자동 유휴 압축할 수 있으므로, 50분 넘게 쉬게 둘 때는 파일에 없는 결정과 다음 행동을 먼저 남긴다.
@@ -373,64 +316,15 @@ agy 는 리드의 대화 맥락과 이름을 모르고, 보고 수단도 셸 명
 
 ### 자기 세션 제어
 
-리드는 내장 슬래시 명령을 직접 실행하지 못한다. 자기 세션의 compact, clear, exit 는 triflux mod 도구 `tfx_control`(`mcp__triflux-mods__tfx_control`)로 건다. tmux 안팎 모두 같다. 리드가 띄운 Claude, Codex, agy 세션과 서브에이전트에도 같은 도구의 `target` 으로 보낸다. 대상별로 되는 동작은 `tfx-live` 스킬의 "대상별 제어 지원" 표다.
-
-| action | 인자 | 동작 |
-| --- | --- | --- |
-| compact | `instructions` 요약 지시문, `then` 압축 뒤 다음 프롬프트 | 이 턴이 끝나면 `/compact <instructions>`, 끝난 뒤 `then` 을 prompt 로 넣는다 |
-| clear | `handoff` 인계 파일 경로, `then` | 인계 파일을 먼저 쓴다. 턴이 끝나면 `/clear`, 그 뒤 "인계 파일 <경로> 를 읽고 이어간다." 와 `then` 을 차례로 넣는다 |
-| exit | `handoff` 필수 | 사용자가 끝내라고 했거나 승계 세션이 인계 파일을 받기로 했을 때만 쓴다. 턴이 끝나면 `/exit` |
-
-- 리드 세션 ID 는 `tfx_control` 의 `action: "whoami"` 로 얻는다. Claude 워커를 띄울 때 `tfx-live start --lead-session <ID>` 로 넘겨야 그 워커가 tmux 밖 피어 경로의 요청을 이 리드에게서만 받는다.
-- `/tfx-lead <역할>` 을 실행한 세션에서만 받는다. 아니면 "이 세션은 리드가 아니다" 로 거부된다. `/clear` 뒤에는 권한이 이어지고, resume 한 세션은 `/tfx-lead` 를 다시 실행한다.
-- 호출은 예약만 한다. 호출한 뒤 응답을 짧게 마쳐야 턴이 끝나고 실행된다.
-- 인자 오류, 없는 인계 파일, exit 의 `handoff` 누락, 서브에이전트 안의 호출은 도구 결과로 거부된다. 실행 뒤 호스트가 슬래시를 거부하면 다음 턴에 `[tfx_control] /<action> 실패: ...` prompt 가 온다. 그때는 사용자에게 직접 입력을 부탁한다.
-- `tfx_control` 이 없는 Codex 리드와 agy 리드는 인계 파일을 먼저 쓰고 `tfx-live clear --cli <codex|agy> --session "$TMUX_PANE" --if-busy wait --busy-timeout 600 --handoff <경로>` 를 `nohup ... > <결과 파일> 2>&1 < /dev/null &` 꼴로 백그라운드에 보낸다. 턴이 끝나면 `/new`(Codex) 나 `/clear`(agy) 를 보내고 "인계 파일 <경로> 를 읽고 이어간다." 를 이어서 보낸다. 비우면 이 스킬 내용도 문맥에서 사라지므로 `--then` 에 이 스킬 파일을 다시 읽고 리드를 이어 맡으라는 문장을 싣는다. 샌드박스가 강제된 agy 세션에서는 `run_command` 에 `BypassSandbox: true` 를 붙인다. 그 인자가 없는 세션에서는 붙이지 않는다.
-- 도구가 목록에 없으면 triflux mod 가 설치되지 않은 세션이다. tmux 안이면 `tfx-live compact --session "$TMUX_PANE" --if-busy wait ...` 를 쓰고, 밖이면 사용자에게 부탁한다.
+리드는 내장 슬래시 명령을 직접 실행하지 못하므로 자기 세션의 compact, clear, exit 는 triflux mod 도구 `tfx_control`(`mcp__triflux-mods__tfx_control`)로 건다. 리드 세션 ID 는 `action: "whoami"`로 얻어 Claude 워커의 `tfx-live start --lead-session <ID>`에 넘긴다. 호출은 예약만 하므로 호출한 뒤 응답을 짧게 끝내야 실행된다. exit 는 `handoff`가 필수다. action 별 인자, 거부 조건, `tfx_control`이 없는 Codex와 agy 리드의 `tfx-live clear` 절차는 [references/self-session-control.md](references/self-session-control.md)를 따른다.
 
 ## 12. 운영 점검표
 
-리드를 맡을 때:
-
-- [ ] `/tfx-lead <역할>`을 실행했고 이름이 바뀌었다(실패하면 `/rename`)
-- [ ] 끝낼 때 `/tfx-pressure off`를 한다
-
-워커를 띄울 때:
-
-- [ ] 이름이 `<월>.<일> <주제>` 형식이고 등록 기록에 적었다
-- [ ] 역할에 맞는 모델과 effort 를 골랐다
-- [ ] `tfx judge worker-mode --task '<요약>'`의 권고를 보고 권한을 정했고 등록 기록에 실제 값과 출처를 적었다
-- [ ] 같은 역할, 주제의 살아 있는 전담 워커가 등록 기록에 있는지 먼저 찾았고, 있으면 컨텍스트를 재고 그 세션에 보냈다
-- [ ] 재사용하거나 다시 올 일이면 서브에이전트 대신 전담 세션으로 띄워 등록 기록에 역할과 주제를 적었다
-- [ ] Agent 도구 팀원을 띄우기 전에 리드 pane 폭을 쟀고, 200 cols 미만이면 `name` 없는 백그라운드 서브에이전트로 띄웠다
-- [ ] Agent 도구 팀원을 tmux 모드로 띄운다면 리드의 현재 폴더가 신뢰된 폴더다
-- [ ] 압박을 재고 실행 위치(m5/m2/ryzen)를 지시서에 적었다
-- [ ] 사용자에게 모델과 tmux 세션명을 알렸다
-- [ ] 지시서 경로를 보냈고 작업 시작을 확인했다
-- [ ] 세션 CLI 에 맞는 컨텍스트 보고 기준이 지시서에 있다
-- [ ] 지시서의 보고 형식이 결과 파일 경로와 세 줄 요약, 4000자 상한이다
-- [ ] 지시서에 사용자 질문 위치를 적었다(기본 리드로 올림)
-- [ ] 등록 줄에 재개 ID 를 적었다(agy 는 첫 지시 뒤 다시 확인)
-- [ ] agy 워커면 지시서에 보고 절(리드 이름이 들어간 보고 명령 전문, `BypassSandbox: true`)이 있다
-
-워커를 닫을 때:
-
-- [ ] 결과 파일을 읽었다
-- [ ] 결과를 받은 팀원 pane 을 닫았다(3절 "끝난 팀원 닫기")
-- [ ] 필요하면 인계 파일과 승계 ACK 를 확인했다
-- [ ] 닫은 뒤 `tmr ls --json`(없으면 `tmux ls`)으로 확인하고 등록 줄을 재개 ID 와 함께 `workers-closed.md` 로 옮겼다
+리드를 맡을 때, 워커를 띄울 때, 워커를 닫을 때의 점검표는 [references/checklist.md](references/checklist.md)다. 맨 앞 "상시 규칙"이 그 요약이다.
 
 ## 13. 정리, 삭제, 결함 수정 레인
 
-코드를 지우거나 간헐 실패를 고치는 레인의 지시서에 아래 기준을 넣는다.
-
-- 무엇을 지울지는 사용자가 결정표로 정한다. 작업 세션은 정해진 것을 실행하고, 쓰임을 추측해 지우지 않는다.
-- 제거 판정은 그 파일을 끝까지 읽은 뒤에만 한다. 파일명, grep 결과, 서브에이전트 요약은 단서일 뿐이다. 리드가 지시서에 적은 사실도 단서로 쓰라고 적는다.
-- 지우는 기준은 "지우기 전과 동작이 같은가"다. 지시서에 비교할 기존 경로를 적고(예: 기능이 꺼져 있거나 비어 있을 때의 경로), 리뷰에서 그 동등성을 확인한다.
-- 의존성은 코드 import 만 보지 말고 다른 패키지의 peer 의존과 지연 import 까지 확인한다.
-- 간헐 실패는 재시도나 timeout 을 늘려 덮지 않는다. 재현해서 원인을 확정하고, 확정하지 못하면 고치지 않고 근거와 남은 후보만 결과 파일에 적는다.
-- 원인을 확정한 수정에서 새 판정이 확신할 수 없는 값을 낼 때는, 안전성이 확인된 기존 폴백 경로로 돌아가게 한다. 틀린 확정보다 폴백이 낫다. 원인을 확정하지 못했으면 이 규칙을 쓰지 않고 위의 "고치지 않고 보고"를 따른다.
-- 범위 밖에서 발견한 문제는 고치지 않고 목록으로 보고받는다. 리드가 다음 레인으로 배정한다.
+코드를 지우거나 간헐 실패를 고치는 레인의 지시서에는 [references/cleanup-lane.md](references/cleanup-lane.md)의 기준을 넣는다.
 
 ## 소통 세션
 
