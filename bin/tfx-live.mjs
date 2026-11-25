@@ -6566,7 +6566,9 @@ async function agyTmuxContext(session, deps = {}) {
 async function doCompact(flags, deps = {}) {
   const cli = flags.cli ?? "claude";
   if (cli === "agy")
-    throw new Error("agy has no compact; use /clear or a handoff");
+    throw new Error(
+      'tfx-live compact does not support agy yet (agy CLI supports /compact directly; use tfx-live ask --cli agy --prompt "/compact ...", /clear, or a handoff)',
+    );
   if (
     !["claude", "codex"].includes(cli) ||
     flags.remote ||
