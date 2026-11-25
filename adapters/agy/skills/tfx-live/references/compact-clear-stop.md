@@ -1,0 +1,11 @@
+# compact, clear, stop 상세
+
+`compact --session S [--cli claude|codex] [--instructions TEXT] [--then PROMPT] [--no-wait]`는 로컬 tmux에서 `/compact`를 중계 표식 없이 보낸다. CLI 기본값은 Claude다. `--instructions`는 Claude에서만 받으며 Codex는 인자를 받지 않아 거부한다. 기본 `--if-busy fail`이며 바쁜 세션에는 compact를 전송하지 않는다. UDS compact는 지원하지 않는다.
+
+`--no-wait`는 압축 진행 표시 또는 새 완료 기록으로 제출을 확인한 뒤 반환한다. Codex에서 확인되지 않으면 Enter를 한 번 더 보내고, 그래도 확인되지 않으면 `--then`을 보내지 않고 오류로 끝낸다. `--then`은 일반 텍스트 지시만 받으며 슬래시 명령은 거부한다. 제출 확인 직후 Claude에는 표식을 붙여 tmux로 보내고 화면의 `queued messages` 또는 transcript의 `enqueue`로 확인한다. Claude 압축이 먼저 끝나 지시가 이미 처리에 들어갔으면 `then.queued: false, delivered: true`로 보고한다. Codex에는 기존 queue 경로로만 보내며 tmux로 전환하지 않는다. 결과의 `then.requestId`로 `wait --request-id`에서 압축 뒤 응답을 받는다.
+
+`clear --session S [--cli claude|codex|agy] [--handoff PATH] [--then PROMPT] [--if-busy fail|wait] [--busy-timeout SEC]`는 로컬 tmux에서 Claude와 agy에 `/clear`, Codex에 `/new`를 중계 표식 없이 보낸다. CLI 기본값은 Claude, 기본 `--if-busy`는 `fail`이며 `compact`와 같은 바쁜 세션 대기를 쓴다. `--handoff` 파일이 없으면 아무것도 보내지 않고 거부한다. 비운 명령이 새 대화로 바뀐 것을 확인하고(agy 는 대화 ID 변경, Codex 와 Claude 는 화면 변화와 입력 대기) 세션이 쉬면 `--handoff`가 있을 때 "인계 파일 <경로> 를 읽고 이어간다.", 이어서 `--then`을 한 메시지(`[tfx-live req=...]` 표식 포함)로 tmux에 보낸다. 결과는 `clear: {command, inputSent: true}`와 뒤따름 문장이 있을 때 `followUp: {requestId, inputSent}`다. `inputSent`는 입력을 보냈다는 뜻이며 모델이 받았다는 확인이 아니다. `--busy-timeout` 안에 전환을 확인하지 못하면 뒤따름 문장을 보내지 않고 같은 방식으로 실패한다. 뒤따름 문장이 실패하면 `ok: false`와 `error`로 종료 코드 1이며, 비우기는 이미 보냈으므로 다시 보내지 않는다. 자기 세션에는 SKILL.md "수동 compact와 종료" 절의 예처럼 표준 입출력을 끊고 `nohup` 으로 백그라운드에 보낸다. 샌드박스가 강제된 agy 세션에서는 `run_command` 에 `BypassSandbox: true` 를 붙인다. 그 인자가 없는 세션에서는 붙이지 않는다.
+
+`--no-wait`가 없으면 Claude의 새 `compact_boundary`, Codex rollout의 새 `compacted`까지 기다린다. 결과에 `compact: {submitted: true, done}`과 `then: {requestId, queued, transport}`를 추가하고 기존 `compacted`, `preTokens`, `postTokens`를 유지한다. 토큰 수는 기록에 있는 값만 보고하며 Codex의 압축 후 token_count가 아직 없으면 `postTokens`는 `null`이다. 시간 안에 완료 기록이 없으면 `compacted: false, timedOut: true`다.
+
+`stop --short`와 `stop --session-id`는 `claude stop <id>`를 호출하고 `stopped: true, conversationKept: true`를 반환한다. `claude attach`로 대화를 재개할 수 있다. `/exit`, `←`, Ctrl+Z는 백그라운드 세션의 연결만 끊는다. macOS의 `sysctl -n kern.memorystatus_vm_pressure_level`이 2 이상이면 새 세션을 띄우기 전 정리한다. 원격 배정 전에는 `tfx-remote probe <host>`의 `ready`와 `warnings`를 확인한다.

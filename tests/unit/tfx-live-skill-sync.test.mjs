@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 
 test("Codex tfx-live adapter keeps the canonical skill body", () => {
@@ -37,42 +37,17 @@ test("agy tfx-live adapter keeps the canonical skill body", () => {
   );
 });
 
-test("tfx-lead and tfx-live agree on how Claude sends to a local Claude session", () => {
-  const lead = readFileSync("skills/tfx-lead/SKILL.md", "utf8");
-  const live = readFileSync("skills/tfx-live/SKILL.md", "utf8");
-  const leadRow = lead
-    .split("\n")
-    .find((line) => line.startsWith("| Claude 세션에 보내기 |"));
-  const claudeLeadCell = leadRow.split("|")[2];
-  const liveRule = live
-    .split("\n")
-    .find((line) => line.includes("Claude 대상의 SendMessage 이름은"));
-  for (const rule of [claudeLeadCell, liveRule]) {
-    assert.match(rule, /SendMessage/);
-    assert.match(rule, /tfx-live list-sessions --cli claude/);
-    assert.match(rule, /원격[^.]*`tfx-live ask/);
-  }
-  assert.match(claudeLeadCell, /팀원 포함/);
-});
-
-test("tfx-lead and tfx-live agree on how agy sends to a local agy session", () => {
-  const lead = readFileSync("skills/tfx-lead/SKILL.md", "utf8");
-  const live = readFileSync("skills/tfx-live/SKILL.md", "utf8");
-  const leadRow = lead
-    .split("\n")
-    .find((line) => line.startsWith("| agy 세션에 보내기 |"));
-  assert.ok(leadRow, "expected agy row in tfx-lead");
-  const agyLeadCell = leadRow.split("|")[2];
-  const liveRule = live
-    .split("\n")
-    .find((line) => line.includes("같은 기기의 agy 끼리는"));
-  assert.ok(liveRule, "expected agy rule in tfx-live");
-  for (const rule of [agyLeadCell, liveRule]) {
-    assert.match(rule, /agy\.patch\.json/);
-    assert.match(rule, /sha256/);
-    assert.match(rule, /peer-wake/);
-    assert.match(rule, /send_message/);
-    assert.match(rule, /#1022/);
-    assert.match(rule, /tfx-live send.*tmux 경로/);
+test("Codex and agy tfx-live adapters ship the canonical references", () => {
+  const dir = "skills/tfx-live/references";
+  const names = readdirSync(dir).sort();
+  for (const host of ["codex", "agy"]) {
+    const adapterDir = `adapters/${host}/skills/tfx-live/references`;
+    assert.deepEqual(readdirSync(adapterDir).sort(), names);
+    for (const name of names) {
+      assert.equal(
+        readFileSync(`${adapterDir}/${name}`, "utf8"),
+        readFileSync(`${dir}/${name}`, "utf8"),
+      );
+    }
   }
 });

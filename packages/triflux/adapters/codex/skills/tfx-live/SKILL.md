@@ -15,6 +15,22 @@ Codex에서는 `$tfx-live`로 호출한다. CLI의 `--cli`는 현재 호스트�
 `tfx-live`는 Claude Code와 Codex 세션을 tmux 또는 daemon UDS로, agy 세션을 로컬 tmux로 제어한다.
 `tfx-live --help`와 `tfx-live <동사> --help`로 사용법을 확인한다.
 
+## 상시 규칙
+
+compact 뒤에는 스킬마다 앞부분만 다시 붙고, 한 세션에서 여러 스킬을 호출했으면 오래된 스킬은 통째로 빠질 수 있다. 이 절이나 아래 절이 문맥에 없으면 이 스킬 파일을 다시 읽는다. 괄호 안은 상세 절이다.
+
+- 로컬 Claude 끼리는 `SendMessage`, 그 밖의 로컬 대상은 어댑터가 설치된 macOS/Linux 에서 `<홈 절대경로>/.claude/scripts/tfx-peer send`를 쓴다. Windows 는 Claude 대상만 지원한다. 원격 피어에는 `tfx-peer remote-send`, 원격 세션에 사용자 입력으로 보낼 때만 `tfx-live ask`를 쓴다. native 전송 실패를 tmux 입력으로 바꾸지 않는다("전송 경로", "원격 native peer 발신과 회신").
+- 새 agy 세션의 첫 입력은 `tfx-live ask --no-wait`로 보낸다. 같은 기기 agy 끼리의 피어 전송은 `peer-wake` 패치가 확인될 때만 쓴다("전송 경로").
+- 표식이 붙은 로컬 요청은 `ask --no-wait` 뒤 `wait --request-id`로 확인한다. 원격 요청, 슬래시 명령, `--no-relay-tag` 요청은 이 방법으로 추적하지 못한다. `submitted`, `queued`, `inputSent`, `written`, `sent`는 완료가 아니다("요청과 완료 확인").
+- `unknown`, `partial`, `timedOut`은 자동 재전송하지 않고 상태부터 확인한다.
+- Codex 슬래시 명령과 interrupt 는 tmux 직접 입력만 된다. queue 로 보낸 슬래시는 실행되지 않는다("Codex ask 메시지 전송").
+- `ready: false`와 `blockedBy`가 오면 키와 지시를 보내지 않는다. MCP 승인과 훅 검토는 사람이 attach 해 처리한다.
+- 공유 daemon 에 로드된 Codex thread 에 `start --resume`을 반복하거나, 새 thread 를 만들거나, daemon 을 재시작하지 않는다. 권한 readback 은 다음 턴 적용 증거가 아니다.
+- 컨텍스트는 "컨텍스트 판단" 표를 쓴다. Claude 85% 는 바로 handoff, agy 12% 는 한 번 보고하고 계속한다. `--resume`한 세션은 재개 직후 잰다.
+- 같은 목표가 이어지면 compact, 담당, CLI, 모델이 바뀌면 handoff 다. 결과와 인계를 확인하면 바로 닫는다("리드 운영").
+- 리드 자기 세션의 compact, clear, exit 는 `tfx_control`을 먼저 쓴다. 도구가 없으면 Claude 와 Codex 의 compact 는 `tfx-live compact`, 세 CLI 의 clear 는 `tfx-live clear`를 `--if-busy wait`로 백그라운드에 보낸다. agy 의 compact 는 `/compact` 직접 입력이다("수동 compact와 종료").
+- Claude pane 에 `C-c`를 보내지 않는다.
+
 ## 전송 경로
 
 - Claude `--short` 또는 `--session-id`는 기본 `auto`로 UDS를 먼저 시도한다. `--session`이 있고 입력 미전송이 확인된 UDS 실패라면 tmux로 전환하고 `~/.claude/cache/triflux/tfx-live/bug-reports/uds-fallback-*.json`을 남긴다. 컨텍스트 가드 거부 시에는 전환하지 않는다.
@@ -35,7 +51,7 @@ tfx-live start --cli codex --session cx1 --cwd ~/Projects --name "10.8 구현 �
 tfx-live stop --cli codex --session cx1
 ```
 
-macOS의 iTerm2에서 로컬 tmux `start`는 프로젝트별 창에 attach 탭이나 pane을 자동 배치한다. `LC_TERMINAL=iTerm2` 또는 `TERM_PROGRAM=iTerm.app`일 때만 적용하며 원격·headless 경로는 유지한다. 프로젝트 키는 git 공통 디렉터리의 실제 경로이므로 같은 저장소의 worktree는 함께 묶이고, git 밖에서는 cwd의 실제 경로를 쓴다. 기존 소유 프로젝트 창, 로컬 리드 창 순으로 찾고 리드 ID가 없으면 현재 focus session의 창을 읽기 전용 anchor로 쓴다. 기본 preserve에서는 새 창을 만들지 않는다. 기본 그룹은 프로젝트 키이며 `--group NAME`으로 바꾼다. `peer`는 실행마다 참여자들을 한 그룹에 모으며 `--group`을 주면 그 값을 쓴다. 제목은 `--name`, 자동 이름, 세션 이름 순이며 새 pane의 custom command를 꺼 이후 Cmd+D가 같은 tmux에 중복 attach하지 않게 한다. `stop`은 registry와 소유 표식이 일치하는 ID만 닫는다. 기존 AppleScript 경로에서도 같은 TFX 세션 표식이 없는 사용자 view는 닫지 않는다. 연동 실패는 시작·종료를 막지 않고 `itermWarning`에 남긴다.
+macOS iTerm2 에서 로컬 tmux `start`는 프로젝트별 창에 attach 탭이나 pane 을 자동 배치한다. 연동 실패는 시작과 종료를 막지 않고 `itermWarning`에 남는다. 프로젝트 키, 그룹, 제목, `stop`이 닫는 범위는 [references/window-layout.md](references/window-layout.md)를 따른다.
 
 새 세션 이름은 `<월>.<일> <주제>`로 짓는다. `start --name`을 생략하면 자동으로 만들고 `nameGenerated: true`를 보고한다. `--resume` 또는 `--resume-last`는 `--name`을 명시한 경우에만 이름을 적용한다. 승계 세션에는 기존 이름 뒤에 ` 2`, 이후 ` 3`을 붙인다. 이름 적용을 요청한 경우 결과의 `nameApplied: false`는 미적용을 뜻한다. agy의 `namePending: true`는 첫 일반 ask에서 적용할 이름이 보류됐다는 뜻이다. Codex `start`는 `/rename` 제출을 입력창이 빌 때까지 확인하고, 이름으로 찾은 thread UUID를 `threadId`로 돌려주며 tmux 세션 옵션 `@tfx_codex_thread`에 남긴다. 로컬 Codex `--resume-last`는 Codex가 고른 thread를 사후에 찾는다. 띄운 뒤 공유 app-server daemon에 로드된 같은 cwd의 thread 중 rollout에 그 시각 이후의 resume 기록(`thread_settings_applied`)이 생긴 것이 정확히 하나이고 1.5초 뒤에도 같을 때만 `threadId`로 쓴다. 이 확인은 5초 안에 끝난다. TUI가 daemon을 쓰지 않거나 같은 cwd에서 동시에 resume이 일어나면 `null`이다. 기존 Codex UDS thread는 `tfx-live rename --cli codex --transport uds --thread ID --name "<이름>"`으로 이름을 바꾼다.
 
@@ -43,32 +59,11 @@ Claude 프로젝트 MCP 승인 화면이 뜨면 `start`는 화면에 답하지 �
 
 Claude, agy, Codex(`Trust this folder?`와 `Do you trust the contents of this directory`)의 폴더 신뢰 화면은 기본으로 자동 승인한다. Codex는 신뢰 결정을 설정에 기록하므로 이후 같은 폴더의 실행에도 적용된다. `start --no-auto-trust`를 주면 이 화면에도 키를 보내지 않고 같은 형식으로 `blockedBy`(`claude-trust-folder`, `agy-trust-folder`, `codex-trust-folder`)를 반환한다. `--resume`, `--resume-last`, `--remote`에도 똑같이 적용된다.
 
-Codex `start --model`은 `astra`, `sol`, `terra`, `luna` 가족 별칭을 호출 호스트의 기존 model-family-resolver로 실제 모델 ID로 바꾼다. 호출 호스트의 `~/.config/triflux/models.json` 가족 고정값을 우선하고, Codex 모델 캐시, 마지막 해석 결과, 내장 기본값 순으로 고른다. `--remote`도 호출 호스트에서 해석한 ID를 보내며 원격 호스트의 고정값은 사용하지 않는다. 실제 모델 ID를 명시하면 그대로 전달한다. 모델 해석은 전역 프로필이나 설정 파일을 바꾸지 않고 `--effort`는 별도로 전달한다.
-
-로컬 Codex 새 thread는 생성 RPC에 `approvalPolicy: "never"`, `sandbox: "danger-full-access"`를 명시한다. `start --sandbox`를 주면 승인 정책은 `on-request`, sandbox는 `workspace-write`로 제한한다. 재개할 때 `--sandbox`를 생략하면 기존 thread 권한을 보존한다. remote TUI resume은 권한 CLI 플래그를 거부하므로 attach 명령에 bypass나 sandbox 플래그를 추가하지 않는다.
-
-Codex 관리 plain/new/resume/resume-last TUI 명령과 `tfx-route` exec/review 워커는 공식 `--dangerously-bypass-hook-trust`가 기본이다. 해당 invocation만 대상으로 하며 일반 `codex` 명령, 전역 config, 저장된 훅 신뢰 기록은 바꾸지 않는다. 활성 훅은 사전 확인 없이 샌드박스 밖에서 실행될 수 있다. 기존 `features.hooks=false`와 sandbox/approval 정책은 유지하고, `--sandbox`만으로 hook-trust bypass를 끄지는 않는다.
-
-관리 기본값을 끄려면 `tfx-live start --cli codex --session NAME --no-bypass-hook-trust` 또는 `tfx lead ROLE --cli codex --no-bypass-hook-trust`를 쓴다. 실행 환경의 `TFX_CODEX_BYPASS_HOOK_TRUST=0`은 route 워커와 live/lead에 공통 적용된다. 미설정과 그 외 값은 켬이며 CLI opt-out은 환경 값 `1`보다 우선한다. 사용자 launcher 내부와 명시 플래그는 재작성하지 않는다. `remote-spawn`은 Claude 진입이고, 내부 Codex는 해당 호스트의 `tfx-route` 정책을 따른다. `tx` 같은 셸 래퍼가 내부에서 같은 플래그를 추가한다면 `--no-bypass-hook-trust`로 TFX 관리 추가를 끈다.
-
-공유 daemon의 prepared-thread TUI attach에는 관리 hook-trust bypass 플래그를 제외한다. CLI가 플래그를 수락해도 daemon에 실제 적용된다는 근거는 없으므로 `features.hooks=false` RPC와 `ready: false`, `blockedBy: "codex-hooks-review"` 폴백을 유지한다. `bypass_hook_trust`나 camelCase RPC/config 필드를 합성하지 않는다. 기본/opt-out과 관계없이 시작 훅 검토 화면에는 메뉴 키, rename, 업무 입력을 보내지 않고 세션을 남긴다. tmux 세션에 attach해 훅을 직접 검토한 뒤 진행한다. builtin 훅과 legacy `notify`는 일반 사용자·플러그인 훅 비활성화 보장에서 제외한다.
-
-로컬 daemon `start` 결과의 `approvalPolicy`, `sandbox`는 TUI attach 뒤 같은 thread에 설정 덮어쓰기 없이 보낸 `thread/resume` 응답이다. 요청의 `sandbox`는 `danger-full-access`, `workspace-write` 형식이고 응답의 `sandbox.type`은 `dangerFullAccess`, `workspaceWrite` 형식이다. `permissionsVerified`는 daemon 설정이 준비한 권한과 일치하는지 나타낸다. 응답 실패나 필드 누락, 다른 thread 응답은 권한 값을 `null`로 보고한다. 권한 불일치는 읽은 값을 그대로 보고한다. 두 경우 모두 `ready: false`, `permissionWarning`을 반환하고 세션은 남긴다. 이 readback은 다음 TUI 턴의 실제 도구 실행까지 확인한 결과는 아니다.
-
-공유 daemon에 이미 로드된 Codex thread는 per-thread hooks override를 지원하지 않아 `start --resume`을 거부하고 기존 설정을 보존한다. 기존 TUI에서 진행 중인 턴이 끝난 뒤 `/permissions`를 입력하고 Full Access를 선택해 확인한다. pane을 닫았다면 오류에 나온 `codex resume <threadId>`는 운영자가 같은 history를 다시 여는 수동 복구 명령이다. 같은 cwd에서 열고 `/permissions`를 다시 선택한다. 이 명령을 에이전트가 직접 실행하는 권한은 아니다. 아직 loaded 상태면 `tfx-live start --resume`은 다시 거부되므로 반복하지 않는다. `thread/settings/update` readback만으로 다음 TUI 턴 권한이 적용됐다고 판단하지 않는다. 새 thread를 만들거나 공유 daemon을 재시작하지 않는다.
+Codex `start --model`의 가족 별칭은 호출 호스트에서 실제 모델 ID 로 해석한다. 로컬 새 thread 는 Full Access 가 기본이고 `--sandbox`로 제한한다. 관리 TUI 는 `--dangerously-bypass-hook-trust`가 기본이고 `--no-bypass-hook-trust`로 끈다. 공유 daemon 에 로드된 thread 는 `start --resume`을 거부하므로 기존 TUI 의 `/permissions`로 권한을 고른다. 모델 해석 순서, hook trust opt-out, 권한 readback 필드, 복구 절차는 [references/codex-sessions.md](references/codex-sessions.md)를 따른다.
 
 ## 창 배치(macOS)
 
-호출자가 매번 배치를 결정할 필요는 없다. Jev는 작업·역할·사람 입력 가능성과 기존 워커의 작업·worktree, window/tab/session ID·cols/rows·관리 태그로 만든 후보 ID만 고른다. 사용자 채팅 초안, 터미널 출력, 키 입력 본문은 읽거나 전송하지 않는다. 비활성·장애·낮은 신뢰도·잘못된 ID는 이유가 있는 규칙 폴백이다.
-
-- 기본 focus preserve는 현재 window/tab/session과 다른 앱의 입력 대상을 유지한다. 각 창의 선택 탭 전체를 split/reconcile spec에서 제외하고 비활성 non-tmux 탭만 조작한다. 새 탭은 `select=False`로 만들며 생성 후 focus 복원에 의존하지 않는다. 명시 `start --focus` 또는 `tfx lead ... --focus`만 목적 있는 전환을 허용한다. 중요 역할은 `attention`으로 표시하고 자동 focus를 요청하지 않는다.
-- 최소 가독성은 human/lead/communication 100 cols × 24 rows, standard 80 × 20, low-human compact 60 × 10이다. 가용 크기가 작으면 추가 분할 대신 독립 비활성 탭을 쓰고, 창 자체도 작으면 `verified: false`로 보고한다.
-- `start --task '<요약>'`과 lead의 `--task`를 전달한다. 이름만 있으면 `taskInformation: insufficient`이고 background 자동 후보를 주지 않는다. 실제 task나 명시 `--human low`/`--background`가 있을 때만 background 후보를 허용하며 lead/high-human/communication은 자동으로 숨기지 않는다.
-- 명시 `--layout tab|window|split-vertical|split-horizontal|background|off|legacy`에서도 preserve가 우선이다. 안전한 split이 없거나 window가 요청되면 비활성 탭 또는 background로 폴백하고 이유를 반환한다. `--background`, `--no-auto-layout`, `--layout off`, `TFX_ITERM_LAYOUT=0`은 UI 없이 tmux를 유지한다. legacy 생성은 `--layout legacy --focus`일 때만 허용한다. `TFX_ITERM_WATCH=0`은 watcher만 끈다.
-- 설치된 iTerm Python runtime/API를 재사용한다. `TFX_ITERM_PYTHON`으로 경로를 지정할 수 있다. 없거나 연결이 실패하면 경고와 attach 가능한 background로 남기고 UI를 생성하지 않는다. `inspect`의 `background` 항목에 작업 정보·결정·attach 명령을 포함하며 `nativeSessionId: null`로 native view registry와 구분한다. 기존 `list-sessions --cli <종류>`와 `tmux attach-session -t '=세션'`으로 찾는다. registry의 `runtimeState: not_checked`는 실행 상태를 확인하지 않았다는 뜻이다.
-- 프로젝트·호스트별 단일 watcher는 종료·이동·resize를 debounce한다. 모든 프로젝트는 같은 host의 전역 mutation lock 다음 프로젝트 lock 순서로 잠그고 대기 뒤 inventory를 다시 읽는다. watcher의 state 읽기·pin 저장도 같은 lock을 쓴다. 수동 이동 pin은 state에 유지하며 `reconcile --reset-pins`로만 해제한다. `--dry-run`은 pin을 해제하지 않는다. 사람이 옮긴 pane을 다른 탭과 임의로 합치지 않는다.
-- 일반 셸/다른 프로젝트가 섞인 탭, tmux integration tab, 선택 탭, 명시 배치 탭은 재배치하지 않는다. 과밀한 관리 탭의 자동 분리도 비활성 탭을 사용한다. 자기 적용 결과는 fingerprint와 새 기준 위치로 흡수하며 관리 view가 없으면 watcher는 종료한다.
-- `tfx-live inspect --cwd '<경로>'`, `tfx-live reconcile --dry-run --cwd '<경로>'`은 계획을 반환한다. 실제 적용은 `tfx-live reconcile --cwd '<경로>'`이다. `decision`, `applied`, `verified`는 각각 판단·UI 적용·실측이다. `focus.requested/effective/transitioned/reason`은 요청·유효 정책·전환 여부·미적용 이유를 구분한다. 부분 실패는 실제 inventory를 포함하고 자동 UI 재생성을 하지 않는다. watcher의 마지막 JSON은 사용자별 private temp의 `iterm-layout/*.last.json`에 있다.
+Jev 가 작업과 역할로 iTerm2 배치 후보를 고르고, 기본은 현재 포커스를 지킨다. `--layout`, `--focus`, `--background` 옵션, 최소 가독성 크기, watcher, `inspect`와 `reconcile` 결과 필드는 [references/window-layout.md](references/window-layout.md)를 따른다.
 
 ## agy 세션
 
@@ -80,13 +75,7 @@ tfx-live list-sessions --cli agy --cwd ~/Projects
 tfx-live stop --cli agy --session ag1
 ```
 
-`start`는 `--model ID`, `--effort low|medium|high|xhigh|max`, `--sandbox`를 agy에 넘긴다. `--sandbox`의 실효는 미검증이다. `--resume ID`와 `--resume-last 1`로 대화를 재개한다. 준비 뒤 `/rename <이름>`의 확인 문구가 보이면 `nameApplied: true`다. 새 대화는 첫 메시지 전 `/rename`이 실패하므로 이름을 tmux 옵션 `@tfx_agy_name`에 남기고 `nameApplied: false`, `namePending: true`로 보류한다. 첫 일반 ask는 제출 확인 뒤 현재 대화 DB에 사용자 step이 생길 때까지 최대 5초 기다리고, 유휴를 기다리지 않고 `/rename`을 보낸다. 확인 문구가 보이면 옵션을 지우고 `nameApplied: true`를 반환하며, 실패하면 옵션을 남기고 `nameApplied: false`를 반환한다. `--no-wait`에도 적용한다. 열린 presence lock에서 찾은 대화 ID는 `conversationId`로 보고한다.
-
-agy `ask`의 기본 `--if-busy queue`는 바쁜 턴에도 바로 전송한다. agy 자체 대기열에 쌓이며 앞 입력을 덮어쓰지 않는다. `wait|fail|interrupt`도 선택할 수 있다. `ask --no-wait`는 `inputSent: true`, `requestId`와 함께 유휴 시 `status: "submitted"`, 바쁠 때 `status: "queued"`를 반환한다. `queue` 정책은 agy 전용이다. 슬래시 명령은 중계 표식 없이 보내고 바빠도 즉시 실행한다. DB step을 만들지 않아 `wait`로 추적하지 않으며, `--no-wait` 여부와 무관하게 제출 확인 뒤 `status: "submitted"`, `slashCommand: true`로 반환한다. `/clear`는 대화 ID를 바꾼다.
-
-`wait`는 `node:sqlite`(Node 22.13+)로 대화 DB의 사용자 입력 표식과 뒤따르는 step 상태를 읽는다. 요청 뒤부터 다음 사용자 입력 전까지 모델 응답 step이 하나 이상 있고 그 구간의 모든 step이 끝났으며, pane이 유휴 상태이거나 다음 요청이 시작됐으면 완료다. 같은 구간의 마지막 비어 있지 않은 모델 텍스트를 응답으로 쓴다. Escape로 취소된 step도 완료 상태로 기록된다. 네트워크 오류처럼 턴이 오류 step으로 끝나고 모델 응답이 뒤따르지 않으면 `status: "failed"`와 화면 문구 `error`를 반환한다. agy는 이 오류에서 스스로 재시도하지 않으므로 같은 요청을 다시 보낸다. `--timeout 0`은 한 번만 확인한다. `/clear`는 대화 ID를 바꾸며 진행 중 `wait`는 처음 연 DB를 계속 본다. agy 설정의 `toolPermission`에 따라 도구 승인 화면이 뜰 수 있다. 승인을 기다리는 동안 턴이 멈추고 `wait`는 `working`으로 남는다. `tfx-live`는 agy에 `--dangerously-skip-permissions`를 쓰지 않는다. agy CLI는 `/compact`를 직접 지원하지만 `tfx-live compact` 중계는 미지원이다. 수동 압축은 `tfx-live ask --cli agy --session <세션> --prompt "/compact <다음 지시>"`로 보내거나 `/clear`, handoff를 쓴다. `peer` relay는 로컬에서만 지원한다. `--remote`는 지원하지 않는다.
-
-`start --unset-env 'PREFIX_*,EXACT_NAME'`은 모든 CLI에 쓸 수 있다. 쉼표로 구분한 환경변수 이름과 끝의 `*`로 지정한 접두만 허용한다. tmux pane 셸의 환경에서 변수를 지우고 CLI를 실행하며 resume에도 적용한다. 로컬에서는 준비 후 CLI 프로세스 환경을 확인한다. macOS는 `ps -E` 출력에 `PATH=`가 있고 Linux는 `/proc/PID/environ`이 비어 있지 않을 때만 환경을 읽은 것으로 판정한다. 일치하는 변수가 실제로 남은 경우에만 생성한 세션을 종료하고 오류를 낸다. 환경을 읽지 못하면 세션을 유지하고 `unsetEnvVerified: false`, `unsetEnvWarning: "CLI environment unreadable; removal not verified"`를 반환한다. 결과의 `unsetEnv`는 요청 목록이고 `unsetEnvVerified`는 확인 여부다. 원격에서는 확인하지 않아 `false`이고 Windows에서는 이 옵션을 지원하지 않는다.
+`start` 옵션과 이름 보류, `ask`의 대기열 정책과 슬래시 명령, `wait` 완료 판정, 모든 CLI 에 쓰는 `start --unset-env`의 확인 규칙은 [references/agy-sessions.md](references/agy-sessions.md)를 따른다.
 
 ## 리드 운영
 
@@ -95,7 +84,7 @@ agy `ask`의 기본 `--if-busy queue`는 바쁜 턴에도 바로 전송한다. a
 | 동작 | 적용 조건과 실행 |
 | --- | --- |
 | compact | 같은 목표와 담당이 이어지고 파일과 git에서 상태를 복구할 수 있을 때. Claude와 Codex는 `tfx-live compact --then "다음 지시" --no-wait`로 압축 제출을 확인하고 다음 지시를 미리 넣는다. 압축 뒤에 필요한 파일 경로와 검증 명령도 `--then`에 싣는다. agy는 CLI의 `/compact`를 지원하지만 `tfx-live compact` 중계는 미지원이라 `ask --prompt "/compact <다음 지시>"` 또는 handoff를 쓴다. |
-| clear | 무관한 작업으로 전환하거나 같은 문제를 두 번 넘게 고쳐도 실패할 때, 스펙에서 구현으로 또는 작성자에서 리뷰어로 바뀔 때. 미완료 상태를 정리한 뒤 Claude는 `/rename`과 `/clear`를 리드가 `tfx-live ask --session <대상>` 으로 보낸다(relay 태그 없이). 리드 자기 세션은 `tfx-lead` 스킬의 "자기 세션 제어" 절을 따라 `tfx_control` 도구를 쓰고, 도구가 없는 Codex 리드와 agy 리드는 `tfx-live clear`를 쓴다. 다른 세션은 `tfx-live clear --cli claude|codex|agy --session <대상>`로 Claude와 agy에 `/clear`, Codex에 `/new`를 보낸다. |
+| clear | 무관한 작업으로 전환하거나 같은 문제를 두 번 넘게 고쳐도 실패할 때, 스펙에서 구현으로 또는 작성자에서 리뷰어로 바뀔 때. 미완료 상태를 정리한 뒤 Claude는 `/rename`과 `/clear`를 리드가 `tfx-live ask --session <대상>` 으로 보낸다(relay 태그 없이). 리드 자기 세션은 `tfx-lead` 스킬의 `references/self-session-control.md`를 따라 `tfx_control` 도구를 쓰고, 도구가 없는 Codex 리드와 agy 리드는 `tfx-live clear`를 쓴다. 다른 세션은 `tfx-live clear --cli claude|codex|agy --session <대상>`로 Claude와 agy에 `/clear`, Codex에 `/new`를 보낸다. |
 | handoff | 담당·CLI·모델·소유자가 바뀌거나 긴 작업이 창을 넘길 때. 인계 파일에 목표, 완료 조건, 체크아웃과 변경 상태, 확정 결정, 증거 경로, PASS/FAIL/SKIP, 미완료 작업과 프로세스, 다음 행동과 소유자, `predecessorSessionId`를 적는다. 승계 세션이 경로를 확인하면 이전 세션을 닫는다. |
 | close | 결과와 인계를 확인한 즉시 닫는다. Claude 백그라운드는 `claude stop <id>`, tmux는 `tfx-live stop --session`, Claude 팀원은 shutdown, Codex 서브에이전트는 `close_agent`(Codex 0.162.1 의 도구 목록에는 없다), agy 서브에이전트는 `/agents` 패널의 K를 쓴다. |
 
@@ -105,7 +94,7 @@ Claude TUI는 바쁠 때 들어온 입력을 대기열에 넣고 현재 턴(압�
 
 ### 대상별 제어 지원
 
-리드(Claude)는 compact, clear, exit 를 triflux mod 도구 `tfx_control` 하나로 보낸다. `/tfx-lead <역할>` 을 실행한 세션의 메인 대화에서만 쓸 수 있다. `target` 으로 대상을 고르고, 안 되는 조합은 도구가 이유와 대안을 오류로 돌려준다. 자기 세션의 인자와 절차는 `tfx-lead` 스킬의 "자기 세션 제어" 절이다.
+리드(Claude)는 compact, clear, exit 를 triflux mod 도구 `tfx_control` 하나로 보낸다. `/tfx-lead <역할>` 을 실행한 세션의 메인 대화에서만 쓸 수 있다. `target` 으로 대상을 고르고, 안 되는 조합은 도구가 이유와 대안을 오류로 반환한다. 자기 세션의 인자와 절차는 `tfx-lead` 스킬의 `references/self-session-control.md`다.
 
 | target | compact | clear | exit | 받는 쪽 검증 | 조건과 이유 |
 | --- | --- | --- | --- | --- | --- |
@@ -128,23 +117,7 @@ Claude TUI는 바쁠 때 들어온 입력을 대기열에 넣고 현재 턴(압�
 
 로컬 세션끼리 주고받는 메시지는 `<홈 절대경로>/.claude/scripts/tfx-peer send`를 쓴다. 다음은 원격 세션이나 명시적으로 사용자 입력을 전달하는 `tfx-live ask`의 동작이다.
 
-1. 기본은 app-server 실험 API `thread/queue/add`로 쌓는 것이다. 공유 daemon에 로드된 thread는 그 daemon에 직접 보내며 `queueVia: "shared-daemon"`을 반환한다. 공유 daemon에 없는 별도 TUI와 stale daemon socket의 연결 실패는 기존 stdio app-server 경로를 쓰며 `queueVia: "app-server"`다. 연결 뒤 initialize나 loaded 목록 검증 실패는 이 경로로 전환하지 않는다. 프롬프트는 두 경로 모두 프로세스 인자에 보이지 않는다. stdio add가 없는 Codex에서는 `codex queue --thread <UUID> --message`로 보내며, 이때 프롬프트가 argv에 보이고 `queueVia: "codex-queue-argv"`와 `queueFallbackReason`이 남는다. `queued`는 큐 기록만 뜻하며 모델 응답 완료가 아니다. 실제 처리는 아래 `wait` 결과로 구분한다.
-2. 첫 줄 머리말은 `[from <보낸 세션 이름>] [tfx-live req=<id>]`다. 이름은 `--from`, `$TFX_LIVE_FROM`, Claude 세션 기록, Codex `session_index` 순으로 찾고 없으면 머리말 없이 표식만 붙인다. Codex TUI는 Claude처럼 접어 보여 주지 않고 사용자 입력으로 그대로 표시한다.
-3. thread는 `--thread UUID`, `start`가 남긴 `@tfx_codex_thread`, Codex 세션 레지스트리, pane 프로세스의 `resume <UUID>` 인자, pane cwd와 같은 rollout 하나 순으로 찾는다. cwd 대응은 그 cwd의 Codex TUI가 하나일 때만 쓰고 exec 워커와 서브에이전트 thread는 뺀다. 이름으로는 보내지 않는다(`codex queue`의 이름 조회가 실패한다).
-4. tmux 직접 입력은 queue를 못 쓸 때만 쓴다: 원격 호스트, thread를 못 찾음(`start` 밖에서 `resume --last`로 띄운 세션, `start --resume-last`의 `threadId: null`, 같은 cwd의 TUI 여럿 포함), `codex queue` 오류(0.160 미만 포함). 결과에 `transport: "tmux"`, `transportRequested: "queue"`, `fallbackReason`이 남는다. 시간 초과처럼 queue가 이미 쌓았을 수도 있는 오류는 `status: "unknown"`으로 끝내고 재전송하지 않는다.
-5. 슬래시 명령(`/rename`, `/compact`, `/new`)과 interrupt(Escape)는 tmux 직접 입력 전용이다. queue로 보낸 슬래시 명령은 실행되지 않고 일반 텍스트로 모델에 들어간다. `/명령`으로 시작하는 프롬프트(절대 경로는 제외)와 `--if-busy fail|interrupt`는 tmux로 보내고 `transportReason`을 남긴다. 슬래시 명령에는 표식을 붙이지 않으므로 `wait`로 추적할 수 없다.
-
-보내는 쪽이 Codex여도 로컬 피어 전송은 `<홈 절대경로>/.claude/scripts/tfx-peer send`를 쓴다. Codex 협업 도구(`spawn_agent`, `send_message`, `followup_task`)는 자기가 띄운 하위 에이전트(`/root/...`)를 대상으로 한다. 다른 최상위 Codex 세션에 닿는지는 확인하지 않았다. Codex 0.162.1 에서 모델에 노출된 협업 도구는 `spawn_agent`, `wait_agent`, `send_message`, `followup_task`, `list_agents`, `interrupt_agent`이고 `close_agent`와 `send_input`은 없었다. `send_message`는 하위 에이전트의 턴을 시작하지 않고 다음 `followup_task` 턴에 함께 전달된다.
-
-결과의 `status`는 `queued`(쌓임), `working`(TUI가 가져가 턴 시작), `completed`, `failed`로 나뉘고 `delivered`, `deliveredAt`, `turnId`가 배달을 구분한다. queue는 바쁜 세션에도 쌓으므로 `--if-busy wait`는 의미가 없다.
-
-```bash
-tfx-live queue --cli codex --session cx1
-tfx-live queue --cli codex --session cx1 --request-id <requestId> --delete all
-tfx-live queue --cli codex --thread <UUID> --delete <queuedMessageId>
-```
-
-`queue`는 TUI가 아직 가져가지 않은 항목을 보고 지운다. Codex app-server의 실험 API `thread/queue/list`·`thread/queue/delete`를 stdio로 호출하며 큐 저장소 파일은 건드리지 않는다. 목록 항목은 `id`(ask 결과의 `queuedMessageId`와 같다), `requestId`, `text`다. 삭제 결과의 `missing`은 이미 TUI가 가져갔거나 없는 항목이다. 유휴 TUI는 쌓인 항목을 곧 가져가므로 지울 수 있는 것은 사실상 바쁜 세션과 닫힌 세션의 항목이다. 가져간 뒤의 처리 여부는 `wait`로 확인한다.
+기본은 Codex 큐이고 `queued`는 큐 기록만 뜻한다. thread 는 UUID 로 찾고 이름으로는 보내지 않는다. queue 를 못 쓸 때만 tmux 직접 입력으로 바꾸고 `fallbackReason`을 남긴다. 큐 경로와 폴백 조건, 머리말, 결과 상태, Codex 협업 도구, `tfx-live queue`로 쌓인 항목 보기와 지우기는 [references/codex-sessions.md](references/codex-sessions.md)를 따른다.
 
 ### 네이티브 goal
 
@@ -155,13 +128,7 @@ tfx-live goal status --session cx1
 tfx-live goal clear --session cx1
 ```
 
-`--cli`를 생략하면 세션 프로세스에서 추정한다. 로컬 Claude와 Codex만 지원하며 `--remote`와 agy는 거부한다. `--budget`은 Codex set의 daemon 경로에서만 받고 Claude와 tmux 폴백에서는 오류로 거부한다.
-
-Claude는 tmux로 `/goal <조건>`과 `/goal clear`를 보내고 transcript의 마지막 `goal_status`로 상태를 읽는다. 별도 평가자의 완료는 `complete`, 수동 해제는 `none`이며 `judgedBy: "evaluator"`와 평가 이유를 보고한다. transcript를 찾지 못하면 상태는 `null`이고 경고를 남긴다. set/clear 뒤 새 sentinel을 최대 15초 확인하며 없으면 `confirmed: false`와 경고를 반환한다. 이미 해제된 goal의 clear는 입력 없이 `alreadyCleared: true`로 답한다. set은 기본 `--if-busy wait`, clear는 미충족 goal이 턴을 계속 이어 가도 끊을 수 있게 기본 `--if-busy interrupt`다. 평가자가 해제하지 않고 멈춘 goal은 `active`로 남으므로 리드가 `goal clear`로 정리한다.
-
-Codex는 공유 daemon UDS의 `thread/goal/*`를 우선 쓴다. `--codex-socket PATH|default`로 소켓을 고르고 기존 thread 해석 순서와 `--thread UUID`를 따른다. 새 goal은 `origin: "user"`로 clear 후 active set한다. 소켓이 없거나 thread가 미적재면 set/clear는 tmux 슬래시로, status는 `$CODEX_HOME/goals_1.sqlite`의 읽기 전용 조회로 폴백한다. `node:sqlite`를 지원하지 않는 Node에서는 상태를 `null`로 두고 경고한다. 결과에 `transport: "daemon"|"tmux"|"sqlite"`와 폴백 이유를 남긴다. tmux 폴백의 set/clear는 sqlite로 최대 15초 확인하고, 확인하지 못하면 재전송을 막으려고 오류 대신 `confirmed: false`와 경고를 반환한다. Codex의 `judgedBy: "model"`, `complete`는 모델 자기 판정이므로 리드의 교차 검증이 필요하다.
-
-Claude와 Codex는 네이티브 goal을 우선 쓴다. 현재 agy는 네이티브 goal을 지원하지 않는다.
+로컬 Claude 와 Codex 만 지원하고 agy 와 `--remote`는 거부한다. 평가자가 해제하지 않고 멈춘 Claude goal 은 리드가 `goal clear`로 정리한다. Codex 의 `complete`는 모델 자기 판정이라 리드가 교차 검증한다. 전송 경로, 상태 판정, 폴백과 확인 상세는 [references/native-goal.md](references/native-goal.md)를 따른다.
 
 ### 컨텍스트 판단
 
@@ -176,9 +143,7 @@ Claude의 분모는 공식 모델 창과 실행 한도 중 작은 값이다. Cod
 
 Claude는 85% 도달 시 바로 handoff를 지시한다. Codex 실행 창(`astra`, `luna` 가족 카탈로그 272k/유효 258.4k, `sol`, `terra` 가족 카탈로그 500k/유효 475k)은 60%에서 준비와 인계 파일 기록을 시작하고 85%에서 일반 전송을 거부한다. 85%에서 거부된 뒤에는 가드를 건너뛰는 `tfx-live compact`를 보내거나 인계 요청에 `--max-context-pct 0`을 넘긴다. rollout 실행 창이 없어도 `session-context.mjs` 구체 모델 표에 등록된 모델은 모델별 창과 60/85%를 적용하고, 미등록 모델만 1.05M 분모(15/22%)를 쓴다. agy 행은 운영 지침이며 전송 거부 코드가 없어 전송 거부 열은 비운다. agy의 12%는 작업 중단이 아니라 한 번 보고 뒤 계속 진행하는 기준이다. agy 상태줄(HUD)이 대화 ID 별로 남긴 기록(`~/.local/state/triflux/agy-context/<대화 ID>.json`)이 있으면 `contextPct`, `estimatedContextTokens`, `contextLimitTokens`와 `contextLimitSource: "agy-statusline"`, 기록 시각 `contextRecordedAt`을 보고하고, 기록이 없으면 `null`이다. 같은 필드를 `tfx-live list-sessions --cli agy` 결과의 각 세션에서도 메시지를 보내지 않고 볼 수 있다. 경고와 전송 거부 임계는 정하지 않아 가드는 건너뛴다. `model_context_window`와 `model_auto_compact_token_limit`은 올리지 않는다.
 
-결과에는 `estimatedContextTokens`, `contextLimitTokens`, `contextLimitSource`, `contextPct`가 포함된다. Claude 실행 한도는 `executionContextLimitTokens`로 별도 보고하며 `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`이면 200,000이다. Codex는 rollout `token_count`의 `model_context_window`를 `executionContextLimitTokens`로 보고한다. 이 값이 있으면 모델 표에 없는 모델이라도 그 창으로 판정하고, 없으면 구체 모델 창 또는 1,050,000 표 값을 분모로 쓴다. 한도를 모르면 비율은 `null`로 두고 경고만 한다. 사용량이 없는 `probe`는 `context: null`이다. Claude daemon 컨텍스트는 `tfx-live probe`로, agy는 `tfx-live list-sessions --cli agy`(`contextRecordedAt` 포함)로 확인한다. `interrupt`, 자동 `ask`의 daemon probe, `stop --short`는 transcript를 읽지 않는다.
-
-`ask`의 `--warn-context-pct`와 `--max-context-pct`는 경고·거부 비율을 덮어쓰며 0이면 해당 가드를 끈다. 기본값은 표의 경고·전송 거부 열이다. Codex는 `executionContextLimitTokens`나 구체 모델 창이 있으면 실행 창 행을, 없으면 1.05M 분모 행을 쓴다. 거부 결과는 `status: "failed"`, `done: false`, `context-limit`, 컨텍스트 필드와 적용한 거부 비율 `thresholdPct`를 돌려준다. 경고의 `thresholdPct`는 적용한 경고 비율이다. 자세한 근거와 실측은 clone 의 `docs/research/tfx-live-context-policy-2026-10.md`에 있다(설치본에는 없다).
+결과 필드, 실행 한도 판정 순서, `ask`의 `--warn-context-pct`와 `--max-context-pct` 덮어쓰기, 거부 결과 형식은 [references/context-fields.md](references/context-fields.md)를 따른다.
 
 ### 수동 compact와 종료
 
@@ -191,22 +156,14 @@ tfx-live stop --cli claude --session-id <id>
 tfx-live stop --session cl1
 ```
 
-리드 자기 세션의 compact, clear, exit 는 tmux 안팎 모두 triflux mod 도구 `tfx_control` 을 먼저 쓴다(`tfx-lead` 스킬 "자기 세션 제어" 절). 아래 경로는 mod 가 없는 세션의 대안이다. tmux 안에서 도는 Claude, Codex, agy 세션은 자기 자신도 compact(agy 는 `tfx-live compact` 중계 미지원이라 `/compact` 직접 입력)와 clear 를 할 수 있다. 자기 턴이 도는 동안에는 세션이 바쁘므로, 백그라운드로 띄우고 `--if-busy wait`로 턴이 끝나기를 기다리게 한다. 기본 `fail`로 두면 턴이 끝나기 전에 거부된다. 결과는 파일에 남겨 다음 턴에 확인한다. 사용자에게 `/compact` 입력을 부탁하기 전에 이 방법을 쓴다.
+리드 자기 세션의 compact, clear, exit 는 tmux 안팎 모두 triflux mod 도구 `tfx_control` 을 먼저 쓴다(`tfx-lead` 스킬 `references/self-session-control.md`). 아래 경로는 mod 가 없는 세션의 대안이다. tmux 안에서 도는 Claude, Codex, agy 세션은 자기 자신도 compact(agy 는 `tfx-live compact` 중계 미지원이라 `/compact` 직접 입력)와 clear 를 할 수 있다. 자기 턴이 도는 동안에는 세션이 바쁘므로, 백그라운드로 띄우고 `--if-busy wait`로 턴이 끝나기를 기다리게 한다. 기본 `fail`로 두면 턴이 끝나기 전에 거부된다. 결과는 파일에 남겨 다음 턴에 확인한다. 사용자에게 `/compact` 입력을 부탁하기 전에 이 방법을 쓴다.
 
 ```bash
 tfx-live compact --session "$TMUX_PANE" --if-busy wait --busy-timeout 600 --instructions "상태 파일 경로와 남은 일을 보존하라" --then "상태 파일을 다시 읽고 이어가라" --no-wait > "${TMPDIR:-/tmp}/tfx-self-compact.json" 2>&1 &
 nohup tfx-live clear --cli <CLI> --session "$TMUX_PANE" --if-busy wait --busy-timeout 600 --handoff <인계 파일 경로> > "${TMPDIR:-/tmp}/tfx-self-clear.json" 2>&1 < /dev/null &
 ```
 
-`compact --session S [--cli claude|codex] [--instructions TEXT] [--then PROMPT] [--no-wait]`는 로컬 tmux에서 `/compact`를 중계 표식 없이 보낸다. CLI 기본값은 Claude다. `--instructions`는 Claude에서만 받으며 Codex는 인자를 받지 않아 거부한다. 기본 `--if-busy fail`이며 바쁜 세션에는 compact를 전송하지 않는다. UDS compact는 지원하지 않는다.
-
-`--no-wait`는 압축 진행 표시 또는 새 완료 기록으로 제출을 확인한 뒤 반환한다. Codex에서 확인되지 않으면 Enter를 한 번 더 보내고, 그래도 확인되지 않으면 `--then`을 보내지 않고 오류로 끝낸다. `--then`은 일반 텍스트 지시만 받으며 슬래시 명령은 거부한다. 제출 확인 직후 Claude에는 표식을 붙여 tmux로 보내고 화면의 `queued messages` 또는 transcript의 `enqueue`로 확인한다. Claude 압축이 먼저 끝나 지시가 이미 처리에 들어갔으면 `then.queued: false, delivered: true`로 보고한다. Codex에는 기존 queue 경로로만 보내며 tmux로 전환하지 않는다. 결과의 `then.requestId`로 `wait --request-id`에서 압축 뒤 응답을 받는다.
-
-`clear --session S [--cli claude|codex|agy] [--handoff PATH] [--then PROMPT] [--if-busy fail|wait] [--busy-timeout SEC]`는 로컬 tmux에서 Claude와 agy에 `/clear`, Codex에 `/new`를 중계 표식 없이 보낸다. CLI 기본값은 Claude, 기본 `--if-busy`는 `fail`이며 `compact`와 같은 바쁜 세션 대기를 쓴다. `--handoff` 파일이 없으면 아무것도 보내지 않고 거부한다. 비운 명령이 새 대화로 바뀐 것을 확인하고(agy 는 대화 ID 변경, Codex 와 Claude 는 화면 변화와 입력 대기) 세션이 쉬면 `--handoff`가 있을 때 "인계 파일 <경로> 를 읽고 이어간다.", 이어서 `--then`을 한 메시지(`[tfx-live req=...]` 표식 포함)로 tmux에 보낸다. 결과는 `clear: {command, inputSent: true}`와 뒤따름 문장이 있을 때 `followUp: {requestId, inputSent}`다. `inputSent`는 입력을 보냈다는 뜻이며 모델이 받았다는 확인이 아니다. `--busy-timeout` 안에 전환을 확인하지 못하면 뒤따름 문장을 보내지 않고 같은 방식으로 실패한다. 뒤따름 문장이 실패하면 `ok: false`와 `error`로 종료 코드 1이며, 비우기는 이미 보냈으므로 다시 보내지 않는다. 자기 세션에는 위 예처럼 표준 입출력을 끊고 `nohup` 으로 백그라운드에 보낸다. 샌드박스가 강제된 agy 세션에서는 `run_command` 에 `BypassSandbox: true` 를 붙인다. 그 인자가 없는 세션에서는 붙이지 않는다.
-
-`--no-wait`가 없으면 Claude의 새 `compact_boundary`, Codex rollout의 새 `compacted`까지 기다린다. 결과에 `compact: {submitted: true, done}`과 `then: {requestId, queued, transport}`를 추가하고 기존 `compacted`, `preTokens`, `postTokens`를 유지한다. 토큰 수는 기록에 있는 값만 보고하며 Codex의 압축 후 token_count가 아직 없으면 `postTokens`는 `null`이다. 시간 안에 완료 기록이 없으면 `compacted: false, timedOut: true`다.
-
-`stop --short`와 `stop --session-id`는 `claude stop <id>`를 호출하고 `stopped: true, conversationKept: true`를 반환한다. `claude attach`로 대화를 재개할 수 있다. `/exit`, `←`, Ctrl+Z는 백그라운드 세션의 연결만 끊는다. macOS의 `sysctl -n kern.memorystatus_vm_pressure_level`이 2 이상이면 새 세션을 띄우기 전 정리한다. 원격 배정 전에는 `tfx-remote probe <host>`의 `ready`와 `warnings`를 확인한다.
+`compact`의 기본 `--if-busy`는 `fail`이고 `--instructions`는 Claude 만 받는다. `--then`은 일반 텍스트만 받는다. `clear`는 `--handoff` 파일이 없으면 아무것도 보내지 않는다. `inputSent`는 입력 전송이지 모델 수신 확인이 아니다. `stop --short`는 대화를 남긴다. 플래그, 제출 확인 순서, 결과 필드는 [references/compact-clear-stop.md](references/compact-clear-stop.md)를 따른다.
 
 ## 요청과 완료 확인
 
@@ -221,13 +178,7 @@ tfx-live wait --cli codex --session cx1 --request-id <requestId> --timeout 120
 
 `ask --no-wait`는 Claude와 tmux에서 `status: "submitted"`, Codex queue에서 `status: "queued"`와 함께 `inputSent: true`, `done: false`, `submittedAt`, `target`, `requestId`를 반환한다. `ask`와 `peer`는 `[tfx-live req=<requestId>]`를 프롬프트 앞에 붙인다. `--no-relay-tag`로 제거하면 `wait --request-id`가 해당 요청을 찾을 수 없다. 슬래시 명령(`/rename`, `/clear` 등)은 CLI와 상관없이 표식 없이 보낸다. 응답 턴이 없는 Claude 내장 명령(`/rename`, `/clear`, `/compact`, `/model`, `/effort`, `/color`)은 기다리지 않고 `status: "submitted"`로 반환한다. 압축 완료까지 기다리려면 `compact` 명령을 쓴다.
 
-`wait`는 Claude transcript에서 표식을 user 메시지, `queue-operation`의 `enqueue` content, queued command attachment에서 찾는다. 표식이 소비된 턴이 끝난 뒤 마지막 assistant 텍스트를 응답으로 쓴다. 표식 없는 `wait`는 최신 user turn을 본다. `isSidechain`과 합성 API 오류 메시지는 정상 응답에서 제외한다. 요청을 소비한 턴에서 합성 오류가 나타나면 오류 문구와 `status: "failed"`를 반환한다. daemon의 `idle`만으로 완료를 단정하지 않는다. timeout은 `status: "working"`, `timedOut: true`, `done: false`다.
-
-tmux로 띄운 대화형 Claude는 `wait --session <tmux 대상>`을 쓴다. pane에 붙은 Claude 세션 기록(`~/.claude/sessions`)에서 sessionId를 찾아 같은 transcript 규칙으로 판정하고, daemon의 idle 대신 세션 기록의 `status: "idle"`을 쓴다. transcript는 처음 찾은 것을 끝까지 쓰므로 대기 중 `/clear`로 바뀐 세션은 따라가지 않는다. 로컬 전용이다.
-
-Codex `wait`는 `--session` 또는 `--thread UUID`의 rollout에서 표식이 든 user 메시지의 `turn_id`를 찾고, 같은 턴의 `task_complete.last_agent_message`를 응답으로 쓴다. `turn_aborted`는 `status: "failed"`다. 표식이 아직 없으면 `status: "queued"`, `timedOut: true`다. `--timeout 0`은 한 번만 확인한다.
-
-명시한 `--config-dir`은 정확히 일치하는 daemon만 선택한다. `CLAUDE_CONFIG_DIR`도 해당 env 디렉터리로 제한한다. stale endpoint 복구는 같은 source configDir 안에서만 재시도한다. attach 전 예외는 `inputSent: false`이므로 `auto`의 tmux fallback이 가능하다. attach 뒤 전송 여부가 불명확하면 `status: "unknown"`으로 보고하고 재전송하지 않는다.
+`wait`는 표식이 소비된 턴의 마지막 응답을 쓴다. 시간 초과는 `timedOut: true`이고 완료가 아니다. 그때 `status`는 `working`, `queued`, `submitted` 중 하나일 수 있다. 전송 여부가 불명확하면 `status: "unknown"`이며 재전송하지 않는다. CLI 별 판정 규칙과 daemon 선택 조건은 [references/wait-details.md](references/wait-details.md)를 따른다.
 
 직접 `tmux capture-pane`과 `tmux send-keys`를 쓸 때는 전송·pane 진단에 한정한다. Claude pane에 `C-c`를 보내지 않는다. 자동 세션 탐색에는 `tmr ls --json`으로 pane 별 에이전트, 상태, 클라이언트 수, 마지막 활동을 본다. tmr 이 없으면 아래 `tfx-live list-sessions`와 `tmux ls -F '#{session_name} #{session_attached}'`를 쓴다. tmr 은 macOS(arm64) 에서 `tfx setup` 이 설치를 묻는다.
 
@@ -274,35 +225,8 @@ tfx-live list-sessions --cli codex
 
 ## 원격 native peer 발신과 회신
 
-- Darwin과 POSIX Linux에서 양쪽에 같은 원격 peer 프로토콜을 지원하는 `tfx-peer` 래퍼가 설치되어 있을 때 쓴다. 등록 OS 값은 대소문자만 정규화하여 `Darwin`, `macOS`, `Linux`도 허용한다. 미상 OS와 Windows 송수신 조합은 전송 전에 거부한다.
-- 발신 호스트에서 `remote-send --host m5 --reply-host m2 --to 'codex:<이름 또는 UUID>' --message '<본문>'`을 실행한다. `m5`는 목적지, `m2`는 수신 호스트에서 발신 호스트를 찾을 등록 별명이다. 발신 호스트의 사용자 상태 `hosts.json`에는 목적지 `m5`, 수신 호스트에는 회신 목적지 `m2`가 호스트 이름 또는 `aliases`로 등록되어 있어야 한다. 각 호스트의 자기 항목은 필요 없다. 송신은 실제 SSH 목적지만 조회하고, 수신은 역방향 회신 목적지만 조회한다. 원본 저장소의 legacy hosts로 폴백하거나 설정을 자동 복사하지 않는다.
-- `--from 'claude:<이름 또는 UUID>'`, `--from 'codex:<이름 또는 UUID>'`, `--from 'agy:<이름 또는 UUID>'`을 명시할 수 있다. 우선순위는 `--from`, `TFX_LIVE_FROM`, 발신 호스트의 자동 탐색이다. 발신 세션을 판별하지 못하면 SSH 전에 `--from`을 요구한다. `remote-send`에는 `--host`와 `--reply-host`가 모두 필요하다. 로컬 `send`에는 `--remote`, `--host`, `--reply-host`를 붙일 수 없으며 `self`도 원격 플래그를 거부한다.
-- 수신 본문은 원래 발신 CLI, 표시 이름, `origin` 호스트와 가능한 대화 UUID를 보존한다. 회신 안내의 `--host`는 원래 발신 호스트, `--reply-host`는 원래 목적지다. UUID가 있으면 표시 이름보다 정확한 대화 UUID로 회신한다. 수신 환경을 발신 환경처럼 바꾸지 않는다.
-- SSH 대상은 등록된 주소와 사용자만 쓴다. 원격 명령은 고정된 `_receive` 진입점이고 본문과 메타데이터는 크기 제한 JSON stdin으로 전달한다. `remote-send`와 `_receive`는 기존 `send` 자동 승인 범위에 포함하지 않는다. 전역 allow, 동의 파일과 설정을 바꾸지 않으며 원격 전송은 별도 실행 권한을 따른다. `_receive`는 내부 수신용이다. 발신 표시와 호스트 별명은 인증 신원이나 권한 근거가 아니다. 기존 수신 세션의 소유권, PID, socket, thread, conversation 검사를 그대로 적용한다.
-- SSH는 한 번만 실행한다. 기록 전 확정 거부는 `rejected`, 기록 후 응답 유실과 timeout은 `unknown`, adapter의 부분 기록은 `partial`로 반환한다. `retrySafe:false`, `modelReceipt:false`와 발신 호스트의 `correlationId`를 유지하며 adapter의 `msgId`도 보존한다. 자동 재전송과 tmux 또는 사용자 턴 폴백은 없다. `sent`와 `written`도 모델 수신이나 완료를 뜻하지 않는다.
-- 같은 호스트 Claude끼리는 기존 `SendMessage`를 쓴다. 원격 peer 수신은 목적지의 기존 native adapter로 전달하고, `tfx-live ask`의 사용자 입력 경로와 구분한다. 기존 `tfx-live send`의 원격 미지원 계약은 그대로다.
-
-```bash
-"$HOME/.claude/scripts/tfx-peer" remote-send --host m5 --reply-host m2 --to 'codex:10.30 구현' --message '변경사항을 공유합니다'
-"$HOME/.claude/scripts/tfx-peer" remote-send --from 'agy:10.30 발신' --host m5 --reply-host m2 --to 'claude:10.30 리드' --message '결과 파일을 확인해 주세요'
-# m5의 수신 본문에 표시되는 회신 예시
-"$HOME/.claude/scripts/tfx-peer" remote-send --host m2 --reply-host m5 --to 'codex:<원래 발신 UUID>' --message '확인했습니다'
-```
+Darwin, Linux 호스트 사이에서는 `tfx-peer remote-send --host <목적지> --reply-host <회신 별명> --to '<cli>:<이름 또는 UUID>' --message '<본문>'`으로 보낸다. 같은 호스트 Claude끼리는 `SendMessage`를 쓴다. `hosts.json` 등록 조건, `--from` 우선순위, 결과 상태와 재전송 금지, 예시는 [references/remote-peer.md](references/remote-peer.md)를 따른다.
 
 ## 선택적 전역 native peer 어댑터
 
-Windows는 Claude 대상 전달만 지원하고 자동 승인용 래퍼나 Codex 규칙을 설치하지 않는다. PowerShell에서 다음처럼 직접 실행한다.
-
-```powershell
-node "$env:APPDATA\npm\node_modules\triflux\bin\tfx-peer.mjs" send --to 'claude:<이름>' --message '<본문>'
-```
-
-npm의 `tfx-peer.cmd` shim은 cmd.exe가 본문을 다시 해석해 `%`, `&`, 줄바꿈을 깨뜨리므로 쓰지 않는다. `tfx-live start`로 띄운 Codex는 승인과 샌드박스를 끈 상태라 이 규칙 없이 실행할 수 있다. Windows의 Codex 대상 전달은 지원하지 않는다.
-
-macOS/Linux는 `triflux setup`에서 별도 동의하면 `~/.claude/scripts/tfx-peer send --to 'codex:<정확한 이름>' --message '<본문>'`, `--to 'claude:<정확한 이름>'`, `--to 'agy:<정확한 이름>'`을 쓴다. `~`는 셸 예시이고 실제 호출과 회신 안내는 setup이 출력한 홈의 절대경로 래퍼 `send`를 쓴다. 위 `<홈 절대경로>`도 실제 값으로 바꾼다. `node`, `bash`, `tfx-live send`를 이 승인으로 실행하지 않는다. Claude끼리는 기존 native `SendMessage`를 우선 사용한다. native peer 실패는 사용자 입력으로 fallback하지 않는다.
-
-macOS/Linux 설치는 현재 사용자 또는 root 소유이고 other-write가 없는 안정적인 package, Node, tmux 경로만 허용한다. group-write는 허용하지만 개발 checkout, symlink packageRoot, 바뀐 런타임 계약은 거부한다. Claude key/socket/auth의 0600 검사는 별도로 유지한다. setup이 확인한 tmux 디렉터리만 래퍼의 고정 PATH에 넣고 호출자 PATH나 PSMUX override를 받지 않는다. 거절·비대화형·CI·postinstall에서는 승인 파일을 쓰지 않으며 update는 미설정·거절·철회를 조용히 보존한다. 재승인은 `triflux setup`에서 명시적으로 선택한다.
-
-Claude 수신은 collapsed native peer UI지만 UDS 또는 named pipe 쓰기 후 결과 `written`에는 같은 연결의 인증·거절 ACK가 없다. 수신이나 모델 완료로 읽지 않는다. Codex는 same-daemon `agent_message` raw injection과 non-user wake를 쓴다. `sent`는 유효한 turn ID와 `inProgress` 또는 `completed` wake 응답을 받은 상태이며 `turnId`, `turnStatus`를 반환한다. 모델 수신과 작업 완료는 뜻하지 않으며 `modelReceipt: false`를 유지한다. injection 뒤 wake가 실패하거나 턴 응답이 없으면 `partial`로 반환하고 자동 재전송하지 않는다. agy는 대화별 `.system_generated/messages/` 파일 저장소 쓰기(`written`)이고 `peer-wake` 패치가 적용된 로컬 세션은 유휴 중에도 바로 깨어난다. 로컬 `tfx-live start --cli codex`와 resume은 검사한 소켓의 realpath로 공유 app-server 데몬에 붙는다. `--remote` 세션의 셸은 데몬에서 돌아서 `-C`로 작업 디렉터리를 지정한다. 소켓이 없으면 `codex app-server daemon start` 안내와 함께 실패한다. 손으로 띄운 Codex는 `tfx-live adopt --session <tmux 대상>`으로 연결한다. 리드가 그 pane에 nonce 메시지를 tmux로 한 번 입력하고, 그 메시지를 받은 공유 데몬 thread를 pane에 기록한다. 이 한 번은 상대 기록에 사용자 발화로 남는다. `-c` 설정 덮어쓰기나 `--no-daemon`으로 띄운 Codex는 공유 데몬 밖에서 돌아 adopt가 실패하므로 `tfx-live start --cli codex --resume <thread>`로 다시 띄운다. 송신 socket은 일회성이므로 native `SendMessage` 회신은 지원하지 않는다(ENOENT 가능). 본문의 발신 머리말과 회신 안내를 따른다. macOS/Linux의 Claude, Codex, agy 발신은 홈의 실제 절대경로 래퍼 `tfx-peer`, unknown 발신은 `회신: 경로 불명(보낸 세션을 판별하지 못함)`을 안내한다. Windows에서 Claude 대상으로 회신할 때는 위 `node` 호출을 안내한다. `tfx-peer` 본문은 8000자까지 받으며 긴 본문은 파일 경로로 보낸다. 머리말과 회신 줄은 그 제한에 포함하지 않는다. `partial`/`unknown` 또는 timeout은 중복 가능성 때문에 자동 재시도하지 않는다.
-
-철회할 때 Claude `settings.json`의 해당 `Bash(<실제 절대경로>/tfx-peer send:*)` allow, `~/.codex/rules/triflux-native-peer.rules`, `~/.claude/scripts/tfx-peer`, **`~/.claude/scripts/tfx-peer-consent.json`**을 확인해 이 어댑터 항목만 제거한다. partial 설치 충돌이면 같은 경로의 `tfx-peer-consent.json.lock`도 확인한다. 다른 설정이나 deny는 건드리지 않는다. 전역 승인 대신 기존 수동 `~/.codex/rules/tfx-live.rules`를 쓰더라도 이는 native peer 전송과 다르다. 원격 자동 권한 변경은 지원하지 않는다.
+macOS/Linux 는 `triflux setup`에서 동의하면 홈 절대경로 래퍼 `~/.claude/scripts/tfx-peer send --to '<cli>:<정확한 이름>'`을 쓴다. Windows 는 Claude 대상만 지원하고 `node .../tfx-peer.mjs send`로 직접 보낸다. 설치 조건, 전송 결과(`written`, `sent`, `partial`)의 뜻, 손으로 띄운 Codex 의 `tfx-live adopt`, 철회 절차는 [references/peer-adapter.md](references/peer-adapter.md)를 따른다.

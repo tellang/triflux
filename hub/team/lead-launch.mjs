@@ -31,6 +31,7 @@ const execFileAsync = promisify(execFile);
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const TFX_LIVE = join(PKG_ROOT, "bin", "tfx-live.mjs");
 const LEAD_SKILL = join(PKG_ROOT, "skills", "tfx-lead", "SKILL.md");
+const COMM_SKILL = join(PKG_ROOT, "skills", "tfx-comm", "SKILL.md");
 export const LEAD_CLIS = ["claude", "codex", "agy"];
 
 export function leadConfigPath() {
@@ -130,11 +131,11 @@ export function leadDisplayName(role, now = new Date()) {
 
 /**
  * 리드: Claude 는 mod 가 /tfx-lead 를 처리하고, Codex 와 agy 는 mod 가 없어 스킬 파일을 읽게 한다.
- * 소통: /tfx-lead 는 리드 전용이라 모든 CLI 가 스킬 파일의 "소통 세션" 절을 읽는다.
+ * 소통: /tfx-lead 는 리드 전용이라 모든 CLI 가 tfx-comm 스킬 파일을 읽는다.
  */
 export function leadEntryPrompt(cli, role, sessionRole = "lead") {
   if (sessionRole === "communication")
-    return `${LEAD_SKILL} 를 읽고 이 세션이 ${role} 소통 세션을 맡는다. 그 스킬의 "소통 세션" 절을 따른다.`;
+    return `${COMM_SKILL} 를 읽고 이 세션이 ${role} 소통 세션을 맡는다. 그 스킬의 절차를 따른다.`;
   if (cli === "claude") return `/tfx-lead ${role}`;
   return `${LEAD_SKILL} 를 읽고 이 세션이 ${role} 리드를 맡는다. 처음 활성화할 때 "보유 자산과 선택" 절로 tfx-harness, tfx-auto, tfx-live 등 설치 자산을 인지하고 요청에 맞는 경로를 선택한다. 그 스킬의 절차를 따른다.`;
 }

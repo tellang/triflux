@@ -2,6 +2,19 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [11.2.0] - 2026-11-25
+
+### Added
+- lead: 상주 소통 세션 절차를 새 스킬 `tfx-comm`으로 분리한다. `tfx lead <역할> --role communication` 진입 프롬프트와 mod `lead-role`이 `tfx-lead` 전체 대신 `tfx-comm`을 읽히고, `tfx-lead`의 "소통 세션" 절에는 리드 몫(`status.md`, `decisions.md` 갱신과 보고 경로 지정)만 남긴다. `tfx setup`이 Codex 와 agy 에도 `tfx-comm`을 관리 스킬로 설치한다.
+
+### Changed
+- skills: `tfx-lead`, `tfx-live` SKILL.md 를 45,000바이트 아래로 줄인다(각 57KB, 59KB 에서 약 38KB, 30KB). OMC read budget 훅이 전체 Read 를 막던 문제를 없애고, 조건부 상세는 `references/`로 옮겨 원래 곳에 요약과 링크를 남긴다. Codex, agy `tfx-live` 어댑터에도 같은 `references/`를 둔다.
+- skills: compact 뒤 스킬마다 앞 5,000 토큰만 다시 붙는 Claude Code 동작에 맞춰 `tfx-lead`, `tfx-live` 맨 앞에 상시 규칙 절을 두고, 문맥에서 빠지면 스킬 파일을 다시 읽도록 안내한다.
+- lead: `tfx-live` "전송 경로"와 겹치던 전송 수단 표, `tfx-routing.md`와 겹치던 역할별 모델 표, 폐기된 주간 80% 리뷰 전환표, 날짜 사례 서술을 뺀다.
+
+### Tests
+- `tests/unit/tfx-live-skill-sync.test.mjs`: 어댑터 `references/`가 정본과 같은지 검사하고, 중복 표를 맞추던 두 테스트를 뺀다. `tests/unit/lead-launch.test.mjs`, `mods/triflux/tests/lead-role.test.ts`의 소통 세션 진입 기대값을 `tfx-comm`으로 바꾼다.
+
 ## [11.1.3] - 2026-11-25
 
 ### Fixed
@@ -271,14 +284,12 @@ All notable changes to triflux will be documented in this file.
 - private 인증 파일을 데이터로 읽고 소유자, 0600 권한, 파일 종류와 크기를 검사하며 명시적 환경변수 비활성화를 우선한다.
 - 셸에서 실행하는 hub/bridge.mjs를 사용자 공유 설치 목록에 추가한다.
 
-
 ## [10.88.1] - 2026-10-30
 
 ### Fixed
 - HUD를 기존 3행으로 유지하고 현재 CLI 행의 `ctx` 사용률을 보존한다.
 - Jev 활성 배지는 Claude와 Antigravity에서 2행, Codex에서 1행의 오른쪽에 표시한다. 비활성이나 미확인 상태에서는 생략한다.
 - Codex tmux HUD의 네 번째 행과 이전 세션 상태 캐시를 정리하고 전역 설정과 다른 세션은 보존한다.
-
 
 ## [10.88.0] - 2026-10-30
 
@@ -1176,7 +1187,6 @@ All notable changes to triflux will be documented in this file.
 - stabilize hub port cwd assumptions (worktree-clamp no longer fails the suite from a worktree cwd)
 - update tray singleton expectations to machine-wide semantics; drop the stale frontmatter-triggers assertion; biome formatting catch-ups surfaced by the new CI lint step
 
-
 ## [10.33.1] - 2026-06-09
 
 ### Added
@@ -1520,7 +1530,6 @@ All notable changes to triflux will be documented in this file.
 - 라우팅 audit (tfx-harness) D2 장기 follow-up 은 별도 Issue [#281](https://github.com/tellang/triflux/issues/281) 등록 (label `routing,tier:high`) — `tfx-auto` 가 staged code change 자동 감지 후 swarm dispatch 로 escalate 하는 라우터 강화 작업. 회귀 테스트 3 case body 명시.
 - packages mirror 정합: `hub/`, `scripts/`, `hooks/`, `bin/` -> `packages/triflux/` byte-identical, `hub/lib/` + `scripts/lib/` -> `packages/core/` byte-identical, `packages/remote/hub/team/*` -> `@triflux/core/*` import 경로 보존. PR #284 / #285 각 PR diff 에서 4-layer 검증 통과.
 - `tfx-harness` 라우팅 audit 정적 일관성 검증 (escalation chain 1~4단계 / dynamic routing fallback `codex-default` / `TRIFLUX_DYNAMIC_ROUTING` env gate 기본 false) 통과. 동적 라우팅 wire-up (PR #266~#270) 과 SSOT 정합 확인.
-
 
 ## [10.22.0] - 2026-05-19
 

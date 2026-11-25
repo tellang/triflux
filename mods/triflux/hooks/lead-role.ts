@@ -145,7 +145,7 @@ export function registerLeadRole(on: On, monitor: Monitor, lead: Holder) {
     const cleanRole = role.replace(datePrefix, '')
     const contextText =
       kind === 'communication'
-        ? `이 세션은 ${cleanRole} 소통 세션을 맡는다. tfx-lead 스킬을 로드해 "소통 세션" 절을 따른다.`
+        ? `이 세션은 ${cleanRole} 소통 세션을 맡는다. tfx-comm 스킬을 로드해 그 절차를 따른다.`
         : `이 세션의 리드 역할은 ${cleanRole}이다. tfx-lead 스킬을 로드해 그 절차를 따른다.`
     return {
       text: `이름 변경 요청: ${name}. ${pressure}`,

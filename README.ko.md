@@ -70,6 +70,7 @@ claude plugin install triflux@triflux
 | `/tfx-auto` | 구현, 수정, 리뷰, 병렬 작업의 진입점. 동작은 아래 플래그로 정한다. |
 | `/tfx-live` | Claude↔Codex 라이브 세션. `start`/`ask`/`wait`/`stop`, `peer` 중계, `list-sessions`. |
 | `/tfx-lead` | `/tfx-lead <역할>`로 세션에 개발 리드, 프로젝트 리드 같은 역할을 맡기고 이름을 바꾼다. 리드가 워커에 이름을 붙여 등록하고 컨텍스트, 지시서, 교차 리뷰, 머지·릴리스를 관리한다. 메모리 압박 알림은 `/tfx-pressure on\|off\|status`. |
+| `/tfx-comm` | `tfx lead <역할> --role communication`으로 띄운 상주 소통 세션이 사람과의 대화, 결정 받기, 사람에게 보이는 보고와 문서를 맡는다. 코드 워커 지휘와 머지는 리드 몫이다. |
 | `/tfx-remote` | SSH 원격 Claude Code 세션 시작, 조회, 재부착, 메시지 전송, 준비 상태 확인, 모니터링, 종료. |
 | `/tfx-setup` | 설정. 파일 동기화, HUD, Codex와 Antigravity 프로필, MCP. mods는 `tfx setup --mods`로 설치. |
 | `/tfx-doctor` | 진단과 복구. |
@@ -143,7 +144,7 @@ Codex 가족 프로필은 `~/.codex/<가족>.config.toml`에 `model`만 기록�
 
 로컬 macOS iTerm2의 `tfx-live start`와 `tfx lead`는 Jev, 작업 메타데이터, 실제 pane 크기로 배치를 선택한다. 기본은 입력 포커스 유지다. 선택된 탭은 자동 분할과 재배치에서 제외하며 `--focus`를 명시할 때만 포커스를 전환한다. 관련 작업은 비활성 탭의 읽기 쉬운 pane에 묶고, 사람이 입력할 가능성이 낮은 상주 작업은 attach 가능한 백그라운드 tmux로 유지할 수 있다. 작업 정보가 부족하면 이름만 보고 숨기지 않는다.
 
-`--task`에 작업을 적고 `--layout`으로 배치를 지정한다. `--focus`가 없으면 포커스 보존이 창과 분할 요청보다 우선한다. `--background`, `--no-auto-layout`, `--layout off`, `TFX_ITERM_LAYOUT=0`은 터미널 view 없이 tmux를 유지한다. API 실패도 같은 안전한 폴백을 사용한다. `tfx-live inspect`는 결정과 attach 명령을, `reconcile --dry-run`은 배치 계획을 반환한다. 수동 이동은 `reconcile --reset-pins` 전까지 고정한다. 최소 크기와 `focus`, `attention` 반환값은 [tfx-live](skills/tfx-live/SKILL.md)를 참조한다.
+`--task`에 작업을 적고 `--layout`으로 배치를 지정한다. `--focus`가 없으면 포커스 보존이 창과 분할 요청보다 우선한다. `--background`, `--no-auto-layout`, `--layout off`, `TFX_ITERM_LAYOUT=0`은 터미널 view 없이 tmux를 유지한다. API 실패도 같은 안전한 폴백을 사용한다. `tfx-live inspect`는 결정과 attach 명령을, `reconcile --dry-run`은 배치 계획을 반환한다. 수동 이동은 `reconcile --reset-pins` 전까지 고정한다. 최소 크기와 `focus`, `attention` 반환값은 [tfx-live](skills/tfx-live/references/window-layout.md)를 참조한다.
 
 `tfx-live start --cli codex`로 만든 로컬 tmux 세션에는 Triflux HUD 전체가 4줄 상태줄로 표시된다.
 provider별 사용 한도 캐시와 `Jev ON`, `Jev OFF`, 남은 문맥을 표시한다. 예: `Jev ON | 문맥 116k 남음`.
@@ -274,7 +275,7 @@ sanitizer는 자격 증명 대입, Bearer 토큰, private key 같은 패턴을 �
 
 ### 선택적 native peer 어댑터
 
-`triflux setup`에서 명시적으로 동의하면 로컬 Claude·Codex 피어용 `~/.claude/scripts/tfx-peer send` 래퍼만 승인하고 Bash 전체 권한이나 sandbox를 완화하지 않는다. `~`는 셸 예시이며 Codex 규칙은 setup이 출력한 실제 절대경로에 맞고, Claude의 `written`은 UDS 쓰기만 뜻하며 Codex의 `agent_message`도 모델 완료를 보증하지 않는다. 설치 신뢰 조건, 재시도와 allow·rule·래퍼·동의 manifest 철회 절차는 [tfx-live 스킬](skills/tfx-live/SKILL.md#선택적-전역-native-peer-어댑터)에 둔다.
+`triflux setup`에서 명시적으로 동의하면 로컬 Claude·Codex 피어용 `~/.claude/scripts/tfx-peer send` 래퍼만 승인하고 Bash 전체 권한이나 sandbox를 완화하지 않는다. `~`는 셸 예시이며 Codex 규칙은 setup이 출력한 실제 절대경로에 맞고, Claude의 `written`은 UDS 쓰기만 뜻하며 Codex의 `agent_message`도 모델 완료를 보증하지 않는다. 설치 신뢰 조건, 재시도와 allow·rule·래퍼·동의 manifest 철회 절차는 [tfx-live 스킬](skills/tfx-live/references/peer-adapter.md)에 둔다.
 
 ## 기여
 
