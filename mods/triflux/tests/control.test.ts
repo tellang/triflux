@@ -114,22 +114,32 @@ test('서브에이전트 대상은 대안을 담은 오류로 돌려주고 아�
   expect(calls).toEqual([])
 })
 
-test('agy compact 는 지원하지 않는다고 돌려준다', async ($, on) => {
+test('agy compact 는 중계 미지원 안내를 돌려준다', async ($, on) => {
   fixture(on)
   const calls = processStub(on)
   const result = await $.tool.call({ tool: controlTool, target: 'agy:ag1', action: 'compact' })
-  expect(result.deny).toContain('agy 는 compact 가 없다')
+  expect(result.deny).toContain('중계는 아직 지원하지 않는다')
+  expect(result.deny).toContain('--session <세션>')
   expect(calls).toEqual([])
 })
 
-test('Codex clear 는 tmux 로 /new 를 보내고 인계 줄과 then 을 뒤이어 보낸다', async ($, on) => {
+test('Codex clear 는 컨텍스트 가드를 건너뛰는 tfx-live clear 로 handoff 와 then 을 넘긴다', async ($, on) => {
   fixture(on, { files: ['/work/h.md'] })
   const calls = processStub(on)
   const result = await $.tool.call({ tool: controlTool, target: 'codex:cx1', action: 'clear', handoff: '/work/h.md', then: '리뷰 시작' })
   expect(result.deny).toBeUndefined()
   expect(calls).toEqual([
-    ['tfx-live', 'ask', '--cli', 'codex', '--session', 'cx1', '--prompt', '/new', '--no-wait'],
-    ['tfx-live', 'ask', '--cli', 'codex', '--session', 'cx1', '--prompt', '인계 파일 /work/h.md 를 읽고 이어간다.\n리뷰 시작', '--no-wait', '--transport', 'tmux'],
+    ['tfx-live', 'clear', '--cli', 'codex', '--session', 'cx1', '--if-busy', 'wait', '--busy-timeout', '30', '--handoff', '/work/h.md', '--then', '리뷰 시작'],
+  ])
+})
+
+test('tmux Claude clear 도 ask 대신 tfx-live clear 로 보낸다', async ($, on) => {
+  fixture(on, { files: ['/work/h.md'] })
+  const calls = processStub(on, false, [{ session: 'cl1', name: '10.23 워커' }])
+  const result = await $.tool.call({ tool: controlTool, target: 'claude:10.23 워커', action: 'clear', handoff: '/work/h.md', then: '다음 진행' })
+  expect(result.deny).toBeUndefined()
+  expect(calls[1]).toEqual([
+    'tfx-live', 'clear', '--cli', 'claude', '--session', 'cl1', '--if-busy', 'wait', '--busy-timeout', '30', '--handoff', '/work/h.md', '--then', '다음 진행',
   ])
 })
 

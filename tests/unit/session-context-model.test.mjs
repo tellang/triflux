@@ -141,6 +141,31 @@ test("Codex 구체 모델(gpt-6.2-astra, gpt-6.2-sol, gpt-6.1)은 실행 창이 
   assert.equal(solWarn.exactModelWindow, true);
   assert.equal(contextGuard("codex", solWarn).contextWarning.thresholdPct, 60);
 
+  const sol61Warn = await codexRolloutContext(310_000, null, "gpt-6.1-sol");
+  assert.equal(sol61Warn.contextLimitTokens, 500_000);
+  assert.equal(sol61Warn.exactModelWindow, true);
+  assert.equal(
+    contextGuard("codex", sol61Warn).contextWarning.thresholdPct,
+    60,
+  );
+
+  const terra61Warn = await codexRolloutContext(350_000, null, "gpt-6.1-terra");
+  assert.equal(terra61Warn.contextLimitTokens, 500_000);
+  assert.equal(terra61Warn.exactModelWindow, true);
+  assert.equal(contextGuard("codex", terra61Warn).errorCode, undefined);
+  assert.equal(
+    contextGuard("codex", terra61Warn).contextWarning.thresholdPct,
+    60,
+  );
+
+  const lunaBlocked = contextGuard(
+    "codex",
+    await codexRolloutContext(235_000, null, "gpt-6-luna"),
+  );
+  assert.equal(lunaBlocked.contextLimitTokens, 272_000);
+  assert.equal(lunaBlocked.errorCode, "context-limit");
+  assert.equal(lunaBlocked.thresholdPct, 85);
+
   const gpt61Blocked = contextGuard(
     "codex",
     await codexRolloutContext(350_000, null, "gpt-6.1"),
@@ -148,4 +173,16 @@ test("Codex 구체 모델(gpt-6.2-astra, gpt-6.2-sol, gpt-6.1)은 실행 창이 
   assert.equal(gpt61Blocked.contextLimitTokens, 400_000);
   assert.equal(gpt61Blocked.errorCode, "context-limit");
   assert.equal(gpt61Blocked.thresholdPct, 85);
+
+  const unknownSuffix = await codexRolloutContext(
+    160_000,
+    null,
+    "gpt-6.1-nova",
+  );
+  assert.equal(unknownSuffix.contextLimitTokens, 1_050_000);
+  assert.equal(unknownSuffix.exactModelWindow, false);
+  assert.equal(
+    contextGuard("codex", unknownSuffix).contextWarning.thresholdPct,
+    15,
+  );
 });

@@ -385,3 +385,190 @@ test("doClear는 직전 데몬 Codex 스레드가 workspace-write면 새 스레�
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("doClear는 read-only 또는 rollout 미확인 Codex 스레드에서 권한을 넓히지 않고 /new로 폴백한다", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tfx-clear-codex-ro-"));
+  try {
+    const roId = "019a0000-0000-7000-8000-000000000055";
+    const missingId = "019a0000-0000-7000-8000-000000000066";
+    const rollout = join(dir, `rollout-${roId}.jsonl`);
+    await writeFile(
+      rollout,
+      `${JSON.stringify({
+        type: "turn_context",
+        payload: {
+          model: "gpt-6.2-sol",
+          effort: "high",
+          approval_policy: "on-request",
+          sandbox_policy: { type: "read-only" },
+          cwd: "/tmp/proj",
+        },
+      })}\n`,
+    );
+    for (const [id, findRollout] of [
+      [roId, async () => rollout],
+      [missingId, async () => null],
+    ]) {
+      const prepareCalls = [];
+      const sent = [];
+      const tmuxArgs = [];
+      let buffer = "";
+      const result = await doClear(
+        {
+          cli: "codex",
+          session: "fake",
+          "if-busy": "wait",
+          timeout: "1",
+          settle: "1",
+          "poll-interval": "1",
+        },
+        {
+          paneCliProcess: async () => ({ running: true }),
+          sleep: async () => {},
+          capturePane: async () => "",
+          captureVisible: async () => "›",
+          findCodexRollout: findRollout,
+          resolveCodexSocket: () => "/tmp/codex.sock",
+          prepareCodexThread: async (_socket, opts) => {
+            prepareCalls.push(opts);
+            return { threadId: "should-not-happen", close: () => {} };
+          },
+          runTmux: async (_remote, args) => {
+            tmuxArgs.push(args);
+            if (args[0] === "display-message")
+              return { stdout: `${id}\t/tmp/proj\n` };
+            if (args[0] === "set-buffer") buffer = args.at(-1);
+            if (args[0] === "send-keys" && args.at(-1) === "Enter" && buffer) {
+              sent.push(buffer);
+              buffer = "";
+            }
+            return { stdout: "" };
+          },
+        },
+      );
+      assert.equal(prepareCalls.length, 0);
+      assert.equal(result.clear.command, "/new");
+      assert.deepEqual(sent, ["/new"]);
+      assert.ok(
+        tmuxArgs.some(
+          (a) =>
+            a[0] === "set-option" &&
+            a.includes("-u") &&
+            a.includes("@tfx_codex_thread"),
+        ),
+      );
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("doClear는 새 스레드 권한 검증에 실패하면 후속 인계 지시를 보내지 않고 중단한다", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "tfx-clear-codex-unverified-"));
+  try {
+    const oldId = "019a0000-0000-7000-8000-000000000077";
+    const newId = "019a0000-0000-7000-8000-000000000088";
+    const handoff = join(dir, "handoff.md");
+    const rollout = join(dir, `rollout-${oldId}.jsonl`);
+    await writeFile(handoff, "인계 내용");
+    await writeFile(
+      rollout,
+      `${JSON.stringify({
+        type: "turn_context",
+        payload: {
+          model: "gpt-6.2-sol",
+          effort: "high",
+          approval_policy: "on-request",
+          sandbox_policy: { type: "workspace-write" },
+          cwd: "/tmp/proj",
+        },
+      })}\n`,
+    );
+    const sent = [];
+    let buffer = "";
+    const result = await doClear(
+      {
+        cli: "codex",
+        session: "fake",
+        handoff,
+        then: "이어서 검증",
+        "if-busy": "wait",
+        timeout: "1",
+        settle: "1",
+        "poll-interval": "1",
+      },
+      {
+        paneCliProcess: async () => ({ running: true }),
+        sleep: async () => {},
+        capturePane: async () => "",
+        captureVisible: async () => "›",
+        findCodexRollout: async () => rollout,
+        resolveCodexSocket: () => "/tmp/codex.sock",
+        prepareCodexThread: async () => ({
+          threadId: newId,
+          readPermissions: async () => ({
+            approvalPolicy: "never",
+            sandbox: { type: "dangerFullAccess" },
+            permissionsVerified: false,
+          }),
+          close: () => {},
+        }),
+        dismissStartupScreens: async () => {},
+        waitForReady: async () => ({ ready: true, raw: "›" }),
+        runTmux: async (_remote, args) => {
+          if (args[0] === "display-message")
+            return { stdout: `${oldId}\t/tmp/proj\n` };
+          if (args[0] === "set-buffer") buffer = args.at(-1);
+          if (args[0] === "send-keys" && args.at(-1) === "Enter" && buffer) {
+            sent.push(buffer);
+            buffer = "";
+          }
+          return { stdout: "" };
+        },
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.followUp.inputSent, false);
+    assert.match(result.error, /did not verify preserved permissions/);
+    assert.equal(sent.length, 0);
+
+    // handoff와 then이 없어도 권한 검증 실패를 오류로 반환한다.
+    const bareResult = await doClear(
+      {
+        cli: "codex",
+        session: "fake",
+        "if-busy": "wait",
+        timeout: "1",
+        settle: "1",
+        "poll-interval": "1",
+      },
+      {
+        paneCliProcess: async () => ({ running: true }),
+        sleep: async () => {},
+        capturePane: async () => "",
+        captureVisible: async () => "›",
+        findCodexRollout: async () => rollout,
+        resolveCodexSocket: () => "/tmp/codex.sock",
+        prepareCodexThread: async () => ({
+          threadId: newId,
+          readPermissions: async () => ({
+            approvalPolicy: "never",
+            sandbox: { type: "dangerFullAccess" },
+            permissionsVerified: false,
+          }),
+          close: () => {},
+        }),
+        dismissStartupScreens: async () => {},
+        waitForReady: async () => ({ ready: true, raw: "›" }),
+        runTmux: async (_remote, args) =>
+          args[0] === "display-message"
+            ? { stdout: `${oldId}\t/tmp/proj\n` }
+            : { stdout: "" },
+      },
+    );
+    assert.equal(bareResult.ok, false);
+    assert.match(bareResult.error, /did not verify preserved permissions/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

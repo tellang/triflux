@@ -6566,7 +6566,9 @@ async function agyTmuxContext(session, deps = {}) {
 async function doCompact(flags, deps = {}) {
   const cli = flags.cli ?? "claude";
   if (cli === "agy")
-    throw new Error("agy has no compact; use /clear or a handoff");
+    throw new Error(
+      'tfx-live compact does not support agy yet (agy CLI supports /compact directly; use tfx-live ask --cli agy --session <NAME> --prompt "/compact ...", /clear, or a handoff)',
+    );
   if (
     !["claude", "codex"].includes(cli) ||
     flags.remote ||
@@ -6795,11 +6797,16 @@ async function readCodexRolloutSettings(threadId, deps = {}) {
         sandboxType === "read-only" ||
         sandboxType === "workspaceWrite" ||
         sandboxType === "readOnly";
+      const hasCustomSandboxRestrictions =
+        typeof p.sandbox_policy === "object" &&
+        p.sandbox_policy !== null &&
+        Object.keys(p.sandbox_policy).some((k) => k !== "type");
       return {
         model: typeof p.model === "string" && p.model ? p.model : undefined,
         effort: typeof p.effort === "string" && p.effort ? p.effort : undefined,
         approvalPolicy: p.approval_policy ?? null,
         sandboxType: sandboxType ?? null,
+        hasCustomSandboxRestrictions,
         sandbox,
         cwd: typeof p.cwd === "string" && p.cwd ? p.cwd : undefined,
       };
@@ -6851,8 +6858,21 @@ async function clearCodexViaPreparedThread(
   const prev = await (
     deps.readCodexRolloutSettings ?? readCodexRolloutSettings
   )(stored, deps);
-  const cwd = prev?.cwd || paneCwd || process.cwd();
-  const sandbox = prev ? prev.sandbox : false;
+  if (!prev) return null;
+  const isFullAccess =
+    (prev.sandboxType === "danger-full-access" ||
+      prev.sandboxType === "dangerFullAccess") &&
+    prev.approvalPolicy === "never";
+  const isWorkspaceWrite =
+    (prev.sandboxType === "workspace-write" ||
+      prev.sandboxType === "workspaceWrite") &&
+    (prev.approvalPolicy === "on-request" ||
+      prev.approvalPolicy === "onRequest");
+  // prepareCodexThread가 그대로 재현할 수 없는 권한(read-only, untrusted, 커스텀 경로 제한 등)은 확장하지 않고 /new로 폴백한다.
+  if (prev.hasCustomSandboxRestrictions || (!isFullAccess && !isWorkspaceWrite))
+    return null;
+  const cwd = prev.cwd || paneCwd || process.cwd();
+  const sandbox = isWorkspaceWrite;
   const prepared = await (deps.prepareCodexThread ?? prepareCodexThread)(
     socket,
     {
@@ -6935,9 +6955,39 @@ async function clearCodexViaPreparedThread(
       },
     },
   };
+  const thenPrompt = flags.then?.trim();
+  if (
+    typeof prepared.readPermissions === "function" &&
+    !permCheck.permissionsVerified
+  ) {
+    if (leadMarker && flags.handoff) {
+      updateLeadMarker(
+        { session: opts.session },
+        {
+          pendingHandoff: {
+            path: pathResolve(flags.handoff),
+            // biome-ignore lint/suspicious/noThenProperty: pendingHandoff 스키마의 then은 후속 지시 문자열이다.
+            then: thenPrompt || null,
+            at: new Date().toISOString(),
+          },
+        },
+        { env: markerEnv },
+      );
+    }
+    if (followUp) {
+      result.followUp = {
+        requestId: randomBytes(6).toString("hex"),
+        inputSent: false,
+        error: "preserved permissions were not verified",
+      };
+    }
+    result.ok = false;
+    result.error =
+      "thread/start+reattach did not verify preserved permissions; skipped follow-up";
+    return result;
+  }
   if (!followUp) return result;
   const requestId = randomBytes(6).toString("hex");
-  const thenPrompt = flags.then?.trim();
   try {
     await waitForTmuxIdle(adapter, opts, deps);
     await doAskViaTmux(
@@ -7070,6 +7120,16 @@ async function doClear(flags, deps = {}) {
     if (reattached) return reattached;
   }
   await doAskViaTmux(adapter, sendOpts, deps);
+  if (cli === "codex") {
+    // /new 폴백 뒤 옛 스레드 ID가 남아 다음 ask가 이전 대화로 가지 않게 연결 옵션을 비운다.
+    await (deps.runTmux ?? runTmux)(null, [
+      "set-option",
+      "-u",
+      "-t",
+      exactTmuxTarget(opts.session),
+      "@tfx_codex_thread",
+    ]).catch(() => {});
+  }
   const result = {
     cli,
     session: opts.session,

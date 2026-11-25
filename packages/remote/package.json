@@ -1,6 +1,6 @@
 {
   "name": "@triflux/remote",
-  "version": "11.1.2",
+  "version": "11.1.3",
   "description": "triflux remote — team mode, psmux, MCP workers.",
   "type": "module",
   "main": "hub/index.mjs",
@@ -12,7 +12,7 @@
     "node": ">=22"
   },
   "peerDependencies": {
-    "@triflux/core": "^11.1.2"
+    "@triflux/core": "^11.1.3"
   },
   "files": [
     "hub",

@@ -84,7 +84,7 @@ tfx-live stop --cli agy --session ag1
 
 agy `ask`의 기본 `--if-busy queue`는 바쁜 턴에도 바로 전송한다. agy 자체 대기열에 쌓이며 앞 입력을 덮어쓰지 않는다. `wait|fail|interrupt`도 선택할 수 있다. `ask --no-wait`는 `inputSent: true`, `requestId`와 함께 유휴 시 `status: "submitted"`, 바쁠 때 `status: "queued"`를 반환한다. `queue` 정책은 agy 전용이다. 슬래시 명령은 중계 표식 없이 보내고 바빠도 즉시 실행한다. DB step을 만들지 않아 `wait`로 추적하지 않으며, `--no-wait` 여부와 무관하게 제출 확인 뒤 `status: "submitted"`, `slashCommand: true`로 반환한다. `/clear`는 대화 ID를 바꾼다.
 
-`wait`는 `node:sqlite`(Node 22.13+)로 대화 DB의 사용자 입력 표식과 뒤따르는 step 상태를 읽는다. 요청 뒤부터 다음 사용자 입력 전까지 모델 응답 step이 하나 이상 있고 그 구간의 모든 step이 끝났으며, pane이 유휴 상태이거나 다음 요청이 시작됐으면 완료다. 같은 구간의 마지막 비어 있지 않은 모델 텍스트를 응답으로 쓴다. Escape로 취소된 step도 완료 상태로 기록된다. 네트워크 오류처럼 턴이 오류 step으로 끝나고 모델 응답이 뒤따르지 않으면 `status: "failed"`와 화면 문구 `error`를 반환한다. agy는 이 오류에서 스스로 재시도하지 않으므로 같은 요청을 다시 보낸다. `--timeout 0`은 한 번만 확인한다. `/clear`는 대화 ID를 바꾸며 진행 중 `wait`는 처음 연 DB를 계속 본다. agy 설정의 `toolPermission`에 따라 도구 승인 화면이 뜰 수 있다. 승인을 기다리는 동안 턴이 멈추고 `wait`는 `working`으로 남는다. `tfx-live`는 agy에 `--dangerously-skip-permissions`를 쓰지 않는다. agy에는 compact가 없으므로 `/clear` 또는 handoff를 쓴다. `peer` relay는 로컬에서만 지원한다. `--remote`는 지원하지 않는다.
+`wait`는 `node:sqlite`(Node 22.13+)로 대화 DB의 사용자 입력 표식과 뒤따르는 step 상태를 읽는다. 요청 뒤부터 다음 사용자 입력 전까지 모델 응답 step이 하나 이상 있고 그 구간의 모든 step이 끝났으며, pane이 유휴 상태이거나 다음 요청이 시작됐으면 완료다. 같은 구간의 마지막 비어 있지 않은 모델 텍스트를 응답으로 쓴다. Escape로 취소된 step도 완료 상태로 기록된다. 네트워크 오류처럼 턴이 오류 step으로 끝나고 모델 응답이 뒤따르지 않으면 `status: "failed"`와 화면 문구 `error`를 반환한다. agy는 이 오류에서 스스로 재시도하지 않으므로 같은 요청을 다시 보낸다. `--timeout 0`은 한 번만 확인한다. `/clear`는 대화 ID를 바꾸며 진행 중 `wait`는 처음 연 DB를 계속 본다. agy 설정의 `toolPermission`에 따라 도구 승인 화면이 뜰 수 있다. 승인을 기다리는 동안 턴이 멈추고 `wait`는 `working`으로 남는다. `tfx-live`는 agy에 `--dangerously-skip-permissions`를 쓰지 않는다. agy CLI는 `/compact`를 직접 지원하지만 `tfx-live compact` 중계는 미지원이다. 수동 압축은 `tfx-live ask --cli agy --session <세션> --prompt "/compact <다음 지시>"`로 보내거나 `/clear`, handoff를 쓴다. `peer` relay는 로컬에서만 지원한다. `--remote`는 지원하지 않는다.
 
 `start --unset-env 'PREFIX_*,EXACT_NAME'`은 모든 CLI에 쓸 수 있다. 쉼표로 구분한 환경변수 이름과 끝의 `*`로 지정한 접두만 허용한다. tmux pane 셸의 환경에서 변수를 지우고 CLI를 실행하며 resume에도 적용한다. 로컬에서는 준비 후 CLI 프로세스 환경을 확인한다. macOS는 `ps -E` 출력에 `PATH=`가 있고 Linux는 `/proc/PID/environ`이 비어 있지 않을 때만 환경을 읽은 것으로 판정한다. 일치하는 변수가 실제로 남은 경우에만 생성한 세션을 종료하고 오류를 낸다. 환경을 읽지 못하면 세션을 유지하고 `unsetEnvVerified: false`, `unsetEnvWarning: "CLI environment unreadable; removal not verified"`를 반환한다. 결과의 `unsetEnv`는 요청 목록이고 `unsetEnvVerified`는 확인 여부다. 원격에서는 확인하지 않아 `false`이고 Windows에서는 이 옵션을 지원하지 않는다.
 
@@ -94,7 +94,7 @@ agy `ask`의 기본 `--if-busy queue`는 바쁜 턴에도 바로 전송한다. a
 
 | 동작 | 적용 조건과 실행 |
 | --- | --- |
-| compact | 같은 목표와 담당이 이어지고 파일과 git에서 상태를 복구할 수 있을 때. Claude와 Codex는 `tfx-live compact --then "다음 지시" --no-wait`로 압축 제출을 확인하고 다음 지시를 미리 넣는다. 압축 뒤에 필요한 파일 경로와 검증 명령도 `--then`에 싣는다. agy는 수동 compact가 없어 handoff한다. |
+| compact | 같은 목표와 담당이 이어지고 파일과 git에서 상태를 복구할 수 있을 때. Claude와 Codex는 `tfx-live compact --then "다음 지시" --no-wait`로 압축 제출을 확인하고 다음 지시를 미리 넣는다. 압축 뒤에 필요한 파일 경로와 검증 명령도 `--then`에 싣는다. agy는 CLI의 `/compact`를 지원하지만 `tfx-live compact` 중계는 미지원이라 `ask --prompt "/compact <다음 지시>"` 또는 handoff를 쓴다. |
 | clear | 무관한 작업으로 전환하거나 같은 문제를 두 번 넘게 고쳐도 실패할 때, 스펙에서 구현으로 또는 작성자에서 리뷰어로 바뀔 때. 미완료 상태를 정리한 뒤 Claude는 `/rename`과 `/clear`를 리드가 `tfx-live ask --session <대상>` 으로 보낸다(relay 태그 없이). 리드 자기 세션은 `tfx-lead` 스킬의 "자기 세션 제어" 절을 따라 `tfx_control` 도구를 쓰고, 도구가 없는 Codex 리드와 agy 리드는 `tfx-live clear`를 쓴다. 다른 세션은 `tfx-live clear --cli claude|codex|agy --session <대상>`로 Claude와 agy에 `/clear`, Codex에 `/new`를 보낸다. |
 | handoff | 담당·CLI·모델·소유자가 바뀌거나 긴 작업이 창을 넘길 때. 인계 파일에 목표, 완료 조건, 체크아웃과 변경 상태, 확정 결정, 증거 경로, PASS/FAIL/SKIP, 미완료 작업과 프로세스, 다음 행동과 소유자, `predecessorSessionId`를 적는다. 승계 세션이 경로를 확인하면 이전 세션을 닫는다. |
 | close | 결과와 인계를 확인한 즉시 닫는다. Claude 백그라운드는 `claude stop <id>`, tmux는 `tfx-live stop --session`, Claude 팀원은 shutdown, Codex 서브에이전트는 `close_agent`(Codex 0.162.1 의 도구 목록에는 없다), agy 서브에이전트는 `/agents` 패널의 K를 쓴다. |
@@ -110,11 +110,11 @@ Claude TUI는 바쁠 때 들어온 입력을 대기열에 넣고 현재 턴(압�
 | target | compact | clear | exit | 받는 쪽 검증 | 조건과 이유 |
 | --- | --- | --- | --- | --- | --- |
 | `self` | 됨 | 됨 | 됨(`handoff` 필수) | 해당 없음 | 턴이 끝난 뒤 mod 가 `$.command.run` 으로 실행한다. tmux 안팎 같다 |
-| `claude:<이름>`, 이 기기 tmux 에서 찾음 | 됨(바쁘면 유휴까지 기다림) | 됨 | 됨 | 없음. 같은 사용자의 tmux 접근 권한뿐 | `tfx-live list-sessions --cli claude` 의 `name` 이나 tmux 세션 이름과 맞으면 `tfx-live compact --if-busy wait`, `ask --via-tmux`, `stop` 으로 보낸다. 나중에 adopt 한 세션도 이 경로다 |
+| `claude:<이름>`, 이 기기 tmux 에서 찾음 | 됨(바쁘면 유휴까지 기다림) | 됨 | 됨 | 없음. 같은 사용자의 tmux 접근 권한뿐 | `tfx-live list-sessions --cli claude` 의 `name` 이나 tmux 세션 이름과 맞으면 `tfx-live compact --if-busy wait`, `clear --if-busy wait`, `stop` 으로 보낸다. 나중에 adopt 한 세션도 이 경로다 |
 | `claude:<이름>`, 피어 경로(tmux 에서 못 찾음), `tfx-live start --lead-session <ID>` 로 띄움 | 됨 | 됨 | 됨(`handoff` 필수) | 발신 리드 검사, plugin 출처, 띄운 리드 묶기 | `[tfx-control] {...}` 표식 피어 메시지를 보내고, 받는 쪽 triflux mod 가 자기를 띄운 리드의 요청일 때만 자기 턴이 끝난 뒤 실행한다. 도구 결과는 전송만 확인한 것이다. "[tfx_control] /<action> 완료" 알림이 오면 실행됐다. 완료 알림이 오지 않으면 받는 쪽 mod 없음 |
 | `claude:<이름>`, 피어 경로, 리드가 띄우지 않음(`claude --bg`, 사용자가 연 세션, adopt 한 세션) | 안 됨 | 안 됨 | 안 됨 | 저장된 리드 없음 | 띄울 때 `TFX_LEAD_SESSION_ID` 가 넘어가지 않아 받는 쪽이 모두 거부하고 "리드가 띄운 세션이 아니다" 를 알린다. 선착순 묶기는 넣지 않는다. tmux 안이면 위 tmux 경로를 쓴다 |
-| `codex:<tmux 세션>` | 됨(`instructions` 안 됨) | 됨(`/new`) | 됨(`tfx-live stop`) | 없음. 받는 쪽 mod 가 없어 tmux 접근 권한뿐 | tmux 직접 입력만 된다. `/new` 뒤 인계 줄과 `then` 도 tmux 로 보낸다. queue 는 슬래시를 실행하지 않아 tmux 밖 Codex 는 안 됨 |
-| `agy:<tmux 세션>` | 안 됨 | 됨 | 됨(`tfx-live stop`) | 없음. tmux 접근 권한뿐 | agy 에는 compact 가 없다. `/clear` 나 handoff 를 쓴다 |
+| `codex:<tmux 세션>` | 됨(`instructions` 안 됨) | 됨(`/new`) | 됨(`tfx-live stop`) | 없음. 받는 쪽 mod 가 없어 tmux 접근 권한뿐 | tmux 직접 입력만 된다. `tfx-live clear --if-busy wait` 로 `/new` 와 인계 줄, `then` 을 보낸다. queue 는 슬래시를 실행하지 않아 tmux 밖 Codex 는 안 됨 |
+| `agy:<tmux 세션>` | 안 됨 | 됨 | 됨(`tfx-live stop`) | 없음. tmux 접근 권한뿐 | agy CLI 는 `/compact` 를 지원하지만 `tfx_control` 중계는 미지원이다. `clear` 를 쓰거나 `tfx-live ask --cli agy --session <세션> --prompt "/compact <다음 지시>"` 로 보낸다 |
 | `subagent:<이름>` | 안 됨 | 안 됨 | 안 됨 | 해당 없음 | 슬래시 입력창이 없고 mod API 에 서브에이전트를 압축하거나 멈추는 함수가 없다. 끝내기는 결과를 받고 닫는다(백그라운드는 TaskStop, 팀원은 `tfx-lead` 스킬 3절 "끝난 팀원 닫기" 절차). 문맥 줄이기는 요약을 넘겨 새 서브에이전트를 띄운다 |
 
 - 리드 세션 ID 는 `action: "whoami"` 로 얻는다. Claude 워커는 `tfx-live start --cli claude ... --lead-session <ID>` 로 띄운다. 그 값은 워커 환경의 `TFX_LEAD_SESSION_ID` 로 넘어가고 받는 쪽 mod 가 저장한다.
@@ -170,15 +170,15 @@ Claude의 분모는 공식 모델 창과 실행 한도 중 작은 값이다. Cod
 | CLI | 준비와 경고 | compact | 신규 배정 중지·handoff | 전송 거부 |
 | --- | ---: | ---: | ---: | ---: |
 | Claude Code 1M 모델 | 60% | 75% | 85% | 90% |
-| Codex rollout 실행 창 | 60% | - | - | 85% |
-| Codex 실행 창 없음(1.05M 분모) | 15% | 18% | 20% | 22% |
-| agy | 12% | 없음 | 15% | 18% |
+| Codex 실행 창(rollout 또는 구체 모델) | 60% | - | - | 85% |
+| Codex 미등록 모델(1.05M 분모) | 15% | 18% | 20% | 22% |
+| agy | 12% | - | 15% | - |
 
-Claude는 85% 도달 시 바로 handoff를 지시한다. Codex 실행 창 행의 compact와 handoff 비율은 아직 정하지 않았다. agy 행은 운영 지침이며 agy도 `tfx-live` 전송 대상이다. agy 상태줄(HUD)이 대화 ID 별로 남긴 기록(`~/.local/state/triflux/agy-context/<대화 ID>.json`)이 있으면 `contextPct`, `estimatedContextTokens`, `contextLimitTokens`와 `contextLimitSource: "agy-statusline"`, 기록 시각 `contextRecordedAt`을 보고하고, 기록이 없으면 `null`이다. 같은 필드를 `tfx-live list-sessions --cli agy` 결과의 각 세션에서도 메시지를 보내지 않고 볼 수 있다. 경고와 전송 거부 임계는 정하지 않아 가드는 건너뛴다. `model_context_window`와 `model_auto_compact_token_limit`은 올리지 않는다.
+Claude는 85% 도달 시 바로 handoff를 지시한다. Codex 실행 창(`astra`, `luna` 가족 카탈로그 272k/유효 258.4k, `sol`, `terra` 가족 카탈로그 500k/유효 475k)은 60%에서 준비와 인계 파일 기록을 시작하고 85%에서 일반 전송을 거부한다. 85%에서 거부된 뒤에는 가드를 건너뛰는 `tfx-live compact`를 보내거나 인계 요청에 `--max-context-pct 0`을 넘긴다. rollout 실행 창이 없어도 `session-context.mjs` 구체 모델 표에 등록된 모델은 모델별 창과 60/85%를 적용하고, 미등록 모델만 1.05M 분모(15/22%)를 쓴다. agy 행은 운영 지침이며 전송 거부 코드가 없어 전송 거부 열은 비운다. agy의 12%는 작업 중단이 아니라 한 번 보고 뒤 계속 진행하는 기준이다. agy 상태줄(HUD)이 대화 ID 별로 남긴 기록(`~/.local/state/triflux/agy-context/<대화 ID>.json`)이 있으면 `contextPct`, `estimatedContextTokens`, `contextLimitTokens`와 `contextLimitSource: "agy-statusline"`, 기록 시각 `contextRecordedAt`을 보고하고, 기록이 없으면 `null`이다. 같은 필드를 `tfx-live list-sessions --cli agy` 결과의 각 세션에서도 메시지를 보내지 않고 볼 수 있다. 경고와 전송 거부 임계는 정하지 않아 가드는 건너뛴다. `model_context_window`와 `model_auto_compact_token_limit`은 올리지 않는다.
 
-결과에는 `estimatedContextTokens`, `contextLimitTokens`, `contextLimitSource`, `contextPct`가 포함된다. Claude 실행 한도는 `executionContextLimitTokens`로 별도 보고하며 `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`이면 200,000이다. Codex는 rollout `token_count`의 `model_context_window`를 `executionContextLimitTokens`로 보고한다. 이 값이 있으면 모델 표에 없는 모델이라도 그 창으로 판정하고, 없으면 1,050,000 표 값을 분모로 쓴다. 한도를 모르면 비율은 `null`로 두고 경고만 한다. 사용량이 없는 `probe`는 `context: null`이다. 컨텍스트를 확인하려면 직접 `tfx-live probe`를 실행한다. `interrupt`, 자동 `ask`의 daemon probe, `stop --short`는 transcript를 읽지 않는다.
+결과에는 `estimatedContextTokens`, `contextLimitTokens`, `contextLimitSource`, `contextPct`가 포함된다. Claude 실행 한도는 `executionContextLimitTokens`로 별도 보고하며 `CLAUDE_CODE_DISABLE_1M_CONTEXT=1`이면 200,000이다. Codex는 rollout `token_count`의 `model_context_window`를 `executionContextLimitTokens`로 보고한다. 이 값이 있으면 모델 표에 없는 모델이라도 그 창으로 판정하고, 없으면 구체 모델 창 또는 1,050,000 표 값을 분모로 쓴다. 한도를 모르면 비율은 `null`로 두고 경고만 한다. 사용량이 없는 `probe`는 `context: null`이다. Claude daemon 컨텍스트는 `tfx-live probe`로, agy는 `tfx-live list-sessions --cli agy`(`contextRecordedAt` 포함)로 확인한다. `interrupt`, 자동 `ask`의 daemon probe, `stop --short`는 transcript를 읽지 않는다.
 
-`ask`의 `--warn-context-pct`와 `--max-context-pct`는 경고·거부 비율을 덮어쓰며 0이면 해당 가드를 끈다. 기본값은 표의 경고·전송 거부 열이다. Codex는 `executionContextLimitTokens`가 있으면 실행 창 행을, 없으면 1.05M 분모 행을 쓴다. 거부 결과는 `status: "failed"`, `done: false`, `context-limit`, 컨텍스트 필드와 적용한 거부 비율 `thresholdPct`를 돌려준다. 경고의 `thresholdPct`는 적용한 경고 비율이다. 자세한 근거와 실측은 clone 의 `docs/research/tfx-live-context-policy-2026-10.md`에 있다(설치본에는 없다).
+`ask`의 `--warn-context-pct`와 `--max-context-pct`는 경고·거부 비율을 덮어쓰며 0이면 해당 가드를 끈다. 기본값은 표의 경고·전송 거부 열이다. Codex는 `executionContextLimitTokens`나 구체 모델 창이 있으면 실행 창 행을, 없으면 1.05M 분모 행을 쓴다. 거부 결과는 `status: "failed"`, `done: false`, `context-limit`, 컨텍스트 필드와 적용한 거부 비율 `thresholdPct`를 돌려준다. 경고의 `thresholdPct`는 적용한 경고 비율이다. 자세한 근거와 실측은 clone 의 `docs/research/tfx-live-context-policy-2026-10.md`에 있다(설치본에는 없다).
 
 ### 수동 compact와 종료
 
@@ -191,7 +191,7 @@ tfx-live stop --cli claude --session-id <id>
 tfx-live stop --session cl1
 ```
 
-리드 자기 세션의 compact, clear, exit 는 tmux 안팎 모두 triflux mod 도구 `tfx_control` 을 먼저 쓴다(`tfx-lead` 스킬 "자기 세션 제어" 절). 아래 경로는 mod 가 없는 세션의 대안이다. tmux 안에서 도는 Claude, Codex, agy 세션은 자기 자신도 compact(agy 는 없음)와 clear 를 할 수 있다. 자기 턴이 도는 동안에는 세션이 바쁘므로, 백그라운드로 띄우고 `--if-busy wait`로 턴이 끝나기를 기다리게 한다. 기본 `fail`로 두면 턴이 끝나기 전에 거부된다. 결과는 파일에 남겨 다음 턴에 확인한다. 사용자에게 `/compact` 입력을 부탁하기 전에 이 방법을 쓴다.
+리드 자기 세션의 compact, clear, exit 는 tmux 안팎 모두 triflux mod 도구 `tfx_control` 을 먼저 쓴다(`tfx-lead` 스킬 "자기 세션 제어" 절). 아래 경로는 mod 가 없는 세션의 대안이다. tmux 안에서 도는 Claude, Codex, agy 세션은 자기 자신도 compact(agy 는 `tfx-live compact` 중계 미지원이라 `/compact` 직접 입력)와 clear 를 할 수 있다. 자기 턴이 도는 동안에는 세션이 바쁘므로, 백그라운드로 띄우고 `--if-busy wait`로 턴이 끝나기를 기다리게 한다. 기본 `fail`로 두면 턴이 끝나기 전에 거부된다. 결과는 파일에 남겨 다음 턴에 확인한다. 사용자에게 `/compact` 입력을 부탁하기 전에 이 방법을 쓴다.
 
 ```bash
 tfx-live compact --session "$TMUX_PANE" --if-busy wait --busy-timeout 600 --instructions "상태 파일 경로와 남은 일을 보존하라" --then "상태 파일을 다시 읽고 이어가라" --no-wait > "${TMPDIR:-/tmp}/tfx-self-compact.json" 2>&1 &

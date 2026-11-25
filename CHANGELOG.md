@@ -2,6 +2,20 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [11.1.3] - 2026-11-25
+
+### Fixed
+- mods: `tfx_control`의 tmux `clear`가 `tfx-live ask` 대신 컨텍스트 가드를 건너뛰는 `tfx-live clear --if-busy wait --busy-timeout 30`을 호출하도록 고친다. 85% 이상 Codex나 90% 이상 Claude를 비울 때 `context-limit`에 막히지 않고 제한 시간 안에 대화 전환과 인계 전달을 함께 처리한다.
+- live: `clearCodexViaPreparedThread`가 `read-only`나 rollout 미확인 Codex 스레드의 권한을 넓히지 않고 `/new`로 폴백하며, 새 스레드 권한 검증 실패 시 후속 인계 지시를 중단하도록 보강한다.
+- live: `hub/team/session-context.mjs`의 Codex 정적 모델 창 표에 `gpt-6.1-sol`, `gpt-6.1-terra`(500k), `gpt-6-luna`(272k)를 `gpt-6.1` 규칙 앞에 추가하고 미확인 접미사는 1.05M 폴백으로 넘기도록 좁힌다.
+
+### Changed
+- live, mods, lead: `agy` `/compact` 미지원 문구를 CLI 직접 지원과 중계 미지원 구분으로 정정한다.
+- lead, live: Codex 실행 창 기준(60% 준비와 인계 기록, 85% 거부 뒤 `compact` 우회와 `--max-context-pct 0` 출구)을 정리하고, `agy` 미구현 18% 거부 열 제거와 12% 보고 뒤 계속 진행, 닫힌 워커의 캐시 수명 기준 새 세션 우선, Claude 200k 유휴 압축 대비, 서브에이전트 5분 캐시, `probe` 범위를 스킬 문서에 반영한다.
+
+### Tests
+- `mods/triflux/tests/control.test.ts`와 `tests/unit/session-context-model.test.mjs`에 `tfx-live clear` 호출과 Codex 구체 모델 창 폴백 테스트를 추가한다.
+
 ## [11.1.1] - 2026-11-24
 
 ### Fixed
