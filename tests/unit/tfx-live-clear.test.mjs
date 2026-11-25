@@ -411,6 +411,7 @@ test("doClear는 read-only 또는 rollout 미확인 Codex 스레드에서 권한
     ]) {
       const prepareCalls = [];
       const sent = [];
+      const tmuxArgs = [];
       let buffer = "";
       const result = await doClear(
         {
@@ -433,6 +434,7 @@ test("doClear는 read-only 또는 rollout 미확인 Codex 스레드에서 권한
             return { threadId: "should-not-happen", close: () => {} };
           },
           runTmux: async (_remote, args) => {
+            tmuxArgs.push(args);
             if (args[0] === "display-message")
               return { stdout: `${id}\t/tmp/proj\n` };
             if (args[0] === "set-buffer") buffer = args.at(-1);
@@ -447,6 +449,14 @@ test("doClear는 read-only 또는 rollout 미확인 Codex 스레드에서 권한
       assert.equal(prepareCalls.length, 0);
       assert.equal(result.clear.command, "/new");
       assert.deepEqual(sent, ["/new"]);
+      assert.ok(
+        tmuxArgs.some(
+          (a) =>
+            a[0] === "set-option" &&
+            a.includes("-u") &&
+            a.includes("@tfx_codex_thread"),
+        ),
+      );
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -521,6 +531,43 @@ test("doClear는 새 스레드 권한 검증에 실패하면 후속 인계 지�
     assert.equal(result.followUp.inputSent, false);
     assert.match(result.error, /did not verify preserved permissions/);
     assert.equal(sent.length, 0);
+
+    // handoff와 then이 없어도 권한 검증 실패를 오류로 반환한다.
+    const bareResult = await doClear(
+      {
+        cli: "codex",
+        session: "fake",
+        "if-busy": "wait",
+        timeout: "1",
+        settle: "1",
+        "poll-interval": "1",
+      },
+      {
+        paneCliProcess: async () => ({ running: true }),
+        sleep: async () => {},
+        capturePane: async () => "",
+        captureVisible: async () => "›",
+        findCodexRollout: async () => rollout,
+        resolveCodexSocket: () => "/tmp/codex.sock",
+        prepareCodexThread: async () => ({
+          threadId: newId,
+          readPermissions: async () => ({
+            approvalPolicy: "never",
+            sandbox: { type: "dangerFullAccess" },
+            permissionsVerified: false,
+          }),
+          close: () => {},
+        }),
+        dismissStartupScreens: async () => {},
+        waitForReady: async () => ({ ready: true, raw: "›" }),
+        runTmux: async (_remote, args) =>
+          args[0] === "display-message"
+            ? { stdout: `${oldId}\t/tmp/proj\n` }
+            : { stdout: "" },
+      },
+    );
+    assert.equal(bareResult.ok, false);
+    assert.match(bareResult.error, /did not verify preserved permissions/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
