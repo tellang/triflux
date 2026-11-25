@@ -70,6 +70,7 @@ claude plugin install triflux@triflux
 | `/tfx-auto` | 구현, 수정, 리뷰, 병렬 작업의 진입점. 동작은 아래 플래그로 정한다. |
 | `/tfx-live` | Claude↔Codex 라이브 세션. `start`/`ask`/`wait`/`stop`, `peer` 중계, `list-sessions`. |
 | `/tfx-lead` | `/tfx-lead <역할>`로 세션에 개발 리드, 프로젝트 리드 같은 역할을 맡기고 이름을 바꾼다. 리드가 워커에 이름을 붙여 등록하고 컨텍스트, 지시서, 교차 리뷰, 머지·릴리스를 관리한다. 메모리 압박 알림은 `/tfx-pressure on\|off\|status`. |
+| `/tfx-comm` | `tfx lead <역할> --role communication`으로 띄운 상주 소통 세션이 사람과의 대화, 결정 받기, 사람에게 보이는 보고와 문서를 맡는다. 코드 워커 지휘와 머지는 리드 몫이다. |
 | `/tfx-remote` | SSH 원격 Claude Code 세션 시작, 조회, 재부착, 메시지 전송, 준비 상태 확인, 모니터링, 종료. |
 | `/tfx-setup` | 설정. 파일 동기화, HUD, Codex와 Antigravity 프로필, MCP. mods는 `tfx setup --mods`로 설치. |
 | `/tfx-doctor` | 진단과 복구. |

@@ -717,7 +717,7 @@ describe("tfx lead", () => {
   }
 
   for (const cli of ["claude", "codex", "agy"]) {
-    it(`소통 세션은 역할을 start 에 넘기고 ${cli} 도 소통 절을 읽는 프롬프트로 진입한다`, async () => {
+    it(`소통 세션은 역할을 start 에 넘기고 ${cli} 도 tfx-comm 스킬을 읽는 프롬프트로 진입한다`, async () => {
       const { calls, run } = fakeRun({
         start: { ready: true },
         ask: { ok: true },
@@ -732,8 +732,8 @@ describe("tfx lead", () => {
       assert.equal(start[start.indexOf("--role") + 1], "communication");
       const prompt = calls[1][calls[1].indexOf("--prompt") + 1];
       assert.ok(!prompt.startsWith("/tfx-lead"));
-      assert.match(prompt, /skills\/tfx-lead\/SKILL\.md 를 읽고/u);
-      assert.match(prompt, /"소통 세션" 절/u);
+      assert.match(prompt, /skills\/tfx-comm\/SKILL\.md 를 읽고/u);
+      assert.match(prompt, /소통 세션을 맡는다/u);
       assert.equal(calls.length, 2);
     });
   }

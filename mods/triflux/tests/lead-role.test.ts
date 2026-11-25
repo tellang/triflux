@@ -116,7 +116,7 @@ test('--role communication 인자로 실행하면 소통 표지로 저장한다'
   expect(f.renames).toEqual(['10.21 소통창구'])
   expect(result.text).toContain('이름 변경 요청: 10.21 소통창구')
   expect(result.context).toEqual([
-    '이 세션은 소통창구 소통 세션을 맡는다. tfx-lead 스킬을 로드해 "소통 세션" 절을 따른다.',
+    '이 세션은 소통창구 소통 세션을 맡는다. tfx-comm 스킬을 로드해 그 절차를 따른다.',
   ])
   await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: '작업', toolUses: [] }] })
   expect(f.compacts[0]).toContain('- 소통 역할: 소통창구, 세션 이름: 10.21 소통창구')
