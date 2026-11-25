@@ -2,6 +2,19 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [11.2.0] - 2026-11-25
+
+### Added
+- lead: 상주 소통 세션 절차를 새 스킬 `tfx-comm`으로 분리한다. `tfx lead <역할> --role communication` 진입 프롬프트와 mod `lead-role`이 `tfx-lead` 전체 대신 `tfx-comm`을 읽히고, `tfx-lead`의 "소통 세션" 절에는 리드 몫(`status.md`, `decisions.md` 갱신과 보고 경로 지정)만 남긴다.
+
+### Changed
+- skills: `tfx-lead`, `tfx-live` SKILL.md 를 45,000바이트 아래로 줄인다(각 57KB, 59KB 에서 약 38KB, 30KB). OMC read budget 훅이 전체 Read 를 막던 문제를 없애고, 조건부 상세는 `references/`로 옮겨 원래 곳에 요약과 링크를 남긴다. Codex, agy `tfx-live` 어댑터에도 같은 `references/`를 둔다.
+- skills: compact 뒤 스킬마다 앞 5,000 토큰만 다시 붙는 Claude Code 동작에 맞춰 `tfx-lead`, `tfx-live` 맨 앞에 상시 규칙 절을 두고, 문맥에서 빠지면 스킬 파일을 다시 읽도록 안내한다.
+- lead: `tfx-live` "전송 경로"와 겹치던 전송 수단 표, `tfx-routing.md`와 겹치던 역할별 모델 표, 폐기된 주간 80% 리뷰 전환표, 날짜 사례 서술을 뺀다.
+
+### Tests
+- `tests/unit/tfx-live-skill-sync.test.mjs`: 어댑터 `references/`가 정본과 같은지 검사하고, 중복 표를 맞추던 두 테스트를 뺀다. `tests/unit/lead-launch.test.mjs`, `mods/triflux/tests/lead-role.test.ts`의 소통 세션 진입 기대값을 `tfx-comm`으로 바꾼다.
+
 ## [11.1.3] - 2026-11-25
 
 ### Fixed
