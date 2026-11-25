@@ -62,7 +62,7 @@ async function refuse($: EngineInterface, e: Request, agentId?: string) {
   if (target.startsWith('subagent:')) return subagentAlternative
   if (target !== 'self' && !/^(?:claude|codex|agy):./.test(target))
     return `지원하지 않는 대상: ${target}. self, claude:<이름>, codex:<tmux 세션>, agy:<tmux 세션> 중 하나다.`
-  if (target.startsWith('agy:') && e.action === 'compact') return 'agy CLI 는 /compact 를 지원하지만 tfx_control 중계는 아직 지원하지 않는다. clear 를 쓰거나 tfx-live ask --cli agy --prompt "/compact <다음 지시>" 로 보낸다.'
+  if (target.startsWith('agy:') && e.action === 'compact') return 'agy CLI 는 /compact 를 지원하지만 tfx_control 중계는 아직 지원하지 않는다. clear 를 쓰거나 tfx-live ask --cli agy --session <세션> --prompt "/compact <다음 지시>" 로 보낸다.'
   if (target.startsWith('codex:') && e.action === 'compact' && e.instructions) return 'Codex compact 는 지시문을 받지 않는다. instructions 를 빼고 then 에 싣는다.'
   if (e.handoff && !(await $.fs.exists(e.handoff))) return `인계 파일이 없다: ${e.handoff}. 먼저 쓴 뒤 다시 호출한다.`
 }
@@ -135,7 +135,8 @@ async function controlTmux($: EngineInterface, cli: string, session: string, act
     await tfxLive($, ['compact', '--cli', cli, '--session', session, ...(cli === 'claude' ? ['--if-busy', 'wait'] : []), ...(e.instructions ? ['--instructions', e.instructions] : []), ...(thenText ? ['--then', thenText] : []), '--no-wait'])
   else {
     // tfx-live clear 는 컨텍스트 가드를 건너뛰고 대화 전환을 확인한 뒤 인계와 then 을 보낸다.
-    await tfxLive($, ['clear', '--cli', cli, '--session', session, '--if-busy', 'wait', ...(e.handoff ? ['--handoff', e.handoff] : []), ...(thenText ? ['--then', thenText] : [])])
+    // 외부 120초 제한 안에 유휴 대기, 전환 대기, 인계 기록이 모두 끝나도록 내부 대기를 30초로 묶는다.
+    await tfxLive($, ['clear', '--cli', cli, '--session', session, '--if-busy', 'wait', '--busy-timeout', '30', ...(e.handoff ? ['--handoff', e.handoff] : []), ...(thenText ? ['--then', thenText] : [])])
   }
   return { result: `${cli}:${session} 에 tmux 로 ${action} 를 보냈다.` }
 }

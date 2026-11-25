@@ -5,7 +5,8 @@ All notable changes to triflux will be documented in this file.
 ## [11.1.3] - 2026-11-25
 
 ### Fixed
-- mods: `tfx_control`의 tmux `clear`가 `tfx-live ask` 대신 컨텍스트 가드를 건너뛰는 `tfx-live clear --if-busy wait`를 호출하도록 고친다. 85% 이상 Codex나 90% 이상 Claude를 비울 때 `context-limit`에 막히지 않고 대화 전환과 인계 전달을 함께 처리한다.
+- mods: `tfx_control`의 tmux `clear`가 `tfx-live ask` 대신 컨텍스트 가드를 건너뛰는 `tfx-live clear --if-busy wait --busy-timeout 30`을 호출하도록 고친다. 85% 이상 Codex나 90% 이상 Claude를 비울 때 `context-limit`에 막히지 않고 제한 시간 안에 대화 전환과 인계 전달을 함께 처리한다.
+- live: `clearCodexViaPreparedThread`가 `read-only`나 rollout 미확인 Codex 스레드의 권한을 넓히지 않고 `/new`로 폴백하며, 새 스레드 권한 검증 실패 시 후속 인계 지시를 중단하도록 보강한다.
 - live: `hub/team/session-context.mjs`의 Codex 정적 모델 창 표에 `gpt-6.1-sol`, `gpt-6.1-terra`(500k), `gpt-6-luna`(272k)를 `gpt-6.1` 규칙 앞에 추가하고 미확인 접미사는 1.05M 폴백으로 넘기도록 좁힌다.
 
 ### Changed

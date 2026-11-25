@@ -110,7 +110,7 @@ Claude TUI는 바쁠 때 들어온 입력을 대기열에 넣고 현재 턴(압�
 | `claude:<이름>`, 피어 경로(tmux 에서 못 찾음), `tfx-live start --lead-session <ID>` 로 띄움 | 됨 | 됨 | 됨(`handoff` 필수) | 발신 리드 검사, plugin 출처, 띄운 리드 묶기 | `[tfx-control] {...}` 표식 피어 메시지를 보내고, 받는 쪽 triflux mod 가 자기를 띄운 리드의 요청일 때만 자기 턴이 끝난 뒤 실행한다. 도구 결과는 전송만 확인한 것이다. "[tfx_control] /<action> 완료" 알림이 오면 실행됐다. 완료 알림이 오지 않으면 받는 쪽 mod 없음 |
 | `claude:<이름>`, 피어 경로, 리드가 띄우지 않음(`claude --bg`, 사용자가 연 세션, adopt 한 세션) | 안 됨 | 안 됨 | 안 됨 | 저장된 리드 없음 | 띄울 때 `TFX_LEAD_SESSION_ID` 가 넘어가지 않아 받는 쪽이 모두 거부하고 "리드가 띄운 세션이 아니다" 를 알린다. 선착순 묶기는 넣지 않는다. tmux 안이면 위 tmux 경로를 쓴다 |
 | `codex:<tmux 세션>` | 됨(`instructions` 안 됨) | 됨(`/new`) | 됨(`tfx-live stop`) | 없음. 받는 쪽 mod 가 없어 tmux 접근 권한뿐 | tmux 직접 입력만 된다. `tfx-live clear --if-busy wait` 로 `/new` 와 인계 줄, `then` 을 보낸다. queue 는 슬래시를 실행하지 않아 tmux 밖 Codex 는 안 됨 |
-| `agy:<tmux 세션>` | 안 됨 | 됨 | 됨(`tfx-live stop`) | 없음. tmux 접근 권한뿐 | agy CLI 는 `/compact` 를 지원하지만 `tfx_control` 중계는 미지원이다. `clear` 를 쓰거나 `tfx-live ask --cli agy --prompt "/compact <다음 지시>"` 로 보낸다 |
+| `agy:<tmux 세션>` | 안 됨 | 됨 | 됨(`tfx-live stop`) | 없음. tmux 접근 권한뿐 | agy CLI 는 `/compact` 를 지원하지만 `tfx_control` 중계는 미지원이다. `clear` 를 쓰거나 `tfx-live ask --cli agy --session <세션> --prompt "/compact <다음 지시>"` 로 보낸다 |
 | `subagent:<이름>` | 안 됨 | 안 됨 | 안 됨 | 해당 없음 | 슬래시 입력창이 없고 mod API 에 서브에이전트를 압축하거나 멈추는 함수가 없다. 끝내기는 결과를 받고 닫는다(백그라운드는 TaskStop, 팀원은 `tfx-lead` 스킬 3절 "끝난 팀원 닫기" 절차). 문맥 줄이기는 요약을 넘겨 새 서브에이전트를 띄운다 |
 
 - 리드 세션 ID 는 `action: "whoami"` 로 얻는다. Claude 워커는 `tfx-live start --cli claude ... --lead-session <ID>` 로 띄운다. 그 값은 워커 환경의 `TFX_LEAD_SESSION_ID` 로 넘어가고 받는 쪽 mod 가 저장한다.

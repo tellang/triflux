@@ -6567,7 +6567,7 @@ async function doCompact(flags, deps = {}) {
   const cli = flags.cli ?? "claude";
   if (cli === "agy")
     throw new Error(
-      'tfx-live compact does not support agy yet (agy CLI supports /compact directly; use tfx-live ask --cli agy --prompt "/compact ...", /clear, or a handoff)',
+      'tfx-live compact does not support agy yet (agy CLI supports /compact directly; use tfx-live ask --cli agy --session <NAME> --prompt "/compact ...", /clear, or a handoff)',
     );
   if (
     !["claude", "codex"].includes(cli) ||
@@ -6853,8 +6853,20 @@ async function clearCodexViaPreparedThread(
   const prev = await (
     deps.readCodexRolloutSettings ?? readCodexRolloutSettings
   )(stored, deps);
-  const cwd = prev?.cwd || paneCwd || process.cwd();
-  const sandbox = prev ? prev.sandbox : false;
+  if (!prev) return null;
+  const isFullAccess =
+    (prev.sandboxType === "danger-full-access" ||
+      prev.sandboxType === "dangerFullAccess") &&
+    prev.approvalPolicy === "never";
+  const isWorkspaceWrite =
+    (prev.sandboxType === "workspace-write" ||
+      prev.sandboxType === "workspaceWrite") &&
+    (prev.approvalPolicy === "on-request" ||
+      prev.approvalPolicy === "onRequest");
+  // prepareCodexThread가 그대로 재현할 수 없는 권한(read-only, untrusted 등)은 확장하지 않고 /new로 폴백한다.
+  if (!isFullAccess && !isWorkspaceWrite) return null;
+  const cwd = prev.cwd || paneCwd || process.cwd();
+  const sandbox = isWorkspaceWrite;
   const prepared = await (deps.prepareCodexThread ?? prepareCodexThread)(
     socket,
     {
@@ -6940,6 +6952,34 @@ async function clearCodexViaPreparedThread(
   if (!followUp) return result;
   const requestId = randomBytes(6).toString("hex");
   const thenPrompt = flags.then?.trim();
+  if (
+    typeof prepared.readPermissions === "function" &&
+    !permCheck.permissionsVerified
+  ) {
+    if (leadMarker && flags.handoff) {
+      updateLeadMarker(
+        { session: opts.session },
+        {
+          pendingHandoff: {
+            path: pathResolve(flags.handoff),
+            // biome-ignore lint/suspicious/noThenProperty: pendingHandoff 스키마의 then은 후속 지시 문자열이다.
+            then: thenPrompt || null,
+            at: new Date().toISOString(),
+          },
+        },
+        { env: markerEnv },
+      );
+    }
+    result.followUp = {
+      requestId,
+      inputSent: false,
+      error: "preserved permissions were not verified",
+    };
+    result.ok = false;
+    result.error =
+      "thread/start+reattach did not verify preserved permissions; skipped follow-up";
+    return result;
+  }
   try {
     await waitForTmuxIdle(adapter, opts, deps);
     await doAskViaTmux(

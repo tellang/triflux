@@ -119,6 +119,7 @@ test('agy compact 는 중계 미지원 안내를 돌려준다', async ($, on) =>
   const calls = processStub(on)
   const result = await $.tool.call({ tool: controlTool, target: 'agy:ag1', action: 'compact' })
   expect(result.deny).toContain('중계는 아직 지원하지 않는다')
+  expect(result.deny).toContain('--session <세션>')
   expect(calls).toEqual([])
 })
 
@@ -128,7 +129,7 @@ test('Codex clear 는 컨텍스트 가드를 건너뛰는 tfx-live clear 로 han
   const result = await $.tool.call({ tool: controlTool, target: 'codex:cx1', action: 'clear', handoff: '/work/h.md', then: '리뷰 시작' })
   expect(result.deny).toBeUndefined()
   expect(calls).toEqual([
-    ['tfx-live', 'clear', '--cli', 'codex', '--session', 'cx1', '--if-busy', 'wait', '--handoff', '/work/h.md', '--then', '리뷰 시작'],
+    ['tfx-live', 'clear', '--cli', 'codex', '--session', 'cx1', '--if-busy', 'wait', '--busy-timeout', '30', '--handoff', '/work/h.md', '--then', '리뷰 시작'],
   ])
 })
 
@@ -138,7 +139,7 @@ test('tmux Claude clear 도 ask 대신 tfx-live clear 로 보낸다', async ($, 
   const result = await $.tool.call({ tool: controlTool, target: 'claude:10.23 워커', action: 'clear', handoff: '/work/h.md', then: '다음 진행' })
   expect(result.deny).toBeUndefined()
   expect(calls[1]).toEqual([
-    'tfx-live', 'clear', '--cli', 'claude', '--session', 'cl1', '--if-busy', 'wait', '--handoff', '/work/h.md', '--then', '다음 진행',
+    'tfx-live', 'clear', '--cli', 'claude', '--session', 'cl1', '--if-busy', 'wait', '--busy-timeout', '30', '--handoff', '/work/h.md', '--then', '다음 진행',
   ])
 })
 
