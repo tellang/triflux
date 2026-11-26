@@ -140,7 +140,7 @@ owner availability를 실제로 검출한 경우에만 `owner unavailable → tf
 | `sonnet` | writer, executor/test-engineer/qa-tester/verifier 보조 |
 | `haiku` | explore, communication-relay 1순위, spark/cleanup/deslop 보조 |
 
-Codex는 `models_cache.json`의 공개 모델에서 같은 가족의 최신 버전을 선택하고 캐시가 없으면 `codex debug models`를 읽는다. Antigravity는 `agy models`의 Hydrogen, Argon, Carbon, Neon 목록을 하루 동안 캐시(`agy-models-v2.json`)하며, 요청한 가족이 목록에 없으면 Carbon은 Neon, 그다음 Hydrogen으로, Neon은 Hydrogen으로, Hydrogen은 Neon으로 폴백하고 stderr에 `agy 가족 폴백`을 남긴다. Argon으로는 폴백하지 않으며 폴백할 가족이 목록에 없으면 요청한 가족을 그대로 쓴다. 최신 모델이 요청 effort를 지원하지 않으면 지원하는 가장 가까운 아래 단계로 제한한다. 옛 `flash*` 프로필 이름은 `argon` + `low`로 해석한다.
+Codex는 `models_cache.json`의 공개 모델에서 같은 가족의 최신 버전을 선택하고 캐시가 없으면 `codex debug models`를 읽는다. Antigravity는 `agy models`의 Hydrogen, Argon, Carbon, Neon 목록을 하루 동안 캐시(`agy-models.json`)하며, 요청한 가족이 목록에 없으면 Carbon은 Neon, 그다음 Hydrogen으로, Neon은 Hydrogen으로, Hydrogen은 Neon으로 폴백하고 stderr에 `agy 가족 폴백`을 남긴다. Argon으로는 폴백하지 않으며 폴백할 가족이 목록에 없으면 요청한 가족을 그대로 쓴다. 최신 모델이 요청 effort를 지원하지 않으면 지원하는 가장 가까운 아래 단계로 제한한다. 옛 `flash*` 프로필 이름은 `argon` + `low`로 해석한다.
 
 `~/.config/triflux/models.json`(Windows는 `%APPDATA%\triflux\models.json`)에 가족별 모델명을 적으면 해당 가족을 고정한다. 목록 조회 실패 시 마지막 성공 결과, 그다음 내장 기본값을 사용한다. 리드별 verifier와 explore 배치는 `skills/tfx-lead/SKILL.md`를 따른다.
 

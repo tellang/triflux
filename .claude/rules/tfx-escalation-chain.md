@@ -9,7 +9,7 @@ paths:
 # `--retry auto-escalate` 체인 규약
 
 `/tfx-auto --retry auto-escalate` 가 사용하는 CLI 승격 체인.
-각 단계에서 `--max-iterations` (기본 3) 소진 시 다음 단계로 전이.
+각 단계에서 양수 `--max-iterations N`을 소진하면 다음 단계로 전이한다. 기본값 `0`이면 횟수에 따른 승격은 없고 동일 실패 3회 STUCK 규칙만 적용된다.
 
 > 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0054](../../docs/adr/0054-multi-vendor-priority-routing.md). 이 문서가 실행 규칙의 정본이다.
 
@@ -27,7 +27,7 @@ paths:
 
 ## 전이 규약
 
-- 각 단계 default `max_iterations = 3` (사용자가 `--max-iterations N` 로 override)
+- 단계별 상한은 `--max-iterations N`(양수)으로 준다. 기본값 `0`은 상한과 횟수 승격이 없다(`retry-state-machine.mjs`의 `maxIterations` 기본값)
 - 단계 전이 시 iterations / stuckCounter / lastFailureReason 리셋
 - **동일 failureReason 3회 연속** 은 체인과 무관하게 `STUCK` 처리 후 즉시 중단
 

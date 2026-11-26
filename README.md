@@ -8,7 +8,7 @@
   </picture>
 </p>
 
-<h3 align="center">CLI-first multi-model orchestration for Claude Code, Codex, and Antigravity</h3>
+<h3 align="center">A CLI orchestrator for running Claude Code, Codex, and Antigravity together</h3>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/triflux"><img src="https://img.shields.io/npm/v/triflux?style=flat-square&color=FFAF00&label=npm" alt="npm version"></a>
@@ -18,44 +18,56 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-374151?style=flat-square" alt="License: MIT"></a>
 </p>
 
-triflux is a Claude Code plugin and npm CLI that routes coding work across Claude, Codex,
-and Antigravity. You describe the task once with `/tfx-auto`; triflux picks the CLI lane
-(Codex by default), runs it through managed routes instead of ad-hoc shell commands, and
-can fan the work out to parallel workers, live Claude↔Codex sessions, or remote
-hosts. Parallel code changes use separate worktrees and one session per worktree.
-The `tfx` shell CLI covers setup, diagnostics,
-and team orchestration.
+## Purpose
+
+triflux is a Claude Code plugin plus an npm CLI. It does three things.
+
+- Task routing: for each role (implementation, review, design, and so on) it picks Codex CLI, Antigravity CLI (`agy`), or Claude Code, plus a model and effort, and runs the work.
+- Session control: it starts, queries, compacts, and stops Claude, Codex, and agy sessions running in tmux, and lets those sessions message each other.
+- Lead workflow: one session acts as a lead that registers other sessions as workers and manages briefs, cross review, and merges.
+
+## Architecture
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-en-dark.png">
+  <img alt="triflux execution architecture" src="docs/assets/architecture-en.png">
+</picture>
+
+- `/tfx-auto` runs `tfx-route.sh` through Bash inside Claude Code.
+- `tfx-route.sh` gets a per-role candidate order from the routing policy module and runs the first candidate CLI as a non-interactive worker.
+- The routing policy reads the usage cache written by the HUD and drops vendors that hit their limits.
+- `tfx multi` creates worker panes in a tmux room. Each pane runs `tfx-route.sh`; Claude workers run `claude --print` directly.
+- `tfx-live` and `tfx-peer` control interactive sessions. Message paths are under "Sessions and peer messages" below.
+
+## Requirements
+
+- Node.js 22 or later
+- tmux on macOS and Linux; psmux and Windows Terminal on Windows
+- The CLIs you want to use: Codex CLI, Antigravity CLI (`agy`), Claude Code. Setup records which ones this machine uses in a machine profile.
+- triflux-mods: Claude Code 2.1.287 or later
 
 ## Install
 
 ```bash
-npm install -g triflux   # postinstall runs the setup script
-tfx doctor               # check CLIs, tmux, MCP, profiles, skills
+npm install -g triflux --allow-scripts=triflux   # npm 12+ blocks install scripts unless allowed
+tfx setup                                        # interactive setup
+tfx doctor                                       # health check
 ```
 
-npm 12 and newer block install scripts by default. Allow the setup script:
-
-```bash
-npm i -g triflux --allow-scripts=triflux
-```
-
-Setup registers the `triflux` marketplace and prints a mods installation hint. To install
-usage bands and subagent effort enforcement (Claude Code 2.1.287 or newer):
-
-```bash
-tfx setup --mods
-```
-
-Or install the Claude Code plugin from this repository's marketplace:
+- postinstall runs `scripts/setup.mjs`, which installs scripts, the HUD, skills, Codex profiles, and the machine profile, and registers Codex hooks.
+- postinstall and CI skip every prompt and only print hints. mods, the agy plugin, lead launch commands, the peer adapter approval, Codex hook trust, tmr, and psmux on Windows are offered only by an interactive `tfx setup`.
+- `tfx setup --mods` installs mods and the agy plugin without asking.
+- The Claude Code marketplace works too:
 
 ```bash
 claude plugin marketplace add tellang/triflux
 claude plugin install triflux@triflux
+claude plugin install triflux-mods@triflux
 ```
 
-`tfx doctor --fix` repairs common drift; `tfx doctor --json` is for automation.
+- `tfx update` detects how triflux was installed (plugin, npm, git), updates it, and runs the new version's setup.
 
-## First steps
+## First run
 
 ```text
 /tfx-auto "fix the failing auth tests"
@@ -63,232 +75,236 @@ claude plugin install triflux@triflux
 /tfx-auto "finish the migration and verify it" --mode deep --retry ralph --max-iterations 10
 ```
 
-## Skills
+## Running tasks
 
-Skills you invoke directly:
-
-| Skill | Use |
-| --- | --- |
-| `/tfx-auto` | Front door for implementing, fixing, reviewing, and parallel work. Behavior is set by flags (below). |
-| `/tfx-live` | Live Claude↔Codex sessions: `start`/`ask`/`wait`/`stop`, `peer` relay, `list-sessions`. |
-| `/tfx-lead` | `/tfx-lead <role>` makes the session a role lead (dev lead, project lead) and renames it. The lead names and registers workers, then manages their context, briefs, cross review, merge and release. Memory pressure alerts are `/tfx-pressure on\|off\|status`. |
-| `/tfx-comm` | Procedure for the resident communication session started with `tfx lead <role> --role communication`: talking with people, collecting decisions, and people-facing reports and docs. Directing code workers and merging stay with the lead. |
-| `/tfx-remote` | Remote Claude Code sessions over SSH: start, list, reattach, send, readiness probe, monitor, stop. |
-| `/tfx-setup` | Setup: file sync, HUD, Codex and Antigravity profiles, MCP. `tfx setup --mods` installs mods. |
-| `/tfx-doctor` | Diagnose and repair. |
-| `/tfx-ship` | triflux release flow (maintainers). |
-| `/tfx-wt` | Windows Terminal tabs and panes. `tfx setup` installs it on Windows only. |
-
-Internal lanes (marked `internal: true`; other skills and the router call them, but you can name them explicitly):
-
-| Skill | Use |
-| --- | --- |
-| `tfx-harness` | Meta routing: returns which skill or path fits a request, without running it. |
-| `tfx-review` | Code review verdict (`--quick` for a lighter pass). |
-| `tfx-research` | Web research with cross-checked sources (`--quick`, `--auto`, `--depth`). |
-
-Use superpowers `writing-plans` for implementation plans, host `deep-interview` for requirements,
-and Claude Code’s built-in `/goal` for goals. Use `/tfx-auto --mode deep` for multi-model planning
-and execution. Manage Codex profiles directly in `~/.codex/<profile>.config.toml`.
-
-## `/tfx-auto` flags
+### `/tfx-auto` flags
 
 | Flag | Values | Effect |
 | --- | --- | --- |
-| `--mode` | `quick` (default), `deep`, `consensus`, `live` | `deep` = plan → execute → verify loop; `consensus` = multi-CLI agreement; `live` = hand off to `tfx-live peer` |
+| `--mode` | `quick` (default), `deep`, `consensus`, `live` | `deep` loops plan, execute, verify. `consensus` merges several CLIs. `live` runs `tfx-live peer` between two sessions |
 | `--shape` | `consensus`, `debate`, `panel` | Output shape for `--mode consensus` |
-| `--cli` | `auto`, `codex`, `antigravity`, `claude` | Force a CLI lane |
-| `--cli-set` | `triad`, `no-antigravity`, `custom` | Consensus participants |
-| `--parallel` | `1`, `N` | `N` = local workers (`tfx multi`) |
-| `--retry` | `0`, `1` (default), `ralph`, `auto-escalate` | `ralph` = retry state machine with stuck detection; `auto-escalate` = move up the model chain |
-| `--max-iterations` | `N` | Cap for `ralph` / `auto-escalate` (`0` = unlimited) |
+| `--cli` | `auto`, `codex`, `antigravity`, `claude` | Moves that vendor to the front |
+| `--cli-set` | `triad`, `no-antigravity`, `custom` | Which CLIs join a consensus |
+| `--parallel` | `1`, `N` | `N` runs through `tfx multi`. Two or more code-changing tasks get one worktree and session each |
+| `--retry` | `0`, `1` (default), `ralph`, `auto-escalate` | See "Retry and escalation" |
+| `--max-iterations` | `N` | Iteration cap for `ralph`, per-stage cap for `auto-escalate`. Default `0` means no cap |
 | `--rounds` | `N` (default 4) | Round trips for `--mode live` |
-| `--skill` | `<name>` | Prepend `skills/<name>/SKILL.md` to the Codex/Antigravity prompt |
-| `--no-native-bridge-ui` | | Hide headless workers from the `claude agents` panel |
+| `--skill` | `<name>` | Prepends `skills/<name>/SKILL.md` to Codex and agy prompts |
+| `--no-native-bridge-ui` | | Keeps headless workers out of the `claude agents` list |
 
-The full contract, including `--lead`, `--options`, `--experts`, and conflict rules, lives in
-[`skills/tfx-auto/SKILL.md`](skills/tfx-auto/SKILL.md).
+The full contract is in [`skills/tfx-auto/SKILL.md`](skills/tfx-auto/SKILL.md).
 
-## Models and profiles
+### Candidate order by role
 
-Codex uses a family profile containing only `model` in `~/.codex/<family>.config.toml`. Effort is passed separately with `-c model_reasoning_effort`, for example `codex -p sol -c 'model_reasoning_effort="high"'`. The role policy in [`scripts/lib/agent-route-policy.mjs`](scripts/lib/agent-route-policy.mjs) selects the family and effort.
-Codex and Antigravity family profiles select the newest available model at dispatch, setup, and update. Codex reads its local model cache; Antigravity caches Argon models from `agy models` for one day. The newest family model is retained when the requested effort is unsupported, and effort is lowered to the closest supported level below it. Without a support list, the requested effort is passed unchanged. Flash and Pro are not selected automatically, and old `flash*` profile names resolve to `argon` + `low`. Claude keeps its existing aliases.
+`tfx-route.sh <role> "<instruction>"` takes its candidate list from [`scripts/lib/vendor-priority-policy.mjs`](scripts/lib/vendor-priority-policy.mjs). Defaults:
 
-Pin a family in `~/.config/triflux/models.json`, for example `{"sol":"gpt-6-sol","argon":"gemini-4-argon"}` (Windows: `%APPDATA%\triflux`). Without a usable catalog, resolution keeps the last result or the built-in default.
+| Role | 1st | 2nd | 3rd |
+| --- | --- | --- | --- |
+| Implementation, tests, verification | Codex `sol` high | agy `hydrogen` | Claude `sonnet` |
+| Build fixes, cleanup | Codex `sol` medium | agy `hydrogen` low | Claude `sonnet` low |
+| Architecture, planning, critique, debugging | Claude `opus` high | Codex `astra` xhigh | agy `carbon` high |
+| Deep execution | Claude `opus` high | Codex `astra` ultra (max inside workers) | agy `carbon` high |
+| Code review (Codex author) | Claude `opus` high | agy `hydrogen` high | Same vendor in a fresh session |
+| Security review | Claude `fable` high | Codex `astra` xhigh | agy `carbon` high |
+| Writing, research | agy `hydrogen` medium | Claude `opus` | Codex `terra` high |
+| Design | Claude `opus` high | agy `hydrogen` high | Codex `sol` high |
+| Exploration | Claude `haiku` low | Codex `luna` low | agy `hydrogen` low |
 
-| Family + effort / Claude alias | Lanes |
-| --- | --- |
-| `astra` + `xhigh` | Architecture, planning, critique, debugging, security review, deep execution |
-| `astra` + `max`, `astra` + `ultra` | Hardest single tasks (`TFX_CODEX_PROFILE=max\|ultra`); `max` is the first `auto-escalate` step |
-| `sol` + `high` / `sol` + `medium` | Default implementation, review, verification, tests, docs / cleanup |
-| `terra` + `high` | Writing, documentation research |
-| `luna` + `high` / `luna` + `low` | Build fixes / latency-first lookups |
-| `argon` + `low` / `medium` / `high` | Antigravity classification / generation / review |
-| Claude `fable` | Final `--retry auto-escalate` step |
-| Claude `opus` / `sonnet` / `haiku` | Meta routing and planning gates / Claude-native QA and verification / fast exploration |
+- Code review drops the vendor that wrote the code. `TFX_REVIEW_AUTHOR` names it and defaults to Codex. With a Claude author the first candidate is Codex `sol` high.
+- Vendors disabled with `TFX_DISABLE_CODEX`, `TFX_DISABLE_ANTIGRAVITY`, or `TFX_DISABLE_CLAUDE`, vendors that are not installed, and vendors at 100% usage or in cooldown are removed.
+- A vendor above 95% usage moves back one slot.
+- With Jev enabled and confidence at 0.85 or higher, two adjacent candidates may swap once.
+- If no candidate is left, routing exits with code 78 instead of silently switching paths.
+- A quota or 429 error at run time reroutes to the next candidate, at most twice. Auth failures, context overflow, and safety refusals do not reroute.
 
-Routing policy: [`.claude/rules/tfx-routing.md`](.claude/rules/tfx-routing.md) ·
-escalation chain: [`.claude/rules/tfx-escalation-chain.md`](.claude/rules/tfx-escalation-chain.md).
+### Model families and effort
 
-## Shell CLI
+- Codex families are `astra`, `sol`, `terra`, and `luna`. `~/.codex/<family>.config.toml` stores only `model`; effort is passed with `-c model_reasoning_effort`.
+- agy families are `hydrogen`, `carbon`, `neon`, and `argon`. Defaults use `carbon` and `hydrogen`; `argon` is used only when named ([ADR-0055](docs/adr/0055-agy-drop-argon-add-neon.md)).
+- Each family resolves to its newest model at run time, from `~/.codex/models_cache.json` for Codex and a daily `agy models` lookup for agy.
+- If a model does not support the requested effort, the nearest lower supported level is used.
+- `~/.config/triflux/models.json` pins a family, for example `{"sol":"<model id>"}`.
 
-| Command | Use |
-| --- | --- |
-| `tfx setup` / `tfx doctor` | Sync files, HUD, MCP, profiles / diagnose and repair (`--fix`, `--json`) |
-| `tfx multi` | Local multi-CLI team in tmux |
-| `tfx mcp` | Managed MCP registry: `list`, `sync`, `add`, `remove` |
-| `bash ~/.claude/scripts/tfx-route.sh code-reviewer "<instruction>"` | Send review to Codex (`codex exec review` via policy) |
-| `tfx list`, `tfx update`, `tfx version` | Installed skills, update, version |
-| `tfx-live` | Live session bridge (same as the `/tfx-live` skill) |
+### Retry and escalation
 
-`tfx <command> --help` prints the exact arguments.
+- `--retry 1` repeats verify and fix up to three times on the same CLI.
+- `--retry ralph` repeats until done. Three consecutive failures with the same cause stop it as STUCK.
+- `--retry auto-escalate` needs a positive `--max-iterations N`; it then tries each stage N times before moving on. With the default `0` it never escalates and only the STUCK rule applies.
+- The default chain has three stages: Codex `astra` max, agy `carbon` high, Claude `fable` high. Stages for disabled or exhausted vendors are skipped.
+- `.triflux/config/escalation-chain.json` sets a per-project chain.
 
-On local macOS iTerm2, `tfx-live start` and `tfx lead` select placements using Jev, task metadata, and available pane sizes. The default preserves keyboard focus and protects selected tabs. Only `--focus` permits a focus change. Related workers can share readable panes in inactive tabs; unattended workers can stay in attachable background tmux sessions. Missing task information keeps a worker visible instead of inferring background operation from its name.
+### Parallel runs and the results index
 
-Use `--task` to describe the work and `--layout` to request a placement. Focus preservation takes priority over window or split requests unless `--focus` is present. `--background`, `--no-auto-layout`, `--layout off`, and `TFX_ITERM_LAYOUT=0` keep tmux running without creating a terminal view. API failures use the same safe background fallback. `tfx-live inspect` reports decisions and attach commands; `reconcile --dry-run` previews a layout. Manual moves remain pinned until `reconcile --reset-pins`. See [tfx-live](skills/tfx-live/references/window-layout.md) for readability limits and the `focus` and `attention` result fields.
+- `tfx multi` runs headless when called non-interactively (Claude Code's Bash tool, a pipe, CI).
+- Headless workers still run in tmux rooms, so a multiplexer is required.
+- Each run writes worker status, exit code, and output paths to `$TMPDIR/triflux-<uid>/tfx-headless/<session>.results.json`. Read results from this file, not from screen text.
+- On macOS and Linux each worker gets a row in `claude agents`. Pressing Enter on a row attaches read-only to the worker pane.
+- For a single long task, `tfx-route.sh --async <role> "<instruction>"` returns a job id; check it with `--job-status`, `--job-wait`, `--job-result`. This avoids the Bash tool's 600-second limit.
 
-Local tmux sessions created by `tfx-live start --cli codex` show the complete Triflux HUD in three provider status rows.
-The active CLI row displays context usage, for example `ctx:27%`; missing context shows `ctx:--`.
-Context uses the current thread's rollout window and token usage, with reported used/remaining percentages as a fallback.
-When Jev configuration is enabled, a lowercase `j` appears separately on the Codex row for active Claude or Antigravity sessions, or on the Claude row for active Codex sessions. Disabled or unknown configuration has no badge. No Jev numeric value is displayed.
-Provider quota information, account labels, and the c/x/a row order remain unchanged.
-The Codex HUD reads local caches and rollout every five seconds without starting external queries; quota values reflect the existing cache refresh time.
-It works without hooks and leaves existing sessions, global tmux options, and Codex's built-in status_line unchanged.
-Fresh Codex threads on the shared daemon use thread-scoped `features.hooks=false` to disable ordinary user and plugin hooks. Builtin hooks and legacy `notify` are outside this guarantee. Startup hook review sends no keys and returns `ready: false`, `blockedBy: "codex-hooks-review"`, and a warning to attach to the tmux session and review the hooks manually.
-Explicit resume and resume-last stop if the target is already loaded or its loaded state cannot be verified, preserving the existing session's settings and permissions. The preflight is a snapshot; a concurrent attach between that check and resume cannot be ruled out, so the fresh-thread hook guarantee does not extend to resumed threads.
-Triflux-managed Codex `tfx-route` exec/review workers, plain/new/resume/resume-last TUI commands, and interactive `tfx multi` Codex sessions default to the official `--dangerously-bypass-hook-trust` flag. This applies only to that invocation; it does not change the ordinary `codex` command, global config, or persisted hook trust. Enabled hooks can run outside the sandbox without prior review. The existing `features.hooks=false` override and task sandbox/approval policies remain in place; `--sandbox` does not turn off hook-trust bypass.
-Disable the managed default with `tfx-live start --cli codex --session NAME --no-bypass-hook-trust` or `tfx lead ROLE --cli codex --no-bypass-hook-trust`. Set `TFX_CODEX_BYPASS_HOOK_TRUST=0` in the launching environment to disable it for route workers, live/lead sessions, and interactive `tfx multi`; any other value or an unset variable keeps it on. The CLI opt-out wins even when the environment is `1`. Custom launcher internals and their explicit flags are not rewritten. If a shell wrapper such as `tx` adds this flag internally, use `--no-bypass-hook-trust` to disable the TFX-managed addition.
-Shared-daemon prepared-thread TUI attach is excluded from this managed flag: accepting a CLI flag does not prove the daemon applies it. It retains the `features.hooks=false` RPC and the hook-review blocking fallback; no `bypass_hook_trust` RPC/config field is synthesized. If hook review still appears, both default and opt-out launches send no menu keys, rename, or task input. Attach to the preserved tmux session and review the hooks manually before continuing. `remote-spawn` enters Claude; Codex invoked from there follows that host's `tfx-route` default.
+## Sessions and peer messages
 
-## Runtime features
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/peer-en-dark.png">
+  <img alt="triflux peer message paths" src="docs/assets/peer-en.png">
+</picture>
 
-**Live sessions.** `tfx-live` drives Claude Code and Codex TUI sessions. Claude daemon targets
-(`--short`/`--session-id`) try UDS first and fall back to tmux when `--session` is also given;
-Codex `ask` queues the message through the app-server `thread/queue/add` API (shown in the TUI with a
-`[from <sender>]` first line) and falls back to tmux with a reported reason; UDS stays available with
-`--transport uds --thread <id|auto>`. `peer` relays between two sessions for `--rounds`. triflux's Codex hook records running Codex
-sessions under `~/.local/state/triflux/codex-sessions/`, so `tfx-live list-sessions --cli codex|claude`
-also finds sessions you started yourself in tmux.
+A peer message reaches the receiving session's model as a message from another agent. `tfx-live ask` is different: it types into the receiver's input box as a user turn.
 
-**Long jobs.** `scripts/tfx-route.sh --async <agent> "<prompt>"` returns a job id at once, which
-gets past Claude Code's 600-second Bash limit. Follow up with `--job-status`, `--job-wait`, and
-`--job-result`.
+### Sending
 
-**Headless workers.** Workers from `tfx-auto` and `tfx multi` appear in
-the `claude agents` panel unless you pass `--no-native-bridge-ui`. Press Enter on a row to open the
-tmux pane the worker runs in.
+- Claude sessions on the same machine use Claude Code's built-in `SendMessage`.
+- Claude also uses `SendMessage` to reach Codex or agy. With `to` set to `codex:<name>` or `agy:<name>`, triflux-mods hands the message to `tfx-peer send`. `ListAgents` lists `codex:` and `agy:` sessions as well.
+- Codex and agy sessions run the wrapper that setup installs.
 
-**Retry and escalation.** `--retry ralph` loops until done or stuck (three identical failures).
-`--retry auto-escalate` steps from Codex `astra` + `max` to Claude `fable`; override the chain in
-`.triflux/config/escalation-chain.json`.
-
-**Machine profile.** Setup records which CLIs this machine may use and its timeout policy in
-`~/.config/triflux/machine-profile.env`. `TFX_DISABLE_CODEX=1` or `TFX_DISABLE_ANTIGRAVITY=1`
-removes a CLI from routing; if no allowed CLI is available the route fails instead of silently
-falling back. Details: [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tfx-machine-profile.md).
-
-**Remote hosts.** `/tfx-remote` reads hosts from `~/.config/triflux/hosts.json`
-(Windows: `%APPDATA%\triflux\hosts.json`). Start a session with `remote-spawn.mjs`
-`--host <host> --prompt "<request>"`. Options: [skills/tfx-remote/SKILL.md](skills/tfx-remote/SKILL.md).
-
-## Architecture
-
-```mermaid
-graph TD
-    User([Claude Code prompt / shell]) --> Skills["/tfx-auto · /tfx-live · /tfx-remote"]
-    User --> Lead["/tfx-lead"]
-    User --> CLI[tfx CLI]
-    Lead -->|"briefs, cross review, merge"| Live
-    Skills --> Route[tfx-route.sh]
-    Skills --> Live[tfx-live]
-    CLI --> Team["tfx multi"]
-    Route --> Codex[Codex CLI]
-    Route --> Agy[Antigravity agy]
-    Route --> Claude[Claude Code]
-    Team -->|headless workers| Route
-    Team --> Index[("results index: tfx-headless/*.results.json")]
-    Team --> Rows["claude agents rows"]
-    Rows -->|Enter| Room["worker tmux room"]
-    Live -->|"codex queue, tmux fallback"| CodexTUI[Codex TUI sessions]
-    Live -->|"UDS or tmux"| ClaudeTUI[Claude Code sessions]
-    Route --> HUD[HUD]
+```bash
+"$HOME/.claude/scripts/tfx-peer" send --to 'codex:11.26 impl' --message 'send me a summary of the change'
+"$HOME/.claude/scripts/tfx-peer" send --to 'claude:11.26 lead' --message 'results are in out/report.md'
 ```
 
-Package layout and execution paths: [ARCHITECTURE.md](ARCHITECTURE.md). Documentation map:
-[docs/README.md](docs/README.md).
+### Transport per target
+
+| Target | Transport | Success status |
+| --- | --- | --- |
+| Claude | Writes a `<cross-session-message>` frame to the session's messaging UDS socket after token auth | `written` |
+| Codex | Sends JSON-RPC `thread/inject_items` (agent_message) over the shared Codex app-server daemon's UDS, then `turn/start` | `sent` |
+| agy | Writes a message file into the conversation's `.system_generated/messages/` | `written` |
+
+- The first line is `[tfx-peer from=<cli>:<name> msg=<id>]` and the last line is a reply command.
+- Bodies are limited to 8000 characters. A body over 4000 characters sent to a lead is cut to its first 800 characters plus up to 20 file paths when it names files that exist; without paths it is sent whole with a warning.
+- `written` and `sent` confirm only the write and the turn start. They do not mean the model read the message or finished the work.
+- `partial` and `unknown` may already have been delivered, so they are never resent automatically. Failures never fall back to tmux input.
+- A Codex target must be attached to the shared daemon through `tfx-live start`. Attach a Codex you started yourself with `tfx-live adopt`.
+- An idle agy session wakes immediately only with the `peer-wake` patch. Without it, use `tfx-live ask`.
+
+### Remote peers
+
+```bash
+"$HOME/.claude/scripts/tfx-peer" remote-send --host m5 --reply-host m2 --to 'codex:11.26 impl' --message 'please check'
+```
+
+- One SSH call passes a JSON message (up to 64 KiB) to the fixed entry point `tfx-peer _receive`, which delivers it through the same three transports.
+- `--host` is the destination. `--reply-host` is this machine's alias that the receiver uses to reply. Both sides need the other host in `~/.config/triflux/hosts.json`.
+- macOS and Linux hosts only. The result is one of `rejected`, `written`, `sent`, `partial`, `unknown`.
+
+### User input path
+
+`tfx-live ask` enters text as the receiver's user turn. Use it for remote sessions, slash commands, and the first instruction to a new agy session.
+
+- Codex: the default is the app-server queue (`thread/queue/add`). Slash commands, `--if-busy fail|interrupt|auto`, and remote sessions use tmux input. When the queue is unavailable it falls back to tmux and reports `fallbackReason`.
+- Claude: background daemon sessions go through the daemon control socket; others get tmux `paste-buffer` input.
+- agy: tmux `paste-buffer` input.
+- `tfx-live send` between local sessions returns `use-tfx-peer` with the matching `tfx-peer send` command, or `use-send-message` from Claude to Claude. `--via-tmux` forces tmux input.
+- `tfx-live peer --rounds N` relays `ask` back and forth between two sessions N times. It is unrelated to `tfx-peer`.
+
+## Lead and communication sessions
+
+- `tfx lead <role>` starts a lead session in tmux. With `--cli auto` (default) the candidates are Claude `opus` high, Codex `astra` xhigh, agy `carbon` high. The session is named `<folder>-lead`.
+- `--role communication` starts a session that talks with people and collects decisions. Candidates are Claude `opus` medium, agy `hydrogen` medium, Codex `terra` high, and the session is named `<folder>-comm`. Procedure: [`skills/tfx-comm/SKILL.md`](skills/tfx-comm/SKILL.md).
+- In a running Claude session, `/tfx-lead <role>` makes it the lead: it renames the session, turns on memory pressure monitoring, and loads the `tfx-lead` skill.
+- The lead uses the mods tool `tfx_control` to compact, clear, or exit itself and its workers. agy targets do not support compact, and exit for the lead itself or a peer-path Claude needs a handoff file. A Claude worker outside tmux accepts it only if the lead started it with `--lead-session`.
+
+### triflux-mods features
+
+| Feature | Behavior |
+| --- | --- |
+| Usage band | In the default `above` position, shows the HUD above the input box every 60 seconds. Sends one succession notice when the lead's context reaches 85% |
+| Subagent effort | Applies a fixed effort per agent type unless the caller sets one |
+| Peer messages | Hands `SendMessage` targets `codex:` and `agy:` to `tfx-peer` |
+| Memory pressure | `/tfx-pressure on\|off\|status`. Reads the macOS kernel pressure level every 2 seconds and notifies the lead at critical |
+| Lead marker | Marks sessions started with `/tfx-lead` or `tfx lead` as leads |
+| `tfx_control` | compact, clear, exit, whoami, rebind for lead sessions |
+| Compact snapshot | Appends a status block of up to 2000 characters to compact instructions; for leads it holds role, handoff file, worker table, open PRs, and remaining work |
+| Report length | Cuts peer messages and subagent results over 4000 characters sent to the lead to a head plus file paths, when they name files |
+| Idle teammates | Flags teammates idle for 10 minutes and asks them to shut down 10 minutes later. `/tfx-keep <name>` exempts one |
+
+## Skills
+
+| Skill | Purpose | Installed for |
+| --- | --- | --- |
+| `/tfx-auto` | Entry point for building, fixing, reviewing, and parallel work | Claude |
+| `/tfx-live` | Session control and peer messages for Claude, Codex, agy | Claude, Codex, agy |
+| `/tfx-lead` | Lead role, worker registry, cross review, merge and release | Claude, Codex, agy |
+| `/tfx-comm` | Communication session: talking with people, decision tables, reports | Claude, Codex, agy |
+| `/tfx-harness` | Picks one skill or path for a request without running it | Claude, Codex |
+| `/tfx-review` | Code review verdicts | Claude |
+| `/tfx-research` | Web research with cross-checked sources | Claude |
+| `/tfx-remote` | Start, list, attach, and stop remote Claude Code sessions over SSH | Claude |
+| `/tfx-setup`, `/tfx-doctor` | Setup and diagnostics | Claude |
+| `/tfx-ship` | triflux release procedure (maintainers) | Claude |
+| `/tfx-wt` | Windows Terminal tabs and panes | Claude (Windows) |
+
+agy skills are installed only when `agy` is on PATH.
+
+## Shell commands
+
+| Command | Purpose |
+| --- | --- |
+| `tfx setup [--dry-run] [--mods]` | Sync files, skills, HUD, profiles |
+| `tfx doctor [--fix] [--json]` | Diagnose and repair. Also `--audit`, `--diagnose`, `--reset`, `--purge-logs`, `--cleanup-stale-tmux` |
+| `tfx update`, `tfx list`, `tfx version` | Update, installed skills, version |
+| `tfx lead <role>` | Start a lead or communication session |
+| `tfx multi` | Multi-CLI team runs: `start`, `status`, `send`, `attach`, `stop`, and more |
+| `tfx judge route\|worker-mode\|worker-model` | Print a routing decision as JSON without starting a session |
+| `tfx mcp list\|catalog-refresh` | List Claude and Codex MCP servers; refresh the public catalog cache. Installs nothing |
+| `tfx-live <verb>` | `start`, `ask`, `wait`, `queue`, `send`, `compact`, `clear`, `goal`, `rename`, `adopt`, `interrupt`, `stop`, `probe`, `list-sessions`, `inspect`, `reconcile`, `peer` |
+| `tfx-peer send\|remote-send` | Send peer messages |
+| `bash ~/.claude/scripts/tfx-route.sh <role> "<instruction>"` | Run one worker under the routing policy |
+
+Run `<command> --help` for arguments.
+
+## HUD
+
+- The Claude Code statusline shows Claude, Codex, and agy usage on `c:`, `x:`, and `a:` rows, each with 5-hour and weekly usage and reset times.
+- Context shows as `ctx:NN%`, or `ctx:--` when unknown. A `j` marks Jev as configured; it does not mean authentication succeeded.
+- tmux sessions started with `tfx-live start --cli codex` show the same HUD in a three-line tmux status bar.
+- Sources: Claude statusline input (or the OAuth usage API), Codex rollouts and an app-server probe, and `agy -p /usage` (Cloud Monitoring metrics when agy has a GCP project configured). Results are cached in `~/.claude/cache/`, which the routing policy reads.
+- Rows for CLIs disabled in the machine profile are hidden.
+
+## Config files
+
+| File | Contents |
+| --- | --- |
+| `~/.config/triflux/machine-profile.env` | CLIs used on this machine, multiplexer, hard ceiling, stall policy |
+| `~/.config/triflux/models.json` | Per-family model pins |
+| `~/.config/triflux/hosts.json` | Remote hosts |
+| `~/.config/triflux/lead.json` | Lead launch command per CLI |
+| `~/.config/triflux/jev.json` | Jev settings |
+| `.triflux/config/escalation-chain.json` | Per-project escalation chain |
+
+`machine-profile.env`, `models.json`, and `lead.json` use `%APPDATA%\triflux` on Windows and honor `XDG_CONFIG_HOME`. `hosts.json` is always under `~/.config/triflux/`; `jev.json` is under `XDG_CONFIG_HOME` or `~/.config/triflux/`. Machine profile keys are in [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tfx-machine-profile.md).
 
 ## Platforms
 
-| Platform | Multiplexer | Notes |
+| Platform | Multiplexer | Limits |
 | --- | --- | --- |
-| macOS | tmux | Default path. Install `coreutils` (`gtimeout`) if you keep a positive hard ceiling. |
-| Linux | tmux | Supported. |
-| Windows | psmux + Windows Terminal | See below. |
+| macOS | tmux | None. A positive hard ceiling uses `gtimeout` from `coreutils` and only warns if it is missing |
+| Linux | tmux | No memory pressure monitoring |
+| Windows | psmux, Windows Terminal | Peer messages to Claude targets only. No `claude agents` rows or memory pressure monitoring |
 
-**Windows.** psmux (a tmux fork) runs PowerShell by default. Callers do not run `wt.exe` or raw
-`psmux kill-session` directly; tabs and panes go through the `tfx-wt` skill (set up only on
-Windows) and `hub/team/wt-manager.mjs`. Agent rules:
-[`.claude/rules/tfx-psmux.md`](.claude/rules/tfx-psmux.md).
+psmux on Windows defaults to PowerShell. Tabs and panes go through the `tfx-wt` skill and [`hub/team/wt-manager.mjs`](hub/team/wt-manager.mjs).
 
-## Security and guards
+## Security
 
-| Layer | Protection |
-| --- | --- |
-| Managed routes | Codex and Antigravity are called through `tfx-route.sh`, headless workers, or `tfx`, never through a bare `codex exec` or `agy`. This is a rule for callers; no hook enforces it. |
-| MCP registry | Replaces stale or unsupported MCP entries with managed ones. |
-| Consensus | Deep and consensus runs report degraded or disputed results instead of hiding them. |
+- By convention Codex and agy run only through `tfx-route.sh`, headless workers, and `tfx` commands. No hook enforces this.
+- Codex workers and TUIs launched by triflux get `--dangerously-bypass-hook-trust` by default, so active hooks can run without a prior review. Turn it off with `TFX_CODEX_BYPASS_HOOK_TRUST=0` or `--no-bypass-hook-trust`.
+- The peer adapter approval is installed only when you agree during an interactive `tfx setup`. It adds one Claude allow entry, `Bash(<absolute path>/tfx-peer send:*)`, and the Codex rule file `~/.codex/rules/triflux-native-peer.rules`. `remote-send` is not covered. Revocation steps are in [`skills/tfx-live/references/peer-adapter.md`](skills/tfx-live/references/peer-adapter.md).
 
-### Jev data transfer policy
+### Jev data transfer
 
-Jev is opt-in. It is enabled by `JEV_API_KEY` or `TYPESAFE_API_KEY`, by an explicit
-`TFX_JEV_CLI` path, or by `TFX_JEV=1` with a discoverable Jev CLI. Built-in judgments
-send inputs to the external Jev HTTP service when an API key is present, otherwise
-to the configured CLI through its arguments.
+Jev is an optional external service that triflux asks for decisions such as routing, mid-task intervention, and session selection.
 
-A host can enable Jev for existing Claude, Codex, Antigravity, and HUD processes with
-`~/.config/triflux/jev.json` (`$XDG_CONFIG_HOME/triflux/jev.json` when set):
-`{"enabled":true,"apiKeyFile":"/absolute/path/private.env"}`.
-The key file must be owned by the current user with mode `0600`; only literal
-`JEV_API_KEY` or `TYPESAFE_API_KEY` assignments are read as data, never sourced.
-Environment keys and CLI settings retain precedence. `TFX_JEV=0`, `false`, or `off`
-disables Jev even with host configuration. The HUD badge indicates enabled
-configuration, not successful authentication. Invalid credentials and failed calls
-fall back to the existing deterministic behavior. No restart is needed for host-config reads.
-
-Task prompts and instructions are sanitized before length limiting and again at
-the HTTP or CLI boundary. Built-in task routing keeps up to 1,400 characters, MCP
-task selection 1,200, busy actions, session selection, and skill branch selection 1,000, subtask assignment
-800, injected instructions 600, and expected composer prefixes 200. General
-stdout, stderr, rollout, worker output, and TUI captures contribute only metadata
-such as character and line counts and progress, input-waiting, or error flags.
-
-Only `judgeSameFailureCause` and `judgePeerConvergence` may send semantic excerpts
-from failure reasons or peer replies. Each reason or reply must fit within 600
-characters as one complete line; an optional peer task must fit within 500. These
-limits use JavaScript string length (UTF-16 code units). No lines are selected
-from a larger log, and these excerpts are never truncated or whitespace-normalized.
-Empty, oversized, multiline, control-character, and structured log-like inputs
-are rejected. If sanitization changes any excerpt, peer task, or assembled context, the judgment
-returns `null` before calling a client, HTTP, or CLI. Rejecting every changed
-candidate also prevents different originals from collapsing into the same
-redacted excerpt. A rejected comparison adds no Jev evidence for STUCK or early
-peer closure; existing deterministic control continues.
-
-The sanitizer recognizes patterns such as credential assignments, Bearer tokens,
-and private keys. Regular expressions cannot guarantee removal of every secret.
-Set `TFX_JEV=0` to disable Jev, including when a key or CLI is configured, and keep
-it disabled for sensitive tasks.
-
-### Optional native peer adapter
-
-`triflux setup` optionally approves only the dedicated `~/.claude/scripts/tfx-peer send` wrapper for local Claude and Codex peers, without broad Bash or sandbox approval; `~` is a shell example, while Codex rules match the exact absolute path printed by setup. Claude reports `written` after its UDS write without a receiver ACK, while Codex sends a typed `agent_message` only to an eligible same-daemon thread; neither result proves model completion. See the [tfx-live skill](skills/tfx-live/references/peer-adapter.md) for setup trust limits, retry behavior, and revocation of the allow entry, rule, wrapper, and consent manifest.
+- It turns on with `JEV_API_KEY` or `TYPESAFE_API_KEY`, `TFX_JEV_CLI`, `TFX_JEV=1` with `jev` (or `jev-cli`, `jevctl`) on PATH, or a `jev.json` with `enabled: true`. `TFX_JEV` set to `0`, `false`, or `off` turns it off regardless.
+- `jev.json` must be owned by the current user and not writable by others. The key file it names must be an absolute path owned by the current user with mode `0600`. Only `KEY=VALUE` lines are read; nothing is executed by a shell.
+- With an API key, requests go over HTTP; otherwise they go to the Jev CLI as arguments. On failure the built-in rules decide.
+- A sanitizer masks private keys, Bearer tokens, and credential assignments before sending. It is regex-based and cannot guarantee that every secret is removed.
+- Input limits per decision: task routing 1,400 characters, MCP selection 1,200, mid-task intervention, session selection, and skill branch 1,000 each, worker mode 1,000, worker mode 1,000, subtask assignment 800, instruction acknowledgment 600, composer prefix 200.
+- stdout, stderr, rollouts, and TUI captures are sent only as metadata such as length, line count, and error flags.
+- Raw excerpts go only to the same-failure-cause and peer-convergence decisions. Each must be one line of at most 600 characters, and it is not sent at all if the sanitizer changes anything.
+- Keep `TFX_JEV=0` for sensitive work.
 
 ## Contributing
 
-Node 22 or newer. See [CONTRIBUTING.md](CONTRIBUTING.md) for tests, lint, package boundaries,
-mirror and release checks, and state snapshots. Releases are automated: merging a version-bump
-commit to `main` runs `release.yml` after CI passes; it tags, creates the GitHub release, and publishes to npm
-through OIDC Trusted Publishing. Decisions are recorded in [docs/adr/](docs/adr/README.md).
+Tests, lint, package mirrors, and release checks are in [CONTRIBUTING.md](CONTRIBUTING.md). When a version-bump commit lands on `main` and CI passes, `release.yml` tags, creates the GitHub release, and publishes to npm through OIDC Trusted Publishing. Design decisions are in [docs/adr/](docs/adr/README.md); internals are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 <p align="center">
   <sub>MIT License &middot; Made by <a href="https://github.com/tellang">tellang</a></sub>

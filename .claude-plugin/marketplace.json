@@ -1,15 +1,15 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "triflux",
-  "description": "CLI-first multi-model orchestrator — Codex/Antigravity/Claude routing with DAG execution, auto-triage, and cost optimization",
+  "description": "CLI-first multi-model orchestrator: role-based routing across Claude Code, Codex, and Antigravity, live sessions, and peer messages between them",
   "owner": {
     "name": "tellang"
   },
   "plugins": [
     {
       "name": "triflux",
-      "description": "Tri-CLI orchestrator for Claude Code. Routes tasks across Claude + Codex + Antigravity with consensus modes, live Claude↔Codex sessions, worktree-isolated swarms, and cross-model review.",
-      "version": "11.2.0",
+      "description": "Routes coding tasks across Claude Code, Codex, and Antigravity by role, runs live Claude, Codex, and agy sessions with peer messaging, and coordinates lead sessions and cross-model review.",
+      "version": "11.2.1",
       "author": {
         "name": "tellang"
       },
@@ -25,14 +25,13 @@
         "antigravity",
         "cli-routing",
         "orchestration",
-        "cost-optimization",
-        "dag-execution"
+        "cost-optimization"
       ]
     },
     {
       "name": "triflux-mods",
-      "description": "사용량 band 표시와 서브에이전트 effort 정책 강제",
-      "version": "11.2.0",
+      "description": "HUD band, 서브에이전트 effort 정책, codex:·agy: SendMessage 중계, 리드 세션 도구(tfx_control)와 메모리 압박 감시",
+      "version": "11.2.1",
       "author": {
         "name": "tellang"
       },
@@ -40,5 +39,5 @@
       "category": "productivity"
     }
   ],
-  "version": "11.2.0"
+  "version": "11.2.1"
 }

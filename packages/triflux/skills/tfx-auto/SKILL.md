@@ -5,7 +5,7 @@ description: >
   Codex 우선으로 dispatch 하고, 명시 플래그로 mode/parallel/consensus 등 동작을 오버라이드한다.
   '코드 짜줘', '구현해줘', '만들어줘', '수정해줘', '고쳐줘', 'implement', 'build', 'fix' 같은
   구현/수정 요청에 사용. 플래그 상세는 argument-hint, 라우팅 정책은 .claude/rules/tfx-routing.md 참조.
-argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus|live] [--rounds <N>] [--shape consensus|debate|panel] [--cli-set triad|no-antigravity|custom] [--parallel 1|N] [--retry 0|1|ralph] [--skill <name>]"
+argument-hint: "<command|task> [args...] [--cli auto|codex|antigravity|claude] [--mode quick|deep|consensus|live] [--rounds <N>] [--shape consensus|debate|panel] [--cli-set triad|no-antigravity|custom] [--parallel 1|N] [--retry 0|1|ralph|auto-escalate] [--max-iterations <N>] [--skill <name>]"
 ---
 
 # tfx-auto: 통합 CLI 오케스트레이터
@@ -151,10 +151,11 @@ ARGUMENTS 에 아래 플래그가 있으면 라우팅 판단의 내부 추론을
 - 동일 `failureReason` 이 3회 연속 반복되면 `stuckCounter` 가 올라가고 `STUCK` 으로 중단한다.
 - `--retry auto-escalate` 는 `DEFAULT_ESCALATION_CHAIN` 을 기본으로 사용한다. 커스텀 체인이 필요하면 `.triflux/config/escalation-chain.json` 으로 override 한다.
 
-`DEFAULT_ESCALATION_CHAIN`(`hub/team/retry-state-machine.mjs`)은 두 단계다. 모델 ID는 프로필과 라우팅 설정이 정한다.
+`DEFAULT_ESCALATION_CHAIN`(`hub/team/retry-state-machine.mjs`)은 세 단계다. 모델 ID는 프로필과 라우팅 설정이 정한다. 끄거나 한도에 걸린 벤더의 단계는 건너뛴다.
 
 1. Codex: `astra` 가족 + `max` effort
-2. Claude: 최종 수단 프로필. 기본값만 바꾸려면 `TFX_ESCALATION_CLAUDE_MODEL`을 설정한다
+2. Antigravity: `carbon` 가족 + `high` effort
+3. Claude: `fable` + `high`. 기본값만 바꾸려면 `TFX_ESCALATION_CLAUDE_MODEL`을 설정한다
 
 체인 규칙:
 - 단계 전이 때 iterations, stuckCounter, lastFailureReason을 리셋한다.
@@ -370,24 +371,23 @@ Agent(subagent_type="oh-my-claudecode:{agent}", model="{model}", prompt="{prompt
 
 ### 에이전트 매핑
 
-| 입력 | CLI | MCP |
-|------|-----|-----|
-| codex / executor | Codex (기본 구현 프로필; 복잡 구현은 deep-executor 프로필) | implement |
-| debugger / deep-executor | Codex (deep-executor 프로필) | implement |
-| build-fixer | Codex (build-fixer 프로필) | implement |
-| spark | Codex (spark 프로필) | implement |
-| architect / planner / critic / analyst | Codex (deep-executor 프로필) | analyze |
-| scientist | Codex | analyze |
-| document-specialist | Antigravity | analyze |
-| code-reviewer / quality-reviewer | 작성 벤더별 Claude Opus / Codex `sol` + `high` review / Hydrogen High | review |
-| security-reviewer | Antigravity `carbon` + `high` | review |
-| antigravity / designer / writer | Antigravity | docs |
-| explore / claude | Claude native | 없음 |
-| test-engineer | Codex | implement |
-| qa-tester | Codex review | review |
-| verifier | Codex review (기본) / Claude native (TFX_VERIFIER_OVERRIDE=claude 시) | review / 없음 |
+후보 순서의 정본은 `scripts/lib/vendor-priority-policy.mjs`다. 아래는 `--cli auto` 기본값이다.
 
-`TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 작성 벤더를 지정한다. 미지정이면 Codex로 보고, 잘못된 값은 거부한다. Codex·Antigravity 작성 코드는 Claude Opus가, Claude 작성 코드는 Codex Sol이 리뷰한다. Claude 주간 사용량(`~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`)이 80 이상이면 Codex 작성 코드는 Hydrogen High가, Antigravity 작성 코드는 Codex Sol이 리뷰한다. 캐시가 없거나 읽을 수 없으면 한도 미만으로 본다. 명시 CLI 선택이 이 기본 배정보다 우선한다. 리드별 verifier·explore는 `tfx-lead`의 표를 따른다.
+| 입력 | 후보 순서 | MCP |
+|------|-----------|-----|
+| codex / executor / test-engineer / scientist | Codex `sol` high, Antigravity `hydrogen`, Claude `sonnet` | implement (scientist 는 analyze) |
+| build-fixer | Codex `sol` medium, Antigravity `hydrogen` low, Claude `sonnet` low | implement |
+| architect / planner / critic / analyst / debugger | Claude `opus` high, Codex `astra` xhigh, Antigravity `carbon` high | analyze (debugger 는 implement) |
+| deep-executor / scientist-deep | Claude `opus` high, Codex `astra` ultra(중첩 실행은 max), Antigravity `carbon` high | implement |
+| spark | Claude `haiku` low, Codex `luna` low, Antigravity `hydrogen` low | implement |
+| document-specialist / writer | Antigravity `hydrogen` medium, Claude `opus`, Codex `terra` high | analyze / docs |
+| designer | Claude `opus` high, Antigravity `hydrogen` high, Codex `sol` high | docs |
+| code-reviewer / quality-reviewer | 작성 벤더를 제외한 순서. 작성자 Codex 면 Claude `opus`, Antigravity `hydrogen` high | review |
+| security-reviewer | Claude `fable` high, Codex `astra` xhigh, Antigravity `carbon` high | review |
+| explore / claude | Claude native | 없음 |
+| qa-tester / verifier | Codex `sol` high review, Antigravity `hydrogen`, Claude `sonnet`. verifier 는 `TFX_VERIFIER_OVERRIDE=claude` 면 Claude native | review |
+
+`TFX_REVIEW_AUTHOR=codex|claude|antigravity`로 작성 벤더를 지정한다. 미지정이면 Codex로 보고, 잘못된 값은 거부한다. Codex 작성 코드는 Claude Opus가, Claude와 Antigravity 작성 코드는 Codex Sol이 먼저 리뷰한다. Claude 주간 사용량(`~/.claude/cache/claude-usage-cache.json`의 `data.weeklyPercent`)이 95를 넘으면 Codex 작성 코드는 Hydrogen High가 먼저 리뷰한다. 캐시가 없거나 읽을 수 없으면 한도 미만으로 본다. 명시 CLI 선택이 이 기본 배정보다 우선한다. 리드별 verifier·explore는 `tfx-lead`의 표를 따른다.
 
 ### MCP 프로필 자동 결정
 
