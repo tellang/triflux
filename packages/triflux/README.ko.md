@@ -29,14 +29,14 @@ triflux는 Claude Code 플러그인과 npm CLI로 구성된 오케스트레이�
 ## 전체 구조
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-ko-dark.png">
-  <img alt="triflux 실행 구조" src="docs/assets/architecture-ko.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/tellang/triflux/main/docs/assets/architecture-ko-dark.png">
+  <img alt="triflux 실행 구조" src="https://raw.githubusercontent.com/tellang/triflux/main/docs/assets/architecture-ko.png">
 </picture>
 
 - `/tfx-auto`는 Claude Code 안에서 Bash로 `tfx-route.sh`를 실행한다.
 - `tfx-route.sh`는 라우팅 정책 모듈에서 역할별 후보 순서를 받아 첫 후보 CLI를 비대화식 워커로 실행한다.
 - 라우팅 정책은 HUD가 기록한 사용량 캐시를 읽어 한도에 걸린 벤더를 후보에서 제외한다.
-- `tfx multi`는 tmux 방에 워커 pane을 생성한다. 각 pane은 `tfx-route.sh`를 실행한다. Claude 워커는 `claude --print`로 바로 실행한다.
+- `tfx multi`는 tmux 방에 워커 pane을 생성한다. headless 실행이면 각 pane이 `tfx-route.sh`를, Claude 워커는 `claude --print`를 실행한다. 대화형 실행이면 pane에서 각 CLI의 TUI를 시작하고 프롬프트를 입력한다.
 - `tfx-live`와 `tfx-peer`는 사람이 쓰는 대화형 세션을 제어한다. 메시지 경로는 아래 "세션과 피어 메시지" 절에 있다.
 
 ## 요구 사항
@@ -83,7 +83,7 @@ claude plugin install triflux-mods@triflux
 | --- | --- | --- |
 | `--mode` | `quick`(기본), `deep`, `consensus`, `live` | `deep`은 계획, 실행, 검증 반복. `consensus`는 여러 CLI의 결과를 합친다. `live`는 `tfx-live peer`로 두 세션을 왕복시킨다 |
 | `--shape` | `consensus`, `debate`, `panel` | `--mode consensus`의 결과 형태 |
-| `--cli` | `auto`, `codex`, `antigravity`, `claude` | 해당 벤더를 1순위로 올린다 |
+| `--cli` | `auto`, `codex`, `antigravity`, `claude` | 해당 벤더를 1순위로 올린다. explore 같은 Claude native 역할은 `--no-claude-native`를 함께 줘야 바뀐다 |
 | `--cli-set` | `triad`, `no-antigravity`, `custom` | 합의에 참여하는 CLI 구성 |
 | `--parallel` | `1`, `N` | `N`이면 `tfx multi`로 실행한다. 코드를 수정하는 작업이 둘 이상이면 작업마다 worktree와 세션을 나눈다 |
 | `--retry` | `0`, `1`(기본), `ralph`, `auto-escalate` | 아래 "재시도와 승격" 참고 |
@@ -112,7 +112,7 @@ claude plugin install triflux-mods@triflux
 
 - 코드 리뷰는 작성 벤더를 후보에서 제외한다. 작성 벤더는 `TFX_REVIEW_AUTHOR`로 정하고 기본값은 Codex다. 작성자가 Claude면 1순위는 Codex `sol` high다.
 - `TFX_DISABLE_CODEX`, `TFX_DISABLE_ANTIGRAVITY`, `TFX_DISABLE_CLAUDE`로 끈 벤더, 설치되지 않은 벤더, 사용량 100% 이상이거나 쿨다운 중인 벤더는 후보에서 제외한다.
-- 사용량이 95%를 넘은 벤더는 한 칸만 뒤로 보낸다.
+- 5시간 또는 주간 사용량이 95%를 넘은 벤더는 한 칸만 뒤로 보낸다.
 - Jev가 켜져 있고 신뢰도가 0.85 이상이면 인접한 두 후보를 한 번 바꿀 수 있다.
 - 남은 후보가 없으면 다른 경로로 조용히 넘어가지 않고 `exit 78`로 끝낸다.
 - 실행 중 쿼터나 429 오류가 나면 다음 후보로 최대 2회 다시 라우팅한다. 인증 실패, 컨텍스트 초과, 안전 정책 거부는 다시 라우팅하지 않는다.
@@ -120,7 +120,7 @@ claude plugin install triflux-mods@triflux
 ### 모델 가족과 effort
 
 - Codex 가족은 `astra`, `sol`, `terra`, `luna`다. `~/.codex/<가족>.config.toml`에는 `model`만 기록하고 effort는 `-c model_reasoning_effort`로 전달한다.
-- agy 가족은 `hydrogen`, `carbon`, `neon`, `argon`이다. 기본 배정은 `carbon`과 `hydrogen`이고 `argon`은 명시할 때만 쓴다([ADR-0055](docs/adr/0055-agy-drop-argon-add-neon.md)).
+- agy 가족은 `hydrogen`, `carbon`, `neon`, `argon`이다. 기본 배정은 `carbon`과 `hydrogen`이고 `argon`은 명시할 때만 쓴다([ADR-0055](https://github.com/tellang/triflux/blob/main/docs/adr/0055-agy-drop-argon-add-neon.md)).
 - 실행할 때 각 가족의 최신 모델을 해석한다. Codex는 `~/.codex/models_cache.json`, agy는 하루 한 번 조회한 `agy models` 결과를 쓴다.
 - 요청한 effort를 모델이 지원하지 않으면 지원하는 가장 가까운 아래 단계로 낮춘다.
 - `~/.config/triflux/models.json`에 `{"sol":"<모델 ID>"}`처럼 적으면 해당 가족을 고정한다.
@@ -129,23 +129,23 @@ claude plugin install triflux-mods@triflux
 
 - `--retry 1`은 같은 CLI로 검증과 수정을 최대 3회 반복한다.
 - `--retry ralph`는 끝날 때까지 반복한다. 같은 실패 원인이 3회 이어지면 STUCK으로 멈춘다.
-- `--retry auto-escalate`는 양수 `--max-iterations N`을 주어야 단계마다 N회 시도한 뒤 다음 단계로 넘어간다. 기본값 `0`이면 승격 없이 STUCK 규칙만 적용된다.
-- 기본 체인은 Codex `astra` max, agy `carbon` high, Claude `fable` high의 3단계다. 끄거나 한도에 걸린 벤더의 단계는 건너뛴다.
+- `--retry auto-escalate`는 양수 `--max-iterations N`을 주어야 단계마다 N회 시도한 뒤 다음 단계로 넘어간다. 기본값 `0`이면 승격 없이 STUCK 규칙만 적용된다. 같은 원인으로 3회 실패하면 상한과 관계없이 STUCK으로 끝난다.
+- 기본 체인은 Codex `astra` max, agy `carbon` high, Claude `fable` high의 3단계다. 끄거나 설치되지 않은 벤더의 단계는 건너뛴다.
 - 체인은 `.triflux/config/escalation-chain.json`으로 프로젝트마다 지정한다.
 
 ### 병렬 실행과 결과 색인
 
 - `tfx multi`는 비대화식 호출(Claude Code의 Bash 도구, 파이프, CI)이면 headless로 실행한다.
 - headless 워커도 tmux 방에서 실행되므로 멀티플렉서가 필요하다.
-- 실행마다 `$TMPDIR/triflux-<uid>/tfx-headless/<세션>.results.json`에 워커별 상태, exit 코드, 출력 경로를 기록한다. 결과는 화면 문자열 대신 이 파일로 판정한다.
+- headless 실행마다 `$TMPDIR/triflux-<uid>/tfx-headless/<세션>.results.json`(Windows는 `%TEMP%\tfx-headless\`)에 워커별 상태, exit 코드, 출력 경로를 기록한다. 결과는 화면 문자열 대신 이 파일로 판정한다.
 - macOS와 Linux에서는 워커마다 `claude agents` 목록에 행을 생성한다. 행에서 Enter를 누르면 워커 pane에 읽기 전용으로 연결된다.
 - 오래 걸리는 단일 작업은 `tfx-route.sh --async <역할> "<지시>"`로 실행하고 `--job-status`, `--job-wait`, `--job-result`로 확인한다. Bash 도구의 600초 제한을 피할 수 있다.
 
 ## 세션과 피어 메시지
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/peer-ko-dark.png">
-  <img alt="triflux 피어 메시지 경로" src="docs/assets/peer-ko.png">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/tellang/triflux/main/docs/assets/peer-ko-dark.png">
+  <img alt="triflux 피어 메시지 경로" src="https://raw.githubusercontent.com/tellang/triflux/main/docs/assets/peer-ko.png">
 </picture>
 
 피어 메시지는 받는 세션의 모델이 다른 에이전트의 메시지로 받는 경로다. 사용자 입력창에 글자를 입력하는 `tfx-live ask`와 구분한다.
@@ -153,8 +153,8 @@ claude plugin install triflux-mods@triflux
 ### 발신 경로
 
 - 같은 기기의 Claude끼리는 Claude Code 내장 `SendMessage`를 쓴다.
-- Claude에서 Codex나 agy로 보낼 때도 `SendMessage`를 쓴다. `to`에 `codex:<이름>` 또는 `agy:<이름>`을 적으면 triflux-mods가 이를 `tfx-peer send`로 전달한다. `ListAgents` 결과에도 `codex:`, `agy:` 세션이 표시된다.
-- Codex와 agy 세션은 setup이 설치한 래퍼를 직접 실행한다.
+- Claude에서 Codex나 agy로 보낼 때도 `SendMessage`를 쓴다. `to`에 `codex:<이름>` 또는 `agy:<이름>`을 적으면 triflux-mods가 이를 `tfx-peer send`로 전달한다. 본문 전체가 JSON 객체나 배열이면 중계하지 않는다. `ListAgents` 결과에도 `codex:`, `agy:` 세션이 표시된다.
+- Codex와 agy 세션은 래퍼 `~/.claude/scripts/tfx-peer`를 직접 실행한다. 래퍼는 macOS와 Linux에서 대화형 `tfx setup`의 피어 어댑터 승인에 동의해야 설치된다.
 
 ```bash
 "$HOME/.claude/scripts/tfx-peer" send --to 'codex:11.26 구현' --message '변경 요약을 보내줘'
@@ -165,15 +165,15 @@ claude plugin install triflux-mods@triflux
 
 | 대상 | 수단 | 성공 상태 |
 | --- | --- | --- |
-| Claude | 대상 세션의 메시지용 UDS 소켓에 토큰 인증 뒤 `<cross-session-message>` 프레임을 쓴다 | `written` |
+| Claude | 대상 세션의 메시지용 UDS 소켓(Windows는 named pipe)에 토큰 인증 뒤 `<cross-session-message>` 프레임을 쓴다 | `written` |
 | Codex | 공유 Codex app-server 데몬의 UDS로 JSON-RPC `thread/inject_items`(agent_message)를 보내고 `turn/start`로 턴을 시작한다 | `sent` |
 | agy | 대화 디렉터리의 `.system_generated/messages/`에 메시지 파일을 쓴다 | `written` |
 
 - 본문 첫 줄에 `[tfx-peer from=<cli>:<이름> msg=<id>]`, 끝에 회신 명령을 추가한다.
-- 본문은 8000자까지 받는다. 리드에게 가는 본문이 4000자를 넘고 실제로 있는 파일 경로를 포함하면 앞 800자와 경로 목록(최대 20개)으로 줄인다. 경로가 없으면 줄이지 않고 경고만 한다.
+- 본문은 8000자까지 받는다. 리드에게 가는 본문이 4000자를 넘고 파일 경로를 포함하면 앞 800자와 경로 목록(최대 20개)으로 줄인다. Codex와 agy 대상은 실제로 있는 파일만 센다. Claude 대상은 받는 쪽 mods가 줄인다. 경로가 없으면 줄이지 않고 경고만 한다.
 - `written`과 `sent`는 기록과 턴 시작까지만 확인한 상태다. 모델이 읽었거나 작업을 마쳤다는 뜻이 아니다.
 - `partial`, `unknown`은 이미 전달되었을 수 있으므로 자동으로 다시 보내지 않는다. 실패해도 tmux 입력으로 전환하지 않는다.
-- Codex 대상은 `tfx-live start`로 공유 데몬에 연결한 세션이어야 한다. 직접 실행한 Codex는 `tfx-live adopt`로 연결한다.
+- Codex 대상은 `tfx-live start`로 공유 데몬에 연결한 세션이어야 한다. 공유 데몬에 붙은 채 직접 실행한 Codex는 `tfx-live adopt`로 스레드를 기록한다. `--no-daemon`이나 `-c` 덮어쓰기로 데몬 밖에서 실행한 Codex는 `tfx-live start --resume`으로 다시 시작한다.
 - 쉬고 있는 agy 세션은 `peer-wake` 패치가 적용된 경우에만 바로 깨어난다. 패치가 없으면 `tfx-live ask`를 쓴다.
 
 ### 원격 피어
@@ -194,7 +194,7 @@ claude plugin install triflux-mods@triflux
 - Claude: 백그라운드 데몬 세션은 데몬 제어 소켓에 연결한다. 그 밖의 세션은 tmux `paste-buffer`로 입력한다.
 - agy: tmux `paste-buffer`로 입력한다.
 - 로컬 세션끼리 `tfx-live send`를 쓰면 `use-tfx-peer`를 반환하고 `tfx-peer send` 명령을 안내한다. Claude에서 Claude로 보내면 `use-send-message`를 반환한다. `--via-tmux`를 주면 tmux로 입력한다. Claude에서 Claude로 보내면 `use-send-message`를 반환한다. `--via-tmux`를 주면 tmux로 입력한다.
-- `tfx-live peer --rounds N`은 두 세션 사이에서 `ask`를 N번 왕복시키는 중계다. `tfx-peer`와는 다른 기능이다.
+- `tfx-live peer --rounds N`은 두 세션 사이에서 `ask`를 최대 N번 왕복시키는 중계다. Jev가 수렴을 판정하면 일찍 끝난다. `tfx-peer`와는 다른 기능이다.
 
 ## 리드와 소통 세션
 
@@ -254,7 +254,7 @@ agy 스킬은 `agy`가 PATH에 있을 때만 설치한다.
 
 ## HUD
 
-- Claude Code statusline에 Claude, Codex, agy 사용량을 `c:`, `x:`, `a:` 행으로 표시한다. 각 행은 5시간과 1주 사용률, 리셋 시각을 보여 준다.
+- Claude Code statusline에 Claude, Codex, agy 사용량을 `c:`, `x:`, `a:` 행으로 표시한다. Claude와 Codex 행은 5시간과 1주 사용률, 리셋 시각을 보여 준다. agy 행은 창 구분 없이 사용률과 받은 리셋 정보만 보여 준다.
 - 컨텍스트는 `ctx:NN%`, 알 수 없으면 `ctx:--`로 표시한다. Jev가 켜져 있으면 `j`를 표시한다. `j`는 설정 상태이며 인증 성공을 뜻하지 않는다.
 - `tfx-live start --cli codex`로 시작한 tmux 세션에는 같은 HUD를 3줄 tmux 상태줄로 표시한다.
 - 데이터 출처는 Claude statusline 입력(없으면 OAuth 사용량 API), Codex rollout과 app-server 조회, agy의 `agy -p /usage`다. agy에 GCP 프로젝트가 설정되어 있으면 Cloud Monitoring 지표를 쓴다. 결과는 `~/.claude/cache/`에 캐시하고 라우팅 정책이 이 캐시를 읽는다.
@@ -271,7 +271,7 @@ agy 스킬은 `agy`가 PATH에 있을 때만 설치한다.
 | `~/.config/triflux/jev.json` | Jev 설정 |
 | `.triflux/config/escalation-chain.json` | 프로젝트별 승격 체인 |
 
-`machine-profile.env`, `models.json`, `lead.json`은 Windows에서 `%APPDATA%\triflux`, `XDG_CONFIG_HOME`이 있으면 그 아래를 쓴다. `hosts.json`은 항상 `~/.config/triflux/` 아래에 있다. `jev.json`은 `XDG_CONFIG_HOME` 또는 `~/.config/triflux/` 아래다. 머신 프로필 항목은 [`.claude/rules/tfx-machine-profile.md`](.claude/rules/tfx-machine-profile.md)에 있다.
+`machine-profile.env`, `models.json`, `lead.json`은 Windows에서 `%APPDATA%\triflux`, `XDG_CONFIG_HOME`이 있으면 그 아래를 쓴다. `hosts.json`은 `~/.config/triflux/`(Windows는 `%APPDATA%\triflux\`) 아래에 있고 `TFX_HOSTS_USER_STATE`로 바꿀 수 있다. `jev.json`은 `XDG_CONFIG_HOME` 또는 `~/.config/triflux/` 아래다. 머신 프로필 항목은 [`.claude/rules/tfx-machine-profile.md`](https://github.com/tellang/triflux/blob/main/.claude/rules/tfx-machine-profile.md)에 있다.
 
 ## 플랫폼
 
@@ -286,7 +286,7 @@ Windows의 psmux 기본 셸은 PowerShell이다. 탭과 pane은 `tfx-wt` 스킬�
 ## 보안
 
 - Codex와 agy는 `tfx-route.sh`, headless 워커, `tfx` 명령으로만 실행하는 것이 컨벤션이다. 이를 강제하는 훅은 없다.
-- triflux가 실행하는 Codex 워커와 TUI에는 `--dangerously-bypass-hook-trust`를 기본으로 추가한다. 활성 훅이 사전 확인 없이 실행될 수 있다. `TFX_CODEX_BYPASS_HOOK_TRUST=0` 또는 `--no-bypass-hook-trust`로 끈다.
+- triflux가 실행하는 Codex exec 워커와 TUI에는 `--dangerously-bypass-hook-trust`를 기본으로 추가한다. 공유 데몬에 붙는 `tfx-live start --cli codex`는 이 플래그 대신 새 스레드마다 `features.hooks=false`를 설정한다. 활성 훅이 사전 확인 없이 실행될 수 있다. `TFX_CODEX_BYPASS_HOOK_TRUST=0` 또는 `--no-bypass-hook-trust`로 끈다.
 - 피어 어댑터 승인은 대화형 `tfx setup`에서 동의할 때만 설치한다. Claude 허용 목록의 `Bash(<절대경로>/tfx-peer send:*)` 한 항목과 Codex 규칙 `~/.codex/rules/triflux-native-peer.rules`만 추가한다. `remote-send`는 승인 범위에 포함하지 않는다. 철회 절차는 [`skills/tfx-live/references/peer-adapter.md`](skills/tfx-live/references/peer-adapter.md)에 있다.
 
 ### Jev 데이터 전송
@@ -299,12 +299,13 @@ Jev는 라우팅, 작업 중 개입, 세션 선택 같은 판정을 외부 서�
 - 보내기 전에 sanitizer가 private key, Bearer 토큰, 자격 증명 대입을 가린다. 정규식이라 모든 형태의 시크릿을 제거한다고 보장하지는 않는다.
 - 판정별 입력 상한: 작업 라우팅 1,400자, MCP 선택 1,200자, 작업 중 개입과 세션 선택과 스킬 분기 1,000자, 워커 모드 판정 1,000자, 워커 모드 판정 1,000자, 하위 작업 배정 800자, 지시 확인 600자, 입력창 접두사 200자.
 - stdout, stderr, rollout, TUI 화면은 원문 대신 길이, 줄 수, 오류 여부 같은 메타데이터만 보낸다.
-- 원문 발췌는 같은 실패 원인 판정과 피어 수렴 판정에만 보낸다. 한 줄 600자 이하만 받는다. sanitizer가 한 글자라도 바꾸면 보내지 않는다.
+- 작업 설명은 위 상한 안에서 보낸다. 예를 들어 워커 모드 판정은 공백을 정리한 작업 설명을 최대 1,000자 보낸다.
+- 실패 로그나 피어 응답의 원문 발췌는 같은 실패 원인 판정과 피어 수렴 판정에만 보낸다. 한 줄 600자 이하만 받는다. sanitizer가 한 글자라도 바꾸면 보내지 않는다.
 - 민감한 작업에서는 `TFX_JEV=0`으로 둔다.
 
 ## 기여
 
-테스트, 린트, 패키지 미러, 릴리스 점검은 [CONTRIBUTING.md](CONTRIBUTING.md)에 있다. 버전을 올린 커밋이 `main`에 머지되면 CI 통과 뒤 `release.yml`이 태그, GitHub 릴리스, npm 게시(OIDC Trusted Publishing)를 실행한다. 설계 결정은 [docs/adr/](docs/adr/README.md), 내부 구조는 [ARCHITECTURE.md](ARCHITECTURE.md)에 있다.
+테스트, 린트, 패키지 미러, 릴리스 점검은 [CONTRIBUTING.md](https://github.com/tellang/triflux/blob/main/CONTRIBUTING.md)에 있다. 버전을 올린 커밋이 `main`에 머지되면 CI 통과 뒤 `release.yml`이 태그, GitHub 릴리스, npm 게시(OIDC Trusted Publishing)를 실행한다. 설계 결정은 [docs/adr/](https://github.com/tellang/triflux/blob/main/docs/adr/README.md), 내부 구조는 [ARCHITECTURE.md](https://github.com/tellang/triflux/blob/main/ARCHITECTURE.md)에 있다.
 
 <p align="center">
   <sub>MIT License &middot; Made by <a href="https://github.com/tellang">tellang</a></sub>

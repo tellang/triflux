@@ -41,7 +41,7 @@
 2. `tfx-route.sh`가 `agent-route-policy.mjs --format route`를 호출해 CLI, 프로필, 가족, effort, 후보 목록을 받는다.
 3. 후보 목록은 `vendor-priority-policy.mjs`가 생성한다. 머신 프로필, 설치 여부, `quota-snapshot.mjs`가 읽은 사용량 캐시로 벤더를 제외하고 순서를 조정한다. 후보가 없으면 `exit 78`이다.
 4. 실행기는 CLI별로 나뉜다. Codex는 `codex exec --profile <가족>`, agy는 `agy --print`, Claude는 `tfx-route-worker.mjs`가 `hub/workers/claude-worker.mjs`를 실행한다.
-5. `tfx-route-post.mjs`가 출력을 정리한다. 쿼터나 429 오류면 다음 후보로 `tfx-route.sh`를 다시 실행한다(최대 2회).
+5. `tfx-route-post.mjs`가 출력을 정리한다. 쿼터나 429 오류면 `tfx-route.sh`의 `auto_reroute`가 다음 후보로 자기 자신을 다시 실행한다(최대 2회).
 
 - `tfx multi`의 명령은 `hub/team/cli/`에 있다. headless 실행은 `headless.mjs`의 `runHeadless`가 tmux 방에 pane을 생성한다. 각 pane은 `tfx-route.sh` 또는 `claude --print`를 실행한다.
 - 워커 결과는 `results-index.mjs`가 `<세션>.results.json`에 기록한다. 근거는 [ADR-0034](docs/adr/0034-headless-session-results-index.md)다.
@@ -50,7 +50,7 @@
 ## 세션 제어와 피어 전송
 
 - `tfx-live`는 tmux 세션을 시작하고 `ask`로 사용자 입력을 보낸다. Codex는 `codex-queue.mjs`의 app-server 큐, Claude 데몬 세션은 `claude-daemon-control.mjs`의 제어 소켓을 쓴다. 그 밖의 세션은 tmux 입력이다. 근거는 [ADR-0027](docs/adr/0027-codex-message-queue-default.md)다.
-- `tfx-peer send`는 `native-peer.mjs`로 전달한다. Claude는 세션 메시지 UDS, Codex는 공유 app-server UDS의 `thread/inject_items`와 `turn/start`, agy는 대화 디렉터리 파일 쓰기다.
+- `tfx-peer send`는 `native-peer.mjs`로 전달한다. Claude는 세션 메시지 UDS(Windows는 named pipe), Codex는 공유 app-server UDS의 `thread/inject_items`와 `turn/start`, agy는 대화 디렉터리 파일 쓰기다.
 - `tfx-peer remote-send`는 `ssh-peer.mjs`가 SSH로 상대 호스트의 `tfx-peer _receive`를 실행한다.
 - 세션 찾기는 Claude가 `~/.claude/sessions/`, Codex가 tmux 옵션 `@tfx_codex_thread`와 `codex-session-hook.mjs`가 쓴 레지스트리, agy가 tmux pane과 열린 잠금 파일이다.
 
