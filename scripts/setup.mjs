@@ -1482,7 +1482,7 @@ export async function ensureTrifluxMods({
       if (
         !install &&
         !(await ask(
-          "triflux mods 플러그인(HUD band, 서브에이전트 effort 정책)을 설치할까요?",
+          "triflux mods 플러그인(HUD band, 서브에이전트 effort, 피어 메시지 중계, 리드 도구)을 설치할까요?",
         ))
       ) {
         notice("mods 설치를 건너뜀. 나중에 설치: tfx setup --mods");

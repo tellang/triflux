@@ -2,18 +2,18 @@
 
 ## 주요 문서
 
-| 알고 싶은 것 | 먼저 볼 문서 |
+| 주제 | 먼저 볼 문서 |
 |---|---|
 | **무엇을 만드나 / 요구사항** | [prd/](prd/): 제품 요구(PRD) · 템플릿 [prd/_template.md](prd/_template.md) |
 | **원문 요구와 확정 요구 (추적성)** | [req/](req/): raw(원문 ask)와 refined(확정 요구사항)의 양방향 링크. PRD보다 앞 단계 |
-| **왜 이렇게 정했나 (결정 근거)** | [adr/](adr/): 번호화된 불변 ADR · 상태보드 [adr/README.md](adr/README.md) · 운영 규약 [adr/CONVENTIONS.md](adr/CONVENTIONS.md) · 경량 결정로그 [DECISIONS.md](DECISIONS.md) |
+| **결정 근거** | [adr/](adr/): 번호화된 불변 ADR · 상태보드 [adr/README.md](adr/README.md) · 운영 규약 [adr/CONVENTIONS.md](adr/CONVENTIONS.md) · 경량 결정로그 [DECISIONS.md](DECISIONS.md) |
 | **CTO 삭제** | [ADR-0035](adr/0035-remove-cto.md) : `tfx cto` 와 lake 기록 제거 |
 | **swarm 퇴역** | [ADR-0025](adr/0025-retire-swarm-execution-engine.md) : 제거한 실행 엔진과 worktree 격리 방향 |
 | **claude agents 행** | [ADR-0026](adr/0026-agents-row-tmux-attach.md) : Enter 로 워커 tmux 방을 여는 행과 터미널 응답 누수 차단 |
 | **Codex 메시지 전송** | [ADR-0027](adr/0027-codex-message-queue-default.md) : `codex queue` 기본, tmux 입력은 폴백과 슬래시 명령 전용 |
 | **항상 지킬 에이전트 규칙** | [../.claude/rules/](../.claude/rules/): 정책 SSOT. 하네스가 auto-load한다. 문서는 이 규칙을 "가리키기만" 한다 |
 | **Codex 실행 관례** | [codex-conventions.md](codex-conventions.md) |
-| **시스템 구조** | [../ARCHITECTURE.md](../ARCHITECTURE.md): 패키지·데이터 흐름·미러 관계 |
+| **시스템 구조** | [../ARCHITECTURE.md](../ARCHITECTURE.md): 패키지, 실행 경로, 피어 전송, 미러 관계. 전체 그림은 [../README.ko.md](../README.ko.md) |
 | **Jev MCP 추천** | [요구사항](prd/0050-jev-mcp-recommendations.md), [결정 근거](adr/0050-jev-mcp-recommendations.md), [실행 계획](../.triflux/plans/0050-jev-mcp-recommendations.md) |
 | **Jev iTerm 자동 배치** | [결정 근거](adr/0052-jev-iterm-layout.md), [사용법](../skills/tfx-live/references/window-layout.md) |
 | **3사 모델 우선순위 라우팅** | [결정 근거](adr/0054-multi-vendor-priority-routing.md), [agy Argon 제외와 Neon 추가](adr/0055-agy-drop-argon-add-neon.md), [상세 설계](design/multi-vendor-priority-routing.md), [배분 조사](research/multi-vendor-role-allocation-2026-11.md) |
@@ -24,7 +24,7 @@
 
 ## 보조 파일
 
-- 공개 자산: [assets/](assets/). README 로고 SVG 두 개와 GitHub 소셜 미리보기 이미지를 둔다.
+- 공개 자산: [assets/](assets/). README 로고 SVG 두 개, README의 구조 그림과 피어 메시지 그림(한국어와 영어, 밝은 테마와 어두운 테마 PNG 8장), GitHub 소셜 미리보기 이미지를 둔다.
 - 폐기한 리딩 노트와 부속 설정은 [보관 인덱스](_archive/README.md)에 원래 경로와 함께 등재한다.
 
 ## 공개 범위
@@ -42,7 +42,17 @@
 ## 보관 문서
 
 - **[_archive/](_archive/)** : 대체되거나 폐기된 문서 보존본. [보관 인덱스](_archive/README.md)에 이번 이동 42개와 ADR-0011을 등재한다. 기존 보관 PRD 32개, 종료 계획 4개, 리딩 노트와 부속 설정 5개, 제거된 원격 TUI 설계 1개를 보존한다.
-  - [swarm 인프라 PRD](_archive/prd/p3-swarm-infra-fixes.md)와 [Issue #281 계획](_archive/triflux/plans/issue-281-auto-router-swarm-dispatch.md), [shard A](_archive/triflux/plans/issue-281-shard-a-staged-file-detect.md), [shard B](_archive/triflux/plans/issue-281-shard-b-router-escalate.md), [shard C](_archive/triflux/plans/issue-281-shard-c-integration-ssot-mirror.md), [swarm 실행 계획](_archive/triflux/plans/issue-281-swarm.md), [swarm smoke test](_archive/prd/archived/swarm-smoke-test.md), [mesh router/queue PRD](_archive/prd/archived/lake5-mesh-router-queue.md), [mesh 활성화 PRD](_archive/prd/archived/mesh-production-activation.md), [worktree lifecycle 테스트 PRD](_archive/prd/archived/worktree-lifecycle-test.md)를 ADR-0025에 따라 보존한다.
+  - ADR-0025(swarm 퇴역)에 따라 아래 문서를 보존한다.
+    - [swarm 인프라 PRD](_archive/prd/p3-swarm-infra-fixes.md)
+    - [Issue #281 계획](_archive/triflux/plans/issue-281-auto-router-swarm-dispatch.md)
+    - [shard A](_archive/triflux/plans/issue-281-shard-a-staged-file-detect.md)
+    - [shard B](_archive/triflux/plans/issue-281-shard-b-router-escalate.md)
+    - [shard C](_archive/triflux/plans/issue-281-shard-c-integration-ssot-mirror.md)
+    - [swarm 실행 계획](_archive/triflux/plans/issue-281-swarm.md)
+    - [swarm smoke test](_archive/prd/archived/swarm-smoke-test.md)
+    - [mesh router/queue PRD](_archive/prd/archived/lake5-mesh-router-queue.md)
+    - [mesh 활성화 PRD](_archive/prd/archived/mesh-production-activation.md)
+    - [worktree lifecycle 테스트 PRD](_archive/prd/archived/worktree-lifecycle-test.md)
   - [Lake 4 스킬 템플릿 엔진 PRD](_archive/prd/archived/lake4-skill-templates.md)를 템플릿 엔진 폐기에 따라 보존한다.
   - [Lake 4 공유 세그먼트 PRD](_archive/prd/archived/lake4-token-shared-segments.md)를 템플릿 엔진 폐기에 따라 보존한다.
   - [Lake 4 텔레메트리 PRD](_archive/prd/archived/lake4-token-telemetry.md)를 템플릿 엔진 폐기에 따라 보존한다.

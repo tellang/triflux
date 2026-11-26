@@ -9,7 +9,7 @@ paths:
 # `--retry auto-escalate` 체인 규약
 
 `/tfx-auto --retry auto-escalate` 가 사용하는 CLI 승격 체인.
-각 단계에서 `--max-iterations` (기본 3) 소진 시 다음 단계로 전이.
+각 단계에서 양수 `--max-iterations N`을 소진하면 다음 단계로 전이한다. 기본값 `0`이면 횟수에 따른 승격은 없고 동일 실패 3회 STUCK 규칙만 적용된다.
 
 > 근거: [ADR-0037](../../docs/adr/0037-model-family-aliases.md), [ADR-0054](../../docs/adr/0054-multi-vendor-priority-routing.md). 이 문서가 실행 규칙의 정본이다.
 
@@ -23,11 +23,11 @@ paths:
 | 2 | antigravity | 프로필에서 해석 | carbon_high | high | 이기종 벤더 상위 추론(Carbon high, 미보유 시 Neon high, 그다음 Hydrogen high 폴백) 2차 복구 단계 |
 | 3 | claude | fable | 미지정 | high | Claude CLI가 최신 Fable tier로 해석하는 최종 수단, 복잡 아키텍처 및 합의 요구 시 |
 
-체인 생성 시 비활성(`TFX_DISABLE_*=1`), 미설치(`TFX_*_OK=0`), 쿼터 `>=100%`, 쿨다운 중인 벤더 단계는 자동으로 건너뛰며, 가용한 단계가 하나도 없으면 빈 체인으로 즉시 `BUDGET_EXCEEDED` 처리한다. 체인 길이 소진 시 `BUDGET_EXCEEDED` with `reason: "escalation-chain-exhausted"`.
+체인 생성 시 비활성(`TFX_DISABLE_*=1`), 미설치(`TFX_*_OK=0`) 벤더 단계는 건너뛴다. 쿼터 `>=100%`와 쿨다운 단계는 `quotaSnapshot`이나 `respectQuota`를 넘기거나 테스트, preflight 환경일 때만 건너뛴다(`bridge.mjs retry-run`은 넘기지 않는다). 남는 단계가 없으면 체인 생성이 오류로 끝난다. 체인 길이 소진 시 `BUDGET_EXCEEDED` with `reason: "escalation-chain-exhausted"`.
 
 ## 전이 규약
 
-- 각 단계 default `max_iterations = 3` (사용자가 `--max-iterations N` 로 override)
+- 단계별 상한은 `--max-iterations N`(양수)으로 준다. 기본값 `0`은 상한과 횟수 승격이 없다(`retry-state-machine.mjs`의 `maxIterations` 기본값)
 - 단계 전이 시 iterations / stuckCounter / lastFailureReason 리셋
 - **동일 failureReason 3회 연속** 은 체인과 무관하게 `STUCK` 처리 후 즉시 중단
 

@@ -2,6 +2,16 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [11.2.1] - 2026-11-26
+
+### Changed
+- docs: `README.md`, `README.ko.md`를 코드 기준으로 새로 쓴다. 역할별 후보 순서, 재시도와 승격, 피어 메시지 전송 수단과 결과 상태, 원격 피어, 리드와 소통 세션, mods 기능 9개, HUD, 설정 파일, 플랫폼 제한, Jev 데이터 전송을 실제 동작에 맞춘다. 없는 `tfx mcp sync|add|remove`, 4줄 HUD와 `Jev ON` 표기, Argon 기본 배정, 2단계 승격 체인 같은 낡은 설명을 뺀다.
+- docs: 실행 구조와 피어 메시지 경로 그림을 `docs/assets/`에 추가한다(한국어와 영어, 밝은 테마와 어두운 테마).
+- docs: `ARCHITECTURE.md`를 현재 디렉터리 구성과 실행, 피어 전송 경로로 다시 쓰고 `docs/README.md`의 제목과 보관 목록을 정리한다.
+- skills: `tfx-auto`의 에이전트 매핑 표를 `vendor-priority-policy.mjs`의 후보 순서로 바꾸고, 승격 체인을 3단계로, 리뷰어 전환 임계값을 95%로, argument-hint에 `auto-escalate`와 `--max-iterations`를 반영한다.
+- rules: `tfx-escalation-chain.md`의 `--max-iterations` 기본값을 코드와 같은 `0`(횟수 승격 없음)으로, `tfx-routing.md`의 agy 모델 캐시 파일명을 `agy-models.json`으로 고친다.
+- plugin: 마켓플레이스와 triflux-mods 설명, `tfx setup`의 mods 설치 질문에 피어 메시지 중계와 리드 도구를 반영하고 폐기된 `dag-execution` 태그를 뺀다.
+
 ## [11.2.0] - 2026-11-25
 
 ### Added
