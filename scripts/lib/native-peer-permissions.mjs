@@ -186,11 +186,13 @@ function keepOnlyLatestSettingsBackup(file, latest) {
       fs.unlinkSync(candidate);
   }
 }
+// verb 마다 허용 규칙, Codex 규칙, 동의 파일을 따로 둔다. 래퍼와 잠금은 함께 쓴다.
 export function peerPermissionPlan({
   home,
   packageRoot,
   nodePath = resolveStableNodeBin(),
   tmuxPath = trustedTmuxPath(),
+  verb = "send",
 }) {
   if (
     !path.isAbsolute(home) ||
@@ -202,8 +204,10 @@ export function peerPermissionPlan({
   const wrapper = path.join(home, ".claude", "scripts", "tfx-peer");
   const entry = path.join(packageRoot, "bin", "tfx-peer.mjs");
   const script = `#!/bin/sh\nunset NODE_OPTIONS NODE_PATH PSMUX_BIN PSMUX_SHELL DYLD_INSERT_LIBRARIES LD_PRELOAD LD_LIBRARY_PATH\nPATH=${quote(`${tmuxPath ? `${path.dirname(tmuxPath)}:` : ""}/usr/bin:/bin:/usr/sbin:/sbin`)}\nexport PATH\nr=${quote(packageRoot)}\n[ "$(cd -P "$r" 2>/dev/null && pwd -P)" = "$r" ] && [ ! -e "$r/.git" ] || { echo 'tfx-peer: untrusted package tree' >&2; exit 126; }\nexec ${quote(nodePath)} ${quote(entry)} "$@"\n`;
-  const allow = `Bash(${wrapper} send:*)`;
-  const codexRule = `prefix_rule(pattern=[${JSON.stringify(wrapper)}, "send"], decision="allow")\n`;
+  const allow = `Bash(${wrapper} ${verb}:*)`;
+  const codexRule = `prefix_rule(pattern=[${JSON.stringify(wrapper)}, "${verb}"], decision="allow")\n`;
+  const suffix = verb === "send" ? "" : "-remote";
+  const scripts = path.join(home, ".claude", "scripts");
   return {
     entry,
     wrapper,
@@ -211,8 +215,14 @@ export function peerPermissionPlan({
     allow,
     codexRule,
     settings: path.join(home, ".claude", "settings.json"),
-    rule: path.join(home, ".codex", "rules", "triflux-native-peer.rules"),
-    manifest: path.join(home, ".claude", "scripts", "tfx-peer-consent.json"),
+    rule: path.join(
+      home,
+      ".codex",
+      "rules",
+      `triflux-native-peer${suffix}.rules`,
+    ),
+    manifest: path.join(scripts, `tfx-peer${suffix}-consent.json`),
+    lock: path.join(scripts, "tfx-peer-consent.json.lock"),
     contract: hash(
       JSON.stringify({
         wrapper,
@@ -232,9 +242,23 @@ export function inspectPeerPermission({
   nodePath,
   tmuxPath,
   platform = process.platform,
+  verb = "send",
 } = {}) {
   if (platform === "win32") return { status: "unsupported" };
-  const plan = peerPermissionPlan({ home, packageRoot, nodePath, tmuxPath });
+  const plan = peerPermissionPlan({
+    home,
+    packageRoot,
+    nodePath,
+    tmuxPath,
+    verb,
+  });
+  // remote-send 승인은 send 승인이 설치한 래퍼 위에서만 성립한다.
+  if (
+    verb !== "send" &&
+    inspectPeerPermission({ home, packageRoot, nodePath, tmuxPath, platform })
+      .status !== "approved"
+  )
+    return { status: "requires-send", plan };
   const effectiveNodePath = nodePath || resolveStableNodeBin();
   if (
     !trustedPackageTree(
@@ -296,7 +320,7 @@ export function inspectPeerPermission({
   if (!manifest)
     return {
       status:
-        existing(plan.wrapper) || existing(plan.rule)
+        (verb === "send" && existing(plan.wrapper)) || existing(plan.rule)
           ? "conflict"
           : "unconfigured",
       plan,
@@ -326,6 +350,7 @@ export function installPeerPermission({
   tmuxPath,
   consent = false,
   platform = process.platform,
+  verb = "send",
 } = {}) {
   const inspected = inspectPeerPermission({
     home,
@@ -333,9 +358,11 @@ export function installPeerPermission({
     nodePath,
     tmuxPath,
     platform,
+    verb,
   });
   const { plan, status } = inspected;
-  if (status === "unsupported") return { status, changed: false };
+  if (status === "unsupported" || status === "requires-send")
+    return { status, changed: false };
   if (status === "approved") return { status: "approved", changed: false };
   if (status === "conflict" || status === "unavailable")
     return {
@@ -357,7 +384,7 @@ export function installPeerPermission({
         trustsPackageRoot: packageRoot,
       },
     };
-  const lock = `${plan.manifest}.lock`;
+  const { lock } = plan;
   fs.mkdirSync(path.dirname(lock), { recursive: true, mode: 0o700 });
   let lockHandle;
   try {
@@ -377,6 +404,7 @@ export function installPeerPermission({
       nodePath,
       tmuxPath,
       platform,
+      verb,
     });
     if (fresh.status !== status)
       return {
@@ -434,16 +462,19 @@ export function installPeerPermission({
           error: "Claude settings changed before install",
         };
       let settingsBackup = null;
+      const installsWrapper = verb === "send";
       for (const file of [
-        plan.wrapper,
+        ...(installsWrapper ? [plan.wrapper] : []),
         plan.settings,
         plan.rule,
         plan.manifest,
       ])
         if (file === plan.settings) settingsBackup = backup(file);
         else backup(file);
-      atomic(plan.wrapper, plan.script, 0o700);
-      steps.push("wrapper");
+      if (installsWrapper) {
+        atomic(plan.wrapper, plan.script, 0o700);
+        steps.push("wrapper");
+      }
       if (
         read(plan.settings) !== settingsBefore ||
         existing(plan.settings)?.ino !== settingsMeta?.ino
@@ -480,7 +511,8 @@ export function installPeerPermission({
     } catch {}
   }
 }
-export async function offerPeerPermission({
+async function offerPeerVerb({
+  verb,
   home,
   packageRoot,
   interactive = false,
@@ -493,12 +525,15 @@ export async function offerPeerPermission({
   tmuxPath,
   platform = process.platform,
 } = {}) {
+  const remote = verb === "remote-send";
+  const label = remote ? "remote-send 사전 승인" : "Native peer adapter";
   const state = inspectPeerPermission({
     home,
     packageRoot,
     nodePath,
     tmuxPath,
     platform,
+    verb,
   });
   if (state.status === "unsupported") {
     notice("Windows 는 자동 승인 없이 tfx-peer 를 직접 실행한다");
@@ -509,11 +544,17 @@ export async function offerPeerPermission({
   if (fromUpdate) {
     if (verbose)
       notice(
-        `Native peer adapter: ${state.status}; update는 승인 설정을 바꾸지 않는다. 재승인은 tfx setup에서 명시적으로 선택한다.`,
+        `${label}: ${state.status}; update는 승인 설정을 바꾸지 않는다. 재승인은 tfx setup에서 명시적으로 선택한다.`,
       );
     return { status: state.status, changed: false };
   }
-  const cleanup = `확인 대상: ${state.plan.wrapper}, ${state.plan.rule}, ${state.plan.manifest}, ${state.plan.manifest}.lock. Claude ${state.plan.settings}의 permissions.allow에서는 ${state.plan.allow} 항목만 확인한다. settings 전체나 다른 allow/deny는 삭제하지 않는다.`;
+  const targets = [
+    ...(remote ? [] : [state.plan.wrapper]),
+    state.plan.rule,
+    state.plan.manifest,
+    state.plan.lock,
+  ].join(", ");
+  const cleanup = `확인 대상: ${targets}. Claude ${state.plan.settings}의 permissions.allow에서는 ${state.plan.allow} 항목만 확인한다. settings 전체나 다른 allow/deny는 삭제하지 않는다.`;
   if (state.status === "conflict" || state.status === "unavailable") {
     if (state.status === "conflict")
       warn(
@@ -535,7 +576,9 @@ export async function offerPeerPermission({
   }
   if (!interactive) {
     notice(
-      "Native peer adapter 전역 승인은 선택 사항이다. tfx setup 에서 설정할 수 있다.",
+      remote
+        ? "remote-send 사전 승인은 선택 사항이다. tfx setup 에서 설정할 수 있다."
+        : "Native peer adapter 전역 승인은 선택 사항이다. tfx setup 에서 설정할 수 있다.",
     );
     return { status: "deferred", changed: false };
   }
@@ -550,11 +593,17 @@ export async function offerPeerPermission({
       );
   } catch {}
   notice(
-    `승인 예정: ${state.plan.wrapper} send, ${state.plan.settings}, ${state.plan.rule}. 이 경로의 향후 Triflux 패키지 업데이트도 신뢰한다. Bash/node 전체 권한은 확대하지 않는다.`,
+    `승인 예정: ${state.plan.wrapper} ${verb}, ${state.plan.settings}, ${state.plan.rule}. ${
+      remote
+        ? "hosts.json 에 등록한 모든 호스트로 확인 없이 메시지를 보낼 수 있게 된다."
+        : "이 경로의 향후 Triflux 패키지 업데이트도 신뢰한다."
+    } Bash/node 전체 권한은 확대하지 않는다.`,
   );
   if (
     !(await ask(
-      "Claude·Codex에서 tfx-peer send 어댑터만 전역 자동 승인할까요?",
+      remote
+        ? "원격 전송(tfx-peer remote-send)도 확인 없이 실행하도록 승인할까요?"
+        : "Claude·Codex에서 tfx-peer send 어댑터만 전역 자동 승인할까요?",
     ))
   )
     return { status: "declined", changed: false };
@@ -564,15 +613,26 @@ export async function offerPeerPermission({
     nodePath,
     tmuxPath,
     platform,
+    verb,
     consent: true,
   });
   if (result.status === "busy")
     warn(
-      `Peer adapter 승인 설치 잠금: ${state.plan.manifest}.lock. 실행 중인 설치가 없는지 확인한 뒤 직접 정리한다. 자동 삭제하지 않는다.`,
+      `Peer adapter 승인 설치 잠금: ${state.plan.lock}. 실행 중인 설치가 없는지 확인한 뒤 직접 정리한다. 자동 삭제하지 않는다.`,
     );
   if (result.status === "conflict" || result.status === "partial")
     warn(`Peer adapter 승인 ${result.status}: ${result.error}. ${cleanup}`);
   else if (result.status === "failed")
     warn(`Peer adapter 승인 실패: ${result.error}`);
   return result;
+}
+export async function offerPeerPermission(options = {}) {
+  const send = await offerPeerVerb({ ...options, verb: "send" });
+  if (send.status !== "approved") return send;
+  const remote = await offerPeerVerb({ ...options, verb: "remote-send" });
+  return {
+    ...send,
+    changed: send.changed || Boolean(remote.changed),
+    remote: remote.status,
+  };
 }

@@ -287,7 +287,7 @@ Windows의 psmux 기본 셸은 PowerShell이다. 탭과 pane은 `tfx-wt` 스킬�
 
 - Codex와 agy는 `tfx-route.sh`, headless 워커, `tfx` 명령으로만 실행하는 것이 컨벤션이다. 이를 강제하는 훅은 없다.
 - triflux가 실행하는 Codex exec 워커와 TUI에는 `--dangerously-bypass-hook-trust`를 기본으로 추가한다. 공유 데몬에 붙는 `tfx-live start --cli codex`는 이 플래그 대신 새 스레드마다 `features.hooks=false`를 설정한다. 활성 훅이 사전 확인 없이 실행될 수 있다. `TFX_CODEX_BYPASS_HOOK_TRUST=0` 또는 `--no-bypass-hook-trust`로 끈다.
-- 피어 어댑터 승인은 대화형 `tfx setup`에서 동의할 때만 설치한다. Claude 허용 목록의 `Bash(<절대경로>/tfx-peer send:*)` 한 항목과 Codex 규칙 `~/.codex/rules/triflux-native-peer.rules`만 추가한다. `remote-send`는 승인 범위에 포함하지 않는다. 철회 절차는 [`skills/tfx-live/references/peer-adapter.md`](skills/tfx-live/references/peer-adapter.md)에 있다.
+- 피어 어댑터 승인은 대화형 `tfx setup`에서 동의할 때만 설치한다. Claude 허용 목록의 `Bash(<절대경로>/tfx-peer send:*)` 한 항목과 Codex 규칙 `~/.codex/rules/triflux-native-peer.rules`만 추가한다. `remote-send`는 어댑터 승인 뒤에 따로 묻고 기본값은 거절이다. 동의하면 `Bash(<절대경로>/tfx-peer remote-send:*)`와 `~/.codex/rules/triflux-native-peer-remote.rules`를 추가하고, 그 뒤로는 `hosts.json`의 모든 호스트로 확인 없이 보낸다. 철회 절차는 [`skills/tfx-live/references/peer-adapter.md`](skills/tfx-live/references/peer-adapter.md)에 있다.
 
 ### Jev 데이터 전송
 

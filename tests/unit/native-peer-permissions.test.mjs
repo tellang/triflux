@@ -614,3 +614,102 @@ it("설치된 로컬 send 승인 규칙은 remote-send와 receiver에 매치하�
     cleanup(x);
   }
 });
+it("remote-send 승인은 따로 묻고 거절하면 send 만 승인한다", async () => {
+  const x = fixture();
+  try {
+    const asked = [];
+    const result = await offerPeerPermission({
+      ...x,
+      interactive: true,
+      ask: async (question) => {
+        asked.push(question);
+        return asked.length === 1;
+      },
+    });
+    assert.equal(result.status, "approved");
+    assert.equal(result.remote, "declined");
+    assert.equal(asked.length, 2);
+    assert.match(asked[1], /remote-send/);
+    const p = peerPermissionPlan({ ...x, verb: "remote-send" });
+    const settings = JSON.parse(fs.readFileSync(p.settings, "utf8"));
+    assert.deepEqual(settings.permissions.allow, [peerPermissionPlan(x).allow]);
+    assert.equal(fs.existsSync(p.rule), false);
+    assert.equal(fs.existsSync(p.manifest), false);
+  } finally {
+    cleanup(x);
+  }
+});
+
+it("remote-send 승인은 래퍼의 remote-send verb 에만 매치한다", async () => {
+  const x = fixture();
+  try {
+    const result = await offerPeerPermission({
+      ...x,
+      interactive: true,
+      ask: async () => true,
+    });
+    assert.equal(result.remote, "approved");
+    const p = peerPermissionPlan({ ...x, verb: "remote-send" });
+    const settings = JSON.parse(fs.readFileSync(p.settings, "utf8"));
+    assert.deepEqual(settings.permissions.allow, [
+      peerPermissionPlan(x).allow,
+      `Bash(${p.wrapper} remote-send:*)`,
+    ]);
+    assert.equal(
+      fs.readFileSync(p.rule, "utf8"),
+      `prefix_rule(pattern=[${JSON.stringify(p.wrapper)}, "remote-send"], decision="allow")\n`,
+    );
+    assert.equal(
+      fs.readFileSync(peerPermissionPlan(x).rule, "utf8"),
+      peerPermissionPlan(x).codexRule,
+    );
+    assert.equal(inspectPeerPermission(x).status, "approved");
+    assert.equal(
+      inspectPeerPermission({ ...x, verb: "remote-send" }).status,
+      "approved",
+    );
+  } finally {
+    cleanup(x);
+  }
+});
+
+it("update 와 비대화형은 send 동의만 있는 사용자에게 remote-send 를 승인하지 않는다", async () => {
+  const x = fixture();
+  try {
+    installPeerPermission({ ...x, consent: true });
+    const p = peerPermissionPlan({ ...x, verb: "remote-send" });
+    const before = fs.readFileSync(p.settings, "utf8");
+    for (const options of [
+      { interactive: true, fromUpdate: true },
+      { interactive: false },
+    ]) {
+      const result = await offerPeerPermission({
+        ...x,
+        ...options,
+        ask: () => assert.fail("update 와 비대화형은 묻지 않는다"),
+      });
+      assert.equal(result.status, "approved");
+      assert.equal(result.changed, false);
+      assert.equal(fs.readFileSync(p.settings, "utf8"), before);
+      assert.equal(fs.existsSync(p.rule), false);
+      assert.equal(fs.existsSync(p.manifest), false);
+    }
+  } finally {
+    cleanup(x);
+  }
+});
+
+it("send 승인이 없으면 remote-send 만 승인할 수 없다", () => {
+  const x = fixture();
+  try {
+    const result = installPeerPermission({
+      ...x,
+      verb: "remote-send",
+      consent: true,
+    });
+    assert.equal(result.status, "requires-send");
+    assert.deepEqual(fs.readdirSync(x.home), []);
+  } finally {
+    cleanup(x);
+  }
+});
