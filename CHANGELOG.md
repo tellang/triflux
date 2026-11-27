@@ -2,6 +2,16 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [11.3.0] - 2026-11-27
+
+### Added
+- Windows PowerShell에서 `tfx-peer remote-send`로 macOS와 Linux의 Claude, Codex, agy 세션에 원격 피어 메시지를 보낸다. (#910)
+- macOS와 Linux에서 등록된 Windows의 Claude 세션으로 원격 피어 메시지를 보낸다. Windows에서 수신한 메시지는 PowerShell 회신 명령을 안내한다. (#913)
+- `triflux setup`에서 원격 피어 사전 승인을 별도로 선택한다. 승인 시점에 표시한 목적지로 범위를 고정하며, 목적지를 추가하거나 주소, SSH 사용자, 포트를 바꾸면 다시 동의한다. (#911)
+
+### Fixed
+- 비대화형 SSH의 locale과 관계없이 tmux 피어 탐색의 탭 구분자를 보존한다. (#912)
+
 ## [11.2.1] - 2026-11-26
 
 ### Changed
