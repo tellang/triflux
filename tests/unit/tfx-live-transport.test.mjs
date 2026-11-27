@@ -20,6 +20,24 @@ import {
 const execFileAsync = promisify(execFile);
 const CLI = path.resolve("bin/tfx-live.mjs");
 
+test("remote Codex discovery preserves tab-separated tmux pane fields", async () => {
+  const result = await live.discoverCodexTmuxSessions(
+    { remote: "m5" },
+    {
+      runTmux: async (remote, args) => {
+        assert.equal(remote, "m5");
+        assert.deepEqual(args.slice(0, 4), ["-u", "list-panes", "-a", "-F"]);
+        return {
+          stdout:
+            "peer\t1735689600\t0\t0\t0\t/tmp\tcodex\tcodex\t/dev/ttys001\t123\t%7\n",
+        };
+      },
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.sessions[0]?.target, "peer:0.0");
+});
+
 test("Codex pane discovery and attach recognize npm shim descendants", async () => {
   for (const command of [
     "node /opt/homebrew/bin/codex --dangerously-bypass-approvals-and-sandbox",
@@ -29,7 +47,7 @@ test("Codex pane discovery and attach recognize npm shim descendants", async () 
     const deps = {
       runTmux: async (_remote, args) => ({
         stdout:
-          args[0] === "list-panes"
+          args[0] === "-u" && args[1] === "list-panes"
             ? "shim\t1735689600\t1\t0\t0\t/tmp\tnode\t\t/dev/ttys010\t100\n"
             : args[0] === "display-message"
               ? "node\t\t/dev/ttys010\t100\n"

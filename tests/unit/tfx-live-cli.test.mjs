@@ -3395,7 +3395,7 @@ test("tfx-live list-sessions discovers Codex tmux sessions and filters exact cwd
     );
     const tmuxArgs = JSON.parse(await fs.readFile(logPath, "utf8"));
 
-    assert.deepEqual(tmuxArgs.slice(0, 3), ["list-panes", "-a", "-F"]);
+    assert.deepEqual(tmuxArgs.slice(0, 4), ["-u", "list-panes", "-a", "-F"]);
     assert.equal(all.ok, true);
     assert.equal(all.cli, "codex");
     assert.deepEqual(
@@ -3791,8 +3791,8 @@ test("Claude discovery matches live pane owners and descendants up to four level
     const deps = {
       env: { TFX_CLAUDE_SESSIONS_DIR: sessionsDir },
       runTmux: async (_remote, args) => {
-        assert.deepEqual(args.slice(0, 3), ["list-panes", "-a", "-F"]);
-        assert.match(args[3], /#\{pane_id\}/);
+        assert.deepEqual(args.slice(0, 4), ["-u", "list-panes", "-a", "-F"]);
+        assert.match(args[4], /#\{pane_id\}/);
         return {
           stdout: [
             `team:part.one\t1735689600\t0\t3\t1\t${cwd}\tclaude\tclaude\t/dev/ttys1\t100\t%7`,
