@@ -3,7 +3,9 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { it } from "node:test";
+import { main } from "../../bin/tfx-peer.mjs";
 import {
   inspectPeerPermission,
   installPeerPermission,
@@ -35,6 +37,12 @@ const fixture = () => {
 const cleanup = (x) => {
   fs.rmSync(x.home, { recursive: true, force: true });
   fs.rmSync(x.prefix, { recursive: true, force: true });
+};
+const writeHosts = (home, hosts) => {
+  const file = path.join(home, ".config", "triflux", "hosts.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ hosts }));
+  return file;
 };
 it("decline and noninteractive write nothing", async () => {
   for (const mode of ["decline", "noninteractive"]) {
@@ -617,6 +625,7 @@ it("설치된 로컬 send 승인 규칙은 remote-send와 receiver에 매치하�
 it("remote-send 승인은 따로 묻고 거절하면 send 만 승인한다", async () => {
   const x = fixture();
   try {
+    writeHosts(x.home, { m5: { os: "darwin", ssh_user: "tester" } });
     const asked = [];
     const result = await offerPeerPermission({
       ...x,
@@ -643,6 +652,7 @@ it("remote-send 승인은 따로 묻고 거절하면 send 만 승인한다", asy
 it("remote-send 승인은 래퍼의 remote-send verb 에만 매치한다", async () => {
   const x = fixture();
   try {
+    writeHosts(x.home, { m5: { os: "darwin", ssh_user: "tester" } });
     const result = await offerPeerPermission({
       ...x,
       interactive: true,
@@ -650,6 +660,10 @@ it("remote-send 승인은 래퍼의 remote-send verb 에만 매치한다", async
     });
     assert.equal(result.remote, "approved");
     const p = peerPermissionPlan({ ...x, verb: "remote-send" });
+    assert.equal(
+      p.wrapper,
+      path.join(x.home, ".claude/scripts/tfx-peer-remote"),
+    );
     const settings = JSON.parse(fs.readFileSync(p.settings, "utf8"));
     assert.deepEqual(settings.permissions.allow, [
       peerPermissionPlan(x).allow,
@@ -676,6 +690,7 @@ it("remote-send 승인은 래퍼의 remote-send verb 에만 매치한다", async
 it("update 와 비대화형은 send 동의만 있는 사용자에게 remote-send 를 승인하지 않는다", async () => {
   const x = fixture();
   try {
+    writeHosts(x.home, { m5: { os: "darwin", ssh_user: "tester" } });
     installPeerPermission({ ...x, consent: true });
     const p = peerPermissionPlan({ ...x, verb: "remote-send" });
     const before = fs.readFileSync(p.settings, "utf8");
@@ -696,6 +711,161 @@ it("update 와 비대화형은 send 동의만 있는 사용자에게 remote-send
     }
   } finally {
     cleanup(x);
+  }
+});
+
+it("사전 승인 래퍼는 등록된 목적지만 보내고 setup에서 다시 동의한 변경만 반영한다", async () => {
+  const x = fixture();
+  const other = fixture();
+  try {
+    const m5 = {
+      os: "darwin",
+      aliases: ["build"],
+      ssh: { host: "Build.Example", user: "tester" },
+    };
+    const hostsFile = writeHosts(x.home, { m5 });
+    const otherFile = writeHosts(other.home, { m5 });
+    const local = peerPermissionPlan(x);
+    installPeerPermission({ ...x, consent: true });
+    const preserved = [local.wrapper, local.rule, local.manifest].map((file) =>
+      fs.readFileSync(file, "utf8"),
+    );
+    const prompts = [];
+    const approve = () =>
+      offerPeerPermission({
+        ...x,
+        interactive: true,
+        ask: async (question) => {
+          prompts.push(question);
+          return true;
+        },
+      });
+    assert.equal((await approve()).remote, "approved");
+    assert.ok(prompts[0].includes(hostsFile));
+    assert.match(prompts[0], /m5.*tester@build\.example:22/i);
+    assert.match(prompts[0], /재승인/);
+
+    const remote = peerPermissionPlan({ ...x, verb: "remote-send" });
+    fs.writeFileSync(x.nodePath, '#!/bin/sh\nshift\nprintf "%s\\0" "$@"\n');
+    const env = {
+      HOME: other.home,
+      TFX_HOSTS_USER_STATE: otherFile,
+      TFX_HOSTS_USER_STATE_DISABLE: "1",
+    };
+    assert.notEqual(spawnSync(remote.wrapper, ["send"], { env }).status, 0);
+    const endpoints = [];
+    const send = async (alias) => {
+      const result = spawnSync(
+        remote.wrapper,
+        [
+          "remote-send",
+          "--from",
+          "codex:발신",
+          "--host",
+          alias,
+          "--reply-host",
+          "m2",
+          "--to",
+          "codex:수신",
+          "--message",
+          "본문",
+        ],
+        { env, encoding: "utf8" },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      return main(result.stdout.split("\0").slice(0, -1), {
+        env,
+        discover: async () => [],
+        spawn: (command, args) => {
+          endpoints.push({ command, args });
+          const child = new PassThrough();
+          child.stdin = new PassThrough();
+          child.stdout = new PassThrough();
+          child.stderr = new PassThrough();
+          child.stdin.on("data", (body) => {
+            child.stdout.end(
+              JSON.stringify({
+                version: 1,
+                correlationId: JSON.parse(body).correlationId,
+                stage: "delivery",
+                result: {
+                  status: "sent",
+                  retrySafe: false,
+                  modelReceipt: false,
+                },
+              }),
+            );
+            child.emit("close", 0);
+          });
+          return child;
+        },
+      });
+    };
+    const m3 = { os: "linux", ssh_user: "tester" };
+    writeHosts(x.home, { m5, m3 });
+    assert.equal((await send("build")).status, "sent");
+    assert.equal(endpoints[0].command, "/usr/bin/ssh");
+    assert.ok(endpoints[0].args.includes("tester@build.example"));
+    assert.ok(endpoints[0].args.includes("HostName=build.example"));
+    assert.ok(endpoints[0].args.includes("CanonicalizeHostname=no"));
+    assert.ok(endpoints[0].args.includes("ControlPath=none"));
+    assert.ok(endpoints[0].args.includes("22"));
+    await assert.rejects(send("m3"), /approval/i);
+    for (const change of [
+      { host: "different.example" },
+      { user: "other" },
+      { port: 2222 },
+    ]) {
+      writeHosts(x.home, { m5: { ...m5, ssh: { ...m5.ssh, ...change } }, m3 });
+      await assert.rejects(send("m5"), /approval/i);
+    }
+    assert.equal(endpoints.length, 1);
+
+    const before = fs.readFileSync(remote.manifest, "utf8");
+    for (const options of [
+      { fromUpdate: true, interactive: true },
+      { interactive: false },
+    ]) {
+      const result = await offerPeerPermission({
+        ...x,
+        ...options,
+        ask: () => assert.fail("setup 동의가 필요하다"),
+      });
+      assert.equal(result.changed, false);
+      assert.equal(fs.readFileSync(remote.manifest, "utf8"), before);
+    }
+
+    const duringPrompt = await offerPeerPermission({
+      ...x,
+      interactive: true,
+      ask: async () => {
+        writeHosts(x.home, {
+          m5: { ...m5, ssh: { ...m5.ssh, port: 2223 } },
+          m3,
+        });
+        return true;
+      },
+    });
+    assert.equal(duringPrompt.remote, "conflict");
+    assert.equal(fs.readFileSync(remote.manifest, "utf8"), before);
+    writeHosts(x.home, { m5: { ...m5, ssh: { ...m5.ssh, port: 2222 } }, m3 });
+    assert.equal((await approve()).remote, "approved");
+    assert.match(prompts[1], /tester@build\.example:2222/i);
+    assert.equal((await send("m5")).status, "sent");
+    assert.ok(endpoints[1].args.includes("2222"));
+    assert.equal((await send("m3")).status, "sent");
+    fs.unlinkSync(remote.manifest);
+    await assert.rejects(send("m5"), /approval/i);
+    assert.equal(endpoints.length, 3);
+    assert.deepEqual(
+      [local.wrapper, local.rule, local.manifest].map((file) =>
+        fs.readFileSync(file, "utf8"),
+      ),
+      preserved,
+    );
+  } finally {
+    cleanup(x);
+    cleanup(other);
   }
 });
 
