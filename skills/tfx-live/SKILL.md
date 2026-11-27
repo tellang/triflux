@@ -225,4 +225,4 @@ Darwin, Linux 호스트로는 `tfx-peer remote-send --host <목적지> --reply-h
 
 ## 선택적 전역 native peer 어댑터
 
-macOS/Linux 는 `triflux setup`에서 동의하면 홈 절대경로 래퍼 `~/.claude/scripts/tfx-peer send --to '<cli>:<정확한 이름>'`을 쓴다. Windows 는 Claude 대상만 지원하고 `node .../tfx-peer.mjs send`로 직접 보낸다. 설치 조건, 전송 결과(`written`, `sent`, `partial`)의 뜻, 손으로 띄운 Codex 의 `tfx-live adopt`, 철회 절차는 [references/peer-adapter.md](references/peer-adapter.md)를 따른다.
+macOS/Linux 는 `triflux setup`에서 동의하면 홈 절대경로 래퍼 `~/.claude/scripts/tfx-peer send --to '<cli>:<정확한 이름>'`을 쓴다. Windows 는 Claude 대상만 지원하고 `node .../tfx-peer.mjs send`로 직접 보낸다. `remote-send` 사전 승인은 별개 항목이고 기본값은 거절이다. 사전 승인으로 보낼 때는 setup이 안내한 절대경로의 `tfx-peer-remote remote-send`를 쓴다. 설치 조건, 전송 결과(`written`, `sent`, `partial`)의 뜻, 손으로 띄운 Codex 의 `tfx-live adopt`, 철회 절차는 [references/peer-adapter.md](references/peer-adapter.md)를 따른다.

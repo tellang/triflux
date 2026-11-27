@@ -63,6 +63,7 @@ triflux의 아키텍처·정책·횡단 결정을 ADR(Architecture Decision Reco
 | [0054](0054-multi-vendor-priority-routing.md) | 역할군별 3사 모델 우선순위 라우팅과 쿼터 연동 및 Jev 조정 규칙을 도입한다 | Accepted | 0004, 0037, 0039, 0048, 0049, 0050, 0051, 0053 |
 | [0055](0055-agy-drop-argon-add-neon.md) | agy 기본 배정과 폴백에서 Argon을 빼고 Neon 가족을 추가한다 | Accepted | 0049, 0054 |
 | [0056](0056-remote-peer-windows-staged.md) | 원격 피어의 Windows 지원을 발신부터 단계로 넓힌다 | Proposed | - |
+| [0057](0057-remote-send-preapproval.md) | remote-send 사전 승인을 send 승인과 별개의 선택 항목으로 둔다 | Proposed | - |
 
 상태 범례: **Proposed**(제안) · **Accepted**(확정, 불변) · **Superseded**(대체됨 → `_archive/`) · **Deprecated**/**Rejected**/**Withdrawn**(무효화 → `_archive/`).
 

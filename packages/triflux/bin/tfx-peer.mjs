@@ -91,6 +91,17 @@ async function receiveRemote(args, deps) {
 
 export async function main(args = process.argv.slice(2), deps = {}) {
   const platform = deps.platform || process.platform;
+  if (args[0] === "_approved-remote") {
+    const [, manifest, hostsPath, verb] = args;
+    if (
+      verb !== "remote-send" ||
+      !path.isAbsolute(manifest) ||
+      !path.isAbsolute(hostsPath)
+    )
+      throw new Error("Invalid remote peer approval invocation");
+    deps = { ...deps, remoteApproval: { manifest, hostsPath } };
+    args = args.slice(3);
+  }
   if (args[0] === "_receive") return receiveRemote(args, deps);
   if (args[0] === "self") {
     const { sessionId, message } = parsePeerArgs(args);

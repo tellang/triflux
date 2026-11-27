@@ -1,60 +1,21 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { normalizeHost, userStateHostsPath } from "@triflux/core/hub/lib/hosts-compat.mjs";
+import {
+  approvedPeerDestination,
+  PEER_HOST_ALIAS,
+  readProtectedPeerJson,
+  remoteSshDestination,
+  resolveRemoteHost,
+} from "@triflux/core/hub/lib/remote-peer-hosts.mjs";
 import { parsePeerSpec } from "./native-peer.mjs";
+
+export { resolveRemoteHost } from "@triflux/core/hub/lib/remote-peer-hosts.mjs";
 
 export const PEER_WIRE_LIMIT = 65536;
 export const PEER_RECEIVER_COMMAND =
   'exec "$HOME/.claude/scripts/tfx-peer" _receive';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ALIAS = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
-
-// 사용자 설정만 읽는다. legacy migration과 source-tree 폴백은 호출하지 않는다.
-export function resolveRemoteHost(
-  alias,
-  { hostsPath = userStateHostsPath(), allowWindows = false } = {},
-) {
-  if (typeof alias !== "string" || !ALIAS.test(alias))
-    throw new Error("Invalid registered host alias");
-  if (!hostsPath) throw new Error("User-state hosts.json is required");
-  const registry = JSON.parse(readFileSync(hostsPath, "utf8"));
-  const matches = Object.entries(registry.hosts || {}).filter(
-    ([name, host]) =>
-      name === alias ||
-      (Array.isArray(host?.aliases) && host.aliases.includes(alias)),
-  );
-  if (matches.length !== 1)
-    throw new Error("Host alias is unregistered or ambiguous");
-  const [name, raw] = matches[0];
-  const os = typeof raw.os === "string" ? raw.os.toLowerCase() : "";
-  if (
-    !["darwin", "macos", "linux"].includes(os) &&
-    !(allowWindows && os === "windows")
-  )
-    throw new Error("Remote peer supports only Darwin and POSIX Linux hosts");
-  const host = normalizeHost(raw, name);
-  const address =
-    host.ssh?.host || host.tailscale?.dns || host.tailscale?.ip || host.name;
-  const user = host.ssh_user;
-  if (
-    typeof address !== "string" ||
-    !/^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/.test(address) ||
-    (user != null &&
-      (typeof user !== "string" || !/^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/.test(user)))
-  )
-    throw new Error("Invalid registered SSH address/user");
-  if (
-    host.ssh?.port !== undefined &&
-    (!Number.isInteger(host.ssh.port) ||
-      host.ssh.port < 1 ||
-      host.ssh.port > 65535)
-  )
-    throw new Error("Invalid registered SSH port");
-  return host;
-}
-
 export function validatePeerEnvelope(value) {
   if (
     !value ||
@@ -69,7 +30,7 @@ export function validatePeerEnvelope(value) {
   )
     throw new Error("Invalid correlation ID");
   for (const key of ["originHost", "replyHost"])
-    if (typeof value[key] !== "string" || !ALIAS.test(value[key]))
+    if (typeof value[key] !== "string" || !PEER_HOST_ALIAS.test(value[key]))
       throw new Error(`Invalid ${key}`);
   if (
     typeof value.message !== "string" ||
@@ -166,11 +127,43 @@ export async function sendRemotePeer(envelope, deps = {}) {
     throw new Error(
       "Remote peer supports only Darwin, POSIX Linux and Windows senders",
     );
-  const lookup = deps.resolveRemoteHost || resolveRemoteHost;
-  const host = lookup(envelope.replyHost, deps);
-  const address =
-    host.ssh?.host || host.tailscale?.dns || host.tailscale?.ip || host.name;
-  const user = host.ssh_user;
+  const approval = deps.remoteApproval;
+  let destination;
+  if (approval) {
+    try {
+      const snapshot = readProtectedPeerJson(approval.manifest).approval;
+      if (
+        snapshot?.hostsPath !== approval.hostsPath ||
+        !Array.isArray(snapshot.destinations)
+      )
+        throw new Error("Invalid approval");
+      const host = resolveRemoteHost(envelope.replyHost, {
+        hostsPath: approval.hostsPath,
+        protectedRegistry: true,
+      });
+      destination = approvedPeerDestination(host);
+      const { name, address, user, port } = destination;
+      if (
+        !user ||
+        !snapshot.destinations.some(
+          (item) =>
+            item?.name === name &&
+            item.address === address &&
+            item.user === user &&
+            item.port === port,
+        )
+      )
+        throw new Error("Destination changed");
+    } catch {
+      throw new Error(
+        "Remote peer approval does not cover this destination; reapprove in triflux setup or request permission for a manual send",
+      );
+    }
+  } else {
+    const lookup = deps.resolveRemoteHost || resolveRemoteHost;
+    destination = remoteSshDestination(lookup(envelope.replyHost, deps));
+  }
+  const { address, user, port } = destination;
   const args = [
     "-T",
     "-o",
@@ -180,7 +173,16 @@ export async function sendRemotePeer(envelope, deps = {}) {
     "-o",
     "ConnectionAttempts=1",
   ];
-  if (host.ssh?.port !== undefined) args.push("-p", String(host.ssh.port));
+  if (approval)
+    args.push(
+      "-o",
+      `HostName=${address}`,
+      "-o",
+      "CanonicalizeHostname=no",
+      "-o",
+      "ControlPath=none",
+    );
+  if (port !== undefined) args.push("-p", String(port));
   args.push("--", user ? `${user}@${address}` : address, PEER_RECEIVER_COMMAND);
   const uncertain = (error) => ({
     status: "unknown",
@@ -192,7 +194,7 @@ export async function sendRemotePeer(envelope, deps = {}) {
   const wire = await new Promise((resolve) => {
     let child;
     try {
-      child = (deps.spawn || spawn)("ssh", args, {
+      child = (deps.spawn || spawn)(approval ? "/usr/bin/ssh" : "ssh", args, {
         shell: false,
         stdio: ["pipe", "pipe", "pipe"],
         env: deps.env || process.env,
