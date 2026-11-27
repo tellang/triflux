@@ -9,7 +9,7 @@
     {
       "name": "triflux",
       "description": "Routes coding tasks across Claude Code, Codex, and Antigravity by role, runs live Claude, Codex, and agy sessions with peer messaging, and coordinates lead sessions and cross-model review.",
-      "version": "11.2.1",
+      "version": "11.3.0",
       "author": {
         "name": "tellang"
       },
@@ -31,7 +31,7 @@
     {
       "name": "triflux-mods",
       "description": "HUD band, 서브에이전트 effort 정책, codex:·agy: SendMessage 중계, 리드 세션 도구(tfx_control)와 메모리 압박 감시",
-      "version": "11.2.1",
+      "version": "11.3.0",
       "author": {
         "name": "tellang"
       },
@@ -39,5 +39,5 @@
       "category": "productivity"
     }
   ],
-  "version": "11.2.1"
+  "version": "11.3.0"
 }
