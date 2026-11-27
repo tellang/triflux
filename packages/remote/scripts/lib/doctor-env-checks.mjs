@@ -37,7 +37,51 @@ export const AGY_PEER_WAKE_PATCH_PREFIX = Buffer.from(
 );
 export const AGY_PEER_WAKE_ORIG_STP = Buffer.from("e08708a9", "hex");
 export const AGY_PEER_WAKE_PATCH_STP = Buffer.from("e0ff08a9", "hex");
-const AGY_PEER_WAKE_STP_DELTA = 0x38;
+const AGY_1512_SELECT_TAIL = "e12f40f9e13b00f9e0c30191e1f30091";
+
+// 버전마다 메시지 감시 루프(startMessageWatcherLocked.func2)의 select 대기 채널을
+// time.After(1s) 로 바꾼다. orig·patched 는 [호출부 기준 오프셋, 바이트] 목록이고
+// 첫 항목으로 위치를 찾는다. blAt 에 time.After 호출을 쓴다.
+export const AGY_PEER_WAKE_VARIANTS = [
+  {
+    name: "1.5.7",
+    blAt: AGY_PEER_WAKE_PATCH_PREFIX.length,
+    orig: [
+      [0, AGY_PEER_WAKE_ORIG_CALL],
+      [0x38, AGY_PEER_WAKE_ORIG_STP],
+    ],
+    patched: [
+      [0, AGY_PEER_WAKE_PATCH_PREFIX],
+      [0x38, AGY_PEER_WAKE_PATCH_STP],
+    ],
+  },
+  {
+    // 1.5.12 에서 NotifyCh 가 Subscribe 로 바뀌어 신호 채널을 루프 밖에서 한 번만 받는다.
+    // 버려진 구독 채널은 송신이 selectnbsend 라 막히지 않고, 감시 goroutine 종료는
+    // spawnBackgroundTask 의 ctx 취소(select case2)가 맡아 그대로 남는다.
+    name: "1.5.12",
+    blAt: 0x0c,
+    orig: [
+      [
+        0,
+        Buffer.from(
+          `e1c301913f7c00a93f7c01a93f7c02a9e04b00f9e12b40f9e2ef0091e10b08a9${AGY_1512_SELECT_TAIL}`,
+          "hex",
+        ),
+      ],
+    ],
+    patched: [
+      [
+        0x10,
+        Buffer.from(
+          `e07f08a9ff3f00f9ff4f00f91f2003d5${AGY_1512_SELECT_TAIL}`,
+          "hex",
+        ),
+      ],
+      [0, Buffer.from("e04b00f9004099524073a772", "hex")],
+    ],
+  },
+];
 
 export function encodeArm64Bl(pcOffset, targetOffset) {
   const delta = targetOffset - pcOffset;
@@ -55,6 +99,21 @@ function findUniqueOffset(buf, pattern) {
   if (first === -1) return -1;
   if (buf.indexOf(pattern, first + 1) !== -1) return -2;
   return first;
+}
+
+function locatePeerWakeSite(buf, checks) {
+  const [anchorAt, anchor] = checks[0];
+  const found = findUniqueOffset(buf, anchor);
+  if (found < 0) return found;
+  const base = found - anchorAt;
+  const matches =
+    base >= 0 &&
+    checks.every(
+      ([at, bytes]) =>
+        base + at + bytes.length <= buf.length &&
+        buf.subarray(base + at, base + at + bytes.length).equals(bytes),
+    );
+  return matches ? base : -1;
 }
 
 export function inspectAgyPeerWakePatch({
@@ -111,95 +170,58 @@ export function inspectAgyPeerWakePatch({
     };
   }
 
-  const patchedOffset = findUniqueOffset(buf, AGY_PEER_WAKE_PATCH_PREFIX);
-  if (
-    patchedOffset >= 0 &&
-    patchedOffset + AGY_PEER_WAKE_STP_DELTA + 4 <= buf.length
-  ) {
-    const expectedBl = encodeArm64Bl(
-      patchedOffset + AGY_PEER_WAKE_PATCH_PREFIX.length,
-      timeAfterOffset,
-    );
-    const actualBl = buf.subarray(
-      patchedOffset + AGY_PEER_WAKE_PATCH_PREFIX.length,
-      patchedOffset + AGY_PEER_WAKE_PATCH_PREFIX.length + 4,
-    );
-    const actualStp = buf.subarray(
-      patchedOffset + AGY_PEER_WAKE_STP_DELTA,
-      patchedOffset + AGY_PEER_WAKE_STP_DELTA + 4,
-    );
-    if (
-      expectedBl &&
-      actualBl.equals(expectedBl) &&
-      actualStp.equals(AGY_PEER_WAKE_PATCH_STP)
-    ) {
-      let metadataOk = false;
-      if (fs.existsSync(patchJsonPath)) {
-        try {
-          const meta = JSON.parse(fs.readFileSync(patchJsonPath, "utf8"));
-          metadataOk =
-            meta?.sha256 === sha256 &&
-            Array.isArray(meta?.patches) &&
-            meta.patches.includes("peer-wake");
-        } catch {
-          metadataOk = false;
-        }
+  for (const variant of AGY_PEER_WAKE_VARIANTS) {
+    const base = locatePeerWakeSite(buf, variant.patched);
+    if (base < 0) continue;
+    const expectedBl = encodeArm64Bl(base + variant.blAt, timeAfterOffset);
+    const actualBl = buf.subarray(base + variant.blAt, base + variant.blAt + 4);
+    if (!expectedBl || !actualBl.equals(expectedBl)) continue;
+    let metadataOk = false;
+    if (fs.existsSync(patchJsonPath)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(patchJsonPath, "utf8"));
+        metadataOk =
+          meta?.sha256 === sha256 &&
+          Array.isArray(meta?.patches) &&
+          meta.patches.includes("peer-wake");
+      } catch {
+        metadataOk = false;
       }
-      if (metadataOk) {
-        return {
-          ok: true,
-          status: "patched",
-          patchable: false,
-          binaryPatched: true,
-          path: resolvedPath,
-          patchJsonPath,
-          sha256,
-          callOffset: patchedOffset,
-          timeAfterOffset,
-        };
-      }
-      return {
-        ok: false,
-        status: "metadata-outdated",
-        patchable: true,
-        binaryPatched: true,
-        path: resolvedPath,
-        patchJsonPath,
-        sha256,
-        callOffset: patchedOffset,
-        timeAfterOffset,
-        fix: "tfx doctor --fix",
-      };
     }
+    return {
+      ok: metadataOk,
+      status: metadataOk ? "patched" : "metadata-outdated",
+      patchable: !metadataOk,
+      binaryPatched: true,
+      path: resolvedPath,
+      patchJsonPath,
+      sha256,
+      variant: variant.name,
+      callOffset: base,
+      timeAfterOffset,
+      ...(metadataOk ? {} : { fix: "tfx doctor --fix" }),
+    };
   }
 
-  const origOffset = findUniqueOffset(buf, AGY_PEER_WAKE_ORIG_CALL);
-  if (
-    origOffset >= 0 &&
-    origOffset + AGY_PEER_WAKE_STP_DELTA + 4 <= buf.length
-  ) {
-    const expectedBl = encodeArm64Bl(
-      origOffset + AGY_PEER_WAKE_PATCH_PREFIX.length,
+  let ambiguous = false;
+  for (const variant of AGY_PEER_WAKE_VARIANTS) {
+    const base = locatePeerWakeSite(buf, variant.orig);
+    if (base === -2) ambiguous = true;
+    if (base < 0 || !encodeArm64Bl(base + variant.blAt, timeAfterOffset))
+      continue;
+    return {
+      ok: false,
+      status: "unpatched",
+      patchable: true,
+      binaryPatched: false,
+      path: resolvedPath,
+      patchJsonPath,
+      sha256,
+      variant: variant.name,
+      callOffset: base,
       timeAfterOffset,
-    );
-    const actualStp = buf.subarray(
-      origOffset + AGY_PEER_WAKE_STP_DELTA,
-      origOffset + AGY_PEER_WAKE_STP_DELTA + 4,
-    );
-    if (expectedBl && actualStp.equals(AGY_PEER_WAKE_ORIG_STP)) {
-      return {
-        ok: false,
-        status: "unpatched",
-        patchable: true,
-        binaryPatched: false,
-        path: resolvedPath,
-        patchJsonPath,
-        sha256,
-        callOffset: origOffset,
-        timeAfterOffset,
-        fix: "tfx doctor --fix",
-      };
-    }
+      fix: "tfx doctor --fix",
+    };
   }
 
   return {
@@ -209,10 +231,9 @@ export function inspectAgyPeerWakePatch({
     path: resolvedPath,
     patchJsonPath,
     sha256,
-    reason:
-      origOffset === -2
-        ? "ambiguous-call-site-signature"
-        : "call-site-signature-not-found",
+    reason: ambiguous
+      ? "ambiguous-call-site-signature"
+      : "call-site-signature-not-found",
   };
 }
 
@@ -283,15 +304,15 @@ export function applyAgyPeerWakePatch({
     backupEntry = { key: backupKey, path: backupPath, sha256: state.sha256 };
 
     const buf = Buffer.from(rawBuf);
-    const expectedBl = encodeArm64Bl(
-      state.callOffset + AGY_PEER_WAKE_PATCH_PREFIX.length,
-      state.timeAfterOffset,
+    const variant = AGY_PEER_WAKE_VARIANTS.find(
+      (candidate) => candidate.name === state.variant,
     );
-    AGY_PEER_WAKE_PATCH_PREFIX.copy(buf, state.callOffset);
-    expectedBl.copy(buf, state.callOffset + AGY_PEER_WAKE_PATCH_PREFIX.length);
-    AGY_PEER_WAKE_PATCH_STP.copy(
+    for (const [at, bytes] of variant.patched) {
+      bytes.copy(buf, state.callOffset + at);
+    }
+    encodeArm64Bl(state.callOffset + variant.blAt, state.timeAfterOffset).copy(
       buf,
-      state.callOffset + AGY_PEER_WAKE_STP_DELTA,
+      state.callOffset + variant.blAt,
     );
 
     const tmpPath = `${state.path}.tmp-${process.pid}`;
