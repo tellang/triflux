@@ -173,7 +173,7 @@ claude plugin install triflux-mods@triflux
 - 본문은 8000자까지 받는다. 리드에게 가는 본문이 4000자를 넘고 파일 경로를 포함하면 앞 800자와 경로 목록(최대 20개)으로 줄인다. Codex와 agy 대상은 실제로 있는 파일만 센다. Claude 대상은 받는 쪽 mods가 줄인다. 경로가 없으면 줄이지 않고 경고만 한다.
 - `written`과 `sent`는 기록과 턴 시작까지만 확인한 상태다. 모델이 읽었거나 작업을 마쳤다는 뜻이 아니다.
 - `partial`, `unknown`은 이미 전달되었을 수 있으므로 자동으로 다시 보내지 않는다. 실패해도 tmux 입력으로 전환하지 않는다.
-- Codex 대상은 `tfx-live start`로 공유 데몬에 연결한 세션이어야 한다. 공유 데몬에 붙은 채 직접 실행한 Codex는 `tfx-live adopt`로 스레드를 기록한다. `--no-daemon`이나 `-c` 덮어쓰기로 데몬 밖에서 실행한 Codex는 `tfx-live start --resume`으로 다시 시작한다.
+- macOS와 Linux의 Codex 대상은 `tfx-live start`로 공유 데몬에 연결한 세션이어야 한다. 공유 데몬에 붙은 채 직접 실행한 Codex는 `tfx-live adopt`로 스레드를 기록한다. `--no-daemon`이나 `-c` 덮어쓰기로 데몬 밖에서 실행한 Codex는 `tfx-live start --resume`으로 다시 시작한다.
 - 쉬고 있는 agy 세션은 `peer-wake` 패치가 적용된 경우에만 바로 깨어난다. 패치가 없으면 `tfx-live ask`를 쓴다.
 
 ### 원격 피어
@@ -184,7 +184,7 @@ claude plugin install triflux-mods@triflux
 
 - 등록된 호스트에 SSH로 한 번 접속해 고정 진입점 `tfx-peer _receive`에 JSON 메시지(최대 64KiB)를 전달한다. 받은 쪽은 같은 세 수단으로 전달한다.
 - `--host`는 목적지, `--reply-host`는 받은 쪽이 회신할 때 쓸 이 기기의 별명이다. 양쪽 `hosts.json`에 상대 호스트를 등록한다. macOS와 Linux는 `~/.config/triflux/hosts.json`, Windows는 `%APPDATA%\triflux\hosts.json`을 쓴다.
-- macOS와 Linux는 Claude, Codex, agy 세션으로 받을 수 있다. `"os": "windows"`로 등록한 호스트는 Claude 세션으로 메시지와 회신을 받는다. Windows 수신에는 PowerShell 7과 npm 글로벌 설치본이 필요하다. [Windows 등록과 수동 명령](skills/tfx-live/references/remote-peer.md).
+- macOS와 Linux는 Claude, Codex, agy 세션으로 받을 수 있다. `"os": "windows"`로 등록한 호스트는 Claude와 Codex 세션으로 메시지와 회신을 받는다. Windows 수신에는 PowerShell 7과 triflux npm 글로벌 설치본이 필요하다. Codex는 수신 계정의 공유 app-server에 이미 로드된 루트 사용자 스레드를 받는다. [Windows 등록과 수동 명령](skills/tfx-live/references/remote-peer.md).
 - 결과는 `rejected`, `written`, `sent`, `partial`, `unknown` 중 하나다.
 
 ### 사용자 입력 경로
@@ -280,7 +280,7 @@ agy 스킬은 `agy`가 PATH에 있을 때만 설치한다.
 | --- | --- | --- |
 | macOS | tmux | 없음. 양수 hard ceiling에는 `coreutils`의 `gtimeout`을 쓰고, 없으면 경고 뒤 계속한다 |
 | Linux | tmux | 메모리 압박 감시 없음 |
-| Windows | psmux, Windows Terminal | 로컬과 원격 피어 수신은 Claude 대상만 지원한다. 원격 발신을 지원한다. `claude agents` 행과 메모리 압박 감시 없음 |
+| Windows | psmux, Windows Terminal | 로컬과 원격 피어 수신은 Claude와 공유 app-server에 연결한 Codex 세션을 지원한다. 원격 발신을 지원한다. `claude agents` 행과 메모리 압박 감시 없음 |
 
 Windows의 psmux 기본 셸은 PowerShell이다. 탭과 pane은 `tfx-wt` 스킬과 [`hub/team/wt-manager.mjs`](hub/team/wt-manager.mjs)로 조작한다.
 

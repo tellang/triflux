@@ -50,9 +50,9 @@
 ## 세션 제어와 피어 전송
 
 - `tfx-live`는 tmux 세션을 시작하고 `ask`로 사용자 입력을 보낸다. Codex는 `codex-queue.mjs`의 app-server 큐, Claude 데몬 세션은 `claude-daemon-control.mjs`의 제어 소켓을 쓴다. 그 밖의 세션은 tmux 입력이다. 근거는 [ADR-0027](docs/adr/0027-codex-message-queue-default.md)다.
-- `tfx-peer send`는 `native-peer.mjs`로 전달한다. Claude는 세션 메시지 UDS(Windows는 named pipe), Codex는 공유 app-server UDS의 `thread/inject_items`와 `turn/start`, agy는 대화 디렉터리 파일 쓰기다.
+- `tfx-peer send`는 `native-peer.mjs`로 전달한다. Claude는 세션 메시지 UDS(Windows는 named pipe), Codex는 공유 app-server UDS의 `thread/inject_items`와 `turn/start`, agy는 대화 디렉터리 파일 쓰기다. Windows Codex는 소켓과 경로의 ACL을 확인하고 네이티브 `codex.exe app-server proxy`를 WebSocket 클라이언트에 연결한다.
 - `tfx-peer remote-send`는 `ssh-peer.mjs`가 SSH로 상대 호스트의 `tfx-peer _receive`를 실행한다.
-- 세션 찾기는 Claude가 `~/.claude/sessions/`, Codex가 tmux 옵션 `@tfx_codex_thread`와 `codex-session-hook.mjs`가 쓴 레지스트리, agy가 tmux pane과 열린 잠금 파일이다.
+- 세션 찾기는 Claude가 `~/.claude/sessions/`, Codex가 macOS와 Linux의 tmux 옵션 `@tfx_codex_thread`와 `codex-session-hook.mjs` 레지스트리, Windows의 공유 app-server 로드 목록과 `thread/read`, agy가 tmux pane과 열린 잠금 파일이다.
 
 ## 호스트 연동
 

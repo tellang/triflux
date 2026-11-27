@@ -4,6 +4,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -12,6 +13,7 @@ import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { JsonRpcWsUdsClient } from "../../hub/workers/lib/jsonrpc-ws-uds.mjs";
+import { connectWindowsCodexProxy } from "../../scripts/lib/native-peer-windows.mjs";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
@@ -71,6 +73,128 @@ describe("JsonRpcWsUdsClient over fake WebSocket-over-UDS", () => {
   after(async () => {
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
   });
+
+  it("uses raw stdio proxy bytes for the WebSocket handshake and cleans up the child", async () => {
+    const { child, sockPath } = await startFakeServer(dir);
+    let proxyClosed;
+    const client = new JsonRpcWsUdsClient({
+      socketPath: sockPath,
+      createSocket: (socket) =>
+        connectWindowsCodexProxy(
+          "C:\\Codex\\codex.exe",
+          socket,
+          (executable, args, options) => {
+            assert.equal(executable, "C:\\Codex\\codex.exe");
+            assert.deepEqual(args, ["app-server", "proxy", "--sock", sockPath]);
+            assert.equal(options.shell, false);
+            assert.equal(options.windowsHide, true);
+            assert.equal(options.cwd, "C:\\Codex");
+            assert.deepEqual(options.stdio, ["pipe", "pipe", "pipe"]);
+            assert.ok(
+              !Object.keys(options.env).some((key) => /^path$/i.test(key)),
+            );
+            const proxy = spawn(
+              process.execPath,
+              [
+                "-e",
+                `
+          const socket = require('node:net').connect(process.argv[1]);
+          process.stderr.write('fixture diagnostic');
+          process.stdin.pipe(socket); socket.pipe(process.stdout);
+        `,
+                socket,
+              ],
+              { ...options, cwd: dir },
+            );
+            proxyClosed = once(proxy, "close");
+            return proxy;
+          },
+        ),
+    });
+    try {
+      await client.connect();
+      const init = await client.request(
+        "initialize",
+        { clientInfo: { name: "proxy-test", version: "1" } },
+        3000,
+      );
+      assert.equal(init.platformFamily, "unix");
+    } finally {
+      client.close();
+      await proxyClosed;
+      killChild(child);
+    }
+  });
+
+  for (const [name, diagnostic, code, expected, padding = 0] of [
+    ["refused", "Connection refused", 1, "connection refused"],
+    [
+      "missing",
+      "The system cannot find the file specified. (os error 2)",
+      1,
+      "socket not found",
+    ],
+    ["denied", "Access is denied.", 1, "access denied"],
+    ["Winsock refused", "(os error 10061)", 1, "connection refused"],
+    ["Winsock denied", "(os error 10013)", 1, "access denied"],
+    ["unknown", " Connection refused", 7, "exited (7)", 65536],
+    ["clean EOF", "", 0, "EOF during handshake"],
+  ]) {
+    it(`reports ${name} after early proxy stdout EOF`, async () => {
+      const socketPath = String.raw`C:\Users\example\private-daemon.sock`;
+      let proxyClosed;
+      const client = new JsonRpcWsUdsClient({
+        socketPath,
+        connectTimeoutMs: 2000,
+        createSocket: (socket) =>
+          connectWindowsCodexProxy(
+            "codex.exe",
+            socket,
+            (_exe, _args, options) => {
+              const proxy = spawn(
+                process.execPath,
+                [
+                  "-e",
+                  `
+              const { closeSync } = require('node:fs');
+              closeSync(1);
+              process.once('message', () => {
+                const stderr = ${JSON.stringify(socketPath)} + ': ' +
+                  'x'.repeat(${padding}) + ${JSON.stringify(diagnostic)};
+                process.stderr.write(stderr, () => {
+                  process.exit(${code});
+                });
+              });
+            `,
+                ],
+                { ...options, cwd: dir, stdio: [...options.stdio, "ipc"] },
+              );
+              proxy.stdout.once("end", () => proxy.send("write", () => {}));
+              proxyClosed = once(proxy, "close");
+              return proxy;
+            },
+          ),
+      });
+      try {
+        await assert.rejects(client.connect(), (error) => {
+          assert.ok(error.message.endsWith(expected), error.message);
+          assert.doesNotMatch(
+            error.cause.message,
+            /private-daemon|\\Users\\example|x{10}/,
+          );
+          assert.doesNotMatch(
+            error.message,
+            /private-daemon|\\Users\\example|x{10}/,
+          );
+          return true;
+        });
+        assert.deepEqual(await proxyClosed, [code, null]);
+      } finally {
+        client.close();
+        await proxyClosed;
+      }
+    });
+  }
 
   it("connects, completes the initialize handshake, and runs a turn", async () => {
     const { child, sockPath } = await startFakeServer(dir, {

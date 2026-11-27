@@ -13,12 +13,14 @@ import { reportLimit } from "../../hub/lib/report-limit.mjs";
 import {
   deliverAgy,
   deliverClaude,
+  deliverCodex,
   parsePeerArgs,
   resolveClaudeReceiver,
   resolveClaudeRegistryTarget,
   sendCodexPeer,
   validateCodexTarget,
 } from "../../hub/team/native-peer.mjs";
+import { resolveWindowsCodexProxy } from "../../scripts/lib/native-peer-windows.mjs";
 import {
   OTHER_SID,
   safeAcl,
@@ -748,14 +750,14 @@ it("unknown sender gets no guessed reply command", async () => {
   );
 });
 
-it("Windows sends only to Claude and refuses Codex before discovery", async () => {
+it("Windows can send to Claude and Codex without tmux discovery", async () => {
   const deps = {
     platform: "win32",
     env: { TFX_LIVE_FROM: "codex:sender" },
-    discover: async () => [],
+    discover: () => assert.fail("must not discover on Windows"),
     resolveClaudeRegistryTarget: () => ({ sessionId: "target" }),
     deliverClaude: ({ message }) => {
-      assert.match(message, /Windows.*Codex.*지원하지/);
+      assert.match(message, /node .*tfx-peer\.mjs" send --to 'codex:sender'/);
       return { status: "written" };
     },
   };
@@ -768,15 +770,372 @@ it("Windows sends only to Claude and refuses Codex before discovery", async () =
     ).status,
     "written",
   );
-  await assert.rejects(
-    peerMain(["send", "--to", "codex:target", "--message", "hello"], {
+  const result = await peerMain(
+    ["send", "--to", "codex:target", "--message", "hello"],
+    {
       ...deps,
-      discover: () => {
-        throw Error("must not discover");
+      deliverCodex: ({ targetName, platform, message }) => {
+        assert.equal(targetName, "target");
+        assert.equal(platform, "win32");
+        assert.match(message, /hello/);
+        return { status: "sent" };
+      },
+    },
+  );
+  assert.equal(result.status, "sent");
+});
+
+it("Windows Codex checks both the socket and its path and locates the npm alias without a shim", (t) => {
+  const fixture = windowsFixture(t);
+  const { home, fs: io } = fixture;
+  const paths = path.win32;
+  const socketPath = paths.join(
+    home,
+    ".codex",
+    "app-server-control",
+    "app-server-control.sock",
+  );
+  const packageRoot = paths.join(
+    home,
+    "AppData",
+    "Roaming",
+    "npm",
+    "node_modules",
+    "@openai",
+    "codex",
+  );
+  const native = paths.join(
+    packageRoot,
+    "node_modules",
+    "@openai",
+    "codex-win32-x64",
+  );
+  const executable = paths.join(
+    native,
+    "vendor",
+    "x86_64-pc-windows-msvc",
+    "bin",
+    "codex.exe",
+  );
+  const write = (file, contents) => {
+    io.mkdirSync(paths.dirname(file), { recursive: true });
+    io.writeFileSync(file, contents);
+  };
+  write(socketPath, "rendezvous");
+  write(executable, "fixture");
+  write(
+    paths.join(packageRoot, "package.json"),
+    JSON.stringify({
+      name: "@openai/codex",
+      version: "0.171.0",
+      optionalDependencies: {
+        "@openai/codex-win32-x64": "npm:@openai/codex@0.171.0-win32-x64",
       },
     }),
-    /Windows 에서는 Codex 대상을 아직 지원하지 않는다/,
   );
+  const nativeManifest = paths.join(native, "package.json");
+  write(
+    nativeManifest,
+    JSON.stringify({ name: "@openai/codex", version: "0.171.0-win32-x64" }),
+  );
+  const acl = safeAcl();
+  const overrides = new Map();
+  const missing = new Set();
+  const readAcls = (files, request) => {
+    assert.equal(request.socketPath, socketPath);
+    return new Map(
+      files
+        .filter(
+          (file) =>
+            !missing.has(file) && io.lstatSync(file, { throwIfNoEntry: false }),
+        )
+        .map((file) => [
+          file,
+          {
+            ...acl,
+            ownerSid: acl.userSid,
+            complete: true,
+            ...(file === socketPath && {
+              unixSocket: true,
+              reparsePoint: true,
+            }),
+            ...overrides.get(file),
+          },
+        ]),
+    );
+  };
+  const resolve = (env = {}) =>
+    resolveWindowsCodexProxy({ home, env, arch: "x64", fs: io, readAcls });
+  assert.deepEqual(resolve({ PATH: "C:\\untrusted" }), {
+    socketPath,
+    executable,
+  });
+  missing.add(socketPath);
+  assert.throws(() => resolve(), /shared app-server socket missing or unsafe/);
+  missing.clear();
+  assert.throws(() => resolve({ CODEX_HOME: "relative" }), /Unsafe CODEX_HOME/);
+  assert.throws(
+    () => resolve({ CODEX_HOME: "\\\\server\\remote" }),
+    /Unsafe CODEX_HOME/,
+  );
+  for (const [file, bad, error] of [
+    [socketPath, { unixSocket: false }, /Unsafe Codex app-server socket$/],
+    [socketPath, { ownerSid: OTHER_SID }, /Unsafe Codex app-server socket$/],
+    [socketPath, { complete: false }, /Unsafe Codex app-server socket$/],
+    [
+      paths.dirname(socketPath),
+      { reparsePoint: true },
+      /Unsafe Codex app-server socket directory/,
+    ],
+    [
+      paths.dirname(socketPath),
+      { access: [...acl.access, { sid: OTHER_SID, type: "Allow", rights: 1 }] },
+      /Unsafe Codex app-server socket directory/,
+    ],
+    [
+      paths.dirname(executable),
+      { access: [...acl.access, { sid: OTHER_SID, type: "Allow", rights: 2 }] },
+      /Unsafe Codex install directory/,
+    ],
+    [
+      paths.dirname(packageRoot),
+      {
+        access: [
+          ...acl.access,
+          { sid: OTHER_SID, type: "Allow", rights: 0x40 },
+        ],
+      },
+      /Unsafe Codex install directory/,
+    ],
+  ]) {
+    overrides.set(file, bad);
+    assert.throws(() => resolve(), error);
+    overrides.clear();
+  }
+  write(
+    nativeManifest,
+    JSON.stringify({ name: "@openai/codex", version: "0.170.0-win32-x64" }),
+  );
+  assert.throws(() => resolve(), /does not match/);
+  const standalone = paths.join(
+    home,
+    ".codex",
+    "packages",
+    "standalone",
+    "current",
+    "bin",
+    "codex.exe",
+  );
+  write(standalone, "fixture");
+  assert.deepEqual(resolve(), { socketPath, executable: standalone });
+  missing.add(executable);
+  assert.deepEqual(resolve(), { socketPath, executable: standalone });
+  missing.clear();
+  write(
+    nativeManifest,
+    JSON.stringify({ name: "@openai/codex", version: "0.171.0-win32-x64" }),
+  );
+  overrides.set(paths.dirname(packageRoot), {
+    access: [...acl.access, { sid: OTHER_SID, type: "Allow", rights: 0x40 }],
+  });
+  assert.deepEqual(resolve(), { socketPath, executable: standalone });
+  const daemon = paths.join(
+    home,
+    ".codex",
+    "packages",
+    "app-server-daemon",
+    "current",
+    "bin",
+    "codex.exe",
+  );
+  write(daemon, "fixture");
+  overrides.set(standalone, { reparsePoint: true });
+  assert.deepEqual(resolve(), { socketPath, executable: daemon });
+  overrides.set(socketPath, { unixSocket: false });
+  assert.throws(() => resolve(), /Unsafe Codex app-server socket$/);
+});
+
+it("Windows Codex selects only physical releases from official current junctions", (t) => {
+  const { home, fs: io } = windowsFixture(t);
+  const { join, dirname } = path.win32;
+  const codexHome = join(home, ".codex");
+  const socketPath = join(
+    codexHome,
+    "app-server-control",
+    "app-server-control.sock",
+  );
+  const root = join(codexHome, "packages", "standalone");
+  const daemonRoot = join(codexHome, "packages", "app-server-daemon");
+  const x64 = "0.171.0-x86_64-pc-windows-msvc";
+  const arm64 = "0.171.0-aarch64-pc-windows-msvc";
+  const packaged = join(root, "releases", x64, "bin", "codex.exe");
+  const flat = join(daemonRoot, "releases", arm64, "codex.exe");
+  const acl = safeAcl();
+  const overrides = new Map();
+  const junctions = new Map();
+  const reads = [];
+  const checked = [];
+  let beforeReleaseAcl;
+  const fs = {
+    ...io,
+    readlinkSync(file) {
+      reads.push(file);
+      return junctions.get(file);
+    },
+  };
+  const readAcls = (files, { junctionPaths = [] }) => {
+    checked.push(...files);
+    if (!junctionPaths.length) beforeReleaseAcl?.();
+    return new Map(
+      files.flatMap((file) => {
+        const junction = junctions.has(file);
+        if (
+          junction
+            ? !junctionPaths.includes(file)
+            : !io.lstatSync(file, { throwIfNoEntry: false })
+        )
+          return [];
+        return [
+          [
+            file,
+            {
+              ...acl,
+              complete: true,
+              ...(junction && { junction: true, reparsePoint: true }),
+              ...(file === socketPath && {
+                ownerSid: acl.userSid,
+                unixSocket: true,
+                reparsePoint: true,
+              }),
+              ...(file === dirname(socketPath) && { ownerSid: acl.userSid }),
+              ...overrides.get(file),
+            },
+          ],
+        ];
+      }),
+    );
+  };
+  const resolve = (arch = "x64") =>
+    resolveWindowsCodexProxy({ home, env: {}, arch, fs, readAcls });
+  for (const file of [socketPath, packaged, flat]) {
+    io.mkdirSync(dirname(file), { recursive: true });
+    io.writeFileSync(file, "fixture");
+  }
+  const current = join(root, "current");
+  const release = dirname(dirname(packaged));
+  junctions.set(current, release);
+  beforeReleaseAcl = () => junctions.set(current, dirname(flat));
+  assert.deepEqual(resolve(), { socketPath, executable: packaged });
+  beforeReleaseAcl = undefined;
+  assert.deepEqual(reads, [current]);
+  assert.ok(
+    [release, dirname(packaged), packaged].every((file) =>
+      checked.includes(file),
+    ),
+  );
+
+  for (const bad of [
+    join(daemonRoot, "releases", x64),
+    join(root, "releases-other", x64),
+    join(root, "releases", "nested", x64),
+    join(root, "releases", arm64),
+    join(root, "releases", `invalid-${x64}`),
+    join(String.raw`\\server\share`, x64),
+  ]) {
+    junctions.set(current, bad);
+    checked.length = 0;
+    assert.throws(() => resolve(), /Unsafe Codex current junction/);
+    assert.ok(!checked.some((file) => file.startsWith(`${bad}\\`)));
+  }
+  junctions.set(current, release);
+  overrides.set(current, { junction: false });
+  reads.length = 0;
+  assert.throws(() => resolve(), /native codex\.exe missing/);
+  assert.deepEqual(reads, []);
+  overrides.clear();
+  overrides.set(release, { reparsePoint: true });
+  assert.throws(() => resolve(), /Unsafe Codex install directory/);
+  overrides.clear();
+  overrides.set(packaged, {
+    access: [...acl.access, { sid: OTHER_SID, type: "Allow", rights: 2 }],
+  });
+  assert.throws(() => resolve(), /Unsafe Codex install file/);
+
+  junctions.delete(current);
+  const daemonCurrent = join(daemonRoot, "current");
+  junctions.set(daemonCurrent, dirname(flat));
+  assert.deepEqual(resolve("arm64"), { socketPath, executable: flat });
+  assert.throws(() => resolve(), /Unsafe Codex current junction/);
+});
+
+it("Windows Codex rejects unloaded UUIDs and ambiguous or ineligible loaded names before writes", async () => {
+  const wanted = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const other = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+  for (const [target, secondName, source, expected] of [
+    [{ targetName: "수신" }, "다른 이름", "user", "sent"],
+    [{ targetName: "수신" }, "수신", "user", /Ambiguous/],
+    [{ targetName: "수신" }, "다른 이름", "subagent", /eligible loaded root/],
+    [{ targetName: "수신" }, "다른 이름", "unreadable", /gone/],
+    [{ threadId: wanted }, "다른 이름", "unloaded", /not loaded/],
+    [{ threadId: wanted }, "수신", "user", "sent"],
+  ]) {
+    const writes = [];
+    let closed = false;
+    const promise = deliverCodex({
+      ...target,
+      platform: "win32",
+      message: "한글 본문",
+      resolveWindowsProxy: () => ({
+        socketPath: "fixture.sock",
+        executable: "codex.exe",
+      }),
+      clientFactory: (socketPath, createSocket) => {
+        assert.equal(socketPath, "fixture.sock");
+        assert.equal(typeof createSocket, "function");
+        return {
+          connect: async () => {},
+          notify: () => {},
+          close: () => {
+            closed = true;
+          },
+          request: async (method, params) => {
+            if (method === "initialize") return {};
+            if (method === "thread/loaded/list")
+              return params.cursor
+                ? { data: [other], nextCursor: null }
+                : {
+                    data: source === "unloaded" ? [] : [wanted],
+                    nextCursor: "more",
+                  };
+            if (method === "thread/read") {
+              if (source === "unreadable" && params.threadId === other)
+                throw new Error("gone");
+              return {
+                thread: {
+                  id: params.threadId,
+                  name: params.threadId === wanted ? "수신" : secondName,
+                  canAcceptDirectInput: true,
+                  threadSource: params.threadId === wanted ? source : "user",
+                },
+              };
+            }
+            assert.ok(["thread/inject_items", "turn/start"].includes(method));
+            assert.equal(params.threadId, wanted);
+            writes.push(method);
+            return { turn: { id: "turn", status: "inProgress" } };
+          },
+        };
+      },
+    });
+    if (expected === "sent") {
+      assert.equal((await promise).status, "sent");
+      assert.deepEqual(writes, ["thread/inject_items", "turn/start"]);
+    } else {
+      await assert.rejects(promise, expected);
+      assert.deepEqual(writes, []);
+    }
+    assert.ok(closed);
+  }
 });
 
 it("Windows Claude send skips discovery and identifies the Codex sender from its thread", async (t) => {

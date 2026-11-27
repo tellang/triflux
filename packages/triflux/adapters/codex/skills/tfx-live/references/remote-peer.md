@@ -1,16 +1,18 @@
 # 원격 native peer 발신과 회신
 
-- 발신과 수신은 Darwin, POSIX Linux, Windows를 지원한다. 등록 OS 값은 대소문자만 정규화하여 `Darwin`, `macOS`, `Linux`, `Windows`를 허용한다. Darwin과 Linux는 같은 원격 피어 프로토콜을 지원하는 `tfx-peer` 래퍼가 필요하다. Windows 수신은 기존 Claude 세션만 지원하며 SSH 계정의 `PATH`에 PowerShell 7, `npm.cmd`, `node.exe`가 있어야 한다. npm 글로벌 설치본의 `triflux/bin/tfx-peer.mjs`를 실행한다.
-- Windows 발신은 PowerShell 7.3 이상에서 `node.exe`로 직접 실행한다. 자동 세션 탐색이 없으므로 `TFX_LIVE_FROM`이 없으면 `--from`으로 발신자를 명시한다. `tfx-peer.cmd` shim과 Windows PowerShell 5.1은 본문의 특수 문자를 바꿀 수 있다. 본문은 작은따옴표나 `@'`와 `'@` 사이의 here-string으로 쓴다. Windows 사용자 등록 파일은 `%APPDATA%\triflux\hosts.json`이다. 수신 호스트는 이 발신 호스트를 `"os": "windows"`로 등록한다. `PATH`의 `ssh`가 비밀번호 입력 없이 접속할 수 있어야 한다.
+- 발신과 수신은 Darwin, POSIX Linux, Windows를 지원한다. 등록 OS 값은 대소문자만 정규화하여 `Darwin`, `macOS`, `Linux`, `Windows`를 허용한다. Darwin과 Linux는 같은 원격 피어 프로토콜을 지원하는 `tfx-peer` 래퍼가 필요하다. Windows는 기존 Claude와 공유 app-server에 연결한 Codex 세션으로 수신하며 SSH 계정의 `PATH`에 PowerShell 7, `npm.cmd`, `node.exe`가 있어야 한다. npm 글로벌 설치본의 `triflux/bin/tfx-peer.mjs`를 실행한다.
+- Windows 발신은 PowerShell 7.3 이상에서 `node.exe`로 직접 실행한다. 발신 정보를 제공하는 `TFX_LIVE_FROM`이나 Codex의 `CODEX_THREAD_ID`가 없으면 `--from`으로 발신자를 명시한다. `tfx-peer.cmd` shim과 Windows PowerShell 5.1은 본문의 특수 문자를 바꿀 수 있다. 본문은 작은따옴표나 `@'`와 `'@` 사이의 here-string으로 쓴다. Windows 사용자 등록 파일은 `%APPDATA%\triflux\hosts.json`이다. 수신 호스트는 이 발신 호스트를 `"os": "windows"`로 등록한다. `PATH`의 `ssh`가 비밀번호 입력 없이 접속할 수 있어야 한다.
 - ryzen에서 m5로 발신했을 때 기본 Win32 OpenSSH 9.5p2는 이 환경에서 stdin 전달이 멈췄다. 테스트에서는 Git for Windows의 `usr\bin`을 프로세스 `PATH` 앞에 추가했다. 같은 증상이 나면 아래 예시처럼 현재 PowerShell에서 Git OpenSSH를 선택할 수 있다.
 - 발신 호스트에서 `remote-send --host m5 --reply-host m2 --to 'codex:<이름 또는 UUID>' --message '<본문>'`을 실행한다. `m5`는 목적지, `m2`는 수신 호스트에서 발신 호스트를 찾을 등록 별명이다. 발신 호스트의 사용자 상태 `hosts.json`에는 목적지 `m5`, 수신 호스트에는 회신 목적지 `m2`가 호스트 이름 또는 `aliases`로 등록되어 있어야 한다. 각 호스트의 자기 항목은 필요 없다. 송신은 실제 SSH 목적지만 조회하고, 수신은 역방향 회신 목적지만 조회한다. 원본 저장소의 legacy hosts로 폴백하거나 설정을 자동 복사하지 않는다.
 - `--from 'claude:<이름 또는 UUID>'`, `--from 'codex:<이름 또는 UUID>'`, `--from 'agy:<이름 또는 UUID>'`을 명시할 수 있다. 우선순위는 `--from`, `TFX_LIVE_FROM`, 발신 호스트의 자동 탐색이다. 발신 세션을 판별하지 못하면 SSH 전에 `--from`을 요구한다. `remote-send`에는 `--host`와 `--reply-host`가 모두 필요하다. 로컬 `send`에는 `--remote`, `--host`, `--reply-host`를 붙일 수 없으며 `self`도 원격 플래그를 거부한다.
-- 수신 본문은 원래 발신 CLI, 표시 이름, `origin` 호스트와 가능한 대화 UUID를 보존한다. 회신 안내의 `--host`는 원래 발신 호스트, `--reply-host`는 원래 목적지다. UUID가 있으면 UUID로 회신한다. Windows에서 받은 메시지는 PowerShell의 Node 직접 호출과 `--from`을 안내한다. Windows의 Codex와 agy 발신자에게는 Claude 세션으로만 회신할 수 있다고 안내한다.
+- 수신 본문은 원래 발신 CLI, 표시 이름, `origin` 호스트와 가능한 대화 UUID를 보존한다. 회신 안내의 `--host`는 원래 발신 호스트, `--reply-host`는 원래 목적지다. UUID가 있으면 UUID로 회신한다. Windows에서 받은 메시지는 PowerShell의 Node 직접 호출과 `--from`을 안내한다. Windows Claude와 Codex 발신자에게 회신할 수 있다. Windows agy 발신자에게는 지원하는 회신 대상을 안내한다.
 - 원격 사전 승인을 받았다면 setup이 출력한 절대경로의 `tfx-peer-remote remote-send`를 쓴다. Windows 목적지를 추가하거나 기존 목적지를 Windows로 바꾸면 대화형 setup에서 다시 동의하거나 수동 전송 권한을 따로 요청한다. Windows 발신자는 수동 명령을 쓴다.
 - 사전 승인 경로는 시스템 OpenSSH에 등록 주소와 SSH 사용자, 포트를 명시하고 호스트 이름 정규화 옵션과 기존 연결 재사용을 끈다. `HostName`으로 별명을 실제 주소에 연결했다면 그 주소를 등록한다. 프록시, DNS, 인증과 호스트 키 검증에는 사용자의 SSH 연결 정책이 적용된다.
 - SSH 대상은 등록된 주소와 사용자만 쓴다. 원격 명령은 고정된 `_receive` 진입점이고 본문과 메타데이터는 크기 제한 JSON stdin으로 전달한다. `remote-send`는 기존 `send` 자동 승인 범위에 포함하지 않는다. `triflux setup`의 별도 사전 승인이 없으면 실행 권한을 따로 받는다. `_receive`는 어떤 승인에도 포함하지 않는다. 전송 명령은 전역 allow, 동의 파일과 설정을 바꾸지 않는다. `_receive`는 내부 수신용이다. 발신 표시와 호스트 별명은 인증 신원이나 권한 근거가 아니다. 기존 수신 세션의 소유권, PID, socket, thread, conversation 검사를 그대로 적용한다.
 - SSH는 한 번만 실행한다. 기록 전 확정 거부는 `rejected`, 기록 후 응답 유실과 timeout은 `unknown`, adapter의 부분 기록은 `partial`로 반환한다. `retrySafe:false`, `modelReceipt:false`와 발신 호스트의 `correlationId`를 유지하며 adapter의 `msgId`도 보존한다. 자동 재전송과 tmux 또는 사용자 턴 폴백은 없다. `sent`와 `written`도 모델 수신이나 완료를 뜻하지 않는다.
 - 같은 호스트 Claude끼리는 기존 `SendMessage`를 쓴다. 원격 peer 수신은 목적지의 기존 native adapter로 전달하고, `tfx-live ask`의 사용자 입력 경로와 구분한다. 기존 `tfx-live send`의 원격 미지원 계약은 그대로다.
+
+Windows Codex 수신은 SSH 접속 계정이 소유한 기존 공유 app-server와 이미 로드된 루트 사용자 스레드가 필요하다.
 
 ```bash
 "$HOME/.claude/scripts/tfx-peer" remote-send --host m5 --reply-host m2 --to 'codex:10.30 구현' --message '변경사항을 공유합니다'

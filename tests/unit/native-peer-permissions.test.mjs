@@ -921,14 +921,16 @@ it("사전 승인 래퍼는 등록된 목적지만 보내고 setup에서 다시 
     assert.match(prompts[1], /m3.*Windows/);
     assert.equal((await send("m5")).status, "sent");
     assert.ok(endpoints[1].args.includes("2222"));
-    await assert.rejects(send("m3"), /Windows.*Claude/);
+    assert.equal((await send("m3")).status, "sent");
+    await assert.rejects(send("m3", "agy:수신"), /Windows.*Claude/);
     assert.equal((await send("m3", "claude:수신")).status, "sent");
     assert.match(endpoints[2].args.at(-1), /^pwsh\.exe /);
+    assert.deepEqual(endpoints[2].args, endpoints[3].args);
     writeHosts(x.home, { m5, m3: { ...m3, os: "linux" } });
     await assert.rejects(send("m3", "claude:수신"), /approval/i);
     fs.unlinkSync(remote.manifest);
     await assert.rejects(send("m5"), /approval/i);
-    assert.equal(endpoints.length, 3);
+    assert.equal(endpoints.length, 4);
     assert.deepEqual(
       [local.wrapper, local.rule, local.manifest].map((file) =>
         fs.readFileSync(file, "utf8"),

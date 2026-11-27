@@ -173,7 +173,7 @@ A peer message reaches the receiving session's model as a message from another a
 - Bodies are limited to 8000 characters. A body over 4000 characters sent to a lead is cut to its first 800 characters plus up to 20 file paths when it names files. Codex and agy targets count only files that exist; for Claude targets the receiver's mods do the cut. Without paths it is sent whole with a warning.
 - `written` and `sent` confirm only the write and the turn start. They do not mean the model read the message or finished the work.
 - `partial` and `unknown` may already have been delivered, so they are never resent automatically. Failures never fall back to tmux input.
-- A Codex target must be attached to the shared daemon through `tfx-live start`. A Codex you started yourself on the shared daemon can be recorded with `tfx-live adopt`; one started outside the daemon (`--no-daemon` or `-c` overrides) must be restarted with `tfx-live start --resume`.
+- On macOS and Linux, a Codex target must be attached to the shared daemon through `tfx-live start`. A Codex you started yourself on the shared daemon can be recorded with `tfx-live adopt`; one started outside the daemon (`--no-daemon` or `-c` overrides) must be restarted with `tfx-live start --resume`.
 - An idle agy session wakes immediately only with the `peer-wake` patch. Without it, use `tfx-live ask`.
 
 ### Remote peers
@@ -184,7 +184,7 @@ A peer message reaches the receiving session's model as a message from another a
 
 - One SSH call passes a JSON message (up to 64 KiB) to the fixed entry point `tfx-peer _receive`, which delivers it through the same three transports.
 - `--host` is the destination. `--reply-host` is this machine's alias that the receiver uses to reply. Each side needs the other host in its `hosts.json`. The path is `~/.config/triflux/hosts.json` on macOS and Linux or `%APPDATA%\triflux\hosts.json` on Windows.
-- macOS and Linux can receive messages for Claude, Codex, and agy. Registered Windows hosts receive messages and replies for Claude sessions only. Windows receivers need PowerShell 7 and an npm global installation of triflux. See [Windows setup and manual commands](skills/tfx-live/references/remote-peer.md).
+- macOS and Linux can receive messages for Claude, Codex, and agy. Registered Windows hosts receive messages and replies for Claude and Codex sessions. Windows receivers need PowerShell 7 and an npm global installation of triflux. Codex requires an existing root user thread on the Windows account’s shared app-server. See [Windows setup and manual commands](skills/tfx-live/references/remote-peer.md).
 - The result is one of `rejected`, `written`, `sent`, `partial`, `unknown`.
 
 ### User input path
@@ -280,7 +280,7 @@ Run `<command> --help` for arguments.
 | --- | --- | --- |
 | macOS | tmux | None. A positive hard ceiling uses `gtimeout` from `coreutils` and only warns if it is missing |
 | Linux | tmux | No memory pressure monitoring |
-| Windows | psmux, Windows Terminal | Local and remote peer receive targets are limited to Claude. Remote sends are supported. No `claude agents` rows or memory pressure monitoring |
+| Windows | psmux, Windows Terminal | Local and remote peer receive targets are Claude and shared app-server Codex sessions. Remote sends are supported. No `claude agents` rows or memory pressure monitoring |
 
 psmux on Windows defaults to PowerShell. Tabs and panes go through the `tfx-wt` skill and [`hub/team/wt-manager.mjs`](hub/team/wt-manager.mjs).
 

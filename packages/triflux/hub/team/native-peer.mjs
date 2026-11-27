@@ -6,8 +6,10 @@ import os from "node:os";
 import path from "node:path";
 import {
   assertWindowsAcl,
+  connectWindowsCodexProxy,
   readWindowsAcls,
   readWindowsPeerState,
+  resolveWindowsCodexProxy,
 } from "../../scripts/lib/native-peer-windows.mjs";
 import { JsonRpcWsUdsClient } from "../workers/lib/jsonrpc-ws-uds.mjs";
 
@@ -104,30 +106,81 @@ export function validateCodexTarget(thread, id) {
 export async function sendCodexPeer({
   client,
   threadId,
+  targetName,
   message,
+  prepareMessage,
   onWriteStart,
+  platform = process.platform,
 }) {
+  const windows = platform === "win32";
+  const deadline = windows ? performance.now() + 8000 : null;
+  const request = (method, params) => {
+    if (!deadline) return client.request(method, params);
+    const remaining = deadline - performance.now();
+    if (remaining <= 0)
+      throw new Error("Windows Codex target lookup timed out");
+    return client.request(method, params, Math.ceil(remaining));
+  };
+  const readThread = async (id) =>
+    (
+      await request("thread/read", {
+        threadId: id,
+        includeTurns: false,
+      })
+    ).thread;
+  const matches = [];
+  const seen = new Set();
+  const cursors = new Set();
   let cursor;
   let loaded = false;
   do {
-    const page = await client.request(
-      "thread/loaded/list",
-      cursor ? { cursor } : {},
-    );
-    loaded ||= (page.data || []).some(
-      (entry) => entry === threadId || entry?.id === threadId,
-    );
+    const page = await request("thread/loaded/list", cursor ? { cursor } : {});
+    if (
+      windows &&
+      (!Array.isArray(page?.data) ||
+        (page.nextCursor != null &&
+          (typeof page.nextCursor !== "string" ||
+            cursors.has(page.nextCursor))))
+    )
+      throw new Error("Invalid Windows Codex loaded thread list");
+    for (const entry of page.data || []) {
+      const id = typeof entry === "string" ? entry : entry?.id;
+      if (threadId) {
+        loaded ||= id === threadId;
+      } else if (!seen.has(id)) {
+        if (typeof id !== "string" || !id)
+          throw new Error("Invalid loaded Codex thread ID");
+        seen.add(id);
+        const thread = await readThread(id);
+        if (thread?.id !== id)
+          throw new Error("Codex loaded thread changed during lookup");
+        if (thread.name === targetName) matches.push(thread);
+      }
+    }
     cursor = page.nextCursor;
+    if (windows && cursor) cursors.add(cursor);
   } while (!loaded && cursor);
-  if (!loaded)
+  let thread;
+  if (targetName) {
+    if (matches.length !== 1)
+      throw new Error(
+        matches.length
+          ? "Ambiguous Windows Codex target name"
+          : "Windows Codex target name not found in the shared app-server loaded threads",
+      );
+    [thread] = matches;
+    threadId = thread.id;
+  } else if (loaded) {
+    thread = await readThread(threadId);
+  } else {
     throw new Error(
-      "Codex target is not loaded in this app-server. 이 Codex 는 공유 데몬에 붙어 있지 않다. tfx-live start --cli codex (또는 --resume)로 다시 띄워라",
+      windows
+        ? "Windows Codex target is not loaded in this shared app-server. Attach the target session to the shared daemon before sending"
+        : "Codex target is not loaded in this app-server. 이 Codex 는 공유 데몬에 붙어 있지 않다. tfx-live start --cli codex (또는 --resume)로 다시 띄워라",
     );
-  const read = await client.request("thread/read", {
-    threadId,
-    includeTurns: false,
-  });
-  validateCodexTarget(read.thread, threadId);
+  }
+  validateCodexTarget(thread, threadId);
+  if (prepareMessage) message = prepareMessage(thread);
   try {
     onWriteStart?.();
     await client.request("thread/inject_items", {
@@ -228,16 +281,26 @@ export function resolveCodexSocket(home = os.homedir(), env = process.env) {
 
 export async function deliverCodex({
   threadId,
+  targetName,
   message,
+  prepareMessage,
   onWriteStart,
   home = os.homedir(),
   env = process.env,
   platform = process.platform,
-  clientFactory = (socketPath) => new JsonRpcWsUdsClient({ socketPath }),
+  resolveWindowsProxy = resolveWindowsCodexProxy,
+  clientFactory = (socketPath, createSocket) =>
+    new JsonRpcWsUdsClient({ socketPath, createSocket }),
 }) {
-  if (platform === "win32")
-    throw new Error("Windows 에서는 Codex 대상을 아직 지원하지 않는다");
-  const client = clientFactory(resolveCodexSocket(home, env));
+  let client;
+  if (platform === "win32") {
+    const { socketPath, executable } = resolveWindowsProxy({ home, env });
+    client = clientFactory(socketPath, (socket) =>
+      connectWindowsCodexProxy(executable, socket),
+    );
+  } else {
+    client = clientFactory(resolveCodexSocket(home, env));
+  }
   try {
     await client.connect();
     await client.request("initialize", {
@@ -245,7 +308,15 @@ export async function deliverCodex({
       capabilities: { experimentalApi: true },
     });
     client.notify("initialized", {});
-    return await sendCodexPeer({ client, threadId, message, onWriteStart });
+    return await sendCodexPeer({
+      client,
+      threadId,
+      targetName,
+      message,
+      prepareMessage,
+      onWriteStart,
+      platform,
+    });
   } finally {
     client.close();
   }
