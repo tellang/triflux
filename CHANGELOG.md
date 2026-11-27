@@ -2,6 +2,11 @@
 
 All notable changes to triflux will be documented in this file.
 
+## [11.4.0] - 2026-11-27
+
+### Added
+- Windows의 Codex 공유 app-server에 연결된 기존 세션이 로컬 및 SSH 피어 메시지를 받고 회신할 수 있다. 스레드 UUID 또는 고유한 이름으로 대상을 지정한다. (#915)
+
 ## [11.3.0] - 2026-11-27
 
 ### Added
