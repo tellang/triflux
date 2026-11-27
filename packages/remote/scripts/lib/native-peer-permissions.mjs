@@ -674,12 +674,12 @@ async function offerPeerVerb({
   if (remote) {
     const { hostsPath, destinations } = state.approval;
     const scope = destinations
-      .map(({ name, address, user, port }) => {
+      .map(({ name, address, user, port, os }) => {
         const host = address.includes(":") ? `[${address}]` : address;
-        return `${name} (${user}@${host}:${port})`;
+        return `${name} (${user}@${host}:${port}${os === "windows" ? ", Windows Claude" : ""})`;
       })
       .join(", ");
-    question = `remote-send로 다음 목적지에 보낼 때 확인을 생략할까요? 등록 파일은 ${hostsPath}입니다. ${scope}. 목적지를 추가하거나 주소, SSH 사용자, 포트를 바꾸면 setup에서 재승인해야 합니다.`;
+    question = `remote-send로 다음 목적지에 보낼 때 확인을 생략할까요? 등록 파일은 ${hostsPath}입니다. ${scope}. 목적지를 추가하거나 주소, SSH 사용자, 포트, Windows 등록 여부를 바꾸면 setup에서 재승인해야 합니다.`;
   }
   if (!(await ask(question))) return { status: "declined", changed: false };
   const result = installPeerPermission({

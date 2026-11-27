@@ -48,16 +48,16 @@ export function remoteSshDestination(host) {
       host.ssh?.host || host.tailscale?.dns || host.tailscale?.ip || host.name,
     user: host.ssh_user ?? null,
     port: host.ssh?.port,
+    os: host.os,
   };
 }
 
-function normalizeRemoteHost(name, raw, allowWindows = false) {
+function normalizeRemoteHost(name, raw) {
   const os = typeof raw?.os === "string" ? raw.os.toLowerCase() : "";
-  if (
-    !["darwin", "macos", "linux"].includes(os) &&
-    !(allowWindows && os === "windows")
-  )
-    throw new Error("Remote peer supports only Darwin and POSIX Linux hosts");
+  if (!["darwin", "macos", "linux", "windows"].includes(os))
+    throw new Error(
+      "Remote peer supports only Darwin, Linux and Windows hosts",
+    );
   const host = normalizeHost(raw, name);
   const { address, user, port } = remoteSshDestination(host);
   if (
@@ -77,11 +77,7 @@ function normalizeRemoteHost(name, raw, allowWindows = false) {
 
 export function resolveRemoteHost(
   alias,
-  {
-    hostsPath = userStateHostsPath(),
-    protectedRegistry = false,
-    allowWindows = false,
-  } = {},
+  { hostsPath = userStateHostsPath(), protectedRegistry = false } = {},
 ) {
   if (typeof alias !== "string" || !PEER_HOST_ALIAS.test(alias))
     throw new Error("Invalid registered host alias");
@@ -97,7 +93,7 @@ export function resolveRemoteHost(
   if (matches.length !== 1)
     throw new Error("Host alias is unregistered or ambiguous");
   const [name, raw] = matches[0];
-  return normalizeRemoteHost(name, raw, allowWindows);
+  return normalizeRemoteHost(name, raw);
 }
 
 export function approvedPeerDestination(host) {
@@ -107,6 +103,8 @@ export function approvedPeerDestination(host) {
     address: address.toLowerCase(),
     user,
     port: port ?? 22,
+    // 기존 POSIX 승인과 호환하고 Windows 진입점은 별도로 동의받는다.
+    ...(host.os === "windows" ? { os: host.os } : {}),
   };
 }
 

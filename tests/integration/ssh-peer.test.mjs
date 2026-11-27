@@ -96,6 +96,7 @@ else {
     return {status:mode==='partial'?'partial':'written',msgId:'adapter-id',retrySafe:false,modelReceipt:false};
   };
   const result=await main(['_receive'],{
+    platform:process.env.PEER_TEST_PLATFORM,
     hostsPath:process.env.TFX_HOSTS_USER_STATE,
     input:(await import('node:stream')).Readable.from([input]),
     env:{CLAUDECODE:'1',CODEX_THREAD_ID:'receiver-only'},
@@ -127,6 +128,10 @@ else {
         PEER_TEST_LOG: log,
         PEER_TEST_MODE: mode,
         PEER_TEST_CLI: targetCli,
+        PEER_TEST_PLATFORM:
+          resolveRemoteHost(destination, f).os === "windows"
+            ? "win32"
+            : process.platform,
       },
     });
   };
@@ -297,7 +302,6 @@ it("user-state만 읽고 등록 오류는 파일 쓰기와 SSH 전에 거부한�
     ),
   );
   for (const host of [
-    { os: "windows" },
     { os: "unknown" },
     { os: "linux", ssh: { host: "-evil" } },
     { os: "linux", ssh: { host: "m5.test", user: "-evil" } },
@@ -359,7 +363,7 @@ it("잘못된 envelope는 native 호출 전에 거부한다", async () => {
   await assert.rejects(readPeerInput(PassThrough.from(["not JSON"])));
 });
 
-it("Windows 발신은 본문을 stdin 으로만 전하고 회신 불가를 안내한다", async (t) => {
+it("Windows 발신은 본문을 stdin으로만 전하고 Claude 회신을 안내한다", async (t) => {
   const f = sshStub(t);
   fs.writeFileSync(
     f.remoteHostsPath,
@@ -395,20 +399,95 @@ it("Windows 발신은 본문을 stdin 으로만 전하고 회신 불가를 안�
   );
   assert.equal(wire.envelope.message, body);
   assert.ok(native.payload.message.includes(body));
-  assert.equal(
+  assert.match(
     native.payload.message.split("\n").at(-1),
-    "회신: Windows 호스트로는 remote-send 회신을 지원하지 않는다",
+    /remote-send --host 'm2' --reply-host 'm5' --to 'claude:윈도우 발신'/,
+  );
+  for (const cli of ["codex", "agy"]) {
+    await sendRemotePeer(
+      { ...envelope(), sender: { cli, name: "윈도우 발신" } },
+      { ...f, platform: "win32" },
+    );
+    assert.match(
+      f.logs().at(-1).payload.message.split("\n").at(-1),
+      /Windows.*Claude.*회신.*지원/,
+    );
+  }
+});
+
+it("Windows Claude 대상은 고정 PowerShell 명령으로 전송하고 직접 Node 회신을 안내한다", async (t) => {
+  const f = sshStub(t, "deliver", "claude");
+  fs.writeFileSync(
+    f.hostsPath,
+    JSON.stringify({
+      hosts: {
+        m5: {
+          os: "Windows",
+          ssh: { host: "windows.test", user: "fixture" },
+          default_dir: "ignored-registry-path",
+        },
+      },
+    }),
+  );
+  const e = {
+    ...envelope(),
+    to: "claude:O'Reilly ‘수신’ ‚‛",
+    message: '한글 %PATH% & "quote"\r\n둘째 줄',
+    sender: { cli: "codex", name: "발신 이름", id: senderId },
+  };
+  for (const cli of ["codex", "agy"])
+    await assert.rejects(
+      sendRemotePeer({ ...e, to: `${cli}:수신` }, f),
+      /Windows.*Claude/,
+    );
+  assert.equal(f.sends(), 0);
+
+  const result = await sendRemotePeer(e, f);
+  assert.deepEqual(result, {
+    status: "written",
+    msgId: "adapter-id",
+    retrySafe: false,
+    modelReceipt: false,
+    correlationId: e.correlationId,
+  });
+  const [wire, native] = f.logs();
+  const command = wire.args.at(-1);
+  assert.match(
+    command,
+    /^pwsh\.exe -NoProfile -NonInteractive -EncodedCommand [A-Za-z0-9+/]+={0,2}$/,
+  );
+  const script = Buffer.from(command.split(" ").at(-1), "base64").toString(
+    "utf16le",
+  );
+  assert.match(script, /npm\.cmd root --global/);
+  assert.match(script, /node\.exe \$entry _receive/);
+  assert.match(script, /exit \$LASTEXITCODE/);
+  assert.doesNotMatch(script, /windows\.test|ignored-registry-path|한글/);
+  assert.deepEqual(wire.envelope, e);
+  assert.equal(native.payload.platform, "win32");
+  assert.ok(native.payload.message.includes(e.message));
+  assert.match(
+    native.payload.message.split("\n").at(-1),
+    /회신: node\.exe .* remote-send --from 'claude:O''Reilly ‘‘수신’’ ‚‚‛‛' --host 'm2' --reply-host 'm5' --to 'codex:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'/,
   );
 });
 
-it("Windows 수신은 native 전달 전에 거부한다", async (t) => {
+it("Windows 수신은 Claude 이외의 대상을 native 전달 전에 거부한다", async (t) => {
   const f = fixture(t);
-  const result = await main(["_receive"], {
-    ...f,
-    platform: "win32",
-    input: PassThrough.from([JSON.stringify(envelope())]),
-  });
-  assert.equal(result.result.status, "rejected");
+  for (const cli of ["codex", "agy"]) {
+    const result = await main(["_receive"], {
+      ...f,
+      platform: "win32",
+      input: PassThrough.from([
+        JSON.stringify({ ...envelope(), to: `${cli}:수신` }),
+      ]),
+      discover: () => assert.fail("Windows must only resolve Claude targets"),
+    });
+    assert.equal(result.stage, "preflight");
+    assert.equal(result.result.status, "rejected");
+    assert.match(result.result.error, /Windows/);
+    assert.match(result.result.error, new RegExp(cli, "i"));
+  }
 });
 
 it("회신 호스트의 잘못된 사용자명도 native 기록 전에 거부한다", async (t) => {
@@ -530,7 +609,7 @@ it("실제 회신 상대가 수신 registry에 없으면 native 전달 전에 �
   assert.equal(writes, 0);
 });
 
-it("등록 OS 값은 대소문자만 정규화하고 미상과 Windows는 거부한다", async (t) => {
+it("등록 OS 값은 대소문자만 정규화하고 미상은 거부한다", async (t) => {
   const f = fixture(t);
   for (const osValue of [
     "Darwin",
@@ -539,6 +618,7 @@ it("등록 OS 값은 대소문자만 정규화하고 미상과 Windows는 거부
     "darwin",
     "macos",
     "linux",
+    "Windows",
   ]) {
     fs.writeFileSync(
       f.hostsPath,
@@ -551,18 +631,13 @@ it("등록 OS 값은 대소문자만 정규화하고 미상과 Windows는 거부
     const host = resolveRemoteHost("m5", f);
     assert.equal(
       host.os,
-      osValue.toLowerCase() === "linux" ? "linux" : "darwin",
+      ["linux", "windows"].includes(osValue.toLowerCase())
+        ? osValue.toLowerCase()
+        : "darwin",
     );
     assert.equal(host.ssh.host, "m5.test");
   }
-  for (const osValue of [
-    "Windows",
-    "unknown",
-    "",
-    null,
-    undefined,
-    " Linux ",
-  ]) {
+  for (const osValue of ["unknown", "", null, undefined, " Linux "]) {
     fs.writeFileSync(
       f.hostsPath,
       JSON.stringify({ hosts: { m5: { os: osValue } } }),

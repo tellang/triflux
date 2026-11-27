@@ -15,6 +15,18 @@ export { resolveRemoteHost } from "../lib/remote-peer-hosts.mjs";
 export const PEER_WIRE_LIMIT = 65536;
 export const PEER_RECEIVER_COMMAND =
   'exec "$HOME/.claude/scripts/tfx-peer" _receive';
+const WINDOWS_PEER_ENTRY = String.raw`triflux\bin\tfx-peer.mjs`;
+const WINDOWS_RECEIVER_SCRIPT = `
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
+$npmRoot = @('' | npm.cmd root --global)
+if ($LASTEXITCODE -ne 0 -or $npmRoot.Count -ne 1 -or !$npmRoot[0]) { throw 'Cannot resolve the npm global root' }
+$entry = Join-Path $npmRoot[0] '${WINDOWS_PEER_ENTRY}'
+if (!(Test-Path -LiteralPath $entry -PathType Leaf)) { throw 'Triflux peer entry is missing' }
+node.exe $entry _receive
+exit $LASTEXITCODE
+`;
+const WINDOWS_RECEIVER_COMMAND = `pwsh.exe -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(WINDOWS_RECEIVER_SCRIPT, "utf16le").toString("base64")}`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function validatePeerEnvelope(value) {
   if (
@@ -85,16 +97,23 @@ export async function readPeerInput(input) {
   );
 }
 
-export function formatRemotePeerMessage(envelope, originOs) {
-  const { sender, correlationId, originHost, replyHost, message } = envelope;
-  const quote = (s) => `'${s.replaceAll("'", `'"'"'`)}'`;
-  const command = quote(path.join(homedir(), ".claude", "scripts", "tfx-peer"));
+export function formatRemotePeerMessage(envelope, originOs, platform) {
+  const { sender, correlationId, originHost, replyHost, message, to } =
+    envelope;
+  const windows = platform === "win32";
+  const quote = windows
+    ? (s) => `'${s.replace(/['‘’‚‛]/g, (mark) => mark + mark)}'`
+    : (s) => `'${s.replaceAll("'", `'"'"'`)}'`;
+  const command = windows
+    ? `node.exe (Join-Path (npm.cmd root --global) '${WINDOWS_PEER_ENTRY}')`
+    : quote(path.join(homedir(), ".claude", "scripts", "tfx-peer"));
+  const from = windows ? ` --from ${quote(to)}` : "";
   return [
     `[tfx-peer from=${sender.cli}:${sender.name} msg=${correlationId} origin=${originHost}${sender.id ? ` fromId=${sender.id}` : ""}]`,
     message,
-    originOs === "windows"
-      ? "회신: Windows 호스트로는 remote-send 회신을 지원하지 않는다"
-      : `회신: ${command} remote-send --host ${quote(originHost)} --reply-host ${quote(replyHost)} --to ${quote(`${sender.cli}:${sender.id || sender.name}`)} --message '...'`,
+    originOs === "windows" && sender.cli !== "claude"
+      ? "회신: Windows 호스트는 Claude 세션으로의 회신만 지원한다"
+      : `회신: ${command} remote-send${from} --host ${quote(originHost)} --reply-host ${quote(replyHost)} --to ${quote(`${sender.cli}:${sender.id || sender.name}`)} --message '...'`,
   ].join("\n");
 }
 
@@ -142,7 +161,7 @@ export async function sendRemotePeer(envelope, deps = {}) {
         protectedRegistry: true,
       });
       destination = approvedPeerDestination(host);
-      const { name, address, user, port } = destination;
+      const { name, address, user, port, os } = destination;
       if (
         !user ||
         !snapshot.destinations.some(
@@ -150,7 +169,8 @@ export async function sendRemotePeer(envelope, deps = {}) {
             item?.name === name &&
             item.address === address &&
             item.user === user &&
-            item.port === port,
+            item.port === port &&
+            item.os === os,
         )
       )
         throw new Error("Destination changed");
@@ -163,7 +183,11 @@ export async function sendRemotePeer(envelope, deps = {}) {
     const lookup = deps.resolveRemoteHost || resolveRemoteHost;
     destination = remoteSshDestination(lookup(envelope.replyHost, deps));
   }
-  const { address, user, port } = destination;
+  const { address, user, port, os } = destination;
+  if (os === "windows" && !envelope.to.startsWith("claude:"))
+    throw new Error(
+      "Windows remote peer destinations support only Claude targets",
+    );
   const args = [
     "-T",
     "-o",
@@ -183,7 +207,11 @@ export async function sendRemotePeer(envelope, deps = {}) {
       "ControlPath=none",
     );
   if (port !== undefined) args.push("-p", String(port));
-  args.push("--", user ? `${user}@${address}` : address, PEER_RECEIVER_COMMAND);
+  args.push(
+    "--",
+    user ? `${user}@${address}` : address,
+    os === "windows" ? WINDOWS_RECEIVER_COMMAND : PEER_RECEIVER_COMMAND,
+  );
   const uncertain = (error) => ({
     status: "unknown",
     correlationId: envelope.correlationId,
