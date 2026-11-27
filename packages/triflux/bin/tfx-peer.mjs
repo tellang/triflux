@@ -129,10 +129,8 @@ export async function main(args = process.argv.slice(2), deps = {}) {
   }
   const { to, message, from, host, replyHost } = parsePeerArgs(args);
   const [cli] = to.split(":");
-  if (platform === "win32" && !host && (cli === "codex" || cli === "agy"))
-    throw new Error(
-      `Windows 에서는 ${cli === "codex" ? "Codex" : "agy"} 대상을 아직 지원하지 않는다`,
-    );
+  if (platform === "win32" && !host && cli === "agy")
+    throw new Error("Windows 에서는 agy 대상을 아직 지원하지 않는다");
   const env = deps.env || process.env;
   if (host && !["darwin", "linux", "win32"].includes(platform))
     throw new Error(
@@ -148,6 +146,16 @@ export async function main(args = process.argv.slice(2), deps = {}) {
     allCandidates: candidates,
     deps,
   });
+  if (
+    platform === "win32" &&
+    sender.cli === "codex" &&
+    !from &&
+    !env.TFX_LIVE_FROM &&
+    UUID.test(env.CODEX_THREAD_ID || "")
+  ) {
+    sender.sessionId = env.CODEX_THREAD_ID;
+    if (sender.name === "codex") sender.name = sender.sessionId;
+  }
   if (host) {
     if (
       sender.cli === "unknown" ||
@@ -301,10 +309,8 @@ async function deliverLocal(
   const platform = deps.platform || process.platform;
   const env = deps.env || process.env;
   const [cli, name] = parsePeerSpec(to).split(":");
-  if (platform === "win32" && (cli === "codex" || cli === "agy"))
-    throw new Error(
-      `Windows 에서는 ${cli === "codex" ? "Codex" : "agy"} 대상을 아직 지원하지 않는다`,
-    );
+  if (platform === "win32" && cli === "agy")
+    throw new Error("Windows 에서는 agy 대상을 아직 지원하지 않는다");
   if (cli === "claude") {
     const target = (
       deps.resolveClaudeRegistryTarget || resolveClaudeRegistryTarget
@@ -316,6 +322,31 @@ async function deliverLocal(
       ...(remote ? { onWriteStart: deps.onWriteStart } : {}),
       platform,
     });
+  }
+  if (platform === "win32") {
+    let reportWarning;
+    const delivery = await (deps.deliverCodex || deliverCodex)({
+      ...(UUID.test(name)
+        ? { threadId: name.toLowerCase() }
+        : { targetName: name }),
+      message: formattedMessage,
+      prepareMessage: ({ id, cwd }) => {
+        const limited = applyLeadReportLimit(
+          { threadId: id, cwd },
+          cli,
+          formattedMessage,
+          deps,
+          env,
+        );
+        reportWarning = limited.reportWarning;
+        return limited.message;
+      },
+      ...(remote ? { onWriteStart: deps.onWriteStart } : {}),
+      home: deps.home,
+      env,
+      platform,
+    });
+    return reportWarning ? { ...delivery, reportWarning } : delivery;
   }
   const candidates =
     deps.candidates || (await (deps.discover || discoverPeerTargets)({ deps }));

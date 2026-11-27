@@ -55,12 +55,14 @@ export class JsonRpcWsUdsClient extends JsonRpcDispatchBase {
     onError,
     maxFrameSize = DEFAULT_MAX_FRAME_SIZE,
     connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
+    createSocket = net.connect,
   } = {}) {
     if (typeof socketPath !== "string" || !socketPath) {
       throw new TypeError("JsonRpcWsUdsClient requires a socketPath string");
     }
     super({ onError, closedMessage: CLOSED_MESSAGE });
     this._socketPath = socketPath;
+    this._createSocket = createSocket;
     this._maxFrameSize =
       Number.isFinite(maxFrameSize) && maxFrameSize > 0
         ? maxFrameSize
@@ -95,7 +97,7 @@ export class JsonRpcWsUdsClient extends JsonRpcDispatchBase {
       let handshakeBuf = Buffer.alloc(0);
       let settled = false;
 
-      const socket = net.connect(this._socketPath);
+      const socket = this._createSocket(this._socketPath);
       this._socket = socket;
 
       const timer = setTimeout(() => {
@@ -116,6 +118,7 @@ export class JsonRpcWsUdsClient extends JsonRpcDispatchBase {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        socket.destroy();
         this._state = "closed";
         reject(
           new JsonRpcTransportError(
@@ -126,6 +129,9 @@ export class JsonRpcWsUdsClient extends JsonRpcDispatchBase {
       };
 
       socket.once("error", onConnectError);
+      const onEarlyClose = () =>
+        onConnectError(new Error("EOF during handshake"));
+      socket.once("close", onEarlyClose);
       socket.on("connect", () => {
         const req =
           "GET / HTTP/1.1\r\n" +
@@ -197,6 +203,7 @@ export class JsonRpcWsUdsClient extends JsonRpcDispatchBase {
         settled = true;
         clearTimeout(timer);
         socket.removeListener("error", onConnectError);
+        socket.removeListener("close", onEarlyClose);
         socket.removeListener("data", onHandshakeData);
         this._state = "running";
 

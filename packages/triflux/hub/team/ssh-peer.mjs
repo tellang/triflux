@@ -111,8 +111,8 @@ export function formatRemotePeerMessage(envelope, originOs, platform) {
   return [
     `[tfx-peer from=${sender.cli}:${sender.name} msg=${correlationId} origin=${originHost}${sender.id ? ` fromId=${sender.id}` : ""}]`,
     message,
-    originOs === "windows" && sender.cli !== "claude"
-      ? "회신: Windows 호스트는 Claude 세션으로의 회신만 지원한다"
+    originOs === "windows" && sender.cli === "agy"
+      ? "회신: Windows 호스트는 Claude와 Codex 세션으로의 회신을 지원한다"
       : `회신: ${command} remote-send${from} --host ${quote(originHost)} --reply-host ${quote(replyHost)} --to ${quote(`${sender.cli}:${sender.id || sender.name}`)} --message '...'`,
   ].join("\n");
 }
@@ -184,9 +184,9 @@ export async function sendRemotePeer(envelope, deps = {}) {
     destination = remoteSshDestination(lookup(envelope.replyHost, deps));
   }
   const { address, user, port, os } = destination;
-  if (os === "windows" && !envelope.to.startsWith("claude:"))
+  if (os === "windows" && envelope.to.startsWith("agy:"))
     throw new Error(
-      "Windows remote peer destinations support only Claude targets",
+      "Windows remote peer destinations support only Claude and Codex targets",
     );
   const args = [
     "-T",

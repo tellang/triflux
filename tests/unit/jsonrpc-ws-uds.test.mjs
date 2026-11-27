@@ -4,6 +4,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -12,6 +13,7 @@ import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { JsonRpcWsUdsClient } from "../../hub/workers/lib/jsonrpc-ws-uds.mjs";
+import { connectWindowsCodexProxy } from "../../scripts/lib/native-peer-windows.mjs";
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(TEST_DIR, "..", "..");
@@ -70,6 +72,72 @@ describe("JsonRpcWsUdsClient over fake WebSocket-over-UDS", () => {
   });
   after(async () => {
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it("uses raw stdio proxy bytes for the WebSocket handshake and cleans up the child", async () => {
+    const { child, sockPath } = await startFakeServer(dir);
+    let proxyClosed;
+    const client = new JsonRpcWsUdsClient({
+      socketPath: sockPath,
+      createSocket: (socket) =>
+        connectWindowsCodexProxy(
+          "C:\\Codex\\codex.exe",
+          socket,
+          (executable, args, options) => {
+            assert.equal(executable, "C:\\Codex\\codex.exe");
+            assert.deepEqual(args, ["app-server", "proxy", "--sock", sockPath]);
+            assert.equal(options.shell, false);
+            assert.equal(options.windowsHide, true);
+            assert.equal(options.cwd, "C:\\Codex");
+            assert.deepEqual(options.stdio, ["pipe", "pipe", "ignore"]);
+            assert.ok(
+              !Object.keys(options.env).some((key) => /^path$/i.test(key)),
+            );
+            const proxy = spawn(
+              process.execPath,
+              [
+                "-e",
+                `
+          const socket = require('node:net').connect(process.argv[1]);
+          process.stdin.pipe(socket); socket.pipe(process.stdout);
+        `,
+                socket,
+              ],
+              { ...options, cwd: dir },
+            );
+            proxyClosed = once(proxy, "close");
+            return proxy;
+          },
+        ),
+    });
+    try {
+      await client.connect();
+      const init = await client.request(
+        "initialize",
+        { clientInfo: { name: "proxy-test", version: "1" } },
+        3000,
+      );
+      assert.equal(init.platformFamily, "unix");
+    } finally {
+      client.close();
+      await proxyClosed;
+      killChild(child);
+    }
+  });
+
+  it("rejects promptly when the proxy exits before the upgrade", async () => {
+    const client = new JsonRpcWsUdsClient({
+      socketPath: "fixture.sock",
+      connectTimeoutMs: 5000,
+      createSocket: (socket) =>
+        connectWindowsCodexProxy("codex.exe", socket, (_exe, _args, options) =>
+          spawn(process.execPath, ["-e", "process.exit(1)"], {
+            ...options,
+            cwd: dir,
+          }),
+        ),
+    });
+    await assert.rejects(client.connect(), /connect error/);
   });
 
   it("connects, completes the initialize handshake, and runs a turn", async () => {

@@ -410,7 +410,9 @@ it("Windows 발신은 본문을 stdin으로만 전하고 Claude 회신을 안내
     );
     assert.match(
       f.logs().at(-1).payload.message.split("\n").at(-1),
-      /Windows.*Claude.*회신.*지원/,
+      cli === "codex"
+        ? /remote-send --host 'm2' --reply-host 'm5' --to 'codex:윈도우 발신'/
+        : /Windows.*Claude.*Codex.*회신.*지원/,
     );
   }
 });
@@ -435,11 +437,10 @@ it("Windows Claude 대상은 고정 PowerShell 명령으로 전송하고 직접 
     message: '한글 %PATH% & "quote"\r\n둘째 줄',
     sender: { cli: "codex", name: "발신 이름", id: senderId },
   };
-  for (const cli of ["codex", "agy"])
-    await assert.rejects(
-      sendRemotePeer({ ...e, to: `${cli}:수신` }, f),
-      /Windows.*Claude/,
-    );
+  await assert.rejects(
+    sendRemotePeer({ ...e, to: "agy:수신" }, f),
+    /Windows.*Claude/,
+  );
   assert.equal(f.sends(), 0);
 
   const result = await sendRemotePeer(e, f);
@@ -472,21 +473,38 @@ it("Windows Claude 대상은 고정 PowerShell 명령으로 전송하고 직접 
   );
 });
 
-it("Windows 수신은 Claude 이외의 대상을 native 전달 전에 거부한다", async (t) => {
+it("Windows 원격 수신은 Codex 이름과 UUID를 전달하고 agy는 기록 전에 거부한다", async (t) => {
   const f = fixture(t);
-  for (const cli of ["codex", "agy"]) {
+  for (const [to, expected] of [
+    ["codex:수신", { targetName: "수신" }],
+    [`codex:${receiverId.toUpperCase()}`, { threadId: receiverId }],
+    ["agy:수신", null],
+  ]) {
     const result = await main(["_receive"], {
       ...f,
       platform: "win32",
-      input: PassThrough.from([
-        JSON.stringify({ ...envelope(), to: `${cli}:수신` }),
-      ]),
-      discover: () => assert.fail("Windows must only resolve Claude targets"),
+      input: PassThrough.from([JSON.stringify({ ...envelope(), to })]),
+      discover: () => assert.fail("Windows must not use tmux target discovery"),
+      deliverCodex: ({ threadId, targetName, onWriteStart, message }) => {
+        assert.ok(expected);
+        assert.deepEqual(threadId ? { threadId } : { targetName }, expected);
+        assert.match(
+          message,
+          /remote-send.* --to 'claude:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'/,
+        );
+        onWriteStart();
+        return { status: "sent" };
+      },
     });
-    assert.equal(result.stage, "preflight");
-    assert.equal(result.result.status, "rejected");
-    assert.match(result.result.error, /Windows/);
-    assert.match(result.result.error, new RegExp(cli, "i"));
+    if (expected) {
+      assert.equal(result.stage, "delivery");
+      assert.equal(result.result.status, "sent");
+      assert.equal(result.result.modelReceipt, false);
+    } else {
+      assert.equal(result.stage, "preflight");
+      assert.equal(result.result.status, "rejected");
+      assert.match(result.result.error, /Windows.*agy/);
+    }
   }
 });
 
