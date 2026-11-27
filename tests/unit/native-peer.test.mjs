@@ -277,7 +277,10 @@ it("registry resolver selects newest same-pane record and refuses timestamp ties
     { tmuxPane: "%7", sessionId: recent, updatedAt: 20 },
   ];
   const deps = {
-    runTmux: async () => ({ stdout: "\t%7\t/tmp\t1\t123" }),
+    runTmux: async (_remote, args) => {
+      assert.deepEqual(args.slice(0, 2), ["-u", "display-message"]);
+      return { stdout: "\t%7\t/tmp\t1\t123" };
+    },
     readCodexSessionRecords: () => records,
   };
   assert.equal((await resolveCodexTmuxThread("pane", deps)).threadId, recent);

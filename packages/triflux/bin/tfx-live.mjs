@@ -471,6 +471,7 @@ async function discoverAgyTmuxSessions({ cwd = null } = {}, deps = {}) {
   let stdout;
   try {
     ({ stdout } = await (deps.runTmux ?? runTmux)(null, [
+      "-u",
       "list-panes",
       "-a",
       "-F",
@@ -1162,6 +1163,7 @@ async function discoverCodexTmuxSessions(
 ) {
   try {
     const { stdout } = await (deps.runTmux ?? runTmux)(remote, [
+      "-u",
       "list-panes",
       "-a",
       "-F",
@@ -1343,6 +1345,7 @@ async function discoverClaudeTmuxSessions({ cwd = null } = {}, deps = {}) {
   let stdout;
   try {
     ({ stdout } = await (deps.runTmux ?? runTmux)(null, [
+      "-u",
       "list-panes",
       "-a",
       "-F",
@@ -4641,6 +4644,7 @@ async function resolveCodexTmuxThread(session, deps = {}) {
   let fields;
   try {
     const { stdout } = await tmux(null, [
+      "-u",
       "display-message",
       "-p",
       "-t",
