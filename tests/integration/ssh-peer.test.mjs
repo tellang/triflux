@@ -359,12 +359,50 @@ it("잘못된 envelope는 native 호출 전에 거부한다", async () => {
   await assert.rejects(readPeerInput(PassThrough.from(["not JSON"])));
 });
 
-it("Windows 신규 조합을 전송 전에 거부한다", async (t) => {
-  const f = fixture(t);
-  await assert.rejects(
-    sendRemotePeer(envelope(), { ...f, platform: "win32" }),
-    /Darwin/,
+it("Windows 발신은 본문을 stdin 으로만 전하고 회신 불가를 안내한다", async (t) => {
+  const f = sshStub(t);
+  fs.writeFileSync(
+    f.remoteHostsPath,
+    JSON.stringify({
+      hosts: {
+        m2: { os: "windows", ssh: { host: "win.test", user: "fixture" } },
+      },
+    }),
   );
+  const body = `한글 100% %PATH% & "quote" 'single' $env:X\r\n둘째 줄`;
+  const result = await main(
+    [
+      "remote-send",
+      "--from",
+      "claude:윈도우 발신",
+      "--host",
+      "m5",
+      "--reply-host",
+      "m2",
+      "--to",
+      "codex:수신",
+      "--message",
+      body,
+    ],
+    { ...f, platform: "win32", env: {} },
+  );
+  assert.equal(result.status, "written");
+  const [wire, native] = f.logs();
+  assert.equal(wire.args.at(-1), PEER_RECEIVER_COMMAND);
+  assert.equal(
+    wire.args.some((arg) => arg.includes("한글")),
+    false,
+  );
+  assert.equal(wire.envelope.message, body);
+  assert.ok(native.payload.message.includes(body));
+  assert.equal(
+    native.payload.message.split("\n").at(-1),
+    "회신: Windows 호스트로는 remote-send 회신을 지원하지 않는다",
+  );
+});
+
+it("Windows 수신은 native 전달 전에 거부한다", async (t) => {
+  const f = fixture(t);
   const result = await main(["_receive"], {
     ...f,
     platform: "win32",

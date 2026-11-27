@@ -183,8 +183,8 @@ A peer message reaches the receiving session's model as a message from another a
 ```
 
 - One SSH call passes a JSON message (up to 64 KiB) to the fixed entry point `tfx-peer _receive`, which delivers it through the same three transports.
-- `--host` is the destination. `--reply-host` is this machine's alias that the receiver uses to reply. Both sides need the other host in `~/.config/triflux/hosts.json`.
-- macOS and Linux hosts only. The result is one of `rejected`, `written`, `sent`, `partial`, `unknown`.
+- `--host` is the destination. `--reply-host` is this machine's alias that the receiver uses to reply. Each side needs the other host in its `hosts.json`. The path is `~/.config/triflux/hosts.json` on macOS and Linux or `%APPDATA%\triflux\hosts.json` on Windows.
+- The destination must be macOS or Linux. A Windows host can send but cannot receive, so it gets no reply; register it with `"os": "windows"` on the receiver. The result is one of `rejected`, `written`, `sent`, `partial`, `unknown`.
 
 ### User input path
 
@@ -279,7 +279,7 @@ Run `<command> --help` for arguments.
 | --- | --- | --- |
 | macOS | tmux | None. A positive hard ceiling uses `gtimeout` from `coreutils` and only warns if it is missing |
 | Linux | tmux | No memory pressure monitoring |
-| Windows | psmux, Windows Terminal | Peer messages to Claude targets only. No `claude agents` rows or memory pressure monitoring |
+| Windows | psmux, Windows Terminal | Local peer messages to Claude targets only; remote peers send only. No `claude agents` rows or memory pressure monitoring |
 
 psmux on Windows defaults to PowerShell. Tabs and panes go through the `tfx-wt` skill and [`hub/team/wt-manager.mjs`](hub/team/wt-manager.mjs).
 
