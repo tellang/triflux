@@ -46,17 +46,21 @@ async function receiveRemote(args, deps) {
     result,
   });
   try {
-    if (!["darwin", "linux"].includes(deps.platform || process.platform))
+    const platform = deps.platform || process.platform;
+    if (!["darwin", "linux", "win32"].includes(platform))
       throw new Error(
-        "Remote peer supports only Darwin and POSIX Linux receivers",
+        "Remote peer supports only Darwin, POSIX Linux and Windows receivers",
       );
-    // Windows 는 발신만 지원해서 회신 상대 조회에서만 허용한다.
     const origin = (deps.resolveRemoteHost || resolveRemoteHost)(
       envelope.originHost,
-      { ...deps, allowWindows: true },
+      deps,
     );
     const compose = (body) =>
-      formatRemotePeerMessage({ ...envelope, message: body }, origin.os);
+      formatRemotePeerMessage(
+        { ...envelope, message: body },
+        origin.os,
+        platform,
+      );
     const deliveryDeps = {
       ...deps,
       rawBody: envelope.message,

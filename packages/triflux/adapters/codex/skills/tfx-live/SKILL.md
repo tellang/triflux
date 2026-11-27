@@ -225,7 +225,7 @@ tfx-live list-sessions --cli codex
 
 ## 원격 native peer 발신과 회신
 
-Darwin, Linux 호스트로는 `tfx-peer remote-send --host <목적지> --reply-host <회신 별명> --to '<cli>:<이름 또는 UUID>' --message '<본문>'`으로 보낸다. Windows 는 발신만 된다. 같은 호스트 Claude끼리는 `SendMessage`를 쓴다. `hosts.json` 등록 조건, `--from` 우선순위, 결과 상태와 재전송 금지, 예시는 [references/remote-peer.md](references/remote-peer.md)를 따른다.
+Darwin, Linux, Windows 호스트로 `tfx-peer remote-send --host <목적지> --reply-host <회신 별명> --to '<cli>:<이름 또는 UUID>' --message '<본문>'`을 보낸다. Windows 목적지는 기존 Claude 세션만 받는다. 같은 호스트 Claude끼리는 `SendMessage`를 쓴다. `hosts.json` 등록 조건, `--from` 우선순위, 결과 상태와 재전송 금지, 예시는 [references/remote-peer.md](references/remote-peer.md)를 따른다.
 
 ## 선택적 전역 native peer 어댑터
 

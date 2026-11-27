@@ -819,7 +819,7 @@ it("사전 승인 래퍼는 등록된 목적지만 보내고 setup에서 다시 
     };
     assert.notEqual(spawnSync(remote.wrapper, ["send"], { env }).status, 0);
     const endpoints = [];
-    const send = async (alias) => {
+    const send = async (alias, target = "codex:수신") => {
       const result = spawnSync(
         remote.wrapper,
         [
@@ -831,7 +831,7 @@ it("사전 승인 래퍼는 등록된 목적지만 보내고 setup에서 다시 
           "--reply-host",
           "m2",
           "--to",
-          "codex:수신",
+          target,
           "--message",
           "본문",
         ],
@@ -866,7 +866,7 @@ it("사전 승인 래퍼는 등록된 목적지만 보내고 setup에서 다시 
         },
       });
     };
-    const m3 = { os: "linux", ssh_user: "tester" };
+    const m3 = { os: "windows", ssh_user: "tester" };
     writeHosts(x.home, { m5, m3 });
     assert.equal((await send("build")).status, "sent");
     assert.equal(endpoints[0].command, "/usr/bin/ssh");
@@ -875,7 +875,9 @@ it("사전 승인 래퍼는 등록된 목적지만 보내고 setup에서 다시 
     assert.ok(endpoints[0].args.includes("CanonicalizeHostname=no"));
     assert.ok(endpoints[0].args.includes("ControlPath=none"));
     assert.ok(endpoints[0].args.includes("22"));
-    await assert.rejects(send("m3"), /approval/i);
+    await assert.rejects(send("m3", "claude:수신"), /approval/i);
+    writeHosts(x.home, { m5: { ...m5, os: "windows" }, m3 });
+    await assert.rejects(send("m5", "claude:수신"), /approval/i);
     for (const change of [
       { host: "different.example" },
       { user: "other" },
@@ -916,9 +918,14 @@ it("사전 승인 래퍼는 등록된 목적지만 보내고 setup에서 다시 
     writeHosts(x.home, { m5: { ...m5, ssh: { ...m5.ssh, port: 2222 } }, m3 });
     assert.equal((await approve()).remote, "approved");
     assert.match(prompts[1], /tester@build\.example:2222/i);
+    assert.match(prompts[1], /m3.*Windows/);
     assert.equal((await send("m5")).status, "sent");
     assert.ok(endpoints[1].args.includes("2222"));
-    assert.equal((await send("m3")).status, "sent");
+    await assert.rejects(send("m3"), /Windows.*Claude/);
+    assert.equal((await send("m3", "claude:수신")).status, "sent");
+    assert.match(endpoints[2].args.at(-1), /^pwsh\.exe /);
+    writeHosts(x.home, { m5, m3: { ...m3, os: "linux" } });
+    await assert.rejects(send("m3", "claude:수신"), /approval/i);
     fs.unlinkSync(remote.manifest);
     await assert.rejects(send("m5"), /approval/i);
     assert.equal(endpoints.length, 3);
