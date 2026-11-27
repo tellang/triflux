@@ -649,6 +649,71 @@ it("remote-send 승인은 따로 묻고 거절하면 send 만 승인한다", asy
   }
 });
 
+it("remote-send 등록 파일 오류는 목적지 없음과 구분하고 승인 파일을 쓰지 않는다", async () => {
+  for (const [variant, expected, guidance] of [
+    ["missing", "host-registry-unavailable", "등록 파일이 없다"],
+    ["empty", "no-destinations", "목적지가 없다"],
+    ["malformed", "host-registry-unavailable", "JSON 형식이 잘못되었다"],
+    ["unsafe", "host-registry-unavailable", "소유자나 권한을 신뢰할 수 없다"],
+    ["unreadable", "host-registry-unavailable", "읽을 수 없다"],
+  ]) {
+    const x = fixture();
+    try {
+      assert.equal(
+        installPeerPermission({ ...x, consent: true }).status,
+        "approved",
+      );
+      const hostsPath = peerPermissionPlan({
+        ...x,
+        verb: "remote-send",
+      }).hostsPath;
+      if (variant !== "missing") writeHosts(x.home, {});
+      if (variant === "malformed")
+        fs.writeFileSync(hostsPath, "{private-hosts");
+      if (variant === "unsafe") fs.chmodSync(path.dirname(hostsPath), 0o777);
+      if (variant === "unreadable") {
+        fs.renameSync(hostsPath, `${hostsPath}.actual`);
+        fs.symlinkSync(`${hostsPath}.actual`, hostsPath);
+      }
+      const remote = peerPermissionPlan({ ...x, verb: "remote-send" });
+      const inspected = inspectPeerPermission({ ...x, verb: "remote-send" });
+      assert.equal(inspected.status, expected, variant);
+      if (variant !== "empty")
+        assert.ok(inspected.reason.includes(guidance), variant);
+      assert.deepEqual(
+        installPeerPermission({ ...x, verb: "remote-send", consent: true }),
+        { status: expected, changed: false },
+        variant,
+      );
+      const messages = [];
+      const result = await offerPeerPermission({
+        ...x,
+        interactive: true,
+        ask: () => assert.fail("등록 파일 오류에는 동의를 묻지 않는다"),
+        notice: (message) => messages.push(message),
+        warn: (message) => messages.push(message),
+      });
+      assert.equal(result.remote, expected, variant);
+      assert.ok(
+        messages.some(
+          (message) =>
+            message.includes(hostsPath) && message.includes(guidance),
+        ),
+        variant,
+      );
+      assert.ok(
+        messages.every((message) => !message.includes("{private-hosts")),
+        variant,
+      );
+      assert.equal(fs.existsSync(remote.rule), false, variant);
+      assert.equal(fs.existsSync(remote.manifest), false, variant);
+      assert.equal(inspectPeerPermission(x).status, "approved", variant);
+    } finally {
+      cleanup(x);
+    }
+  }
+});
+
 it("remote-send 승인은 래퍼의 remote-send verb 에만 매치한다", async () => {
   const x = fixture();
   try {

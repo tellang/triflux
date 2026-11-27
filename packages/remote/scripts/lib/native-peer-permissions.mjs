@@ -332,8 +332,16 @@ export function inspectPeerPermission({
       return { status: "legacy-remote", plan, legacyAllow };
     try {
       approval = snapshotPeerDestinations(plan.hostsPath);
-    } catch {
-      return { status: "no-destinations", plan };
+    } catch (error) {
+      let reason = "등록 파일을 읽을 수 없다. 경로와 읽기 권한을 확인한다.";
+      if (error.code === "ENOENT")
+        reason = "등록 파일이 없다. 파일 경로를 확인한다.";
+      else if (error instanceof SyntaxError)
+        reason = "등록 파일의 JSON 형식이 잘못되었다. 형식을 확인한다.";
+      else if (error.message?.startsWith("Untrusted peer configuration"))
+        reason =
+          "등록 파일의 소유자나 권한을 신뢰할 수 없다. 파일과 상위 디렉터리의 권한을 확인한다.";
+      return { status: "host-registry-unavailable", plan, reason };
     }
     if (!approval.destinations.length)
       return { status: "no-destinations", plan };
@@ -402,6 +410,7 @@ export function installPeerPermission({
       "requires-send",
       "legacy-remote",
       "no-destinations",
+      "host-registry-unavailable",
     ].includes(status)
   )
     return { status, changed: false };
@@ -610,6 +619,10 @@ async function offerPeerVerb({
     notice(
       `원격 사전 승인에 사용할 목적지가 없다. ${state.plan.hostsPath}에 SSH 사용자를 명시한 Darwin 또는 Linux 호스트를 등록한다.`,
     );
+    return { status: state.status, changed: false };
+  }
+  if (state.status === "host-registry-unavailable") {
+    warn(`원격 사전 승인 등록 파일 ${state.plan.hostsPath}: ${state.reason}`);
     return { status: state.status, changed: false };
   }
   if (state.status === "conflict" || state.status === "unavailable") {
