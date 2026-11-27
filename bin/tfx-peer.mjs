@@ -50,19 +50,24 @@ async function receiveRemote(args, deps) {
       throw new Error(
         "Remote peer supports only Darwin and POSIX Linux receivers",
       );
-    (deps.resolveRemoteHost || resolveRemoteHost)(envelope.originHost, deps);
+    // Windows 는 발신만 지원해서 회신 상대 조회에서만 허용한다.
+    const origin = (deps.resolveRemoteHost || resolveRemoteHost)(
+      envelope.originHost,
+      { ...deps, allowWindows: true },
+    );
+    const compose = (body) =>
+      formatRemotePeerMessage({ ...envelope, message: body }, origin.os);
     const deliveryDeps = {
       ...deps,
       rawBody: envelope.message,
-      composeMessage: (body) =>
-        formatRemotePeerMessage({ ...envelope, message: body }),
+      composeMessage: compose,
       onWriteStart: () => {
         started = true;
       },
     };
     const result = await deliverLocal(
       envelope.to,
-      formatRemotePeerMessage(envelope),
+      compose(envelope.message),
       envelope.sender,
       deliveryDeps,
       true,
@@ -109,13 +114,15 @@ export async function main(args = process.argv.slice(2), deps = {}) {
   }
   const { to, message, from, host, replyHost } = parsePeerArgs(args);
   const [cli] = to.split(":");
-  if (platform === "win32" && (cli === "codex" || cli === "agy"))
+  if (platform === "win32" && !host && (cli === "codex" || cli === "agy"))
     throw new Error(
       `Windows 에서는 ${cli === "codex" ? "Codex" : "agy"} 대상을 아직 지원하지 않는다`,
     );
   const env = deps.env || process.env;
-  if (host && !["darwin", "linux"].includes(platform))
-    throw new Error("Remote peer supports only Darwin and POSIX Linux senders");
+  if (host && !["darwin", "linux", "win32"].includes(platform))
+    throw new Error(
+      "Remote peer supports only Darwin, POSIX Linux and Windows senders",
+    );
   const candidates =
     platform === "win32"
       ? []

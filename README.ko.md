@@ -184,7 +184,7 @@ claude plugin install triflux-mods@triflux
 
 - 등록된 호스트에 SSH로 한 번 접속해 고정 진입점 `tfx-peer _receive`에 JSON 메시지(최대 64KiB)를 전달한다. 받은 쪽은 같은 세 수단으로 전달한다.
 - `--host`는 목적지, `--reply-host`는 받은 쪽이 회신할 때 쓸 이 기기의 별명이다. 양쪽 `~/.config/triflux/hosts.json`에 상대 호스트가 등록되어 있어야 한다.
-- macOS와 Linux 호스트끼리만 지원한다. 결과는 `rejected`, `written`, `sent`, `partial`, `unknown` 중 하나다.
+- 목적지는 macOS와 Linux 호스트다. Windows 호스트는 보내기만 되고 회신을 받지 못하며, 받는 쪽 `hosts.json`에 `"os": "windows"`로 등록한다. 결과는 `rejected`, `written`, `sent`, `partial`, `unknown` 중 하나다.
 
 ### 사용자 입력 경로
 
@@ -279,7 +279,7 @@ agy 스킬은 `agy`가 PATH에 있을 때만 설치한다.
 | --- | --- | --- |
 | macOS | tmux | 없음. 양수 hard ceiling에는 `coreutils`의 `gtimeout`을 쓰고, 없으면 경고 뒤 계속한다 |
 | Linux | tmux | 메모리 압박 감시 없음 |
-| Windows | psmux, Windows Terminal | 피어 메시지는 Claude 대상만. `claude agents` 행과 메모리 압박 감시 없음 |
+| Windows | psmux, Windows Terminal | 로컬 피어 메시지는 Claude 대상만, 원격 피어는 발신만. `claude agents` 행과 메모리 압박 감시 없음 |
 
 Windows의 psmux 기본 셸은 PowerShell이다. 탭과 pane은 `tfx-wt` 스킬과 [`hub/team/wt-manager.mjs`](hub/team/wt-manager.mjs)로 조작한다.
 

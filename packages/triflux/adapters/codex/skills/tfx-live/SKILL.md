@@ -19,7 +19,7 @@ Codex에서는 `$tfx-live`로 호출한다. CLI의 `--cli`는 현재 호스트�
 
 compact 뒤에는 스킬마다 앞부분만 다시 붙고, 한 세션에서 여러 스킬을 호출했으면 오래된 스킬은 통째로 빠질 수 있다. 이 절이나 아래 절이 문맥에 없으면 이 스킬 파일을 다시 읽는다. 괄호 안은 상세 절이다.
 
-- 로컬 Claude 끼리는 `SendMessage`, 그 밖의 로컬 대상은 어댑터가 설치된 macOS/Linux 에서 `<홈 절대경로>/.claude/scripts/tfx-peer send`를 쓴다. Windows 는 Claude 대상만 지원한다. 원격 피어에는 `tfx-peer remote-send`, 원격 세션에 사용자 입력으로 보낼 때만 `tfx-live ask`를 쓴다. native 전송 실패를 tmux 입력으로 바꾸지 않는다("전송 경로", "원격 native peer 발신과 회신").
+- 로컬 Claude 끼리는 `SendMessage`, 그 밖의 로컬 대상은 어댑터가 설치된 macOS/Linux 에서 `<홈 절대경로>/.claude/scripts/tfx-peer send`를 쓴다. Windows 의 로컬 전달은 Claude 대상만 지원한다. 원격 피어에는 `tfx-peer remote-send`, 원격 세션에 사용자 입력으로 보낼 때만 `tfx-live ask`를 쓴다. native 전송 실패를 tmux 입력으로 바꾸지 않는다("전송 경로", "원격 native peer 발신과 회신").
 - 새 agy 세션의 첫 입력은 `tfx-live ask --no-wait`로 보낸다. 같은 기기 agy 끼리의 피어 전송은 `peer-wake` 패치가 확인될 때만 쓴다("전송 경로").
 - 표식이 붙은 로컬 요청은 `ask --no-wait` 뒤 `wait --request-id`로 확인한다. 원격 요청, 슬래시 명령, `--no-relay-tag` 요청은 이 방법으로 추적하지 못한다. `submitted`, `queued`, `inputSent`, `written`, `sent`는 완료가 아니다("요청과 완료 확인").
 - `unknown`, `partial`, `timedOut`은 자동 재전송하지 않고 상태부터 확인한다.
@@ -225,7 +225,7 @@ tfx-live list-sessions --cli codex
 
 ## 원격 native peer 발신과 회신
 
-Darwin, Linux 호스트 사이에서는 `tfx-peer remote-send --host <목적지> --reply-host <회신 별명> --to '<cli>:<이름 또는 UUID>' --message '<본문>'`으로 보낸다. 같은 호스트 Claude끼리는 `SendMessage`를 쓴다. `hosts.json` 등록 조건, `--from` 우선순위, 결과 상태와 재전송 금지, 예시는 [references/remote-peer.md](references/remote-peer.md)를 따른다.
+Darwin, Linux 호스트로는 `tfx-peer remote-send --host <목적지> --reply-host <회신 별명> --to '<cli>:<이름 또는 UUID>' --message '<본문>'`으로 보낸다. Windows 는 발신만 된다. 같은 호스트 Claude끼리는 `SendMessage`를 쓴다. `hosts.json` 등록 조건, `--from` 우선순위, 결과 상태와 재전송 금지, 예시는 [references/remote-peer.md](references/remote-peer.md)를 따른다.
 
 ## 선택적 전역 native peer 어댑터
 

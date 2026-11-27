@@ -14,7 +14,7 @@ const ALIAS = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 // 사용자 설정만 읽는다. legacy migration과 source-tree 폴백은 호출하지 않는다.
 export function resolveRemoteHost(
   alias,
-  { hostsPath = userStateHostsPath() } = {},
+  { hostsPath = userStateHostsPath(), allowWindows = false } = {},
 ) {
   if (typeof alias !== "string" || !ALIAS.test(alias))
     throw new Error("Invalid registered host alias");
@@ -28,10 +28,10 @@ export function resolveRemoteHost(
   if (matches.length !== 1)
     throw new Error("Host alias is unregistered or ambiguous");
   const [name, raw] = matches[0];
+  const os = typeof raw.os === "string" ? raw.os.toLowerCase() : "";
   if (
-    !["darwin", "macos", "linux"].includes(
-      typeof raw.os === "string" ? raw.os.toLowerCase() : "",
-    )
+    !["darwin", "macos", "linux"].includes(os) &&
+    !(allowWindows && os === "windows")
   )
     throw new Error("Remote peer supports only Darwin and POSIX Linux hosts");
   const host = normalizeHost(raw, name);
@@ -124,14 +124,16 @@ export async function readPeerInput(input) {
   );
 }
 
-export function formatRemotePeerMessage(envelope) {
+export function formatRemotePeerMessage(envelope, originOs) {
   const { sender, correlationId, originHost, replyHost, message } = envelope;
   const quote = (s) => `'${s.replaceAll("'", `'"'"'`)}'`;
   const command = quote(path.join(homedir(), ".claude", "scripts", "tfx-peer"));
   return [
     `[tfx-peer from=${sender.cli}:${sender.name} msg=${correlationId} origin=${originHost}${sender.id ? ` fromId=${sender.id}` : ""}]`,
     message,
-    `회신: ${command} remote-send --host ${quote(originHost)} --reply-host ${quote(replyHost)} --to ${quote(`${sender.cli}:${sender.id || sender.name}`)} --message '...'`,
+    originOs === "windows"
+      ? "회신: Windows 호스트로는 remote-send 회신을 지원하지 않는다"
+      : `회신: ${command} remote-send --host ${quote(originHost)} --reply-host ${quote(replyHost)} --to ${quote(`${sender.cli}:${sender.id || sender.name}`)} --message '...'`,
   ].join("\n");
 }
 
@@ -160,8 +162,10 @@ export function validatePeerResponse(response, correlationId) {
 export async function sendRemotePeer(envelope, deps = {}) {
   validatePeerEnvelope(envelope);
   const platform = deps.platform || process.platform;
-  if (!["darwin", "linux"].includes(platform))
-    throw new Error("Remote peer supports only Darwin and POSIX Linux senders");
+  if (!["darwin", "linux", "win32"].includes(platform))
+    throw new Error(
+      "Remote peer supports only Darwin, POSIX Linux and Windows senders",
+    );
   const lookup = deps.resolveRemoteHost || resolveRemoteHost;
   const host = lookup(envelope.replyHost, deps);
   const address =
