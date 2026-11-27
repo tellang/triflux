@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { Duplex } from "node:stream";
+import { Duplex, PassThrough } from "node:stream";
 
 const WINDOWS_POWERSHELL = String.raw`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`;
 
@@ -482,16 +482,71 @@ export function connectWindowsCodexProxy(
       windowsHide: true,
       cwd: path.win32.dirname(executable),
       env: windowsStartupEnv(),
-      stdio: ["pipe", "pipe", "ignore"],
+      stdio: ["pipe", "pipe", "pipe"],
     },
   );
-  const stream = Duplex.from({ readable: child.stdout, writable: child.stdin });
-  child.once("spawn", () => stream.emit("connect"));
-  child.once("error", (error) => stream.destroy(error));
-  child.once("close", (code) => {
-    if (code)
-      stream.destroy(new Error(`Codex app-server proxy exited (${code})`));
+  const diagnostics = Buffer.alloc(4096);
+  let diagnosticBytes = 0;
+  child.stderr.on("data", (chunk) => {
+    if (diagnosticBytes < diagnostics.length) {
+      diagnosticBytes += chunk.copy(diagnostics, diagnosticBytes);
+    }
   });
+
+  // 연결 실패 시 stdout EOF나 stdin 닫힘이 stderr 수신보다 먼저 올 수 있다.
+  const readable = new PassThrough();
+  const writable = new PassThrough();
+  const stream = Duplex.from({ readable, writable });
+  let receivedOutput = false;
+  child.stdout.once("data", () => {
+    receivedOutput = true;
+  });
+  child.stdout.pipe(readable, { end: false });
+  writable.pipe(child.stdin);
+  child.stdout.once("end", () => {
+    if (receivedOutput) readable.end();
+  });
+  child.stdin.on("error", () => {});
+  child.stderr.on("error", () => {});
+  child.stdout.on("error", () => {
+    if (receivedOutput) stream.destroy();
+  });
+
+  child.once("spawn", () => stream.emit("connect"));
+  child.once("error", () => {
+    stream.destroy(new Error("Could not start Codex app-server proxy"));
+  });
+  child.once("close", (code) => {
+    if (receivedOutput || !code) {
+      readable.end();
+      return;
+    }
+    const stderr = diagnostics.toString("utf8", 0, diagnosticBytes);
+    let reason = "";
+    if (
+      /\b(?:connection refused|actively refused|(?:WSA)?ECONNREFUSED|os error 10061)\b/i.test(
+        stderr,
+      )
+    ) {
+      reason = ": connection refused";
+    } else if (
+      /\b(?:not found|cannot find the (?:file|path) specified|ENOENT|os error [23])\b/i.test(
+        stderr,
+      )
+    ) {
+      reason = ": socket not found";
+    } else if (
+      /\b(?:access (?:is )?denied|permission denied|(?:WSA)?EACCES|os error (?:5|10013))\b/i.test(
+        stderr,
+      )
+    ) {
+      reason = ": access denied";
+    }
+    stream.destroy(
+      new Error(`Codex app-server proxy exited (${code})${reason}`),
+    );
+  });
+  stream.once("end", () => stream.destroy());
   stream.once("close", () => child.kill());
   return stream;
 }

@@ -750,7 +750,7 @@ it("a Claude pane without name or sessionId cannot advertise its tmux name as a 
   );
 });
 
-it("Windows Claude reply uses node in PowerShell and quotes the exact target", () => {
+it("Windows Claude and Codex replies use node in PowerShell and quote the exact target", () => {
   assert.equal(
     formatPeerReply({ cli: "claude", name: "O'Brien & 10%" }, "agy", {
       platform: "win32",
@@ -761,7 +761,7 @@ it("Windows Claude reply uses node in PowerShell and quotes the exact target", (
     formatPeerReply({ cli: "codex", name: "lead" }, "claude", {
       platform: "win32",
     }),
-    "회신: Windows 에서는 Codex 대상을 아직 지원하지 않는다",
+    String.raw`회신: node "$env:APPDATA\npm\node_modules\triflux\bin\tfx-peer.mjs" send --to 'codex:lead' --message '...'`,
   );
   assert.equal(
     formatPeerReply({ cli: "agy", name: "lead" }, "claude", {

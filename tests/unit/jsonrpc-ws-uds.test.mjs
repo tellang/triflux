@@ -89,7 +89,7 @@ describe("JsonRpcWsUdsClient over fake WebSocket-over-UDS", () => {
             assert.equal(options.shell, false);
             assert.equal(options.windowsHide, true);
             assert.equal(options.cwd, "C:\\Codex");
-            assert.deepEqual(options.stdio, ["pipe", "pipe", "ignore"]);
+            assert.deepEqual(options.stdio, ["pipe", "pipe", "pipe"]);
             assert.ok(
               !Object.keys(options.env).some((key) => /^path$/i.test(key)),
             );
@@ -99,6 +99,7 @@ describe("JsonRpcWsUdsClient over fake WebSocket-over-UDS", () => {
                 "-e",
                 `
           const socket = require('node:net').connect(process.argv[1]);
+          process.stderr.write('fixture diagnostic');
           process.stdin.pipe(socket); socket.pipe(process.stdout);
         `,
                 socket,
@@ -125,20 +126,75 @@ describe("JsonRpcWsUdsClient over fake WebSocket-over-UDS", () => {
     }
   });
 
-  it("rejects promptly when the proxy exits before the upgrade", async () => {
-    const client = new JsonRpcWsUdsClient({
-      socketPath: "fixture.sock",
-      connectTimeoutMs: 5000,
-      createSocket: (socket) =>
-        connectWindowsCodexProxy("codex.exe", socket, (_exe, _args, options) =>
-          spawn(process.execPath, ["-e", "process.exit(1)"], {
-            ...options,
-            cwd: dir,
-          }),
-        ),
+  for (const [name, diagnostic, code, expected, padding = 0] of [
+    ["refused", "Connection refused", 1, "connection refused"],
+    [
+      "missing",
+      "The system cannot find the file specified. (os error 2)",
+      1,
+      "socket not found",
+    ],
+    ["denied", "Access is denied.", 1, "access denied"],
+    ["Winsock refused", "(os error 10061)", 1, "connection refused"],
+    ["Winsock denied", "(os error 10013)", 1, "access denied"],
+    ["unknown", " Connection refused", 7, "exited (7)", 65536],
+    ["clean EOF", "", 0, "EOF during handshake"],
+  ]) {
+    it(`reports ${name} after early proxy stdout EOF`, async () => {
+      const socketPath = String.raw`C:\Users\example\private-daemon.sock`;
+      let proxyClosed;
+      const client = new JsonRpcWsUdsClient({
+        socketPath,
+        connectTimeoutMs: 2000,
+        createSocket: (socket) =>
+          connectWindowsCodexProxy(
+            "codex.exe",
+            socket,
+            (_exe, _args, options) => {
+              const proxy = spawn(
+                process.execPath,
+                [
+                  "-e",
+                  `
+              const { closeSync } = require('node:fs');
+              closeSync(1);
+              process.once('message', () => {
+                const stderr = ${JSON.stringify(socketPath)} + ': ' +
+                  'x'.repeat(${padding}) + ${JSON.stringify(diagnostic)};
+                process.stderr.write(stderr, () => {
+                  process.exit(${code});
+                });
+              });
+            `,
+                ],
+                { ...options, cwd: dir, stdio: [...options.stdio, "ipc"] },
+              );
+              proxy.stdout.once("end", () => proxy.send("write", () => {}));
+              proxyClosed = once(proxy, "close");
+              return proxy;
+            },
+          ),
+      });
+      try {
+        await assert.rejects(client.connect(), (error) => {
+          assert.ok(error.message.endsWith(expected), error.message);
+          assert.doesNotMatch(
+            error.cause.message,
+            /private-daemon|\\Users\\example|x{10}/,
+          );
+          assert.doesNotMatch(
+            error.message,
+            /private-daemon|\\Users\\example|x{10}/,
+          );
+          return true;
+        });
+        assert.deepEqual(await proxyClosed, [code, null]);
+      } finally {
+        client.close();
+        await proxyClosed;
+      }
     });
-    await assert.rejects(client.connect(), /connect error/);
-  });
+  }
 
   it("connects, completes the initialize handshake, and runs a turn", async () => {
     const { child, sockPath } = await startFakeServer(dir, {
